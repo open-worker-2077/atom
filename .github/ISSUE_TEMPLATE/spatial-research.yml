@@ -1,0 +1,44 @@
+name: 三维交互研究
+description: 提出不越过数据脚本边界的视觉交互范式改进
+title: "[Spatial Research] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        本模板只讨论视觉交互范式：空间、视角、节点、关系、命中、反馈与设备映射。业务计算和数据流脚本不在此 Issue 中实现。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 当前交互问题
+      description: 说明传统范式或当前3D范式产生的认知、操作或呈现问题
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议的视觉交互范式
+      description: 描述空间结构、触发方式、反馈与视角变化，不把鼠标按键写死成功能定义
+    validations:
+      required: true
+  - type: textarea
+    id: relationships
+    attributes:
+      label: 与现有元素的关系
+      description: 说明它如何与球域、球镜、域径、节点、关系线和递归导航组合
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: 非目标
+      description: 明确本研究不处理的业务逻辑、数据计算或次要瑕疵
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收体感
+      description: 描述用户第一眼与连续操作时应感受到什么
+    validations:
+      required: true
+

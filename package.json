@@ -1,0 +1,35 @@
+{
+  "name": "atom",
+  "version": "0.3.0",
+  "private": true,
+  "description": "An executable high-dimensional world for facts, relations, Programs, Agents, and spatial interaction",
+  "bin": {
+    "spatial": "cli/spatial.mjs",
+    "atom": "work-engine/atom-language/cli.mjs"
+  },
+  "scripts": {
+    "start": "node work-engine/atom-language/graph-server.mjs",
+    "build:browser": "node scripts/build-browser.mjs",
+    "test:architecture": "node --test tests/atom-production-architecture.test.mjs tests/atom-system-architecture.test.mjs tests/atom-system-boundaries.test.mjs",
+    "test:system": "node --test tests/atom-world-transaction.test.mjs tests/atom-system-failure-recovery.test.mjs tests/atom-program-port.test.mjs tests/atom-program-runtime-scheduling.test.mjs tests/atom-system-performance.test.mjs tests/atom-interaction-runtime.test.mjs tests/atom-legacy-runtime-composition.test.mjs tests/atom-language-graph-server.test.mjs tests/atom-production-architecture.test.mjs",
+    "test": "npm run build:browser && node --test --test-isolation=none tests/*.test.js tests/*.test.mjs",
+    "atom": "node work-engine/atom-language/cli.mjs",
+    "atom:serve": "node work-engine/atom-language/graph-server.mjs",
+    "atom:parse-debug": "node work-engine/atom-language/dev-server.mjs --host 127.0.0.1 --port 4794"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-markdown": "^6.5.1",
+    "@codemirror/lang-python": "^6.2.1",
+    "codemirror": "^6.0.2",
+    "dompurify": "^3.4.12",
+    "markdown-it": "^14.3.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
+}

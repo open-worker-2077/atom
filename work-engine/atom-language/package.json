@@ -1,0 +1,12 @@
+{
+  "name": "@local/atom-language-cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "atom": "cli.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

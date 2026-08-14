@@ -1,0 +1,241 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+import {
+  DEFAULT_ATOM_GRAPH_HOST,
+  DEFAULT_ATOM_GRAPH_PORT,
+  createAtomGraphHandlers,
+  parseAtomGraphServerArgs,
+  startAtomGraphServer
+} from '../work-engine/atom-language/graph-server.mjs';
+import { resolveAtomRuntime } from '../work-engine/atom-language/runtime-config.mjs';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+test('Atom HTTP handlers translate transport payloads into one interaction runtime', async () => {
+  const calls = [];
+  const handlers = createAtomGraphHandlers({
+    execute: async (intent) => {
+      calls.push(['execute', intent]);
+      return { ok: true, command: 'transform' };
+    },
+    updateHumanStatus: async (intent) => {
+      calls.push(['human-status', intent]);
+      return { ok: true, command: 'transform' };
+    },
+    updateHumanWorkspace: async (intent) => {
+      calls.push(['human-workspace', intent]);
+      return { ok: true, command: 'transform' };
+    },
+    recover: async (intent) => {
+      calls.push(['recover-projection', intent]);
+      return { sourceRevision: intent.expectedRevision };
+    }
+  });
+
+  await handlers.atomCommand({
+    source: 'transform {}',
+    interaction: { id: 'interaction-1', agent: { ref: 'old-ref', path: 'Root/Sol' } },
+    history: []
+  });
+  await handlers.atomHumanStatus({
+    key: 'node-key',
+    detail: '进行中',
+    interactionId: 'interaction-2'
+  });
+  await handlers.atomWorkspaceEdit({
+    operation: { kind: 'node-create', path: 'root', draft: { label: 'New' } },
+    interactionId: 'interaction-3'
+  });
+  await handlers.atomProjectionRecover({ expectedRevision: 'rev-2' });
+
+  assert.deepEqual(calls, [
+    ['execute', {
+      source: 'transform {}',
+      correlationId: 'interaction-1',
+      agentPath: 'Root/Sol',
+      history: []
+    }],
+    ['human-status', {
+      key: 'node-key',
+      detail: '进行中',
+      correlationId: 'interaction-2'
+    }],
+    ['human-workspace', {
+      operation: { kind: 'node-create', path: 'root', draft: { label: 'New' } },
+      correlationId: 'interaction-3'
+    }],
+    ['recover-projection', { expectedRevision: 'rev-2' }]
+  ]);
+});
+
+async function temporaryDirectory(t) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-graph-server-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  return directory;
+}
+
+function atomFixture() {
+  return [
+    {
+      'name@agent': '石器工坊',
+      'detail#工坊简介': '可核查的正文',
+      children: [],
+      partners: [
+        { verb: '产出', object: '石斧' }
+      ]
+    },
+    {
+      'name@item': '石斧',
+      'detail#物件简介': '可核查的物件',
+      children: [],
+      partners: []
+    }
+  ];
+}
+
+test('graph server arguments default to the shared LocalAppData Atom world', () => {
+  const runtime = resolveAtomRuntime();
+  assert.equal(DEFAULT_ATOM_GRAPH_HOST, '127.0.0.1');
+  assert.equal(DEFAULT_ATOM_GRAPH_PORT, 4784);
+  assert.deepEqual(parseAtomGraphServerArgs([]), {
+    host: '127.0.0.1',
+    port: 4784,
+    contextFile: runtime.contextFile,
+    graphFile: runtime.graphFile,
+    storeFile: runtime.storeFile,
+    help: false
+  });
+
+  assert.deepEqual(parseAtomGraphServerArgs([
+    '--host', '127.0.0.2',
+    '--port=0',
+    '--context', 'context.json',
+    '--graph=projection.json',
+    '--store', 'store.json'
+  ]), {
+    host: '127.0.0.2',
+    port: 0,
+    contextFile: path.resolve('context.json'),
+    graphFile: path.resolve('projection.json'),
+    storeFile: path.resolve('store.json'),
+    help: false
+  });
+});
+
+test('graph server rejects 4783 and colliding context, projection, and store paths before startup', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+
+  assert.throws(
+    () => parseAtomGraphServerArgs(['--port', '4783']),
+    (error) => error.code === 'RESERVED_ATOM_GRAPH_PORT'
+  );
+  await assert.rejects(
+    startAtomGraphServer({
+      host: '127.0.0.1',
+      port: 4783,
+      contextFile,
+      graphFile,
+      storeFile
+    }),
+    (error) => error.code === 'RESERVED_ATOM_GRAPH_PORT'
+  );
+
+  for (const paths of [
+    { contextFile, graphFile: contextFile, storeFile },
+    { contextFile, graphFile, storeFile: contextFile },
+    { contextFile, graphFile, storeFile: graphFile }
+  ]) {
+    await assert.rejects(
+      startAtomGraphServer({ host: '127.0.0.1', port: 0, ...paths }),
+      (error) => error.code === 'ATOM_GRAPH_PATH_COLLISION'
+    );
+  }
+  assert.deepEqual(await fs.readdir(directory), []);
+});
+
+test('graph server initializes the projection, serves the full UI health and Graph API, and stays isolated', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const contextFile = path.join(directory, 'live', 'atom.json');
+  const graphFile = path.join(directory, 'live', 'graph.json');
+  const storeFile = path.join(directory, 'live', 'knowledge.json');
+  await fs.mkdir(path.dirname(contextFile), { recursive: true });
+  await fs.writeFile(contextFile, `${JSON.stringify(atomFixture(), null, 2)}\n`, 'utf8');
+
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1',
+    port: 0,
+    contextFile,
+    graphFile,
+    storeFile
+  });
+  t.after(() => running.close());
+
+  assert.equal(running.host, '127.0.0.1');
+  assert.notEqual(running.port, 4783);
+  assert.equal(running.contextFile, path.resolve(contextFile));
+  assert.equal(running.graphFile, path.resolve(graphFile));
+  assert.equal(running.storeFile, path.resolve(storeFile));
+
+  const healthResponse = await fetch(`${running.url}/__spatial/api/health`);
+  assert.equal(healthResponse.status, 200);
+  const health = await healthResponse.json();
+  assert.equal(health.ok, true);
+  assert.equal(health.store, path.resolve(storeFile));
+  assert.equal(health.graphFile, path.resolve(graphFile));
+
+  const recoveryResponse = await fetch(`${running.url}/__atom/api/recover-projection`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ expectedRevision: running.initialization.revisionAfter })
+  });
+  assert.equal(recoveryResponse.status, 200);
+  const recovery = await recoveryResponse.json();
+  assert.equal(recovery.ok, true);
+  assert.equal(recovery.result.sourceRevision, `sha256:${running.initialization.revisionAfter}`);
+
+  const staleRecoveryResponse = await fetch(`${running.url}/__atom/api/recover-projection`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ expectedRevision: 'stale-revision' })
+  });
+  assert.equal(staleRecoveryResponse.status, 400);
+  const staleRecovery = await staleRecoveryResponse.json();
+  assert.equal(staleRecovery.error.code, 'STALE_WORLD_PROJECTION');
+
+  const graphResponse = await fetch(`${running.url}/__spatial/api/graph`);
+  assert.equal(graphResponse.status, 200);
+  const graph = await graphResponse.json();
+  assert.equal(graph.graph.name, 'atom.json');
+  assert.equal(graph.graph.children[0].name, '石器工坊');
+  assert.equal(graph.graph.children[0].detail, '可核查的正文');
+
+  const pageResponse = await fetch(`${running.url}/`);
+  assert.equal(pageResponse.status, 200);
+  assert.match(pageResponse.headers.get('content-type'), /^text\/html/);
+  assert.match(await pageResponse.text(), /<canvas\b|Spatial|空间/u);
+
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), atomFixture());
+  assert.equal(JSON.parse(await fs.readFile(graphFile, 'utf8')).graph.children[0].name, '石器工坊');
+  assert.equal((await fs.stat(storeFile)).isFile(), true);
+  await assert.rejects(
+    fs.access(path.join(directory, 'data', 'knowledge.json')),
+    { code: 'ENOENT' }
+  );
+
+  const stateResponse = await fetch(`${running.url}/__spatial/api/state`);
+  assert.equal(stateResponse.status, 200);
+  const state = await stateResponse.json();
+  const labels = state.knowledge.nodes.map((node) => node.label);
+  assert.ok(labels.includes('石器工坊'), 'atom node projects into the spatial knowledge store');
+  assert.ok(labels.includes('石斧'), 'atom partner object projects as its own node');
+  assert.equal(state.knowledge.edges.length, 1);
+  assert.equal(state.knowledge.edges[0].label, '产出');
+});

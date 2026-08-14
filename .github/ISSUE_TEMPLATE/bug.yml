@@ -1,0 +1,52 @@
+name: Bug 报告
+description: 报告可复现的视觉、交互、持久化或 CLI 缺陷
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请只填写可复现事实。知识库真实内容、附件和隐私数据不要上传到 Issue。
+  - type: input
+    id: version
+    attributes:
+      label: 版本与入口
+      description: Release、Build，以及 file、spatial serve 或 CLI 入口
+      placeholder: v0.2.0 / Build 20260720.8 / spatial serve
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 从初始域和初始输入开始，逐步写出操作
+      placeholder: |
+        1. 进入……
+        2. 对节点……
+        3. 返回……
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 视觉与运行证据
+      description: 可附脱敏截图、控制台错误或 CLI 输出
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: 数据安全
+      options:
+        - label: 我已确认内容不含真实知识库数据、附件或敏感信息
+          required: true
+

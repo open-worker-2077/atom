@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+import { createSpatialServer } from '../cli/lib/server.mjs';
+import { VERSION } from '../cli/lib/version.mjs';
+
+test('local server exposes one store to the page bridge and command API', async (context) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-server-'));
+  const instance = await createSpatialServer({
+    root: path.resolve(import.meta.dirname, '..'),
+    storeFile: path.join(directory, 'knowledge.json')
+  });
+  await new Promise((resolve) => instance.server.listen(0, '127.0.0.1', resolve));
+  context.after(() => new Promise((resolve) => instance.server.close(resolve)));
+  const address = instance.server.address();
+  const origin = `http://127.0.0.1:${address.port}`;
+
+  const health = await (await fetch(`${origin}/__spatial/api/health`)).json();
+  assert.equal(health.ok, true);
+  assert.equal(health.version, VERSION);
+
+  const created = await (await fetch(`${origin}/__spatial/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ method: 'node.create', params: { path: 'root', label: '服务节点' } })
+  })).json();
+  assert.equal(created.result.node.label, '服务节点');
+
+  const state = await (await fetch(`${origin}/__spatial/api/state`)).json();
+  assert.equal(state.knowledge.nodes.length, 1);
+  assert.equal(state.knowledge.revision, 1);
+
+  const page = await fetch(`${origin}/`);
+  assert.equal(page.status, 200);
+  const pageHtml = await page.text();
+  const build = pageHtml.match(/data-build="([^"]+)"/)[1];
+  assert.match(pageHtml, new RegExp(`spatial-browser-bridge\\.js\\?v=${build.replaceAll('.', '\\.')}`));
+});

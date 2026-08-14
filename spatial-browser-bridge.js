@@ -1,0 +1,339 @@
+(function spatialBrowserBridge(global) {
+  "use strict";
+
+  const lab = global.spatialLab;
+  const LOCAL_STORAGE_KEY = "spatial-kb:knowledge:v1";
+  let localStorage = null;
+  if (global.location.protocol === "file:" && lab) {
+    try {
+      localStorage = global.localStorage;
+    } catch (error) {
+      localStorage = null;
+    }
+  }
+  const localFile = Boolean(localStorage);
+  const localHost = ["127.0.0.1", "localhost", "::1"].includes(global.location.hostname);
+  const supported = ["http:", "https:"].includes(global.location.protocol) && localHost && lab;
+  document.body.dataset.spatialBridge = localFile ? "local" : supported ? "connecting" : "standalone";
+
+  if (localFile) {
+    function restoreLocalKnowledge() {
+      try {
+        const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (saved) lab.importKnowledge(JSON.parse(saved));
+        document.body.dataset.spatialBridge = "local";
+      } catch (error) {
+        document.body.dataset.spatialBridge = "local-error";
+      }
+    }
+
+    function saveLocalKnowledge(event) {
+      if (!event || !event.detail || !event.detail.knowledge) return false;
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(event.detail.knowledge));
+        document.body.dataset.spatialBridge = "local";
+        return true;
+      } catch (error) {
+        document.body.dataset.spatialBridge = "local-error";
+        return false;
+      }
+    }
+
+    global.addEventListener("spatial-workspace-committed", saveLocalKnowledge);
+    restoreLocalKnowledge();
+    return;
+  }
+
+  if (!supported) return;
+
+  const API = "/__spatial/api";
+  let revision = -1;
+  let pulling = false;
+  let pushing = false;
+  const queuedCommits = [];
+  let bossMode = false;
+  let atomWorkspace = false;
+  let lastKnowledge = null;
+
+  function reportPersistence(type, detail = {}) {
+    if (!Number.isFinite(Number(detail.persistenceId)) || typeof global.dispatchEvent !== "function") return;
+    const EventConstructor = global.CustomEvent;
+    if (typeof EventConstructor !== "function") return;
+    global.dispatchEvent(new EventConstructor(type, { detail }));
+  }
+
+  async function request(path, options) {
+    const response = await global.fetch(`${API}${path}`, {
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      ...options
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      const error = new Error(payload.error && payload.error.message || "Spatial bridge request failed");
+      error.code = payload.error && payload.error.code;
+      throw error;
+    }
+    return payload;
+  }
+
+  async function pullKnowledge() {
+    if (pulling || pushing || lab.state().transactionActive) return false;
+    pulling = true;
+    try {
+      const payload = await request("/state");
+      const knowledge = payload.knowledge;
+      if (knowledge && Number(knowledge.revision) > revision) {
+        if (!lab.importKnowledge(knowledge)) return false;
+        revision = Number(knowledge.revision) || 0;
+        lastKnowledge = knowledge;
+      }
+      document.body.dataset.spatialBridge = "connected";
+      return true;
+    } catch (error) {
+      document.body.dataset.spatialBridge = "offline";
+      return false;
+    } finally {
+      pulling = false;
+    }
+  }
+
+  function activeBossId() {
+    const knowledge = lab.exportKnowledge();
+    const nodes = Array.isArray(knowledge && knowledge.nodes) ? knowledge.nodes : [];
+    const current = lab.state();
+    const selected = current.selected
+      ? nodes.find((node) => (node.nodeId || node.id) === current.selected)
+      : null;
+    if (selected && selected.bossId) return selected.bossId;
+    const inPath = [...new Set(nodes
+      .filter((node) => node.path === current.path && node.bossId)
+      .map((node) => node.bossId))];
+    return inPath.length === 1 ? inPath[0] : null;
+  }
+
+  function recursiveDeleteConfirmations(nextKnowledge) {
+    if (!bossMode || !lastKnowledge) return [];
+    const prior = Array.isArray(lastKnowledge.nodes) ? lastKnowledge.nodes : [];
+    const nextIds = new Set((Array.isArray(nextKnowledge.nodes) ? nextKnowledge.nodes : [])
+      .map((node) => `${node.bossId}::${node.nodeId || node.id}`));
+    const confirmed = [];
+    for (const node of prior) {
+      if (nextIds.has(`${node.bossId}::${node.nodeId || node.id}`)) continue;
+      const descendants = new Set();
+      let frontier = [node.nodeId || node.id];
+      while (frontier.length) {
+        const leaders = new Set(frontier);
+        frontier = prior
+          .filter((candidate) => (
+            candidate.bossId === node.bossId
+            && leaders.has(candidate.leaderId)
+            && !descendants.has(candidate.nodeId || candidate.id)
+          ))
+          .map((candidate) => {
+            const id = candidate.nodeId || candidate.id;
+            descendants.add(id);
+            return id;
+          });
+      }
+      if (!descendants.size) continue;
+      const accepted = global.confirm(
+        `该 Leader 仍有 ${descendants.size} 个下级节点。确认后将删除整条分支，并可用 Z 撤销。`
+      );
+      if (!accepted) return null;
+      confirmed.push(node.nodeId || node.id);
+    }
+    return confirmed;
+  }
+
+  async function pushKnowledge(event) {
+    const knowledge = event && event.detail && event.detail.knowledge;
+    const operation = event && event.detail && event.detail.operation;
+    const persistenceId = event && event.detail && event.detail.persistenceId;
+    if (!knowledge) return false;
+    if (typeof operation === "string") {
+      document.body.dataset.spatialBridge = "connected";
+      return true;
+    }
+    if (atomWorkspace && !operation) {
+      document.body.dataset.spatialBridge = "connected";
+      return false;
+    }
+    if (pushing) {
+      queuedCommits.push({ knowledge, operation, persistenceId });
+      return true;
+    }
+    pushing = true;
+    try {
+      if (operation && operation.kind === "node-create") {
+        const response = await global.fetch('/__atom/api/workspace-edit', {
+          method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ operation })
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.ok === false || payload.result?.ok === false) {
+          throw new Error(payload.error?.message || payload.result?.errors?.[0]?.message || 'Atom workspace edit failed');
+        }
+        if (payload.knowledge) {
+          lastKnowledge = payload.knowledge;
+          revision = Number(payload.knowledge.revision) || revision;
+          if (!queuedCommits.length) lab.importKnowledge(payload.knowledge);
+        }
+        document.body.dataset.spatialBridge = "connected";
+        reportPersistence("spatial-workspace-persisted", { persistenceId, operation });
+        return true;
+      }
+      const previousByKey = new Map(((lastKnowledge && lastKnowledge.nodes) || [])
+        .map((node) => [node.key, node]));
+      const statusChanges = (Array.isArray(knowledge.nodes) ? knowledge.nodes : [])
+        .filter((node) => {
+          const previous = previousByKey.get(node.key);
+          return node.label === "状态"
+            && previous && previous.detail !== node.detail;
+        });
+      if (statusChanges.length) {
+        let latest = null;
+        for (const node of statusChanges) {
+          const response = await global.fetch('/__atom/api/human-status', {
+            method: 'POST',
+            cache: 'no-store',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ key: node.key, atomPath: node.atomPath, detail: node.detail })
+          });
+          latest = await response.json();
+          if (!response.ok || latest.ok === false || latest.result?.ok === false) {
+            throw new Error(latest.error?.message || latest.result?.errors?.[0]?.message || 'Atom status update failed');
+          }
+        }
+        if (latest && latest.knowledge) {
+          lastKnowledge = latest.knowledge;
+          revision = Number(latest.knowledge.revision) || revision;
+          if (!queuedCommits.length) lab.importKnowledge(latest.knowledge);
+        }
+        document.body.dataset.spatialBridge = "connected";
+        return true;
+      }
+      if (operation) {
+        const response = await global.fetch('/__atom/api/workspace-edit', {
+          method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ operation })
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.ok === false || payload.result?.ok === false) {
+          throw new Error(payload.error?.message || payload.result?.errors?.[0]?.message || 'Atom workspace edit failed');
+        }
+        if (payload.knowledge) {
+          lastKnowledge = payload.knowledge;
+          revision = Number(payload.knowledge.revision) || revision;
+          if (!queuedCommits.length) lab.importKnowledge(payload.knowledge);
+        }
+        document.body.dataset.spatialBridge = "connected";
+        reportPersistence("spatial-workspace-persisted", { persistenceId, operation });
+        return true;
+      }
+      const confirmedRecursiveDeleteNodeIds = recursiveDeleteConfirmations(knowledge);
+      if (confirmedRecursiveDeleteNodeIds === null) {
+        if (lastKnowledge) lab.importKnowledge(lastKnowledge);
+        document.body.dataset.spatialBridge = "connected";
+        return false;
+      }
+      const payload = await request("/state", {
+        method: "PUT",
+        body: JSON.stringify({
+          expectedRevision: Math.max(0, revision),
+          knowledge,
+          confirmedRecursiveDeleteNodeIds
+        })
+      });
+      revision = Number(payload.result && payload.result.revision) || revision;
+      const persisted = payload.result && payload.result.knowledge;
+      if (persisted) {
+        const beforeKeys = JSON.stringify((knowledge.nodes || []).map((node) => node.key));
+        const afterKeys = JSON.stringify((persisted.nodes || []).map((node) => node.key));
+        lastKnowledge = persisted;
+        if (beforeKeys !== afterKeys) lab.importKnowledge(persisted);
+      } else {
+        lastKnowledge = knowledge;
+      }
+      document.body.dataset.spatialBridge = "connected";
+      return true;
+    } catch (error) {
+      document.body.dataset.spatialBridge = error.code === "REVISION_CONFLICT" ? "conflict" : "offline";
+      if (lastKnowledge && !queuedCommits.length) lab.importKnowledge(lastKnowledge);
+      reportPersistence("spatial-workspace-persist-failed", {
+        persistenceId,
+        operation,
+        message: error && error.message || "Atom edit failed"
+      });
+      return false;
+    } finally {
+      pushing = false;
+      if (queuedCommits.length) {
+        const nextCommit = queuedCommits.shift();
+        void pushKnowledge({ detail: nextCommit });
+      }
+    }
+  }
+
+  async function pushView() {
+    if (document.hidden) return;
+    try {
+      await request("/view", {
+        method: "PUT",
+        body: JSON.stringify({ view: lab.exportField(), bossId: bossMode ? activeBossId() : null })
+      });
+    } catch (error) {
+      document.body.dataset.spatialBridge = "offline";
+    }
+  }
+
+  async function navigateBossHistory(direction) {
+    const bossId = activeBossId();
+    if (!bossId || pushing || pulling || lab.state().transactionActive) return false;
+    pushing = true;
+    try {
+      const payload = await request(`/boss/${direction}`, {
+        method: "POST",
+        body: JSON.stringify({ bossId })
+      });
+      if (payload.knowledge) {
+        lab.importKnowledge(payload.knowledge);
+        lastKnowledge = payload.knowledge;
+        revision = Number(payload.knowledge.revision) || revision;
+      }
+      document.body.dataset.spatialBridge = "connected";
+      return true;
+    } catch (error) {
+      document.body.dataset.spatialBridge = error.code === "NOTHING_TO_UNDO" || error.code === "NOTHING_TO_REDO"
+        ? "connected"
+        : "offline";
+      return false;
+    } finally {
+      pushing = false;
+    }
+  }
+
+  global.addEventListener("keydown", (event) => {
+    if (!bossMode || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (!["KeyZ", "KeyX"].includes(event.code)) return;
+    const target = event.target;
+    if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+    if (!activeBossId()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    void navigateBossHistory(event.code === "KeyZ" ? "undo" : "redo");
+  }, true);
+
+  global.addEventListener("spatial-workspace-committed", pushKnowledge);
+  global.setInterval(pullKnowledge, 1200);
+  global.setInterval(pushView, 2400);
+  request("/health")
+    .then((payload) => {
+      bossMode = payload.mode === "boss";
+      atomWorkspace = payload.atomWorkspace === true;
+      document.body.dataset.spatialStore = bossMode ? "boss" : "single";
+    })
+    .catch(() => {})
+    .then(pullKnowledge)
+    .then(pushView);
+})(window);

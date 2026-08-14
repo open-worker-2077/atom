@@ -1,0 +1,116 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import { createSpatialServer } from '../cli/lib/server.mjs';
+import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
+import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  materializeGraphJson,
+  parseGraphJson
+} from '../work-engine/atom-language/graph-json.mjs';
+
+async function runCli(args) {
+  let stdout = '';
+  let stderr = '';
+  const code = await runAtomCli(['--json', ...args], {
+    execute: executeAtomLanguage,
+    stdin: { isTTY: false },
+    stdout: {
+      isTTY: false,
+      write(value) {
+        stdout += value;
+      }
+    },
+    stderr: {
+      write(value) {
+        stderr += value;
+      }
+    }
+  });
+  return {
+    code,
+    stdout,
+    stderr,
+    output: stdout
+      ? materializeGraphJson(parseGraphJson(stdout))
+      : null
+  };
+}
+
+function findGraphNode(document, name) {
+  const queue = [document.graph];
+  while (queue.length) {
+    const node = queue.shift();
+    if (node.name === name) return node;
+    queue.push(...node.children);
+  }
+  return null;
+}
+
+test('the atom CLI drives a graph served from a fully isolated 4784-style store', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-cli-graph-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+
+  const created = await runCli([
+    '--context',
+    contextFile,
+    '--projection',
+    projectionFile,
+    'transform',
+    'new',
+    '{"name":"石器工坊","detail#工坊简介":"第一版正文","children":[],"partners":[]}'
+  ]);
+  assert.equal(created.code, 0, created.stderr);
+  assert.deepEqual(created.output, { 'name~created': '石器工坊' });
+
+  const instance = await createSpatialServer({
+    storeFile,
+    graphFile: projectionFile
+  });
+  await new Promise((resolve, reject) => {
+    instance.server.once('error', reject);
+    instance.server.listen(0, '127.0.0.1', resolve);
+  });
+  t.after(() => new Promise((resolve) => instance.server.close(resolve)));
+  const address = instance.server.address();
+  assert.notEqual(address.port, 4783);
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  const health = await fetch(`${baseUrl}/__spatial/api/health`).then((response) => response.json());
+  assert.equal(health.store, path.resolve(storeFile));
+  assert.equal(health.graphFile, path.resolve(projectionFile));
+
+  const firstGraph = await fetch(`${baseUrl}/__spatial/api/graph`).then((response) => response.json());
+  assert.equal(findGraphNode(firstGraph, '石器工坊').detail, '第一版正文');
+
+  const transformed = await runCli([
+    '--context',
+    contextFile,
+    '--projection',
+    projectionFile,
+    'transform',
+    '{"name":"石器工坊","detail.rep.第二版正文"}'
+  ]);
+  assert.equal(transformed.code, 0, transformed.stderr);
+  assert.deepEqual(transformed.output, { 'name~updated': '石器工坊' });
+
+  const secondGraph = await fetch(`${baseUrl}/__spatial/api/graph`).then((response) => response.json());
+  assert.equal(findGraphNode(secondGraph, '石器工坊').detail, '第二版正文');
+
+  const explored = await runCli([
+    '--context',
+    contextFile,
+    '--projection',
+    projectionFile,
+    'explore',
+    '{"name":"石器工坊","detail$full"}'
+  ]);
+  assert.equal(explored.code, 0, explored.stderr);
+  assert.match(explored.stdout, /第二版正文/u);
+});

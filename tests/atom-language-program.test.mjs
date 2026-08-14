@@ -1,0 +1,127 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
+import { TRANSFORM_COMMANDS } from '../work-engine/atom-language/transform-key-parser.mjs';
+import { executeProgram } from '../work-engine/atom-language/program.mjs';
+
+function atom(name, detail = '', children = [], partners = [], types = []) {
+  const key = `name${types.map((type) => `@${type}`).join('')}`;
+  return { [key]: name, detail, children, partners };
+}
+
+function capability(name, id) {
+  return atom(name, id);
+}
+
+function partner(verb, object) {
+  return { verb, object };
+}
+
+async function fixture(t, atoms) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'atom.graph.json');
+  await fs.writeFile(contextFile, `${JSON.stringify(atoms, null, 2)}\n`, 'utf8');
+  return { contextFile, projectionFile };
+}
+
+async function readAtoms(file) {
+  return JSON.parse(await fs.readFile(file, 'utf8'));
+}
+
+function findAtom(atoms, name) {
+  const queue = [...atoms];
+  while (queue.length) {
+    const candidate = queue.shift();
+    const nameEntry = Object.entries(candidate).find(([key]) => (
+      key === 'name' || key.startsWith('name@') || key.startsWith('name#')
+    ));
+    if (nameEntry?.[1] === name) return candidate;
+    const childrenEntry = Object.entries(candidate).find(([key]) => (
+      key === 'children' || key.startsWith('children@') || key.startsWith('children#')
+    ));
+    queue.push(...(childrenEntry?.[1] ?? []));
+  }
+  return null;
+}
+
+function replaceProgram() {
+  return atom('标记完成', '', [
+    atom('读取任务', '', [], [
+      partner('uses', '能力/读取正文'),
+      partner('source', '任务')
+    ]),
+    atom('正文非空', '', [], [
+      partner('uses', '能力/非空判断'),
+      partner('value-result', '读取任务')
+    ]),
+    atom('写入完成', '', [], [
+      partner('uses', '能力/替换正文'),
+      partner('target', '任务'),
+      partner('value', '参数/完成值')
+    ])
+  ], [], ['program']);
+}
+
+function baseWorld(program = replaceProgram()) {
+  return [
+    atom('能力', '', [
+      capability('读取正文', 'atom.engine/read-detail@1'),
+      capability('非空判断', 'atom.engine/guard-non-empty@1'),
+      capability('相等判断', 'atom.engine/guard-equals@1'),
+      capability('沿关系取 Atom', 'atom.engine/follow-partner@1'),
+      capability('替换正文', 'atom.engine/replace-detail@1'),
+      capability('新建 child', 'atom.engine/create-child@1')
+    ]),
+    atom('参数', '', [atom('完成值', '完成')]),
+    atom('任务', '待办'),
+    program
+  ];
+}
+
+test('Program adds one exact name.run. Transform command', () => {
+  assert.deepEqual([...TRANSFORM_COMMANDS], [
+    'rep', 'sum', 'typ', 'ren', 'mov', 'cpy', 'dsc', 'rst', 'run'
+  ]);
+  const parsed = createAtomLanguageReceiver().receive(
+    'transform {"name.run.":"标记完成"}'
+  );
+  assert.equal(parsed.ok, true, JSON.stringify(parsed.errors));
+  assert.deepEqual(parsed.items[0].fields[0].commands, [
+    { name: 'run', parameter: '' }
+  ]);
+});
+
+test('a valid Program is published immediately but never runs during write', async (t) => {
+  const world = baseWorld();
+  const program = world.pop();
+  const files = await fixture(t, world);
+  const result = await executeAtomLanguage({
+    ...files,
+    source: `transform new ${JSON.stringify(program)}`
+  });
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(findAtom(await readAtoms(files.contextFile), '任务').detail, '待办');
+  assert.ok(findAtom(await readAtoms(files.contextFile), '标记完成'));
+});
+
+test('Program uses the shared access evaluator for reads and writes', async () => {
+  const world = baseWorld();
+  const programName = world.at(-1)['name@program'];
+  const result = await executeProgram({
+    atoms: world,
+    selector: programName,
+    contextFile: 'atom.json',
+    authorize: async (_match, operation) => ({
+      decision: operation === 'write' ? 'deny' : 'allow'
+    })
+  });
+
+  assert.equal(result.error.code, 'PROGRAM_ACCESS_DENIED');
+});

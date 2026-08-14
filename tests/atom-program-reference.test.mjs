@@ -1,0 +1,48 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+
+function atom(name, detail = '', children = [], type = '') {
+  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+}
+
+test('a Program can call one exact reusable Program with JSON arguments', async () => {
+  const reusable = [
+    'def main(arguments):',
+    "    rows = explore({'name': arguments['root'], 'children$latitude-1': None, 'detail$full': None})",
+    "    refs = [row.ref for row in rows if row.detail.strip()]",
+    "    lock({'targets': {'refs': refs}, 'mode': 'write', 'fields': ['name', 'detail'], 'protect': {'atom': True, 'messages': False}, 'reason': {'code': 'PREDEFINED_CONTENT', 'message': '预定义内容已锁定'}})",
+    "    return {'locked': len(refs)}",
+  ].join('\n');
+  const caller = [
+    "result = use_program({'name': '预定义内容锁', 'arguments': {'root': '任务'}})",
+    "message({'level': 'info', 'text': 'locked=' + str(result['locked'])})",
+  ].join('\n');
+  const world = [
+    atom('任务', '框架说明', [atom('框架', '预填说明'), atom('填写项', '')]),
+    atom('预定义内容锁', reusable, [], 'program'),
+    atom('调用方', caller, [], 'program'),
+  ];
+
+  const result = await createProgramRuntimeScheduler().refresh(world);
+
+  assert.equal(result.locks.length, 1);
+  assert.equal(result.locks[0].targets.refs.length, 2);
+  assert.deepEqual(result.locks[0].fields, ['name', 'detail']);
+  assert.equal(result.messages[0].text, 'locked=2');
+});
+
+test('Program references reject ambiguous names and recursive calls', async () => {
+  const caller = atom('调用方', "use_program({'name': '库', 'arguments': {}})", [], 'program');
+  const scheduler = createProgramRuntimeScheduler();
+  await assert.rejects(
+    scheduler.refresh([atom('A', '', [atom('库', 'def main(arguments):\n    return {}', [], 'program')]), atom('B', '', [atom('库', 'def main(arguments):\n    return {}', [], 'program')]), caller]),
+    (error) => error?.code === 'ATOM_PROGRAM_FAILED' && /ambiguous/.test(error?.message)
+  );
+
+  await assert.rejects(
+    scheduler.refresh([atom('循环', "def main(arguments):\n    return use_program({'name': '循环', 'arguments': {}})\nuse_program({'name': '循环', 'arguments': {}})", [], 'program')]),
+    (error) => error?.code === 'ATOM_PROGRAM_FAILED' && /recursive/i.test(error?.message)
+  );
+});

@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>多球域 · 3D 交互范式实验场</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500&family=Tomorrow:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="spatial.css?v=20260813.229">
+</head>
+<body data-build="20260813.229">
+  <main class="spatial-shell" id="spatialShell">
+    <canvas
+      id="spaceCanvas"
+      tabindex="0"
+      role="application"
+      aria-label="多球域三维交互场。左键使用，右键按当前视角展收；A 内包、S 外围、D 层级、F 沉浸；按住 Shift 用魔杖批量命中，CapsLock 在镜面与透明页详情间切换，中键单击聚焦、拖动旋转，滚轮缩放。"
+    ></canvas>
+    <div class="surface-markdown-layer" id="surfaceMarkdownLayer" aria-hidden="true"></div>
+    <aside class="detail-magnifier" id="detailMagnifier" aria-live="polite" hidden>
+      <header class="detail-magnifier__head">
+        <span aria-hidden="true">🔍</span>
+        <strong id="detailMagnifierTitle">全文</strong>
+        <small>三击 CapsLock 退出</small>
+      </header>
+      <article class="detail-magnifier__content" id="detailMagnifierContent"></article>
+    </aside>
+    <div class="detail-magnifier-cursor" id="detailMagnifierCursor" aria-hidden="true" hidden>🔍</div>
+
+    <header class="field-header" aria-label="当前空间状态">
+      <div class="field-mark">
+        <span class="field-mark__signal" aria-hidden="true"></span>
+        <span class="field-mark__name">MULTISPHERE</span>
+        <span class="field-mark__mode">VISUAL FIELD</span>
+      </div>
+      <p class="field-path" id="fieldPath">全域</p>
+    </header>
+
+    <nav class="field-actions" aria-label="视角与空间工具">
+      <button class="edge-action" id="viewBackAction" type="button" data-intent="backView">视角后退</button>
+      <button class="edge-action" id="viewForwardAction" type="button" data-intent="forwardView" data-priority="wide">前进</button>
+      <button class="edge-action" id="exitAction" type="button" data-intent="exit">上层</button>
+      <button class="edge-action" type="button" data-intent="returnOverview" data-priority="wide">全域</button>
+      <button class="edge-action" type="button" data-ui="search">搜索</button>
+      <button class="edge-action" type="button" data-ui="mermaid">导入/导出</button>
+      <button class="edge-action" id="worldLensAction" type="button" data-intent="toggleWorldLens" data-priority="wide" aria-pressed="false">域径图</button>
+      <button class="edge-action" type="button" data-ui="mapping">映射</button>
+      <button class="edge-action" type="button" data-ui="help" data-priority="wide" aria-keyshortcuts="H">帮助 H</button>
+    </nav>
+
+    <section class="spatial-search" id="searchPanel" role="search" aria-labelledby="searchTitle" hidden>
+      <div class="spatial-search__rail">
+        <span class="spatial-search__title" id="searchTitle">SPACE SEARCH</span>
+        <label class="sr-only" for="spatialSearch">搜索域径和节点名称</label>
+        <input id="spatialSearch" type="search" autocomplete="off" placeholder="输入域径或节点名称" spellcheck="false">
+        <button class="panel-close" type="button" data-close="search" aria-label="关闭空间搜索">关闭</button>
+      </div>
+      <p class="spatial-search__scope">检索已访问域径 · 路径从左向右 · Enter 定位 · Esc 关闭</p>
+      <ol class="search-results" id="searchResults" aria-label="空间搜索备选项"></ol>
+    </section>
+
+    <aside class="edge-panel mermaid-panel" id="mermaidPanel" aria-labelledby="mermaidTitle" hidden>
+      <div class="edge-panel__head">
+        <div>
+          <h2 id="mermaidTitle">知识交换</h2>
+          <p id="mermaidTarget">目标：尚未读取</p>
+        </div>
+        <button class="panel-close" type="button" data-close="mermaid" aria-label="关闭知识导入导出">关闭</button>
+      </div>
+      <label class="knowledge-format" for="knowledgeFormat">
+        <span>交换格式</span>
+        <select id="knowledgeFormat">
+          <option value="mermaid">Mermaid</option>
+          <option value="json">JSON</option>
+        </select>
+      </label>
+      <label class="mermaid-file" for="mermaidFile">
+        <span id="knowledgeFileLabel">读取 .mmd / .md / .json 文件</span>
+        <input id="mermaidFile" type="file" accept=".mmd,.md,.json,text/markdown,text/plain,application/json">
+      </label>
+      <label class="mermaid-source" for="mermaidSource">
+        <span id="knowledgeSourceLabel">Mermaid 源码</span>
+        <textarea id="mermaidSource" spellcheck="false" placeholder="flowchart LR&#10;  A[&quot;节点名称&lt;br/&gt;节点详情&quot;]"></textarea>
+      </label>
+      <output class="mermaid-status" id="mermaidStatus" aria-live="polite">先预览，再确认导入；没有选择母球时会明确警告。</output>
+      <div class="mermaid-actions" aria-label="知识交换操作">
+        <button type="button" id="mermaidPreview">预览导入</button>
+        <button type="button" id="mermaidConfirm" disabled>确认导入</button>
+        <button type="button" id="mermaidCancel" disabled>取消预览</button>
+            <button type="button" id="mermaidExport">导出并保存</button>
+        <button type="button" id="mermaidCopy">复制源码</button>
+            <button type="button" id="mermaidDownload">另存文件</button>
+      </div>
+      <label class="mermaid-root-confirm" id="mermaidRootConfirmWrap" hidden>
+        <input id="mermaidRootConfirm" type="checkbox">
+        <span>未选择母球，确认导入全局顶层</span>
+      </label>
+    </aside>
+
+    <section class="field-readout" aria-live="polite" aria-atomic="true">
+      <p class="field-readout__label" id="selectionLabel">无中心多球系</p>
+      <p class="field-readout__copy" id="selectionCopy">所有球体统一为隧洞；有子内容可同层展收，空隧洞也可进入并在内部新增节点。</p>
+      <p class="field-readout__caps" id="selectionCaps">独立球面 · 静默设备无关意图 · 有界预取历史</p>
+    </section>
+
+    <label class="node-name-editor edge-name-editor" id="edgeNameEditorWrap" data-edit-state="update" hidden>
+      <span>关系名称</span>
+      <input id="edgeNameEditor" type="text" maxlength="80" autocomplete="off" spellcheck="false">
+    </label>
+
+    <section class="lens-editor" id="lensEditor" data-edit-state="update" aria-label="球镜详情编辑" hidden>
+      <div class="node-name-editor" id="nodeNameEditorWrap" data-edit-state="update" hidden>
+        <div class="node-key-editor">
+          <span class="node-key-editor__base">节点名称</span>
+          <label class="node-key-editor__suffix" for="nodeTypeEditor">
+            <span class="sr-only">注册字符尾缀</span><b>@</b>
+            <input id="nodeTypeEditor" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="注册字符">
+          </label>
+        </div>
+        <label class="node-value-editor" for="nodeNameEditor">
+          <span>名称值</span>
+          <input id="nodeNameEditor" type="text" maxlength="80" autocomplete="off" spellcheck="false">
+        </label>
+      </div>
+      <label class="sr-only" for="nodeDetailEditor">节点详情</label>
+      <textarea id="nodeDetailEditor" maxlength="4000" placeholder="在球镜表面写入详情"></textarea>
+      <header class="markdown-editor-toolbar">
+        <span>Markdown</span>
+        <span class="markdown-editor-toolbar__actions">
+          <button id="nodeDetailLineBreak" type="button">换行</button>
+          <button id="nodeDetailModeToggle" type="button" aria-pressed="false">预览</button>
+        </span>
+      </header>
+      <div class="markdown-editor-mount" id="nodeDetailEditorMount"></div>
+      <article class="markdown-preview" id="nodeDetailPreview" aria-label="Markdown预览" hidden></article>
+      <label class="attachment-control" for="attachmentInput">
+        <input id="attachmentInput" type="file">
+        <span>附加文件</span>
+      </label>
+      <output id="attachmentMeta">纯文本</output>
+    </section>
+
+    <output class="edit-status" id="editStatus" data-edit-state="update" hidden>
+      待提交更新 · Enter 确认 · Shift+Enter 换行 · Esc 取消
+    </output>
+
+    <div class="field-metrics" aria-label="场域读数">
+      <span><b id="metricDepth">00</b> 层深</span>
+      <span><b id="metricVisible">08</b> 可见</span>
+      <span><b id="metricScale">1.0</b> 尺度</span>
+      <span><b id="metricPhase">空域</b> 阶段</span>
+    </div>
+
+    <p class="field-hint" id="fieldHint">
+      左键使用 · 右键展收 · A内包 S外围 D层级 F沉浸 · CapsLock详情 · 中键单击聚焦／拖动旋转 · Shift魔杖
+    </p>
+
+    <aside class="edge-panel" id="mappingPanel" aria-labelledby="mappingTitle" hidden>
+      <div class="edge-panel__head">
+        <div>
+          <h2 id="mappingTitle">输入映射</h2>
+          <p>功能意图与物理按键彻底分离。</p>
+        </div>
+        <button class="panel-close" type="button" data-close="mapping" aria-label="关闭输入映射">关闭</button>
+      </div>
+      <div class="preset-switch" role="group" aria-label="输入预设">
+        <button type="button" data-preset="explorer" aria-pressed="true">标准探索</button>
+        <button type="button" data-preset="oneHand" aria-pressed="false">单手试验</button>
+      </div>
+      <section class="presentation-settings" aria-labelledby="nestedLayoutSettingsTitle">
+        <h3 id="nestedLayoutSettingsTitle">A 内包布局</h3>
+        <label class="range-setting">
+          <span>S 互斥间隔</span>
+          <span class="range-setting__control">
+            <input id="nestedCompactness" type="range" min="0" max="100" step="1" value="50"
+              aria-describedby="nestedCompactnessHint">
+            <output id="nestedCompactnessValue" for="nestedCompactness">50%</output>
+          </span>
+          <small id="nestedCompactnessHint">显示 0–100%；底层按 0–1000 计算，100% 对应原上限的 10 倍互斥范围；不缩放团或屏幕。</small>
+        </label>
+      </section>
+      <section class="presentation-settings" aria-labelledby="peripheralLayoutSettingsTitle">
+        <h3 id="peripheralLayoutSettingsTitle">S 外围层级</h3>
+        <label class="range-setting">
+          <span>A 每层节点缩小</span>
+          <span class="range-setting__control">
+            <input id="peripheralDepthShrink" type="range" min="0" max="90" step="1" value="20"
+              aria-describedby="peripheralDepthShrinkHint">
+            <output id="peripheralDepthShrinkValue" for="peripheralDepthShrink">20%</output>
+          </span>
+          <small id="peripheralDepthShrinkHint">每展开一层，子层节点相对母层缩小该比例；节点互斥仍按缩放后的真实体积计算。</small>
+        </label>
+      </section>
+      <section class="presentation-settings" aria-labelledby="presentationSettingsTitle">
+        <h3 id="presentationSettingsTitle">启动与演示</h3>
+        <label>
+          <span>P 空闲演示秒数</span>
+          <input id="demoIdleSeconds" type="number" min="1" max="3600" step="1" inputmode="numeric" placeholder="留空关闭">
+        </label>
+        <label>
+          <span>进入网页显示 H 帮助</span>
+          <input id="helpStartupToggle" type="checkbox">
+        </label>
+        <label class="range-setting">
+          <span>滚轮缩放速度</span>
+          <span class="range-setting__control">
+            <input id="zoomSpeed" type="range" min="25" max="400" step="5" value="160">
+            <output id="zoomSpeedValue" for="zoomSpeed">160%</output>
+          </span>
+        </label>
+        <label class="range-setting">
+          <span>中键名称高亮层级</span>
+          <span class="range-setting__control">
+            <input id="middleLabelDepth" type="range" min="1" max="9" step="1" value="3">
+            <output id="middleLabelDepthValue" for="middleLabelDepth">3 层</output>
+          </span>
+        </label>
+        <label class="range-setting">
+          <span>范围内名称亮度</span>
+          <span class="range-setting__control">
+            <input id="highlightedLabelBrightness" type="range" min="0" max="100" step="5" value="100">
+            <output id="highlightedLabelBrightnessValue" for="highlightedLabelBrightness">100%</output>
+          </span>
+        </label>
+        <label class="range-setting">
+          <span>其他名称亮度</span>
+          <span class="range-setting__control">
+            <input id="otherLabelBrightness" type="range" min="0" max="100" step="5" value="35">
+            <output id="otherLabelBrightnessValue" for="otherLabelBrightness">35%</output>
+          </span>
+        </label>
+        <label class="range-setting">
+          <span>S 团边界强度</span>
+          <span class="range-setting__control">
+            <input id="nestedTunnelStrength" type="range" min="0" max="100" step="1" value="0">
+            <output id="nestedTunnelStrengthValue" for="nestedTunnelStrength">0%</output>
+          </span>
+        </label>
+        <label class="range-setting">
+          <span>S 团内部背景强度</span>
+          <span class="range-setting__control">
+            <input id="nestedTunnelInteriorStrength" type="range" min="0" max="100" step="1" value="0">
+            <output id="nestedTunnelInteriorStrengthValue" for="nestedTunnelInteriorStrength">0%</output>
+          </span>
+        </label>
+      </section>
+      <section class="presentation-settings" aria-labelledby="detailFocusSettingsTitle">
+        <h3 id="detailFocusSettingsTitle">详情聚焦</h3>
+        <label class="range-setting">
+          <span>中键详情显示层级</span>
+          <span class="range-setting__control">
+            <input id="middleDetailDepth" type="range" min="1" max="9" step="1" value="1">
+            <output id="middleDetailDepthValue" for="middleDetailDepth">1 层</output>
+          </span>
+        </label>
+        <label class="range-setting">
+          <span>范围内详情亮度</span>
+          <span class="range-setting__control">
+            <input id="highlightedDetailBrightness" type="range" min="0" max="100" step="5" value="100">
+            <output id="highlightedDetailBrightnessValue" for="highlightedDetailBrightness">100%</output>
+          </span>
+        </label>
+        <label class="range-setting">
+          <span>其他详情亮度</span>
+          <span class="range-setting__control">
+            <input id="otherDetailBrightness" type="range" min="0" max="100" step="5" value="0">
+            <output id="otherDetailBrightnessValue" for="otherDetailBrightness">0%</output>
+          </span>
+        </label>
+        <label class="range-setting">
+          <span>悬浮详情背景不透明度</span>
+          <span class="range-setting__control">
+            <input id="floatingDetailBackdropOpacity" type="range" min="0" max="100" step="1" value="82">
+            <output id="floatingDetailBackdropOpacityValue" for="floatingDetailBackdropOpacity">82%</output>
+          </span>
+        </label>
+        <p class="settings-note">中键选择节点或团后，CapsLock 详情只重点显示所设层数；默认隐藏范围外详情。</p>
+      </section>
+      <div class="binding-groups" id="bindingList"></div>
+      <p class="edge-panel__foot">未来触控、手柄、凝视与手势只需增加适配器，不改球域逻辑。</p>
+    </aside>
+
+    <aside id="helpPanel" class="edge-panel help-overlay" aria-labelledby="helpTitle" aria-modal="false" hidden>
+      <div class="edge-panel__head">
+        <div>
+          <h2 id="helpTitle">操作帮助</h2>
+          <p>H 显示／隐藏。面板不改变当前视角与空间状态。</p>
+        </div>
+        <button class="panel-close" type="button" data-close="help" aria-label="关闭帮助">关闭</button>
+      </div>
+      <div class="help-groups" aria-label="当前操作快捷键">
+        <section class="help-group" data-help-group="视角">
+          <h3>视角</h3>
+          <dl>
+            <div><dt><kbd>A</kbd></dt><dd>内包展开</dd></div>
+            <div><dt><kbd>S</kbd></dt><dd>外围展开</dd></div>
+            <div><dt><kbd>D</kbd></dt><dd>层级展开</dd></div>
+            <div><dt><kbd>F</kbd></dt><dd>沉浸进入</dd></div>
+          </dl>
+        </section>
+        <section class="help-group" data-help-group="鼠标">
+          <h3>鼠标</h3>
+          <dl>
+            <div><dt><kbd>左键</kbd></dt><dd>使用节点</dd></div>
+            <div><dt><kbd>右键</kbd></dt><dd>应用视角；空白返回母域</dd></div>
+            <div><dt><kbd>CapsLock</kbd></dt><dd>大写为镜面，小写为透明页；三击开关全文放大镜</dd></div>
+            <div><dt><kbd>按住中键</kbd></dt><dd>围绕最近交互节点旋转</dd></div>
+            <div><dt><kbd>滚轮</kbd></dt><dd>平滑远近</dd></div>
+          </dl>
+        </section>
+        <section class="help-group" data-help-group="摄像机">
+          <h3>摄像机</h3>
+          <dl>
+            <div><dt><kbd>按住中键移动</kbd></dt><dd>旋转视角</dd></div>
+          </dl>
+        </section>
+        <section class="help-group" data-help-group="导航">
+          <h3>导航</h3>
+          <dl>
+            <div><dt><kbd>Z</kbd> <kbd>X</kbd></dt><dd>后退／前进</dd></div>
+            <div><dt><kbd>Home</kbd></dt><dd>返回全域</dd></div>
+            <div><dt><kbd>O</kbd></dt><dd>域径图</dd></div>
+            <div><dt><kbd>Ctrl K</kbd></dt><dd>空间搜索</dd></div>
+          </dl>
+        </section>
+        <section class="help-group" data-help-group="批量">
+          <h3>批量</h3>
+          <dl>
+            <div><dt><kbd>Shift + 右拖</kbd></dt><dd>木杖轨迹命中</dd></div>
+            <div><dt><kbd>Shift 双击</kbd></dt><dd>按当前 A／S／D 作用光标所指节点的同层同团节点；F 不响应</dd></div>
+            <div><dt><kbd>Shift 三击</kbd></dt><dd>玉杖递归切换</dd></div>
+          </dl>
+        </section>
+        <section class="help-group" data-help-group="编辑">
+          <h3>编辑</h3>
+          <dl>
+            <div><dt><kbd>Ctrl + 左键</kbd></dt><dd>新增／编辑节点</dd></div>
+            <div><dt><kbd>Ctrl + 右键</kbd></dt><dd>新建／编辑关系</dd></div>
+            <div><dt><kbd>Enter</kbd> <kbd>Shift+Enter</kbd> <kbd>Esc</kbd></dt><dd>确认／详情换行／取消</dd></div>
+            <div><dt><kbd>Delete</kbd></dt><dd>进入删除预警</dd></div>
+          </dl>
+        </section>
+      </div>
+    </aside>
+
+    <output class="demo-theme" id="demoTheme" aria-live="polite" aria-atomic="true" hidden>
+      <span id="demoThemeIndex">01</span>
+      <strong id="demoThemeLabel">空间视角</strong>
+    </output>
+
+    <output class="demo-cue" id="demoCue" aria-live="polite" aria-atomic="true" hidden>
+      <strong id="demoCueKey">P</strong>
+      <span id="demoCueLabel">自动演示</span>
+    </output>
+
+    <div class="sr-only" id="ariaLive" aria-live="polite"></div>
+  </main>
+
+  <noscript>此实验场需要 JavaScript 才能响应空间交互。</noscript>
+  <script src="input-config.js?v=20260813.229"></script>
+  <script src="spatial-visual-model.js?v=20260813.229"></script>
+  <script src="spatial-detail-magnifier-model.js?v=20260813.229"></script>
+  <script src="spatial-gesture-arbiter.js?v=20260813.229"></script>
+  <script src="spatial-middle-frame-target.js?v=20260813.229"></script>
+  <script src="spatial-entity-registry.js?v=20260813.229"></script>
+  <script src="spatial-view-grammar.js?v=20260813.229"></script>
+  <script src="spatial-workspace-model.js?v=20260813.229"></script>
+  <script src="spatial-mermaid-codec.js?v=20260813.229"></script>
+  <script src="spatial-json-codec.js?v=20260813.229"></script>
+  <script src="spatial-view-mode-model.js?v=20260813.229"></script>
+  <script src="spatial-demo-model.js?v=20260813.229"></script>
+  <script src="spatial-demo-geometry.js?v=20260813.229"></script>
+  <script src="spatial-cluster-field.js?v=20260813.229"></script>
+  <script src="vendor/spatial-markdown-editor.bundle.js?v=20260813.229"></script>
+  <script src="vendor/atom-spatial-scene.bundle.js?v=20260813.229"></script>
+  <script src="spatial-engine.js?v=20260813.229"></script>
+  <script src="spatial-mermaid-panel.js?v=20260813.229"></script>
+  <script src="spatial-browser-bridge.js?v=20260813.229"></script>
+</body>
+</html>

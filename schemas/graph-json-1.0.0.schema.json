@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Graph JSON 1.0.0",
+  "description": "外部软件与 Graph 渲染器之间的唯一语义数据接口。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "config",
+    "graph"
+  ],
+  "properties": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.0.0"
+        }
+      }
+    },
+    "graph": {
+      "$ref": "#/$defs/node"
+    }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "detail",
+        "children",
+        "partners"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^/]+$"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        },
+        "partners": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/partner"
+          }
+        }
+      }
+    },
+    "partner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verb",
+        "object"
+      ],
+      "properties": {
+        "verb": {
+          "type": "string",
+          "minLength": 1
+        },
+        "object": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^/]+(?:/[^/]+)*$"
+        }
+      }
+    }
+  }
+}

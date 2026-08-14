@@ -1,0 +1,173 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+
+function atom(name, detail = '', children = [], type = '') {
+  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+}
+
+async function runProgram(source, world = []) {
+  const scheduler = createProgramRuntimeScheduler();
+  return scheduler.refresh([...world, atom('原子函数验收', source, [], 'program')]);
+}
+
+test('Program form helpers read direct fields and report missing details', async () => {
+  const world = [atom('推进流', '', [
+    atom('定向', '', [atom('目标', '交付可验证结果'), atom('边界', '   '), atom('状态', '进行中')])
+  ])];
+  const cycle = await runProgram([
+    "rows = explore({'name': '推进流/定向', 'children$latitude-1': None, 'detail$full': None})",
+    "field_count = len(direct_children(rows, '推进流/定向'))",
+    "missing = missing_details(rows, '推进流/定向', ['目标', '边界', '完成标准'])",
+    "message({'level': 'info', 'text': str(field_count) + '|' + child_detail(rows, '推进流/定向', '目标') + '|' + form_status(rows, '推进流/定向') + '|' + ','.join(missing)})"
+  ].join('\n'), world);
+
+  assert.equal(cycle.messages[0].text, '3|交付可验证结果|进行中|边界,完成标准');
+});
+
+test('Program routing helpers choose the first unfinished form and validate transitions', async () => {
+  const cycle = await runProgram([
+    "forms = [('定向', '已通过'), ('调研', '进行中'), ('策评', '未进入')]",
+    "pending = first_pending(forms, ['已通过', '已冻结'])",
+    "rules = {'未进入': ['进行中'], '进行中': ['已提交']} ",
+    "allowed = transition_allowed('未进入', '进行中', rules)",
+    "blocked = transition_allowed('未进入', '已通过', rules)",
+    "message({'level': 'info', 'text': pending[0] + '|' + str(allowed) + '|' + str(blocked)})"
+  ].join('\n'));
+
+  assert.equal(cycle.messages[0].text, '调研|True|False');
+});
+
+test('Program subtree_refs selects only the requested subtree', async () => {
+  const world = [atom('世界', '', [
+    atom('当前层', '', [atom('分片A'), atom('分片B')]),
+    atom('其他层', '', [atom('分片C')])
+  ])];
+  const cycle = await runProgram([
+    "rows = explore({'name': '世界', 'children$latitude-2': None})",
+    "refs = subtree_refs(rows, '世界/当前层')",
+    "lock({'targets': {'refs': refs}, 'mode': 'write', 'fields': ['detail'], 'protect': {'atom': True, 'messages': False}})"
+  ].join('\n'), world);
+
+  assert.equal(cycle.locks[0].targets.refs.length, 3);
+});
+
+test('Program shard planner supports per-item and fixed-size deterministic plans', async () => {
+  const world = [atom('来源', '', [atom('A'), atom('B'), atom('C'), atom('D'), atom('E')])];
+  const cycle = await runProgram([
+    "rows = explore({'name': '来源', 'children$latitude-1': None})",
+    "items = [row for row in rows if row.path != '来源']",
+    "each = plan_shards(items, {'mode': 'each', 'name_prefix': '片'})",
+    "fixed = plan_shards(items, {'mode': 'fixed_size', 'size': 2, 'name_prefix': '批'})",
+    "message({'level': 'info', 'text': str(len(each)) + '|' + ','.join([shard['name'] for shard in fixed]) + '|' + str(len(fixed[2]['source_refs']))})"
+  ].join('\n'), world);
+
+  assert.equal(cycle.messages[0].text, '5|批01,批02,批03|1');
+});
+
+test('Program shard planner rejects invalid specifications and accepts empty sources', async () => {
+  const empty = await runProgram([
+    "plan = plan_shards([], {'mode': 'fixed_size', 'size': 3})",
+    "message({'level': 'info', 'text': str(len(plan))})"
+  ].join('\n'));
+  assert.equal(empty.messages[0].text, '0');
+
+  await assert.rejects(runProgram("plan_shards([], {'mode': 'unknown'})"), {
+    code: 'ATOM_PROGRAM_FAILED'
+  });
+});
+
+test('Program form-flow planner creates complete missing forms without overwriting existing content', async () => {
+  const world = [atom('任务流', '', [
+    atom('定向', '人工已修订的说明', [atom('目标', '已填写')])
+  ])];
+  const cycle = await runProgram([
+    "rows = explore({'name': '任务流', 'children$latitude-2': None, 'detail$full': None})",
+    "standard = {'forms': [",
+    "    {'name': '定向', 'detail': '标准说明', 'status': '未进入', 'fields': ['目标', '边界']},",
+    "    {'name': '调研', 'detail': '调研说明', 'status': '未进入', 'fields': ['渠道'], 'routes': [{'verb': '通过后', 'object': '策评'}]}",
+    "]}",
+    "plan = plan_form_flow(rows, '任务流', standard)",
+    "if plan['children']:",
+    "    transform({'name': '任务流', 'children': plan['children']})",
+    "message({'level': 'info', 'text': str(len(plan['children'])) + '|' + ','.join(plan['conflicts'])})"
+  ].join('\n'), world);
+
+  assert.equal(cycle.transforms.length, 1);
+  const [directionPatch, researchForm] = cycle.transforms[0].children;
+  assert.deepEqual(directionPatch, {
+    name: '定向',
+    children: [
+      { name: '状态', detail: '未进入', children: [], partners: [] },
+      { name: '边界', detail: '', children: [], partners: [] }
+    ]
+  });
+  assert.equal(researchForm.name, '调研');
+  assert.equal(researchForm.children[0].name, '状态');
+  assert.equal(researchForm.children[1].name, '渠道');
+  assert.deepEqual(researchForm.partners, [{ verb: '通过后', object: '策评' }]);
+  assert.equal(cycle.messages[0].text, '2|任务流/定向:detail');
+});
+
+test('Program form-flow planner is a no-op when the generated structure already exists', async () => {
+  const world = [atom('任务流', '', [
+    atom('定向', '说明', [atom('状态', '未进入'), atom('目标')])
+  ])];
+  const cycle = await runProgram([
+    "rows = explore({'name': '任务流', 'children$latitude-2': None, 'detail$full': None})",
+    "plan = plan_form_flow(rows, '任务流', {'forms': [{'name': '定向', 'detail': '说明', 'status': '未进入', 'fields': ['目标']}]})",
+    "if plan['children']:",
+    "    transform({'name': '任务流', 'children': plan['children']})",
+    "message({'level': 'info', 'text': str(plan['complete'])})"
+  ].join('\n'), world);
+
+  assert.equal(cycle.transforms.length, 0);
+  assert.equal(cycle.messages[0].text, 'True');
+});
+
+test('Program form-flow planner rejects duplicate form and field names', async () => {
+  for (const standard of [
+    "{'forms': [{'name': '定向', 'fields': []}, {'name': '定向', 'fields': []}]}",
+    "{'forms': [{'name': '定向', 'fields': ['目标', '目标']}]}",
+    "{'forms': [{'name': '定向', 'fields': ['状态']}]}",
+  ]) {
+    await assert.rejects(runProgram(`plan_form_flow([], '任务流', ${standard})`), {
+      code: 'ATOM_PROGRAM_FAILED'
+    });
+  }
+});
+
+test('Program form-flow planner reports an existing route mismatch without resetting runtime status', async () => {
+  const existingForm = atom('定向', '说明', [atom('状态', '进行中'), atom('目标')]);
+  existingForm.partners = [{ verb: '通过后', object: '旧节点' }];
+  const world = [atom('任务流', '', [existingForm])];
+  const cycle = await runProgram([
+    "rows = explore({'name': '任务流', 'children$latitude-2': None, 'detail$full': None})",
+    "standard = {'forms': [{'name': '定向', 'detail': '说明', 'status': '未进入', 'fields': ['目标'], 'routes': [{'verb': '通过后', 'object': '调研'}]}]}",
+    "plan = plan_form_flow(rows, '任务流', standard)",
+    "message({'level': 'warning', 'text': ','.join(plan['conflicts']) + '|' + str(len(plan['children']))})"
+  ].join('\n'), world);
+
+  assert.equal(cycle.messages[0].text, '任务流/定向:routes|0');
+});
+
+test('Program template planner creates one typed nested instance and then becomes a no-op', async () => {
+  const template = "{'name': '推进流', 'detail': '任务推进入口', 'children': [{'name': '定向', 'detail': '填写方向'}, {'name': '路由', 'types': ['program'], 'detail': \"message({'level': 'info', 'text': '路由已运行'})\"}]}";
+  const missing = await runProgram([
+    `plan = plan_template_instance([], '项目A', ${template})`,
+    "transform({'name': '项目A', 'children': plan['children']})",
+    "message({'level': 'info', 'text': plan['children'][0]['children'][1]['name@program']})"
+  ].join('\n'), [atom('项目A')]);
+  assert.equal(missing.transforms[0].children[0].name, '推进流');
+  assert.equal(missing.transforms[0].children[0].children[1]['name@program'], '路由');
+  assert.equal(missing.messages[0].text, '路由');
+
+  const existingRowsWorld = [atom('项目A', '', [atom('推进流')])];
+  const existing = await runProgram([
+    "rows = explore({'name': '项目A', 'children$latitude-1': None})",
+    `plan = plan_template_instance(rows, '项目A', ${template})`,
+    "message({'level': 'info', 'text': str(plan['exists']) + '|' + str(len(plan['children']))})"
+  ].join('\n'), existingRowsWorld);
+  assert.equal(existing.messages[0].text, 'True|0');
+});
