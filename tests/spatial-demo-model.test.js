@@ -14,12 +14,12 @@ function loadModel() {
   return sandbox.window.SpatialDemoModel;
 }
 
-test('first visit defaults to five-second presentation and visible help', () => {
+test('first visit keeps automatic presentation off until the user explicitly enables it', () => {
   const model = loadModel();
   assert.ok(model, 'SpatialDemoModel must exist');
   assert.deepEqual(
     JSON.parse(JSON.stringify(model.normalizeSettings(null))),
-    { idleSeconds: 5, lastIdleSeconds: 5, helpVisible: true, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 5, helpVisible: true, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 

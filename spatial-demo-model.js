@@ -67,7 +67,8 @@
   function normalizeSettings(input) {
     const source = input && typeof input === "object" ? input : {};
     const lastIdleSeconds = validSeconds(source.lastIdleSeconds) || DEFAULT_IDLE_SECONDS;
-    const idleSeconds = source.idleSeconds === null
+    const idleSeconds = !Object.prototype.hasOwnProperty.call(source, "idleSeconds")
+      || source.idleSeconds === null
       ? null
       : (validSeconds(source.idleSeconds) || DEFAULT_IDLE_SECONDS);
     const middleLabelDepth = validMiddleLabelDepth(source.middleLabelDepth);
