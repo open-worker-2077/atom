@@ -239,3 +239,45 @@ test('graph server initializes the projection, serves the full UI health and Gra
   assert.equal(state.knowledge.edges.length, 1);
   assert.equal(state.knowledge.edges[0].label, '产出');
 });
+
+test('graph server queues private backup from a committed operation instead of relying on polling', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const contextFile = path.join(directory, 'live', 'atom.json');
+  const graphFile = path.join(directory, 'live', 'graph.json');
+  const storeFile = path.join(directory, 'live', 'knowledge.json');
+  await fs.mkdir(path.dirname(contextFile), { recursive: true });
+  await fs.writeFile(contextFile, `${JSON.stringify(atomFixture(), null, 2)}\n`, 'utf8');
+  const calls = [];
+  const trigger = {
+    start: () => calls.push('start'),
+    schedule: () => calls.push('schedule'),
+    close: () => calls.push('close')
+  };
+
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1',
+    port: 0,
+    contextFile,
+    graphFile,
+    storeFile,
+    backupRepository: path.join(directory, 'private-backup'),
+    backupTriggerFactory: () => trigger
+  });
+  t.after(() => running.close());
+  assert.deepEqual(calls, ['start']);
+
+  const response = await fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source: 'transform {"name":"石斧","detail.rep.已更新"}',
+      interaction: {
+        id: 'backup-after-write',
+        agent: { ref: 'fixture-agent-ref', path: '石器工坊' }
+      },
+      history: []
+    })
+  });
+  assert.equal(response.status, 200, await response.text());
+  assert.deepEqual(calls, ['start', 'schedule']);
+});

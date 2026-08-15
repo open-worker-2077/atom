@@ -222,6 +222,43 @@ test('transactional persistence rollback restores facts and rebuilds the Graph p
   assert.equal(journal.receipts[1].receipt.result.restoredCommandId, committed.commandId);
 });
 
+test('each authoritative commit and rollback emits one recovery-backup signal', async (t) => {
+  const { createTransactionalWorldPersistence } = await import(
+    new URL('../src/atom-system/adapters/transactional-world-persistence.mjs', import.meta.url)
+  );
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-world-backup-signal-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
+  const signals = [];
+  const persistence = createTransactionalWorldPersistence({
+    contextFile,
+    projectionFile,
+    onAuthoritativeWrite: (signal) => signals.push(signal)
+  });
+
+  const facts = [{ name: 'recoverable', detail: '', children: [], partners: [] }];
+  const committed = await persistence.commit({
+    correlationId: 'backup-signal-commit',
+    expectedRevision: 'sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
+    nextRevision: `sha256:${crypto.createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`,
+    facts
+  });
+  await persistence.rollback({
+    targetCommandId: committed.commandId,
+    correlationId: 'backup-signal-rollback',
+    expectedRevision: committed.afterRevision
+  });
+
+  assert.deepEqual(signals.map(({ operation }) => operation), ['commit', 'rollback']);
+  assert.deepEqual(signals.map(({ contextFile: file }) => file), [contextFile, contextFile]);
+  assert.deepEqual(signals.map(({ revision }) => revision), [
+    committed.afterRevision,
+    committed.beforeRevision
+  ]);
+});
+
 test('ordinary world commits cannot silently erase an existing agent registration', async (t) => {
   const { createTransactionalWorldPersistence } = await import(
     new URL('../src/atom-system/adapters/transactional-world-persistence.mjs', import.meta.url)

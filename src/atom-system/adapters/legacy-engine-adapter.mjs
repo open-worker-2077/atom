@@ -7,7 +7,8 @@ export function createLegacyWorldService(options = {}) {
   const transactionProvider = options.transactionProvider ?? ((request) => (
     createTransactionalWorldPersistence({
       contextFile: request.contextFile,
-      projectionFile: request.projectionFile
+      projectionFile: request.projectionFile,
+      onAuthoritativeWrite: options.onAuthoritativeWrite
     })
   ));
   const transactions = new Map();

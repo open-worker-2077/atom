@@ -55,7 +55,8 @@ export function createTransactionalWorldPersistence({
   contextFile,
   projectionFile,
   journalFile = path.join(path.dirname(contextFile), 'atom.transactions.json'),
-  worldId = 'primary'
+  worldId = 'primary',
+  onAuthoritativeWrite = async () => {}
 }) {
   const worldRepository = createJsonWorldRepository({ file: contextFile, worldId, initialFacts: [] });
   const journalRepository = createJsonTransactionJournal({ file: journalFile });
@@ -111,6 +112,12 @@ export function createTransactionalWorldPersistence({
       },
       transition: () => ({ facts: structuredClone(facts), result: { source } })
     });
+    await onAuthoritativeWrite({
+      operation: 'commit',
+      contextFile,
+      revision: receipt.afterRevision,
+      receipt
+    });
     try {
       await writeAtomGraphProjection(projectionFile, facts, { rootName: path.basename(contextFile) });
     } catch (error) {
@@ -141,6 +148,12 @@ export function createTransactionalWorldPersistence({
         name: 'rollback-world-command',
         payload: { targetCommandId }
       }
+    });
+    await onAuthoritativeWrite({
+      operation: 'rollback',
+      contextFile,
+      revision: receipt.afterRevision,
+      receipt
     });
     const restored = await worldRepository.read();
     try {

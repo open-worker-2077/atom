@@ -9,6 +9,7 @@ import {
   createSpatialServer,
   projectRoot
 } from '../../cli/lib/server.mjs';
+import { createLegacyWorldService } from '../../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createLegacyRuntimeComposition } from '../../src/atom-system/adapters/legacy-runtime-composition.mjs';
 import { createAtomRuntimeBackupTrigger } from '../../src/atom-system/operations/atom-runtime-backup-trigger.mjs';
 import { resolveAtomRuntime } from './runtime-config.mjs';
@@ -249,13 +250,24 @@ export function createAtomGraphHandlers(interactionRuntime) {
 
 export async function startAtomGraphServer(options = {}) {
   const configuration = resolveConfiguration(options);
+  const backupRepository = options.backupRepository ?? process.env.ATOM_RUNTIME_BACKUP_REPO;
+  const backupTriggerFactory = options.backupTriggerFactory ?? createAtomRuntimeBackupTrigger;
+  const backupTrigger = options.backupTrigger ?? (backupRepository ? backupTriggerFactory({
+    worldDirectory: path.dirname(configuration.contextFile),
+    backupRepository,
+    branch: options.backupBranch ?? process.env.ATOM_RUNTIME_BACKUP_BRANCH ?? 'runtime-data',
+    delayMs: options.backupDelayMs ?? process.env.ATOM_RUNTIME_BACKUP_DELAY_MS
+  }) : null);
   const programScheduler = options.programScheduler ?? createProgramRuntimeScheduler();
+  const worldService = options.worldService ?? createLegacyWorldService({
+    onAuthoritativeWrite: () => backupTrigger?.schedule()
+  });
   const interactionRuntime = options.interactionRuntime ?? createLegacyRuntimeComposition({
     contextFile: configuration.contextFile,
     graphFile: configuration.graphFile,
     storeFile: configuration.storeFile,
     programScheduler,
-    ...(options.worldService ? { worldService: options.worldService } : {}),
+    worldService,
     ...(options.projectionOrchestrator ? { projectionOrchestrator: options.projectionOrchestrator } : {})
   });
   const handlers = createAtomGraphHandlers(interactionRuntime);
@@ -282,13 +294,6 @@ export async function startAtomGraphServer(options = {}) {
     atomWorkspaceEdit: handlers.atomWorkspaceEdit,
     atomProjectionRecover: handlers.atomProjectionRecover
   });
-  const backupRepository = options.backupRepository ?? process.env.ATOM_RUNTIME_BACKUP_REPO;
-  const backupTrigger = backupRepository ? createAtomRuntimeBackupTrigger({
-    worldDirectory: path.dirname(configuration.contextFile),
-    backupRepository,
-    branch: options.backupBranch ?? process.env.ATOM_RUNTIME_BACKUP_BRANCH ?? 'runtime-data',
-    delayMs: options.backupDelayMs ?? process.env.ATOM_RUNTIME_BACKUP_DELAY_MS
-  }) : null;
   backupTrigger?.start();
   instance.server.once('close', () => backupTrigger?.close());
   await new Promise((resolve, reject) => {
