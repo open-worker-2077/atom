@@ -224,6 +224,61 @@ test('http bridge preserves the semantic operation when a structural commit is q
   assert.equal(requests.some(([url, options]) => url.endsWith('/state') && options.method === 'PUT'), false);
 });
 
+test('a queued view save never prevents the latest authoritative move projection from landing', async () => {
+  const listeners = new Map();
+  const imports = [];
+  let releaseMove;
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge: (knowledge) => { imports.push(knowledge); return true; },
+      exportField: () => ({ path: 'root', viewMode: 'nested' })
+    },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state') && !options.method) {
+        return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+      }
+      if (url.endsWith('/workspace-edit')) {
+        return new Promise((resolve) => {
+          releaseMove = () => resolve(response({
+            result: { ok: true },
+            knowledge: { revision: 2, nodes: [{ id: 'new-id', path: 'root/waiting', label: '网络' }], edges: [] }
+          }));
+        });
+      }
+      if (url.endsWith('/view')) return response({ result: { revision: 1 } });
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => 0
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  imports.length = 0;
+
+  const move = listeners.get('spatial-workspace-committed')({ detail: {
+    operation: {
+      kind: 'node-land',
+      source: { key: 'root::old-id' },
+      target: { path: 'root/waiting' },
+      draft: { label: '网络' }
+    },
+    knowledge: { revision: 1, nodes: [], edges: [] }
+  } });
+  await Promise.resolve();
+  listeners.get('spatial-view-committed')({ detail: { view: { path: 'root', viewMode: 'nested' } } });
+  releaseMove();
+  await move;
+
+  assert.equal(imports.length, 1);
+  assert.equal(imports[0].nodes[0].path, 'root/waiting');
+});
+
 test('Atom Web never lets an operation-less browser snapshot overwrite the Atom projection', async () => {
   const listeners = new Map();
   const requests = [];

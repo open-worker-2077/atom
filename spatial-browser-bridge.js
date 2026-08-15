@@ -56,6 +56,10 @@
   let lastKnowledge = null;
   let pendingRemoteRevision = -1;
 
+  function hasQueuedWorkspaceCommit() {
+    return queuedCommits.some((entry) => entry && entry.kind === "workspace");
+  }
+
   function reportPersistence(type, detail = {}) {
     if (!Number.isFinite(Number(detail.persistenceId)) || typeof global.dispatchEvent !== "function") return;
     const EventConstructor = global.CustomEvent;
@@ -178,7 +182,7 @@
         if (payload.knowledge) {
           lastKnowledge = payload.knowledge;
           revision = Number(payload.knowledge.revision) || revision;
-          if (!queuedCommits.length) lab.importKnowledge(payload.knowledge);
+          if (!hasQueuedWorkspaceCommit()) lab.importKnowledge(payload.knowledge);
         }
         document.body.dataset.spatialBridge = "connected";
         reportPersistence("spatial-workspace-persisted", {
@@ -211,7 +215,7 @@
         if (latest && latest.knowledge) {
           lastKnowledge = latest.knowledge;
           revision = Number(latest.knowledge.revision) || revision;
-          if (!queuedCommits.length) lab.importKnowledge(latest.knowledge);
+          if (!hasQueuedWorkspaceCommit()) lab.importKnowledge(latest.knowledge);
         }
         document.body.dataset.spatialBridge = "connected";
         return true;
@@ -228,7 +232,7 @@
         if (payload.knowledge) {
           lastKnowledge = payload.knowledge;
           revision = Number(payload.knowledge.revision) || revision;
-          if (!queuedCommits.length) lab.importKnowledge(payload.knowledge);
+          if (!hasQueuedWorkspaceCommit()) lab.importKnowledge(payload.knowledge);
         }
         document.body.dataset.spatialBridge = "connected";
         reportPersistence("spatial-workspace-persisted", {
