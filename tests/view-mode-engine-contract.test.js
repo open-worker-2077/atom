@@ -85,32 +85,27 @@ test('a right click appends its projection without rewriting the previously form
   assert.doesNotMatch(visible, /state\.domainStack\.map/);
 });
 
-test('double Shift arms one peer batch and the next right click supplies its target', () => {
+test('double Shift immediately selects peers and view actions apply to the persistent selection', () => {
   const shift = functionSource('handleShiftTap');
-  const arm = functionSource('armPeerViewBatch');
-  const consume = functionSource('consumePeerViewBatch');
   const apply = functionSource('applyViewMode');
+  const establish = functionSource('establishPeerSelection');
+  const batch = functionSource('applyBatchViewMode');
 
-  assert.match(shift, /next\.tapCount === 2[\s\S]*armPeerViewBatch/);
-  assert.match(arm, /peerBatchArmed\s*=\s*true/);
-  assert.match(arm, /peerBatchMode\s*=\s*state\.viewMode/);
-  assert.doesNotMatch(arm, /pointerPosition|executeWandTargets|setTimeout/);
-  assert.match(apply, /consumePeerViewBatch\(node\)/);
-  assert.match(consume, /viewModeModel\.planPeerBatch/);
-  assert.match(consume, /executeWandTargets/);
-  assert.match(consume, /batchMode === ["']immersive["'][\s\S]*changed:\s*false/);
-  assert.match(consume, /viewMode:\s*batchMode/);
+  assert.match(shift, /next\.tapCount === 2[\s\S]*establishPeerSelection/);
+  assert.doesNotMatch(shift, /armPeerViewBatch/);
+  assert.match(establish, /batchSelectionKeys/);
+  assert.match(establish, /viewModeModel\.planPeerBatch/);
+  assert.match(apply, /applyBatchViewMode/);
+  assert.match(batch, /executeWandTargets/);
 });
 
-test('an armed peer batch shows the existing wand at the free pointer until right click consumes it', () => {
+test('legacy peer-batch atoms remain available without owning the active double-Shift path', () => {
   const arm = functionSource('armPeerViewBatch');
   const consume = functionSource('consumePeerViewBatch');
-  const trail = functionSource('drawWandTrail');
 
   assert.match(arm, /canvas\.style\.cursor\s*=\s*["']none["']/);
-  assert.match(trail, /state\.wand\.peerBatchArmed/);
   assert.match(consume, /syncCanvasCursor/);
-  assert.match(engine, /state\.wand\.highEnergy\s*\|\|\s*state\.wand\.peerBatchArmed/);
+  assert.doesNotMatch(functionSource('handleShiftTap'), /armPeerViewBatch/);
 });
 
 test('immersive blank right click returns through the active domain when no cluster context exists', () => {
@@ -174,7 +169,7 @@ test('closed-loop targets glow for 500ms before one recursive visual transaction
   assert.match(engine, /wandGlowUntil/);
 });
 
-test('triple Shift toggles jade recursion and recursive planning never calls data editing APIs', () => {
+test('triple Shift is reserved while the preserved recursive atom remains data-read-only', () => {
   const shift = functionSource('handleShiftTap');
   const recursive = functionSource('expandRecursively');
   const collect = functionSource('recursiveVisualEntries');
@@ -186,7 +181,7 @@ test('triple Shift toggles jade recursion and recursive planning never calls dat
   assert.doesNotMatch(recursive, /workspace\.(create|update|delete|import|replace|commit)/);
   assert.match(engine, /wand\.highEnergy/);
   assert.match(trail, /!state\.wand\.highEnergy/);
-  assert.match(shift, /canvas\.style\.cursor/);
+  assert.doesNotMatch(shift, /next\.triple[\s\S]*expandRecursively/);
 });
 
 test('jade recursion follows imported workspace child domains in every ASDF mode and commits atomically', () => {

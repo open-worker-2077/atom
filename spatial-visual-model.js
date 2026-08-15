@@ -315,6 +315,9 @@
       ? Math.max(0, settings.fieldRepulsionStrength)
       : 0.11;
     var linkStrength = Number.isFinite(settings.linkStrength) ? settings.linkStrength : 0.16;
+    var edgeRepulsionStrength = Number.isFinite(settings.edgeRepulsionStrength)
+      ? Math.max(0, settings.edgeRepulsionStrength)
+      : 0.34;
     var anchorStrength = Number.isFinite(settings.anchorStrength) ? settings.anchorStrength : 0.055;
     var maxStep = Number.isFinite(settings.maxStep) ? settings.maxStep : 0.42;
     var maxFieldRadius = Number.isFinite(settings.maxFieldRadius) ? settings.maxFieldRadius : 10.8;
@@ -414,6 +417,31 @@
 
     function forceGroup(entry) {
       return entry && entry.parentId ? entry.parentId : '__root__';
+    }
+
+    function linkForceGroup(link) {
+      var fromEntry = link && byId.get(link.fromId);
+      var toEntry = link && byId.get(link.toId);
+      if (!fromEntry || !toEntry) return null;
+      var fromGroup = forceGroup(fromEntry);
+      return fromGroup === forceGroup(toEntry) ? fromGroup : null;
+    }
+
+    function planarOrientation(a, b, c) {
+      return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    }
+
+    function linksCross(first, second) {
+      if (
+        first.fromId === second.fromId || first.fromId === second.toId
+        || first.toId === second.fromId || first.toId === second.toId
+      ) return false;
+      var a = positions[first.fromId];
+      var b = positions[first.toId];
+      var c = positions[second.fromId];
+      var d = positions[second.toId];
+      return planarOrientation(a, b, c) * planarOrientation(a, b, d) < 0
+        && planarOrientation(c, d, a) * planarOrientation(c, d, b) < 0;
     }
 
     var links = Array.isArray(relationships) ? relationships.filter(function (relationship) {
@@ -764,6 +792,28 @@
         addDelta(deltas, relationship.toId, separation.direction, -pull);
       });
 
+      for (var firstLinkIndex = 0; firstLinkIndex < links.length; firstLinkIndex += 1) {
+        for (var secondLinkIndex = firstLinkIndex + 1; secondLinkIndex < links.length; secondLinkIndex += 1) {
+          var firstLink = links[firstLinkIndex];
+          var secondLink = links[secondLinkIndex];
+          var firstLinkGroup = linkForceGroup(firstLink);
+          if (!firstLinkGroup || firstLinkGroup !== linkForceGroup(secondLink)) continue;
+          if (!linksCross(firstLink, secondLink)) continue;
+          var firstVector = vectorBetween(firstLink.fromId, firstLink.toId).direction;
+          var normal = { x: -firstVector.y, y: firstVector.x, z: 0 };
+          var sign = deterministicDirection(
+            firstLink.fromId + ':' + firstLink.toId,
+            secondLink.fromId + ':' + secondLink.toId
+          ).x < 0 ? -1 : 1;
+          for (const id of [firstLink.fromId, firstLink.toId]) {
+            addDelta(deltas, id, normal, edgeRepulsionStrength * sign);
+          }
+          for (const id of [secondLink.fromId, secondLink.toId]) {
+            addDelta(deltas, id, normal, -edgeRepulsionStrength * sign);
+          }
+        }
+      }
+
       ids.forEach(function (id) {
         var entry = byId.get(id);
         if (entry.fixed) return;
@@ -802,6 +852,37 @@
     }
 
     if (planarRepulsion) {
+      for (var crossingPass = 0; crossingPass < 48; crossingPass += 1) {
+        var crossingAdjusted = false;
+        for (var crossingFirstIndex = 0; crossingFirstIndex < links.length; crossingFirstIndex += 1) {
+          for (var crossingSecondIndex = crossingFirstIndex + 1; crossingSecondIndex < links.length; crossingSecondIndex += 1) {
+            var crossingFirst = links[crossingFirstIndex];
+            var crossingSecond = links[crossingSecondIndex];
+            var crossingGroup = linkForceGroup(crossingFirst);
+            if (!crossingGroup || crossingGroup !== linkForceGroup(crossingSecond)) continue;
+            if (!linksCross(crossingFirst, crossingSecond)) continue;
+            var crossingVector = vectorBetween(crossingFirst.fromId, crossingFirst.toId).direction;
+            var crossingNormal = { x: -crossingVector.y, y: crossingVector.x };
+            var crossingSign = deterministicDirection(
+              crossingFirst.fromId + ':' + crossingFirst.toId,
+              crossingSecond.fromId + ':' + crossingSecond.toId
+            ).x < 0 ? -1 : 1;
+            var crossingStep = Math.max(0.08, edgeRepulsionStrength * 0.35);
+            [crossingFirst.fromId, crossingFirst.toId].forEach(function (id) {
+              if (byId.get(id).fixed) return;
+              positions[id].x += crossingNormal.x * crossingStep * crossingSign;
+              positions[id].y += crossingNormal.y * crossingStep * crossingSign;
+            });
+            [crossingSecond.fromId, crossingSecond.toId].forEach(function (id) {
+              if (byId.get(id).fixed) return;
+              positions[id].x -= crossingNormal.x * crossingStep * crossingSign;
+              positions[id].y -= crossingNormal.y * crossingStep * crossingSign;
+            });
+            crossingAdjusted = true;
+          }
+        }
+        if (!crossingAdjusted) break;
+      }
       for (var separationPass = 0; separationPass < 48; separationPass += 1) {
         var adjusted = false;
         for (var firstIndex = 0; firstIndex < ids.length; firstIndex += 1) {

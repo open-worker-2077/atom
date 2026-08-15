@@ -100,10 +100,11 @@
     const tapCount = withinWindow ? priorTapCount + 1 : 1;
     if (tapCount >= 3) {
       return Object.freeze({
-        highEnergy: !Boolean(state.highEnergy),
+        highEnergy: Boolean(state.highEnergy),
         lastTapAt: 0,
         tapCount: 0,
-        toggled: true
+        toggled: false,
+        triple: true
       });
     }
     return Object.freeze({
@@ -170,7 +171,6 @@
         region
         && region.key !== undefined
         && region.ownerPath
-        && region.portal === true
         && region.clusterShellProxy !== true
       ));
     const target = regions
@@ -191,6 +191,13 @@
         && Number(region.level) === Number(target.region.level)
       ))
       .map((region) => region.key));
+  }
+
+  function toggleSelectionKey(selectionInput, key) {
+    const selected = new Set(Array.isArray(selectionInput) ? selectionInput : selectionInput || []);
+    if (selected.has(key)) selected.delete(key);
+    else if (key !== undefined && key !== null) selected.add(key);
+    return Object.freeze([...selected]);
   }
 
   function planContextLevelExpansion(entriesInput, expandedPathsInput, mode) {
@@ -274,6 +281,7 @@
     classifyStrokeGesture,
     planRecursiveTargets,
     planPeerBatch,
+    toggleSelectionKey,
     planContextLevelExpansion,
     planContextLevelCollapse,
     immersiveDomainFrame

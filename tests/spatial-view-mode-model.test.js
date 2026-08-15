@@ -77,7 +77,7 @@ test('a closed wand stroke selects every enclosed node plus nodes touched by the
   assert.equal(result.glowDurationMs, 500);
 });
 
-test('triple tapping Shift toggles jade recursion while single and double taps do nothing', () => {
+test('double Shift selects peers while triple Shift remains reserved and inert', () => {
   const model = loadModel();
   assert.deepEqual(
     JSON.parse(JSON.stringify(model.resolveShiftTap({ highEnergy: false, lastTapAt: 0 }, 1000))),
@@ -89,7 +89,7 @@ test('triple tapping Shift toggles jade recursion while single and double taps d
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(model.resolveShiftTap({ highEnergy: false, lastTapAt: 1240, tapCount: 2 }, 1460))),
-    { highEnergy: true, lastTapAt: 0, tapCount: 0, toggled: true }
+    { highEnergy: false, lastTapAt: 0, tapCount: 0, toggled: false, triple: true }
   );
 });
 
@@ -102,7 +102,7 @@ test('ASDF maps directly to the four future view modes', () => {
   assert.equal(model.modeForKey('CapsLock'), null);
 });
 
-test('peer batch selects only portal nodes in the pointed node same layer and group', () => {
+test('peer batch selects every node in the pointed node same layer and group', () => {
   const model = loadModel();
   const regions = [
     { key: 'g/a', ownerPath: 'g', level: 1, x: 10, y: 10, radius: 8, portal: true },
@@ -111,7 +111,7 @@ test('peer batch selects only portal nodes in the pointed node same layer and gr
     { key: 'other/d', ownerPath: 'other', level: 1, x: 70, y: 10, radius: 8, portal: true },
     { key: 'g/value', ownerPath: 'g', level: 1, x: 90, y: 10, radius: 8, portal: false }
   ];
-  assert.deepEqual(Array.from(model.planPeerBatch(regions, { x: 11, y: 10 })), ['g/a', 'g/b']);
+  assert.deepEqual(Array.from(model.planPeerBatch(regions, { x: 11, y: 10 })), ['g/a', 'g/b', 'g/value']);
   assert.deepEqual(Array.from(model.planPeerBatch(regions, { x: 200, y: 200 })), []);
 });
 
@@ -146,6 +146,12 @@ test('recursive visual planning reaches every descendant without mutating the kn
 
   assert.deepEqual(Array.from(plan), ['a', 'a1', 'a11', 'a2']);
   assert.equal(JSON.stringify(graph), before);
+});
+
+test('Shift brushing toggles each crossed peer repeatedly', () => {
+  const model = loadModel();
+  assert.deepEqual(Array.from(model.toggleSelectionKey(['a', 'b'], 'b')), ['a']);
+  assert.deepEqual(Array.from(model.toggleSelectionKey(['a'], 'b')), ['a', 'b']);
 });
 
 test('PageDown plans every currently visible unopened portal once in A S or D mode', () => {

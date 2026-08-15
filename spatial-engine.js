@@ -130,6 +130,7 @@
 
   const intentNames = {
     cycleViewMode: "视角模式",
+    cycleVisibleDetails: "信息密度",
     applyViewMode: "应用视角",
     expandToLeaves: "展开至最细级",
     activate: "使用",
@@ -620,6 +621,8 @@
     commitPulseUntil: 0,
     confirmationRipples: new Map(),
     wandGlowUntil: new Map(),
+    batchSelectionKeys: new Set(),
+    batchToggleKey: null,
     wand: {
       shiftHeld: false,
       highEnergy: false,
@@ -680,6 +683,7 @@
     bindingCaptureIntent: null,
     drag: null,
     latestInteractionAnchor: null,
+    latestInteractionKey: null,
     pointerCandidate: null,
     wheelGestureActive: false,
     wheelHistoryTimer: null,
@@ -4856,7 +4860,7 @@
   }
 
   function setVisibleDetailMode(mode) {
-    if (!["surface", "floating"].includes(mode)) return false;
+    if (!["name", "surface", "floating"].includes(mode)) return false;
     const nodes = visibleDetailNodes();
     state.batchFloatingDetails = mode === "floating";
     const openedAt = mode === "surface" ? performance.now() : 0;
@@ -4870,11 +4874,20 @@
     persistWorkspaceSnapshot(`detail-mode-${mode}`);
     updateSelectionUI();
     announce(
-      mode === "surface"
+      mode === "name"
+        ? "仅显示节点名称"
+        : mode === "surface"
         ? "节点已切换为镜面详情；团已关闭悬浮详情"
         : "节点与团已切换为悬浮详情"
     );
     return true;
+  }
+
+  function cycleVisibleDetailMode() {
+    const nodes = visibleDetailNodes();
+    const current = nodes.length ? detailModeFor(nodes[0]) : "floating";
+    const order = ["floating", "name", "surface"];
+    return setVisibleDetailMode(order[(order.indexOf(current) + 1) % order.length]);
   }
 
   function clearFocus() {
@@ -5467,8 +5480,10 @@
     const options = optionsInput || {};
     const mode = viewModeModel.modes.includes(options.mode) ? options.mode : state.viewMode;
     if (!node || !node.capabilities || !node.capabilities.portal) return false;
-    const peerBatch = consumePeerViewBatch(node);
-    if (peerBatch) return peerBatch.changed;
+    if (options.skipBatch !== true) {
+      const batch = applyBatchViewMode(mode);
+      if (batch) return batch.changed;
+    }
     const ownerPath = nodeOwnerPath(node);
     const childPath = childPathFor(node, ownerPath);
     const shouldRecord = options.record !== false;
@@ -5535,6 +5550,7 @@
     }
     if (!changed) return false;
     buildClusterScene();
+    recenterLatestInteraction();
     updateSelectionUI();
     recordCurrentView();
     announce("当前视图已全部展开一层");
@@ -5550,6 +5566,7 @@
     });
     if (!changed) return false;
     buildClusterScene();
+    recenterLatestInteraction();
     updateSelectionUI();
     announce(`已收起 ${descriptor.label} 的子域团`);
     return true;
@@ -5573,6 +5590,7 @@
     }
     if (!changed) return false;
     buildClusterScene();
+    recenterLatestInteraction();
     updateSelectionUI();
     recordCurrentView();
     announce("当前视图已全部收缩一层");
@@ -5605,6 +5623,7 @@
   function rememberLatestInteraction(item) {
     if (!item || !item.node || !item.position) return false;
     state.latestInteractionAnchor = { ...item.position };
+    state.latestInteractionKey = visualNodeKey(item.node, item.ownerPath || nodeOwnerPath(item.node));
     return true;
   }
 
@@ -5617,6 +5636,11 @@
         && visualNodeKey(item.node, item.ownerPath || nodeOwnerPath(item.node)) === key;
     });
     return rememberLatestInteraction(region && region.item);
+  }
+
+  function recenterLatestInteraction() {
+    if (state.latestInteractionKey) rememberLatestInteractionKey(state.latestInteractionKey);
+    return adoptLatestInteractionAnchor();
   }
 
   function handleShiftTap(now = performance.now()) {
@@ -5636,8 +5660,46 @@
       updateSelectionUI();
       announce(next.highEnergy ? "玉杖递归已开启" : "已恢复木杖普通模式");
     }
-    if (!next.toggled && next.tapCount === 2) armPeerViewBatch();
+    if (!next.toggled && next.tapCount === 2) establishPeerSelection();
     return next;
+  }
+
+  function establishPeerSelection() {
+    const regions = peerViewBatchRegions();
+    const anchor = regions.find((region) => region.key === state.latestInteractionKey)
+      || regions.find((region) => state.hovered && region.key === visualNodeKey(state.hovered, nodeOwnerPath(state.hovered)));
+    if (!anchor) return false;
+    state.batchSelectionKeys = new Set(viewModeModel.planPeerBatch(regions, anchor));
+    state.batchToggleKey = anchor.key;
+    updateSelectionUI();
+    announce(`已选择同层同团 ${state.batchSelectionKeys.size} 个节点`);
+    return state.batchSelectionKeys.size > 0;
+  }
+
+  function toggleBatchSelectionAtHit(hit) {
+    if (!state.wand.shiftHeld || !state.batchSelectionKeys.size) return false;
+    const item = hit && hit.item;
+    const key = item && item.node
+      ? visualNodeKey(item.node, item.ownerPath || nodeOwnerPath(item.node))
+      : null;
+    if (!key) {
+      state.batchToggleKey = null;
+      return false;
+    }
+    if (key === state.batchToggleKey) return false;
+    state.batchSelectionKeys = new Set(viewModeModel.toggleSelectionKey(state.batchSelectionKeys, key));
+    state.batchToggleKey = key;
+    updateSelectionUI();
+    return true;
+  }
+
+  function applyBatchViewMode(mode) {
+    if (!state.batchSelectionKeys.size) return null;
+    const keys = [...state.batchSelectionKeys];
+    return {
+      handled: true,
+      changed: executeWandTargets(keys, { recursive: false, viewMode: mode, skipBatch: true })
+    };
   }
 
   function armPeerViewBatch() {
@@ -5826,7 +5888,7 @@
       } else if (viewMode === "immersive") {
         applyViewMode(entries[0].node, { record: false, mode: viewMode });
       } else {
-        for (const entry of entries) applyViewMode(entry.node, { record: false, mode: viewMode });
+        for (const entry of entries) applyViewMode(entry.node, { record: false, mode: viewMode, skipBatch: true });
       }
       recordCurrentView();
       updateSelectionUI();
@@ -5848,13 +5910,14 @@
   function drawWandGlow(screen, item) {
     if (!item || item.kind !== "node" || !item.node) return;
     const key = visualNodeKey(item.node, item.ownerPath || nodeOwnerPath(item.node));
-    const until = state.wandGlowUntil.get(key) || 0;
+    const batchSelected = state.batchSelectionKeys.has(key);
+    const until = batchSelected ? Infinity : state.wandGlowUntil.get(key) || 0;
     const now = performance.now();
     if (until <= now) {
       state.wandGlowUntil.delete(key);
       return;
     }
-    const progress = clamp((until - now) / 650, 0, 1);
+    const progress = batchSelected ? 1 : clamp((until - now) / 650, 0, 1);
     const pulse = state.reducedMotion ? 0.6 : 0.62 + Math.sin(state.time * 17) * 0.18;
     context.save();
     context.globalCompositeOperation = "lighter";
@@ -6153,6 +6216,9 @@
         break;
       case "setFloatingDetails":
         setVisibleDetailMode("floating");
+        break;
+      case "cycleVisibleDetails":
+        cycleVisibleDetailMode();
         break;
       case "toggleFieldSurfaces": {
         const path = visualMeta.domainContext
@@ -6571,15 +6637,15 @@
       beginWandStroke(event.pointerId, point);
       return;
     }
-    const blankSensitive = state.clusterFieldOpen
-      && ((event.ctrlKey && event.button === 0) || event.button === 2);
+    const blankSensitive = event.button === 2
+      || (state.clusterFieldOpen && event.ctrlKey && event.button === 0);
     const semanticEdit = event.ctrlKey && (event.button === 0 || event.button === 2);
     const hit = event.button === 1
       ? findMiddleFrameHit(event.clientX, event.clientY)
       : findHit(event.clientX, event.clientY, { blankSensitive, semanticEdit });
     const item = hit ? hit.item : null;
     const node = item && item.node ? item.node : null;
-    if (node && (event.button === 0 || event.button === 2)) rememberLatestInteraction(item);
+    if (node && (event.button === 0 || event.button === 1 || event.button === 2)) rememberLatestInteraction(item);
     const onEdge = Boolean(item && item.kind === "relationship");
     const transaction = workspace.transaction();
     const edgeDraft = Boolean(transaction && transaction.kind === "edge-create" && !transaction.target);
@@ -6665,6 +6731,7 @@
       return;
     }
     const hit = findHit(event.clientX, event.clientY);
+    if (toggleBatchSelectionAtHit(hit)) return;
     const nextHovered = hit && hit.item && hit.item.node ? hit.item.node : null;
     if (nextHovered !== state.hovered) {
       state.hovered = nextHovered;

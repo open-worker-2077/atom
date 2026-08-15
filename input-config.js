@@ -43,6 +43,7 @@
     toggleFieldChildren: "toggleFieldChildren",
     toggleSurface: "toggleSurface",
     cycleDetailMode: "cycleDetailMode",
+    cycleVisibleDetails: "cycleVisibleDetails",
     setSurfaceDetails: "setSurfaceDetails",
     setFloatingDetails: "setFloatingDetails",
     toggleFieldSurfaces: "toggleFieldSurfaces",
@@ -65,7 +66,7 @@
   const PRESETS = {
     explorer: {
       name: "标准探索",
-      hint: "左键使用 · 右键按 ASDF 视角展收 · CapsLock 详情 · 中键旋转 · Shift 魔杖",
+      hint: "左键使用 · 右键按 ASDF 视角展收 · CapsLock 信息密度 · 中键旋转 · 双击 Shift 同层选择",
       pointer: {
         nodePrimary: VISUAL_INTENTS.activate,
         fieldPrimary: null,
@@ -148,7 +149,7 @@
     },
     oneHand: {
       name: "单手试验",
-      hint: "左键使用 · 右键按 ASDF 视角展收 · CapsLock 详情 · 中键旋转 · Shift 魔杖",
+      hint: "左键使用 · 右键按 ASDF 视角展收 · CapsLock 信息密度 · 中键旋转 · 双击 Shift 同层选择",
       pointer: {
         nodePrimary: VISUAL_INTENTS.activate,
         fieldPrimary: null,
@@ -352,11 +353,8 @@
       !(context && context.editing)
       && event.code === "CapsLock"
       && event.type === "keyup"
-      && typeof event.getModifierState === "function"
     ) {
-      return event.getModifierState("CapsLock")
-        ? VISUAL_INTENTS.setSurfaceDetails
-        : VISUAL_INTENTS.setFloatingDetails;
+      return VISUAL_INTENTS.cycleVisibleDetails;
     }
     const chord = chordFromEvent(event);
     const map = context && context.editing ? EDIT_KEYBOARD : current().keyboard;

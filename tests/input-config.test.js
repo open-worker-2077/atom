@@ -50,7 +50,7 @@ test('pointer grammar assigns use and view while middle drag exclusively owns or
   }
 });
 
-test('CapsLock applies its settled key state on keyup in every ASDF view mode', () => {
+test('CapsLock cycles the shared visible detail density in every ASDF view mode', () => {
   const { config } = loadInputConfig();
   for (const viewMode of ['peripheral', 'nested', 'hierarchy', 'immersive']) {
     assert.equal(config.resolveKeyboard({
@@ -62,12 +62,12 @@ test('CapsLock applies its settled key state on keyup in every ASDF view mode', 
       type: 'keyup',
       code: 'CapsLock',
       getModifierState(name) { return name === 'CapsLock'; }
-    }, { viewMode }), 'setSurfaceDetails');
+    }, { viewMode }), 'cycleVisibleDetails');
     assert.equal(config.resolveKeyboard({
       type: 'keyup',
       code: 'CapsLock',
       getModifierState() { return false; }
-    }, { viewMode }), 'setFloatingDetails');
+    }, { viewMode }), 'cycleVisibleDetails');
   }
 });
 

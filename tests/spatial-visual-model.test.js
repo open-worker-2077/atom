@@ -221,6 +221,29 @@ test('deterministic tension layout repels overlaps while linked nodes stay bound
   assert.deepEqual(entries, original, 'pure layout never mutates carrier data');
 });
 
+test('crossing association lines exert a deterministic untangling force', () => {
+  const entries = [
+    { id: 'a', position: { x: -3, y: -3, z: 0 }, radius: 0.4 },
+    { id: 'b', position: { x: 3, y: 3, z: 0 }, radius: 0.4 },
+    { id: 'c', position: { x: -3, y: 3, z: 0 }, radius: 0.4 },
+    { id: 'd', position: { x: 3, y: -3, z: 0 }, radius: 0.4 }
+  ];
+  const links = [
+    { fromId: 'a', toId: 'b', kind: 'association' },
+    { fromId: 'c', toId: 'd', kind: 'association' }
+  ];
+  const layout = SpatialVisualModel.relaxRelationshipLayout(entries, links, {
+    planarRepulsion: true,
+    edgeRepulsionStrength: 0.7,
+    iterations: 24,
+    anchorStrength: 0.01
+  });
+  const orient = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  const crosses = orient(layout.a, layout.b, layout.c) * orient(layout.a, layout.b, layout.d) < 0
+    && orient(layout.c, layout.d, layout.a) * orient(layout.c, layout.d, layout.b) < 0;
+  assert.equal(crosses, false);
+});
+
 test('dense domains keep carrier silhouettes separated in the primary viewing plane', () => {
   const entries = Array.from({ length: 9 }, (_, index) => ({
     id: `dense-${index}`,

@@ -469,6 +469,12 @@ test('CapsLock still settles floating details while an ASDF mode button retains 
   assert.match(keyup, /event\.target\s+instanceof\s+HTMLTextAreaElement/);
 });
 
+test('CapsLock includes a name-only density without hiding relationship semantics', () => {
+  assert.match(source, /case\s+["']cycleVisibleDetails["']/);
+  assert.match(functionSource('setVisibleDetailMode'), /["']name["']/);
+  assert.match(functionSource('cycleVisibleDetailMode'), /name/);
+});
+
 test('navigation does not discard an unfinished cross-domain edge draft', () => {
   for (const name of ['enterNode', 'returnToDepth', 'returnOverview']) {
     assert.doesNotMatch(functionSource(name), /workspace\.cancel\s*\(/, `${name} preserves draft`);

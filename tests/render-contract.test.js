@@ -440,7 +440,7 @@ test('H toggles a translucent non-modal help overlay grouped by current controls
 });
 
 test('visible help documents CapsLock details and middle-drag orbit without legacy Space camera', () => {
-  assert.match(htmlSource, /CapsLock[\s\S]*镜面[\s\S]*透明页/);
+  assert.match(htmlSource, /CapsLock[\s\S]*名称[\s\S]*镜面[\s\S]*透明页/);
   assert.match(htmlSource, /按住中键[\s\S]*旋转/);
   assert.doesNotMatch(htmlSource, /Space\s*\+\s*(?:移动|左拖)/);
 });

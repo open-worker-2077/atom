@@ -91,6 +91,25 @@ test('PageDown applies the selected A mode to the current field before expanding
   assert.match(visible, /projectionMode:\s*state\.appliedViewMode/);
   assert.match(expand, /state\.appliedViewMode\s*=\s*state\.viewMode/);
   assert.doesNotMatch(setMode, /appliedViewMode/);
+  assert.match(expand, /recenterLatestInteraction/);
+  assert.match(functionSource('collapseHoveredClusterLevel'), /recenterLatestInteraction/);
+});
+
+test('double Shift owns a persistent peer selection instead of arming the next right click', () => {
+  const tap = functionSource('handleShiftTap');
+  const apply = functionSource('applyViewMode');
+  assert.match(engine, /batchSelectionKeys:\s*new Set\(\)/);
+  assert.match(tap, /establishPeerSelection/);
+  assert.doesNotMatch(tap, /armPeerViewBatch/);
+  assert.match(apply, /applyBatchViewMode/);
+});
+
+test('immersive blank right click remains blank-sensitive and exits to the parent domain', () => {
+  const start = engine.indexOf('canvas.addEventListener("pointerdown"');
+  const end = engine.indexOf('canvas.addEventListener("pointermove"', start);
+  const pointer = engine.slice(start, end);
+  assert.match(pointer, /event\.button\s*===\s*2[\s\S]{0,180}blankSensitive/);
+  assert.match(functionSource('applyParentView'), /exitDomain/);
 });
 
 test('immersive navigation history is not rendered as hierarchy when a local view is appended', () => {
@@ -247,7 +266,7 @@ test('cluster blank edit and exit gestures use the visible sphere instead of its
   assert.match(engine, /blankSensitive && region\.item\.kind === ["']node["']/);
   assert.match(engine, /region\.item\.screen\.radius \+ 3/);
   assert.match(engine, /nodeOwnerPath\(region\.item\.node\) === domainContext\.path/);
-  assert.match(engine, /const blankSensitive = state\.clusterFieldOpen[\s\S]{0,220}event\.ctrlKey[\s\S]{0,160}event\.button === 2/);
+  assert.match(engine, /const blankSensitive = event\.button === 2[\s\S]{0,180}state\.clusterFieldOpen[\s\S]{0,160}event\.ctrlKey/);
   assert.match(engine, /findHit\(event\.clientX, event\.clientY, \{ blankSensitive, semanticEdit \}\)/);
 });
 
