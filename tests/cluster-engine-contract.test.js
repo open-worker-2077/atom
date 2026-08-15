@@ -63,6 +63,25 @@ test('hierarchy and nested view modes toggle independent child branches without 
   assert.doesNotMatch(clusterBranch, /state\.domainStack\.push/);
 });
 
+test('selecting a future ASDF mode cannot restyle an already rendered cluster scene', () => {
+  const visible = functionSource('visibleClusterDomains');
+  const build = functionSource('buildClusterScene');
+  const tunnel = functionSource('drawClusterTunnelInterior');
+  const field = functionSource('drawClusterField');
+  const layout = functionSource('resolveClusterScreenLayout');
+
+  assert.doesNotMatch(visible, /state\.viewMode/);
+  assert.match(visible, /descriptor\.projectionMode/);
+  assert.doesNotMatch(build, /state\.viewMode/);
+  assert.match(build, /routeDomains[\s\S]*projectionMode/);
+  assert.doesNotMatch(tunnel, /state\.viewMode/);
+  assert.match(tunnel, /cluster\.projectionMode/);
+  assert.doesNotMatch(field, /state\.viewMode/);
+  assert.match(field, /cluster\.projectionMode/);
+  assert.doesNotMatch(layout, /state\.viewMode/);
+  assert.match(layout, /clusterScene\.clusters[\s\S]*projectionMode/);
+});
+
 test('immersive navigation history is not rendered as hierarchy when a local view is appended', () => {
   const visible = functionSource('visibleClusterDomains');
 
@@ -164,7 +183,7 @@ test('nested domains project direct children only instead of mixing revealed dee
   const end = engine.indexOf('function buildClusterScene()', start);
   const visible = engine.slice(start, end);
 
-  assert.match(visible, /const directOnly = state\.viewMode === ["']nested["']/);
+  assert.match(visible, /const directOnly = descriptor\.projectionMode === ["']nested["']/);
   assert.match(visible, /if\s*\(!directOnly && node\.revealed/);
 });
 
@@ -261,8 +280,8 @@ test('rendered cluster verification exposes real screen-space node and sibling o
   assert.match(metrics, /item\.screen/);
   const screenLayout = functionSource('resolveClusterScreenLayout');
   const exactRadius = functionSource('exactProjectedRadius');
-  assert.match(screenLayout, /state\.viewMode === ["']peripheral["']/);
-  assert.match(screenLayout, /state\.viewMode !== ["']nested["']/);
+  assert.match(screenLayout, /projectionModes\.has\(["']peripheral["']\)/);
+  assert.match(screenLayout, /!projectionModes\.has\(["']nested["']\)/);
   assert.match(screenLayout, /0\.65 \/ compressionMultiplier/);
   assert.match(screenLayout, /left\.screen\.radius \+ right\.screen\.radius \+ safetyGap/);
   assert.match(screenLayout, /clusterScreens\.get\(item\.ownerPath\)/);

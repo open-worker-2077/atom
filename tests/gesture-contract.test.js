@@ -209,14 +209,15 @@ test('direct satellite entry derives true semantic depth from its ancestor linea
   assert.doesNotMatch(enter, /state\.depth\s*\+=\s*1/);
 });
 
-test('parent return restores the domain and entry node without moving the camera', () => {
+test('immersive parent return restores and frames every direct node in that layer', () => {
   const exit = functionSource('returnToDepth');
 
   assert.match(exit, /state\.currentPath\s*=\s*previous\.path/);
   assert.match(exit, /findExistingNode\s*\(\s*state\.nodes\s*,\s*previous\.nodeId\s*\)/);
   assert.match(exit, /entryNode\.peekOpen\s*=\s*false/);
+  assert.match(exit, /viewModeModel\.immersiveDomainFrame/);
+  assert.match(exit, /startCameraTween\s*\(/);
   assert.doesNotMatch(exit, /camera\.(?:target|yaw|pitch|distance)\s*=/);
-  assert.doesNotMatch(exit, /startCameraTween\s*\(/);
 });
 
 test('transition lock blocks dolly while allowing only ready-field edit intents', () => {
@@ -251,13 +252,14 @@ test('transition lock blocks dolly while allowing only ready-field edit intents'
   );
 });
 
-test('multi-depth exit restores the requested target entry without camera travel', () => {
+test('multi-depth exit restores the requested target entry before framing its complete layer', () => {
   const exit = functionSource('returnToDepth');
   const targetMatch = exit.match(/const\s+(\w+)\s*=\s*state\.domainStack\[\s*targetDepth\s*\]/);
   assert.ok(targetMatch, 'requested target entry is resolved');
   assert.match(exit, new RegExp(`state\\.currentPath\\s*=\\s*${targetMatch[1]}\\.path`));
   assert.match(exit, new RegExp(`findExistingNode\\s*\\(\\s*state\\.nodes\\s*,\\s*${targetMatch[1]}\\.nodeId`));
-  assert.doesNotMatch(exit, /startCameraTween\s*\(|camera\.(?:target|yaw|pitch|distance)\s*=/);
+  assert.match(exit, /immersiveDomainFrame[\s\S]*startCameraTween\s*\(/);
+  assert.doesNotMatch(exit, /camera\.(?:target|yaw|pitch|distance)\s*=/);
 });
 
 test('wheel remains the only normal browsing path that writes camera distance', () => {

@@ -277,7 +277,6 @@ test('right click browsing and Z X history never mutate the middle or wheel owne
   for (const name of [
     'applyViewMode',
     'applyParentView',
-    'returnToDepth',
     'restoreVisualSnapshot',
     'backView',
     'forwardView'
@@ -290,6 +289,9 @@ test('right click browsing and Z X history never mutate the middle or wheel owne
   const enter = functionSource('enterNode');
   assert.doesNotMatch(enter, /camera\.(?:target|yaw|pitch|distance)\s*=/);
   assert.match(enter, /immersiveDomainFrame[\s\S]*startCameraTween/);
+  const exit = functionSource('returnToDepth');
+  assert.doesNotMatch(exit, /camera\.(?:target|yaw|pitch|distance)\s*=/);
+  assert.match(exit, /immersiveDomainFrame[\s\S]*startCameraTween/);
 
   const restore = functionSource('restoreVisualSnapshot');
   assert.doesNotMatch(restore, /snapshot\.camera/, 'history restore ignores recorded camera state');

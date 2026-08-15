@@ -95,7 +95,7 @@ test('S cluster shell border and interior use independent persistent controls', 
   const cluster = functionSource('drawClusterField');
   const tunnel = functionSource('drawClusterTunnelInterior');
 
-  assert.match(tunnel, /state\.viewMode\s*===\s*["']nested["']/);
+  assert.match(tunnel, /cluster\.projectionMode\s*===\s*["']nested["']/);
   assert.match(tunnel, /nestedTunnelInteriorPercent\s*\/\s*100/);
   assert.match(cluster, /nestedTunnelPercent\s*\/\s*100/);
   assert.match(cluster, /nestedTunnelInteriorPercent\s*\/\s*100/);

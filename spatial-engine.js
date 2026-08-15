@@ -1265,7 +1265,7 @@
           : descriptor.nodes || domainCache.get(descriptor.path) || createDomain(descriptor.path, descriptor.depth);
         const projected = projectDomainNodes(descriptor.path, baseNodes);
         const visible = [];
-        const directOnly = state.viewMode === "nested";
+        const directOnly = descriptor.projectionMode === "nested";
         const walk = (nodes, level = 0) => {
           for (const node of nodes) {
             node.__clusterLevel = level;
@@ -1323,7 +1323,7 @@
     const routeDomains = visibleClusterDomains();
     const scene = clusterField.buildScene(routeDomains, {
       maxDetailedClusters: 9,
-      compact: state.viewMode === "nested",
+      compact: routeDomains.some((domain) => domain.projectionMode === "nested"),
       compactPercent: state.demo.settings.nestedCompactnessPercent * 10,
       peripheralDepthShrinkPercent: state.demo.settings.peripheralDepthShrinkPercent
     });
@@ -1646,7 +1646,7 @@
 
   function drawClusterTunnelInterior(cluster, screen) {
     const seed = hashText(`${cluster.path}:cluster-tunnel`);
-    const interiorStrength = state.viewMode === "nested"
+    const interiorStrength = cluster.projectionMode === "nested"
       ? state.demo.settings.nestedTunnelInteriorPercent / 100
       : 1;
     context.save();
@@ -1763,7 +1763,7 @@
       });
       drawClusterTunnelInterior(cluster, screen);
       const nestedTunnelStrength = state.demo.settings.nestedTunnelPercent / 100;
-      const interiorStrength = state.viewMode === "nested"
+      const interiorStrength = cluster.projectionMode === "nested"
         ? state.demo.settings.nestedTunnelInteriorPercent / 100
         : 1;
       const glow = context.createRadialGradient(
@@ -1784,16 +1784,16 @@
       context.arc(screen.x, screen.y, screen.radius * 1.14, 0, Math.PI * 2);
       context.fill();
 
-      context.strokeStyle = state.viewMode === "nested"
+      context.strokeStyle = cluster.projectionMode === "nested"
         ? `rgb(156 225 255 / ${0.58 * nestedTunnelStrength})`
         : cluster.active
           ? "rgb(138 218 255 / 10%)"
           : "rgb(106 171 229 / 5%)";
-      context.lineWidth = state.viewMode === "nested"
+      context.lineWidth = cluster.projectionMode === "nested"
         ? 1
         : Math.max(8, screen.radius * 0.09);
       context.shadowColor = cluster.active ? theme.accent : theme["accent-2"];
-      context.shadowBlur = state.viewMode === "nested"
+      context.shadowBlur = cluster.projectionMode === "nested"
         ? 4 * nestedTunnelStrength
         : cluster.active ? 22 : 14;
       context.beginPath();
@@ -1879,7 +1879,10 @@
   function resolveClusterScreenLayout(rendered, basis) {
     state.clusterScreenOffsets.clear();
     if (!state.clusterFieldOpen) return;
-    if (state.viewMode === "peripheral") {
+    const projectionModes = new Set(
+      state.clusterScene.clusters.map((cluster) => cluster.projectionMode)
+    );
+    if (projectionModes.has("peripheral")) {
       const clusterScreens = state.clusterScene.clusters.map((cluster) => {
         const screen = project(cluster.center, cluster.radius, basis);
         if (screen) screen.radius = exactProjectedRadius(cluster.radius, screen.depth);
@@ -1925,9 +1928,8 @@
         item.screen.x += offset.x;
         item.screen.y += offset.y;
       }
-      return;
     }
-    if (state.viewMode !== "nested") return;
+    if (!projectionModes.has("nested")) return;
     const nodes = rendered.filter((item) => (
       item.kind === "node"
       && item.node
@@ -5250,8 +5252,15 @@
     state.middleLabelFocus = null;
     state.prefetchedDomain = null;
     if (entryNode) entryNode.peekOpen = false;
+    const immersiveFrame = viewModeModel.immersiveDomainFrame(existingNodes(currentDomainNodes()), {
+      fov: camera.fov,
+      aspect: state.width / Math.max(1, state.height),
+      minimumDistance: MIN_CAMERA_DISTANCE,
+      maximumDistance: MAX_CAMERA_DISTANCE,
+      fallbackDistance: NORMAL_FIELD_DISTANCE
+    });
     updateSelectionUI();
-    recordCurrentView();
+    startCameraTween(immersiveFrame, 420, recordCurrentView);
     announce(`已返回 ${previous.crumbs.at(-1)}`);
     return true;
   }
