@@ -43,5 +43,8 @@ test('GitHub templates, CI and runtime-data exclusions are present', () => {
   assert.match(read('.github/ISSUE_TEMPLATE/bug.yml'), /复现步骤/);
   assert.match(read('.github/ISSUE_TEMPLATE/spatial-research.yml'), /视觉交互范式/);
   assert.match(read('.gitignore'), /data\/knowledge\.json/);
+  assert.match(read('.gitignore'), /^runtime-data\/$/m);
+  assert.match(read('.gitignore'), /^submissions\.jsonl$/m);
+  assert.match(read('.gitignore'), /^atom\.transactions\.json$/m);
   assert.match(read('.gitignore'), /\*\.baiduyun\.uploading\.cfg/);
 });

@@ -9,6 +9,9 @@ graph.json
 knowledge.json
 ADVANCE_CONTEXT.json
 worlds/
+runtime-data/
+submissions.jsonl
+atom.transactions.json
 data/
 backups/
 local-history/
