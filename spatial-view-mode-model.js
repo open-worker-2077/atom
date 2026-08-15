@@ -216,6 +216,52 @@
     )));
   }
 
+  function immersiveDomainFrame(nodesInput, optionsInput = {}) {
+    const nodes = (Array.isArray(nodesInput) ? nodesInput : []).filter((node) => (
+      node
+      && node.position
+      && Number.isFinite(node.position.x)
+      && Number.isFinite(node.position.y)
+      && Number.isFinite(node.position.z)
+    ));
+    const fallbackDistance = Math.max(0.01, Number(optionsInput.fallbackDistance) || 17.2);
+    if (!nodes.length) {
+      return Object.freeze({
+        target: Object.freeze({ x: 0, y: 0, z: 0 }),
+        distance: fallbackDistance
+      });
+    }
+    const axes = ["x", "y", "z"];
+    const minimum = Object.fromEntries(axes.map((axis) => [axis, Infinity]));
+    const maximum = Object.fromEntries(axes.map((axis) => [axis, -Infinity]));
+    for (const node of nodes) {
+      const radius = Math.max(0, Number(node.radius) || 0);
+      for (const axis of axes) {
+        minimum[axis] = Math.min(minimum[axis], node.position[axis] - radius);
+        maximum[axis] = Math.max(maximum[axis], node.position[axis] + radius);
+      }
+    }
+    const target = Object.fromEntries(axes.map((axis) => [axis, (minimum[axis] + maximum[axis]) / 2]));
+    const radius = Math.max(...nodes.map((node) => (
+      Math.hypot(
+        node.position.x - target.x,
+        node.position.y - target.y,
+        node.position.z - target.z
+      ) + Math.max(0, Number(node.radius) || 0)
+    )));
+    const fov = Math.max(0.1, Number(optionsInput.fov) || Math.PI / 3);
+    const aspect = Math.max(0.1, Number(optionsInput.aspect) || 1);
+    const verticalTangent = Math.tan(fov / 2);
+    const limitingTangent = Math.max(0.05, Math.min(verticalTangent, verticalTangent * aspect));
+    const minimumDistance = Math.max(0.01, Number(optionsInput.minimumDistance) || 0.04);
+    const maximumDistance = Math.max(minimumDistance, Number(optionsInput.maximumDistance) || 25200);
+    const distance = Math.min(
+      maximumDistance,
+      Math.max(minimumDistance, radius / (limitingTangent * 0.82))
+    );
+    return Object.freeze({ target: Object.freeze(target), distance });
+  }
+
   global.SpatialViewModeModel = Object.freeze({
     modes: MODES,
     modeLabels: MODE_LABELS,
@@ -229,6 +275,7 @@
     planRecursiveTargets,
     planPeerBatch,
     planContextLevelExpansion,
-    planContextLevelCollapse
+    planContextLevelCollapse,
+    immersiveDomainFrame
   });
 })(window);

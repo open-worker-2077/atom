@@ -5194,8 +5194,15 @@
     state.hovered = null;
     state.middleLabelFocus = null;
     state.prefetchedDomain = null;
+    const immersiveFrame = viewModeModel.immersiveDomainFrame(existingNodes(currentDomainNodes()), {
+      fov: camera.fov,
+      aspect: state.width / Math.max(1, state.height),
+      minimumDistance: MIN_CAMERA_DISTANCE,
+      maximumDistance: MAX_CAMERA_DISTANCE,
+      fallbackDistance: NORMAL_FIELD_DISTANCE
+    });
     updateSelectionUI();
-    recordCurrentView();
+    startCameraTween(immersiveFrame, 420, recordCurrentView);
     announce(`已进入 ${node.label}，当前深度 ${state.depth}`);
     return true;
   }

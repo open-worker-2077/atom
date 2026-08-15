@@ -175,3 +175,27 @@ test('PageUp closes only the deepest open layer inside the current context', () 
   );
   assert.deepEqual(Array.from(model.planContextLevelCollapse(paths, 'root', 'immersive')), []);
 });
+
+test('immersive entry frames every direct child inside the viewport with breathing room', () => {
+  const model = loadModel();
+  const frame = model.immersiveDomainFrame([
+    { position: { x: -8, y: -2, z: 0 }, radius: 1 },
+    { position: { x: 10, y: 4, z: 2 }, radius: 2 }
+  ], { fov: Math.PI / 3, aspect: 16 / 9, minimumDistance: 0.04, fallbackDistance: 17.2 });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(frame.target)), { x: 1.5, y: 1.5, z: 1.5 });
+  assert.ok(frame.distance > 17.2, 'wide children require a wider default frame');
+});
+
+test('an empty immersive domain receives the stable full-field fallback', () => {
+  const model = loadModel();
+  assert.deepEqual(JSON.parse(JSON.stringify(model.immersiveDomainFrame([], {
+    fov: Math.PI / 3,
+    aspect: 16 / 9,
+    minimumDistance: 0.04,
+    fallbackDistance: 17.2
+  }))), {
+    target: { x: 0, y: 0, z: 0 },
+    distance: 17.2
+  });
+});

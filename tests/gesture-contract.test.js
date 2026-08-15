@@ -187,13 +187,14 @@ test('domain travel never injects a fixed yaw rotation', () => {
   assert.doesNotMatch(source, /camera\.yaw\s*\+=\s*0\.36/);
 });
 
-test('child entry changes only domain browsing state and leaves camera ownership external', () => {
+test('immersive child entry frames the new direct children once while preserving later camera ownership', () => {
   const enter = functionSource('enterNode');
 
   assert.match(enter, /state\.domainStack\.push\s*\(\s*\.\.\.route\.entries\s*\)/);
   assert.match(enter, /state\.currentPath\s*=\s*nextPath/);
+  assert.match(enter, /viewModeModel\.immersiveDomainFrame/);
+  assert.match(enter, /startCameraTween\s*\(/);
   assert.doesNotMatch(enter, /camera\.(?:target|yaw|pitch|distance)\s*=/);
-  assert.doesNotMatch(enter, /startCameraTween\s*\(/);
 });
 
 test('direct satellite entry derives true semantic depth from its ancestor lineage', () => {
