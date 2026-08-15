@@ -5146,6 +5146,7 @@
     const changed = openClusterChildDomain(node, ownerPath, projectionMode);
     if (!changed) return false;
     buildClusterScene();
+    frameClusterDomain(childPath);
     updateSelectionUI();
     announce(`已展开 ${node.label} 的下一层子域团`);
     return true;
@@ -5480,8 +5481,14 @@
     const options = optionsInput || {};
     const mode = viewModeModel.modes.includes(options.mode) ? options.mode : state.viewMode;
     if (!node || !node.capabilities || !node.capabilities.portal) return false;
-    if (options.skipBatch !== true) {
-      const batch = applyBatchViewMode(mode);
+    const clickedKey = visualNodeKey(node, nodeOwnerPath(node));
+    const targetKeys = viewModeModel.planViewTargets(mode, clickedKey, state.batchSelectionKeys);
+    if (mode === "immersive") {
+      enterNode(node, true);
+      return true;
+    }
+    if (options.skipBatch !== true && targetKeys.length > 1) {
+      const batch = applyBatchViewMode(mode, targetKeys);
       if (batch) return batch.changed;
     }
     const ownerPath = nodeOwnerPath(node);
@@ -5491,10 +5498,6 @@
       const changed = collapseClusterDomain(childPath);
       if (changed && shouldRecord) recordCurrentView();
       return changed;
-    }
-    if (mode === "immersive") {
-      enterNode(node, true);
-      return true;
     }
     state.appliedViewMode = mode;
     if (mode === "peripheral") {
@@ -5554,6 +5557,19 @@
     updateSelectionUI();
     recordCurrentView();
     announce("当前视图已全部展开一层");
+    return true;
+  }
+
+  function frameClusterDomain(path) {
+    const cluster = state.clusterScene.clusters.find((candidate) => candidate.path === path);
+    if (!cluster) return false;
+    const frame = viewModeModel.clusterDomainFrame(cluster, {
+      fov: camera.fov,
+      aspect: state.width / Math.max(1, state.height),
+      minimumDistance: focusMinimumDistance(),
+      maximumDistance: MAX_CAMERA_DISTANCE
+    });
+    startCameraTween(frame, 420, recordCurrentView);
     return true;
   }
 
@@ -5693,9 +5709,9 @@
     return true;
   }
 
-  function applyBatchViewMode(mode) {
-    if (!state.batchSelectionKeys.size) return null;
-    const keys = [...state.batchSelectionKeys];
+  function applyBatchViewMode(mode, keysInput) {
+    const keys = Array.isArray(keysInput) ? keysInput : [...state.batchSelectionKeys];
+    if (!keys.length) return null;
     return {
       handled: true,
       changed: executeWandTargets(keys, { recursive: false, viewMode: mode, skipBatch: true })
@@ -6042,6 +6058,11 @@
 
   function cancelTemporaryState() {
     let changed = false;
+    if (state.batchSelectionKeys.size) {
+      state.batchSelectionKeys.clear();
+      state.batchToggleKey = null;
+      changed = true;
+    }
     if (primaryClickArbiter.pending) {
       primaryClickArbiter.cancel();
       changed = true;

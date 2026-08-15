@@ -99,6 +99,19 @@ test('double Shift immediately selects peers and view actions apply to the persi
   assert.match(batch, /executeWandTargets/);
 });
 
+test('F uses the clicked node despite batch selection and Escape clears the batch', () => {
+  const apply = functionSource('applyViewMode');
+  const cancel = functionSource('cancelTemporaryState');
+  assert.match(apply, /planViewTargets/);
+  assert.match(apply, /mode\s*===\s*["']immersive["'][\s\S]*enterNode\(node/);
+  assert.match(cancel, /batchSelectionKeys\.clear\(\)/);
+});
+
+test('successful A S D expansion frames the resulting child domain', () => {
+  const toggle = functionSource('toggleClusterChildDomain');
+  assert.match(toggle, /frameClusterDomain\(childPath/);
+});
+
 test('legacy peer-batch atoms remain available without owning the active double-Shift path', () => {
   const arm = functionSource('armPeerViewBatch');
   const consume = functionSource('consumePeerViewBatch');
@@ -245,8 +258,8 @@ test('stationary middle click quickly frames the pointed node or cluster', () =>
   assert.match(quickFrame, /startCameraTween\s*\(/);
 });
 
-test('wand batch and recursive actions preserve the current camera snapshot', () => {
-  for (const name of ['executeWandTargets', 'expandRecursively', 'applyViewMode']) {
+test('wand batch and recursive actions preserve the camera except the explicit completed view transition', () => {
+  for (const name of ['executeWandTargets', 'expandRecursively']) {
     const source = functionSource(name);
     assert.doesNotMatch(source, /camera\.distance\s*=|startCameraTween/);
   }
@@ -268,9 +281,8 @@ test('rapid visual undo and redo can replace an unfinished history tween', () =>
   assert.doesNotMatch(forward, /if\s*\(state\.transitionLocked\)\s*\{\s*return/);
 });
 
-test('right click browsing and Z X history never mutate the middle or wheel owned camera', () => {
+test('history preserves camera ownership while a completed right-click transition may frame its result', () => {
   for (const name of [
-    'applyViewMode',
     'applyParentView',
     'restoreVisualSnapshot',
     'backView',

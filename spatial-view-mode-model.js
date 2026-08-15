@@ -200,6 +200,30 @@
     return Object.freeze([...selected]);
   }
 
+  function planViewTargets(mode, clickedKey, selectionInput) {
+    if (clickedKey === undefined || clickedKey === null) return Object.freeze([]);
+    if (mode === 'immersive') return Object.freeze([clickedKey]);
+    var selected = Array.from(new Set(Array.isArray(selectionInput) ? selectionInput : selectionInput || []));
+    return Object.freeze(selected.length ? selected : [clickedKey]);
+  }
+
+  function clusterDomainFrame(clusterInput, optionsInput) {
+    var cluster = clusterInput || {};
+    var options = optionsInput || {};
+    var center = cluster.center || { x: 0, y: 0, z: 0 };
+    var radius = Math.max(0.001, Number(cluster.radius) || 0);
+    var fov = Math.max(0.1, Number(options.fov) || Math.PI / 3);
+    var aspect = Math.max(0.1, Number(options.aspect) || 1);
+    var verticalTangent = Math.tan(fov / 2);
+    var limitingTangent = Math.max(0.05, Math.min(verticalTangent, verticalTangent * aspect));
+    var minimumDistance = Math.max(0.01, Number(options.minimumDistance) || 0.04);
+    var maximumDistance = Math.max(minimumDistance, Number(options.maximumDistance) || 25200);
+    return Object.freeze({
+      target: Object.freeze({ x: center.x, y: center.y, z: center.z }),
+      distance: Math.min(maximumDistance, Math.max(minimumDistance, radius / (limitingTangent * 0.82)))
+    });
+  }
+
   function planContextLevelExpansion(entriesInput, expandedPathsInput, mode) {
     if (mode === "immersive") return Object.freeze([]);
     const expanded = new Set(Array.isArray(expandedPathsInput) ? expandedPathsInput : []);
@@ -282,6 +306,8 @@
     planRecursiveTargets,
     planPeerBatch,
     toggleSelectionKey,
+    planViewTargets,
+    clusterDomainFrame,
     planContextLevelExpansion,
     planContextLevelCollapse,
     immersiveDomainFrame

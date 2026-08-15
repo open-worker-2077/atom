@@ -154,6 +154,30 @@ test('Shift brushing toggles each crossed peer repeatedly', () => {
   assert.deepEqual(Array.from(model.toggleSelectionKey(['a'], 'b')), ['a', 'b']);
 });
 
+test('immersive view always enters the explicitly clicked node while structural modes may use the batch', () => {
+  const model = loadModel();
+  assert.deepEqual(
+    Array.from(model.planViewTargets('immersive', 'g/explore', ['g/other', 'g/explore'])),
+    ['g/explore']
+  );
+  assert.deepEqual(
+    Array.from(model.planViewTargets('nested', 'g/explore', ['g/other', 'g/explore'])),
+    ['g/other', 'g/explore']
+  );
+  assert.deepEqual(Array.from(model.planViewTargets('nested', 'g/explore', [])), ['g/explore']);
+});
+
+test('cluster framing centres the opened domain and fits its radius into the safe viewport', () => {
+  const model = loadModel();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(model.clusterDomainFrame(
+      { center: { x: 8, y: -3, z: 2 }, radius: 4 },
+      { fov: Math.PI / 3, aspect: 16 / 9, minimumDistance: 0.1, maximumDistance: 100 }
+    ))),
+    { target: { x: 8, y: -3, z: 2 }, distance: 8.44902832960428 }
+  );
+});
+
 test('PageDown plans every currently visible unopened portal once in A S or D mode', () => {
   const model = loadModel();
   const entries = [
