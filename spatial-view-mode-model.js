@@ -193,6 +193,29 @@
       .map((region) => region.key));
   }
 
+  function planContextLevelExpansion(entriesInput, expandedPathsInput, mode) {
+    if (mode === "immersive") return Object.freeze([]);
+    const expanded = new Set(Array.isArray(expandedPathsInput) ? expandedPathsInput : []);
+    const plannedPaths = new Set();
+    const keys = [];
+    for (const entry of Array.isArray(entriesInput) ? entriesInput : []) {
+      if (!entry || !entry.portal || !entry.key || !entry.childPath) continue;
+      if (expanded.has(entry.childPath) || plannedPaths.has(entry.childPath)) continue;
+      plannedPaths.add(entry.childPath);
+      keys.push(entry.key);
+    }
+    return Object.freeze(keys);
+  }
+
+  function planContextLevelCollapse(pathsInput, currentPath, mode) {
+    if (mode === "immersive" || !currentPath) return Object.freeze([]);
+    const paths = (Array.isArray(pathsInput) ? pathsInput : [])
+      .filter((path) => path && path !== currentPath && path.startsWith(`${currentPath}/`));
+    return Object.freeze(paths.filter((path) => (
+      !paths.some((candidate) => candidate !== path && candidate.startsWith(`${path}/`))
+    )));
+  }
+
   global.SpatialViewModeModel = Object.freeze({
     modes: MODES,
     modeLabels: MODE_LABELS,
@@ -204,6 +227,8 @@
     resolveShiftTap,
     classifyStrokeGesture,
     planRecursiveTargets,
-    planPeerBatch
+    planPeerBatch,
+    planContextLevelExpansion,
+    planContextLevelCollapse
   });
 })(window);

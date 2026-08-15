@@ -5069,7 +5069,8 @@
     return route ? route.length : Math.max(0, path.split("/").length - 1);
   }
 
-  function collapseClusterDomain(path) {
+  function collapseClusterDomainWithOptions(path, optionsInput) {
+    const options = optionsInput || {};
     const targetPath = typeof path === "string" ? path : "";
     const descriptor = state.expandedClusterDomains.get(targetPath);
     if (!descriptor) return false;
@@ -5087,9 +5088,9 @@
         : state.middleLabelFocus.descendantPath
     );
     if (pathContains(targetPath, detailFocusPath)) state.middleLabelFocus = null;
-    buildClusterScene();
-    updateSelectionUI();
-    announce(`已收起 ${descriptor.label} 的子域团`);
+    if (options.render !== false) buildClusterScene();
+    if (options.updateSelection !== false) updateSelectionUI();
+    if (options.announce !== false) announce(`已收起 ${descriptor.label} 的子域团`);
     return true;
   }
 
@@ -5467,42 +5468,74 @@
   }
 
   function expandHoveredClusterLevel() {
-    if (state.viewMode !== "nested") return false;
-    let node = state.hovered && state.hovered.capabilities && state.hovered.capabilities.portal
-      ? state.hovered
-      : null;
-    if (!node) {
-      const domainContext = findClusterDomainContext(state.pointerPosition.x, state.pointerPosition.y);
-      if (domainContext) {
-        node = nearestClusterDomainNode(domainContext.path, state.pointerPosition.x, state.pointerPosition.y);
-      }
-    }
-    if (!node || !node.capabilities || !node.capabilities.portal) {
-      announce("请将光标指向可展开子域团的节点");
-      return false;
-    }
-    const ownerPath = nodeOwnerPath(node);
-    const childPath = childPathFor(node, ownerPath);
-    if (state.expandedClusterDomains.has(childPath)) {
-      announce(`${node.label} 的子域团已展开`);
-      return false;
-    }
+    if (state.viewMode === "immersive" || transactionBlocksViewChange()) return false;
+    const entries = visibleClusterDomains().flatMap((domain) => domain.nodes.map((projected) => {
+      const node = projected.sourceNode || projected;
+      return {
+        key: visualNodeKey(node, domain.path),
+        childPath: childPathFor(node, domain.path),
+        ownerPath: domain.path,
+        node,
+        portal: Boolean(node.capabilities && node.capabilities.portal)
+      };
+    }));
+    const keys = viewModeModel.planContextLevelExpansion(
+      entries,
+      [...state.expandedClusterDomains.keys()],
+      state.viewMode
+    );
+    if (!keys.length) return false;
+    const byKey = new Map(entries.map((entry) => [entry.key, entry]));
     state.clusterFieldOpen = true;
-    const changed = toggleClusterChildDomain(node, ownerPath, "nested");
-    if (changed) recordCurrentView();
-    return changed;
+    let changed = false;
+    for (const key of keys) {
+      const entry = byKey.get(key);
+      if (entry && openClusterChildDomain(entry.node, entry.ownerPath, state.viewMode)) changed = true;
+    }
+    if (!changed) return false;
+    buildClusterScene();
+    updateSelectionUI();
+    recordCurrentView();
+    announce("当前视图已全部展开一层");
+    return true;
+  }
+
+  function collapseClusterDomain(path) {
+    const descriptor = state.expandedClusterDomains.get(path);
+    const changed = collapseClusterDomainWithOptions(path, {
+      render: false,
+      updateSelection: false,
+      announce: false
+    });
+    if (!changed) return false;
+    buildClusterScene();
+    updateSelectionUI();
+    announce(`已收起 ${descriptor.label} 的子域团`);
+    return true;
   }
 
   function collapseHoveredClusterLevel() {
-    if (state.viewMode !== "nested") return false;
-    const domainContext = findClusterDomainContext(state.pointerPosition.x, state.pointerPosition.y);
-    if (!domainContext) {
-      announce("光标未指向已展开的子域团");
-      return false;
+    if (state.viewMode === "immersive" || transactionBlocksViewChange()) return false;
+    const paths = viewModeModel.planContextLevelCollapse(
+      [...state.expandedClusterDomains.keys()],
+      state.currentPath,
+      state.viewMode
+    );
+    if (!paths.length) return false;
+    let changed = false;
+    for (const path of paths) {
+      if (collapseClusterDomainWithOptions(path, {
+        render: false,
+        updateSelection: false,
+        announce: false
+      })) changed = true;
     }
-    const changed = collapseClusterDomain(domainContext.path);
-    if (changed) recordCurrentView();
-    return changed;
+    if (!changed) return false;
+    buildClusterScene();
+    updateSelectionUI();
+    recordCurrentView();
+    announce("当前视图已全部收缩一层");
+    return true;
   }
 
   function visualNodeKey(node, ownerPath = nodeOwnerPath(node)) {

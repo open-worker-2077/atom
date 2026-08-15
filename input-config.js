@@ -142,8 +142,8 @@
         setNestedView: "A · 内包",
         setHierarchyView: "D · 层级",
         setImmersiveView: "F · 沉浸",
-        collapseHoveredCluster: "PageUp · 光标所指团单层收缩（内包模式）",
-        expandHoveredCluster: "PageDown · 光标所指团单层展开（内包模式）"
+        collapseHoveredCluster: "PageUp · 当前视图全部收缩一层（A/S/D）",
+        expandHoveredCluster: "PageDown · 当前视图全部展开一层（A/S/D）"
       }
     },
     oneHand: {
@@ -225,8 +225,8 @@
         setNestedView: "A · 内包",
         setHierarchyView: "D · 层级",
         setImmersiveView: "F · 沉浸",
-        collapseHoveredCluster: "PageUp · 光标所指团单层收缩（内包模式）",
-        expandHoveredCluster: "PageDown · 光标所指团单层展开（内包模式）"
+        collapseHoveredCluster: "PageUp · 当前视图全部收缩一层（A/S/D）",
+        expandHoveredCluster: "PageDown · 当前视图全部展开一层（A/S/D）"
       }
     }
   };

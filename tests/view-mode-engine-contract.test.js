@@ -123,22 +123,25 @@ test('immersive blank right click returns through the active domain when no clus
   assert.match(applyParent, /exitDomain/);
 });
 
-test('PageUp/PageDown collapse or expand one level of the cluster the cursor points to, A mode only', () => {
+test('PageUp/PageDown collapse or expand the entire current context by one level in A S or D mode', () => {
   const expand = functionSource('expandHoveredClusterLevel');
   const collapse = functionSource('collapseHoveredClusterLevel');
   const inputConfig = fs.readFileSync(path.join(root, 'input-config.js'), 'utf8');
 
-  assert.match(expand, /state\.viewMode\s*!==\s*["']nested["']/);
-  assert.match(expand, /state\.hovered/);
-  assert.match(expand, /toggleClusterChildDomain\(node,\s*ownerPath,\s*["']nested["']\)/);
-  assert.match(collapse, /state\.viewMode\s*!==\s*["']nested["']/);
-  assert.match(collapse, /findClusterDomainContext\(state\.pointerPosition\.x,\s*state\.pointerPosition\.y\)/);
-  assert.match(collapse, /collapseClusterDomain\(domainContext\.path\)/);
+  assert.match(expand, /planContextLevelExpansion/);
+  assert.match(expand, /visibleClusterDomains/);
+  assert.match(expand, /openClusterChildDomain/);
+  assert.doesNotMatch(expand, /state\.hovered|pointerPosition/);
+  assert.match(collapse, /planContextLevelCollapse/);
+  assert.match(collapse, /expandedClusterDomains/);
+  assert.doesNotMatch(collapse, /pointerPosition/);
 
   assert.match(engine, /case ["']collapseHoveredCluster["']/);
   assert.match(engine, /case ["']expandHoveredCluster["']/);
   assert.match(inputConfig, /PageUp:\s*VISUAL_INTENTS\.collapseHoveredCluster/);
   assert.match(inputConfig, /PageDown:\s*VISUAL_INTENTS\.expandHoveredCluster/);
+  assert.match(inputConfig, /PageUp · 当前视图全部收缩一层（A\/S\/D）/);
+  assert.match(inputConfig, /PageDown · 当前视图全部展开一层（A\/S\/D）/);
 });
 
 test('Shift right-drag records a visible wand stroke and resolves hit regions at release', () => {

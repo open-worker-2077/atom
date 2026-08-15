@@ -147,3 +147,31 @@ test('recursive visual planning reaches every descendant without mutating the kn
   assert.deepEqual(Array.from(plan), ['a', 'a1', 'a11', 'a2']);
   assert.equal(JSON.stringify(graph), before);
 });
+
+test('PageDown plans every currently visible unopened portal once in A S or D mode', () => {
+  const model = loadModel();
+  const entries = [
+    { key: 'root::a', childPath: 'root/a', portal: true },
+    { key: 'root::b', childPath: 'root/b', portal: true },
+    { key: 'root::value', childPath: 'root/value', portal: false }
+  ];
+
+  for (const mode of ['nested', 'peripheral', 'hierarchy']) {
+    assert.deepEqual(
+      Array.from(model.planContextLevelExpansion(entries, ['root/a'], mode)),
+      ['root::b']
+    );
+  }
+  assert.deepEqual(Array.from(model.planContextLevelExpansion(entries, [], 'immersive')), []);
+});
+
+test('PageUp closes only the deepest open layer inside the current context', () => {
+  const model = loadModel();
+  const paths = ['root/a', 'root/b', 'root/a/a1', 'elsewhere/x'];
+
+  assert.deepEqual(
+    Array.from(model.planContextLevelCollapse(paths, 'root', 'nested')),
+    ['root/b', 'root/a/a1']
+  );
+  assert.deepEqual(Array.from(model.planContextLevelCollapse(paths, 'root', 'immersive')), []);
+});
