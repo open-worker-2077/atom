@@ -55,6 +55,7 @@
   let atomWorkspace = false;
   let lastKnowledge = null;
   let pendingRemoteRevision = -1;
+  let workspaceOperationEpoch = 0;
 
   function hasQueuedWorkspaceCommit() {
     return queuedCommits.some((entry) => entry && entry.kind === "workspace");
@@ -102,9 +103,13 @@
   async function pullKnowledge() {
     if (pulling || pushing || lab.state().transactionActive) return false;
     pulling = true;
+    const pullOperationEpoch = workspaceOperationEpoch;
     try {
       const payload = await request("/state");
       const knowledge = payload.knowledge;
+      if (pullOperationEpoch !== workspaceOperationEpoch || pushing || hasQueuedWorkspaceCommit()) {
+        return false;
+      }
       if (knowledge && Number(knowledge.revision) > revision) {
         if (!lab.importKnowledge(knowledge)) return false;
         revision = Number(knowledge.revision) || 0;
@@ -181,6 +186,7 @@
       document.body.dataset.spatialBridge = "connected";
       return false;
     }
+    if (operation && typeof operation === "object") workspaceOperationEpoch += 1;
     if (pushing) {
       queuedCommits.push({ kind: "workspace", knowledge, operation, persistenceId });
       return true;

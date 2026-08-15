@@ -642,3 +642,63 @@ test('a remote commit received during a local save is refreshed after the save q
 
   assert.equal(imports.at(-1).revision, 2);
 });
+
+test('an older pull already in flight cannot overwrite a newer optimistic workspace operation', async () => {
+  const listeners = new Map();
+  const imports = [];
+  let releaseInitialPull;
+  let releaseWorkspaceSave;
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge: (knowledge) => { imports.push(knowledge); return true; },
+      exportField: () => ({ path: 'root' })
+    },
+    fetch: async (url) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state')) {
+        return new Promise((resolve) => {
+          releaseInitialPull = () => resolve(response({
+            knowledge: { revision: 1, nodes: [], edges: [] }
+          }));
+        });
+      }
+      if (url.endsWith('/workspace-edit')) {
+        return new Promise((resolve) => {
+          releaseWorkspaceSave = () => resolve(response({
+            result: { ok: true },
+            knowledge: { revision: 2, nodes: [{ key: 'root::edited', label: '编辑后' }], edges: [] }
+          }));
+        });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const save = listeners.get('spatial-workspace-committed')({ detail: {
+    persistenceId: 31,
+    operation: {
+      kind: 'node-edit', nodeKey: 'root::edited', node: { atomPath: '编辑后' },
+      draft: { label: '编辑后', description: '' }
+    },
+    knowledge: { revision: 1, nodes: [{ key: 'root::edited', label: '编辑后' }], edges: [] }
+  } });
+  releaseInitialPull();
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseWorkspaceSave();
+  await save;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(imports.some((knowledge) => knowledge.revision === 1), false,
+    'an in-flight stale pull must never redraw the page after a local operation begins');
+  assert.equal(imports.at(-1).revision, 2);
+  assert.equal(imports.at(-1).nodes[0].label, '编辑后');
+});
