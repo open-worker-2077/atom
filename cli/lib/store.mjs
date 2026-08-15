@@ -6,6 +6,19 @@ import { childDomainPath, probeKnowledge } from './probe.mjs';
 
 export const SCHEMA_VERSION = 1;
 
+const fileWriteQueues = new Map();
+
+function enqueueFileWrite(file, handler) {
+  const previous = fileWriteQueues.get(file) ?? Promise.resolve();
+  const operation = previous.then(handler, handler);
+  const tail = operation.then(() => undefined, () => undefined);
+  fileWriteQueues.set(file, tail);
+  void tail.then(() => {
+    if (fileWriteQueues.get(file) === tail) fileWriteQueues.delete(file);
+  });
+  return operation;
+}
+
 export class SpatialStoreError extends Error {
   constructor(code, message, details = {}) {
     super(message);
@@ -192,7 +205,6 @@ async function atomicWrite(file, value) {
 
 export function createStore(file) {
   const absoluteFile = path.resolve(file);
-  let queue = Promise.resolve();
 
   async function read() {
     try {
@@ -213,7 +225,7 @@ export function createStore(file) {
   }
 
   function mutate(handler) {
-    const operation = queue.then(async () => {
+    return enqueueFileWrite(absoluteFile, async () => {
       const knowledge = await read();
       const result = await handler(knowledge);
       knowledge.revision += 1;
@@ -221,8 +233,6 @@ export function createStore(file) {
       await write(knowledge);
       return { ...result, revision: knowledge.revision };
     });
-    queue = operation.catch(() => {});
-    return operation;
   }
 
   function findNode(knowledge, key) {
@@ -382,7 +392,7 @@ export function createStore(file) {
     }
     if (method === 'knowledge.replace') {
       const expectedRevision = params.expectedRevision;
-      const operation = queue.then(async () => {
+      return enqueueFileWrite(absoluteFile, async () => {
         const current = await read();
         if (expectedRevision !== undefined && Number(expectedRevision) !== current.revision) {
           throw new SpatialStoreError('REVISION_CONFLICT', '知识库已被其他操作更新', {
@@ -396,18 +406,14 @@ export function createStore(file) {
         await write(incoming);
         return { knowledge: incoming, revision: incoming.revision };
       });
-      queue = operation.catch(() => {});
-      return operation;
     }
     if (method === 'view.update') {
-      const operation = queue.then(async () => {
+      return enqueueFileWrite(absoluteFile, async () => {
         const knowledge = await read();
         knowledge.view = params.view && typeof params.view === 'object' ? params.view : null;
         await write(knowledge);
         return { view: knowledge.view, revision: knowledge.revision };
       });
-      queue = operation.catch(() => {});
-      return operation;
     }
     throw new SpatialStoreError('UNKNOWN_METHOD', '不支持的空间命令', { method });
   }

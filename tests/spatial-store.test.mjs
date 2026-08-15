@@ -7,6 +7,35 @@ import path from 'node:path';
 import { createStore, edgeIdentity } from '../cli/lib/store.mjs';
 import { childDomainPath } from '../cli/lib/probe.mjs';
 
+test('store handles for one file serialize fact projection and view persistence', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-shared-writer-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const losses = [];
+
+  for (let index = 0; index < 40; index += 1) {
+    const file = path.join(directory, `knowledge-${index}.json`);
+    const serverStore = createStore(file);
+    const projectionStore = createStore(file);
+    await serverStore.init();
+
+    await Promise.all([
+      projectionStore.execute('knowledge.replace', {
+        knowledge: {
+          nodes: [{ path: 'root', id: `committed-${index}`, label: '已提交事实' }],
+          edges: []
+        }
+      }),
+      serverStore.execute('view.update', { view: { path: 'root', zoom: index } })
+    ]);
+
+    const persisted = await serverStore.execute('field.get', { scope: 'all' });
+    if (!persisted.nodes.some((node) => node.id === `committed-${index}`)) losses.push(index);
+    assert.deepEqual(persisted.view, { path: 'root', zoom: index });
+  }
+
+  assert.deepEqual(losses, [], 'view persistence must never overwrite a committed fact projection');
+});
+
 test('creating a node in a child domain makes its parent expandable', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-child-state-'));
   const store = createStore(path.join(directory, 'knowledge.json'));

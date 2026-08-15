@@ -430,6 +430,8 @@ test('public help exposes only public Agent CLI options', async () => {
   assert.match(stdout.text(), /CLI 不会把目标 name 自动当作 --agent/u);
   assert.match(stdout.text(), /父路径不明确时只询问父 Atom/u);
   assert.match(stdout.text(), /每次写入后重新 explore 实际写入的 Atom/u);
+  assert.match(stdout.text(), /先 explore 预定父节点及其直接子节点/u);
+  assert.match(stdout.text(), /确实没有可复用节点时.*transform new/u);
   assert.doesNotMatch(stdout.text(), /目标 @agent/u);
   assert.doesNotMatch(stdout.text(), /\\"name\\"/u);
   assert.doesNotMatch(stdout.text(), /--session|--window|--context|--projection|--global/u);
@@ -476,6 +478,7 @@ test('public help is a complete daily Agent operation contract', async () => {
   assert.match(text, /查询或写入的事实目标不得代替 --agent 上下文来源/u);
   assert.match(text, /目标 Atom 本身不需要是 @agent/u);
   assert.match(text, /AMBIGUOUS_ATOM_NAME.*ATOM_NOT_FOUND/us);
+  assert.match(text, /ATOM_NOT_FOUND.*预定父节点.*复用.*transform new/us);
   assert.match(text, /WORLD_REVISION_CONFLICT.*重新读取/us);
   assert.match(text, /WORLD_COMMITTED_PROJECTION_PENDING.*维护入口/us);
   assert.match(text, /纠正提示仍无法解除阻断.*submit/u);

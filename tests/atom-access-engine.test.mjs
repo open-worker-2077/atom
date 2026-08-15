@@ -74,10 +74,22 @@ test('explore truncates a sealed exact target without leaking its name or path',
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.items[0].matches, []);
-  assert.equal(result.warnings.some((warning) => warning.code === 'WINDOW_SCOPE_TRUNCATED'), true);
+  assert.equal(result.warnings.some((warning) => warning.code === 'ATOM_READ_PROTECTED'), true);
   assert.equal(serialized.includes('Diary'), false);
   assert.equal(serialized.includes('Personal'), false);
   assert.equal(serialized.includes('secret'), false);
+});
+
+test('explore reports an absent exact target as not found even when unrelated locks exist', async (t) => {
+  const files = await isolated(t);
+  const result = await executeAtomLanguage({
+    ...files, legacyAccess,
+    source: 'explore {"name":"Network","detail$full"}'
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === 'ATOM_NOT_FOUND'), true);
+  assert.equal(result.warnings.some((warning) => warning.code === 'ATOM_READ_PROTECTED'), false);
 });
 
 test('transform denial leaves context and projection revisions unchanged', async (t) => {

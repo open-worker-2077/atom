@@ -187,12 +187,35 @@ export async function executeExploreItem(atoms, item, matcherRegistry, accessCon
   const selected = exactMatches(atoms, item, matcherRegistry, visibleMatches);
   if (selected.error) return { ok: false, index: item.index, errors: [selected.error] };
   if (selected.matches.length === 0) {
-    if (accessController.restricted) {
+    const unfiltered = exactMatches(atoms, item, matcherRegistry, allMatches);
+    if (unfiltered.error) return { ok: false, index: item.index, errors: [unfiltered.error] };
+    if (unfiltered.matches.length > 0) {
+      const programSources = [];
+      for (const match of unfiltered.matches) {
+        for (const field of requestedReadFields) {
+          const decision = await accessController.authorize(match, 'read', field);
+          for (const source of decision.matched ?? []) {
+            if (!programSources.some((candidate) => candidate.sourceProgramPath === source.sourceProgramPath)) {
+              programSources.push(source);
+            }
+          }
+        }
+      }
+      const source = programSources[0];
+      const reason = source?.reason?.message?.trim();
+      const explanation = source?.sourceProgramPath
+        ? `目标存在，但读取受到 Program“${source.sourceProgramPath}”限制。${reason ? `原因：${reason}。` : ''}此限制与 @agent 上下文无关。`
+        : '目标存在，但读取受到世界规则限制；此限制与 @agent 上下文无关。';
       return {
         ok: true,
         index: item.index,
         matches: [],
-        warnings: [diagnostic('WINDOW_SCOPE_TRUNCATED', '当前窗口已截断不可访问内容；如需访问请反馈派发方')]
+        warnings: [diagnostic('ATOM_READ_PROTECTED', explanation, {
+          programs: programSources.map((candidate) => ({
+            sourceProgramPath: candidate.sourceProgramPath,
+            reason: candidate.reason ?? null
+          }))
+        })]
       };
     }
     return {
