@@ -421,13 +421,15 @@ test('Atom Web keeps visual-only detail changes local instead of sending and rol
 test('Atom Web node creation enters the semantic workspace endpoint instead of overwriting the projection store', async () => {
   const listeners = new Map();
   const requests = [];
+  const imports = [];
+  const persisted = [];
   const document = { body: { dataset: {} }, hidden: false };
   const response = (payload) => ({ ok: true, json: async () => payload });
   const window = {
     location: { hostname: '127.0.0.1', protocol: 'http:' },
     spatialLab: {
       state: () => ({ transactionActive: false }),
-      importKnowledge: () => true,
+      importKnowledge: (knowledge) => { imports.push(knowledge); return true; },
       exportField: () => ({ path: 'root' })
     },
     fetch: async (url, options = {}) => {
@@ -436,11 +438,19 @@ test('Atom Web node creation enters the semantic workspace endpoint instead of o
       if (url.endsWith('/state') && !options.method) {
         return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
       }
-      if (url.endsWith('/workspace-edit')) {
-        return response({ ok: true, knowledge: { revision: 2, nodes: [], edges: [] } });
-      }
+      if (url.endsWith('/workspace-edit')) return response({
+        ok: true,
+        result: { ok: true },
+        knowledge: {
+          revision: 2,
+          nodes: [{ id: 'projected-id', key: 'root::projected-id', path: 'root', label: 'New Atom', position: { x: 40, y: 40, z: 0 } }],
+          edges: []
+        }
+      });
       return response({ result: {} });
     },
+    CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    dispatchEvent: (event) => { if (event.type === 'spatial-workspace-persisted') persisted.push(event.detail); },
     addEventListener: (name, listener) => listeners.set(name, listener),
     setInterval: () => 0
   };
@@ -450,7 +460,8 @@ test('Atom Web node creation enters the semantic workspace endpoint instead of o
 
   await listeners.get('spatial-workspace-committed')({
     detail: {
-      operation: { kind: 'node-create', path: 'root', draft: { label: 'New Atom', description: 'Detail' } },
+      persistenceId: 7,
+      operation: { kind: 'node-create', path: 'root', draft: { label: 'New Atom', description: 'Detail', position: { x: 7, y: -3, z: 2 } } },
       knowledge: { revision: 1, nodes: [{ label: 'New Atom' }], edges: [] }
     }
   });
@@ -458,7 +469,11 @@ test('Atom Web node creation enters the semantic workspace endpoint instead of o
   const workspace = requests.find(([url]) => url.endsWith('/workspace-edit'));
   assert.ok(workspace, 'node creation reaches the Atom workspace command boundary');
   assert.deepEqual(JSON.parse(workspace[1].body), {
-    operation: { kind: 'node-create', path: 'root', draft: { label: 'New Atom', description: 'Detail' } }
+    operation: { kind: 'node-create', path: 'root', draft: { label: 'New Atom', description: 'Detail', position: { x: 7, y: -3, z: 2 } } }
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(imports.at(-1).nodes[0].position)), { x: 7, y: -3, z: 2 });
+  assert.deepEqual(JSON.parse(JSON.stringify(persisted.at(-1).persistedNode)), {
+    id: 'projected-id', key: 'root::projected-id', path: 'root', label: 'New Atom', position: { x: 7, y: -3, z: 2 }, clusterLocalPositionLocked: false
   });
   assert.equal(requests.some(([url, options]) => url.endsWith('/state') && options.method === 'PUT'), false);
 });

@@ -60,6 +60,23 @@
     return queuedCommits.some((entry) => entry && entry.kind === "workspace");
   }
 
+  function reconcileCreatedNode(operation, knowledge, previousKnowledge) {
+    if (!operation || operation.kind !== "node-create" || !knowledge) return null;
+    const priorKeys = new Set(((previousKnowledge && previousKnowledge.nodes) || [])
+      .map((node) => node && node.key)
+      .filter(Boolean));
+    const label = operation.draft && operation.draft.label;
+    const candidates = (Array.isArray(knowledge.nodes) ? knowledge.nodes : [])
+      .filter((node) => node && node.label === label && !priorKeys.has(node.key));
+    if (candidates.length !== 1) return null;
+    const persistedNode = candidates[0];
+    if (persistedNode.path === operation.path && operation.draft && operation.draft.position) {
+      persistedNode.position = { ...operation.draft.position };
+      persistedNode.clusterLocalPositionLocked = operation.draft.clusterLocalPositionLocked === true;
+    }
+    return persistedNode;
+  }
+
   function reportPersistence(type, detail = {}) {
     if (!Number.isFinite(Number(detail.persistenceId)) || typeof global.dispatchEvent !== "function") return;
     const EventConstructor = global.CustomEvent;
@@ -171,6 +188,7 @@
     pushing = true;
     try {
       if (operation && operation.kind === "node-create") {
+        const previousKnowledge = lastKnowledge;
         const response = await global.fetch('/__atom/api/workspace-edit', {
           method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ operation })
@@ -179,6 +197,7 @@
         if (!response.ok || payload.ok === false || payload.result?.ok === false) {
           throw new Error(payload.error?.message || payload.result?.errors?.[0]?.message || 'Atom workspace edit failed');
         }
+        const persistedNode = reconcileCreatedNode(operation, payload.knowledge, previousKnowledge);
         if (payload.knowledge) {
           lastKnowledge = payload.knowledge;
           revision = Number(payload.knowledge.revision) || revision;
@@ -186,7 +205,7 @@
         }
         document.body.dataset.spatialBridge = "connected";
         reportPersistence("spatial-workspace-persisted", {
-          persistenceId, operation, knowledge: payload.knowledge
+          persistenceId, operation, knowledge: payload.knowledge, persistedNode
         });
         return true;
       }

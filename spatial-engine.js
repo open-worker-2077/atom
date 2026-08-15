@@ -609,6 +609,7 @@
     },
     clusterFieldOpen: false,
     viewMode: "nested",
+    appliedViewMode: "hierarchy",
     expandedClusterDomains: new Map(),
     clusterScene: { clusters: [], corridors: [], bounds: { center: { x: 0, y: 0, z: 0 }, radius: 0 } },
     interactionPhase: grammar.interactionPhases.idle,
@@ -916,6 +917,7 @@
       worldLens: { ...state.worldLens },
       clusterFieldOpen: state.clusterFieldOpen,
       viewMode: state.viewMode,
+      appliedViewMode: state.appliedViewMode,
       expandedClusters: clusterBranchSnapshot(),
       revealedIds,
       detailLensIds,
@@ -994,6 +996,7 @@
     state.worldLens = { ...snapshot.worldLens };
     state.clusterFieldOpen = snapshot.clusterFieldOpen === true;
     state.viewMode = snapshot.viewMode || "nested";
+    state.appliedViewMode = snapshot.appliedViewMode || "hierarchy";
     restoreClusterBranches(snapshot.expandedClusters || []);
     if (state.clusterFieldOpen) buildClusterScene();
     updateSelectionUI();
@@ -1252,7 +1255,7 @@
       ...(descriptors.get(state.currentPath) || {}),
       path: state.currentPath,
       depth: state.depth,
-      projectionMode: "hierarchy",
+      projectionMode: state.appliedViewMode,
       label: state.crumbs.at(-1) || (state.depth ? `第 ${state.depth} 域` : "全域"),
       parentPath: null,
       parentNodeId: null,
@@ -4489,6 +4492,22 @@
         return;
       }
     }
+    if (kind === "node-create" && event.detail.persistedNode) {
+      const persisted = event.detail.persistedNode;
+      if (persisted.path !== state.currentPath) {
+        locateKnowledgeNode(persisted.key || `${persisted.path}::${persisted.id || persisted.nodeId}`);
+      } else {
+        state.selected = nodeByIdInPath(persisted.path, persisted.id || persisted.nodeId);
+        state.focused = null;
+      }
+      if (state.selected) {
+        scheduleCommittedNodeFrame(state.selected, persisted.path);
+        updateSelectionUI();
+        recordCurrentView();
+        announce("节点已创建并保存");
+        return;
+      }
+    }
     announce(kind.startsWith("edge-") ? "关系已保存" : "节点已保存");
   });
 
@@ -5458,6 +5477,7 @@
       enterNode(node, true);
       return true;
     }
+    state.appliedViewMode = mode;
     if (mode === "peripheral") {
       revealNode(node, { record: shouldRecord });
       return true;
@@ -5485,6 +5505,7 @@
 
   function expandHoveredClusterLevel() {
     if (state.viewMode === "immersive" || transactionBlocksViewChange()) return false;
+    state.appliedViewMode = state.viewMode;
     const entries = visibleClusterDomains().flatMap((domain) => domain.nodes.map((projected) => {
       const node = projected.sourceNode || projected;
       return {

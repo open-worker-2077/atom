@@ -82,6 +82,17 @@ test('selecting a future ASDF mode cannot restyle an already rendered cluster sc
   assert.match(layout, /clusterScene\.clusters[\s\S]*projectionMode/);
 });
 
+test('PageDown applies the selected A mode to the current field before expanding its next layer', () => {
+  const visible = functionSource('visibleClusterDomains');
+  const expand = functionSource('expandHoveredClusterLevel');
+  const setMode = functionSource('setViewMode');
+
+  assert.match(engine, /appliedViewMode:\s*["']hierarchy["']/);
+  assert.match(visible, /projectionMode:\s*state\.appliedViewMode/);
+  assert.match(expand, /state\.appliedViewMode\s*=\s*state\.viewMode/);
+  assert.doesNotMatch(setMode, /appliedViewMode/);
+});
+
 test('immersive navigation history is not rendered as hierarchy when a local view is appended', () => {
   const visible = functionSource('visibleClusterDomains');
 

@@ -302,6 +302,17 @@ test('engine exposes explicit knowledge and field projections without pointer si
   assert.doesNotMatch(source, /spatialLab[\s\S]{0,600}dispatchEvent\s*\(\s*new\s+(?:Mouse|Pointer|Keyboard)Event/);
 });
 
+test('Atom confirmation reselects the authoritative created node after its projected identity changes', () => {
+  const start = source.indexOf('global.addEventListener("spatial-workspace-persisted"');
+  const end = source.indexOf('global.addEventListener("spatial-workspace-persist-failed"', start);
+  const persisted = source.slice(start, end);
+
+  assert.match(persisted, /kind === ["']node-create["']/);
+  assert.match(persisted, /event\.detail\.persistedNode/);
+  assert.match(persisted, /locateKnowledgeNode|nodeByIdInPath/);
+  assert.match(persisted, /scheduleCommittedNodeFrame/);
+});
+
 test('imported workspace-node preparation is guarded and derives surface visibility from detail mode', () => {
   const current = functionSource('currentDomainNodes');
   const prepare = functionSource('prepareWorkspaceNode');

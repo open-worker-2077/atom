@@ -80,7 +80,7 @@ test('right single click applies the selected projection and right double click 
 test('a right click appends its projection without rewriting the previously formed route', () => {
   const visible = functionSource('visibleClusterDomains');
   assert.doesNotMatch(visible, /routeProjectionMode/);
-  assert.match(visible, /projectionMode:\s*["']hierarchy["']/);
+  assert.match(visible, /projectionMode:\s*state\.appliedViewMode/);
   assert.match(visible, /const descriptors = new Map\([\s\S]*state\.expandedClusterDomains/);
   assert.doesNotMatch(visible, /state\.domainStack\.map/);
 });
