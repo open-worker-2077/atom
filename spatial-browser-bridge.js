@@ -54,6 +54,7 @@
   let bossMode = false;
   let atomWorkspace = false;
   let lastKnowledge = null;
+  let pendingRemoteRevision = -1;
 
   function reportPersistence(type, detail = {}) {
     if (!Number.isFinite(Number(detail.persistenceId)) || typeof global.dispatchEvent !== "function") return;
@@ -160,7 +161,7 @@
       return false;
     }
     if (pushing) {
-      queuedCommits.push({ knowledge, operation, persistenceId });
+      queuedCommits.push({ kind: "workspace", knowledge, operation, persistenceId });
       return true;
     }
     pushing = true;
@@ -270,20 +271,45 @@
       pushing = false;
       if (queuedCommits.length) {
         const nextCommit = queuedCommits.shift();
-        void pushKnowledge({ detail: nextCommit });
-      }
+        if (nextCommit.kind === "view") void pushView({ detail: nextCommit });
+        else void pushKnowledge({ detail: nextCommit });
+      } else void drainRemoteChanges();
     }
   }
 
-  async function pushView() {
-    if (document.hidden) return;
+  async function drainRemoteChanges() {
+    if (pendingRemoteRevision <= revision || pulling || pushing || lab.state().transactionActive) return false;
+    const requestedRevision = pendingRemoteRevision;
+    const refreshed = await pullKnowledge();
+    if (refreshed && revision >= requestedRevision) pendingRemoteRevision = -1;
+    return refreshed;
+  }
+
+  async function pushView(event) {
+    const view = event?.detail?.view ?? lab.exportField();
+    if (!view || document.hidden) return false;
+    if (pushing) {
+      queuedCommits.push({ kind: "view", view });
+      return true;
+    }
+    pushing = true;
     try {
       await request("/view", {
         method: "PUT",
-        body: JSON.stringify({ view: lab.exportField(), bossId: bossMode ? activeBossId() : null })
+        body: JSON.stringify({ view, bossId: bossMode ? activeBossId() : null })
       });
+      document.body.dataset.spatialBridge = "connected";
+      return true;
     } catch (error) {
       document.body.dataset.spatialBridge = "offline";
+      return false;
+    } finally {
+      pushing = false;
+      if (queuedCommits.length) {
+        const nextCommit = queuedCommits.shift();
+        if (nextCommit.kind === "view") void pushView({ detail: nextCommit });
+        else void pushKnowledge({ detail: nextCommit });
+      } else void drainRemoteChanges();
     }
   }
 
@@ -325,8 +351,19 @@
   }, true);
 
   global.addEventListener("spatial-workspace-committed", pushKnowledge);
-  global.setInterval(pullKnowledge, 1200);
-  global.setInterval(pushView, 2400);
+  global.addEventListener("spatial-view-committed", pushView);
+  if (typeof global.EventSource === "function") {
+    const changes = new global.EventSource(`${API}/events`);
+    changes.onmessage = (event) => {
+      try {
+        const notice = JSON.parse(event.data);
+        pendingRemoteRevision = Math.max(pendingRemoteRevision, Number(notice.revision) || -1);
+        void drainRemoteChanges();
+      } catch {
+        document.body.dataset.spatialBridge = "offline";
+      }
+    };
+  }
   request("/health")
     .then((payload) => {
       bossMode = payload.mode === "boss";
@@ -334,6 +371,5 @@
       document.body.dataset.spatialStore = bossMode ? "boss" : "single";
     })
     .catch(() => {})
-    .then(pullKnowledge)
-    .then(pushView);
+    .then(pullKnowledge);
 })(window);

@@ -927,6 +927,9 @@
   function recordCurrentView(options) {
     const snapshot = state.viewHistory.push(visualSnapshot(), options);
     updateNavigationUI();
+    global.dispatchEvent(new CustomEvent("spatial-view-committed", {
+      detail: Object.freeze({ view: exportFieldProjection() })
+    }));
     return snapshot;
   }
 

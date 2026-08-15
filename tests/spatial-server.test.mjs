@@ -39,3 +39,31 @@ test('local server exposes one store to the page bridge and command API', async 
   const build = pageHtml.match(/data-build="([^"]+)"/)[1];
   assert.match(pageHtml, new RegExp(`spatial-browser-bridge\\.js\\?v=${build.replaceAll('.', '\\.')}`));
 });
+
+test('local server notifies connected pages immediately after a committed operation', async (context) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-events-'));
+  const instance = await createSpatialServer({
+    root: path.resolve(import.meta.dirname, '..'),
+    storeFile: path.join(directory, 'knowledge.json')
+  });
+  await new Promise((resolve) => instance.server.listen(0, '127.0.0.1', resolve));
+  context.after(() => new Promise((resolve) => instance.server.close(resolve)));
+  const address = instance.server.address();
+  const origin = `http://127.0.0.1:${address.port}`;
+  const abort = new AbortController();
+  context.after(() => abort.abort());
+  const events = await fetch(`${origin}/__spatial/api/events`, { signal: abort.signal });
+  assert.equal(events.status, 200);
+  const reader = events.body.getReader();
+  const decoder = new TextDecoder();
+  await reader.read();
+
+  await fetch(`${origin}/__spatial/api/command`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ method: 'node.create', params: { path: 'root', label: '另一端提交' } })
+  });
+  const notice = decoder.decode((await reader.read()).value);
+  assert.match(notice, /"revision":1/u);
+  abort.abort();
+  await reader.cancel().catch(() => {});
+});

@@ -58,6 +58,22 @@ export async function createSpatialServer(options = {}) {
     : null;
   backupTrigger?.start();
   let atomInteractionTail = Promise.resolve();
+  const knowledgeSubscribers = new Set();
+  const mutatingSpatialMethods = new Set([
+    'knowledge.replace', 'node.create', 'node.update', 'node.delete', 'node.land',
+    'edge.create', 'edge.update', 'edge.delete'
+  ]);
+
+  function publishKnowledgeChange(knowledge) {
+    const message = `data: ${JSON.stringify({ revision: knowledge.revision })}\n\n`;
+    for (const subscriber of [...knowledgeSubscribers]) {
+      try {
+        subscriber.write(message);
+      } catch {
+        knowledgeSubscribers.delete(subscriber);
+      }
+    }
+  }
 
   function enqueueAtomInteraction(operation) {
     const current = atomInteractionTail.then(operation, operation);
@@ -92,6 +108,17 @@ export async function createSpatialServer(options = {}) {
           ...(graphFile ? { graphFile } : {})
         });
       }
+      if (url.pathname === '/__spatial/api/events' && request.method === 'GET') {
+        response.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-store',
+          connection: 'keep-alive'
+        });
+        response.write(': connected\n\n');
+        knowledgeSubscribers.add(response);
+        request.on('close', () => knowledgeSubscribers.delete(response));
+        return;
+      }
       if (
         graphFile
         && url.pathname === '/__spatial/api/graph'
@@ -117,9 +144,12 @@ export async function createSpatialServer(options = {}) {
           const knowledge = await bossStore.replaceAll(payload.knowledge, {
             confirmedRecursiveDeleteNodeIds: payload.confirmedRecursiveDeleteNodeIds
           });
+          publishKnowledgeChange(knowledge);
           return json(response, 200, { ok: true, result: { knowledge, revision: knowledge.revision } });
         }
-        return json(response, 200, { ok: true, result: await store.execute('knowledge.replace', payload) });
+        const result = await store.execute('knowledge.replace', payload);
+        publishKnowledgeChange(result.knowledge);
+        return json(response, 200, { ok: true, result });
       }
       if (url.pathname === '/__spatial/api/view' && request.method === 'PUT') {
         const payload = await body(request);
@@ -141,7 +171,9 @@ export async function createSpatialServer(options = {}) {
             result: await bossStore.execute(payload.bossId, payload.method, payload.params || {})
           });
         }
-        return json(response, 200, { ok: true, result: await store.execute(payload.method, payload.params || {}) });
+        const result = await store.execute(payload.method, payload.params || {});
+        if (mutatingSpatialMethods.has(payload.method)) publishKnowledgeChange(await readKnowledge());
+        return json(response, 200, { ok: true, result });
       }
       if (url.pathname === '/__atom/api/command' && request.method === 'POST') {
         if (typeof options.atomCommand !== 'function') {
@@ -160,6 +192,7 @@ export async function createSpatialServer(options = {}) {
           }
           return commandResult;
         });
+        publishKnowledgeChange(await readKnowledge());
         return json(response, 200, { ok: true, result });
       }
       if (url.pathname === '/__atom/api/human-status' && request.method === 'POST') {
@@ -179,7 +212,9 @@ export async function createSpatialServer(options = {}) {
           }
           return commandResult;
         });
-        return json(response, 200, { ok: true, result, knowledge: await readKnowledge() });
+        const knowledge = await readKnowledge();
+        publishKnowledgeChange(knowledge);
+        return json(response, 200, { ok: true, result, knowledge });
       }
       if (url.pathname === '/__atom/api/workspace-edit' && request.method === 'POST') {
         if (typeof options.atomWorkspaceEdit !== 'function') {
@@ -187,7 +222,9 @@ export async function createSpatialServer(options = {}) {
         }
         const payload = await body(request);
         const result = await enqueueAtomInteraction(() => options.atomWorkspaceEdit(payload));
-        return json(response, 200, { ok: true, result, knowledge: await readKnowledge() });
+        const knowledge = await readKnowledge();
+        publishKnowledgeChange(knowledge);
+        return json(response, 200, { ok: true, result, knowledge });
       }
       if (url.pathname === '/__atom/api/recover-projection' && request.method === 'POST') {
         const remoteAddress = request.socket.remoteAddress ?? '';

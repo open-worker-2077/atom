@@ -445,3 +445,129 @@ test('every Atom Web structural edit uses the semantic workspace boundary instea
     assert.equal(requests.some(([url, options]) => url.endsWith('/state') && options.method === 'PUT'), false, operation.kind);
   }
 });
+
+test('Atom Web persists view operations exactly and installs no periodic save or pull timers', async () => {
+  const listeners = new Map();
+  const requests = [];
+  const timers = [];
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge: () => true,
+      exportField: () => ({ path: 'root', viewMode: 'nested' })
+    },
+    fetch: async (url, options = {}) => {
+      requests.push([url, options]);
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state')) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+      return response({ result: { revision: 1 } });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: (...args) => { timers.push(args); return timers.length; }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(timers.length, 0, 'persistence and synchronization must not depend on periodic timers');
+  assert.equal(typeof listeners.get('spatial-view-committed'), 'function');
+  await listeners.get('spatial-view-committed')({ detail: { view: { path: 'root/child', viewMode: 'hierarchy' } } });
+
+  const viewWrites = requests.filter(([url, options]) => url.endsWith('/view') && options.method === 'PUT');
+  assert.equal(viewWrites.length, 1);
+  assert.deepEqual(JSON.parse(viewWrites[0][1].body), {
+    view: { path: 'root/child', viewMode: 'hierarchy' }, bossId: null
+  });
+});
+
+test('Atom Web refreshes from a committed remote operation instead of polling', async () => {
+  const listeners = new Map();
+  const imports = [];
+  const requests = [];
+  let serverRevision = 1;
+  let eventSource = null;
+  class FakeEventSource {
+    constructor(url) { this.url = url; eventSource = this; }
+  }
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge: (knowledge) => { imports.push(knowledge); return true; },
+      exportField: () => ({ path: 'root' })
+    },
+    EventSource: FakeEventSource,
+    fetch: async (url, options = {}) => {
+      requests.push([url, options]);
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state')) {
+        return response({ knowledge: { revision: serverRevision, nodes: [{ label: `r${serverRevision}` }], edges: [] } });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(eventSource.url, '/__spatial/api/events');
+  assert.equal(imports.at(-1).nodes[0].label, 'r1');
+
+  serverRevision = 2;
+  eventSource.onmessage({ data: '{"revision":2}' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(imports.at(-1).nodes[0].label, 'r2');
+  assert.equal(requests.filter(([url]) => url.endsWith('/state')).length, 2);
+});
+
+test('a remote commit received during a local save is refreshed after the save queue settles', async () => {
+  const listeners = new Map();
+  const imports = [];
+  let eventSource = null;
+  let serverRevision = 1;
+  let finishViewSave;
+  const viewSaved = new Promise((resolve) => { finishViewSave = resolve; });
+  class FakeEventSource {
+    constructor() { eventSource = this; }
+  }
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge: (knowledge) => { imports.push(knowledge); return true; },
+      exportField: () => ({ path: 'root' })
+    },
+    EventSource: FakeEventSource,
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state')) return response({ knowledge: { revision: serverRevision, nodes: [], edges: [] } });
+      if (url.endsWith('/view') && options.method === 'PUT') {
+        await viewSaved;
+        return response({ ok: true });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const localSave = listeners.get('spatial-view-committed')({ detail: { view: { path: 'root/child' } } });
+  serverRevision = 2;
+  eventSource.onmessage({ data: '{"revision":2}' });
+  finishViewSave();
+  await localSave;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(imports.at(-1).revision, 2);
+});
