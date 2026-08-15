@@ -262,6 +262,27 @@ test('a landed node can change mirror state from inside its new domain', () => {
   assert.equal(reopened.projectDomain('root/child', [])[0].surfaceVisible, true);
 });
 
+test('persisted landing resolves the moved node by target domain after its projected id changes', () => {
+  const model = loadModel();
+  const operation = {
+    kind: 'node-land',
+    source: { key: 'root::old-id' },
+    target: { path: 'root/classified' },
+    draft: { id: 'old-id', label: '网络' }
+  };
+  const knowledge = {
+    nodes: [
+      { id: 'same-name-elsewhere', path: 'root', label: '网络' },
+      { id: 'new-id', path: 'root/classified', label: '网络' }
+    ]
+  };
+
+  assert.deepEqual(
+    plain(model.persistedLandingNode(operation, knowledge)),
+    { id: 'new-id', path: 'root/classified', label: '网络' }
+  );
+});
+
 test('manual cluster placement survives knowledge export and import', () => {
   const model = loadModel();
   const workspace = model.createWorkspace();

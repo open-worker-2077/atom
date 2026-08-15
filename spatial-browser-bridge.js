@@ -181,7 +181,9 @@
           if (!queuedCommits.length) lab.importKnowledge(payload.knowledge);
         }
         document.body.dataset.spatialBridge = "connected";
-        reportPersistence("spatial-workspace-persisted", { persistenceId, operation });
+        reportPersistence("spatial-workspace-persisted", {
+          persistenceId, operation, knowledge: payload.knowledge
+        });
         return true;
       }
       const previousByKey = new Map(((lastKnowledge && lastKnowledge.nodes) || [])
@@ -229,7 +231,9 @@
           if (!queuedCommits.length) lab.importKnowledge(payload.knowledge);
         }
         document.body.dataset.spatialBridge = "connected";
-        reportPersistence("spatial-workspace-persisted", { persistenceId, operation });
+        reportPersistence("spatial-workspace-persisted", {
+          persistenceId, operation, knowledge: payload.knowledge
+        });
         return true;
       }
       const confirmedRecursiveDeleteNodeIds = recursiveDeleteConfirmations(knowledge);

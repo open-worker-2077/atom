@@ -4474,7 +4474,19 @@
 
   global.addEventListener("spatial-workspace-persisted", (event) => {
     if (!event.detail || !Number.isFinite(Number(event.detail.persistenceId))) return;
-    const kind = event.detail.operation && event.detail.operation.kind || "";
+    const operation = event.detail.operation;
+    const kind = operation && operation.kind || "";
+    if (kind === "node-land") {
+      const persisted = workspaceModel.persistedLandingNode(operation, event.detail.knowledge);
+      if (persisted) {
+        if (state.expandedClusterDomains.has(persisted.path)) buildClusterScene();
+        state.selected = nodeByIdInPath(persisted.path, persisted.id || persisted.nodeId);
+        state.focused = null;
+        updateSelectionUI();
+        announce("节点已移动并保存");
+        return;
+      }
+    }
     announce(kind.startsWith("edge-") ? "关系已保存" : "节点已保存");
   });
 

@@ -94,6 +94,15 @@
     };
   }
 
+  function persistedLandingNode(operation, knowledge) {
+    if (!operation || operation.kind !== "node-land") return null;
+    const targetPath = safeText(operation.target && operation.target.path, "", 512);
+    const label = safeText(operation.draft && operation.draft.label, "", MAX_LABEL_LENGTH);
+    if (!targetPath || !label) return null;
+    return (Array.isArray(knowledge && knowledge.nodes) ? knowledge.nodes : [])
+      .find((node) => node && node.path === targetPath && node.label === label) || null;
+  }
+
   function edgeIdentity(edge) {
     if (!edge || !edge.from || !edge.to) return "";
     if (typeof edge.id === "string" && edge.id.trim()) return edge.id.trim();
@@ -763,6 +772,7 @@
     edgeIdentity,
     highlightSegments,
     normalizeQuery,
+    persistedLandingNode,
     qualifiedEndpoint,
     searchEntries
   });

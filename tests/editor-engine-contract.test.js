@@ -426,6 +426,17 @@ test('semantic edits wait for persistence acknowledgement before claiming succes
   assert.match(source, /正在保存/);
 });
 
+test('a persisted landing reselects the moved node at its authoritative projected id', () => {
+  const listenerStart = source.indexOf('global.addEventListener("spatial-workspace-persisted"');
+  const listenerEnd = source.indexOf('global.addEventListener("spatial-workspace-persist-failed"', listenerStart);
+  const listener = source.slice(listenerStart, listenerEnd);
+
+  assert.match(listener, /workspaceModel\.persistedLandingNode/);
+  assert.match(listener, /nodeByIdInPath/);
+  assert.match(listener, /buildClusterScene/);
+  assert.match(listener, /updateSelectionUI/);
+});
+
 test('CapsLock settles detail mode on keyup without escaping form or edit boundaries', () => {
   const keyupStart = source.indexOf('document.addEventListener("keyup"');
   const keyup = source.slice(keyupStart, source.indexOf('document.querySelectorAll("[data-intent]"', keyupStart));

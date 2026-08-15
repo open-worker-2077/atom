@@ -161,6 +161,7 @@ test('Atom Web reports semantic persistence confirmation and failure instead of 
     assert.equal(lifecycle.length, 1);
     assert.equal(lifecycle[0].type, succeeds ? 'spatial-workspace-persisted' : 'spatial-workspace-persist-failed');
     assert.equal(lifecycle[0].detail.persistenceId, 17);
+    if (succeeds) assert.equal(lifecycle[0].detail.knowledge.revision, 2);
     if (!succeeds) assert.match(lifecycle[0].detail.message, /write rejected/);
   }
 });
