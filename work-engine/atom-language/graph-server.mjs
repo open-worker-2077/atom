@@ -10,6 +10,7 @@ import {
   projectRoot
 } from '../../cli/lib/server.mjs';
 import { createLegacyRuntimeComposition } from '../../src/atom-system/adapters/legacy-runtime-composition.mjs';
+import { createAtomRuntimeBackupTrigger } from '../../src/atom-system/operations/atom-runtime-backup-trigger.mjs';
 import { resolveAtomRuntime } from './runtime-config.mjs';
 import { createProgramRuntimeScheduler } from './program-runtime.mjs';
 import { ATOM_RUNTIME_CONTRACT } from './runtime-contract.mjs';
@@ -281,6 +282,15 @@ export async function startAtomGraphServer(options = {}) {
     atomWorkspaceEdit: handlers.atomWorkspaceEdit,
     atomProjectionRecover: handlers.atomProjectionRecover
   });
+  const backupRepository = options.backupRepository ?? process.env.ATOM_RUNTIME_BACKUP_REPO;
+  const backupTrigger = backupRepository ? createAtomRuntimeBackupTrigger({
+    worldDirectory: path.dirname(configuration.contextFile),
+    backupRepository,
+    branch: options.backupBranch ?? process.env.ATOM_RUNTIME_BACKUP_BRANCH ?? 'runtime-data',
+    delayMs: options.backupDelayMs ?? process.env.ATOM_RUNTIME_BACKUP_DELAY_MS
+  }) : null;
+  backupTrigger?.start();
+  instance.server.once('close', () => backupTrigger?.close());
   await new Promise((resolve, reject) => {
     const onError = (error) => {
       instance.server.off('listening', onListening);
@@ -316,6 +326,7 @@ export async function startAtomGraphServer(options = {}) {
     initialization,
     interactionRuntime,
     programScheduler,
+    backupTrigger,
     close: () => closeServer(instance.server)
   });
 }
