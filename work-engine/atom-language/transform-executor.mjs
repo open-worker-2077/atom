@@ -7,6 +7,7 @@ import { diagnostic } from './errors.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { programLockDeniedDiagnostic } from './program-locks.mjs';
+import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 
 function fieldsByBase(atom) {
   const result = new Map();
@@ -581,9 +582,12 @@ export async function applyTransform({
   if (['mov', 'cpy'].includes(command.name)) {
     const invalid = validateParameter(command);
     if (invalid) return { error: invalid };
-    const destination = resolveUnique(nextAtoms, command.parameter);
+    const worldRootDestination = command.name === 'mov' && command.parameter === WORLD_OUTSIDE_NAME;
+    const destination = worldRootDestination
+      ? { match: { atom: null, path: [], parent: null, index: -1 } }
+      : resolveUnique(nextAtoms, command.parameter);
     if (destination.error) return destination;
-    if ((await authorize(destination.match, 'write')).decision !== 'allow') {
+    if (!worldRootDestination && (await authorize(destination.match, 'write')).decision !== 'allow') {
       return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造目标位置；请反馈派发方') };
     }
     if (command.name === 'mov' && destination.match.path.join('/').startsWith(
@@ -591,7 +595,9 @@ export async function applyTransform({
     )) {
       return { error: diagnostic('ATOM_MOVE_CYCLE', '不能把 Atom 移入自身后代') };
     }
-    const destinationChildren = immediateChildren(destination.match.atom);
+    const destinationChildren = worldRootDestination
+      ? nextAtoms
+      : immediateChildren(destination.match.atom);
     if (!destinationChildren) {
       return { error: diagnostic('INVALID_ATOM_CHILDREN', '目标上级 children 不是数组') };
     }
@@ -600,7 +606,10 @@ export async function applyTransform({
       && target.parent?.atom === destination.match.atom
       ? target.atom
       : null;
-    if (childNameCollision(destination.match.atom, targetName, excluded)) {
+    const collision = worldRootDestination
+      ? destinationChildren.some((atom) => atom !== excluded && storedField(atom, 'name')?.value === targetName)
+      : childNameCollision(destination.match.atom, targetName, excluded);
+    if (collision) {
       return {
         error: diagnostic(
           'DUPLICATE_DESTINATION_CHILD',

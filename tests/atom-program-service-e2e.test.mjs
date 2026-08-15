@@ -186,6 +186,18 @@ test('4784 Web workspace node creation commits atom.json before returning the re
   const nestedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(nestedWorld[0].children[0].name, 'Nested in Web');
 
+  const returnable = (await applyWebEdit({
+    kind: 'node-create', path: childPath(parent), draft: { label: 'Return to top', description: 'root move' }
+  })).knowledge.nodes.find((node) => node.label === 'Return to top');
+  const returnedToTop = (await applyWebEdit({
+    kind: 'node-land',
+    source: { key: returnable.key, nodeId: returnable.id },
+    sourceNode: returnable,
+    target: { path: 'root' },
+    draft: { id: returnable.id }
+  })).knowledge.nodes.find((node) => node.label === 'Return to top');
+  assert.equal(returnedToTop.atomPath, 'Return to top');
+
   const movable = (await applyWebEdit({
     kind: 'node-create', path: 'root', draft: { label: 'Move after refresh', description: 'movable' }
   })).knowledge.nodes.find((node) => node.label === 'Move after refresh');

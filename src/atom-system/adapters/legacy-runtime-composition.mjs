@@ -7,6 +7,7 @@ import { recordAtomFeedback } from '../../../work-engine/atom-language/feedback-
 import { projectAtomGraphWithPaths } from '../../../work-engine/atom-language/graph-4d-projection.mjs';
 import { createProgramRuntimeScheduler } from '../../../work-engine/atom-language/program-runtime.mjs';
 import { resolveAgentContext } from '../../../work-engine/atom-language/cli.mjs';
+import { WORLD_OUTSIDE_NAME } from '../../../work-engine/atom-language/world-root.mjs';
 import { createInteractionRuntime } from '../public/interaction-runtime.mjs';
 import { createLegacyWorldService } from './legacy-engine-adapter.mjs';
 import { createLegacyProjectionOrchestrator } from './legacy-projection-orchestrator.mjs';
@@ -169,7 +170,6 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
 
       if (operation?.kind === 'node-land') {
         const destinationPath = containerPath(operation.target?.path);
-        if (!destinationPath) throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Web landing requires an Atom destination');
         const legacyNode = operation.sourceNode ?? operation.draft;
         const projectedSourcePath = typeof legacyNode?.atomPath === 'string' ? legacyNode.atomPath.trim() : '';
         const sourcePath = atomPathForKey(operation.source?.key)
@@ -187,7 +187,8 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
           const name = `${destinationPath}/${label}`;
           return `transform new ${JSON.stringify({ [`name${type ? `@${type}` : ''}`]: name, detail, children: [], partners: [] })}`;
         }
-        return `transform {${JSON.stringify(`name.mov.${destinationPath}`)}:${JSON.stringify(sourcePath)}}`;
+        const destination = destinationPath || WORLD_OUTSIDE_NAME;
+        return `transform {${JSON.stringify(`name.mov.${destination}`)}:${JSON.stringify(sourcePath)}}`;
       }
 
       if (operation?.kind === 'edge-create') {
