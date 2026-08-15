@@ -80,6 +80,14 @@ test('P and the settings field share one toggle path', () => {
   assert.match(engine, /demoIdleSeconds\.addEventListener\(["']input["']/);
 });
 
+test('legacy presentation preferences migrate with automatic playback disabled', () => {
+  const load = functionSource('loadDemoSettings');
+  assert.match(engine, /graph-4d\.presentation-settings\.v2/);
+  assert.match(engine, /LEGACY_DEMO_SETTINGS_KEY/);
+  assert.match(load, /legacyRaw/);
+  assert.match(load, /idleSeconds:\s*null/);
+});
+
 test('idle presentation replans unfinished work from the current graph and cues before acting', () => {
   const start = functionSource('startDemoPresentation');
   const next = functionSource('runNextDemoStep');

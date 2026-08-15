@@ -97,7 +97,8 @@
     worldLensAction: document.getElementById("worldLensAction")
   };
 
-  const DEMO_SETTINGS_KEY = "graph-4d.presentation-settings.v1";
+  const DEMO_SETTINGS_KEY = "graph-4d.presentation-settings.v2";
+  const LEGACY_DEMO_SETTINGS_KEY = "graph-4d.presentation-settings.v1";
 
   function atomDisplayName(node, fallback = "") {
     const label = String(node && node.label || fallback || "");
@@ -108,7 +109,10 @@
   function loadDemoSettings() {
     try {
       const raw = global.localStorage.getItem(DEMO_SETTINGS_KEY);
-      return demoModel.normalizeSettings(raw ? JSON.parse(raw) : null);
+      if (raw) return demoModel.normalizeSettings(JSON.parse(raw));
+      const legacyRaw = global.localStorage.getItem(LEGACY_DEMO_SETTINGS_KEY);
+      if (!legacyRaw) return demoModel.normalizeSettings(null);
+      return demoModel.normalizeSettings({ ...JSON.parse(legacyRaw), idleSeconds: null });
     } catch (_error) {
       return demoModel.normalizeSettings(null);
     }
