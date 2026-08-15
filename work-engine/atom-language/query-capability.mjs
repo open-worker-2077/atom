@@ -116,6 +116,7 @@ export function describeAtom(match, includeFullDetail, options = {}) {
   const detailField = oneStoredField(match.atom, 'detail');
   const result = {
     path: match.path.join('/'),
+    selector: options.selector ?? match.path.join('/'),
     name: nameField?.value ?? null,
     types: nameField?.parsed.types.map((type) => type.raw) ?? [],
     description: detailField?.parsed.descriptionPresent ? detailField.parsed.description : null
@@ -124,6 +125,17 @@ export function describeAtom(match, includeFullDetail, options = {}) {
   if (options.partners) result.partners = structuredClone(options.partners);
   if (options.lockState) result.lockState = structuredClone(options.lockState);
   return result;
+}
+
+function shortestUniqueSelector(match, matches) {
+  for (let length = 1; length <= match.path.length; length += 1) {
+    const suffix = match.path.slice(-length).join('/');
+    const count = matches.filter((candidate) => (
+      candidate.path.slice(-length).join('/') === suffix
+    )).length;
+    if (count === 1) return suffix;
+  }
+  return match.path.join('/');
 }
 
 function resolvePartnerTarget(source, target, matches) {
@@ -247,11 +259,15 @@ export async function executeExploreItem(atoms, item, matcherRegistry, accessCon
     ok: true,
     index: item.index,
     matches: ordered.map((match) => describeAtom(match, includeFullDetail, {
+      selector: shortestUniqueSelector(match, visibleMatches),
       ...(includePartners
         ? { partners: oneStoredField(match.atom, 'partners')?.value ?? [] }
         : {}),
       lockState: programLockState(lockIndex, match.path.join('/'))
     })),
+    presentation: routes.some((route) => route.axis === 'latitude' && route.parameter < 0)
+      ? { kind: 'children-tree', anchorPath: anchor.path.join('/') }
+      : null,
     warnings: item.warnings
   };
 }

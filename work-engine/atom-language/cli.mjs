@@ -59,7 +59,7 @@ const TRANSFORM_HELP = Object.freeze({
 
 const EXPLORE_HELP = Object.freeze({
   'detail\u0000full': 'detail$full（返回完整 detail；否则可只返回简介）',
-  'children\u0000latitude': 'children$latitude+1 / children$latitude-1（向上看一层 / 向下看一层；数字可调整，0 为锚点层）',
+  'children\u0000latitude': 'children$latitude+1 / children$latitude-1（向上看一层 / 向下看一层；向下结果保留嵌套 children；数字可调整，0 为锚点层）',
   'children\u0000longitude': 'children$longitude+1 / children$longitude-1（向后看一个同级 / 向前看一个同级；数字可调整，0 为锚点）'
 });
 
@@ -129,6 +129,7 @@ function help() {
     ...contract.explore,
     '  读取投影推荐使用标准 JSON true（例如 ""detail$full"":true、""partners"":true）；旧的无值投影键继续兼容。',
     '  partners（返回每个匹配 Atom 的完整有向关系数组；每项包含 verb 与 object）',
+    '  多层向下查询按真实包含关系返回嵌套 children；name 仅在需要消歧时增加最短必要路径片段。',
     '  explore new 使用同一查询契约，并重置本次探索上下文；空结果返回 explore~empty/new，不代表错误。',
     '',
     'Transform 契约（目标 name 必须 exact 且唯一；写入后必须回读）：',
@@ -345,7 +346,7 @@ function graphMatch(match, hint = null) {
   const types = (match.types ?? []).map((type) => `@${type}`).join('');
   const transientHint = hint ? `~${hint}` : '';
   const entries = [
-    graphEntry(`name${types}${transientHint}`, true, match.name)
+    graphEntry(`name${types}${transientHint}`, true, match.selector ?? match.name)
   ];
   const descriptionPresent = (
     match.description !== null && match.description !== undefined
@@ -367,6 +368,29 @@ function graphMatch(match, hint = null) {
   return graphObject(entries);
 }
 
+function graphChildrenTree(item) {
+  const matches = item.matches ?? [];
+  const byPath = new Map(matches.map((match) => [match.path, match]));
+  const childrenByPath = new Map();
+  for (const match of matches) {
+    const parentPath = match.path.split('/').slice(0, -1).join('/');
+    if (!childrenByPath.has(parentPath)) childrenByPath.set(parentPath, []);
+    childrenByPath.get(parentPath).push(match);
+  }
+  function build(match) {
+    const value = graphMatch(match);
+    const children = childrenByPath.get(match.path) ?? [];
+    if (children.length) {
+      value.entries.push(graphEntry('children', true, {
+        kind: 'array', values: children.map(build)
+      }));
+    }
+    return value;
+  }
+  const root = byPath.get(item.presentation?.anchorPath);
+  return root ? build(root) : null;
+}
+
 function graphResult(result) {
   if (result.command === 'atom') {
     const count = Number.isInteger(result.atomCount) ? result.atomCount : null;
@@ -375,8 +399,13 @@ function graphResult(result) {
     return graphObject(entries);
   }
   if (result.command === 'explore') {
-    const matches = (result.items ?? []).flatMap((item) => item.matches ?? []);
-    const values = matches.map((match) => graphMatch(match));
+    const values = (result.items ?? []).flatMap((item) => {
+      if (item.presentation?.kind === 'children-tree') {
+        const tree = graphChildrenTree(item);
+        return tree ? [tree] : [];
+      }
+      return (item.matches ?? []).map((match) => graphMatch(match));
+    });
     if (values.length === 1) return values[0];
     if (values.length > 1) return { kind: 'array', values };
     if (result.ok) {

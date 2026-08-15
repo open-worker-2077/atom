@@ -157,6 +157,19 @@ test('explore accepts standard JSON true values for read projections', async (t)
   assert.deepEqual(result.items[0].matches[1].partners, [{ verb: '相邻', object: '乙区/乙后' }]);
 });
 
+test('CLI preserves descendant containment and uses only the shortest distinguishing selector', async (t) => {
+  const files = await fixture(t);
+  const result = await runCli(files, [
+    'explore', '{"name":"丙区","children$latitude-2":true,"detail$full":true}'
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.name, '丙区');
+  assert.equal(parsed.children[0].name, '规划');
+  assert.equal(parsed.children[0].children[0].name, '规划/登记册');
+  assert.equal(parsed.children[0].children[0].detail, '丙区登记册');
+});
+
 test('exact selectors use the shortest unique path suffix for reads and writes', async (t) => {
   const files = await fixture(t);
   const ambiguous = await executeAtomLanguage({
