@@ -24,6 +24,13 @@
     return KEY_MODES[code] || null;
   }
 
+  function isShiftKeyEvent(eventInput) {
+    const event = eventInput || {};
+    return event.code === "ShiftLeft"
+      || event.code === "ShiftRight"
+      || event.key === "Shift";
+  }
+
   function pointDistance(left, right) {
     return Math.hypot((right.x || 0) - (left.x || 0), (right.y || 0) - (left.y || 0));
   }
@@ -164,8 +171,12 @@
     return Object.freeze(result);
   }
 
-  function planPeerBatch(regionsInput, pointInput) {
-    const point = pointInput || { x: 0, y: 0 };
+  function planPeerBatch(regionsInput, pointInput, fallbackOwnerPathInput) {
+    const point = pointInput
+      && Number.isFinite(Number(pointInput.x))
+      && Number.isFinite(Number(pointInput.y))
+      ? pointInput
+      : null;
     const regions = (Array.isArray(regionsInput) ? regionsInput : [])
       .filter((region) => (
         region
@@ -173,7 +184,7 @@
         && region.ownerPath
         && region.clusterShellProxy !== true
       ));
-    const target = regions
+    const target = point ? regions
       .map((region) => ({
         region,
         radius: Math.max(1, Number(region.radius) || 0),
@@ -183,8 +194,18 @@
       .sort((left, right) => (
         left.distance / left.radius - right.distance / right.radius
         || left.radius - right.radius
-      ))[0];
-    if (!target) return Object.freeze([]);
+      ))[0] : null;
+    if (!target) {
+      const fallbackOwnerPath = typeof fallbackOwnerPathInput === "string"
+        ? fallbackOwnerPathInput
+        : "";
+      const contextRegions = regions.filter((region) => region.ownerPath === fallbackOwnerPath);
+      if (!contextRegions.length) return Object.freeze([]);
+      const level = Math.min(...contextRegions.map((region) => Number(region.level) || 0));
+      return Object.freeze(contextRegions
+        .filter((region) => (Number(region.level) || 0) === level)
+        .map((region) => region.key));
+    }
     return Object.freeze(regions
       .filter((region) => (
         region.ownerPath === target.region.ownerPath
@@ -298,6 +319,7 @@
     modeLabels: MODE_LABELS,
     nextMode,
     modeForKey,
+    isShiftKeyEvent,
     pointToSegmentDistance,
     pointInPolygon,
     resolveStrokeTargets,

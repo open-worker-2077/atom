@@ -93,6 +93,14 @@ test('double Shift selects peers while triple Shift remains reserved and inert',
   );
 });
 
+test('Shift gesture recognises physical and virtual keyboard events', () => {
+  const model = loadModel();
+  assert.equal(model.isShiftKeyEvent({ code: 'ShiftLeft', key: 'Shift' }), true);
+  assert.equal(model.isShiftKeyEvent({ code: 'ShiftRight', key: 'Shift' }), true);
+  assert.equal(model.isShiftKeyEvent({ code: '', key: 'Shift' }), true);
+  assert.equal(model.isShiftKeyEvent({ code: 'KeyA', key: 'a' }), false);
+});
+
 test('ASDF maps directly to the four future view modes', () => {
   const model = loadModel();
   assert.equal(model.modeForKey('KeyA'), 'nested');
@@ -113,6 +121,21 @@ test('peer batch selects every node in the pointed node same layer and group', (
   ];
   assert.deepEqual(Array.from(model.planPeerBatch(regions, { x: 11, y: 10 })), ['g/a', 'g/b', 'g/value']);
   assert.deepEqual(Array.from(model.planPeerBatch(regions, { x: 200, y: 200 })), []);
+});
+
+test('double Shift selects the current domain peer layer without a prior pointer anchor', () => {
+  const model = loadModel();
+  const regions = [
+    { key: 'current/a', ownerPath: 'current', level: 2, x: 10, y: 10, radius: 8 },
+    { key: 'current/b', ownerPath: 'current', level: 2, x: 30, y: 10, radius: 8 },
+    { key: 'current/deeper', ownerPath: 'current', level: 3, x: 50, y: 10, radius: 8 },
+    { key: 'other/c', ownerPath: 'other', level: 2, x: 70, y: 10, radius: 8 }
+  ];
+
+  assert.deepEqual(
+    Array.from(model.planPeerBatch(regions, null, 'current')),
+    ['current/a', 'current/b']
+  );
 });
 
 test('recognises a continuous five-point star without mistaking loops or zigzags', () => {

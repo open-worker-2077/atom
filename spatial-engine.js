@@ -5576,9 +5576,9 @@
     const regions = peerViewBatchRegions();
     const anchor = regions.find((region) => region.key === state.latestInteractionKey)
       || regions.find((region) => state.hovered && region.key === visualNodeKey(state.hovered, nodeOwnerPath(state.hovered)));
-    if (!anchor) return false;
-    state.batchSelectionKeys = new Set(viewModeModel.planPeerBatch(regions, anchor));
-    state.batchToggleKey = anchor.key;
+    state.batchSelectionKeys = new Set(viewModeModel.planPeerBatch(regions, anchor, state.currentPath));
+    if (!state.batchSelectionKeys.size) return false;
+    state.batchToggleKey = anchor ? anchor.key : null;
     updateSelectionUI();
     announce(`已选择同层同团 ${state.batchSelectionKeys.size} 个节点`);
     return state.batchSelectionKeys.size > 0;
@@ -6781,7 +6781,7 @@
   document.addEventListener("keydown", handleEditTransactionKey, { capture: true });
 
   document.addEventListener("keydown", (event) => {
-    if ((event.code === "ShiftLeft" || event.code === "ShiftRight") && !event.repeat) {
+    if (viewModeModel.isShiftKeyEvent(event) && !event.repeat) {
       if (workspace.transaction()) {
         state.editShiftLineBreakUntil = performance.now() + 900;
         state.wand.shiftHeld = true;
@@ -6917,7 +6917,7 @@
       }
       return;
     }
-    if (event.code !== "ShiftLeft" && event.code !== "ShiftRight") return;
+    if (!viewModeModel.isShiftKeyEvent(event)) return;
     state.wand.shiftHeld = false;
     if (state.wand.active) finishWandStroke(state.pointerPosition);
     releaseWandBatch();
