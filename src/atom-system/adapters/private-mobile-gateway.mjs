@@ -1,0 +1,179 @@
+import http from 'node:http';
+
+const LOOPBACK_HOST = '127.0.0.1';
+const ALLOWED_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT']);
+const STRIPPED_REQUEST_HEADERS = new Set([
+  'connection',
+  'host',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+  'tailscale-user-login',
+  'tailscale-user-name',
+  'tailscale-user-profile-pic',
+  'tailscale-app-capabilities'
+]);
+const STRIPPED_RESPONSE_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade'
+]);
+
+function gatewayProblem(code, message, statusCode = 400, details = {}) {
+  return Object.freeze({ code, message, statusCode, details });
+}
+
+function writeProblem(response, problem) {
+  const body = JSON.stringify({
+    ok: false,
+    error: {
+      code: problem.code,
+      message: problem.message,
+      ...(Object.keys(problem.details || {}).length ? { details: problem.details } : {})
+    }
+  });
+  response.writeHead(problem.statusCode, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(body),
+    'cache-control': 'no-store'
+  });
+  response.end(body);
+}
+
+function canonicalLogin(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function allowedLoginSet(values) {
+  const result = new Set(
+    (Array.isArray(values) ? values : [])
+      .map(canonicalLogin)
+      .filter(Boolean)
+  );
+  if (!result.size) {
+    throw new Error('Private mobile gateway requires at least one allowed Tailscale login');
+  }
+  return result;
+}
+
+function loopbackTarget(value) {
+  const target = new URL(value || 'http://127.0.0.1:4784');
+  if (target.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(target.hostname)) {
+    throw new Error('Private mobile gateway target must be a loopback HTTP service');
+  }
+  return target;
+}
+
+function requestLogin(request) {
+  const value = request.headers['tailscale-user-login'];
+  if (Array.isArray(value)) return '';
+  return canonicalLogin(value);
+}
+
+function sanitizedHeaders(headers, stripped) {
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name, value]) => (
+      value !== undefined && !stripped.has(name.toLowerCase())
+    ))
+  );
+}
+
+function targetRequestUrl(requestUrl, target) {
+  const incoming = new URL(requestUrl || '/', 'http://gateway.invalid');
+  return new URL(`${incoming.pathname}${incoming.search}`, target);
+}
+
+export async function startPrivateMobileGateway(options = {}) {
+  const allowedLogins = allowedLoginSet(options.allowedLogins);
+  const target = loopbackTarget(options.targetUrl);
+  const port = Number(options.port ?? 4785);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error('Private mobile gateway port must be an integer between 0 and 65535');
+  }
+
+  const server = http.createServer((request, response) => {
+    const login = requestLogin(request);
+    if (!login) {
+      writeProblem(response, gatewayProblem(
+        'TAILSCALE_IDENTITY_REQUIRED',
+        'Private Atom access requires a Tailscale Serve identity',
+        401
+      ));
+      return;
+    }
+    if (!allowedLogins.has(login)) {
+      writeProblem(response, gatewayProblem(
+        'TAILSCALE_IDENTITY_DENIED',
+        'This Tailscale identity is not allowed to access Atom',
+        403
+      ));
+      return;
+    }
+    if (!ALLOWED_METHODS.has(request.method || '')) {
+      writeProblem(response, gatewayProblem(
+        'PRIVATE_GATEWAY_METHOD_NOT_ALLOWED',
+        'The private Atom gateway accepts GET, HEAD, POST and PUT only',
+        405
+      ));
+      return;
+    }
+
+    const upstream = http.request(targetRequestUrl(request.url, target), {
+      method: request.method,
+      headers: {
+        ...sanitizedHeaders(request.headers, STRIPPED_REQUEST_HEADERS),
+        host: target.host
+      }
+    }, (upstreamResponse) => {
+      response.writeHead(
+        upstreamResponse.statusCode || 502,
+        sanitizedHeaders(upstreamResponse.headers, STRIPPED_RESPONSE_HEADERS)
+      );
+      upstreamResponse.pipe(response);
+    });
+
+    upstream.once('error', (error) => {
+      if (response.headersSent) {
+        response.destroy(error);
+        return;
+      }
+      writeProblem(response, gatewayProblem(
+        'ATOM_PRIVATE_UPSTREAM_UNAVAILABLE',
+        'The local Atom service is unavailable',
+        502
+      ));
+    });
+    request.once('aborted', () => upstream.destroy());
+    request.pipe(upstream);
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, LOOPBACK_HOST, resolve);
+  });
+  const address = server.address();
+  const actualPort = typeof address === 'object' && address ? address.port : port;
+
+  return Object.freeze({
+    server,
+    host: LOOPBACK_HOST,
+    port: actualPort,
+    url: `http://${LOOPBACK_HOST}:${actualPort}`,
+    targetUrl: target.href,
+    close() {
+      if (!server.listening) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+}

@@ -9,7 +9,8 @@ const REGISTERED_ENTRIES = new Set([
   'work-engine/atom-language/cli.mjs',
   'work-engine/atom-language/dev-server.mjs',
   'work-engine/atom-language/global-cli.mjs',
-  'work-engine/atom-language/graph-server.mjs'
+  'work-engine/atom-language/graph-server.mjs',
+  'work-engine/atom-language/private-mobile-gateway.mjs'
 ]);
 
 const APPROVED_LEGACY_ENGINE_IMPORTERS = new Set([

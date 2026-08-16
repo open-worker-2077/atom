@@ -156,6 +156,24 @@
       左键使用 · 右键展收 · A内包 S外围 D层级 F沉浸 · CapsLock详情 · 中键单击聚焦／拖动旋转 · Shift魔杖
     </p>
 
+    <nav class="mobile-action-dock" aria-label="手机 Atom 操作">
+      <button type="button" data-intent="setNestedView" aria-label="内包视角">A</button>
+      <button type="button" data-intent="setPeripheralView" aria-label="外围视角">S</button>
+      <button type="button" data-intent="setHierarchyView" aria-label="层级视角">D</button>
+      <button type="button" data-intent="setImmersiveView" aria-label="沉浸视角">F</button>
+      <button type="button" data-intent="applyViewMode">进入</button>
+      <button type="button" data-intent="applyParentView">返回</button>
+      <button type="button" data-intent="collapseHoveredCluster" aria-label="当前视图收缩一层">收层</button>
+      <button type="button" data-intent="expandHoveredCluster" aria-label="当前视图展开一层">展层</button>
+      <button type="button" data-intent="cycleVisibleDetails">详情</button>
+      <button type="button" data-intent="createNode">新增</button>
+      <button type="button" data-intent="editNode">编辑</button>
+      <button type="button" data-intent="editEdge">关系</button>
+      <button type="button" data-intent="confirmEdit">确认</button>
+      <button type="button" data-intent="cancelEdit">取消</button>
+      <button type="button" data-intent="deleteEdit">删除</button>
+    </nav>
+
     <aside class="edge-panel" id="mappingPanel" aria-labelledby="mappingTitle" hidden>
       <div class="edge-panel__head">
         <div>
