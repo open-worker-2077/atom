@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node work-engine/atom-language/graph-server.mjs",
     "build:browser": "node scripts/build-browser.mjs",
-    "test:architecture": "node --test tests/atom-production-architecture.test.mjs tests/atom-system-architecture.test.mjs tests/atom-system-boundaries.test.mjs",
+    "test:architecture": "node --test tests/atom-capability-graph.test.mjs tests/atom-production-architecture.test.mjs tests/atom-system-architecture.test.mjs tests/atom-system-boundaries.test.mjs",
     "test:system": "node --test tests/atom-world-transaction.test.mjs tests/atom-system-failure-recovery.test.mjs tests/atom-program-port.test.mjs tests/atom-program-runtime-scheduling.test.mjs tests/atom-system-performance.test.mjs tests/atom-interaction-runtime.test.mjs tests/atom-legacy-runtime-composition.test.mjs tests/atom-language-graph-server.test.mjs tests/atom-production-architecture.test.mjs",
     "test": "npm run build:browser && node --test --test-isolation=none tests/*.test.js tests/*.test.mjs",
     "atom": "node work-engine/atom-language/cli.mjs",

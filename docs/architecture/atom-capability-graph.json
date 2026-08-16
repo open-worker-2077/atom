@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-08-16T17:54:08+08:00",
+  "system": {
+    "id": "atom",
+    "name": "Atom",
+    "positioning": "可执行的高维事实世界：统一承载事实、关系、Program、Agent 与空间交互；Graph 和 Web 均为投影或交互形态，不是第二事实源。",
+    "authoritativeFactSource": "atom.json through the world repository port"
+  },
+  "components": [
+    { "id": "world-kernel", "name": "世界内核", "owns": ["Atom语义", "层级", "关系", "Program源码", "Agent注册"] },
+    { "id": "interaction-runtime", "name": "运行脊柱", "owns": ["交互生命周期", "世界修订", "提交顺序", "Program运行结果", "事务历史"] },
+    { "id": "projection-system", "name": "投影系统", "owns": ["Graph读模型", "Spatial读模型", "投影来源修订"] },
+    { "id": "spatial-experience", "name": "空间体验", "owns": ["相机", "焦点", "选择集", "展开状态", "视图模式", "显式布局覆盖"] },
+    { "id": "adapters", "name": "交互适配器", "owns": ["CLI协议翻译", "HTTP协议翻译", "Web意图翻译"] },
+    { "id": "operations", "name": "运行保障", "owns": ["备份副本", "恢复记录", "健康与诊断证据"] },
+    { "id": "governance", "name": "演进治理", "owns": ["能力图", "验收映射", "回归门禁"] }
+  ],
+  "capabilities": [
+    {
+      "id": "atom-facts", "name": "Atom事实", "owner": "world-kernel", "status": "achieved",
+      "purpose": "保存并解释 Atom 身份、内容、层级、关系与注册类型。",
+      "acceptance": [{ "kind": "system-test", "ref": "tests/atom-world-transaction.test.mjs", "claim": "事实只通过事务端口提交" }]
+    },
+    {
+      "id": "agent-context", "name": "Agent上下文", "owner": "world-kernel", "status": "partial",
+      "purpose": "让任意任务在明确告知已有 @agent 后进入对应工作窗口，不把 Session 当作默认绑定。",
+      "acceptance": [{ "kind": "contract-test", "ref": "tests/atom-language-context-store.test.mjs", "claim": "Agent 类型与上下文解析有契约覆盖，但跨任务真实使用仍需持续验收" }]
+    },
+    {
+      "id": "program-runtime", "name": "Program运行", "owner": "interaction-runtime", "status": "achieved",
+      "purpose": "在受限时间、并发和世界修订内执行 Program 并返回结果。",
+      "acceptance": [{ "kind": "system-test", "ref": "tests/atom-program-runtime-scheduling.test.mjs", "claim": "并发、超时、取消与失败隔离" }]
+    },
+    {
+      "id": "world-query", "name": "世界查询", "owner": "world-kernel", "status": "achieved",
+      "purpose": "按名称、路径、坐标与关系读取不可变世界修订。",
+      "acceptance": [{ "kind": "system-test", "ref": "tests/atom-language-explore-full-path.test.mjs", "claim": "公开 explore 查询契约" }]
+    },
+    {
+      "id": "world-commit", "name": "世界提交", "owner": "interaction-runtime", "status": "achieved",
+      "purpose": "把一个合法意图按预期修订原子提交为新世界事实。",
+      "acceptance": [{ "kind": "system-test", "ref": "tests/atom-world-transaction.test.mjs", "claim": "串行提交、冲突拒绝与幂等" }]
+    },
+    {
+      "id": "interaction-runtime", "name": "统一交互生命周期", "owner": "interaction-runtime", "status": "achieved",
+      "purpose": "让 CLI、HTTP、Web 和 Program 进入同一接收、决策、提交、投影与回执脊柱。",
+      "acceptance": [{ "kind": "system-test", "ref": "tests/atom-interaction-runtime.test.mjs", "claim": "生产交互生命周期" }]
+    },
+    {
+      "id": "graph-projection", "name": "Graph投影", "owner": "projection-system", "status": "achieved",
+      "purpose": "由世界事实生成可重建、带来源修订的结构读模型。",
+      "acceptance": [{ "kind": "system-test", "ref": "tests/atom-projection-pipeline.test.mjs", "claim": "投影发布与失败恢复" }]
+    },
+    {
+      "id": "spatial-projection", "name": "Spatial投影", "owner": "projection-system", "status": "achieved",
+      "purpose": "把 Atom 与 Graph 含义翻译为空间实体，不成为事实所有者。",
+      "acceptance": [{ "kind": "system-test", "ref": "tests/atom-language-graph-4d-projection.test.mjs", "claim": "空间投影可由世界事实重建" }]
+    },
+    {
+      "id": "cli-adapter", "name": "CLI交互", "owner": "adapters", "status": "partial",
+      "purpose": "让 Agent 通过稳定、可解释的 Graph-JSON 契约查询和变更 Atom。",
+      "acceptance": [{ "kind": "contract-test", "ref": "tests/atom-language-operational-cli.test.mjs", "claim": "主要命令契约已覆盖，真实 Agent 使用反馈仍会暴露解释性缺口" }]
+    },
+    {
+      "id": "http-adapter", "name": "HTTP交互", "owner": "adapters", "status": "achieved",
+      "purpose": "为 CLI 与 Web 提供同一 4784 运行脊柱的本地协议入口。",
+      "acceptance": [{ "kind": "service-e2e", "ref": "tests/atom-program-service-e2e.test.mjs", "claim": "真实 HTTP 服务命令与工作区编辑" }]
+    },
+    {
+      "id": "spatial-input", "name": "空间输入", "owner": "spatial-experience", "status": "partial",
+      "purpose": "把鼠标、键盘和模式动作翻译为明确意图，并保持单选与批量语义一致。",
+      "acceptance": [{ "kind": "model-test", "ref": "tests/spatial-view-mode-model.test.js", "claim": "输入模型已有覆盖，但缺少完整浏览器手势链验收" }]
+    },
+    {
+      "id": "workspace-edit", "name": "Web工作区编辑", "owner": "adapters", "status": "partial",
+      "purpose": "创建、编辑、移动、关联和删除节点，并逐操作提交而非定时覆盖。",
+      "acceptance": [{ "kind": "adapter-test", "ref": "tests/browser-bridge-contract.test.js", "claim": "保存排队与权威回执有覆盖，真实浏览器操作链仍不闭合" }]
+    },
+    {
+      "id": "projection-reconcile", "name": "权威投影回显", "owner": "projection-system", "status": "partial",
+      "purpose": "用最新已提交投影更新页面，同时拒绝旧快照覆盖新操作。",
+      "acceptance": [{ "kind": "adapter-test", "ref": "tests/browser-bridge-contract.test.js", "claim": "队列和修订防回退已覆盖，场景重建后的视图连续性未形成真实验收" }]
+    },
+    {
+      "id": "scene-render", "name": "场景呈现", "owner": "spatial-experience", "status": "partial",
+      "purpose": "从空间投影和独立视图事实生成确定场景。",
+      "acceptance": [{ "kind": "missing-browser-e2e", "ref": "gap://scene-render-user-path", "claim": "现有验收只证明页面可加载，未证明编辑后场景和视角保持" }]
+    },
+    {
+      "id": "view-navigation", "name": "视角与层级导航", "owner": "spatial-experience", "status": "partial",
+      "purpose": "按 A/S/D/F、PageUp/PageDown、进入与退出稳定改变视图，并围绕明确锚点居中。",
+      "acceptance": [{ "kind": "missing-browser-e2e", "ref": "gap://view-navigation-user-path", "claim": "模型契约存在，但真实浏览器多步路径曾反复回归" }]
+    },
+    {
+      "id": "persistence-recovery", "name": "持久化与恢复", "owner": "operations", "status": "achieved",
+      "purpose": "保证事实提交、事务记录、投影发布和故障恢复具有明确边界。",
+      "acceptance": [{ "kind": "failure-test", "ref": "tests/atom-system-failure-recovery.test.mjs", "claim": "提交前后中断与投影补偿" }]
+    },
+    {
+      "id": "private-backup", "name": "私密数据备份", "owner": "operations", "status": "achieved",
+      "purpose": "在权威写入后持续生成不进入公开仓库的可核验备份。",
+      "acceptance": [{ "kind": "backup-test", "ref": "tests/atom-runtime-backup-contract.test.mjs", "claim": "写入触发、数据排除与备份证据" }]
+    },
+    {
+      "id": "runtime-observability", "name": "运行可观测性", "owner": "operations", "status": "partial",
+      "purpose": "用同一关联标识贯穿用户意图、提交、投影、回显和失败。",
+      "acceptance": [{ "kind": "architecture-test", "ref": "tests/atom-system-architecture.test.mjs", "claim": "命令和回执要求关联标识，但 Web 视图链尚未完整贯通" }]
+    },
+    {
+      "id": "regression-governance", "name": "回归治理", "owner": "governance", "status": "gap",
+      "purpose": "每次改动依据能力影响面自动运行对应完整用户路径，而非只验证局部源码或模型。",
+      "acceptance": [{ "kind": "missing-browser-e2e", "ref": "gap://capability-to-journey-gate", "claim": "当前尚无能力影响面到真实浏览器路径的强制门禁" }]
+    }
+  ],
+  "invariants": [
+    {
+      "id": "single-fact-owner",
+      "statement": "每类事实只有一个权威所有者，投影、缓存和浏览器回显不得反向成为事实源。"
+    },
+    {
+      "id": "world-edit-preserves-view",
+      "statement": "世界数据编辑只改变世界事实；除非用户同时发出明确视图意图，否则权威回显和场景重建必须保留视图事实。",
+      "forbiddenMutations": ["camera", "focus", "selection", "expanded-branches", "view-mode"]
+    },
+    {
+      "id": "ordered-operation-persistence",
+      "statement": "每个操作精确触发一次提交；多端、多步操作按关联标识和修订排队，不允许定时旧快照覆盖。"
+    },
+    {
+      "id": "projection-is-rebuildable",
+      "statement": "Graph 与 Spatial 均由已提交世界修订重建并携带来源修订。"
+    },
+    {
+      "id": "real-path-evidence",
+      "statement": "关键交互只有在真实浏览器中完成输入、保存、回显和视图结果验收后，才能标记为 achieved。"
+    }
+  ],
+  "relations": [
+    { "id": "r01", "from": "cli-adapter", "to": "interaction-runtime", "type": "translates-intent-to" },
+    { "id": "r02", "from": "http-adapter", "to": "interaction-runtime", "type": "translates-intent-to" },
+    { "id": "r03", "from": "workspace-edit", "to": "interaction-runtime", "type": "submits-through" },
+    { "id": "r04", "from": "interaction-runtime", "to": "world-query", "type": "coordinates" },
+    { "id": "r05", "from": "interaction-runtime", "to": "program-runtime", "type": "bounds" },
+    { "id": "r06", "from": "interaction-runtime", "to": "world-commit", "type": "serializes" },
+    { "id": "r07", "from": "world-commit", "to": "atom-facts", "type": "advances" },
+    { "id": "r08", "from": "atom-facts", "to": "graph-projection", "type": "projects-to" },
+    { "id": "r09", "from": "graph-projection", "to": "spatial-projection", "type": "projects-to" },
+    { "id": "r10", "from": "spatial-projection", "to": "projection-reconcile", "type": "publishes-to" },
+    { "id": "r11", "from": "projection-reconcile", "to": "scene-render", "type": "refreshes-without-owning-view" },
+    { "id": "r12", "from": "spatial-input", "to": "workspace-edit", "type": "creates-data-intent" },
+    { "id": "r13", "from": "spatial-input", "to": "view-navigation", "type": "creates-view-intent" },
+    { "id": "r14", "from": "view-navigation", "to": "scene-render", "type": "changes-view-facts-for" },
+    { "id": "r15", "from": "world-commit", "to": "persistence-recovery", "type": "records-through" },
+    { "id": "r16", "from": "world-commit", "to": "private-backup", "type": "triggers" },
+    { "id": "r17", "from": "regression-governance", "to": "workspace-edit", "type": "must-gate" },
+    { "id": "r18", "from": "regression-governance", "to": "view-navigation", "type": "must-gate" }
+  ],
+  "journeys": [
+    {
+      "id": "web-edit-authoritative-reconcile",
+      "name": "Web编辑并保持视角",
+      "critical": true,
+      "status": "partial",
+      "steps": ["spatial-input", "workspace-edit", "interaction-runtime", "world-commit", "spatial-projection", "projection-reconcile", "scene-render"],
+      "invariants": ["single-fact-owner", "world-edit-preserves-view", "ordered-operation-persistence", "real-path-evidence"],
+      "acceptance": [{ "kind": "missing-browser-e2e", "ref": "gap://web-edit-authoritative-reconcile", "claim": "缺少真实 Enter 提交后数据、选择、布局和相机均稳定的浏览器验收" }]
+    },
+    {
+      "id": "web-view-navigation",
+      "name": "空间视图导航",
+      "critical": true,
+      "status": "partial",
+      "steps": ["spatial-input", "view-navigation", "scene-render"],
+      "invariants": ["world-edit-preserves-view", "real-path-evidence"],
+      "acceptance": [{ "kind": "missing-browser-e2e", "ref": "gap://web-view-navigation", "claim": "缺少 A/S/D/F、层级进出和 PageUp/PageDown 的连续浏览器路径" }]
+    },
+    {
+      "id": "agent-cli-world-use",
+      "name": "Agent通过CLI使用Atom",
+      "critical": true,
+      "status": "partial",
+      "steps": ["agent-context", "cli-adapter", "interaction-runtime", "world-query"],
+      "invariants": ["single-fact-owner"],
+      "acceptance": [{ "kind": "agent-acceptance", "ref": "tests/atom-language-operational-cli.test.mjs", "claim": "命令契约已有覆盖，跨任务自然语言使用仍需真实验收" }]
+    },
+    {
+      "id": "program-world-transition",
+      "name": "Program参与世界转移",
+      "critical": false,
+      "status": "achieved",
+      "steps": ["interaction-runtime", "world-query", "program-runtime", "world-commit", "graph-projection"],
+      "invariants": ["single-fact-owner", "projection-is-rebuildable"],
+      "acceptance": [{ "kind": "system-test", "ref": "tests/atom-program-runtime-scheduling.test.mjs", "claim": "Program受限运行并通过统一提交" }]
+    },
+    {
+      "id": "commit-backup-recovery",
+      "name": "提交、备份与恢复",
+      "critical": false,
+      "status": "achieved",
+      "steps": ["world-commit", "persistence-recovery", "private-backup"],
+      "invariants": ["single-fact-owner", "ordered-operation-persistence"],
+      "acceptance": [{ "kind": "failure-test", "ref": "tests/atom-system-failure-recovery.test.mjs", "claim": "中断恢复与写后备份" }]
+    }
+  ],
+  "currentDiagnosis": {
+    "summary": "反复回归不是单一输入错误，而是能力到完整用户路径的验收映射缺失。局部模型测试和源码匹配能够通过，但没有证明编辑回显后的场景与视图连续性。",
+    "viewJumpChain": ["spatial-input", "workspace-edit", "interaction-runtime", "world-commit", "spatial-projection", "projection-reconcile", "scene-render"],
+    "highestPriorityGap": "regression-governance",
+    "codeGraph": {
+      "status": "enabled-with-degraded-full-text",
+      "freshBranch": "main",
+      "nodes": 25096,
+      "edges": 59080,
+      "flows": 300,
+      "note": "GitNexus 精确符号、调用关系、影响分析与 Cypher 可用；本机 Windows 的 FTS/BM25 扩展不可用，因此关键词全文检索需配合 rg。"
+    }
+  }
+}

@@ -26,8 +26,12 @@ test('repository exposes one GitHub-native handoff path', () => {
 });
 
 test('architecture and accepted decisions are durable repository facts', () => {
-  assert.match(read('docs/ARCHITECTURE.md'), /视觉交互层/);
-  assert.match(read('docs/ARCHITECTURE.md'), /知识存储桥/);
+  const capabilityGraph = JSON.parse(read('docs/architecture/atom-capability-graph.json'));
+  assert.equal(capabilityGraph.system.id, 'atom');
+  assert.match(capabilityGraph.system.positioning, /高维事实世界/);
+  assert.ok(capabilityGraph.components.some(({ id }) => id === 'world-kernel'));
+  assert.ok(capabilityGraph.components.some(({ id }) => id === 'spatial-experience'));
+  assert.ok(capabilityGraph.invariants.some(({ id }) => id === 'world-edit-preserves-view'));
   for (const id of ['0001', '0002', '0003']) {
     assert.equal(findAdr(id).length, 1, `ADR ${id} exists exactly once`);
   }
