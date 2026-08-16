@@ -103,6 +103,113 @@
       .find((node) => node && node.path === targetPath && node.label === label) || null;
   }
 
+  function nodeIdentity(node, fallbackPath = "") {
+    if (!node || typeof node !== "object") return null;
+    const path = safeText(node.path || node.workspacePath || fallbackPath, "", 512);
+    const id = safeText(node.id || node.nodeId, "", 256);
+    if (!path || !id) return null;
+    return {
+      key: safeText(node.key, "", 1024) || `${path}::${id}`,
+      path,
+      id
+    };
+  }
+
+  function operationIdentityTransitions(operation, knowledge, previousKnowledge, persistedNode = null) {
+    if (!operation || typeof operation !== "object") return [];
+    const previousNodes = Array.isArray(previousKnowledge && previousKnowledge.nodes)
+      ? previousKnowledge.nodes
+      : [];
+    const nextNodes = Array.isArray(knowledge && knowledge.nodes) ? knowledge.nodes : [];
+    const transitions = [];
+    const add = (fromNode, toNode, fallbackPath = "") => {
+      const from = nodeIdentity(fromNode, fallbackPath);
+      const to = nodeIdentity(toNode, fallbackPath);
+      if (!from || !to || transitions.some((entry) => entry.from.key === from.key)) return;
+      transitions.push({ from, to });
+    };
+
+    if (operation.kind === "node-create" && persistedNode) {
+      add(operation.draft, persistedNode, operation.path);
+      return transitions;
+    }
+
+    if (!["node-edit", "node-land"].includes(operation.kind)) return transitions;
+    const operationNode = operation.node || operation.sourceNode || operation.draft || null;
+    const requestedKey = operation.nodeKey || operation.oldKey || operation.source && operation.source.key;
+    const priorRoot = previousNodes.find((node) => (
+      node && (
+        node.key === requestedKey
+        || (operationNode && node.id === operationNode.id && node.path === (operationNode.path || operationNode.workspacePath))
+        || (operationNode && operationNode.atomPath && node.atomPath === operationNode.atomPath)
+      )
+    )) || operationNode;
+    const nextRoot = persistedNode || (operation.kind === "node-land"
+      ? persistedLandingNode(operation, knowledge)
+      : null);
+    if (!priorRoot || !nextRoot) return transitions;
+
+    const oldAtomPath = safeText(priorRoot.atomPath, "", 4000);
+    const newAtomPath = safeText(nextRoot.atomPath, "", 4000);
+    if (!oldAtomPath || !newAtomPath) {
+      add(priorRoot, nextRoot, operation.path || operation.target && operation.target.path);
+      return transitions;
+    }
+    const nextByAtomPath = new Map(nextNodes
+      .filter((node) => node && typeof node.atomPath === "string")
+      .map((node) => [node.atomPath, node]));
+    previousNodes.forEach((node) => {
+      if (!node || (node.atomPath !== oldAtomPath && !node.atomPath.startsWith(`${oldAtomPath}/`))) return;
+      const suffix = node.atomPath.slice(oldAtomPath.length);
+      const nextNode = nextByAtomPath.get(`${newAtomPath}${suffix}`);
+      if (nextNode) add(node, nextNode);
+    });
+    if (!transitions.length) add(priorRoot, nextRoot, operation.path || operation.target && operation.target.path);
+    return transitions;
+  }
+
+  function remapIdentity(identity, transitions = []) {
+    if (!identity || !identity.path || !identity.id) return null;
+    const key = `${identity.path}::${identity.id}`;
+    const transition = transitions.find((entry) => entry && entry.from && entry.from.key === key);
+    return transition
+      ? { path: transition.to.path, id: transition.to.id }
+      : { path: identity.path, id: identity.id };
+  }
+
+  function reconcileVisualItems(items, transitions, resolveNode) {
+    if (!Array.isArray(items) || typeof resolveNode !== "function") return [];
+    const presentationFields = [
+      "semanticStage",
+      "revealed",
+      "peekOpen",
+      "lensOpen",
+      "lensOpenedAt",
+      "surfaceOpenedAt",
+      "pinned",
+      "pinnedAt",
+      "manualPosition",
+      "layoutIdentity",
+      "isPrimary",
+      "depthIndex",
+      "__clusterLevel"
+    ];
+    return items.flatMap((item) => {
+      if (!item || item.kind !== "node" || !item.node || item.node.isWorkspaceNode !== true) return [item];
+      const identity = remapIdentity({
+        path: item.ownerPath || item.node.workspacePath,
+        id: item.node.id
+      }, transitions);
+      const node = identity && resolveNode(identity);
+      if (!node) return [];
+      presentationFields.forEach((field) => {
+        if (Object.prototype.hasOwnProperty.call(item.node, field)) node[field] = item.node[field];
+      });
+      node.__clusterOwnerPath = identity.path;
+      return [{ ...item, node, ownerPath: identity.path }];
+    });
+  }
+
   function edgeIdentity(edge) {
     if (!edge || !edge.from || !edge.to) return "";
     if (typeof edge.id === "string" && edge.id.trim()) return edge.id.trim();
@@ -773,6 +880,9 @@
     highlightSegments,
     normalizeQuery,
     persistedLandingNode,
+    operationIdentityTransitions,
+    remapIdentity,
+    reconcileVisualItems,
     qualifiedEndpoint,
     searchEntries
   });

@@ -34,8 +34,9 @@ test('public repository excludes local worlds, projections, backups and context 
   assert.deepEqual(violations, []);
 });
 
-test('tracked JSON is limited to source manifests and public schemas', () => {
+test('tracked JSON is limited to source manifests, public schemas and reviewed architecture contracts', () => {
   const allowed = new Set([
+    'docs/architecture/atom-capability-graph.json',
     'package-lock.json',
     'package.json',
     'work-engine/atom-language/package.json'

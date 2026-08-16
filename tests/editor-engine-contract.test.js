@@ -198,7 +198,8 @@ test('knowledge refresh rebinds an existing middle-click selection instead of cl
 
   assert.match(refresh, /selectedPath/);
   assert.match(refresh, /selectedId/);
-  assert.match(refresh, /nodeByIdInPath\s*\(\s*selectedPath\s*,\s*selectedId\s*\)/);
+  assert.match(refresh, /selectedIdentity\s*=\s*workspaceModel\.remapIdentity/);
+  assert.match(refresh, /resolveImportedNode\s*=\s*\(\{\s*path,\s*id\s*\}\)\s*=>\s*nodeByIdInPath\(path,\s*id\)/);
   assert.match(refresh, /middleLabelFocus/);
   assert.match(refresh, /middleDetailFocus/);
   assert.doesNotMatch(refresh, /state\.selected\s*=\s*null/);
@@ -299,6 +300,7 @@ test('a node created at a pointer keeps that exact visual anchor after authorita
   assert.match(beginCreate, /clusterLocalPositionLocked:\s*true/);
   assert.match(beginCreate, /node\.clusterLocalPositionLocked\s*=\s*true/);
   assert.match(prepareNode, /manualPosition:\s*node\.clusterLocalPositionLocked\s*\?\s*\{\s*\.\.\.node\.position\s*\}\s*:\s*null/);
+  assert.match(prepareNode, /layoutIdentity:\s*node\.layoutIdentity\s*\|\|\s*node\.id/);
 });
 
 test('Atom confirmation reselects changed identities without navigating or reframing the view', () => {

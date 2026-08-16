@@ -56,6 +56,7 @@
   let lastKnowledge = null;
   let pendingRemoteRevision = -1;
   let workspaceOperationEpoch = 0;
+  const workspaceModel = global.SpatialWorkspaceModel;
 
   function hasQueuedWorkspaceCommit() {
     return queuedCommits.some((entry) => entry && entry.kind === "workspace");
@@ -112,6 +113,19 @@
     if (priorNode && priorNode.position) persistedNode.position = { ...priorNode.position };
     persistedNode.clusterLocalPositionLocked = priorNode && priorNode.clusterLocalPositionLocked === true;
     return persistedNode;
+  }
+
+  function importOperationKnowledge(knowledge, operation, previousKnowledge, persistedNode) {
+    const identityTransitions = workspaceModel
+      && typeof workspaceModel.operationIdentityTransitions === "function"
+      ? workspaceModel.operationIdentityTransitions(
+          operation,
+          knowledge,
+          previousKnowledge,
+          persistedNode
+        )
+      : [];
+    return lab.importKnowledge(knowledge, { identityTransitions });
   }
 
   function reportPersistence(type, detail = {}) {
@@ -243,7 +257,9 @@
         if (payload.knowledge) {
           lastKnowledge = payload.knowledge;
           revision = Number(payload.knowledge.revision) || revision;
-          if (!hasQueuedWorkspaceCommit()) lab.importKnowledge(payload.knowledge);
+          if (!hasQueuedWorkspaceCommit()) {
+            importOperationKnowledge(payload.knowledge, operation, previousKnowledge, persistedNode);
+          }
         }
         document.body.dataset.spatialBridge = "connected";
         reportPersistence("spatial-workspace-persisted", {
@@ -291,11 +307,17 @@
         if (!response.ok || payload.ok === false || payload.result?.ok === false) {
           throw new Error(payload.error?.message || payload.result?.errors?.[0]?.message || 'Atom workspace edit failed');
         }
-        const persistedNode = reconcileEditedNode(operation, payload.knowledge, previousKnowledge);
+        const persistedNode = operation.kind === "node-land"
+          && workspaceModel
+          && typeof workspaceModel.persistedLandingNode === "function"
+          ? workspaceModel.persistedLandingNode(operation, payload.knowledge)
+          : reconcileEditedNode(operation, payload.knowledge, previousKnowledge);
         if (payload.knowledge) {
           lastKnowledge = payload.knowledge;
           revision = Number(payload.knowledge.revision) || revision;
-          if (!hasQueuedWorkspaceCommit()) lab.importKnowledge(payload.knowledge);
+          if (!hasQueuedWorkspaceCommit()) {
+            importOperationKnowledge(payload.knowledge, operation, previousKnowledge, persistedNode);
+          }
         }
         document.body.dataset.spatialBridge = "connected";
         reportPersistence("spatial-workspace-persisted", {

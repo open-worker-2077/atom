@@ -5,6 +5,12 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'spatial-browser-bridge.js'), 'utf8');
+const workspaceModelSource = fs.readFileSync(path.join(__dirname, '..', 'spatial-workspace-model.js'), 'utf8');
+
+function installWorkspaceModel(window) {
+  window.window = window;
+  vm.runInNewContext(workspaceModelSource, { window }, { filename: 'spatial-workspace-model.js' });
+}
 
 test('bridge synchronizes snapshots through the explicit lab API only', () => {
   assert.match(source, /lab\.importKnowledge\s*\(/);
@@ -481,6 +487,7 @@ test('Atom Web node creation enters the semantic workspace endpoint instead of o
 test('Atom node rename keeps the prior visual placement and reports the new projected identity', async () => {
   const listeners = new Map();
   const imports = [];
+  const importOptions = [];
   const persisted = [];
   const response = (payload) => ({ ok: true, json: async () => payload });
   const oldNode = {
@@ -492,7 +499,7 @@ test('Atom node rename keeps the prior visual placement and reports the new proj
     location: { hostname: '127.0.0.1', protocol: 'http:' },
     spatialLab: {
       state: () => ({ transactionActive: false }),
-      importKnowledge: (knowledge) => { imports.push(knowledge); return true; },
+      importKnowledge: (knowledge, options) => { imports.push(knowledge); importOptions.push(options); return true; },
       exportField: () => ({ path: 'root/domain' })
     },
     fetch: async (url, options = {}) => {
@@ -519,6 +526,7 @@ test('Atom node rename keeps the prior visual placement and reports the new proj
     addEventListener: (name, listener) => listeners.set(name, listener),
     setInterval: () => 0
   };
+  installWorkspaceModel(window);
   window.window = window;
   vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
   await new Promise((resolve) => setImmediate(resolve));
@@ -535,6 +543,10 @@ test('Atom node rename keeps the prior visual placement and reports the new proj
 
   assert.deepEqual(JSON.parse(JSON.stringify(imports.at(-1).nodes[0].position)), { x: 7, y: -3, z: 2 });
   assert.equal(imports.at(-1).nodes[0].clusterLocalPositionLocked, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(importOptions.at(-1).identityTransitions)), [{
+    from: { key: 'root/domain::old-id', path: 'root/domain', id: 'old-id' },
+    to: { key: 'root/domain::new-id', path: 'root/domain', id: 'new-id' }
+  }]);
   assert.deepEqual(JSON.parse(JSON.stringify(persisted.at(-1).persistedNode)), {
     id: 'new-id', key: 'root/domain::new-id', path: 'root/domain', atomPath: 'Renamed',
     label: 'Renamed', position: { x: 7, y: -3, z: 2 }, clusterLocalPositionLocked: true

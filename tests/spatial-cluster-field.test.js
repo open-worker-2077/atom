@@ -40,6 +40,33 @@ test('builds one stable active cluster with owned nodes and bounded translucent 
   assert.ok(first.clusters[0].nodes.every((node) => node.ownerPath === 'root'));
 });
 
+test('authoritative id replacement keeps compact node placement through stable layout identity', () => {
+  const field = loadClusterField();
+  const nodes = Array.from({ length: 5 }, (_, index) => ({
+    id: `old-${index}`,
+    layoutIdentity: `layout-${index}`,
+    label: `节点 ${index}`,
+    radius: 0.82,
+    position: { x: 0, y: 0, z: 0 },
+    __clusterLevel: 0
+  }));
+  const before = field.buildScene([
+    { path: 'root', depth: 0, active: true, projectionMode: 'nested', nodes }
+  ], { compact: true, compactPercent: 500 }).clusters[0].layoutNodes;
+  const after = field.buildScene([
+    {
+      path: 'root', depth: 0, active: true, projectionMode: 'nested',
+      nodes: nodes.map((node, index) => ({ ...node, id: index === 1 ? 'new-authoritative-id' : node.id }))
+    }
+  ], { compact: true, compactPercent: 500 }).clusters[0].layoutNodes;
+  const placement = (items) => Object.fromEntries(items.map((node) => [
+    node.layoutIdentity,
+    { x: node.position.x, y: node.position.y, z: node.position.z }
+  ]));
+
+  assert.deepEqual(placement(after), placement(before));
+});
+
 test('dense cluster nodes repel in the visible plane instead of shrinking into a knot', () => {
   const field = loadClusterField();
   const sourceNodes = Array.from({ length: 12 }, (_, index) => ({

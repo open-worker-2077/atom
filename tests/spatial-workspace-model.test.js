@@ -576,3 +576,112 @@ test('discarding a transient added node leaves no tombstone or future id collisi
   assert.equal(reopened.projectDomain('root', []).some((node) => node.id === replacement.id), true);
   assert.equal(reopened.exportKnowledge().deletedNodeKeys.length, 0);
 });
+
+test('authoritative rename remaps the visible subtree without an empty projection frame', () => {
+  const model = loadModel();
+  const previousKnowledge = {
+    nodes: [
+      {
+        id: 'old-parent', key: 'root/domain::old-parent', path: 'root/domain',
+        atomPath: '旧父级', label: '旧父级'
+      },
+      {
+        id: 'old-child', key: 'root/domain/old-branch::old-child', path: 'root/domain/old-branch',
+        atomPath: '旧父级/子节点', label: '子节点'
+      }
+    ]
+  };
+  const nextKnowledge = {
+    nodes: [
+      {
+        id: 'new-parent', key: 'root/domain::new-parent', path: 'root/domain',
+        atomPath: '新父级', label: '新父级'
+      },
+      {
+        id: 'new-child', key: 'root/domain/new-branch::new-child', path: 'root/domain/new-branch',
+        atomPath: '新父级/子节点', label: '子节点'
+      }
+    ]
+  };
+  const transitions = model.operationIdentityTransitions({
+    kind: 'node-edit',
+    path: 'root/domain',
+    nodeKey: 'root/domain::old-parent',
+    node: previousKnowledge.nodes[0],
+    draft: { label: '新父级' }
+  }, nextKnowledge, previousKnowledge, nextKnowledge.nodes[0]);
+
+  assert.deepEqual(plain(transitions), [
+    {
+      from: { key: 'root/domain::old-parent', path: 'root/domain', id: 'old-parent' },
+      to: { key: 'root/domain::new-parent', path: 'root/domain', id: 'new-parent' }
+    },
+    {
+      from: { key: 'root/domain/old-branch::old-child', path: 'root/domain/old-branch', id: 'old-child' },
+      to: { key: 'root/domain/new-branch::new-child', path: 'root/domain/new-branch', id: 'new-child' }
+    }
+  ]);
+  assert.deepEqual(
+    plain(model.remapIdentity({ path: 'root/domain', id: 'old-parent' }, transitions)),
+    { path: 'root/domain', id: 'new-parent' }
+  );
+
+  const authoritative = new Map(nextKnowledge.nodes.map((node) => [node.key, node]));
+  const screen = { x: 420, y: 240, radius: 36 };
+  const reconciled = model.reconcileVisualItems([
+    {
+      kind: 'node', ownerPath: 'root/domain',
+      node: {
+        ...previousKnowledge.nodes[0],
+        isWorkspaceNode: true,
+        semanticStage: 'interior',
+        revealed: true,
+        layoutIdentity: 'stable-layout-root'
+      },
+      screen
+    },
+    { kind: 'node', ownerPath: 'root/domain/old-branch', node: { ...previousKnowledge.nodes[1], isWorkspaceNode: true }, screen: { x: 510, y: 270, radius: 20 } }
+  ], transitions, ({ path, id }) => authoritative.get(`${path}::${id}`) || null);
+
+  assert.equal(reconciled.length, 2);
+  assert.equal(reconciled[0].node.id, 'new-parent');
+  assert.equal(reconciled[0].ownerPath, 'root/domain');
+  assert.deepEqual(plain(reconciled[0].screen), screen);
+  assert.equal(reconciled[0].node.semanticStage, 'interior');
+  assert.equal(reconciled[0].node.revealed, true);
+  assert.equal(reconciled[0].node.layoutIdentity, 'stable-layout-root');
+  assert.equal(reconciled[1].node.id, 'new-child');
+  assert.equal(reconciled[1].ownerPath, 'root/domain/new-branch');
+});
+
+test('authoritative create replaces the temporary identity without dropping the visible node', () => {
+  const model = loadModel();
+  const draft = {
+    id: 'workspace-node-1',
+    key: 'root::workspace-node-1',
+    workspacePath: 'root',
+    label: '新节点'
+  };
+  const persisted = {
+    id: 'json-authoritative',
+    key: 'root::json-authoritative',
+    path: 'root',
+    atomPath: '新节点',
+    label: '新节点'
+  };
+  const transitions = model.operationIdentityTransitions(
+    { kind: 'node-create', path: 'root', draft },
+    { nodes: [persisted] },
+    { nodes: [] },
+    persisted
+  );
+
+  assert.deepEqual(plain(transitions), [{
+    from: { key: 'root::workspace-node-1', path: 'root', id: 'workspace-node-1' },
+    to: { key: 'root::json-authoritative', path: 'root', id: 'json-authoritative' }
+  }]);
+  assert.deepEqual(
+    plain(model.remapIdentity({ path: 'root', id: 'workspace-node-1' }, transitions)),
+    { path: 'root', id: 'json-authoritative' }
+  );
+});

@@ -4164,6 +4164,7 @@
       pinned: false,
       pinnedAt: 0,
       manualPosition: node.clusterLocalPositionLocked ? { ...node.position } : null,
+      layoutIdentity: node.layoutIdentity || node.id,
       isPrimary: true,
       semanticStage: 0
     });
@@ -8037,22 +8038,43 @@
     };
   }
 
-  function importKnowledge(knowledge) {
+  function importKnowledge(knowledge, options) {
+    options = options && typeof options === "object" ? options : {};
+    const identityTransitions = Array.isArray(options.identityTransitions)
+      ? options.identityTransitions
+      : [];
     const selectedPath = state.selected ? nodeOwnerPath(state.selected) : "";
     const selectedId = state.selected && state.selected.id;
     const focusedPath = state.focused ? nodeOwnerPath(state.focused) : "";
     const focusedId = state.focused && state.focused.id;
     const middleLabelFocus = state.middleLabelFocus;
     const middleDetailFocus = state.middleDetailFocus;
+    const selectedIdentity = workspaceModel.remapIdentity(
+      { path: selectedPath, id: selectedId },
+      identityTransitions
+    );
+    const focusedIdentity = workspaceModel.remapIdentity(
+      { path: focusedPath, id: focusedId },
+      identityTransitions
+    );
     if (!workspace.importKnowledge(knowledge)) return false;
     cleanupOrphanedDemoKnowledge();
     state.hovered = null;
-    state.rendered = [];
-    state.hitRegions = [];
-    state.relationHitRegions = [];
     currentDomainNodes();
-    state.selected = selectedId ? nodeByIdInPath(selectedPath, selectedId) : null;
-    state.focused = focusedId ? nodeByIdInPath(focusedPath, focusedId) : null;
+    const resolveImportedNode = ({ path, id }) => nodeByIdInPath(path, id);
+    state.rendered = workspaceModel.reconcileVisualItems(
+      state.rendered,
+      identityTransitions,
+      resolveImportedNode
+    );
+    state.hitRegions = workspaceModel.reconcileVisualItems(
+      state.hitRegions,
+      identityTransitions,
+      resolveImportedNode
+    );
+    state.relationHitRegions = [];
+    state.selected = selectedIdentity ? resolveImportedNode(selectedIdentity) : null;
+    state.focused = focusedIdentity ? resolveImportedNode(focusedIdentity) : null;
     const focusSurvives = (focus) => Boolean(
       focus
       && (focus.kind !== "node" || visualEntryForKey(focus.anchorKey))

@@ -163,6 +163,10 @@
     return { x: Math.cos(angle), y: Math.sin(angle) };
   }
 
+  function stableLayoutIdentity(node) {
+    return node && (node.layoutIdentity || node.id) || "";
+  }
+
   function clusterNodeScale() {
     return 1;
   }
@@ -355,7 +359,7 @@
     const placed = [...fixedNodes];
     const ordered = [...automaticNodes].sort((left, right) => (
       right.__clusterRadius - left.__clusterRadius
-      || String(left.id).localeCompare(String(right.id))
+      || String(stableLayoutIdentity(left)).localeCompare(String(stableLayoutIdentity(right)))
     ));
     const fits = (node, candidate) => placed.every((other) => (
       Math.hypot(candidate.x - other.position.x, candidate.y - other.position.y) + 0.00001
@@ -370,7 +374,7 @@
       const candidates = [{ x: center.x, y: center.y }];
       for (const anchor of placed) {
         const tangentDistance = node.__clusterRadius + anchor.__clusterRadius + gap;
-        const seed = stableDirection(node.id, anchor.id);
+        const seed = stableDirection(stableLayoutIdentity(node), stableLayoutIdentity(anchor));
         const startAngle = Math.atan2(seed.y, seed.x);
         for (let step = 0; step < 48; step += 1) {
           const angle = startAngle + step * Math.PI * 2 / 48;
@@ -389,7 +393,7 @@
         || left.x - right.x
       ))[0];
       if (!best) {
-        const seed = stableDirection(node.id, "compact-disk");
+        const seed = stableDirection(stableLayoutIdentity(node), "compact-disk");
         const startAngle = Math.atan2(seed.y, seed.x);
         const stepSize = Math.max(0.04, gap * 0.5, node.__clusterRadius * 0.12);
         for (let attempt = 1; attempt < 4096; attempt += 1) {
@@ -453,7 +457,7 @@
     if (compactness > 0 && positioned.length > 1) {
       const automatic = positioned
         .filter((node) => node.__packingLocked !== true)
-        .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+        .sort((left, right) => String(stableLayoutIdentity(left)).localeCompare(String(stableLayoutIdentity(right))));
       const fixed = positioned.filter((node) => node.__packingLocked === true);
       placeCompactDisk(automatic, fixed, center, collisionGap * displayScale);
     }
@@ -471,7 +475,7 @@
           const distance = Math.hypot(dx, dy);
           const direction = distance > 0.0001
             ? { x: dx / distance, y: dy / distance }
-            : stableDirection(left.id, right.id);
+            : stableDirection(stableLayoutIdentity(left), stableLayoutIdentity(right));
           const minimumDistance = left.__clusterRadius + right.__clusterRadius + collisionGap;
           // In A mode repulsion begins exactly at x. A wider influence field
           // recreates the large empty gaps that compact packing is meant to remove.
@@ -534,7 +538,7 @@
           if (!(penetration > 0.000001)) continue;
           const direction = distance > 0.0001
             ? { x: dx / distance, y: dy / distance }
-            : stableDirection(left.id, right.id);
+            : stableDirection(stableLayoutIdentity(left), stableLayoutIdentity(right));
           const leftLocked = left.__packingLocked === true;
           const rightLocked = right.__packingLocked === true;
           const correction = penetration * (leftLocked || rightLocked ? 1.01 : 0.505);
@@ -573,7 +577,9 @@
       ))
     ));
     if (hasHardOverlap()) {
-      const ordered = [...positioned].sort((left, right) => String(left.id).localeCompare(String(right.id)));
+      const ordered = [...positioned].sort((left, right) => (
+        String(stableLayoutIdentity(left)).localeCompare(String(stableLayoutIdentity(right)))
+      ));
       const maximumRadius = Math.max(...ordered.map((node) => node.__clusterRadius));
       const cell = maximumRadius * 2 + hardGap;
       const placed = [];
@@ -591,7 +597,7 @@
       }
       for (const node of movable) {
         if (!fitsPlaced(node, node.position.x, node.position.y)) {
-          const baseDirection = stableDirection(node.id, ownerPath);
+          const baseDirection = stableDirection(stableLayoutIdentity(node), ownerPath);
           const baseAngle = Math.atan2(baseDirection.y, baseDirection.x);
           for (let attempt = 0; attempt < 4096; attempt += 1) {
             const distance = cell * 0.58 * Math.sqrt(attempt);
