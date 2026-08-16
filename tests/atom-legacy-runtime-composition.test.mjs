@@ -6,7 +6,8 @@ import test from 'node:test';
 
 import {
   createLegacyRuntimeComposition,
-  createLegacyHumanStatusTranslator
+  createLegacyHumanStatusTranslator,
+  createLegacyHumanWorkspaceTranslator
 } from '../src/atom-system/adapters/legacy-runtime-composition.mjs';
 import { createRuntimeCliExecutor } from '../src/atom-system/adapters/runtime-cli-executor.mjs';
 
@@ -135,5 +136,39 @@ test('human status translator accepts only projected 状态 nodes and returns on
   await assert.rejects(
     translator.translate({ key: 'missing', detail: '进行中' }),
     (error) => error.code === 'INVALID_HUMAN_STATUS_REQUEST'
+  );
+});
+
+test('human workspace translator treats the single synthetic root domain as the top-level Atom container', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-workspace-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const graphFile = path.join(directory, 'graph.json');
+  await fs.writeFile(graphFile, '{}\n', 'utf8');
+  const rootDomain = {
+    id: 'synthetic-root', key: 'root::synthetic-root', path: 'root', atomPath: '',
+    label: 'atom.json', hasChildren: true
+  };
+  let hash = 2166136261;
+  for (const character of rootDomain.id) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  const rootDomainPath = `root/${(hash >>> 0).toString(36)}`;
+  const translator = createLegacyHumanWorkspaceTranslator({
+    graphFile,
+    projectGraph: async () => ({
+      knowledge: { nodes: [rootDomain], edges: [] },
+      atomPathByKey: new Map()
+    })
+  });
+
+  assert.equal(
+    await translator.translate({
+      operation: {
+        kind: 'node-create', path: rootDomainPath,
+        draft: { label: 'Top-level from Web', description: 'saved' }
+      }
+    }),
+    'transform new {"name":"Top-level from Web","detail":"saved","children":[],"partners":[]}'
   );
 });

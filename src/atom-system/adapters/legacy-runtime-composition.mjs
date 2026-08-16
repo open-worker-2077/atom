@@ -100,8 +100,11 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
       const containerPath = (spatialPath) => {
         if (spatialPath === 'root') return '';
         const parent = knowledge.nodes.find((node) => (
-          spatialChildPath(node) === spatialPath && atomPathByKey.has(node.key)
+          spatialChildPath(node) === spatialPath
         ));
+        const rootNodes = knowledge.nodes.filter((node) => node.path === 'root');
+        const syntheticRoot = rootNodes.length === 1 && rootNodes[0] === parent && !atomPathByKey.has(parent.key);
+        if (syntheticRoot) return '';
         const path = parent ? atomPathByKey.get(parent.key) : '';
         if (!path) {
           throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Web node target does not map to one Atom container');

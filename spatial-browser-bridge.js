@@ -78,6 +78,42 @@
     return persistedNode;
   }
 
+  function reconcileEditedNode(operation, knowledge, previousKnowledge) {
+    if (!operation || operation.kind !== "node-edit" || operation.status === "delete" || !knowledge) return null;
+    const priorNodes = Array.isArray(previousKnowledge && previousKnowledge.nodes)
+      ? previousKnowledge.nodes
+      : [];
+    const operationNode = operation.node && typeof operation.node === "object" ? operation.node : null;
+    const priorNode = priorNodes.find((node) => (
+      node && (
+        node.key === operation.nodeKey
+        || (operationNode && node.key === operationNode.key)
+        || (operationNode && operationNode.atomPath && node.atomPath === operationNode.atomPath)
+      )
+    )) || operationNode;
+    const label = operation.draft && operation.draft.label;
+    const priorAtomPath = priorNode && priorNode.atomPath;
+    const parentAtomPath = typeof priorAtomPath === "string" && priorAtomPath.includes("/")
+      ? priorAtomPath.slice(0, priorAtomPath.lastIndexOf("/"))
+      : "";
+    const expectedAtomPath = label
+      ? (parentAtomPath ? `${parentAtomPath}/${label}` : label)
+      : "";
+    const candidates = (Array.isArray(knowledge.nodes) ? knowledge.nodes : []).filter((node) => (
+      node
+      && node.label === label
+      && (
+        (expectedAtomPath && node.atomPath === expectedAtomPath)
+        || (!expectedAtomPath && node.path === operation.path)
+      )
+    ));
+    if (candidates.length !== 1) return null;
+    const persistedNode = candidates[0];
+    if (priorNode && priorNode.position) persistedNode.position = { ...priorNode.position };
+    persistedNode.clusterLocalPositionLocked = priorNode && priorNode.clusterLocalPositionLocked === true;
+    return persistedNode;
+  }
+
   function reportPersistence(type, detail = {}) {
     if (!Number.isFinite(Number(detail.persistenceId)) || typeof global.dispatchEvent !== "function") return;
     const EventConstructor = global.CustomEvent;
@@ -246,6 +282,7 @@
         return true;
       }
       if (operation) {
+        const previousKnowledge = lastKnowledge;
         const response = await global.fetch('/__atom/api/workspace-edit', {
           method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ operation })
@@ -254,6 +291,7 @@
         if (!response.ok || payload.ok === false || payload.result?.ok === false) {
           throw new Error(payload.error?.message || payload.result?.errors?.[0]?.message || 'Atom workspace edit failed');
         }
+        const persistedNode = reconcileEditedNode(operation, payload.knowledge, previousKnowledge);
         if (payload.knowledge) {
           lastKnowledge = payload.knowledge;
           revision = Number(payload.knowledge.revision) || revision;
@@ -261,7 +299,7 @@
         }
         document.body.dataset.spatialBridge = "connected";
         reportPersistence("spatial-workspace-persisted", {
-          persistenceId, operation, knowledge: payload.knowledge
+          persistenceId, operation, knowledge: payload.knowledge, persistedNode
         });
         return true;
       }

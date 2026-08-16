@@ -92,6 +92,6 @@ test('editor exposes a deterministic line-break control alongside Shift Enter', 
 
 test('browser assets use the current cache-busting release id', () => {
   assert.doesNotMatch(html, /v=20260727\.74/);
-  assert.match(html, /spatial-engine\.js\?v=20260813\.229/);
-  assert.match(html, /spatial-markdown-editor\.bundle\.js\?v=20260813\.229/);
+  assert.match(html, /spatial-engine\.js\?v=20260816\.310/);
+  assert.match(html, /spatial-markdown-editor\.bundle\.js\?v=20260816\.310/);
 });

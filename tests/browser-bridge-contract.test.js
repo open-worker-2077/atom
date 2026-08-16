@@ -478,6 +478,69 @@ test('Atom Web node creation enters the semantic workspace endpoint instead of o
   assert.equal(requests.some(([url, options]) => url.endsWith('/state') && options.method === 'PUT'), false);
 });
 
+test('Atom node rename keeps the prior visual placement and reports the new projected identity', async () => {
+  const listeners = new Map();
+  const imports = [];
+  const persisted = [];
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const oldNode = {
+    id: 'old-id', key: 'root/domain::old-id', path: 'root/domain', atomPath: 'Old',
+    label: 'Old', position: { x: 7, y: -3, z: 2 }, clusterLocalPositionLocked: true
+  };
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge: (knowledge) => { imports.push(knowledge); return true; },
+      exportField: () => ({ path: 'root/domain' })
+    },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state') && !options.method) {
+        return response({ knowledge: { revision: 1, nodes: [oldNode], edges: [] } });
+      }
+      if (url.endsWith('/workspace-edit')) return response({
+        ok: true,
+        result: { ok: true },
+        knowledge: {
+          revision: 2,
+          nodes: [{
+            id: 'new-id', key: 'root/domain::new-id', path: 'root/domain', atomPath: 'Renamed',
+            label: 'Renamed', position: { x: 40, y: 40, z: 0 }
+          }],
+          edges: []
+        }
+      });
+      return response({ result: {} });
+    },
+    CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    dispatchEvent: (event) => { if (event.type === 'spatial-workspace-persisted') persisted.push(event.detail); },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => 0
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  imports.length = 0;
+
+  await listeners.get('spatial-workspace-committed')({ detail: {
+    persistenceId: 9,
+    operation: {
+      kind: 'node-edit', path: 'root/domain', nodeKey: oldNode.key, node: oldNode,
+      draft: { label: 'Renamed', description: 'Edited' }
+    },
+    knowledge: { revision: 1, nodes: [{ ...oldNode, label: 'Renamed' }], edges: [] }
+  } });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(imports.at(-1).nodes[0].position)), { x: 7, y: -3, z: 2 });
+  assert.equal(imports.at(-1).nodes[0].clusterLocalPositionLocked, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(persisted.at(-1).persistedNode)), {
+    id: 'new-id', key: 'root/domain::new-id', path: 'root/domain', atomPath: 'Renamed',
+    label: 'Renamed', position: { x: 7, y: -3, z: 2 }, clusterLocalPositionLocked: true
+  });
+});
+
 test('every Atom Web structural edit uses the semantic workspace boundary instead of the projection store', async () => {
   for (const operation of [
     { kind: 'node-edit', path: 'root', nodeKey: 'root::a', node: { id: 'a' }, draft: { label: 'Renamed', description: 'Edited' } },

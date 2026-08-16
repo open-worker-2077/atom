@@ -77,27 +77,17 @@ test('node editor starts from ctrl pointer position and updates name detail and 
   assert.match(source, /attachmentInput\.addEventListener\s*\(\s*["']change["']/);
 });
 
-test('node editing frames the live rendered node and keeps it centred after commit', () => {
+test('node editing never moves the camera because data operations do not own the view', () => {
   const beginCreate = functionSource('beginNodeCreateAt');
   const beginEdit = functionSource('beginNodeEdit');
-  const applyFrame = functionSource('applyPendingNodeEditFrame');
   const commit = functionSource('commitWorkspaceEdit');
   const cancel = functionSource('cancelWorkspaceEdit');
 
-  assert.match(beginCreate, /beginNodeEditCamera\s*\(\s*node\s*,\s*path/);
-  assert.match(beginCreate, /editWorldPosition/);
-  assert.match(beginCreate, /domainContext\.center/);
-  assert.match(beginEdit, /beginNodeEditCamera\s*\(\s*resolvedNode\s*,\s*path/);
-  assert.match(applyFrame, /state\.rendered\.find/);
-  assert.match(applyFrame, /pending\.position/);
-  assert.match(applyFrame, /state\.width\s*\/\s*2/);
-  assert.match(applyFrame, /state\.height\s*\/\s*2/);
-  assert.match(applyFrame, /item\.position/);
-  assert.match(applyFrame, /item\.radius/);
-  assert.match(applyFrame, /Math\.tan\s*\(\s*camera\.fov\s*\/\s*2\s*\)/);
-  assert.match(applyFrame, /startCameraTween\s*\(/);
-  assert.match(commit, /scheduleCommittedNodeFrame/);
-  assert.match(cancel, /restoreNodeEditCamera/);
+  for (const operation of [beginCreate, beginEdit, commit, cancel]) {
+    assert.doesNotMatch(operation, /beginNodeEditCamera|scheduleCommittedNodeFrame|restoreNodeEditCamera/);
+    assert.doesNotMatch(operation, /camera\.(?:target|distance|yaw|pitch)\s*=/);
+    assert.doesNotMatch(operation, /startCameraTween\s*\(/);
+  }
 });
 
 test('edit confirmation keys are consumed before editor and browsing shortcuts can both run', () => {
@@ -132,7 +122,7 @@ test('cluster creation preserves click-local placement and pending relations ren
   const connections = functionSource('drawConnections');
   const clusterConnections = functionSource('drawClusterConnections');
 
-  assert.match(create, /clusterLocalPositionLocked\s*=\s*Boolean\s*\(\s*domainContext\s*\)/);
+  assert.match(create, /clusterLocalPositionLocked\s*=\s*true/);
   assert.match(create, /state\.nodeEditorFallback\s*=\s*\{[\s\S]*x:\s*point\.x[\s\S]*y:\s*point\.y/);
   assert.doesNotMatch(sync, /if\s*\(\s*!rendered\s*\)\s*\{[\s\S]*nodeNameEditorWrap\.hidden\s*=\s*true/);
   assert.match(sync, /rendered\s*\?\s*rendered\.screen\s*:\s*anchor\.screen\s*\|\|\s*state\.nodeEditorFallback/);
@@ -302,15 +292,24 @@ test('engine exposes explicit knowledge and field projections without pointer si
   assert.doesNotMatch(source, /spatialLab[\s\S]{0,600}dispatchEvent\s*\(\s*new\s+(?:Mouse|Pointer|Keyboard)Event/);
 });
 
-test('Atom confirmation reselects the authoritative created node after its projected identity changes', () => {
+test('a node created at a pointer keeps that exact visual anchor after authoritative save', () => {
+  const beginCreate = functionSource('beginNodeCreateAt');
+  const prepareNode = functionSource('prepareWorkspaceNode');
+
+  assert.match(beginCreate, /clusterLocalPositionLocked:\s*true/);
+  assert.match(beginCreate, /node\.clusterLocalPositionLocked\s*=\s*true/);
+  assert.match(prepareNode, /manualPosition:\s*node\.clusterLocalPositionLocked\s*\?\s*\{\s*\.\.\.node\.position\s*\}\s*:\s*null/);
+});
+
+test('Atom confirmation reselects changed identities without navigating or reframing the view', () => {
   const start = source.indexOf('global.addEventListener("spatial-workspace-persisted"');
   const end = source.indexOf('global.addEventListener("spatial-workspace-persist-failed"', start);
   const persisted = source.slice(start, end);
 
-  assert.match(persisted, /kind === ["']node-create["']/);
+  assert.match(persisted, /\[["']node-create["'],\s*["']node-edit["']\]\.includes\(kind\)/);
   assert.match(persisted, /event\.detail\.persistedNode/);
-  assert.match(persisted, /locateKnowledgeNode|nodeByIdInPath/);
-  assert.match(persisted, /scheduleCommittedNodeFrame/);
+  assert.match(persisted, /nodeByIdInPath/);
+  assert.doesNotMatch(persisted, /locateKnowledgeNode|scheduleCommittedNodeFrame|startCameraTween/);
 });
 
 test('imported workspace-node preparation is guarded and derives surface visibility from detail mode', () => {

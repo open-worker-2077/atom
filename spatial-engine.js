@@ -677,8 +677,6 @@
     attachmentUrl: "",
     nodeEditorFallback: null,
     nodeEditorAnchor: null,
-    nodeEditCameraSnapshot: null,
-    pendingNodeEditFrame: null,
     editShiftLineBreakUntil: 0,
     bindingCaptureIntent: null,
     drag: null,
@@ -3663,8 +3661,6 @@
       focused: state.focused,
       viewMode: state.viewMode
     });
-    applyPendingNodeEditFrame();
-
     if (state.clusterFieldOpen) {
       drawClusterField(state.clusterScene, basis);
       drawClusterConnections(rendered);
@@ -4147,82 +4143,6 @@
     });
   }
 
-  function beginNodeEditCamera(node, path, fallback = null) {
-    if (!state.nodeEditCameraSnapshot) {
-      state.nodeEditCameraSnapshot = cameraSnapshot();
-    }
-    state.pendingNodeEditFrame = {
-      nodeId: node.id,
-      path,
-      phase: "editing",
-      position: fallback && fallback.position ? { ...fallback.position } : null,
-      radius: fallback && Number(fallback.radius) || null
-    };
-  }
-
-  function scheduleCommittedNodeFrame(node, path = nodeOwnerPath(node, state.currentPath)) {
-    if (!node) {
-      state.pendingNodeEditFrame = null;
-      state.nodeEditCameraSnapshot = null;
-      return;
-    }
-    state.pendingNodeEditFrame = {
-      nodeId: node.id,
-      path,
-      phase: "committed"
-    };
-    state.nodeEditCameraSnapshot = null;
-  }
-
-  function restoreNodeEditCamera() {
-    const snapshot = state.nodeEditCameraSnapshot;
-    state.pendingNodeEditFrame = null;
-    state.nodeEditCameraSnapshot = null;
-    if (!snapshot) return false;
-    state.cameraTween = null;
-    startCameraTween(snapshot, 260, updateSelectionUI);
-    return true;
-  }
-
-  function applyPendingNodeEditFrame() {
-    const pending = state.pendingNodeEditFrame;
-    if (!pending) return false;
-    const item = state.rendered.find((candidate) => (
-      candidate.kind === "node"
-      && candidate.node
-      && candidate.node.id === pending.nodeId
-      && (candidate.ownerPath || nodeOwnerPath(candidate.node)) === pending.path
-    ));
-    const position = item && item.position ? item.position : pending.position;
-    if (!position) return false;
-    state.pendingNodeEditFrame = null;
-    const radius = Math.max(0.25, Number(item && item.radius) || Number(pending.radius) || 0.82);
-    if (!item) {
-      const fallbackScreen = {
-        x: state.width / 2,
-        y: state.height / 2,
-        radius: Math.min(state.width, state.height) * 0.34
-      };
-      state.nodeEditorFallback = fallbackScreen;
-      if (state.nodeEditorAnchor) state.nodeEditorAnchor.screen = { ...fallbackScreen };
-    }
-    const distance = clamp(
-      radius / (Math.max(0.08, Math.tan(camera.fov / 2)) * 0.76),
-      MIN_CAMERA_DISTANCE,
-      MAX_CAMERA_DISTANCE
-    );
-    state.cameraTween = null;
-    startCameraTween(
-      { target: position, distance },
-      pending.phase === "editing" ? 280 : 360,
-      () => {
-        updateSelectionUI();
-        syncEditorOverlays();
-      }
-    );
-    return true;
-  }
-
   function prepareWorkspaceNode(node, path = state.currentPath) {
     const detailMode = visualModel.detailModeFor(node);
     Object.assign(node, {
@@ -4243,7 +4163,7 @@
       surfaceOpenedAt: detailMode === "surface" ? performance.now() : 0,
       pinned: false,
       pinnedAt: 0,
-      manualPosition: null,
+      manualPosition: node.clusterLocalPositionLocked ? { ...node.position } : null,
       isPrimary: true,
       semanticStage: 0
     });
@@ -4275,25 +4195,16 @@
     }
     const path = domainContext ? domainContext.path : state.currentPath;
     const position = clusterLocalPosition(point, domainContext);
-    const editWorldPosition = domainContext
-      ? V.add(
-        domainContext.center,
-        V.scale(position, Math.max(0.0001, Number(domainContext.nodeScale) || 1))
-      )
-      : { ...position };
-    const editWorldRadius = domainContext
-      ? clamp(0.82 * Math.max(0.0001, Number(domainContext.nodeScale) || 1) * 1.12, 0.34, 0.82)
-      : 0.82;
     const node = workspace.beginNodeCreate(path, {
       label: "未命名节点",
       description: "",
       position,
       radius: 0.82,
-      clusterLocalPositionLocked: Boolean(domainContext)
+      clusterLocalPositionLocked: true
     });
     if (!node) return false;
     prepareWorkspaceNode(node, path);
-    node.clusterLocalPositionLocked = Boolean(domainContext);
+    node.clusterLocalPositionLocked = true;
     node.__clusterOwnerPath = path;
     state.nodeEditorFallback = {
       x: point.x,
@@ -4305,10 +4216,6 @@
       path,
       screen: { ...state.nodeEditorFallback }
     };
-    beginNodeEditCamera(node, path, {
-      position: editWorldPosition,
-      radius: editWorldRadius
-    });
     openNodeEditor(node, path);
     announce("新节点已出现，输入名称后按 Enter 提交");
     return true;
@@ -4331,7 +4238,6 @@
       screen: renderedHit && renderedHit.screen ? { ...renderedHit.screen } : null
     };
     state.nodeEditorFallback = state.nodeEditorAnchor.screen;
-    beginNodeEditCamera(resolvedNode, path);
     openNodeEditor(resolvedNode, path);
     announce(`正在编辑 ${resolvedNode.label}`);
     return true;
@@ -4500,19 +4406,15 @@
         return;
       }
     }
-    if (kind === "node-create" && event.detail.persistedNode) {
+    if (["node-create", "node-edit"].includes(kind) && event.detail.persistedNode) {
       const persisted = event.detail.persistedNode;
-      if (persisted.path !== state.currentPath) {
-        locateKnowledgeNode(persisted.key || `${persisted.path}::${persisted.id || persisted.nodeId}`);
-      } else {
+      if (persisted.path === state.currentPath) {
         state.selected = nodeByIdInPath(persisted.path, persisted.id || persisted.nodeId);
         state.focused = null;
       }
       if (state.selected) {
-        scheduleCommittedNodeFrame(state.selected, persisted.path);
         updateSelectionUI();
-        recordCurrentView();
-        announce("节点已创建并保存");
+        announce(kind === "node-create" ? "节点已创建并保存" : "节点已更新并保存");
         return;
       }
     }
@@ -4591,7 +4493,6 @@
   function commitWorkspaceEdit() {
     const transaction = workspace.transaction();
     if (!transaction) return false;
-    const nodeTransaction = ["node-create", "node-edit"].includes(transaction.kind);
     if (["node-create", "node-edit"].includes(transaction.kind)) syncEditorOverlays();
     if (transaction.kind === "edge-edit" && transaction.status !== "delete") {
       workspace.updateEdgeDraft({ label: ui.edgeNameEditor.value });
@@ -4631,14 +4532,6 @@
       state.selected = nodeId ? nodeByIdInPath(operationPath, nodeId) : state.selected;
       announce(operation.kind.startsWith("edge-") ? "关系已提交" : "节点更新已提交");
     }
-    if (nodeTransaction && state.selected) {
-      scheduleCommittedNodeFrame(
-        state.selected,
-        nodeOwnerPath(state.selected, operation.path || state.currentPath)
-      );
-    } else if (nodeTransaction) {
-      restoreNodeEditCamera();
-    }
     updateSelectionUI();
     renderSearchResults();
     announce("正在保存，等待 Atom 确认");
@@ -4660,7 +4553,6 @@
     workspace.cancel();
     closeNodeEditor();
     state.selected = nodeId && sourcePath ? nodeByIdInPath(sourcePath, nodeId) : null;
-    restoreNodeEditCamera();
     updateSelectionUI();
     announce("编辑已取消，原状态已恢复");
     canvas.focus({ preventScroll: true });
