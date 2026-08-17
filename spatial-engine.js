@@ -12,12 +12,13 @@
   const workspaceModel = global.SpatialWorkspaceModel;
   const clusterField = global.SpatialClusterField;
   const viewModeModel = global.SpatialViewModeModel;
+  const helpPageModel = global.SpatialHelpPageModel;
   const demoModel = global.SpatialDemoModel;
   const demoGeometry = global.SpatialDemoGeometry;
   const detailMagnifierModel = global.SpatialDetailMagnifierModel;
   const sceneAdapter = global.AtomSpatialScene;
 
-  if (!context || !input || !visualModel || !gestureArbiter || !middleFrameTarget || !registry || !grammar || !workspaceModel || !clusterField || !viewModeModel || !demoModel || !demoGeometry || !detailMagnifierModel || !sceneAdapter) {
+  if (!context || !input || !visualModel || !gestureArbiter || !middleFrameTarget || !registry || !grammar || !workspaceModel || !clusterField || !viewModeModel || !helpPageModel || !demoModel || !demoGeometry || !detailMagnifierModel || !sceneAdapter) {
     document.body.dataset.spatialUnavailable = "true";
     return;
   }
@@ -6997,6 +6998,22 @@
     }
   }
 
+  let activeHelpPage = helpPageModel.defaultPage({
+    coarsePointer: Boolean(global.matchMedia && global.matchMedia("(hover: none) and (pointer: coarse)").matches)
+  });
+
+  function setHelpPage(requestedPage) {
+    activeHelpPage = helpPageModel.selectPage(activeHelpPage, requestedPage);
+    document.querySelectorAll("[data-help-tab]").forEach((button) => {
+      const selected = button.dataset.helpTab === activeHelpPage;
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+    });
+    document.querySelectorAll("[data-help-page]").forEach((page) => {
+      page.hidden = page.dataset.helpPage !== activeHelpPage;
+    });
+  }
+
   function clearDemoTimers() {
     ["themeTimer", "stepTimer", "cueTimer", "frameTimer", "wandTimer"].forEach((key) => {
       if (state.demo[key]) global.clearTimeout(state.demo[key]);
@@ -7715,6 +7732,18 @@
     });
   });
 
+  document.querySelectorAll("[data-help-tab]").forEach((button) => {
+    button.addEventListener("click", () => setHelpPage(button.dataset.helpTab));
+  });
+
+  document.querySelectorAll("[data-open-help-page]").forEach((button) => {
+    button.addEventListener("click", () => {
+      closePanels("help");
+      setHelpPage(button.dataset.openHelpPage);
+      setHelpPanelVisible(true);
+    });
+  });
+
   ui.demoIdleSeconds.addEventListener("input", () => {
     stopDemoPresentation();
     updateDemoSettings(demoModel.withIdleInput(state.demo.settings, ui.demoIdleSeconds.value.trim()));
@@ -7923,6 +7952,7 @@
   }
 
   syncPresentationControls();
+  setHelpPage(activeHelpPage);
   setHelpPanelVisible(state.demo.settings.helpVisible, false);
   renderBindings();
   updateSelectionUI();

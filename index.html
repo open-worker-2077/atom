@@ -166,6 +166,7 @@
       <button type="button" data-intent="collapseHoveredCluster" aria-label="当前视图收缩一层">收层</button>
       <button type="button" data-intent="expandHoveredCluster" aria-label="当前视图展开一层">展层</button>
       <button type="button" data-intent="cycleVisibleDetails">详情</button>
+      <button type="button" data-intent="toggleHelp">帮助</button>
       <button type="button" data-intent="createNode">新增</button>
       <button type="button" data-intent="editNode">编辑</button>
       <button type="button" data-intent="editEdge">关系</button>
@@ -182,6 +183,10 @@
         </div>
         <button class="panel-close" type="button" data-close="mapping" aria-label="关闭输入映射">关闭</button>
       </div>
+      <button class="mapping-help-route" type="button" data-open-help-page="mobile">
+        <span>手机 Web 操作</span>
+        <small>手指替代鼠标；键盘沿用电脑端键位</small>
+      </button>
       <div class="preset-switch" role="group" aria-label="输入预设">
         <button type="button" data-preset="explorer" aria-pressed="true">标准探索</button>
         <button type="button" data-preset="oneHand" aria-pressed="false">单手试验</button>
@@ -307,7 +312,15 @@
         </div>
         <button class="panel-close" type="button" data-close="help" aria-label="关闭帮助">关闭</button>
       </div>
-      <div class="help-groups" aria-label="当前操作快捷键">
+      <nav class="help-submenu" role="tablist" aria-label="操作环境">
+        <button type="button" role="tab" id="helpDesktopTab" data-help-tab="desktop"
+          aria-controls="helpDesktopPage" aria-selected="true">电脑操作</button>
+        <button type="button" role="tab" id="helpMobileTab" data-help-tab="mobile"
+          aria-controls="helpMobilePage" aria-selected="false" tabindex="-1">手机操作</button>
+      </nav>
+      <div id="helpDesktopPage" class="help-page" data-help-page="desktop" role="tabpanel"
+        aria-labelledby="helpDesktopTab">
+        <div class="help-groups" aria-label="当前操作快捷键">
         <section class="help-group" data-help-group="视角">
           <h3>视角</h3>
           <dl>
@@ -359,6 +372,21 @@
             <div><dt><kbd>Delete</kbd></dt><dd>进入删除预警</dd></div>
           </dl>
         </section>
+        </div>
+      </div>
+      <div id="helpMobilePage" class="help-page" data-help-page="mobile" role="tabpanel"
+        aria-labelledby="helpMobileTab" hidden>
+        <section class="help-group help-group--mobile" data-help-group="手机触控">
+          <h3>手指替代鼠标</h3>
+          <dl>
+            <div><dt><kbd>单指点按</kbd></dt><dd>等同鼠标左键，选择并使用节点</dd></div>
+            <div><dt><kbd>点中节点 → 进入</kbd></dt><dd>等同节点右键，应用当前 A／S／D／F 视角</dd></div>
+            <div><dt><kbd>返回</kbd></dt><dd>等同空白右键，返回直接母域</dd></div>
+            <div><dt><kbd>底部操作栏</kbd></dt><dd>直接执行视角、层级、详情与编辑操作</dd></div>
+            <div><dt><kbd>中键／滚轮</kbd></dt><dd>当前仍使用鼠标；不伪装成尚未支持的触控手势</dd></div>
+          </dl>
+          <p class="help-keyboard-note">键盘沿用电脑端全部键位，不另设手机键位。</p>
+        </section>
       </div>
     </aside>
 
@@ -387,6 +415,7 @@
   <script src="spatial-mermaid-codec.js?v=20260816.310"></script>
   <script src="spatial-json-codec.js?v=20260816.310"></script>
   <script src="spatial-view-mode-model.js?v=20260816.310"></script>
+  <script src="spatial-help-page-model.js?v=20260817.1"></script>
   <script src="spatial-demo-model.js?v=20260816.310"></script>
   <script src="spatial-demo-geometry.js?v=20260816.310"></script>
   <script src="spatial-cluster-field.js?v=20260816.310"></script>

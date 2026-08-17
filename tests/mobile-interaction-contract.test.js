@@ -17,6 +17,7 @@ test('coarse-pointer dock reuses the complete Atom visual intent boundary', () =
     'collapseHoveredCluster',
     'expandHoveredCluster',
     'cycleVisibleDetails',
+    'toggleHelp',
     'applyViewMode',
     'applyParentView',
     'createNode',
@@ -32,4 +33,9 @@ test('mobile controls stay hidden on desktop and respect touch size and safe are
   assert.match(css, /@media\s*\(max-width:\s*48rem\),\s*\(hover:\s*none\)\s*and\s*\(pointer:\s*coarse\)[\s\S]*?\.mobile-action-dock\s*\{[\s\S]*?display:\s*grid/u);
   assert.match(css, /safe-area-inset-bottom/u);
   assert.match(css, /\.mobile-action-dock button\s*\{[\s\S]*?min-block-size:\s*2\.75rem/u);
+});
+
+test('input mapping exposes a dedicated route to mobile Web operation help', () => {
+  assert.match(html, /data-open-help-page="mobile"/u);
+  assert.match(html, /手机 Web 操作/u);
 });
