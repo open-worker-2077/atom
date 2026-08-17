@@ -268,7 +268,9 @@ test('hierarchy links are dim dashed while peer links are bright solid and label
   const link = functionSource('drawTopologyLink');
   assert.match(link, /context\.setLineDash\s*\(\s*pending\s*\?\s*\[[^\]]+\]\s*:\s*hierarchy\s*\?\s*\[[^\]]+\]\s*:\s*\[\s*\]\s*\)/);
   assert.match(link, /const\s+visibilityFloor\s*=\s*hierarchy\s*\?\s*0\.12\s*:\s*0\.16/);
-  assert.match(link, /context\.lineWidth\s*=\s*hierarchy\s*\?\s*0\.9\s*:\s*1\.35/);
+  assert.match(link, /relationshipVisualStyle\s*\(\s*state\.demo\.settings/);
+  assert.match(link, /baseWidth:\s*hierarchy\s*\?\s*0\.9\s*:\s*1\.35/);
+  assert.match(link, /context\.lineWidth\s*=\s*relationshipStyle\.lineWidth/);
   assert.match(link, /relationship\.label/);
   assert.match(link, /italic 500 11px/);
   assert.match(link, /context\.shadowColor\s*=\s*theme\["space-0"\]/);

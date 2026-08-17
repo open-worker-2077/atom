@@ -63,6 +63,10 @@
     helpStartupToggle: document.getElementById("helpStartupToggle"),
     zoomSpeed: document.getElementById("zoomSpeed"),
     zoomSpeedValue: document.getElementById("zoomSpeedValue"),
+    relationshipLineWidth: document.getElementById("relationshipLineWidth"),
+    relationshipLineWidthValue: document.getElementById("relationshipLineWidthValue"),
+    relationshipBrightness: document.getElementById("relationshipBrightness"),
+    relationshipBrightnessValue: document.getElementById("relationshipBrightnessValue"),
     middleLabelDepth: document.getElementById("middleLabelDepth"),
     middleLabelDepthValue: document.getElementById("middleLabelDepthValue"),
     highlightedLabelBrightness: document.getElementById("highlightedLabelBrightness"),
@@ -1226,6 +1230,7 @@
         id: node.id,
         position,
         radius,
+        labelSpan: Math.min(6, String(node.label || "").length * 0.12),
         fixed: Boolean(node.manualPosition),
         parentId: node.parent ? node.parent.id : null,
         containerRadius: node.parent ? node.parent.radius : null
@@ -1238,6 +1243,7 @@
         repulsionRangeScale: 2.2,
         repulsionStrength: 0.72,
         fieldRepulsionStrength: 0.38,
+        nodeEdgeRepulsionStrength: 0.54,
         linkStrength: 0.14,
         anchorStrength: 0.006,
         maxStep: 0.56,
@@ -1299,6 +1305,7 @@
             id: node.id,
             position: node.position,
             radius: node.radius,
+            labelSpan: Math.min(6, String(node.label || "").length * 0.12),
             fixed: Boolean(node.manualPosition),
             parentId: node.parent ? node.parent.id : null,
             containerRadius: node.parent ? node.parent.radius : null
@@ -1311,6 +1318,7 @@
             repulsionRangeScale: 2.35,
             repulsionStrength: 0.78,
             fieldRepulsionStrength: 0.42,
+            nodeEdgeRepulsionStrength: 0.58,
             linkStrength: 0.13,
             anchorStrength: 0.004,
             maxStep: 0.62,
@@ -2107,21 +2115,35 @@
     const visibilityFloor = hierarchy ? 0.12 : 0.16;
     const weightedAlpha = (hierarchy ? 0.22 : 0.28) * depthFade * effectiveContextWeight;
     const alpha = Math.max(visibilityFloor, weightedAlpha) + (localFocus ? 0.12 : 0);
+    const baseRelationshipAlpha = relationshipBrightness === null
+      ? clamp(alpha, visibilityFloor, hierarchy ? 0.42 : 0.46)
+      : relationshipBrightness;
+    const relationshipStyle = demoModel.relationshipVisualStyle(state.demo.settings, {
+      baseWidth: hierarchy ? 0.9 : 1.35,
+      baseAlpha: baseRelationshipAlpha
+    });
 
     context.save();
     context.globalAlpha = magnifierHighlighted ? 1 : magnifierFocusActive
       ? 0.055
-      : relationshipBrightness === null
-      ? clamp(alpha, visibilityFloor, hierarchy ? 0.42 : 0.46)
-      : relationshipBrightness;
+      : relationshipStyle.alpha;
     context.strokeStyle = editColor;
-    context.lineWidth = hierarchy ? 0.9 : 1.35;
+    context.lineWidth = relationshipStyle.lineWidth;
+    if (relationshipStyle.glowStrength > 0) {
+      context.shadowColor = editColor;
+      context.shadowBlur = 7 * relationshipStyle.glowStrength;
+    }
     if (magnifierHighlighted) {
       context.lineWidth = Math.max(3.2, context.lineWidth * 2.4);
       context.shadowColor = theme.accent;
       context.shadowBlur = 14;
     }
-    if (editState !== "idle") context.lineWidth = editState === "delete" ? 2.4 : 2;
+    if (editState !== "idle") {
+      context.lineWidth = Math.max(
+        relationshipStyle.lineWidth,
+        (editState === "delete" ? 2.4 : 2) * relationshipStyle.glyphScale
+      );
+    }
     context.lineCap = "round";
     context.setLineDash(pending ? [8, 7] : hierarchy ? [3, 6] : []);
     context.beginPath();
@@ -2145,7 +2167,7 @@
       const tangentLength = Math.hypot(tangentX, tangentY);
       if (tangentLength > 0.5) {
         const arrowAngle = Math.atan2(tangentY, tangentX);
-        const arrowSize = clamp(distance * 0.034, 4, 10);
+        const arrowSize = clamp(distance * 0.034, 4, 10) * relationshipStyle.glyphScale;
         const spread = 0.4;
         context.beginPath();
         context.moveTo(
@@ -2158,7 +2180,7 @@
           end.y - Math.sin(arrowAngle + spread) * arrowSize
         );
         context.strokeStyle = editColor;
-        context.lineWidth = hierarchy ? 0.9 : 1.35;
+        context.lineWidth = relationshipStyle.lineWidth;
         context.stroke();
       }
 
@@ -2167,8 +2189,8 @@
       const originTangentLength = Math.hypot(originTangentX, originTangentY);
       if (originTangentLength > 0.5) {
         const originAngle = Math.atan2(originTangentY, originTangentX);
-        const tailDepth = clamp(distance * 0.034, 5, 11);
-        const tailWidth = clamp(distance * 0.026, 4, 8);
+        const tailDepth = clamp(distance * 0.034, 5, 11) * relationshipStyle.glyphScale;
+        const tailWidth = clamp(distance * 0.026, 4, 8) * relationshipStyle.glyphScale;
         const forwardX = Math.cos(originAngle);
         const forwardY = Math.sin(originAngle);
         const sideX = -forwardY;
@@ -2184,7 +2206,7 @@
         context.lineTo(backX - sideX * tailWidth, backY - sideY * tailWidth);
         context.closePath();
         context.strokeStyle = editColor;
-        context.lineWidth = hierarchy ? 0.9 : 1.35;
+        context.lineWidth = relationshipStyle.lineWidth;
         context.stroke();
       }
     }
@@ -2201,9 +2223,13 @@
     if (relationship.showLabel !== false && distance >= labelDistanceFloor) {
       const labelX = (start.x + end.x) * 0.5 + normalX * bend * 0.58;
       const labelY = (start.y + end.y) * 0.5 + normalY * bend * 0.58;
-      context.globalAlpha = relationshipBrightness === null
-        ? hierarchy ? 0.5 : 0.62
-        : relationshipBrightness;
+      const relationshipLabelStyle = demoModel.relationshipVisualStyle(state.demo.settings, {
+        baseWidth: 1,
+        baseAlpha: relationshipBrightness === null
+          ? hierarchy ? 0.5 : 0.62
+          : relationshipBrightness
+      });
+      context.globalAlpha = relationshipLabelStyle.alpha;
       context.fillStyle = editColor;
       context.font = `italic 500 11px ${theme.fontBody}`;
       context.textAlign = "center";
@@ -6955,6 +6981,10 @@
     ui.helpStartupToggle.checked = state.demo.settings.helpVisible;
     ui.zoomSpeed.value = String(state.demo.settings.zoomSpeedPercent);
     ui.zoomSpeedValue.textContent = `${state.demo.settings.zoomSpeedPercent}%`;
+    ui.relationshipLineWidth.value = String(state.demo.settings.relationshipLineWidthPercent);
+    ui.relationshipLineWidthValue.textContent = `${state.demo.settings.relationshipLineWidthPercent}%`;
+    ui.relationshipBrightness.value = String(state.demo.settings.relationshipBrightnessPercent);
+    ui.relationshipBrightnessValue.textContent = `${state.demo.settings.relationshipBrightnessPercent}%`;
     ui.middleLabelDepth.value = String(state.demo.settings.middleLabelDepth);
     ui.middleLabelDepthValue.textContent = `${state.demo.settings.middleLabelDepth} 层`;
     ui.highlightedLabelBrightness.value = String(state.demo.settings.highlightedLabelBrightnessPercent);
@@ -7785,6 +7815,20 @@
     updateDemoSettings(demoModel.withHighlightedLabelBrightnessInput(
       state.demo.settings,
       ui.highlightedLabelBrightness.value
+    ));
+  });
+
+  ui.relationshipLineWidth.addEventListener("input", () => {
+    updateDemoSettings(demoModel.withRelationshipLineWidthInput(
+      state.demo.settings,
+      ui.relationshipLineWidth.value
+    ));
+  });
+
+  ui.relationshipBrightness.addEventListener("input", () => {
+    updateDemoSettings(demoModel.withRelationshipBrightnessInput(
+      state.demo.settings,
+      ui.relationshipBrightness.value
     ));
   });
 

@@ -244,6 +244,30 @@ test('crossing association lines exert a deterministic untangling force', () => 
   assert.equal(crosses, false);
 });
 
+test('an unrelated node is repelled from an association corridor instead of sitting on the line', () => {
+  const entries = [
+    { id: 'left', position: { x: -4, y: 0, z: 0 }, radius: 0.6 },
+    { id: 'right', position: { x: 4, y: 0, z: 0 }, radius: 0.6 },
+    { id: 'blocker', position: { x: 0, y: 0, z: 0 }, radius: 0.8 }
+  ];
+  const layout = SpatialVisualModel.relaxRelationshipLayout(entries, [
+    { fromId: 'left', toId: 'right', kind: 'association' }
+  ], {
+    iterations: 18,
+    baseGap: 1,
+    repulsionStrength: 0,
+    fieldRepulsionStrength: 0,
+    linkStrength: 0,
+    anchorStrength: 0,
+    nodeEdgeRepulsionStrength: 0.9,
+    maxStep: 0.6,
+    maxFieldRadius: 20,
+    planarRepulsion: true
+  });
+
+  assert.ok(Math.abs(layout.blocker.y) > 1.05, 'the relation corridor remains visibly traceable');
+});
+
 test('dense domains keep carrier silhouettes separated in the primary viewing plane', () => {
   const entries = Array.from({ length: 9 }, (_, index) => ({
     id: `dense-${index}`,
@@ -443,6 +467,32 @@ test('open association chains relax toward a stretched line', () => {
 
   assert.ok(axisLength > 5, 'repulsion stretches the open chain');
   assert.ok(offsetB < 0.75 && offsetC < 0.75, 'intermediate nodes stay near the open-chain axis');
+});
+
+test('long labels enlarge the same exclusion field so a readable chain does not collapse into text overlap', () => {
+  const entries = ['a', 'b', 'c', 'd'].map((id, index) => ({
+    id,
+    position: { x: index * 0.1, y: 0, z: 0 },
+    radius: 0.45,
+    labelSpan: 4.2
+  }));
+  const relationships = [
+    { fromId: 'a', toId: 'b', kind: 'association' },
+    { fromId: 'b', toId: 'c', kind: 'association' },
+    { fromId: 'c', toId: 'd', kind: 'association' }
+  ];
+  const layout = SpatialVisualModel.relaxRelationshipLayout(entries, relationships, {
+    planarRepulsion: true,
+    maxFieldRadius: 24
+  });
+  const adjacentDistance = (fromId, toId) => Math.hypot(
+    layout[toId].x - layout[fromId].x,
+    layout[toId].y - layout[fromId].y
+  );
+
+  assert.ok(adjacentDistance('a', 'b') > 4.2);
+  assert.ok(adjacentDistance('b', 'c') > 4.2);
+  assert.ok(adjacentDistance('c', 'd') > 4.2);
 });
 
 test('closed association chains relax into a balanced ring', () => {

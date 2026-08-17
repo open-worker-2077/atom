@@ -1341,6 +1341,39 @@ textarea:focus-visible {
   border-block: 1px solid rgba(132, 213, 255, 0.14);
 }
 
+.settings-sections {
+  position: sticky;
+  z-index: 2;
+  top: calc(-1 * max(var(--space-2xl), env(safe-area-inset-top)));
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
+  margin: var(--space-lg) 0 var(--space-sm);
+  padding-block: var(--space-xs);
+  background: var(--color-space-1);
+}
+
+.settings-sections a {
+  min-width: 0;
+  padding: 0.5rem 0.25rem;
+  border-block-end: var(--rule-hairline) solid var(--color-rule-2);
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-align: center;
+  text-decoration: none;
+}
+
+.settings-sections a:hover,
+.settings-sections a:focus-visible {
+  border-color: var(--color-accent);
+  color: var(--color-ink);
+}
+
+.presentation-settings {
+  scroll-margin-block-start: 4rem;
+}
+
 .presentation-settings h3 {
   margin: 0;
   color: var(--ink-1);

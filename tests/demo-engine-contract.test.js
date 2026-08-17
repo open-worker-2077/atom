@@ -48,6 +48,9 @@ test('demo model loads before the engine and the mapping panel owns persistent P
   assert.match(html, /id="nestedTunnelInteriorStrengthValue"/);
   assert.match(html, /id="zoomSpeed"[^>]*min="25"[^>]*max="400"/);
   assert.match(html, /id="zoomSpeedValue"/);
+  assert.match(html, /id="relationshipLineWidth"[^>]*min="50"[^>]*max="400"/);
+  assert.match(html, /id="relationshipBrightness"[^>]*min="25"[^>]*max="250"/);
+  assert.match(html, /id="relationshipSettingsTitle"/);
   assert.match(engine, /SpatialDemoModel/);
   assert.match(engine, /localStorage/);
   assert.match(engine, /helpVisible/);
@@ -55,6 +58,8 @@ test('demo model loads before the engine and the mapping panel owns persistent P
   assert.match(engine, /withNestedTunnelInput/);
   assert.match(engine, /withNestedTunnelInteriorInput/);
   assert.match(engine, /withZoomSpeedInput/);
+  assert.match(engine, /withRelationshipLineWidthInput/);
+  assert.match(engine, /withRelationshipBrightnessInput/);
 });
 
 test('presentation cue is central non-blocking live UI', () => {

@@ -8,6 +8,8 @@
   const DEFAULT_PERIPHERAL_DEPTH_SHRINK_PERCENT = 20;
   const MAX_NESTED_COMPACTNESS_PERCENT = 100;
   const DEFAULT_ZOOM_SPEED_PERCENT = 160;
+  const DEFAULT_RELATIONSHIP_LINE_WIDTH_PERCENT = 180;
+  const DEFAULT_RELATIONSHIP_BRIGHTNESS_PERCENT = 160;
   const DEFAULT_MIDDLE_LABEL_DEPTH = 3;
   const DEFAULT_HIGHLIGHTED_LABEL_BRIGHTNESS_PERCENT = 100;
   const DEFAULT_OTHER_LABEL_BRIGHTNESS_PERCENT = 35;
@@ -34,6 +36,20 @@
     return Number.isFinite(number)
       ? Math.min(400, Math.max(25, Math.round(number)))
       : DEFAULT_ZOOM_SPEED_PERCENT;
+  }
+
+  function validRelationshipLineWidth(value) {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? Math.min(400, Math.max(50, Math.round(number)))
+      : DEFAULT_RELATIONSHIP_LINE_WIDTH_PERCENT;
+  }
+
+  function validRelationshipBrightness(value) {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? Math.min(250, Math.max(25, Math.round(number)))
+      : DEFAULT_RELATIONSHIP_BRIGHTNESS_PERCENT;
   }
 
   function validMiddleLabelDepth(value) {
@@ -81,6 +97,12 @@
       nestedTunnelPercent: validPercent(source.nestedTunnelPercent),
       nestedTunnelInteriorPercent: validPercent(source.nestedTunnelInteriorPercent),
       zoomSpeedPercent: validZoomSpeed(source.zoomSpeedPercent),
+      relationshipLineWidthPercent: validRelationshipLineWidth(
+        source.relationshipLineWidthPercent
+      ),
+      relationshipBrightnessPercent: validRelationshipBrightness(
+        source.relationshipBrightnessPercent
+      ),
       middleLabelDepth,
       highlightedLabelBrightnessPercent: validLabelBrightness(
         source.highlightedLabelBrightnessPercent,
@@ -153,6 +175,38 @@
   function withZoomSpeedInput(settingsInput, value) {
     const settings = normalizeSettings(settingsInput);
     return normalizeSettings({ ...settings, zoomSpeedPercent: validZoomSpeed(value) });
+  }
+
+  function withRelationshipLineWidthInput(settingsInput, value) {
+    const settings = normalizeSettings(settingsInput);
+    return normalizeSettings({
+      ...settings,
+      relationshipLineWidthPercent: validRelationshipLineWidth(value)
+    });
+  }
+
+  function withRelationshipBrightnessInput(settingsInput, value) {
+    const settings = normalizeSettings(settingsInput);
+    return normalizeSettings({
+      ...settings,
+      relationshipBrightnessPercent: validRelationshipBrightness(value)
+    });
+  }
+
+  function relationshipVisualStyle(settingsInput, visualInput) {
+    const settings = normalizeSettings(settingsInput);
+    const visual = visualInput && typeof visualInput === "object" ? visualInput : {};
+    const baseWidth = Number.isFinite(Number(visual.baseWidth)) ? Number(visual.baseWidth) : 1;
+    const baseAlpha = Number.isFinite(Number(visual.baseAlpha)) ? Number(visual.baseAlpha) : 1;
+    const lineWidthScale = settings.relationshipLineWidthPercent / 100;
+    const brightnessScale = settings.relationshipBrightnessPercent / 100;
+    const rounded = (value) => Number(value.toFixed(3));
+    return Object.freeze({
+      lineWidth: rounded(baseWidth * lineWidthScale),
+      alpha: rounded(Math.min(1, Math.max(0, baseAlpha * brightnessScale))),
+      glyphScale: rounded(Math.sqrt(lineWidthScale)),
+      glowStrength: rounded(Math.max(0, brightnessScale - 1))
+    });
   }
 
   function withMiddleLabelDepthInput(settingsInput, value) {
@@ -400,6 +454,9 @@
     withNestedTunnelInput,
     withNestedTunnelInteriorInput,
     withZoomSpeedInput,
+    withRelationshipLineWidthInput,
+    withRelationshipBrightnessInput,
+    relationshipVisualStyle,
     withMiddleLabelDepthInput,
     withOtherLabelBrightnessInput,
     withHighlightedLabelBrightnessInput,

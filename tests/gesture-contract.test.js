@@ -189,10 +189,12 @@ test('domain travel never injects a fixed yaw rotation', () => {
 
 test('immersive child entry frames the new direct children once while preserving later camera ownership', () => {
   const enter = functionSource('enterNode');
+  const frame = functionSource('currentDomainSceneFrame');
 
   assert.match(enter, /state\.domainStack\.push\s*\(\s*\.\.\.route\.entries\s*\)/);
   assert.match(enter, /state\.currentPath\s*=\s*nextPath/);
-  assert.match(enter, /viewModeModel\.immersiveDomainFrame/);
+  assert.match(enter, /currentDomainSceneFrame\s*\(\s*\)/);
+  assert.match(frame, /viewModeModel\.immersiveDomainFrame/);
   assert.match(enter, /startCameraTween\s*\(/);
   assert.doesNotMatch(enter, /camera\.(?:target|yaw|pitch|distance)\s*=/);
 });
@@ -211,11 +213,13 @@ test('direct satellite entry derives true semantic depth from its ancestor linea
 
 test('immersive parent return restores and frames every direct node in that layer', () => {
   const exit = functionSource('returnToDepth');
+  const frame = functionSource('currentDomainSceneFrame');
 
   assert.match(exit, /state\.currentPath\s*=\s*previous\.path/);
   assert.match(exit, /findExistingNode\s*\(\s*state\.nodes\s*,\s*previous\.nodeId\s*\)/);
   assert.match(exit, /entryNode\.peekOpen\s*=\s*false/);
-  assert.match(exit, /viewModeModel\.immersiveDomainFrame/);
+  assert.match(exit, /currentDomainSceneFrame\s*\(\s*\)/);
+  assert.match(frame, /viewModeModel\.immersiveDomainFrame/);
   assert.match(exit, /startCameraTween\s*\(/);
   assert.doesNotMatch(exit, /camera\.(?:target|yaw|pitch|distance)\s*=/);
 });
@@ -258,7 +262,7 @@ test('multi-depth exit restores the requested target entry before framing its co
   assert.ok(targetMatch, 'requested target entry is resolved');
   assert.match(exit, new RegExp(`state\\.currentPath\\s*=\\s*${targetMatch[1]}\\.path`));
   assert.match(exit, new RegExp(`findExistingNode\\s*\\(\\s*state\\.nodes\\s*,\\s*${targetMatch[1]}\\.nodeId`));
-  assert.match(exit, /immersiveDomainFrame[\s\S]*startCameraTween\s*\(/);
+  assert.match(exit, /currentDomainSceneFrame[\s\S]*startCameraTween\s*\(/);
   assert.doesNotMatch(exit, /camera\.(?:target|yaw|pitch|distance)\s*=/);
 });
 

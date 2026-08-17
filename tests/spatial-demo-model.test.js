@@ -19,7 +19,7 @@ test('first visit keeps automatic presentation off until the user explicitly ena
   assert.ok(model, 'SpatialDemoModel must exist');
   assert.deepEqual(
     JSON.parse(JSON.stringify(model.normalizeSettings(null))),
-    { idleSeconds: null, lastIdleSeconds: 5, helpVisible: true, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 5, helpVisible: true, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 
@@ -31,11 +31,11 @@ test('blank idle seconds disables presentation while retaining the last valid de
       lastIdleSeconds: 12,
       helpVisible: false
     }))),
-    { idleSeconds: null, lastIdleSeconds: 12, helpVisible: false, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 12, helpVisible: false, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(model.withIdleInput({ idleSeconds: 8, lastIdleSeconds: 8, helpVisible: true }, ''))),
-    { idleSeconds: null, lastIdleSeconds: 8, helpVisible: true, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 8, helpVisible: true, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 
@@ -349,6 +349,41 @@ test('ordinary label brightness is adjustable without changing hierarchy depth',
   assert.equal(model.withHighlightedLabelBrightnessInput(null, 0).highlightedLabelBrightnessPercent, 0);
 });
 
+test('relationship thickness and brightness are independent persistent presentation controls', () => {
+  const model = loadModel();
+  const defaults = model.normalizeSettings(null);
+  assert.equal(defaults.relationshipLineWidthPercent, 180);
+  assert.equal(defaults.relationshipBrightnessPercent, 160);
+
+  const thickened = model.withRelationshipLineWidthInput(defaults, 240);
+  assert.equal(thickened.relationshipLineWidthPercent, 240);
+  assert.equal(thickened.relationshipBrightnessPercent, 160);
+
+  const brightened = model.withRelationshipBrightnessInput(thickened, 210);
+  assert.equal(brightened.relationshipLineWidthPercent, 240);
+  assert.equal(brightened.relationshipBrightnessPercent, 210);
+  assert.equal(model.withRelationshipLineWidthInput(null, 5).relationshipLineWidthPercent, 50);
+  assert.equal(model.withRelationshipLineWidthInput(null, 999).relationshipLineWidthPercent, 400);
+  assert.equal(model.withRelationshipBrightnessInput(null, 0).relationshipBrightnessPercent, 25);
+  assert.equal(model.withRelationshipBrightnessInput(null, 999).relationshipBrightnessPercent, 250);
+});
+
+test('relationship visual style enlarges shaft and endpoint glyphs while brightness only changes alpha', () => {
+  const model = loadModel();
+  const base = model.relationshipVisualStyle(null, { baseWidth: 1.35, baseAlpha: 0.28 });
+  assert.equal(base.lineWidth, 2.43);
+  assert.ok(base.glyphScale > 1.3);
+  assert.equal(base.alpha, 0.448);
+
+  const dim = model.relationshipVisualStyle({
+    relationshipLineWidthPercent: 180,
+    relationshipBrightnessPercent: 80
+  }, { baseWidth: 1.35, baseAlpha: 0.28 });
+  assert.equal(dim.lineWidth, base.lineWidth);
+  assert.equal(dim.glyphScale, base.glyphScale);
+  assert.equal(dim.alpha, 0.224);
+});
+
 test('idle start and deterministic shuffle are pure and bounded', () => {
   const model = loadModel();
   assert.equal(model.shouldStart({ idleSeconds: 5, lastInputAt: 1000, now: 5999 }), false);
@@ -370,7 +405,7 @@ test('invalid persisted settings recover without leaking unknown fields', () => 
   });
   assert.deepEqual(
     JSON.parse(JSON.stringify(settings)),
-    { idleSeconds: 5, lastIdleSeconds: 5, helpVisible: true, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: 5, lastIdleSeconds: 5, helpVisible: true, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 

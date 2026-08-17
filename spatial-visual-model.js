@@ -318,6 +318,9 @@
     var edgeRepulsionStrength = Number.isFinite(settings.edgeRepulsionStrength)
       ? Math.max(0, settings.edgeRepulsionStrength)
       : 0.34;
+    var nodeEdgeRepulsionStrength = Number.isFinite(settings.nodeEdgeRepulsionStrength)
+      ? Math.max(0, settings.nodeEdgeRepulsionStrength)
+      : 0.34;
     var anchorStrength = Number.isFinite(settings.anchorStrength) ? settings.anchorStrength : 0.055;
     var maxStep = Number.isFinite(settings.maxStep) ? settings.maxStep : 0.42;
     var maxFieldRadius = Number.isFinite(settings.maxFieldRadius) ? settings.maxFieldRadius : 10.8;
@@ -339,6 +342,7 @@
       var normalized = {
         id: entry.id,
         radius: Number.isFinite(entry.radius) ? Math.max(0.05, entry.radius) : 0.5,
+        labelSpan: Number.isFinite(entry.labelSpan) ? Math.max(0, entry.labelSpan) : 0,
         fixed: entry.fixed === true,
         parentId: typeof entry.parentId === 'string' ? entry.parentId : null,
         containerRadius: Number.isFinite(entry.containerRadius)
@@ -522,7 +526,8 @@
               ? Math.max(0.08, pairContainerRadius * 0.44)
               : Math.max(
                   2.25,
-                  (byId.get(pairOrder[0]).radius + byId.get(pairOrder[1]).radius) * 1.55
+                  (byId.get(pairOrder[0]).radius + byId.get(pairOrder[1]).radius) * 1.55,
+                  (byId.get(pairOrder[0]).labelSpan + byId.get(pairOrder[1]).labelSpan) * 0.58
                 );
             pairOrder.forEach(function (id, index) {
               if (byId.get(id).fixed) return;
@@ -616,9 +621,19 @@
               : planarRepulsion
                 ? planarDirection(order[0], order[order.length - 1])
                 : deterministicDirection(order[0], order[order.length - 1]);
+            var pathStep = 1.05;
+            for (var pathIndex = 1; pathIndex < order.length; pathIndex += 1) {
+              var previousEntry = byId.get(order[pathIndex - 1]);
+              var currentEntry = byId.get(order[pathIndex]);
+              pathStep = Math.max(
+                pathStep,
+                (previousEntry.radius + currentEntry.radius) * 1.4
+                  + (previousEntry.labelSpan + currentEntry.labelSpan) * 0.46
+              );
+            }
             var halfSpan = Number.isFinite(containerRadius)
               ? containerRadius * 0.88
-              : Math.max(2.8, (order.length - 1) * 1.05);
+              : Math.max(2.8, (order.length - 1) * pathStep * 0.5);
             order.forEach(function (id, index) {
               if (byId.get(id).fixed) return;
               var offset = -halfSpan + index * (halfSpan * 2 / (order.length - 1));
@@ -633,7 +648,13 @@
           } else {
             var ringRadius = Number.isFinite(containerRadius)
               ? containerRadius * 0.46
-              : Math.max(2.2, order.length * 0.55);
+              : Math.max(
+                  2.2,
+                  order.length * 0.55,
+                  Math.max.apply(null, order.map(function (id) {
+                    return byId.get(id).labelSpan;
+                  })) * 1.08
+                );
             var axisU = planarRepulsion
               ? planarDirection(order[0], order[1])
               : deterministicDirection(order[0], order[1]);
@@ -759,7 +780,9 @@
           var rightEntry = byId.get(rightId);
           if (forceGroup(leftEntry) !== forceGroup(rightEntry)) continue;
           var separation = repulsionVectorBetween(leftId, rightId);
-          var minimumDistance = (leftEntry.radius + rightEntry.radius) * radiusScale + baseGap;
+          var minimumDistance = (leftEntry.radius + rightEntry.radius) * radiusScale
+            + baseGap
+            + (leftEntry.labelSpan + rightEntry.labelSpan) * 0.42;
           var repulsionRange = minimumDistance * repulsionRangeScale;
           var movableCount = Number(!leftEntry.fixed) + Number(!rightEntry.fixed);
           if (!movableCount) continue;
@@ -784,12 +807,71 @@
         ) return;
         var separation = vectorBetween(relationship.fromId, relationship.toId);
         var radiusDistance = (fromEntry.radius + toEntry.radius) * 1.55;
-        var restDistance = Math.max(radiusDistance + 1.4, 3.65);
+        var restDistance = Math.max(
+          radiusDistance + 1.4,
+          3.65,
+          radiusDistance + (fromEntry.labelSpan + toEntry.labelSpan) * 0.46
+        );
         var movableCount = Number(!fromEntry.fixed) + Number(!toEntry.fixed);
         if (!movableCount) return;
         var pull = (separation.distance - restDistance) * linkStrength / movableCount;
         addDelta(deltas, relationship.fromId, separation.direction, pull);
         addDelta(deltas, relationship.toId, separation.direction, -pull);
+      });
+
+      links.forEach(function (relationship) {
+        if (relationship.kind === 'hierarchy') return;
+        var fromEntry = byId.get(relationship.fromId);
+        var toEntry = byId.get(relationship.toId);
+        var linkGroup = linkForceGroup(relationship);
+        if (!linkGroup) return;
+        var fromPosition = positions[relationship.fromId];
+        var toPosition = positions[relationship.toId];
+        var linkX = toPosition.x - fromPosition.x;
+        var linkY = toPosition.y - fromPosition.y;
+        var linkLengthSquared = linkX * linkX + linkY * linkY;
+        if (linkLengthSquared < 0.0001) return;
+
+        ids.forEach(function (nodeId) {
+          if (nodeId === relationship.fromId || nodeId === relationship.toId) return;
+          var nodeEntry = byId.get(nodeId);
+          if (forceGroup(nodeEntry) !== linkGroup) return;
+          var nodePosition = positions[nodeId];
+          var projection = Math.max(0.08, Math.min(0.92, (
+            (nodePosition.x - fromPosition.x) * linkX
+            + (nodePosition.y - fromPosition.y) * linkY
+          ) / linkLengthSquared));
+          var closest = {
+            x: fromPosition.x + linkX * projection,
+            y: fromPosition.y + linkY * projection
+          };
+          var offsetX = nodePosition.x - closest.x;
+          var offsetY = nodePosition.y - closest.y;
+          var offsetDistance = Math.hypot(offsetX, offsetY);
+          var clearance = nodeEntry.radius * radiusScale
+            + Math.min(fromEntry.radius, toEntry.radius) * 0.5
+            + baseGap * 0.55;
+          if (offsetDistance >= clearance) return;
+          var normal;
+          if (offsetDistance < 0.0001) {
+            var linkLength = Math.sqrt(linkLengthSquared);
+            var normalSign = deterministicDirection(
+              nodeId,
+              relationship.fromId + ':' + relationship.toId
+            ).x < 0 ? -1 : 1;
+            normal = {
+              x: -linkY / linkLength * normalSign,
+              y: linkX / linkLength * normalSign,
+              z: 0
+            };
+          } else {
+            normal = { x: offsetX / offsetDistance, y: offsetY / offsetDistance, z: 0 };
+          }
+          var force = (clearance - offsetDistance) * nodeEdgeRepulsionStrength;
+          addDelta(deltas, nodeId, normal, force * 0.72);
+          addDelta(deltas, relationship.fromId, normal, -force * (1 - projection) * 0.28);
+          addDelta(deltas, relationship.toId, normal, -force * projection * 0.28);
+        });
       });
 
       for (var firstLinkIndex = 0; firstLinkIndex < links.length; firstLinkIndex += 1) {

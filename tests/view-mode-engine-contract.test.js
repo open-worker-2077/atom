@@ -295,10 +295,10 @@ test('history preserves camera ownership while a completed right-click transitio
 
   const enter = functionSource('enterNode');
   assert.doesNotMatch(enter, /camera\.(?:target|yaw|pitch|distance)\s*=/);
-  assert.match(enter, /immersiveDomainFrame[\s\S]*startCameraTween/);
+  assert.match(enter, /currentDomainSceneFrame[\s\S]*startCameraTween/);
   const exit = functionSource('returnToDepth');
   assert.doesNotMatch(exit, /camera\.(?:target|yaw|pitch|distance)\s*=/);
-  assert.match(exit, /immersiveDomainFrame[\s\S]*startCameraTween/);
+  assert.match(exit, /currentDomainSceneFrame[\s\S]*startCameraTween/);
 
   const restore = functionSource('restoreVisualSnapshot');
   assert.doesNotMatch(restore, /snapshot\.camera/, 'history restore ignores recorded camera state');

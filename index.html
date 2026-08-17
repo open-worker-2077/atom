@@ -7,9 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500&family=Tomorrow:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="spatial.css?v=20260817.2">
+  <link rel="stylesheet" href="spatial.css?v=20260817.3">
 </head>
-<body data-build="20260817.2">
+<body data-build="20260817.3">
   <main class="spatial-shell" id="spatialShell">
     <canvas
       id="spaceCanvas"
@@ -191,10 +191,17 @@
         <button type="button" data-preset="explorer" aria-pressed="true">标准探索</button>
         <button type="button" data-preset="oneHand" aria-pressed="false">单手试验</button>
       </div>
-      <section class="presentation-settings" aria-labelledby="nestedLayoutSettingsTitle">
-        <h3 id="nestedLayoutSettingsTitle">A 内包布局</h3>
+      <nav class="settings-sections" aria-label="映射设置分栏">
+        <a href="#viewSettingsTitle">视图</a>
+        <a href="#nodeSettingsTitle">节点</a>
+        <a href="#relationshipSettingsTitle">关联线</a>
+        <a href="#detailFocusSettingsTitle">详情</a>
+        <a href="#startupSettingsTitle">启动</a>
+      </nav>
+      <section class="presentation-settings" aria-labelledby="viewSettingsTitle">
+        <h3 id="viewSettingsTitle">视图布局</h3>
         <label class="range-setting">
-          <span>S 互斥间隔</span>
+          <span>S 同层互斥间隔</span>
           <span class="range-setting__control">
             <input id="nestedCompactness" type="range" min="0" max="100" step="1" value="50"
               aria-describedby="nestedCompactnessHint">
@@ -202,28 +209,14 @@
           </span>
           <small id="nestedCompactnessHint">显示 0–100%；底层按 0–1000 计算，100% 对应原上限的 10 倍互斥范围；不缩放团或屏幕。</small>
         </label>
-      </section>
-      <section class="presentation-settings" aria-labelledby="peripheralLayoutSettingsTitle">
-        <h3 id="peripheralLayoutSettingsTitle">S 外围层级</h3>
         <label class="range-setting">
-          <span>A 每层节点缩小</span>
+          <span>A 子层节点缩小</span>
           <span class="range-setting__control">
             <input id="peripheralDepthShrink" type="range" min="0" max="90" step="1" value="20"
               aria-describedby="peripheralDepthShrinkHint">
             <output id="peripheralDepthShrinkValue" for="peripheralDepthShrink">20%</output>
           </span>
           <small id="peripheralDepthShrinkHint">每展开一层，子层节点相对母层缩小该比例；节点互斥仍按缩放后的真实体积计算。</small>
-        </label>
-      </section>
-      <section class="presentation-settings" aria-labelledby="presentationSettingsTitle">
-        <h3 id="presentationSettingsTitle">启动与演示</h3>
-        <label>
-          <span>P 空闲演示秒数</span>
-          <input id="demoIdleSeconds" type="number" min="1" max="3600" step="1" inputmode="numeric" placeholder="留空关闭">
-        </label>
-        <label>
-          <span>进入网页显示 H 帮助</span>
-          <input id="helpStartupToggle" type="checkbox">
         </label>
         <label class="range-setting">
           <span>滚轮缩放速度</span>
@@ -232,6 +225,23 @@
             <output id="zoomSpeedValue" for="zoomSpeed">160%</output>
           </span>
         </label>
+        <label class="range-setting">
+          <span>S 团边界强度</span>
+          <span class="range-setting__control">
+            <input id="nestedTunnelStrength" type="range" min="0" max="100" step="1" value="0">
+            <output id="nestedTunnelStrengthValue" for="nestedTunnelStrength">0%</output>
+          </span>
+        </label>
+        <label class="range-setting">
+          <span>S 团内部背景强度</span>
+          <span class="range-setting__control">
+            <input id="nestedTunnelInteriorStrength" type="range" min="0" max="100" step="1" value="0">
+            <output id="nestedTunnelInteriorStrengthValue" for="nestedTunnelInteriorStrength">0%</output>
+          </span>
+        </label>
+      </section>
+      <section class="presentation-settings" aria-labelledby="nodeSettingsTitle">
+        <h3 id="nodeSettingsTitle">节点文字</h3>
         <label class="range-setting">
           <span>中键名称高亮层级</span>
           <span class="range-setting__control">
@@ -253,20 +263,24 @@
             <output id="otherLabelBrightnessValue" for="otherLabelBrightness">35%</output>
           </span>
         </label>
+      </section>
+      <section class="presentation-settings" aria-labelledby="relationshipSettingsTitle">
+        <h3 id="relationshipSettingsTitle">关联线</h3>
         <label class="range-setting">
-          <span>S 团边界强度</span>
+          <span>箭身与端点粗度</span>
           <span class="range-setting__control">
-            <input id="nestedTunnelStrength" type="range" min="0" max="100" step="1" value="0">
-            <output id="nestedTunnelStrengthValue" for="nestedTunnelStrength">0%</output>
+            <input id="relationshipLineWidth" type="range" min="50" max="400" step="10" value="180">
+            <output id="relationshipLineWidthValue" for="relationshipLineWidth">180%</output>
           </span>
         </label>
         <label class="range-setting">
-          <span>S 团内部背景强度</span>
+          <span>箭身与端点亮度</span>
           <span class="range-setting__control">
-            <input id="nestedTunnelInteriorStrength" type="range" min="0" max="100" step="1" value="0">
-            <output id="nestedTunnelInteriorStrengthValue" for="nestedTunnelInteriorStrength">0%</output>
+            <input id="relationshipBrightness" type="range" min="25" max="250" step="5" value="160">
+            <output id="relationshipBrightnessValue" for="relationshipBrightness">160%</output>
           </span>
         </label>
+        <p class="settings-note">粗度同时作用于箭头、燕尾和箭身；亮度独立调节，不改变布局。</p>
       </section>
       <section class="presentation-settings" aria-labelledby="detailFocusSettingsTitle">
         <h3 id="detailFocusSettingsTitle">详情聚焦</h3>
@@ -299,6 +313,17 @@
           </span>
         </label>
         <p class="settings-note">中键选择节点或团后，CapsLock 详情只重点显示所设层数；默认隐藏范围外详情。</p>
+      </section>
+      <section class="presentation-settings" aria-labelledby="startupSettingsTitle">
+        <h3 id="startupSettingsTitle">启动与演示</h3>
+        <label>
+          <span>P 空闲演示秒数</span>
+          <input id="demoIdleSeconds" type="number" min="1" max="3600" step="1" inputmode="numeric" placeholder="留空关闭">
+        </label>
+        <label>
+          <span>进入网页显示 H 帮助</span>
+          <input id="helpStartupToggle" type="checkbox">
+        </label>
       </section>
       <div class="binding-groups" id="bindingList"></div>
       <p class="edge-panel__foot">未来触控、手柄、凝视与手势只需增加适配器，不改球域逻辑。</p>
@@ -404,25 +429,25 @@
   </main>
 
   <noscript>此实验场需要 JavaScript 才能响应空间交互。</noscript>
-  <script src="input-config.js?v=20260817.2"></script>
-  <script src="spatial-visual-model.js?v=20260817.2"></script>
-  <script src="spatial-detail-magnifier-model.js?v=20260817.2"></script>
-  <script src="spatial-gesture-arbiter.js?v=20260817.2"></script>
-  <script src="spatial-middle-frame-target.js?v=20260817.2"></script>
-  <script src="spatial-entity-registry.js?v=20260817.2"></script>
-  <script src="spatial-view-grammar.js?v=20260817.2"></script>
-  <script src="spatial-workspace-model.js?v=20260817.2"></script>
-  <script src="spatial-mermaid-codec.js?v=20260817.2"></script>
-  <script src="spatial-json-codec.js?v=20260817.2"></script>
-  <script src="spatial-view-mode-model.js?v=20260817.2"></script>
-  <script src="spatial-help-page-model.js?v=20260817.2"></script>
-  <script src="spatial-demo-model.js?v=20260817.2"></script>
-  <script src="spatial-demo-geometry.js?v=20260817.2"></script>
-  <script src="spatial-cluster-field.js?v=20260817.2"></script>
-  <script src="vendor/spatial-markdown-editor.bundle.js?v=20260817.2"></script>
-  <script src="vendor/atom-spatial-scene.bundle.js?v=20260817.2"></script>
-  <script src="spatial-engine.js?v=20260817.2"></script>
-  <script src="spatial-mermaid-panel.js?v=20260817.2"></script>
-  <script src="spatial-browser-bridge.js?v=20260817.2"></script>
+  <script src="input-config.js?v=20260817.3"></script>
+  <script src="spatial-visual-model.js?v=20260817.3"></script>
+  <script src="spatial-detail-magnifier-model.js?v=20260817.3"></script>
+  <script src="spatial-gesture-arbiter.js?v=20260817.3"></script>
+  <script src="spatial-middle-frame-target.js?v=20260817.3"></script>
+  <script src="spatial-entity-registry.js?v=20260817.3"></script>
+  <script src="spatial-view-grammar.js?v=20260817.3"></script>
+  <script src="spatial-workspace-model.js?v=20260817.3"></script>
+  <script src="spatial-mermaid-codec.js?v=20260817.3"></script>
+  <script src="spatial-json-codec.js?v=20260817.3"></script>
+  <script src="spatial-view-mode-model.js?v=20260817.3"></script>
+  <script src="spatial-help-page-model.js?v=20260817.3"></script>
+  <script src="spatial-demo-model.js?v=20260817.3"></script>
+  <script src="spatial-demo-geometry.js?v=20260817.3"></script>
+  <script src="spatial-cluster-field.js?v=20260817.3"></script>
+  <script src="vendor/spatial-markdown-editor.bundle.js?v=20260817.3"></script>
+  <script src="vendor/atom-spatial-scene.bundle.js?v=20260817.3"></script>
+  <script src="spatial-engine.js?v=20260817.3"></script>
+  <script src="spatial-mermaid-panel.js?v=20260817.3"></script>
+  <script src="spatial-browser-bridge.js?v=20260817.3"></script>
 </body>
 </html>
