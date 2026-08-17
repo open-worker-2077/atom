@@ -28,3 +28,10 @@ test('private access disable script removes only owned entry and task', async ()
   assert.doesNotMatch(source, /serve\s+reset/iu);
   assert.doesNotMatch(source, /tailscale(?:\.exe)?["']?\s+funnel/iu);
 });
+
+test('Windows PowerShell 5 can decode the private access scripts without a UTF-8 BOM', async () => {
+  for (const file of ['install-atom-private-access.ps1', 'disable-atom-private-access.ps1']) {
+    const source = await fs.readFile(path.join(root, 'scripts', file), 'utf8');
+    assert.doesNotMatch(source, /[^\u0000-\u007f]/u, `${file} must remain ASCII-compatible`);
+  }
+});

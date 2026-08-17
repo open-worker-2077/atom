@@ -11,7 +11,7 @@ if (-not (Test-Path -LiteralPath $markerFile)) {
 
 $marker = Get-Content -Raw -LiteralPath $markerFile | ConvertFrom-Json
 if ([string]$marker.contract -ne "atom.private-access") {
-  throw "PRIVATE_ACCESS_MARKER_INVALID: 不会撤销来源不明的配置"
+  throw "PRIVATE_ACCESS_MARKER_INVALID: refusing to remove an unowned configuration"
 }
 
 $tailscaleCommand = Get-Command tailscale.exe -ErrorAction SilentlyContinue

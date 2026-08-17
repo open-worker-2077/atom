@@ -27,7 +27,7 @@ function Resolve-CurrentLogin($Status) {
   $selfUserId = [string]$Status.Self.UserID
   $user = $Status.User.PSObject.Properties[$selfUserId].Value
   if ($null -eq $user -or [string]::IsNullOrWhiteSpace([string]$user.LoginName)) {
-    throw "TAILSCALE_LOGIN_REQUIRED: 无法从 Tailscale 状态确定当前登录身份"
+    throw "TAILSCALE_LOGIN_REQUIRED: unable to resolve the current Tailscale login"
   }
   return ([string]$user.LoginName).Trim().ToLowerInvariant()
 }
@@ -37,7 +37,7 @@ function Resolve-TailscaleCommand {
   if ($null -ne $command) { return $command.Source }
   $installed = Join-Path $env:ProgramFiles "Tailscale\tailscale.exe"
   if (Test-Path -LiteralPath $installed) { return $installed }
-  throw "TAILSCALE_NOT_INSTALLED: 未找到 Tailscale 客户端"
+  throw "TAILSCALE_NOT_INSTALLED: Tailscale client was not found"
 }
 
 if (Test-Path -LiteralPath $markerFile) {
@@ -56,11 +56,11 @@ $nodeCommand = Get-Command node.exe -ErrorAction Stop
 if (-not (Test-Path -LiteralPath $gatewayScript)) { throw "PRIVATE_GATEWAY_MISSING: $gatewayScript" }
 
 $tailscaleStatusText = & $tailscaleExecutable status --json
-if ($LASTEXITCODE -ne 0) { throw "TAILSCALE_NOT_RUNNING: 请先登录 Tailscale" }
+if ($LASTEXITCODE -ne 0) { throw "TAILSCALE_NOT_RUNNING: sign in to Tailscale first" }
 $tailscaleStatus = $tailscaleStatusText | ConvertFrom-Json
-if ([string]$tailscaleStatus.BackendState -ne "Running") { throw "TAILSCALE_NOT_RUNNING: 请先登录 Tailscale" }
+if ([string]$tailscaleStatus.BackendState -ne "Running") { throw "TAILSCALE_NOT_RUNNING: sign in to Tailscale first" }
 $resolvedLogin = Resolve-CurrentLogin $tailscaleStatus
-if ($resolvedLogin -notmatch '^[a-z0-9._%+@-]+$') { throw "INVALID_TAILSCALE_LOGIN: 登录名包含不受支持的字符" }
+if ($resolvedLogin -notmatch '^[a-z0-9._%+@-]+$') { throw "INVALID_TAILSCALE_LOGIN: unsupported characters in login name" }
 
 Invoke-WebRequest -UseBasicParsing -Uri $atomUrl -TimeoutSec 5 | Out-Null
 
@@ -68,12 +68,12 @@ $serveStatusText = & $tailscaleExecutable serve status --json 2>$null
 $serveStatus = if ([string]::IsNullOrWhiteSpace(($serveStatusText -join ""))) { $null } else { ($serveStatusText | ConvertFrom-Json) }
 $existingServeEntries = (Get-ObjectEntryCount $serveStatus "TCP") + (Get-ObjectEntryCount $serveStatus "Web")
 if ($existingServeEntries -gt 0) {
-  throw "SERVE_CONFIG_NOT_EMPTY: existing Tailscale Serve 配置不属于 Atom，已停止以避免覆盖"
+  throw "SERVE_CONFIG_NOT_EMPTY: existing Tailscale Serve configuration is not owned by Atom"
 }
 
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($null -ne $existingTask) {
-  throw "PRIVATE_GATEWAY_TASK_EXISTS: 同名计划任务不属于本次安装，已停止以避免覆盖"
+  throw "PRIVATE_GATEWAY_TASK_EXISTS: the scheduled task name is already in use"
 }
 
 New-Item -ItemType Directory -Path $stateDirectory -Force | Out-Null
