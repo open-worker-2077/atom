@@ -5091,6 +5091,22 @@
     return true;
   }
 
+  function currentDomainSceneFrame() {
+    const finalSceneNodes = collectNodes(state.time)
+      .filter((item) => item.kind === "node" && item.node)
+      .map((item) => ({
+        position: item.position,
+        radius: item.radius
+      }));
+    return viewModeModel.immersiveDomainFrame(finalSceneNodes, {
+      fov: camera.fov,
+      aspect: state.width / Math.max(1, state.height),
+      minimumDistance: MIN_CAMERA_DISTANCE,
+      maximumDistance: MAX_CAMERA_DISTANCE,
+      fallbackDistance: NORMAL_FIELD_DISTANCE
+    });
+  }
+
   function enterNode(node, forceImmersive = false) {
     if (
       !node
@@ -5127,13 +5143,7 @@
     state.hovered = null;
     state.middleLabelFocus = null;
     state.prefetchedDomain = null;
-    const immersiveFrame = viewModeModel.immersiveDomainFrame(existingNodes(currentDomainNodes()), {
-      fov: camera.fov,
-      aspect: state.width / Math.max(1, state.height),
-      minimumDistance: MIN_CAMERA_DISTANCE,
-      maximumDistance: MAX_CAMERA_DISTANCE,
-      fallbackDistance: NORMAL_FIELD_DISTANCE
-    });
+    const immersiveFrame = currentDomainSceneFrame();
     updateSelectionUI();
     startCameraTween(immersiveFrame, 420, recordCurrentView);
     announce(`已进入 ${node.label}，当前深度 ${state.depth}`);
@@ -5183,13 +5193,7 @@
     state.middleLabelFocus = null;
     state.prefetchedDomain = null;
     if (entryNode) entryNode.peekOpen = false;
-    const immersiveFrame = viewModeModel.immersiveDomainFrame(existingNodes(currentDomainNodes()), {
-      fov: camera.fov,
-      aspect: state.width / Math.max(1, state.height),
-      minimumDistance: MIN_CAMERA_DISTANCE,
-      maximumDistance: MAX_CAMERA_DISTANCE,
-      fallbackDistance: NORMAL_FIELD_DISTANCE
-    });
+    const immersiveFrame = currentDomainSceneFrame();
     updateSelectionUI();
     startCameraTween(immersiveFrame, 420, recordCurrentView);
     announce(`已返回 ${previous.crumbs.at(-1)}`);
@@ -8258,7 +8262,8 @@
       ...visualVerificationState()
     }),
     selectByLabel(label) {
-      const node = state.nodes.find((candidate) => candidate.label === label);
+      const node = existingNodes(currentDomainNodes())
+        .find((candidate) => candidate.label === label);
       if (node) {
         selectNode(node);
       }

@@ -41,3 +41,41 @@ test('each authoritative Atom write schedules one serialized private backup', as
   assert.equal(runs[1].worldDirectory.endsWith('primary'), true);
   trigger.close();
 });
+
+test('runtime changes share one fixed five-minute backup window', async () => {
+  const callbacks = [];
+  const runs = [];
+  const timers = [];
+  const trigger = createAtomRuntimeBackupTrigger({
+    worldDirectory: 'C:/AtomGraph/worlds/primary',
+    backupRepository: 'C:/private/atom_backup',
+    watch: (_directory, _options, callback) => {
+      callbacks.push(callback);
+      return { close() {} };
+    },
+    runBackup: async (request) => {
+      runs.push(request);
+      return true;
+    },
+    setTimer: (handler, delayMs) => {
+      const timer = { handler, delayMs };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimer: () => {}
+  });
+
+  trigger.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runs.length, 1, 'startup still captures the current recoverable state immediately');
+
+  callbacks[0]('change', 'atom.json');
+  callbacks[0]('change', 'submissions.jsonl');
+  trigger.schedule();
+  assert.equal(timers.length, 1, 'later changes join the active backup window instead of postponing it');
+  assert.equal(timers[0].delayMs, 5 * 60 * 1_000);
+
+  await timers[0].handler();
+  assert.equal(runs.length, 2, 'the merged changes produce one private backup version');
+  trigger.close();
+});

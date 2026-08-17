@@ -30,7 +30,7 @@ export function createAtomRuntimeBackupTrigger(options = {}) {
   const runBackup = options.runBackup || runPowerShellBackup;
   const setTimer = options.setTimer || setTimeout;
   const clearTimer = options.clearTimer || clearTimeout;
-  const delayMs = Math.max(250, Number(options.delayMs) || 2_000);
+  const delayMs = Math.max(250, Number(options.delayMs) || 5 * 60 * 1_000);
   let watcher = null;
   let timer = null;
   let running = false;
@@ -43,11 +43,12 @@ export function createAtomRuntimeBackupTrigger(options = {}) {
       pending = true;
       return;
     }
-    if (timer) clearTimer(timer);
+    if (timer) return;
     timer = setTimer(flush, delayMs);
   }
 
   async function flush() {
+    if (timer) clearTimer(timer);
     timer = null;
     if (closed) return;
     if (running) {
@@ -69,7 +70,7 @@ export function createAtomRuntimeBackupTrigger(options = {}) {
       const name = typeof filename === 'string' ? filename.toLowerCase() : '';
       if (name === 'atom.json' || name === 'submissions.jsonl') schedule();
     });
-    schedule();
+    void flush();
   }
 
   function close() {
