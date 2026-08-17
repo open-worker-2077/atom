@@ -66,17 +66,63 @@ function fingerprint(records, programs, agentOrigin, isolateFailures) {
   return crypto.createHash('sha256').update(JSON.stringify({
     records,
     programs,
-    agentOrigin: agentOrigin ? { ref: agentOrigin.ref, path: agentOrigin.path } : null,
+    agentOrigin: agentOrigin ? { path: agentOrigin.path } : null,
     isolateFailures
   })).digest('hex');
 }
 
-function programSetFingerprint(programs, agentOrigin, isolateFailures) {
+function programSetFingerprint(programs, isolateFailures, records) {
+  const recordsByRef = new Map(records.map((record) => [record.ref, record]));
   return crypto.createHash('sha256').update(JSON.stringify({
-    programs: programs.map(({ path: programPath, detail, types }) => ({ path: programPath, detail, types })),
-    agentOrigin: agentOrigin ? { ref: agentOrigin.ref, path: agentOrigin.path } : null,
+    programs: programs.map((program) => semanticRecord(program, recordsByRef)),
     isolateFailures
   })).digest('hex');
+}
+
+function reusableProgramSetFingerprint(programs, dependencyPrograms, isolateFailures, records) {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    selectedPrograms: programSetFingerprint(programs, isolateFailures, records),
+    availablePrograms: programSetFingerprint(dependencyPrograms, isolateFailures, records)
+  })).digest('hex');
+}
+
+function agentScopePath(agentOrigin) {
+  return typeof agentOrigin?.path === 'string' && agentOrigin.path
+    ? agentOrigin.path
+    : null;
+}
+
+function contextualProgramSetFingerprint(
+  programs, dependencyPrograms, isolateFailures, scopePath, records
+) {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    programSet: reusableProgramSetFingerprint(
+      programs, dependencyPrograms, isolateFailures, records
+    ),
+    scopePath
+  })).digest('hex');
+}
+
+function requestsDependOnAgent(requests) {
+  return requests.some((request) => !request?.name);
+}
+
+function reusableCandidates(
+  cache, programs, isolateFailures, agentOrigin, records, dependencyPrograms = programs
+) {
+  const scopePath = agentScopePath(agentOrigin);
+  const contextualKey = contextualProgramSetFingerprint(
+    programs, dependencyPrograms, isolateFailures, scopePath, records
+  );
+  const globalKey = reusableProgramSetFingerprint(
+    programs, dependencyPrograms, isolateFailures, records
+  );
+  return [
+    [contextualKey, cache.get(contextualKey)],
+    [globalKey, cache.get(globalKey)]
+  ].filter(([, entry]) => entry
+    && (entry.contextDependent !== true || entry.scopePath === scopePath)
+    && !(entry.contextIncomplete === true && scopePath));
 }
 
 function semanticRecord(record, recordsByRef) {
@@ -94,27 +140,26 @@ function semanticRecord(record, recordsByRef) {
 async function dependencyFingerprint(requests, executeExplore, records) {
   const recordsByPath = new Map(records.map((record) => [record.path, record]));
   const recordsByRef = new Map(records.map((record) => [record.ref, record]));
-  const snapshots = [];
-  for (const request of requests) {
+  const snapshots = await Promise.all(requests.map(async (request) => {
     try {
       const matches = await executeExplore(structuredClone(request));
-      snapshots.push({
+      return {
         request,
         matches: matches.map((match) => recordsByPath.get(match.path))
           .filter(Boolean)
           .map((record) => semanticRecord(record, recordsByRef))
-      });
+      };
     } catch (error) {
-      snapshots.push({
+      return {
         request,
         error: {
           code: error?.code ?? 'PROGRAM_DEPENDENCY_QUERY_FAILED',
           message: error?.message ?? 'Program dependency query failed',
           details: error?.details ?? {}
         }
-      });
+      };
     }
-  }
+  }));
   return crypto.createHash('sha256').update(JSON.stringify(snapshots)).digest('hex');
 }
 
@@ -129,6 +174,10 @@ function rebindLocks(locks, previousRecords, records) {
       refs: lock.targets.refs.map((ref) => newRefByPath.get(oldPathByRef.get(ref))).filter(Boolean)
     }
   })).filter((lock) => lock.targets.refs.length);
+}
+
+function worldRevisionKey(records) {
+  return records[0]?.ref ?? 'empty-world';
 }
 
 function validateResult(result, records, program) {
@@ -199,7 +248,14 @@ function runWorker({ python, records, program, timeoutMs, executeExplore }) {
     });
     let stdout = '';
     let stderr = '';
+    let workerClosed = false;
+    const writeToWorker = (payload) => {
+      if (workerClosed || child.stdin.destroyed || !child.stdin.writable) return false;
+      child.stdin.write(`${JSON.stringify(payload)}\n`);
+      return true;
+    };
     const timer = setTimeout(() => {
+      workerClosed = true;
       child.kill();
       const error = new Error(`Program cycle exceeded ${timeoutMs}ms`);
       error.code = 'ATOM_PROGRAM_TIMEOUT';
@@ -219,9 +275,9 @@ function runWorker({ python, records, program, timeoutMs, executeExplore }) {
             try {
               if (event.function !== 'explore') throw new Error(`Unsupported Program call: ${event.function}`);
               const result = await executeExplore(event.request);
-              child.stdin.write(`${JSON.stringify({ id: event.id, ok: true, result })}\n`);
+              writeToWorker({ id: event.id, ok: true, result });
             } catch (error) {
-              child.stdin.write(`${JSON.stringify({ id: event.id, ok: false, error: { code: error.code, message: error.message } })}\n`);
+              writeToWorker({ id: event.id, ok: false, error: { code: error.code, message: error.message } });
             }
             return;
           }
@@ -230,11 +286,16 @@ function runWorker({ python, records, program, timeoutMs, executeExplore }) {
       }
     });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.stdin.on('error', () => {
+      workerClosed = true;
+    });
     child.on('error', (error) => {
+      workerClosed = true;
       clearTimeout(timer);
       reject(error);
     });
     child.on('close', async (code) => {
+      workerClosed = true;
       clearTimeout(timer);
       await handling;
       if (code !== 0) {
@@ -247,7 +308,7 @@ function runWorker({ python, records, program, timeoutMs, executeExplore }) {
         reject(error);
       }
     });
-    child.stdin.write(`${JSON.stringify({ world: records, program })}\n`);
+    writeToWorker({ world: records, program });
   });
 }
 
@@ -274,6 +335,18 @@ export class ProgramRuntimeScheduler {
     this.workerQueue = [];
     this.reusable = new Map();
     this.programReusable = new Map();
+    this.runProgram = options.runProgram ?? runWorker;
+    this.projectionRepository = options.projectionRepository ?? null;
+    this.loadedProjection = undefined;
+    this.projectionLoadWarning = null;
+    if (this.projectionRepository
+      && (typeof this.projectionRepository.load !== 'function'
+        || typeof this.projectionRepository.save !== 'function')) {
+      throw Object.assign(
+        new Error('Program projection repository requires load() and save()'),
+        { code: 'INVALID_PROGRAM_PROJECTION_REPOSITORY' }
+      );
+    }
   }
 
   async runBounded(operation) {
@@ -289,14 +362,132 @@ export class ProgramRuntimeScheduler {
     }
   }
 
+  async loadProjection() {
+    if (this.loadedProjection !== undefined) return this.loadedProjection;
+    try {
+      this.loadedProjection = this.projectionRepository
+        ? await this.projectionRepository.load()
+        : null;
+    } catch (error) {
+      this.loadedProjection = null;
+      this.projectionLoadWarning = {
+        code: 'PROGRAM_PROJECTION_LOAD_FAILED',
+        message: 'Replaceable Program projection was unreadable and will be rebuilt',
+        details: { cause: error?.code ?? error?.name ?? 'PROGRAM_PROJECTION_READ_FAILED' }
+      };
+    }
+    return this.loadedProjection;
+  }
+
+  async persistedProjection({
+    records, programs, isolateFailures, fingerprint: cycleFingerprint, agentOrigin
+  }) {
+    const stored = await this.loadProjection();
+    const programSetKey = programSetFingerprint(programs, isolateFailures, records);
+    if (!stored || stored.version !== 1
+      || stored.worldKey !== worldRevisionKey(records)
+      || stored.programSetKey !== programSetKey
+      || (stored.contextIncomplete === true && agentScopePath(agentOrigin))
+      || (stored.contextDependent === true
+        && stored.scopePath !== agentScopePath(agentOrigin))
+      || !Array.isArray(stored.locks)
+      || !Array.isArray(stored.failures)
+      || stored.failures.length > 0) {
+      return null;
+    }
+    return {
+      fingerprint: cycleFingerprint,
+      cached: true,
+      records,
+      selectedProgram: null,
+      locks: structuredClone(stored.locks),
+      messages: [],
+      transforms: [],
+      failures: structuredClone(stored.failures),
+      contextIncomplete: stored.contextIncomplete === true
+    };
+  }
+
+  async saveProjection({ records, programs, isolateFailures, value, requests, agentOrigin }) {
+    if (!this.projectionRepository) return;
+    const contextDependent = requestsDependOnAgent(requests);
+    const scopePath = contextDependent ? agentScopePath(agentOrigin) : null;
+    if (contextDependent && !scopePath) return;
+    const projection = {
+      version: 1,
+      worldKey: worldRevisionKey(records),
+      programSetKey: programSetFingerprint(programs, isolateFailures, records),
+      contextDependent,
+      contextIncomplete: value.contextIncomplete === true,
+      scopePath,
+      locks: structuredClone(value.locks),
+      failures: []
+    };
+    try {
+      await this.projectionRepository.save(projection);
+      this.loadedProjection = projection;
+      return null;
+    } catch (error) {
+      return {
+        code: 'PROGRAM_PROJECTION_PERSIST_FAILED',
+        message: 'Validated Program projection remains available in memory but could not be persisted',
+        details: { cause: error?.code ?? error?.name ?? 'PROGRAM_PROJECTION_WRITE_FAILED' }
+      };
+    }
+  }
+
+  async current(atoms, options = {}) {
+    const records = worldRecords(atoms);
+    const programs = programRecords(records, options.programSelector);
+    const isolateFailures = options.isolateFailures === true;
+    const key = fingerprint(records, programs, options.agentOrigin, isolateFailures);
+    const completed = this.completed.get(key);
+    if (completed) return { ...completed, cached: true, messages: [], transforms: [] };
+
+    const reusable = reusableCandidates(
+      this.reusable, programs, isolateFailures, options.agentOrigin, records
+    ).map(([, entry]) => entry).find((entry) => (
+      entry.worldKey === worldRevisionKey(records)
+    ));
+    if (reusable?.worldKey === worldRevisionKey(records)) {
+      const value = {
+        ...reusable.value,
+        fingerprint: key,
+        cached: true,
+        records,
+        locks: rebindLocks(reusable.value.locks, reusable.value.records, records),
+        messages: [],
+        transforms: [],
+        failures: structuredClone(reusable.value.failures ?? [])
+      };
+      this.completed.set(key, value);
+      return value;
+    }
+
+    const persisted = options.programSelector
+      ? null
+      : await this.persistedProjection({
+        records, programs, isolateFailures, fingerprint: key, agentOrigin: options.agentOrigin
+      });
+    if (persisted) {
+      this.completed.set(key, persisted);
+      return persisted;
+    }
+    const error = new Error('No validated Program projection exists for the current world revision');
+    error.code = 'ATOM_PROGRAM_PROJECTION_MISSING';
+    error.details = { worldKey: worldRevisionKey(records) };
+    throw error;
+  }
+
   async refresh(atoms, options = {}) {
     const records = worldRecords(atoms);
     const programs = programRecords(records, options.programSelector);
     const isolateFailures = options.isolateFailures === true;
     const stableKey = fingerprint(records, programs, options.agentOrigin, isolateFailures);
     const key = options.force === true ? `${stableKey}:${crypto.randomUUID()}` : stableKey;
-    if (this.completed.has(key)) {
-      const cached = this.completed.get(key);
+    const completed = this.completed.get(key);
+    if (completed && completed.failures.length === 0) {
+      const cached = completed;
       return { ...cached, cached: true, messages: [], transforms: [] };
     }
     if (this.inflight.has(key)) {
@@ -304,15 +495,39 @@ export class ProgramRuntimeScheduler {
         ...value, cached: true, messages: [], transforms: []
       }));
     }
+
+    const pending = this.computeRefresh(atoms, options, {
+      records, programs, isolateFailures, key
+    }).finally(() => this.inflight.delete(key));
+    this.inflight.set(key, pending);
+    return pending;
+  }
+
+  async computeRefresh(atoms, options, { records, programs, isolateFailures, key }) {
+    if (options.force !== true && !options.programSelector) {
+      const persisted = await this.persistedProjection({
+        records, programs, isolateFailures, fingerprint: key, agentOrigin: options.agentOrigin
+      });
+      if (persisted) {
+        this.completed.set(key, persisted);
+        return persisted;
+      }
+    }
     const byPath = new Map(records.map((record) => [record.path, record.ref]));
     const executeExplore = options.executeExplore ?? ((request) => executeProgramExplore({ atoms, request }));
-    const reusableKey = programSetFingerprint(programs, options.agentOrigin, isolateFailures);
-    const reusable = options.force === true ? null : this.reusable.get(reusableKey);
+    const currentWorldKey = worldRevisionKey(records);
+    const scopePath = agentScopePath(options.agentOrigin);
+    const reusableEntry = options.force === true
+      ? null
+      : reusableCandidates(
+        this.reusable, programs, isolateFailures, options.agentOrigin, records
+      )[0];
+    const reusable = reusableEntry?.[1] ?? null;
     if (reusable) {
-      const currentDependencyFingerprint = await dependencyFingerprint(
-        reusable.requests, executeExplore, records
-      );
-      if (currentDependencyFingerprint === reusable.dependencyFingerprint) {
+      const dependenciesUnchanged = reusable.worldKey === currentWorldKey
+        || await dependencyFingerprint(reusable.requests, executeExplore, records)
+          === reusable.dependencyFingerprint;
+      if (dependenciesUnchanged) {
         const value = {
           ...reusable.value,
           fingerprint: key,
@@ -321,7 +536,7 @@ export class ProgramRuntimeScheduler {
           locks: rebindLocks(reusable.value.locks, reusable.value.records, records),
           messages: [],
           transforms: [],
-          failures: []
+          failures: structuredClone(reusable.value.failures ?? [])
         };
         this.completed.set(key, value);
         while (this.completed.size > this.maxCompleted) {
@@ -330,27 +545,19 @@ export class ProgramRuntimeScheduler {
         return value;
       }
     }
-    const deadline = Date.now() + this.timeoutMs;
     const operations = programs.map(async (program) => {
-      const stateKey = programSetFingerprint([program], options.agentOrigin, isolateFailures);
-      const previous = options.force === true ? null : this.programReusable.get(stateKey);
+      const previousEntry = options.force === true
+        ? null
+        : reusableCandidates(
+          this.programReusable, [program], isolateFailures, options.agentOrigin,
+          records, programs
+        )[0];
+      const previous = previousEntry?.[1] ?? null;
       if (previous) {
-        const currentDependencyFingerprint = await dependencyFingerprint(
-          previous.requests, executeExplore, records
-        );
-        if (currentDependencyFingerprint === previous.dependencyFingerprint) {
-          if (previous.failure) {
-            const failure = {
-              ...previous.failure,
-              programRef: program.ref,
-              details: { ...previous.failure.details, program: program.path }
-            };
-            if (isolateFailures) return { failure, cached: true, requests: previous.requests };
-            const error = Object.assign(new Error(failure.message), {
-              code: failure.code, details: failure.details
-            });
-            throw error;
-          }
+        const dependenciesUnchanged = previous.worldKey === currentWorldKey
+          || await dependencyFingerprint(previous.requests, executeExplore, records)
+            === previous.dependencyFingerprint;
+        if (dependenciesUnchanged) {
           return {
             result: {
               ...previous.result,
@@ -359,15 +566,16 @@ export class ProgramRuntimeScheduler {
               transforms: []
             },
             cached: true,
-            requests: previous.requests
+            requests: previous.requests,
+            contextDependent: previous.contextDependent === true
           };
         }
       }
 
       const requests = [];
       try {
-        const result = await this.runBounded(() => runWorker({
-          python: this.python, records, program, timeoutMs: Math.max(1, deadline - Date.now()),
+        const result = await this.runBounded(() => this.runProgram({
+          python: this.python, records, program, timeoutMs: this.timeoutMs,
           executeExplore: async (request) => {
             requests.push(structuredClone(request));
             const matches = await executeExplore(request);
@@ -381,63 +589,99 @@ export class ProgramRuntimeScheduler {
         const uniqueRequests = [...new Map(requests.map((request) => (
           [JSON.stringify(request), request]
         ))).values()];
-        this.programReusable.set(stateKey, {
-          requests: uniqueRequests,
-          dependencyFingerprint: await dependencyFingerprint(uniqueRequests, executeExplore, records),
-          result,
-          records
-        });
-        return { result, cached: false, requests: uniqueRequests };
+        const contextDependent = requestsDependOnAgent(uniqueRequests);
+        const stateKey = contextDependent
+          ? contextualProgramSetFingerprint(
+            [program], programs, isolateFailures, scopePath, records
+          )
+          : reusableProgramSetFingerprint([program], programs, isolateFailures, records);
+        if (!contextDependent || scopePath) {
+          this.programReusable.set(stateKey, {
+            contextDependent,
+            scopePath: contextDependent ? scopePath : null,
+            requests: uniqueRequests,
+            dependencyFingerprint: await dependencyFingerprint(uniqueRequests, executeExplore, records),
+            worldKey: currentWorldKey,
+            result,
+            records
+          });
+        }
+        return { result, cached: false, requests: uniqueRequests, contextDependent };
       } catch (error) {
         const failure = describeProgramFailure(error, program);
         const uniqueRequests = [...new Map(requests.map((request) => (
           [JSON.stringify(request), request]
         ))).values()];
-        this.programReusable.set(stateKey, {
-          requests: uniqueRequests,
-          dependencyFingerprint: await dependencyFingerprint(uniqueRequests, executeExplore, records),
-          failure,
-          records
-        });
-        if (isolateFailures) return { failure, cached: false, requests: uniqueRequests };
+        const contextDependent = requestsDependOnAgent(uniqueRequests);
+        if (contextDependent && !scopePath) {
+          return { failure, cached: false, requests: uniqueRequests, contextDependent };
+        }
+        if (isolateFailures) {
+          return { failure, cached: false, requests: uniqueRequests, contextDependent };
+        }
         throw error;
       }
     });
-    const settledResults = Promise.all(operations);
-    const pending = settledResults.then(async (settled) => {
-      const results = settled.flatMap((entry) => entry.result ? [entry.result] : []);
-      const value = {
-        fingerprint: key,
-        cached: programs.length > 0 && settled.every((entry) => entry.cached),
-        records,
-        selectedProgram: options.programSelector ? programs[0] : null,
-        locks: results.flatMap((result) => result.locks),
-        messages: results.flatMap((result) => result.messages),
-        transforms: results.flatMap((result) => result.transforms),
-        failures: settled.flatMap((entry) => entry.failure && !entry.cached ? [entry.failure] : [])
-      };
-      this.completed.set(key, value);
-      while (this.completed.size > this.maxCompleted) {
-        this.completed.delete(this.completed.keys().next().value);
-      }
-      const uniqueRequests = [...new Map(settled.flatMap((entry) => entry.requests).map((request) => (
-        [JSON.stringify(request), request]
-      ))).values()];
+    const settled = await Promise.all(operations);
+    const applicable = settled.filter((entry) => !(entry.contextDependent === true && !scopePath));
+    const contextIncomplete = settled.some((entry) => (
+      entry.contextDependent === true && !scopePath
+    ));
+    const results = applicable.flatMap((entry) => entry.result ? [entry.result] : []);
+    const value = {
+      fingerprint: key,
+      cached: applicable.length > 0 && applicable.every((entry) => entry.cached),
+      records,
+      selectedProgram: options.programSelector ? programs[0] : null,
+      locks: results.flatMap((result) => result.locks),
+      messages: results.flatMap((result) => result.messages),
+      transforms: results.flatMap((result) => result.transforms),
+      failures: applicable.flatMap((entry) => entry.failure ? [entry.failure] : []),
+      contextIncomplete
+    };
+    this.completed.set(key, value);
+    while (this.completed.size > this.maxCompleted) {
+      this.completed.delete(this.completed.keys().next().value);
+    }
+    const uniqueRequests = [...new Map(applicable.flatMap((entry) => entry.requests).map((request) => (
+      [JSON.stringify(request), request]
+    ))).values()];
+    const contextDependent = requestsDependOnAgent(uniqueRequests);
+    const runtimeWarnings = this.projectionLoadWarning ? [this.projectionLoadWarning] : [];
+    this.projectionLoadWarning = null;
+    if (value.failures.length === 0) {
+      const reusableKey = contextDependent
+        ? contextualProgramSetFingerprint(
+          programs, programs, isolateFailures, scopePath, records
+        )
+        : reusableProgramSetFingerprint(programs, programs, isolateFailures, records);
       this.reusable.set(reusableKey, {
+        contextDependent,
+        contextIncomplete,
+        scopePath: contextDependent ? scopePath : null,
         requests: uniqueRequests,
         dependencyFingerprint: await dependencyFingerprint(uniqueRequests, executeExplore, records),
+        worldKey: currentWorldKey,
         value
       });
-      while (this.reusable.size > this.maxCompleted) {
-        this.reusable.delete(this.reusable.keys().next().value);
-      }
-      while (this.programReusable.size > this.maxCompleted * Math.max(1, this.maxWorkers)) {
-        this.programReusable.delete(this.programReusable.keys().next().value);
-      }
-      return value;
-    }).finally(() => this.inflight.delete(key));
-    this.inflight.set(key, pending);
-    return pending;
+      const projectionWarning = await this.saveProjection({
+        records,
+        programs,
+        isolateFailures,
+        value,
+        requests: uniqueRequests,
+        agentOrigin: options.agentOrigin
+      });
+      if (projectionWarning) runtimeWarnings.push(projectionWarning);
+    }
+    if (runtimeWarnings.length) value.runtimeWarnings = runtimeWarnings;
+    while (this.reusable.size > this.maxCompleted) {
+      this.reusable.delete(this.reusable.keys().next().value);
+    }
+    while (this.programReusable.size > this.maxCompleted * Math.max(1, this.maxWorkers)) {
+      this.programReusable.delete(this.programReusable.keys().next().value);
+    }
+    return value;
   }
 }
 

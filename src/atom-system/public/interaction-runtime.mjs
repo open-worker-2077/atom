@@ -82,13 +82,33 @@ export function createInteractionRuntime({
         history: intent.history
       });
     }
-    const result = await world.execute({
-      source: intent.source,
-      interaction,
+    const executeWorld = (source, currentInteraction, currentOptions = options) => world.execute({
+      source,
+      interaction: currentInteraction,
       history: intent.history,
-      ...(options.bypassProgramLocks ? { bypassProgramLocks: true } : {}),
+      ...(currentOptions.bypassProgramLocks ? { bypassProgramLocks: true } : {}),
+      ...(currentOptions.programMode ? { programMode: currentOptions.programMode } : {}),
       programRuntime
     });
+    let result = await executeWorld(intent.source, interaction);
+    const projectionMissing = result?.ok === false
+      && result.errors?.some(({ code }) => code === 'ATOM_PROGRAM_PROJECTION_MISSING');
+    if (projectionMissing && interaction.agent && !options.programMode) {
+      const preparation = await executeWorld('atom', Object.freeze({
+        ...interaction,
+        id: `${interaction.id}:program-context`
+      }), { ...options, programMode: 'reconcile' });
+      if (!preparation?.ok) return preparation;
+      if (options.publish !== false) await publish(preparation);
+      result = await executeWorld(intent.source, interaction);
+      result = {
+        ...result,
+        messages: [
+          ...(preparation.messages ?? []),
+          ...(result.messages ?? [])
+        ]
+      };
+    }
     if (options.publish !== false) await publish(result);
     return result;
   }
@@ -99,7 +119,10 @@ export function createInteractionRuntime({
 
   async function initialize({ correlationId }) {
     const intent = validateIntent({ source: 'atom', correlationId, history: [] });
-    const initialization = await executeValidated(intent, { publish: false });
+    const initialization = await executeValidated(intent, {
+      publish: false,
+      programMode: 'reconcile'
+    });
     if (!initialization?.ok || !initialization.revisionAfter) {
       throw problem('RUNTIME_INITIALIZATION_FAILED', 'World initialization did not produce a readable revision', {
         result: initialization
@@ -120,14 +143,17 @@ export function createInteractionRuntime({
       detail: detail.trim()
     });
     return executeValidated(validateIntent({ source, correlationId, history: [] }), {
-      bypassProgramLocks: true
+      bypassProgramLocks: true,
+      programMode: 'reconcile'
     });
   }
 
   async function updateHumanWorkspace({ operation, correlationId }) {
     requireMethod(humanWorkspace, 'translate', 'INVALID_HUMAN_WORKSPACE_PORT', 'Interaction runtime human-workspace port');
     const source = await humanWorkspace.translate({ operation });
-    return executeValidated(validateIntent({ source, correlationId, history: [] }));
+    return executeValidated(validateIntent({ source, correlationId, history: [] }), {
+      programMode: 'reconcile'
+    });
   }
 
   async function recover({ expectedRevision }) {

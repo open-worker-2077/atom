@@ -156,14 +156,98 @@ test('Program cycles default to a sixty-second wall-clock budget', () => {
   assert.equal(scheduler.timeoutMs, 60_000);
 });
 
-test('scheduler fingerprint includes the @agent context origin', async () => {
+test('a revision-local @agent ref change does not replay Programs for the same context path', async () => {
+  const program = atom('Context Reporter', [
+    "value = explore({'name': 'Agent'})[0].detail",
+    "message({'level': 'info', 'text': value})"
+  ].join('\n'), [], 'program');
+  const scheduler = createProgramRuntimeScheduler();
+
+  const first = await scheduler.refresh([
+    atom('Agent', 'stable', [], 'agent'),
+    atom('Unrelated', 'before'),
+    program
+  ], { agentOrigin: { ref: 'revision-one-ref', path: 'Agent' } });
+  const unrelatedChange = await scheduler.refresh([
+    atom('Agent', 'stable', [], 'agent'),
+    atom('Unrelated', 'after'),
+    structuredClone(program)
+  ], { agentOrigin: { ref: 'revision-two-ref', path: 'Agent' } });
+
+  assert.equal(first.messages[0].text, 'stable');
+  assert.equal(unrelatedChange.cached, true);
+  assert.deepEqual(unrelatedChange.messages, []);
+});
+
+test('scheduler distinguishes @agent cycles while reusing context-independent Program results', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const world = [atom('No Program')];
   const first = await scheduler.refresh(world, { agentOrigin: { ref: 'agent-a', path: 'A/Agent' } });
   const second = await scheduler.refresh(world, { agentOrigin: { ref: 'agent-b', path: 'B/Agent' } });
   assert.equal(first.cached, false);
-  assert.equal(second.cached, false);
+  assert.equal(second.cached, true);
   assert.notEqual(first.fingerprint, second.fingerprint);
+});
+
+test('Programs with explicit explore anchors are reused across @agent context paths', async () => {
+  const program = atom('Explicit Reporter', [
+    "value = explore({'name': 'Target'})[0].detail",
+    "message({'level': 'info', 'text': value})"
+  ].join('\n'), [], 'program');
+  const scheduler = createProgramRuntimeScheduler();
+  const world = [atom('Target', 'stable'), program];
+  let dependencyReads = 0;
+  const executeExplore = async (request) => {
+    dependencyReads += 1;
+    return [{ path: request.name }];
+  };
+
+  const first = await scheduler.refresh(world, {
+    agentOrigin: { ref: 'agent-a', path: 'A/Agent' }, executeExplore
+  });
+  const readsAfterFirstCycle = dependencyReads;
+  const second = await scheduler.refresh(structuredClone(world), {
+    agentOrigin: { ref: 'agent-b', path: 'B/Agent' }, executeExplore
+  });
+
+  assert.equal(first.cached, false);
+  assert.equal(second.cached, true);
+  assert.deepEqual(second.messages, []);
+  assert.equal(dependencyReads, readsAfterFirstCycle);
+});
+
+test('independent Program dependency queries are revalidated concurrently', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const programs = ['A', 'B', 'C', 'D'].map((name) => atom(`${name} Reporter`, [
+    `value = explore({'name': '${name}'})[0].detail`,
+    "message({'level': 'info', 'text': value})"
+  ].join('\n'), [], 'program'));
+  const world = [
+    atom('A', 'a'), atom('B', 'b'), atom('C', 'c'), atom('D', 'd'),
+    atom('Unrelated', 'before'), ...programs
+  ];
+  let active = 0;
+  let maxActive = 0;
+  let measure = false;
+  const executeExplore = async (request) => {
+    if (measure) {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      active -= 1;
+    }
+    return [{ path: request.name }];
+  };
+
+  await scheduler.refresh(world, { executeExplore });
+  measure = true;
+  const changed = await scheduler.refresh([
+    atom('A', 'a'), atom('B', 'b'), atom('C', 'c'), atom('D', 'd'),
+    atom('Unrelated', 'after'), ...structuredClone(programs)
+  ], { executeExplore });
+
+  assert.equal(changed.cached, true);
+  assert.ok(maxActive > 1, `expected concurrent dependency reads, observed ${maxActive}`);
 });
 
 test('a configurable timeout terminates a stuck worker and the scheduler can run the next revision', async () => {
@@ -181,6 +265,28 @@ test('a configurable timeout terminates a stuck worker and the scheduler can run
     atom('Recovery Program', "message({'level': 'info', 'text': 'recovered'})", [], 'program')
   ]);
   assert.equal(recovered.cached, false);
+  assert.equal(recovered.messages[0].text, 'recovered');
+});
+
+test('a timeout during an in-flight explore cannot crash the scheduler with EPIPE', async () => {
+  const scheduler = createProgramRuntimeScheduler({ timeoutMs: 150 });
+  const slowExplore = async (request) => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return [{ path: request.name }];
+  };
+
+  await assert.rejects(
+    scheduler.refresh([
+      atom('Target'),
+      atom('Slow Reader', "explore({'name': 'Target'})", [], 'program')
+    ], { executeExplore: slowExplore }),
+    { code: 'ATOM_PROGRAM_TIMEOUT' }
+  );
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  const recovered = await scheduler.refresh([
+    atom('Recovery Program', "message({'level': 'info', 'text': 'recovered'})", [], 'program')
+  ]);
   assert.equal(recovered.messages[0].text, 'recovered');
 });
 

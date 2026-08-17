@@ -10,6 +10,7 @@ import {
   projectRoot
 } from '../../cli/lib/server.mjs';
 import { createLegacyWorldService } from '../../src/atom-system/adapters/legacy-engine-adapter.mjs';
+import { createJsonProgramProjectionRepository } from '../../src/atom-system/adapters/json-program-projection-repository.mjs';
 import { createLegacyRuntimeComposition } from '../../src/atom-system/adapters/legacy-runtime-composition.mjs';
 import { createAtomRuntimeBackupTrigger } from '../../src/atom-system/operations/atom-runtime-backup-trigger.mjs';
 import { resolveAtomRuntime } from './runtime-config.mjs';
@@ -81,11 +82,12 @@ function pathIdentity(file) {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
-function validateDistinctPaths({ contextFile, graphFile, storeFile }) {
+function validateDistinctPaths({ contextFile, graphFile, storeFile, programProjectionFile }) {
   const entries = [
     ['contextFile', contextFile],
     ['graphFile', graphFile],
-    ['storeFile', storeFile]
+    ['storeFile', storeFile],
+    ['programProjectionFile', programProjectionFile]
   ];
   const seen = new Map();
   for (const [label, file] of entries) {
@@ -93,7 +95,7 @@ function validateDistinctPaths({ contextFile, graphFile, storeFile }) {
     if (seen.has(identity)) {
       throw problem(
         'ATOM_GRAPH_PATH_COLLISION',
-        'Atom context、Graph 投影和 Spatial store 必须使用三个不同文件',
+        'Atom context、Graph 投影、Spatial store 和 Program 投影必须使用四个不同文件',
         {
           first: seen.get(identity),
           second: label,
@@ -106,13 +108,14 @@ function validateDistinctPaths({ contextFile, graphFile, storeFile }) {
 }
 
 function resolveConfiguration(options = {}) {
+  const contextFile = resolveJsonPath(
+    options.contextFile ?? defaultFiles.contextFile,
+    'Atom context 文件'
+  );
   const configuration = {
     host: validateHost(options.host ?? DEFAULT_ATOM_GRAPH_HOST),
     port: validatePort(options.port ?? DEFAULT_ATOM_GRAPH_PORT),
-    contextFile: resolveJsonPath(
-      options.contextFile ?? defaultFiles.contextFile,
-      'Atom context 文件'
-    ),
+    contextFile,
     graphFile: resolveJsonPath(
       options.graphFile ?? defaultFiles.graphFile,
       'Graph 投影文件'
@@ -120,6 +123,11 @@ function resolveConfiguration(options = {}) {
     storeFile: resolveJsonPath(
       options.storeFile ?? defaultFiles.storeFile,
       'Spatial store 文件'
+    ),
+    programProjectionFile: resolveJsonPath(
+      options.programProjectionFile
+        ?? path.join(path.dirname(contextFile), 'program-projection.json'),
+      'Program 投影文件'
     )
   };
   validateDistinctPaths(configuration);
@@ -170,6 +178,12 @@ export function parseAtomGraphServerArgs(argv = []) {
     if (argument === '--store' || argument.startsWith('--store=')) {
       const parsed = optionValue(argv, index, '--store');
       options.storeFile = parsed.value;
+      index += parsed.consumed;
+      continue;
+    }
+    if (argument === '--program-projection' || argument.startsWith('--program-projection=')) {
+      const parsed = optionValue(argv, index, '--program-projection');
+      options.programProjectionFile = parsed.value;
       index += parsed.consumed;
       continue;
     }
@@ -258,7 +272,13 @@ export async function startAtomGraphServer(options = {}) {
     branch: options.backupBranch ?? process.env.ATOM_RUNTIME_BACKUP_BRANCH ?? 'runtime-data',
     delayMs: options.backupDelayMs ?? process.env.ATOM_RUNTIME_BACKUP_DELAY_MS
   }) : null);
-  const programScheduler = options.programScheduler ?? createProgramRuntimeScheduler();
+  const programProjectionRepository = options.programProjectionRepository
+    ?? createJsonProgramProjectionRepository({
+      file: configuration.programProjectionFile
+    });
+  const programScheduler = options.programScheduler ?? createProgramRuntimeScheduler({
+    projectionRepository: programProjectionRepository
+  });
   const worldService = options.worldService ?? createLegacyWorldService({
     onAuthoritativeWrite: () => backupTrigger?.schedule()
   });
@@ -266,6 +286,7 @@ export async function startAtomGraphServer(options = {}) {
     contextFile: configuration.contextFile,
     graphFile: configuration.graphFile,
     storeFile: configuration.storeFile,
+    programProjectionFile: configuration.programProjectionFile,
     programScheduler,
     worldService,
     ...(options.projectionOrchestrator ? { projectionOrchestrator: options.projectionOrchestrator } : {})
@@ -331,6 +352,7 @@ export async function startAtomGraphServer(options = {}) {
     initialization,
     interactionRuntime,
     programScheduler,
+    programProjectionRepository,
     backupTrigger,
     close: () => closeServer(instance.server)
   });
@@ -342,6 +364,7 @@ function help() {
     '',
     `  node graph-server.mjs [--host ${DEFAULT_ATOM_GRAPH_HOST}] [--port ${DEFAULT_ATOM_GRAPH_PORT}]`,
     '    [--context atom.json] [--graph graph.json] [--store knowledge.json]',
+    '    [--program-projection program-projection.json]',
     '',
     `默认目录：${defaultLiveDirectory}`,
     '4783 为现有服务保留，不能由本服务占用。'
@@ -361,6 +384,7 @@ if (invokedFile === currentFile) {
       process.stdout.write(`Atom context：${running.contextFile}\n`);
       process.stdout.write(`Graph projection：${running.graphFile}\n`);
       process.stdout.write(`Spatial store：${running.storeFile}\n`);
+      process.stdout.write(`Program 投影：${running.programProjectionFile}\n`);
     }
   } catch (error) {
     process.stderr.write(`${JSON.stringify({

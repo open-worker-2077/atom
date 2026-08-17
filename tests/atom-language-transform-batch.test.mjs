@@ -214,6 +214,39 @@ test('post-batch Program transforms join the same authoritative commit', async (
   );
 });
 
+test('a single Transform and its Program consequences share one authoritative commit', async (t) => {
+  const files = await fixture(t);
+  const writes = [];
+  const world = createLegacyWorldService({
+    onAuthoritativeWrite: (write) => writes.push(write)
+  });
+  const scheduler = {
+    async current() {
+      return { messages: [], locks: [], records: [], transforms: [], failures: [] };
+    },
+    async refresh() {
+      return {
+        messages: [], locks: [], records: [], failures: [],
+        transforms: [{ name: '来源乙', 'detail.rep.自动乙': null }]
+      };
+    }
+  };
+
+  const result = await world.executeLegacy({
+    ...files,
+    source: 'transform {"name":"来源甲","detail.rep.新甲"}',
+    programScheduler: scheduler
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(writes.length, 1, 'user change and Program consequences form one commit');
+  const [sourceA, sourceB] = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.equal(sourceA.detail, '新甲');
+  assert.equal(sourceB.detail, '自动乙');
+  assert.equal(result.revisionAfter, crypto.createHash('sha256')
+    .update(JSON.stringify([sourceA, sourceB])).digest('hex'));
+});
+
 test('batch receipt follows a final Program rename in the same commit', async (t) => {
   const files = await fixture(t);
   let refreshes = 0;

@@ -108,6 +108,7 @@ test('graph server arguments default to the shared LocalAppData Atom world', () 
     contextFile: runtime.contextFile,
     graphFile: runtime.graphFile,
     storeFile: runtime.storeFile,
+    programProjectionFile: path.join(path.dirname(runtime.contextFile), 'program-projection.json'),
     help: false
   });
 
@@ -116,13 +117,15 @@ test('graph server arguments default to the shared LocalAppData Atom world', () 
     '--port=0',
     '--context', 'context.json',
     '--graph=projection.json',
-    '--store', 'store.json'
+    '--store', 'store.json',
+    '--program-projection=program-projection.json'
   ]), {
     host: '127.0.0.2',
     port: 0,
     contextFile: path.resolve('context.json'),
     graphFile: path.resolve('projection.json'),
     storeFile: path.resolve('store.json'),
+    programProjectionFile: path.resolve('program-projection.json'),
     help: false
   });
 });
@@ -132,6 +135,7 @@ test('graph server rejects 4783 and colliding context, projection, and store pat
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
+  const programProjectionFile = path.join(directory, 'program-projection.json');
 
   assert.throws(
     () => parseAtomGraphServerArgs(['--port', '4783']),
@@ -149,9 +153,12 @@ test('graph server rejects 4783 and colliding context, projection, and store pat
   );
 
   for (const paths of [
-    { contextFile, graphFile: contextFile, storeFile },
-    { contextFile, graphFile, storeFile: contextFile },
-    { contextFile, graphFile, storeFile: graphFile }
+    { contextFile, graphFile: contextFile, storeFile, programProjectionFile },
+    { contextFile, graphFile, storeFile: contextFile, programProjectionFile },
+    { contextFile, graphFile, storeFile: graphFile, programProjectionFile },
+    { contextFile, graphFile, storeFile, programProjectionFile: contextFile },
+    { contextFile, graphFile, storeFile, programProjectionFile: graphFile },
+    { contextFile, graphFile, storeFile, programProjectionFile: storeFile }
   ]) {
     await assert.rejects(
       startAtomGraphServer({ host: '127.0.0.1', port: 0, ...paths }),

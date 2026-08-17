@@ -364,7 +364,14 @@ export async function executeAtomLanguage(options = {}) {
   if (options.programScheduler) {
     try {
       const unrestricted = createAccessController(atoms, {});
-      programCycle = await options.programScheduler.refresh(atoms, {
+      const reconcilePrograms = options.programMode === 'reconcile'
+        || Boolean(requestedProgramRun?.selector);
+      const programOperation = reconcilePrograms
+        ? options.programScheduler.refresh.bind(options.programScheduler)
+        : (typeof options.programScheduler.current === 'function'
+          ? options.programScheduler.current.bind(options.programScheduler)
+          : options.programScheduler.refresh.bind(options.programScheduler));
+      programCycle = await programOperation(atoms, {
         agentOrigin: interaction.agent,
         isolateFailures: true,
         ...(requestedProgramRun?.selector
@@ -385,16 +392,22 @@ export async function executeAtomLanguage(options = {}) {
     failure.message ?? 'Python Program failed',
     { ...(failure.details ?? {}), program: failure.programPath }
   ));
+  const programRuntimeWarnings = (programCycle.runtimeWarnings ?? []).map((warning) => diagnostic(
+    warning.code ?? 'PROGRAM_RUNTIME_WARNING',
+    warning.message ?? 'Program runtime reported a recoverable warning',
+    warning.details ?? {}
+  ));
   const interactionWarnings = [
     ...(parsed.warnings ?? []),
-    ...(parsed.command === 'explore' && !requestedProgramRun ? [] : programWarnings)
+    ...(parsed.command === 'explore' && !requestedProgramRun ? [] : programWarnings),
+    ...programRuntimeWarnings
   ];
-  const programLockIndex = buildProgramLockIndex({
+  let programLockIndex = buildProgramLockIndex({
     revision: revisionBefore,
     results: options.bypassProgramLocks ? [] : programCycle.locks,
     records: programCycle.records
   });
-  const accessController = createAccessController(atoms, { ...options, programLockIndex });
+  let accessController = createAccessController(atoms, { ...options, programLockIndex });
   const interactionMessages = (programCycle.messages ?? [])
     .filter((message) => authorizeProgramLock({
       lockIndex: programLockIndex,
@@ -460,6 +473,168 @@ export async function executeAtomLanguage(options = {}) {
         revisionAfter: after
       });
     }
+  }
+
+  async function reconcileProgramsForWorld(candidateAtoms) {
+    if (!options.programScheduler) {
+      return {
+        atoms: candidateAtoms,
+        lockIndex: programLockIndex,
+        messages: [],
+        transformLogs: [],
+        pathChanges: []
+      };
+    }
+    let reconciledAtoms = candidateAtoms;
+    const messages = [];
+    const transformLogs = [];
+    const pathChanges = [];
+    let finalLockIndex = programLockIndex;
+    const maxPasses = 8;
+
+    for (let pass = 1; pass <= maxPasses; pass += 1) {
+      const unrestricted = createAccessController(reconciledAtoms, {});
+      const cycle = await options.programScheduler.refresh(reconciledAtoms, {
+        agentOrigin: interaction.agent,
+        isolateFailures: true,
+        executeExplore: (request) => executeProgramExplore({
+          atoms: reconciledAtoms,
+          request,
+          receiver,
+          accessController: unrestricted,
+          agentOrigin: interaction.agent
+        })
+      });
+      const cycleWarnings = (cycle.failures ?? []).map((failure) => diagnostic(
+        failure.code ?? 'ATOM_PROGRAM_FAILED',
+        failure.message ?? 'Python Program failed',
+        { ...(failure.details ?? {}), program: failure.programPath }
+      ));
+      programWarnings.push(...cycleWarnings);
+      if (parsed.command !== 'explore') interactionWarnings.push(...cycleWarnings);
+      interactionWarnings.push(...(cycle.runtimeWarnings ?? []).map((warning) => diagnostic(
+        warning.code ?? 'PROGRAM_RUNTIME_WARNING',
+        warning.message ?? 'Program runtime reported a recoverable warning',
+        warning.details ?? {}
+      )));
+      finalLockIndex = buildProgramLockIndex({
+        revision: revisionOf(reconciledAtoms),
+        results: options.bypassProgramLocks ? [] : cycle.locks,
+        records: cycle.records
+      });
+      const cycleAccessController = createAccessController(reconciledAtoms, {
+        ...options,
+        programLockIndex: finalLockIndex
+      });
+      messages.push(...(cycle.messages ?? [])
+        .filter((message) => authorizeProgramLock({
+          lockIndex: finalLockIndex,
+          targetPath: message.sourceProgramPath,
+          operation: 'read',
+          field: 'messages'
+        }).decision === 'allow')
+        .map((message) => ({ interactionId: interaction.id, ...message })));
+
+      let passChanged = false;
+      for (const request of cycle.transforms ?? []) {
+        const { sourceProgramRef: _sourceProgramRef, sourceProgramPath, ...transformRequest } = request;
+        const compiled = compileProgramTransform({ request: transformRequest, receiver });
+        if (!compiled.ok) {
+          interactionWarnings.push(diagnostic(
+            'INVALID_PROGRAM_TRANSFORM',
+            compiled.errors?.[0]?.message ?? 'Program transform 无法编译',
+            { program: sourceProgramPath, errors: compiled.errors ?? [] }
+          ));
+          continue;
+        }
+        let transformed;
+        try {
+          transformed = await applyTransform({
+            atoms: reconciledAtoms,
+            item: compiled.item,
+            contextFile,
+            authorize: cycleAccessController.authorize
+          });
+        } catch (error) {
+          interactionWarnings.push(diagnostic(
+            error.code ?? 'PROGRAM_TRANSFORM_FAILED',
+            error.message,
+            { program: sourceProgramPath }
+          ));
+          continue;
+        }
+        if (transformed.error) {
+          interactionWarnings.push(diagnostic(
+            'PROGRAM_TRANSFORM_REJECTED', transformed.error.message,
+            { program: sourceProgramPath, cause: transformed.error.code }
+          ));
+          continue;
+        }
+        try {
+          projectAtomContext(transformed.atoms, { rootName: path.basename(contextFile) });
+        } catch (error) {
+          interactionWarnings.push(diagnostic(
+            error.code ?? 'PROGRAM_TRANSFORM_INVALID_GRAPH', error.message,
+            { program: sourceProgramPath }
+          ));
+          continue;
+        }
+        const before = revisionOf(reconciledAtoms);
+        const after = revisionOf(transformed.atoms);
+        if (before === after) continue;
+        reconciledAtoms = transformed.atoms;
+        passChanged = true;
+        if (transformed.sourcePath && transformed.resultPath) {
+          pathChanges.push({ sourcePath: transformed.sourcePath, resultPath: transformed.resultPath });
+        }
+        transformLogs.push({
+          id: crypto.randomUUID(),
+          operation: 'program-transform',
+          source: transformRequest,
+          revisionBefore: before,
+          revisionAfter: after
+        });
+      }
+      if (!passChanged) {
+        return {
+          atoms: reconciledAtoms,
+          lockIndex: finalLockIndex,
+          messages,
+          transformLogs,
+          pathChanges
+        };
+      }
+    }
+    const error = new Error(`Program consequences did not converge after ${maxPasses} passes`);
+    error.code = 'ATOM_PROGRAM_RECONCILIATION_LIMIT';
+    error.details = { passes: maxPasses };
+    throw error;
+  }
+
+  function rewritePath(initialPath, pathChanges) {
+    return pathChanges.reduce((currentPath, change) => {
+      if (currentPath === change.sourcePath
+        || currentPath?.startsWith(`${change.sourcePath}/`)) {
+        return `${change.resultPath}${currentPath.slice(change.sourcePath.length)}`;
+      }
+      return currentPath;
+    }, initialPath);
+  }
+
+  if (programChanged && (parsed.command === 'atom' || parsed.command === 'explore')) {
+    let reconciled;
+    try {
+      reconciled = await reconcileProgramsForWorld(atoms);
+    } catch (error) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+        error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
+      )]);
+    }
+    atoms = reconciled.atoms;
+    programLockIndex = reconciled.lockIndex;
+    accessController = createAccessController(atoms, { ...options, programLockIndex });
+    interactionMessages.push(...reconciled.messages);
+    programTransformLogs.push(...reconciled.transformLogs);
   }
 
   if (parsed.command === 'atom') {
@@ -631,115 +806,23 @@ export async function executeAtomLanguage(options = {}) {
     let finalProgramLockIndex = programLockIndex;
     const finalProgramMessages = [];
     if (changed && options.programScheduler) {
-      let finalCycle;
+      let reconciled;
       try {
-        const programInputAtoms = nextAtoms;
-        const unrestricted = createAccessController(programInputAtoms, {});
-        finalCycle = await options.programScheduler.refresh(programInputAtoms, {
-          agentOrigin: interaction.agent,
-          isolateFailures: true,
-          executeExplore: (request) => executeProgramExplore({
-            atoms: programInputAtoms,
-            request,
-            receiver,
-            accessController: unrestricted,
-            agentOrigin: interaction.agent
-          })
-        });
+        reconciled = await reconcileProgramsForWorld(nextAtoms);
       } catch (error) {
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
           error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
         )]);
       }
-      interactionWarnings.push(...(finalCycle.failures ?? []).map((failure) => diagnostic(
-        failure.code ?? 'ATOM_PROGRAM_FAILED',
-        failure.message ?? 'Python Program failed',
-        { ...(failure.details ?? {}), program: failure.programPath }
-      )));
-      finalProgramLockIndex = buildProgramLockIndex({
-        revision: revisionOf(nextAtoms),
-        results: options.bypassProgramLocks ? [] : finalCycle.locks,
-        records: finalCycle.records
-      });
-      const finalAccessController = createAccessController(nextAtoms, {
-        ...options,
-        programLockIndex: finalProgramLockIndex
-      });
-      finalProgramMessages.push(...(finalCycle.messages ?? [])
-        .filter((message) => authorizeProgramLock({
-          lockIndex: finalProgramLockIndex,
-          targetPath: message.sourceProgramPath,
-          operation: 'read',
-          field: 'messages'
-        }).decision === 'allow')
-        .map((message) => ({ interactionId: interaction.id, ...message })));
-      for (const request of finalCycle.transforms ?? []) {
-        const { sourceProgramRef: _sourceProgramRef, sourceProgramPath, ...transformRequest } = request;
-        const compiled = compileProgramTransform({ request: transformRequest, receiver });
-        if (!compiled.ok) {
-          interactionWarnings.push(diagnostic(
-            'INVALID_PROGRAM_TRANSFORM',
-            compiled.errors?.[0]?.message ?? 'Program transform 无法编译',
-            { program: sourceProgramPath, errors: compiled.errors ?? [] }
-          ));
-          continue;
-        }
-        let transformed;
-        try {
-          transformed = await applyTransform({
-            atoms: nextAtoms,
-            item: compiled.item,
-            contextFile,
-            authorize: finalAccessController.authorize
-          });
-        } catch (error) {
-          interactionWarnings.push(diagnostic(
-            error.code ?? 'PROGRAM_TRANSFORM_FAILED',
-            error.message,
-            { program: sourceProgramPath }
-          ));
-          continue;
-        }
-        if (transformed.error) {
-          interactionWarnings.push(diagnostic(
-            'PROGRAM_TRANSFORM_REJECTED', transformed.error.message,
-            { program: sourceProgramPath, cause: transformed.error.code }
-          ));
-          continue;
-        }
-        try {
-          projectAtomContext(transformed.atoms, { rootName: path.basename(contextFile) });
-        } catch (error) {
-          interactionWarnings.push(diagnostic(
-            error.code ?? 'PROGRAM_TRANSFORM_INVALID_GRAPH', error.message,
-            { program: sourceProgramPath }
-          ));
-          continue;
-        }
-        const before = revisionOf(nextAtoms);
-        nextAtoms = transformed.atoms;
-        const after = revisionOf(nextAtoms);
-        if (before !== after) {
-          if (transformed.sourcePath && transformed.resultPath) {
-            for (const receipt of results) {
-              const receiptPath = receipt.result?.path;
-              if (
-                receiptPath === transformed.sourcePath
-                || receiptPath?.startsWith(`${transformed.sourcePath}/`)
-              ) {
-                const suffix = receiptPath.slice(transformed.sourcePath.length);
-                receipt.result.path = `${transformed.resultPath}${suffix}`;
-                receipt.result.selector = receipt.result.path;
-              }
-            }
-          }
-          programTransformLogs.push({
-            id: crypto.randomUUID(),
-            operation: 'program-transform',
-            source: transformRequest,
-            revisionBefore: before,
-            revisionAfter: after
-          });
+      nextAtoms = reconciled.atoms;
+      finalProgramLockIndex = reconciled.lockIndex;
+      finalProgramMessages.push(...reconciled.messages);
+      programTransformLogs.push(...reconciled.transformLogs);
+      for (const receipt of results) {
+        const rewritten = rewritePath(receipt.result?.path, reconciled.pathChanges);
+        if (rewritten && receipt.result) {
+          receipt.result.path = rewritten;
+          receipt.result.selector = rewritten;
         }
       }
       revisionAfter = revisionOf(nextAtoms);
@@ -893,6 +976,24 @@ export async function executeAtomLanguage(options = {}) {
         compiled.errors
       );
     }
+    let postRefresh = {
+      atoms: nextAtoms,
+      lockIndex: programLockIndex,
+      messages: [],
+      transformLogs: [],
+      pathChanges: []
+    };
+    if (options.programScheduler) {
+      try {
+        postRefresh = await reconcileProgramsForWorld(nextAtoms);
+        nextAtoms = postRefresh.atoms;
+      } catch (error) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
+        )]);
+      }
+    }
+    const finalCreatePath = rewritePath(createName, postRefresh.pathChanges);
     await persistChangedGraph({
       atoms: nextAtoms,
       contextFile,
@@ -903,7 +1004,9 @@ export async function executeAtomLanguage(options = {}) {
       correlationId: interaction.id,
       source
     });
-    for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
+    for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
+      await appendTransformLog(contextFile, record);
+    }
     return {
       ok: true,
       language: 'atom',
@@ -915,15 +1018,15 @@ export async function executeAtomLanguage(options = {}) {
       revisionBefore,
       revisionAfter: revisionOf(nextAtoms),
       result: describeAtom(
-        walkAtoms(nextAtoms).find((match) => match.path.join('/') === createName)
+        walkAtoms(nextAtoms).find((match) => match.path.join('/') === finalCreatePath)
           ?? walkAtoms(nextAtoms).at(-1),
         false
       ),
-      warnings: interactionWarnings,
+      warnings: mergeWarnings(interactionWarnings),
       errors: [],
-      messages: interactionMessages,
+      messages: [...interactionMessages, ...postRefresh.messages],
       interactionId: interaction.id,
-      lockState: programLockState(programLockIndex)
+      lockState: programLockState(postRefresh.lockIndex)
     };
   }
 
@@ -984,10 +1087,16 @@ export async function executeAtomLanguage(options = {}) {
     return failureBase(parsed, contextFile, projectionFile, atoms, [transformed.error], { messages: interactionMessages });
   }
 
-  const nextAtoms = transformed.atoms;
-  const revisionAfter = revisionOf(nextAtoms);
+  let nextAtoms = transformed.atoms;
+  let revisionAfter = revisionOf(nextAtoms);
   const changed = revisionAfter !== revisionBefore;
-  let postRefresh = null;
+  let postRefresh = {
+    atoms: nextAtoms,
+    lockIndex: programLockIndex,
+    messages: [],
+    transformLogs: [],
+    pathChanges: []
+  };
   if (changed) {
     const compiled = validatePrograms(nextAtoms, contextFile, atoms);
     interactionWarnings.push(...compiled.warnings);
@@ -1000,6 +1109,17 @@ export async function executeAtomLanguage(options = {}) {
         compiled.errors
       );
     }
+    if (options.programScheduler) {
+      try {
+        postRefresh = await reconcileProgramsForWorld(nextAtoms);
+        nextAtoms = postRefresh.atoms;
+        revisionAfter = revisionOf(nextAtoms);
+      } catch (error) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
+        )]);
+      }
+    }
     await persistChangedGraph({
       atoms: nextAtoms,
       contextFile,
@@ -1010,7 +1130,9 @@ export async function executeAtomLanguage(options = {}) {
       correlationId: interaction.id,
       source
     });
-    for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
+    for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
+      await appendTransformLog(contextFile, record);
+    }
     if (transformed.logRecord) {
       await appendTransformLog(contextFile, {
         ...transformed.logRecord,
@@ -1018,20 +1140,13 @@ export async function executeAtomLanguage(options = {}) {
         revisionAfter
       });
     }
-    if (options.programScheduler) {
-      postRefresh = await executeAtomLanguage({
-        source: 'atom',
-        contextFile,
-        projectionFile,
-        interaction,
-        programScheduler: options.programScheduler,
-        bypassProgramLocks: options.bypassProgramLocks,
-        commitWorld: options.commitWorld
-      });
-    }
   }
+  const finalResultPath = rewritePath(
+    transformed.resultPath ?? transformed.resultName,
+    postRefresh.pathChanges
+  );
   const resultMatch = walkAtoms(nextAtoms).find((match) => (
-    oneStoredField(match.atom, 'name')?.value === transformed.resultName
+    match.path.join('/') === finalResultPath
   ));
   return {
     ok: true,
@@ -1045,17 +1160,12 @@ export async function executeAtomLanguage(options = {}) {
     revisionAfter,
     result: resultMatch ? describeAtom(resultMatch, false) : null,
     warnings: [
-      ...mergeWarnings(interactionWarnings, postRefresh?.warnings ?? []),
-      ...(!postRefresh?.ok ? [diagnostic(
-        'POST_TRANSFORM_PROGRAM_REFRESH_FAILED',
-        '数据已写入，但随后 Program 刷新失败；锁和自动化状态可能尚未更新',
-        { errors: postRefresh?.errors ?? [] }
-      )] : [])
+      ...mergeWarnings(interactionWarnings)
     ],
     errors: [],
-    messages: [...interactionMessages, ...(postRefresh?.messages ?? [])],
+    messages: [...interactionMessages, ...postRefresh.messages],
     interactionId: interaction.id,
-    lockState: postRefresh?.lockState ?? programLockState(programLockIndex)
+    lockState: programLockState(postRefresh.lockIndex)
   };
 
 }

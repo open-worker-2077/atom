@@ -42,6 +42,12 @@ function ports() {
         calls.push(['human-status', structuredClone(request)]);
         return `transform {"name":"${request.key}","detail.rep.":"${request.detail}"}`;
       }
+    },
+    humanWorkspace: {
+      translate: async (request) => {
+        calls.push(['human-workspace', structuredClone(request)]);
+        return 'transform {"name":"Root/Workspace","detail.rep.":"updated"}';
+      }
     }
   };
 }
@@ -70,6 +76,66 @@ test('command follows one agent, Program, world and revision-labelled projection
   ]);
 });
 
+test('the first use of an Agent prepares its scoped Program projection once and retries the intent', async () => {
+  const calls = [];
+  let attempts = 0;
+  const runtime = createInteractionRuntime({
+    world: {
+      async execute(request) {
+        calls.push(['world', request.source, request.programMode ?? null, request.interaction.id]);
+        attempts += 1;
+        if (attempts === 1) {
+          return {
+            ok: false,
+            errors: [{ code: 'ATOM_PROGRAM_PROJECTION_MISSING' }]
+          };
+        }
+        return {
+          ok: true,
+          command: request.source === 'atom' ? 'atom' : 'explore',
+          revisionAfter: 'rev-1',
+          lockState: { revision: 'rev-1' },
+          messages: request.source === 'atom'
+            ? [{ level: 'info', text: 'prepared context' }]
+            : []
+        };
+      }
+    },
+    projections: {
+      async publish(request) {
+        calls.push(['projection', request]);
+        return { sourceRevision: request.expectedRevision };
+      },
+      async recover() {}
+    },
+    feedback: { async submit() {} },
+    agents: {
+      async resolve(path) {
+        return { ref: 'agent-ref', path };
+      }
+    },
+    humanStatus: { async translate() {} },
+    humanWorkspace: { async translate() {} },
+    programRuntime: 'program-runtime'
+  });
+
+  const result = await runtime.execute({
+    source: 'explore {"name":"Target"}',
+    correlationId: 'interaction-context',
+    agentPath: 'Agent A'
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.messages, [{ level: 'info', text: 'prepared context' }]);
+  assert.deepEqual(calls, [
+    ['world', 'explore {"name":"Target"}', null, 'interaction-context'],
+    ['world', 'atom', 'reconcile', 'interaction-context:program-context'],
+    ['projection', { expectedRevision: 'rev-1', lockState: { revision: 'rev-1' } }],
+    ['world', 'explore {"name":"Target"}', null, 'interaction-context'],
+    ['projection', { expectedRevision: 'rev-1', lockState: { revision: 'rev-1' } }]
+  ]);
+});
+
 test('initialization publishes the exact initialized revision before reporting ready', async () => {
   const context = ports();
   const runtime = createInteractionRuntime(context);
@@ -83,6 +149,7 @@ test('initialization publishes the exact initialized revision before reporting r
       source: 'atom',
       interaction: { id: 'startup-1', agent: null },
       history: [],
+      programMode: 'reconcile',
       programRuntime: 'program-runtime'
     }],
     ['projection', { expectedRevision: 'rev-2', lockState: { revision: 'rev-2' } }]
@@ -128,6 +195,31 @@ test('human status translation re-enters the same world lifecycle as an explicit
       interaction: { id: 'interaction-3', agent: null },
       history: [],
       bypassProgramLocks: true,
+      programMode: 'reconcile',
+      programRuntime: 'program-runtime'
+    }],
+    ['projection', { expectedRevision: 'rev-2', lockState: { revision: 'rev-2' } }]
+  ]);
+});
+
+test('human workspace changes rebuild the context-free Program projection in the same world lifecycle', async () => {
+  const context = ports();
+  const runtime = createInteractionRuntime(context);
+
+  await runtime.updateHumanWorkspace({
+    operation: { type: 'move', sourcePath: 'Root/A', targetPath: 'Root/B' },
+    correlationId: 'interaction-workspace'
+  });
+
+  assert.deepEqual(context.calls, [
+    ['human-workspace', {
+      operation: { type: 'move', sourcePath: 'Root/A', targetPath: 'Root/B' }
+    }],
+    ['world', {
+      source: 'transform {"name":"Root/Workspace","detail.rep.":"updated"}',
+      interaction: { id: 'interaction-workspace', agent: null },
+      history: [],
+      programMode: 'reconcile',
       programRuntime: 'program-runtime'
     }],
     ['projection', { expectedRevision: 'rev-2', lockState: { revision: 'rev-2' } }]
