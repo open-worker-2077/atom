@@ -324,6 +324,33 @@ export async function executeAtomLanguage(options = {}) {
     };
   }
   const revisionBefore = revisionOf(atoms);
+  if (parsed.command === 'transform' && parsed.batch && !parsed.ok) {
+    return failureBase(parsed, contextFile, projectionFile, atoms, parsed.errors);
+  }
+  if (parsed.command === 'transform' && parsed.batch && parsed.items.length === 0) {
+    return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+      'EMPTY_TRANSFORM_BATCH',
+      '批量 transform 至少需要一个 Atom 改造'
+    )]);
+  }
+  if (parsed.command === 'transform' && parsed.batch) {
+    const unsupported = parsed.items.flatMap((item) => item.fields
+      .filter((field) => (
+        !['name', 'detail', 'partners'].includes(field.baseKey)
+        || (field.baseKey === 'name' && field.commands.length > 0)
+      ))
+      .map((field) => ({ item, field })))[0];
+    if (unsupported) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, [{
+        ...diagnostic(
+          'UNSUPPORTED_TRANSFORM_BATCH_AXIS',
+          '批量 transform 当前只支持已有 Atom 的 detail 与 partners 改造',
+          { axis: unsupported.field.baseKey }
+        ),
+        itemIndex: unsupported.item.index
+      }]);
+    }
+  }
   const interaction = {
     id: options.interaction?.id ?? crypto.randomUUID(),
     agent: options.interaction?.agent ?? null
@@ -523,17 +550,254 @@ export async function executeAtomLanguage(options = {}) {
       [diagnostic('UNKNOWN_ATOM_LANGUAGE_COMMAND', '无法分派 Atom Language 命令')]
     );
   }
-  if (parsed.batch || parsed.items.length !== 1) {
+  if (!parsed.batch && parsed.items.length !== 1) {
     return failureBase(
       parsed,
       contextFile,
       projectionFile,
       atoms,
       [diagnostic(
-        'UNSUPPORTED_TRANSFORM_BATCH',
-        '首轮真实 transform 一次只执行一个 Atom 改造'
+        'TRANSFORM_ITEM_REQUIRED',
+        'transform 需要一个 Atom 改造对象或对象数组'
       )]
     );
+  }
+  if (parsed.batch) {
+    if (parsed.createNew) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+        'UNSUPPORTED_TRANSFORM_NEW_BATCH',
+        '批量 transform 只改造已有 Atom；transform new 仍逐个创建'
+      )]);
+    }
+    const runIndex = parsed.items.findIndex((candidate) => programRunRequest(candidate));
+    if (runIndex !== -1) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+        'PROGRAM_RUN_BATCH_REJECTED',
+        'Program 运行不能与批量 Atom 改造混合',
+        { itemIndex: runIndex }
+      )]);
+    }
+
+    let nextAtoms = atoms;
+    const results = [];
+    const transformLogs = [];
+    for (const candidate of parsed.items) {
+      let transformed;
+      try {
+        transformed = await applyTransform({
+          atoms: nextAtoms,
+          item: candidate,
+          contextFile,
+          authorize: accessController.authorize
+        });
+      } catch (error) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          error.code ?? 'TRANSFORM_BATCH_ITEM_FAILED',
+          error.message,
+          { ...(error.details ?? {}), itemIndex: candidate.index }
+        )], { messages: interactionMessages });
+      }
+      if (transformed.error) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [{
+          ...transformed.error,
+          itemIndex: candidate.index
+        }], { messages: interactionMessages });
+      }
+
+      const itemRevisionBefore = revisionOf(nextAtoms);
+      nextAtoms = transformed.atoms;
+      const itemRevisionAfter = revisionOf(nextAtoms);
+      const resultMatch = walkAtoms(nextAtoms).find((match) => (
+        transformed.resultPath
+          ? match.path.join('/') === transformed.resultPath
+          : oneStoredField(match.atom, 'name')?.value === transformed.resultName
+      ));
+      results.push({
+        index: candidate.index,
+        changed: itemRevisionAfter !== itemRevisionBefore,
+        result: resultMatch ? describeAtom(resultMatch, false) : null
+      });
+      if (transformed.logRecord) {
+        transformLogs.push({
+          ...transformed.logRecord,
+          revisionBefore: itemRevisionBefore,
+          revisionAfter: itemRevisionAfter
+        });
+      }
+    }
+
+    let revisionAfter = revisionOf(nextAtoms);
+    let changed = revisionAfter !== revisionBefore;
+    let finalProgramLockIndex = programLockIndex;
+    const finalProgramMessages = [];
+    if (changed && options.programScheduler) {
+      let finalCycle;
+      try {
+        const programInputAtoms = nextAtoms;
+        const unrestricted = createAccessController(programInputAtoms, {});
+        finalCycle = await options.programScheduler.refresh(programInputAtoms, {
+          agentOrigin: interaction.agent,
+          isolateFailures: true,
+          executeExplore: (request) => executeProgramExplore({
+            atoms: programInputAtoms,
+            request,
+            receiver,
+            accessController: unrestricted,
+            agentOrigin: interaction.agent
+          })
+        });
+      } catch (error) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
+        )]);
+      }
+      interactionWarnings.push(...(finalCycle.failures ?? []).map((failure) => diagnostic(
+        failure.code ?? 'ATOM_PROGRAM_FAILED',
+        failure.message ?? 'Python Program failed',
+        { ...(failure.details ?? {}), program: failure.programPath }
+      )));
+      finalProgramLockIndex = buildProgramLockIndex({
+        revision: revisionOf(nextAtoms),
+        results: options.bypassProgramLocks ? [] : finalCycle.locks,
+        records: finalCycle.records
+      });
+      const finalAccessController = createAccessController(nextAtoms, {
+        ...options,
+        programLockIndex: finalProgramLockIndex
+      });
+      finalProgramMessages.push(...(finalCycle.messages ?? [])
+        .filter((message) => authorizeProgramLock({
+          lockIndex: finalProgramLockIndex,
+          targetPath: message.sourceProgramPath,
+          operation: 'read',
+          field: 'messages'
+        }).decision === 'allow')
+        .map((message) => ({ interactionId: interaction.id, ...message })));
+      for (const request of finalCycle.transforms ?? []) {
+        const { sourceProgramRef: _sourceProgramRef, sourceProgramPath, ...transformRequest } = request;
+        const compiled = compileProgramTransform({ request: transformRequest, receiver });
+        if (!compiled.ok) {
+          interactionWarnings.push(diagnostic(
+            'INVALID_PROGRAM_TRANSFORM',
+            compiled.errors?.[0]?.message ?? 'Program transform 无法编译',
+            { program: sourceProgramPath, errors: compiled.errors ?? [] }
+          ));
+          continue;
+        }
+        let transformed;
+        try {
+          transformed = await applyTransform({
+            atoms: nextAtoms,
+            item: compiled.item,
+            contextFile,
+            authorize: finalAccessController.authorize
+          });
+        } catch (error) {
+          interactionWarnings.push(diagnostic(
+            error.code ?? 'PROGRAM_TRANSFORM_FAILED',
+            error.message,
+            { program: sourceProgramPath }
+          ));
+          continue;
+        }
+        if (transformed.error) {
+          interactionWarnings.push(diagnostic(
+            'PROGRAM_TRANSFORM_REJECTED', transformed.error.message,
+            { program: sourceProgramPath, cause: transformed.error.code }
+          ));
+          continue;
+        }
+        try {
+          projectAtomContext(transformed.atoms, { rootName: path.basename(contextFile) });
+        } catch (error) {
+          interactionWarnings.push(diagnostic(
+            error.code ?? 'PROGRAM_TRANSFORM_INVALID_GRAPH', error.message,
+            { program: sourceProgramPath }
+          ));
+          continue;
+        }
+        const before = revisionOf(nextAtoms);
+        nextAtoms = transformed.atoms;
+        const after = revisionOf(nextAtoms);
+        if (before !== after) {
+          if (transformed.sourcePath && transformed.resultPath) {
+            for (const receipt of results) {
+              const receiptPath = receipt.result?.path;
+              if (
+                receiptPath === transformed.sourcePath
+                || receiptPath?.startsWith(`${transformed.sourcePath}/`)
+              ) {
+                const suffix = receiptPath.slice(transformed.sourcePath.length);
+                receipt.result.path = `${transformed.resultPath}${suffix}`;
+                receipt.result.selector = receipt.result.path;
+              }
+            }
+          }
+          programTransformLogs.push({
+            id: crypto.randomUUID(),
+            operation: 'program-transform',
+            source: transformRequest,
+            revisionBefore: before,
+            revisionAfter: after
+          });
+        }
+      }
+      revisionAfter = revisionOf(nextAtoms);
+      changed = revisionAfter !== revisionBefore;
+    }
+    const finalMatchesByPath = new Map(walkAtoms(nextAtoms).map((match) => [
+      match.path.join('/'), match
+    ]));
+    for (const receipt of results) {
+      const finalMatch = finalMatchesByPath.get(receipt.result?.path);
+      if (finalMatch) receipt.result = describeAtom(finalMatch, false);
+    }
+    if (changed) {
+      const compiled = validatePrograms(nextAtoms, contextFile, atoms);
+      interactionWarnings.push(...compiled.warnings);
+      if (!compiled.ok) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, compiled.errors);
+      }
+      await persistChangedGraph({
+        atoms: nextAtoms,
+        contextFile,
+        projectionFile,
+        rootName: path.basename(contextFile),
+        commitWorld: options.commitWorld,
+        expectedRevision: revisionBefore,
+        correlationId: interaction.id,
+        source
+      });
+      for (const record of [...programTransformLogs, ...transformLogs]) {
+        try {
+          await appendTransformLog(contextFile, record);
+        } catch (error) {
+          interactionWarnings.push(diagnostic(
+            'TRANSFORM_LOG_APPEND_FAILED',
+            '事实已原子提交，但辅助变更日志未能写入',
+            { cause: error.code ?? error.message }
+          ));
+        }
+      }
+    }
+    return {
+      ok: true,
+      language: 'atom',
+      command: 'transform',
+      batch: true,
+      createNew: false,
+      changed,
+      contextFile,
+      projectionFile,
+      revisionBefore,
+      revisionAfter,
+      results,
+      warnings: mergeWarnings(interactionWarnings),
+      errors: [],
+      messages: [...interactionMessages, ...finalProgramMessages],
+      interactionId: interaction.id,
+      lockState: programLockState(finalProgramLockIndex)
+    };
   }
   const [item] = parsed.items;
   if (!item.ok || parsed.errors.length) {

@@ -120,7 +120,7 @@ function help() {
     'Graph-JSON 基础：',
     '  name 使用能唯一表征目标的最短 exact 选择器；detail 是内容；children 是真实包含；partners 是 [{"verb":"...","object":"目标路径"}]。',
     '  @type 写在 name 键上（如 name@agent、name@program）；#简介必须在键末尾；~hint 仅为返回提示。',
-    '  对象或对象数组均可作为请求；数组逐项返回结果。所有结果只使用 Graph-JSON。',
+    '  Explore 接受对象或对象数组；Transform 对象数组把已有 Atom 改造作为一个原子批次执行，并逐项返回结果。所有结果只使用 Graph-JSON。',
     '',
     'Explore 契约（只读，不修复或写入投影）：',
     '  atom.cmd --% --agent 工作Agent explore "{""name"":""目标节点"",""detail$full"":true,""children$latitude+1"":true,""children$longitude+1"":true,""partners"":true}"',
@@ -135,7 +135,8 @@ function help() {
     'Transform 契约（目标 name 必须 exact 且唯一；写入后必须回读）：',
     '  transform new 创建完整 Atom；新节点的归属由 name 中的精确父路径决定，与 --agent 无关。',
     '  name 可用“精确父路径/新名称”创建子 Atom，省略父路径则创建顶层 Atom；父路径不明确时只询问父 Atom。',
-    '  detail 和 partners 的全文替换必须显式使用 .rep.；结构操作一次只能有一个。',
+    '  Transform 对象数组批量更新已有 Atom 的 detail/partners：任一项失败整批不写；成功后整批只做一次权威提交。',
+    '  detail 和 partners 的全文替换必须显式使用 .rep.；每个对象的结构操作只能有一个。',
     ...contract.transform,
     '',
     'Program 模板与复用：',
@@ -414,6 +415,13 @@ function graphResult(result) {
       ]);
     }
     return null;
+  }
+  if (result.command === 'transform' && result.batch && Array.isArray(result.results)) {
+    const values = result.results.map((item) => {
+      const hint = item.changed ? 'updated' : 'unchanged';
+      return graphMatch(item.result, hint);
+    });
+    return { kind: 'array', values };
   }
   if (result.command === 'transform' && result.result) {
     const hint = result.createNew

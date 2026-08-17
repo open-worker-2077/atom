@@ -499,6 +499,7 @@ export async function applyTransform({
   }
   const selected = resolveUnique(nextAtoms, nameField.value);
   if (selected.error) return selected;
+  const sourcePath = selected.match.path.join('/');
   const changedFields = new Set();
   for (const field of item.fields) {
     if (field.baseKey === 'name' && field.commands?.length) changedFields.add('name');
@@ -572,9 +573,15 @@ export async function applyTransform({
       }
       rewritePartnerBindings(nextAtoms, partnerBindings);
     }
+    const resultMatch = walkAtoms(nextAtoms).find((match) => match.atom === selected.match.atom);
     return error
       ? { error }
-      : { atoms: nextAtoms, resultName: storedField(selected.match.atom, 'name').value };
+      : {
+          atoms: nextAtoms,
+          resultName: storedField(selected.match.atom, 'name').value,
+          sourcePath,
+          resultPath: resultMatch?.path.join('/') ?? null
+        };
   }
 
   const { command } = operation;
@@ -629,7 +636,13 @@ export async function applyTransform({
       destinationChildren.push(target.atom);
     }
     rewritePartnerBindings(nextAtoms, partnerBindings);
-    return { atoms: nextAtoms, resultName: nameField.value };
+    const resultMatch = walkAtoms(nextAtoms).find((match) => match.atom === target.atom);
+    return {
+      atoms: nextAtoms,
+      resultName: nameField.value,
+      sourcePath,
+      resultPath: resultMatch?.path.join('/') ?? sourcePath
+    };
   }
 
   if (command.name === 'dsc') {
@@ -660,6 +673,8 @@ export async function applyTransform({
     return {
       atoms: nextAtoms,
       resultName: targetName,
+      sourcePath,
+      resultPath: walkAtoms(nextAtoms).find((match) => match.atom === target.atom)?.path.join('/') ?? null,
       logRecord: {
         id: crypto.randomUUID(),
         operation: 'discard',
@@ -715,6 +730,8 @@ export async function applyTransform({
     return {
       atoms: nextAtoms,
       resultName: targetName,
+      sourcePath,
+      resultPath: walkAtoms(nextAtoms).find((match) => match.atom === target.atom)?.path.join('/') ?? null,
       logRecord: {
         id: crypto.randomUUID(),
         operation: 'restore',
