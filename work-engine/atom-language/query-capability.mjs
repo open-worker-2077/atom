@@ -58,7 +58,7 @@ function nameFieldIn(item) {
   return item.fields.find((field) => field.baseKey === 'name');
 }
 
-export function exactMatches(atoms, item, matcherRegistry, candidates = null) {
+export function exactMatches(atoms, item, matcherRegistry, candidates = null, exactIndex = null) {
   const nameField = nameFieldIn(item);
   if (!nameField?.valuePresent || typeof nameField.value !== 'string' || !nameField.value) {
     return { error: diagnostic('ATOM_NAME_REQUIRED', '首轮 explore/transform 执行需要带 Value 的 name 精确锚点') };
@@ -68,7 +68,15 @@ export function exactMatches(atoms, item, matcherRegistry, candidates = null) {
   if (!matcher) {
     return { error: diagnostic('UNSUPPORTED_MATCHER', `不支持此匹配模式：${mode}`, { mode }) };
   }
-  const matches = (candidates ?? walkAtoms(atoms)).filter(({ atom, path: atomPath }) => {
+  const available = candidates ?? walkAtoms(atoms);
+  if (mode === 'exact' && exactIndex) {
+    const candidateSet = new Set(available);
+    return {
+      matches: (exactIndex.get(nameField.value) ?? []).filter((match) => candidateSet.has(match)),
+      expected: nameField.value
+    };
+  }
+  const matches = available.filter(({ atom, path: atomPath }) => {
     if (mode === 'exact') {
       return matchesExactSelector(
         atomPath,
@@ -127,6 +135,29 @@ export function describeAtom(match, includeFullDetail, options = {}) {
   return result;
 }
 
+export function prepareExploreWorld(atoms) {
+  const allMatches = walkAtoms(atoms, { virtualRoot: true });
+  const exactIndex = new Map();
+  const add = (selector, match) => {
+    if (!indexableSelector(selector)) return;
+    if (!exactIndex.has(selector)) exactIndex.set(selector, []);
+    exactIndex.get(selector).push(match);
+  };
+  for (const match of allMatches) {
+    const name = oneStoredField(match.atom, 'name')?.value;
+    add(name, match);
+    for (let length = 2; length <= match.path.length; length += 1) {
+      add(match.path.slice(-length).join('/'), match);
+    }
+    if (!match.virtual) add(`${WORLD_OUTSIDE_NAME}/${match.path.join('/')}`, match);
+  }
+  return { allMatches, exactIndex };
+}
+
+function indexableSelector(selector) {
+  return typeof selector === 'string' && selector.length > 0;
+}
+
 function shortestUniqueSelector(match, matches) {
   for (let length = 1; length <= match.path.length; length += 1) {
     const suffix = match.path.slice(-length).join('/');
@@ -154,7 +185,14 @@ function outgoingPartners(match, matches) {
   return partners.map((partner) => ({ partner, target: resolvePartnerTarget(match, partner?.object, matches) }));
 }
 
-export async function executeExploreItem(atoms, item, matcherRegistry, accessController, lockIndex = null) {
+export async function executeExploreItem(
+  atoms,
+  item,
+  matcherRegistry,
+  accessController,
+  lockIndex = null,
+  preparedWorld = null
+) {
   if (!item.ok) return { ok: false, index: item.index, errors: item.errors };
   const isProjection = (field) => !field.valuePresent || field.value === true;
   const unsupported = item.fields.filter((field) => {
@@ -175,13 +213,14 @@ export async function executeExploreItem(atoms, item, matcherRegistry, accessCon
       })]
     };
   }
-  const allMatches = walkAtoms(atoms, { virtualRoot: true });
-  const visibleMatches = [];
+  const prepared = preparedWorld ?? prepareExploreWorld(atoms);
+  const allMatches = prepared.allMatches;
+  const visibleMatches = accessController.restricted ? [] : allMatches;
   const requestedReadFields = new Set(['name']);
   if (item.fields.some((field) => field.baseKey === 'detail' && field.actions.some((action) => action.name === 'full'))) requestedReadFields.add('detail');
   if (item.fields.some((field) => field.baseKey === 'children')) requestedReadFields.add('children');
   if (item.fields.some((field) => field.baseKey === 'partners')) requestedReadFields.add('partners');
-  for (const match of allMatches) {
+  for (const match of accessController.restricted ? allMatches : []) {
     if (match.virtual) {
       visibleMatches.push(match);
       continue;
@@ -196,10 +235,14 @@ export async function executeExploreItem(atoms, item, matcherRegistry, accessCon
     }
     if (allowed) visibleMatches.push(match);
   }
-  const selected = exactMatches(atoms, item, matcherRegistry, visibleMatches);
+  const selected = exactMatches(
+    atoms, item, matcherRegistry, visibleMatches, prepared.exactIndex
+  );
   if (selected.error) return { ok: false, index: item.index, errors: [selected.error] };
   if (selected.matches.length === 0) {
-    const unfiltered = exactMatches(atoms, item, matcherRegistry, allMatches);
+    const unfiltered = exactMatches(
+      atoms, item, matcherRegistry, allMatches, prepared.exactIndex
+    );
     if (unfiltered.error) return { ok: false, index: item.index, errors: [unfiltered.error] };
     if (unfiltered.matches.length > 0) {
       const programSources = [];
@@ -287,7 +330,8 @@ export async function executeProgramExplore({
   request,
   receiver = createAtomLanguageReceiver(),
   accessController = { restricted: false, authorize: async () => ({ decision: 'allow' }) },
-  agentOrigin = null
+  agentOrigin = null,
+  preparedWorld = null
 }) {
   const normalizedRequest = request.name === undefined && agentOrigin?.path
     ? { ...request, name: agentOrigin.path }
@@ -298,7 +342,14 @@ export async function executeProgramExplore({
     error.code = parsed.errors?.[0]?.code ?? 'INVALID_PROGRAM_EXPLORE';
     throw error;
   }
-  const result = await executeExploreItem(atoms, parsed.items[0], receiver.matcherRegistry, accessController);
+  const result = await executeExploreItem(
+    atoms,
+    parsed.items[0],
+    receiver.matcherRegistry,
+    accessController,
+    null,
+    preparedWorld
+  );
   if (!result.ok) {
     const error = new Error(result.errors?.[0]?.message ?? 'Program explore failed');
     error.code = result.errors?.[0]?.code ?? 'PROGRAM_EXPLORE_FAILED';

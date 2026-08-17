@@ -168,7 +168,7 @@ Every external CLI/Web interaction requests one Program refresh. A refresh reque
 3. Coalesce concurrent requests for the same fingerprint into one in-flight execution.
 4. Run dirty Programs concurrently in isolated Python workers.
 5. Program world-function calls belong to the existing interaction and never recursively trigger another cycle.
-6. Enforce one 60-second wall-clock budget per cycle. On timeout, terminate workers and return a structured failure instead of using an unknown lock state.
+6. Enforce one 10-second wall-clock budget per cycle. Programs run independently within that shared deadline; on timeout, terminate only the affected worker and return a structured failure instead of blocking Atom.
 7. Commit one validated result set for the revision. Messages are delivered once for the interaction that produced them; cached refreshes do not repeat old messages.
 
 The first implementation invalidates the cache on any world revision change. A later dependency index may record `explore` query descriptors and read Atom references, allowing unaffected Programs to reuse results across revisions without changing the public API.

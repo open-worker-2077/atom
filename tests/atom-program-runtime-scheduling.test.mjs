@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
+import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
 function atom(name, detail = '', children = [], type = '') {
@@ -150,10 +154,11 @@ test('one failed Program is isolated while healthy Program effects survive the s
   assert.equal(cycle.failures[0].code, 'ATOM_PROGRAM_FAILED');
 });
 
-test('Program cycles default to a sixty-second wall-clock budget', () => {
+test('Program cycles default to a ten-second wall-clock budget', () => {
   const scheduler = createProgramRuntimeScheduler();
 
-  assert.equal(scheduler.timeoutMs, 60_000);
+  assert.equal(scheduler.timeoutMs, 10_000);
+  assert.equal(scheduler.maxWorkers, 16);
 });
 
 test('a revision-local @agent ref change does not replay Programs for the same context path', async () => {
@@ -248,6 +253,79 @@ test('independent Program dependency queries are revalidated concurrently', asyn
 
   assert.equal(changed.cached, true);
   assert.ok(maxActive > 1, `expected concurrent dependency reads, observed ${maxActive}`);
+});
+
+test('many Programs inspect a large world without copying every fact into every worker', async () => {
+  const facts = [atom('Target', 'stable')];
+  for (let index = 0; index < 10_000; index += 1) {
+    facts.push(atom(`Fact ${index}`, 'x'.repeat(1_000)));
+  }
+  for (let index = 0; index < 12; index += 1) {
+    facts.push(atom(`Reporter ${index}`, [
+      "value = explore({'name': 'Target'})[0].detail",
+      "message({'level': 'info', 'text': value})"
+    ].join('\n'), [], 'program'));
+  }
+  const scheduler = createProgramRuntimeScheduler({ maxWorkers: 4 });
+
+  const startedAt = Date.now();
+  const cycle = await scheduler.refresh(facts);
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(cycle.messages.length, 12);
+  assert.ok(elapsedMs < 5_000, `large-world Program cycle took ${elapsedMs}ms`);
+});
+
+test('an unrelated transform revalidates many Program queries against one prepared world', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-revalidation-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const targets = Array.from({ length: 32 }, (_, index) => atom(`Target ${index}`, 'stable'));
+  const programs = targets.map((_, index) => atom(`Reporter ${index}`, [
+    `value = explore({'name': 'Target ${index}'})[0].detail`,
+    "message({'level': 'info', 'text': value})"
+  ].join('\n'), [], 'program'));
+  const ballast = Array.from(
+    { length: 10_000 },
+    (_, index) => atom(`Ballast ${index}`, 'x'.repeat(1_000))
+  );
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Unrelated', 'before'),
+    ...targets,
+    ...programs,
+    ...ballast
+  ]));
+  const scheduler = createProgramRuntimeScheduler({ maxWorkers: 4 });
+  const interaction = { id: 'program-revalidation', agent: null };
+  const commitWorld = async ({ facts }) => {
+    await fs.writeFile(contextFile, JSON.stringify(facts));
+  };
+
+  const initialized = await executeAtomLanguage({
+    source: 'atom',
+    contextFile,
+    projectionFile,
+    interaction,
+    programScheduler: scheduler,
+    programMode: 'reconcile',
+    commitWorld
+  });
+  assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
+
+  const startedAt = Date.now();
+  const changed = await executeAtomLanguage({
+    source: 'transform {"name":"Unrelated","detail.rep.after"}',
+    contextFile,
+    projectionFile,
+    interaction: { ...interaction, id: 'program-revalidation:write' },
+    programScheduler: scheduler,
+    commitWorld
+  });
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(changed.ok, true, JSON.stringify(changed.errors));
+  assert.ok(elapsedMs < 5_000, `Program dependency revalidation took ${elapsedMs}ms`);
 });
 
 test('a configurable timeout terminates a stuck worker and the scheduler can run the next revision', async () => {

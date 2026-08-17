@@ -29,7 +29,12 @@ function relevantProgramMessages(items, messages) {
   return messages.filter((message) => visiblePaths.has(message.sourceProgramPath));
 }
 import { createAtomLanguageReceiver } from './receiver.mjs';
-import { appendTransformLog, applyTransform } from './transform-executor.mjs';
+import {
+  appendTransformLog,
+  applyTransform,
+  createExactTransformIndex,
+  transformChangesStructure
+} from './transform-executor.mjs';
 import {
   projectAtomContext,
   readAtomContext,
@@ -43,6 +48,7 @@ import {
   executeProgramExplore,
   fieldsByBase,
   oneStoredField,
+  prepareExploreWorld,
   walkAtoms
 } from './query-capability.mjs';
 
@@ -53,6 +59,11 @@ function revisionOf(atoms) {
     .createHash('sha256')
     .update(JSON.stringify(atoms))
     .digest('hex');
+}
+
+function performanceTrace(event, details) {
+  if (process.env.ATOM_PERF_TRACE !== '1') return;
+  process.stderr.write(`${JSON.stringify({ event, ...details })}\n`);
 }
 
 function projectionFileFor(contextFile, explicitProjectionFile) {
@@ -250,12 +261,17 @@ async function persistChangedGraph({
   source
 }) {
   // Validate the full projection before either active file is changed.
+  const validationStartedAt = performance.now();
   projectAtomContext(atoms, { rootName });
+  performanceTrace('world-precommit-validation', {
+    elapsedMs: Math.round(performance.now() - validationStartedAt)
+  });
   if (typeof commitWorld !== 'function') {
     const error = new Error('World mutation requires an explicit commit capability');
     error.code = 'WORLD_COMMIT_CAPABILITY_REQUIRED';
     throw error;
   }
+  const commitStartedAt = performance.now();
   await commitWorld({
     expectedRevision,
     nextRevision: revisionOf(atoms),
@@ -263,9 +279,13 @@ async function persistChangedGraph({
     correlationId,
     source
   });
+  performanceTrace('world-commit', {
+    elapsedMs: Math.round(performance.now() - commitStartedAt)
+  });
 }
 
 export async function executeAtomLanguage(options = {}) {
+  const operationStartedAt = performance.now();
   const source = options.source;
   const receiver = options.receiver ?? createAtomLanguageReceiver(options.receiverOptions);
   const parsed = receiver.receive(source);
@@ -304,6 +324,9 @@ export async function executeAtomLanguage(options = {}) {
   let atoms;
   try {
     atoms = await readAtomContext(contextFile, { create: parsed.command === 'atom' });
+    performanceTrace('world-read-context', {
+      elapsedMs: Math.round(performance.now() - operationStartedAt)
+    });
   } catch (error) {
     const ambiguous = error.code === 'DUPLICATE_GRAPH_NAME';
     return {
@@ -364,6 +387,7 @@ export async function executeAtomLanguage(options = {}) {
   if (options.programScheduler) {
     try {
       const unrestricted = createAccessController(atoms, {});
+      const preparedWorld = prepareExploreWorld(atoms);
       const reconcilePrograms = options.programMode === 'reconcile'
         || Boolean(requestedProgramRun?.selector);
       const programOperation = reconcilePrograms
@@ -371,6 +395,7 @@ export async function executeAtomLanguage(options = {}) {
         : (typeof options.programScheduler.current === 'function'
           ? options.programScheduler.current.bind(options.programScheduler)
           : options.programScheduler.refresh.bind(options.programScheduler));
+      const programStartedAt = performance.now();
       programCycle = await programOperation(atoms, {
         agentOrigin: interaction.agent,
         isolateFailures: true,
@@ -378,8 +403,18 @@ export async function executeAtomLanguage(options = {}) {
           ? { programSelector: requestedProgramRun.selector, force: true }
           : {}),
         executeExplore: (request) => executeProgramExplore({
-          atoms, request, receiver, accessController: unrestricted, agentOrigin: interaction.agent
+          atoms,
+          request,
+          receiver,
+          accessController: unrestricted,
+          agentOrigin: interaction.agent,
+          preparedWorld
         })
+      });
+      performanceTrace('program-initial-cycle', {
+        elapsedMs: Math.round(performance.now() - programStartedAt),
+        transforms: programCycle.transforms?.length ?? 0,
+        cached: programCycle.cached === true
       });
     } catch (error) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
@@ -494,6 +529,8 @@ export async function executeAtomLanguage(options = {}) {
 
     for (let pass = 1; pass <= maxPasses; pass += 1) {
       const unrestricted = createAccessController(reconciledAtoms, {});
+      const preparedWorld = prepareExploreWorld(reconciledAtoms);
+      const refreshStartedAt = performance.now();
       const cycle = await options.programScheduler.refresh(reconciledAtoms, {
         agentOrigin: interaction.agent,
         isolateFailures: true,
@@ -502,8 +539,16 @@ export async function executeAtomLanguage(options = {}) {
           request,
           receiver,
           accessController: unrestricted,
-          agentOrigin: interaction.agent
+          agentOrigin: interaction.agent,
+          preparedWorld
         })
+      });
+      performanceTrace('program-reconcile-refresh', {
+        pass,
+        elapsedMs: Math.round(performance.now() - refreshStartedAt),
+        transforms: cycle.transforms?.length ?? 0,
+        failures: cycle.failures?.length ?? 0,
+        cached: cycle.cached === true
       });
       const cycleWarnings = (cycle.failures ?? []).map((failure) => diagnostic(
         failure.code ?? 'ATOM_PROGRAM_FAILED',
@@ -536,6 +581,7 @@ export async function executeAtomLanguage(options = {}) {
         .map((message) => ({ interactionId: interaction.id, ...message })));
 
       let passChanged = false;
+      const compiledRequests = [];
       for (const request of cycle.transforms ?? []) {
         const { sourceProgramRef: _sourceProgramRef, sourceProgramPath, ...transformRequest } = request;
         const compiled = compileProgramTransform({ request: transformRequest, receiver });
@@ -547,53 +593,114 @@ export async function executeAtomLanguage(options = {}) {
           ));
           continue;
         }
-        let transformed;
-        try {
-          transformed = await applyTransform({
-            atoms: reconciledAtoms,
-            item: compiled.item,
-            contextFile,
-            authorize: cycleAccessController.authorize
-          });
-        } catch (error) {
-          interactionWarnings.push(diagnostic(
-            error.code ?? 'PROGRAM_TRANSFORM_FAILED',
-            error.message,
-            { program: sourceProgramPath }
-          ));
-          continue;
+        compiledRequests.push({ sourceProgramPath, transformRequest, item: compiled.item });
+      }
+
+      performanceTrace('program-reconcile-plan', {
+        pass,
+        compiled: compiledRequests.length,
+        structural: compiledRequests.filter(({ item }) => transformChangesStructure(item)).length
+      });
+      const applyCompiled = async (baseAtoms, mutateInput, reportFailure) => {
+        let candidateAtoms = baseAtoms;
+        let exactIndex = mutateInput
+          ? createExactTransformIndex(candidateAtoms)
+          : null;
+        const applied = [];
+        let rejected = 0;
+        let structuralChanged = 0;
+        for (const entry of compiledRequests) {
+          let transformed;
+          try {
+            transformed = await applyTransform({
+              atoms: candidateAtoms,
+              item: entry.item,
+              contextFile,
+              authorize: cycleAccessController.authorize,
+              mutateInput,
+              exactIndex
+            });
+          } catch (error) {
+            if (reportFailure) {
+              rejected += 1;
+              interactionWarnings.push(diagnostic(
+                error.code ?? 'PROGRAM_TRANSFORM_FAILED',
+                error.message,
+                { program: entry.sourceProgramPath }
+              ));
+              continue;
+            }
+            return { failed: true };
+          }
+          if (transformed.error) {
+            if (mutateInput && transformed.rolledBack) {
+              exactIndex = createExactTransformIndex(candidateAtoms);
+            }
+            if (reportFailure) {
+              rejected += 1;
+              interactionWarnings.push(diagnostic(
+                'PROGRAM_TRANSFORM_REJECTED', transformed.error.message,
+                { program: entry.sourceProgramPath, cause: transformed.error.code }
+              ));
+              continue;
+            }
+            return { failed: true };
+          }
+          candidateAtoms = transformed.atoms;
+          applied.push({ ...entry, transformed });
+          if (mutateInput && transformed.changed && transformChangesStructure(entry.item)) {
+            structuralChanged += 1;
+            exactIndex = createExactTransformIndex(candidateAtoms);
+          }
         }
-        if (transformed.error) {
-          interactionWarnings.push(diagnostic(
-            'PROGRAM_TRANSFORM_REJECTED', transformed.error.message,
-            { program: sourceProgramPath, cause: transformed.error.code }
-          ));
-          continue;
-        }
-        try {
-          projectAtomContext(transformed.atoms, { rootName: path.basename(contextFile) });
-        } catch (error) {
-          interactionWarnings.push(diagnostic(
-            error.code ?? 'PROGRAM_TRANSFORM_INVALID_GRAPH', error.message,
-            { program: sourceProgramPath }
-          ));
-          continue;
-        }
-        const before = revisionOf(reconciledAtoms);
-        const after = revisionOf(transformed.atoms);
-        if (before === after) continue;
-        reconciledAtoms = transformed.atoms;
-        passChanged = true;
-        if (transformed.sourcePath && transformed.resultPath) {
-          pathChanges.push({ sourcePath: transformed.sourcePath, resultPath: transformed.resultPath });
-        }
-        transformLogs.push({
-          id: crypto.randomUUID(),
-          operation: 'program-transform',
-          source: transformRequest,
-          revisionBefore: before,
-          revisionAfter: after
+        performanceTrace('program-effect-set', {
+          mutateInput,
+          applied: applied.length,
+          rejected,
+          structuralChanged
         });
+        return { failed: false, atoms: candidateAtoms, applied };
+      };
+
+      const before = revisionOf(reconciledAtoms);
+      const applyStartedAt = performance.now();
+      let application = await applyCompiled(structuredClone(reconciledAtoms), true, true);
+      if (!application.failed) {
+        try {
+          projectAtomContext(application.atoms, { rootName: path.basename(contextFile) });
+        } catch {
+          application = { failed: true };
+        }
+      }
+      if (application.failed) {
+        application = await applyCompiled(reconciledAtoms, false, true);
+      }
+      const after = revisionOf(application.atoms);
+      performanceTrace('program-reconcile-apply', {
+        pass,
+        elapsedMs: Math.round(performance.now() - applyStartedAt),
+        applied: application.applied?.length ?? 0,
+        changed: before !== after
+      });
+      if (before !== after) {
+        reconciledAtoms = application.atoms;
+        passChanged = true;
+        for (const { transformRequest, transformed } of application.applied) {
+          if (transformed.sourcePath && transformed.resultPath) {
+            pathChanges.push({
+              sourcePath: transformed.sourcePath,
+              resultPath: transformed.resultPath
+            });
+          }
+          if (transformed.changed !== true) continue;
+          transformLogs.push({
+            id: crypto.randomUUID(),
+            operation: 'program-transform',
+            source: transformRequest,
+            revisionBefore: before,
+            revisionAfter: after
+          });
+        }
       }
       if (!passChanged) {
         return {
@@ -753,7 +860,8 @@ export async function executeAtomLanguage(options = {}) {
       )]);
     }
 
-    let nextAtoms = atoms;
+    let nextAtoms = structuredClone(atoms);
+    let exactIndex = createExactTransformIndex(nextAtoms);
     const results = [];
     const transformLogs = [];
     for (const candidate of parsed.items) {
@@ -763,7 +871,9 @@ export async function executeAtomLanguage(options = {}) {
           atoms: nextAtoms,
           item: candidate,
           contextFile,
-          authorize: accessController.authorize
+          authorize: accessController.authorize,
+          mutateInput: true,
+          exactIndex
         });
       } catch (error) {
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
@@ -779,9 +889,10 @@ export async function executeAtomLanguage(options = {}) {
         }], { messages: interactionMessages });
       }
 
-      const itemRevisionBefore = revisionOf(nextAtoms);
       nextAtoms = transformed.atoms;
-      const itemRevisionAfter = revisionOf(nextAtoms);
+      if (transformed.changed && transformChangesStructure(candidate)) {
+        exactIndex = createExactTransformIndex(nextAtoms);
+      }
       const resultMatch = walkAtoms(nextAtoms).find((match) => (
         transformed.resultPath
           ? match.path.join('/') === transformed.resultPath
@@ -789,14 +900,14 @@ export async function executeAtomLanguage(options = {}) {
       ));
       results.push({
         index: candidate.index,
-        changed: itemRevisionAfter !== itemRevisionBefore,
+        changed: transformed.changed === true,
         result: resultMatch ? describeAtom(resultMatch, false) : null
       });
       if (transformed.logRecord) {
         transformLogs.push({
           ...transformed.logRecord,
-          revisionBefore: itemRevisionBefore,
-          revisionAfter: itemRevisionAfter
+          revisionBefore,
+          revisionAfter: null
         });
       }
     }
@@ -853,7 +964,10 @@ export async function executeAtomLanguage(options = {}) {
       });
       for (const record of [...programTransformLogs, ...transformLogs]) {
         try {
-          await appendTransformLog(contextFile, record);
+          await appendTransformLog(contextFile, {
+            ...record,
+            revisionAfter: record.revisionAfter ?? revisionAfter
+          });
         } catch (error) {
           interactionWarnings.push(diagnostic(
             'TRANSFORM_LOG_APPEND_FAILED',

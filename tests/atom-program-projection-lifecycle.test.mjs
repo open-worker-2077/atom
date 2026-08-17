@@ -141,12 +141,14 @@ test('a legacy persisted failure is rejected and retried instead of becoming aut
   assert.equal(executions, 2);
 });
 
-test('every Program receives its own full timeout budget', async () => {
+test('concurrent Programs share one cycle deadline', async () => {
   const budgets = [];
   const scheduler = createProgramRuntimeScheduler({
     timeoutMs: 12_345,
+    maxWorkers: 1,
     runProgram: async ({ timeoutMs }) => {
       budgets.push(timeoutMs);
+      await new Promise((resolve) => setTimeout(resolve, 10));
       return { locks: [], messages: [], transforms: [] };
     }
   });
@@ -157,7 +159,10 @@ test('every Program receives its own full timeout budget', async () => {
     atom('Program C', '# c', [], 'program')
   ]);
 
-  assert.deepEqual(budgets, [12_345, 12_345, 12_345]);
+  assert.equal(budgets.length, 3);
+  assert.equal(budgets.every((budget) => budget > 12_000 && budget <= 12_345), true);
+  assert.ok(budgets[1] < budgets[0]);
+  assert.ok(budgets[2] < budgets[1]);
 });
 
 test('a Program that explores the current Agent cannot reuse another Agent projection', async () => {

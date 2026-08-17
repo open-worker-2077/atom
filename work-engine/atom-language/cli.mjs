@@ -141,6 +141,7 @@ function help() {
     '',
     'Program 模板与复用：',
     '  @program 是唯一可执行类型，detail 直接保存 Python；普通交互不得手工替代已有 Program 或模板。',
+    '  Program 并发独立运行并共享单轮 10 秒时间预算；单项失败独立报告，超时自动中断。短期内避免编写超出该预算的复杂 Program。',
     '  世界函数：explore(query)->rows；transform(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
     '  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。',
     '  规划函数：direct_children(rows,parent_path)、child_detail(rows,parent_path,name,default)、missing_details(rows,parent_path,names)、form_status(rows,parent_path,status_name)、first_pending(forms,completed_states)、transition_allowed(current,requested,transitions)、subtree_refs(rows,root_path)、plan_shards(sources,spec)、plan_form_flow(rows,parent_path,standard)、plan_template_instance(rows,parent_path,template)。',

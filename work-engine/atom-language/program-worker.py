@@ -172,8 +172,20 @@ def main():
             raise RuntimeError(response.get("error", {}).get("message", "Atom world function failed"))
         return response.get("result")
 
+    def remember(result):
+        result_refs = []
+        for item in result:
+            if isinstance(item, dict):
+                ref = item["ref"]
+                by_ref[ref] = item
+                views[ref] = AtomView(item)
+                result_refs.append(ref)
+            else:
+                result_refs.append(item)
+        return result_refs
+
     def explore(query):
-        result_refs = call_engine("explore", query)
+        result_refs = remember(call_engine("explore", query))
         return [views[ref] for ref in result_refs]
 
     def lock(specification):
@@ -197,11 +209,11 @@ def main():
         specification = require_object(specification, "instantiate")
         resolved = PROGRAM_TEMPLATES.resolve_instantiation(specification)
         program = current_atom()
-        result_refs = call_engine("explore", {
+        result_refs = remember(call_engine("explore", {
             "name": program.path,
             "children$latitude-1": None,
             "detail$full": None,
-        })
+        }))
         rows = [views[ref] for ref in result_refs]
         children = []
         conflicts = []
@@ -265,7 +277,7 @@ def main():
         if not isinstance(arguments, dict):
             raise TypeError("use_program.arguments must be one JSON object")
         matches = [
-            record for record in records
+            record for record in by_ref.values()
             if "program" in record.get("types", [])
             and (record["path"] == selector or record["name"] == selector)
         ]

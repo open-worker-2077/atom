@@ -4,9 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseAtomKey } from './key-parser.mjs';
-import { executeProgramExplore } from './query-capability.mjs';
+import { executeProgramExplore, prepareExploreWorld } from './query-capability.mjs';
 
-const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_MAX_WORKERS = 16;
 const workerFile = path.join(path.dirname(fileURLToPath(import.meta.url)), 'program-worker.py');
 
 function fields(atom) {
@@ -137,28 +138,48 @@ function semanticRecord(record, recordsByRef) {
   };
 }
 
-async function dependencyFingerprint(requests, executeExplore, records) {
-  const recordsByPath = new Map(records.map((record) => [record.path, record]));
-  const recordsByRef = new Map(records.map((record) => [record.ref, record]));
-  const snapshots = await Promise.all(requests.map(async (request) => {
-    try {
-      const matches = await executeExplore(structuredClone(request));
-      return {
-        request,
-        matches: matches.map((match) => recordsByPath.get(match.path))
-          .filter(Boolean)
-          .map((record) => semanticRecord(record, recordsByRef))
-      };
-    } catch (error) {
-      return {
-        request,
-        error: {
-          code: error?.code ?? 'PROGRAM_DEPENDENCY_QUERY_FAILED',
-          message: error?.message ?? 'Program dependency query failed',
-          details: error?.details ?? {}
+function dependencySnapshot(request, matches, state) {
+  return {
+    request,
+    matches: matches.map((match) => state.recordsByPath.get(match.path))
+      .filter(Boolean)
+      .map((record) => semanticRecord(record, state.recordsByRef))
+  };
+}
+
+function rememberDependencySnapshot(state, request, matches) {
+  const key = JSON.stringify(request);
+  if (!state.snapshots.has(key)) {
+    state.snapshots.set(key, Promise.resolve(dependencySnapshot(request, matches, state)));
+  }
+}
+
+async function dependencyFingerprint(requests, executeExplore, records, cache = null) {
+  const state = cache ?? {
+    recordsByPath: new Map(records.map((record) => [record.path, record])),
+    recordsByRef: new Map(records.map((record) => [record.ref, record])),
+    snapshots: new Map()
+  };
+  const snapshots = await Promise.all(requests.map((request) => {
+    const key = JSON.stringify(request);
+    if (!state.snapshots.has(key)) {
+      state.snapshots.set(key, (async () => {
+        try {
+          const matches = await executeExplore(structuredClone(request));
+          return dependencySnapshot(request, matches, state);
+        } catch (error) {
+          return {
+            request,
+            error: {
+              code: error?.code ?? 'PROGRAM_DEPENDENCY_QUERY_FAILED',
+              message: error?.message ?? 'Program dependency query failed',
+              details: error?.details ?? {}
+            }
+          };
         }
-      };
+      })());
     }
+    return state.snapshots.get(key);
   }));
   return crypto.createHash('sha256').update(JSON.stringify(snapshots)).digest('hex');
 }
@@ -308,7 +329,10 @@ function runWorker({ python, records, program, timeoutMs, executeExplore }) {
         reject(error);
       }
     });
-    writeToWorker({ world: records, program });
+    writeToWorker({
+      world: records.filter((record) => record.types.includes('program')),
+      program
+    });
   });
 }
 
@@ -330,7 +354,7 @@ export class ProgramRuntimeScheduler {
     this.completed = new Map();
     this.inflight = new Map();
     this.maxCompleted = options.maxCompleted ?? 8;
-    this.maxWorkers = options.maxWorkers ?? 4;
+    this.maxWorkers = options.maxWorkers ?? DEFAULT_MAX_WORKERS;
     this.activeWorkers = 0;
     this.workerQueue = [];
     this.reusable = new Map();
@@ -504,6 +528,7 @@ export class ProgramRuntimeScheduler {
   }
 
   async computeRefresh(atoms, options, { records, programs, isolateFailures, key }) {
+    const cycleDeadline = Date.now() + this.timeoutMs;
     if (options.force !== true && !options.programSelector) {
       const persisted = await this.persistedProjection({
         records, programs, isolateFailures, fingerprint: key, agentOrigin: options.agentOrigin
@@ -513,8 +538,19 @@ export class ProgramRuntimeScheduler {
         return persisted;
       }
     }
-    const byPath = new Map(records.map((record) => [record.path, record.ref]));
-    const executeExplore = options.executeExplore ?? ((request) => executeProgramExplore({ atoms, request }));
+    const byPath = new Map(records.map((record) => [record.path, record]));
+    const dependencyCache = {
+      recordsByPath: byPath,
+      recordsByRef: new Map(records.map((record) => [record.ref, record])),
+      snapshots: new Map()
+    };
+    const preparedWorld = options.executeExplore ? null : prepareExploreWorld(atoms);
+    const executeExplore = options.executeExplore ?? ((request) => executeProgramExplore({
+      atoms, request, preparedWorld
+    }));
+    const fingerprintDependencies = (requests) => dependencyFingerprint(
+      requests, executeExplore, records, dependencyCache
+    );
     const currentWorldKey = worldRevisionKey(records);
     const scopePath = agentScopePath(options.agentOrigin);
     const reusableEntry = options.force === true
@@ -525,7 +561,7 @@ export class ProgramRuntimeScheduler {
     const reusable = reusableEntry?.[1] ?? null;
     if (reusable) {
       const dependenciesUnchanged = reusable.worldKey === currentWorldKey
-        || await dependencyFingerprint(reusable.requests, executeExplore, records)
+        || await fingerprintDependencies(reusable.requests)
           === reusable.dependencyFingerprint;
       if (dependenciesUnchanged) {
         const value = {
@@ -555,7 +591,7 @@ export class ProgramRuntimeScheduler {
       const previous = previousEntry?.[1] ?? null;
       if (previous) {
         const dependenciesUnchanged = previous.worldKey === currentWorldKey
-          || await dependencyFingerprint(previous.requests, executeExplore, records)
+          || await fingerprintDependencies(previous.requests)
             === previous.dependencyFingerprint;
         if (dependenciesUnchanged) {
           return {
@@ -574,18 +610,28 @@ export class ProgramRuntimeScheduler {
 
       const requests = [];
       try {
-        const result = await this.runBounded(() => this.runProgram({
-          python: this.python, records, program, timeoutMs: this.timeoutMs,
-          executeExplore: async (request) => {
-            requests.push(structuredClone(request));
-            const matches = await executeExplore(request);
-            return matches.map((match) => {
-              const ref = byPath.get(match.path);
-              if (!ref) throw Object.assign(new Error(`Program explore returned an unknown path: ${match.path}`), { code: 'INVALID_PROGRAM_EXPLORE_RESULT' });
-              return ref;
-            });
+        const result = await this.runBounded(() => {
+          const remainingMs = cycleDeadline - Date.now();
+          if (remainingMs <= 0) {
+            throw Object.assign(
+              new Error(`Program cycle exceeded ${this.timeoutMs}ms`),
+              { code: 'ATOM_PROGRAM_TIMEOUT' }
+            );
           }
-        }));
+          return this.runProgram({
+            python: this.python, records, program, timeoutMs: remainingMs,
+            executeExplore: async (request) => {
+              requests.push(structuredClone(request));
+              const matches = await executeExplore(request);
+              rememberDependencySnapshot(dependencyCache, request, matches);
+              return matches.map((match) => {
+                const record = byPath.get(match.path);
+                if (!record) throw Object.assign(new Error(`Program explore returned an unknown path: ${match.path}`), { code: 'INVALID_PROGRAM_EXPLORE_RESULT' });
+                return record;
+              });
+            }
+          });
+        });
         const uniqueRequests = [...new Map(requests.map((request) => (
           [JSON.stringify(request), request]
         ))).values()];
@@ -600,7 +646,7 @@ export class ProgramRuntimeScheduler {
             contextDependent,
             scopePath: contextDependent ? scopePath : null,
             requests: uniqueRequests,
-            dependencyFingerprint: await dependencyFingerprint(uniqueRequests, executeExplore, records),
+            dependencyFingerprint: await fingerprintDependencies(uniqueRequests),
             worldKey: currentWorldKey,
             result,
             records
@@ -660,7 +706,7 @@ export class ProgramRuntimeScheduler {
         contextIncomplete,
         scopePath: contextDependent ? scopePath : null,
         requests: uniqueRequests,
-        dependencyFingerprint: await dependencyFingerprint(uniqueRequests, executeExplore, records),
+        dependencyFingerprint: await fingerprintDependencies(uniqueRequests),
         worldKey: currentWorldKey,
         value
       });

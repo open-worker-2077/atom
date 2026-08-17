@@ -124,6 +124,168 @@ test('4784 serializes concurrent writes as complete world interactions without l
   );
 });
 
+test('4784 applies one Program effect set without cloning the whole world per transform', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-service-effect-set-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const targets = Array.from({ length: 80 }, (_, index) => atom(
+    `Target ${index}`,
+    'before',
+    Array.from({ length: 20 }, (__, childIndex) => atom(`Child ${index}-${childIndex}`))
+  ));
+  const ballast = Array.from(
+    { length: 2_000 },
+    (_, index) => atom(`Ballast ${index}`, 'x'.repeat(200))
+  );
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('工作Agent', '起点', [], 'agent'),
+    atom('Switch', 'before'),
+    ...targets,
+    ...ballast
+  ], null, 2));
+
+  const emptyCycle = () => ({
+    cached: false,
+    records: [],
+    locks: [],
+    messages: [],
+    transforms: [],
+    failures: [],
+    runtimeWarnings: []
+  });
+  let refreshCount = 0;
+  const programScheduler = {
+    current: async () => emptyCycle(),
+    refresh: async () => {
+      refreshCount += 1;
+      if (refreshCount !== 2) return emptyCycle();
+      return {
+        ...emptyCycle(),
+        transforms: [
+          {
+            'name.typ.program': 'Target 0',
+            detail: 'invalid implicit replacement',
+            sourceProgramRef: 'rejected-partial-program-ref',
+            sourceProgramPath: 'Rejected Partial Program'
+          },
+          ...targets.map((_, index) => ({
+            name: `Target ${index}`,
+            'detail.rep.after': null,
+            sourceProgramRef: 'bulk-program-ref',
+            sourceProgramPath: 'Bulk Program'
+          }))
+        ]
+      };
+    }
+  };
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, programScheduler
+  });
+  t.after(() => running.close());
+  const agent = await resolveAgentContext(contextFile, '工作Agent');
+
+  const startedAt = Date.now();
+  const result = await executeAtomCommandEndpoint({
+    source: 'transform {"name":"Switch","detail.rep.after"}',
+    interaction: { agent }
+  }, `${running.url}/__atom/api/command`);
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.ok(elapsedMs < 4_000, `one effect set took ${elapsedMs}ms`);
+  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  for (let index = 0; index < targets.length; index += 1) {
+    assert.equal(world.find((entry) => entry.name === `Target ${index}`)?.detail, 'after');
+  }
+  assert.equal(Object.hasOwn(world.find((entry) => entry.name === 'Target 0'), 'name@program'), false);
+  const health = await fetch(`${running.url}/__spatial/api/health`);
+  assert.equal(health.status, 200);
+});
+
+test('4784 keeps one isolated Program effect set fast across structural and rejected effects', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-structural-effect-set-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const targets = Array.from({ length: 80 }, (_, index) => atom(`Target ${index}`, 'before'));
+  const ballast = Array.from(
+    { length: 5_000 },
+    (_, index) => atom(`Ballast ${index}`, 'x'.repeat(400))
+  );
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('工作Agent', '起点', [], 'agent'),
+    atom('Switch', 'before'),
+    atom('Destination'),
+    ...targets,
+    ...ballast
+  ], null, 2));
+
+  const emptyCycle = () => ({
+    cached: false,
+    records: [],
+    locks: [],
+    messages: [],
+    transforms: [],
+    failures: [],
+    runtimeWarnings: []
+  });
+  let refreshCount = 0;
+  const programScheduler = {
+    current: async () => emptyCycle(),
+    refresh: async () => {
+      refreshCount += 1;
+      if (refreshCount !== 2) return emptyCycle();
+      return {
+        ...emptyCycle(),
+        transforms: [
+          {
+            name: 'Target 0',
+            'name.mov.Destination': null,
+            sourceProgramRef: 'structural-program-ref',
+            sourceProgramPath: 'Structural Program'
+          },
+          {
+            name: 'Missing target',
+            'detail.rep.after': null,
+            sourceProgramRef: 'rejected-program-ref',
+            sourceProgramPath: 'Rejected Program'
+          },
+          ...targets.slice(1).map((_, index) => ({
+            name: `Target ${index + 1}`,
+            'detail.rep.after': null,
+            sourceProgramRef: 'bulk-program-ref',
+            sourceProgramPath: 'Bulk Program'
+          }))
+        ]
+      };
+    }
+  };
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, programScheduler
+  });
+  t.after(() => running.close());
+  const agent = await resolveAgentContext(contextFile, '工作Agent');
+
+  const startedAt = Date.now();
+  const result = await executeAtomCommandEndpoint({
+    source: 'transform {"name":"Switch","detail.rep.after"}',
+    interaction: { agent }
+  }, `${running.url}/__atom/api/command`);
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.ok(elapsedMs < 4_000, `structural effect set took ${elapsedMs}ms`);
+  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(world.find((entry) => entry.name === 'Target 0'), undefined);
+  assert.equal(world.find((entry) => entry.name === 'Destination').children[0].name, 'Target 0');
+  for (let index = 1; index < targets.length; index += 1) {
+    assert.equal(world.find((entry) => entry.name === `Target ${index}`)?.detail, 'after');
+  }
+});
+
 test('4784 Web workspace node creation commits atom.json before returning the rebuilt projection', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-web-create-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

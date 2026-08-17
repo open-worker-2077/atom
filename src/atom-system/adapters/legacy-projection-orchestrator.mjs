@@ -12,6 +12,11 @@ function sameRevision(expected, actual) {
   return expected === actual || expected === actual.slice('sha256:'.length);
 }
 
+function performanceTrace(event, details) {
+  if (process.env.ATOM_PERF_TRACE !== '1') return;
+  process.stderr.write(`${JSON.stringify({ event, ...details })}\n`);
+}
+
 export function createLegacyProjectionOrchestrator({
   contextFile,
   worldId = 'primary',
@@ -20,7 +25,11 @@ export function createLegacyProjectionOrchestrator({
   if (!contextFile) throw problem('INVALID_PROJECTION_CONTEXT', 'Atom context file is required');
 
   async function projectCurrent({ expectedRevision, lockState = [] } = {}) {
+    const readStartedAt = performance.now();
     const facts = await readAtomContext(contextFile, { create: false });
+    performanceTrace('projection-read-world', {
+      elapsedMs: Math.round(performance.now() - readStartedAt)
+    });
     const sourceRevision = revisionOfWorldFacts(facts);
     if (expectedRevision && !sameRevision(expectedRevision, sourceRevision)) {
       throw problem('STALE_WORLD_PROJECTION', 'Projection request does not match the current Atom world', {
@@ -32,12 +41,16 @@ export function createLegacyProjectionOrchestrator({
       projectors: createLegacyProjectionProjectors({ lockState }),
       repository
     });
+    const rebuildStartedAt = performance.now();
     await pipeline.rebuild({
       contract: 'atom.world-snapshot',
       version: 1,
       worldId,
       revision: sourceRevision,
       facts
+    });
+    performanceTrace('projection-rebuild', {
+      elapsedMs: Math.round(performance.now() - rebuildStartedAt)
     });
     const batch = await repository.readCurrent(worldId, sourceRevision);
     if (!batch.current) {

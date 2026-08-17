@@ -36,6 +36,11 @@ function feedbackSource(source) {
   return /^submit(?:\s|$)/u.test(source.trim());
 }
 
+function performanceTrace(event, details) {
+  if (process.env.ATOM_PERF_TRACE !== '1') return;
+  process.stderr.write(`${JSON.stringify({ event, ...details })}\n`);
+}
+
 export function createInteractionRuntime({
   world,
   projections,
@@ -60,10 +65,15 @@ export function createInteractionRuntime({
   async function publish(result) {
     if (!result?.ok || typeof result.revisionAfter !== 'string' || !result.revisionAfter) return null;
     try {
-      return await projections.publish({
+      const startedAt = performance.now();
+      const published = await projections.publish({
         expectedRevision: result.revisionAfter,
         lockState: result.lockState
       });
+      performanceTrace('projection-publish', {
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
+      return published;
     } catch (error) {
       throw problem(
         'WORLD_COMMITTED_PROJECTION_PENDING',
@@ -90,7 +100,12 @@ export function createInteractionRuntime({
       ...(currentOptions.programMode ? { programMode: currentOptions.programMode } : {}),
       programRuntime
     });
+    const worldStartedAt = performance.now();
     let result = await executeWorld(intent.source, interaction);
+    performanceTrace('world-execute', {
+      elapsedMs: Math.round(performance.now() - worldStartedAt),
+      changed: result?.changed === true
+    });
     const projectionMissing = result?.ok === false
       && result.errors?.some(({ code }) => code === 'ATOM_PROGRAM_PROJECTION_MISSING');
     if (projectionMissing && interaction.agent && !options.programMode) {

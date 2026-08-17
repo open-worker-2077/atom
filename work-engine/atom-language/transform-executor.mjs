@@ -182,8 +182,8 @@ function copiedBindings(bindings, mapping) {
     });
 }
 
-function resolveUnique(atoms, selector) {
-  const matches = walkAtoms(atoms).filter((match) => (
+function resolveUnique(atoms, selector, exactIndex = null) {
+  const matches = exactIndex?.get(selector) ?? walkAtoms(atoms).filter((match) => (
     matchesExactSelector(
       match.path,
       storedField(match.atom, 'name')?.value,
@@ -205,6 +205,32 @@ function resolveUnique(atoms, selector) {
     };
   }
   return { match: matches[0] };
+}
+
+export function createExactTransformIndex(atoms) {
+  const index = new Map();
+  const add = (selector, match) => {
+    if (!index.has(selector)) index.set(selector, []);
+    index.get(selector).push(match);
+  };
+  for (const match of walkAtoms(atoms)) {
+    const parts = match.path;
+    add(storedField(match.atom, 'name')?.value, match);
+    for (let start = 0; start < parts.length - 1; start += 1) {
+      add(parts.slice(start).join('/'), match);
+    }
+    add(`${WORLD_OUTSIDE_NAME}/${parts.join('/')}`, match);
+  }
+  return index;
+}
+
+export function transformChangesStructure(item) {
+  return item.fields.some((field) => (
+    (field.baseKey === 'children' && field.valuePresent)
+    || (field.baseKey === 'name' && field.commands.some((command) => (
+      ['ren', 'mov', 'cpy', 'dsc', 'rst'].includes(command.name)
+    )))
+  ));
 }
 
 function containerOf(atoms, match) {
@@ -488,17 +514,37 @@ export async function applyTransform({
   atoms,
   item,
   contextFile,
-  authorize = async () => ({ decision: 'allow' })
+  authorize = async () => ({ decision: 'allow' }),
+  mutateInput = false,
+  exactIndex = null
 }) {
-  const nextAtoms = structuredClone(atoms);
+  const nextAtoms = mutateInput ? atoms : structuredClone(atoms);
   const rootName = path.basename(contextFile);
-  const partnerBindings = capturePartnerBindings(nextAtoms, rootName);
   const nameField = item.fields.find((field) => field.baseKey === 'name');
   if (!nameField?.valuePresent || typeof nameField.value !== 'string' || !nameField.value) {
     return { error: diagnostic('ATOM_NAME_REQUIRED', 'transform 需要 name 精确锚点') };
   }
-  const selected = resolveUnique(nextAtoms, nameField.value);
+  const selected = resolveUnique(nextAtoms, nameField.value, exactIndex);
   if (selected.error) return selected;
+  const selectedBefore = JSON.stringify(selected.match.atom);
+  const selectedSnapshot = mutateInput ? structuredClone(selected.match.atom) : null;
+  const rejectAfterMutation = (error) => {
+    if (!selectedSnapshot || JSON.stringify(selected.match.atom) === selectedBefore) return { error };
+    for (const key of Object.keys(selected.match.atom)) delete selected.match.atom[key];
+    Object.assign(selected.match.atom, selectedSnapshot);
+    return { error, rolledBack: true };
+  };
+  const structural = structuralCommand(item);
+  if (structural.error) return structural;
+  const nameCommands = item.fields
+    .filter((field) => field.baseKey === 'name')
+    .flatMap((field) => field.commands ?? []);
+  const rewritesPaths = nameCommands.some((command) => (
+    ['ren', 'mov', 'cpy', 'dsc', 'rst'].includes(command.name)
+  ));
+  const partnerBindings = rewritesPaths
+    ? capturePartnerBindings(nextAtoms, rootName)
+    : [];
   const sourcePath = selected.match.path.join('/');
   const changedFields = new Set();
   for (const field of item.fields) {
@@ -507,7 +553,7 @@ export async function applyTransform({
     if (field.baseKey === 'partners' && (field.commands?.length || field.valuePresent)) changedFields.add('partners');
     if (field.baseKey === 'children' && (field.commands?.length || field.valuePresent)) changedFields.add('children');
   }
-  if (nameField.commands?.some((command) => ['mov', 'cpy', 'dsc', 'rst'].includes(command.name))) {
+  if (nameCommands.some((command) => ['mov', 'cpy', 'dsc', 'rst'].includes(command.name))) {
     changedFields.add('children');
   }
   for (const field of changedFields) {
@@ -520,11 +566,16 @@ export async function applyTransform({
       return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权执行该改造；请反馈派发方', { field }) };
     }
   }
-  const selectedAtoms = new Set(walkAtoms([selected.match.atom]).map((match) => match.atom));
-  for (const descendant of walkAtoms(nextAtoms)) {
-    if (selectedAtoms.has(descendant.atom)
-      && (await authorize(descendant, 'write', 'children')).decision !== 'allow') {
-      return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造该子树；请反馈派发方') };
+  const selectedAtoms = new Set([selected.match.atom]);
+  const changesSubtree = rewritesPaths || changedFields.has('children');
+  if (changesSubtree && (immediateChildren(selected.match.atom)?.length ?? 0) > 0) {
+    for (const match of walkAtoms([selected.match.atom])) selectedAtoms.add(match.atom);
+    for (const descendant of walkAtoms(nextAtoms)) {
+      if (descendant.atom !== selected.match.atom
+        && selectedAtoms.has(descendant.atom)
+        && (await authorize(descendant, 'write', 'children')).decision !== 'allow') {
+        return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造该子树；请反馈派发方') };
+      }
     }
   }
   // Renames and structural changes rewrite incoming relations. Their source
@@ -538,11 +589,9 @@ export async function applyTransform({
     }
   }
 
-  const structural = structuralCommand(item);
-  if (structural.error) return structural;
   const operation = structural.operation;
   if (!operation) {
-    const rename = nameField.commands.find((command) => command.name === 'ren');
+    const rename = nameCommands.find((command) => command.name === 'ren');
     if (
       rename
       && siblingNameCollision(nextAtoms, selected.match, rename.parameter)
@@ -556,31 +605,36 @@ export async function applyTransform({
     }
     const error = applyFields(selected.match.atom, item.fields, nextAtoms);
     if (!error) {
-      const currentMatches = walkAtoms(nextAtoms);
-      const byAtom = new Map(currentMatches.map((match) => [match.atom, match]));
-      const outgoing = capturePartnerBindings(nextAtoms, rootName)
-        .filter((binding) => binding.sourceAtom === selected.match.atom);
-      for (const binding of outgoing) {
-        const relationTarget = byAtom.get(binding.targetAtom);
-        if (relationTarget && (await authorize(relationTarget, 'read')).decision !== 'allow') {
-          return {
-            error: diagnostic(
-              'WINDOW_ACCESS_DENIED',
-              '当前窗口无权建立指向该关系目标的连接；请反馈派发方'
-            )
-          };
+      if (changedFields.has('partners')) {
+        const currentMatches = walkAtoms(nextAtoms);
+        const byAtom = new Map(currentMatches.map((match) => [match.atom, match]));
+        const outgoing = capturePartnerBindings(nextAtoms, rootName)
+          .filter((binding) => binding.sourceAtom === selected.match.atom);
+        for (const binding of outgoing) {
+          const relationTarget = byAtom.get(binding.targetAtom);
+          if (relationTarget && (await authorize(relationTarget, 'read')).decision !== 'allow') {
+            return rejectAfterMutation(
+              diagnostic(
+                'WINDOW_ACCESS_DENIED',
+                '当前窗口无权建立指向该关系目标的连接；请反馈派发方'
+              )
+            );
+          }
         }
       }
-      rewritePartnerBindings(nextAtoms, partnerBindings);
+      if (partnerBindings.length) rewritePartnerBindings(nextAtoms, partnerBindings);
     }
-    const resultMatch = walkAtoms(nextAtoms).find((match) => match.atom === selected.match.atom);
+    const resultPath = rewritesPaths
+      ? walkAtoms(nextAtoms).find((match) => match.atom === selected.match.atom)?.path.join('/') ?? null
+      : sourcePath;
     return error
-      ? { error }
+      ? rejectAfterMutation(error)
       : {
           atoms: nextAtoms,
           resultName: storedField(selected.match.atom, 'name').value,
           sourcePath,
-          resultPath: resultMatch?.path.join('/') ?? null
+          resultPath,
+          changed: JSON.stringify(selected.match.atom) !== selectedBefore
         };
   }
 
@@ -592,7 +646,7 @@ export async function applyTransform({
     const worldRootDestination = command.name === 'mov' && command.parameter === WORLD_OUTSIDE_NAME;
     const destination = worldRootDestination
       ? { match: { atom: null, path: [], parent: null, index: -1 } }
-      : resolveUnique(nextAtoms, command.parameter);
+      : resolveUnique(nextAtoms, command.parameter, exactIndex);
     if (destination.error) return destination;
     if (!worldRootDestination && (await authorize(destination.match, 'write')).decision !== 'allow') {
       return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造目标位置；请反馈派发方') };
@@ -641,7 +695,8 @@ export async function applyTransform({
       atoms: nextAtoms,
       resultName: nameField.value,
       sourcePath,
-      resultPath: resultMatch?.path.join('/') ?? sourcePath
+      resultPath: resultMatch?.path.join('/') ?? sourcePath,
+      changed: true
     };
   }
 
@@ -675,6 +730,7 @@ export async function applyTransform({
       resultName: targetName,
       sourcePath,
       resultPath: walkAtoms(nextAtoms).find((match) => match.atom === target.atom)?.path.join('/') ?? null,
+      changed: true,
       logRecord: {
         id: crypto.randomUUID(),
         operation: 'discard',
@@ -707,7 +763,7 @@ export async function applyTransform({
     if (discard.originalParentPath === null) {
       destination = nextAtoms;
     } else {
-      const parent = resolveUnique(nextAtoms, discard.originalParentPath);
+      const parent = resolveUnique(nextAtoms, discard.originalParentPath, exactIndex);
       if (parent.error) return parent;
       if ((await authorize(parent.match, 'write')).decision !== 'allow') {
         return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权恢复到目标位置；请反馈派发方') };
@@ -732,6 +788,7 @@ export async function applyTransform({
       resultName: targetName,
       sourcePath,
       resultPath: walkAtoms(nextAtoms).find((match) => match.atom === target.atom)?.path.join('/') ?? null,
+      changed: true,
       logRecord: {
         id: crypto.randomUUID(),
         operation: 'restore',
