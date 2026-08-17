@@ -26,6 +26,10 @@ if (Test-Path -LiteralPath $tailscaleExecutable) {
 
 Stop-ScheduledTask -TaskName ([string]$marker.taskName) -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName ([string]$marker.taskName) -Confirm:$false -ErrorAction SilentlyContinue
+if (-not [string]::IsNullOrWhiteSpace([string]$marker.directTaskName)) {
+  Stop-ScheduledTask -TaskName ([string]$marker.directTaskName) -ErrorAction SilentlyContinue
+  Unregister-ScheduledTask -TaskName ([string]$marker.directTaskName) -Confirm:$false -ErrorAction SilentlyContinue
+}
 if ($marker.processId) {
   Stop-Process -Id ([int]$marker.processId) -Force -ErrorAction SilentlyContinue
 }

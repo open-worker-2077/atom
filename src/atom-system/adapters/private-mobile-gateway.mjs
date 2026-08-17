@@ -65,6 +65,34 @@ function allowedLoginSet(values) {
   return result;
 }
 
+function canonicalRemoteAddress(value) {
+  const address = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address;
+}
+
+function allowedRemoteAddressSet(values) {
+  return new Set(
+    (Array.isArray(values) ? values : [])
+      .map(canonicalRemoteAddress)
+      .filter(Boolean)
+  );
+}
+
+function isTailscaleIpv4(value) {
+  const parts = value.split('.').map((part) => Number(part));
+  return parts.length === 4
+    && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
+    && parts[0] === 100
+    && parts[1] >= 64
+    && parts[1] <= 127;
+}
+
+function privateBindHost(value) {
+  const host = typeof value === 'string' ? value.trim().toLowerCase() : LOOPBACK_HOST;
+  if (host === LOOPBACK_HOST || isTailscaleIpv4(host)) return host;
+  throw new Error('Private mobile gateway host must be loopback or a Tailscale IPv4 address');
+}
+
 function loopbackTarget(value) {
   const target = new URL(value || 'http://127.0.0.1:4784');
   if (target.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(target.hostname)) {
@@ -93,30 +121,47 @@ function targetRequestUrl(requestUrl, target) {
 }
 
 export async function startPrivateMobileGateway(options = {}) {
-  const allowedLogins = allowedLoginSet(options.allowedLogins);
+  const allowedRemoteAddresses = allowedRemoteAddressSet(options.allowedRemoteAddresses);
+  const allowedLogins = allowedRemoteAddresses.size ? null : allowedLoginSet(options.allowedLogins);
   const target = loopbackTarget(options.targetUrl);
+  const host = privateBindHost(options.host);
+  if (host !== LOOPBACK_HOST && !allowedRemoteAddresses.size) {
+    throw new Error('A Tailscale-bound private gateway requires an explicit allowed remote address');
+  }
   const port = Number(options.port ?? 4785);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new Error('Private mobile gateway port must be an integer between 0 and 65535');
   }
 
   const server = http.createServer((request, response) => {
-    const login = requestLogin(request);
-    if (!login) {
-      writeProblem(response, gatewayProblem(
-        'TAILSCALE_IDENTITY_REQUIRED',
-        'Private Atom access requires a Tailscale Serve identity',
-        401
-      ));
-      return;
-    }
-    if (!allowedLogins.has(login)) {
-      writeProblem(response, gatewayProblem(
-        'TAILSCALE_IDENTITY_DENIED',
-        'This Tailscale identity is not allowed to access Atom',
-        403
-      ));
-      return;
+    if (allowedRemoteAddresses.size) {
+      const remoteAddress = canonicalRemoteAddress(request.socket.remoteAddress);
+      if (!allowedRemoteAddresses.has(remoteAddress)) {
+        writeProblem(response, gatewayProblem(
+          'TAILSCALE_DEVICE_DENIED',
+          'This Tailscale device is not allowed to access Atom',
+          403
+        ));
+        return;
+      }
+    } else {
+      const login = requestLogin(request);
+      if (!login) {
+        writeProblem(response, gatewayProblem(
+          'TAILSCALE_IDENTITY_REQUIRED',
+          'Private Atom access requires a Tailscale Serve identity',
+          401
+        ));
+        return;
+      }
+      if (!allowedLogins.has(login)) {
+        writeProblem(response, gatewayProblem(
+          'TAILSCALE_IDENTITY_DENIED',
+          'This Tailscale identity is not allowed to access Atom',
+          403
+        ));
+        return;
+      }
     }
     if (!ALLOWED_METHODS.has(request.method || '')) {
       writeProblem(response, gatewayProblem(
@@ -158,16 +203,16 @@ export async function startPrivateMobileGateway(options = {}) {
 
   await new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, LOOPBACK_HOST, resolve);
+    server.listen(port, host, resolve);
   });
   const address = server.address();
   const actualPort = typeof address === 'object' && address ? address.port : port;
 
   return Object.freeze({
     server,
-    host: LOOPBACK_HOST,
+    host,
     port: actualPort,
-    url: `http://${LOOPBACK_HOST}:${actualPort}`,
+    url: `http://${host}:${actualPort}`,
     targetUrl: target.href,
     close() {
       if (!server.listening) return Promise.resolve();

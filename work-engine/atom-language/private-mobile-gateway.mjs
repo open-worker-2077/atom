@@ -11,13 +11,16 @@ function option(argv, name, fallback) {
 
 const argv = process.argv.slice(2);
 const allowedLogin = option(argv, '--allowed-login', process.env.ATOM_PRIVATE_ALLOWED_TAILSCALE_LOGIN);
-if (!allowedLogin) {
-  process.stderr.write('ATOM_PRIVATE_ALLOWED_TAILSCALE_LOGIN or --allowed-login is required\n');
+const allowedSource = option(argv, '--allowed-source', process.env.ATOM_PRIVATE_ALLOWED_TAILSCALE_SOURCE);
+if (!allowedLogin && !allowedSource) {
+  process.stderr.write('An allowed Tailscale login or source address is required\n');
   process.exitCode = 2;
 } else {
   const running = await startPrivateMobileGateway({
-    allowedLogins: [allowedLogin],
+    allowedLogins: allowedLogin ? [allowedLogin] : undefined,
+    allowedRemoteAddresses: allowedSource ? [allowedSource] : undefined,
     targetUrl: option(argv, '--target', 'http://127.0.0.1:4784'),
+    host: option(argv, '--host', '127.0.0.1'),
     port: option(argv, '--port', 4785)
   });
   process.stdout.write(`${JSON.stringify({

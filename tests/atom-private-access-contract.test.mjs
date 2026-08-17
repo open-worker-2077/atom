@@ -24,6 +24,7 @@ test('private access disable script removes only owned entry and task', async ()
   const source = await fs.readFile(path.join(root, 'scripts', 'disable-atom-private-access.ps1'), 'utf8');
   assert.match(source, /private-access\.json/u);
   assert.match(source, /Unregister-ScheduledTask/u);
+  assert.match(source, /directTaskName/u);
   assert.match(source, /serve[^\r\n]*--https=443[^\r\n]*off/u);
   assert.doesNotMatch(source, /serve\s+reset/iu);
   assert.doesNotMatch(source, /tailscale(?:\.exe)?["']?\s+funnel/iu);

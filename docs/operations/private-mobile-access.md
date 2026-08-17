@@ -16,6 +16,8 @@
 
 安装器只接受当前 Tailscale 登录身份，拒绝覆盖既有 Serve 配置或同名计划任务，并在失败时撤回本次创建的入口。
 
+主入口依赖 Android MagicDNS。若真机的域名链持续中断，可另启 Tailnet IP 直连网关：它只绑定电脑的 Tailscale IPv4，并只接受显式批准的手机 Tailscale IPv4；手机使用 `http://<电脑的 Tailscale IPv4>:<直连端口>/`。传输仍在 Tailscale 加密私网内，不经过公网。
+
 ## 停用
 
 ```powershell
@@ -28,5 +30,6 @@ powershell -ExecutionPolicy Bypass -File scripts/disable-atom-private-access.ps1
 
 - 4784 继续只监听 `127.0.0.1`。
 - 4785 继续只监听 `127.0.0.1`，并要求 Tailscale Serve 注入且位于白名单的登录身份。
+- 直连网关不得绑定 `0.0.0.0`、局域网地址或公网地址；非批准手机来源即使伪造身份头也必须拒绝。
 - 失去 Tailscale 身份、身份不匹配或误用 Funnel 时均拒绝访问。
 - Android 端不保存第二份事实副本；断网时停止写入，恢复连接后继续使用电脑端事实。

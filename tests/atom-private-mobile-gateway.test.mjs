@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import http from 'node:http';
 import test from 'node:test';
 
@@ -36,7 +38,7 @@ function request(url, options = {}) {
   });
 }
 
-async function fixture(t) {
+async function fixture(t, gatewayOptions = {}) {
   const received = [];
   const target = http.createServer((req, res) => {
     const chunks = [];
@@ -58,17 +60,84 @@ async function fixture(t) {
     });
   });
   const targetAddress = await listen(target);
+  t.after(() => close(target));
   const gateway = await startPrivateMobileGateway({
     targetUrl: `http://127.0.0.1:${targetAddress.port}`,
     port: 0,
-    allowedLogins: ['worker@example.com']
+    allowedLogins: ['worker@example.com'],
+    ...gatewayOptions
   });
-  t.after(async () => {
-    await gateway.close();
-    await close(target);
-  });
+  t.after(() => gateway.close());
   return { gateway, received };
 }
+
+test('explicit source-address authorization admits only the approved tailnet peer', async (t) => {
+  const { gateway } = await fixture(t, {
+    allowedLogins: undefined,
+    allowedRemoteAddresses: ['127.0.0.1']
+  });
+
+  const response = await request(`${gateway.url}/hello?from=direct-tailnet`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(JSON.parse(response.body), { ok: true, path: '/hello?from=direct-tailnet' });
+});
+
+test('source-address authorization does not trust a caller-supplied identity header', async (t) => {
+  const { gateway } = await fixture(t, {
+    allowedLogins: undefined,
+    allowedRemoteAddresses: ['100.64.0.2']
+  });
+
+  const response = await request(`${gateway.url}/`, {
+    headers: { 'Tailscale-User-Login': 'worker@example.com' }
+  });
+  assert.equal(response.status, 403);
+  assert.equal(JSON.parse(response.body).error.code, 'TAILSCALE_DEVICE_DENIED');
+});
+
+test('private gateway refuses wildcard or ordinary network bind addresses', async () => {
+  const attempt = startPrivateMobileGateway({
+    host: '0.0.0.0',
+    port: 0,
+    targetUrl: 'http://127.0.0.1:4784',
+    allowedRemoteAddresses: ['100.64.0.2']
+  }).then(async (gateway) => {
+    await gateway.close();
+    return gateway;
+  });
+
+  await assert.rejects(attempt, /loopback or a Tailscale IPv4 address/u);
+});
+
+test('gateway CLI starts an explicit source-address listener without a login header', async (t) => {
+  const target = http.createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end('{"ok":true}');
+  });
+  const targetAddress = await listen(target);
+  t.after(() => close(target));
+
+  const child = spawn(process.execPath, [
+    'work-engine/atom-language/private-mobile-gateway.mjs',
+    '--host', '127.0.0.1',
+    '--allowed-source', '127.0.0.1',
+    '--target', `http://127.0.0.1:${targetAddress.port}`,
+    '--port', '0'
+  ], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
+  t.after(() => child.kill());
+
+  let errorText = '';
+  child.stderr.on('data', (chunk) => { errorText += chunk.toString('utf8'); });
+  const [chunk] = await Promise.race([
+    once(child.stdout, 'data'),
+    once(child, 'exit').then(([code]) => {
+      assert.fail(`gateway CLI exited before readiness (code ${code}): ${errorText}`);
+    })
+  ]);
+  const ready = JSON.parse(chunk.toString('utf8').trim());
+  const response = await request(`http://${ready.host}:${ready.port}/`);
+  assert.equal(response.status, 200);
+});
 
 test('private mobile gateway binds only to loopback and denies missing Tailscale identity', async (t) => {
   const { gateway } = await fixture(t);
