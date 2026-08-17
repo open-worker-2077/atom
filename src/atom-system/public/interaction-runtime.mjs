@@ -109,7 +109,7 @@ export function createInteractionRuntime({
         ]
       };
     }
-    if (options.publish !== false) await publish(result);
+    if (options.publish !== false && result?.changed !== false) await publish(result);
     return result;
   }
 

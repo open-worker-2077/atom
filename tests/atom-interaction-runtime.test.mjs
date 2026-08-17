@@ -93,6 +93,7 @@ test('the first use of an Agent prepares its scoped Program projection once and 
         return {
           ok: true,
           command: request.source === 'atom' ? 'atom' : 'explore',
+          changed: false,
           revisionAfter: 'rev-1',
           lockState: { revision: 'rev-1' },
           messages: request.source === 'atom'
@@ -131,9 +132,35 @@ test('the first use of an Agent prepares its scoped Program projection once and 
     ['world', 'explore {"name":"Target"}', null, 'interaction-context'],
     ['world', 'atom', 'reconcile', 'interaction-context:program-context'],
     ['projection', { expectedRevision: 'rev-1', lockState: { revision: 'rev-1' } }],
-    ['world', 'explore {"name":"Target"}', null, 'interaction-context'],
-    ['projection', { expectedRevision: 'rev-1', lockState: { revision: 'rev-1' } }]
+    ['world', 'explore {"name":"Target"}', null, 'interaction-context']
   ]);
+});
+
+test('an ordinary read consumes current projections without rebuilding them', async () => {
+  const context = ports();
+  context.world.execute = async (request) => {
+    context.calls.push(['world', structuredClone({
+      ...request,
+      programRuntime: request.programRuntime?.id
+    })]);
+    return {
+      ok: true,
+      changed: false,
+      revisionAfter: 'rev-2',
+      lockState: { revision: 'rev-2' }
+    };
+  };
+  const runtime = createInteractionRuntime(context);
+
+  const result = await runtime.execute({
+    source: 'explore {"name":"Root"}',
+    correlationId: 'read-current-projection',
+    agentPath: 'Root/Sol',
+    history: []
+  });
+
+  assert.equal(result.changed, false);
+  assert.equal(context.calls.some(([kind]) => kind === 'projection'), false);
 });
 
 test('initialization publishes the exact initialized revision before reporting ready', async () => {
