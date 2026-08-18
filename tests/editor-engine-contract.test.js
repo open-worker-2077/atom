@@ -504,6 +504,14 @@ test('edge drafting keeps normal view-navigation keys available away from form f
   assert.match(keyboard, /transaction\.kind\.startsWith\s*\(\s*["']edge-["']\s*\)/);
   assert.match(keyboard, /input\.resolveKeyboard\s*\(\s*event\s*,\s*\{\s*editing:\s*false\s*\}\s*\)/);
   assert.match(keyboard, /EDGE_DRAFT_NAVIGATION_INTENTS/);
+  const navigationIntents = source.slice(
+    source.indexOf('const EDGE_DRAFT_NAVIGATION_INTENTS'),
+    source.indexOf('const transactionGuardedIntents')
+  );
+  for (const intent of ['setPeripheralView', 'setNestedView', 'setHierarchyView', 'setImmersiveView']) {
+    assert.match(navigationIntents, new RegExp(`input\\.intents\\.${intent}`));
+  }
+  assert.doesNotMatch(keyboard, /targetIsFormControl\s*=\s*\([\s\S]*HTMLButtonElement/);
 });
 
 test('pointer mapping distinguishes nodes, edges, and empty field under ctrl', () => {

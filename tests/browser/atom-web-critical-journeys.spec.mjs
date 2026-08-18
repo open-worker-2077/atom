@@ -80,23 +80,28 @@ test('Enter-committed node creation stays visible and preserves the current view
 test('double-Shift selection survives the real ctrl-right landing gesture as one batch', async ({ page }) => {
   await openIsolatedWorld(page);
   await enterAtomFile(page);
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('测试入口'))).toBe(true);
+  await page.keyboard.press('f');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await waitForViewToSettle(page);
+  await page.keyboard.press('a');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().viewMode)).toBe('nested');
 
-  const targets = await page.evaluate(() => window.spatialLab.state().interactionTargets);
+  const targets = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .filter(({ label }) => label !== '批量目标');
   expect(targets.length).toBeGreaterThan(1);
   const source = targets[0];
 
   await page.mouse.click(source.clientX, source.clientY);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().latestInteractionKey))
     .toBe(source.key);
-  await page.evaluate(async () => {
-    const tap = () => {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', bubbles: true }));
-      document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft', bubbles: true }));
-    };
-    tap();
-    await new Promise((resolve) => setTimeout(resolve, 90));
-    tap();
-  });
+  await page.keyboard.press('Shift');
+  const firstShift = await page.evaluate(() => ({ ...window.spatialLab.state(), now: performance.now() }));
+  await page.waitForTimeout(90);
+  await page.keyboard.press('Shift');
+  const secondShift = await page.evaluate(() => ({ ...window.spatialLab.state(), now: performance.now() }));
+  expect(firstShift.shiftTapCount).toBe(1);
+  expect(secondShift.shiftTapCount, JSON.stringify({ firstShift, secondShift })).toBe(2);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().batchSelectionCount))
     .toBeGreaterThan(1);
 
@@ -106,17 +111,32 @@ test('double-Shift selection survives the real ctrl-right landing gesture as one
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().transactionBatchCount))
     .toBeGreaterThan(1);
 
-  const committed = page.evaluate(() => new Promise((resolve) => {
-    window.addEventListener('spatial-workspace-committed', (event) => resolve(event.detail.operation), { once: true });
+  const persisted = page.evaluate(() => new Promise((resolve) => {
+    window.addEventListener('spatial-workspace-persisted', (event) => resolve(event.detail), { once: true });
   }));
+  const sourcePath = await page.evaluate(() => window.spatialLab.state().path);
+  await page.getByRole('button', { name: '上层' }).click();
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).not.toBe(sourcePath);
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('批量目标'))).toBe(true);
+  await page.keyboard.press('f');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().viewMode)).toBe('immersive');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label)))
+    .toContain('目标占位');
   await page.keyboard.down('Control');
   await page.mouse.click(48, 360, { button: 'right' });
   await page.keyboard.up('Control');
   await page.keyboard.press('Enter');
 
-  const operation = await committed;
+  const detail = await persisted;
+  const operation = detail.operation;
   expect(operation.kind).toBe('node-land-batch');
   expect(operation.landings).toHaveLength(targets.length);
+  const movedPaths = detail.knowledge.nodes
+    .filter(({ label }) => targets.some((target) => target.label === label))
+    .map(({ atomPath }) => atomPath);
+  expect(movedPaths).toHaveLength(targets.length);
+  expect(movedPaths.every((atomPath) => atomPath.startsWith('批量目标/'))).toBe(true);
 });
 
 test('a steady domain reuses its rasterized backdrop instead of repainting blurred tunnels', async ({ page }) => {

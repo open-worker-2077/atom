@@ -234,7 +234,11 @@
     input.intents.exit,
     input.intents.backView,
     input.intents.forwardView,
-    input.intents.returnOverview
+    input.intents.returnOverview,
+    input.intents.setPeripheralView,
+    input.intents.setNestedView,
+    input.intents.setHierarchyView,
+    input.intents.setImmersiveView
   ]);
   const transactionGuardedIntents = new Set([
     "focus",
@@ -6967,8 +6971,7 @@
       return;
     }
     const targetIsFormControl = (
-      event.target instanceof HTMLButtonElement
-      || event.target instanceof HTMLInputElement
+      event.target instanceof HTMLInputElement
       || event.target instanceof HTMLTextAreaElement
     );
     if (targetIsFormControl) {
@@ -8359,6 +8362,9 @@
         ? workspace.transaction().batchEntries.length
         : 0,
       batchSelectionCount: state.batchSelectionKeys.size,
+      shiftTapCount: state.wand.tapCount,
+      shiftLastTapAt: state.wand.lastTapAt,
+      peerBatchCandidateCount: peerViewBatchRegions().length,
       latestInteractionKey: state.latestInteractionKey,
       interactionTargets: state.hitRegions
         .filter((region) => region.item && region.item.kind === "node" && region.item.node)
