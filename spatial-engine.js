@@ -4378,7 +4378,21 @@
     const endpointPath = node.__clusterOwnerPath || node.workspacePath || state.currentPath;
     const endpoint = workspaceModel.qualifiedEndpoint(endpointPath, node, pathLabelsForPath(endpointPath));
     if (!active) {
-      workspace.beginEdgeCreate(endpoint, node);
+      const transaction = workspace.beginEdgeCreate(endpoint, node);
+      const clickedKey = visualNodeKey(node, endpointPath);
+      if (transaction && state.batchSelectionKeys.size > 1 && state.batchSelectionKeys.has(clickedKey)) {
+        transaction.batchEntries = [...state.batchSelectionKeys]
+          .map((key) => visualEntryForKey(key))
+          .filter(Boolean)
+          .map((entry) => ({
+            source: workspaceModel.qualifiedEndpoint(
+              entry.ownerPath,
+              entry.node,
+              pathLabelsForPath(entry.ownerPath)
+            ),
+            sourceNode: entry.node
+          }));
+      }
       state.selected = node;
       updateSelectionUI();
       ui.editStatus.hidden = false;
@@ -4460,6 +4474,13 @@
     if (!event.detail || !Number.isFinite(Number(event.detail.persistenceId))) return;
     const operation = event.detail.operation;
     const kind = operation && operation.kind || "";
+    if (kind === "node-land-batch") {
+      const movedCount = Array.isArray(operation.landings) ? operation.landings.length : 0;
+      state.focused = null;
+      updateSelectionUI();
+      announce(`${movedCount} 个节点已移动并保存`);
+      return;
+    }
     if (kind === "node-land") {
       const persisted = workspaceModel.persistedLandingNode(operation, event.detail.knowledge);
       if (persisted) {
@@ -4561,11 +4582,12 @@
     if (transaction.kind === "edge-edit" && transaction.status !== "delete") {
       workspace.updateEdgeDraft({ label: ui.edgeNameEditor.value });
     }
-    const operation = workspace.commit();
+    let operation = workspace.commit();
     if (!operation) {
       announce("请先选择关系落脚节点");
       return false;
     }
+    operation = workspaceModel.batchLandingOperation(operation, operation.batchEntries);
     closeNodeEditor();
     if (operation.kind === "node-edit" && operation.status === "delete") {
       state.selected = null;
@@ -4580,14 +4602,15 @@
         ? nodeByIdInPath(operation.target.path, operation.target.nodeId)
         : null;
       announce("关系已提交");
-    } else if (operation.kind === "node-land") {
+    } else if (operation.kind === "node-land" || operation.kind === "node-land-batch") {
       state.selected = operation.target
-        ? nodeByIdInPath(operation.target.path, operation.draft.id)
+        ? nodeByIdInPath(operation.target.path, operation.draft && operation.draft.id)
         : null;
       const targetLabel = operation.target
         ? pathLabelsForPath(operation.target.path).at(-1) || "目标域"
         : "目标域";
-      announce(`节点已落到 ${targetLabel}，旧关系保留为跨域长尾`);
+      const movedCount = operation.kind === "node-land-batch" ? operation.landings.length : 1;
+      announce(`${movedCount} 个节点已落到 ${targetLabel}，旧关系保留为跨域长尾`);
     } else {
       const nodeId = operation.draft && operation.draft.id
         ? operation.draft.id

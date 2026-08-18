@@ -283,6 +283,47 @@ test('persisted landing resolves the moved node by target domain after its proje
   );
 });
 
+test('batch landing keeps every selected source in one atomic move operation', () => {
+  const operation = loadModel().batchLandingOperation({
+    kind: 'node-land',
+    source: { key: 'root::a', nodeId: 'a' },
+    sourceNode: { id: 'a', label: 'A' },
+    target: { path: 'root/target', position: { x: 1, y: 2, z: 0 } },
+    draft: { id: 'a', label: 'A' }
+  }, [
+    { source: { key: 'root::a', nodeId: 'a' }, sourceNode: { id: 'a', label: 'A' } },
+    { source: { key: 'root::b', nodeId: 'b' }, sourceNode: { id: 'b', label: 'B' } }
+  ]);
+
+  assert.equal(operation.kind, 'node-land-batch');
+  assert.deepEqual(plain(operation.landings.map((landing) => landing.source.key)), ['root::a', 'root::b']);
+  assert.deepEqual(plain(operation.landings.map((landing) => landing.target.path)), ['root/target', 'root/target']);
+});
+
+test('batch landing remaps every moved node after authoritative persistence', () => {
+  const model = loadModel();
+  const previousKnowledge = { nodes: [
+    { id: 'a', key: 'root::a', path: 'root', atomPath: '来源甲', label: '来源甲' },
+    { id: 'b', key: 'root::b', path: 'root', atomPath: '来源乙', label: '来源乙' }
+  ] };
+  const knowledge = { nodes: [
+    { id: 'a2', key: 'target::a2', path: 'target', atomPath: '目标域/来源甲', label: '来源甲' },
+    { id: 'b2', key: 'target::b2', path: 'target', atomPath: '目标域/来源乙', label: '来源乙' }
+  ] };
+  const transitions = model.operationIdentityTransitions({
+    kind: 'node-land-batch',
+    landings: [
+      { kind: 'node-land', source: { key: 'root::a' }, sourceNode: previousKnowledge.nodes[0], target: { path: 'target' } },
+      { kind: 'node-land', source: { key: 'root::b' }, sourceNode: previousKnowledge.nodes[1], target: { path: 'target' } }
+    ]
+  }, knowledge, previousKnowledge);
+
+  assert.deepEqual(plain(transitions.map((entry) => [entry.from.key, entry.to.key])), [
+    ['root::a', 'target::a2'],
+    ['root::b', 'target::b2']
+  ]);
+});
+
 test('manual cluster placement survives knowledge export and import', () => {
   const model = loadModel();
   const workspace = model.createWorkspace();

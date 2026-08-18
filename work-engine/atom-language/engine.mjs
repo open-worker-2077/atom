@@ -360,14 +360,14 @@ export async function executeAtomLanguage(options = {}) {
     const unsupported = parsed.items.flatMap((item) => item.fields
       .filter((field) => (
         !['name', 'detail', 'partners'].includes(field.baseKey)
-        || (field.baseKey === 'name' && field.commands.length > 0)
+        || (field.baseKey === 'name' && field.commands.some((command) => command.name !== 'mov'))
       ))
       .map((field) => ({ item, field })))[0];
     if (unsupported) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [{
         ...diagnostic(
           'UNSUPPORTED_TRANSFORM_BATCH_AXIS',
-          '批量 transform 当前只支持已有 Atom 的 detail 与 partners 改造',
+          '批量 transform 当前支持已有 Atom 的移动、detail 与 partners 改造',
           { axis: unsupported.field.baseKey }
         ),
         itemIndex: unsupported.item.index

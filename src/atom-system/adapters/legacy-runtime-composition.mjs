@@ -134,6 +134,26 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
       const replacePartners = (sourcePath, partners) => (
         `transform ${JSON.stringify({ name: sourcePath, 'partners.rep.': partners })}`
       );
+      const landingTransform = (landing) => {
+        const destinationPath = containerPath(landing.target?.path);
+        const legacyNode = landing.sourceNode ?? landing.draft;
+        const projectedSourcePath = typeof legacyNode?.atomPath === 'string' ? legacyNode.atomPath.trim() : '';
+        const sourcePath = atomPathForKey(landing.source?.key)
+          || (graphByPath.has(projectedSourcePath) ? projectedSourcePath : '');
+        if (!sourcePath) {
+          const label = legacyNode?.label?.trim();
+          const detail = (legacyNode?.description ?? legacyNode?.detail ?? '').trim();
+          const type = legacyNode?.atomTypes?.[0]?.trim() ?? '';
+          if (!label || label.includes('/') || label.length > 200) {
+            throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Legacy Web node requires a valid Atom name before landing');
+          }
+          if (type && (!/^[\p{L}\p{N}_-]+$/u.test(type) || type.length > 80)) {
+            throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Legacy Web node requires one safe @type name');
+          }
+          return { new: { [`name${type ? `@${type}` : ''}`]: `${destinationPath}/${label}`, detail, children: [], partners: [] } };
+        }
+        return { [`name.mov.${destinationPath || WORLD_OUTSIDE_NAME}`]: sourcePath };
+      };
 
       if (operation?.kind === 'node-create' && typeof operation.path === 'string') {
         const label = operation.draft?.label?.trim();
@@ -172,26 +192,21 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
       }
 
       if (operation?.kind === 'node-land') {
-        const destinationPath = containerPath(operation.target?.path);
-        const legacyNode = operation.sourceNode ?? operation.draft;
-        const projectedSourcePath = typeof legacyNode?.atomPath === 'string' ? legacyNode.atomPath.trim() : '';
-        const sourcePath = atomPathForKey(operation.source?.key)
-          || (graphByPath.has(projectedSourcePath) ? projectedSourcePath : '');
-        if (!sourcePath) {
-          const label = legacyNode?.label?.trim();
-          const detail = (legacyNode?.description ?? legacyNode?.detail ?? '').trim();
-          const type = legacyNode?.atomTypes?.[0]?.trim() ?? '';
-          if (!label || label.includes('/') || label.length > 200) {
-            throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Legacy Web node requires a valid Atom name before landing');
-          }
-          if (type && (!/^[\p{L}\p{N}_-]+$/u.test(type) || type.length > 80)) {
-            throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Legacy Web node requires one safe @type name');
-          }
-          const name = `${destinationPath}/${label}`;
-          return `transform new ${JSON.stringify({ [`name${type ? `@${type}` : ''}`]: name, detail, children: [], partners: [] })}`;
+        const command = landingTransform(operation);
+        if (command.new) return `transform new ${JSON.stringify(command.new)}`;
+        return `transform ${JSON.stringify(command)}`;
+      }
+
+      if (operation?.kind === 'node-land-batch') {
+        const landings = Array.isArray(operation.landings) ? operation.landings : [];
+        if (landings.length < 2) {
+          throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Batch landing requires at least two nodes');
         }
-        const destination = destinationPath || WORLD_OUTSIDE_NAME;
-        return `transform {${JSON.stringify(`name.mov.${destination}`)}:${JSON.stringify(sourcePath)}}`;
+        const commands = landings.map(landingTransform);
+        if (commands.some((command) => command.new)) {
+          throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Batch landing requires existing Atom nodes');
+        }
+        return `transform ${JSON.stringify(commands)}`;
       }
 
       if (operation?.kind === 'edge-create') {

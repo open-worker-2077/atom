@@ -129,9 +129,13 @@ test('CLI returns one compact Graph-JSON receipt per committed batch item', asyn
   ]);
 });
 
-test('batch Transform rejects structural and identity changes before writing', async (t) => {
+test('batch Transform moves multiple existing Atoms in one authoritative commit', async (t) => {
   const files = await fixture(t);
-  const before = await fs.readFile(files.contextFile, 'utf8');
+  await fs.writeFile(files.contextFile, `${JSON.stringify([
+    atom('来源甲', '旧甲'),
+    atom('来源乙', '旧乙'),
+    atom('目标域')
+  ], null, 2)}\n`, 'utf8');
   const writes = [];
   const world = createLegacyWorldService({
     onAuthoritativeWrite: (write) => writes.push(write)
@@ -140,16 +144,17 @@ test('batch Transform rejects structural and identity changes before writing', a
   const result = await world.executeLegacy({
     ...files,
     source: `transform ${JSON.stringify([
-      { 'name.mov.来源乙': '来源甲' },
-      { name: '来源乙', 'detail.rep.新乙': null }
+      { 'name.mov.目标域': '来源甲' },
+      { 'name.mov.目标域': '来源乙' }
     ])}`
   });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.errors[0].code, 'UNSUPPORTED_TRANSFORM_BATCH_AXIS');
-  assert.equal(result.errors[0].itemIndex, 0);
-  assert.equal(writes.length, 0);
-  assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.batch, true);
+  assert.equal(writes.length, 1);
+  const current = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.deepEqual(current.map((item) => item.name), ['目标域']);
+  assert.deepEqual(current[0].children.map((item) => item.name), ['来源甲', '来源乙']);
 });
 
 test('batch receipts preserve the exact path when short names repeat', async (t) => {

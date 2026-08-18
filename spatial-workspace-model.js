@@ -97,10 +97,42 @@
   function persistedLandingNode(operation, knowledge) {
     if (!operation || operation.kind !== "node-land") return null;
     const targetPath = safeText(operation.target && operation.target.path, "", 512);
-    const label = safeText(operation.draft && operation.draft.label, "", MAX_LABEL_LENGTH);
+    const label = safeText(
+      operation.draft && operation.draft.label
+        || operation.sourceNode && operation.sourceNode.label,
+      "",
+      MAX_LABEL_LENGTH
+    );
     if (!targetPath || !label) return null;
     return (Array.isArray(knowledge && knowledge.nodes) ? knowledge.nodes : [])
       .find((node) => node && node.path === targetPath && node.label === label) || null;
+  }
+
+  function batchLandingOperation(primary, entriesInput) {
+    if (!primary || primary.kind !== "node-land") return primary;
+    const entries = Array.isArray(entriesInput) ? entriesInput.filter(Boolean) : [];
+    if (entries.length <= 1) return primary;
+    const target = primary.target ? {
+      ...primary.target,
+      pathLabels: Array.isArray(primary.target.pathLabels) ? [...primary.target.pathLabels] : [],
+      position: primary.target.position ? { ...primary.target.position } : undefined
+    } : null;
+    const primaryKey = primary.source && primary.source.key;
+    const ordered = [
+      ...entries.filter((entry) => entry.source && entry.source.key === primaryKey),
+      ...entries.filter((entry) => !entry.source || entry.source.key !== primaryKey)
+    ];
+    return {
+      kind: "node-land-batch",
+      target,
+      landings: ordered.map((entry) => ({
+        kind: "node-land",
+        source: entry.source ? { ...entry.source } : null,
+        sourceNode: entry.sourceNode ? { ...entry.sourceNode } : null,
+        target: target ? { ...target, position: target.position ? { ...target.position } : undefined } : null,
+        draft: entry.sourceNode ? { ...entry.sourceNode } : null
+      }))
+    };
   }
 
   function nodeIdentity(node, fallbackPath = "") {
@@ -117,6 +149,15 @@
 
   function operationIdentityTransitions(operation, knowledge, previousKnowledge, persistedNode = null) {
     if (!operation || typeof operation !== "object") return [];
+    if (operation.kind === "node-land-batch") {
+      return (Array.isArray(operation.landings) ? operation.landings : [])
+        .flatMap((landing) => operationIdentityTransitions(
+          landing,
+          knowledge,
+          previousKnowledge,
+          null
+        ));
+    }
     const previousNodes = Array.isArray(previousKnowledge && previousKnowledge.nodes)
       ? previousKnowledge.nodes
       : [];
@@ -882,6 +923,7 @@
     highlightSegments,
     normalizeQuery,
     persistedLandingNode,
+    batchLandingOperation,
     operationIdentityTransitions,
     remapIdentity,
     reconcileVisualItems,

@@ -172,3 +172,41 @@ test('human workspace translator treats the single synthetic root domain as the 
     'transform new {"name":"Top-level from Web","detail":"saved","children":[],"partners":[]}'
   );
 });
+
+test('human workspace translator emits one atomic Transform for a batch landing', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-batch-landing-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const graphFile = path.join(directory, 'graph.json');
+  await fs.writeFile(graphFile, '{}\n', 'utf8');
+  const targetNode = { id: 'target', key: 'root::target', path: 'root', label: '目标域' };
+  let hash = 2166136261;
+  for (const character of targetNode.id) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  const targetSpatialPath = `root/${(hash >>> 0).toString(36)}`;
+  const translator = createLegacyHumanWorkspaceTranslator({
+    graphFile,
+    projectGraph: async () => ({
+      knowledge: { nodes: [targetNode], edges: [] },
+      atomPathByKey: new Map([
+        ['root::a', '来源甲'],
+        ['root::b', '来源乙'],
+        [targetNode.key, '目标域']
+      ])
+    })
+  });
+
+  assert.equal(
+    await translator.translate({
+      operation: {
+        kind: 'node-land-batch',
+        landings: [
+          { source: { key: 'root::a' }, target: { path: targetSpatialPath } },
+          { source: { key: 'root::b' }, target: { path: targetSpatialPath } }
+        ]
+      }
+    }),
+    'transform [{"name.mov.目标域":"来源甲"},{"name.mov.目标域":"来源乙"}]'
+  );
+});
