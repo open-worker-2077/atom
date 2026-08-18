@@ -898,18 +898,19 @@
 
       ids.forEach(function (id) {
         var entry = byId.get(id);
-        if (entry.fixed) return;
         var position = positions[id];
-        var anchor = anchors[id];
-        var activeAnchorStrength = topologySeeded.has(id) ? Math.max(anchorStrength, 0.16) : anchorStrength;
-        deltas[id].x += (anchor.x - position.x) * activeAnchorStrength;
-        deltas[id].y += (anchor.y - position.y) * activeAnchorStrength;
-        deltas[id].z += (anchor.z - position.z) * activeAnchorStrength;
-        var deltaLength = Math.hypot(deltas[id].x, deltas[id].y, deltas[id].z);
-        var stepScale = deltaLength > maxStep ? maxStep / deltaLength : 1;
-        position.x += deltas[id].x * stepScale;
-        position.y += deltas[id].y * stepScale;
-        position.z += deltas[id].z * stepScale;
+        if (!entry.fixed) {
+          var anchor = anchors[id];
+          var activeAnchorStrength = topologySeeded.has(id) ? Math.max(anchorStrength, 0.16) : anchorStrength;
+          deltas[id].x += (anchor.x - position.x) * activeAnchorStrength;
+          deltas[id].y += (anchor.y - position.y) * activeAnchorStrength;
+          deltas[id].z += (anchor.z - position.z) * activeAnchorStrength;
+          var deltaLength = Math.hypot(deltas[id].x, deltas[id].y, deltas[id].z);
+          var stepScale = deltaLength > maxStep ? maxStep / deltaLength : 1;
+          position.x += deltas[id].x * stepScale;
+          position.y += deltas[id].y * stepScale;
+          position.z += deltas[id].z * stepScale;
+        }
         var fieldDistance = Math.hypot(position.x, position.y, position.z);
         if (fieldDistance > maxFieldRadius) {
           var fieldScale = maxFieldRadius / fieldDistance;

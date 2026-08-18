@@ -545,6 +545,21 @@ test('local child tension fields never exceed the parent radius', () => {
   }
 });
 
+test('fixed manual nodes remain inside the readable field envelope', () => {
+  const layout = SpatialVisualModel.relaxRelationshipLayout([
+    { id: 'clustered', position: { x: 0, y: 0, z: 0 }, radius: 0.4 },
+    { id: 'escaped', position: { x: -100, y: 0, z: 0 }, radius: 0.4, fixed: true }
+  ], [], {
+    iterations: 1,
+    maxFieldRadius: 12
+  });
+
+  assert.ok(
+    Math.hypot(layout.escaped.x, layout.escaped.y, layout.escaped.z) <= 12.0001,
+    'manual placement cannot make a node disappear outside its domain'
+  );
+});
+
 test('child nodes never alter their parent-level topology', () => {
   const roots = [
     { id: 'root-a', position: { x: -1.2, y: 0.3, z: 0 }, radius: 0.6 },
