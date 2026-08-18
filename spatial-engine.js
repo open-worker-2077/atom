@@ -622,6 +622,7 @@
     appliedViewMode: "hierarchy",
     expandedClusterDomains: new Map(),
     clusterScene: { clusters: [], corridors: [], bounds: { center: { x: 0, y: 0, z: 0 }, radius: 0 } },
+    clusterConnectionEdges: [],
     interactionPhase: grammar.interactionPhases.idle,
     commitPulseUntil: 0,
     confirmationRipples: new Map(),
@@ -1346,11 +1347,16 @@
       peripheralDepthShrinkPercent: state.demo.settings.peripheralDepthShrinkPercent
     });
     state.clusterScene = scene;
+    state.clusterConnectionEdges = (workspace.exportKnowledge().edges || []).map((edge) => ({
+      edge,
+      fromEndpoint: workspace.resolveEndpoint(edge.from),
+      toEndpoint: workspace.resolveEndpoint(edge.to)
+    }));
     return { routeDomains, scene };
   }
 
   function collectClusterNodes() {
-    const { scene } = buildClusterScene();
+    const scene = state.clusterScene;
     const compressionMultiplier = Math.max(
       1,
       Number(scene.compressionMultiplier) || 1
@@ -4461,11 +4467,12 @@
       .filter((item) => item.kind === "node" && item.node && item.ownerPath)
       .map((item) => [`${item.ownerPath}::${item.node.id}`, item]));
 
-    for (const domain of visibleClusterDomains()) {
+    for (const cluster of state.clusterScene.clusters) {
       let labels = 0;
-      for (const relationship of visualModel.relationshipPairs(domain.nodes)) {
-        const from = renderedNodes.get(`${domain.path}::${relationship.fromId}`);
-        const to = renderedNodes.get(`${domain.path}::${relationship.toId}`);
+      const nodes = cluster.nodes.map((clusterNode) => clusterNode.sourceNode || clusterNode);
+      for (const relationship of visualModel.relationshipPairs(nodes)) {
+        const from = renderedNodes.get(`${cluster.path}::${relationship.fromId}`);
+        const to = renderedNodes.get(`${cluster.path}::${relationship.toId}`);
         if (!from || !to) continue;
         drawTopologyLink(from, to, {
           ...relationship,
@@ -4475,9 +4482,7 @@
       }
     }
 
-    for (const edge of workspace.exportKnowledge().edges || []) {
-      const fromEndpoint = workspace.resolveEndpoint(edge.from);
-      const toEndpoint = workspace.resolveEndpoint(edge.to);
+    for (const { edge, fromEndpoint, toEndpoint } of state.clusterConnectionEdges) {
       const from = renderedNodes.get(`${fromEndpoint.path}::${fromEndpoint.nodeId}`);
       const to = renderedNodes.get(`${toEndpoint.path}::${toEndpoint.nodeId}`);
       if (!from || !to) continue;
