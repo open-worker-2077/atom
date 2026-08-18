@@ -289,8 +289,10 @@
     }
 
     function findAddedNodeEntry(key) {
+      const directNode = addedNodes.get(key);
+      if (directNode) return { key, node: directNode };
       for (const [currentKey, node] of addedNodes.entries()) {
-        if (currentKey === key || sanitizeAliases(node.aliases, currentKey).includes(key)) {
+        if (sanitizeAliases(node.aliases, currentKey).includes(key)) {
           return { key: currentKey, node };
         }
       }

@@ -346,6 +346,33 @@ test('landing preserves historical edge endpoints and resolves them as visible l
   assert.deepEqual(plain(workspace.relationshipPairsForPath('root/child')), []);
 });
 
+test('relationship projection remains interactive when a large world references late nodes', () => {
+  const model = loadModel();
+  const workspace = model.createWorkspace();
+  const nodeCount = 10000;
+  const nodes = Array.from({ length: nodeCount }, (_, index) => ({
+    id: `node-${index}`,
+    path: 'root',
+    label: `Node ${index}`
+  }));
+  const edges = Array.from({ length: 349 }, (_, index) => {
+    const fromIndex = nodeCount - 1 - index * 2;
+    const toIndex = fromIndex - 1;
+    return {
+      from: { key: `root::node-${fromIndex}`, path: 'root', nodeId: `node-${fromIndex}` },
+      to: { key: `root::node-${toIndex}`, path: 'root', nodeId: `node-${toIndex}` }
+    };
+  });
+  workspace.importKnowledge({ nodes, edges });
+
+  const startedAt = performance.now();
+  const relationships = workspace.relationshipPairsForPath('root');
+  const elapsed = performance.now() - startedAt;
+
+  assert.equal(relationships.length, edges.length);
+  assert.ok(elapsed < 500, `relationship projection took ${elapsed.toFixed(1)}ms`);
+});
+
 test('a preserved long tail remains after cancel and is removed only after delete commit', () => {
   const model = loadModel();
   const workspace = model.createWorkspace();

@@ -171,6 +171,7 @@
 
   const rootStyles = getComputedStyle(document.documentElement);
   const theme = {};
+  let staticBackdropCache = null;
   [
     "space-0",
     "space-1",
@@ -1529,7 +1530,8 @@
     }));
   }
 
-  function drawStars() {
+  function drawStars(renderContext = context) {
+    const context = renderContext;
     context.save();
     context.fillStyle = theme.star;
     for (const star of state.starField) {
@@ -1541,7 +1543,8 @@
     context.restore();
   }
 
-  function drawDomainBackdrop() {
+  function drawDomainBackdrop(renderContext = context) {
+    const context = renderContext;
     if (state.depth === 0) {
       return;
     }
@@ -1646,6 +1649,35 @@
     context.font = `500 ${labelSize}px ${theme.fontDisplay}`;
     context.fillText(entry.nodeLabel, centreX, centreY + labelSize * 0.08);
     context.restore();
+  }
+
+  function drawStaticBackdrop() {
+    const entry = state.domainStack.at(-1);
+    const key = [
+      state.width,
+      state.height,
+      state.dpr,
+      state.depth,
+      entry && (entry.nodeId || entry.nodeLabel),
+      theme.star,
+      theme["space-0"],
+      theme["space-2"],
+      theme["sphere-core"],
+      theme["sphere-edge"],
+      theme["accent-2"],
+      theme.ink
+    ].join("|");
+    if (!staticBackdropCache || staticBackdropCache.key !== key) {
+      const layer = document.createElement("canvas");
+      layer.width = canvas.width;
+      layer.height = canvas.height;
+      const layerContext = layer.getContext("2d", { alpha: true });
+      layerContext.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+      drawStars(layerContext);
+      drawDomainBackdrop(layerContext);
+      staticBackdropCache = { key, layer };
+    }
+    context.drawImage(staticBackdropCache.layer, 0, 0, state.width, state.height);
   }
 
   function drawLine(from, to, color, alpha, width) {
@@ -3630,8 +3662,7 @@
     if (state.clusterFieldOpen) {
       drawClusterVoid();
     } else {
-      drawStars();
-      drawDomainBackdrop();
+      drawStaticBackdrop();
     }
 
     const basis = cameraBasis();

@@ -76,3 +76,35 @@ test('Enter-committed node creation stays visible and preserves the current view
   expect(after.state.viewMode).toBe(before.viewMode);
   expect(after.state.camera).toEqual(before.camera);
 });
+
+test('a steady domain reuses its rasterized backdrop instead of repainting blurred tunnels', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__domainEllipseCalls = 0;
+    window.__backdropBlits = 0;
+    const ellipse = CanvasRenderingContext2D.prototype.ellipse;
+    const drawImage = CanvasRenderingContext2D.prototype.drawImage;
+    CanvasRenderingContext2D.prototype.ellipse = function countedEllipse(...args) {
+      window.__domainEllipseCalls += 1;
+      return ellipse.apply(this, args);
+    };
+    CanvasRenderingContext2D.prototype.drawImage = function countedDrawImage(...args) {
+      window.__backdropBlits += 1;
+      return drawImage.apply(this, args);
+    };
+  });
+  await openIsolatedWorld(page);
+  await enterAtomFile(page);
+  await page.evaluate(() => {
+    window.__domainEllipseCalls = 0;
+    window.__backdropBlits = 0;
+  });
+
+  await page.waitForTimeout(2000);
+
+  const drawCounts = await page.evaluate(() => ({
+    ellipses: window.__domainEllipseCalls,
+    backdropBlits: window.__backdropBlits
+  }));
+  expect(drawCounts.backdropBlits).toBeGreaterThan(0);
+  expect(drawCounts.ellipses / drawCounts.backdropBlits).toBeLessThan(70);
+});
