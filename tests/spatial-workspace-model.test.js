@@ -300,6 +300,29 @@ test('batch landing keeps every selected source in one atomic move operation', (
   assert.deepEqual(plain(operation.landings.map((landing) => landing.target.path)), ['root/target', 'root/target']);
 });
 
+test('batch landing resolves every selected identity from authoritative knowledge instead of stale render entries', () => {
+  const model = loadModel();
+  const knowledge = { nodes: [
+    { id: 'a', key: 'work::a', path: 'work', atomPath: 'work/来源甲', label: '来源甲', aliases: ['stale::a'] },
+    { id: 'b', key: 'work::b', path: 'work', atomPath: 'work/来源乙', label: '来源乙', aliases: ['stale::b'] }
+  ] };
+
+  const entries = model.batchLandingEntries(
+    ['stale::a', 'stale::b'],
+    knowledge,
+    new Map([['stale::a', { ownerPath: 'old', node: { id: 'old-a' } }]])
+  );
+
+  assert.deepEqual(plain(entries.map((entry) => ({
+    key: entry.source.key,
+    path: entry.source.path,
+    atomPath: entry.sourceNode.atomPath
+  }))), [
+    { key: 'work::a', path: 'work', atomPath: 'work/来源甲' },
+    { key: 'work::b', path: 'work', atomPath: 'work/来源乙' }
+  ]);
+});
+
 test('batch landing remaps every moved node after authoritative persistence', () => {
   const model = loadModel();
   const previousKnowledge = { nodes: [

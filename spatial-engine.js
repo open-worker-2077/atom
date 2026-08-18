@@ -4382,17 +4382,23 @@
       const transaction = workspace.beginEdgeCreate(endpoint, node);
       const clickedKey = visualNodeKey(node, endpointPath);
       if (transaction && state.batchSelectionKeys.size > 1 && state.batchSelectionKeys.has(clickedKey)) {
-        transaction.batchEntries = [...state.batchSelectionKeys]
-          .map((key) => state.batchSelectionEntries.get(key))
-          .filter(Boolean)
-          .map((entry) => ({
-            source: workspaceModel.qualifiedEndpoint(
-              entry.ownerPath,
-              entry.node,
-              pathLabelsForPath(entry.ownerPath)
-            ),
-            sourceNode: entry.node
-          }));
+        const batchEntries = workspaceModel.batchLandingEntries(
+          [...state.batchSelectionKeys],
+          workspace.exportKnowledge(),
+          state.batchSelectionEntries
+        );
+        if (batchEntries.length !== state.batchSelectionKeys.size) {
+          workspace.cancel();
+          announce("批量选择中存在无法确认的节点，本次未执行移动");
+          return false;
+        }
+        transaction.batchEntries = batchEntries.map((entry) => ({
+          source: {
+            ...entry.source,
+            pathLabels: pathLabelsForPath(entry.source.path)
+          },
+          sourceNode: entry.sourceNode
+        }));
       }
       state.selected = node;
       updateSelectionUI();

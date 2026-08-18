@@ -467,6 +467,60 @@ test('4784 Web workspace node creation commits atom.json before returning the re
   assert.equal(finalWorld[0].children.some((child) => child.name === 'Nested in Web'), false);
 });
 
+test('4784 Web batch landing moves every selected sibling into one nested Atom container', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-web-batch-land-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('work', '', [
+      atom('项目'),
+      atom('工业气系统说明书-旧图冻结备份-20260817'),
+      atom('工业气系统说明书-分级学习详情暂存-v10')
+    ]),
+    atom('工作Agent', '', [], 'agent')
+  ], null, 2));
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile });
+  t.after(() => running.close());
+
+  const initial = (await (await fetch(`${running.url}/__spatial/api/state`)).json()).knowledge;
+  const target = initial.nodes.find((node) => node.atomPath === 'work/项目');
+  const sources = initial.nodes.filter((node) => [
+    'work/工业气系统说明书-旧图冻结备份-20260817',
+    'work/工业气系统说明书-分级学习详情暂存-v10'
+  ].includes(node.atomPath));
+  assert.equal(sources.length, 2);
+
+  const response = await fetch(`${running.url}/__atom/api/workspace-edit`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      operation: {
+        kind: 'node-land-batch',
+        target: { path: childPath(target) },
+        landings: sources.map((source) => ({
+          kind: 'node-land',
+          source: { key: source.key, nodeId: source.id },
+          sourceNode: source,
+          target: { path: childPath(target) },
+          draft: source
+        }))
+      }
+    })
+  });
+  const payload = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(payload));
+  assert.equal(payload.result.ok, true, JSON.stringify(payload.result.errors));
+  const movedPaths = payload.knowledge.nodes
+    .filter((node) => node.label.startsWith('工业气系统说明书-'))
+    .map((node) => node.atomPath)
+    .sort();
+  assert.deepEqual(movedPaths, [
+    'work/项目/工业气系统说明书-分级学习详情暂存-v10',
+    'work/项目/工业气系统说明书-旧图冻结备份-20260817'
+  ].sort());
+});
+
 test('4784 rejects direct projection replacement so Web edits cannot bypass atom.json', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-projection-read-only-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

@@ -293,7 +293,7 @@ test('engine exposes explicit knowledge and field projections without pointer si
   assert.doesNotMatch(source, /spatialLab[\s\S]{0,600}dispatchEvent\s*\(\s*new\s+(?:Mouse|Pointer|Keyboard)Event/);
 });
 
-test('batch landing uses identities captured at selection time instead of re-resolving a mutable view', () => {
+test('batch landing resolves the complete selection against authoritative knowledge and fails closed', () => {
   const establish = functionSource('establishPeerSelection');
   const toggle = functionSource('toggleBatchSelectionAtHit');
   const gesture = functionSource('beginEdgeGesture');
@@ -301,7 +301,10 @@ test('batch landing uses identities captured at selection time instead of re-res
   assert.match(source, /batchSelectionEntries:\s*new Map\(\)/);
   assert.match(establish, /state\.batchSelectionEntries\s*=\s*new Map/);
   assert.match(toggle, /batchSelectionEntries\.(?:set|delete)/);
-  assert.match(gesture, /state\.batchSelectionEntries\.get\(key\)/);
+  assert.match(gesture, /workspaceModel\.batchLandingEntries\(/);
+  assert.match(gesture, /workspace\.exportKnowledge\(\)/);
+  assert.match(gesture, /batchEntries\.length\s*!==\s*state\.batchSelectionKeys\.size/);
+  assert.match(gesture, /workspace\.cancel\(\)/);
   assert.doesNotMatch(gesture, /\.map\(\(key\)\s*=>\s*visualEntryForKey\(key\)\)/);
 });
 

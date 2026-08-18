@@ -135,6 +135,41 @@
     };
   }
 
+  function batchLandingEntries(keysInput, knowledge, capturedEntriesInput) {
+    const keys = Array.isArray(keysInput)
+      ? [...new Set(keysInput.map((key) => safeText(key, "", 1024)).filter(Boolean))]
+      : [];
+    const nodes = Array.isArray(knowledge && knowledge.nodes) ? knowledge.nodes : [];
+    const capturedEntries = capturedEntriesInput instanceof Map ? capturedEntriesInput : new Map();
+    const nodesByIdentity = new Map();
+    nodes.forEach((node) => {
+      if (!node || typeof node !== "object") return;
+      const path = safeText(node.path || node.workspacePath, "", 512);
+      const id = safeText(node.id || node.nodeId, "", 256);
+      const key = safeText(node.key, "", 1024) || (path && id ? `${path}::${id}` : "");
+      [key, ...(Array.isArray(node.aliases) ? node.aliases : [])]
+        .map((identity) => safeText(identity, "", 1024))
+        .filter(Boolean)
+        .forEach((identity) => nodesByIdentity.set(identity, node));
+    });
+    return keys.map((requestedKey) => {
+      const authoritativeNode = nodesByIdentity.get(requestedKey);
+      if (authoritativeNode) {
+        const path = safeText(authoritativeNode.path || authoritativeNode.workspacePath, "", 512);
+        return {
+          source: qualifiedEndpoint(path, authoritativeNode, []),
+          sourceNode: authoritativeNode
+        };
+      }
+      const captured = capturedEntries.get(requestedKey);
+      if (!captured || !captured.node) return null;
+      return {
+        source: qualifiedEndpoint(captured.ownerPath, captured.node, []),
+        sourceNode: captured.node
+      };
+    }).filter(Boolean);
+  }
+
   function nodeIdentity(node, fallbackPath = "") {
     if (!node || typeof node !== "object") return null;
     const path = safeText(node.path || node.workspacePath || fallbackPath, "", 512);
@@ -923,6 +958,7 @@
     highlightSegments,
     normalizeQuery,
     persistedLandingNode,
+    batchLandingEntries,
     batchLandingOperation,
     operationIdentityTransitions,
     remapIdentity,
