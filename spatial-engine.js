@@ -629,6 +629,7 @@
     confirmationRipples: new Map(),
     wandGlowUntil: new Map(),
     batchSelectionKeys: new Set(),
+    batchSelectionEntries: new Map(),
     batchToggleKey: null,
     wand: {
       shiftHeld: false,
@@ -4382,7 +4383,7 @@
       const clickedKey = visualNodeKey(node, endpointPath);
       if (transaction && state.batchSelectionKeys.size > 1 && state.batchSelectionKeys.has(clickedKey)) {
         transaction.batchEntries = [...state.batchSelectionKeys]
-          .map((key) => visualEntryForKey(key))
+          .map((key) => state.batchSelectionEntries.get(key))
           .filter(Boolean)
           .map((entry) => ({
             source: workspaceModel.qualifiedEndpoint(
@@ -5668,6 +5669,13 @@
     const anchor = regions.find((region) => region.key === state.latestInteractionKey)
       || regions.find((region) => state.hovered && region.key === visualNodeKey(state.hovered, nodeOwnerPath(state.hovered)));
     state.batchSelectionKeys = new Set(viewModeModel.planPeerBatch(regions, anchor, state.currentPath));
+    state.batchSelectionEntries = new Map(regions
+      .filter((region) => state.batchSelectionKeys.has(region.key) && region.node)
+      .map((region) => [region.key, {
+        key: region.key,
+        ownerPath: region.ownerPath,
+        node: region.node
+      }]));
     if (!state.batchSelectionKeys.size) return false;
     state.batchToggleKey = anchor ? anchor.key : null;
     updateSelectionUI();
@@ -5687,6 +5695,15 @@
     }
     if (key === state.batchToggleKey) return false;
     state.batchSelectionKeys = new Set(viewModeModel.toggleSelectionKey(state.batchSelectionKeys, key));
+    if (state.batchSelectionKeys.has(key)) {
+      state.batchSelectionEntries.set(key, {
+        key,
+        ownerPath: item.ownerPath || nodeOwnerPath(item.node),
+        node: item.node
+      });
+    } else {
+      state.batchSelectionEntries.delete(key);
+    }
     state.batchToggleKey = key;
     updateSelectionUI();
     return true;
@@ -5723,6 +5740,7 @@
       .filter((region) => region.item && region.item.kind === "node" && region.item.node)
       .map((region) => ({
         key: visualNodeKey(region.item.node, region.item.ownerPath || nodeOwnerPath(region.item.node)),
+        node: region.item.node,
         ownerPath: region.item.ownerPath || nodeOwnerPath(region.item.node),
         level: Number(region.item.level) || 0,
         x: region.x,
@@ -6043,6 +6061,7 @@
     let changed = false;
     if (state.batchSelectionKeys.size) {
       state.batchSelectionKeys.clear();
+      state.batchSelectionEntries.clear();
       state.batchToggleKey = null;
       changed = true;
     }
@@ -8330,6 +8349,22 @@
       inputPreset: input.activePreset,
       phase: currentInteractionPhase(),
       transactionActive: Boolean(workspace.transaction()),
+      transactionBatchCount: Array.isArray(workspace.transaction() && workspace.transaction().batchEntries)
+        ? workspace.transaction().batchEntries.length
+        : 0,
+      batchSelectionCount: state.batchSelectionKeys.size,
+      latestInteractionKey: state.latestInteractionKey,
+      interactionTargets: state.hitRegions
+        .filter((region) => region.item && region.item.kind === "node" && region.item.node)
+        .map((region) => ({
+          key: visualNodeKey(region.item.node, region.item.ownerPath || nodeOwnerPath(region.item.node)),
+          label: region.item.node.label,
+          x: region.x,
+          y: region.y,
+          clientX: canvas.getBoundingClientRect().left + region.x,
+          clientY: canvas.getBoundingClientRect().top + region.y,
+          radius: Math.max(3, region.item.screen.radius)
+        })),
       semanticStage: state.selected ? state.selected.semanticStage : null,
       worldLensOpen: state.worldLens.open,
       clusterFieldOpen: state.clusterFieldOpen,

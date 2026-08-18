@@ -77,6 +77,48 @@ test('Enter-committed node creation stays visible and preserves the current view
   expect(after.state.camera).toEqual(before.camera);
 });
 
+test('double-Shift selection survives the real ctrl-right landing gesture as one batch', async ({ page }) => {
+  await openIsolatedWorld(page);
+  await enterAtomFile(page);
+
+  const targets = await page.evaluate(() => window.spatialLab.state().interactionTargets);
+  expect(targets.length).toBeGreaterThan(1);
+  const source = targets[0];
+
+  await page.mouse.click(source.clientX, source.clientY);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().latestInteractionKey))
+    .toBe(source.key);
+  await page.evaluate(async () => {
+    const tap = () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', bubbles: true }));
+      document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft', bubbles: true }));
+    };
+    tap();
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    tap();
+  });
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().batchSelectionCount))
+    .toBeGreaterThan(1);
+
+  await page.keyboard.down('Control');
+  await page.mouse.click(source.clientX, source.clientY, { button: 'right' });
+  await page.keyboard.up('Control');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().transactionBatchCount))
+    .toBeGreaterThan(1);
+
+  const committed = page.evaluate(() => new Promise((resolve) => {
+    window.addEventListener('spatial-workspace-committed', (event) => resolve(event.detail.operation), { once: true });
+  }));
+  await page.keyboard.down('Control');
+  await page.mouse.click(48, 360, { button: 'right' });
+  await page.keyboard.up('Control');
+  await page.keyboard.press('Enter');
+
+  const operation = await committed;
+  expect(operation.kind).toBe('node-land-batch');
+  expect(operation.landings).toHaveLength(targets.length);
+});
+
 test('a steady domain reuses its rasterized backdrop instead of repainting blurred tunnels', async ({ page }) => {
   await page.addInitScript(() => {
     window.__domainEllipseCalls = 0;

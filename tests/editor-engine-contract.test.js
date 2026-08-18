@@ -293,6 +293,18 @@ test('engine exposes explicit knowledge and field projections without pointer si
   assert.doesNotMatch(source, /spatialLab[\s\S]{0,600}dispatchEvent\s*\(\s*new\s+(?:Mouse|Pointer|Keyboard)Event/);
 });
 
+test('batch landing uses identities captured at selection time instead of re-resolving a mutable view', () => {
+  const establish = functionSource('establishPeerSelection');
+  const toggle = functionSource('toggleBatchSelectionAtHit');
+  const gesture = functionSource('beginEdgeGesture');
+
+  assert.match(source, /batchSelectionEntries:\s*new Map\(\)/);
+  assert.match(establish, /state\.batchSelectionEntries\s*=\s*new Map/);
+  assert.match(toggle, /batchSelectionEntries\.(?:set|delete)/);
+  assert.match(gesture, /state\.batchSelectionEntries\.get\(key\)/);
+  assert.doesNotMatch(gesture, /\.map\(\(key\)\s*=>\s*visualEntryForKey\(key\)\)/);
+});
+
 test('a node created at a pointer keeps that exact visual anchor after authoritative save', () => {
   const beginCreate = functionSource('beginNodeCreateAt');
   const prepareNode = functionSource('prepareWorkspaceNode');
