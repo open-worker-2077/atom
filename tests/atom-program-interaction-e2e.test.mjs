@@ -323,3 +323,39 @@ test('name.run forces the selected Python Program detail to execute again', asyn
   assert.equal(explicit.ok, true, JSON.stringify(explicit.errors));
   assert.equal(explicit.messages.some((message) => message.text === 'ran detail'), true);
 });
+
+test('name.run accepts the same shortest unique path suffix as explore and transform', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-explicit-suffix-run-'));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('work', '', [
+      atom('ESG项目总结与计划-自研复盘框架', '', [
+        atom('推进流', "message({'level': 'info', 'text': 'suffix ran'})", [
+          atom('内部路由', "message({'level': 'info', 'text': 'nested suffix ran'})", [], 'program')
+        ], 'program')
+      ])
+    ])
+  ], null, 2));
+  const scheduler = createProgramRuntimeScheduler();
+
+  const result = await executeAtomLanguage({
+    source: 'transform {"name.run.":"ESG项目总结与计划-自研复盘框架/推进流"}',
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.messages.some((message) => message.text === 'suffix ran'), true);
+
+  const nested = await executeAtomLanguage({
+    source: 'transform {"name.run.":"ESG项目总结与计划-自研复盘框架/推进流/内部路由"}',
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler
+  });
+
+  assert.equal(nested.ok, true, JSON.stringify(nested.errors));
+  assert.equal(nested.messages.some((message) => message.text === 'nested suffix ran'), true);
+});

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { parseAtomKey } from './key-parser.mjs';
 import { executeProgramExplore, prepareExploreWorld } from './query-capability.mjs';
+import { matchesExactSelector } from './exact-selector.mjs';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_WORKERS = 16;
@@ -51,8 +52,8 @@ function worldRecords(atoms) {
 function programRecords(records, selector = null) {
   const programs = records.filter((record) => record.types.includes('program') && record.detail.trim());
   if (!selector) return programs;
-  const matches = programs.filter((program) => (
-    selector.includes('/') ? program.path === selector : program.name === selector
+  const matches = programs.filter((program) => matchesExactSelector(
+    program.path.split('/'), program.name, selector
   ));
   if (matches.length === 1) return matches;
   const error = new Error(matches.length

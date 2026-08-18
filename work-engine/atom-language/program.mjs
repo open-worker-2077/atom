@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { diagnostic } from './errors.mjs';
+import { matchesExactSelector } from './exact-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { applyTransform } from './transform-executor.mjs';
 
@@ -348,17 +349,17 @@ function transformItemForChild(targetPath, child) {
 }
 
 function selectProgram(compiled, selector) {
-  const byPath = compiled.programs.filter((program) => program.path === selector);
-  if (byPath.length === 1) return { program: byPath[0] };
-  const byName = compiled.programs.filter((program) => program.name === selector);
-  if (byName.length === 1) return { program: byName[0] };
+  const matches = compiled.programs.filter((program) => matchesExactSelector(
+    program.path.split('/'), program.name, selector
+  ));
+  if (matches.length === 1) return { program: matches[0] };
   return {
     error: diagnostic(
-      byName.length ? 'AMBIGUOUS_ATOM_NAME' : 'PROGRAM_NOT_FOUND',
-      byName.length
+      matches.length ? 'AMBIGUOUS_ATOM_NAME' : 'PROGRAM_NOT_FOUND',
+      matches.length
         ? `Program 名称不唯一：${selector}`
         : `找不到已编译 Program：${selector}`,
-      { selector, paths: byName.map((program) => program.path) }
+      { selector, paths: matches.map((program) => program.path) }
     )
   };
 }
