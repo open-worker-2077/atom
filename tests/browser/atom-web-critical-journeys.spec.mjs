@@ -160,6 +160,31 @@ test('holding Shift brushes individual nodes into and out of a batch without pee
   await page.keyboard.up('Shift');
 });
 
+test('Shift brushing remains available after Home returns from another context', async ({ page }) => {
+  await openIsolatedWorld(page);
+  await enterAtomFile(page);
+
+  const innerTarget = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .find(({ label }) => Boolean(label));
+  expect(innerTarget).toBeTruthy();
+  await page.keyboard.down('Shift');
+  await page.mouse.move(innerTarget.clientX, innerTarget.clientY);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().batchSelectionCount)).toBe(1);
+  await page.keyboard.up('Shift');
+
+  await page.keyboard.press('Home');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe('root');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().batchSelectionCount)).toBe(0);
+
+  const rootTarget = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .find(({ label }) => Boolean(label));
+  expect(rootTarget).toBeTruthy();
+  await page.keyboard.down('Shift');
+  await page.mouse.move(rootTarget.clientX, rootTarget.clientY);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().batchSelectionCount)).toBe(1);
+  await page.keyboard.up('Shift');
+});
+
 test('a steady domain reuses its rasterized backdrop instead of repainting blurred tunnels', async ({ page }) => {
   await page.addInitScript(() => {
     window.__domainEllipseCalls = 0;

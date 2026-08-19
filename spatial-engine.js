@@ -5430,6 +5430,11 @@
     state.selected = null;
     state.focused = null;
     state.hovered = null;
+    state.batchSelectionKeys.clear();
+    state.batchSelectionEntries.clear();
+    state.batchToggleKey = null;
+    state.wand.tapCount = 0;
+    state.wand.lastTapAt = 0;
     state.menuFor = null;
     state.middleLabelFocus = null;
     state.prefetchedDomain = null;

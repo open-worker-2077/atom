@@ -180,6 +180,16 @@ test('holding Shift can start and revise a batch by brushing nodes without prior
   assert.match(pointerMove, /toggleBatchSelectionAtHit/);
 });
 
+test('Home clears the contextual batch so Shift brushing starts cleanly in the overview', () => {
+  const overview = functionSource('returnOverview');
+
+  assert.match(overview, /batchSelectionKeys\.clear/);
+  assert.match(overview, /batchSelectionEntries\.clear/);
+  assert.match(overview, /batchToggleKey\s*=\s*null/);
+  assert.match(overview, /wand\.tapCount\s*=\s*0/);
+  assert.match(overview, /wand\.lastTapAt\s*=\s*0/);
+});
+
 test('Shift right-drag remembers the final hit node for the next middle-drag orbit', () => {
   const finish = functionSource('finishWandStroke');
 
