@@ -7,9 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500&family=Tomorrow:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="spatial.css?v=20260819.2">
+  <link rel="stylesheet" href="spatial.css?v=20260819.3">
 </head>
-<body data-build="20260819.2">
+<body data-build="20260819.3">
   <main class="spatial-shell" id="spatialShell">
     <canvas
       id="spaceCanvas"
@@ -124,7 +124,7 @@
         </label>
       </div>
       <label class="sr-only" for="nodeDetailEditor">节点详情</label>
-      <textarea id="nodeDetailEditor" maxlength="4000" placeholder="在球镜表面写入详情"></textarea>
+      <textarea id="nodeDetailEditor" maxlength="1000000" placeholder="在球镜表面写入详情"></textarea>
       <header class="markdown-editor-toolbar">
         <span>Markdown</span>
         <span class="markdown-editor-toolbar__actions">
@@ -144,6 +144,15 @@
     <output class="edit-status" id="editStatus" data-edit-state="update" hidden>
       待提交更新 · Enter 确认 · Shift+Enter 换行 · Esc 取消
     </output>
+
+    <section class="program-choice-panel" id="programChoicePanel" aria-label="Program 多选项" hidden>
+      <header>
+        <strong id="programChoiceTitle">选择</strong>
+        <button type="button" id="programChoiceClose" aria-label="关闭选项">关闭</button>
+      </header>
+      <div id="programChoiceControls"></div>
+      <output id="programChoiceStatus" aria-live="polite"></output>
+    </section>
 
     <div class="field-metrics" aria-label="场域读数">
       <span><b id="metricDepth">00</b> 层深</span>
@@ -429,25 +438,26 @@
   </main>
 
   <noscript>此实验场需要 JavaScript 才能响应空间交互。</noscript>
-  <script src="input-config.js?v=20260819.2"></script>
-  <script src="spatial-visual-model.js?v=20260819.2"></script>
-  <script src="spatial-detail-magnifier-model.js?v=20260819.2"></script>
-  <script src="spatial-gesture-arbiter.js?v=20260819.2"></script>
-  <script src="spatial-middle-frame-target.js?v=20260819.2"></script>
-  <script src="spatial-entity-registry.js?v=20260819.2"></script>
-  <script src="spatial-view-grammar.js?v=20260819.2"></script>
-  <script src="spatial-workspace-model.js?v=20260819.2"></script>
-  <script src="spatial-mermaid-codec.js?v=20260819.2"></script>
-  <script src="spatial-json-codec.js?v=20260819.2"></script>
-  <script src="spatial-view-mode-model.js?v=20260819.2"></script>
-  <script src="spatial-help-page-model.js?v=20260819.2"></script>
-  <script src="spatial-demo-model.js?v=20260819.2"></script>
-  <script src="spatial-demo-geometry.js?v=20260819.2"></script>
-  <script src="spatial-cluster-field.js?v=20260819.2"></script>
-  <script src="vendor/spatial-markdown-editor.bundle.js?v=20260819.2"></script>
-  <script src="vendor/atom-spatial-scene.bundle.js?v=20260819.2"></script>
-  <script src="spatial-engine.js?v=20260819.2"></script>
-  <script src="spatial-mermaid-panel.js?v=20260819.2"></script>
-  <script src="spatial-browser-bridge.js?v=20260819.2"></script>
+  <script src="input-config.js?v=20260819.3"></script>
+  <script src="spatial-visual-model.js?v=20260819.3"></script>
+  <script src="spatial-detail-magnifier-model.js?v=20260819.3"></script>
+  <script src="spatial-gesture-arbiter.js?v=20260819.3"></script>
+  <script src="spatial-middle-frame-target.js?v=20260819.3"></script>
+  <script src="spatial-entity-registry.js?v=20260819.3"></script>
+  <script src="spatial-view-grammar.js?v=20260819.3"></script>
+  <script src="spatial-workspace-model.js?v=20260819.3"></script>
+  <script src="spatial-program-choice-model.js?v=20260819.3"></script>
+  <script src="spatial-mermaid-codec.js?v=20260819.3"></script>
+  <script src="spatial-json-codec.js?v=20260819.3"></script>
+  <script src="spatial-view-mode-model.js?v=20260819.3"></script>
+  <script src="spatial-help-page-model.js?v=20260819.3"></script>
+  <script src="spatial-demo-model.js?v=20260819.3"></script>
+  <script src="spatial-demo-geometry.js?v=20260819.3"></script>
+  <script src="spatial-cluster-field.js?v=20260819.3"></script>
+  <script src="vendor/spatial-markdown-editor.bundle.js?v=20260819.3"></script>
+  <script src="vendor/atom-spatial-scene.bundle.js?v=20260819.3"></script>
+  <script src="spatial-engine.js?v=20260819.3"></script>
+  <script src="spatial-mermaid-panel.js?v=20260819.3"></script>
+  <script src="spatial-browser-bridge.js?v=20260819.3"></script>
 </body>
 </html>

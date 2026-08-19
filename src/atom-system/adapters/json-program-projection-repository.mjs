@@ -15,6 +15,7 @@ function validateProjection(value) {
     || (value.scopePath !== null && typeof value.scopePath !== 'string')
     || (value.contextDependent && !value.scopePath)
     || !Array.isArray(value.locks)
+    || !Array.isArray(value.choices)
     || !Array.isArray(value.failures)
     || value.failures.length > 0) {
     throw problem(

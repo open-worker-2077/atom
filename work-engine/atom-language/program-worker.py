@@ -68,7 +68,7 @@ ALLOWED_FUNCTIONS = {
     "int", "len", "list", "map", "max", "min", "range", "set",
     "sorted", "str", "sum", "tuple", "zip",
     "Exception", "ValueError", "TypeError",
-    "explore", "transform", "lock", "message", "current_atom",
+    "explore", "transform", "lock", "message", "choice", "current_atom",
     "direct_children", "child_detail", "missing_details", "form_status",
     "first_pending", "transition_allowed", "subtree_refs", "plan_form_flow",
     "plan_template_instance", "plan_shards", "instantiate", "template_catalog",
@@ -150,7 +150,7 @@ def main():
     records = request["world"]
     by_ref = {record["ref"]: record for record in records}
     views = {ref: AtomView(record) for ref, record in by_ref.items()}
-    effects = {"locks": [], "messages": [], "transforms": []}
+    effects = {"locks": [], "messages": [], "transforms": [], "choices": []}
 
     next_request_id = 0
 
@@ -199,6 +199,14 @@ def main():
     def transform(specification):
         specification = require_object(specification, "transform")
         effects["transforms"].append(specification)
+
+    def choice(specification):
+        specification = require_object(specification, "choice")
+        effects["choices"].append(specification)
+        selected = specification.get("selected", [])
+        if not isinstance(selected, list):
+            raise TypeError("choice.selected must be an array")
+        return list(selected)
 
     program_stack = [request["program"]["ref"]]
 
@@ -253,6 +261,7 @@ def main():
         "transform": transform,
         "lock": lock,
         "message": message,
+        "choice": choice,
         "current_atom": current_atom,
         "direct_children": direct_children,
         "child_detail": child_detail,

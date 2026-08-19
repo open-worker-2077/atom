@@ -14,7 +14,7 @@
 - The CLI passes the origin to the engine only as `interaction.agent = { ref, path }`. The opaque `ref` is derived from the immutable world revision plus structural address; the Agent is not passed to lock evaluation.
 - `@program` is the only executable Atom type. Its `detail` is Python source.
 - Program source controls execution order. Atom world functions are ordinary Python calls whose single root argument is a JSON-shaped object (`dict`).
-- The world functions are `explore({...})`, `transform({...})`, `lock({...})`, and `message({...})`; `use_program({...})` composes reusable Program logic without adding another executable Atom type.
+- The world functions are `explore({...})`, `transform({...})`, `lock({...})`, `message({...})`, and `choice({...})`; `choice` takes a double-quoted JSON object (valid Python), registers a multi-select control, and returns its selected option ids, while `use_program({...})` composes reusable Program logic without adding another executable Atom type.
 - `explore` and `transform` compile into the same internal command model as the CLI; they do not launch a CLI subprocess or edit JSON storage.
 - `lock` receives targets only after Program logic has selected them. The stable target form is `{ "refs": [<opaque-ref>...] }`; the engine validates every reference against the same immutable world revision.
 - `message` is the only user-visible Program return channel. Python `return` remains local Python control flow.
@@ -33,7 +33,7 @@ world functions as its caller, so it cannot open storage or bypass locks.
 The runtime also exposes a small trusted Python standard library. These helpers
 only interpret Atom values already returned by `explore`; they cannot read
 storage, mutate the world, emit locks, or send messages. Programs keep all side
-effects explicit through the four world functions.
+effects explicit through the registered world functions.
 
 | Helper | Purpose |
 | --- | --- |

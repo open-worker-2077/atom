@@ -1181,7 +1181,10 @@ export async function executeAtomLanguage(options = {}) {
       result: resultMatch ? describeAtom(resultMatch, false) : null,
       program: {
         path: programCycle.selectedProgram?.path ?? run.selector,
-        runtime: 'python-detail'
+        runtime: 'python-detail',
+        choices: (programCycle.choices ?? []).filter((choice) => (
+          choice.sourceProgramPath === programCycle.selectedProgram?.path
+        ))
       },
       warnings: interactionWarnings,
       errors: [],

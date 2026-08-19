@@ -262,6 +262,19 @@ test('a landed node can change mirror state from inside its new domain', () => {
   assert.equal(reopened.projectDomain('root/child', [])[0].surfaceVisible, true);
 });
 
+test('node edit preserves long Program source without truncating registered controls', () => {
+  const model = loadModel();
+  const workspace = model.createWorkspace();
+  const source = `${'x = 1\n'.repeat(900)}selected = choice({"id":"status","options":[{"id":"todo","label":"待办"}],"selected":[]})`;
+  const node = { id: 'program-1', label: '流程', description: source, atomTypes: ['program'] };
+
+  workspace.beginNodeEdit('root', node);
+  const transaction = workspace.transaction();
+
+  assert.equal(transaction.draft.description, source);
+  assert.match(transaction.draft.description, /selected = choice/);
+});
+
 test('persisted landing resolves the moved node by target domain after its projected id changes', () => {
   const model = loadModel();
   const operation = {

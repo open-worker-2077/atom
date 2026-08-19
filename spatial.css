@@ -408,10 +408,68 @@ textarea:focus-visible {
 
 .node-name-editor,
 .lens-editor,
-.edit-status {
+.edit-status,
+.program-choice-panel {
   position: absolute;
   z-index: var(--z-dropdown);
   pointer-events: auto;
+}
+
+.program-choice-panel {
+  inset: 50% auto auto 50%;
+  display: grid;
+  width: min(30rem, calc(100vw - 2rem));
+  max-height: min(38rem, calc(100vh - 2rem));
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  transform: translate(-50%, -50%);
+  overflow: auto;
+  border: var(--rule-hairline) solid color-mix(in oklch, var(--color-update) 52%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklch, var(--color-space-0) 94%, transparent);
+  box-shadow: 0 0 3rem color-mix(in oklch, var(--color-update) 14%, transparent);
+  color: var(--color-ink-2);
+  backdrop-filter: blur(1rem);
+}
+
+.program-choice-panel[hidden] {
+  display: none;
+}
+
+.program-choice-panel > header,
+.program-choice-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.program-choice-panel > header {
+  justify-content: space-between;
+}
+
+.program-choice-panel button {
+  padding: 0.5rem 0.75rem;
+  border: var(--rule-hairline) solid color-mix(in oklch, currentColor 28%, transparent);
+  border-radius: var(--radius-sm);
+  color: inherit;
+  cursor: pointer;
+}
+
+.program-choice-panel button[aria-pressed="true"] {
+  border-color: var(--color-update);
+  background: color-mix(in oklch, var(--color-update) 18%, transparent);
+  color: var(--color-update);
+}
+
+.program-choice-control {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.program-choice-control small,
+#programChoiceStatus {
+  color: var(--color-muted);
 }
 
 .node-name-editor {

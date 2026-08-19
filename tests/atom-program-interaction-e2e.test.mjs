@@ -324,6 +324,32 @@ test('name.run forces the selected Python Program detail to execute again', asyn
   assert.equal(explicit.messages.some((message) => message.text === 'ran detail'), true);
 });
 
+test('name.run returns registered choice controls for the selected Program', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-choice-run-'));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Choice Program', "choice({'id': '状态', 'options': [{'id': 'todo', 'label': '待办'}], 'selected': ['todo']})", [], 'program')
+  ], null, 2));
+
+  const result = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Choice Program"}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.deepEqual(result.program.choices, [{
+    id: '状态',
+    options: [{ id: 'todo', label: '待办' }],
+    selected: ['todo'],
+    empty: '未选择',
+    multiple: true,
+    sourceProgramPath: 'Choice Program'
+  }]);
+});
+
 test('name.run accepts the same shortest unique path suffix as explore and transform', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-explicit-suffix-run-'));
   const contextFile = path.join(directory, 'atom.json');

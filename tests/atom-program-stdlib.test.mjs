@@ -39,6 +39,36 @@ test('Program routing helpers choose the first unfinished form and validate tran
   assert.equal(cycle.messages[0].text, '调研|True|False');
 });
 
+test('Program choice registers one multi-select control and returns its selected values', async () => {
+  const cycle = await runProgram([
+    "selected = choice({'id': '状态', 'options': [{'id': 'todo', 'label': '待办'}, {'id': 'done', 'label': '完成'}], 'selected': ['todo'], 'empty': '未选择'})",
+    "message({'level': 'info', 'text': ','.join(selected)})"
+  ].join('\n'));
+
+  assert.equal(cycle.messages[0].text, 'todo');
+  assert.deepEqual(cycle.choices, [{
+    id: '状态',
+    options: [
+      { id: 'todo', label: '待办' },
+      { id: 'done', label: '完成' }
+    ],
+    selected: ['todo'],
+    empty: '未选择',
+    multiple: true,
+    sourceProgramPath: '原子函数验收'
+  }]);
+});
+
+test('Program choice rejects duplicate options and unknown selected values', async () => {
+  for (const [source, code] of [
+    ["choice({'id': '状态', 'options': [{'id': 'same', 'label': 'A'}, {'id': 'same', 'label': 'B'}]})", 'INVALID_PROGRAM_CHOICE_OPTION'],
+    ["choice({'id': '状态', 'options': [{'id': 'todo', 'label': '待办'}], 'selected': ['missing']})", 'INVALID_PROGRAM_CHOICE_SELECTED'],
+    ["choice({'id': '状态', 'options': [{'id': 'todo', 'label': '待办'}], 'multiple': False})", 'UNSUPPORTED_PROGRAM_CHOICE_MODE']
+  ]) {
+    await assert.rejects(runProgram(source), { code });
+  }
+});
+
 test('Program subtree_refs selects only the requested subtree', async () => {
   const world = [atom('世界', '', [
     atom('当前层', '', [atom('分片A'), atom('分片B')]),

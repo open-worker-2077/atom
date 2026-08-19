@@ -10,6 +10,7 @@
   const registry = global.SpatialEntityRegistry;
   const grammar = global.SpatialViewGrammar;
   const workspaceModel = global.SpatialWorkspaceModel;
+  const programChoiceModel = global.SpatialProgramChoiceModel;
   const clusterField = global.SpatialClusterField;
   const viewModeModel = global.SpatialViewModeModel;
   const helpPageModel = global.SpatialHelpPageModel;
@@ -18,7 +19,7 @@
   const detailMagnifierModel = global.SpatialDetailMagnifierModel;
   const sceneAdapter = global.AtomSpatialScene;
 
-  if (!context || !input || !visualModel || !gestureArbiter || !middleFrameTarget || !registry || !grammar || !workspaceModel || !clusterField || !viewModeModel || !helpPageModel || !demoModel || !demoGeometry || !detailMagnifierModel || !sceneAdapter) {
+  if (!context || !input || !visualModel || !gestureArbiter || !middleFrameTarget || !registry || !grammar || !workspaceModel || !programChoiceModel || !clusterField || !viewModeModel || !helpPageModel || !demoModel || !demoGeometry || !detailMagnifierModel || !sceneAdapter) {
     document.body.dataset.spatialUnavailable = "true";
     return;
   }
@@ -58,6 +59,11 @@
     attachmentInput: document.getElementById("attachmentInput"),
     attachmentMeta: document.getElementById("attachmentMeta"),
     editStatus: document.getElementById("editStatus"),
+    programChoicePanel: document.getElementById("programChoicePanel"),
+    programChoiceTitle: document.getElementById("programChoiceTitle"),
+    programChoiceControls: document.getElementById("programChoiceControls"),
+    programChoiceStatus: document.getElementById("programChoiceStatus"),
+    programChoiceClose: document.getElementById("programChoiceClose"),
     bindingList: document.getElementById("bindingList"),
     demoIdleSeconds: document.getElementById("demoIdleSeconds"),
     helpStartupToggle: document.getElementById("helpStartupToggle"),
@@ -4191,9 +4197,100 @@
     ui.attachmentInput.value = "";
   }
 
+  let activeProgramChoice = null;
+
+  function closeProgramChoicePanel() {
+    activeProgramChoice = null;
+    ui.programChoicePanel.hidden = true;
+    ui.programChoiceControls.replaceChildren();
+    ui.programChoiceStatus.textContent = "";
+  }
+
+  function programNode(node) {
+    return Boolean(node && Array.isArray(node.atomTypes) && node.atomTypes.some((type) => (
+      String(type).replace(/^@+/u, "").toLocaleLowerCase() === "program"
+    )));
+  }
+
+  function renderProgramChoicePanel() {
+    if (!activeProgramChoice) return false;
+    const controls = programChoiceModel.parse(activeProgramChoice.source);
+    if (controls.length === 0) return false;
+    ui.programChoiceTitle.textContent = activeProgramChoice.node.label;
+    ui.programChoiceControls.replaceChildren();
+    for (const control of controls) {
+      const group = document.createElement("section");
+      group.className = "program-choice-control";
+      const title = document.createElement("strong");
+      title.textContent = control.id;
+      group.appendChild(title);
+      const options = document.createElement("div");
+      options.className = "program-choice-options";
+      for (const option of control.options) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = option.label;
+        button.dataset.controlId = control.id;
+        button.dataset.optionId = option.id;
+        button.setAttribute("aria-pressed", String(control.selected.includes(option.id)));
+        options.appendChild(button);
+      }
+      group.appendChild(options);
+      const value = document.createElement("small");
+      const labels = control.options
+        .filter((option) => control.selected.includes(option.id))
+        .map((option) => option.label);
+      value.textContent = labels.length ? labels.join("、") : control.empty;
+      group.appendChild(value);
+      ui.programChoiceControls.appendChild(group);
+    }
+    ui.programChoicePanel.hidden = false;
+    return true;
+  }
+
+  function openProgramChoicePanel(node) {
+    if (!programNode(node)) return false;
+    const source = String(node.description || "");
+    if (programChoiceModel.parse(source).length === 0) return false;
+    activeProgramChoice = { node, path: nodeOwnerPath(node), source };
+    ui.programChoiceStatus.textContent = "";
+    return renderProgramChoicePanel();
+  }
+
+  function saveProgramChoice(controlId, optionId) {
+    if (!activeProgramChoice || workspace.transaction()) return false;
+    let toggled;
+    try {
+      toggled = programChoiceModel.toggle(activeProgramChoice.source, controlId, optionId);
+    } catch (_error) {
+      announce("选项定义已变化，请重新打开");
+      return false;
+    }
+    const { node, path } = activeProgramChoice;
+    const resolved = nodeByIdInPath(path, node.id) || node;
+    if (!workspace.beginNodeEdit(path, resolved)) return false;
+    workspace.updateNodeDraft({
+      label: resolved.label,
+      atomTypes: resolved.atomTypes,
+      description: toggled.source,
+      attachment: resolved.attachment
+    });
+    const operation = workspace.commit();
+    if (!operation) {
+      workspace.cancel();
+      return false;
+    }
+    activeProgramChoice.source = toggled.source;
+    renderProgramChoicePanel();
+    ui.programChoiceStatus.textContent = "正在保存，等待 Atom 确认";
+    persistWorkspaceSnapshot(operation);
+    return true;
+  }
+
   function openNodeEditor(node, path = state.currentPath) {
     const transaction = workspace.transaction();
     if (!transaction || !["node-create", "node-edit"].includes(transaction.kind)) return;
+    closeProgramChoicePanel();
     const draft = transaction.draft;
     state.selected = workspace.projectNode(path, node) || node;
     ui.nodeNameEditor.value = draft.label || "";
@@ -4485,6 +4582,14 @@
     if (!event.detail || !Number.isFinite(Number(event.detail.persistenceId))) return;
     const operation = event.detail.operation;
     const kind = operation && operation.kind || "";
+    if (
+      kind === "node-edit"
+      && activeProgramChoice
+      && operation.path === activeProgramChoice.path
+      && operation.nodeKey === `${activeProgramChoice.path}::${activeProgramChoice.node.id}`
+    ) {
+      ui.programChoiceStatus.textContent = "已保存";
+    }
     if (kind === "node-land-batch") {
       const movedCount = Array.isArray(operation.landings) ? operation.landings.length : 0;
       state.focused = null;
@@ -4521,6 +4626,7 @@
   global.addEventListener("spatial-workspace-persist-failed", (event) => {
     if (!event.detail || !Number.isFinite(Number(event.detail.persistenceId))) return;
     const message = String(event.detail.message || "服务未确认本次编辑");
+    closeProgramChoicePanel();
     announce(`保存失败，已恢复保存前内容：${message}`);
   });
 
@@ -6187,6 +6293,11 @@
       case "activate":
         if (!target) {
           return;
+        }
+        if (openProgramChoicePanel(target)) {
+          state.commitPulseUntil = performance.now() + 320;
+          announce(`${target.label} 选项已打开`);
+          break;
         }
         state.commitPulseUntil = performance.now() + 320;
         announce(`${target.label} 已触发使用`);
@@ -7903,6 +8014,13 @@
       state.demo.settings,
       ui.highlightedLabelBrightness.value
     ));
+  });
+
+  ui.programChoiceClose.addEventListener("click", closeProgramChoicePanel);
+  ui.programChoiceControls.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-control-id][data-option-id]");
+    if (!button) return;
+    saveProgramChoice(button.dataset.controlId, button.dataset.optionId);
   });
 
   ui.relationshipLineWidth.addEventListener("input", () => {

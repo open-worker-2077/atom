@@ -258,7 +258,50 @@ function validateResult(result, records, program) {
       sourceProgramPath: program.path
     };
   });
-  return { locks, messages, transforms };
+  const choiceIds = new Set();
+  const choices = (result.choices ?? []).map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw Object.assign(new Error('choice() requires one JSON object'), { code: 'INVALID_PROGRAM_CHOICE' });
+    }
+    const id = typeof entry.id === 'string' ? entry.id.trim() : '';
+    if (!id || choiceIds.has(id)) {
+      throw Object.assign(new Error('choice.id must be non-empty and unique within one Program'), { code: 'INVALID_PROGRAM_CHOICE_ID' });
+    }
+    choiceIds.add(id);
+    if (entry.multiple === false) {
+      throw Object.assign(new Error('choice.multiple=false is not supported yet'), { code: 'UNSUPPORTED_PROGRAM_CHOICE_MODE' });
+    }
+    if (!Array.isArray(entry.options) || entry.options.length === 0) {
+      throw Object.assign(new Error('choice.options must be a non-empty array'), { code: 'INVALID_PROGRAM_CHOICE_OPTIONS' });
+    }
+    const optionIds = new Set();
+    const options = entry.options.map((option) => {
+      const optionId = typeof option?.id === 'string' ? option.id.trim() : '';
+      const label = typeof option?.label === 'string' ? option.label.trim() : '';
+      if (!optionId || !label || optionIds.has(optionId)) {
+        throw Object.assign(new Error('Every choice option requires a unique id and non-empty label'), { code: 'INVALID_PROGRAM_CHOICE_OPTION' });
+      }
+      optionIds.add(optionId);
+      return { id: optionId, label };
+    });
+    const selected = entry.selected ?? [];
+    if (!Array.isArray(selected) || new Set(selected).size !== selected.length
+      || selected.some((optionId) => typeof optionId !== 'string' || !optionIds.has(optionId))) {
+      throw Object.assign(new Error('choice.selected must contain unique declared option ids'), { code: 'INVALID_PROGRAM_CHOICE_SELECTED' });
+    }
+    if (entry.empty !== undefined && (typeof entry.empty !== 'string' || !entry.empty.trim())) {
+      throw Object.assign(new Error('choice.empty must be a non-empty string'), { code: 'INVALID_PROGRAM_CHOICE_EMPTY' });
+    }
+    return {
+      id,
+      options,
+      selected: [...selected],
+      empty: entry.empty?.trim() || '未选择',
+      multiple: true,
+      sourceProgramPath: program.path
+    };
+  });
+  return { locks, messages, transforms, choices };
 }
 
 function runWorker({ python, records, program, timeoutMs, executeExplore }) {
@@ -426,6 +469,7 @@ export class ProgramRuntimeScheduler {
       records,
       selectedProgram: null,
       locks: structuredClone(stored.locks),
+      choices: structuredClone(stored.choices ?? []),
       messages: [],
       transforms: [],
       failures: structuredClone(stored.failures),
@@ -446,6 +490,7 @@ export class ProgramRuntimeScheduler {
       contextIncomplete: value.contextIncomplete === true,
       scopePath,
       locks: structuredClone(value.locks),
+      choices: structuredClone(value.choices ?? []),
       failures: []
     };
     try {
@@ -481,6 +526,7 @@ export class ProgramRuntimeScheduler {
         cached: true,
         records,
         locks: rebindLocks(reusable.value.locks, reusable.value.records, records),
+        choices: structuredClone(reusable.value.choices ?? []),
         messages: [],
         transforms: [],
         failures: structuredClone(reusable.value.failures ?? [])
@@ -571,6 +617,7 @@ export class ProgramRuntimeScheduler {
           cached: true,
           records,
           locks: rebindLocks(reusable.value.locks, reusable.value.records, records),
+          choices: structuredClone(reusable.value.choices ?? []),
           messages: [],
           transforms: [],
           failures: structuredClone(reusable.value.failures ?? [])
@@ -681,6 +728,7 @@ export class ProgramRuntimeScheduler {
       records,
       selectedProgram: options.programSelector ? programs[0] : null,
       locks: results.flatMap((result) => result.locks),
+      choices: results.flatMap((result) => result.choices ?? []),
       messages: results.flatMap((result) => result.messages),
       transforms: results.flatMap((result) => result.transforms),
       failures: applicable.flatMap((entry) => entry.failure ? [entry.failure] : []),

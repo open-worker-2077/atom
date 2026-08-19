@@ -141,6 +141,7 @@ function help() {
     '',
     'Program 模板与复用：',
     '  @program 是唯一可执行类型，detail 直接保存 Python；普通交互不得手工替代已有 Program 或模板。',
+    '  多选函数：choice({id,options:[{id,label}],selected:[id],empty})；参数必须使用双引号标准 JSON（同时是合法 Python），当前仅支持多选，返回 selected 数组并在显式 .run. 回执中公开 choices。',
     '  Program 并发独立运行并共享单轮 10 秒时间预算；单项失败独立报告，超时自动中断。短期内避免编写超出该预算的复杂 Program。',
     '  世界函数：explore(query)->rows；transform(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
     '  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。',
@@ -429,9 +430,13 @@ function graphResult(result) {
       ? 'created'
       : (result.changed ? 'updated' : 'unchanged');
     const types = (result.result.types ?? []).map((type) => `@${type}`).join('');
-    return graphObject([
+    const entries = [
       graphEntry(`name${types}~${hint}`, true, result.result.name)
-    ]);
+    ];
+    if (Array.isArray(result.program?.choices)) {
+      entries.push(graphEntry('choices', true, result.program.choices));
+    }
+    return graphObject(entries);
   }
   if (result.ok) return graphObject([graphEntry('atom~done')]);
   return null;

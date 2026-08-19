@@ -3,7 +3,7 @@
 
   const MAX_QUERY_LENGTH = 80;
   const MAX_LABEL_LENGTH = 80;
-  const MAX_DETAIL_LENGTH = 4000;
+  const MAX_DETAIL_LENGTH = 1_000_000;
 
   function normalizedDetailMode(node) {
     if (node && node.surfaceVisible === true) {
