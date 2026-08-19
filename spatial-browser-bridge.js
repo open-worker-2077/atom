@@ -307,6 +307,16 @@
         if (!response.ok || payload.ok === false || payload.result?.ok === false) {
           throw new Error(payload.error?.message || payload.result?.errors?.[0]?.message || 'Atom workspace edit failed');
         }
+        if (operation.kind === "node-land-batch") {
+          const expected = Array.isArray(operation.landings) ? operation.landings.length : 0;
+          const persistedBatch = workspaceModel
+            && typeof workspaceModel.persistedBatchLandingNodes === "function"
+            ? workspaceModel.persistedBatchLandingNodes(operation, payload.knowledge)
+            : [];
+          if (!expected || persistedBatch.length !== expected) {
+            throw new Error(`整批移动未完成：目标仅确认 ${persistedBatch.length}/${expected} 个节点，已恢复保存前状态`);
+          }
+        }
         const persistedNode = operation.kind === "node-land"
           && workspaceModel
           && typeof workspaceModel.persistedLandingNode === "function"

@@ -777,3 +777,70 @@ test('an older pull already in flight cannot overwrite a newer optimistic worksp
   assert.equal(imports.at(-1).revision, 2);
   assert.equal(imports.at(-1).nodes[0].label, '编辑后');
 });
+
+test('batch landing is acknowledged only when every selected Atom exists in the authoritative destination', async () => {
+  const listeners = new Map();
+  const imports = [];
+  const persisted = [];
+  const failed = [];
+  const sourceA = { id: 'a', key: 'root::a', path: 'root', atomPath: 'A', label: 'A' };
+  const sourceB = { id: 'b', key: 'root::b', path: 'root', atomPath: 'B', label: 'B' };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge: (knowledge) => { imports.push(knowledge); return true; },
+      exportField: () => ({ path: 'root' })
+    },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state') && !options.method) {
+        return response({ knowledge: { revision: 1, nodes: [sourceA, sourceB], edges: [] } });
+      }
+      if (url.endsWith('/workspace-edit')) {
+        return response({
+          ok: true,
+          result: { ok: true },
+          knowledge: {
+            revision: 2,
+            nodes: [{ ...sourceA, id: 'a2', key: 'target::a2', path: 'target', atomPath: 'Target/A' }, sourceB],
+            edges: []
+          }
+        });
+      }
+      return response({ result: {} });
+    },
+    CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    dispatchEvent: (event) => {
+      if (event.type === 'spatial-workspace-persisted') persisted.push(event.detail);
+      if (event.type === 'spatial-workspace-persist-failed') failed.push(event.detail);
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => 0
+  };
+  installWorkspaceModel(window);
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  imports.length = 0;
+
+  const target = { path: 'target' };
+  await listeners.get('spatial-workspace-committed')({ detail: {
+    persistenceId: 41,
+    operation: {
+      kind: 'node-land-batch', target,
+      landings: [
+        { kind: 'node-land', source: { key: sourceA.key }, sourceNode: sourceA, target, draft: sourceA },
+        { kind: 'node-land', source: { key: sourceB.key }, sourceNode: sourceB, target, draft: sourceB }
+      ]
+    },
+    knowledge: { revision: 1, nodes: [sourceA, sourceB], edges: [] }
+  } });
+
+  assert.equal(persisted.length, 0, 'partial authoritative results must not be reported as saved');
+  assert.equal(failed.length, 1);
+  assert.match(failed[0].message, /整批|2|1/);
+  assert.equal(imports.at(-1).revision, 1, 'the optimistic preview rolls back to the last authoritative world');
+});

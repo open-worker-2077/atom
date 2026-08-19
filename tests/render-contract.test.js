@@ -475,10 +475,11 @@ test('the large magnifier panel only lays out when its target or viewport change
   assert.match(source, /state\.detailMagnifier\.layoutKey\s*!==\s*layoutKey/);
 });
 
-test('magnifier resolves the live pointer hit and includes group carriers', () => {
+test('magnifier resolves only visible rendered targets and never leaks a hidden descendant carrier', () => {
   assert.match(source, /function currentMagnifierNode\(point\)/);
   assert.match(source, /!region\.item\.clusterShellProxy/);
-  assert.match(source, /regions:\s*state\.clusterHitRegions/);
+  const update = functionSource('updateDetailMagnifier');
+  assert.doesNotMatch(update, /regions:\s*state\.clusterHitRegions/);
   assert.match(source, /magnifierNode:/);
 });
 

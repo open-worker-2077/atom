@@ -108,6 +108,22 @@
       .find((node) => node && node.path === targetPath && node.label === label) || null;
   }
 
+  function persistedBatchLandingNodes(operation, knowledge) {
+    if (!operation || operation.kind !== "node-land-batch") return [];
+    const persisted = [];
+    const identities = new Set();
+    (Array.isArray(operation.landings) ? operation.landings : []).forEach((landing) => {
+      const node = persistedLandingNode(landing, knowledge);
+      if (!node) return;
+      const identity = safeText(node.key, "", 1024)
+        || `${safeText(node.path, "", 512)}::${safeText(node.id || node.nodeId, "", 256)}`;
+      if (!identity || identities.has(identity)) return;
+      identities.add(identity);
+      persisted.push(node);
+    });
+    return persisted;
+  }
+
   function batchLandingOperation(primary, entriesInput) {
     if (!primary || primary.kind !== "node-land") return primary;
     const entries = Array.isArray(entriesInput) ? entriesInput.filter(Boolean) : [];
@@ -958,6 +974,7 @@
     highlightSegments,
     normalizeQuery,
     persistedLandingNode,
+    persistedBatchLandingNodes,
     batchLandingEntries,
     batchLandingOperation,
     operationIdentityTransitions,

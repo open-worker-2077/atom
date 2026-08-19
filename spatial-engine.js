@@ -3970,10 +3970,6 @@
       nodeOwnerPath: nodeHit ? nodeHit.ownerPath : "",
       relations: relation ? [{ ...relation, edge: relation.item.edge, label: relation.item.label }] : [],
       boxes: state.renderedFloatingDetailBoxes,
-      regions: state.clusterHitRegions.map((region) => ({
-        ...region,
-        node: region.magnifierNode
-      })),
       x: point.x,
       y: point.y
     });
