@@ -166,6 +166,20 @@ test('Shift right-drag records a visible wand stroke and resolves hit regions at
   assert.match(engine, /drawWandTrail\(\)/);
 });
 
+test('holding Shift can start and revise a batch by brushing nodes without prior peer selection', () => {
+  const toggle = functionSource('toggleBatchSelectionAtHit');
+  const pointerMoveStart = engine.indexOf('canvas.addEventListener("pointermove"');
+  const pointerMoveEnd = engine.indexOf('function releasePointer', pointerMoveStart);
+  const pointerMove = engine.slice(pointerMoveStart, pointerMoveEnd);
+
+  assert.match(toggle, /!state\.wand\.shiftHeld/);
+  assert.doesNotMatch(toggle, /!state\.batchSelectionKeys\.size/);
+  assert.match(toggle, /toggleSelectionKey/);
+  assert.match(toggle, /batchSelectionEntries\.set/);
+  assert.match(toggle, /batchSelectionEntries\.delete/);
+  assert.match(pointerMove, /toggleBatchSelectionAtHit/);
+});
+
 test('Shift right-drag remembers the final hit node for the next middle-drag orbit', () => {
   const finish = functionSource('finishWandStroke');
 

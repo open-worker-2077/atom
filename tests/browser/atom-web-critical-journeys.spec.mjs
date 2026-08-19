@@ -139,6 +139,27 @@ test('double-Shift selection survives the real ctrl-right landing gesture as one
   expect(movedPaths.every((atomPath) => atomPath.startsWith('批量目标/'))).toBe(true);
 });
 
+test('holding Shift brushes individual nodes into and out of a batch without peer preselection', async ({ page }) => {
+  await openIsolatedWorld(page);
+  await enterAtomFile(page);
+
+  const targets = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .filter(({ label }) => Boolean(label))
+    .slice(0, 2);
+  expect(targets).toHaveLength(2);
+
+  await page.keyboard.down('Shift');
+  await page.mouse.move(targets[0].clientX, targets[0].clientY);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().batchSelectionCount)).toBe(1);
+
+  await page.mouse.move(targets[1].clientX, targets[1].clientY);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().batchSelectionCount)).toBe(2);
+
+  await page.mouse.move(targets[0].clientX, targets[0].clientY);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().batchSelectionCount)).toBe(1);
+  await page.keyboard.up('Shift');
+});
+
 test('a steady domain reuses its rasterized backdrop instead of repainting blurred tunnels', async ({ page }) => {
   await page.addInitScript(() => {
     window.__domainEllipseCalls = 0;

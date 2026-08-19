@@ -5800,7 +5800,7 @@
   }
 
   function toggleBatchSelectionAtHit(hit) {
-    if (!state.wand.shiftHeld || !state.batchSelectionKeys.size) return false;
+    if (!state.wand.shiftHeld) return false;
     const item = hit && hit.item;
     const key = item && item.node
       ? visualNodeKey(item.node, item.ownerPath || nodeOwnerPath(item.node))
