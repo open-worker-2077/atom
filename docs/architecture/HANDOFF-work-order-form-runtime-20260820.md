@@ -300,7 +300,8 @@ GitNexus 索引当时落后代码约 10 个提交；接手时应先刷新索引�
 ## 12. 恢复开发后的最终实施与验证状态
 
 本节覆盖第 7—10 节记载的历史暂停点。当前 `add-work-order-form-runtime`
-的 18 项任务均已按实际实现和验证勾选，未提交、未推送。
+的 18 项任务均已按实际实现和验证勾选。实现、规格、测试和文档已纳入提交
+`b216ecf`，尚未推送。
 
 ### 12.1 已实现的交付主干
 
@@ -344,8 +345,8 @@ GitNexus 索引当时落后代码约 10 个提交；接手时应先刷新索引�
 ### 12.3 当前 Git 事实
 
 - 分支：`backup/web-convergence-checkpoint-20260817-154248`
-- HEAD：`a508c2d`
-- 所有本轮实现、规格、测试和文档仍在工作树中，未提交、未推送。
+- 实现检查点：`b216ecf feat(atom): add form work-order and year-ring runtime`
+- 本轮实现、规格、测试和文档已提交，尚未推送。
 - `AGENTS.md`、`.agents/`、`.claude/`、`CLAUDE.md`、`test-results/` 等原有或
   其他未归属项未删除、未覆盖、未纳入完成结论；浏览器复跑只在现有
   `test-results/` 下刷新了测试工具产物。
