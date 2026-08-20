@@ -27,11 +27,13 @@ Another Agent is already using the legacy `{name, arguments}` form, so the stand
 The standard call will be JSON-shaped and use the `ref` already returned by Explore:
 
 ```python
-target = explore({"name": "项目/程序库/处理器"})[0]
-result = use_program({"ref": target.ref, "arguments": {"批次": 1}})
+result = use_program({
+    "ref": explore({"name": "项目/程序库/处理器"})[0].ref,
+    "arguments": {"批次": 1}
+})
 ```
 
-`arguments` remains optional and defaults to `{}`. This passes the existing coordinate directly; it does not introduce a second coordinate system.
+`arguments` remains optional and defaults to `{}`. The Explore call is intentionally inline: callers do not need an intermediate `target` variable. This passes the existing coordinate directly and does not introduce a second coordinate system.
 
 Passing the entire `AtomView` was rejected because registered world functions otherwise use JSON-shaped root inputs and because an opaque ref is sufficient for exact revision-local identity. Continuing to use a name or path as the standard target was rejected because it leaves selection responsibility inside `use_program()`.
 
