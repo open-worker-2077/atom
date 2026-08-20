@@ -208,6 +208,7 @@ function help() {
     '  name 默认 exact；短名重名时逐步增加必要的上级路径片段。顶层同名目标使用“世界之外/目标名”精确选择。fuzzy、regex、vector 不支持。',
     '  “世界之外”以 name@universe 暴露为不落盘的虚拟父级；用于读取、上下钻、顶层消歧，以及作为 .mov. 的顶层目的地。',
     ...contract.explore,
+    '  每次成功命中 exact 锚点都会返回 boundary~preview；up/down/left/right 分别给出视野外 state、hasMore、nodes、characters，并随重新锚定更新。protected 方向不公开精确数量且不得当作空白。',
     '  读取投影推荐使用标准 JSON true（例如 ""detail$full"":true、""partners"":true）；旧的无值投影键继续兼容。',
     '  partners（返回每个匹配 Atom 的完整有向关系数组；每项包含 verb 与 object）',
     '  多层向下查询按真实包含关系返回嵌套 children；name 仅在需要消歧时增加最短必要路径片段。',
@@ -447,7 +448,18 @@ function graphEntry(key, valuePresent = false, value) {
     : { key, valuePresent: false };
 }
 
-function graphMatch(match, hint = null) {
+function graphBoundary(boundary) {
+  const directions = ['up', 'down', 'left', 'right'];
+  return graphObject(directions.map((direction) => graphEntry(
+    direction,
+    true,
+    graphObject(Object.entries(boundary?.[direction] ?? {}).map(([key, value]) => (
+      graphEntry(key, true, value)
+    )))
+  )));
+}
+
+function graphMatch(match, hint = null, boundary = null) {
   const types = (match.types ?? []).map((type) => `@${type}`).join('');
   const transientHint = hint ? `~${hint}` : '';
   const entries = [
@@ -469,6 +481,9 @@ function graphMatch(match, hint = null) {
   }
   if (match.lockState) {
     entries.push(graphEntry('lock~active', true, match.lockState));
+  }
+  if (boundary) {
+    entries.push(graphEntry('boundary~preview', true, graphBoundary(boundary)));
   }
   return graphObject(entries);
 }
@@ -493,7 +508,12 @@ function graphChildrenTree(item) {
     return value;
   }
   const root = byPath.get(item.presentation?.anchorPath);
-  return root ? build(root) : null;
+  if (!root) return null;
+  const tree = build(root);
+  if (item.boundary) {
+    tree.entries.push(graphEntry('boundary~preview', true, graphBoundary(item.boundary)));
+  }
+  return tree;
 }
 
 function graphResult(result) {
@@ -509,7 +529,11 @@ function graphResult(result) {
         const tree = graphChildrenTree(item);
         return tree ? [tree] : [];
       }
-      return (item.matches ?? []).map((match) => graphMatch(match));
+      return (item.matches ?? []).map((match) => graphMatch(
+        match,
+        null,
+        match.path === item.anchorPath ? item.boundary : null
+      ));
     });
     if (values.length === 1) return values[0];
     if (values.length > 1) return { kind: 'array', values };

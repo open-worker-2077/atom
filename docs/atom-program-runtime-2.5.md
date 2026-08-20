@@ -11,6 +11,11 @@
   `up`, `down`, `left`, and `right`, each with an approximate Atom count and
   character count. It never includes hidden names or detail, and executable
   Program source contributes zero characters.
+- Every successful ordinary `explore` recalculates that boundary from its exact
+  anchor and returned coordinate scope. Complete directions include `hasMore`,
+  `nodes`, and `characters`; a protected continuation reports `protected`
+  without exposing names, content, or exact quantities. Movement syntax remains
+  owned by `explore` rather than Form, `use_program()`, or application functions.
 - The CLI passes the origin to the engine only as `interaction.agent = { ref, path }`. The opaque `ref` is derived from the immutable world revision plus structural address; the Agent is not passed to lock evaluation.
 - `@program` is the only executable Atom type. Its `detail` is Python source.
 - Program source controls execution order. Atom world functions are ordinary Python calls whose single root argument is a JSON-shaped object (`dict`).

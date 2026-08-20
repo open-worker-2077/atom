@@ -185,13 +185,80 @@ function outgoingPartners(match, matches) {
   return partners.map((partner) => ({ partner, target: resolvePartnerTarget(match, partner?.object, matches) }));
 }
 
+function boundaryCandidates(anchor, matches, selected) {
+  const outside = (candidate) => !selected.has(candidate);
+  const childrenByParent = new Map();
+  for (const match of matches) {
+    const children = childrenByParent.get(match.parent) ?? [];
+    children.push(match);
+    childrenByParent.set(match.parent, children);
+  }
+  const up = [];
+  let ancestor = anchor.parent;
+  while (ancestor) {
+    if (outside(ancestor)) up.push(ancestor);
+    ancestor = ancestor.parent;
+  }
+  const down = [];
+  const descendants = [...(childrenByParent.get(anchor) ?? [])];
+  for (let index = 0; index < descendants.length; index += 1) {
+    const candidate = descendants[index];
+    if (outside(candidate)) down.push(candidate);
+    descendants.push(...(childrenByParent.get(candidate) ?? []));
+  }
+  const siblings = childrenByParent.get(anchor.parent) ?? [];
+  const anchorIndex = siblings.indexOf(anchor);
+  const left = anchorIndex < 0
+    ? []
+    : siblings.slice(0, anchorIndex).filter(outside);
+  const right = anchorIndex < 0
+    ? []
+    : siblings.slice(anchorIndex + 1).filter(outside);
+  return { up, down, left, right };
+}
+
+async function boundaryDirection(candidates, accessController) {
+  let characters = 0;
+  for (const candidate of candidates) {
+    const nameField = oneStoredField(candidate.atom, 'name');
+    const executable = nameField?.parsed.types.some((type) => type.raw === 'program') ?? false;
+    if (accessController.restricted) {
+      const nameAccess = await accessController.authorize(candidate, 'read', 'name');
+      const detailAccess = executable
+        ? { decision: 'allow' }
+        : await accessController.authorize(candidate, 'read', 'detail');
+      if (nameAccess.decision !== 'allow' || detailAccess.decision !== 'allow') {
+        return { state: 'protected', hasMore: true };
+      }
+    }
+    const name = typeof nameField?.value === 'string' ? nameField.value : '';
+    const detail = oneStoredField(candidate.atom, 'detail')?.value;
+    characters += name.length + (executable ? 0 : String(detail ?? '').length);
+  }
+  return {
+    state: 'complete',
+    hasMore: candidates.length > 0,
+    nodes: candidates.length,
+    characters
+  };
+}
+
+async function exploreBoundary(anchor, matches, selected, accessController) {
+  const candidates = boundaryCandidates(anchor, matches, selected);
+  const entries = await Promise.all(Object.entries(candidates).map(async ([direction, values]) => (
+    [direction, await boundaryDirection(values, accessController)]
+  )));
+  return Object.fromEntries(entries);
+}
+
 export async function executeExploreItem(
   atoms,
   item,
   matcherRegistry,
   accessController,
   lockIndex = null,
-  preparedWorld = null
+  preparedWorld = null,
+  options = {}
 ) {
   if (!item.ok) return { ok: false, index: item.index, errors: item.errors };
   const isProjection = (field) => !field.valuePresent || field.value === true;
@@ -298,6 +365,9 @@ export async function executeExploreItem(
   ));
   const scoped = selectCoordinateScope(anchor, visibleMatches, routes);
   const ordered = visibleMatches.filter((match) => scoped.has(match));
+  const boundary = options.includeBoundary === false
+    ? null
+    : await exploreBoundary(anchor, allMatches, scoped, accessController);
   return {
     ok: true,
     index: item.index,
@@ -308,6 +378,7 @@ export async function executeExploreItem(
         : {}),
       lockState: programLockState(lockIndex, match.path.join('/'))
     })),
+    ...(boundary ? { anchorPath: anchor.path.join('/'), boundary } : {}),
     presentation: routes.some((route) => route.axis === 'latitude' && route.parameter < 0)
       ? { kind: 'children-tree', anchorPath: anchor.path.join('/') }
       : null,
@@ -348,7 +419,8 @@ export async function executeProgramExplore({
     receiver.matcherRegistry,
     accessController,
     null,
-    preparedWorld
+    preparedWorld,
+    { includeBoundary: false }
   );
   if (!result.ok) {
     const error = new Error(result.errors?.[0]?.message ?? 'Program explore failed');

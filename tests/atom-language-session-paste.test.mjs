@@ -60,7 +60,7 @@ transform {
   assert.match(output, /\{\n  "atom~count1"\n\}/u);
   assert.match(
     output,
-    /\{\n  "name": "石器工坊",\n  "detail#工坊简介": "旧正文"\n\}/u
+    /\{\n  "name": "石器工坊",\n  "detail#工坊简介": "旧正文",\n  "boundary~preview":/u
   );
   assert.match(
     output,
