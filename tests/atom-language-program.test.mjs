@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { compileProgramTransform } from '../work-engine/atom-language/engine.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
 import { TRANSFORM_COMMANDS } from '../work-engine/atom-language/transform-key-parser.mjs';
 import { executeProgram } from '../work-engine/atom-language/program.mjs';
@@ -96,6 +97,18 @@ test('Program adds one exact name.run. Transform command', () => {
   assert.deepEqual(parsed.items[0].fields[0].commands, [
     { name: 'run', parameter: '' }
   ]);
+});
+
+test('Program-only full detail replacement keeps dot-command markers opaque', () => {
+  const replacement = '{"成果引用":"doc://e2e.rep.segment","说明":"保留 .sum. 文本"}';
+  const compiled = compileProgramTransform({
+    request: { name: '任务', 'detail$replace': replacement }
+  });
+
+  assert.equal(compiled.ok, true, JSON.stringify(compiled.errors));
+  const detail = compiled.item.fields.find((field) => field.baseKey === 'detail');
+  assert.equal(detail.valuePresent, false);
+  assert.deepEqual(detail.commands, [{ name: 'rep', parameter: replacement }]);
 });
 
 test('a valid Program is published immediately but never runs during write', async (t) => {

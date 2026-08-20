@@ -245,7 +245,8 @@ export function createLegacyRuntimeComposition(options) {
     storeFile,
     worldService = createLegacyWorldService(),
     projectionOrchestrator = createLegacyProjectionOrchestrator({ contextFile }),
-    programScheduler = createProgramRuntimeScheduler(),
+    diagnostics = null,
+    programScheduler = createProgramRuntimeScheduler({ diagnosticRecorder: diagnostics }),
     graphPublisher = defaultGraphPublisher(graphFile),
     spatialPublisher = defaultSpatialPublisher(storeFile),
     feedbackRecorder = recordAtomFeedback,
@@ -303,6 +304,7 @@ export function createLegacyRuntimeComposition(options) {
     },
     humanStatus: humanStatusTranslator,
     humanWorkspace: humanWorkspaceTranslator,
-    programRuntime: programScheduler
+    programRuntime: programScheduler,
+    diagnostics
   });
 }

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseAtomKey } from './key-parser.mjs';
 import { executeProgramExplore, prepareExploreWorld } from './query-capability.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
+import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_WORKERS = 16;
@@ -404,6 +405,7 @@ export class ProgramRuntimeScheduler {
     this.reusable = new Map();
     this.programReusable = new Map();
     this.runProgram = options.runProgram ?? runWorker;
+    this.diagnosticRecorder = options.diagnosticRecorder ?? null;
     this.projectionRepository = options.projectionRepository ?? null;
     this.loadedProjection = undefined;
     this.projectionLoadWarning = null;
@@ -413,6 +415,12 @@ export class ProgramRuntimeScheduler {
       throw Object.assign(
         new Error('Program projection repository requires load() and save()'),
         { code: 'INVALID_PROGRAM_PROJECTION_REPOSITORY' }
+      );
+    }
+    if (this.diagnosticRecorder && typeof this.diagnosticRecorder.record !== 'function') {
+      throw Object.assign(
+        new Error('Program diagnostic recorder requires record()'),
+        { code: 'INVALID_PROGRAM_DIAGNOSTIC_RECORDER' }
       );
     }
   }
@@ -629,6 +637,39 @@ export class ProgramRuntimeScheduler {
         return value;
       }
     }
+    const diagnosticWarnings = [];
+    const recordProgramDiagnostic = async ({ program, requests, startedAt, error = null }) => {
+      if (!this.diagnosticRecorder) return;
+      try {
+        await this.diagnosticRecorder.record({
+          id: crypto.randomUUID(),
+          type: 'program',
+          durationMs: performance.now() - startedAt,
+          outcome: error?.code === 'ATOM_PROGRAM_TIMEOUT'
+            ? 'timeout'
+            : error ? 'failure' : 'success',
+          program: programDiagnosticIdentity(program),
+          ...(error ? {
+            failure: {
+              code: error.code ?? 'ATOM_PROGRAM_FAILED',
+              message: error.message ?? 'Python Program failed'
+            }
+          } : {}),
+          affectedAtoms: [
+            { path: program.path, ref: program.ref, axes: [] },
+            ...requests
+              .filter((request) => typeof request?.name === 'string' && request.name.trim())
+              .map((request) => ({ path: request.name.trim(), axes: [] }))
+          ]
+        });
+      } catch (error) {
+        diagnosticWarnings.push({
+          code: 'PROGRAM_DIAGNOSTIC_RECORD_FAILED',
+          message: 'Program completed, but its bounded diagnostic could not be recorded',
+          details: { cause: error?.code ?? error?.name ?? 'DIAGNOSTIC_WRITE_FAILED' }
+        });
+      }
+    };
     const operations = programs.map(async (program) => {
       const previousEntry = options.force === true
         ? null
@@ -657,6 +698,7 @@ export class ProgramRuntimeScheduler {
       }
 
       const requests = [];
+      const executionStartedAt = performance.now();
       try {
         const result = await this.runBounded(() => {
           const remainingMs = cycleDeadline - Date.now();
@@ -683,6 +725,9 @@ export class ProgramRuntimeScheduler {
         const uniqueRequests = [...new Map(requests.map((request) => (
           [JSON.stringify(request), request]
         ))).values()];
+        await recordProgramDiagnostic({
+          program, requests: uniqueRequests, startedAt: executionStartedAt
+        });
         const contextDependent = requestsDependOnAgent(uniqueRequests);
         const stateKey = contextDependent
           ? contextualProgramSetFingerprint(
@@ -706,6 +751,9 @@ export class ProgramRuntimeScheduler {
         const uniqueRequests = [...new Map(requests.map((request) => (
           [JSON.stringify(request), request]
         ))).values()];
+        await recordProgramDiagnostic({
+          program, requests: uniqueRequests, startedAt: executionStartedAt, error
+        });
         const contextDependent = requestsDependOnAgent(uniqueRequests);
         if (contextDependent && !scopePath) {
           return { failure, cached: false, requests: uniqueRequests, contextDependent };
@@ -742,7 +790,10 @@ export class ProgramRuntimeScheduler {
       [JSON.stringify(request), request]
     ))).values()];
     const contextDependent = requestsDependOnAgent(uniqueRequests);
-    const runtimeWarnings = this.projectionLoadWarning ? [this.projectionLoadWarning] : [];
+    const runtimeWarnings = [
+      ...(this.projectionLoadWarning ? [this.projectionLoadWarning] : []),
+      ...diagnosticWarnings
+    ];
     this.projectionLoadWarning = null;
     if (value.failures.length === 0) {
       const reusableKey = contextDependent

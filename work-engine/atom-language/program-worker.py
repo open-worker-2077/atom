@@ -28,6 +28,8 @@ plan_form_flow = PROGRAM_STDLIB.plan_form_flow
 plan_template_instance = PROGRAM_STDLIB.plan_template_instance
 subtree_refs = PROGRAM_STDLIB.subtree_refs
 transition_allowed = PROGRAM_STDLIB.transition_allowed
+compile_form = PROGRAM_STDLIB.compile_form
+work_order_template = PROGRAM_STDLIB.work_order_template
 
 
 def load_program_templates():
@@ -41,6 +43,19 @@ def load_program_templates():
 
 
 PROGRAM_TEMPLATES = load_program_templates()
+
+
+def load_work_order_registry():
+    module_path = Path(__file__).with_name("work-order-registry.json")
+    with module_path.open("r", encoding="utf-8") as handle:
+        registry = json.load(handle)
+    if (registry.get("contract") != "atom-work-order-registry"
+            or registry.get("version") != 1):
+        raise RuntimeError("Unable to load the trusted work-order registry")
+    return registry
+
+
+WORK_ORDER_REGISTRY = load_work_order_registry()
 
 
 class ProgramSecurityError(Exception):
@@ -72,7 +87,7 @@ ALLOWED_FUNCTIONS = {
     "direct_children", "child_detail", "missing_details", "form_status",
     "first_pending", "transition_allowed", "subtree_refs", "plan_form_flow",
     "plan_template_instance", "plan_shards", "instantiate", "template_catalog",
-    "use_program",
+    "use_program", "form", "work_order", "work_order_catalog",
 }
 
 ALLOWED_METHODS = {
@@ -247,6 +262,419 @@ def main():
         specification = require_object(specification, "template_catalog")
         return PROGRAM_TEMPLATES.catalog_entries(specification)
 
+    def form(specification):
+        return compile_form(require_object(specification, "form"))
+
+    def parse_detail(record):
+        try:
+            value = json.loads(record.get("detail", ""))
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+    def formatted_detail(value):
+        return json.dumps(value, ensure_ascii=False, indent=2)
+
+    def merge_declared_detail(current, patch, group_name, prefix=""):
+        if not isinstance(patch, dict):
+            raise TypeError(f"work_order values for {group_name} must be a JSON object")
+        merged = dict(current)
+        for key, value in patch.items():
+            field_path = f"{prefix}.{key}" if prefix else key
+            if key == "定义":
+                raise ValueError(f"Reserved {group_name} guidance field cannot be filled: {field_path}")
+            if key not in current:
+                raise ValueError(f"Unknown {group_name} field: {field_path}")
+            existing = current[key]
+            if isinstance(existing, dict):
+                if not isinstance(value, dict):
+                    raise TypeError(f"work_order {group_name}.{field_path} must be a JSON object")
+                merged[key] = merge_declared_detail(
+                    existing, value, group_name, field_path
+                )
+            else:
+                merged[key] = value
+        return merged
+
+    def content_at(value, path):
+        current = value
+        for key in path:
+            current = current.get(key) if isinstance(current, dict) else None
+        return current
+
+    def has_content(value):
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (list, dict)):
+            return bool(value)
+        return True
+
+    def incomplete_work_order_groups(selector, details):
+        missing = []
+        output = details.get("Output", {})
+        if "requestedResult" in output:
+            output_complete = has_content(output.get("requestedResult"))
+        else:
+            output_complete = (
+                has_content(content_at(output, ("交付物", "成果引用")))
+                and has_content(content_at(output, ("交付物", "版本")))
+            )
+        step = details.get("Step", {})
+        if "evidence" in step:
+            step_complete = has_content(step.get("evidence"))
+        else:
+            step_complete = (
+                has_content(content_at(step, ("操作", "实际产出")))
+                and content_at(step, ("操作", "状态")) == "已完成"
+                and not has_content(content_at(step, ("操作", "异常")))
+            )
+        criteria = details.get("Criteria", {})
+        if "acceptanceRules" in criteria:
+            criteria_complete = has_content(criteria.get("acceptanceRules"))
+        else:
+            criteria_complete = has_content(content_at(criteria, ("要求", "条件")))
+        for name, complete in (
+            ("Output", output_complete),
+            ("Step", step_complete),
+            ("Criteria", criteria_complete),
+        ):
+            if not complete:
+                missing.append(selector + "/" + name)
+        return missing
+
+    def root_status(detail):
+        status = detail.get("status")
+        if isinstance(status, str) and status.strip():
+            return status
+        return content_at(detail, ("状态", "当前"))
+
+    def with_root_status(detail, status):
+        updated = dict(detail)
+        updated["status"] = status
+        state = dict(updated.get("状态", {}))
+        state["当前"] = status
+        updated["状态"] = state
+        return updated
+
+    def work_order_actions(status):
+        return {
+            "待执行": ["fill", "validate", "read-back"],
+            "执行中": ["fill", "validate", "submit", "read-back"],
+            "待验收": ["submit", "reject", "read-back"],
+            "已通过": ["read-back"],
+            "已驳回": ["revise", "read-back"],
+            "已暂缓": ["read-back"],
+        }.get(status, ["read-back"])
+
+    def work_order_catalog(specification):
+        specification = require_object(specification, "work_order_catalog")
+        unknown = set(specification) - {"template", "version"}
+        if unknown:
+            raise ValueError(
+                "Unknown work_order_catalog options: " + ", ".join(sorted(unknown))
+            )
+        template_id = specification.get("template", "work-order")
+        templates = [
+            item for item in WORK_ORDER_REGISTRY["templates"]
+            if item["id"] == template_id
+        ]
+        if len(templates) != 1:
+            raise ValueError(f"Unknown work-order template {template_id}")
+        template = templates[0]
+        requested_version = str(specification.get("version", template["latest"]))
+        versions = [
+            item for item in template["versions"]
+            if str(item["version"]) == requested_version
+        ]
+        if len(versions) != 1:
+            raise ValueError(f"Unsupported work-order version {requested_version}")
+        return {
+            "template": template["id"],
+            "label": template["label"],
+            "description": template["description"],
+            **json.loads(json.dumps(versions[0], ensure_ascii=False)),
+        }
+
+    def work_order_instance(selector):
+        if not isinstance(selector, str) or not selector.strip():
+            raise ValueError("work_order action requires one exact path")
+        rows = explore({
+            "name": selector,
+            "children$latitude-1": None,
+            "detail$full": None,
+        })
+        records = [by_ref[row.ref] for row in rows]
+        matches = [record for record in records if record["path"] == selector]
+        if len(matches) != 1:
+            raise ValueError(f"Work-order path must resolve exactly once: {selector}")
+        root = matches[0]
+        root_detail = parse_detail(root)
+        if root_detail.get("template") != "work-order":
+            raise ValueError(f"Atom is not a work-order instance: {selector}")
+        if str(root_detail.get("templateVersion")) != "1":
+            raise ValueError(
+                f"Unsupported work-order instance version {root_detail.get('templateVersion')}"
+            )
+        children = {
+            record["name"]: record
+            for record in records
+            if record["path"].startswith(selector + "/")
+            and "/" not in record["path"][len(selector) + 1:]
+        }
+        required = {"Output", "Step", "Criteria"}
+        if set(children) != required:
+            raise ValueError(f"Work-order groups must be exactly Output, Step, Criteria: {selector}")
+        details = {name: parse_detail(children[name]) for name in required}
+        return root, root_detail, children, details
+
+    def merged_group_values(details, values):
+        if not isinstance(values, dict) or not values:
+            raise ValueError("work_order values must be a non-empty JSON object")
+        unknown = set(values) - {"Output", "Step", "Criteria"}
+        if unknown:
+            raise ValueError("Unknown work-order group: " + ", ".join(sorted(unknown)))
+        updates = {}
+        for name in ("Output", "Step", "Criteria"):
+            if name not in values:
+                continue
+            updates[name] = merge_declared_detail(details[name], values[name], name)
+        return updates
+
+    def emit_detail_transform(path, current, updated):
+        if current != updated:
+            effects["transforms"].append({
+                "name": path,
+                "detail$replace": formatted_detail(updated),
+            })
+
+    def work_order(specification):
+        specification = require_object(specification, "work_order")
+        action = specification.get("action")
+        supported_actions = {
+            item["id"] for item in work_order_catalog({"version": "1"})["actions"]
+        }
+        if action not in supported_actions:
+            raise ValueError(f"Unsupported work-order action {action}")
+        if action == "create":
+            allowed = {"action", "title", "creation_id", "version"}
+            unknown = set(specification) - allowed
+            if unknown:
+                raise ValueError("Unknown work_order.create options: " + ", ".join(sorted(unknown)))
+            title = specification.get("title")
+            creation_id = specification.get("creation_id")
+            requested_version = specification.get("version")
+            if requested_version is None:
+                raise ValueError("work_order.create requires an exact version")
+            version = str(requested_version)
+            template = work_order_template(title, creation_id, version)
+            rows = explore({
+                "name": current_atom().path,
+                "children$latitude-1": None,
+                "detail$full": None,
+            })
+            identities = []
+            for row in rows:
+                record = by_ref[row.ref]
+                detail = parse_detail(record)
+                if detail.get("template") == "work-order" and detail.get("creationId") == creation_id:
+                    identities.append(record)
+            if len(identities) > 1:
+                raise ValueError(f"Work-order creation identity is ambiguous: {creation_id}")
+            if identities:
+                existing = identities[0]
+                if existing["name"] != title:
+                    raise ValueError(
+                        f"Work-order creation identity {creation_id} already belongs to {existing['name']}"
+                    )
+                existing_detail = parse_detail(existing)
+                if str(existing_detail.get("templateVersion")) != version:
+                    raise ValueError(f"Work-order creation identity {creation_id} has another template version")
+                return {"template": "work-order", "version": version, "created": False, "path": existing["path"]}
+            effects["transforms"].append({"name": current_atom().path, "children": [template]})
+            return {"template": "work-order", "version": version, "created": True, "path": current_atom().path + "/" + title}
+        selector = specification.get("path")
+        allowed_options = {
+            "fill": {"action", "path", "values"},
+            "validate": {"action", "path"},
+            "submit": {
+                "action", "path", "submitted_at", "decision", "reviewer", "reviewed_at"
+            },
+            "reject": {"action", "path", "reasons", "reviewer", "reviewed_at"},
+            "revise": {"action", "path", "values", "note"},
+            "read-back": {"action", "path"},
+        }
+        unknown = set(specification) - allowed_options[action]
+        if unknown:
+            raise ValueError(
+                f"Unknown work_order.{action} options: " + ", ".join(sorted(unknown))
+            )
+        root, root_detail, children, details = work_order_instance(selector)
+        status = root_status(root_detail)
+
+        if action == "validate":
+            missing = incomplete_work_order_groups(selector, details)
+            return {"valid": not missing, "missing": missing, "status": status}
+
+        if action == "read-back":
+            missing = incomplete_work_order_groups(selector, details)
+            return {
+                "template": "work-order",
+                "version": "1",
+                "path": selector,
+                "status": status,
+                "valid": not missing,
+                "missing": missing,
+                "available_actions": work_order_actions(status),
+                "guidance": {
+                    "Output": "填写交付物成果引用和版本。",
+                    "Step": "记录已完成状态、实际动作、实际产出和异常。",
+                    "Criteria": "填写验收条件和不可越过的边界。",
+                },
+                "values": {
+                    "Output": details["Output"].get("交付物", details["Output"].get("requestedResult")),
+                    "Step": details["Step"].get("操作", details["Step"].get("evidence")),
+                    "Criteria": details["Criteria"].get("要求", details["Criteria"].get("acceptanceRules")),
+                },
+            }
+
+        if action == "fill":
+            if status not in {"待执行", "执行中"}:
+                raise ValueError(f"work_order.fill is not allowed from status {status}")
+            updates = merged_group_values(details, specification.get("values"))
+            for name, updated in updates.items():
+                emit_detail_transform(children[name]["path"], details[name], updated)
+            updated_root = with_root_status(root_detail, "执行中")
+            emit_detail_transform(root["path"], root_detail, updated_root)
+            return {
+                "filled": any(details[name] != updated for name, updated in updates.items()),
+                "status": "执行中",
+                "path": selector,
+            }
+
+        if action == "submit":
+            missing = incomplete_work_order_groups(selector, details)
+            if missing:
+                return {"submitted": False, "status": status, "missing": missing}
+            decision = specification.get("decision")
+            if decision not in {None, "通过"}:
+                raise ValueError("work_order.submit decision must be 通过 when provided")
+            submitted_at = specification.get("submitted_at")
+            output = content_at(details["Output"], ("交付物",))
+            criteria = details["Criteria"]
+            submission = content_at(criteria, ("验收", "提交"))
+            if not isinstance(submission, dict):
+                raise ValueError("work_order Criteria is missing 验收.提交")
+            if not isinstance(submitted_at, str) or not submitted_at.strip():
+                submitted_at = submission.get("提交时间")
+            if not isinstance(submitted_at, str) or not submitted_at.strip():
+                raise ValueError("work_order.submit requires submitted_at")
+            expected_submission = {
+                "成果引用": output.get("成果引用") if isinstance(output, dict) else None,
+                "版本": output.get("版本") if isinstance(output, dict) else None,
+                "提交时间": submitted_at,
+            }
+            acceptance = dict(criteria.get("验收", {}))
+            audit = dict(acceptance.get("审核", {}))
+            if decision == "通过":
+                reviewer = specification.get("reviewer")
+                reviewed_at = specification.get("reviewed_at")
+                if not isinstance(reviewer, str) or not reviewer.strip():
+                    raise ValueError("work_order.submit decision requires reviewer")
+                if not isinstance(reviewed_at, str) or not reviewed_at.strip():
+                    raise ValueError("work_order.submit decision requires reviewed_at")
+                expected_audit = {
+                    **audit,
+                    "结论": "通过",
+                    "意见": [],
+                    "审核人": reviewer,
+                    "审核时间": reviewed_at,
+                }
+                if (status == "已通过" and submission == expected_submission
+                        and audit == expected_audit):
+                    return {
+                        "submitted": False, "idempotent": True,
+                        "status": status, "missing": []
+                    }
+                if status not in {"执行中", "待验收"}:
+                    raise ValueError(f"work_order.submit is not allowed from status {status}")
+                acceptance["提交"] = expected_submission
+                acceptance["审核"] = expected_audit
+                updated_criteria = {**criteria, "验收": acceptance}
+                emit_detail_transform(
+                    children["Criteria"]["path"], criteria, updated_criteria
+                )
+                updated_root = with_root_status(root_detail, "已通过")
+                emit_detail_transform(root["path"], root_detail, updated_root)
+                return {"submitted": True, "status": "已通过", "missing": []}
+            if status == "待验收" and submission == expected_submission:
+                return {"submitted": False, "idempotent": True, "status": status, "missing": []}
+            if status != "执行中":
+                raise ValueError(f"work_order.submit is not allowed from status {status}")
+            updated_criteria = dict(criteria)
+            acceptance["提交"] = expected_submission
+            updated_criteria["验收"] = acceptance
+            emit_detail_transform(children["Criteria"]["path"], criteria, updated_criteria)
+            updated_root = with_root_status(root_detail, "待验收")
+            emit_detail_transform(root["path"], root_detail, updated_root)
+            return {"submitted": True, "status": "待验收", "missing": []}
+
+        if action == "reject":
+            reasons = specification.get("reasons")
+            reviewer = specification.get("reviewer")
+            reviewed_at = specification.get("reviewed_at")
+            if (not isinstance(reasons, list) or not reasons
+                    or any(not isinstance(item, str) or not item.strip() for item in reasons)):
+                raise ValueError("work_order.reject requires non-empty reasons")
+            if not isinstance(reviewer, str) or not reviewer.strip():
+                raise ValueError("work_order.reject requires reviewer")
+            if not isinstance(reviewed_at, str) or not reviewed_at.strip():
+                raise ValueError("work_order.reject requires reviewed_at")
+            criteria = details["Criteria"]
+            acceptance = dict(criteria.get("验收", {}))
+            audit = dict(acceptance.get("审核", {}))
+            rejection = dict(acceptance.get("驳回", {}))
+            expected_audit = {
+                **audit,
+                "结论": "驳回",
+                "意见": list(reasons),
+                "审核人": reviewer,
+                "审核时间": reviewed_at,
+            }
+            expected_rejection = {**rejection, "返回": "Step", "原因": list(reasons)}
+            if (status == "已驳回" and audit == expected_audit and rejection == expected_rejection):
+                return {"rejected": False, "idempotent": True, "status": status}
+            if status != "待验收":
+                raise ValueError(f"work_order.reject is not allowed from status {status}")
+            acceptance["审核"] = expected_audit
+            acceptance["驳回"] = expected_rejection
+            updated_criteria = {**criteria, "验收": acceptance}
+            emit_detail_transform(children["Criteria"]["path"], criteria, updated_criteria)
+            updated_root = with_root_status(root_detail, "已驳回")
+            emit_detail_transform(root["path"], root_detail, updated_root)
+            return {"rejected": True, "status": "已驳回", "responsible": selector + "/Step"}
+
+        note = specification.get("note")
+        if not isinstance(note, str) or not note.strip():
+            raise ValueError("work_order.revise requires note")
+        updates = merged_group_values(details, specification.get("values"))
+        history = list(root_detail.get("修订记录", []))
+        already_recorded = bool(history and isinstance(history[-1], dict)
+                                and history[-1].get("说明") == note)
+        already_applied = all(details[name] == updated for name, updated in updates.items())
+        if status == "执行中" and already_recorded and already_applied:
+            return {"revised": False, "idempotent": True, "status": status}
+        if status != "已驳回":
+            raise ValueError(f"work_order.revise is not allowed from status {status}")
+        for name, updated in updates.items():
+            emit_detail_transform(children[name]["path"], details[name], updated)
+        history.append({"序号": len(history) + 1, "说明": note})
+        updated_root = with_root_status(root_detail, "执行中")
+        updated_root["修订记录"] = history
+        emit_detail_transform(root["path"], root_detail, updated_root)
+        return {"revised": True, "status": "执行中", "path": selector}
+
     safe_builtins = {
         "all": all, "any": any, "bool": bool, "dict": dict, "enumerate": enumerate,
         "filter": filter, "float": float, "int": int, "len": len, "list": list,
@@ -275,6 +703,9 @@ def main():
         "plan_template_instance": plan_template_instance,
         "instantiate": instantiate,
         "template_catalog": template_catalog,
+        "work_order_catalog": work_order_catalog,
+        "form": form,
+        "work_order": work_order,
     }
 
     def use_program(specification):

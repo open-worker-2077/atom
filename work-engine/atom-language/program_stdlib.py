@@ -198,6 +198,115 @@ def _compile_atom_template(template):
     }
 
 
+def compile_form(specification):
+    """Compile one protected Form definition to the four native Graph axes."""
+    if not isinstance(specification, dict):
+        raise TypeError("form() requires one JSON object argument")
+    allowed = {"name", "detail", "children", "partners"}
+    unknown = set(specification) - allowed
+    if unknown:
+        raise ValueError(
+            "form() contains unsupported Graph axes: " + ", ".join(sorted(unknown))
+        )
+    name = specification.get("name")
+    detail = specification.get("detail", "")
+    children = specification.get("children", [])
+    partners = specification.get("partners", [])
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("form() requires a non-empty name")
+    if not isinstance(detail, str):
+        raise TypeError("form.detail must be a string")
+    if not isinstance(children, list):
+        raise TypeError("form.children must be an array")
+    if not isinstance(partners, list):
+        raise TypeError("form.partners must be an array")
+    compiled_children = [compile_form(child) for child in children]
+    child_names = [child["name"] for child in compiled_children]
+    if len(set(child_names)) != len(child_names):
+        raise ValueError(f"form() contains duplicate child names under {name!r}")
+    normalized_partners = []
+    for relation in partners:
+        if not isinstance(relation, dict):
+            raise TypeError("form.partners items must be JSON objects")
+        if set(relation) != {"verb", "object"}:
+            raise ValueError("form.partners items require exactly verb and object")
+        if not all(isinstance(relation[key], str) and relation[key].strip()
+                   for key in ("verb", "object")):
+            raise ValueError("form.partners verb and object must be non-empty strings")
+        normalized_partners.append({"verb": relation["verb"], "object": relation["object"]})
+    return {
+        "name": name,
+        "detail": detail,
+        "children": compiled_children,
+        "partners": normalized_partners,
+    }
+
+
+def work_order_template(title, creation_id, version="1"):
+    """Build the first Graph-native work-order template without emitting effects."""
+    if str(version) != "1":
+        raise ValueError(f"Unsupported work-order version {version}")
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("work_order.create requires a non-empty title")
+    if not isinstance(creation_id, str) or not creation_id.strip():
+        raise ValueError("work_order.create requires a non-empty creation_id")
+
+    root_detail = {
+        "定义": "工单表示一项需要形成明确交付物并接受审核的工作任务。",
+        "template": "work-order",
+        "templateVersion": "1",
+        "creationId": creation_id,
+        "status": "待执行",
+        "状态": {
+            "定义": "表示整张工单从接收、执行、提交到审核结束的整体流转状态；不代替各Step的局部状态。",
+            "当前": "待执行",
+            "可选值": ["待执行", "执行中", "待验收", "已通过", "已驳回", "已暂缓"],
+            "流转": ["待执行→执行中", "执行中→待验收", "待验收→已通过", "待验收→已驳回", "已驳回→执行中"],
+        },
+        "当前节点": "Step",
+        "修订记录": [],
+    }
+    output_detail = {
+        "定义": "领导或派活方要求最终交付的成果事物；它不是Step中的动作，也不是未经产出的字段清单。",
+        "交付物": {"名称": None, "接收方": None, "成果引用": None, "版本": None},
+    }
+    step_detail = {
+        "定义": "把已有输入加工为工单交付物的作业步骤；本工单当前只有一个Step。",
+        "输入": {"定义": "进入本步骤并需要被加工的原始内容。", "内容": []},
+        "加工": {"定义": "针对输入实际实施的整理、判断和转化动作。", "内容": None},
+        "输出": {"定义": "本步骤加工完成后形成并交给工单Output的结果。", "目标": None},
+        "支撑": {"定义": "帮助Step正确执行但不直接等同于输入或交付物的数据、规范、工具和上下文。", "数据": []},
+        "操作": {"定义": "记录本Step的局部执行状态与实际发生事实；可与其他Step分别变化。", "状态": "未开始", "实际动作": [], "实际产出": [], "异常": []},
+    }
+    criteria_detail = {
+        "定义": "针对Output的一组条件及其审核结果；要求与验收是同一标准的事前规定和事后判定。",
+        "要求": {"定义": "执行前规定交付物必须符合的条件和不可越过的边界。", "条件": [], "边界": []},
+        "验收": {
+            "定义": "Output提交后，审核方依据同一组要求作出通过或驳回判定。",
+            "提交": {"成果引用": None, "版本": None, "提交时间": None},
+            "审核": {"结论": None, "意见": [], "审核人": None, "审核时间": None},
+            "驳回": {"返回": "Step", "原因": []},
+        },
+    }
+
+    def formatted(value):
+        import json
+        return json.dumps(value, ensure_ascii=False, indent=2)
+
+    return compile_form({
+        "name": title,
+        "detail": formatted(root_detail),
+        "children": [
+            {"name": "Output", "detail": formatted(output_detail), "partners": [{"verb": "提交验收", "object": "Criteria"}]},
+            {"name": "Step", "detail": formatted(step_detail), "partners": [{"verb": "产出", "object": "Output"}]},
+            {"name": "Criteria", "detail": formatted(criteria_detail), "partners": [
+                {"verb": "约束", "object": "Step"},
+                {"verb": "驳回返工", "object": "Step"},
+            ]},
+        ],
+    })
+
+
 def plan_template_instance(rows, parent_path, template):
     compiled = _compile_atom_template(template)
     template_name = template.get("name")

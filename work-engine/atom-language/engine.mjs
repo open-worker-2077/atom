@@ -243,9 +243,40 @@ function programObjectSource(command, request) {
 }
 
 export function compileProgramTransform({ request, receiver = createAtomLanguageReceiver() }) {
-  const parsed = receiver.receive(programObjectSource('transform', request));
+  const opaqueDetail = request && Object.hasOwn(request, 'detail$replace')
+    ? request['detail$replace']
+    : undefined;
+  if (opaqueDetail !== undefined && typeof opaqueDetail !== 'string') {
+    return {
+      ok: false,
+      errors: [diagnostic(
+        'INVALID_PROGRAM_DETAIL_REPLACEMENT',
+        'Program detail$replace requires one complete string value'
+      )]
+    };
+  }
+  const normalized = opaqueDetail === undefined
+    ? request
+    : Object.fromEntries([
+        ...Object.entries(request).filter(([key]) => key !== 'detail$replace'),
+        ['detail.rep.__ATOM_PROGRAM_OPAQUE_REPLACEMENT__', null]
+      ]);
+  const parsed = receiver.receive(programObjectSource('transform', normalized));
   if (!parsed.ok || parsed.batch || parsed.items.length !== 1) {
     return { ok: false, errors: parsed.errors };
+  }
+  if (opaqueDetail !== undefined) {
+    const fields = parsed.items[0].fields.filter((field) => field.baseKey === 'detail');
+    if (fields.length !== 1) {
+      return {
+        ok: false,
+        errors: [diagnostic(
+          'CONFLICTING_PROGRAM_DETAIL_REPLACEMENT',
+          'Program detail$replace cannot be combined with another detail operation'
+        )]
+      };
+    }
+    fields[0].commands = [{ name: 'rep', parameter: opaqueDetail }];
   }
   return { ok: true, item: parsed.items[0], parsed };
 }

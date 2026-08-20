@@ -41,6 +41,35 @@ function performanceTrace(event, details) {
   process.stderr.write(`${JSON.stringify({ event, ...details })}\n`);
 }
 
+function readAffectedAtoms(result) {
+  const affected = new Map();
+  for (const item of result?.items ?? []) {
+    for (const match of item?.matches ?? []) {
+      const path = typeof match?.path === 'string' ? match.path.trim() : '';
+      const ref = typeof match?.ref === 'string' ? match.ref.trim() : '';
+      if (!path && !ref) continue;
+      const key = `${path}\0${ref}`;
+      affected.set(key, {
+        ...(path ? { path } : {}),
+        ...(ref ? { ref } : {}),
+        axes: []
+      });
+    }
+  }
+  return [...affected.values()].sort((left, right) => (
+    (left.path ?? left.ref).localeCompare(right.path ?? right.ref)
+  ));
+}
+
+function diagnosticFailure(result) {
+  const first = result?.errors?.[0];
+  if (!first) return undefined;
+  return {
+    ...(typeof first.code === 'string' && first.code ? { code: first.code } : {}),
+    ...(typeof first.message === 'string' && first.message ? { message: first.message } : {})
+  };
+}
+
 export function createInteractionRuntime({
   world,
   projections,
@@ -48,7 +77,8 @@ export function createInteractionRuntime({
   agents,
   humanStatus,
   humanWorkspace,
-  programRuntime
+  programRuntime,
+  diagnostics = null
 }) {
   requireMethod(world, 'execute', 'INVALID_WORLD_PORT', 'Interaction runtime world port');
   requireMethod(projections, 'publish', 'INVALID_PROJECTION_PORT', 'Interaction runtime projection port');
@@ -56,6 +86,9 @@ export function createInteractionRuntime({
   requireMethod(feedback, 'submit', 'INVALID_FEEDBACK_PORT', 'Interaction runtime feedback port');
   requireMethod(agents, 'resolve', 'INVALID_AGENT_DIRECTORY', 'Interaction runtime agent directory');
   requireMethod(humanStatus, 'translate', 'INVALID_HUMAN_STATUS_PORT', 'Interaction runtime human-status port');
+  if (diagnostics) {
+    requireMethod(diagnostics, 'record', 'INVALID_RUNTIME_DIAGNOSTIC_PORT', 'Interaction runtime diagnostic port');
+  }
 
   async function interactionOf(intent) {
     const agent = intent.agentPath ? await agents.resolve(intent.agentPath) : null;
@@ -84,6 +117,7 @@ export function createInteractionRuntime({
   }
 
   async function executeValidated(intent, options = {}) {
+    const interactionStartedAt = performance.now();
     const interaction = await interactionOf(intent);
     if (feedbackSource(intent.source)) {
       return feedback.submit({
@@ -125,6 +159,30 @@ export function createInteractionRuntime({
       };
     }
     if (options.publish !== false && result?.changed !== false) await publish(result);
+    if (diagnostics && result?.command === 'explore') {
+      try {
+        await diagnostics.record({
+          id: `${intent.correlationId}:read`,
+          type: 'read',
+          durationMs: performance.now() - interactionStartedAt,
+          outcome: result.ok === false ? 'failure' : 'success',
+          ...(diagnosticFailure(result) ? { failure: diagnosticFailure(result) } : {}),
+          affectedAtoms: readAffectedAtoms(result)
+        });
+      } catch (error) {
+        result = {
+          ...result,
+          warnings: [
+            ...(result.warnings ?? []),
+            {
+              code: 'READ_DIAGNOSTIC_RECORD_FAILED',
+              message: 'Read completed, but its compact runtime diagnostic was not persisted',
+              details: { cause: error.code ?? error.name }
+            }
+          ]
+        };
+      }
+    }
     return result;
   }
 

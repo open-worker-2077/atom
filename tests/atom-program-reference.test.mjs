@@ -46,3 +46,24 @@ test('Program references reject ambiguous names and recursive calls', async () =
     (error) => error?.code === 'ATOM_PROGRAM_FAILED' && /recursive/i.test(error?.message)
   );
 });
+
+test('Programs resolve exact sibling, ancestor, descendant, and partner paths without flattening scope', async () => {
+  const library = (label) => [
+    'def main(arguments):',
+    `    return {'label': '${label}', 'path': current_atom().path}`
+  ].join('\n');
+  const callerSource = [
+    "paths = ['领域/同级库', '领域', '领域/调用方/下级库', '外部/伙伴库']",
+    "resolved = [use_program({'name': path, 'arguments': {}})['path'] for path in paths]",
+    "message({'level': 'info', 'text': '|'.join(resolved)})"
+  ].join('\n');
+  const caller = atom('调用方', callerSource, [atom('下级库', library('descendant'), [], 'program')], 'program');
+  caller.partners = [{ verb: '调用', object: '外部/伙伴库' }];
+  const world = [
+    atom('领域', library('ancestor'), [atom('同级库', library('sibling'), [], 'program'), caller], 'program'),
+    atom('外部', '', [atom('伙伴库', library('partner'), [], 'program')])
+  ];
+
+  const result = await createProgramRuntimeScheduler().refresh(world);
+  assert.equal(result.messages[0].text, '领域/同级库|领域|领域/调用方/下级库|外部/伙伴库');
+});

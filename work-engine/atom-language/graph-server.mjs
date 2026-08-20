@@ -11,11 +11,14 @@ import {
 } from '../../cli/lib/server.mjs';
 import { createLegacyWorldService } from '../../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createJsonProgramProjectionRepository } from '../../src/atom-system/adapters/json-program-projection-repository.mjs';
+import { createJsonRuntimeDiagnosticRepository } from '../../src/atom-system/adapters/json-runtime-diagnostic-repository.mjs';
 import { createLegacyRuntimeComposition } from '../../src/atom-system/adapters/legacy-runtime-composition.mjs';
 import { createAtomRuntimeBackupTrigger } from '../../src/atom-system/operations/atom-runtime-backup-trigger.mjs';
+import { createRuntimeDiagnosticStore } from '../../src/atom-system/world-runtime/year-ring.mjs';
 import { resolveAtomRuntime } from './runtime-config.mjs';
 import { createProgramRuntimeScheduler } from './program-runtime.mjs';
 import { ATOM_RUNTIME_CONTRACT } from './runtime-contract.mjs';
+import { workOrderRegistry } from './work-order-registry.mjs';
 
 export const DEFAULT_ATOM_GRAPH_HOST = '127.0.0.1';
 export const DEFAULT_ATOM_GRAPH_PORT = 4784;
@@ -82,12 +85,15 @@ function pathIdentity(file) {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
-function validateDistinctPaths({ contextFile, graphFile, storeFile, programProjectionFile }) {
+function validateDistinctPaths({
+  contextFile, graphFile, storeFile, programProjectionFile, diagnosticFile
+}) {
   const entries = [
     ['contextFile', contextFile],
     ['graphFile', graphFile],
     ['storeFile', storeFile],
-    ['programProjectionFile', programProjectionFile]
+    ['programProjectionFile', programProjectionFile],
+    ['diagnosticFile', diagnosticFile]
   ];
   const seen = new Map();
   for (const [label, file] of entries) {
@@ -95,7 +101,7 @@ function validateDistinctPaths({ contextFile, graphFile, storeFile, programProje
     if (seen.has(identity)) {
       throw problem(
         'ATOM_GRAPH_PATH_COLLISION',
-        'Atom context、Graph 投影、Spatial store 和 Program 投影必须使用四个不同文件',
+        'Atom context、Graph 投影、Spatial store、Program 投影和运行诊断必须使用不同文件',
         {
           first: seen.get(identity),
           second: label,
@@ -128,6 +134,11 @@ function resolveConfiguration(options = {}) {
       options.programProjectionFile
         ?? path.join(path.dirname(contextFile), 'program-projection.json'),
       'Program 投影文件'
+    ),
+    diagnosticFile: resolveJsonPath(
+      options.diagnosticFile
+        ?? path.join(path.dirname(contextFile), 'runtime-diagnostics.json'),
+      '运行诊断文件'
     )
   };
   validateDistinctPaths(configuration);
@@ -184,6 +195,12 @@ export function parseAtomGraphServerArgs(argv = []) {
     if (argument === '--program-projection' || argument.startsWith('--program-projection=')) {
       const parsed = optionValue(argv, index, '--program-projection');
       options.programProjectionFile = parsed.value;
+      index += parsed.consumed;
+      continue;
+    }
+    if (argument === '--runtime-diagnostics' || argument.startsWith('--runtime-diagnostics=')) {
+      const parsed = optionValue(argv, index, '--runtime-diagnostics');
+      options.diagnosticFile = parsed.value;
       index += parsed.consumed;
       continue;
     }
@@ -258,6 +275,9 @@ export function createAtomGraphHandlers(interactionRuntime) {
         throw problem('INVALID_WORLD_REVISION', 'Projection recovery requires expectedRevision');
       }
       return interactionRuntime.recover({ expectedRevision: payload.expectedRevision.trim() });
+    },
+    async workOrderRegistry() {
+      return workOrderRegistry();
     }
   });
 }
@@ -276,8 +296,16 @@ export async function startAtomGraphServer(options = {}) {
     ?? createJsonProgramProjectionRepository({
       file: configuration.programProjectionFile
     });
+  const diagnosticRepository = options.diagnosticRepository
+    ?? createJsonRuntimeDiagnosticRepository({ file: configuration.diagnosticFile });
+  const diagnostics = options.diagnostics ?? createRuntimeDiagnosticStore({
+    repository: diagnosticRepository,
+    retentionMs: options.diagnosticRetentionMs,
+    maxEntries: options.diagnosticMaxEntries
+  });
   const programScheduler = options.programScheduler ?? createProgramRuntimeScheduler({
-    projectionRepository: programProjectionRepository
+    projectionRepository: programProjectionRepository,
+    diagnosticRecorder: diagnostics
   });
   const worldService = options.worldService ?? createLegacyWorldService({
     onAuthoritativeWrite: () => backupTrigger?.schedule()
@@ -288,6 +316,7 @@ export async function startAtomGraphServer(options = {}) {
     storeFile: configuration.storeFile,
     programProjectionFile: configuration.programProjectionFile,
     programScheduler,
+    diagnostics,
     worldService,
     ...(options.projectionOrchestrator ? { projectionOrchestrator: options.projectionOrchestrator } : {})
   });
@@ -313,7 +342,8 @@ export async function startAtomGraphServer(options = {}) {
     atomCommand: handlers.atomCommand,
     atomHumanStatus: handlers.atomHumanStatus,
     atomWorkspaceEdit: handlers.atomWorkspaceEdit,
-    atomProjectionRecover: handlers.atomProjectionRecover
+    atomProjectionRecover: handlers.atomProjectionRecover,
+    atomWorkOrderRegistry: handlers.workOrderRegistry
   });
   backupTrigger?.start();
   instance.server.once('close', () => backupTrigger?.close());
@@ -349,10 +379,14 @@ export async function startAtomGraphServer(options = {}) {
     contextFile: configuration.contextFile,
     graphFile: configuration.graphFile,
     storeFile: configuration.storeFile,
+    programProjectionFile: configuration.programProjectionFile,
+    diagnosticFile: configuration.diagnosticFile,
     initialization,
     interactionRuntime,
     programScheduler,
     programProjectionRepository,
+    diagnostics,
+    diagnosticRepository,
     backupTrigger,
     close: () => closeServer(instance.server)
   });
@@ -365,8 +399,9 @@ function help() {
     `  node graph-server.mjs [--host ${DEFAULT_ATOM_GRAPH_HOST}] [--port ${DEFAULT_ATOM_GRAPH_PORT}]`,
     '    [--context atom.json] [--graph graph.json] [--store knowledge.json]',
     '    [--program-projection program-projection.json]',
+    '    [--runtime-diagnostics runtime-diagnostics.json]',
     '',
-    `默认目录：${defaultLiveDirectory}`,
+    `默认目录：${path.dirname(defaultFiles.contextFile)}`,
     '4783 为现有服务保留，不能由本服务占用。'
   ].join('\n');
 }
@@ -385,6 +420,7 @@ if (invokedFile === currentFile) {
       process.stdout.write(`Graph projection：${running.graphFile}\n`);
       process.stdout.write(`Spatial store：${running.storeFile}\n`);
       process.stdout.write(`Program 投影：${running.programProjectionFile}\n`);
+      process.stdout.write(`运行诊断：${running.diagnosticFile}\n`);
     }
   } catch (error) {
     process.stderr.write(`${JSON.stringify({

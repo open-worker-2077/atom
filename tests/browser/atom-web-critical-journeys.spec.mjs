@@ -26,6 +26,32 @@ async function enterAtomFile(page) {
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).not.toBe('root');
 }
 
+test('Web help renders work-order actions, errors, and receipt fields from the shared registry endpoint', async ({ page }) => {
+  await openIsolatedWorld(page);
+  await page.keyboard.press('h');
+  const panel = page.locator('#workOrderRegistryHelp');
+  await expect(panel).toHaveAttribute('data-state', 'ready');
+  await expect(panel).toContainText('工单 v1');
+  const comparison = await page.evaluate(async () => {
+    const payload = await fetch('/__atom/api/work-order-registry').then((response) => response.json());
+    const version = payload.result.templates[0].versions[0];
+    const mount = document.getElementById('workOrderRegistryHelp');
+    return {
+      endpointActions: version.actions.map((action) => action.id),
+      renderedActions: [...mount.querySelectorAll('[data-work-order-action]')]
+        .map((element) => element.dataset.workOrderAction),
+      endpointErrors: version.errors.map((error) => error.code),
+      renderedErrors: [...mount.querySelectorAll('[data-work-order-error]')]
+        .map((element) => element.dataset.workOrderError),
+      endpointReceipt: version.commitReceipt.required,
+      renderedReceipt: mount.querySelector('[data-work-order-receipt]').dataset.workOrderReceipt.split(',')
+    };
+  });
+  expect(comparison.renderedActions).toEqual(comparison.endpointActions);
+  expect(comparison.renderedErrors).toEqual(comparison.endpointErrors);
+  expect(comparison.renderedReceipt).toEqual(comparison.endpointReceipt);
+});
+
 test('F entry keeps every intended child node inside the rendered viewport', async ({ page }) => {
   await openIsolatedWorld(page);
   await enterAtomFile(page);

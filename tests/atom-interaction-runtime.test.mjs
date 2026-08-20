@@ -163,6 +163,64 @@ test('an ordinary read consumes current projections without rebuilding them', as
   assert.equal(context.calls.some(([kind]) => kind === 'projection'), false);
 });
 
+test('an ordinary read records only compact matched Atom paths and duration', async () => {
+  const context = ports();
+  const diagnostics = [];
+  context.diagnostics = {
+    async record(value) {
+      diagnostics.push(structuredClone(value));
+    }
+  };
+  context.world.execute = async () => ({
+    ok: true,
+    command: 'explore',
+    changed: false,
+    revisionAfter: 'rev-2',
+    items: [{ matches: [{ path: 'Root/Target', detail: '不得进入诊断' }] }]
+  });
+  const runtime = createInteractionRuntime(context);
+
+  const result = await runtime.execute({
+    source: 'explore {"name":"Root/Target"}',
+    correlationId: 'read-diagnostic',
+    history: []
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(diagnostics.length, 1);
+  assert.deepEqual({ ...diagnostics[0], durationMs: 0 }, {
+    id: 'read-diagnostic:read',
+    type: 'read',
+    durationMs: 0,
+    outcome: 'success',
+    affectedAtoms: [{ path: 'Root/Target', axes: [] }]
+  });
+  assert.equal(Number.isFinite(diagnostics[0].durationMs), true);
+  assert.equal(JSON.stringify(diagnostics[0]).includes('不得进入诊断'), false);
+});
+
+test('diagnostic persistence failure warns but never changes a successful read outcome', async () => {
+  const context = ports();
+  context.diagnostics = {
+    async record() {
+      throw Object.assign(new Error('disk unavailable'), { code: 'EIO' });
+    }
+  };
+  context.world.execute = async () => ({
+    ok: true, command: 'explore', changed: false, revisionAfter: 'rev-2', items: []
+  });
+  const runtime = createInteractionRuntime(context);
+
+  const result = await runtime.execute({
+    source: 'explore {}', correlationId: 'read-diagnostic-failure', history: []
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.warnings.some((warning) => (
+    warning.code === 'READ_DIAGNOSTIC_RECORD_FAILED' && warning.details.cause === 'EIO'
+  )), true);
+});
+
 test('initialization publishes the exact initialized revision before reporting ready', async () => {
   const context = ports();
   const runtime = createInteractionRuntime(context);

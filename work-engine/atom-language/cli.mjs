@@ -16,6 +16,7 @@ import { TRANSFORM_COMMANDS } from './transform-key-parser.mjs';
 import { ATOM_RUNTIME_CONTRACT } from './runtime-contract.mjs';
 
 export const DEFAULT_ATOM_COMMAND_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/command';
+export const DEFAULT_WORK_ORDER_REGISTRY_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/work-order-registry';
 
 export async function executeAtomCommandEndpoint(options, endpoint = DEFAULT_ATOM_COMMAND_ENDPOINT) {
   let response;
@@ -40,6 +41,36 @@ export async function executeAtomCommandEndpoint(options, endpoint = DEFAULT_ATO
     throw cliError(
       'ATOM_RUNTIME_CONTRACT_MISMATCH',
       `Atom engineering service contract is stale or incompatible; restart the 4784 service (expected ${ATOM_RUNTIME_CONTRACT})`
+    );
+  }
+  return payload.result;
+}
+
+export async function executeAtomWorkOrderRegistryEndpoint(
+  endpoint = DEFAULT_WORK_ORDER_REGISTRY_ENDPOINT
+) {
+  let response;
+  try {
+    response = await fetch(endpoint);
+  } catch (cause) {
+    throw cliError(
+      'ATOM_ENGINE_UNAVAILABLE',
+      `Atom engineering service is unavailable at ${endpoint}: ${cause.message}`
+    );
+  }
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) {
+    throw cliError(
+      payload.error?.code ?? 'ATOM_ENGINE_REQUEST_FAILED',
+      payload.error?.message ?? 'Work-order registry request failed'
+    );
+  }
+  if (payload.result?.contract !== 'atom-work-order-registry'
+    || payload.result?.version !== 1
+    || payload.result?.runtimeContract !== ATOM_RUNTIME_CONTRACT) {
+    throw cliError(
+      'ATOM_RUNTIME_CONTRACT_MISMATCH',
+      `Work-order registry is stale or incompatible; restart the 4784 service (expected ${ATOM_RUNTIME_CONTRACT})`
     );
   }
   return payload.result;
@@ -98,7 +129,8 @@ function help() {
     'Options:',
     '  --agent AGENT      必填；exact 且唯一的 @agent 短名或业务路径',
     '  --stdin            从标准输入读取一条完整 Atom 命令；用于变量、多行、长文本和特殊字符',
-    '  --json             已弃用的兼容选项；无行为差异，输出始终为 Graph-JSON',
+    '  --json             已弃用的兼容选项；Atom 命令结果仍为 Graph-JSON',
+    '  --work-order-registry  输出 CLI/Web 共用的工单动作、错误与回执契约',
     '  -h, --help         显示帮助',
     '',
     'Agent 入口：',
@@ -145,6 +177,9 @@ function help() {
     '  Program 并发独立运行并共享单轮 10 秒时间预算；单项失败独立报告，超时自动中断。短期内避免编写超出该预算的复杂 Program。',
     '  世界函数：explore(query)->rows；transform(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
     '  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。',
+    '  工单函数：work_order_catalog({template?,version?})->contract；work_order({action,...})->result。v1 动作固定为 create/fill/validate/submit/reject/revise/read-back。',
+    '  工单公开契约：atom.cmd --work-order-registry；该只读命令无需 --agent，Web 帮助从同一注册表渲染动作、错误和提交回执字段。',
+    '  工单写入只能由 Program 发出并继续经过 Transform、修订检查和中央提交；调用时使用精确版本、稳定 creation_id 与 exact path，写后按 read-back 和世界回读验收。',
     '  规划函数：direct_children(rows,parent_path)、child_detail(rows,parent_path,name,default)、missing_details(rows,parent_path,names)、form_status(rows,parent_path,status_name)、first_pending(forms,completed_states)、transition_allowed(current,requested,transitions)、subtree_refs(rows,root_path)、plan_shards(sources,spec)、plan_form_flow(rows,parent_path,standard)、plan_template_instance(rows,parent_path,template)。',
     '  模板参数以 template_catalog({}) 返回的契约为准；被 use_program 调用的 Program 必须定义 main(arguments)。',
     '  推进流配方：在指定的事实父 Atom 下建立“推进流” @program，其 detail 调用 instantiate({\'template\':\'advancement-flow\',\'version\':\'latest\',\'mode\':\'ensure\',\'parameters\':{\'title\':\'任务标题\'}})；新建 Agent 与追加 Program 分两次 transform。',
@@ -193,6 +228,7 @@ function parseCliArgs(argv) {
   let explicitContext = false;
   let json = false;
   let readSourceFromStdin = false;
+  let workOrderRegistryRequested = false;
   const source = [];
   let positionalOnly = false;
   for (let index = 0; index < argv.length; index += 1) {
@@ -210,6 +246,10 @@ function parseCliArgs(argv) {
     }
     if (!positionalOnly && argument === '--stdin') {
       readSourceFromStdin = true;
+      continue;
+    }
+    if (!positionalOnly && argument === '--work-order-registry') {
+      workOrderRegistryRequested = true;
       continue;
     }
     if (!positionalOnly && argument === '--global') {
@@ -258,6 +298,7 @@ function parseCliArgs(argv) {
     explicitContext,
     json,
     readSourceFromStdin,
+    workOrderRegistry: workOrderRegistryRequested,
     source
   };
 }
@@ -736,6 +777,23 @@ export async function runAtomCli(argv = [], overrides = {}) {
     const parsed = parseCliArgs(argv);
     if (parsed.help) {
       stdout.write(`${help()}\n`);
+      return 0;
+    }
+    if (parsed.workOrderRegistry) {
+      if (parsed.readSourceFromStdin || parsed.source.length) {
+        throw cliError(
+          'AMBIGUOUS_COMMAND_SOURCE',
+          '--work-order-registry 不能与 Atom 命令或 --stdin 同时使用'
+        );
+      }
+      const loadRegistry = overrides.workOrderRegistry ?? executeAtomWorkOrderRegistryEndpoint;
+      if (typeof loadRegistry !== 'function') {
+        throw cliError(
+          'ATOM_WORK_ORDER_REGISTRY_UNAVAILABLE',
+          'Atom CLI requires a work-order registry capability'
+        );
+      }
+      stdout.write(`${JSON.stringify(await loadRegistry(), null, 2)}\n`);
       return 0;
     }
     if (parsed.readSourceFromStdin && parsed.source.length) {

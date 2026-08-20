@@ -1,0 +1,107 @@
+{
+  "contract": "atom-work-order-registry",
+  "version": 1,
+  "runtimeContract": "atom-interaction/3",
+  "templates": [
+    {
+      "id": "work-order",
+      "function": "work_order",
+      "label": "工单",
+      "description": "创建、填写、校验、提交、驳回、修订并回读一张版本化工单。",
+      "latest": "1",
+      "versions": [
+        {
+          "version": "1",
+          "groups": ["Output", "Step", "Criteria"],
+          "statuses": ["待执行", "执行中", "待验收", "已通过", "已驳回", "已暂缓"],
+          "actions": [
+            {
+              "id": "create",
+              "label": "创建",
+              "mutates": true,
+              "input": { "required": ["title", "creation_id", "version"], "optional": [] },
+              "result": { "required": ["template", "version", "created", "path"], "optional": [] }
+            },
+            {
+              "id": "fill",
+              "label": "填写",
+              "mutates": true,
+              "input": { "required": ["path", "values"], "optional": [] },
+              "result": { "required": ["filled", "status", "path"], "optional": [] }
+            },
+            {
+              "id": "validate",
+              "label": "校验",
+              "mutates": false,
+              "input": { "required": ["path"], "optional": [] },
+              "result": { "required": ["valid", "missing", "status"], "optional": [] }
+            },
+            {
+              "id": "submit",
+              "label": "提交或通过",
+              "mutates": true,
+              "input": {
+                "required": ["path"],
+                "optional": ["submitted_at", "decision", "reviewer", "reviewed_at"]
+              },
+              "result": {
+                "required": ["submitted", "status", "missing"],
+                "optional": ["idempotent"]
+              }
+            },
+            {
+              "id": "reject",
+              "label": "驳回",
+              "mutates": true,
+              "input": {
+                "required": ["path", "reasons", "reviewer", "reviewed_at"],
+                "optional": []
+              },
+              "result": {
+                "required": ["rejected", "status"],
+                "optional": ["responsible", "idempotent"]
+              }
+            },
+            {
+              "id": "revise",
+              "label": "修订",
+              "mutates": true,
+              "input": { "required": ["path", "values", "note"], "optional": [] },
+              "result": {
+                "required": ["revised", "status"],
+                "optional": ["path", "idempotent"]
+              }
+            },
+            {
+              "id": "read-back",
+              "label": "回读",
+              "mutates": false,
+              "input": { "required": ["path"], "optional": [] },
+              "result": {
+                "required": [
+                  "template", "version", "path", "status", "valid", "missing",
+                  "available_actions", "guidance", "values"
+                ],
+                "optional": []
+              }
+            }
+          ],
+          "errors": [
+            { "code": "ATOM_PROGRAM_FAILED", "meaning": "动作、参数、工单结构或状态流转不符合工单契约。" },
+            { "code": "ATOM_PROGRAM_TIMEOUT", "meaning": "Program 未在运行预算内完成。" },
+            { "code": "PROGRAM_LOCK_DENIED", "meaning": "当前 Program 锁不允许目标写入。" },
+            { "code": "WORLD_REVISION_CONFLICT", "meaning": "提交所依据的世界修订已经过期。" }
+          ],
+          "commitReceipt": {
+            "contract": "atom.world-receipt",
+            "version": 1,
+            "required": [
+              "commandId", "correlationId", "beforeRevision", "afterRevision",
+              "status", "committedAt", "source", "affectedAtoms"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

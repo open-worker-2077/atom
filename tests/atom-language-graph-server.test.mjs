@@ -109,6 +109,7 @@ test('graph server arguments default to the shared LocalAppData Atom world', () 
     graphFile: runtime.graphFile,
     storeFile: runtime.storeFile,
     programProjectionFile: path.join(path.dirname(runtime.contextFile), 'program-projection.json'),
+    diagnosticFile: path.join(path.dirname(runtime.contextFile), 'runtime-diagnostics.json'),
     help: false
   });
 
@@ -118,7 +119,8 @@ test('graph server arguments default to the shared LocalAppData Atom world', () 
     '--context', 'context.json',
     '--graph=projection.json',
     '--store', 'store.json',
-    '--program-projection=program-projection.json'
+    '--program-projection=program-projection.json',
+    '--runtime-diagnostics=runtime-diagnostics.json'
   ]), {
     host: '127.0.0.2',
     port: 0,
@@ -126,6 +128,7 @@ test('graph server arguments default to the shared LocalAppData Atom world', () 
     graphFile: path.resolve('projection.json'),
     storeFile: path.resolve('store.json'),
     programProjectionFile: path.resolve('program-projection.json'),
+    diagnosticFile: path.resolve('runtime-diagnostics.json'),
     help: false
   });
 });
@@ -136,6 +139,7 @@ test('graph server rejects 4783 and colliding context, projection, and store pat
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
   const programProjectionFile = path.join(directory, 'program-projection.json');
+  const diagnosticFile = path.join(directory, 'runtime-diagnostics.json');
 
   assert.throws(
     () => parseAtomGraphServerArgs(['--port', '4783']),
@@ -153,12 +157,16 @@ test('graph server rejects 4783 and colliding context, projection, and store pat
   );
 
   for (const paths of [
-    { contextFile, graphFile: contextFile, storeFile, programProjectionFile },
-    { contextFile, graphFile, storeFile: contextFile, programProjectionFile },
-    { contextFile, graphFile, storeFile: graphFile, programProjectionFile },
-    { contextFile, graphFile, storeFile, programProjectionFile: contextFile },
-    { contextFile, graphFile, storeFile, programProjectionFile: graphFile },
-    { contextFile, graphFile, storeFile, programProjectionFile: storeFile }
+    { contextFile, graphFile: contextFile, storeFile, programProjectionFile, diagnosticFile },
+    { contextFile, graphFile, storeFile: contextFile, programProjectionFile, diagnosticFile },
+    { contextFile, graphFile, storeFile: graphFile, programProjectionFile, diagnosticFile },
+    { contextFile, graphFile, storeFile, programProjectionFile: contextFile, diagnosticFile },
+    { contextFile, graphFile, storeFile, programProjectionFile: graphFile, diagnosticFile },
+    { contextFile, graphFile, storeFile, programProjectionFile: storeFile, diagnosticFile },
+    { contextFile, graphFile, storeFile, programProjectionFile, diagnosticFile: contextFile },
+    { contextFile, graphFile, storeFile, programProjectionFile, diagnosticFile: graphFile },
+    { contextFile, graphFile, storeFile, programProjectionFile, diagnosticFile: storeFile },
+    { contextFile, graphFile, storeFile, programProjectionFile, diagnosticFile: programProjectionFile }
   ]) {
     await assert.rejects(
       startAtomGraphServer({ host: '127.0.0.1', port: 0, ...paths }),
@@ -245,6 +253,41 @@ test('graph server initializes the projection, serves the full UI health and Gra
   assert.ok(labels.includes('石斧'), 'atom partner object projects as its own node');
   assert.equal(state.knowledge.edges.length, 1);
   assert.equal(state.knowledge.edges[0].label, '产出');
+});
+
+test('graph server persists compact read diagnostics through the shared interaction runtime', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const diagnosticFile = path.join(directory, 'runtime-diagnostics.json');
+  await fs.writeFile(contextFile, `${JSON.stringify(atomFixture(), null, 2)}\n`, 'utf8');
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, diagnosticFile
+  });
+  t.after(() => running.close());
+
+  const response = await fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source: 'explore {"name":"石器工坊"}',
+      interaction: {
+        id: 'service-read-diagnostic',
+        agent: { ref: 'transport-ref', path: '石器工坊' }
+      },
+      history: []
+    })
+  });
+  assert.equal(response.status, 200, await response.text());
+  const persisted = JSON.parse(await fs.readFile(diagnosticFile, 'utf8'));
+  assert.equal(running.diagnosticFile, path.resolve(diagnosticFile));
+  assert.deepEqual(persisted.diagnostics.map((item) => item.id), ['service-read-diagnostic:read']);
+  assert.deepEqual(persisted.diagnostics[0].affectedAtoms, [{
+    path: '石器工坊',
+    axes: []
+  }]);
+  assert.equal(JSON.stringify(persisted).includes('可核查的正文'), false);
 });
 
 test('graph server queues private backup from a committed operation instead of relying on polling', async (t) => {

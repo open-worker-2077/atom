@@ -129,6 +129,18 @@ export async function createSpatialServer(options = {}) {
       if (url.pathname === '/__spatial/api/state' && request.method === 'GET') {
         return json(response, 200, { ok: true, knowledge: await readKnowledge() });
       }
+      if (url.pathname === '/__atom/api/work-order-registry' && request.method === 'GET') {
+        if (typeof options.atomWorkOrderRegistry !== 'function') {
+          return json(response, 404, {
+            ok: false,
+            error: { code: 'ATOM_WORK_ORDER_REGISTRY_UNAVAILABLE' }
+          });
+        }
+        return json(response, 200, {
+          ok: true,
+          result: await options.atomWorkOrderRegistry()
+        });
+      }
       if (url.pathname === '/__spatial/api/state' && request.method === 'PUT') {
         if (options.atomProjectionReadOnly === true) {
           return json(response, 409, {
