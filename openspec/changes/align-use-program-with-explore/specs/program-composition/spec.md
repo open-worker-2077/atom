@@ -47,4 +47,3 @@ An explored-reference call SHALL preserve the existing JSON-compatible return bo
 #### Scenario: Recursive reference
 - **WHEN** an explored referenced Program would call itself directly or indirectly
 - **THEN** execution rejects the recursive chain and publishes no partial effects from that failed evaluation
-
