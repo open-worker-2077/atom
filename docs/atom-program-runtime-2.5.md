@@ -78,16 +78,20 @@ reason.
 
 `function_catalog({})` returns the same read-only Program function inventory as
 `atom.cmd --program-function-registry` and
-`GET /__atom/api/program-function-registry`. Optional `layer`, `category`, and
-`scope` filters return subsets of that inventory. The catalog keeps function
-layer, capability category, scope, and Atom type separate: `explore` and
-`transform` share the Graph-world category, `form` is a kernel structure
-capability, `work_order` is an application function, and `@program` remains the
-only executable kernel type.
+`GET /__atom/api/program-function-registry`. Optional `layer`, `family`, and
+`scope` filters return subsets of that inventory. The functional catalog has
+two real objects: registered functions and Atom types. Registered functions use
+the `kernel` or `application` layer and a coarse family. Kernel families are
+`graph`, `form`, and `program`; `work_order` remains in an application-owned
+family. `@program` remains the only executable kernel type.
 
-Scope is either one Atom or hierarchical public. Atom-local reusable behavior
-remains an ordinary `@program`; public registration and protected runtime changes
-remain backend responsibilities. See
+Scope is the simple value `atom` or `public`; it does not declare public paths,
+inheritance, or allowed application structures. Agents can write, refine, and
+reuse Atom-local Programs through `use_program()` without formal registration.
+Help is the unified operational explanation: Program execution can read the
+registered catalog but exposes no function that rewrites the protected registry
+or runtime source. This protects formal registration without prohibiting local
+research or mature Program contributions. See
 `docs/architecture/program-function-ecosystem.md` for the complete boundary.
 
 ### Standard compilation before sharding

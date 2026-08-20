@@ -37,49 +37,42 @@ def load_program_function_registry():
     module_path = Path(__file__).with_name("program-function-registry.json")
     value = json.loads(module_path.read_text(encoding="utf-8"))
     if (value.get("contract") != "atom-program-function-registry"
-            or value.get("version") != 1
+            or value.get("version") != 2
             or value.get("runtimeContract") != "atom-interaction/3"):
         raise RuntimeError("Program function registry has an invalid public contract")
-    scope_kinds = {item.get("id") for item in value.get("scopeKinds", [])}
-    if scope_kinds != {"atom", "public"}:
-        raise RuntimeError("Program function registry scope kinds must be atom and public")
-    categories = {
-        (item.get("layer"), item.get("id")) for item in value.get("categories", [])
-    }
-    scopes = {}
-    for scope in value.get("publicScopes", []):
-        key = tuple(scope.get("path", []))
-        constraints = scope.get("constraints")
-        if key in scopes or not isinstance(constraints, list):
-            raise RuntimeError("Program function registry contains an invalid public scope")
-        scopes[key] = constraints
+    families = set()
+    kernel_families = set()
+    for item in value.get("functionFamilies", []):
+        layer = item.get("layer")
+        family = item.get("id")
+        key = (layer, family)
+        if (layer not in {"kernel", "application"}
+                or not isinstance(family, str) or not family
+                or not isinstance(item.get("label"), str) or not item["label"]
+                or key in families):
+            raise RuntimeError("Program function registry contains an invalid function family")
+        families.add(key)
+        if layer == "kernel":
+            kernel_families.add(family)
+    if kernel_families != {"graph", "form", "program"}:
+        raise RuntimeError("Kernel function families must be graph, form, and program")
     names = set()
-    functions = []
     for item in value.get("functions", []):
         name = item.get("name")
         layer = item.get("layer")
-        category = item.get("category")
-        scope = item.get("scope", {})
-        scope_path = scope.get("path")
+        family = item.get("family")
+        scope = item.get("scope")
         if (not isinstance(name, str) or not name or name in names
-                or (layer, category) not in categories
-                or scope.get("kind") != "public"
-                or scope_path != [layer, category]):
+                or (layer, family) not in families
+                or scope not in {"atom", "public"}
+                or "category" in item
+                or "effectiveConstraints" in item):
             raise RuntimeError(f"Invalid or duplicate Program function: {name}")
         names.add(name)
-        effective = []
-        for length in range(len(scope_path) + 1):
-            prefix = tuple(scope_path[:length])
-            if prefix not in scopes:
-                raise RuntimeError(f"Missing public scope prefix for {name}")
-            for constraint in scopes[prefix]:
-                if constraint not in effective:
-                    effective.append(constraint)
-        functions.append({**item, "effectiveConstraints": effective})
     executable = [item for item in value.get("types", []) if item.get("executable")]
     if executable != [{"id": "program", "layer": "kernel", "executable": True}]:
         raise RuntimeError("Program must be the only executable kernel type")
-    return {**value, "functions": functions}
+    return value
 
 
 PROGRAM_FUNCTION_REGISTRY = load_program_function_registry()
@@ -457,26 +450,26 @@ def main():
 
     def function_catalog(specification):
         specification = require_object(specification, "function_catalog")
-        unknown = set(specification) - {"layer", "category", "scope"}
+        unknown = set(specification) - {"layer", "family", "scope"}
         if unknown:
             raise ValueError(
                 "Unknown function_catalog options: " + ", ".join(sorted(unknown))
             )
         requested_layer = specification.get("layer")
-        requested_category = specification.get("category")
+        requested_family = specification.get("family")
         requested_scope = specification.get("scope")
         if requested_layer is not None and requested_layer not in {"kernel", "application"}:
             raise ValueError("function_catalog.layer must be kernel or application")
-        if requested_category is not None and not isinstance(requested_category, str):
-            raise TypeError("function_catalog.category must be a string")
+        if requested_family is not None and not isinstance(requested_family, str):
+            raise TypeError("function_catalog.family must be a string")
         if requested_scope is not None and requested_scope not in {"atom", "public"}:
             raise ValueError("function_catalog.scope must be atom or public")
         result = json.loads(json.dumps(PROGRAM_FUNCTION_REGISTRY, ensure_ascii=False))
         result["functions"] = [
             item for item in result["functions"]
             if (requested_layer is None or item["layer"] == requested_layer)
-            and (requested_category is None or item["category"] == requested_category)
-            and (requested_scope is None or item["scope"]["kind"] == requested_scope)
+            and (requested_family is None or item["family"] == requested_family)
+            and (requested_scope is None or item["scope"] == requested_scope)
         ]
         return result
 

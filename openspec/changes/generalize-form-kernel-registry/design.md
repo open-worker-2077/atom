@@ -8,7 +8,7 @@ See `proposal.md` for motivation and the two capability specs for observable beh
 
 - Add one pure, recursive Form component evaluator without growing a second Graph model.
 - Make registered-function classification machine-readable and consistent across Python, CLI, Web and Help.
-- Encode layer, capability category, and scope as separate dimensions.
+- Keep the functional catalog centered on registered functions and Atom types, with coarse function families and a simple per-function scope.
 - Preserve all current direct Form compilation and application behavior.
 
 **Non-Goals:**
@@ -17,6 +17,7 @@ See `proposal.md` for motivation and the two capability specs for observable beh
 - Implement the pending `use_program()` Explore-ref change.
 - Add automatic harvesting, publication, permissions, application types, or a general plugin marketplace.
 - Let a Program modify the protected registry or runtime source.
+- Model research roles, organizational identities, or a public hierarchy in registry data.
 
 ## Decisions
 
@@ -53,30 +54,36 @@ Alternative rejected: hard-code a minimal/standard/large Form mode. Scale is the
 
 A versioned JSON registry owns Atom function metadata. Both the JavaScript public loader and Python worker load that file. The worker derives the allowed Atom function names from it and verifies that each declared function has an implementation; Python built-ins remain a separate sandbox list. This prevents Help metadata and executable namespace from drifting.
 
-The registry records:
+The registry records only the facts needed by code:
 
 - `layer`: `kernel` or `application`;
-- `category`: stable capability responsibility;
-- `scope.kind`: `atom` or `public`;
-- `scope.path`: hierarchical segments for public entries;
+- `family`: one coarse function family; kernel uses `graph`, `form`, or `program`;
+- `scope`: the simple value `atom` or `public`;
 - type metadata identifying `program` as the only executable kernel type.
 
 Current runtime functions are public. Atom-local behavior is represented by ordinary `@program` instances and is deliberately absent from the public function inventory.
 
-### 4. Public hierarchy is prefix inheritance, not a third scope
+Alternative rejected: separate categories for execution, reading, planning, templates, and governance. Those labels expose implementation fragmentation at the top of the catalog and force callers to reconstruct the broader Program family.
 
-Public constraints are declared by path prefix. Effective constraints are accumulated from root to leaf and exposed in catalog results. This supports broad and locally public libraries without a separate `cross-atom` state or new authorization model.
+### 4. Public is a visibility value, not a platform hierarchy
 
-### 5. Usage and backend responsibilities are architectural, not runtime identities
+Registered functions use one simple public marker. The registry does not declare public paths, parent constraints, or allowed application structures. Programs compose public components according to their own application needs; existing locks, access checks, revisions, and transactions still govern actual world operations.
 
-The architecture document uses only usage-side and backend-development responsibilities. A domain-specialized participant remains usage-side and receives no protected-code authority. Local code and patterns are eligible material; selection and abstraction are backend work. The runtime does not auto-copy or auto-promote local Programs in this change.
+### 5. Help owns the development guidance
+
+Research and development roles are not registry types. Help states the operational surface instead: Agents may freely write, refine, and reuse local `@program` code through `use_program()`; no Program function mutates the protected registry or runtime source. Agents may still supply mature implementations as material, so the boundary does not prohibit usage-side research.
+
+### 6. Keep replaceable tool output outside the source-work view
+
+The repository ignores subproject-local `.agents/`, `.claude/`, `CLAUDE.md`, and `test-results/`. Project-specific `AGENTS.md` remains tracked because it carries repository instructions rather than a reusable Skill bundle. Playwright writes run artifacts to an operating-system temporary directory so test execution does not recreate output inside the software tree.
 
 ## Risks / Trade-offs
 
 - **Optional nested content can be misread as activation** → activation remains explicit; content only decides whether an already optional component's declared requirements apply.
 - **A registry can become stale beside the worker namespace** → derive allowed Atom names from the registry and add completeness/duplicate tests.
-- **Classification can freeze premature application taxonomies** → require a second-level category for actual registered entries, but do not predeclare domain roles or future application types.
-- **Public hierarchy may be mistaken for authorization** → document it as catalog scope and inherited contract only; existing lock and transaction boundaries remain authoritative.
+- **Coarse families can hide implementation detail** → retain every exact function entry and use families only for navigation, not dispatch.
+- **Public may be mistaken for unrestricted world access** → Help states that public describes function availability; locks and transaction boundaries remain authoritative.
+- **Ignored tool files can hide intended project policy** → keep `AGENTS.md` tracked and ignore only replaceable integration bundles and run output.
 - **Compatibility branch can become permanent ambiguity** → direct four-axis objects are compile calls; only objects with explicit `action` enter runtime evaluation.
 
 ## Migration Plan
@@ -84,6 +91,7 @@ The architecture document uses only usage-side and backend-development responsib
 1. Add failing Form evaluation and function-registry contract tests while retaining old compilation assertions.
 2. Add the pure evaluator and wire the explicit `form({action: ...})` branch.
 3. Add the shared registry, derive Python Atom-function names, and reject inventory drift.
-4. Expose read-only Program, CLI and Web catalog projections and render grouped Help.
-5. Run focused Program, work-order, advancement-flow, CLI/Web and architecture suites.
-6. Roll back by removing the new registry/evaluation commits; no world-data migration is required because no new Graph axis or Atom type is persisted.
+4. Simplify the registry to coarse families and simple scope, then expose equivalent Program, CLI, Web and Help projections.
+5. Ignore local integration bundles and route Playwright artifacts to the operating-system temporary directory.
+6. Run focused Program, work-order, advancement-flow, CLI/Web and architecture suites.
+7. Roll back by reverting the registry/hygiene commits; no world-data migration is required because no new Graph axis or Atom type is persisted.

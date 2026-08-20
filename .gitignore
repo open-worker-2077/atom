@@ -29,3 +29,11 @@ Thumbs.db
 .idea/
 .vscode/
 .worktrees/
+
+# Replaceable local Agent integrations use the global Skill installation.
+.agents/
+.claude/
+CLAUDE.md
+
+# Test runners write outside the source tree; keep legacy output ignored.
+test-results/

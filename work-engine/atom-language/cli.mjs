@@ -98,7 +98,7 @@ export async function executeAtomProgramFunctionRegistryEndpoint(
     );
   }
   if (payload.result?.contract !== 'atom-program-function-registry'
-    || payload.result?.version !== 1
+    || payload.result?.version !== 2
     || payload.result?.runtimeContract !== ATOM_RUNTIME_CONTRACT) {
     throw cliError(
       'ATOM_RUNTIME_CONTRACT_MISMATCH',
@@ -139,13 +139,13 @@ function verifiedHelpLines() {
     throw cliError('ATOM_HELP_CONTRACT_DRIFT', 'Explore 动作注册表与 help 契约不一致');
   }
   const functionRegistry = programFunctionRegistry();
-  const categoryLines = (layer) => functionRegistry.categories
-    .filter((category) => category.layer === layer)
-    .map((category) => {
+  const familyLines = (layer) => functionRegistry.functionFamilies
+    .filter((family) => family.layer === layer)
+    .map((family) => {
       const names = functionRegistry.functions
-        .filter((entry) => entry.layer === layer && entry.category === category.id)
+        .filter((entry) => entry.layer === layer && entry.family === family.id)
         .map((entry) => entry.name);
-      return names.length ? `  ${category.label}：${names.join('、')}` : null;
+      return names.length ? `  ${family.label}：${names.join('、')}` : null;
     })
     .filter(Boolean);
   return {
@@ -153,9 +153,9 @@ function verifiedHelpLines() {
     explore: activeActions.map(({ baseKey, name }) => `  ${EXPLORE_HELP[`${baseKey}\u0000${name}`]}`),
     programFunctions: [
       '内核函数：',
-      ...categoryLines('kernel'),
+      ...familyLines('kernel'),
       '应用函数：',
-      ...categoryLines('application')
+      ...familyLines('application')
     ]
   };
 }
@@ -178,7 +178,7 @@ function help() {
     '  --agent AGENT      必填；exact 且唯一的 @agent 短名或业务路径',
     '  --stdin            从标准输入读取一条完整 Atom 命令；用于变量、多行、长文本和特殊字符',
     '  --json             已弃用的兼容选项；Atom 命令结果仍为 Graph-JSON',
-    '  --program-function-registry  输出 CLI/Web/Program 共用的注册函数分类与公共层级契约',
+    '  --program-function-registry  输出 CLI/Web/Program 共用的注册函数、粗颗粒家族、简单作用域与 Atom 类型契约',
     '  --work-order-registry  输出 CLI/Web 共用的工单动作、错误与回执契约',
     '  -h, --help         显示帮助',
     '',
@@ -222,9 +222,10 @@ function help() {
     '',
     'Program 模板与复用：',
     '  @program 是唯一可执行类型，detail 直接保存 Python；普通交互不得手工替代已有 Program 或模板。',
-    '  本 Atom 行为由使用方封装为 @program；跨 Atom 可见的公共注册能力由后台维护，局部公共仍继承上级公共契约。',
+    '  本 Atom Program 可自行研发、研磨并通过 use_program() 复用；成熟实现也可作为后续公共能力素材。',
+    '  注册表与底层运行时不通过 Program 开放修改；这项保护不限制 Agent 自行研发 Program。',
     ...contract.programFunctions,
-    '  注册函数目录：function_catalog({layer?,category?,scope?})；完整公共契约可用 atom.cmd --program-function-registry 读取。',
+    '  注册函数目录：function_catalog({layer?,family?,scope?})；完整公共契约可用 atom.cmd --program-function-registry 读取。',
     '  多选函数：choice({id,options:[{id,label}],selected:[id],empty})；参数必须使用双引号标准 JSON（同时是合法 Python），当前仅支持多选，返回 selected 数组并在显式 .run. 回执中公开 choices。',
     '  Program 并发独立运行并共享单轮 10 秒时间预算；单项失败独立报告，超时自动中断。短期内避免编写超出该预算的复杂 Program。',
     '  世界函数：explore(query)->rows；transform(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',

@@ -28,3 +28,13 @@
 - [x] 5.1 Run focused Form, Program standard-library, work-order, advancement-flow, CLI/Web and architecture suites; resolve regressions within scope.
 - [x] 5.2 Run strict OpenSpec validation and relevant repository-wide regression, recording exact unrelated baseline failures without overstating completion.
 - [x] 5.3 Run GitNexus change detection, review the final diff for scope and data safety, then commit only the change-owned files.
+
+## 6. Review correction: simplify the public model
+
+Sections 1-5 record the first delivery. The following correction supersedes its fine-grained categories and hierarchical-public model without rewriting that completed history.
+
+- [x] 6.1 Add failing catalog and Help tests for coarse `graph`/`form`/`program` families, simple public scope, unchanged Atom type metadata, and open local Program research through `use_program()`.
+- [x] 6.2 Replace category paths and inherited public constraints with one coarse family and simple scope in the shared registry, JavaScript validator, Python worker, filters, CLI and Web projections.
+- [x] 6.3 Ignore subproject-local Agent integration bundles and route Playwright run artifacts to the operating-system temporary directory while keeping repository `AGENTS.md` tracked.
+- [x] 6.4 Update Help and human documentation so development guidance is unified there and does not create usage/backend identities or prohibit local research.
+- [ ] 6.5 Run strict OpenSpec validation, focused Form/Program/CLI/Web/data-boundary tests, architecture/system regression, GitNexus change detection and scope-safe commits.
