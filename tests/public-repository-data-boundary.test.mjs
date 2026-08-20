@@ -39,7 +39,9 @@ test('tracked JSON is limited to source manifests, public schemas and reviewed a
     'docs/architecture/atom-capability-graph.json',
     'package-lock.json',
     'package.json',
-    'work-engine/atom-language/package.json'
+    'work-engine/atom-language/package.json',
+    'work-engine/atom-language/program-function-registry.json',
+    'work-engine/atom-language/work-order-registry.json'
   ]);
   const violations = trackedFiles().filter((file) =>
     file.endsWith('.json') && !allowed.has(file) && !/^schemas\/[^/]+\.schema\.json$/.test(file)

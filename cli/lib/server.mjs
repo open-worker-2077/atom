@@ -141,6 +141,18 @@ export async function createSpatialServer(options = {}) {
           result: await options.atomWorkOrderRegistry()
         });
       }
+      if (url.pathname === '/__atom/api/program-function-registry' && request.method === 'GET') {
+        if (typeof options.atomProgramFunctionRegistry !== 'function') {
+          return json(response, 404, {
+            ok: false,
+            error: { code: 'ATOM_PROGRAM_FUNCTION_REGISTRY_UNAVAILABLE' }
+          });
+        }
+        return json(response, 200, {
+          ok: true,
+          result: await options.atomProgramFunctionRegistry()
+        });
+      }
       if (url.pathname === '/__spatial/api/state' && request.method === 'PUT') {
         if (options.atomProjectionReadOnly === true) {
           return json(response, 409, {

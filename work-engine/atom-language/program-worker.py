@@ -29,7 +29,63 @@ plan_template_instance = PROGRAM_STDLIB.plan_template_instance
 subtree_refs = PROGRAM_STDLIB.subtree_refs
 transition_allowed = PROGRAM_STDLIB.transition_allowed
 compile_form = PROGRAM_STDLIB.compile_form
+evaluate_form = PROGRAM_STDLIB.evaluate_form
 work_order_template = PROGRAM_STDLIB.work_order_template
+
+
+def load_program_function_registry():
+    module_path = Path(__file__).with_name("program-function-registry.json")
+    value = json.loads(module_path.read_text(encoding="utf-8"))
+    if (value.get("contract") != "atom-program-function-registry"
+            or value.get("version") != 1
+            or value.get("runtimeContract") != "atom-interaction/3"):
+        raise RuntimeError("Program function registry has an invalid public contract")
+    scope_kinds = {item.get("id") for item in value.get("scopeKinds", [])}
+    if scope_kinds != {"atom", "public"}:
+        raise RuntimeError("Program function registry scope kinds must be atom and public")
+    categories = {
+        (item.get("layer"), item.get("id")) for item in value.get("categories", [])
+    }
+    scopes = {}
+    for scope in value.get("publicScopes", []):
+        key = tuple(scope.get("path", []))
+        constraints = scope.get("constraints")
+        if key in scopes or not isinstance(constraints, list):
+            raise RuntimeError("Program function registry contains an invalid public scope")
+        scopes[key] = constraints
+    names = set()
+    functions = []
+    for item in value.get("functions", []):
+        name = item.get("name")
+        layer = item.get("layer")
+        category = item.get("category")
+        scope = item.get("scope", {})
+        scope_path = scope.get("path")
+        if (not isinstance(name, str) or not name or name in names
+                or (layer, category) not in categories
+                or scope.get("kind") != "public"
+                or scope_path != [layer, category]):
+            raise RuntimeError(f"Invalid or duplicate Program function: {name}")
+        names.add(name)
+        effective = []
+        for length in range(len(scope_path) + 1):
+            prefix = tuple(scope_path[:length])
+            if prefix not in scopes:
+                raise RuntimeError(f"Missing public scope prefix for {name}")
+            for constraint in scopes[prefix]:
+                if constraint not in effective:
+                    effective.append(constraint)
+        functions.append({**item, "effectiveConstraints": effective})
+    executable = [item for item in value.get("types", []) if item.get("executable")]
+    if executable != [{"id": "program", "layer": "kernel", "executable": True}]:
+        raise RuntimeError("Program must be the only executable kernel type")
+    return {**value, "functions": functions}
+
+
+PROGRAM_FUNCTION_REGISTRY = load_program_function_registry()
+REGISTERED_PROGRAM_FUNCTIONS = {
+    item["name"] for item in PROGRAM_FUNCTION_REGISTRY["functions"]
+}
 
 
 def load_program_templates():
@@ -87,8 +143,7 @@ ALLOWED_FUNCTIONS = {
     "direct_children", "child_detail", "missing_details", "form_status",
     "first_pending", "transition_allowed", "subtree_refs", "plan_form_flow",
     "plan_template_instance", "plan_shards", "instantiate", "template_catalog",
-    "use_program", "form", "work_order", "work_order_catalog",
-}
+} | REGISTERED_PROGRAM_FUNCTIONS
 
 ALLOWED_METHODS = {
     "append", "extend", "insert", "pop", "remove", "clear", "copy",
@@ -263,7 +318,10 @@ def main():
         return PROGRAM_TEMPLATES.catalog_entries(specification)
 
     def form(specification):
-        return compile_form(require_object(specification, "form"))
+        specification = require_object(specification, "form")
+        if "action" in specification:
+            return evaluate_form(specification)
+        return compile_form(specification)
 
     def parse_detail(record):
         try:
@@ -396,6 +454,31 @@ def main():
             "description": template["description"],
             **json.loads(json.dumps(versions[0], ensure_ascii=False)),
         }
+
+    def function_catalog(specification):
+        specification = require_object(specification, "function_catalog")
+        unknown = set(specification) - {"layer", "category", "scope"}
+        if unknown:
+            raise ValueError(
+                "Unknown function_catalog options: " + ", ".join(sorted(unknown))
+            )
+        requested_layer = specification.get("layer")
+        requested_category = specification.get("category")
+        requested_scope = specification.get("scope")
+        if requested_layer is not None and requested_layer not in {"kernel", "application"}:
+            raise ValueError("function_catalog.layer must be kernel or application")
+        if requested_category is not None and not isinstance(requested_category, str):
+            raise TypeError("function_catalog.category must be a string")
+        if requested_scope is not None and requested_scope not in {"atom", "public"}:
+            raise ValueError("function_catalog.scope must be atom or public")
+        result = json.loads(json.dumps(PROGRAM_FUNCTION_REGISTRY, ensure_ascii=False))
+        result["functions"] = [
+            item for item in result["functions"]
+            if (requested_layer is None or item["layer"] == requested_layer)
+            and (requested_category is None or item["category"] == requested_category)
+            and (requested_scope is None or item["scope"]["kind"] == requested_scope)
+        ]
+        return result
 
     def work_order_instance(selector):
         if not isinstance(selector, str) or not selector.strip():
@@ -703,6 +786,7 @@ def main():
         "plan_template_instance": plan_template_instance,
         "instantiate": instantiate,
         "template_catalog": template_catalog,
+        "function_catalog": function_catalog,
         "work_order_catalog": work_order_catalog,
         "form": form,
         "work_order": work_order,
@@ -745,6 +829,12 @@ def main():
             program_stack.pop()
 
     namespace["use_program"] = use_program
+    missing_implementations = REGISTERED_PROGRAM_FUNCTIONS - set(namespace)
+    if missing_implementations:
+        raise RuntimeError(
+            "Program function registry contains unimplemented functions: "
+            + ", ".join(sorted(missing_implementations))
+        )
     program_tree = validate_program(request["program"]["detail"], request["program"]["path"])
     exec(compile(program_tree, request["program"]["path"], "exec"), namespace, namespace)
     sys.stdout.write(json.dumps({"type": "result", "ok": True, **effects}, ensure_ascii=True) + "\n")

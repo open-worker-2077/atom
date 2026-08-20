@@ -14,9 +14,11 @@ import { createActionRegistry } from './registry.mjs';
 import { resolveAtomRuntime } from './runtime-config.mjs';
 import { TRANSFORM_COMMANDS } from './transform-key-parser.mjs';
 import { ATOM_RUNTIME_CONTRACT } from './runtime-contract.mjs';
+import { programFunctionRegistry } from './program-function-registry.mjs';
 
 export const DEFAULT_ATOM_COMMAND_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/command';
 export const DEFAULT_WORK_ORDER_REGISTRY_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/work-order-registry';
+export const DEFAULT_PROGRAM_FUNCTION_REGISTRY_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/program-function-registry';
 
 export async function executeAtomCommandEndpoint(options, endpoint = DEFAULT_ATOM_COMMAND_ENDPOINT) {
   let response;
@@ -76,6 +78,36 @@ export async function executeAtomWorkOrderRegistryEndpoint(
   return payload.result;
 }
 
+export async function executeAtomProgramFunctionRegistryEndpoint(
+  endpoint = DEFAULT_PROGRAM_FUNCTION_REGISTRY_ENDPOINT
+) {
+  let response;
+  try {
+    response = await fetch(endpoint);
+  } catch (cause) {
+    throw cliError(
+      'ATOM_ENGINE_UNAVAILABLE',
+      `Atom engineering service is unavailable at ${endpoint}: ${cause.message}`
+    );
+  }
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) {
+    throw cliError(
+      payload.error?.code ?? 'ATOM_ENGINE_REQUEST_FAILED',
+      payload.error?.message ?? 'Program function registry request failed'
+    );
+  }
+  if (payload.result?.contract !== 'atom-program-function-registry'
+    || payload.result?.version !== 1
+    || payload.result?.runtimeContract !== ATOM_RUNTIME_CONTRACT) {
+    throw cliError(
+      'ATOM_RUNTIME_CONTRACT_MISMATCH',
+      `Program function registry is stale or incompatible; restart the 4784 service (expected ${ATOM_RUNTIME_CONTRACT})`
+    );
+  }
+  return payload.result;
+}
+
 const TRANSFORM_HELP = Object.freeze({
   rep: '{"name":"A","detail.rep.NEW"}；局部替换用 "detail.rep.NEW":"OLD"；关系全替换用 "partners.rep.":[...]',
   sum: '{"name":"A","detail.sum.SUMMARY"}（只更新 detail 简介）',
@@ -106,9 +138,25 @@ function verifiedHelpLines() {
     || activeActions.some(({ baseKey, name }) => !Object.hasOwn(EXPLORE_HELP, `${baseKey}\u0000${name}`))) {
     throw cliError('ATOM_HELP_CONTRACT_DRIFT', 'Explore 动作注册表与 help 契约不一致');
   }
+  const functionRegistry = programFunctionRegistry();
+  const categoryLines = (layer) => functionRegistry.categories
+    .filter((category) => category.layer === layer)
+    .map((category) => {
+      const names = functionRegistry.functions
+        .filter((entry) => entry.layer === layer && entry.category === category.id)
+        .map((entry) => entry.name);
+      return names.length ? `  ${category.label}：${names.join('、')}` : null;
+    })
+    .filter(Boolean);
   return {
     transform: TRANSFORM_COMMANDS.map((name) => `  .${name}.  ${TRANSFORM_HELP[name]}`),
-    explore: activeActions.map(({ baseKey, name }) => `  ${EXPLORE_HELP[`${baseKey}\u0000${name}`]}`)
+    explore: activeActions.map(({ baseKey, name }) => `  ${EXPLORE_HELP[`${baseKey}\u0000${name}`]}`),
+    programFunctions: [
+      '内核函数：',
+      ...categoryLines('kernel'),
+      '应用函数：',
+      ...categoryLines('application')
+    ]
   };
 }
 
@@ -130,6 +178,7 @@ function help() {
     '  --agent AGENT      必填；exact 且唯一的 @agent 短名或业务路径',
     '  --stdin            从标准输入读取一条完整 Atom 命令；用于变量、多行、长文本和特殊字符',
     '  --json             已弃用的兼容选项；Atom 命令结果仍为 Graph-JSON',
+    '  --program-function-registry  输出 CLI/Web/Program 共用的注册函数分类与公共层级契约',
     '  --work-order-registry  输出 CLI/Web 共用的工单动作、错误与回执契约',
     '  -h, --help         显示帮助',
     '',
@@ -173,6 +222,9 @@ function help() {
     '',
     'Program 模板与复用：',
     '  @program 是唯一可执行类型，detail 直接保存 Python；普通交互不得手工替代已有 Program 或模板。',
+    '  本 Atom 行为由使用方封装为 @program；跨 Atom 可见的公共注册能力由后台维护，局部公共仍继承上级公共契约。',
+    ...contract.programFunctions,
+    '  注册函数目录：function_catalog({layer?,category?,scope?})；完整公共契约可用 atom.cmd --program-function-registry 读取。',
     '  多选函数：choice({id,options:[{id,label}],selected:[id],empty})；参数必须使用双引号标准 JSON（同时是合法 Python），当前仅支持多选，返回 selected 数组并在显式 .run. 回执中公开 choices。',
     '  Program 并发独立运行并共享单轮 10 秒时间预算；单项失败独立报告，超时自动中断。短期内避免编写超出该预算的复杂 Program。',
     '  世界函数：explore(query)->rows；transform(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
@@ -229,6 +281,7 @@ function parseCliArgs(argv) {
   let json = false;
   let readSourceFromStdin = false;
   let workOrderRegistryRequested = false;
+  let programFunctionRegistryRequested = false;
   const source = [];
   let positionalOnly = false;
   for (let index = 0; index < argv.length; index += 1) {
@@ -250,6 +303,10 @@ function parseCliArgs(argv) {
     }
     if (!positionalOnly && argument === '--work-order-registry') {
       workOrderRegistryRequested = true;
+      continue;
+    }
+    if (!positionalOnly && argument === '--program-function-registry') {
+      programFunctionRegistryRequested = true;
       continue;
     }
     if (!positionalOnly && argument === '--global') {
@@ -299,6 +356,7 @@ function parseCliArgs(argv) {
     json,
     readSourceFromStdin,
     workOrderRegistry: workOrderRegistryRequested,
+    programFunctionRegistry: programFunctionRegistryRequested,
     source
   };
 }
@@ -779,6 +837,12 @@ export async function runAtomCli(argv = [], overrides = {}) {
       stdout.write(`${help()}\n`);
       return 0;
     }
+    if (parsed.workOrderRegistry && parsed.programFunctionRegistry) {
+      throw cliError(
+        'AMBIGUOUS_COMMAND_SOURCE',
+        '--work-order-registry 与 --program-function-registry 必须单独使用'
+      );
+    }
     if (parsed.workOrderRegistry) {
       if (parsed.readSourceFromStdin || parsed.source.length) {
         throw cliError(
@@ -791,6 +855,24 @@ export async function runAtomCli(argv = [], overrides = {}) {
         throw cliError(
           'ATOM_WORK_ORDER_REGISTRY_UNAVAILABLE',
           'Atom CLI requires a work-order registry capability'
+        );
+      }
+      stdout.write(`${JSON.stringify(await loadRegistry(), null, 2)}\n`);
+      return 0;
+    }
+    if (parsed.programFunctionRegistry) {
+      if (parsed.readSourceFromStdin || parsed.source.length) {
+        throw cliError(
+          'AMBIGUOUS_COMMAND_SOURCE',
+          '--program-function-registry 不能与 Atom 命令或 --stdin 同时使用'
+        );
+      }
+      const loadRegistry = overrides.programFunctionRegistry
+        ?? executeAtomProgramFunctionRegistryEndpoint;
+      if (typeof loadRegistry !== 'function') {
+        throw cliError(
+          'ATOM_PROGRAM_FUNCTION_REGISTRY_UNAVAILABLE',
+          'Atom CLI requires a Program function registry capability'
         );
       }
       stdout.write(`${JSON.stringify(await loadRegistry(), null, 2)}\n`);

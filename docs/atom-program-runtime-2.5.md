@@ -48,6 +48,48 @@ effects explicit through the registered world functions.
 | `plan_template_instance(rows, parent_path, template)` | Compile one complete typed Atom subtree only when that instance is absent. |
 | `plan_shards(sources, specification)` | Produce a deterministic, side-effect-free shard plan. |
 
+## Adaptive Form evaluation
+
+`form()` keeps its direct four-axis compiler contract and also accepts one
+explicit, pure evaluation action. Each component declares `required`, `optional`,
+or `disabled`; the runtime never infers activation from a stage name or scale.
+Requirements use JSON key-path arrays, and components may nest recursively.
+
+```python
+result = form({
+    "action": "evaluate",
+    "components": [{
+        "name": "直接操作",
+        "activation": "required",
+        "value": {"结果": "完成"},
+        "requirements": [{"path": ["结果"]}],
+        "components": []
+    }]
+})
+```
+
+The result reports `valid`, activation groups, active component paths, and exact
+missing component/key paths. Evaluation cannot explore, emit effects, choose
+workflow stages, or update status. An unused optional component adds no missing
+result; a disabled component excludes its whole subtree without requiring a skip
+reason.
+
+## Registered function catalog
+
+`function_catalog({})` returns the same read-only Program function inventory as
+`atom.cmd --program-function-registry` and
+`GET /__atom/api/program-function-registry`. Optional `layer`, `category`, and
+`scope` filters return subsets of that inventory. The catalog keeps function
+layer, capability category, scope, and Atom type separate: `explore` and
+`transform` share the Graph-world category, `form` is a kernel structure
+capability, `work_order` is an application function, and `@program` remains the
+only executable kernel type.
+
+Scope is either one Atom or hierarchical public. Atom-local reusable behavior
+remains an ordinary `@program`; public registration and protected runtime changes
+remain backend responsibilities. See
+`docs/architecture/program-function-ecosystem.md` for the complete boundary.
+
 ### Standard compilation before sharding
 
 Form-flow compilation is the upstream operation. A compiler Program declares

@@ -5,6 +5,9 @@
 The runtime adds one protected Graph-native form kernel, `work_order` version 1,
 and a rebuildable per-Atom year ring. It does not add a fifth Graph axis, a
 parallel form store, organizational dispatch, claiming, or cross-order routing.
+The Form kernel now also evaluates caller-selected required, optional, and
+disabled component trees without imposing the work-order lifecycle on other
+applications; `work_order` remains one application of that kernel.
 
 Authoritative instances remain ordinary Atoms using only:
 

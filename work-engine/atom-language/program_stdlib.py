@@ -242,6 +242,138 @@ def compile_form(specification):
     }
 
 
+def _json_has_content(value):
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return True
+
+
+def _normalize_form_component(component, parent_path=()):
+    if not isinstance(component, dict):
+        raise TypeError("form.evaluate components must be JSON objects")
+    allowed = {"name", "activation", "value", "requirements", "components"}
+    unknown = set(component) - allowed
+    if unknown:
+        raise ValueError(
+            "form.evaluate component contains unknown keys: " + ", ".join(sorted(unknown))
+        )
+    name = component.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("form.evaluate component requires a non-empty name")
+    activation = component.get("activation")
+    if activation not in {"required", "optional", "disabled"}:
+        raise ValueError(
+            "form.evaluate component activation must be required, optional, or disabled"
+        )
+    requirements = component.get("requirements", [])
+    children = component.get("components", [])
+    if not isinstance(requirements, list):
+        raise TypeError("form.evaluate component requirements must be an array")
+    if not isinstance(children, list):
+        raise TypeError("form.evaluate nested components must be an array")
+    normalized_requirements = []
+    for requirement in requirements:
+        if not isinstance(requirement, dict) or set(requirement) != {"path"}:
+            raise ValueError("form.evaluate requirements require exactly one path array")
+        key_path = requirement["path"]
+        if (not isinstance(key_path, list) or not key_path
+                or any(not isinstance(key, str) or not key for key in key_path)):
+            raise ValueError(
+                "form.evaluate requirement path must contain non-empty JSON key strings"
+            )
+        normalized_requirements.append({"path": list(key_path)})
+    normalized_children = [
+        _normalize_form_component(child, (*parent_path, name)) for child in children
+    ]
+    child_names = [child["name"] for child in normalized_children]
+    if len(set(child_names)) != len(child_names):
+        location = "/".join((*parent_path, name))
+        raise ValueError(f"form.evaluate contains duplicate component names under {location}")
+    return {
+        "name": name,
+        "activation": activation,
+        "value": component.get("value", {}),
+        "requirements": normalized_requirements,
+        "components": normalized_children,
+    }
+
+
+def _component_has_content(component):
+    if component["activation"] == "disabled":
+        return False
+    if _json_has_content(component["value"]):
+        return True
+    return any(_component_has_content(child) for child in component["components"])
+
+
+def _required_value(value, key_path):
+    current = value
+    for key in key_path:
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+    return current
+
+
+def evaluate_form(specification):
+    """Evaluate caller-selected components without reading or changing the Atom world."""
+    if not isinstance(specification, dict):
+        raise TypeError("form() requires one JSON object argument")
+    unknown = set(specification) - {"action", "components"}
+    if unknown:
+        raise ValueError(
+            "form.evaluate contains unknown options: " + ", ".join(sorted(unknown))
+        )
+    if specification.get("action") != "evaluate":
+        raise ValueError("form.action must be evaluate when an action is supplied")
+    submitted = specification.get("components")
+    if not isinstance(submitted, list):
+        raise TypeError("form.evaluate components must be an array")
+    components = [_normalize_form_component(component) for component in submitted]
+    component_names = [component["name"] for component in components]
+    if len(set(component_names)) != len(component_names):
+        raise ValueError("form.evaluate contains duplicate top-level component names")
+
+    result = {
+        "valid": True,
+        "required": [],
+        "optional": [],
+        "disabled": [],
+        "active": [],
+        "missing": [],
+    }
+
+    def evaluate(component, parent_path=()):
+        component_path = (*parent_path, component["name"])
+        display_path = "/".join(component_path)
+        activation = component["activation"]
+        result[activation].append(display_path)
+        if activation == "disabled":
+            return
+        engaged = activation == "required" or _component_has_content(component)
+        if not engaged:
+            return
+        result["active"].append(display_path)
+        for requirement in component["requirements"]:
+            key_path = requirement["path"]
+            if not _json_has_content(_required_value(component["value"], key_path)):
+                result["missing"].append({
+                    "component": list(component_path),
+                    "path": list(key_path),
+                })
+        for child in component["components"]:
+            evaluate(child, component_path)
+
+    for component in components:
+        evaluate(component)
+    result["valid"] = not result["missing"]
+    return result
+
+
 def work_order_template(title, creation_id, version="1"):
     """Build the first Graph-native work-order template without emitting effects."""
     if str(version) != "1":

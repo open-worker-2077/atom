@@ -19,6 +19,7 @@ import { resolveAtomRuntime } from './runtime-config.mjs';
 import { createProgramRuntimeScheduler } from './program-runtime.mjs';
 import { ATOM_RUNTIME_CONTRACT } from './runtime-contract.mjs';
 import { workOrderRegistry } from './work-order-registry.mjs';
+import { programFunctionRegistry } from './program-function-registry.mjs';
 
 export const DEFAULT_ATOM_GRAPH_HOST = '127.0.0.1';
 export const DEFAULT_ATOM_GRAPH_PORT = 4784;
@@ -278,6 +279,9 @@ export function createAtomGraphHandlers(interactionRuntime) {
     },
     async workOrderRegistry() {
       return workOrderRegistry();
+    },
+    async programFunctionRegistry() {
+      return programFunctionRegistry();
     }
   });
 }
@@ -343,7 +347,8 @@ export async function startAtomGraphServer(options = {}) {
     atomHumanStatus: handlers.atomHumanStatus,
     atomWorkspaceEdit: handlers.atomWorkspaceEdit,
     atomProjectionRecover: handlers.atomProjectionRecover,
-    atomWorkOrderRegistry: handlers.workOrderRegistry
+    atomWorkOrderRegistry: handlers.workOrderRegistry,
+    atomProgramFunctionRegistry: handlers.programFunctionRegistry
   });
   backupTrigger?.start();
   instance.server.once('close', () => backupTrigger?.close());

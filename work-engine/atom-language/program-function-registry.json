@@ -1,0 +1,64 @@
+{
+  "contract": "atom-program-function-registry",
+  "version": 1,
+  "runtimeContract": "atom-interaction/3",
+  "scopeKinds": [
+    { "id": "atom", "public": false, "hierarchical": false },
+    { "id": "public", "public": true, "hierarchical": true, "inheritsParentConstraints": true }
+  ],
+  "types": [
+    { "id": "program", "layer": "kernel", "executable": true }
+  ],
+  "categories": [
+    { "layer": "kernel", "id": "graph-world", "label": "Graph 世界操作" },
+    { "layer": "kernel", "id": "graph-governance", "label": "Graph 约束" },
+    { "layer": "kernel", "id": "interaction", "label": "交互结果" },
+    { "layer": "kernel", "id": "execution", "label": "Program 执行与组合" },
+    { "layer": "kernel", "id": "graph-read", "label": "Graph 读取辅助" },
+    { "layer": "kernel", "id": "structure-constraint", "label": "结构与约束" },
+    { "layer": "kernel", "id": "planning", "label": "通用规划" },
+    { "layer": "kernel", "id": "template", "label": "模板组合" },
+    { "layer": "kernel", "id": "governance", "label": "注册与自省" },
+    { "layer": "application", "id": "work-order", "label": "工单应用" }
+  ],
+  "publicScopes": [
+    { "path": [], "constraints": ["stable-contract"] },
+    { "path": ["kernel"], "constraints": [] },
+    { "path": ["kernel", "graph-world"], "constraints": ["graph-native"] },
+    { "path": ["kernel", "graph-governance"], "constraints": ["protected-effects"] },
+    { "path": ["kernel", "interaction"], "constraints": ["json-compatible"] },
+    { "path": ["kernel", "execution"], "constraints": ["sandboxed"] },
+    { "path": ["kernel", "graph-read"], "constraints": ["immutable-input"] },
+    { "path": ["kernel", "structure-constraint"], "constraints": ["graph-native", "caller-controlled"] },
+    { "path": ["kernel", "planning"], "constraints": ["side-effect-free"] },
+    { "path": ["kernel", "template"], "constraints": ["versioned-public-contract"] },
+    { "path": ["kernel", "governance"], "constraints": ["read-only"] },
+    { "path": ["application"], "constraints": ["kernel-only-dependencies"] },
+    { "path": ["application", "work-order"], "constraints": ["central-transaction"] }
+  ],
+  "functions": [
+    { "name": "explore", "layer": "kernel", "category": "graph-world", "scope": { "kind": "public", "path": ["kernel", "graph-world"] } },
+    { "name": "transform", "layer": "kernel", "category": "graph-world", "scope": { "kind": "public", "path": ["kernel", "graph-world"] } },
+    { "name": "lock", "layer": "kernel", "category": "graph-governance", "scope": { "kind": "public", "path": ["kernel", "graph-governance"] } },
+    { "name": "message", "layer": "kernel", "category": "interaction", "scope": { "kind": "public", "path": ["kernel", "interaction"] } },
+    { "name": "choice", "layer": "kernel", "category": "interaction", "scope": { "kind": "public", "path": ["kernel", "interaction"] } },
+    { "name": "current_atom", "layer": "kernel", "category": "execution", "scope": { "kind": "public", "path": ["kernel", "execution"] } },
+    { "name": "use_program", "layer": "kernel", "category": "execution", "scope": { "kind": "public", "path": ["kernel", "execution"] } },
+    { "name": "direct_children", "layer": "kernel", "category": "graph-read", "scope": { "kind": "public", "path": ["kernel", "graph-read"] } },
+    { "name": "child_detail", "layer": "kernel", "category": "graph-read", "scope": { "kind": "public", "path": ["kernel", "graph-read"] } },
+    { "name": "subtree_refs", "layer": "kernel", "category": "graph-read", "scope": { "kind": "public", "path": ["kernel", "graph-read"] } },
+    { "name": "form", "layer": "kernel", "category": "structure-constraint", "scope": { "kind": "public", "path": ["kernel", "structure-constraint"] } },
+    { "name": "missing_details", "layer": "kernel", "category": "structure-constraint", "scope": { "kind": "public", "path": ["kernel", "structure-constraint"] } },
+    { "name": "form_status", "layer": "kernel", "category": "structure-constraint", "scope": { "kind": "public", "path": ["kernel", "structure-constraint"] } },
+    { "name": "plan_form_flow", "layer": "kernel", "category": "structure-constraint", "scope": { "kind": "public", "path": ["kernel", "structure-constraint"] } },
+    { "name": "first_pending", "layer": "kernel", "category": "planning", "scope": { "kind": "public", "path": ["kernel", "planning"] } },
+    { "name": "transition_allowed", "layer": "kernel", "category": "planning", "scope": { "kind": "public", "path": ["kernel", "planning"] } },
+    { "name": "plan_shards", "layer": "kernel", "category": "planning", "scope": { "kind": "public", "path": ["kernel", "planning"] } },
+    { "name": "plan_template_instance", "layer": "kernel", "category": "planning", "scope": { "kind": "public", "path": ["kernel", "planning"] } },
+    { "name": "instantiate", "layer": "kernel", "category": "template", "scope": { "kind": "public", "path": ["kernel", "template"] } },
+    { "name": "template_catalog", "layer": "kernel", "category": "template", "scope": { "kind": "public", "path": ["kernel", "template"] } },
+    { "name": "function_catalog", "layer": "kernel", "category": "governance", "scope": { "kind": "public", "path": ["kernel", "governance"] } },
+    { "name": "work_order", "layer": "application", "category": "work-order", "scope": { "kind": "public", "path": ["application", "work-order"] } },
+    { "name": "work_order_catalog", "layer": "application", "category": "work-order", "scope": { "kind": "public", "path": ["application", "work-order"] } }
+  ]
+}
