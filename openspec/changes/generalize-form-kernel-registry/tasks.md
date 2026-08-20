@@ -27,4 +27,4 @@
 
 - [x] 5.1 Run focused Form, Program standard-library, work-order, advancement-flow, CLI/Web and architecture suites; resolve regressions within scope.
 - [x] 5.2 Run strict OpenSpec validation and relevant repository-wide regression, recording exact unrelated baseline failures without overstating completion.
-- [ ] 5.3 Run GitNexus change detection, review the final diff for scope and data safety, then commit only the change-owned files.
+- [x] 5.3 Run GitNexus change detection, review the final diff for scope and data safety, then commit only the change-owned files.
