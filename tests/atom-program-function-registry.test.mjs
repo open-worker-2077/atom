@@ -119,6 +119,21 @@ test('CLI Help renders coarse families and keeps local Program research open', a
   assert.match(stdout.value(), /注册表[\s\S]*底层运行时[\s\S]*不通过 Program 开放修改/u);
 });
 
+test('CLI Help exposes the complete adaptive form evaluation contract', async () => {
+  const stdout = output();
+  const stderr = output();
+  const code = await runAtomCli(['--help'], { stdout: stdout.stream, stderr: stderr.stream });
+
+  assert.equal(code, 0, stderr.value());
+  assert.match(stdout.value(), /form\(\{"action":"evaluate","components":\[/u);
+  assert.match(stdout.value(), /"activation":"required\|optional\|disabled"/u);
+  assert.match(stdout.value(), /"requirements":\[\{"path":\["JSON键"/u);
+  assert.match(stdout.value(), /components 可递归/u);
+  assert.match(stdout.value(), /valid、required、optional、disabled、active、missing/u);
+  assert.match(stdout.value(), /missing[\s\S]*component[\s\S]*path/u);
+  assert.match(stdout.value(), /disabled[\s\S]*不参与校验[\s\S]*未使用的 optional[\s\S]*不形成缺项/u);
+});
+
 test('CLI rejects selecting both public registry projections at once', async () => {
   const stdout = output();
   const stderr = output();

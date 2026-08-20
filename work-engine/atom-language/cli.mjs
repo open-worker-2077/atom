@@ -226,6 +226,8 @@ function help() {
     '  注册表与底层运行时不通过 Program 开放修改；这项保护不限制 Agent 自行研发 Program。',
     ...contract.programFunctions,
     '  注册函数目录：function_catalog({layer?,family?,scope?})；完整公共契约可用 atom.cmd --program-function-registry 读取。',
+    '  Form 评估：form({"action":"evaluate","components":[{"name":"组件","activation":"required|optional|disabled","value":{},"requirements":[{"path":["JSON键","下级键"]}],"components":[]}]})；components 可递归嵌套。',
+    '  Form 返回 valid、required、optional、disabled、active、missing；missing 每项为 {"component":["组件路径"],"path":["缺失键路径"]}。required 必参与；optional 在自身或后代有内容时参与；disabled 子树不参与校验；未使用的 optional 不形成缺项。',
     '  多选函数：choice({id,options:[{id,label}],selected:[id],empty})；参数必须使用双引号标准 JSON（同时是合法 Python），当前仅支持多选，返回 selected 数组并在显式 .run. 回执中公开 choices。',
     '  Program 并发独立运行并共享单轮 10 秒时间预算；单项失败独立报告，超时自动中断。短期内避免编写超出该预算的复杂 Program。',
     '  世界函数：explore(query)->rows；transform(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
