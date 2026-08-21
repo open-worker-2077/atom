@@ -39,6 +39,54 @@ test('Program routing helpers choose the first unfinished form and validate tran
   assert.equal(cycle.messages[0].text, '调研|True|False');
 });
 
+test('Program JSON codecs parse strict JSON and stringify compact or indented Unicode JSON', async () => {
+  const cycle = await runProgram([
+    'value = json_parse({"text": "{\\"name\\":\\"中文\\",\\"items\\":[1,true,null]}"})',
+    'compact = json_stringify({"value": value})',
+    'pretty = json_stringify({"value": value, "indent": 2})',
+    'scalar = json_parse({"text": "42"})',
+    'message({"level": "info", "text": compact + "|" + str(scalar) + "|" + pretty})'
+  ].join('\n'));
+
+  assert.equal(
+    cycle.messages[0].text,
+    '{"name":"中文","items":[1,true,null]}|42|{\n  "name": "中文",\n  "items": [\n    1,\n    true,\n    null\n  ]\n}'
+  );
+});
+
+test('Program JSON codecs reject non-standard input, unknown options, and non-JSON values', async () => {
+  for (const source of [
+    'json_parse({"text": "{\\"value\\": NaN}"})',
+    'json_parse({"text": "1e400"})',
+    'json_parse({"text": "-1e400"})',
+    'json_parse({"text": "{\\"truncated\\":"})',
+    'json_parse({"text": "{\\"trailing\\": true,}"})',
+    'json_parse({"text": "{}", "extra": true})',
+    'json_stringify({"value": float("nan")})',
+    'json_stringify({"value": {1: "not-a-json-key"}})',
+    'json_stringify({"value": ("tuple",)})',
+    'json_stringify({"value": [], "indent": true})',
+    'json_stringify({"value": [], "indent": 9})',
+    'json_stringify({"value": [], "extra": true})',
+    'value = []\nvalue.append(value)\njson_stringify({"value": value})'
+  ]) {
+    await assert.rejects(runProgram(source), { code: 'ATOM_PROGRAM_FAILED' });
+  }
+});
+
+test('Program JSON transport rejects non-finite effect data without terminating the test runtime', async () => {
+  await assert.rejects(runProgram([
+    'message({"level": "info", "text": "unsafe", "data": {"value": float("inf")}})'
+  ].join('\n')), { code: 'ATOM_PROGRAM_FAILED' });
+
+  const healthy = await runProgram([
+    'value = json_stringify({"value": 1.5, "indent": 0})',
+    'round_trip = json_parse({"text": value})',
+    'message({"level": "info", "text": str(round_trip)})'
+  ].join('\n'));
+  assert.equal(healthy.messages[0].text, '1.5');
+});
+
 test('Program choice registers one multi-select control and returns its selected values', async () => {
   const cycle = await runProgram([
     "selected = choice({'id': '状态', 'options': [{'id': 'todo', 'label': '待办'}, {'id': 'done', 'label': '完成'}], 'selected': ['todo'], 'empty': '未选择'})",

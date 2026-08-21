@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import {
   materializeGraphJson,
   parseGraphJson
@@ -250,6 +251,48 @@ test('a single Transform and its Program consequences share one authoritative co
   assert.equal(sourceB.detail, '自动乙');
   assert.equal(result.revisionAfter, crypto.createHash('sha256')
     .update(JSON.stringify([sourceA, sourceB])).digest('hex'));
+});
+
+test('a real Program creates then updates one new Atom inside the triggering central commit', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-create-update-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    { name: 'test', detail: '', children: [], partners: [] },
+    { name: 'Trigger', detail: 'wait', children: [], partners: [] },
+    {
+      'name@program': 'Create Then Update',
+      detail: [
+        "trigger = explore({'name': 'Trigger', 'detail$full': None})[0]",
+        "if trigger.detail == 'go':",
+        "    transform({'name': 'test/Created In Reconcile', 'detail': 'created', 'children': [], 'partners': []})",
+        "    transform({'name': 'test/Created In Reconcile', 'detail.rep.final': None})"
+      ].join('\n'),
+      children: [],
+      partners: []
+    }
+  ], null, 2));
+  const writes = [];
+  const world = createLegacyWorldService({
+    onAuthoritativeWrite: (write) => writes.push(write)
+  });
+
+  const result = await world.executeLegacy({
+    contextFile,
+    projectionFile,
+    source: 'transform {"name":"Trigger","detail.rep.go"}',
+    programMode: 'reconcile',
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(writes.length, 1);
+  const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(persisted[0].children[0].name, 'Created In Reconcile');
+  assert.equal(persisted[0].children[0].detail, 'final');
+  assert.equal(result.revisionAfter, crypto.createHash('sha256')
+    .update(JSON.stringify(persisted)).digest('hex'));
 });
 
 test('batch receipt follows a final Program rename in the same commit', async (t) => {

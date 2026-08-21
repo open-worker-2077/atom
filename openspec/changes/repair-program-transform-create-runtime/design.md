@@ -35,6 +35,8 @@ The engine will isolate the current `transform new` mutation core into one local
 
 Program reconciliation will continue to plan all deferred effects first and persist only the validated final candidate world. Creation candidates will additionally pass Program-source validation when they introduce executable content; the final Graph projection and central commit remain the authoritative all-or-nothing gates.
 
+Nested creation authorizes both the not-yet-existing target path and the existing parent Atom's `children` field. Introduced or changed `@program` source is checked by the same Python sandbox AST validator in validation-only mode before the candidate world can commit.
+
 Duplicating the external creation block inside Program reconciliation was rejected because validation and collision behavior would drift. Calling the public CLI recursively was rejected because it would create nested transactions and bypass the effect-set reconciliation boundary.
 
 ### 3. Keep `transform()` return value as `None`
@@ -47,18 +49,27 @@ Returning the submitted object was rejected because it would look like a committ
 
 After world records are built, the scheduler will identify the unique record carrying both `backup` and `default` types and mark its entire descendant closure inactive for Program execution. `programRecords()` will select only active Programs. The same active set will be sent to the worker as the callable `use_program` catalog, while ordinary world records remain available to authorized `explore`.
 
+Zero default-backup records means no ancestry exclusion. Exactly one excludes its closure. Multiple typed default-backup roots fail explicitly with `AMBIGUOUS_DEFAULT_BACKUP` instead of silently disabling several Program subtrees.
+
 Filtering by a localized name such as `默认备份仓` was rejected because type annotations are the stable semantic identity. Filtering only top-level children was rejected because Programs can be nested arbitrarily deep. Filtering only scheduler roots was rejected because `use_program` would still execute backed-up code indirectly.
 
 ### 5. Expose one structured Transform contract
 
 The existing registry entry for `transform` will gain JSON-compatible contract metadata describing its create form, update form, deferred result and confirmation rule. CLI Help will render the same semantics in concise examples. The registry family hierarchy and public scope model remain unchanged.
 
+### 6. Keep selected explicit runs out of the full-world projection slot
+
+`name.run.` evaluates one selected Program and may refresh that Program's in-memory reusable result, but it must not replace the persisted projection for the complete active Program set. Only an unselected full-set refresh may publish the projection later consumed by ordinary `explore` after restart.
+
+Persisting a selected subset was rejected because the next ordinary read cannot validate it against the complete Program-set fingerprint. That mismatch forces an avoidable full-world rebuild and can outlive the CLI request timeout in a large world, producing an empty receipt even though the server eventually recovers.
+
 ## Risks / Trade-offs
 
 - **[Previously undocumented full-four-axis updates become creation attempts]** → Plain full-axis replacement is already outside the documented update contract; retain every documented dot-command update and add a regression test.
 - **[Creation and update effects in one cycle can target each other]** → Apply effects deterministically in emitted order against one candidate world, then validate and commit the final world atomically.
-- **[Backup identification fails in a malformed world]** → Do not guess by name; existing world validation remains responsible for enforcing the unique default backup. With no valid default-backup record, the scheduler performs no ancestry exclusion and the interaction surfaces the existing world-validation failure at its normal gate.
+- **[Backup identification fails in a malformed world]** → Do not guess by name; with no typed default backup the scheduler performs no ancestry exclusion, while multiple typed roots fail explicitly before Program selection.
 - **[Registry metadata surprises older readers]** → Add optional fields without changing contract version 2 or existing required fields; existing readers that select known keys remain compatible.
+- **[Explicit runs need durable results]** → Keep selected results in the existing in-memory caches; durable authoritative facts still travel through the central world commit, while only the derived full-set projection remains restart-persistent.
 
 ## Migration Plan
 

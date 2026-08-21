@@ -52,6 +52,16 @@ function worldRecords(atoms) {
 
 function programRecords(records, selector = null) {
   const recordsByRef = new Map(records.map((record) => [record.ref, record]));
+  const defaultBackups = records.filter((record) => (
+    record.types.includes('backup') && record.types.includes('default')
+  ));
+  if (defaultBackups.length > 1) {
+    const error = new Error('World contains multiple typed default backup roots');
+    error.code = 'AMBIGUOUS_DEFAULT_BACKUP';
+    error.details = { paths: defaultBackups.map((record) => record.path) };
+    throw error;
+  }
+  const [defaultBackup] = defaultBackups;
   const insideDefaultBackup = new Map();
   const isInsideDefaultBackup = (record) => {
     if (!record) return false;
@@ -60,12 +70,12 @@ function programRecords(records, selector = null) {
     let current = record;
     while (current && !insideDefaultBackup.has(current.ref)) {
       lineage.push(current);
-      if (current.types.includes('backup') && current.types.includes('default')) break;
+      if (current.ref === defaultBackup?.ref) break;
       current = current.parentRef ? recordsByRef.get(current.parentRef) : null;
     }
     let inactive = current
       ? insideDefaultBackup.get(current.ref)
-        ?? (current.types.includes('backup') && current.types.includes('default'))
+        ?? (current.ref === defaultBackup?.ref)
       : false;
     while (lineage.length) {
       insideDefaultBackup.set(lineage.pop().ref, inactive);
@@ -330,7 +340,9 @@ function validateResult(result, records, program) {
   return { locks, messages, transforms, choices };
 }
 
-function runWorker({ python, records, programs, program, timeoutMs, executeExplore }) {
+function runWorker({
+  python, records, programs, program, timeoutMs, executeExplore, validateOnly = false
+}) {
   return new Promise((resolve, reject) => {
     const child = spawn(python, ['-I', '-X', 'utf8', workerFile], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -340,6 +352,7 @@ function runWorker({ python, records, programs, program, timeoutMs, executeExplo
     let stdout = '';
     let stderr = '';
     let workerClosed = false;
+    let protocolError = null;
     const writeToWorker = (payload) => {
       if (workerClosed || child.stdin.destroyed || !child.stdin.writable) return false;
       child.stdin.write(`${JSON.stringify(payload)}\n`);
@@ -373,6 +386,11 @@ function runWorker({ python, records, programs, program, timeoutMs, executeExplo
             return;
           }
           child.__atomResult = event;
+        }).catch((error) => {
+          protocolError ??= Object.assign(
+            new Error(`Python Program emitted invalid JSON protocol: ${error.message}`),
+            { code: 'ATOM_PROGRAM_PROTOCOL_INVALID_JSON' }
+          );
         });
       }
     });
@@ -389,6 +407,10 @@ function runWorker({ python, records, programs, program, timeoutMs, executeExplo
       workerClosed = true;
       clearTimeout(timer);
       await handling;
+      if (protocolError) {
+        reject(protocolError);
+        return;
+      }
       if (code !== 0) {
         reject(Object.assign(new Error(stderr || `Python worker exited ${code}`), { code: 'ATOM_PROGRAM_WORKER_FAILED' }));
         return;
@@ -401,7 +423,8 @@ function runWorker({ python, records, programs, program, timeoutMs, executeExplo
     });
     writeToWorker({
       world: programs ?? records.filter((record) => record.types.includes('program')),
-      program
+      program,
+      validateOnly
     });
   });
 }
@@ -461,6 +484,36 @@ export class ProgramRuntimeScheduler {
       this.activeWorkers -= 1;
       this.workerQueue.shift()?.();
     }
+  }
+
+  async validateProgramSources(atoms, previousAtoms = []) {
+    const records = worldRecords(atoms);
+    const previousRecords = worldRecords(previousAtoms);
+    const previousByPath = new Map(previousRecords.map((record) => [record.path, record]));
+    const programs = records.filter((record) => (
+      record.types.includes('program')
+      && record.detail.trim()
+      && (() => {
+        const previous = previousByPath.get(record.path);
+        return !previous
+          || previous.detail !== record.detail
+          || !previous.types.includes('program');
+      })()
+    ));
+    await Promise.all(programs.map((program) => this.runBounded(() => this.runProgram({
+      python: this.python,
+      records,
+      programs: records.filter((record) => record.types.includes('program')),
+      program,
+      timeoutMs: this.timeoutMs,
+      executeExplore: async () => {
+        throw Object.assign(
+          new Error('Program validation cannot execute Graph functions'),
+          { code: 'INVALID_PROGRAM_VALIDATION_EFFECT' }
+        );
+      },
+      validateOnly: true
+    }))));
   }
 
   async loadProjection() {
@@ -853,15 +906,17 @@ export class ProgramRuntimeScheduler {
         worldKey: currentWorldKey,
         value
       });
-      const projectionWarning = await this.saveProjection({
-        records,
-        programs,
-        isolateFailures,
-        value,
-        requests: uniqueRequests,
-        agentOrigin: options.agentOrigin
-      });
-      if (projectionWarning) runtimeWarnings.push(projectionWarning);
+      if (!options.programSelector) {
+        const projectionWarning = await this.saveProjection({
+          records,
+          programs,
+          isolateFailures,
+          value,
+          requests: uniqueRequests,
+          agentOrigin: options.agentOrigin
+        });
+        if (projectionWarning) runtimeWarnings.push(projectionWarning);
+      }
     }
     if (runtimeWarnings.length) value.runtimeWarnings = runtimeWarnings;
     while (this.reusable.size > this.maxCompleted) {

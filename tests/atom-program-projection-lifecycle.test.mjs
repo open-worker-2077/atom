@@ -90,6 +90,38 @@ test('a validated Program projection survives scheduler restart for the exact wo
   assert.equal(executions, 1);
 });
 
+test('an explicit selected Program run cannot replace the persisted full-world projection', async () => {
+  const repository = memoryProjectionRepository();
+  const world = [
+    atom('Program A', '# selected', [], 'program'),
+    atom('Program B', '# remains active', [], 'program')
+  ];
+  const scheduler = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async () => ({ locks: [], messages: [], transforms: [] })
+  });
+
+  await scheduler.refresh(world, { isolateFailures: true });
+  await scheduler.refresh(structuredClone(world), {
+    isolateFailures: true,
+    programSelector: 'Program A',
+    force: true
+  });
+
+  const restarted = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async () => {
+      throw new Error('the preserved full-world projection must be restored');
+    }
+  });
+  const restored = await restarted.current(structuredClone(world), {
+    isolateFailures: true
+  });
+
+  assert.equal(restored.cached, true);
+  assert.deepEqual(restored.failures, []);
+});
+
 test('a persisted Program projection cannot be reused for a different world revision', async () => {
   const repository = memoryProjectionRepository();
   const scheduler = createProgramRuntimeScheduler({

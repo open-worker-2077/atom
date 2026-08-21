@@ -58,6 +58,20 @@ test('Program function catalog filters coarse families without a public hierarch
   );
 });
 
+test('Program function catalog discovers JSON codecs and their result contracts', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const cycle = await scheduler.refresh([
+    atom('JSON函数目录验收', [
+      'catalog = function_catalog({"layer": "kernel", "family": "program"})',
+      'codecs = [item for item in catalog["functions"] if item["name"] in ["json_parse", "json_stringify"]]',
+      'text = ",".join(sorted([item["name"] + ":" + item["contract"]["result"]["type"] for item in codecs]))',
+      'message({"level": "info", "text": text})'
+    ].join('\n'), [], 'program')
+  ]);
+
+  assert.equal(cycle.messages[0].text, 'json_parse:json,json_stringify:string');
+});
+
 test('function registry validator fails closed on duplicate or structurally invalid entries', async () => {
   const registryModule = await import('../work-engine/atom-language/program-function-registry.mjs');
   assert.equal(typeof registryModule.validateProgramFunctionRegistry, 'function');
@@ -165,6 +179,51 @@ test('CLI Help explains Program Transform creation, compatibility and confirmati
   assert.match(stdout.value(), /完整四轴[\s\S]*无点号指令[\s\S]*创建/u);
   assert.match(stdout.value(), /点号指令[\s\S]*更新/u);
   assert.match(stdout.value(), /返回 None[\s\S]*交互回执[\s\S]*exact explore/u);
+});
+
+test('public registry exposes strict Program JSON codec contracts', async () => {
+  const { programFunctionRegistry } = await import('../work-engine/atom-language/program-function-registry.mjs');
+  const registry = programFunctionRegistry();
+  const parse = registry.functions.find((item) => item.name === 'json_parse');
+  const stringify = registry.functions.find((item) => item.name === 'json_stringify');
+
+  assert.deepEqual(parse.contract.argument, {
+    type: 'object',
+    required: ['text'],
+    additionalProperties: false,
+    properties: { text: { type: 'string' } }
+  });
+  assert.deepEqual(parse.contract.result, { type: 'json' });
+  assert.equal(parse.contract.strictNumbers, true);
+  assert.equal(parse.contract.failureBoundary, 'program-evaluation');
+  assert.equal(parse.contract.effectsPublishedOnFailure, false);
+
+  assert.deepEqual(stringify.contract.argument, {
+    type: 'object',
+    required: ['value'],
+    additionalProperties: false,
+    properties: {
+      value: { type: 'json' },
+      indent: { type: 'integer', minimum: 0, maximum: 8 }
+    }
+  });
+  assert.deepEqual(stringify.contract.result, { type: 'string' });
+  assert.equal(stringify.contract.strictNumbers, true);
+  assert.equal(stringify.contract.failureBoundary, 'program-evaluation');
+  assert.equal(stringify.contract.effectsPublishedOnFailure, false);
+});
+
+test('CLI Help exposes JSON detail processing without opening import or eval', async () => {
+  const stdout = output();
+  const stderr = output();
+  const code = await runAtomCli(['--help'], { stdout: stdout.stream, stderr: stderr.stream });
+
+  assert.equal(code, 0, stderr.value());
+  assert.match(stdout.value(), /json_parse\(\{"text":"\.\.\."\}\)/u);
+  assert.match(stdout.value(), /json_stringify\(\{"value":\.\.\.,"indent"\?:0\.\.8\}\)/u);
+  assert.match(stdout.value(), /默认紧凑[\s\S]*NaN[\s\S]*Infinity[\s\S]*非 JSON 值/u);
+  assert.match(stdout.value(), /不开放 import\/eval[\s\S]*detail\.rep\./u);
+  assert.match(stdout.value(), /失败将终止整个 Program 评估[\s\S]*不发布已登记效果/u);
 });
 
 test('CLI rejects selecting both public registry projections at once', async () => {

@@ -81,6 +81,52 @@ test('Program transform uses the normal Transform executor and is persisted befo
   assert.equal(persisted[0].detail, '42');
 });
 
+test('Program parses source detail JSON, processes it, and serializes it into a Transform update', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-json-detail-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Source', '{"record_key":"R1","label":"旧"}'),
+    atom('Target', '{}'),
+    atom('JSON Processor', [
+      'source = explore({"name": "Source", "detail$full": True})[0]',
+      'value = json_parse({"text": source.detail})',
+      'value["label"] = "中文成果"',
+      'serialized = json_stringify({"value": value, "indent": 2})',
+      'target = explore({"name": "Target", "detail$full": True})[0]',
+      'if target.detail != serialized:',
+      '    transform({"name": "Target", "detail.rep." + serialized: None})'
+    ].join('\n'), [], 'program')
+  ], null, 2));
+
+  const run = await executeAtomLanguage({
+    source: 'transform {"name.run.":"JSON Processor"}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(run.ok, true, JSON.stringify(run.errors));
+  assert.equal(run.changed, true, JSON.stringify(run));
+
+  const result = await executeAtomLanguage({
+    source: 'explore {"name":"Target","detail$full":true}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.deepEqual(JSON.parse(result.items[0].matches[0].detail), {
+    record_key: 'R1', label: '中文成果'
+  });
+  const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.deepEqual(JSON.parse(persisted[1].detail), {
+    record_key: 'R1', label: '中文成果'
+  });
+});
+
 test('explicit Program run creates a nested four-axis Atom and leaves assignment as None', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-create-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
@@ -153,6 +199,94 @@ test('Program creation rejects a duplicate exact target without overwriting it',
   assert.equal(result.warnings[0].code, 'PROGRAM_TRANSFORM_REJECTED');
   assert.equal(result.warnings[0].cause, 'DUPLICATE_ATOM_NAME');
   assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].children[0].detail, 'original');
+});
+
+test('Program creation cannot append a child through a parent children write lock', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-create-parent-lock-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Parent'),
+    atom('Creator', [
+      "parent = explore({'name': 'Parent'})[0]",
+      "lock({'targets': {'refs': [parent.ref]}, 'mode': 'write', 'fields': ['children']})",
+      "transform({'name': 'Parent/Unauthorized', 'detail': '', 'children': [], 'partners': []})"
+    ].join('\n'), [], 'program')
+  ], null, 2));
+
+  const before = await fs.readFile(contextFile, 'utf8');
+  const result = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Creator"}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.changed, false, JSON.stringify(result));
+  assert.equal(result.warnings.some((warning) => (
+    warning.code === 'PROGRAM_TRANSFORM_REJECTED'
+      && warning.cause === 'PROGRAM_LOCK_DENIED'
+  )), true, JSON.stringify(result.warnings));
+  assert.equal(await fs.readFile(contextFile, 'utf8'), before);
+});
+
+test('Program creation rejects an introduced Program that violates the sandbox grammar', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-create-invalid-program-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('test'),
+    atom('Creator', "transform({'name@program': 'test/Bad Program', 'detail': 'import os', 'children': [], 'partners': []})", [], 'program')
+  ], null, 2));
+
+  const before = await fs.readFile(contextFile, 'utf8');
+  const result = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Creator"}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.changed, false, JSON.stringify(result));
+  assert.equal(result.warnings.some((warning) => (
+    warning.code === 'PROGRAM_TRANSFORM_REJECTED'
+      && warning.cause === 'INVALID_PROGRAM_SOURCE'
+  )), true, JSON.stringify(result.warnings));
+  assert.equal(await fs.readFile(contextFile, 'utf8'), before);
+});
+
+test('a caught JSON codec failure discards effects registered earlier in the Program', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-json-failure-atomic-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Target', 'original'),
+    atom('Catching Program', [
+      "transform({'name': 'Target', 'detail.rep.changed': None})",
+      'try:',
+      '    json_parse({"text": "NaN"})',
+      'except ValueError:',
+      '    pass'
+    ].join('\n'), [], 'program')
+  ], null, 2));
+
+  const before = await fs.readFile(contextFile, 'utf8');
+  const result = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Catching Program"}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.changed, false, JSON.stringify(result));
+  assert.equal(result.warnings.some((warning) => warning.code === 'ATOM_PROGRAM_FAILED'), true);
+  assert.equal(await fs.readFile(contextFile, 'utf8'), before);
 });
 
 test('explore keeps Program computation active without leaking unrelated Program failures into its receipt', async (t) => {
@@ -458,4 +592,56 @@ test('name.run accepts the same shortest unique path suffix as explore and trans
 
   assert.equal(nested.ok, true, JSON.stringify(nested.errors));
   assert.equal(nested.messages.some((message) => message.text === 'nested suffix ran'), true);
+});
+
+test('name.run keeps every active Program available to use_program', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-explicit-library-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Library', [
+      'def main(arguments):',
+      '    return {"value": arguments["value"] + "-library"}'
+    ].join('\n'), [], 'program'),
+    atom('Caller', [
+      'result = use_program({"name": "Library", "arguments": {"value": "active"}})',
+      'message({"level": "info", "text": result["value"]})'
+    ].join('\n'), [], 'program')
+  ], null, 2));
+
+  const result = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Caller"}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.messages.some((message) => message.text === 'active-library'), true);
+});
+
+test('name.run cannot select a Program below the typed default backup', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-explicit-backup-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Default Backup', '', [
+      atom('Archived', "message({'level': 'info', 'text': 'must not run'})", [], 'program')
+    ], 'backup@default')
+  ], null, 2));
+  const before = await fs.readFile(contextFile, 'utf8');
+
+  const result = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Default Backup/Archived"}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'PROGRAM_NOT_FOUND');
+  assert.deepEqual(result.messages ?? [], []);
+  assert.equal(await fs.readFile(contextFile, 'utf8'), before);
 });

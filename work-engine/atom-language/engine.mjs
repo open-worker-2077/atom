@@ -215,11 +215,25 @@ function programRunRequest(item) {
   return { selector: field.value };
 }
 
-function validatePrograms(atoms, contextFile, previousAtoms = null) {
-  void atoms;
+async function validatePrograms(atoms, contextFile, previousAtoms = null, programScheduler = null) {
   void contextFile;
-  void previousAtoms;
-  return { ok: true, errors: [], warnings: [] };
+  if (typeof programScheduler?.validateProgramSources !== 'function') {
+    return { ok: true, errors: [], warnings: [] };
+  }
+  try {
+    await programScheduler.validateProgramSources(atoms, previousAtoms ?? []);
+    return { ok: true, errors: [], warnings: [] };
+  } catch (error) {
+    return {
+      ok: false,
+      errors: [diagnostic(
+        'INVALID_PROGRAM_SOURCE',
+        error.message ?? 'Introduced Program source failed validation',
+        error.details ?? {}
+      )],
+      warnings: []
+    };
+  }
 }
 
 function appendNestedAtom(atoms, parentMatch, atom) {
@@ -246,7 +260,8 @@ async function applyCreateTransform({
   item,
   contextFile,
   authorize,
-  matcherRegistry
+  matcherRegistry,
+  programScheduler = null
 }) {
   const commandFields = item.fields.filter((field) => field.commands?.length);
   if (commandFields.length) {
@@ -299,11 +314,22 @@ async function applyCreateTransform({
         { parentPath, matches: parentMatches.map((match) => match.path.join('/')) }
       ) };
     }
+    const parentDecision = await authorize(parentMatches[0], 'write', 'children');
+    if (parentDecision.decision !== 'allow') {
+      const programDenied = parentDecision.matched
+        ? programLockDeniedDiagnostic(parentDecision, 'children')
+        : null;
+      return { error: diagnostic(
+        programDenied?.code ?? 'WINDOW_ACCESS_DENIED',
+        programDenied?.message ?? '当前窗口无权修改父 Atom 的 children；请反馈派发方',
+        programDenied?.details ?? { parentPath }
+      ) };
+    }
     atom[createNameField.rawKey] = childName;
     nextAtoms = appendNestedAtom(atoms, parentMatches[0], atom);
   }
 
-  const compiled = validatePrograms(nextAtoms, contextFile, atoms);
+  const compiled = await validatePrograms(nextAtoms, contextFile, atoms, programScheduler);
   if (!compiled.ok) return { error: compiled.errors[0], warnings: compiled.warnings };
   return {
     atoms: nextAtoms,
@@ -590,7 +616,8 @@ export async function executeAtomLanguage(options = {}) {
             item: compiled.item,
             contextFile,
             authorize: accessController.authorize,
-            matcherRegistry: receiver.matcherRegistry
+            matcherRegistry: receiver.matcherRegistry,
+            programScheduler: options.programScheduler
           })
         : await applyTransform({
             atoms,
@@ -752,7 +779,8 @@ export async function executeAtomLanguage(options = {}) {
                   item: entry.item,
                   contextFile,
                   authorize: cycleAccessController.authorize,
-                  matcherRegistry: receiver.matcherRegistry
+                  matcherRegistry: receiver.matcherRegistry,
+                  programScheduler: options.programScheduler
                 })
               : await applyTransform({
                   atoms: candidateAtoms,
@@ -1091,7 +1119,9 @@ export async function executeAtomLanguage(options = {}) {
       if (finalMatch) receipt.result = describeAtom(finalMatch, false);
     }
     if (changed) {
-      const compiled = validatePrograms(nextAtoms, contextFile, atoms);
+      const compiled = await validatePrograms(
+        nextAtoms, contextFile, atoms, options.programScheduler
+      );
       interactionWarnings.push(...compiled.warnings);
       if (!compiled.ok) {
         return failureBase(parsed, contextFile, projectionFile, atoms, compiled.errors);
@@ -1157,7 +1187,8 @@ export async function executeAtomLanguage(options = {}) {
       item,
       contextFile,
       authorize: accessController.authorize,
-      matcherRegistry: receiver.matcherRegistry
+      matcherRegistry: receiver.matcherRegistry,
+      programScheduler: options.programScheduler
     });
     interactionWarnings.push(...(created.warnings ?? []));
     if (created.error) {
@@ -1291,7 +1322,9 @@ export async function executeAtomLanguage(options = {}) {
     pathChanges: []
   };
   if (changed) {
-    const compiled = validatePrograms(nextAtoms, contextFile, atoms);
+    const compiled = await validatePrograms(
+      nextAtoms, contextFile, atoms, options.programScheduler
+    );
     interactionWarnings.push(...compiled.warnings);
     if (!compiled.ok) {
       return failureBase(

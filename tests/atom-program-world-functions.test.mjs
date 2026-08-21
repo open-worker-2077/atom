@@ -58,9 +58,20 @@ test('Program transform classifies only a complete command-free four-axis Atom a
     request: { name: '已有目标', children: [] },
     receiver
   });
+  const fourAxesWithCommand = compileProgramTransform({
+    request: {
+      name: '已有目标',
+      detail: '保留值',
+      children: [],
+      'partners.rep.': []
+    },
+    receiver
+  });
 
   assert.equal(create.ok, true);
   assert.equal(create.createNew, true);
   assert.equal(partial.ok, true);
   assert.equal(partial.createNew, false);
+  assert.equal(fourAxesWithCommand.ok, true);
+  assert.equal(fourAxesWithCommand.createNew, false);
 });

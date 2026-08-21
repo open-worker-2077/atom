@@ -18,4 +18,13 @@
 
 - [x] 4.1 运行定向 Program/Transform/Scheduler/CLI 测试、OpenSpec 严格校验和完整测试套件
 - [x] 4.2 重启 4784 服务并仅在 test 域运行既有 ESG 创建探针，以 exact explore 确认创建且普通读取不再受备份 Program 拖累
-- [ ] 4.3 向来源任务发送结构化故障修复回执，提交并推送本次软件与 OpenSpec 改动且不纳入用户原有 AGENTS.md 改动
+- [x] 4.3 向来源任务发送结构化故障修复回执
+- [ ] 4.4 提交并推送本次软件与 OpenSpec 改动且不纳入用户原有 AGENTS.md 改动
+
+## 5. 独立审查收敛
+
+- [x] 5.1 增加父 Atom children 写锁拒绝、非法 Program 提交前拒绝和多默认备份根显式失败测试
+- [x] 5.2 嵌套创建同时授权父 children，并通过 validation-only worker 校验新增或变更 Program
+- [x] 5.3 覆盖四轴点号更新判别、协调轮先创建后更新单次提交、显式 use_program 目录和备份 Program 不可显式运行
+- [x] 5.4 增加显式 name.run 不得覆盖完整 Program 投影的回归测试，并阻止选定子集写入完整投影槽位
+- [x] 5.5 重跑完整测试、OpenSpec 严格校验与 test 域上线探针

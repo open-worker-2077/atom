@@ -5,6 +5,115 @@ read files, mutate the Atom world, or emit effects.  World changes remain
 explicit calls to ``transform``, ``lock`` and ``message`` in Program source.
 """
 
+import json
+import math
+
+
+def _require_exact_object(specification, function_name, required, optional=()):
+    if not isinstance(specification, dict):
+        raise TypeError(f"{function_name}() requires one JSON object argument")
+    allowed = set(required) | set(optional)
+    unknown = set(specification) - allowed
+    if unknown:
+        raise ValueError(
+            f"{function_name}() contains unknown options: "
+            + ", ".join(sorted(unknown))
+        )
+    missing = [name for name in required if name not in specification]
+    if missing:
+        raise ValueError(
+            f"{function_name}() requires: " + ", ".join(missing)
+        )
+    return specification
+
+
+def _reject_nonstandard_json_constant(value):
+    raise ValueError(f"json_parse.text contains a non-standard JSON number: {value}")
+
+
+def json_parse(specification):
+    """Parse strict standard JSON without exposing Python's json module."""
+    specification = _require_exact_object(
+        specification, "json_parse", required=("text",)
+    )
+    text = specification["text"]
+    if not isinstance(text, str):
+        raise TypeError("json_parse.text must be a string")
+    try:
+        value = json.loads(text, parse_constant=_reject_nonstandard_json_constant)
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            "json_parse.text must contain valid standard JSON "
+            f"(line {error.lineno}, column {error.colno})"
+        ) from None
+    _validate_json_value(value)
+    return value
+
+
+def _validate_json_value(value, path="$", ancestors=None):
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"json_stringify.value contains a non-finite number at {path}")
+        return
+    if ancestors is None:
+        ancestors = set()
+    if isinstance(value, list):
+        identity = id(value)
+        if identity in ancestors:
+            raise ValueError(f"json_stringify.value contains a cycle at {path}")
+        ancestors.add(identity)
+        try:
+            for index, item in enumerate(value):
+                _validate_json_value(item, f"{path}[{index}]", ancestors)
+        finally:
+            ancestors.remove(identity)
+        return
+    if isinstance(value, dict):
+        identity = id(value)
+        if identity in ancestors:
+            raise ValueError(f"json_stringify.value contains a cycle at {path}")
+        ancestors.add(identity)
+        try:
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    raise TypeError(
+                        f"json_stringify.value requires string object keys at {path}"
+                    )
+                _validate_json_value(item, f"{path}.{key}", ancestors)
+        finally:
+            ancestors.remove(identity)
+        return
+    raise TypeError(
+        f"json_stringify.value contains a non-JSON value at {path}: "
+        f"{type(value).__name__}"
+    )
+
+
+def json_stringify(specification):
+    """Serialize only standard JSON values to compact or bounded-indented text."""
+    specification = _require_exact_object(
+        specification, "json_stringify", required=("value",), optional=("indent",)
+    )
+    value = specification["value"]
+    indent = specification.get("indent")
+    if "indent" in specification:
+        if isinstance(indent, bool) or not isinstance(indent, int):
+            raise TypeError("json_stringify.indent must be an integer from 0 through 8")
+        if indent < 0 or indent > 8:
+            raise ValueError("json_stringify.indent must be from 0 through 8")
+    _validate_json_value(value)
+    options = {
+        "ensure_ascii": False,
+        "allow_nan": False,
+    }
+    if "indent" in specification:
+        options["indent"] = indent
+    else:
+        options["separators"] = (",", ":")
+    return json.dumps(value, **options)
+
 
 def _join_path(parent_path, child_name):
     return f"{parent_path}/{child_name}" if parent_path else child_name

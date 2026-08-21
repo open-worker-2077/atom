@@ -233,6 +233,7 @@ function help() {
     '  Program 并发独立运行并共享单轮 10 秒时间预算；单项失败独立报告，超时自动中断。短期内避免编写超出该预算的复杂 Program。',
     '  Program transform 创建：transform({"name":"精确父路径/新节点","detail":"内容","children":[],"partners":[]})；完整四轴且无点号指令时创建，带点号指令的既有写法继续按更新处理。',
     '  transform() 返回 None，只表示登记了延后效果；实际提交必须以交互回执或后续 exact explore 回读确认。',
+    '  JSON 函数：json_parse({"text":"..."})->JSON值；json_stringify({"value":...,"indent"?:0..8})->string。序列化默认紧凑，拒绝 NaN、Infinity 和非 JSON 值；失败将终止整个 Program 评估且不发布已登记效果；不开放 import/eval；可配合 detail.rep. 写回。',
     '  世界函数：explore(query)->rows；transform(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
     '  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。',
     '  工单函数：work_order_catalog({template?,version?})->contract；work_order({action,...})->result。v1 动作固定为 create/fill/validate/submit/reject/revise/read-back。',

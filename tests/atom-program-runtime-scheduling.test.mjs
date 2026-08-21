@@ -200,6 +200,18 @@ test('a Program becomes executable again after it is restored outside the defaul
   assert.deepEqual(cycle.messages.map((message) => message.text), ['restored']);
 });
 
+test('multiple typed default backup roots fail explicitly instead of disabling multiple subtrees', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  await assert.rejects(scheduler.refresh([
+    atom('Default Backup A', '', [
+      atom('Archived A', "message({'level': 'info', 'text': 'A'})", [], 'program')
+    ], 'backup@default'),
+    atom('Default Backup B', '', [
+      atom('Archived B', "message({'level': 'info', 'text': 'B'})", [], 'program')
+    ], 'backup@default')
+  ]), { code: 'AMBIGUOUS_DEFAULT_BACKUP' });
+});
+
 test('Program cycles default to a ten-second wall-clock budget', () => {
   const scheduler = createProgramRuntimeScheduler();
 

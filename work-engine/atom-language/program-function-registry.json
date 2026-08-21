@@ -48,6 +48,47 @@
     { "name": "instantiate", "layer": "kernel", "family": "program", "scope": "public" },
     { "name": "template_catalog", "layer": "kernel", "family": "program", "scope": "public" },
     { "name": "function_catalog", "layer": "kernel", "family": "program", "scope": "public" },
+    {
+      "name": "json_parse",
+      "layer": "kernel",
+      "family": "program",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["text"],
+          "additionalProperties": false,
+          "properties": { "text": { "type": "string" } }
+        },
+        "result": { "type": "json" },
+        "strictNumbers": true,
+        "failureBoundary": "program-evaluation",
+        "effectsPublishedOnFailure": false,
+        "errors": ["TypeError", "ValueError"]
+      }
+    },
+    {
+      "name": "json_stringify",
+      "layer": "kernel",
+      "family": "program",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["value"],
+          "additionalProperties": false,
+          "properties": {
+            "value": { "type": "json" },
+            "indent": { "type": "integer", "minimum": 0, "maximum": 8 }
+          }
+        },
+        "result": { "type": "string" },
+        "strictNumbers": true,
+        "failureBoundary": "program-evaluation",
+        "effectsPublishedOnFailure": false,
+        "errors": ["TypeError", "ValueError"]
+      }
+    },
     { "name": "work_order", "layer": "application", "family": "work-order", "scope": "public" },
     { "name": "work_order_catalog", "layer": "application", "family": "work-order", "scope": "public" }
   ]

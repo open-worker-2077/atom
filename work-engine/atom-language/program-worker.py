@@ -31,6 +31,8 @@ transition_allowed = PROGRAM_STDLIB.transition_allowed
 compile_form = PROGRAM_STDLIB.compile_form
 evaluate_form = PROGRAM_STDLIB.evaluate_form
 work_order_template = PROGRAM_STDLIB.work_order_template
+json_parse_impl = PROGRAM_STDLIB.json_parse
+json_stringify_impl = PROGRAM_STDLIB.json_stringify
 
 
 def load_program_function_registry():
@@ -226,7 +228,7 @@ def main():
             "id": next_request_id,
             "function": function_name,
             "request": specification,
-        }, ensure_ascii=True) + "\n")
+        }, ensure_ascii=True, allow_nan=False) + "\n")
         sys.stdout.flush()
         response = json.loads(sys.stdin.readline())
         if response.get("id") != next_request_id:
@@ -751,6 +753,23 @@ def main():
         emit_detail_transform(root["path"], root_detail, updated_root)
         return {"revised": True, "status": "执行中", "path": selector}
 
+    codec_failure = None
+
+    def call_json_codec(implementation, specification):
+        nonlocal codec_failure
+        try:
+            return implementation(specification)
+        except (TypeError, ValueError) as error:
+            if codec_failure is None:
+                codec_failure = error
+            raise
+
+    def json_parse(specification):
+        return call_json_codec(json_parse_impl, specification)
+
+    def json_stringify(specification):
+        return call_json_codec(json_stringify_impl, specification)
+
     safe_builtins = {
         "all": all, "any": any, "bool": bool, "dict": dict, "enumerate": enumerate,
         "filter": filter, "float": float, "int": int, "len": len, "list": list,
@@ -780,6 +799,8 @@ def main():
         "instantiate": instantiate,
         "template_catalog": template_catalog,
         "function_catalog": function_catalog,
+        "json_parse": json_parse,
+        "json_stringify": json_stringify,
         "work_order_catalog": work_order_catalog,
         "form": form,
         "work_order": work_order,
@@ -829,8 +850,22 @@ def main():
             + ", ".join(sorted(missing_implementations))
         )
     program_tree = validate_program(request["program"]["detail"], request["program"]["path"])
+    if request.get("validateOnly") is True:
+        sys.stdout.write(json.dumps(
+            {"type": "result", "ok": True, **effects},
+            ensure_ascii=True,
+            allow_nan=False,
+        ) + "\n")
+        sys.stdout.flush()
+        return
     exec(compile(program_tree, request["program"]["path"], "exec"), namespace, namespace)
-    sys.stdout.write(json.dumps({"type": "result", "ok": True, **effects}, ensure_ascii=True) + "\n")
+    if codec_failure is not None:
+        raise codec_failure
+    sys.stdout.write(json.dumps(
+        {"type": "result", "ok": True, **effects},
+        ensure_ascii=True,
+        allow_nan=False,
+    ) + "\n")
     sys.stdout.flush()
 
 
@@ -845,5 +880,5 @@ if __name__ == "__main__":
                 "type": type(error).__name__,
                 "message": str(error),
             },
-        }, ensure_ascii=True) + "\n")
+        }, ensure_ascii=True, allow_nan=False) + "\n")
         sys.stdout.flush()
