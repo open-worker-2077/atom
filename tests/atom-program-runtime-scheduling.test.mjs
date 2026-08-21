@@ -154,6 +154,52 @@ test('one failed Program is isolated while healthy Program effects survive the s
   assert.equal(cycle.failures[0].code, 'ATOM_PROGRAM_FAILED');
 });
 
+test('Programs nested below the typed default backup are not executed', async () => {
+  const scheduler = createProgramRuntimeScheduler({ timeoutMs: 500 });
+  const cycle = await scheduler.refresh([
+    atom('Default Backup', '', [
+      atom('Archive', '', [
+        atom('Broken Archived Program', 'if', [], 'program')
+      ])
+    ], 'backup@default'),
+    atom('Active Program', "message({'level': 'info', 'text': 'active'})", [], 'program')
+  ], { isolateFailures: true });
+
+  assert.deepEqual(cycle.failures, []);
+  assert.deepEqual(cycle.messages.map((message) => message.text), ['active']);
+});
+
+test('use_program cannot execute a Program stored below the default backup', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const cycle = await scheduler.refresh([
+    atom('Default Backup', '', [
+      atom('Archived Library', [
+        'def main(arguments):',
+        "    return {'value': 'archived'}"
+      ].join('\n'), [], 'program')
+    ], 'backup@default'),
+    atom('Active Caller', [
+      "result = use_program({'name': 'Default Backup/Archived Library', 'arguments': {}})",
+      "message({'level': 'info', 'text': result['value']})"
+    ].join('\n'), [], 'program')
+  ], { isolateFailures: true });
+
+  assert.deepEqual(cycle.messages, []);
+  assert.equal(cycle.failures.length, 1);
+  assert.equal(cycle.failures[0].programPath, 'Active Caller');
+  assert.match(cycle.failures[0].message, /Referenced Program not found/u);
+});
+
+test('a Program becomes executable again after it is restored outside the default backup', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const cycle = await scheduler.refresh([
+    atom('Default Backup', '', [], 'backup@default'),
+    atom('Restored Program', "message({'level': 'info', 'text': 'restored'})", [], 'program')
+  ]);
+
+  assert.deepEqual(cycle.messages.map((message) => message.text), ['restored']);
+});
+
 test('Program cycles default to a ten-second wall-clock budget', () => {
   const scheduler = createProgramRuntimeScheduler();
 

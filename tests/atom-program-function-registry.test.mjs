@@ -134,6 +134,39 @@ test('CLI Help exposes the complete adaptive form evaluation contract', async ()
   assert.match(stdout.value(), /disabled[\s\S]*不参与校验[\s\S]*未使用的 optional[\s\S]*不形成缺项/u);
 });
 
+test('public registry exposes the deferred Program Transform create and update contract', async () => {
+  const { programFunctionRegistry } = await import('../work-engine/atom-language/program-function-registry.mjs');
+  const transform = programFunctionRegistry().functions.find((item) => item.name === 'transform');
+
+  assert.deepEqual(transform.contract.argument, { type: 'object', name: 'spec' });
+  assert.deepEqual(transform.contract.create.requiredAxes, [
+    'name', 'detail', 'children', 'partners'
+  ]);
+  assert.equal(transform.contract.create.dotCommands, 'forbidden');
+  assert.equal(transform.contract.update.dotCommands, 'supported');
+  assert.deepEqual(transform.contract.result, {
+    type: 'null',
+    value: null,
+    meaning: 'deferred-effect'
+  });
+  assert.deepEqual(transform.contract.confirmation, [
+    'interaction-receipt', 'exact-explore'
+  ]);
+});
+
+test('CLI Help explains Program Transform creation, compatibility and confirmation', async () => {
+  const stdout = output();
+  const stderr = output();
+  const code = await runAtomCli(['--help'], { stdout: stdout.stream, stderr: stderr.stream });
+
+  assert.equal(code, 0, stderr.value());
+  assert.match(stdout.value(), /Program transform 创建/u);
+  assert.match(stdout.value(), /name[\s\S]*detail[\s\S]*children[\s\S]*partners/u);
+  assert.match(stdout.value(), /完整四轴[\s\S]*无点号指令[\s\S]*创建/u);
+  assert.match(stdout.value(), /点号指令[\s\S]*更新/u);
+  assert.match(stdout.value(), /返回 None[\s\S]*交互回执[\s\S]*exact explore/u);
+});
+
 test('CLI rejects selecting both public registry projections at once', async () => {
   const stdout = output();
   const stderr = output();

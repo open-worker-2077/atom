@@ -81,6 +81,80 @@ test('Program transform uses the normal Transform executor and is persisted befo
   assert.equal(persisted[0].detail, '42');
 });
 
+test('explicit Program run creates a nested four-axis Atom and leaves assignment as None', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-create-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('test'),
+    atom('Creator', [
+      "result = transform({'name': 'test/Created', 'detail': '{\"probe\":true}', 'children': [], 'partners': []})",
+      "message({'level': 'info', 'text': str(result)})"
+    ].join('\n'), [], 'program')
+  ], null, 2));
+  const result = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Creator"}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.changed, true);
+  assert.equal(result.messages.some((message) => message.text === 'None'), true);
+  const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(persisted[0].children[0].name, 'Created');
+  assert.equal(persisted[0].children[0].detail, '{"probe":true}');
+});
+
+test('Program creation rejects a missing parent without persisting a partial Atom', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-create-missing-parent-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Creator', "transform({'name': 'missing/Created', 'detail': '', 'children': [], 'partners': []})", [], 'program')
+  ], null, 2));
+
+  const result = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Creator"}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.changed, false);
+  assert.equal(result.warnings[0].code, 'PROGRAM_TRANSFORM_REJECTED');
+  assert.equal(result.warnings[0].cause, 'ATOM_NOT_FOUND');
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8')).length, 1);
+});
+
+test('Program creation rejects a duplicate exact target without overwriting it', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-create-duplicate-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('test', '', [atom('Created', 'original')]),
+    atom('Creator', "transform({'name': 'test/Created', 'detail': 'replacement', 'children': [], 'partners': []})", [], 'program')
+  ], null, 2));
+
+  const result = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Creator"}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.changed, false);
+  assert.equal(result.warnings[0].code, 'PROGRAM_TRANSFORM_REJECTED');
+  assert.equal(result.warnings[0].cause, 'DUPLICATE_ATOM_NAME');
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].children[0].detail, 'original');
+});
+
 test('explore keeps Program computation active without leaking unrelated Program failures into its receipt', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-explore-feedback-scope-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

@@ -232,6 +232,88 @@ function appendNestedAtom(atoms, parentMatch, atom) {
   return nextAtoms;
 }
 
+function isCompletePersistentAtomItem(item) {
+  const required = new Set(['name', 'detail', 'children', 'partners']);
+  return item.fields.length === required.size
+    && item.fields.every((field) => (
+      required.has(field.baseKey) && (field.commands ?? []).length === 0
+    ))
+    && new Set(item.fields.map((field) => field.baseKey)).size === required.size;
+}
+
+async function applyCreateTransform({
+  atoms,
+  item,
+  contextFile,
+  authorize,
+  matcherRegistry
+}) {
+  const commandFields = item.fields.filter((field) => field.commands?.length);
+  if (commandFields.length) {
+    return { error: diagnostic(
+      'TRANSFORM_NEW_COMMANDS_REJECTED',
+      'transform new 不接受点号改造指令；请提交完整持久 Atom',
+      { fields: commandFields.map((field) => field.rawKey) }
+    ) };
+  }
+  const atom = persistentAtomFromItem(item);
+  const invalid = validateNewAtom(atom);
+  if (invalid) return { error: invalid };
+
+  const createNameField = oneStoredField(atom, 'name');
+  const createName = createNameField?.value;
+  const createPath = createName.split('/');
+  const createDecision = await authorize({ atom, name: createName, path: createPath }, 'write');
+  if (createDecision.decision !== 'allow') {
+    const programDenied = createDecision.matched
+      ? programLockDeniedDiagnostic(createDecision)
+      : null;
+    return { error: diagnostic(
+      programDenied?.code ?? 'WINDOW_ACCESS_DENIED',
+      programDenied?.message ?? '当前窗口无权执行该改造；请反馈派发方',
+      programDenied?.details ?? {}
+    ) };
+  }
+
+  const selected = exactMatches(atoms, item, matcherRegistry);
+  if (selected.error) return { error: selected.error };
+  if (selected.matches.length) {
+    return { error: diagnostic(
+      'DUPLICATE_ATOM_NAME',
+      `已存在 exact name 为“${selected.expected}”的 Atom，transform new 不会覆盖`,
+      { name: selected.expected, paths: selected.matches.map((match) => match.path.join('/')) }
+    ) };
+  }
+
+  let nextAtoms;
+  if (createPath.length === 1) {
+    nextAtoms = [...structuredClone(atoms), atom];
+  } else {
+    const childName = createPath.at(-1);
+    const parentPath = createPath.slice(0, -1).join('/');
+    const parentMatches = walkAtoms(atoms).filter((match) => match.path.join('/') === parentPath);
+    if (parentMatches.length !== 1) {
+      return { error: diagnostic(
+        parentMatches.length ? 'AMBIGUOUS_ATOM_NAME' : 'ATOM_NOT_FOUND',
+        `transform new parent must resolve to one exact Atom: ${parentPath}`,
+        { parentPath, matches: parentMatches.map((match) => match.path.join('/')) }
+      ) };
+    }
+    atom[createNameField.rawKey] = childName;
+    nextAtoms = appendNestedAtom(atoms, parentMatches[0], atom);
+  }
+
+  const compiled = validatePrograms(nextAtoms, contextFile, atoms);
+  if (!compiled.ok) return { error: compiled.errors[0], warnings: compiled.warnings };
+  return {
+    atoms: nextAtoms,
+    changed: true,
+    resultName: createPath.at(-1),
+    resultPath: createName,
+    warnings: compiled.warnings
+  };
+}
+
 function programObjectSource(command, request) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) {
     throw Object.assign(new Error(`${command}() requires one root JSON object`), { code: 'INVALID_PROGRAM_WORLD_FUNCTION' });
@@ -278,7 +360,12 @@ export function compileProgramTransform({ request, receiver = createAtomLanguage
     }
     fields[0].commands = [{ name: 'rep', parameter: opaqueDetail }];
   }
-  return { ok: true, item: parsed.items[0], parsed };
+  return {
+    ok: true,
+    item: parsed.items[0],
+    parsed,
+    createNew: isCompletePersistentAtomItem(parsed.items[0])
+  };
 }
 
 async function persistChangedGraph({
@@ -497,12 +584,20 @@ export async function executeAtomLanguage(options = {}) {
     }
     let transformed;
     try {
-      transformed = await applyTransform({
-        atoms,
-        item: compiled.item,
-        contextFile,
-        authorize: accessController.authorize
-      });
+      transformed = compiled.createNew
+        ? await applyCreateTransform({
+            atoms,
+            item: compiled.item,
+            contextFile,
+            authorize: accessController.authorize,
+            matcherRegistry: receiver.matcherRegistry
+          })
+        : await applyTransform({
+            atoms,
+            item: compiled.item,
+            contextFile,
+            authorize: accessController.authorize
+          });
     } catch (error) {
       interactionWarnings.push(diagnostic(
         error.code ?? 'PROGRAM_TRANSFORM_FAILED', error.message,
@@ -517,6 +612,7 @@ export async function executeAtomLanguage(options = {}) {
       ));
       continue;
     }
+    interactionWarnings.push(...(transformed.warnings ?? []));
     try {
       projectAtomContext(transformed.atoms, { rootName: path.basename(contextFile) });
     } catch (error) {
@@ -624,13 +720,20 @@ export async function executeAtomLanguage(options = {}) {
           ));
           continue;
         }
-        compiledRequests.push({ sourceProgramPath, transformRequest, item: compiled.item });
+        compiledRequests.push({
+          sourceProgramPath,
+          transformRequest,
+          item: compiled.item,
+          createNew: compiled.createNew
+        });
       }
 
       performanceTrace('program-reconcile-plan', {
         pass,
         compiled: compiledRequests.length,
-        structural: compiledRequests.filter(({ item }) => transformChangesStructure(item)).length
+        structural: compiledRequests.filter(({ item, createNew }) => (
+          createNew || transformChangesStructure(item)
+        )).length
       });
       const applyCompiled = async (baseAtoms, mutateInput, reportFailure) => {
         let candidateAtoms = baseAtoms;
@@ -643,14 +746,22 @@ export async function executeAtomLanguage(options = {}) {
         for (const entry of compiledRequests) {
           let transformed;
           try {
-            transformed = await applyTransform({
-              atoms: candidateAtoms,
-              item: entry.item,
-              contextFile,
-              authorize: cycleAccessController.authorize,
-              mutateInput,
-              exactIndex
-            });
+            transformed = entry.createNew
+              ? await applyCreateTransform({
+                  atoms: candidateAtoms,
+                  item: entry.item,
+                  contextFile,
+                  authorize: cycleAccessController.authorize,
+                  matcherRegistry: receiver.matcherRegistry
+                })
+              : await applyTransform({
+                  atoms: candidateAtoms,
+                  item: entry.item,
+                  contextFile,
+                  authorize: cycleAccessController.authorize,
+                  mutateInput,
+                  exactIndex
+                });
           } catch (error) {
             if (reportFailure) {
               rejected += 1;
@@ -677,9 +788,11 @@ export async function executeAtomLanguage(options = {}) {
             }
             return { failed: true };
           }
+          interactionWarnings.push(...(transformed.warnings ?? []));
           candidateAtoms = transformed.atoms;
           applied.push({ ...entry, transformed });
-          if (mutateInput && transformed.changed && transformChangesStructure(entry.item)) {
+          if (mutateInput && transformed.changed
+            && (entry.createNew || transformChangesStructure(entry.item))) {
             structuralChanged += 1;
             exactIndex = createExactTransformIndex(candidateAtoms);
           }
@@ -1039,88 +1152,20 @@ export async function executeAtomLanguage(options = {}) {
   }
 
   if (parsed.createNew) {
-    const commandFields = item.fields.filter((field) => field.commands?.length);
-    if (commandFields.length) {
-      return failureBase(
-        parsed,
-        contextFile,
-        projectionFile,
-        atoms,
-        [diagnostic(
-          'TRANSFORM_NEW_COMMANDS_REJECTED',
-          'transform new 不接受点号改造指令；请提交完整持久 Atom',
-          { fields: commandFields.map((field) => field.rawKey) }
-        )]
-      );
+    const created = await applyCreateTransform({
+      atoms,
+      item,
+      contextFile,
+      authorize: accessController.authorize,
+      matcherRegistry: receiver.matcherRegistry
+    });
+    interactionWarnings.push(...(created.warnings ?? []));
+    if (created.error) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, [created.error], {
+        messages: interactionMessages
+      });
     }
-    const atom = persistentAtomFromItem(item);
-    const invalid = validateNewAtom(atom);
-    if (invalid) {
-      return failureBase(parsed, contextFile, projectionFile, atoms, [invalid]);
-    }
-    const createNameField = oneStoredField(atom, 'name');
-    const createName = createNameField?.value;
-    const createPath = createName.split('/');
-    const createDecision = await accessController.authorize({
-      atom,
-      name: createName,
-      path: createPath
-    }, 'write');
-    if (createDecision.decision !== 'allow') {
-      const programDenied = createDecision.matched
-        ? programLockDeniedDiagnostic(createDecision)
-        : null;
-      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
-        programDenied?.code ?? 'WINDOW_ACCESS_DENIED',
-        programDenied?.message ?? '当前窗口无权执行该改造；请反馈派发方',
-        programDenied?.details ?? {}
-      )], { messages: interactionMessages });
-    }
-    const selected = exactMatches(atoms, item, receiver.matcherRegistry);
-    if (selected.error) {
-      return failureBase(parsed, contextFile, projectionFile, atoms, [selected.error]);
-    }
-    if (selected.matches.length) {
-      return failureBase(
-        parsed,
-        contextFile,
-        projectionFile,
-        atoms,
-        [diagnostic(
-          'DUPLICATE_ATOM_NAME',
-          `已存在 exact name 为“${selected.expected}”的 Atom，transform new 不会覆盖`,
-          { name: selected.expected, paths: selected.matches.map((match) => match.path.join('/')) }
-        )]
-      );
-    }
-    let nextAtoms;
-    if (createPath.length === 1) {
-      nextAtoms = [...structuredClone(atoms), atom];
-    } else {
-      const childName = createPath.at(-1);
-      const parentPath = createPath.slice(0, -1).join('/');
-      const parentMatches = walkAtoms(atoms).filter((match) => match.path.join('/') === parentPath);
-      if (parentMatches.length !== 1) {
-        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
-          parentMatches.length ? 'AMBIGUOUS_ATOM_NAME' : 'ATOM_NOT_FOUND',
-          `transform new parent must resolve to one exact Atom: ${parentPath}`,
-          { parentPath, matches: parentMatches.map((match) => match.path.join('/')) }
-        )]);
-      }
-      atom[createNameField.rawKey] = childName;
-      nextAtoms = appendNestedAtom(atoms, parentMatches[0], atom);
-    }
-    const compiled = validatePrograms(nextAtoms, contextFile, atoms);
-    interactionWarnings.push(...compiled.warnings);
-    if (!compiled.ok) {
-      return failureBase(
-        parsed,
-        contextFile,
-        projectionFile,
-        atoms,
-        compiled.errors
-      );
-    }
+    let nextAtoms = created.atoms;
     let postRefresh = {
       atoms: nextAtoms,
       lockIndex: programLockIndex,
@@ -1138,7 +1183,7 @@ export async function executeAtomLanguage(options = {}) {
         )]);
       }
     }
-    const finalCreatePath = rewritePath(createName, postRefresh.pathChanges);
+    const finalCreatePath = rewritePath(created.resultPath, postRefresh.pathChanges);
     await persistChangedGraph({
       atoms: nextAtoms,
       contextFile,

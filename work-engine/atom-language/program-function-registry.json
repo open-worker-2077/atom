@@ -13,7 +13,22 @@
   ],
   "functions": [
     { "name": "explore", "layer": "kernel", "family": "graph", "scope": "public" },
-    { "name": "transform", "layer": "kernel", "family": "graph", "scope": "public" },
+    {
+      "name": "transform",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "contract": {
+        "argument": { "type": "object", "name": "spec" },
+        "create": {
+          "requiredAxes": ["name", "detail", "children", "partners"],
+          "dotCommands": "forbidden"
+        },
+        "update": { "dotCommands": "supported" },
+        "result": { "type": "null", "value": null, "meaning": "deferred-effect" },
+        "confirmation": ["interaction-receipt", "exact-explore"]
+      }
+    },
     { "name": "lock", "layer": "kernel", "family": "graph", "scope": "public" },
     { "name": "direct_children", "layer": "kernel", "family": "graph", "scope": "public" },
     { "name": "child_detail", "layer": "kernel", "family": "graph", "scope": "public" },

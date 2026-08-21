@@ -40,4 +40,27 @@ test('Program transform compiles to the same normalized item as CLI transform', 
 
   assert.equal(program.ok, true);
   assert.deepEqual(program.item, cli.items[0]);
+  assert.equal(program.createNew, false);
+});
+
+test('Program transform classifies only a complete command-free four-axis Atom as creation', () => {
+  const receiver = createAtomLanguageReceiver();
+  const create = compileProgramTransform({
+    request: {
+      name: 'test/创建结果',
+      detail: '{"probe":true}',
+      children: [],
+      partners: []
+    },
+    receiver
+  });
+  const partial = compileProgramTransform({
+    request: { name: '已有目标', children: [] },
+    receiver
+  });
+
+  assert.equal(create.ok, true);
+  assert.equal(create.createNew, true);
+  assert.equal(partial.ok, true);
+  assert.equal(partial.createNew, false);
 });

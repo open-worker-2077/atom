@@ -51,7 +51,32 @@ function worldRecords(atoms) {
 }
 
 function programRecords(records, selector = null) {
-  const programs = records.filter((record) => record.types.includes('program') && record.detail.trim());
+  const recordsByRef = new Map(records.map((record) => [record.ref, record]));
+  const insideDefaultBackup = new Map();
+  const isInsideDefaultBackup = (record) => {
+    if (!record) return false;
+    if (insideDefaultBackup.has(record.ref)) return insideDefaultBackup.get(record.ref);
+    const lineage = [];
+    let current = record;
+    while (current && !insideDefaultBackup.has(current.ref)) {
+      lineage.push(current);
+      if (current.types.includes('backup') && current.types.includes('default')) break;
+      current = current.parentRef ? recordsByRef.get(current.parentRef) : null;
+    }
+    let inactive = current
+      ? insideDefaultBackup.get(current.ref)
+        ?? (current.types.includes('backup') && current.types.includes('default'))
+      : false;
+    while (lineage.length) {
+      insideDefaultBackup.set(lineage.pop().ref, inactive);
+    }
+    return inactive;
+  };
+  const programs = records.filter((record) => (
+    record.types.includes('program')
+    && record.detail.trim()
+    && !isInsideDefaultBackup(record)
+  ));
   if (!selector) return programs;
   const matches = programs.filter((program) => matchesExactSelector(
     program.path.split('/'), program.name, selector
@@ -305,7 +330,7 @@ function validateResult(result, records, program) {
   return { locks, messages, transforms, choices };
 }
 
-function runWorker({ python, records, program, timeoutMs, executeExplore }) {
+function runWorker({ python, records, programs, program, timeoutMs, executeExplore }) {
   return new Promise((resolve, reject) => {
     const child = spawn(python, ['-I', '-X', 'utf8', workerFile], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -375,7 +400,7 @@ function runWorker({ python, records, program, timeoutMs, executeExplore }) {
       }
     });
     writeToWorker({
-      world: records.filter((record) => record.types.includes('program')),
+      world: programs ?? records.filter((record) => record.types.includes('program')),
       program
     });
   });
@@ -516,14 +541,18 @@ export class ProgramRuntimeScheduler {
 
   async current(atoms, options = {}) {
     const records = worldRecords(atoms);
-    const programs = programRecords(records, options.programSelector);
+    const availablePrograms = programRecords(records);
+    const programs = options.programSelector
+      ? programRecords(records, options.programSelector)
+      : availablePrograms;
     const isolateFailures = options.isolateFailures === true;
     const key = fingerprint(records, programs, options.agentOrigin, isolateFailures);
     const completed = this.completed.get(key);
     if (completed) return { ...completed, cached: true, messages: [], transforms: [] };
 
     const reusable = reusableCandidates(
-      this.reusable, programs, isolateFailures, options.agentOrigin, records
+      this.reusable, programs, isolateFailures, options.agentOrigin, records,
+      availablePrograms
     ).map(([, entry]) => entry).find((entry) => (
       entry.worldKey === worldRevisionKey(records)
     ));
@@ -560,7 +589,10 @@ export class ProgramRuntimeScheduler {
 
   async refresh(atoms, options = {}) {
     const records = worldRecords(atoms);
-    const programs = programRecords(records, options.programSelector);
+    const availablePrograms = programRecords(records);
+    const programs = options.programSelector
+      ? programRecords(records, options.programSelector)
+      : availablePrograms;
     const isolateFailures = options.isolateFailures === true;
     const stableKey = fingerprint(records, programs, options.agentOrigin, isolateFailures);
     const key = options.force === true ? `${stableKey}:${crypto.randomUUID()}` : stableKey;
@@ -576,13 +608,15 @@ export class ProgramRuntimeScheduler {
     }
 
     const pending = this.computeRefresh(atoms, options, {
-      records, programs, isolateFailures, key
+      records, programs, availablePrograms, isolateFailures, key
     }).finally(() => this.inflight.delete(key));
     this.inflight.set(key, pending);
     return pending;
   }
 
-  async computeRefresh(atoms, options, { records, programs, isolateFailures, key }) {
+  async computeRefresh(atoms, options, {
+    records, programs, availablePrograms, isolateFailures, key
+  }) {
     const cycleDeadline = Date.now() + this.timeoutMs;
     if (options.force !== true && !options.programSelector) {
       const persisted = await this.persistedProjection({
@@ -611,7 +645,8 @@ export class ProgramRuntimeScheduler {
     const reusableEntry = options.force === true
       ? null
       : reusableCandidates(
-        this.reusable, programs, isolateFailures, options.agentOrigin, records
+        this.reusable, programs, isolateFailures, options.agentOrigin, records,
+        availablePrograms
       )[0];
     const reusable = reusableEntry?.[1] ?? null;
     if (reusable) {
@@ -675,7 +710,7 @@ export class ProgramRuntimeScheduler {
         ? null
         : reusableCandidates(
           this.programReusable, [program], isolateFailures, options.agentOrigin,
-          records, programs
+          records, availablePrograms
         )[0];
       const previous = previousEntry?.[1] ?? null;
       if (previous) {
@@ -709,7 +744,11 @@ export class ProgramRuntimeScheduler {
             );
           }
           return this.runProgram({
-            python: this.python, records, program, timeoutMs: remainingMs,
+            python: this.python,
+            records,
+            programs: availablePrograms,
+            program,
+            timeoutMs: remainingMs,
             executeExplore: async (request) => {
               requests.push(structuredClone(request));
               const matches = await executeExplore(request);
@@ -731,9 +770,11 @@ export class ProgramRuntimeScheduler {
         const contextDependent = requestsDependOnAgent(uniqueRequests);
         const stateKey = contextDependent
           ? contextualProgramSetFingerprint(
-            [program], programs, isolateFailures, scopePath, records
+            [program], availablePrograms, isolateFailures, scopePath, records
           )
-          : reusableProgramSetFingerprint([program], programs, isolateFailures, records);
+          : reusableProgramSetFingerprint(
+            [program], availablePrograms, isolateFailures, records
+          );
         if (!contextDependent || scopePath) {
           this.programReusable.set(stateKey, {
             contextDependent,
@@ -798,9 +839,11 @@ export class ProgramRuntimeScheduler {
     if (value.failures.length === 0) {
       const reusableKey = contextDependent
         ? contextualProgramSetFingerprint(
-          programs, programs, isolateFailures, scopePath, records
+          programs, availablePrograms, isolateFailures, scopePath, records
         )
-        : reusableProgramSetFingerprint(programs, programs, isolateFailures, records);
+        : reusableProgramSetFingerprint(
+          programs, availablePrograms, isolateFailures, records
+        );
       this.reusable.set(reusableKey, {
         contextDependent,
         contextIncomplete,
