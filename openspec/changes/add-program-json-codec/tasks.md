@@ -19,7 +19,7 @@
 - [x] 4.1 运行定向 codec/sandbox/registry/Program/interaction 测试及 OpenSpec 严格校验
 - [x] 4.2 与 Transform-runtime 修复一并重启 4784，并在 test 域完成 JSON detail 往返与 exact read-back
 - [x] 4.3 回执 ESG 来源任务
-- [ ] 4.4 提交可回滚改动并推送远端，不纳入用户原有 AGENTS.md 改动
+- [x] 4.4 提交可回滚改动并推送远端，不纳入用户原有 AGENTS.md 改动
 
 ## 5. 独立审查收敛
 

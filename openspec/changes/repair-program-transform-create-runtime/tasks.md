@@ -19,7 +19,7 @@
 - [x] 4.1 运行定向 Program/Transform/Scheduler/CLI 测试、OpenSpec 严格校验和完整测试套件
 - [x] 4.2 重启 4784 服务并仅在 test 域运行既有 ESG 创建探针，以 exact explore 确认创建且普通读取不再受备份 Program 拖累
 - [x] 4.3 向来源任务发送结构化故障修复回执
-- [ ] 4.4 提交并推送本次软件与 OpenSpec 改动且不纳入用户原有 AGENTS.md 改动
+- [x] 4.4 提交并推送本次软件与 OpenSpec 改动且不纳入用户原有 AGENTS.md 改动
 
 ## 5. 独立审查收敛
 
