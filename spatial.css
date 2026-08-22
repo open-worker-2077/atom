@@ -241,12 +241,13 @@ textarea:focus-visible {
   pointer-events: none;
 }
 
-.mobile-action-dock {
+.mobile-keyboard {
   display: none;
 }
 
-.mobile-action-dock button {
+.mobile-keyboard button {
   min-block-size: 2.75rem;
+  min-inline-size: 3.25rem;
   padding: var(--space-xs) var(--space-sm);
   border: var(--rule-hairline) solid color-mix(in oklch, var(--color-update) 34%, transparent);
   border-radius: var(--radius-sm);
@@ -254,18 +255,31 @@ textarea:focus-visible {
   color: var(--color-ink-2);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+  touch-action: none;
+  user-select: none;
   white-space: nowrap;
 }
 
+.mobile-keyboard button[data-pressed="true"] {
+  border-color: var(--color-update);
+  background: color-mix(in oklch, var(--color-update) 24%, var(--color-space-0));
+  color: var(--color-ink);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-update) 36%, transparent);
+}
+
+.mobile-keyboard__row {
+  display: flex;
+  gap: var(--space-xs);
+  min-inline-size: max-content;
+}
+
 @media (max-width: 48rem), (hover: none) and (pointer: coarse) {
-  .mobile-action-dock {
+  .mobile-keyboard {
     position: absolute;
     z-index: var(--z-modal);
     inset: auto var(--space-sm) max(var(--space-sm), env(safe-area-inset-bottom));
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(3.5rem, auto);
-    grid-template-rows: repeat(2, 2.75rem);
+    display: flex;
+    flex-direction: column;
     gap: var(--space-xs);
     padding: var(--space-xs);
     overflow-x: auto;
@@ -283,7 +297,7 @@ textarea:focus-visible {
 
   .field-readout,
   .field-metrics {
-    margin-block-end: calc(6.5rem + env(safe-area-inset-bottom));
+    margin-block-end: calc(9.75rem + env(safe-area-inset-bottom));
   }
 }
 

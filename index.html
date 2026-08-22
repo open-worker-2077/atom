@@ -7,9 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500&family=Tomorrow:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="spatial.css?v=20260819.5">
+  <link rel="stylesheet" href="spatial.css?v=20260822.1">
 </head>
-<body data-build="20260819.5">
+<body data-build="20260822.1">
   <main class="spatial-shell" id="spatialShell">
     <canvas
       id="spaceCanvas"
@@ -165,23 +165,34 @@
       左键使用 · 右键展收 · A内包 S外围 D层级 F沉浸 · CapsLock详情 · 中键单击聚焦／拖动旋转 · Shift魔杖
     </p>
 
-    <nav class="mobile-action-dock" aria-label="手机 Atom 操作">
-      <button type="button" data-intent="setNestedView" aria-label="内包视角">A</button>
-      <button type="button" data-intent="setPeripheralView" aria-label="外围视角">S</button>
-      <button type="button" data-intent="setHierarchyView" aria-label="层级视角">D</button>
-      <button type="button" data-intent="setImmersiveView" aria-label="沉浸视角">F</button>
-      <button type="button" data-intent="applyViewMode">进入</button>
-      <button type="button" data-intent="applyParentView">返回</button>
-      <button type="button" data-intent="collapseHoveredCluster" aria-label="当前视图收缩一层">收层</button>
-      <button type="button" data-intent="expandHoveredCluster" aria-label="当前视图展开一层">展层</button>
-      <button type="button" data-intent="cycleVisibleDetails">详情</button>
-      <button type="button" data-intent="toggleHelp">帮助</button>
-      <button type="button" data-intent="createNode">新增</button>
-      <button type="button" data-intent="editNode">编辑</button>
-      <button type="button" data-intent="editEdge">关系</button>
-      <button type="button" data-intent="confirmEdit">确认</button>
-      <button type="button" data-intent="cancelEdit">取消</button>
-      <button type="button" data-intent="deleteEdit">删除</button>
+    <nav class="mobile-keyboard" aria-label="手机电脑键盘">
+      <div class="mobile-keyboard__row">
+        <button type="button" data-mobile-key="Escape" data-key-value="Escape">Esc</button>
+        <button type="button" data-mobile-key="ControlLeft" data-key-value="Control" data-mobile-modifier aria-pressed="false">Ctrl</button>
+        <button type="button" data-mobile-key="ShiftLeft" data-key-value="Shift" data-mobile-modifier aria-pressed="false">Shift</button>
+        <button type="button" data-mobile-key="AltLeft" data-key-value="Alt" data-mobile-modifier aria-pressed="false">Alt</button>
+        <button type="button" data-mobile-key="KeyA" data-key-value="a">A</button>
+        <button type="button" data-mobile-key="KeyS" data-key-value="s">S</button>
+        <button type="button" data-mobile-key="KeyD" data-key-value="d">D</button>
+        <button type="button" data-mobile-key="KeyF" data-key-value="f">F</button>
+      </div>
+      <div class="mobile-keyboard__row">
+        <button type="button" data-mobile-key="CapsLock" data-key-value="CapsLock">CapsLock</button>
+        <button type="button" data-mobile-key="KeyZ" data-key-value="z">Z</button>
+        <button type="button" data-mobile-key="KeyX" data-key-value="x">X</button>
+        <button type="button" data-mobile-key="Home" data-key-value="Home">Home</button>
+        <button type="button" data-mobile-key="End" data-key-value="End">End</button>
+        <button type="button" data-mobile-key="PageUp" data-key-value="PageUp">PageUp</button>
+        <button type="button" data-mobile-key="PageDown" data-key-value="PageDown">PageDown</button>
+      </div>
+      <div class="mobile-keyboard__row">
+        <button type="button" data-mobile-key="KeyO" data-key-value="o">O</button>
+        <button type="button" data-mobile-key="KeyK" data-key-value="k">K</button>
+        <button type="button" data-mobile-key="KeyH" data-key-value="h">H</button>
+        <button type="button" data-mobile-key="KeyP" data-key-value="p">P</button>
+        <button type="button" data-mobile-key="Enter" data-key-value="Enter">Enter</button>
+        <button type="button" data-mobile-key="Delete" data-key-value="Delete">Delete</button>
+      </div>
     </nav>
 
     <aside class="edge-panel" id="mappingPanel" aria-labelledby="mappingTitle" hidden>
@@ -418,12 +429,12 @@
           <h3>手指替代鼠标</h3>
           <dl>
             <div><dt><kbd>单指点按</kbd></dt><dd>等同鼠标左键，选择并使用节点</dd></div>
-            <div><dt><kbd>点中节点 → 进入</kbd></dt><dd>等同节点右键，应用当前 A／S／D／F 视角</dd></div>
-            <div><dt><kbd>返回</kbd></dt><dd>等同空白右键，返回直接母域</dd></div>
-            <div><dt><kbd>底部操作栏</kbd></dt><dd>直接执行视角、层级、详情与编辑操作</dd></div>
+            <div><dt><kbd>单指按住后释放</kbd></dt><dd>等同鼠标右键，节点应用当前 A／S／D／F 视角，空白返回直接母域</dd></div>
+            <div><dt><kbd>底部键盘</kbd></dt><dd>直接对应电脑键位，不另设业务动作按钮</dd></div>
+            <div><dt><kbd>组合操作</kbd></dt><dd>一指按住 Ctrl／Shift／Alt，另一指点按或按住图区域</dd></div>
             <div><dt><kbd>中键／滚轮</kbd></dt><dd>当前仍使用鼠标；不伪装成尚未支持的触控手势</dd></div>
           </dl>
-          <p class="help-keyboard-note">键盘沿用电脑端全部键位，不另设手机键位。</p>
+          <p class="help-keyboard-note">按住 Ctrl 再点按图区域，即为 Ctrl + 鼠标左键；修饰键抬手时释放。</p>
         </section>
       </div>
     </aside>
@@ -442,28 +453,29 @@
   </main>
 
   <noscript>此实验场需要 JavaScript 才能响应空间交互。</noscript>
-  <script src="input-config.js?v=20260819.5"></script>
-  <script src="spatial-visual-model.js?v=20260819.5"></script>
-  <script src="spatial-detail-magnifier-model.js?v=20260819.5"></script>
-  <script src="spatial-gesture-arbiter.js?v=20260819.5"></script>
-  <script src="spatial-middle-frame-target.js?v=20260819.5"></script>
-  <script src="spatial-entity-registry.js?v=20260819.5"></script>
-  <script src="spatial-view-grammar.js?v=20260819.5"></script>
-  <script src="spatial-workspace-model.js?v=20260819.5"></script>
-  <script src="spatial-program-choice-model.js?v=20260819.5"></script>
-  <script src="spatial-mermaid-codec.js?v=20260819.5"></script>
-  <script src="spatial-json-codec.js?v=20260819.5"></script>
-  <script src="spatial-view-mode-model.js?v=20260819.5"></script>
-  <script src="spatial-help-page-model.js?v=20260819.5"></script>
-  <script src="spatial-work-order-registry-model.js?v=20260819.5"></script>
-  <script src="spatial-work-order-registry-panel.js?v=20260819.5"></script>
-  <script src="spatial-demo-model.js?v=20260819.5"></script>
-  <script src="spatial-demo-geometry.js?v=20260819.5"></script>
-  <script src="spatial-cluster-field.js?v=20260819.5"></script>
-  <script src="vendor/spatial-markdown-editor.bundle.js?v=20260819.5"></script>
-  <script src="vendor/atom-spatial-scene.bundle.js?v=20260819.5"></script>
-  <script src="spatial-engine.js?v=20260819.5"></script>
-  <script src="spatial-mermaid-panel.js?v=20260819.5"></script>
-  <script src="spatial-browser-bridge.js?v=20260819.5"></script>
+  <script src="input-config.js?v=20260822.1"></script>
+  <script src="spatial-mobile-input-model.js?v=20260822.1"></script>
+  <script src="spatial-visual-model.js?v=20260822.1"></script>
+  <script src="spatial-detail-magnifier-model.js?v=20260822.1"></script>
+  <script src="spatial-gesture-arbiter.js?v=20260822.1"></script>
+  <script src="spatial-middle-frame-target.js?v=20260822.1"></script>
+  <script src="spatial-entity-registry.js?v=20260822.1"></script>
+  <script src="spatial-view-grammar.js?v=20260822.1"></script>
+  <script src="spatial-workspace-model.js?v=20260822.1"></script>
+  <script src="spatial-program-choice-model.js?v=20260822.1"></script>
+  <script src="spatial-mermaid-codec.js?v=20260822.1"></script>
+  <script src="spatial-json-codec.js?v=20260822.1"></script>
+  <script src="spatial-view-mode-model.js?v=20260822.1"></script>
+  <script src="spatial-help-page-model.js?v=20260822.1"></script>
+  <script src="spatial-work-order-registry-model.js?v=20260822.1"></script>
+  <script src="spatial-work-order-registry-panel.js?v=20260822.1"></script>
+  <script src="spatial-demo-model.js?v=20260822.1"></script>
+  <script src="spatial-demo-geometry.js?v=20260822.1"></script>
+  <script src="spatial-cluster-field.js?v=20260822.1"></script>
+  <script src="vendor/spatial-markdown-editor.bundle.js?v=20260822.1"></script>
+  <script src="vendor/atom-spatial-scene.bundle.js?v=20260822.1"></script>
+  <script src="spatial-engine.js?v=20260822.1"></script>
+  <script src="spatial-mermaid-panel.js?v=20260822.1"></script>
+  <script src="spatial-browser-bridge.js?v=20260822.1"></script>
 </body>
 </html>

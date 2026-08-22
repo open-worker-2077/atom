@@ -40,7 +40,7 @@ if ($null -ne $existingRuntime) {
   }
 }
 
-$runtimeArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $runtimeScript
+$runtimeArguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $runtimeScript
 $runtimeAction = New-ScheduledTaskAction `
   -Execute $powerShellCommand.Source `
   -Argument $runtimeArguments `
@@ -62,14 +62,14 @@ Register-ScheduledTask `
 $gatewayDefinitions = @([pscustomobject]@{
   Name = [string]$marker.taskName
   Description = "Local identity gate for private Atom mobile access; owns no Atom data."
-  Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -AllowedLogin "{1}" -Target "{2}" -Port {3}' -f `
+  Arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -AllowedLogin "{1}" -Target "{2}" -Port {3}' -f `
     $gatewaySupervisor, [string]$marker.allowedLogin, "http://127.0.0.1:4784", [int]$marker.gatewayPort
 })
 if (-not [string]::IsNullOrWhiteSpace([string]$marker.directTaskName)) {
   $gatewayDefinitions += [pscustomobject]@{
     Name = [string]$marker.directTaskName
     Description = "Tailnet-IP-only Atom mobile gateway; accepts only the approved phone Tailscale address."
-    Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -AllowedSource "{1}" -HostAddress "{2}" -Target "{3}" -Port {4}' -f `
+    Arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -AllowedSource "{1}" -HostAddress "{2}" -Target "{3}" -Port {4}' -f `
       $gatewaySupervisor, [string]$marker.directAllowedSource, `
       ([uri][string]$marker.directGatewayUrl).Host, "http://127.0.0.1:4784", `
       ([uri][string]$marker.directGatewayUrl).Port

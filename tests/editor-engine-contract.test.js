@@ -278,7 +278,7 @@ test('new-domain edit gestures remain available while only the camera is settlin
   const dispatchEnd = source.indexOf('function moveSelection(', dispatchStart);
   const dispatch = source.slice(dispatchStart, dispatchEnd);
 
-  assert.match(pointer, /transitionBlocksPointerEdit\s*\(\s*event\s*\)/);
+  assert.match(pointer, /transitionBlocksPointerEdit\s*\(\s*pointerInput\s*\)/);
   assert.match(dispatch, /transitionBlocksIntent\s*\(\s*intent\s*\)/);
   assert.match(source, /state\.transitionFieldReady\s*=\s*true/);
 });
@@ -519,7 +519,8 @@ test('pointer mapping distinguishes nodes, edges, and empty field under ctrl', (
   const end = source.indexOf('canvas.addEventListener("pointermove"', start);
   const pointer = source.slice(start, end);
 
-  assert.match(pointer, /ctrlKey:\s*event\.ctrlKey/);
+  assert.match(pointer, /mobileInput\.mergePointerEvent\(event, mobileKeyState\)/);
+  assert.match(pointer, /ctrlKey:\s*pointerInput\.ctrlKey/);
   assert.match(pointer, /onEdge/);
   assert.match(pointer, /item\s*&&\s*item\.kind\s*===\s*["']relationship["']/);
 });

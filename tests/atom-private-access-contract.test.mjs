@@ -52,6 +52,14 @@ test('private access installer is deny-first and never configures a public Funne
   assert.doesNotMatch(source, /serve\s+reset/iu);
 });
 
+test('private access scheduled services start PowerShell without a visible terminal', async () => {
+  const repair = await fs.readFile(path.join(root, 'scripts', 'repair-atom-private-access.ps1'), 'utf8');
+  assert.match(repair, /-WindowStyle Hidden/u);
+  assert.match(repair, /-NonInteractive/u);
+  const install = await fs.readFile(path.join(root, 'scripts', 'install-atom-private-access.ps1'), 'utf8');
+  assert.match(install, /repair-atom-private-access\.ps1/u);
+});
+
 test('private access disable script removes only owned entry and task', async () => {
   const source = await fs.readFile(path.join(root, 'scripts', 'disable-atom-private-access.ps1'), 'utf8');
   assert.match(source, /private-access\.json/u);

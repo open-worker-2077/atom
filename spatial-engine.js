@@ -4,6 +4,7 @@
   const canvas = document.getElementById("spaceCanvas");
   const context = canvas.getContext("2d", { alpha: true });
   const input = global.SpatialInputConfig;
+  const mobileInput = global.SpatialMobileInputModel;
   const visualModel = global.SpatialVisualModel;
   const gestureArbiter = global.SpatialGestureArbiter;
   const middleFrameTarget = global.SpatialMiddleFrameTarget;
@@ -19,10 +20,12 @@
   const detailMagnifierModel = global.SpatialDetailMagnifierModel;
   const sceneAdapter = global.AtomSpatialScene;
 
-  if (!context || !input || !visualModel || !gestureArbiter || !middleFrameTarget || !registry || !grammar || !workspaceModel || !programChoiceModel || !clusterField || !viewModeModel || !helpPageModel || !demoModel || !demoGeometry || !detailMagnifierModel || !sceneAdapter) {
+  if (!context || !input || !mobileInput || !visualModel || !gestureArbiter || !middleFrameTarget || !registry || !grammar || !workspaceModel || !programChoiceModel || !clusterField || !viewModeModel || !helpPageModel || !demoModel || !demoGeometry || !detailMagnifierModel || !sceneAdapter) {
     document.body.dataset.spatialUnavailable = "true";
     return;
   }
+
+  const mobileKeyState = mobileInput.createState();
 
   const ui = {
     path: document.getElementById("fieldPath"),
@@ -6777,54 +6780,60 @@
   }
 
   canvas.addEventListener("pointerdown", (event) => {
-    if (transitionBlocksPointerEdit(event)) {
+    const pointerInput = mobileInput.mergePointerEvent(event, mobileKeyState);
+    if (transitionBlocksPointerEdit(pointerInput)) {
       return;
     }
     const point = canvasPoint(event);
     state.pointerPosition = point;
-    if (event.button === 2 && event.shiftKey && !event.ctrlKey) {
+    if (pointerInput.button === 2 && pointerInput.shiftKey && !pointerInput.ctrlKey) {
       canvas.setPointerCapture(event.pointerId);
       canvas.focus({ preventScroll: true });
       beginWandStroke(event.pointerId, point);
       return;
     }
-    const blankSensitive = event.button === 2
-      || (state.clusterFieldOpen && event.ctrlKey && event.button === 0);
-    const semanticEdit = event.ctrlKey && (event.button === 0 || event.button === 2);
-    const hit = event.button === 1
+    const blankSensitive = pointerInput.button === 2
+      || (state.clusterFieldOpen && pointerInput.ctrlKey && pointerInput.button === 0);
+    const semanticEdit = pointerInput.ctrlKey && (pointerInput.button === 0 || pointerInput.button === 2);
+    const hit = pointerInput.button === 1
       ? findMiddleFrameHit(event.clientX, event.clientY)
       : findHit(event.clientX, event.clientY, { blankSensitive, semanticEdit });
     const item = hit ? hit.item : null;
     const node = item && item.node ? item.node : null;
-    if (node && (event.button === 0 || event.button === 1 || event.button === 2)) rememberLatestInteraction(item);
+    if (node && (pointerInput.button === 0 || pointerInput.button === 1 || pointerInput.button === 2)) rememberLatestInteraction(item);
     const onEdge = Boolean(item && item.kind === "relationship");
     const transaction = workspace.transaction();
     const edgeDraft = Boolean(transaction && transaction.kind === "edge-create" && !transaction.target);
     const mappingEvent = {
-      button: event.button,
+      button: pointerInput.button,
       detail: 1,
-      ctrlKey: event.ctrlKey,
-      shiftKey: event.shiftKey,
-      altKey: event.altKey,
-      metaKey: event.metaKey
+      ctrlKey: pointerInput.ctrlKey,
+      shiftKey: pointerInput.shiftKey,
+      altKey: pointerInput.altKey,
+      metaKey: pointerInput.metaKey
     };
-    const intent = input.resolvePointer(mappingEvent, { onNode: Boolean(node), onEdge, edgeDraft, gesture: "tap" });
+    const mappingContext = { onNode: Boolean(node), onEdge, edgeDraft };
+    const intent = input.resolvePointer(mappingEvent, { ...mappingContext, gesture: "tap" });
     if (state.clusterFieldOpen && intent === "createNode") {
       state.cameraTween = null;
     }
-    const dragIntent = input.resolvePointer(mappingEvent, { onNode: Boolean(node), onEdge, edgeDraft, gesture: "drag" });
+    const dragIntent = input.resolvePointer(mappingEvent, { ...mappingContext, gesture: "drag" });
     canvas.setPointerCapture(event.pointerId);
     canvas.focus({ preventScroll: true });
     state.pointerCandidate = {
       pointerId: event.pointerId,
       pointerType: event.pointerType || "mouse",
-      button: event.button,
+      button: pointerInput.button,
       start: point,
+      startedAt: performance.now(),
+      movementPx: 0,
       node,
       item,
       domainContext: hit ? hit.domainContext || null : null,
       intent,
       dragIntent,
+      mappingEvent,
+      mappingContext,
       direct: directPointerIntent(item),
       threshold: event.pointerType === "touch" ? 10 : 6,
       cancelled: false
@@ -6841,6 +6850,7 @@
     if (state.pointerCandidate && state.pointerCandidate.pointerId === event.pointerId) {
       const candidate = state.pointerCandidate;
       const distance = Math.hypot(point.x - candidate.start.x, point.y - candidate.start.y);
+      candidate.movementPx = Math.max(candidate.movementPx || 0, distance);
       if (distance >= candidate.threshold) {
         primaryClickArbiter.cancel();
         secondaryClickArbiter.cancel();
@@ -6903,6 +6913,40 @@
       const candidate = state.pointerCandidate;
       state.pointerCandidate = null;
       if (!cancelled) {
+        const releasePoint = canvasPoint(event);
+        candidate.movementPx = Math.max(
+          candidate.movementPx || 0,
+          Math.hypot(releasePoint.x - candidate.start.x, releasePoint.y - candidate.start.y)
+        );
+        if (candidate.pointerType === "touch" && candidate.button === 0) {
+          const touchButton = mobileInput.classifyTouchRelease({
+            durationMs: performance.now() - candidate.startedAt,
+            movementPx: candidate.movementPx
+          });
+          if (touchButton === 2) {
+            const secondaryHit = findHit(event.clientX, event.clientY, {
+              blankSensitive: true,
+              semanticEdit: Boolean(candidate.mappingEvent.ctrlKey)
+            });
+            candidate.item = secondaryHit ? secondaryHit.item || null : null;
+            candidate.node = candidate.item && candidate.item.node ? candidate.item.node : null;
+            candidate.domainContext = secondaryHit ? secondaryHit.domainContext || null : null;
+            candidate.direct = directPointerIntent(candidate.item);
+            if (candidate.node) rememberLatestInteraction(candidate.item);
+            const transaction = workspace.transaction();
+            candidate.mappingContext = {
+              onNode: Boolean(candidate.node),
+              onEdge: Boolean(candidate.item && candidate.item.kind === "relationship"),
+              edgeDraft: Boolean(transaction && transaction.kind === "edge-create" && !transaction.target)
+            };
+            candidate.button = 2;
+            candidate.mappingEvent = { ...candidate.mappingEvent, button: 2 };
+            candidate.intent = input.resolvePointer(
+              candidate.mappingEvent,
+              { ...candidate.mappingContext, gesture: "tap" }
+            );
+          }
+        }
         if (candidate.button === 1) {
           const releaseHit = findMiddleFrameHit(event.clientX, event.clientY);
           candidate.start = canvasPoint(event);
@@ -6940,6 +6984,11 @@
     state.wand.shiftHeld = false;
     state.wand.active = false;
     state.wand.points = [];
+    mobileInput.clear(mobileKeyState);
+    document.querySelectorAll("[data-mobile-key]").forEach((button) => {
+      button.dataset.pressed = "false";
+      if (button.hasAttribute("data-mobile-modifier")) button.setAttribute("aria-pressed", "false");
+    });
   });
 
   canvas.addEventListener("wheel", (event) => {
@@ -7159,6 +7208,46 @@
     if (state.wand.active) finishWandStroke(state.pointerPosition);
     releaseWandBatch();
     syncCanvasCursor();
+  });
+
+  function dispatchMobileKeyboardEvent(type, button) {
+    const held = mobileInput.heldModifiers(mobileKeyState);
+    document.dispatchEvent(new KeyboardEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      key: button.dataset.keyValue || button.dataset.mobileKey,
+      code: button.dataset.mobileKey,
+      ctrlKey: held.ctrlKey,
+      shiftKey: held.shiftKey,
+      altKey: held.altKey,
+      metaKey: held.metaKey
+    }));
+  }
+
+  document.querySelectorAll("[data-mobile-key]").forEach((button) => {
+    const releaseMobileKey = (event) => {
+      if (button.dataset.mobilePointer !== String(event.pointerId)) return;
+      dispatchMobileKeyboardEvent("keyup", button);
+      mobileInput.releasePointer(mobileKeyState, event.pointerId);
+      delete button.dataset.mobilePointer;
+      button.dataset.pressed = "false";
+      if (button.hasAttribute("data-mobile-modifier")) button.setAttribute("aria-pressed", "false");
+      if (button.hasPointerCapture(event.pointerId)) button.releasePointerCapture(event.pointerId);
+    };
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      if (button.dataset.mobilePointer) return;
+      button.dataset.mobilePointer = String(event.pointerId);
+      button.dataset.pressed = "true";
+      button.setPointerCapture(event.pointerId);
+      if (button.hasAttribute("data-mobile-modifier")) {
+        mobileInput.pressModifier(mobileKeyState, button.dataset.mobileKey, event.pointerId);
+        button.setAttribute("aria-pressed", "true");
+      }
+      dispatchMobileKeyboardEvent("keydown", button);
+    });
+    button.addEventListener("pointerup", releaseMobileKey);
+    button.addEventListener("pointercancel", releaseMobileKey);
   });
 
   document.querySelectorAll("[data-intent]").forEach((button) => {
