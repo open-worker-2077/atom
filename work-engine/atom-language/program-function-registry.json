@@ -29,7 +29,27 @@
         "confirmation": ["interaction-receipt", "exact-explore"]
       }
     },
-    { "name": "lock", "layer": "kernel", "family": "graph", "scope": "public" },
+    {
+      "name": "lock", "layer": "kernel", "family": "graph", "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["targets", "mode"],
+          "properties": {
+            "allowed_windows": {
+              "type": "object", "required": ["paths"], "additionalProperties": false,
+              "properties": { "paths": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "exact-agent-path" } } }
+            },
+            "refresh": {
+              "type": "object", "required": ["policy"], "additionalProperties": false,
+              "properties": { "policy": { "const": "on_request" } }
+            }
+          }
+        },
+        "recompute": { "command": "transform {\"name.run.\":\"EXACT_PROGRAM_PATH\"}" },
+        "denial": { "write": "PROGRAM_LOCK_DENIED" }
+      }
+    },
     { "name": "direct_children", "layer": "kernel", "family": "graph", "scope": "public" },
     { "name": "child_detail", "layer": "kernel", "family": "graph", "scope": "public" },
     { "name": "subtree_refs", "layer": "kernel", "family": "graph", "scope": "public" },

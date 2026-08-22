@@ -168,6 +168,40 @@ test('public registry exposes the deferred Program Transform create and update c
   ]);
 });
 
+test('public registry exposes the complete window-aware Program lock contract', async () => {
+  const { programFunctionRegistry } = await import('../work-engine/atom-language/program-function-registry.mjs');
+  const lock = programFunctionRegistry().functions.find((item) => item.name === 'lock');
+
+  assert.deepEqual(lock.contract.argument.required, ['targets', 'mode']);
+  assert.deepEqual(lock.contract.argument.properties.allowed_windows, {
+    type: 'object',
+    required: ['paths'],
+    additionalProperties: false,
+    properties: {
+      paths: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', format: 'exact-agent-path' } }
+    }
+  });
+  assert.deepEqual(lock.contract.argument.properties.refresh, {
+    type: 'object',
+    required: ['policy'],
+    additionalProperties: false,
+    properties: { policy: { const: 'on_request' } }
+  });
+  assert.equal(lock.contract.recompute.command, 'transform {"name.run.":"EXACT_PROGRAM_PATH"}');
+  assert.equal(lock.contract.denial.write, 'PROGRAM_LOCK_DENIED');
+});
+
+test('CLI Help explains window allowlists and explicit lock recomputation', async () => {
+  const stdout = output();
+  const stderr = output();
+  const code = await runAtomCli(['--help'], { stdout: stdout.stream, stderr: stderr.stream });
+
+  assert.equal(code, 0, stderr.value());
+  assert.match(stdout.value(), /allowed_windows[\s\S]*paths[\s\S]*exact.*@agent/iu);
+  assert.match(stdout.value(), /refresh[\s\S]*on_request[\s\S]*name\.run\./u);
+  assert.match(stdout.value(), /PROGRAM_LOCK_DENIED[\s\S]*旧锁快照/u);
+});
+
 test('CLI Help explains Program Transform creation, compatibility and confirmation', async () => {
   const stdout = output();
   const stderr = output();

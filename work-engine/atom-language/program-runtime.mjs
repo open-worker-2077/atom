@@ -227,11 +227,11 @@ function rebindLocks(locks, previousRecords, records) {
   return locks.map((lock) => ({
     ...structuredClone(lock),
     sourceProgramRef: newRefByPath.get(lock.sourceProgramPath) ?? lock.sourceProgramRef,
-    targets: {
+    targets: Array.isArray(lock.targets?.paths) ? structuredClone(lock.targets) : {
       ...structuredClone(lock.targets),
       refs: lock.targets.refs.map((ref) => newRefByPath.get(oldPathByRef.get(ref))).filter(Boolean)
     }
-  })).filter((lock) => lock.targets.refs.length);
+  })).filter((lock) => Array.isArray(lock.targets?.paths) || lock.targets.refs.length);
 }
 
 function worldRevisionKey(records) {
@@ -246,6 +246,7 @@ function validateResult(result, records, program) {
     throw error;
   }
   const knownRefs = new Set(records.map((record) => record.ref));
+  const recordsByPath = new Map(records.map((record) => [record.path, record]));
   const locks = (result.locks ?? []).map((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
       throw Object.assign(new Error('lock() result must be a JSON object'), { code: 'INVALID_PROGRAM_LOCK' });
@@ -268,8 +269,40 @@ function validateResult(result, records, program) {
       || typeof (protect.messages ?? false) !== 'boolean') {
       throw Object.assign(new Error('lock.protect must be a JSON object of booleans'), { code: 'INVALID_PROGRAM_LOCK_PROTECT' });
     }
+    let allowedWindows;
+    if (entry.allowed_windows !== undefined) {
+      const value = entry.allowed_windows;
+      const keys = value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value) : [];
+      const paths = value?.paths;
+      if (keys.length !== 1 || keys[0] !== 'paths'
+        || !Array.isArray(paths) || paths.length === 0
+        || paths.some((path) => typeof path !== 'string' || !path.includes('/'))
+        || new Set(paths).size !== paths.length
+        || paths.some((path) => {
+          const record = recordsByPath.get(path);
+          return !record || !record.types?.includes('agent');
+        })) {
+        throw Object.assign(new Error('lock.allowed_windows.paths must contain unique exact full paths resolving to @agent Atoms'), {
+          code: 'INVALID_PROGRAM_LOCK_ALLOWED_WINDOWS'
+        });
+      }
+      allowedWindows = { paths: [...paths] };
+    }
+    let refresh;
+    if (entry.refresh !== undefined) {
+      const value = entry.refresh;
+      const keys = value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value) : [];
+      if (keys.length !== 1 || keys[0] !== 'policy' || value.policy !== 'on_request') {
+        throw Object.assign(new Error('lock.refresh only supports {"policy":"on_request"}'), {
+          code: 'INVALID_PROGRAM_LOCK_REFRESH'
+        });
+      }
+      refresh = { policy: 'on_request' };
+    }
     return {
       ...structuredClone(entry), fields, protect: { atom: protect.atom ?? true, messages: protect.messages ?? false },
+      ...(allowedWindows ? { allowed_windows: allowedWindows } : {}),
+      ...(refresh ? { refresh } : {}),
       sourceProgramRef: program.ref, sourceProgramPath: program.path
     };
   });
@@ -457,6 +490,8 @@ export class ProgramRuntimeScheduler {
     this.projectionRepository = options.projectionRepository ?? null;
     this.loadedProjection = undefined;
     this.projectionLoadWarning = null;
+    this.requestDrivenLockRepository = options.requestDrivenLockRepository ?? null;
+    this.requestDrivenLocks = undefined;
     if (this.projectionRepository
       && (typeof this.projectionRepository.load !== 'function'
         || typeof this.projectionRepository.save !== 'function')) {
@@ -471,6 +506,58 @@ export class ProgramRuntimeScheduler {
         { code: 'INVALID_PROGRAM_DIAGNOSTIC_RECORDER' }
       );
     }
+    if (this.requestDrivenLockRepository
+      && (typeof this.requestDrivenLockRepository.load !== 'function'
+        || typeof this.requestDrivenLockRepository.save !== 'function')) {
+      throw Object.assign(new Error('Request-driven lock repository requires load() and save()'), {
+        code: 'INVALID_REQUEST_DRIVEN_LOCK_REPOSITORY'
+      });
+    }
+  }
+
+  async activeRequestDrivenLocks() {
+    if (this.requestDrivenLocks !== undefined) return this.requestDrivenLocks;
+    const stored = this.requestDrivenLockRepository
+      ? await this.requestDrivenLockRepository.load()
+      : { version: 1, locks: [] };
+    this.requestDrivenLocks = structuredClone(stored?.locks ?? []);
+    return this.requestDrivenLocks;
+  }
+
+  async overlayRequestDrivenLocks(value) {
+    const active = await this.activeRequestDrivenLocks();
+    return {
+      ...value,
+      locks: [
+        ...(value.locks ?? []).filter((lock) => lock.refresh?.policy !== 'on_request'),
+        ...structuredClone(active)
+      ]
+    };
+  }
+
+  async mergeRequestDrivenLocks(value, records, options) {
+    const active = await this.activeRequestDrivenLocks();
+    const automatic = value.locks.filter((lock) => lock.refresh?.policy !== 'on_request');
+    if (options.force === true && options.programSelector && value.failures.length === 0) {
+      const sourcePath = value.selectedProgram?.path ?? options.programSelector;
+      const pathByRef = new Map(records.map((record) => [record.ref, record.path]));
+      const replacement = value.locks
+        .filter((lock) => lock.refresh?.policy === 'on_request')
+        .map((lock) => ({
+          ...structuredClone(lock),
+          targets: { paths: lock.targets.refs.map((ref) => pathByRef.get(ref)).filter(Boolean) }
+        }));
+      const next = [
+        ...active.filter((lock) => lock.sourceProgramPath !== sourcePath),
+        ...replacement
+      ];
+      if (this.requestDrivenLockRepository) {
+        await this.requestDrivenLockRepository.save({ version: 1, locks: next });
+      }
+      this.requestDrivenLocks = next;
+    }
+    value.locks = [...automatic, ...structuredClone(this.requestDrivenLocks ?? active)];
+    return value;
   }
 
   async runBounded(operation) {
@@ -549,7 +636,7 @@ export class ProgramRuntimeScheduler {
       || stored.failures.length > 0) {
       return null;
     }
-    return {
+    return this.overlayRequestDrivenLocks({
       fingerprint: cycleFingerprint,
       cached: true,
       records,
@@ -560,7 +647,7 @@ export class ProgramRuntimeScheduler {
       transforms: [],
       failures: structuredClone(stored.failures),
       contextIncomplete: stored.contextIncomplete === true
-    };
+    });
   }
 
   async saveProjection({ records, programs, isolateFailures, value, requests, agentOrigin }) {
@@ -575,7 +662,7 @@ export class ProgramRuntimeScheduler {
       contextDependent,
       contextIncomplete: value.contextIncomplete === true,
       scopePath,
-      locks: structuredClone(value.locks),
+      locks: structuredClone(value.locks.filter((lock) => lock.refresh?.policy !== 'on_request')),
       choices: structuredClone(value.choices ?? []),
       failures: []
     };
@@ -601,7 +688,9 @@ export class ProgramRuntimeScheduler {
     const isolateFailures = options.isolateFailures === true;
     const key = fingerprint(records, programs, options.agentOrigin, isolateFailures);
     const completed = this.completed.get(key);
-    if (completed) return { ...completed, cached: true, messages: [], transforms: [] };
+    if (completed) return this.overlayRequestDrivenLocks({
+      ...completed, cached: true, messages: [], transforms: []
+    });
 
     const reusable = reusableCandidates(
       this.reusable, programs, isolateFailures, options.agentOrigin, records,
@@ -610,7 +699,7 @@ export class ProgramRuntimeScheduler {
       entry.worldKey === worldRevisionKey(records)
     ));
     if (reusable?.worldKey === worldRevisionKey(records)) {
-      const value = {
+      const value = await this.overlayRequestDrivenLocks({
         ...reusable.value,
         fingerprint: key,
         cached: true,
@@ -620,7 +709,7 @@ export class ProgramRuntimeScheduler {
         messages: [],
         transforms: [],
         failures: structuredClone(reusable.value.failures ?? [])
-      };
+      });
       this.completed.set(key, value);
       return value;
     }
@@ -652,7 +741,9 @@ export class ProgramRuntimeScheduler {
     const completed = this.completed.get(key);
     if (completed && completed.failures.length === 0) {
       const cached = completed;
-      return { ...cached, cached: true, messages: [], transforms: [] };
+      return this.overlayRequestDrivenLocks({
+        ...cached, cached: true, messages: [], transforms: []
+      });
     }
     if (this.inflight.has(key)) {
       return this.inflight.get(key).then((value) => ({
@@ -707,7 +798,7 @@ export class ProgramRuntimeScheduler {
         || await fingerprintDependencies(reusable.requests)
           === reusable.dependencyFingerprint;
       if (dependenciesUnchanged) {
-        const value = {
+        const value = await this.overlayRequestDrivenLocks({
           ...reusable.value,
           fingerprint: key,
           cached: true,
@@ -717,7 +808,7 @@ export class ProgramRuntimeScheduler {
           messages: [],
           transforms: [],
           failures: structuredClone(reusable.value.failures ?? [])
-        };
+        });
         this.completed.set(key, value);
         while (this.completed.size > this.maxCompleted) {
           this.completed.delete(this.completed.keys().next().value);
@@ -876,6 +967,7 @@ export class ProgramRuntimeScheduler {
       failures: applicable.flatMap((entry) => entry.failure ? [entry.failure] : []),
       contextIncomplete
     };
+    await this.mergeRequestDrivenLocks(value, records, options);
     this.completed.set(key, value);
     while (this.completed.size > this.maxCompleted) {
       this.completed.delete(this.completed.keys().next().value);

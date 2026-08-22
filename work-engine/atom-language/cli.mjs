@@ -235,6 +235,8 @@ function help() {
     '  transform() 返回 None，只表示登记了延后效果；实际提交必须以交互回执或后续 exact explore 回读确认。',
     '  JSON 函数：json_parse({"text":"..."})->JSON值；json_stringify({"value":...,"indent"?:0..8})->string。序列化默认紧凑，拒绝 NaN、Infinity 和非 JSON 值；失败将终止整个 Program 评估且不发布已登记效果；不开放 import/eval；可配合 detail.rep. 写回。',
     '  世界函数：explore(query)->rows；transform(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
+    '  窗口识别锁：lock({...\"allowed_windows\":{\"paths\":[\"exact 完整 @agent 路径\"]},\"refresh\":{\"policy\":\"on_request\"}})。只有当前 --agent 解析路径 exact 命中才绕过该锁；未命中写入返回 PROGRAM_LOCK_DENIED。',
+    '  显式重算：transform {\"name.run.\":\"EXACT_PROGRAM_PATH\"}；仅成功运行才原子替换旧锁快照，普通依赖变化不自动重算，失败保留旧锁快照。',
     '  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。',
     '  工单函数：work_order_catalog({template?,version?})->contract；work_order({action,...})->result。v1 动作固定为 create/fill/validate/submit/reject/revise/read-back。',
     '  工单公开契约：atom.cmd --work-order-registry；该只读命令无需 --agent，Web 帮助从同一注册表渲染动作、错误和提交回执字段。',

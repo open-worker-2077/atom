@@ -586,13 +586,16 @@ export async function executeAtomLanguage(options = {}) {
     results: options.bypassProgramLocks ? [] : programCycle.locks,
     records: programCycle.records
   });
-  let accessController = createAccessController(atoms, { ...options, programLockIndex });
+  let accessController = createAccessController(atoms, {
+    ...options, programLockIndex, agentPath: interaction.agent?.path ?? null
+  });
   const interactionMessages = (programCycle.messages ?? [])
     .filter((message) => authorizeProgramLock({
       lockIndex: programLockIndex,
       targetPath: message.sourceProgramPath,
       operation: 'read',
-      field: 'messages'
+      field: 'messages',
+      agentPath: interaction.agent?.path ?? null
     }).decision === 'allow')
     .map((message) => ({ interactionId: interaction.id, ...message }));
   let programChanged = false;
@@ -723,14 +726,16 @@ export async function executeAtomLanguage(options = {}) {
       });
       const cycleAccessController = createAccessController(reconciledAtoms, {
         ...options,
-        programLockIndex: finalLockIndex
+        programLockIndex: finalLockIndex,
+        agentPath: interaction.agent?.path ?? null
       });
       messages.push(...(cycle.messages ?? [])
         .filter((message) => authorizeProgramLock({
           lockIndex: finalLockIndex,
           targetPath: message.sourceProgramPath,
           operation: 'read',
-          field: 'messages'
+          field: 'messages',
+          agentPath: interaction.agent?.path ?? null
         }).decision === 'allow')
         .map((message) => ({ interactionId: interaction.id, ...message })));
 
@@ -911,7 +916,9 @@ export async function executeAtomLanguage(options = {}) {
     }
     atoms = reconciled.atoms;
     programLockIndex = reconciled.lockIndex;
-    accessController = createAccessController(atoms, { ...options, programLockIndex });
+    accessController = createAccessController(atoms, {
+      ...options, programLockIndex, agentPath: interaction.agent?.path ?? null
+    });
     interactionMessages.push(...reconciled.messages);
     programTransformLogs.push(...reconciled.transformLogs);
   }

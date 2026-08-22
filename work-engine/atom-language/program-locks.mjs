@@ -4,26 +4,40 @@ export function buildProgramLockIndex({ revision, results = [], records = [] }) 
   const known = new Map(records.map((record) => [record.ref, record]));
   const byPath = new Map();
   for (const result of results) {
-    for (const ref of result.targets.refs) {
-      const record = known.get(ref);
-      if (!record) throw Object.assign(new Error('Program lock ref does not belong to this revision'), { code: 'INVALID_PROGRAM_LOCK_TARGET' });
-      const entry = byPath.get(record.path) ?? { read: new Set(), write: new Set(), sources: [] };
+    const targetPaths = Array.isArray(result.targets?.paths)
+      ? result.targets.paths
+      : (result.targets?.refs ?? []).map((ref) => {
+        const record = known.get(ref);
+        if (!record) throw Object.assign(new Error('Program lock ref does not belong to this revision'), { code: 'INVALID_PROGRAM_LOCK_TARGET' });
+        return record.path;
+      });
+    for (const targetPath of targetPaths) {
+      const entry = byPath.get(targetPath) ?? { read: new Set(), write: new Set(), sources: [] };
+      const sourceRead = new Set();
+      const sourceWrite = new Set();
       for (const field of result.fields) {
         if (!LOCK_FIELDS.has(field)) throw Object.assign(new Error(`Unsupported lock field: ${field}`), { code: 'INVALID_PROGRAM_LOCK_FIELDS' });
         if (field === 'messages' && !result.protect.messages) continue;
         if (field !== 'messages' && !result.protect.atom) continue;
         entry.write.add(field);
-        if (result.mode === 'read_write') entry.read.add(field);
+        sourceWrite.add(field);
+        if (result.mode === 'read_write') {
+          entry.read.add(field);
+          sourceRead.add(field);
+        }
       }
       entry.sources.push({
         sourceProgramRef: result.sourceProgramRef,
         sourceProgramPath: result.sourceProgramPath,
         protect: result.protect,
+        readFields: sourceRead,
+        writeFields: sourceWrite,
+        allowedWindows: result.allowed_windows?.paths ? [...result.allowed_windows.paths] : null,
         reason: result.reason && typeof result.reason === 'object'
           ? structuredClone(result.reason)
           : null
       });
-      byPath.set(record.path, entry);
+      byPath.set(targetPath, entry);
     }
   }
   return Object.freeze({ revision, byPath });
@@ -44,21 +58,27 @@ export function programLockDeniedDiagnostic(decision, field = null) {
     message,
     details: {
       ...(field ? { field } : {}),
+      ...(decision?.agentPath ? { agentPath: decision.agentPath } : {}),
       locks: (decision?.matched ?? []).map((source) => ({
         sourceProgramPath: source.sourceProgramPath,
+        allowedWindows: source.allowedWindows ?? null,
         reason: source.reason ?? null
       }))
     }
   };
 }
 
-export function authorizeProgramLock({ lockIndex, targetPath, operation, field }) {
+export function authorizeProgramLock({ lockIndex, targetPath, operation, field, agentPath = null }) {
   const entry = lockIndex?.byPath?.get(targetPath);
   if (!entry) return { decision: 'allow' };
-  const fields = operation === 'read' ? entry.read : entry.write;
-  if (field && !fields.has(field)) return { decision: 'allow' };
-  if (!field && fields.size === 0) return { decision: 'allow' };
-  return { decision: operation === 'read' ? 'truncate' : 'deny', matched: entry.sources };
+  const fieldKey = operation === 'read' ? 'readFields' : 'writeFields';
+  const matched = entry.sources.filter((source) => {
+    if (source.allowedWindows?.includes(agentPath)) return false;
+    const fields = source[fieldKey];
+    return field ? fields.has(field) : fields.size > 0;
+  });
+  if (!matched.length) return { decision: 'allow' };
+  return { decision: operation === 'read' ? 'truncate' : 'deny', matched, agentPath };
 }
 
 export function programLockState(lockIndex, targetPath = null) {

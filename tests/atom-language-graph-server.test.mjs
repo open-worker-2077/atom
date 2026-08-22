@@ -109,6 +109,7 @@ test('graph server arguments default to the shared LocalAppData Atom world', () 
     graphFile: runtime.graphFile,
     storeFile: runtime.storeFile,
     programProjectionFile: path.join(path.dirname(runtime.contextFile), 'program-projection.json'),
+    requestDrivenLockFile: path.join(path.dirname(runtime.contextFile), 'request-driven-locks.json'),
     diagnosticFile: path.join(path.dirname(runtime.contextFile), 'runtime-diagnostics.json'),
     help: false
   });
@@ -120,6 +121,7 @@ test('graph server arguments default to the shared LocalAppData Atom world', () 
     '--graph=projection.json',
     '--store', 'store.json',
     '--program-projection=program-projection.json',
+    '--request-driven-locks=request-driven-locks.json',
     '--runtime-diagnostics=runtime-diagnostics.json'
   ]), {
     host: '127.0.0.2',
@@ -128,6 +130,7 @@ test('graph server arguments default to the shared LocalAppData Atom world', () 
     graphFile: path.resolve('projection.json'),
     storeFile: path.resolve('store.json'),
     programProjectionFile: path.resolve('program-projection.json'),
+    requestDrivenLockFile: path.resolve('request-driven-locks.json'),
     diagnosticFile: path.resolve('runtime-diagnostics.json'),
     help: false
   });

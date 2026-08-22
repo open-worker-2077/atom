@@ -11,6 +11,7 @@ import {
 } from '../../cli/lib/server.mjs';
 import { createLegacyWorldService } from '../../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createJsonProgramProjectionRepository } from '../../src/atom-system/adapters/json-program-projection-repository.mjs';
+import { createJsonRequestDrivenLockRepository } from '../../src/atom-system/adapters/json-request-driven-lock-repository.mjs';
 import { createJsonRuntimeDiagnosticRepository } from '../../src/atom-system/adapters/json-runtime-diagnostic-repository.mjs';
 import { createLegacyRuntimeComposition } from '../../src/atom-system/adapters/legacy-runtime-composition.mjs';
 import { createAtomRuntimeBackupTrigger } from '../../src/atom-system/operations/atom-runtime-backup-trigger.mjs';
@@ -87,13 +88,14 @@ function pathIdentity(file) {
 }
 
 function validateDistinctPaths({
-  contextFile, graphFile, storeFile, programProjectionFile, diagnosticFile
+  contextFile, graphFile, storeFile, programProjectionFile, requestDrivenLockFile, diagnosticFile
 }) {
   const entries = [
     ['contextFile', contextFile],
     ['graphFile', graphFile],
     ['storeFile', storeFile],
     ['programProjectionFile', programProjectionFile],
+    ['requestDrivenLockFile', requestDrivenLockFile],
     ['diagnosticFile', diagnosticFile]
   ];
   const seen = new Map();
@@ -135,6 +137,11 @@ function resolveConfiguration(options = {}) {
       options.programProjectionFile
         ?? path.join(path.dirname(contextFile), 'program-projection.json'),
       'Program 投影文件'
+    ),
+    requestDrivenLockFile: resolveJsonPath(
+      options.requestDrivenLockFile
+        ?? path.join(path.dirname(contextFile), 'request-driven-locks.json'),
+      '请求驱动锁快照文件'
     ),
     diagnosticFile: resolveJsonPath(
       options.diagnosticFile
@@ -196,6 +203,12 @@ export function parseAtomGraphServerArgs(argv = []) {
     if (argument === '--program-projection' || argument.startsWith('--program-projection=')) {
       const parsed = optionValue(argv, index, '--program-projection');
       options.programProjectionFile = parsed.value;
+      index += parsed.consumed;
+      continue;
+    }
+    if (argument === '--request-driven-locks' || argument.startsWith('--request-driven-locks=')) {
+      const parsed = optionValue(argv, index, '--request-driven-locks');
+      options.requestDrivenLockFile = parsed.value;
       index += parsed.consumed;
       continue;
     }
@@ -300,6 +313,8 @@ export async function startAtomGraphServer(options = {}) {
     ?? createJsonProgramProjectionRepository({
       file: configuration.programProjectionFile
     });
+  const requestDrivenLockRepository = options.requestDrivenLockRepository
+    ?? createJsonRequestDrivenLockRepository({ file: configuration.requestDrivenLockFile });
   const diagnosticRepository = options.diagnosticRepository
     ?? createJsonRuntimeDiagnosticRepository({ file: configuration.diagnosticFile });
   const diagnostics = options.diagnostics ?? createRuntimeDiagnosticStore({
@@ -309,6 +324,7 @@ export async function startAtomGraphServer(options = {}) {
   });
   const programScheduler = options.programScheduler ?? createProgramRuntimeScheduler({
     projectionRepository: programProjectionRepository,
+    requestDrivenLockRepository,
     diagnosticRecorder: diagnostics
   });
   const worldService = options.worldService ?? createLegacyWorldService({
@@ -320,6 +336,7 @@ export async function startAtomGraphServer(options = {}) {
     graphFile: configuration.graphFile,
     storeFile: configuration.storeFile,
     programProjectionFile: configuration.programProjectionFile,
+    requestDrivenLockFile: configuration.requestDrivenLockFile,
     programScheduler,
     diagnostics,
     worldService,
@@ -394,6 +411,7 @@ export async function startAtomGraphServer(options = {}) {
     interactionRuntime,
     programScheduler,
     programProjectionRepository,
+    requestDrivenLockRepository,
     diagnostics,
     diagnosticRepository,
     backupTrigger,

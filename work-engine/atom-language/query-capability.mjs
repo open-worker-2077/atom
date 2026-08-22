@@ -103,7 +103,10 @@ export function createAccessController(atoms, options = {}) {
     async authorize(match, operation, field) {
       const targetPath = Array.isArray(match.path) ? match.path.join('/') : match.path;
       if (programLockIndex) {
-        const decision = authorizeProgramLock({ lockIndex: programLockIndex, targetPath, operation, field });
+        const decision = authorizeProgramLock({
+          lockIndex: programLockIndex, targetPath, operation, field,
+          agentPath: options.agentPath ?? options.interaction?.agent?.path ?? null
+        });
         if (decision.decision !== 'allow') return decision;
       }
       if (!access || access.global === true) return { decision: 'allow', matchedLocks: [] };
