@@ -21,6 +21,7 @@ test('coarse-pointer dock exposes real keyboard keys instead of business actions
   ]) {
     assert.match(dock, new RegExp(`data-mobile-key="${code}"`, 'u'), code);
   }
+  assert.match(dock, /data-mobile-mouse-button="1"[^>]*>中键</u);
   assert.doesNotMatch(dock, /data-intent=/u);
   for (const businessLabel of ['进入', '返回', '收层', '展层', '详情', '帮助', '新增', '编辑', '关系', '确认']) {
     assert.doesNotMatch(dock, new RegExp(`>${businessLabel}<`, 'u'), businessLabel);
@@ -41,6 +42,7 @@ test('mobile modifiers merge into graph pointer input and a stationary hold beco
   assert.match(engine, /secondaryHit\s*=\s*findHit[\s\S]*blankSensitive:\s*true/u);
   assert.match(engine, /data-mobile-key/u);
   assert.match(engine, /setPointerCapture/u);
+  assert.match(engine, /mobileInput\.pressButton/u);
 });
 
 test('input mapping exposes a dedicated route to mobile Web operation help', () => {
@@ -48,4 +50,5 @@ test('input mapping exposes a dedicated route to mobile Web operation help', () 
   assert.match(html, /手机 Web 操作/u);
   assert.match(html, /按住.*Ctrl.*图区域/u);
   assert.match(html, /按住后释放.*右键/u);
+  assert.match(html, /按住.*中键.*图区域.*点按.*拖动/u);
 });

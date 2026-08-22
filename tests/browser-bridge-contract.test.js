@@ -369,6 +369,56 @@ test('network bridge progressively loads the entered Atom path without downloadi
   assert.deepEqual(imports.at(-1).nodes.map((node) => node.label), ['atom.json', '项目']);
 });
 
+test('a view entered during an earlier path pull loads on the first entry without another view event', async () => {
+  const listeners = new Map();
+  const requested = [];
+  const imports = [];
+  let releaseRoot;
+  const rootKnowledge = {
+    schemaVersion: 1, revision: 7,
+    nodes: [{ id: 'root-node', key: 'root::root-node', path: 'root', label: 'atom.json' }],
+    nodePatches: [], deletedNodeKeys: [], edges: [], removedEdgeIds: [], view: null
+  };
+  const childKnowledge = {
+    ...rootKnowledge,
+    nodes: [{ id: 'child-node', key: 'root/child::child-node', path: 'root/child', label: '首次即显示' }]
+  };
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: 'worker.tail33a2eb.ts.net', protocol: 'https:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge(knowledge) { imports.push(structuredClone(knowledge)); return true; },
+      exportField: () => ({ path: 'root' }),
+      exportKnowledge: () => imports.at(-1) ?? rootKnowledge
+    },
+    fetch: async (url, options = {}) => {
+      requested.push([url, options.method ?? 'GET']);
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state?path=root')) {
+        return new Promise((resolve) => { releaseRoot = () => resolve(response({ knowledge: rootKnowledge, scope: { path: 'root' } })); });
+      }
+      if (url.endsWith('/state?path=root%2Fchild')) {
+        return response({ knowledge: childKnowledge, scope: { path: 'root/child' } });
+      }
+      return response({ ok: true });
+    },
+    addEventListener(type, listener) { listeners.set(type, listener); }
+  };
+  window.window = window;
+
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  const firstEntry = listeners.get('spatial-view-committed')({ detail: { view: { path: 'root/child' } } });
+  releaseRoot();
+  await firstEntry;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(requested.filter(([url]) => url.endsWith('/state?path=root%2Fchild')).length, 1);
+  assert.equal(imports.at(-1).nodes.some((node) => node.label === '首次即显示'), true);
+});
+
 test('Atom Web reports committed facts with a pending projection without claiming failure or importing stale knowledge', async () => {
   const listeners = new Map();
   const lifecycle = [];

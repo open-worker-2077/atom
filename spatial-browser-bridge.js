@@ -49,6 +49,7 @@
   const initialLoadProgress = { service: 0, data: 0, scene: 0 };
   let revision = -1;
   let pulling = false;
+  let pullCompletion = Promise.resolve();
   let pushing = false;
   const queuedCommits = [];
   let bossMode = false;
@@ -226,7 +227,13 @@
   }
 
   async function pullKnowledge(requestedPath = lab.state().path || "root") {
-    if (pulling || pushing || lab.state().transactionActive) return false;
+    if (pulling) {
+      await pullCompletion;
+      return pullKnowledge(requestedPath);
+    }
+    if (pushing || lab.state().transactionActive) return false;
+    let completePull;
+    pullCompletion = new Promise((resolve) => { completePull = resolve; });
     pulling = true;
     const pullOperationEpoch = workspaceOperationEpoch;
     const initialLoad = document.body.dataset.spatialKnowledge !== "authoritative";
@@ -275,6 +282,7 @@
       return false;
     } finally {
       pulling = false;
+      completePull();
     }
   }
 
@@ -497,6 +505,10 @@
   async function pushView(event) {
     const view = event?.detail?.view ?? lab.exportField();
     if (!view || document.hidden) return false;
+    if (pulling) {
+      await pullCompletion;
+      return pushView(event);
+    }
     if (pushing) {
       queuedCommits.push({ kind: "view", view });
       return true;

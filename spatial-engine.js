@@ -6985,9 +6985,9 @@
     state.wand.active = false;
     state.wand.points = [];
     mobileInput.clear(mobileKeyState);
-    document.querySelectorAll("[data-mobile-key]").forEach((button) => {
+    document.querySelectorAll("[data-mobile-key], [data-mobile-mouse-button]").forEach((button) => {
       button.dataset.pressed = "false";
-      if (button.hasAttribute("data-mobile-modifier")) button.setAttribute("aria-pressed", "false");
+      if (button.hasAttribute("aria-pressed")) button.setAttribute("aria-pressed", "false");
     });
   });
 
@@ -7248,6 +7248,28 @@
     });
     button.addEventListener("pointerup", releaseMobileKey);
     button.addEventListener("pointercancel", releaseMobileKey);
+  });
+
+  document.querySelectorAll("[data-mobile-mouse-button]").forEach((button) => {
+    const releaseMobileButton = (event) => {
+      if (button.dataset.mobilePointer !== String(event.pointerId)) return;
+      mobileInput.releasePointer(mobileKeyState, event.pointerId);
+      delete button.dataset.mobilePointer;
+      button.dataset.pressed = "false";
+      button.setAttribute("aria-pressed", "false");
+      if (button.hasPointerCapture(event.pointerId)) button.releasePointerCapture(event.pointerId);
+    };
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      if (button.dataset.mobilePointer) return;
+      if (!mobileInput.pressButton(mobileKeyState, Number(button.dataset.mobileMouseButton), event.pointerId)) return;
+      button.dataset.mobilePointer = String(event.pointerId);
+      button.dataset.pressed = "true";
+      button.setAttribute("aria-pressed", "true");
+      button.setPointerCapture(event.pointerId);
+    });
+    button.addEventListener("pointerup", releaseMobileButton);
+    button.addEventListener("pointercancel", releaseMobileButton);
   });
 
   document.querySelectorAll("[data-intent]").forEach((button) => {

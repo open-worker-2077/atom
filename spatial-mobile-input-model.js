@@ -13,7 +13,7 @@
   });
 
   function createState() {
-    return { heldPointers: new Map() };
+    return { heldPointers: new Map(), heldButtons: new Map() };
   }
 
   function pressModifier(state, code, pointerId) {
@@ -24,11 +24,29 @@
   }
 
   function releasePointer(state, pointerId) {
-    return Boolean(state && state.heldPointers && state.heldPointers.delete(pointerId));
+    if (!state) return false;
+    const releasedModifier = Boolean(state.heldPointers && state.heldPointers.delete(pointerId));
+    const releasedButton = Boolean(state.heldButtons && state.heldButtons.delete(pointerId));
+    return releasedModifier || releasedButton;
   }
 
   function clear(state) {
     if (state && state.heldPointers) state.heldPointers.clear();
+    if (state && state.heldButtons) state.heldButtons.clear();
+  }
+
+  function pressButton(state, button, pointerId) {
+    const normalizedButton = Number(button);
+    if (!state || !state.heldButtons || ![0, 1, 2].includes(normalizedButton)) return false;
+    state.heldButtons.set(pointerId, normalizedButton);
+    return true;
+  }
+
+  function heldButton(state) {
+    if (!state || !state.heldButtons) return null;
+    let button = null;
+    for (const held of state.heldButtons.values()) button = held;
+    return button;
   }
 
   function heldModifiers(state) {
@@ -46,8 +64,9 @@
   function mergePointerEvent(eventInput, state) {
     const event = eventInput || {};
     const held = heldModifiers(state);
+    const virtualButton = heldButton(state);
     return {
-      button: Number.isFinite(event.button) ? event.button : 0,
+      button: virtualButton === null ? (Number.isFinite(event.button) ? event.button : 0) : virtualButton,
       detail: Number.isFinite(event.detail) ? event.detail : 1,
       ctrlKey: Boolean(event.ctrlKey || held.ctrlKey),
       shiftKey: Boolean(event.shiftKey || held.shiftKey),
@@ -67,6 +86,7 @@
   global.SpatialMobileInputModel = Object.freeze({
     createState,
     pressModifier,
+    pressButton,
     releasePointer,
     clear,
     heldModifiers,

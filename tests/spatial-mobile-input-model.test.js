@@ -54,3 +54,23 @@ test('releasing an unknown pointer leaves other held modifiers intact', () => {
   model.clear(state);
   assert.equal(model.mergePointerEvent({}, state).altKey, false);
 });
+
+test('a held virtual middle button turns a simultaneous graph touch into mouse button one', () => {
+  const model = loadModel();
+  const state = model.createState();
+  assert.equal(model.pressButton(state, 1, 21), true);
+  assert.equal(model.mergePointerEvent({ button: 0 }, state).button, 1);
+  model.releasePointer(state, 21);
+  assert.equal(model.mergePointerEvent({ button: 0 }, state).button, 0);
+});
+
+test('clearing mobile input releases both modifiers and virtual mouse buttons', () => {
+  const model = loadModel();
+  const state = model.createState();
+  model.pressModifier(state, 'ControlLeft', 31);
+  model.pressButton(state, 1, 32);
+  model.clear(state);
+  const event = model.mergePointerEvent({ button: 0 }, state);
+  assert.equal(event.ctrlKey, false);
+  assert.equal(event.button, 0);
+});
