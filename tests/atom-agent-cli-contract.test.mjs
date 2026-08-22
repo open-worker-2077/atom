@@ -481,7 +481,8 @@ test('public help is a complete daily Agent operation contract', async () => {
   assert.match(text, /AMBIGUOUS_ATOM_NAME.*ATOM_NOT_FOUND/us);
   assert.match(text, /ATOM_NOT_FOUND.*预定父节点.*复用.*transform new/us);
   assert.match(text, /WORLD_REVISION_CONFLICT.*重新读取/us);
-  assert.match(text, /WORLD_COMMITTED_PROJECTION_PENDING.*维护入口/us);
+  assert.match(text, /PROJECTION_RECOVERY_PENDING.*事实写入已成功.*维护入口/us);
+  assert.doesNotMatch(text, /WORLD_COMMITTED_PROJECTION_PENDING/u);
   assert.match(text, /纠正提示仍无法解除阻断.*submit/u);
   assert.doesNotMatch(text, /PROGRAM_LOCK_DENIED[^\n]*submit/u);
   assert.doesNotMatch(text, /ATOM_PROGRAM_TIMEOUT[^\n]*submit/u);

@@ -16,6 +16,18 @@ function problem(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
 }
 
+async function publishProjectionStage(projection, publisher, value) {
+  try {
+    return await publisher.publish(value);
+  } catch (error) {
+    throw problem(
+      'PROJECTION_CACHE_PUBLISH_FAILED',
+      `Disposable ${projection} projection could not be published`,
+      { projection, cause: error.code ?? error.name }
+    );
+  }
+}
+
 function defaultSpatialPublisher(storeFile) {
   if (!storeFile) {
     throw problem('INVALID_SPATIAL_PUBLISHER', 'Legacy runtime composition requires storeFile or spatialPublisher');
@@ -271,19 +283,33 @@ export function createLegacyRuntimeComposition(options) {
     throw problem('INVALID_GRAPH_PUBLISHER', 'Legacy runtime composition requires Graph publisher');
   }
 
-  const projections = Object.freeze({
-    async publish(request) {
-      const projected = await projectionOrchestrator.projectCurrent(request);
-      await graphPublisher.publish(projected.graph);
-      await spatialPublisher.publish(projected.spatial);
-      return projected;
-    },
-    async recover(request) {
-      const projected = await projectionOrchestrator.projectCurrent(request);
-      await graphPublisher.publish(projected.graph);
-      await spatialPublisher.publish(projected.spatial);
-      return projected;
+  async function projectAndPublish(request) {
+    let projected;
+    try {
+      projected = await projectionOrchestrator.projectCurrent(request);
+    } catch (error) {
+      if (error.code === 'STALE_WORLD_PROJECTION') {
+        error.details = {
+          ...(error.details ?? {}),
+          projection: 'projector',
+          cause: error.code
+        };
+        throw error;
+      }
+      throw problem(
+        'PROJECTION_CACHE_PUBLISH_FAILED',
+        'Disposable projection could not be derived from current world facts',
+        { projection: 'projector', cause: error.code ?? error.name }
+      );
     }
+    await publishProjectionStage('graph', graphPublisher, projected.graph);
+    await publishProjectionStage('spatial', spatialPublisher, projected.spatial);
+    return projected;
+  }
+
+  const projections = Object.freeze({
+    publish: projectAndPublish,
+    recover: projectAndPublish
   });
 
   return createInteractionRuntime({

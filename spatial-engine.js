@@ -4619,6 +4619,12 @@
     announce(kind.startsWith("edge-") ? "关系已保存" : "节点已保存");
   });
 
+  global.addEventListener("spatial-workspace-projection-pending", (event) => {
+    if (!event.detail || !Number.isFinite(Number(event.detail.persistenceId))) return;
+    closeProgramChoicePanel();
+    announce("事实已保存，派生投影待恢复；请勿重复操作");
+  });
+
   global.addEventListener("spatial-workspace-persist-failed", (event) => {
     if (!event.detail || !Number.isFinite(Number(event.detail.persistenceId))) return;
     const message = String(event.detail.message || "服务未确认本次编辑");

@@ -8,6 +8,7 @@ export function createLegacyWorldService(options = {}) {
     createTransactionalWorldPersistence({
       contextFile: request.contextFile,
       projectionFile: request.projectionFile,
+      publishLegacyProjection: options.publishLegacyProjection !== false,
       onAuthoritativeWrite: options.onAuthoritativeWrite
     })
   ));

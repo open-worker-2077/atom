@@ -56,6 +56,7 @@ export function createTransactionalWorldPersistence({
   projectionFile,
   journalFile = path.join(path.dirname(contextFile), 'atom.transactions.json'),
   worldId = 'primary',
+  publishLegacyProjection = true,
   onAuthoritativeWrite = async () => {}
 }) {
   const worldRepository = createJsonWorldRepository({ file: contextFile, worldId, initialFacts: [] });
@@ -118,14 +119,16 @@ export function createTransactionalWorldPersistence({
       revision: receipt.afterRevision,
       receipt
     });
-    try {
-      await writeAtomGraphProjection(projectionFile, facts, { rootName: path.basename(contextFile) });
-    } catch (error) {
-      throw problem(
-        'WORLD_COMMITTED_PROJECTION_PENDING',
-        'World transition committed, but Graph projection requires recovery',
-        { receipt, cause: error.code ?? error.name }
-      );
+    if (publishLegacyProjection) {
+      try {
+        await writeAtomGraphProjection(projectionFile, facts, { rootName: path.basename(contextFile) });
+      } catch (error) {
+        throw problem(
+          'WORLD_COMMITTED_PROJECTION_PENDING',
+          'World transition committed, but the legacy Graph projection requires recovery',
+          { receipt, projection: 'graph', cause: error.code ?? error.name }
+        );
+      }
     }
     return receipt;
   }
@@ -155,17 +158,19 @@ export function createTransactionalWorldPersistence({
       revision: receipt.afterRevision,
       receipt
     });
-    const restored = await worldRepository.read();
-    try {
-      await writeAtomGraphProjection(projectionFile, restored.facts, {
-        rootName: path.basename(contextFile)
-      });
-    } catch (error) {
-      throw problem(
-        'WORLD_COMMITTED_PROJECTION_PENDING',
-        'World rollback committed, but Graph projection requires recovery',
-        { receipt, cause: error.code ?? error.name }
-      );
+    if (publishLegacyProjection) {
+      const restored = await worldRepository.read();
+      try {
+        await writeAtomGraphProjection(projectionFile, restored.facts, {
+          rootName: path.basename(contextFile)
+        });
+      } catch (error) {
+        throw problem(
+          'WORLD_COMMITTED_PROJECTION_PENDING',
+          'World rollback committed, but the legacy Graph projection requires recovery',
+          { receipt, projection: 'graph', cause: error.code ?? error.name }
+        );
+      }
     }
     return receipt;
   }

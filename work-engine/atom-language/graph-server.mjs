@@ -312,6 +312,7 @@ export async function startAtomGraphServer(options = {}) {
     diagnosticRecorder: diagnostics
   });
   const worldService = options.worldService ?? createLegacyWorldService({
+    publishLegacyProjection: false,
     onAuthoritativeWrite: () => backupTrigger?.schedule()
   });
   const interactionRuntime = options.interactionRuntime ?? createLegacyRuntimeComposition({
@@ -347,6 +348,9 @@ export async function startAtomGraphServer(options = {}) {
     atomHumanStatus: handlers.atomHumanStatus,
     atomWorkspaceEdit: handlers.atomWorkspaceEdit,
     atomProjectionRecover: handlers.atomProjectionRecover,
+    atomProjectionStatus: typeof interactionRuntime.projectionStatus === 'function'
+      ? () => interactionRuntime.projectionStatus()
+      : undefined,
     atomWorkOrderRegistry: handlers.workOrderRegistry,
     atomProgramFunctionRegistry: handlers.programFunctionRegistry
   });

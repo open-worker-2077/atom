@@ -82,6 +82,36 @@ test('legacy composition binds world, Program, projection and spatial publicatio
   ]);
 });
 
+test('legacy composition identifies the disposable projection stage without exposing a file path', async () => {
+  const runtime = createLegacyRuntimeComposition({
+    contextFile: 'atom.json',
+    graphFile: 'graph.json',
+    programScheduler: {},
+    worldService: {
+      executeLegacy: async () => ({ ok: true, revisionAfter: 'rev-2', lockState: {} })
+    },
+    projectionOrchestrator: {
+      projectCurrent: async () => ({ sourceRevision: 'rev-2', graph: {}, spatial: { nodes: [] } })
+    },
+    graphPublisher: {
+      publish: async () => {
+        throw Object.assign(new Error('locked'), { code: 'EPERM' });
+      }
+    },
+    spatialPublisher: { publish: async () => assert.fail('must stop at the failed Graph cache') },
+    feedbackRecorder: async () => ({ ok: true }),
+    agentResolver: async () => null,
+    humanStatusTranslator: { translate: async () => 'transform {}' }
+  });
+
+  const result = await runtime.execute({ source: 'transform {}', correlationId: 'projection-stage' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.projectionStatus, 'pending');
+  assert.deepEqual(result.projectionFailure, { projection: 'graph', cause: 'EPERM' });
+  assert.equal(JSON.stringify(result).includes('graph.json'), false);
+});
+
 test('legacy composition routes feedback through the configured recorder with world paths', async () => {
   const calls = [];
   const runtime = createLegacyRuntimeComposition({

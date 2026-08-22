@@ -41,7 +41,7 @@ test('world command pipeline publishes projections from the exact committed revi
   assert.equal(result.projectionStatus, 'published');
 });
 
-test('projection failure reports a committed world and can be recovered without replaying the command', async () => {
+test('projection failure returns a committed receipt and can be recovered without replaying the command', async () => {
   let commits = 0;
   let projectionAttempts = 0;
   const snapshot = {
@@ -58,17 +58,23 @@ test('projection failure reports a committed world and can be recovered without 
     projectionPipeline: {
       rebuild: async (value) => {
         projectionAttempts += 1;
-        if (projectionAttempts === 1) throw Object.assign(new Error('projector unavailable'), { code: 'PROJECTOR_DOWN' });
+        if (projectionAttempts === 1) {
+          throw Object.assign(new Error('projector unavailable'), {
+            code: 'PROJECTION_CACHE_PUBLISH_FAILED',
+            details: { projection: 'spatial', cause: 'EPERM' }
+          });
+        }
         return { worldId: value.worldId, sourceRevision: value.revision, projections: ['graph'] };
       }
     }
   });
 
-  await assert.rejects(
-    pipeline.execute({ command: {}, transition: () => {} }),
-    (error) => error.code === 'WORLD_COMMITTED_PROJECTION_PENDING'
-      && error.details.receipt.afterRevision === 'rev-2'
-  );
+  const committed = await pipeline.execute({ command: {}, transition: () => {} });
+
+  assert.equal(committed.receipt.afterRevision, 'rev-2');
+  assert.equal(committed.projectionStatus, 'pending');
+  assert.deepEqual(committed.projectionRecovery, { expectedRevision: 'rev-2' });
+  assert.deepEqual(committed.projectionFailure, { projection: 'spatial', cause: 'EPERM' });
 
   const recovered = await pipeline.recoverProjection({ expectedRevision: 'rev-2' });
   assert.equal(commits, 1);

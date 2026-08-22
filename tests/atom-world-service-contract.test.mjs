@@ -189,7 +189,7 @@ test('real legacy transform advances atom facts through the durable transaction 
   assert.equal(journal.receipts[0].receipt.afterRevision, `sha256:${result.revisionAfter}`);
 });
 
-test('transactional persistence rollback restores facts and rebuilds the Graph projection', async (t) => {
+test('transactional persistence rollback restores only authoritative facts and leaves projection rebuilding to the projector', async (t) => {
   const { createTransactionalWorldPersistence } = await import(
     new URL('../src/atom-system/adapters/transactional-world-persistence.mjs', import.meta.url)
   );
@@ -198,7 +198,11 @@ test('transactional persistence rollback restores facts and rebuilds the Graph p
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, '[]\n', 'utf8');
-  const persistence = createTransactionalWorldPersistence({ contextFile, projectionFile });
+  const persistence = createTransactionalWorldPersistence({
+    contextFile,
+    projectionFile,
+    publishLegacyProjection: false
+  });
 
   const facts = [{ name: 'temporary', detail: 'must disappear', children: [], partners: [] }];
   const committed = await persistence.commit({
@@ -215,7 +219,7 @@ test('transactional persistence rollback restores facts and rebuilds the Graph p
   });
 
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), []);
-  assert.deepEqual(JSON.parse(await fs.readFile(projectionFile, 'utf8')).graph.children, []);
+  await assert.rejects(fs.access(projectionFile), { code: 'ENOENT' });
   assert.equal(rolledBack.afterRevision, committed.beforeRevision);
   const journal = JSON.parse(await fs.readFile(path.join(directory, 'atom.transactions.json'), 'utf8'));
   assert.equal(journal.receipts.length, 2);

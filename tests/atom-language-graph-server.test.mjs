@@ -255,6 +255,49 @@ test('graph server initializes the projection, serves the full UI health and Gra
   assert.equal(state.knowledge.edges[0].label, '产出');
 });
 
+test('graph server remains available and reports degraded health when only a disposable projection is pending', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
+  const projectionState = {
+    status: 'pending',
+    expectedRevision: 'rev-2',
+    failure: { projection: 'graph', cause: 'EPERM' }
+  };
+  const interactionRuntime = {
+    async initialize() {
+      return {
+        initialization: { ok: true, revisionAfter: 'rev-2' },
+        projection: null,
+        projectionStatus: 'pending'
+      };
+    },
+    async execute() { return { ok: true, changed: false }; },
+    async updateHumanStatus() { return { ok: true, changed: false }; },
+    async updateHumanWorkspace() { return { ok: true, changed: false }; },
+    async recover() { return { sourceRevision: 'rev-2' }; },
+    projectionStatus() { return structuredClone(projectionState); }
+  };
+
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1',
+    port: 0,
+    contextFile,
+    graphFile,
+    storeFile,
+    interactionRuntime
+  });
+  t.after(() => running.close());
+
+  const response = await fetch(`${running.url}/__spatial/api/health`);
+  assert.equal(response.status, 200);
+  const health = await response.json();
+  assert.equal(health.ok, true);
+  assert.deepEqual(health.atomProjection, projectionState);
+});
+
 test('graph server persists compact read diagnostics through the shared interaction runtime', async (t) => {
   const directory = await temporaryDirectory(t);
   const contextFile = path.join(directory, 'atom.json');

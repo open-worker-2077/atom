@@ -90,9 +90,45 @@ export function createInteractionRuntime({
     requireMethod(diagnostics, 'record', 'INVALID_RUNTIME_DIAGNOSTIC_PORT', 'Interaction runtime diagnostic port');
   }
 
+  let latestProjectionState = Object.freeze({ status: 'uninitialized' });
+
   async function interactionOf(intent) {
     const agent = intent.agentPath ? await agents.resolve(intent.agentPath) : null;
     return Object.freeze({ id: intent.correlationId, agent });
+  }
+
+  function projectionFailure(error) {
+    const details = error?.details && typeof error.details === 'object' ? error.details : {};
+    return Object.freeze({
+      ...(typeof details.projection === 'string' && details.projection
+        ? { projection: details.projection }
+        : {}),
+      cause: details.cause ?? error?.code ?? error?.name ?? 'PROJECTION_FAILED'
+    });
+  }
+
+  function withProjectionOutcome(result, outcome) {
+    if (!outcome) return result;
+    if (outcome.status === 'published') {
+      return { ...result, projectionStatus: 'published' };
+    }
+    return {
+      ...result,
+      projectionStatus: 'pending',
+      projectionRecovery: { expectedRevision: outcome.expectedRevision },
+      projectionFailure: outcome.failure,
+      warnings: [
+        ...(result.warnings ?? []),
+        {
+          code: 'PROJECTION_RECOVERY_PENDING',
+          message: 'World facts are committed; a disposable projection is pending recovery',
+          details: {
+            expectedRevision: outcome.expectedRevision,
+            ...outcome.failure
+          }
+        }
+      ]
+    };
   }
 
   async function publish(result) {
@@ -106,13 +142,23 @@ export function createInteractionRuntime({
       performanceTrace('projection-publish', {
         elapsedMs: Math.round(performance.now() - startedAt)
       });
-      return published;
+      latestProjectionState = Object.freeze({
+        status: 'published',
+        expectedRevision: result.revisionAfter
+      });
+      return Object.freeze({ status: 'published', projection: published });
     } catch (error) {
-      throw problem(
-        'WORLD_COMMITTED_PROJECTION_PENDING',
-        'World interaction completed, but its replaceable projection requires recovery',
-        { result, cause: error.code ?? error.name }
-      );
+      const failure = projectionFailure(error);
+      latestProjectionState = Object.freeze({
+        status: 'pending',
+        expectedRevision: result.revisionAfter,
+        failure
+      });
+      return Object.freeze({
+        status: 'pending',
+        expectedRevision: result.revisionAfter,
+        failure
+      });
     }
   }
 
@@ -143,22 +189,39 @@ export function createInteractionRuntime({
     const projectionMissing = result?.ok === false
       && result.errors?.some(({ code }) => code === 'ATOM_PROGRAM_PROJECTION_MISSING');
     if (projectionMissing && interaction.agent && !options.programMode) {
-      const preparation = await executeWorld('atom', Object.freeze({
+      let preparation = await executeWorld('atom', Object.freeze({
         ...interaction,
         id: `${interaction.id}:program-context`
       }), { ...options, programMode: 'reconcile' });
       if (!preparation?.ok) return preparation;
-      if (options.publish !== false) await publish(preparation);
+      if (options.publish !== false) {
+        preparation = withProjectionOutcome(preparation, await publish(preparation));
+      }
       result = await executeWorld(intent.source, interaction);
       result = {
         ...result,
+        ...(preparation.projectionStatus ? {
+          projectionStatus: preparation.projectionStatus,
+          ...(preparation.projectionRecovery
+            ? { projectionRecovery: preparation.projectionRecovery }
+            : {}),
+          ...(preparation.projectionFailure
+            ? { projectionFailure: preparation.projectionFailure }
+            : {}),
+          warnings: [
+            ...(preparation.warnings ?? []),
+            ...(result.warnings ?? [])
+          ]
+        } : {}),
         messages: [
           ...(preparation.messages ?? []),
           ...(result.messages ?? [])
         ]
       };
     }
-    if (options.publish !== false && result?.changed !== false) await publish(result);
+    if (options.publish !== false && result?.changed !== false) {
+      result = withProjectionOutcome(result, await publish(result));
+    }
     if (diagnostics && result?.command === 'explore') {
       try {
         await diagnostics.record({
@@ -201,8 +264,21 @@ export function createInteractionRuntime({
         result: initialization
       });
     }
-    const projection = await publish(initialization);
-    return Object.freeze({ initialization, projection });
+    const outcome = await publish(initialization);
+    if (outcome?.status === 'published') {
+      return Object.freeze({
+        initialization,
+        projection: outcome.projection,
+        projectionStatus: 'published'
+      });
+    }
+    return Object.freeze({
+      initialization,
+      projection: null,
+      projectionStatus: 'pending',
+      projectionRecovery: { expectedRevision: outcome.expectedRevision },
+      projectionFailure: outcome.failure
+    });
   }
 
   async function updateHumanStatus({ key, atomPath, detail, correlationId }) {
@@ -233,8 +309,30 @@ export function createInteractionRuntime({
     if (typeof expectedRevision !== 'string' || !expectedRevision.trim()) {
       throw problem('INVALID_WORLD_REVISION', 'Recovery requires a non-empty expected revision');
     }
-    return projections.recover({ expectedRevision });
+    try {
+      const projection = await projections.recover({ expectedRevision });
+      latestProjectionState = Object.freeze({ status: 'published', expectedRevision });
+      return projection;
+    } catch (error) {
+      latestProjectionState = Object.freeze({
+        status: 'pending',
+        expectedRevision,
+        failure: projectionFailure(error)
+      });
+      throw error;
+    }
   }
 
-  return Object.freeze({ initialize, execute, updateHumanStatus, updateHumanWorkspace, recover });
+  function projectionStatus() {
+    return structuredClone(latestProjectionState);
+  }
+
+  return Object.freeze({
+    initialize,
+    execute,
+    updateHumanStatus,
+    updateHumanWorkspace,
+    recover,
+    projectionStatus
+  });
 }

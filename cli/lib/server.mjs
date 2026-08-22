@@ -98,12 +98,16 @@ export async function createSpatialServer(options = {}) {
       }
       if (url.pathname === '/__spatial/api/health') {
         const knowledge = await readKnowledge();
+        const atomProjection = typeof options.atomProjectionStatus === 'function'
+          ? await options.atomProjectionStatus()
+          : null;
         return json(response, 200, {
           ok: true,
           version: VERSION,
           revision: knowledge.revision,
           mode: bossStore ? 'boss' : 'single',
           atomWorkspace: typeof options.atomWorkspaceEdit === 'function',
+          ...(atomProjection ? { atomProjection } : {}),
           store: bossStore ? bossDirectory : store.file,
           ...(graphFile ? { graphFile } : {})
         });

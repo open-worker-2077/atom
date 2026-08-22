@@ -135,6 +135,20 @@
     global.dispatchEvent(new EventConstructor(type, { detail }));
   }
 
+  function reportPendingProjection(payload, persistenceId, operation) {
+    if (payload && payload.result && payload.result.projectionStatus === "pending") {
+      document.body.dataset.spatialBridge = "degraded";
+      reportPersistence("spatial-workspace-projection-pending", {
+        persistenceId,
+        operation,
+        projectionRecovery: payload.result.projectionRecovery,
+        projectionFailure: payload.result.projectionFailure
+      });
+      return true;
+    }
+    return false;
+  }
+
   async function request(path, options) {
     const response = await global.fetch(`${API}${path}`, {
       cache: "no-store",
@@ -253,6 +267,7 @@
         if (!response.ok || payload.ok === false || payload.result?.ok === false) {
           throw new Error(payload.error?.message || payload.result?.errors?.[0]?.message || 'Atom workspace edit failed');
         }
+        if (reportPendingProjection(payload, persistenceId, operation)) return true;
         const persistedNode = reconcileCreatedNode(operation, payload.knowledge, previousKnowledge);
         if (payload.knowledge) {
           lastKnowledge = payload.knowledge;
@@ -289,6 +304,7 @@
             throw new Error(latest.error?.message || latest.result?.errors?.[0]?.message || 'Atom status update failed');
           }
         }
+        if (reportPendingProjection(latest, persistenceId, operation)) return true;
         if (latest && latest.knowledge) {
           lastKnowledge = latest.knowledge;
           revision = Number(latest.knowledge.revision) || revision;
@@ -307,6 +323,7 @@
         if (!response.ok || payload.ok === false || payload.result?.ok === false) {
           throw new Error(payload.error?.message || payload.result?.errors?.[0]?.message || 'Atom workspace edit failed');
         }
+        if (reportPendingProjection(payload, persistenceId, operation)) return true;
         if (operation.kind === "node-land-batch") {
           const expected = Array.isArray(operation.landings) ? operation.landings.length : 0;
           const persistedBatch = workspaceModel

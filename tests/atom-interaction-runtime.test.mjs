@@ -136,6 +136,51 @@ test('the first use of an Agent prepares its scoped Program projection once and 
   ]);
 });
 
+test('a failed projection after automatic Program preparation remains visible on the retried read', async () => {
+  let attempts = 0;
+  const context = ports();
+  context.world.execute = async (request) => {
+    attempts += 1;
+    if (attempts === 1) {
+      return { ok: false, errors: [{ code: 'ATOM_PROGRAM_PROJECTION_MISSING' }] };
+    }
+    if (request.source === 'atom') {
+      return {
+        ok: true,
+        command: 'atom',
+        changed: true,
+        revisionAfter: 'rev-2',
+        lockState: {}
+      };
+    }
+    return {
+      ok: true,
+      command: 'explore',
+      changed: false,
+      revisionAfter: 'rev-2',
+      items: []
+    };
+  };
+  context.projections.publish = async () => {
+    throw Object.assign(new Error('locked'), {
+      code: 'PROJECTION_CACHE_PUBLISH_FAILED',
+      details: { projection: 'spatial', cause: 'EPERM' }
+    });
+  };
+  const runtime = createInteractionRuntime(context);
+
+  const result = await runtime.execute({
+    source: 'explore {"name":"Target"}',
+    correlationId: 'prepare-pending',
+    agentPath: 'Root/Sol'
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.projectionStatus, 'pending');
+  assert.deepEqual(result.projectionFailure, { projection: 'spatial', cause: 'EPERM' });
+  assert.equal(result.warnings.some(({ code }) => code === 'PROJECTION_RECOVERY_PENDING'), true);
+});
+
 test('an ordinary read consumes current projections without rebuilding them', async () => {
   const context = ports();
   context.world.execute = async (request) => {
@@ -326,24 +371,53 @@ test('runtime rejects malformed intents before any capability is called', async 
   assert.deepEqual(context.calls, []);
 });
 
-test('projection failure preserves the committed result and exposes explicit recovery', async () => {
+test('projection failure preserves the committed result without turning it into a failed write', async () => {
   const context = ports();
   context.projections.publish = async () => {
-    throw Object.assign(new Error('projection unavailable'), { code: 'PROJECTOR_DOWN' });
+    throw Object.assign(new Error('projection unavailable'), {
+      code: 'PROJECTION_CACHE_PUBLISH_FAILED',
+      details: { projection: 'graph', cause: 'EPERM' }
+    });
   };
   const runtime = createInteractionRuntime(context);
 
-  await assert.rejects(
-    runtime.execute({
-      source: 'transform {"name":"Root"}',
-      correlationId: 'interaction-5'
-    }),
-    (error) => error.code === 'WORLD_COMMITTED_PROJECTION_PENDING'
-      && error.details.result.revisionAfter === 'rev-2'
-      && error.details.cause === 'PROJECTOR_DOWN'
-  );
+  const result = await runtime.execute({
+    source: 'transform {"name":"Root"}',
+    correlationId: 'interaction-5'
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.revisionAfter, 'rev-2');
+  assert.equal(result.projectionStatus, 'pending');
+  assert.deepEqual(result.projectionRecovery, { expectedRevision: 'rev-2' });
+  assert.deepEqual(result.projectionFailure, { projection: 'graph', cause: 'EPERM' });
+  assert.equal(result.warnings.at(-1).code, 'PROJECTION_RECOVERY_PENDING');
 
   const recovered = await runtime.recover({ expectedRevision: 'rev-2' });
   assert.equal(recovered.sourceRevision, 'rev-2');
+  assert.equal(runtime.projectionStatus().status, 'published');
   assert.deepEqual(context.calls.at(-1), ['recover', { expectedRevision: 'rev-2' }]);
+});
+
+test('initialization keeps the fact service available when a disposable projection is unavailable', async () => {
+  const context = ports();
+  context.projections.publish = async () => {
+    throw Object.assign(new Error('spatial cache locked'), {
+      code: 'PROJECTION_CACHE_PUBLISH_FAILED',
+      details: { projection: 'spatial', cause: 'EPERM' }
+    });
+  };
+  const runtime = createInteractionRuntime(context);
+
+  const initialized = await runtime.initialize({ correlationId: 'startup-degraded' });
+
+  assert.equal(initialized.initialization.ok, true);
+  assert.equal(initialized.projection, null);
+  assert.equal(initialized.projectionStatus, 'pending');
+  assert.deepEqual(initialized.projectionFailure, { projection: 'spatial', cause: 'EPERM' });
+  assert.deepEqual(runtime.projectionStatus(), {
+    status: 'pending',
+    expectedRevision: 'rev-2',
+    failure: { projection: 'spatial', cause: 'EPERM' }
+  });
 });

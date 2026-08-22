@@ -172,6 +172,67 @@ test('Atom Web reports semantic persistence confirmation and failure instead of 
   }
 });
 
+test('Atom Web reports committed facts with a pending projection without claiming failure or importing stale knowledge', async () => {
+  const listeners = new Map();
+  const lifecycle = [];
+  const imports = [];
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge: (knowledge) => { imports.push(knowledge); return true; },
+      exportField: () => ({ path: 'root' })
+    },
+    CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init.detail; } },
+    dispatchEvent: (event) => { lifecycle.push(event); return true; },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state') && !options.method) {
+        return response({ knowledge: { revision: 1, nodes: [{ key: 'root::a', atomPath: 'A' }] } });
+      }
+      if (url.endsWith('/workspace-edit')) {
+        return response({
+          result: {
+            ok: true,
+            projectionStatus: 'pending',
+            projectionRecovery: { expectedRevision: 'rev-2' },
+            projectionFailure: { projection: 'spatial', cause: 'EPERM' }
+          },
+          knowledge: { revision: 1, nodes: [{ key: 'root::a', atomPath: 'A' }] }
+        });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => 0
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  lifecycle.length = 0;
+  imports.length = 0;
+
+  const result = await listeners.get('spatial-workspace-committed')({ detail: {
+    persistenceId: 19,
+    operation: { kind: 'node-edit', nodeKey: 'root::a', node: { atomPath: 'A' }, draft: { label: 'A2' } },
+    knowledge: { revision: 1, nodes: [{ key: 'root::a', atomPath: 'A', label: 'A2' }] }
+  } });
+
+  assert.equal(result, true);
+  assert.equal(document.body.dataset.spatialBridge, 'degraded');
+  assert.equal(imports.length, 0, 'a stale projection must not replace the optimistic or authoritative view');
+  assert.equal(lifecycle.length, 1);
+  assert.equal(lifecycle[0].type, 'spatial-workspace-projection-pending');
+  assert.deepEqual(JSON.parse(JSON.stringify(lifecycle[0].detail.projectionRecovery)), {
+    expectedRevision: 'rev-2'
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(lifecycle[0].detail.projectionFailure)), {
+    projection: 'spatial', cause: 'EPERM'
+  });
+});
+
 test('http bridge preserves the semantic operation when a structural commit is queued', async () => {
   const listeners = new Map();
   const requests = [];
