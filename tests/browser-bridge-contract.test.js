@@ -214,6 +214,52 @@ test('private HTTPS host loads authoritative Atom knowledge instead of standalon
   assert.deepEqual(requested, ['/__spatial/api/health', '/__spatial/api/state']);
 });
 
+test('network bridge retries an initial actual-data failure instead of leaving synthetic knowledge visible', async () => {
+  const actualKnowledge = {
+    schemaVersion: 1,
+    revision: 7,
+    nodes: [{ id: 'actual', key: 'root::actual', path: 'root', label: 'atom.json' }],
+    edges: []
+  };
+  let stateAttempts = 0;
+  let changes = null;
+  let imported = null;
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: 'worker.tail33a2eb.ts.net', protocol: 'https:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge(knowledge) { imported = knowledge; return true; },
+      exportField: () => ({ path: 'root' }),
+      exportKnowledge: () => actualKnowledge
+    },
+    fetch: async (url) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      stateAttempts += 1;
+      if (stateAttempts === 1) throw new Error('temporary mobile network failure');
+      return response({ knowledge: actualKnowledge });
+    },
+    addEventListener() {},
+    EventSource: class {
+      constructor() { changes = this; }
+    }
+  };
+  window.window = window;
+
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(document.body.dataset.spatialBridge, 'offline');
+  assert.equal(imported, null);
+
+  changes.onopen();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(document.body.dataset.spatialBridge, 'connected');
+  assert.deepEqual(JSON.parse(JSON.stringify(imported)), actualKnowledge);
+});
+
 test('Atom Web reports committed facts with a pending projection without claiming failure or importing stale knowledge', async () => {
   const listeners = new Map();
   const lifecycle = [];

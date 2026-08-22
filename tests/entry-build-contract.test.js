@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'spatial.css'), 'utf8');
 
 test('file entry versions every local executable asset with one build id', () => {
   const assets = [...html.matchAll(/(?:href|src)="((?:spatial|input|tokens)[^"]+)"/g)]
@@ -22,4 +23,12 @@ test('knowledge bridge loads after the visual engine', () => {
   const bridge = html.indexOf(`spatial-browser-bridge.js?v=${build}`);
   assert.ok(engine > -1);
   assert.ok(bridge > engine);
+});
+
+test('network entry hides synthetic knowledge until authoritative Atom data connects', () => {
+  assert.match(html, /<body[^>]*data-spatial-bridge="connecting"/);
+  assert.match(html, /class="spatial-data-gate"[^>]*role="status"/);
+  assert.match(css, /body\[data-spatial-bridge="connecting"\][\s\S]*\.spatial-shell/);
+  assert.match(css, /body\[data-spatial-bridge="offline"\][^\n]*data-spatial-knowledge="authoritative"[^\n]*\.spatial-shell/);
+  assert.match(css, /body\[data-spatial-bridge="connected"\][\s\S]*\.spatial-data-gate/);
 });

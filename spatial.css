@@ -36,6 +36,41 @@ body {
   line-height: 1.55;
 }
 
+.spatial-data-gate {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-modal) + 1);
+  place-items: center;
+  padding: var(--space-l);
+  background: var(--color-space-0);
+  color: var(--color-ink);
+  text-align: center;
+}
+
+.spatial-data-gate__offline {
+  display: none;
+}
+
+body[data-spatial-bridge="connecting"] .spatial-shell,
+body[data-spatial-bridge="offline"]:not([data-spatial-knowledge="authoritative"]) .spatial-shell {
+  visibility: hidden;
+}
+
+body[data-spatial-bridge="connecting"] .spatial-data-gate,
+body[data-spatial-bridge="offline"]:not([data-spatial-knowledge="authoritative"]) .spatial-data-gate {
+  display: grid;
+}
+
+body[data-spatial-bridge="offline"]:not([data-spatial-knowledge="authoritative"]) .spatial-data-gate__connecting,
+body[data-spatial-bridge="connected"] .spatial-data-gate {
+  display: none;
+}
+
+body[data-spatial-bridge="offline"]:not([data-spatial-knowledge="authoritative"]) .spatial-data-gate__offline {
+  display: inline;
+}
+
 button {
   color: inherit;
   font: inherit;

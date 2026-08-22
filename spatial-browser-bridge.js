@@ -177,6 +177,7 @@
         if (!lab.importKnowledge(knowledge)) return false;
         revision = Number(knowledge.revision) || 0;
         lastKnowledge = knowledge;
+        document.body.dataset.spatialKnowledge = "authoritative";
       }
       document.body.dataset.spatialBridge = "connected";
       return true;
@@ -473,6 +474,9 @@
   global.addEventListener("spatial-view-committed", pushView);
   if (typeof global.EventSource === "function") {
     const changes = new global.EventSource(`${API}/events`);
+    changes.onopen = () => {
+      if (document.body.dataset.spatialBridge === "offline") void pullKnowledge();
+    };
     changes.onmessage = (event) => {
       try {
         const notice = JSON.parse(event.data);
