@@ -46,6 +46,7 @@
   if (!supported) return;
 
   const API = "/__spatial/api";
+  const initialLoadProgress = { service: 0, data: 0, scene: 0 };
   let revision = -1;
   let pulling = false;
   let pushing = false;
@@ -57,6 +58,38 @@
   let workspaceOperationEpoch = 0;
   const loadedPaths = new Set();
   const workspaceModel = global.SpatialWorkspaceModel;
+
+  function setInitialLoadProgress(stage, value) {
+    if (!(stage in initialLoadProgress)) return;
+    initialLoadProgress[stage] = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+    const stageName = stage[0].toUpperCase() + stage.slice(1);
+    const progressElement = typeof document.getElementById === "function"
+      ? document.getElementById(`spatialProgress${stageName}`)
+      : null;
+    const valueElement = typeof document.getElementById === "function"
+      ? document.getElementById(`spatialProgress${stageName}Value`)
+      : null;
+    if (progressElement) progressElement.value = initialLoadProgress[stage];
+    if (valueElement) valueElement.textContent = `${initialLoadProgress[stage]}%`;
+    const overall = Math.round((
+      initialLoadProgress.service + initialLoadProgress.data + initialLoadProgress.scene
+    ) / 3);
+    const overallProgress = typeof document.getElementById === "function"
+      ? document.getElementById("spatialProgressOverall")
+      : null;
+    const overallValue = typeof document.getElementById === "function"
+      ? document.getElementById("spatialProgressOverallValue")
+      : null;
+    if (overallProgress) overallProgress.value = overall;
+    if (overallValue) overallValue.textContent = `${overall}%`;
+  }
+
+  function nextVisualFrame() {
+    if (typeof global.requestAnimationFrame !== "function") return Promise.resolve();
+    return new Promise((resolve) => global.requestAnimationFrame(resolve));
+  }
+
+  setInitialLoadProgress("service", 10);
 
   function itemIdentity(item, fallback) {
     if (!item || typeof item !== "object") return fallback;
@@ -196,11 +229,17 @@
     if (pulling || pushing || lab.state().transactionActive) return false;
     pulling = true;
     const pullOperationEpoch = workspaceOperationEpoch;
+    const initialLoad = document.body.dataset.spatialKnowledge !== "authoritative";
     try {
       const normalizedPath = typeof requestedPath === "string" && requestedPath.trim()
         ? requestedPath.trim()
         : "root";
+      if (initialLoad) setInitialLoadProgress("data", 15);
       const payload = await request(`/state?path=${encodeURIComponent(normalizedPath)}`);
+      if (initialLoad) {
+        setInitialLoadProgress("service", 100);
+        setInitialLoadProgress("data", 75);
+      }
       const incoming = payload.knowledge;
       const scopedPath = payload.scope && payload.scope.path;
       if (pullOperationEpoch !== workspaceOperationEpoch || pushing || hasQueuedWorkspaceCommit()) {
@@ -216,10 +255,18 @@
         }
         const knowledge = scopedPath ? mergeScopedKnowledge(lastKnowledge, incoming) : incoming;
         if (!lab.importKnowledge(knowledge)) return false;
+        if (initialLoad) {
+          setInitialLoadProgress("data", 100);
+          setInitialLoadProgress("scene", 70);
+        }
         revision = incomingRevision;
         lastKnowledge = knowledge;
         if (scopedPath) loadedPaths.add(scopedPath);
         document.body.dataset.spatialKnowledge = "authoritative";
+      }
+      if (initialLoad) {
+        await nextVisualFrame();
+        setInitialLoadProgress("scene", 100);
       }
       document.body.dataset.spatialBridge = "connected";
       return true;
@@ -532,6 +579,7 @@
   }
   request("/health")
     .then((payload) => {
+      setInitialLoadProgress("service", 100);
       bossMode = payload.mode === "boss";
       atomWorkspace = payload.atomWorkspace === true;
       document.body.dataset.spatialStore = bossMode ? "boss" : "single";

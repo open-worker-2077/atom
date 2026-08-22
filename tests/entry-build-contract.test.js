@@ -32,3 +32,13 @@ test('network entry hides synthetic knowledge until authoritative Atom data conn
   assert.match(css, /body\[data-spatial-bridge="offline"\][^\n]*data-spatial-knowledge="authoritative"[^\n]*\.spatial-shell/);
   assert.match(css, /body\[data-spatial-bridge="connected"\][\s\S]*\.spatial-data-gate/);
 });
+
+test('loading gate distinguishes overall, service, actual-data, and scene progress', () => {
+  assert.match(html, /id="spatialProgressOverall"[^>]*max="100"/);
+  assert.match(html, /id="spatialProgressService"[^>]*max="100"/);
+  assert.match(html, /id="spatialProgressData"[^>]*max="100"/);
+  assert.match(html, /id="spatialProgressScene"[^>]*max="100"/);
+  assert.match(html, />服务连接</);
+  assert.match(html, />当前层实际数据</);
+  assert.match(html, />场景渲染</);
+});

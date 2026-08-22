@@ -172,6 +172,69 @@ test('Atom Web reports semantic persistence confirmation and failure instead of 
   }
 });
 
+test('initial Atom load exposes separate service, data, and scene progress checkpoints', async () => {
+  const progressElements = Object.fromEntries([
+    'spatialProgressOverall',
+    'spatialProgressService',
+    'spatialProgressData',
+    'spatialProgressScene',
+    'spatialProgressOverallValue',
+    'spatialProgressServiceValue',
+    'spatialProgressDataValue',
+    'spatialProgressSceneValue'
+  ].map((id) => [id, { value: 0, textContent: '0%' }]));
+  let releaseHealth;
+  let releaseState;
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = {
+    body: { dataset: {} },
+    hidden: false,
+    getElementById: (id) => progressElements[id] || null
+  };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ path: 'root', transactionActive: false }),
+      importKnowledge: () => true,
+      exportField: () => ({ path: 'root' })
+    },
+    fetch: async (url) => {
+      if (url.endsWith('/health')) {
+        return new Promise((resolve) => { releaseHealth = () => resolve(response({ mode: 'single', atomWorkspace: true })); });
+      }
+      if (url.includes('/state')) {
+        return new Promise((resolve) => { releaseState = () => resolve(response({
+          knowledge: { revision: 1, nodes: [{ key: 'root::actual', atomPath: 'actual' }], edges: [] },
+          scope: { path: 'root' }
+        })); });
+      }
+      return response({ ok: true });
+    },
+    addEventListener: () => {},
+    setInterval: () => 0,
+    requestAnimationFrame: (callback) => callback()
+  };
+  window.window = window;
+
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  assert.ok(progressElements.spatialProgressService.value > 0);
+  assert.equal(progressElements.spatialProgressData.value, 0);
+  assert.equal(progressElements.spatialProgressScene.value, 0);
+
+  releaseHealth();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(progressElements.spatialProgressService.value, 100);
+  assert.ok(progressElements.spatialProgressData.value > 0);
+  assert.equal(progressElements.spatialProgressScene.value, 0);
+
+  releaseState();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(progressElements.spatialProgressData.value, 100);
+  assert.equal(progressElements.spatialProgressScene.value, 100);
+  assert.equal(progressElements.spatialProgressOverall.value, 100);
+  assert.equal(progressElements.spatialProgressOverallValue.textContent, '100%');
+});
+
 test('private HTTPS host loads authoritative Atom knowledge instead of standalone demo data', async () => {
   const actualKnowledge = {
     schemaVersion: 1,

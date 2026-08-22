@@ -7,12 +7,35 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500&family=Tomorrow:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="spatial.css?v=20260822.4">
+  <link rel="stylesheet" href="spatial.css?v=20260822.5">
 </head>
-<body data-build="20260822.4" data-spatial-bridge="connecting">
+<body data-build="20260822.5" data-spatial-bridge="connecting">
   <div class="spatial-data-gate" role="status" aria-live="polite">
-    <span class="spatial-data-gate__connecting">正在读取 Atom 实际数据…</span>
-    <span class="spatial-data-gate__offline">实际数据连接失败，正在自动重试…</span>
+    <div class="spatial-data-gate__panel">
+      <div class="spatial-data-gate__headline">
+        <span class="spatial-data-gate__connecting">正在读取 Atom 实际数据</span>
+        <span class="spatial-data-gate__offline">实际数据连接失败，正在自动重试</span>
+        <output id="spatialProgressOverallValue">0%</output>
+      </div>
+      <progress id="spatialProgressOverall" max="100" value="0" aria-label="总体载入进度"></progress>
+      <div class="spatial-data-gate__stages">
+        <label>
+          <span>服务连接</span>
+          <progress id="spatialProgressService" max="100" value="0"></progress>
+          <output id="spatialProgressServiceValue">0%</output>
+        </label>
+        <label>
+          <span>当前层实际数据</span>
+          <progress id="spatialProgressData" max="100" value="0"></progress>
+          <output id="spatialProgressDataValue">0%</output>
+        </label>
+        <label>
+          <span>场景渲染</span>
+          <progress id="spatialProgressScene" max="100" value="0"></progress>
+          <output id="spatialProgressSceneValue">0%</output>
+        </label>
+      </div>
+    </div>
   </div>
   <main class="spatial-shell" id="spatialShell">
     <canvas
@@ -457,29 +480,29 @@
   </main>
 
   <noscript>此实验场需要 JavaScript 才能响应空间交互。</noscript>
-  <script src="input-config.js?v=20260822.4"></script>
-  <script src="spatial-mobile-input-model.js?v=20260822.4"></script>
-  <script src="spatial-visual-model.js?v=20260822.4"></script>
-  <script src="spatial-detail-magnifier-model.js?v=20260822.4"></script>
-  <script src="spatial-gesture-arbiter.js?v=20260822.4"></script>
-  <script src="spatial-middle-frame-target.js?v=20260822.4"></script>
-  <script src="spatial-entity-registry.js?v=20260822.4"></script>
-  <script src="spatial-view-grammar.js?v=20260822.4"></script>
-  <script src="spatial-workspace-model.js?v=20260822.4"></script>
-  <script src="spatial-program-choice-model.js?v=20260822.4"></script>
-  <script src="spatial-mermaid-codec.js?v=20260822.4"></script>
-  <script src="spatial-json-codec.js?v=20260822.4"></script>
-  <script src="spatial-view-mode-model.js?v=20260822.4"></script>
-  <script src="spatial-help-page-model.js?v=20260822.4"></script>
-  <script src="spatial-work-order-registry-model.js?v=20260822.4"></script>
-  <script src="spatial-work-order-registry-panel.js?v=20260822.4"></script>
-  <script src="spatial-demo-model.js?v=20260822.4"></script>
-  <script src="spatial-demo-geometry.js?v=20260822.4"></script>
-  <script src="spatial-cluster-field.js?v=20260822.4"></script>
-  <script src="vendor/spatial-markdown-editor.bundle.js?v=20260822.4"></script>
-  <script src="vendor/atom-spatial-scene.bundle.js?v=20260822.4"></script>
-  <script src="spatial-engine.js?v=20260822.4"></script>
-  <script src="spatial-mermaid-panel.js?v=20260822.4"></script>
-  <script src="spatial-browser-bridge.js?v=20260822.4"></script>
+  <script src="input-config.js?v=20260822.5"></script>
+  <script src="spatial-mobile-input-model.js?v=20260822.5"></script>
+  <script src="spatial-visual-model.js?v=20260822.5"></script>
+  <script src="spatial-detail-magnifier-model.js?v=20260822.5"></script>
+  <script src="spatial-gesture-arbiter.js?v=20260822.5"></script>
+  <script src="spatial-middle-frame-target.js?v=20260822.5"></script>
+  <script src="spatial-entity-registry.js?v=20260822.5"></script>
+  <script src="spatial-view-grammar.js?v=20260822.5"></script>
+  <script src="spatial-workspace-model.js?v=20260822.5"></script>
+  <script src="spatial-program-choice-model.js?v=20260822.5"></script>
+  <script src="spatial-mermaid-codec.js?v=20260822.5"></script>
+  <script src="spatial-json-codec.js?v=20260822.5"></script>
+  <script src="spatial-view-mode-model.js?v=20260822.5"></script>
+  <script src="spatial-help-page-model.js?v=20260822.5"></script>
+  <script src="spatial-work-order-registry-model.js?v=20260822.5"></script>
+  <script src="spatial-work-order-registry-panel.js?v=20260822.5"></script>
+  <script src="spatial-demo-model.js?v=20260822.5"></script>
+  <script src="spatial-demo-geometry.js?v=20260822.5"></script>
+  <script src="spatial-cluster-field.js?v=20260822.5"></script>
+  <script src="vendor/spatial-markdown-editor.bundle.js?v=20260822.5"></script>
+  <script src="vendor/atom-spatial-scene.bundle.js?v=20260822.5"></script>
+  <script src="spatial-engine.js?v=20260822.5"></script>
+  <script src="spatial-mermaid-panel.js?v=20260822.5"></script>
+  <script src="spatial-browser-bridge.js?v=20260822.5"></script>
 </body>
 </html>
