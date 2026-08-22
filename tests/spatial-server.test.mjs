@@ -67,3 +67,29 @@ test('local server notifies connected pages immediately after a committed operat
   abort.abort();
   await reader.cancel().catch(() => {});
 });
+
+test('mobile state projection returns only the requested visible path', async (context) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-path-state-'));
+  const instance = await createSpatialServer({
+    root: path.resolve(import.meta.dirname, '..'),
+    storeFile: path.join(directory, 'knowledge.json')
+  });
+  await new Promise((resolve) => instance.server.listen(0, '127.0.0.1', resolve));
+  context.after(() => new Promise((resolve) => instance.server.close(resolve)));
+  const address = instance.server.address();
+  const origin = `http://127.0.0.1:${address.port}`;
+  const create = (pathValue, label) => fetch(`${origin}/__spatial/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ method: 'node.create', params: { path: pathValue, label } })
+  });
+  await create('root', 'atom.json');
+  await create('root/child-domain', '项目');
+
+  const response = await fetch(`${origin}/__spatial/api/state?path=root`);
+  assert.equal(response.status, 200);
+  const state = await response.json();
+  assert.deepEqual(state.scope, { path: 'root' });
+  assert.deepEqual(state.knowledge.nodes.map((node) => node.label), ['atom.json']);
+  assert.equal(state.knowledge.revision, 2);
+});

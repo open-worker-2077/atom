@@ -55,7 +55,36 @@
   let lastKnowledge = null;
   let pendingRemoteRevision = -1;
   let workspaceOperationEpoch = 0;
+  const loadedPaths = new Set();
   const workspaceModel = global.SpatialWorkspaceModel;
+
+  function itemIdentity(item, fallback) {
+    if (!item || typeof item !== "object") return fallback;
+    return item.key || item.id || fallback;
+  }
+
+  function mergeScopedKnowledge(previous, incoming) {
+    if (!previous) return incoming;
+    const mergeItems = (left, right) => [...new Map([
+      ...(Array.isArray(left) ? left : []),
+      ...(Array.isArray(right) ? right : [])
+    ].map((item, index) => [itemIdentity(item, index), item])).values()];
+    return {
+      ...previous,
+      ...incoming,
+      nodes: mergeItems(previous.nodes, incoming.nodes),
+      nodePatches: mergeItems(previous.nodePatches, incoming.nodePatches),
+      deletedNodeKeys: [...new Set([
+        ...(Array.isArray(previous.deletedNodeKeys) ? previous.deletedNodeKeys : []),
+        ...(Array.isArray(incoming.deletedNodeKeys) ? incoming.deletedNodeKeys : [])
+      ])],
+      edges: mergeItems(previous.edges, incoming.edges),
+      removedEdgeIds: [...new Set([
+        ...(Array.isArray(previous.removedEdgeIds) ? previous.removedEdgeIds : []),
+        ...(Array.isArray(incoming.removedEdgeIds) ? incoming.removedEdgeIds : [])
+      ])]
+    };
+  }
 
   function hasQueuedWorkspaceCommit() {
     return queuedCommits.some((entry) => entry && entry.kind === "workspace");
@@ -163,20 +192,33 @@
     return payload;
   }
 
-  async function pullKnowledge() {
+  async function pullKnowledge(requestedPath = lab.state().path || "root") {
     if (pulling || pushing || lab.state().transactionActive) return false;
     pulling = true;
     const pullOperationEpoch = workspaceOperationEpoch;
     try {
-      const payload = await request("/state");
-      const knowledge = payload.knowledge;
+      const normalizedPath = typeof requestedPath === "string" && requestedPath.trim()
+        ? requestedPath.trim()
+        : "root";
+      const payload = await request(`/state?path=${encodeURIComponent(normalizedPath)}`);
+      const incoming = payload.knowledge;
+      const scopedPath = payload.scope && payload.scope.path;
       if (pullOperationEpoch !== workspaceOperationEpoch || pushing || hasQueuedWorkspaceCommit()) {
         return false;
       }
-      if (knowledge && Number(knowledge.revision) > revision) {
+      const incomingRevision = Number(incoming && incoming.revision) || 0;
+      const newerRevision = incomingRevision > revision;
+      const unseenScope = scopedPath && !loadedPaths.has(scopedPath);
+      if (incoming && (newerRevision || unseenScope || !lastKnowledge)) {
+        if (newerRevision && scopedPath) {
+          loadedPaths.clear();
+          lastKnowledge = null;
+        }
+        const knowledge = scopedPath ? mergeScopedKnowledge(lastKnowledge, incoming) : incoming;
         if (!lab.importKnowledge(knowledge)) return false;
-        revision = Number(knowledge.revision) || 0;
+        revision = incomingRevision;
         lastKnowledge = knowledge;
+        if (scopedPath) loadedPaths.add(scopedPath);
         document.body.dataset.spatialKnowledge = "authoritative";
       }
       document.body.dataset.spatialBridge = "connected";
@@ -412,6 +454,7 @@
       queuedCommits.push({ kind: "view", view });
       return true;
     }
+    if (view.path && !loadedPaths.has(view.path)) await pullKnowledge(view.path);
     pushing = true;
     try {
       await request("/view", {

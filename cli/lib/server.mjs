@@ -29,6 +29,33 @@ function json(response, status, value) {
   response.end(`${JSON.stringify(value)}\n`);
 }
 
+function knowledgeAtPath(knowledge, requestedPath) {
+  const pathValue = typeof requestedPath === 'string' ? requestedPath.trim() : '';
+  if (!pathValue || pathValue.length > 1024) {
+    throw new SpatialStoreError('INVALID_SPATIAL_PATH', '可视数据路径必须是 1 到 1024 个字符');
+  }
+  const nodes = Array.isArray(knowledge.nodes)
+    ? knowledge.nodes.filter((node) => node?.path === pathValue)
+    : [];
+  const edges = Array.isArray(knowledge.edges)
+    ? knowledge.edges.filter((edge) => edge?.from?.path === pathValue || edge?.to?.path === pathValue)
+    : [];
+  const belongsToPath = (key) => typeof key === 'string'
+    && key.slice(0, key.lastIndexOf('::')) === pathValue;
+  return {
+    ...knowledge,
+    nodes,
+    nodePatches: Array.isArray(knowledge.nodePatches)
+      ? knowledge.nodePatches.filter((entry) => belongsToPath(entry?.key))
+      : [],
+    deletedNodeKeys: Array.isArray(knowledge.deletedNodeKeys)
+      ? knowledge.deletedNodeKeys.filter(belongsToPath)
+      : [],
+    edges,
+    view: knowledge.view?.path === pathValue ? knowledge.view : null
+  };
+}
+
 async function body(request) {
   const chunks = [];
   let size = 0;
@@ -131,7 +158,14 @@ export async function createSpatialServer(options = {}) {
         return json(response, 200, JSON.parse(await fs.readFile(graphFile, 'utf8')));
       }
       if (url.pathname === '/__spatial/api/state' && request.method === 'GET') {
-        return json(response, 200, { ok: true, knowledge: await readKnowledge() });
+        const knowledge = await readKnowledge();
+        if (!url.searchParams.has('path')) return json(response, 200, { ok: true, knowledge });
+        const requestedPath = url.searchParams.get('path');
+        return json(response, 200, {
+          ok: true,
+          knowledge: knowledgeAtPath(knowledge, requestedPath),
+          scope: { path: requestedPath.trim() }
+        });
       }
       if (url.pathname === '/__atom/api/work-order-registry' && request.method === 'GET') {
         if (typeof options.atomWorkOrderRegistry !== 'function') {
