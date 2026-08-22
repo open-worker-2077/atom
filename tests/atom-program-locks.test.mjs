@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { authorizeProgramLock, buildProgramLockIndex } from '../work-engine/atom-language/program-locks.mjs';
+import {
+  authorizeProgramLock,
+  buildProgramLockIndex,
+  mergeProgramLockIndexes
+} from '../work-engine/atom-language/program-locks.mjs';
 
 const records = [
   { ref: 'r-target', path: '推进流/任务A', types: [] },
@@ -67,4 +71,46 @@ test('an allowed Agent window bypasses only its matching Program lock', () => {
     lockIndex: index, targetPath: '推进流/任务A', operation: 'read', field: 'detail',
     agentPath: '推进流/其他窗口'
   }).decision, 'truncate');
+});
+
+test('targeted Program refresh preserves locks emitted by Programs that did not run', () => {
+  const previous = buildProgramLockIndex({
+    revision: 'rev-before', records,
+    results: [{
+      targets: { refs: ['r-target'] }, mode: 'write', fields: ['detail'],
+      protect: { atom: true, messages: false },
+      sourceProgramRef: 'r-program', sourceProgramPath: '冻结程序'
+    }]
+  });
+  const merged = mergeProgramLockIndexes({
+    revision: 'rev-after',
+    previous,
+    next: buildProgramLockIndex({ revision: 'rev-after', records, results: [] }),
+    replacedSources: new Set(['其他程序'])
+  });
+
+  assert.equal(authorizeProgramLock({
+    lockIndex: merged, targetPath: '推进流/任务A', operation: 'write', field: 'detail'
+  }).decision, 'deny');
+});
+
+test('targeted Program refresh removes an old lock when its source ran without re-emitting it', () => {
+  const previous = buildProgramLockIndex({
+    revision: 'rev-before', records,
+    results: [{
+      targets: { refs: ['r-target'] }, mode: 'write', fields: ['detail'],
+      protect: { atom: true, messages: false },
+      sourceProgramRef: 'r-program', sourceProgramPath: '冻结程序'
+    }]
+  });
+  const merged = mergeProgramLockIndexes({
+    revision: 'rev-after',
+    previous,
+    next: buildProgramLockIndex({ revision: 'rev-after', records, results: [] }),
+    replacedSources: new Set(['冻结程序'])
+  });
+
+  assert.equal(authorizeProgramLock({
+    lockIndex: merged, targetPath: '推进流/任务A', operation: 'write', field: 'detail'
+  }).decision, 'allow');
 });

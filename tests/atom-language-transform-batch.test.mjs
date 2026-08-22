@@ -295,6 +295,59 @@ test('a real Program creates then updates one new Atom inside the triggering cen
     .update(JSON.stringify(persisted)).digest('hex'));
 });
 
+test('a Transform request triggers its declared Program even when the requested value is unchanged', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-transform-trigger-same-value-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    {
+      name: 'test',
+      detail: '',
+      children: [
+        atom('Target', 'stable'),
+        atom('Result', 'pending'),
+        {
+          'name@program': 'Target Trigger',
+          detail: [
+            'def main():',
+            "    transform({'name': 'test/Target Trigger Case/Result', 'detail.rep.fired': None})",
+            "trigger('transform', {'nodes': ['test/Target Trigger Case/Target']}, main)"
+          ].join('\n'),
+          children: [],
+          partners: []
+        }
+      ],
+      partners: []
+    }
+  ], null, 2));
+  const initial = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  initial[0].children = [{
+    name: 'Target Trigger Case',
+    detail: '',
+    children: initial[0].children,
+    partners: []
+  }];
+  await fs.writeFile(contextFile, JSON.stringify(initial, null, 2));
+  const writes = [];
+  const world = createLegacyWorldService({
+    onAuthoritativeWrite: (write) => writes.push(write)
+  });
+
+  const result = await world.executeLegacy({
+    contextFile,
+    projectionFile,
+    source: 'transform {"name":"test/Target Trigger Case/Target","detail.rep.stable"}',
+    programMode: 'reconcile',
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(writes.length, 1);
+  const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(persisted[0].children[0].children.find(({ name }) => name === 'Result').detail, 'fired');
+});
+
 test('batch receipt follows a final Program rename in the same commit', async (t) => {
   const files = await fixture(t);
   let refreshes = 0;

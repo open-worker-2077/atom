@@ -191,6 +191,43 @@ test('public registry exposes the complete window-aware Program lock contract', 
   assert.equal(lock.contract.denial.write, 'PROGRAM_LOCK_DENIED');
 });
 
+test('public registry exposes indexed Transform trigger dispatch and function-reference entrypoints', async () => {
+  const { programFunctionRegistry } = await import('../work-engine/atom-language/program-function-registry.mjs');
+  const trigger = programFunctionRegistry().functions.find((item) => item.name === 'trigger');
+
+  assert.deepEqual(trigger.contract.arguments, [
+    { name: 'mode', const: 'transform' },
+    {
+      name: 'parameters',
+      type: 'object',
+      required: ['nodes'],
+      additionalProperties: false,
+      properties: {
+        nodes: {
+          type: 'array', minItems: 1, uniqueItems: true,
+          items: { type: 'string', format: 'exact-atom-path' }
+        }
+      }
+    },
+    { name: 'entrypoint', type: 'function-reference', arguments: 0 }
+  ]);
+  assert.equal(trigger.contract.dispatch, 'reverse-index');
+  assert.equal(trigger.contract.event, 'transform-request');
+  assert.equal(trigger.contract.sameValueTriggers, true);
+});
+
+test('CLI Help documents the three-argument Transform trigger without eager main invocation', async () => {
+  const stdout = output();
+  const stderr = output();
+  const code = await runAtomCli(['--help'], { stdout: stdout.stream, stderr: stderr.stream });
+
+  assert.equal(code, 0, stderr.value());
+  assert.match(stdout.value(), /trigger\("transform",\s*\{"nodes":\["exact 节点路径"\]\},\s*main\)/u);
+  assert.match(stdout.value(), /main 是函数引用[\s\S]*不能写 main\(\)/u);
+  assert.match(stdout.value(), /相同值[\s\S]*仍属于 Transform 事件/u);
+  assert.match(stdout.value(), /反向索引[\s\S]*只运行命中的 Program/u);
+});
+
 test('CLI Help explains window allowlists and explicit lock recomputation', async () => {
   const stdout = output();
   const stderr = output();

@@ -43,6 +43,42 @@ export function buildProgramLockIndex({ revision, results = [], records = [] }) 
   return Object.freeze({ revision, byPath });
 }
 
+export function mergeProgramLockIndexes({
+  revision,
+  previous,
+  next,
+  replacedSources = new Set()
+}) {
+  const byPath = new Map();
+  const addSource = (path, source) => {
+    const entry = byPath.get(path) ?? { read: new Set(), write: new Set(), sources: [] };
+    const cloned = {
+      ...source,
+      readFields: new Set(source.readFields),
+      writeFields: new Set(source.writeFields),
+      allowedWindows: source.allowedWindows ? [...source.allowedWindows] : null,
+      reason: source.reason && typeof source.reason === 'object'
+        ? structuredClone(source.reason)
+        : null
+    };
+    for (const field of cloned.readFields) entry.read.add(field);
+    for (const field of cloned.writeFields) entry.write.add(field);
+    entry.sources.push(cloned);
+    byPath.set(path, entry);
+  };
+
+  for (const [path, entry] of previous?.byPath?.entries?.() ?? []) {
+    for (const source of entry.sources) {
+      if (!replacedSources.has(source.sourceProgramPath)) addSource(path, source);
+    }
+  }
+  for (const [path, entry] of next?.byPath?.entries?.() ?? []) {
+    for (const source of entry.sources) addSource(path, source);
+  }
+
+  return Object.freeze({ revision, byPath });
+}
+
 export function programLockDeniedDiagnostic(decision, field = null) {
   const reasons = (decision?.matched ?? [])
     .map((source) => source.reason)

@@ -370,11 +370,13 @@ function validateResult(result, records, program) {
       sourceProgramPath: program.path
     };
   });
-  return { locks, messages, transforms, choices };
+  const trigger = result.trigger == null ? null : structuredClone(result.trigger);
+  return { locks, messages, transforms, choices, trigger };
 }
 
 function runWorker({
-  python, records, programs, program, timeoutMs, executeExplore, validateOnly = false
+  python, records, programs, program, timeoutMs, executeExplore, validateOnly = false,
+  triggered = false
 }) {
   return new Promise((resolve, reject) => {
     const child = spawn(python, ['-I', '-X', 'utf8', workerFile], {
@@ -457,7 +459,8 @@ function runWorker({
     writeToWorker({
       world: programs ?? records.filter((record) => record.types.includes('program')),
       program,
-      validateOnly
+      validateOnly,
+      triggered
     });
   });
 }
@@ -492,6 +495,9 @@ export class ProgramRuntimeScheduler {
     this.projectionLoadWarning = null;
     this.requestDrivenLockRepository = options.requestDrivenLockRepository ?? null;
     this.requestDrivenLocks = undefined;
+    this.triggerContracts = new Map();
+    this.triggerIndex = new Map();
+    this.triggerContractsInitialized = false;
     if (this.projectionRepository
       && (typeof this.projectionRepository.load !== 'function'
         || typeof this.projectionRepository.save !== 'function')) {
@@ -587,7 +593,7 @@ export class ProgramRuntimeScheduler {
           || !previous.types.includes('program');
       })()
     ));
-    await Promise.all(programs.map((program) => this.runBounded(() => this.runProgram({
+    const validated = await Promise.all(programs.map((program) => this.runBounded(() => this.runProgram({
       python: this.python,
       records,
       programs: records.filter((record) => record.types.includes('program')),
@@ -601,6 +607,61 @@ export class ProgramRuntimeScheduler {
       },
       validateOnly: true
     }))));
+    for (const [index, program] of programs.entries()) {
+      this.setTriggerContract(program, validated[index].trigger ?? null);
+    }
+    const activePaths = new Set(records.map((record) => record.path));
+    for (const path of this.triggerContracts.keys()) {
+      if (!activePaths.has(path)) this.removeTriggerContract(path);
+    }
+  }
+
+  removeTriggerContract(programPath) {
+    const existing = this.triggerContracts.get(programPath)?.contract;
+    if (existing) {
+      for (const node of existing.parameters.nodes) {
+        const key = `${existing.mode}\0${node}`;
+        const paths = this.triggerIndex.get(key);
+        paths?.delete(programPath);
+        if (paths?.size === 0) this.triggerIndex.delete(key);
+      }
+    }
+    this.triggerContracts.delete(programPath);
+  }
+
+  setTriggerContract(program, contract) {
+    this.removeTriggerContract(program.path);
+    this.triggerContracts.set(program.path, { detail: program.detail, contract });
+    if (!contract) return;
+    for (const node of contract.parameters.nodes) {
+      const key = `${contract.mode}\0${node}`;
+      const paths = this.triggerIndex.get(key) ?? new Set();
+      paths.add(program.path);
+      this.triggerIndex.set(key, paths);
+    }
+  }
+
+  async ensureTriggerContracts(records, programs, executeExplore) {
+    if (this.triggerContractsInitialized) return;
+    const candidates = programs.filter((program) => (
+      /\btrigger\s*\(/u.test(program.detail)
+      && this.triggerContracts.get(program.path)?.detail !== program.detail
+    ));
+    const inspected = await Promise.all(candidates.map((program) => this.runBounded(() => (
+      this.runProgram({
+        python: this.python,
+        records,
+        programs,
+        program,
+        timeoutMs: this.timeoutMs,
+        executeExplore,
+        validateOnly: true
+      })
+    ))));
+    for (const [index, program] of candidates.entries()) {
+      this.setTriggerContract(program, inspected[index].trigger ?? null);
+    }
+    this.triggerContractsInitialized = true;
   }
 
   async loadProjection() {
@@ -737,7 +798,9 @@ export class ProgramRuntimeScheduler {
       : availablePrograms;
     const isolateFailures = options.isolateFailures === true;
     const stableKey = fingerprint(records, programs, options.agentOrigin, isolateFailures);
-    const key = options.force === true ? `${stableKey}:${crypto.randomUUID()}` : stableKey;
+    const key = options.force === true || options.triggerEvent
+      ? `${stableKey}:${crypto.randomUUID()}`
+      : stableKey;
     const completed = this.completed.get(key);
     if (completed && completed.failures.length === 0) {
       const cached = completed;
@@ -762,7 +825,7 @@ export class ProgramRuntimeScheduler {
     records, programs, availablePrograms, isolateFailures, key
   }) {
     const cycleDeadline = Date.now() + this.timeoutMs;
-    if (options.force !== true && !options.programSelector) {
+    if (options.force !== true && !options.programSelector && !options.triggerEvent) {
       const persisted = await this.persistedProjection({
         records, programs, isolateFailures, fingerprint: key, agentOrigin: options.agentOrigin
       });
@@ -781,12 +844,31 @@ export class ProgramRuntimeScheduler {
     const executeExplore = options.executeExplore ?? ((request) => executeProgramExplore({
       atoms, request, preparedWorld
     }));
+    const triggerEvent = options.triggerEvent ?? null;
+    if (triggerEvent && (triggerEvent.mode !== 'transform'
+      || !Array.isArray(triggerEvent.nodes)
+      || triggerEvent.nodes.length === 0
+      || triggerEvent.nodes.some((node) => typeof node !== 'string' || !node.trim()))) {
+      throw Object.assign(new Error('transform trigger event requires one non-empty nodes string list'), {
+        code: 'INVALID_PROGRAM_TRIGGER_EVENT'
+      });
+    }
+    if (triggerEvent) await this.ensureTriggerContracts(records, programs, executeExplore);
+    const eventNodes = new Set((triggerEvent?.nodes ?? []).map((node) => node.trim()));
+    const triggeredProgramPaths = new Set();
+    if (triggerEvent) {
+      for (const node of eventNodes) {
+        for (const programPath of this.triggerIndex.get(`${triggerEvent.mode}\0${node}`) ?? []) {
+          triggeredProgramPaths.add(programPath);
+        }
+      }
+    }
     const fingerprintDependencies = (requests) => dependencyFingerprint(
       requests, executeExplore, records, dependencyCache
     );
     const currentWorldKey = worldRevisionKey(records);
     const scopePath = agentScopePath(options.agentOrigin);
-    const reusableEntry = options.force === true
+    const reusableEntry = options.force === true || triggerEvent
       ? null
       : reusableCandidates(
         this.reusable, programs, isolateFailures, options.agentOrigin, records,
@@ -857,12 +939,38 @@ export class ProgramRuntimeScheduler {
           records, availablePrograms
         )[0];
       const previous = previousEntry?.[1] ?? null;
-      if (previous) {
+      const triggerContract = this.triggerContracts.get(program.path)?.contract ?? null;
+      const forcedByTrigger = triggerEvent && triggeredProgramPaths.has(program.path);
+      if (triggerEvent && triggeredProgramPaths.size > 0 && !triggerContract && !previous) {
+        return {
+          programPath: program.path,
+          result: { locks: [], messages: [], transforms: [], choices: [], trigger: null },
+          cached: true,
+          requests: [],
+          contextDependent: false
+        };
+      }
+      if (triggerEvent && triggerContract && !forcedByTrigger) {
+        return {
+          programPath: program.path,
+          result: previous ? {
+            ...previous.result,
+            locks: rebindLocks(previous.result.locks, previous.records, records),
+            messages: [],
+            transforms: []
+          } : { locks: [], messages: [], transforms: [], choices: [], trigger: null },
+          cached: true,
+          requests: previous?.requests ?? [],
+          contextDependent: previous?.contextDependent === true
+        };
+      }
+      if (previous && !forcedByTrigger) {
         const dependenciesUnchanged = previous.worldKey === currentWorldKey
           || await fingerprintDependencies(previous.requests)
             === previous.dependencyFingerprint;
         if (dependenciesUnchanged) {
           return {
+            programPath: program.path,
             result: {
               ...previous.result,
               locks: rebindLocks(previous.result.locks, previous.records, records),
@@ -893,6 +1001,8 @@ export class ProgramRuntimeScheduler {
             programs: availablePrograms,
             program,
             timeoutMs: remainingMs,
+            triggered: options.force === true
+              || (triggerEvent ? triggeredProgramPaths.has(program.path) : false),
             executeExplore: async (request) => {
               requests.push(structuredClone(request));
               const matches = await executeExplore(request);
@@ -930,7 +1040,7 @@ export class ProgramRuntimeScheduler {
             records
           });
         }
-        return { result, cached: false, requests: uniqueRequests, contextDependent };
+        return { programPath: program.path, result, cached: false, requests: uniqueRequests, contextDependent };
       } catch (error) {
         const failure = describeProgramFailure(error, program);
         const uniqueRequests = [...new Map(requests.map((request) => (
@@ -941,10 +1051,10 @@ export class ProgramRuntimeScheduler {
         });
         const contextDependent = requestsDependOnAgent(uniqueRequests);
         if (contextDependent && !scopePath) {
-          return { failure, cached: false, requests: uniqueRequests, contextDependent };
+          return { programPath: program.path, failure, cached: false, requests: uniqueRequests, contextDependent };
         }
         if (isolateFailures) {
-          return { failure, cached: false, requests: uniqueRequests, contextDependent };
+          return { programPath: program.path, failure, cached: false, requests: uniqueRequests, contextDependent };
         }
         throw error;
       }
@@ -965,6 +1075,9 @@ export class ProgramRuntimeScheduler {
       messages: results.flatMap((result) => result.messages),
       transforms: results.flatMap((result) => result.transforms),
       failures: applicable.flatMap((entry) => entry.failure ? [entry.failure] : []),
+      executedProgramPaths: applicable
+        .filter((entry) => entry.cached === false && entry.result)
+        .map((entry) => entry.programPath),
       contextIncomplete
     };
     await this.mergeRequestDrivenLocks(value, records, options);

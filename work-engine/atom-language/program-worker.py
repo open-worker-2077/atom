@@ -134,7 +134,7 @@ ALLOWED_FUNCTIONS = {
     "int", "len", "list", "map", "max", "min", "range", "set",
     "sorted", "str", "sum", "tuple", "zip",
     "Exception", "ValueError", "TypeError",
-    "explore", "transform", "lock", "message", "choice", "current_atom",
+    "explore", "transform", "lock", "message", "choice", "current_atom", "trigger",
     "direct_children", "child_detail", "missing_details", "form_status",
     "first_pending", "transition_allowed", "subtree_refs", "plan_form_flow",
     "plan_template_instance", "plan_shards", "instantiate", "template_catalog",
@@ -186,6 +186,61 @@ def validate_program(source, filename):
             else:
                 raise ProgramSecurityError("Indirect callable expressions are not allowed in Atom Program")
     return tree
+
+
+def extract_trigger_contract(tree):
+    declarations = [
+        node.value for node in tree.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "trigger"
+    ]
+    if not declarations:
+        return None
+    if len(declarations) != 1:
+        raise ProgramSecurityError("Atom Program must declare at most one trigger()")
+    declaration = declarations[0]
+    if declaration.keywords or len(declaration.args) != 3:
+        raise ProgramSecurityError(
+            "trigger() requires mode, mode parameters, and one function reference"
+        )
+    try:
+        mode = ast.literal_eval(declaration.args[0])
+        parameters = ast.literal_eval(declaration.args[1])
+    except (TypeError, ValueError, SyntaxError) as error:
+        raise ProgramSecurityError(
+            "trigger mode and parameters must be literal JSON-compatible values"
+        ) from error
+    entrypoint_node = declaration.args[2]
+    if not isinstance(entrypoint_node, ast.Name):
+        raise ProgramSecurityError("trigger() third argument must be a function reference, not a call")
+    entrypoint = entrypoint_node.id
+    functions = {
+        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+    }
+    function = functions.get(entrypoint)
+    if function is None:
+        raise ProgramSecurityError(f"trigger() entrypoint is not defined: {entrypoint}")
+    if function.args.args or function.args.vararg or function.args.kwarg:
+        raise ProgramSecurityError("trigger() entrypoint must accept no arguments")
+    if mode != "transform":
+        raise ProgramSecurityError("trigger() currently supports only transform mode")
+    if (not isinstance(parameters, dict)
+            or set(parameters) != {"nodes"}
+            or not isinstance(parameters.get("nodes"), list)
+            or not parameters["nodes"]
+            or any(not isinstance(value, str) or not value.strip()
+                   for value in parameters["nodes"])
+            or len(set(parameters["nodes"])) != len(parameters["nodes"])):
+        raise ProgramSecurityError(
+            "trigger transform parameters require one non-empty unique nodes string list"
+        )
+    return {
+        "mode": mode,
+        "parameters": {"nodes": [value.strip() for value in parameters["nodes"]]},
+        "entrypoint": entrypoint,
+    }
 
 
 class AtomView:
@@ -272,6 +327,10 @@ def main():
         if not isinstance(selected, list):
             raise TypeError("choice.selected must be an array")
         return list(selected)
+
+    def trigger(mode, parameters, entrypoint):
+        if request.get("triggered") is True:
+            entrypoint()
 
     program_stack = [request["program"]["ref"]]
 
@@ -785,6 +844,7 @@ def main():
         "lock": lock,
         "message": message,
         "choice": choice,
+        "trigger": trigger,
         "current_atom": current_atom,
         "direct_children": direct_children,
         "child_detail": child_detail,
@@ -850,9 +910,10 @@ def main():
             + ", ".join(sorted(missing_implementations))
         )
     program_tree = validate_program(request["program"]["detail"], request["program"]["path"])
+    trigger_contract = extract_trigger_contract(program_tree)
     if request.get("validateOnly") is True:
         sys.stdout.write(json.dumps(
-            {"type": "result", "ok": True, **effects},
+            {"type": "result", "ok": True, "trigger": trigger_contract, **effects},
             ensure_ascii=True,
             allow_nan=False,
         ) + "\n")
@@ -862,7 +923,7 @@ def main():
     if codec_failure is not None:
         raise codec_failure
     sys.stdout.write(json.dumps(
-        {"type": "result", "ok": True, **effects},
+        {"type": "result", "ok": True, "trigger": trigger_contract, **effects},
         ensure_ascii=True,
         allow_nan=False,
     ) + "\n")

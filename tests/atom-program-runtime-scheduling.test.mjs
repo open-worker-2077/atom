@@ -11,6 +11,101 @@ function atom(name, detail = '', children = [], type = '') {
   return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
 }
 
+test('transform trigger runs only Programs whose declared node list intersects the event', async () => {
+  const triggeredProgram = (name, monitoredNode, text) => atom(name, [
+    'def main():',
+    `    message({'level': 'info', 'text': '${text}'})`,
+    `trigger('transform', {'nodes': ['${monitoredNode}']}, main)`
+  ].join('\n'), [], 'program');
+  const scheduler = createProgramRuntimeScheduler();
+
+  const cycle = await scheduler.refresh([
+    atom('A'),
+    atom('B'),
+    triggeredProgram('A Program', 'A', 'ran-a'),
+    triggeredProgram('B Program', 'B', 'ran-b')
+  ], {
+    triggerEvent: { mode: 'transform', nodes: ['A'] }
+  });
+
+  assert.deepEqual(cycle.messages.map(({ text }) => text), ['ran-a']);
+  assert.deepEqual(cycle.failures, []);
+});
+
+test('one transform event runs a matching Program once when several monitored nodes match', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const program = atom('Combined Program', [
+    'def main():',
+    "    message({'level': 'info', 'text': 'ran-once'})",
+    "trigger('transform', {'nodes': ['A', 'B']}, main)"
+  ].join('\n'), [], 'program');
+
+  const cycle = await scheduler.refresh([
+    atom('A'),
+    atom('B'),
+    program
+  ], {
+    triggerEvent: { mode: 'transform', nodes: ['A', 'B'] }
+  });
+
+  assert.deepEqual(cycle.messages.map(({ text }) => text), ['ran-once']);
+});
+
+test('an explicit Program run executes the trigger entrypoint without waiting for a Transform event', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const program = atom('Explicit Trigger Program', [
+    'def main():',
+    "    message({'level': 'info', 'text': 'explicit-run'})",
+    "trigger('transform', {'nodes': ['A']}, main)"
+  ].join('\n'), [], 'program');
+
+  const cycle = await scheduler.refresh([atom('A'), program], {
+    programSelector: 'Explicit Trigger Program',
+    force: true
+  });
+
+  assert.deepEqual(cycle.messages.map(({ text }) => text), ['explicit-run']);
+});
+
+test('a Transform event bypasses a persisted projection after scheduler restart', async () => {
+  let stored = null;
+  const projectionRepository = {
+    async load() { return structuredClone(stored); },
+    async save(value) { stored = structuredClone(value); }
+  };
+  const world = [
+    atom('A'),
+    atom('Legacy Unrelated', "message({'level': 'info', 'text': 'legacy-must-not-replay'})", [], 'program'),
+    atom('Restart Trigger', [
+      'def main():',
+      "    message({'level': 'info', 'text': 'cold-start-trigger'})",
+      "trigger('transform', {'nodes': ['A']}, main)"
+    ].join('\n'), [], 'program')
+  ];
+  await createProgramRuntimeScheduler({ projectionRepository }).refresh(world);
+
+  const cycle = await createProgramRuntimeScheduler({ projectionRepository }).refresh(world, {
+    triggerEvent: { mode: 'transform', nodes: ['A'] }
+  });
+
+  assert.deepEqual(cycle.messages.map(({ text }) => text), ['cold-start-trigger']);
+});
+
+test('trigger rejects eager main invocation instead of executing during contract registration', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const program = atom('Invalid Trigger Program', [
+    'def main():',
+    "    message({'level': 'info', 'text': 'must-not-run'})",
+    "trigger('transform', {'nodes': ['A']}, main())"
+  ].join('\n'), [], 'program');
+
+  await assert.rejects(
+    scheduler.validateProgramSources([atom('A'), program]),
+    (error) => error?.code === 'ATOM_PROGRAM_FAILED'
+      && /function reference, not a call/u.test(error.message)
+  );
+});
+
 test('concurrent refreshes for one world revision share one cycle and deliver its message once', async () => {
   const world = [
     atom('Program', "message({'level': 'info', 'text': 'delivered-once'})", [], 'program')
