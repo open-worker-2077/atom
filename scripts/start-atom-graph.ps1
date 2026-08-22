@@ -1,5 +1,6 @@
 param(
-  [switch]$NoBrowser
+  [switch]$NoBrowser,
+  [int]$StartupTimeoutSeconds = 90
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,7 +26,7 @@ if (-not (Test-AtomGraphHealth)) {
     -WindowStyle Hidden `
     -PassThru
 
-  $deadline = (Get-Date).AddSeconds(30)
+  $deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
     if (Test-AtomGraphHealth) { break }
     if ($server.HasExited) {
@@ -36,7 +37,7 @@ if (-not (Test-AtomGraphHealth)) {
 }
 
 if (-not (Test-AtomGraphHealth)) {
-  throw 'Atom Graph did not become healthy on port 4784 within 30 seconds.'
+  throw "Atom Graph did not become healthy on port 4784 within $StartupTimeoutSeconds seconds."
 }
 
 if (-not $NoBrowser) {
