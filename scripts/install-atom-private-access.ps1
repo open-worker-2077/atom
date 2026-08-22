@@ -1,7 +1,8 @@
 param(
   [string]$AllowedLogin,
   [int]$GatewayPort = 4785,
-  [string]$TaskName = "Atom Private Mobile Gateway"
+  [string]$TaskName = "Atom Private Mobile Gateway",
+  [string]$RuntimeTaskName = "Atom Graph Runtime"
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,8 +12,14 @@ $stateDirectory = Join-Path $env:LOCALAPPDATA "AtomGraph"
 $markerFile = Join-Path $stateDirectory "private-access.json"
 $repositoryRoot = Split-Path $PSScriptRoot -Parent
 $gatewayScript = Join-Path $repositoryRoot "work-engine\atom-language\private-mobile-gateway.mjs"
+$settingsScript = Join-Path $PSScriptRoot "atom-long-running-task.ps1"
+$repairScript = Join-Path $PSScriptRoot "repair-atom-private-access.ps1"
 $serveOwned = $false
 $gatewayProcess = $null
+$markerCreated = $false
+$runtimeTaskPreexisting = $null -ne (Get-ScheduledTask -TaskName $RuntimeTaskName -ErrorAction SilentlyContinue)
+
+. $settingsScript
 
 function Get-ObjectEntryCount($Value, [string]$PropertyName) {
   if ($null -eq $Value) { return 0 }
@@ -41,13 +48,7 @@ function Resolve-TailscaleCommand {
 }
 
 if (Test-Path -LiteralPath $markerFile) {
-  $existing = Get-Content -Raw -LiteralPath $markerFile | ConvertFrom-Json
-  Write-Output ([pscustomobject]@{
-    ok = $true
-    alreadyConfigured = $true
-    gateway = $existing.gatewayUrl
-    login = $existing.allowedLogin
-  })
+  & $repairScript -RuntimeTaskName $RuntimeTaskName
   exit 0
 }
 
@@ -83,7 +84,7 @@ $taskAction = New-ScheduledTaskAction -Execute $nodeCommand.Source -Argument $ta
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
 $taskPrincipal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
-$taskSettings = New-ScheduledTaskSettingsSet -Hidden -StartWhenAvailable -MultipleInstances IgnoreNew
+$taskSettings = New-AtomLongRunningTaskSettings
 
 try {
   Register-ScheduledTask `
@@ -132,10 +133,16 @@ try {
     configuredAt = (Get-Date).ToUniversalTime().ToString("o")
   }
   $marker | ConvertTo-Json | Set-Content -LiteralPath $markerFile -Encoding utf8
+  $markerCreated = $true
+  & $repairScript -RuntimeTaskName $RuntimeTaskName
   Write-Output ([pscustomobject]@{ ok = $true; gateway = $gatewayUrl; login = $resolvedLogin })
 } catch {
   if ($serveOwned) { & $tailscaleExecutable serve --https=443 off | Out-Null }
   if ($gatewayProcess -and -not $gatewayProcess.HasExited) { Stop-Process -Id $gatewayProcess.Id -Force }
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+  if ($markerCreated) { Remove-Item -LiteralPath $markerFile -Force -ErrorAction SilentlyContinue }
+  if (-not $runtimeTaskPreexisting) {
+    Unregister-ScheduledTask -TaskName $RuntimeTaskName -Confirm:$false -ErrorAction SilentlyContinue
+  }
   throw
 }
