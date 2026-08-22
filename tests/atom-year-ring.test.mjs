@@ -173,8 +173,10 @@ test('year-ring index rebuilds exact per-Atom history without changing central f
   });
   const journal = await journalRepository.readState();
   const journalBefore = structuredClone(journal);
+  const committedAt = journal.receipts[0]?.receipt?.committedAt ?? journal.receipts[0]?.committedAt;
+  const diagnosticRecordedAt = new Date(Date.parse(committedAt) + 1_000).toISOString();
   const diagnostics = [{
-    id: 'program-1', type: 'program', recordedAt: '2026-08-20T10:00:00.000Z',
+    id: 'program-1', type: 'program', recordedAt: diagnosticRecordedAt,
     durationMs: 3, outcome: 'success',
     program: { path: '项目/程序', ref: 'p1', fingerprint: 'sha256:p1' },
     affectedAtoms: [
