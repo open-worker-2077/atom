@@ -12,8 +12,7 @@
     }
   }
   const localFile = Boolean(localStorage);
-  const localHost = ["127.0.0.1", "localhost", "::1"].includes(global.location.hostname);
-  const supported = ["http:", "https:"].includes(global.location.protocol) && localHost && lab;
+  const supported = ["http:", "https:"].includes(global.location.protocol) && lab;
   document.body.dataset.spatialBridge = localFile ? "local" : supported ? "connecting" : "standalone";
 
   if (localFile) {

@@ -172,6 +172,48 @@ test('Atom Web reports semantic persistence confirmation and failure instead of 
   }
 });
 
+test('private HTTPS host loads authoritative Atom knowledge instead of standalone demo data', async () => {
+  const actualKnowledge = {
+    schemaVersion: 1,
+    revision: 5592,
+    nodes: [{ id: 'actual', key: 'root::actual', path: 'root', label: 'ESG计划' }],
+    edges: []
+  };
+  const requested = [];
+  let imported = null;
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: 'worker.tail33a2eb.ts.net', protocol: 'https:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge(knowledge) {
+        imported = knowledge;
+        return true;
+      },
+      exportField: () => ({ path: 'root' }),
+      exportKnowledge: () => actualKnowledge
+    },
+    fetch: async (url) => {
+      requested.push(url);
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state')) return response({ knowledge: actualKnowledge });
+      return response({});
+    },
+    addEventListener() {},
+    setInterval: () => 0
+  };
+  window.window = window;
+
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(document.body.dataset.spatialBridge, 'connected');
+  assert.deepEqual(JSON.parse(JSON.stringify(imported)), actualKnowledge);
+  assert.deepEqual(requested, ['/__spatial/api/health', '/__spatial/api/state']);
+});
+
 test('Atom Web reports committed facts with a pending projection without claiming failure or importing stale knowledge', async () => {
   const listeners = new Map();
   const lifecycle = [];
