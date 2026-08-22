@@ -114,6 +114,45 @@ test('a matched Transform trigger does not revalidate cached legacy Programs', a
   assert.deepEqual(cycle.messages.map(({ text }) => text), ['indexed-only']);
 });
 
+test('an unmatched Transform event does not revalidate legacy Programs', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const legacy = atom('Legacy Reporter', [
+    "value = explore({'name': 'Legacy Input'})[0].detail",
+    "message({'level': 'info', 'text': 'legacy:' + value})"
+  ].join('\n'), [], 'program');
+  const triggered = atom('Indexed Trigger', [
+    'def main():',
+    "    message({'level': 'info', 'text': 'indexed-only'})",
+    "trigger('transform', {'nodes': ['Trigger Input']}, main)"
+  ].join('\n'), [], 'program');
+
+  await scheduler.refresh([atom('Legacy Input', 'before'), atom('Unrelated'), legacy, triggered]);
+  const cycle = await scheduler.refresh([
+    atom('Legacy Input', 'after'), atom('Unrelated'),
+    structuredClone(legacy), structuredClone(triggered)
+  ], {
+    triggerEvent: { mode: 'transform', nodes: ['Unrelated'] }
+  });
+
+  assert.equal(cycle.cached, true);
+  assert.deepEqual(cycle.messages, []);
+  assert.deepEqual(cycle.executedProgramPaths, []);
+});
+
+test('editing a legacy Program still runs that Program for compatibility', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const before = atom('Legacy Reporter', "message({'level': 'info', 'text': 'before'})", [], 'program');
+  const after = atom('Legacy Reporter', "message({'level': 'info', 'text': 'after'})", [], 'program');
+
+  await scheduler.refresh([before]);
+  const cycle = await scheduler.refresh([after], {
+    triggerEvent: { mode: 'transform', nodes: ['Legacy Reporter'] }
+  });
+
+  assert.deepEqual(cycle.messages.map(({ text }) => text), ['after']);
+  assert.deepEqual(cycle.executedProgramPaths, ['Legacy Reporter']);
+});
+
 test('trigger rejects eager main invocation instead of executing during contract registration', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const program = atom('Invalid Trigger Program', [

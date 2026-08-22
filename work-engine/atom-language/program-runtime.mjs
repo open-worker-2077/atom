@@ -941,7 +941,10 @@ export class ProgramRuntimeScheduler {
       const previous = previousEntry?.[1] ?? null;
       const triggerContract = this.triggerContracts.get(program.path)?.contract ?? null;
       const forcedByTrigger = triggerEvent && triggeredProgramPaths.has(program.path);
-      if (triggerEvent && triggeredProgramPaths.size > 0 && !triggerContract) {
+      if (triggerEvent
+        && this.triggerIndex.size > 0
+        && !triggerContract
+        && !eventNodes.has(program.path)) {
         return {
           programPath: program.path,
           result: previous ? {
