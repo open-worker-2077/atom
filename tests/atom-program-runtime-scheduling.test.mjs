@@ -91,6 +91,29 @@ test('a Transform event bypasses a persisted projection after scheduler restart'
   assert.deepEqual(cycle.messages.map(({ text }) => text), ['cold-start-trigger']);
 });
 
+test('a matched Transform trigger does not revalidate cached legacy Programs', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const legacy = atom('Legacy Reporter', [
+    "value = explore({'name': 'Legacy Input'})[0].detail",
+    "message({'level': 'info', 'text': 'legacy:' + value})"
+  ].join('\n'), [], 'program');
+  const triggered = atom('Indexed Trigger', [
+    'def main():',
+    "    message({'level': 'info', 'text': 'indexed-only'})",
+    "trigger('transform', {'nodes': ['Trigger Input']}, main)"
+  ].join('\n'), [], 'program');
+
+  await scheduler.refresh([atom('Legacy Input', 'before'), atom('Trigger Input'), legacy, triggered]);
+  const cycle = await scheduler.refresh([
+    atom('Legacy Input', 'after'), atom('Trigger Input'),
+    structuredClone(legacy), structuredClone(triggered)
+  ], {
+    triggerEvent: { mode: 'transform', nodes: ['Trigger Input'] }
+  });
+
+  assert.deepEqual(cycle.messages.map(({ text }) => text), ['indexed-only']);
+});
+
 test('trigger rejects eager main invocation instead of executing during contract registration', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const program = atom('Invalid Trigger Program', [

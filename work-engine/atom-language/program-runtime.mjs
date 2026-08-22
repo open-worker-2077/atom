@@ -941,13 +941,18 @@ export class ProgramRuntimeScheduler {
       const previous = previousEntry?.[1] ?? null;
       const triggerContract = this.triggerContracts.get(program.path)?.contract ?? null;
       const forcedByTrigger = triggerEvent && triggeredProgramPaths.has(program.path);
-      if (triggerEvent && triggeredProgramPaths.size > 0 && !triggerContract && !previous) {
+      if (triggerEvent && triggeredProgramPaths.size > 0 && !triggerContract) {
         return {
           programPath: program.path,
-          result: { locks: [], messages: [], transforms: [], choices: [], trigger: null },
+          result: previous ? {
+            ...previous.result,
+            locks: rebindLocks(previous.result.locks, previous.records, records),
+            messages: [],
+            transforms: []
+          } : { locks: [], messages: [], transforms: [], choices: [], trigger: null },
           cached: true,
-          requests: [],
-          contextDependent: false
+          requests: previous?.requests ?? [],
+          contextDependent: previous?.contextDependent === true
         };
       }
       if (triggerEvent && triggerContract && !forcedByTrigger) {
