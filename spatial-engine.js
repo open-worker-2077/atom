@@ -5314,6 +5314,14 @@
     });
   }
 
+  function refitCurrentDomain(optionsInput) {
+    optionsInput = optionsInput || {};
+    const path = typeof optionsInput.path === "string" ? optionsInput.path : state.currentPath;
+    if (path !== state.currentPath) return false;
+    startCameraTween(currentDomainSceneFrame(), 420);
+    return true;
+  }
+
   function enterNode(node, forceImmersive = false) {
     if (
       !node
@@ -8658,6 +8666,7 @@
     exportField: exportFieldProjection,
     exportKnowledge: () => workspace.exportKnowledge(),
     importKnowledge,
+    refitCurrentDomain,
     mermaidTarget,
     locateKnowledgeNode,
     replaceKnowledge,

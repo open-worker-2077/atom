@@ -373,6 +373,8 @@ test('a view entered during an earlier path pull loads on the first entry withou
   const listeners = new Map();
   const requested = [];
   const imports = [];
+  const refits = [];
+  let activePath = 'root';
   let releaseRoot;
   const rootKnowledge = {
     schemaVersion: 1, revision: 7,
@@ -388,8 +390,9 @@ test('a view entered during an earlier path pull loads on the first entry withou
   const window = {
     location: { hostname: 'worker.tail33a2eb.ts.net', protocol: 'https:' },
     spatialLab: {
-      state: () => ({ transactionActive: false, path: 'root' }),
+      state: () => ({ transactionActive: false, path: activePath }),
       importKnowledge(knowledge) { imports.push(structuredClone(knowledge)); return true; },
+      refitCurrentDomain({ path }) { refits.push(path); return true; },
       exportField: () => ({ path: 'root' }),
       exportKnowledge: () => imports.at(-1) ?? rootKnowledge
     },
@@ -410,6 +413,7 @@ test('a view entered during an earlier path pull loads on the first entry withou
 
   vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
   await new Promise((resolve) => setImmediate(resolve));
+  activePath = 'root/child';
   const firstEntry = listeners.get('spatial-view-committed')({ detail: { view: { path: 'root/child' } } });
   releaseRoot();
   await firstEntry;
@@ -417,6 +421,7 @@ test('a view entered during an earlier path pull loads on the first entry withou
 
   assert.equal(requested.filter(([url]) => url.endsWith('/state?path=root%2Fchild')).length, 1);
   assert.equal(imports.at(-1).nodes.some((node) => node.label === '首次即显示'), true);
+  assert.deepEqual(refits, ['root/child']);
 });
 
 test('Atom Web reports committed facts with a pending projection without claiming failure or importing stale knowledge', async () => {

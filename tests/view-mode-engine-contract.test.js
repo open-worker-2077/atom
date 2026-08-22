@@ -112,6 +112,14 @@ test('successful A S D expansion frames the resulting child domain', () => {
   assert.match(toggle, /frameClusterDomain\(childPath/);
 });
 
+test('newly loaded active Atom scope can refit every current node into the viewport', () => {
+  const refit = functionSource('refitCurrentDomain');
+
+  assert.match(refit, /currentDomainSceneFrame\(\)/);
+  assert.match(refit, /startCameraTween\s*\(/);
+  assert.match(engine, /refitCurrentDomain,/);
+});
+
 test('legacy peer-batch atoms remain available without owning the active double-Shift path', () => {
   const arm = functionSource('armPeerViewBatch');
   const consume = functionSource('consumePeerViewBatch');

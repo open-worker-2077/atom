@@ -262,6 +262,13 @@
         }
         const knowledge = scopedPath ? mergeScopedKnowledge(lastKnowledge, incoming) : incoming;
         if (!lab.importKnowledge(knowledge)) return false;
+        if (
+          unseenScope
+          && scopedPath === (lab.state().path || "root")
+          && typeof lab.refitCurrentDomain === "function"
+        ) {
+          lab.refitCurrentDomain({ path: scopedPath, reason: "scope-loaded" });
+        }
         if (initialLoad) {
           setInitialLoadProgress("data", 100);
           setInitialLoadProgress("scene", 70);
