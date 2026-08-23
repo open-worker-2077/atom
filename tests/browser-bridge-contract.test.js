@@ -369,6 +369,63 @@ test('network bridge progressively loads the entered Atom path without downloadi
   assert.deepEqual(imports.at(-1).nodes.map((node) => node.label), ['atom.json', '项目']);
 });
 
+test('nested A mode loads every newly expanded Atom domain without requiring an immersive F visit', async () => {
+  const listeners = new Map();
+  const requested = [];
+  const imports = [];
+  const refits = [];
+  const rootKnowledge = {
+    schemaVersion: 1,
+    revision: 7,
+    nodes: [{ id: 'root-node', key: 'root::root-node', path: 'root', label: '发务' }],
+    nodePatches: [], deletedNodeKeys: [], edges: [], removedEdgeIds: [], view: null
+  };
+  const childKnowledge = {
+    ...rootKnowledge,
+    nodes: [
+      { id: 'inside', key: 'root/development::inside', path: 'root/development', label: '内务' },
+      { id: 'outside', key: 'root/development::outside', path: 'root/development', label: '外务' }
+    ]
+  };
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: 'worker.tail33a2eb.ts.net', protocol: 'https:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge(knowledge) { imports.push(structuredClone(knowledge)); return true; },
+      refitLoadedDomain({ path }) { refits.push(path); return true; },
+      exportField: () => ({ path: 'root' }),
+      exportKnowledge: () => imports.at(-1) ?? rootKnowledge
+    },
+    fetch: async (url) => {
+      requested.push(url);
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state?path=root')) {
+        return response({ knowledge: rootKnowledge, scope: { path: 'root' } });
+      }
+      if (url.endsWith('/state?path=root%2Fdevelopment')) {
+        return response({ knowledge: childKnowledge, scope: { path: 'root/development' } });
+      }
+      return response({ ok: true });
+    },
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    EventSource: class {}
+  };
+  window.window = window;
+
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  await listeners.get('spatial-view-committed')({
+    detail: { view: { path: 'root', expandedPaths: ['root/development'] } }
+  });
+
+  assert.equal(requested.filter((url) => url.endsWith('/state?path=root%2Fdevelopment')).length, 1);
+  assert.equal(imports.at(-1).nodes.some((node) => node.label === '内务'), true);
+  assert.equal(refits.includes('root/development'), true);
+});
+
 test('a view entered during an earlier path pull loads on the first entry without another view event', async () => {
   const listeners = new Map();
   const requested = [];

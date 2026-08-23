@@ -262,7 +262,9 @@
         }
         const knowledge = scopedPath ? mergeScopedKnowledge(lastKnowledge, incoming) : incoming;
         if (!lab.importKnowledge(knowledge)) return false;
-        if (
+        if (unseenScope && typeof lab.refitLoadedDomain === "function") {
+          lab.refitLoadedDomain({ path: scopedPath, reason: "scope-loaded" });
+        } else if (
           unseenScope
           && scopedPath === (lab.state().path || "root")
           && typeof lab.refitCurrentDomain === "function"
@@ -520,7 +522,13 @@
       queuedCommits.push({ kind: "view", view });
       return true;
     }
-    if (view.path && !loadedPaths.has(view.path)) await pullKnowledge(view.path);
+    const requiredPaths = [...new Set([
+      view.path,
+      ...(Array.isArray(view.expandedPaths) ? view.expandedPaths : [])
+    ].filter((path) => typeof path === "string" && path.trim()))];
+    for (const path of requiredPaths) {
+      if (!loadedPaths.has(path)) await pullKnowledge(path);
+    }
     pushing = true;
     try {
       await request("/view", {

@@ -5322,6 +5322,15 @@
     return true;
   }
 
+  function refitLoadedDomain(optionsInput) {
+    optionsInput = optionsInput || {};
+    const path = typeof optionsInput.path === "string" ? optionsInput.path : state.currentPath;
+    if (path === state.currentPath) return refitCurrentDomain(optionsInput);
+    if (!state.expandedClusterDomains.has(path)) return false;
+    buildClusterScene();
+    return frameClusterDomain(path);
+  }
+
   function enterNode(node, forceImmersive = false) {
     if (
       !node
@@ -8437,6 +8446,7 @@
     }));
     return {
       path: state.currentPath,
+      expandedPaths: [...state.expandedClusterDomains.keys()],
       pathLabels: [...state.crumbs],
       depth: state.depth,
       selection: state.selected ? `${state.currentPath}::${state.selected.id}` : null,
@@ -8667,6 +8677,7 @@
     exportKnowledge: () => workspace.exportKnowledge(),
     importKnowledge,
     refitCurrentDomain,
+    refitLoadedDomain,
     mermaidTarget,
     locateKnowledgeNode,
     replaceKnowledge,
