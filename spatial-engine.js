@@ -5322,13 +5322,13 @@
     return true;
   }
 
-  function refitLoadedDomain(optionsInput) {
+  function refreshLoadedDomain(optionsInput) {
     optionsInput = optionsInput || {};
     const path = typeof optionsInput.path === "string" ? optionsInput.path : state.currentPath;
-    if (path === state.currentPath) return refitCurrentDomain(optionsInput);
     if (!state.expandedClusterDomains.has(path)) return false;
     buildClusterScene();
-    return frameClusterDomain(path);
+    updateSelectionUI();
+    return true;
   }
 
   function enterNode(node, forceImmersive = false) {
@@ -8677,7 +8677,7 @@
     exportKnowledge: () => workspace.exportKnowledge(),
     importKnowledge,
     refitCurrentDomain,
-    refitLoadedDomain,
+    refreshLoadedDomain,
     mermaidTarget,
     locateKnowledgeNode,
     replaceKnowledge,

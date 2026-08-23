@@ -262,14 +262,14 @@
         }
         const knowledge = scopedPath ? mergeScopedKnowledge(lastKnowledge, incoming) : incoming;
         if (!lab.importKnowledge(knowledge)) return false;
-        if (unseenScope && typeof lab.refitLoadedDomain === "function") {
-          lab.refitLoadedDomain({ path: scopedPath, reason: "scope-loaded" });
-        } else if (
+        if (
           unseenScope
           && scopedPath === (lab.state().path || "root")
           && typeof lab.refitCurrentDomain === "function"
         ) {
           lab.refitCurrentDomain({ path: scopedPath, reason: "scope-loaded" });
+        } else if (unseenScope && typeof lab.refreshLoadedDomain === "function") {
+          lab.refreshLoadedDomain({ path: scopedPath, reason: "scope-loaded" });
         }
         if (initialLoad) {
           setInitialLoadProgress("data", 100);

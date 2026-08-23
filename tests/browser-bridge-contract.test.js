@@ -369,10 +369,11 @@ test('network bridge progressively loads the entered Atom path without downloadi
   assert.deepEqual(imports.at(-1).nodes.map((node) => node.label), ['atom.json', '项目']);
 });
 
-test('nested A mode loads every newly expanded Atom domain without requiring an immersive F visit', async () => {
+test('PageDown in nested A mode loads every expanded domain without moving the camera between scopes', async () => {
   const listeners = new Map();
   const requested = [];
   const imports = [];
+  const refreshes = [];
   const refits = [];
   const rootKnowledge = {
     schemaVersion: 1,
@@ -387,6 +388,10 @@ test('nested A mode loads every newly expanded Atom domain without requiring an 
       { id: 'outside', key: 'root/development::outside', path: 'root/development', label: '外务' }
     ]
   };
+  const peerKnowledge = {
+    ...rootKnowledge,
+    nodes: [{ id: 'peer', key: 'root/operations::peer', path: 'root/operations', label: '推进' }]
+  };
   const document = { body: { dataset: {} }, hidden: false };
   const response = (payload) => ({ ok: true, json: async () => payload });
   const window = {
@@ -394,7 +399,8 @@ test('nested A mode loads every newly expanded Atom domain without requiring an 
     spatialLab: {
       state: () => ({ transactionActive: false, path: 'root' }),
       importKnowledge(knowledge) { imports.push(structuredClone(knowledge)); return true; },
-      refitLoadedDomain({ path }) { refits.push(path); return true; },
+      refitCurrentDomain({ path }) { refits.push(path); return true; },
+      refreshLoadedDomain({ path }) { refreshes.push(path); return true; },
       exportField: () => ({ path: 'root' }),
       exportKnowledge: () => imports.at(-1) ?? rootKnowledge
     },
@@ -407,6 +413,9 @@ test('nested A mode loads every newly expanded Atom domain without requiring an 
       if (url.endsWith('/state?path=root%2Fdevelopment')) {
         return response({ knowledge: childKnowledge, scope: { path: 'root/development' } });
       }
+      if (url.endsWith('/state?path=root%2Foperations')) {
+        return response({ knowledge: peerKnowledge, scope: { path: 'root/operations' } });
+      }
       return response({ ok: true });
     },
     addEventListener(type, listener) { listeners.set(type, listener); },
@@ -417,13 +426,17 @@ test('nested A mode loads every newly expanded Atom domain without requiring an 
   vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
+  refits.length = 0;
   await listeners.get('spatial-view-committed')({
-    detail: { view: { path: 'root', expandedPaths: ['root/development'] } }
+    detail: { view: { path: 'root', expandedPaths: ['root/development', 'root/operations'] } }
   });
 
   assert.equal(requested.filter((url) => url.endsWith('/state?path=root%2Fdevelopment')).length, 1);
+  assert.equal(requested.filter((url) => url.endsWith('/state?path=root%2Foperations')).length, 1);
   assert.equal(imports.at(-1).nodes.some((node) => node.label === '内务'), true);
-  assert.equal(refits.includes('root/development'), true);
+  assert.equal(imports.at(-1).nodes.some((node) => node.label === '推进'), true);
+  assert.deepEqual(refreshes, ['root/development', 'root/operations']);
+  assert.deepEqual(refits, []);
 });
 
 test('a view entered during an earlier path pull loads on the first entry without another view event', async () => {
