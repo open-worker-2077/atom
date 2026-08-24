@@ -39,3 +39,12 @@
 
 - [x] 6.1 Review the complete diff against both specs and the original user conclusions; keep the pre-existing `AGENTS.md` change out of the commit.
 - [ ] 6.2 Commit the coherent implementation and OpenSpec artifacts, push the branch, and record commit, live test paths, results and rollback point.
+
+### Delivery evidence
+
+- Implementation commit: `0a0093d` (`feat(atom): add generic slot body runtime`).
+- Rollback point before this change: `515bb152697831f699985c0535642c61f4b1bf0a` (local and remote branch matched before commit).
+- Live generic path: `test/槽体内核验收-20260825-01`; after runtime restart, `订单槽体/槽例` contains exactly `空槽例` and `订单001`.
+- Live ESG acceptance-only path: `test/ESG活动轴槽体验收-20260825-01`; `完整结果` remains `ready` after reading exactly five explicit relations, while `缺项结果` remains `missing` with `relation:泳道依据`.
+- Verification: browser build plus full suite `1006/1006`; post-contract targeted suite `40/40`; strict OpenSpec validation passed; runtime instance-term scan returned no matches.
+- Push status: pending. Two normal `git push origin backup/web-convergence-checkpoint-20260817-154248` approval requests were rejected, and `gh auth status` reports the active `open-worker-2077` keyring token is invalid. No alternate upload path was used.
