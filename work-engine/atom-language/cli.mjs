@@ -15,6 +15,9 @@ import { resolveAtomRuntime } from './runtime-config.mjs';
 import { TRANSFORM_COMMANDS } from './transform-key-parser.mjs';
 import { ATOM_RUNTIME_CONTRACT } from './runtime-contract.mjs';
 import { programFunctionRegistry } from './program-function-registry.mjs';
+import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
+
+const agentDirectories = new WeakMap();
 
 export const DEFAULT_ATOM_COMMAND_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/command';
 export const DEFAULT_WORK_ORDER_REGISTRY_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/work-order-registry';
@@ -710,11 +713,26 @@ export async function resolveAgentContext(contextFile, selector) {
   }
   const requested = selector.trim();
   const atoms = await readAtomContext(contextFile, { create: false });
-  const revision = crypto.createHash('sha256').update(JSON.stringify(atoms)).digest('hex');
-  const entries = atomEntries(atoms);
-  const exact = entries.filter((entry) => (
-    requested.includes('/') ? entry.path === requested : entry.name === requested
-  ));
+  let directory = agentDirectories.get(atoms);
+  if (!directory) {
+    const byName = new Map();
+    const byPath = new Map();
+    for (const entry of atomEntries(atoms)) {
+      const named = byName.get(entry.name) ?? [];
+      named.push(entry);
+      byName.set(entry.name, named);
+      byPath.set(entry.path, [entry]);
+    }
+    directory = {
+      revision: revisionOfWorldFacts(atoms).slice('sha256:'.length),
+      byName,
+      byPath
+    };
+    agentDirectories.set(atoms, directory);
+  }
+  const exact = requested.includes('/')
+    ? (directory.byPath.get(requested) ?? [])
+    : (directory.byName.get(requested) ?? []);
   const agents = exact.filter((entry) => entry.agent);
   if (agents.length > 1) {
     throw cliError('AMBIGUOUS_AGENT', '只能选择 exact 且唯一的 @agent Atom');
@@ -722,7 +740,7 @@ export async function resolveAgentContext(contextFile, selector) {
   if (agents.length === 1) {
     return {
       ref: crypto.createHash('sha256')
-        .update(`${revision}:${agents[0].address}`)
+        .update(`${directory.revision}:${agents[0].address}`)
         .digest('base64url')
         .slice(0, 24),
       path: agents[0].path
@@ -927,10 +945,21 @@ export async function runAtomCli(argv = [], overrides = {}) {
       if (parsed.global) {
         throw cliError('DAILY_GLOBAL_MODE_REJECTED', '日常 Atom CLI 不允许进入全局模式');
       }
-      interaction = {
-        ...(interaction ?? {}),
-        agent: await resolveAgentContext(contextFile, parsed.agent)
-      };
+      if (typeof parsed.agent !== 'string' || !parsed.agent.trim()) {
+        throw cliError('AGENT_REQUIRED', '公开 Atom CLI 需要 --agent 上下文起点');
+      }
+      const remoteAgentResolution = overrides.remoteAgentResolution
+        ?? overrides.execute === executeAtomCommandEndpoint;
+      interaction = remoteAgentResolution
+        ? {
+            ...(interaction ?? {}),
+            agentSelector: parsed.agent.trim(),
+            agent: { path: parsed.agent.trim() }
+          }
+        : {
+            ...(interaction ?? {}),
+            agent: await resolveAgentContext(contextFile, parsed.agent)
+          };
     }
     const interactive = overrides.interactive
       ?? (parsed.source.length === 0 && Boolean(stdin.isTTY && stdout.isTTY));
@@ -963,7 +992,7 @@ export async function runAtomCli(argv = [], overrides = {}) {
       ...(interaction ? { interaction } : {}),
       history: []
     });
-    if (interaction?.agent) result.agent = interaction.agent.path;
+    if (interaction?.agent && !result.agent) result.agent = interaction.agent.path;
     return writeGraphResult(result, stdout, stderr);
   } catch (error) {
     stderr.write(`错误 ${error.code || 'ATOM_LANGUAGE_CLI_ERROR'}：${error.message}\n`);

@@ -376,6 +376,52 @@ test('Program cycles default to a ten-second wall-clock budget', () => {
   assert.equal(scheduler.maxWorkers, 16);
 });
 
+test('one immutable world revision reuses its prepared Program records', async () => {
+  let detailReads = 0;
+  const program = {
+    'name@program': 'Cached Program',
+    get detail() {
+      detailReads += 1;
+      return "message({'level': 'info', 'text': 'cached'})";
+    },
+    children: Object.freeze([]),
+    partners: Object.freeze([])
+  };
+  Object.freeze(program);
+  const world = Object.freeze([program]);
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async () => ({
+      locks: [], messages: [], transforms: [], choices: [], trigger: null
+    })
+  });
+
+  await scheduler.refresh(world);
+  const readsAfterFirst = detailReads;
+  await scheduler.refresh(world);
+
+  assert.equal(detailReads, readsAfterFirst);
+});
+
+test('one immutable large-world revision reuses its Program cycle fingerprint', async () => {
+  const freezeAtom = (value) => Object.freeze({
+    ...value,
+    children: Object.freeze(value.children ?? []),
+    partners: Object.freeze(value.partners ?? [])
+  });
+  const world = Object.freeze(Array.from({ length: 10_000 }, (_, index) => freezeAtom(
+    atom(`Fact ${index}`, 'x'.repeat(1_000))
+  )));
+  const scheduler = createProgramRuntimeScheduler();
+  await scheduler.refresh(world);
+
+  const startedAt = performance.now();
+  const cached = await scheduler.refresh(world);
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.equal(cached.cached, true);
+  assert.ok(elapsedMs < 30, `cached Program fingerprint took ${elapsedMs}ms`);
+});
+
 test('a revision-local @agent ref change does not replay Programs for the same context path', async () => {
   const program = atom('Context Reporter', [
     "value = explore({'name': 'Agent'})[0].detail",

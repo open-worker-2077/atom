@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
+import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
@@ -85,7 +86,7 @@ test('a top-level test Program completes create fill validate submit read-back i
     成果引用: 'doc://e2e.rep.segment', 版本: 'v1', 提交时间: '2026-08-20T10:00:00Z'
   });
 
-  const journal = JSON.parse(await fs.readFile(journalFile, 'utf8'));
+  const journal = await createJsonTransactionJournal({ file: journalFile }).readState();
   assert.equal(journal.prepared.length, 0);
   assert.equal(journal.receipts.length, 1, 'all Program passes persist as one transaction');
   assert.equal(journal.receipts[0].receipt.status, 'committed');
@@ -165,7 +166,7 @@ test('two work-order writes from one old revision allow at most one central comm
   assert.equal(rejected?.reason?.code, 'WORLD_REVISION_CONFLICT');
   const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(['doc://A', 'doc://B'].includes(JSON.parse(persisted[0].children[0].detail).交付物.成果引用), true);
-  const journal = JSON.parse(await fs.readFile(journalFile, 'utf8'));
+  const journal = await createJsonTransactionJournal({ file: journalFile }).readState();
   assert.equal(journal.prepared.length, 0);
   assert.equal(journal.receipts.length, 1);
 });

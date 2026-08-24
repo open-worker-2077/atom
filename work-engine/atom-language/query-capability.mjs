@@ -8,6 +8,8 @@ import { createDefaultWorldLawRegistry } from './world-laws/registry.mjs';
 import { authorizeProgramLock, programLockState } from './program-locks.mjs';
 import { WORLD_OUTSIDE_NAME, worldOutsideAtom } from './world-root.mjs';
 
+const preparedExploreSnapshots = new WeakMap();
+
 export function fieldsByBase(atom) {
   const byBase = new Map();
   for (const [rawKey, value] of Object.entries(atom)) {
@@ -139,6 +141,9 @@ export function describeAtom(match, includeFullDetail, options = {}) {
 }
 
 export function prepareExploreWorld(atoms) {
+  if (Object.isFrozen(atoms) && preparedExploreSnapshots.has(atoms)) {
+    return preparedExploreSnapshots.get(atoms);
+  }
   const allMatches = walkAtoms(atoms, { virtualRoot: true });
   const exactIndex = new Map();
   const add = (selector, match) => {
@@ -154,7 +159,9 @@ export function prepareExploreWorld(atoms) {
     }
     if (!match.virtual) add(`${WORLD_OUTSIDE_NAME}/${match.path.join('/')}`, match);
   }
-  return { allMatches, exactIndex };
+  const prepared = { allMatches, exactIndex };
+  if (Object.isFrozen(atoms)) preparedExploreSnapshots.set(atoms, prepared);
+  return prepared;
 }
 
 function indexableSelector(selector) {

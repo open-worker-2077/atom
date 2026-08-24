@@ -258,6 +258,32 @@ test('graph server initializes the projection, serves the full UI health and Gra
   assert.equal(state.knowledge.edges[0].label, '产出');
 });
 
+test('4784 resolves an Agent selector inside the resident world instead of every CLI process', async () => {
+  const calls = [];
+  const handlers = createAtomGraphHandlers({
+    execute: async (intent) => {
+      calls.push(intent);
+      return { ok: true, command: 'explore' };
+    },
+    updateHumanStatus: async () => ({}),
+    updateHumanWorkspace: async () => ({}),
+    recover: async () => ({})
+  }, {
+    resolveAgent: async (selector) => ({
+      ref: 'revision-local-agent-ref',
+      path: selector === '冰' ? 'Root/冰' : selector
+    })
+  });
+
+  const result = await handlers.atomCommand({
+    source: 'explore {"name":"Target"}',
+    interaction: { agentSelector: '冰', agent: { path: '冰' } }
+  });
+
+  assert.equal(result.agent, 'Root/冰');
+  assert.equal(calls[0].agentPath, 'Root/冰');
+});
+
 test('graph server remains available and reports degraded health when only a disposable projection is pending', async (t) => {
   const directory = await temporaryDirectory(t);
   const contextFile = path.join(directory, 'atom.json');
@@ -334,6 +360,84 @@ test('graph server persists compact read diagnostics through the shared interact
     axes: []
   }]);
   assert.equal(JSON.stringify(persisted).includes('可核查的正文'), false);
+});
+
+test('unchanged explore does not load, republish, or rewrite the complete spatial projection', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, `${JSON.stringify(atomFixture(), null, 2)}\n`, 'utf8');
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
+  });
+  t.after(() => running.close());
+
+  const beforeState = await (await fetch(`${running.url}/__spatial/api/state`)).json();
+  const beforeStat = await fs.stat(storeFile);
+  await fs.rename(graphFile, `${graphFile}.offline`);
+  const response = await fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source: 'explore {"name":"石器工坊"}',
+      interaction: {
+        id: 'read-without-projection-write',
+        agent: { ref: 'transport-ref', path: '石器工坊' }
+      },
+      history: []
+    })
+  });
+  assert.equal(response.status, 200, await response.text());
+
+  const afterState = await (await fetch(`${running.url}/__spatial/api/state`)).json();
+  const afterStat = await fs.stat(storeFile);
+  assert.equal(afterState.knowledge.revision, beforeState.knowledge.revision);
+  assert.equal(afterStat.mtimeMs, beforeStat.mtimeMs);
+});
+
+test('independent explore requests execute concurrently against one initialized runtime', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, `${JSON.stringify(atomFixture(), null, 2)}\n`, 'utf8');
+  let active = 0;
+  let maximumActive = 0;
+  const interactionRuntime = {
+    async initialize() {
+      return { initialization: { ok: true, changed: false } };
+    },
+    async execute() {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      active -= 1;
+      return { ok: true, command: 'explore', changed: false, items: [], errors: [], warnings: [] };
+    },
+    async updateHumanStatus() { return { ok: true, changed: false }; },
+    async updateHumanWorkspace() { return { ok: true, changed: false }; },
+    async recover() { return { sourceRevision: 'revision' }; },
+    projectionStatus() { return { status: 'published' }; }
+  };
+  await fs.writeFile(graphFile, '{}\n', 'utf8');
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, interactionRuntime
+  });
+  t.after(() => running.close());
+  const request = (id) => fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source: 'explore {"name":"石器工坊"}',
+      interaction: { id, agent: { ref: 'transport-ref', path: '石器工坊' } },
+      history: []
+    })
+  });
+
+  const responses = await Promise.all([request('concurrent-read-a'), request('concurrent-read-b')]);
+  assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+  assert.equal(maximumActive, 2);
 });
 
 test('graph server queues private backup from a committed operation instead of relying on polling', async (t) => {

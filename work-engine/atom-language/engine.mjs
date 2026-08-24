@@ -1,6 +1,6 @@
-import crypto from 'node:crypto';
 import path from 'node:path';
 import { diagnostic } from './errors.mjs';
+import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 
 function mergeWarnings(...groups) {
   const warnings = [];
@@ -61,10 +61,7 @@ import {
 export { executeProgramExplore } from './query-capability.mjs';
 
 function revisionOf(atoms) {
-  return crypto
-    .createHash('sha256')
-    .update(JSON.stringify(atoms))
-    .digest('hex');
+  return revisionOfWorldFacts(atoms).slice('sha256:'.length);
 }
 
 function performanceTrace(event, details) {
@@ -783,6 +780,15 @@ export async function executeAtomLanguage(options = {}) {
           createNew || transformChangesStructure(item)
         )).length
       });
+      if (compiledRequests.length === 0) {
+        return {
+          atoms: reconciledAtoms,
+          lockIndex: finalLockIndex,
+          messages,
+          transformLogs,
+          pathChanges
+        };
+      }
       const applyCompiled = async (baseAtoms, mutateInput, reportFailure) => {
         let candidateAtoms = baseAtoms;
         let exactIndex = mutateInput

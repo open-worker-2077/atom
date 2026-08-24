@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
+
 const serviceUrl = new URL('../src/atom-system/public/world-service.mjs', import.meta.url);
 const adapterUrl = new URL('../src/atom-system/adapters/legacy-engine-adapter.mjs', import.meta.url);
 const engineUrl = new URL('../work-engine/atom-language/engine.mjs', import.meta.url);
@@ -183,7 +185,9 @@ test('real legacy transform advances atom facts through the durable transaction 
   assert.equal(result.ok, true);
   assert.equal(result.changed, true);
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')).map(({ name }) => name), ['Root']);
-  const journal = JSON.parse(await fs.readFile(path.join(directory, 'atom.transactions.json'), 'utf8'));
+  const journal = await createJsonTransactionJournal({
+    file: path.join(directory, 'atom.transactions.json')
+  }).readState();
   assert.equal(journal.prepared.length, 0);
   assert.equal(journal.receipts.length, 1);
   assert.equal(journal.receipts[0].receipt.afterRevision, `sha256:${result.revisionAfter}`);
@@ -221,7 +225,9 @@ test('transactional persistence rollback restores only authoritative facts and l
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), []);
   await assert.rejects(fs.access(projectionFile), { code: 'ENOENT' });
   assert.equal(rolledBack.afterRevision, committed.beforeRevision);
-  const journal = JSON.parse(await fs.readFile(path.join(directory, 'atom.transactions.json'), 'utf8'));
+  const journal = await createJsonTransactionJournal({
+    file: path.join(directory, 'atom.transactions.json')
+  }).readState();
   assert.equal(journal.receipts.length, 2);
   assert.equal(journal.receipts[1].receipt.result.restoredCommandId, committed.commandId);
 });

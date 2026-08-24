@@ -8,8 +8,16 @@ import test from 'node:test';
 import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { writeAtomGraphProjection } from '../work-engine/atom-language/context-store.mjs';
+import { prepareExploreWorld } from '../work-engine/atom-language/query-capability.mjs';
 
 const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
+
+test('one immutable world reuses its exact Explore index', () => {
+  const atoms = Object.freeze([
+    Object.freeze({ name: 'Root', detail: '', children: Object.freeze([]), partners: Object.freeze([]) })
+  ]);
+  assert.strictEqual(prepareExploreWorld(atoms), prepareExploreWorld(atoms));
+});
 
 async function fixture(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-explore-full-path-'));

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 
-import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
+import { resolveAgentContext, runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
 function atom(name, { type = null, detail = '', children = [] } = {}) {
@@ -74,6 +74,23 @@ test('public CLI selects one @agent context with --agent and needs no session', 
   assert.match(stdout.text(), /atom~count\d+/u);
   assert.match(stdout.text(), /"agent~current": "Workspace\/Work Agent"/u);
   assert.equal(stderr.text(), '');
+});
+
+test('agent resolution reuses the indexed directory for one immutable large-world revision', async (t) => {
+  const files = await world(t, [
+    atom('Work Agent', { type: 'agent' }),
+    ...Array.from({ length: 10_000 }, (_, index) => atom(`Node ${index}`, {
+      detail: 'x'.repeat(1_000)
+    }))
+  ]);
+  await resolveAgentContext(files.contextFile, 'Work Agent');
+
+  const startedAt = performance.now();
+  const resolved = await resolveAgentContext(files.contextFile, 'Work Agent');
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.equal(resolved.path, 'Work Agent');
+  assert.ok(elapsedMs < 30, `cached agent resolution took ${elapsedMs}ms`);
 });
 
 test('public CLI reads one complete multiline long-text command from stdin without shell quoting', async (t) => {

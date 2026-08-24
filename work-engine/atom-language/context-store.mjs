@@ -10,12 +10,31 @@ import { atomLanguageError } from './errors.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 
 const DEFAULT_CONTEXT_FILENAME = 'atom.json';
+const contextSnapshots = new Map();
+const contextLoads = new Map();
 const REQUIRED_ATOM_FIELDS = Object.freeze([
   'name',
   'detail',
   'children',
   'partners'
 ]);
+
+function freezeSnapshot(value) {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) freezeSnapshot(child);
+  return Object.freeze(value);
+}
+
+async function contextSignature(file) {
+  const stat = await fs.stat(file, { bigint: true });
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+}
+
+async function rememberContextSnapshot(file, value) {
+  const snapshot = freezeSnapshot(structuredClone(value));
+  contextSnapshots.set(file, { signature: await contextSignature(file), value: snapshot });
+  return snapshot;
+}
 
 function isPlainObject(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -244,25 +263,41 @@ async function atomicWriteJson(file, value) {
  */
 export async function readAtomContext(file, options = {}) {
   const contextFile = resolveAtomContextFile(file);
-  let value;
+  let signature;
   try {
-    value = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+    signature = await contextSignature(contextFile);
   } catch (error) {
     if (error.code === 'ENOENT') {
       if (options.create !== false) await writeAtomContext(contextFile, []);
       return [];
     }
-    if (error instanceof SyntaxError) {
-      throw atomLanguageError(
-        'INVALID_ATOM_CONTEXT_JSON',
-        'Atom context 不是有效的严格 JSON',
-        { file: contextFile, cause: error.message }
-      );
-    }
     throw error;
   }
-  projectAtomContext(value);
-  return value;
+  const cached = contextSnapshots.get(contextFile);
+  if (cached?.signature === signature) return cached.value;
+  const loadKey = `${contextFile}\0${signature}`;
+  if (contextLoads.has(loadKey)) return contextLoads.get(loadKey);
+  const loading = (async () => {
+    let value;
+    try {
+      value = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw atomLanguageError(
+          'INVALID_ATOM_CONTEXT_JSON',
+          'Atom context 不是有效的严格 JSON',
+          { file: contextFile, cause: error.message }
+        );
+      }
+      throw error;
+    }
+    projectAtomContext(value);
+    const snapshot = freezeSnapshot(value);
+    contextSnapshots.set(contextFile, { signature, value: snapshot });
+    return snapshot;
+  })().finally(() => contextLoads.delete(loadKey));
+  contextLoads.set(loadKey, loading);
+  return loading;
 }
 
 /**
@@ -273,6 +308,7 @@ export async function writeAtomContext(file, atoms) {
   const contextFile = resolveAtomContextFile(file);
   projectAtomContext(atoms);
   await atomicWriteJson(contextFile, atoms);
+  await rememberContextSnapshot(contextFile, atoms);
   return contextFile;
 }
 

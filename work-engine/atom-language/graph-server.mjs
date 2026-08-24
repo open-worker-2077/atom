@@ -21,6 +21,7 @@ import { createProgramRuntimeScheduler } from './program-runtime.mjs';
 import { ATOM_RUNTIME_CONTRACT } from './runtime-contract.mjs';
 import { workOrderRegistry } from './work-order-registry.mjs';
 import { programFunctionRegistry } from './program-function-registry.mjs';
+import { resolveAgentContext } from './cli.mjs';
 
 export const DEFAULT_ATOM_GRAPH_HOST = '127.0.0.1';
 export const DEFAULT_ATOM_GRAPH_PORT = 4784;
@@ -240,7 +241,7 @@ function displayHost(host) {
   return host.includes(':') ? `[${host}]` : host;
 }
 
-export function createAtomGraphHandlers(interactionRuntime) {
+export function createAtomGraphHandlers(interactionRuntime, options = {}) {
   if (typeof interactionRuntime?.execute !== 'function'
     || typeof interactionRuntime?.updateHumanStatus !== 'function'
     || typeof interactionRuntime?.updateHumanWorkspace !== 'function'
@@ -253,7 +254,12 @@ export function createAtomGraphHandlers(interactionRuntime) {
         || typeof payload.source !== 'string') {
         throw problem('INVALID_ATOM_COMMAND_REQUEST', 'Atom command endpoint requires source and optional interaction.agent');
       }
-      const agent = payload.interaction?.agent;
+      let agent = payload.interaction?.agent;
+      if ((!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string')
+        && typeof payload.interaction?.agentSelector === 'string'
+        && typeof options.resolveAgent === 'function') {
+        agent = await options.resolveAgent(payload.interaction.agentSelector);
+      }
       if (!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string') {
         throw problem('AGENT_REQUIRED', 'Atom command endpoint requires a revision-local @agent origin');
       }
@@ -263,7 +269,7 @@ export function createAtomGraphHandlers(interactionRuntime) {
         agentPath: agent.path,
         history: Array.isArray(payload.history) ? payload.history : []
       });
-      return { ...result, runtimeContract: ATOM_RUNTIME_CONTRACT };
+      return { ...result, agent: agent.path, runtimeContract: ATOM_RUNTIME_CONTRACT };
     },
     async atomHumanStatus(payload) {
       if (!payload || typeof payload.key !== 'string' || typeof payload.detail !== 'string') {
@@ -342,7 +348,9 @@ export async function startAtomGraphServer(options = {}) {
     worldService,
     ...(options.projectionOrchestrator ? { projectionOrchestrator: options.projectionOrchestrator } : {})
   });
-  const handlers = createAtomGraphHandlers(interactionRuntime);
+  const handlers = createAtomGraphHandlers(interactionRuntime, {
+    resolveAgent: (selector) => resolveAgentContext(configuration.contextFile, selector)
+  });
 
   const initialized = await interactionRuntime.initialize({
     correlationId: options.startupCorrelationId ?? crypto.randomUUID()

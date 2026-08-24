@@ -7,10 +7,19 @@ import { parseAtomKey } from './key-parser.mjs';
 import { executeProgramExplore, prepareExploreWorld } from './query-capability.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
+import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_WORKERS = 16;
 const workerFile = path.join(path.dirname(fileURLToPath(import.meta.url)), 'program-worker.py');
+const preparedRecordSnapshots = new WeakMap();
+const preparedProgramSnapshots = new WeakMap();
+
+function freezePrepared(value) {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) freezePrepared(child);
+  return Object.freeze(value);
+}
 
 function fields(atom) {
   const result = new Map();
@@ -22,8 +31,11 @@ function fields(atom) {
 }
 
 function worldRecords(atoms) {
+  if (Object.isFrozen(atoms) && preparedRecordSnapshots.has(atoms)) {
+    return preparedRecordSnapshots.get(atoms);
+  }
   const records = [];
-  const worldRevision = crypto.createHash('sha256').update(JSON.stringify(atoms)).digest('hex');
+  const worldRevision = revisionOfWorldFacts(atoms).slice('sha256:'.length);
   function visit(atom, parentRef, parentPath, address) {
     const stored = fields(atom);
     const name = stored.get('name')?.value;
@@ -47,10 +59,29 @@ function worldRecords(atoms) {
     return record;
   }
   for (const [index, atom] of atoms.entries()) visit(atom, null, [], `${index}`);
-  return records;
+  if (!Object.isFrozen(atoms)) return records;
+  const prepared = freezePrepared(records);
+  preparedRecordSnapshots.set(atoms, prepared);
+  return prepared;
 }
 
 function programRecords(records, selector = null) {
+  const cachedPrograms = Object.isFrozen(records)
+    ? preparedProgramSnapshots.get(records)
+    : null;
+  if (cachedPrograms && !selector) return cachedPrograms;
+  if (cachedPrograms) {
+    const matches = cachedPrograms.filter((program) => matchesExactSelector(
+      program.path.split('/'), program.name, selector
+    ));
+    if (matches.length === 1) return matches;
+    const error = new Error(matches.length
+      ? `Program name is ambiguous: ${selector}`
+      : `Program not found: ${selector}`);
+    error.code = matches.length ? 'AMBIGUOUS_PROGRAM_NAME' : 'PROGRAM_NOT_FOUND';
+    error.details = { program: selector, paths: matches.map((program) => program.path) };
+    throw error;
+  }
   const recordsByRef = new Map(records.map((record) => [record.ref, record]));
   const defaultBackups = records.filter((record) => (
     record.types.includes('backup') && record.types.includes('default')
@@ -82,11 +113,15 @@ function programRecords(records, selector = null) {
     }
     return inactive;
   };
-  const programs = records.filter((record) => (
+  let programs = records.filter((record) => (
     record.types.includes('program')
     && record.detail.trim()
     && !isInsideDefaultBackup(record)
   ));
+  if (Object.isFrozen(records)) {
+    programs = Object.freeze(programs);
+    preparedProgramSnapshots.set(records, programs);
+  }
   if (!selector) return programs;
   const matches = programs.filter((program) => matchesExactSelector(
     program.path.split('/'), program.name, selector
@@ -102,8 +137,8 @@ function programRecords(records, selector = null) {
 
 function fingerprint(records, programs, agentOrigin, isolateFailures) {
   return crypto.createHash('sha256').update(JSON.stringify({
-    records,
-    programs,
+    worldKey: worldRevisionKey(records),
+    programs: programs.map((program) => program.ref),
     agentOrigin: agentOrigin ? { path: agentOrigin.path } : null,
     isolateFailures
   })).digest('hex');

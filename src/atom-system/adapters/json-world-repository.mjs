@@ -1,8 +1,12 @@
 import crypto from 'node:crypto';
-import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
+import { constants as zlibConstants, gzip, gunzip } from 'node:zlib';
 import { revisionOfWorldFacts } from '../world-runtime/world-revision.mjs';
+
+const gzipAsync = promisify(gzip);
+const gunzipAsync = promisify(gunzip);
 
 function problem(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -115,29 +119,18 @@ function compactReceiptHistory(receipts) {
       });
 }
 
-export function createJsonTransactionJournal({ file }) {
+export function createJsonTransactionJournal({ file, incrementalDirectory = `${file}.d` }) {
   if (!file) throw problem('INVALID_TRANSACTION_JOURNAL', 'file is required');
+  const eventFile = path.join(incrementalDirectory, 'events.jsonl');
+  const objectDirectory = path.join(incrementalDirectory, 'objects');
+  let statePromise = null;
+  let tail = Promise.resolve();
 
-  async function preserveLegacyHistory() {
-    const archive = `${file}.full-history-v1.archive`;
-    try {
-      await fs.copyFile(file, archive, fsConstants.COPYFILE_EXCL);
-    } catch (error) {
-      if (error.code !== 'EEXIST' && error.code !== 'ENOENT') throw error;
-    }
-  }
-
-  async function load() {
+  async function loadLegacy() {
     try {
       const parsed = JSON.parse(await fs.readFile(file, 'utf8'));
       if (parsed?.schemaVersion !== 1 || !Array.isArray(parsed.prepared) || !Array.isArray(parsed.receipts)) {
         throw problem('INVALID_TRANSACTION_JOURNAL', 'Transaction journal has an invalid shape');
-      }
-      if (parsed.historyMode !== JOURNAL_HISTORY_MODE) {
-        await preserveLegacyHistory();
-        parsed.receipts = compactReceiptHistory(parsed.receipts);
-        parsed.historyMode = JOURNAL_HISTORY_MODE;
-        await writeJsonAtomically(file, parsed);
       }
       return parsed;
     } catch (error) {
@@ -147,58 +140,209 @@ export function createJsonTransactionJournal({ file }) {
     }
   }
 
-  async function save(state) {
-    await writeJsonAtomically(file, state);
+  function snapshotObjectFile(revision) {
+    const match = /^sha256:([a-f0-9]{64})$/u.exec(revision ?? '');
+    if (!match) throw problem('INVALID_WORLD_REVISION', 'Snapshot requires a sha256 revision');
+    return path.join(objectDirectory, `${match[1]}.json.gz`);
+  }
+
+  async function readSnapshot(identity) {
+    if (Array.isArray(identity?.facts)) return structuredClone(identity);
+    if (!identity?.snapshotRef) return structuredClone(identity);
+    const objectFile = snapshotObjectFile(identity?.snapshotRef ?? identity?.revision);
+    let value;
+    try {
+      value = JSON.parse((await gunzipAsync(await fs.readFile(objectFile))).toString('utf8'));
+    } catch (error) {
+      throw problem('TRANSACTION_SNAPSHOT_READ_FAILED', 'Cannot read transaction snapshot object', {
+        revision: identity?.revision,
+        cause: error.code ?? error.name
+      });
+    }
+    if (value?.revision !== identity.revision
+      || value?.worldId !== identity.worldId
+      || revisionOfWorldFacts(value?.facts) !== value.revision) {
+      throw problem('INVALID_TRANSACTION_SNAPSHOT', 'Transaction snapshot object failed revision verification', {
+        revision: identity?.revision
+      });
+    }
+    return value;
+  }
+
+  async function persistSnapshot(value) {
+    if (!value || revisionOfWorldFacts(value.facts) !== value.revision) {
+      throw problem('INVALID_TRANSACTION_SNAPSHOT', 'Transaction snapshot does not match its revision');
+    }
+    const objectFile = snapshotObjectFile(value.revision);
+    await fs.mkdir(objectDirectory, { recursive: true });
+    let handle;
+    let created = false;
+    try {
+      handle = await fs.open(objectFile, 'wx');
+      created = true;
+      await handle.writeFile(await gzipAsync(
+        Buffer.from(JSON.stringify(value), 'utf8'),
+        { level: zlibConstants.Z_BEST_SPEED }
+      ));
+      await handle.sync();
+    } catch (error) {
+      await handle?.close();
+      handle = null;
+      if (error.code !== 'EEXIST') {
+        if (created) await fs.rm(objectFile, { force: true }).catch(() => {});
+        throw error;
+      }
+      await readSnapshot({ ...compactSnapshot(value), snapshotRef: value.revision });
+    } finally {
+      await handle?.close();
+    }
+    return { ...compactSnapshot(value), snapshotRef: value.revision };
+  }
+
+  async function compactRecord(record) {
+    const [before, after] = await Promise.all([
+      persistSnapshot(record.before),
+      persistSnapshot(record.after)
+    ]);
+    return { ...structuredClone(record), before, after };
+  }
+
+  async function hydrateRecord(record) {
+    if (!record) return null;
+    const [before, after] = await Promise.all([
+      readSnapshot(record.before),
+      readSnapshot(record.after)
+    ]);
+    return { ...structuredClone(record), before, after };
+  }
+
+  async function appendEvent(event) {
+    await fs.mkdir(incrementalDirectory, { recursive: true });
+    const handle = await fs.open(eventFile, 'a');
+    try {
+      await handle.writeFile(`${JSON.stringify({ schemaVersion: 2, ...event })}\n`, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  }
+
+  async function loadEvents() {
+    let text;
+    try {
+      text = await fs.readFile(eventFile, 'utf8');
+    } catch (error) {
+      if (error.code === 'ENOENT') return [];
+      throw problem('TRANSACTION_JOURNAL_READ_FAILED', 'Cannot read incremental transaction events', {
+        cause: error.code
+      });
+    }
+    const lines = text.split('\n');
+    if (lines.at(-1) !== '') lines.pop();
+    else lines.pop();
+    return lines.filter(Boolean).map((line, index) => {
+      try {
+        const event = JSON.parse(line);
+        if (event?.schemaVersion !== 2 || !['prepared', 'committed'].includes(event.type)) {
+          throw new Error('invalid event');
+        }
+        return event;
+      } catch (error) {
+        throw problem('INVALID_TRANSACTION_EVENT', 'Incremental transaction event is invalid', {
+          line: index + 1,
+          cause: error.message
+        });
+      }
+    });
+  }
+
+  async function loadState() {
+    const legacy = await loadLegacy();
+    const prepared = new Map(legacy.prepared.map((entry) => [entry.commandId, structuredClone(entry)]));
+    const receipts = new Map(legacy.receipts.map((entry) => [entry.commandId, structuredClone(entry)]));
+    const order = legacy.receipts.map((entry) => entry.commandId);
+    for (const event of await loadEvents()) {
+      if (event.type === 'prepared') {
+        if (receipts.has(event.commandId)) continue;
+        prepared.set(event.commandId, event.record);
+        continue;
+      }
+      prepared.delete(event.commandId);
+      if (!receipts.has(event.commandId)) order.push(event.commandId);
+      receipts.set(event.commandId, { ...event.record, receipt: event.receipt });
+    }
+    return { prepared, receipts, order };
+  }
+
+  function load() {
+    statePromise ??= loadState();
+    return statePromise;
+  }
+
+  function serialize(operation) {
+    const running = tail.then(operation, operation);
+    tail = running.catch(() => {});
+    return running;
   }
 
   async function findReceipt(commandId) {
-    return structuredClone((await load()).receipts.find((entry) => entry.commandId === commandId)?.receipt ?? null);
+    return structuredClone((await load()).receipts.get(commandId)?.receipt ?? null);
   }
 
   async function findPrepared(commandId) {
-    return structuredClone((await load()).prepared.find((entry) => entry.commandId === commandId) ?? null);
+    return hydrateRecord((await load()).prepared.get(commandId));
   }
 
   async function findCommitted(commandId) {
-    return structuredClone((await load()).receipts.find((entry) => entry.commandId === commandId) ?? null);
+    return hydrateRecord((await load()).receipts.get(commandId));
   }
 
-  async function prepare(record) {
-    const state = await load();
-    if (state.prepared.some((entry) => entry.commandId === record.commandId)
-      || state.receipts.some((entry) => entry.commandId === record.commandId)) {
-      throw problem('DUPLICATE_COMMAND_ID', `Command ${record.commandId} already exists`);
-    }
-    state.prepared.push(structuredClone(record));
-    await save(state);
+  function prepare(record) {
+    return serialize(async () => {
+      const state = await load();
+      if (state.prepared.has(record.commandId) || state.receipts.has(record.commandId)) {
+        throw problem('DUPLICATE_COMMAND_ID', `Command ${record.commandId} already exists`);
+      }
+      const compact = await compactRecord(record);
+      await appendEvent({ type: 'prepared', commandId: record.commandId, record: compact });
+      state.prepared.set(record.commandId, compact);
+    });
   }
 
-  async function commit(commandId, receipt) {
-    const state = await load();
-    const prepared = state.prepared.find((entry) => entry.commandId === commandId);
-    if (!prepared) {
-      const existing = state.receipts.find((entry) => entry.commandId === commandId);
-      if (existing) return structuredClone(existing.receipt);
-      throw problem('MISSING_PREPARED_TRANSACTION', `Command ${commandId} was not prepared`);
-    }
-    state.prepared = state.prepared.filter((entry) => entry.commandId !== commandId);
-    state.receipts.push({ ...structuredClone(prepared), receipt: structuredClone(receipt) });
-    state.receipts = compactReceiptHistory(state.receipts);
-    await save(state);
-    return structuredClone(receipt);
+  function commit(commandId, receipt) {
+    return serialize(async () => {
+      const state = await load();
+      const prepared = state.prepared.get(commandId);
+      if (!prepared) {
+        const existing = state.receipts.get(commandId);
+        if (existing) return structuredClone(existing.receipt);
+        throw problem('MISSING_PREPARED_TRANSACTION', `Command ${commandId} was not prepared`);
+      }
+      await appendEvent({
+        type: 'committed', commandId, record: prepared, receipt: structuredClone(receipt)
+      });
+      state.prepared.delete(commandId);
+      if (!state.receipts.has(commandId)) state.order.push(commandId);
+      state.receipts.set(commandId, { ...prepared, receipt: structuredClone(receipt) });
+      return structuredClone(receipt);
+    });
   }
 
   async function listPrepared() {
-    return structuredClone((await load()).prepared);
+    return Promise.all([...((await load()).prepared.values())].map(hydrateRecord));
   }
 
   async function readState() {
     const state = await load();
-    return {
-      prepared: structuredClone(state.prepared),
-      receipts: structuredClone(state.receipts)
-    };
+    const prepared = await Promise.all([...state.prepared.values()].map(hydrateRecord));
+    const compactReceipts = state.order.map((id) => structuredClone(state.receipts.get(id)));
+    const receipts = compactReceiptHistory(compactReceipts);
+    if (receipts.length) receipts[receipts.length - 1] = await hydrateRecord(receipts.at(-1));
+    return { prepared, receipts };
   }
 
-  return Object.freeze({ file, findReceipt, findPrepared, findCommitted, prepare, commit, listPrepared, readState });
+  return Object.freeze({
+    file, incrementalDirectory, eventFile, objectDirectory,
+    findReceipt, findPrepared, findCommitted, prepare, commit, listPrepared, readState
+  });
 }

@@ -69,6 +69,25 @@ test('missing contexts initialize as an empty top-level Atom array', async (t) =
   await assert.rejects(fs.access(optionalFile), { code: 'ENOENT' });
 });
 
+test('repeated reads reuse one immutable context snapshot until the file revision changes', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const contextFile = path.join(directory, 'atom.json');
+  await writeAtomContext(contextFile, atomsFixture());
+
+  const first = await readAtomContext(contextFile, { create: false });
+  const second = await readAtomContext(contextFile, { create: false });
+  assert.strictEqual(second, first);
+  assert.equal(Object.isFrozen(first), true);
+  assert.equal(Object.isFrozen(first[0].children), true);
+
+  const changed = atomsFixture();
+  changed[0]['detail#主观窗口'] = '新正文';
+  await writeAtomContext(contextFile, changed);
+  const third = await readAtomContext(contextFile, { create: false });
+  assert.notStrictEqual(third, first);
+  assert.equal(third[0]['detail#主观窗口'], '新正文');
+});
+
 test('projects decorated Atom keys recursively through parseAtomKey onto a virtual Graph root', () => {
   const atoms = atomsFixture();
   const projection = projectAtomContext(atoms);
