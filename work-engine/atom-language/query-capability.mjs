@@ -12,7 +12,7 @@ const preparedExploreSnapshots = new WeakMap();
 
 export function fieldsByBase(atom) {
   const byBase = new Map();
-  for (const [rawKey, value] of Object.entries(atom)) {
+  for (const [rawKey, value] of Object.entries(atom ?? {})) {
     const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
     if (parsed.errors.length) continue;
     const list = byBase.get(parsed.baseKey) ?? [];
@@ -100,6 +100,12 @@ export function createAccessController(atoms, options = {}) {
   const registry = options.worldLawRegistry ?? createDefaultWorldLawRegistry();
   const locks = legacyAccess && legacyAccess.global !== true ? decodeLockAtoms(atoms) : [];
   const access = legacyAccess;
+  const agentPath = options.agentPath ?? options.interaction?.agent?.path ?? null;
+  const agentMatch = agentPath
+    ? walkAtoms(atoms).find((match) => match.path.join('/') === agentPath)
+    : null;
+  const agentTypes = oneStoredField(agentMatch?.atom, 'name')?.parsed.types
+    .map((type) => type.raw) ?? [];
   return {
     restricted: true,
     async authorize(match, operation, field) {
@@ -107,7 +113,11 @@ export function createAccessController(atoms, options = {}) {
       if (programLockIndex) {
         const decision = authorizeProgramLock({
           lockIndex: programLockIndex, targetPath, operation, field,
-          agentPath: options.agentPath ?? options.interaction?.agent?.path ?? null
+          agentPath,
+          agentTypes,
+          targetTypes: oneStoredField(match.atom, 'name')?.parsed.types
+            .map((type) => type.raw) ?? [],
+          action: operation === 'read' ? 'explore' : 'transform'
         });
         if (decision.decision !== 'allow') return decision;
       }

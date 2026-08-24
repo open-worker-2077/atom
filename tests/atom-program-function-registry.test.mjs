@@ -54,7 +54,7 @@ test('Program function catalog filters coarse families without a public hierarch
 
   assert.equal(
     cycle.messages[0].text,
-    'child_detail,direct_children,explore,lock,subtree_refs,transform|False'
+    'child_detail,direct_children,explore,lock,slot_body,subtree_refs,transform|False'
   );
 });
 
@@ -106,7 +106,7 @@ test('CLI and Web expose equivalent function registry data without an Agent cont
   const webPayload = await response.json();
   assert.equal(webPayload.ok, true);
   assert.equal(webPayload.result.contract, 'atom-program-function-registry');
-  assert.equal(webPayload.result.version, 2);
+  assert.equal(webPayload.result.version, 3);
 
   const stdout = output();
   const stderr = output();
@@ -168,6 +168,30 @@ test('public registry exposes the deferred Program Transform create and update c
   ]);
 });
 
+test('public registry and CLI Help expose the complete槽体 kernel contract', async () => {
+  const { programFunctionRegistry } = await import('../work-engine/atom-language/program-function-registry.mjs');
+  const slotBody = programFunctionRegistry().functions.find((item) => item.name === 'slot_body');
+  assert.equal(slotBody.layer, 'kernel');
+  assert.equal(slotBody.family, 'graph');
+  assert.deepEqual(slotBody.contract.argument.required, ['action', 'body']);
+  assert.deepEqual(slotBody.contract.argument.properties.action.enum, ['seal', 'print', 'sync']);
+  assert.deepEqual(slotBody.contract.layout, {
+    children: ['槽模', '槽例'], blank: '槽例/空槽例'
+  });
+  assert.equal(slotBody.contract.transaction, 'central-atomic-commit');
+  assert.deepEqual(slotBody.contract.confirmation, ['interaction-receipt', 'exact-explore']);
+  assert.ok(slotBody.contract.errors.includes('SLOT_BODY_SYNC_CONFLICT'));
+
+  const stdout = output();
+  const stderr = output();
+  const code = await runAtomCli(['--help'], { stdout: stdout.stream, stderr: stderr.stream });
+  assert.equal(code, 0, stderr.value());
+  assert.match(stdout.value(), /slot_body\(\{"action":"seal\|print\|sync"/u);
+  assert.match(stdout.value(), /槽模／槽例／空槽例/u);
+  assert.match(stdout.value(), /不递归建槽/u);
+  assert.match(stdout.value(), /SLOT_BODY_EXAMPLE_EXISTS[\s\S]*不产生半份槽例/u);
+});
+
 test('public registry exposes the complete window-aware Program lock contract', async () => {
   const { programFunctionRegistry } = await import('../work-engine/atom-language/program-function-registry.mjs');
   const lock = programFunctionRegistry().functions.find((item) => item.name === 'lock');
@@ -175,10 +199,30 @@ test('public registry exposes the complete window-aware Program lock contract', 
   assert.deepEqual(lock.contract.argument.required, ['targets', 'mode']);
   assert.deepEqual(lock.contract.argument.properties.allowed_windows, {
     type: 'object',
-    required: ['paths'],
+    additionalProperties: false,
+    oneOf: [
+      {
+        required: ['paths'],
+        properties: {
+          paths: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', format: 'exact-agent-path' } }
+        }
+      },
+      {
+        required: ['types'],
+        properties: { types: { $ref: '#/definitions/graph-type-predicate' } }
+      }
+    ]
+  });
+  assert.deepEqual(lock.contract.argument.properties.when, {
+    type: 'object',
+    minProperties: 1,
     additionalProperties: false,
     properties: {
-      paths: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', format: 'exact-agent-path' } }
+      target_types: { $ref: '#/definitions/graph-type-predicate' },
+      actions: {
+        type: 'array', minItems: 1, uniqueItems: true,
+        items: { enum: ['explore', 'transform'] }
+      }
     }
   });
   assert.deepEqual(lock.contract.argument.properties.refresh, {
@@ -189,6 +233,16 @@ test('public registry exposes the complete window-aware Program lock contract', 
   });
   assert.equal(lock.contract.recompute.command, 'transform {"name.run.":"EXACT_PROGRAM_PATH"}');
   assert.equal(lock.contract.denial.write, 'PROGRAM_LOCK_DENIED');
+  assert.equal(lock.contract.denial.read, 'truncate');
+  assert.deepEqual(lock.contract.compatibility, { legacyAllowedWindows: 'paths' });
+  assert.deepEqual(lock.contract.validationErrors, [
+    'INVALID_PROGRAM_LOCK_ALLOWED_WINDOWS',
+    'INVALID_PROGRAM_LOCK_WINDOW_TYPES',
+    'INVALID_PROGRAM_LOCK_TARGET_TYPES',
+    'INVALID_PROGRAM_LOCK_ACTIONS',
+    'INVALID_PROGRAM_LOCK_WHEN',
+    'INVALID_PROGRAM_LOCK_REFRESH'
+  ]);
 });
 
 test('public registry exposes indexed Transform trigger dispatch and function-reference entrypoints', async () => {
@@ -235,6 +289,9 @@ test('CLI Help explains window allowlists and explicit lock recomputation', asyn
 
   assert.equal(code, 0, stderr.value());
   assert.match(stdout.value(), /allowed_windows[\s\S]*paths[\s\S]*exact.*@agent/iu);
+  assert.match(stdout.value(), /allowed_windows[\s\S]*types[\s\S]*all／any／none/u);
+  assert.match(stdout.value(), /target_types[\s\S]*when\.actions[\s\S]*explore／transform/u);
+  assert.match(stdout.value(), /守窗、跳窗、关窗和滚动绑定[\s\S]*内核不写死/u);
   assert.match(stdout.value(), /refresh[\s\S]*on_request[\s\S]*name\.run\./u);
   assert.match(stdout.value(), /PROGRAM_LOCK_DENIED[\s\S]*旧锁快照/u);
 });

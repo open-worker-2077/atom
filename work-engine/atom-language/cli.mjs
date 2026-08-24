@@ -101,7 +101,7 @@ export async function executeAtomProgramFunctionRegistryEndpoint(
     );
   }
   if (payload.result?.contract !== 'atom-program-function-registry'
-    || payload.result?.version !== 2
+    || payload.result?.version !== 3
     || payload.result?.runtimeContract !== ATOM_RUNTIME_CONTRACT) {
     throw cliError(
       'ATOM_RUNTIME_CONTRACT_MISMATCH',
@@ -237,11 +237,15 @@ function help() {
     '  Program transform 创建：transform({"name":"精确父路径/新节点","detail":"内容","children":[],"partners":[]})；完整四轴且无点号指令时创建，带点号指令的既有写法继续按更新处理。',
     '  transform() 返回 None，只表示登记了延后效果；实际提交必须以交互回执或后续 exact explore 回读确认。',
     '  JSON 函数：json_parse({"text":"..."})->JSON值；json_stringify({"value":...,"indent"?:0..8})->string。序列化默认紧凑，拒绝 NaN、Infinity 和非 JSON 值；失败将终止整个 Program 评估且不发布已登记效果；不开放 import/eval；可配合 detail.rep. 写回。',
-    '  世界函数：explore(query)->rows；transform(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
+    '  世界函数：explore(query)->rows；transform(spec)、slot_body(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
     '  Transform 触发器：先定义无参数 main，再声明 trigger("transform", {"nodes":["exact 节点路径"]}, main)。main 是函数引用，不能写 main()；运行时按反向索引只运行命中的 Program；相同值写入仍属于 Transform 事件。',
     '  窗口识别锁：lock({...\"allowed_windows\":{\"paths\":[\"exact 完整 @agent 路径\"]},\"refresh\":{\"policy\":\"on_request\"}})。只有当前 --agent 解析路径 exact 命中才绕过该锁；未命中写入返回 PROGRAM_LOCK_DENIED。',
+    '  类型条件锁：allowed_windows 也可写 {"types":{"all":["agent"],"any":["研发","总控"],"none":["执行"]}}；all／any／none 读取当前窗口节点的 Graph 类型，不读取调用方自报类型，并与旧 paths 写法二选一。',
+    '  锁定条件轴：when.target_types 使用相同类型条件判断目标状态；when.actions 仅取 explore／transform。状态与动作决定锁是否生效，窗口条件决定是否放行；守窗、跳窗、关窗和滚动绑定由上层 Program 调度，内核不写死。',
     '  显式重算：transform {\"name.run.\":\"EXACT_PROGRAM_PATH\"}；仅成功运行才原子替换旧锁快照，普通依赖变化不自动重算，失败保留旧锁快照。',
     '  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。',
+    '  槽体内核：slot_body({"action":"seal|print|sync","body":"EXACT槽体路径","name":"PRINT时的新槽例名"})。槽体必须显式为“槽模／槽例／空槽例”；调用方不递归建槽，结果是延迟事务计划，提交后必须 exact explore 回读。',
+    '  槽体错误：INVALID_SLOT_BODY_LAYOUT（结构不完整）、SLOT_BODY_NOT_SEALED（未映照）、SLOT_BODY_EXAMPLE_EXISTS（重名）、SLOT_BODY_SYNC_CONFLICT（有料结构冲突）；任一失败不产生半份槽例。',
     '  工单函数：work_order_catalog({template?,version?})->contract；work_order({action,...})->result。v1 动作固定为 create/fill/validate/submit/reject/revise/read-back。',
     '  工单公开契约：atom.cmd --work-order-registry；该只读命令无需 --agent，Web 帮助从同一注册表渲染动作、错误和提交回执字段。',
     '  工单写入只能由 Program 发出并继续经过 Transform、修订检查和中央提交；调用时使用精确版本、稳定 creation_id 与 exact path，写后按 read-back 和世界回读验收。',

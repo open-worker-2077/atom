@@ -1,6 +1,6 @@
 {
   "contract": "atom-program-function-registry",
-  "version": 2,
+  "version": 3,
   "runtimeContract": "atom-interaction/3",
   "types": [
     { "id": "program", "layer": "kernel", "executable": true }
@@ -30,6 +30,35 @@
       }
     },
     {
+      "name": "slot_body",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["action", "body"],
+          "additionalProperties": false,
+          "properties": {
+            "action": { "enum": ["seal", "print", "sync"] },
+            "body": { "type": "string", "format": "exact-atom-path" },
+            "name": { "type": "string", "format": "single-atom-name", "requiredWhen": { "action": "print" } }
+          }
+        },
+        "layout": { "children": ["槽模", "槽例"], "blank": "槽例/空槽例" },
+        "result": { "type": "object", "meaning": "deferred-effect-plan" },
+        "transaction": "central-atomic-commit",
+        "confirmation": ["interaction-receipt", "exact-explore"],
+        "errors": [
+          "INVALID_SLOT_BODY_EFFECT",
+          "INVALID_SLOT_BODY_LAYOUT",
+          "SLOT_BODY_NOT_SEALED",
+          "SLOT_BODY_EXAMPLE_EXISTS",
+          "SLOT_BODY_SYNC_CONFLICT"
+        ]
+      }
+    },
+    {
       "name": "lock", "layer": "kernel", "family": "graph", "scope": "public",
       "contract": {
         "argument": {
@@ -37,8 +66,34 @@
           "required": ["targets", "mode"],
           "properties": {
             "allowed_windows": {
-              "type": "object", "required": ["paths"], "additionalProperties": false,
-              "properties": { "paths": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "exact-agent-path" } } }
+              "type": "object",
+              "additionalProperties": false,
+              "oneOf": [
+                {
+                  "required": ["paths"],
+                  "properties": {
+                    "paths": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "exact-agent-path" } }
+                  }
+                },
+                {
+                  "required": ["types"],
+                  "properties": {
+                    "types": { "$ref": "#/definitions/graph-type-predicate" }
+                  }
+                }
+              ]
+            },
+            "when": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": false,
+              "properties": {
+                "target_types": { "$ref": "#/definitions/graph-type-predicate" },
+                "actions": {
+                  "type": "array", "minItems": 1, "uniqueItems": true,
+                  "items": { "enum": ["explore", "transform"] }
+                }
+              }
             },
             "refresh": {
               "type": "object", "required": ["policy"], "additionalProperties": false,
@@ -47,7 +102,28 @@
           }
         },
         "recompute": { "command": "transform {\"name.run.\":\"EXACT_PROGRAM_PATH\"}" },
-        "denial": { "write": "PROGRAM_LOCK_DENIED" }
+        "definitions": {
+          "graph-type-predicate": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "all": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+              "any": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+              "none": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+            }
+          }
+        },
+        "compatibility": { "legacyAllowedWindows": "paths" },
+        "denial": { "write": "PROGRAM_LOCK_DENIED", "read": "truncate" },
+        "validationErrors": [
+          "INVALID_PROGRAM_LOCK_ALLOWED_WINDOWS",
+          "INVALID_PROGRAM_LOCK_WINDOW_TYPES",
+          "INVALID_PROGRAM_LOCK_TARGET_TYPES",
+          "INVALID_PROGRAM_LOCK_ACTIONS",
+          "INVALID_PROGRAM_LOCK_WHEN",
+          "INVALID_PROGRAM_LOCK_REFRESH"
+        ]
       }
     },
     { "name": "direct_children", "layer": "kernel", "family": "graph", "scope": "public" },

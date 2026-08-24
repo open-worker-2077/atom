@@ -279,7 +279,7 @@ test('initialization publishes the exact initialized revision before reporting r
       source: 'atom',
       interaction: { id: 'startup-1', agent: null },
       history: [],
-      programMode: 'reconcile',
+      programMode: 'project',
       programRuntime: 'program-runtime'
     }],
     ['projection', { expectedRevision: 'rev-2', lockState: { revision: 'rev-2' } }]

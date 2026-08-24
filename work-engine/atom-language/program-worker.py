@@ -39,7 +39,7 @@ def load_program_function_registry():
     module_path = Path(__file__).with_name("program-function-registry.json")
     value = json.loads(module_path.read_text(encoding="utf-8"))
     if (value.get("contract") != "atom-program-function-registry"
-            or value.get("version") != 2
+            or value.get("version") != 3
             or value.get("runtimeContract") != "atom-interaction/3"):
         raise RuntimeError("Program function registry has an invalid public contract")
     families = set()
@@ -270,7 +270,7 @@ def main():
     records = request["world"]
     by_ref = {record["ref"]: record for record in records}
     views = {ref: AtomView(record) for ref, record in by_ref.items()}
-    effects = {"locks": [], "messages": [], "transforms": [], "choices": []}
+    effects = {"locks": [], "messages": [], "transforms": [], "choices": [], "slotBodies": []}
 
     next_request_id = 0
 
@@ -319,6 +319,16 @@ def main():
     def transform(specification):
         specification = require_object(specification, "transform")
         effects["transforms"].append(specification)
+
+    def slot_body(specification):
+        specification = require_object(specification, "slot_body")
+        effects["slotBodies"].append(specification)
+        action = specification.get("action")
+        body = specification.get("body")
+        result = {"planned": True, "action": action, "body": body}
+        if "name" in specification:
+            result["target"] = body + "/槽例/" + str(specification["name"])
+        return result
 
     def choice(specification):
         specification = require_object(specification, "choice")
@@ -841,6 +851,7 @@ def main():
         "__builtins__": safe_builtins,
         "explore": explore,
         "transform": transform,
+        "slot_body": slot_body,
         "lock": lock,
         "message": message,
         "choice": choice,

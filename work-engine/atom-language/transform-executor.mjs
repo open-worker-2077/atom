@@ -207,6 +207,78 @@ function resolveUnique(atoms, selector, exactIndex = null) {
   return { match: matches[0] };
 }
 
+function captureSubtreeBindings(sourceAtom, sourcePath) {
+  const sourceParts = sourcePath.split('/');
+  const prefix = sourceParts.slice(0, -1);
+  const matches = walkAtoms([sourceAtom]).map((match) => ({
+    ...match,
+    path: [...prefix, ...match.path]
+  }));
+  const bindings = [];
+  for (const source of matches) {
+    const partners = storedField(source.atom, 'partners')?.value;
+    if (!Array.isArray(partners)) continue;
+    partners.forEach((partner, partnerIndex) => {
+      const target = partnerTarget(source, partner?.object, matches, null);
+      if (!target) return;
+      bindings.push({
+        sourceAtom: source.atom,
+        targetAtom: target.atom,
+        partnerIndex,
+        explicitPath: partner.object.includes('/')
+      });
+    });
+  }
+  return bindings;
+}
+
+function rewriteCopiedSubtreeBindings(clone, mapping, bindings, destinationPath) {
+  const clonedMatches = walkAtoms([clone]);
+  const byAtom = new Map(clonedMatches.map((match) => [match.atom, match]));
+  for (const binding of bindings) {
+    const source = byAtom.get(mapping.get(binding.sourceAtom));
+    const target = byAtom.get(mapping.get(binding.targetAtom));
+    if (!source || !target) continue;
+    const partners = storedField(source.atom, 'partners')?.value;
+    if (!Array.isArray(partners) || !partners[binding.partnerIndex]) continue;
+    const sameParent = source.parent === target.parent;
+    partners[binding.partnerIndex].object = !binding.explicitPath && sameParent
+      ? storedField(target.atom, 'name')?.value
+      : [destinationPath, ...target.path].join('/');
+  }
+}
+
+export function insertAuthoritativeSubtreeCopy({
+  atoms,
+  sourceAtom,
+  destinationChildren,
+  newRootName = null,
+  rootName = null,
+  bindings = null,
+  sourcePath = null,
+  destinationPath = null,
+  scope = 'world'
+}) {
+  const partnerBindings = scope === 'subtree'
+    ? captureSubtreeBindings(sourceAtom, sourcePath)
+    : (bindings ?? capturePartnerBindings(atoms, rootName));
+  const clone = structuredClone(sourceAtom);
+  if (newRootName !== null) replaceStoredField(clone, 'name', newRootName);
+  const mapping = new Map();
+  mapClonedSubtree(sourceAtom, clone, mapping);
+  destinationChildren.push(clone);
+  if (scope === 'subtree') {
+    rewriteCopiedSubtreeBindings(clone, mapping, partnerBindings, destinationPath);
+    return { clone, bindings: partnerBindings };
+  }
+  const allBindings = [
+    ...partnerBindings,
+    ...copiedBindings(partnerBindings, mapping)
+  ];
+  rewritePartnerBindings(atoms, allBindings);
+  return { clone, bindings: allBindings };
+}
+
 export function createExactTransformIndex(atoms) {
   const index = new Map();
   const add = (selector, match) => {
@@ -680,16 +752,18 @@ export async function applyTransform({
       };
     }
     if (command.name === 'cpy') {
-      const clone = structuredClone(target.atom);
-      const mapping = new Map();
-      mapClonedSubtree(target.atom, clone, mapping);
-      destinationChildren.push(clone);
-      partnerBindings.push(...copiedBindings(partnerBindings, mapping));
+      insertAuthoritativeSubtreeCopy({
+        atoms: nextAtoms,
+        sourceAtom: target.atom,
+        destinationChildren,
+        rootName,
+        bindings: partnerBindings
+      });
     } else {
       containerOf(nextAtoms, target).splice(target.index, 1);
       destinationChildren.push(target.atom);
+      rewritePartnerBindings(nextAtoms, partnerBindings);
     }
-    rewritePartnerBindings(nextAtoms, partnerBindings);
     const resultMatch = walkAtoms(nextAtoms).find((match) => match.atom === target.atom);
     return {
       atoms: nextAtoms,

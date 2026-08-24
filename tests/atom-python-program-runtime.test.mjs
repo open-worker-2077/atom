@@ -42,6 +42,19 @@ test('same world fingerprint reuses one completed Program cycle', async () => {
   assert.equal(second.fingerprint, first.fingerprint);
 });
 
+test('slot_body emits a validated deferred effect once and cached cycles do not replay it', async () => {
+  const world = [atom('程序', "slot_body({'action':'print','body':'订单槽体','name':'订单001'})", [], 'program')];
+  const scheduler = createProgramRuntimeScheduler();
+  const first = await scheduler.refresh(world);
+  const second = await scheduler.refresh(world);
+
+  assert.deepEqual(first.slotBodies, [{
+    action: 'print', body: '订单槽体', name: '订单001',
+    sourceProgramPath: '程序'
+  }]);
+  assert.deepEqual(second.slotBodies, []);
+});
+
 test('Program world functions require one JSON object root argument', async () => {
   const world = [atom('程序', "message(['not', 'an', 'object'])", [], 'program')];
   const scheduler = createProgramRuntimeScheduler();

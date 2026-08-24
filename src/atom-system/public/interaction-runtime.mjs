@@ -257,7 +257,7 @@ export function createInteractionRuntime({
     const intent = validateIntent({ source: 'atom', correlationId, history: [] });
     const initialization = await executeValidated(intent, {
       publish: false,
-      programMode: 'reconcile'
+      programMode: 'project'
     });
     if (!initialization?.ok || !initialization.revisionAfter) {
       throw problem('RUNTIME_INITIALIZATION_FAILED', 'World initialization did not produce a readable revision', {

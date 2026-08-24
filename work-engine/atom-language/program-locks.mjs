@@ -1,4 +1,41 @@
 const LOCK_FIELDS = new Set(['name', 'detail', 'children', 'partners', 'messages']);
+const TYPE_PREDICATE_KEYS = new Set(['all', 'any', 'none']);
+
+export function normalizeTypePredicate(value, {
+  code = 'INVALID_PROGRAM_LOCK_TYPE_CONDITION',
+  label = 'type condition'
+} = {}) {
+  const keys = value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.keys(value)
+    : [];
+  if (keys.length === 0 || keys.some((key) => !TYPE_PREDICATE_KEYS.has(key))) {
+    throw Object.assign(new Error(`${label} requires one or more of all, any, none`), { code });
+  }
+  const normalized = {};
+  for (const key of keys) {
+    const types = value[key];
+    if (!Array.isArray(types) || types.length === 0
+      || types.some((type) => typeof type !== 'string' || !type.trim())
+      || new Set(types.map((type) => type.trim())).size !== types.length) {
+      throw Object.assign(new Error(`${label}.${key} must contain unique non-empty Graph types`), { code });
+    }
+    normalized[key] = types.map((type) => type.trim());
+  }
+  const positive = new Set([...(normalized.all ?? []), ...(normalized.any ?? [])]);
+  if ((normalized.none ?? []).some((type) => positive.has(type))) {
+    throw Object.assign(new Error(`${label} cannot both require and exclude one Graph type`), { code });
+  }
+  return normalized;
+}
+
+export function matchesTypePredicate(types, predicate) {
+  if (!predicate) return true;
+  const available = new Set(Array.isArray(types) ? types : []);
+  if (predicate.all?.some((type) => !available.has(type))) return false;
+  if (predicate.any && !predicate.any.some((type) => available.has(type))) return false;
+  if (predicate.none?.some((type) => available.has(type))) return false;
+  return true;
+}
 
 export function buildProgramLockIndex({ revision, results = [], records = [] }) {
   const known = new Map(records.map((record) => [record.ref, record]));
@@ -33,6 +70,10 @@ export function buildProgramLockIndex({ revision, results = [], records = [] }) 
         readFields: sourceRead,
         writeFields: sourceWrite,
         allowedWindows: result.allowed_windows?.paths ? [...result.allowed_windows.paths] : null,
+        allowedWindowTypes: result.allowed_windows?.types
+          ? structuredClone(result.allowed_windows.types)
+          : null,
+        when: result.when ? structuredClone(result.when) : null,
         reason: result.reason && typeof result.reason === 'object'
           ? structuredClone(result.reason)
           : null
@@ -57,6 +98,10 @@ export function mergeProgramLockIndexes({
       readFields: new Set(source.readFields),
       writeFields: new Set(source.writeFields),
       allowedWindows: source.allowedWindows ? [...source.allowedWindows] : null,
+      allowedWindowTypes: source.allowedWindowTypes
+        ? structuredClone(source.allowedWindowTypes)
+        : null,
+      when: source.when ? structuredClone(source.when) : null,
       reason: source.reason && typeof source.reason === 'object'
         ? structuredClone(source.reason)
         : null
@@ -98,18 +143,34 @@ export function programLockDeniedDiagnostic(decision, field = null) {
       locks: (decision?.matched ?? []).map((source) => ({
         sourceProgramPath: source.sourceProgramPath,
         allowedWindows: source.allowedWindows ?? null,
+        allowedWindowTypes: source.allowedWindowTypes ?? null,
+        when: source.when ?? null,
         reason: source.reason ?? null
       }))
     }
   };
 }
 
-export function authorizeProgramLock({ lockIndex, targetPath, operation, field, agentPath = null }) {
+export function authorizeProgramLock({
+  lockIndex,
+  targetPath,
+  operation,
+  field,
+  agentPath = null,
+  agentTypes = [],
+  targetTypes = [],
+  action = operation === 'read' ? 'explore' : 'transform'
+}) {
   const entry = lockIndex?.byPath?.get(targetPath);
   if (!entry) return { decision: 'allow' };
   const fieldKey = operation === 'read' ? 'readFields' : 'writeFields';
   const matched = entry.sources.filter((source) => {
+    if (source.when?.actions && !source.when.actions.includes(action)) return false;
+    if (source.when?.target_types
+      && !matchesTypePredicate(targetTypes, source.when.target_types)) return false;
     if (source.allowedWindows?.includes(agentPath)) return false;
+    if (source.allowedWindowTypes
+      && matchesTypePredicate(agentTypes, source.allowedWindowTypes)) return false;
     const fields = source[fieldKey];
     return field ? fields.has(field) : fields.size > 0;
   });

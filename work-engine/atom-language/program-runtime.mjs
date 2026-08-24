@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseAtomKey } from './key-parser.mjs';
 import { executeProgramExplore, prepareExploreWorld } from './query-capability.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
+import { normalizeTypePredicate } from './program-locks.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 
@@ -309,19 +310,59 @@ function validateResult(result, records, program) {
       const value = entry.allowed_windows;
       const keys = value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value) : [];
       const paths = value?.paths;
-      if (keys.length !== 1 || keys[0] !== 'paths'
-        || !Array.isArray(paths) || paths.length === 0
-        || paths.some((path) => typeof path !== 'string' || !path.includes('/'))
-        || new Set(paths).size !== paths.length
-        || paths.some((path) => {
-          const record = recordsByPath.get(path);
-          return !record || !record.types?.includes('agent');
-        })) {
-        throw Object.assign(new Error('lock.allowed_windows.paths must contain unique exact full paths resolving to @agent Atoms'), {
+      if (keys.length !== 1 || !['paths', 'types'].includes(keys[0])) {
+        throw Object.assign(new Error('lock.allowed_windows requires exactly one of paths or types'), {
           code: 'INVALID_PROGRAM_LOCK_ALLOWED_WINDOWS'
         });
       }
-      allowedWindows = { paths: [...paths] };
+      if (keys[0] === 'paths') {
+        if (!Array.isArray(paths) || paths.length === 0
+          || paths.some((path) => typeof path !== 'string' || !path.includes('/'))
+          || new Set(paths).size !== paths.length
+          || paths.some((path) => {
+            const record = recordsByPath.get(path);
+            return !record || !record.types?.includes('agent');
+          })) {
+          throw Object.assign(new Error('lock.allowed_windows.paths must contain unique exact full paths resolving to @agent Atoms'), {
+            code: 'INVALID_PROGRAM_LOCK_ALLOWED_WINDOWS'
+          });
+        }
+        allowedWindows = { paths: [...paths] };
+      } else {
+        allowedWindows = {
+          types: normalizeTypePredicate(value.types, {
+            code: 'INVALID_PROGRAM_LOCK_WINDOW_TYPES',
+            label: 'lock.allowed_windows.types'
+          })
+        };
+      }
+    }
+    let when;
+    if (entry.when !== undefined) {
+      const value = entry.when;
+      const keys = value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value) : [];
+      if (keys.length === 0 || keys.some((key) => !['target_types', 'actions'].includes(key))) {
+        throw Object.assign(new Error('lock.when only supports target_types and actions'), {
+          code: 'INVALID_PROGRAM_LOCK_WHEN'
+        });
+      }
+      const actions = value.actions;
+      if (actions !== undefined && (!Array.isArray(actions) || actions.length === 0
+        || actions.some((action) => !['explore', 'transform'].includes(action))
+        || new Set(actions).size !== actions.length)) {
+        throw Object.assign(new Error('lock.when.actions requires unique explore or transform values'), {
+          code: 'INVALID_PROGRAM_LOCK_ACTIONS'
+        });
+      }
+      when = {
+        ...(value.target_types !== undefined ? {
+          target_types: normalizeTypePredicate(value.target_types, {
+            code: 'INVALID_PROGRAM_LOCK_TARGET_TYPES',
+            label: 'lock.when.target_types'
+          })
+        } : {}),
+        ...(actions !== undefined ? { actions: [...actions] } : {})
+      };
     }
     let refresh;
     if (entry.refresh !== undefined) {
@@ -337,6 +378,7 @@ function validateResult(result, records, program) {
     return {
       ...structuredClone(entry), fields, protect: { atom: protect.atom ?? true, messages: protect.messages ?? false },
       ...(allowedWindows ? { allowed_windows: allowedWindows } : {}),
+      ...(when ? { when } : {}),
       ...(refresh ? { refresh } : {}),
       sourceProgramRef: program.ref, sourceProgramPath: program.path
     };
@@ -359,6 +401,31 @@ function validateResult(result, records, program) {
     return {
       ...structuredClone(entry),
       sourceProgramRef: program.ref,
+      sourceProgramPath: program.path
+    };
+  });
+  const slotBodies = (result.slotBodies ?? []).map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw Object.assign(new Error('slot_body() requires one JSON object'), { code: 'INVALID_SLOT_BODY_EFFECT' });
+    }
+    const keys = Object.keys(entry).sort();
+    const expected = entry.action === 'print'
+      ? ['action', 'body', 'name']
+      : ['action', 'body'];
+    if (!['seal', 'print', 'sync'].includes(entry.action)
+      || typeof entry.body !== 'string' || !entry.body.trim()
+      || keys.length !== expected.length
+      || expected.some((key) => !keys.includes(key))
+      || (entry.action === 'print'
+        && (typeof entry.name !== 'string' || !entry.name.trim() || entry.name.includes('/')))) {
+      throw Object.assign(new Error('slot_body() requires seal/sync {action,body} or print {action,body,name}'), {
+        code: 'INVALID_SLOT_BODY_EFFECT'
+      });
+    }
+    return {
+      ...structuredClone(entry),
+      body: entry.body.trim(),
+      ...(entry.action === 'print' ? { name: entry.name.trim() } : {}),
       sourceProgramPath: program.path
     };
   });
@@ -406,7 +473,7 @@ function validateResult(result, records, program) {
     };
   });
   const trigger = result.trigger == null ? null : structuredClone(result.trigger);
-  return { locks, messages, transforms, choices, trigger };
+  return { locks, messages, transforms, slotBodies, choices, trigger };
 }
 
 function runWorker({
@@ -741,6 +808,7 @@ export class ProgramRuntimeScheduler {
       choices: structuredClone(stored.choices ?? []),
       messages: [],
       transforms: [],
+      slotBodies: [],
       failures: structuredClone(stored.failures),
       contextIncomplete: stored.contextIncomplete === true
     });
@@ -785,7 +853,7 @@ export class ProgramRuntimeScheduler {
     const key = fingerprint(records, programs, options.agentOrigin, isolateFailures);
     const completed = this.completed.get(key);
     if (completed) return this.overlayRequestDrivenLocks({
-      ...completed, cached: true, messages: [], transforms: []
+      ...completed, cached: true, messages: [], transforms: [], slotBodies: []
     });
 
     const reusable = reusableCandidates(
@@ -804,6 +872,7 @@ export class ProgramRuntimeScheduler {
         choices: structuredClone(reusable.value.choices ?? []),
         messages: [],
         transforms: [],
+        slotBodies: [],
         failures: structuredClone(reusable.value.failures ?? [])
       });
       this.completed.set(key, value);
@@ -840,12 +909,12 @@ export class ProgramRuntimeScheduler {
     if (completed && completed.failures.length === 0) {
       const cached = completed;
       return this.overlayRequestDrivenLocks({
-        ...cached, cached: true, messages: [], transforms: []
+        ...cached, cached: true, messages: [], transforms: [], slotBodies: []
       });
     }
     if (this.inflight.has(key)) {
       return this.inflight.get(key).then((value) => ({
-        ...value, cached: true, messages: [], transforms: []
+        ...value, cached: true, messages: [], transforms: [], slotBodies: []
       }));
     }
 
@@ -924,6 +993,7 @@ export class ProgramRuntimeScheduler {
           choices: structuredClone(reusable.value.choices ?? []),
           messages: [],
           transforms: [],
+          slotBodies: [],
           failures: structuredClone(reusable.value.failures ?? [])
         });
         this.completed.set(key, value);
@@ -986,8 +1056,9 @@ export class ProgramRuntimeScheduler {
             ...previous.result,
             locks: rebindLocks(previous.result.locks, previous.records, records),
             messages: [],
-            transforms: []
-          } : { locks: [], messages: [], transforms: [], choices: [], trigger: null },
+            transforms: [],
+            slotBodies: []
+          } : { locks: [], messages: [], transforms: [], slotBodies: [], choices: [], trigger: null },
           cached: true,
           requests: previous?.requests ?? [],
           contextDependent: previous?.contextDependent === true
@@ -1000,8 +1071,9 @@ export class ProgramRuntimeScheduler {
             ...previous.result,
             locks: rebindLocks(previous.result.locks, previous.records, records),
             messages: [],
-            transforms: []
-          } : { locks: [], messages: [], transforms: [], choices: [], trigger: null },
+            transforms: [],
+            slotBodies: []
+          } : { locks: [], messages: [], transforms: [], slotBodies: [], choices: [], trigger: null },
           cached: true,
           requests: previous?.requests ?? [],
           contextDependent: previous?.contextDependent === true
@@ -1018,7 +1090,8 @@ export class ProgramRuntimeScheduler {
               ...previous.result,
               locks: rebindLocks(previous.result.locks, previous.records, records),
               messages: [],
-              transforms: []
+              transforms: [],
+              slotBodies: []
             },
             cached: true,
             requests: previous.requests,
@@ -1117,6 +1190,7 @@ export class ProgramRuntimeScheduler {
       choices: results.flatMap((result) => result.choices ?? []),
       messages: results.flatMap((result) => result.messages),
       transforms: results.flatMap((result) => result.transforms),
+      slotBodies: results.flatMap((result) => result.slotBodies ?? []),
       failures: applicable.flatMap((entry) => entry.failure ? [entry.failure] : []),
       executedProgramPaths: applicable
         .filter((entry) => entry.cached === false && entry.result)

@@ -47,6 +47,7 @@ import {
   programLockDeniedDiagnostic,
   programLockState
 } from './program-locks.mjs';
+import { applySlotBodyEffect } from './slot-body-runtime.mjs';
 import {
   createAccessController,
   describeAtom,
@@ -62,6 +63,13 @@ export { executeProgramExplore } from './query-capability.mjs';
 
 function revisionOf(atoms) {
   return revisionOfWorldFacts(atoms).slice('sha256:'.length);
+}
+
+function graphTypesAtPath(atoms, targetPath) {
+  if (!targetPath) return [];
+  const match = walkAtoms(atoms).find((candidate) => candidate.path.join('/') === targetPath);
+  if (!match) return [];
+  return oneStoredField(match.atom, 'name')?.parsed.types.map((type) => type.raw) ?? [];
 }
 
 function performanceTrace(event, details) {
@@ -537,7 +545,8 @@ export async function executeAtomLanguage(options = {}) {
       const preparedWorld = prepareExploreWorld(atoms);
       const reconcilePrograms = options.programMode === 'reconcile'
         || Boolean(requestedProgramRun?.selector);
-      const programOperation = reconcilePrograms
+      const projectPrograms = options.programMode === 'project';
+      const programOperation = reconcilePrograms || projectPrograms
         ? options.programScheduler.refresh.bind(options.programScheduler)
         : (typeof options.programScheduler.current === 'function'
           ? options.programScheduler.current.bind(options.programScheduler)
@@ -558,6 +567,14 @@ export async function executeAtomLanguage(options = {}) {
           preparedWorld
         })
       });
+      if (projectPrograms) {
+        programCycle = {
+          ...programCycle,
+          messages: [],
+          transforms: [],
+          slotBodies: []
+        };
+      }
       performanceTrace('program-initial-cycle', {
         elapsedMs: Math.round(performance.now() - programStartedAt),
         transforms: programCycle.transforms?.length ?? 0,
@@ -598,7 +615,10 @@ export async function executeAtomLanguage(options = {}) {
       targetPath: message.sourceProgramPath,
       operation: 'read',
       field: 'messages',
-      agentPath: interaction.agent?.path ?? null
+      agentPath: interaction.agent?.path ?? null,
+      agentTypes: graphTypesAtPath(atoms, interaction.agent?.path),
+      targetTypes: graphTypesAtPath(atoms, message.sourceProgramPath),
+      action: 'explore'
     }).decision === 'allow')
     .map((message) => ({ interactionId: interaction.id, ...message }));
   let programChanged = false;
@@ -664,6 +684,49 @@ export async function executeAtomLanguage(options = {}) {
         id: crypto.randomUUID(),
         operation: 'program-transform',
         source: transformRequest,
+        revisionBefore: before,
+        revisionAfter: after
+      });
+    }
+  }
+
+  for (const request of programCycle.slotBodies ?? []) {
+    const { sourceProgramPath, ...effect } = request;
+    const result = await applySlotBodyEffect({
+      atoms,
+      effect,
+      authorize: async ({ path: targetPath }) => {
+        const match = walkAtoms(atoms).find((candidate) => candidate.path.join('/') === targetPath);
+        if (!match) return { decision: 'deny' };
+        return accessController.authorize(match, 'write', 'children');
+      }
+    });
+    if (result.error) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+        result.error.code ?? 'PROGRAM_SLOT_BODY_REJECTED',
+        result.error.message,
+        { program: sourceProgramPath, ...(result.error.details ?? {}) }
+      )]);
+    }
+    try {
+      projectAtomContext(result.atoms, { rootName: path.basename(contextFile) });
+    } catch (error) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+        error.code ?? 'PROGRAM_SLOT_BODY_INVALID_GRAPH',
+        error.message,
+        { program: sourceProgramPath }
+      )]);
+    }
+    const before = revisionOf(atoms);
+    atoms = result.atoms;
+    const after = revisionOf(atoms);
+    if (before !== after) {
+      programChanged = true;
+      programTransformLogs.push({
+        id: crypto.randomUUID(),
+        operation: `slot-body-${effect.action}`,
+        source: effect,
+        receipt: result.receipt,
         revisionBefore: before,
         revisionAfter: after
       });
@@ -748,7 +811,10 @@ export async function executeAtomLanguage(options = {}) {
           targetPath: message.sourceProgramPath,
           operation: 'read',
           field: 'messages',
-          agentPath: interaction.agent?.path ?? null
+          agentPath: interaction.agent?.path ?? null,
+          agentTypes: graphTypesAtPath(reconciledAtoms, interaction.agent?.path),
+          targetTypes: graphTypesAtPath(reconciledAtoms, message.sourceProgramPath),
+          action: 'explore'
         }).decision === 'allow')
         .map((message) => ({ interactionId: interaction.id, ...message })));
 
@@ -780,7 +846,7 @@ export async function executeAtomLanguage(options = {}) {
           createNew || transformChangesStructure(item)
         )).length
       });
-      if (compiledRequests.length === 0) {
+      if (compiledRequests.length === 0 && (cycle.slotBodies?.length ?? 0) === 0) {
         return {
           atoms: reconciledAtoms,
           lockIndex: finalLockIndex,
@@ -874,6 +940,28 @@ export async function executeAtomLanguage(options = {}) {
       if (application.failed) {
         application = await applyCompiled(reconciledAtoms, false, true);
       }
+      const appliedSlotBodies = [];
+      for (const request of cycle.slotBodies ?? []) {
+        const { sourceProgramPath, ...effect } = request;
+        const slotResult = await applySlotBodyEffect({
+          atoms: application.atoms,
+          effect,
+          authorize: async ({ path: targetPath }) => {
+            const match = walkAtoms(application.atoms)
+              .find((candidate) => candidate.path.join('/') === targetPath);
+            if (!match) return { decision: 'deny' };
+            return cycleAccessController.authorize(match, 'write', 'children');
+          }
+        });
+        if (slotResult.error) {
+          throw Object.assign(new Error(slotResult.error.message), {
+            code: slotResult.error.code ?? 'PROGRAM_SLOT_BODY_REJECTED',
+            details: { program: sourceProgramPath, ...(slotResult.error.details ?? {}) }
+          });
+        }
+        application.atoms = slotResult.atoms;
+        appliedSlotBodies.push({ sourceProgramPath, effect, receipt: slotResult.receipt });
+      }
       const after = revisionOf(application.atoms);
       performanceTrace('program-reconcile-apply', {
         pass,
@@ -900,11 +988,24 @@ export async function executeAtomLanguage(options = {}) {
             revisionAfter: after
           });
         }
+        for (const entry of appliedSlotBodies) {
+          transformLogs.push({
+            id: crypto.randomUUID(),
+            operation: `slot-body-${entry.effect.action}`,
+            source: entry.effect,
+            receipt: entry.receipt,
+            revisionBefore: before,
+            revisionAfter: after
+          });
+        }
         const triggeredNodes = [...new Set(application.applied.flatMap(({ transformed }) => ([
           transformed.sourcePath,
           transformed.resultPath,
           transformed.resultName
-        ])).filter(Boolean))];
+        ])).concat(appliedSlotBodies.flatMap(({ receipt }) => ([
+          receipt?.body,
+          receipt?.target
+        ]))).filter(Boolean))];
         pendingTriggerEvent = triggeredNodes.length
           ? { mode: 'transform', nodes: triggeredNodes }
           : null;

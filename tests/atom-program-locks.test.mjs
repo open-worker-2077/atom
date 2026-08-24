@@ -8,10 +8,10 @@ import {
 } from '../work-engine/atom-language/program-locks.mjs';
 
 const records = [
-  { ref: 'r-target', path: '推进流/任务A', types: [] },
+  { ref: 'r-target', path: '推进流/任务A', types: ['槽例', '待处理'] },
   { ref: 'r-program', path: '冻结程序', types: ['program'] },
-  { ref: 'r-allowed', path: '推进流/允许窗口', types: ['agent'] },
-  { ref: 'r-denied', path: '推进流/其他窗口', types: ['agent'] }
+  { ref: 'r-allowed', path: '推进流/允许窗口', types: ['agent', '研发'] },
+  { ref: 'r-denied', path: '推进流/其他窗口', types: ['agent', '执行'] }
 ];
 
 test('field-specific Program locks restrict only the requested Atom fields', () => {
@@ -71,6 +71,55 @@ test('an allowed Agent window bypasses only its matching Program lock', () => {
     lockIndex: index, targetPath: '推进流/任务A', operation: 'read', field: 'detail',
     agentPath: '推进流/其他窗口'
   }).decision, 'truncate');
+});
+
+test('window Graph types admit a class without matching a concrete path or name', () => {
+  const index = buildProgramLockIndex({
+    revision: 'rev-types', records,
+    results: [{
+      targets: { refs: ['r-target'] }, mode: 'write', fields: ['detail'],
+      protect: { atom: true, messages: false },
+      allowed_windows: { types: { all: ['agent'], any: ['研发', '总控'], none: ['执行'] } },
+      sourceProgramRef: 'r-program', sourceProgramPath: '冻结程序'
+    }]
+  });
+
+  assert.equal(authorizeProgramLock({
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'detail',
+    agentPath: '任意新路径', agentTypes: ['agent', '研发'], targetTypes: ['槽例', '待处理'], action: 'transform'
+  }).decision, 'allow');
+  assert.equal(authorizeProgramLock({
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'detail',
+    agentPath: '推进流/其他窗口', agentTypes: ['agent', '执行'], targetTypes: ['槽例', '待处理'], action: 'transform'
+  }).decision, 'deny');
+});
+
+test('target state and interaction action independently decide whether a lock is active', () => {
+  const index = buildProgramLockIndex({
+    revision: 'rev-conditions', records,
+    results: [{
+      targets: { refs: ['r-target'] }, mode: 'read_write', fields: ['detail'],
+      protect: { atom: true, messages: false },
+      when: {
+        target_types: { all: ['槽例'], any: ['待处理'] },
+        actions: ['transform']
+      },
+      sourceProgramRef: 'r-program', sourceProgramPath: '冻结程序'
+    }]
+  });
+
+  assert.equal(authorizeProgramLock({
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'detail',
+    targetTypes: ['槽例', '待处理'], action: 'transform'
+  }).decision, 'deny');
+  assert.equal(authorizeProgramLock({
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'read', field: 'detail',
+    targetTypes: ['槽例', '待处理'], action: 'explore'
+  }).decision, 'allow');
+  assert.equal(authorizeProgramLock({
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'detail',
+    targetTypes: ['槽例', '已完成'], action: 'transform'
+  }).decision, 'allow');
 });
 
 test('targeted Program refresh preserves locks emitted by Programs that did not run', () => {
