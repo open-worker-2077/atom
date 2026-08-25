@@ -6,14 +6,14 @@
 
 - **BREAKING**：槽体从“槽模／槽例／空槽例”改为“槽模／`print@program`／槽例容器”；不再要求或接受物理 `空槽例` 作为打印母版，旧空槽例机制由新封装流程替代。
 - 使用方先建立一棵普通、可单次自运行的候选槽模 DataFlow；上层 Program 调用 `slot_body()` 封装后，内核原子保留同一份逻辑为 `槽模`，生成可见且可审计的 print 计划与空的槽例容器。
-- print 计划覆盖全部普通槽、嵌套 contain、support 关系、类型／描述元数据和默认料；打印复制所有槽但不复制共享 Program，也不硬编码输入／输出角色或限制可填写槽。
+- print 计划覆盖全部抽象槽、嵌套 contain、support 关系、类型及说明／契约元数据；打印只复制槽结构，不生成默认料。槽的 `detail`／`situation` 是槽契约，不是料。
 - 为共享 Program 增加 `./…` 当前域相对选择器：研发态绑定候选槽模，实例态绑定本次槽例；禁止以绝对实例路径冒充相对域，禁止越过嵌套槽体边界。
 - 实例事件按“所属槽例 → 相对槽角色 → 槽模局部 support 计划 → 条件命中 → 同槽例 Program”定向调度，不扫描全部槽例或无关世界。
-- 同一槽模重新封装时生成新修订 print 计划，局部同步全部所属槽例并重算派生计算；默认料使用旧默认／实例当前值／新默认三方比较，保留并报告个性料。
-- 大规模同步可分批提交；每个槽例公开采用的槽模修订，未完成批次必须返回未完成状态，不得宣称整体同步成功。
+- 同一槽模重新封装时生成新修订 print 计划，并在同一调用内同步全部所属槽例、更新共享 Program 引用和重算派生计算；不提供批次、游标或续跑 API。
+- 槽例中，带 `槽模角色` 映射的节点是抽象槽；槽下不带角色映射的普通 Thing 子树是实例本地具体料。重新封装逐字节保全这些料子树；删除仍含料的槽以精确路径冲突并整次回滚。
 - 槽体效果继续在 Program 完成后进入锁、世界修订、Graph 校验和中央原子提交；任一失败不留下半份封装、实例或同步结果。
 - Help 与函数注册表公开从候选槽模研发、封装、打印、填写、触发计算、重新封装到回读的完整契约，并保留“只读 exact Explore 不重放无关 Program”的回归门禁。
-- v1 明确不提供跨槽例引用、外部共享资料或 PowerPivot 式 `FILTER`／`SUM` 聚合；thing／situation／contain／support 的权威表示由独立 Graph 迁移负责，本变更只消费语义适配层。
+- v1 明确不提供跨槽例引用、外部共享资料直读或 PowerPivot 式 `FILTER`／`SUM` 聚合；外部编排必须先把变量物化为当前槽例槽下的本地料 Thing，再触发该槽例。thing／situation／contain／support 的权威表示由独立 Graph 迁移负责，本变更只消费语义适配层。
 
 ## Capabilities
 
@@ -21,7 +21,7 @@
 
 - `slot-body-packaging`: 候选 DataFlow 封装、可见 print 计划、无空槽例打印和共享 Program 契约。
 - `slot-relative-execution`: 当前域相对选择、scope 绑定、嵌套边界与局部 support 触发契约。
-- `slot-body-revision-sync`: 槽模修订、三方默认料合并、分批同步和实例派生重算契约。
+- `slot-body-revision-sync`: 槽模修订、全实例结构覆盖、本地料守恒和实例派生重算契约。
 - `slot-body-operations`: 槽体事务、错误回执、Help、无关 Program 隔离及 Graph 语义适配边界。
 
 ### Modified Capabilities

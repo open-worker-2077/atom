@@ -35,7 +35,7 @@ function find(atoms, selector) {
 function world() {
   const calculate = [
     'def main(arguments):',
-    '    rows = explore({"name":"./输入","detail$full":True})',
+    '    rows = explore({"name":"./输入/变量料","detail$full":True})',
     '    transform({"name":"./输出","detail.rep." + rows[0].detail:None})',
     '    return {"computed":True}'
   ].join('\n');
@@ -46,9 +46,9 @@ function world() {
     atom('研发窗口', '', [], [], ['agent']),
     atom('订单槽体', '', [
       atom('候选流', '', [
-        atom('输入', '默认', [], [{ verb: '触发计算', object: '计算' }]),
-        atom('输出', '未计算'),
-        atom('备注', '无关'),
+        atom('输入', '输入槽契约', [], [{ verb: '触发计算', object: '计算' }]),
+        atom('输出', '输出槽契约'),
+        atom('备注', '备注槽契约'),
         atom('计算', calculate, [], [], ['program'])
       ])
     ]),
@@ -94,22 +94,28 @@ test('generated print Program seals and prints without a blank template in centr
   assert.equal(find(committed, 'Root/订单槽体/槽例/订单001/计算'), null);
 });
 
-test('one instance support event runs the shared Program only in its owning scope', async (t) => {
+test('outside orchestration materializes a local variable Thing before triggering only its owning instance', async (t) => {
   const runtime = await setup(t);
   const scheduler = createProgramRuntimeScheduler();
   await run(runtime, 'transform {"name.run.":"Root/封装"}', scheduler);
   await run(runtime, 'transform {"name.run.":"Root/打印001"}', scheduler);
   await run(runtime, 'transform {"name.run.":"Root/打印002"}', scheduler);
 
+  const materialized = await run(
+    runtime,
+    'transform new {"name":"Root/订单槽体/槽例/订单001/输入/变量料","detail":"实例一","children":[],"partners":[]}',
+    scheduler
+  );
+  assert.equal(materialized.ok, true, JSON.stringify(materialized.errors));
   const changed = await run(
     runtime,
-    'transform {"name":"Root/订单槽体/槽例/订单001/输入","detail.rep.实例一"}',
+    'transform {"name":"Root/订单槽体/槽例/订单001/输入","detail.rep.输入槽契约"}',
     scheduler
   );
   assert.equal(changed.ok, true, JSON.stringify(changed.errors));
   let committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(find(committed, 'Root/订单槽体/槽例/订单001/输出').detail, '实例一');
-  assert.equal(find(committed, 'Root/订单槽体/槽例/订单002/输出').detail, '未计算');
+  assert.equal(find(committed, 'Root/订单槽体/槽例/订单002/输出').detail, '输出槽契约');
 
   const unrelated = await run(
     runtime,
@@ -118,7 +124,7 @@ test('one instance support event runs the shared Program only in its owning scop
   );
   assert.equal(unrelated.ok, true, JSON.stringify(unrelated.errors));
   committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
-  assert.equal(find(committed, 'Root/订单槽体/槽例/订单002/输出').detail, '未计算');
+  assert.equal(find(committed, 'Root/订单槽体/槽例/订单002/输出').detail, '输出槽契约');
 });
 
 test('re-seal recomputes every synchronized instance with the new shared Program in the same commit', async (t) => {
@@ -127,8 +133,10 @@ test('re-seal recomputes every synchronized instance with the new shared Program
   await run(runtime, 'transform {"name.run.":"Root/封装"}', scheduler);
   await run(runtime, 'transform {"name.run.":"Root/打印001"}', scheduler);
   await run(runtime, 'transform {"name.run.":"Root/打印002"}', scheduler);
-  await run(runtime, 'transform {"name":"Root/订单槽体/槽例/订单001/输入","detail.rep.一"}', scheduler);
-  await run(runtime, 'transform {"name":"Root/订单槽体/槽例/订单002/输入","detail.rep.二"}', scheduler);
+  await run(runtime, 'transform new {"name":"Root/订单槽体/槽例/订单001/输入/变量料","detail":"一","children":[],"partners":[]}', scheduler);
+  await run(runtime, 'transform new {"name":"Root/订单槽体/槽例/订单002/输入/变量料","detail":"二","children":[],"partners":[]}', scheduler);
+  await run(runtime, 'transform {"name":"Root/订单槽体/槽例/订单001/输入","detail.rep.输入槽契约"}', scheduler);
+  await run(runtime, 'transform {"name":"Root/订单槽体/槽例/订单002/输入","detail.rep.输入槽契约"}', scheduler);
   await run(runtime, 'transform {"name":"Root/订单槽体/槽例/订单001/输出","detail.rep.陈旧一"}', scheduler);
   await run(runtime, 'transform {"name":"Root/订单槽体/槽例/订单002/输出","detail.rep.陈旧二"}', scheduler);
 

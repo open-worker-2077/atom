@@ -56,6 +56,16 @@ test('slot_body emits a revision-bound deferred print effect once and cached cyc
   assert.deepEqual(second.slotBodies, []);
 });
 
+test('slot_body seal rejects retired limit and cursor arguments inside Program evaluation', async () => {
+  for (const extra of ["'limit':1", "'cursor':'retired'"]) {
+    const world = [atom('程序', `slot_body({'action':'seal','body':'订单槽体',${extra}})`, [], 'program')];
+    await assert.rejects(
+      createProgramRuntimeScheduler().refresh(world),
+      { code: 'INVALID_SLOT_BODY_EFFECT' }
+    );
+  }
+});
+
 test('Program world functions require one JSON object root argument', async () => {
   const world = [atom('程序', "message(['not', 'an', 'object'])", [], 'program')];
   const scheduler = createProgramRuntimeScheduler();

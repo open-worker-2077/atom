@@ -58,14 +58,14 @@ function fixture() {
     ['program'],
     '共享源码'
   );
-  const candidate = atom('订单候选流', '订单默认料', [
-    atom('客户', '默认客户', [
-      atom('地址', '默认地址', [
-        atom('城市', '上海', [], [], ['text'], '城市说明')
+  const candidate = atom('订单候选流', '订单槽模契约', [
+    atom('客户', '客户槽契约', [
+      atom('地址', '地址槽契约', [
+        atom('城市', '城市槽契约', [], [], ['text'], '城市说明')
       ], [], ['group'], '地址说明')
     ], [{ verb: '推支', object: '金额' }], ['text'], '客户说明'),
-    atom('金额', '100', [], [{ verb: '计算', object: '共享计算' }], ['number'], '金额说明'),
-    atom('业务任意槽', '任意默认料', [], [], ['custom'], '非输入输出角色'),
+    atom('金额', '金额槽契约', [], [{ verb: '计算', object: '共享计算' }], ['number'], '金额说明'),
+    atom('业务任意槽', '任意槽契约', [], [], ['custom'], '非输入输出角色'),
     calculate
   ], [], ['dataflow'], '普通候选槽模');
   return [atom('订单槽体', '', [candidate])];
@@ -138,8 +138,9 @@ test('seal stores a deterministic complete canonical plan in the visible print P
     name: '城市',
     types: ['text'],
     description: '城市说明',
-    default_detail: '上海'
+    contract_detail: '城市槽契约'
   });
+  assert.equal(JSON.stringify(plan).includes('default_detail'), false);
   assert.deepEqual(plan.support.map(({ verb, source_path, target_path }) => (
     { verb, source_path, target_path }
   )), [
@@ -153,17 +154,20 @@ test('seal stores a deterministic complete canonical plan in the visible print P
   assert.equal(field(find(repeated.atoms, '订单槽体/print/修订'), 'children').length, 1);
 });
 
-test('current print plan directly creates a nested ordinary example with all slots, defaults, metadata and support', async () => {
+test('current print plan creates contract-bearing mapped slots without default material', async () => {
   const sealed = await seal();
   const printed = await print(sealed.atoms, '订单001');
 
   assert.equal(printed.error, undefined);
   assert.equal(printed.receipt.target, '订单槽体/槽例/订单001');
   assert.equal(find(printed.atoms, '订单槽体/槽例/订单001/共享计算'), null);
-  assert.equal(field(find(printed.atoms, '订单槽体/槽例/订单001/客户/地址/城市'), 'detail'), '上海');
+  assert.equal(field(find(printed.atoms, '订单槽体/槽例/订单001/客户/地址/城市'), 'detail'), '城市槽契约');
+  assert.deepEqual(field(find(printed.atoms, '订单槽体/槽例/订单001/客户/地址/城市'), 'children'), []);
   assert.deepEqual(types(find(printed.atoms, '订单槽体/槽例/订单001/客户')), ['text']);
   assert.equal(description(find(printed.atoms, '订单槽体/槽例/订单001/客户')), '客户说明');
-  assert.equal(field(find(printed.atoms, '订单槽体/槽例/订单001/业务任意槽'), 'detail'), '任意默认料');
+  assert.equal(field(find(printed.atoms, '订单槽体/槽例/订单001/业务任意槽'), 'detail'), '任意槽契约');
+  assert.deepEqual(field(find(printed.atoms, '订单槽体/槽例/订单001/业务任意槽'), 'children'), []);
+  assert.match(relation(find(printed.atoms, '订单槽体/槽例/订单001/业务任意槽'), '槽模角色'), /订单槽体\/print\/角色\//u);
   assert.equal(
     relation(find(printed.atoms, '订单槽体/槽例/订单001/客户'), '推支'),
     '订单槽体/槽例/订单001/金额'

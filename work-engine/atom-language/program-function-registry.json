@@ -43,9 +43,7 @@
             "action": { "enum": ["seal", "print"] },
             "body": { "type": "string", "format": "exact-atom-path" },
             "name": { "type": "string", "format": "single-atom-name", "requiredWhen": { "action": "print" } },
-            "revision": { "type": "string", "format": "sha256-revision", "requiredWhen": { "action": "print" } },
-            "limit": { "type": "integer", "minimum": 1, "allowedWhen": { "action": "seal" } },
-            "cursor": { "type": "string", "allowedWhen": { "action": "seal" } }
+            "revision": { "type": "string", "format": "sha256-revision", "requiredWhen": { "action": "print" } }
           }
         },
         "development": {
@@ -57,14 +55,15 @@
           "sealedChildren": ["槽模", "print", "槽例"],
           "physicalBlankExample": "forbidden",
           "sharedPrograms": "槽模-only",
-          "visiblePlan": "print@program plus immutable print/修订 records"
+          "visiblePlan": "print@program plus immutable print/修订 records",
+          "material": "unmapped-Thing-subtree-below-mapped-slot",
+          "defaultMaterial": "forbidden"
         },
         "print": { "invoke": "use_program exact body/print with arguments.name" },
         "revisionSync": {
           "trigger": "seal same body again",
-          "merge": "old-model-default/current-instance/new-model-default",
-          "personalizedMaterial": "preserve-and-report",
-          "batch": ["limit", "cursor"],
+          "mode": "all-instances-one-seal",
+          "material": "byte-preserved",
           "adoptionEvidence": "采用槽模修订 relation per instance",
           "derivedRecompute": "all synchronized instances in candidate transaction"
         },
@@ -78,9 +77,7 @@
           "SLOT_BODY_NOT_SEALED",
           "SLOT_BODY_EXAMPLE_EXISTS",
           "SLOT_PRINT_PLAN_STALE",
-          "INVALID_SLOT_SYNC_LIMIT",
-          "SLOT_SYNC_CURSOR_INVALID",
-          "SLOT_SYNC_CURSOR_STALE",
+          "SLOT_MATERIAL_CONTAINMENT_CONFLICT",
           "SLOT_INSTANCE_REVISION_MISSING",
           "SLOT_SCOPE_ROOT_UNBOUND",
           "SLOT_RELATIVE_SELECTOR_REQUIRED",

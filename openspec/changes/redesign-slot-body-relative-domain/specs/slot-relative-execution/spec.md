@@ -50,7 +50,7 @@
 - **THEN** 系统返回 `SLOT_SCOPE_ROLE_MISMATCH`，不猜测同名角色或跨实例执行
 
 ### Requirement: v1 计算不探索当前槽例域外数据
-v1 相对域计算 SHALL 只读取和改造当前槽例普通槽，并可调用同一槽模中的共享 Program 代码；被调用 Program SHALL 继承同一 `scope_root`。系统 SHALL NOT 提供跨槽例选择、外部共享资料读取或 PowerPivot 式 `FILTER`／`SUM` 聚合。
+v1 相对域计算 SHALL 只读取和改造当前槽例内的映射槽与本地料 Thing，并可调用同一槽模中的共享 Program 代码；被调用 Program SHALL 继承同一 `scope_root`。系统 SHALL NOT 提供跨槽例选择、外部共享资料直读或 PowerPivot 式 `FILTER`／`SUM` 聚合。外部变量需要参与计算时，槽体外编排 SHALL 先将其值物化为目标槽例指定槽下的未映射本地料 Thing，再触发该槽例；槽模 Program 仍仅使用 `./` 相对选择器读取。
 
 #### Scenario: 被复用 Program 继承当前实例域
 - **WHEN** 一个共享 Program 通过 `use_program()` 调用同槽模中的另一个 Program
@@ -59,3 +59,7 @@ v1 相对域计算 SHALL 只读取和改造当前槽例普通槽，并可调用�
 #### Scenario: 跨槽例聚合请求被拒绝
 - **WHEN** Program 试图从当前槽例枚举兄弟槽例或提交跨实例聚合选择器
 - **THEN** 系统返回 `SLOT_SCOPE_BOUNDARY_CROSSING` 或 `SLOT_RELATIVE_SELECTOR_REQUIRED`，不提供隐式世界扫描
+
+#### Scenario: 外部变量先本地物化再触发
+- **WHEN** 槽体外编排把变量值写成槽例 A 指定槽下的本地料 Thing，随后触发槽例 A 的映射来源槽
+- **THEN** 共享 Program 以 `./` 读取该本地料并只计算槽例 A，槽例 B 不执行且槽模不主动读取域外变量节点

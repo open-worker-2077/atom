@@ -1,39 +1,39 @@
-## 1. Baseline and Red Contracts
+## 1. Existing Foundation at cdc763d
 
-- [x] 1.1 Install the locked workspace dependencies, rerun the common-baseline full suite, and record any pre-existing failure separately from this change.
-- [x] 1.2 Run GitNexus upstream impact analysis for every existing symbol to be edited; report HIGH/CRITICAL blast radius before editing and keep the affected processes bounded to Atom runtime, query, scheduling and Help paths.
-- [x] 1.3 Add failing pure runtime tests for candidate DataFlow seal, rejection of the physical blank layout, deterministic visible print plans, complete nested slot/default/metadata/support capture, direct no-blank print, duplicate rejection and shared Program non-copy.
-- [x] 1.4 Add failing scoped Program tests for `.`/`./…`, development `scope_root`, instance binding, nested contain, boundary rejection, missing/ambiguous roles, absolute-selector rejection, inherited `use_program()` scope and two-instance isolation.
-- [x] 1.5 Add failing integration tests for precise local support routing, non-matching events, unrelated Program creation, cold projection/restart and exact Explore without replaying any old print effect.
+- [x] 1.1 Establish the common-baseline test result and run impact analysis before editing shared runtime, query, scheduler and Help symbols.
+- [x] 1.2 Replace the physical `空槽例` layout with candidate DataFlow seal, a visible deterministic `print@program`, stable role/revision evidence and direct instance printing.
+- [x] 1.3 Implement strict `.`／`./…` selectors, runtime-owned development and instance scopes, nested-domain rejection and inherited `use_program()` scope.
+- [x] 1.4 Route one mapped instance event through only its revision-local support plan, deduplicate shared Programs and preserve exact Explore/unrelated-Program isolation.
+- [x] 1.5 Commit the initial implementation locally as `cdc763d` without push or merge.
 
-## 2. Plan-based Slot Body Packaging
+## 2. Formal v1 Contract Correction
 
-- [x] 2.1 Introduce the contain/support semantic adapter for current Graph data, exclude reserved system relations from support, and keep the interface replaceable by the parallel four-axis branch.
-- [x] 2.2 Replace blank-layout sealing with the atomic candidate-child-to-`槽模` transition and generate the three direct body parts without copying the candidate logic.
-- [x] 2.3 Implement stable visible role records, canonical plan compilation, deterministic revision hashing, generated `print@program` source and immutable adopted revision records.
-- [x] 2.4 Implement authenticated current-plan printing of every ordinary role with nested contain, support, types, descriptions and defaults, while retaining one exact shared Program set in the model.
-- [x] 2.5 Remove the old blank-copy/mapping public law, validate legacy layouts with `INVALID_SLOT_BODY_LAYOUT`, and keep unrelated copy/template/form/work-order/trigger/lock calls compatible.
+- [x] 2.1 Revise proposal, four delta specs, design and tasks to define abstract mapped slots, contract-only `detail`／`situation`, unmapped local material Thing subtrees, one-call reseal and outside-variable local materialization.
+- [x] 2.2 Add red tests proving slot contract metadata never becomes material, the visible plan has no `default_detail`, and a newly printed instance contains no material Thing.
+- [x] 2.3 Add red tests with two instances containing distinct nested material subtrees; capture and compare complete material Graph bytes before and after slot rename/move/add/support reseal.
+- [x] 2.4 Add red tests proving an added slot appears everywhere, deletion of an empty slot succeeds, and deletion of any slot containing local material returns `SLOT_MATERIAL_CONTAINMENT_CONFLICT` with exact paths and whole-transaction rollback.
+- [x] 2.5 Add red Help, registry, Program-validation and runtime tests proving `limit`, `cursor`, `next_cursor` and related continuation errors are absent or rejected.
+- [x] 2.6 Add a red integration test in which outside orchestration materializes a variable as an unmapped local Thing and a subsequent mapped-slot event triggers only that instance.
 
-## 3. Relative Scope and Local Execution
+## 3. Implementation
 
-- [x] 3.1 Implement strict relative selector parsing and engine-side contain resolution with the specified not-found, ambiguity, boundary, unbound-scope and absolute-selector errors.
-- [x] 3.2 Extend explicit development `.run.<EXACT_SCOPE_ROOT>` with a validated candidate scope; pass runtime-owned scope through Python world calls, diagnostics and `use_program()` without changing shared Program source or adding a persistent Graph key.
-- [x] 3.3 Normalize relative Transform effects only inside the candidate transaction, reject out-of-scope targets, and key dependency/result caches by Program, scope root and adopted revision.
-- [x] 3.4 Compile revision-local support reachability and maintain an incremental instance-prefix index that maps one changed instance node to one relative role without enumerating sibling instances or the world.
-- [x] 3.5 Route each matching event to each reachable shared Program once in deterministic order with the owning instance scope, and reject nested slot-body effects or any cross-instance/external-data access.
+- [x] 3.1 Replace `default_detail` with explicit slot-contract metadata in canonical plans and printers; never synthesize material nodes or copy shared Program nodes.
+- [x] 3.2 Replace three-way detail merging and customized-role detachment with stable mapped-slot synchronization plus byte-preserving detach/reattach of opaque unmapped material subtrees.
+- [x] 3.3 Detect material below deleted mapped roles, return exact `SLOT_MATERIAL_CONTAINMENT_CONFLICT`, and preserve candidate-world atomic rollback.
+- [x] 3.4 Remove public and internal reseal batching inputs, cursors, continuation receipts, registry entries, Help text and obsolete error codes; make one `seal` process all body instances.
+- [x] 3.5 Keep normal support events instance-local, preserve Program de-duplication and scope rejection, and support local-variable material reads solely through existing `./` resolution.
 
-## 4. Revision Sync and Automated Verification
+## 4. Automated Verification
 
-- [x] 4.1 Add failing tests for model add/rename/move/type/description/support changes, deleted default-only roles, preserved personalized removals and byte-exact old/current/new default merging.
-- [x] 4.2 Implement re-seal plan replacement, stable-role structure merge, three-way default merge, `preserved_customized` receipts, adopted-revision transitions and safe retirement of unreferenced old plans.
-- [x] 4.3 Implement deterministic batch limits/cursors, stale-cursor rejection, per-batch atomicity and candidate-world derived recomputation for every synchronized instance.
-- [x] 4.4 Update `atom.cmd --help` and the shared function registry with the complete candidate-development, seal, plan-readback, print, fill, trigger, re-seal, continuation, revision and error contract; prove a fixture-free Help-only user path.
-- [x] 4.5 Run targeted and complete automated suites, strict OpenSpec validation, runtime scans for forbidden ESG/business constants, GitNexus `detect_changes()` against the baseline, and an independent diff review against every delta requirement.
+- [x] 4.1 Run focused slot plan, reseal, scoped Program, integration, scheduler, registry and Help tests; record red-to-green evidence for each corrected contract.
+- [x] 4.2 Run the complete automated suite and record totals; do not treat focused or partial passing tests as delivery.
+- [x] 4.3 Run strict OpenSpec validation and scan runtime, Help, registry, specs and tests for forbidden default-material and batch-cursor contract remnants.
+- [x] 4.4 Run GitNexus change detection against the common baseline, independently review the diff against every requirement, and resolve all in-scope findings.
+- [x] 4.5 Create a new follow-up local commit on top of `cdc763d`, containing only authorized source, tests and OpenSpec artifacts; do not push or merge.
 
-## 5. Delivery Gates
+## 5. External Delivery Gates
 
-- [x] 5.1 Create one coherent local commit containing only this change's source, tests and OpenSpec artifacts; record the commit, baseline, test totals, strict validation and rollback point without pushing.
-- [ ] 5.2 Total control schedules a real user-task trial with real ESG activity material in Atom `test`, proving positive seal/print/fill/trigger/re-seal/readback and negative missing-relation/over-scope cases without modifying ESG files or formal nodes.
-- [ ] 5.3 A human reviewer audits the visible print plan, per-instance revision evidence, personalized-material report, Help-only workflow, real-trial evidence and the claim boundary; unresolved findings return to implementation.
-- [ ] 5.4 Total control merges the local commit with `feature/graph-four-axis-support`, resolves only the contain/support adapter seam, reruns combined automated and exclusive 4784 acceptance, and records the merge result.
-- [ ] 5.5 Total control pushes only after merge, human review and real-use gates pass; until then OpenSpec remains incomplete and no local or partial test result may be presented as delivered.
+- [ ] 5.1 Total control schedules a real user-task trial with real ESG activity material in Atom `test`, proving positive seal/print/local-material/trigger/reseal/readback and negative material-conflict/over-scope cases without modifying ESG files or formal nodes.
+- [ ] 5.2 A human reviewer audits the visible plan, no-default-material evidence, per-instance revision evidence, byte-preserved material, Help-only workflow and real-trial evidence; unresolved findings return to implementation.
+- [ ] 5.3 Total control merges both local commits with `feature/graph-four-axis-support`, resolves only the contain/support adapter seam, and reruns combined automated and exclusive 4784 acceptance.
+- [ ] 5.4 Total control pushes only after merge, human review and real-use gates pass; until then OpenSpec remains incomplete and no local result may be presented as final delivery.

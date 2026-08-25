@@ -178,11 +178,17 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   assert.deepEqual(slotBody.contract.layout.sealedChildren, ['槽模', 'print', '槽例']);
   assert.equal(slotBody.contract.layout.physicalBlankExample, 'forbidden');
   assert.equal(slotBody.contract.layout.sharedPrograms, '槽模-only');
-  assert.equal(slotBody.contract.revisionSync.merge, 'old-model-default/current-instance/new-model-default');
-  assert.deepEqual(slotBody.contract.revisionSync.batch, ['limit', 'cursor']);
+  assert.equal(slotBody.contract.layout.material, 'unmapped-Thing-subtree-below-mapped-slot');
+  assert.equal(slotBody.contract.layout.defaultMaterial, 'forbidden');
+  assert.equal(slotBody.contract.revisionSync.mode, 'all-instances-one-seal');
+  assert.equal(slotBody.contract.revisionSync.material, 'byte-preserved');
+  assert.equal(Object.hasOwn(slotBody.contract.revisionSync, 'batch'), false);
+  assert.equal(Object.hasOwn(slotBody.contract.argument.properties, 'limit'), false);
+  assert.equal(Object.hasOwn(slotBody.contract.argument.properties, 'cursor'), false);
   assert.equal(slotBody.contract.transaction, 'central-atomic-commit');
   assert.deepEqual(slotBody.contract.confirmation, ['interaction-receipt', 'exact-explore']);
-  assert.ok(slotBody.contract.errors.includes('SLOT_SYNC_CURSOR_STALE'));
+  assert.ok(slotBody.contract.errors.includes('SLOT_MATERIAL_CONTAINMENT_CONFLICT'));
+  assert.equal(slotBody.contract.errors.some((code) => code.includes('CURSOR')), false);
   assert.ok(slotBody.contract.errors.includes('SLOT_SCOPE_BOUNDARY_CROSSING'));
 
   const stdout = output();
@@ -193,8 +199,9 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   assert.match(stdout.value(), /槽模／print@program／槽例/u);
   assert.match(stdout.value(), /use_program[\s\S]*revision/u);
   assert.match(stdout.value(), /\.\/相对contain路径[\s\S]*当前槽例域/u);
-  assert.match(stdout.value(), /三方比较[\s\S]*preserved_customized/u);
-  assert.match(stdout.value(), /SLOT_SYNC_CURSOR_STALE[\s\S]*不产生半份槽例/u);
+  assert.match(stdout.value(), /本地料 Thing[\s\S]*逐字节/u);
+  assert.match(stdout.value(), /SLOT_MATERIAL_CONTAINMENT_CONFLICT[\s\S]*不产生半份槽例/u);
+  assert.doesNotMatch(stdout.value(), /next_cursor|SLOT_SYNC_CURSOR|三方比较/u);
 });
 
 test('public registry exposes the complete window-aware Program lock contract', async () => {

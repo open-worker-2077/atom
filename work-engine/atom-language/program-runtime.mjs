@@ -463,20 +463,15 @@ function validateResult(result, records, program, scopeRoot = null) {
     const required = entry.action === 'print'
       ? ['action', 'body', 'name', 'revision']
       : ['action', 'body'];
-    const allowed = entry.action === 'print'
-      ? required
-      : [...required, 'cursor', 'limit'];
+    const allowed = required;
     if (!['seal', 'print'].includes(entry.action)
       || typeof entry.body !== 'string' || !entry.body.trim()
       || keys.some((key) => !allowed.includes(key))
       || required.some((key) => !keys.includes(key))
-      || (entry.action === 'seal' && entry.limit != null
-        && (!Number.isInteger(entry.limit) || entry.limit <= 0))
-      || (entry.action === 'seal' && entry.cursor != null && typeof entry.cursor !== 'string')
       || (entry.action === 'print'
         && (typeof entry.name !== 'string' || !entry.name.trim() || entry.name.includes('/')
           || typeof entry.revision !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(entry.revision)))) {
-      throw Object.assign(new Error('slot_body() requires seal {action,body,limit?,cursor?} or current-plan print {action,body,name,revision}'), {
+      throw Object.assign(new Error('slot_body() requires seal {action,body} or current-plan print {action,body,name,revision}'), {
         code: 'INVALID_SLOT_BODY_EFFECT'
       });
     }

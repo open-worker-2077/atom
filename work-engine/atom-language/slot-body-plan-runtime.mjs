@@ -141,7 +141,7 @@ function compilePlan(layout) {
       types: [...atomTypes(record.atom)],
       description: atomDescription(record.atom),
       ...(kind === 'slot'
-        ? { default_detail: fieldValue(record.atom, 'detail') ?? '' }
+        ? { contract_detail: fieldValue(record.atom, 'detail') ?? '' }
         : { program_digest: `sha256:${digest(fieldValue(record.atom, 'detail') ?? '')}` })
     };
   });
@@ -273,7 +273,7 @@ function buildInstance(layout, plan, name) {
   for (const role of slots) {
     const node = createAtom({
       name: role.path === '.' ? name : role.name,
-      detail: role.default_detail,
+      detail: role.contract_detail,
       types: role.types,
       description: role.description
     });
@@ -315,65 +315,27 @@ function roleMapForInstance(layout, instance) {
   return result;
 }
 
-function generatedRelationKeys(layout, plan, roleId, instancePath) {
-  const byId = new Map(plan.roles.map((role) => [role.role_id, role]));
-  return new Set(plan.support
-    .filter((edge) => edge.source_role_id === roleId)
-    .map((edge) => {
-      const target = byId.get(edge.target_role_id);
-      return `${edge.verb}\0${roleTargetPath(layout, target, instancePath)}`;
-    }));
-}
-
-function localPartners(layout, plan, roleId, instancePath, node) {
-  const generated = generatedRelationKeys(layout, plan, roleId, instancePath);
-  return (partnersOf(node) ?? []).filter((partner) => (
-    partner.verb !== SLOT_ROLE_VERB
-    && partner.verb !== SLOT_REVISION_VERB
-    && !generated.has(`${partner.verb}\0${partner.object}`)
-  ));
-}
-
-function roleMatchesOldDefault(node, role) {
-  return fieldValue(node, 'detail') === role.default_detail
-    && atomName(node) === role.name
-    && stableStringify(atomTypes(node)) === stableStringify(role.types)
-    && atomDescription(node) === role.description;
-}
-
-function sanitizePreservedSubtree(layout, oldPlan, instancePath, node) {
-  const clone = structuredClone(node);
-  function visit(current) {
-    const roleTarget = relationTarget(current, SLOT_ROLE_VERB);
-    const roleId = typeof roleTarget === 'string' ? roleTarget.split('/').at(-1) : null;
-    const generated = roleId
-      ? generatedRelationKeys(layout, oldPlan, roleId, instancePath)
-      : new Set();
-    replaceStoredField(current, 'partners', (partnersOf(current) ?? []).filter((partner) => (
-      partner.verb !== SLOT_ROLE_VERB
-      && partner.verb !== SLOT_REVISION_VERB
-      && !generated.has(`${partner.verb}\0${partner.object}`)
-    )));
-    for (const child of childrenOf(current) ?? []) visit(child);
-  }
-  visit(clone);
-  return clone;
-}
-
-function removedSubtreeIsCustomized(layout, oldPlan, oldRoleById, oldMap, instancePath, roleId) {
-  const role = oldRoleById.get(roleId);
+function firstLocalMaterial(oldPlan, oldMap, roleId, slotPath) {
   const node = oldMap.get(roleId);
-  if (!role || !node) return false;
-  if (!roleMatchesOldDefault(node, role)) return true;
-  if (localPartners(layout, oldPlan, roleId, instancePath, node).length) return true;
-  const childRoleIds = oldPlan.roles
-    .filter((candidate) => candidate.parent_role_id === roleId && candidate.kind === 'slot')
-    .map((candidate) => candidate.role_id);
-  const mappedChildren = new Set(childRoleIds.map((childId) => oldMap.get(childId)).filter(Boolean));
-  if ((childrenOf(node) ?? []).some((child) => !mappedChildren.has(child))) return true;
-  return childRoleIds.some((childId) => (
-    removedSubtreeIsCustomized(layout, oldPlan, oldRoleById, oldMap, instancePath, childId)
+  if (!node) return null;
+  const childRoles = oldPlan.roles.filter((candidate) => (
+    candidate.kind === 'slot' && candidate.parent_role_id === roleId
   ));
+  const mappedChildren = new Map(childRoles
+    .map((role) => [oldMap.get(role.role_id), role])
+    .filter(([child]) => child));
+  for (const child of childrenOf(node) ?? []) {
+    const childRole = mappedChildren.get(child);
+    if (!childRole) return `${slotPath}/${atomName(child)}`;
+    const nested = firstLocalMaterial(
+      oldPlan,
+      oldMap,
+      childRole.role_id,
+      `${slotPath}/${atomName(child)}`
+    );
+    if (nested) return nested;
+  }
+  return null;
 }
 
 function synchronizeInstance(layout, instance, oldPlan, newPlan, receipt) {
@@ -391,35 +353,19 @@ function synchronizeInstance(layout, instance, oldPlan, newPlan, receipt) {
     const oldNode = oldMap.get(roleId);
     const newNode = rebuiltMap.get(roleId);
     if (!oldRole || !oldNode || !newNode) continue;
-    const currentDetail = fieldValue(oldNode, 'detail');
-    if (currentDetail === oldRole.default_detail) {
-      if (currentDetail !== newRole.default_detail) {
-        receipt.default_updated.push({
-          instance: instanceName,
-          role_id: roleId,
-          old_default: oldRole.default_detail,
-          new_default: newRole.default_detail
-        });
-      }
-    } else {
-      replaceStoredField(newNode, 'detail', currentDetail);
-      receipt.preserved_customized.push({
-        instance: instanceName,
-        role_id: roleId,
-        old_path: oldRole.path,
-        new_path: newRole.path,
-        reason: 'current_differs_from_old_default'
-      });
-    }
-    const locals = localPartners(layout, oldPlan, roleId, instancePath, oldNode);
-    if (locals.length) replaceStoredField(newNode, 'partners', [...partnersOf(newNode), ...structuredClone(locals)]);
-
     const oldChildRoles = new Set(oldPlan.roles
       .filter((candidate) => candidate.parent_role_id === roleId && candidate.kind === 'slot')
       .map((candidate) => oldMap.get(candidate.role_id))
       .filter(Boolean));
     for (const child of childrenOf(oldNode) ?? []) {
-      if (!oldChildRoles.has(child)) childrenOf(newNode).push(structuredClone(child));
+      if (!oldChildRoles.has(child)) {
+        childrenOf(newNode).push(structuredClone(child));
+        receipt.material_preserved.push({
+          instance: instancePath,
+          slot: roleTargetPath(layout, newRole, instancePath),
+          material: `${roleTargetPath(layout, newRole, instancePath)}/${atomName(child)}`
+        });
+      }
     }
   }
 
@@ -429,55 +375,19 @@ function synchronizeInstance(layout, instance, oldPlan, newPlan, receipt) {
   const removedIds = new Set(removed.map((role) => role.role_id));
   for (const role of removed) {
     if (removedIds.has(role.parent_role_id)) continue;
-    if (!removedSubtreeIsCustomized(
-      layout, oldPlan, oldRoleById, oldMap, instancePath, role.role_id
-    )) continue;
-    let parentId = role.parent_role_id;
-    while (parentId && !rebuiltMap.has(parentId)) parentId = oldRoleById.get(parentId)?.parent_role_id;
-    const destination = parentId ? rebuiltMap.get(parentId) : rebuilt;
-    childrenOf(destination).push(sanitizePreservedSubtree(
-      layout, oldPlan, instancePath, oldMap.get(role.role_id)
-    ));
-    receipt.preserved_customized.push({
-      instance: instanceName,
-      role_id: role.role_id,
-      old_path: role.path,
-      new_path: null,
-      reason: 'removed_role_contains_personalized_material'
-    });
-  }
-  return rebuilt;
-}
-
-function cursorInventory(layout) {
-  return digest((childrenOf(layout.examples) ?? []).map(atomName).sort().join('\0'));
-}
-
-function encodeCursor(layout, revision, after) {
-  const payload = {
-    body: layout.bodyPath,
-    revision,
-    after,
-    inventory: cursorInventory(layout)
-  };
-  return Buffer.from(JSON.stringify({ ...payload, checksum: digest(stableStringify(payload)) }))
-    .toString('base64url');
-}
-
-function decodeCursor(layout, effect, revision) {
-  if (effect.cursor == null) return { after: null };
-  try {
-    const parsed = JSON.parse(Buffer.from(effect.cursor, 'base64url').toString('utf8'));
-    const { checksum, ...payload } = parsed;
-    if (checksum !== digest(stableStringify(payload))) throw new Error('checksum');
-    if (payload.body !== layout.bodyPath || payload.revision !== revision
-      || payload.inventory !== cursorInventory(layout) || typeof payload.after !== 'string') {
-      return { error: slotError('SLOT_SYNC_CURSOR_STALE', '槽例同步游标不属于当前槽模修订或实例集合') };
+    const slotPath = roleTargetPath(layout, role, instancePath);
+    const material = firstLocalMaterial(oldPlan, oldMap, role.role_id, slotPath);
+    if (material) {
+      return {
+        error: slotError(
+          'SLOT_MATERIAL_CONTAINMENT_CONFLICT',
+          '待删除映射槽仍包含实例本地料，重封装已回滚',
+          { instance: instancePath, slot: slotPath, material }
+        )
+      };
     }
-    return { after: payload.after };
-  } catch {
-    return { error: slotError('SLOT_SYNC_CURSOR_INVALID', '槽例同步游标无法解析或校验失败') };
   }
+  return { replacement: rebuilt };
 }
 
 function retireUnreferencedPlans(layout, currentRevision) {
@@ -513,20 +423,12 @@ async function seal(atoms, effect, authorize) {
   if (recompiled.error) return recompiled;
   const oldPlan = currentPlan(layout);
   appendRevision(layout, recompiled.plan);
-  const limit = effect.limit == null ? Number.POSITIVE_INFINITY : effect.limit;
-  if (effect.limit != null && (!Number.isInteger(limit) || limit <= 0)) {
-    return { error: slotError('INVALID_SLOT_SYNC_LIMIT', '同步批次 limit 必须是正整数') };
-  }
-  const cursor = decodeCursor(layout, effect, recompiled.plan.revision);
-  if (cursor.error) return cursor;
   const instances = [...(childrenOf(layout.examples) ?? [])].sort((left, right) => (
     atomName(left).localeCompare(atomName(right), 'zh-CN')
   ));
   const pending = instances.filter((instance) => (
     instanceRevision(layout, instance) !== recompiled.plan.revision
-    && (cursor.after == null || atomName(instance).localeCompare(cursor.after, 'zh-CN') > 0)
   ));
-  const selected = pending.slice(0, limit);
   const receipt = {
     action: 'seal',
     body: layout.bodyPath,
@@ -536,11 +438,10 @@ async function seal(atoms, effect, authorize) {
     revision: recompiled.plan.revision,
     previous_revision: oldPlan?.revision ?? null,
     processed: [],
-    preserved_customized: [],
-    default_updated: [],
+    material_preserved: [],
     recompute_targets: []
   };
-  for (const instance of selected) {
+  for (const instance of pending) {
     const name = atomName(instance);
     const decision = await authorize({ path: `${layout.examplesPath}/${name}`, action: 'transform' });
     if (decision?.decision && decision.decision !== 'allow') {
@@ -556,9 +457,10 @@ async function seal(atoms, effect, authorize) {
         revision: adoptedRevision
       }) };
     }
-    const replacement = synchronizeInstance(layout, instance, adoptedPlan, recompiled.plan, receipt);
+    const synchronized = synchronizeInstance(layout, instance, adoptedPlan, recompiled.plan, receipt);
+    if (synchronized.error) return synchronized;
     const position = childrenOf(layout.examples).indexOf(instance);
-    childrenOf(layout.examples)[position] = replacement;
+    childrenOf(layout.examples)[position] = synchronized.replacement;
     receipt.processed.push(name);
     const sourceIds = new Set(recompiled.plan.support.map((edge) => edge.source_role_id));
     for (const role of recompiled.plan.roles) {
@@ -569,19 +471,8 @@ async function seal(atoms, effect, authorize) {
       }
     }
   }
-  const remaining = (childrenOf(layout.examples) ?? []).filter((instance) => (
-    instanceRevision(layout, instance) !== recompiled.plan.revision
-  )).length;
-  const complete = remaining === 0;
-  if (complete) retireUnreferencedPlans(layout, recompiled.plan.revision);
-  const lastProcessed = receipt.processed.at(-1) ?? cursor.after;
-  Object.assign(receipt, {
-    remaining,
-    next_cursor: complete || !lastProcessed
-      ? null
-      : encodeCursor(layout, recompiled.plan.revision, lastProcessed),
-    complete
-  });
+  retireUnreferencedPlans(layout, recompiled.plan.revision);
+  receipt.complete = true;
   return {
     atoms,
     receipt
@@ -643,7 +534,7 @@ export async function applyPlanSlotBodyEffect({
     ? Object.keys(effect)
     : [];
   const allowedKeys = effect?.action === 'seal'
-    ? ['action', 'body', 'cursor', 'limit']
+    ? ['action', 'body']
     : ['action', 'body', 'name', 'revision'];
   if (!effect || typeof effect !== 'object' || Array.isArray(effect)
     || !['seal', 'print'].includes(effect.action)
@@ -733,6 +624,8 @@ export function slotProgramInvocationsForEvent(atoms, triggerEvent) {
     if (!context) continue;
     const source = context.plan.roles.find((role) => role.path === context.relativePath);
     if (!source) {
+      const selected = resolveUnique(atoms, eventPath);
+      if (!selected.error && !relationTarget(selected.match.atom, SLOT_ROLE_VERB)) continue;
       throw Object.assign(new Error('实例事件无法映射到采用修订中的相对槽角色'), {
         code: 'SLOT_SCOPE_ROLE_MISMATCH',
         details: {

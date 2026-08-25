@@ -38,11 +38,11 @@ exact Explore、Help、函数注册表和其他只读投影 SHALL NOT 调度或�
 - **THEN** 新 Program 可正常验证与提交，既有槽例数量不变且旧 print Program 不执行
 
 ### Requirement: Help 公开完整使用链与精确错误
-`atom.cmd --help` 与 Program 函数注册表 SHALL 公开候选槽模试运行、首次封装、print 计划回读、实例打印与填写、相对选择器、support 触发、重新封装、分批继续、修订回读和失败回滚的完整输入、结果与示例。Help SHALL 至少解释本规格中的所有 `SLOT_*`／`INVALID_SLOT_BODY_LAYOUT` 错误，使用方不得需要阅读源码或测试夹具猜测结构。
+`atom.cmd --help` 与 Program 函数注册表 SHALL 公开候选槽模试运行、首次封装、print 计划回读、实例打印、在槽下创建本地料 Thing、外部变量本地物化、相对选择器、support 触发、单次自动重新封装、修订回读和失败回滚的完整输入、结果与示例。`seal` 的公开输入 SHALL 只有 `action` 与 `body`，不得出现 `limit`、`cursor` 或 `next_cursor`。Help SHALL 至少解释本规格中的所有 `SLOT_*`／`INVALID_SLOT_BODY_LAYOUT` 错误，使用方不得需要阅读源码或测试夹具猜测结构。
 
 #### Scenario: 使用方只凭 Help 完成全生命周期
 - **WHEN** 未读源码的使用方读取 Help 和函数注册表
-- **THEN** 它能构造普通候选 DataFlow，完成正向封装／打印／填写／计算／重封装／回读，并能按精确错误完成越域、重名、过期修订和事务失败的负向判断
+- **THEN** 它能构造普通候选 DataFlow，完成正向封装／打印／本地料填写／变量物化／计算／单次重封装／回读，并能按精确错误完成越域、重名、含料删除冲突、过期修订和事务失败的负向判断
 
 ### Requirement: 槽体只消费权威 contain 与 support 语义
 槽体运行时 SHALL 通过 Graph 语义边界读取真实 contain 与有向 support，不新增或重定义 thing／situation／contain／support 持久化轴。当前 Graph 表示与未来四轴迁移 SHALL 通过适配保持同一槽体行为；现有 `.cpy.`、`instantiate()`、`template_catalog()`、`form()`、`work_order()`、普通 Program trigger 和锁契约 SHALL 在未调用新槽体能力时保持兼容。

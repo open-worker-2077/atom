@@ -16,22 +16,26 @@
 - **THEN** 系统以 `INVALID_SLOT_BODY_LAYOUT` 拒绝，不读取空槽例作为权威定义且不部分改造布局
 
 ### Requirement: print Program 显式承载完整生成计划
-系统 SHALL 从封装时槽模的最新事实生成确定性、可回读的 print 计划，并把当前完整计划及其修订标识保存在 `print@program` 的可见 Graph 内容中，而不是只存在运行时缓存。计划 SHALL 枚举全部非 Program 槽角色、嵌套 contain、局部 support 关系、类型、描述元数据和默认料；槽模重新封装时 SHALL 重新生成计划。
+系统 SHALL 从封装时槽模的最新事实生成确定性、可回读的 print 计划，并把当前完整计划及其修订标识保存在 `print@program` 的可见 Graph 内容中，而不是只存在运行时缓存。计划 SHALL 枚举全部非 Program 抽象槽角色、嵌套 contain、局部 support 关系、类型及槽的说明／契约元数据；计划 SHALL NOT 编译 `default_detail` 或任何默认料。槽模重新封装时 SHALL 重新生成计划。
 
 #### Scenario: Help 回读可审计 print 计划
-- **WHEN** 使用方封装一个含嵌套槽、元数据、默认料和 support 推线的槽模并 exact Explore `print@program`
-- **THEN** 返回内容足以逐项核对这些槽角色、contain、support、元数据、默认料和当前修订，不依赖隐藏缓存或测试夹具
+- **WHEN** 使用方封装一个含嵌套槽、槽契约元数据和 support 推线的槽模并 exact Explore `print@program`
+- **THEN** 返回内容足以逐项核对槽角色、contain、support、契约元数据和当前修订，且计划中不存在 `default_detail` 或默认料，不依赖隐藏缓存或测试夹具
 
 #### Scenario: 相同槽模生成稳定计划
 - **WHEN** 槽模事实未变化而重复封装
 - **THEN** 系统生成相同的规范化计划与修订标识，不制造无意义新修订
 
 ### Requirement: print 计划直接生成普通槽例
-使用方 SHALL 通过生成的 `print@program` 提交具名打印；系统 SHALL 从当前计划直接建立完整普通槽例，不经过物理空槽例。打印 SHALL 复制计划中的所有普通槽、嵌套 contain、support 关系、类型、描述元数据和默认料，不得只复制输出槽、按输入／输出角色筛选或限制业务可填写的槽。
+使用方 SHALL 通过生成的 `print@program` 提交具名打印；系统 SHALL 从当前计划直接建立完整普通槽例，不经过物理空槽例。打印 SHALL 复制计划中的所有抽象槽、嵌套 contain、support 关系、类型及槽契约元数据，不得只复制输出槽、按输入／输出角色筛选或限制业务可填写的槽。打印 SHALL NOT 创建任何默认料；槽例中的具体料只能由使用方或外部编排在映射槽下新增为不带 `槽模角色` 的普通 Thing 子树。
 
 #### Scenario: 无空槽例打印嵌套实例
 - **WHEN** 使用方以唯一名称运行 `print@program`
 - **THEN** 系统在 `槽体/槽例/名称` 一次形成计划声明的完整嵌套 Graph，槽例容器中不存在作为母版的 `空槽例`
+
+#### Scenario: 槽契约不是默认料
+- **WHEN** 槽模槽节点带有 `detail`／`situation` 说明而使用方打印新槽例
+- **THEN** 对应映射槽保留槽契约语义，但槽下不生成料节点，且计划与实例均不把契约字符标记或处理为默认料
 
 #### Scenario: 重名打印整次拒绝
 - **WHEN** `槽例` 中已经存在同名直接下级
