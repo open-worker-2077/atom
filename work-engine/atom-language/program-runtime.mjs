@@ -10,6 +10,7 @@ import { normalizeTypePredicate } from './program-locks.mjs';
 import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
+import { validateWindowSelfLock, windowPolicyIsSubset } from './window-self-lock.mjs';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_WORKERS = 16;
@@ -463,11 +464,12 @@ function validateResult(result, records, program, scopeRoot = null) {
     const required = entry.action === 'print'
       ? ['action', 'body', 'name', 'revision']
       : ['action', 'body'];
-    const allowed = required;
+    const allowed = entry.action === 'seal' ? [...required, 'lock'] : required;
     if (!['seal', 'print'].includes(entry.action)
       || typeof entry.body !== 'string' || !entry.body.trim()
       || keys.some((key) => !allowed.includes(key))
       || required.some((key) => !keys.includes(key))
+      || (entry.lock !== undefined && typeof entry.lock !== 'boolean')
       || (entry.action === 'print'
         && (typeof entry.name !== 'string' || !entry.name.trim() || entry.name.includes('/')
           || typeof entry.revision !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(entry.revision)))) {
@@ -526,13 +528,54 @@ function validateResult(result, records, program, scopeRoot = null) {
       sourceProgramPath: program.path
     };
   });
+  const jumps = (result.jumps ?? []).map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || !['guard', 'move', 'recycle'].includes(entry.action)
+      || (entry.action === 'move'
+        && (typeof entry.destinationPath !== 'string'
+          || !recordsByPath.has(entry.destinationPath)))
+      || (entry.action !== 'move' && entry.destinationPath !== undefined)) {
+      throw Object.assign(new Error('jump() returned an invalid window effect'), {
+        code: 'INVALID_WINDOW_JUMP_EFFECT'
+      });
+    }
+    const lock = entry.lock === undefined ? undefined : validateWindowSelfLock(entry.lock);
+    return {
+      action: entry.action,
+      ...(entry.action === 'move' ? { destinationPath: entry.destinationPath } : {}),
+      ...(lock !== undefined ? { lock } : {}),
+      sourceProgramPath: program.path
+    };
+  });
+  const changedThings = [...new Set(result.changedThings ?? [])];
+  if (changedThings.some((entry) => typeof entry !== 'string' || !recordsByPath.has(entry))) {
+    throw Object.assign(new Error('changed() returned an unknown exact Thing coordinate'), {
+      code: 'INVALID_CHANGED_THING'
+    });
+  }
   const trigger = result.trigger == null ? null : structuredClone(result.trigger);
-  return { locks, messages, transforms, slotBodies, choices, trigger };
+  return { locks, messages, transforms, slotBodies, choices, jumps, changedThings, trigger };
+}
+
+function bindCurrentWindowPolicy(policy, agentPath) {
+  if (!policy) return null;
+  return Object.fromEntries(Object.entries(policy).map(([sideName, side]) => [
+    sideName,
+    Object.fromEntries(Object.entries(side).map(([effect, rules]) => [
+      effect,
+      rules.map((rule) => ({
+        ...rule,
+        fromPath: rule.fromPath === '$current' ? agentPath : rule.fromPath,
+        ...(rule.fromPath === '$current' ? { currentRelative: true } : {})
+      }))
+    ]))
+  ]));
 }
 
 function runWorker({
   python, records, programs, program, timeoutMs, executeExplore, validateOnly = false,
-  triggered = false, scopeRoot = null, programRoot = null, invokeMain = false, programArguments = {}
+  triggered = false, changedNodes = [], scopeRoot = null, programRoot = null,
+  invokeMain = false, programArguments = {}
 }) {
   return new Promise((resolve, reject) => {
     const child = spawn(python, ['-I', '-X', 'utf8', workerFile], {
@@ -617,6 +660,7 @@ function runWorker({
       program,
       validateOnly,
       triggered,
+      changedNodes,
       programRoot,
       invokeMain,
       programArguments
@@ -625,8 +669,10 @@ function runWorker({
 }
 
 function describeProgramFailure(error, program) {
+  const jumpFailure = /\bjump\s*\(/u.test(program.detail)
+    && (!error?.code || error.code === 'ATOM_PROGRAM_FAILED');
   return {
-    code: error?.code ?? 'ATOM_PROGRAM_FAILED',
+    code: jumpFailure ? 'WINDOW_JUMP_DESTINATION_INVALID' : error?.code ?? 'ATOM_PROGRAM_FAILED',
     message: error?.message ?? 'Python Program failed',
     programRef: program.ref,
     programPath: program.path,
@@ -657,6 +703,8 @@ export class ProgramRuntimeScheduler {
     this.triggerContracts = new Map();
     this.triggerIndex = new Map();
     this.triggerContractsInitialized = false;
+    this.activeWindowSelfLocks = new Map();
+    this.activeWindowAgents = new Set();
     if (this.projectionRepository
       && (typeof this.projectionRepository.load !== 'function'
         || typeof this.projectionRepository.save !== 'function')) {
@@ -685,8 +733,75 @@ export class ProgramRuntimeScheduler {
     const stored = this.requestDrivenLockRepository
       ? await this.requestDrivenLockRepository.load()
       : { version: 1, locks: [] };
+    for (const entry of stored?.windowSelfLocks ?? []) {
+      this.activeWindowSelfLocks.set(entry.agentPath, validateWindowSelfLock(entry.policy));
+      this.activeWindowAgents.add(entry.agentPath);
+    }
     this.requestDrivenLocks = structuredClone(stored?.locks ?? []);
     return this.requestDrivenLocks;
+  }
+
+  async persistWindowSelfLocks() {
+    if (!this.requestDrivenLockRepository) return;
+    await this.requestDrivenLockRepository.save({
+      version: 1,
+      locks: structuredClone(this.requestDrivenLocks ?? []),
+      windowSelfLocks: [...this.activeWindowSelfLocks].map(([agentPath, policy]) => ({
+        agentPath, policy: structuredClone(policy)
+      }))
+    });
+  }
+
+  async recycleWindowSelfLock(agentPath) {
+    this.activeWindowSelfLocks.delete(agentPath);
+    this.activeWindowAgents.delete(agentPath);
+    await this.persistWindowSelfLocks();
+  }
+
+  async remapWindowSelfLock(previousPath, nextPath) {
+    const policy = this.activeWindowSelfLocks.get(nextPath)
+      ?? this.activeWindowSelfLocks.get(previousPath);
+    this.activeWindowSelfLocks.delete(previousPath);
+    this.activeWindowAgents.delete(previousPath);
+    if (policy) this.activeWindowSelfLocks.set(nextPath, policy);
+    this.activeWindowAgents.add(nextPath);
+    await this.persistWindowSelfLocks();
+  }
+
+  async replaceWindowSelfLock({ callerPath, targetPath, policy, records, authorize }) {
+    if (typeof callerPath !== 'string' || typeof targetPath !== 'string'
+      || !Array.isArray(records) || typeof authorize !== 'function') {
+      throw Object.assign(new Error('Window self-lock replacement requires exact caller and target coordinates'), {
+        code: 'INVALID_WINDOW_SELF_LOCK'
+      });
+    }
+    await this.activeRequestDrivenLocks();
+    const normalized = policy == null ? null : validateWindowSelfLock(policy);
+    const previous = this.activeWindowSelfLocks.get(targetPath) ?? null;
+    if (callerPath === targetPath) {
+      if (normalized == null || !windowPolicyIsSubset({
+        previous,
+        next: normalized,
+        agentPath: targetPath,
+        targetPaths: records.map((record) => record.path)
+      })) {
+        throw Object.assign(new Error('An active window cannot expand or remove its own self-lock'), {
+          code: 'WINDOW_SELF_LOCK_EXPANSION_DENIED'
+        });
+      }
+    } else {
+      const decision = await authorize(targetPath, 'write');
+      if (decision?.decision !== 'allow') {
+        throw Object.assign(new Error('Caller cannot reach the target window through both lock systems'), {
+          code: 'WINDOW_ACCESS_DENIED'
+        });
+      }
+    }
+    if (normalized) this.activeWindowSelfLocks.set(targetPath, normalized);
+    else this.activeWindowSelfLocks.delete(targetPath);
+    this.activeWindowAgents.add(targetPath);
+    await this.persistWindowSelfLocks();
+    return normalized;
   }
 
   async overlayRequestDrivenLocks(value) {
@@ -720,7 +835,13 @@ export class ProgramRuntimeScheduler {
         ...replacement
       ];
       if (this.requestDrivenLockRepository) {
-        await this.requestDrivenLockRepository.save({ version: 1, locks: next });
+        await this.requestDrivenLockRepository.save({
+          version: 1,
+          locks: next,
+          windowSelfLocks: [...this.activeWindowSelfLocks].map(([agentPath, policy]) => ({
+            agentPath, policy: structuredClone(policy)
+          }))
+        });
       }
       this.requestDrivenLocks = next;
     }
@@ -770,7 +891,12 @@ export class ProgramRuntimeScheduler {
       validateOnly: true
     }))));
     for (const [index, program] of programs.entries()) {
-      this.setTriggerContract(program, validated[index].trigger ?? null);
+      if (/\bchanged\s*\(/u.test(program.detail)) {
+        this.removeTriggerContract(program.path);
+        this.triggerContractsInitialized = false;
+      } else {
+        this.setTriggerContract(program, validated[index].trigger ?? null);
+      }
     }
     const activePaths = new Set(records.map((record) => record.path));
     for (const path of this.triggerContracts.keys()) {
@@ -779,10 +905,16 @@ export class ProgramRuntimeScheduler {
   }
 
   removeTriggerContract(programPath) {
-    const existing = this.triggerContracts.get(programPath)?.contract;
+    const existing = this.triggerContracts.get(programPath);
     if (existing) {
-      for (const node of existing.parameters.nodes) {
-        const key = `${existing.mode}\0${node}`;
+      const indexed = [
+        ...(existing.contract?.parameters?.nodes ?? []).map((node) => ({
+          mode: existing.contract.mode, node
+        })),
+        ...(existing.changedThings ?? []).map((node) => ({ mode: 'transform', node }))
+      ];
+      for (const { mode, node } of indexed) {
+        const key = `${mode}\0${node}`;
         const paths = this.triggerIndex.get(key);
         paths?.delete(programPath);
         if (paths?.size === 0) this.triggerIndex.delete(key);
@@ -791,12 +923,17 @@ export class ProgramRuntimeScheduler {
     this.triggerContracts.delete(programPath);
   }
 
-  setTriggerContract(program, contract) {
+  setTriggerContract(program, contract, changedThings = []) {
     this.removeTriggerContract(program.path);
-    this.triggerContracts.set(program.path, { detail: program.detail, contract });
-    if (!contract) return;
-    for (const node of contract.parameters.nodes) {
-      const key = `${contract.mode}\0${node}`;
+    this.triggerContracts.set(program.path, {
+      detail: program.detail, contract, changedThings: [...new Set(changedThings)]
+    });
+    const indexed = [
+      ...(contract?.parameters?.nodes ?? []).map((node) => ({ mode: contract.mode, node })),
+      ...[...new Set(changedThings)].map((node) => ({ mode: 'transform', node }))
+    ];
+    for (const { mode, node } of indexed) {
+      const key = `${mode}\0${node}`;
       const paths = this.triggerIndex.get(key) ?? new Set();
       paths.add(program.path);
       this.triggerIndex.set(key, paths);
@@ -805,8 +942,9 @@ export class ProgramRuntimeScheduler {
 
   async ensureTriggerContracts(records, programs, executeExplore) {
     if (this.triggerContractsInitialized) return;
+    const recordsByPath = new Map(records.map((record) => [record.path, record]));
     const candidates = programs.filter((program) => (
-      /\btrigger\s*\(/u.test(program.detail)
+      /\b(?:trigger|changed)\s*\(/u.test(program.detail)
       && this.triggerContracts.get(program.path)?.detail !== program.detail
     ));
     const inspected = await Promise.all(candidates.map((program) => this.runBounded(() => (
@@ -816,12 +954,29 @@ export class ProgramRuntimeScheduler {
         programs,
         program,
         timeoutMs: this.timeoutMs,
-        executeExplore,
-        validateOnly: true
+        executeExplore: async (request) => {
+          const matches = await executeExplore(request);
+          return matches.map((match) => {
+            const record = recordsByPath.get(match.path);
+            if (!record) {
+              throw Object.assign(
+                new Error(`Program explore returned an unknown path: ${match.path}`),
+                { code: 'INVALID_PROGRAM_EXPLORE_RESULT' }
+              );
+            }
+            return record;
+          });
+        },
+        validateOnly: !/\bchanged\s*\(/u.test(program.detail),
+        changedNodes: []
       })
     ))));
     for (const [index, program] of candidates.entries()) {
-      this.setTriggerContract(program, inspected[index].trigger ?? null);
+      this.setTriggerContract(
+        program,
+        inspected[index].trigger ?? null,
+        inspected[index].changedThings ?? []
+      );
     }
     this.triggerContractsInitialized = true;
   }
@@ -1121,11 +1276,15 @@ export class ProgramRuntimeScheduler {
           records, availablePrograms
         )[0];
       const previous = previousEntry?.[1] ?? null;
-      const triggerContract = this.triggerContracts.get(program.path)?.contract ?? null;
+      const triggerEntry = this.triggerContracts.get(program.path) ?? null;
+      const triggerContract = triggerEntry?.contract ?? null;
+      const hasIndexedContract = Boolean(
+        triggerContract || (triggerEntry?.changedThings?.length ?? 0) > 0
+      );
       const forcedByTrigger = triggerEvent
         && (triggeredProgramPaths.has(program.path) || Boolean(slotInvocation));
       if (triggerEvent
-        && !triggerContract
+        && !hasIndexedContract
         && !eventNodes.has(program.path)
         && !slotInvocation
         && (this.triggerIndex.size > 0 || !previous)) {
@@ -1143,7 +1302,7 @@ export class ProgramRuntimeScheduler {
           contextDependent: previous?.contextDependent === true
         };
       }
-      if (triggerEvent && triggerContract && !forcedByTrigger) {
+      if (triggerEvent && hasIndexedContract && !forcedByTrigger) {
         return {
           programPath: program.path,
           result: previous ? {
@@ -1198,6 +1357,7 @@ export class ProgramRuntimeScheduler {
             program,
             timeoutMs: remainingMs,
             triggered: options.force === true || forcedByTrigger,
+            changedNodes: [...eventNodes],
             scopeRoot: effectiveScopeRoot,
             programRoot: slotInvocation?.programRoot ?? options.slotScopeRoot ?? null,
             invokeMain: Boolean(slotInvocation),
@@ -1231,7 +1391,9 @@ export class ProgramRuntimeScheduler {
         await recordProgramDiagnostic({
           program, requests: uniqueRequests, startedAt: executionStartedAt
         });
-        const contextDependent = requestsDependOnAgent(uniqueRequests);
+        const contextDependent = requestsDependOnAgent(uniqueRequests)
+          || (result.jumps?.length ?? 0) > 0;
+        this.setTriggerContract(program, result.trigger ?? null, result.changedThings ?? []);
         const stateKey = contextDependent
           ? contextualProgramSetFingerprint(
             [program], availablePrograms, isolateFailures, scopePath, records
@@ -1275,6 +1437,43 @@ export class ProgramRuntimeScheduler {
       entry.contextDependent === true && !scopePath
     ));
     const results = applicable.flatMap((entry) => entry.result ? [entry.result] : []);
+    const currentAgentPath = agentScopePath(options.agentOrigin);
+    let windowSelfLocks = applicable.flatMap((entry) => (
+      entry.result?.jumps ?? []
+    ).filter((jump) => jump.lock).map((jump) => ({
+      agentPath: currentAgentPath,
+      sourceProgramPath: jump.sourceProgramPath,
+      policy: bindCurrentWindowPolicy(jump.lock, currentAgentPath)
+    })));
+    const windowSelfLockAgents = currentAgentPath && results.some((result) => (
+      (result.jumps?.length ?? 0) > 0
+    )) ? [currentAgentPath] : [];
+    if (currentAgentPath && windowSelfLockAgents.length) {
+      this.activeWindowAgents.add(currentAgentPath);
+      const proposed = windowSelfLocks.at(-1)?.policy ?? null;
+      const previous = this.activeWindowSelfLocks.get(currentAgentPath);
+      if (proposed && previous && !windowPolicyIsSubset({
+        previous,
+        next: proposed,
+        agentPath: currentAgentPath,
+        targetPaths: records.map((record) => record.path)
+      })) {
+        throw Object.assign(new Error('An active window may keep or tighten, but not expand, its own self-lock'), {
+          code: 'WINDOW_SELF_LOCK_EXPANSION_DENIED',
+          details: { agentPath: currentAgentPath }
+        });
+      }
+      if (proposed) this.activeWindowSelfLocks.set(currentAgentPath, proposed);
+      const effective = this.activeWindowSelfLocks.get(currentAgentPath);
+      windowSelfLocks = effective ? [{
+        agentPath: currentAgentPath,
+        sourceProgramPath: windowSelfLocks.at(-1)?.sourceProgramPath ?? null,
+        policy: effective
+      }] : [];
+    }
+    const uniqueRequests = [...new Map(applicable.flatMap((entry) => entry.requests).map((request) => (
+      [JSON.stringify(request), request]
+    ))).values()];
     const value = {
       fingerprint: key,
       cached: applicable.length > 0 && applicable.every((entry) => entry.cached),
@@ -1285,6 +1484,12 @@ export class ProgramRuntimeScheduler {
       messages: results.flatMap((result) => result.messages),
       transforms: results.flatMap((result) => result.transforms),
       slotBodies: results.flatMap((result) => result.slotBodies ?? []),
+      jumps: applicable.flatMap((entry) => entry.cached === false
+        ? entry.result?.jumps ?? []
+        : []),
+      windowSelfLocks,
+      windowSelfLockAgents,
+      exploreRequests: structuredClone(uniqueRequests),
       failures: applicable.flatMap((entry) => entry.failure ? [entry.failure] : []),
       executedProgramPaths: applicable
         .filter((entry) => entry.cached === false && entry.result)
@@ -1296,10 +1501,8 @@ export class ProgramRuntimeScheduler {
     while (this.completed.size > this.maxCompleted) {
       this.completed.delete(this.completed.keys().next().value);
     }
-    const uniqueRequests = [...new Map(applicable.flatMap((entry) => entry.requests).map((request) => (
-      [JSON.stringify(request), request]
-    ))).values()];
-    const contextDependent = requestsDependOnAgent(uniqueRequests);
+    const contextDependent = requestsDependOnAgent(uniqueRequests)
+      || results.some((result) => (result.jumps?.length ?? 0) > 0);
     const runtimeWarnings = [
       ...(this.projectionLoadWarning ? [this.projectionLoadWarning] : []),
       ...diagnosticWarnings

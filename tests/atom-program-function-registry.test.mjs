@@ -54,7 +54,7 @@ test('Program function catalog filters coarse families without a public hierarch
 
   assert.equal(
     cycle.messages[0].text,
-    'child_detail,direct_children,explore,lock,slot_body,subtree_refs,transform|False'
+    'changed,child_detail,direct_children,explore,jump,lock,slot_body,subtree_refs,transform|False'
   );
 });
 

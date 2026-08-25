@@ -75,6 +75,19 @@ function graphTypesAtPath(atoms, targetPath) {
   return oneStoredField(match.atom, 'name')?.parsed.types.map((type) => type.raw) ?? [];
 }
 
+function rebindCurrentWindowPolicy(policy, nextAgentPath) {
+  if (!policy) return null;
+  return Object.fromEntries(Object.entries(policy).map(([sideName, side]) => [
+    sideName,
+    Object.fromEntries(Object.entries(side).map(([effect, rules]) => [
+      effect,
+      rules.map((rule) => rule.currentRelative === true
+        ? { ...rule, fromPath: nextAgentPath }
+        : { ...rule })
+    ]))
+  ]));
+}
+
 function newlyAddedProgramPaths(beforeAtoms, afterAtoms) {
   const previousPaths = new Set(walkAtoms(beforeAtoms).map((match) => match.path.join('/')));
   return walkAtoms(afterAtoms)
@@ -305,7 +318,7 @@ async function applyCreateTransform({
       ? programLockDeniedDiagnostic(createDecision)
       : null;
     return { error: diagnostic(
-      programDenied?.code ?? 'WINDOW_ACCESS_DENIED',
+      programDenied?.code ?? createDecision.code ?? 'WINDOW_ACCESS_DENIED',
       programDenied?.message ?? '当前窗口无权执行该改造；请反馈派发方',
       programDenied?.details ?? {}
     ) };
@@ -335,13 +348,15 @@ async function applyCreateTransform({
         { parentPath, matches: parentMatches.map((match) => match.path.join('/')) }
       ) };
     }
-    const parentDecision = await authorize(parentMatches[0], 'write', 'children');
+    const parentDecision = await authorize(
+      parentMatches[0], 'write', 'children', { slotMaterialCreate: true, createdAtom: atom }
+    );
     if (parentDecision.decision !== 'allow') {
       const programDenied = parentDecision.matched
         ? programLockDeniedDiagnostic(parentDecision, 'children')
         : null;
       return { error: diagnostic(
-        programDenied?.code ?? 'WINDOW_ACCESS_DENIED',
+        programDenied?.code ?? parentDecision.code ?? 'WINDOW_ACCESS_DENIED',
         programDenied?.message ?? '当前窗口无权修改父 Atom 的 children；请反馈派发方',
         programDenied?.details ?? { parentPath }
       ) };
@@ -423,7 +438,8 @@ async function persistChangedGraph({
   commitWorld,
   expectedRevision,
   correlationId,
-  source
+  source,
+  registrationChange = null
 }) {
   // Validate the full projection before either active file is changed.
   const validationStartedAt = performance.now();
@@ -442,7 +458,8 @@ async function persistChangedGraph({
     nextRevision: revisionOf(atoms),
     facts: structuredClone(atoms),
     correlationId,
-    source
+    source,
+    registrationChange
   });
   performanceTrace('world-commit', {
     elapsedMs: Math.round(performance.now() - commitStartedAt)
@@ -554,7 +571,7 @@ export async function executeAtomLanguage(options = {}) {
   }
   const interaction = {
     id: options.interaction?.id ?? crypto.randomUUID(),
-    agent: options.interaction?.agent ?? null
+    agent: options.interaction?.agent ? structuredClone(options.interaction.agent) : null
   };
   const requestedProgramRun = parsed.command === 'transform'
     && !parsed.batch
@@ -638,14 +655,172 @@ export async function executeAtomLanguage(options = {}) {
     ...(parsed.command === 'explore' && !requestedProgramRun ? [] : programWarnings),
     ...programRuntimeWarnings
   ];
+  const fatalJumpFailure = (programCycle.failures ?? []).find((failure) => (
+    typeof failure.code === 'string' && failure.code.startsWith('WINDOW_JUMP_')
+  ));
+  if (fatalJumpFailure) {
+    return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+      fatalJumpFailure.code,
+      fatalJumpFailure.message ?? '窗口跳转候选失败',
+      { ...(fatalJumpFailure.details ?? {}), program: fatalJumpFailure.programPath }
+    )]);
+  }
   let programLockIndex = buildProgramLockIndex({
     revision: revisionBefore,
     results: options.bypassProgramLocks ? [] : programCycle.locks,
     records: programCycle.records
   });
+  let programChanged = false;
+  let windowRecycled = false;
+  let recycledAgentPath = null;
+  let movedAgentPaths = null;
+  const initialProgramTriggerNodes = [];
+  const initialAgentPath = interaction.agent?.path ?? null;
+  const initialWindowSelfLock = (programCycle.windowSelfLocks ?? [])
+    .find((entry) => entry.agentPath === initialAgentPath)?.policy ?? null;
+  const enforceWindowSelfLock = (programCycle.windowSelfLockAgents ?? [])
+    .includes(initialAgentPath);
   let accessController = createAccessController(atoms, {
-    ...options, programLockIndex, agentPath: interaction.agent?.path ?? null
+    ...options, programLockIndex, agentPath: initialAgentPath,
+    windowSelfLock: initialWindowSelfLock, enforceWindowSelfLock
   });
+  if (enforceWindowSelfLock) {
+    const unrestrictedProgramReads = createAccessController(atoms, {});
+    const preparedProgramReadWorld = prepareExploreWorld(atoms);
+    for (const request of programCycle.exploreRequests ?? []) {
+      const matches = await executeProgramExplore({
+        atoms,
+        request,
+        receiver,
+        accessController: unrestrictedProgramReads,
+        agentOrigin: interaction.agent,
+        preparedWorld: preparedProgramReadWorld
+      });
+      for (const match of matches) {
+        for (const field of ['name', 'detail']) {
+          if ((await accessController.authorize(match, 'read', field)).decision !== 'allow') {
+            return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+              'WINDOW_JUMP_LOCK_DENIED',
+              '窗口 Program 的精确 Explore 超出窗口自锁边界',
+              { path: Array.isArray(match.path) ? match.path.join('/') : match.path, field }
+            )]);
+          }
+        }
+      }
+    }
+  }
+  const jumpEffects = (programCycle.jumps ?? []).filter((jump) => jump.action !== 'guard');
+  const jumpBaseAtoms = atoms;
+  if (jumpEffects.length > 1) {
+    return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+      'WINDOW_JUMP_CONFLICT', '一个候选事务只能执行一次窗口移动或回收'
+    )]);
+  }
+  if (jumpEffects.length === 1) {
+    const jump = jumpEffects[0];
+    const agentPath = interaction.agent?.path ?? null;
+    const configuredPolicy = initialWindowSelfLock;
+    if (!agentPath) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+        'WINDOW_JUMP_AGENT_REQUIRED', '窗口跳转需要当前交互 Agent 的精确坐标'
+      )]);
+    }
+    if (jump.action === 'move') {
+      const destination = walkAtoms(atoms).find((candidate) => (
+        candidate.path.join('/') === jump.destinationPath
+      ));
+      if (!destination) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          'WINDOW_JUMP_DESTINATION_INVALID', '跳窗目标在当前候选世界中不存在'
+        )]);
+      }
+      const destinationRead = createAccessController(atoms, {
+        ...options,
+        programLockIndex,
+        agentPath,
+        windowSelfLock: configuredPolicy,
+        enforceWindowSelfLock: true
+      });
+      if ((await destinationRead.authorize(
+        destination, 'read', 'name', { programPath: jump.sourceProgramPath }
+      )).decision !== 'allow') {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          'WINDOW_JUMP_LOCK_DENIED', '窗口自锁或节点锁拒绝跳窗目标'
+        )]);
+      }
+      const compiled = compileProgramTransform({
+        request: { [`name.mov.${jump.destinationPath}`]: agentPath }, receiver
+      });
+      if (!compiled.ok) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          'WINDOW_JUMP_DESTINATION_INVALID',
+          compiled.errors?.[0]?.message ?? '跳窗目标无法编译'
+        )]);
+      }
+      const nodeLockController = createAccessController(atoms, {
+        ...options, programLockIndex, agentPath, bypassWindowSelfLock: true
+      });
+      const moved = await applyTransform({
+        atoms,
+        item: compiled.item,
+        contextFile,
+        authorize: (match, operation, field) => nodeLockController.authorize(
+          match, operation, field, { programPath: jump.sourceProgramPath }
+        )
+      });
+      if (moved.error) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          moved.error.code === 'WINDOW_ACCESS_DENIED'
+            ? 'WINDOW_JUMP_LOCK_DENIED'
+            : 'WINDOW_JUMP_DESTINATION_INVALID',
+          moved.error.message,
+          { cause: moved.error.code }
+        )]);
+      }
+      atoms = moved.atoms;
+      programChanged = true;
+      initialProgramTriggerNodes.push(moved.resultPath, jump.destinationPath);
+      interaction.agent.path = moved.resultPath;
+      movedAgentPaths = { previousPath: agentPath, nextPath: moved.resultPath };
+      const reboundPolicy = rebindCurrentWindowPolicy(configuredPolicy, moved.resultPath);
+      accessController = createAccessController(atoms, {
+        ...options,
+        programLockIndex,
+        agentPath: interaction.agent.path,
+        windowSelfLock: reboundPolicy,
+        enforceWindowSelfLock: true
+      });
+    } else if (jump.action === 'recycle') {
+      const candidate = structuredClone(atoms);
+      const selected = walkAtoms(candidate).find((entry) => entry.path.join('/') === agentPath);
+      if (!selected) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          'WINDOW_JUMP_AGENT_REQUIRED', '待回收窗口不存在'
+        )]);
+      }
+      const nodeLockController = createAccessController(candidate, {
+        ...options, programLockIndex, agentPath, bypassWindowSelfLock: true
+      });
+      for (const entry of walkAtoms([selected.atom])) {
+        const actual = walkAtoms(candidate).find((match) => match.atom === entry.atom);
+        if ((await nodeLockController.authorize(
+          actual, 'write', 'children', { programPath: jump.sourceProgramPath }
+        )).decision !== 'allow') {
+          return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+            'WINDOW_JUMP_LOCK_DENIED', '节点锁拒绝回收窗口'
+          )]);
+        }
+      }
+      const container = selected.parent ? selected.parent.atom.children : candidate;
+      container.splice(selected.index, 1);
+      atoms = candidate;
+      programChanged = true;
+      interaction.agent = null;
+      windowRecycled = true;
+      recycledAgentPath = agentPath;
+      accessController = createAccessController(atoms, { ...options, agentPath: null, programLockIndex });
+    }
+  }
   const interactionMessages = (programCycle.messages ?? [])
     .filter((message) => authorizeProgramLock({
       lockIndex: programLockIndex,
@@ -658,9 +833,7 @@ export async function executeAtomLanguage(options = {}) {
       action: 'explore'
     }).decision === 'allow')
     .map((message) => ({ interactionId: interaction.id, ...message }));
-  let programChanged = false;
   const programTransformLogs = [];
-  const initialProgramTriggerNodes = [];
   let strictSlotRecompute = false;
   for (const request of programCycle.transforms ?? []) {
     const {
@@ -684,6 +857,13 @@ export async function executeAtomLanguage(options = {}) {
     }
     const compiled = compileProgramTransform({ request: transformRequest, receiver });
     if (!compiled.ok) {
+      if (jumpEffects.length) {
+        return failureBase(parsed, contextFile, projectionFile, jumpBaseAtoms, [diagnostic(
+          'WINDOW_JUMP_DOWNSTREAM_FAILED',
+          compiled.errors?.[0]?.message ?? '跳窗后的 Program Transform 无法编译',
+          { program: sourceProgramPath }
+        )]);
+      }
       interactionWarnings.push(diagnostic(
         'INVALID_PROGRAM_TRANSFORM',
         compiled.errors?.[0]?.message ?? 'Program transform 无法编译',
@@ -692,8 +872,10 @@ export async function executeAtomLanguage(options = {}) {
       continue;
     }
     let transformed;
-    const authorizeProgramEffect = (match, operation, field) => (
-      accessController.authorize(match, operation, field, { programPath: sourceProgramPath })
+    const authorizeProgramEffect = (match, operation, field, actor = {}) => (
+      accessController.authorize(match, operation, field, {
+        ...actor, programPath: sourceProgramPath
+      })
     );
     try {
       transformed = compiled.createNew
@@ -712,6 +894,12 @@ export async function executeAtomLanguage(options = {}) {
             authorize: authorizeProgramEffect
           });
     } catch (error) {
+      if (jumpEffects.length) {
+        return failureBase(parsed, contextFile, projectionFile, jumpBaseAtoms, [diagnostic(
+          'WINDOW_JUMP_DOWNSTREAM_FAILED', error.message,
+          { program: sourceProgramPath, cause: error.code }
+        )]);
+      }
       interactionWarnings.push(diagnostic(
         error.code ?? 'PROGRAM_TRANSFORM_FAILED', error.message,
         { program: sourceProgramPath }
@@ -719,6 +907,12 @@ export async function executeAtomLanguage(options = {}) {
       continue;
     }
     if (transformed.error) {
+      if (jumpEffects.length) {
+        return failureBase(parsed, contextFile, projectionFile, jumpBaseAtoms, [diagnostic(
+          'WINDOW_JUMP_DOWNSTREAM_FAILED', transformed.error.message,
+          { program: sourceProgramPath, cause: transformed.error.code }
+        )]);
+      }
       interactionWarnings.push(diagnostic(
         'PROGRAM_TRANSFORM_REJECTED', transformed.error.message,
         { program: sourceProgramPath, cause: transformed.error.code }
@@ -729,6 +923,12 @@ export async function executeAtomLanguage(options = {}) {
     try {
       projectAtomContext(transformed.atoms, { rootName: path.basename(contextFile) });
     } catch (error) {
+      if (jumpEffects.length) {
+        return failureBase(parsed, contextFile, projectionFile, jumpBaseAtoms, [diagnostic(
+          'WINDOW_JUMP_DOWNSTREAM_FAILED', error.message,
+          { program: sourceProgramPath, cause: error.code }
+        )]);
+      }
       interactionWarnings.push(diagnostic(
         error.code ?? 'PROGRAM_TRANSFORM_INVALID_GRAPH', error.message,
         { program: sourceProgramPath }
@@ -760,7 +960,10 @@ export async function executeAtomLanguage(options = {}) {
         const match = walkAtoms(atoms).find((candidate) => candidate.path.join('/') === targetPath);
         if (!match) return { decision: 'deny' };
         return accessController.authorize(
-          match, 'write', 'children', { programPath: sourceProgramPath }
+          match, 'write', 'children', {
+            programPath: sourceProgramPath,
+            slotReseal: effect.action === 'seal'
+          }
         );
       }
     });
@@ -963,9 +1166,9 @@ export async function executeAtomLanguage(options = {}) {
         let structuralChanged = 0;
         for (const entry of compiledRequests) {
           let transformed;
-          const authorizeProgramEffect = (match, operation, field) => (
+          const authorizeProgramEffect = (match, operation, field, actor = {}) => (
             cycleAccessController.authorize(
-              match, operation, field, { programPath: entry.sourceProgramPath }
+              match, operation, field, { ...actor, programPath: entry.sourceProgramPath }
             )
           );
           try {
@@ -1055,7 +1258,10 @@ export async function executeAtomLanguage(options = {}) {
               .find((candidate) => candidate.path.join('/') === targetPath);
             if (!match) return { decision: 'deny' };
             return cycleAccessController.authorize(
-              match, 'write', 'children', { programPath: sourceProgramPath }
+              match, 'write', 'children', {
+                programPath: sourceProgramPath,
+                slotReseal: effect.action === 'seal'
+              }
             );
           }
         });
@@ -1174,8 +1380,13 @@ export async function executeAtomLanguage(options = {}) {
       await persistChangedGraph({
         atoms, contextFile, projectionFile, rootName: path.basename(contextFile),
         commitWorld: options.commitWorld, expectedRevision: revisionBefore,
-        correlationId: interaction.id, source
+        correlationId: interaction.id, source,
+        registrationChange: windowRecycled ? 'window-recycle' : null
       });
+      if (recycledAgentPath) await options.programScheduler?.recycleWindowSelfLock?.(recycledAgentPath);
+      if (movedAgentPaths) await options.programScheduler?.remapWindowSelfLock?.(
+        movedAgentPaths.previousPath, movedAgentPaths.nextPath
+      );
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
     const matches = walkAtoms(atoms);
@@ -1197,8 +1408,13 @@ export async function executeAtomLanguage(options = {}) {
       await persistChangedGraph({
         atoms, contextFile, projectionFile, rootName: path.basename(contextFile),
         commitWorld: options.commitWorld, expectedRevision: revisionBefore,
-        correlationId: interaction.id, source
+        correlationId: interaction.id, source,
+        registrationChange: windowRecycled ? 'window-recycle' : null
       });
+      if (recycledAgentPath) await options.programScheduler?.recycleWindowSelfLock?.(recycledAgentPath);
+      if (movedAgentPaths) await options.programScheduler?.remapWindowSelfLock?.(
+        movedAgentPaths.previousPath, movedAgentPaths.nextPath
+      );
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
     if (!parsed.items.length) {

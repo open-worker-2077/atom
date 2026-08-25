@@ -250,11 +250,12 @@ def extract_trigger_contract(tree):
 
 
 class AtomView:
-    __slots__ = ("ref", "name", "detail", "path", "types", "partners", "_record")
+    __slots__ = ("ref", "name", "thing", "detail", "path", "types", "partners", "_record")
 
     def __init__(self, record):
         self.ref = record["ref"]
         self.name = record["name"]
+        self.thing = record["name"]
         self.detail = record["detail"]
         self.path = record["path"]
         self.types = tuple(record["types"])
@@ -276,7 +277,10 @@ def main():
     records = request["world"]
     by_ref = {record["ref"]: record for record in records}
     views = {ref: AtomView(record) for ref, record in by_ref.items()}
-    effects = {"locks": [], "messages": [], "transforms": [], "choices": [], "slotBodies": []}
+    effects = {
+        "locks": [], "messages": [], "transforms": [], "choices": [],
+        "slotBodies": [], "jumps": [], "changedThings": []
+    }
 
     next_request_id = 0
 
@@ -332,6 +336,10 @@ def main():
         action = specification.get("action")
         body = specification.get("body")
         result = {"planned": True, "action": action, "body": body}
+        if action == "seal" and "lock" in specification:
+            if not isinstance(specification["lock"], bool):
+                raise TypeError("slot_body seal lock must be boolean")
+            result["lock"] = specification["lock"]
         if "name" in specification:
             result["target"] = body + "/槽例/" + str(specification["name"])
         return result
@@ -352,6 +360,165 @@ def main():
 
     def current_atom():
         return views[program_stack[-1]]
+
+    def resolve_exact_thing(value, function_name, required_type=None):
+        if isinstance(value, AtomView):
+            target = value._record
+        elif isinstance(value, dict):
+            if len(value) != 1:
+                raise TypeError(
+                    f"{function_name} requires one exact Thing coordinate object"
+                )
+            coordinate = value.get("thing", value.get("thing@program"))
+            if not isinstance(coordinate, str) or not coordinate.strip():
+                raise TypeError(
+                    f"{function_name} requires one exact Thing coordinate object"
+                )
+            matches = [record for record in by_ref.values()
+                       if record["path"] == coordinate.strip()]
+            if len(matches) != 1:
+                raise ValueError(
+                    f"{function_name} exact Thing coordinate was not found: {coordinate}"
+                )
+            target = matches[0]
+        else:
+            raise TypeError(
+                f"{function_name} requires an exact Thing coordinate object; strings and refs are forbidden"
+            )
+        if required_type and required_type not in target.get("types", []):
+            raise TypeError(
+                f"{function_name} requires an exact Thing@{required_type} coordinate"
+            )
+        return target
+
+    def invoke_program_thing(value, function_name):
+        target = resolve_exact_thing(value, function_name, "program")
+        program_root = request.get("programRoot")
+        if program_root and not (
+            target["path"] == program_root
+            or target["path"].startswith(program_root + "/")
+        ):
+            raise SlotScopeError(
+                "SLOT_SCOPE_BOUNDARY_CROSSING",
+                "Scoped Program may reuse code only inside its current model: "
+                + target["path"]
+            )
+        if target["ref"] in program_stack:
+            raise ValueError(f"Recursive Program reference is not allowed: {target['path']}")
+        if len(program_stack) >= 8:
+            raise ValueError("Program reference depth exceeds 8")
+        target_tree = validate_program(target["detail"], target["path"])
+        child_namespace = dict(namespace)
+        child_namespace["use_program"] = use_program
+        program_stack.append(target["ref"])
+        try:
+            exec(compile(target_tree, target["path"], "exec"), child_namespace, child_namespace)
+            entrypoint = child_namespace.get("main")
+            if not callable(entrypoint):
+                raise ValueError(f"Referenced Program must define main(arguments): {target['path']}")
+            return entrypoint({})
+        finally:
+            program_stack.pop()
+
+    def jump(specification):
+        specification = require_object(specification, "jump")
+        allowed = {"when", "where", "recycle", "lock"}
+        unknown = set(specification) - allowed
+        if unknown:
+            raise ValueError("jump() accepts only when, where, recycle, and lock")
+        action = "guard"
+        destination_path = None
+        if "recycle" in specification:
+            recycle = invoke_program_thing(specification["recycle"], "jump.recycle")
+            if not isinstance(recycle, bool):
+                raise TypeError("jump.recycle Program must return bool")
+            if recycle:
+                action = "recycle"
+        if action != "recycle" and "when" in specification:
+            when = invoke_program_thing(specification["when"], "jump.when")
+            if not isinstance(when, bool):
+                raise TypeError("jump.when Program must return bool")
+            if when:
+                if "where" not in specification:
+                    raise ValueError("jump.where is required when jump.when returns true")
+                destination = invoke_program_thing(specification["where"], "jump.where")
+                destination_path = resolve_exact_thing(
+                    destination, "jump.where result"
+                )["path"]
+                action = "move"
+        effect = {"action": action}
+        if destination_path is not None:
+            effect["destinationPath"] = destination_path
+        if "lock" in specification:
+            policy = require_object(specification["lock"], "jump.lock")
+            if any(side not in {"read", "write"} for side in policy):
+                raise ValueError("jump.lock accepts only read and write sides")
+            normalized_policy = {}
+            for side_name, side in policy.items():
+                side = require_object(side, f"jump.lock.{side_name}")
+                if any(effect_name not in {"allow", "deny"} for effect_name in side):
+                    raise ValueError("jump.lock sides accept allow and deny arrays")
+                normalized_side = {}
+                for effect_name, rules in side.items():
+                    if not isinstance(rules, list):
+                        raise TypeError("jump.lock allow and deny must be arrays")
+                    normalized_rules = []
+                    for rule in rules:
+                        rule = require_object(rule, "jump.lock rule")
+                        allowed_rule_keys = {
+                            "priority", "from", "parent", "peers", "descendants"
+                        }
+                        if set(rule) - allowed_rule_keys:
+                            raise ValueError("jump.lock rule contains an unknown key")
+                        priority = rule.get("priority")
+                        if (not isinstance(priority, int) or isinstance(priority, bool)
+                                or priority <= 0):
+                            raise ValueError("jump.lock rule priority must be a positive integer")
+                        start = rule.get("from")
+                        if start == "current":
+                            start_path = "$current"
+                        else:
+                            start_path = resolve_exact_thing(
+                                start, "jump.lock rule from"
+                            )["path"]
+                        normalized_rule = {
+                            "priority": priority, "fromPath": start_path
+                        }
+                        for relation in ("parent", "peers"):
+                            if relation in rule:
+                                if not isinstance(rule[relation], bool):
+                                    raise TypeError(f"jump.lock rule {relation} must be boolean")
+                                normalized_rule[relation] = rule[relation]
+                        if "descendants" in rule:
+                            depth = rule["descendants"]
+                            if not (depth == "all" or (
+                                isinstance(depth, int) and not isinstance(depth, bool) and depth >= 0
+                            )):
+                                raise TypeError(
+                                    "jump.lock rule descendants must be all or a non-negative integer"
+                                )
+                            normalized_rule["descendants"] = depth
+                        normalized_rules.append(normalized_rule)
+                    normalized_side[effect_name] = normalized_rules
+                normalized_policy[side_name] = normalized_side
+            effect["lock"] = normalized_policy
+        effects["jumps"].append(effect)
+        return None
+
+    def changed(things):
+        if not isinstance(things, list) or not things:
+            raise TypeError("changed() requires one non-empty exact Thing coordinate array")
+        paths = []
+        for thing in things:
+            path = resolve_exact_thing(thing, "changed")["path"]
+            if path in paths:
+                raise ValueError("changed() Thing coordinates must be unique")
+            paths.append(path)
+        for path in paths:
+            if path not in effects["changedThings"]:
+                effects["changedThings"].append(path)
+        event_nodes = set(request.get("changedNodes", []))
+        return any(path in event_nodes for path in paths)
 
     def instantiate(specification):
         specification = require_object(specification, "instantiate")
@@ -862,6 +1029,8 @@ def main():
         "message": message,
         "choice": choice,
         "trigger": trigger,
+        "jump": jump,
+        "changed": changed,
         "current_atom": current_atom,
         "direct_children": direct_children,
         "child_detail": child_detail,

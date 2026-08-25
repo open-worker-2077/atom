@@ -8,6 +8,8 @@ import { decodeLockAtoms, evaluateLockAccess } from './world-laws/locks.mjs';
 import { createDefaultWorldLawRegistry } from './world-laws/registry.mjs';
 import { authorizeProgramLock, programLockState } from './program-locks.mjs';
 import { WORLD_OUTSIDE_NAME, worldOutsideAtom } from './world-root.mjs';
+import { authorizeWindowSelfLock, validateWindowSelfLock } from './window-self-lock.mjs';
+import { readVisibleSlotPlans, slotStructureLockAtPath } from './slot-body-plan-runtime.mjs';
 
 const preparedExploreSnapshots = new WeakMap();
 
@@ -95,13 +97,20 @@ export function exactMatches(atoms, item, matcherRegistry, candidates = null, ex
 export function createAccessController(atoms, options = {}) {
   const programLockIndex = options.programLockIndex?.byPath?.size ? options.programLockIndex : null;
   const legacyAccess = options.legacyAccess;
-  if ((!legacyAccess || legacyAccess.global === true) && !programLockIndex) {
+  const agentPath = options.agentPath ?? options.interaction?.agent?.path ?? null;
+  const windowSelfLock = validateWindowSelfLock(options.windowSelfLock ?? null);
+  const selfLockActive = Boolean(agentPath
+    && options.bypassWindowSelfLock !== true
+    && (options.enforceWindowSelfLock === true || windowSelfLock));
+  const slotStructureRestricted = readVisibleSlotPlans(atoms)
+    .some(({ plan }) => plan.structureLock === true);
+  if ((!legacyAccess || legacyAccess.global === true) && !programLockIndex
+    && !selfLockActive && !slotStructureRestricted) {
     return { restricted: false, authorize: async () => ({ decision: 'allow', matchedLocks: [] }) };
   }
   const registry = options.worldLawRegistry ?? createDefaultWorldLawRegistry();
   const locks = legacyAccess && legacyAccess.global !== true ? decodeLockAtoms(atoms) : [];
   const access = legacyAccess;
-  const agentPath = options.agentPath ?? options.interaction?.agent?.path ?? null;
   const agentMatch = agentPath
     ? walkAtoms(atoms).find((match) => match.path.join('/') === agentPath)
     : null;
@@ -111,6 +120,29 @@ export function createAccessController(atoms, options = {}) {
     restricted: true,
     async authorize(match, operation, field, actor = {}) {
       const targetPath = Array.isArray(match.path) ? match.path.join('/') : match.path;
+      const slotLock = operation === 'write'
+        ? slotStructureLockAtPath(atoms, targetPath)
+        : null;
+      const createdPartners = actor.createdAtom
+        ? oneStoredField(actor.createdAtom, 'partners')?.value ?? []
+        : [];
+      if (slotLock?.locked && createdPartners.some((relation) => (
+        relation?.verb === '槽模角色'
+      ))) {
+        return {
+          decision: 'deny', code: 'SLOT_ROLE_FORGERY_DENIED',
+          lockKind: 'slot-structure-lock', matchedLocks: []
+        };
+      }
+      if (slotLock?.mappedSelf
+        && actor.slotMaterialCreate !== true
+        && actor.slotMaterialMove !== true
+        && actor.slotReseal !== true) {
+        return {
+          decision: 'deny', code: 'SLOT_STRUCTURE_LOCK_DENIED',
+          lockKind: 'slot-structure-lock', matchedLocks: []
+        };
+      }
       if (programLockIndex) {
         const decision = authorizeProgramLock({
           lockIndex: programLockIndex, targetPath, operation, field,
@@ -123,15 +155,29 @@ export function createAccessController(atoms, options = {}) {
         });
         if (decision.decision !== 'allow') return decision;
       }
-      if (!access || access.global === true) return { decision: 'allow', matchedLocks: [] };
-      return evaluateLockAccess({
-        locks,
-        registry,
-        operation,
-        window: access.window,
-        keys: access.keys ?? [],
-        target: { name: oneStoredField(match.atom, 'name')?.value ?? match.name ?? null, path: targetPath }
-      });
+      if (access && access.global !== true) {
+        const legacyDecision = evaluateLockAccess({
+          locks,
+          registry,
+          operation,
+          window: access.window,
+          keys: access.keys ?? [],
+          target: { name: oneStoredField(match.atom, 'name')?.value ?? match.name ?? null, path: targetPath }
+        });
+        if (legacyDecision.decision !== 'allow') return legacyDecision;
+      }
+      if (selfLockActive
+        && actor.slotMaterialCreate !== true
+        && actor.slotMaterialMove !== true
+        && !authorizeWindowSelfLock({
+        policy: windowSelfLock, agentPath, targetPath, operation
+      })) {
+        return {
+          decision: 'deny', code: 'WINDOW_ACCESS_DENIED',
+          lockKind: 'window-self-lock', matchedLocks: []
+        };
+      }
+      return { decision: 'allow', matchedLocks: [] };
     }
   };
 }

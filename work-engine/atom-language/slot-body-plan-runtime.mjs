@@ -121,7 +121,7 @@ function resolveSupportTarget(source, relation, records) {
   return named.length === 1 ? named[0] : null;
 }
 
-function compilePlan(layout) {
+function compilePlan(layout, structureLock = null) {
   const records = modelRecords(layout);
   const roles = records.map((record) => {
     const roleId = roleIdFor(layout, record);
@@ -174,7 +174,10 @@ function compilePlan(layout) {
     || roleOrder.get(left.target_role_id) - roleOrder.get(right.target_role_id)
     || left.verb.localeCompare(right.verb)
   ));
-  const planBase = { schema: 'atom-slot-print-plan/v1', body: layout.bodyPath, roles, support };
+  const planBase = {
+    schema: 'atom-slot-print-plan/v1', body: layout.bodyPath, roles, support,
+    ...(structureLock === true ? { structureLock: true } : {})
+  };
   const revision = `sha256:${digest(stableStringify(planBase))}`;
   return { plan: { ...planBase, revision }, records };
 }
@@ -416,10 +419,10 @@ async function seal(atoms, effect, authorize) {
   const denied = await authorizeLayout(layout, authorize);
   if (denied) return { error: denied };
   if (!layout.sealed) layout = initialSeal(atoms, layout);
-  const compiled = compilePlan(layout);
+  const compiled = compilePlan(layout, effect.lock === true);
   if (compiled.error) return compiled;
   ensureRoleRecords(layout, compiled.plan);
-  const recompiled = compilePlan(layout);
+  const recompiled = compilePlan(layout, effect.lock === true);
   if (recompiled.error) return recompiled;
   const oldPlan = currentPlan(layout);
   appendRevision(layout, recompiled.plan);
@@ -534,11 +537,12 @@ export async function applyPlanSlotBodyEffect({
     ? Object.keys(effect)
     : [];
   const allowedKeys = effect?.action === 'seal'
-    ? ['action', 'body']
+    ? ['action', 'body', 'lock']
     : ['action', 'body', 'name', 'revision'];
   if (!effect || typeof effect !== 'object' || Array.isArray(effect)
     || !['seal', 'print'].includes(effect.action)
     || typeof effect.body !== 'string' || !effect.body.trim()
+    || (effect.lock !== undefined && typeof effect.lock !== 'boolean')
     || effectKeys.some((key) => !allowedKeys.includes(key))) {
     return { error: slotError('INVALID_SLOT_BODY_EFFECT', 'slot_body() 需要 seal 或带当前计划修订的 print') };
   }
@@ -562,6 +566,34 @@ export function readVisibleSlotPlans(atoms) {
     if (plan) plans.push({ layout, plan });
   }
   return plans;
+}
+
+export function slotStructureLockAtPath(atoms, targetPath) {
+  for (const { layout, plan } of readVisibleSlotPlans(atoms)) {
+    if (plan.structureLock !== true) continue;
+    const rolePaths = new Set();
+    for (const role of plan.roles.filter((entry) => entry.kind === 'slot')) {
+      rolePaths.add(roleTargetPath(layout, role, layout.modelPath));
+    }
+    for (const instance of childrenOf(layout.examples) ?? []) {
+      const instancePath = `${layout.examplesPath}/${atomName(instance)}`;
+      for (const role of plan.roles.filter((entry) => entry.kind === 'slot')) {
+        rolePaths.add(roleTargetPath(layout, role, instancePath));
+      }
+      if (targetPath === instancePath || targetPath.startsWith(`${instancePath}/`)) {
+        return {
+          locked: true,
+          mappedSelf: rolePaths.has(targetPath),
+          instancePath,
+          rolePaths
+        };
+      }
+    }
+    if (targetPath === layout.modelPath || targetPath.startsWith(`${layout.modelPath}/`)) {
+      return { locked: true, mappedSelf: rolePaths.has(targetPath), instancePath: null, rolePaths };
+    }
+  }
+  return { locked: false, mappedSelf: false, instancePath: null, rolePaths: new Set() };
 }
 
 function planAtRevision(layout, revision) {

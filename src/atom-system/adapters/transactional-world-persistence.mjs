@@ -74,13 +74,15 @@ export function createTransactionalWorldPersistence({
     expectedRevision,
     nextRevision,
     facts,
-    source = 'legacy-interaction'
+    source = 'legacy-interaction',
+    registrationChange = null
   }) {
     await recover();
     const current = await worldRepository.read();
     if (
       agentRegistrationCount(facts) < agentRegistrationCount(current.facts)
       && !explicitlyChangesRegistration(source)
+      && registrationChange !== 'window-recycle'
     ) {
       throw problem(
         'AGENT_REGISTRATION_LOSS',

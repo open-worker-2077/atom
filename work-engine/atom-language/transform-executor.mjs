@@ -772,7 +772,13 @@ export async function applyTransform({
         const denied = programLockDeniedDiagnostic(decision, field);
         return { error: diagnostic(denied.code, denied.message, denied.details) };
       }
-      return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权执行该改造；请反馈派发方', { field }) };
+      return { error: diagnostic(
+        decision.code ?? 'WINDOW_ACCESS_DENIED',
+        decision.code === 'SLOT_STRUCTURE_LOCK_DENIED'
+          ? '槽体映射槽 self Transform 已被结构锁拒绝'
+          : '当前窗口无权执行该改造；请反馈派发方',
+        { field }
+      ) };
     }
   }
   const selectedAtoms = new Set([selected.match.atom]);
@@ -857,11 +863,24 @@ export async function applyTransform({
       ? { match: { atom: null, path: [], parent: null, index: -1 } }
       : resolveUnique(nextAtoms, command.parameter, exactIndex);
     if (destination.error) return destination;
-    if (!worldRootDestination && (await authorize(destination.match, 'write')).decision !== 'allow') {
+    const targetName = storedField(target.atom, 'name').value;
+    const futurePath = worldRootDestination
+      ? targetName
+      : `${destination.match.path.join('/')}/${targetName}`;
+    if ((await authorize({
+      atom: target.atom,
+      path: futurePath.split('/')
+    }, 'write')).decision !== 'allow') {
+      return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权把该料移入目标位置；请反馈派发方') };
+    }
+    if (!worldRootDestination && (await authorize(
+      destination.match, 'write', 'children', { slotMaterialMove: true }
+    )).decision !== 'allow') {
       return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造目标位置；请反馈派发方') };
     }
-    if (command.name === 'mov' && destination.match.path.join('/').startsWith(
-      `${target.path.join('/')}/`
+    if (command.name === 'mov' && (
+      destination.match.path.join('/') === target.path.join('/')
+      || destination.match.path.join('/').startsWith(`${target.path.join('/')}/`)
     )) {
       return { error: diagnostic('ATOM_MOVE_CYCLE', '不能把 Atom 移入自身后代') };
     }
@@ -871,7 +890,6 @@ export async function applyTransform({
     if (!destinationChildren) {
       return { error: diagnostic('INVALID_ATOM_CHILDREN', '目标上级 children 不是数组') };
     }
-    const targetName = storedField(target.atom, 'name').value;
     const excluded = command.name === 'mov'
       && target.parent?.atom === destination.match.atom
       ? target.atom
