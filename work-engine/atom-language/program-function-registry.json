@@ -71,6 +71,11 @@
         },
         "evaluation": ["recycle", "when", "where-on-true"],
         "default": "guard-window",
+        "selfLockActivation": {
+          "trigger": "current-agent-jump-registration",
+          "timing": "same-program-cycle",
+          "unregisteredAgent": "legacy-access-behavior"
+        },
         "transaction": "central-atomic-commit",
         "coordinate": { "$ref": "#/runtimeTypes/ThingCoordinate" },
         "errors": [

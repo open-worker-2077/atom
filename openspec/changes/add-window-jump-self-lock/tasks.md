@@ -22,7 +22,7 @@
 
 ## 4. Window Self-Lock TDD
 
-- [x] 4.1 Add red default-read tests for current, all descendants, same-parent peers and the unique direct parent, plus denials for the parent's peers, higher ancestors, other branches and exact-path bypass attempts.
+- [x] 4.1 Add red activation/default-read tests proving an Agent without `jump` registration keeps legacy access, a `jump` registration immediately enables default self-lock, and activated defaults allow current, all descendants, same-parent peers and the unique direct parent while denying the parent's peers, higher ancestors, other branches and exact-path bypass attempts.
 - [x] 4.2 Add red default-write tests allowing descendant material creation/modification while denying current self, peers, direct parent, ancestors and other branches.
 - [x] 4.3 Add red rule-validation tests for independent read/write allow+deny arrays; `current`, absolute explore and current-relative explore starts; exact/parent/peers/descendant depth; positive integer priorities; and rejection of fuzzy/ref/invalid starts.
 - [x] 4.4 Add red precedence tests proving highest priority wins, same-priority allow/deny resolves deny, parent means one unique node, unmatched targets fall back to defaults and read/write never leak into each other.
@@ -42,7 +42,7 @@
 
 - [x] 6.1 Run focused red-green-refactor cycles for worker/runtime, scheduler, transaction, interaction access, Program locks, slot body, function registry and CLI Help; keep the exact failing/passing evidence.
 - [x] 6.2 Add/verify end-to-end CLI and Program tests for central commit/rollback, existing node locks, existing slot fill/reseal/support, full exact-path enforcement and no unrelated world scan.
-- [x] 6.3 Verify Help describes lock priority/tie/default fallback, direct absolute/current-relative `explore()[0]` objects, slot lock-off risk, allowed material fill and denied slot-self/forgery examples.
+- [x] 6.3 Verify Help describes `jump`-registration self-lock activation and unregistered-Agent compatibility, lock priority/tie/default fallback, direct absolute/current-relative `explore()[0]` objects, slot lock-off risk, allowed material fill and denied slot-self/forgery examples.
 
 ## 7. Local Candidate Verification and Commit
 

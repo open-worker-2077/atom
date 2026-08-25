@@ -143,6 +143,11 @@ test('registry and Help publish jump, changed, thing coordinates, and explicit s
     recycle: { format: 'exact-thing@program' },
     lock: { $ref: '#/definitions/window-self-lock' }
   });
+  assert.deepEqual(jump.contract.selfLockActivation, {
+    trigger: 'current-agent-jump-registration',
+    timing: 'same-program-cycle',
+    unregisteredAgent: 'legacy-access-behavior'
+  });
   assert.equal(changed.contract.dispatch, 'shared-transform-reverse-index');
   assert.equal(changed.contract.result, 'boolean');
   assert.equal(changed.contract.controlFlow, 'caller-explicit-short-circuit');
@@ -155,4 +160,6 @@ test('registry and Help publish jump, changed, thing coordinates, and explicit s
   assert.match(stdout.value(), /explore\(\{"thing":"EXACT.*@program"\}\)\[0\]/u);
   assert.match(stdout.value(), /不使用 \.ref/u);
   assert.match(stdout.value(), /if not changed\(\[.*\]\):[\s\S]*return/u);
+  assert.match(stdout.value(), /jump 注册.*立即进入受自锁窗口态/u);
+  assert.match(stdout.value(), /未注册 jump.*维持旧访问行为/u);
 });

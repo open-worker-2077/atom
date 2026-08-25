@@ -2,9 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createAccessController, walkAtoms } from '../work-engine/atom-language/query-capability.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
 function atom(name, children = [], type = '') {
   return { [`name${type ? `@${type}` : ''}`]: name, detail: '', children, partners: [] };
+}
+
+function program(name, detail) {
+  return { [`name@program`]: name, detail, children: [], partners: [] };
 }
 
 function world() {
@@ -27,6 +32,40 @@ function match(atoms, path) {
 async function decision(controller, atoms, path, operation) {
   return (await controller.authorize(match(atoms, path), operation, 'detail')).decision;
 }
+
+test('Agent without jump registration keeps legacy access instead of activating self-lock', async () => {
+  const atoms = world();
+  const agentPath = '祖先/父/窗口';
+  const cycle = await createProgramRuntimeScheduler().refresh(atoms, {
+    agentOrigin: { path: agentPath }
+  });
+  assert.deepEqual(cycle.windowSelfLockAgents, []);
+
+  const controller = createAccessController(atoms, {
+    agentPath,
+    enforceWindowSelfLock: cycle.windowSelfLockAgents.includes(agentPath)
+  });
+  assert.equal(await decision(controller, atoms, '祖先', 'read'), 'allow');
+  assert.equal(await decision(controller, atoms, agentPath, 'write'), 'allow');
+});
+
+test('jump registration activates default self-lock in the same Program cycle', async () => {
+  const atoms = [...world(), program('守窗注册', 'jump({})')];
+  const agentPath = '祖先/父/窗口';
+  const cycle = await createProgramRuntimeScheduler().refresh(atoms, {
+    agentOrigin: { path: agentPath }
+  });
+  assert.deepEqual(cycle.windowSelfLockAgents, [agentPath]);
+  assert.deepEqual(cycle.jumps, [{ action: 'guard', sourceProgramPath: '守窗注册' }]);
+
+  const controller = createAccessController(atoms, {
+    agentPath,
+    enforceWindowSelfLock: cycle.windowSelfLockAgents.includes(agentPath)
+  });
+  assert.equal(await decision(controller, atoms, '祖先', 'read'), 'deny');
+  assert.equal(await decision(controller, atoms, agentPath, 'write'), 'deny');
+  assert.equal(await decision(controller, atoms, agentPath, 'read'), 'allow');
+});
 
 test('default window self-lock reads current, descendants, peers and only the direct parent', async () => {
   const atoms = world();

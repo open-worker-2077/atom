@@ -11,7 +11,7 @@ The baseline still exposes legacy AtomView fields internally, while the separate
 - Make jump/recycle, self-lock enforcement, slot structural locking and their derived rebinding part of the existing candidate transaction.
 - Reuse the current reverse indexes, nested Program invocation, authorization controller, lock snapshot discipline and slot-body stable-role plan.
 - Keep exact coordinates opaque to Program authors: an object returned by `explore()` is accepted directly, and only the engine resolves its identity.
-- Keep default self-lock computable from the current Agent position, with only explicit overrides requiring a snapshot.
+- Activate self-lock only when the current Agent emits a `jump` registration; keep its default computable from position and require snapshots only for explicit overrides, while legacy Agents without `jump` retain their old access behavior.
 - Provide a non-role-based recovery route for explicit self-lock overrides without creating an unlocked active window.
 
 **Non-Goals:**
@@ -54,7 +54,9 @@ Alternative considered: rewrite the shared template's support endpoints to the n
 
 ### Compute defaults and store only explicit self-lock overrides
 
-The authorization controller gains a second, independent decision after exact resolution and before fact exposure/mutation. The default read/write sets are calculated from the current Agent path and candidate contain tree, so a move automatically changes them without persistent duplicate facts. Explicit `jump.lock` is normalized to two independently evaluated rule sides:
+The current Agent enters the self-locked window state when its Program cycle emits a valid `jump` registration result. The scheduler carries that activation into the same candidate authorization pass, including guard registrations that do not move in the current cycle. An Agent cycle without a `jump` result does not activate either default or explicit window self-lock, preserving legacy non-jump Agent behavior.
+
+For an activated window, the authorization controller gains a second, independent decision after exact resolution and before fact exposure/mutation. The default read/write sets are calculated from the current Agent path and candidate contain tree, so a move automatically changes them without persistent duplicate facts. Explicit `jump.lock` is normalized to two independently evaluated rule sides:
 
 ```json
 {
@@ -83,7 +85,7 @@ Alternative considered: persist default boundaries on every Agent. They are deri
 
 ### Reuse request-driven lock replacement for external recovery
 
-The existing `lock()` result gains an optional, mutually exclusive window-self-lock form whose target is one exact Agent Thing coordinate and whose value is the same `{read,write}` policy. It uses `refresh.policy: "on_request"`: a successful explicit run atomically replaces the source Program's target override; emitting no window-self-lock entry removes that explicit override and restores the always-present default.
+The existing `lock()` result gains an optional, mutually exclusive window-self-lock form whose target is one exact Agent Thing coordinate and whose value is the same `{read,write}` policy. It uses `refresh.policy: "on_request"`: a successful explicit run atomically replaces the source Program's target override; emitting no window-self-lock entry removes that explicit override and restores the default for an activated `jump` window.
 
 Before replacement, the caller must be able to write the exact target Agent through both its own self-lock and all ordinary node locks. If caller and target are the same Agent, the subset-only rule still applies; a different reachable caller may broaden, narrow or remove the override. No role, Agent type or named controller is privileged. Recycling the target removes its override. This is the minimum recovery mechanism: there is no active window with self-lock disabled and no hidden bypass.
 
