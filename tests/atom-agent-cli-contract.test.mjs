@@ -489,6 +489,7 @@ test('public help is a complete daily Agent operation contract', async () => {
   assert.match(text, /partners（返回每个匹配 Atom 的完整有向关系数组/u);
   assert.match(text, /读取投影推荐使用标准 JSON true/u);
   assert.match(text, /任一项失败整批不写；成功后整批只做一次权威提交/u);
+  assert.match(text, /批量改名按最终状态统一校验/u);
   assert.match(text, /children\$latitude\+1.*children\$latitude-1/u);
   assert.match(text, /children\$longitude\+1.*children\$longitude-1/u);
   assert.doesNotMatch(text, /±N/u);

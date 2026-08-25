@@ -359,6 +359,37 @@ test('a name-only Program lock permits detail edits but denies rename', async ()
   assert.equal(rename.errors[0].code, 'PROGRAM_LOCK_DENIED');
 });
 
+test('batch rename preflights descendant locks with authoritative full paths', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-batch-rename-lock-'));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('域', '', [
+      atom('甲', '', [atom('受保护后代')]),
+      atom('乙')
+    ]),
+    atom('后代锁', [
+      "target = explore({'name': '域/甲/受保护后代'})[0]",
+      "lock({'targets': {'refs': [target.ref]}, 'mode': 'write', 'fields': ['children']})"
+    ].join('\n'), [], 'program')
+  ], null, 2));
+  const before = await fs.readFile(contextFile, 'utf8');
+
+  const result = await executeAtomLanguage({
+    source: `transform ${JSON.stringify([
+      { 'name.ren.新甲': '域/甲' },
+      { 'name.ren.新乙': '域/乙' }
+    ])}`,
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'WINDOW_ACCESS_DENIED');
+  assert.equal(await fs.readFile(contextFile, 'utf8'), before);
+});
+
 test('explore returns the applicable write-lock summary before an Agent attempts a change', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-lock-summary-'));
   const contextFile = path.join(directory, 'atom.json');

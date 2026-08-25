@@ -158,6 +158,73 @@ test('batch Transform moves multiple existing Atoms in one authoritative commit'
   assert.deepEqual(current[0].children.map((item) => item.name), ['来源甲', '来源乙']);
 });
 
+test('batch Transform swaps sibling names from one final-state plan and rewrites relations once', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-transform-batch-rename-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, `${JSON.stringify([
+    {
+      ...atom('域'),
+      children: [
+        { ...atom('甲'), children: [atom('甲子')] },
+        atom('乙'),
+        atom('观察者', '', [{ verb: '指向', object: '域/甲/甲子' }])
+      ]
+    }
+  ], null, 2)}\n`, 'utf8');
+  const writes = [];
+  const world = createLegacyWorldService({
+    onAuthoritativeWrite: (write) => writes.push(write)
+  });
+
+  const result = await world.executeLegacy({
+    contextFile,
+    projectionFile,
+    source: `transform ${JSON.stringify([
+      { 'name.ren.乙': '域/甲' },
+      { 'name.ren.甲': '域/乙' }
+    ])}`
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(writes.length, 1);
+  assert.deepEqual(
+    result.results.map(({ result: item }) => item.path),
+    ['域/乙', '域/甲']
+  );
+  const [domain] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.deepEqual(domain.children.map((child) => child.name), ['乙', '甲', '观察者']);
+  assert.equal(domain.children[0].children[0].name, '甲子');
+  assert.deepEqual(
+    domain.children[2].partners,
+    [{ verb: '指向', object: '域/乙/甲子' }]
+  );
+});
+
+test('batch Transform rejects a final sibling-name collision without writing any item', async (t) => {
+  const files = await fixture(t);
+  const before = await fs.readFile(files.contextFile, 'utf8');
+  const writes = [];
+  const world = createLegacyWorldService({
+    onAuthoritativeWrite: (write) => writes.push(write)
+  });
+
+  const result = await world.executeLegacy({
+    ...files,
+    source: `transform ${JSON.stringify([
+      { 'name.ren.共同名称': '来源甲' },
+      { 'name.ren.共同名称': '来源乙' }
+    ])}`
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.changed, false);
+  assert.equal(result.errors[0].code, 'DUPLICATE_DESTINATION_CHILD');
+  assert.equal(writes.length, 0);
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
+});
+
 test('batch receipts preserve the exact path when short names repeat', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-transform-batch-path-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

@@ -305,6 +305,16 @@ export function transformChangesStructure(item) {
   ));
 }
 
+export function isBatchRenameItem(item) {
+  return item.fields.length === 1
+    && item.fields[0].baseKey === 'name'
+    && item.fields[0].valuePresent
+    && typeof item.fields[0].value === 'string'
+    && item.fields[0].value.length > 0
+    && item.fields[0].commands.length === 1
+    && item.fields[0].commands[0].name === 'ren';
+}
+
 function containerOf(atoms, match) {
   if (!match.parent) return atoms;
   return storedField(match.parent.atom, 'children').value;
@@ -387,6 +397,133 @@ function applyNameMetadata(target, field) {
     description: current.parsed.description
   });
   return null;
+}
+
+export async function applyBatchRenames({
+  atoms,
+  items,
+  contextFile,
+  authorize = async () => ({ decision: 'allow' })
+}) {
+  const nextAtoms = structuredClone(atoms);
+  const exactIndex = createExactTransformIndex(nextAtoms);
+  const rootName = path.basename(contextFile);
+  const partnerBindings = capturePartnerBindings(nextAtoms, rootName);
+  const plans = [];
+  const planByAtom = new Map();
+
+  for (const item of items) {
+    const nameField = item.fields[0];
+    const rename = nameField.commands[0];
+    const invalid = validateParameter(rename);
+    if (invalid) return { error: invalid, itemIndex: item.index };
+    const selected = resolveUnique(nextAtoms, nameField.value, exactIndex);
+    if (selected.error) return { error: selected.error, itemIndex: item.index };
+    if (planByAtom.has(selected.match.atom)) {
+      return {
+        error: diagnostic(
+          'DUPLICATE_TRANSFORM_BATCH_TARGET',
+          `批量 transform 重复改造同一 Atom：${nameField.value}`
+        ),
+        itemIndex: item.index
+      };
+    }
+    const plan = {
+      item,
+      nameField,
+      rename,
+      match: selected.match,
+      sourcePath: selected.match.path.join('/'),
+      before: JSON.stringify(selected.match.atom)
+    };
+    plans.push(plan);
+    planByAtom.set(selected.match.atom, plan);
+  }
+
+  const affectedContainers = new Set(plans.map((plan) => containerOf(nextAtoms, plan.match)));
+  for (const container of affectedContainers) {
+    const names = new Map();
+    for (const atom of container) {
+      const plan = planByAtom.get(atom);
+      const name = plan?.rename.parameter ?? storedField(atom, 'name')?.value;
+      if (names.has(name)) {
+        const duplicatePlan = plan ?? planByAtom.get(names.get(name));
+        return {
+          error: diagnostic(
+            'DUPLICATE_DESTINATION_CHILD',
+            `批量改名后的同一 children 中会出现重名 Atom：${name}`
+          ),
+          itemIndex: duplicatePlan?.item.index ?? 0
+        };
+      }
+      names.set(name, atom);
+    }
+  }
+
+  const selectedAtoms = new Set();
+  const ownerPlanByAtom = new Map();
+  const authoritativeMatches = walkAtoms(nextAtoms);
+  for (const plan of plans) {
+    const decision = await authorize(plan.match, 'write', 'name');
+    if (decision.decision !== 'allow') {
+      if (decision.matched) {
+        const denied = programLockDeniedDiagnostic(decision, 'name');
+        return {
+          error: diagnostic(denied.code, denied.message, denied.details),
+          itemIndex: plan.item.index
+        };
+      }
+      return {
+        error: diagnostic(
+          'WINDOW_ACCESS_DENIED',
+          '当前窗口无权执行该批量改名；请反馈派发方',
+          { field: 'name' }
+        ),
+        itemIndex: plan.item.index
+      };
+    }
+    const subtreeAtoms = new Set(walkAtoms([plan.match.atom]).map((match) => match.atom));
+    subtreeAtoms.forEach((atom) => {
+      selectedAtoms.add(atom);
+      if (!ownerPlanByAtom.has(atom)) ownerPlanByAtom.set(atom, plan);
+    });
+    for (const descendant of authoritativeMatches.filter((match) => (
+      match.atom !== plan.match.atom && subtreeAtoms.has(match.atom)
+    ))) {
+      if ((await authorize(descendant, 'write', 'children')).decision !== 'allow') {
+        return {
+          error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造该批量改名子树；请反馈派发方'),
+          itemIndex: plan.item.index
+        };
+      }
+    }
+  }
+
+  const matchesByAtom = new Map(authoritativeMatches.map((match) => [match.atom, match]));
+  for (const binding of partnerBindings) {
+    if (!selectedAtoms.has(binding.targetAtom) || selectedAtoms.has(binding.sourceAtom)) continue;
+    const source = matchesByAtom.get(binding.sourceAtom);
+    if (source && (await authorize(source, 'write')).decision !== 'allow') {
+      return {
+        error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改写指向批量改名子树的关系；请反馈派发方'),
+        itemIndex: ownerPlanByAtom.get(binding.targetAtom)?.item.index ?? 0
+      };
+    }
+  }
+
+  for (const plan of plans) applyNameMetadata(plan.match.atom, plan.nameField);
+  rewritePartnerBindings(nextAtoms, partnerBindings);
+  const finalMatches = new Map(walkAtoms(nextAtoms).map((match) => [match.atom, match]));
+  return {
+    atoms: nextAtoms,
+    results: plans.map((plan) => ({
+      index: plan.item.index,
+      sourcePath: plan.sourcePath,
+      resultPath: finalMatches.get(plan.match.atom)?.path.join('/') ?? null,
+      resultName: storedField(plan.match.atom, 'name').value,
+      changed: JSON.stringify(plan.match.atom) !== plan.before
+    }))
+  };
 }
 
 function immediateChildren(atom) {

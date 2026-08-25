@@ -31,8 +31,10 @@ function relevantProgramMessages(items, messages) {
 import { createAtomLanguageReceiver } from './receiver.mjs';
 import {
   appendTransformLog,
+  applyBatchRenames,
   applyTransform,
   createExactTransformIndex,
+  isBatchRenameItem,
   transformChangesStructure
 } from './transform-executor.mjs';
 import {
@@ -512,17 +514,30 @@ export async function executeAtomLanguage(options = {}) {
     )]);
   }
   if (parsed.command === 'transform' && parsed.batch) {
+    const renameBatch = parsed.items.every(isBatchRenameItem);
+    const hasRename = parsed.items.some((item) => item.fields.some((field) => (
+      field.baseKey === 'name'
+      && field.commands.some((command) => command.name === 'ren')
+    )));
+    if (hasRename && !renameBatch) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+        'UNSUPPORTED_MIXED_BATCH_RENAME',
+        '批量改名必须由纯 name.ren 项组成；请将移动、detail 与 partners 放入另一批事务'
+      )]);
+    }
     const unsupported = parsed.items.flatMap((item) => item.fields
       .filter((field) => (
         !['name', 'detail', 'partners'].includes(field.baseKey)
-        || (field.baseKey === 'name' && field.commands.some((command) => command.name !== 'mov'))
+        || (field.baseKey === 'name' && field.commands.some((command) => (
+          command.name !== 'mov' && !(renameBatch && command.name === 'ren')
+        )))
       ))
       .map((field) => ({ item, field })))[0];
     if (unsupported) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [{
         ...diagnostic(
           'UNSUPPORTED_TRANSFORM_BATCH_AXIS',
-          '批量 transform 当前支持已有 Atom 的移动、detail 与 partners 改造',
+          '批量 transform 当前支持已有 Atom 的纯批量改名、移动、detail 与 partners 改造',
           { axis: unsupported.field.baseKey }
         ),
         itemIndex: unsupported.item.index
@@ -1175,7 +1190,37 @@ export async function executeAtomLanguage(options = {}) {
     const results = [];
     const transformLogs = [];
     const transformEventNodes = new Set();
-    for (const candidate of parsed.items) {
+    const renameBatch = parsed.items.every(isBatchRenameItem);
+    if (renameBatch) {
+      const renamed = await applyBatchRenames({
+        atoms: nextAtoms,
+        items: parsed.items,
+        contextFile,
+        authorize: accessController.authorize
+      });
+      if (renamed.error) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [{
+          ...renamed.error,
+          itemIndex: renamed.itemIndex
+        }], { messages: interactionMessages });
+      }
+      nextAtoms = renamed.atoms;
+      const matchesByPath = new Map(walkAtoms(nextAtoms).map((match) => [
+        match.path.join('/'), match
+      ]));
+      for (const renamedItem of renamed.results) {
+        const resultMatch = matchesByPath.get(renamedItem.resultPath);
+        results.push({
+          index: renamedItem.index,
+          changed: renamedItem.changed,
+          result: resultMatch ? describeAtom(resultMatch, false) : null
+        });
+        for (const path of [renamedItem.sourcePath, renamedItem.resultPath]) {
+          if (path) transformEventNodes.add(path);
+        }
+      }
+    }
+    for (const candidate of renameBatch ? [] : parsed.items) {
       let transformed;
       try {
         transformed = await applyTransform({
