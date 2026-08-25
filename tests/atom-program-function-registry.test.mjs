@@ -8,8 +8,8 @@ import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 function output() {
@@ -154,7 +154,7 @@ test('public registry exposes the deferred Program Transform create and update c
 
   assert.deepEqual(transform.contract.argument, { type: 'object', name: 'spec' });
   assert.deepEqual(transform.contract.create.requiredAxes, [
-    'name', 'detail', 'children', 'partners'
+    'thing', 'situation', 'contain', 'support'
   ]);
   assert.equal(transform.contract.create.dotCommands, 'forbidden');
   assert.equal(transform.contract.update.dotCommands, 'supported');
@@ -185,6 +185,8 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   assert.equal(Object.hasOwn(slotBody.contract.revisionSync, 'batch'), false);
   assert.equal(Object.hasOwn(slotBody.contract.argument.properties, 'limit'), false);
   assert.equal(Object.hasOwn(slotBody.contract.argument.properties, 'cursor'), false);
+  assert.match(slotBody.contract.development.scopeBinding, /thing\.run/u);
+  assert.doesNotMatch(slotBody.contract.development.scopeBinding, /name\.run/u);
   assert.equal(slotBody.contract.transaction, 'central-atomic-commit');
   assert.deepEqual(slotBody.contract.confirmation, ['interaction-receipt', 'exact-explore']);
   assert.ok(slotBody.contract.errors.includes('SLOT_MATERIAL_CONTAINMENT_CONFLICT'));
@@ -198,7 +200,9 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   assert.match(stdout.value(), /普通可自运行候选 DataFlow/u);
   assert.match(stdout.value(), /槽模／print@program／槽例/u);
   assert.match(stdout.value(), /use_program[\s\S]*revision/u);
-  assert.match(stdout.value(), /\.\/相对contain路径[\s\S]*当前槽例域/u);
+  assert.match(stdout.value(), /thing\.run\.EXACT候选根路径[\s\S]*\.\/相对 contain 路径[\s\S]*当前槽例域/u);
+  assert.match(stdout.value(), /"thing":"EXACT槽体\/槽例\/实例\/槽"[\s\S]*situation\.rep\.填写值/u);
+  assert.doesNotMatch(stdout.value(), /name\.run\.EXACT候选根路径|detail\.rep\.填写值/u);
   assert.match(stdout.value(), /本地料 Thing[\s\S]*逐字节/u);
   assert.match(stdout.value(), /SLOT_MATERIAL_CONTAINMENT_CONFLICT[\s\S]*不产生半份槽例/u);
   assert.doesNotMatch(stdout.value(), /next_cursor|SLOT_SYNC_CURSOR|三方比较/u);
@@ -260,7 +264,7 @@ test('public registry exposes the complete window-aware Program lock contract', 
     additionalProperties: false,
     properties: { policy: { const: 'on_request' } }
   });
-  assert.equal(lock.contract.recompute.command, 'transform {"name.run.":"EXACT_PROGRAM_PATH"}');
+  assert.equal(lock.contract.recompute.command, 'transform {"thing.run.":"EXACT_PROGRAM_PATH"}');
   assert.equal(lock.contract.denial.write, 'PROGRAM_LOCK_DENIED');
   assert.equal(lock.contract.denial.read, 'truncate');
   assert.deepEqual(lock.contract.compatibility, { legacyAllowedWindows: 'paths' });
@@ -332,7 +336,7 @@ test('CLI Help explains window allowlists and explicit lock recomputation', asyn
   assert.match(stdout.value(), /移动后[\s\S]*无需[\s\S]*重算/u);
   assert.match(stdout.value(), /target_types[\s\S]*when\.actions[\s\S]*explore／transform/u);
   assert.match(stdout.value(), /守窗、跳窗、关窗和滚动绑定[\s\S]*内核不写死/u);
-  assert.match(stdout.value(), /refresh[\s\S]*on_request[\s\S]*name\.run\./u);
+  assert.match(stdout.value(), /refresh[\s\S]*on_request[\s\S]*thing\.run\./u);
   assert.match(stdout.value(), /PROGRAM_LOCK_DENIED[\s\S]*旧锁快照/u);
 });
 
@@ -343,7 +347,7 @@ test('CLI Help explains Program Transform creation, compatibility and confirmati
 
   assert.equal(code, 0, stderr.value());
   assert.match(stdout.value(), /Program transform 创建/u);
-  assert.match(stdout.value(), /name[\s\S]*detail[\s\S]*children[\s\S]*partners/u);
+  assert.match(stdout.value(), /thing[\s\S]*situation[\s\S]*contain[\s\S]*support/u);
   assert.match(stdout.value(), /完整四轴[\s\S]*无点号指令[\s\S]*创建/u);
   assert.match(stdout.value(), /点号指令[\s\S]*更新/u);
   assert.match(stdout.value(), /返回 None[\s\S]*交互回执[\s\S]*exact explore/u);
@@ -390,7 +394,7 @@ test('CLI Help exposes JSON detail processing without opening import or eval', a
   assert.match(stdout.value(), /json_parse\(\{"text":"\.\.\."\}\)/u);
   assert.match(stdout.value(), /json_stringify\(\{"value":\.\.\.,"indent"\?:0\.\.8\}\)/u);
   assert.match(stdout.value(), /默认紧凑[\s\S]*NaN[\s\S]*Infinity[\s\S]*非 JSON 值/u);
-  assert.match(stdout.value(), /不开放 import\/eval[\s\S]*detail\.rep\./u);
+  assert.match(stdout.value(), /不开放 import\/eval[\s\S]*situation\.rep\./u);
   assert.match(stdout.value(), /失败将终止整个 Program 评估[\s\S]*不发布已登记效果/u);
 });
 

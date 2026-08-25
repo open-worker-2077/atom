@@ -53,6 +53,6 @@
 
 ## 8. Total-Control External Gates
 
-- [ ] 8.1 Total control merges the independent four-axis adapter seam, resolves integration conflicts and reruns combined automated verification.
+- [x] 8.1 Total control merges the independent four-axis adapter seam, resolves integration conflicts and reruns combined automated verification.
 - [ ] 8.2 Total control loads the candidate into the exclusive shared 4784 runtime and verifies its live Help/registry contract.
 - [ ] 8.3 Total control performs isolated Atom `test`/ESG acceptance and human review, then alone decides merge and push; this branch does not modify formal Atom or ESG data.

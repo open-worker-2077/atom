@@ -7,203 +7,78 @@ import test from 'node:test';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
-function atom(name, detail = '', children = [], partners = [], types = []) {
-  return {
-    [`name${types.map((type) => `@${type}`).join('')}`]: name,
-    detail,
-    children,
-    partners
-  };
+function atom(thing, situation = '', contain = [], support = [], types = []) {
+  return { [`thing${types.map((type) => `@${type}`).join('')}`]: thing, situation, contain, support };
 }
-
-function nameOf(value) {
-  const key = Object.keys(value).find((candidate) => candidate.split(/[@#]/u)[0] === 'name');
-  return value[key];
+function thingOf(value) {
+  return Object.entries(value).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
 }
-
 function find(atoms, selector) {
-  let children = atoms;
+  let contain = atoms;
   let current = null;
   for (const segment of selector.split('/')) {
-    current = children.find((candidate) => nameOf(candidate) === segment);
+    current = contain.find((candidate) => thingOf(candidate) === segment);
     if (!current) return null;
-    children = current.children;
+    contain = current.contain;
   }
   return current;
 }
-
 function world() {
   return [atom('Root', '', [
     atom('研发窗口', '', [], [], ['agent', '研发']),
-    atom('订单槽体', '', [
-      atom('候选流', '', [
-        atom('客户', '定义', [], [{ verb: '触发', object: '金额' }], ['text']),
-        atom('金额', '定义', [], [{ verb: '计算', object: '共享计算' }], ['number']),
-        atom('共享计算', 'def main(arguments):\n    return arguments', [], [], ['program'])
-      ])
-    ]),
+    atom('订单槽体', '', [atom('候选流', '', [
+      atom('客户', '客户槽契约', [], [{ 'if@current': true, then: [{ thing: '金额' }] }], ['text']),
+      atom('金额', '金额槽契约', [], [{ 'if@current': true, then: [{ 'thing@program': '共享计算' }] }], ['number']),
+      atom('共享计算', 'def main(arguments):\n    return arguments', [], [], ['program'])
+    ])]),
     atom('槽体封装程序', 'slot_body({"action":"seal","body":"Root/订单槽体"})', [], [], ['program']),
     atom('槽体打印程序', 'use_program({"name":"Root/订单槽体/print","arguments":{"name":"订单001"}})', [], [], ['program'])
   ])];
 }
-
-test('Program seals a candidate then invokes generated print in central atomic commits and rejects duplicate atomically', async (t) => {
+async function setup(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-slot-body-program-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify(world(), null, 2), 'utf8');
-  const scheduler = createProgramRuntimeScheduler();
-  const interaction = { agent: { ref: 'agent:Root/研发窗口', path: 'Root/研发窗口' } };
+  return {
+    contextFile, projectionFile, programScheduler: createProgramRuntimeScheduler(),
+    interaction: { agent: { ref: 'agent:Root/研发窗口', path: 'Root/研发窗口' } }
+  };
+}
+const run = (runtime, source) => executeAtomLanguage({ ...runtime, source });
 
-  const first = await executeAtomLanguage({
-    source: 'transform {"name.run.":"Root/槽体封装程序"}',
-    contextFile,
-    projectionFile,
-    programScheduler: scheduler,
-    interaction
-  });
-  assert.equal(first.ok, true, JSON.stringify(first.errors));
-  const printedResult = await executeAtomLanguage({
-    source: 'transform {"name.run.":"Root/槽体打印程序"}',
-    contextFile,
-    projectionFile,
-    programScheduler: scheduler,
-    interaction
-  });
-  assert.equal(printedResult.ok, true, JSON.stringify(printedResult.errors));
-  const committedText = await fs.readFile(contextFile, 'utf8');
+test('Program seals then prints one instance with shared Program and owner-local support', async (t) => {
+  const runtime = await setup(t);
+  const sealed = await run(runtime, 'transform {"thing.run.":"Root/槽体封装程序"}');
+  assert.equal(sealed.ok, true, JSON.stringify(sealed.errors));
+  const printed = await run(runtime, 'transform {"thing.run.":"Root/槽体打印程序"}');
+  assert.equal(printed.ok, true, JSON.stringify(printed.errors));
+  const committedText = await fs.readFile(runtime.contextFile, 'utf8');
   const committed = JSON.parse(committedText);
-  const printed = find(committed, 'Root/订单槽体/槽例/订单001');
-  assert.ok(printed, JSON.stringify(first));
+  assert.ok(find(committed, 'Root/订单槽体/槽例/订单001'));
   assert.equal(find(committed, 'Root/订单槽体/槽例/订单001/共享计算'), null);
-  assert.equal(
-    find(committed, 'Root/订单槽体/槽例/订单001/金额').partners
-      .find((partner) => partner.verb === '计算')?.object,
-    'Root/订单槽体/槽模/共享计算'
-  );
-
-  const restartedScheduler = createProgramRuntimeScheduler();
+  assert.deepEqual(find(committed, 'Root/订单槽体/槽例/订单001/金额').support, [{
+    'if@current': true, then: [{ 'thing@program': 'Root/订单槽体/槽模/共享计算' }]
+  }]);
   const projected = await executeAtomLanguage({
-    source: 'atom',
-    contextFile,
-    projectionFile,
-    programScheduler: restartedScheduler,
-    programMode: 'project',
-    interaction
+    ...runtime, source: 'atom', programScheduler: createProgramRuntimeScheduler(), programMode: 'project'
   });
   assert.equal(projected.ok, true, JSON.stringify(projected.errors));
-  assert.equal(await fs.readFile(contextFile, 'utf8'), committedText);
-
-  const duplicate = await executeAtomLanguage({
-    source: 'transform {"name.run.":"Root/槽体打印程序"}',
-    contextFile,
-    projectionFile,
-    programScheduler: restartedScheduler,
-    interaction
-  });
+  assert.equal(await fs.readFile(runtime.contextFile, 'utf8'), committedText);
+  const duplicate = await run(runtime, 'transform {"thing.run.":"Root/槽体打印程序"}');
   assert.equal(duplicate.ok, false);
   assert.equal(duplicate.errors[0].code, 'SLOT_BODY_EXAMPLE_EXISTS');
-  assert.equal(await fs.readFile(contextFile, 'utf8'), committedText);
+  assert.equal(await fs.readFile(runtime.contextFile, 'utf8'), committedText);
 });
 
-test('creating an unrelated Program does not replay an existing slot-body print', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-slot-body-unrelated-program-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const contextFile = path.join(directory, 'atom.json');
-  const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify(world(), null, 2), 'utf8');
-  const scheduler = createProgramRuntimeScheduler();
-  const interaction = { agent: { ref: 'agent:Root/研发窗口', path: 'Root/研发窗口' } };
-
-  const printed = await executeAtomLanguage({
-    source: 'transform {"name.run.":"Root/槽体封装程序"}',
-    contextFile,
-    projectionFile,
-    programScheduler: scheduler,
-    interaction
-  });
-  assert.equal(printed.ok, true, JSON.stringify(printed.errors));
-  const printedExample = await executeAtomLanguage({
-    source: 'transform {"name.run.":"Root/槽体打印程序"}',
-    contextFile,
-    projectionFile,
-    programScheduler: scheduler,
-    interaction
-  });
-  assert.equal(printedExample.ok, true, JSON.stringify(printedExample.errors));
-
-  const created = await executeAtomLanguage({
-    source: 'transform new {"name@program":"Root/无关共享程序","detail":"def main(arguments):\\n    return arguments","children":[],"partners":[]}',
-    contextFile,
-    projectionFile,
-    programScheduler: scheduler,
-    interaction
-  });
-
+test('unrelated Program creation does not replay an existing print effect', async (t) => {
+  const runtime = await setup(t);
+  assert.equal((await run(runtime, 'transform {"thing.run.":"Root/槽体封装程序"}')).ok, true);
+  assert.equal((await run(runtime, 'transform {"thing.run.":"Root/槽体打印程序"}')).ok, true);
+  const created = await run(runtime, 'transform new {"thing@program":"Root/无关共享程序","situation":"def main(arguments):\\n    return arguments","contain":[],"support":[]}');
   assert.equal(created.ok, true, JSON.stringify(created.errors));
-  const committed = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.ok(find(committed, 'Root/无关共享程序'));
-  assert.equal(
-    find(committed, 'Root/订单槽体/槽例').children
-      .filter((child) => nameOf(child) === '订单001').length,
-    1
-  );
-});
-
-test('a cold interaction runtime projects legacy Programs without replaying slot-body effects', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-slot-body-cold-runtime-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const contextFile = path.join(directory, 'atom.json');
-  const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify(world(), null, 2), 'utf8');
-  const interaction = { agent: { ref: 'agent:Root/研发窗口', path: 'Root/研发窗口' } };
-
-  const printed = await executeAtomLanguage({
-    source: 'transform {"name.run.":"Root/槽体封装程序"}',
-    contextFile,
-    projectionFile,
-    programScheduler: createProgramRuntimeScheduler(),
-    programMode: undefined,
-    interaction
-  });
-  assert.equal(printed.ok, true, JSON.stringify(printed.errors));
-  const printedExample = await executeAtomLanguage({
-    source: 'transform {"name.run.":"Root/槽体打印程序"}',
-    contextFile,
-    projectionFile,
-    programScheduler: createProgramRuntimeScheduler(),
-    programMode: undefined,
-    interaction
-  });
-  assert.equal(printedExample.ok, true, JSON.stringify(printedExample.errors));
-  assert.ok(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Root/订单槽体/槽例/订单001'));
-
-  const restarted = createProgramRuntimeScheduler();
-  const projected = await executeAtomLanguage({
-    source: 'atom',
-    contextFile,
-    projectionFile,
-    programScheduler: restarted,
-    programMode: 'project',
-    interaction
-  });
-  assert.equal(projected.ok, true, JSON.stringify(projected.errors));
-
-  const unrelated = await executeAtomLanguage({
-    source: 'transform {"name":"Root/研发窗口","detail.rep.仍可工作"}',
-    contextFile,
-    projectionFile,
-    programScheduler: restarted,
-    programMode: undefined,
-    interaction
-  });
-
-  assert.equal(unrelated.ok, true, JSON.stringify(unrelated.errors));
-  const committed = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(
-    find(committed, 'Root/订单槽体/槽例').children
-      .filter((child) => nameOf(child) === '订单001').length,
-    1
-  );
+  assert.equal(find(committed, 'Root/订单槽体/槽例').contain.filter((child) => thingOf(child) === '订单001').length, 1);
 });

@@ -57,7 +57,7 @@ test('daily CLI requires one @agent origin and rejects retired session/window fl
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    { 'name@agent': 'Work Agent', detail: '', children: [], partners: [] }
+    { 'thing@agent': 'Work Agent', detail: '', children: [], partners: [] }
   ]));
   const stdout = output();
   const stderr = output();
@@ -108,8 +108,8 @@ test('maintenance session issuance accepts only exact unique @agent windows', as
   const contextFile = path.join(directory, 'atom.json');
   const sessionsDirectory = path.join(directory, 'sessions');
   await fs.writeFile(contextFile, `${JSON.stringify([
-    { 'name@agent': 'Work Agent', detail: '', children: [], partners: [] },
-    { name: 'Not Agent', detail: '', children: [], partners: [] }
+    { 'thing@agent': 'Work Agent', situation: '', contain: [], support: [] },
+    { thing: 'Not Agent', situation: '', contain: [], support: [] }
   ])}\n`);
 
   const issued = await issueWorldAgentSession({

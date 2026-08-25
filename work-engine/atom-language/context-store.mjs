@@ -13,10 +13,10 @@ const DEFAULT_CONTEXT_FILENAME = 'atom.json';
 const contextSnapshots = new Map();
 const contextLoads = new Map();
 const REQUIRED_ATOM_FIELDS = Object.freeze([
-  'name',
-  'detail',
-  'children',
-  'partners'
+  'thing',
+  'situation',
+  'contain',
+  'support'
 ]);
 
 function freezeSnapshot(value) {
@@ -118,7 +118,7 @@ function atomFields(atom, location) {
         { location, rawKey, persistentKey: parsed.persistentKey }
       );
     }
-    if (fields.has(parsed.baseKey)) {
+    if (fields.has(parsed.baseKey) && parsed.baseKey !== 'support') {
       throw atomLanguageError(
         'DUPLICATE_ATOM_FIELD',
         `${location} 重复声明基础字段 ${parsed.baseKey}`,
@@ -129,7 +129,7 @@ function atomFields(atom, location) {
         }
       );
     }
-    fields.set(parsed.baseKey, {
+    if (!fields.has(parsed.baseKey) || rawKey === 'support') fields.set(parsed.baseKey, {
       rawKey,
       parsed,
       value: atom[rawKey]
@@ -148,60 +148,75 @@ function atomFields(atom, location) {
   return fields;
 }
 
-function projectedPartner(partner, rootName) {
-  const projected = structuredClone(partner);
-  if (
-    typeof projected?.object === 'string'
-    && projected.object.includes('/')
-    && !projected.object.startsWith(`${rootName}/`)
-  ) {
-    projected.object = `${rootName}/${projected.object}`;
-  }
+function projectedSupport(clause, rootThing) {
+  const projected = structuredClone(clause);
+  const qualify = (selector) => {
+    const key = typeof selector?.thing === 'string' ? 'thing'
+      : typeof selector?.['thing@program'] === 'string' ? 'thing@program' : null;
+    if (key && selector[key] !== '.'
+      && !selector[key].startsWith('./')
+      && selector[key].includes('/')
+      && !selector[key].startsWith(`${rootThing}/`)) {
+      selector[key] = `${rootThing}/${selector[key]}`;
+    }
+  };
+  const visitExpr = (expr) => {
+    if (!expr || typeof expr !== 'object' || Array.isArray(expr)) return;
+    qualify(expr);
+    for (const child of expr.and ?? expr.or ?? []) visitExpr(child);
+  };
+  for (const expr of projected?.if ?? []) visitExpr(expr);
+  for (const target of projected?.then ?? []) qualify(target);
   return projected;
 }
 
-function projectAtom(atom, location, rootName) {
+function projectAtom(atom, location, rootThing) {
   const fields = atomFields(atom, location);
-  const name = fields.get('name').value;
-  const detail = fields.get('detail').value;
-  const children = fields.get('children').value;
-  const partners = fields.get('partners').value;
-  if (typeof name !== 'string' || !name.trim() || name !== name.trim()) {
+  const thing = fields.get('thing').value;
+  const situation = fields.get('situation').value;
+  const contain = fields.get('contain').value;
+  const support = fields.get('support').value;
+  if (typeof thing !== 'string' || !thing.trim() || thing !== thing.trim()) {
     throw atomLanguageError(
-      'INVALID_ATOM_NAME',
-      `${location} 的 name 必须是无首尾空白的非空字符串`,
+      'INVALID_ATOM_THING',
+      `${location} 的 thing 必须是无首尾空白的非空字符串`,
       { location }
     );
   }
-  if (typeof detail !== 'string') {
+  if (typeof situation !== 'string') {
     throw atomLanguageError(
-      'INVALID_ATOM_DETAIL',
-      `${location} 的 detail 必须是字符串`,
+      'INVALID_ATOM_SITUATION',
+      `${location} 的 situation 必须是字符串`,
       { location }
     );
   }
-  if (!Array.isArray(children)) {
+  if (!Array.isArray(contain)) {
     throw atomLanguageError(
-      'INVALID_ATOM_CHILDREN',
-      `${location} 的 children 必须是数组`,
+      'INVALID_ATOM_CONTAIN',
+      `${location} 的 contain 必须是数组`,
       { location }
     );
   }
-  if (!Array.isArray(partners)) {
+  if (!Array.isArray(support)) {
     throw atomLanguageError(
-      'INVALID_ATOM_PARTNERS',
-      `${location} 的 partners 必须是数组`,
+      'INVALID_ATOM_SUPPORT',
+      `${location} 的 support 必须是数组`,
       { location }
     );
   }
-  return {
-    name,
-    detail,
-    children: children.map((child, index) => (
-      projectAtom(child, `${location}.children[${index}]`, rootName)
-    )),
-    partners: partners.map((partner) => projectedPartner(partner, rootName))
+  const projected = {
+    [fields.get('thing').rawKey]: thing,
+    [fields.get('situation').rawKey]: situation,
+    [fields.get('contain').rawKey]: contain.map((child, index) => (
+      projectAtom(child, `${location}.contain[${index}]`, rootThing)
+    ))
   };
+  for (const [rawKey, value] of Object.entries(atom)) {
+    const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
+    if (parsed.baseKey !== 'support') continue;
+    projected[rawKey] = value.map((selector) => projectedSupport(selector, rootThing));
+  }
+  return projected;
 }
 
 /**
@@ -222,10 +237,10 @@ export function projectAtomContext(atoms, options = {}) {
       schema_version: GRAPH_JSON_SCHEMA_VERSION
     },
     graph: {
-      name: rootName,
-      detail: '',
-      children: atoms.map((atom, index) => projectAtom(atom, `$[${index}]`, rootName)),
-      partners: []
+      thing: rootName,
+      situation: '',
+      contain: atoms.map((atom, index) => projectAtom(atom, `$[${index}]`, rootName)),
+      support: []
     }
   };
   return parseGraphDocument(candidate);
@@ -314,9 +329,9 @@ export async function writeAtomContext(file, atoms) {
 
 export async function writeAtomGraphProjection(file, atoms, options = {}) {
   const graphFile = requireJsonFile(file, 'Graph 投影文件');
-  const projection = projectAtomContext(atoms, options);
-  // Keep the strict validator immediately before the persistence boundary.
-  const validated = parseGraphDocument(projection);
-  await atomicWriteJson(graphFile, validated);
+  // projectAtomContext returns validated derived relation metadata for runtime
+  // consumers; only the strict public Graph document is persisted.
+  const { config, graph } = projectAtomContext(atoms, options);
+  await atomicWriteJson(graphFile, { config, graph });
   return graphFile;
 }

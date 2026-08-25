@@ -4,12 +4,12 @@ import test from 'node:test';
 import { createAccessController, walkAtoms } from '../work-engine/atom-language/query-capability.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail: '', children, partners: [] };
+function atom(thing, contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation: '', contain, support: [] };
 }
 
-function program(name, detail) {
-  return { [`name@program`]: name, detail, children: [], partners: [] };
+function program(thing, situation) {
+  return { [`thing@program`]: thing, situation, contain: [], support: [] };
 }
 
 function world() {
@@ -30,7 +30,7 @@ function match(atoms, path) {
 }
 
 async function decision(controller, atoms, path, operation) {
-  return (await controller.authorize(match(atoms, path), operation, 'detail')).decision;
+  return (await controller.authorize(match(atoms, path), operation, 'situation')).decision;
 }
 
 test('Agent without jump registration keeps legacy access instead of activating self-lock', async () => {
@@ -121,7 +121,7 @@ test('explicit read/write allow and deny use highest priority, deny ties, and de
 test('exact paths use the same self-lock and node-lock denial remains independent', async () => {
   const atoms = world();
   const controller = createAccessController(atoms, { agentPath: '祖先/父/窗口', enforceWindowSelfLock: true });
-  const denied = await controller.authorize(match(atoms, '祖先/父同层/旁支'), 'read', 'detail');
+  const denied = await controller.authorize(match(atoms, '祖先/父同层/旁支'), 'read', 'situation');
   assert.equal(denied.decision, 'deny');
   assert.equal(denied.code, 'WINDOW_ACCESS_DENIED');
   assert.equal(denied.lockKind, 'window-self-lock');

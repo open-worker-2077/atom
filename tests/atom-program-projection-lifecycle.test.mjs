@@ -7,8 +7,13 @@ import test from 'node:test';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return {
+    [`thing${type ? `@${type}` : ''}`]: thing,
+    situation: situation,
+    contain: contain,
+    support: []
+  };
 }
 
 function memoryProjectionRepository() {
@@ -309,7 +314,7 @@ test('concurrent invalidated refreshes share the complete dependency-check and w
   const scheduler = createProgramRuntimeScheduler({
     runProgram: async ({ executeExplore }) => {
       executions += 1;
-      await executeExplore({ name: 'Fact' });
+        await executeExplore({ thing: 'Fact' });
       await new Promise((resolve) => setTimeout(resolve, 25));
       return { locks: [], messages: [], transforms: [] };
     }
@@ -336,12 +341,12 @@ test('Program structural facts invalidate reusable effects even without explore 
       return { locks: [], messages: [], transforms: [] };
     }
   });
-  const program = atom('Program', '# current_atom partners', [], 'program');
-  program.partners = [{ verb: 'before', object: 'Target' }];
+  const program = atom('Program', '# current_atom support', [], 'program');
+  program.support = [];
   await scheduler.refresh([atom('Target'), program]);
 
   const changed = structuredClone(program);
-  changed.partners = [{ verb: 'after', object: 'Target' }];
+  changed.support = [{ 'if@current': true, then: [{ thing: 'Target' }] }];
   await scheduler.refresh([atom('Target'), changed]);
 
   assert.equal(executions, 2);

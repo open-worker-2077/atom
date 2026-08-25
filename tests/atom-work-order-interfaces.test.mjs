@@ -12,8 +12,8 @@ import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { workOrderRegistry } from '../work-engine/atom-language/work-order-registry.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 function output() {

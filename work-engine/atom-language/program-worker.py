@@ -250,20 +250,25 @@ def extract_trigger_contract(tree):
 
 
 class AtomView:
-    __slots__ = ("ref", "name", "thing", "detail", "path", "types", "partners", "_record")
+    __slots__ = ("ref", "thing", "situation", "path", "types", "support", "_record")
 
     def __init__(self, record):
         self.ref = record["ref"]
-        self.name = record["name"]
         self.thing = record["name"]
-        self.detail = record["detail"]
+        self.situation = record["detail"]
         self.path = record["path"]
         self.types = tuple(record["types"])
-        self.partners = tuple(record.get("partners", []))
+        self.support = tuple(record.get("partners", []))
         self._record = record
 
     def __repr__(self):
-        return f"AtomView(name={self.name!r}, path={self.path!r})"
+        return f"AtomView(thing={self.thing!r}, path={self.path!r})"
+
+
+class EngineCallError(RuntimeError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
 
 
 def require_object(value, function_name):
@@ -299,7 +304,11 @@ def main():
         if response.get("id") != next_request_id:
             raise RuntimeError("Atom engine returned a mismatched world-function response")
         if not response.get("ok"):
-            raise RuntimeError(response.get("error", {}).get("message", "Atom world function failed"))
+            failure = response.get("error", {})
+            raise EngineCallError(
+                failure.get("code", "ATOM_PROGRAM_ENGINE_CALL_FAILED"),
+                failure.get("message", "Atom world function failed"),
+            )
         return response.get("result")
 
     def remember(result):
@@ -525,19 +534,19 @@ def main():
         resolved = PROGRAM_TEMPLATES.resolve_instantiation(specification)
         program = current_atom()
         result_refs = remember(call_engine("explore", {
-            "name": program.path,
-            "children$latitude-1": None,
-            "detail$full": None,
+            "thing": program.path,
+            "contain$latitude-1": None,
+            "situation$full": None,
         }))
         rows = [views[ref] for ref in result_refs]
         children = []
         conflicts = []
         for template in resolved["roots"]:
             plan = plan_template_instance(rows, program.path, template)
-            children.extend(plan["children"])
+            children.extend(plan["contain"])
             conflicts.extend(plan["conflicts"])
         if children:
-            effects["transforms"].append({"name": program.path, "children": children})
+            effects["transforms"].append({"thing": program.path, "contain": children})
         if conflicts:
             effects["messages"].append({
                 "level": "warning",
@@ -721,9 +730,9 @@ def main():
         if not isinstance(selector, str) or not selector.strip():
             raise ValueError("work_order action requires one exact path")
         rows = explore({
-            "name": selector,
-            "children$latitude-1": None,
-            "detail$full": None,
+            "thing": selector,
+            "contain$latitude-1": None,
+            "situation$full": None,
         })
         records = [by_ref[row.ref] for row in rows]
         matches = [record for record in records if record["path"] == selector]
@@ -765,8 +774,8 @@ def main():
     def emit_detail_transform(path, current, updated):
         if current != updated:
             effects["transforms"].append({
-                "name": path,
-                "detail$replace": formatted_detail(updated),
+                "thing": path,
+                "situation$replace": formatted_detail(updated),
             })
 
     def work_order(specification):
@@ -790,9 +799,9 @@ def main():
             version = str(requested_version)
             template = work_order_template(title, creation_id, version)
             rows = explore({
-                "name": current_atom().path,
-                "children$latitude-1": None,
-                "detail$full": None,
+                "thing": current_atom().path,
+                "contain$latitude-1": None,
+                "situation$full": None,
             })
             identities = []
             for row in rows:
@@ -812,7 +821,7 @@ def main():
                 if str(existing_detail.get("templateVersion")) != version:
                     raise ValueError(f"Work-order creation identity {creation_id} has another template version")
                 return {"template": "work-order", "version": version, "created": False, "path": existing["path"]}
-            effects["transforms"].append({"name": current_atom().path, "children": [template]})
+            effects["transforms"].append({"thing": current_atom().path, "contain": [template]})
             return {"template": "work-order", "version": version, "created": True, "path": current_atom().path + "/" + title}
         selector = specification.get("path")
         allowed_options = {
@@ -1126,8 +1135,18 @@ def main():
         entrypoint(request.get("programArguments", {}))
     if codec_failure is not None:
         raise codec_failure
+    support_decision = None
+    if request.get("supportDecision") is True:
+        entrypoint = namespace.get("main")
+        if not callable(entrypoint):
+            raise ValueError("Support antecedent Program must define main(arguments)")
+        support_decision = entrypoint({})
     sys.stdout.write(json.dumps(
-        {"type": "result", "ok": True, "trigger": trigger_contract, **effects},
+        {
+            "type": "result", "ok": True, "trigger": trigger_contract,
+            **({"supportDecision": support_decision} if request.get("supportDecision") is True else {}),
+            **effects,
+        },
         ensure_ascii=True,
         allow_nan=False,
     ) + "\n")

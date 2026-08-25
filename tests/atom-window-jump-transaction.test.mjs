@@ -8,8 +8,8 @@ import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeProgramExplore } from '../work-engine/atom-language/engine.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 async function fixture(t, atoms) {
@@ -26,12 +26,12 @@ function jumpWorld(destination = 'Root/B') {
     atom('A', '', [atom('Window', '', [], 'agent')]),
     atom('B'),
     atom('When', 'def main(arguments):\n    return True', [], 'program'),
-    atom('Where', `def main(arguments):\n    return explore({"name":"${destination}"})[0]`, [], 'program'),
+    atom('Where', `def main(arguments):\n    return explore({"thing":"${destination}"})[0]`, [], 'program'),
     atom('Registration', [
-      'target = explore({"name":"Root"})[0]',
+      'target = explore({"thing":"Root"})[0]',
       'jump({',
-      '  "when": explore({"name":"Root/When"})[0],',
-      '  "where": explore({"name":"Root/Where"})[0],',
+      '  "when": explore({"thing":"Root/When"})[0],',
+      '  "where": explore({"thing":"Root/Where"})[0],',
       '  "lock": {"read":{"allow":[{"priority":2,"from":target,"descendants":"all"}]}}',
       '})'
     ].join('\n'), [], 'program')
@@ -39,12 +39,12 @@ function jumpWorld(destination = 'Root/B') {
 }
 
 function childNames(atomValue) {
-  return (atomValue.children ?? []).map((entry) => Object.entries(entry)
-    .find(([key]) => key === 'name' || key.startsWith('name@'))?.[1]);
+  return (atomValue.contain ?? []).map((entry) => Object.entries(entry)
+    .find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1]);
 }
 
 function nameOf(atomValue) {
-  return Object.entries(atomValue).find(([key]) => key === 'name' || key.startsWith('name@'))?.[1];
+  return Object.entries(atomValue).find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1];
 }
 
 test('successful jump moves the active Agent in the same authoritative commit', async (t) => {
@@ -57,8 +57,8 @@ test('successful jump moves the active Agent in the same authoritative commit', 
   });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(childNames(stored[0].children[0]), []);
-  assert.deepEqual(childNames(stored[0].children[1]), ['Window']);
+  assert.deepEqual(childNames(stored[0].contain[0]), []);
+  assert.deepEqual(childNames(stored[0].contain[1]), ['Window']);
   assert.equal(scheduler.activeWindowSelfLocks.has('Root/A/Window'), false);
   assert.equal(scheduler.activeWindowSelfLocks.has('Root/B/Window'), true);
 });
@@ -79,8 +79,8 @@ test('invalid destination rolls back the entire jump candidate with a stable err
 
 test('default self-lock denial leaves the window in place', async (t) => {
   const initial = jumpWorld();
-  const registration = initial[0].children.find((entry) => nameOf(entry) === 'Registration');
-  registration.detail = registration.detail.replace(
+  const registration = initial[0].contain.find((entry) => nameOf(entry) === 'Registration');
+  registration.situation = registration.situation.replace(
     ',\n  "lock": {"read":{"allow":[{"priority":2,"from":target,"descendants":"all"}]}}', ''
   );
   const files = await fixture(t, initial);
@@ -100,7 +100,7 @@ test('recycle true removes the active window without evaluating when or where', 
       atom('Window', '', [], 'agent'),
       atom('Recycle', 'def main(arguments):\n    return True', [], 'program')
     ]),
-    atom('Registration', 'jump({"recycle":explore({"name":"Root/A/Recycle"})[0]})', [], 'program')
+    atom('Registration', 'jump({"recycle":explore({"thing":"Root/A/Recycle"})[0]})', [], 'program')
   ])];
   const files = await fixture(t, initial);
   const scheduler = createProgramRuntimeScheduler();
@@ -111,7 +111,7 @@ test('recycle true removes the active window without evaluating when or where', 
   });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(childNames(stored[0].children[0]), ['Recycle']);
+  assert.deepEqual(childNames(stored[0].contain[0]), ['Recycle']);
   assert.equal(scheduler.activeWindowAgents.has('Root/A/Window'), false);
 });
 
@@ -121,9 +121,9 @@ test('cyclic destination and downstream failure both roll back the moved window'
       ? jumpWorld('Root/A/Window')
       : jumpWorld();
     if (mode === 'downstream') {
-      initial[0].children.push(atom(
+      initial[0].contain.push(atom(
         'BrokenEffect',
-        'transform({"name":"Missing","detail.rep.value":None})',
+        'transform({"thing":"Missing","situation.rep.value":None})',
         [], 'program'
       ));
     }
@@ -144,13 +144,13 @@ test('rebinding a scoped changed probe removes instance A and triggers only inst
     atom('A', '', [atom('Monitor')]),
     atom('B', '', [atom('Monitor')]),
     atom('Probe', [
-      'point = explore({"name":"./Monitor"})[0]',
+      'point = explore({"thing":"./Monitor"})[0]',
       'if changed([point]):',
       '    message({"level":"info","text":"hit"})'
     ].join('\n'), [], 'program')
   ])];
-  world[0].children[0].partners = [{ verb: 'support', object: './Monitor' }];
-  const supportBefore = JSON.stringify(world[0].children[0].partners);
+  world[0].contain[0].support = [{ 'if@current': true, then: [{ thing: './Monitor' }] }];
+  const supportBefore = JSON.stringify(world[0].contain[0].support);
   const scheduler = createProgramRuntimeScheduler();
   const scopedExplore = (request, context = {}) => executeProgramExplore({
     atoms: world, request, scopeRoot: context.scopeRoot ?? null
@@ -180,5 +180,5 @@ test('rebinding a scoped changed probe removes instance A and triggers only inst
     executeExplore: scopedExplore
   });
   assert.deepEqual(hit.messages.map((entry) => entry.text), ['hit']);
-  assert.equal(JSON.stringify(world[0].children[0].partners), supportBefore);
+  assert.equal(JSON.stringify(world[0].contain[0].support), supportBefore);
 });

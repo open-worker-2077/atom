@@ -7,8 +7,8 @@ import test from 'node:test';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 test('instantiate creates one complete advancement flow below the calling Program', async () => {
@@ -36,14 +36,14 @@ test('instantiate creates one complete advancement flow below the calling Progra
   assert.equal(first.changed, true);
 
   const afterFirst = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  const program = afterFirst[0].children[0];
-  assert.deepEqual(program.children.map((entry) => entry.name ?? entry['name@program']), [
+  const program = afterFirst[0].contain[0];
+  assert.deepEqual(program.contain.map((entry) => entry.thing ?? entry['thing@program']), [
     '编标版本', '任务标题', '导航坐标', '设标', '建标', '推进', '收尾', '内部路由'
   ]);
-  assert.equal(program.children.find((entry) => entry.name === '任务标题').detail, '新任务');
-  assert.equal(program.children.find((entry) => entry['name@program'] === '内部路由')['name@program'], '内部路由');
+  assert.equal(program.contain.find((entry) => entry.thing === '任务标题').situation, '新任务');
+  assert.equal(program.contain.find((entry) => entry['thing@program'] === '内部路由')['thing@program'], '内部路由');
   assert.deepEqual(
-    program.children.find((entry) => entry.name === '设标').children.map((entry) => entry.name),
+    program.contain.find((entry) => entry.thing === '设标').contain.map((entry) => entry.thing),
     ['定向', '调研', '策评']
   );
 
@@ -64,7 +64,7 @@ test('documented two-step commands create an Agent with one attached complete ad
   const scheduler = createProgramRuntimeScheduler();
 
   const created = await executeAtomLanguage({
-    source: 'transform new {"name@agent":"任务名","detail":"","children":[],"partners":[]}',
+    source: 'transform new {"thing@agent":"任务名","situation":"","contain":[],"support":[]}',
     contextFile,
     projectionFile,
     programScheduler: scheduler
@@ -72,7 +72,7 @@ test('documented two-step commands create an Agent with one attached complete ad
   assert.equal(created.ok, true);
 
   const result = await executeAtomLanguage({
-    source: `transform {"name":"任务名","children":[{"name@program":"推进流","detail":"instantiate({'template': 'advancement-flow', 'version': 'latest', 'mode': 'ensure', 'parameters': {'title': '任务标题'}})","children":[],"partners":[]}]}`,
+    source: `transform {"thing":"任务名","contain":[{"thing@program":"推进流","situation":"instantiate({'template': 'advancement-flow', 'version': 'latest', 'mode': 'ensure', 'parameters': {'title': '任务标题'}})","contain":[],"support":[]}]}`,
     contextFile,
     projectionFile,
     programScheduler: scheduler
@@ -80,10 +80,10 @@ test('documented two-step commands create an Agent with one attached complete ad
 
   assert.equal(result.ok, true);
   const [agent] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(agent['name@agent'], '任务名');
-  assert.equal(agent.children.length, 1);
-  assert.equal(agent.children[0]['name@program'], '推进流');
-  assert.deepEqual(agent.children[0].children.map((child) => child.name ?? child['name@program']), [
+  assert.equal(agent['thing@agent'], '任务名');
+  assert.equal(agent.contain.length, 1);
+  assert.equal(agent.contain[0]['thing@program'], '推进流');
+  assert.deepEqual(agent.contain[0].contain.map((child) => child.thing ?? child['thing@program']), [
     '编标版本', '任务标题', '导航坐标', '设标', '建标', '推进', '收尾', '内部路由'
   ]);
 });
@@ -96,7 +96,7 @@ test('documented repair command attaches and instantiates a flow below an existi
   const scheduler = createProgramRuntimeScheduler();
 
   const result = await executeAtomLanguage({
-    source: `transform {"name":"已有任务名","children":[{"name@program":"推进流","detail":"instantiate({'template': 'advancement-flow', 'version': 'latest', 'mode': 'ensure', 'parameters': {'title': '任务标题'}})","children":[],"partners":[]}]}`,
+    source: `transform {"thing":"已有任务名","contain":[{"thing@program":"推进流","situation":"instantiate({'template': 'advancement-flow', 'version': 'latest', 'mode': 'ensure', 'parameters': {'title': '任务标题'}})","contain":[],"support":[]}]}`,
     contextFile,
     projectionFile,
     programScheduler: scheduler
@@ -104,10 +104,10 @@ test('documented repair command attaches and instantiates a flow below an existi
 
   assert.equal(result.ok, true);
   const [agent] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(agent['name@agent'], '已有任务名');
-  assert.equal(agent.children.length, 1);
-  assert.equal(agent.children[0]['name@program'], '推进流');
-  assert.equal(agent.children[0].children.find((child) => child.name === '导航坐标').detail, '定向');
+  assert.equal(agent['thing@agent'], '已有任务名');
+  assert.equal(agent.contain.length, 1);
+  assert.equal(agent.contain[0]['thing@program'], '推进流');
+  assert.equal(agent.contain[0].contain.find((child) => child.thing === '导航坐标').situation, '定向');
 });
 
 test('advancement-flow data children can be edited without legacy uses partners', async () => {
@@ -126,7 +126,7 @@ test('advancement-flow data children can be edited without legacy uses partners'
   assert.equal(instantiated.ok, true);
 
   const edited = await executeAtomLanguage({
-    source: 'transform {"name":"Editable Flow/推进流/设标/定向/需求","detail.rep.真实需求"}',
+    source: 'transform {"thing":"Editable Flow/推进流/设标/定向/需求","situation.rep.真实需求"}',
     contextFile,
     projectionFile,
     programScheduler: scheduler
@@ -134,11 +134,11 @@ test('advancement-flow data children can be edited without legacy uses partners'
 
   assert.equal(edited.ok, true, JSON.stringify(edited.errors));
   const [agent] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  const requirement = agent.children[0].children
-    .find((child) => child.name === '设标').children
-    .find((child) => child.name === '定向').children
-    .find((child) => child.name === '需求');
-  assert.equal(requirement.detail, '真实需求');
+  const requirement = agent.contain[0].contain
+    .find((child) => child.thing === '设标').contain
+    .find((child) => child.thing === '定向').contain
+    .find((child) => child.thing === '需求');
+  assert.equal(requirement.situation, '真实需求');
 });
 
 test('instantiate rejects an unknown template and unsupported mode', async () => {

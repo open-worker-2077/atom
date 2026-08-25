@@ -14,7 +14,7 @@ test('one pasted block executes every complete multiline Atom command in order',
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   const seeded = await executeAtomLanguage({
-    source: 'transform new {"name":"石器工坊","detail#工坊简介":"旧正文","children":[],"partners":[]}',
+    source: 'transform new {"thing":"石器工坊","situation#工坊简介":"旧正文","contain":[],"support":[]}',
     contextFile,
     projectionFile
   });
@@ -44,13 +44,13 @@ test('one pasted block executes every complete multiline Atom command in order',
   stdin.end(`atom
 
 explore {
-  "name": "石器工坊",
-  "detail$full"
+  "thing": "石器工坊",
+  "situation$full"
 }
 
 transform {
-  "name": "石器工坊",
-  "detail.rep.更新后的正文"
+  "thing": "石器工坊",
+  "situation.rep.更新后的正文"
 }
 `);
 
@@ -60,11 +60,11 @@ transform {
   assert.match(output, /\{\n  "atom~count1"\n\}/u);
   assert.match(
     output,
-    /\{\n  "name": "石器工坊",\n  "detail#工坊简介": "旧正文",\n  "boundary~preview":/u
+    /\{\n  "thing": "石器工坊",\n  "situation#工坊简介": "旧正文",\n  "boundary~preview":/u
   );
   assert.match(
     output,
-    /\{\n  "name~updated": "石器工坊"\n\}/u
+    /\{\n  "thing~updated": "石器工坊"\n\}/u
   );
   assert.doesNotMatch(output, /当前 1 个 Atom|简介：|正文：|已更新：/u);
   assert.doesNotMatch(
@@ -74,7 +74,7 @@ transform {
   assert.doesNotMatch(errors, /UNKNOWN_ATOM_LANGUAGE_COMMAND/u);
 
   const explored = await executeAtomLanguage({
-    source: 'explore {"name":"石器工坊","detail$full"}',
+    source: 'explore {"thing":"石器工坊","situation$full"}',
     contextFile,
     projectionFile
   });

@@ -8,8 +8,8 @@ import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runt
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, detail = '', children = [], partners = []) {
-  return { name, detail, children, partners };
+function atom(thing, situation = '', contain = [], support = []) {
+  return { thing, situation, contain, support };
 }
 
 async function lockedWorld() {
@@ -32,9 +32,9 @@ async function setup(t) {
   const projectionFile = path.join(directory, 'graph.json');
   const atoms = await lockedWorld();
   atoms.push({
-    'name@program': 'Seal',
-    detail: 'slot_body({"action":"seal","body":"\u69fd\u4f53","lock":True})',
-    children: [], partners: []
+    'thing@program': 'Seal',
+    situation: 'slot_body({"action":"seal","body":"\u69fd\u4f53","lock":True})',
+    contain: [], support: []
   });
   await fs.writeFile(contextFile, `${JSON.stringify(atoms, null, 2)}\n`, 'utf8');
   return { contextFile, projectionFile };
@@ -43,32 +43,32 @@ async function setup(t) {
 test('central Transform denies mapped self, permits material fill, and rejects forged roles', async (t) => {
   const files = await setup(t);
   const mapped = await executeAtomLanguage({
-    source: 'transform {"name":"槽体/槽例/实例/输入","detail.rep.篡改"}', ...files
+    source: 'transform {"thing":"槽体/槽例/实例/输入","situation.rep.篡改"}', ...files
   });
   assert.equal(mapped.ok, false);
   assert.ok(mapped.errors.some((error) => error.code === 'SLOT_STRUCTURE_LOCK_DENIED'));
 
   const material = await executeAtomLanguage({
-    source: 'transform new {"name":"槽体/槽例/实例/输入/料","detail":"值","children":[],"partners":[]}',
+    source: 'transform new {"thing":"槽体/槽例/实例/输入/料","situation":"值","contain":[],"support":[]}',
     ...files
   });
   assert.equal(material.ok, true, JSON.stringify(material.errors));
 
   const movedMaterial = await executeAtomLanguage({
-    source: 'transform {"name.mov.槽体/槽例/实例/输出":"槽体/槽例/实例/输入/料"}',
+    source: 'transform {"thing.mov.槽体/槽例/实例/输出":"槽体/槽例/实例/输入/料"}',
     ...files
   });
   assert.equal(movedMaterial.ok, true, JSON.stringify(movedMaterial.errors));
 
   const movedRole = await executeAtomLanguage({
-    source: 'transform {"name.mov.槽体/槽例/实例/输出":"槽体/槽例/实例/输入"}',
+    source: 'transform {"thing.mov.槽体/槽例/实例/输出":"槽体/槽例/实例/输入"}',
     ...files
   });
   assert.equal(movedRole.ok, false);
   assert.ok(movedRole.errors.some((error) => error.code === 'SLOT_STRUCTURE_LOCK_DENIED'));
 
   const forged = await executeAtomLanguage({
-    source: 'transform new {"name":"槽体/槽例/实例/输入/伪槽","detail":"","children":[],"partners":[{"verb":"槽模角色","object":"fake"}]}',
+    source: 'transform new {"thing@slot-role-fake":"槽体/槽例/实例/输入/伪槽","situation":"","contain":[],"support":[]}',
     ...files
   });
   assert.equal(forged.ok, false);
@@ -78,7 +78,7 @@ test('central Transform denies mapped self, permits material fill, and rejects f
 test('authorized reseal replaces its own mapped projections without a structural-lock bypass for callers', async (t) => {
   const files = await setup(t);
   const result = await executeAtomLanguage({
-    source: 'transform {"name.run.":"Seal"}',
+    source: 'transform {"thing.run.":"Seal"}',
     programScheduler: createProgramRuntimeScheduler(),
     ...files
   });

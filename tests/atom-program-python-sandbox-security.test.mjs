@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 async function rejectsAsSecurityViolation(source) {
@@ -48,15 +48,15 @@ test('Program sandbox rejects private and dunder attribute traversal before exec
 
 test('Program sandbox preserves ordinary Python control flow and registered world functions', async () => {
   const program = [
-    "items = explore({'name': 'Work', 'children$latitude-1': None})",
+    "items = explore({'thing': 'Work', 'contain$latitude-1': None})",
     'values = []',
     'for item in items:',
-    "    if item.name.startswith('Score'):",
-    '        values.append(int(item.detail))',
+    "    if item.thing.startswith('Score'):",
+    '        values.append(int(item.situation))',
     'total = sum(values)',
     "if total >= 3:",
     "    lock({'targets': {'refs': [current_atom().ref]}, 'mode': 'write'})",
-    "    transform({'name': 'Total', f'detail.rep.{total}': None})",
+    "    transform({'thing': 'Total', f'situation.rep.{total}': None})",
     "    message({'level': 'info', 'text': f'total={total}'})",
   ].join('\n');
   const world = [

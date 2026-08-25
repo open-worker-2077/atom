@@ -5,8 +5,8 @@ import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { programFunctionRegistry } from '../work-engine/atom-language/program-function-registry.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 function output() {
@@ -23,12 +23,12 @@ test('jump accepts exact Program Things and orders recycle before when and where
     atom('目标计算', [
       'def main(arguments):',
       '    message({"level":"info","text":"where"})',
-      '    return explore({"name":"槽例B"})[0]'
+      '    return explore({"thing":"槽例B"})[0]'
     ].join('\n'), [], 'program'),
     atom('窗口注册', [
-      'recycle_program = explore({"name":"回收判定"})[0]',
-      'when_program = explore({"name":"跳转判定"})[0]',
-      'where_program = explore({"name":"目标计算"})[0]',
+      'recycle_program = explore({"thing":"回收判定"})[0]',
+      'when_program = explore({"thing":"跳转判定"})[0]',
+      'where_program = explore({"thing":"目标计算"})[0]',
       'jump({"recycle":recycle_program,"when":when_program,"where":where_program})'
     ].join('\n'), [], 'program')
   ];
@@ -46,17 +46,17 @@ test('jump accepts exact Program Things and orders recycle before when and where
 test('jump guards without when, skips where when false, and recycle true wins', async () => {
   const cases = [
     {
-      name: '守窗', source: 'jump({"where":explore({"name":"目标计算"})[0]})',
+      name: '守窗', source: 'jump({"where":explore({"thing":"目标计算"})[0]})',
       expected: { action: 'guard' }, messages: []
     },
     {
       name: '不命中',
-      source: 'jump({"when":explore({"name":"否"})[0],"where":explore({"name":"目标计算"})[0]})',
+      source: 'jump({"when":explore({"thing":"否"})[0],"where":explore({"thing":"目标计算"})[0]})',
       expected: { action: 'guard' }, messages: []
     },
     {
       name: '回收',
-      source: 'jump({"recycle":explore({"name":"是"})[0],"when":explore({"name":"否"})[0],"where":explore({"name":"目标计算"})[0]})',
+      source: 'jump({"recycle":explore({"thing":"是"})[0],"when":explore({"thing":"否"})[0],"where":explore({"thing":"目标计算"})[0]})',
       expected: { action: 'recycle' }, messages: []
     }
   ];
@@ -65,7 +65,7 @@ test('jump guards without when, skips where when false, and recycle true wins', 
       atom('目标'),
       atom('是', 'def main(arguments):\n    return True', [], 'program'),
       atom('否', 'def main(arguments):\n    return False', [], 'program'),
-      atom('目标计算', 'def main(arguments):\n    message({"level":"info","text":"where"})\n    return explore({"name":"目标"})[0]', [], 'program'),
+      atom('目标计算', 'def main(arguments):\n    message({"level":"info","text":"where"})\n    return explore({"thing":"目标"})[0]', [], 'program'),
       atom(scenario.name, scenario.source, [], 'program')
     ];
     const cycle = await createProgramRuntimeScheduler().refresh(world, {
@@ -85,7 +85,7 @@ test('jump rejects strings and accepts the final thing exact-coordinate object a
   const adapted = [
     atom('判定', 'def main(arguments):\n    return True', [], 'program'),
     atom('目标'),
-    atom('定位', 'def main(arguments):\n    return explore({"name":"目标"})[0]', [], 'program'),
+    atom('定位', 'def main(arguments):\n    return explore({"thing":"目标"})[0]', [], 'program'),
     atom('注册', 'jump({"when":{"thing":"判定"},"where":{"thing":"定位"}})', [], 'program')
   ];
   const cycle = await createProgramRuntimeScheduler().refresh(adapted, {
@@ -100,7 +100,7 @@ test('changed returns only a bool, records exact dependencies, and caller explic
     atom('探针', [
       'def expensive():',
       '    message({"level":"info","text":"expensive"})',
-      'point = explore({"name":"监测点"})[0]',
+      'point = explore({"thing":"监测点"})[0]',
       'if changed([point]):',
       '    expensive()'
     ].join('\n'), [], 'program')
@@ -122,7 +122,7 @@ test('changed returns only a bool, records exact dependencies, and caller explic
 test('changed rejects empty, duplicate, string, and ref arrays', async () => {
   for (const expression of ['[]', '["\u76d1\u6d4b\u70b9"]', '[point.ref]', '[point, point]']) {
     const source = expression.includes('point')
-      ? `point = explore({"name":"\u76d1\u6d4b\u70b9"})[0]\nchanged(${expression})`
+      ? `point = explore({"thing":"\u76d1\u6d4b\u70b9"})[0]\nchanged(${expression})`
       : `changed(${expression})`;
     await assert.rejects(createProgramRuntimeScheduler().refresh([
       atom('\u76d1\u6d4b\u70b9'), atom('\u975e\u6cd5\u63a2\u9488', source, [], 'program')

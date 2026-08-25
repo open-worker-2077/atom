@@ -28,42 +28,43 @@ states = []
 framework_paths = [flow_path] + [flow_path + '/' + block for block in ['设标', '建标', '推进', '收尾']]
 framework_refs = []
 for framework_path in framework_paths:
-    framework_rows = explore({'name': framework_path})
+    framework_rows = explore({'thing': framework_path})
     if framework_rows:
         framework_refs.append(framework_rows[0].ref)
 if framework_refs:
-    lock({'targets': {'refs': framework_refs}, 'mode': 'write', 'fields': ['name', 'detail'], 'protect': {'atom': True, 'messages': False}, 'reason': {'code': 'FRAMEWORK_SCHEMA', 'message': '推进流第1至2级框架由模板维护；请填写下级表单字段，不要修改框架名称与总说明'}})
+    lock({'targets': {'refs': framework_refs}, 'mode': 'write', 'fields': ['thing', 'situation'], 'protect': {'atom': True, 'messages': False}, 'reason': {'code': 'FRAMEWORK_SCHEMA', 'message': '推进流第1至2级框架由模板维护；请填写下级表单字段，不要修改框架名称与总说明'}})
 for form_name, relative_path in definitions:
     form_path = flow_path + '/' + relative_path
-    rows = explore({'name': form_path, 'children$latitude-1': None, 'detail$full': None})
+    rows = explore({'thing': form_path, 'contain$latitude-1': None, 'situation$full': None})
     status = form_status(rows, form_path)
     states.append((form_name, form_path, status))
     if status == '已冻结':
         refs = subtree_refs(rows, form_path)
         if refs:
-            lock({'targets': {'refs': refs}, 'mode': 'write', 'fields': ['name', 'detail', 'children', 'partners'], 'protect': {'atom': True, 'messages': False}, 'reason': {'code': 'MANUAL_FREEZE', 'message': '该表单已人工冻结；如需继续，请向人工反馈解冻需求'}})
+            lock({'targets': {'refs': refs}, 'mode': 'write', 'fields': ['thing', 'situation', 'contain', 'support'], 'protect': {'atom': True, 'messages': False}, 'reason': {'code': 'MANUAL_FREEZE', 'message': '该表单已人工冻结；如需继续，请向人工反馈解冻需求'}})
 pending = first_pending(states, ['已通过', '已冻结'])
 navigation_value = pending[0] if pending else '已完成'
-navigation = explore({'name': flow_path + '/导航坐标', 'detail$full': None})
-if navigation and navigation[0].detail != navigation_value:
-    command = 'detail.re' + 'p.' + navigation_value
-    transform({'name': flow_path + '/导航坐标', command: None})
+navigation = explore({'thing': flow_path + '/导航坐标', 'situation$full': None})
+if navigation and navigation[0].situation != navigation_value:
+    command = 'situation.re' + 'p.' + navigation_value
+    transform({'thing': flow_path + '/导航坐标', command: None})
 message({'level': 'info', 'text': '推进流当前节点：' + navigation_value})"""
 
 
-def _atom(name, detail="", children=None, partners=None, types=None):
-    result = {"name": name, "detail": detail}
+def _atom(name, detail="", children=None, support=None, types=None):
+    result = {"thing": name, "situation": detail}
     if types:
         result["types"] = list(types)
     if children:
-        result["children"] = list(children)
-    if partners:
-        result["partners"] = list(partners)
+        result["contain"] = list(children)
+    if support:
+        result["support"] = list(support)
     return result
 
 
 def _form(name, purpose, fields, next_name=None):
-    routes = [{"verb": "通过后", "object": next_name}] if next_name else []
+    routes = ([{"if@current": True, "then": [{"thing": next_name}]}]
+              if next_name else [])
     return _atom(
         name,
         purpose,

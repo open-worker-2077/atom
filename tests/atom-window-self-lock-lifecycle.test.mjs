@@ -4,8 +4,8 @@ import test from 'node:test';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeProgramExplore } from '../work-engine/atom-language/engine.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 function world(rule) {
@@ -13,7 +13,7 @@ function world(rule) {
     atom('Area', '', [atom('Window', '', [], 'agent')]),
     atom('Other'),
     atom('Registration', [
-      'other = explore({"name":"Root/Other"})[0]',
+      'other = explore({"thing":"Root/Other"})[0]',
       `jump({"lock":{"read":${JSON.stringify(rule).replaceAll('"from":"other"', '"from":other')}}})`
     ].join('\n'), [], 'program')
   ])];
@@ -86,7 +86,7 @@ test('window self-lock normalizes current and current-relative exact explore sta
   const scopedWorld = [atom('Root', '', [atom('Area', '', [
     atom('Window', '', [], 'agent'), atom('Child'),
     atom('Policy', [
-      'near = explore({"name":"./Child"})[0]',
+      'near = explore({"thing":"./Child"})[0]',
       'jump({"lock":{"write":{"deny":[{"priority":3,"from":near}]}}})'
     ].join('\n'), [], 'program')
   ])])];

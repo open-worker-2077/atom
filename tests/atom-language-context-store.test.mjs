@@ -14,30 +14,30 @@ import {
 } from '../work-engine/atom-language/context-store.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
+const supports = (...targets) => targets.length === 0
+  ? []
+  : [{ 'if@current': true, then: targets.map((thing) => ({ thing })) }];
+
 function atomsFixture() {
   return [
     {
-      'name@agent': '石器工坊',
-      'detail#主观窗口': '工坊正文',
-      children: [
+      'thing@agent': '石器工坊',
+      'situation#主观窗口': '工坊正文',
+      contain: [
         {
-          'name@program': '锤子',
-          'detail#工具': '锻造工具',
-          children: [],
-          partners: [
-            { verb: '归属', object: '石器工坊' }
-          ]
+          'thing@program': '锤子',
+          'situation#工具': '锻造工具',
+          contain: [],
+          support: supports('石器工坊')
         }
       ],
-      partners: [
-        { verb: '连接', object: '河岸' }
-      ]
+      support: supports('河岸')
     },
     {
-      name: '河岸',
-      detail: '河岸正文',
-      children: [],
-      partners: []
+      thing: '河岸',
+      situation: '河岸正文',
+      contain: [],
+      support: []
     }
   ];
 }
@@ -78,51 +78,47 @@ test('repeated reads reuse one immutable context snapshot until the file revisio
   const second = await readAtomContext(contextFile, { create: false });
   assert.strictEqual(second, first);
   assert.equal(Object.isFrozen(first), true);
-  assert.equal(Object.isFrozen(first[0].children), true);
+  assert.equal(Object.isFrozen(first[0].contain), true);
 
   const changed = atomsFixture();
-  changed[0]['detail#主观窗口'] = '新正文';
+  changed[0]['situation#主观窗口'] = '新正文';
   await writeAtomContext(contextFile, changed);
   const third = await readAtomContext(contextFile, { create: false });
   assert.notStrictEqual(third, first);
-  assert.equal(third[0]['detail#主观窗口'], '新正文');
+  assert.equal(third[0]['situation#主观窗口'], '新正文');
 });
 
 test('projects decorated Atom keys recursively through parseAtomKey onto a virtual Graph root', () => {
   const atoms = atomsFixture();
   const projection = projectAtomContext(atoms);
-  assert.equal(projection.config.schema_version, '1.0.0');
+  assert.equal(projection.config.schema_version, '2.0.0');
   assert.deepEqual(projection.graph, {
-    name: 'atom.json',
-    detail: '',
-    children: [
+    thing: 'atom.json',
+    situation: '',
+    contain: [
       {
-        name: '石器工坊',
-        detail: '工坊正文',
-        children: [
+        'thing@agent': '石器工坊',
+        'situation#主观窗口': '工坊正文',
+        contain: [
           {
-            name: '锤子',
-            detail: '锻造工具',
-            children: [],
-            partners: [
-              { verb: '归属', object: '石器工坊' }
-            ]
+            'thing@program': '锤子',
+            'situation#工具': '锻造工具',
+            contain: [],
+            support: supports('石器工坊')
           }
         ],
-        partners: [
-          { verb: '连接', object: '河岸' }
-        ]
+        support: supports('河岸')
       },
       {
-        name: '河岸',
-        detail: '河岸正文',
-        children: [],
-        partners: []
+        thing: '河岸',
+        situation: '河岸正文',
+        contain: [],
+        support: []
       }
     ],
-    partners: []
+    support: []
   });
-  assert.doesNotThrow(() => parseGraphDocument(projection));
+  assert.doesNotThrow(() => parseGraphDocument({ config: projection.config, graph: projection.graph }));
   assert.deepEqual(atoms, atomsFixture(), 'projection must not turn the virtual root into a factual Atom');
 });
 
@@ -137,17 +133,18 @@ test('writes the Atom context and its strict Graph projection as separate atomic
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), atoms);
 
   const graph = JSON.parse(await fs.readFile(graphFile, 'utf8'));
-  assert.deepEqual(graph, projectAtomContext(atoms));
+  const expected = projectAtomContext(atoms);
+  assert.deepEqual(graph, { config: expected.config, graph: expected.graph });
   assert.doesNotThrow(() => parseGraphDocument(graph));
 
-  atoms[0]['detail#主观窗口'] = '更新后的正文';
+  atoms[0]['situation#主观窗口'] = '更新后的正文';
   await writeAtomContext(contextFile, atoms);
   await writeAtomGraphProjection(graphFile, atoms);
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0]['detail#主观窗口'], '更新后的正文');
-  assert.equal(JSON.parse(await fs.readFile(graphFile, 'utf8')).graph.children[0].detail, '更新后的正文');
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0]['situation#主观窗口'], '更新后的正文');
+  assert.equal(JSON.parse(await fs.readFile(graphFile, 'utf8')).graph.contain[0]['situation#主观窗口'], '更新后的正文');
 
   const generated = await fs.readdir(directory, { recursive: true });
-  assert.equal(generated.some((name) => name.endsWith('.tmp')), false);
+  assert.equal(generated.some((thing) => thing.endsWith('.tmp')), false);
   await assert.rejects(fs.access(path.join(directory, 'data', 'knowledge.json')), { code: 'ENOENT' });
 });
 
@@ -176,15 +173,15 @@ test('validates the projected Graph before either persistent file can be written
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const invalid = atomsFixture();
-  invalid[0].partners[0].object = '不存在的 Atom';
+  invalid[0].support[0].then[0].thing = '不存在的 Atom';
 
   await assert.rejects(
     writeAtomContext(contextFile, invalid),
-    (error) => error.code === 'UNKNOWN_GRAPH_OBJECT'
+    (error) => error.code === 'SUPPORT_SELECTOR_NOT_FOUND'
   );
   await assert.rejects(
     writeAtomGraphProjection(graphFile, invalid),
-    (error) => error.code === 'UNKNOWN_GRAPH_OBJECT'
+    (error) => error.code === 'SUPPORT_SELECTOR_NOT_FOUND'
   );
   await assert.rejects(fs.access(contextFile), { code: 'ENOENT' });
   await assert.rejects(fs.access(graphFile), { code: 'ENOENT' });
@@ -200,10 +197,10 @@ test('rejects non-array context documents and malformed recursive Atom fields', 
   );
 
   const malformed = atomsFixture();
-  malformed[0].children[0] = {
-    name: '缺字段',
-    detail: '',
-    children: []
+  malformed[0].contain[0] = {
+    thing: '缺字段',
+    situation: '',
+    contain: []
   };
   assert.throws(
     () => projectAtomContext(malformed),
@@ -212,14 +209,14 @@ test('rejects non-array context documents and malformed recursive Atom fields', 
 });
 
 test('partner short names resolve inside the nearest containing flow before the global graph', () => {
-  const form = (name, next) => ({
-    name, detail: '', children: [],
-    partners: next ? [{ verb: 'next', object: next }] : []
+  const form = (thing, next) => ({
+    thing, situation: '', contain: [],
+    support: next ? supports(next) : []
   });
-  const flow = (name) => ({
-    name, detail: '', partners: [], children: [
-      { name: 'Stage A', detail: '', partners: [], children: [form('Review', 'Build')] },
-      { name: 'Stage B', detail: '', partners: [], children: [form('Build')] }
+  const flow = (thing) => ({
+    thing, situation: '', support: [], contain: [
+      { thing: 'Stage A', situation: '', support: [], contain: [form('Review', 'Build')] },
+      { thing: 'Stage B', situation: '', support: [], contain: [form('Build')] }
     ]
   });
 

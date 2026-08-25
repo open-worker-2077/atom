@@ -12,12 +12,12 @@ import {
 import { selectCoordinateScope } from '../work-engine/atom-language/world-laws/coordinates.mjs';
 import { parseAtomKey } from '../work-engine/atom-language/key-parser.mjs';
 
-function atom(name, detail = '', children = [], partners = [], type = '') {
+function atom(thing, situation = '', contain = [], support = [], type = '') {
   return {
-    [`name${type ? `@${type}` : ''}`]: name,
-    detail,
-    children,
-    partners
+    [`thing${type ? `@${type}` : ''}`]: thing,
+    situation,
+    contain,
+    support
   };
 }
 
@@ -33,15 +33,11 @@ function lock(name, options = {}) {
     property('scope', options.scope ?? 'subtree'),
     property('grade', String(options.grade ?? 0)),
     property('key_requirement', options.keyRequirement ?? ''),
+    property('protects', options.protects ?? 'Personal'),
+    property('applies_to', options.appliesTo ?? ''),
     property('enabled', String(options.enabled ?? true))
   ];
-  const partners = [
-    { verb: 'protects', object: options.protects ?? 'Personal' },
-    ...(options.appliesTo
-      ? [{ verb: 'applies_to', object: options.appliesTo }]
-      : [])
-  ];
-  return atom(name, '', children, partners, 'lock');
+  return atom(name, '', children, [], 'lock');
 }
 
 test('decodes a lock from ordinary Atom axes without adding Graph fields', () => {
@@ -225,9 +221,9 @@ test('latitude and longitude select a concurrent union from one anchor', () => {
 });
 
 test('coordinate actions accept signed integers and retired routes explain migration', () => {
-  const latitude = parseAtomKey('children$latitude-2');
-  const longitude = parseAtomKey('children$longitude+3');
-  const retired = parseAtomKey('partners$hop2');
+  const latitude = parseAtomKey('contain$latitude-2');
+  const longitude = parseAtomKey('contain$longitude+3');
+  const retired = parseAtomKey('contain$up2');
 
   assert.equal(latitude.errors.length, 0);
   assert.deepEqual(latitude.actions[0], {

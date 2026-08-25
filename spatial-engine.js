@@ -674,6 +674,7 @@
     rendered: [],
     hitRegions: [],
     relationHitRegions: [],
+    supportClauses: [],
     clusterHitRegions: [],
     clusterScreenOffsets: new Map(),
     clusterDetailCandidates: [],
@@ -953,12 +954,16 @@
     };
   }
 
-  function recordCurrentView(options) {
-    const snapshot = state.viewHistory.push(visualSnapshot(), options);
-    updateNavigationUI();
+  function publishCurrentView() {
     global.dispatchEvent(new CustomEvent("spatial-view-committed", {
       detail: Object.freeze({ view: exportFieldProjection() })
     }));
+  }
+
+  function recordCurrentView(options) {
+    const snapshot = state.viewHistory.push(visualSnapshot(), options);
+    updateNavigationUI();
+    publishCurrentView();
     return snapshot;
   }
 
@@ -2217,7 +2222,7 @@
       const tangentX = end.x - controlTwo.x;
       const tangentY = end.y - controlTwo.y;
       const tangentLength = Math.hypot(tangentX, tangentY);
-      if (tangentLength > 0.5) {
+      if (relationship.glyphs !== false && tangentLength > 0.5) {
         const arrowAngle = Math.atan2(tangentY, tangentX);
         const arrowSize = clamp(distance * 0.034, 4, 10) * relationshipStyle.glyphScale;
         const spread = 0.4;
@@ -2239,7 +2244,7 @@
       const originTangentX = controlOne.x - start.x;
       const originTangentY = controlOne.y - start.y;
       const originTangentLength = Math.hypot(originTangentX, originTangentY);
-      if (originTangentLength > 0.5) {
+      if (relationship.glyphs !== false && originTangentLength > 0.5) {
         const originAngle = Math.atan2(originTangentY, originTangentX);
         const tailDepth = clamp(distance * 0.034, 5, 11) * relationshipStyle.glyphScale;
         const tailWidth = clamp(distance * 0.026, 4, 8) * relationshipStyle.glyphScale;
@@ -2320,6 +2325,38 @@
         .filter((item) => item.kind === "node" && item.node)
         .map((item) => [item.node.id, item])
     );
+    const renderedByGraphPath = new Map(
+      [...renderedNodes.values()]
+        .filter((item) => typeof item.node.graphPath === "string" && item.node.graphPath)
+        .map((item) => [item.node.graphPath, item])
+    );
+    const supportBundles = visualModel.supportBundles(state.supportClauses, { junctionRatio: 0.5 });
+    const drawableSupportBundles = supportBundles.filter((bundle) => {
+      const inputPaths = [];
+      function collectInputPaths(plan) {
+        if (!plan) return;
+        if (plan.kind === "leaf") inputPaths.push(plan.fromPath);
+        else if (Array.isArray(plan.inputs)) plan.inputs.forEach(collectInputPaths);
+      }
+      collectInputPaths(bundle.input || bundle.inputTopology);
+      const outputPaths = bundle.edge
+        ? [bundle.edge.toPath]
+        : bundle.outputBranches.map((branch) => branch.toPath);
+      return [...inputPaths, ...outputPaths].every((path) => renderedByGraphPath.has(path));
+    });
+    const drawableSupportPairs = new Set(drawableSupportBundles.flatMap((bundle) => {
+      const inputs = inputLeavesForBundle(bundle.input || bundle.inputTopology);
+      const outputs = bundle.edge
+        ? [bundle.edge.toPath]
+        : bundle.outputBranches.map((branch) => branch.toPath);
+      return inputs.flatMap((fromPath) => outputs.map((toPath) => `${fromPath}\u0000${toPath}`));
+    }));
+
+    function inputLeavesForBundle(plan) {
+      if (!plan) return [];
+      if (plan.kind === "leaf") return [plan.fromPath];
+      return Array.isArray(plan.inputs) ? plan.inputs.flatMap(inputLeavesForBundle) : [];
+    }
     const relationships = visualModel.relationshipPairs(existingNodes(state.nodes));
     const labelledHierarchyParents = new Set();
     const labelledAssociationSources = new Set();
@@ -2354,6 +2391,101 @@
       const x = side === "source" ? 72 : state.width - 72;
       const y = clamp(state.height * 0.34 + (seed % 290), 132, state.height - 132);
       return { screen: { x, y, radius: 7, depth: 6.4 }, node: null, focusContext: null };
+    }
+
+    function supportJunction(id, point) {
+      return {
+        node: null,
+        focusContext: null,
+        screen: { x: point.x, y: point.y, radius: 3, depth: 6.4 },
+        supportJunctionId: id
+      };
+    }
+
+    function averageScreen(items) {
+      return items.reduce((sum, item) => ({
+        x: sum.x + item.screen.x / items.length,
+        y: sum.y + item.screen.y / items.length
+      }), { x: 0, y: 0 });
+    }
+
+    function inputLeaves(plan) {
+      if (!plan) return [];
+      if (plan.kind === "leaf") return [renderedByGraphPath.get(plan.fromPath)].filter(Boolean);
+      return Array.isArray(plan.inputs) ? plan.inputs.flatMap(inputLeaves) : [];
+    }
+
+    function drawSupportInput(plan, target, bundleId, depth = 0) {
+      if (plan.kind === "leaf") {
+        const from = renderedByGraphPath.get(plan.fromPath);
+        drawTopologyLink(from, target, {
+          fromId: from.node.id,
+          toId: `${bundleId}:input:${depth}`,
+          kind: "association", label: "support", showLabel: false, glyphs: false
+        });
+        return;
+      }
+      const leaves = inputLeaves(plan);
+      if (!leaves.length) return;
+      const center = averageScreen(leaves);
+      const local = supportJunction(plan.id, {
+        x: center.x + (target.screen.x - center.x) * 0.62,
+        y: center.y + (target.screen.y - center.y) * 0.62
+      });
+      plan.inputs.forEach((child, index) => drawSupportInput(child, local, bundleId, depth + index + 1));
+      drawTopologyLink(local, target, {
+        fromId: plan.id,
+        toId: target.supportJunctionId,
+        kind: "association", label: "support", showLabel: false, glyphs: false
+      });
+      context.save();
+      context.globalAlpha = 0.72;
+      context.fillStyle = theme["accent-2"];
+      context.font = `600 10px ${theme.fontMono}`;
+      context.textAlign = "center";
+      context.fillText(String(plan.operator || "").toUpperCase(), local.screen.x, local.screen.y - 8);
+      context.restore();
+    }
+
+    function drawSupportBundle(bundle) {
+      if (bundle.edge) {
+        const from = renderedByGraphPath.get(bundle.edge.fromPath);
+        const to = renderedByGraphPath.get(bundle.edge.toPath);
+        drawTopologyLink(from, to, {
+          fromId: from.node.id, toId: to.node.id,
+          kind: "association", label: "support", showLabel: true
+        });
+        return;
+      }
+      const inputs = inputLeaves(bundle.inputTopology);
+      const outputs = bundle.outputBranches.map((branch) => renderedByGraphPath.get(branch.toPath));
+      const inputCenter = averageScreen(inputs);
+      const outputCenter = averageScreen(outputs);
+      const ratio = bundle.junctionRatio;
+      const center = {
+        x: inputCenter.x + (outputCenter.x - inputCenter.x) * ratio,
+        y: inputCenter.y + (outputCenter.y - inputCenter.y) * ratio
+      };
+      const length = Math.max(1, Math.hypot(outputCenter.x - inputCenter.x, outputCenter.y - inputCenter.y));
+      const unit = { x: (outputCenter.x - inputCenter.x) / length, y: (outputCenter.y - inputCenter.y) / length };
+      const ifJunction = supportJunction(bundle.trunk.from, {
+        x: center.x - unit.x * 10, y: center.y - unit.y * 10
+      });
+      const thenJunction = supportJunction(bundle.trunk.to, {
+        x: center.x + unit.x * 10, y: center.y + unit.y * 10
+      });
+      drawSupportInput(bundle.inputTopology, ifJunction, bundle.id);
+      drawTopologyLink(ifJunction, thenJunction, {
+        fromId: bundle.trunk.from, toId: bundle.trunk.to,
+        kind: "association", label: "support", showLabel: true
+      });
+      bundle.outputBranches.forEach((branch, index) => {
+        const to = outputs[index];
+        drawTopologyLink(thenJunction, to, {
+          fromId: bundle.trunk.to, toId: to.node.id,
+          kind: "association", label: "support", showLabel: false
+        });
+      });
     }
 
     function descendantPortalItem(endpoint) {
@@ -2400,7 +2532,17 @@
       }
     }
 
-    workspace.edgesForPath(state.currentPath).forEach((edge) => drawWorkspaceEdge(edge));
+    workspace.edgesForPath(state.currentPath).forEach((edge) => {
+      const fromNode = edge.from.path === state.currentPath
+        ? renderedNodes.get(edge.from.nodeId)?.node
+        : null;
+      const toNode = edge.to.path === state.currentPath
+        ? renderedNodes.get(edge.to.nodeId)?.node
+        : null;
+      if (edge.label === "support" && drawableSupportPairs.has(`${fromNode?.graphPath}\u0000${toNode?.graphPath}`)) return;
+      drawWorkspaceEdge(edge);
+    });
+    drawableSupportBundles.forEach(drawSupportBundle);
 
     const transaction = workspace.transaction();
     if (transaction && transaction.kind === "edge-create") {
@@ -4249,7 +4391,7 @@
 
   function openProgramChoicePanel(node) {
     if (!programNode(node)) return false;
-    const source = String(node.description || "");
+    const source = String(node.programSource || node.description || "");
     if (programChoiceModel.parse(source).length === 0) return false;
     activeProgramChoice = { node, path: nodeOwnerPath(node), source };
     ui.programChoiceStatus.textContent = "";
@@ -5361,6 +5503,10 @@
     state.nodes = prefetched && prefetched.path === nextPath
       ? prefetched.nodes
       : createChildDomainNodes(node, state.currentPath, state.depth);
+    // Announce the new scope before the camera tween finishes so the bridge can
+    // fetch its authoritative children during the transition. The history entry
+    // still records the settled camera in the tween completion callback below.
+    publishCurrentView();
     rememberDomainRoute(state.currentPath, state.domainStack);
     state.selected = null;
     state.focused = null;
@@ -8319,20 +8465,24 @@
   function frame(now) {
     resizeCanvas();
     state.time = now / 1000;
-    updateCameraTween(now);
-    renderScene();
-    updateDetailMagnifier(state.pointerPosition, state.hovered);
-    if (state.frameCount % 12 === 0) {
-      updateMetrics();
-      if (
-        !state.demo.active
-        && demoModel.shouldStart({
-          idleSeconds: state.demo.settings.idleSeconds,
-          lastInputAt: state.demo.lastInputAt,
-          now: performance.now()
-        })
-      ) {
-        startDemoPresentation();
+    const waitingForAuthoritativeKnowledge = document.body.dataset.spatialBridge === "connecting"
+      && document.body.dataset.spatialKnowledge !== "authoritative";
+    if (!waitingForAuthoritativeKnowledge) {
+      updateCameraTween(now);
+      renderScene();
+      updateDetailMagnifier(state.pointerPosition, state.hovered);
+      if (state.frameCount % 12 === 0) {
+        updateMetrics();
+        if (
+          !state.demo.active
+          && demoModel.shouldStart({
+            idleSeconds: state.demo.settings.idleSeconds,
+            lastInputAt: state.demo.lastInputAt,
+            now: performance.now()
+          })
+        ) {
+          startDemoPresentation();
+        }
       }
     }
     state.frameCount += 1;
@@ -8476,7 +8626,12 @@
       { path: focusedPath, id: focusedId },
       identityTransitions
     );
-    if (!workspace.importKnowledge(knowledge)) return false;
+    if (!workspace.importKnowledge(knowledge, {
+      preserveTransaction: options.preserveTransaction === true
+    })) return false;
+    state.supportClauses = Array.isArray(knowledge.supportClauses)
+      ? structuredClone(knowledge.supportClauses)
+      : [];
     cleanupOrphanedDemoKnowledge();
     state.hovered = null;
     currentDomainNodes();

@@ -13,9 +13,14 @@ import {
   parseGraphJson
 } from '../work-engine/atom-language/graph-json.mjs';
 
-function atom(name, detail = '', partners = []) {
-  return { name, detail, children: [], partners };
+function atom(thing, situation = '', support = []) {
+  const normalizedSupport = support.length && support.every((item) => Object.keys(item).length === 1 && item.thing)
+    ? [{ 'if@current': true, then: support }]
+    : support;
+  return { thing: thing, situation: situation, contain: [], support: normalizedSupport };
 }
+
+const supports = (thing) => [{ 'if@current': true, then: [{ thing }] }];
 
 async function fixture(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-transform-batch-'));
@@ -49,8 +54,8 @@ test('batch Transform commits all items once and refreshes one interaction lifec
   const result = await world.executeLegacy({
     ...files,
     source: `transform ${JSON.stringify([
-      { name: '来源甲', 'partners.rep.': [{ verb: '先导', object: '来源乙' }] },
-      { name: '来源乙', 'partners.rep.': [{ verb: '支持', object: '来源甲' }] }
+      { thing: '来源甲', 'support.rep.': supports('来源乙') },
+      { thing: '来源乙', 'support.rep.': supports('来源甲') }
     ])}`,
     programScheduler: idleProgramScheduler(() => { refreshes += 1; })
   });
@@ -62,19 +67,19 @@ test('batch Transform commits all items once and refreshes one interaction lifec
     result.results.map(({ index, changed, result: item }) => ({
       index,
       changed,
-      name: item.name
+      thing: item.thing
     })),
     [
-      { index: 0, changed: true, name: '来源甲' },
-      { index: 1, changed: true, name: '来源乙' }
+      { index: 0, changed: true, thing: '来源甲' },
+      { index: 1, changed: true, thing: '来源乙' }
     ]
   );
   assert.equal(writes.length, 1, 'the whole batch is one authoritative commit');
   assert.equal(refreshes, 2, 'Programs refresh once before and once after the batch, not per item');
 
   const [sourceA, sourceB] = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(sourceA.partners, [{ verb: '先导', object: '来源乙' }]);
-  assert.deepEqual(sourceB.partners, [{ verb: '支持', object: '来源甲' }]);
+  assert.deepEqual(sourceA.support, supports('来源乙'));
+  assert.deepEqual(sourceB.support, supports('来源甲'));
 });
 
 test('batch Transform writes nothing when any item fails', async (t) => {
@@ -88,8 +93,8 @@ test('batch Transform writes nothing when any item fails', async (t) => {
   const result = await world.executeLegacy({
     ...files,
     source: `transform ${JSON.stringify([
-      { name: '来源甲', 'partners.rep.': [{ verb: '先导', object: '来源乙' }] },
-      { name: '不存在', 'partners.rep.': [] }
+      { thing: '来源甲', 'support.rep.': supports('来源乙') },
+      { thing: '不存在', 'support.rep.': [] }
     ])}`
   });
 
@@ -107,8 +112,8 @@ test('CLI returns one compact Graph-JSON receipt per committed batch item', asyn
   let stdout = '';
   let stderr = '';
   const source = JSON.stringify([
-    { name: '来源甲', 'partners.rep.': [{ verb: '先导', object: '来源乙' }] },
-    { name: '来源乙', 'partners.rep.': [{ verb: '支持', object: '来源甲' }] }
+    { thing: '来源甲', 'support.rep.': supports('来源乙') },
+    { thing: '来源乙', 'support.rep.': supports('来源甲') }
   ]);
 
   const code = await runAtomCli([
@@ -125,8 +130,8 @@ test('CLI returns one compact Graph-JSON receipt per committed batch item', asyn
   assert.equal(code, 0, stderr);
   assert.equal(stderr, '');
   assert.deepEqual(materializeGraphJson(parseGraphJson(stdout)), [
-    { 'name~updated': '来源甲' },
-    { 'name~updated': '来源乙' }
+    { 'thing~updated': '来源甲' },
+    { 'thing~updated': '来源乙' }
   ]);
 });
 
@@ -145,8 +150,8 @@ test('batch Transform moves multiple existing Atoms in one authoritative commit'
   const result = await world.executeLegacy({
     ...files,
     source: `transform ${JSON.stringify([
-      { 'name.mov.目标域': '来源甲' },
-      { 'name.mov.目标域': '来源乙' }
+      { 'thing.mov.目标域': '来源甲' },
+      { 'thing.mov.目标域': '来源乙' }
     ])}`
   });
 
@@ -154,8 +159,8 @@ test('batch Transform moves multiple existing Atoms in one authoritative commit'
   assert.equal(result.batch, true);
   assert.equal(writes.length, 1);
   const current = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(current.map((item) => item.name), ['目标域']);
-  assert.deepEqual(current[0].children.map((item) => item.name), ['来源甲', '来源乙']);
+  assert.deepEqual(current.map((item) => item.thing), ['目标域']);
+  assert.deepEqual(current[0].contain.map((item) => item.thing), ['来源甲', '来源乙']);
 });
 
 test('batch Transform swaps sibling names from one final-state plan and rewrites relations once', async (t) => {
@@ -166,10 +171,10 @@ test('batch Transform swaps sibling names from one final-state plan and rewrites
   await fs.writeFile(contextFile, `${JSON.stringify([
     {
       ...atom('域'),
-      children: [
-        { ...atom('甲'), children: [atom('甲子')] },
+      contain: [
+        { ...atom('甲'), contain: [atom('甲子')] },
         atom('乙'),
-        atom('观察者', '', [{ verb: '指向', object: '域/甲/甲子' }])
+        atom('观察者', '', [{ thing: '域/甲/甲子' }])
       ]
     }
   ], null, 2)}\n`, 'utf8');
@@ -182,8 +187,8 @@ test('batch Transform swaps sibling names from one final-state plan and rewrites
     contextFile,
     projectionFile,
     source: `transform ${JSON.stringify([
-      { 'name.ren.乙': '域/甲' },
-      { 'name.ren.甲': '域/乙' }
+      { 'thing.ren.乙': '域/甲' },
+      { 'thing.ren.甲': '域/乙' }
     ])}`
   });
 
@@ -194,15 +199,15 @@ test('batch Transform swaps sibling names from one final-state plan and rewrites
     ['域/乙', '域/甲']
   );
   const [domain] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.deepEqual(domain.children.map((child) => child.name), ['乙', '甲', '观察者']);
-  assert.equal(domain.children[0].children[0].name, '甲子');
+  assert.deepEqual(domain.contain.map((child) => child.thing), ['乙', '甲', '观察者']);
+  assert.equal(domain.contain[0].contain[0].thing, '甲子');
   assert.deepEqual(
-    domain.children[2].partners,
-    [{ verb: '指向', object: '域/乙/甲子' }]
+    domain.contain[2].support,
+    supports('域/乙/甲子')
   );
 });
 
-test('batch Transform rejects a final sibling-name collision without writing any item', async (t) => {
+test('batch Transform rejects a final sibling-thing collision without writing any item', async (t) => {
   const files = await fixture(t);
   const before = await fs.readFile(files.contextFile, 'utf8');
   const writes = [];
@@ -213,8 +218,8 @@ test('batch Transform rejects a final sibling-name collision without writing any
   const result = await world.executeLegacy({
     ...files,
     source: `transform ${JSON.stringify([
-      { 'name.ren.共同名称': '来源甲' },
-      { 'name.ren.共同名称': '来源乙' }
+      { 'thing.ren.共同名称': '来源甲' },
+      { 'thing.ren.共同名称': '来源乙' }
     ])}`
   });
 
@@ -231,8 +236,8 @@ test('batch receipts preserve the exact path when short names repeat', async (t)
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, `${JSON.stringify([
-    { ...atom('P1'), children: [atom('X', '旧一')] },
-    { ...atom('P2'), children: [atom('X', '旧二')] }
+    { ...atom('P1'), contain: [atom('X', '旧一')] },
+    { ...atom('P2'), contain: [atom('X', '旧二')] }
   ], null, 2)}\n`, 'utf8');
 
   const world = createLegacyWorldService();
@@ -240,7 +245,7 @@ test('batch receipts preserve the exact path when short names repeat', async (t)
     contextFile,
     projectionFile,
     source: `transform ${JSON.stringify([
-      { name: 'P2/X', 'partners.rep.': [{ verb: '精确', object: 'P1/X' }] }
+      { thing: 'P2/X', 'support.rep.': supports('P1/X') }
     ])}`
   });
 
@@ -262,7 +267,7 @@ test('post-batch Program transforms join the same authoritative commit', async (
       return refreshes === 2
         ? {
             messages: [], locks: [], records: [], failures: [],
-            transforms: [{ name: '来源乙', 'partners.rep.': [{ verb: '自动', object: '来源甲' }] }]
+            transforms: [{ thing: '来源乙', 'support.rep.': supports('来源甲') }]
           }
         : { messages: [], locks: [], records: [], transforms: [], failures: [] };
     }
@@ -271,7 +276,7 @@ test('post-batch Program transforms join the same authoritative commit', async (
   const result = await world.executeLegacy({
     ...files,
     source: `transform ${JSON.stringify([
-      { name: '来源甲', 'partners.rep.': [{ verb: '批量', object: '来源乙' }] }
+      { thing: '来源甲', 'support.rep.': supports('来源乙') }
     ])}`,
     programScheduler: scheduler
   });
@@ -279,8 +284,8 @@ test('post-batch Program transforms join the same authoritative commit', async (
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(writes.length, 1);
   const [sourceA, sourceB] = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(sourceA.partners, [{ verb: '批量', object: '来源乙' }]);
-  assert.deepEqual(sourceB.partners, [{ verb: '自动', object: '来源甲' }]);
+  assert.deepEqual(sourceA.support, supports('来源乙'));
+  assert.deepEqual(sourceB.support, supports('来源甲'));
   assert.equal(
     result.revisionAfter,
     crypto.createHash('sha256').update(JSON.stringify([sourceA, sourceB])).digest('hex')
@@ -300,22 +305,22 @@ test('a single Transform and its Program consequences share one authoritative co
     async refresh() {
       return {
         messages: [], locks: [], records: [], failures: [],
-        transforms: [{ name: '来源乙', 'detail.rep.自动乙': null }]
+        transforms: [{ thing: '来源乙', 'situation.rep.自动乙': null }]
       };
     }
   };
 
   const result = await world.executeLegacy({
     ...files,
-    source: 'transform {"name":"来源甲","detail.rep.新甲"}',
+    source: 'transform {"thing":"来源甲","situation.rep.新甲"}',
     programScheduler: scheduler
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(writes.length, 1, 'user change and Program consequences form one commit');
   const [sourceA, sourceB] = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.equal(sourceA.detail, '新甲');
-  assert.equal(sourceB.detail, '自动乙');
+  assert.equal(sourceA.situation, '新甲');
+  assert.equal(sourceB.situation, '自动乙');
   assert.equal(result.revisionAfter, crypto.createHash('sha256')
     .update(JSON.stringify([sourceA, sourceB])).digest('hex'));
 });
@@ -326,18 +331,18 @@ test('a real Program creates then updates one new Atom inside the triggering cen
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    { name: 'test', detail: '', children: [], partners: [] },
-    { name: 'Trigger', detail: 'wait', children: [], partners: [] },
+    { thing: 'test', situation: '', contain: [], support: [] },
+    { thing: 'Trigger', situation: 'wait', contain: [], support: [] },
     {
-      'name@program': 'Create Then Update',
-      detail: [
-        "trigger = explore({'name': 'Trigger', 'detail$full': None})[0]",
-        "if trigger.detail == 'go':",
-        "    transform({'name': 'test/Created In Reconcile', 'detail': 'created', 'children': [], 'partners': []})",
-        "    transform({'name': 'test/Created In Reconcile', 'detail.rep.final': None})"
+      'thing@program': 'Create Then Update',
+      situation: [
+        "trigger = explore({'thing': 'Trigger', 'situation$full': None})[0]",
+        "if trigger.situation == 'go':",
+        "    transform({'thing': 'test/Created In Reconcile', 'situation': 'created', 'contain': [], 'support': []})",
+        "    transform({'thing': 'test/Created In Reconcile', 'situation.rep.final': None})"
       ].join('\n'),
-      children: [],
-      partners: []
+      contain: [],
+      support: []
     }
   ], null, 2));
   const writes = [];
@@ -348,7 +353,7 @@ test('a real Program creates then updates one new Atom inside the triggering cen
   const result = await world.executeLegacy({
     contextFile,
     projectionFile,
-    source: 'transform {"name":"Trigger","detail.rep.go"}',
+    source: 'transform {"thing":"Trigger","situation.rep.go"}',
     programMode: 'reconcile',
     programScheduler: createProgramRuntimeScheduler()
   });
@@ -356,8 +361,8 @@ test('a real Program creates then updates one new Atom inside the triggering cen
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(writes.length, 1);
   const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(persisted[0].children[0].name, 'Created In Reconcile');
-  assert.equal(persisted[0].children[0].detail, 'final');
+  assert.equal(persisted[0].contain[0].thing, 'Created In Reconcile');
+  assert.equal(persisted[0].contain[0].situation, 'final');
   assert.equal(result.revisionAfter, crypto.createHash('sha256')
     .update(JSON.stringify(persisted)).digest('hex'));
 });
@@ -369,31 +374,31 @@ test('a Transform request triggers its declared Program even when the requested 
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
     {
-      name: 'test',
-      detail: '',
-      children: [
+      thing: 'test',
+      situation: '',
+      contain: [
         atom('Target', 'stable'),
         atom('Result', 'pending'),
         {
-          'name@program': 'Target Trigger',
-          detail: [
+          'thing@program': 'Target Trigger',
+          situation: [
             'def main():',
-            "    transform({'name': 'test/Target Trigger Case/Result', 'detail.rep.fired': None})",
+            "    transform({'thing': 'test/Target Trigger Case/Result', 'situation.rep.fired': None})",
             "trigger('transform', {'nodes': ['test/Target Trigger Case/Target']}, main)"
           ].join('\n'),
-          children: [],
-          partners: []
+          contain: [],
+          support: []
         }
       ],
-      partners: []
+      support: []
     }
   ], null, 2));
   const initial = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  initial[0].children = [{
-    name: 'Target Trigger Case',
-    detail: '',
-    children: initial[0].children,
-    partners: []
+  initial[0].contain = [{
+    thing: 'Target Trigger Case',
+    situation: '',
+    contain: initial[0].contain,
+    support: []
   }];
   await fs.writeFile(contextFile, JSON.stringify(initial, null, 2));
   const writes = [];
@@ -404,7 +409,7 @@ test('a Transform request triggers its declared Program even when the requested 
   const result = await world.executeLegacy({
     contextFile,
     projectionFile,
-    source: 'transform {"name":"test/Target Trigger Case/Target","detail.rep.stable"}',
+    source: 'transform {"thing":"test/Target Trigger Case/Target","situation.rep.stable"}',
     programMode: 'reconcile',
     programScheduler: createProgramRuntimeScheduler()
   });
@@ -412,7 +417,7 @@ test('a Transform request triggers its declared Program even when the requested 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(writes.length, 1);
   const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(persisted[0].children[0].children.find(({ name }) => name === 'Result').detail, 'fired');
+  assert.equal(persisted[0].contain[0].contain.find(({ thing }) => thing === 'Result').situation, 'fired');
 });
 
 test('batch receipt follows a final Program rename in the same commit', async (t) => {
@@ -425,7 +430,7 @@ test('batch receipt follows a final Program rename in the same commit', async (t
       return refreshes === 2
         ? {
             messages: [], locks: [], records: [], failures: [],
-            transforms: [{ name: '来源甲', 'name.ren.Z': null }]
+            transforms: [{ thing: '来源甲', 'thing.ren.Z': null }]
           }
         : { messages: [], locks: [], records: [], transforms: [], failures: [] };
     }
@@ -434,7 +439,7 @@ test('batch receipt follows a final Program rename in the same commit', async (t
   const result = await world.executeLegacy({
     ...files,
     source: `transform ${JSON.stringify([
-      { name: '来源甲', 'partners.rep.': [{ verb: '批量', object: '来源乙' }] }
+      { thing: '来源甲', 'support.rep.': supports('来源乙') }
     ])}`,
     programScheduler: scheduler
   });

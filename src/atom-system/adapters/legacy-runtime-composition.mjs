@@ -7,6 +7,7 @@ import { recordAtomFeedback } from '../../../work-engine/atom-language/feedback-
 import { projectAtomGraphWithPaths } from '../../../work-engine/atom-language/graph-4d-projection.mjs';
 import { createProgramRuntimeScheduler } from '../../../work-engine/atom-language/program-runtime.mjs';
 import { resolveAgentContext } from '../../../work-engine/atom-language/cli.mjs';
+import { parseAtomKey } from '../../../work-engine/atom-language/key-parser.mjs';
 import { WORLD_OUTSIDE_NAME } from '../../../work-engine/atom-language/world-root.mjs';
 import { createInteractionRuntime } from '../public/interaction-runtime.mjs';
 import { createLegacyWorldService } from './legacy-engine-adapter.mjs';
@@ -89,7 +90,7 @@ export function createLegacyHumanStatusTranslator({ graphFile, projectGraph = pr
           'Human Web entry only updates an Atom 状态 detail'
         );
       }
-      return `transform {"name":${JSON.stringify(atomPath)},${JSON.stringify(`detail.rep.${normalizedDetail}`)}}`;
+      return `transform {"thing":${JSON.stringify(atomPath)},${JSON.stringify(`situation.rep.${normalizedDetail}`)}}`;
     }
   });
 }
@@ -124,17 +125,22 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
         return path;
       };
       const graphByPath = new Map();
+      const axisEntry = (node, axis) => Object.entries(node ?? {}).find(([rawKey]) => (
+        parseAtomKey(rawKey, { descriptionSymbolWarnings: false }).baseKey === axis
+      ));
       const visit = (node, parentPath = '') => {
-        const path = parentPath ? `${parentPath}/${node.name}` : node.name;
+        const thing = axisEntry(node, 'thing')?.[1];
+        if (typeof thing !== 'string' || !thing) return;
+        const path = parentPath ? `${parentPath}/${thing}` : thing;
         graphByPath.set(path, node);
-        for (const child of node.children ?? []) visit(child, path);
+        for (const child of axisEntry(node, 'contain')?.[1] ?? []) visit(child, path);
       };
-      for (const child of rawGraphDocument.graph?.children ?? []) visit(child);
-      const resolvePartnerPath = (sourcePath, object) => {
-        if (graphByPath.has(object)) return object;
-        const sibling = `${sourcePath.split('/').slice(0, -1).join('/')}/${object}`.replace(/^\//u, '');
+      for (const child of axisEntry(rawGraphDocument.graph, 'contain')?.[1] ?? []) visit(child);
+      const resolveSupportPath = (sourcePath, selector) => {
+        if (graphByPath.has(selector)) return selector;
+        const sibling = `${sourcePath.split('/').slice(0, -1).join('/')}/${selector}`.replace(/^\//u, '');
         if (graphByPath.has(sibling)) return sibling;
-        const named = [...graphByPath.keys()].filter((path) => path.split('/').at(-1) === object);
+        const named = [...graphByPath.keys()].filter((path) => path.split('/').at(-1) === selector);
         return named.length === 1 ? named[0] : '';
       };
       const requireAtomPath = (key, node = null) => {
@@ -143,8 +149,8 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
         if (!path) throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Web edit target does not map to one Atom');
         return path;
       };
-      const replacePartners = (sourcePath, partners) => (
-        `transform ${JSON.stringify({ name: sourcePath, 'partners.rep.': partners })}`
+      const replaceSupport = (sourcePath, support) => (
+        `transform ${JSON.stringify({ thing: sourcePath, 'support.rep.': support })}`
       );
       const landingTransform = (landing) => {
         const destinationPath = containerPath(landing.target?.path);
@@ -162,9 +168,9 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
           if (type && (!/^[\p{L}\p{N}_-]+$/u.test(type) || type.length > 80)) {
             throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Legacy Web node requires one safe @type name');
           }
-          return { new: { [`name${type ? `@${type}` : ''}`]: `${destinationPath}/${label}`, detail, children: [], partners: [] } };
+          return { new: { [`thing${type ? `@${type}` : ''}`]: `${destinationPath}/${label}`, situation: detail, contain: [], support: [] } };
         }
-        return { [`name.mov.${destinationPath || WORLD_OUTSIDE_NAME}`]: sourcePath };
+        return { [`thing.mov.${destinationPath || WORLD_OUTSIDE_NAME}`]: sourcePath };
       };
 
       if (operation?.kind === 'node-create' && typeof operation.path === 'string') {
@@ -178,14 +184,14 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
           throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Atom type requires one safe @type name');
         }
         const parentAtomPath = containerPath(operation.path);
-        const name = parentAtomPath ? `${parentAtomPath}/${label}` : label;
-        return `transform new ${JSON.stringify({ [`name${type ? `@${type}` : ''}`]: name, detail, children: [], partners: [] })}`;
+        const thing = parentAtomPath ? `${parentAtomPath}/${label}` : label;
+        return `transform new ${JSON.stringify({ [`thing${type ? `@${type}` : ''}`]: thing, situation: detail, contain: [], support: [] })}`;
       }
 
       if (operation?.kind === 'node-edit') {
         const path = requireAtomPath(operation.nodeKey, operation.node);
         if (operation.status === 'delete') {
-          return `transform {${JSON.stringify('name.dsc.')}:${JSON.stringify(path)}}`;
+          return `transform {${JSON.stringify('thing.dsc.')}:${JSON.stringify(path)}}`;
         }
         const label = operation.draft?.label?.trim();
         const detail = operation.draft?.description?.trim() ?? '';
@@ -198,9 +204,9 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
           throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Atom type requires one safe @type name');
         }
         const currentName = path.split('/').at(-1);
-        const nameCommand = `name${hasTypeDraft ? `.typ.${type}` : ''}${label === currentName ? '' : `.ren.${label}`}`;
-        const nameField = `${JSON.stringify(nameCommand)}:${JSON.stringify(path)}`;
-        return `transform {${nameField},${JSON.stringify(`detail.rep.${detail}`)}}`;
+        const thingCommand = `thing${hasTypeDraft ? `.typ.${type}` : ''}${label === currentName ? '' : `.ren.${label}`}`;
+        const thingField = `${JSON.stringify(thingCommand)}:${JSON.stringify(path)}`;
+        return `transform {${thingField},${JSON.stringify(`situation.rep.${detail}`)}}`;
       }
 
       if (operation?.kind === 'node-land') {
@@ -225,24 +231,42 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
         const sourcePath = requireAtomPath(operation.source?.key, operation.source);
         const targetPath = requireAtomPath(operation.target?.key, operation.target);
         const source = graphByPath.get(sourcePath);
-        const partners = structuredClone(source?.partners ?? []);
-        partners.push({ verb: operation.label?.trim() || '关联', object: targetPath });
-        return replacePartners(sourcePath, partners);
+        const support = structuredClone(axisEntry(source, 'support')?.[1] ?? []);
+        const outbound = support.find((rule) => (
+          rule?.['if@current'] === true && !Object.hasOwn(rule, 'if') && Array.isArray(rule.then)
+        ));
+        if (outbound) {
+          if (outbound.then.some((selector) => resolveSupportPath(sourcePath, selector?.thing) === targetPath)) {
+            throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Web cannot duplicate one directed Atom support relation');
+          }
+          outbound.then.push({ thing: targetPath });
+        } else {
+          support.push({ 'if@current': true, then: [{ thing: targetPath }] });
+        }
+        return replaceSupport(sourcePath, support);
       }
 
       if (operation?.kind === 'edge-edit') {
         const sourcePath = requireAtomPath(operation.edge?.from?.key, operation.edge?.from);
         const targetPath = requireAtomPath(operation.edge?.to?.key, operation.edge?.to);
         const source = graphByPath.get(sourcePath);
-        const partners = structuredClone(source?.partners ?? []);
-        const matching = partners.map((partner, index) => ({ partner, index }))
-          .filter(({ partner }) => resolvePartnerPath(sourcePath, partner.object) === targetPath);
+        const support = structuredClone(axisEntry(source, 'support')?.[1] ?? []);
+        const matching = support.flatMap((rule, ruleIndex) => (
+          rule?.['if@current'] === true && !Object.hasOwn(rule, 'if') && Array.isArray(rule.then)
+            ? rule.then.map((selector, thenIndex) => ({ rule, ruleIndex, selector, thenIndex }))
+            : []
+        )).filter(({ selector }) => resolveSupportPath(sourcePath, selector.thing) === targetPath);
         if (matching.length !== 1) {
           throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Web relation edit requires one exact directed Atom relation');
         }
-        if (operation.status === 'delete') partners.splice(matching[0].index, 1);
-        else matching[0].partner.verb = operation.edge?.label?.trim() || '关联';
-        return replacePartners(sourcePath, partners);
+        if (operation.status === 'delete') {
+          matching[0].rule.then.splice(matching[0].thenIndex, 1);
+          if (matching[0].rule.then.length === 0) support.splice(matching[0].ruleIndex, 1);
+        }
+        else if (operation.edge?.label && operation.edge.label !== 'support') {
+          throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Atom support relation label is fixed');
+        }
+        return replaceSupport(sourcePath, support);
       }
 
       throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Unsupported Human Web workspace operation');
@@ -256,7 +280,7 @@ export function createLegacyRuntimeComposition(options) {
     graphFile,
     storeFile,
     worldService = createLegacyWorldService(),
-    projectionOrchestrator = createLegacyProjectionOrchestrator({ contextFile }),
+    projectionOrchestrator = null,
     diagnostics = null,
     programScheduler = createProgramRuntimeScheduler({ diagnosticRecorder: diagnostics }),
     graphPublisher = defaultGraphPublisher(graphFile),
@@ -266,6 +290,8 @@ export function createLegacyRuntimeComposition(options) {
     humanStatusTranslator = createLegacyHumanStatusTranslator({ graphFile }),
     humanWorkspaceTranslator = createLegacyHumanWorkspaceTranslator({ graphFile })
   } = options ?? {};
+  const activeProjectionOrchestrator = projectionOrchestrator
+    ?? createLegacyProjectionOrchestrator({ contextFile, programScheduler });
 
   if (typeof contextFile !== 'string' || !contextFile || typeof graphFile !== 'string' || !graphFile) {
     throw problem('INVALID_RUNTIME_PATHS', 'Legacy runtime composition requires contextFile and graphFile');
@@ -273,7 +299,7 @@ export function createLegacyRuntimeComposition(options) {
   if (typeof worldService?.executeLegacy !== 'function') {
     throw problem('INVALID_WORLD_SERVICE', 'Legacy runtime composition requires World Service');
   }
-  if (typeof projectionOrchestrator?.projectCurrent !== 'function') {
+  if (typeof activeProjectionOrchestrator?.projectCurrent !== 'function') {
     throw problem('INVALID_PROJECTION_ORCHESTRATOR', 'Legacy runtime composition requires projection orchestrator');
   }
   if (typeof spatialPublisher?.publish !== 'function') {
@@ -286,7 +312,7 @@ export function createLegacyRuntimeComposition(options) {
   async function projectAndPublish(request) {
     let projected;
     try {
-      projected = await projectionOrchestrator.projectCurrent(request);
+      projected = await activeProjectionOrchestrator.projectCurrent(request);
     } catch (error) {
       if (error.code === 'STALE_WORLD_PROJECTION') {
         error.details = {

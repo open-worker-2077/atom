@@ -14,15 +14,15 @@ export const TRANSFORM_COMMANDS = Object.freeze([
 ]);
 
 const COMMAND_AXES = Object.freeze({
-  rep: new Set(['detail', 'partners']),
-  sum: new Set(['detail']),
-  typ: new Set(['name']),
-  ren: new Set(['name']),
-  mov: new Set(['name']),
-  cpy: new Set(['name']),
-  dsc: new Set(['name']),
-  rst: new Set(['name']),
-  run: new Set(['name'])
+  rep: new Set(['situation', 'support']),
+  sum: new Set(['situation']),
+  typ: new Set(['thing']),
+  ren: new Set(['thing']),
+  mov: new Set(['thing']),
+  cpy: new Set(['thing']),
+  dsc: new Set(['thing']),
+  rst: new Set(['thing']),
+  run: new Set(['thing'])
 });
 
 const MARKER_PATTERN = new RegExp(

@@ -56,21 +56,21 @@ test('Transform receipt keeps only the minimal Graph outline and never echoes lo
     'transform',
     'new',
     JSON.stringify({
-      name: '长正文',
-      detail,
-      children: [],
-      partners: []
+      thing: '长正文',
+      situation: detail,
+      contain: [],
+      support: []
     })
   ]);
 
   assert.equal(created.code, 0, created.stderr);
   assert.equal(created.stdout.includes(detail), false);
-  assert.equal(created.stdout.includes('"detail"'), false);
-  assert.equal(created.stdout.includes('"children"'), false);
-  assert.equal(created.stdout.includes('"partners"'), false);
+  assert.equal(created.stdout.includes('"situation"'), false);
+  assert.equal(created.stdout.includes('"contain"'), false);
+  assert.equal(created.stdout.includes('"support"'), false);
   assert.deepEqual(
     materializeGraphJson(parseGraphJson(created.stdout)),
-    { 'name~created': '长正文' }
+    { 'thing~created': '长正文' }
   );
 });
 
@@ -79,9 +79,9 @@ test('--json is a compatibility alias for the same Graph-JSON result, not a mach
   await run(files, [
     'transform',
     'new',
-    '{"name":"目标","detail":"正文","children":[],"partners":[]}'
+    '{"thing":"目标","situation":"正文","contain":[],"support":[]}'
   ]);
-  const source = ['transform', '{"name":"目标","detail.rep.正文"}'];
+  const source = ['transform', '{"thing":"目标","situation.rep.正文"}'];
   const ordinary = await run(files, source);
   const json = await run(files, source, { json: true });
 
@@ -92,7 +92,7 @@ test('--json is a compatibility alias for the same Graph-JSON result, not a mach
   assert.equal(json.stdout.includes('"result"'), false);
   assert.deepEqual(
     materializeGraphJson(parseGraphJson(json.stdout)),
-    { 'name~unchanged': '目标' }
+    { 'thing~unchanged': '目标' }
   );
 });
 
@@ -101,11 +101,11 @@ test('failed Transform emits no success receipt', async (t) => {
   await run(files, [
     'transform',
     'new',
-    '{"name":"目标","detail":"正文","children":[],"partners":[]}'
+    '{"thing":"目标","situation":"正文","contain":[],"support":[]}'
   ]);
   const failed = await run(files, [
     'transform',
-    '{"name":"目标","detail.rep.新片段":"不存在的旧片段"}'
+    '{"thing":"目标","situation.rep.新片段":"不存在的旧片段"}'
   ]);
 
   assert.equal(failed.code, 4);

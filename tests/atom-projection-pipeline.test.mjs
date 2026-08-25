@@ -106,10 +106,10 @@ test('duplicate projection ids are rejected before any projector runs', async ()
 
 test('legacy Graph and Spatial projectors fit the pipeline without changing their semantic output', async () => {
   const facts = [{
-    name: 'Root',
-    detail: 'root detail',
-    children: [{ name: 'Child', detail: 'child detail', children: [], partners: [] }],
-    partners: []
+    thing: 'Root',
+    situation: 'root detail',
+    contain: [{ thing: 'Child', situation: 'child detail', contain: [], support: [] }],
+    support: []
   }];
   const repository = createMemoryProjectionRepository();
   const pipeline = createProjectionPipeline({
@@ -127,10 +127,10 @@ test('legacy Graph and Spatial projectors fit the pipeline without changing thei
 
 test('spatial projection preserves Atom registration types as presentation metadata', async () => {
   const facts = [{
-    'name@agent': 'Work Agent',
-    detail: '',
-    children: [{ 'name@program': 'Router', detail: 'pass', children: [], partners: [] }],
-    partners: []
+    'thing@agent': 'Work Agent',
+    situation: '',
+    contain: [{ 'thing@program': 'Router', situation: 'pass', contain: [], support: [] }],
+    support: []
   }];
   const repository = createMemoryProjectionRepository();
   const pipeline = createProjectionPipeline({
@@ -151,7 +151,7 @@ test('legacy projection orchestration rejects a stale command revision before pu
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-projection-orchestrator-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
-  const facts = [{ name: 'Root', detail: '', children: [], partners: [] }];
+  const facts = [{ thing: 'Root', situation: '', contain: [], support: [] }];
   await fs.writeFile(contextFile, JSON.stringify(facts), 'utf8');
   const orchestrator = createLegacyProjectionOrchestrator({ contextFile });
 
@@ -161,6 +161,6 @@ test('legacy projection orchestration rejects a stale command revision before pu
   );
   const current = await orchestrator.projectCurrent();
   assert.match(current.sourceRevision, /^sha256:/u);
-  assert.equal(current.graph.config.schema_version, '1.0.0');
+  assert.equal(current.graph.config.schema_version, '2.0.0');
   assert.ok(Array.isArray(current.spatial.nodes));
 });

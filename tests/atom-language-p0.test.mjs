@@ -42,56 +42,56 @@ test('Graph-JSON result formatting preserves decorated and absent-Value keys', (
     kind: 'object',
     entries: [
       {
-        key: 'name@agent~updated',
+        key: 'thing@agent~updated',
         valuePresent: true,
         value: '石器工坊'
       },
       {
-        key: 'detail#简介中的 @/$/~ 都是原文',
+        key: 'situation#简介中的 @/$/~ 都是原文',
         valuePresent: false
       }
     ]
   };
   const text = formatGraphJson(value);
   assert.equal(text, `{
-  "name@agent~updated": "石器工坊",
-  "detail#简介中的 @/$/~ 都是原文"
+  "thing@agent~updated": "石器工坊",
+  "situation#简介中的 @/$/~ 都是原文"
 }`);
   assert.deepEqual(parseGraphJson(text), value);
 });
 
-test('Graph-JSON display formatting omits only explicitly empty children and partners', () => {
+test('Graph-JSON display formatting omits only explicitly empty contain and support', () => {
   const empty = { kind: 'array', values: [] };
   const child = {
     kind: 'object',
-    entries: [{ key: 'name', valuePresent: true, value: '子节点' }]
+    entries: [{ key: 'thing', valuePresent: true, value: '子节点' }]
   };
   const value = {
     kind: 'object',
     entries: [
-      { key: 'name', valuePresent: true, value: '入口' },
-      { key: 'children', valuePresent: true, value: { kind: 'array', values: [child] } },
-      { key: 'partners', valuePresent: true, value: empty },
-      { key: 'children~truncated', valuePresent: false }
+      { key: 'thing', valuePresent: true, value: '入口' },
+      { key: 'contain', valuePresent: true, value: { kind: 'array', values: [child] } },
+      { key: 'support', valuePresent: true, value: empty },
+      { key: 'contain~truncated', valuePresent: false }
     ]
   };
 
-  assert.match(formatGraphJson(value), /"partners": \[\]/u);
+  assert.match(formatGraphJson(value), /"support": \[\]/u);
   const text = formatGraphJson(value, { omitEmptyStructuralArrays: true });
 
-  assert.match(text, /"children": \[/u);
-  assert.doesNotMatch(text, /"partners"/u);
-  assert.match(text, /"children~truncated"/u);
+  assert.match(text, /"contain": \[/u);
+  assert.doesNotMatch(text, /"support"/u);
+  assert.match(text, /"contain~truncated"/u);
   assert.deepEqual(formatGraphJson({
     kind: 'object',
     entries: [
-      { key: 'children', valuePresent: true, value: empty },
-      { key: 'partners', valuePresent: true, value: empty }
+      { key: 'contain', valuePresent: true, value: empty },
+      { key: 'support', valuePresent: true, value: empty }
     ]
   }, { omitEmptyStructuralArrays: true }), '{}');
 });
 
-test('1. atom is the registered Atom Language entry and the package CLI name', async () => {
+test('1. atom is the registered Atom Language entry and the package CLI thing', async () => {
   const receiver = createAtomLanguageReceiver();
   const entry = receiver.receive('atom');
   assert.equal(entry.ok, true);
@@ -119,9 +119,9 @@ test('1. atom is the registered Atom Language entry and the package CLI name', a
 test('2. explore recognizes the complete first-round request', () => {
   const result = createAtomLanguageReceiver().receive(`
     explore {
-      "name": "石器工坊",
-      "detail$full",
-      "children$latitude2$latitude-3$longitude-4$longitude4"
+      "thing": "石器工坊",
+      "situation$full",
+      "contain$latitude2$latitude-3$longitude-4$longitude4"
     }
   `);
   assert.equal(result.ok, true);
@@ -130,7 +130,7 @@ test('2. explore recognizes the complete first-round request', () => {
   assert.equal(result.batch, false);
   assert.equal(result.items.length, 1);
   assert.deepEqual(
-    fieldByBase(result.items[0], 'children').actions.map(({ name, parameter }) => ({ name, parameter })),
+    fieldByBase(result.items[0], 'contain').actions.map(({ name, parameter }) => ({ name, parameter })),
     [
       { name: 'latitude', parameter: 2 },
       { name: 'latitude', parameter: -3 },
@@ -141,7 +141,7 @@ test('2. explore recognizes the complete first-round request', () => {
 });
 
 test('3. explore new starts a new exploration line, not a new World', () => {
-  const result = createAtomLanguageReceiver().receive('explore new {"name":"河岸"}');
+  const result = createAtomLanguageReceiver().receive('explore new {"thing":"河岸"}');
   assert.equal(result.ok, true);
   assert.equal(result.command, 'explore');
   assert.equal(result.newExploration, true);
@@ -151,17 +151,17 @@ test('3. explore new starts a new exploration line, not a new World', () => {
 
 test('4. ordinary strict JSON remains valid input', () => {
   const result = createAtomLanguageReceiver().receive(
-    'explore {"name":"石器工坊","detail":null,"children":[],"partners":[]}'
+    'explore {"thing":"石器工坊","situation":null,"contain":[],"support":[]}'
   );
   assert.equal(result.ok, true);
   assert.equal(result.items[0].fields.length, 4);
-  assert.equal(fieldByBase(result.items[0], 'name').value, '石器工坊');
-  assert.equal(fieldByBase(result.items[0], 'detail').value, null);
+  assert.equal(fieldByBase(result.items[0], 'thing').value, '石器工坊');
+  assert.equal(fieldByBase(result.items[0], 'situation').value, null);
 });
 
 test('5. Graph-JSON accepts keys whose Value is absent', () => {
   const result = createAtomLanguageReceiver().receive(
-    'explore {"detail$full","children$latitude-2"}'
+    'explore {"situation$full","contain$latitude-2"}'
   );
   assert.equal(result.ok, true);
   for (const parsed of result.items[0].fields) {
@@ -170,34 +170,34 @@ test('5. Graph-JSON accepts keys whose Value is absent', () => {
   }
 
   const nested = createAtomLanguageReceiver().receive(
-    'explore {"children":[{"name":"子节点","detail$full"}]}'
+    'explore {"contain":[{"thing":"子节点","situation$full"}]}'
   );
-  const nestedObject = fieldByBase(nested.items[0], 'children').value[0];
+  const nestedObject = fieldByBase(nested.items[0], 'contain').value[0];
   assert.equal(nestedObject.kind, 'graph-object');
-  const nestedDetail = fieldByBase(nestedObject, 'detail');
+  const nestedDetail = fieldByBase(nestedObject, 'situation');
   assert.equal(nestedDetail.valuePresent, false);
   assert.equal(nestedDetail.actions[0].name, 'full');
 });
 
 test('6. absent Value, null, empty string, and an absent key stay distinct', () => {
   const result = createAtomLanguageReceiver().receive(
-    'explore {"detail$full","name":null,"children":""}'
+    'explore {"situation$full","thing":null,"contain":""}'
   );
   const item = result.items[0];
-  const detail = fieldByBase(item, 'detail');
-  const name = fieldByBase(item, 'name');
-  const children = fieldByBase(item, 'children');
-  assert.equal(detail.valuePresent, false);
-  assert.equal(Object.hasOwn(detail, 'value'), false);
-  assert.equal(name.valuePresent, true);
-  assert.equal(name.value, null);
-  assert.equal(children.valuePresent, true);
-  assert.equal(children.value, '');
-  assert.equal(fieldByBase(item, 'partners'), undefined);
+  const situation = fieldByBase(item, 'situation');
+  const thing = fieldByBase(item, 'thing');
+  const contain = fieldByBase(item, 'contain');
+  assert.equal(situation.valuePresent, false);
+  assert.equal(Object.hasOwn(situation, 'value'), false);
+  assert.equal(thing.valuePresent, true);
+  assert.equal(thing.value, null);
+  assert.equal(contain.valuePresent, true);
+  assert.equal(contain.value, '');
+  assert.equal(fieldByBase(item, 'support'), undefined);
 });
 
 test('7. the first # terminates engineering-symbol execution', () => {
-  const rawKey = 'detail#简介中的@agent$full~more438';
+  const rawKey = 'situation#简介中的@agent$full~more438';
   const result = createAtomLanguageReceiver().receive(`explore {${JSON.stringify(rawKey)}}`);
   const parsed = field(result.items[0], rawKey);
   assert.equal(result.ok, true);
@@ -211,7 +211,7 @@ test('7. the first # terminates engineering-symbol execution', () => {
 });
 
 test('8. symbols after # produce a warning that can be disabled without changing parsing', () => {
-  const rawKey = 'detail#简介中的@agent$full~more438';
+  const rawKey = 'situation#简介中的@agent$full~more438';
   const source = `explore {${JSON.stringify(rawKey)}}`;
   const warned = createAtomLanguageReceiver().receive(source);
   assert.equal(warned.items[0].warnings[0].code, 'DESCRIPTION_NOT_LAST');
@@ -229,7 +229,7 @@ test('8. symbols after # produce a warning that can be disabled without changing
 });
 
 test('9. the left side of # is split and dispatched by @, $, and ~', () => {
-  const rawKey = 'name@agent$exact~hidden12#石器工坊窗口';
+  const rawKey = 'thing@agent$exact~hidden12#石器工坊窗口';
   const result = createAtomLanguageReceiver().receive(
     `explore {${JSON.stringify(rawKey)}:"窗口一"}`
   );
@@ -251,28 +251,28 @@ test('9. the left side of # is split and dispatched by @, $, and ~', () => {
 });
 
 test('10. latitude-2 becomes a signed coordinate action', () => {
-  const result = createAtomLanguageReceiver().receive('explore {"children$latitude-2"}');
-  const action = fieldByBase(result.items[0], 'children').actions[0];
+  const result = createAtomLanguageReceiver().receive('explore {"contain$latitude-2"}');
+  const action = fieldByBase(result.items[0], 'contain').actions[0];
   assert.equal(result.ok, true);
   assert.equal(action.name, 'latitude');
   assert.equal(action.parameter, -2);
   assert.equal(typeof action.parameter, 'number');
 });
 
-test('11. plain name uses the registered exact matcher by default', () => {
-  const result = createAtomLanguageReceiver().receive('explore {"name":"石器工坊"}');
+test('11. plain thing uses the registered exact matcher by default', () => {
+  const result = createAtomLanguageReceiver().receive('explore {"thing":"石器工坊"}');
   assert.equal(result.ok, true);
-  assert.deepEqual(fieldByBase(result.items[0], 'name').matcher, {
+  assert.deepEqual(fieldByBase(result.items[0], 'thing').matcher, {
     mode: 'exact',
     explicit: false,
     registered: true
   });
 });
 
-test('12. name$exact explicitly uses the same registered exact matcher', () => {
-  const result = createAtomLanguageReceiver().receive('explore {"name$exact":"石器工坊"}');
+test('12. thing$exact explicitly uses the same registered exact matcher', () => {
+  const result = createAtomLanguageReceiver().receive('explore {"thing$exact":"石器工坊"}');
   assert.equal(result.ok, true);
-  assert.deepEqual(fieldByBase(result.items[0], 'name').matcher, {
+  assert.deepEqual(fieldByBase(result.items[0], 'thing').matcher, {
     mode: 'exact',
     explicit: true,
     registered: true
@@ -287,9 +287,9 @@ test('13. reserved match modes use one registry and stay unsupported by default'
   for (const mode of ['fuzzy', 'regex', 'vector']) {
     assert.equal(matcherRegistry.has(mode), false);
     const result = createAtomLanguageReceiver({ matcherRegistry }).receive(
-      `explore {"name$${mode}":"石器工坊"}`
+      `explore {"thing$${mode}":"石器工坊"}`
     );
-    const parsed = fieldByBase(result.items[0], 'name');
+    const parsed = fieldByBase(result.items[0], 'thing');
     assert.equal(result.ok, false);
     assert.equal(result.items[0].ok, false);
     assert.equal(parsed.matcher.mode, mode);
@@ -306,14 +306,14 @@ test('13. reserved match modes use one registry and stay unsupported by default'
   }));
   const extended = createAtomLanguageReceiver({
     matcherRegistry: extensionRegistry
-  }).receive('explore {"name$fuzzy":"石器工坊"}');
-  assert.equal(fieldByBase(extended.items[0], 'name').matcher.registered, true);
+  }).receive('explore {"thing$fuzzy":"石器工坊"}');
+  assert.equal(fieldByBase(extended.items[0], 'thing').matcher.registered, true);
   assert.deepEqual(extended.items[0].errors, []);
 });
 
 test('14. an unknown $ action returns a parse error instead of guessing', () => {
-  const result = createAtomLanguageReceiver().receive('explore {"detail$invent"}');
-  const parsed = fieldByBase(result.items[0], 'detail');
+  const result = createAtomLanguageReceiver().receive('explore {"situation$invent"}');
+  const parsed = fieldByBase(result.items[0], 'situation');
   assert.equal(result.ok, false);
   assert.equal(result.items[0].ok, false);
   assert.equal(parsed.errors[0].code, 'UNKNOWN_ACTION');
@@ -321,30 +321,30 @@ test('14. an unknown $ action returns a parse error instead of guessing', () => 
 });
 
 test('15. transient $ actions and ~ hints are stripped from the persistent key', () => {
-  const rawKey = 'detail$full~more438#简介';
+  const rawKey = 'situation$full~more438#简介';
   const result = createAtomLanguageReceiver().receive(`explore {${JSON.stringify(rawKey)}}`);
   const parsed = field(result.items[0], rawKey);
-  assert.equal(parsed.persistentKey, 'detail#简介');
+  assert.equal(parsed.persistentKey, 'situation#简介');
   assert.equal(parsed.persistentKey.includes('$'), false);
   assert.equal(parsed.persistentKey.includes('~'), false);
 });
 
 test('16. ordinary field merging preserves existing @ type and # description', () => {
   const existing = {
-    'name@agent': '旧窗口',
-    'detail#石器工坊简介': '旧正文',
-    children: [],
-    partners: []
+    'thing@agent': '旧窗口',
+    'situation#石器工坊简介': '旧正文',
+    contain: [],
+    support: []
   };
   const request = createAtomLanguageReceiver().receive(
-    'explore {"name~candidate3":"新窗口","detail":"新正文"}'
+    'explore {"thing~candidate3":"新窗口","situation":"新正文"}'
   );
   const merged = mergePersistentAtom(existing, request.items[0]);
   assert.deepEqual(merged, {
-    'name@agent': '新窗口',
-    'detail#石器工坊简介': '新正文',
-    children: [],
-    partners: []
+    'thing@agent': '新窗口',
+    'situation#石器工坊简介': '新正文',
+    contain: [],
+    support: []
   });
   assert.equal(Object.keys(merged).some((key) => key.includes('~') || key.includes('$')), false);
 });
@@ -352,21 +352,21 @@ test('16. ordinary field merging preserves existing @ type and # description', (
 test('17. batch requests keep every item when one item fails', () => {
   const result = createAtomLanguageReceiver().receive(`
     explore [
-      {"name":"工具房","children$latitude-2"},
-      {"name":"河岸","detail$invent"},
-      {"name":"石器工坊","detail$full"}
+      {"thing":"工具房","contain$latitude-2"},
+      {"thing":"河岸","situation$invent"},
+      {"thing":"石器工坊","situation$full"}
     ]
   `);
   assert.equal(result.batch, true);
   assert.equal(result.items.length, 3);
   assert.deepEqual(result.items.map((item) => item.ok), [true, false, true]);
-  assert.equal(fieldByBase(result.items[0], 'name').value, '工具房');
+  assert.equal(fieldByBase(result.items[0], 'thing').value, '工具房');
   assert.equal(result.items[1].errors[0].code, 'UNKNOWN_ACTION');
-  assert.equal(fieldByBase(result.items[2], 'name').value, '石器工坊');
+  assert.equal(fieldByBase(result.items[2], 'thing').value, '石器工坊');
 });
 
 test('18. Chinese, quotes, newlines, and accidental description symbols are never executed', () => {
-  const rawKey = 'detail#第一段“引号”\n第二段#仍是简介@agent$full~more9';
+  const rawKey = 'situation#第一段“引号”\n第二段#仍是简介@agent$full~more9';
   const value = '正文写到“@agent”、“$full”和“~more”，但它们只是正文。';
   const result = createAtomLanguageReceiver().receive(
     `explore {${JSON.stringify(rawKey)}:${JSON.stringify(value)}}`
@@ -382,9 +382,9 @@ test('18. Chinese, quotes, newlines, and accidental description symbols are neve
 
   const longDigits = '9'.repeat(400);
   const largeHint = createAtomLanguageReceiver().receive(
-    `explore {${JSON.stringify(`detail~more${longDigits}#简介`)}}`
+    `explore {${JSON.stringify(`situation~more${longDigits}#简介`)}}`
   );
-  const parameter = fieldByBase(largeHint.items[0], 'detail').hints[0].parameter;
+  const parameter = fieldByBase(largeHint.items[0], 'situation').hints[0].parameter;
   assert.equal(parameter, longDigits);
   assert.equal(JSON.parse(JSON.stringify(parameter)), longDigits);
 });
@@ -393,10 +393,10 @@ test('19. persistence defaults to atom.json while allowing contextual JSON files
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-language-p0-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const document = {
-    'name@agent': 'agent001',
-    'detail#主观窗口': '严格 JSON 正文',
-    children: [],
-    partners: []
+    'thing@agent': 'agent001',
+    'situation#主观窗口': '严格 JSON 正文',
+    contain: [],
+    support: []
   };
 
   const defaultFile = await writeAtomJson(directory, document);
@@ -410,13 +410,13 @@ test('19. persistence defaults to atom.json while allowing contextual JSON files
 });
 
 test('20. the new writer rejects and never creates active world.json names', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-language-world-name-'));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-language-world-thing-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const document = {
-    name: '上下文节点',
-    detail: '',
-    children: [],
-    partners: []
+    thing: '上下文节点',
+    situation: '',
+    contain: [],
+    support: []
   };
   const worldFile = path.join(directory, 'world.json');
   const legacyWorldFile = path.join(directory, 'legacy.world.json');
@@ -434,33 +434,33 @@ test('20. the new writer rejects and never creates active world.json names', asy
 
   const transientFile = path.join(directory, 'transient.json');
   await assert.rejects(
-    writeAtomJson(transientFile, { 'detail$full~more8': '正文' }),
+    writeAtomJson(transientFile, { 'situation$full~more8': '正文' }),
     (error) => error.code === 'TRANSIENT_SYMBOL_PERSISTENCE_REJECTED'
   );
   await assert.rejects(fs.access(transientFile), { code: 'ENOENT' });
 });
 
-test('21. type sections come only from keys and never from a detail Value scan', () => {
+test('21. type sections come only from keys and never from a situation Value scan', () => {
   const value = '正文中提到 @agent、@program、@backup，但正文不能决定 Atom 类型。';
   const result = createAtomLanguageReceiver().receive(`explore {
-    "detail#类型说明":${JSON.stringify(value)},
-    "name":"普通节点正文也提到 @agent @program @backup"
+    "situation#类型说明":${JSON.stringify(value)},
+    "thing":"普通节点正文也提到 @agent @program @backup"
   }`);
-  assert.deepEqual(fieldByBase(result.items[0], 'detail').types, []);
-  assert.deepEqual(fieldByBase(result.items[0], 'name').types, []);
+  assert.deepEqual(fieldByBase(result.items[0], 'situation').types, []);
+  assert.deepEqual(fieldByBase(result.items[0], 'thing').types, []);
 
   const typed = createAtomLanguageReceiver().receive(
-    'explore {"name@agent":"agent001","detail":"普通正文"}'
+    'explore {"thing@agent":"agent001","situation":"普通正文"}'
   );
   assert.deepEqual(
-    fieldByBase(typed.items[0], 'name').types.map((type) => type.name),
+    fieldByBase(typed.items[0], 'thing').types.map((type) => type.name),
     ['agent']
   );
 
   const numberedType = createAtomLanguageReceiver().receive(
-    'explore {"name@agent2":"agent002"}'
+    'explore {"thing@agent2":"agent002"}'
   );
-  assert.deepEqual(fieldByBase(numberedType.items[0], 'name').types[0], {
+  assert.deepEqual(fieldByBase(numberedType.items[0], 'thing').types[0], {
     symbol: '@',
     raw: 'agent2',
     name: 'agent2',

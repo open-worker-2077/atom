@@ -30,16 +30,20 @@ export function oneStoredField(atom, baseKey) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+function storedSupportFields(atom) {
+  return fieldsByBase(atom).get('support') ?? [];
+}
+
 export function walkAtoms(atoms, options = {}) {
   const visited = [];
   function visit(atom, parentPath, index, parent = null) {
     if (!atom || typeof atom !== 'object' || Array.isArray(atom)) return;
-    const nameField = oneStoredField(atom, 'name');
+    const nameField = oneStoredField(atom, 'thing');
     const name = typeof nameField?.value === 'string' ? nameField.value : `[${index}]`;
     const visiblePath = [...parentPath, name];
     const match = { atom, path: visiblePath, parent, index };
     visited.push(match);
-    const children = oneStoredField(atom, 'children')?.value;
+    const children = oneStoredField(atom, 'contain')?.value;
     if (Array.isArray(children)) {
       children.forEach((child, childIndex) => visit(child, visiblePath, childIndex, match));
     }
@@ -60,13 +64,13 @@ export function walkAtoms(atoms, options = {}) {
 }
 
 function nameFieldIn(item) {
-  return item.fields.find((field) => field.baseKey === 'name');
+  return item.fields.find((field) => field.baseKey === 'thing');
 }
 
 export function exactMatches(atoms, item, matcherRegistry, candidates = null, exactIndex = null) {
   const nameField = nameFieldIn(item);
   if (!nameField?.valuePresent || typeof nameField.value !== 'string' || !nameField.value) {
-    return { error: diagnostic('ATOM_NAME_REQUIRED', '首轮 explore/transform 执行需要带 Value 的 name 精确锚点') };
+    return { error: diagnostic('ATOM_THING_REQUIRED', '首轮 explore/transform 执行需要带 Value 的 thing 精确锚点') };
   }
   const mode = nameField.matcher?.mode ?? 'exact';
   const matcher = matcherRegistry.resolve(mode);
@@ -85,11 +89,11 @@ export function exactMatches(atoms, item, matcherRegistry, candidates = null, ex
     if (mode === 'exact') {
       return matchesExactSelector(
         atomPath,
-        oneStoredField(atom, 'name')?.value,
+        oneStoredField(atom, 'thing')?.value,
         nameField.value
       );
     }
-    return matcher.match(oneStoredField(atom, 'name')?.value, nameField.value);
+    return matcher.match(oneStoredField(atom, 'thing')?.value, nameField.value);
   });
   return { matches, expected: nameField.value };
 }
@@ -114,7 +118,7 @@ export function createAccessController(atoms, options = {}) {
   const agentMatch = agentPath
     ? walkAtoms(atoms).find((match) => match.path.join('/') === agentPath)
     : null;
-  const agentTypes = oneStoredField(agentMatch?.atom, 'name')?.parsed.types
+  const agentTypes = oneStoredField(agentMatch?.atom, 'thing')?.parsed.types
     .map((type) => type.raw) ?? [];
   return {
     restricted: true,
@@ -123,12 +127,10 @@ export function createAccessController(atoms, options = {}) {
       const slotLock = operation === 'write'
         ? slotStructureLockAtPath(atoms, targetPath)
         : null;
-      const createdPartners = actor.createdAtom
-        ? oneStoredField(actor.createdAtom, 'partners')?.value ?? []
+      const createdTypes = actor.createdAtom
+        ? oneStoredField(actor.createdAtom, 'thing')?.parsed.types.map((type) => type.raw) ?? []
         : [];
-      if (slotLock?.locked && createdPartners.some((relation) => (
-        relation?.verb === '槽模角色'
-      ))) {
+      if (slotLock?.locked && createdTypes.some((type) => type.startsWith('slot-role-'))) {
         return {
           decision: 'deny', code: 'SLOT_ROLE_FORGERY_DENIED',
           lockKind: 'slot-structure-lock', matchedLocks: []
@@ -149,7 +151,7 @@ export function createAccessController(atoms, options = {}) {
           agentPath,
           agentTypes,
           programPath: actor.programPath ?? null,
-          targetTypes: oneStoredField(match.atom, 'name')?.parsed.types
+          targetTypes: oneStoredField(match.atom, 'thing')?.parsed.types
             .map((type) => type.raw) ?? [],
           action: operation === 'read' ? 'explore' : 'transform'
         });
@@ -162,7 +164,7 @@ export function createAccessController(atoms, options = {}) {
           operation,
           window: access.window,
           keys: access.keys ?? [],
-          target: { name: oneStoredField(match.atom, 'name')?.value ?? match.name ?? null, path: targetPath }
+          target: { name: oneStoredField(match.atom, 'thing')?.value ?? match.name ?? null, path: targetPath }
         });
         if (legacyDecision.decision !== 'allow') return legacyDecision;
       }
@@ -183,17 +185,19 @@ export function createAccessController(atoms, options = {}) {
 }
 
 export function describeAtom(match, includeFullDetail, options = {}) {
-  const nameField = oneStoredField(match.atom, 'name');
-  const detailField = oneStoredField(match.atom, 'detail');
+  const nameField = oneStoredField(match.atom, 'thing');
+  const detailField = oneStoredField(match.atom, 'situation');
   const result = {
     path: match.path.join('/'),
     selector: options.selector ?? match.path.join('/'),
-    name: nameField?.value ?? null,
+    thing: nameField?.value ?? null,
     types: nameField?.parsed.types.map((type) => type.raw) ?? [],
     description: detailField?.parsed.descriptionPresent ? detailField.parsed.description : null
   };
-  if (includeFullDetail) result.detail = detailField?.value ?? null;
-  if (options.partners) result.partners = structuredClone(options.partners);
+  if (includeFullDetail) result.situation = detailField?.value ?? null;
+  for (const field of options.supportFields ?? []) {
+    result[field.rawKey] = structuredClone(field.value);
+  }
   if (options.lockState) result.lockState = structuredClone(options.lockState);
   return result;
 }
@@ -210,7 +214,7 @@ export function prepareExploreWorld(atoms) {
     exactIndex.get(selector).push(match);
   };
   for (const match of allMatches) {
-    const name = oneStoredField(match.atom, 'name')?.value;
+    const name = oneStoredField(match.atom, 'thing')?.value;
     add(name, match);
     for (let length = 2; length <= match.path.length; length += 1) {
       add(match.path.slice(-length).join('/'), match);
@@ -243,14 +247,50 @@ function resolvePartnerTarget(source, target, matches) {
   if (target.includes('/')) return byPath.get(target) ?? null;
   const sibling = byPath.get([...source.path.slice(0, -1), target].join('/'));
   if (sibling) return sibling;
-  const named = matches.filter((match) => oneStoredField(match.atom, 'name')?.value === target);
+  const named = matches.filter((match) => oneStoredField(match.atom, 'thing')?.value === target);
+  for (let depth = source.path.length - 2; depth >= 0; depth -= 1) {
+    const domain = source.path.slice(0, depth + 1);
+    const scoped = named.filter((match) => domain.every((part, index) => match.path[index] === part));
+    if (scoped.length === 1) return scoped[0];
+    if (scoped.length > 1) return null;
+  }
   return named.length === 1 ? named[0] : null;
 }
 
-function outgoingPartners(match, matches) {
-  const partners = oneStoredField(match.atom, 'partners')?.value;
-  if (!Array.isArray(partners)) return [];
-  return partners.map((partner) => ({ partner, target: resolvePartnerTarget(match, partner?.object, matches) }));
+function supportRuleEndpoints(owner, matches) {
+  const selectorsInExpr = (expr) => {
+    if (!expr || typeof expr !== 'object' || Array.isArray(expr)) return [];
+    if (typeof expr.thing === 'string') return [expr.thing];
+    if (typeof expr['thing@program'] === 'string') return [expr['thing@program']];
+    return ['and', 'or'].flatMap((operator) => (
+      Array.isArray(expr[operator]) ? expr[operator].flatMap(selectorsInExpr) : []
+    ));
+  };
+  return storedSupportFields(owner.atom).flatMap((field) => (
+    Array.isArray(field.value) ? field.value.map((rule, ordinal) => {
+      const endpoints = new Set([owner]);
+      for (const selector of [
+        ...(Array.isArray(rule?.if) ? rule.if.flatMap(selectorsInExpr) : []),
+        ...(Array.isArray(rule?.then) ? rule.then.map((item) => item?.thing ?? item?.['thing@program']) : [])
+      ]) {
+        const target = resolvePartnerTarget(owner, selector, matches);
+        if (target) endpoints.add(target);
+      }
+      return { key: field.rawKey, ordinal, owner, endpoints };
+    }) : []
+  ));
+}
+
+function supportScope(anchor, matches) {
+  const selected = new Set([anchor]);
+  for (const owner of matches) {
+    for (const rule of supportRuleEndpoints(owner, matches)) {
+      if (!rule.endpoints.has(anchor)) continue;
+      selected.add(owner);
+      for (const endpoint of rule.endpoints) selected.add(endpoint);
+    }
+  }
+  return selected;
 }
 
 function boundaryCandidates(anchor, matches, selected) {
@@ -288,19 +328,19 @@ function boundaryCandidates(anchor, matches, selected) {
 async function boundaryDirection(candidates, accessController) {
   let characters = 0;
   for (const candidate of candidates) {
-    const nameField = oneStoredField(candidate.atom, 'name');
+    const nameField = oneStoredField(candidate.atom, 'thing');
     const executable = nameField?.parsed.types.some((type) => type.raw === 'program') ?? false;
     if (accessController.restricted) {
-      const nameAccess = await accessController.authorize(candidate, 'read', 'name');
+      const nameAccess = await accessController.authorize(candidate, 'read', 'thing');
       const detailAccess = executable
         ? { decision: 'allow' }
-        : await accessController.authorize(candidate, 'read', 'detail');
+        : await accessController.authorize(candidate, 'read', 'situation');
       if (nameAccess.decision !== 'allow' || detailAccess.decision !== 'allow') {
         return { state: 'protected', hasMore: true };
       }
     }
     const name = typeof nameField?.value === 'string' ? nameField.value : '';
-    const detail = oneStoredField(candidate.atom, 'detail')?.value;
+    const detail = oneStoredField(candidate.atom, 'situation')?.value;
     characters += name.length + (executable ? 0 : String(detail ?? '').length);
   }
   return {
@@ -331,19 +371,19 @@ export async function executeExploreItem(
   if (!item.ok) return { ok: false, index: item.index, errors: item.errors };
   const isProjection = (field) => !field.valuePresent || field.value === true;
   const unsupported = item.fields.filter((field) => {
-    if (field.baseKey === 'name') return false;
-    if (field.baseKey === 'detail') return !isProjection(field) || field.actions.some((action) => action.name !== 'full');
-    if (field.baseKey === 'children') {
+    if (field.baseKey === 'thing') return false;
+    if (field.baseKey === 'situation') return !isProjection(field) || field.actions.some((action) => action.name !== 'full');
+    if (field.baseKey === 'contain') {
       return !isProjection(field) || field.actions.some((action) => !['latitude', 'longitude'].includes(action.name));
     }
-    if (field.baseKey === 'partners') return !isProjection(field) || field.actions.length > 0;
+    if (field.baseKey === 'support') return !isProjection(field) || field.actions.length > 0;
     return field.valuePresent || field.actions.length > 0;
   });
   if (unsupported.length) {
     return {
       ok: false,
       index: item.index,
-      errors: [diagnostic('UNSUPPORTED_EXPLORE_EXECUTION', '当前 explore 只执行 exact name、detail$full、children$up/down/prev/next 与 partners$hop', {
+      errors: [diagnostic('UNSUPPORTED_EXPLORE_EXECUTION', '当前 explore 只执行 exact thing、situation$full、contain$latitude/longitude 与 support 投影', {
         fields: unsupported.map((field) => field.rawKey)
       })]
     };
@@ -351,10 +391,10 @@ export async function executeExploreItem(
   const prepared = preparedWorld ?? prepareExploreWorld(atoms);
   const allMatches = prepared.allMatches;
   const visibleMatches = accessController.restricted ? [] : allMatches;
-  const requestedReadFields = new Set(['name']);
-  if (item.fields.some((field) => field.baseKey === 'detail' && field.actions.some((action) => action.name === 'full'))) requestedReadFields.add('detail');
-  if (item.fields.some((field) => field.baseKey === 'children')) requestedReadFields.add('children');
-  if (item.fields.some((field) => field.baseKey === 'partners')) requestedReadFields.add('partners');
+  const requestedReadFields = new Set(['thing']);
+  if (item.fields.some((field) => field.baseKey === 'situation' && field.actions.some((action) => action.name === 'full'))) requestedReadFields.add('situation');
+  if (item.fields.some((field) => field.baseKey === 'contain')) requestedReadFields.add('contain');
+  if (item.fields.some((field) => field.baseKey === 'support')) requestedReadFields.add('support');
   for (const match of accessController.restricted ? allMatches : []) {
     if (match.virtual) {
       visibleMatches.push(match);
@@ -429,14 +469,17 @@ export async function executeExploreItem(
       })]
     };
   }
-  const includeFullDetail = item.fields.some((field) => field.baseKey === 'detail'
+  const includeFullDetail = item.fields.some((field) => field.baseKey === 'situation'
     && field.actions.some((action) => action.name === 'full'));
-  const includePartners = item.fields.some((field) => field.baseKey === 'partners');
+  const includeSupport = item.fields.some((field) => field.baseKey === 'support');
   const anchor = visibleMatches.find((match) => match.atom === selected.matches[0].atom);
-  const routes = item.fields.filter((field) => field.baseKey === 'children').flatMap((field) => (
+  const routes = item.fields.filter((field) => field.baseKey === 'contain').flatMap((field) => (
     field.actions.map((action) => ({ axis: action.name, parameter: action.parameter }))
   ));
   const scoped = selectCoordinateScope(anchor, visibleMatches, routes);
+  if (includeSupport) {
+    for (const match of supportScope(anchor, visibleMatches)) scoped.add(match);
+  }
   const ordered = visibleMatches.filter((match) => scoped.has(match));
   const boundary = options.includeBoundary === false
     ? null
@@ -446,8 +489,8 @@ export async function executeExploreItem(
     index: item.index,
     matches: ordered.map((match) => describeAtom(match, includeFullDetail, {
       selector: shortestUniqueSelector(match, visibleMatches),
-      ...(includePartners
-        ? { partners: oneStoredField(match.atom, 'partners')?.value ?? [] }
+      ...(includeSupport
+        ? { supportFields: storedSupportFields(match.atom) }
         : {}),
       lockState: programLockState(lockIndex, match.path.join('/'))
     })),
@@ -478,11 +521,11 @@ export async function executeProgramExplore({
   scopeRoot = null,
   preparedWorld = null
 }) {
-  const requestedName = request.name === undefined
+  const requestedThing = request.thing === undefined
     ? (scopeRoot ? '.' : agentOrigin?.path)
-    : request.name;
-  const resolved = resolveSlotRelativeSelector({ atoms, selector: requestedName, scopeRoot });
-  const normalizedRequest = { ...request, name: resolved.selector };
+    : request.thing;
+  const resolved = resolveSlotRelativeSelector({ atoms, selector: requestedThing, scopeRoot });
+  const normalizedRequest = { ...request, thing: resolved.selector };
   const parsed = receiver.receive(programObjectSource('explore', normalizedRequest));
   if (!parsed.ok || parsed.batch || parsed.items.length !== 1) {
     const error = new Error(parsed.errors?.[0]?.message ?? 'Invalid Program explore request');

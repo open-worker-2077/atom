@@ -112,21 +112,21 @@ export async function executeAtomProgramFunctionRegistryEndpoint(
 }
 
 const TRANSFORM_HELP = Object.freeze({
-  rep: '{"name":"A","detail.rep.NEW"}；局部替换用 "detail.rep.NEW":"OLD"；关系全替换用 "partners.rep.":[...]',
-  sum: '{"name":"A","detail.sum.SUMMARY"}（只更新 detail 简介）',
-  typ: '{"name.typ.TYPE":"A"}（替换类型标记）；{"name.typ.":"A"}（移除类型标记）',
-  ren: '{"name.ren.NEW_NAME":"A"}（同级必须保持唯一）',
-  mov: '{"name.mov.DESTINATION_PATH":"A"}（移动子树；移至顶层时 DESTINATION_PATH 使用“世界之外”；拒绝形成循环）',
-  cpy: '{"name.cpy.DESTINATION_PATH":"A"}（复制子树）',
-  dsc: '{"name.dsc.":"A"}（可逆移入唯一默认备份仓）',
-  rst: '{"name.rst.":"BACKUP_PATH/A"}（按丢弃记录恢复原位置）',
-  run: '{"name.run.":"PROGRAM_PATH"}（显式运行唯一 @program）'
+  rep: '{"thing":"A","situation.rep.NEW"}；局部替换用 "situation.rep.NEW":"OLD"；support 全替换用 "support.rep.":[{"if@current":true,"then":[{"thing":"TARGET"}]}]',
+  sum: '{"thing":"A","situation.sum.SUMMARY"}（只更新 situation 简介）',
+  typ: '{"thing.typ.TYPE":"A"}（替换类型标记）；{"thing.typ.":"A"}（移除类型标记）',
+  ren: '{"thing.ren.NEW_THING":"A"}（同级必须保持唯一）',
+  mov: '{"thing.mov.DESTINATION_PATH":"A"}（移动 contain 子树；移至顶层时 DESTINATION_PATH 使用“世界之外”；拒绝形成循环）',
+  cpy: '{"thing.cpy.DESTINATION_PATH":"A"}（复制 contain 子树）',
+  dsc: '{"thing.dsc.":"A"}（可逆移入唯一默认备份仓）',
+  rst: '{"thing.rst.":"BACKUP_PATH/A"}（按丢弃记录恢复原位置）',
+  run: '{"thing.run.":"PROGRAM_PATH"}（显式运行唯一 @program）'
 });
 
 const EXPLORE_HELP = Object.freeze({
-  'detail\u0000full': 'detail$full（返回完整 detail；否则可只返回简介）',
-  'children\u0000latitude': 'children$latitude+1 / children$latitude-1（向上看一层 / 向下看一层；向下结果保留嵌套 children；数字可调整，0 为锚点层）',
-  'children\u0000longitude': 'children$longitude+1 / children$longitude-1（向后看一个同级 / 向前看一个同级；数字可调整，0 为锚点）'
+  'situation\u0000full': 'situation$full（返回完整 situation；否则可只返回简介）',
+  'contain\u0000latitude': 'contain$latitude+1 / contain$latitude-1（向上看一层 / 向下看一层；向下结果保留嵌套 contain；数字可调整，0 为锚点层）',
+  'contain\u0000longitude': 'contain$longitude+1 / contain$longitude-1（向后看一个同级 / 向前看一个同级；数字可调整，0 为锚点）'
 });
 
 function verifiedHelpLines() {
@@ -189,7 +189,7 @@ function help() {
     '  --agent 只指定本次交互的上下文来源，不指定节点的归属或写入位置，也不代表身份、权限或锁。',
     '  查询或写入的事实目标不得代替 --agent 上下文来源；目标 Atom 本身不需要是 @agent。',
     '  会话已给出或已绑定唯一 @agent 时直接复用，不得重复询问；只有上下文来源确实未知或不唯一时才请求明确。',
-    '  每条非交互命令都原样携带已绑定的 @agent；CLI 不会把目标 name 自动当作 --agent。',
+    '  每条非交互命令都原样携带已绑定的 @agent；CLI 不会把目标 thing 自动当作 --agent。',
     '  短名必须唯一；重名时增加必要路径片段。仍无法确定上下文时联系任务派发方或维护入口。',
     '  进入交互会话：atom.cmd --agent AGENT；Ctrl+C 退出。',
     '  PowerShell 固定短 JSON 可使用 --%；--% 会停止变量展开，变量、多行或长文本必须通过 --stdin 传入。',
@@ -198,35 +198,39 @@ function help() {
     '  1. explore 当前锚点和最小必要邻域；只依据显式事实与用户授权决定下一步。',
     '     用户要求使用或创建一个命名节点时，先 explore 预定父节点及其直接子节点：已有相同或明确等价节点则复用；确实没有可复用节点时才 transform new。',
     '  2. 优先运行已有 Program/模板；没有适用能力时才执行最小 transform。',
-    '  3. 每次写入后重新 explore 实际写入的 Atom 及其必要 children、partners 和 detail。',
+    '  3. 每次写入后重新 explore 实际写入的 Atom 及其必要 contain、support 和 situation。',
     '  4. 以回读事实验收；Program 消息不是其他 Agent 已改变的证明。失败按下方错误动作处理。',
     '',
     'Graph-JSON 基础：',
-    '  name 使用能唯一表征目标的最短 exact 选择器；detail 是内容；children 是真实包含；partners 是 [{"verb":"...","object":"目标路径"}]。',
-    '  @type 写在 name 键上（如 name@agent、name@program）；#简介必须在键末尾；~hint 仅为返回提示。',
+    '  thing 使用最短唯一 exact 选择器；situation 是内容；contain 是真实包含；support 是 owner-local if→then 规则数组。',
+    '  1→N 写在起点：{"if@current":true,"then":[{"thing":"B"},{"thing":"C"}]}；N→1 写在终点：{"if":[{"and":[{"thing":"A"},{"thing":"B"}]}],"then@current":true}。',
+    '  每条 rule 必须且只能含一个 @current:true；if 永远是前件，then 永远是后件。首版禁止无 current、线载源码与原生 M→N。',
+    '  Program 端点写 {"thing@program":"selector"}：前件 Program 仅以 strict bool 决定本条支撑，且不得产生写入等副作用；后件 Program 只按自身触发/use_program/显式运行计算自己。',
+    '  M→N 必须建立真实枢纽 H，并在 H 分别写 M→H 与 H→N；Web 可压缩布局但不会隐藏 H。Program 机制放 exact thing@program 节点的 situation，沿用既有 Program ABI。',
+    '  @type 写在 thing 键上（如 thing@agent、thing@program）；#简介必须在键末尾；~hint 仅为返回提示。',
     '  Explore 接受对象或对象数组；Transform 对象数组把已有 Atom 改造作为一个原子批次执行，并逐项返回结果。所有结果只使用 Graph-JSON。',
     '',
     'Explore 契约（只读，不修复或写入投影）：',
-    '  atom.cmd --% --agent 工作Agent explore "{""name"":""目标节点"",""detail$full"":true,""children$latitude+1"":true,""children$longitude+1"":true,""partners"":true}"',
-    '  name 默认 exact；短名重名时逐步增加必要的上级路径片段。顶层同名目标使用“世界之外/目标名”精确选择。fuzzy、regex、vector 不支持。',
-    '  “世界之外”以 name@universe 暴露为不落盘的虚拟父级；用于读取、上下钻、顶层消歧，以及作为 .mov. 的顶层目的地。',
+    '  atom.cmd --% --agent 工作Agent explore "{""thing"":""目标节点"",""situation$full"":true,""contain$latitude+1"":true,""contain$longitude+1"":true,""support"":true}"',
+    '  thing 默认 exact；短名重名时逐步增加必要的上级路径片段。顶层同名目标使用“世界之外/目标名”精确选择。fuzzy、regex、vector 不支持。',
+    '  “世界之外”以 thing@universe 暴露为不落盘的虚拟父级；用于读取、上下钻、顶层消歧，以及作为 .mov. 的顶层目的地。',
     ...contract.explore,
     '  每次成功命中 exact 锚点都会返回 boundary~preview；up/down/left/right 分别给出视野外 state、hasMore、nodes、characters，并随重新锚定更新。protected 方向不公开精确数量且不得当作空白。',
-    '  读取投影推荐使用标准 JSON true（例如 ""detail$full"":true、""partners"":true）；旧的无值投影键继续兼容。',
-    '  partners（返回每个匹配 Atom 的完整有向关系数组；每项包含 verb 与 object）',
-    '  多层向下查询按真实包含关系返回嵌套 children；name 仅在需要消歧时增加最短必要路径片段。',
+    '  读取投影推荐使用标准 JSON true（例如 ""situation$full"":true、""support"":true）；无值投影键继续兼容。',
+    '  support 按原始 ordinal 回读 owner 声明；从任一相关端查询会带出唯一 owner 节点及其完整 if→then rule，不复制持久声明。',
+    '  多层向下查询按真实包含关系返回嵌套 contain；thing 仅在需要消歧时增加最短必要路径片段。',
     '  explore new 使用同一查询契约，并重置本次探索上下文；空结果返回 explore~empty/new，不代表错误。',
     '',
-    'Transform 契约（目标 name 必须 exact 且唯一；写入后必须回读）：',
-    '  transform new 创建完整 Atom；新节点的归属由 name 中的精确父路径决定，与 --agent 无关。',
-    '  name 可用“精确父路径/新名称”创建子 Atom，省略父路径则创建顶层 Atom；父路径不明确时只询问父 Atom。',
-    '  Transform 对象数组可批量改名、移动或更新已有 Atom 的 detail/partners：任一项失败整批不写；成功后整批只做一次权威提交。',
-    '  批量改名按最终状态统一校验，可交换同级名称；整批统一重写后代路径与 partners。批量改名项不得混入移动、detail 或 partners。',
-    '  detail 和 partners 的全文替换必须显式使用 .rep.；每个对象的结构操作只能有一个。',
+    'Transform 契约（目标 thing 必须 exact 且唯一；写入后必须回读）：',
+    '  transform new 创建完整 Atom；新节点的归属由 thing 中的精确父路径决定，与 --agent 无关。',
+    '  thing 可用“精确父路径/新名称”创建子 Atom，省略父路径则创建顶层 Atom；父路径不明确时只询问父 Atom。',
+    '  Transform 对象数组可批量改名、移动或更新已有 Atom 的 situation/support：任一项失败整批不写；成功后整批只做一次权威提交。',
+    '  批量改名按最终状态统一校验，可交换同级名称；整批统一重写后代路径与 support selector。批量改名项不得混入移动、situation 或 support。',
+    '  situation 和 support 的全文替换必须显式使用 .rep.；每个对象的结构操作只能有一个。',
     ...contract.transform,
     '',
     'Program 模板与复用：',
-    '  @program 是唯一可执行类型，detail 直接保存 Python；普通交互不得手工替代已有 Program 或模板。',
+    '  @program 是唯一可执行类型，situation 直接保存 Python；普通交互不得手工替代已有 Program 或模板。',
     '  本 Atom Program 可自行研发、研磨并通过 use_program() 复用；成熟实现也可作为后续公共能力素材。',
     '  注册表与底层运行时不通过 Program 开放修改；这项保护不限制 Agent 自行研发 Program。',
     ...contract.programFunctions,
@@ -235,9 +239,9 @@ function help() {
     '  Form 返回 valid、required、optional、disabled、active、missing；missing 每项为 {"component":["组件路径"],"path":["缺失键路径"]}。required 必参与；optional 在自身或后代有内容时参与；disabled 子树不参与校验；未使用的 optional 不形成缺项。',
     '  多选函数：choice({id,options:[{id,label}],selected:[id],empty})；参数必须使用双引号标准 JSON（同时是合法 Python），当前仅支持多选，返回 selected 数组并在显式 .run. 回执中公开 choices。',
     '  Program 并发独立运行并共享单轮 10 秒时间预算；单项失败独立报告，超时自动中断。短期内避免编写超出该预算的复杂 Program。',
-    '  Program transform 创建：transform({"name":"精确父路径/新节点","detail":"内容","children":[],"partners":[]})；完整四轴且无点号指令时创建，带点号指令的既有写法继续按更新处理。',
+    '  Program transform 创建：transform({"thing":"精确父路径/新节点","situation":"内容","contain":[],"support":[]})；完整四轴且无点号指令时创建，带点号指令按更新处理。',
     '  transform() 返回 None，只表示登记了延后效果；实际提交必须以交互回执或后续 exact explore 回读确认。',
-    '  JSON 函数：json_parse({"text":"..."})->JSON值；json_stringify({"value":...,"indent"?:0..8})->string。序列化默认紧凑，拒绝 NaN、Infinity 和非 JSON 值；失败将终止整个 Program 评估且不发布已登记效果；不开放 import/eval；可配合 detail.rep. 写回。',
+    '  JSON 函数：json_parse({"text":"..."})->JSON值；json_stringify({"value":...,"indent"?:0..8})->string。序列化默认紧凑，拒绝 NaN、Infinity 和非 JSON 值；失败将终止整个 Program 评估且不发布已登记效果；不开放 import/eval；可配合 situation.rep. 写回。',
     '  世界函数：explore(query)->rows；transform(spec)、slot_body(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
     '  窗口跳转：jump({"when":when_program,"where":where_program,"recycle":recycle_program,"lock":self_lock})；四项均可省略，recycle=true 直接回收，随后才算 when，且仅 when=true 才算 where；省略 when 即守窗。',
     '  精确坐标：when_program = explore({"thing":"EXACT判定@program"})[0]；把 explore() 返回对象直接交给 jump 或锁规则，不使用 .ref，也不接受短名字符串或数组位置猜测。旧 AtomView 仅由内部适配层兼容。',
@@ -252,13 +256,13 @@ function help() {
     '  空间范围锁：targets.scope 取 subtree 时锁覆盖目标整棵子树；allowed_windows 可写 {"relation":"target_within_window_parent"}，只允许窗口读取或改造其当前父节点及下级，exact path 不能绕过。',
     '  调度权限：allowed_programs.paths 显式列出可越过该锁执行 Transform 的调度 Program；该权限不交给执行窗口。窗口被调度 Program 移动后，相对空间权限按新父级即时生效，无需重算锁。',
     '  锁定条件轴：when.target_types 使用相同类型条件判断目标状态；when.actions 仅取 explore／transform。状态与动作决定锁是否生效，窗口条件决定是否放行；守窗、跳窗、关窗和滚动绑定由上层 Program 调度，内核不写死。',
-    '  显式重算：transform {\"name.run.\":\"EXACT_PROGRAM_PATH\"}；仅成功运行才原子替换旧锁快照，普通依赖变化不自动重算，失败保留旧锁快照。',
+    '  显式重算：transform {\"thing.run.\":\"EXACT_PROGRAM_PATH\"}；仅成功运行才原子替换旧锁快照，普通依赖变化不自动重算，失败保留旧锁快照。',
     '  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。',
-    '  槽体研发：槽体首次只放一棵普通可自运行候选 DataFlow（下级槽、contain、support、@program）；研发态可用 transform {"name.run.EXACT候选根路径":"EXACT_PROGRAM_PATH"} 绑定当前域，Program 内仅用 . 或 ./相对contain路径。',
+    '  槽体研发：槽体首次只放一棵普通可自运行候选 DataFlow（下级槽、contain、support、@program）；研发态可用 transform {"thing.run.EXACT候选根路径":"EXACT_PROGRAM_PATH"} 绑定当前域，Program 内仅用 . 或 ./相对 contain 路径。',
     '  槽体封装：上层注册 Program 调用 slot_body({"action":"seal","body":"EXACT槽体路径"})；中央事务把同一候选保留为槽模，并生成“槽模／print@program／槽例”。不预建空槽例，print 计划在 Graph 中可 exact explore 审计。槽 detail／situation 是说明契约，计划不含默认料。',
     '  槽体结构锁：seal 可用 slot_body({"action":"seal","body":"EXACT槽体路径","lock":true})。默认 lock:false，未开启时任何其他锁允许的写者都可改槽例结构；开启后映射槽 self 的名称／结构／support／Program 规则不可改，槽下新建或修改未映射料 Thing 仍允许，伪造槽角色返回 SLOT_ROLE_FORGERY_DENIED。reseal 仍须发起窗口同时通过节点锁与窗口自锁。',
     '  槽体打印：用 explore {"name":"EXACT槽体/print/修订","children$latitude-1":true} 回读当前 sha256 revision，再显式 use_program({"name":"EXACT槽体/print","arguments":{"name":"新槽例名"}})；内核复制全部普通槽、嵌套 contain、support、类型、描述和默认料，Program 只在槽模共享一份。',
-    '  槽例填写与计算：用 transform {"name":"EXACT槽体/槽例/实例/槽","detail.rep.填写值"} 填料；字段事件按“所属槽例→相对角色→当前修订 support→共享 Program”只在当前槽例域运行，再用 exact explore 回读该实例结果与“采用槽模修订”。禁止绝对实例路径、越过嵌套槽例边界、跨槽例或外部资料访问。',
+    '  槽例填写与计算：用 transform {"thing":"EXACT槽体/槽例/实例/槽","situation.rep.填写值"} 填写槽的 situation；具体料应作为槽下未映射普通 Thing 创建。字段事件按“所属槽例→相对角色→当前修订 support→共享 Program”只在当前槽例域运行，再用 exact explore 回读该实例结果与采用槽模修订。禁止绝对实例路径、越过嵌套槽例边界、跨槽例或外部资料访问。',
     '  槽例填料与变量：带“槽模角色”的实例节点是抽象槽；在槽下 transform new 的未映射普通 Thing 子树才是本地料。外部变量必须先物化为目标槽例内的本地料 Thing，再触发该实例；共享 Program 只用 ./相对contain路径读取当前槽例域。',
     '  槽模修订：修改同一槽模后再次 seal；一次调用自动同步全部所属槽例的映射槽、contain、support、契约元数据与共享 Program 引用，并逐字节保留未映射本地料 Thing 子树；删除含料槽整次冲突回滚，成功后统一重算全部实例。',
     '  槽体错误：INVALID_SLOT_BODY_EFFECT、INVALID_SLOT_BODY_LAYOUT、INVALID_SLOT_PRINT_PLAN、SLOT_BODY_NOT_SEALED、SLOT_PRINT_PLAN_STALE、SLOT_BODY_EXAMPLE_EXISTS、SLOT_MATERIAL_CONTAINMENT_CONFLICT、SLOT_INSTANCE_REVISION_MISSING、SLOT_SCOPE_ROOT_UNBOUND、SLOT_RELATIVE_SELECTOR_REQUIRED、SLOT_RELATIVE_TARGET_NOT_FOUND、SLOT_RELATIVE_TARGET_AMBIGUOUS、SLOT_SCOPE_BOUNDARY_CROSSING、SLOT_SCOPE_ROLE_MISMATCH、SLOT_BODY_NESTED_EFFECT_FORBIDDEN；任一失败不产生半份槽例。',
@@ -267,7 +271,7 @@ function help() {
     '  工单写入只能由 Program 发出并继续经过 Transform、修订检查和中央提交；调用时使用精确版本、稳定 creation_id 与 exact path，写后按 read-back 和世界回读验收。',
     '  规划函数：direct_children(rows,parent_path)、child_detail(rows,parent_path,name,default)、missing_details(rows,parent_path,names)、form_status(rows,parent_path,status_name)、first_pending(forms,completed_states)、transition_allowed(current,requested,transitions)、subtree_refs(rows,root_path)、plan_shards(sources,spec)、plan_form_flow(rows,parent_path,standard)、plan_template_instance(rows,parent_path,template)。',
     '  模板参数以 template_catalog({}) 返回的契约为准；被 use_program 调用的 Program 必须定义 main(arguments)。',
-    '  推进流配方：在指定的事实父 Atom 下建立“推进流” @program，其 detail 调用 instantiate({\'template\':\'advancement-flow\',\'version\':\'latest\',\'mode\':\'ensure\',\'parameters\':{\'title\':\'任务标题\'}})；新建 Agent 与追加 Program 分两次 transform。',
+    '  推进流配方：在指定的事实父 Atom 下建立“推进流” @program，其 situation 调用 instantiate({\'template\':\'advancement-flow\',\'version\':\'latest\',\'mode\':\'ensure\',\'parameters\':{\'title\':\'任务标题\'}})；新建 Agent 与追加 Program 分两次 transform。',
     '',
     '反馈：',
     '  submit {"type":"bug|pain|requirement|optimization","detail":"1 至 10000 字说明"}',
@@ -492,21 +496,21 @@ function graphMatch(match, hint = null, boundary = null) {
   const types = (match.types ?? []).map((type) => `@${type}`).join('');
   const transientHint = hint ? `~${hint}` : '';
   const entries = [
-    graphEntry(`name${types}${transientHint}`, true, match.selector ?? match.name)
+    graphEntry(`thing${types}${transientHint}`, true, match.selector ?? match.thing)
   ];
   const descriptionPresent = (
     match.description !== null && match.description !== undefined
   );
-  const detailPresent = Object.hasOwn(match, 'detail');
+  const detailPresent = Object.hasOwn(match, 'situation');
   if (descriptionPresent || detailPresent) {
     entries.push(graphEntry(
-      `detail${descriptionPresent ? `#${match.description}` : ''}`,
+      `situation${descriptionPresent ? `#${match.description}` : ''}`,
       detailPresent,
-      match.detail
+      match.situation
     ));
   }
-  if (Array.isArray(match.partners)) {
-    entries.push(graphEntry('partners', true, match.partners));
+  if (Array.isArray(match.support)) {
+    entries.push(graphEntry('support', true, match.support));
   }
   if (match.lockState) {
     entries.push(graphEntry('lock~active', true, match.lockState));
@@ -530,7 +534,7 @@ function graphChildrenTree(item) {
     const value = graphMatch(match);
     const children = childrenByPath.get(match.path) ?? [];
     if (children.length) {
-      value.entries.push(graphEntry('children', true, {
+      value.entries.push(graphEntry('contain', true, {
         kind: 'array', values: children.map(build)
       }));
     }
@@ -586,12 +590,20 @@ function graphResult(result) {
       : (result.changed ? 'updated' : 'unchanged');
     const types = (result.result.types ?? []).map((type) => `@${type}`).join('');
     const entries = [
-      graphEntry(`name${types}~${hint}`, true, result.result.name)
+      graphEntry(`thing${types}~${hint}`, true, result.result.thing)
     ];
     if (Array.isArray(result.program?.choices)) {
       entries.push(graphEntry('choices', true, result.program.choices));
     }
     return graphObject(entries);
+  }
+  if (result.command === 'submit' && result.submission) {
+    return graphObject([
+      graphEntry('submit~recorded'),
+      graphEntry('id', true, result.submission.id),
+      graphEntry('type', true, result.submission.type),
+      graphEntry('submittedAt', true, result.submission.submittedAt)
+    ]);
   }
   if (result.ok) return graphObject([graphEntry('atom~done')]);
   return null;
@@ -609,21 +621,13 @@ function storedField(atom, baseKey) {
     const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
     if (parsed.baseKey === baseKey) return { parsed, value };
   }
-  if (result.command === 'submit' && result.submission) {
-    return graphObject([
-      graphEntry('submit~recorded'),
-      graphEntry('id', true, result.submission.id),
-      graphEntry('type', true, result.submission.type),
-      graphEntry('submittedAt', true, result.submission.submittedAt)
-    ]);
-  }
   return null;
 }
 
 function atomEntries(atoms, parentPath = [], parentAddress = '') {
   const entries = [];
   for (const [index, atom] of (atoms ?? []).entries()) {
-    const nameField = storedField(atom, 'name');
+    const nameField = storedField(atom, 'thing');
     if (typeof nameField?.value !== 'string') continue;
     const path = [...parentPath, nameField.value];
     const address = parentAddress ? `${parentAddress}/${index}` : `${index}`;
@@ -633,10 +637,10 @@ function atomEntries(atoms, parentPath = [], parentAddress = '') {
       path: path.join('/'),
       address,
       parentAddress,
-      detail: storedField(atom, 'detail')?.value ?? '',
+      detail: storedField(atom, 'situation')?.value ?? '',
       agent: nameField.parsed.types.some((type) => type.raw === 'agent')
     });
-    const children = storedField(atom, 'children')?.value;
+    const children = storedField(atom, 'contain')?.value;
     if (Array.isArray(children)) entries.push(...atomEntries(children, path, address));
   }
   return entries;
@@ -664,7 +668,7 @@ async function formatAgentEntryContext(contextFile, agentPath) {
   const graphAtom = (entry, role = null, descendantDepth = 0) => {
     const types = [...(entry.types ?? [])];
     if (role && !types.includes(role)) types.push(role);
-    const nameKey = `name${types.map((type) => `@${type}`).join('')}`;
+    const nameKey = `thing${types.map((type) => `@${type}`).join('')}`;
     const executable = types.includes('program');
     const childEntries = descendantDepth > 0
       ? (childrenByParent.get(entry.address) ?? []).map((child) => (
@@ -673,9 +677,9 @@ async function formatAgentEntryContext(contextFile, agentPath) {
       : [];
     return graphObject([
       graphEntry(nameKey, true, entry.name),
-      graphEntry('detail', true, executable ? '' : entry.detail),
-      graphEntry('children', true, graphArray(childEntries)),
-      graphEntry('partners', true, graphArray([]))
+      graphEntry('situation', true, executable ? '' : entry.detail),
+      graphEntry('contain', true, graphArray(childEntries)),
+      graphEntry('support', true, graphArray([]))
     ]);
   };
   const descendantsOf = (entry) => entries.filter((candidate) => (
@@ -709,14 +713,14 @@ async function formatAgentEntryContext(contextFile, agentPath) {
     ), 0))
   ]);
   const context = graphObject([
-    graphEntry('name@context', true, current.path),
-    graphEntry('detail', true, ''),
-    graphEntry('children', true, graphArray([
+    graphEntry('thing@context', true, current.path),
+    graphEntry('situation', true, ''),
+    graphEntry('contain', true, graphArray([
       ...(parent ? [graphAtom(parent, 'parent')] : []),
       ...peers.map((entry) => graphAtom(entry, 'peer')),
       graphAtom(current, 'current', 2)
     ])),
-    graphEntry('partners', true, graphArray([])),
+    graphEntry('support', true, graphArray([])),
     graphEntry('boundary~preview', true, graphObject([
       graphEntry('up', true, previewStats(upOutside)),
       graphEntry('down', true, previewStats(downOutside)),

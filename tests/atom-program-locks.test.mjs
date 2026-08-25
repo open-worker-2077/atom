@@ -21,7 +21,7 @@ test('subtree spatial lock follows the window parent and admits only its schedul
     results: [{
       targets: { refs: ['r-root'], scope: 'subtree' },
       mode: 'read_write',
-      fields: ['name', 'detail', 'children', 'partners'],
+      fields: ['thing', 'situation', 'contain', 'support'],
       protect: { atom: true, messages: false },
       allowed_windows: { relation: 'target_within_window_parent' },
       allowed_programs: { paths: ['推进流/调度程序'] },
@@ -30,23 +30,23 @@ test('subtree spatial lock follows the window parent and admits only its schedul
   });
 
   assert.equal(authorizeProgramLock({
-    lockIndex: index, targetPath: '推进流/任务A/字段', operation: 'read', field: 'detail',
+    lockIndex: index, targetPath: '推进流/任务A/字段', operation: 'read', field: 'situation',
     agentPath: '推进流/任务A/执行窗口'
   }).decision, 'allow');
   assert.equal(authorizeProgramLock({
-    lockIndex: index, targetPath: '推进流/任务B', operation: 'read', field: 'detail',
+    lockIndex: index, targetPath: '推进流/任务B', operation: 'read', field: 'situation',
     agentPath: '推进流/任务A/执行窗口'
   }).decision, 'truncate');
   assert.equal(authorizeProgramLock({
-    lockIndex: index, targetPath: '推进流/状态', operation: 'read', field: 'detail',
+    lockIndex: index, targetPath: '推进流/状态', operation: 'read', field: 'situation',
     agentPath: '推进流/任务A/执行窗口'
   }).decision, 'truncate');
   assert.equal(authorizeProgramLock({
-    lockIndex: index, targetPath: '推进流/任务A/执行窗口', operation: 'write', field: 'name',
+    lockIndex: index, targetPath: '推进流/任务A/执行窗口', operation: 'write', field: 'thing',
     agentPath: '推进流/任务A/执行窗口'
   }).decision, 'deny');
   assert.equal(authorizeProgramLock({
-    lockIndex: index, targetPath: '推进流/任务A/执行窗口', operation: 'write', field: 'name',
+    lockIndex: index, targetPath: '推进流/任务A/执行窗口', operation: 'write', field: 'thing',
     agentPath: '推进流/任务A/执行窗口', programPath: '推进流/调度程序'
   }).decision, 'allow');
 });
@@ -55,12 +55,12 @@ test('field-specific Program locks restrict only the requested Atom fields', () 
   const index = buildProgramLockIndex({
     revision: 'rev-1', records,
     results: [{
-      targets: { refs: ['r-target'] }, mode: 'write', fields: ['name'],
+      targets: { refs: ['r-target'] }, mode: 'write', fields: ['thing'],
       protect: { atom: true, messages: false }, sourceProgramRef: 'r-program', sourceProgramPath: '冻结程序'
     }]
   });
-  assert.equal(authorizeProgramLock({ lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'name' }).decision, 'deny');
-  assert.equal(authorizeProgramLock({ lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'detail' }).decision, 'allow');
+  assert.equal(authorizeProgramLock({ lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'thing' }).decision, 'deny');
+  assert.equal(authorizeProgramLock({ lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'situation' }).decision, 'allow');
 });
 
 test('message protection is explicit and independent from Atom content protection', () => {
@@ -72,14 +72,14 @@ test('message protection is explicit and independent from Atom content protectio
     }]
   });
   assert.equal(authorizeProgramLock({ lockIndex: index, targetPath: '冻结程序', operation: 'read', field: 'messages' }).decision, 'truncate');
-  assert.equal(authorizeProgramLock({ lockIndex: index, targetPath: '冻结程序', operation: 'read', field: 'detail' }).decision, 'allow');
+  assert.equal(authorizeProgramLock({ lockIndex: index, targetPath: '冻结程序', operation: 'read', field: 'situation' }).decision, 'allow');
 });
 
 test('an allowed Agent window bypasses only its matching Program lock', () => {
   const index = buildProgramLockIndex({
     revision: 'rev-window', records,
     results: [{
-      targets: { refs: ['r-target'] }, mode: 'read_write', fields: ['detail'],
+      targets: { refs: ['r-target'] }, mode: 'read_write', fields: ['situation'],
       protect: { atom: true, messages: false },
       allowed_windows: { paths: ['推进流/允许窗口'] },
       sourceProgramRef: 'r-program', sourceProgramPath: '冻结程序'
@@ -90,22 +90,22 @@ test('an allowed Agent window bypasses only its matching Program lock', () => {
     lockIndex: index,
     targetPath: '推进流/任务A',
     operation: 'write',
-    field: 'detail',
+    field: 'situation',
     agentPath: '推进流/允许窗口'
   }).decision, 'allow');
   assert.equal(authorizeProgramLock({
     lockIndex: index,
     targetPath: '推进流/任务A',
     operation: 'write',
-    field: 'detail',
+    field: 'situation',
     agentPath: '推进流/其他窗口'
   }).decision, 'deny');
   assert.equal(authorizeProgramLock({
-    lockIndex: index, targetPath: '推进流/任务A', operation: 'read', field: 'detail',
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'read', field: 'situation',
     agentPath: '推进流/允许窗口'
   }).decision, 'allow');
   assert.equal(authorizeProgramLock({
-    lockIndex: index, targetPath: '推进流/任务A', operation: 'read', field: 'detail',
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'read', field: 'situation',
     agentPath: '推进流/其他窗口'
   }).decision, 'truncate');
 });
@@ -114,7 +114,7 @@ test('window Graph types admit a class without matching a concrete path or name'
   const index = buildProgramLockIndex({
     revision: 'rev-types', records,
     results: [{
-      targets: { refs: ['r-target'] }, mode: 'write', fields: ['detail'],
+      targets: { refs: ['r-target'] }, mode: 'write', fields: ['situation'],
       protect: { atom: true, messages: false },
       allowed_windows: { types: { all: ['agent'], any: ['研发', '总控'], none: ['执行'] } },
       sourceProgramRef: 'r-program', sourceProgramPath: '冻结程序'
@@ -122,11 +122,11 @@ test('window Graph types admit a class without matching a concrete path or name'
   });
 
   assert.equal(authorizeProgramLock({
-    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'detail',
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'situation',
     agentPath: '任意新路径', agentTypes: ['agent', '研发'], targetTypes: ['槽例', '待处理'], action: 'transform'
   }).decision, 'allow');
   assert.equal(authorizeProgramLock({
-    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'detail',
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'situation',
     agentPath: '推进流/其他窗口', agentTypes: ['agent', '执行'], targetTypes: ['槽例', '待处理'], action: 'transform'
   }).decision, 'deny');
 });
@@ -135,7 +135,7 @@ test('target state and interaction action independently decide whether a lock is
   const index = buildProgramLockIndex({
     revision: 'rev-conditions', records,
     results: [{
-      targets: { refs: ['r-target'] }, mode: 'read_write', fields: ['detail'],
+      targets: { refs: ['r-target'] }, mode: 'read_write', fields: ['situation'],
       protect: { atom: true, messages: false },
       when: {
         target_types: { all: ['槽例'], any: ['待处理'] },
@@ -146,15 +146,15 @@ test('target state and interaction action independently decide whether a lock is
   });
 
   assert.equal(authorizeProgramLock({
-    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'detail',
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'situation',
     targetTypes: ['槽例', '待处理'], action: 'transform'
   }).decision, 'deny');
   assert.equal(authorizeProgramLock({
-    lockIndex: index, targetPath: '推进流/任务A', operation: 'read', field: 'detail',
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'read', field: 'situation',
     targetTypes: ['槽例', '待处理'], action: 'explore'
   }).decision, 'allow');
   assert.equal(authorizeProgramLock({
-    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'detail',
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'situation',
     targetTypes: ['槽例', '已完成'], action: 'transform'
   }).decision, 'allow');
 });
@@ -163,7 +163,7 @@ test('targeted Program refresh preserves locks emitted by Programs that did not 
   const previous = buildProgramLockIndex({
     revision: 'rev-before', records,
     results: [{
-      targets: { refs: ['r-target'] }, mode: 'write', fields: ['detail'],
+      targets: { refs: ['r-target'] }, mode: 'write', fields: ['situation'],
       protect: { atom: true, messages: false },
       sourceProgramRef: 'r-program', sourceProgramPath: '冻结程序'
     }]
@@ -176,7 +176,7 @@ test('targeted Program refresh preserves locks emitted by Programs that did not 
   });
 
   assert.equal(authorizeProgramLock({
-    lockIndex: merged, targetPath: '推进流/任务A', operation: 'write', field: 'detail'
+    lockIndex: merged, targetPath: '推进流/任务A', operation: 'write', field: 'situation'
   }).decision, 'deny');
 });
 
@@ -184,7 +184,7 @@ test('targeted Program refresh removes an old lock when its source ran without r
   const previous = buildProgramLockIndex({
     revision: 'rev-before', records,
     results: [{
-      targets: { refs: ['r-target'] }, mode: 'write', fields: ['detail'],
+      targets: { refs: ['r-target'] }, mode: 'write', fields: ['situation'],
       protect: { atom: true, messages: false },
       sourceProgramRef: 'r-program', sourceProgramPath: '冻结程序'
     }]
@@ -197,6 +197,6 @@ test('targeted Program refresh removes an old lock when its source ran without r
   });
 
   assert.equal(authorizeProgramLock({
-    lockIndex: merged, targetPath: '推进流/任务A', operation: 'write', field: 'detail'
+    lockIndex: merged, targetPath: '推进流/任务A', operation: 'write', field: 'situation'
   }).decision, 'allow');
 });

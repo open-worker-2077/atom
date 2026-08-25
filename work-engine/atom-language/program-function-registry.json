@@ -110,7 +110,7 @@
       "contract": {
         "argument": { "type": "object", "name": "spec" },
         "create": {
-          "requiredAxes": ["name", "detail", "children", "partners"],
+          "requiredAxes": ["thing", "situation", "contain", "support"],
           "dotCommands": "forbidden"
         },
         "update": { "dotCommands": "supported" },
@@ -138,7 +138,7 @@
         },
         "development": {
           "initialLayout": "one ordinary self-runnable candidate DataFlow child",
-          "scopeBinding": "transform {\"name.run.EXACT_SCOPE_ROOT\":\"EXACT_PROGRAM_PATH\"}",
+          "scopeBinding": "transform {\"thing.run.EXACT_SCOPE_ROOT\":\"EXACT_PROGRAM_PATH\"}",
           "relativeSelectors": [".", "./direct/contain/path"]
         },
         "layout": {
@@ -252,7 +252,7 @@
             }
           }
         },
-        "recompute": { "command": "transform {\"name.run.\":\"EXACT_PROGRAM_PATH\"}" },
+        "recompute": { "command": "transform {\"thing.run.\":\"EXACT_PROGRAM_PATH\"}" },
         "definitions": {
           "graph-type-predicate": {
             "type": "object",

@@ -135,7 +135,7 @@ def child_detail(rows, parent_path, child_name, default=""):
     expected_path = _join_path(parent_path, child_name)
     for row in rows:
         if row.path == expected_path:
-            return row.detail
+            return row.situation
     return default
 
 
@@ -172,12 +172,12 @@ def subtree_refs(rows, root_path):
     return [row.ref for row in rows if row.path == root_path or row.path.startswith(prefix)]
 
 
-def _atom(name, detail="", children=None, partners=None):
+def _atom(thing, situation="", contain=None, support=None):
     return {
-        "name": name,
-        "detail": detail,
-        "children": list(children or []),
-        "partners": list(partners or []),
+        "thing": thing,
+        "situation": situation,
+        "contain": list(contain or []),
+        "support": list(support or []),
     }
 
 
@@ -186,15 +186,15 @@ def _field_definition(field):
         name = field
         detail = ""
     elif isinstance(field, dict):
-        name = field.get("name")
-        detail = field.get("detail", "")
+        name = field.get("thing")
+        detail = field.get("situation", "")
     else:
         raise TypeError("Each form field must be a name or JSON object")
     if not isinstance(name, str) or not name.strip():
         raise ValueError("Each form field requires a non-empty name")
     if not isinstance(detail, str):
         raise TypeError("Form field detail must be a string")
-    return {"name": name, "detail": detail}
+    return {"thing": name, "situation": detail}
 
 
 def plan_form_flow(rows, parent_path, standard):
@@ -203,7 +203,7 @@ def plan_form_flow(rows, parent_path, standard):
     forms = standard.get("forms")
     if not isinstance(forms, list):
         raise TypeError("plan_form_flow() standard.forms must be a list")
-    status_name = standard.get("status_name", "状态")
+    status_name = standard.get("status_thing", "状态")
     if not isinstance(status_name, str) or not status_name.strip():
         raise ValueError("plan_form_flow() status_name must be a non-empty string")
 
@@ -215,26 +215,21 @@ def plan_form_flow(rows, parent_path, standard):
     for form in forms:
         if not isinstance(form, dict):
             raise TypeError("Each form definition must be a JSON object")
-        form_name = form.get("name")
+        form_name = form.get("thing")
         if not isinstance(form_name, str) or not form_name.strip():
             raise ValueError("Each form requires a non-empty name")
         if form_name in seen_forms:
             raise ValueError(f"Duplicate form name: {form_name}")
         seen_forms.add(form_name)
 
-        detail = form.get("detail", "")
+        detail = form.get("situation", "")
         initial_status = form.get("status", "未进入")
-        routes = form.get("routes", [])
+        routes = _normalize_support_rules(form.get("support", []))
         if not isinstance(detail, str) or not isinstance(initial_status, str):
             raise TypeError("Form detail and status must be strings")
-        if not isinstance(routes, list) or any(not isinstance(route, dict) for route in routes):
-            raise TypeError("Form routes must be a list of JSON objects")
-        for route in routes:
-            if not isinstance(route.get("verb"), str) or not isinstance(route.get("object"), str):
-                raise TypeError("Each form route requires string verb and object values")
 
         field_definitions = [_field_definition(field) for field in form.get("fields", [])]
-        field_names = [field["name"] for field in field_definitions]
+        field_names = [field["thing"] for field in field_definitions]
         if status_name in field_names:
             raise ValueError(f"Status field {status_name!r} is created by the compiler")
         if len(set(field_names)) != len(field_names):
@@ -243,32 +238,32 @@ def plan_form_flow(rows, parent_path, standard):
         form_path = _join_path(parent_path, form_name)
         existing_form = row_paths.get(form_path)
         desired_fields = [
-            {"name": status_name, "detail": initial_status},
+            {"thing": status_name, "situation": initial_status},
             *field_definitions,
         ]
         if existing_form is None:
             submitted_children.append(_atom(
                 form_name,
                 detail,
-                [_atom(field["name"], field["detail"]) for field in desired_fields],
+                [_atom(field["thing"], field["situation"]) for field in desired_fields],
                 routes,
             ))
             continue
 
-        if detail and existing_form.detail != detail:
-            conflicts.append(f"{form_path}:detail")
-        if list(existing_form.partners) != routes:
-            conflicts.append(f"{form_path}:routes")
+        if detail and existing_form.situation != detail:
+            conflicts.append(f"{form_path}:situation")
+        if list(existing_form.support) != routes:
+            conflicts.append(f"{form_path}:support")
         missing = []
         for field in desired_fields:
-            field_path = _join_path(form_path, field["name"])
+            field_path = _join_path(form_path, field["thing"])
             if field_path not in row_paths:
-                missing.append(_atom(field["name"], field["detail"]))
+                missing.append(_atom(field["thing"], field["situation"]))
         if missing:
-            submitted_children.append({"name": form_name, "children": missing})
+            submitted_children.append({"thing": form_name, "contain": missing})
 
     return {
-        "children": submitted_children,
+        "contain": submitted_children,
         "conflicts": conflicts,
         "complete": not submitted_children and not conflicts,
     }
@@ -277,11 +272,11 @@ def plan_form_flow(rows, parent_path, standard):
 def _compile_atom_template(template):
     if not isinstance(template, dict):
         raise TypeError("Each Atom template must be a JSON object")
-    name = template.get("name")
-    detail = template.get("detail", "")
+    name = template.get("thing")
+    detail = template.get("situation", "")
     types = template.get("types", [])
-    children = template.get("children", [])
-    partners = template.get("partners", [])
+    children = template.get("contain", [])
+    partners = template.get("support", [])
     if not isinstance(name, str) or not name.strip():
         raise ValueError("Each Atom template requires a non-empty name")
     if not isinstance(detail, str):
@@ -294,60 +289,131 @@ def _compile_atom_template(template):
         raise TypeError("Atom template children must be a list")
     if not isinstance(partners, list) or any(not isinstance(item, dict) for item in partners):
         raise TypeError("Atom template partners must be a list of JSON objects")
-    child_names = [child.get("name") if isinstance(child, dict) else None for child in children]
+    child_names = [child.get("thing") if isinstance(child, dict) else None for child in children]
     if len(set(child_names)) != len(child_names):
         raise ValueError(f"Duplicate child name in Atom template {name!r}")
 
-    name_key = "name" + "".join(f"@{item}" for item in types)
+    name_key = "thing" + "".join(f"@{item}" for item in types)
     return {
         name_key: name,
-        "detail": detail,
-        "children": [_compile_atom_template(child) for child in children],
-        "partners": [dict(item) for item in partners],
+        "situation": detail,
+        "contain": [_compile_atom_template(child) for child in children],
+        "support": _normalize_support_rules(partners),
     }
+
+
+def _normalize_support_expr(expr):
+    if not isinstance(expr, dict) or len(expr) != 1:
+        raise ValueError("support Expr requires exactly one key")
+    kind, value = next(iter(expr.items()))
+    if kind == "satisfies":
+        raise ValueError("SUPPORT_INLINE_PROGRAM_UNSUPPORTED")
+    if kind in ("thing", "thing@program"):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("support thing requires a non-empty selector")
+        if kind == "thing@program" and any(token in value for token in ("satisfies(", "lambda", "def main", "\n", "\r")):
+            raise ValueError("SUPPORT_INLINE_PROGRAM_UNSUPPORTED")
+        return {kind: value}
+    if kind not in ("and", "or") or not isinstance(value, list) or len(value) < 2:
+        raise ValueError("support Expr must be thing or ordered and/or with at least two children")
+    return {kind: [_normalize_support_expr(child) for child in value]}
+
+
+def _support_expr_endpoints(expr):
+    if "thing" in expr or "thing@program" in expr:
+        return {expr.get("thing", expr.get("thing@program"))}
+    return set().union(*(_support_expr_endpoints(child)
+                         for child in expr[next(iter(expr))]))
+
+
+def _normalize_support_rules(rules):
+    if not isinstance(rules, list):
+        raise TypeError("support must be an array")
+    normalized = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            raise TypeError("support items must be rule objects")
+        unknown = set(rule) - {"if@current", "if", "then@current", "then"}
+        if unknown:
+            if "satisfies" in unknown or "support@program" in unknown:
+                raise ValueError("SUPPORT_INLINE_PROGRAM_UNSUPPORTED")
+            raise ValueError("support rule contains unknown fields: " + ", ".join(sorted(unknown)))
+        current_if = "if@current" in rule
+        current_then = "then@current" in rule
+        if current_if == current_then:
+            raise ValueError("CURRENT_ENDPOINT_ON_BOTH_SIDES" if current_if
+                             else "SUPPORT_OWNER_CURRENT_REQUIRED")
+        marker = "if@current" if current_if else "then@current"
+        if rule[marker] is not True:
+            raise ValueError("INVALID_CURRENT_MODIFIER")
+        antecedents = rule.get("if", [])
+        consequents = rule.get("then", [])
+        if not isinstance(antecedents, list) or len(antecedents) > 1:
+            raise ValueError("support if requires at most one root Expr")
+        if not isinstance(consequents, list):
+            raise TypeError("support then must be an array")
+        normalized_if = [_normalize_support_expr(expr) for expr in antecedents]
+        normalized_then = []
+        for target in consequents:
+            endpoint_keys = set(target) if isinstance(target, dict) else set()
+            if (endpoint_keys not in ({"thing"}, {"thing@program"})):
+                raise ValueError("support then items require exactly one thing endpoint")
+            endpoint_key = next(iter(endpoint_keys))
+            endpoint_value = target[endpoint_key]
+            if not isinstance(endpoint_value, str) or not endpoint_value.strip():
+                raise ValueError("support then endpoint requires a non-empty selector")
+            if endpoint_key == "thing@program" and any(token in endpoint_value for token in ("satisfies(", "lambda", "def main", "\n", "\r")):
+                raise ValueError("SUPPORT_INLINE_PROGRAM_UNSUPPORTED")
+            normalized_then.append({endpoint_key: endpoint_value})
+        if not current_if and not normalized_if:
+            raise ValueError("MISSING_SUPPORT_ANTECEDENT")
+        if not current_then and not normalized_then:
+            raise ValueError("MISSING_SUPPORT_CONSEQUENT")
+        antecedent_count = (1 if current_if else 0) + (len(_support_expr_endpoints(normalized_if[0])) if normalized_if else 0)
+        consequent_count = (1 if current_then else 0) + len({next(iter(target.values())) for target in normalized_then})
+        if antecedent_count > 1 and consequent_count > 1:
+            raise ValueError("NATIVE_MANY_TO_MANY_SUPPORT_UNSUPPORTED")
+        normalized.append({
+            **({"if@current": True} if current_if else {}),
+            **({"if": normalized_if} if "if" in rule else {}),
+            **({"then@current": True} if current_then else {}),
+            **({"then": normalized_then} if "then" in rule else {}),
+        })
+    return normalized
 
 
 def compile_form(specification):
     """Compile one protected Form definition to the four native Graph axes."""
     if not isinstance(specification, dict):
         raise TypeError("form() requires one JSON object argument")
-    allowed = {"name", "detail", "children", "partners"}
+    allowed = {"thing", "situation", "contain", "support"}
     unknown = set(specification) - allowed
     if unknown:
         raise ValueError(
             "form() contains unsupported Graph axes: " + ", ".join(sorted(unknown))
         )
-    name = specification.get("name")
-    detail = specification.get("detail", "")
-    children = specification.get("children", [])
-    partners = specification.get("partners", [])
+    name = specification.get("thing")
+    detail = specification.get("situation", "")
+    children = specification.get("contain", [])
+    partners = specification.get("support", [])
     if not isinstance(name, str) or not name.strip():
-        raise ValueError("form() requires a non-empty name")
+        raise ValueError("form() requires a non-empty thing")
     if not isinstance(detail, str):
-        raise TypeError("form.detail must be a string")
+        raise TypeError("form.situation must be a string")
     if not isinstance(children, list):
-        raise TypeError("form.children must be an array")
+        raise TypeError("form.contain must be an array")
     if not isinstance(partners, list):
-        raise TypeError("form.partners must be an array")
+        raise TypeError("form.support must be an array")
     compiled_children = [compile_form(child) for child in children]
-    child_names = [child["name"] for child in compiled_children]
+    child_names = [child["thing"] for child in compiled_children]
     if len(set(child_names)) != len(child_names):
         raise ValueError(f"form() contains duplicate child names under {name!r}")
-    normalized_partners = []
-    for relation in partners:
-        if not isinstance(relation, dict):
-            raise TypeError("form.partners items must be JSON objects")
-        if set(relation) != {"verb", "object"}:
-            raise ValueError("form.partners items require exactly verb and object")
-        if not all(isinstance(relation[key], str) and relation[key].strip()
-                   for key in ("verb", "object")):
-            raise ValueError("form.partners verb and object must be non-empty strings")
-        normalized_partners.append({"verb": relation["verb"], "object": relation["object"]})
+    normalized_partners = _normalize_support_rules(partners)
     return {
-        "name": name,
-        "detail": detail,
-        "children": compiled_children,
-        "partners": normalized_partners,
+        "thing": name,
+        "situation": detail,
+        "contain": compiled_children,
+        "support": normalized_partners,
     }
 
 
@@ -535,14 +601,13 @@ def work_order_template(title, creation_id, version="1"):
         return json.dumps(value, ensure_ascii=False, indent=2)
 
     return compile_form({
-        "name": title,
-        "detail": formatted(root_detail),
-        "children": [
-            {"name": "Output", "detail": formatted(output_detail), "partners": [{"verb": "提交验收", "object": "Criteria"}]},
-            {"name": "Step", "detail": formatted(step_detail), "partners": [{"verb": "产出", "object": "Output"}]},
-            {"name": "Criteria", "detail": formatted(criteria_detail), "partners": [
-                {"verb": "约束", "object": "Step"},
-                {"verb": "驳回返工", "object": "Step"},
+        "thing": title,
+        "situation": formatted(root_detail),
+        "contain": [
+            {"thing": "Output", "situation": formatted(output_detail), "support": [{"if@current": True, "then": [{"thing": "Criteria"}]}]},
+            {"thing": "Step", "situation": formatted(step_detail), "support": [{"if@current": True, "then": [{"thing": "Output"}]}]},
+            {"thing": "Criteria", "situation": formatted(criteria_detail), "support": [
+                {"if@current": True, "then": [{"thing": "Step"}]},
             ]},
         ],
     })
@@ -550,7 +615,7 @@ def work_order_template(title, creation_id, version="1"):
 
 def plan_template_instance(rows, parent_path, template):
     compiled = _compile_atom_template(template)
-    template_name = template.get("name")
+    template_name = template.get("thing")
     instance_path = _join_path(parent_path, template_name)
     existing = None
     for row in rows:
@@ -562,8 +627,8 @@ def plan_template_instance(rows, parent_path, template):
         conflicts = []
         if tuple(existing.types) != expected_types:
             conflicts.append(f"{instance_path}:types")
-        return {"children": [], "conflicts": conflicts, "exists": True}
-    return {"children": [compiled], "conflicts": [], "exists": False}
+        return {"contain": [], "conflicts": conflicts, "exists": True}
+    return {"contain": [compiled], "conflicts": [], "exists": False}
 
 
 def plan_shards(sources, specification):

@@ -1,8 +1,7 @@
 import {
-  SLOT_REVISION_VERB,
   atomName,
   childrenOf,
-  relationTarget,
+  instanceRevisionOf,
   resolveUnique
 } from './slot-graph-semantics.mjs';
 
@@ -50,7 +49,7 @@ export function resolveSlotRelativeSelector({ atoms, selector, scopeRoot }) {
   let current = selected.match.atom;
   const path = [...selected.match.path];
   for (const [index, segment] of parts.entries()) {
-    if (index > 0 && relationTarget(current, SLOT_REVISION_VERB)) {
+    if (index > 0 && instanceRevisionOf(current)) {
       throw scopeError('SLOT_SCOPE_BOUNDARY_CROSSING', '相对槽选择器不能穿透嵌套槽体实例域', {
         selector,
         scope_root: scopeRoot,
@@ -85,12 +84,12 @@ export function normalizeScopedTransformRequest({ atoms, request, scopeRoot }) {
     throw scopeError('INVALID_PROGRAM_TRANSFORM', 'transform() requires one JSON object');
   }
   const normalized = structuredClone(request);
-  if (typeof normalized.name !== 'string') {
-    throw scopeError('SLOT_RELATIVE_SELECTOR_REQUIRED', '相对域 Transform 必须以 name:. 或 name:./… 选择槽', {
+  if (typeof normalized.thing !== 'string') {
+    throw scopeError('SLOT_RELATIVE_SELECTOR_REQUIRED', '相对域 Transform 必须以 thing:. 或 thing:./… 选择槽', {
       scope_root: scopeRoot
     });
   }
-  const resolved = resolveSlotRelativeSelector({ atoms, selector: normalized.name, scopeRoot });
-  normalized.name = resolved.selector;
+  const resolved = resolveSlotRelativeSelector({ atoms, selector: normalized.thing, scopeRoot });
+  normalized.thing = resolved.selector;
   return normalized;
 }

@@ -6,11 +6,11 @@ import { parseAtomKey } from './key-parser.mjs';
 import { applyTransform } from './transform-executor.mjs';
 
 export const PROGRAM_CAPABILITIES = Object.freeze({
-  READ_DETAIL: 'atom.engine/read-detail@1',
+  READ_DETAIL: 'atom.engine/read-situation@1',
   FOLLOW_PARTNER: 'atom.engine/follow-partner@1',
   GUARD_NON_EMPTY: 'atom.engine/guard-non-empty@1',
   GUARD_EQUALS: 'atom.engine/guard-equals@1',
-  REPLACE_DETAIL: 'atom.engine/replace-detail@1',
+  REPLACE_DETAIL: 'atom.engine/replace-situation@1',
   CREATE_CHILD: 'atom.engine/create-child@1'
 });
 
@@ -33,25 +33,25 @@ function storedField(atom, baseKey) {
 }
 
 function atomName(atom) {
-  return storedField(atom, 'name')?.value;
+  return storedField(atom, 'thing')?.value;
 }
 
 function directChildren(atom) {
-  const children = storedField(atom, 'children')?.value;
+  const children = storedField(atom, 'contain')?.value;
   return Array.isArray(children) ? children : [];
 }
 
 function atomPartners(atom) {
-  const partners = storedField(atom, 'partners')?.value;
+  const partners = storedField(atom, 'support')?.value;
   return Array.isArray(partners) ? partners : [];
 }
 
 function atomDetail(atom) {
-  return storedField(atom, 'detail')?.value;
+  return storedField(atom, 'situation')?.value;
 }
 
 function isProgram(atom) {
-  return storedField(atom, 'name')?.parsed.types.some((type) => (
+  return storedField(atom, 'thing')?.parsed.types.some((type) => (
     type.raw === 'program'
   )) ?? false;
 }
@@ -224,7 +224,7 @@ function compileStep(step, stepIndex, stepRecords, matches, rootName) {
 }
 
 /**
- * Compiles every name@program Atom in one candidate graph. Compilation is
+ * Compiles every thing@program Atom in one candidate graph. Compilation is
  * read-only and is intended to run before either active JSON file is written.
  */
 export function compilePrograms(atoms, options = {}) {
@@ -309,7 +309,7 @@ function atomToNormalized(atom) {
       ...parsed,
       commands: [],
       valuePresent: true,
-      value: parsed.baseKey === 'children' && Array.isArray(value)
+      value: parsed.baseKey === 'contain' && Array.isArray(value)
         ? value.map((item) => (
           item && typeof item === 'object' && !Array.isArray(item)
             ? { kind: 'graph-object', fields: atomToNormalized(item).fields }
@@ -324,9 +324,9 @@ function atomToNormalized(atom) {
 function transformItemForDetail(targetPath, value) {
   return {
     fields: [
-      { baseKey: 'name', valuePresent: true, value: targetPath, commands: [] },
+      { baseKey: 'thing', valuePresent: true, value: targetPath, commands: [] },
       {
-        baseKey: 'detail',
+        baseKey: 'situation',
         valuePresent: false,
         commands: [{ name: 'rep', parameter: value }]
       }
@@ -337,9 +337,9 @@ function transformItemForDetail(targetPath, value) {
 function transformItemForChild(targetPath, child) {
   return {
     fields: [
-      { baseKey: 'name', valuePresent: true, value: targetPath, commands: [] },
+      { baseKey: 'thing', valuePresent: true, value: targetPath, commands: [] },
       {
-        baseKey: 'children',
+        baseKey: 'contain',
         valuePresent: true,
         commands: [],
         value: [atomToNormalized(child)]

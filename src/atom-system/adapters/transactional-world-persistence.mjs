@@ -38,8 +38,8 @@ function agentRegistrationCount(atoms) {
     for (const atom of Array.isArray(items) ? items : []) {
       for (const [key, value] of Object.entries(atom ?? {})) {
         const parsed = parseAtomKey(key, { descriptionSymbolWarnings: false });
-        if (parsed.baseKey === 'name' && parsed.types.some((type) => type.raw === 'agent')) count += 1;
-        if (parsed.baseKey === 'children') visit(value);
+        if (parsed.baseKey === 'thing' && parsed.types.some((type) => type.raw === 'agent')) count += 1;
+        if (parsed.baseKey === 'contain') visit(value);
       }
     }
   };
@@ -48,7 +48,7 @@ function agentRegistrationCount(atoms) {
 }
 
 function explicitlyChangesRegistration(source) {
-  return typeof source === 'string' && /["']name\.typ\./u.test(source);
+  return typeof source === 'string' && /["']thing\.typ\./u.test(source);
 }
 
 export function createTransactionalWorldPersistence({

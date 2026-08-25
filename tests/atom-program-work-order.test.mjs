@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 async function runProgram(source, world = [], programChildren = []) {
@@ -55,25 +55,25 @@ function programFor(action) {
 }
 
 function transformedDetail(item) {
-  if (typeof item['detail$replace'] === 'string') {
-    return JSON.parse(item['detail$replace']);
+  if (typeof item['situation$replace'] === 'string') {
+    return JSON.parse(item['situation$replace']);
   }
-  const key = Object.keys(item).find((name) => name.startsWith('detail.rep.'));
+  const key = Object.keys(item).find((name) => name.startsWith('situation.rep.'));
   assert.ok(key, `missing full detail replacement: ${JSON.stringify(item)}`);
   assert.equal(item[key], null);
-  return JSON.parse(key.slice('detail.rep.'.length));
+  return JSON.parse(key.slice('situation.rep.'.length));
 }
 
 test('form compiles only the four authoritative Graph axes', async () => {
   const cycle = await runProgram([
-    "compiled = form({'name': '最小单', 'detail': '说明', 'children': [{'name': '内容'}], 'partners': []})",
+    "compiled = form({'thing': '最小单', 'situation': '说明', 'contain': [{'thing': '内容'}], 'support': []})",
     "message({'level': 'info', 'text': ','.join(sorted(compiled.keys()))})"
   ].join('\n'));
 
-  assert.equal(cycle.messages[0].text, 'children,detail,name,partners');
+  assert.equal(cycle.messages[0].text, 'contain,situation,support,thing');
 
   await assert.rejects(
-    runProgram("form({'name': '错误单', 'fields': []})"),
+    runProgram("form({'thing': '错误单', 'fields': []})"),
     (error) => error?.code === 'ATOM_PROGRAM_FAILED'
       && /unsupported Graph axes/i.test(error?.message ?? '')
   );
@@ -86,21 +86,18 @@ test('work_order creates one versioned Graph-native instance with exactly three 
   ].join('\n'));
 
   assert.equal(cycle.transforms.length, 1);
-  const [instance] = cycle.transforms[0].children;
-  assert.equal(instance.name, 'ESG计划');
-  assert.deepEqual(instance.children.map((child) => child.name), ['Output', 'Step', 'Criteria']);
-  assert.deepEqual(instance.children.map((child) => child.partners), [
-    [{ verb: '提交验收', object: 'Criteria' }],
-    [{ verb: '产出', object: 'Output' }],
-    [
-      { verb: '约束', object: 'Step' },
-      { verb: '驳回返工', object: 'Step' }
-    ]
+  const [instance] = cycle.transforms[0].contain;
+  assert.equal(instance.thing, 'ESG计划');
+  assert.deepEqual(instance.contain.map((child) => child.thing), ['Output', 'Step', 'Criteria']);
+  assert.deepEqual(instance.contain.map((child) => child.support), [
+    [{ 'if@current': true, then: [{ thing: 'Criteria' }] }],
+    [{ 'if@current': true, then: [{ thing: 'Output' }] }],
+    [{ 'if@current': true, then: [{ thing: 'Step' }] }]
   ]);
-  assert.equal(JSON.parse(instance.detail).template, 'work-order');
-  assert.equal(JSON.parse(instance.detail).templateVersion, '1');
-  assert.equal(JSON.parse(instance.detail).creationId, 'esg-2026');
-  const [output, step, criteria] = instance.children.map((item) => JSON.parse(item.detail));
+  assert.equal(JSON.parse(instance.situation).template, 'work-order');
+  assert.equal(JSON.parse(instance.situation).templateVersion, '1');
+  assert.equal(JSON.parse(instance.situation).creationId, 'esg-2026');
+  const [output, step, criteria] = instance.contain.map((item) => JSON.parse(item.situation));
   assert.deepEqual(Object.keys(output.交付物), ['名称', '接收方', '成果引用', '版本']);
   assert.deepEqual(Object.keys(step.操作), ['定义', '状态', '实际动作', '实际产出', '异常']);
   assert.deepEqual(Object.keys(criteria.要求), ['定义', '条件', '边界']);
@@ -174,7 +171,7 @@ test('work_order fill merges declared group values, preserves guidance, and coor
   }), [workOrder()]);
 
   assert.equal(cycle.transforms.length, 4);
-  const byName = new Map(cycle.transforms.map((item) => [item.name, item]));
+  const byName = new Map(cycle.transforms.map((item) => [item.thing, item]));
   const output = transformedDetail(byName.get('现有工单/Output'));
   const step = transformedDetail(byName.get('现有工单/Step'));
   const criteria = transformedDetail(byName.get('现有工单/Criteria'));
@@ -210,7 +207,7 @@ test('work_order submit refuses incomplete instances and submits complete outcom
   });
   const submitted = await runProgram(programFor({ action: 'submit', path: '现有工单', submitted_at: '2026-08-20T10:00:00Z' }), [complete]);
   assert.equal(submitted.transforms.length, 2);
-  const byName = new Map(submitted.transforms.map((item) => [item.name, item]));
+  const byName = new Map(submitted.transforms.map((item) => [item.thing, item]));
   assert.equal(transformedDetail(byName.get('现有工单')).status, '待验收');
   assert.deepEqual(transformedDetail(byName.get('现有工单/Criteria')).验收.提交, {
     成果引用: 'doc://esg', 版本: 'v1', 提交时间: '2026-08-20T10:00:00Z'
@@ -228,7 +225,7 @@ test('work_order submit records a passing Criteria outcome and closes a pending 
   }), [pending]);
 
   assert.equal(cycle.transforms.length, 2);
-  const byName = new Map(cycle.transforms.map((item) => [item.name, item]));
+  const byName = new Map(cycle.transforms.map((item) => [item.thing, item]));
   assert.equal(transformedDetail(byName.get('现有工单')).status, '已通过');
   assert.deepEqual(transformedDetail(byName.get('现有工单/Criteria')).验收.审核, {
     结论: '通过', 意见: [], 审核人: '审核人', 审核时间: '2026-08-20T12:00:00Z'
@@ -241,7 +238,7 @@ test('work_order reject and revise preserve responsible-node facts and enforce l
     action: 'reject', path: '现有工单', reasons: ['缺少签章'], reviewer: '审核人', reviewed_at: '2026-08-20T11:00:00Z'
   }), [pending]);
   assert.equal(rejected.transforms.length, 2);
-  const rejectedByName = new Map(rejected.transforms.map((item) => [item.name, item]));
+  const rejectedByName = new Map(rejected.transforms.map((item) => [item.thing, item]));
   assert.equal(transformedDetail(rejectedByName.get('现有工单')).status, '已驳回');
   const rejectedCriteria = transformedDetail(rejectedByName.get('现有工单/Criteria'));
   assert.equal(rejectedCriteria.验收.审核.结论, '驳回');
@@ -253,7 +250,7 @@ test('work_order reject and revise preserve responsible-node facts and enforce l
     }
   }), [workOrder('现有工单', '已驳回')]);
   assert.equal(revised.transforms.length, 2);
-  const revisedByName = new Map(revised.transforms.map((item) => [item.name, item]));
+  const revisedByName = new Map(revised.transforms.map((item) => [item.thing, item]));
   const revisedRoot = transformedDetail(revisedByName.get('现有工单'));
   assert.equal(revisedRoot.status, '执行中');
   assert.equal(revisedRoot.修订记录.at(-1).说明, '补充签章');

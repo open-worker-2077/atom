@@ -17,8 +17,8 @@ import {
   rebuildYearRingIndex
 } from '../src/atom-system/world-runtime/year-ring.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 test('committed receipts retain compact affected Atom and Graph-axis metadata', async (t) => {
@@ -40,15 +40,17 @@ test('committed receipts retain compact affected Atom and Graph-axis metadata', 
       name: 'transform', payload: { source: 'web' }
     },
     transition: ({ facts }) => ({
-      facts: [...facts, { name: '项目', detail: '新建' }],
+      facts: [...facts, atom('项目', '新建')],
       result: {
-        affectedAtoms: [{ path: '项目', axes: ['name', 'detail'] }],
+        affectedAtoms: [{ path: '项目', axes: ['thing', 'situation'] }],
         source: 'web'
       }
     })
   });
 
-  assert.deepEqual(receipt.affectedAtoms, [{ path: '项目', axes: ['detail', 'name'] }]);
+  assert.deepEqual(receipt.affectedAtoms, [{
+    path: '项目', axes: ['contain', 'situation', 'support', 'thing']
+  }]);
   assert.equal(typeof receipt.committedAt, 'string');
   assert.equal(receipt.source, 'web');
   assert.equal(JSON.stringify(receipt).includes('新建'), false);
@@ -82,7 +84,7 @@ test('runtime diagnostics retain compact Program facts for a bounded period', as
     id: 'program-failed', type: 'program', durationMs: 12, outcome: 'failure',
     program: { path: '测试程序', ref: 'program-ref', fingerprint: 'sha256:program' },
     failure: { code: 'BROKEN', message: '失败原因', detail: '不得复制' },
-    affectedAtoms: [{ path: '项目/Step', axes: ['detail'] }]
+    affectedAtoms: [{ path: '项目/Step', axes: ['situation'] }]
   });
   now += 600;
   await store.record({
@@ -180,7 +182,7 @@ test('year-ring index rebuilds exact per-Atom history without changing central f
     durationMs: 3, outcome: 'success',
     program: { path: '项目/程序', ref: 'p1', fingerprint: 'sha256:p1' },
     affectedAtoms: [
-      { path: '项目', ref: 'project-ref', axes: ['detail'] },
+      { path: '项目', ref: 'project-ref', axes: ['situation'] },
       { path: '项目', axes: [] }
     ]
   }, {
@@ -230,8 +232,8 @@ test('compacted transaction history retains enough receipts to rebuild every aff
   const history = queryYearRing(rebuildYearRingIndex({ journal }), '项目');
   assert.deepEqual(history.map((item) => item.id), ['compact-1', 'compact-2', 'compact-3']);
   assert.deepEqual(history.map((item) => item.atom.axes), [
-    ['children', 'detail', 'name', 'partners'],
-    ['detail'],
-    ['detail']
+    ['contain', 'situation', 'support', 'thing'],
+    ['situation'],
+    ['situation']
   ]);
 });

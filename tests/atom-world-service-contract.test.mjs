@@ -24,7 +24,7 @@ test('World Service owns the temporary legacy interaction seam without changing 
   });
 
   const request = {
-    source: 'explore {"name":"推进流总控"}',
+    source: 'explore {"thing":"推进流总控"}',
     contextFile: 'atom.json',
     projectionFile: 'graph.json',
     interaction: { id: 'interaction-1', agent: { path: '推进流总控' } }
@@ -139,7 +139,7 @@ test('the command engine cannot mutate world facts without a commit capability',
 
   await assert.rejects(
     executeAtomLanguage({
-      source: 'transform new {"name":"Root","detail":"","children":[],"partners":[]}',
+      source: 'transform new {"thing":"Root","situation":"","contain":[],"support":[]}',
       contextFile,
       projectionFile,
       interaction: { id: 'interaction-without-commit-port' }
@@ -176,7 +176,7 @@ test('real legacy transform advances atom facts through the durable transaction 
   const service = createLegacyWorldService();
 
   const result = await service.executeLegacy({
-    source: 'transform new {"name":"Root","detail":"","children":[],"partners":[]}',
+    source: 'transform new {"thing":"Root","situation":"","contain":[],"support":[]}',
     contextFile,
     projectionFile,
     interaction: { id: 'interaction-real-1' }
@@ -184,7 +184,7 @@ test('real legacy transform advances atom facts through the durable transaction 
 
   assert.equal(result.ok, true);
   assert.equal(result.changed, true);
-  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')).map(({ name }) => name), ['Root']);
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')).map(({ thing }) => thing), ['Root']);
   const journal = await createJsonTransactionJournal({
     file: path.join(directory, 'atom.transactions.json')
   }).readState();
@@ -208,11 +208,11 @@ test('transactional persistence rollback restores only authoritative facts and l
     publishLegacyProjection: false
   });
 
-  const facts = [{ name: 'temporary', detail: 'must disappear', children: [], partners: [] }];
+  const facts = [{ thing: 'temporary', situation: 'must disappear', contain: [], support: [] }];
   const committed = await persistence.commit({
     correlationId: 'rollback-rehearsal',
     expectedRevision: 'sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
-    nextRevision: 'sha256:d93ecab5abd57c622a7fedad102c91cddb9993c7edf8dbedaced0fc02762547d',
+    nextRevision: `sha256:${crypto.createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`,
     facts
   });
 
@@ -248,7 +248,7 @@ test('each authoritative commit and rollback emits one recovery-backup signal', 
     onAuthoritativeWrite: (signal) => signals.push(signal)
   });
 
-  const facts = [{ name: 'recoverable', detail: '', children: [], partners: [] }];
+  const facts = [{ thing: 'recoverable', situation: '', contain: [], support: [] }];
   const committed = await persistence.commit({
     correlationId: 'backup-signal-commit',
     expectedRevision: 'sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
@@ -277,7 +277,7 @@ test('ordinary world commits cannot silently erase an existing agent registratio
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  const initial = [{ 'name@agent': '测试Agent', detail: '', children: [], partners: [] }];
+  const initial = [{ 'thing@agent': '测试Agent', situation: '', contain: [], support: [] }];
   await fs.writeFile(contextFile, `${JSON.stringify(initial)}\n`, 'utf8');
   const persistence = createTransactionalWorldPersistence({ contextFile, projectionFile });
   const beforeRevision = `sha256:${crypto.createHash('sha256').update(JSON.stringify(initial)).digest('hex')}`;
@@ -290,7 +290,7 @@ test('ordinary world commits cannot silently erase an existing agent registratio
       expectedRevision: beforeRevision,
       nextRevision,
       facts: withoutAgent,
-      source: 'transform {"name":"Other","detail.rep.changed"}'
+      source: 'transform {"thing":"Other","situation.rep.changed"}'
     }),
     (error) => error.code === 'AGENT_REGISTRATION_LOSS'
   );

@@ -4,8 +4,8 @@ import test from 'node:test';
 import { createAccessController, walkAtoms } from '../work-engine/atom-language/query-capability.mjs';
 import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
 
-function atom(name, detail = '', children = [], partners = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners };
+function atom(thing, situation = '', contain = [], support = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support };
 }
 
 function fixture() {
@@ -36,23 +36,23 @@ async function sealed(lock) {
 test('slot_body seal lock protects mapped self but permits ordinary material below it', async () => {
   const atoms = await sealed(true);
   const input = find(atoms, '槽体/槽例/实例/输入');
-  input.atom.children.push(atom('料', '可写'));
+  input.atom.contain.push(atom('料', '可写'));
   const material = find(atoms, '槽体/槽例/实例/输入/料');
   const controller = createAccessController(atoms, {});
 
-  const mapped = await controller.authorize(input, 'write', 'detail');
+  const mapped = await controller.authorize(input, 'write', 'situation');
   assert.equal(mapped.decision, 'deny');
   assert.equal(mapped.code, 'SLOT_STRUCTURE_LOCK_DENIED');
-  assert.equal((await controller.authorize(material, 'write', 'detail')).decision, 'allow');
+  assert.equal((await controller.authorize(material, 'write', 'situation')).decision, 'allow');
   assert.equal((await controller.authorize(
-    input, 'write', 'children', { slotMaterialCreate: true }
+    input, 'write', 'contain', { slotMaterialCreate: true }
   )).decision, 'allow');
   const forged = await controller.authorize({
-    atom: atom('伪槽', '', [], [{ verb: '槽模角色', object: 'fake' }]),
+    atom: atom('伪槽', '', [], [], 'slot-role-fake'),
     path: ['槽体', '槽例', '实例', '输入', '伪槽']
   }, 'write', undefined, {
     slotMaterialCreate: true,
-    createdAtom: atom('伪槽', '', [], [{ verb: '槽模角色', object: 'fake' }])
+    createdAtom: atom('伪槽', '', [], [], 'slot-role-fake')
   });
   assert.equal(forged.decision, 'deny');
   assert.equal(forged.code, 'SLOT_ROLE_FORGERY_DENIED');
@@ -62,7 +62,7 @@ test('slot_body seal lock defaults off', async () => {
   const atoms = await sealed(false);
   const input = find(atoms, '槽体/槽例/实例/输入');
   assert.equal((await createAccessController(atoms, {}).authorize(
-    input, 'write', 'detail'
+    input, 'write', 'situation'
   )).decision, 'allow');
 });
 
@@ -78,7 +78,7 @@ test('reseal still requires the caller lock intersection and denial rolls back e
   assert.equal(denied.error.code, 'PROGRAM_LOCK_DENIED');
   assert.deepEqual(atoms, before);
 
-  find(atoms, '\u69fd\u4f53/\u69fd\u4f8b/\u5b9e\u4f8b/\u8f93\u5165').atom.children.push(atom('\u672c\u5730\u6599', '\u4fdd\u7559'));
+  find(atoms, '\u69fd\u4f53/\u69fd\u4f8b/\u5b9e\u4f8b/\u8f93\u5165').atom.contain.push(atom('\u672c\u5730\u6599', '\u4fdd\u7559'));
   const allowed = await applySlotBodyEffect({
     atoms,
     effect: { action: 'seal', body: '\u69fd\u4f53', lock: true },

@@ -8,12 +8,12 @@ import { executeProgramExplore } from '../work-engine/atom-language/query-capabi
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
-function atom(name, detail = '', children = [], partners = [], types = []) {
+function atom(thing, situation = '', contain = [], support = [], types = []) {
   return {
-    [`name${types.map((type) => `@${type}`).join('')}`]: name,
-    detail,
-    children,
-    partners
+    [`thing${types.map((type) => `@${type}`).join('')}`]: thing,
+    situation,
+    contain,
+    support
   };
 }
 
@@ -22,10 +22,10 @@ function find(atoms, selector) {
   let current = null;
   for (const segment of selector.split('/')) {
     current = children.find((candidate) => (
-      Object.entries(candidate).find(([key]) => key.split(/[@#]/u)[0] === 'name')?.[1] === segment
+      Object.entries(candidate).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1] === segment
     ));
     if (!current) return null;
-    children = current.children;
+    children = current.contain;
   }
   return current;
 }
@@ -38,16 +38,16 @@ test('relative Program Explore resolves only unique direct contain segments belo
     ])
   ];
 
-  const root = await executeProgramExplore({ atoms, request: { name: '.', 'detail$full': true }, scopeRoot: 'Root/候选' });
+  const root = await executeProgramExplore({ atoms, request: { thing: '.', 'situation$full': true }, scopeRoot: 'Root/候选' });
   const nested = await executeProgramExplore({
     atoms,
-    request: { name: './客户/地址/城市', 'detail$full': true },
+    request: { thing: './客户/地址/城市', 'situation$full': true },
     scopeRoot: 'Root/候选'
   });
 
   assert.deepEqual(root.map(({ path: value }) => value), ['Root/候选']);
-  assert.deepEqual(nested.map(({ path: value, detail }) => ({ path: value, detail })), [
-    { path: 'Root/候选/客户/地址/城市', detail: '上海' }
+  assert.deepEqual(nested.map(({ path: value, situation }) => ({ path: value, situation })), [
+    { path: 'Root/候选/客户/地址/城市', situation: '上海' }
   ]);
 });
 
@@ -58,19 +58,19 @@ test('relative Program Explore fails closed for unbound, absolute, missing and a
   ])];
 
   await assert.rejects(
-    executeProgramExplore({ atoms, request: { name: './客户' } }),
+    executeProgramExplore({ atoms, request: { thing: './客户' } }),
     (error) => error.code === 'SLOT_SCOPE_ROOT_UNBOUND'
   );
   await assert.rejects(
-    executeProgramExplore({ atoms, request: { name: 'Root/其他' }, scopeRoot: 'Root/候选' }),
+    executeProgramExplore({ atoms, request: { thing: 'Root/其他' }, scopeRoot: 'Root/候选' }),
     (error) => error.code === 'SLOT_RELATIVE_SELECTOR_REQUIRED'
   );
   await assert.rejects(
-    executeProgramExplore({ atoms, request: { name: './缺项' }, scopeRoot: 'Root/候选' }),
+    executeProgramExplore({ atoms, request: { thing: './缺项' }, scopeRoot: 'Root/候选' }),
     (error) => error.code === 'SLOT_RELATIVE_TARGET_NOT_FOUND'
   );
   await assert.rejects(
-    executeProgramExplore({ atoms, request: { name: './客户' }, scopeRoot: 'Root/候选' }),
+    executeProgramExplore({ atoms, request: { thing: './客户' }, scopeRoot: 'Root/候选' }),
     (error) => error.code === 'SLOT_RELATIVE_TARGET_AMBIGUOUS'
   );
 });
@@ -78,9 +78,7 @@ test('relative Program Explore fails closed for unbound, absolute, missing and a
 test('relative Program Explore may return a nested slot instance root but cannot cross its domain boundary', async () => {
   const atoms = [atom('Root', '', [
     atom('外层实例', '', [
-      atom('嵌套实例', '', [atom('秘密', '不可穿透')], [
-        { verb: '采用槽模修订', object: 'Root/嵌套槽体/print/修订/sha256:abc' }
-      ])
+      atom('嵌套实例', '', [atom('秘密', '不可穿透')], [], ['slot-revision-sha256-abc'])
     ]),
     atom('嵌套槽体', '', [
       atom('槽模'),
@@ -90,12 +88,12 @@ test('relative Program Explore may return a nested slot instance root but cannot
   ])];
 
   const boundary = await executeProgramExplore({
-    atoms, request: { name: './嵌套实例' }, scopeRoot: 'Root/外层实例'
+    atoms, request: { thing: './嵌套实例' }, scopeRoot: 'Root/外层实例'
   });
   assert.deepEqual(boundary.map(({ path: value }) => value), ['Root/外层实例/嵌套实例']);
   await assert.rejects(
     executeProgramExplore({
-      atoms, request: { name: './嵌套实例/秘密' }, scopeRoot: 'Root/外层实例'
+      atoms, request: { thing: './嵌套实例/秘密' }, scopeRoot: 'Root/外层实例'
     }),
     (error) => error.code === 'SLOT_SCOPE_BOUNDARY_CROSSING'
   );
@@ -108,12 +106,12 @@ test('explicit development run binds one candidate scope and inherited use_progr
   const projectionFile = path.join(directory, 'graph.json');
   const reader = [
     'def main(arguments):',
-    '    rows = explore({"name":"./客户","detail$full":True})',
-    '    return rows[0].detail'
+    '    rows = explore({"thing":"./客户","situation$full":True})',
+    '    return rows[0].situation'
   ].join('\n');
   const orchestrator = [
     'value = use_program({"name":"Root/候选/读取客户","arguments":{}})',
-    'transform({"name":"./结果","detail.rep." + value:None})'
+    'transform({"thing":"./结果","situation.rep." + value:None})'
   ].join('\n');
   const world = [atom('Root', '', [
     atom('研发窗口', '', [], [], ['agent']),
@@ -128,7 +126,7 @@ test('explicit development run binds one candidate scope and inherited use_progr
   await fs.writeFile(contextFile, JSON.stringify(world, null, 2), 'utf8');
 
   const result = await executeAtomLanguage({
-    source: 'transform {"name.run.Root/候选":"Root/候选/编排"}',
+    source: 'transform {"thing.run.Root/候选":"Root/候选/编排"}',
     contextFile,
     projectionFile,
     programScheduler: createProgramRuntimeScheduler(),
@@ -137,8 +135,8 @@ test('explicit development run binds one candidate scope and inherited use_progr
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const committed = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(find(committed, 'Root/候选/结果').detail, '张三', JSON.stringify(result));
-  assert.equal(find(committed, 'Root/无关域/结果').detail, '保持不变');
+  assert.equal(find(committed, 'Root/候选/结果').situation, '张三', JSON.stringify(result));
+  assert.equal(find(committed, 'Root/无关域/结果').situation, '保持不变');
 });
 
 test('scope-bound use_program rejects a Program outside the current model with an exact boundary code', async () => {

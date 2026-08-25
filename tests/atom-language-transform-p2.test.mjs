@@ -6,8 +6,11 @@ import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
-function atom(name, detail = '', children = [], partners = []) {
-  return { name, detail, children, partners };
+function atom(thing, situation = '', contain = [], support = []) {
+  const normalizedSupport = support.length && support.every((item) => Object.keys(item).length === 1 && item.thing)
+    ? [{ 'if@current': true, then: support }]
+    : support;
+  return { thing, situation, contain, support: normalizedSupport };
 }
 
 async function fixture(t, atoms) {
@@ -36,17 +39,17 @@ function namedField(atomValue, baseKey) {
 }
 
 function findByPath(atoms, selector) {
-  let current = { children: atoms };
+  let current = { contain: atoms };
   for (const segment of selector.split('/')) {
-    current = namedField(current, 'children')
-      .find((candidate) => namedField(candidate, 'name') === segment);
+    current = namedField(current, 'contain')
+      .find((candidate) => namedField(candidate, 'thing') === segment);
     if (!current) return null;
   }
   return current;
 }
 
 function partnersOf(atomValue) {
-  return namedField(atomValue, 'partners');
+  return namedField(atomValue, 'support').flatMap((rule) => rule.then ?? []);
 }
 
 test('complete Atom paths precisely select duplicate names', async (t) => {
@@ -56,36 +59,36 @@ test('complete Atom paths precisely select duplicate names', async (t) => {
   ]);
   const result = await execute(
     files,
-    'transform {"name":"左/同名","detail.rep.只改左边"}'
+    'transform {"thing":"左/同名","situation.rep.只改左边"}'
   );
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const atoms = await readAtoms(files.contextFile);
-  assert.equal(namedField(findByPath(atoms, '左/同名'), 'detail'), '只改左边');
-  assert.equal(namedField(findByPath(atoms, '右/同名'), 'detail'), '右正文');
+  assert.equal(namedField(findByPath(atoms, '左/同名'), 'situation'), '只改左边');
+  assert.equal(namedField(findByPath(atoms, '右/同名'), 'situation'), '右正文');
 });
 
 test('rename preserves sibling and cross-tree partner targets', async (t) => {
   const files = await fixture(t, [
     atom('甲', '', [
       atom('目标'),
-      atom('同级来源', '', [], [{ verb: '同级', object: '目标' }])
+      atom('同级来源', '', [], [{ thing: '目标' }])
     ]),
     atom('乙', '', [
       atom('目标'),
-      atom('跨树来源', '', [], [{ verb: '跨树', object: '甲/目标' }])
+      atom('跨树来源', '', [], [{ thing: '甲/目标' }])
     ])
   ]);
   const renamed = await execute(
     files,
-    'transform {"name.ren.新目标":"甲/目标"}'
+    'transform {"thing.ren.新目标":"甲/目标"}'
   );
   assert.equal(renamed.ok, true, JSON.stringify(renamed.errors));
   const atoms = await readAtoms(files.contextFile);
-  assert.equal(partnersOf(findByPath(atoms, '甲/同级来源'))[0].object, '新目标');
-  assert.equal(partnersOf(findByPath(atoms, '乙/跨树来源'))[0].object, '甲/新目标');
+  assert.equal(partnersOf(findByPath(atoms, '甲/同级来源'))[0].thing, '新目标');
+  assert.equal(partnersOf(findByPath(atoms, '乙/跨树来源'))[0].thing, '甲/新目标');
   const projection = JSON.parse(await fs.readFile(files.projectionFile, 'utf8'));
   assert.equal(
-    projection.graph.children[1].children[1].partners[0].object,
+    projection.graph.contain[1].contain[1].support[0].then[0].thing,
     'atom.json/甲/新目标'
   );
 });
@@ -95,50 +98,50 @@ test('move rewrites affected paths while keeping internal subtree relations loca
     atom('甲', '', [
       atom('分支', '', [
         atom('叶'),
-        atom('内部来源', '', [], [{ verb: '内部', object: '叶' }])
+        atom('内部来源', '', [], [{ thing: '叶' }])
       ]),
-      atom('原同级来源', '', [], [{ verb: '原同级', object: '分支' }])
+      atom('原同级来源', '', [], [{ thing: '分支' }])
     ]),
     atom('乙', '', [
-      atom('新同级来源', '', [], [{ verb: '跨树', object: '甲/分支' }]),
-      atom('深层来源', '', [], [{ verb: '跨树', object: '甲/分支/叶' }])
+      atom('新同级来源', '', [], [{ thing: '甲/分支' }]),
+      atom('深层来源', '', [], [{ thing: '甲/分支/叶' }])
     ])
   ]);
-  const moved = await execute(files, 'transform {"name.mov.乙":"甲/分支"}');
+  const moved = await execute(files, 'transform {"thing.mov.乙":"甲/分支"}');
   assert.equal(moved.ok, true, JSON.stringify(moved.errors));
   const atoms = await readAtoms(files.contextFile);
-  assert.equal(partnersOf(findByPath(atoms, '甲/原同级来源'))[0].object, '分支');
-  assert.equal(partnersOf(findByPath(atoms, '乙/新同级来源'))[0].object, '乙/分支');
-  assert.equal(partnersOf(findByPath(atoms, '乙/深层来源'))[0].object, '乙/分支/叶');
-  assert.equal(partnersOf(findByPath(atoms, '乙/分支/内部来源'))[0].object, '叶');
+  assert.equal(partnersOf(findByPath(atoms, '甲/原同级来源'))[0].thing, '分支');
+  assert.equal(partnersOf(findByPath(atoms, '乙/新同级来源'))[0].thing, '乙/分支');
+  assert.equal(partnersOf(findByPath(atoms, '乙/深层来源'))[0].thing, '乙/分支/叶');
+  assert.equal(partnersOf(findByPath(atoms, '乙/分支/内部来源'))[0].thing, '叶');
 });
 
 test('discard and restore keep external relations bound to the same Atom', async (t) => {
   const files = await fixture(t, [
     atom('甲', '', [atom('目标')]),
-    atom('来源', '', [], [{ verb: '指向', object: '甲/目标' }]),
+    atom('来源', '', [], [{ thing: '甲/目标' }]),
     {
-      'name@backup@default': '默认备份仓',
-      detail: '',
-      children: [],
-      partners: []
+      'thing@backup@default': '默认备份仓',
+      situation: '',
+      contain: [],
+      support: []
     }
   ]);
-  const discarded = await execute(files, 'transform {"name.dsc.":"甲/目标"}');
+  const discarded = await execute(files, 'transform {"thing.dsc.":"甲/目标"}');
   assert.equal(discarded.ok, true, JSON.stringify(discarded.errors));
   let atoms = await readAtoms(files.contextFile);
   assert.equal(
-    partnersOf(findByPath(atoms, '来源'))[0].object,
+    partnersOf(findByPath(atoms, '来源'))[0].thing,
     '默认备份仓/目标'
   );
 
   const restored = await execute(
     files,
-    'transform {"name.rst.":"默认备份仓/目标"}'
+    'transform {"thing.rst.":"默认备份仓/目标"}'
   );
   assert.equal(restored.ok, true, JSON.stringify(restored.errors));
   atoms = await readAtoms(files.contextFile);
-  assert.equal(partnersOf(findByPath(atoms, '来源'))[0].object, '甲/目标');
+  assert.equal(partnersOf(findByPath(atoms, '来源'))[0].thing, '甲/目标');
 });
 
 test('copy preserves original bindings and redirects copied internal relations', async (t) => {
@@ -146,29 +149,29 @@ test('copy preserves original bindings and redirects copied internal relations',
     atom('甲', '', [
       atom('分支', '', [
         atom('叶'),
-        atom('内部来源', '', [], [{ verb: '内部', object: '叶' }])
+        atom('内部来源', '', [], [{ thing: '叶' }])
       ])
     ]),
     atom('乙', '', [
-      atom('外部来源', '', [], [{ verb: '原目标', object: '甲/分支' }])
+      atom('外部来源', '', [], [{ thing: '甲/分支' }])
     ])
   ]);
-  const copied = await execute(files, 'transform {"name.cpy.乙":"甲/分支"}');
+  const copied = await execute(files, 'transform {"thing.cpy.乙":"甲/分支"}');
   assert.equal(copied.ok, true, JSON.stringify(copied.errors));
   const atoms = await readAtoms(files.contextFile);
-  assert.equal(partnersOf(findByPath(atoms, '乙/外部来源'))[0].object, '甲/分支');
+  assert.equal(partnersOf(findByPath(atoms, '乙/外部来源'))[0].thing, '甲/分支');
   assert.equal(
-    partnersOf(findByPath(atoms, '乙/分支/内部来源'))[0].object,
+    partnersOf(findByPath(atoms, '乙/分支/内部来源'))[0].thing,
     '叶'
   );
 
   const original = await execute(
     files,
-    'transform {"name":"甲/分支","detail.rep.原件"}'
+    'transform {"thing":"甲/分支","situation.rep.原件"}'
   );
   const duplicate = await execute(
     files,
-    'transform {"name":"乙/分支","detail.rep.副本"}'
+    'transform {"thing":"乙/分支","situation.rep.副本"}'
   );
   assert.equal(original.ok, true, JSON.stringify(original.errors));
   assert.equal(duplicate.ok, true, JSON.stringify(duplicate.errors));
@@ -180,9 +183,9 @@ test('copy and move reject destination sibling collisions without changing files
     atom('乙', '', [atom('同名')])
   ]);
   for (const source of [
-    'transform {"name.cpy.乙":"甲/同名"}',
-    'transform {"name.mov.乙":"甲/同名"}',
-    'transform {"name.ren.乙":"甲"}'
+    'transform {"thing.cpy.乙":"甲/同名"}',
+    'transform {"thing.mov.乙":"甲/同名"}',
+    'transform {"thing.ren.乙":"甲"}'
   ]) {
     const before = await fs.readFile(files.contextFile, 'utf8');
     const result = await execute(files, source);

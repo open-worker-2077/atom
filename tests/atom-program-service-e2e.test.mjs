@@ -9,8 +9,8 @@ import { executeAtomCommandEndpoint, resolveAgentContext } from '../work-engine/
 import { projectAtomGraphToKnowledge } from '../work-engine/atom-language/graph-4d-projection.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 function childPath(node) {
@@ -33,7 +33,7 @@ test('CLI rejects a stale 4784 runtime instead of trusting a newer local help co
 
   await assert.rejects(
     executeAtomCommandEndpoint(
-      { source: 'explore {"name":"Target"}', interaction: { agent: { ref: 'agent-ref', path: 'Agent' } } },
+      { source: 'explore {"thing":"Target"}', interaction: { agent: { ref: 'agent-ref', path: 'Agent' } } },
       `http://127.0.0.1:${port}/__atom/api/command`
     ),
     (error) => error?.code === 'ATOM_RUNTIME_CONTRACT_MISMATCH'
@@ -50,7 +50,7 @@ test('4784 command endpoint owns one scheduler and uses @agent as Program explor
     atom('工作Agent', '起点', [], 'agent'),
     atom('起点锁', [
       "origin = explore({})[0]",
-      "lock({'targets': {'refs': [origin.ref]}, 'mode': 'write', 'fields': ['detail']})",
+      "lock({'targets': {'refs': [origin.ref]}, 'mode': 'write', 'fields': ['situation']})",
       "message({'level': 'info', 'text': f'当前起点:{origin.path}'})"
     ].join('\n'), [], 'program')
   ], null, 2));
@@ -70,7 +70,7 @@ test('4784 command endpoint owns one scheduler and uses @agent as Program explor
   assert.deepEqual(cached.messages, [], '同一长驻scheduler的缓存不重放旧消息');
 
   const denied = await executeAtomCommandEndpoint({
-    source: 'transform {"name":"工作Agent","detail.rep.篡改"}', interaction: { agent }
+    source: 'transform {"thing":"工作Agent","situation.rep.篡改"}', interaction: { agent }
   }, endpoint);
   assert.equal(denied.ok, false);
   assert.equal(denied.errors[0].code, 'PROGRAM_LOCK_DENIED');
@@ -97,18 +97,18 @@ test('4784 serializes concurrent writes as complete world interactions without l
 
   const [left, right] = await Promise.all([
     executeAtomCommandEndpoint({
-      source: 'transform {"name":"任务甲","detail.rep.新甲"}', interaction: { agent }
+      source: 'transform {"thing":"任务甲","situation.rep.新甲"}', interaction: { agent }
     }, endpoint),
     executeAtomCommandEndpoint({
-      source: 'transform {"name":"任务乙","detail.rep.新乙"}', interaction: { agent }
+      source: 'transform {"thing":"任务乙","situation.rep.新乙"}', interaction: { agent }
     }, endpoint)
   ]);
 
   assert.equal(left.ok, true);
   assert.equal(right.ok, true);
   const context = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(context.find((entry) => entry.name === '任务甲')?.detail, '新甲');
-  assert.equal(context.find((entry) => entry.name === '任务乙')?.detail, '新乙');
+  assert.equal(context.find((entry) => entry.thing === '任务甲')?.situation, '新甲');
+  assert.equal(context.find((entry) => entry.thing === '任务乙')?.situation, '新乙');
 
   const graph = JSON.parse(await fs.readFile(graphFile, 'utf8'));
   const expectedKnowledge = await projectAtomGraphToKnowledge(graph);
@@ -165,14 +165,14 @@ test('4784 applies one Program effect set without cloning the whole world per tr
         ...emptyCycle(),
         transforms: [
           {
-            'name.typ.program': 'Target 0',
-            detail: 'invalid implicit replacement',
+            'thing.typ.program': 'Target 0',
+            situation: 'invalid implicit replacement',
             sourceProgramRef: 'rejected-partial-program-ref',
             sourceProgramPath: 'Rejected Partial Program'
           },
           ...targets.map((_, index) => ({
-            name: `Target ${index}`,
-            'detail.rep.after': null,
+            thing: `Target ${index}`,
+            'situation.rep.after': null,
             sourceProgramRef: 'bulk-program-ref',
             sourceProgramPath: 'Bulk Program'
           }))
@@ -188,7 +188,7 @@ test('4784 applies one Program effect set without cloning the whole world per tr
 
   const startedAt = Date.now();
   const result = await executeAtomCommandEndpoint({
-    source: 'transform {"name":"Switch","detail.rep.after"}',
+    source: 'transform {"thing":"Switch","situation.rep.after"}',
     interaction: { agent }
   }, `${running.url}/__atom/api/command`);
   const elapsedMs = Date.now() - startedAt;
@@ -197,9 +197,9 @@ test('4784 applies one Program effect set without cloning the whole world per tr
   assert.ok(elapsedMs < 4_000, `one effect set took ${elapsedMs}ms`);
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   for (let index = 0; index < targets.length; index += 1) {
-    assert.equal(world.find((entry) => entry.name === `Target ${index}`)?.detail, 'after');
+    assert.equal(world.find((entry) => entry.thing === `Target ${index}`)?.situation, 'after');
   }
-  assert.equal(Object.hasOwn(world.find((entry) => entry.name === 'Target 0'), 'name@program'), false);
+  assert.equal(Object.hasOwn(world.find((entry) => entry.thing === 'Target 0'), 'thing@program'), false);
   const health = await fetch(`${running.url}/__spatial/api/health`);
   assert.equal(health.status, 200);
 });
@@ -242,20 +242,20 @@ test('4784 keeps one isolated Program effect set fast across structural and reje
         ...emptyCycle(),
         transforms: [
           {
-            name: 'Target 0',
-            'name.mov.Destination': null,
+            thing: 'Target 0',
+            'thing.mov.Destination': null,
             sourceProgramRef: 'structural-program-ref',
             sourceProgramPath: 'Structural Program'
           },
           {
-            name: 'Missing target',
-            'detail.rep.after': null,
+            thing: 'Missing target',
+            'situation.rep.after': null,
             sourceProgramRef: 'rejected-program-ref',
             sourceProgramPath: 'Rejected Program'
           },
           ...targets.slice(1).map((_, index) => ({
-            name: `Target ${index + 1}`,
-            'detail.rep.after': null,
+            thing: `Target ${index + 1}`,
+            'situation.rep.after': null,
             sourceProgramRef: 'bulk-program-ref',
             sourceProgramPath: 'Bulk Program'
           }))
@@ -271,7 +271,7 @@ test('4784 keeps one isolated Program effect set fast across structural and reje
 
   const startedAt = Date.now();
   const result = await executeAtomCommandEndpoint({
-    source: 'transform {"name":"Switch","detail.rep.after"}',
+    source: 'transform {"thing":"Switch","situation.rep.after"}',
     interaction: { agent }
   }, `${running.url}/__atom/api/command`);
   const elapsedMs = Date.now() - startedAt;
@@ -279,10 +279,10 @@ test('4784 keeps one isolated Program effect set fast across structural and reje
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.ok(elapsedMs < 4_000, `structural effect set took ${elapsedMs}ms`);
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(world.find((entry) => entry.name === 'Target 0'), undefined);
-  assert.equal(world.find((entry) => entry.name === 'Destination').children[0].name, 'Target 0');
+  assert.equal(world.find((entry) => entry.thing === 'Target 0'), undefined);
+  assert.equal(world.find((entry) => entry.thing === 'Destination').contain[0].thing, 'Target 0');
   for (let index = 1; index < targets.length; index += 1) {
-    assert.equal(world.find((entry) => entry.name === `Target ${index}`)?.detail, 'after');
+    assert.equal(world.find((entry) => entry.thing === `Target ${index}`)?.situation, 'after');
   }
 });
 
@@ -322,8 +322,8 @@ test('4784 Web workspace node creation commits atom.json before returning the re
   assert.equal(response.status, 200, JSON.stringify(payload));
   assert.equal(payload.result.ok, true, JSON.stringify(payload.result.errors));
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(world[0].name, 'Existing');
-  assert.equal(world[2].name, 'Created in Web');
+  assert.equal(world[0].thing, 'Existing');
+  assert.equal(world[2].thing, 'Created in Web');
   assert.equal(payload.knowledge.nodes.some((node) => node.label === 'Created in Web'), true);
 
   const refreshedState = await (await fetch(`${running.url}/__spatial/api/state`)).json();
@@ -346,7 +346,7 @@ test('4784 Web workspace node creation commits atom.json before returning the re
   const nestedPayload = await nestedResponse.json();
   assert.equal(nestedPayload.result.ok, true, JSON.stringify(nestedPayload));
   const nestedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(nestedWorld[0].children[0].name, 'Nested in Web');
+  assert.equal(nestedWorld[0].contain[0].thing, 'Nested in Web');
 
   const returnable = (await applyWebEdit({
     kind: 'node-create', path: childPath(parent), draft: { label: 'Return to top', description: 'root move' }
@@ -428,15 +428,22 @@ test('4784 Web workspace node creation commits atom.json before returning the re
   renamed = current.nodes.find((node) => node.label === 'Agent renamed only');
   assert.equal(current.edges.length, 1);
 
-  current = (await applyWebEdit({
-    kind: 'edge-edit', status: 'update',
-    edge: {
-      from: { key: 'stale-edge-source', atomPath: existing.atomPath },
-      to: { key: 'stale-edge-target', atomPath: renamed.atomPath },
-      label: 'Changed relation'
-    }
-  })).knowledge;
-  assert.equal(current.edges[0].label, 'Changed relation');
+  const labelEdit = await fetch(`${running.url}/__atom/api/workspace-edit`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      operation: {
+        kind: 'edge-edit', status: 'update',
+        edge: {
+          from: { key: 'stale-edge-source', atomPath: existing.atomPath },
+          to: { key: 'stale-edge-target', atomPath: renamed.atomPath },
+          label: 'Changed relation'
+        }
+      }
+    })
+  });
+  assert.equal(labelEdit.status, 400);
+  assert.equal((await labelEdit.json()).error.code, 'INVALID_HUMAN_WORKSPACE_REQUEST');
+  assert.equal(current.edges[0].label, 'support');
   existing = current.nodes.find((node) => node.label === 'Existing');
   renamed = current.nodes.find((node) => node.label === 'Agent renamed only');
 
@@ -445,7 +452,7 @@ test('4784 Web workspace node creation commits atom.json before returning the re
     edge: {
       from: { key: 'stale-edge-source', atomPath: existing.atomPath },
       to: { key: 'stale-edge-target', atomPath: renamed.atomPath },
-      label: 'Changed relation'
+      label: 'support'
     }
   })).knowledge;
   assert.equal(current.edges.length, 0);
@@ -464,7 +471,7 @@ test('4784 Web workspace node creation commits atom.json before returning the re
   });
   const finalWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(JSON.stringify(finalWorld).includes('Nested in Web'), true, 'discard remains recoverable in the backup area');
-  assert.equal(finalWorld[0].children.some((child) => child.name === 'Nested in Web'), false);
+  assert.equal(finalWorld[0].contain.some((child) => child.thing === 'Nested in Web'), false);
 });
 
 test('4784 Web batch landing moves every selected sibling into one nested Atom container', async (t) => {
@@ -540,7 +547,7 @@ test('4784 rejects direct projection replacement so Web edits cannot bypass atom
 
   assert.equal(response.status, 409);
   assert.equal(payload.error.code, 'ATOM_PROJECTION_READ_ONLY');
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].detail, 'owned by Atom');
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].situation, 'owned by Atom');
 });
 
 test('4784 continues an ordinary command when one Program fails before execution', async (t) => {
@@ -558,12 +565,12 @@ test('4784 continues an ordinary command when one Program fails before execution
   const agent = await resolveAgentContext(contextFile, '工作Agent');
 
   const result = await executeAtomCommandEndpoint({
-    source: 'transform {"name":"工作Agent","detail.rep.新值"}',
+    source: 'transform {"thing":"工作Agent","situation.rep.新值"}',
     interaction: { agent }
   }, `${running.url}/__atom/api/command`);
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].detail, '新值');
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].situation, '新值');
   assert.equal(result.warnings.some((warning) => (
     warning.code === 'ATOM_PROGRAM_FAILED'
     && warning.program === '故障Program'

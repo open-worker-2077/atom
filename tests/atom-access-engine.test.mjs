@@ -16,12 +16,12 @@ async function publishProjection(files) {
   );
 }
 
-function atom(name, detail = '', children = [], partners = [], type = '') {
+function atom(thing, situation = '', contain = [], support = [], type = '') {
   return {
-    [`name${type ? `@${type}` : ''}`]: name,
-    detail,
-    children,
-    partners
+    [`thing${type ? `@${type}` : ''}`]: thing,
+    situation,
+    contain,
+    support
   };
 }
 
@@ -41,11 +41,10 @@ function fixture() {
       property('scope', 'subtree'),
       property('grade', '0'),
       property('key_requirement', ''),
+      property('protects', 'Personal'),
+      property('applies_to', 'Work Agent'),
       property('enabled', 'true')
-    ], [
-      { verb: 'protects', object: 'Personal' },
-      { verb: 'applies_to', object: 'Work Agent' }
-    ], 'lock')
+    ], [], 'lock')
   ];
 }
 
@@ -68,7 +67,7 @@ test('explore truncates a sealed exact target without leaking its name or path',
   const files = await isolated(t);
   const result = await executeAtomLanguage({
     ...files, legacyAccess,
-    source: 'explore {"name":"Diary","detail$full"}'
+    source: 'explore {"thing":"Diary","situation$full"}'
   });
   const serialized = JSON.stringify(result);
 
@@ -84,7 +83,7 @@ test('explore reports an absent exact target as not found even when unrelated lo
   const files = await isolated(t);
   const result = await executeAtomLanguage({
     ...files, legacyAccess,
-    source: 'explore {"name":"Network","detail$full"}'
+    source: 'explore {"thing":"Network","situation$full"}'
   });
 
   assert.equal(result.ok, false);
@@ -100,7 +99,7 @@ test('transform denial leaves context and projection revisions unchanged', async
 
   const result = await executeAtomLanguage({
     ...files, legacyAccess,
-    source: 'transform {"name":"Diary","detail.rep.changed"}'
+    source: 'transform {"thing":"Diary","situation.rep.changed"}'
   });
 
   assert.equal(result.ok, false);
@@ -114,13 +113,13 @@ test('an allowed work target remains readable and writable through the same eval
   const files = await isolated(t);
   let result = await executeAtomLanguage({
     ...files, legacyAccess,
-    source: 'explore {"name":"Task","detail$full"}'
+    source: 'explore {"thing":"Task","situation$full"}'
   });
-  assert.equal(result.items[0].matches[0].detail, 'deliver');
+  assert.equal(result.items[0].matches[0].situation, 'deliver');
 
   result = await executeAtomLanguage({
     ...files, legacyAccess,
-    source: 'transform {"name":"Task","detail.rep.done"}'
+    source: 'transform {"thing":"Task","situation.rep.done"}'
   });
   assert.equal(result.ok, true);
   assert.equal(result.changed, true);
@@ -132,7 +131,7 @@ test('move preflights the locked destination through the same evaluator', async 
   const before = await fs.readFile(files.contextFile, 'utf8');
   const result = await executeAtomLanguage({
     ...files, legacyAccess,
-    source: 'transform {"name.mov.Personal":"Task"}'
+    source: 'transform {"thing.mov.Personal":"Task"}'
   });
 
   assert.equal(result.ok, false);
@@ -147,16 +146,16 @@ test('window entry reports only the visible Atom count and does not rewrite the 
   const result = await executeAtomLanguage({ ...files, legacyAccess, source: 'atom' });
 
   assert.equal(result.ok, true);
-  assert.equal(result.atomCount, 11);
+  assert.equal(result.atomCount, 13);
   assert.equal(await fs.readFile(files.projectionFile, 'utf8'), beforeProjection);
 });
 
-test('partner replacement cannot create a relation to a sealed target', async (t) => {
+test('support replacement cannot create a relation to a sealed target', async (t) => {
   const files = await isolated(t);
   const before = await fs.readFile(files.contextFile, 'utf8');
   const result = await executeAtomLanguage({
     ...files, legacyAccess,
-    source: 'transform {"name":"Task","partners.rep.":[{"verb":"mentions","object":"Personal/Diary"}]}'
+    source: 'transform {"thing":"Task","support.rep.":[{"if@current":true,"then":[{"thing":"Personal/Diary"}]}]}'
   });
 
   assert.equal(result.ok, false);

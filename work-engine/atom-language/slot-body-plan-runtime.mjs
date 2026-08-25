@@ -1,21 +1,22 @@
 import crypto from 'node:crypto';
 
 import {
-  SLOT_REVISION_VERB,
-  SLOT_ROLE_VERB,
   atomDescription,
   atomName,
   atomTypes,
+  publicAtomTypes,
   childrenOf,
   createAtom,
   directChild,
   directedSupports,
   fieldValue,
+  instanceRevisionOf,
   partnersOf,
-  relationTarget,
   replaceStoredField,
   resolveUnique,
-  setRelation,
+  roleIdOf,
+  setInstanceRevision,
+  setRoleId,
   storedField,
   walkAtoms
 } from './slot-graph-semantics.mjs';
@@ -52,7 +53,7 @@ function layoutOf(atoms, bodySelector) {
   const bodyPath = selected.match.path.join('/');
   const children = childrenOf(body);
   if (!children) {
-    return { error: slotError('INVALID_SLOT_BODY_LAYOUT', '槽体必须具有完整 children Graph', { body: bodyPath }) };
+    return { error: slotError('INVALID_SLOT_BODY_LAYOUT', '槽体必须具有完整 contain Graph', { body: bodyPath }) };
   }
   const model = directChild(body, MODEL_NAME);
   const print = directChild(body, PRINT_NAME);
@@ -97,28 +98,70 @@ function modelRecords(layout) {
 }
 
 function roleIdFor(layout, record) {
-  const existing = relationTarget(record.atom, SLOT_ROLE_VERB);
-  if (typeof existing === 'string' && existing.startsWith(`${layout.printPath}/${ROLES_NAME}/`)) {
-    return existing.slice(`${layout.printPath}/${ROLES_NAME}/`.length);
-  }
+  const existing = roleIdOf(record.atom);
+  if (existing) return existing;
   return digest(`${layout.bodyPath}\0${record.relative}`).slice(0, 24);
 }
 
-function resolveSupportTarget(source, relation, records) {
-  if (typeof relation?.object !== 'string' || !relation.object.trim()) return null;
-  const object = relation.object.trim();
-  const byAbsolute = records.find((record) => record.absolute === object);
-  if (byAbsolute) return byAbsolute;
-  if (object.startsWith('./')) return records.find((record) => record.relative === object) ?? null;
-  if (object.includes('/')) return null;
+function resolveSupportEndpoint(source, endpoint, records) {
+  const key = Object.hasOwn(endpoint ?? {}, 'thing@program') ? 'thing@program' : 'thing';
+  const selector = endpoint?.[key];
+  if (typeof selector !== 'string' || !selector.trim()) return null;
+  if (selector === '.') return source;
+  if (selector.startsWith('./')) {
+    const sourceParent = source.relative === '.'
+      ? '.'
+      : source.relative.split('/').slice(0, -1).join('/') || '.';
+    const relative = sourceParent === '.' ? `./${selector.slice(2)}` : `${sourceParent}/${selector.slice(2)}`;
+    return records.find((record) => record.relative === relative) ?? null;
+  }
+  const absolute = records.find((record) => record.absolute === selector);
+  if (absolute) return absolute;
+  if (selector.includes('/')) return null;
   const sourceParent = source.relative === '.'
     ? '.'
     : source.relative.split('/').slice(0, -1).join('/') || '.';
-  const siblingPath = sourceParent === '.' ? `./${object}` : `${sourceParent}/${object}`;
+  const siblingPath = sourceParent === '.' ? `./${selector}` : `${sourceParent}/${selector}`;
   const sibling = records.find((record) => record.relative === siblingPath);
   if (sibling) return sibling;
-  const named = records.filter((record) => atomName(record.atom) === object);
+  const named = records.filter((record) => atomName(record.atom) === selector);
   return named.length === 1 ? named[0] : null;
+}
+
+function compileSupportEndpoint(source, endpoint, records, roleByRelative) {
+  const key = Object.hasOwn(endpoint ?? {}, 'thing@program') ? 'thing@program' : 'thing';
+  const target = resolveSupportEndpoint(source, endpoint, records);
+  if (!target) return null;
+  return { [key]: roleByRelative.get(target.relative).role_id };
+}
+
+function compileSupportExpr(source, expr, records, roleByRelative) {
+  if (Object.hasOwn(expr ?? {}, 'thing') || Object.hasOwn(expr ?? {}, 'thing@program')) {
+    return compileSupportEndpoint(source, expr, records, roleByRelative);
+  }
+  for (const key of ['and', 'or']) {
+    if (Array.isArray(expr?.[key])) {
+      const children = expr[key].map((child) => compileSupportExpr(source, child, records, roleByRelative));
+      return children.every(Boolean) ? { [key]: children } : null;
+    }
+  }
+  return null;
+}
+
+function compileSupportRule(source, rule, records, roleByRelative) {
+  const compiled = {};
+  if (rule['if@current'] === true) compiled['if@current'] = true;
+  if (Array.isArray(rule.if)) {
+    const root = rule.if.length === 0 ? [] : [compileSupportExpr(source, rule.if[0], records, roleByRelative)];
+    if (root.some((entry) => !entry)) return null;
+    compiled.if = root;
+  }
+  if (rule['then@current'] === true) compiled['then@current'] = true;
+  if (Array.isArray(rule.then)) {
+    compiled.then = rule.then.map((entry) => compileSupportEndpoint(source, entry, records, roleByRelative));
+    if (compiled.then.some((entry) => !entry)) return null;
+  }
+  return compiled;
 }
 
 function compilePlan(layout, structureLock = null) {
@@ -137,42 +180,36 @@ function compilePlan(layout, structureLock = null) {
       kind,
       path: record.relative,
       parent_role_id: parent ? roleIdFor(layout, parent) : null,
-      name: atomName(record.atom),
-      types: [...atomTypes(record.atom)],
+      thing: atomName(record.atom),
+      types: [...publicAtomTypes(record.atom)],
       description: atomDescription(record.atom),
       ...(kind === 'slot'
-        ? { contract_detail: fieldValue(record.atom, 'detail') ?? '' }
-        : { program_digest: `sha256:${digest(fieldValue(record.atom, 'detail') ?? '')}` })
+        ? { contract_situation: fieldValue(record.atom, 'situation') ?? '' }
+        : { program_digest: `sha256:${digest(fieldValue(record.atom, 'situation') ?? '')}` })
     };
   });
   const roleByRelative = new Map(roles.map((role) => [role.path, role]));
   const support = [];
   for (const record of records) {
-    for (const relation of directedSupports(record.atom)) {
-      const target = resolveSupportTarget(record, relation, records);
-      if (!target) {
+    for (const rule of directedSupports(record.atom)) {
+      const compiledRule = compileSupportRule(record, rule, records, roleByRelative);
+      if (!compiledRule) {
         return {
           error: slotError('INVALID_SLOT_PRINT_PLAN', '槽模 support 必须指向槽模内唯一角色', {
             source: record.absolute,
-            verb: relation.verb,
-            target: relation.object
+            rule
           })
         };
       }
       support.push({
-        verb: relation.verb,
-        source_role_id: roleByRelative.get(record.relative).role_id,
-        target_role_id: roleByRelative.get(target.relative).role_id,
-        source_path: record.relative,
-        target_path: target.relative
+        owner_role_id: roleByRelative.get(record.relative).role_id,
+        rule: compiledRule
       });
     }
   }
   const roleOrder = new Map(roles.map((role, index) => [role.role_id, index]));
   support.sort((left, right) => (
-    roleOrder.get(left.source_role_id) - roleOrder.get(right.source_role_id)
-    || roleOrder.get(left.target_role_id) - roleOrder.get(right.target_role_id)
-    || left.verb.localeCompare(right.verb)
+    roleOrder.get(left.owner_role_id) - roleOrder.get(right.owner_role_id)
   ));
   const planBase = {
     schema: 'atom-slot-print-plan/v1', body: layout.bodyPath, roles, support,
@@ -200,7 +237,7 @@ function currentPlan(layout) {
   const records = childrenOf(revisions) ?? [];
   if (!records.length) return null;
   try {
-    return JSON.parse(fieldValue(records.at(-1), 'detail'));
+    return JSON.parse(fieldValue(records.at(-1), 'situation'));
   } catch {
     return null;
   }
@@ -216,14 +253,14 @@ function ensureRoleRecords(layout, plan) {
   for (const role of plan.roles) {
     if (!existing.has(role.role_id)) {
       childrenOf(catalog).push(createAtom({
-        name: role.role_id,
-        detail: JSON.stringify({ role_id: role.role_id })
+        thing: role.role_id,
+        situation: JSON.stringify({ role_id: role.role_id })
       }));
     }
   }
   const byRelative = new Map(modelRecords(layout).map((record) => [record.relative, record]));
   for (const role of plan.roles) {
-    setRelation(byRelative.get(role.path).atom, SLOT_ROLE_VERB, `${layout.printPath}/${ROLES_NAME}/${role.role_id}`);
+    setRoleId(byRelative.get(role.path).atom, role.role_id);
   }
 }
 
@@ -232,30 +269,30 @@ function appendRevision(layout, plan) {
   const existing = (childrenOf(revisions) ?? []).find((record) => atomName(record) === plan.revision);
   if (!existing) {
     childrenOf(revisions).push(createAtom({
-      name: plan.revision,
-      detail: JSON.stringify(plan)
+      thing: plan.revision,
+      situation: JSON.stringify(plan)
     }));
   }
-  replaceStoredField(layout.print, 'detail', planSource(plan));
+  replaceStoredField(layout.print, 'situation', planSource(plan));
 }
 
 function initialSeal(atoms, layout) {
-  replaceStoredField(layout.candidate, 'name', MODEL_NAME, {
+  replaceStoredField(layout.candidate, 'thing', MODEL_NAME, {
     types: atomTypes(layout.candidate),
     descriptionPresent: atomDescription(layout.candidate) != null,
     description: atomDescription(layout.candidate)
   });
   childrenOf(layout.body).push(
     createAtom({
-      name: PRINT_NAME,
-      detail: 'def main(arguments):\n    return arguments',
-      children: [
-        createAtom({ name: ROLES_NAME }),
-        createAtom({ name: REVISIONS_NAME })
+      thing: PRINT_NAME,
+      situation: 'def main(arguments):\n    return arguments',
+      contain: [
+        createAtom({ thing: ROLES_NAME }),
+        createAtom({ thing: REVISIONS_NAME })
       ],
       types: ['program']
     }),
-    createAtom({ name: EXAMPLES_NAME })
+    createAtom({ thing: EXAMPLES_NAME })
   );
   return layoutOf(atoms, layout.bodyPath);
 }
@@ -269,51 +306,95 @@ function roleTargetPath(layout, role, instancePath) {
   return role.path === '.' ? instancePath : `${instancePath}/${role.path.slice(2)}`;
 }
 
+function materializeEndpoint(endpoint, plan, layout, instancePath) {
+  const key = Object.hasOwn(endpoint, 'thing@program') ? 'thing@program' : 'thing';
+  const role = plan.roles.find((candidate) => candidate.role_id === endpoint[key]);
+  return role ? { [key]: roleTargetPath(layout, role, instancePath) } : null;
+}
+
+function materializeExpr(expr, plan, layout, instancePath) {
+  if (Object.hasOwn(expr, 'thing') || Object.hasOwn(expr, 'thing@program')) {
+    return materializeEndpoint(expr, plan, layout, instancePath);
+  }
+  for (const key of ['and', 'or']) {
+    if (Array.isArray(expr[key])) {
+      return { [key]: expr[key].map((child) => materializeExpr(child, plan, layout, instancePath)) };
+    }
+  }
+  return null;
+}
+
+function materializeRule(compiled, plan, layout, instancePath) {
+  const rule = {};
+  if (compiled['if@current'] === true) rule['if@current'] = true;
+  if (Array.isArray(compiled.if)) rule.if = compiled.if.map((expr) => materializeExpr(expr, plan, layout, instancePath));
+  if (compiled['then@current'] === true) rule['then@current'] = true;
+  if (Array.isArray(compiled.then)) rule.then = compiled.then.map((endpoint) => (
+    materializeEndpoint(endpoint, plan, layout, instancePath)
+  ));
+  return rule;
+}
+
+function roleIdsInExpr(expr) {
+  if (Object.hasOwn(expr ?? {}, 'thing')) return [expr.thing];
+  if (Object.hasOwn(expr ?? {}, 'thing@program')) return [expr['thing@program']];
+  for (const key of ['and', 'or']) {
+    if (Array.isArray(expr?.[key])) return expr[key].flatMap(roleIdsInExpr);
+  }
+  return [];
+}
+
+function supportRoleSides(entry) {
+  const antecedent = entry.rule['if@current'] === true ? [entry.owner_role_id] : [];
+  antecedent.push(...(entry.rule.if ?? []).flatMap(roleIdsInExpr));
+  const consequent = entry.rule['then@current'] === true ? [entry.owner_role_id] : [];
+  consequent.push(...(entry.rule.then ?? []).flatMap(roleIdsInExpr));
+  return {
+    antecedent: [...new Set(antecedent)],
+    consequent: [...new Set(consequent)]
+  };
+}
+
 function buildInstance(layout, plan, name) {
   const instancePath = `${layout.examplesPath}/${name}`;
   const slots = plan.roles.filter((role) => role.kind === 'slot');
   const created = new Map();
   for (const role of slots) {
     const node = createAtom({
-      name: role.path === '.' ? name : role.name,
-      detail: role.contract_detail,
+      thing: role.path === '.' ? name : role.thing,
+      situation: role.contract_situation,
       types: role.types,
       description: role.description
     });
-    setRelation(node, SLOT_ROLE_VERB, `${layout.printPath}/${ROLES_NAME}/${role.role_id}`);
+    setRoleId(node, role.role_id);
     created.set(role.role_id, node);
   }
   for (const role of slots.filter((candidate) => candidate.parent_role_id)) {
     childrenOf(created.get(role.parent_role_id)).push(created.get(role.role_id));
   }
   const root = created.get(slots.find((role) => role.path === '.').role_id);
-  setRelation(root, SLOT_REVISION_VERB, `${layout.printPath}/${REVISIONS_NAME}/${plan.revision}`);
+  setInstanceRevision(root, plan.revision);
   for (const edge of plan.support) {
-    const sourceRole = plan.roles.find((role) => role.role_id === edge.source_role_id);
-    const targetRole = plan.roles.find((role) => role.role_id === edge.target_role_id);
+    const sourceRole = plan.roles.find((role) => role.role_id === edge.owner_role_id);
     if (sourceRole.kind !== 'slot') continue;
     const source = created.get(sourceRole.role_id);
     const retained = partnersOf(source) ?? [];
-    retained.push({ verb: edge.verb, object: roleTargetPath(layout, targetRole, instancePath) });
-    replaceStoredField(source, 'partners', retained);
+    retained.push(materializeRule(edge.rule, plan, layout, instancePath));
+    replaceStoredField(source, 'support', retained);
   }
   return root;
 }
 
 function instanceRevision(layout, instance) {
-  const target = relationTarget(instance, SLOT_REVISION_VERB);
-  const prefix = `${layout.printPath}/${REVISIONS_NAME}/`;
-  return typeof target === 'string' && target.startsWith(prefix) ? target.slice(prefix.length) : null;
+  void layout;
+  return instanceRevisionOf(instance);
 }
 
 function roleMapForInstance(layout, instance) {
-  const prefix = `${layout.printPath}/${ROLES_NAME}/`;
   const result = new Map();
   for (const match of walkAtoms([instance])) {
-    const target = relationTarget(match.atom, SLOT_ROLE_VERB);
-    if (typeof target === 'string' && target.startsWith(prefix)) {
-      result.set(target.slice(prefix.length), match.atom);
-    }
+    const roleId = roleIdOf(match.atom);
+    if (roleId) result.set(roleId, match.atom);
   }
   return result;
 }
@@ -398,7 +479,7 @@ function retireUnreferencedPlans(layout, currentRevision) {
     instanceRevision(layout, instance)
   )).filter(Boolean));
   const revisions = revisionContainer(layout);
-  replaceStoredField(revisions, 'children', (childrenOf(revisions) ?? []).filter((record) => (
+  replaceStoredField(revisions, 'contain', (childrenOf(revisions) ?? []).filter((record) => (
     atomName(record) === currentRevision || adopted.has(atomName(record))
   )));
 }
@@ -465,7 +546,9 @@ async function seal(atoms, effect, authorize) {
     const position = childrenOf(layout.examples).indexOf(instance);
     childrenOf(layout.examples)[position] = synchronized.replacement;
     receipt.processed.push(name);
-    const sourceIds = new Set(recompiled.plan.support.map((edge) => edge.source_role_id));
+    const sourceIds = new Set(recompiled.plan.support.flatMap((entry) => (
+      supportRoleSides(entry).antecedent
+    )));
     for (const role of recompiled.plan.roles) {
       if (role.kind === 'slot' && sourceIds.has(role.role_id)) {
         receipt.recompute_targets.push(roleTargetPath(
@@ -601,7 +684,7 @@ function planAtRevision(layout, revision) {
     .find((candidate) => atomName(candidate) === revision);
   if (!record) return null;
   try {
-    return JSON.parse(fieldValue(record, 'detail'));
+    return JSON.parse(fieldValue(record, 'situation'));
   } catch {
     return null;
   }
@@ -627,10 +710,8 @@ function instanceContextForEvent(atoms, eventPath) {
     if (layout.error || !layout.sealed) continue;
     const selected = resolveUnique(atoms, instancePath);
     if (selected.error) continue;
-    const revisionTarget = relationTarget(selected.match.atom, SLOT_REVISION_VERB);
-    const prefix = `${layout.printPath}/${REVISIONS_NAME}/`;
-    if (typeof revisionTarget !== 'string' || !revisionTarget.startsWith(prefix)) continue;
-    const revision = revisionTarget.slice(prefix.length);
+    const revision = instanceRevisionOf(selected.match.atom);
+    if (!revision) continue;
     const plan = planAtRevision(layout, revision);
     if (!plan) continue;
     const suffix = segments.slice(index + 2);
@@ -657,7 +738,7 @@ export function slotProgramInvocationsForEvent(atoms, triggerEvent) {
     const source = context.plan.roles.find((role) => role.path === context.relativePath);
     if (!source) {
       const selected = resolveUnique(atoms, eventPath);
-      if (!selected.error && !relationTarget(selected.match.atom, SLOT_ROLE_VERB)) continue;
+      if (!selected.error && !roleIdOf(selected.match.atom)) continue;
       throw Object.assign(new Error('实例事件无法映射到采用修订中的相对槽角色'), {
         code: 'SLOT_SCOPE_ROLE_MISMATCH',
         details: {
@@ -669,9 +750,12 @@ export function slotProgramInvocationsForEvent(atoms, triggerEvent) {
       });
     }
     const outgoing = new Map();
-    for (const edge of context.plan.support) {
-      if (!outgoing.has(edge.source_role_id)) outgoing.set(edge.source_role_id, []);
-      outgoing.get(edge.source_role_id).push(edge.target_role_id);
+    for (const entry of context.plan.support) {
+      const sides = supportRoleSides(entry);
+      for (const antecedent of sides.antecedent) {
+        if (!outgoing.has(antecedent)) outgoing.set(antecedent, []);
+        outgoing.get(antecedent).push(...sides.consequent);
+      }
     }
     const byId = new Map(context.plan.roles.map((role) => [role.role_id, role]));
     const queue = [...(outgoing.get(source.role_id) ?? [])];
