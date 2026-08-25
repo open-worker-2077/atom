@@ -1,6 +1,6 @@
 {
   "contract": "atom-program-function-registry",
-  "version": 4,
+  "version": 5,
   "runtimeContract": "atom-interaction/3",
   "types": [
     { "id": "program", "layer": "kernel", "executable": true }
@@ -40,21 +40,55 @@
           "required": ["action", "body"],
           "additionalProperties": false,
           "properties": {
-            "action": { "enum": ["seal", "print", "sync"] },
+            "action": { "enum": ["seal", "print"] },
             "body": { "type": "string", "format": "exact-atom-path" },
-            "name": { "type": "string", "format": "single-atom-name", "requiredWhen": { "action": "print" } }
+            "name": { "type": "string", "format": "single-atom-name", "requiredWhen": { "action": "print" } },
+            "revision": { "type": "string", "format": "sha256-revision", "requiredWhen": { "action": "print" } },
+            "limit": { "type": "integer", "minimum": 1, "allowedWhen": { "action": "seal" } },
+            "cursor": { "type": "string", "allowedWhen": { "action": "seal" } }
           }
         },
-        "layout": { "children": ["槽模", "槽例"], "blank": "槽例/空槽例" },
+        "development": {
+          "initialLayout": "one ordinary self-runnable candidate DataFlow child",
+          "scopeBinding": "transform {\"name.run.EXACT_SCOPE_ROOT\":\"EXACT_PROGRAM_PATH\"}",
+          "relativeSelectors": [".", "./direct/contain/path"]
+        },
+        "layout": {
+          "sealedChildren": ["槽模", "print", "槽例"],
+          "physicalBlankExample": "forbidden",
+          "sharedPrograms": "槽模-only",
+          "visiblePlan": "print@program plus immutable print/修订 records"
+        },
+        "print": { "invoke": "use_program exact body/print with arguments.name" },
+        "revisionSync": {
+          "trigger": "seal same body again",
+          "merge": "old-model-default/current-instance/new-model-default",
+          "personalizedMaterial": "preserve-and-report",
+          "batch": ["limit", "cursor"],
+          "adoptionEvidence": "采用槽模修订 relation per instance",
+          "derivedRecompute": "all synchronized instances in candidate transaction"
+        },
         "result": { "type": "object", "meaning": "deferred-effect-plan" },
         "transaction": "central-atomic-commit",
         "confirmation": ["interaction-receipt", "exact-explore"],
         "errors": [
           "INVALID_SLOT_BODY_EFFECT",
           "INVALID_SLOT_BODY_LAYOUT",
+          "INVALID_SLOT_PRINT_PLAN",
           "SLOT_BODY_NOT_SEALED",
           "SLOT_BODY_EXAMPLE_EXISTS",
-          "SLOT_BODY_SYNC_CONFLICT"
+          "SLOT_PRINT_PLAN_STALE",
+          "INVALID_SLOT_SYNC_LIMIT",
+          "SLOT_SYNC_CURSOR_INVALID",
+          "SLOT_SYNC_CURSOR_STALE",
+          "SLOT_INSTANCE_REVISION_MISSING",
+          "SLOT_SCOPE_ROOT_UNBOUND",
+          "SLOT_RELATIVE_SELECTOR_REQUIRED",
+          "SLOT_RELATIVE_TARGET_NOT_FOUND",
+          "SLOT_RELATIVE_TARGET_AMBIGUOUS",
+          "SLOT_SCOPE_BOUNDARY_CROSSING",
+          "SLOT_SCOPE_ROLE_MISMATCH",
+          "SLOT_BODY_NESTED_EFFECT_FORBIDDEN"
         ]
       }
     },

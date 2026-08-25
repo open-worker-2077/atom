@@ -18,6 +18,12 @@ def load_program_stdlib():
 
 
 PROGRAM_STDLIB = load_program_stdlib()
+
+
+class SlotScopeError(ValueError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
 child_detail = PROGRAM_STDLIB.child_detail
 direct_children = PROGRAM_STDLIB.direct_children
 first_pending = PROGRAM_STDLIB.first_pending
@@ -39,7 +45,7 @@ def load_program_function_registry():
     module_path = Path(__file__).with_name("program-function-registry.json")
     value = json.loads(module_path.read_text(encoding="utf-8"))
     if (value.get("contract") != "atom-program-function-registry"
-            or value.get("version") != 4
+            or value.get("version") != 5
             or value.get("runtimeContract") != "atom-interaction/3"):
         raise RuntimeError("Program function registry has an invalid public contract")
     families = set()
@@ -322,7 +328,7 @@ def main():
 
     def slot_body(specification):
         specification = require_object(specification, "slot_body")
-        effects["slotBodies"].append(specification)
+        effects["slotBodies"].append({**specification, "__sourceProgramPath": current_atom().path})
         action = specification.get("action")
         body = specification.get("body")
         result = {"planned": True, "action": action, "body": body}
@@ -895,6 +901,16 @@ def main():
         if len(matches) > 1:
             raise ValueError(f"Referenced Program name is ambiguous; use its full path: {selector}")
         target = matches[0]
+        program_root = request.get("programRoot")
+        if program_root and not (
+            target["path"] == program_root
+            or target["path"].startswith(program_root + "/")
+        ):
+            raise SlotScopeError(
+                "SLOT_SCOPE_BOUNDARY_CROSSING",
+                "Scoped Program may reuse code only inside its current model: "
+                + target["path"]
+            )
         if target["ref"] in program_stack:
             raise ValueError(f"Recursive Program reference is not allowed: {target['path']}")
         if len(program_stack) >= 8:
@@ -931,6 +947,14 @@ def main():
         sys.stdout.flush()
         return
     exec(compile(program_tree, request["program"]["path"], "exec"), namespace, namespace)
+    if request.get("invokeMain") is True:
+        entrypoint = namespace.get("main")
+        if not callable(entrypoint):
+            raise ValueError(
+                "Support-target Program must define main(arguments): "
+                + request["program"]["path"]
+            )
+        entrypoint(request.get("programArguments", {}))
     if codec_failure is not None:
         raise codec_failure
     sys.stdout.write(json.dumps(
@@ -951,6 +975,7 @@ if __name__ == "__main__":
             "error": {
                 "type": type(error).__name__,
                 "message": str(error),
+                **({"code": error.code} if hasattr(error, "code") else {}),
             },
         }, ensure_ascii=True, allow_nan=False) + "\n")
         sys.stdout.flush()

@@ -101,7 +101,7 @@ export async function executeAtomProgramFunctionRegistryEndpoint(
     );
   }
   if (payload.result?.contract !== 'atom-program-function-registry'
-    || payload.result?.version !== 4
+    || payload.result?.version !== 5
     || payload.result?.runtimeContract !== ATOM_RUNTIME_CONTRACT) {
     throw cliError(
       'ATOM_RUNTIME_CONTRACT_MISMATCH',
@@ -247,8 +247,12 @@ function help() {
     '  锁定条件轴：when.target_types 使用相同类型条件判断目标状态；when.actions 仅取 explore／transform。状态与动作决定锁是否生效，窗口条件决定是否放行；守窗、跳窗、关窗和滚动绑定由上层 Program 调度，内核不写死。',
     '  显式重算：transform {\"name.run.\":\"EXACT_PROGRAM_PATH\"}；仅成功运行才原子替换旧锁快照，普通依赖变化不自动重算，失败保留旧锁快照。',
     '  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。',
-    '  槽体内核：slot_body({"action":"seal|print|sync","body":"EXACT槽体路径","name":"PRINT时的新槽例名"})。槽体必须显式为“槽模／槽例／空槽例”；调用方不递归建槽，结果是延迟事务计划，提交后必须 exact explore 回读。',
-    '  槽体错误：INVALID_SLOT_BODY_LAYOUT（结构不完整）、SLOT_BODY_NOT_SEALED（未映照）、SLOT_BODY_EXAMPLE_EXISTS（重名）、SLOT_BODY_SYNC_CONFLICT（有料结构冲突）；任一失败不产生半份槽例。',
+    '  槽体研发：槽体首次只放一棵普通可自运行候选 DataFlow（下级槽、contain、support、@program）；研发态可用 transform {"name.run.EXACT候选根路径":"EXACT_PROGRAM_PATH"} 绑定当前域，Program 内仅用 . 或 ./相对contain路径。',
+    '  槽体封装：上层注册 Program 调用 slot_body({"action":"seal","body":"EXACT槽体路径","limit"?:正整数,"cursor"?:"续批游标"})；中央事务把同一候选保留为槽模，并生成“槽模／print@program／槽例”。不预建空槽例，print 计划在 Graph 中可 exact explore 审计。',
+    '  槽体打印：用 explore {"name":"EXACT槽体/print/修订","children$latitude-1":true} 回读当前 sha256 revision，再显式 use_program({"name":"EXACT槽体/print","arguments":{"name":"新槽例名"}})；内核复制全部普通槽、嵌套 contain、support、类型、描述和默认料，Program 只在槽模共享一份。',
+    '  槽例填写与计算：用 transform {"name":"EXACT槽体/槽例/实例/槽","detail.rep.填写值"} 填料；字段事件按“所属槽例→相对角色→当前修订 support→共享 Program”只在当前槽例域运行，再用 exact explore 回读该实例结果与“采用槽模修订”。禁止绝对实例路径、越过嵌套槽例边界、跨槽例或外部资料访问。',
+    '  槽模修订：修改同一槽模后再次 seal；每张槽例以旧槽模默认值／槽例当前值／新槽模默认值三方比较，未改默认随新值更新，个性字符逐字节保留并在 preserved_customized 报告；批次未 complete 时按 next_cursor 续跑，每张槽例保留“采用槽模修订”，同步批次内统一重算派生结果。',
+    '  槽体错误：INVALID_SLOT_BODY_EFFECT、INVALID_SLOT_BODY_LAYOUT、INVALID_SLOT_PRINT_PLAN、INVALID_SLOT_SYNC_LIMIT、SLOT_BODY_NOT_SEALED、SLOT_PRINT_PLAN_STALE、SLOT_BODY_EXAMPLE_EXISTS、SLOT_SYNC_CURSOR_INVALID、SLOT_SYNC_CURSOR_STALE、SLOT_INSTANCE_REVISION_MISSING、SLOT_SCOPE_ROOT_UNBOUND、SLOT_RELATIVE_SELECTOR_REQUIRED、SLOT_RELATIVE_TARGET_NOT_FOUND、SLOT_RELATIVE_TARGET_AMBIGUOUS、SLOT_SCOPE_BOUNDARY_CROSSING、SLOT_SCOPE_ROLE_MISMATCH、SLOT_BODY_NESTED_EFFECT_FORBIDDEN；任一失败不产生半份槽例。',
     '  工单函数：work_order_catalog({template?,version?})->contract；work_order({action,...})->result。v1 动作固定为 create/fill/validate/submit/reject/revise/read-back。',
     '  工单公开契约：atom.cmd --work-order-registry；该只读命令无需 --agent，Web 帮助从同一注册表渲染动作、错误和提交回执字段。',
     '  工单写入只能由 Program 发出并继续经过 Transform、修订检查和中央提交；调用时使用精确版本、稳定 creation_id 与 exact path，写后按 read-back 和世界回读验收。',

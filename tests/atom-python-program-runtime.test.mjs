@@ -42,14 +42,15 @@ test('same world fingerprint reuses one completed Program cycle', async () => {
   assert.equal(second.fingerprint, first.fingerprint);
 });
 
-test('slot_body emits a validated deferred effect once and cached cycles do not replay it', async () => {
-  const world = [atom('程序', "slot_body({'action':'print','body':'订单槽体','name':'订单001'})", [], 'program')];
+test('slot_body emits a revision-bound deferred print effect once and cached cycles do not replay it', async () => {
+  const revision = `sha256:${'0'.repeat(64)}`;
+  const world = [atom('程序', `slot_body({'action':'print','body':'订单槽体','name':'订单001','revision':'${revision}'})`, [], 'program')];
   const scheduler = createProgramRuntimeScheduler();
   const first = await scheduler.refresh(world);
   const second = await scheduler.refresh(world);
 
   assert.deepEqual(first.slotBodies, [{
-    action: 'print', body: '订单槽体', name: '订单001',
+    action: 'print', body: '订单槽体', name: '订单001', revision,
     sourceProgramPath: '程序'
   }]);
   assert.deepEqual(second.slotBodies, []);

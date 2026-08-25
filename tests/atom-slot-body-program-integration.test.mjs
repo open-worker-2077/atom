@@ -33,30 +33,21 @@ function find(atoms, selector) {
 }
 
 function world() {
-  const program = [
-    'slot_body({"action":"seal","body":"Root/订单槽体"})',
-    'slot_body({"action":"print","body":"Root/订单槽体","name":"订单001"})'
-  ].join('\n');
   return [atom('Root', '', [
     atom('研发窗口', '', [], [], ['agent', '研发']),
     atom('订单槽体', '', [
-      atom('槽模', '', [
+      atom('候选流', '', [
         atom('客户', '定义', [], [{ verb: '触发', object: '金额' }], ['text']),
-        atom('金额', '定义', [], [], ['number']),
+        atom('金额', '定义', [], [{ verb: '计算', object: '共享计算' }], ['number']),
         atom('共享计算', 'def main(arguments):\n    return arguments', [], [], ['program'])
-      ]),
-      atom('槽例', '', [
-        atom('空槽例', '', [
-          atom('客户', '', [], [{ verb: '触发', object: '金额' }], ['text']),
-          atom('金额', '', [], [{ verb: '计算', object: 'Root/订单槽体/槽模/共享计算' }], ['number'])
-        ])
       ])
     ]),
-    atom('槽体装配程序', program, [], [], ['program'])
+    atom('槽体封装程序', 'slot_body({"action":"seal","body":"Root/订单槽体"})', [], [], ['program']),
+    atom('槽体打印程序', 'use_program({"name":"Root/订单槽体/print","arguments":{"name":"订单001"}})', [], [], ['program'])
   ])];
 }
 
-test('Program slot_body effects seal and print in one central commit and reject duplicate atomically', async (t) => {
+test('Program seals a candidate then invokes generated print in central atomic commits and rejects duplicate atomically', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-slot-body-program-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -66,13 +57,21 @@ test('Program slot_body effects seal and print in one central commit and reject 
   const interaction = { agent: { ref: 'agent:Root/研发窗口', path: 'Root/研发窗口' } };
 
   const first = await executeAtomLanguage({
-    source: 'transform {"name.run.":"Root/槽体装配程序"}',
+    source: 'transform {"name.run.":"Root/槽体封装程序"}',
     contextFile,
     projectionFile,
     programScheduler: scheduler,
     interaction
   });
   assert.equal(first.ok, true, JSON.stringify(first.errors));
+  const printedResult = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Root/槽体打印程序"}',
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler,
+    interaction
+  });
+  assert.equal(printedResult.ok, true, JSON.stringify(printedResult.errors));
   const committedText = await fs.readFile(contextFile, 'utf8');
   const committed = JSON.parse(committedText);
   const printed = find(committed, 'Root/订单槽体/槽例/订单001');
@@ -97,7 +96,7 @@ test('Program slot_body effects seal and print in one central commit and reject 
   assert.equal(await fs.readFile(contextFile, 'utf8'), committedText);
 
   const duplicate = await executeAtomLanguage({
-    source: 'transform {"name.run.":"Root/槽体装配程序"}',
+    source: 'transform {"name.run.":"Root/槽体打印程序"}',
     contextFile,
     projectionFile,
     programScheduler: restartedScheduler,
@@ -118,13 +117,21 @@ test('creating an unrelated Program does not replay an existing slot-body print'
   const interaction = { agent: { ref: 'agent:Root/研发窗口', path: 'Root/研发窗口' } };
 
   const printed = await executeAtomLanguage({
-    source: 'transform {"name.run.":"Root/槽体装配程序"}',
+    source: 'transform {"name.run.":"Root/槽体封装程序"}',
     contextFile,
     projectionFile,
     programScheduler: scheduler,
     interaction
   });
   assert.equal(printed.ok, true, JSON.stringify(printed.errors));
+  const printedExample = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Root/槽体打印程序"}',
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler,
+    interaction
+  });
+  assert.equal(printedExample.ok, true, JSON.stringify(printedExample.errors));
 
   const created = await executeAtomLanguage({
     source: 'transform new {"name@program":"Root/无关共享程序","detail":"def main(arguments):\\n    return arguments","children":[],"partners":[]}',
@@ -153,7 +160,7 @@ test('a cold interaction runtime projects legacy Programs without replaying slot
   const interaction = { agent: { ref: 'agent:Root/研发窗口', path: 'Root/研发窗口' } };
 
   const printed = await executeAtomLanguage({
-    source: 'transform {"name.run.":"Root/槽体装配程序"}',
+    source: 'transform {"name.run.":"Root/槽体封装程序"}',
     contextFile,
     projectionFile,
     programScheduler: createProgramRuntimeScheduler(),
@@ -161,6 +168,15 @@ test('a cold interaction runtime projects legacy Programs without replaying slot
     interaction
   });
   assert.equal(printed.ok, true, JSON.stringify(printed.errors));
+  const printedExample = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Root/槽体打印程序"}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler(),
+    programMode: undefined,
+    interaction
+  });
+  assert.equal(printedExample.ok, true, JSON.stringify(printedExample.errors));
   assert.ok(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Root/订单槽体/槽例/订单001'));
 
   const restarted = createProgramRuntimeScheduler();

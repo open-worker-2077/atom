@@ -106,7 +106,7 @@ test('CLI and Web expose equivalent function registry data without an Agent cont
   const webPayload = await response.json();
   assert.equal(webPayload.ok, true);
   assert.equal(webPayload.result.contract, 'atom-program-function-registry');
-  assert.equal(webPayload.result.version, 4);
+  assert.equal(webPayload.result.version, 5);
 
   const stdout = output();
   const stderr = output();
@@ -174,22 +174,27 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   assert.equal(slotBody.layer, 'kernel');
   assert.equal(slotBody.family, 'graph');
   assert.deepEqual(slotBody.contract.argument.required, ['action', 'body']);
-  assert.deepEqual(slotBody.contract.argument.properties.action.enum, ['seal', 'print', 'sync']);
-  assert.deepEqual(slotBody.contract.layout, {
-    children: ['槽模', '槽例'], blank: '槽例/空槽例'
-  });
+  assert.deepEqual(slotBody.contract.argument.properties.action.enum, ['seal', 'print']);
+  assert.deepEqual(slotBody.contract.layout.sealedChildren, ['槽模', 'print', '槽例']);
+  assert.equal(slotBody.contract.layout.physicalBlankExample, 'forbidden');
+  assert.equal(slotBody.contract.layout.sharedPrograms, '槽模-only');
+  assert.equal(slotBody.contract.revisionSync.merge, 'old-model-default/current-instance/new-model-default');
+  assert.deepEqual(slotBody.contract.revisionSync.batch, ['limit', 'cursor']);
   assert.equal(slotBody.contract.transaction, 'central-atomic-commit');
   assert.deepEqual(slotBody.contract.confirmation, ['interaction-receipt', 'exact-explore']);
-  assert.ok(slotBody.contract.errors.includes('SLOT_BODY_SYNC_CONFLICT'));
+  assert.ok(slotBody.contract.errors.includes('SLOT_SYNC_CURSOR_STALE'));
+  assert.ok(slotBody.contract.errors.includes('SLOT_SCOPE_BOUNDARY_CROSSING'));
 
   const stdout = output();
   const stderr = output();
   const code = await runAtomCli(['--help'], { stdout: stdout.stream, stderr: stderr.stream });
   assert.equal(code, 0, stderr.value());
-  assert.match(stdout.value(), /slot_body\(\{"action":"seal\|print\|sync"/u);
-  assert.match(stdout.value(), /槽模／槽例／空槽例/u);
-  assert.match(stdout.value(), /不递归建槽/u);
-  assert.match(stdout.value(), /SLOT_BODY_EXAMPLE_EXISTS[\s\S]*不产生半份槽例/u);
+  assert.match(stdout.value(), /普通可自运行候选 DataFlow/u);
+  assert.match(stdout.value(), /槽模／print@program／槽例/u);
+  assert.match(stdout.value(), /use_program[\s\S]*revision/u);
+  assert.match(stdout.value(), /\.\/相对contain路径[\s\S]*当前槽例域/u);
+  assert.match(stdout.value(), /三方比较[\s\S]*preserved_customized/u);
+  assert.match(stdout.value(), /SLOT_SYNC_CURSOR_STALE[\s\S]*不产生半份槽例/u);
 });
 
 test('public registry exposes the complete window-aware Program lock contract', async () => {

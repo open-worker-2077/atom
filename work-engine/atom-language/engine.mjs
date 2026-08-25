@@ -50,6 +50,7 @@ import {
   programLockState
 } from './program-locks.mjs';
 import { applySlotBodyEffect } from './slot-body-runtime.mjs';
+import { normalizeScopedTransformRequest } from './slot-relative-scope.mjs';
 import {
   createAccessController,
   describeAtom,
@@ -221,7 +222,6 @@ function programRunRequest(item) {
     || commands.length !== 1
     || item.fields.length !== 1
     || field.baseKey !== 'name'
-    || command.parameter !== ''
     || !field.valuePresent
     || typeof field.value !== 'string'
     || !field.value
@@ -229,11 +229,11 @@ function programRunRequest(item) {
     return {
       error: diagnostic(
         'INVALID_PROGRAM_RUN',
-        'Program 只接受独立的 transform {"name.run.":"Program 名称或路径"}'
+        'Program 只接受独立的 transform {"name.run.[EXACT_SCOPE_ROOT]":"Program 名称或路径"}'
       )
     };
   }
-  return { selector: field.value };
+  return { selector: field.value, scopeRoot: command.parameter || null };
 }
 
 async function validatePrograms(atoms, contextFile, previousAtoms = null, programScheduler = null) {
@@ -579,14 +579,21 @@ export async function executeAtomLanguage(options = {}) {
         agentOrigin: interaction.agent,
         isolateFailures: true,
         ...(requestedProgramRun?.selector
-          ? { programSelector: requestedProgramRun.selector, force: true }
+          ? {
+              programSelector: requestedProgramRun.selector,
+              force: true,
+              ...(requestedProgramRun.scopeRoot
+                ? { slotScopeRoot: requestedProgramRun.scopeRoot }
+                : {})
+            }
           : {}),
-        executeExplore: (request) => executeProgramExplore({
+        executeExplore: (request, executionContext = {}) => executeProgramExplore({
           atoms,
           request,
           receiver,
           accessController: unrestricted,
           agentOrigin: interaction.agent,
+          scopeRoot: executionContext.scopeRoot ?? null,
           preparedWorld
         })
       });
@@ -595,6 +602,13 @@ export async function executeAtomLanguage(options = {}) {
           ...programCycle,
           messages: [],
           transforms: [],
+          slotBodies: []
+        };
+      }
+      if ((parsed.command === 'atom' || parsed.command === 'explore')
+        && !requestedProgramRun) {
+        programCycle = {
+          ...programCycle,
           slotBodies: []
         };
       }
@@ -646,8 +660,28 @@ export async function executeAtomLanguage(options = {}) {
     .map((message) => ({ interactionId: interaction.id, ...message }));
   let programChanged = false;
   const programTransformLogs = [];
+  const initialProgramTriggerNodes = [];
+  let strictSlotRecompute = false;
   for (const request of programCycle.transforms ?? []) {
-    const { sourceProgramRef: _sourceProgramRef, sourceProgramPath, ...transformRequest } = request;
+    const {
+      sourceProgramRef: _sourceProgramRef,
+      sourceProgramPath,
+      sourceScopeRoot = null,
+      ...rawTransformRequest
+    } = request;
+    let transformRequest;
+    try {
+      transformRequest = normalizeScopedTransformRequest({
+        atoms,
+        request: rawTransformRequest,
+        scopeRoot: sourceScopeRoot
+      });
+    } catch (error) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+        error.code ?? 'INVALID_PROGRAM_TRANSFORM', error.message,
+        { program: sourceProgramPath, ...(error.details ?? {}) }
+      )]);
+    }
     const compiled = compileProgramTransform({ request: transformRequest, receiver });
     if (!compiled.ok) {
       interactionWarnings.push(diagnostic(
@@ -717,10 +751,11 @@ export async function executeAtomLanguage(options = {}) {
   }
 
   for (const request of programCycle.slotBodies ?? []) {
-    const { sourceProgramPath, ...effect } = request;
+    const { sourceProgramPath, sourceScopeRoot: _sourceScopeRoot, ...effect } = request;
     const result = await applySlotBodyEffect({
       atoms,
       effect,
+      sourceProgramPath,
       authorize: async ({ path: targetPath }) => {
         const match = walkAtoms(atoms).find((candidate) => candidate.path.join('/') === targetPath);
         if (!match) return { decision: 'deny' };
@@ -750,6 +785,12 @@ export async function executeAtomLanguage(options = {}) {
     const after = revisionOf(atoms);
     if (before !== after) {
       programChanged = true;
+      initialProgramTriggerNodes.push(
+        result.receipt?.body,
+        result.receipt?.target,
+        ...(result.receipt?.recompute_targets ?? [])
+      );
+      strictSlotRecompute ||= (result.receipt?.recompute_targets?.length ?? 0) > 0;
       programTransformLogs.push({
         id: crypto.randomUUID(),
         operation: `slot-body-${effect.action}`,
@@ -761,7 +802,9 @@ export async function executeAtomLanguage(options = {}) {
     }
   }
 
-  async function reconcileProgramsForWorld(candidateAtoms, initialTriggerEvent = null) {
+  async function reconcileProgramsForWorld(
+    candidateAtoms, initialTriggerEvent = null, failOnProgramFailure = false
+  ) {
     if (!options.programScheduler) {
       return {
         atoms: candidateAtoms,
@@ -787,15 +830,23 @@ export async function executeAtomLanguage(options = {}) {
         agentOrigin: interaction.agent,
         isolateFailures: true,
         ...(pendingTriggerEvent ? { triggerEvent: pendingTriggerEvent } : {}),
-        executeExplore: (request) => executeProgramExplore({
+        executeExplore: (request, executionContext = {}) => executeProgramExplore({
           atoms: reconciledAtoms,
           request,
           receiver,
           accessController: unrestricted,
           agentOrigin: interaction.agent,
+          scopeRoot: executionContext.scopeRoot ?? null,
           preparedWorld
         })
       });
+      if (failOnProgramFailure && (cycle.failures?.length ?? 0) > 0) {
+        const failure = cycle.failures[0];
+        throw Object.assign(new Error(failure.message ?? '槽例派生重算失败'), {
+          code: failure.code ?? 'ATOM_PROGRAM_FAILED',
+          details: { ...(failure.details ?? {}), program: failure.programPath }
+        });
+      }
       performanceTrace('program-reconcile-refresh', {
         pass,
         elapsedMs: Math.round(performance.now() - refreshStartedAt),
@@ -849,7 +900,26 @@ export async function executeAtomLanguage(options = {}) {
       let passChanged = false;
       const compiledRequests = [];
       for (const request of cycle.transforms ?? []) {
-        const { sourceProgramRef: _sourceProgramRef, sourceProgramPath, ...transformRequest } = request;
+        const {
+          sourceProgramRef: _sourceProgramRef,
+          sourceProgramPath,
+          sourceScopeRoot = null,
+          ...rawTransformRequest
+        } = request;
+        let transformRequest;
+        try {
+          transformRequest = normalizeScopedTransformRequest({
+            atoms: reconciledAtoms,
+            request: rawTransformRequest,
+            scopeRoot: sourceScopeRoot
+          });
+        } catch (error) {
+          interactionWarnings.push(diagnostic(
+            error.code ?? 'INVALID_PROGRAM_TRANSFORM', error.message,
+            { program: sourceProgramPath, ...(error.details ?? {}) }
+          ));
+          continue;
+        }
         const compiled = compileProgramTransform({ request: transformRequest, receiver });
         if (!compiled.ok) {
           interactionWarnings.push(diagnostic(
@@ -975,10 +1045,11 @@ export async function executeAtomLanguage(options = {}) {
       }
       const appliedSlotBodies = [];
       for (const request of cycle.slotBodies ?? []) {
-        const { sourceProgramPath, ...effect } = request;
+        const { sourceProgramPath, sourceScopeRoot: _sourceScopeRoot, ...effect } = request;
         const slotResult = await applySlotBodyEffect({
           atoms: application.atoms,
           effect,
+          sourceProgramPath,
           authorize: async ({ path: targetPath }) => {
             const match = walkAtoms(application.atoms)
               .find((candidate) => candidate.path.join('/') === targetPath);
@@ -995,6 +1066,7 @@ export async function executeAtomLanguage(options = {}) {
           });
         }
         application.atoms = slotResult.atoms;
+        failOnProgramFailure ||= (slotResult.receipt?.recompute_targets?.length ?? 0) > 0;
         appliedSlotBodies.push({ sourceProgramPath, effect, receipt: slotResult.receipt });
       }
       const after = revisionOf(application.atoms);
@@ -1039,7 +1111,8 @@ export async function executeAtomLanguage(options = {}) {
           transformed.resultName
         ])).concat(appliedSlotBodies.flatMap(({ receipt }) => ([
           receipt?.body,
-          receipt?.target
+          receipt?.target,
+          ...(receipt?.recompute_targets ?? [])
         ]))).filter(Boolean))];
         pendingTriggerEvent = triggeredNodes.length
           ? { mode: 'transform', nodes: triggeredNodes }
@@ -1071,10 +1144,17 @@ export async function executeAtomLanguage(options = {}) {
     }, initialPath);
   }
 
-  if (programChanged && (parsed.command === 'atom' || parsed.command === 'explore')) {
+  if (programChanged && (
+    parsed.command === 'atom' || parsed.command === 'explore' || strictSlotRecompute
+  )) {
     let reconciled;
     try {
-      reconciled = await reconcileProgramsForWorld(atoms);
+      const triggerNodes = [...new Set(initialProgramTriggerNodes.filter(Boolean))];
+      reconciled = await reconcileProgramsForWorld(
+        atoms,
+        triggerNodes.length ? { mode: 'transform', nodes: triggerNodes } : null,
+        strictSlotRecompute
+      );
     } catch (error) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}

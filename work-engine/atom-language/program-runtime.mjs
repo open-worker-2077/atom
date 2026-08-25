@@ -7,6 +7,7 @@ import { parseAtomKey } from './key-parser.mjs';
 import { executeProgramExplore, prepareExploreWorld } from './query-capability.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
 import { normalizeTypePredicate } from './program-locks.mjs';
+import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 
@@ -274,10 +275,12 @@ function worldRevisionKey(records) {
   return records[0]?.ref ?? 'empty-world';
 }
 
-function validateResult(result, records, program) {
+function validateResult(result, records, program, scopeRoot = null) {
   if (!result?.ok) {
     const error = new Error(result?.error?.message || 'Python Program failed');
-    error.code = 'ATOM_PROGRAM_FAILED';
+    error.code = typeof result?.error?.code === 'string'
+      ? result.error.code
+      : 'ATOM_PROGRAM_FAILED';
     error.details = { program: program.path, type: result?.error?.type };
     throw error;
   }
@@ -436,32 +439,53 @@ function validateResult(result, records, program) {
     return {
       ...structuredClone(entry),
       sourceProgramRef: program.ref,
-      sourceProgramPath: program.path
+      sourceProgramPath: program.path,
+      ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {})
     };
   });
+  if (scopeRoot && (result.slotBodies?.length ?? 0) > 0) {
+    throw Object.assign(new Error('相对域计算 Program 不得递归登记槽体效果'), {
+      code: 'SLOT_BODY_NESTED_EFFECT_FORBIDDEN',
+      details: { scope_root: scopeRoot, program: program.path }
+    });
+  }
   const slotBodies = (result.slotBodies ?? []).map((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
       throw Object.assign(new Error('slot_body() requires one JSON object'), { code: 'INVALID_SLOT_BODY_EFFECT' });
     }
-    const keys = Object.keys(entry).sort();
-    const expected = entry.action === 'print'
-      ? ['action', 'body', 'name']
+    const sourceProgramPath = typeof entry.__sourceProgramPath === 'string'
+      ? entry.__sourceProgramPath
+      : program.path;
+    const publicEntry = Object.fromEntries(Object.entries(entry).filter(([key]) => (
+      key !== '__sourceProgramPath'
+    )));
+    const keys = Object.keys(publicEntry).sort();
+    const required = entry.action === 'print'
+      ? ['action', 'body', 'name', 'revision']
       : ['action', 'body'];
-    if (!['seal', 'print', 'sync'].includes(entry.action)
+    const allowed = entry.action === 'print'
+      ? required
+      : [...required, 'cursor', 'limit'];
+    if (!['seal', 'print'].includes(entry.action)
       || typeof entry.body !== 'string' || !entry.body.trim()
-      || keys.length !== expected.length
-      || expected.some((key) => !keys.includes(key))
+      || keys.some((key) => !allowed.includes(key))
+      || required.some((key) => !keys.includes(key))
+      || (entry.action === 'seal' && entry.limit != null
+        && (!Number.isInteger(entry.limit) || entry.limit <= 0))
+      || (entry.action === 'seal' && entry.cursor != null && typeof entry.cursor !== 'string')
       || (entry.action === 'print'
-        && (typeof entry.name !== 'string' || !entry.name.trim() || entry.name.includes('/')))) {
-      throw Object.assign(new Error('slot_body() requires seal/sync {action,body} or print {action,body,name}'), {
+        && (typeof entry.name !== 'string' || !entry.name.trim() || entry.name.includes('/')
+          || typeof entry.revision !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(entry.revision)))) {
+      throw Object.assign(new Error('slot_body() requires seal {action,body,limit?,cursor?} or current-plan print {action,body,name,revision}'), {
         code: 'INVALID_SLOT_BODY_EFFECT'
       });
     }
     return {
-      ...structuredClone(entry),
+      ...structuredClone(publicEntry),
       body: entry.body.trim(),
       ...(entry.action === 'print' ? { name: entry.name.trim() } : {}),
-      sourceProgramPath: program.path
+      sourceProgramPath,
+      ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {})
     };
   });
   const choiceIds = new Set();
@@ -513,7 +537,7 @@ function validateResult(result, records, program) {
 
 function runWorker({
   python, records, programs, program, timeoutMs, executeExplore, validateOnly = false,
-  triggered = false
+  triggered = false, scopeRoot = null, programRoot = null, invokeMain = false, programArguments = {}
 }) {
   return new Promise((resolve, reject) => {
     const child = spawn(python, ['-I', '-X', 'utf8', workerFile], {
@@ -588,7 +612,7 @@ function runWorker({
         return;
       }
       try {
-        resolve(validateResult(child.__atomResult ?? JSON.parse(stdout), records, program));
+        resolve(validateResult(child.__atomResult ?? JSON.parse(stdout), records, program, scopeRoot));
       } catch (error) {
         reject(error);
       }
@@ -597,7 +621,10 @@ function runWorker({
       world: programs ?? records.filter((record) => record.types.includes('program')),
       program,
       validateOnly,
-      triggered
+      triggered,
+      programRoot,
+      invokeMain,
+      programArguments
     });
   });
 }
@@ -939,7 +966,10 @@ export class ProgramRuntimeScheduler {
       ? programRecords(records, options.programSelector)
       : availablePrograms;
     const isolateFailures = options.isolateFailures === true;
-    const stableKey = fingerprint(records, programs, options.agentOrigin, isolateFailures);
+    const baseKey = fingerprint(records, programs, options.agentOrigin, isolateFailures);
+    const stableKey = options.slotScopeRoot || options.slotScopeRevision
+      ? `${baseKey}:${options.slotScopeRoot ?? ''}:${options.slotScopeRevision ?? ''}`
+      : baseKey;
     const key = options.force === true || options.triggerEvent
       ? `${stableKey}:${crypto.randomUUID()}`
       : stableKey;
@@ -1004,6 +1034,14 @@ export class ProgramRuntimeScheduler {
           triggeredProgramPaths.add(programPath);
         }
       }
+    }
+    const slotInvocations = slotProgramInvocationsForEvent(atoms, triggerEvent);
+    const slotInvocationsByProgram = new Map();
+    for (const invocation of slotInvocations) {
+      if (!slotInvocationsByProgram.has(invocation.programPath)) {
+        slotInvocationsByProgram.set(invocation.programPath, []);
+      }
+      slotInvocationsByProgram.get(invocation.programPath).push(invocation);
     }
     const fingerprintDependencies = (requests) => dependencyFingerprint(
       requests, executeExplore, records, dependencyCache
@@ -1074,7 +1112,13 @@ export class ProgramRuntimeScheduler {
         });
       }
     };
-    const operations = programs.map(async (program) => {
+    const operationEntries = programs.flatMap((program) => {
+      const scoped = slotInvocationsByProgram.get(program.path) ?? [];
+      return scoped.length
+        ? scoped.map((slotInvocation) => ({ program, slotInvocation }))
+        : [{ program, slotInvocation: null }];
+    });
+    const operations = operationEntries.map(async ({ program, slotInvocation }) => {
       const previousEntry = options.force === true
         ? null
         : reusableCandidates(
@@ -1083,10 +1127,12 @@ export class ProgramRuntimeScheduler {
         )[0];
       const previous = previousEntry?.[1] ?? null;
       const triggerContract = this.triggerContracts.get(program.path)?.contract ?? null;
-      const forcedByTrigger = triggerEvent && triggeredProgramPaths.has(program.path);
+      const forcedByTrigger = triggerEvent
+        && (triggeredProgramPaths.has(program.path) || Boolean(slotInvocation));
       if (triggerEvent
         && !triggerContract
         && !eventNodes.has(program.path)
+        && !slotInvocation
         && (this.triggerIndex.size > 0 || !previous)) {
         return {
           programPath: program.path,
@@ -1149,17 +1195,32 @@ export class ProgramRuntimeScheduler {
               { code: 'ATOM_PROGRAM_TIMEOUT' }
             );
           }
+          const effectiveScopeRoot = slotInvocation?.scopeRoot ?? options.slotScopeRoot ?? null;
           return this.runProgram({
             python: this.python,
             records,
             programs: availablePrograms,
             program,
             timeoutMs: remainingMs,
-            triggered: options.force === true
-              || (triggerEvent ? triggeredProgramPaths.has(program.path) : false),
+            triggered: options.force === true || forcedByTrigger,
+            scopeRoot: effectiveScopeRoot,
+            programRoot: slotInvocation?.programRoot ?? options.slotScopeRoot ?? null,
+            invokeMain: Boolean(slotInvocation),
+            programArguments: slotInvocation ? {
+              event: {
+                mode: triggerEvent.mode,
+                path: slotInvocation.eventPath,
+                role: slotInvocation.sourceRole
+              },
+              scope_root: slotInvocation.scopeRoot,
+              revision: slotInvocation.revision
+            } : {},
             executeExplore: async (request) => {
               requests.push(structuredClone(request));
-              const matches = await executeExplore(request);
+              const matches = await executeExplore(request, {
+                scopeRoot: effectiveScopeRoot,
+                programPath: program.path
+              });
               rememberDependencySnapshot(dependencyCache, request, matches);
               return matches.map((match) => {
                 const record = byPath.get(match.path);
@@ -1183,7 +1244,7 @@ export class ProgramRuntimeScheduler {
           : reusableProgramSetFingerprint(
             [program], availablePrograms, isolateFailures, records
           );
-        if (!contextDependent || scopePath) {
+        if (!slotInvocation && !(options.slotScopeRoot) && (!contextDependent || scopePath)) {
           this.programReusable.set(stateKey, {
             contextDependent,
             scopePath: contextDependent ? scopePath : null,

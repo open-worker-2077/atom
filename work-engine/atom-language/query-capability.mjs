@@ -2,6 +2,7 @@ import { diagnostic } from './errors.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { createAtomLanguageReceiver } from './receiver.mjs';
+import { resolveSlotRelativeSelector } from './slot-relative-scope.mjs';
 import { selectCoordinateScope } from './world-laws/coordinates.mjs';
 import { decodeLockAtoms, evaluateLockAccess } from './world-laws/locks.mjs';
 import { createDefaultWorldLawRegistry } from './world-laws/registry.mjs';
@@ -428,11 +429,14 @@ export async function executeProgramExplore({
   receiver = createAtomLanguageReceiver(),
   accessController = { restricted: false, authorize: async () => ({ decision: 'allow' }) },
   agentOrigin = null,
+  scopeRoot = null,
   preparedWorld = null
 }) {
-  const normalizedRequest = request.name === undefined && agentOrigin?.path
-    ? { ...request, name: agentOrigin.path }
-    : request;
+  const requestedName = request.name === undefined
+    ? (scopeRoot ? '.' : agentOrigin?.path)
+    : request.name;
+  const resolved = resolveSlotRelativeSelector({ atoms, selector: requestedName, scopeRoot });
+  const normalizedRequest = { ...request, name: resolved.selector };
   const parsed = receiver.receive(programObjectSource('explore', normalizedRequest));
   if (!parsed.ok || parsed.batch || parsed.items.length !== 1) {
     const error = new Error(parsed.errors?.[0]?.message ?? 'Invalid Program explore request');
