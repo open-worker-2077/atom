@@ -90,6 +90,12 @@ Service startup validates Program contracts and rebuilds the current lock/projec
 
 Alternative considered: reuse the ordinary reconciliation mode at startup. That can execute non-idempotent application effects before any caller has requested them and makes service recovery alter business data.
 
+### Treat Program-structure Transform events as positive Program selection
+
+A Transform event that creates or edits a Program runs only Programs selected by an indexed `trigger()` contract plus that exact changed Program for legacy compatibility. Every other Program reuses its previous projection with messages, transforms and槽体 effects cleared, even when no trigger contract exists anywhere in the world or adding a Program changes the available `use_program()` catalog. An ordinary data Transform retains legacy dependency-based recomputation when the world has not adopted trigger contracts, so existing calculation, lock and work-order Programs remain compatible.
+
+Alternative considered: fall back to evaluating every legacy Program on a Program-structure Transform while the trigger index is empty. A real ESG trial proved that this replays unrelated non-idempotent effects: creating one calculation Program retriggered an old order printer and failed with `SLOT_BODY_EXAMPLE_EXISTS` for `订单001` outside the target槽体. Disabling all legacy evaluation for every Transform was also rejected because it breaks established data-driven Programs; the event boundary must distinguish Program structure from ordinary data.
+
 ## Risks / Trade-offs
 
 - **[A model and empty example cannot be paired unambiguously during first seal]** → Reject with exact unmatched paths; require the authoring Agent to make the visible structures correspond before sealing.

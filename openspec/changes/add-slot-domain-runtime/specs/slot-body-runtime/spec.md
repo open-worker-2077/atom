@@ -90,3 +90,10 @@ CLI Help 与 Program 函数注册表 SHALL 公开 `slot_body()` 的动作、JSON
 #### Scenario: 重启不重复打印槽例
 - **WHEN** 世界中已有一个可打印槽例的 Program 且 Atom 服务重新启动
 - **THEN** 服务恢复可读投影与锁状态，但不新增、同步或修改任何槽例
+
+### Requirement: 无关 Program 结构 Transform 不得重放槽体效果
+系统 SHALL 将创建或修改 Program 的 Transform 事件视为 Program 的正向选择条件：只运行其 `trigger()` 契约命中的 Program；为兼容旧 Program，可以运行该 exact Program，但不得运行其他无关 Program。此约束 SHALL 不依赖世界中是否已经存在 trigger 索引，也不得因 `use_program()` 可用目录发生变化而重放既有 `slot_body()` 效果。普通数据 Transform 在尚无 trigger 契约时 SHALL 保持既有依赖重算兼容行为。
+
+#### Scenario: 创建无关 Program 不重复打印既有槽例
+- **WHEN** 世界中已有一个曾打印 `订单001` 的槽体 Program，调用方在另一位置创建新的共享计算 Program
+- **THEN** 新 Program 正常创建，旧槽体 Program 不执行，`订单001` 保持恰好一份且中央事务不返回 `SLOT_BODY_EXAMPLE_EXISTS`

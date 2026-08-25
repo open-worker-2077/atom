@@ -107,3 +107,39 @@ test('Program slot_body effects seal and print in one central commit and reject 
   assert.equal(duplicate.errors[0].code, 'SLOT_BODY_EXAMPLE_EXISTS');
   assert.equal(await fs.readFile(contextFile, 'utf8'), committedText);
 });
+
+test('creating an unrelated Program does not replay an existing slot-body print', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-slot-body-unrelated-program-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify(world(), null, 2), 'utf8');
+  const scheduler = createProgramRuntimeScheduler();
+  const interaction = { agent: { ref: 'agent:Root/研发窗口', path: 'Root/研发窗口' } };
+
+  const printed = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Root/槽体装配程序"}',
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler,
+    interaction
+  });
+  assert.equal(printed.ok, true, JSON.stringify(printed.errors));
+
+  const created = await executeAtomLanguage({
+    source: 'transform new {"name@program":"Root/无关共享程序","detail":"def main(arguments):\\n    return arguments","children":[],"partners":[]}',
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler,
+    interaction
+  });
+
+  assert.equal(created.ok, true, JSON.stringify(created.errors));
+  const committed = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.ok(find(committed, 'Root/无关共享程序'));
+  assert.equal(
+    find(committed, 'Root/订单槽体/槽例').children
+      .filter((child) => nameOf(child) === '订单001').length,
+    1
+  );
+});

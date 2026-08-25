@@ -621,6 +621,7 @@ test('a timeout during an in-flight explore cannot crash the scheduler with EPIP
     ], { executeExplore: slowExplore }),
     { code: 'ATOM_PROGRAM_TIMEOUT' }
   );
+  scheduler.timeoutMs = 2_000;
   await new Promise((resolve) => setTimeout(resolve, 300));
 
   const recovered = await scheduler.refresh([

@@ -959,6 +959,8 @@ export class ProgramRuntimeScheduler {
     }
     if (triggerEvent) await this.ensureTriggerContracts(records, programs, executeExplore);
     const eventNodes = new Set((triggerEvent?.nodes ?? []).map((node) => node.trim()));
+    const availableProgramPaths = new Set(availablePrograms.map((program) => program.path));
+    const eventTouchesProgram = [...eventNodes].some((node) => availableProgramPaths.has(node));
     const triggeredProgramPaths = new Set();
     if (triggerEvent) {
       for (const node of eventNodes) {
@@ -1047,7 +1049,7 @@ export class ProgramRuntimeScheduler {
       const triggerContract = this.triggerContracts.get(program.path)?.contract ?? null;
       const forcedByTrigger = triggerEvent && triggeredProgramPaths.has(program.path);
       if (triggerEvent
-        && this.triggerIndex.size > 0
+        && (this.triggerIndex.size > 0 || eventTouchesProgram)
         && !triggerContract
         && !eventNodes.has(program.path)) {
         return {
