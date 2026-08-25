@@ -153,6 +153,19 @@ test('editing a legacy Program still runs that Program for compatibility', async
   assert.deepEqual(cycle.executedProgramPaths, ['Legacy Reporter']);
 });
 
+test('a cold scheduler does not replay an untriggered legacy effect for an unrelated Transform', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const cycle = await scheduler.refresh([
+    atom('Unrelated', 'changed'),
+    atom('Legacy Printer', "slot_body({'action':'print','body':'订单槽体','name':'订单001'})", [], 'program')
+  ], {
+    triggerEvent: { mode: 'transform', nodes: ['Unrelated'] }
+  });
+
+  assert.deepEqual(cycle.slotBodies, []);
+  assert.deepEqual(cycle.executedProgramPaths, []);
+});
+
 test('trigger rejects eager main invocation instead of executing during contract registration', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const program = atom('Invalid Trigger Program', [

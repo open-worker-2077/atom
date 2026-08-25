@@ -25,10 +25,18 @@ function validTypePredicate(value) {
 function validAllowedWindows(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length !== 1 || !['paths', 'types'].includes(keys[0])) return false;
+  if (keys.length !== 1 || !['paths', 'types', 'relation'].includes(keys[0])) return false;
   if (keys[0] === 'types') return validTypePredicate(value.types);
+  if (keys[0] === 'relation') return value.relation === 'target_within_window_parent';
   return Array.isArray(value.paths) && value.paths.length > 0
     && value.paths.every((item) => typeof item === 'string' && item.includes('/'))
+    && new Set(value.paths).size === value.paths.length;
+}
+
+function validAllowedPrograms(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).length === 1 && Array.isArray(value.paths) && value.paths.length > 0
+    && value.paths.every((item) => typeof item === 'string' && item.length > 0)
     && new Set(value.paths).size === value.paths.length;
 }
 
@@ -53,12 +61,14 @@ function validate(value) {
       || !Array.isArray(lock.targets?.paths) || lock.targets.paths.length === 0
       || lock.targets.paths.some((item) => typeof item !== 'string' || !item)
       || new Set(lock.targets.paths).size !== lock.targets.paths.length
+      || (lock.targets.scope !== undefined && lock.targets.scope !== 'subtree')
       || !['write', 'read_write'].includes(lock.mode)
       || !Array.isArray(lock.fields) || lock.fields.length === 0
       || lock.fields.some((field) => !supportedFields.has(field))
       || !lock.protect || typeof lock.protect.atom !== 'boolean'
       || typeof lock.protect.messages !== 'boolean'
       || (lock.allowed_windows !== undefined && !validAllowedWindows(lock.allowed_windows))
+      || (lock.allowed_programs !== undefined && !validAllowedPrograms(lock.allowed_programs))
       || (lock.when !== undefined && !validWhen(lock.when))
       || lock.refresh?.policy !== 'on_request')) {
     throw problem('INVALID_REQUEST_DRIVEN_LOCK_SNAPSHOT', 'Stored request-driven lock snapshot is invalid');

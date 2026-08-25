@@ -8,11 +8,48 @@ import {
 } from '../work-engine/atom-language/program-locks.mjs';
 
 const records = [
+  { ref: 'r-root', path: '推进流', types: [] },
   { ref: 'r-target', path: '推进流/任务A', types: ['槽例', '待处理'] },
   { ref: 'r-program', path: '冻结程序', types: ['program'] },
   { ref: 'r-allowed', path: '推进流/允许窗口', types: ['agent', '研发'] },
   { ref: 'r-denied', path: '推进流/其他窗口', types: ['agent', '执行'] }
 ];
+
+test('subtree spatial lock follows the window parent and admits only its scheduler Program', () => {
+  const index = buildProgramLockIndex({
+    revision: 'rev-spatial', records,
+    results: [{
+      targets: { refs: ['r-root'], scope: 'subtree' },
+      mode: 'read_write',
+      fields: ['name', 'detail', 'children', 'partners'],
+      protect: { atom: true, messages: false },
+      allowed_windows: { relation: 'target_within_window_parent' },
+      allowed_programs: { paths: ['推进流/调度程序'] },
+      sourceProgramRef: 'r-program', sourceProgramPath: '冻结程序'
+    }]
+  });
+
+  assert.equal(authorizeProgramLock({
+    lockIndex: index, targetPath: '推进流/任务A/字段', operation: 'read', field: 'detail',
+    agentPath: '推进流/任务A/执行窗口'
+  }).decision, 'allow');
+  assert.equal(authorizeProgramLock({
+    lockIndex: index, targetPath: '推进流/任务B', operation: 'read', field: 'detail',
+    agentPath: '推进流/任务A/执行窗口'
+  }).decision, 'truncate');
+  assert.equal(authorizeProgramLock({
+    lockIndex: index, targetPath: '推进流/状态', operation: 'read', field: 'detail',
+    agentPath: '推进流/任务A/执行窗口'
+  }).decision, 'truncate');
+  assert.equal(authorizeProgramLock({
+    lockIndex: index, targetPath: '推进流/任务A/执行窗口', operation: 'write', field: 'name',
+    agentPath: '推进流/任务A/执行窗口'
+  }).decision, 'deny');
+  assert.equal(authorizeProgramLock({
+    lockIndex: index, targetPath: '推进流/任务A/执行窗口', operation: 'write', field: 'name',
+    agentPath: '推进流/任务A/执行窗口', programPath: '推进流/调度程序'
+  }).decision, 'allow');
+});
 
 test('field-specific Program locks restrict only the requested Atom fields', () => {
   const index = buildProgramLockIndex({

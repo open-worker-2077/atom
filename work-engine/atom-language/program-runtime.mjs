@@ -291,6 +291,14 @@ function validateResult(result, records, program) {
     if (!Array.isArray(refs) || !refs.length || refs.some((ref) => !knownRefs.has(ref))) {
       throw Object.assign(new Error('lock.targets.refs contains an unknown Atom reference'), { code: 'INVALID_PROGRAM_LOCK_TARGET' });
     }
+    const targetKeys = Object.keys(entry.targets ?? {});
+    const targetScope = entry.targets?.scope ?? 'exact';
+    if (targetKeys.some((key) => !['refs', 'scope'].includes(key))
+      || !['exact', 'subtree'].includes(targetScope)) {
+      throw Object.assign(new Error('lock.targets.scope must be exact or subtree'), {
+        code: 'INVALID_PROGRAM_LOCK_TARGET_SCOPE'
+      });
+    }
     if (!['write', 'read_write'].includes(entry.mode)) {
       throw Object.assign(new Error('lock.mode must be write or read_write'), { code: 'INVALID_PROGRAM_LOCK_MODE' });
     }
@@ -310,8 +318,8 @@ function validateResult(result, records, program) {
       const value = entry.allowed_windows;
       const keys = value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value) : [];
       const paths = value?.paths;
-      if (keys.length !== 1 || !['paths', 'types'].includes(keys[0])) {
-        throw Object.assign(new Error('lock.allowed_windows requires exactly one of paths or types'), {
+      if (keys.length !== 1 || !['paths', 'types', 'relation'].includes(keys[0])) {
+        throw Object.assign(new Error('lock.allowed_windows requires exactly one of paths, types or relation'), {
           code: 'INVALID_PROGRAM_LOCK_ALLOWED_WINDOWS'
         });
       }
@@ -328,14 +336,38 @@ function validateResult(result, records, program) {
           });
         }
         allowedWindows = { paths: [...paths] };
-      } else {
+      } else if (keys[0] === 'types') {
         allowedWindows = {
           types: normalizeTypePredicate(value.types, {
             code: 'INVALID_PROGRAM_LOCK_WINDOW_TYPES',
             label: 'lock.allowed_windows.types'
           })
         };
+      } else {
+        if (value.relation !== 'target_within_window_parent') {
+          throw Object.assign(new Error('lock.allowed_windows.relation only supports target_within_window_parent'), {
+            code: 'INVALID_PROGRAM_LOCK_WINDOW_RELATION'
+          });
+        }
+        allowedWindows = { relation: value.relation };
       }
+    }
+    let allowedPrograms;
+    if (entry.allowed_programs !== undefined) {
+      const value = entry.allowed_programs;
+      const keys = value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value) : [];
+      if (keys.length !== 1 || keys[0] !== 'paths'
+        || !Array.isArray(value.paths) || value.paths.length === 0
+        || new Set(value.paths).size !== value.paths.length
+        || value.paths.some((path) => {
+          const record = recordsByPath.get(path);
+          return !record || !record.types?.includes('program');
+        })) {
+        throw Object.assign(new Error('lock.allowed_programs.paths must contain unique exact paths resolving to @program Atoms'), {
+          code: 'INVALID_PROGRAM_LOCK_ALLOWED_PROGRAMS'
+        });
+      }
+      allowedPrograms = { paths: [...value.paths] };
     }
     let when;
     if (entry.when !== undefined) {
@@ -376,8 +408,11 @@ function validateResult(result, records, program) {
       refresh = { policy: 'on_request' };
     }
     return {
-      ...structuredClone(entry), fields, protect: { atom: protect.atom ?? true, messages: protect.messages ?? false },
+      ...structuredClone(entry),
+      targets: { refs: [...refs], ...(targetScope === 'subtree' ? { scope: 'subtree' } : {}) },
+      fields, protect: { atom: protect.atom ?? true, messages: protect.messages ?? false },
       ...(allowedWindows ? { allowed_windows: allowedWindows } : {}),
+      ...(allowedPrograms ? { allowed_programs: allowedPrograms } : {}),
       ...(when ? { when } : {}),
       ...(refresh ? { refresh } : {}),
       sourceProgramRef: program.ref, sourceProgramPath: program.path
@@ -653,7 +688,10 @@ export class ProgramRuntimeScheduler {
         .filter((lock) => lock.refresh?.policy === 'on_request')
         .map((lock) => ({
           ...structuredClone(lock),
-          targets: { paths: lock.targets.refs.map((ref) => pathByRef.get(ref)).filter(Boolean) }
+          targets: {
+            paths: lock.targets.refs.map((ref) => pathByRef.get(ref)).filter(Boolean),
+            ...(lock.targets.scope === 'subtree' ? { scope: 'subtree' } : {})
+          }
         }));
       const next = [
         ...active.filter((lock) => lock.sourceProgramPath !== sourcePath),
@@ -959,8 +997,6 @@ export class ProgramRuntimeScheduler {
     }
     if (triggerEvent) await this.ensureTriggerContracts(records, programs, executeExplore);
     const eventNodes = new Set((triggerEvent?.nodes ?? []).map((node) => node.trim()));
-    const availableProgramPaths = new Set(availablePrograms.map((program) => program.path));
-    const eventTouchesProgram = [...eventNodes].some((node) => availableProgramPaths.has(node));
     const triggeredProgramPaths = new Set();
     if (triggerEvent) {
       for (const node of eventNodes) {
@@ -1049,9 +1085,9 @@ export class ProgramRuntimeScheduler {
       const triggerContract = this.triggerContracts.get(program.path)?.contract ?? null;
       const forcedByTrigger = triggerEvent && triggeredProgramPaths.has(program.path);
       if (triggerEvent
-        && (this.triggerIndex.size > 0 || eventTouchesProgram)
         && !triggerContract
-        && !eventNodes.has(program.path)) {
+        && !eventNodes.has(program.path)
+        && (this.triggerIndex.size > 0 || !previous)) {
         return {
           programPath: program.path,
           result: previous ? {

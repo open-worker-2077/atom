@@ -101,7 +101,7 @@ export async function executeAtomProgramFunctionRegistryEndpoint(
     );
   }
   if (payload.result?.contract !== 'atom-program-function-registry'
-    || payload.result?.version !== 3
+    || payload.result?.version !== 4
     || payload.result?.runtimeContract !== ATOM_RUNTIME_CONTRACT) {
     throw cliError(
       'ATOM_RUNTIME_CONTRACT_MISMATCH',
@@ -239,9 +239,11 @@ function help() {
     '  transform() 返回 None，只表示登记了延后效果；实际提交必须以交互回执或后续 exact explore 回读确认。',
     '  JSON 函数：json_parse({"text":"..."})->JSON值；json_stringify({"value":...,"indent"?:0..8})->string。序列化默认紧凑，拒绝 NaN、Infinity 和非 JSON 值；失败将终止整个 Program 评估且不发布已登记效果；不开放 import/eval；可配合 detail.rep. 写回。',
     '  世界函数：explore(query)->rows；transform(spec)、slot_body(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
-    '  Transform 触发器：先定义无参数 main，再声明 trigger("transform", {"nodes":["exact 节点路径"]}, main)。main 是函数引用，不能写 main()；运行时按反向索引只运行命中的 Program；相同值写入仍属于 Transform 事件。',
+    '  Transform 触发器：先定义无参数 main，再声明 trigger("transform", {"nodes":["exact 节点路径"]}, main)。main 是函数引用，不能写 main()；运行时按反向索引只运行命中的 Program；相同值写入仍属于 Transform 事件。未声明 trigger 的 Program 冷启动时遇到无关 Transform 不会重放；显式 .run.、其自身被 Transform 或已知 explore 依赖变化时仍运行。',
     '  窗口识别锁：lock({...\"allowed_windows\":{\"paths\":[\"exact 完整 @agent 路径\"]},\"refresh\":{\"policy\":\"on_request\"}})。只有当前 --agent 解析路径 exact 命中才绕过该锁；未命中写入返回 PROGRAM_LOCK_DENIED。',
     '  类型条件锁：allowed_windows 也可写 {"types":{"all":["agent"],"any":["研发","总控"],"none":["执行"]}}；all／any／none 读取当前窗口节点的 Graph 类型，不读取调用方自报类型，并与旧 paths 写法二选一。',
+    '  空间范围锁：targets.scope 取 subtree 时锁覆盖目标整棵子树；allowed_windows 可写 {"relation":"target_within_window_parent"}，只允许窗口读取或改造其当前父节点及下级，exact path 不能绕过。',
+    '  调度权限：allowed_programs.paths 显式列出可越过该锁执行 Transform 的调度 Program；该权限不交给执行窗口。窗口被调度 Program 移动后，相对空间权限按新父级即时生效，无需重算锁。',
     '  锁定条件轴：when.target_types 使用相同类型条件判断目标状态；when.actions 仅取 explore／transform。状态与动作决定锁是否生效，窗口条件决定是否放行；守窗、跳窗、关窗和滚动绑定由上层 Program 调度，内核不写死。',
     '  显式重算：transform {\"name.run.\":\"EXACT_PROGRAM_PATH\"}；仅成功运行才原子替换旧锁快照，普通依赖变化不自动重算，失败保留旧锁快照。',
     '  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。',

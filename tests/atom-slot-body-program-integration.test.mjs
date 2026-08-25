@@ -76,7 +76,7 @@ test('Program slot_body effects seal and print in one central commit and reject 
   const committedText = await fs.readFile(contextFile, 'utf8');
   const committed = JSON.parse(committedText);
   const printed = find(committed, 'Root/订单槽体/槽例/订单001');
-  assert.ok(printed);
+  assert.ok(printed, JSON.stringify(first));
   assert.equal(find(committed, 'Root/订单槽体/槽例/订单001/共享计算'), null);
   assert.equal(
     find(committed, 'Root/订单槽体/槽例/订单001/金额').partners
@@ -137,6 +137,54 @@ test('creating an unrelated Program does not replay an existing slot-body print'
   assert.equal(created.ok, true, JSON.stringify(created.errors));
   const committed = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.ok(find(committed, 'Root/无关共享程序'));
+  assert.equal(
+    find(committed, 'Root/订单槽体/槽例').children
+      .filter((child) => nameOf(child) === '订单001').length,
+    1
+  );
+});
+
+test('a cold interaction runtime projects legacy Programs without replaying slot-body effects', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-slot-body-cold-runtime-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify(world(), null, 2), 'utf8');
+  const interaction = { agent: { ref: 'agent:Root/研发窗口', path: 'Root/研发窗口' } };
+
+  const printed = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Root/槽体装配程序"}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler(),
+    programMode: undefined,
+    interaction
+  });
+  assert.equal(printed.ok, true, JSON.stringify(printed.errors));
+  assert.ok(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Root/订单槽体/槽例/订单001'));
+
+  const restarted = createProgramRuntimeScheduler();
+  const projected = await executeAtomLanguage({
+    source: 'atom',
+    contextFile,
+    projectionFile,
+    programScheduler: restarted,
+    programMode: 'project',
+    interaction
+  });
+  assert.equal(projected.ok, true, JSON.stringify(projected.errors));
+
+  const unrelated = await executeAtomLanguage({
+    source: 'transform {"name":"Root/研发窗口","detail.rep.仍可工作"}',
+    contextFile,
+    projectionFile,
+    programScheduler: restarted,
+    programMode: undefined,
+    interaction
+  });
+
+  assert.equal(unrelated.ok, true, JSON.stringify(unrelated.errors));
+  const committed = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(
     find(committed, 'Root/订单槽体/槽例').children
       .filter((child) => nameOf(child) === '订单001').length,

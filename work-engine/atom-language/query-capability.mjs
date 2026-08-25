@@ -108,13 +108,14 @@ export function createAccessController(atoms, options = {}) {
     .map((type) => type.raw) ?? [];
   return {
     restricted: true,
-    async authorize(match, operation, field) {
+    async authorize(match, operation, field, actor = {}) {
       const targetPath = Array.isArray(match.path) ? match.path.join('/') : match.path;
       if (programLockIndex) {
         const decision = authorizeProgramLock({
           lockIndex: programLockIndex, targetPath, operation, field,
           agentPath,
           agentTypes,
+          programPath: actor.programPath ?? null,
           targetTypes: oneStoredField(match.atom, 'name')?.parsed.types
             .map((type) => type.raw) ?? [],
           action: operation === 'read' ? 'explore' : 'transform'
@@ -345,9 +346,14 @@ export async function executeExploreItem(
       }
       const source = programSources[0];
       const reason = source?.reason?.message?.trim();
+      const contextExplanation = source?.allowedWindows
+        || source?.allowedWindowTypes
+        || source?.allowedWindowRelation
+        ? '当前 @agent 上下文未满足放行条件。'
+        : '此限制不依赖 @agent 上下文。';
       const explanation = source?.sourceProgramPath
-        ? `目标存在，但读取受到 Program“${source.sourceProgramPath}”限制。${reason ? `原因：${reason}。` : ''}此限制与 @agent 上下文无关。`
-        : '目标存在，但读取受到世界规则限制；此限制与 @agent 上下文无关。';
+        ? `目标存在，但读取受到 Program“${source.sourceProgramPath}”限制。${reason ? `原因：${reason}。` : ''}${contextExplanation}`
+        : '目标存在，但读取受到世界规则限制；此限制不依赖 @agent 上下文。';
       return {
         ok: true,
         index: item.index,

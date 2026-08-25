@@ -74,6 +74,14 @@ function graphTypesAtPath(atoms, targetPath) {
   return oneStoredField(match.atom, 'name')?.parsed.types.map((type) => type.raw) ?? [];
 }
 
+function newlyAddedProgramPaths(beforeAtoms, afterAtoms) {
+  const previousPaths = new Set(walkAtoms(beforeAtoms).map((match) => match.path.join('/')));
+  return walkAtoms(afterAtoms)
+    .filter((match) => !previousPaths.has(match.path.join('/'))
+      && oneStoredField(match.atom, 'name')?.parsed.types.some((type) => type.raw === 'program'))
+    .map((match) => match.path.join('/'));
+}
+
 function performanceTrace(event, details) {
   if (process.env.ATOM_PERF_TRACE !== '1') return;
   process.stderr.write(`${JSON.stringify({ event, ...details })}\n`);
@@ -650,13 +658,16 @@ export async function executeAtomLanguage(options = {}) {
       continue;
     }
     let transformed;
+    const authorizeProgramEffect = (match, operation, field) => (
+      accessController.authorize(match, operation, field, { programPath: sourceProgramPath })
+    );
     try {
       transformed = compiled.createNew
         ? await applyCreateTransform({
             atoms,
             item: compiled.item,
             contextFile,
-            authorize: accessController.authorize,
+            authorize: authorizeProgramEffect,
             matcherRegistry: receiver.matcherRegistry,
             programScheduler: options.programScheduler
           })
@@ -664,7 +675,7 @@ export async function executeAtomLanguage(options = {}) {
             atoms,
             item: compiled.item,
             contextFile,
-            authorize: accessController.authorize
+            authorize: authorizeProgramEffect
           });
     } catch (error) {
       interactionWarnings.push(diagnostic(
@@ -713,7 +724,9 @@ export async function executeAtomLanguage(options = {}) {
       authorize: async ({ path: targetPath }) => {
         const match = walkAtoms(atoms).find((candidate) => candidate.path.join('/') === targetPath);
         if (!match) return { decision: 'deny' };
-        return accessController.authorize(match, 'write', 'children');
+        return accessController.authorize(
+          match, 'write', 'children', { programPath: sourceProgramPath }
+        );
       }
     });
     if (result.error) {
@@ -880,13 +893,18 @@ export async function executeAtomLanguage(options = {}) {
         let structuralChanged = 0;
         for (const entry of compiledRequests) {
           let transformed;
+          const authorizeProgramEffect = (match, operation, field) => (
+            cycleAccessController.authorize(
+              match, operation, field, { programPath: entry.sourceProgramPath }
+            )
+          );
           try {
             transformed = entry.createNew
               ? await applyCreateTransform({
                   atoms: candidateAtoms,
                   item: entry.item,
                   contextFile,
-                  authorize: cycleAccessController.authorize,
+                  authorize: authorizeProgramEffect,
                   matcherRegistry: receiver.matcherRegistry,
                   programScheduler: options.programScheduler
                 })
@@ -894,7 +912,7 @@ export async function executeAtomLanguage(options = {}) {
                   atoms: candidateAtoms,
                   item: entry.item,
                   contextFile,
-                  authorize: cycleAccessController.authorize,
+                  authorize: authorizeProgramEffect,
                   mutateInput,
                   exactIndex
                 });
@@ -965,7 +983,9 @@ export async function executeAtomLanguage(options = {}) {
             const match = walkAtoms(application.atoms)
               .find((candidate) => candidate.path.join('/') === targetPath);
             if (!match) return { decision: 'deny' };
-            return cycleAccessController.authorize(match, 'write', 'children');
+            return cycleAccessController.authorize(
+              match, 'write', 'children', { programPath: sourceProgramPath }
+            );
           }
         });
         if (slotResult.error) {
@@ -1271,6 +1291,9 @@ export async function executeAtomLanguage(options = {}) {
       }
     }
 
+    for (const programPath of newlyAddedProgramPaths(atoms, nextAtoms)) {
+      transformEventNodes.add(programPath);
+    }
     let revisionAfter = revisionOf(nextAtoms);
     let changed = revisionAfter !== revisionBefore;
     let finalProgramLockIndex = programLockIndex;
@@ -1535,7 +1558,8 @@ export async function executeAtomLanguage(options = {}) {
         nodes: [...new Set([
           transformed.sourcePath,
           transformed.resultPath,
-          transformed.resultName
+          transformed.resultName,
+          ...newlyAddedProgramPaths(atoms, nextAtoms)
         ].filter(Boolean))]
       });
       nextAtoms = postRefresh.atoms;

@@ -106,7 +106,7 @@ test('CLI and Web expose equivalent function registry data without an Agent cont
   const webPayload = await response.json();
   assert.equal(webPayload.ok, true);
   assert.equal(webPayload.result.contract, 'atom-program-function-registry');
-  assert.equal(webPayload.result.version, 3);
+  assert.equal(webPayload.result.version, 4);
 
   const stdout = output();
   const stderr = output();
@@ -197,6 +197,13 @@ test('public registry exposes the complete window-aware Program lock contract', 
   const lock = programFunctionRegistry().functions.find((item) => item.name === 'lock');
 
   assert.deepEqual(lock.contract.argument.required, ['targets', 'mode']);
+  assert.deepEqual(lock.contract.argument.properties.targets, {
+    type: 'object', required: ['refs'], additionalProperties: false,
+    properties: {
+      refs: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', format: 'atom-ref' } },
+      scope: { enum: ['exact', 'subtree'], default: 'exact' }
+    }
+  });
   assert.deepEqual(lock.contract.argument.properties.allowed_windows, {
     type: 'object',
     additionalProperties: false,
@@ -210,8 +217,18 @@ test('public registry exposes the complete window-aware Program lock contract', 
       {
         required: ['types'],
         properties: { types: { $ref: '#/definitions/graph-type-predicate' } }
+      },
+      {
+        required: ['relation'],
+        properties: { relation: { const: 'target_within_window_parent' } }
       }
     ]
+  });
+  assert.deepEqual(lock.contract.argument.properties.allowed_programs, {
+    type: 'object', required: ['paths'], additionalProperties: false,
+    properties: {
+      paths: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', format: 'exact-program-path' } }
+    }
   });
   assert.deepEqual(lock.contract.argument.properties.when, {
     type: 'object',
@@ -238,6 +255,9 @@ test('public registry exposes the complete window-aware Program lock contract', 
   assert.deepEqual(lock.contract.validationErrors, [
     'INVALID_PROGRAM_LOCK_ALLOWED_WINDOWS',
     'INVALID_PROGRAM_LOCK_WINDOW_TYPES',
+    'INVALID_PROGRAM_LOCK_WINDOW_RELATION',
+    'INVALID_PROGRAM_LOCK_ALLOWED_PROGRAMS',
+    'INVALID_PROGRAM_LOCK_TARGET_SCOPE',
     'INVALID_PROGRAM_LOCK_TARGET_TYPES',
     'INVALID_PROGRAM_LOCK_ACTIONS',
     'INVALID_PROGRAM_LOCK_WHEN',
@@ -268,6 +288,10 @@ test('public registry exposes indexed Transform trigger dispatch and function-re
   assert.equal(trigger.contract.dispatch, 'reverse-index');
   assert.equal(trigger.contract.event, 'transform-request');
   assert.equal(trigger.contract.sameValueTriggers, true);
+  assert.equal(
+    trigger.contract.untriggeredProgramDispatch,
+    'explicit-run-program-self-transform-or-known-dependency-change'
+  );
 });
 
 test('CLI Help documents the three-argument Transform trigger without eager main invocation', async () => {
@@ -280,6 +304,7 @@ test('CLI Help documents the three-argument Transform trigger without eager main
   assert.match(stdout.value(), /main 是函数引用[\s\S]*不能写 main\(\)/u);
   assert.match(stdout.value(), /相同值[\s\S]*仍属于 Transform 事件/u);
   assert.match(stdout.value(), /反向索引[\s\S]*只运行命中的 Program/u);
+  assert.match(stdout.value(), /未声明 trigger[\s\S]*无关 Transform[\s\S]*不会重放/u);
 });
 
 test('CLI Help explains window allowlists and explicit lock recomputation', async () => {
@@ -290,6 +315,9 @@ test('CLI Help explains window allowlists and explicit lock recomputation', asyn
   assert.equal(code, 0, stderr.value());
   assert.match(stdout.value(), /allowed_windows[\s\S]*paths[\s\S]*exact.*@agent/iu);
   assert.match(stdout.value(), /allowed_windows[\s\S]*types[\s\S]*all／any／none/u);
+  assert.match(stdout.value(), /targets\.scope[\s\S]*subtree[\s\S]*target_within_window_parent/u);
+  assert.match(stdout.value(), /allowed_programs[\s\S]*调度 Program/u);
+  assert.match(stdout.value(), /移动后[\s\S]*无需[\s\S]*重算/u);
   assert.match(stdout.value(), /target_types[\s\S]*when\.actions[\s\S]*explore／transform/u);
   assert.match(stdout.value(), /守窗、跳窗、关窗和滚动绑定[\s\S]*内核不写死/u);
   assert.match(stdout.value(), /refresh[\s\S]*on_request[\s\S]*name\.run\./u);

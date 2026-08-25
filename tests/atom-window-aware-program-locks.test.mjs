@@ -13,6 +13,10 @@ function atom(name, detail = '', children = [], type = '') {
   return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
 }
 
+function nameOf(value) {
+  return Object.entries(value).find(([key]) => key === 'name' || key.startsWith('name@'))?.[1];
+}
+
 function fixture(lockSource) {
   return [atom('Root', '', [
     atom('允许窗口', '', [], 'agent@研发'),
@@ -65,6 +69,143 @@ test('Program lock accepts normalized window types, target state and actions', a
     target_types: { all: ['槽例'], any: ['待处理'] },
     actions: ['transform']
   });
+});
+
+test('Program lock accepts one subtree spatial scope and explicit scheduler paths', async () => {
+  const source = [
+    'root = explore({"name":"Root"})[0]',
+    'lock({"targets":{"refs":[root.ref],"scope":"subtree"},"mode":"read_write","fields":["name","detail","children","partners"],"allowed_windows":{"relation":"target_within_window_parent"},"allowed_programs":{"paths":["Root/调度程序"]},"refresh":{"policy":"on_request"}})'
+  ].join('\n');
+  const scheduler = createProgramRuntimeScheduler();
+  const world = fixture(source);
+  world[0].children.push(atom('调度程序', 'def main(arguments):\n    return arguments', [], 'program'));
+  const cycle = await scheduler.refresh(world, {
+    programSelector: 'Root/窗口锁程序', force: true
+  });
+
+  assert.deepEqual(cycle.locks[0].targets.scope, 'subtree');
+  assert.deepEqual(cycle.locks[0].allowed_windows, {
+    relation: 'target_within_window_parent'
+  });
+  assert.deepEqual(cycle.locks[0].allowed_programs, { paths: ['Root/调度程序'] });
+});
+
+test('Program lock rejects an unknown target scope', async () => {
+  const source = [
+    'root = explore({"name":"Root"})[0]',
+    'lock({"targets":{"refs":[root.ref],"scope":"world"},"mode":"read_write"})'
+  ].join('\n');
+  await assert.rejects(
+    createProgramRuntimeScheduler().refresh(fixture(source), {
+      programSelector: 'Root/窗口锁程序', force: true
+    }),
+    (error) => error?.code === 'INVALID_PROGRAM_LOCK_TARGET_SCOPE'
+  );
+});
+
+test('Program lock rejects an unknown window relation', async () => {
+  const source = programWithAllowedWindows({ relation: 'window_within_target' });
+  await assert.rejects(
+    createProgramRuntimeScheduler().refresh(fixture(source), {
+      programSelector: 'Root/窗口锁程序', force: true
+    }),
+    (error) => error?.code === 'INVALID_PROGRAM_LOCK_WINDOW_RELATION'
+  );
+});
+
+test('Program lock rejects scheduler paths that do not resolve to Programs', async () => {
+  const source = [
+    'root = explore({"name":"Root"})[0]',
+    'lock({"targets":{"refs":[root.ref]},"mode":"write","allowed_programs":{"paths":["Root/受控目标"]}})'
+  ].join('\n');
+  await assert.rejects(
+    createProgramRuntimeScheduler().refresh(fixture(source), {
+      programSelector: 'Root/窗口锁程序', force: true
+    }),
+    (error) => error?.code === 'INVALID_PROGRAM_LOCK_ALLOWED_PROGRAMS'
+  );
+});
+
+test('scheduler Program moves one fixed window while its spatial scope follows the new parent', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-window-spatial-scope-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const snapshotFile = path.join(directory, 'request-driven-locks.json');
+  const schedulerSource = [
+    'def main():',
+    '    window = explore({"name":"执行窗口"})[0]',
+    '    transform({"name":"Root/状态","detail.rep.2":None})',
+    '    transform({"name.mov.Root/工单2":window.path})',
+    'trigger("transform", {"nodes":["Root/工单1/回单"]}, main)'
+  ].join('\n');
+  const lockSource = [
+    'root = explore({"name":"Root"})[0]',
+    'lock({"targets":{"refs":[root.ref],"scope":"subtree"},"mode":"read_write","fields":["name","detail","children","partners"],"allowed_windows":{"relation":"target_within_window_parent"},"allowed_programs":{"paths":["Root/调度程序"]},"refresh":{"policy":"on_request"}})'
+  ].join('\n');
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+    atom('状态', '1'),
+    atom('调度程序', schedulerSource, [], 'program'),
+    atom('空间锁', lockSource, [], 'program'),
+    atom('工单1', '', [atom('回单', '待回'), atom('执行窗口', '', [], 'agent@jump-executor')]),
+    atom('工单2', '', [atom('回单', '待回')])
+  ])], null, 2));
+  const scheduler = createProgramRuntimeScheduler({
+    requestDrivenLockRepository: createJsonRequestDrivenLockRepository({ file: snapshotFile })
+  });
+  const interaction = (windowPath) => ({ agent: { ref: `agent:${windowPath}`, path: windowPath } });
+
+  const locked = await executeAtomLanguage({
+    source: 'transform {"name.run.":"Root/空间锁"}', contextFile, projectionFile,
+    programScheduler: scheduler, interaction: interaction('Root/工单1/执行窗口')
+  });
+  assert.equal(locked.ok, true, JSON.stringify(locked.errors));
+
+  const returned = await executeAtomLanguage({
+    source: 'transform {"name":"Root/工单1/回单","detail.rep.已回"}', contextFile, projectionFile,
+    programScheduler: scheduler, interaction: interaction('Root/工单1/执行窗口')
+  });
+  assert.equal(returned.ok, true, JSON.stringify(returned.errors));
+
+  const worldAfter = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const root = worldAfter[0];
+  assert.equal(root.children.find((item) => item.name === '状态').detail, '2');
+  assert.equal(root.children.find((item) => item.name === '工单1').children.some((item) => nameOf(item) === '执行窗口'), false);
+  assert.equal(
+    root.children.find((item) => item.name === '工单2').children.some((item) => nameOf(item) === '执行窗口'),
+    true,
+    JSON.stringify(returned.warnings)
+  );
+
+  const movedInteraction = interaction('Root/工单2/执行窗口');
+  const current = await executeAtomLanguage({
+    source: 'explore {"name":"Root/工单2","children$latitude-1":true}', contextFile, projectionFile,
+    programScheduler: scheduler, interaction: movedInteraction
+  });
+  assert.equal(current.ok, true, JSON.stringify(current.errors));
+  assert.ok(current.items[0].matches.some((item) => item.path === 'Root/工单2/执行窗口'));
+
+  const upper = await executeAtomLanguage({
+    source: 'explore {"name":"Root/状态","detail$full":true}', contextFile, projectionFile,
+    programScheduler: scheduler, interaction: movedInteraction
+  });
+  assert.equal(upper.items[0].matches.length, 0);
+  assert.equal(upper.warnings[0].code, 'ATOM_READ_PROTECTED');
+  assert.match(upper.warnings[0].message, /当前 @agent 上下文未满足放行条件/u);
+
+  const otherOrder = await executeAtomLanguage({
+    source: 'explore {"name":"Root/工单1","detail$full":true}', contextFile, projectionFile,
+    programScheduler: scheduler, interaction: movedInteraction
+  });
+  assert.equal(otherOrder.items[0].matches.length, 0);
+  assert.equal(otherOrder.warnings[0].code, 'ATOM_READ_PROTECTED');
+  assert.match(otherOrder.warnings[0].message, /当前 @agent 上下文未满足放行条件/u);
+
+  const selfMove = await executeAtomLanguage({
+    source: 'transform {"name.mov.Root/工单1":"Root/工单2/执行窗口"}', contextFile, projectionFile,
+    programScheduler: scheduler, interaction: movedInteraction
+  });
+  assert.equal(selfMove.errors[0].code, 'PROGRAM_LOCK_DENIED');
 });
 
 for (const [name, predicate] of [

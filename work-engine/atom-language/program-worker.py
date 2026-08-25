@@ -39,7 +39,7 @@ def load_program_function_registry():
     module_path = Path(__file__).with_name("program-function-registry.json")
     value = json.loads(module_path.read_text(encoding="utf-8"))
     if (value.get("contract") != "atom-program-function-registry"
-            or value.get("version") != 3
+            or value.get("version") != 4
             or value.get("runtimeContract") != "atom-interaction/3"):
         raise RuntimeError("Program function registry has an invalid public contract")
     families = set()

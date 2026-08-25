@@ -73,6 +73,9 @@ export function buildProgramLockIndex({ revision, results = [], records = [] }) 
         allowedWindowTypes: result.allowed_windows?.types
           ? structuredClone(result.allowed_windows.types)
           : null,
+        allowedWindowRelation: result.allowed_windows?.relation ?? null,
+        allowedPrograms: result.allowed_programs?.paths ? [...result.allowed_programs.paths] : null,
+        targetScope: result.targets?.scope ?? 'exact',
         when: result.when ? structuredClone(result.when) : null,
         reason: result.reason && typeof result.reason === 'object'
           ? structuredClone(result.reason)
@@ -101,6 +104,9 @@ export function mergeProgramLockIndexes({
       allowedWindowTypes: source.allowedWindowTypes
         ? structuredClone(source.allowedWindowTypes)
         : null,
+      allowedWindowRelation: source.allowedWindowRelation ?? null,
+      allowedPrograms: source.allowedPrograms ? [...source.allowedPrograms] : null,
+      targetScope: source.targetScope ?? 'exact',
       when: source.when ? structuredClone(source.when) : null,
       reason: source.reason && typeof source.reason === 'object'
         ? structuredClone(source.reason)
@@ -144,6 +150,8 @@ export function programLockDeniedDiagnostic(decision, field = null) {
         sourceProgramPath: source.sourceProgramPath,
         allowedWindows: source.allowedWindows ?? null,
         allowedWindowTypes: source.allowedWindowTypes ?? null,
+        allowedWindowRelation: source.allowedWindowRelation ?? null,
+        allowedPrograms: source.allowedPrograms ?? null,
         when: source.when ?? null,
         reason: source.reason ?? null
       }))
@@ -158,22 +166,39 @@ export function authorizeProgramLock({
   field,
   agentPath = null,
   agentTypes = [],
+  programPath = null,
   targetTypes = [],
   action = operation === 'read' ? 'explore' : 'transform'
 }) {
-  const entry = lockIndex?.byPath?.get(targetPath);
-  if (!entry) return { decision: 'allow' };
+  const entries = [];
+  const segments = targetPath.split('/');
+  for (let length = segments.length; length > 0; length -= 1) {
+    const lockedPath = segments.slice(0, length).join('/');
+    const entry = lockIndex?.byPath?.get(lockedPath);
+    if (entry) entries.push({ entry, exact: lockedPath === targetPath });
+  }
+  if (!entries.length) return { decision: 'allow' };
   const fieldKey = operation === 'read' ? 'readFields' : 'writeFields';
-  const matched = entry.sources.filter((source) => {
+  const matched = entries.flatMap(({ entry, exact }) => entry.sources.filter((source) => {
+    if (!exact && source.targetScope !== 'subtree') return false;
     if (source.when?.actions && !source.when.actions.includes(action)) return false;
     if (source.when?.target_types
       && !matchesTypePredicate(targetTypes, source.when.target_types)) return false;
+    if (source.allowedPrograms?.includes(programPath)) return false;
     if (source.allowedWindows?.includes(agentPath)) return false;
     if (source.allowedWindowTypes
       && matchesTypePredicate(agentTypes, source.allowedWindowTypes)) return false;
+    if (source.allowedWindowRelation === 'target_within_window_parent' && agentPath) {
+      const parentPath = agentPath.split('/').slice(0, -1).join('/');
+      const withinParent = parentPath
+        && (targetPath === parentPath || targetPath.startsWith(`${parentPath}/`));
+      const selfStructuralWrite = operation === 'write'
+        && targetPath === agentPath && ['name', 'children'].includes(field);
+      if (withinParent && !selfStructuralWrite) return false;
+    }
     const fields = source[fieldKey];
     return field ? fields.has(field) : fields.size > 0;
-  });
+  }));
   if (!matched.length) return { decision: 'allow' };
   return { decision: operation === 'read' ? 'truncate' : 'deny', matched, agentPath };
 }
