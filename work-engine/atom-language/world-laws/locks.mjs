@@ -17,29 +17,29 @@ function field(atom, baseKey) {
 }
 
 function atomName(atom) {
-  return field(atom, 'name')?.value ?? null;
+  return field(atom, 'thing')?.value ?? null;
 }
 
 function atomDetail(atom) {
-  return field(atom, 'detail')?.value ?? '';
+  return field(atom, 'situation')?.value ?? '';
 }
 
 function walk(atoms, parentPath = []) {
   const result = [];
   for (const atom of atoms ?? []) {
-    const nameField = field(atom, 'name');
+    const nameField = field(atom, 'thing');
     const name = nameField?.value;
     if (typeof name !== 'string') continue;
     const path = [...parentPath, name];
     result.push({ atom, name, path: path.join('/'), types: nameField.types });
-    const children = field(atom, 'children')?.value;
+    const children = field(atom, 'contain')?.value;
     if (Array.isArray(children)) result.push(...walk(children, path));
   }
   return result;
 }
 
 function properties(atom) {
-  const children = field(atom, 'children')?.value;
+  const children = field(atom, 'contain')?.value;
   return new Map((Array.isArray(children) ? children : []).map((child) => [
     atomName(child), atomDetail(child)
   ]));
@@ -67,11 +67,8 @@ export function decodeLockAtoms(atoms) {
   };
   return entries.filter((entry) => entry.types.includes('lock')).map((entry) => {
     const values = properties(entry.atom);
-    const partners = field(entry.atom, 'partners')?.value;
-    const relations = Array.isArray(partners) ? partners : [];
-    const related = (verb) => relations
-      .filter((relation) => relation?.verb === verb && typeof relation.object === 'string')
-      .map((relation) => resolveReference(entry, relation.object));
+    const related = (property) => csv(values.get(property))
+      .map((reference) => resolveReference(entry, reference));
     return {
       id: entry.name,
       path: entry.path,

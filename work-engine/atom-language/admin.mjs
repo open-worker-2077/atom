@@ -19,13 +19,13 @@ function field(atom, baseKey) {
 function windowsIn(atoms, parent = []) {
   const result = [];
   for (const atom of atoms) {
-    const nameField = field(atom, 'name');
+    const nameField = field(atom, 'thing');
     if (typeof nameField?.value !== 'string') continue;
     const path = [...parent, nameField.value];
     if (nameField.parsed.types.some((type) => type.raw === 'agent')) {
       result.push({ name: nameField.value, path: path.join('/') });
     }
-    const children = field(atom, 'children')?.value;
+    const children = field(atom, 'contain')?.value;
     if (Array.isArray(children)) result.push(...windowsIn(children, path));
   }
   return result;

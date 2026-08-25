@@ -226,12 +226,13 @@
     return payload;
   }
 
-  async function pullKnowledge(requestedPath = lab.state().path || "root") {
+  async function pullKnowledge(requestedPath = lab.state().path || "root", options = {}) {
+    const allowDuringTransaction = options.allowDuringTransaction === true;
     if (pulling) {
       await pullCompletion;
-      return pullKnowledge(requestedPath);
+      return pullKnowledge(requestedPath, options);
     }
-    if (pushing || lab.state().transactionActive) return false;
+    if (pushing || (lab.state().transactionActive && !allowDuringTransaction)) return false;
     let completePull;
     pullCompletion = new Promise((resolve) => { completePull = resolve; });
     pulling = true;
@@ -249,7 +250,12 @@
       }
       const incoming = payload.knowledge;
       const scopedPath = payload.scope && payload.scope.path;
-      if (pullOperationEpoch !== workspaceOperationEpoch || pushing || hasQueuedWorkspaceCommit()) {
+      if (
+        pullOperationEpoch !== workspaceOperationEpoch
+        || pushing
+        || hasQueuedWorkspaceCommit()
+        || (lab.state().transactionActive && !allowDuringTransaction)
+      ) {
         return false;
       }
       const incomingRevision = Number(incoming && incoming.revision) || 0;
@@ -261,7 +267,9 @@
           lastKnowledge = null;
         }
         const knowledge = scopedPath ? mergeScopedKnowledge(lastKnowledge, incoming) : incoming;
-        if (!lab.importKnowledge(knowledge)) return false;
+        if (!lab.importKnowledge(knowledge, {
+          preserveTransaction: allowDuringTransaction && lab.state().transactionActive === true
+        })) return false;
         if (
           unseenScope
           && scopedPath === (lab.state().path || "root")
@@ -527,7 +535,9 @@
       ...(Array.isArray(view.expandedPaths) ? view.expandedPaths : [])
     ].filter((path) => typeof path === "string" && path.trim()))];
     for (const path of requiredPaths) {
-      if (!loadedPaths.has(path)) await pullKnowledge(path);
+      if (!loadedPaths.has(path)) {
+        await pullKnowledge(path, { allowDuringTransaction: true });
+      }
     }
     pushing = true;
     try {

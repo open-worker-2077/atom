@@ -95,6 +95,27 @@ test('import without a detail presentation defaults to floating while explicit s
   assert.equal(nodes[1].surfaceVisible, true);
 });
 
+test('workspace retains Graph identity and Program source separately from the visible summary', () => {
+  const model = loadModel();
+  const workspace = model.createWorkspace();
+  workspace.importKnowledge({
+    nodes: [{
+      id: 'program', path: 'root', label: 'Predicate', detail: 'Program',
+      graphPath: 'Root/Predicate', programSource: 'def main(arguments):\n    return True',
+      atomTypes: ['program']
+    }],
+    edges: []
+  });
+
+  const node = workspace.projectDomain('root', [])[0];
+  assert.equal(node.description, 'Program');
+  assert.match(node.programSource, /return True/u);
+  assert.equal(node.graphPath, 'Root/Predicate');
+  const exported = workspace.exportKnowledge().nodes[0];
+  assert.equal(exported.programSource, node.programSource);
+  assert.equal(exported.graphPath, node.graphPath);
+});
+
 test('imported knowledge replaces built-in validation nodes in the projected domain', () => {
   const model = loadModel();
   const workspace = model.createWorkspace();
@@ -111,6 +132,32 @@ test('imported knowledge replaces built-in validation nodes in the projected dom
   assert.deepEqual(
     plain(workspace.projectDomain('root', validationNodes).map((node) => node.label)),
     ['Logic Fire agent初加工']
+  );
+});
+
+test('scoped hydration can preserve an active cross-domain transaction', () => {
+  const model = loadModel();
+  const workspace = model.createWorkspace();
+  const sourceNode = { id: 'source', path: 'root', label: '待移动节点' };
+  workspace.importKnowledge({ nodes: [sourceNode], edges: [] });
+  workspace.beginEdgeCreate(
+    model.qualifiedEndpoint('root', sourceNode, ['全域']),
+    sourceNode
+  );
+
+  const hydrated = {
+    nodes: [
+      sourceNode,
+      { id: 'landing', path: 'root/target', label: '目标占位' }
+    ],
+    edges: []
+  };
+  assert.equal(workspace.importKnowledge(hydrated), false);
+  assert.equal(workspace.importKnowledge(hydrated, { preserveTransaction: true }), true);
+  assert.equal(workspace.transaction().source.key, 'root::source');
+  assert.deepEqual(
+    plain(workspace.projectDomain('root/target', []).map((node) => node.label)),
+    ['目标占位']
   );
 });
 

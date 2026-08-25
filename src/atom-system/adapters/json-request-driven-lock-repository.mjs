@@ -53,7 +53,7 @@ function validWhen(value) {
 }
 
 function validate(value) {
-  const supportedFields = new Set(['name', 'detail', 'children', 'partners', 'messages']);
+  const supportedFields = new Set(['thing', 'situation', 'contain', 'support', 'messages']);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.version !== 1 || !Array.isArray(value.locks)
     || value.locks.some((lock) => !lock || typeof lock !== 'object' || Array.isArray(lock)

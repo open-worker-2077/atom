@@ -21,7 +21,7 @@
       "contract": {
         "argument": { "type": "object", "name": "spec" },
         "create": {
-          "requiredAxes": ["name", "detail", "children", "partners"],
+          "requiredAxes": ["thing", "situation", "contain", "support"],
           "dotCommands": "forbidden"
         },
         "update": { "dotCommands": "supported" },
@@ -45,7 +45,7 @@
             "name": { "type": "string", "format": "single-atom-name", "requiredWhen": { "action": "print" } }
           }
         },
-        "layout": { "children": ["槽模", "槽例"], "blank": "槽例/空槽例" },
+        "layout": { "contain": ["槽模", "槽例"], "blank": "槽例/空槽例" },
         "result": { "type": "object", "meaning": "deferred-effect-plan" },
         "transaction": "central-atomic-commit",
         "confirmation": ["interaction-receipt", "exact-explore"],
@@ -124,7 +124,7 @@
             }
           }
         },
-        "recompute": { "command": "transform {\"name.run.\":\"EXACT_PROGRAM_PATH\"}" },
+        "recompute": { "command": "transform {\"thing.run.\":\"EXACT_PROGRAM_PATH\"}" },
         "definitions": {
           "graph-type-predicate": {
             "type": "object",

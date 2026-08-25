@@ -82,18 +82,16 @@ async function temporaryDirectory(t) {
 function atomFixture() {
   return [
     {
-      'name@agent': '石器工坊',
-      'detail#工坊简介': '可核查的正文',
-      children: [],
-      partners: [
-        { verb: '产出', object: '石斧' }
-      ]
+      'thing@agent': '石器工坊',
+      'situation#工坊简介': '可核查的正文',
+      contain: [],
+      support: [{ 'if@current': true, then: [{ thing: '石斧' }] }]
     },
     {
-      'name@item': '石斧',
-      'detail#物件简介': '可核查的物件',
-      children: [],
-      partners: []
+      'thing@item': '石斧',
+      'situation#物件简介': '可核查的物件',
+      contain: [],
+      support: []
     }
   ];
 }
@@ -214,7 +212,7 @@ test('graph server initializes the projection, serves the full UI health and Gra
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ expectedRevision: running.initialization.revisionAfter })
   });
-  assert.equal(recoveryResponse.status, 200);
+  assert.equal(recoveryResponse.status, 200, await recoveryResponse.clone().text());
   const recovery = await recoveryResponse.json();
   assert.equal(recovery.ok, true);
   assert.equal(recovery.result.sourceRevision, `sha256:${running.initialization.revisionAfter}`);
@@ -231,9 +229,9 @@ test('graph server initializes the projection, serves the full UI health and Gra
   const graphResponse = await fetch(`${running.url}/__spatial/api/graph`);
   assert.equal(graphResponse.status, 200);
   const graph = await graphResponse.json();
-  assert.equal(graph.graph.name, 'atom.json');
-  assert.equal(graph.graph.children[0].name, '石器工坊');
-  assert.equal(graph.graph.children[0].detail, '可核查的正文');
+  assert.equal(graph.graph.thing, 'atom.json');
+  assert.equal(graph.graph.contain[0]['thing@agent'], '石器工坊');
+  assert.equal(graph.graph.contain[0]['situation#工坊简介'], '可核查的正文');
 
   const pageResponse = await fetch(`${running.url}/`);
   assert.equal(pageResponse.status, 200);
@@ -241,7 +239,7 @@ test('graph server initializes the projection, serves the full UI health and Gra
   assert.match(await pageResponse.text(), /<canvas\b|Spatial|空间/u);
 
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), atomFixture());
-  assert.equal(JSON.parse(await fs.readFile(graphFile, 'utf8')).graph.children[0].name, '石器工坊');
+  assert.equal(JSON.parse(await fs.readFile(graphFile, 'utf8')).graph.contain[0]['thing@agent'], '石器工坊');
   assert.equal((await fs.stat(storeFile)).isFile(), true);
   await assert.rejects(
     fs.access(path.join(directory, 'data', 'knowledge.json')),
@@ -253,9 +251,9 @@ test('graph server initializes the projection, serves the full UI health and Gra
   const state = await stateResponse.json();
   const labels = state.knowledge.nodes.map((node) => node.label);
   assert.ok(labels.includes('石器工坊'), 'atom node projects into the spatial knowledge store');
-  assert.ok(labels.includes('石斧'), 'atom partner object projects as its own node');
+  assert.ok(labels.includes('石斧'), 'support target projects as its own node');
   assert.equal(state.knowledge.edges.length, 1);
-  assert.equal(state.knowledge.edges[0].label, '产出');
+  assert.equal(state.knowledge.edges[0].label, 'support');
 });
 
 test('4784 resolves an Agent selector inside the resident world instead of every CLI process', async () => {
@@ -276,7 +274,7 @@ test('4784 resolves an Agent selector inside the resident world instead of every
   });
 
   const result = await handlers.atomCommand({
-    source: 'explore {"name":"Target"}',
+    source: 'explore {"thing":"Target"}',
     interaction: { agentSelector: '冰', agent: { path: '冰' } }
   });
 
@@ -343,7 +341,7 @@ test('graph server persists compact read diagnostics through the shared interact
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      source: 'explore {"name":"石器工坊"}',
+      source: 'explore {"thing":"石器工坊"}',
       interaction: {
         id: 'service-read-diagnostic',
         agent: { ref: 'transport-ref', path: '石器工坊' }
@@ -380,7 +378,7 @@ test('unchanged explore does not load, republish, or rewrite the complete spatia
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      source: 'explore {"name":"石器工坊"}',
+      source: 'explore {"thing":"石器工坊"}',
       interaction: {
         id: 'read-without-projection-write',
         agent: { ref: 'transport-ref', path: '石器工坊' }
@@ -429,7 +427,7 @@ test('independent explore requests execute concurrently against one initialized 
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      source: 'explore {"name":"石器工坊"}',
+      source: 'explore {"thing":"石器工坊"}',
       interaction: { id, agent: { ref: 'transport-ref', path: '石器工坊' } },
       history: []
     })
@@ -470,7 +468,7 @@ test('graph server queues private backup from a committed operation instead of r
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      source: 'transform {"name":"石斧","detail.rep.已更新"}',
+      source: 'transform {"thing":"石斧","situation.rep.已更新"}',
       interaction: {
         id: 'backup-after-write',
         agent: { ref: 'fixture-agent-ref', path: '石器工坊' }

@@ -3,16 +3,16 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 test('a Program can call one exact reusable Program with JSON arguments', async () => {
   const reusable = [
     'def main(arguments):',
-    "    rows = explore({'name': arguments['root'], 'children$latitude-1': None, 'detail$full': None})",
-    "    refs = [row.ref for row in rows if row.detail.strip()]",
-    "    lock({'targets': {'refs': refs}, 'mode': 'write', 'fields': ['name', 'detail'], 'protect': {'atom': True, 'messages': False}, 'reason': {'code': 'PREDEFINED_CONTENT', 'message': '预定义内容已锁定'}})",
+    "    rows = explore({'thing': arguments['root'], 'contain$latitude-1': None, 'situation$full': None})",
+    "    refs = [row.ref for row in rows if row.situation.strip()]",
+    "    lock({'targets': {'refs': refs}, 'mode': 'write', 'fields': ['thing', 'situation'], 'protect': {'atom': True, 'messages': False}, 'reason': {'code': 'PREDEFINED_CONTENT', 'message': '预定义内容已锁定'}})",
     "    return {'locked': len(refs)}",
   ].join('\n');
   const caller = [
@@ -29,7 +29,7 @@ test('a Program can call one exact reusable Program with JSON arguments', async 
 
   assert.equal(result.locks.length, 1);
   assert.equal(result.locks[0].targets.refs.length, 2);
-  assert.deepEqual(result.locks[0].fields, ['name', 'detail']);
+  assert.deepEqual(result.locks[0].fields, ['thing', 'situation']);
   assert.equal(result.messages[0].text, 'locked=2');
 });
 
@@ -58,7 +58,7 @@ test('Programs resolve exact sibling, ancestor, descendant, and partner paths wi
     "message({'level': 'info', 'text': '|'.join(resolved)})"
   ].join('\n');
   const caller = atom('调用方', callerSource, [atom('下级库', library('descendant'), [], 'program')], 'program');
-  caller.partners = [{ verb: '调用', object: '外部/伙伴库' }];
+  caller.support = [{ 'if@current': true, then: [{ thing: '外部/伙伴库' }] }];
   const world = [
     atom('领域', library('ancestor'), [atom('同级库', library('sibling'), [], 'program'), caller], 'program'),
     atom('外部', '', [atom('伙伴库', library('partner'), [], 'program')])

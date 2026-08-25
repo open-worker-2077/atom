@@ -39,21 +39,21 @@ function worldRecords(atoms) {
   const worldRevision = revisionOfWorldFacts(atoms).slice('sha256:'.length);
   function visit(atom, parentRef, parentPath, address) {
     const stored = fields(atom);
-    const name = stored.get('name')?.value;
+    const name = stored.get('thing')?.value;
     const atomPath = [...parentPath, name].join('/');
     const ref = crypto.createHash('sha256').update(`${worldRevision}:${address}`).digest('base64url').slice(0, 24);
     const record = {
       ref,
       name,
-      detail: stored.get('detail')?.value ?? '',
+      detail: stored.get('situation')?.value ?? '',
       path: atomPath,
-      types: stored.get('name')?.parsed.types.map((type) => type.raw) ?? [],
+      types: stored.get('thing')?.parsed.types.map((type) => type.raw) ?? [],
       parentRef,
       childrenRefs: [],
-      partners: structuredClone(stored.get('partners')?.value ?? [])
+      partners: structuredClone(stored.get('support')?.value ?? [])
     };
     records.push(record);
-    for (const [index, child] of (stored.get('children')?.value ?? []).entries()) {
+    for (const [index, child] of (stored.get('contain')?.value ?? []).entries()) {
       const childRecord = visit(child, ref, [...parentPath, name], `${address}/${index}`);
       record.childrenRefs.push(childRecord.ref);
     }
@@ -178,7 +178,7 @@ function contextualProgramSetFingerprint(
 }
 
 function requestsDependOnAgent(requests) {
-  return requests.some((request) => !request?.name);
+  return requests.some((request) => !request?.thing);
 }
 
 function reusableCandidates(
@@ -274,10 +274,10 @@ function worldRevisionKey(records) {
   return records[0]?.ref ?? 'empty-world';
 }
 
-function validateResult(result, records, program) {
+function validateResult(result, records, program, options = {}) {
   if (!result?.ok) {
     const error = new Error(result?.error?.message || 'Python Program failed');
-    error.code = 'ATOM_PROGRAM_FAILED';
+    error.code = result?.error?.code || 'ATOM_PROGRAM_FAILED';
     error.details = { program: program.path, type: result?.error?.type };
     throw error;
   }
@@ -302,9 +302,9 @@ function validateResult(result, records, program) {
     if (!['write', 'read_write'].includes(entry.mode)) {
       throw Object.assign(new Error('lock.mode must be write or read_write'), { code: 'INVALID_PROGRAM_LOCK_MODE' });
     }
-    const fields = entry.fields ?? ['name', 'detail', 'children', 'partners'];
+    const fields = entry.fields ?? ['thing', 'situation', 'contain', 'support'];
     if (!Array.isArray(fields) || !fields.length
-      || fields.some((field) => !['name', 'detail', 'children', 'partners', 'messages'].includes(field))) {
+      || fields.some((field) => !['thing', 'situation', 'contain', 'support', 'messages'].includes(field))) {
       throw Object.assign(new Error('lock.fields contains an unsupported Atom field'), { code: 'INVALID_PROGRAM_LOCK_FIELDS' });
     }
     const protect = entry.protect ?? { atom: true, messages: false };
@@ -508,12 +508,27 @@ function validateResult(result, records, program) {
     };
   });
   const trigger = result.trigger == null ? null : structuredClone(result.trigger);
-  return { locks, messages, transforms, slotBodies, choices, trigger };
+  if (options.supportDecision === true) {
+    if ([locks, messages, transforms, slotBodies, choices].some((entries) => entries.length > 0)) {
+      throw Object.assign(new Error('Support antecedent Program may only return bool and cannot emit effects'), {
+        code: 'PROGRAM_SUPPORT_EFFECT_FORBIDDEN', details: { program: program.path }
+      });
+    }
+    if (typeof result.supportDecision !== 'boolean') {
+      throw Object.assign(new Error('Support antecedent Program must return a strict JSON boolean'), {
+        code: 'INVALID_PROGRAM_SUPPORT_RESULT', details: { program: program.path }
+      });
+    }
+  }
+  return {
+    locks, messages, transforms, slotBodies, choices, trigger,
+    ...(options.supportDecision === true ? { supportDecision: result.supportDecision } : {})
+  };
 }
 
 function runWorker({
   python, records, programs, program, timeoutMs, executeExplore, validateOnly = false,
-  triggered = false
+  triggered = false, supportDecision = false
 }) {
   return new Promise((resolve, reject) => {
     const child = spawn(python, ['-I', '-X', 'utf8', workerFile], {
@@ -588,7 +603,7 @@ function runWorker({
         return;
       }
       try {
-        resolve(validateResult(child.__atomResult ?? JSON.parse(stdout), records, program));
+        resolve(validateResult(child.__atomResult ?? JSON.parse(stdout), records, program, { supportDecision }));
       } catch (error) {
         reject(error);
       }
@@ -597,7 +612,8 @@ function runWorker({
       world: programs ?? records.filter((record) => record.types.includes('program')),
       program,
       validateOnly,
-      triggered
+      triggered,
+      supportDecision
     });
   });
 }
@@ -656,6 +672,30 @@ export class ProgramRuntimeScheduler {
         code: 'INVALID_REQUEST_DRIVEN_LOCK_REPOSITORY'
       });
     }
+  }
+
+  async evaluateSupportProgram(atoms, selector, options = {}) {
+    const records = worldRecords(atoms);
+    const [program] = programRecords(records, selector);
+    const preparedWorld = options.executeExplore ? null : prepareExploreWorld(atoms);
+    const executeExplore = options.executeExplore ?? ((request) => executeProgramExplore({
+      atoms, request, preparedWorld
+    }));
+    const result = await this.runBounded(() => this.runProgram({
+      python: this.python,
+      records,
+      programs: programRecords(records),
+      program,
+      timeoutMs: options.timeoutMs ?? this.timeoutMs,
+      executeExplore: async (request) => {
+        const matches = await executeExplore(request);
+        const byPath = new Map(records.map((record) => [record.path, record]));
+        return matches.map((match) => byPath.get(match.path)).filter(Boolean);
+      },
+      supportDecision: true,
+      triggered: true
+    }));
+    return result.supportDecision;
   }
 
   async activeRequestDrivenLocks() {
@@ -1062,8 +1102,8 @@ export class ProgramRuntimeScheduler {
           affectedAtoms: [
             { path: program.path, ref: program.ref, axes: [] },
             ...requests
-              .filter((request) => typeof request?.name === 'string' && request.name.trim())
-              .map((request) => ({ path: request.name.trim(), axes: [] }))
+              .filter((request) => typeof request?.thing === 'string' && request.thing.trim())
+              .map((request) => ({ path: request.thing.trim(), axes: [] }))
           ]
         });
       } catch (error) {

@@ -116,6 +116,13 @@ test('connections come from relationshipPairs without a hard-coded root index ch
   assert.doesNotMatch(connections, /\brootPairs\b/);
 });
 
+test('real canvas consumes support bundles as branches, a common trunk, and ordered outputs', () => {
+  assert.match(source, /visualModel\.supportBundles\s*\(\s*state\.supportClauses/);
+  assert.match(source, /drawSupportBundle/);
+  assert.match(source, /junctionRatio/);
+  assert.match(source, /glyphs:\s*false/);
+});
+
 test('tunnel drawing is purely visual and does not reveal child topology', () => {
   const tunnel = functionSource('drawTunnelInterior');
 

@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 async function runProgram(source) {
@@ -54,8 +54,8 @@ test('form accepts zero components and one required component without synthesizi
     'single = form({"action": "evaluate", "components": [',
     '  {"name": "直接操作", "activation": "required", "value": {"结果": "完成"}, "requirements": [{"path": ["结果"]}], "components": []}',
     ']})',
-    'compiled = form({"name": "极简单", "detail": "", "children": [{"name": "直接操作"}], "partners": []})',
-    'message({"level": "info", "text": str(empty["valid"]) + "|" + ",".join(single["active"]) + "|" + ",".join([child["name"] for child in compiled["children"]])})'
+    'compiled = form({"thing": "极简单", "situation": "", "contain": [{"thing": "直接操作"}], "support": []})',
+    'message({"level": "info", "text": str(empty["valid"]) + "|" + ",".join(single["active"]) + "|" + ",".join([child["thing"] for child in compiled["contain"]])})'
   ].join('\n'));
 
   assert.equal(cycle.messages[0].text, 'True|直接操作|直接操作');

@@ -10,8 +10,8 @@ import { executeProgramExplore } from '../work-engine/atom-language/query-capabi
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 async function filesFor(t, atoms, prefix = 'atom-boundary-preview-') {
@@ -58,7 +58,7 @@ test('ordinary Explore reports unreturned coordinate nodes and readable characte
   const files = await filesFor(t, routeFixture());
   const result = await executeAtomLanguage({
     ...files,
-    source: 'explore {"name":"Center","detail$full":true,"children$latitude-1":true,"children$longitude+1":true}'
+    source: 'explore {"thing":"Center","situation$full":true,"contain$latitude-1":true,"contain$longitude+1":true}'
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
@@ -77,11 +77,11 @@ test('ordinary Explore recalculates the boundary after re-anchoring along the ro
   const files = await filesFor(t, routeFixture());
   const center = await executeAtomLanguage({
     ...files,
-    source: 'explore {"name":"Center","children$latitude-1":true}'
+    source: 'explore {"thing":"Center","contain$latitude-1":true}'
   });
   const child = await executeAtomLanguage({
     ...files,
-    source: 'explore {"name":"Center/Child","children$latitude-1":true}'
+    source: 'explore {"thing":"Center/Child","contain$latitude-1":true}'
   });
 
   assert.equal(center.items[0].boundary.down.nodes, 2);
@@ -97,27 +97,26 @@ test('protected continuation is explicit without leaking names, content, or exac
     atom('Work Agent', '', [], 'agent'),
     atom('Root', '', [atom('Center', '', [atom('Public', 'shown'), atom('Secret', 'hidden')])]),
     {
-      'name@lock': 'Secret seal',
-      detail: '',
-      children: [
+      'thing@lock': 'Secret seal',
+      situation: '',
+      contain: [
         property('law', 'atom.lock.basic'),
         property('effect', 'seal'),
         property('actions', 'read,write'),
         property('scope', 'subtree'),
         property('grade', '0'),
         property('key_requirement', ''),
+        property('protects', 'Root/Center/Secret'),
+        property('applies_to', 'Work Agent'),
         property('enabled', 'true')
       ],
-      partners: [
-        { verb: 'protects', object: 'Root/Center/Secret' },
-        { verb: 'applies_to', object: 'Work Agent' }
-      ]
+      support: []
     }
   ], 'atom-protected-boundary-');
   const result = await executeAtomLanguage({
     ...files,
     legacyAccess: { window: 'Work Agent', keys: [] },
-    source: 'explore {"name":"Center"}'
+    source: 'explore {"thing":"Center"}'
   });
   const serialized = JSON.stringify(result.items[0].boundary);
 
@@ -133,21 +132,21 @@ test('protected continuation is explicit without leaking names, content, or exac
 
 test('CLI projects the query boundary beside the anchor as Graph-JSON', async (t) => {
   const files = await filesFor(t, routeFixture());
-  const result = await runCli(files, '{"name":"Center","children$latitude-1":true}');
+  const result = await runCli(files, '{"thing":"Center","contain$latitude-1":true}');
 
   assert.equal(result.code, 0, result.stderr);
   const receipt = JSON.parse(result.stdout);
   assert.deepEqual(receipt['boundary~preview'].down, {
     state: 'complete', hasMore: true, nodes: 2, characters: 13
   });
-  assert.equal(receipt.name, 'Center');
-  assert.deepEqual(receipt.children.map((child) => child.name), ['Child']);
+  assert.equal(receipt.thing, 'Center');
+  assert.deepEqual(receipt.contain.map((child) => child.thing), ['Child']);
 });
 
 test('Program Explore remains a list containing only real Atom matches', async () => {
   const program = await executeProgramExplore({
     atoms: routeFixture(),
-    request: { name: 'Center', 'children$latitude-1': true },
+    request: { thing: 'Center', 'contain$latitude-1': true },
     receiver: createAtomLanguageReceiver()
   });
 

@@ -1,4 +1,4 @@
-const LOCK_FIELDS = new Set(['name', 'detail', 'children', 'partners', 'messages']);
+const LOCK_FIELDS = new Set(['thing', 'situation', 'contain', 'support', 'messages']);
 const TYPE_PREDICATE_KEYS = new Set(['all', 'any', 'none']);
 
 export function normalizeTypePredicate(value, {
@@ -193,7 +193,7 @@ export function authorizeProgramLock({
       const withinParent = parentPath
         && (targetPath === parentPath || targetPath.startsWith(`${parentPath}/`));
       const selfStructuralWrite = operation === 'write'
-        && targetPath === agentPath && ['name', 'children'].includes(field);
+        && targetPath === agentPath && ['thing', 'contain'].includes(field);
       if (withinParent && !selfStructuralWrite) return false;
     }
     const fields = source[fieldKey];

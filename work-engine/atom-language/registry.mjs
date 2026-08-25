@@ -73,13 +73,13 @@ export class ActionRegistry {
 
 export function createActionRegistry() {
   const registry = new ActionRegistry();
-  registry.register('detail', 'full');
+  registry.register('situation', 'full');
   for (const name of ['latitude', 'longitude']) {
-    registry.register('children', name, { parameter: 'integer' });
+    registry.register('contain', name, { parameter: 'integer' });
   }
   for (const name of ['up', 'down', 'prev', 'next']) {
-    registry.register('children', name, { parameter: 'retiredRoute' });
+    registry.register('contain', name, { parameter: 'retiredRoute' });
   }
-  registry.register('partners', 'hop', { parameter: 'retiredRoute' });
+  registry.register('support', 'hop', { parameter: 'retiredRoute' });
   return registry;
 }

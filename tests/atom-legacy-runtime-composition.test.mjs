@@ -157,11 +157,11 @@ test('human status translator accepts only projected 状态 nodes and returns on
 
   assert.equal(
     await translator.translate({ key: 'node-key', detail: '进行中' }),
-    'transform {"name":"Root/状态","detail.rep.进行中"}'
+    'transform {"thing":"Root/状态","situation.rep.进行中"}'
   );
   assert.equal(
     await translator.translate({ key: 'stale-node-key', atomPath: 'Root/状态', detail: '已完成' }),
-    'transform {"name":"Root/状态","detail.rep.已完成"}'
+    'transform {"thing":"Root/状态","situation.rep.已完成"}'
   );
   await assert.rejects(
     translator.translate({ key: 'missing', detail: '进行中' }),
@@ -199,7 +199,7 @@ test('human workspace translator treats the single synthetic root domain as the 
         draft: { label: 'Top-level from Web', description: 'saved' }
       }
     }),
-    'transform new {"name":"Top-level from Web","detail":"saved","children":[],"partners":[]}'
+    'transform new {"thing":"Top-level from Web","situation":"saved","contain":[],"support":[]}'
   );
 });
 
@@ -237,6 +237,6 @@ test('human workspace translator emits one atomic Transform for a batch landing'
         ]
       }
     }),
-    'transform [{"name.mov.目标域":"来源甲"},{"name.mov.目标域":"来源乙"}]'
+    'transform [{"thing.mov.目标域":"来源甲"},{"thing.mov.目标域":"来源乙"}]'
   );
 });

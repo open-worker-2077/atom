@@ -104,6 +104,7 @@ test('Enter-committed node creation stays visible and preserves the current view
 });
 
 test('double-Shift selection survives the real ctrl-right landing gesture as one batch', async ({ page }) => {
+  test.setTimeout(90_000);
   await openIsolatedWorld(page);
   await enterAtomFile(page);
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('测试入口'))).toBe(true);

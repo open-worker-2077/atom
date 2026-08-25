@@ -28,9 +28,9 @@ const DEBUG_PAGE = `<!doctype html>
 <body>
   <h1>Atom Language P0 调试器</h1>
   <textarea id="source">explore {
-  "name": "石器工坊",
-  "detail$full",
-  "children$down2"
+  "thing": "石器工坊",
+  "situation$full",
+  "contain$latitude+2"
 }</textarea>
   <button id="parse" type="button">解析</button>
   <pre id="result" aria-live="polite">等待输入。</pre>

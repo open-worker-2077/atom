@@ -6,7 +6,6 @@ import { insertAuthoritativeSubtreeCopy } from './transform-executor.mjs';
 const MODEL_NAME = '槽模';
 const EXAMPLES_NAME = '槽例';
 const BLANK_NAME = '空槽例';
-const MAPPING_VERB = '槽模映照';
 
 function slotError(code, message, details = {}) {
   return { code, message, details };
@@ -32,20 +31,20 @@ function fieldValue(atom, baseKey) {
 }
 
 function atomName(atom) {
-  return fieldValue(atom, 'name');
+  return fieldValue(atom, 'thing');
 }
 
 function atomTypes(atom) {
-  return storedField(atom, 'name')?.parsed.types.map((type) => type.raw) ?? [];
+  return storedField(atom, 'thing')?.parsed.types.map((type) => type.raw) ?? [];
 }
 
 function childrenOf(atom) {
-  const value = fieldValue(atom, 'children');
+  const value = fieldValue(atom, 'contain');
   return Array.isArray(value) ? value : null;
 }
 
 function partnersOf(atom) {
-  const value = fieldValue(atom, 'partners');
+  const value = fieldValue(atom, 'support');
   return Array.isArray(value) ? value : null;
 }
 
@@ -125,8 +124,8 @@ function cloneWorldAtSelector(atoms, selector) {
       : { ...match.atom };
     destination[match.index] = clone;
     if (depth < chain.length - 1) {
-      const childrenField = storedField(clone, 'children');
-      replaceStoredField(clone, 'children', childrenField.value.slice());
+      const childrenField = storedField(clone, 'contain');
+      replaceStoredField(clone, 'contain', childrenField.value.slice());
       destination = childrenOf(clone);
     }
   }
@@ -200,16 +199,6 @@ function exampleRecords(layout, example) {
   }));
 }
 
-function mappingTarget(atom) {
-  return partnersOf(atom)?.find((partner) => partner?.verb === MAPPING_VERB)?.object ?? null;
-}
-
-function setMapping(atom, modelPath) {
-  const partners = (partnersOf(atom) ?? []).filter((partner) => partner?.verb !== MAPPING_VERB);
-  partners.push({ verb: MAPPING_VERB, object: modelPath });
-  replaceStoredField(atom, 'partners', partners);
-}
-
 function byRelative(records) {
   return new Map(records.map((record) => [record.relative.join('/'), record]));
 }
@@ -223,7 +212,6 @@ function sealExample(layout, example, models) {
       missing.push(model.path);
       continue;
     }
-    setMapping(current.atom, model.path);
   }
   if (missing.length) {
     return slotError('INVALID_SLOT_BODY_LAYOUT', '槽例缺少与槽模对应的显式槽', {
@@ -235,7 +223,7 @@ function sealExample(layout, example, models) {
 }
 
 function subtreeHasMaterial(atom) {
-  if ((fieldValue(atom, 'detail') ?? '') !== '') return true;
+  if ((fieldValue(atom, 'situation') ?? '') !== '') return true;
   return (childrenOf(atom) ?? []).some(subtreeHasMaterial);
 }
 
@@ -246,40 +234,40 @@ function removeAtom(match) {
 }
 
 function createMappedSlot(model, modelPath) {
-  const nameField = storedField(model, 'name');
-  const detailField = storedField(model, 'detail');
+  const nameField = storedField(model, 'thing');
+  const detailField = storedField(model, 'situation');
   const created = {};
-  replaceStoredField(created, 'name', nameField.value, {
+  replaceStoredField(created, 'thing', nameField.value, {
     types: nameField.parsed.types.map((type) => type.raw),
     descriptionPresent: nameField.parsed.descriptionPresent,
     description: nameField.parsed.description
   });
-  replaceStoredField(created, 'detail', '', {
+  replaceStoredField(created, 'situation', '', {
     types: detailField?.parsed.types.map((type) => type.raw) ?? [],
     descriptionPresent: detailField?.parsed.descriptionPresent ?? false,
     description: detailField?.parsed.description ?? null
   });
-  replaceStoredField(created, 'children', []);
-  replaceStoredField(created, 'partners', [{ verb: MAPPING_VERB, object: modelPath }]);
+  replaceStoredField(created, 'contain', []);
+  replaceStoredField(created, 'support', []);
   return created;
 }
 
 function modelTargetPath(modelRecord, relation, models) {
-  if (typeof relation?.object !== 'string') return null;
+  if (typeof relation?.thing !== 'string') return null;
   const byPath = new Map(models.map((record) => [record.path, record]));
-  if (relation.object.includes('/')) return byPath.get(relation.object)?.path ?? relation.object;
-  const sibling = [...modelRecord.path.split('/').slice(0, -1), relation.object].join('/');
+  if (relation.thing.includes('/')) return byPath.get(relation.thing)?.path ?? relation.thing;
+  const sibling = [...modelRecord.path.split('/').slice(0, -1), relation.thing].join('/');
   if (byPath.has(sibling)) return sibling;
-  const named = models.filter((record) => atomName(record.atom) === relation.object);
-  return named.length === 1 ? named[0].path : relation.object;
+  const named = models.filter((record) => atomName(record.atom) === relation.thing);
+  return named.length === 1 ? named[0].path : relation.thing;
 }
 
 function translatedPartners(modelRecord, exampleByModel, models, allModelRecords, existing) {
-  const modelPartners = (partnersOf(modelRecord.atom) ?? []).filter((partner) => partner.verb !== MAPPING_VERB);
+  const modelPartners = partnersOf(modelRecord.atom) ?? [];
   const mappedExamples = [...exampleByModel.values()];
   const modelRootPath = allModelRecords[0]?.path;
   const targetsMappedStructure = (partner) => {
-    const target = partner?.object;
+    const target = partner?.thing;
     if (typeof target !== 'string') return false;
     if (modelRootPath && (target === modelRootPath || target.startsWith(`${modelRootPath}/`))) return true;
     const namedModelTargets = allModelRecords.filter((record) => atomName(record.atom) === target);
@@ -288,16 +276,12 @@ function translatedPartners(modelRecord, exampleByModel, models, allModelRecords
     const named = mappedExamples.filter((record) => atomName(record.atom) === target);
     return named.length === 1;
   };
-  const result = existing.filter((partner) => (
-    partner.verb !== MAPPING_VERB && !targetsMappedStructure(partner)
-  ));
-  result.push({ verb: MAPPING_VERB, object: modelRecord.path });
+  const result = existing.filter((partner) => !targetsMappedStructure(partner));
   for (const relation of modelPartners) {
     const targetPath = modelTargetPath(modelRecord, relation, allModelRecords);
     const mappedTarget = exampleByModel.get(targetPath);
     result.push({
-      verb: relation.verb,
-      object: mappedTarget?.path ?? targetPath
+      thing: mappedTarget?.path ?? targetPath
     });
   }
   return result;
@@ -365,8 +349,8 @@ async function printExample(atoms, effect, authorize) {
     };
   }
   const models = modelRecords(layout);
-  const blankMappings = new Set(exampleRecords(layout, layout.blank).map((record) => mappingTarget(record.atom)));
-  const missing = models.filter((model) => !blankMappings.has(model.path)).map((model) => model.path);
+  const blankRelative = new Set(exampleRecords(layout, layout.blank).map((record) => record.relative.join('/')));
+  const missing = models.filter((model) => !blankRelative.has(model.relative.join('/'))).map((model) => model.path);
   if (missing.length) {
     return { error: slotError('SLOT_BODY_NOT_SEALED', '空槽例尚未完成槽模映照', { missing }) };
   }
@@ -401,10 +385,9 @@ async function sync(atoms, effect, authorize) {
 
   for (const example of childrenOf(layout.examples)) {
     const records = exampleRecords(layout, example);
-    const stale = records.filter((record) => {
-      const target = mappingTarget(record.atom);
-      return target && !modelByPath.has(target);
-    });
+    const modelPathByRelative = new Map(models.map((model) => [model.relative.join('/'), model.path]));
+    const stale = records.filter((record) => record.relative.length > 0
+      && !modelPathByRelative.has(record.relative.join('/')));
     const staleSet = new Set(stale.map((record) => record.atom));
     const roots = stale.filter((record) => !record.parent || !staleSet.has(record.parent.atom));
     const conflicts = roots.filter((record) => subtreeHasMaterial(record.atom));
@@ -419,8 +402,8 @@ async function sync(atoms, effect, authorize) {
       .forEach(removeAtom);
 
     const byModel = new Map(exampleRecords(layout, example)
-      .filter((record) => mappingTarget(record.atom))
-      .map((record) => [mappingTarget(record.atom), record]));
+      .map((record) => [modelPathByRelative.get(record.relative.join('/')), record])
+      .filter(([modelPath]) => modelPath));
     const rootRecord = byModel.get(layout.modelPath);
     if (!rootRecord || rootRecord.atom !== example) {
       return {
@@ -455,22 +438,22 @@ async function sync(atoms, effect, authorize) {
           }
           childrenOf(desiredParent).push(current.atom);
         }
-        copyFieldMetadata(current.atom, model.atom, 'name');
-        copyFieldMetadata(current.atom, model.atom, 'detail', true);
+        copyFieldMetadata(current.atom, model.atom, 'thing');
+        copyFieldMetadata(current.atom, model.atom, 'situation', true);
       }
     }
 
     layout = layoutOf(atoms, effect.body);
     const refreshedRecords = exampleRecords(layout, directChild(layout.examples, atomName(example)) ?? example);
     const refreshedByModel = new Map(refreshedRecords
-      .filter((record) => mappingTarget(record.atom))
-      .map((record) => [mappingTarget(record.atom), record]));
+      .map((record) => [modelPathByRelative.get(record.relative.join('/')), record])
+      .filter(([modelPath]) => modelPath));
     for (const model of models) {
       const current = refreshedByModel.get(model.path);
       if (!current) continue;
       replaceStoredField(
         current.atom,
-        'partners',
+        'support',
         translatedPartners(
           model,
           refreshedByModel,
@@ -521,5 +504,5 @@ export const SLOT_BODY_CONTRACT = Object.freeze({
   function: 'slot_body',
   actions: ['seal', 'print', 'sync'],
   layout: { model: MODEL_NAME, examples: EXAMPLES_NAME, blank: BLANK_NAME },
-  mappingVerb: MAPPING_VERB
+  mapping: 'relative-contain-path'
 });

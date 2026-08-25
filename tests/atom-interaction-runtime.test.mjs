@@ -40,13 +40,13 @@ function ports() {
     humanStatus: {
       translate: async (request) => {
         calls.push(['human-status', structuredClone(request)]);
-        return `transform {"name":"${request.key}","detail.rep.":"${request.detail}"}`;
+        return `transform {"name":"${request.key}","situation.rep.":"${request.detail}"}`;
       }
     },
     humanWorkspace: {
       translate: async (request) => {
         calls.push(['human-workspace', structuredClone(request)]);
-        return 'transform {"name":"Root/Workspace","detail.rep.":"updated"}';
+        return 'transform {"name":"Root/Workspace","situation.rep.":"updated"}';
       }
     }
   };
@@ -321,7 +321,7 @@ test('human status translation re-enters the same world lifecycle as an explicit
   assert.deepEqual(context.calls, [
     ['human-status', { key: 'Root/状态', atomPath: '', detail: '进行中' }],
     ['world', {
-      source: 'transform {"name":"Root/状态","detail.rep.":"进行中"}',
+      source: 'transform {"name":"Root/状态","situation.rep.":"进行中"}',
       interaction: { id: 'interaction-3', agent: null },
       history: [],
       bypassProgramLocks: true,
@@ -346,7 +346,7 @@ test('human workspace changes rebuild the context-free Program projection in the
       operation: { type: 'move', sourcePath: 'Root/A', targetPath: 'Root/B' }
     }],
     ['world', {
-      source: 'transform {"name":"Root/Workspace","detail.rep.":"updated"}',
+      source: 'transform {"name":"Root/Workspace","situation.rep.":"updated"}',
       interaction: { id: 'interaction-workspace', agent: null },
       history: [],
       programMode: 'reconcile',

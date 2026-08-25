@@ -1,7 +1,11 @@
 import { diagnostic } from './errors.mjs';
+import {
+  GRAPH_AXIS_SET,
+  RETIRED_GRAPH_AXES,
+  validateSupportTypes
+} from './graph-schema.mjs';
 import { createActionRegistry, createMatcherRegistry } from './registry.mjs';
 
-const GRAPH_KEYS = new Set(['name', 'detail', 'children', 'partners']);
 const LEFT_ENGINEERING_SYMBOLS = new Set(['@', '$', '~']);
 
 function parseCommandSegment(symbol, raw) {
@@ -51,7 +55,7 @@ function actionParameterError(action, definition) {
   if (definition.parameter === 'retiredRoute') {
     return diagnostic(
       'RETIRED_ROUTE_ACTION',
-      `路线 $${action.name} 已停用；请改用 children$latitude+1、children$latitude-1、children$longitude+1 或 children$longitude-1（数字可调整）`,
+      `路线 $${action.name} 已停用；请改用 contain$latitude+1、contain$latitude-1、contain$longitude+1 或 contain$longitude-1（数字可调整）`,
       { action: action.name }
     );
   }
@@ -124,7 +128,13 @@ export function parseAtomKey(rawKey, options = {}) {
   const { baseKey, sections } = splitLeftSide(left);
   if (!baseKey) {
     errors.push(diagnostic('INVALID_GRAPH_KEY', '基础 Graph 键不能为空', { rawKey }));
-  } else if (!GRAPH_KEYS.has(baseKey)) {
+  } else if (Object.hasOwn(RETIRED_GRAPH_AXES, baseKey)) {
+    errors.push(diagnostic(
+      'RETIRED_GRAPH_AXIS',
+      `Graph 轴 ${baseKey} 已停用；请改用 ${RETIRED_GRAPH_AXES[baseKey]}`,
+      { rawKey, baseKey, replacement: RETIRED_GRAPH_AXES[baseKey] }
+    ));
+  } else if (!GRAPH_AXIS_SET.has(baseKey)) {
     errors.push(diagnostic(
       'UNKNOWN_GRAPH_FIELD',
       `未知基础 Graph 键：${baseKey}`,
@@ -150,8 +160,16 @@ export function parseAtomKey(rawKey, options = {}) {
     if (section.symbol === '~') hints.push(command);
   }
 
+  if (baseKey === 'support') {
+    const markerError = validateSupportTypes(types);
+    if (markerError) errors.push(diagnostic(markerError.code, markerError.message, {
+      rawKey,
+      markers: markerError.markers
+    }));
+  }
+
   let matcher = null;
-  if (baseKey === 'name') {
+  if (baseKey === 'thing') {
     if (actions.length > 1) {
       errors.push(diagnostic(
         'MULTIPLE_MATCHERS',

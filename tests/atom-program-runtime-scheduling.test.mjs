@@ -7,8 +7,13 @@ import test from 'node:test';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return {
+    [`thing${type ? `@${type}` : ''}`]: thing,
+    situation: situation,
+    contain: contain,
+    support: []
+  };
 }
 
 test('transform trigger runs only Programs whose declared node list intersects the event', async () => {
@@ -94,7 +99,7 @@ test('a Transform event bypasses a persisted projection after scheduler restart'
 test('a matched Transform trigger does not revalidate cached legacy Programs', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const legacy = atom('Legacy Reporter', [
-    "value = explore({'name': 'Legacy Input'})[0].detail",
+    "value = explore({'thing': 'Legacy Input'})[0].situation",
     "message({'level': 'info', 'text': 'legacy:' + value})"
   ].join('\n'), [], 'program');
   const triggered = atom('Indexed Trigger', [
@@ -117,7 +122,7 @@ test('a matched Transform trigger does not revalidate cached legacy Programs', a
 test('an unmatched Transform event does not revalidate legacy Programs', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const legacy = atom('Legacy Reporter', [
-    "value = explore({'name': 'Legacy Input'})[0].detail",
+    "value = explore({'thing': 'Legacy Input'})[0].situation",
     "message({'level': 'info', 'text': 'legacy:' + value})"
   ].join('\n'), [], 'program');
   const triggered = atom('Indexed Trigger', [
@@ -202,7 +207,7 @@ test('a completed revision reuses lock projection without replaying an old messa
   const world = [
     atom('Target'),
     atom('Program', [
-      "target = explore({'name': 'Target'})[0]",
+      "target = explore({'thing': 'Target'})[0]",
       "lock({'targets': {'refs': [target.ref]}, 'mode': 'write'})",
       "message({'level': 'info', 'text': 'projection-computed'})"
     ].join('\n'), [], 'program')
@@ -222,7 +227,7 @@ test('a completed revision reuses lock projection without replaying an old messa
 
 test('a changed world revision recomputes Programs instead of reusing the previous result', async () => {
   const program = atom('Reporter', [
-    "value = explore({'name': 'Input'})[0].detail",
+    "value = explore({'thing': 'Input'})[0].situation",
     "message({'level': 'info', 'text': value})"
   ].join('\n'), [], 'program');
   const scheduler = createProgramRuntimeScheduler();
@@ -238,7 +243,7 @@ test('a changed world revision recomputes Programs instead of reusing the previo
 
 test('an unrelated fact change reuses Program results without replaying the Program', async () => {
   const program = atom('Target Reporter', [
-    "value = explore({'name': 'Target'})[0].detail",
+    "value = explore({'thing': 'Target'})[0].situation",
     "message({'level': 'info', 'text': value})"
   ].join('\n'), [], 'program');
   const scheduler = createProgramRuntimeScheduler();
@@ -261,8 +266,8 @@ test('an unrelated fact change reuses Program results without replaying the Prog
 
 test('cached Program locks are rebound to the current world revision', async () => {
   const program = atom('Target Guard', [
-    "target = explore({'name': 'Target'})[0]",
-    "lock({'targets': {'refs': [target.ref]}, 'mode': 'write', 'fields': ['detail']})"
+    "target = explore({'thing': 'Target'})[0]",
+    "lock({'targets': {'refs': [target.ref]}, 'mode': 'write', 'fields': ['situation']})"
   ].join('\n'), [], 'program');
   const scheduler = createProgramRuntimeScheduler();
 
@@ -285,11 +290,11 @@ test('cached Program locks are rebound to the current world revision', async () 
 
 test('a changed dependency reruns only the Program that reads it', async () => {
   const leftProgram = atom('Left Reporter', [
-    "value = explore({'name': 'Left'})[0].detail",
+    "value = explore({'thing': 'Left'})[0].situation",
     "message({'level': 'info', 'text': 'left:' + value})"
   ].join('\n'), [], 'program');
   const rightProgram = atom('Right Reporter', [
-    "value = explore({'name': 'Right'})[0].detail",
+    "value = explore({'thing': 'Right'})[0].situation",
     "message({'level': 'info', 'text': 'right:' + value})"
   ].join('\n'), [], 'program');
   const scheduler = createProgramRuntimeScheduler();
@@ -309,8 +314,8 @@ test('one failed Program is isolated while healthy Program effects survive the s
     atom('Target'),
     atom('Broken Program', "raise ValueError('broken on purpose')", [], 'program'),
     atom('Healthy Program', [
-      "target = explore({'name': 'Target'})[0]",
-      "lock({'targets': {'refs': [target.ref]}, 'mode': 'write', 'fields': ['detail']})",
+      "target = explore({'thing': 'Target'})[0]",
+      "lock({'targets': {'refs': [target.ref]}, 'mode': 'write', 'fields': ['situation']})",
       "message({'level': 'info', 'text': 'healthy survived'})"
     ].join('\n'), [], 'program')
   ];
@@ -392,7 +397,7 @@ test('Program cycles default to a ten-second wall-clock budget', () => {
 test('one immutable world revision reuses its prepared Program records', async () => {
   let detailReads = 0;
   const program = {
-    'name@program': 'Cached Program',
+    'thing@program': 'Cached Program',
     get detail() {
       detailReads += 1;
       return "message({'level': 'info', 'text': 'cached'})";
@@ -418,8 +423,8 @@ test('one immutable world revision reuses its prepared Program records', async (
 test('one immutable large-world revision reuses its Program cycle fingerprint', async () => {
   const freezeAtom = (value) => Object.freeze({
     ...value,
-    children: Object.freeze(value.children ?? []),
-    partners: Object.freeze(value.partners ?? [])
+    children: Object.freeze(value.contain ?? []),
+    partners: Object.freeze(value.support ?? [])
   });
   const world = Object.freeze(Array.from({ length: 10_000 }, (_, index) => freezeAtom(
     atom(`Fact ${index}`, 'x'.repeat(1_000))
@@ -437,7 +442,7 @@ test('one immutable large-world revision reuses its Program cycle fingerprint', 
 
 test('a revision-local @agent ref change does not replay Programs for the same context path', async () => {
   const program = atom('Context Reporter', [
-    "value = explore({'name': 'Agent'})[0].detail",
+    "value = explore({'thing': 'Agent'})[0].situation",
     "message({'level': 'info', 'text': value})"
   ].join('\n'), [], 'program');
   const scheduler = createProgramRuntimeScheduler();
@@ -470,7 +475,7 @@ test('scheduler distinguishes @agent cycles while reusing context-independent Pr
 
 test('Programs with explicit explore anchors are reused across @agent context paths', async () => {
   const program = atom('Explicit Reporter', [
-    "value = explore({'name': 'Target'})[0].detail",
+    "value = explore({'thing': 'Target'})[0].situation",
     "message({'level': 'info', 'text': value})"
   ].join('\n'), [], 'program');
   const scheduler = createProgramRuntimeScheduler();
@@ -478,7 +483,7 @@ test('Programs with explicit explore anchors are reused across @agent context pa
   let dependencyReads = 0;
   const executeExplore = async (request) => {
     dependencyReads += 1;
-    return [{ path: request.name }];
+    return [{ path: request.thing }];
   };
 
   const first = await scheduler.refresh(world, {
@@ -498,7 +503,7 @@ test('Programs with explicit explore anchors are reused across @agent context pa
 test('independent Program dependency queries are revalidated concurrently', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const programs = ['A', 'B', 'C', 'D'].map((name) => atom(`${name} Reporter`, [
-    `value = explore({'name': '${name}'})[0].detail`,
+    `value = explore({'thing': '${name}'})[0].situation`,
     "message({'level': 'info', 'text': value})"
   ].join('\n'), [], 'program'));
   const world = [
@@ -515,7 +520,7 @@ test('independent Program dependency queries are revalidated concurrently', asyn
       await new Promise((resolve) => setTimeout(resolve, 40));
       active -= 1;
     }
-    return [{ path: request.name }];
+    return [{ path: request.thing }];
   };
 
   await scheduler.refresh(world, { executeExplore });
@@ -536,7 +541,7 @@ test('many Programs inspect a large world without copying every fact into every 
   }
   for (let index = 0; index < 12; index += 1) {
     facts.push(atom(`Reporter ${index}`, [
-      "value = explore({'name': 'Target'})[0].detail",
+      "value = explore({'thing': 'Target'})[0].situation",
       "message({'level': 'info', 'text': value})"
     ].join('\n'), [], 'program'));
   }
@@ -557,7 +562,7 @@ test('an unrelated transform revalidates many Program queries against one prepar
   const projectionFile = path.join(directory, 'graph.json');
   const targets = Array.from({ length: 32 }, (_, index) => atom(`Target ${index}`, 'stable'));
   const programs = targets.map((_, index) => atom(`Reporter ${index}`, [
-    `value = explore({'name': 'Target ${index}'})[0].detail`,
+    `value = explore({'thing': 'Target ${index}'})[0].situation`,
     "message({'level': 'info', 'text': value})"
   ].join('\n'), [], 'program'));
   const ballast = Array.from(
@@ -589,7 +594,7 @@ test('an unrelated transform revalidates many Program queries against one prepar
 
   const startedAt = Date.now();
   const changed = await executeAtomLanguage({
-    source: 'transform {"name":"Unrelated","detail.rep.after"}',
+    source: 'transform {"thing":"Unrelated","situation.rep.after"}',
     contextFile,
     projectionFile,
     interaction: { ...interaction, id: 'program-revalidation:write' },
@@ -624,13 +629,13 @@ test('a timeout during an in-flight explore cannot crash the scheduler with EPIP
   const scheduler = createProgramRuntimeScheduler({ timeoutMs: 150 });
   const slowExplore = async (request) => {
     await new Promise((resolve) => setTimeout(resolve, 300));
-    return [{ path: request.name }];
+    return [{ path: request.thing }];
   };
 
   await assert.rejects(
     scheduler.refresh([
       atom('Target'),
-      atom('Slow Reader', "explore({'name': 'Target'})", [], 'program')
+      atom('Slow Reader', "explore({'thing': 'Target'})", [], 'program')
     ], { executeExplore: slowExplore }),
     { code: 'ATOM_PROGRAM_TIMEOUT' }
   );
@@ -662,7 +667,7 @@ test('lock rejects a mode outside the registered write and read_write values', a
   const world = [
     atom('Target'),
     atom('Program', [
-      "target = explore({'name': 'Target'})[0]",
+      "target = explore({'thing': 'Target'})[0]",
       "lock({'targets': {'refs': [target.ref]}, 'mode': 'delete'})"
     ].join('\n'), [], 'program')
   ];

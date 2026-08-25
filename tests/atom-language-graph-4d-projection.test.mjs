@@ -7,33 +7,33 @@ import {
   toGraph4dImportDocument
 } from '../work-engine/atom-language/graph-4d-projection.mjs';
 
-function graphDocument(partners = []) {
+function graphDocument(support = []) {
   return {
-    config: { schema_version: '1.0.0' },
+    config: { schema_version: '2.0.0' },
     graph: {
-      name: 'root',
-      detail: '',
-      children: [
+      thing: 'root',
+      situation: '',
+      contain: [
         {
-          name: '石器工坊',
-          detail: '可核查的正文',
-          children: [],
-          partners
+          thing: '石器工坊',
+          situation: '可核查的正文',
+          contain: [],
+          support
         },
         {
-          name: '石斧',
-          detail: '可核查的物件',
-          children: [],
-          partners: []
+          thing: '石斧',
+          situation: '可核查的物件',
+          contain: [],
+          support: []
         }
       ],
-      partners: []
+      support: []
     }
   };
 }
 
-test('toGraph4dImportDocument keeps the atom tree shape and turns partners into from/to relations', () => {
-  const { graph } = graphDocument([{ verb: '产出', object: '石斧' }]);
+test('toGraph4dImportDocument keeps contain shape and turns support into directed relations', () => {
+  const { graph } = graphDocument([{ 'if@current': true, then: [{ thing: '石斧' }] }]);
   const document = toGraph4dImportDocument(graph);
 
   assert.equal(document.format, 'graph-4d');
@@ -43,34 +43,37 @@ test('toGraph4dImportDocument keeps the atom tree shape and turns partners into 
   assert.equal(document.relations.length, 1);
   assert.deepEqual(document.relations[0].from, ['root', '石器工坊']);
   assert.deepEqual(document.relations[0].to, ['root', '石斧']);
-  assert.equal(document.relations[0].name, '产出');
+  assert.equal(document.relations[0].name, 'support');
 });
 
-test('toGraph4dImportDocument drops a partner whose object cannot be resolved instead of throwing', () => {
-  const { graph } = graphDocument([{ verb: '产出', object: '不存在的节点' }]);
-  const document = toGraph4dImportDocument(graph);
-  assert.equal(document.relations.length, 0);
+test('toGraph4dImportDocument rejects an unresolved support selector before projection', () => {
+  const { graph } = graphDocument([{ 'if@current': true, then: [{ thing: '不存在的节点' }] }]);
+  assert.throws(() => toGraph4dImportDocument(graph), {
+    code: 'SUPPORT_SELECTOR_NOT_FOUND'
+  });
 });
 
 test('toGraph4dImportDocument fills a placeholder detail for leaf atoms with empty detail', () => {
   const document = toGraph4dImportDocument({
-    name: 'root',
-    detail: '',
-    partners: [],
-    children: [
-      { name: '空详情节点', detail: '', partners: [], children: [] }
+    thing: 'root',
+    situation: '',
+    support: [],
+    contain: [
+      { thing: '空详情节点', situation: '', support: [], contain: [] }
     ]
   });
   assert.match(document.nodes[0].children[0].detail, /空详情节点/);
 });
 
 test('projectAtomGraphToKnowledge produces a real spatial knowledge store from an atom graph document', async () => {
-  const knowledge = await projectAtomGraphToKnowledge(graphDocument([{ verb: '产出', object: '石斧' }]));
+  const knowledge = await projectAtomGraphToKnowledge(graphDocument([{
+    'if@current': true, then: [{ thing: '石斧' }]
+  }]));
   const labels = knowledge.nodes.map((node) => node.label);
   assert.ok(labels.includes('石器工坊'));
   assert.ok(labels.includes('石斧'));
   assert.equal(knowledge.edges.length, 1);
-  assert.equal(knowledge.edges[0].label, '产出');
+  assert.equal(knowledge.edges[0].label, 'support');
 });
 
 test('projection keeps a server-side key to Atom path index for human status edits', async () => {
@@ -79,32 +82,48 @@ test('projection keeps a server-side key to Atom path index for human status edi
   assert.equal(atomPathByKey.get(workshop.key), '石器工坊');
 });
 
+test('projection keeps Graph paths, support clauses, and Program source for the real Web renderer', async () => {
+  const document = graphDocument([{ if: [{ thing: '石斧' }], 'then@current': true }]);
+  document.graph.contain[0]['thing@program'] = document.graph.contain[0].thing;
+  delete document.graph.contain[0].thing;
+  document.graph.contain[0].situation = 'def main(arguments):\n    return True';
+  const { knowledge } = await projectAtomGraphWithPaths(document);
+  const workshop = knowledge.nodes.find((node) => node.label === '石器工坊');
+
+  assert.equal(workshop.graphPath, 'root/石器工坊');
+  assert.equal(workshop.programSource, 'def main(arguments):\n    return True');
+  assert.equal(workshop.detail, 'Program');
+  assert.equal(knowledge.supportClauses.length, 1);
+  assert.equal(knowledge.supportClauses[0].currentSide, 'consequent');
+});
+
 test('projection exposes derived lock state without changing Atom detail', async () => {
   const { knowledge } = await projectAtomGraphWithPaths(graphDocument(), {
-    lockState: [{ path: '石器工坊', writeFields: ['name', 'detail'], reasons: [{ code: 'FRAMEWORK_SCHEMA', message: '框架锁' }] }]
+    lockState: [{ path: '石器工坊', writeFields: ['thing', 'situation'], reasons: [{ code: 'FRAMEWORK_SCHEMA', message: '框架锁' }] }]
   });
   const workshop = knowledge.nodes.find((node) => node.label === '石器工坊');
-  assert.deepEqual(workshop.lockState.writeFields, ['name', 'detail']);
+  assert.deepEqual(workshop.lockState.writeFields, ['thing', 'situation']);
   assert.equal(workshop.detail, '可核查的正文');
 });
 
 test('spatial projection hides every relation entering or leaving the default backup subtree', async () => {
   const document = {
-    config: { schema_version: '1.0.0' },
+    config: { schema_version: '2.0.0' },
     graph: {
-      name: 'root', detail: '', partners: [], children: [
+      thing: 'root', situation: '', support: [], contain: [
         {
-          name: '活动来源', detail: '', children: [], partners: [
-            { verb: '保留', object: '活动目标' },
-            { verb: '隐藏入边', object: 'root/默认备份仓/已删除' }
+          thing: '活动来源', situation: '', contain: [], support: [
+            { 'if@current': true, then: [
+              { thing: '活动目标' }, { thing: 'root/默认备份仓/已删除' }
+            ] }
           ]
         },
-        { name: '活动目标', detail: '', children: [], partners: [] },
+        { thing: '活动目标', situation: '', contain: [], support: [] },
         {
-          name: '默认备份仓', detail: '', partners: [], children: [
+          thing: '默认备份仓', situation: '', support: [], contain: [
             {
-              name: '已删除', detail: '', children: [],
-              partners: [{ verb: '隐藏出边', object: 'root/活动目标' }]
+              thing: '已删除', situation: '', contain: [],
+              support: [{ 'if@current': true, then: [{ thing: 'root/活动目标' }] }]
             }
           ]
         }
@@ -115,5 +134,5 @@ test('spatial projection hides every relation entering or leaving the default ba
     atomTypesByPath: new Map([['默认备份仓', ['backup', 'default']]])
   });
 
-  assert.deepEqual(Array.from(knowledge.edges, (edge) => edge.label), ['保留']);
+  assert.deepEqual(Array.from(knowledge.edges, (edge) => edge.label), ['support']);
 });

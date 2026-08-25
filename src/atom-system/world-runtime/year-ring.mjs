@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-const GRAPH_AXES = Object.freeze(['children', 'detail', 'name', 'partners']);
+const GRAPH_AXES = Object.freeze(['contain', 'situation', 'thing', 'support']);
 const GRAPH_AXIS_SET = new Set(GRAPH_AXES);
 
 function problem(code, message, details = {}) {
@@ -21,19 +21,19 @@ function fieldEntry(atom, axis) {
 }
 
 function atomName(atom) {
-  return fieldEntry(atom, 'name')?.[1];
+  return fieldEntry(atom, 'thing')?.[1];
 }
 
 function immediateChildren(atom) {
-  const value = fieldEntry(atom, 'children')?.[1];
+  const value = fieldEntry(atom, 'contain')?.[1];
   return Array.isArray(value) ? value : [];
 }
 
 function axisValue(atom, axis) {
   const entry = fieldEntry(atom, axis);
   if (!entry) return undefined;
-  if (axis === 'children') {
-    return immediateChildren(atom).map((child) => fieldEntry(child, 'name'));
+  if (axis === 'contain') {
+    return immediateChildren(atom).map((child) => fieldEntry(child, 'thing'));
   }
   return entry;
 }

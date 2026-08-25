@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Graph JSON 2.0.0",
+  "description": "Atom Graph 四轴公开接口：thing / situation / contain / support。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["config", "graph"],
+  "properties": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version"],
+      "properties": { "schema_version": { "const": "2.0.0" } }
+    },
+    "graph": { "$ref": "#/$defs/node" }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "minProperties": 4,
+      "additionalProperties": false,
+      "patternProperties": {
+        "^thing(?:@[^@$~#]+)*(?:#[^$~]*)?$": { "type": "string", "minLength": 1, "pattern": "^[^/]+$" },
+        "^situation(?:@[^@$~#]+)*(?:#[^$~]*)?$": { "type": "string" },
+        "^contain(?:@[^@$~#]+)*(?:#[^$~]*)?$": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+        "^support$": { "$ref": "#/$defs/supportArray" }
+      }
+    },
+    "supportArray": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/supportRule" }
+    },
+    "thingRef": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["thing"],
+          "properties": { "thing": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["thing@program"],
+          "properties": { "thing@program": { "type": "string", "minLength": 1 } }
+        }
+      ]
+    },
+    "expr": {
+      "oneOf": [
+        { "$ref": "#/$defs/thingRef" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["and"],
+          "properties": { "and": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/expr" } } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["or"],
+          "properties": { "or": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/expr" } } }
+        }
+      ]
+    },
+    "supportRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "if@current": { "const": true },
+        "if": { "type": "array", "maxItems": 1, "items": { "$ref": "#/$defs/expr" } },
+        "then@current": { "const": true },
+        "then": { "type": "array", "items": { "$ref": "#/$defs/thingRef" } }
+      },
+      "allOf": [
+        {
+          "anyOf": [
+            { "required": ["if@current"] },
+            { "required": ["if"], "properties": { "if": { "minItems": 1 } } }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["then@current"] },
+            { "required": ["then"], "properties": { "then": { "minItems": 1 } } }
+          ]
+        },
+        {
+          "oneOf": [
+            { "required": ["if@current"], "not": { "required": ["then@current"] } },
+            { "required": ["then@current"], "not": { "required": ["if@current"] } }
+          ]
+        }
+      ]
+    }
+  }
+}

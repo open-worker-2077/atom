@@ -96,8 +96,14 @@ function cleanNode(input) {
     key,
     path: domainPath,
     atomPath: text(input.atomPath, 4000),
-    label: text(input.label || input.name, 80).trim() || '未命名节点',
-    detail: text(input.detail ?? input.description, 4000),
+    ...(typeof input.graphPath === 'string' && input.graphPath
+      ? { graphPath: text(input.graphPath, 4000) }
+      : {}),
+    label: text(input.label || input.thing || input.name, 80).trim() || '未命名节点',
+    detail: text(input.detail ?? input.situation ?? input.description, 4000),
+    ...(typeof input.programSource === 'string'
+      ? { programSource: text(input.programSource, 1_000_000) }
+      : {}),
     attachment: cleanAttachment(input.attachment),
     position: {
       x: Number(input.position?.x) || 0,
@@ -186,6 +192,9 @@ export function normalizeKnowledge(value) {
     deletedNodeKeys: Array.isArray(input.deletedNodeKeys) ? [...new Set(input.deletedNodeKeys.filter((key) => typeof key === 'string'))] : [],
     edges: [...new Map(edges.map((edge) => [edge.id, edge])).values()],
     removedEdgeIds: Array.isArray(input.removedEdgeIds) ? [...new Set(input.removedEdgeIds.filter((id) => typeof id === 'string'))] : [],
+    supportClauses: Array.isArray(input.supportClauses)
+      ? structuredClone(input.supportClauses.slice(0, 10_000))
+      : [],
     view: input.view && typeof input.view === 'object' ? input.view : null
   };
 }
@@ -257,7 +266,14 @@ export function createStore(file) {
       const edges = scope === 'all'
         ? knowledge.edges
         : knowledge.edges.filter((edge) => visibleKeys.has(edge.from.key) || visibleKeys.has(edge.to.key));
-      return { path: currentPath, revision: knowledge.revision, nodes, edges, view: knowledge.view };
+      return {
+        path: currentPath,
+        revision: knowledge.revision,
+        nodes,
+        edges,
+        supportClauses: knowledge.supportClauses,
+        view: knowledge.view
+      };
     }
     if (method === 'view.get') {
       const knowledge = await read();

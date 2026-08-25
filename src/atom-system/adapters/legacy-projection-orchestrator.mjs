@@ -20,7 +20,8 @@ function performanceTrace(event, details) {
 export function createLegacyProjectionOrchestrator({
   contextFile,
   worldId = 'primary',
-  repository = createMemoryProjectionRepository()
+  repository = createMemoryProjectionRepository(),
+  programScheduler = null
 }) {
   if (!contextFile) throw problem('INVALID_PROJECTION_CONTEXT', 'Atom context file is required');
 
@@ -38,7 +39,7 @@ export function createLegacyProjectionOrchestrator({
       });
     }
     const pipeline = createProjectionPipeline({
-      projectors: createLegacyProjectionProjectors({ lockState }),
+      projectors: createLegacyProjectionProjectors({ lockState, programScheduler }),
       repository
     });
     const rebuildStartedAt = performance.now();

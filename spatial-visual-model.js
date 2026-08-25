@@ -116,6 +116,71 @@
     };
   }
 
+  function supportBundles(clauses, options) {
+    var junctionRatio = Number(options && options.junctionRatio);
+    if (!Number.isFinite(junctionRatio) || junctionRatio <= 0 || junctionRatio >= 1) {
+      junctionRatio = 0.5;
+    }
+    function inputPlan(expr, clauseId) {
+      if (!isNode(expr)) return null;
+      if (expr.kind === 'thing' || expr.kind === 'program') {
+        return {
+          kind: 'leaf',
+          id: clauseId + ':if:' + (Array.isArray(expr.exprPath) ? expr.exprPath.join('.') : 'root'),
+          fromPath: expr.targetPath,
+          computed: expr.kind === 'program'
+        };
+      }
+      if ((expr.kind !== 'and' && expr.kind !== 'or') || !Array.isArray(expr.children)) return null;
+      return {
+        kind: 'junction',
+        operator: expr.kind,
+        id: clauseId + ':if:' + (Array.isArray(expr.exprPath) && expr.exprPath.length
+          ? expr.exprPath.join('.')
+          : 'root'),
+        inputs: expr.children.map(function (child) { return inputPlan(child, clauseId); })
+      };
+    }
+
+    return (Array.isArray(clauses) ? clauses : []).flatMap(function (clause) {
+      if (!isNode(clause) || typeof clause.id !== 'string' || !clause.id
+        || !isNode(clause.root) || !Array.isArray(clause.then) || !clause.then.length) return [];
+      var evaluation = clause.evaluation;
+      if (evaluation && evaluation.decision !== true) return [];
+      var inputs = inputPlan(clause.root, clause.id);
+      var outputs = clause.then.slice().sort(function (left, right) {
+        return left.thenOrdinal - right.thenOrdinal;
+      });
+      if (inputs && inputs.kind === 'leaf' && outputs.length === 1) {
+        return [{
+          id: clause.id,
+          currentSide: clause.currentSide,
+          junctionRatio: junctionRatio,
+          edge: { fromPath: inputs.fromPath, toPath: outputs[0].targetPath },
+          input: inputs,
+          outputOrdinal: outputs[0].thenOrdinal
+        }];
+      }
+      var ifJunction = clause.id + ':if-junction';
+      var thenJunction = clause.id + ':then-junction';
+      return [{
+        id: clause.id,
+        currentSide: clause.currentSide,
+        junctionRatio: junctionRatio,
+        inputTopology: inputs,
+        trunk: { from: ifJunction, to: thenJunction },
+        outputBranches: outputs.map(function (target) {
+          return {
+            id: clause.id + ':then:' + target.thenOrdinal,
+            ordinal: target.thenOrdinal,
+            from: thenJunction,
+            toPath: target.targetPath
+          };
+        })
+      }];
+    });
+  }
+
   function findNodeById(nodes, id) {
     if (!Array.isArray(nodes) || typeof id !== 'string' || !id) return null;
     var seen = new Set();
@@ -1025,6 +1090,7 @@
     toggleFieldChildren: toggleFieldChildren,
     descendantPortalId: descendantPortalId,
     visiblePortalRelationship: visiblePortalRelationship,
+    supportBundles: supportBundles,
     hydrateNodePath: hydrateNodePath,
     restoreRevealedNodes: restoreRevealedNodes,
     resetSnapshotNodeState: resetSnapshotNodeState,

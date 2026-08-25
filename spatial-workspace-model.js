@@ -418,6 +418,12 @@
         label: safeText(node && node.label, endpoint && endpoint.label, MAX_LABEL_LENGTH) || "未命名节点",
         short: safeText(node && node.short, "", 32) || `K${id.slice(-4).toUpperCase()}`,
         description: safeText(node && (node.description ?? node.detail)),
+        ...(typeof node?.programSource === "string"
+          ? { programSource: safeText(node.programSource) }
+          : {}),
+        ...(typeof node?.graphPath === "string" && node.graphPath
+          ? { graphPath: safeText(node.graphPath, "", 4000) }
+          : {}),
         attachment: sanitizeAttachment(node && node.attachment),
         position: cleanPosition(node && (node.manualPosition || node.position)),
         clusterLocalPositionLocked: node && node.clusterLocalPositionLocked === true,
@@ -529,7 +535,10 @@
         node,
         draft: {
           label: safeText(projected.label, "未命名节点", MAX_LABEL_LENGTH),
-          description: safeText(projected.description),
+          description: sanitizeAtomTypes(projected.atomTypes).includes("program")
+            && typeof projected.programSource === "string"
+            ? safeText(projected.programSource)
+            : safeText(projected.description),
           atomTypes: sanitizeAtomTypes(projected.atomTypes),
           attachment: sanitizeAttachment(projected.attachment)
         }
@@ -829,6 +838,12 @@
             key,
             path,
             atomPath: safeText(node.atomPath, "", 4000),
+            ...(typeof node.graphPath === "string" && node.graphPath
+              ? { graphPath: safeText(node.graphPath, "", 4000) }
+              : {}),
+            ...(typeof node.programSource === "string"
+              ? { programSource: safeText(node.programSource) }
+              : {}),
             label: safeText(node.label, "未命名节点", MAX_LABEL_LENGTH) || "未命名节点",
             short: safeText(node.short, "", 32),
             detail: safeText(node.description),
@@ -860,8 +875,9 @@
       };
     }
 
-    function importKnowledge(knowledge) {
-      if (active || !knowledge || typeof knowledge !== "object") return false;
+    function importKnowledge(knowledge, options) {
+      const preserveTransaction = options && options.preserveTransaction === true;
+      if ((active && !preserveTransaction) || !knowledge || typeof knowledge !== "object") return false;
       authoritativeKnowledge = true;
       addedNodes.clear();
       nodePatches.clear();
@@ -888,6 +904,12 @@
           label: safeText(source.label, "未命名节点", MAX_LABEL_LENGTH) || "未命名节点",
           short: safeText(source.short, "", 32) || `K${id.slice(-4).toUpperCase()}`,
           description: safeText(source.detail ?? source.description),
+          ...(typeof source.programSource === "string"
+            ? { programSource: safeText(source.programSource) }
+            : {}),
+          ...(typeof source.graphPath === "string" && source.graphPath
+            ? { graphPath: safeText(source.graphPath, "", 4000) }
+            : {}),
           attachment: sanitizeAttachment(source.attachment),
           position: {
             x: Number(source.position && source.position.x) || 0,

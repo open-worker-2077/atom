@@ -10,8 +10,8 @@ function fieldByBase(item, baseKey) {
 test('transform reuses Graph-JSON and key normalization without executing a change', () => {
   const result = createAtomLanguageReceiver().receive(`
     transform {
-      "name": "石器工坊",
-      "detail#工坊简介": "更新后的正文"
+      "thing": "石器工坊",
+      "situation#工坊简介": "更新后的正文"
     }
   `);
 
@@ -21,15 +21,15 @@ test('transform reuses Graph-JSON and key normalization without executing a chan
   assert.equal(result.newExploration, false);
   assert.equal(result.batch, false);
   assert.equal(result.items.length, 1);
-  assert.deepEqual(fieldByBase(result.items[0], 'name').matcher, {
+  assert.deepEqual(fieldByBase(result.items[0], 'thing').matcher, {
     mode: 'exact',
     explicit: false,
     registered: true
   });
-  const detail = fieldByBase(result.items[0], 'detail');
-  assert.equal(detail.description, '工坊简介');
-  assert.equal(detail.valuePresent, true);
-  assert.equal(detail.value, '更新后的正文');
+  const situation = fieldByBase(result.items[0], 'situation');
+  assert.equal(situation.description, '工坊简介');
+  assert.equal(situation.valuePresent, true);
+  assert.equal(situation.value, '更新后的正文');
   assert.equal(Object.hasOwn(result, 'revision'), false);
   assert.equal(Object.hasOwn(result, 'changed'), false);
 });
@@ -37,10 +37,10 @@ test('transform reuses Graph-JSON and key normalization without executing a chan
 test('transform new is marked explicitly while preserving persistent key metadata', () => {
   const result = createAtomLanguageReceiver().receive(`
     transform new {
-      "name@program": "工坊程序",
-      "detail#首轮程序": "正文",
-      "children": [],
-      "partners": []
+      "thing@program": "工坊程序",
+      "situation#首轮程序": "正文",
+      "contain": [],
+      "support": []
     }
   `);
 
@@ -49,15 +49,15 @@ test('transform new is marked explicitly while preserving persistent key metadat
   assert.equal(result.createNew, true);
   assert.equal(result.newExploration, false);
   assert.equal(result.items.length, 1);
-  assert.equal(fieldByBase(result.items[0], 'name').persistentKey, 'name@program');
-  assert.equal(fieldByBase(result.items[0], 'detail').persistentKey, 'detail#首轮程序');
+  assert.equal(fieldByBase(result.items[0], 'thing').persistentKey, 'thing@program');
+  assert.equal(fieldByBase(result.items[0], 'situation').persistentKey, 'situation#首轮程序');
 });
 
 test('transform batch normalizes each item and keeps item-local errors', () => {
   const result = createAtomLanguageReceiver().receive(`
     transform [
-      {"name":"石器工坊","detail":"新正文"},
-      {"name":"河岸","detail$invent"}
+      {"thing":"石器工坊","situation":"新正文"},
+      {"thing":"河岸","situation$invent"}
     ]
   `);
 
@@ -66,7 +66,7 @@ test('transform batch normalizes each item and keeps item-local errors', () => {
   assert.equal(result.batch, true);
   assert.equal(result.items.length, 2);
   assert.deepEqual(result.items.map((item) => item.ok), [true, false]);
-  assert.equal(fieldByBase(result.items[0], 'detail').value, '新正文');
+  assert.equal(fieldByBase(result.items[0], 'situation').value, '新正文');
   assert.equal(
     result.items[1].errors.at(-1).code,
     'TRANSFORM_DOLLAR_COMMAND_REJECTED'
@@ -74,7 +74,7 @@ test('transform batch normalizes each item and keeps item-local errors', () => {
 });
 
 test('transform parse failures retain command and create-new intent', () => {
-  const result = createAtomLanguageReceiver().receive('transform new {"name":');
+  const result = createAtomLanguageReceiver().receive('transform new {"thing":');
 
   assert.equal(result.ok, false);
   assert.equal(result.command, 'transform');
@@ -85,7 +85,7 @@ test('transform parse failures retain command and create-new intent', () => {
 
 test('explore new keeps its existing exploration-reset meaning', () => {
   const result = createAtomLanguageReceiver().receive(
-    'explore new {"name":"河岸"}'
+    'explore new {"thing":"河岸"}'
   );
 
   assert.equal(result.ok, true);
@@ -95,7 +95,7 @@ test('explore new keeps its existing exploration-reset meaning', () => {
 });
 
 test('unknown command diagnostics list the recognized transform forms', () => {
-  const result = createAtomLanguageReceiver().receive('move {"name":"石器工坊"}');
+  const result = createAtomLanguageReceiver().receive('move {"thing":"石器工坊"}');
 
   assert.equal(result.ok, false);
   assert.equal(result.errors[0].code, 'UNKNOWN_ATOM_LANGUAGE_COMMAND');

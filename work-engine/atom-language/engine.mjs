@@ -71,14 +71,14 @@ function graphTypesAtPath(atoms, targetPath) {
   if (!targetPath) return [];
   const match = walkAtoms(atoms).find((candidate) => candidate.path.join('/') === targetPath);
   if (!match) return [];
-  return oneStoredField(match.atom, 'name')?.parsed.types.map((type) => type.raw) ?? [];
+  return oneStoredField(match.atom, 'thing')?.parsed.types.map((type) => type.raw) ?? [];
 }
 
 function newlyAddedProgramPaths(beforeAtoms, afterAtoms) {
   const previousPaths = new Set(walkAtoms(beforeAtoms).map((match) => match.path.join('/')));
   return walkAtoms(afterAtoms)
     .filter((match) => !previousPaths.has(match.path.join('/'))
-      && oneStoredField(match.atom, 'name')?.parsed.types.some((type) => type.raw === 'program'))
+      && oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => type.raw === 'program'))
     .map((match) => match.path.join('/'));
 }
 
@@ -128,19 +128,19 @@ function persistentAtomFromItem(item) {
 
 function validateNewAtom(atom) {
   const byBase = fieldsByBase(atom);
-  const required = ['name', 'detail', 'children', 'partners'];
+  const required = ['thing', 'situation', 'contain', 'support'];
   const missing = required.filter((baseKey) => (byBase.get(baseKey) ?? []).length !== 1);
   if (missing.length) {
     return diagnostic(
       'TRANSFORM_NEW_REQUIRES_FOUR_AXES',
-      'transform new 首轮要求完整提交 name、detail、children、partners 四个纵轴',
+      'transform new 首轮要求完整提交 thing、situation、contain、support 四轴',
       { missing }
     );
   }
-  const name = byBase.get('name')[0].value;
-  const detail = byBase.get('detail')[0].value;
-  const children = byBase.get('children')[0].value;
-  const partners = byBase.get('partners')[0].value;
+  const name = byBase.get('thing')[0].value;
+  const detail = byBase.get('situation')[0].value;
+  const children = byBase.get('contain')[0].value;
+  const partners = byBase.get('support')[0].value;
   if (typeof name !== 'string' || !name.trim()) {
     return diagnostic('INVALID_ATOM_NAME', 'Atom name 必须是非空字符串');
   }
@@ -157,7 +157,7 @@ function validateNewAtom(atom) {
 }
 
 function nameFieldIn(item) {
-  return item.fields.find((field) => field.baseKey === 'name');
+  return item.fields.find((field) => field.baseKey === 'thing');
 }
 
 function exactMatches(atoms, item, matcherRegistry, candidates = null) {
@@ -186,7 +186,7 @@ function exactMatches(atoms, item, matcherRegistry, candidates = null) {
     if (isFullBusinessPath) {
       return atomPath.join('/') === nameField.value;
     }
-    const candidate = oneStoredField(atom, 'name')?.value;
+    const candidate = oneStoredField(atom, 'thing')?.value;
     return matcher.match(candidate, nameField.value);
   });
   return { matches, expected: nameField.value };
@@ -220,7 +220,7 @@ function programRunRequest(item) {
     runs.length !== 1
     || commands.length !== 1
     || item.fields.length !== 1
-    || field.baseKey !== 'name'
+    || field.baseKey !== 'thing'
     || command.parameter !== ''
     || !field.valuePresent
     || typeof field.value !== 'string'
@@ -262,13 +262,13 @@ function appendNestedAtom(atoms, parentMatch, atom) {
   const lineage = [];
   for (let current = parentMatch; current; current = current.parent) lineage.unshift(current.index);
   let parent = nextAtoms[lineage.shift()];
-  for (const index of lineage) parent = oneStoredField(parent, 'children').value[index];
-  oneStoredField(parent, 'children').value.push(atom);
+  for (const index of lineage) parent = oneStoredField(parent, 'contain').value[index];
+  oneStoredField(parent, 'contain').value.push(atom);
   return nextAtoms;
 }
 
 function isCompletePersistentAtomItem(item) {
-  const required = new Set(['name', 'detail', 'children', 'partners']);
+  const required = new Set(['thing', 'situation', 'contain', 'support']);
   return item.fields.length === required.size
     && item.fields.every((field) => (
       required.has(field.baseKey) && (field.commands ?? []).length === 0
@@ -296,7 +296,7 @@ async function applyCreateTransform({
   const invalid = validateNewAtom(atom);
   if (invalid) return { error: invalid };
 
-  const createNameField = oneStoredField(atom, 'name');
+  const createNameField = oneStoredField(atom, 'thing');
   const createName = createNameField?.value;
   const createPath = createName.split('/');
   const createDecision = await authorize({ atom, name: createName, path: createPath }, 'write');
@@ -335,10 +335,10 @@ async function applyCreateTransform({
         { parentPath, matches: parentMatches.map((match) => match.path.join('/')) }
       ) };
     }
-    const parentDecision = await authorize(parentMatches[0], 'write', 'children');
+    const parentDecision = await authorize(parentMatches[0], 'write', 'contain');
     if (parentDecision.decision !== 'allow') {
       const programDenied = parentDecision.matched
-        ? programLockDeniedDiagnostic(parentDecision, 'children')
+        ? programLockDeniedDiagnostic(parentDecision, 'contain')
         : null;
       return { error: diagnostic(
         programDenied?.code ?? 'WINDOW_ACCESS_DENIED',
@@ -372,30 +372,30 @@ function programObjectSource(command, request) {
 }
 
 export function compileProgramTransform({ request, receiver = createAtomLanguageReceiver() }) {
-  const opaqueDetail = request && Object.hasOwn(request, 'detail$replace')
-    ? request['detail$replace']
+  const opaqueDetail = request && Object.hasOwn(request, 'situation$replace')
+    ? request['situation$replace']
     : undefined;
   if (opaqueDetail !== undefined && typeof opaqueDetail !== 'string') {
     return {
       ok: false,
       errors: [diagnostic(
         'INVALID_PROGRAM_DETAIL_REPLACEMENT',
-        'Program detail$replace requires one complete string value'
+        'Program situation$replace requires one complete string value'
       )]
     };
   }
   const normalized = opaqueDetail === undefined
     ? request
     : Object.fromEntries([
-        ...Object.entries(request).filter(([key]) => key !== 'detail$replace'),
-        ['detail.rep.__ATOM_PROGRAM_OPAQUE_REPLACEMENT__', null]
+        ...Object.entries(request).filter(([key]) => key !== 'situation$replace'),
+        ['situation.rep.__ATOM_PROGRAM_OPAQUE_REPLACEMENT__', null]
       ]);
   const parsed = receiver.receive(programObjectSource('transform', normalized));
   if (!parsed.ok || parsed.batch || parsed.items.length !== 1) {
     return { ok: false, errors: parsed.errors };
   }
   if (opaqueDetail !== undefined) {
-    const fields = parsed.items[0].fields.filter((field) => field.baseKey === 'detail');
+    const fields = parsed.items[0].fields.filter((field) => field.baseKey === 'situation');
     if (fields.length !== 1) {
       return {
         ok: false,
@@ -524,7 +524,7 @@ export async function executeAtomLanguage(options = {}) {
   if (parsed.command === 'transform' && parsed.batch) {
     const renameBatch = parsed.items.every(isBatchRenameItem);
     const hasRename = parsed.items.some((item) => item.fields.some((field) => (
-      field.baseKey === 'name'
+      field.baseKey === 'thing'
       && field.commands.some((command) => command.name === 'ren')
     )));
     if (hasRename && !renameBatch) {
@@ -535,8 +535,8 @@ export async function executeAtomLanguage(options = {}) {
     }
     const unsupported = parsed.items.flatMap((item) => item.fields
       .filter((field) => (
-        !['name', 'detail', 'partners'].includes(field.baseKey)
-        || (field.baseKey === 'name' && field.commands.some((command) => (
+        !['thing', 'situation', 'support'].includes(field.baseKey)
+        || (field.baseKey === 'thing' && field.commands.some((command) => (
           command.name !== 'mov' && !(renameBatch && command.name === 'ren')
         )))
       ))
@@ -725,7 +725,7 @@ export async function executeAtomLanguage(options = {}) {
         const match = walkAtoms(atoms).find((candidate) => candidate.path.join('/') === targetPath);
         if (!match) return { decision: 'deny' };
         return accessController.authorize(
-          match, 'write', 'children', { programPath: sourceProgramPath }
+          match, 'write', 'contain', { programPath: sourceProgramPath }
         );
       }
     });
@@ -984,7 +984,7 @@ export async function executeAtomLanguage(options = {}) {
               .find((candidate) => candidate.path.join('/') === targetPath);
             if (!match) return { decision: 'deny' };
             return cycleAccessController.authorize(
-              match, 'write', 'children', { programPath: sourceProgramPath }
+              match, 'write', 'contain', { programPath: sourceProgramPath }
             );
           }
         });
@@ -1101,7 +1101,7 @@ export async function executeAtomLanguage(options = {}) {
     const matches = walkAtoms(atoms);
     const visible = [];
     for (const match of matches) {
-      if ((await accessController.authorize(match, 'read', 'name')).decision === 'allow') visible.push(match);
+      if ((await accessController.authorize(match, 'read', 'thing')).decision === 'allow') visible.push(match);
     }
     return {
       ok: true, language: 'atom', command: 'atom', changed: programChanged,
@@ -1272,7 +1272,7 @@ export async function executeAtomLanguage(options = {}) {
       const resultMatch = walkAtoms(nextAtoms).find((match) => (
         transformed.resultPath
           ? match.path.join('/') === transformed.resultPath
-          : oneStoredField(match.atom, 'name')?.value === transformed.resultName
+          : oneStoredField(match.atom, 'thing')?.value === transformed.resultName
       ));
       results.push({
         index: candidate.index,

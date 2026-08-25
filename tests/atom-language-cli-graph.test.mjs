@@ -40,12 +40,12 @@ async function runCli(args) {
   };
 }
 
-function findGraphNode(document, name) {
+function findGraphNode(document, thing) {
   const queue = [document.graph];
   while (queue.length) {
     const node = queue.shift();
-    if (node.name === name) return node;
-    queue.push(...node.children);
+    if (node.thing === thing) return node;
+    queue.push(...node.contain);
   }
   return null;
 }
@@ -64,10 +64,10 @@ test('the atom CLI drives a graph served from a fully isolated 4784-style store'
     projectionFile,
     'transform',
     'new',
-    '{"name":"石器工坊","detail#工坊简介":"第一版正文","children":[],"partners":[]}'
+    '{"thing":"石器工坊","situation#工坊简介":"第一版正文","contain":[],"support":[]}'
   ]);
   assert.equal(created.code, 0, created.stderr);
-  assert.deepEqual(created.output, { 'name~created': '石器工坊' });
+  assert.deepEqual(created.output, { 'thing~created': '石器工坊' });
 
   const instance = await createSpatialServer({
     storeFile,
@@ -87,7 +87,7 @@ test('the atom CLI drives a graph served from a fully isolated 4784-style store'
   assert.equal(health.graphFile, path.resolve(projectionFile));
 
   const firstGraph = await fetch(`${baseUrl}/__spatial/api/graph`).then((response) => response.json());
-  assert.equal(findGraphNode(firstGraph, '石器工坊').detail, '第一版正文');
+  assert.equal(findGraphNode(firstGraph, '石器工坊')['situation#工坊简介'], '第一版正文');
 
   const transformed = await runCli([
     '--context',
@@ -95,13 +95,13 @@ test('the atom CLI drives a graph served from a fully isolated 4784-style store'
     '--projection',
     projectionFile,
     'transform',
-    '{"name":"石器工坊","detail.rep.第二版正文"}'
+    '{"thing":"石器工坊","situation.rep.第二版正文"}'
   ]);
   assert.equal(transformed.code, 0, transformed.stderr);
-  assert.deepEqual(transformed.output, { 'name~updated': '石器工坊' });
+  assert.deepEqual(transformed.output, { 'thing~updated': '石器工坊' });
 
   const secondGraph = await fetch(`${baseUrl}/__spatial/api/graph`).then((response) => response.json());
-  assert.equal(findGraphNode(secondGraph, '石器工坊').detail, '第二版正文');
+  assert.equal(findGraphNode(secondGraph, '石器工坊')['situation#工坊简介'], '第二版正文');
 
   const explored = await runCli([
     '--context',
@@ -109,7 +109,7 @@ test('the atom CLI drives a graph served from a fully isolated 4784-style store'
     '--projection',
     projectionFile,
     'explore',
-    '{"name":"石器工坊","detail$full"}'
+    '{"thing":"石器工坊","situation$full"}'
   ]);
   assert.equal(explored.code, 0, explored.stderr);
   assert.match(explored.stdout, /第二版正文/u);

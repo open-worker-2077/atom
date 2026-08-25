@@ -14,7 +14,7 @@ const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
 test('one immutable world reuses its exact Explore index', () => {
   const atoms = Object.freeze([
-    Object.freeze({ name: 'Root', detail: '', children: Object.freeze([]), partners: Object.freeze([]) })
+    Object.freeze({ thing: 'Root', situation: '', contain: Object.freeze([]), support: Object.freeze([]) })
   ]);
   assert.strictEqual(prepareExploreWorld(atoms), prepareExploreWorld(atoms));
 });
@@ -26,29 +26,29 @@ async function fixture(t) {
   const projectionFile = path.join(directory, 'graph.json');
   const atoms = [
     {
-      name: '甲区', detail: '甲区正文', partners: [], children: [
-        { name: '同名节点', detail: '甲区节点正文', partners: [{ verb: '相邻', object: '甲区/甲末' }], children: [] },
-        { name: '甲末', detail: '甲末正文', partners: [], children: [] }
+      thing: '甲区', situation: '甲区正文', support: [], contain: [
+        { thing: '同名节点', situation: '甲区节点正文', support: [{ 'if@current': true, then: [{ thing: '甲区/甲末' }] }], contain: [] },
+        { thing: '甲末', situation: '甲末正文', support: [], contain: [] }
       ]
     },
     {
-      name: '乙区', detail: '乙区正文', partners: [], children: [
-        { name: '乙前', detail: '乙前正文', partners: [], children: [] },
-        { name: '同名节点', detail: '乙区节点正文', partners: [{ verb: '相邻', object: '乙区/乙后' }], children: [] },
-        { name: '乙后', detail: '乙后正文', partners: [], children: [] }
+      thing: '乙区', situation: '乙区正文', support: [], contain: [
+        { thing: '乙前', situation: '乙前正文', support: [], contain: [] },
+        { thing: '同名节点', situation: '乙区节点正文', support: [{ 'if@current': true, then: [{ thing: '乙区/乙后' }] }], contain: [] },
+        { thing: '乙后', situation: '乙后正文', support: [], contain: [] }
       ]
     },
     {
-      name: '丙区', detail: '', partners: [], children: [
-        { name: '规划', detail: '', partners: [], children: [
-          { name: '登记册', detail: '丙区登记册', partners: [], children: [] }
+      thing: '丙区', situation: '', support: [], contain: [
+        { thing: '规划', situation: '', support: [], contain: [
+          { thing: '登记册', situation: '丙区登记册', support: [], contain: [] }
         ] }
       ]
     },
     {
-      name: '丁区', detail: '', partners: [], children: [
-        { name: '执行', detail: '', partners: [], children: [
-          { name: '登记册', detail: '丁区登记册', partners: [], children: [] }
+      thing: '丁区', situation: '', support: [], contain: [
+        { thing: '执行', situation: '', support: [], contain: [
+          { thing: '登记册', situation: '丁区登记册', support: [], contain: [] }
         ] }
       ]
     }
@@ -59,7 +59,7 @@ async function fixture(t) {
 }
 
 function names(result) {
-  return result.items[0].matches.map((match) => match.name);
+  return result.items[0].matches.map((match) => match.thing);
 }
 
 async function runCli(files, source) {
@@ -84,22 +84,22 @@ test('explore exact supports top-level business Atom full paths without mutating
   const projectionBefore = await fs.readFile(files.projectionFile, 'utf8');
 
   const fullDetail = await executeAtomLanguage({
-    source: 'explore {"name":"乙区/同名节点","detail$full"}', ...files
+    source: 'explore {"thing":"乙区/同名节点","situation$full"}', ...files
   });
   assert.equal(fullDetail.ok, true, JSON.stringify(fullDetail.errors));
   assert.deepEqual(names(fullDetail), ['同名节点']);
   assert.equal(fullDetail.items[0].matches[0].path, '乙区/同名节点');
-  assert.equal(fullDetail.items[0].matches[0].detail, '乙区节点正文');
+  assert.equal(fullDetail.items[0].matches[0].situation, '乙区节点正文');
 
   const scopes = [
-    ['children$latitude1', ['乙区', '同名节点']],
-    ['children$latitude-1', ['同名节点']],
-    ['children$longitude-1', ['乙前', '同名节点']],
-    ['children$longitude1', ['同名节点', '乙后']]
+    ['contain$latitude1', ['乙区', '同名节点']],
+    ['contain$latitude-1', ['同名节点']],
+    ['contain$longitude-1', ['乙前', '同名节点']],
+    ['contain$longitude1', ['同名节点', '乙后']]
   ];
   for (const [scope, expected] of scopes) {
     const result = await executeAtomLanguage({
-      source: `explore {"name":"乙区/同名节点","${scope}"}`,
+      source: `explore {"thing":"乙区/同名节点","${scope}"}`,
       ...files
     });
     assert.equal(result.ok, true, `${scope}: ${JSON.stringify(result.errors)}`);
@@ -107,7 +107,7 @@ test('explore exact supports top-level business Atom full paths without mutating
   }
 
   const merged = await executeAtomLanguage({
-    source: 'explore {"name":"乙区/同名节点","children$latitude1","children$longitude-1","children$longitude1"}',
+    source: 'explore {"thing":"乙区/同名节点","contain$latitude1","contain$longitude-1","contain$longitude1"}',
     ...files
   });
   assert.equal(merged.ok, true, JSON.stringify(merged.errors));
@@ -121,12 +121,12 @@ test('explore exact supports top-level business Atom full paths without mutating
   assert.equal(fullDetail.revisionBefore, fullDetail.revisionAfter);
 });
 
-test('explore full path remains exact while short-name ambiguity and virtual roots are rejected', async (t) => {
+test('explore full path remains exact while short-thing ambiguity and virtual roots are rejected', async (t) => {
   const files = await fixture(t);
   const cases = [
-    ['explore {"name":"同名节点","detail$full"}', 'AMBIGUOUS_ATOM_NAME'],
-    ['explore {"name":"丙区/同名节点","detail$full"}', 'ATOM_NOT_FOUND'],
-    ['explore {"name":"atom.json/乙区/同名节点","detail$full"}', 'ATOM_NOT_FOUND']
+    ['explore {"thing":"同名节点","situation$full"}', 'AMBIGUOUS_ATOM_NAME'],
+    ['explore {"thing":"丙区/同名节点","situation$full"}', 'ATOM_NOT_FOUND'],
+    ['explore {"thing":"atom.json/乙区/同名节点","situation$full"}', 'ATOM_NOT_FOUND']
   ];
   for (const [source, code] of cases) {
     const result = await executeAtomLanguage({ source, ...files });
@@ -135,72 +135,88 @@ test('explore full path remains exact while short-name ambiguity and virtual roo
   }
 });
 
-test('explore partners returns the stored directed relation body through the CLI', async (t) => {
+test('explore support returns the stored directed relation body through the CLI', async (t) => {
   const files = await fixture(t);
   const contextBefore = await fs.readFile(files.contextFile, 'utf8');
   const projectionBefore = await fs.readFile(files.projectionFile, 'utf8');
 
   const result = await runCli(files, [
-    'explore', '{"name":"乙区/同名节点","partners"}'
+    'explore', '{"thing":"乙区/同名节点","support"}'
   ]);
 
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /"partners"/u);
-  assert.match(result.stdout, /"verb"\s*:\s*"相邻"/u);
-  assert.match(result.stdout, /"object"\s*:\s*"乙区\/乙后"/u);
+  assert.match(result.stdout, /"support"/u);
+  assert.match(result.stdout, /"thing"\s*:\s*"乙区\/乙后"/u);
   assert.equal(hash(await fs.readFile(files.contextFile, 'utf8')), hash(contextBefore));
   assert.equal(hash(await fs.readFile(files.projectionFile, 'utf8')), hash(projectionBefore));
+});
+
+test('explore from a consequent returns the single owner declaration without copying it', async (t) => {
+  const files = await fixture(t);
+  const result = await executeAtomLanguage({
+    source: 'explore {"thing":"乙区/乙后","support":true}',
+    ...files
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.deepEqual(names(result), ['同名节点', '乙后']);
+  assert.deepEqual(result.items[0].matches[0].support, [
+    { 'if@current': true, then: [{ thing: '乙区/乙后' }] }
+  ]);
+  assert.deepEqual(result.items[0].matches[1].support, []);
 });
 
 test('explore accepts standard JSON true values for read projections', async (t) => {
   const files = await fixture(t);
   const result = await executeAtomLanguage({
-    source: 'explore {"name":"乙区/同名节点","detail$full":true,"children$latitude+1":true,"children$longitude+1":true,"partners":true}',
+    source: 'explore {"thing":"乙区/同名节点","situation$full":true,"contain$latitude+1":true,"contain$longitude+1":true,"support":true}',
     ...files
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.deepEqual(names(result), ['乙区', '同名节点', '乙后']);
-  assert.equal(result.items[0].matches[1].detail, '乙区节点正文');
-  assert.deepEqual(result.items[0].matches[1].partners, [{ verb: '相邻', object: '乙区/乙后' }]);
+  assert.equal(result.items[0].matches[1].situation, '乙区节点正文');
+  assert.deepEqual(result.items[0].matches[1].support, [
+    { 'if@current': true, then: [{ thing: '乙区/乙后' }] }
+  ]);
 });
 
 test('CLI preserves descendant containment and uses only the shortest distinguishing selector', async (t) => {
   const files = await fixture(t);
   const result = await runCli(files, [
-    'explore', '{"name":"丙区","children$latitude-2":true,"detail$full":true}'
+    'explore', '{"thing":"丙区","contain$latitude-2":true,"situation$full":true}'
   ]);
   assert.equal(result.code, 0, result.stderr);
   const parsed = JSON.parse(result.stdout);
-  assert.equal(parsed.name, '丙区');
-  assert.equal(parsed.children[0].name, '规划');
-  assert.equal(parsed.children[0].children[0].name, '规划/登记册');
-  assert.equal(parsed.children[0].children[0].detail, '丙区登记册');
+  assert.equal(parsed.thing, '丙区');
+  assert.equal(parsed.contain[0].thing, '规划');
+  assert.equal(parsed.contain[0].contain[0].thing, '规划/登记册');
+  assert.equal(parsed.contain[0].contain[0].situation, '丙区登记册');
 });
 
 test('exact selectors use the shortest unique path suffix for reads and writes', async (t) => {
   const files = await fixture(t);
   const ambiguous = await executeAtomLanguage({
-    source: 'explore {"name":"登记册","detail$full"}', ...files
+    source: 'explore {"thing":"登记册","situation$full"}', ...files
   });
   assert.equal(ambiguous.ok, false);
   assert.equal(ambiguous.errors[0].code, 'AMBIGUOUS_ATOM_NAME');
 
   const explored = await executeAtomLanguage({
-    source: 'explore {"name":"规划/登记册","detail$full"}', ...files
+    source: 'explore {"thing":"规划/登记册","situation$full"}', ...files
   });
   assert.equal(explored.ok, true, JSON.stringify(explored.errors));
   assert.equal(explored.items[0].matches[0].path, '丙区/规划/登记册');
-  assert.equal(explored.items[0].matches[0].detail, '丙区登记册');
+  assert.equal(explored.items[0].matches[0].situation, '丙区登记册');
 
   const transformed = await executeAtomLanguage({
-    source: 'transform {"name":"规划/登记册","detail.rep.已核验"}', ...files
+    source: 'transform {"thing":"规划/登记册","situation.rep.已核验"}', ...files
   });
   assert.equal(transformed.ok, true, JSON.stringify(transformed.errors));
   const verified = await executeAtomLanguage({
-    source: 'explore {"name":"规划/登记册","detail$full"}', ...files
+    source: 'explore {"thing":"规划/登记册","situation$full"}', ...files
   });
-  assert.equal(verified.items[0].matches[0].detail, '已核验');
+  assert.equal(verified.items[0].matches[0].situation, '已核验');
 });
 
 test('transform new creates a nested Atom by exact parent path without replacing siblings', async (t) => {
@@ -209,19 +225,19 @@ test('transform new creates a nested Atom by exact parent path without replacing
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    { name: 'Root', detail: '', children: [{ name: 'Existing', detail: 'keep', children: [], partners: [] }], partners: [] }
+    { thing: 'Root', situation: '', contain: [{ thing: 'Existing', situation: 'keep', contain: [], support: [] }], support: [] }
   ], null, 2));
 
   const result = await executeAtomLanguage({
-    source: 'transform new {"name":"Root/New","detail":"created","children":[],"partners":[]}',
+    source: 'transform new {"thing":"Root/New","situation":"created","contain":[],"support":[]}',
     contextFile,
     projectionFile
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.deepEqual(world[0].children.map((child) => child.name), ['Existing', 'New']);
-  assert.equal(world[0].children[1].detail, 'created');
+  assert.deepEqual(world[0].contain.map((child) => child.thing), ['Existing', 'New']);
+  assert.equal(world[0].contain[1].situation, 'created');
 });
 
 test('CLI full-path success and rejection receipts are exact and read-only', async (t) => {
@@ -234,7 +250,7 @@ test('CLI full-path success and rejection receipts are exact and read-only', asy
     ['乙区/同名节点', '乙区节点正文', '甲区节点正文']
   ]) {
     const result = await runCli(files, [
-      'explore', `{"name":"${businessPath}","detail$full"}`
+      'explore', `{"thing":"${businessPath}","situation$full"}`
     ]);
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, new RegExp(expected, 'u'));
@@ -248,7 +264,7 @@ test('CLI full-path success and rejection receipts are exact and read-only', asy
     ['atom.json/乙区/同名节点', 'ATOM_NOT_FOUND']
   ]) {
     const result = await runCli(files, [
-      'explore', `{"name":"${selector}","detail$full"}`
+      'explore', `{"thing":"${selector}","situation$full"}`
     ]);
     assert.equal(result.code, 4, selector);
     assert.equal(result.stdout, '');

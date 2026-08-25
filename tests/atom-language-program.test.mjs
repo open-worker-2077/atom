@@ -10,16 +10,16 @@ import { createAtomLanguageReceiver } from '../work-engine/atom-language/receive
 import { TRANSFORM_COMMANDS } from '../work-engine/atom-language/transform-key-parser.mjs';
 import { executeProgram } from '../work-engine/atom-language/program.mjs';
 
-function atom(name, detail = '', children = [], partners = [], types = []) {
-  const key = `name${types.map((type) => `@${type}`).join('')}`;
-  return { [key]: name, detail, children, partners };
+function atom(thing, situation = '', contain = [], support = [], types = []) {
+  const key = `thing${types.map((type) => `@${type}`).join('')}`;
+  return { [key]: thing, situation, contain, support };
 }
 
 function capability(name, id) {
   return atom(name, id);
 }
 
-function partner(verb, object) {
+function legacyPartner(verb, object) {
   return { verb, object };
 }
 
@@ -41,11 +41,11 @@ function findAtom(atoms, name) {
   while (queue.length) {
     const candidate = queue.shift();
     const nameEntry = Object.entries(candidate).find(([key]) => (
-      key === 'name' || key.startsWith('name@') || key.startsWith('name#')
+      key === 'thing' || key.startsWith('thing@') || key.startsWith('thing#')
     ));
     if (nameEntry?.[1] === name) return candidate;
     const childrenEntry = Object.entries(candidate).find(([key]) => (
-      key === 'children' || key.startsWith('children@') || key.startsWith('children#')
+      key === 'contain' || key.startsWith('contain@') || key.startsWith('contain#')
     ));
     queue.push(...(childrenEntry?.[1] ?? []));
   }
@@ -53,19 +53,20 @@ function findAtom(atoms, name) {
 }
 
 function replaceProgram() {
+  return atom('标记完成', [
+    'target = explore({"thing":"任务"})[0]',
+    'transform({"thing":target.path,"situation.rep.完成":None})'
+  ].join('\n'), [], [], ['program']);
+}
+
+function legacyDataflowProgram() {
   return atom('标记完成', '', [
     atom('读取任务', '', [], [
-      partner('uses', '能力/读取正文'),
-      partner('source', '任务')
-    ]),
-    atom('正文非空', '', [], [
-      partner('uses', '能力/非空判断'),
-      partner('value-result', '读取任务')
+      legacyPartner('uses', '能力/读取正文'), legacyPartner('source', '任务')
     ]),
     atom('写入完成', '', [], [
-      partner('uses', '能力/替换正文'),
-      partner('target', '任务'),
-      partner('value', '参数/完成值')
+      legacyPartner('uses', '能力/替换正文'), legacyPartner('target', '任务'),
+      legacyPartner('value', '参数/完成值')
     ])
   ], [], ['program']);
 }
@@ -73,11 +74,11 @@ function replaceProgram() {
 function baseWorld(program = replaceProgram()) {
   return [
     atom('能力', '', [
-      capability('读取正文', 'atom.engine/read-detail@1'),
+      capability('读取正文', 'atom.engine/read-situation@1'),
       capability('非空判断', 'atom.engine/guard-non-empty@1'),
       capability('相等判断', 'atom.engine/guard-equals@1'),
       capability('沿关系取 Atom', 'atom.engine/follow-partner@1'),
-      capability('替换正文', 'atom.engine/replace-detail@1'),
+      capability('替换正文', 'atom.engine/replace-situation@1'),
       capability('新建 child', 'atom.engine/create-child@1')
     ]),
     atom('参数', '', [atom('完成值', '完成')]),
@@ -86,12 +87,12 @@ function baseWorld(program = replaceProgram()) {
   ];
 }
 
-test('Program adds one exact name.run. Transform command', () => {
+test('Program adds one exact thing.run. Transform command', () => {
   assert.deepEqual([...TRANSFORM_COMMANDS], [
     'rep', 'sum', 'typ', 'ren', 'mov', 'cpy', 'dsc', 'rst', 'run'
   ]);
   const parsed = createAtomLanguageReceiver().receive(
-    'transform {"name.run.":"标记完成"}'
+    'transform {"thing.run.":"标记完成"}'
   );
   assert.equal(parsed.ok, true, JSON.stringify(parsed.errors));
   assert.deepEqual(parsed.items[0].fields[0].commands, [
@@ -102,11 +103,11 @@ test('Program adds one exact name.run. Transform command', () => {
 test('Program-only full detail replacement keeps dot-command markers opaque', () => {
   const replacement = '{"成果引用":"doc://e2e.rep.segment","说明":"保留 .sum. 文本"}';
   const compiled = compileProgramTransform({
-    request: { name: '任务', 'detail$replace': replacement }
+    request: { thing: '任务', 'situation$replace': replacement }
   });
 
   assert.equal(compiled.ok, true, JSON.stringify(compiled.errors));
-  const detail = compiled.item.fields.find((field) => field.baseKey === 'detail');
+  const detail = compiled.item.fields.find((field) => field.baseKey === 'situation');
   assert.equal(detail.valuePresent, false);
   assert.deepEqual(detail.commands, [{ name: 'rep', parameter: replacement }]);
 });
@@ -120,13 +121,13 @@ test('a valid Program is published immediately but never runs during write', asy
     source: `transform new ${JSON.stringify(program)}`
   });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  assert.equal(findAtom(await readAtoms(files.contextFile), '任务').detail, '待办');
+  assert.equal(findAtom(await readAtoms(files.contextFile), '任务').situation, '待办');
   assert.ok(findAtom(await readAtoms(files.contextFile), '标记完成'));
 });
 
 test('Program uses the shared access evaluator for reads and writes', async () => {
-  const world = baseWorld();
-  const programName = world.at(-1)['name@program'];
+  const world = baseWorld(legacyDataflowProgram());
+  const programName = world.at(-1)['thing@program'];
   const result = await executeProgram({
     atoms: world,
     selector: programName,
