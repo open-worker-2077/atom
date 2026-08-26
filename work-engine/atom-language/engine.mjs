@@ -676,7 +676,7 @@ export async function executeAtomLanguage(options = {}) {
   const fatalJumpFailure = (programCycle.failures ?? []).find((failure) => (
     typeof failure.code === 'string' && failure.code.startsWith('WINDOW_JUMP_')
   ));
-  if (fatalJumpFailure) {
+  if (fatalJumpFailure && options.programMode !== 'project') {
     return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
       fatalJumpFailure.code,
       fatalJumpFailure.message ?? '窗口跳转候选失败',

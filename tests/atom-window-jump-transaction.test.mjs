@@ -284,6 +284,21 @@ test('invalid destination rolls back the entire jump candidate with a stable err
   assert.deepEqual(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), initial);
 });
 
+test('startup projection remains readable when an existing jump registration is invalid', async (t) => {
+  const initial = jumpWorld('Root/Missing');
+  const files = await fixture(t, initial);
+  const result = await executeAtomLanguage({
+    source: 'atom', ...files,
+    programMode: 'project',
+    programScheduler: createProgramRuntimeScheduler(),
+    interaction: { id: 'startup', agent: null }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.revisionAfter, result.revisionBefore);
+  assert.deepEqual(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), initial);
+});
+
 test('default self-lock denial leaves the window in place', async (t) => {
   const initial = jumpWorld();
   const registration = initial[0].contain.find((entry) => nameOf(entry) === 'Registration');
