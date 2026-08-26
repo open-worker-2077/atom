@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { legacyAtomContextMetadata } from './context-store.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { executeProgramExplore, prepareExploreWorld } from './query-capability.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
@@ -17,6 +18,8 @@ const DEFAULT_MAX_WORKERS = 16;
 const workerFile = path.join(path.dirname(fileURLToPath(import.meta.url)), 'program-worker.py');
 const preparedRecordSnapshots = new WeakMap();
 const preparedProgramSnapshots = new WeakMap();
+const isolatedProgramPathsByRecords = new WeakMap();
+const legacyProgramPathsByRecords = new WeakMap();
 
 function freezePrepared(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
@@ -62,8 +65,18 @@ function worldRecords(atoms) {
     return record;
   }
   for (const [index, atom] of atoms.entries()) visit(atom, null, [], `${index}`);
+  const legacy = legacyAtomContextMetadata(atoms);
+  if (legacy) {
+    isolatedProgramPathsByRecords.set(records, new Set(legacy.isolatedProgramPaths));
+    legacyProgramPathsByRecords.set(records, new Set(legacy.legacyProgramPaths ?? []));
+    for (const record of records) {
+      if (legacy.legacyProgramPaths?.includes(record.path)) record.legacyGraphAbi = true;
+    }
+  }
   if (!Object.isFrozen(atoms)) return records;
   const prepared = freezePrepared(records);
+  if (legacy) isolatedProgramPathsByRecords.set(prepared, new Set(legacy.isolatedProgramPaths));
+  if (legacy) legacyProgramPathsByRecords.set(prepared, new Set(legacy.legacyProgramPaths ?? []));
   preparedRecordSnapshots.set(atoms, prepared);
   return prepared;
 }
@@ -86,6 +99,8 @@ function programRecords(records, selector = null) {
     throw error;
   }
   const recordsByRef = new Map(records.map((record) => [record.ref, record]));
+  const isolatedPaths = isolatedProgramPathsByRecords.get(records) ?? new Set();
+  const legacyProgramPaths = legacyProgramPathsByRecords.get(records) ?? new Set();
   const defaultBackups = records.filter((record) => (
     record.types.includes('backup') && record.types.includes('default')
   ));
@@ -118,9 +133,14 @@ function programRecords(records, selector = null) {
   };
   let programs = records.filter((record) => (
     record.types.includes('program')
+    && !record.types.includes('migration-isolated')
+    && !isolatedPaths.has(record.path)
     && record.detail.trim()
     && !isInsideDefaultBackup(record)
   ));
+  programs = programs.map((program) => legacyProgramPaths.has(program.path)
+    ? { ...program, legacyGraphAbi: true }
+    : program);
   if (Object.isFrozen(records)) {
     programs = Object.freeze(programs);
     preparedProgramSnapshots.set(records, programs);
@@ -674,7 +694,7 @@ function runWorker({
       }
     });
     writeToWorker({
-      world: programs ?? records.filter((record) => record.types.includes('program')),
+      world: programs ?? programRecords(records),
       program,
       validateOnly,
       triggered,
@@ -682,7 +702,9 @@ function runWorker({
       programRoot,
       invokeMain,
       programArguments,
-      supportDecision
+      supportDecision,
+      legacyGraphAbi: program.legacyGraphAbi === true
+        || legacyProgramPathsByRecords.get(records)?.has(program.path) === true
     });
   });
 }
@@ -908,8 +930,11 @@ export class ProgramRuntimeScheduler {
     const records = worldRecords(atoms);
     const previousRecords = worldRecords(previousAtoms);
     const previousByPath = new Map(previousRecords.map((record) => [record.path, record]));
+    const activePrograms = programRecords(records);
+    const activeProgramPaths = new Set(activePrograms.map((record) => record.path));
     const programs = records.filter((record) => (
       record.types.includes('program')
+      && activeProgramPaths.has(record.path)
       && record.detail.trim()
       && (() => {
         const previous = previousByPath.get(record.path);
@@ -921,7 +946,7 @@ export class ProgramRuntimeScheduler {
     const validated = await Promise.all(programs.map((program) => this.runBounded(() => this.runProgram({
       python: this.python,
       records,
-      programs: records.filter((record) => record.types.includes('program')),
+      programs: activePrograms,
       program,
       timeoutMs: this.timeoutMs,
       executeExplore: async () => {
@@ -1153,6 +1178,11 @@ export class ProgramRuntimeScheduler {
 
   async refresh(atoms, options = {}) {
     const records = worldRecords(atoms);
+    const compatibility = legacyAtomContextMetadata(atoms);
+    if (compatibility) {
+      isolatedProgramPathsByRecords.set(records, new Set(compatibility.isolatedProgramPaths ?? []));
+      legacyProgramPathsByRecords.set(records, new Set(compatibility.legacyProgramPaths ?? []));
+    }
     const availablePrograms = programRecords(records);
     const programs = options.programSelector
       ? programRecords(records, options.programSelector)

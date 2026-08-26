@@ -1,6 +1,6 @@
 ## Purpose
 
-为旧四轴世界、嵌套 Graph、Program 与模板提供可恢复、事务化且不猜测 partners 语义的一次性迁移。
+为同一应用世界的旧持久编码、嵌套 Graph、Program 与模板提供可恢复、事务化且不猜测 partners 语义的内核编码升级；不迁移应用节点或业务语义。
 
 ## ADDED Requirements
 
@@ -18,12 +18,16 @@
 - **WHEN** detail 中包含旧新轴普通字符串
 - **THEN** 只有结构 key 改为 situation，正文字节不变
 
-### Requirement: 旧 partners 无损性阻断
-由于任意 `verb/object` 不存在到显式 if/then 的通用无损映射，任何非空旧 partners SHALL 返回 `UNMAPPABLE_LEGACY_SUPPORT_RELATION` 并阻断迁移。诊断 MUST 保留 source、ordinal、原始 verb 与 object 全部字符，不得猜含义、丢字符、压平或新增字段。空 partners MAY 映射为 `support:[]`。
+### Requirement: 旧 partners 原位进入受信 support 编码
+由于任意 `verb/object` 不存在到显式 if/then 的通用无损映射，迁移 SHALL 只将外层 `partners` 键改为 `support`，内部 `{verb,object}` 数组项、字符与顺序 MUST 不变。版本化持久 adapter MUST 仅在 revision-bound manifest 命中的受信快照中把这些项识别为 legacy-support entry；它们 MUST 可由兼容查询/投影呈现，但 MUST NOT 被解释为 if/then 或进入新 support dependency/endpoint/Program 推理索引。升级 MUST 保持节点数、路径、contain 拓扑和事实语义，不得生成、移动或删除业务节点。
 
-#### Scenario: 非空 partner 阻断整批
-- **WHEN** 任一旧节点含 partner，无论 verb 是否为空
-- **THEN** 预检逐项报告原值且整批不可提交
+#### Scenario: 非空 partner 保全文字
+- **WHEN** 任一旧节点含 partner，无论 verb 是否为空或包含何种 Unicode 字符
+- **THEN** 预检报告原值，升级后同一节点的 `support` legacy entry 与原 partner 逐字、逐序相等
+
+#### Scenario: 兼容事实不伪造 support
+- **WHEN** 旧 partner 的 verb 无已裁定的新语义
+- **THEN** 升级后的来源和目标均不新增由该 verb 猜出的活跃 support clause
 
 #### Scenario: 空 partners 可迁移
 - **WHEN** 所有 partners 均为空且其他结构合法
@@ -33,15 +37,19 @@
 迁移 SHALL 递归覆盖 contain 层级、类型/简介 key、旧 Program、模板与消费端。获批批次 SHALL 基于 expected revision 预检并原子提交；任一错误或 revision 冲突 SHALL 使整批不写入。
 
 #### Scenario: 嵌套 Graph 守恒
-- **WHEN** 三层以上且无非空 partners 的旧树通过预检
+- **WHEN** 三层以上且可含任意 legacy partners 的旧树通过预检
 - **THEN** path、对象数、层级、类型、situation bytes 与数组顺序守恒
 
 #### Scenario: 失败不留半迁移
 - **WHEN** 任一对象或模板无法转换
 - **THEN** 整批不提交且其他对象保留旧修订
 
-### Requirement: 一次性读取边界与回退
-旧 reader 只 MAY 存在于版本化 planner 中；常规 CLI、Web、Program、Help 与写入 SHALL 只接受新语法。回退 SHALL 从备份恢复为新的审计修订，不覆盖 backing JSON 或抹除历史，并拒绝跨越后续提交。
+### Requirement: 持久兼容边界与回退
+旧 reader 只 MAY 存在于版本化持久 adapter 与 planner 中；常规 CLI 输入、Web 编辑、新 Program、Help 与写入 SHALL 只接受新语法。含旧轴的权威快照 MUST 可启动并由受控迁移升级；升级后的受信 legacy-support entry 与新 if/then clause MAY 在同一世界存在，普通四轴写入不得被全世界锁死。用户对一个节点显式全文替换新 support 时，旧 relation 才由该应用动作移除。回退 SHALL 从备份恢复为新的审计修订，不覆盖 backing JSON 或抹除历史，并拒绝跨越后续提交。
+
+#### Scenario: 旧世界可启动并受控写入
+- **WHEN** 权威快照仍含旧轴、partners 或旧 Graph ABI Program
+- **THEN** 新运行时可加载、预检并按事务升级编码；升级后普通新四轴写入可执行，未被显式替换的 legacy relation 保持不变
 
 #### Scenario: 旧入口关闭
 - **WHEN** 常规入口使用旧轴或旧方向标记语法
@@ -50,3 +58,47 @@
 #### Scenario: 回退保留历史
 - **WHEN** 对未被后续修订跨越的迁移执行 rollback
 - **THEN** 备份事实恢复为新修订，迁移与回退事件均保留
+### Requirement: 全量预检与执行门禁
+预检 SHALL 在一个 revision-bound 快照上完成一次结构遍历，返回节点数、legacy partner 节点数/条目数、Program 总数，以及按默认备份仓、显式配置的 test 隔离根、活跃域分类的旧 ABI Program。报告 MUST 为每个旧 Program 给出 exact path、源码哈希、调用、旧轴、行列、迁移状态和隔离理由；为每个 partner 给出 source、ordinal、verb、object。预检 MUST 收集全部问题而非首错退出，并产生可机器执行的 `readyToCommit` 门禁。
+
+#### Scenario: 任意规模世界完整聚类
+- **WHEN** 对同一只读修订运行预检
+- **THEN** 报告返回该修订的完整节点、legacy partners、Program 与各隔离分类计数及逐项清单，且不写世界
+
+#### Scenario: 修订漂移
+- **WHEN** 预检后权威修订发生变化
+- **THEN** 提交返回 `GRAPH_MIGRATION_REVISION_MISMATCH` 且必须重新预检和备份
+
+### Requirement: Program 结构迁移与执行隔离
+所有识别到旧 Graph ABI 的 Program facts SHALL 保持 situation 源码逐字不变。迁移 manifest MUST 以升级后的 world revision、exact path 与 source hash 记录兼容资格；内部 worker wrapper 只为三者同时命中的存量 Program 映射 name/detail/children/partners 到 thing/situation/contain/support 的调用与 AtomView，且不得改变源码。新建 Program、源码变化或 revision/manifest 不一致 MUST 使用严格新 ABI。默认备份仓及调用方显式提供的 exact test 隔离根 MAY 从执行集排除，但不得按短名、正文或业务含义猜测。
+
+#### Scenario: 备份与 test Program 不阻断启动
+- **WHEN** 旧 ABI Program 位于 typed default backup 或预检显式给定的 exact test root
+- **THEN** 事实保留、报告为 `isolated`、不进入执行集且不阻断其他事实加载
+
+#### Scenario: 活跃旧 ABI Program 由 manifest 兼容
+- **WHEN** AST 显示 Program 调用 explore/transform 的旧轴，无论参数是 literal、partners 或动态 key
+- **THEN** situation 源码哈希与字符保持不变，manifest 记录 exact path/hash；只有该受信版本由内部 wrapper 解释旧 ABI
+
+#### Scenario: 兼容资格不可伪造
+- **WHEN** 新 Program 提交旧轴调用，或存量 Program 源码 hash/世界 revision 与 manifest 不一致
+- **THEN** 严格拒绝旧 ABI，且不得因路径重名继承兼容资格
+
+### Requirement: manifest 随中央事务推进迁移谱系
+manifest MUST 保存 currentWorldRevision，并与每次中央授权事实提交原子推进。无关写入 MUST 保留仍可验证的 legacy-support 与 Program 资格；重启时 manifest revision 与当前事实 revision 不一致 MUST 拒绝启用兼容能力。legacy-support 资格 SHALL 由迁移数组内容指纹与授权出现次数验证，使节点改名/移动仍保持关系 provenance；显式 support 替换 SHALL 清除被移除旧数组的资格。Program 资格 SHALL 仅在 exact path 与 source hash 都不变时延续；源码变化、删除、新建、复制、改名或移动 MUST 撤销而不得转授。
+
+#### Scenario: 无关写不使兼容整体掉线
+- **WHEN** 中央事务只修改一个不相关普通节点
+- **THEN** manifest currentWorldRevision 与事实原子推进，未变化 legacy relation 和旧 Program 资格继续有效
+
+#### Scenario: Program 改名或移动撤销资格
+- **WHEN** legacy ABI Program 通过合法事务改名或移动且源码未变
+- **THEN** 旧 exact path 资格被撤销，新 path 不继承 legacy ABI
+
+#### Scenario: legacy relation 随节点移动保持
+- **WHEN** 含 legacy-support entries 的节点合法改名或移动且 support 未被替换
+- **THEN** 数组指纹/出现次数仍匹配并继续作为 legacy relation 呈现
+
+#### Scenario: 重启发现 manifest 漂移
+- **WHEN** manifest currentWorldRevision 不等于权威事实 revision
+- **THEN** 运行时拒绝启用 legacy ABI/provenance 并返回稳定迁移谱系错误

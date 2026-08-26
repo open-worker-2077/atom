@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 
 import { revisionOfWorldFacts } from '../world-runtime/world-revision.mjs';
+import { createCompatibilityManifest } from '../world-runtime/legacy-graph-compat.mjs';
 
 function problem(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -10,7 +11,7 @@ function digest(value) {
   return `sha256:${crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')}`;
 }
 
-export function planGraphFourAxisWorldMigration({ snapshot, planner, allowVerbs = [] }) {
+export function planGraphFourAxisWorldMigration({ snapshot, planner, isolatedRoots = [] }) {
   if (!snapshot || !Array.isArray(snapshot.facts) || typeof snapshot.revision !== 'string') {
     throw problem('INVALID_GRAPH_MIGRATION_SNAPSHOT', 'Migration planning requires one revision-bound world snapshot');
   }
@@ -23,8 +24,14 @@ export function planGraphFourAxisWorldMigration({ snapshot, planner, allowVerbs 
   if (typeof planner !== 'function') {
     throw problem('GRAPH_MIGRATION_PLANNER_REQUIRED', 'Migration planning requires an injected legacy Graph planner');
   }
-  const { graph: facts, summary } = planner(snapshot.facts, { allowVerbs });
+  const { graph: facts, summary } = planner(snapshot.facts, { isolatedRoots });
   const nextRevision = revisionOfWorldFacts(facts);
+  const compatibilityManifest = createCompatibilityManifest({
+    sourceRevision: snapshot.revision,
+    targetFacts: facts,
+    programAudit: summary.programs,
+    isolatedRoots
+  });
   const migrationId = `graph-four-axis-${digest({
     sourceRevision: snapshot.revision, nextRevision, summary
   }).slice('sha256:'.length, 'sha256:'.length + 20)}`;
@@ -33,7 +40,8 @@ export function planGraphFourAxisWorldMigration({ snapshot, planner, allowVerbs 
     expectedRevision: snapshot.revision, nextRevision,
     sourceFactsHash: digest(snapshot.facts), nextFactsHash: digest(facts),
     sourceFacts: structuredClone(snapshot.facts), facts: structuredClone(facts),
-    summary: structuredClone(summary)
+    summary: structuredClone(summary),
+    compatibilityManifest: structuredClone(compatibilityManifest)
   });
 }
 
@@ -66,7 +74,8 @@ export async function applyGraphFourAxisWorldMigration({
     correlationId: correlationId ?? plan.migrationId,
     expectedRevision: plan.expectedRevision, nextRevision: plan.nextRevision,
     facts: structuredClone(plan.facts),
-    source: `graph-four-axis-migration:${plan.migrationId}`
+    source: `graph-four-axis-migration:${plan.migrationId}`,
+    compatibilityManifest: structuredClone(plan.compatibilityManifest)
   });
   return Object.freeze({
     migrationId: plan.migrationId,

@@ -30,8 +30,8 @@ test('migration planner is a pure structural conversion that preserves situation
   assert.equal(result.summary.situationBytes, Buffer.byteLength(body) + Buffer.byteLength('A'));
 });
 
-test('migration planner blocks every non-empty partners array and preserves exact order and text', () => {
-  assert.throws(() => graphSchema.planGraphFourAxisMigration({
+test('migration planner preserves every non-empty partners item without assigning support semantics', () => {
+  const result = graphSchema.planGraphFourAxisMigration({
     name: '世界', detail: '', partners: [], children: [
       { name: 'A', detail: '', children: [], partners: [
         { verb: '', object: 'B' }, { verb: '', object: 'C' }
@@ -39,29 +39,31 @@ test('migration planner blocks every non-empty partners array and preserves exac
       { name: 'B', detail: '', children: [], partners: [] },
       { name: 'C', detail: '', children: [], partners: [] }
     ]
-  }, { allowEmptyVerbAsSupport: true }), (error) => {
-    assert.equal(error.code, 'UNMAPPABLE_LEGACY_SUPPORT_RELATION');
-    assert.deepEqual(error.details.relations, [
+  }, { allowEmptyVerbAsSupport: true });
+  assert.deepEqual(result.summary.legacyRelations, [
       { source: '世界/A', ordinal: 0, verb: '', object: 'B' },
       { source: '世界/A', ordinal: 1, verb: '', object: 'C' }
-    ]);
-    return true;
-  });
+  ]);
+  assert.deepEqual(result.graph.contain[0].support, [
+    { verb: '', object: 'B' }, { verb: '', object: 'C' }
+  ]);
+  assert.equal(JSON.stringify(result.graph).includes('if@current'), false);
 });
 
-test('migration planner blocks a legacy verb instead of losing it', () => {
-  assert.throws(() => graphSchema.planGraphFourAxisMigration({
+test('migration planner preserves a legacy verb instead of losing or guessing it', () => {
+  const result = graphSchema.planGraphFourAxisMigration({
     name: '世界', detail: '', children: [
       { name: 'A', detail: '', children: [], partners: [{ verb: '依赖', object: 'B' }] },
       { name: 'B', detail: '', children: [], partners: [] }
     ], partners: []
-  }), (error) => error.code === 'UNMAPPABLE_LEGACY_SUPPORT_RELATION'
-    && error.details.source === '世界/A'
-    && error.details.relations[0].object === 'B'
-    && error.details.relations[0].verb === '依赖');
+  });
+  assert.deepEqual(result.summary.legacyRelations[0], {
+    source: '世界/A', ordinal: 0, verb: '依赖', object: 'B'
+  });
+  assert.deepEqual(result.graph.contain[0].support[0], { verb: '依赖', object: 'B' });
 });
 
-test('migration dry-run blocks old Program Graph ABI with exact source locations', () => {
+test('migration dry-run audits old Program Graph ABI without changing source', () => {
   const legacy = legacyNode('Root', '', [legacyNode(
     'Program',
     "def main(arguments):\n    return explore({'name': 'Target', 'detail': 'x'})",
@@ -69,15 +71,14 @@ test('migration dry-run blocks old Program Graph ABI with exact source locations
     [],
     '@program'
   )]);
-  assert.throws(() => graphSchema.planGraphFourAxisMigration(legacy), (error) => {
-    assert.equal(error.code, 'UNMAPPABLE_LEGACY_PROGRAM_GRAPH_ABI');
-    assert.equal(error.details.path, 'Root/Program');
-    assert.deepEqual(error.details.uses.map(({ call, axis, line }) => ({ call, axis, line })), [
+  const result = graphSchema.planGraphFourAxisMigration(legacy);
+  assert.equal(result.summary.programs[0].path, 'Root/Program');
+  assert.deepEqual(result.summary.programs[0].uses.map(({ call, axis, line }) => ({ call, axis, line })), [
       { call: 'explore', axis: 'name', line: 2 },
       { call: 'explore', axis: 'detail', line: 2 }
-    ]);
-    return true;
-  });
+  ]);
+  assert.equal(result.summary.programs[0].disposition, 'legacy-wrapper');
+  assert.equal(result.graph.contain[0].situation, legacy.children[0].detail);
 });
 
 test('migration does not treat ordinary situation words as structural fields', () => {

@@ -38,6 +38,7 @@ import {
   transformChangesStructure
 } from './transform-executor.mjs';
 import {
+  legacyAtomContextMetadata,
   projectAtomContext,
   readAtomContext,
   resolveAtomContextFile
@@ -439,11 +440,12 @@ async function persistChangedGraph({
   expectedRevision,
   correlationId,
   source,
-  registrationChange = null
+  registrationChange = null,
+  compatibilityManifest
 }) {
   // Validate the full projection before either active file is changed.
   const validationStartedAt = performance.now();
-  projectAtomContext(atoms, { rootName });
+  projectAtomContext(atoms, { rootName, allowLegacySupport: Boolean(compatibilityManifest) });
   performanceTrace('world-precommit-validation', {
     elapsedMs: Math.round(performance.now() - validationStartedAt)
   });
@@ -505,7 +507,10 @@ export async function executeAtomLanguage(options = {}) {
 
   let atoms;
   try {
-    atoms = await readAtomContext(contextFile, { create: parsed.command === 'atom' });
+    atoms = await readAtomContext(contextFile, {
+      create: parsed.command === 'atom',
+      compatibilityManifest: options.compatibilityManifest
+    });
     performanceTrace('world-read-context', {
       elapsedMs: Math.round(performance.now() - operationStartedAt)
     });
@@ -529,6 +534,19 @@ export async function executeAtomLanguage(options = {}) {
     };
   }
   const revisionBefore = revisionOf(atoms);
+  const legacyMetadata = legacyAtomContextMetadata(atoms);
+  if (parsed.command === 'transform' && legacyMetadata) {
+    return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+      'LEGACY_GRAPH_MIGRATION_REQUIRED',
+      '存量旧 Graph 已以只读兼容模式加载；完成可验证迁移前禁止普通写入',
+      {
+        sourceFactsHash: legacyMetadata.sourceFactsHash,
+        legacyNodes: legacyMetadata.legacyNodes,
+        legacyRelations: legacyMetadata.relations.length,
+        isolatedPrograms: legacyMetadata.isolatedProgramPaths.length
+      }
+    )]);
+  }
   if (parsed.command === 'transform' && parsed.batch && !parsed.ok) {
     return failureBase(parsed, contextFile, projectionFile, atoms, parsed.errors);
   }
@@ -1383,7 +1401,8 @@ export async function executeAtomLanguage(options = {}) {
         atoms, contextFile, projectionFile, rootName: path.basename(contextFile),
         commitWorld: options.commitWorld, expectedRevision: revisionBefore,
         correlationId: interaction.id, source,
-        registrationChange: windowRecycled ? 'window-recycle' : null
+        registrationChange: windowRecycled ? 'window-recycle' : null,
+        compatibilityManifest: options.compatibilityManifest
       });
       if (recycledAgentPath) await options.programScheduler?.recycleWindowSelfLock?.(recycledAgentPath);
       if (movedAgentPaths) await options.programScheduler?.remapWindowSelfLock?.(
@@ -1411,7 +1430,8 @@ export async function executeAtomLanguage(options = {}) {
         atoms, contextFile, projectionFile, rootName: path.basename(contextFile),
         commitWorld: options.commitWorld, expectedRevision: revisionBefore,
         correlationId: interaction.id, source,
-        registrationChange: windowRecycled ? 'window-recycle' : null
+        registrationChange: windowRecycled ? 'window-recycle' : null,
+        compatibilityManifest: options.compatibilityManifest
       });
       if (recycledAgentPath) await options.programScheduler?.recycleWindowSelfLock?.(recycledAgentPath);
       if (movedAgentPaths) await options.programScheduler?.remapWindowSelfLock?.(
@@ -1645,7 +1665,8 @@ export async function executeAtomLanguage(options = {}) {
         commitWorld: options.commitWorld,
         expectedRevision: revisionBefore,
         correlationId: interaction.id,
-        source
+        source,
+        compatibilityManifest: options.compatibilityManifest
       });
       for (const record of [...programTransformLogs, ...transformLogs]) {
         try {
@@ -1736,7 +1757,8 @@ export async function executeAtomLanguage(options = {}) {
       commitWorld: options.commitWorld,
       expectedRevision: revisionBefore,
       correlationId: interaction.id,
-      source
+      source,
+      compatibilityManifest: options.compatibilityManifest
     });
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
       await appendTransformLog(contextFile, record);
@@ -1781,7 +1803,8 @@ export async function executeAtomLanguage(options = {}) {
         commitWorld: options.commitWorld,
         expectedRevision: revisionBefore,
         correlationId: interaction.id,
-        source
+        source,
+        compatibilityManifest: options.compatibilityManifest
       });
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
@@ -1878,7 +1901,8 @@ export async function executeAtomLanguage(options = {}) {
       commitWorld: options.commitWorld,
       expectedRevision: revisionBefore,
       correlationId: interaction.id,
-      source
+      source,
+      compatibilityManifest: options.compatibilityManifest
     });
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
       await appendTransformLog(contextFile, record);

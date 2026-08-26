@@ -19,8 +19,8 @@
 
 - [x] 3.1 备份 manifest、哈希、恢复与事务边界
 - [x] 3.2 递归迁移 name/detail/children 与空 partners
-- [x] 3.3 非空 partners 原样阻断，正文同名字符串不误改
-- [x] 3.4 旧 Program/模板 dry-run、批量回退与错误码
+- [x] 3.3 非空 partners 保持原字符/顺序且隔离于新 support 推理，正文同名字符串不误改
+- [x] 3.4 旧 Program/模板仅做 dry-run 审计，源码不改并提供批量回退错误码
 
 ## 4. 投影、Web 与 Help
 
@@ -40,3 +40,25 @@
   - 浏览器门禁根因已修复：权威数据到达前暂停昂贵占位星图渲染；事务期间只允许同修订的新域补载并保留当前事务，首次进入不再为空。
 - [x] 5.6 strict OpenSpec、diff check、GitNexus detect_changes 与本地提交
   - strict、diff check、脚本语法检查与 GitNexus detect_changes 已完成；浏览器门禁通过后形成独立分支本地提交。
+
+## 6. 真实世界兼容读取与预检
+
+- [x] 6.1 为旧/新持久快照增加版本化规范化与 provenance；公开 parser/写入仍严格四轴
+- [x] 6.2 兼容快照允许初始化、查询、投影和受控新四轴写入，不长期锁成只读
+- [x] 6.3 单遍预检完整聚类节点、partners、Program、默认备份与 exact test 隔离根，不首错退出
+- [x] 6.4 输出 revision/facts hash 绑定、逐项可审计且可机器判定的迁移门禁报告
+
+## 7. 无损迁移与 Program 隔离
+
+- [x] 7.1 仅做外层 partners→support 并保留 legacy entry 原数组，验证节点/拓扑/字符/顺序/语义守恒与公开伪造拒绝
+- [x] 7.2 用 AST 只审计旧 ABI 调用位置，生成 revision+exact path+source hash manifest，Program 源码逐字不改
+- [x] 7.3 worker wrapper 仅为 manifest 命中 Program 解释旧 ABI；默认备份/exact test 可结构隔离，新/变更 Program严格新 ABI
+- [x] 7.4 在备份验证后执行 revision-bound 单次原子提交、四轴回读与可审计 rollback
+- [x] 7.5 中央事务原子推进 manifest 谱系；覆盖无关写保留、relation 移动保留、Program 变更/移动撤销与重启漂移拒绝
+
+## 8. 部署验证与交付
+
+- [x] 8.1 红测覆盖真实启动失败复现、持久兼容读取、受控新写、未授权旧 Program 不重放和旧入口关闭
+- [x] 8.2 用任意规模合成 fixture 覆盖 relation/Program 完整聚类、AST 正反例及大型单遍性能；primary 实例数量仅进入 revision-bound deployment evidence
+- [x] 8.3 运行受影响测试、一次 Node 全量、必要的 Web 回归、strict OpenSpec 与 diff check
+- [x] 8.4 基于总控提供的 primary 只读清单生成全量预检回执，GitNexus detect_changes 后本地提交

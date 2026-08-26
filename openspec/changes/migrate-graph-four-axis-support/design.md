@@ -11,6 +11,7 @@ Graph 语法跨 parser、事务、Program、CLI/Web、投影和模板。首版�
 - 1→N、N→1、1→1 与显式 `M→hub→N` 可精确读写。
 - Program/业务机制保留在可见节点及既有 ABI。
 - 迁移可备份、回退、守恒且不误改正文。
+- 未升级持久编码能先进入可诊断兼容读取，而不是在初始化阶段失败；完成事务化编码升级后同一世界继续受控读写。
 - Web/CLI/Help 展示真实 if→then 与枢纽。
 
 ## Non-Goals
@@ -69,13 +70,37 @@ selector 支持 exact 与 current-domain relative；槽例 `./` 绑定当前实�
 
 ## 8. 迁移与回退
 
-迁移先生成带哈希 manifest 的可恢复备份，再通过受控事务转换 name/detail/children。空 partners 转空 support；非空 partners 因 verb/object 无无损结构映射而以 `UNMAPPABLE_LEGACY_SUPPORT_RELATION` 阻断并原样报告字符、ordinal 与路径。禁止脚本直改 backing JSON、正文字符串替换或部分提交。
+迁移先生成与 source revision/facts hash 绑定的可恢复备份，再通过受控事务只改四个外层结构键：`name→thing`、`detail→situation`、`children→contain`、`partners→support`。partners 数组整体原样搬入 support，绝不改写 `{verb,object}`、生成业务节点或猜作 if/then。节点数量、路径、contain 拓扑、类型后缀、situation bytes、relation source/ordinal/字符/顺序必须全量守恒。
+
+同一原子提交写入升级后的事实和内核拥有的 migration manifest。manifest 记录 source/target revision、facts hash、legacy-support 所在 exact path/ordinal，以及旧 ABI Program 的 exact path/source hash；它不是 Atom 业务节点。回退通过事务历史恢复事实与对应 manifest 版本，不直接改 backing JSON。
+
+manifest 不永久钉死迁移 revision。中央事务在每次事实提交时同步推进 `currentWorldRevision`：legacy-support 用迁移数组内容指纹与授权出现次数验证并延续，因此节点改名/移动不丢 provenance，显式 support 替换会减少资格；Program 只在 exact path 与 source hash 均未改变时延续，源码变化、删除、新建、复制、改名或移动均撤销。重启若 manifest revision 与事实不一致，兼容能力 fail closed。
+
+## 9. 存量读取与写入隔离
+
+公开 parser 继续严格拒绝旧轴及 `{verb,object}` support item。仅持久 adapter 可在读取权威旧快照或 revision-bound manifest 命中的升级快照时识别 legacy 编码；兼容资格由存储来源授予，应用 JSON 形状本身不能伪造。
+
+adapter 将旧外层键规范化为内核四轴，同时把受信 legacy-support entries 标注到不可枚举 provenance。查询/投影可呈现 verb/object 旧关系；support compiler/index 只消费 if/then clause。普通新四轴写入可修改 situation/contain/其他节点并保留 provenance；对某节点显式全文替换 support 才由应用动作清除该节点的 legacy entries。提交前 adapter 生成目标持久编码并由事务层计算/核对权威 revision，因此不会长期锁世界只读，也不会让第一笔写入暗中执行全世界迁移。
+
+## 10. Program 聚类与结构迁移
+
+隔离根只通过结构事实决定：typed `thing@backup@default` 自动识别；test 根由迁移调用方提供 exact selector 并绑定源修订，不按短名或正文猜测。隔离根下 Program 从编译、调度、trigger、显式 run/use_program 全部排除，但仍保留在 Explore 与迁移报告中。
+
+Python AST 只用于定位/审计旧 Graph ABI 调用，不产生源码 edits。worker 在运行前取得当前 world revision 与 manifest；仅 exact path、source hash、revision 三者命中时启用内部 legacy ABI adapter。adapter 在 Program 调用边界把 name/detail/children/partners 映射到内核规范形，并把 AtomView 结果映射回该 Program 既有字段视图；源码本身逐字不变。新建 Program、源码改变或 manifest 漂移均只获得严格新 ABI。
+
+## 11. 全量预检与提交门禁
+
+预检一次 DFS 同时产出世界结构计数、partner 完整清单、Program 调用清单、隔离分类、目标编码守恒摘要和问题集合，不以异常实现首错退出。`readyToCommit` 只有在所有节点/路径/contain/situation/relation 守恒、每个旧 Program 都有 `legacy-wrapper/isolate` 处置、备份端口可用且 source revision 未漂移时为 true。
+
+apply 顺序固定为：只读预检 → 创建源 revision/facts hash 绑定备份 → 回读验证备份 → 再次核对 revision → 单次原子 commit → 四轴全量回读 → 记录 rollback target。任一步失败均不提交；rollback 仍走事务历史创建新审计修订。
 
 # Risks / Trade-offs
 
 - 显式枢纽增加节点数量，但换取局部可读、可审计和机制归属。
 - 首版拒绝原生 M→N，避免预设计；后续只能基于真实生产涌现另开变更。
 - Web 需处理视觉压缩与真实节点同时存在，命中测试必须锁定身份。
+- 持久 adapter 与 manifest 增加内核复杂度；以 revision/path/hash 三重绑定和公开输入负测防止兼容能力泄漏。
+- legacy-support 可与新 clause 共存，查询展示需区分两类关系；索引测试必须证明 legacy entry 永不进入推理。
 
 # Open Questions
 

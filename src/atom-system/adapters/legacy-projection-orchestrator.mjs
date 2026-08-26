@@ -1,8 +1,14 @@
-import { readAtomContext } from '../../../work-engine/atom-language/context-store.mjs';
+import path from 'node:path';
+
+import {
+  legacyAtomContextMetadata,
+  readAtomContext
+} from '../../../work-engine/atom-language/context-store.mjs';
 import { createProjectionPipeline } from '../projections/projection-pipeline.mjs';
 import { createMemoryProjectionRepository } from '../projections/projection-repository.mjs';
 import { revisionOfWorldFacts } from '../world-runtime/world-revision.mjs';
 import { createLegacyProjectionProjectors } from './legacy-projection-adapter.mjs';
+import { createJsonTransactionJournal } from './json-world-repository.mjs';
 
 function problem(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -21,13 +27,20 @@ export function createLegacyProjectionOrchestrator({
   contextFile,
   worldId = 'primary',
   repository = createMemoryProjectionRepository(),
-  programScheduler = null
+  programScheduler = null,
+  journalFile = path.join(path.dirname(contextFile), 'atom.transactions.json')
 }) {
   if (!contextFile) throw problem('INVALID_PROJECTION_CONTEXT', 'Atom context file is required');
 
   async function projectCurrent({ expectedRevision, lockState = [] } = {}) {
     const readStartedAt = performance.now();
-    const facts = await readAtomContext(contextFile, { create: false });
+    const journal = createJsonTransactionJournal({ file: journalFile });
+    const journalState = await journal.readState();
+    const compatibilityManifest = journalState.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null;
+    const facts = await readAtomContext(contextFile, {
+      create: false,
+      compatibilityManifest
+    });
     performanceTrace('projection-read-world', {
       elapsedMs: Math.round(performance.now() - readStartedAt)
     });
@@ -39,7 +52,12 @@ export function createLegacyProjectionOrchestrator({
       });
     }
     const pipeline = createProjectionPipeline({
-      projectors: createLegacyProjectionProjectors({ lockState, programScheduler }),
+      projectors: createLegacyProjectionProjectors({
+        lockState,
+        programScheduler,
+        compatibilityManifest,
+        compatibilityMetadata: legacyAtomContextMetadata(facts)
+      }),
       repository
     });
     const rebuildStartedAt = performance.now();

@@ -26,12 +26,16 @@ export function createLegacyProjectionProjectors(options = {}) {
   return Object.freeze([
     Object.freeze({
       id: 'graph',
-      project: ({ facts }) => projectAtomContext(facts)
+      project: ({ facts }) => projectAtomContext(facts, {
+        allowLegacySupport: Boolean(options.compatibilityManifest)
+      })
     }),
     Object.freeze({
       id: 'spatial',
       async project({ facts }) {
-        const graphDocument = projectAtomContext(facts);
+        const graphDocument = projectAtomContext(facts, {
+          allowLegacySupport: Boolean(options.compatibilityManifest)
+        });
         const supportDecisions = await evaluateSupportClausesWithPrograms(graphDocument, {
           evaluateProgram: (selector) => {
             if (!programScheduler?.evaluateSupportProgram) {
@@ -42,11 +46,15 @@ export function createLegacyProjectionProjectors(options = {}) {
             return programScheduler.evaluateSupportProgram(facts, selector);
           }
         });
-        return projectAtomGraphToKnowledge(graphDocument, {
+        const knowledge = projectAtomGraphToKnowledge(graphDocument, {
           lockState,
           atomTypesByPath: atomTypesByPath(facts),
           supportDecisions
         });
+        if (options.compatibilityMetadata?.relations?.length) {
+          knowledge.legacyRelations = structuredClone(options.compatibilityMetadata.relations);
+        }
+        return knowledge;
       }
     })
   ]);

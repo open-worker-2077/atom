@@ -53,8 +53,16 @@ Program endpoint MUST 沿用 main(arguments)、current_atom、explore/transform�
 - **THEN** 四轴迁移后参数和返回契约不变
 
 ### Requirement: Program 节点迁移不静默改义
-迁移 SHALL 保持 situation 源码字符、thing@program identity、contain、support、锁和 trigger。若源码含旧 Graph 轴调用 SHALL 在 dry-run 报告并阻断，禁止猜测改写。
+迁移 SHALL 保持 thing@program identity、situation 源码字符、contain、support、锁和 trigger。任何旧 Graph ABI 调用 SHALL 保留原文，禁止 AST 批改、全局替换或猜测改写。只有 revision-bound manifest 以 exact path/source hash 命中的存量 Program 可由内部 worker wrapper 解释旧 Graph 调用；新 Program 与源码变化 Program只接受新 ABI。默认备份仓与调用方 exact test 隔离根可按结构排除执行。
 
 #### Scenario: 旧 Program 使用 name
-- **WHEN** dry-run 发现源码调用 explore({name:...})
-- **THEN** 报告精确 Program 路径与源码位置并阻断自动迁移
+- **WHEN** dry-run 的 AST 发现源码调用 explore({name:...}) 且 key 是 literal Graph 参数
+- **THEN** 报告精确 Program 路径、源码哈希与位置，源码保持不变并由 manifest 决定兼容或隔离
+
+#### Scenario: 普通正文提到旧轴
+- **WHEN** Program 注释、字符串或非 Graph object 中出现 name/detail/children/partners
+- **THEN** 源码字符保持不变且不得被识别为可迁移调用
+
+#### Scenario: 隔离 Program 不重放
+- **WHEN** 旧 Program 位于隔离根或包含不可证明等价的旧 ABI 调用
+- **THEN** 冷启动、trigger、use_program 与迁移均不执行该 Program，并返回稳定的隔离诊断

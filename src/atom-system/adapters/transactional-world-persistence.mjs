@@ -2,6 +2,10 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 
 import { writeAtomGraphProjection } from '../../../work-engine/atom-language/context-store.mjs';
+import {
+  advanceCompatibilityManifest,
+  validateCompatibilityManifest
+} from '../world-runtime/legacy-graph-compat.mjs';
 import { parseAtomKey } from '../../../work-engine/atom-language/key-parser.mjs';
 import { createCommitCoordinator } from '../world-runtime/commit-coordinator.mjs';
 import { revisionOfWorldFacts } from '../world-runtime/world-revision.mjs';
@@ -69,16 +73,24 @@ export function createTransactionalWorldPersistence({
     return recovery;
   }
 
+  async function compatibilityManifest() {
+    await recover();
+    const state = await journalRepository.readState();
+    return structuredClone(state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null);
+  }
+
   async function commit({
     correlationId,
     expectedRevision,
     nextRevision,
     facts,
     source = 'legacy-interaction',
-    registrationChange = null
+    registrationChange = null,
+    compatibilityManifest: suppliedManifest = null
   }) {
     await recover();
     const current = await worldRepository.read();
+    const previousManifest = await compatibilityManifest();
     if (
       agentRegistrationCount(facts) < agentRegistrationCount(current.facts)
       && !explicitlyChangesRegistration(source)
@@ -103,6 +115,11 @@ export function createTransactionalWorldPersistence({
       expectedRevision: canonicalExpectedRevision,
       nextRevision: canonicalNextRevision
     });
+    const nextManifest = suppliedManifest
+      ? (validateCompatibilityManifest(suppliedManifest, facts), structuredClone(suppliedManifest))
+      : previousManifest
+        ? advanceCompatibilityManifest(previousManifest, current.facts, facts)
+        : null;
     const receipt = await coordinator.execute({
       command: {
         contract: 'atom.world-command',
@@ -113,7 +130,14 @@ export function createTransactionalWorldPersistence({
         name: 'legacy-transition',
         payload: { source }
       },
-      transition: () => ({ facts: structuredClone(facts), result: { source } })
+      transition: () => ({
+        facts: structuredClone(facts),
+        result: {
+          source,
+          ...(nextManifest ? { compatibilityManifest: nextManifest } : {}),
+          ...(previousManifest ? { previousCompatibilityManifest: previousManifest } : {})
+        }
+      })
     });
     await onAuthoritativeWrite({
       operation: 'commit',
@@ -123,7 +147,10 @@ export function createTransactionalWorldPersistence({
     });
     if (publishLegacyProjection) {
       try {
-        await writeAtomGraphProjection(projectionFile, facts, { rootName: path.basename(contextFile) });
+        await writeAtomGraphProjection(projectionFile, facts, {
+          rootName: path.basename(contextFile),
+          allowLegacySupport: Boolean(nextManifest)
+        });
       } catch (error) {
         throw problem(
           'WORLD_COMMITTED_PROJECTION_PENDING',
@@ -164,7 +191,8 @@ export function createTransactionalWorldPersistence({
       const restored = await worldRepository.read();
       try {
         await writeAtomGraphProjection(projectionFile, restored.facts, {
-          rootName: path.basename(contextFile)
+          rootName: path.basename(contextFile),
+          allowLegacySupport: Boolean(await compatibilityManifest())
         });
       } catch (error) {
         throw problem(
@@ -177,5 +205,5 @@ export function createTransactionalWorldPersistence({
     return receipt;
   }
 
-  return Object.freeze({ commit, recover, rollback });
+  return Object.freeze({ commit, compatibilityManifest, recover, rollback });
 }

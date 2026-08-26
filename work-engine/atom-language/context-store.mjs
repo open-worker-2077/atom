@@ -7,17 +7,106 @@ import {
   parseGraphDocument
 } from '../../cli/lib/graph-json.mjs';
 import { atomLanguageError } from './errors.mjs';
+import { RETIRED_GRAPH_AXES } from './graph-schema.mjs';
 import { parseAtomKey } from './key-parser.mjs';
+import {
+  compatibilityMetadata,
+  isLegacySupportEntry,
+  validateCompatibilityManifest
+} from '../../src/atom-system/world-runtime/legacy-graph-compat.mjs';
 
 const DEFAULT_CONTEXT_FILENAME = 'atom.json';
 const contextSnapshots = new Map();
 const contextLoads = new Map();
+const legacySnapshotMetadata = new WeakMap();
 const REQUIRED_ATOM_FIELDS = Object.freeze([
   'thing',
   'situation',
   'contain',
   'support'
 ]);
+const GRAPH_BASES = new Set(REQUIRED_ATOM_FIELDS);
+
+function rawBaseKey(rawKey) {
+  return String(rawKey).match(/^[^@#$~]+/u)?.[0] ?? '';
+}
+
+function migratedLegacyKey(rawKey) {
+  const baseKey = rawBaseKey(rawKey);
+  return `${RETIRED_GRAPH_AXES[baseKey]}${String(rawKey).slice(baseKey.length)}`;
+}
+
+function normalizePersistedContext(value) {
+  if (!Array.isArray(value)) return { atoms: value, metadata: null };
+  const relations = [];
+  const isolatedProgramPaths = [];
+  let legacyNodes = 0;
+
+  function visit(atom, parentPath = []) {
+    if (!isPlainObject(atom)) return atom;
+    const entries = Object.entries(atom);
+    const oldEntries = entries.filter(([key]) => Object.hasOwn(RETIRED_GRAPH_AXES, rawBaseKey(key)));
+    const newEntries = entries.filter(([key]) => GRAPH_BASES.has(rawBaseKey(key)));
+    if (!oldEntries.length) {
+      if (!newEntries.length) return atom;
+      const thing = newEntries.find(([key]) => rawBaseKey(key) === 'thing')?.[1];
+      const contain = newEntries.find(([key]) => rawBaseKey(key) === 'contain');
+      if (!Array.isArray(contain?.[1])) return atom;
+      return {
+        ...atom,
+        [contain[0]]: contain[1].map((child) => visit(child, [...parentPath, String(thing ?? '')]))
+      };
+    }
+    if (newEntries.length) {
+      throw atomLanguageError('MIXED_GRAPH_AXIS_GENERATION', '同一持久 Atom 不得混用旧轴与新四轴', {
+        parent: parentPath.join('/')
+      });
+    }
+    const fields = new Map(oldEntries.map(([key, fieldValue]) => [
+      rawBaseKey(key), { rawKey: key, value: fieldValue }
+    ]));
+    if (Object.keys(RETIRED_GRAPH_AXES).some((required) => !fields.has(required))) return atom;
+    const thing = fields.get('name').value;
+    const pathParts = [...parentPath, thing];
+    const pathText = pathParts.join('/');
+    legacyNodes += 1;
+    if (Array.isArray(fields.get('partners').value)) {
+      for (const [ordinal, partner] of fields.get('partners').value.entries()) {
+        relations.push({ source: pathText, ordinal, verb: partner?.verb, object: partner?.object });
+      }
+    }
+    const thingKey = migratedLegacyKey(fields.get('name').rawKey);
+    if (thingKey.split('@').slice(1).some((part) => part.split('#')[0] === 'program')) {
+      isolatedProgramPaths.push(pathText);
+    }
+    return {
+      [thingKey]: thing,
+      [migratedLegacyKey(fields.get('detail').rawKey)]: fields.get('detail').value,
+      contain: Array.isArray(fields.get('children').value)
+        ? fields.get('children').value.map((child) => visit(child, pathParts))
+        : fields.get('children').value,
+      support: structuredClone(fields.get('partners').value)
+    };
+  }
+
+  const atoms = value.map((atom) => visit(atom));
+  if (!legacyNodes) return { atoms: value, metadata: null };
+  return {
+    atoms,
+    metadata: Object.freeze({
+      contract: 'atom.legacy-graph-read-only', version: 1, mode: 'legacy-read-only',
+      legacyNodes,
+      relations: Object.freeze(relations.map(Object.freeze)),
+      isolatedProgramPaths: Object.freeze([...isolatedProgramPaths]),
+      sourceFactsHash: `sha256:${crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')}`
+    })
+  };
+}
+
+export function legacyAtomContextMetadata(atoms) {
+  const metadata = atoms && typeof atoms === 'object' ? legacySnapshotMetadata.get(atoms) : null;
+  return metadata ? structuredClone(metadata) : null;
+}
 
 function freezeSnapshot(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
@@ -170,7 +259,7 @@ function projectedSupport(clause, rootThing) {
   return projected;
 }
 
-function projectAtom(atom, location, rootThing) {
+function projectAtom(atom, location, rootThing, options = {}) {
   const fields = atomFields(atom, location);
   const thing = fields.get('thing').value;
   const situation = fields.get('situation').value;
@@ -208,13 +297,15 @@ function projectAtom(atom, location, rootThing) {
     [fields.get('thing').rawKey]: thing,
     [fields.get('situation').rawKey]: situation,
     [fields.get('contain').rawKey]: contain.map((child, index) => (
-      projectAtom(child, `${location}.contain[${index}]`, rootThing)
+      projectAtom(child, `${location}.contain[${index}]`, rootThing, options)
     ))
   };
   for (const [rawKey, value] of Object.entries(atom)) {
     const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
     if (parsed.baseKey !== 'support') continue;
-    projected[rawKey] = value.map((selector) => projectedSupport(selector, rootThing));
+    projected[rawKey] = value
+      .filter((selector) => options.allowLegacySupport !== true || !isLegacySupportEntry(selector))
+      .map((selector) => projectedSupport(selector, rootThing));
   }
   return projected;
 }
@@ -232,6 +323,10 @@ export function projectAtomContext(atoms, options = {}) {
     );
   }
   const rootName = options.rootName ?? DEFAULT_CONTEXT_FILENAME;
+  const projectionOptions = {
+    ...options,
+    allowLegacySupport: options.allowLegacySupport === true || legacySnapshotMetadata.has(atoms)
+  };
   const candidate = {
     config: {
       schema_version: GRAPH_JSON_SCHEMA_VERSION
@@ -239,7 +334,7 @@ export function projectAtomContext(atoms, options = {}) {
     graph: {
       thing: rootName,
       situation: '',
-      contain: atoms.map((atom, index) => projectAtom(atom, `$[${index}]`, rootName)),
+      contain: atoms.map((atom, index) => projectAtom(atom, `$[${index}]`, rootName, projectionOptions)),
       support: []
     }
   };
@@ -288,9 +383,10 @@ export async function readAtomContext(file, options = {}) {
     }
     throw error;
   }
+  const manifestRevision = options.compatibilityManifest?.currentWorldRevision ?? '';
   const cached = contextSnapshots.get(contextFile);
-  if (cached?.signature === signature) return cached.value;
-  const loadKey = `${contextFile}\0${signature}`;
+  if (cached?.signature === signature && cached.manifestRevision === manifestRevision) return cached.value;
+  const loadKey = `${contextFile}\0${signature}\0${manifestRevision}`;
   if (contextLoads.has(loadKey)) return contextLoads.get(loadKey);
   const loading = (async () => {
     let value;
@@ -306,9 +402,14 @@ export async function readAtomContext(file, options = {}) {
       }
       throw error;
     }
-    projectAtomContext(value);
-    const snapshot = freezeSnapshot(value);
-    contextSnapshots.set(contextFile, { signature, value: snapshot });
+    const normalized = normalizePersistedContext(value);
+    const metadata = options.compatibilityManifest
+      ? compatibilityMetadata(options.compatibilityManifest, normalized.atoms)
+      : normalized.metadata;
+    projectAtomContext(normalized.atoms, { allowLegacySupport: Boolean(metadata) });
+    const snapshot = freezeSnapshot(normalized.atoms);
+    if (metadata) legacySnapshotMetadata.set(snapshot, metadata);
+    contextSnapshots.set(contextFile, { signature, manifestRevision, value: snapshot });
     return snapshot;
   })().finally(() => contextLoads.delete(loadKey));
   contextLoads.set(loadKey, loading);
@@ -319,9 +420,19 @@ export async function readAtomContext(file, options = {}) {
  * Atom context persistence is separate from projection persistence so the
  * engine can coordinate the two files without coupling either to knowledge.json.
  */
-export async function writeAtomContext(file, atoms) {
+export async function writeAtomContext(file, atoms, options = {}) {
   const contextFile = resolveAtomContextFile(file);
-  projectAtomContext(atoms);
+  const legacy = legacySnapshotMetadata.get(atoms);
+  if (legacy?.mode === 'legacy-read-only') {
+    throw atomLanguageError(
+      'LEGACY_GRAPH_MIGRATION_REQUIRED',
+      '存量旧 Graph 已以只读兼容模式加载；完成可验证迁移前禁止普通写入',
+      { file: contextFile, sourceFactsHash: legacy.sourceFactsHash }
+    );
+  }
+  if (options.compatibilityManifest) validateCompatibilityManifest(options.compatibilityManifest, atoms);
+  const trusted = legacy?.mode === 'versioned-compatibility' || Boolean(options.compatibilityManifest);
+  projectAtomContext(atoms, { allowLegacySupport: trusted });
   await atomicWriteJson(contextFile, atoms);
   await rememberContextSnapshot(contextFile, atoms);
   return contextFile;

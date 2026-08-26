@@ -25,8 +25,12 @@ export function createLegacyWorldService(options = {}) {
       if (!request.contextFile || !request.projectionFile) return execute(request);
       const persistence = transactionFor(request);
       await persistence.recover();
+      const compatibilityManifest = typeof persistence.compatibilityManifest === 'function'
+        ? await persistence.compatibilityManifest()
+        : null;
       return execute({
         ...request,
+        compatibilityManifest,
         commitWorld: (transition) => persistence.commit({
           ...transition,
           source: request.source,
