@@ -39,8 +39,8 @@
 - **THEN** 系统仍返回 `WINDOW_ACCESS_DENIED`，结果与使用最短 exact 选择器相同
 
 #### Scenario: 跳窗后下一公开请求仍执行重绑定自锁
-- **WHEN** 窗口已从槽例 A 原子跳到槽例 B，活动自锁已重绑定到 B 下的新窗口路径，随后该窗口在下一条公开 CLI/Program 请求中以完整 exact path 读取旧槽例 A
-- **THEN** 系统从 scheduler 的活动状态投影重绑定后的默认或显式自锁，以 `WINDOW_ACCESS_DENIED` 拒绝且不公开旧槽例内容；不得因该请求未重跑 `jump` Program、复用缓存投影或跨越事务边界而回落为无自锁访问
+- **WHEN** 窗口通过显式 `thing.run.` 从槽例 A 原子跳到槽例 B，随后该窗口在不同的公开 CLI/Program 请求中以完整 exact path 分别读取当前直接父节点 B、旧槽例 A 与 B 以上的祖先
+- **THEN** 移动提交同时把活动自锁从旧窗口路径重绑定到新路径并持久到 request-driven lock snapshot；后续请求允许 B，对 A 和更高祖先返回 `WINDOW_ACCESS_DENIED`，且不得因未重跑 `jump` Program、复用缓存投影、跨越请求或使用完整 exact path 而回落为无自锁访问
 
 ### Requirement: 显式 lock 在 read 与 write 分别层叠 allow deny 规则
 显式 `lock` SHALL 只允许 `read` 与 `write` 两个侧对象；每侧 SHALL 同时支持 `allow` 与 `deny` 规则数组。每条规则 SHALL 包含正整数 `priority`、一个 `from` 精确起点，以及可选 `parent:boolean`、`peers:boolean`、`descendants:"all"|非负整数`。`from` 只允许字面量 `"current"`，或由绝对 exact `explore()` 返回的单个 Thing 坐标对象，或由 current 执行 exact 相对 `explore()` 后返回的单个 Thing 坐标对象；除唯一保留字 `current` 外 SHALL NOT 接受字符串、短名、模糊选择、ref 或邻接/数组位置猜测。每条规则 SHALL 匹配起点 exact Thing 本身，并按声明选择唯一直接 parent、同父 peers 与指定深度 descendants；`parent` SHALL NOT 展开到父节点所在层。read 与 write 未出现的一侧、以及任一侧没有显式命中目标时 SHALL 回落该侧既定默认自锁，不得默认全放行。

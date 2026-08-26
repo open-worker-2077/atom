@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { createJsonRequestDrivenLockRepository } from '../src/atom-system/adapters/json-request-driven-lock-repository.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeProgramExplore } from '../work-engine/atom-language/engine.mjs';
 
@@ -268,6 +269,61 @@ test('explicit run binds a window-relative jump guard while preserving its exact
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
   assert.deepEqual(childNames(stored[0].contain[0]), []);
   assert.deepEqual(childNames(stored[0].contain[1]), ['Window']);
+});
+
+test('explicit jump run persists the moved self-lock before later exact CLI requests', async (t) => {
+  const initial = [atom('Root', '', [
+    atom('Acceptance', '', [
+      atom('Job1', '', [
+        atom('Window', '', [
+          atom('When', 'def main(arguments):\n    return True', [], 'program'),
+          atom('Where', 'def main(arguments):\n    return explore({"thing":"Root/Acceptance/Job2"})[0]', [], 'program'),
+          atom('Registration', [
+            'when_program = explore({"thing":"Root/Acceptance/Job1/Window/When"})[0]',
+            'where_program = explore({"thing":"Root/Acceptance/Job1/Window/Where"})[0]',
+            'destination = explore({"thing":"Root/Acceptance/Job2"})[0]',
+            'jump({',
+            '  "when": when_program,',
+            '  "where": where_program,',
+            '  "lock": {"read":{"allow":[',
+            '    {"priority":2,"from":destination,"descendants":"all"}',
+            '  ]}}',
+            '})'
+          ].join('\n'), [], 'program')
+        ], 'agent')
+      ]),
+      atom('Job2')
+    ])
+  ])];
+  const files = await fixture(t, initial);
+  const snapshotFile = path.join(path.dirname(files.contextFile), 'request-driven-locks.json');
+  const repository = createJsonRequestDrivenLockRepository({ file: snapshotFile });
+  const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
+  const movedPath = 'Root/Acceptance/Job2/Window';
+  const request = (source) => executeAtomLanguage({
+    source,
+    ...files,
+    programMode: null,
+    programScheduler: scheduler,
+    interaction: { agent: { ref: 'window-ref', path: movedPath } }
+  });
+
+  const moved = await executeAtomLanguage({
+    source: 'transform {"thing.run.":"Root/Acceptance/Job1/Window/Registration"}',
+    ...files,
+    programScheduler: scheduler,
+    interaction: { agent: { ref: 'window-ref', path: 'Root/Acceptance/Job1/Window' } }
+  });
+  assert.equal(moved.ok, true, JSON.stringify(moved.errors));
+  assert.deepEqual((await repository.load()).windowSelfLocks.map((entry) => entry.agentPath), [movedPath]);
+
+  const parent = await request('explore {"thing":"Root/Acceptance/Job2","situation$full":true}');
+  assert.equal(parent.ok, true, JSON.stringify(parent.errors));
+  for (const target of ['Root/Acceptance/Job1', 'Root/Acceptance']) {
+    const denied = await request(`explore {"thing":"${target}","situation$full":true}`);
+    assert.equal(denied.ok, false, `${target}: ${JSON.stringify(denied)}`);
+    assert.ok(denied.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), target);
+  }
 });
 
 test('invalid destination rolls back the entire jump candidate with a stable error', async (t) => {

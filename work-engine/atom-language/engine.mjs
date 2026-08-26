@@ -1857,6 +1857,10 @@ export async function executeAtomLanguage(options = {}) {
         source,
         compatibilityManifest: options.compatibilityManifest
       });
+      if (recycledAgentPath) await options.programScheduler?.recycleWindowSelfLock?.(recycledAgentPath);
+      if (movedAgentPaths) await options.programScheduler?.remapWindowSelfLock?.(
+        movedAgentPaths.previousPath, movedAgentPaths.nextPath
+      );
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
     const resultMatch = walkAtoms(nextAtoms).find((match) => (
