@@ -51,7 +51,11 @@ test('instantiate creates one complete advancement flow below the calling Progra
     source: 'atom', contextFile, projectionFile, programScheduler: scheduler
   });
   assert.equal(second.ok, true);
-  assert.equal(second.lockState.filter((entry) => entry.reasons.some((reason) => reason.code === 'FRAMEWORK_SCHEMA')).length, 5);
+  assert.equal(
+    second.lockState.filter((entry) => entry.reasons.some((reason) => reason.code === 'FRAMEWORK_SCHEMA')).length,
+    5,
+    JSON.stringify(second)
+  );
   const afterSecond = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.deepEqual(afterSecond, afterFirst);
 });

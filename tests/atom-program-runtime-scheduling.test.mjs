@@ -119,6 +119,28 @@ test('a matched Transform trigger does not revalidate cached unrelated Programs'
   assert.deepEqual(cycle.messages.map(({ text }) => text), ['indexed-only']);
 });
 
+test('a trigger-scoped cycle cannot replace the reusable full-world projection after a Program is added', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const seed = atom('Seed Program', "message({'level': 'info', 'text': 'seed'})", [], 'program');
+  const target = atom('Protected Target');
+  const lockProgram = atom('New Lock Program', [
+    "target = explore({'thing': 'Protected Target'})[0]",
+    "lock({'targets': {'refs': [target.ref]}, 'mode': 'write', 'fields': ['thing'], 'reason': {'code': 'NEW_PROGRAM_LOCK', 'message': 'new Program lock'}})"
+  ].join('\n'), [], 'program');
+
+  await scheduler.refresh([target, seed]);
+  const expandedWorld = [structuredClone(target), structuredClone(seed), lockProgram];
+  const triggered = await scheduler.refresh(expandedWorld, {
+    triggerEvent: { mode: 'transform', nodes: ['Seed Program'] }
+  });
+  assert.equal(triggered.locks.length, 0);
+
+  const complete = await scheduler.refresh(expandedWorld);
+
+  assert.deepEqual(complete.executedProgramPaths, ['New Lock Program']);
+  assert.equal(complete.locks[0].reason.code, 'NEW_PROGRAM_LOCK');
+});
+
 test('an unmatched Transform event does not revalidate unrelated Programs', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const legacy = atom('Legacy Reporter', [

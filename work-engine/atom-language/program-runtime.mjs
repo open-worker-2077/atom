@@ -1627,7 +1627,7 @@ export class ProgramRuntimeScheduler {
       ...diagnosticWarnings
     ];
     this.projectionLoadWarning = null;
-    if (value.failures.length === 0) {
+    if (value.failures.length === 0 && !triggerEvent) {
       const reusableKey = contextDependent
         ? contextualProgramSetFingerprint(
           programs, availablePrograms, isolateFailures, scopePath, records
