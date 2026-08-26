@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-import { validateRequestDrivenLockSnapshot } from '../adapters/json-request-driven-lock-repository.mjs';
+import { validateRequestDrivenLockSnapshot } from '../public/request-driven-lock-contract.mjs';
 import { revisionOfWorldFacts } from '../world-runtime/world-revision.mjs';
 import { createCompatibilityManifest } from '../world-runtime/legacy-graph-compat.mjs';
 
