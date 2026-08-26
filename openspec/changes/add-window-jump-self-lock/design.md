@@ -30,6 +30,8 @@ The Program function registry declares a reusable `ThingCoordinate` runtime type
 
 Alternative considered: accept strings or expose current refs. Strings reintroduce ambiguity and refs are revision-scoped implementation data, both contrary to the fixed contract.
 
+Exact-string compatibility is contract-local rather than a shared coordinate coercion: `use_program.name` and the CLI `thing.run.` selector retain their explicitly published exact-name/path forms, while jump `when`/`where`/`recycle` and the `where` result remain ThingCoordinate-only. The worker validates all three supplied jump selectors before recycle/when short-circuit evaluation, then preserves the established execution order. Because exact-path strings were never a valid jump contract, rejecting accidental historical acceptance is a defect fix rather than a deprecation window or dual ABI.
+
 ### Emit jump and changed metadata through the existing Program result
 
 The worker adds `jumps` effects and `changedThings` metadata to its existing result envelope. `jump()` validates only its four fixed keys and converts Program-coordinate arguments into exact nested Program paths. `changed(things)` records normalized dependencies on every projection/registration execution; it returns whether the current indexed Transform event intersects them. Because the call itself is cheap, a Program can write `if not changed(explore(...)): return` and no later explore/calculation runs on a miss.

@@ -734,7 +734,9 @@ function runWorker({
 function describeProgramFailure(error, program) {
   const jumpFailure = /\bjump\s*\(/u.test(program.detail);
   return {
-    code: jumpFailure ? 'WINDOW_JUMP_DESTINATION_INVALID' : error?.code ?? 'ATOM_PROGRAM_FAILED',
+    code: error?.code === 'INVALID_JUMP_CONTRACT'
+      ? error.code
+      : jumpFailure ? 'WINDOW_JUMP_DESTINATION_INVALID' : error?.code ?? 'ATOM_PROGRAM_FAILED',
     message: error?.message ?? 'Python Program failed',
     programRef: program.ref,
     programPath: program.path,

@@ -452,11 +452,28 @@ def main():
             program_stack.pop()
 
     def jump(specification):
-        specification = require_object(specification, "jump")
+        try:
+            specification = require_object(specification, "jump")
+        except TypeError as error:
+            raise EngineCallError("INVALID_JUMP_CONTRACT", str(error)) from error
         allowed = {"when", "where", "recycle", "lock"}
         unknown = set(specification) - allowed
         if unknown:
-            raise ValueError("jump() accepts only when, where, recycle, and lock")
+            raise EngineCallError(
+                "INVALID_JUMP_CONTRACT",
+                "jump() accepts only when, where, recycle, and lock",
+            )
+        for coordinate_name in ("when", "where", "recycle"):
+            if coordinate_name not in specification:
+                continue
+            try:
+                resolve_exact_thing(
+                    specification[coordinate_name],
+                    f"jump.{coordinate_name}",
+                    "program",
+                )
+            except (TypeError, ValueError) as error:
+                raise EngineCallError("INVALID_JUMP_CONTRACT", str(error)) from error
         action = "guard"
         destination_path = None
         if "recycle" in specification:

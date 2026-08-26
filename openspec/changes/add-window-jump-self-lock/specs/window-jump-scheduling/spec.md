@@ -5,15 +5,19 @@
 ## ADDED Requirements
 
 ### Requirement: jump 使用固定的精确 Program 契约
-系统 SHALL 注册 `jump`，其参数对象只允许 `when`、`where`、`recycle`、`lock`。`when`、`where`、`recycle` 若存在 SHALL 是由 `explore()` 返回的单个精确 Thing 坐标对象，且目标 Thing SHALL 为 `@program`；系统 SHALL NOT 要求调用方提取 `.ref`，也 SHALL NOT 接受短名、模糊字符串、数组位置或隐式邻接猜测。`when` 与 `recycle` Program SHALL 返回 JSON boolean；`where` Program SHALL 返回一个精确 Thing 坐标对象。
+系统 SHALL 注册 `jump`，其参数对象只允许 `when`、`where`、`recycle`、`lock`。`when`、`where`、`recycle` 若存在 SHALL 是由 `explore()` 返回的单个精确 Thing 坐标对象，且目标 Thing SHALL 为 `@program`；系统 SHALL NOT 要求调用方提取 `.ref`，也 SHALL NOT 接受短名、完整 `EXACT_PATH` 字符串、模糊字符串、数组位置或隐式邻接猜测。三项坐标 SHALL 在 jump 注册时全部校验，即使当前求值顺序会短路其中一项；`when` 与 `recycle` Program SHALL 返回 JSON boolean；`where` Program SHALL 返回一个精确 Thing 坐标对象而非字符串。
 
 #### Scenario: explore 坐标直接传入
 - **WHEN** 使用方把 `explore({...})[0]` 返回的精确 `@program` Thing 坐标分别传给 `when`、`where` 或 `recycle`
 - **THEN** `jump` 直接接受坐标对象并保存稳定的精确依赖，不要求 `.ref` 或另造游走语法
 
 #### Scenario: 非精确 Program 引用被拒绝
-- **WHEN** 任一 Program 参数是字符串、模糊选择、零命中、多命中、非 `@program` Thing 或包含未知键
+- **WHEN** 任一 Program 参数是短名或完整 `EXACT_PATH` 字符串、模糊选择、零命中、多命中、非 `@program` Thing 或包含未知键，包括因守窗或 recycle 优先而本轮不会求值的 `where`／`when`
 - **THEN** 系统以稳定的 `INVALID_JUMP_CONTRACT` 拒绝注册或执行且不产生窗口效果
+
+#### Scenario: 精确字符串兼容不扩散到 jump
+- **WHEN** `use_program.name` 或 CLI `thing.run.` 按各自公开契约使用精确字符串，而 jump 的 `when`、`where`、`recycle` 收到相同字符串
+- **THEN** 前两处维持各自既有兼容，jump 仍以 `INVALID_JUMP_CONTRACT` 拒绝；内部规范化 path 不是新的公开字符串入口，本变更无需退役或迁移合法 jump 调用
 
 ### Requirement: 守窗、回收与跳转具有确定顺序
 一次命中执行中系统 SHALL 先求值 `recycle`；其结果为 `true` 时 SHALL 直接回收当前窗口且不执行 `when` 或 `where`。`recycle` 省略或返回 `false` 时，系统 SHALL 再求值 `when`；`when` 省略或返回 `false` 时 SHALL 原位守窗且不执行 `where`。只有 `when` 返回 `true` 时 SHALL 执行 `where` 并尝试跳转。

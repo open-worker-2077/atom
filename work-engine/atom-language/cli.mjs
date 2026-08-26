@@ -248,7 +248,7 @@ function help() {
     '  JSON 函数：json_parse({"text":"..."})->JSON值；json_stringify({"value":...,"indent"?:0..8})->string。序列化默认紧凑，拒绝 NaN、Infinity 和非 JSON 值；失败将终止整个 Program 评估且不发布已登记效果；不开放 import/eval；可配合 situation.rep. 写回。',
     '  世界函数：explore(query)->rows；transform(spec)、slot_body(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
     '  窗口跳转：jump({"when":when_program,"where":where_program,"recycle":recycle_program,"lock":self_lock})；四项均可省略，recycle=true 直接回收，随后才算 when，且仅 when=true 才算 where；省略 when 即守窗。',
-    '  精确坐标：when_program = explore({"thing":"EXACT判定@program"})[0]；把 explore() 返回对象直接交给 jump 或锁规则，不使用 .ref，也不接受短名字符串或数组位置猜测。旧 AtomView 仅由内部适配层兼容。',
+    '  精确坐标：when_program = explore({"thing":"EXACT判定@program"})[0]；把 explore() 返回对象直接交给 jump 或锁规则，不使用 .ref。jump 的 when／where／recycle 及 where 返回值只接受 ThingCoordinate；短名字符串与完整 EXACT_PATH 字符串均拒绝，数组位置也不得猜测。精确字符串兼容仅保留于 use_program.name 与 CLI thing.run. 选择器，不扩散到 jump；旧 AtomView 仅由内部适配层兼容。',
     '  变化探针：def main(arguments):\n    point = explore({"thing":"EXACT监测Thing"})[0]\n    if not changed([point]):\n        return\n    # 命中后才 explore／聚合／计算。changed 只返回 bool 并登记既有 Transform 反向索引，控制流必须由调用方显式短路。',
     '  窗口自锁激活：当前 Agent 的 Program 周期产出 jump 注册结果后，当前窗口立即进入受自锁窗口态；守窗注册同样激活。未注册 jump 的既有 Agent 维持旧访问行为，不会仅因 @agent 或当前交互窗口身份而隐式启用自锁。',
     '  激活后的默认窗口自锁：read 可读 current／全部后代／同父 peers／唯一直接 parent；不可读 parent 的同层节点、更高祖先或其他分支。write 仅可写 current 下方后代，不可改 current 自身、peers 或 parent；完整 exact path 也不能绕过。',

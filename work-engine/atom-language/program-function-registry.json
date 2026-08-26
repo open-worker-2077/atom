@@ -78,7 +78,15 @@
         },
         "transaction": "central-atomic-commit",
         "coordinate": { "$ref": "#/runtimeTypes/ThingCoordinate" },
+        "coordinateInputs": {
+          "selectors": "ThingCoordinate-only",
+          "whereResult": "ThingCoordinate-only",
+          "exactPathString": "forbidden",
+          "shortNameString": "forbidden",
+          "ref": "forbidden"
+        },
         "errors": [
+          "INVALID_JUMP_CONTRACT",
           "INVALID_WINDOW_JUMP_EFFECT",
           "WINDOW_JUMP_DESTINATION_INVALID",
           "WINDOW_JUMP_LOCK_DENIED"

@@ -76,11 +76,24 @@ test('jump guards without when, skips where when false, and recycle true wins', 
   }
 });
 
-test('jump rejects strings and accepts the final thing exact-coordinate object adapter', async () => {
-  const invalid = [atom('错误注册', 'jump({"when":"判定"})', [], 'program')];
-  await assert.rejects(createProgramRuntimeScheduler().refresh(invalid), {
-    code: 'ATOM_PROGRAM_FAILED'
-  });
+test('jump rejects every exact-path string selector and accepts ThingCoordinate objects', async () => {
+  for (const [key, selector] of [
+    ['when', 'Root/判定'],
+    ['where', 'Root/定位'],
+    ['recycle', 'Root/判定']
+  ]) {
+    const invalid = [atom('Root', '', [
+      atom('判定', 'def main(arguments):\n    return True', [], 'program'),
+      atom('目标'),
+      atom('定位', 'def main(arguments):\n    return explore({"thing":"Root/目标"})[0]', [], 'program'),
+      atom('错误注册', `jump({"${key}":"${selector}"})`, [], 'program')
+    ])];
+    await assert.rejects(createProgramRuntimeScheduler().refresh(invalid, {
+      programSelector: 'Root/错误注册',
+      force: true,
+      agentOrigin: { path: '窗口' }
+    }), { code: 'INVALID_JUMP_CONTRACT' });
+  }
 
   const adapted = [
     atom('判定', 'def main(arguments):\n    return True', [], 'program'),
@@ -89,9 +102,31 @@ test('jump rejects strings and accepts the final thing exact-coordinate object a
     atom('注册', 'jump({"when":{"thing":"判定"},"where":{"thing":"定位"}})', [], 'program')
   ];
   const cycle = await createProgramRuntimeScheduler().refresh(adapted, {
-    agentOrigin: { path: '窗口' }
+    programSelector: '注册', force: true, agentOrigin: { path: '窗口' }
   });
   assert.equal(cycle.jumps[0].destinationPath, '目标');
+});
+
+test('jump rejects an exact-path string returned by where as an invalid destination', async () => {
+  const world = [
+    atom('判定', 'def main(arguments):\n    return True', [], 'program'),
+    atom('定位', 'def main(arguments):\n    return "目标"', [], 'program'),
+    atom('目标'),
+    atom('注册', [
+      'when_program = explore({"thing":"判定"})[0]',
+      'where_program = explore({"thing":"定位"})[0]',
+      'jump({"when":when_program,"where":where_program})'
+    ].join('\n'), [], 'program')
+  ];
+  const cycle = await createProgramRuntimeScheduler().refresh(world, {
+    programSelector: '注册',
+    force: true,
+    isolateFailures: true,
+    agentOrigin: { path: '窗口' }
+  });
+
+  assert.deepEqual(cycle.jumps, []);
+  assert.equal(cycle.failures[0].code, 'WINDOW_JUMP_DESTINATION_INVALID');
 });
 
 test('changed returns only a bool, records exact dependencies, and caller explicitly short-circuits', async () => {
@@ -143,6 +178,14 @@ test('registry and Help publish jump, changed, thing coordinates, and explicit s
     recycle: { format: 'exact-thing@program' },
     lock: { $ref: '#/definitions/window-self-lock' }
   });
+  assert.deepEqual(jump.contract.coordinateInputs, {
+    selectors: 'ThingCoordinate-only',
+    whereResult: 'ThingCoordinate-only',
+    exactPathString: 'forbidden',
+    shortNameString: 'forbidden',
+    ref: 'forbidden'
+  });
+  assert.equal(jump.contract.errors.includes('INVALID_JUMP_CONTRACT'), true);
   assert.deepEqual(jump.contract.selfLockActivation, {
     trigger: 'current-agent-jump-registration',
     timing: 'same-program-cycle',
@@ -159,6 +202,8 @@ test('registry and Help publish jump, changed, thing coordinates, and explicit s
   assert.match(stdout.value(), /jump\(\{"when":.*"where":.*"recycle":.*"lock":/u);
   assert.match(stdout.value(), /explore\(\{"thing":"EXACT.*@program"\}\)\[0\]/u);
   assert.match(stdout.value(), /不使用 \.ref/u);
+  assert.match(stdout.value(), /jump 的 when／where／recycle.*完整 EXACT_PATH 字符串.*拒绝/u);
+  assert.match(stdout.value(), /精确字符串兼容仅保留于 use_program\.name 与 CLI thing\.run\./u);
   assert.match(stdout.value(), /if not changed\(\[.*\]\):[\s\S]*return/u);
   assert.match(stdout.value(), /jump 注册.*立即进入受自锁窗口态/u);
   assert.match(stdout.value(), /未注册 jump.*维持旧访问行为/u);
