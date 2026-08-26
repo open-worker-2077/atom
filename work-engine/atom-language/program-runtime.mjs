@@ -189,7 +189,11 @@ function contextualProgramSetFingerprint(
 }
 
 function requestsDependOnAgent(requests) {
-  return requests.some((request) => !request?.thing);
+  return requests.some((request) => (
+    !request?.thing
+    || request.thing === '.'
+    || (typeof request.thing === 'string' && request.thing.startsWith('./'))
+  ));
 }
 
 function reusableCandidates(
@@ -1071,14 +1075,16 @@ export class ProgramRuntimeScheduler {
   }
 
   async persistedProjection({
-    records, programs, isolateFailures, fingerprint: cycleFingerprint, agentOrigin
+    records, programs, isolateFailures, fingerprint: cycleFingerprint, agentOrigin,
+    allowContextIncomplete = false
   }) {
     const stored = await this.loadProjection();
     const programSetKey = programSetFingerprint(programs, isolateFailures, records);
     if (!stored || stored.version !== 1
       || stored.worldKey !== worldRevisionKey(records)
       || stored.programSetKey !== programSetKey
-      || (stored.contextIncomplete === true && agentScopePath(agentOrigin))
+      || (!allowContextIncomplete
+        && stored.contextIncomplete === true && agentScopePath(agentOrigin))
       || (stored.contextDependent === true
         && stored.scopePath !== agentScopePath(agentOrigin))
       || !Array.isArray(stored.locks)
@@ -1228,11 +1234,18 @@ export class ProgramRuntimeScheduler {
     const cycleDeadline = Date.now() + this.timeoutMs;
     if (options.force !== true && !options.programSelector && !options.triggerEvent) {
       const persisted = await this.persistedProjection({
-        records, programs, isolateFailures, fingerprint: key, agentOrigin: options.agentOrigin
+        records, programs, isolateFailures, fingerprint: key, agentOrigin: options.agentOrigin,
+        allowContextIncomplete: options.passive === true
       });
       if (persisted) {
         this.completed.set(key, persisted);
         return persisted;
+      }
+      if (options.passive === true) {
+        const error = new Error('No validated context-free Program projection exists for passive read preparation');
+        error.code = 'ATOM_PROGRAM_PROJECTION_MISSING';
+        error.details = { worldKey: worldRevisionKey(records) };
+        throw error;
       }
     }
     const byPath = new Map(records.map((record) => [record.path, record]));

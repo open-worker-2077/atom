@@ -83,6 +83,8 @@ Overrides live in the existing request-driven lock snapshot repository as a sepa
 
 The scheduler's `current()` and cached/reusable projection paths overlay both active window paths and their explicit policies onto every public request cycle. The engine therefore reconstructs the same access controller after a request boundary without rerunning the jump Program. An exact target denied specifically by the window self-lock is returned as `WINDOW_ACCESS_DENIED`; ordinary Program/node protection retains its non-disclosing protected-result behavior.
 
+If an ordinary Explore lacks an Agent-scoped reusable projection, read preparation is passive: it may reuse only a validated context-free projection for the same world revision and overlay request-driven locks. It never executes Programs to manufacture a read projection. Relative `.` / `./...` Explore dependencies are classified as Agent-context-dependent, so another Agent cannot reuse or accidentally recompute that jump chain. Without a validated context-free base, preparation remains fail-closed with `ATOM_PROGRAM_PROJECTION_MISSING`; explicit `.run.` and indexed Transform events retain the existing execution paths.
+
 Alternative considered: persist default boundaries on every Agent. They are derived from position, would become stale on movement and would create a second world fact representation.
 
 ### Reuse request-driven lock replacement for external recovery

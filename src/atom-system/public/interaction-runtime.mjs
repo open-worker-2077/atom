@@ -192,7 +192,7 @@ export function createInteractionRuntime({
       let preparation = await executeWorld('atom', Object.freeze({
         ...interaction,
         id: `${interaction.id}:program-context`
-      }), { ...options, programMode: 'reconcile' });
+      }), { ...options, programMode: 'passive' });
       if (!preparation?.ok) return preparation;
       if (options.publish !== false) {
         preparation = withProjectionOutcome(preparation, await publish(preparation));

@@ -171,6 +171,25 @@ test('a persisted Program projection cannot be reused for a different world revi
   );
 });
 
+test('passive read preparation fails closed without a validated context-free projection', async () => {
+  let executions = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async () => {
+      executions += 1;
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+
+  await assert.rejects(
+    scheduler.refresh([atom('Program', '# must not execute', [], 'program')], {
+      passive: true,
+      agentOrigin: { path: 'Agent' }
+    }),
+    (error) => error.code === 'ATOM_PROGRAM_PROJECTION_MISSING'
+  );
+  assert.equal(executions, 0);
+});
+
 test('a legacy persisted failure is rejected and retried instead of becoming authoritative', async () => {
   const repository = memoryProjectionRepository();
   const world = [atom('Program', '# retry legacy failure', [], 'program')];

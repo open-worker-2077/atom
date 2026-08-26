@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
+import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { createInteractionRuntime } from '../src/atom-system/public/interaction-runtime.mjs';
+
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+}
 
 function ports() {
   const calls = [];
@@ -169,10 +178,71 @@ test('the first use of an Agent prepares its scoped Program projection once and 
   assert.deepEqual(result.messages, [{ level: 'info', text: 'prepared context' }]);
   assert.deepEqual(calls, [
     ['world', 'explore {"name":"Target"}', null, 'interaction-context'],
-    ['world', 'atom', 'reconcile', 'interaction-context:program-context'],
+    ['world', 'atom', 'passive', 'interaction-context:program-context'],
     ['projection', { expectedRevision: 'rev-1', lockState: { revision: 'rev-1' } }],
     ['world', 'explore {"name":"Target"}', null, 'interaction-context']
   ]);
+});
+
+test('an ordinary exact Explore passively prepares projections without replaying an unrelated jump Program', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-read-passive-jump-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+    atom('Audit', '', [], 'agent'),
+    atom('Acceptance', '', [
+      atom('Job1'),
+      atom('Job2', '', [
+        atom('Window', '', [atom('Registration', [
+          'point = explore({"thing":"./PriorityWritable"})[0]',
+          'jump({})'
+        ].join('\n'), [], 'program')], 'agent')
+      ])
+    ])
+  ])], null, 2));
+  let storedProjection = null;
+  const scheduler = createProgramRuntimeScheduler({
+    projectionRepository: {
+      load: async () => structuredClone(storedProjection),
+      save: async (value) => {
+        storedProjection = structuredClone(value);
+        return structuredClone(value);
+      }
+    }
+  });
+  const initialized = await executeAtomLanguage({
+    source: 'atom', contextFile, projectionFile, programScheduler: scheduler,
+    programMode: 'project', interaction: { id: 'startup', agent: null }
+  });
+  assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
+  assert.equal(storedProjection.contextIncomplete, true);
+  const runtime = createInteractionRuntime({
+    world: {
+      execute: (request) => executeAtomLanguage({
+        ...request, contextFile, projectionFile, programScheduler: request.programRuntime
+      })
+    },
+    projections: {
+      publish: async ({ expectedRevision }) => ({ sourceRevision: expectedRevision }),
+      recover: async ({ expectedRevision }) => ({ sourceRevision: expectedRevision })
+    },
+    feedback: { submit: async () => ({ ok: true }) },
+    agents: { resolve: async (agentPath) => ({ ref: `agent:${agentPath}`, path: agentPath }) },
+    humanStatus: { translate: async () => '' },
+    humanWorkspace: { translate: async () => '' },
+    programRuntime: scheduler
+  });
+
+  const result = await runtime.execute({
+    source: 'explore {"thing":"Root/Acceptance/Job2/Window","situation$full":true}',
+    correlationId: 'ordinary-read-after-window-reset',
+    agentPath: 'Root/Audit'
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.items[0].matches[0].path, 'Root/Acceptance/Job2/Window');
+  assert.equal(result.errors.some((error) => error.code === 'WINDOW_JUMP_DESTINATION_INVALID'), false);
 });
 
 test('a failed projection after automatic Program preparation remains visible on the retried read', async () => {

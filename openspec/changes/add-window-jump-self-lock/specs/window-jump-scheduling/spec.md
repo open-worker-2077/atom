@@ -79,6 +79,10 @@
 - **WHEN** 窗口已提交迁移到 B 后槽例 A 的原监测槽发生 Transform
 - **THEN** 该窗口的旧绑定不运行，系统不扫描其他槽例寻找替代匹配
 
+#### Scenario: 普通 Explore 不重放无关 jump
+- **WHEN** 一条普通 exact Explore 缺少当前 Agent 的可复用 Program 投影，世界中另一窗口已有使用 `./…` 相对读取的 jump 注册 Program
+- **THEN** 系统只被动复用已验证的上下文无关投影并叠加 request-driven 锁，不解析、执行或重放该 jump 的 `when`/`where`/目的地链；只有精确命中的 Transform 事件或显式 `.run.` 才按既有索引执行
+
 #### Scenario: 新增伪槽不进入监测
 - **WHEN** 槽例执行窗口在普通料子树下创建未映射节点
 - **THEN** 该节点不自动成为槽模监测角色，只有槽模已定义槽及其允许料变化参与 v1 索引

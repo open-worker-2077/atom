@@ -604,7 +604,8 @@ export async function executeAtomLanguage(options = {}) {
       const reconcilePrograms = options.programMode === 'reconcile'
         || Boolean(requestedProgramRun?.selector);
       const projectPrograms = options.programMode === 'project';
-      const programOperation = reconcilePrograms || projectPrograms
+      const passivePrograms = options.programMode === 'passive';
+      const programOperation = reconcilePrograms || projectPrograms || passivePrograms
         ? options.programScheduler.refresh.bind(options.programScheduler)
         : (typeof options.programScheduler.current === 'function'
           ? options.programScheduler.current.bind(options.programScheduler)
@@ -613,6 +614,7 @@ export async function executeAtomLanguage(options = {}) {
       programCycle = await programOperation(atoms, {
         agentOrigin: interaction.agent,
         isolateFailures: true,
+        ...(passivePrograms ? { passive: true } : {}),
         ...(requestedProgramRun?.selector
           ? {
               programSelector: requestedProgramRun.selector,
