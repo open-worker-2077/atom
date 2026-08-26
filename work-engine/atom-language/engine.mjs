@@ -1371,7 +1371,10 @@ export async function executeAtomLanguage(options = {}) {
   }
 
   if (programChanged && (
-    parsed.command === 'atom' || parsed.command === 'explore' || strictSlotRecompute
+    parsed.command === 'atom'
+    || parsed.command === 'explore'
+    || strictSlotRecompute
+    || Boolean(requestedProgramRun?.selector)
   )) {
     let reconciled;
     try {

@@ -591,6 +591,45 @@ test('4784 continues an ordinary command without replaying an unrelated startup 
   assert.equal(readBack.warnings.some((warning) => warning.program === '故障Program'), false);
 });
 
+test('4784 exact Explore does not replay an unrelated slot effect after an explicit Program changes the world', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-service-post-run-projection-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('工作Agent', '', [], 'agent'),
+    atom('目标', 'before'),
+    atom('改值Program', "transform({'thing':'目标','situation.rep.after':None})", [], 'program'),
+    atom('无关槽体Program', [
+      "origin = explore({})[0]",
+      "slot_body({'action':'print','body':'不存在槽体','revision':'synthetic','name':'不应创建'})"
+    ].join('\n'), [], 'program')
+  ], null, 2));
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
+  });
+  t.after(() => running.close());
+  const endpoint = `${running.url}/__atom/api/command`;
+  const agent = await resolveAgentContext(contextFile, '工作Agent');
+
+  const changed = await executeAtomCommandEndpoint({
+    source: 'transform {"thing.run.":"改值Program"}', interaction: { agent }
+  }, endpoint);
+  assert.equal(changed.ok, true, JSON.stringify(changed));
+  assert.equal(changed.changed, true, JSON.stringify(changed));
+
+  const readBack = await executeAtomCommandEndpoint({
+    source: 'explore {"thing":"目标","situation$full":true}', interaction: { agent }
+  }, endpoint);
+  assert.equal(readBack.ok, true, JSON.stringify(readBack));
+  assert.equal(readBack.items[0].matches[0].situation, 'after');
+  assert.equal(readBack.warnings.some((warning) => (
+    warning.code === 'INVALID_SLOT_BODY_EFFECT'
+    || warning.program === '无关槽体Program'
+  )), false, JSON.stringify(readBack.warnings));
+});
+
 test('4784 submit endpoint records the current agent and supplied CLI history', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-feedback-service-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
