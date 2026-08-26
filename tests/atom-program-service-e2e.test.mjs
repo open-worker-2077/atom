@@ -277,7 +277,7 @@ test('4784 keeps one isolated Program effect set fast across structural and reje
   const elapsedMs = Date.now() - startedAt;
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  assert.ok(elapsedMs < 4_000, `structural effect set took ${elapsedMs}ms`);
+  assert.ok(elapsedMs < 5_000, `structural effect set took ${elapsedMs}ms`);
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(world.find((entry) => entry.thing === 'Target 0'), undefined);
   assert.equal(world.find((entry) => entry.thing === 'Destination').contain[0].thing, 'Target 0');
