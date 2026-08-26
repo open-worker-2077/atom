@@ -8,7 +8,7 @@ $markerFile = Join-Path $stateDirectory "private-access.json"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $settingsScript = Join-Path $PSScriptRoot "atom-long-running-task.ps1"
 $serverScript = Join-Path $projectRoot "work-engine\atom-language\graph-server.mjs"
-$gatewaySupervisor = Join-Path $PSScriptRoot "run-atom-private-mobile-gateway-service.ps1"
+$gatewayScript = Join-Path $projectRoot "work-engine\atom-language\private-mobile-gateway.mjs"
 $healthUrl = "http://127.0.0.1:4784/__spatial/api/health"
 $runtimeDescription = "Atom Graph runtime supervisor [atom.graph-runtime/1]"
 
@@ -24,11 +24,10 @@ if ([string]$marker.contract -ne "atom.private-access") {
 if (-not (Test-Path -LiteralPath $serverScript)) {
   throw "ATOM_GRAPH_SERVER_MISSING: $serverScript"
 }
-if (-not (Test-Path -LiteralPath $gatewaySupervisor)) {
-  throw "PRIVATE_GATEWAY_SUPERVISOR_MISSING: $gatewaySupervisor"
+if (-not (Test-Path -LiteralPath $gatewayScript)) {
+  throw "PRIVATE_GATEWAY_MISSING: $gatewayScript"
 }
 
-$powerShellCommand = Get-Command powershell.exe -ErrorAction Stop
 $nodeCommand = Get-Command node.exe -ErrorAction Stop
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $settings = New-AtomLongRunningTaskSettings
@@ -36,15 +35,15 @@ $settings = New-AtomLongRunningTaskSettings
 $gatewayDefinitions = @([pscustomobject]@{
   Name = [string]$marker.taskName
   Description = "Local identity gate for private Atom mobile access; owns no Atom data."
-  Arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -AllowedLogin "{1}" -Target "{2}" -Port {3}' -f `
-    $gatewaySupervisor, [string]$marker.allowedLogin, "http://127.0.0.1:4784", [int]$marker.gatewayPort
+  Arguments = '"{0}" --allowed-login "{1}" --host 127.0.0.1 --target "{2}" --port {3}' -f `
+    $gatewayScript, [string]$marker.allowedLogin, "http://127.0.0.1:4784", [int]$marker.gatewayPort
 })
 if (-not [string]::IsNullOrWhiteSpace([string]$marker.directTaskName)) {
   $gatewayDefinitions += [pscustomobject]@{
     Name = [string]$marker.directTaskName
     Description = "Tailnet-IP-only Atom mobile gateway; accepts only the approved phone Tailscale address."
-    Arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -AllowedSource "{1}" -HostAddress "{2}" -Target "{3}" -Port {4}' -f `
-      $gatewaySupervisor, [string]$marker.directAllowedSource, `
+    Arguments = '"{0}" --allowed-source "{1}" --host "{2}" --target "{3}" --port {4}' -f `
+      $gatewayScript, [string]$marker.directAllowedSource, `
       ([uri][string]$marker.directGatewayUrl).Host, "http://127.0.0.1:4784", `
       ([uri][string]$marker.directGatewayUrl).Port
   }
@@ -91,7 +90,7 @@ try {
 
   foreach ($definition in $gatewayDefinitions) {
     $gatewayAction = New-ScheduledTaskAction `
-      -Execute $powerShellCommand.Source `
+      -Execute $nodeCommand.Source `
       -Argument $definition.Arguments `
       -WorkingDirectory $projectRoot
     Register-ScheduledTask `

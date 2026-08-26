@@ -137,10 +137,10 @@ test('private access installer is deny-first and never configures a public Funne
   assert.doesNotMatch(source, /serve\s+reset/iu);
 });
 
-test('private access scheduled services start PowerShell without a visible terminal', async () => {
+test('private access scheduled services directly own their Node gateway listeners', async () => {
   const repair = await fs.readFile(path.join(root, 'scripts', 'repair-atom-private-access.ps1'), 'utf8');
-  assert.match(repair, /-WindowStyle Hidden/u);
-  assert.match(repair, /-NonInteractive/u);
+  assert.doesNotMatch(repair, /run-atom-private-mobile-gateway-service\.ps1/u);
+  assert.doesNotMatch(repair, /powershell\.exe/u);
   const install = await fs.readFile(path.join(root, 'scripts', 'install-atom-private-access.ps1'), 'utf8');
   assert.match(install, /repair-atom-private-access\.ps1/u);
 });
@@ -161,8 +161,8 @@ test('repair recreates every missing Atom-owned private access task from a valid
   assert.match(runtime.argument, /graph-server\.mjs/u);
   for (const task of result.tasks.filter((task) => task.name !== 'Atom Graph Runtime')) {
     assert.match(task.description, /Atom mobile access|Tailnet-IP-only/u);
-    assert.equal(task.execute.toLowerCase().endsWith('powershell.exe'), true);
-    assert.match(task.argument, /run-atom-private-mobile-gateway-service\.ps1/u);
+    assert.equal(task.execute.toLowerCase().endsWith('node.exe'), true);
+    assert.match(task.argument, /private-mobile-gateway\.mjs/u);
   }
 });
 

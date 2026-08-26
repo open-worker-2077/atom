@@ -15,7 +15,6 @@ $gatewayScript = Join-Path $repositoryRoot "work-engine\atom-language\private-mo
 $settingsScript = Join-Path $PSScriptRoot "atom-long-running-task.ps1"
 $repairScript = Join-Path $PSScriptRoot "repair-atom-private-access.ps1"
 $serveOwned = $false
-$gatewayProcess = $null
 $markerCreated = $false
 $runtimeTaskPreexisting = $null -ne (Get-ScheduledTask -TaskName $RuntimeTaskName -ErrorAction SilentlyContinue)
 
@@ -95,11 +94,7 @@ try {
     -Settings $taskSettings `
     -Description "Local identity gate for private Atom mobile access; owns no Atom data." | Out-Null
 
-  $gatewayProcess = Start-Process `
-    -FilePath $nodeCommand.Source `
-    -ArgumentList $taskArguments `
-    -WindowStyle Hidden `
-    -PassThru
+  Start-ScheduledTask -TaskName $TaskName
 
   $ready = $false
   for ($attempt = 0; $attempt -lt 20; $attempt += 1) {
@@ -138,7 +133,7 @@ try {
   Write-Output ([pscustomobject]@{ ok = $true; gateway = $gatewayUrl; login = $resolvedLogin })
 } catch {
   if ($serveOwned) { & $tailscaleExecutable serve --https=443 off | Out-Null }
-  if ($gatewayProcess -and -not $gatewayProcess.HasExited) { Stop-Process -Id $gatewayProcess.Id -Force }
+  Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
   if ($markerCreated) { Remove-Item -LiteralPath $markerFile -Force -ErrorAction SilentlyContinue }
   if (-not $runtimeTaskPreexisting) {
