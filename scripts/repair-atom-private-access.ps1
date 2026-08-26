@@ -7,7 +7,7 @@ $stateDirectory = Join-Path $env:LOCALAPPDATA "AtomGraph"
 $markerFile = Join-Path $stateDirectory "private-access.json"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $settingsScript = Join-Path $PSScriptRoot "atom-long-running-task.ps1"
-$runtimeScript = Join-Path $PSScriptRoot "run-atom-graph-service.ps1"
+$serverScript = Join-Path $projectRoot "work-engine\atom-language\graph-server.mjs"
 $gatewaySupervisor = Join-Path $PSScriptRoot "run-atom-private-mobile-gateway-service.ps1"
 $healthUrl = "http://127.0.0.1:4784/__spatial/api/health"
 $runtimeDescription = "Atom Graph runtime supervisor [atom.graph-runtime/1]"
@@ -21,14 +21,15 @@ $marker = Get-Content -Raw -LiteralPath $markerFile | ConvertFrom-Json
 if ([string]$marker.contract -ne "atom.private-access") {
   throw "PRIVATE_ACCESS_MARKER_INVALID: refusing to repair an unowned configuration"
 }
-if (-not (Test-Path -LiteralPath $runtimeScript)) {
-  throw "ATOM_RUNTIME_SUPERVISOR_MISSING: $runtimeScript"
+if (-not (Test-Path -LiteralPath $serverScript)) {
+  throw "ATOM_GRAPH_SERVER_MISSING: $serverScript"
 }
 if (-not (Test-Path -LiteralPath $gatewaySupervisor)) {
   throw "PRIVATE_GATEWAY_SUPERVISOR_MISSING: $gatewaySupervisor"
 }
 
 $powerShellCommand = Get-Command powershell.exe -ErrorAction Stop
+$nodeCommand = Get-Command node.exe -ErrorAction Stop
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $settings = New-AtomLongRunningTaskSettings
 
@@ -40,9 +41,9 @@ if ($null -ne $existingRuntime) {
   }
 }
 
-$runtimeArguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $runtimeScript
+$runtimeArguments = '"{0}"' -f $serverScript
 $runtimeAction = New-ScheduledTaskAction `
-  -Execute $powerShellCommand.Source `
+  -Execute $nodeCommand.Source `
   -Argument $runtimeArguments `
   -WorkingDirectory $projectRoot
 $runtimeTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser

@@ -60,6 +60,14 @@ test('private access scheduled services start PowerShell without a visible termi
   assert.match(install, /repair-atom-private-access\.ps1/u);
 });
 
+test('the runtime scheduled task directly owns graph-server so stopping it cannot orphan Node', async () => {
+  const repair = await fs.readFile(path.join(root, 'scripts', 'repair-atom-private-access.ps1'), 'utf8');
+  assert.match(repair, /serverScript\s*=.*graph-server\.mjs/u);
+  assert.match(repair, /runtimeAction\s*=\s*New-ScheduledTaskAction[\s\S]*-Execute\s+\$nodeCommand\.Source/u);
+  assert.match(repair, /runtimeAction\s*=\s*New-ScheduledTaskAction[\s\S]*-Argument\s+\$runtimeArguments/u);
+  assert.doesNotMatch(repair, /runtimeScript\s*=.*run-atom-graph-service\.ps1/u);
+});
+
 test('private access disable script removes only owned entry and task', async () => {
   const source = await fs.readFile(path.join(root, 'scripts', 'disable-atom-private-access.ps1'), 'utf8');
   assert.match(source, /private-access\.json/u);
