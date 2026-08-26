@@ -1184,6 +1184,27 @@ export class ProgramRuntimeScheduler {
       this.completed.set(key, persisted);
       return persisted;
     }
+    if (options.allowWindowLockSnapshot === true) {
+      await this.activeRequestDrivenLocks();
+      const scopePath = agentScopePath(options.agentOrigin);
+      if (scopePath && this.activeWindowAgents.has(scopePath)) {
+        return this.overlayRequestDrivenLocks({
+          fingerprint: key,
+          cached: true,
+          records,
+          selectedProgram: null,
+          locks: [],
+          choices: [],
+          messages: [],
+          transforms: [],
+          slotBodies: [],
+          failures: [],
+          exploreReadPaths: [],
+          contextIncomplete: true,
+          windowLockSnapshotOnly: true
+        });
+      }
+    }
     const error = new Error('No validated Program projection exists for the current world revision');
     error.code = 'ATOM_PROGRAM_PROJECTION_MISSING';
     error.details = { worldKey: worldRevisionKey(records) };

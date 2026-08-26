@@ -614,6 +614,7 @@ export async function executeAtomLanguage(options = {}) {
       programCycle = await programOperation(atoms, {
         agentOrigin: interaction.agent,
         isolateFailures: true,
+        ...(parsed.command === 'explore' ? { allowWindowLockSnapshot: true } : {}),
         ...(passivePrograms ? { passive: true } : {}),
         ...(requestedProgramRun?.selector
           ? {
