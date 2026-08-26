@@ -95,6 +95,39 @@ test('a validated Program projection survives scheduler restart for the exact wo
   assert.equal(executions, 1);
 });
 
+test('a persisted Program projection restores only versioned exact Explore read paths', async () => {
+  const repository = memoryProjectionRepository();
+  const world = [atom('Target'), atom('Program', '# reads target', [], 'program')];
+  const first = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async ({ executeExplore }) => {
+      await executeExplore({ thing: 'Target', 'contain$latitude-1': true });
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+  await first.refresh(world, {
+    isolateFailures: true,
+    executeExplore: async () => [{ path: 'Target' }]
+  });
+
+  const stored = await repository.load();
+  assert.equal(stored.readSetVersion, 1);
+  assert.deepEqual(stored.exploreReadPaths, ['Target']);
+
+  const restarted = createProgramRuntimeScheduler({ projectionRepository: repository });
+  const restored = await restarted.current(structuredClone(world), { isolateFailures: true });
+  assert.deepEqual(restored.exploreReadPaths, ['Target']);
+
+  repository.replace(Object.fromEntries(
+    Object.entries(stored).filter(([key]) => key !== 'readSetVersion')
+  ));
+  await assert.rejects(
+    createProgramRuntimeScheduler({ projectionRepository: repository })
+      .current(structuredClone(world), { isolateFailures: true }),
+    { code: 'ATOM_PROGRAM_PROJECTION_MISSING' }
+  );
+});
+
 test('an explicit selected Program run cannot replace the persisted full-world projection', async () => {
   const repository = memoryProjectionRepository();
   const world = [

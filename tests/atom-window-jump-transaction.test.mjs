@@ -38,6 +38,47 @@ function jumpWorld(destination = 'Root/B') {
   ])];
 }
 
+function fourAxisJumpWorld(when) {
+  return [atom('Root', '', [
+    atom('Audit', '', [], 'agent'),
+    atom('A', '', [atom('Window', '', [
+      atom('When', `def main(arguments):\n    return ${when ? 'True' : 'False'}`, [], 'program'),
+      atom('Where', 'def main(arguments):\n    return explore({"thing":"Root/B"})[0]', [], 'program'),
+      atom('Registration', [
+        'when_program = explore({"thing":"Root/A/Window/When"})[0]',
+        'where_program = explore({"thing":"Root/A/Window/Where"})[0]',
+        'destination = explore({"thing":"Root/B"})[0]',
+        'jump({',
+        '  "when": when_program,',
+        '  "where": where_program,',
+        '  "lock": {"read":{"allow":[',
+        '    {"priority":2,"from":"current","descendants":"all"},',
+        '    {"priority":2,"from":destination,"descendants":"all"}',
+        '  ]}}',
+        '})'
+      ].join('\n'), [], 'program')
+    ], 'agent')]),
+    atom('B', '', [atom('Payload')])
+  ])];
+}
+
+function contaminateInternalExploreSnapshot(scheduler) {
+  for (const method of ['refresh', 'current']) {
+    const original = scheduler[method].bind(scheduler);
+    scheduler[method] = async (...arguments_) => {
+      const cycle = await original(...arguments_);
+      return {
+        ...cycle,
+        exploreRequests: [
+          ...(cycle.exploreRequests ?? []),
+          { thing: 'Root/B', children: true }
+        ]
+      };
+    };
+  }
+  return scheduler;
+}
+
 function childNames(atomValue) {
   return (atomValue.contain ?? []).map((entry) => Object.entries(entry)
     .find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1]);
@@ -148,6 +189,42 @@ test('the next public exact Explore after a jump enforces the remapped active se
   assert.equal(denied.ok, false, JSON.stringify(denied));
   assert.ok(denied.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'));
   assert.equal(denied.items[0].ok, false);
+});
+
+test('public contain Explore is independent from stale internal projection axes around jump guards and moves', async (t) => {
+  for (const when of [false, true]) {
+    const files = await fixture(t, fourAxisJumpWorld(when));
+    const scheduler = contaminateInternalExploreSnapshot(createProgramRuntimeScheduler());
+    const source = when
+      ? 'explore {"thing":"Root/B/Window","contain$latitude-1":true}'
+      : 'explore {"thing":"Root/A/Window","contain$latitude-1":true}';
+    const result = await executeAtomLanguage({
+      source, ...files, programScheduler: scheduler,
+      interaction: { agent: { ref: 'window-ref', path: 'Root/A/Window' } }
+    });
+    assert.equal(result.ok, true, `${when ? 'when=true' : 'when=false'}: ${JSON.stringify(result.errors)}`);
+    assert.equal(result.errors.some((error) => error.code === 'RETIRED_GRAPH_AXIS'), false);
+  }
+
+  const auditFiles = await fixture(t, fourAxisJumpWorld(false));
+  const audit = await executeAtomLanguage({
+    source: 'explore {"thing":"Root/Audit","contain$latitude-1":true}',
+    ...auditFiles,
+    programScheduler: contaminateInternalExploreSnapshot(createProgramRuntimeScheduler()),
+    interaction: { agent: { ref: 'audit-ref', path: 'Root/Audit' } }
+  });
+  assert.equal(audit.ok, false, JSON.stringify(audit.errors));
+  assert.ok(audit.errors.some((error) => error.code === 'WINDOW_JUMP_LOCK_DENIED'));
+  assert.equal(audit.errors.some((error) => error.code === 'RETIRED_GRAPH_AXIS'), false);
+
+  const legacy = await executeAtomLanguage({
+    source: 'explore {"thing":"Root/Audit","children$latitude-1":true}',
+    ...auditFiles,
+    programScheduler: createProgramRuntimeScheduler(),
+    interaction: { agent: { ref: 'audit-ref', path: 'Root/Audit' } }
+  });
+  assert.equal(legacy.ok, false);
+  assert.ok(legacy.errors.some((error) => error.code === 'RETIRED_GRAPH_AXIS'));
 });
 
 test('invalid destination rolls back the entire jump candidate with a stable error', async (t) => {

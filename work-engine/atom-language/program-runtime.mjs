@@ -238,6 +238,15 @@ function rememberDependencySnapshot(state, request, matches) {
   }
 }
 
+async function dependencyMatchPaths(requests, state) {
+  const snapshots = await Promise.all(requests.map((request) => (
+    state.snapshots.get(JSON.stringify(request))
+  )).filter(Boolean));
+  return [...new Set(snapshots.flatMap((snapshot) => (
+    (snapshot.matches ?? []).map((match) => match.path).filter(Boolean)
+  )))];
+}
+
 async function dependencyFingerprint(requests, executeExplore, records, cache = null) {
   const state = cache ?? {
     recordsByPath: new Map(records.map((record) => [record.path, record])),
@@ -1067,6 +1076,7 @@ export class ProgramRuntimeScheduler {
     const stored = await this.loadProjection();
     const programSetKey = programSetFingerprint(programs, isolateFailures, records);
     if (!stored || stored.version !== 1
+      || stored.readSetVersion !== 1
       || stored.worldKey !== worldRevisionKey(records)
       || stored.programSetKey !== programSetKey
       || (stored.contextIncomplete === true && agentScopePath(agentOrigin))
@@ -1084,6 +1094,7 @@ export class ProgramRuntimeScheduler {
       selectedProgram: null,
       locks: structuredClone(stored.locks),
       choices: structuredClone(stored.choices ?? []),
+      exploreReadPaths: structuredClone(stored.exploreReadPaths ?? []),
       messages: [],
       transforms: [],
       slotBodies: [],
@@ -1099,6 +1110,7 @@ export class ProgramRuntimeScheduler {
     if (contextDependent && !scopePath) return;
     const projection = {
       version: 1,
+      readSetVersion: 1,
       worldKey: worldRevisionKey(records),
       programSetKey: programSetFingerprint(programs, isolateFailures, records),
       contextDependent,
@@ -1106,6 +1118,7 @@ export class ProgramRuntimeScheduler {
       scopePath,
       locks: structuredClone(value.locks.filter((lock) => lock.refresh?.policy !== 'on_request')),
       choices: structuredClone(value.choices ?? []),
+      exploreReadPaths: structuredClone(value.exploreReadPaths ?? []),
       failures: []
     };
     try {
@@ -1566,6 +1579,7 @@ export class ProgramRuntimeScheduler {
     const uniqueRequests = [...new Map(applicable.flatMap((entry) => entry.requests).map((request) => (
       [JSON.stringify(request), request]
     ))).values()];
+    const exploreReadPaths = await dependencyMatchPaths(uniqueRequests, dependencyCache);
     const value = {
       fingerprint: key,
       cached: applicable.length > 0 && applicable.every((entry) => entry.cached),
@@ -1582,6 +1596,7 @@ export class ProgramRuntimeScheduler {
       windowSelfLocks,
       windowSelfLockAgents,
       exploreRequests: structuredClone(uniqueRequests),
+      exploreReadPaths,
       failures: applicable.flatMap((entry) => entry.failure ? [entry.failure] : []),
       executedProgramPaths: applicable
         .filter((entry) => entry.cached === false && entry.result)

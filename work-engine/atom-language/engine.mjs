@@ -703,26 +703,25 @@ export async function executeAtomLanguage(options = {}) {
     windowSelfLock: initialWindowSelfLock, enforceWindowSelfLock
   });
   if (enforceWindowSelfLock) {
-    const unrestrictedProgramReads = createAccessController(atoms, {});
-    const preparedProgramReadWorld = prepareExploreWorld(atoms);
-    for (const request of programCycle.exploreRequests ?? []) {
-      const matches = await executeProgramExplore({
-        atoms,
-        request,
-        receiver,
-        accessController: unrestrictedProgramReads,
-        agentOrigin: interaction.agent,
-        preparedWorld: preparedProgramReadWorld
-      });
-      for (const match of matches) {
-        for (const field of ['thing', 'situation']) {
-          if ((await accessController.authorize(match, 'read', field)).decision !== 'allow') {
-            return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
-              'WINDOW_JUMP_LOCK_DENIED',
-              '窗口 Program 的精确 Explore 超出窗口自锁边界',
-              { path: Array.isArray(match.path) ? match.path.join('/') : match.path, field }
-            )]);
-          }
+    const programReadByPath = new Map(walkAtoms(atoms).map((match) => (
+      [match.path.join('/'), match]
+    )));
+    for (const readPath of programCycle.exploreReadPaths ?? []) {
+      const match = programReadByPath.get(readPath);
+      if (!match) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          'INVALID_PROGRAM_EXPLORE_PROJECTION',
+          'Program Explore 精确命中路径与当前世界不一致',
+          { path: readPath }
+        )]);
+      }
+      for (const field of ['thing', 'situation']) {
+        if ((await accessController.authorize(match, 'read', field)).decision !== 'allow') {
+          return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+            'WINDOW_JUMP_LOCK_DENIED',
+            '窗口 Program 的精确 Explore 超出窗口自锁边界',
+            { path: readPath, field }
+          )]);
         }
       }
     }
