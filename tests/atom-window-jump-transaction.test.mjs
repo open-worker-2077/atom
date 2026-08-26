@@ -63,6 +63,57 @@ test('successful jump moves the active Agent in the same authoritative commit', 
   assert.equal(scheduler.activeWindowSelfLocks.has('Root/B/Window'), true);
 });
 
+test('the next public exact Explore after a jump enforces the remapped active self-lock', async (t) => {
+  const initial = [atom('Root', '', [
+    atom('A', '', [atom('Window', '', [], 'agent')]),
+    atom('B'),
+    atom('When', 'def main(arguments):\n    return True', [], 'program'),
+    atom('Where', 'def main(arguments):\n    return explore({"name":"Root/B"})[0]', [], 'program'),
+    atom('Registration', [
+      'when_program = explore({"name":"Root/When"})[0]',
+      'where_program = explore({"name":"Root/Where"})[0]',
+      'destination = explore({"name":"Root/B"})[0]',
+      'jump({',
+      '  "when": when_program,',
+      '  "where": where_program,',
+      '  "lock": {"read":{"allow":[',
+      '    {"priority":2,"from":when_program},',
+      '    {"priority":2,"from":where_program},',
+      '    {"priority":2,"from":destination}',
+      '  ]}}',
+      '})'
+    ].join('\n'), [], 'program')
+  ])];
+  const files = await fixture(t, initial);
+  const scheduler = createProgramRuntimeScheduler();
+
+  const moved = await executeAtomLanguage({
+    source: 'atom', ...files,
+    programScheduler: scheduler,
+    interaction: { agent: { ref: 'window-ref', path: 'Root/A/Window' } }
+  });
+  assert.equal(moved.ok, true, JSON.stringify(moved.errors));
+  assert.deepEqual(scheduler.activeWindowSelfLocks.get('Root/B/Window'), {
+    read: {
+      allow: [
+        { priority: 2, fromPath: 'Root/When' },
+        { priority: 2, fromPath: 'Root/Where' },
+        { priority: 2, fromPath: 'Root/B' }
+      ]
+    }
+  });
+
+  const denied = await executeAtomLanguage({
+    source: 'explore {"name":"Root/A","detail$full":true}', ...files,
+    programMode: null,
+    programScheduler: scheduler,
+    interaction: { agent: { ref: 'window-ref', path: 'Root/B/Window' } }
+  });
+  assert.equal(denied.ok, false, JSON.stringify(denied));
+  assert.ok(denied.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'));
+  assert.equal(denied.items[0].ok, false);
+});
+
 test('invalid destination rolls back the entire jump candidate with a stable error', async (t) => {
   const initial = jumpWorld('Root/Missing');
   const files = await fixture(t, initial);

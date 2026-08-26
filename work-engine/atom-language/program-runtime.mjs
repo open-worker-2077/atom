@@ -875,7 +875,11 @@ export class ProgramRuntimeScheduler {
       locks: [
         ...(value.locks ?? []).filter((lock) => lock.refresh?.policy !== 'on_request'),
         ...structuredClone(active)
-      ]
+      ],
+      windowSelfLocks: [...this.activeWindowSelfLocks].map(([agentPath, policy]) => ({
+        agentPath, policy: structuredClone(policy)
+      })),
+      windowSelfLockAgents: [...this.activeWindowAgents]
     };
   }
 

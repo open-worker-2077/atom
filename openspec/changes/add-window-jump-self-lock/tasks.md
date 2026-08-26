@@ -27,7 +27,7 @@
 - [x] 4.3 Add red rule-validation tests for independent read/write allow+deny arrays; `current`, absolute explore and current-relative explore starts; exact/parent/peers/descendant depth; positive integer priorities; and rejection of fuzzy/ref/invalid starts.
 - [x] 4.4 Add red precedence tests proving highest priority wins, same-priority allow/deny resolves deny, parent means one unique node, unmatched targets fall back to defaults and read/write never leak into each other.
 - [x] 4.5 Implement self-lock normalization/evaluation as an independent authorization decision intersected with existing node locks for every CLI/Program read/write after exact resolution.
-- [x] 4.6 Add red snapshot tests for atomic install/move/recycle, same-window effective-set subset-only tightening, self-expansion rejection, different reachable-window replacement/removal to defaults, lock-intersection denial and failed-recompute retention.
+- [x] 4.6 Add red snapshot and public cross-request tests for atomic install/move/recycle, activity/policy projection through `current()` and cached/reusable cycles, exact old-scope denial after a move, same-window effective-set subset-only tightening, self-expansion rejection, different reachable-window replacement/removal to defaults, lock-intersection denial and failed-recompute retention.
 - [x] 4.7 Implement request-driven explicit override snapshots and the non-role-based external recovery path without any active-window no-lock state or hidden bypass.
 
 ## 5. Slot Structural Lock TDD

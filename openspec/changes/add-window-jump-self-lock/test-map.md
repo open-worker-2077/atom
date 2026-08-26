@@ -9,6 +9,7 @@
 
 - **`tests/atom-window-self-lock.test.mjs`** — catches incorrect activation, default geometry or rule evaluation. Covers legacy Agent behavior without `jump`, immediate default activation after a `jump` registration, default positive/negative reads, descendant-only writes, self/peer/parent/branch write denial, exact-path enforcement, independent read/write, `current`, absolute Explore and current-relative Explore starts, fuzzy/ref rejection, positive integer validation, highest-priority resolution, deny-on-tie, default fallback, unique direct parent and node-lock intersection.
 - **`tests/atom-window-self-lock-lifecycle.test.mjs`** — catches non-atomic snapshot replacement, path-stale overrides, self-expansion, hard-coded roles or hidden unlocks. Covers self tightening, self expansion denial, reachable external replacement/removal to defaults, recycle cleanup, movement remap, failed recompute retention and the minimal external recovery path.
+- **`tests/atom-window-jump-transaction.test.mjs`** — catches activity/policy loss at the public request boundary. Covers a successful move followed by a separate exact Explore from the remapped window and requires `WINDOW_ACCESS_DENIED` for the old scope without rerunning the jump Program.
 
 ### `slot-body-structure-locking`
 
