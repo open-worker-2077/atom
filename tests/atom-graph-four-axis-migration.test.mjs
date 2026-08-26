@@ -93,7 +93,7 @@ test('migration upgrades only proven Graph API keys and AtomView attributes', ()
 
 test('migration reports every ambiguous executable Program and closes the commit gate', () => {
   const legacy = legacyNode('Root', '', [
-    legacyNode('Dynamic', "axis = 'name'\nexplore({axis: 'A'})", [], [], '@program'),
+    legacyNode('Dynamic', "axis = arguments['axis']\nexplore({axis: 'A'})", [], [], '@program'),
     legacyNode('Unknown View', [
       'def first(items):',
       '    return items[0]',
@@ -172,9 +172,131 @@ test('ordinary object attributes remain byte-identical when no Graph view exists
   assert.deepEqual(result.summary.programs[0].edits, []);
 });
 
+test('Program upgrader rewrites only a retired axis prefix in a composite Graph key', () => {
+  const source = [
+    "text = arguments['payload']",
+    "transform({'name':'Root', 'detail#' + text: None})",
+    "message({'level':'info','text':text})"
+  ].join('\n');
+  const result = graphSchema.planGraphFourAxisMigration(legacyNode(
+    'Root', '', [legacyNode('Composite Key', source, [], [], '@program')]
+  ));
+
+  assert.equal(result.summary.readyToCommit, true);
+  assert.equal(result.graph.contain[0].situation, [
+    "text = arguments['payload']",
+    "transform({'thing':'Root', 'situation#' + text: None})",
+    "message({'level':'info','text':text})"
+  ].join('\n'));
+});
+
+test('Program upgrader follows a single-use local binding for a composite Graph key', () => {
+  const source = [
+    "command = 'detail' + '.rep.' + arguments['navigation']",
+    "transform({'name':'Root', command: None})"
+  ].join('\n');
+  const result = graphSchema.planGraphFourAxisMigration(legacyNode(
+    'Root', '', [legacyNode('Bound Key', source, [], [], '@program')]
+  ));
+
+  assert.equal(result.summary.readyToCommit, true);
+  assert.equal(result.graph.contain[0].situation, [
+    "command = 'situation' + '.rep.' + arguments['navigation']",
+    "transform({'thing':'Root', command: None})"
+  ].join('\n'));
+});
+
+test('Program upgrader follows one local Graph specification through mutation and comprehension views', () => {
+  const source = [
+    'def main(arguments):',
+    "    query = {'name': arguments['root'], 'detail$full': None}",
+    "    query['children#' + str(arguments['depth'])] = None",
+    '    rows = explore(query)',
+    '    return [row.detail.strip() for row in rows]'
+  ].join('\n');
+  const result = graphSchema.planGraphFourAxisMigration(legacyNode(
+    'Root', '', [legacyNode('Local Query', source, [], [], '@program')]
+  ));
+
+  assert.equal(result.summary.readyToCommit, true);
+  assert.equal(result.graph.contain[0].situation, [
+    'def main(arguments):',
+    "    query = {'thing': arguments['root'], 'situation$full': None}",
+    "    query['contain#' + str(arguments['depth'])] = None",
+    '    rows = explore(query)',
+    '    return [row.situation.strip() for row in rows]'
+  ].join('\n'));
+});
+
+test('Program upgrader follows a local list of literal Graph specifications into transform', () => {
+  const source = [
+    "updates = [{'name':'A','detail':'x'}, {'name':'B','partners':[]}]",
+    'for update in updates:',
+    '    transform(update)'
+  ].join('\n');
+  const result = graphSchema.planGraphFourAxisMigration(legacyNode(
+    'Root', '', [legacyNode('Batch', source, [], [], '@program')]
+  ));
+
+  assert.equal(result.summary.readyToCommit, true);
+  assert.equal(result.graph.contain[0].situation, [
+    "updates = [{'thing':'A','situation':'x'}, {'thing':'B','support':[]}]",
+    'for update in updates:',
+    '    transform(update)'
+  ].join('\n'));
+});
+
+test('Program upgrader proves AtomView identity through the registered direct_children filter', () => {
+  const source = [
+    'def main(arguments):',
+    "    instance = arguments['instance']",
+    "    rows = explore({'name':instance,'detail$full':None,'children$latitude-1':None,'partners':None})",
+    '    children = direct_children(rows, instance)',
+    '    result = []',
+    '    for child in children:',
+    '        result.append(child.name)',
+    '        result.append(child.detail)',
+    '        for partner in child.partners:',
+    "            result.append(partner['object'])",
+    '    return result'
+  ].join('\n');
+  const result = graphSchema.planGraphFourAxisMigration(legacyNode(
+    'Root', '', [legacyNode('Filtered Views', source, [], [], '@program')]
+  ));
+
+  assert.equal(result.summary.readyToCommit, true);
+  assert.equal(result.graph.contain[0].situation, [
+    'def main(arguments):',
+    "    instance = arguments['instance']",
+    "    rows = explore({'thing':instance,'situation$full':None,'contain$latitude-1':None,'support':None})",
+    '    children = direct_children(rows, instance)',
+    '    result = []',
+    '    for child in children:',
+    '        result.append(child.thing)',
+    '        result.append(child.situation)',
+    '        for partner in child.support:',
+    "            result.append(partner['object'])",
+    '    return result'
+  ].join('\n'));
+});
+
+test('Program upgrader still blocks a composite key without a retired-axis constant prefix', () => {
+  const source = [
+    "prefix = arguments['prefix']",
+    "transform({'name':'Root', prefix + arguments['payload']: None})"
+  ].join('\n');
+  const result = graphSchema.planGraphFourAxisMigration(legacyNode(
+    'Root', '', [legacyNode('Dynamic Prefix', source, [], [], '@program')]
+  ));
+
+  assert.equal(result.summary.readyToCommit, false);
+  assert.equal(result.summary.blockedPrograms[0].blockers[0].reason, 'dynamic-graph-key');
+  assert.equal(result.graph.contain[0].situation, source);
+});
+
 test('world migration refuses to commit a plan with Program source blockers', async () => {
   const sourceFacts = [legacyNode('Root', '', [legacyNode(
-    'Blocked', "axis = 'name'\nexplore({axis:'Root'})", [], [], '@program'
+    'Blocked', "axis = arguments['axis']\nexplore({axis:'Root'})", [], [], '@program'
   )])];
   const plan = planGraphFourAxisWorldMigration({
     snapshot: { revision: revisionOfWorldFacts(sourceFacts), facts: sourceFacts },

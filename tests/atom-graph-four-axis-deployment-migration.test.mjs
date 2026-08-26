@@ -202,7 +202,7 @@ test('one preflight collects all Program and relation clusters without first-err
     legacyNode('Default Backup', '', [program('Archived', "explore({'name':'A'})")], [], '@backup@default'),
     legacyNode('test', '', [program('Fixture', "transform({'detail':'x'})")]),
     program('Active Safe', "note = 'name stays text'\nexplore({'children':[]})"),
-    program('Active Unsafe', "axis='name'\nexplore({axis:'A'})\ntransform({'partners':[]})"),
+    program('Active Unsafe', "axis=arguments['axis']\nexplore({axis:'A'})\ntransform({'partners':[]})"),
     legacyNode('A', '', [], [{ verb: 'v', object: 'B' }])
   ]);
   const { graph, summary } = graphSchema.planGraphFourAxisMigration(world, {

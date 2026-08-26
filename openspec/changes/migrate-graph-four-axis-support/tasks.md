@@ -62,3 +62,9 @@
 - [x] 8.2 用任意规模合成 fixture 覆盖 relation/Program 完整聚类、source edits 正反例及大型单遍性能；primary 数量仅进 evidence
 - [x] 8.3 运行受影响组合、一次 Node 全量、strict OpenSpec、语法与 diff check
 - [x] 8.4 更新 primary 只读部署门禁说明，GitNexus detect_changes 后本地提交并双向回执
+
+## 9. Primary 阻断收口
+
+- [x] 9.1 红测并修复部署脚本 `--isolated-root` 到 operation `testRoots` 的参数贯通，证明脚本计数与直接 planner 一致
+- [x] 9.2 按 primary blocker AST 聚类扩展保守局部数据流证明，覆盖可归约 dynamic key/spec 与 AtomView 来源，同时保持真正动态和普通字符串阻断
+- [ ] 9.3 在绑定 revision/fileHash 的同一 primary 只读快照取得42个可执行 Program 全部升级、`blockedPrograms=[]`，再跑聚焦/strict/diff/GitNexus并提交回执

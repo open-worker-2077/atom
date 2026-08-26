@@ -25,6 +25,15 @@
 - **待重采样证据**：现有清单未含 47 个 Program 的源码与 source revision/facts hash，因此不能声称其中 42 个可自动升级，也不能形成精确 blocker 清单。
 - **部署前动作**：总控排他读取 primary → 生成 revision/hash 绑定报告与逐 Program edits/blockers → 核对库存与字符守恒 → 验证备份 → 仅在门禁全绿时执行原子编码及 Program 调用升级。
 
+## Bound primary preflight after first integration-ready candidate
+
+- **source revision**：`sha256:ef95262283496ebb45b367acf41dd8dabf8af9d020dd71fa465609f3faeed5b7`。
+- **source file hash**：`sha256:063ec948a99bf24f4353e8aa1c688275a30a0a030ede7367ce5b25f2b83374c2`。
+- **Program 门禁**：93 个 Program；47 个 legacy ABI，其中5个 default backup、42个可执行；18个已升级、24个阻断，`readyToCommit=false`，未停服、未备份、未写入。
+- **阻断聚类**：以 `dynamic-graph-key` 为主，另含 `dynamic-graph-specification` 与 `unproven-retired-attribute`。逐项 exact path/source hash/行列由绑定 planner 报告保管，不进入通用 spec。
+- **分类接线缺陷**：部署脚本曾将 `isolatedRoots` 传给只接收 `testRoots` 的 operation，导致36个 test 被脚本误报为 active；直接 planner 使用 `testRoots` 时分类正确。本轮须以隔离 fixture 红测修复。
+- **专项修复进度**：部署脚本参数贯通和三类 AST 证明均已红绿验证；复合旧轴固定前缀、局部 Dict/List specification、推导式/For AtomView 及注册 `direct_children` 身份传播的聚焦测试共19/19通过，真正动态前缀仍阻断。真实同 revision 复验尚未执行，不能据此提前改写24项实际结论。
+
 ## Integration-ready candidate evidence
 
 - **大型合成预检**：1,621 节点、3,000 条 legacy relation、120 个旧 ABI Program；120 个均生成 AST 证明的 source edits，`blockedPrograms=[]`，未把任何实例数量硬编码进内核。

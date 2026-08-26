@@ -86,7 +86,7 @@ adapter 将旧外层键规范化为内核四轴，同时把受信 legacy-support
 
 typed `thing@backup@default` 只通过结构事实自动识别，其下 Program 从编译、调度、trigger 与显式 run/use_program 全部排除，并作为历史事实保留原源码字符。test 根仅由迁移调用方提供 exact selector 并绑定源修订；它用于报告分类而非永久隔离，域内可执行 Program 与活跃 Program 一样必须升级。
 
-Python AST 先定位 Graph API 调用和 AtomView 数据来源，再生成只覆盖结构 token 的 source edits：`explore/transform` 首个 literal dict 的旧轴 key 映射为新轴；仅对可证明源自 `explore` 或 `current_atom` 的 AtomView 属性访问映射旧属性。普通字符串、注释、标识符、业务表达式和其他对象属性保持原字节。动态 key、字典展开、无法证明来源的旧属性访问或其他不能唯一等价转换的形态必须以 exact path/source hash/行列/原因阻断，不能猜测。
+Python AST 先定位 Graph API 调用和 AtomView 数据来源，再在函数作用域内建立保守的定义使用关系，生成只覆盖结构 token 的 source edits：`explore/transform` 首个 literal dict 的旧轴 key 映射为新轴；局部 Name 作为 dict key 时，仅当它有唯一旧轴常量定义且无重赋值/逃逸/副作用，直接把 Graph key 表达式替换成新轴 literal，不改那段普通常量绑定；局部 Name 作为整个 Graph specification 时，仅当支配该调用的单一 reaching definition 是未变异、未逃逸的 dict，才迁移该 dict 的结构 key。仅对可证明源自 `explore` 或 `current_atom` 的 AtomView 属性访问映射旧属性。`direct_children` 的身份传播不凭函数名信任，而是每次对正式 `program_stdlib.py` 实现做结构证明：返回列表唯一写入为输入 rows 循环变量原对象；证明失配或 Program 自定义同名函数即关闭该资格。普通字符串、注释、标识符、业务表达式和其他对象属性保持原字节。多定义、控制流歧义、动态拼接、字典展开、别名写入、来源不明的旧属性访问或其他不能唯一等价转换的形态必须以 exact path/source hash/行列/原因阻断，不能猜测。
 
 预检输出每个 Program 的 before/after source hash、逐项 edit 与 blocker。`readyToCommit` 仅在所有非备份可执行旧 ABI Program 都具有唯一升级结果且升级后 AST 复检不含旧 Graph ABI 时成立。升级源码与四轴外层结构在同一 revision-bound 事务提交，备份和 rollback 覆盖原源码。提交后 worker、Program runtime 与 manifest 均无 legacy ABI wrapper/授权；所有可执行 Program 只走新 ABI。
 
@@ -95,6 +95,8 @@ Python AST 先定位 Graph API 调用和 AtomView 数据来源，再生成只覆
 预检一次 DFS 同时产出世界结构计数、partner 完整清单、Program 调用清单、报告分类、目标编码守恒摘要和问题集合，不以异常实现首错退出。`readyToCommit` 只有在所有节点/路径/contain/relation 守恒、普通 situation 字节守恒、默认备份 Program 源码守恒、每个非备份旧 Program 均已唯一升级并复检为新 ABI、备份端口可用且 source revision 未漂移时为 true。任一 blocker 都携带 exact Program path/source hash/行列并关闭上线门禁。
 
 apply 顺序固定为：只读预检 → 创建源 revision/facts hash 绑定备份 → 回读验证备份 → 再次核对 revision → 单次原子 commit → 四轴全量回读 → 记录 rollback target。任一步失败均不提交；rollback 仍走事务历史创建新审计修订。
+
+部署脚本的 CLI 名称可保留 `--isolated-root` 以兼容操作手册，但进入 operation 时必须显式映射为 `testRoots`，输出也使用 `testRoots`。它只决定报告分类，不能恢复 test 执行隔离或绕过源码升级。
 
 # Risks / Trade-offs
 

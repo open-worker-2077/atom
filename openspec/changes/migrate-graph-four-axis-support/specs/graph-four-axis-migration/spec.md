@@ -70,7 +70,7 @@
 - **THEN** 提交返回 `GRAPH_MIGRATION_REVISION_MISMATCH` 且必须重新预检和备份
 
 ### Requirement: Program 一次性结构升级与执行边界
-所有非默认备份仓中的可执行旧 Graph ABI Program MUST 在迁移事务中原地升级为新四轴调用。升级器 SHALL 以 Python AST 证明 Graph API 字典键或 AtomView 来源，并只改对应结构 token；普通字符串、注释、业务表达式、其他对象属性与计算语义 MUST 不变。迁移 manifest MUST NOT 保存 Program 兼容授权，worker/runtime MUST NOT 提供 legacy ABI wrapper。typed default backup 下 Program SHALL 保留原源码字符且永不进入执行集；调用方 exact test 根只用于报告分类，其可执行 Program 仍必须升级。
+所有非默认备份仓中的可执行旧 Graph ABI Program MUST 在迁移事务中原地升级为新四轴调用。升级器 SHALL 以 Python AST 和函数内局部定义使用链证明 Graph API 字典键、Graph specification 或 AtomView 来源，并只改对应结构 token。直接 literal 与可唯一归约的局部常量/单一 reaching definition 均 MAY 生成 edit；只要存在多重赋值、控制流歧义、逃逸、别名写入、动态构造或来源不明就 MUST 阻断。普通字符串、注释、业务表达式、其他对象属性与计算语义 MUST 不变。迁移 manifest MUST NOT 保存 Program 兼容授权，worker/runtime MUST NOT 提供 legacy ABI wrapper。typed default backup 下 Program SHALL 保留原源码字符且永不进入执行集；调用方 exact test 根只用于报告分类，其可执行 Program 仍必须升级。
 
 #### Scenario: 默认备份 Program 保留历史原文
 - **WHEN** 旧 ABI Program 位于 typed default backup
@@ -87,6 +87,25 @@
 #### Scenario: 普通字符串不改
 - **WHEN** Program 注释、日志文本、selector 值或非 Graph object 中出现 name/detail/children/partners
 - **THEN** 这些源码字节保持不变且不生成 edit
+
+#### Scenario: 局部常量 Graph key 可证明升级
+- **WHEN** Graph call 的 dict key 由函数内单一 reaching definition 绑定旧轴常量，且该表达式无重赋值、逃逸或副作用
+- **THEN** upgrader 只在 Graph dict key 结构位置写入对应新轴 literal，原常量绑定和其他普通用途保持逐字不变
+
+#### Scenario: 局部 Graph specification 可证明升级
+- **WHEN** explore/transform 首参 Name 在同一函数内只有一个支配该调用的 literal dict 定义，且该 dict 未逃逸、未变异并只含可证明键
+- **THEN** upgrader 对该 Graph specification 的旧轴结构 token 生成最小 edits；任一证明条件不成立仍按 exact blocker 拒绝
+
+#### Scenario: 注册过滤函数保持 AtomView identity
+- **WHEN** Explore rows 经正式注册 `direct_children` 返回，并且 upgrader 对当前 stdlib AST 验证其返回列表元素唯一来自输入 rows 原对象
+- **THEN** 后续 For 中的 child 仍可证明为 AtomView；若 stdlib 证明失配或 Program 自定义同名函数则不授予来源资格
+
+### Requirement: 部署入口保持预检分类参数一致
+部署脚本 SHALL 将每个 `--isolated-root` 操作参数解释为本次迁移报告的 exact test root，并以 operation 公开参数 `testRoots` 传给 `planGraphFourAxisWorldMigration`。脚本输出 SHALL 使用 `testRoots` 命名并与直接 planner 调用产生相同的 default backup/test/active 计数；该参数只影响分类，不隔离可执行 test Program 的升级。
+
+#### Scenario: test 根从脚本贯通 planner
+- **WHEN** 隔离 fixture 含一个 exact test root 下旧 ABI Program 与一个 active 旧 ABI Program，并以 `--isolated-root` 调用部署 preflight
+- **THEN** 脚本报告 `testLegacyPrograms=1`、`activeLegacyPrograms=1`，且两项都必须升级或进入 blocker，不得把 test 项误计 active
 
 ### Requirement: manifest 随中央事务推进迁移谱系
 manifest MUST 保存 currentWorldRevision，并与每次中央授权事实提交原子推进。无关写入 MUST 保留仍可验证的 legacy-support provenance；重启时 manifest revision 与当前事实 revision 不一致 MUST 拒绝启用该 provenance。legacy-support 资格 SHALL 由迁移数组内容指纹与授权出现次数验证，使节点改名/移动仍保持关系 provenance；显式 support 替换 SHALL 清除被移除旧数组的资格。manifest 不得包含 Program ABI 资格或源码授权。
