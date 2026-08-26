@@ -206,6 +206,26 @@ test('Program upgrader follows a single-use local binding for a composite Graph 
   ].join('\n'));
 });
 
+test('Program upgrader proves one composite Graph key binding inside one module control block', () => {
+  const source = [
+    "navigation_value = arguments['navigation']",
+    "if arguments['enabled']:",
+    "    command = 'detail' + '.rep.' + navigation_value",
+    "    transform({'name':'Root', command: None})"
+  ].join('\n');
+  const result = graphSchema.planGraphFourAxisMigration(legacyNode(
+    'Root', '', [legacyNode('Block Key', source, [], [], '@program')]
+  ));
+
+  assert.equal(result.summary.readyToCommit, true);
+  assert.equal(result.graph.contain[0].situation, [
+    "navigation_value = arguments['navigation']",
+    "if arguments['enabled']:",
+    "    command = 'situation' + '.rep.' + navigation_value",
+    "    transform({'thing':'Root', command: None})"
+  ].join('\n'));
+});
+
 test('Program upgrader follows one local Graph specification through mutation and comprehension views', () => {
   const source = [
     'def main(arguments):',
@@ -230,9 +250,11 @@ test('Program upgrader follows one local Graph specification through mutation an
 
 test('Program upgrader follows a local list of literal Graph specifications into transform', () => {
   const source = [
-    "updates = [{'name':'A','detail':'x'}, {'name':'B','partners':[]}]",
-    'for update in updates:',
-    '    transform(update)'
+    'def main(arguments):',
+    "    updates = [{'name':'A','detail':'x'}, {'name':'B','partners':[]}]",
+    '    for update in updates:',
+    '        transform(update)',
+    "    return {'updated': len(updates)}"
   ].join('\n');
   const result = graphSchema.planGraphFourAxisMigration(legacyNode(
     'Root', '', [legacyNode('Batch', source, [], [], '@program')]
@@ -240,9 +262,11 @@ test('Program upgrader follows a local list of literal Graph specifications into
 
   assert.equal(result.summary.readyToCommit, true);
   assert.equal(result.graph.contain[0].situation, [
-    "updates = [{'thing':'A','situation':'x'}, {'thing':'B','support':[]}]",
-    'for update in updates:',
-    '    transform(update)'
+    'def main(arguments):',
+    "    updates = [{'thing':'A','situation':'x'}, {'thing':'B','support':[]}]",
+    '    for update in updates:',
+    '        transform(update)',
+    "    return {'updated': len(updates)}"
   ].join('\n'));
 });
 

@@ -143,7 +143,21 @@ class ProgramUpgradeAnalyzer(ast.NodeVisitor):
         if len(assignments) != 1:
             return None
         statement, value = assignments[0]
-        if self.parents.get(statement) is not scope or statement.lineno >= use.lineno:
+        block = self.parents.get(statement)
+        if block is None or statement.lineno >= use.lineno:
+            return None
+        direct_use = use
+        while self.parents.get(direct_use) is not None \
+                and self.parents.get(direct_use) is not block:
+            direct_use = self.parents[direct_use]
+        if self.parents.get(direct_use) is not block:
+            return None
+        containing_sequence = next((sequence for sequence in (
+            getattr(block, "body", None), getattr(block, "orelse", None)
+        ) if isinstance(sequence, list)
+            and statement in sequence and direct_use in sequence), None)
+        if containing_sequence is None \
+                or containing_sequence.index(statement) >= containing_sequence.index(direct_use):
             return None
         return statement, value
 
@@ -179,9 +193,16 @@ class ProgramUpgradeAnalyzer(ast.NodeVisitor):
         return True
 
     def safe_list_name(self, name, use):
-        return all(isinstance(self.parents.get(load), (ast.For, ast.AsyncFor))
-                   and self.parents[load].iter is load
-                   for load in self.name_loads(name, use))
+        for load in self.name_loads(name, use):
+            parent = self.parents.get(load)
+            if isinstance(parent, (ast.For, ast.AsyncFor)) and parent.iter is load:
+                continue
+            if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) \
+                    and parent.func.id == "len" and len(parent.args) == 1 \
+                    and parent.args[0] is load and not parent.keywords:
+                continue
+            return False
+        return True
 
     def safe_loop_target(self, name, loop):
         scope = self.scope_of(loop)

@@ -33,6 +33,7 @@
 - **阻断聚类**：以 `dynamic-graph-key` 为主，另含 `dynamic-graph-specification` 与 `unproven-retired-attribute`。逐项 exact path/source hash/行列由绑定 planner 报告保管，不进入通用 spec。
 - **分类接线缺陷**：部署脚本曾将 `isolatedRoots` 传给只接收 `testRoots` 的 operation，导致36个 test 被脚本误报为 active；直接 planner 使用 `testRoots` 时分类正确。本轮须以隔离 fixture 红测修复。
 - **专项修复进度**：部署脚本参数贯通和三类 AST 证明均已红绿验证；复合旧轴固定前缀、局部 Dict/List specification、推导式/For AtomView 及注册 `direct_children` 身份传播的聚焦测试共19/19通过，真正动态前缀仍阻断。真实同 revision 复验尚未执行，不能据此提前改写24项实际结论。
+- **第二次绑定复验**：同一 revision/fileHash 下，增强的点式旧轴识别把 legacy ABI 完整库存从47补正为50（5 default backup + 45 executable），没有新增或复制 Program；42个 executable 已升级，3个 active 仍阻断。新增3项来自此前漏识别的点式旧轴 Program，故旧报告47与新完整报告50的差额守恒。剩余结构已定位为同一 module-level If body 的单赋值/单key消费，以及 List specification 除 For.iter 外仅用于 `len(updates)` 的只读计数；本轮已补红绿测试，等待第三次同 revision 复验。
 
 ## Integration-ready candidate evidence
 

@@ -70,7 +70,7 @@
 - **THEN** 提交返回 `GRAPH_MIGRATION_REVISION_MISMATCH` 且必须重新预检和备份
 
 ### Requirement: Program 一次性结构升级与执行边界
-所有非默认备份仓中的可执行旧 Graph ABI Program MUST 在迁移事务中原地升级为新四轴调用。升级器 SHALL 以 Python AST 和函数内局部定义使用链证明 Graph API 字典键、Graph specification 或 AtomView 来源，并只改对应结构 token。直接 literal 与可唯一归约的局部常量/单一 reaching definition 均 MAY 生成 edit；只要存在多重赋值、控制流歧义、逃逸、别名写入、动态构造或来源不明就 MUST 阻断。普通字符串、注释、业务表达式、其他对象属性与计算语义 MUST 不变。迁移 manifest MUST NOT 保存 Program 兼容授权，worker/runtime MUST NOT 提供 legacy ABI wrapper。typed default backup 下 Program SHALL 保留原源码字符且永不进入执行集；调用方 exact test 根只用于报告分类，其可执行 Program 仍必须升级。
+所有非默认备份仓中的可执行旧 Graph ABI Program MUST 在迁移事务中原地升级为新四轴调用。升级器 SHALL 以 Python AST 和词法块局部定义使用链证明 Graph API 字典键、Graph specification 或 AtomView 来源，并只改对应结构 token。直接 literal 与可唯一归约、在同一 block 内支配消费点的单一 reaching definition 均 MAY 生成 edit；只要存在多重赋值、控制流歧义、逃逸、别名写入、动态构造或来源不明就 MUST 阻断。Graph specification 集合除 For.iter 外只 MAY 被纯 `len(binding)` 观察基数，其他用途均视为逃逸。普通字符串、注释、业务表达式、其他对象属性与计算语义 MUST 不变。迁移 manifest MUST NOT 保存 Program 兼容授权，worker/runtime MUST NOT 提供 legacy ABI wrapper。typed default backup 下 Program SHALL 保留原源码字符且永不进入执行集；调用方 exact test 根只用于报告分类，其可执行 Program 仍必须升级。
 
 #### Scenario: 默认备份 Program 保留历史原文
 - **WHEN** 旧 ABI Program 位于 typed default backup
@@ -89,11 +89,11 @@
 - **THEN** 这些源码字节保持不变且不生成 edit
 
 #### Scenario: 局部常量 Graph key 可证明升级
-- **WHEN** Graph call 的 dict key 由函数内单一 reaching definition 绑定旧轴常量，且该表达式无重赋值、逃逸或副作用
+- **WHEN** Graph call 的 dict key 由同一 module/function 控制块内的单一 reaching definition 绑定旧轴常量，该赋值支配唯一 key 消费，且表达式无重赋值、逃逸或副作用
 - **THEN** upgrader 只在 Graph dict key 结构位置写入对应新轴 literal，原常量绑定和其他普通用途保持逐字不变
 
 #### Scenario: 局部 Graph specification 可证明升级
-- **WHEN** explore/transform 首参 Name 在同一函数内只有一个支配该调用的 literal dict 定义，且该 dict 未逃逸、未变异并只含可证明键
+- **WHEN** explore/transform 首参 Name 在同一词法块内只有一个支配该调用的 literal dict 定义，且该 dict 未逃逸、未变异并只含可证明键；批量 List 只额外进入 `len(binding)`
 - **THEN** upgrader 对该 Graph specification 的旧轴结构 token 生成最小 edits；任一证明条件不成立仍按 exact blocker 拒绝
 
 #### Scenario: 注册过滤函数保持 AtomView identity
