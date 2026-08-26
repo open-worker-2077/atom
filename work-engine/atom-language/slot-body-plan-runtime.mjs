@@ -730,7 +730,35 @@ function instanceContextForEvent(atoms, eventPath) {
 export function slotProgramInvocationsForEvent(atoms, triggerEvent) {
   if (triggerEvent?.mode !== 'transform' || !Array.isArray(triggerEvent.nodes)) return [];
   const invocations = [];
-  const seen = new Set();
+  const invocationByKey = new Map();
+  const addInvocation = (context, eventPath, source, role, condition = null) => {
+    const programPath = role.path === '.'
+      ? context.layout.modelPath
+      : `${context.layout.modelPath}/${role.path.slice(2)}`;
+    const key = `${programPath}\0${context.instancePath}\0${context.revision}`;
+    const existing = invocationByKey.get(key);
+    if (existing) {
+      if (!condition) delete existing.conditions;
+      else if (existing.conditions) {
+        const fingerprint = stableStringify(condition);
+        if (!existing.conditions.some((entry) => stableStringify(entry) === fingerprint)) {
+          existing.conditions.push(condition);
+        }
+      }
+      return;
+    }
+    const invocation = {
+      programPath,
+      programRoot: context.layout.modelPath,
+      scopeRoot: context.instancePath,
+      revision: context.revision,
+      eventPath,
+      sourceRole: source.path,
+      ...(condition ? { conditions: [condition] } : {})
+    };
+    invocationByKey.set(key, invocation);
+    invocations.push(invocation);
+  };
   for (const eventPath of triggerEvent.nodes) {
     if (typeof eventPath !== 'string') continue;
     const context = instanceContextForEvent(atoms, eventPath);
@@ -750,14 +778,26 @@ export function slotProgramInvocationsForEvent(atoms, triggerEvent) {
       });
     }
     const outgoing = new Map();
+    const byId = new Map(context.plan.roles.map((role) => [role.role_id, role]));
     for (const entry of context.plan.support) {
       const sides = supportRoleSides(entry);
       for (const antecedent of sides.antecedent) {
         if (!outgoing.has(antecedent)) outgoing.set(antecedent, []);
         outgoing.get(antecedent).push(...sides.consequent);
       }
+      const owner = byId.get(entry.owner_role_id);
+      if (owner?.kind === 'program'
+        && entry.rule['then@current'] === true
+        && entry.rule.if?.length === 1) {
+        addInvocation(
+          context,
+          eventPath,
+          source,
+          owner,
+          materializeExpr(entry.rule.if[0], context.plan, context.layout, context.instancePath)
+        );
+      }
     }
-    const byId = new Map(context.plan.roles.map((role) => [role.role_id, role]));
     const queue = [...(outgoing.get(source.role_id) ?? [])];
     const visited = new Set([source.role_id]);
     while (queue.length) {
@@ -767,21 +807,7 @@ export function slotProgramInvocationsForEvent(atoms, triggerEvent) {
       const role = byId.get(roleId);
       if (!role) continue;
       if (role.kind === 'program') {
-        const programPath = role.path === '.'
-          ? context.layout.modelPath
-          : `${context.layout.modelPath}/${role.path.slice(2)}`;
-        const key = `${programPath}\0${context.instancePath}\0${context.revision}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          invocations.push({
-            programPath,
-            programRoot: context.layout.modelPath,
-            scopeRoot: context.instancePath,
-            revision: context.revision,
-            eventPath,
-            sourceRole: context.relativePath
-          });
-        }
+        addInvocation(context, eventPath, source, role);
       }
       queue.push(...(outgoing.get(roleId) ?? []));
     }

@@ -299,6 +299,32 @@ async function dependencyFingerprint(requests, executeExplore, records, cache = 
   return crypto.createHash('sha256').update(JSON.stringify(snapshots)).digest('hex');
 }
 
+async function evaluateSlotSupportExpr(expr, { recordsByPath, evaluateProgram }) {
+  if (typeof expr?.thing === 'string') return recordsByPath.has(expr.thing);
+  if (typeof expr?.['thing@program'] === 'string') {
+    return evaluateProgram(expr['thing@program']);
+  }
+  if (Array.isArray(expr?.and)) {
+    for (const child of expr.and) {
+      if (await evaluateSlotSupportExpr(child, { recordsByPath, evaluateProgram }) === false) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (Array.isArray(expr?.or)) {
+    for (const child of expr.or) {
+      if (await evaluateSlotSupportExpr(child, { recordsByPath, evaluateProgram }) === true) {
+        return true;
+      }
+    }
+    return false;
+  }
+  throw Object.assign(new Error('槽体采用修订包含无法求值的 support 前件'), {
+    code: 'INVALID_SLOT_SUPPORT_EXPR'
+  });
+}
+
 function rebindLocks(locks, previousRecords, records) {
   const oldPathByRef = new Map(previousRecords.map((record) => [record.ref, record.path]));
   const newRefByPath = new Map(records.map((record) => [record.path, record.ref]));
@@ -768,6 +794,7 @@ export class ProgramRuntimeScheduler {
     this.triggerContracts = new Map();
     this.triggerIndex = new Map();
     this.triggerContractsInitialized = false;
+    this.slotInvocationCycles = new Map();
     this.activeWindowSelfLocks = new Map();
     this.activeWindowAgents = new Set();
     if (this.projectionRepository
@@ -807,10 +834,15 @@ export class ProgramRuntimeScheduler {
       program,
       timeoutMs: options.timeoutMs ?? this.timeoutMs,
       executeExplore: async (request) => {
-        const matches = await executeExplore(request);
+        const matches = await executeExplore(request, {
+          scopeRoot: options.scopeRoot ?? null,
+          programPath: selector
+        });
         const byPath = new Map(records.map((record) => [record.path, record]));
         return matches.map((match) => byPath.get(match.path)).filter(Boolean);
       },
+      scopeRoot: options.scopeRoot ?? null,
+      programRoot: options.programRoot ?? null,
       supportDecision: true,
       triggered: true
     }));
@@ -1318,7 +1350,50 @@ export class ProgramRuntimeScheduler {
         }
       }
     }
-    const slotInvocations = slotProgramInvocationsForEvent(atoms, triggerEvent);
+    const slotCandidates = slotProgramInvocationsForEvent(atoms, triggerEvent);
+    let cycleInvocations = null;
+    if (typeof options.slotTriggerCycleId === 'string' && options.slotTriggerCycleId) {
+      if (!this.slotInvocationCycles.has(options.slotTriggerCycleId)) {
+        this.slotInvocationCycles.set(options.slotTriggerCycleId, new Set());
+        while (this.slotInvocationCycles.size > this.maxCompleted) {
+          this.slotInvocationCycles.delete(this.slotInvocationCycles.keys().next().value);
+        }
+      }
+      cycleInvocations = this.slotInvocationCycles.get(options.slotTriggerCycleId);
+    }
+    const slotInvocations = [];
+    for (const invocation of slotCandidates) {
+      const invocationKey = `${invocation.programPath}\0${invocation.scopeRoot}\0${invocation.revision}`;
+      if (cycleInvocations?.has(invocationKey)) continue;
+      if (!invocation.conditions?.length) {
+        cycleInvocations?.add(invocationKey);
+        slotInvocations.push(invocation);
+        continue;
+      }
+      let matched = false;
+      for (const condition of invocation.conditions) {
+        const remainingMs = cycleDeadline - Date.now();
+        if (remainingMs <= 0) {
+          throw Object.assign(new Error(`Program cycle exceeded ${this.timeoutMs}ms`), {
+            code: 'ATOM_PROGRAM_TIMEOUT'
+          });
+        }
+        matched = await evaluateSlotSupportExpr(condition, {
+          recordsByPath: byPath,
+          evaluateProgram: (selector) => this.evaluateSupportProgram(atoms, selector, {
+            timeoutMs: remainingMs,
+            scopeRoot: invocation.scopeRoot,
+            programRoot: invocation.programRoot,
+            executeExplore
+          })
+        });
+        if (matched) break;
+      }
+      if (matched) {
+        cycleInvocations?.add(invocationKey);
+        slotInvocations.push(invocation);
+      }
+    }
     const slotInvocationsByProgram = new Map();
     for (const invocation of slotInvocations) {
       if (!slotInvocationsByProgram.has(invocation.programPath)) {

@@ -1078,6 +1078,7 @@ export async function executeAtomLanguage(options = {}) {
       const cycle = await options.programScheduler.refresh(reconciledAtoms, {
         agentOrigin: interaction.agent,
         isolateFailures: true,
+        slotTriggerCycleId: interaction.id,
         ...(pendingTriggerEvent ? { triggerEvent: pendingTriggerEvent } : {}),
         executeExplore: (request, executionContext = {}) => executeProgramExplore({
           atoms: reconciledAtoms,

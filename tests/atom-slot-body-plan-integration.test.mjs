@@ -75,6 +75,65 @@ async function run(runtime, source, scheduler) {
   return executeAtomLanguage({ ...runtime, source, programScheduler: scheduler });
 }
 
+function conditionalWorld() {
+  const predicate = [
+    'def main(arguments):',
+    '    left = explore({"thing":"./字段甲","situation$full":True})',
+    '    right = explore({"thing":"./字段乙","situation$full":True})',
+    '    return left[0].situation == "值甲" and right[0].situation == "值乙"'
+  ].join('\n');
+  const calculate = [
+    'def main(arguments):',
+    '    transform({"thing":"./结果","situation.rep.已计算":None})',
+    '    return {"computed":True}'
+  ].join('\n');
+  const printer = (name) => (
+    `use_program({"name":"Root/条件槽体/print","arguments":{"name":"${name}"}})`
+  );
+  return [atom('Root', '', [
+    atom('研发窗口', '', [], [], ['agent']),
+    atom('条件槽体', '', [
+      atom('候选流', '', [
+        atom('字段甲', '字段甲槽契约'),
+        atom('字段乙', '字段乙槽契约'),
+        atom('结果', '结果槽契约'),
+        atom('判定', predicate, [], [], ['program']),
+        atom('计算', calculate, [], [{
+          if: [{ 'thing@program': '判定' }],
+          'then@current': true
+        }], ['program'])
+      ])
+    ]),
+    atom('封装条件槽体', 'slot_body({"action":"seal","body":"Root/条件槽体"})', [], [], ['program']),
+    atom('打印条件001', printer('实例001'), [], [], ['program']),
+    atom('打印条件002', printer('实例002'), [], [], ['program'])
+  ])];
+}
+
+async function setupConditional(t) {
+  const runtime = await setup(t);
+  await fs.writeFile(runtime.contextFile, JSON.stringify(conditionalWorld(), null, 2), 'utf8');
+  return runtime;
+}
+
+async function sealAndPrintConditional(runtime, scheduler, second = false) {
+  const sealed = await run(runtime, 'transform {"thing.run.":"Root/封装条件槽体"}', scheduler);
+  assert.equal(sealed.ok, true, JSON.stringify(sealed.errors));
+  const printed = await run(runtime, 'transform {"thing.run.":"Root/打印条件001"}', scheduler);
+  assert.equal(printed.ok, true, JSON.stringify(printed.errors));
+  if (second) {
+    const printedSecond = await run(runtime, 'transform {"thing.run.":"Root/打印条件002"}', scheduler);
+    assert.equal(printedSecond.ok, true, JSON.stringify(printedSecond.errors));
+  }
+}
+
+function triggerFields(instance, fields = ['字段甲', '字段乙'], sameValue = false) {
+  return `transform ${JSON.stringify(fields.map((field) => ({
+    thing: `Root/条件槽体/槽例/${instance}/${field}`,
+    [`situation.rep.值${field.at(-1)}`]: sameValue ? `值${field.at(-1)}` : `${field}槽契约`
+  })))}`;
+}
+
 test('generated print Program seals and prints without a blank template in central atomic commits', async (t) => {
   const runtime = await setup(t);
   const scheduler = createProgramRuntimeScheduler();
@@ -125,6 +184,96 @@ test('outside orchestration materializes a local variable Thing before triggerin
   assert.equal(unrelated.ok, true, JSON.stringify(unrelated.errors));
   committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(find(committed, 'Root/订单槽体/槽例/订单002/输出').situation, '输出槽契约');
+});
+
+test('one atomic batch evaluates one owner-local condition and dispatches its consequent once', async (t) => {
+  const runtime = await setupConditional(t);
+  const diagnostics = [];
+  const scheduler = createProgramRuntimeScheduler({
+    diagnosticRecorder: { async record(entry) { diagnostics.push(entry); } }
+  });
+  await sealAndPrintConditional(runtime, scheduler);
+  diagnostics.length = 0;
+
+  const before = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  const invocations = slotProgramInvocationsForEvent(before, {
+    mode: 'transform',
+    nodes: [
+      'Root/条件槽体/槽例/实例001/字段甲',
+      'Root/条件槽体/槽例/实例001/字段乙'
+    ]
+  });
+  assert.equal(invocations.length, 1);
+  assert.equal(invocations[0].programPath, 'Root/条件槽体/槽模/计算');
+
+  const changed = await run(runtime, triggerFields('实例001'), scheduler);
+
+  assert.equal(changed.ok, true, JSON.stringify(changed.errors));
+  const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果').situation, '已计算');
+  assert.equal(
+    diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/槽模/计算').length,
+    1
+  );
+});
+
+test('a same-value mapped-slot Transform still evaluates and dispatches owner-local support', async (t) => {
+  const runtime = await setupConditional(t);
+  const diagnostics = [];
+  const scheduler = createProgramRuntimeScheduler({
+    diagnosticRecorder: { async record(entry) { diagnostics.push(entry); } }
+  });
+  await sealAndPrintConditional(runtime, scheduler);
+  assert.equal((await run(runtime, triggerFields('实例001'), scheduler)).ok, true);
+  diagnostics.length = 0;
+
+  const changed = await run(runtime, triggerFields('实例001', ['字段甲'], true), scheduler);
+
+  assert.equal(changed.ok, true, JSON.stringify(changed.errors));
+  const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果').situation, '已计算');
+  assert.equal(
+    diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/槽模/计算').length,
+    1
+  );
+});
+
+test('a strict-false owner-local condition does not dispatch its consequent', async (t) => {
+  const runtime = await setupConditional(t);
+  const diagnostics = [];
+  const scheduler = createProgramRuntimeScheduler({
+    diagnosticRecorder: { async record(entry) { diagnostics.push(entry); } }
+  });
+  await sealAndPrintConditional(runtime, scheduler);
+  diagnostics.length = 0;
+
+  const before = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  assert.equal(slotProgramInvocationsForEvent(before, {
+    mode: 'transform', nodes: ['Root/条件槽体/槽例/实例001/字段甲']
+  }).length, 1);
+
+  const changed = await run(runtime, triggerFields('实例001', ['字段甲']), scheduler);
+
+  assert.equal(changed.ok, true, JSON.stringify(changed.errors));
+  const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果').situation, '结果槽契约');
+  assert.equal(
+    diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/槽模/计算').length,
+    0
+  );
+});
+
+test('owner-local support never dispatches the same revision in a sibling instance', async (t) => {
+  const runtime = await setupConditional(t);
+  const scheduler = createProgramRuntimeScheduler();
+  await sealAndPrintConditional(runtime, scheduler, true);
+
+  const changed = await run(runtime, triggerFields('实例001'), scheduler);
+
+  assert.equal(changed.ok, true, JSON.stringify(changed.errors));
+  const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果').situation, '已计算');
+  assert.equal(find(committed, 'Root/条件槽体/槽例/实例002/结果').situation, '结果槽契约');
 });
 
 test('re-seal recomputes every synchronized instance with the new shared Program in the same commit', async (t) => {
