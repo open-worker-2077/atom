@@ -68,3 +68,10 @@
 - [x] 9.1 红测并修复部署脚本 `--isolated-root` 到 operation `testRoots` 的参数贯通，证明脚本计数与直接 planner 一致
 - [x] 9.2 按 primary blocker AST 聚类扩展保守局部数据流证明，覆盖可归约 dynamic key/spec 与 AtomView 来源，同时保持真正动态和普通字符串阻断
 - [x] 9.3 在绑定 revision/fileHash 的同一 primary 只读快照取得45个可执行 Program 全部升级、`blockedPrograms=[]`，再跑聚焦/strict/diff/GitNexus并提交回执
+
+## 10. 请求驱动锁侧车部署收口
+
+- [x] 10.1 红测锁定旧 fields 保序映射、new-only 幂等、其他字段守恒、旧新混合/碰撞/非法快照稳定拒绝
+- [x] 10.2 在四轴部署 plan/apply 中接入锁侧车 source/next hash、私有备份、原子替换、严格仓库回读及失败补偿，不增加 runtime legacy wrapper
+- [x] 10.3 红测并实现 operator rollback 同时恢复世界审计修订与原侧车原始字节，验证备份 receipt 覆盖侧车哈希
+- [x] 10.4 运行部署/锁/窗口聚焦、strict OpenSpec、diff check、GitNexus detect_changes，形成 integration-ready 本地提交并脱敏回执

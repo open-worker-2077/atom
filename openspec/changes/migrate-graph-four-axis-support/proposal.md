@@ -20,6 +20,8 @@ Atom 的 Graph 公开范式仍散落着 `name / detail / children / partners` �
 - 迁移必须先验证 revision-bound 完整备份，再经单次原子事务提交结构编码、可升级 Program 源码与仅承载 legacy relation provenance 的 manifest；回退不覆盖历史。升级后新 support 与受信 legacy relation 可同世界共存但语义索引严格隔离。
 - 更新 parser、Transform、Explore、Program AtomView、投影、CLI、Web、Help、模板、错误码与回归。
 - 部署预检脚本必须把调用方提供的 exact test 根以 `testRoots` 贯通至 planner，报告分类与直接 planner 调用一致，不得把 test Program 误报为 active。
+- 同一部署升级还必须覆盖内核拥有的 `request-driven-locks.json`：只在每条锁的 `fields` 中按 `name→thing`、`detail→situation`、`children→contain`、`partners→support` 做纯结构映射，保留锁顺序、字段顺序、锁语义及其他字段；旧新轴混合或映射后歧义在首写前稳定拒绝。
+- 锁侧车原始字节与哈希必须进入同一私有备份和部署收据；apply 后由严格新仓库回读，失败时恢复世界与侧车，operator rollback 也必须恢复备份中的原锁快照。正式 runtime 不增加 legacy wrapper 或双 ABI。
 
 # Capabilities
 
@@ -30,4 +32,4 @@ Atom 的 Graph 公开范式仍散落着 `name / detail / children / partners` �
 
 # Impact
 
-影响 Graph parser/schema、持久快照兼容 reader、Atom key parser、语言 receiver/engine、Transform/Explore、Program runtime/AtomView、投影与 spatial model、Web 编辑、Help/registry、模板、预检/迁移工具和自动测试。不得修改业务 Atom/ESG，不得写共享 4784。
+影响 Graph parser/schema、持久快照兼容 reader、Atom key parser、语言 receiver/engine、Transform/Explore、Program runtime/AtomView、投影与 spatial model、Web 编辑、Help/registry、模板、预检/迁移工具、请求驱动锁部署侧车和自动测试。不得修改业务 Atom/ESG，不得写共享 4784。

@@ -71,7 +71,7 @@ function validWindowPolicy(policy) {
     && Object.values(side).every((rules) => Array.isArray(rules) && rules.every(validWindowRule)));
 }
 
-function validate(value) {
+export function validateRequestDrivenLockSnapshot(value) {
   const supportedFields = new Set(['thing', 'situation', 'contain', 'support', 'messages']);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.version !== 1 || !Array.isArray(value.locks)
@@ -108,14 +108,14 @@ export function createJsonRequestDrivenLockRepository({ file }) {
     file: snapshotFile,
     async load() {
       try {
-        return validate(JSON.parse(await fs.readFile(snapshotFile, 'utf8')));
+        return validateRequestDrivenLockSnapshot(JSON.parse(await fs.readFile(snapshotFile, 'utf8')));
       } catch (error) {
         if (error.code === 'ENOENT') return { version: 1, locks: [] };
         throw error;
       }
     },
     async save(snapshot) {
-      const value = validate(snapshot);
+      const value = validateRequestDrivenLockSnapshot(snapshot);
       await fs.mkdir(path.dirname(snapshotFile), { recursive: true });
       const temporary = `${snapshotFile}.${process.pid}.${crypto.randomUUID()}.tmp`;
       try {

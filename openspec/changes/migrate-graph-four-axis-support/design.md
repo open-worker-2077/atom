@@ -98,6 +98,12 @@ apply 顺序固定为：只读预检 → 创建源 revision/facts hash 绑定备
 
 部署脚本的 CLI 名称可保留 `--isolated-root` 以兼容操作手册，但进入 operation 时必须显式映射为 `testRoots`，输出也使用 `testRoots`。它只决定报告分类，不能恢复 test 执行隔离或绕过源码升级。
 
+## 12. 内核锁侧车部署升级
+
+`request-driven-locks.json` 是内核拥有的持久状态，不属于 Atom 业务事实，却与 Program/窗口锁的 Graph field 契约同版本演进。正式 request-driven-lock repository 继续只接受新四轴；部署入口在 runtime 启动前用独立纯函数规划侧车，只遍历 `locks[*].fields` 并保序映射四个旧轴。new-only 快照保持不变；同一 fields 列表出现旧新轴混合、映射碰撞、非字符串或闭集外 field 时 fail closed，不猜测、不去重。
+
+部署计划记录侧车 source/next hash、锁数、改动 fields 数和结构守恒结果，不把锁内容写入公开证据。私有 backup 复制并校验原始侧车字节。apply 顺序为：世界/侧车联合预检 → 私有备份与哈希回读 → revision 再核对 → 世界中央事务提交 → 侧车临时文件原子替换 → 严格新仓库回读 → 私有 deployment receipt。侧车阶段失败时立即 rollback 世界并从私有备份恢复侧车；operator rollback 复用同一侧车恢复端口。该机制是一次性部署升级，不进入 graph-server 初始化路径，也不产生 legacy wrapper、双 ABI 或长期兼容分支。
+
 # Risks / Trade-offs
 
 - 显式枢纽增加节点数量，但换取局部可读、可审计和机制归属。
@@ -105,6 +111,7 @@ apply 顺序固定为：只读预检 → 创建源 revision/facts hash 绑定备
 - Web 需处理视觉压缩与真实节点同时存在，命中测试必须锁定身份。
 - 一次性 Program source upgrader 需要保守数据流证明；宁可精确阻断少量歧义 Program，也不在正式内核保留双 ABI 或猜测业务语义。
 - legacy-support 可与新 clause 共存，查询展示需区分两类关系；索引测试必须证明 legacy entry 永不进入推理。
+- 世界提交与独立侧车文件无法依赖单次文件 rename 跨文件原子化，因此部署 operation 采用可验证备份、原子单文件替换和同步补偿；收据与聚焦故障注入测试必须证明任一步显式失败后两者都恢复源状态。
 
 # Open Questions
 

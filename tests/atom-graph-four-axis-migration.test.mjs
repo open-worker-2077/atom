@@ -5,6 +5,7 @@ import * as graphSchema from '../work-engine/atom-language/graph-schema.mjs';
 import {
   applyGraphFourAxisWorldMigration,
   planGraphFourAxisWorldMigration,
+  planRequestDrivenLockFourAxisMigration,
   rollbackGraphFourAxisWorldMigration
 } from '../src/atom-system/operations/graph-four-axis-migration.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
@@ -12,6 +13,65 @@ import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-rev
 function legacyNode(name, detail = '', children = [], partners = [], suffix = '') {
   return { [`name${suffix}`]: name, detail, children, partners };
 }
+
+function legacyLockSnapshot(fields = ['name', 'detail', 'children', 'partners', 'messages']) {
+  return {
+    version: 1,
+    locks: [{
+      sourceProgramPath: 'Root/Lock Program',
+      targets: { paths: ['Root/Target'], scope: 'subtree' },
+      mode: 'read_write',
+      fields,
+      protect: { atom: true, messages: false },
+      allowed_programs: { paths: ['Root/Lock Program'] },
+      refresh: { policy: 'on_request' },
+      retained: { order: [3, 1, 2] }
+    }]
+  };
+}
+
+test('request-driven lock migration maps only legacy fields while preserving order and all other structure', () => {
+  const source = legacyLockSnapshot();
+  const plan = planRequestDrivenLockFourAxisMigration(source);
+
+  assert.deepEqual(plan.snapshot.locks[0].fields, [
+    'thing', 'situation', 'contain', 'support', 'messages'
+  ]);
+  assert.deepEqual(
+    { ...plan.snapshot.locks[0], fields: source.locks[0].fields },
+    source.locks[0]
+  );
+  assert.deepEqual(plan.summary, {
+    locks: 1,
+    fields: 5,
+    migratedFields: 4,
+    changed: true
+  });
+  assert.notEqual(plan.sourceHash, plan.nextHash);
+
+  const current = legacyLockSnapshot(['thing', 'situation', 'contain', 'support', 'messages']);
+  const currentPlan = planRequestDrivenLockFourAxisMigration(current);
+  assert.deepEqual(currentPlan.snapshot, current);
+  assert.equal(currentPlan.summary.changed, false);
+  assert.equal(currentPlan.sourceHash, currentPlan.nextHash);
+});
+
+test('request-driven lock migration rejects mixed, colliding, and invalid field snapshots before planning', () => {
+  for (const fields of [
+    ['name', 'situation'],
+    ['name', 'thing'],
+    ['name', 'name'],
+    ['thing', 'unsupported'],
+    ['thing', 1]
+  ]) {
+    assert.throws(
+      () => planRequestDrivenLockFourAxisMigration(legacyLockSnapshot(fields)),
+      { code: fields.includes('unsupported') || fields.includes(1)
+        ? 'INVALID_REQUEST_DRIVEN_LOCK_MIGRATION_SNAPSHOT'
+        : 'AMBIGUOUS_REQUEST_DRIVEN_LOCK_GRAPH_AXIS' }
+    );
+  }
+});
 
 test('migration planner is a pure structural conversion that preserves situation bytes', () => {
   assert.equal(typeof graphSchema.planGraphFourAxisMigration, 'function');
@@ -402,4 +462,64 @@ test('world migration never commits when private backup verification fails', asy
     persistence: { commit: async () => { committed = true; }, rollback: async () => {} }
   }), { code: 'GRAPH_MIGRATION_BACKUP_VERIFICATION_FAILED' });
   assert.equal(committed, false);
+});
+
+test('sidecar commit failure compensates the world and restores the request-driven lock backup', async () => {
+  const sourceFacts = [legacyNode('Root')];
+  const plan = planGraphFourAxisWorldMigration({
+    snapshot: { revision: revisionOfWorldFacts(sourceFacts), facts: sourceFacts },
+    planner: graphSchema.planGraphFourAxisMigration,
+    requestDrivenLockSnapshot: legacyLockSnapshot(['detail'])
+  });
+  const calls = [];
+  await assert.rejects(applyGraphFourAxisWorldMigration({
+    plan,
+    confirmation: true,
+    backup: {
+      create: async () => ({ directory: 'private-backup' }),
+      verify: async () => true
+    },
+    persistence: {
+      commit: async () => ({ commandId: 'world-command', afterRevision: plan.nextRevision }),
+      rollback: async (request) => {
+        calls.push(['world-rollback', request]);
+        return { status: 'committed', afterRevision: plan.expectedRevision };
+      }
+    },
+    requestDrivenLockPersistence: {
+      commit: async () => { calls.push(['sidecar-commit']); throw Object.assign(new Error('disk'), { code: 'EIO' }); },
+      rollback: async (request) => { calls.push(['sidecar-rollback', request]); return { restored: true }; }
+    }
+  }), (error) => error?.code === 'GRAPH_MIGRATION_SIDECAR_COMMIT_FAILED'
+    && error.details.cause === 'EIO');
+  assert.deepEqual(calls.map(([kind]) => kind), [
+    'sidecar-commit', 'sidecar-rollback', 'world-rollback'
+  ]);
+});
+
+test('operator rollback restores the world revision and request-driven lock sidecar', async () => {
+  const calls = [];
+  const receipt = await rollbackGraphFourAxisWorldMigration({
+    migration: {
+      migrationId: 'migration',
+      backup: { directory: 'private-backup' },
+      requestDrivenLocks: { sourceHash: 'sha256:old', nextHash: 'sha256:new' },
+      rollback: { targetCommandId: 'world-command', expectedRevision: 'sha256:new-world' }
+    },
+    persistence: {
+      rollback: async (request) => {
+        calls.push(['world', request]);
+        return { status: 'committed', afterRevision: 'sha256:old-world' };
+      }
+    },
+    requestDrivenLockPersistence: {
+      rollback: async (request) => {
+        calls.push(['sidecar', request]);
+        return { restoredHash: 'sha256:old' };
+      }
+    }
+  });
+  assert.deepEqual(calls.map(([kind]) => kind), ['world', 'sidecar']);
+  assert.equal(receipt.afterRevision, 'sha256:old-world');
+  assert.equal(receipt.requestDrivenLocks.restoredHash, 'sha256:old');
 });

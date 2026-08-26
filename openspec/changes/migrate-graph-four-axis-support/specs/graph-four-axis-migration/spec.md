@@ -121,3 +121,22 @@ manifest MUST 保存 currentWorldRevision，并与每次中央授权事实提交
 #### Scenario: 重启发现 manifest 漂移
 - **WHEN** manifest currentWorldRevision 不等于权威事实 revision
 - **THEN** 运行时拒绝启用 legacy relation provenance 并返回稳定迁移谱系错误；Program 仍只有新 ABI
+
+### Requirement: 请求驱动锁侧车随部署事务升级
+部署迁移 SHALL 在同一只读预检中读取内核拥有的 `request-driven-locks.json`，并且只在每个 lock 的 `fields` 数组中原位映射 `name→thing`、`detail→situation`、`children→contain`、`partners→support`。迁移 MUST 保持顶层键、lock 顺序、fields 顺序、重复以外的数组基数、窗口规则、目标、模式、保护项、刷新策略和所有其他字段结构等价；不得把该兼容能力带入 runtime repository、公开 parser 或 Program ABI。
+
+若同一个 `fields` 数组同时含任一旧 Graph 轴与任一新 Graph 轴，或映射后产生同义重复，预检 MUST 返回 `AMBIGUOUS_REQUEST_DRIVEN_LOCK_GRAPH_AXIS`。非法顶层结构、非字符串 field 或闭集外 field MUST 返回 `INVALID_REQUEST_DRIVEN_LOCK_MIGRATION_SNAPSHOT`。任一错误 MUST 在世界或侧车首写前终止。
+
+侧车原始字节、哈希和路径 MUST 纳入 source revision 绑定的私有备份与部署收据。apply SHALL 在世界迁移提交后以临时文件原子替换侧车，并用严格四轴 request-driven-lock repository 回读校验；侧车提交或校验失败 SHALL 回退本次世界迁移并恢复备份侧车。operator rollback SHALL 同时创建世界回退审计修订并恢复原侧车字节，不得只回退 atom.json。
+
+#### Scenario: 旧锁 fields 无损升级
+- **WHEN** 合法侧车包含多个旧轴 fields、`messages` 及其他锁配置
+- **THEN** 每个旧轴按原 ordinal 映射为新轴，`messages` 与所有非 fields 数据逐结构保持，严格新仓库可加载升级结果
+
+#### Scenario: 旧新轴混合在首写前拒绝
+- **WHEN** 任一 lock.fields 同时含旧轴与新轴，或含 `name` 与 `thing` 等映射碰撞
+- **THEN** 返回 `AMBIGUOUS_REQUEST_DRIVEN_LOCK_GRAPH_AXIS`，世界、侧车和备份目录均不改变
+
+#### Scenario: apply 失败补偿与 operator rollback
+- **WHEN** 侧车原子写入/严格回读失败，或操作员对成功部署执行 rollback
+- **THEN** 权威世界回到源 revision 对应的新审计修订，侧车字节与源备份哈希一致
