@@ -611,7 +611,7 @@ export async function executeAtomLanguage(options = {}) {
           ? options.programScheduler.current.bind(options.programScheduler)
           : options.programScheduler.refresh.bind(options.programScheduler));
       const programStartedAt = performance.now();
-      programCycle = await programOperation(atoms, {
+      const programOptions = {
         agentOrigin: interaction.agent,
         isolateFailures: true,
         ...(parsed.command === 'explore' ? { allowWindowLockSnapshot: true } : {}),
@@ -634,7 +634,20 @@ export async function executeAtomLanguage(options = {}) {
           scopeRoot: executionContext.scopeRoot ?? null,
           preparedWorld
         })
-      });
+      };
+      programCycle = await programOperation(atoms, programOptions);
+      if (projectPrograms && (programCycle.failures?.length ?? 0) > 0) {
+        // The first project pass records isolated failures as dormant; settle once so the
+        // exact-world passive projection can persist without replaying workers on reads.
+        const isolatedFailures = structuredClone(programCycle.failures);
+        const initialRuntimeWarnings = structuredClone(programCycle.runtimeWarnings ?? []);
+        const settled = await programOperation(atoms, programOptions);
+        programCycle = {
+          ...settled,
+          failures: [...isolatedFailures, ...(settled.failures ?? [])],
+          runtimeWarnings: [...initialRuntimeWarnings, ...(settled.runtimeWarnings ?? [])]
+        };
+      }
       if (projectPrograms) {
         programCycle = {
           ...programCycle,

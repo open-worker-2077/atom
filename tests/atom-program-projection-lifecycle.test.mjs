@@ -241,6 +241,84 @@ test('startup isolates Agent-bound jump failures into a restartable context-free
   assert.equal(restartedExecutions, 0);
 });
 
+test('startup settles isolated Program failures before replacing a stale passive projection', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-startup-settle-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const repository = memoryProjectionRepository();
+  repository.replace({
+    version: 1,
+    readSetVersion: 1,
+    worldKey: 'stale-world',
+    programSetKey: 'stale-programs',
+    contextDependent: false,
+    contextIncomplete: false,
+    scopePath: null,
+    locks: [],
+    choices: [],
+    exploreReadPaths: [],
+    failures: []
+  });
+  const world = [
+    atom('Target'),
+    atom('Healthy Program', '# healthy', [], 'program'),
+    atom('Broken Program', '# deterministic isolated failure', [], 'program'),
+    atom('Scoped Program', '# requires one slot scope', [], 'program')
+  ];
+  await fs.writeFile(contextFile, JSON.stringify(world));
+  let startupExecutions = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async ({ program }) => {
+      startupExecutions += 1;
+      if (program.path === 'Broken Program') {
+        throw Object.assign(new Error('invalid isolated message effect'), {
+          code: 'INVALID_PROGRAM_MESSAGE'
+        });
+      }
+      if (program.path === 'Scoped Program') {
+        throw Object.assign(new Error('slot scope is required'), {
+          code: 'SLOT_SCOPE_ROOT_UNBOUND'
+        });
+      }
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+
+  const initialized = await executeAtomLanguage({
+    source: 'atom', contextFile, projectionFile,
+    programScheduler: scheduler,
+    programMode: 'project',
+    interaction: { id: 'startup-settle', agent: null }
+  });
+
+  assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
+  assert.equal(startupExecutions, 3, 'the settle pass must reuse success and isolated failure state');
+  assert.ok(initialized.warnings.some(({ code }) => code === 'INVALID_PROGRAM_MESSAGE'));
+  const stored = await repository.load();
+  assert.notEqual(stored.worldKey, 'stale-world');
+  assert.notEqual(stored.programSetKey, 'stale-programs');
+  assert.equal(stored.contextIncomplete, true);
+  assert.deepEqual(stored.failures, []);
+
+  let restartedExecutions = 0;
+  const restarted = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async () => {
+      restartedExecutions += 1;
+      throw new Error('same-revision passive restore must not execute Programs');
+    }
+  });
+  const restored = await restarted.refresh(structuredClone(world), {
+    isolateFailures: true,
+    passive: true,
+    agentOrigin: { ref: 'agent-ref', path: 'Agent' }
+  });
+  assert.equal(restored.cached, true);
+  assert.equal(restartedExecutions, 0);
+});
+
 test('a legacy persisted failure is rejected and retried instead of becoming authoritative', async () => {
   const repository = memoryProjectionRepository();
   const world = [atom('Program', '# retry legacy failure', [], 'program')];

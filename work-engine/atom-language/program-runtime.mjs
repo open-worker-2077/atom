@@ -1401,7 +1401,8 @@ export class ProgramRuntimeScheduler {
       if (dormantFailure
         && options.force !== true
         && !forcedByTrigger
-        && !eventNodes.has(program.path)) {
+        && !eventNodes.has(program.path)
+        && !(dormantFailure.contextDependent === true && scopePath)) {
         return {
           programPath: program.path,
           result: {
@@ -1409,7 +1410,7 @@ export class ProgramRuntimeScheduler {
           },
           cached: true,
           requests: dormantFailure.requests,
-          contextDependent: false
+          contextDependent: dormantFailure.contextDependent === true
         };
       }
       if (triggerEvent
@@ -1551,8 +1552,19 @@ export class ProgramRuntimeScheduler {
           program, requests: uniqueRequests, startedAt: executionStartedAt, error
         });
         const contextDependent = requestsDependOnAgent(uniqueRequests)
-          || failure.code.startsWith('WINDOW_JUMP_');
+          || failure.code.startsWith('WINDOW_JUMP_')
+          || failure.code === 'SLOT_SCOPE_ROOT_UNBOUND';
         if (contextDependent && !scopePath) {
+          if (isolateFailures && !slotInvocation && !options.slotScopeRoot) {
+            this.dormantFailures.set(dormantKey, {
+              requests: uniqueRequests,
+              failure,
+              contextDependent: true
+            });
+            while (this.dormantFailures.size > this.maxCompleted * Math.max(1, this.maxWorkers)) {
+              this.dormantFailures.delete(this.dormantFailures.keys().next().value);
+            }
+          }
           return { programPath: program.path, failure, cached: false, requests: uniqueRequests, contextDependent };
         }
         if (isolateFailures) {
