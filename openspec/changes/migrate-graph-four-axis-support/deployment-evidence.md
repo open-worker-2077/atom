@@ -2,11 +2,11 @@
 
 ## Evidence identity
 
-- **来源**：总控提供的 primary 世界只读预检清单。
+- **来源**：总控在同一 primary 世界上执行的三次只读预检。
 - **数据操作**：本专项未读取、写入或启动共享 4784，也未触碰正式 Atom/ESG。
-- **source revision**：未随清单提供。
-- **facts hash**：未随清单提供。
-- **执行门禁**：`closed`。以下库存可用于评估覆盖面，不能单独授权迁移提交；排他部署前必须在同一只读快照重跑 planner，并绑定 source revision 与 facts hash。
+- **source revision**：`sha256:ef95262283496ebb45b367acf41dd8dabf8af9d020dd71fa465609f3faeed5b7`。
+- **facts hash**：`sha256:063ec948a99bf24f4353e8aa1c688275a30a0a030ede7367ce5b25f2b83374c2`。
+- **执行门禁**：`open for controlled deployment`。最终绑定 preflight 仅读且 `ok=true`；本专项未执行 apply，未停服、未写入 primary。
 
 ## Reported inventory
 
@@ -43,4 +43,5 @@
 - **最终迁移专项**：加入转换后旧 ABI 残留复检后，迁移与部署专项 21/21 通过。
 - **Node 全量**：1,107/1,107 通过；本轮只执行一次全量。
 - **变更影响**：GitNexus `detect_changes` 标记世界投影、Program worker 与事务迁移主链为 critical；上述组合与全量覆盖这些受影响链，未发现断言红灯。
-- **真实 primary 结论**：当前仍为 `closed`，因为总控库存清单不含源码、revision 与 facts hash；排他预检必须返回 42 个可执行旧 ABI Program 的逐项升级结果和 `blockedPrograms=[]`，否则不得上线。
+- **最终绑定 preflight**：总控在 `cb7f9d8` 与上述同一 revision/fileHash 上仅读执行，未传 `--apply`、未停服、未写入。结果 `ok=true`、`action=preflight`：11,038 节点，578 个 legacy relation 节点/706 条 relation，93 个 Program，50 个 legacy ABI Program = 5 个 default backup + 45 个可执行；45/45 全部生成确定升级，`blockedPrograms=0`，`testRoots=[]`。
+- **库存守恒解释**：首次报告的47是旧识别器漏识3个点式旧轴 Program 的不完整库存；增强分析后完整库存稳定为50，没有新增或复制 Program。最终 50 = 5 备份 + 45 可执行，45 = 45 已升级 + 0 阻断。
