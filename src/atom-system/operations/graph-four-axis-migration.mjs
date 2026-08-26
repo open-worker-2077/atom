@@ -142,7 +142,8 @@ export function planGraphFourAxisWorldMigration({
 }
 
 export async function applyGraphFourAxisWorldMigration({
-  plan, confirmation = false, backup, persistence, requestDrivenLockPersistence = null, correlationId
+  plan, confirmation = false, backup, persistence,
+  requestDrivenLockPersistence = null, attemptId = null, correlationId = null
 }) {
   if (confirmation !== true) {
     throw problem('GRAPH_MIGRATION_CONFIRMATION_REQUIRED', 'Graph migration requires explicit confirmation');
@@ -170,8 +171,17 @@ export async function applyGraphFourAxisWorldMigration({
       'Graph migration requires request-driven lock commit and rollback ports'
     );
   }
+  const attemptScope = attemptId ?? correlationId;
+  if (typeof attemptScope !== 'string' || attemptScope.length === 0) {
+    throw problem(
+      'GRAPH_MIGRATION_ATTEMPT_ID_REQUIRED',
+      'Graph migration requires one explicit deployment attempt identity'
+    );
+  }
+  const transactionCorrelationId = correlationId
+    ?? `${plan.migrationId}:attempt:${attemptScope}`;
   const backupReceipt = await backup.create({
-    migrationId: plan.migrationId, revision: plan.expectedRevision,
+    migrationId: plan.migrationId, attemptId: attemptScope, revision: plan.expectedRevision,
     facts: structuredClone(plan.sourceFacts), factsHash: plan.sourceFactsHash,
     ...(plan.requestDrivenLocks ? {
       requestDrivenLocks: {
@@ -187,7 +197,7 @@ export async function applyGraphFourAxisWorldMigration({
     throw problem('GRAPH_MIGRATION_BACKUP_VERIFICATION_FAILED', 'Private migration backup could not be verified');
   }
   const receipt = await persistence.commit({
-    correlationId: correlationId ?? plan.migrationId,
+    correlationId: transactionCorrelationId,
     expectedRevision: plan.expectedRevision, nextRevision: plan.nextRevision,
     facts: structuredClone(plan.facts),
     source: `graph-four-axis-migration:${plan.migrationId}`,
@@ -219,7 +229,7 @@ export async function applyGraphFourAxisWorldMigration({
         compensation.world = await persistence.rollback({
           targetCommandId: receipt.commandId,
           expectedRevision: receipt.afterRevision,
-          correlationId: `${correlationId ?? plan.migrationId}:sidecar-compensation`
+          correlationId: `${transactionCorrelationId}:sidecar-compensation`
         });
       } catch (rollbackError) {
         compensation.worldError = rollbackError.code ?? rollbackError.name;
@@ -232,7 +242,8 @@ export async function applyGraphFourAxisWorldMigration({
     }
   }
   return Object.freeze({
-    migrationId: plan.migrationId,
+    migrationId: plan.migrationId, attemptId: attemptScope,
+    sourceRevision: plan.expectedRevision,
     backup: structuredClone(backupReceipt), receipt: structuredClone(receipt),
     ...(requestDrivenLocks ? { requestDrivenLocks } : {}),
     rollback: Object.freeze({

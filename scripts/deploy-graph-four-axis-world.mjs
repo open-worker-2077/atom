@@ -115,6 +115,43 @@ function createRequestDrivenLockMigrationPersistence(file) {
   });
 }
 
+function requireAttemptId(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(value)) {
+    throw Object.assign(new Error('Deployment attempt id must be a path-safe stable token'), {
+      code: 'INVALID_GRAPH_MIGRATION_ATTEMPT_ID'
+    });
+  }
+  return value;
+}
+
+async function currentRevision(contextFile) {
+  const facts = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  return revisionOfWorldFacts(facts);
+}
+
+async function restoreProjectionBackup({ deployment, graphFile }) {
+  const backup = deployment.migration?.backup;
+  const projection = backup?.projection;
+  if (!backup?.directory || projection?.path !== graphFile) {
+    throw Object.assign(new Error('Deployment receipt has no matching projection backup'), {
+      code: 'GRAPH_MIGRATION_PROJECTION_BACKUP_REQUIRED'
+    });
+  }
+  if (projection.present === false) {
+    await fs.rm(graphFile, { force: true });
+    return { restored: true, present: false };
+  }
+  const stored = path.join(backup.directory, 'graph.json');
+  const bytes = await fs.readFile(stored);
+  if (hashBytes(bytes) !== projection.hash) {
+    throw Object.assign(new Error('Projection backup hash does not match its receipt'), {
+      code: 'GRAPH_MIGRATION_PROJECTION_BACKUP_INVALID'
+    });
+  }
+  await fs.copyFile(stored, graphFile);
+  return { restored: true, present: true, hash: projection.hash };
+}
+
 async function rollbackWithProjectionTolerance(request) {
   try {
     return { receipt: await rollbackGraphFourAxisWorldMigration(request), projectionPending: false };
@@ -141,22 +178,59 @@ async function main() {
 
   if (rollbackReceipt) {
     const deployment = JSON.parse(await fs.readFile(path.resolve(rollbackReceipt), 'utf8'));
-    const rolledBack = await rollbackWithProjectionTolerance({
-      migration: deployment.migration,
-      persistence,
-      requestDrivenLockPersistence,
-      correlationId: `${deployment.migration.migrationId}:operator-rollback`
-    });
-    const facts = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-    const revision = revisionOfWorldFacts(facts);
+    const beforeRevision = await currentRevision(contextFile);
+    let alreadyAtSource = beforeRevision === deployment.sourceRevision;
+    const atDeploymentTarget = beforeRevision === deployment.migration?.rollback?.expectedRevision;
+    if (!alreadyAtSource && !atDeploymentTarget) {
+      throw Object.assign(new Error('World advanced beyond this deployment attempt'), {
+        code: 'ROLLBACK_WORLD_DIVERGED',
+        details: {
+          actualRevision: beforeRevision,
+          sourceRevision: deployment.sourceRevision,
+          targetRevision: deployment.migration?.rollback?.expectedRevision
+        }
+      });
+    }
+    let rolledBack = { receipt: null, projectionPending: false };
+    let rollbackError = null;
+    let restoredRequestDrivenLocks = null;
+    if (!alreadyAtSource) {
+      try {
+        rolledBack = await rollbackWithProjectionTolerance({
+          migration: deployment.migration,
+          persistence,
+          requestDrivenLockPersistence,
+          correlationId: `${deployment.migration.migrationId}:attempt:${deployment.attemptId}:operator-rollback`
+        });
+        restoredRequestDrivenLocks = rolledBack.receipt?.requestDrivenLocks ?? null;
+      } catch (error) {
+        rollbackError = error;
+      }
+    }
+    if (rollbackError?.code === 'ROLLBACK_WORLD_DIVERGED'
+      && await currentRevision(contextFile) === deployment.sourceRevision) {
+      rollbackError = null;
+      alreadyAtSource = true;
+    }
+    if (alreadyAtSource && deployment.migration.requestDrivenLocks) {
+      restoredRequestDrivenLocks = await requestDrivenLockPersistence.rollback({
+        backup: deployment.migration.backup
+      });
+    }
+    const projection = await restoreProjectionBackup({ deployment, graphFile });
+    if (rollbackError) throw rollbackError;
+    const revision = await currentRevision(contextFile);
     const sidecarOk = !deployment.migration.requestDrivenLocks
-      || rolledBack.receipt.requestDrivenLocks?.restoredSnapshotHash
+      || restoredRequestDrivenLocks?.restoredSnapshotHash
         === deployment.migration.requestDrivenLocks.sourceHash;
     const ok = revision === deployment.sourceRevision
-      && rolledBack.receipt.afterRevision === deployment.sourceRevision
+      && (alreadyAtSource || rolledBack.receipt?.afterRevision === deployment.sourceRevision)
       && sidecarOk;
     process.stdout.write(`${JSON.stringify({
       ok, action: 'rollback', revision,
+      alreadyAtSource,
+      projection,
+      requestDrivenLocks: restoredRequestDrivenLocks,
       projectionPending: rolledBack.projectionPending,
       receipt: rolledBack.receipt
     })}\n`);
@@ -206,12 +280,35 @@ async function main() {
     return;
   }
 
+  const attemptId = requireAttemptId(argument('--attempt-id') ?? crypto.randomUUID());
+  preflight.attemptId = attemptId;
+
   let backupDirectory;
   const backup = {
     async create(request) {
-      backupDirectory = path.join(backupRoot, request.migrationId);
+      backupDirectory = path.join(backupRoot, request.migrationId, request.attemptId);
       await fs.mkdir(backupRoot, { recursive: true });
-      await fs.mkdir(backupDirectory, { recursive: false });
+      await fs.mkdir(path.dirname(backupDirectory), { recursive: true });
+      try {
+        await fs.mkdir(backupDirectory, { recursive: false });
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        const existing = JSON.parse(await fs.readFile(
+          path.join(backupDirectory, 'backup-receipt.json'), 'utf8'
+        ));
+        if (existing.migrationId !== request.migrationId
+          || existing.attemptId !== request.attemptId
+          || existing.revision !== request.revision
+          || existing.factsHash !== request.factsHash
+          || existing.sourceFileHash !== hashBytes(sourceBytes)
+          || existing.directory !== backupDirectory
+          || existing.projection?.path !== graphFile) {
+          throw Object.assign(new Error('Existing deployment attempt backup does not match this plan'), {
+            code: 'GRAPH_MIGRATION_ATTEMPT_BACKUP_CONFLICT'
+          });
+        }
+        return existing;
+      }
       const files = (await Promise.all([
         copyIfPresent(contextFile, path.join(backupDirectory, 'atom.json')),
         copyIfPresent(graphFile, path.join(backupDirectory, 'graph.json')),
@@ -223,16 +320,24 @@ async function main() {
       const receipt = {
         contract: 'atom.graph-four-axis-private-backup', version: 1,
         migrationId: request.migrationId,
+        attemptId: request.attemptId,
         revision: request.revision,
         factsHash: request.factsHash,
         sourceFileHash: hashBytes(sourceBytes),
         directory: backupDirectory,
+        projection: {
+          path: graphFile,
+          present: files.some((file) => file.source === graphFile),
+          ...(files.find((file) => file.source === graphFile)?.hash
+            ? { hash: files.find((file) => file.source === graphFile).hash }
+            : {})
+        },
         files
       };
       await fs.writeFile(
         path.join(backupDirectory, 'backup-receipt.json'),
         `${JSON.stringify(receipt, null, 2)}\n`,
-        'utf8'
+        { encoding: 'utf8', flag: 'wx' }
       );
       return receipt;
     },
@@ -260,7 +365,7 @@ async function main() {
       backup,
       persistence,
       requestDrivenLockPersistence,
-      correlationId: `${plan.migrationId}:deploy`
+      attemptId
     });
     const deployedFacts = JSON.parse(await fs.readFile(contextFile, 'utf8'));
     const deployedRevision = revisionOfWorldFacts(deployedFacts);
@@ -275,19 +380,70 @@ async function main() {
       manifest
     };
     const receiptFile = path.join(backupDirectory, 'deployment-receipt.json');
-    await fs.writeFile(receiptFile, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
+    await fs.writeFile(receiptFile, `${JSON.stringify(result, null, 2)}\n`, {
+      encoding: 'utf8', flag: 'wx'
+    });
     process.stdout.write(`${JSON.stringify({ ...result, receiptFile })}\n`);
     if (!result.ok) throw Object.assign(new Error('Post-migration verification failed'), { code: 'GRAPH_MIGRATION_POSTCHECK_FAILED' });
   } catch (error) {
     if (migration) {
-      const rolledBack = await rollbackWithProjectionTolerance({
-        migration, persistence, requestDrivenLockPersistence
-      });
-      const restored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+      let rolledBack = { receipt: null, projectionPending: false };
+      let rollbackError = null;
+      let restoredRequestDrivenLocks = null;
+      const beforeRevision = await currentRevision(contextFile);
+      let alreadyAtSource = beforeRevision === sourceRevision;
+      const atDeploymentTarget = beforeRevision === migration.rollback.expectedRevision;
+      if (atDeploymentTarget) {
+        try {
+          rolledBack = await rollbackWithProjectionTolerance({
+            migration,
+            persistence,
+            requestDrivenLockPersistence,
+            correlationId: `${migration.migrationId}:attempt:${attemptId}:failure-compensation`
+          });
+          restoredRequestDrivenLocks = rolledBack.receipt?.requestDrivenLocks ?? null;
+        } catch (failure) {
+          rollbackError = failure;
+        }
+      }
+      if (rollbackError?.code === 'ROLLBACK_WORLD_DIVERGED'
+        && await currentRevision(contextFile) === sourceRevision) {
+        rollbackError = null;
+        alreadyAtSource = true;
+      }
+      if (alreadyAtSource && migration.requestDrivenLocks) {
+        try {
+          restoredRequestDrivenLocks = await requestDrivenLockPersistence.rollback({
+            backup: migration.backup
+          });
+        } catch (failure) {
+          error.requestDrivenLockRestoreError = failure;
+        }
+      }
+      let projection = null;
+      if (alreadyAtSource || atDeploymentTarget) {
+        try {
+          projection = await restoreProjectionBackup({ deployment: {
+            migration, sourceRevision, attemptId
+          }, graphFile });
+        } catch (failure) {
+          error.projectionRestoreError = failure;
+        }
+      }
+      const sidecarOk = !migration.requestDrivenLocks
+        || restoredRequestDrivenLocks?.restoredSnapshotHash
+          === migration.requestDrivenLocks.sourceHash;
       error.rollback = {
-        ok: revisionOfWorldFacts(restored) === sourceRevision,
+        ok: await currentRevision(contextFile) === sourceRevision
+          && !rollbackError
+          && sidecarOk
+          && projection?.restored === true,
+        alreadyAtSource,
+        projection,
+        requestDrivenLocks: restoredRequestDrivenLocks,
         projectionPending: rolledBack.projectionPending,
-        receipt: rolledBack.receipt
+        receipt: rolledBack.receipt,
+        ...(rollbackError ? { error: rollbackError } : {})
       };
     }
     throw error;

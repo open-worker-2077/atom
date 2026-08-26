@@ -449,6 +449,47 @@ test('world migration requires a verified recovery backup before one revision-bo
   assert.equal(calls.at(-1)[1].targetCommandId, 'migration-command');
 });
 
+test('deployment attempt identity scopes both backup and transaction idempotency', async () => {
+  const sourceFacts = [{ name: 'A', detail: '', children: [], partners: [] }];
+  const plan = planGraphFourAxisWorldMigration({
+    snapshot: { revision: revisionOfWorldFacts(sourceFacts), facts: sourceFacts },
+    planner: graphSchema.planGraphFourAxisMigration
+  });
+  const calls = [];
+  const backup = {
+    async create(request) {
+      calls.push(['backup', request.attemptId]);
+      return { attemptId: request.attemptId };
+    },
+    async verify() { return true; }
+  };
+  const persistence = {
+    async commit(request) {
+      calls.push(['commit', request.correlationId]);
+      return { commandId: request.correlationId, afterRevision: request.nextRevision };
+    },
+    async rollback() {}
+  };
+
+  await applyGraphFourAxisWorldMigration({
+    plan, confirmation: true, backup, persistence, attemptId: 'attempt-a'
+  });
+  await applyGraphFourAxisWorldMigration({
+    plan, confirmation: true, backup, persistence, attemptId: 'attempt-a'
+  });
+  await applyGraphFourAxisWorldMigration({
+    plan, confirmation: true, backup, persistence, attemptId: 'attempt-b'
+  });
+
+  assert.deepEqual(calls.filter(([kind]) => kind === 'backup').map(([, value]) => value), [
+    'attempt-a', 'attempt-a', 'attempt-b'
+  ]);
+  const correlations = calls.filter(([kind]) => kind === 'commit').map(([, value]) => value);
+  assert.equal(correlations[0], correlations[1]);
+  assert.notEqual(correlations[0], correlations[2]);
+  assert.match(correlations[0], /attempt-a/u);
+});
+
 test('world migration never commits when private backup verification fails', async () => {
   const sourceFacts = [{ name: 'A', detail: '', children: [], partners: [] }];
   const plan = planGraphFourAxisWorldMigration({
@@ -457,7 +498,7 @@ test('world migration never commits when private backup verification fails', asy
   });
   let committed = false;
   await assert.rejects(applyGraphFourAxisWorldMigration({
-    plan, confirmation: true,
+    plan, confirmation: true, attemptId: 'backup-verification-test',
     backup: { create: async () => ({ backupId: 'bad' }), verify: async () => false },
     persistence: { commit: async () => { committed = true; }, rollback: async () => {} }
   }), { code: 'GRAPH_MIGRATION_BACKUP_VERIFICATION_FAILED' });
@@ -475,6 +516,7 @@ test('sidecar commit failure compensates the world and restores the request-driv
   await assert.rejects(applyGraphFourAxisWorldMigration({
     plan,
     confirmation: true,
+    attemptId: 'sidecar-compensation-test',
     backup: {
       create: async () => ({ directory: 'private-backup' }),
       verify: async () => true

@@ -79,3 +79,7 @@
 ## 11. 共享部署回归收口
 
 - [x] 11.1 Agent selector 解析与 interaction runtime Agent port 复用同一 world persistence manifest；覆盖受信 legacy support 世界 exact Explore 与无授权/伪造 provenance 拒绝
+
+## 12. 部署尝试隔离与补偿
+
+- [x] 12.1 为每次部署增加独立可重试 attempt scope、不可覆盖备份，并覆盖世界已回源/投影仍为 target 的幂等补偿

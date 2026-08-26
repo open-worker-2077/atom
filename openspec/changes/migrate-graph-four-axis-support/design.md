@@ -106,6 +106,14 @@ apply 顺序固定为：只读预检 → 创建源 revision/facts hash 绑定备
 
 部署计划记录侧车 source/next hash、锁数、改动 fields 数和结构守恒结果，不把锁内容写入公开证据。私有 backup 复制并校验原始侧车字节。apply 顺序为：世界/侧车联合预检 → 私有备份与哈希回读 → revision 再核对 → 世界中央事务提交 → 侧车临时文件原子替换 → 严格新仓库回读 → 私有 deployment receipt。侧车阶段失败时立即 rollback 世界并从私有备份恢复侧车；operator rollback 复用同一侧车恢复端口。该机制是一次性部署升级，不进入 graph-server 初始化路径，也不产生 legacy wrapper、双 ABI 或长期兼容分支。
 
+## 13. 部署 attempt 与部分状态补偿
+
+`migrationId` 继续表示稳定的 source→target 迁移计划，不再兼任一次部署命令身份。每次 apply 另有 path-safe `attemptId`；operation 以 `migrationId:attempt:attemptId` 派生 correlation，事务层继续从 correlation 与 revisions 派生 command id。因此同一 attempt 的未知状态重试仍命中同一 receipt，而回退后的新 attempt 必然得到新 command id。
+
+私有备份目录固定为 `<backupRoot>/<migrationId>/<attemptId>`。首次创建使用排他写；同 attempt 重试只可回读并验证完全相同的 migration/revision/facts hash receipt，任何冲突或不完整目录都 fail closed。deployment receipt 同样排他写，绝不覆盖历史证据。
+
+Graph 投影是权威世界的派生 sidecar，但仍须按原始字节恢复。备份 receipt 记录投影原路径、存在性与字节 hash。失败补偿和 operator rollback 先读取权威 revision：若已经等于 source，则跳过会因 expected target 而报 diverged 的世界 rollback；无论世界 rollback 是否需要执行，均独立校验备份 hash 并恢复原始投影。只有真实后续世界 revision 才继续拒绝跨越，不能把“已回源”误判成不可补偿的漂移。
+
 # Risks / Trade-offs
 
 - 显式枢纽增加节点数量，但换取局部可读、可审计和机制归属。

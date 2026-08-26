@@ -144,3 +144,18 @@ manifest MUST 保存 currentWorldRevision，并与每次中央授权事实提交
 #### Scenario: apply 失败补偿与 operator rollback
 - **WHEN** 侧车原子写入/严格回读失败，或操作员对成功部署执行 rollback
 - **THEN** 权威世界回到源 revision 对应的新审计修订，侧车字节与源备份哈希一致
+
+### Requirement: 部署尝试可重试且补偿完整
+每次 apply 部署尝试 MUST 具有显式 attempt identity，并由 migration id 与 attempt identity 共同形成事务 correlation/command scope。相同 attempt 的未知状态重试 MUST 幂等复用同一命令与已验证备份；新的 attempt MUST 产生不同命令且不得命中已提交后回退的历史 receipt。备份 MUST 按 migration/attempt 分层、不可覆盖，并把原始 Graph 投影的存在性与字节哈希写入 receipt。
+
+#### Scenario: 历史回退后新尝试不重放旧提交
+- **WHEN** 同一 source→target 迁移的一次 attempt 已提交后回退，操作方以新 attempt identity 再次 apply
+- **THEN** 新事务 command id 与旧 attempt 不同，世界实际提交到 target，且两次备份位于不同不可覆盖目录
+
+#### Scenario: 同一尝试保持幂等
+- **WHEN** 操作方因结果未知而用同一 attempt identity 重试同一迁移
+- **THEN** correlation/command scope 与备份 receipt 保持相同，任何既有备份或部署 receipt 均不被覆盖
+
+#### Scenario: 世界已回源但投影仍在目标态
+- **WHEN** apply 或 operator rollback 进入“权威世界已是 source、Graph 投影 sidecar 仍是 target”的部分状态
+- **THEN** 补偿先独立校验并恢复备份中的原始投影字节，再把世界回退视为已完成；不得让 `ROLLBACK_WORLD_DIVERGED` 阻断投影恢复，重复补偿仍成功
