@@ -219,6 +219,10 @@ export function createInteractionRuntime({
         ]
       };
     }
+    if (result?.ok === true && result?.changed === true
+      && typeof options.onCommitted === 'function') {
+      options.onCommitted(structuredClone(result));
+    }
     if (options.publish !== false && result?.changed !== false) {
       result = withProjectionOutcome(result, await publish(result));
     }
@@ -249,8 +253,8 @@ export function createInteractionRuntime({
     return result;
   }
 
-  async function execute(rawIntent) {
-    return executeValidated(validateIntent(rawIntent));
+  async function execute(rawIntent, options = {}) {
+    return executeValidated(validateIntent(rawIntent), options);
   }
 
   async function initialize({ correlationId }) {

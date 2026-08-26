@@ -24,6 +24,10 @@ export const DEFAULT_WORK_ORDER_REGISTRY_ENDPOINT = 'http://127.0.0.1:4784/__ato
 export const DEFAULT_PROGRAM_FUNCTION_REGISTRY_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/program-function-registry';
 
 export async function executeAtomCommandEndpoint(options, endpoint = DEFAULT_ATOM_COMMAND_ENDPOINT) {
+  const interaction = {
+    ...(options.interaction ?? {}),
+    id: options.interaction?.id ?? crypto.randomUUID()
+  };
   let response;
   try {
     response = await fetch(endpoint, {
@@ -31,7 +35,7 @@ export async function executeAtomCommandEndpoint(options, endpoint = DEFAULT_ATO
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         source: options.source,
-        interaction: options.interaction,
+        interaction,
         ...(Array.isArray(options.history) ? { history: options.history } : {})
       })
     });

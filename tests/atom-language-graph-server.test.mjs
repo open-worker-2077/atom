@@ -569,6 +569,64 @@ test('independent explore requests execute concurrently against one initialized 
   assert.equal(maximumActive, 2);
 });
 
+test('duplicate HTTP requests with one interaction id execute one authoritative command', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
+  await fs.writeFile(graphFile, '{}\n', 'utf8');
+  let executions = 0;
+  let release;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const interactionRuntime = {
+    async initialize() { return { initialization: { ok: true, changed: false } }; },
+    async execute(_intent, { onCommitted } = {}) {
+      executions += 1;
+      const committed = {
+        ok: true, command: 'transform', changed: true, revisionAfter: 'rev-2'
+      };
+      onCommitted?.(committed);
+      await blocked;
+      return { ...committed, projectionStatus: 'published' };
+    },
+    async updateHumanStatus() { return { ok: true, changed: false }; },
+    async updateHumanWorkspace() { return { ok: true, changed: false }; },
+    async recover() { return { sourceRevision: 'revision' }; },
+    projectionStatus() { return { status: 'published' }; }
+  };
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, interactionRuntime
+  });
+  t.after(() => running.close());
+  const request = (source = 'transform new {"thing":"Root","situation":"","contain":[],"support":[]}') => fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source,
+      interaction: {
+        id: 'same-authoritative-request',
+        agent: { ref: 'transport-ref', path: 'Root' }
+      },
+      history: []
+    })
+  }).then((response) => response.json());
+
+  const first = request();
+  const retry = request();
+  const [firstReceipt, retriedReceipt] = await Promise.all([first, retry]);
+  assert.deepEqual(retriedReceipt, firstReceipt);
+  assert.equal(executions, 1);
+  assert.equal(firstReceipt.result.projectionStatus, undefined);
+  const conflicting = await request('transform {"thing":"Other","situation.rep.changed"}');
+  assert.equal(conflicting.ok, false);
+  assert.equal(conflicting.error.code, 'ATOM_INTERACTION_ID_CONFLICT');
+  assert.equal(executions, 1);
+  release();
+});
+
 test('graph server queues private backup from a committed operation instead of relying on polling', async (t) => {
   const directory = await temporaryDirectory(t);
   const contextFile = path.join(directory, 'live', 'atom.json');
@@ -609,4 +667,17 @@ test('graph server queues private backup from a committed operation instead of r
   });
   assert.equal(response.status, 200, await response.text());
   assert.deepEqual(calls, ['start', 'schedule']);
+  const barrier = await fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source: 'explore {"thing":"石斧","situation$full":true}',
+      interaction: {
+        id: 'backup-after-write-read-barrier',
+        agent: { ref: 'fixture-agent-ref', path: '石器工坊' }
+      },
+      history: []
+    })
+  });
+  assert.equal(barrier.status, 200, await barrier.text());
 });

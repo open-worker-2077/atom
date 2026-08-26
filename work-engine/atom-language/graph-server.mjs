@@ -249,7 +249,7 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
     throw problem('INVALID_INTERACTION_RUNTIME', 'Atom Graph handlers require one interaction runtime');
   }
   return Object.freeze({
-    async atomCommand(payload) {
+    async atomCommand(payload, lifecycle = {}) {
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)
         || typeof payload.source !== 'string') {
         throw problem('INVALID_ATOM_COMMAND_REQUEST', 'Atom command endpoint requires source and optional interaction.agent');
@@ -263,13 +263,22 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
       if (!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string') {
         throw problem('AGENT_REQUIRED', 'Atom command endpoint requires a revision-local @agent origin');
       }
+      const decorate = (result) => ({
+        ...result,
+        agent: agent.path,
+        runtimeContract: ATOM_RUNTIME_CONTRACT
+      });
       const result = await interactionRuntime.execute({
         source: payload.source,
         correlationId: payload.interaction?.id ?? crypto.randomUUID(),
         agentPath: agent.path,
         history: Array.isArray(payload.history) ? payload.history : []
+      }, {
+        ...(typeof lifecycle.onCommitted === 'function' ? {
+          onCommitted: (committed) => lifecycle.onCommitted(decorate(committed))
+        } : {})
       });
-      return { ...result, agent: agent.path, runtimeContract: ATOM_RUNTIME_CONTRACT };
+      return decorate(result);
     },
     async atomHumanStatus(payload) {
       if (!payload || typeof payload.key !== 'string' || typeof payload.detail !== 'string') {
@@ -430,7 +439,11 @@ export async function startAtomGraphServer(options = {}) {
     diagnostics,
     diagnosticRepository,
     backupTrigger,
-    close: () => closeServer(instance.server)
+    close: async () => {
+      const closing = closeServer(instance.server);
+      await instance.drainAtomInteractions?.();
+      await closing;
+    }
   });
 }
 

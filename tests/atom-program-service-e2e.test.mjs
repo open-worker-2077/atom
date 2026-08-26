@@ -110,6 +110,11 @@ test('4784 serializes concurrent writes as complete world interactions without l
   assert.equal(context.find((entry) => entry.thing === '任务甲')?.situation, '新甲');
   assert.equal(context.find((entry) => entry.thing === '任务乙')?.situation, '新乙');
 
+  const projectionBarrier = await executeAtomCommandEndpoint({
+    source: 'explore {"thing":"任务乙","situation$full":true}', interaction: { agent }
+  }, endpoint);
+  assert.equal(projectionBarrier.ok, true, JSON.stringify(projectionBarrier.errors));
+
   const graph = JSON.parse(await fs.readFile(graphFile, 'utf8'));
   const expectedKnowledge = await projectAtomGraphToKnowledge(graph);
   const stateResponse = await fetch(`${running.url}/__spatial/api/state`);
@@ -195,6 +200,11 @@ test('4784 applies one Program effect set without cloning the whole world per tr
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.ok(elapsedMs < 4_000, `one effect set took ${elapsedMs}ms`);
+  const projectionBarrier = await executeAtomCommandEndpoint({
+    source: 'explore {"thing":"Target 0","situation$full":true}',
+    interaction: { agent }
+  }, `${running.url}/__atom/api/command`);
+  assert.equal(projectionBarrier.ok, true, JSON.stringify(projectionBarrier.errors));
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   for (let index = 0; index < targets.length; index += 1) {
     assert.equal(world.find((entry) => entry.thing === `Target ${index}`)?.situation, 'after');

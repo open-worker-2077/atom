@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -85,6 +86,7 @@ export async function createSpatialServer(options = {}) {
     : null;
   backupTrigger?.start();
   let atomInteractionTail = Promise.resolve();
+  const atomCommandReceipts = new Map();
   let spatialProjectionFailure = null;
   const knowledgeSubscribers = new Set();
   const mutatingSpatialMethods = new Set([
@@ -115,7 +117,64 @@ export async function createSpatialServer(options = {}) {
   }
 
   function executeAtomInteraction(payload, operation) {
-    return readOnlyAtomCommand(payload) ? operation() : enqueueAtomInteraction(operation);
+    if (!readOnlyAtomCommand(payload)) return enqueueAtomInteraction(operation);
+    const committedWrites = atomInteractionTail;
+    return committedWrites.then(operation, operation);
+  }
+
+  function atomCommandRequest(payload, operation) {
+    const interaction = payload?.interaction && typeof payload.interaction === 'object'
+      ? payload.interaction
+      : {};
+    const id = typeof interaction.id === 'string' && interaction.id.trim()
+      ? interaction.id.trim()
+      : crypto.randomUUID();
+    const normalized = { ...payload, interaction: { ...interaction, id } };
+    const fingerprint = JSON.stringify({
+      source: normalized.source,
+      agent: normalized.interaction.agent ?? null,
+      agentSelector: normalized.interaction.agentSelector ?? null,
+      history: normalized.history ?? []
+    });
+    const existing = atomCommandReceipts.get(id);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) {
+        throw new SpatialStoreError(
+          'ATOM_INTERACTION_ID_CONFLICT',
+          '同一 Atom 请求标识不能对应不同命令'
+        );
+      }
+      return existing.receipt;
+    }
+
+    let resolveReceipt;
+    let rejectReceipt;
+    let settled = false;
+    const receipt = new Promise((resolve, reject) => {
+      resolveReceipt = resolve;
+      rejectReceipt = reject;
+    });
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      resolveReceipt(result);
+    };
+    atomCommandReceipts.set(id, { fingerprint, receipt });
+    while (atomCommandReceipts.size > 1_000) {
+      atomCommandReceipts.delete(atomCommandReceipts.keys().next().value);
+    }
+
+    executeAtomInteraction(normalized, async () => {
+      try {
+        const result = await operation(normalized, settle);
+        settle(result);
+        return result;
+      } catch (error) {
+        if (!settled) rejectReceipt(error);
+        throw error;
+      }
+    }).catch(() => undefined);
+    return receipt;
   }
 
   async function readKnowledge() {
@@ -255,15 +314,9 @@ export async function createSpatialServer(options = {}) {
           return json(response, 404, { ok: false, error: { code: 'ATOM_COMMAND_UNAVAILABLE' } });
         }
         const payload = await body(request);
-        let responseSent = false;
-        const result = await executeAtomInteraction(payload, async () => {
-          const commandResult = await options.atomCommand(payload);
+        const result = await atomCommandRequest(payload, async (normalized, onCommitted) => {
+          const commandResult = await options.atomCommand(normalized, { onCommitted });
           if (commandResult?.changed !== false && graphFile) {
-            // The authoritative world is already committed. Return that receipt now;
-            // the disposable spatial projection remains serialized behind the write.
-            json(response, 200, { ok: true, result: commandResult });
-            responseSent = true;
-            await new Promise((resolve) => setImmediate(resolve));
             try {
               const document = JSON.parse(await fs.readFile(graphFile, 'utf8'));
               if (options.projectAtomKnowledge) {
@@ -282,8 +335,7 @@ export async function createSpatialServer(options = {}) {
           }
           return commandResult;
         });
-        if (!responseSent) return json(response, 200, { ok: true, result });
-        return undefined;
+        return json(response, 200, { ok: true, result });
       }
       if (url.pathname === '/__atom/api/human-status' && request.method === 'POST') {
         if (typeof options.atomHumanStatus !== 'function') {
@@ -370,7 +422,8 @@ export async function createSpatialServer(options = {}) {
     root,
     storeFile: bossStore ? bossDirectory : storeFile,
     graphFile,
-    mode: bossStore ? 'boss' : 'single'
+    mode: bossStore ? 'boss' : 'single',
+    drainAtomInteractions: () => atomInteractionTail
   };
 }
 

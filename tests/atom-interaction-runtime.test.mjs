@@ -76,6 +76,45 @@ test('command follows one agent, Program, world and revision-labelled projection
   ]);
 });
 
+test('a committed write is exposed before disposable projection publication finishes', async () => {
+  let releaseProjection;
+  const projectionBlocked = new Promise((resolve) => {
+    releaseProjection = resolve;
+  });
+  const context = ports();
+  context.projections.publish = async () => {
+    await projectionBlocked;
+    return { sourceRevision: 'rev-2' };
+  };
+  context.world.execute = async () => ({
+    ok: true,
+    command: 'transform',
+    changed: true,
+    revisionAfter: 'rev-2',
+    lockState: { revision: 'rev-2' }
+  });
+  const runtime = createInteractionRuntime(context);
+  let committed;
+
+  const completion = runtime.execute({
+    source: 'transform {"thing":"Root"}',
+    correlationId: 'receipt-before-projection',
+    history: []
+  }, {
+    onCommitted(result) {
+      committed = result;
+    }
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(committed?.revisionAfter, 'rev-2');
+  assert.equal(committed?.changed, true);
+
+  releaseProjection();
+  const result = await completion;
+  assert.equal(result.projectionStatus, 'published');
+});
+
 test('the first use of an Agent prepares its scoped Program projection once and retries the intent', async () => {
   const calls = [];
   let attempts = 0;
