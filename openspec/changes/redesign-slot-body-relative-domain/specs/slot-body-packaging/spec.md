@@ -27,7 +27,15 @@
 - **THEN** 系统生成相同的规范化计划与修订标识，不制造无意义新修订
 
 ### Requirement: print 计划直接生成普通槽例
-使用方 SHALL 通过生成的 `print@program` 提交具名打印；系统 SHALL 从当前计划直接建立完整普通槽例，不经过物理空槽例。打印 SHALL 复制计划中的所有抽象槽、嵌套 contain、support 关系、类型及槽契约元数据，不得只复制输出槽、按输入／输出角色筛选或限制业务可填写的槽。打印 SHALL NOT 创建任何默认料；槽例中的具体料只能由使用方或外部编排在映射槽下新增为不带 `槽模角色` 的普通 Thing 子树。
+使用方 SHALL 只通过 `use_program({"name":"EXACT槽体/print","arguments":{"name":"新槽例名"}})` 调用生成的 `print@program` 提交具名打印；`name` SHALL 是唯一公开打印参数。调用方 SHALL NOT 读取后再回传 `revision`；当前 `print@program` SHALL 从自身可见计划绑定当前修订，内核 SHALL 验证调用源与该计划后直接建立完整普通槽例，不经过物理空槽例。打印 SHALL 复制计划中的所有抽象槽、嵌套 contain、support 关系、类型及槽契约元数据，不得只复制输出槽、按输入／输出角色筛选或限制业务可填写的槽。打印 SHALL NOT 创建任何默认料；槽例中的具体料只能由使用方或外部编排在映射槽下新增为不带 `槽模角色` 的普通 Thing 子树。
+
+#### Scenario: name-only 调用绑定当前可见修订
+- **WHEN** 使用方封装槽体后仅向生成的 `print@program` 传入唯一 `name`
+- **THEN** `print@program` 自动绑定其当前可见计划修订，系统生成采用该修订的槽例且回执返回同一修订
+
+#### Scenario: 调用方不直接提交 print 效果
+- **WHEN** 其他 Program 绕过生成的 `print@program` 直接登记 `slot_body(action=print)`
+- **THEN** 系统返回 `INVALID_SLOT_PRINT_PLAN`，不生成槽例且不把 caller-supplied revision 作为授权
 
 #### Scenario: 无空槽例打印嵌套实例
 - **WHEN** 使用方以唯一名称运行 `print@program`

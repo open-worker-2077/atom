@@ -37,3 +37,11 @@
 - [ ] 5.2 A human reviewer audits the visible plan, no-default-material evidence, per-instance revision evidence, byte-preserved material, Help-only workflow and real-trial evidence; unresolved findings return to implementation.
 - [ ] 5.3 Total control merges both local commits with `feature/graph-four-axis-support`, resolves only the contain/support adapter seam, and reruns combined automated and exclusive 4784 acceptance.
 - [ ] 5.4 Total control pushes only after merge, human review and real-use gates pass; until then OpenSpec remains incomplete and no local result may be presented as final delivery.
+
+## 6. Name-only Print Contract Repair
+
+- [x] 6.1 Reconcile proposal, packaging/operations specs, design and tasks around one public `use_program(body/print, arguments.name)` contract with runtime-owned revision binding.
+- [x] 6.2 Add minimal synthetic red tests proving name-only print succeeds, direct print remains unauthorized, stale legacy revision is rejected, and Help/registry expose no caller revision requirement.
+- [x] 6.3 Update generated print source, slot effect validation, registry and Help so public inputs, runtime behavior and error receipts agree without changing other slot semantics.
+- [x] 6.4 Run focused tests, complete automated tests, strict OpenSpec validation, diff checks and impact review.
+- [ ] 6.5 Create one follow-up local commit, update Issue #4 with candidate evidence and notify total control; do not push, merge, deploy or run real 4784/ESG acceptance.

@@ -132,9 +132,13 @@
             "action": { "enum": ["seal", "print"] },
             "body": { "type": "string", "format": "exact-atom-path" },
             "lock": { "type": "boolean", "default": false, "allowedWhen": { "action": "seal" } },
-            "name": { "type": "string", "format": "single-atom-name", "requiredWhen": { "action": "print" } },
-            "revision": { "type": "string", "format": "sha256-revision", "requiredWhen": { "action": "print" } }
+            "name": { "type": "string", "format": "single-atom-name", "requiredWhen": { "action": "print" } }
           }
+        },
+        "internalPrintEffect": {
+          "source": "current-body-print-program",
+          "callerAccessible": false,
+          "revisionBinding": "current-visible-print-plan"
         },
         "development": {
           "initialLayout": "one ordinary self-runnable candidate DataFlow child",
@@ -156,7 +160,6 @@
           "forgery": "SLOT_ROLE_FORGERY_DENIED",
           "reseal": "requires-node-and-window-lock-intersection"
         },
-        "print": { "invoke": "use_program exact body/print with arguments.name" },
         "revisionSync": {
           "trigger": "seal same body again",
           "mode": "all-instances-one-seal",
@@ -320,7 +323,27 @@
         "untriggeredProgramDispatch": "explicit-run-program-self-transform-or-known-dependency-change"
       }
     },
-    { "name": "use_program", "layer": "kernel", "family": "program", "scope": "public" },
+    {
+      "name": "use_program",
+      "layer": "kernel",
+      "family": "program",
+      "scope": "public",
+      "contract": {
+        "slotBodyPrint": {
+          "selector": "EXACT-body/print",
+          "arguments": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "format": "single-atom-name" }
+            }
+          },
+          "revisionArgument": "forbidden",
+          "revisionBinding": "current-visible-print-plan"
+        }
+      }
+    },
     { "name": "first_pending", "layer": "kernel", "family": "program", "scope": "public" },
     { "name": "transition_allowed", "layer": "kernel", "family": "program", "scope": "public" },
     { "name": "plan_shards", "layer": "kernel", "family": "program", "scope": "public" },

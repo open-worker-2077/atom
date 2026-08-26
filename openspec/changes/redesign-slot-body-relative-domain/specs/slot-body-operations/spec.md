@@ -16,7 +16,7 @@ Program 调用 `slot_body()` SHALL 只登记候选效果；Program 结束后，�
 - **THEN** 系统返回对应精确错误，事实文件、投影和世界修订均保持事务前状态
 
 ### Requirement: print 效果必须来自当前可见计划
-运行时 SHALL 验证打印效果由目标槽体当前 `print@program` 发出，携带的计划修订与可见当前计划一致；手工伪造、过期计划或其他 Program 代发 SHALL 被拒绝。运行时缓存只能作为派生索引，缓存缺失或重启后 SHALL 从可见计划恢复且不得打印实例。
+运行时 SHALL 验证打印效果由目标槽体当前 `print@program` 发出，并从该 Program 的当前可见计划绑定修订；调用方不得直接提供 revision 取得打印授权。手工伪造、其他 Program 代发或旧版效果中显式携带的过期修订 SHALL 被拒绝。运行时缓存只能作为派生索引，缓存缺失或重启后 SHALL 从可见计划恢复且不得打印实例。
 
 #### Scenario: 过期 print Program 不生成实例
 - **WHEN** 调用方在槽模重封装后提交旧修订的打印效果
@@ -38,7 +38,7 @@ exact Explore、Help、函数注册表和其他只读投影 SHALL NOT 调度或�
 - **THEN** 新 Program 可正常验证与提交，既有槽例数量不变且旧 print Program 不执行
 
 ### Requirement: Help 公开完整使用链与精确错误
-`atom.cmd --help` 与 Program 函数注册表 SHALL 公开候选槽模试运行、首次封装、print 计划回读、实例打印、在槽下创建本地料 Thing、外部变量本地物化、相对选择器、support 触发、单次自动重新封装、修订回读和失败回滚的完整输入、结果与示例。`seal` 的公开输入 SHALL 只有 `action` 与 `body`，不得出现 `limit`、`cursor` 或 `next_cursor`。Help SHALL 至少解释本规格中的所有 `SLOT_*`／`INVALID_SLOT_BODY_LAYOUT` 错误，使用方不得需要阅读源码或测试夹具猜测结构。
+`atom.cmd --help` 与 Program 函数注册表 SHALL 公开候选槽模试运行、首次封装、print 计划回读、实例打印、在槽下创建本地料 Thing、外部变量本地物化、相对选择器、support 触发、单次自动重新封装、修订回读和失败回滚的完整输入、结果与示例。`seal` 的公开输入 SHALL 只有 `action` 与 `body`，不得出现 `limit`、`cursor` 或 `next_cursor`；print 的唯一公开调用 SHALL 是生成的 `print@program` 加唯一 `arguments.name`，registry 与 Help SHALL 明示 revision 由生成 Program 内部绑定而不是调用参数。Help SHALL 至少解释本规格中的所有 `SLOT_*`／`INVALID_SLOT_BODY_LAYOUT` 错误，使用方不得需要阅读源码或测试夹具猜测结构。
 
 #### Scenario: 使用方只凭 Help 完成全生命周期
 - **WHEN** 未读源码的使用方读取 Help 和函数注册表

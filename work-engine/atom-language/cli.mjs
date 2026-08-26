@@ -261,7 +261,7 @@ function help() {
     '  槽体研发：槽体首次只放一棵普通可自运行候选 DataFlow（下级槽、contain、support、@program）；研发态可用 transform {"thing.run.EXACT候选根路径":"EXACT_PROGRAM_PATH"} 绑定当前域，Program 内仅用 . 或 ./相对 contain 路径。',
     '  槽体封装：上层注册 Program 调用 slot_body({"action":"seal","body":"EXACT槽体路径"})；中央事务把同一候选保留为槽模，并生成“槽模／print@program／槽例”。不预建空槽例，print 计划在 Graph 中可 exact explore 审计。槽 detail／situation 是说明契约，计划不含默认料。',
     '  槽体结构锁：seal 可用 slot_body({"action":"seal","body":"EXACT槽体路径","lock":true})。默认 lock:false，未开启时任何其他锁允许的写者都可改槽例结构；开启后映射槽 self 的名称／结构／support／Program 规则不可改，槽下新建或修改未映射料 Thing 仍允许，伪造槽角色返回 SLOT_ROLE_FORGERY_DENIED。reseal 仍须发起窗口同时通过节点锁与窗口自锁。',
-    '  槽体打印：用 explore {"thing":"EXACT槽体/print/修订","contain$latitude-1":true} 回读当前 sha256 revision，再显式 use_program({"name":"EXACT槽体/print","arguments":{"name":"新槽例名"}})；内核复制全部抽象槽、嵌套 contain、support、类型和槽契约，不复制具体料，Program 只在槽模共享一份。',
+    '  槽体打印：唯一公开调用是 use_program({"name":"EXACT槽体/print","arguments":{"name":"新槽例名"}})；name 是唯一打印参数，修订由当前 print@program 内部绑定，调用方不得传 revision。可用 explore {"thing":"EXACT槽体/print/修订","contain$latitude-1":true} 审计当前计划；内核复制全部抽象槽、嵌套 contain、support、类型和槽契约，不复制具体料，Program 只在槽模共享一份。',
     '  槽例填写与计算：用 transform {"thing":"EXACT槽体/槽例/实例/槽","situation.rep.填写值"} 填写槽的 situation；具体料应作为槽下未映射普通 Thing 创建。字段事件按“所属槽例→相对角色→当前修订 support→共享 Program”只在当前槽例域运行，再用 exact explore 回读该实例结果与采用槽模修订。禁止绝对实例路径、越过嵌套槽例边界、跨槽例或外部资料访问。',
     '  槽例填料与变量：带“槽模角色”的实例节点是抽象槽；在槽下 transform new 的未映射普通 Thing 子树才是本地料。外部变量必须先物化为目标槽例内的本地料 Thing，再触发该实例；共享 Program 只用 ./相对contain路径读取当前槽例域。',
     '  槽模修订：修改同一槽模后再次 seal；一次调用自动同步全部所属槽例的映射槽、contain、support、契约元数据与共享 Program 引用，并逐字节保留未映射本地料 Thing 子树；删除含料槽整次冲突回滚，成功后统一重算全部实例。',

@@ -56,6 +56,20 @@ test('slot_body emits a revision-bound deferred print effect once and cached cyc
   assert.deepEqual(second.slotBodies, []);
 });
 
+test('slot_body accepts the current print Program internal effect without a caller-supplied revision', async () => {
+  const world = [atom('程序', "slot_body({'action':'print','body':'订单槽体','name':'订单001'})", [], 'program')];
+  const scheduler = createProgramRuntimeScheduler();
+  const cycle = await scheduler.refresh(world);
+
+  assert.deepEqual(cycle.failures, []);
+  assert.deepEqual(cycle.slotBodies, [{
+    action: 'print',
+    body: '订单槽体',
+    name: '订单001',
+    sourceProgramPath: '程序'
+  }]);
+});
+
 test('slot_body seal rejects retired limit and cursor arguments inside Program evaluation', async () => {
   for (const extra of ["'limit':1", "'cursor':'retired'"]) {
     const world = [atom('程序', `slot_body({'action':'seal','body':'订单槽体',${extra}})`, [], 'program')];

@@ -49,9 +49,9 @@ Alternative considered: use relative paths as identity. It cannot distinguish re
 
 Printing builds a new instance directly from the current visible plan. It emits every non-Program mapped slot, contain order, type/description/contract metadata and plan-owned support. Support targets that are Programs continue to reference the single model Program. The printer does not create any unmapped child, so a new instance contains no concrete material.
 
-The runtime accepts an internal print effect only from the body’s current `print@program` and only when the revision matches the visible plan. Missing caches are rebuilt from visible facts and never authorize or replay a print.
+The sole public print invocation is `use_program()` against the body’s current `print@program` with one `arguments.name`. The caller never supplies a revision. The generated Program binds the current visible plan revision, and the runtime accepts its internal print effect only from that exact Program path. For compatibility, an older generated effect may still carry a revision, but a mismatched value is rejected as `SLOT_PRINT_PLAN_STALE`; omission selects the current visible plan only after source authorization. Missing caches are rebuilt from visible facts and never authorize or replay a print.
 
-Alternative considered: public direct `slot_body(action=print)`. It lets callers bypass the visible Program authority and remains rejected.
+Alternative considered: public direct `slot_body(action=print)` or caller-supplied revision. Both let callers confuse the internal effect contract with the public print interface; direct calls remain rejected and revision stays runtime-owned.
 
 ### Bind `.` and `./…` to a runtime-owned domain
 

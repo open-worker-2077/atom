@@ -170,11 +170,29 @@ test('public registry exposes the deferred Program Transform create and update c
 
 test('public registry and CLI Help expose the complete槽体 kernel contract', async () => {
   const { programFunctionRegistry } = await import('../work-engine/atom-language/program-function-registry.mjs');
-  const slotBody = programFunctionRegistry().functions.find((item) => item.name === 'slot_body');
+  const registry = programFunctionRegistry();
+  const slotBody = registry.functions.find((item) => item.name === 'slot_body');
+  const useProgram = registry.functions.find((item) => item.name === 'use_program');
   assert.equal(slotBody.layer, 'kernel');
   assert.equal(slotBody.family, 'graph');
   assert.deepEqual(slotBody.contract.argument.required, ['action', 'body']);
   assert.deepEqual(slotBody.contract.argument.properties.action.enum, ['seal', 'print']);
+  assert.deepEqual(slotBody.contract.argument.properties.name.requiredWhen, { action: 'print' });
+  assert.equal(Object.hasOwn(slotBody.contract.argument.properties, 'revision'), false);
+  assert.deepEqual(slotBody.contract.internalPrintEffect, {
+    source: 'current-body-print-program',
+    callerAccessible: false,
+    revisionBinding: 'current-visible-print-plan'
+  });
+  assert.deepEqual(useProgram.contract.slotBodyPrint, {
+    selector: 'EXACT-body/print',
+    arguments: {
+      type: 'object', required: ['name'], additionalProperties: false,
+      properties: { name: { type: 'string', format: 'single-atom-name' } }
+    },
+    revisionArgument: 'forbidden',
+    revisionBinding: 'current-visible-print-plan'
+  });
   assert.deepEqual(slotBody.contract.layout.sealedChildren, ['槽模', 'print', '槽例']);
   assert.equal(slotBody.contract.layout.physicalBlankExample, 'forbidden');
   assert.equal(slotBody.contract.layout.sharedPrograms, '槽模-only');
@@ -201,7 +219,8 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   assert.match(stdout.value(), /槽模／print@program／槽例/u);
   assert.match(stdout.value(), /explore \{"thing":"EXACT槽体\/print\/修订","contain\$latitude-1":true\}/u);
   assert.doesNotMatch(stdout.value(), /explore \{"name":"EXACT槽体\/print\/修订"|复制[^\n]*默认料/u);
-  assert.match(stdout.value(), /use_program[\s\S]*revision/u);
+  assert.match(stdout.value(), /use_program[\s\S]*arguments[\s\S]*name[\s\S]*修订由当前 print@program 内部绑定/u);
+  assert.match(stdout.value(), /调用方不得传 revision/u);
   assert.match(stdout.value(), /thing\.run\.EXACT候选根路径[\s\S]*\.\/相对 contain 路径[\s\S]*当前槽例域/u);
   assert.match(stdout.value(), /"thing":"EXACT槽体\/槽例\/实例\/槽"[\s\S]*situation\.rep\.填写值/u);
   assert.doesNotMatch(stdout.value(), /name\.run\.EXACT候选根路径|detail\.rep\.填写值/u);

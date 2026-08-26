@@ -472,9 +472,13 @@ function validateResult(result, records, program, options = {}) {
     )));
     const keys = Object.keys(publicEntry).sort();
     const required = entry.action === 'print'
-      ? ['action', 'body', 'name', 'revision']
+      ? ['action', 'body', 'name']
       : ['action', 'body'];
-    const allowed = entry.action === 'seal' ? [...required, 'lock'] : required;
+    const allowed = entry.action === 'print'
+      ? [...required, 'revision']
+      : [...required, 'lock'];
+    const invalidLegacyRevision = entry.revision !== undefined
+      && (typeof entry.revision !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(entry.revision));
     if (!['seal', 'print'].includes(entry.action)
       || typeof entry.body !== 'string' || !entry.body.trim()
       || keys.some((key) => !allowed.includes(key))
@@ -482,8 +486,8 @@ function validateResult(result, records, program, options = {}) {
       || (entry.lock !== undefined && typeof entry.lock !== 'boolean')
       || (entry.action === 'print'
         && (typeof entry.name !== 'string' || !entry.name.trim() || entry.name.includes('/')
-          || typeof entry.revision !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(entry.revision)))) {
-      throw Object.assign(new Error('slot_body() requires seal {action,body} or current-plan print {action,body,name,revision}'), {
+          || invalidLegacyRevision))) {
+      throw Object.assign(new Error('slot_body() requires seal {action,body} or a current-print Program effect {action,body,name} with an optional legacy revision'), {
         code: 'INVALID_SLOT_BODY_EFFECT'
       });
     }

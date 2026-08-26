@@ -107,6 +107,21 @@ test('print rewrites complete support AST to the current instance and shares mod
   }]);
 });
 
+test('current print Program binds its visible revision when the internal effect carries only the instance name', async () => {
+  const sealed = await seal();
+  const currentRevision = planOf(sealed.atoms).revision;
+
+  const printed = await applySlotBodyEffect({
+    atoms: sealed.atoms,
+    effect: { action: 'print', body: '订单槽体', name: '订单001' },
+    sourceProgramPath: '订单槽体/print'
+  });
+
+  assert.equal(printed.error, undefined, JSON.stringify(printed.error));
+  assert.equal(printed.receipt.revision, currentRevision);
+  assert.ok(find(printed.atoms, '订单槽体/槽例/订单001'));
+});
+
 test('print rejects duplicate, stale revision and forged caller atomically', async () => {
   const sealed = await seal();
   const first = await print(sealed.atoms, '订单001');

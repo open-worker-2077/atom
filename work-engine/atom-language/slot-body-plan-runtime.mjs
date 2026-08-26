@@ -224,7 +224,7 @@ function planSource(plan) {
   return [
     `PRINT_PLAN = json_parse(${JSON.stringify({ text: planText })})`,
     'def main(arguments):',
-    `    return slot_body({"action":"print","body":${JSON.stringify(plan.body)},"name":arguments["name"],"revision":${JSON.stringify(plan.revision)}})`
+    `    return slot_body({"action":"print","body":${JSON.stringify(plan.body)},"name":arguments["name"]})`
   ].join('\n');
 }
 
@@ -577,7 +577,7 @@ async function printExample(atoms, effect, sourceProgramPath, authorize) {
   }
   const plan = currentPlan(layout);
   if (!plan) return { error: slotError('INVALID_SLOT_PRINT_PLAN', '当前 print Program 缺少可见计划') };
-  if (effect.revision !== plan.revision) {
+  if (effect.revision !== undefined && effect.revision !== plan.revision) {
     return { error: slotError('SLOT_PRINT_PLAN_STALE', '打印计划修订已经过期', {
       body: layout.bodyPath,
       expected: plan.revision,
@@ -627,7 +627,7 @@ export async function applyPlanSlotBodyEffect({
     || typeof effect.body !== 'string' || !effect.body.trim()
     || (effect.lock !== undefined && typeof effect.lock !== 'boolean')
     || effectKeys.some((key) => !allowedKeys.includes(key))) {
-    return { error: slotError('INVALID_SLOT_BODY_EFFECT', 'slot_body() 需要 seal 或带当前计划修订的 print') };
+    return { error: slotError('INVALID_SLOT_BODY_EFFECT', 'slot_body() 只接受 seal 或当前 print Program 的内部打印效果') };
   }
   const candidate = mutateInput ? atoms : structuredClone(atoms);
   const before = mutateInput ? structuredClone(atoms) : null;
