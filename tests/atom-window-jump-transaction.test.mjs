@@ -431,6 +431,30 @@ test('recycle true removes the active window without evaluating when or where', 
   assert.equal(scheduler.activeWindowAgents.has('Root/A/Window'), false);
 });
 
+test('an explicit jump recycle is the only transform allowed to remove its active Agent', async (t) => {
+  const initial = [atom('Root', '', [
+    atom('A', '', [
+      atom('Window', '', [], 'agent'),
+      atom('Recycle', 'def main(arguments):\n    return True', [], 'program')
+    ]),
+    atom('Registration', 'jump({"recycle":explore({"thing":"Root/A/Recycle"})[0]})', [], 'program')
+  ])];
+  const files = await fixture(t, initial);
+  const scheduler = createProgramRuntimeScheduler();
+
+  const result = await executeAtomLanguage({
+    source: 'transform {"thing.run.":"Root/Registration"}',
+    ...files,
+    programScheduler: scheduler,
+    interaction: { agent: { ref: 'window-ref', path: 'Root/A/Window' } }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.deepEqual(childNames(stored[0].contain[0]), ['Recycle']);
+  assert.equal(scheduler.activeWindowAgents.has('Root/A/Window'), false);
+});
+
 test('cyclic destination and downstream failure both roll back the moved window', async (t) => {
   for (const mode of ['cycle', 'downstream']) {
     const initial = mode === 'cycle'

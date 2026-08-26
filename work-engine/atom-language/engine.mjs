@@ -1439,6 +1439,8 @@ export async function executeAtomLanguage(options = {}) {
   }
 
   async function commitChangedGraph(candidateAtoms, { registrationChange = null } = {}) {
+    const effectiveRegistrationChange = registrationChange
+      ?? (windowRecycled ? 'window-recycle' : null);
     await persistChangedGraph({
       atoms: candidateAtoms,
       contextFile,
@@ -1448,7 +1450,7 @@ export async function executeAtomLanguage(options = {}) {
       expectedRevision: revisionBefore,
       correlationId: interaction.id,
       source,
-      registrationChange,
+      registrationChange: effectiveRegistrationChange,
       compatibilityManifest: options.compatibilityManifest
     });
     if (recycledAgentPath) {
