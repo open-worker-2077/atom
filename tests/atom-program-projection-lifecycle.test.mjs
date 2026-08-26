@@ -309,6 +309,84 @@ test('a transient Program failure is retried instead of becoming a reusable proj
   assert.deepEqual(recovered.failures, []);
 });
 
+test('an isolated context-free startup failure stays dormant while Agent context is completed', async () => {
+  let executions = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async () => {
+      executions += 1;
+      throw Object.assign(new Error('unrelated persistent failure'), {
+        code: 'ATOM_PROGRAM_FAILED'
+      });
+    }
+  });
+  const world = [
+    atom('Agent', '', [], 'agent'),
+    atom('Broken Program', '# fails without reading the Agent', [], 'program')
+  ];
+
+  const startup = await scheduler.refresh(world, { isolateFailures: true });
+  const agentProjection = await scheduler.refresh(structuredClone(world), {
+    isolateFailures: true,
+    agentOrigin: { ref: 'agent-ref', path: 'Agent' }
+  });
+
+  assert.equal(startup.failures.length, 1);
+  assert.equal(executions, 1);
+  assert.deepEqual(agentProjection.failures, []);
+  assert.equal(agentProjection.cached, true);
+});
+
+test('a cold Agent Transform does not replay or report an unrelated startup failure', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-cold-agent-transform-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Agent', '', [], 'agent'),
+    atom('Target', 'before'),
+    atom('Broken Program', "raise ValueError('unrelated persistent failure')", [], 'program')
+  ], null, 2));
+  let executions = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async () => {
+      executions += 1;
+      throw Object.assign(new Error('unrelated persistent failure'), {
+        code: 'ATOM_PROGRAM_FAILED'
+      });
+    }
+  });
+
+  const startup = await executeAtomLanguage({
+    source: 'atom', contextFile, projectionFile, programScheduler: scheduler,
+    programMode: 'project', interaction: { id: 'startup', agent: null }
+  });
+  const preparation = await executeAtomLanguage({
+    source: 'atom', contextFile, projectionFile, programScheduler: scheduler,
+    programMode: 'reconcile',
+    interaction: { id: 'agent-preparation', agent: { ref: 'agent-ref', path: 'Agent' } }
+  });
+  const transformed = await executeAtomLanguage({
+    source: 'transform {"thing":"Target","situation.rep.after"}',
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler,
+    commitWorld: async () => {},
+    interaction: { id: 'agent-transform', agent: { ref: 'agent-ref', path: 'Agent' } }
+  });
+
+  assert.equal(startup.ok, true, JSON.stringify(startup.errors));
+  assert.equal(preparation.ok, true, JSON.stringify(preparation.errors));
+  assert.equal(preparation.warnings.some((warning) => (
+    warning.code === 'ATOM_PROGRAM_FAILED'
+  )), false, JSON.stringify(preparation.warnings));
+  assert.equal(transformed.ok, true, JSON.stringify(transformed.errors));
+  assert.equal(transformed.changed, true, JSON.stringify(transformed));
+  assert.equal(executions, 1);
+  assert.equal(transformed.warnings.some((warning) => (
+    warning.code === 'ATOM_PROGRAM_FAILED'
+  )), false, JSON.stringify(transformed.warnings));
+});
+
 test('concurrent invalidated refreshes share the complete dependency-check and worker pipeline', async () => {
   let executions = 0;
   const scheduler = createProgramRuntimeScheduler({

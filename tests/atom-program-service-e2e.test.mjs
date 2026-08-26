@@ -550,7 +550,7 @@ test('4784 rejects direct projection replacement so Web edits cannot bypass atom
   assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].situation, 'owned by Atom');
 });
 
-test('4784 continues an ordinary command when one Program fails before execution', async (t) => {
+test('4784 continues an ordinary command without replaying an unrelated startup failure', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-service-isolation-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -574,7 +574,7 @@ test('4784 continues an ordinary command when one Program fails before execution
   assert.equal(result.warnings.some((warning) => (
     warning.code === 'ATOM_PROGRAM_FAILED'
     && warning.program === '故障Program'
-  )), true, JSON.stringify(result.warnings));
+  )), false, JSON.stringify(result.warnings));
 });
 
 test('4784 submit endpoint records the current agent and supplied CLI history', async (t) => {

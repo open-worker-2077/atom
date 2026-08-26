@@ -1337,7 +1337,7 @@ export class ProgramRuntimeScheduler {
           this.programReusable, [program], isolateFailures, options.agentOrigin,
           records, availablePrograms
         )[0];
-      const previous = previousEntry?.[1] ?? null;
+      let previous = previousEntry?.[1] ?? null;
       const triggerEntry = this.triggerContracts.get(program.path) ?? null;
       const triggerContract = triggerEntry?.contract ?? null;
       const hasIndexedContract = Boolean(
@@ -1345,6 +1345,22 @@ export class ProgramRuntimeScheduler {
       );
       const forcedByTrigger = triggerEvent
         && (triggeredProgramPaths.has(program.path) || Boolean(slotInvocation));
+      const dormantStartupFailure = previous?.dormantUntilTriggered === true
+        && previous.sourceScopePath === null
+        && Boolean(scopePath)
+        && !forcedByTrigger;
+      if (dormantStartupFailure) {
+        return {
+          programPath: program.path,
+          result: {
+            locks: [], messages: [], transforms: [], slotBodies: [], choices: [], trigger: null
+          },
+          cached: true,
+          requests: previous.requests,
+          contextDependent: false
+        };
+      }
+      if (previous?.dormantUntilTriggered === true) previous = null;
       if (triggerEvent
         && !hasIndexedContract
         && !eventNodes.has(program.path)
@@ -1488,6 +1504,22 @@ export class ProgramRuntimeScheduler {
           return { programPath: program.path, failure, cached: false, requests: uniqueRequests, contextDependent };
         }
         if (isolateFailures) {
+          if (!slotInvocation && !options.slotScopeRoot && !contextDependent) {
+            const stateKey = reusableProgramSetFingerprint(
+              [program], availablePrograms, isolateFailures, records
+            );
+            this.programReusable.set(stateKey, {
+              contextDependent: false,
+              scopePath: null,
+              sourceScopePath: scopePath,
+              dormantUntilTriggered: true,
+              requests: uniqueRequests,
+              dependencyFingerprint: await fingerprintDependencies(uniqueRequests),
+              worldKey: currentWorldKey,
+              failure,
+              records
+            });
+          }
           return { programPath: program.path, failure, cached: false, requests: uniqueRequests, contextDependent };
         }
         throw error;
