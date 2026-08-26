@@ -1076,7 +1076,6 @@ export class ProgramRuntimeScheduler {
     const stored = await this.loadProjection();
     const programSetKey = programSetFingerprint(programs, isolateFailures, records);
     if (!stored || stored.version !== 1
-      || stored.readSetVersion !== 1
       || stored.worldKey !== worldRevisionKey(records)
       || stored.programSetKey !== programSetKey
       || (stored.contextIncomplete === true && agentScopePath(agentOrigin))

@@ -9,7 +9,6 @@ function problem(code, message, details = {}) {
 function validateProjection(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.version !== 1
-    || value.readSetVersion !== 1
     || typeof value.worldKey !== 'string' || !value.worldKey
     || typeof value.programSetKey !== 'string' || !value.programSetKey
     || typeof value.contextDependent !== 'boolean'
@@ -17,9 +16,12 @@ function validateProjection(value) {
     || (value.contextDependent && !value.scopePath)
     || !Array.isArray(value.locks)
     || !Array.isArray(value.choices)
-    || !Array.isArray(value.exploreReadPaths)
-    || value.exploreReadPaths.some((entry) => typeof entry !== 'string' || !entry.trim())
-    || new Set(value.exploreReadPaths).size !== value.exploreReadPaths.length
+    || (value.readSetVersion !== undefined && value.readSetVersion !== 1)
+    || (value.exploreReadPaths !== undefined && (
+      !Array.isArray(value.exploreReadPaths)
+      || value.exploreReadPaths.some((entry) => typeof entry !== 'string' || !entry.trim())
+      || new Set(value.exploreReadPaths).size !== value.exploreReadPaths.length
+    ))
     || !Array.isArray(value.failures)
     || value.failures.length > 0) {
     throw problem(

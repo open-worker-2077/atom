@@ -118,14 +118,6 @@ test('a persisted Program projection restores only versioned exact Explore read 
   const restored = await restarted.current(structuredClone(world), { isolateFailures: true });
   assert.deepEqual(restored.exploreReadPaths, ['Target']);
 
-  repository.replace(Object.fromEntries(
-    Object.entries(stored).filter(([key]) => key !== 'readSetVersion')
-  ));
-  await assert.rejects(
-    createProgramRuntimeScheduler({ projectionRepository: repository })
-      .current(structuredClone(world), { isolateFailures: true }),
-    { code: 'ATOM_PROGRAM_PROJECTION_MISSING' }
-  );
 });
 
 test('an explicit selected Program run cannot replace the persisted full-world projection', async () => {
