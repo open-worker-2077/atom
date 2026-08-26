@@ -349,6 +349,27 @@ test('deployed Agent resolution reuses the world compatibility manifest for exac
   assert.equal(body.result.agent, '冰');
 });
 
+test('deployed legacy-support provenance permits a new four-axis Agent transform', async (t) => {
+  const files = await migratedLegacySupportWorld(t);
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, ...files });
+  t.after(() => running.close());
+
+  const response = await fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source: 'transform new {"thing":"test/写入验收","situation":"四轴","contain":[],"support":[]}',
+      interaction: { id: 'trusted-legacy-agent-transform', agentSelector: '冰', agent: { path: '冰' } },
+      history: []
+    })
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(body.result.ok, true, JSON.stringify(body));
+  assert.equal(body.result.changed, true, JSON.stringify(body));
+});
+
 test('public Agent resolution rejects unauthorized and forged legacy support provenance', async (t) => {
   const files = await migratedLegacySupportWorld(t);
   await assert.rejects(resolveAgentContext(files.contextFile, '冰'), {

@@ -535,7 +535,7 @@ export async function executeAtomLanguage(options = {}) {
   }
   const revisionBefore = revisionOf(atoms);
   const legacyMetadata = legacyAtomContextMetadata(atoms);
-  if (parsed.command === 'transform' && legacyMetadata) {
+  if (parsed.command === 'transform' && legacyMetadata?.mode === 'legacy-read-only') {
     return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
       'LEGACY_GRAPH_MIGRATION_REQUIRED',
       '存量旧 Graph 已以只读兼容模式加载；完成可验证迁移前禁止普通写入',
