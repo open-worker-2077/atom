@@ -258,6 +258,7 @@ function help() {
     '  锁定条件轴：when.target_types 使用相同类型条件判断目标状态；when.actions 仅取 explore／transform。状态与动作决定锁是否生效，窗口条件决定是否放行；守窗、跳窗、关窗和滚动绑定由上层 Program 调度，内核不写死。',
     '  显式重算：transform {\"thing.run.\":\"EXACT_PROGRAM_PATH\"}；仅成功运行才原子替换旧锁快照，普通依赖变化不自动重算，失败保留旧锁快照。',
     '  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。',
+    '  Program 复用：use_program({"name": explore({"thing":"EXACT @program 路径"})[0], "arguments": {...}})；坐标会按当前窗口与 Program 边界重新授权。精确字符串名称或路径继续兼容；不使用 .ref。',
     '  槽体研发：槽体首次只放一棵普通可自运行候选 DataFlow（下级槽、contain、support、@program）；研发态可用 transform {"thing.run.EXACT候选根路径":"EXACT_PROGRAM_PATH"} 绑定当前域，Program 内仅用 . 或 ./相对 contain 路径。',
     '  槽体封装：上层注册 Program 调用 slot_body({"action":"seal","body":"EXACT槽体路径"})；中央事务把同一候选保留为槽模，并生成“槽模／print@program／槽例”。不预建空槽例，print 计划在 Graph 中可 exact explore 审计。槽 detail／situation 是说明契约，计划不含默认料。',
     '  槽体结构锁：seal 可用 slot_body({"action":"seal","body":"EXACT槽体路径","lock":true})。默认 lock:false，未开启时任何其他锁允许的写者都可改槽例结构；开启后映射槽 self 的名称／结构／support／Program 规则不可改，槽下新建或修改未映射料 Thing 仍允许，伪造槽角色返回 SLOT_ROLE_FORGERY_DENIED。reseal 仍须发起窗口同时通过节点锁与窗口自锁。',

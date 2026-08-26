@@ -1087,20 +1087,44 @@ def main():
         specification = require_object(specification, "use_program")
         selector = specification.get("name")
         arguments = specification.get("arguments", {})
-        if not isinstance(selector, str) or not selector.strip():
+        if isinstance(selector, AtomView):
+            coordinate_path = selector.path
+            authorized_refs = remember(call_engine("explore", {"thing": coordinate_path}))
+            authorized = [
+                by_ref[ref] for ref in authorized_refs
+                if by_ref[ref]["path"] == coordinate_path and ref == selector.ref
+            ]
+            if len(authorized) != 1:
+                raise EngineCallError(
+                    "USE_PROGRAM_COORDINATE_NOT_FOUND",
+                    "use_program ThingCoordinate no longer resolves exactly: "
+                    + coordinate_path,
+                )
+            target = authorized[0]
+            if "program" not in target.get("types", []):
+                raise EngineCallError(
+                    "USE_PROGRAM_TARGET_NOT_PROGRAM",
+                    "use_program ThingCoordinate does not identify a Program: "
+                    + coordinate_path,
+                )
+        elif isinstance(selector, str) and selector.strip():
+            matches = [
+                record for record in by_ref.values()
+                if "program" in record.get("types", [])
+                and (record["path"] == selector or record["name"] == selector)
+            ]
+            if not matches:
+                raise ValueError(f"Referenced Program not found: {selector}")
+            if len(matches) > 1:
+                raise ValueError(
+                    "Referenced Program name is ambiguous; use its full path: "
+                    + selector
+                )
+            target = matches[0]
+        else:
             raise ValueError("use_program.name must be one exact Program name or path")
         if not isinstance(arguments, dict):
             raise TypeError("use_program.arguments must be one JSON object")
-        matches = [
-            record for record in by_ref.values()
-            if "program" in record.get("types", [])
-            and (record["path"] == selector or record["name"] == selector)
-        ]
-        if not matches:
-            raise ValueError(f"Referenced Program not found: {selector}")
-        if len(matches) > 1:
-            raise ValueError(f"Referenced Program name is ambiguous; use its full path: {selector}")
-        target = matches[0]
         program_root = request.get("programRoot")
         if program_root and not (
             target["path"] == program_root

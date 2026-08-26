@@ -173,6 +173,26 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   const registry = programFunctionRegistry();
   const slotBody = registry.functions.find((item) => item.name === 'slot_body');
   const useProgram = registry.functions.find((item) => item.name === 'use_program');
+  assert.deepEqual(useProgram.contract.argument, {
+    type: 'object',
+    required: ['name', 'arguments'],
+    additionalProperties: false,
+    properties: {
+      name: {
+        oneOf: [
+          { $ref: '#/runtimeTypes/ThingCoordinate' },
+          { type: 'string', format: 'exact-program-name-or-path' }
+        ]
+      },
+      arguments: { type: 'object' }
+    }
+  });
+  assert.equal(useProgram.contract.coordinateAuthorization, 'repeat-exact-explore-current-access-boundary');
+  assert.deepEqual(useProgram.contract.errors, [
+    'USE_PROGRAM_COORDINATE_NOT_FOUND',
+    'USE_PROGRAM_TARGET_NOT_PROGRAM',
+    'WINDOW_ACCESS_DENIED'
+  ]);
   assert.equal(slotBody.layer, 'kernel');
   assert.equal(slotBody.family, 'graph');
   assert.deepEqual(slotBody.contract.argument.required, ['action', 'body']);
@@ -220,6 +240,9 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   assert.match(stdout.value(), /explore \{"thing":"EXACT槽体\/print\/修订","contain\$latitude-1":true\}/u);
   assert.doesNotMatch(stdout.value(), /explore \{"name":"EXACT槽体\/print\/修订"|复制[^\n]*默认料/u);
   assert.match(stdout.value(), /use_program[\s\S]*arguments[\s\S]*name[\s\S]*修订由当前 print@program 内部绑定/u);
+  assert.match(stdout.value(), /use_program\(\{"name": explore\(\{.*\}\)\[0\], "arguments": \{.*\}\}\)/u);
+  assert.match(stdout.value(), /坐标会按当前窗口与 Program 边界重新授权/u);
+  assert.match(stdout.value(), /精确字符串名称或路径继续兼容/u);
   assert.match(stdout.value(), /调用方不得传 revision/u);
   assert.match(stdout.value(), /thing\.run\.EXACT候选根路径[\s\S]*\.\/相对 contain 路径[\s\S]*当前槽例域/u);
   assert.match(stdout.value(), /"thing":"EXACT槽体\/槽例\/实例\/槽"[\s\S]*situation\.rep\.填写值/u);

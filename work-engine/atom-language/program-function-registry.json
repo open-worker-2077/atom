@@ -329,6 +329,26 @@
       "family": "program",
       "scope": "public",
       "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["name", "arguments"],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "oneOf": [
+                { "$ref": "#/runtimeTypes/ThingCoordinate" },
+                { "type": "string", "format": "exact-program-name-or-path" }
+              ]
+            },
+            "arguments": { "type": "object" }
+          }
+        },
+        "coordinateAuthorization": "repeat-exact-explore-current-access-boundary",
+        "errors": [
+          "USE_PROGRAM_COORDINATE_NOT_FOUND",
+          "USE_PROGRAM_TARGET_NOT_PROGRAM",
+          "WINDOW_ACCESS_DENIED"
+        ],
         "slotBodyPrint": {
           "selector": "EXACT-body/print",
           "arguments": {
