@@ -370,6 +370,36 @@ test('deployed legacy-support provenance permits a new four-axis Agent transform
   assert.equal(body.result.changed, true, JSON.stringify(body));
 });
 
+test('deployed legacy-support provenance remains valid while a new Program seals a slot body', async (t) => {
+  const files = await migratedLegacySupportWorld(t);
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, ...files });
+  t.after(() => running.close());
+  const execute = async (source, id) => {
+    const response = await fetch(`${running.url}/__atom/api/command`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        source,
+        interaction: { id, agentSelector: '冰', agent: { path: '冰' } },
+        history: []
+      })
+    });
+    return response.json();
+  };
+
+  const created = await execute(
+    'transform new {"thing":"test/合成槽体验收","situation":"合成验收","contain":[{"thing":"槽体","situation":"","contain":[{"thing":"候选流","situation":"","contain":[{"thing":"原文","situation":"待填写","contain":[],"support":[]},{"thing":"结论","situation":"待计算","contain":[],"support":[]}],"support":[]}],"support":[]},{"thing@program":"封装","situation":"slot_body({\\"action\\":\\"seal\\",\\"body\\":\\"test/合成槽体验收/槽体\\"})","contain":[],"support":[]}],"support":[]}',
+    'trusted-legacy-slot-create'
+  );
+  assert.equal(created.result.ok, true, JSON.stringify(created));
+
+  const sealed = await execute(
+    'transform {"thing.run.":"test/合成槽体验收/封装"}',
+    'trusted-legacy-slot-seal'
+  );
+  assert.equal(sealed.result.ok, true, JSON.stringify(sealed));
+});
+
 test('public Agent resolution rejects unauthorized and forged legacy support provenance', async (t) => {
   const files = await migratedLegacySupportWorld(t);
   await assert.rejects(resolveAgentContext(files.contextFile, '冰'), {

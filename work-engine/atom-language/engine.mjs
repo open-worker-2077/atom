@@ -941,7 +941,10 @@ export async function executeAtomLanguage(options = {}) {
     }
     interactionWarnings.push(...(transformed.warnings ?? []));
     try {
-      projectAtomContext(transformed.atoms, { rootName: path.basename(contextFile) });
+      projectAtomContext(transformed.atoms, {
+        rootName: path.basename(contextFile),
+        allowLegacySupport: Boolean(options.compatibilityManifest)
+      });
     } catch (error) {
       if (jumpEffects.length) {
         return failureBase(parsed, contextFile, projectionFile, jumpBaseAtoms, [diagnostic(
@@ -1000,7 +1003,10 @@ export async function executeAtomLanguage(options = {}) {
       )]);
     }
     try {
-      projectAtomContext(result.atoms, { rootName: path.basename(contextFile) });
+      projectAtomContext(result.atoms, {
+        rootName: path.basename(contextFile),
+        allowLegacySupport: Boolean(options.compatibilityManifest)
+      });
     } catch (error) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         error.code ?? 'PROGRAM_SLOT_BODY_INVALID_GRAPH',
@@ -1263,7 +1269,10 @@ export async function executeAtomLanguage(options = {}) {
       let application = await applyCompiled(structuredClone(reconciledAtoms), true, true);
       if (!application.failed) {
         try {
-          projectAtomContext(application.atoms, { rootName: path.basename(contextFile) });
+          projectAtomContext(application.atoms, {
+            rootName: path.basename(contextFile),
+            allowLegacySupport: Boolean(options.compatibilityManifest)
+          });
         } catch {
           application = { failed: true };
         }
