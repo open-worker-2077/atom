@@ -720,6 +720,7 @@ export class ProgramRuntimeScheduler {
     this.workerQueue = [];
     this.reusable = new Map();
     this.programReusable = new Map();
+    this.dormantFailures = new Map();
     this.runProgram = options.runProgram ?? runWorker;
     this.diagnosticRecorder = options.diagnosticRecorder ?? null;
     this.projectionRepository = options.projectionRepository ?? null;
@@ -1331,6 +1332,8 @@ export class ProgramRuntimeScheduler {
         : [{ program, slotInvocation: null }];
     });
     const operations = operationEntries.map(async ({ program, slotInvocation }) => {
+      const dormantKey = programSetFingerprint([program], isolateFailures, records);
+      const dormantFailure = this.dormantFailures.get(dormantKey) ?? null;
       const previousEntry = options.force === true
         ? null
         : reusableCandidates(
@@ -1345,22 +1348,20 @@ export class ProgramRuntimeScheduler {
       );
       const forcedByTrigger = triggerEvent
         && (triggeredProgramPaths.has(program.path) || Boolean(slotInvocation));
-      const dormantStartupFailure = previous?.dormantUntilTriggered === true
-        && previous.sourceScopePath === null
-        && Boolean(scopePath)
-        && !forcedByTrigger;
-      if (dormantStartupFailure) {
+      if (dormantFailure
+        && options.force !== true
+        && !forcedByTrigger
+        && !eventNodes.has(program.path)) {
         return {
           programPath: program.path,
           result: {
             locks: [], messages: [], transforms: [], slotBodies: [], choices: [], trigger: null
           },
           cached: true,
-          requests: previous.requests,
+          requests: dormantFailure.requests,
           contextDependent: false
         };
       }
-      if (previous?.dormantUntilTriggered === true) previous = null;
       if (triggerEvent
         && !hasIndexedContract
         && !eventNodes.has(program.path)
@@ -1505,20 +1506,13 @@ export class ProgramRuntimeScheduler {
         }
         if (isolateFailures) {
           if (!slotInvocation && !options.slotScopeRoot && !contextDependent) {
-            const stateKey = reusableProgramSetFingerprint(
-              [program], availablePrograms, isolateFailures, records
-            );
-            this.programReusable.set(stateKey, {
-              contextDependent: false,
-              scopePath: null,
-              sourceScopePath: scopePath,
-              dormantUntilTriggered: true,
+            this.dormantFailures.set(dormantKey, {
               requests: uniqueRequests,
-              dependencyFingerprint: await fingerprintDependencies(uniqueRequests),
-              worldKey: currentWorldKey,
-              failure,
-              records
+              failure
             });
+            while (this.dormantFailures.size > this.maxCompleted * Math.max(1, this.maxWorkers)) {
+              this.dormantFailures.delete(this.dormantFailures.keys().next().value);
+            }
           }
           return { programPath: program.path, failure, cached: false, requests: uniqueRequests, contextDependent };
         }

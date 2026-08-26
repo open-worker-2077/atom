@@ -575,6 +575,20 @@ test('4784 continues an ordinary command without replaying an unrelated startup 
     warning.code === 'ATOM_PROGRAM_FAILED'
     && warning.program === '故障Program'
   )), false, JSON.stringify(result.warnings));
+
+  const created = await executeAtomCommandEndpoint({
+    source: 'transform new {"thing@program":"新增Program","situation":"def main(arguments):\\n    return None","contain":[],"support":[]}',
+    interaction: { agent }
+  }, `${running.url}/__atom/api/command`);
+  assert.equal(created.ok, true, JSON.stringify(created.errors));
+  assert.equal(created.warnings.some((warning) => warning.program === '故障Program'), false);
+
+  const readBack = await executeAtomCommandEndpoint({
+    source: 'explore {"thing":"新增Program","situation$full":true}',
+    interaction: { agent }
+  }, `${running.url}/__atom/api/command`);
+  assert.equal(readBack.ok, true, JSON.stringify(readBack.errors));
+  assert.equal(readBack.warnings.some((warning) => warning.program === '故障Program'), false);
 });
 
 test('4784 submit endpoint records the current agent and supplied CLI history', async (t) => {

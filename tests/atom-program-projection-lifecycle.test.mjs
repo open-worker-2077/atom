@@ -284,7 +284,7 @@ test('replaceable projection persistence failure does not discard a valid in-mem
   assert.equal(current.cached, true);
 });
 
-test('a transient Program failure is retried instead of becoming a reusable projection', async () => {
+test('a transient Program failure is retried by an explicit Program refresh', async () => {
   let executions = 0;
   const scheduler = createProgramRuntimeScheduler({
     runProgram: async () => {
@@ -302,7 +302,7 @@ test('a transient Program failure is retried instead of becoming a reusable proj
   });
   const recovered = await scheduler.refresh([
     atom('Fact', 'after'), structuredClone(program)
-  ], { isolateFailures: true });
+  ], { isolateFailures: true, force: true });
 
   assert.equal(failed.failures[0].code, 'ATOM_PROGRAM_TIMEOUT');
   assert.equal(executions, 2);
@@ -312,8 +312,11 @@ test('a transient Program failure is retried instead of becoming a reusable proj
 test('an isolated context-free startup failure stays dormant while Agent context is completed', async () => {
   let executions = 0;
   const scheduler = createProgramRuntimeScheduler({
-    runProgram: async () => {
+    runProgram: async ({ program }) => {
       executions += 1;
+      if (program.path !== 'Broken Program') {
+        return { locks: [], messages: [], transforms: [] };
+      }
       throw Object.assign(new Error('unrelated persistent failure'), {
         code: 'ATOM_PROGRAM_FAILED'
       });
@@ -325,15 +328,19 @@ test('an isolated context-free startup failure stays dormant while Agent context
   ];
 
   const startup = await scheduler.refresh(world, { isolateFailures: true });
-  const agentProjection = await scheduler.refresh(structuredClone(world), {
+  const changedWorld = [
+    ...structuredClone(world),
+    atom('Unrelated New Program', '# added elsewhere', [], 'program')
+  ];
+  const agentProjection = await scheduler.refresh(changedWorld, {
     isolateFailures: true,
     agentOrigin: { ref: 'agent-ref', path: 'Agent' }
   });
 
   assert.equal(startup.failures.length, 1);
-  assert.equal(executions, 1);
+  assert.equal(executions, 2);
   assert.deepEqual(agentProjection.failures, []);
-  assert.equal(agentProjection.cached, true);
+  assert.equal(agentProjection.cached, false);
 });
 
 test('a cold Agent Transform does not replay or report an unrelated startup failure', async (t) => {
