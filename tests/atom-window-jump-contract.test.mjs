@@ -189,6 +189,7 @@ test('registry and Help publish jump, changed, thing coordinates, and explicit s
   assert.deepEqual(jump.contract.selfLockActivation, {
     trigger: 'current-agent-jump-registration',
     timing: 'same-program-cycle',
+    persistence: 'request-driven-snapshot-across-requests',
     unregisteredAgent: 'legacy-access-behavior'
   });
   assert.equal(changed.contract.dispatch, 'shared-transform-reverse-index');
@@ -206,5 +207,6 @@ test('registry and Help publish jump, changed, thing coordinates, and explicit s
   assert.match(stdout.value(), /精确字符串兼容仅保留于 use_program\.name 与 CLI thing\.run\./u);
   assert.match(stdout.value(), /if not changed\(\[.*\]\):[\s\S]*return/u);
   assert.match(stdout.value(), /jump 注册.*立即进入受自锁窗口态/u);
+  assert.match(stdout.value(), /request-driven snapshot.*跨独立请求保持/u);
   assert.match(stdout.value(), /未注册 jump.*维持旧访问行为/u);
 });

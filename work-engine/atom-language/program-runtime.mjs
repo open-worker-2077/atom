@@ -177,6 +177,11 @@ function agentScopePath(agentOrigin) {
     : null;
 }
 
+function defaultWindowSelfLockAgentPaths(activeWindowAgents, activeWindowSelfLocks) {
+  return [...activeWindowAgents]
+    .filter((agentPath) => !activeWindowSelfLocks.has(agentPath));
+}
+
 function contextualProgramSetFingerprint(
   programs, dependencyPrograms, isolateFailures, scopePath, records
 ) {
@@ -854,6 +859,9 @@ export class ProgramRuntimeScheduler {
     const stored = this.requestDrivenLockRepository
       ? await this.requestDrivenLockRepository.load()
       : { version: 1, locks: [] };
+    for (const agentPath of stored?.windowSelfLockAgents ?? []) {
+      this.activeWindowAgents.add(agentPath);
+    }
     for (const entry of stored?.windowSelfLocks ?? []) {
       this.activeWindowSelfLocks.set(entry.agentPath, validateWindowSelfLock(entry.policy));
       this.activeWindowAgents.add(entry.agentPath);
@@ -864,9 +872,15 @@ export class ProgramRuntimeScheduler {
 
   async persistWindowSelfLocks() {
     if (!this.requestDrivenLockRepository) return;
+    const defaultAgentPaths = defaultWindowSelfLockAgentPaths(
+      this.activeWindowAgents, this.activeWindowSelfLocks
+    );
     await this.requestDrivenLockRepository.save({
       version: 1,
       locks: structuredClone(this.requestDrivenLocks ?? []),
+      ...(defaultAgentPaths.length > 0
+        ? { windowSelfLockAgents: defaultAgentPaths }
+        : {}),
       windowSelfLocks: [...this.activeWindowSelfLocks].map(([agentPath, policy]) => ({
         agentPath, policy: structuredClone(policy)
       }))
@@ -960,9 +974,15 @@ export class ProgramRuntimeScheduler {
         ...replacement
       ];
       if (this.requestDrivenLockRepository) {
+        const defaultAgentPaths = defaultWindowSelfLockAgentPaths(
+          this.activeWindowAgents, this.activeWindowSelfLocks
+        );
         await this.requestDrivenLockRepository.save({
           version: 1,
           locks: next,
+          ...(defaultAgentPaths.length > 0
+            ? { windowSelfLockAgents: defaultAgentPaths }
+            : {}),
           windowSelfLocks: [...this.activeWindowSelfLocks].map(([agentPath, policy]) => ({
             agentPath, policy: structuredClone(policy)
           }))

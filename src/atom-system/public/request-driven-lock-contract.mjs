@@ -71,6 +71,12 @@ export function validateRequestDrivenLockSnapshot(value) {
   const supportedFields = new Set(['thing', 'situation', 'contain', 'support', 'messages']);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.version !== 1 || !Array.isArray(value.locks)
+    || (value.windowSelfLockAgents !== undefined
+      && (!Array.isArray(value.windowSelfLockAgents)
+        || value.windowSelfLockAgents.some((agentPath) => (
+          typeof agentPath !== 'string' || !agentPath
+        ))
+        || new Set(value.windowSelfLockAgents).size !== value.windowSelfLockAgents.length))
     || (value.windowSelfLocks !== undefined && (!Array.isArray(value.windowSelfLocks)
       || value.windowSelfLocks.some((entry) => !entry || typeof entry !== 'object'
         || typeof entry.agentPath !== 'string' || !entry.agentPath

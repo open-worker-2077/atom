@@ -74,6 +74,7 @@
         "selfLockActivation": {
           "trigger": "current-agent-jump-registration",
           "timing": "same-program-cycle",
+          "persistence": "request-driven-snapshot-across-requests",
           "unregisteredAgent": "legacy-access-behavior"
         },
         "transaction": "central-atomic-commit",

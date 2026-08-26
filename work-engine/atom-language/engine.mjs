@@ -718,7 +718,11 @@ export async function executeAtomLanguage(options = {}) {
     ...options, programLockIndex, agentPath: initialAgentPath,
     windowSelfLock: initialWindowSelfLock, enforceWindowSelfLock
   });
-  if (enforceWindowSelfLock) {
+  // Cached projections describe reads performed by an earlier Program cycle. A later
+  // public request must authorize only its own exact target; replaying those historical
+  // dependencies against the active window would turn an unrelated Program read into a
+  // WINDOW_JUMP_LOCK_DENIED before the requested Explore is evaluated.
+  if (enforceWindowSelfLock && programCycle.cached !== true) {
     const programReadByPath = new Map(walkAtoms(atoms).map((match) => (
       [match.path.join('/'), match]
     )));

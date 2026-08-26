@@ -367,6 +367,106 @@ test('explicit jump commit persists a new passive base before later exact CLI re
   assert.equal(restartedExecutions, 0);
 });
 
+test('cached Program reads cannot deny later default-lock Explore targets', async (t) => {
+  const agentPath = 'Root/Acceptance/Job1/Window';
+  const initial = [atom('Root', '', [
+    atom('Acceptance', '', [
+      atom('Job1', '', [
+        atom('Window', '', [atom('Control')], 'agent'),
+        atom('Window Peer')
+      ]),
+      atom('Job2')
+    ]),
+    atom('Other Branch')
+  ])];
+  const files = await fixture(t, initial);
+  const cachedCycle = {
+    cached: true,
+    records: [],
+    locks: [],
+    choices: [],
+    messages: [],
+    transforms: [],
+    slotBodies: [],
+    jumps: [],
+    failures: [],
+    windowSelfLocks: [],
+    windowSelfLockAgents: [agentPath],
+    // This belongs to a previously evaluated Program and is not a read in this request.
+    exploreReadPaths: ['Root/Acceptance/Job2']
+  };
+  const programScheduler = {
+    current: async () => structuredClone(cachedCycle),
+    refresh: async () => structuredClone(cachedCycle)
+  };
+  const request = (thing) => executeAtomLanguage({
+    source: `explore {"thing":"${thing}","situation$full":true}`,
+    ...files,
+    programScheduler,
+    interaction: { agent: { ref: 'window-ref', path: agentPath } }
+  });
+
+  for (const target of [
+    'Window', agentPath,
+    `${agentPath}/Control`,
+    'Root/Acceptance/Job1',
+    'Root/Acceptance/Job1/Window Peer'
+  ]) {
+    const allowed = await request(target);
+    assert.equal(allowed.ok, true, `${target}: ${JSON.stringify(allowed.errors)}`);
+  }
+  for (const target of [
+    'Root/Acceptance/Job2',
+    'Root/Acceptance',
+    'Root/Other Branch'
+  ]) {
+    const denied = await request(target);
+    assert.equal(denied.ok, false, `${target}: ${JSON.stringify(denied)}`);
+    assert.ok(denied.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), target);
+    assert.equal(denied.errors.some((error) => error.code === 'WINDOW_JUMP_LOCK_DENIED'), false);
+  }
+});
+
+test('a guard-only default self-lock activation survives scheduler reconstruction', async (t) => {
+  const agentPath = 'Root/Acceptance/Job1/Window';
+  const initial = [atom('Root', '', [atom('Acceptance', '', [
+    atom('Job1', '', [atom('Window', '', [
+      atom('When', 'def main(arguments):\n    return False', [], 'program'),
+      atom('Where', 'def main(arguments):\n    return explore({"thing":"Root/Acceptance/Job2"})[0]', [], 'program'),
+      atom('Registration', [
+        'jump({',
+        '  "when": explore({"thing":"Root/Acceptance/Job1/Window/When"})[0],',
+        '  "where": explore({"thing":"Root/Acceptance/Job1/Window/Where"})[0]',
+        '})'
+      ].join('\n'), [], 'program')
+    ], 'agent')]),
+    atom('Job2')
+  ])])];
+  const files = await fixture(t, initial);
+  const repository = createJsonRequestDrivenLockRepository({
+    file: path.join(path.dirname(files.contextFile), 'request-driven-locks.json')
+  });
+  const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
+  const interaction = { agent: { ref: 'window-ref', path: agentPath } };
+
+  const activated = await executeAtomLanguage({
+    source: 'transform {"thing.run.":"Root/Acceptance/Job1/Window/Registration"}',
+    ...files,
+    programScheduler: scheduler,
+    interaction
+  });
+  assert.equal(activated.ok, true, JSON.stringify(activated.errors));
+  assert.deepEqual((await repository.load()).windowSelfLockAgents, [agentPath]);
+
+  const restarted = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
+  const cycle = await restarted.current(initial, {
+    agentOrigin: interaction.agent,
+    allowWindowLockSnapshot: true
+  });
+  assert.deepEqual(cycle.windowSelfLockAgents, [agentPath]);
+  assert.deepEqual(cycle.windowSelfLocks, []);
+});
+
 test('invalid destination rolls back the entire jump candidate with a stable error', async (t) => {
   const initial = jumpWorld('Root/Missing');
   const files = await fixture(t, initial);
