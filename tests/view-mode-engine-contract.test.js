@@ -185,6 +185,8 @@ test('holding Shift can start and revise a batch by brushing nodes without prior
   assert.match(toggle, /toggleSelectionKey/);
   assert.match(toggle, /batchSelectionEntries\.set/);
   assert.match(toggle, /batchSelectionEntries\.delete/);
+  assert.match(toggle, /state\.wand\.tapCount\s*=\s*0/);
+  assert.match(toggle, /state\.wand\.lastTapAt\s*=\s*0/);
   assert.match(pointerMove, /toggleBatchSelectionAtHit/);
 });
 

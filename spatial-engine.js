@@ -5993,6 +5993,8 @@
     } else {
       state.batchSelectionEntries.delete(key);
     }
+    state.wand.tapCount = 0;
+    state.wand.lastTapAt = 0;
     state.batchToggleKey = key;
     updateSelectionUI();
     return true;
