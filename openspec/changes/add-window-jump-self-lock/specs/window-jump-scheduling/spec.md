@@ -34,6 +34,10 @@
 - **WHEN** `recycle` 不回收且 `when` 返回 `true`
 - **THEN** 系统恰好执行一次 `where`，并仅以其返回的精确 Thing 坐标作为目的地
 
+#### Scenario: 显式运行绑定当前窗口相对域
+- **WHEN** 当前 Agent 窗口显式运行 jump 注册 Program，`when` 内以 `./…` 读取窗口内节点且 `where` 返回绝对 exact Thing 坐标
+- **THEN** 系统以当前 Agent 窗口为未显式绑定槽域的相对解析根，保留 `where` 绝对 exact 坐标语义，且不放宽已显式绑定的槽例域边界
+
 ### Requirement: 窗口迁移是中央事务中的原子效果
 有效目的地 SHALL 是可作为当前 Agent 窗口新父位置的唯一精确 Thing。迁移、窗口自锁安装或收紧、相对域重绑、触发索引更新与派生 Program 效果 SHALL 在同一候选世界事务中验证并一次提交；任一验证、锁或 Program 失败 SHALL 回滚全部候选效果，窗口保持原位并返回稳定错误。
 

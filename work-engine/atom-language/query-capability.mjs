@@ -2,7 +2,7 @@ import { diagnostic } from './errors.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { createAtomLanguageReceiver } from './receiver.mjs';
-import { resolveSlotRelativeSelector } from './slot-relative-scope.mjs';
+import { parseSlotRelativeSelector, resolveSlotRelativeSelector } from './slot-relative-scope.mjs';
 import { selectCoordinateScope } from './world-laws/coordinates.mjs';
 import { decodeLockAtoms, evaluateLockAccess } from './world-laws/locks.mjs';
 import { createDefaultWorldLawRegistry } from './world-laws/registry.mjs';
@@ -538,7 +538,15 @@ export async function executeProgramExplore({
   const requestedThing = request.thing === undefined
     ? (scopeRoot ? '.' : agentOrigin?.path)
     : request.thing;
-  const resolved = resolveSlotRelativeSelector({ atoms, selector: requestedThing, scopeRoot });
+  const relativeSelector = parseSlotRelativeSelector(requestedThing) !== null;
+  const effectiveScopeRoot = scopeRoot ?? (
+    relativeSelector ? agentOrigin?.path ?? null : null
+  );
+  const resolved = resolveSlotRelativeSelector({
+    atoms,
+    selector: requestedThing,
+    scopeRoot: effectiveScopeRoot
+  });
   const normalizedRequest = { ...request, thing: resolved.selector };
   const parsed = receiver.receive(programObjectSource('explore', normalizedRequest));
   if (!parsed.ok || parsed.batch || parsed.items.length !== 1) {

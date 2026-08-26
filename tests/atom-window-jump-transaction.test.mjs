@@ -227,6 +227,49 @@ test('public contain Explore is independent from stale internal projection axes 
   assert.ok(legacy.errors.some((error) => error.code === 'RETIRED_GRAPH_AXIS'));
 });
 
+test('explicit run binds a window-relative jump guard while preserving its exact destination coordinate', async (t) => {
+  const initial = [atom('Root', '', [
+    atom('Job1', '', [
+      atom('Window', '', [
+        atom('Control', '完成'),
+        atom('When', [
+          'def main(arguments):',
+          '    control = explore({"thing":"./Control","situation$full":True})[0]',
+          '    return control.situation == "完成"'
+        ].join('\n'), [], 'program'),
+        atom('Where', 'def main(arguments):\n    return explore({"thing":"Root/Job2"})[0]', [], 'program'),
+        atom('Registration', [
+          'when_program = explore({"thing":"Root/Job1/Window/When"})[0]',
+          'where_program = explore({"thing":"Root/Job1/Window/Where"})[0]',
+          'destination = explore({"thing":"Root/Job2"})[0]',
+          'jump({',
+          '  "when": when_program,',
+          '  "where": where_program,',
+          '  "lock": {"read":{"allow":[',
+          '    {"priority":2,"from":when_program},',
+          '    {"priority":2,"from":where_program},',
+          '    {"priority":2,"from":destination,"descendants":"all"}',
+          '  ]}}',
+          '})'
+        ].join('\n'), [], 'program')
+      ], 'agent')
+    ]),
+    atom('Job2')
+  ])];
+  const files = await fixture(t, initial);
+  const result = await executeAtomLanguage({
+    source: 'transform {"thing.run.":"Root/Job1/Window/Registration"}',
+    ...files,
+    programScheduler: createProgramRuntimeScheduler(),
+    interaction: { agent: { ref: 'window-ref', path: 'Root/Job1/Window' } }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.deepEqual(childNames(stored[0].contain[0]), []);
+  assert.deepEqual(childNames(stored[0].contain[1]), ['Window']);
+});
+
 test('invalid destination rolls back the entire jump candidate with a stable error', async (t) => {
   const initial = jumpWorld('Root/Missing');
   const files = await fixture(t, initial);
