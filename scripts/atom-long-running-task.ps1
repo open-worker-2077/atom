@@ -2,7 +2,7 @@ function New-AtomLongRunningTaskSettings {
   [CmdletBinding()]
   param()
 
-  New-ScheduledTaskSettingsSet `
+  $settings = New-ScheduledTaskSettingsSet `
     -Hidden `
     -StartWhenAvailable `
     -MultipleInstances IgnoreNew `
@@ -11,4 +11,6 @@ function New-AtomLongRunningTaskSettings {
     -ExecutionTimeLimit ([TimeSpan]::Zero) `
     -RestartCount 999 `
     -RestartInterval (New-TimeSpan -Minutes 1)
+  $settings.UseUnifiedSchedulingEngine = $false
+  $settings
 }

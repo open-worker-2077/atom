@@ -108,6 +108,7 @@ test('long-running Atom task settings survive battery changes and restart crashe
     '  executionTimeLimit = [string]$settings.ExecutionTimeLimit',
     '  restartCount = $settings.RestartCount',
     '  restartInterval = [string]$settings.RestartInterval',
+    '  unifiedScheduling = $settings.UseUnifiedSchedulingEngine',
     '} | ConvertTo-Json -Compress'
   ].join('\n');
   const { stdout } = await execFileAsync('powershell.exe', [
@@ -119,7 +120,8 @@ test('long-running Atom task settings survive battery changes and restart crashe
     startWhenAvailable: true,
     executionTimeLimit: 'PT0S',
     restartCount: 999,
-    restartInterval: 'PT1M'
+    restartInterval: 'PT1M',
+    unifiedScheduling: false
   });
 });
 
