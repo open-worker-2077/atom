@@ -82,6 +82,8 @@ manifest 不永久钉死迁移 revision。中央事务在每次事实提交时�
 
 adapter 将旧外层键规范化为内核四轴，同时把受信 legacy-support entries 标注到不可枚举 provenance。查询/投影可呈现 verb/object 旧关系；support compiler/index 只消费 if/then clause。普通新四轴写入可修改 situation/contain/其他节点并保留 provenance；对某节点显式全文替换 support 才由应用动作清除该节点的 legacy entries。提交前 adapter 生成目标持久编码并由事务层计算/核对权威 revision，因此不会长期锁世界只读，也不会让第一笔写入暗中执行全世界迁移。
 
+server 的 Agent selector resolver 与 interaction runtime 内部 Agent port 都通过同一 world service 读取该世界已缓存事务的 current compatibility manifest，再传入 `readAtomContext`。这只是内部持久 provenance wiring；不向公开 CLI/Program 暴露 manifest，不改变新写入仍只接受四轴的门禁。
+
 ## 10. Program 聚类与一次性结构升级
 
 typed `thing@backup@default` 只通过结构事实自动识别，其下 Program 从编译、调度、trigger 与显式 run/use_program 全部排除，并作为历史事实保留原源码字符。test 根仅由迁移调用方提供 exact selector 并绑定源修订；它用于报告分类而非永久隔离，域内可执行 Program 与活跃 Program 一样必须升级。

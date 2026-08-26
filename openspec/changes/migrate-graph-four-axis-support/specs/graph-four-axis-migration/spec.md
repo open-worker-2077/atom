@@ -45,7 +45,7 @@
 - **THEN** 整批不提交且其他对象保留旧修订
 
 ### Requirement: 持久兼容边界与回退
-旧 reader 只 MAY 存在于版本化持久 adapter 与 planner 中；常规 CLI 输入、Web 编辑、新 Program、Help 与写入 SHALL 只接受新语法。含旧轴的权威快照 MUST 可启动并由受控迁移升级；升级后的受信 legacy-support entry 与新 if/then clause MAY 在同一世界存在，普通四轴写入不得被全世界锁死。用户对一个节点显式全文替换新 support 时，旧 relation 才由该应用动作移除。回退 SHALL 从备份恢复为新的审计修订，不覆盖 backing JSON 或抹除历史，并拒绝跨越后续提交。
+旧 reader 只 MAY 存在于版本化持久 adapter 与 planner 中；常规 CLI 输入、Web 编辑、新 Program、Help 与写入 SHALL 只接受新语法。含旧轴的权威快照 MUST 可启动并由受控迁移升级；升级后的受信 legacy-support entry 与新 if/then clause MAY 在同一世界存在，普通四轴写入不得被全世界锁死。同一长驻世界的所有内部权威读取（包括 Agent selector 解析）MUST 复用该世界事务 persistence 当前的 compatibility manifest，不得另行无授权重读。用户对一个节点显式全文替换新 support 时，旧 relation 才由该应用动作移除。回退 SHALL 从备份恢复为新的审计修订，不覆盖 backing JSON 或抹除历史，并拒绝跨越后续提交。
 
 #### Scenario: 旧世界可启动并受控写入
 - **WHEN** 权威快照仍含旧轴、partners 或旧 Graph ABI Program
@@ -54,6 +54,10 @@
 #### Scenario: 旧入口关闭
 - **WHEN** 常规入口使用旧轴或旧方向标记语法
 - **THEN** 系统返回稳定错误，日常路径不导入 migration reader
+
+#### Scenario: Agent 解析复用事务 manifest
+- **WHEN** 已升级世界仍含受信 legacy-support entry，并通过 exact Agent selector 执行公开 Explore
+- **THEN** server 前置 resolver 与 interaction runtime Agent port 都从同一 world persistence 取当前 manifest，Explore 成功；无 manifest 或伪造 provenance 仍稳定拒绝
 
 #### Scenario: 回退保留历史
 - **WHEN** 对未被后续修订跨越的迁移执行 rollback

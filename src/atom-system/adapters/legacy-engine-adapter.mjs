@@ -20,7 +20,7 @@ export function createLegacyWorldService(options = {}) {
     return transactions.get(key);
   }
 
-  return createWorldService({
+  const service = createWorldService({
     executeLegacyInteraction: async (request) => {
       if (!request.contextFile || !request.projectionFile) return execute(request);
       const persistence = transactionFor(request);
@@ -37,6 +37,17 @@ export function createLegacyWorldService(options = {}) {
           correlationId: request.interaction?.id ?? transition.correlationId
         })
       });
+    }
+  });
+  return Object.freeze({
+    ...service,
+    async compatibilityManifest(request) {
+      if (!request?.contextFile || !request?.projectionFile) return null;
+      const persistence = transactionFor(request);
+      await persistence.recover();
+      return typeof persistence.compatibilityManifest === 'function'
+        ? persistence.compatibilityManifest()
+        : null;
     }
   });
 }

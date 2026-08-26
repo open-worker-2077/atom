@@ -12,7 +12,15 @@ import {
   parseAtomGraphServerArgs,
   startAtomGraphServer
 } from '../work-engine/atom-language/graph-server.mjs';
+import * as graphSchema from '../work-engine/atom-language/graph-schema.mjs';
+import { resolveAgentContext } from '../work-engine/atom-language/cli.mjs';
 import { resolveAtomRuntime } from '../work-engine/atom-language/runtime-config.mjs';
+import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
+import {
+  applyGraphFourAxisWorldMigration,
+  planGraphFourAxisWorldMigration
+} from '../src/atom-system/operations/graph-four-axis-migration.mjs';
+import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -94,6 +102,44 @@ function atomFixture() {
       support: []
     }
   ];
+}
+
+async function migratedLegacySupportWorld(t) {
+  const directory = await temporaryDirectory(t);
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const legacyFacts = [
+    {
+      'name@agent': '冰', detail: '上下文', children: [],
+      partners: [{ verb: '原关系字符', object: 'test' }]
+    },
+    { name: 'test', detail: '目标', children: [], partners: [] }
+  ];
+  await fs.writeFile(contextFile, `${JSON.stringify(legacyFacts, null, 2)}\n`, 'utf8');
+  const plan = planGraphFourAxisWorldMigration({
+    snapshot: { facts: legacyFacts, revision: revisionOfWorldFacts(legacyFacts) },
+    planner: graphSchema.planGraphFourAxisMigration
+  });
+  const persistence = createTransactionalWorldPersistence({
+    contextFile, projectionFile: graphFile, publishLegacyProjection: false
+  });
+  await applyGraphFourAxisWorldMigration({
+    plan,
+    confirmation: true,
+    backup: {
+      create: async () => ({ id: 'verified-test-backup' }),
+      verify: async () => true
+    },
+    persistence,
+    correlationId: 'graph-server-agent-manifest-fixture'
+  });
+  return {
+    contextFile,
+    graphFile,
+    storeFile,
+    compatibilityManifest: await persistence.compatibilityManifest()
+  };
 }
 
 test('graph server arguments default to the shared LocalAppData Atom world', () => {
@@ -280,6 +326,40 @@ test('4784 resolves an Agent selector inside the resident world instead of every
 
   assert.equal(result.agent, 'Root/冰');
   assert.equal(calls[0].agentPath, 'Root/冰');
+});
+
+test('deployed Agent resolution reuses the world compatibility manifest for exact explore', async (t) => {
+  const files = await migratedLegacySupportWorld(t);
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, ...files });
+  t.after(() => running.close());
+
+  const response = await fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source: 'explore {"thing":"test"}',
+      interaction: { id: 'trusted-legacy-agent-explore', agentSelector: '冰', agent: { path: '冰' } },
+      history: []
+    })
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(body.result.ok, true);
+  assert.equal(body.result.agent, '冰');
+});
+
+test('public Agent resolution rejects unauthorized and forged legacy support provenance', async (t) => {
+  const files = await migratedLegacySupportWorld(t);
+  await assert.rejects(resolveAgentContext(files.contextFile, '冰'), {
+    code: 'SUPPORT_OWNER_CURRENT_REQUIRED'
+  });
+  await assert.rejects(resolveAgentContext(files.contextFile, '冰', {
+    compatibilityManifest: {
+      ...files.compatibilityManifest,
+      legacySupport: [{ fingerprint: `sha256:${'0'.repeat(64)}`, occurrences: 1 }]
+    }
+  }), { code: 'GRAPH_COMPATIBILITY_PROVENANCE_MISMATCH' });
 });
 
 test('graph server remains available and reports degraded health when only a disposable projection is pending', async (t) => {

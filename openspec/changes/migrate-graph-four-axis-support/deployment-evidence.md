@@ -45,3 +45,4 @@
 - **变更影响**：GitNexus `detect_changes` 标记世界投影、Program worker 与事务迁移主链为 critical；上述组合与全量覆盖这些受影响链，未发现断言红灯。
 - **最终绑定 preflight**：总控在 `cb7f9d8` 与上述同一 revision/fileHash 上仅读执行，未传 `--apply`、未停服、未写入。结果 `ok=true`、`action=preflight`：11,038 节点，578 个 legacy relation 节点/706 条 relation，93 个 Program，50 个 legacy ABI Program = 5 个 default backup + 45 个可执行；45/45 全部生成确定升级，`blockedPrograms=0`，`testRoots=[]`。
 - **库存守恒解释**：首次报告的47是旧识别器漏识3个点式旧轴 Program 的不完整库存；增强分析后完整库存稳定为50，没有新增或复制 Program。最终 50 = 5 备份 + 45 可执行，45 = 45 已升级 + 0 阻断。
+- **共享部署回归**：主世界与 request-driven-locks 升级后新服务健康，但 Agent selector 前置解析曾未带同一事务 manifest，导致可信 legacy support 在命令前被误拒。本轮仅修复 resolver/world persistence manifest wiring；真实部署证据由总控保管，本分支未读写 shared 4784。

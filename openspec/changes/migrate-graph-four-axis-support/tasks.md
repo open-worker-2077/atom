@@ -75,3 +75,7 @@
 - [x] 10.2 在四轴部署 plan/apply 中接入锁侧车 source/next hash、私有备份、原子替换、严格仓库回读及失败补偿，不增加 runtime legacy wrapper
 - [x] 10.3 红测并实现 operator rollback 同时恢复世界审计修订与原侧车原始字节，验证备份 receipt 覆盖侧车哈希
 - [x] 10.4 运行部署/锁/窗口聚焦、strict OpenSpec、diff check、GitNexus detect_changes，形成 integration-ready 本地提交并脱敏回执
+
+## 11. 共享部署回归收口
+
+- [x] 11.1 Agent selector 解析与 interaction runtime Agent port 复用同一 world persistence manifest；覆盖受信 legacy support 世界 exact Explore 与无授权/伪造 provenance 拒绝

@@ -349,7 +349,14 @@ export async function startAtomGraphServer(options = {}) {
     ...(options.projectionOrchestrator ? { projectionOrchestrator: options.projectionOrchestrator } : {})
   });
   const handlers = createAtomGraphHandlers(interactionRuntime, {
-    resolveAgent: (selector) => resolveAgentContext(configuration.contextFile, selector)
+    resolveAgent: async (selector) => resolveAgentContext(configuration.contextFile, selector, {
+      compatibilityManifest: typeof worldService.compatibilityManifest === 'function'
+        ? await worldService.compatibilityManifest({
+          contextFile: configuration.contextFile,
+          projectionFile: configuration.graphFile
+        })
+        : null
+    })
   });
 
   const initialized = await interactionRuntime.initialize({

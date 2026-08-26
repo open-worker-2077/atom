@@ -731,12 +731,17 @@ async function formatAgentEntryContext(contextFile, agentPath) {
   return formatGraphJson(context, { omitEmptyStructuralArrays: true });
 }
 
-export async function resolveAgentContext(contextFile, selector) {
+export async function resolveAgentContext(contextFile, selector, options = {}) {
   if (typeof selector !== 'string' || !selector.trim()) {
     throw cliError('AGENT_REQUIRED', '公开 Atom CLI 需要 --agent 上下文起点');
   }
   const requested = selector.trim();
-  const atoms = await readAtomContext(contextFile, { create: false });
+  const atoms = await readAtomContext(contextFile, {
+    create: false,
+    ...(options.compatibilityManifest
+      ? { compatibilityManifest: options.compatibilityManifest }
+      : {})
+  });
   let directory = agentDirectories.get(atoms);
   if (!directory) {
     const byName = new Map();

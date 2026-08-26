@@ -352,7 +352,14 @@ export function createLegacyRuntimeComposition(options) {
       submit: (request) => feedbackRecorder({ ...request, contextFile })
     },
     agents: {
-      resolve: (agentPath) => agentResolver(contextFile, agentPath)
+      resolve: async (agentPath) => agentResolver(contextFile, agentPath, {
+        compatibilityManifest: typeof worldService.compatibilityManifest === 'function'
+          ? await worldService.compatibilityManifest({
+            contextFile,
+            projectionFile: graphFile
+          })
+          : null
+      })
     },
     humanStatus: humanStatusTranslator,
     humanWorkspace: humanWorkspaceTranslator,
