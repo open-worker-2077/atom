@@ -152,6 +152,74 @@ test('an explicit selected Program run cannot replace the persisted full-world p
   assert.deepEqual(restored.failures, []);
 });
 
+test('each committed Program create settles the next independent request onto its new revision', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-create-projection-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Root', '', [atom('Audit', '', [], 'agent')])
+  ], null, 2));
+  const projectionRepository = memoryProjectionRepository();
+  const programExecutions = [];
+  const scheduler = createProgramRuntimeScheduler({
+    projectionRepository,
+    runProgram: async ({ program }) => {
+      programExecutions.push(program.path);
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+  const interaction = { agent: { ref: 'audit-ref', path: 'Root/Audit' } };
+  const commitWorld = async ({ facts }) => {
+    await fs.writeFile(contextFile, JSON.stringify(facts, null, 2));
+  };
+
+  const initialized = await executeAtomLanguage({
+    source: 'atom', contextFile, projectionFile, programScheduler: scheduler,
+    programMode: 'project', interaction: { id: 'create-startup', agent: null }
+  });
+  assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
+
+  const createdPredicate = await executeAtomLanguage({
+    source: 'transform new {"thing@program":"Root/Predicate","situation":"def main(arguments):\\n    return False","contain":[],"support":[]}',
+    contextFile, projectionFile, programScheduler: scheduler, commitWorld,
+    interaction: { id: 'create-predicate', ...interaction }
+  });
+  assert.equal(createdPredicate.ok, true, JSON.stringify(createdPredicate.errors));
+  const predicateExecutionsAfterCreate = programExecutions.filter((programPath) => (
+    programPath === 'Root/Predicate'
+  )).length;
+  assert.ok(predicateExecutionsAfterCreate > 0);
+
+  const createdRegistration = await executeAtomLanguage({
+    source: 'transform new {"thing@program":"Root/Registration","situation":"def main(arguments):\\n    return None","contain":[],"support":[]}',
+    contextFile, projectionFile, programScheduler: scheduler, commitWorld,
+    interaction: { id: 'create-registration', ...interaction }
+  });
+  assert.equal(createdRegistration.ok, true, JSON.stringify(createdRegistration.errors));
+  assert.equal(programExecutions.filter((programPath) => (
+    programPath === 'Root/Predicate'
+  )).length, predicateExecutionsAfterCreate);
+  assert.ok(programExecutions.includes('Root/Registration'));
+
+  let readExecutions = 0;
+  const restarted = createProgramRuntimeScheduler({
+    projectionRepository,
+    runProgram: async () => {
+      readExecutions += 1;
+      throw new Error('ordinary exact Explore must consume the committed passive base');
+    }
+  });
+  const audited = await executeAtomLanguage({
+    source: 'explore {"thing":"Root/Registration","situation$full":true}',
+    contextFile, projectionFile, programScheduler: restarted,
+    interaction: { id: 'audit-registration', ...interaction }
+  });
+  assert.equal(audited.ok, true, JSON.stringify(audited.errors));
+  assert.equal(audited.items[0].matches[0].path, 'Root/Registration');
+  assert.equal(readExecutions, 0);
+});
+
 test('a persisted Program projection cannot be reused for a different world revision', async () => {
   const repository = memoryProjectionRepository();
   const scheduler = createProgramRuntimeScheduler({

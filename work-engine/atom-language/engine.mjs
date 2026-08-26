@@ -1438,6 +1438,43 @@ export async function executeAtomLanguage(options = {}) {
     return cycle.runtimeWarnings ?? [];
   }
 
+  async function commitChangedGraph(candidateAtoms, { registrationChange = null } = {}) {
+    await persistChangedGraph({
+      atoms: candidateAtoms,
+      contextFile,
+      projectionFile,
+      rootName: path.basename(contextFile),
+      commitWorld: options.commitWorld,
+      expectedRevision: revisionBefore,
+      correlationId: interaction.id,
+      source,
+      registrationChange,
+      compatibilityManifest: options.compatibilityManifest
+    });
+    if (recycledAgentPath) {
+      await options.programScheduler?.recycleWindowSelfLock?.(recycledAgentPath);
+    }
+    if (movedAgentPaths) {
+      await options.programScheduler?.remapWindowSelfLock?.(
+        movedAgentPaths.previousPath, movedAgentPaths.nextPath
+      );
+    }
+    try {
+      const settleWarnings = await settleContextFreeProgramProjectionForWorld(candidateAtoms);
+      interactionWarnings.push(...settleWarnings.map((warning) => diagnostic(
+        warning.code ?? 'PROGRAM_RUNTIME_WARNING',
+        warning.message ?? 'Program runtime reported a recoverable warning',
+        warning.details ?? {}
+      )));
+    } catch (error) {
+      interactionWarnings.push(diagnostic(
+        'PROGRAM_PROJECTION_RECOVERY_PENDING',
+        'World facts are committed, but the context-free Program projection requires recovery',
+        { cause: error.code ?? error.name ?? 'PROGRAM_PROJECTION_SETTLE_FAILED' }
+      ));
+    }
+  }
+
   function rewritePath(initialPath, pathChanges) {
     return pathChanges.reduce((currentPath, change) => {
       if (currentPath === change.sourcePath
@@ -1475,17 +1512,9 @@ export async function executeAtomLanguage(options = {}) {
 
   if (parsed.command === 'atom') {
     if (programChanged) {
-      await persistChangedGraph({
-        atoms, contextFile, projectionFile, rootName: path.basename(contextFile),
-        commitWorld: options.commitWorld, expectedRevision: revisionBefore,
-        correlationId: interaction.id, source,
-        registrationChange: windowRecycled ? 'window-recycle' : null,
-        compatibilityManifest: options.compatibilityManifest
+      await commitChangedGraph(atoms, {
+        registrationChange: windowRecycled ? 'window-recycle' : null
       });
-      if (recycledAgentPath) await options.programScheduler?.recycleWindowSelfLock?.(recycledAgentPath);
-      if (movedAgentPaths) await options.programScheduler?.remapWindowSelfLock?.(
-        movedAgentPaths.previousPath, movedAgentPaths.nextPath
-      );
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
     const matches = walkAtoms(atoms);
@@ -1504,17 +1533,9 @@ export async function executeAtomLanguage(options = {}) {
 
   if (parsed.command === 'explore') {
     if (programChanged) {
-      await persistChangedGraph({
-        atoms, contextFile, projectionFile, rootName: path.basename(contextFile),
-        commitWorld: options.commitWorld, expectedRevision: revisionBefore,
-        correlationId: interaction.id, source,
-        registrationChange: windowRecycled ? 'window-recycle' : null,
-        compatibilityManifest: options.compatibilityManifest
+      await commitChangedGraph(atoms, {
+        registrationChange: windowRecycled ? 'window-recycle' : null
       });
-      if (recycledAgentPath) await options.programScheduler?.recycleWindowSelfLock?.(recycledAgentPath);
-      if (movedAgentPaths) await options.programScheduler?.remapWindowSelfLock?.(
-        movedAgentPaths.previousPath, movedAgentPaths.nextPath
-      );
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
     if (!parsed.items.length) {
@@ -1735,17 +1756,7 @@ export async function executeAtomLanguage(options = {}) {
       if (!compiled.ok) {
         return failureBase(parsed, contextFile, projectionFile, atoms, compiled.errors);
       }
-      await persistChangedGraph({
-        atoms: nextAtoms,
-        contextFile,
-        projectionFile,
-        rootName: path.basename(contextFile),
-        commitWorld: options.commitWorld,
-        expectedRevision: revisionBefore,
-        correlationId: interaction.id,
-        source,
-        compatibilityManifest: options.compatibilityManifest
-      });
+      await commitChangedGraph(nextAtoms);
       for (const record of [...programTransformLogs, ...transformLogs]) {
         try {
           await appendTransformLog(contextFile, {
@@ -1827,17 +1838,7 @@ export async function executeAtomLanguage(options = {}) {
       }
     }
     const finalCreatePath = rewritePath(created.resultPath, postRefresh.pathChanges);
-    await persistChangedGraph({
-      atoms: nextAtoms,
-      contextFile,
-      projectionFile,
-      rootName: path.basename(contextFile),
-      commitWorld: options.commitWorld,
-      expectedRevision: revisionBefore,
-      correlationId: interaction.id,
-      source,
-      compatibilityManifest: options.compatibilityManifest
-    });
+    await commitChangedGraph(nextAtoms);
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
       await appendTransformLog(contextFile, record);
     }
@@ -1886,35 +1887,7 @@ export async function executeAtomLanguage(options = {}) {
       }
     }
     if (changed) {
-      await persistChangedGraph({
-        atoms: nextAtoms,
-        contextFile,
-        projectionFile,
-        rootName: path.basename(contextFile),
-        commitWorld: options.commitWorld,
-        expectedRevision: revisionBefore,
-        correlationId: interaction.id,
-        source,
-        compatibilityManifest: options.compatibilityManifest
-      });
-      if (recycledAgentPath) await options.programScheduler?.recycleWindowSelfLock?.(recycledAgentPath);
-      if (movedAgentPaths) await options.programScheduler?.remapWindowSelfLock?.(
-        movedAgentPaths.previousPath, movedAgentPaths.nextPath
-      );
-      try {
-        const settleWarnings = await settleContextFreeProgramProjectionForWorld(nextAtoms);
-        interactionWarnings.push(...settleWarnings.map((warning) => diagnostic(
-          warning.code ?? 'PROGRAM_RUNTIME_WARNING',
-          warning.message ?? 'Program runtime reported a recoverable warning',
-          warning.details ?? {}
-        )));
-      } catch (error) {
-        interactionWarnings.push(diagnostic(
-          'PROGRAM_PROJECTION_RECOVERY_PENDING',
-          'World facts are committed, but the context-free Program projection requires recovery',
-          { cause: error.code ?? error.name ?? 'PROGRAM_PROJECTION_SETTLE_FAILED' }
-        ));
-      }
+      await commitChangedGraph(nextAtoms);
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
     const resultMatch = walkAtoms(nextAtoms).find((match) => (
@@ -2002,17 +1975,7 @@ export async function executeAtomLanguage(options = {}) {
     }
   }
   if (changed) {
-    await persistChangedGraph({
-      atoms: nextAtoms,
-      contextFile,
-      projectionFile,
-      rootName: path.basename(contextFile),
-      commitWorld: options.commitWorld,
-      expectedRevision: revisionBefore,
-      correlationId: interaction.id,
-      source,
-      compatibilityManifest: options.compatibilityManifest
-    });
+    await commitChangedGraph(nextAtoms);
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
       await appendTransformLog(contextFile, record);
     }

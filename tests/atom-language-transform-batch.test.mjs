@@ -75,7 +75,11 @@ test('batch Transform commits all items once and refreshes one interaction lifec
     ]
   );
   assert.equal(writes.length, 1, 'the whole batch is one authoritative commit');
-  assert.equal(refreshes, 2, 'Programs refresh once before and once after the batch, not per item');
+  assert.equal(
+    refreshes,
+    3,
+    'Programs refresh before the batch, for trigger consequences, and once for the committed base'
+  );
 
   const [sourceA, sourceB] = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
   assert.deepEqual(sourceA.support, supports('来源乙'));

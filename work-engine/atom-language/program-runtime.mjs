@@ -214,6 +214,24 @@ function reusableCandidates(
     && !(entry.contextIncomplete === true && scopePath));
 }
 
+function programMayResolveAnotherProgram(program) {
+  return /\buse_program\b/u.test(program.detail);
+}
+
+function reusableProgramCandidates(
+  cache, program, isolateFailures, agentOrigin, records, availablePrograms
+) {
+  const completeSetCandidates = reusableCandidates(
+    cache, [program], isolateFailures, agentOrigin, records, availablePrograms
+  );
+  if (completeSetCandidates.length || programMayResolveAnotherProgram(program)) {
+    return completeSetCandidates;
+  }
+  return reusableCandidates(
+    cache, [program], isolateFailures, agentOrigin, records, [program]
+  );
+}
+
 function semanticRecord(record, recordsByRef) {
   return {
     path: record.path,
@@ -1339,6 +1357,22 @@ export class ProgramRuntimeScheduler {
         while (this.completed.size > this.maxCompleted) {
           this.completed.delete(this.completed.keys().next().value);
         }
+        if (!options.programSelector) {
+          const projectionWarning = await this.saveProjection({
+            records,
+            programs,
+            isolateFailures,
+            value,
+            requests: reusable.requests,
+            agentOrigin: options.agentOrigin
+          });
+          if (projectionWarning) {
+            value.runtimeWarnings = [
+              ...(value.runtimeWarnings ?? []),
+              projectionWarning
+            ];
+          }
+        }
         return value;
       }
     }
@@ -1386,8 +1420,8 @@ export class ProgramRuntimeScheduler {
       const dormantFailure = this.dormantFailures.get(dormantKey) ?? null;
       const previousEntry = options.force === true
         ? null
-        : reusableCandidates(
-          this.programReusable, [program], isolateFailures, options.agentOrigin,
+        : reusableProgramCandidates(
+          this.programReusable, program, isolateFailures, options.agentOrigin,
           records, availablePrograms
         )[0];
       let previous = previousEntry?.[1] ?? null;
@@ -1532,7 +1566,7 @@ export class ProgramRuntimeScheduler {
             [program], availablePrograms, isolateFailures, records
           );
         if (!slotInvocation && !(options.slotScopeRoot) && (!contextDependent || scopePath)) {
-          this.programReusable.set(stateKey, {
+          const reusableState = {
             contextDependent,
             scopePath: contextDependent ? scopePath : null,
             requests: uniqueRequests,
@@ -1540,7 +1574,16 @@ export class ProgramRuntimeScheduler {
             worldKey: currentWorldKey,
             result,
             records
-          });
+          };
+          this.programReusable.set(stateKey, reusableState);
+          if (!programMayResolveAnotherProgram(program)) {
+            const independentStateKey = contextDependent
+              ? contextualProgramSetFingerprint(
+                [program], [program], isolateFailures, scopePath, records
+              )
+              : reusableProgramSetFingerprint([program], [program], isolateFailures, records);
+            this.programReusable.set(independentStateKey, reusableState);
+          }
         }
         return { programPath: program.path, result, cached: false, requests: uniqueRequests, contextDependent };
       } catch (error) {
