@@ -199,6 +199,8 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   assert.equal(code, 0, stderr.value());
   assert.match(stdout.value(), /普通可自运行候选 DataFlow/u);
   assert.match(stdout.value(), /槽模／print@program／槽例/u);
+  assert.match(stdout.value(), /explore \{"thing":"EXACT槽体\/print\/修订","contain\$latitude-1":true\}/u);
+  assert.doesNotMatch(stdout.value(), /explore \{"name":"EXACT槽体\/print\/修订"|复制[^\n]*默认料/u);
   assert.match(stdout.value(), /use_program[\s\S]*revision/u);
   assert.match(stdout.value(), /thing\.run\.EXACT候选根路径[\s\S]*\.\/相对 contain 路径[\s\S]*当前槽例域/u);
   assert.match(stdout.value(), /"thing":"EXACT槽体\/槽例\/实例\/槽"[\s\S]*situation\.rep\.填写值/u);
