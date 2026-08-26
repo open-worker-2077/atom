@@ -960,6 +960,11 @@ export async function executeAtomLanguage(options = {}) {
     const after = revisionOf(atoms);
     if (before !== after) {
       programChanged = true;
+      initialProgramTriggerNodes.push(
+        transformed.sourcePath,
+        transformed.resultPath,
+        transformed.resultName
+      );
       programTransformLogs.push({
         id: crypto.randomUUID(),
         operation: 'program-transform',
@@ -1360,6 +1365,31 @@ export async function executeAtomLanguage(options = {}) {
     throw error;
   }
 
+  async function refreshProgramProjectionForWorld(candidateAtoms, triggerNodes) {
+    if (!options.programScheduler || triggerNodes.length === 0) return programLockIndex;
+    const unrestricted = createAccessController(candidateAtoms, {});
+    const preparedWorld = prepareExploreWorld(candidateAtoms);
+    const cycle = await options.programScheduler.refresh(candidateAtoms, {
+      agentOrigin: interaction.agent,
+      isolateFailures: true,
+      triggerEvent: { mode: 'transform', nodes: triggerNodes },
+      executeExplore: (request, executionContext = {}) => executeProgramExplore({
+        atoms: candidateAtoms,
+        request,
+        receiver,
+        accessController: unrestricted,
+        agentOrigin: interaction.agent,
+        scopeRoot: executionContext.scopeRoot ?? null,
+        preparedWorld
+      })
+    });
+    return buildProgramLockIndex({
+      revision: revisionOf(candidateAtoms),
+      results: options.bypassProgramLocks ? [] : cycle.locks,
+      records: cycle.records
+    });
+  }
+
   function rewritePath(initialPath, pathChanges) {
     return pathChanges.reduce((currentPath, change) => {
       if (currentPath === change.sourcePath
@@ -1371,10 +1401,7 @@ export async function executeAtomLanguage(options = {}) {
   }
 
   if (programChanged && (
-    parsed.command === 'atom'
-    || parsed.command === 'explore'
-    || strictSlotRecompute
-    || Boolean(requestedProgramRun?.selector)
+    parsed.command === 'atom' || parsed.command === 'explore' || strictSlotRecompute
   )) {
     let reconciled;
     try {
@@ -1797,6 +1824,19 @@ export async function executeAtomLanguage(options = {}) {
     const nextAtoms = atoms;
     const revisionAfter = revisionOf(nextAtoms);
     const changed = programChanged;
+    let finalProgramLockIndex = programLockIndex;
+    if (changed && !strictSlotRecompute) {
+      try {
+        finalProgramLockIndex = await refreshProgramProjectionForWorld(
+          nextAtoms,
+          [...new Set(initialProgramTriggerNodes.filter(Boolean))]
+        );
+      } catch (error) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
+        )]);
+      }
+    }
     if (changed) {
       await persistChangedGraph({
         atoms: nextAtoms,
@@ -1836,7 +1876,7 @@ export async function executeAtomLanguage(options = {}) {
       errors: [],
       messages: interactionMessages,
       interactionId: interaction.id,
-      lockState: programLockState(programLockIndex)
+      lockState: programLockState(finalProgramLockIndex)
     };
   }
 
