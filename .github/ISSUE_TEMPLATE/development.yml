@@ -1,0 +1,75 @@
+name: 开发事项
+description: 登记一个可独立开发、验证和交付的功能、修复或内核变更
+title: "[Dev] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issue 是该事项的工作事实入口。代码完成不等于交付完成；只有真实验收成立后才能关闭。
+  - type: textarea
+    id: goal
+    attributes:
+      label: 目标状态
+      description: 用可验证的结果描述完成后必须达到什么状态，不写实施过程。
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: 当前事实与证据
+      description: 写明当前行为、错误码、相关提交或脱敏证据。
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 边界与非目标
+      description: 明确允许修改和禁止扩展的范围，避免把实例逻辑写入内核。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完成与真实验收条件
+      description: 同时列出自动测试、实际运行、正反例、回退、用户审核等必要条件。
+      placeholder: |
+        - [ ] 代码与聚焦测试完成
+        - [ ] 完整回归通过
+        - [ ] 真实运行环境通过
+        - [ ] 正反例结果符合预期
+        - [ ] 回退路径通过
+        - [ ] 交付证据经总控审核
+    validations:
+      required: true
+  - type: input
+    id: session
+    attributes:
+      label: 专职 Session
+      description: 填写持续负责该职责的 Codex Session 标题或链接；不得使用一次性 Agent。
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 依赖与阻断关系
+      description: 列出 blocked by / blocking 的 Issue；没有则写“无”。
+    validations:
+      required: true
+  - type: dropdown
+    id: openspec
+    attributes:
+      label: OpenSpec
+      description: 只有长期稳定、跨层或难回退的契约变更才需要 OpenSpec。
+      options:
+        - 不需要
+        - 已有关联变更
+        - 需要新建
+    validations:
+      required: true
+  - type: checkboxes
+    id: delivery
+    attributes:
+      label: 交付纪律
+      options:
+        - label: 我确认不会把开发提交、自动测试或局部门禁通过单独宣称为整体交付完成
+          required: true
