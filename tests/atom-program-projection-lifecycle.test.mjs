@@ -190,6 +190,57 @@ test('passive read preparation fails closed without a validated context-free pro
   assert.equal(executions, 0);
 });
 
+test('startup isolates Agent-bound jump failures into a restartable context-free passive projection', async () => {
+  const repository = memoryProjectionRepository();
+  const world = [
+    atom('Stable Program', '# context-free lock', [], 'program'),
+    atom('Jump Program', '# Agent-bound jump', [], 'program')
+  ];
+  const startup = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async ({ program }) => {
+      if (program.path === 'Jump Program') {
+        throw Object.assign(new Error('jump requires one active Agent window'), {
+          code: 'WINDOW_JUMP_DESTINATION_INVALID'
+        });
+      }
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+
+  const built = await startup.refresh(world, { isolateFailures: true });
+  assert.deepEqual(built.failures, []);
+  assert.equal(built.contextIncomplete, true);
+  assert.ok(await repository.load(), 'startup must persist the validated context-free base');
+
+  const agentCycle = await startup.refresh(structuredClone(world), {
+    isolateFailures: true,
+    force: true,
+    agentOrigin: { ref: 'agent-ref', path: 'Root/Window' }
+  });
+  assert.deepEqual(agentCycle.failures.map(({ code }) => code), [
+    'WINDOW_JUMP_DESTINATION_INVALID'
+  ]);
+
+  let restartedExecutions = 0;
+  const restarted = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async () => {
+      restartedExecutions += 1;
+      throw new Error('passive restore must not execute Programs');
+    }
+  });
+  const restored = await restarted.refresh(structuredClone(world), {
+    isolateFailures: true,
+    passive: true,
+    agentOrigin: { ref: 'agent-ref', path: 'Root/Window' }
+  });
+
+  assert.equal(restored.cached, true);
+  assert.equal(restored.contextIncomplete, true);
+  assert.equal(restartedExecutions, 0);
+});
+
 test('a legacy persisted failure is rejected and retried instead of becoming authoritative', async () => {
   const repository = memoryProjectionRepository();
   const world = [atom('Program', '# retry legacy failure', [], 'program')];

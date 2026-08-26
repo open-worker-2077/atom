@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
 import { createJsonRequestDrivenLockRepository } from '../src/atom-system/adapters/json-request-driven-lock-repository.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeProgramExplore } from '../work-engine/atom-language/engine.mjs';
@@ -297,16 +298,14 @@ test('explicit jump run persists the moved self-lock before later exact CLI requ
   ])];
   const files = await fixture(t, initial);
   const snapshotFile = path.join(path.dirname(files.contextFile), 'request-driven-locks.json');
+  const programProjectionFile = path.join(path.dirname(files.contextFile), 'program-projection.json');
   const repository = createJsonRequestDrivenLockRepository({ file: snapshotFile });
-  const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
-  const movedPath = 'Root/Acceptance/Job2/Window';
-  const request = (source) => executeAtomLanguage({
-    source,
-    ...files,
-    programMode: null,
-    programScheduler: scheduler,
-    interaction: { agent: { ref: 'window-ref', path: movedPath } }
+  const projectionRepository = createJsonProgramProjectionRepository({ file: programProjectionFile });
+  const scheduler = createProgramRuntimeScheduler({
+    requestDrivenLockRepository: repository,
+    projectionRepository
   });
+  const movedPath = 'Root/Acceptance/Job2/Window';
 
   const moved = await executeAtomLanguage({
     source: 'transform {"thing.run.":"Root/Acceptance/Job1/Window/Registration"}',
@@ -317,6 +316,43 @@ test('explicit jump run persists the moved self-lock before later exact CLI requ
   assert.equal(moved.ok, true, JSON.stringify(moved.errors));
   assert.deepEqual((await repository.load()).windowSelfLocks.map((entry) => entry.agentPath), [movedPath]);
 
+  const projected = await executeAtomLanguage({
+    source: 'atom', ...files,
+    programMode: 'project',
+    programScheduler: scheduler,
+    interaction: { id: 'startup-after-jump', agent: null }
+  });
+  assert.equal(projected.ok, true, JSON.stringify(projected.errors));
+  assert.equal(projected.revisionAfter, moved.revisionAfter);
+
+  let restartedExecutions = 0;
+  const restarted = createProgramRuntimeScheduler({
+    requestDrivenLockRepository: repository,
+    projectionRepository,
+    runProgram: async () => {
+      restartedExecutions += 1;
+      throw new Error('same-revision passive reads must not execute Programs');
+    }
+  });
+  const interaction = { agent: { ref: 'window-ref', path: movedPath } };
+  const prepared = await executeAtomLanguage({
+    source: 'atom', ...files,
+    programMode: 'passive',
+    programScheduler: restarted,
+    interaction
+  });
+  assert.equal(prepared.ok, true, JSON.stringify(prepared.errors));
+  assert.equal(prepared.revisionAfter, moved.revisionAfter);
+  assert.equal(restartedExecutions, 0);
+
+  const request = (source) => executeAtomLanguage({
+    source,
+    ...files,
+    programMode: null,
+    programScheduler: restarted,
+    interaction
+  });
+
   const parent = await request('explore {"thing":"Root/Acceptance/Job2","situation$full":true}');
   assert.equal(parent.ok, true, JSON.stringify(parent.errors));
   for (const target of ['Root/Acceptance/Job1', 'Root/Acceptance']) {
@@ -324,6 +360,7 @@ test('explicit jump run persists the moved self-lock before later exact CLI requ
     assert.equal(denied.ok, false, `${target}: ${JSON.stringify(denied)}`);
     assert.ok(denied.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), target);
   }
+  assert.equal(restartedExecutions, 0);
 });
 
 test('invalid destination rolls back the entire jump candidate with a stable error', async (t) => {

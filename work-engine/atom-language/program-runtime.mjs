@@ -1550,7 +1550,8 @@ export class ProgramRuntimeScheduler {
         await recordProgramDiagnostic({
           program, requests: uniqueRequests, startedAt: executionStartedAt, error
         });
-        const contextDependent = requestsDependOnAgent(uniqueRequests);
+        const contextDependent = requestsDependOnAgent(uniqueRequests)
+          || failure.code.startsWith('WINDOW_JUMP_');
         if (contextDependent && !scopePath) {
           return { programPath: program.path, failure, cached: false, requests: uniqueRequests, contextDependent };
         }
