@@ -52,17 +52,17 @@ Program endpoint MUST 沿用 main(arguments)、current_atom、explore/transform�
 - **WHEN** 既有 Program 使用 main(arguments)
 - **THEN** 四轴迁移后参数和返回契约不变
 
-### Requirement: Program 节点迁移不静默改义
-迁移 SHALL 保持 thing@program identity、situation 源码字符、contain、support、锁和 trigger。任何旧 Graph ABI 调用 SHALL 保留原文，禁止 AST 批改、全局替换或猜测改写。只有 revision-bound manifest 以 exact path/source hash 命中的存量 Program 可由内部 worker wrapper 解释旧 Graph 调用；新 Program 与源码变化 Program只接受新 ABI。默认备份仓与调用方 exact test 隔离根可按结构排除执行。
+### Requirement: Program 节点只保留新 ABI
+迁移 SHALL 保持 thing@program identity、contain、support、锁、trigger 与业务计算语义。旧 Graph ABI 只可由一次性 upgrader 在 AST 证明后修改 Graph API 结构键与 AtomView 属性 token；不得全局替换或修改普通字符串。无法唯一升级者 MUST 阻断迁移。正式 worker/runtime 与 manifest MUST 不含 legacy Program wrapper、双 ABI 分支或兼容授权。默认备份仓 Program 保留原字符但不可执行；活跃与 exact test 可执行 Program 升级后全部只接受新 ABI。
 
 #### Scenario: 旧 Program 使用 name
 - **WHEN** dry-run 的 AST 发现源码调用 explore({name:...}) 且 key 是 literal Graph 参数
-- **THEN** 报告精确 Program 路径、源码哈希与位置，源码保持不变并由 manifest 决定兼容或隔离
+- **THEN** 报告精确 Program 路径、before/after 源码哈希、位置与 `name→thing` edit，并在同一事务提交升级源码
 
 #### Scenario: 普通正文提到旧轴
 - **WHEN** Program 注释、字符串或非 Graph object 中出现 name/detail/children/partners
 - **THEN** 源码字符保持不变且不得被识别为可迁移调用
 
-#### Scenario: 隔离 Program 不重放
-- **WHEN** 旧 Program 位于隔离根或包含不可证明等价的旧 ABI 调用
-- **THEN** 冷启动、trigger、use_program 与迁移均不执行该 Program，并返回稳定的隔离诊断
+#### Scenario: 歧义 Program 不靠 wrapper 运行
+- **WHEN** 非备份 Program 包含不可证明等价的旧 ABI 调用
+- **THEN** 迁移门禁列出精确 Program 并拒绝提交；运行时不提供兼容执行路径

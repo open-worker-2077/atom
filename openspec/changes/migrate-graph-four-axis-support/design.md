@@ -70,11 +70,11 @@ selector 支持 exact 与 current-domain relative；槽例 `./` 绑定当前实�
 
 ## 8. 迁移与回退
 
-迁移先生成与 source revision/facts hash 绑定的可恢复备份，再通过受控事务只改四个外层结构键：`name→thing`、`detail→situation`、`children→contain`、`partners→support`。partners 数组整体原样搬入 support，绝不改写 `{verb,object}`、生成业务节点或猜作 if/then。节点数量、路径、contain 拓扑、类型后缀、situation bytes、relation source/ordinal/字符/顺序必须全量守恒。
+迁移先生成与 source revision/facts hash 绑定的可恢复备份，再通过受控事务改四个外层结构键：`name→thing`、`detail→situation`、`children→contain`、`partners→support`，并提交已由 AST 证明的 Program 结构 token edits。partners 数组整体原样搬入 support，绝不改写 `{verb,object}`、生成业务节点或猜作 if/then。节点数量、路径、contain 拓扑、类型后缀、非 Program situation bytes、Program 普通源码片段与业务计算、relation source/ordinal/字符/顺序必须全量守恒。
 
-同一原子提交写入升级后的事实和内核拥有的 migration manifest。manifest 记录 source/target revision、facts hash、legacy-support 所在 exact path/ordinal，以及旧 ABI Program 的 exact path/source hash；它不是 Atom 业务节点。回退通过事务历史恢复事实与对应 manifest 版本，不直接改 backing JSON。
+同一原子提交写入升级后的事实和内核拥有的 migration manifest。manifest 记录 source/target revision、facts hash 与 legacy-support 所在 exact path/ordinal；Program 升级审计留在 migration plan/receipt，不进入运行时授权 manifest。manifest 不是 Atom 业务节点。回退通过事务历史恢复事实、Program 原源码与对应 manifest 版本，不直接改 backing JSON。
 
-manifest 不永久钉死迁移 revision。中央事务在每次事实提交时同步推进 `currentWorldRevision`：legacy-support 用迁移数组内容指纹与授权出现次数验证并延续，因此节点改名/移动不丢 provenance，显式 support 替换会减少资格；Program 只在 exact path 与 source hash 均未改变时延续，源码变化、删除、新建、复制、改名或移动均撤销。重启若 manifest revision 与事实不一致，兼容能力 fail closed。
+manifest 不永久钉死迁移 revision。中央事务在每次事实提交时同步推进 `currentWorldRevision`：legacy-support 用迁移数组内容指纹与授权出现次数验证并延续，因此节点改名/移动不丢 provenance，显式 support 替换会减少资格。manifest 不含 Program ABI 授权；重启若 manifest revision 与事实不一致，legacy relation provenance fail closed，但 Program 始终只有新 ABI。
 
 ## 9. 存量读取与写入隔离
 
@@ -82,24 +82,28 @@ manifest 不永久钉死迁移 revision。中央事务在每次事实提交时�
 
 adapter 将旧外层键规范化为内核四轴，同时把受信 legacy-support entries 标注到不可枚举 provenance。查询/投影可呈现 verb/object 旧关系；support compiler/index 只消费 if/then clause。普通新四轴写入可修改 situation/contain/其他节点并保留 provenance；对某节点显式全文替换 support 才由应用动作清除该节点的 legacy entries。提交前 adapter 生成目标持久编码并由事务层计算/核对权威 revision，因此不会长期锁世界只读，也不会让第一笔写入暗中执行全世界迁移。
 
-## 10. Program 聚类与结构迁移
+## 10. Program 聚类与一次性结构升级
 
-隔离根只通过结构事实决定：typed `thing@backup@default` 自动识别；test 根由迁移调用方提供 exact selector 并绑定源修订，不按短名或正文猜测。隔离根下 Program 从编译、调度、trigger、显式 run/use_program 全部排除，但仍保留在 Explore 与迁移报告中。
+typed `thing@backup@default` 只通过结构事实自动识别，其下 Program 从编译、调度、trigger 与显式 run/use_program 全部排除，并作为历史事实保留原源码字符。test 根仅由迁移调用方提供 exact selector 并绑定源修订；它用于报告分类而非永久隔离，域内可执行 Program 与活跃 Program 一样必须升级。
 
-Python AST 只用于定位/审计旧 Graph ABI 调用，不产生源码 edits。worker 在运行前取得当前 world revision 与 manifest；仅 exact path、source hash、revision 三者命中时启用内部 legacy ABI adapter。adapter 在 Program 调用边界把 name/detail/children/partners 映射到内核规范形，并把 AtomView 结果映射回该 Program 既有字段视图；源码本身逐字不变。新建 Program、源码改变或 manifest 漂移均只获得严格新 ABI。
+Python AST 先定位 Graph API 调用和 AtomView 数据来源，再在 module/function 的词法语句块内建立保守定义使用关系，生成只覆盖结构 token 的 source edits：`explore/transform` 首个 literal dict 的旧轴 key 映射为新轴；局部 Name 作为 dict key 时，仅当同一 block 的唯一旧轴常量定义支配唯一 key 消费且无重赋值/逃逸/副作用，才修改该结构前缀；局部 Name 作为整个 Graph specification 时，仅当支配该调用的单一 reaching definition 是未变异、未逃逸的 dict，才迁移该 dict 的结构 key。批量 specification List 可进入 For.iter，并允许额外用 `len(binding)` 产生只读计数回执，其他用途仍视为逃逸。仅对可证明源自 `explore` 或 `current_atom` 的 AtomView 属性访问映射旧属性。`direct_children` 的身份传播不凭函数名信任，而是每次对正式 `program_stdlib.py` 实现做结构证明：返回列表唯一写入为输入 rows 循环变量原对象；证明失配或 Program 自定义同名函数即关闭该资格。普通字符串、注释、标识符、业务表达式和其他对象属性保持原字节。多定义、控制流歧义、动态拼接、字典展开、别名写入、来源不明的旧属性访问或其他不能唯一等价转换的形态必须以 exact path/source hash/行列/原因阻断，不能猜测。
+
+预检输出每个 Program 的 before/after source hash、逐项 edit 与 blocker。`readyToCommit` 仅在所有非备份可执行旧 ABI Program 都具有唯一升级结果且升级后 AST 复检不含旧 Graph ABI 时成立。升级源码与四轴外层结构在同一 revision-bound 事务提交，备份和 rollback 覆盖原源码。提交后 worker、Program runtime 与 manifest 均无 legacy ABI wrapper/授权；所有可执行 Program 只走新 ABI。
 
 ## 11. 全量预检与提交门禁
 
-预检一次 DFS 同时产出世界结构计数、partner 完整清单、Program 调用清单、隔离分类、目标编码守恒摘要和问题集合，不以异常实现首错退出。`readyToCommit` 只有在所有节点/路径/contain/situation/relation 守恒、每个旧 Program 都有 `legacy-wrapper/isolate` 处置、备份端口可用且 source revision 未漂移时为 true。
+预检一次 DFS 同时产出世界结构计数、partner 完整清单、Program 调用清单、报告分类、目标编码守恒摘要和问题集合，不以异常实现首错退出。`readyToCommit` 只有在所有节点/路径/contain/relation 守恒、普通 situation 字节守恒、默认备份 Program 源码守恒、每个非备份旧 Program 均已唯一升级并复检为新 ABI、备份端口可用且 source revision 未漂移时为 true。任一 blocker 都携带 exact Program path/source hash/行列并关闭上线门禁。
 
 apply 顺序固定为：只读预检 → 创建源 revision/facts hash 绑定备份 → 回读验证备份 → 再次核对 revision → 单次原子 commit → 四轴全量回读 → 记录 rollback target。任一步失败均不提交；rollback 仍走事务历史创建新审计修订。
+
+部署脚本的 CLI 名称可保留 `--isolated-root` 以兼容操作手册，但进入 operation 时必须显式映射为 `testRoots`，输出也使用 `testRoots`。它只决定报告分类，不能恢复 test 执行隔离或绕过源码升级。
 
 # Risks / Trade-offs
 
 - 显式枢纽增加节点数量，但换取局部可读、可审计和机制归属。
 - 首版拒绝原生 M→N，避免预设计；后续只能基于真实生产涌现另开变更。
 - Web 需处理视觉压缩与真实节点同时存在，命中测试必须锁定身份。
-- 持久 adapter 与 manifest 增加内核复杂度；以 revision/path/hash 三重绑定和公开输入负测防止兼容能力泄漏。
+- 一次性 Program source upgrader 需要保守数据流证明；宁可精确阻断少量歧义 Program，也不在正式内核保留双 ABI 或猜测业务语义。
 - legacy-support 可与新 clause 共存，查询展示需区分两类关系；索引测试必须证明 legacy entry 永不进入推理。
 
 # Open Questions

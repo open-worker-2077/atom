@@ -1,4 +1,4 @@
-[
+export default [
   {
     "name@agent": "迁移验收窗口",
     "detail": "正文中的 name/detail/children/partners 不得被替换",
@@ -17,4 +17,4 @@
     ],
     "partners": []
   }
-]
+];

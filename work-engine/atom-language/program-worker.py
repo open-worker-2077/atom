@@ -155,7 +155,7 @@ ALLOWED_METHODS = {
 }
 
 
-def validate_program(source, filename, legacy_graph_abi=False):
+def validate_program(source, filename):
     try:
         tree = ast.parse(source, filename=filename, mode="exec")
     except SyntaxError:
@@ -191,7 +191,7 @@ def validate_program(source, filename, legacy_graph_abi=False):
                     )
             else:
                 raise ProgramSecurityError("Indirect callable expressions are not allowed in Atom Program")
-            if (not legacy_graph_abi and isinstance(node.func, ast.Name)
+            if (isinstance(node.func, ast.Name)
                     and node.func.id in {"explore", "transform"}
                     and node.args and isinstance(node.args[0], ast.Dict)):
                 retired = [
@@ -202,7 +202,7 @@ def validate_program(source, filename, legacy_graph_abi=False):
                 ]
                 if retired:
                     raise ProgramSecurityError(
-                        "Retired Graph axes require a migration-manifest legacy ABI: "
+                        "Retired Graph axes are not executable; run the four-axis Program upgrader: "
                         + ", ".join(retired)
                     )
     return tree
@@ -279,17 +279,6 @@ class AtomView:
         return f"AtomView(thing={self.thing!r}, path={self.path!r})"
 
 
-class LegacyAtomView(AtomView):
-    __slots__ = ("name", "detail", "children", "partners")
-
-    def __init__(self, record):
-        super().__init__(record)
-        self.name = self.thing
-        self.detail = self.situation
-        self.children = tuple(record.get("childrenRefs", []))
-        self.partners = self.support
-
-
 class EngineCallError(RuntimeError):
     def __init__(self, code, message):
         super().__init__(message)
@@ -310,25 +299,11 @@ LEGACY_GRAPH_AXES = {
 }
 
 
-def legacy_graph_specification(value):
-    """Map only the public call's structural keys; never rewrite source or values."""
-    value = require_object(value, "legacy Graph ABI")
-    mapped = {}
-    for key, item in value.items():
-        base, separator, suffix = key.partition("@")
-        next_base = LEGACY_GRAPH_AXES.get(base, base)
-        next_key = next_base + (separator + suffix if separator else "")
-        mapped[next_key] = item
-    return mapped
-
-
 def main():
     request = json.loads(sys.stdin.readline())
     records = request["world"]
-    legacy_graph_abi = request.get("legacyGraphAbi") is True
-    view_type = LegacyAtomView if legacy_graph_abi else AtomView
     by_ref = {record["ref"]: record for record in records}
-    views = {ref: view_type(record) for ref, record in by_ref.items()}
+    views = {ref: AtomView(record) for ref, record in by_ref.items()}
     effects = {
         "locks": [], "messages": [], "transforms": [], "choices": [],
         "slotBodies": [], "jumps": [], "changedThings": []
@@ -364,15 +339,13 @@ def main():
             if isinstance(item, dict):
                 ref = item["ref"]
                 by_ref[ref] = item
-                views[ref] = view_type(item)
+                views[ref] = AtomView(item)
                 result_refs.append(ref)
             else:
                 result_refs.append(item)
         return result_refs
 
     def explore(query):
-        if legacy_graph_abi:
-            query = legacy_graph_specification(query)
         result_refs = remember(call_engine("explore", query))
         return [views[ref] for ref in result_refs]
 
@@ -386,8 +359,6 @@ def main():
 
     def transform(specification):
         specification = require_object(specification, "transform")
-        if legacy_graph_abi:
-            specification = legacy_graph_specification(specification)
         effects["transforms"].append(specification)
 
     def slot_body(specification):
@@ -1144,9 +1115,7 @@ def main():
             raise ValueError(f"Recursive Program reference is not allowed: {target['path']}")
         if len(program_stack) >= 8:
             raise ValueError("Program reference depth exceeds 8")
-        target_tree = validate_program(
-            target["detail"], target["path"], target.get("legacyGraphAbi") is True
-        )
+        target_tree = validate_program(target["detail"], target["path"])
         child_namespace = dict(namespace)
         child_namespace["use_program"] = use_program
         program_stack.append(target["ref"])
@@ -1167,9 +1136,7 @@ def main():
             "Program function registry contains unimplemented functions: "
             + ", ".join(sorted(missing_implementations))
         )
-    program_tree = validate_program(
-        request["program"]["detail"], request["program"]["path"], legacy_graph_abi
-    )
+    program_tree = validate_program(request["program"]["detail"], request["program"]["path"])
     trigger_contract = extract_trigger_contract(program_tree)
     if request.get("validateOnly") is True:
         sys.stdout.write(json.dumps(

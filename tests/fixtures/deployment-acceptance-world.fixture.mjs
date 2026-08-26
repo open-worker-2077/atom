@@ -1,8 +1,8 @@
-[
+export default [
   {
     "thing@agent": "部署验收窗口",
     "situation": "仅供隔离的新运行时加载、健康与回退演练",
     "contain": [],
     "support": []
   }
-]
+];

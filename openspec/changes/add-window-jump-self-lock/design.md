@@ -81,6 +81,8 @@ Each rule includes its exact start and optionally the start's unique direct pare
 
 Overrides live in the existing request-driven lock snapshot repository as a separate `windowSelfLocks` record keyed by the locked Agent path and source Program. Jump atomically remaps the key when it moves that same Agent. A same-window replacement is accepted only if set inclusion proves that every newly allowed coordinate was already allowed; priority/rule edits and relation-depth changes are reduced to the same effective-set comparison on the candidate tree.
 
+The scheduler's `current()` and cached/reusable projection paths overlay both active window paths and their explicit policies onto every public request cycle. The engine therefore reconstructs the same access controller after a request boundary without rerunning the jump Program. An exact target denied specifically by the window self-lock is returned as `WINDOW_ACCESS_DENIED`; ordinary Program/node protection retains its non-disclosing protected-result behavior.
+
 Alternative considered: persist default boundaries on every Agent. They are derived from position, would become stale on movement and would create a second world fact representation.
 
 ### Reuse request-driven lock replacement for external recovery

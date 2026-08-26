@@ -68,56 +68,50 @@ test('legacy persisted axes load losslessly without making legacy relations into
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), legacy);
 });
 
-test('compatibility manifest advances across unrelated commits without losing trusted facts', () => {
+test('relation-only compatibility manifest advances across unrelated commits', () => {
   const source = [atom('Root', '', [
     { 'thing@program': 'Legacy', situation: "explore({'name':'Root'})", contain: [], support: [] },
     { thing: 'Relations', situation: '', contain: [], support: [{ verb: '原字符→', object: 'Target' }] }
   ])];
-  const audit = [{
-    path: 'Root/Legacy', uses: [{ function: 'explore', axes: ['name'] }],
-    disposition: 'legacy-wrapper', reason: 'revision-path-source-manifest'
-  }];
   const manifest = createCompatibilityManifest({
-    sourceRevision: 'sha256:source', targetFacts: source, programAudit: audit
+    sourceRevision: 'sha256:source', targetFacts: source
   });
   const next = structuredClone(source);
   next[0].contain.push(atom('Unrelated'));
   const advanced = advanceCompatibilityManifest(manifest, source, next);
   assert.doesNotThrow(() => validateCompatibilityManifest(advanced, next));
-  assert.deepEqual(advanced.programs.map(({ path }) => path), ['Root/Legacy']);
+  assert.equal(Object.hasOwn(advanced, 'programs'), false);
   assert.equal(advanced.legacySupport.length, 1);
 });
 
-test('legacy relation provenance survives node movement but Program qualification does not transfer', () => {
+test('legacy relation provenance survives node movement without any Program qualification', () => {
   const source = [atom('Root', '', [
     { 'thing@program': 'Legacy', situation: "explore({'name':'Root'})", contain: [], support: [] },
     { thing: 'Relations', situation: '', contain: [], support: [{ verb: 'v', object: 'O' }] }
   ])];
   const manifest = createCompatibilityManifest({
-    sourceRevision: 'sha256:source', targetFacts: source,
-    programAudit: [{ path: 'Root/Legacy', uses: [{ axes: ['name'] }], disposition: 'legacy-wrapper' }]
+    sourceRevision: 'sha256:source', targetFacts: source
   });
   const moved = structuredClone(source);
   moved[0].contain[0]['thing@program'] = 'Moved Legacy';
   moved[0].contain[1].thing = 'Moved Relations';
   const advanced = advanceCompatibilityManifest(manifest, source, moved);
-  assert.deepEqual(advanced.programs, []);
+  assert.equal(Object.hasOwn(advanced, 'programs'), false);
   assert.equal(advanced.legacySupport[0].occurrences, 1);
   const metadata = compatibilityMetadata(advanced, moved);
   assert.deepEqual(metadata.legacySupportPaths, ['Root/Moved Relations']);
 });
 
-test('source change, new Program and manifest revision mismatch cannot inherit legacy ABI', () => {
+test('Program source changes never create manifest ABI authorization', () => {
   const source = [{ 'thing@program': 'Legacy', situation: "explore({'name':'Root'})", contain: [], support: [] }];
   const manifest = createCompatibilityManifest({
-    sourceRevision: 'sha256:source', targetFacts: source,
-    programAudit: [{ path: 'Legacy', uses: [{ axes: ['name'] }], disposition: 'legacy-wrapper' }]
+    sourceRevision: 'sha256:source', targetFacts: source
   });
   const changed = structuredClone(source);
   changed[0].situation += '\npass';
   changed.push({ 'thing@program': 'Copy', situation: source[0].situation, contain: [], support: [] });
   const advanced = advanceCompatibilityManifest(manifest, source, changed);
-  assert.deepEqual(advanced.programs, []);
+  assert.equal(Object.hasOwn(advanced, 'programs'), false);
   assert.throws(() => validateCompatibilityManifest(manifest, changed), {
     code: 'GRAPH_COMPATIBILITY_MANIFEST_REVISION_MISMATCH'
   });
@@ -152,7 +146,7 @@ test('central transaction advances compatibility manifest with the same authoriz
   assert.doesNotThrow(() => validateCompatibilityManifest(currentManifest, later));
 });
 
-test('only a manifest-matched stored Program receives the legacy Graph ABI wrapper', async (t) => {
+test('compatibility manifest never authorizes a legacy Program ABI', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-legacy-program-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -164,21 +158,18 @@ test('only a manifest-matched stored Program receives the legacy Graph ABI wrapp
     }]
   }];
   const manifest = createCompatibilityManifest({
-    sourceRevision: 'sha256:legacy', targetFacts: source,
-    programAudit: [{
-      path: 'Root/Legacy', uses: [{ call: 'explore', axes: ['name'] }],
-      disposition: 'legacy-wrapper'
-    }]
+    sourceRevision: 'sha256:legacy', targetFacts: source
   });
   await fs.writeFile(contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
   const loaded = await readAtomContext(contextFile, { create: false, compatibilityManifest: manifest });
-  assert.deepEqual(legacyAtomContextMetadata(loaded).legacyProgramPaths, ['Root/Legacy']);
+  assert.equal(Object.hasOwn(manifest, 'programs'), false);
+  assert.equal(Object.hasOwn(legacyAtomContextMetadata(loaded), 'legacyProgramPaths'), false);
+  assert.throws(() => validateCompatibilityManifest({
+    ...manifest,
+    programs: [{ path: 'Root/Legacy', sourceHash: 'sha256:forged' }]
+  }, source), { code: 'INVALID_GRAPH_COMPATIBILITY_MANIFEST' });
   const scheduler = createProgramRuntimeScheduler({ timeoutMs: 5_000 });
-  const cycle = await scheduler.refresh(loaded, { isolateFailures: false });
-  assert.deepEqual(cycle.messages.map(({ text }) => text), ['Root']);
-
-  const untrustedScheduler = createProgramRuntimeScheduler({ timeoutMs: 5_000 });
-  await assert.rejects(untrustedScheduler.refresh(structuredClone(source), {
+  await assert.rejects(scheduler.refresh(loaded, {
     isolateFailures: false
   }), { code: 'ATOM_PROGRAM_FAILED' });
 });
@@ -211,11 +202,11 @@ test('one preflight collects all Program and relation clusters without first-err
     legacyNode('Default Backup', '', [program('Archived', "explore({'name':'A'})")], [], '@backup@default'),
     legacyNode('test', '', [program('Fixture', "transform({'detail':'x'})")]),
     program('Active Safe', "note = 'name stays text'\nexplore({'children':[]})"),
-    program('Active Unsafe', "axis='name'\nexplore({axis:'A'})\ntransform({'partners':[]})"),
+    program('Active Unsafe', "axis=arguments['axis']\nexplore({axis:'A'})\ntransform({'partners':[]})"),
     legacyNode('A', '', [], [{ verb: 'v', object: 'B' }])
   ]);
   const { graph, summary } = graphSchema.planGraphFourAxisMigration(world, {
-    isolatedRoots: ['World/test']
+    testRoots: ['World/test']
   });
   assert.deepEqual(summary.counts, {
     nodes: 8,
@@ -224,25 +215,26 @@ test('one preflight collects all Program and relation clusters without first-err
     programs: 4,
     legacyAbiPrograms: 4,
     defaultBackupPrograms: 1,
-    testIsolatedPrograms: 1,
+    testLegacyPrograms: 1,
     activeLegacyPrograms: 2,
-    activeIsolatedPrograms: 0
+    upgradedPrograms: 2,
+    blockedPrograms: 1
   });
-  assert.equal(summary.readyToCommit, true);
   assert.deepEqual(summary.programs.map(({ path, disposition, reason }) => ({
     path, disposition, reason
   })), [
-    { path: 'World/Default Backup/Archived', disposition: 'isolated', reason: 'default-backup' },
-    { path: 'World/test/Fixture', disposition: 'isolated', reason: 'configured-isolation-root' },
-    { path: 'World/Active Safe', disposition: 'legacy-wrapper', reason: 'revision-path-source-manifest' },
-    { path: 'World/Active Unsafe', disposition: 'legacy-wrapper', reason: 'revision-path-source-manifest' }
+    { path: 'World/Default Backup/Archived', disposition: 'historical-non-executable', reason: 'default-backup' },
+    { path: 'World/test/Fixture', disposition: 'upgraded-test', reason: 'ast-proven-graph-structure-edits' },
+    { path: 'World/Active Safe', disposition: 'upgraded', reason: 'ast-proven-graph-structure-edits' },
+    { path: 'World/Active Unsafe', disposition: 'blocked', reason: 'program-source-upgrade-ambiguous' }
   ]);
   assert.equal(graph.contain[2].situation.includes("note = 'name stays text'"), true);
-  assert.equal(graph.contain[2].situation.includes("explore({'children':[]})"), true);
+  assert.equal(graph.contain[2].situation.includes("explore({'contain':[]})"), true);
   assert.equal(graph.contain[3]['thing@program'], 'Active Unsafe');
   assert.equal(graph.contain[3].situation, world.children[3].detail);
+  assert.equal(summary.readyToCommit, false);
+  assert.deepEqual(summary.blockedPrograms.map(({ path }) => path), ['World/Active Unsafe']);
 });
-
 test('one large synthetic preflight reports arbitrary relation and Program scale in one pass', () => {
   const relationNodes = Array.from({ length: 1_500 }, (_, index) => legacyNode(
     `Relation ${index}`,
@@ -273,31 +265,5 @@ test('one large synthetic preflight reports arbitrary relation and Program scale
   assert.equal(summary.counts.legacyAbiPrograms, 120);
   assert.equal(summary.legacyRelations.length, 3_000);
   assert.equal(summary.programs.length, 120);
-  assert.equal(summary.readyToCommit, true);
   assert.ok(elapsedMs < 10_000, `synthetic preflight took ${Math.round(elapsedMs)}ms`);
-});
-
-test('migration-isolated Programs never enter refresh or explicit execution sets', async () => {
-  const executed = [];
-  const scheduler = createProgramRuntimeScheduler({
-    timeoutMs: 500,
-    async runProgram({ program }) {
-      executed.push(program.path);
-      return {
-        locks: [], transforms: [], choices: [], trigger: null,
-        messages: [{ level: 'info', text: program.name === 'Active Program' ? 'active' : 'must-not-run' }]
-      };
-    }
-  });
-  const cycle = await scheduler.refresh([
-    atom('Unsafe Legacy', "message({'level':'info','text':'must-not-run'})", [], 'program@migration-isolated'),
-    atom('Active Program', "message({'level':'info','text':'active'})", [], 'program')
-  ], { isolateFailures: true });
-
-  assert.deepEqual(cycle.failures, []);
-  assert.deepEqual(cycle.messages.map(({ text }) => text), ['active']);
-  assert.deepEqual(executed, ['Active Program']);
-  await assert.rejects(scheduler.refresh([
-    atom('Unsafe Legacy', 'pass', [], 'program@migration-isolated')
-  ], { programSelector: 'Unsafe Legacy', force: true }), { code: 'PROGRAM_NOT_FOUND' });
 });

@@ -74,26 +74,26 @@ function analyzePrograms(programs, python) {
   }
 }
 
-function reasonAt(programPath, defaultBackupPath, isolatedRoots) {
+function classificationAt(programPath, defaultBackupPath, testRoots) {
   if (defaultBackupPath
     && (programPath === defaultBackupPath || programPath.startsWith(`${defaultBackupPath}/`))) {
     return 'default-backup';
   }
-  if (isolatedRoots.some((root) => programPath === root || programPath.startsWith(`${root}/`))) {
-    return 'configured-isolation-root';
+  if (testRoots.some((root) => programPath === root || programPath.startsWith(`${root}/`))) {
+    return 'configured-test-root';
   }
   return null;
 }
 
 export function planGraphFourAxisMigration(root, options = {}) {
-  const isolatedRoots = [...new Set(options.isolatedRoots ?? [])];
-  if (isolatedRoots.some((value) => typeof value !== 'string' || !value.trim())) {
-    throw problem('INVALID_GRAPH_MIGRATION_ISOLATION_ROOT', 'Program 隔离根必须是非空 exact path');
+  const testRoots = [...new Set(options.testRoots ?? [])];
+  if (testRoots.some((value) => typeof value !== 'string' || !value.trim())) {
+    throw problem('INVALID_GRAPH_MIGRATION_TEST_ROOT', 'Program test 分类根必须是非空 exact path');
   }
   const summary = {
     nodes: 0, supports: 0, situationBytes: 0, paths: [], typedNodes: [],
     supportEndpoints: [], programs: [], legacyRelations: [], legacySupportSources: [],
-    readyToCommit: false
+    blockedPrograms: [], readyToCommit: false
   };
   const seen = new Set();
   const programs = [];
@@ -170,36 +170,56 @@ export function planGraphFourAxisMigration(root, options = {}) {
     programs: programs.length,
     legacyAbiPrograms: 0,
     defaultBackupPrograms: 0,
-    testIsolatedPrograms: 0,
+    testLegacyPrograms: 0,
     activeLegacyPrograms: 0,
-    activeIsolatedPrograms: 0
+    upgradedPrograms: 0,
+    blockedPrograms: 0
   };
   for (const program of programs) {
     const analysis = analysisByPath.get(program.path);
-    const legacyAbi = analysis.uses.length > 0 || analysis.blockingAxes.includes('dynamic');
+    const legacyAbi = analysis.uses.length > 0 || analysis.blockers.length > 0;
     if (legacyAbi) counts.legacyAbiPrograms += 1;
-    const configuredReason = reasonAt(program.path, defaultBackupPath, isolatedRoots);
-    let disposition = 'unchanged';
+    const configuredReason = classificationAt(program.path, defaultBackupPath, testRoots);
+    let disposition = configuredReason === 'configured-test-root' ? 'current-test' : 'current';
     let reason = 'current-abi';
-    if (configuredReason) {
-      disposition = 'isolated';
+    if (configuredReason === 'default-backup') {
+      disposition = 'historical-non-executable';
       reason = configuredReason;
-      if (legacyAbi && reason === 'default-backup') counts.defaultBackupPrograms += 1;
-      if (legacyAbi && reason === 'configured-isolation-root') counts.testIsolatedPrograms += 1;
+      if (legacyAbi) counts.defaultBackupPrograms += 1;
+    } else if (analysis.blockers.length) {
+      disposition = 'blocked';
+      reason = 'program-source-upgrade-ambiguous';
+      counts.blockedPrograms += 1;
+      summary.blockedPrograms.push({
+        path: program.path,
+        sourceHash: analysis.sourceHashBefore,
+        blockers: structuredClone(analysis.blockers)
+      });
+      if (configuredReason === 'configured-test-root') counts.testLegacyPrograms += 1;
+      else counts.activeLegacyPrograms += 1;
+    } else if (analysis.edits.length) {
+      disposition = configuredReason === 'configured-test-root' ? 'upgraded-test' : 'upgraded';
+      reason = 'ast-proven-graph-structure-edits';
+      counts.upgradedPrograms += 1;
+      if (configuredReason === 'configured-test-root') counts.testLegacyPrograms += 1;
+      else counts.activeLegacyPrograms += 1;
+      program.converted[program.situationKey] = analysis.migratedSource;
     } else if (legacyAbi) {
-      disposition = 'legacy-wrapper';
-      reason = 'revision-path-source-manifest';
       counts.activeLegacyPrograms += 1;
     }
     summary.programs.push({
-      path: program.path, sourceHash: analysis.sourceHash,
+      path: program.path,
+      sourceHash: analysis.sourceHashBefore,
+      sourceHashBefore: analysis.sourceHashBefore,
+      sourceHashAfter: analysis.sourceHashAfter,
       uses: analysis.uses, blockingAxes: analysis.blockingAxes,
+      edits: analysis.edits, blockers: analysis.blockers,
       disposition, reason
     });
   }
   summary.supports = summary.legacyRelations.length;
   summary.counts = counts;
-  summary.readyToCommit = true;
+  summary.readyToCommit = summary.blockedPrograms.length === 0;
   summary.sourceFactsHash = digest(root);
   return { graph, summary };
 }

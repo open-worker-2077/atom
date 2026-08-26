@@ -52,7 +52,7 @@ async function main() {
   const graphFile = path.resolve(argument('--graph') ?? path.join(worldDirectory, 'graph.json'));
   const journalFile = path.resolve(argument('--journal') ?? path.join(worldDirectory, 'atom.transactions.json'));
   const backupRoot = path.resolve(argument('--backup-root') ?? path.join(worldDirectory, 'migration-backups'));
-  const isolatedRoots = argumentsOf('--isolated-root');
+  const testRoots = argumentsOf('--isolated-root');
   const rollbackReceipt = argument('--rollback');
   const persistence = createTransactionalWorldPersistence({ contextFile, projectionFile: graphFile, journalFile });
 
@@ -82,7 +82,7 @@ async function main() {
   const plan = planGraphFourAxisWorldMigration({
     snapshot: { revision: sourceRevision, facts: sourceFacts },
     planner: planGraphFourAxisMigration,
-    isolatedRoots
+    testRoots
   });
   const preflight = {
     ok: plan.summary.readyToCommit === true,
@@ -92,7 +92,7 @@ async function main() {
     sourceFileHash: hashBytes(sourceBytes),
     nextRevision: plan.nextRevision,
     counts: plan.summary.counts,
-    isolatedRoots
+    testRoots
   };
   if (!process.argv.includes('--apply')) {
     process.stdout.write(`${JSON.stringify(preflight)}\n`);

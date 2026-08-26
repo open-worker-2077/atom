@@ -421,15 +421,29 @@ export async function executeExploreItem(
     if (unfiltered.error) return { ok: false, index: item.index, errors: [unfiltered.error] };
     if (unfiltered.matches.length > 0) {
       const programSources = [];
+      let windowSelfLockDenied = false;
       for (const match of unfiltered.matches) {
         for (const field of requestedReadFields) {
           const decision = await accessController.authorize(match, 'read', field);
+          if (decision.decision !== 'allow' && decision.lockKind === 'window-self-lock') {
+            windowSelfLockDenied = true;
+          }
           for (const source of decision.matched ?? []) {
             if (!programSources.some((candidate) => candidate.sourceProgramPath === source.sourceProgramPath)) {
               programSources.push(source);
             }
           }
         }
+      }
+      if (windowSelfLockDenied) {
+        return {
+          ok: false,
+          index: item.index,
+          errors: [diagnostic(
+            'WINDOW_ACCESS_DENIED',
+            '窗口自锁拒绝读取该 exact 目标'
+          )]
+        };
       }
       const source = programSources[0];
       const reason = source?.reason?.message?.trim();
