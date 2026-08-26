@@ -272,7 +272,7 @@ test('explicit run binds a window-relative jump guard while preserving its exact
   assert.deepEqual(childNames(stored[0].contain[1]), ['Window']);
 });
 
-test('explicit jump run persists the moved self-lock before later exact CLI requests', async (t) => {
+test('explicit jump commit persists a new passive base before later exact CLI requests', async (t) => {
   const initial = [atom('Root', '', [
     atom('Acceptance', '', [
       atom('Job1', '', [
@@ -307,6 +307,15 @@ test('explicit jump run persists the moved self-lock before later exact CLI requ
   });
   const movedPath = 'Root/Acceptance/Job2/Window';
 
+  const initialized = await executeAtomLanguage({
+    source: 'atom', ...files,
+    programMode: 'project',
+    programScheduler: scheduler,
+    interaction: { id: 'startup-before-jump', agent: null }
+  });
+  assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
+  const initialProjectionWorldKey = (await projectionRepository.load()).worldKey;
+
   const moved = await executeAtomLanguage({
     source: 'transform {"thing.run.":"Root/Acceptance/Job1/Window/Registration"}',
     ...files,
@@ -315,15 +324,7 @@ test('explicit jump run persists the moved self-lock before later exact CLI requ
   });
   assert.equal(moved.ok, true, JSON.stringify(moved.errors));
   assert.deepEqual((await repository.load()).windowSelfLocks.map((entry) => entry.agentPath), [movedPath]);
-
-  const projected = await executeAtomLanguage({
-    source: 'atom', ...files,
-    programMode: 'project',
-    programScheduler: scheduler,
-    interaction: { id: 'startup-after-jump', agent: null }
-  });
-  assert.equal(projected.ok, true, JSON.stringify(projected.errors));
-  assert.equal(projected.revisionAfter, moved.revisionAfter);
+  assert.notEqual((await projectionRepository.load()).worldKey, initialProjectionWorldKey);
 
   let restartedExecutions = 0;
   const restarted = createProgramRuntimeScheduler({

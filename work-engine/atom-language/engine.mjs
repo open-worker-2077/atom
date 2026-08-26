@@ -1414,6 +1414,30 @@ export async function executeAtomLanguage(options = {}) {
     });
   }
 
+  async function settleContextFreeProgramProjectionForWorld(candidateAtoms) {
+    if (!options.programScheduler) return [];
+    const unrestricted = createAccessController(candidateAtoms, {});
+    const preparedWorld = prepareExploreWorld(candidateAtoms);
+    const refreshOptions = {
+      agentOrigin: null,
+      isolateFailures: true,
+      executeExplore: (request, executionContext = {}) => executeProgramExplore({
+        atoms: candidateAtoms,
+        request,
+        receiver,
+        accessController: unrestricted,
+        agentOrigin: null,
+        scopeRoot: executionContext.scopeRoot ?? null,
+        preparedWorld
+      })
+    };
+    let cycle = await options.programScheduler.refresh(candidateAtoms, refreshOptions);
+    if ((cycle.failures?.length ?? 0) > 0) {
+      cycle = await options.programScheduler.refresh(candidateAtoms, refreshOptions);
+    }
+    return cycle.runtimeWarnings ?? [];
+  }
+
   function rewritePath(initialPath, pathChanges) {
     return pathChanges.reduce((currentPath, change) => {
       if (currentPath === change.sourcePath
@@ -1877,6 +1901,20 @@ export async function executeAtomLanguage(options = {}) {
       if (movedAgentPaths) await options.programScheduler?.remapWindowSelfLock?.(
         movedAgentPaths.previousPath, movedAgentPaths.nextPath
       );
+      try {
+        const settleWarnings = await settleContextFreeProgramProjectionForWorld(nextAtoms);
+        interactionWarnings.push(...settleWarnings.map((warning) => diagnostic(
+          warning.code ?? 'PROGRAM_RUNTIME_WARNING',
+          warning.message ?? 'Program runtime reported a recoverable warning',
+          warning.details ?? {}
+        )));
+      } catch (error) {
+        interactionWarnings.push(diagnostic(
+          'PROGRAM_PROJECTION_RECOVERY_PENDING',
+          'World facts are committed, but the context-free Program projection requires recovery',
+          { cause: error.code ?? error.name ?? 'PROGRAM_PROJECTION_SETTLE_FAILED' }
+        ));
+      }
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
     const resultMatch = walkAtoms(nextAtoms).find((match) => (
