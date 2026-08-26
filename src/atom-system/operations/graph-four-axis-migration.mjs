@@ -11,7 +11,7 @@ function digest(value) {
   return `sha256:${crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')}`;
 }
 
-export function planGraphFourAxisWorldMigration({ snapshot, planner, isolatedRoots = [] }) {
+export function planGraphFourAxisWorldMigration({ snapshot, planner, testRoots = [] }) {
   if (!snapshot || !Array.isArray(snapshot.facts) || typeof snapshot.revision !== 'string') {
     throw problem('INVALID_GRAPH_MIGRATION_SNAPSHOT', 'Migration planning requires one revision-bound world snapshot');
   }
@@ -24,13 +24,11 @@ export function planGraphFourAxisWorldMigration({ snapshot, planner, isolatedRoo
   if (typeof planner !== 'function') {
     throw problem('GRAPH_MIGRATION_PLANNER_REQUIRED', 'Migration planning requires an injected legacy Graph planner');
   }
-  const { graph: facts, summary } = planner(snapshot.facts, { isolatedRoots });
+  const { graph: facts, summary } = planner(snapshot.facts, { testRoots });
   const nextRevision = revisionOfWorldFacts(facts);
   const compatibilityManifest = createCompatibilityManifest({
     sourceRevision: snapshot.revision,
-    targetFacts: facts,
-    programAudit: summary.programs,
-    isolatedRoots
+    targetFacts: facts
   });
   const migrationId = `graph-four-axis-${digest({
     sourceRevision: snapshot.revision, nextRevision, summary
@@ -53,6 +51,11 @@ export async function applyGraphFourAxisWorldMigration({
   }
   if (plan?.contract !== 'atom.graph-four-axis-migration-plan' || plan.version !== 1) {
     throw problem('INVALID_GRAPH_MIGRATION_PLAN', 'A valid Graph migration plan is required');
+  }
+  if (plan.summary?.readyToCommit !== true) {
+    throw problem('GRAPH_PROGRAM_SOURCE_UPGRADE_BLOCKED', 'Graph migration contains Programs that cannot be upgraded uniquely', {
+      programs: structuredClone(plan.summary?.blockedPrograms ?? [])
+    });
   }
   if (typeof backup?.create !== 'function' || typeof backup?.verify !== 'function') {
     throw problem('GRAPH_MIGRATION_BACKUP_REQUIRED', 'Graph migration requires a verifiable private backup port');

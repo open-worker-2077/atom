@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { revisionOfWorldFacts } from './world-revision.mjs';
 
 const MANIFEST_CONTRACT = 'atom.graph-four-axis-compatibility-manifest';
+const MANIFEST_VERSION = 2;
 
 function problem(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -35,10 +36,8 @@ export function legacySupportFingerprint(entries) {
 
 export function scanCompatibilityFacts(facts) {
   const supportGroups = [];
-  const programs = [];
   function visit(atom, parentPath = []) {
     const thingEntry = entryAt(atom, 'thing') ?? entryAt(atom, 'name');
-    const situationEntry = entryAt(atom, 'situation') ?? entryAt(atom, 'detail');
     const containEntry = entryAt(atom, 'contain') ?? entryAt(atom, 'children');
     const supportEntry = entryAt(atom, 'support') ?? entryAt(atom, 'partners');
     const thing = thingEntry?.[1];
@@ -54,15 +53,10 @@ export function scanCompatibilityFacts(facts) {
         entries: structuredClone(legacyEntries)
       });
     }
-    const thingKey = thingEntry?.[0] ?? '';
-    if (thingKey.split('@').slice(1).map((part) => part.split('#')[0]).includes('program')) {
-      const source = typeof situationEntry?.[1] === 'string' ? situationEntry[1] : '';
-      programs.push({ path, sourceHash: digest(source) });
-    }
     for (const child of Array.isArray(containEntry?.[1]) ? containEntry[1] : []) visit(child, pathParts);
   }
   for (const atom of Array.isArray(facts) ? facts : [facts]) visit(atom);
-  return { supportGroups, programs };
+  return { supportGroups };
 }
 
 function countedFingerprints(groups) {
@@ -74,37 +68,22 @@ function countedFingerprints(groups) {
 
 export function createCompatibilityManifest({
   sourceRevision,
-  targetFacts,
-  programAudit = [],
-  isolatedRoots = []
+  targetFacts
 }) {
   const currentWorldRevision = revisionOfWorldFacts(targetFacts);
   const scanned = scanCompatibilityFacts(targetFacts);
-  const audited = new Map(programAudit.map((program) => [program.path, program]));
-  const programs = scanned.programs.flatMap((program) => {
-    const audit = audited.get(program.path);
-    if (!audit || (!audit.uses?.length && !audit.blockingAxes?.length)) return [];
-    return [{
-      path: program.path,
-      sourceHash: program.sourceHash,
-      mode: audit.disposition === 'isolated' ? 'isolated' : 'legacy-wrapper',
-      reason: audit.reason,
-      uses: structuredClone(audit.uses ?? [])
-    }];
-  });
   return Object.freeze({
     contract: MANIFEST_CONTRACT,
-    version: 1,
+    version: MANIFEST_VERSION,
     sourceRevision,
     currentWorldRevision,
-    legacySupport: countedFingerprints(scanned.supportGroups),
-    programs,
-    isolatedRoots: [...isolatedRoots]
+    legacySupport: countedFingerprints(scanned.supportGroups)
   });
 }
 
 export function validateCompatibilityManifest(manifest, facts) {
-  if (manifest?.contract !== MANIFEST_CONTRACT || manifest.version !== 1) {
+  if (manifest?.contract !== MANIFEST_CONTRACT || manifest.version !== MANIFEST_VERSION
+      || Object.hasOwn(manifest, 'programs') || Object.hasOwn(manifest, 'isolatedRoots')) {
     throw problem('INVALID_GRAPH_COMPATIBILITY_MANIFEST', 'Graph compatibility manifest is invalid');
   }
   const actualRevision = revisionOfWorldFacts(facts);
@@ -126,14 +105,6 @@ export function validateCompatibilityManifest(manifest, facts) {
       });
     }
   }
-  const programs = new Map(scanned.programs.map((program) => [program.path, program.sourceHash]));
-  for (const entry of manifest.programs ?? []) {
-    if (programs.get(entry.path) !== entry.sourceHash) {
-      throw problem('GRAPH_COMPATIBILITY_PROGRAM_MISMATCH', 'Legacy Program path/source no longer matches manifest', {
-        path: entry.path
-      });
-    }
-  }
   return true;
 }
 
@@ -146,15 +117,10 @@ export function advanceCompatibilityManifest(manifest, currentFacts, nextFacts) 
     const occurrences = Math.min(entry.occurrences, authorized.get(entry.fingerprint) ?? 0);
     return occurrences ? [{ fingerprint: entry.fingerprint, occurrences }] : [];
   });
-  const programsByPath = new Map(scanned.programs.map((program) => [program.path, program.sourceHash]));
-  const programs = (manifest.programs ?? []).filter((program) => (
-    programsByPath.get(program.path) === program.sourceHash
-  ));
   return Object.freeze({
     ...structuredClone(manifest),
     currentWorldRevision: revisionOfWorldFacts(nextFacts),
-    legacySupport: nextCounts,
-    programs
+    legacySupport: nextCounts
   });
 }
 
@@ -171,16 +137,12 @@ export function compatibilityMetadata(manifest, facts) {
   }
   return Object.freeze({
     contract: MANIFEST_CONTRACT,
-    version: 1,
+    version: MANIFEST_VERSION,
     mode: 'versioned-compatibility',
     currentWorldRevision: manifest.currentWorldRevision,
     legacySupportPaths: Object.freeze(trustedGroups.map(({ path }) => path)),
     relations: Object.freeze(trustedGroups.flatMap((group) => group.entries.map((entry, ordinal) => Object.freeze({
       source: group.path, ordinal, verb: entry.verb, object: entry.object
-    })))),
-    isolatedProgramPaths: Object.freeze((manifest.programs ?? [])
-      .filter(({ mode }) => mode === 'isolated').map(({ path }) => path)),
-    legacyProgramPaths: Object.freeze((manifest.programs ?? [])
-      .filter(({ mode }) => mode === 'legacy-wrapper').map(({ path }) => path))
+    }))))
   });
 }

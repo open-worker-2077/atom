@@ -13,10 +13,11 @@ Atom 的 Graph 公开范式仍散落着 `name / detail / children / partners` �
 - 为每条 owner-local 规则建立端点查询索引，Explore 可从相关端读取声明，但 atom.json 不复制规则。
 - Web 渲染真实枢纽、汇流、线干和分流；可视觉压缩，不得隐藏或伪造语义枢纽。
 - 存量旧世界由版本化持久 adapter 读取；原地升级只改四个外层结构键，运行时可继续受控读写，普通 parser、Help 和所有新输入仍只接受新四轴。
-- 预检一次遍历全世界并完整聚类默认备份仓、显式 test 隔离域、活跃 Program 与 legacy partners，不在首个阻断处退出。
+- 预检一次遍历全世界并完整聚类默认备份仓、调用方 exact test 分类域、活跃 Program 与 legacy partners，不在首个阻断处退出。
 - 旧 partners 只做外层键 `partners→support`，内部 `{verb,object}` 字符与顺序不动；受信快照 adapter 将其作为 legacy-support entry 查询/展示，但不解释为 if/then、不进入新 support 推理索引。
-- 旧 Program 源码逐字保留；revision-bound manifest 以 exact path + source hash 授予内部 legacy ABI wrapper，映射旧 Graph 调用和 AtomView。源码变化、新建 Program 或 manifest/revision 漂移后不继承兼容资格。
-- 迁移必须先验证 revision-bound 完整备份，再经单次原子事务提交结构编码与 manifest；回退不覆盖历史。升级后新 support 与受信 legacy relation 可同世界共存但语义索引严格隔离。
+- 旧 Program 通过一次性、结构化源码升级改用新四轴调用：只修改可由 Python AST 唯一定位的 Graph API 字典键和 AtomView 访问，不改普通字符串或业务计算；无法唯一升级者进入精确阻断清单。
+- 默认备份仓中的旧 Program 作为不可执行历史事实保留原源码字符；活跃域与调用方指定 test 域中的可执行 Program 必须升级后只走新 ABI。正式运行时不保留 legacy Program wrapper，也不由 manifest 授予双 ABI 资格。
+- 迁移必须先验证 revision-bound 完整备份，再经单次原子事务提交结构编码、可升级 Program 源码与仅承载 legacy relation provenance 的 manifest；回退不覆盖历史。升级后新 support 与受信 legacy relation 可同世界共存但语义索引严格隔离。
 - 更新 parser、Transform、Explore、Program AtomView、投影、CLI、Web、Help、模板、错误码与回归。
 
 # Capabilities

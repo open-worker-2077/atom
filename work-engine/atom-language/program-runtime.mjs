@@ -19,7 +19,6 @@ const workerFile = path.join(path.dirname(fileURLToPath(import.meta.url)), 'prog
 const preparedRecordSnapshots = new WeakMap();
 const preparedProgramSnapshots = new WeakMap();
 const isolatedProgramPathsByRecords = new WeakMap();
-const legacyProgramPathsByRecords = new WeakMap();
 
 function freezePrepared(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
@@ -67,16 +66,11 @@ function worldRecords(atoms) {
   for (const [index, atom] of atoms.entries()) visit(atom, null, [], `${index}`);
   const legacy = legacyAtomContextMetadata(atoms);
   if (legacy) {
-    isolatedProgramPathsByRecords.set(records, new Set(legacy.isolatedProgramPaths));
-    legacyProgramPathsByRecords.set(records, new Set(legacy.legacyProgramPaths ?? []));
-    for (const record of records) {
-      if (legacy.legacyProgramPaths?.includes(record.path)) record.legacyGraphAbi = true;
-    }
+    isolatedProgramPathsByRecords.set(records, new Set(legacy.isolatedProgramPaths ?? []));
   }
   if (!Object.isFrozen(atoms)) return records;
   const prepared = freezePrepared(records);
-  if (legacy) isolatedProgramPathsByRecords.set(prepared, new Set(legacy.isolatedProgramPaths));
-  if (legacy) legacyProgramPathsByRecords.set(prepared, new Set(legacy.legacyProgramPaths ?? []));
+  if (legacy) isolatedProgramPathsByRecords.set(prepared, new Set(legacy.isolatedProgramPaths ?? []));
   preparedRecordSnapshots.set(atoms, prepared);
   return prepared;
 }
@@ -100,7 +94,6 @@ function programRecords(records, selector = null) {
   }
   const recordsByRef = new Map(records.map((record) => [record.ref, record]));
   const isolatedPaths = isolatedProgramPathsByRecords.get(records) ?? new Set();
-  const legacyProgramPaths = legacyProgramPathsByRecords.get(records) ?? new Set();
   const defaultBackups = records.filter((record) => (
     record.types.includes('backup') && record.types.includes('default')
   ));
@@ -133,14 +126,10 @@ function programRecords(records, selector = null) {
   };
   let programs = records.filter((record) => (
     record.types.includes('program')
-    && !record.types.includes('migration-isolated')
     && !isolatedPaths.has(record.path)
     && record.detail.trim()
     && !isInsideDefaultBackup(record)
   ));
-  programs = programs.map((program) => legacyProgramPaths.has(program.path)
-    ? { ...program, legacyGraphAbi: true }
-    : program);
   if (Object.isFrozen(records)) {
     programs = Object.freeze(programs);
     preparedProgramSnapshots.set(records, programs);
@@ -702,9 +691,7 @@ function runWorker({
       programRoot,
       invokeMain,
       programArguments,
-      supportDecision,
-      legacyGraphAbi: program.legacyGraphAbi === true
-        || legacyProgramPathsByRecords.get(records)?.has(program.path) === true
+      supportDecision
     });
   });
 }
@@ -1185,7 +1172,6 @@ export class ProgramRuntimeScheduler {
     const compatibility = legacyAtomContextMetadata(atoms);
     if (compatibility) {
       isolatedProgramPathsByRecords.set(records, new Set(compatibility.isolatedProgramPaths ?? []));
-      legacyProgramPathsByRecords.set(records, new Set(compatibility.legacyProgramPaths ?? []));
     }
     const availablePrograms = programRecords(records);
     const programs = options.programSelector

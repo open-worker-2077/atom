@@ -96,7 +96,7 @@ test('a Transform event bypasses a persisted projection after scheduler restart'
   assert.deepEqual(cycle.messages.map(({ text }) => text), ['cold-start-trigger']);
 });
 
-test('a matched Transform trigger does not revalidate cached legacy Programs', async () => {
+test('a matched Transform trigger does not revalidate cached unrelated Programs', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const legacy = atom('Legacy Reporter', [
     "value = explore({'thing': 'Legacy Input'})[0].situation",
@@ -119,7 +119,7 @@ test('a matched Transform trigger does not revalidate cached legacy Programs', a
   assert.deepEqual(cycle.messages.map(({ text }) => text), ['indexed-only']);
 });
 
-test('an unmatched Transform event does not revalidate legacy Programs', async () => {
+test('an unmatched Transform event does not revalidate unrelated Programs', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const legacy = atom('Legacy Reporter', [
     "value = explore({'thing': 'Legacy Input'})[0].situation",
@@ -144,7 +144,7 @@ test('an unmatched Transform event does not revalidate legacy Programs', async (
   assert.deepEqual(cycle.executedProgramPaths, []);
 });
 
-test('editing a legacy Program still runs that Program for compatibility', async () => {
+test('editing a Program still runs that Program for the matching event', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const before = atom('Legacy Reporter', "message({'level': 'info', 'text': 'before'})", [], 'program');
   const after = atom('Legacy Reporter', "message({'level': 'info', 'text': 'after'})", [], 'program');
@@ -158,7 +158,7 @@ test('editing a legacy Program still runs that Program for compatibility', async
   assert.deepEqual(cycle.executedProgramPaths, ['Legacy Reporter']);
 });
 
-test('a cold scheduler does not replay an untriggered legacy effect for an unrelated Transform', async () => {
+test('a cold scheduler does not replay an untriggered effect for an unrelated Transform', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const cycle = await scheduler.refresh([
     atom('Unrelated', 'changed'),

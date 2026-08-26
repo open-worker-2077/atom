@@ -63,10 +63,10 @@ test('migration planner preserves a legacy verb instead of losing or guessing it
   assert.deepEqual(result.graph.contain[0].support[0], { verb: '依赖', object: 'B' });
 });
 
-test('migration dry-run audits old Program Graph ABI without changing source', () => {
+test('migration upgrades only proven Graph API keys and AtomView attributes', () => {
   const legacy = legacyNode('Root', '', [legacyNode(
     'Program',
-    "def main(arguments):\n    return explore({'name': 'Target', 'detail': 'x'})",
+    "# name stays in this comment\ndef main(arguments):\n    nodes = explore({'name': 'Target', 'detail': 'name stays'})\n    return {'label': nodes[0].name, 'text': 'partners stays'}",
     [],
     [],
     '@program'
@@ -74,11 +74,129 @@ test('migration dry-run audits old Program Graph ABI without changing source', (
   const result = graphSchema.planGraphFourAxisMigration(legacy);
   assert.equal(result.summary.programs[0].path, 'Root/Program');
   assert.deepEqual(result.summary.programs[0].uses.map(({ call, axis, line }) => ({ call, axis, line })), [
-      { call: 'explore', axis: 'name', line: 2 },
-      { call: 'explore', axis: 'detail', line: 2 }
+      { call: 'explore', axis: 'name', line: 3 },
+      { call: 'explore', axis: 'detail', line: 3 },
+      { call: 'AtomView', axis: 'name', line: 4 }
   ]);
-  assert.equal(result.summary.programs[0].disposition, 'legacy-wrapper');
+  assert.equal(result.summary.programs[0].disposition, 'upgraded');
+  assert.equal(result.summary.programs[0].sourceHashBefore, result.summary.programs[0].sourceHash);
+  assert.notEqual(result.summary.programs[0].sourceHashAfter, result.summary.programs[0].sourceHashBefore);
+  assert.deepEqual(result.summary.programs[0].blockers, []);
+  assert.equal(result.graph.contain[0].situation, [
+    '# name stays in this comment',
+    'def main(arguments):',
+    "    nodes = explore({'thing': 'Target', 'situation': 'name stays'})",
+    "    return {'label': nodes[0].thing, 'text': 'partners stays'}"
+  ].join('\n'));
+  assert.equal(result.summary.readyToCommit, true);
+});
+
+test('migration reports every ambiguous executable Program and closes the commit gate', () => {
+  const legacy = legacyNode('Root', '', [
+    legacyNode('Dynamic', "axis = 'name'\nexplore({axis: 'A'})", [], [], '@program'),
+    legacyNode('Unknown View', [
+      'def first(items):',
+      '    return items[0]',
+      "payload = first(explore({'thing':'Root'}))",
+      "message({'level':'info','text':payload.name})"
+    ].join('\n'), [], [], '@program')
+  ]);
+  const result = graphSchema.planGraphFourAxisMigration(legacy);
+
+  assert.equal(result.summary.readyToCommit, false);
+  assert.deepEqual(result.summary.blockedPrograms.map(({ path }) => path), [
+    'Root/Dynamic', 'Root/Unknown View'
+  ]);
+  for (const blocked of result.summary.blockedPrograms) {
+    assert.match(blocked.sourceHash, /^sha256:/u);
+    assert.ok(blocked.blockers.every(({ line, column, reason }) => (
+      Number.isInteger(line) && Number.isInteger(column) && reason
+    )));
+  }
   assert.equal(result.graph.contain[0].situation, legacy.children[0].detail);
+  assert.equal(result.graph.contain[1].situation, legacy.children[1].detail);
+});
+
+test('default backup Program preserves source while exact test Program is upgraded', () => {
+  const archivedSource = "explore({'name':'Archived'})";
+  const testSource = "explore({'name':'Fixture'})";
+  const legacy = legacyNode('Root', '', [
+    legacyNode('Backup', '', [legacyNode('Archived', archivedSource, [], [], '@program')], [], '@backup@default'),
+    legacyNode('test', '', [legacyNode('Fixture', testSource, [], [], '@program')])
+  ]);
+  const result = graphSchema.planGraphFourAxisMigration(legacy, { testRoots: ['Root/test'] });
+
+  assert.equal(result.graph.contain[0].contain[0].situation, archivedSource);
+  assert.equal(result.graph.contain[1].contain[0].situation, "explore({'thing':'Fixture'})");
+  assert.deepEqual(result.summary.programs.map(({ path, disposition }) => ({ path, disposition })), [
+    { path: 'Root/Backup/Archived', disposition: 'historical-non-executable' },
+    { path: 'Root/test/Fixture', disposition: 'upgraded-test' }
+  ]);
+});
+
+test('Program upgrader follows proven current_atom and explore loop views only', () => {
+  const source = [
+    "label = 'detail stays text'",
+    'current = current_atom()',
+    'message({\'level\':\'info\', \'text\': current.detail})',
+    "for node in explore({'children': []}):",
+    '    message({\'level\':\'info\', \'text\': node.name})'
+  ].join('\n');
+  const result = graphSchema.planGraphFourAxisMigration(legacyNode(
+    'Root', '', [legacyNode('Views', source, [], [], '@program')]
+  ));
+
+  assert.equal(result.summary.readyToCommit, true);
+  assert.equal(result.graph.contain[0].situation, [
+    "label = 'detail stays text'",
+    'current = current_atom()',
+    'message({\'level\':\'info\', \'text\': current.situation})',
+    "for node in explore({'contain': []}):",
+    '    message({\'level\':\'info\', \'text\': node.thing})'
+  ].join('\n'));
+});
+
+test('ordinary object attributes remain byte-identical when no Graph view exists', () => {
+  const source = [
+    'class Payload:',
+    "    name = 'business'",
+    'payload = Payload()',
+    "message({'level':'info','text':payload.name})"
+  ].join('\n');
+  const result = graphSchema.planGraphFourAxisMigration(legacyNode(
+    'Root', '', [legacyNode('Business', source, [], [], '@program')]
+  ));
+
+  assert.equal(result.summary.readyToCommit, true);
+  assert.equal(result.graph.contain[0].situation, source);
+  assert.deepEqual(result.summary.programs[0].edits, []);
+});
+
+test('world migration refuses to commit a plan with Program source blockers', async () => {
+  const sourceFacts = [legacyNode('Root', '', [legacyNode(
+    'Blocked', "axis = 'name'\nexplore({axis:'Root'})", [], [], '@program'
+  )])];
+  const plan = planGraphFourAxisWorldMigration({
+    snapshot: { revision: revisionOfWorldFacts(sourceFacts), facts: sourceFacts },
+    planner: graphSchema.planGraphFourAxisMigration
+  });
+  let backedUp = false;
+  let committed = false;
+  await assert.rejects(applyGraphFourAxisWorldMigration({
+    plan,
+    confirmation: true,
+    backup: {
+      create: async () => { backedUp = true; return {}; },
+      verify: async () => true
+    },
+    persistence: {
+      commit: async () => { committed = true; },
+      rollback: async () => {}
+    }
+  }), (error) => error?.code === 'GRAPH_PROGRAM_SOURCE_UPGRADE_BLOCKED'
+    && error.details.programs[0].path === 'Root/Blocked');
+  assert.equal(backedUp, false);
+  assert.equal(committed, false);
 });
 
 test('migration does not treat ordinary situation words as structural fields', () => {
@@ -88,7 +206,12 @@ test('migration does not treat ordinary situation words as structural fields', (
 });
 
 test('world migration requires a verified recovery backup before one revision-bound commit', async () => {
-  const sourceFacts = [{ name: 'A', detail: 'situation 中的 name 不得替换', children: [], partners: [] }];
+  const programSource = "nodes = explore({'name':'A'})\nmessage({'level':'info','text':nodes[0].name})";
+  const sourceFacts = [{
+    name: 'A', detail: 'situation 中的 name 不得替换', partners: [], children: [
+      legacyNode('Reader', programSource, [], [], '@program')
+    ]
+  }];
   const snapshot = { revision: revisionOfWorldFacts(sourceFacts), facts: sourceFacts };
   const plan = planGraphFourAxisWorldMigration({ snapshot, planner: graphSchema.planGraphFourAxisMigration });
   const calls = [];
@@ -110,6 +233,9 @@ test('world migration requires a verified recovery backup before one revision-bo
   assert.deepEqual(calls.map(([kind]) => kind), ['backup', 'verify', 'commit']);
   assert.equal(calls[2][1].expectedRevision, snapshot.revision);
   assert.equal(calls[2][1].facts[0].situation, sourceFacts[0].detail);
+  assert.equal(calls[0][1].facts[0].children[0].detail, programSource);
+  assert.equal(calls[2][1].facts[0].contain[0].situation,
+    "nodes = explore({'thing':'A'})\nmessage({'level':'info','text':nodes[0].thing})");
   assert.equal(JSON.stringify(calls[2][1].facts).includes('situation 中的 name 不得替换'), true);
 
   await rollbackGraphFourAxisWorldMigration({ migration, persistence });
