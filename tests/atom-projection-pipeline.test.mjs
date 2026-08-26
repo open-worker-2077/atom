@@ -10,6 +10,7 @@ import { createLegacyProjectionProjectors } from '../src/atom-system/adapters/le
 import { createLegacyProjectionOrchestrator } from '../src/atom-system/adapters/legacy-projection-orchestrator.mjs';
 import { projectAtomContext } from '../work-engine/atom-language/context-store.mjs';
 import { projectAtomGraphToKnowledge } from '../work-engine/atom-language/graph-4d-projection.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
 function snapshot(revision, facts = []) {
   return {
@@ -145,6 +146,52 @@ test('spatial projection preserves Atom registration types as presentation metad
 
   assert.deepEqual(agent.atomTypes, ['agent']);
   assert.deepEqual(program.atomTypes, ['program']);
+});
+
+test('spatial support resolves Program endpoints by Atom identity across the synthetic graph root', async () => {
+  const program = (thing, support = []) => ({
+    [`thing@program`]: thing,
+    situation: 'def main(arguments):\n    return True',
+    contain: [],
+    support
+  });
+  const ordinary = (thing, support = []) => ({ thing, situation: '', contain: [], support });
+  const facts = [{
+    thing: 'Flow', situation: '', support: [], contain: [
+      program('Forward', [{ 'if@current': true, then: [{ thing: 'Forward result' }] }]),
+      program('Gate A'),
+      program('Gate B'),
+      ordinary('Hub', [
+        {
+          if: [{ and: [{ 'thing@program': 'Gate A' }, { 'thing@program': 'Gate B' }] }],
+          'then@current': true
+        },
+        { 'if@current': true, then: [{ thing: 'Result A' }, { thing: 'Result B' }] }
+      ]),
+      ordinary('Forward result'),
+      ordinary('Result A'),
+      ordinary('Result B')
+    ]
+  }];
+  const repository = createMemoryProjectionRepository();
+  const pipeline = createProjectionPipeline({
+    projectors: createLegacyProjectionProjectors({
+      programScheduler: createProgramRuntimeScheduler()
+    }),
+    repository
+  });
+
+  await pipeline.rebuild(snapshot('rev-support-program-path-domain', facts));
+
+  const spatial = (await repository.readCurrent(
+    'primary', 'rev-support-program-path-domain'
+  )).projections.spatial.value;
+  assert.deepEqual(
+    spatial.supportClauses.map((clause) => clause.evaluation.status),
+    ['true', 'true', 'true']
+  );
+  assert.equal(spatial.supportRelations.length, 5);
+  assert.equal(spatial.edges.filter((edge) => edge.label === 'support').length, 5);
 });
 
 test('legacy projection orchestration rejects a stale command revision before publishing Spatial state', async (t) => {

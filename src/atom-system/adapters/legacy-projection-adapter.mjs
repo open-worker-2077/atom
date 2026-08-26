@@ -43,7 +43,14 @@ export function createLegacyProjectionProjectors(options = {}) {
                 code: 'SUPPORT_PROGRAM_EVALUATOR_REQUIRED'
               });
             }
-            return programScheduler.evaluateSupportProgram(facts, selector);
+            const atomPath = graphDocument.atomPathByGraphPath?.get(selector);
+            if (!atomPath) {
+              throw Object.assign(new Error(`Program support endpoint has no Atom identity: ${selector}`), {
+                code: 'SUPPORT_PROGRAM_IDENTITY_REQUIRED',
+                details: { selector }
+              });
+            }
+            return programScheduler.evaluateSupportProgram(facts, atomPath);
           }
         });
         const knowledge = projectAtomGraphToKnowledge(graphDocument, {

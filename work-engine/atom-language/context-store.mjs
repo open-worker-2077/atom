@@ -293,11 +293,18 @@ function projectAtom(atom, location, rootThing, options = {}) {
       { location }
     );
   }
+  const atomPath = options.parentAtomPath
+    ? `${options.parentAtomPath}/${thing}`
+    : thing;
+  options.atomPathByGraphPath?.set(`${rootThing}/${atomPath}`, atomPath);
   const projected = {
     [fields.get('thing').rawKey]: thing,
     [fields.get('situation').rawKey]: situation,
     [fields.get('contain').rawKey]: contain.map((child, index) => (
-      projectAtom(child, `${location}.contain[${index}]`, rootThing, options)
+      projectAtom(child, `${location}.contain[${index}]`, rootThing, {
+        ...options,
+        parentAtomPath: atomPath
+      })
     ))
   };
   for (const [rawKey, value] of Object.entries(atom)) {
@@ -325,7 +332,9 @@ export function projectAtomContext(atoms, options = {}) {
   const rootName = options.rootName ?? DEFAULT_CONTEXT_FILENAME;
   const projectionOptions = {
     ...options,
-    allowLegacySupport: options.allowLegacySupport === true || legacySnapshotMetadata.has(atoms)
+    allowLegacySupport: options.allowLegacySupport === true || legacySnapshotMetadata.has(atoms),
+    atomPathByGraphPath: new Map(),
+    parentAtomPath: ''
   };
   const candidate = {
     config: {
@@ -338,7 +347,12 @@ export function projectAtomContext(atoms, options = {}) {
       support: []
     }
   };
-  return parseGraphDocument(candidate);
+  const parsed = parseGraphDocument(candidate);
+  Object.defineProperty(parsed, 'atomPathByGraphPath', {
+    value: projectionOptions.atomPathByGraphPath,
+    enumerable: false
+  });
+  return parsed;
 }
 
 async function atomicWriteJson(file, value) {
