@@ -44,6 +44,8 @@ Within the existing candidate cycle, jump effects run after source Program valid
 
 Move/recycle authorization uses the same access controller as CLI/Program Transform. A denial is translated to the jump-specific stable receipt while preserving the underlying matched-lock details. The candidate then derives the new Agent path, self-lock snapshot key, slot `scope_root`, local support sources and changed dependencies before any single authoritative commit. Any nested Program error, destination error, lock denial, slot-role mismatch or downstream effect failure discards the entire candidate.
 
+The central commit helper derives `registrationChange: "window-recycle"` only from the validated `windowRecycled` candidate effect, including the exact `thing.run.` path. This admits the planned Agent-count decrease through the registration-conservation guard without weakening ordinary commits: every unrelated decrease remains `AGENT_REGISTRATION_LOSS`. The authoritative world commit occurs first; only after it succeeds does the scheduler delete the recycled path from its active Agent/self-lock state and persist the request-driven snapshot, so a rejected world commit cannot prematurely discard the live lock.
+
 Alternative considered: commit the move and rebuild indexes afterward. That exposes half-moved windows and leaves a crash window where the old slot can still trigger.
 
 ### Rebind by stable slot roles, never by rewriting template support

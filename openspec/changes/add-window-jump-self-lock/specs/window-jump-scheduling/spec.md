@@ -27,8 +27,9 @@
 - **THEN** 当前窗口保持原位且 `where` 的复杂 Program 不运行
 
 #### Scenario: recycle true 优先回收
-- **WHEN** `recycle` 返回 `true`
-- **THEN** 当前窗口被直接回收，`when` 与 `where` 均不运行且系统不保留、停放或销毁枚举状态
+- **WHEN** `recycle` 返回 `true`，包括通过 exact `thing.run.` 显式运行 jump 注册 Program
+- **THEN** 系统把该 Agent 注册减少标记为本次计划内 `window-recycle`，在同一权威世界提交中直接回收当前窗口，并在提交成功后清理其活动窗口自锁快照；`when` 与 `where` 均不运行且系统不保留、停放或销毁枚举状态
+- **AND** 未由该 jump 回收效果产生的 Agent 注册减少仍以 `AGENT_REGISTRATION_LOSS` 拒绝且不提交
 
 #### Scenario: when true 才计算目的地
 - **WHEN** `recycle` 不回收且 `when` 返回 `true`
