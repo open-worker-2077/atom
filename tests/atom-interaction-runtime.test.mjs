@@ -184,6 +184,53 @@ test('the first use of an Agent prepares its scoped Program projection once and 
   ]);
 });
 
+test('a trusted agentless read prepares its context-free Program projection once and retries', async () => {
+  const calls = [];
+  let attempts = 0;
+  const runtime = createInteractionRuntime({
+    world: {
+      async execute(request) {
+        calls.push(['world', request.source, request.programMode ?? null, request.interaction.agent]);
+        attempts += 1;
+        if (attempts === 1) return { ok: false, errors: [{ code: 'ATOM_PROGRAM_PROJECTION_MISSING' }] };
+        return {
+          ok: true,
+          command: request.source === 'atom' ? 'atom' : 'explore',
+          changed: false,
+          revisionAfter: 'rev-1',
+          lockState: { revision: 'rev-1' },
+          messages: []
+        };
+      }
+    },
+    projections: {
+      async publish(request) {
+        calls.push(['projection', request]);
+        return { sourceRevision: request.expectedRevision };
+      },
+      async recover() {}
+    },
+    feedback: { async submit() {} },
+    agents: { async resolve() { throw new Error('agentless request must not resolve an Agent'); } },
+    humanStatus: { async translate() {} },
+    humanWorkspace: { async translate() {} },
+    programRuntime: 'program-runtime'
+  });
+
+  const result = await runtime.execute({
+    source: 'explore {"thing":"test"}',
+    correlationId: 'trusted-bootstrap-context'
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [
+    ['world', 'explore {"thing":"test"}', null, null],
+    ['world', 'atom', 'passive', null],
+    ['projection', { expectedRevision: 'rev-1', lockState: { revision: 'rev-1' } }],
+    ['world', 'explore {"thing":"test"}', null, null]
+  ]);
+});
+
 test('an ordinary exact Explore passively prepares projections without replaying an unrelated jump Program', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-read-passive-jump-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

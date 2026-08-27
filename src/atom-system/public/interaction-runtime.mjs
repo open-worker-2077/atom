@@ -188,7 +188,7 @@ export function createInteractionRuntime({
     });
     const projectionMissing = result?.ok === false
       && result.errors?.some(({ code }) => code === 'ATOM_PROGRAM_PROJECTION_MISSING');
-    if (projectionMissing && interaction.agent && !options.programMode) {
+    if (projectionMissing && !options.programMode) {
       let preparation = await executeWorld('atom', Object.freeze({
         ...interaction,
         id: `${interaction.id}:program-context`

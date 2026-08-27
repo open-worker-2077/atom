@@ -10,6 +10,13 @@ import {
   createLegacyHumanWorkspaceTranslator
 } from '../src/atom-system/adapters/legacy-runtime-composition.mjs';
 import { createRuntimeCliExecutor } from '../src/atom-system/adapters/runtime-cli-executor.mjs';
+import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
+import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+}
 
 test('maintenance CLI requests enter through the same interaction runtime contract', async () => {
   const intents = [];
@@ -29,6 +36,38 @@ test('maintenance CLI requests enter through the same interaction runtime contra
     agentPath: 'Root/Maintainer',
     history: [{ source: 'explore {}' }]
   }]);
+});
+
+test('maintenance CLI reloads the persisted context-free Program projection for an agentless read', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-maintenance-projection-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const programProjectionFile = path.join(directory, 'program-projection.json');
+  await fs.writeFile(contextFile, JSON.stringify([atom('test', '', [atom('Bootstrap')])]), 'utf8');
+
+  const projectionRepository = createJsonProgramProjectionRepository({ file: programProjectionFile });
+  const primingScheduler = createProgramRuntimeScheduler({ projectionRepository });
+  const primed = await executeAtomLanguage({
+    source: 'atom', contextFile, projectionFile: graphFile,
+    programMode: 'project', interaction: { id: 'prime', agent: null },
+    programScheduler: primingScheduler
+  });
+  assert.equal(primed.ok, true, JSON.stringify(primed.errors));
+
+  const execute = createRuntimeCliExecutor({
+    contextFile,
+    graphFile,
+    storeFile
+  });
+  const result = await execute({
+    source: 'explore {"thing":"test","contain$latitude-1":true}',
+    interaction: { id: 'maintenance-read' }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.items[0].matches[0].path, 'test');
 });
 
 test('legacy composition binds world, Program, projection and spatial publication behind one runtime', async () => {
