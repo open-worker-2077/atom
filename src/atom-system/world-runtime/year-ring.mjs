@@ -158,7 +158,7 @@ function sanitizeDiagnostic(input, now) {
     throw problem('INVALID_RUNTIME_DIAGNOSTIC', 'Runtime diagnostic must be an object');
   }
   const id = requireText(input.id, 'INVALID_DIAGNOSTIC_ID', 'diagnostic id');
-  if (!['read', 'program', 'transform', 'transform-stage'].includes(input.type)) {
+  if (!['read', 'program', 'transform', 'transform-stage', 'interaction-timing'].includes(input.type)) {
     throw problem('INVALID_DIAGNOSTIC_TYPE', 'diagnostic type must be read, program, transform or transform-stage');
   }
   if (!Number.isFinite(input.durationMs) || input.durationMs < 0) {
@@ -199,6 +199,16 @@ function sanitizeDiagnostic(input, now) {
       command: 'transform',
       stages: input.stages.map(sanitizeTransformStage)
     });
+  }
+  if (input.type === 'interaction-timing') {
+    const allowed = new Set(['interactionOf', 'agents.resolve', 'world.execute', 'world.recover', 'world.manifest', 'world.engine.execute', 'result.serialize']);
+    if (input.command !== 'transform' || !Array.isArray(input.stages) || input.stages.length < 1
+      || input.stages.some((stage) => !stage || !allowed.has(stage.stage) || !Number.isFinite(stage.durationMs) || stage.durationMs < 0)) {
+      throw problem('INVALID_INTERACTION_TIMING_DIAGNOSTIC', 'Interaction timing diagnostic is invalid');
+    }
+    return Object.freeze({ id, type: 'interaction-timing', recordedAt: diagnosticTime(input.recordedAt, now),
+      durationMs: Math.round(input.durationMs * 1000) / 1000, outcome: input.outcome, command: 'transform',
+      stages: input.stages.map(({ stage, durationMs }) => ({ stage, durationMs: Math.round(durationMs * 1000) / 1000 })) });
   }
   const output = {
     id,

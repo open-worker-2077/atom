@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_ATOM_GRAPH_HOST,
   DEFAULT_ATOM_GRAPH_PORT,
+  createOneShotTimingObserver,
   createAtomGraphHandlers,
   parseAtomGraphServerArgs,
   startAtomGraphServer
@@ -178,6 +179,36 @@ test('graph server arguments default to the shared LocalAppData Atom world', () 
     diagnosticFile: path.resolve('runtime-diagnostics.json'),
     help: false
   });
+});
+
+test('graph server accepts one UUID timing interaction id and rejects duplicate or invalid values', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  assert.equal(parseAtomGraphServerArgs([`--timing-interaction-id=${id}`]).timingInteractionId, id);
+  assert.throws(
+    () => parseAtomGraphServerArgs(['--timing-interaction-id', 'not-a-uuid']),
+    (error) => error.code === 'INVALID_TIMING_INTERACTION_ID'
+  );
+  assert.throws(
+    () => parseAtomGraphServerArgs(['--timing-interaction-id', id, '--timing-interaction-id', id]),
+    (error) => error.code === 'DUPLICATE_TIMING_INTERACTION_ID'
+  );
+});
+
+test('one-shot timing observer records only one matching interaction under concurrent callbacks', async () => {
+  const records = [];
+  const id = '11111111-1111-4111-8111-111111111111';
+  const observe = createOneShotTimingObserver({ interactionId: id, diagnostics: { enqueue: (entry) => records.push(entry) } });
+  await Promise.all([
+    observe({ interactionId: id, stage: 'interactionOf', durationMs: 1 }),
+    observe({ interactionId: id, stage: 'interactionOf', durationMs: 99 }),
+    observe({ interactionId: '22222222-2222-4222-8222-222222222222', stage: 'interactionOf', durationMs: 99 }),
+    observe({ interactionId: id, stage: 'world.execute', durationMs: 2 }),
+    observe({ interactionId: id, stage: 'result.serialize', durationMs: 3 })
+  ]);
+  assert.equal(records.length, 1);
+  assert.deepEqual(records[0].stages, [
+    { stage: 'interactionOf', durationMs: 1 }, { stage: 'world.execute', durationMs: 2 }, { stage: 'result.serialize', durationMs: 3 }
+  ]);
 });
 
 test('graph server rejects 4783 and colliding context, projection, and store paths before startup', async (t) => {

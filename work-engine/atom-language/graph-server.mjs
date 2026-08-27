@@ -165,6 +165,28 @@ function optionValue(argv, index, name) {
   return { value: argv[index + 1], consumed: 1 };
 }
 
+function validateTimingInteractionId(value) {
+  if (typeof value !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)) {
+    throw problem('INVALID_TIMING_INTERACTION_ID', 'Timing interaction id must be one UUID');
+  }
+  return value.toLowerCase();
+}
+
+export function createOneShotTimingObserver({ interactionId, diagnostics }) {
+  let claimed = false;
+  const stages = [];
+  return (entry) => {
+    if (entry?.interactionId !== interactionId || (claimed && entry.stage === 'interactionOf')) return;
+    claimed = true;
+    stages.push({ stage: entry.stage, durationMs: entry.durationMs });
+    if (entry.stage === 'result.serialize') diagnostics.enqueue({
+      id: `${interactionId}:interaction-timing`, type: 'interaction-timing', command: 'transform', outcome: 'success',
+      durationMs: stages.reduce((total, item) => total + item.durationMs, 0), stages
+    });
+  };
+}
+
 export function parseAtomGraphServerArgs(argv = []) {
   const options = {};
   let help = false;
@@ -222,12 +244,25 @@ export function parseAtomGraphServerArgs(argv = []) {
       index += parsed.consumed;
       continue;
     }
+    if (argument === '--timing-interaction-id' || argument.startsWith('--timing-interaction-id=')) {
+      if (options.timingInteractionId !== undefined) {
+        throw problem('DUPLICATE_TIMING_INTERACTION_ID', 'Timing interaction id may be supplied once');
+      }
+      const parsed = optionValue(argv, index, '--timing-interaction-id');
+      options.timingInteractionId = validateTimingInteractionId(parsed.value);
+      index += parsed.consumed;
+      continue;
+    }
     throw problem(
       'UNKNOWN_ATOM_GRAPH_OPTION',
       `未知 Atom Graph 服务参数：${argument}`
     );
   }
-  return { ...resolveConfiguration(options), help };
+  return {
+    ...resolveConfiguration(options),
+    ...(options.timingInteractionId ? { timingInteractionId: options.timingInteractionId } : {}),
+    help
+  };
 }
 
 function closeServer(server) {
@@ -324,6 +359,7 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
 
 export async function startAtomGraphServer(options = {}) {
   const configuration = resolveConfiguration(options);
+  const timingInteractionId = options.timingInteractionId ?? null;
   const backupRepository = options.backupRepository ?? process.env.ATOM_RUNTIME_BACKUP_REPO;
   const backupTriggerFactory = options.backupTriggerFactory ?? createAtomRuntimeBackupTrigger;
   const backupTrigger = options.backupTrigger ?? (backupRepository ? backupTriggerFactory({
@@ -376,6 +412,7 @@ export async function startAtomGraphServer(options = {}) {
     programScheduler,
     diagnostics,
     worldService,
+    ...(timingInteractionId ? { onStage: createOneShotTimingObserver({ interactionId: timingInteractionId, diagnostics }) } : {}),
     ...(options.projectionOrchestrator ? { projectionOrchestrator: options.projectionOrchestrator } : {})
   });
   const handlers = createAtomGraphHandlers(interactionRuntime, {

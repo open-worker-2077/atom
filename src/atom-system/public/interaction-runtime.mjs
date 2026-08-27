@@ -103,7 +103,7 @@ export function createInteractionRuntime({
 
   let latestProjectionState = Object.freeze({ status: 'uninitialized' });
 
-  async function timedStage(stage, work) {
+  async function timedStage(stage, work, interactionId = null) {
     const startedAt = performance.now();
     try {
       return await work();
@@ -111,6 +111,7 @@ export function createInteractionRuntime({
       try {
         onStage?.({
           stage,
+          ...(interactionId ? { interactionId } : {}),
           durationMs: Math.round((performance.now() - startedAt) * 1000) / 1000
         });
       } catch {
@@ -122,10 +123,10 @@ export function createInteractionRuntime({
   async function interactionOf(intent) {
     return timedStage('interactionOf', async () => {
       const agent = intent.agentPath
-        ? await timedStage('agents.resolve', () => agents.resolve(intent.agentPath))
+        ? await timedStage('agents.resolve', () => agents.resolve(intent.agentPath), intent.correlationId)
         : null;
       return Object.freeze({ id: intent.correlationId, agent });
-    });
+    }, intent.correlationId);
   }
 
   function projectionFailure(error) {
@@ -213,7 +214,7 @@ export function createInteractionRuntime({
     });
     const worldStartedAt = performance.now();
     let result = withInteractionId(await timedStage(
-      'world.execute', () => executeWorld(intent.source, interaction)
+      'world.execute', () => executeWorld(intent.source, interaction), intent.correlationId
     ), intent.correlationId);
     performanceTrace('world-execute', {
       elapsedMs: Math.round(performance.now() - worldStartedAt),
@@ -327,7 +328,7 @@ export function createInteractionRuntime({
         }
       }
     }
-    return timedStage('result.serialize', () => result);
+    return timedStage('result.serialize', () => result, intent.correlationId);
   }
 
   async function execute(rawIntent, options = {}) {
