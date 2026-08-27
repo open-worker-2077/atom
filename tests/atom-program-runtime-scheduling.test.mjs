@@ -119,6 +119,29 @@ test('a matched Transform trigger does not revalidate cached unrelated Programs'
   assert.deepEqual(cycle.messages.map(({ text }) => text), ['indexed-only']);
 });
 
+test('trigger contract discovery isolates an unrelated Program denied by the current window', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const inaccessible = atom('Outside Scope');
+  const unrelated = atom('Unrelated Trigger', [
+    "outside = explore({'thing': 'Outside Scope'})[0]",
+    'changed([outside])'
+  ].join('\n'), [], 'program');
+
+  const cycle = await scheduler.refresh([
+    atom('Writable Child'), inaccessible, unrelated
+  ], {
+    triggerEvent: { mode: 'transform', nodes: ['Writable Child'] },
+    executeExplore: async () => {
+      throw Object.assign(new Error('fixed Agent cannot read outside scope'), {
+        code: 'WINDOW_ACCESS_DENIED'
+      });
+    }
+  });
+
+  assert.deepEqual(cycle.executedProgramPaths, []);
+  assert.deepEqual(cycle.failures, []);
+});
+
 test('a trigger-scoped cycle cannot replace the reusable full-world projection after a Program is added', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const seed = atom('Seed Program', "message({'level': 'info', 'text': 'seed'})", [], 'program');

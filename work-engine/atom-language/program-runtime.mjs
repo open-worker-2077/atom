@@ -1177,7 +1177,7 @@ export class ProgramRuntimeScheduler {
       /\b(?:trigger|changed)\s*\(/u.test(program.detail)
       && this.triggerContracts.get(program.path)?.detail !== program.detail
     ));
-    const inspected = await Promise.all(candidates.map((program) => this.runBounded(() => (
+    const inspected = await Promise.allSettled(candidates.map((program) => this.runBounded(() => (
       this.runProgram({
         python: this.python,
         records,
@@ -1202,10 +1202,11 @@ export class ProgramRuntimeScheduler {
       })
     ))));
     for (const [index, program] of candidates.entries()) {
+      const result = inspected[index];
       this.setTriggerContract(
         program,
-        inspected[index].trigger ?? null,
-        inspected[index].changedThings ?? []
+        result.status === 'fulfilled' ? result.value.trigger ?? null : null,
+        result.status === 'fulfilled' ? result.value.changedThings ?? [] : []
       );
     }
     this.triggerContractsInitialized = true;
