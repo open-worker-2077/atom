@@ -44,11 +44,19 @@ json_stringify_impl = PROGRAM_STDLIB.json_stringify
 def load_program_function_registry():
     module_path = Path(__file__).with_name("program-function-registry.json")
     value = json.loads(module_path.read_text(encoding="utf-8"))
+    hierarchy = value.get("functionScopeHierarchy", {})
     if (value.get("contract") != "atom-program-function-registry"
             or value.get("version") != 5
-            or value.get("runtimeContract") != "atom-interaction/3"):
+            or value.get("runtimeContract") != "atom-interaction/3"
+            or hierarchy.get("groupField") != "functionFamilies[].id"
+            or hierarchy.get("parentField") != "functionFamilies[].parent"
+            or hierarchy.get("rootWhenParentOmitted") is not True
+            or hierarchy.get("functionMembership") != "single-family"
+            or hierarchy.get("groupEffectiveMembership") != "self-and-descendants"):
         raise RuntimeError("Program function registry has an invalid public contract")
     families = set()
+    family_ids = set()
+    family_parents = {}
     kernel_families = set()
     for item in value.get("functionFamilies", []):
         layer = item.get("layer")
@@ -57,11 +65,25 @@ def load_program_function_registry():
         if (layer not in {"kernel", "application"}
                 or not isinstance(family, str) or not family
                 or not isinstance(item.get("label"), str) or not item["label"]
-                or key in families):
+                or key in families or family in family_ids
+                or ("parent" in item
+                    and (not isinstance(item["parent"], str) or not item["parent"]))):
             raise RuntimeError("Program function registry contains an invalid function family")
         families.add(key)
+        family_ids.add(family)
+        family_parents[family] = item.get("parent")
         if layer == "kernel":
             kernel_families.add(family)
+    for family, parent in family_parents.items():
+        if parent is not None and parent not in family_parents:
+            raise RuntimeError(f"Unknown parent Program function family: {family}")
+        visited = {family}
+        cursor = parent
+        while cursor is not None:
+            if cursor in visited:
+                raise RuntimeError(f"Cyclic Program function family: {family}")
+            visited.add(cursor)
+            cursor = family_parents[cursor]
     if kernel_families != {"graph", "form", "program"}:
         raise RuntimeError("Kernel function families must be graph, form, and program")
     names = set()
@@ -87,9 +109,59 @@ PROGRAM_FUNCTION_REGISTRY = load_program_function_registry()
 REGISTERED_PROGRAM_FUNCTIONS = {
     item["name"] for item in PROGRAM_FUNCTION_REGISTRY["functions"]
 }
-PROGRAM_FUNCTIONS_BY_FAMILY = {}
-for _item in PROGRAM_FUNCTION_REGISTRY["functions"]:
-    PROGRAM_FUNCTIONS_BY_FAMILY.setdefault(_item["family"], set()).add(_item["name"])
+PROGRAM_FUNCTION_PARENT_BY_FAMILY = {
+    item["id"]: item.get("parent")
+    for item in PROGRAM_FUNCTION_REGISTRY["functionFamilies"]
+}
+
+
+def function_family_is_within(family, ancestor):
+    cursor = family
+    while cursor is not None:
+        if cursor == ancestor:
+            return True
+        cursor = PROGRAM_FUNCTION_PARENT_BY_FAMILY[cursor]
+    return False
+
+
+def validate_program_function_selection(value):
+    if (not isinstance(value, dict) or set(value) != {"groups", "names"}
+            or not isinstance(value.get("groups"), list)
+            or not isinstance(value.get("names"), list)):
+        raise EngineCallError(
+            "INVALID_AGENT_REGISTRATION",
+            "agent.functions requires groups and names arrays",
+        )
+    groups = value["groups"]
+    names = value["names"]
+    if any(not isinstance(group, str) or not group for group in groups):
+        raise EngineCallError(
+            "INVALID_AGENT_REGISTRATION", "agent.functions.groups must contain strings"
+        )
+    if any(not isinstance(name, str) or not name for name in names):
+        raise EngineCallError(
+            "INVALID_AGENT_REGISTRATION", "agent.functions.names must contain strings"
+        )
+    unknown_groups = [group for group in groups if group not in PROGRAM_FUNCTION_PARENT_BY_FAMILY]
+    if unknown_groups:
+        raise EngineCallError(
+            "UNKNOWN_PROGRAM_FUNCTION_GROUP", "Unknown Program function group: " + unknown_groups[0]
+        )
+    unknown_names = [name for name in names if name not in REGISTERED_PROGRAM_FUNCTIONS]
+    if unknown_names:
+        raise EngineCallError(
+            "UNKNOWN_PROGRAM_FUNCTION", "Unknown Program function: " + unknown_names[0]
+        )
+    normalized = {
+        "groups": sorted(set(groups)),
+        "names": sorted(set(names)),
+    }
+    expanded = set(normalized["names"])
+    for item in PROGRAM_FUNCTION_REGISTRY["functions"]:
+        if any(function_family_is_within(item["family"], group)
+               for group in normalized["groups"]):
+            expanded.add(item["name"])
+    return normalized, sorted(expanded)
 
 
 def load_program_templates():
@@ -215,6 +287,7 @@ def validate_program(source, filename, allowed_registered_functions=None):
                         "Retired Graph axes are not executable; run the four-axis Program upgrader: "
                         + ", ".join(retired)
                     )
+    extract_agent_declaration(tree)
     return tree
 
 
@@ -295,6 +368,63 @@ class EngineCallError(RuntimeError):
         self.code = code
 
 
+def validate_agent_specification(specification):
+    if (not isinstance(specification, dict)
+            or set(specification) - {"labels", "functions"}
+            or "functions" not in specification):
+        raise EngineCallError(
+            "INVALID_AGENT_REGISTRATION",
+            "agent() accepts only optional labels and required functions",
+        )
+    labels = specification.get("labels", [])
+    if (not isinstance(labels, list)
+            or any(not isinstance(label, str) or not label for label in labels)):
+        raise EngineCallError("INVALID_AGENT_REGISTRATION", "agent.labels must contain strings")
+    function_scopes, functions = validate_program_function_selection(specification["functions"])
+    return {
+        "labels": list(dict.fromkeys(labels)),
+        "functionScopes": function_scopes,
+        "functions": functions,
+    }
+
+
+def extract_agent_declaration(tree):
+    calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "agent"
+    ]
+    if not calls:
+        return None
+    top_level_calls = [
+        node.value for node in tree.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "agent"
+    ]
+    if len(calls) != 1 or len(top_level_calls) != 1 or calls[0] is not top_level_calls[0]:
+        raise EngineCallError(
+            "AGENT_REGISTRATION_LITERAL_REQUIRED",
+            "agent() must be one top-level call with a literal JSON-compatible argument",
+        )
+    declaration = calls[0]
+    if declaration.keywords or len(declaration.args) != 1:
+        raise EngineCallError(
+            "AGENT_REGISTRATION_LITERAL_REQUIRED",
+            "agent() must be one top-level call with one literal argument",
+        )
+    try:
+        specification = ast.literal_eval(declaration.args[0])
+    except (TypeError, ValueError, SyntaxError) as error:
+        raise EngineCallError(
+            "AGENT_REGISTRATION_LITERAL_REQUIRED",
+            "agent labels and function scopes must be literal JSON-compatible values",
+        ) from error
+    return validate_agent_specification(specification)
+
+
 def require_object(value, function_name):
     if not isinstance(value, dict):
         raise TypeError(f"{function_name}() requires one JSON object argument")
@@ -361,46 +491,10 @@ def main():
 
     def agent(specification):
         try:
-            specification = require_object(specification, "agent")
+            declaration = validate_agent_specification(require_object(specification, "agent"))
         except TypeError as error:
             raise EngineCallError("INVALID_AGENT_REGISTRATION", str(error)) from error
-        if set(specification) - {"labels", "functions"} or "functions" not in specification:
-            raise EngineCallError(
-                "INVALID_AGENT_REGISTRATION",
-                "agent() accepts only optional labels and required functions",
-            )
-        labels = specification.get("labels", [])
-        functions = specification.get("functions")
-        if (not isinstance(labels, list)
-                or any(not isinstance(label, str) or not label for label in labels)):
-            raise EngineCallError("INVALID_AGENT_REGISTRATION", "agent.labels must contain strings")
-        if (not isinstance(functions, dict)
-                or set(functions) != {"groups", "names"}
-                or not isinstance(functions.get("groups"), list)
-                or not isinstance(functions.get("names"), list)):
-            raise EngineCallError(
-                "INVALID_AGENT_REGISTRATION",
-                "agent.functions requires groups and names arrays",
-            )
-        groups = functions["groups"]
-        names = functions["names"]
-        unknown_groups = [group for group in groups if group not in PROGRAM_FUNCTIONS_BY_FAMILY]
-        if unknown_groups:
-            raise EngineCallError(
-                "UNKNOWN_PROGRAM_FUNCTION_GROUP", "Unknown Program function group: " + unknown_groups[0]
-            )
-        unknown_names = [name for name in names if name not in REGISTERED_PROGRAM_FUNCTIONS]
-        if unknown_names:
-            raise EngineCallError(
-                "UNKNOWN_PROGRAM_FUNCTION", "Unknown Program function: " + unknown_names[0]
-            )
-        expanded = set(names)
-        for group in groups:
-            expanded.update(PROGRAM_FUNCTIONS_BY_FAMILY[group])
-        effects["agents"].append({
-            "labels": list(dict.fromkeys(labels)),
-            "functions": sorted(expanded),
-        })
+        effects["agents"].append(declaration)
         return {"registered": True, "path": current_atom().path}
 
     def lock(specification):
@@ -1190,9 +1284,14 @@ def main():
         request.get("allowedFunctions"),
     )
     trigger_contract = extract_trigger_contract(program_tree)
+    agent_declaration = extract_agent_declaration(program_tree)
     if request.get("validateOnly") is True:
         sys.stdout.write(json.dumps(
-            {"type": "result", "ok": True, "trigger": trigger_contract, **effects},
+            {
+                "type": "result", "ok": True, "trigger": trigger_contract,
+                **effects,
+                **({"agents": [agent_declaration]} if agent_declaration is not None else {}),
+            },
             ensure_ascii=True,
             allow_nan=False,
         ) + "\n")

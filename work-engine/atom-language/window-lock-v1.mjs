@@ -3,6 +3,7 @@ function problem(code, message, details = {}) {
 }
 
 import { parseAtomKey } from './key-parser.mjs';
+import { validateProgramFunctionDelegation } from './program-function-registry.mjs';
 
 function parts(value) {
   return typeof value === 'string' ? value.split('/').filter(Boolean) : [];
@@ -48,7 +49,7 @@ export function validateDelegatedLabels({ creator = [], child = [] }) {
 }
 
 export function validateAgentDelegation({ creator, child }) {
-  if (!creator || !child || !Array.isArray(creator.functions) || !Array.isArray(child.functions)) {
+  if (!creator || !child || !creator.functionScopes || !child.functionScopes) {
     throw problem('INVALID_AGENT_DELEGATION', 'Agent delegation requires creator and child security contexts');
   }
   const creatorLabels = normalizeAgentLabels(creator.labels ?? []);
@@ -59,17 +60,20 @@ export function validateAgentDelegation({ creator, child }) {
       throw problem('AGENT_LABEL_DELEGATION_DENIED', 'Only a caret holder may define a new business label');
     }
   }
-  const functions = [...new Set(child.functions)].sort();
-  const allowed = new Set(creator.functions);
-  if (functions.some((name) => !allowed.has(name))) {
-    throw problem('PROGRAM_FUNCTION_DELEGATION_DENIED', 'Child Agent functions must be a creator subset');
-  }
+  const delegatedFunctions = validateProgramFunctionDelegation({
+    creator: creator.functionScopes,
+    child: child.functionScopes
+  });
   return {
     labels: [
       ...(childLabels.jurisdiction ? ['^'.repeat(childLabels.jurisdiction)] : []),
       ...childLabels.business
     ],
-    functions
+    functionScopes: {
+      groups: delegatedFunctions.groups,
+      names: delegatedFunctions.names
+    },
+    functions: delegatedFunctions.functions
   };
 }
 

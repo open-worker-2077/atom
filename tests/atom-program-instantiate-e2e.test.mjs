@@ -90,7 +90,9 @@ test('documented two-step commands create an Agent with one attached complete ad
   })}`;
   const runCommand = 'transform {"thing.run.":"当前Agent/任务区/任务名"}';
   await scheduler.registerAgentWindow({
-    sourceProgramPath: '当前Agent', labels: ['^'], functions: agentExample.functions.names
+    sourceProgramPath: '当前Agent', labels: ['^'],
+    functionScopes: structuredClone(agentExample.functions),
+    functions: agentExample.functions.names
   });
 
   const stdout = output();
@@ -129,6 +131,7 @@ test('documented two-step commands create an Agent with one attached complete ad
   ]);
   assert.deepEqual(scheduler.agentSecurity.get('当前Agent/任务区/任务名'), {
     labels: [],
+    functionScopes: structuredClone(agentExample.functions),
     functions: agentExample.functions.names
   });
 });

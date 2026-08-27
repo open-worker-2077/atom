@@ -41,7 +41,7 @@ test('Program function catalog exposes coarse function families and Atom types',
   ].join('|'));
 });
 
-test('Program function catalog filters coarse families without a public hierarchy', async () => {
+test('Program function catalog filters declared groups without exposing a second permission engine', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const cycle = await scheduler.refresh([
     atom('函数目录筛选', [
@@ -321,10 +321,13 @@ test('CLI Help explains fixed Agent registration and the shared Graph authorizat
   assert.equal(code, 0, stderr.value());
   assert.match(stdout.value(), /agent\(\{"labels"[\s\S]*"functions"[\s\S]*"groups"[\s\S]*"names"/u);
   assert.match(stdout.value(), /functions 必填[\s\S]*禁止 null、通配/u);
-  assert.match(stdout.value(), /groups 在登记时[\s\S]*固定去重 names/u);
+  assert.match(stdout.value(), /groups 是正式分层权限[\s\S]*当前 registry/u);
+  assert.match(stdout.value(), /names 是冻结的具体函数授权/u);
+  assert.match(stdout.value(), /后代组[\s\S]*不能上铸祖先组[\s\S]*同级其他职能树/u);
   assert.match(stdout.value(), /当前 Agent 起点[\s\S]*contain 路径[\s\S]*目标 node 锁/u);
   assert.match(stdout.value(), /jump 定位复用 Explore、移动复用 Transform/u);
   assert.match(stdout.value(), /windowSelfLocks[\s\S]*RETIRED_WINDOW_SELF_LOCK_SNAPSHOT/u);
+  assert.match(stdout.value(), /agentRegistrations[\s\S]*RETIRED_AGENT_REGISTRATION_SNAPSHOT/u);
   assert.match(stdout.value(), /slot_body[\s\S]*不接受 lock 开关/u);
 });
 

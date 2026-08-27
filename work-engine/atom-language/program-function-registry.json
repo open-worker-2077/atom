@@ -14,6 +14,13 @@
     }
   },
   "definitions": {},
+  "functionScopeHierarchy": {
+    "groupField": "functionFamilies[].id",
+    "parentField": "functionFamilies[].parent",
+    "rootWhenParentOmitted": true,
+    "functionMembership": "single-family",
+    "groupEffectiveMembership": "self-and-descendants"
+  },
   "functionFamilies": [
     { "layer": "kernel", "id": "graph", "label": "Graph 函数" },
     { "layer": "kernel", "id": "form", "label": "Form 函数" },
@@ -57,7 +64,9 @@
         },
         "target": "current-program-node",
         "fixedWindowLock": true,
-        "persistedFunctions": "expanded-deduplicated-names"
+        "persistedFunctionScopes": "literal-symbolic-groups-and-names",
+        "groupResolution": "current-registry-descendant-union",
+        "delegation": "same-or-descendant-symbolic-scope"
       }
     },
     {

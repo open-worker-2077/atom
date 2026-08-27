@@ -593,7 +593,7 @@ export async function executeAtomLanguage(options = {}) {
   let programCycle = { messages: [], locks: [], records: [] };
   if (options.programScheduler) {
     try {
-      await options.programScheduler.activeRequestDrivenLocks?.();
+      await options.programScheduler.activeRequestDrivenLocks?.(atoms);
       const initialAgentPath = interaction.agent?.path ?? null;
       const initialAgentSecurity = initialAgentPath
         ? structuredClone(options.programScheduler.agentSecurity?.get(initialAgentPath) ?? null)
@@ -718,6 +718,10 @@ export async function executeAtomLanguage(options = {}) {
   }
   if (pendingAgentRegistrations.length === 1) {
     try {
+      const registrationPath = pendingAgentRegistrations[0].sourceProgramPath;
+      const alreadyRegistered = (programCycle.records ?? []).some((record) => (
+        record.path === registrationPath && record.types?.includes('agent')
+      ));
       if (programCycle.agentSecurity) {
         const delegated = validateAgentDelegation({
           creator: programCycle.agentSecurity,
@@ -728,8 +732,8 @@ export async function executeAtomLanguage(options = {}) {
           ...delegated
         };
       }
-      atoms = registerCurrentProgramAsAgent(atoms, pendingAgentRegistrations[0].sourceProgramPath);
-      programChanged = true;
+      atoms = registerCurrentProgramAsAgent(atoms, registrationPath);
+      programChanged = !alreadyRegistered;
     } catch (error) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         error.code ?? 'INVALID_AGENT_REGISTRATION', error.message

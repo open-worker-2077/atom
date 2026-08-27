@@ -8,11 +8,19 @@ function atom(thing, contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation: '', contain, support: [] };
 }
 
+const AGENT_SOURCE = 'agent({"labels":["^","approved"],"functions":{"groups":[],"names":["explore","jump","transform"]}})';
+
+function registeredWindow(thing, contain = []) {
+  const value = atom(thing, contain, 'program@agent');
+  value.situation = AGENT_SOURCE;
+  return value;
+}
+
 function world() {
   return [
     atom('祖先', [
       atom('父', [
-        atom('窗口', [atom('后代', [atom('深后代')])], 'agent'),
+        registeredWindow('窗口', [atom('后代', [atom('深后代')])]),
         atom('兄弟')
       ]),
       atom('父同层', [atom('旁支')])
@@ -29,7 +37,11 @@ async function decision(controller, atoms, path, operation) {
   return (await controller.authorize(match(atoms, path), operation, 'situation')).decision;
 }
 
-const security = { labels: ['^', 'approved'], functions: ['explore', 'jump', 'transform'] };
+const security = {
+  labels: ['^', 'approved'],
+  functionScopes: { groups: [], names: ['explore', 'jump', 'transform'] },
+  functions: ['explore', 'jump', 'transform']
+};
 
 test('an unregistered legacy Agent has no v1 security context until bootstrap migration', async () => {
   const atoms = world();
@@ -40,11 +52,10 @@ test('an unregistered legacy Agent has no v1 security context until bootstrap mi
   assert.equal(await decision(controller, atoms, agentPath, 'write'), 'allow');
 });
 
-test('a persisted Agent registration activates its fixed window in the same cycle', async () => {
+test('a source-derived Agent registration activates its fixed window in the same cycle', async () => {
   const atoms = world();
   const agentPath = '祖先/父/窗口';
   const scheduler = createProgramRuntimeScheduler();
-  await scheduler.registerAgentWindow({ sourceProgramPath: agentPath, ...security });
   const cycle = await scheduler.refresh(atoms, { agentOrigin: { path: agentPath } });
   assert.deepEqual(cycle.agentSecurity, security);
 

@@ -260,7 +260,9 @@ test('operational Atom Language closes one isolated transform/explore/projection
     support: []
   }], null, 2)}\n`, 'utf8');
   await scheduler.registerAgentWindow({
-    sourceProgramPath: '创建Agent', labels: ['^'], functions: agentExample.functions.names
+    sourceProgramPath: '创建Agent', labels: ['^'],
+    functionScopes: structuredClone(agentExample.functions),
+    functions: agentExample.functions.names
   });
   const execute = (request) => executeAtomLanguage({
     ...request, programScheduler: scheduler

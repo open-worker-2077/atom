@@ -18,6 +18,12 @@ function atom(thing, situation = '', contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
+const WINDOW_AGENT_SOURCE = 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","jump","lock","transform"]}})';
+
+function windowAgent(thing, contain = []) {
+  return atom(thing, WINDOW_AGENT_SOURCE, contain, 'program@agent');
+}
+
 async function fixture(t, atoms) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-window-jump-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
@@ -30,7 +36,7 @@ async function fixture(t, atoms) {
 function jumpWorld(destination = 'Root/A/B') {
   return [atom('Root', '', [
     atom('A', '', [
-      atom('Window', '', [
+      windowAgent('Window', [
         atom('When', 'def main(arguments):\n    return True', [], 'program'),
         atom('Where', `def main(arguments):\n    return explore({"thing":"${destination}"})[0]`, [], 'program'),
         atom('Registration', [
@@ -39,7 +45,7 @@ function jumpWorld(destination = 'Root/A/B') {
           '  "where": explore({"thing":"Root/A/Window/Where"})[0]',
           '})'
         ].join('\n'), [], 'program')
-      ], 'agent'),
+      ]),
       atom('B')
     ])
   ])];
@@ -47,8 +53,8 @@ function jumpWorld(destination = 'Root/A/B') {
 
 function fourAxisJumpWorld(when) {
   return [atom('Root', '', [
-    atom('Audit', '', [], 'agent'),
-    atom('Window', '', [
+    windowAgent('Audit'),
+    windowAgent('Window', [
       atom('When', `def main(arguments):\n    return ${when ? 'True' : 'False'}`, [], 'program'),
       atom('Where', 'def main(arguments):\n    return explore({"thing":"Root/B"})[0]', [], 'program'),
       atom('Registration', [
@@ -59,19 +65,14 @@ function fourAxisJumpWorld(when) {
         '  "where": where_program',
         '})'
       ].join('\n'), [], 'program')
-    ], 'agent'),
+    ]),
     atom('B', '', [atom('Payload')])
   ])];
 }
 
 async function v1Scheduler(agentPath, options = {}) {
-  const scheduler = createProgramRuntimeScheduler(options);
-  await scheduler.registerAgentWindow({
-    sourceProgramPath: agentPath,
-    labels: ['^'],
-    functions: ['explore', 'jump', 'lock', 'transform']
-  });
-  return scheduler;
+  assert.equal(typeof agentPath, 'string');
+  return createProgramRuntimeScheduler(options);
 }
 
 function contaminateInternalExploreSnapshot(scheduler) {
@@ -119,7 +120,7 @@ test('successful jump moves the active Agent in the same authoritative commit', 
 test('the next public exact Explore after a jump enforces the remapped active self-lock', async (t) => {
   const initial = [atom('Root', '', [
     atom('A'),
-    atom('Window', '', [
+    windowAgent('Window', [
       atom('When', 'def main(arguments):\n    return True', [], 'program'),
       atom('Where', 'def main(arguments):\n    return explore({"thing":"Root/B"})[0]', [], 'program'),
       atom('Registration', [
@@ -128,7 +129,7 @@ test('the next public exact Explore after a jump enforces the remapped active se
         '  "where": explore({"thing":"Root/Window/Where"})[0]',
         '})'
       ].join('\n'), [], 'program')
-    ], 'agent'),
+    ]),
     atom('B'),
   ])];
   const files = await fixture(t, initial);
@@ -170,7 +171,9 @@ test('the next public exact Explore after a jump enforces the remapped active se
   });
   assert.equal(moved.ok, true, JSON.stringify(moved.errors));
   assert.deepEqual(scheduler.agentSecurity.get('Root/B/Window'), {
-    labels: ['^'], functions: ['explore', 'jump', 'lock', 'transform']
+    labels: ['^'],
+    functionScopes: { groups: [], names: ['explore', 'jump', 'lock', 'transform'] },
+    functions: ['explore', 'jump', 'lock', 'transform']
   });
 
   const publicDeniedRequest = {
@@ -230,7 +233,7 @@ test('public contain Explore is independent from stale internal projection axes 
 
 test('explicit run binds a window-relative jump guard while preserving its exact destination coordinate', async (t) => {
   const initial = [atom('Root', '', [
-    atom('Window', '', [
+    windowAgent('Window', [
         atom('Control', '完成'),
         atom('When', [
           'def main(arguments):',
@@ -246,7 +249,7 @@ test('explicit run binds a window-relative jump guard while preserving its exact
           '  "where": where_program',
           '})'
         ].join('\n'), [], 'program')
-      ], 'agent'),
+      ]),
     atom('Job2')
   ])];
   const files = await fixture(t, initial);
@@ -268,7 +271,7 @@ test('explicit jump commit persists a new passive base before later exact CLI re
   const initial = [atom('Root', '', [
     atom('Acceptance', '', [
       atom('Job1'),
-      atom('Window', '', [
+      windowAgent('Window', [
           atom('When', 'def main(arguments):\n    return True', [], 'program'),
           atom('Where', 'def main(arguments):\n    return explore({"thing":"Root/Acceptance/Job2"})[0]', [], 'program'),
           atom('Registration', [
@@ -279,7 +282,7 @@ test('explicit jump commit persists a new passive base before later exact CLI re
             '  "where": where_program',
             '})'
           ].join('\n'), [], 'program')
-        ], 'agent'),
+        ]),
       atom('Job2')
     ])
   ])];
@@ -310,7 +313,7 @@ test('explicit jump commit persists a new passive base before later exact CLI re
     interaction: { agent: { ref: 'window-ref', path: 'Root/Acceptance/Window' } }
   });
   assert.equal(moved.ok, true, JSON.stringify(moved.errors));
-  assert.deepEqual((await repository.load()).agentRegistrations.map((entry) => entry.agentPath), [movedPath]);
+  assert.deepEqual(await repository.load(), { version: 1, locks: [] });
   assert.notEqual((await projectionRepository.load()).worldKey, initialProjectionWorldKey);
 
   let restartedExecutions = 0;
@@ -356,7 +359,7 @@ test('cached Program reads cannot deny later default-lock Explore targets', asyn
   const initial = [atom('Root', '', [
     atom('Acceptance', '', [
       atom('Job1', '', [
-        atom('Window', '', [atom('Control')], 'agent'),
+        windowAgent('Window', [atom('Control')]),
         atom('Window Peer')
       ]),
       atom('Job2')
@@ -412,18 +415,17 @@ test('cached Program reads cannot deny later default-lock Explore targets', asyn
   }
 });
 
-test('a fixed Agent security registration survives scheduler reconstruction', async (t) => {
+test('a symbolic Agent security declaration survives scheduler reconstruction', async (t) => {
   const agentPath = 'Root/Acceptance/Job1/Window';
   const initial = [atom('Root', '', [atom('Acceptance', '', [
-    atom('Job1', '', [atom('Window', '', [], 'agent')])
+    atom('Job1', '', [windowAgent('Window')])
   ])])];
   const files = await fixture(t, initial);
   const repository = createJsonRequestDrivenLockRepository({
     file: path.join(path.dirname(files.contextFile), 'request-driven-locks.json')
   });
-  await v1Scheduler(agentPath, { requestDrivenLockRepository: repository });
   const interaction = { agent: { ref: 'window-ref', path: agentPath } };
-  assert.deepEqual((await repository.load()).agentRegistrations.map((entry) => entry.agentPath), [agentPath]);
+  await repository.save({ version: 1, locks: [] });
 
   const restarted = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
   const cycle = await restarted.current(initial, {
@@ -431,7 +433,9 @@ test('a fixed Agent security registration survives scheduler reconstruction', as
     allowWindowLockSnapshot: true
   });
   assert.deepEqual(cycle.agentSecurity, {
-    labels: ['^'], functions: ['explore', 'jump', 'lock', 'transform']
+    labels: ['^'],
+    functionScopes: { groups: [], names: ['explore', 'jump', 'lock', 'transform'] },
+    functions: ['explore', 'jump', 'lock', 'transform']
   });
 });
 
@@ -439,9 +443,9 @@ test('a persisted fixed Agent boundary applies to short and full exact selectors
   const agentPath = 'Root/Acceptance/Job1/Window';
   const controlPath = `${agentPath}/Control`;
   const initial = [atom('Root', 'root-secret', [atom('Acceptance', 'ancestor-secret', [
-    atom('Job1', 'parent-visible', [atom('Window', 'current-visible', [
+    atom('Job1', 'parent-visible', [windowAgent('Window', [
       atom('Control', '待回单')
-    ], 'agent')]),
+    ])]),
     atom('Job2')
   ])])];
   const files = await fixture(t, initial);
@@ -523,10 +527,10 @@ test('business Graph lock denial leaves the window in place', async (t) => {
 test('recycle true removes the active window without evaluating when or where', async (t) => {
   const initial = [atom('Root', '', [
     atom('A', '', [
-      atom('Window', '', [
+      windowAgent('Window', [
         atom('Recycle', 'def main(arguments):\n    return True', [], 'program'),
         atom('Registration', 'jump({"recycle":explore({"thing":"Root/A/Window/Recycle"})[0]})', [], 'program')
-      ], 'agent')
+      ])
     ])
   ])];
   const files = await fixture(t, initial);
@@ -545,23 +549,16 @@ test('recycle true removes the active window without evaluating when or where', 
 test('an explicit jump recycle is the only transform allowed to remove its active Agent', async (t) => {
   const initial = [atom('Root', '', [
     atom('A', '', [
-      atom('Window', '', [
+      windowAgent('Window', [
         atom('Recycle', 'def main(arguments):\n    return True', [], 'program'),
         atom('Registration', 'jump({"recycle":explore({"thing":"Root/A/Window/Recycle"})[0]})', [], 'program')
-      ], 'agent')
+      ])
     ])
   ])];
   const files = await fixture(t, initial);
   const snapshotFile = path.join(path.dirname(files.contextFile), 'request-driven-locks.json');
   const repository = createJsonRequestDrivenLockRepository({ file: snapshotFile });
-  await repository.save({
-    version: 1,
-    locks: [],
-    agentRegistrations: [{
-      agentPath: 'Root/A/Window', labels: ['^'],
-      functions: ['explore', 'jump', 'lock', 'transform']
-    }]
-  });
+  await repository.save({ version: 1, locks: [] });
   const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
 
   const result = await executeAtomLanguage({
@@ -575,16 +572,16 @@ test('an explicit jump recycle is the only transform allowed to remove its activ
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
   assert.deepEqual(childNames(stored[0].contain[0]), []);
   assert.equal(scheduler.agentSecurity.has('Root/A/Window'), false);
-  assert.deepEqual((await repository.load()).agentRegistrations, []);
+  assert.deepEqual(await repository.load(), { version: 1, locks: [] });
 });
 
-test('a rejected recycle commit retains the Agent and its persisted self-lock', async (t) => {
+test('a rejected recycle commit retains the Agent and its source-derived self-lock', async (t) => {
   const initial = [atom('Root', '', [
     atom('A', '', [
-      atom('Window', '', [
+      windowAgent('Window', [
         atom('Recycle', 'def main(arguments):\n    return True', [], 'program'),
         atom('Registration', 'jump({"recycle":explore({"thing":"Root/A/Window/Recycle"})[0]})', [], 'program')
-      ], 'agent')
+      ])
     ])
   ])];
   const files = await fixture(t, initial);
@@ -592,11 +589,7 @@ test('a rejected recycle commit retains the Agent and its persisted self-lock', 
   const repository = createJsonRequestDrivenLockRepository({ file: snapshotFile });
   const snapshot = {
     version: 1,
-    locks: [],
-    agentRegistrations: [{
-      agentPath: 'Root/A/Window', labels: ['^'],
-      functions: ['explore', 'jump', 'lock', 'transform']
-    }]
+    locks: []
   };
   await repository.save(snapshot);
   const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });

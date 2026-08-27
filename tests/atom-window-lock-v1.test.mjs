@@ -20,7 +20,7 @@ function atom(thing, situation = '', contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
-test('function groups expand once to a fixed deduplicated function-name grant', () => {
+test('function groups resolve through the current registry to deduplicated effective names', () => {
   assert.deepEqual(expandProgramFunctionSelection({ groups: ['form'], names: ['message', 'form'] }), [
     'form', 'form_status', 'message', 'missing_details', 'plan_form_flow'
   ]);
@@ -43,16 +43,24 @@ test('agent labels keep caret jurisdiction separate from ordinary business label
 
 test('child Agent functions and jurisdiction are monotonic while caret holders may mint business labels', () => {
   assert.deepEqual(validateAgentDelegation({
-    creator: { labels: ['^^'], functions: ['agent', 'message'] },
-    child: { labels: ['^', 'new-business'], functions: ['message'] }
-  }), { labels: ['^', 'new-business'], functions: ['message'] });
+    creator: {
+      labels: ['^^'], functionScopes: { groups: [], names: ['agent', 'message'] }
+    },
+    child: { labels: ['^', 'new-business'], functionScopes: { groups: [], names: ['message'] } }
+  }), {
+    labels: ['^', 'new-business'],
+    functionScopes: { groups: [], names: ['message'] },
+    functions: ['message']
+  });
   assert.throws(() => validateAgentDelegation({
-    creator: { labels: [], functions: ['message'] },
-    child: { labels: ['new-business'], functions: ['message'] }
+    creator: { labels: [], functionScopes: { groups: [], names: ['message'] } },
+    child: {
+      labels: ['new-business'], functionScopes: { groups: [], names: ['message'] }
+    }
   }), (error) => error.code === 'AGENT_LABEL_DELEGATION_DENIED');
   assert.throws(() => validateAgentDelegation({
-    creator: { labels: ['^'], functions: ['message'] },
-    child: { labels: [], functions: ['transform'] }
+    creator: { labels: ['^'], functionScopes: { groups: [], names: ['message'] } },
+    child: { labels: [], functionScopes: { groups: [], names: ['transform'] } }
   }), (error) => error.code === 'PROGRAM_FUNCTION_DELEGATION_DENIED');
 });
 
@@ -83,13 +91,14 @@ test('contain locks are checked before target node locks and labels are action-s
   assert.equal(decide('Root/Order/Agent/Area/Record', 'transform', ['edit']).decision, 'allow');
 });
 
-test('agent() declares the current Program node and freezes expanded function names', async () => {
+test('agent() declares the current Program node and preserves symbolic scopes with effective names', async () => {
   const cycle = await createProgramRuntimeScheduler().refresh([
     atom('Registrar', 'agent({"labels":["^^","audit"],"functions":{"groups":["form"],"names":["message","form"]}})', [], 'program')
   ], { programSelector: 'Registrar', force: true, agentOrigin: { path: 'Root/Controller' } });
   assert.deepEqual(cycle.agentRegistrations, [{
     sourceProgramPath: 'Registrar',
     labels: ['^^', 'audit'],
+    functionScopes: { groups: ['form'], names: ['form', 'message'] },
     functions: ['form', 'form_status', 'message', 'missing_details', 'plan_form_flow']
   }]);
 });
@@ -148,21 +157,13 @@ test('jump and slot_body no longer expose caller-defined fixed-lock switches', a
   }
 });
 
-test('registered Agent execution only exposes its frozen function-name grant', async () => {
-  const repository = {
-    async load() {
-      return {
-        version: 1,
-        locks: [],
-        agentRegistrations: [{ agentPath: 'Root/Agent', labels: ['^'], functions: ['message'] }]
-      };
-    },
-    async save(value) { return value; }
-  };
-  const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
+test('registered Agent execution only exposes functions resolved from its persisted symbolic scopes', async () => {
+  const scheduler = createProgramRuntimeScheduler();
   await assert.rejects(scheduler.refresh([
     atom('Root', '', [
-      atom('Agent', '', [atom('Writer', 'transform({"thing":"Root/Agent","situation.rep.x":None})', [], 'program')], 'agent')
+      atom('Agent', 'agent({"labels":["^"],"functions":{"groups":[],"names":["message"]}})', [
+        atom('Writer', 'transform({"thing":"Root/Agent","situation.rep.x":None})', [], 'program')
+      ], 'program@agent')
     ])
   ], { programSelector: 'Root/Agent/Writer', force: true, agentOrigin: { path: 'Root/Agent' } }),
   (error) => error.code === 'PROGRAM_FUNCTION_DENIED');
@@ -175,20 +176,14 @@ test('registered Program Explore uses the same fixed Graph path before reading s
   const projectionFile = path.join(directory, 'graph.json');
   const lockFile = path.join(directory, 'request-driven-locks.json');
   await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
-    atom('Area', '', [atom('Window', '', [atom('Probe', [
+    atom('Area', '', [atom('Window', 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","message"]}})', [atom('Probe', [
       'outside = explore({"thing":"Root/Outside","situation$full":True})[0]',
       'message({"level":"info","text":outside.situation})'
-    ].join('\n'), [], 'program')], 'agent')]),
+    ].join('\n'), [], 'program')], 'program@agent')]),
     atom('Outside', 'secret')
   ])], null, 2));
   const repository = createJsonRequestDrivenLockRepository({ file: lockFile });
-  await repository.save({
-    version: 1,
-    locks: [],
-    agentRegistrations: [{
-      agentPath: 'Root/Area/Window', labels: ['^'], functions: ['explore', 'message']
-    }]
-  });
+  await repository.save({ version: 1, locks: [] });
   const result = await executeAtomLanguage({
     source: 'transform {"thing.run.":"Root/Area/Window/Probe"}',
     contextFile,
@@ -218,7 +213,7 @@ test('lock() publishes only range, Explore or Transform actions, and required la
   }]);
 });
 
-test('agent() atomically registers its Program node and persists fixed security names', async (t) => {
+test('agent() atomically registers its Program node while the sidecar remains locks-only', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-register-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -242,60 +237,49 @@ test('agent() atomically registers its Program node and persists fixed security 
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(Object.hasOwn(world[0].contain[1], 'thing@program@agent'), true);
   const snapshot = JSON.parse(await fs.readFile(lockFile, 'utf8'));
-  assert.deepEqual(snapshot.agentRegistrations, [{
-    agentPath: 'Root/Registrar', labels: ['^', 'leaf'], functions: ['message']
-  }]);
+  assert.deepEqual(snapshot, { version: 1, locks: [] });
+  const restarted = createProgramRuntimeScheduler({
+    requestDrivenLockRepository: createJsonRequestDrivenLockRepository({ file: lockFile })
+  });
+  await restarted.rebuildAgentSecurity(world);
+  assert.deepEqual(restarted.agentSecurity.get('Root/Registrar'), {
+    labels: ['^', 'leaf'],
+    functionScopes: { groups: [], names: ['message'] },
+    functions: ['message']
+  });
 });
 
-test('agent() security persistence failure leaves the Program node unregistered', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-register-fail-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const contextFile = path.join(directory, 'atom.json');
-  const projectionFile = path.join(directory, 'graph.json');
-  const initial = [atom('Root', '', [
-    atom('Controller', '', [], 'agent'),
-    atom('Registrar', 'agent({"functions":{"groups":[],"names":["message"]}})', [], 'program')
-  ])];
-  await fs.writeFile(contextFile, JSON.stringify(initial, null, 2));
+test('agent() in-memory publication never writes registration authority to the sidecar', async () => {
+  let saves = 0;
   const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: {
     async load() { return { version: 1, locks: [] }; },
-    async save() { throw Object.assign(new Error('sidecar failed'), { code: 'LOCK_SIDECAR_FAILED' }); }
+    async save() { saves += 1; }
   } });
-  const result = await executeAtomLanguage({
-    source: 'transform {"thing.run.":"Root/Registrar"}',
-    contextFile, projectionFile, programScheduler: scheduler,
-    interaction: { id: 'register-fail', agent: { path: 'Root/Controller' } }
+  await scheduler.registerAgentWindow({
+    sourceProgramPath: 'Root/Registrar',
+    labels: ['^'],
+    functionScopes: { groups: [], names: ['message'] },
+    functions: ['message']
   });
-  assert.equal(result.ok, false);
-  assert.equal(result.errors[0].code, 'LOCK_SIDECAR_FAILED');
-  assert.equal(scheduler.agentSecurity.has('Root/Registrar'), false);
-  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), initial);
+  assert.equal(saves, 0);
+  assert.equal(scheduler.agentSecurity.has('Root/Registrar'), true);
 });
 
-test('Agent move and recycle security mutations roll back when sidecar persistence fails', async () => {
-  let rejectSave = false;
-  let stored = { version: 1, locks: [] };
+test('Agent move and recycle update only reconstructible in-memory paths, never sidecar authority', async () => {
+  let saves = 0;
   const repository = {
-    async load() { return structuredClone(stored); },
-    async save(value) {
-      if (rejectSave) throw Object.assign(new Error('sidecar failed'), { code: 'LOCK_SIDECAR_FAILED' });
-      stored = structuredClone(value);
-    }
+    async load() { return { version: 1, locks: [] }; },
+    async save() { saves += 1; }
   };
   const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
   await scheduler.registerAgentWindow({
-    sourceProgramPath: 'Root/Window', labels: ['^'], functions: ['jump']
+    sourceProgramPath: 'Root/Window', labels: ['^'],
+    functionScopes: { groups: [], names: ['jump'] }, functions: ['jump']
   });
-  rejectSave = true;
-  await assert.rejects(
-    scheduler.remapAgentWindow('Root/Window', 'Root/Next/Window'),
-    (error) => error.code === 'LOCK_SIDECAR_FAILED'
-  );
-  assert.equal(scheduler.agentSecurity.has('Root/Window'), true);
+  await scheduler.remapAgentWindow('Root/Window', 'Root/Next/Window');
+  assert.equal(scheduler.agentSecurity.has('Root/Window'), false);
+  assert.equal(scheduler.agentSecurity.has('Root/Next/Window'), true);
+  await scheduler.recycleAgentWindow('Root/Next/Window');
   assert.equal(scheduler.agentSecurity.has('Root/Next/Window'), false);
-  await assert.rejects(
-    scheduler.recycleAgentWindow('Root/Window'),
-    (error) => error.code === 'LOCK_SIDECAR_FAILED'
-  );
-  assert.equal(scheduler.agentSecurity.has('Root/Window'), true);
+  assert.equal(saves, 0);
 });

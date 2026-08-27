@@ -641,6 +641,11 @@ function validateResult(result, records, program, options = {}) {
   const agentRegistrations = (result.agents ?? []).map((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)
       || !Array.isArray(entry.labels) || !Array.isArray(entry.functions)
+      || !entry.functionScopes || typeof entry.functionScopes !== 'object'
+      || !Array.isArray(entry.functionScopes.groups)
+      || !Array.isArray(entry.functionScopes.names)
+      || entry.functionScopes.groups.some((group) => typeof group !== 'string' || !group)
+      || entry.functionScopes.names.some((name) => typeof name !== 'string' || !name)
       || entry.labels.some((label) => typeof label !== 'string' || !label)
       || entry.functions.length === 0
       || entry.functions.some((name) => typeof name !== 'string' || !name)) {
@@ -651,6 +656,10 @@ function validateResult(result, records, program, options = {}) {
     return {
       sourceProgramPath: program.path,
       labels: [...new Set(entry.labels)],
+      functionScopes: {
+        groups: [...new Set(entry.functionScopes.groups)].sort(),
+        names: [...new Set(entry.functionScopes.names)].sort()
+      },
       functions: [...new Set(entry.functions)].sort()
     };
   });
@@ -808,6 +817,7 @@ export class ProgramRuntimeScheduler {
     this.programReusable = new Map();
     this.dormantFailures = new Map();
     this.runProgram = options.runProgram ?? runWorker;
+    this.inspectProgram = options.inspectProgram ?? runWorker;
     this.diagnosticRecorder = options.diagnosticRecorder ?? null;
     this.projectionRepository = options.projectionRepository ?? null;
     this.loadedProjection = undefined;
@@ -819,6 +829,7 @@ export class ProgramRuntimeScheduler {
     this.triggerContractsInitialized = false;
     this.slotInvocationCycles = new Map();
     this.agentSecurity = new Map();
+    this.agentSecurityWorldRevision = null;
     if (this.projectionRepository
       && (typeof this.projectionRepository.load !== 'function'
         || typeof this.projectionRepository.save !== 'function')) {
@@ -871,69 +882,76 @@ export class ProgramRuntimeScheduler {
     return result.supportDecision;
   }
 
-  async activeRequestDrivenLocks() {
+  async rebuildAgentSecurity(atoms) {
+    const revision = revisionOfWorldFacts(atoms);
+    if (this.agentSecurityWorldRevision === revision) return this.agentSecurity;
+    const records = worldRecords(atoms);
+    const programs = programRecords(records);
+    const registeredPrograms = programs.filter((program) => program.types.includes('agent'));
+    const registrations = await Promise.all(registeredPrograms.map((program) => (
+      this.runBounded(() => this.inspectProgram({
+        python: this.python,
+        records,
+        programs,
+        program,
+        timeoutMs: this.timeoutMs,
+        executeExplore: async () => {
+          throw Object.assign(
+            new Error('Agent registration reconstruction cannot execute Graph functions'),
+            { code: 'INVALID_AGENT_REGISTRATION_RECONSTRUCTION_EFFECT' }
+          );
+        },
+        validateOnly: true
+      }))
+    )));
+    const next = new Map();
+    for (const [index, program] of registeredPrograms.entries()) {
+      const declarations = registrations[index].agentRegistrations ?? [];
+      if (declarations.length !== 1) {
+        throw Object.assign(
+          new Error(`Registered Agent Program requires exactly one literal agent() declaration: ${program.path}`),
+          { code: 'AGENT_REGISTRATION_SOURCE_REQUIRED' }
+        );
+      }
+      const registration = declarations[0];
+      next.set(program.path, {
+        labels: [...registration.labels],
+        functionScopes: structuredClone(registration.functionScopes),
+        functions: [...registration.functions]
+      });
+    }
+    this.agentSecurity = next;
+    this.agentSecurityWorldRevision = revision;
+    return this.agentSecurity;
+  }
+
+  async activeRequestDrivenLocks(atoms = null) {
+    if (atoms) await this.rebuildAgentSecurity(atoms);
     if (this.requestDrivenLocks !== undefined) return this.requestDrivenLocks;
     const stored = this.requestDrivenLockRepository
       ? await this.requestDrivenLockRepository.load()
       : { version: 1, locks: [] };
-    for (const entry of stored?.agentRegistrations ?? []) {
-      this.agentSecurity.set(entry.agentPath, {
-        labels: [...entry.labels], functions: [...entry.functions]
-      });
-    }
     this.requestDrivenLocks = structuredClone(stored?.locks ?? []);
     return this.requestDrivenLocks;
   }
 
-  async persistAgentSecurity() {
-    if (!this.requestDrivenLockRepository) return;
-    await this.requestDrivenLockRepository.save({
-      version: 1,
-      locks: structuredClone(this.requestDrivenLocks ?? []),
-      agentRegistrations: [...this.agentSecurity].map(([agentPath, security]) => ({
-        agentPath,
-        labels: [...security.labels],
-        functions: [...security.functions]
-      }))
-    });
-  }
-
-  async registerAgentWindow({ sourceProgramPath, labels, functions }) {
-    await this.activeRequestDrivenLocks();
-    const previous = new Map(this.agentSecurity);
+  async registerAgentWindow({ sourceProgramPath, labels, functionScopes, functions }) {
     this.agentSecurity.set(sourceProgramPath, {
-      labels: [...labels], functions: [...functions]
+      labels: [...labels], functionScopes: structuredClone(functionScopes), functions: [...functions]
     });
-    try {
-      await this.persistAgentSecurity();
-    } catch (error) {
-      this.agentSecurity = previous;
-      throw error;
-    }
+    this.agentSecurityWorldRevision = null;
   }
 
   async recycleAgentWindow(agentPath) {
-    const previous = new Map(this.agentSecurity);
     this.agentSecurity.delete(agentPath);
-    try {
-      await this.persistAgentSecurity();
-    } catch (error) {
-      this.agentSecurity = previous;
-      throw error;
-    }
+    this.agentSecurityWorldRevision = null;
   }
 
   async remapAgentWindow(previousPath, nextPath) {
-    const previous = new Map(this.agentSecurity);
     const security = this.agentSecurity.get(previousPath);
     this.agentSecurity.delete(previousPath);
     if (security) this.agentSecurity.set(nextPath, security);
-    try {
-      await this.persistAgentSecurity();
-    } catch (error) {
-      this.agentSecurity = previous;
-      throw error;
-    }
+    this.agentSecurityWorldRevision = null;
   }
 
   async overlayRequestDrivenLocks(value, agentOrigin = null) {
@@ -976,12 +994,7 @@ export class ProgramRuntimeScheduler {
       if (this.requestDrivenLockRepository) {
         await this.requestDrivenLockRepository.save({
           version: 1,
-          locks: next,
-          agentRegistrations: [...this.agentSecurity].map(([agentPath, security]) => ({
-            agentPath,
-            labels: [...security.labels],
-            functions: [...security.functions]
-          }))
+          locks: next
         });
       }
       this.requestDrivenLocks = next;
@@ -1208,6 +1221,7 @@ export class ProgramRuntimeScheduler {
   }
 
   async current(atoms, options = {}) {
+    await this.activeRequestDrivenLocks(atoms);
     const records = worldRecords(atoms);
     const availablePrograms = programRecords(records);
     const programs = options.programSelector
@@ -1280,7 +1294,7 @@ export class ProgramRuntimeScheduler {
   }
 
   async refresh(atoms, options = {}) {
-    await this.activeRequestDrivenLocks();
+    await this.activeRequestDrivenLocks(atoms);
     const records = worldRecords(atoms);
     const compatibility = legacyAtomContextMetadata(atoms);
     if (compatibility) {
@@ -1599,7 +1613,7 @@ export class ProgramRuntimeScheduler {
       const requests = [];
       const executionStartedAt = performance.now();
       try {
-        const result = await this.runBounded(() => {
+        const rawResult = await this.runBounded(() => {
           const remainingMs = cycleDeadline - Date.now();
           if (remainingMs <= 0) {
             throw Object.assign(
@@ -1628,9 +1642,13 @@ export class ProgramRuntimeScheduler {
               scope_root: slotInvocation.scopeRoot,
               revision: slotInvocation.revision
             } : {},
-            allowedFunctions: this.agentSecurity.get(
-              agentScopePath(options.agentOrigin)
-            )?.functions ?? null,
+            allowedFunctions: (() => {
+              const allowed = this.agentSecurity.get(
+                agentScopePath(options.agentOrigin)
+              )?.functions ?? null;
+              if (!allowed || !program.types.includes('agent')) return allowed;
+              return [...new Set([...allowed, 'agent'])];
+            })(),
             executeExplore: async (request) => {
               requests.push(structuredClone(request));
               const matches = await executeExplore(request, {
@@ -1646,6 +1664,9 @@ export class ProgramRuntimeScheduler {
             }
           });
         });
+        const result = program.types.includes('agent')
+          ? { ...rawResult, agentRegistrations: [] }
+          : rawResult;
         const uniqueRequests = [...new Map(requests.map((request) => (
           [JSON.stringify(request), request]
         ))).values()];
