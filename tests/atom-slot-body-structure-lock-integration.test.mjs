@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
+import { readVisibleSlotPlans } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
@@ -15,12 +16,18 @@ function atom(thing, situation = '', contain = [], support = []) {
 async function lockedWorld() {
   const sealed = await applySlotBodyEffect({
     atoms: [atom('槽体', '', [atom('候选', '', [atom('输入'), atom('输出')])])],
-    effect: { action: 'seal', body: '槽体', lock: true },
+    effect: { action: 'seal', body: '槽体' },
     sourceProgramPath: '封装'
   });
+  assert.equal(sealed.error, undefined);
+  const visiblePlans = readVisibleSlotPlans(sealed.atoms);
+  assert.equal(visiblePlans.length, 1);
+  assert.equal(visiblePlans[0].plan.revision, sealed.receipt.revision);
   return (await applySlotBodyEffect({
     atoms: sealed.atoms,
-    effect: { action: 'print', body: '槽体', name: '实例', revision: sealed.receipt.revision },
+    effect: {
+      action: 'print', body: '槽体', name: '实例', revision: visiblePlans[0].plan.revision
+    },
     sourceProgramPath: '槽体/print'
   })).atoms;
 }
@@ -33,7 +40,7 @@ async function setup(t) {
   const atoms = await lockedWorld();
   atoms.push({
     'thing@program': 'Seal',
-    situation: 'slot_body({"action":"seal","body":"\u69fd\u4f53","lock":True})',
+    situation: 'slot_body({"action":"seal","body":"\u69fd\u4f53"})',
     contain: [], support: []
   });
   await fs.writeFile(contextFile, `${JSON.stringify(atoms, null, 2)}\n`, 'utf8');

@@ -8,8 +8,8 @@ import { decodeLockAtoms, evaluateLockAccess } from './world-laws/locks.mjs';
 import { createDefaultWorldLawRegistry } from './world-laws/registry.mjs';
 import { authorizeProgramLock, programLockState } from './program-locks.mjs';
 import { WORLD_OUTSIDE_NAME, worldOutsideAtom } from './world-root.mjs';
-import { authorizeWindowSelfLock, validateWindowSelfLock } from './window-self-lock.mjs';
-import { readVisibleSlotPlans, slotStructureLockAtPath } from './slot-body-plan-runtime.mjs';
+import { authorizeWindowGraphPath } from './window-lock-v1.mjs';
+import { compileSlotStructureGraphLocks } from './slot-body-plan-runtime.mjs';
 
 const preparedExploreSnapshots = new WeakMap();
 
@@ -102,14 +102,12 @@ export function createAccessController(atoms, options = {}) {
   const programLockIndex = options.programLockIndex?.byPath?.size ? options.programLockIndex : null;
   const legacyAccess = options.legacyAccess;
   const agentPath = options.agentPath ?? options.interaction?.agent?.path ?? null;
-  const windowSelfLock = validateWindowSelfLock(options.windowSelfLock ?? null);
-  const selfLockActive = Boolean(agentPath
-    && options.bypassWindowSelfLock !== true
-    && (options.enforceWindowSelfLock === true || windowSelfLock));
-  const slotStructureRestricted = readVisibleSlotPlans(atoms)
-    .some(({ plan }) => plan.structureLock === true);
+  const fixedAgentWindow = Boolean(agentPath && options.agentSecurity);
+  const slotStructure = compileSlotStructureGraphLocks(atoms);
+  const graphLocks = [...(options.graphLocks ?? []), ...slotStructure.locks];
+  const slotStructureRestricted = slotStructure.locks.length > 0;
   if ((!legacyAccess || legacyAccess.global === true) && !programLockIndex
-    && !selfLockActive && !slotStructureRestricted) {
+    && !fixedAgentWindow && !slotStructureRestricted && graphLocks.length === 0) {
     return { restricted: false, authorize: async () => ({ decision: 'allow', matchedLocks: [] }) };
   }
   const registry = options.worldLawRegistry ?? createDefaultWorldLawRegistry();
@@ -124,24 +122,16 @@ export function createAccessController(atoms, options = {}) {
     restricted: true,
     async authorize(match, operation, field, actor = {}) {
       const targetPath = Array.isArray(match.path) ? match.path.join('/') : match.path;
-      const slotLock = operation === 'write'
-        ? slotStructureLockAtPath(atoms, targetPath)
-        : null;
       const createdTypes = actor.createdAtom
         ? oneStoredField(actor.createdAtom, 'thing')?.parsed.types.map((type) => type.raw) ?? []
         : [];
-      if (slotLock?.locked && createdTypes.some((type) => type.startsWith('slot-role-'))) {
+      const insideSlotDomain = slotStructure.domains.some(({ path }) => (
+        targetPath === path || targetPath.startsWith(`${path}/`)
+      ));
+      if (operation === 'write' && insideSlotDomain
+        && createdTypes.some((type) => type.startsWith('slot-role-'))) {
         return {
           decision: 'deny', code: 'SLOT_ROLE_FORGERY_DENIED',
-          lockKind: 'slot-structure-lock', matchedLocks: []
-        };
-      }
-      if (slotLock?.mappedSelf
-        && actor.slotMaterialCreate !== true
-        && actor.slotMaterialMove !== true
-        && actor.slotReseal !== true) {
-        return {
-          decision: 'deny', code: 'SLOT_STRUCTURE_LOCK_DENIED',
           lockKind: 'slot-structure-lock', matchedLocks: []
         };
       }
@@ -168,16 +158,21 @@ export function createAccessController(atoms, options = {}) {
         });
         if (legacyDecision.decision !== 'allow') return legacyDecision;
       }
-      if (selfLockActive
-        && actor.slotMaterialCreate !== true
-        && actor.slotMaterialMove !== true
-        && !authorizeWindowSelfLock({
-        policy: windowSelfLock, agentPath, targetPath, operation
-      })) {
-        return {
-          decision: 'deny', code: 'WINDOW_ACCESS_DENIED',
-          lockKind: 'window-self-lock', matchedLocks: []
-        };
+      if (fixedAgentWindow || graphLocks.length > 0) {
+        const capabilities = [];
+        if (actor.slotMaterialCreate === true) capabilities.push('slot-material-create');
+        if (actor.slotMaterialMove === true) capabilities.push('slot-material-move');
+        if (actor.slotReseal === true) capabilities.push('slot-reseal');
+        const fixed = authorizeWindowGraphPath({
+          agentPath: fixedAgentWindow ? agentPath : null,
+          targetPath,
+          operation: operation === 'read' ? 'explore' : 'transform',
+          locks: graphLocks,
+          labels: options.agentSecurity?.labels ?? [],
+          capabilities,
+          windowLifecycle: actor.windowLifecycle ?? null
+        });
+        if (fixed.decision !== 'allow') return fixed;
       }
       return { decision: 'allow', matchedLocks: [] };
     }
@@ -421,12 +416,12 @@ export async function executeExploreItem(
     if (unfiltered.error) return { ok: false, index: item.index, errors: [unfiltered.error] };
     if (unfiltered.matches.length > 0) {
       const programSources = [];
-      let windowSelfLockDenied = false;
+      let windowAccessDenied = false;
       for (const match of unfiltered.matches) {
         for (const field of requestedReadFields) {
           const decision = await accessController.authorize(match, 'read', field);
-          if (decision.decision !== 'allow' && decision.lockKind === 'window-self-lock') {
-            windowSelfLockDenied = true;
+          if (decision.decision !== 'allow' && decision.code === 'WINDOW_ACCESS_DENIED') {
+            windowAccessDenied = true;
           }
           for (const source of decision.matched ?? []) {
             if (!programSources.some((candidate) => candidate.sourceProgramPath === source.sourceProgramPath)) {
@@ -435,13 +430,13 @@ export async function executeExploreItem(
           }
         }
       }
-      if (windowSelfLockDenied) {
+      if (windowAccessDenied) {
         return {
           ok: false,
           index: item.index,
           errors: [diagnostic(
             'WINDOW_ACCESS_DENIED',
-            '窗口自锁拒绝读取该 exact 目标'
+            '固定 Agent 窗口边界拒绝读取该 exact 目标'
           )]
         };
       }

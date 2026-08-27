@@ -67,3 +67,29 @@ const REGISTRY = loadRegistry();
 export function programFunctionRegistry() {
   return structuredClone(REGISTRY);
 }
+
+export function expandProgramFunctionSelection(selection) {
+  if (!selection || typeof selection !== 'object' || Array.isArray(selection)
+    || !Array.isArray(selection.groups) || !Array.isArray(selection.names)
+    || Object.keys(selection).some((key) => !['groups', 'names'].includes(key))) {
+    throw problem('INVALID_PROGRAM_FUNCTION_SELECTION', 'functions requires groups and names arrays');
+  }
+  const groups = new Set(REGISTRY.functionFamilies.map((family) => family.id));
+  for (const group of selection.groups) {
+    if (typeof group !== 'string' || !groups.has(group)) {
+      throw problem('UNKNOWN_PROGRAM_FUNCTION_GROUP', `Unknown Program function group: ${group}`);
+    }
+  }
+  const knownNames = new Set(REGISTRY.functions.map((entry) => entry.name));
+  for (const name of selection.names) {
+    if (typeof name !== 'string' || !knownNames.has(name)) {
+      throw problem('UNKNOWN_PROGRAM_FUNCTION', `Unknown Program function: ${name}`);
+    }
+  }
+  return [...new Set([
+    ...REGISTRY.functions
+      .filter((entry) => selection.groups.includes(entry.family))
+      .map((entry) => entry.name),
+    ...selection.names
+  ])].sort();
+}

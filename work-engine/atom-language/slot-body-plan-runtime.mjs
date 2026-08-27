@@ -500,10 +500,10 @@ async function seal(atoms, effect, authorize) {
   const denied = await authorizeLayout(layout, authorize);
   if (denied) return { error: denied };
   if (!layout.sealed) layout = initialSeal(atoms, layout);
-  const compiled = compilePlan(layout, effect.lock === true);
+  const compiled = compilePlan(layout, true);
   if (compiled.error) return compiled;
   ensureRoleRecords(layout, compiled.plan);
-  const recompiled = compilePlan(layout, effect.lock === true);
+  const recompiled = compilePlan(layout, true);
   if (recompiled.error) return recompiled;
   const oldPlan = currentPlan(layout);
   appendRevision(layout, recompiled.plan);
@@ -620,12 +620,11 @@ export async function applyPlanSlotBodyEffect({
     ? Object.keys(effect)
     : [];
   const allowedKeys = effect?.action === 'seal'
-    ? ['action', 'body', 'lock']
+    ? ['action', 'body']
     : ['action', 'body', 'name', 'revision'];
   if (!effect || typeof effect !== 'object' || Array.isArray(effect)
     || !['seal', 'print'].includes(effect.action)
     || typeof effect.body !== 'string' || !effect.body.trim()
-    || (effect.lock !== undefined && typeof effect.lock !== 'boolean')
     || effectKeys.some((key) => !allowedKeys.includes(key))) {
     return { error: slotError('INVALID_SLOT_BODY_EFFECT', 'slot_body() 只接受 seal 或当前 print Program 的内部打印效果') };
   }
@@ -651,32 +650,38 @@ export function readVisibleSlotPlans(atoms) {
   return plans;
 }
 
-export function slotStructureLockAtPath(atoms, targetPath) {
+export function compileSlotStructureGraphLocks(atoms) {
+  const locks = [];
+  const domains = [];
+  const seen = new Set();
   for (const { layout, plan } of readVisibleSlotPlans(atoms)) {
     if (plan.structureLock !== true) continue;
-    const rolePaths = new Set();
-    for (const role of plan.roles.filter((entry) => entry.kind === 'slot')) {
-      rolePaths.add(roleTargetPath(layout, role, layout.modelPath));
-    }
+    const roots = [layout.modelPath];
     for (const instance of childrenOf(layout.examples) ?? []) {
-      const instancePath = `${layout.examplesPath}/${atomName(instance)}`;
-      for (const role of plan.roles.filter((entry) => entry.kind === 'slot')) {
-        rolePaths.add(roleTargetPath(layout, role, instancePath));
-      }
-      if (targetPath === instancePath || targetPath.startsWith(`${instancePath}/`)) {
-        return {
-          locked: true,
-          mappedSelf: rolePaths.has(targetPath),
-          instancePath,
-          rolePaths
-        };
-      }
+      roots.push(`${layout.examplesPath}/${atomName(instance)}`);
     }
-    if (targetPath === layout.modelPath || targetPath.startsWith(`${layout.modelPath}/`)) {
-      return { locked: true, mappedSelf: rolePaths.has(targetPath), instancePath: null, rolePaths };
+    for (const root of roots) {
+      domains.push({ path: root, body: layout.bodyPath, revision: plan.revision });
+      for (const role of plan.roles.filter((entry) => entry.kind === 'slot')) {
+        const path = roleTargetPath(layout, role, root);
+        const key = `${path}\u0000${plan.revision}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        locks.push({
+          kind: 'node',
+          path,
+          actions: ['transform'],
+          allowCapabilities: ['slot-material-create', 'slot-material-move', 'slot-reseal'],
+          denialCode: 'SLOT_STRUCTURE_LOCK_DENIED',
+          lockKind: 'slot-structure-lock',
+          source: 'slot_body',
+          body: layout.bodyPath,
+          revision: plan.revision
+        });
+      }
     }
   }
-  return { locked: false, mappedSelf: false, instancePath: null, rolePaths: new Set() };
+  return { locks, domains };
 }
 
 function planAtRevision(layout, revision) {
@@ -763,10 +768,18 @@ export function slotProgramInvocationsForEvent(atoms, triggerEvent) {
     if (typeof eventPath !== 'string') continue;
     const context = instanceContextForEvent(atoms, eventPath);
     if (!context) continue;
-    const source = context.plan.roles.find((role) => role.path === context.relativePath);
+    let source = context.plan.roles.find((role) => role.path === context.relativePath);
     if (!source) {
       const selected = resolveUnique(atoms, eventPath);
-      if (!selected.error && !roleIdOf(selected.match.atom)) continue;
+      if (!selected.error && !roleIdOf(selected.match.atom)) {
+        source = context.plan.roles
+          .filter((role) => role.kind === 'slot'
+            && context.relativePath.startsWith(`${role.path}/`))
+          .sort((left, right) => right.path.length - left.path.length)[0];
+        if (!source) continue;
+      }
+    }
+    if (!source) {
       throw Object.assign(new Error('实例事件无法映射到采用修订中的相对槽角色'), {
         code: 'SLOT_SCOPE_ROLE_MISMATCH',
         details: {

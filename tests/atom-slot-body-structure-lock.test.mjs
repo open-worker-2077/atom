@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import { createAccessController, walkAtoms } from '../work-engine/atom-language/query-capability.mjs';
 import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
+import { compileSlotStructureGraphLocks } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
+import { authorizeWindowGraphPath } from '../work-engine/atom-language/window-lock-v1.mjs';
 
 function atom(thing, situation = '', contain = [], support = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support };
@@ -18,9 +20,9 @@ function find(atoms, path) {
   return walkAtoms(atoms).find((entry) => entry.path.join('/') === path);
 }
 
-async function sealed(lock) {
+async function sealed() {
   const result = await applySlotBodyEffect({
-    atoms: fixture(), effect: { action: 'seal', body: '槽体', lock }, sourceProgramPath: '封装'
+    atoms: fixture(), effect: { action: 'seal', body: '槽体' }, sourceProgramPath: '封装'
   });
   assert.equal(result.error, undefined);
   const revision = result.receipt.revision;
@@ -34,7 +36,7 @@ async function sealed(lock) {
 }
 
 test('slot_body seal lock protects mapped self but permits ordinary material below it', async () => {
-  const atoms = await sealed(true);
+  const atoms = await sealed();
   const input = find(atoms, '槽体/槽例/实例/输入');
   input.atom.contain.push(atom('料', '可写'));
   const material = find(atoms, '槽体/槽例/实例/输入/料');
@@ -58,20 +60,50 @@ test('slot_body seal lock protects mapped self but permits ordinary material bel
   assert.equal(forged.code, 'SLOT_ROLE_FORGERY_DENIED');
 });
 
-test('slot_body seal lock defaults off', async () => {
-  const atoms = await sealed(false);
+test('slot_body seal always applies the fixed structure lock', async () => {
+  const atoms = await sealed();
   const input = find(atoms, '槽体/槽例/实例/输入');
   assert.equal((await createAccessController(atoms, {}).authorize(
     input, 'write', 'situation'
-  )).decision, 'allow');
+  )).code, 'SLOT_STRUCTURE_LOCK_DENIED');
+});
+
+test('slot structure plans compile their adopted revision into the shared Graph authorizer', async () => {
+  const atoms = await sealed();
+  const compiled = compileSlotStructureGraphLocks(atoms);
+  const inputPath = '槽体/槽例/实例/输入';
+  const inputLock = compiled.locks.find((lock) => lock.path === inputPath);
+  assert.ok(inputLock);
+  assert.equal(typeof inputLock.revision, 'string');
+
+  const denied = authorizeWindowGraphPath({
+    agentPath: null,
+    targetPath: inputPath,
+    operation: 'transform',
+    locks: compiled.locks,
+    labels: [],
+    capabilities: []
+  });
+  assert.equal(denied.decision, 'deny');
+  assert.equal(denied.code, 'SLOT_STRUCTURE_LOCK_DENIED');
+
+  const materialCreate = authorizeWindowGraphPath({
+    agentPath: null,
+    targetPath: inputPath,
+    operation: 'transform',
+    locks: compiled.locks,
+    labels: [],
+    capabilities: ['slot-material-create']
+  });
+  assert.equal(materialCreate.decision, 'allow');
 });
 
 test('reseal still requires the caller lock intersection and denial rolls back every projection', async () => {
-  const atoms = await sealed(true);
+  const atoms = await sealed();
   const before = structuredClone(atoms);
   const denied = await applySlotBodyEffect({
     atoms,
-    effect: { action: 'seal', body: '\u69fd\u4f53', lock: true },
+    effect: { action: 'seal', body: '\u69fd\u4f53' },
     sourceProgramPath: '\u4e0a\u65b9\u7a97\u53e3/Seal',
     authorize: async () => ({ decision: 'deny' })
   });
@@ -81,7 +113,7 @@ test('reseal still requires the caller lock intersection and denial rolls back e
   find(atoms, '\u69fd\u4f53/\u69fd\u4f8b/\u5b9e\u4f8b/\u8f93\u5165').atom.contain.push(atom('\u672c\u5730\u6599', '\u4fdd\u7559'));
   const allowed = await applySlotBodyEffect({
     atoms,
-    effect: { action: 'seal', body: '\u69fd\u4f53', lock: true },
+    effect: { action: 'seal', body: '\u69fd\u4f53' },
     sourceProgramPath: '\u4e0a\u65b9\u7a97\u53e3/Seal',
     authorize: async () => ({ decision: 'allow' })
   });

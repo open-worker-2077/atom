@@ -12,6 +12,8 @@ import {
   parseGraphJson
 } from '../work-engine/atom-language/graph-json.mjs';
 import { parseAtomKey } from '../work-engine/atom-language/key-parser.mjs';
+import { programFunctionRegistry } from '../work-engine/atom-language/program-function-registry.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
 function atomsIn(document) {
   return Array.isArray(document) ? document : [document];
@@ -243,22 +245,91 @@ test('operational Atom Language closes one isolated transform/explore/projection
   );
   const otherBefore = await fileText(otherContextFile);
 
-  const created = await executeAtomLanguage({
+  const agentExample = programFunctionRegistry().functions
+    .find((entry) => entry.name === 'agent').contract.argument.example;
+  const scheduler = createProgramRuntimeScheduler();
+  await fs.writeFile(contextFile, `${JSON.stringify([{
+    'thing@agent': '创建Agent',
+    situation: '',
+    contain: [{
+      thing: '工坊区',
+      situation: '',
+      contain: [{ thing: '既有工件', situation: '', contain: [], support: [] }],
+      support: []
+    }],
+    support: []
+  }], null, 2)}\n`, 'utf8');
+  await scheduler.registerAgentWindow({
+    sourceProgramPath: '创建Agent', labels: ['^'], functions: agentExample.functions.names
+  });
+  const execute = (request) => executeAtomLanguage({
+    ...request, programScheduler: scheduler
+  });
+  const runOperationalCli = async (agent, source) => {
+    let stdout = '';
+    let stderr = '';
+    const code = await runAtomCli(['--agent', agent, ...source], {
+      requireAgent: true,
+      defaultContextFile: contextFile,
+      defaultProjectionFile: projectionFile,
+      execute,
+      stdin: { isTTY: false },
+      stdout: { isTTY: false, write(value) { stdout += value; } },
+      stderr: { write(value) { stderr += value; } }
+    });
+    return { code, stdout, stderr };
+  };
+  const workshopPath = '创建Agent/工坊区/石器工坊';
+  const registrationSource = [
+    `agent(${JSON.stringify(agentExample)})`,
+    'instantiate({"template":"advancement-flow","version":"latest","mode":"ensure","parameters":{"title":"石器工坊"}})'
+  ].join('\n');
+  const created = await runOperationalCli('创建Agent', [
+    'transform', 'new', JSON.stringify({
+      'thing@program#保存石器与工具的工坊': workshopPath,
+      situation: registrationSource,
+      contain: [{
+        thing: '工坊说明',
+        'situation#保存石器与工具的工坊': '第一版完整正文',
+        contain: [],
+        support: []
+      }],
+      support: []
+    })
+  ]);
+  assert.equal(created.code, 0, created.stderr);
+
+  const createdWorld = JSON.parse(await fileText(contextFile));
+  const createdProgram = createdWorld[0].contain[0].contain
+    .find((entry) => fieldEntry(entry, 'thing')?.[1] === '石器工坊');
+  assert.equal(fieldEntry(createdProgram, 'thing')[0], 'thing@program#保存石器与工具的工坊');
+  const duplicateContextBefore = await fileText(contextFile);
+  const duplicateProjectionBefore = await fileText(projectionFile);
+  const duplicate = await execute({
     source: `transform new {
-      "thing@agent": "石器工坊",
-      "situation#保存石器与工具的工坊": "第一版完整正文",
+      "thing": "创建Agent/工坊区/既有工件",
+      "situation": "不得覆盖",
       "contain": [],
       "support": []
     }`,
     contextFile,
-    projectionFile
+    projectionFile,
+    interaction: { id: 'duplicate-workshop', agent: { path: '创建Agent' } }
   });
-  assert.equal(created.ok, true);
+  assertRejected(duplicate, /(?:ATOM_)?(?:ALREADY_)?EXISTS|DUPLICATE/u);
+  assert.equal(await fileText(contextFile), duplicateContextBefore);
+  assert.equal(await fileText(projectionFile), duplicateProjectionBefore);
+
+  const registered = await runOperationalCli('创建Agent', [
+    'transform', JSON.stringify({ 'thing.run.': workshopPath })
+  ]);
+  assert.equal(registered.code, 0, registered.stderr);
 
   const persistedAfterCreate = JSON.parse(await fileText(contextFile));
   const atomsAfterCreate = atomsIn(persistedAfterCreate);
   assert.equal(atomsAfterCreate.length, 1);
-  const workshop = atomsAfterCreate[0];
+  const workshop = atomsAfterCreate[0].contain[0].contain
+    .find((entry) => fieldEntry(entry, 'thing')?.[1] === '石器工坊');
   assert.deepEqual(
     Object.keys(workshop)
       .map((rawKey) => parseAtomKey(rawKey, {
@@ -267,12 +338,14 @@ test('operational Atom Language closes one isolated transform/explore/projection
       .sort(),
     ['contain', 'situation', 'support', 'thing']
   );
-  assert.equal(fieldEntry(workshop, 'thing')[0], 'thing@agent');
-  assert.equal(fieldEntry(workshop, 'thing')[1], '石器工坊');
   assert.equal(
-    fieldEntry(workshop, 'situation')[0],
-    'situation#保存石器与工具的工坊'
+    fieldEntry(workshop, 'thing')[0],
+    'thing@program@agent#保存石器与工具的工坊'
   );
+  assert.equal(fieldEntry(workshop, 'thing')[1], '石器工坊');
+  assert.equal(fieldEntry(workshop, 'situation')[1], registrationSource);
+  const workshopDetail = workshop.contain[0];
+  assert.equal(fieldEntry(workshopDetail, 'situation')[0], 'situation#保存石器与工具的工坊');
 
   const projectionAfterCreateText = await fileText(projectionFile);
   const projectionAfterCreate = parseGraphDocument(
@@ -280,36 +353,22 @@ test('operational Atom Language closes one isolated transform/explore/projection
   );
   assert.ok(graphNode(projectionAfterCreate, '石器工坊'));
 
-  const duplicateContextBefore = await fileText(contextFile);
-  const duplicateProjectionBefore = await fileText(projectionFile);
-  const duplicate = await executeAtomLanguage({
-    source: `transform new {
-      "thing": "石器工坊",
-      "situation": "不得覆盖",
-      "contain": [],
-      "support": []
-    }`,
-    contextFile,
-    projectionFile
-  });
-  assertRejected(duplicate, /(?:ATOM_)?(?:ALREADY_)?EXISTS|DUPLICATE/u);
-  assert.equal(await fileText(contextFile), duplicateContextBefore);
-  assert.equal(await fileText(projectionFile), duplicateProjectionBefore);
-
-  const updated = await executeAtomLanguage({
+  const updated = await execute({
     source: `transform {
-      "thing": "石器工坊",
+      "thing": "${workshopPath}/工坊说明",
       "situation.rep.第二版完整正文"
     }`,
     contextFile,
-    projectionFile
+    projectionFile,
+    interaction: { id: 'update-workshop', agent: { path: workshopPath } }
   });
   assert.equal(updated.ok, true);
 
-  const persistedAfterUpdate = atomsIn(
-    JSON.parse(await fileText(contextFile))
-  )[0];
-  assert.equal(fieldEntry(persistedAfterUpdate, 'thing')[0], 'thing@agent');
+  const updatedWorkshop = atomsIn(JSON.parse(await fileText(contextFile)))[0]
+    .contain[0].contain.find((entry) => fieldEntry(entry, 'thing')?.[1] === '石器工坊');
+  const persistedAfterUpdate = updatedWorkshop.contain
+    .find((entry) => fieldEntry(entry, 'thing')?.[1] === '工坊说明');
+  assert.equal(fieldEntry(persistedAfterUpdate, 'thing')[0], 'thing');
   assert.equal(
     fieldEntry(persistedAfterUpdate, 'situation')[0],
     'situation#保存石器与工具的工坊'
@@ -325,16 +384,17 @@ test('operational Atom Language closes one isolated transform/explore/projection
     JSON.parse(projectionAfterUpdateText)
   );
   assert.equal(
-    fieldEntry(graphNode(projectionAfterUpdate, '石器工坊'), 'situation')[1],
+    fieldEntry(graphNode(projectionAfterUpdate, '工坊说明'), 'situation')[1],
     '第二版完整正文'
   );
 
   const beforeExploreContext = await fileText(contextFile);
   const beforeExploreProjection = await fileText(projectionFile);
-  const explored = await executeAtomLanguage({
-    source: 'explore {"thing":"石器工坊","situation$full"}',
+  const explored = await execute({
+    source: `explore {"thing":"${workshopPath}/工坊说明","situation$full"}`,
     contextFile,
-    projectionFile
+    projectionFile,
+    interaction: { id: 'explore-workshop', agent: { path: workshopPath } }
   });
   assert.equal(explored.ok, true);
   assert.match(JSON.stringify(explored), /第二版完整正文/u);
@@ -346,10 +406,11 @@ test('operational Atom Language closes one isolated transform/explore/projection
   ]) {
     const contextBefore = await fileText(contextFile);
     const projectionBefore = await fileText(projectionFile);
-    const rejected = await executeAtomLanguage({
+    const rejected = await execute({
       source: rejectedSource,
       contextFile,
-      projectionFile
+      projectionFile,
+      interaction: { id: 'missing-workshop', agent: { path: '创建Agent' } }
     });
     assertRejected(
       rejected,

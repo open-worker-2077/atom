@@ -797,6 +797,12 @@ export async function applyTransform({
   const nameCommands = item.fields
     .filter((field) => field.baseKey === 'thing')
     .flatMap((field) => field.commands ?? []);
+  if (nameCommands.some((command) => command.name === 'typ' && command.parameter === 'agent')) {
+    return { error: diagnostic(
+      'AGENT_REGISTRATION_REQUIRED',
+      '公开 Transform 不能把 Thing 登记为 @agent；请由当前 Program 调用 agent()'
+    ) };
+  }
   const rewritesPaths = nameCommands.some((command) => (
     ['ren', 'mov', 'cpy', 'dsc', 'rst'].includes(command.name)
   ));

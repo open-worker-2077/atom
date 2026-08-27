@@ -48,39 +48,24 @@ function validWhen(value) {
   );
 }
 
-function validWindowRule(rule) {
-  return rule && typeof rule === 'object' && !Array.isArray(rule)
-    && Number.isInteger(rule.priority) && rule.priority > 0
-    && typeof rule.fromPath === 'string' && rule.fromPath.length > 0
-    && (rule.parent === undefined || typeof rule.parent === 'boolean')
-    && (rule.peers === undefined || typeof rule.peers === 'boolean')
-    && (rule.descendants === undefined || rule.descendants === 'all'
-      || (Number.isInteger(rule.descendants) && rule.descendants >= 0));
-}
-
-function validWindowPolicy(policy) {
-  if (!policy || typeof policy !== 'object' || Array.isArray(policy)
-    || Object.keys(policy).some((key) => !['read', 'write'].includes(key))) return false;
-  return Object.values(policy).every((side) => side && typeof side === 'object'
-    && !Array.isArray(side)
-    && Object.keys(side).every((key) => ['allow', 'deny'].includes(key))
-    && Object.values(side).every((rules) => Array.isArray(rules) && rules.every(validWindowRule)));
-}
-
 export function validateRequestDrivenLockSnapshot(value) {
   const supportedFields = new Set(['thing', 'situation', 'contain', 'support', 'messages']);
+  if (value && typeof value === 'object'
+    && (Object.hasOwn(value, 'windowSelfLocks') || Object.hasOwn(value, 'windowSelfLockAgents'))) {
+    throw problem(
+      'RETIRED_WINDOW_SELF_LOCK_SNAPSHOT',
+      'Legacy window self-lock snapshots require one-time migration to agentRegistrations'
+    );
+  }
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.version !== 1 || !Array.isArray(value.locks)
-    || (value.windowSelfLockAgents !== undefined
-      && (!Array.isArray(value.windowSelfLockAgents)
-        || value.windowSelfLockAgents.some((agentPath) => (
-          typeof agentPath !== 'string' || !agentPath
-        ))
-        || new Set(value.windowSelfLockAgents).size !== value.windowSelfLockAgents.length))
-    || (value.windowSelfLocks !== undefined && (!Array.isArray(value.windowSelfLocks)
-      || value.windowSelfLocks.some((entry) => !entry || typeof entry !== 'object'
+    || (value.agentRegistrations !== undefined && (!Array.isArray(value.agentRegistrations)
+      || value.agentRegistrations.some((entry) => !entry || typeof entry !== 'object'
         || typeof entry.agentPath !== 'string' || !entry.agentPath
-        || !validWindowPolicy(entry.policy))))
+        || !Array.isArray(entry.labels)
+        || entry.labels.some((label) => typeof label !== 'string' || !label)
+        || !Array.isArray(entry.functions) || entry.functions.length === 0
+        || entry.functions.some((name) => typeof name !== 'string' || !name))))
     || value.locks.some((lock) => !lock || typeof lock !== 'object' || Array.isArray(lock)
       || typeof lock.sourceProgramPath !== 'string' || !lock.sourceProgramPath
       || !Array.isArray(lock.targets?.paths) || lock.targets.paths.length === 0
