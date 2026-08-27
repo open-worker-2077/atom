@@ -309,6 +309,53 @@ test('startup isolates Agent-bound jump failures into a restartable context-free
   assert.equal(restartedExecutions, 0);
 });
 
+test('an Agent exact read reuses a valid context-incomplete projection without executing an unrelated jump', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-context-incomplete-exact-read-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const repository = memoryProjectionRepository();
+  const world = [atom('Root', '', [
+    atom('Audit', '', [], 'program@agent'),
+    atom('Target'),
+    atom('Legacy Jump', '# agent-bound jump', [], 'program')
+  ])];
+  await fs.writeFile(contextFile, JSON.stringify(world, null, 2));
+
+  const startup = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async ({ program }) => {
+      if (program.path === 'Root/Legacy Jump') {
+        throw Object.assign(new Error('missing destination'), {
+          code: 'WINDOW_JUMP_DESTINATION_INVALID'
+        });
+      }
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+  await startup.refresh(world, { isolateFailures: true });
+
+  let executions = 0;
+  const restarted = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async () => {
+      executions += 1;
+      throw new Error('an exact read must not rebuild unrelated Programs');
+    }
+  });
+  const result = await executeAtomLanguage({
+    source: 'explore {"thing":"Root/Target","situation$full":true}',
+    contextFile,
+    projectionFile,
+    programScheduler: restarted,
+    interaction: { id: 'context-incomplete-exact-read', agent: { ref: 'audit-ref', path: 'Root/Audit' } }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.items[0].matches[0].path, 'Root/Target');
+  assert.equal(executions, 0);
+});
+
 test('startup settles isolated Program failures before replacing a stale passive projection', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-startup-settle-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

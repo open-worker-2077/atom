@@ -1388,7 +1388,8 @@ export class ProgramRuntimeScheduler {
     const persisted = options.programSelector
       ? null
       : await this.persistedProjection({
-        records, programs, isolateFailures, fingerprint: key, agentOrigin: options.agentOrigin
+        records, programs, isolateFailures, fingerprint: key, agentOrigin: options.agentOrigin,
+        allowContextIncomplete: options.allowContextIncomplete === true
       });
     if (persisted) {
       this.completed.set(key, persisted);

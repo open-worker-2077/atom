@@ -667,7 +667,10 @@ export async function executeAtomLanguage(options = {}) {
       const programOptions = {
         agentOrigin: interaction.agent,
         isolateFailures: true,
-        ...(parsed.command === 'explore' ? { allowWindowLockSnapshot: true } : {}),
+        ...(parsed.command === 'explore' ? {
+          allowWindowLockSnapshot: true,
+          allowContextIncomplete: true
+        } : {}),
         ...(passivePrograms ? { passive: true } : {}),
         ...(requestedProgramRun?.selector
           ? {
