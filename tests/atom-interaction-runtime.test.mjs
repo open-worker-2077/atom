@@ -85,6 +85,27 @@ test('command follows one agent, Program, world and revision-labelled projection
   ]);
 });
 
+test('failed interactions retain their correlation id for bounded server-side diagnosis', async () => {
+  const context = ports();
+  context.world.execute = async () => ({
+    ok: false,
+    command: 'transform',
+    changed: false,
+    errors: [{ code: 'WINDOW_ACCESS_DENIED', message: 'denied' }]
+  });
+  const runtime = createInteractionRuntime(context);
+
+  const result = await runtime.execute({
+    source: 'transform new {"thing":"Agent/Task/New","situation":"","contain":[],"support":[]}',
+    correlationId: 'failed-create-correlation',
+    agentPath: 'Agent',
+    history: []
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.interactionId, 'failed-create-correlation');
+});
+
 test('a committed write is exposed before disposable projection publication finishes', async () => {
   let releaseProjection;
   const projectionBlocked = new Promise((resolve) => {

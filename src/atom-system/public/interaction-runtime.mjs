@@ -70,6 +70,11 @@ function diagnosticFailure(result) {
   };
 }
 
+function withInteractionId(result, correlationId) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
+  return { ...result, interactionId: correlationId };
+}
+
 export function createInteractionRuntime({
   world,
   projections,
@@ -181,7 +186,9 @@ export function createInteractionRuntime({
       programRuntime
     });
     const worldStartedAt = performance.now();
-    let result = await executeWorld(intent.source, interaction);
+    let result = withInteractionId(
+      await executeWorld(intent.source, interaction), intent.correlationId
+    );
     performanceTrace('world-execute', {
       elapsedMs: Math.round(performance.now() - worldStartedAt),
       changed: result?.changed === true
@@ -189,15 +196,20 @@ export function createInteractionRuntime({
     const projectionMissing = result?.ok === false
       && result.errors?.some(({ code }) => code === 'ATOM_PROGRAM_PROJECTION_MISSING');
     if (projectionMissing && !options.programMode) {
-      let preparation = await executeWorld('atom', Object.freeze({
-        ...interaction,
-        id: `${interaction.id}:program-context`
-      }), { ...options, programMode: 'passive' });
+      let preparation = withInteractionId(
+        await executeWorld('atom', Object.freeze({
+          ...interaction,
+          id: `${interaction.id}:program-context`
+        }), { ...options, programMode: 'passive' }),
+        `${intent.correlationId}:program-context`
+      );
       if (!preparation?.ok) return preparation;
       if (options.publish !== false) {
         preparation = withProjectionOutcome(preparation, await publish(preparation));
       }
-      result = await executeWorld(intent.source, interaction);
+      result = withInteractionId(
+        await executeWorld(intent.source, interaction), intent.correlationId
+      );
       result = {
         ...result,
         ...(preparation.projectionStatus ? {
