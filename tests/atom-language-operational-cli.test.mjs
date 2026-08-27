@@ -496,3 +496,97 @@ test('operational writes reject colliding files, preserve long context situation
   assert.equal(await fileText(contextFile), contextBefore);
   assert.equal(await fileText(projectionFile), projectionBefore);
 });
+
+test('stdin keeps a split UTF-8 Program situation intact through persistence', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-cli-utf8-stdin-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const situation = [
+    'def main():',
+    "    message({'level': 'info', 'text': '验'})"
+  ].join('\n');
+  const source = `transform new ${JSON.stringify({
+    'thing@program': 'UTF-8 Program', situation, contain: [], support: []
+  })}`;
+  const bytes = Buffer.from(source, 'utf8');
+  const splitAt = bytes.indexOf(Buffer.from('验', 'utf8')) + 1;
+  const stdin = {
+    isTTY: false,
+    async *[Symbol.asyncIterator]() {
+      yield bytes.subarray(0, splitAt);
+      yield bytes.subarray(splitAt);
+    }
+  };
+  let stdout = '';
+  let stderr = '';
+
+  const code = await runAtomCli([
+    '--stdin', '--context', contextFile, '--projection', projectionFile
+  ], {
+    execute: executeAtomLanguage,
+    stdin,
+    stdout: { isTTY: false, write(value) { stdout += value; } },
+    stderr: { write(value) { stderr += value; } }
+  });
+
+  assert.equal(code, 0, stderr);
+  assert.equal(JSON.parse(stdout)['thing@program~created'], 'UTF-8 Program', stdout);
+  const [persisted] = JSON.parse(await fileText(contextFile));
+  assert.equal(fieldEntry(persisted, 'situation')[1], situation);
+});
+
+test('stdin keeps an ASCII command intact in one complete chunk', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-cli-ascii-stdin-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const source = 'transform new {"thing":"ASCII Node","situation":"plain","contain":[],"support":[]}';
+  const stdin = {
+    isTTY: false,
+    async *[Symbol.asyncIterator]() { yield Buffer.from(source, 'utf8'); }
+  };
+
+  const code = await runAtomCli([
+    '--stdin', '--context', contextFile, '--projection', projectionFile
+  ], {
+    execute: executeAtomLanguage,
+    stdin,
+    stdout: { isTTY: false, write() {} },
+    stderr: { write(value) { throw new Error(value); } }
+  });
+
+  assert.equal(code, 0);
+  const [persisted] = JSON.parse(await fileText(contextFile));
+  assert.equal(fieldEntry(persisted, 'situation')[1], 'plain');
+});
+
+test('stdin retains replacement-character behavior for invalid UTF-8 at stream end', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-cli-invalid-stdin-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const stdin = {
+    isTTY: false,
+    async *[Symbol.asyncIterator]() {
+      yield Buffer.concat([
+        Buffer.from('transform new {"thing":"Invalid UTF8","situation":"', 'utf8'),
+        Buffer.from([0xE9]),
+        Buffer.from('","contain":[],"support":[]}', 'utf8')
+      ]);
+    }
+  };
+
+  const code = await runAtomCli([
+    '--stdin', '--context', contextFile, '--projection', projectionFile
+  ], {
+    execute: executeAtomLanguage,
+    stdin,
+    stdout: { isTTY: false, write() {} },
+    stderr: { write(value) { throw new Error(value); } }
+  });
+
+  assert.equal(code, 0);
+  const [persisted] = JSON.parse(await fileText(contextFile));
+  assert.equal(fieldEntry(persisted, 'situation')[1], '\uFFFD');
+});

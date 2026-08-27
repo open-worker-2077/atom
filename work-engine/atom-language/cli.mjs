@@ -2,6 +2,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import process from 'node:process';
 import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
@@ -406,7 +407,11 @@ function parseCliArgs(argv) {
 
 async function readCommandSource(stream) {
   let source = '';
-  for await (const chunk of stream) source += chunk.toString('utf8');
+  const decoder = new StringDecoder('utf8');
+  for await (const chunk of stream) {
+    source += decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8'));
+  }
+  source += decoder.end();
   if (!source.trim()) {
     throw cliError('EMPTY_STDIN_COMMAND', '--stdin 未收到 Atom 命令');
   }
