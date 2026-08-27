@@ -121,6 +121,54 @@ test('legacy composition binds world, Program, projection and spatial publicatio
   ]);
 });
 
+test('legacy composition primes and revision-binds Agent resolution without caching a denied Agent', async () => {
+  let manifestCalls = 0;
+  let resolverCalls = 0;
+  let revision = 'revision-1';
+  const scheduler = { agentSecurityWorldRevision: 'security-1' };
+  const runtime = createLegacyRuntimeComposition({
+    contextFile: 'atom.json', graphFile: 'graph.json', storeFile: 'knowledge.json',
+    programScheduler: scheduler,
+    worldService: {
+      async executeLegacy(request) {
+        if (request.source === 'transform {"change":true}') revision = 'revision-2';
+        return { ok: true, changed: request.source === 'transform {"change":true}', revisionAfter: revision };
+      },
+      async compatibilityManifest() {
+        manifestCalls += 1;
+        return { contract: 'test-manifest', currentWorldRevision: revision };
+      }
+    },
+    projectionOrchestrator: { projectCurrent: async () => ({ sourceRevision: revision, graph: {}, spatial: {} }) },
+    graphPublisher: { publish: async () => {} }, spatialPublisher: { publish: async () => {} },
+    feedbackRecorder: async () => ({ ok: true }),
+    agentResolver: async (_file, agentPath, options) => {
+      resolverCalls += 1;
+      if (agentPath === 'Root/Missing') throw Object.assign(new Error('missing'), { code: 'AGENT_NOT_FOUND' });
+      return { ref: `${options.worldRevision}:${agentPath}`, path: agentPath };
+    },
+    humanStatusTranslator: { translate: async () => 'transform {}' }
+  });
+
+  await runtime.initialize({ correlationId: 'prime-agent-resolution' });
+  await runtime.execute({ source: 'transform {}', correlationId: 'same-1', agentPath: 'Root/Agent', history: [] });
+  await runtime.execute({ source: 'transform {}', correlationId: 'same-2', agentPath: 'Root/Agent', history: [] });
+  assert.equal(manifestCalls, 1, 'startup proof must be reused for the unchanged world');
+  assert.equal(resolverCalls, 1, 'same Agent resolution must be O(1) after priming');
+
+  await runtime.execute({ source: 'transform {"change":true}', correlationId: 'changed', agentPath: 'Root/Agent', history: [] });
+  await runtime.execute({ source: 'transform {}', correlationId: 'changed-2', agentPath: 'Root/Agent', history: [] });
+  assert.equal(resolverCalls, 2, 'a world revision change must force a fresh resolution');
+
+  scheduler.agentSecurityWorldRevision = 'security-2';
+  await runtime.execute({ source: 'transform {}', correlationId: 'security-changed', agentPath: 'Root/Agent', history: [] });
+  assert.equal(resolverCalls, 3, 'an Agent-security revision change must force a fresh resolution');
+  await assert.rejects(
+    runtime.execute({ source: 'transform {}', correlationId: 'missing-agent', agentPath: 'Root/Missing', history: [] }),
+    (error) => error.code === 'AGENT_NOT_FOUND'
+  );
+});
+
 test('legacy composition identifies the disposable projection stage without exposing a file path', async () => {
   const runtime = createLegacyRuntimeComposition({
     contextFile: 'atom.json',

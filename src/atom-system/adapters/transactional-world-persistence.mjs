@@ -67,6 +67,8 @@ export function createTransactionalWorldPersistence({
   const journalRepository = createJsonTransactionJournal({ file: journalFile });
   const coordinator = createCommitCoordinator({ worldRepository, journalRepository });
   let recovery = null;
+  let cachedManifest = null;
+  let manifestLoaded = false;
 
   function recover() {
     recovery ??= coordinator.recover();
@@ -75,8 +77,11 @@ export function createTransactionalWorldPersistence({
 
   async function compatibilityManifest() {
     await recover();
+    if (manifestLoaded) return structuredClone(cachedManifest);
     const state = await journalRepository.readState();
-    return structuredClone(state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null);
+    cachedManifest = structuredClone(state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null);
+    manifestLoaded = true;
+    return structuredClone(cachedManifest);
   }
 
   async function commit({
@@ -139,6 +144,8 @@ export function createTransactionalWorldPersistence({
         }
       })
     });
+    cachedManifest = structuredClone(nextManifest);
+    manifestLoaded = true;
     await onAuthoritativeWrite({
       operation: 'commit',
       contextFile,
@@ -181,6 +188,7 @@ export function createTransactionalWorldPersistence({
         payload: { targetCommandId }
       }
     });
+    manifestLoaded = false;
     await onAuthoritativeWrite({
       operation: 'rollback',
       contextFile,

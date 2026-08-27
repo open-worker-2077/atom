@@ -338,29 +338,66 @@ export function createLegacyRuntimeComposition(options) {
     recover: projectAndPublish
   });
 
+  let resolutionManifest = null;
+  let resolutionManifestReady = false;
+  const resolvedAgents = new Map();
+
+  async function refreshResolutionManifest() {
+    const manifest = typeof worldService.compatibilityManifest === 'function'
+      ? await worldService.compatibilityManifest({ contextFile, projectionFile: graphFile })
+      : null;
+    resolutionManifest = manifest ? structuredClone(manifest) : null;
+    resolutionManifestReady = true;
+    resolvedAgents.clear();
+    return resolutionManifest;
+  }
+
+  async function currentResolutionManifest() {
+    if (!resolutionManifestReady) await refreshResolutionManifest();
+    return resolutionManifest;
+  }
+
+  function resolutionKey(agentPath, manifest) {
+    const manifestHash = crypto.createHash('sha256')
+      .update(JSON.stringify(manifest ?? null))
+      .digest('hex');
+    const securityRevision = programScheduler?.agentSecurityWorldRevision ?? '';
+    return `${agentPath}\0${manifestHash}\0${securityRevision}`;
+  }
+
+  async function resolveAgent(agentPath) {
+    const manifest = await currentResolutionManifest();
+    const key = resolutionKey(agentPath, manifest);
+    const cached = resolvedAgents.get(key);
+    if (cached) return structuredClone(cached);
+    const resolved = await agentResolver(contextFile, agentPath, {
+      ...(manifest ? { compatibilityManifest: structuredClone(manifest) } : {}),
+      ...(manifest?.currentWorldRevision ? { worldRevision: manifest.currentWorldRevision } : {})
+    });
+    resolvedAgents.set(key, structuredClone(resolved));
+    return resolved;
+  }
+
   return createInteractionRuntime({
     world: {
-      execute: ({ programRuntime, ...request }) => worldService.executeLegacy({
-        ...request,
-        contextFile,
-        projectionFile: graphFile,
-        programScheduler: programRuntime,
-        diagnosticRecorder: diagnostics
-      })
+      execute: async ({ programRuntime, ...request }) => {
+        const result = await worldService.executeLegacy({
+          ...request,
+          contextFile,
+          projectionFile: graphFile,
+          programScheduler: programRuntime,
+          ...(diagnostics ? { diagnosticRecorder: diagnostics } : {})
+        });
+        if (!resolutionManifestReady || result?.changed === true) await refreshResolutionManifest();
+        return result;
+      }
     },
     projections,
     feedback: {
       submit: (request) => feedbackRecorder({ ...request, contextFile })
     },
     agents: {
-      resolve: async (agentPath) => agentResolver(contextFile, agentPath, {
-        compatibilityManifest: typeof worldService.compatibilityManifest === 'function'
-          ? await worldService.compatibilityManifest({
-            contextFile,
-            projectionFile: graphFile
-          })
-          : null
-      })
+      resolve: resolveAgent
     },
     humanStatus: humanStatusTranslator,
     humanWorkspace: humanWorkspaceTranslator,

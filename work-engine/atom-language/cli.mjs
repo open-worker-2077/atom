@@ -778,7 +778,7 @@ export async function resolveAgentContext(contextFile, selector, options = {}) {
       byPath.set(entry.path, [entry]);
     }
     directory = {
-      revision: revisionOfWorldFacts(atoms).slice('sha256:'.length),
+      revision: (options.worldRevision ?? revisionOfWorldFacts(atoms)).replace(/^sha256:/u, ''),
       byName,
       byPath
     };
