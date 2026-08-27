@@ -531,6 +531,15 @@ function graphMatch(match, hint = null, boundary = null) {
   if (match.lockState) {
     entries.push(graphEntry('lock~active', true, match.lockState));
   }
+  if (match.resolvedThroughShortcut) {
+    const marker = match.resolvedThroughShortcut;
+    entries.push(graphEntry('shortcut~resolved', true, graphObject([
+      graphEntry('identity', true, marker.identity),
+      graphEntry('thing', true, marker.thing),
+      graphEntry('placement', true, marker.placement),
+      graphEntry('path', true, marker.path)
+    ])));
+  }
   if (boundary) {
     entries.push(graphEntry('boundary~preview', true, graphBoundary(boundary)));
   }

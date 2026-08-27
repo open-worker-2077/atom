@@ -10,7 +10,11 @@ import { authorizeProgramLock, programLockState } from './program-locks.mjs';
 import { WORLD_OUTSIDE_NAME, worldOutsideAtom } from './world-root.mjs';
 import { authorizeWindowGraphPath } from './window-lock-v1.mjs';
 import { compileSlotStructureGraphLocks } from './slot-body-plan-runtime.mjs';
-import { isShortcutAtom, resolveShortcutMatch } from './shortcut-runtime.mjs';
+import {
+  isShortcutAtom,
+  resolveShortcutMatch,
+  shortcutMetadata
+} from './shortcut-runtime.mjs';
 
 const preparedExploreSnapshots = new WeakMap();
 
@@ -205,6 +209,16 @@ export function describeAtom(match, includeFullDetail, options = {}) {
   if (options.lockState) result.lockState = structuredClone(options.lockState);
   if (options.resolvedThroughShortcut) result.resolvedThroughShortcut = structuredClone(options.resolvedThroughShortcut);
   return result;
+}
+
+function shortcutResolutionMarker(match) {
+  const metadata = shortcutMetadata(match.atom);
+  return {
+    identity: metadata.referenceId,
+    thing: oneStoredField(match.atom, 'thing')?.value ?? null,
+    placement: 'contain',
+    path: match.path.join('/')
+  };
 }
 
 export function prepareExploreWorld(atoms) {
@@ -507,10 +521,7 @@ export async function executeExploreItem(
       }
     }
     selected.matches[0] = target;
-    resolvedThroughShortcut = {
-      path: shortcutMatch.path.join('/'),
-      thing: oneStoredField(shortcutMatch.atom, 'thing')?.value ?? null
-    };
+    resolvedThroughShortcut = shortcutResolutionMarker(shortcutMatch);
   }
   const includeFullDetail = item.fields.some((field) => field.baseKey === 'situation'
     && field.actions.some((action) => action.name === 'full'));
@@ -550,14 +561,16 @@ export async function executeExploreItem(
         }
       }
       if (!allowed) continue;
-      marker = { path: match.path.join('/'), thing: oneStoredField(match.atom, 'thing')?.value ?? null };
+      marker = shortcutResolutionMarker(match);
     }
-    describedMatches.push(describeAtom(describedMatch, includeFullDetail, {
+    const described = describeAtom(describedMatch, includeFullDetail, {
       selector: shortestUniqueSelector(describedMatch, visibleMatches),
       ...(includeSupport ? { supportFields: storedSupportFields(describedMatch.atom) } : {}),
       lockState: programLockState(lockIndex, describedMatch.path.join('/')),
       ...(marker ? { resolvedThroughShortcut: marker } : {})
-    }));
+    });
+    if (isShortcutAtom(match.atom)) described.path = marker.path;
+    describedMatches.push(described);
   }
   return {
     ok: true,

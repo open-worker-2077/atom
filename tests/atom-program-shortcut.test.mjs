@@ -5,7 +5,12 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
+import {
+  materializeGraphJson,
+  parseGraphJson
+} from '../work-engine/atom-language/graph-json.mjs';
 import { executeExploreItem } from '../work-engine/atom-language/query-capability.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
@@ -13,7 +18,8 @@ import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-rev
 import {
   applyShortcutEffect,
   createShortcutAtom,
-  resolveShortcutMatch
+  resolveShortcutMatch,
+  shortcutMetadata
 } from '../work-engine/atom-language/shortcut-runtime.mjs';
 
 function atom(thing, situation = '', contain = [], types = []) {
@@ -59,6 +65,86 @@ function creatorSource(targetPath, shortcutName) {
   ].join('\n');
 }
 
+async function runCli(files, source) {
+  let stdout = '';
+  let stderr = '';
+  const code = await runAtomCli([
+    '--context', files.contextFile,
+    '--projection', files.projectionFile,
+    ...source
+  ], {
+    execute: executeAtomLanguage,
+    stdin: { isTTY: false },
+    stdout: { isTTY: false, write(value) { stdout += value; } },
+    stderr: { write(value) { stderr += value; } }
+  });
+  return {
+    code,
+    stderr,
+    output: stdout ? materializeGraphJson(parseGraphJson(stdout)) : null
+  };
+}
+
+test('exact Graph-JSON exposes the resolved target with stable shortcut audit metadata', async (t) => {
+  const files = await fixture(t, [
+    atom('目标域', '', [atom('权威 Thing', '唯一正文')]),
+    atom('引用域', '', [program('创建引用', '')]),
+    atom('备份', '', [], ['backup', 'default'])
+  ]);
+  const atoms = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  findAtom(atoms, '引用域/创建引用').contain.push(createShortcutAtom({
+    thing: '常用入口',
+    targetPath: '目标域/权威 Thing',
+    referenceId: 'shortcut-audit-id'
+  }));
+  await fs.writeFile(files.contextFile, `${JSON.stringify(atoms, null, 2)}\n`, 'utf8');
+
+  const explored = await runCli(files, [
+    'explore', '{"thing":"引用域/创建引用/常用入口","situation$full"}'
+  ]);
+
+  assert.equal(explored.code, 0, explored.stderr);
+  assert.equal(explored.output.thing, '权威 Thing');
+  assert.equal(explored.output.situation, '唯一正文');
+  assert.deepEqual(explored.output['shortcut~resolved'], {
+    identity: 'shortcut-audit-id',
+    thing: '常用入口',
+    placement: 'contain',
+    path: '引用域/创建引用/常用入口'
+  });
+});
+
+test('a parent Graph-JSON contain projection keeps its shortcut as one direct auditable member', async (t) => {
+  const files = await fixture(t, [
+    atom('目标域', '', [atom('权威 Thing', '唯一正文')]),
+    atom('引用域', '', [program('创建引用', '')]),
+    atom('备份', '', [], ['backup', 'default'])
+  ]);
+  const atoms = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  findAtom(atoms, '引用域/创建引用').contain.push(createShortcutAtom({
+    thing: '常用入口',
+    targetPath: '目标域/权威 Thing',
+    referenceId: 'shortcut-member-id'
+  }));
+  await fs.writeFile(files.contextFile, `${JSON.stringify(atoms, null, 2)}\n`, 'utf8');
+
+  const explored = await runCli(files, [
+    'explore', '{"thing":"引用域/创建引用","contain$latitude-1","situation$full"}'
+  ]);
+
+  assert.equal(explored.code, 0, explored.stderr);
+  assert.equal(explored.output['thing@program'], '创建引用');
+  assert.equal(explored.output.contain.length, 1);
+  assert.equal(explored.output.contain[0].thing, '权威 Thing');
+  assert.equal(explored.output.contain[0].situation, '唯一正文');
+  assert.deepEqual(explored.output.contain[0]['shortcut~resolved'], {
+    identity: 'shortcut-member-id',
+    thing: '常用入口',
+    placement: 'contain',
+    path: '引用域/创建引用/常用入口'
+  });
+});
+
 test('shortcut() creates one owner-local reference without copying target facts and exact Explore resolves it', async (t) => {
   const world = [
     atom('目标域', '', [atom('权威 Thing', '唯一正文', [atom('唯一子项')])]),
@@ -94,6 +180,8 @@ test('shortcut() creates one owner-local reference without copying target facts 
   assert.equal(explored.items[0].matches[0].thing, '权威 Thing');
   assert.equal(explored.items[0].matches[0].situation, '唯一正文');
   assert.deepEqual(explored.items[0].matches[0].resolvedThroughShortcut, {
+    identity: shortcutMetadata(shortcut).referenceId,
+    placement: 'contain',
     path: '引用域/创建引用/常用入口',
     thing: '常用入口'
   });
@@ -106,7 +194,7 @@ test('shortcut() creates one owner-local reference without copying target facts 
   const ordinaryShortcut = ordinary.items[0].matches.find((match) => (
     match.resolvedThroughShortcut?.path === '引用域/创建引用/常用入口'
   ));
-  assert.equal(ordinaryShortcut.path, '目标域/权威 Thing');
+  assert.equal(ordinaryShortcut.path, '引用域/创建引用/常用入口');
   assert.equal(ordinaryShortcut.situation, '唯一正文');
 });
 
