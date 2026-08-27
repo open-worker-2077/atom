@@ -30,30 +30,16 @@ function legacyLockSnapshot(fields = ['name', 'detail', 'children', 'partners', 
   };
 }
 
-test('request-driven lock migration maps only legacy fields while preserving order and all other structure', () => {
-  const source = legacyLockSnapshot();
-  const plan = planRequestDrivenLockFourAxisMigration(source);
-
-  assert.deepEqual(plan.snapshot.locks[0].fields, [
-    'thing', 'situation', 'contain', 'support', 'messages'
-  ]);
-  assert.deepEqual(
-    { ...plan.snapshot.locks[0], fields: source.locks[0].fields },
-    source.locks[0]
-  );
-  assert.deepEqual(plan.summary, {
-    locks: 1,
-    fields: 5,
-    migratedFields: 4,
-    changed: true
-  });
-  assert.notEqual(plan.sourceHash, plan.nextHash);
-
-  const current = legacyLockSnapshot(['thing', 'situation', 'contain', 'support', 'messages']);
-  const currentPlan = planRequestDrivenLockFourAxisMigration(current);
-  assert.deepEqual(currentPlan.snapshot, current);
-  assert.equal(currentPlan.summary.changed, false);
-  assert.equal(currentPlan.sourceHash, currentPlan.nextHash);
+test('request-driven lock snapshots are retired instead of becoming a second authorization authority', () => {
+  for (const fields of [
+    ['name', 'detail', 'children', 'partners', 'messages'],
+    ['thing', 'situation', 'contain', 'support', 'messages']
+  ]) {
+    assert.throws(
+      () => planRequestDrivenLockFourAxisMigration(legacyLockSnapshot(fields)),
+      { code: 'INVALID_REQUEST_DRIVEN_LOCK_MIGRATION_SNAPSHOT' }
+    );
+  }
 });
 
 test('request-driven lock migration rejects mixed, colliding, and invalid field snapshots before planning', () => {
@@ -505,38 +491,13 @@ test('world migration never commits when private backup verification fails', asy
   assert.equal(committed, false);
 });
 
-test('sidecar commit failure compensates the world and restores the request-driven lock backup', async () => {
+test('graph migration rejects retired request-driven lock snapshots before backup or commit', async () => {
   const sourceFacts = [legacyNode('Root')];
-  const plan = planGraphFourAxisWorldMigration({
+  assert.throws(() => planGraphFourAxisWorldMigration({
     snapshot: { revision: revisionOfWorldFacts(sourceFacts), facts: sourceFacts },
     planner: graphSchema.planGraphFourAxisMigration,
     requestDrivenLockSnapshot: legacyLockSnapshot(['detail'])
-  });
-  const calls = [];
-  await assert.rejects(applyGraphFourAxisWorldMigration({
-    plan,
-    confirmation: true,
-    attemptId: 'sidecar-compensation-test',
-    backup: {
-      create: async () => ({ directory: 'private-backup' }),
-      verify: async () => true
-    },
-    persistence: {
-      commit: async () => ({ commandId: 'world-command', afterRevision: plan.nextRevision }),
-      rollback: async (request) => {
-        calls.push(['world-rollback', request]);
-        return { status: 'committed', afterRevision: plan.expectedRevision };
-      }
-    },
-    requestDrivenLockPersistence: {
-      commit: async () => { calls.push(['sidecar-commit']); throw Object.assign(new Error('disk'), { code: 'EIO' }); },
-      rollback: async (request) => { calls.push(['sidecar-rollback', request]); return { restored: true }; }
-    }
-  }), (error) => error?.code === 'GRAPH_MIGRATION_SIDECAR_COMMIT_FAILED'
-    && error.details.cause === 'EIO');
-  assert.deepEqual(calls.map(([kind]) => kind), [
-    'sidecar-commit', 'sidecar-rollback', 'world-rollback'
-  ]);
+  }), { code: 'INVALID_REQUEST_DRIVEN_LOCK_MIGRATION_SNAPSHOT' });
 });
 
 test('operator rollback restores the world revision and request-driven lock sidecar', async () => {
