@@ -1,4 +1,5 @@
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { diagnostic } from './errors.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 
@@ -52,6 +53,8 @@ import {
 } from './program-locks.mjs';
 import { applySlotBodyEffect } from './slot-body-runtime.mjs';
 import { normalizeScopedTransformRequest } from './slot-relative-scope.mjs';
+import { applyShortcutEffect, breakShortcutTargets } from './shortcut-runtime.mjs';
+import { registerCurrentProgramAsAgent, validateAgentDelegation } from './window-lock-v1.mjs';
 import {
   createAccessController,
   describeAtom,
@@ -74,19 +77,6 @@ function graphTypesAtPath(atoms, targetPath) {
   const match = walkAtoms(atoms).find((candidate) => candidate.path.join('/') === targetPath);
   if (!match) return [];
   return oneStoredField(match.atom, 'thing')?.parsed.types.map((type) => type.raw) ?? [];
-}
-
-function rebindCurrentWindowPolicy(policy, nextAgentPath) {
-  if (!policy) return null;
-  return Object.fromEntries(Object.entries(policy).map(([sideName, side]) => [
-    sideName,
-    Object.fromEntries(Object.entries(side).map(([effect, rules]) => [
-      effect,
-      rules.map((rule) => rule.currentRelative === true
-        ? { ...rule, fromPath: nextAgentPath }
-        : { ...rule })
-    ]))
-  ]));
 }
 
 function newlyAddedProgramPaths(beforeAtoms, afterAtoms) {
@@ -311,6 +301,17 @@ async function applyCreateTransform({
   if (invalid) return { error: invalid };
 
   const createNameField = oneStoredField(atom, 'thing');
+  if (createNameField?.parsed.types.some((type) => type.raw === 'agent')) {
+    return { error: diagnostic(
+      'AGENT_REGISTRATION_REQUIRED',
+      '公开 Transform 不能创建 @agent；请由当前 Program 调用 agent()'
+    ) };
+  }
+  if (walkAtoms([atom]).some((match) => (
+    oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => type.raw === 'shortcut')
+  ))) {
+    return { error: diagnostic('SHORTCUT_PERSISTENCE_FORGERY_DENIED', '公开 Transform 不得创建或伪造内核虚拟引用记录') };
+  }
   const createName = createNameField?.value;
   const createPath = createName.split('/');
   const createDecision = await authorize({ atom, name: createName, path: createPath }, 'write');
@@ -599,7 +600,17 @@ export async function executeAtomLanguage(options = {}) {
   let programCycle = { messages: [], locks: [], records: [] };
   if (options.programScheduler) {
     try {
-      const unrestricted = createAccessController(atoms, {});
+      await options.programScheduler.activeRequestDrivenLocks?.(atoms);
+      const initialAgentPath = interaction.agent?.path ?? null;
+      const initialAgentSecurity = initialAgentPath
+        ? structuredClone(options.programScheduler.agentSecurity?.get(initialAgentPath) ?? null)
+        : null;
+      const programAccess = createAccessController(atoms, {
+        ...options,
+        agentPath: initialAgentPath,
+        agentSecurity: initialAgentSecurity,
+        graphLocks: []
+      });
       const preparedWorld = prepareExploreWorld(atoms);
       const reconcilePrograms = options.programMode === 'reconcile'
         || Boolean(requestedProgramRun?.selector);
@@ -629,7 +640,7 @@ export async function executeAtomLanguage(options = {}) {
           atoms,
           request,
           receiver,
-          accessController: unrestricted,
+          accessController: programAccess,
           agentOrigin: interaction.agent,
           scopeRoot: executionContext.scopeRoot ?? null,
           preparedWorld
@@ -653,6 +664,7 @@ export async function executeAtomLanguage(options = {}) {
           ...programCycle,
           messages: [],
           transforms: [],
+          shortcuts: [],
           slotBodies: []
         };
       }
@@ -660,6 +672,7 @@ export async function executeAtomLanguage(options = {}) {
         && !requestedProgramRun) {
         programCycle = {
           ...programCycle,
+          shortcuts: [],
           slotBodies: []
         };
       }
@@ -701,49 +714,85 @@ export async function executeAtomLanguage(options = {}) {
   }
   let programLockIndex = buildProgramLockIndex({
     revision: revisionBefore,
-    results: options.bypassProgramLocks ? [] : programCycle.locks,
+    results: options.bypassProgramLocks ? [] : programCycle.locks.filter((lock) => !lock.kind),
     records: programCycle.records
   });
+  const graphLocks = programCycle.locks.filter((lock) => lock.kind);
   let programChanged = false;
+  const pendingAgentRegistrations = programCycle.agentRegistrations ?? [];
+  if (pendingAgentRegistrations.length > 1) {
+    return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+      'AGENT_REGISTRATION_CONFLICT', '一个候选事务只能登记一个 Agent'
+    )]);
+  }
+  if (pendingAgentRegistrations.length === 1) {
+    try {
+      const registrationPath = pendingAgentRegistrations[0].sourceProgramPath;
+      const alreadyRegistered = (programCycle.records ?? []).some((record) => (
+        record.path === registrationPath && record.types?.includes('agent')
+      ));
+      if (programCycle.agentSecurity) {
+        const delegated = validateAgentDelegation({
+          creator: programCycle.agentSecurity,
+          child: pendingAgentRegistrations[0]
+        });
+        pendingAgentRegistrations[0] = {
+          ...pendingAgentRegistrations[0],
+          ...delegated
+        };
+      }
+      atoms = registerCurrentProgramAsAgent(atoms, registrationPath);
+      programChanged = !alreadyRegistered;
+    } catch (error) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+        error.code ?? 'INVALID_AGENT_REGISTRATION', error.message
+      )]);
+    }
+  }
   let windowRecycled = false;
   let recycledAgentPath = null;
   let movedAgentPaths = null;
   const initialProgramTriggerNodes = [];
   const initialAgentPath = interaction.agent?.path ?? null;
-  const initialWindowSelfLock = (programCycle.windowSelfLocks ?? [])
-    .find((entry) => entry.agentPath === initialAgentPath)?.policy ?? null;
-  const enforceWindowSelfLock = (programCycle.windowSelfLockAgents ?? [])
-    .includes(initialAgentPath);
   let accessController = createAccessController(atoms, {
     ...options, programLockIndex, agentPath: initialAgentPath,
-    windowSelfLock: initialWindowSelfLock, enforceWindowSelfLock
+    agentSecurity: programCycle.agentSecurity,
+    graphLocks
   });
-  // Cached projections describe reads performed by an earlier Program cycle. A later
-  // public request must authorize only its own exact target; replaying those historical
-  // dependencies against the active window would turn an unrelated Program read into a
-  // WINDOW_JUMP_LOCK_DENIED before the requested Explore is evaluated.
-  if (enforceWindowSelfLock && programCycle.cached !== true) {
-    const programReadByPath = new Map(walkAtoms(atoms).map((match) => (
-      [match.path.join('/'), match]
-    )));
-    for (const readPath of programCycle.exploreReadPaths ?? []) {
-      const match = programReadByPath.get(readPath);
-      if (!match) {
-        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
-          'INVALID_PROGRAM_EXPLORE_PROJECTION',
-          'Program Explore 精确命中路径与当前世界不一致',
-          { path: readPath }
-        )]);
-      }
-      for (const field of ['thing', 'situation']) {
-        if ((await accessController.authorize(match, 'read', field)).decision !== 'allow') {
-          return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
-            'WINDOW_JUMP_LOCK_DENIED',
-            '窗口 Program 的精确 Explore 超出窗口自锁边界',
-            { path: readPath, field }
-          )]);
-        }
-      }
+  const fatalShortcutFailure = requestedProgramRun
+    ? (programCycle.failures ?? []).find((failure) => typeof failure.code === 'string'
+      && (failure.code.startsWith('INVALID_SHORTCUT_') || failure.code.startsWith('SHORTCUT_')))
+    : null;
+  if (fatalShortcutFailure) {
+    return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+      fatalShortcutFailure.code, fatalShortcutFailure.message ?? '虚拟引用创建失败'
+    )]);
+  }
+  const programTransformLogs = [];
+  for (const effect of programCycle.shortcuts ?? []) {
+    const shortcut = await applyShortcutEffect({
+      atoms,
+      effect,
+      authorize: (match, operation, field, actor = {}) => accessController.authorize(
+        match, operation, field, { ...actor, programPath: effect.sourceProgramPath }
+      )
+    });
+    if (shortcut.error) return failureBase(parsed, contextFile, projectionFile, atoms, [shortcut.error]);
+    if (shortcut.changed) {
+      const before = revisionOf(atoms);
+      atoms = shortcut.atoms;
+      const after = revisionOf(atoms);
+      programChanged = true;
+      initialProgramTriggerNodes.push(shortcut.resultPath, shortcut.targetPath);
+      programTransformLogs.push({
+        id: crypto.randomUUID(), operation: 'program-shortcut',
+        source: { placement: effect.placement, thing: effect.thing, targetPath: effect.targetPath },
+        revisionBefore: before, revisionAfter: after
+      });
+      accessController = createAccessController(atoms, {
+        ...options, programLockIndex, agentPath: initialAgentPath,
+        agentSecurity: programCycle.agentSecurity, graphLocks
+      });
     }
   }
   const jumpEffects = (programCycle.jumps ?? []).filter((jump) => jump.action !== 'guard');
@@ -756,7 +805,6 @@ export async function executeAtomLanguage(options = {}) {
   if (jumpEffects.length === 1) {
     const jump = jumpEffects[0];
     const agentPath = interaction.agent?.path ?? null;
-    const configuredPolicy = initialWindowSelfLock;
     if (!agentPath) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         'WINDOW_JUMP_AGENT_REQUIRED', '窗口跳转需要当前交互 Agent 的精确坐标'
@@ -775,14 +823,14 @@ export async function executeAtomLanguage(options = {}) {
         ...options,
         programLockIndex,
         agentPath,
-        windowSelfLock: configuredPolicy,
-        enforceWindowSelfLock: true
+        agentSecurity: programCycle.agentSecurity,
+        graphLocks
       });
       if ((await destinationRead.authorize(
         destination, 'read', 'thing', { programPath: jump.sourceProgramPath }
       )).decision !== 'allow') {
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
-          'WINDOW_JUMP_LOCK_DENIED', '窗口自锁或节点锁拒绝跳窗目标'
+          'WINDOW_JUMP_LOCK_DENIED', '统一 Graph 路径或节点锁拒绝跳窗目标'
         )]);
       }
       const compiled = compileProgramTransform({
@@ -795,14 +843,20 @@ export async function executeAtomLanguage(options = {}) {
         )]);
       }
       const nodeLockController = createAccessController(atoms, {
-        ...options, programLockIndex, agentPath, bypassWindowSelfLock: true
+        ...options, programLockIndex, agentPath,
+        agentSecurity: programCycle.agentSecurity,
+        graphLocks
       });
       const moved = await applyTransform({
         atoms,
         item: compiled.item,
         contextFile,
-        authorize: (match, operation, field) => nodeLockController.authorize(
-          match, operation, field, { programPath: jump.sourceProgramPath }
+        authorize: (match, operation, field, actor = {}) => nodeLockController.authorize(
+          match, operation, field, {
+            ...actor,
+            programPath: jump.sourceProgramPath,
+            windowLifecycle: { action: 'move', destinationPath: jump.destinationPath }
+          }
         )
       });
       if (moved.error) {
@@ -819,13 +873,12 @@ export async function executeAtomLanguage(options = {}) {
       initialProgramTriggerNodes.push(moved.resultPath, jump.destinationPath);
       interaction.agent.path = moved.resultPath;
       movedAgentPaths = { previousPath: agentPath, nextPath: moved.resultPath };
-      const reboundPolicy = rebindCurrentWindowPolicy(configuredPolicy, moved.resultPath);
       accessController = createAccessController(atoms, {
         ...options,
         programLockIndex,
         agentPath: interaction.agent.path,
-        windowSelfLock: reboundPolicy,
-        enforceWindowSelfLock: true
+        agentSecurity: programCycle.agentSecurity,
+        graphLocks
       });
     } else if (jump.action === 'recycle') {
       const candidate = structuredClone(atoms);
@@ -836,12 +889,17 @@ export async function executeAtomLanguage(options = {}) {
         )]);
       }
       const nodeLockController = createAccessController(candidate, {
-        ...options, programLockIndex, agentPath, bypassWindowSelfLock: true
+        ...options, programLockIndex, agentPath,
+        agentSecurity: programCycle.agentSecurity,
+        graphLocks
       });
       for (const entry of walkAtoms([selected.atom])) {
         const actual = walkAtoms(candidate).find((match) => match.atom === entry.atom);
         if ((await nodeLockController.authorize(
-          actual, 'write', 'contain', { programPath: jump.sourceProgramPath }
+          actual, 'write', 'contain', {
+            programPath: jump.sourceProgramPath,
+            windowLifecycle: { action: 'recycle' }
+          }
         )).decision !== 'allow') {
           return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
             'WINDOW_JUMP_LOCK_DENIED', '节点锁拒绝回收窗口'
@@ -852,6 +910,7 @@ export async function executeAtomLanguage(options = {}) {
         ? oneStoredField(selected.parent.atom, 'contain')?.value
         : candidate;
       container.splice(selected.index, 1);
+      breakShortcutTargets(candidate, agentPath);
       atoms = candidate;
       programChanged = true;
       interaction.agent = null;
@@ -872,7 +931,6 @@ export async function executeAtomLanguage(options = {}) {
       action: 'explore'
     }).decision === 'allow')
     .map((message) => ({ interactionId: interaction.id, ...message }));
-  const programTransformLogs = [];
   let strictSlotRecompute = false;
   for (const request of programCycle.transforms ?? []) {
     const {
@@ -1072,11 +1130,23 @@ export async function executeAtomLanguage(options = {}) {
     const transformLogs = [];
     const pathChanges = [];
     let finalLockIndex = programLockIndex;
+    let finalGraphLocks = graphLocks;
     let pendingTriggerEvent = initialTriggerEvent;
     const maxPasses = 8;
 
     for (let pass = 1; pass <= maxPasses; pass += 1) {
-      const unrestricted = createAccessController(reconciledAtoms, {});
+      const cycleAgentPath = interaction.agent?.path ?? null;
+      const cycleAgentSecurity = cycleAgentPath
+        ? structuredClone(options.programScheduler.agentSecurity?.get(cycleAgentPath)
+          ?? programCycle.agentSecurity ?? null)
+        : null;
+      const programAccess = createAccessController(reconciledAtoms, {
+        ...options,
+        programLockIndex: finalLockIndex,
+        agentPath: cycleAgentPath,
+        agentSecurity: cycleAgentSecurity,
+        graphLocks: finalGraphLocks
+      });
       const preparedWorld = prepareExploreWorld(reconciledAtoms);
       const refreshStartedAt = performance.now();
       const cycle = await options.programScheduler.refresh(reconciledAtoms, {
@@ -1088,7 +1158,7 @@ export async function executeAtomLanguage(options = {}) {
           atoms: reconciledAtoms,
           request,
           receiver,
-          accessController: unrestricted,
+          accessController: programAccess,
           agentOrigin: interaction.agent,
           scopeRoot: executionContext.scopeRoot ?? null,
           preparedWorld
@@ -1136,8 +1206,11 @@ export async function executeAtomLanguage(options = {}) {
       const cycleAccessController = createAccessController(reconciledAtoms, {
         ...options,
         programLockIndex: finalLockIndex,
-        agentPath: interaction.agent?.path ?? null
+        agentPath: interaction.agent?.path ?? null,
+        agentSecurity: cycle.agentSecurity ?? programCycle.agentSecurity,
+        graphLocks: cycle.locks.filter((lock) => lock.kind)
       });
+      finalGraphLocks = cycle.locks.filter((lock) => lock.kind);
       messages.push(...(cycle.messages ?? [])
         .filter((message) => authorizeProgramLock({
           lockIndex: finalLockIndex,
@@ -1198,7 +1271,7 @@ export async function executeAtomLanguage(options = {}) {
           createNew || transformChangesStructure(item)
         )).length
       });
-      if (compiledRequests.length === 0 && (cycle.slotBodies?.length ?? 0) === 0) {
+      if (compiledRequests.length === 0 && (cycle.shortcuts?.length ?? 0) === 0 && (cycle.slotBodies?.length ?? 0) === 0) {
         return {
           atoms: reconciledAtoms,
           lockIndex: finalLockIndex,
@@ -1286,7 +1359,25 @@ export async function executeAtomLanguage(options = {}) {
 
       const before = revisionOf(reconciledAtoms);
       const applyStartedAt = performance.now();
-      let application = await applyCompiled(structuredClone(reconciledAtoms), true, true);
+      let shortcutAtoms = structuredClone(reconciledAtoms);
+      const appliedShortcuts = [];
+      for (const effect of cycle.shortcuts ?? []) {
+        const shortcut = await applyShortcutEffect({
+          atoms: shortcutAtoms,
+          effect,
+          authorize: (match, operation, field, actor = {}) => cycleAccessController.authorize(
+            match, operation, field, { ...actor, programPath: effect.sourceProgramPath }
+          )
+        });
+        if (shortcut.error) {
+          throw Object.assign(new Error(shortcut.error.message), {
+            code: shortcut.error.code, details: { program: effect.sourceProgramPath }
+          });
+        }
+        shortcutAtoms = shortcut.atoms;
+        if (shortcut.changed) appliedShortcuts.push({ effect, shortcut });
+      }
+      let application = await applyCompiled(shortcutAtoms, true, true);
       if (!application.failed) {
         try {
           projectAtomContext(application.atoms, {
@@ -1298,7 +1389,7 @@ export async function executeAtomLanguage(options = {}) {
         }
       }
       if (application.failed) {
-        application = await applyCompiled(reconciledAtoms, false, true);
+        application = await applyCompiled(shortcutAtoms, false, true);
       }
       const appliedSlotBodies = [];
       for (const request of cycle.slotBodies ?? []) {
@@ -1339,6 +1430,13 @@ export async function executeAtomLanguage(options = {}) {
       if (before !== after) {
         reconciledAtoms = application.atoms;
         passChanged = true;
+        for (const entry of appliedShortcuts) {
+          transformLogs.push({
+            id: crypto.randomUUID(), operation: 'program-shortcut',
+            source: { placement: entry.effect.placement, thing: entry.effect.thing, targetPath: entry.effect.targetPath },
+            revisionBefore: before, revisionAfter: after
+          });
+        }
         for (const { transformRequest, transformed } of application.applied) {
           if (transformed.sourcePath && transformed.resultPath) {
             pathChanges.push({
@@ -1396,7 +1494,17 @@ export async function executeAtomLanguage(options = {}) {
 
   async function refreshProgramProjectionForWorld(candidateAtoms, triggerNodes) {
     if (!options.programScheduler || triggerNodes.length === 0) return programLockIndex;
-    const unrestricted = createAccessController(candidateAtoms, {});
+    const currentAgentPath = interaction.agent?.path ?? null;
+    const programAccess = createAccessController(candidateAtoms, {
+      ...options,
+      programLockIndex,
+      agentPath: currentAgentPath,
+      agentSecurity: currentAgentPath
+        ? structuredClone(options.programScheduler.agentSecurity?.get(currentAgentPath)
+          ?? programCycle.agentSecurity ?? null)
+        : null,
+      graphLocks
+    });
     const preparedWorld = prepareExploreWorld(candidateAtoms);
     const cycle = await options.programScheduler.refresh(candidateAtoms, {
       agentOrigin: interaction.agent,
@@ -1406,7 +1514,7 @@ export async function executeAtomLanguage(options = {}) {
         atoms: candidateAtoms,
         request,
         receiver,
-        accessController: unrestricted,
+        accessController: programAccess,
         agentOrigin: interaction.agent,
         scopeRoot: executionContext.scopeRoot ?? null,
         preparedWorld
@@ -1459,12 +1567,15 @@ export async function executeAtomLanguage(options = {}) {
       compatibilityManifest: options.compatibilityManifest
     });
     if (recycledAgentPath) {
-      await options.programScheduler?.recycleWindowSelfLock?.(recycledAgentPath);
+      await options.programScheduler?.recycleAgentWindow?.(recycledAgentPath);
     }
     if (movedAgentPaths) {
-      await options.programScheduler?.remapWindowSelfLock?.(
+      await options.programScheduler?.remapAgentWindow?.(
         movedAgentPaths.previousPath, movedAgentPaths.nextPath
       );
+    }
+    if (pendingAgentRegistrations.length === 1) {
+      await options.programScheduler?.registerAgentWindow?.(pendingAgentRegistrations[0]);
     }
     try {
       const settleWarnings = await settleContextFreeProgramProjectionForWorld(candidateAtoms);
@@ -1511,7 +1622,8 @@ export async function executeAtomLanguage(options = {}) {
     atoms = reconciled.atoms;
     programLockIndex = reconciled.lockIndex;
     accessController = createAccessController(atoms, {
-      ...options, programLockIndex, agentPath: interaction.agent?.path ?? null
+      ...options, programLockIndex, agentPath: interaction.agent?.path ?? null,
+      agentSecurity: programCycle.agentSecurity
     });
     interactionMessages.push(...reconciled.messages);
     programTransformLogs.push(...reconciled.transformLogs);

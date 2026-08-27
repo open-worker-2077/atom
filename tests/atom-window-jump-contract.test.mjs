@@ -175,8 +175,7 @@ test('registry and Help publish jump, changed, thing coordinates, and explicit s
   assert.deepEqual(jump.contract.argument.properties, {
     when: { format: 'exact-thing@program' },
     where: { format: 'exact-thing@program' },
-    recycle: { format: 'exact-thing@program' },
-    lock: { $ref: '#/definitions/window-self-lock' }
+    recycle: { format: 'exact-thing@program' }
   });
   assert.deepEqual(jump.contract.coordinateInputs, {
     selectors: 'ThingCoordinate-only',
@@ -186,12 +185,7 @@ test('registry and Help publish jump, changed, thing coordinates, and explicit s
     ref: 'forbidden'
   });
   assert.equal(jump.contract.errors.includes('INVALID_JUMP_CONTRACT'), true);
-  assert.deepEqual(jump.contract.selfLockActivation, {
-    trigger: 'current-agent-jump-registration',
-    timing: 'same-program-cycle',
-    persistence: 'request-driven-snapshot-across-requests',
-    unregisteredAgent: 'legacy-access-behavior'
-  });
+  assert.equal(jump.contract.authorization, 'shared-cli-graph-chain');
   assert.equal(changed.contract.dispatch, 'shared-transform-reverse-index');
   assert.equal(changed.contract.result, 'boolean');
   assert.equal(changed.contract.controlFlow, 'caller-explicit-short-circuit');
@@ -200,13 +194,12 @@ test('registry and Help publish jump, changed, thing coordinates, and explicit s
   const stderr = output();
   const code = await runAtomCli(['--help'], { stdout: stdout.stream, stderr: stderr.stream });
   assert.equal(code, 0, stderr.value());
-  assert.match(stdout.value(), /jump\(\{"when":.*"where":.*"recycle":.*"lock":/u);
+  assert.match(stdout.value(), /jump\(\{"when":.*"where":.*"recycle":/u);
   assert.match(stdout.value(), /explore\(\{"thing":"EXACT.*@program"\}\)\[0\]/u);
   assert.match(stdout.value(), /不使用 \.ref/u);
   assert.match(stdout.value(), /jump 的 when／where／recycle.*完整 EXACT_PATH 字符串.*拒绝/u);
   assert.match(stdout.value(), /精确字符串兼容仅保留于 use_program\.name 与 CLI thing\.run\./u);
   assert.match(stdout.value(), /if not changed\(\[.*\]\):[\s\S]*return/u);
-  assert.match(stdout.value(), /jump 注册.*立即进入受自锁窗口态/u);
-  assert.match(stdout.value(), /request-driven snapshot.*跨独立请求保持/u);
-  assert.match(stdout.value(), /未注册 jump.*维持旧访问行为/u);
+  assert.match(stdout.value(), /jump 定位复用 Explore、移动复用 Transform/u);
+  assert.match(stdout.value(), /固定窗口锁：agent\(\) 登记时/u);
 });

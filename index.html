@@ -192,35 +192,49 @@
       左键使用 · 右键展收 · A内包 S外围 D层级 F沉浸 · CapsLock详情 · 中键单击聚焦／拖动旋转 · Shift魔杖
     </p>
 
-    <nav class="mobile-keyboard" aria-label="手机电脑键盘与鼠标">
-      <div class="mobile-keyboard__row">
-        <button type="button" data-mobile-key="Escape" data-key-value="Escape">Esc</button>
-        <button type="button" data-mobile-key="ControlLeft" data-key-value="Control" data-mobile-modifier aria-pressed="false">Ctrl</button>
-        <button type="button" data-mobile-key="ShiftLeft" data-key-value="Shift" data-mobile-modifier aria-pressed="false">Shift</button>
-        <button type="button" data-mobile-key="AltLeft" data-key-value="Alt" data-mobile-modifier aria-pressed="false">Alt</button>
-        <button type="button" data-mobile-key="KeyA" data-key-value="a">A</button>
-        <button type="button" data-mobile-key="KeyS" data-key-value="s">S</button>
-        <button type="button" data-mobile-key="KeyD" data-key-value="d">D</button>
-        <button type="button" data-mobile-key="KeyF" data-key-value="f">F</button>
-      </div>
-      <div class="mobile-keyboard__row">
-        <button type="button" data-mobile-key="CapsLock" data-key-value="CapsLock">CapsLock</button>
-        <button type="button" data-mobile-key="KeyZ" data-key-value="z">Z</button>
-        <button type="button" data-mobile-key="KeyX" data-key-value="x">X</button>
-        <button type="button" data-mobile-key="Home" data-key-value="Home">Home</button>
-        <button type="button" data-mobile-key="End" data-key-value="End">End</button>
-        <button type="button" data-mobile-key="PageUp" data-key-value="PageUp">PageUp</button>
-        <button type="button" data-mobile-key="PageDown" data-key-value="PageDown">PageDown</button>
-      </div>
-      <div class="mobile-keyboard__row">
-        <button type="button" data-mobile-mouse-button="1" aria-pressed="false">中键</button>
-        <button type="button" data-mobile-key="KeyO" data-key-value="o">O</button>
-        <button type="button" data-mobile-key="KeyK" data-key-value="k">K</button>
-        <button type="button" data-mobile-key="KeyH" data-key-value="h">H</button>
-        <button type="button" data-mobile-key="KeyP" data-key-value="p">P</button>
-        <button type="button" data-mobile-key="Enter" data-key-value="Enter">Enter</button>
-        <button type="button" data-mobile-key="Delete" data-key-value="Delete">Delete</button>
-      </div>
+    <nav class="mobile-control-panel" aria-label="手机控制面板">
+      <section class="mobile-control-panel__group" data-mobile-control-group="mouse" aria-labelledby="mobileMouseControls">
+        <h2 class="mobile-control-panel__title" id="mobileMouseControls">鼠标</h2>
+        <div class="mobile-control-panel__scroll" aria-label="鼠标按键">
+          <div class="mobile-control-panel__row">
+            <button type="button" data-mobile-mouse-button="1" aria-pressed="false">中键</button>
+          </div>
+        </div>
+      </section>
+      <section class="mobile-control-panel__group" data-mobile-control-group="keyboard" aria-labelledby="mobileKeyboardControls">
+        <h2 class="mobile-control-panel__title" id="mobileKeyboardControls">键盘</h2>
+        <div class="mobile-control-panel__scroll" aria-label="键盘按键">
+          <div class="mobile-control-panel__rows">
+            <div class="mobile-control-panel__row">
+              <button type="button" data-mobile-key="Escape" data-key-value="Escape">Esc</button>
+              <button type="button" data-mobile-key="ControlLeft" data-key-value="Control" data-mobile-modifier aria-pressed="false">Ctrl</button>
+              <button type="button" data-mobile-key="ShiftLeft" data-key-value="Shift" data-mobile-modifier aria-pressed="false">Shift</button>
+              <button type="button" data-mobile-key="AltLeft" data-key-value="Alt" data-mobile-modifier aria-pressed="false">Alt</button>
+              <button type="button" data-mobile-key="KeyA" data-key-value="a">A</button>
+              <button type="button" data-mobile-key="KeyS" data-key-value="s">S</button>
+              <button type="button" data-mobile-key="KeyD" data-key-value="d">D</button>
+              <button type="button" data-mobile-key="KeyF" data-key-value="f">F</button>
+            </div>
+            <div class="mobile-control-panel__row">
+              <button type="button" data-mobile-key="CapsLock" data-key-value="CapsLock">CapsLock</button>
+              <button type="button" data-mobile-key="KeyZ" data-key-value="z">Z</button>
+              <button type="button" data-mobile-key="KeyX" data-key-value="x">X</button>
+              <button type="button" data-mobile-key="Home" data-key-value="Home">Home</button>
+              <button type="button" data-mobile-key="End" data-key-value="End">End</button>
+              <button type="button" data-mobile-key="PageUp" data-key-value="PageUp">PageUp</button>
+              <button type="button" data-mobile-key="PageDown" data-key-value="PageDown">PageDown</button>
+            </div>
+            <div class="mobile-control-panel__row">
+              <button type="button" data-mobile-key="KeyO" data-key-value="o">O</button>
+              <button type="button" data-mobile-key="KeyK" data-key-value="k">K</button>
+              <button type="button" data-mobile-key="KeyH" data-key-value="h">H</button>
+              <button type="button" data-mobile-key="KeyP" data-key-value="p">P</button>
+              <button type="button" data-mobile-key="Enter" data-key-value="Enter">Enter</button>
+              <button type="button" data-mobile-key="Delete" data-key-value="Delete">Delete</button>
+            </div>
+          </div>
+        </div>
+      </section>
     </nav>
 
     <aside class="edge-panel" id="mappingPanel" aria-labelledby="mappingTitle" hidden>

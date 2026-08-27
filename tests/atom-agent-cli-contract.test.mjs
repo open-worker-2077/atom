@@ -441,8 +441,13 @@ test('public help exposes only public Agent CLI options', async () => {
   assert.match(stdout.text(), /Program 模板与复用/u);
   assert.match(stdout.text(), /template_catalog\(\{\}\)/u);
   assert.match(stdout.text(), /instantiate\(/u);
-  assert.match(stdout.text(), /'template':'advancement-flow'/u);
-  assert.match(stdout.text(), /新建 Agent 与追加 Program 分两次 transform/u);
+  assert.match(stdout.text(), /\\"template\\":\\"advancement-flow\\"/u);
+  assert.match(stdout.text(), /推进流两步配方/u);
+  assert.match(stdout.text(), /第1步：transform new \{"thing@program":"当前Agent\/任务区\/任务名"/u);
+  assert.match(stdout.text(), /agent\(\{\\"labels\\":\[\],\\"functions\\":/u);
+  assert.match(stdout.text(), /第2步：transform \{"thing\.run\.":"当前Agent\/任务区\/任务名"\}/u);
+  assert.match(stdout.text(), /“任务区”必须是当前窗口下已获准写入的普通事实父节点/u);
+  assert.match(stdout.text(), /不得用公开 Transform 创建 thing@agent/u);
   assert.match(stdout.text(), /use_program\(\{name,arguments\}\)/u);
   assert.match(stdout.text(), /--agent 只指定本次交互的上下文来源，不指定节点的归属或写入位置/u);
   assert.match(stdout.text(), /新节点的归属由 thing 中的精确父路径决定/u);

@@ -41,7 +41,7 @@ test('Program function catalog exposes coarse function families and Atom types',
   ].join('|'));
 });
 
-test('Program function catalog filters coarse families without a public hierarchy', async () => {
+test('Program function catalog filters declared groups without exposing a second permission engine', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const cycle = await scheduler.refresh([
     atom('函数目录筛选', [
@@ -54,7 +54,7 @@ test('Program function catalog filters coarse families without a public hierarch
 
   assert.equal(
     cycle.messages[0].text,
-    'changed,child_detail,direct_children,explore,jump,lock,slot_body,subtree_refs,transform|False'
+    'agent,changed,child_detail,direct_children,explore,jump,lock,shortcut,slot_body,subtree_refs,transform|False'
   );
 });
 
@@ -252,77 +252,26 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   assert.doesNotMatch(stdout.value(), /next_cursor|SLOT_SYNC_CURSOR|三方比较/u);
 });
 
-test('public registry exposes the complete window-aware Program lock contract', async () => {
+test('public registry exposes the business state lock range, action, and label contract', async () => {
   const { programFunctionRegistry } = await import('../work-engine/atom-language/program-function-registry.mjs');
   const lock = programFunctionRegistry().functions.find((item) => item.name === 'lock');
 
-  assert.deepEqual(lock.contract.argument.required, ['targets', 'mode']);
+  assert.deepEqual(lock.contract.argument.required, ['targets', 'actions', 'labels']);
+  assert.equal(lock.contract.argument.additionalProperties, false);
   assert.deepEqual(lock.contract.argument.properties.targets, {
-    type: 'object', required: ['refs'], additionalProperties: false,
+    type: 'object', additionalProperties: false,
+    oneOf: [{ required: ['refs'] }, { required: ['paths'] }],
     properties: {
       refs: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', format: 'atom-ref' } },
+      paths: { type: 'array', minItems: 1, maxItems: 1, uniqueItems: true, items: { type: 'string', format: 'exact-atom-path' } },
       scope: { enum: ['exact', 'subtree'], default: 'exact' }
     }
   });
-  assert.deepEqual(lock.contract.argument.properties.allowed_windows, {
-    type: 'object',
-    additionalProperties: false,
-    oneOf: [
-      {
-        required: ['paths'],
-        properties: {
-          paths: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', format: 'exact-agent-path' } }
-        }
-      },
-      {
-        required: ['types'],
-        properties: { types: { $ref: '#/definitions/graph-type-predicate' } }
-      },
-      {
-        required: ['relation'],
-        properties: { relation: { const: 'target_within_window_parent' } }
-      }
-    ]
-  });
-  assert.deepEqual(lock.contract.argument.properties.allowed_programs, {
-    type: 'object', required: ['paths'], additionalProperties: false,
-    properties: {
-      paths: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', format: 'exact-program-path' } }
-    }
-  });
-  assert.deepEqual(lock.contract.argument.properties.when, {
-    type: 'object',
-    minProperties: 1,
-    additionalProperties: false,
-    properties: {
-      target_types: { $ref: '#/definitions/graph-type-predicate' },
-      actions: {
-        type: 'array', minItems: 1, uniqueItems: true,
-        items: { enum: ['explore', 'transform'] }
-      }
-    }
-  });
-  assert.deepEqual(lock.contract.argument.properties.refresh, {
-    type: 'object',
-    required: ['policy'],
-    additionalProperties: false,
-    properties: { policy: { const: 'on_request' } }
-  });
-  assert.equal(lock.contract.recompute.command, 'transform {"thing.run.":"EXACT_PROGRAM_PATH"}');
-  assert.equal(lock.contract.denial.write, 'PROGRAM_LOCK_DENIED');
-  assert.equal(lock.contract.denial.read, 'truncate');
-  assert.deepEqual(lock.contract.compatibility, { legacyAllowedWindows: 'paths' });
-  assert.deepEqual(lock.contract.validationErrors, [
-    'INVALID_PROGRAM_LOCK_ALLOWED_WINDOWS',
-    'INVALID_PROGRAM_LOCK_WINDOW_TYPES',
-    'INVALID_PROGRAM_LOCK_WINDOW_RELATION',
-    'INVALID_PROGRAM_LOCK_ALLOWED_PROGRAMS',
-    'INVALID_PROGRAM_LOCK_TARGET_SCOPE',
-    'INVALID_PROGRAM_LOCK_TARGET_TYPES',
-    'INVALID_PROGRAM_LOCK_ACTIONS',
-    'INVALID_PROGRAM_LOCK_WHEN',
-    'INVALID_PROGRAM_LOCK_REFRESH'
-  ]);
+  assert.deepEqual(lock.contract.argument.properties.actions.items.enum, ['explore', 'transform']);
+  assert.equal(lock.contract.argument.properties.labels.minItems, 1);
+  assert.equal(lock.contract.authorization, 'shared-cli-graph-chain');
+  assert.equal(lock.contract.denial, 'GRAPH_LOCK_DENIED');
+  assert.equal(lock.contract.persistence, 'literal-path-declaration-in-program-source');
 });
 
 test('public registry exposes indexed Transform trigger dispatch and function-reference entrypoints', async () => {
@@ -367,21 +316,22 @@ test('CLI Help documents the three-argument Transform trigger without eager main
   assert.match(stdout.value(), /未声明 trigger[\s\S]*无关 Transform[\s\S]*不会重放/u);
 });
 
-test('CLI Help explains window allowlists and explicit lock recomputation', async () => {
+test('CLI Help explains fixed Agent registration and the shared Graph authorization chain', async () => {
   const stdout = output();
   const stderr = output();
   const code = await runAtomCli(['--help'], { stdout: stdout.stream, stderr: stderr.stream });
 
   assert.equal(code, 0, stderr.value());
-  assert.match(stdout.value(), /allowed_windows[\s\S]*paths[\s\S]*exact.*@agent/iu);
-  assert.match(stdout.value(), /allowed_windows[\s\S]*types[\s\S]*all／any／none/u);
-  assert.match(stdout.value(), /targets\.scope[\s\S]*subtree[\s\S]*target_within_window_parent/u);
-  assert.match(stdout.value(), /allowed_programs[\s\S]*调度 Program/u);
-  assert.match(stdout.value(), /移动后[\s\S]*无需[\s\S]*重算/u);
-  assert.match(stdout.value(), /target_types[\s\S]*when\.actions[\s\S]*explore／transform/u);
-  assert.match(stdout.value(), /守窗、跳窗、关窗和滚动绑定[\s\S]*内核不写死/u);
-  assert.match(stdout.value(), /refresh[\s\S]*on_request[\s\S]*thing\.run\./u);
-  assert.match(stdout.value(), /PROGRAM_LOCK_DENIED[\s\S]*旧锁快照/u);
+  assert.match(stdout.value(), /agent\(\{"labels"[\s\S]*"functions"[\s\S]*"groups"[\s\S]*"names"/u);
+  assert.match(stdout.value(), /functions 必填[\s\S]*禁止 null、通配/u);
+  assert.match(stdout.value(), /groups 是正式分层权限[\s\S]*当前 registry/u);
+  assert.match(stdout.value(), /names 是冻结的具体函数授权/u);
+  assert.match(stdout.value(), /后代组[\s\S]*不能上铸祖先组[\s\S]*同级其他职能树/u);
+  assert.match(stdout.value(), /当前 Agent 起点[\s\S]*contain 路径[\s\S]*目标 node 锁/u);
+  assert.match(stdout.value(), /jump 定位复用 Explore、移动复用 Transform/u);
+  assert.match(stdout.value(), /windowSelfLocks[\s\S]*RETIRED_WINDOW_SELF_LOCK_SNAPSHOT/u);
+  assert.match(stdout.value(), /agentRegistrations[\s\S]*RETIRED_AGENT_REGISTRATION_SNAPSHOT/u);
+  assert.match(stdout.value(), /slot_body[\s\S]*不接受 lock 开关/u);
 });
 
 test('CLI Help explains Program Transform creation, compatibility and confirmation', async () => {

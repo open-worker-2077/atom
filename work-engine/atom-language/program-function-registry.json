@@ -13,37 +13,13 @@
       "stringOrRef": "forbidden"
     }
   },
-  "definitions": {
-    "window-self-lock": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "read": { "$ref": "#/definitions/window-self-lock-side" },
-        "write": { "$ref": "#/definitions/window-self-lock-side" }
-      },
-      "fallback": "default-window-self-lock"
-    },
-    "window-self-lock-side": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "allow": { "type": "array", "items": { "$ref": "#/definitions/window-self-lock-rule" } },
-        "deny": { "type": "array", "items": { "$ref": "#/definitions/window-self-lock-rule" } }
-      },
-      "resolution": "highest-priority; deny-wins-tie; no-match-default"
-    },
-    "window-self-lock-rule": {
-      "type": "object",
-      "required": ["priority", "from"],
-      "additionalProperties": false,
-      "properties": {
-        "priority": { "type": "integer", "minimum": 1 },
-        "from": { "oneOf": [{ "const": "current" }, { "$ref": "#/runtimeTypes/ThingCoordinate" }] },
-        "parent": { "type": "boolean", "meaning": "unique-direct-parent" },
-        "peers": { "type": "boolean", "meaning": "same-parent-peers" },
-        "descendants": { "oneOf": [{ "const": "all" }, { "type": "integer", "minimum": 0 }] }
-      }
-    }
+  "definitions": {},
+  "functionScopeHierarchy": {
+    "groupField": "functionFamilies[].id",
+    "parentField": "functionFamilies[].parent",
+    "rootWhenParentOmitted": true,
+    "functionMembership": "single-family",
+    "groupEffectiveMembership": "self-and-descendants"
   },
   "functionFamilies": [
     { "layer": "kernel", "id": "graph", "label": "Graph 函数" },
@@ -53,6 +29,69 @@
   ],
   "functions": [
     { "name": "explore", "layer": "kernel", "family": "graph", "scope": "public" },
+    {
+      "name": "shortcut",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["placement", "thing", "target"],
+          "additionalProperties": false,
+          "properties": {
+            "placement": { "const": "contain", "meaning": "direct child of current Program" },
+            "thing": { "type": "string", "format": "single-atom-name" },
+            "target": { "$ref": "#/runtimeTypes/ThingCoordinate" }
+          }
+        },
+        "persistence": "kernel-owned-four-axis-reference-record",
+        "authorization": "same-current-agent-graph-explore-and-transform-evaluator",
+        "view": "transparent-target-with-resolvedThroughShortcut-marker",
+        "transformRedirect": "forbidden",
+        "errors": ["INVALID_SHORTCUT_TARGET_COORDINATE", "SHORTCUT_TARGET_ACCESS_DENIED", "SHORTCUT_TARGET_BROKEN", "SHORTCUT_REFERENCE_CYCLE", "SHORTCUT_REFERENCE_DEPTH_EXCEEDED"]
+      }
+    },
+    {
+      "name": "agent",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["functions"],
+          "additionalProperties": false,
+          "properties": {
+            "labels": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] },
+            "functions": {
+              "type": "object",
+              "required": ["groups", "names"],
+              "additionalProperties": false,
+              "properties": {
+                "groups": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                "names": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+              }
+            }
+          },
+          "example": {
+            "labels": [],
+            "functions": {
+              "groups": [],
+              "names": [
+                "agent", "current_atom", "explore", "first_pending", "form_status",
+                "instantiate", "lock", "message", "subtree_refs", "transform"
+              ]
+            }
+          }
+        },
+        "target": "current-program-node",
+        "fixedWindowLock": true,
+        "persistedFunctionScopes": "literal-symbolic-groups-and-names",
+        "groupResolution": "current-registry-descendant-union",
+        "delegation": "same-or-descendant-symbolic-scope"
+      }
+    },
     {
       "name": "jump",
       "layer": "kernel",
@@ -65,18 +104,12 @@
           "properties": {
             "when": { "format": "exact-thing@program" },
             "where": { "format": "exact-thing@program" },
-            "recycle": { "format": "exact-thing@program" },
-            "lock": { "$ref": "#/definitions/window-self-lock" }
+            "recycle": { "format": "exact-thing@program" }
           }
         },
         "evaluation": ["recycle", "when", "where-on-true"],
         "default": "guard-window",
-        "selfLockActivation": {
-          "trigger": "current-agent-jump-registration",
-          "timing": "same-program-cycle",
-          "persistence": "request-driven-snapshot-across-requests",
-          "unregisteredAgent": "legacy-access-behavior"
-        },
+        "authorization": "shared-cli-graph-chain",
         "transaction": "central-atomic-commit",
         "coordinate": { "$ref": "#/runtimeTypes/ThingCoordinate" },
         "coordinateInputs": {
@@ -140,7 +173,6 @@
           "properties": {
             "action": { "enum": ["seal", "print"] },
             "body": { "type": "string", "format": "exact-atom-path" },
-            "lock": { "type": "boolean", "default": false, "allowedWhen": { "action": "seal" } },
             "name": { "type": "string", "format": "single-atom-name", "requiredWhen": { "action": "print" } }
           }
         },
@@ -163,7 +195,7 @@
           "defaultMaterial": "forbidden"
         },
         "structureLock": {
-          "default": false,
+          "default": true,
           "mappedSelf": "immutable-transform",
           "unmappedDescendants": "ordinary-material-writable",
           "forgery": "SLOT_ROLE_FORGERY_DENIED",
@@ -203,93 +235,36 @@
       "contract": {
         "argument": {
           "type": "object",
-          "required": ["targets", "mode"],
+          "required": ["targets", "actions", "labels"],
+          "additionalProperties": false,
           "properties": {
             "targets": {
               "type": "object",
-              "required": ["refs"],
               "additionalProperties": false,
+              "oneOf": [
+                { "required": ["refs"] },
+                { "required": ["paths"] }
+              ],
               "properties": {
                 "refs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "atom-ref" } },
+                "paths": { "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "exact-atom-path" } },
                 "scope": { "enum": ["exact", "subtree"], "default": "exact" }
               }
             },
-            "allowed_windows": {
-              "type": "object",
-              "additionalProperties": false,
-              "oneOf": [
-                {
-                  "required": ["paths"],
-                  "properties": {
-                    "paths": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "exact-agent-path" } }
-                  }
-                },
-                {
-                  "required": ["types"],
-                  "properties": {
-                    "types": { "$ref": "#/definitions/graph-type-predicate" }
-                  }
-                },
-                {
-                  "required": ["relation"],
-                  "properties": {
-                    "relation": { "const": "target_within_window_parent" }
-                  }
-                }
-              ]
+            "actions": {
+              "type": "array", "minItems": 1, "uniqueItems": true,
+              "items": { "enum": ["explore", "transform"] }
             },
-            "allowed_programs": {
-              "type": "object",
-              "required": ["paths"],
-              "additionalProperties": false,
-              "properties": {
-                "paths": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "exact-program-path" } }
-              }
-            },
-            "when": {
-              "type": "object",
-              "minProperties": 1,
-              "additionalProperties": false,
-              "properties": {
-                "target_types": { "$ref": "#/definitions/graph-type-predicate" },
-                "actions": {
-                  "type": "array", "minItems": 1, "uniqueItems": true,
-                  "items": { "enum": ["explore", "transform"] }
-                }
-              }
-            },
-            "refresh": {
-              "type": "object", "required": ["policy"], "additionalProperties": false,
-              "properties": { "policy": { "const": "on_request" } }
+            "labels": {
+              "type": "array", "minItems": 1, "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
             }
           }
         },
-        "recompute": { "command": "transform {\"thing.run.\":\"EXACT_PROGRAM_PATH\"}" },
-        "definitions": {
-          "graph-type-predicate": {
-            "type": "object",
-            "minProperties": 1,
-            "additionalProperties": false,
-            "properties": {
-              "all": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
-              "any": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
-              "none": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
-            }
-          }
-        },
-        "compatibility": { "legacyAllowedWindows": "paths" },
-        "denial": { "write": "PROGRAM_LOCK_DENIED", "read": "truncate" },
-        "validationErrors": [
-          "INVALID_PROGRAM_LOCK_ALLOWED_WINDOWS",
-          "INVALID_PROGRAM_LOCK_WINDOW_TYPES",
-          "INVALID_PROGRAM_LOCK_WINDOW_RELATION",
-          "INVALID_PROGRAM_LOCK_ALLOWED_PROGRAMS",
-          "INVALID_PROGRAM_LOCK_TARGET_SCOPE",
-          "INVALID_PROGRAM_LOCK_TARGET_TYPES",
-          "INVALID_PROGRAM_LOCK_ACTIONS",
-          "INVALID_PROGRAM_LOCK_WHEN",
-          "INVALID_PROGRAM_LOCK_REFRESH"
-        ]
+        "persistence": "literal-path-declaration-in-program-source",
+        "coldStart": "recompiled-from-program-and-current-graph",
+        "authorization": "shared-cli-graph-chain",
+        "denial": "GRAPH_LOCK_DENIED"
       }
     },
     { "name": "direct_children", "layer": "kernel", "family": "graph", "scope": "public" },

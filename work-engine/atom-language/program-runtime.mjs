@@ -11,7 +11,6 @@ import { normalizeTypePredicate } from './program-locks.mjs';
 import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
-import { validateWindowSelfLock, windowPolicyIsSubset } from './window-self-lock.mjs';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_WORKERS = 16;
@@ -177,11 +176,6 @@ function agentScopePath(agentOrigin) {
     : null;
 }
 
-function defaultWindowSelfLockAgentPaths(activeWindowAgents, activeWindowSelfLocks) {
-  return [...activeWindowAgents]
-    .filter((agentPath) => !activeWindowSelfLocks.has(agentPath));
-}
-
 function contextualProgramSetFingerprint(
   programs, dependencyPrograms, isolateFailures, scopePath, records
 ) {
@@ -343,6 +337,14 @@ function rebindLocks(locks, previousRecords, records) {
   })).filter((lock) => Array.isArray(lock.targets?.paths) || lock.targets.refs.length);
 }
 
+function mergeDerivedLocks(...collections) {
+  const unique = new Map();
+  for (const lock of collections.flat()) {
+    unique.set(JSON.stringify(lock), structuredClone(lock));
+  }
+  return [...unique.values()];
+}
+
 function worldRevisionKey(records) {
   return records[0]?.ref ?? 'empty-world';
 }
@@ -358,18 +360,62 @@ function validateResult(result, records, program, options = {}) {
     throw error;
   }
   const knownRefs = new Set(records.map((record) => record.ref));
+  const recordsByRef = new Map(records.map((record) => [record.ref, record]));
   const recordsByPath = new Map(records.map((record) => [record.path, record]));
   const locks = (result.locks ?? []).map((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
       throw Object.assign(new Error('lock() result must be a JSON object'), { code: 'INVALID_PROGRAM_LOCK' });
     }
     const refs = entry.targets?.refs;
-    if (!Array.isArray(refs) || !refs.length || refs.some((ref) => !knownRefs.has(ref))) {
-      throw Object.assign(new Error('lock.targets.refs contains an unknown Atom reference'), { code: 'INVALID_PROGRAM_LOCK_TARGET' });
+    const paths = entry.targets?.paths;
+    if (Array.isArray(entry.actions) || Array.isArray(entry.labels)) {
+      const scope = entry.targets?.scope ?? 'exact';
+      const targetPath = Array.isArray(paths) && paths.length === 1
+        ? paths[0]
+        : (Array.isArray(refs) && refs.length === 1 && knownRefs.has(refs[0])
+          ? recordsByRef.get(refs[0]).path
+          : null);
+      if (typeof targetPath === 'string' && !recordsByPath.has(targetPath)) {
+        throw Object.assign(new Error('lock target path does not resolve in the current Graph'), {
+          code: 'INVALID_PROGRAM_LOCK_TARGET'
+        });
+      }
+      if (!targetPath || !recordsByPath.has(targetPath)
+        || (paths !== undefined && refs !== undefined)
+        || !['exact', 'subtree'].includes(scope)
+        || !Array.isArray(entry.actions) || entry.actions.length === 0
+        || entry.actions.some((action) => !['explore', 'transform'].includes(action))
+        || new Set(entry.actions).size !== entry.actions.length
+        || !Array.isArray(entry.labels) || entry.labels.length === 0
+        || entry.labels.some((label) => typeof label !== 'string' || !label)
+        || new Set(entry.labels).size !== entry.labels.length
+        || Object.keys(entry).some((key) => !['targets', 'actions', 'labels'].includes(key))
+        || Object.keys(entry.targets ?? {}).some((key) => !['refs', 'paths', 'scope'].includes(key))) {
+        throw Object.assign(new Error('lock() requires one range, actions, and labels'), {
+          code: 'INVALID_PROGRAM_LOCK'
+        });
+      }
+      return {
+        kind: scope === 'subtree' ? 'contain' : 'node',
+        path: targetPath,
+        actions: [...entry.actions],
+        labels: [...entry.labels],
+        sourceProgramPath: program.path
+      };
+    }
+    const usesPaths = paths !== undefined;
+    if (usesPaths
+      ? (!Array.isArray(paths) || !paths.length || new Set(paths).size !== paths.length
+        || paths.some((path) => typeof path !== 'string' || !recordsByPath.has(path)))
+      : (!Array.isArray(refs) || !refs.length || refs.some((ref) => !knownRefs.has(ref)))) {
+      throw Object.assign(new Error('lock targets contain an unknown exact Atom coordinate'), {
+        code: 'INVALID_PROGRAM_LOCK_TARGET'
+      });
     }
     const targetKeys = Object.keys(entry.targets ?? {});
     const targetScope = entry.targets?.scope ?? 'exact';
-    if (targetKeys.some((key) => !['refs', 'scope'].includes(key))
+    if ((usesPaths && refs !== undefined)
+      || targetKeys.some((key) => !['refs', 'paths', 'scope'].includes(key))
       || !['exact', 'subtree'].includes(targetScope)) {
       throw Object.assign(new Error('lock.targets.scope must be exact or subtree'), {
         code: 'INVALID_PROGRAM_LOCK_TARGET_SCOPE'
@@ -482,10 +528,18 @@ function validateResult(result, records, program, options = {}) {
         });
       }
       refresh = { policy: 'on_request' };
+      if (!usesPaths) {
+        throw Object.assign(new Error('request-driven locks require literal exact Graph paths'), {
+          code: 'REQUEST_DRIVEN_LOCK_LITERAL_REQUIRED'
+        });
+      }
     }
     return {
       ...structuredClone(entry),
-      targets: { refs: [...refs], ...(targetScope === 'subtree' ? { scope: 'subtree' } : {}) },
+      targets: {
+        ...(usesPaths ? { paths: [...paths] } : { refs: [...refs] }),
+        ...(targetScope === 'subtree' ? { scope: 'subtree' } : {})
+      },
       fields, protect: { atom: protect.atom ?? true, messages: protect.messages ?? false },
       ...(allowedWindows ? { allowed_windows: allowedWindows } : {}),
       ...(allowedPrograms ? { allowed_programs: allowedPrograms } : {}),
@@ -516,6 +570,23 @@ function validateResult(result, records, program, options = {}) {
       ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {})
     };
   });
+  const shortcuts = (result.shortcuts ?? []).map((entry) => {
+    const target = records.find((record) => record.ref === entry?.targetRef);
+    const sourceProgramPath = typeof entry?.__sourceProgramPath === 'string'
+      ? entry.__sourceProgramPath : program.path;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || entry.placement !== 'contain' || typeof entry.thing !== 'string' || !entry.thing.trim()
+      || entry.thing !== entry.thing.trim() || entry.thing.includes('/')
+      || !target || target.path !== entry.targetPath
+      || !recordsByPath.get(sourceProgramPath)?.types.includes('program')) {
+      throw Object.assign(new Error('shortcut() returned an invalid reference effect'), {
+        code: 'INVALID_SHORTCUT_EFFECT'
+      });
+    }
+    return { placement: 'contain', thing: entry.thing, targetRef: entry.targetRef,
+      targetPath: entry.targetPath, sourceProgramPath,
+      ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {}) };
+  });
   if (scopeRoot && (result.slotBodies?.length ?? 0) > 0) {
     throw Object.assign(new Error('相对域计算 Program 不得递归登记槽体效果'), {
       code: 'SLOT_BODY_NESTED_EFFECT_FORBIDDEN',
@@ -538,14 +609,13 @@ function validateResult(result, records, program, options = {}) {
       : ['action', 'body'];
     const allowed = entry.action === 'print'
       ? [...required, 'revision']
-      : [...required, 'lock'];
+      : [...required];
     const invalidLegacyRevision = entry.revision !== undefined
       && (typeof entry.revision !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(entry.revision));
     if (!['seal', 'print'].includes(entry.action)
       || typeof entry.body !== 'string' || !entry.body.trim()
       || keys.some((key) => !allowed.includes(key))
       || required.some((key) => !keys.includes(key))
-      || (entry.lock !== undefined && typeof entry.lock !== 'boolean')
       || (entry.action === 'print'
         && (typeof entry.name !== 'string' || !entry.name.trim() || entry.name.includes('/')
           || invalidLegacyRevision))) {
@@ -615,12 +685,35 @@ function validateResult(result, records, program, options = {}) {
         code: 'INVALID_WINDOW_JUMP_EFFECT'
       });
     }
-    const lock = entry.lock === undefined ? undefined : validateWindowSelfLock(entry.lock);
     return {
       action: entry.action,
       ...(entry.action === 'move' ? { destinationPath: entry.destinationPath } : {}),
-      ...(lock !== undefined ? { lock } : {}),
       sourceProgramPath: program.path
+    };
+  });
+  const agentRegistrations = (result.agents ?? []).map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || !Array.isArray(entry.labels) || !Array.isArray(entry.functions)
+      || !entry.functionScopes || typeof entry.functionScopes !== 'object'
+      || !Array.isArray(entry.functionScopes.groups)
+      || !Array.isArray(entry.functionScopes.names)
+      || entry.functionScopes.groups.some((group) => typeof group !== 'string' || !group)
+      || entry.functionScopes.names.some((name) => typeof name !== 'string' || !name)
+      || entry.labels.some((label) => typeof label !== 'string' || !label)
+      || entry.functions.length === 0
+      || entry.functions.some((name) => typeof name !== 'string' || !name)) {
+      throw Object.assign(new Error('agent() returned an invalid registration effect'), {
+        code: 'INVALID_AGENT_REGISTRATION'
+      });
+    }
+    return {
+      sourceProgramPath: program.path,
+      labels: [...new Set(entry.labels)],
+      functionScopes: {
+        groups: [...new Set(entry.functionScopes.groups)].sort(),
+        names: [...new Set(entry.functionScopes.names)].sort()
+      },
+      functions: [...new Set(entry.functions)].sort()
     };
   });
   const changedThings = [...new Set(result.changedThings ?? [])];
@@ -631,7 +724,7 @@ function validateResult(result, records, program, options = {}) {
   }
   const trigger = result.trigger == null ? null : structuredClone(result.trigger);
   if (supportDecision === true) {
-    if ([locks, messages, transforms, slotBodies, choices, jumps].some((entries) => entries.length > 0)) {
+    if ([locks, messages, transforms, shortcuts, slotBodies, choices, jumps, agentRegistrations].some((entries) => entries.length > 0)) {
       throw Object.assign(new Error('Support antecedent Program may only return bool and cannot emit effects'), {
         code: 'PROGRAM_SUPPORT_EFFECT_FORBIDDEN', details: { program: program.path }
       });
@@ -643,30 +736,16 @@ function validateResult(result, records, program, options = {}) {
     }
   }
   return {
-    locks, messages, transforms, slotBodies, choices, jumps, changedThings, trigger,
+    locks, messages, transforms, shortcuts, slotBodies, choices, jumps, agentRegistrations, changedThings, trigger,
     ...(supportDecision === true ? { supportDecision: result.supportDecision } : {})
   };
-}
-
-function bindCurrentWindowPolicy(policy, agentPath) {
-  if (!policy) return null;
-  return Object.fromEntries(Object.entries(policy).map(([sideName, side]) => [
-    sideName,
-    Object.fromEntries(Object.entries(side).map(([effect, rules]) => [
-      effect,
-      rules.map((rule) => ({
-        ...rule,
-        fromPath: rule.fromPath === '$current' ? agentPath : rule.fromPath,
-        ...(rule.fromPath === '$current' ? { currentRelative: true } : {})
-      }))
-    ]))
-  ]));
 }
 
 function runWorker({
   python, records, programs, program, timeoutMs, executeExplore, validateOnly = false,
   triggered = false, changedNodes = [], scopeRoot = null, programRoot = null,
-  invokeMain = false, programArguments = {}, supportDecision = false
+  invokeMain = false, programArguments = {}, supportDecision = false,
+  allowedFunctions = null
 }) {
   return new Promise((resolve, reject) => {
     const child = spawn(python, ['-I', '-X', 'utf8', workerFile], {
@@ -757,7 +836,8 @@ function runWorker({
       programRoot,
       invokeMain,
       programArguments,
-      supportDecision
+      supportDecision,
+      ...(allowedFunctions ? { allowedFunctions } : {})
     });
   });
 }
@@ -790,18 +870,21 @@ export class ProgramRuntimeScheduler {
     this.programReusable = new Map();
     this.dormantFailures = new Map();
     this.runProgram = options.runProgram ?? runWorker;
+    this.inspectProgram = options.inspectProgram ?? runWorker;
     this.diagnosticRecorder = options.diagnosticRecorder ?? null;
     this.projectionRepository = options.projectionRepository ?? null;
     this.loadedProjection = undefined;
     this.projectionLoadWarning = null;
     this.requestDrivenLockRepository = options.requestDrivenLockRepository ?? null;
     this.requestDrivenLocks = undefined;
+    this.requestDrivenLocksWorldRevision = null;
+    this.requestDrivenLockRetirementChecked = false;
     this.triggerContracts = new Map();
     this.triggerIndex = new Map();
     this.triggerContractsInitialized = false;
     this.slotInvocationCycles = new Map();
-    this.activeWindowSelfLocks = new Map();
-    this.activeWindowAgents = new Set();
+    this.agentSecurity = new Map();
+    this.agentSecurityWorldRevision = null;
     if (this.projectionRepository
       && (typeof this.projectionRepository.load !== 'function'
         || typeof this.projectionRepository.save !== 'function')) {
@@ -854,151 +937,142 @@ export class ProgramRuntimeScheduler {
     return result.supportDecision;
   }
 
-  async activeRequestDrivenLocks() {
-    if (this.requestDrivenLocks !== undefined) return this.requestDrivenLocks;
-    const stored = this.requestDrivenLockRepository
-      ? await this.requestDrivenLockRepository.load()
-      : { version: 1, locks: [] };
-    for (const agentPath of stored?.windowSelfLockAgents ?? []) {
-      this.activeWindowAgents.add(agentPath);
+  async rebuildAgentSecurity(atoms) {
+    const revision = revisionOfWorldFacts(atoms);
+    if (this.agentSecurityWorldRevision === revision) return this.agentSecurity;
+    const records = worldRecords(atoms);
+    const programs = programRecords(records);
+    const registeredPrograms = programs.filter((program) => program.types.includes('agent'));
+    const registrations = await Promise.all(registeredPrograms.map((program) => (
+      this.runBounded(() => this.inspectProgram({
+        python: this.python,
+        records,
+        programs,
+        program,
+        timeoutMs: this.timeoutMs,
+        executeExplore: async () => {
+          throw Object.assign(
+            new Error('Agent registration reconstruction cannot execute Graph functions'),
+            { code: 'INVALID_AGENT_REGISTRATION_RECONSTRUCTION_EFFECT' }
+          );
+        },
+        validateOnly: true
+      }))
+    )));
+    const next = new Map();
+    for (const [index, program] of registeredPrograms.entries()) {
+      const declarations = registrations[index].agentRegistrations ?? [];
+      if (declarations.length !== 1) {
+        throw Object.assign(
+          new Error(`Registered Agent Program requires exactly one literal agent() declaration: ${program.path}`),
+          { code: 'AGENT_REGISTRATION_SOURCE_REQUIRED' }
+        );
+      }
+      const registration = declarations[0];
+      next.set(program.path, {
+        labels: [...registration.labels],
+        functionScopes: structuredClone(registration.functionScopes),
+        functions: [...registration.functions]
+      });
     }
-    for (const entry of stored?.windowSelfLocks ?? []) {
-      this.activeWindowSelfLocks.set(entry.agentPath, validateWindowSelfLock(entry.policy));
-      this.activeWindowAgents.add(entry.agentPath);
-    }
-    this.requestDrivenLocks = structuredClone(stored?.locks ?? []);
+    this.agentSecurity = next;
+    this.agentSecurityWorldRevision = revision;
+    return this.agentSecurity;
+  }
+
+  async rebuildRequestDrivenLocks(atoms) {
+    const revision = revisionOfWorldFacts(atoms);
+    if (this.requestDrivenLocksWorldRevision === revision) return this.requestDrivenLocks ?? [];
+    await this.rebuildAgentSecurity(atoms);
+    const records = worldRecords(atoms);
+    const programs = programRecords(records);
+    const lockPrograms = programs.filter((program) => /\block\s*\(/u.test(program.detail));
+    const inspected = await Promise.all(lockPrograms.map((program) => (
+      this.runBounded(() => {
+        const enclosingAgent = [...this.agentSecurity.entries()]
+          .filter(([agentPath]) => (
+            program.path === agentPath || program.path.startsWith(`${agentPath}/`)
+          ))
+          .sort(([left], [right]) => right.length - left.length)[0]?.[1] ?? null;
+        const allowedFunctions = enclosingAgent
+          ? [...new Set([
+            ...enclosingAgent.functions,
+            ...(program.types.includes('agent') ? ['agent'] : [])
+          ])]
+          : null;
+        return this.inspectProgram({
+          python: this.python,
+          records,
+          programs,
+          program,
+          timeoutMs: this.timeoutMs,
+          allowedFunctions,
+          executeExplore: async () => {
+            throw Object.assign(
+              new Error('Persistent lock reconstruction cannot execute Graph functions'),
+              { code: 'INVALID_REQUEST_DRIVEN_LOCK_RECONSTRUCTION_EFFECT' }
+            );
+          },
+          validateOnly: true
+        });
+      })
+    )));
+    const next = inspected.flatMap((result) => result.locks).sort((left, right) => (
+      left.sourceProgramPath.localeCompare(right.sourceProgramPath)
+      || JSON.stringify(left.targets ?? { path: left.path, kind: left.kind })
+        .localeCompare(JSON.stringify(right.targets ?? { path: right.path, kind: right.kind }))
+    ));
+    this.requestDrivenLocks = next;
+    this.requestDrivenLocksWorldRevision = revision;
     return this.requestDrivenLocks;
   }
 
-  async persistWindowSelfLocks() {
-    if (!this.requestDrivenLockRepository) return;
-    const defaultAgentPaths = defaultWindowSelfLockAgentPaths(
-      this.activeWindowAgents, this.activeWindowSelfLocks
-    );
-    await this.requestDrivenLockRepository.save({
-      version: 1,
-      locks: structuredClone(this.requestDrivenLocks ?? []),
-      ...(defaultAgentPaths.length > 0
-        ? { windowSelfLockAgents: defaultAgentPaths }
-        : {}),
-      windowSelfLocks: [...this.activeWindowSelfLocks].map(([agentPath, policy]) => ({
-        agentPath, policy: structuredClone(policy)
-      }))
+  async activeRequestDrivenLocks(atoms = null) {
+    if (atoms) {
+      await this.rebuildAgentSecurity(atoms);
+      await this.rebuildRequestDrivenLocks(atoms);
+    }
+    if (this.requestDrivenLockRepository && !this.requestDrivenLockRetirementChecked) {
+      await this.requestDrivenLockRepository.load();
+      this.requestDrivenLockRetirementChecked = true;
+    }
+    return this.requestDrivenLocks ?? [];
+  }
+
+  async registerAgentWindow({ sourceProgramPath, labels, functionScopes, functions }) {
+    this.agentSecurity.set(sourceProgramPath, {
+      labels: [...labels], functionScopes: structuredClone(functionScopes), functions: [...functions]
     });
+    this.agentSecurityWorldRevision = null;
   }
 
-  async recycleWindowSelfLock(agentPath) {
-    this.activeWindowSelfLocks.delete(agentPath);
-    this.activeWindowAgents.delete(agentPath);
-    await this.persistWindowSelfLocks();
+  async recycleAgentWindow(agentPath) {
+    this.agentSecurity.delete(agentPath);
+    this.agentSecurityWorldRevision = null;
   }
 
-  async remapWindowSelfLock(previousPath, nextPath) {
-    const policy = this.activeWindowSelfLocks.get(nextPath)
-      ?? this.activeWindowSelfLocks.get(previousPath);
-    this.activeWindowSelfLocks.delete(previousPath);
-    this.activeWindowAgents.delete(previousPath);
-    if (policy) this.activeWindowSelfLocks.set(nextPath, policy);
-    this.activeWindowAgents.add(nextPath);
-    await this.persistWindowSelfLocks();
+  async remapAgentWindow(previousPath, nextPath) {
+    const security = this.agentSecurity.get(previousPath);
+    this.agentSecurity.delete(previousPath);
+    if (security) this.agentSecurity.set(nextPath, security);
+    this.agentSecurityWorldRevision = null;
   }
 
-  async replaceWindowSelfLock({ callerPath, targetPath, policy, records, authorize }) {
-    if (typeof callerPath !== 'string' || typeof targetPath !== 'string'
-      || !Array.isArray(records) || typeof authorize !== 'function') {
-      throw Object.assign(new Error('Window self-lock replacement requires exact caller and target coordinates'), {
-        code: 'INVALID_WINDOW_SELF_LOCK'
-      });
-    }
-    await this.activeRequestDrivenLocks();
-    const normalized = policy == null ? null : validateWindowSelfLock(policy);
-    const previous = this.activeWindowSelfLocks.get(targetPath) ?? null;
-    if (callerPath === targetPath) {
-      if (normalized == null || !windowPolicyIsSubset({
-        previous,
-        next: normalized,
-        agentPath: targetPath,
-        targetPaths: records.map((record) => record.path)
-      })) {
-        throw Object.assign(new Error('An active window cannot expand or remove its own self-lock'), {
-          code: 'WINDOW_SELF_LOCK_EXPANSION_DENIED'
-        });
-      }
-    } else {
-      const decision = await authorize(targetPath, 'write');
-      if (decision?.decision !== 'allow') {
-        throw Object.assign(new Error('Caller cannot reach the target window through both lock systems'), {
-          code: 'WINDOW_ACCESS_DENIED'
-        });
-      }
-    }
-    if (normalized) this.activeWindowSelfLocks.set(targetPath, normalized);
-    else this.activeWindowSelfLocks.delete(targetPath);
-    this.activeWindowAgents.add(targetPath);
-    await this.persistWindowSelfLocks();
-    return normalized;
-  }
-
-  async overlayRequestDrivenLocks(value) {
+  async overlayRequestDrivenLocks(value, agentOrigin = null) {
     const active = await this.activeRequestDrivenLocks();
     return {
       ...value,
-      locks: [
-        ...(value.locks ?? []).filter((lock) => lock.refresh?.policy !== 'on_request'),
-        ...structuredClone(active)
-      ],
-      windowSelfLocks: [...this.activeWindowSelfLocks].map(([agentPath, policy]) => ({
-        agentPath, policy: structuredClone(policy)
-      })),
-      windowSelfLockAgents: [...this.activeWindowAgents]
+      locks: mergeDerivedLocks(value.locks ?? [], active),
+      agentSecurity: (() => {
+        const scopePath = agentScopePath(agentOrigin);
+        return scopePath ? structuredClone(this.agentSecurity.get(scopePath) ?? null) : null;
+      })()
     };
   }
 
   async mergeRequestDrivenLocks(value, records, options) {
     const active = await this.activeRequestDrivenLocks();
-    const automatic = value.locks.filter((lock) => lock.refresh?.policy !== 'on_request');
-    const explicitReplacement = options.force === true
-      && options.programSelector
-      && value.failures.length === 0;
-    if (explicitReplacement) {
-      const sourcePath = value.selectedProgram?.path ?? options.programSelector;
-      const pathByRef = new Map(records.map((record) => [record.ref, record.path]));
-      const replacement = value.locks
-        .filter((lock) => lock.refresh?.policy === 'on_request')
-        .map((lock) => ({
-          ...structuredClone(lock),
-          targets: {
-            paths: lock.targets.refs.map((ref) => pathByRef.get(ref)).filter(Boolean),
-            ...(lock.targets.scope === 'subtree' ? { scope: 'subtree' } : {})
-          }
-        }));
-      const next = [
-        ...active.filter((lock) => lock.sourceProgramPath !== sourcePath),
-        ...replacement
-      ];
-      if (this.requestDrivenLockRepository) {
-        const defaultAgentPaths = defaultWindowSelfLockAgentPaths(
-          this.activeWindowAgents, this.activeWindowSelfLocks
-        );
-        await this.requestDrivenLockRepository.save({
-          version: 1,
-          locks: next,
-          ...(defaultAgentPaths.length > 0
-            ? { windowSelfLockAgents: defaultAgentPaths }
-            : {}),
-          windowSelfLocks: [...this.activeWindowSelfLocks].map(([agentPath, policy]) => ({
-            agentPath, policy: structuredClone(policy)
-          }))
-        });
-      }
-      this.requestDrivenLocks = next;
-    }
-    const guardOnlyWindowActivation = (value.jumps?.length ?? 0) > 0
-      && value.jumps.every((jump) => jump.action === 'guard');
-    if (!explicitReplacement && guardOnlyWindowActivation && value.failures.length === 0) {
-      await this.persistWindowSelfLocks();
-    }
-    value.locks = [...automatic, ...structuredClone(this.requestDrivenLocks ?? active)];
+    value.locks = mergeDerivedLocks(value.locks, active);
     return value;
   }
 
@@ -1182,10 +1256,11 @@ export class ProgramRuntimeScheduler {
       exploreReadPaths: structuredClone(stored.exploreReadPaths ?? []),
       messages: [],
       transforms: [],
+      shortcuts: [],
       slotBodies: [],
       failures: structuredClone(stored.failures),
       contextIncomplete: stored.contextIncomplete === true
-    });
+    }, agentOrigin);
   }
 
   async saveProjection({ records, programs, isolateFailures, value, requests, agentOrigin }) {
@@ -1220,6 +1295,7 @@ export class ProgramRuntimeScheduler {
   }
 
   async current(atoms, options = {}) {
+    await this.activeRequestDrivenLocks(atoms);
     const records = worldRecords(atoms);
     const availablePrograms = programRecords(records);
     const programs = options.programSelector
@@ -1229,8 +1305,8 @@ export class ProgramRuntimeScheduler {
     const key = fingerprint(records, programs, options.agentOrigin, isolateFailures);
     const completed = this.completed.get(key);
     if (completed) return this.overlayRequestDrivenLocks({
-      ...completed, cached: true, messages: [], transforms: [], slotBodies: []
-    });
+      ...completed, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: []
+    }, options.agentOrigin);
 
     const reusable = reusableCandidates(
       this.reusable, programs, isolateFailures, options.agentOrigin, records,
@@ -1248,9 +1324,10 @@ export class ProgramRuntimeScheduler {
         choices: structuredClone(reusable.value.choices ?? []),
         messages: [],
         transforms: [],
+        shortcuts: [],
         slotBodies: [],
         failures: structuredClone(reusable.value.failures ?? [])
-      });
+      }, options.agentOrigin);
       this.completed.set(key, value);
       return value;
     }
@@ -1267,7 +1344,7 @@ export class ProgramRuntimeScheduler {
     if (options.allowWindowLockSnapshot === true) {
       await this.activeRequestDrivenLocks();
       const scopePath = agentScopePath(options.agentOrigin);
-      if (scopePath && this.activeWindowAgents.has(scopePath)) {
+      if (scopePath && this.agentSecurity.has(scopePath)) {
         return this.overlayRequestDrivenLocks({
           fingerprint: key,
           cached: true,
@@ -1277,12 +1354,13 @@ export class ProgramRuntimeScheduler {
           choices: [],
           messages: [],
           transforms: [],
+          shortcuts: [],
           slotBodies: [],
           failures: [],
           exploreReadPaths: [],
           contextIncomplete: true,
           windowLockSnapshotOnly: true
-        });
+        }, options.agentOrigin);
       }
     }
     const error = new Error('No validated Program projection exists for the current world revision');
@@ -1292,6 +1370,7 @@ export class ProgramRuntimeScheduler {
   }
 
   async refresh(atoms, options = {}) {
+    await this.activeRequestDrivenLocks(atoms);
     const records = worldRecords(atoms);
     const compatibility = legacyAtomContextMetadata(atoms);
     if (compatibility) {
@@ -1313,12 +1392,12 @@ export class ProgramRuntimeScheduler {
     if (completed && completed.failures.length === 0) {
       const cached = completed;
       return this.overlayRequestDrivenLocks({
-        ...cached, cached: true, messages: [], transforms: [], slotBodies: []
-      });
+        ...cached, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: []
+      }, options.agentOrigin);
     }
     if (this.inflight.has(key)) {
       return this.inflight.get(key).then((value) => ({
-        ...value, cached: true, messages: [], transforms: [], slotBodies: []
+        ...value, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: []
       }));
     }
 
@@ -1455,9 +1534,10 @@ export class ProgramRuntimeScheduler {
           choices: structuredClone(reusable.value.choices ?? []),
           messages: [],
           transforms: [],
+          shortcuts: [],
           slotBodies: [],
           failures: structuredClone(reusable.value.failures ?? [])
-        });
+        }, options.agentOrigin);
         this.completed.set(key, value);
         while (this.completed.size > this.maxCompleted) {
           this.completed.delete(this.completed.keys().next().value);
@@ -1545,7 +1625,7 @@ export class ProgramRuntimeScheduler {
         return {
           programPath: program.path,
           result: {
-            locks: [], messages: [], transforms: [], slotBodies: [], choices: [], trigger: null
+            locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [], trigger: null
           },
           cached: true,
           requests: dormantFailure.requests,
@@ -1564,8 +1644,9 @@ export class ProgramRuntimeScheduler {
             locks: rebindLocks(previous.result.locks, previous.records, records),
             messages: [],
             transforms: [],
+            shortcuts: [],
             slotBodies: []
-          } : { locks: [], messages: [], transforms: [], slotBodies: [], choices: [], trigger: null },
+          } : { locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [], trigger: null },
           cached: true,
           requests: previous?.requests ?? [],
           contextDependent: previous?.contextDependent === true
@@ -1579,8 +1660,9 @@ export class ProgramRuntimeScheduler {
             locks: rebindLocks(previous.result.locks, previous.records, records),
             messages: [],
             transforms: [],
+            shortcuts: [],
             slotBodies: []
-          } : { locks: [], messages: [], transforms: [], slotBodies: [], choices: [], trigger: null },
+          } : { locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [], trigger: null },
           cached: true,
           requests: previous?.requests ?? [],
           contextDependent: previous?.contextDependent === true
@@ -1598,6 +1680,7 @@ export class ProgramRuntimeScheduler {
               locks: rebindLocks(previous.result.locks, previous.records, records),
               messages: [],
               transforms: [],
+              shortcuts: [],
               slotBodies: []
             },
             cached: true,
@@ -1610,7 +1693,7 @@ export class ProgramRuntimeScheduler {
       const requests = [];
       const executionStartedAt = performance.now();
       try {
-        const result = await this.runBounded(() => {
+        const rawResult = await this.runBounded(() => {
           const remainingMs = cycleDeadline - Date.now();
           if (remainingMs <= 0) {
             throw Object.assign(
@@ -1639,6 +1722,13 @@ export class ProgramRuntimeScheduler {
               scope_root: slotInvocation.scopeRoot,
               revision: slotInvocation.revision
             } : {},
+            allowedFunctions: (() => {
+              const allowed = this.agentSecurity.get(
+                agentScopePath(options.agentOrigin)
+              )?.functions ?? null;
+              if (!allowed || !program.types.includes('agent')) return allowed;
+              return [...new Set([...allowed, 'agent'])];
+            })(),
             executeExplore: async (request) => {
               requests.push(structuredClone(request));
               const matches = await executeExplore(request, {
@@ -1654,6 +1744,9 @@ export class ProgramRuntimeScheduler {
             }
           });
         });
+        const result = program.types.includes('agent')
+          ? { ...rawResult, agentRegistrations: [] }
+          : rawResult;
         const uniqueRequests = [...new Map(requests.map((request) => (
           [JSON.stringify(request), request]
         ))).values()];
@@ -1737,39 +1830,6 @@ export class ProgramRuntimeScheduler {
     ));
     const results = applicable.flatMap((entry) => entry.result ? [entry.result] : []);
     const currentAgentPath = agentScopePath(options.agentOrigin);
-    let windowSelfLocks = applicable.flatMap((entry) => (
-      entry.result?.jumps ?? []
-    ).filter((jump) => jump.lock).map((jump) => ({
-      agentPath: currentAgentPath,
-      sourceProgramPath: jump.sourceProgramPath,
-      policy: bindCurrentWindowPolicy(jump.lock, currentAgentPath)
-    })));
-    const windowSelfLockAgents = currentAgentPath && results.some((result) => (
-      (result.jumps?.length ?? 0) > 0
-    )) ? [currentAgentPath] : [];
-    if (currentAgentPath && windowSelfLockAgents.length) {
-      this.activeWindowAgents.add(currentAgentPath);
-      const proposed = windowSelfLocks.at(-1)?.policy ?? null;
-      const previous = this.activeWindowSelfLocks.get(currentAgentPath);
-      if (proposed && previous && !windowPolicyIsSubset({
-        previous,
-        next: proposed,
-        agentPath: currentAgentPath,
-        targetPaths: records.map((record) => record.path)
-      })) {
-        throw Object.assign(new Error('An active window may keep or tighten, but not expand, its own self-lock'), {
-          code: 'WINDOW_SELF_LOCK_EXPANSION_DENIED',
-          details: { agentPath: currentAgentPath }
-        });
-      }
-      if (proposed) this.activeWindowSelfLocks.set(currentAgentPath, proposed);
-      const effective = this.activeWindowSelfLocks.get(currentAgentPath);
-      windowSelfLocks = effective ? [{
-        agentPath: currentAgentPath,
-        sourceProgramPath: windowSelfLocks.at(-1)?.sourceProgramPath ?? null,
-        policy: effective
-      }] : [];
-    }
     const uniqueRequests = [...new Map(applicable.flatMap((entry) => entry.requests).map((request) => (
       [JSON.stringify(request), request]
     ))).values()];
@@ -1783,12 +1843,14 @@ export class ProgramRuntimeScheduler {
       choices: results.flatMap((result) => result.choices ?? []),
       messages: results.flatMap((result) => result.messages),
       transforms: results.flatMap((result) => result.transforms),
+      shortcuts: results.flatMap((result) => result.shortcuts ?? []),
       slotBodies: results.flatMap((result) => result.slotBodies ?? []),
       jumps: applicable.flatMap((entry) => entry.cached === false
         ? entry.result?.jumps ?? []
         : []),
-      windowSelfLocks,
-      windowSelfLockAgents,
+      agentRegistrations: applicable.flatMap((entry) => entry.cached === false
+        ? entry.result?.agentRegistrations ?? []
+        : []),
       exploreRequests: structuredClone(uniqueRequests),
       exploreReadPaths,
       failures: applicable.flatMap((entry) => entry.failure ? [entry.failure] : []),
@@ -1798,6 +1860,9 @@ export class ProgramRuntimeScheduler {
       contextIncomplete
     };
     await this.mergeRequestDrivenLocks(value, records, options);
+    value.agentSecurity = currentAgentPath
+      ? structuredClone(this.agentSecurity.get(currentAgentPath) ?? null)
+      : null;
     this.completed.set(key, value);
     while (this.completed.size > this.maxCompleted) {
       this.completed.delete(this.completed.keys().next().value);

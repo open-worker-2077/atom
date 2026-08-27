@@ -36,7 +36,7 @@ function world() {
   const calculate = [
     'def main(arguments):',
     '    rows = explore({"thing":"./输入/变量料","situation$full":True})',
-    '    transform({"thing":"./输出","situation.rep." + rows[0].situation:None})',
+    '    transform({"thing":"./输出/结果料","situation.rep." + rows[0].situation:None})',
     '    return {"computed":True}'
   ].join('\n');
   const printer = (name) => (
@@ -78,13 +78,16 @@ async function run(runtime, source, scheduler) {
 function conditionalWorld() {
   const predicate = [
     'def main(arguments):',
-    '    left = explore({"thing":"./字段甲","situation$full":True})',
-    '    right = explore({"thing":"./字段乙","situation$full":True})',
-    '    return left[0].situation == "值甲" and right[0].situation == "值乙"'
+    '    try:',
+    '        left = explore({"thing":"./字段甲/值料","situation$full":True})',
+    '        right = explore({"thing":"./字段乙/值料","situation$full":True})',
+    '        return left[0].situation == "值甲" and right[0].situation == "值乙"',
+    '    except Exception:',
+    '        return False'
   ].join('\n');
   const calculate = [
     'def main(arguments):',
-    '    transform({"thing":"./结果","situation.rep.已计算":None})',
+    '    transform({"thing":"./结果/结果料","situation.rep.已计算":None})',
     '    return {"computed":True}'
   ].join('\n');
   const printer = (name) => (
@@ -121,15 +124,31 @@ async function sealAndPrintConditional(runtime, scheduler, second = false) {
   assert.equal(sealed.ok, true, JSON.stringify(sealed.errors));
   const printed = await run(runtime, 'transform {"thing.run.":"Root/打印条件001"}', scheduler);
   assert.equal(printed.ok, true, JSON.stringify(printed.errors));
+  for (const material of [
+    { thing: 'Root/条件槽体/槽例/实例001/结果/结果料', situation: '', contain: [], support: [] },
+    { thing: 'Root/条件槽体/槽例/实例001/字段甲/值料', situation: '字段甲槽契约', contain: [], support: [] },
+    { thing: 'Root/条件槽体/槽例/实例001/字段乙/值料', situation: '字段乙槽契约', contain: [], support: [] }
+  ]) {
+    const initialized = await run(runtime, `transform new ${JSON.stringify(material)}`, scheduler);
+    assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
+  }
   if (second) {
     const printedSecond = await run(runtime, 'transform {"thing.run.":"Root/打印条件002"}', scheduler);
     assert.equal(printedSecond.ok, true, JSON.stringify(printedSecond.errors));
+    for (const material of [
+      { thing: 'Root/条件槽体/槽例/实例002/结果/结果料', situation: '', contain: [], support: [] },
+      { thing: 'Root/条件槽体/槽例/实例002/字段甲/值料', situation: '字段甲槽契约', contain: [], support: [] },
+      { thing: 'Root/条件槽体/槽例/实例002/字段乙/值料', situation: '字段乙槽契约', contain: [], support: [] }
+    ]) {
+      const initializedSecond = await run(runtime, `transform new ${JSON.stringify(material)}`, scheduler);
+      assert.equal(initializedSecond.ok, true, JSON.stringify(initializedSecond.errors));
+    }
   }
 }
 
 function triggerFields(instance, fields = ['字段甲', '字段乙'], sameValue = false) {
   return `transform ${JSON.stringify(fields.map((field) => ({
-    thing: `Root/条件槽体/槽例/${instance}/${field}`,
+    thing: `Root/条件槽体/槽例/${instance}/${field}/值料`,
     [`situation.rep.值${field.at(-1)}`]: sameValue ? `值${field.at(-1)}` : `${field}槽契约`
   })))}`;
 }
@@ -160,30 +179,27 @@ test('outside orchestration materializes a local variable Thing before triggerin
   await run(runtime, 'transform {"thing.run.":"Root/打印001"}', scheduler);
   await run(runtime, 'transform {"thing.run.":"Root/打印002"}', scheduler);
 
+  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单001/输出/结果料","situation":"","contain":[],"support":[]}', scheduler);
+  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单002/输出/结果料","situation":"","contain":[],"support":[]}', scheduler);
+
   const materialized = await run(
     runtime,
     'transform new {"thing":"Root/订单槽体/槽例/订单001/输入/变量料","situation":"实例一","contain":[],"support":[]}',
     scheduler
   );
   assert.equal(materialized.ok, true, JSON.stringify(materialized.errors));
-  const changed = await run(
-    runtime,
-    'transform {"thing":"Root/订单槽体/槽例/订单001/输入","situation.rep.输入槽契约"}',
-    scheduler
-  );
-  assert.equal(changed.ok, true, JSON.stringify(changed.errors));
   let committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
-  assert.equal(find(committed, 'Root/订单槽体/槽例/订单001/输出').situation, '实例一');
-  assert.equal(find(committed, 'Root/订单槽体/槽例/订单002/输出').situation, '输出槽契约');
+  assert.equal(find(committed, 'Root/订单槽体/槽例/订单001/输出/结果料').situation, '实例一');
+  assert.equal(find(committed, 'Root/订单槽体/槽例/订单002/输出/结果料').situation, '');
 
   const unrelated = await run(
     runtime,
-    'transform {"thing":"Root/订单槽体/槽例/订单002/备注","situation.rep.不触发"}',
+    'transform new {"thing":"Root/订单槽体/槽例/订单002/备注/旁注料","situation":"不触发","contain":[],"support":[]}',
     scheduler
   );
   assert.equal(unrelated.ok, true, JSON.stringify(unrelated.errors));
   committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
-  assert.equal(find(committed, 'Root/订单槽体/槽例/订单002/输出').situation, '输出槽契约');
+  assert.equal(find(committed, 'Root/订单槽体/槽例/订单002/输出/结果料').situation, '');
 });
 
 test('one atomic batch evaluates one owner-local condition and dispatches its consequent once', async (t) => {
@@ -199,8 +215,8 @@ test('one atomic batch evaluates one owner-local condition and dispatches its co
   const invocations = slotProgramInvocationsForEvent(before, {
     mode: 'transform',
     nodes: [
-      'Root/条件槽体/槽例/实例001/字段甲',
-      'Root/条件槽体/槽例/实例001/字段乙'
+      'Root/条件槽体/槽例/实例001/字段甲/值料',
+      'Root/条件槽体/槽例/实例001/字段乙/值料'
     ]
   });
   assert.equal(invocations.length, 1);
@@ -210,14 +226,14 @@ test('one atomic batch evaluates one owner-local condition and dispatches its co
 
   assert.equal(changed.ok, true, JSON.stringify(changed.errors));
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
-  assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果').situation, '已计算');
+  assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果/结果料').situation, '已计算');
   assert.equal(
     diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/槽模/计算').length,
     1
   );
 });
 
-test('a same-value mapped-slot Transform still evaluates and dispatches owner-local support', async (t) => {
+test('a same-value local-material Transform still evaluates and dispatches owner-local support', async (t) => {
   const runtime = await setupConditional(t);
   const diagnostics = [];
   const scheduler = createProgramRuntimeScheduler({
@@ -231,7 +247,7 @@ test('a same-value mapped-slot Transform still evaluates and dispatches owner-lo
 
   assert.equal(changed.ok, true, JSON.stringify(changed.errors));
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
-  assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果').situation, '已计算');
+  assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果/结果料').situation, '已计算');
   assert.equal(
     diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/槽模/计算').length,
     1
@@ -249,14 +265,14 @@ test('a strict-false owner-local condition does not dispatch its consequent', as
 
   const before = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(slotProgramInvocationsForEvent(before, {
-    mode: 'transform', nodes: ['Root/条件槽体/槽例/实例001/字段甲']
+    mode: 'transform', nodes: ['Root/条件槽体/槽例/实例001/字段甲/值料']
   }).length, 1);
 
   const changed = await run(runtime, triggerFields('实例001', ['字段甲']), scheduler);
 
   assert.equal(changed.ok, true, JSON.stringify(changed.errors));
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
-  assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果').situation, '结果槽契约');
+  assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果/结果料').situation, '');
   assert.equal(
     diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/槽模/计算').length,
     0
@@ -272,8 +288,8 @@ test('owner-local support never dispatches the same revision in a sibling instan
 
   assert.equal(changed.ok, true, JSON.stringify(changed.errors));
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
-  assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果').situation, '已计算');
-  assert.equal(find(committed, 'Root/条件槽体/槽例/实例002/结果').situation, '结果槽契约');
+  assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果/结果料').situation, '已计算');
+  assert.equal(find(committed, 'Root/条件槽体/槽例/实例002/结果/结果料').situation, '');
 });
 
 test('re-seal recomputes every synchronized instance with the new shared Program in the same commit', async (t) => {
@@ -282,12 +298,12 @@ test('re-seal recomputes every synchronized instance with the new shared Program
   await run(runtime, 'transform {"thing.run.":"Root/封装"}', scheduler);
   await run(runtime, 'transform {"thing.run.":"Root/打印001"}', scheduler);
   await run(runtime, 'transform {"thing.run.":"Root/打印002"}', scheduler);
+  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单001/输出/结果料","situation":"","contain":[],"support":[]}', scheduler);
+  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单002/输出/结果料","situation":"","contain":[],"support":[]}', scheduler);
   await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单001/输入/变量料","situation":"一","contain":[],"support":[]}', scheduler);
   await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单002/输入/变量料","situation":"二","contain":[],"support":[]}', scheduler);
-  await run(runtime, 'transform {"thing":"Root/订单槽体/槽例/订单001/输入","situation.rep.输入槽契约"}', scheduler);
-  await run(runtime, 'transform {"thing":"Root/订单槽体/槽例/订单002/输入","situation.rep.输入槽契约"}', scheduler);
-  await run(runtime, 'transform {"thing":"Root/订单槽体/槽例/订单001/输出","situation.rep.陈旧一"}', scheduler);
-  await run(runtime, 'transform {"thing":"Root/订单槽体/槽例/订单002/输出","situation.rep.陈旧二"}', scheduler);
+  await run(runtime, 'transform {"thing":"Root/订单槽体/槽例/订单001/输出/结果料","situation.rep.陈旧一"}', scheduler);
+  await run(runtime, 'transform {"thing":"Root/订单槽体/槽例/订单002/输出/结果料","situation.rep.陈旧二"}', scheduler);
 
   const changed = await run(runtime, `transform ${JSON.stringify({
     thing: 'Root/订单槽体/槽模/计算',
@@ -302,12 +318,12 @@ test('re-seal recomputes every synchronized instance with the new shared Program
     mode: 'transform', nodes: ['Root/订单槽体/槽例/订单001/输入']
   }).map((item) => item.programPath), ['Root/订单槽体/槽模/计算']);
   assert.equal(
-    find(committed, 'Root/订单槽体/槽例/订单001/输出').situation,
+    find(committed, 'Root/订单槽体/槽例/订单001/输出/结果料').situation,
     '一',
     JSON.stringify(resealed)
   );
   assert.equal(
-    find(committed, 'Root/订单槽体/槽例/订单002/输出').situation,
+    find(committed, 'Root/订单槽体/槽例/订单002/输出/结果料').situation,
     '二',
     JSON.stringify(resealed)
   );

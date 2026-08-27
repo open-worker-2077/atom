@@ -8,15 +8,19 @@ function atom(thing, contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation: '', contain, support: [] };
 }
 
-function program(thing, situation) {
-  return { [`thing@program`]: thing, situation, contain: [], support: [] };
+const AGENT_SOURCE = 'agent({"labels":["^","approved"],"functions":{"groups":[],"names":["explore","jump","transform"]}})';
+
+function registeredWindow(thing, contain = []) {
+  const value = atom(thing, contain, 'program@agent');
+  value.situation = AGENT_SOURCE;
+  return value;
 }
 
 function world() {
   return [
     atom('祖先', [
       atom('父', [
-        atom('窗口', [atom('后代', [atom('深后代')])], 'agent'),
+        registeredWindow('窗口', [atom('后代', [atom('深后代')])]),
         atom('兄弟')
       ]),
       atom('父同层', [atom('旁支')])
@@ -33,43 +37,39 @@ async function decision(controller, atoms, path, operation) {
   return (await controller.authorize(match(atoms, path), operation, 'situation')).decision;
 }
 
-test('Agent without jump registration keeps legacy access instead of activating self-lock', async () => {
+const security = {
+  labels: ['^', 'approved'],
+  functionScopes: { groups: [], names: ['explore', 'jump', 'transform'] },
+  functions: ['explore', 'jump', 'transform']
+};
+
+test('an unregistered legacy Agent has no v1 security context until bootstrap migration', async () => {
   const atoms = world();
   const agentPath = '祖先/父/窗口';
-  const cycle = await createProgramRuntimeScheduler().refresh(atoms, {
-    agentOrigin: { path: agentPath }
-  });
-  assert.deepEqual(cycle.windowSelfLockAgents, []);
-
-  const controller = createAccessController(atoms, {
-    agentPath,
-    enforceWindowSelfLock: cycle.windowSelfLockAgents.includes(agentPath)
-  });
+  const controller = createAccessController(atoms, { agentPath });
+  assert.equal(controller.restricted, false);
   assert.equal(await decision(controller, atoms, '祖先', 'read'), 'allow');
   assert.equal(await decision(controller, atoms, agentPath, 'write'), 'allow');
 });
 
-test('jump registration activates default self-lock in the same Program cycle', async () => {
-  const atoms = [...world(), program('守窗注册', 'jump({})')];
+test('a source-derived Agent registration activates its fixed window in the same cycle', async () => {
+  const atoms = world();
   const agentPath = '祖先/父/窗口';
-  const cycle = await createProgramRuntimeScheduler().refresh(atoms, {
-    agentOrigin: { path: agentPath }
-  });
-  assert.deepEqual(cycle.windowSelfLockAgents, [agentPath]);
-  assert.deepEqual(cycle.jumps, [{ action: 'guard', sourceProgramPath: '守窗注册' }]);
+  const scheduler = createProgramRuntimeScheduler();
+  const cycle = await scheduler.refresh(atoms, { agentOrigin: { path: agentPath } });
+  assert.deepEqual(cycle.agentSecurity, security);
 
-  const controller = createAccessController(atoms, {
-    agentPath,
-    enforceWindowSelfLock: cycle.windowSelfLockAgents.includes(agentPath)
-  });
+  const controller = createAccessController(atoms, { agentPath, agentSecurity: cycle.agentSecurity });
   assert.equal(await decision(controller, atoms, '祖先', 'read'), 'deny');
   assert.equal(await decision(controller, atoms, agentPath, 'write'), 'deny');
   assert.equal(await decision(controller, atoms, agentPath, 'read'), 'allow');
 });
 
-test('default window self-lock reads current, descendants, peers and only the direct parent', async () => {
+test('fixed window Explore allows current descendants peers and only the direct parent', async () => {
   const atoms = world();
-  const controller = createAccessController(atoms, { agentPath: '祖先/父/窗口', enforceWindowSelfLock: true });
+  const controller = createAccessController(atoms, {
+    agentPath: '祖先/父/窗口', agentSecurity: security
+  });
   for (const path of ['祖先/父/窗口', '祖先/父/窗口/后代', '祖先/父/窗口/后代/深后代', '祖先/父/兄弟', '祖先/父']) {
     assert.equal(await decision(controller, atoms, path, 'read'), 'allow', path);
   }
@@ -78,9 +78,11 @@ test('default window self-lock reads current, descendants, peers and only the di
   }
 });
 
-test('default window self-lock writes descendants only', async () => {
+test('fixed window Transform allows descendants only', async () => {
   const atoms = world();
-  const controller = createAccessController(atoms, { agentPath: '祖先/父/窗口', enforceWindowSelfLock: true });
+  const controller = createAccessController(atoms, {
+    agentPath: '祖先/父/窗口', agentSecurity: security
+  });
   for (const path of ['祖先/父/窗口/后代', '祖先/父/窗口/后代/深后代']) {
     assert.equal(await decision(controller, atoms, path, 'write'), 'allow', path);
   }
@@ -89,40 +91,34 @@ test('default window self-lock writes descendants only', async () => {
   }
 });
 
-test('explicit read/write allow and deny use highest priority, deny ties, and default fallback', async () => {
+test('business Graph locks require labels independently for Explore and Transform', async () => {
   const atoms = world();
-  const policy = {
-    read: {
-      allow: [
-        { priority: 2, fromPath: '祖先/父同层', descendants: 'all' },
-        { priority: 3, fromPath: '其他分支' }
-      ],
-      deny: [
-        { priority: 1, fromPath: '祖先/父同层', descendants: 'all' },
-        { priority: 3, fromPath: '其他分支' }
-      ]
-    },
-    write: {
-      allow: [{ priority: 4, fromPath: '祖先/父', peers: true }],
-      deny: [{ priority: 5, fromPath: '祖先/父/兄弟' }]
-    }
-  };
+  const locks = [
+    { kind: 'node', path: '祖先/父/兄弟', actions: ['explore'], labels: ['approved'] },
+    { kind: 'node', path: '祖先/父/窗口/后代', actions: ['transform'], labels: ['writer'] }
+  ];
   const controller = createAccessController(atoms, {
-    agentPath: '祖先/父/窗口', windowSelfLock: policy
+    agentPath: '祖先/父/窗口', agentSecurity: security, graphLocks: locks
   });
-  assert.equal(await decision(controller, atoms, '祖先/父同层/旁支', 'read'), 'allow');
-  assert.equal(await decision(controller, atoms, '其他分支', 'read'), 'deny');
+  assert.equal(await decision(controller, atoms, '祖先/父/兄弟', 'read'), 'allow');
   assert.equal(await decision(controller, atoms, '祖先/父/窗口/后代', 'read'), 'allow');
-  assert.equal(await decision(controller, atoms, '祖先/父同层', 'write'), 'allow');
-  assert.equal(await decision(controller, atoms, '祖先/父/兄弟', 'write'), 'deny');
-  assert.equal(await decision(controller, atoms, '祖先/父/窗口', 'write'), 'deny');
+  assert.equal(await decision(controller, atoms, '祖先/父/窗口/后代', 'write'), 'deny');
 });
 
-test('exact paths use the same self-lock and node-lock denial remains independent', async () => {
+test('exact paths use the fixed window and node-lock denial remains independent', async () => {
   const atoms = world();
-  const controller = createAccessController(atoms, { agentPath: '祖先/父/窗口', enforceWindowSelfLock: true });
-  const denied = await controller.authorize(match(atoms, '祖先/父同层/旁支'), 'read', 'situation');
-  assert.equal(denied.decision, 'deny');
-  assert.equal(denied.code, 'WINDOW_ACCESS_DENIED');
-  assert.equal(denied.lockKind, 'window-self-lock');
+  const agentPath = '祖先/父/窗口';
+  const controller = createAccessController(atoms, {
+    agentPath,
+    agentSecurity: security,
+    graphLocks: [{
+      kind: 'node', path: `${agentPath}/后代`, actions: ['explore'], labels: ['missing']
+    }]
+  });
+  const outside = await controller.authorize(match(atoms, '祖先/父同层/旁支'), 'read', 'situation');
+  assert.equal(outside.code, 'WINDOW_ACCESS_DENIED');
+  assert.equal(outside.lockKind, 'agent-window');
+  const node = await controller.authorize(match(atoms, `${agentPath}/后代`), 'read', 'situation');
+  assert.equal(node.code, 'GRAPH_LOCK_DENIED');
+  assert.equal(node.lockKind, 'node');
 });

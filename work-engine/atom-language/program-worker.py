@@ -44,11 +44,19 @@ json_stringify_impl = PROGRAM_STDLIB.json_stringify
 def load_program_function_registry():
     module_path = Path(__file__).with_name("program-function-registry.json")
     value = json.loads(module_path.read_text(encoding="utf-8"))
+    hierarchy = value.get("functionScopeHierarchy", {})
     if (value.get("contract") != "atom-program-function-registry"
             or value.get("version") != 5
-            or value.get("runtimeContract") != "atom-interaction/3"):
+            or value.get("runtimeContract") != "atom-interaction/3"
+            or hierarchy.get("groupField") != "functionFamilies[].id"
+            or hierarchy.get("parentField") != "functionFamilies[].parent"
+            or hierarchy.get("rootWhenParentOmitted") is not True
+            or hierarchy.get("functionMembership") != "single-family"
+            or hierarchy.get("groupEffectiveMembership") != "self-and-descendants"):
         raise RuntimeError("Program function registry has an invalid public contract")
     families = set()
+    family_ids = set()
+    family_parents = {}
     kernel_families = set()
     for item in value.get("functionFamilies", []):
         layer = item.get("layer")
@@ -57,11 +65,25 @@ def load_program_function_registry():
         if (layer not in {"kernel", "application"}
                 or not isinstance(family, str) or not family
                 or not isinstance(item.get("label"), str) or not item["label"]
-                or key in families):
+                or key in families or family in family_ids
+                or ("parent" in item
+                    and (not isinstance(item["parent"], str) or not item["parent"]))):
             raise RuntimeError("Program function registry contains an invalid function family")
         families.add(key)
+        family_ids.add(family)
+        family_parents[family] = item.get("parent")
         if layer == "kernel":
             kernel_families.add(family)
+    for family, parent in family_parents.items():
+        if parent is not None and parent not in family_parents:
+            raise RuntimeError(f"Unknown parent Program function family: {family}")
+        visited = {family}
+        cursor = parent
+        while cursor is not None:
+            if cursor in visited:
+                raise RuntimeError(f"Cyclic Program function family: {family}")
+            visited.add(cursor)
+            cursor = family_parents[cursor]
     if kernel_families != {"graph", "form", "program"}:
         raise RuntimeError("Kernel function families must be graph, form, and program")
     names = set()
@@ -87,6 +109,59 @@ PROGRAM_FUNCTION_REGISTRY = load_program_function_registry()
 REGISTERED_PROGRAM_FUNCTIONS = {
     item["name"] for item in PROGRAM_FUNCTION_REGISTRY["functions"]
 }
+PROGRAM_FUNCTION_PARENT_BY_FAMILY = {
+    item["id"]: item.get("parent")
+    for item in PROGRAM_FUNCTION_REGISTRY["functionFamilies"]
+}
+
+
+def function_family_is_within(family, ancestor):
+    cursor = family
+    while cursor is not None:
+        if cursor == ancestor:
+            return True
+        cursor = PROGRAM_FUNCTION_PARENT_BY_FAMILY[cursor]
+    return False
+
+
+def validate_program_function_selection(value):
+    if (not isinstance(value, dict) or set(value) != {"groups", "names"}
+            or not isinstance(value.get("groups"), list)
+            or not isinstance(value.get("names"), list)):
+        raise EngineCallError(
+            "INVALID_AGENT_REGISTRATION",
+            "agent.functions requires groups and names arrays",
+        )
+    groups = value["groups"]
+    names = value["names"]
+    if any(not isinstance(group, str) or not group for group in groups):
+        raise EngineCallError(
+            "INVALID_AGENT_REGISTRATION", "agent.functions.groups must contain strings"
+        )
+    if any(not isinstance(name, str) or not name for name in names):
+        raise EngineCallError(
+            "INVALID_AGENT_REGISTRATION", "agent.functions.names must contain strings"
+        )
+    unknown_groups = [group for group in groups if group not in PROGRAM_FUNCTION_PARENT_BY_FAMILY]
+    if unknown_groups:
+        raise EngineCallError(
+            "UNKNOWN_PROGRAM_FUNCTION_GROUP", "Unknown Program function group: " + unknown_groups[0]
+        )
+    unknown_names = [name for name in names if name not in REGISTERED_PROGRAM_FUNCTIONS]
+    if unknown_names:
+        raise EngineCallError(
+            "UNKNOWN_PROGRAM_FUNCTION", "Unknown Program function: " + unknown_names[0]
+        )
+    normalized = {
+        "groups": sorted(set(groups)),
+        "names": sorted(set(names)),
+    }
+    expanded = set(normalized["names"])
+    for item in PROGRAM_FUNCTION_REGISTRY["functions"]:
+        if any(function_family_is_within(item["family"], group)
+               for group in normalized["groups"]):
+            expanded.add(item["name"])
+    return normalized, sorted(expanded)
 
 
 def load_program_templates():
@@ -155,7 +230,7 @@ ALLOWED_METHODS = {
 }
 
 
-def validate_program(source, filename):
+def validate_program(source, filename, allowed_registered_functions=None):
     try:
         tree = ast.parse(source, filename=filename, mode="exec")
     except SyntaxError:
@@ -180,6 +255,13 @@ def validate_program(source, filename):
                 raise ProgramSecurityError("Private function names are not allowed in Atom Program")
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name):
+                if (allowed_registered_functions is not None
+                        and node.func.id in REGISTERED_PROGRAM_FUNCTIONS
+                        and node.func.id not in allowed_registered_functions):
+                    raise EngineCallError(
+                        "PROGRAM_FUNCTION_DENIED",
+                        f"Registered function is not allowed for this Agent: {node.func.id}",
+                    )
                 if node.func.id not in ALLOWED_FUNCTIONS | defined_functions:
                     raise ProgramSecurityError(
                         f"Function {node.func.id!r} is not allowed in Atom Program"
@@ -205,6 +287,7 @@ def validate_program(source, filename):
                         "Retired Graph axes are not executable; run the four-axis Program upgrader: "
                         + ", ".join(retired)
                     )
+    extract_agent_declaration(tree)
     return tree
 
 
@@ -285,6 +368,112 @@ class EngineCallError(RuntimeError):
         self.code = code
 
 
+def validate_agent_specification(specification):
+    if (not isinstance(specification, dict)
+            or set(specification) - {"labels", "functions"}
+            or "functions" not in specification):
+        raise EngineCallError(
+            "INVALID_AGENT_REGISTRATION",
+            "agent() accepts only optional labels and required functions",
+        )
+    labels = specification.get("labels", [])
+    if (not isinstance(labels, list)
+            or any(not isinstance(label, str) or not label for label in labels)):
+        raise EngineCallError("INVALID_AGENT_REGISTRATION", "agent.labels must contain strings")
+    function_scopes, functions = validate_program_function_selection(specification["functions"])
+    return {
+        "labels": list(dict.fromkeys(labels)),
+        "functionScopes": function_scopes,
+        "functions": functions,
+    }
+
+
+def extract_agent_declaration(tree):
+    calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "agent"
+    ]
+    if not calls:
+        return None
+    top_level_calls = [
+        node.value for node in tree.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "agent"
+    ]
+    if len(calls) != 1 or len(top_level_calls) != 1 or calls[0] is not top_level_calls[0]:
+        raise EngineCallError(
+            "AGENT_REGISTRATION_LITERAL_REQUIRED",
+            "agent() must be one top-level call with a literal JSON-compatible argument",
+        )
+    declaration = calls[0]
+    if declaration.keywords or len(declaration.args) != 1:
+        raise EngineCallError(
+            "AGENT_REGISTRATION_LITERAL_REQUIRED",
+            "agent() must be one top-level call with one literal argument",
+        )
+    try:
+        specification = ast.literal_eval(declaration.args[0])
+    except (TypeError, ValueError, SyntaxError) as error:
+        raise EngineCallError(
+            "AGENT_REGISTRATION_LITERAL_REQUIRED",
+            "agent labels and function scopes must be literal JSON-compatible values",
+        ) from error
+    return validate_agent_specification(specification)
+
+
+def extract_request_driven_lock_declarations(tree):
+    """Return persistent lock facts that can be reconstructed without executing Program code."""
+    declarations = []
+    top_level_calls = {
+        id(node.value): node.value for node in tree.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "lock"
+    }
+    literal_assignments = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            try:
+                literal_assignments[node.targets[0].id] = ast.literal_eval(node.value)
+            except (TypeError, ValueError, SyntaxError):
+                pass
+    for call in (
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "lock"
+    ):
+        specification = None
+        direct_literal = False
+        if not call.keywords and len(call.args) == 1:
+            try:
+                specification = ast.literal_eval(call.args[0])
+                direct_literal = True
+            except (TypeError, ValueError, SyntaxError):
+                if isinstance(call.args[0], ast.Name):
+                    specification = literal_assignments.get(call.args[0].id)
+        is_request_driven = (
+            isinstance(specification, dict)
+            and (specification.get("refresh") == {"policy": "on_request"}
+                 or "actions" in specification or "labels" in specification)
+        )
+        if not is_request_driven:
+            continue
+        if id(call) not in top_level_calls or not direct_literal:
+            raise EngineCallError(
+                "REQUEST_DRIVEN_LOCK_LITERAL_REQUIRED",
+                "request-driven lock() must be one top-level call with one literal argument",
+            )
+        declarations.append(specification)
+    return declarations
+
+
 def require_object(value, function_name):
     if not isinstance(value, dict):
         raise TypeError(f"{function_name}() requires one JSON object argument")
@@ -306,7 +495,7 @@ def main():
     views = {ref: AtomView(record) for ref, record in by_ref.items()}
     effects = {
         "locks": [], "messages": [], "transforms": [], "choices": [],
-        "slotBodies": [], "jumps": [], "changedThings": []
+        "slotBodies": [], "jumps": [], "shortcuts": [], "agents": [], "changedThings": []
     }
 
     next_request_id = 0
@@ -349,8 +538,30 @@ def main():
         result_refs = remember(call_engine("explore", query))
         return [views[ref] for ref in result_refs]
 
+    def agent(specification):
+        try:
+            declaration = validate_agent_specification(require_object(specification, "agent"))
+        except TypeError as error:
+            raise EngineCallError("INVALID_AGENT_REGISTRATION", str(error)) from error
+        effects["agents"].append(declaration)
+        return {"registered": True, "path": current_atom().path}
+
+    request_lock_declarations = []
+
     def lock(specification):
         specification = require_object(specification, "lock")
+        if (specification.get("refresh") == {"policy": "on_request"}
+                or "actions" in specification or "labels" in specification):
+            canonical = json.dumps(specification, sort_keys=True, ensure_ascii=True, allow_nan=False)
+            declared = {
+                json.dumps(item, sort_keys=True, ensure_ascii=True, allow_nan=False)
+                for item in request_lock_declarations
+            }
+            if canonical not in declared:
+                raise EngineCallError(
+                    "REQUEST_DRIVEN_LOCK_LITERAL_REQUIRED",
+                    "request-driven lock() must match a top-level literal Program declaration",
+                )
         effects["locks"].append(specification)
 
     def message(specification):
@@ -361,16 +572,39 @@ def main():
         specification = require_object(specification, "transform")
         effects["transforms"].append(specification)
 
+    def shortcut(specification):
+        try:
+            specification = require_object(specification, "shortcut")
+        except TypeError as error:
+            raise EngineCallError("INVALID_SHORTCUT_CONTRACT", str(error)) from error
+        if set(specification) != {"placement", "thing", "target"}:
+            raise EngineCallError("INVALID_SHORTCUT_CONTRACT", "shortcut() accepts exactly placement, thing, and target")
+        if specification["placement"] != "contain":
+            raise EngineCallError("INVALID_SHORTCUT_PLACEMENT", "shortcut.placement currently accepts only contain")
+        thing = specification["thing"]
+        if (not isinstance(thing, str) or not thing.strip() or thing != thing.strip() or "/" in thing):
+            raise EngineCallError("INVALID_SHORTCUT_THING", "shortcut.thing must be one non-empty Atom name")
+        target_coordinate = specification["target"]
+        if not isinstance(target_coordinate, AtomView):
+            raise EngineCallError("INVALID_SHORTCUT_TARGET_COORDINATE", "shortcut.target requires one exact ThingCoordinate from explore(); strings and refs are forbidden")
+        target = target_coordinate._record
+        effects["shortcuts"].append({
+            "placement": "contain", "thing": thing, "targetRef": target["ref"],
+            "targetPath": target["path"], "__sourceProgramPath": current_atom().path,
+        })
+        return None
+
     def slot_body(specification):
         specification = require_object(specification, "slot_body")
+        if "lock" in specification:
+            raise EngineCallError(
+                "INVALID_SLOT_BODY_EFFECT",
+                "slot_body lock is fixed by the kernel and cannot be configured",
+            )
         effects["slotBodies"].append({**specification, "__sourceProgramPath": current_atom().path})
         action = specification.get("action")
         body = specification.get("body")
         result = {"planned": True, "action": action, "body": body}
-        if action == "seal" and "lock" in specification:
-            if not isinstance(specification["lock"], bool):
-                raise TypeError("slot_body seal lock must be boolean")
-            result["lock"] = specification["lock"]
         if "name" in specification:
             result["target"] = body + "/槽例/" + str(specification["name"])
         return result
@@ -438,7 +672,9 @@ def main():
             raise ValueError(f"Recursive Program reference is not allowed: {target['path']}")
         if len(program_stack) >= 8:
             raise ValueError("Program reference depth exceeds 8")
-        target_tree = validate_program(target["detail"], target["path"])
+        target_tree = validate_program(
+            target["detail"], target["path"], request.get("allowedFunctions")
+        )
         child_namespace = dict(namespace)
         child_namespace["use_program"] = use_program
         program_stack.append(target["ref"])
@@ -456,12 +692,12 @@ def main():
             specification = require_object(specification, "jump")
         except TypeError as error:
             raise EngineCallError("INVALID_JUMP_CONTRACT", str(error)) from error
-        allowed = {"when", "where", "recycle", "lock"}
+        allowed = {"when", "where", "recycle"}
         unknown = set(specification) - allowed
         if unknown:
             raise EngineCallError(
                 "INVALID_JUMP_CONTRACT",
-                "jump() accepts only when, where, recycle, and lock",
+                "jump() accepts only when, where, and recycle",
             )
         for coordinate_name in ("when", "where", "recycle"):
             if coordinate_name not in specification:
@@ -497,59 +733,6 @@ def main():
         effect = {"action": action}
         if destination_path is not None:
             effect["destinationPath"] = destination_path
-        if "lock" in specification:
-            policy = require_object(specification["lock"], "jump.lock")
-            if any(side not in {"read", "write"} for side in policy):
-                raise ValueError("jump.lock accepts only read and write sides")
-            normalized_policy = {}
-            for side_name, side in policy.items():
-                side = require_object(side, f"jump.lock.{side_name}")
-                if any(effect_name not in {"allow", "deny"} for effect_name in side):
-                    raise ValueError("jump.lock sides accept allow and deny arrays")
-                normalized_side = {}
-                for effect_name, rules in side.items():
-                    if not isinstance(rules, list):
-                        raise TypeError("jump.lock allow and deny must be arrays")
-                    normalized_rules = []
-                    for rule in rules:
-                        rule = require_object(rule, "jump.lock rule")
-                        allowed_rule_keys = {
-                            "priority", "from", "parent", "peers", "descendants"
-                        }
-                        if set(rule) - allowed_rule_keys:
-                            raise ValueError("jump.lock rule contains an unknown key")
-                        priority = rule.get("priority")
-                        if (not isinstance(priority, int) or isinstance(priority, bool)
-                                or priority <= 0):
-                            raise ValueError("jump.lock rule priority must be a positive integer")
-                        start = rule.get("from")
-                        if start == "current":
-                            start_path = "$current"
-                        else:
-                            start_path = resolve_exact_thing(
-                                start, "jump.lock rule from"
-                            )["path"]
-                        normalized_rule = {
-                            "priority": priority, "fromPath": start_path
-                        }
-                        for relation in ("parent", "peers"):
-                            if relation in rule:
-                                if not isinstance(rule[relation], bool):
-                                    raise TypeError(f"jump.lock rule {relation} must be boolean")
-                                normalized_rule[relation] = rule[relation]
-                        if "descendants" in rule:
-                            depth = rule["descendants"]
-                            if not (depth == "all" or (
-                                isinstance(depth, int) and not isinstance(depth, bool) and depth >= 0
-                            )):
-                                raise TypeError(
-                                    "jump.lock rule descendants must be all or a non-negative integer"
-                                )
-                            normalized_rule["descendants"] = depth
-                        normalized_rules.append(normalized_rule)
-                    normalized_side[effect_name] = normalized_rules
-                normalized_policy[side_name] = normalized_side
-            effect["lock"] = normalized_policy
         effects["jumps"].append(effect)
         return None
 
@@ -1072,6 +1255,7 @@ def main():
         "__builtins__": safe_builtins,
         "explore": explore,
         "transform": transform,
+        "shortcut": shortcut,
         "slot_body": slot_body,
         "lock": lock,
         "message": message,
@@ -1093,6 +1277,7 @@ def main():
         "instantiate": instantiate,
         "template_catalog": template_catalog,
         "function_catalog": function_catalog,
+        "agent": agent,
         "json_parse": json_parse,
         "json_stringify": json_stringify,
         "work_order_catalog": work_order_catalog,
@@ -1156,7 +1341,9 @@ def main():
             raise ValueError(f"Recursive Program reference is not allowed: {target['path']}")
         if len(program_stack) >= 8:
             raise ValueError("Program reference depth exceeds 8")
-        target_tree = validate_program(target["detail"], target["path"])
+        target_tree = validate_program(
+            target["detail"], target["path"], request.get("allowedFunctions")
+        )
         child_namespace = dict(namespace)
         child_namespace["use_program"] = use_program
         program_stack.append(target["ref"])
@@ -1177,11 +1364,22 @@ def main():
             "Program function registry contains unimplemented functions: "
             + ", ".join(sorted(missing_implementations))
         )
-    program_tree = validate_program(request["program"]["detail"], request["program"]["path"])
+    program_tree = validate_program(
+        request["program"]["detail"],
+        request["program"]["path"],
+        request.get("allowedFunctions"),
+    )
     trigger_contract = extract_trigger_contract(program_tree)
+    agent_declaration = extract_agent_declaration(program_tree)
+    request_lock_declarations = extract_request_driven_lock_declarations(program_tree)
     if request.get("validateOnly") is True:
         sys.stdout.write(json.dumps(
-            {"type": "result", "ok": True, "trigger": trigger_contract, **effects},
+            {
+                "type": "result", "ok": True, "trigger": trigger_contract,
+                **effects,
+                "locks": request_lock_declarations,
+                **({"agents": [agent_declaration]} if agent_declaration is not None else {}),
+            },
             ensure_ascii=True,
             allow_nan=False,
         ) + "\n")
