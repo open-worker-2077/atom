@@ -957,7 +957,10 @@ export class ProgramRuntimeScheduler {
   async mergeRequestDrivenLocks(value, records, options) {
     const active = await this.activeRequestDrivenLocks();
     const automatic = value.locks.filter((lock) => lock.refresh?.policy !== 'on_request');
-    if (options.force === true && options.programSelector && value.failures.length === 0) {
+    const explicitReplacement = options.force === true
+      && options.programSelector
+      && value.failures.length === 0;
+    if (explicitReplacement) {
       const sourcePath = value.selectedProgram?.path ?? options.programSelector;
       const pathByRef = new Map(records.map((record) => [record.ref, record.path]));
       const replacement = value.locks
@@ -989,6 +992,11 @@ export class ProgramRuntimeScheduler {
         });
       }
       this.requestDrivenLocks = next;
+    }
+    const guardOnlyWindowActivation = (value.jumps?.length ?? 0) > 0
+      && value.jumps.every((jump) => jump.action === 'guard');
+    if (!explicitReplacement && guardOnlyWindowActivation && value.failures.length === 0) {
+      await this.persistWindowSelfLocks();
     }
     value.locks = [...automatic, ...structuredClone(this.requestDrivenLocks ?? active)];
     return value;
