@@ -115,6 +115,9 @@ test('successful jump moves the active Agent in the same authoritative commit', 
   assert.deepEqual(childNames(stored[0].contain[0].contain[0]), ['Window']);
   assert.equal(scheduler.agentSecurity.has('Root/A/Window'), false);
   assert.equal(scheduler.agentSecurity.has('Root/A/B/Window'), true);
+  const restarted = createProgramRuntimeScheduler();
+  await restarted.rebuildAgentSecurity(stored);
+  assert.deepEqual([...restarted.agentSecurity.keys()], ['Root/A/B/Window']);
 });
 
 test('the next public exact Explore after a jump enforces the remapped active self-lock', async (t) => {
@@ -472,6 +475,94 @@ test('a persisted fixed Agent boundary applies to short and full exact selectors
   }
 });
 
+test('a transform-triggered guard rebuilds its fixed Agent boundary without sidecar authority', async (t) => {
+  const agentPath = 'Root/Acceptance/Job1/Window';
+  const controlPath = `${agentPath}/Control`;
+  const initial = [atom('Root', 'root-secret', [atom('Acceptance', 'ancestor-secret', [
+    atom('Job1', 'parent-visible', [windowAgent('Window', [
+      atom('Control', '待回单'),
+      atom('When', [
+        'def main(arguments):',
+        `    control = explore({"thing":"${controlPath}","situation$full":True})[0]`,
+        '    return control.situation == "完成"'
+      ].join('\n'), [], 'program'),
+      atom('Where', 'def main(arguments):\n    return explore({"thing":"Root/Acceptance/Job2"})[0]', [], 'program'),
+      atom('Registration', [
+        'jump({',
+        `  "when": explore({"thing":"${agentPath}/When"})[0],`,
+        `  "where": explore({"thing":"${agentPath}/Where"})[0]`,
+        '})'
+      ].join('\n'), [], 'program')
+    ])]),
+    atom('Job2', 'horizontal-secret')
+  ])])];
+  const files = await fixture(t, initial);
+  const snapshotFile = path.join(path.dirname(files.contextFile), 'request-driven-locks.json');
+  const retiredSnapshot = {
+    contract: 'atom.request-driven-security-retired',
+    version: 1
+  };
+  await fs.writeFile(snapshotFile, `${JSON.stringify(retiredSnapshot, null, 2)}\n`);
+  const repository = createJsonRequestDrivenLockRepository({ file: snapshotFile });
+  const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
+  const interaction = { agent: { ref: 'window-ref', path: agentPath } };
+
+  const initialized = await executeAtomLanguage({
+    source: 'atom', ...files,
+    programMode: 'project',
+    programScheduler: scheduler,
+    interaction: { id: 'startup', agent: null }
+  });
+  assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
+  const activated = await executeAtomLanguage({
+    source: `transform {"thing":"${controlPath}","situation.rep.待回单"}`,
+    ...files,
+    programScheduler: scheduler,
+    interaction
+  });
+  assert.equal(activated.ok, true, JSON.stringify(activated.errors));
+  assert.equal(activated.changed, false);
+  assert.deepEqual(JSON.parse(await fs.readFile(snapshotFile, 'utf8')), retiredSnapshot);
+
+  for (const restarted of [scheduler, createProgramRuntimeScheduler({
+    requestDrivenLockRepository: repository
+  })]) {
+    const request = (thing) => executeAtomLanguage({
+      source: `explore {"thing":"${thing}","situation$full":true}`,
+      ...files,
+      programMode: null,
+      programScheduler: restarted,
+      interaction
+    });
+    for (const target of [agentPath, controlPath, 'Root/Acceptance/Job1']) {
+      const allowed = await request(target);
+      assert.equal(allowed.ok, true, `${target}: ${JSON.stringify(allowed.errors)}`);
+    }
+    for (const target of ['Root/Acceptance', 'Root/Acceptance/Job2']) {
+      const denied = await request(target);
+      assert.equal(denied.ok, false, `${target}: ${JSON.stringify(denied)}`);
+      assert.ok(denied.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'));
+      assert.equal(denied.items[0].matches?.[0]?.situation, undefined);
+    }
+  }
+
+  const guardRemoved = await executeAtomLanguage({
+    source: `transform {"thing":"${agentPath}/Registration","situation.rep.pass"}`,
+    ...files,
+    programScheduler: scheduler,
+    interaction
+  });
+  assert.equal(guardRemoved.ok, true, JSON.stringify(guardRemoved.errors));
+  assert.equal(guardRemoved.changed, true);
+  assert.deepEqual(JSON.parse(await fs.readFile(snapshotFile, 'utf8')), retiredSnapshot);
+  const storedWithoutGuard = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const afterGuardRemoval = createProgramRuntimeScheduler({
+    requestDrivenLockRepository: repository
+  });
+  await afterGuardRemoval.rebuildAgentSecurity(storedWithoutGuard);
+  assert.deepEqual([...afterGuardRemoval.agentSecurity.keys()], [agentPath]);
+});
+
 test('invalid destination rolls back the entire jump candidate with a stable error', async (t) => {
   const initial = jumpWorld('Root/Missing');
   const files = await fixture(t, initial);
@@ -539,6 +630,9 @@ test('recycle true removes the active window without evaluating when or where', 
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
   assert.deepEqual(childNames(stored[0].contain[0]), []);
   assert.equal(scheduler.agentSecurity.has('Root/A/Window'), false);
+  const restarted = createProgramRuntimeScheduler();
+  await restarted.rebuildAgentSecurity(stored);
+  assert.deepEqual([...restarted.agentSecurity.keys()], []);
 });
 
 test('an explicit jump recycle is the only transform allowed to remove its active Agent', async (t) => {
