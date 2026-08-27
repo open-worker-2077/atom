@@ -129,6 +129,42 @@ test('failed Transform diagnostics are queryable by interaction id without paylo
   assert.equal(JSON.stringify(await store.list()).includes('must not persist'), false);
 });
 
+test('Transform reconcile stage diagnostics retain only bounded anonymous timing facts', async () => {
+  const store = createRuntimeDiagnosticStore({ maxEntries: 10 });
+  await store.record({
+    id: 'slow-transform:transform-stage',
+    type: 'transform-stage',
+    durationMs: 31_002,
+    outcome: 'timeout',
+    command: 'transform',
+    stages: [{
+      stage: 'reconcile',
+      durationMs: 30_001,
+      candidateProgramCount: 93,
+      executedProgramCount: 47,
+      slowestProgramFingerprint: 'sha256:anonymous-program',
+      slowestProgramDurationMs: 29_999,
+      commitEntered: false,
+      path: 'Sensitive/Business/Path',
+      source: 'must not persist'
+    }],
+    situation: 'must not persist'
+  });
+
+  const diagnostic = await store.findByInteractionId('slow-transform');
+  assert.deepEqual(diagnostic.stages, [{
+    stage: 'reconcile',
+    durationMs: 30_001,
+    candidateProgramCount: 93,
+    executedProgramCount: 47,
+    slowestProgramFingerprint: 'sha256:anonymous-program',
+    slowestProgramDurationMs: 29_999,
+    commitEntered: false
+  }]);
+  assert.equal(JSON.stringify(diagnostic).includes('Sensitive'), false);
+  assert.equal(JSON.stringify(diagnostic).includes('must not persist'), false);
+});
+
 test('runtime diagnostics survive a repository restart and reject invalid persisted state', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-runtime-diagnostics-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

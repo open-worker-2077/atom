@@ -5,6 +5,10 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
+import { executeAtomLanguage as executeRawAtomLanguage } from '../work-engine/atom-language/engine.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
+import { createRuntimeDiagnosticStore } from '../src/atom-system/world-runtime/year-ring.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import {
   materializeGraphJson,
@@ -112,6 +116,35 @@ test('failed Transform emits no success receipt', async (t) => {
   assert.equal(failed.stdout, '');
   assert.match(failed.stderr, /DETAIL_FRAGMENT_NOT_FOUND/u);
   assert.doesNotMatch(failed.stderr, /~created|~updated|~unchanged/u);
+});
+
+test('Transform reconcile timing diagnostic is observational and contains no fact fields', async (t) => {
+  const files = await fixture(t);
+  const diagnostics = createRuntimeDiagnosticStore({ maxEntries: 10 });
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async () => ({
+      locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [], trigger: null
+    })
+  });
+  const worldService = createLegacyWorldService({
+    execute: (request) => executeRawAtomLanguage({ ...request, diagnosticRecorder: diagnostics })
+  });
+  const result = await worldService.executeLegacy({
+    source: 'transform new {"thing":"诊断对象","situation":"不得持久化","contain":[],"support":[]}',
+    contextFile: files.contextFile,
+    projectionFile: files.projectionFile,
+    interaction: { id: 'transform-stage-observational' },
+    programMode: 'reconcile',
+    programScheduler: scheduler,
+    diagnosticRecorder: diagnostics
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors ?? result));
+  const diagnostic = await diagnostics.findByInteractionId('transform-stage-observational');
+  assert.equal(diagnostic.type, 'transform-stage');
+  assert.deepEqual(diagnostic.stages.map(({ stage }) => stage), ['request', 'reconcile', 'commit']);
+  assert.equal(JSON.stringify(diagnostic).includes('诊断对象'), false);
+  assert.equal(JSON.stringify(diagnostic).includes('不得持久化'), false);
 });
 
 test('--json does not restore a machine envelope for CLI argument errors', async () => {

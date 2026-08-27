@@ -344,7 +344,8 @@ export function createLegacyRuntimeComposition(options) {
         ...request,
         contextFile,
         projectionFile: graphFile,
-        programScheduler: programRuntime
+        programScheduler: programRuntime,
+        diagnosticRecorder: diagnostics
       })
     },
     projections,

@@ -7,6 +7,7 @@ import test from 'node:test';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { createInteractionRuntime } from '../src/atom-system/public/interaction-runtime.mjs';
+import { createRuntimeDiagnosticStore } from '../src/atom-system/world-runtime/year-ring.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
@@ -165,6 +166,41 @@ test('failed Transform diagnostic persistence never changes the business result'
   });
 
   assert.deepEqual(result, { ...expected, interactionId: 'failed-transform-diagnostic-write' });
+});
+
+test('a failed Transform marks an existing bounded stage diagnostic without payload fields', async () => {
+  const context = ports();
+  const diagnostics = createRuntimeDiagnosticStore({ maxEntries: 10 });
+  await diagnostics.record({
+    id: 'stage-before-failure:transform-stage',
+    type: 'transform-stage',
+    command: 'transform',
+    durationMs: 1,
+    outcome: 'success',
+    stages: [{
+      stage: 'request', durationMs: 1, candidateProgramCount: 0,
+      executedProgramCount: 0, commitEntered: false, source: 'must not persist'
+    }]
+  });
+  context.diagnostics = diagnostics;
+  context.world.execute = async () => ({
+    ok: false,
+    command: 'transform',
+    changed: false,
+    errors: [{ code: 'ATOM_PROGRAM_TIMEOUT', message: 'must not persist' }]
+  });
+  const runtime = createInteractionRuntime(context);
+
+  const result = await runtime.execute({
+    source: 'transform new {"thing":"Sensitive/Business/Target"}',
+    correlationId: 'stage-before-failure', history: []
+  });
+
+  assert.equal(result.ok, false);
+  const stage = (await diagnostics.list()).find((entry) => entry.type === 'transform-stage');
+  assert.equal(stage.outcome, 'failure');
+  assert.equal(JSON.stringify(stage).includes('Sensitive'), false);
+  assert.equal(JSON.stringify(stage).includes('must not persist'), false);
 });
 
 test('a committed write is exposed before disposable projection publication finishes', async () => {

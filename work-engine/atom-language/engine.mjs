@@ -634,6 +634,36 @@ export async function executeAtomLanguage(options = {}) {
     id: options.interaction?.id ?? crypto.randomUUID(),
     agent: options.interaction?.agent ? structuredClone(options.interaction.agent) : null
   };
+  const transformStageDiagnostics = [];
+  async function recordTransformStage(stage, startedAt, details = {}) {
+    if (parsed.command !== 'transform' || !options.diagnosticRecorder?.record) return;
+    transformStageDiagnostics.push({
+      stage,
+      durationMs: performance.now() - startedAt,
+      candidateProgramCount: details.candidateProgramCount ?? 0,
+      executedProgramCount: details.executedProgramCount ?? 0,
+      ...(details.slowestProgramFingerprint ? {
+        slowestProgramFingerprint: details.slowestProgramFingerprint
+      } : {}),
+      ...(details.slowestProgramDurationMs !== undefined ? {
+        slowestProgramDurationMs: details.slowestProgramDurationMs
+      } : {}),
+      commitEntered: details.commitEntered === true
+    });
+    try {
+      await options.diagnosticRecorder.record({
+        id: `${interaction.id}:transform-stage`,
+        type: 'transform-stage',
+        command: 'transform',
+        durationMs: performance.now() - operationStartedAt,
+        outcome: details.outcome ?? 'success',
+        stages: transformStageDiagnostics
+      });
+    } catch {
+      // Timing diagnostics are observational and must never alter Transform behavior.
+    }
+  }
+  await recordTransformStage('request', operationStartedAt);
   const requestedProgramRun = parsed.command === 'transform'
     && !parsed.batch
     && parsed.items.length === 1
@@ -1404,20 +1434,29 @@ export async function executeAtomLanguage(options = {}) {
       });
       const preparedWorld = prepareExploreWorld(reconciledAtoms);
       const refreshStartedAt = performance.now();
-      const cycle = await options.programScheduler.refresh(reconciledAtoms, {
-        agentOrigin: interaction.agent,
-        isolateFailures: true,
-        slotTriggerCycleId: interaction.id,
-        ...(pendingTriggerEvent ? { triggerEvent: pendingTriggerEvent } : {}),
-        executeExplore: (request, executionContext = {}) => executeProgramExplore({
-          atoms: reconciledAtoms,
-          request,
-          receiver,
-          accessController: programAccess,
+      let cycle;
+      try {
+        cycle = await options.programScheduler.refresh(reconciledAtoms, {
           agentOrigin: interaction.agent,
-          scopeRoot: executionContext.scopeRoot ?? null,
-          preparedWorld
-        })
+          isolateFailures: true,
+          slotTriggerCycleId: interaction.id,
+          ...(pendingTriggerEvent ? { triggerEvent: pendingTriggerEvent } : {}),
+          executeExplore: (request, executionContext = {}) => executeProgramExplore({
+            atoms: reconciledAtoms,
+            request,
+            receiver,
+            accessController: programAccess,
+            agentOrigin: interaction.agent,
+            scopeRoot: executionContext.scopeRoot ?? null,
+            preparedWorld
+          })
+        });
+      } catch (error) {
+        await recordTransformStage('reconcile', refreshStartedAt, { outcome: 'failure' });
+        throw error;
+      }
+      await recordTransformStage('reconcile', refreshStartedAt, {
+        ...(cycle.reconcileSummary ?? {})
       });
       if (failOnProgramFailure && (cycle.failures?.length ?? 0) > 0) {
         const failure = cycle.failures[0];
@@ -1813,18 +1852,28 @@ export async function executeAtomLanguage(options = {}) {
   async function commitChangedGraph(candidateAtoms, { registrationChange = null } = {}) {
     const effectiveRegistrationChange = registrationChange
       ?? (windowRecycled ? 'window-recycle' : null);
-    await persistChangedGraph({
-      atoms: candidateAtoms,
-      contextFile,
-      projectionFile,
-      rootName: path.basename(contextFile),
-      commitWorld: options.commitWorld,
-      expectedRevision: revisionBefore,
-      correlationId: interaction.id,
-      source,
-      registrationChange: effectiveRegistrationChange,
-      compatibilityManifest: options.compatibilityManifest
-    });
+    const commitStartedAt = performance.now();
+    try {
+      await persistChangedGraph({
+        atoms: candidateAtoms,
+        contextFile,
+        projectionFile,
+        rootName: path.basename(contextFile),
+        commitWorld: options.commitWorld,
+        expectedRevision: revisionBefore,
+        correlationId: interaction.id,
+        source,
+        registrationChange: effectiveRegistrationChange,
+        compatibilityManifest: options.compatibilityManifest
+      });
+    } catch (error) {
+      await recordTransformStage('commit', commitStartedAt, {
+        commitEntered: true,
+        outcome: 'failure'
+      });
+      throw error;
+    }
+    await recordTransformStage('commit', commitStartedAt, { commitEntered: true });
     if (recycledAgentPath) {
       await options.programScheduler?.recycleAgentWindow?.(recycledAgentPath);
     }

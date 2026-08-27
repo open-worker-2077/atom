@@ -270,6 +270,20 @@ export function createInteractionRuntime({
     if (diagnostics && result?.command === 'transform' && result?.ok === false) {
       const failure = diagnosticFailure(result);
       if (failure?.code) {
+        if (typeof diagnostics.findByInteractionId === 'function') {
+          try {
+            const stageDiagnostic = await diagnostics.findByInteractionId(intent.correlationId);
+            if (stageDiagnostic?.type === 'transform-stage') {
+              await diagnostics.record({
+                ...stageDiagnostic,
+                outcome: 'failure',
+                durationMs: performance.now() - interactionStartedAt
+              });
+            }
+          } catch {
+            // Diagnostics are observational: a persistence fault must not change a failed command result.
+          }
+        }
         try {
           await diagnostics.record({
             id: `${intent.correlationId}:transform`,

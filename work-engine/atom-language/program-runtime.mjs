@@ -1889,7 +1889,17 @@ export class ProgramRuntimeScheduler {
             this.programReusable.set(independentStateKey, reusableState);
           }
         }
-        return { programPath: program.path, result, cached: false, requests: uniqueRequests, contextDependent };
+        return {
+          programPath: program.path,
+          result,
+          cached: false,
+          requests: uniqueRequests,
+          contextDependent,
+          execution: {
+            fingerprint: programDiagnosticIdentity(program).fingerprint,
+            durationMs: performance.now() - executionStartedAt
+          }
+        };
       } catch (error) {
         const failure = describeProgramFailure(error, program);
         const uniqueRequests = [...new Map(requests.map((request) => (
@@ -1912,7 +1922,17 @@ export class ProgramRuntimeScheduler {
               this.dormantFailures.delete(this.dormantFailures.keys().next().value);
             }
           }
-          return { programPath: program.path, failure, cached: false, requests: uniqueRequests, contextDependent };
+          return {
+            programPath: program.path,
+            failure,
+            cached: false,
+            requests: uniqueRequests,
+            contextDependent,
+            execution: {
+              fingerprint: programDiagnosticIdentity(program).fingerprint,
+              durationMs: performance.now() - executionStartedAt
+            }
+          };
         }
         if (isolateFailures) {
           if (!slotInvocation && !options.slotScopeRoot && !contextDependent) {
@@ -1924,7 +1944,17 @@ export class ProgramRuntimeScheduler {
               this.dormantFailures.delete(this.dormantFailures.keys().next().value);
             }
           }
-          return { programPath: program.path, failure, cached: false, requests: uniqueRequests, contextDependent };
+          return {
+            programPath: program.path,
+            failure,
+            cached: false,
+            requests: uniqueRequests,
+            contextDependent,
+            execution: {
+              fingerprint: programDiagnosticIdentity(program).fingerprint,
+              durationMs: performance.now() - executionStartedAt
+            }
+          };
         }
         throw error;
       }
@@ -1940,6 +1970,12 @@ export class ProgramRuntimeScheduler {
       [JSON.stringify(request), request]
     ))).values()];
     const exploreReadPaths = await dependencyMatchPaths(uniqueRequests, dependencyCache);
+    const executedEntries = applicable.filter((entry) => (
+      entry.cached === false && entry.execution
+    ));
+    const slowestExecution = executedEntries.reduce((slowest, entry) => (
+      !slowest || entry.execution.durationMs > slowest.execution.durationMs ? entry : slowest
+    ), null);
     const value = {
       fingerprint: key,
       cached: applicable.length > 0 && applicable.every((entry) => entry.cached),
@@ -1966,6 +2002,14 @@ export class ProgramRuntimeScheduler {
       executedProgramPaths: applicable
         .filter((entry) => entry.cached === false && entry.result)
         .map((entry) => entry.programPath),
+      reconcileSummary: {
+        candidateProgramCount: operationEntries.length,
+        executedProgramCount: executedEntries.length,
+        ...(slowestExecution ? {
+          slowestProgramFingerprint: slowestExecution.execution.fingerprint,
+          slowestProgramDurationMs: Math.round(slowestExecution.execution.durationMs * 1000) / 1000
+        } : {})
+      },
       contextIncomplete
     };
     await this.mergeRequestDrivenLocks(value, records, options);

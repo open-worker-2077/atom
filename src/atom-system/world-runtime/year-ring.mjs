@@ -109,13 +109,57 @@ function diagnosticTime(value, now) {
   return new Date(recordedAt).toISOString();
 }
 
+function nonNegativeInteger(value, code, label) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw problem(code, `${label} must be a non-negative integer`);
+  }
+  return value;
+}
+
+function sanitizeTransformStage(stage) {
+  if (!stage || typeof stage !== 'object' || Array.isArray(stage)) {
+    throw problem('INVALID_TRANSFORM_STAGE_DIAGNOSTIC', 'Transform stage must be an object');
+  }
+  if (!['request', 'reconcile', 'commit'].includes(stage.stage)) {
+    throw problem('INVALID_TRANSFORM_STAGE_DIAGNOSTIC', 'Transform stage is invalid');
+  }
+  if (!Number.isFinite(stage.durationMs) || stage.durationMs < 0) {
+    throw problem('INVALID_TRANSFORM_STAGE_DIAGNOSTIC', 'Transform stage duration must be non-negative');
+  }
+  const output = {
+    stage: stage.stage,
+    durationMs: Math.round(stage.durationMs * 1000) / 1000,
+    candidateProgramCount: nonNegativeInteger(
+      stage.candidateProgramCount ?? 0,
+      'INVALID_TRANSFORM_STAGE_DIAGNOSTIC',
+      'candidateProgramCount'
+    ),
+    executedProgramCount: nonNegativeInteger(
+      stage.executedProgramCount ?? 0,
+      'INVALID_TRANSFORM_STAGE_DIAGNOSTIC',
+      'executedProgramCount'
+    ),
+    commitEntered: stage.commitEntered === true
+  };
+  if (typeof stage.slowestProgramFingerprint === 'string' && stage.slowestProgramFingerprint.trim()) {
+    output.slowestProgramFingerprint = stage.slowestProgramFingerprint.trim();
+  }
+  if (stage.slowestProgramDurationMs !== undefined) {
+    if (!Number.isFinite(stage.slowestProgramDurationMs) || stage.slowestProgramDurationMs < 0) {
+      throw problem('INVALID_TRANSFORM_STAGE_DIAGNOSTIC', 'slowestProgramDurationMs must be non-negative');
+    }
+    output.slowestProgramDurationMs = Math.round(stage.slowestProgramDurationMs * 1000) / 1000;
+  }
+  return output;
+}
+
 function sanitizeDiagnostic(input, now) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw problem('INVALID_RUNTIME_DIAGNOSTIC', 'Runtime diagnostic must be an object');
   }
   const id = requireText(input.id, 'INVALID_DIAGNOSTIC_ID', 'diagnostic id');
-  if (!['read', 'program', 'transform'].includes(input.type)) {
-    throw problem('INVALID_DIAGNOSTIC_TYPE', 'diagnostic type must be read, program or transform');
+  if (!['read', 'program', 'transform', 'transform-stage'].includes(input.type)) {
+    throw problem('INVALID_DIAGNOSTIC_TYPE', 'diagnostic type must be read, program, transform or transform-stage');
   }
   if (!Number.isFinite(input.durationMs) || input.durationMs < 0) {
     throw problem('INVALID_DIAGNOSTIC_DURATION', 'durationMs must be a non-negative number');
@@ -141,6 +185,20 @@ function sanitizeDiagnostic(input, now) {
       output.programFingerprint = input.programFingerprint.trim();
     }
     return Object.freeze(output);
+  }
+  if (input.type === 'transform-stage') {
+    if (input.command !== 'transform' || !Array.isArray(input.stages) || input.stages.length < 1) {
+      throw problem('INVALID_TRANSFORM_STAGE_DIAGNOSTIC', 'Transform stage diagnostic requires transform stages');
+    }
+    return Object.freeze({
+      id,
+      type: 'transform-stage',
+      recordedAt: diagnosticTime(input.recordedAt, now),
+      durationMs: Math.round(input.durationMs * 1000) / 1000,
+      outcome: input.outcome,
+      command: 'transform',
+      stages: input.stages.map(sanitizeTransformStage)
+    });
   }
   const output = {
     id,
@@ -242,7 +300,9 @@ export function createRuntimeDiagnosticStore({
     return serialize(async () => {
       await load();
       const id = requireText(interactionId, 'INVALID_INTERACTION_ID', 'interaction id');
-      return structuredClone(entries.find((entry) => entry.id === `${id}:transform`) ?? null);
+      return structuredClone(entries.find((entry) => entry.id === `${id}:transform`)
+        ?? entries.find((entry) => entry.id === `${id}:transform-stage`)
+        ?? null);
     });
   }
 

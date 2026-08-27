@@ -37,6 +37,29 @@ test('transform trigger runs only Programs whose declared node list intersects t
   assert.deepEqual(cycle.failures, []);
 });
 
+test('a refresh exposes only bounded anonymous reconcile timing summary', async () => {
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program }) => {
+      if (program.path === 'Slow Program') await new Promise((resolve) => setTimeout(resolve, 8));
+      return { locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [], trigger: null };
+    }
+  });
+  const cycle = await scheduler.refresh([
+    atom('Fast Program', 'pass', [], 'program'),
+    atom('Slow Program', 'pass', [], 'program')
+  ], { force: true });
+
+  assert.deepEqual(Object.keys(cycle.reconcileSummary).sort(), [
+    'candidateProgramCount', 'executedProgramCount', 'slowestProgramDurationMs',
+    'slowestProgramFingerprint'
+  ]);
+  assert.equal(cycle.reconcileSummary.candidateProgramCount, 2);
+  assert.equal(cycle.reconcileSummary.executedProgramCount, 2);
+  assert.match(cycle.reconcileSummary.slowestProgramFingerprint, /^sha256:[a-f0-9]{64}$/u);
+  assert.equal(cycle.reconcileSummary.slowestProgramDurationMs >= 0, true);
+  assert.equal(JSON.stringify(cycle.reconcileSummary).includes('Slow Program'), false);
+});
+
 test('one transform event runs a matching Program once when several monitored nodes match', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const program = atom('Combined Program', [
