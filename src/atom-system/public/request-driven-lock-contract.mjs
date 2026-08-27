@@ -3,6 +3,12 @@ function problem(code, message) {
 }
 
 export function validateRequestDrivenLockSnapshot(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).length === 2
+    && value.contract === 'atom.request-driven-security-retired'
+    && value.version === 1) {
+    return structuredClone(value);
+  }
   if (value && typeof value === 'object'
     && (Object.hasOwn(value, 'windowSelfLocks') || Object.hasOwn(value, 'windowSelfLockAgents'))) {
     throw problem(
