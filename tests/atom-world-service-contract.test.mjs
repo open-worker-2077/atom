@@ -164,8 +164,38 @@ test('legacy World Service single-flights recovery and compatibility validation 
   await service.executeLegacy({ ...request, source: 'transform {}' });
   assert.equal(recoverCalls, 1, 'recovery remains single-flight after a committed revision');
   assert.equal(manifestCalls, 2, 'commit invalidates the revision-bound manifest cache');
-  assert.deepEqual(stages.map(({ stage }) => stage), ['recover', 'manifest', 'manifest']);
+  assert.deepEqual(
+    stages.filter(({ stage }) => stage !== 'engine.execute').map(({ stage }) => stage),
+    ['recover', 'manifest', 'manifest']
+  );
+  assert.equal(stages.filter(({ stage }) => stage === 'engine.execute').length, 4);
   assert.equal(stages.every(({ durationMs }) => Number.isFinite(durationMs) && durationMs >= 0), true);
+});
+
+test('legacy World Service reports recovery, manifest, and engine timing without request facts', async () => {
+  const stages = [];
+  const service = (await import(adapterUrl)).createLegacyWorldService({
+    transactionProvider: () => ({
+      async recover() { await new Promise((resolve) => setTimeout(resolve, 5)); },
+      async compatibilityManifest() {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return { currentWorldRevision: 'revision-1' };
+      }
+    }),
+    execute: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { ok: true, changed: false, revisionAfter: 'revision-1' };
+    },
+    onPersistenceStage: (stage) => stages.push(stage)
+  });
+
+  await service.executeLegacy({
+    source: 'transform {}', contextFile: 'atom.json', projectionFile: 'graph.json'
+  });
+
+  assert.deepEqual(stages.map(({ stage }) => stage), ['recover', 'manifest', 'engine.execute']);
+  assert.equal(stages.every(({ durationMs }) => Number.isFinite(durationMs) && durationMs >= 0), true);
+  assert.equal(stages.every((stage) => JSON.stringify(stage).includes('atom.json') === false), true);
 });
 
 test('legacy World Service never caches a failed persistence readiness stage', async () => {

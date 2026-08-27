@@ -279,9 +279,10 @@ export function createLegacyRuntimeComposition(options) {
     contextFile,
     graphFile,
     storeFile,
-    worldService = createLegacyWorldService(),
+    worldService: suppliedWorldService = null,
     projectionOrchestrator = null,
     diagnostics = null,
+    onStage = null,
     programScheduler = createProgramRuntimeScheduler({ diagnosticRecorder: diagnostics }),
     graphPublisher = defaultGraphPublisher(graphFile),
     spatialPublisher = defaultSpatialPublisher(storeFile),
@@ -290,6 +291,14 @@ export function createLegacyRuntimeComposition(options) {
     humanStatusTranslator = createLegacyHumanStatusTranslator({ graphFile }),
     humanWorkspaceTranslator = createLegacyHumanWorkspaceTranslator({ graphFile })
   } = options ?? {};
+  const worldService = suppliedWorldService ?? createLegacyWorldService({
+    ...(typeof onStage === 'function' ? {
+      onPersistenceStage: (stage) => onStage({
+        stage: `world.${stage.stage}`,
+        durationMs: stage.durationMs
+      })
+    } : {})
+  });
   const activeProjectionOrchestrator = projectionOrchestrator
     ?? createLegacyProjectionOrchestrator({ contextFile, programScheduler });
 
@@ -402,6 +411,7 @@ export function createLegacyRuntimeComposition(options) {
     humanStatus: humanStatusTranslator,
     humanWorkspace: humanWorkspaceTranslator,
     programRuntime: programScheduler,
-    diagnostics
+    diagnostics,
+    onStage
   });
 }

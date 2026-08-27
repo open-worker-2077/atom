@@ -88,7 +88,8 @@ export function createInteractionRuntime({
   humanStatus,
   humanWorkspace,
   programRuntime,
-  diagnostics = null
+  diagnostics = null,
+  onStage = null
 }) {
   requireMethod(world, 'execute', 'INVALID_WORLD_PORT', 'Interaction runtime world port');
   requireMethod(projections, 'publish', 'INVALID_PROJECTION_PORT', 'Interaction runtime projection port');
@@ -102,9 +103,29 @@ export function createInteractionRuntime({
 
   let latestProjectionState = Object.freeze({ status: 'uninitialized' });
 
+  async function timedStage(stage, work) {
+    const startedAt = performance.now();
+    try {
+      return await work();
+    } finally {
+      try {
+        onStage?.({
+          stage,
+          durationMs: Math.round((performance.now() - startedAt) * 1000) / 1000
+        });
+      } catch {
+        // Local timing is observational and must never alter an interaction result.
+      }
+    }
+  }
+
   async function interactionOf(intent) {
-    const agent = intent.agentPath ? await agents.resolve(intent.agentPath) : null;
-    return Object.freeze({ id: intent.correlationId, agent });
+    return timedStage('interactionOf', async () => {
+      const agent = intent.agentPath
+        ? await timedStage('agents.resolve', () => agents.resolve(intent.agentPath))
+        : null;
+      return Object.freeze({ id: intent.correlationId, agent });
+    });
   }
 
   function projectionFailure(error) {
@@ -191,9 +212,9 @@ export function createInteractionRuntime({
       programRuntime
     });
     const worldStartedAt = performance.now();
-    let result = withInteractionId(
-      await executeWorld(intent.source, interaction), intent.correlationId
-    );
+    let result = withInteractionId(await timedStage(
+      'world.execute', () => executeWorld(intent.source, interaction)
+    ), intent.correlationId);
     performanceTrace('world-execute', {
       elapsedMs: Math.round(performance.now() - worldStartedAt),
       changed: result?.changed === true
@@ -306,7 +327,7 @@ export function createInteractionRuntime({
         }
       }
     }
-    return result;
+    return timedStage('result.serialize', () => result);
   }
 
   async function execute(rawIntent, options = {}) {

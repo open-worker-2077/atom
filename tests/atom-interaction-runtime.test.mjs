@@ -152,6 +152,54 @@ test('a failed Transform persists one redacted diagnostic keyed by its interacti
   assert.equal(JSON.stringify(diagnostics).includes('fixed Agent'), false);
 });
 
+test('interaction timing reports a closed top-level ledger without request content', async () => {
+  const context = ports();
+  const stages = [];
+  context.agents.resolve = async (agentPath) => {
+    await new Promise((resolve) => setTimeout(resolve, 8));
+    return { ref: 'agent-ref', path: agentPath };
+  };
+  context.world.execute = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 12));
+    return { ok: true, changed: false, revisionAfter: 'rev-2' };
+  };
+  const runtime = createInteractionRuntime({
+    ...context,
+    onStage: (stage) => stages.push(stage)
+  });
+
+  const startedAt = performance.now();
+  const result = await runtime.execute({
+    source: 'transform {}', correlationId: 'timing-ledger', agentPath: 'Root/Sol', history: []
+  });
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(stages.map(({ stage }) => stage), [
+    'agents.resolve', 'interactionOf', 'world.execute', 'result.serialize'
+  ]);
+  assert.equal(stages.every(({ durationMs }) => Number.isFinite(durationMs) && durationMs >= 0), true);
+  assert.equal(stages.every((stage) => JSON.stringify(stage).includes('transform {}') === false), true);
+  const ledgerMs = stages
+    .filter(({ stage }) => stage !== 'agents.resolve')
+    .reduce((sum, { durationMs }) => sum + durationMs, 0);
+  assert.ok(Math.abs(ledgerMs - elapsedMs) < 15, `ledger=${ledgerMs}, elapsed=${elapsedMs}`);
+});
+
+test('a local timing observer cannot change an interaction result', async () => {
+  const context = ports();
+  const runtime = createInteractionRuntime({
+    ...context,
+    onStage: () => { throw new Error('observer failure'); }
+  });
+
+  const result = await runtime.execute({
+    source: 'transform {}', correlationId: 'timing-observer-failure', agentPath: 'Root/Sol', history: []
+  });
+
+  assert.equal(result.ok, true);
+});
+
 test('a failed Transform returns before a slow diagnostic repository write completes', async () => {
   let release;
   const blockedWrite = new Promise((resolve) => { release = resolve; });

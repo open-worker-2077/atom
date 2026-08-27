@@ -199,6 +199,41 @@ test('legacy composition identifies the disposable projection stage without expo
   assert.equal(JSON.stringify(result).includes('graph.json'), false);
 });
 
+test('legacy composition forwards a content-free closed interaction timing ledger', async () => {
+  const stages = [];
+  const runtime = createLegacyRuntimeComposition({
+    contextFile: 'atom.json',
+    graphFile: 'graph.json',
+    programScheduler: {},
+    onStage: (stage) => stages.push(stage),
+    worldService: {
+      executeLegacy: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 8));
+        return { ok: true, changed: false, revisionAfter: 'rev-1' };
+      }
+    },
+    projectionOrchestrator: { projectCurrent: async () => ({ sourceRevision: 'rev-1', graph: {}, spatial: {} }) },
+    graphPublisher: { publish: async () => {} }, spatialPublisher: { publish: async () => {} },
+    feedbackRecorder: async () => ({ ok: true }),
+    agentResolver: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 8));
+      return { ref: 'agent-ref', path: 'Root/Agent' };
+    },
+    humanStatusTranslator: { translate: async () => 'transform {}' }
+  });
+
+  const startedAt = performance.now();
+  await runtime.execute({ source: 'transform {}', correlationId: 'closed-ledger', agentPath: 'Root/Agent', history: [] });
+  const elapsedMs = performance.now() - startedAt;
+  assert.deepEqual(stages.map(({ stage }) => stage), [
+    'agents.resolve', 'interactionOf', 'world.execute', 'result.serialize'
+  ]);
+  assert.equal(stages.every(({ durationMs }) => Number.isFinite(durationMs) && durationMs >= 0), true);
+  assert.ok(Math.abs(stages.filter(({ stage }) => stage !== 'agents.resolve')
+    .reduce((total, { durationMs }) => total + durationMs, 0) - elapsedMs) < 15);
+  assert.equal(stages.every((stage) => JSON.stringify(stage).includes('atom.json') === false), true);
+});
+
 test('legacy composition routes feedback through the configured recorder with world paths', async () => {
   const calls = [];
   const runtime = createLegacyRuntimeComposition({

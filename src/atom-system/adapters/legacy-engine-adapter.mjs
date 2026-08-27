@@ -79,7 +79,7 @@ export function createLegacyWorldService(options = {}) {
       const persistence = transactionFor(request);
       await recoverPersistence(persistence);
       const compatibilityManifest = await manifestFor(persistence);
-      return execute({
+      return timed('engine.execute', () => execute({
         ...request,
         compatibilityManifest,
         commitWorld: async (transition) => {
@@ -91,7 +91,7 @@ export function createLegacyWorldService(options = {}) {
           invalidateManifest(persistence);
           return receipt;
         }
-      });
+      }));
     }
   });
   return Object.freeze({
