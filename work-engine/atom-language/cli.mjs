@@ -767,23 +767,7 @@ export async function resolveAgentContext(contextFile, selector, options = {}) {
       ? { compatibilityManifest: options.compatibilityManifest }
       : {})
   });
-  let directory = agentDirectories.get(atoms);
-  if (!directory) {
-    const byName = new Map();
-    const byPath = new Map();
-    for (const entry of atomEntries(atoms)) {
-      const named = byName.get(entry.name) ?? [];
-      named.push(entry);
-      byName.set(entry.name, named);
-      byPath.set(entry.path, [entry]);
-    }
-    directory = {
-      revision: (options.worldRevision ?? revisionOfWorldFacts(atoms)).replace(/^sha256:/u, ''),
-      byName,
-      byPath
-    };
-    agentDirectories.set(atoms, directory);
-  }
+  const directory = agentDirectoryFor(atoms, options);
   const exact = requested.includes('/')
     ? (directory.byPath.get(requested) ?? [])
     : (directory.byName.get(requested) ?? []);
@@ -804,6 +788,34 @@ export async function resolveAgentContext(contextFile, selector, options = {}) {
     throw cliError('AGENT_TYPE_REQUIRED', '--agent 上下文来源必须是 @agent Atom；查询或写入目标不得代替入口，目标本身无需是 @agent');
   }
   throw cliError('AGENT_NOT_FOUND', '未找到 exact 匹配的 @agent Atom');
+}
+
+function agentDirectoryFor(atoms, options = {}) {
+  let directory = agentDirectories.get(atoms);
+  if (directory) return directory;
+  const byName = new Map();
+  const byPath = new Map();
+  for (const entry of atomEntries(atoms)) {
+    const named = byName.get(entry.name) ?? [];
+    named.push(entry);
+    byName.set(entry.name, named);
+    byPath.set(entry.path, [entry]);
+  }
+  directory = {
+    revision: (options.worldRevision ?? revisionOfWorldFacts(atoms)).replace(/^sha256:/u, ''),
+    byName,
+    byPath
+  };
+  agentDirectories.set(atoms, directory);
+  return directory;
+}
+
+export async function primeAgentDirectory(contextFile, options = {}) {
+  const atoms = await readAtomContext(contextFile, {
+    create: false,
+    ...(options.compatibilityManifest ? { compatibilityManifest: options.compatibilityManifest } : {})
+  });
+  agentDirectoryFor(atoms, options);
 }
 
 export async function runAtomSession(options = {}) {

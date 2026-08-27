@@ -5,7 +5,7 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 
-import { resolveAgentContext, runAtomCli } from '../work-engine/atom-language/cli.mjs';
+import { primeAgentDirectory, resolveAgentContext, runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
 function atom(thing, options = {}) {
@@ -94,6 +94,19 @@ test('agent resolution reuses the indexed directory for one immutable large-worl
 
   assert.equal(resolved.path, 'Work Agent');
   assert.ok(elapsedMs < 30, `cached agent resolution took ${elapsedMs}ms`);
+});
+
+test('startup can prime an immutable Agent directory before the first command', async (t) => {
+  const files = await world(t, [
+    atom('Work Agent', { type: 'agent' }),
+    ...Array.from({ length: 10_000 }, (_, index) => atom(`Node ${index}`, { detail: 'x'.repeat(1_000) }))
+  ]);
+  const revision = 'sha256:startup-proof';
+  await primeAgentDirectory(files.contextFile, { worldRevision: revision });
+  const startedAt = performance.now();
+  const resolved = await resolveAgentContext(files.contextFile, 'Work Agent', { worldRevision: revision });
+  assert.equal(resolved.path, 'Work Agent');
+  assert.ok(performance.now() - startedAt < 30, 'first command must reuse the startup Agent directory');
 });
 
 test('public CLI reads one complete multiline long-text command from stdin without shell quoting', async (t) => {

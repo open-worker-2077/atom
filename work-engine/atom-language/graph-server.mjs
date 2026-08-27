@@ -24,7 +24,7 @@ import { createProgramRuntimeScheduler } from './program-runtime.mjs';
 import { ATOM_RUNTIME_CONTRACT } from './runtime-contract.mjs';
 import { workOrderRegistry } from './work-order-registry.mjs';
 import { programFunctionRegistry } from './program-function-registry.mjs';
-import { resolveAgentContext } from './cli.mjs';
+import { primeAgentDirectory, resolveAgentContext } from './cli.mjs';
 
 export const DEFAULT_ATOM_GRAPH_HOST = '127.0.0.1';
 export const DEFAULT_ATOM_GRAPH_PORT = 4784;
@@ -401,6 +401,18 @@ export async function startAtomGraphServer(options = {}) {
       { errors: initialization.errors ?? [] }
     );
   }
+  const startupManifest = typeof worldService.compatibilityManifest === 'function'
+    ? await worldService.compatibilityManifest({
+      contextFile: configuration.contextFile,
+      projectionFile: configuration.graphFile
+    })
+    : null;
+  await primeAgentDirectory(configuration.contextFile, {
+    ...(startupManifest ? { compatibilityManifest: startupManifest } : {}),
+    ...(startupManifest?.currentWorldRevision
+      ? { worldRevision: startupManifest.currentWorldRevision }
+      : {})
+  });
 
   const instance = await createSpatialServer({
     root: options.root ?? projectRoot,
