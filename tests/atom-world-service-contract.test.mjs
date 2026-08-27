@@ -129,6 +129,64 @@ test('legacy engine writes are inverted through one transactional persistence po
   assert.deepEqual(commits[0].facts, [{ name: 'committed' }]);
 });
 
+test('legacy World Service single-flights recovery and compatibility validation by persistence revision', async () => {
+  let recoverCalls = 0;
+  let manifestCalls = 0;
+  let revision = 'revision-1';
+  const stages = [];
+  const service = (await import(adapterUrl)).createLegacyWorldService({
+    transactionProvider: () => ({
+      async recover() { recoverCalls += 1; await new Promise((resolve) => setTimeout(resolve, 20)); },
+      async compatibilityManifest() {
+        manifestCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { currentWorldRevision: revision };
+      },
+      async commit() { revision = 'revision-2'; return { afterRevision: revision }; }
+    }),
+    execute: async (request) => {
+      if (request.source === 'transform {"change":true}') {
+        await request.commitWorld({ expectedRevision: 'revision-1', nextRevision: 'revision-2', facts: [] });
+        return { ok: true, changed: true, revisionAfter: 'revision-2' };
+      }
+      return { ok: true, changed: false, revisionAfter: revision };
+    },
+    onPersistenceStage: (stage) => stages.push(stage)
+  });
+  const request = { contextFile: 'atom.json', projectionFile: 'graph.json', interaction: { id: 'i' } };
+  await service.executeLegacy({ ...request, source: 'transform {}' });
+  const startedAt = performance.now();
+  await service.executeLegacy({ ...request, source: 'transform {}' });
+  assert.ok(performance.now() - startedAt < 20, 'unchanged persistence readiness must be reused');
+  assert.equal(recoverCalls, 1);
+  assert.equal(manifestCalls, 1);
+  await service.executeLegacy({ ...request, source: 'transform {"change":true}' });
+  await service.executeLegacy({ ...request, source: 'transform {}' });
+  assert.equal(recoverCalls, 1, 'recovery remains single-flight after a committed revision');
+  assert.equal(manifestCalls, 2, 'commit invalidates the revision-bound manifest cache');
+  assert.deepEqual(stages.map(({ stage }) => stage), ['recover', 'manifest', 'manifest']);
+  assert.equal(stages.every(({ durationMs }) => Number.isFinite(durationMs) && durationMs >= 0), true);
+});
+
+test('legacy World Service never caches a failed persistence readiness stage', async () => {
+  let manifestCalls = 0;
+  const service = (await import(adapterUrl)).createLegacyWorldService({
+    transactionProvider: () => ({
+      async recover() {},
+      async compatibilityManifest() {
+        manifestCalls += 1;
+        if (manifestCalls === 1) throw Object.assign(new Error('transient'), { code: 'EIO' });
+        return { currentWorldRevision: 'revision-1' };
+      }
+    }),
+    execute: async () => ({ ok: true, changed: false, revisionAfter: 'revision-1' })
+  });
+  const request = { source: 'transform {}', contextFile: 'atom.json', projectionFile: 'graph.json' };
+  await assert.rejects(service.executeLegacy(request), (error) => error.code === 'EIO');
+  assert.equal((await service.executeLegacy(request)).ok, true);
+  assert.equal(manifestCalls, 2);
+});
+
 test('the command engine cannot mutate world facts without a commit capability', async (t) => {
   const { executeAtomLanguage } = await import(engineUrl);
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-engine-no-write-port-'));
