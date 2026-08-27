@@ -95,6 +95,9 @@ def load_program_function_registry():
         if (not isinstance(name, str) or not name or name in names
                 or (layer, family) not in families
                 or scope not in {"atom", "public"}
+                or ("explicitNameOnly" in item
+                    and not isinstance(item["explicitNameOnly"], bool))
+                or ("delegable" in item and not isinstance(item["delegable"], bool))
                 or "category" in item
                 or "effectiveConstraints" in item):
             raise RuntimeError(f"Invalid or duplicate Program function: {name}")
@@ -158,8 +161,9 @@ def validate_program_function_selection(value):
     }
     expanded = set(normalized["names"])
     for item in PROGRAM_FUNCTION_REGISTRY["functions"]:
-        if any(function_family_is_within(item["family"], group)
-               for group in normalized["groups"]):
+        if (item.get("explicitNameOnly") is not True
+                and any(function_family_is_within(item["family"], group)
+                        for group in normalized["groups"])):
             expanded.add(item["name"])
     return normalized, sorted(expanded)
 
@@ -495,7 +499,7 @@ def main():
     views = {ref: AtomView(record) for ref, record in by_ref.items()}
     effects = {
         "locks": [], "messages": [], "transforms": [], "choices": [],
-        "slotBodies": [], "jumps": [], "shortcuts": [], "agents": [], "changedThings": []
+        "slotBodies": [], "jumps": [], "jumpAuthorizations": [], "shortcuts": [], "agents": [], "changedThings": []
     }
 
     next_request_id = 0
@@ -712,6 +716,7 @@ def main():
                 raise EngineCallError("INVALID_JUMP_CONTRACT", str(error)) from error
         action = "guard"
         destination_path = None
+        authorization_path = None
         if "recycle" in specification:
             recycle = invoke_program_thing(specification["recycle"], "jump.recycle")
             if not isinstance(recycle, bool):
@@ -726,15 +731,58 @@ def main():
                 if "where" not in specification:
                     raise ValueError("jump.where is required when jump.when returns true")
                 destination = invoke_program_thing(specification["where"], "jump.where")
-                destination_path = resolve_exact_thing(
+                resolved_destination = resolve_exact_thing(
                     destination, "jump.where result"
-                )["path"]
+                )
+                if "jump-authorization" in resolved_destination.get("types", []):
+                    authorization_path = resolved_destination["path"]
+                else:
+                    destination_path = resolved_destination["path"]
                 action = "move"
         effect = {"action": action}
         if destination_path is not None:
             effect["destinationPath"] = destination_path
+        if authorization_path is not None:
+            effect["authorizationPath"] = authorization_path
         effects["jumps"].append(effect)
         return None
+
+    def jump_authorize(specification):
+        try:
+            specification = require_object(specification, "jump_authorize")
+        except TypeError as error:
+            raise EngineCallError("INVALID_JUMP_AUTHORIZATION_CONTRACT", str(error)) from error
+        if set(specification) != {"window", "source", "destination"}:
+            raise EngineCallError(
+                "INVALID_JUMP_AUTHORIZATION_CONTRACT",
+                "jump_authorize() accepts exactly window, source, and destination",
+            )
+        resolved = {}
+        for name in ("window", "source", "destination"):
+            value = specification[name]
+            if not isinstance(value, AtomView):
+                raise EngineCallError(
+                    "INVALID_JUMP_AUTHORIZATION_COORDINATE",
+                    f"jump_authorize.{name} requires an exact ThingCoordinate returned by explore()",
+                )
+            resolved[name] = value._record
+        if "agent" not in resolved["window"].get("types", []):
+            raise EngineCallError(
+                "INVALID_JUMP_AUTHORIZATION_WINDOW",
+                "jump_authorize.window must identify one registered Agent Program",
+            )
+        if "program" not in resolved["source"].get("types", []):
+            raise EngineCallError(
+                "INVALID_JUMP_AUTHORIZATION_SOURCE",
+                "jump_authorize.source must identify one Program",
+            )
+        effects["jumpAuthorizations"].append({
+            "windowPath": resolved["window"]["path"],
+            "sourcePath": resolved["source"]["path"],
+            "destinationPath": resolved["destination"]["path"],
+            "__sourceProgramPath": current_atom().path,
+        })
+        return {"planned": True}
 
     def changed(things):
         if not isinstance(things, list) or not things:
@@ -1262,6 +1310,7 @@ def main():
         "choice": choice,
         "trigger": trigger,
         "jump": jump,
+        "jump_authorize": jump_authorize,
         "changed": changed,
         "current_atom": current_atom,
         "direct_children": direct_children,

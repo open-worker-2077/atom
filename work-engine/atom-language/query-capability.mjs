@@ -126,6 +126,15 @@ export function createAccessController(atoms, options = {}) {
       const createdTypes = actor.createdAtom
         ? oneStoredField(actor.createdAtom, 'thing')?.parsed.types.map((type) => type.raw) ?? []
         : [];
+      const targetTypes = oneStoredField(match.atom, 'thing')?.parsed.types
+        .map((type) => type.raw) ?? [];
+      if (operation === 'write' && targetTypes.includes('jump-authorization')
+        && actor.windowJumpAuthorization !== true) {
+        return {
+          decision: 'deny', code: 'WINDOW_JUMP_AUTHORIZATION_IMMUTABLE',
+          lockKind: 'window-jump-authorization', matchedLocks: []
+        };
+      }
       const insideSlotDomain = slotStructure.domains.some(({ path }) => (
         targetPath === path || targetPath.startsWith(`${path}/`)
       ));
@@ -142,8 +151,7 @@ export function createAccessController(atoms, options = {}) {
           agentPath,
           agentTypes,
           programPath: actor.programPath ?? null,
-          targetTypes: oneStoredField(match.atom, 'thing')?.parsed.types
-            .map((type) => type.raw) ?? [],
+          targetTypes,
           action: operation === 'read' ? 'explore' : 'transform'
         });
         if (decision.decision !== 'allow') return decision;

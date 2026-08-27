@@ -66,6 +66,8 @@ export function validateProgramFunctionRegistry(value) {
     if (typeof item?.name !== 'string' || !item.name || names.has(item.name)
       || !families.has(`${item.layer}:${item.family}`)
       || !['atom', 'public'].includes(item.scope)
+      || (item.explicitNameOnly !== undefined && typeof item.explicitNameOnly !== 'boolean')
+      || (item.delegable !== undefined && typeof item.delegable !== 'boolean')
       || Object.hasOwn(item, 'category')
       || Object.hasOwn(item, 'effectiveConstraints')) {
       throw problem('INVALID_PROGRAM_FUNCTION_REGISTRY', `Invalid or duplicate Program function: ${item?.name ?? ''}`);
@@ -135,9 +137,10 @@ export function expandProgramFunctionSelection(selection, registry = REGISTRY) {
   const normalized = normalizeProgramFunctionSelection(selection, normalizedRegistry);
   return [...new Set([
     ...normalizedRegistry.functions
-      .filter((entry) => normalized.groups.some((group) => (
-        familyIsWithin(normalizedRegistry, entry.family, group)
-      )))
+      .filter((entry) => entry.explicitNameOnly !== true
+        && normalized.groups.some((group) => (
+          familyIsWithin(normalizedRegistry, entry.family, group)
+        )))
       .map((entry) => entry.name),
     ...normalized.names
   ])].sort();
@@ -159,7 +162,9 @@ export function validateProgramFunctionDelegation({ creator, child, registry = R
       familyIsWithin(normalizedRegistry, functionByName.get(name).family, held)
     ));
   if (childScopes.groups.some((group) => !groupAllowed(group))
-    || childScopes.names.some((name) => !nameAllowed(name))) {
+    || childScopes.names.some((name) => (
+      !nameAllowed(name) || functionByName.get(name).delegable === false
+    ))) {
     throw problem(
       'PROGRAM_FUNCTION_DELEGATION_DENIED',
       'Child Agent function scopes must be the same scope or descendants of creator scopes'

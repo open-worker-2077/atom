@@ -56,6 +56,12 @@ import { normalizeScopedTransformRequest } from './slot-relative-scope.mjs';
 import { applyShortcutEffect, breakShortcutTargets } from './shortcut-runtime.mjs';
 import { registerCurrentProgramAsAgent, validateAgentDelegation } from './window-lock-v1.mjs';
 import {
+  createWindowJumpAuthorization,
+  parseWindowJumpAuthorization,
+  validateWindowJumpAuthorization,
+  WINDOW_JUMP_AUTHORIZATION_TYPE
+} from './window-jump-authorization.mjs';
+import {
   createAccessController,
   describeAtom,
   executeExploreItem,
@@ -271,6 +277,32 @@ function appendNestedAtom(atoms, parentMatch, atom) {
   return nextAtoms;
 }
 
+function removeWindowJumpAuthorization(atoms, operationId) {
+  const next = structuredClone(atoms);
+  let removed = false;
+  function visit(items) {
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const atom = items[index];
+      const types = oneStoredField(atom, 'thing')?.parsed.types.map((type) => type.raw) ?? [];
+      if (types.includes(WINDOW_JUMP_AUTHORIZATION_TYPE)) {
+        let payload = null;
+        try {
+          payload = JSON.parse(oneStoredField(atom, 'situation')?.value ?? '');
+        } catch {}
+        if (payload?.operationId === operationId) {
+          items.splice(index, 1);
+          removed = true;
+          continue;
+        }
+      }
+      const children = oneStoredField(atom, 'contain')?.value;
+      if (Array.isArray(children)) visit(children);
+    }
+  }
+  visit(next);
+  return { atoms: next, removed };
+}
+
 function isCompletePersistentAtomItem(item) {
   const required = new Set(['thing', 'situation', 'contain', 'support']);
   return item.fields.length === required.size
@@ -311,6 +343,16 @@ async function applyCreateTransform({
     oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => type.raw === 'shortcut')
   ))) {
     return { error: diagnostic('SHORTCUT_PERSISTENCE_FORGERY_DENIED', '公开 Transform 不得创建或伪造内核虚拟引用记录') };
+  }
+  if (walkAtoms([atom]).some((match) => (
+    oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => (
+      type.raw === WINDOW_JUMP_AUTHORIZATION_TYPE
+    ))
+  ))) {
+    return { error: diagnostic(
+      'KERNEL_GRAPH_FACT_FORGERY_DENIED',
+      '公开 Transform 不得创建或伪造内核保留 Graph 事实'
+    ) };
   }
   const createName = createNameField?.value;
   const createPath = createName.split('/');
@@ -769,6 +811,116 @@ export async function executeAtomLanguage(options = {}) {
     )]);
   }
   const programTransformLogs = [];
+  for (const effect of programCycle.jumpAuthorizations ?? []) {
+    const issuerAgentPath = interaction.agent?.path ?? null;
+    const issuerSecurity = issuerAgentPath
+      ? options.programScheduler?.agentSecurity?.get(issuerAgentPath) ?? programCycle.agentSecurity
+      : null;
+    const matches = new Map(walkAtoms(atoms).map((match) => [match.path.join('/'), match]));
+    const source = matches.get(effect.sourcePath);
+    const window = matches.get(effect.windowPath);
+    const destination = matches.get(effect.destinationPath);
+    const issuerProgram = matches.get(effect.issuerProgramPath);
+    const denied = !issuerAgentPath || !issuerSecurity || !source || !window || !destination
+      || !issuerProgram || !issuerSecurity.functions?.includes('jump_authorize')
+      || (await accessController.authorize(issuerProgram, 'read', 'thing', {
+        programPath: effect.issuerProgramPath
+      })).decision !== 'allow'
+      || (await accessController.authorize(window, 'write', 'thing', {
+        programPath: effect.issuerProgramPath,
+        windowLifecycle: { action: 'move', destinationPath: effect.destinationPath }
+      })).decision !== 'allow'
+      || (await accessController.authorize(source, 'write', 'contain', {
+        programPath: effect.issuerProgramPath
+      })).decision !== 'allow'
+      || (await accessController.authorize(destination, 'read', 'thing', {
+        programPath: effect.issuerProgramPath
+      })).decision !== 'allow'
+      || (await accessController.authorize(destination, 'write', 'contain', {
+        programPath: effect.issuerProgramPath,
+        windowLifecycle: { action: 'move', destinationPath: effect.destinationPath }
+      })).decision !== 'allow';
+    if (denied) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+        'WINDOW_JUMP_AUTHORIZATION_DENIED',
+        '签发窗口无权控制当前窗口与迁移目的地'
+      )]);
+    }
+    const recordsByPath = new Map((programCycle.records ?? []).map((record) => [record.path, record]));
+    const existing = walkAtoms(atoms).filter((match) => (
+      match.parent?.atom === source.atom
+      && oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => (
+        type.raw === WINDOW_JUMP_AUTHORIZATION_TYPE
+      ))
+    ));
+    if (existing.length > 0) {
+      const payload = existing.length === 1 ? parseWindowJumpAuthorization({
+        ...existing[0],
+        types: oneStoredField(existing[0].atom, 'thing')?.parsed.types.map((type) => type.raw) ?? [],
+        detail: oneStoredField(existing[0].atom, 'situation')?.value ?? ''
+      }) : null;
+      if (!payload || payload.windowPath !== effect.windowPath
+        || payload.sourcePath !== effect.sourcePath
+        || payload.destinationPath !== effect.destinationPath
+        || payload.issuerAgentPath !== issuerAgentPath
+        || payload.issuerProgramPath !== effect.issuerProgramPath) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          'WINDOW_JUMP_AUTHORIZATION_CONFLICT',
+          '同一 jump source 已存在另一项未消费迁窗授权'
+        )]);
+      }
+      try {
+        validateWindowJumpAuthorization({
+          payload,
+          windowPath: effect.windowPath,
+          sourcePath: effect.sourcePath,
+          destinationPath: effect.destinationPath,
+          issuerSecurity,
+          recordsByPath
+        });
+      } catch (error) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          error.code ?? 'WINDOW_JUMP_AUTHORIZATION_INVALID', error.message
+        )]);
+      }
+      continue;
+    }
+    const before = revisionOf(atoms);
+    const operationId = crypto.randomUUID();
+    let authorization;
+    try {
+      authorization = createWindowJumpAuthorization({
+        operationId,
+        effect,
+        issuerAgentPath,
+        issuerSecurity,
+        recordsByPath
+      });
+    } catch (error) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+        error.code ?? 'WINDOW_JUMP_AUTHORIZATION_INVALID', error.message
+      )]);
+    }
+    atoms = appendNestedAtom(atoms, source, authorization.atom);
+    programChanged = true;
+    initialProgramTriggerNodes.push(effect.sourcePath);
+    programTransformLogs.push({
+      id: operationId,
+      operation: 'window-jump-authorize',
+      source: {
+        windowPath: effect.windowPath,
+        sourcePath: effect.sourcePath,
+        destinationPath: effect.destinationPath,
+        issuerProgramPath: effect.issuerProgramPath
+      },
+      revisionBefore: before,
+      revisionAfter: revisionOf(atoms)
+    });
+    accessController = createAccessController(atoms, {
+      ...options, programLockIndex, agentPath: initialAgentPath,
+      agentSecurity: programCycle.agentSecurity, graphLocks
+    });
+  }
   for (const effect of programCycle.shortcuts ?? []) {
     const shortcut = await applyShortcutEffect({
       atoms,
@@ -811,8 +963,43 @@ export async function executeAtomLanguage(options = {}) {
       )]);
     }
     if (jump.action === 'move') {
+      const currentRecords = programCycle.records ?? [];
+      const recordsByPath = new Map(currentRecords.map((record) => [record.path, record]));
+      let destinationPath = jump.destinationPath ?? null;
+      let consumedAuthorization = null;
+      let issuerSecurity = null;
+      if (jump.authorizationPath) {
+        const authorizationRecord = recordsByPath.get(jump.authorizationPath);
+        const payload = parseWindowJumpAuthorization(authorizationRecord);
+        if (!payload
+          || authorizationRecord.path !== jump.authorizationPath
+          || payload.windowPath !== agentPath
+          || payload.sourcePath !== jump.sourceProgramPath) {
+          return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+            'WINDOW_JUMP_AUTHORIZATION_INVALID',
+            'jump.where 返回的受控迁窗授权与当前窗口或注册 Program 不匹配'
+          )]);
+        }
+        issuerSecurity = options.programScheduler?.agentSecurity?.get(payload.issuerAgentPath) ?? null;
+        try {
+          validateWindowJumpAuthorization({
+            payload,
+            windowPath: agentPath,
+            sourcePath: jump.sourceProgramPath,
+            destinationPath: payload.destinationPath,
+            issuerSecurity,
+            recordsByPath
+          });
+        } catch (error) {
+          return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+            error.code ?? 'WINDOW_JUMP_AUTHORIZATION_INVALID', error.message
+          )]);
+        }
+        destinationPath = payload.destinationPath;
+        consumedAuthorization = payload;
+      }
       const destination = walkAtoms(atoms).find((candidate) => (
-        candidate.path.join('/') === jump.destinationPath
+        candidate.path.join('/') === destinationPath
       ));
       if (!destination) {
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
@@ -826,15 +1013,58 @@ export async function executeAtomLanguage(options = {}) {
         agentSecurity: programCycle.agentSecurity,
         graphLocks
       });
-      if ((await destinationRead.authorize(
-        destination, 'read', 'thing', { programPath: jump.sourceProgramPath }
-      )).decision !== 'allow') {
-        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
-          'WINDOW_JUMP_LOCK_DENIED', '统一 Graph 路径或节点锁拒绝跳窗目标'
-        )]);
+      let moveController = destinationRead;
+      if (!consumedAuthorization) {
+        if ((await destinationRead.authorize(
+          destination, 'read', 'thing', { programPath: jump.sourceProgramPath }
+        )).decision !== 'allow') {
+          return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+            'WINDOW_JUMP_LOCK_DENIED',
+            '执行窗口无横向权限；预传坐标、路径或快捷引用不能替代受控迁窗授权',
+            { cause: 'WINDOW_JUMP_AUTHORIZATION_REQUIRED' }
+          )]);
+        }
+      } else {
+        const payload = consumedAuthorization;
+        const issuerController = createAccessController(atoms, {
+          ...options,
+          programLockIndex,
+          agentPath: payload.issuerAgentPath,
+          agentSecurity: issuerSecurity,
+          graphLocks
+        });
+        const source = walkAtoms(atoms).find((candidate) => (
+          candidate.path.join('/') === jump.sourceProgramPath
+        ));
+        const window = walkAtoms(atoms).find((candidate) => (
+          candidate.path.join('/') === agentPath
+        ));
+        const decisions = await Promise.all([
+          issuerController.authorize(source, 'read', 'thing', {
+            programPath: payload.issuerProgramPath
+          }),
+          issuerController.authorize(window, 'write', 'thing', {
+            programPath: payload.issuerProgramPath,
+            windowLifecycle: { action: 'move', destinationPath }
+          }),
+          issuerController.authorize(destination, 'read', 'thing', {
+            programPath: payload.issuerProgramPath
+          }),
+          issuerController.authorize(destination, 'write', 'contain', {
+            programPath: payload.issuerProgramPath,
+            windowLifecycle: { action: 'move', destinationPath }
+          })
+        ]);
+        if (decisions.some((decision) => decision.decision !== 'allow')) {
+          return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+            'WINDOW_JUMP_AUTHORIZATION_DENIED',
+            '签发窗口当前已无权控制窗口或迁移目的地'
+          )]);
+        }
+        moveController = issuerController;
       }
       const compiled = compileProgramTransform({
-        request: { [`thing.mov.${jump.destinationPath}`]: agentPath }, receiver
+        request: { [`thing.mov.${destinationPath}`]: agentPath }, receiver
       });
       if (!compiled.ok) {
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
@@ -842,20 +1072,16 @@ export async function executeAtomLanguage(options = {}) {
           compiled.errors?.[0]?.message ?? '跳窗目标无法编译'
         )]);
       }
-      const nodeLockController = createAccessController(atoms, {
-        ...options, programLockIndex, agentPath,
-        agentSecurity: programCycle.agentSecurity,
-        graphLocks
-      });
       const moved = await applyTransform({
         atoms,
         item: compiled.item,
         contextFile,
-        authorize: (match, operation, field, actor = {}) => nodeLockController.authorize(
+        authorize: (match, operation, field, actor = {}) => moveController.authorize(
           match, operation, field, {
             ...actor,
             programPath: jump.sourceProgramPath,
-            windowLifecycle: { action: 'move', destinationPath: jump.destinationPath }
+            ...(consumedAuthorization ? { windowJumpAuthorization: true } : {}),
+            windowLifecycle: { action: 'move', destinationPath }
           }
         )
       });
@@ -869,8 +1095,30 @@ export async function executeAtomLanguage(options = {}) {
         )]);
       }
       atoms = moved.atoms;
+      if (consumedAuthorization) {
+        const consumed = removeWindowJumpAuthorization(
+          atoms, consumedAuthorization.operationId
+        );
+        if (!consumed.removed) {
+          return failureBase(parsed, contextFile, projectionFile, jumpBaseAtoms, [diagnostic(
+            'WINDOW_JUMP_AUTHORIZATION_INVALID',
+            '受控迁窗授权在候选事务中无法精确消费'
+          )]);
+        }
+        atoms = consumed.atoms;
+        programTransformLogs.push({
+          id: consumedAuthorization.operationId,
+          operation: 'window-jump-authorized-move',
+          source: {
+            windowPath: agentPath,
+            sourcePath: jump.sourceProgramPath,
+            destinationPath,
+            issuerProgramPath: consumedAuthorization.issuerProgramPath
+          }
+        });
+      }
       programChanged = true;
-      initialProgramTriggerNodes.push(moved.resultPath, jump.destinationPath);
+      initialProgramTriggerNodes.push(moved.resultPath, destinationPath);
       interaction.agent.path = moved.resultPath;
       movedAgentPaths = { previousPath: agentPath, nextPath: moved.resultPath };
       accessController = createAccessController(atoms, {

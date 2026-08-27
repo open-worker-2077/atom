@@ -675,20 +675,50 @@ function validateResult(result, records, program, options = {}) {
     };
   });
   const jumps = (result.jumps ?? []).map((entry) => {
+    const moveTargets = [entry?.destinationPath, entry?.authorizationPath]
+      .filter((value) => value !== undefined);
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)
       || !['guard', 'move', 'recycle'].includes(entry.action)
       || (entry.action === 'move'
-        && (typeof entry.destinationPath !== 'string'
-          || !recordsByPath.has(entry.destinationPath)))
-      || (entry.action !== 'move' && entry.destinationPath !== undefined)) {
+        && (moveTargets.length !== 1
+          || typeof moveTargets[0] !== 'string'
+          || !recordsByPath.has(moveTargets[0])
+          || (entry.authorizationPath !== undefined
+            && !recordsByPath.get(entry.authorizationPath)?.types.includes('jump-authorization'))))
+      || (entry.action !== 'move'
+        && (entry.destinationPath !== undefined || entry.authorizationPath !== undefined))) {
       throw Object.assign(new Error('jump() returned an invalid window effect'), {
         code: 'INVALID_WINDOW_JUMP_EFFECT'
       });
     }
     return {
       action: entry.action,
-      ...(entry.action === 'move' ? { destinationPath: entry.destinationPath } : {}),
+      ...(entry.action === 'move' && entry.destinationPath !== undefined
+        ? { destinationPath: entry.destinationPath } : {}),
+      ...(entry.action === 'move' && entry.authorizationPath !== undefined
+        ? { authorizationPath: entry.authorizationPath } : {}),
       sourceProgramPath: program.path
+    };
+  });
+  const jumpAuthorizations = (result.jumpAuthorizations ?? []).map((entry) => {
+    const sourceProgramPath = typeof entry?.__sourceProgramPath === 'string'
+      ? entry.__sourceProgramPath : program.path;
+    const window = recordsByPath.get(entry?.windowPath);
+    const source = recordsByPath.get(entry?.sourcePath);
+    const destination = recordsByPath.get(entry?.destinationPath);
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || !window?.types.includes('agent') || !source?.types.includes('program') || !destination
+      || !recordsByPath.get(sourceProgramPath)?.types.includes('program')
+      || !source.path.startsWith(`${window.path}/`)) {
+      throw Object.assign(new Error('jump_authorize() returned an invalid controlled migration effect'), {
+        code: 'INVALID_JUMP_AUTHORIZATION_EFFECT'
+      });
+    }
+    return {
+      windowPath: window.path,
+      sourcePath: source.path,
+      destinationPath: destination.path,
+      issuerProgramPath: sourceProgramPath
     };
   });
   const agentRegistrations = (result.agents ?? []).map((entry) => {
@@ -736,7 +766,8 @@ function validateResult(result, records, program, options = {}) {
     }
   }
   return {
-    locks, messages, transforms, shortcuts, slotBodies, choices, jumps, agentRegistrations, changedThings, trigger,
+    locks, messages, transforms, shortcuts, slotBodies, choices, jumps, jumpAuthorizations,
+    agentRegistrations, changedThings, trigger,
     ...(supportDecision === true ? { supportDecision: result.supportDecision } : {})
   };
 }
@@ -1871,6 +1902,9 @@ export class ProgramRuntimeScheduler {
       slotBodies: results.flatMap((result) => result.slotBodies ?? []),
       jumps: applicable.flatMap((entry) => entry.cached === false
         ? entry.result?.jumps ?? []
+        : []),
+      jumpAuthorizations: applicable.flatMap((entry) => entry.cached === false
+        ? entry.result?.jumpAuthorizations ?? []
         : []),
       agentRegistrations: applicable.flatMap((entry) => entry.cached === false
         ? entry.result?.agentRegistrations ?? []

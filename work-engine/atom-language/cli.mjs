@@ -253,6 +253,8 @@ function help() {
     '  职能 scope：groups 是正式分层权限，运行时按当前 registry 获得该组及后代组的函数；names 是冻结的具体函数授权。子窗口只能获得创建者 scope 本身、后代组或其函数，不能上铸祖先组、跨到同级其他职能树，仅持有 name 也不能铸造 group。',
     '  标签边界：连续 ^ 只表示管辖等级，普通字符串是业务标签，两者不混算；自身或子 Agent 的 ^ 数量不得超过创建者。持有 ^ 的 Agent 可在既有 Graph 活动空间内定义普通标签；子 functions 必须通过创建者符号 scope 的同组或后代关系校验。',
     '  窗口跳转：jump({"when":when_program,"where":where_program,"recycle":recycle_program})；三项均可省略，recycle=true 直接回收，随后才算 when，且仅 when=true 才算 where；省略 when 即守窗。jump 定位复用 Explore、移动复用 Transform，并通过同一 Graph 鉴权链。',
+    '  受控横向迁窗：上级 Program 须显式获授 names:["jump_authorize"]，并在自身合法域内用 window=explore({"thing":"EXACT窗口"})[0]、source=explore({"thing":"EXACT注册Program"})[0]、destination=explore({"thing":"EXACT目的地"})[0] 后调用 jump_authorize({"window":window,"source":source,"destination":destination})。函数只返回 {"planned":true}，凭据不暴露；内核在 source 下生成一次性授权坐标。执行窗口的 where 返回该授权的 explore() 坐标后，仍按 recycle→when→where 顺序消费；落地前复验签发方当前 Graph 权限并在中央事务内移动与删授权。',
+    '  受控迁窗边界：jump_authorize 只能用具体 names 授予且不可委派；执行窗口不能读取目的地 situation、改目的地、篡改／复制／重放授权。预传 ThingCoordinate、完整路径、短名、.ref、support 或 shortcut 都不携带迁移权限；签发方失权、Graph 世代变化、节点／contain 锁拒绝或提交失败时窗口原位不动。',
     '  精确坐标：when_program = explore({"thing":"EXACT判定@program"})[0]；把 explore() 返回对象直接交给 jump 或锁规则，不使用 .ref。jump 的 when／where／recycle 及 where 返回值只接受 ThingCoordinate；短名字符串与完整 EXACT_PATH 字符串均拒绝，数组位置也不得猜测。精确字符串兼容仅保留于 use_program.name 与 CLI thing.run. 选择器，不扩散到 jump；旧 AtomView 仅由内部适配层兼容。',
     '  变化探针：def main(arguments):\n    point = explore({"thing":"EXACT监测Thing"})[0]\n    if not changed([point]):\n        return\n    # 命中后才 explore／聚合／计算。changed 只返回 bool 并登记既有 Transform 反向索引，控制流必须由调用方显式短路。',
     '  固定窗口锁：agent() 登记时由内核强制启用且不可关闭或自定义；可读 current／后代／同父普通节点／唯一直接父上下文，可写 current 后代。直接父不能成为新锚点进入其同层；exact path 不绕过。',

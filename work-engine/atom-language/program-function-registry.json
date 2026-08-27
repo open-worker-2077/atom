@@ -119,11 +119,48 @@
           "shortNameString": "forbidden",
           "ref": "forbidden"
         },
+        "controlledMove": {
+          "issuer": "jump_authorize explicit-name-only registered function",
+          "consumer": "exact matching active window and source Program",
+          "targetSituationDisclosure": "forbidden-before-authorization",
+          "reuse": "forbidden-single-use",
+          "landingRevalidation": "issuer-current-shared-cli-graph-chain"
+        },
         "errors": [
           "INVALID_JUMP_CONTRACT",
           "INVALID_WINDOW_JUMP_EFFECT",
           "WINDOW_JUMP_DESTINATION_INVALID",
           "WINDOW_JUMP_LOCK_DENIED"
+        ]
+      }
+    },
+    {
+      "name": "jump_authorize",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "explicitNameOnly": true,
+      "delegable": false,
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["window", "source", "destination"],
+          "additionalProperties": false,
+          "properties": {
+            "window": { "$ref": "#/runtimeTypes/ThingCoordinate" },
+            "source": { "$ref": "#/runtimeTypes/ThingCoordinate" },
+            "destination": { "$ref": "#/runtimeTypes/ThingCoordinate" }
+          }
+        },
+        "result": { "type": "object", "properties": { "planned": { "const": true } } },
+        "credentialExposure": "none",
+        "authorization": "issuer-shared-cli-graph-chain",
+        "persistence": "single-use-kernel-reserved-graph-fact",
+        "transaction": "central-atomic-commit",
+        "errors": [
+          "INVALID_JUMP_AUTHORIZATION_CONTRACT",
+          "INVALID_JUMP_AUTHORIZATION_COORDINATE",
+          "WINDOW_JUMP_AUTHORIZATION_DENIED"
         ]
       }
     },
