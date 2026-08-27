@@ -1201,15 +1201,21 @@ export class ProgramRuntimeScheduler {
         changedNodes: []
       })
     ))));
+    const deferredByWindow = new Set();
     for (const [index, program] of candidates.entries()) {
       const result = inspected[index];
+      if (result.status === 'rejected') {
+        if (result.reason?.code !== 'WINDOW_ACCESS_DENIED') throw result.reason;
+        deferredByWindow.add(program.path);
+        continue;
+      }
       this.setTriggerContract(
         program,
-        result.status === 'fulfilled' ? result.value.trigger ?? null : null,
-        result.status === 'fulfilled' ? result.value.changedThings ?? [] : []
+        result.value.trigger ?? null,
+        result.value.changedThings ?? []
       );
     }
-    this.triggerContractsInitialized = true;
+    this.triggerContractsInitialized = deferredByWindow.size === 0;
   }
 
   async loadProjection() {

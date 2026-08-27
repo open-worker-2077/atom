@@ -142,6 +142,51 @@ test('trigger contract discovery isolates an unrelated Program denied by the cur
   assert.deepEqual(cycle.failures, []);
 });
 
+test('a denied trigger contract is retried under a later authorized Agent context', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const watched = atom('Watched');
+  const program = atom('Scoped Trigger', [
+    "watched = explore({'thing': 'Watched'})[0]",
+    'def main():',
+    "    message({'level': 'info', 'text': 'ran'})",
+    'if changed([watched]):',
+    '    main()'
+  ].join('\n'), [], 'program');
+  const world = [watched, program];
+
+  await scheduler.refresh(world, {
+    triggerEvent: { mode: 'transform', nodes: ['Watched'] },
+    agentOrigin: { path: 'Root/Denied Window' },
+    executeExplore: async () => {
+      throw Object.assign(new Error('fixed Agent cannot read outside scope'), {
+        code: 'WINDOW_ACCESS_DENIED'
+      });
+    }
+  });
+
+  assert.equal(scheduler.triggerContracts.has('Scoped Trigger'), false);
+  const authorized = await scheduler.refresh(world, {
+    triggerEvent: { mode: 'transform', nodes: ['Watched'] },
+    agentOrigin: { path: 'Root/Authorized Window' },
+    executeExplore: async () => [{ path: 'Watched' }]
+  });
+
+  assert.deepEqual(authorized.executedProgramPaths, ['Scoped Trigger']);
+  assert.deepEqual(authorized.messages.map(({ text }) => text), ['ran']);
+});
+
+test('trigger contract discovery keeps invalid Program failures visible', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const invalid = atom('Invalid Trigger', 'changed([)', [], 'program');
+
+  await assert.rejects(
+    scheduler.refresh([atom('Writable Child'), invalid], {
+      triggerEvent: { mode: 'transform', nodes: ['Writable Child'] }
+    }),
+    (error) => error?.code === 'ATOM_PROGRAM_FAILED'
+  );
+});
+
 test('a trigger-scoped cycle cannot replace the reusable full-world projection after a Program is added', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const seed = atom('Seed Program', "message({'level': 'info', 'text': 'seed'})", [], 'program');
