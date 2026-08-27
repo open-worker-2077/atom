@@ -635,6 +635,7 @@ export async function executeAtomLanguage(options = {}) {
     agent: options.interaction?.agent ? structuredClone(options.interaction.agent) : null
   };
   const existingTransformStage = parsed.command === 'transform'
+    && typeof options.diagnosticRecorder?.enqueue !== 'function'
     && typeof options.diagnosticRecorder?.findByInteractionId === 'function'
     ? await options.diagnosticRecorder.findByInteractionId(interaction.id).catch(() => null)
     : null;
@@ -657,14 +658,19 @@ export async function executeAtomLanguage(options = {}) {
       commitEntered: details.commitEntered === true
     });
     try {
-      await options.diagnosticRecorder.record({
+      const diagnostic = {
         id: `${interaction.id}:transform-stage`,
         type: 'transform-stage',
         command: 'transform',
         durationMs: performance.now() - operationStartedAt,
         outcome: details.outcome ?? 'success',
         stages: transformStageDiagnostics
-      });
+      };
+      if (typeof options.diagnosticRecorder.enqueue === 'function') {
+        options.diagnosticRecorder.enqueue(diagnostic);
+      } else {
+        await options.diagnosticRecorder.record(diagnostic);
+      }
     } catch {
       // Timing diagnostics are observational and must never alter Transform behavior.
     }

@@ -12,10 +12,33 @@ import {
   createJsonWorldRepository
 } from '../src/atom-system/adapters/json-world-repository.mjs';
 import {
+  createBoundedRuntimeDiagnosticRecorder,
   createRuntimeDiagnosticStore,
   queryYearRing,
   rebuildYearRingIndex
 } from '../src/atom-system/world-runtime/year-ring.mjs';
+
+test('bounded diagnostic queue never makes a caller wait for a slow repository write', async () => {
+  let release;
+  const slowWrite = new Promise((resolve) => { release = resolve; });
+  const recorder = createBoundedRuntimeDiagnosticRecorder({
+    recorder: {
+      async record() { await slowWrite; }
+    },
+    capacity: 1,
+    writeTimeoutMs: 10
+  });
+  const startedAt = performance.now();
+  assert.equal(recorder.enqueue({ id: 'slow-write' }), true);
+  assert.ok(performance.now() - startedAt < 10, 'enqueue must not await diagnostic persistence');
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.deepEqual(recorder.snapshot(), {
+    capacity: 1, queued: 0, inFlight: true, accepted: 1, dropped: 0, failed: 1, timedOut: 1
+  });
+  release();
+  await recorder.flush();
+  assert.equal(recorder.snapshot().inFlight, false);
+});
 
 function atom(thing, situation = '', contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };

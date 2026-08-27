@@ -15,7 +15,10 @@ import { createJsonRequestDrivenLockRepository } from '../../src/atom-system/ada
 import { createJsonRuntimeDiagnosticRepository } from '../../src/atom-system/adapters/json-runtime-diagnostic-repository.mjs';
 import { createLegacyRuntimeComposition } from '../../src/atom-system/adapters/legacy-runtime-composition.mjs';
 import { createAtomRuntimeBackupTrigger } from '../../src/atom-system/operations/atom-runtime-backup-trigger.mjs';
-import { createRuntimeDiagnosticStore } from '../../src/atom-system/world-runtime/year-ring.mjs';
+import {
+  createBoundedRuntimeDiagnosticRecorder,
+  createRuntimeDiagnosticStore
+} from '../../src/atom-system/world-runtime/year-ring.mjs';
 import { resolveAtomRuntime } from './runtime-config.mjs';
 import { createProgramRuntimeScheduler } from './program-runtime.mjs';
 import { ATOM_RUNTIME_CONTRACT } from './runtime-contract.mjs';
@@ -255,8 +258,6 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
         throw problem('INVALID_ATOM_COMMAND_REQUEST', 'Atom command endpoint requires source and optional interaction.agent');
       }
       const correlationId = payload.interaction?.id ?? crypto.randomUUID();
-      const transformRequest = payload.source.trim().startsWith('transform');
-      const requestStartedAt = performance.now();
       let agent = payload.interaction?.agent;
       if ((!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string')
         && typeof payload.interaction?.agentSelector === 'string'
@@ -264,24 +265,8 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
         try {
           agent = await options.resolveAgent(payload.interaction.agentSelector);
         } catch (error) {
-          if (transformRequest && options.diagnostics?.record) {
-            await options.diagnostics.record({
-              id: `${correlationId}:transform-stage`, type: 'transform-stage', command: 'transform',
-              durationMs: performance.now() - requestStartedAt, outcome: 'failure',
-              stages: [{ stage: 'request', durationMs: performance.now() - requestStartedAt,
-                candidateProgramCount: 0, executedProgramCount: 0, commitEntered: false }]
-            }).catch(() => {});
-          }
           throw error;
         }
-      }
-      if (transformRequest && options.diagnostics?.record) {
-        await options.diagnostics.record({
-          id: `${correlationId}:transform-stage`, type: 'transform-stage', command: 'transform',
-          durationMs: performance.now() - requestStartedAt, outcome: 'success',
-          stages: [{ stage: 'request', durationMs: performance.now() - requestStartedAt,
-            candidateProgramCount: 0, executedProgramCount: 0, commitEntered: false }]
-        }).catch(() => {});
       }
       if (!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string') {
         throw problem('AGENT_REQUIRED', 'Atom command endpoint requires a revision-local @agent origin');
@@ -355,10 +340,23 @@ export async function startAtomGraphServer(options = {}) {
     ?? createJsonRequestDrivenLockRepository({ file: configuration.requestDrivenLockFile });
   const diagnosticRepository = options.diagnosticRepository
     ?? createJsonRuntimeDiagnosticRepository({ file: configuration.diagnosticFile });
-  const diagnostics = options.diagnostics ?? createRuntimeDiagnosticStore({
+  const diagnosticStore = options.diagnostics ?? createRuntimeDiagnosticStore({
     repository: diagnosticRepository,
     retentionMs: options.diagnosticRetentionMs,
     maxEntries: options.diagnosticMaxEntries
+  });
+  const diagnosticQueue = createBoundedRuntimeDiagnosticRecorder({
+    recorder: diagnosticStore,
+    capacity: options.diagnosticQueueCapacity ?? 32,
+    writeTimeoutMs: options.diagnosticWriteTimeoutMs ?? 250
+  });
+  const diagnostics = Object.freeze({
+    record: diagnosticStore.record.bind(diagnosticStore),
+    list: diagnosticStore.list.bind(diagnosticStore),
+    findByInteractionId: diagnosticStore.findByInteractionId.bind(diagnosticStore),
+    enqueue: diagnosticQueue.enqueue,
+    flush: diagnosticQueue.flush,
+    snapshot: diagnosticQueue.snapshot
   });
   const programScheduler = options.programScheduler ?? createProgramRuntimeScheduler({
     projectionRepository: programProjectionRepository,

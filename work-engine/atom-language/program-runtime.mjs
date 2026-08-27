@@ -1670,28 +1670,33 @@ export class ProgramRuntimeScheduler {
     const diagnosticWarnings = [];
     const recordProgramDiagnostic = async ({ program, requests, startedAt, error = null }) => {
       if (!this.diagnosticRecorder) return;
+      const diagnostic = {
+        id: crypto.randomUUID(),
+        type: 'program',
+        durationMs: performance.now() - startedAt,
+        outcome: error?.code === 'ATOM_PROGRAM_TIMEOUT'
+          ? 'timeout'
+          : error ? 'failure' : 'success',
+        program: programDiagnosticIdentity(program),
+        ...(error ? {
+          failure: {
+            code: error.code ?? 'ATOM_PROGRAM_FAILED',
+            message: error.message ?? 'Python Program failed'
+          }
+        } : {}),
+        affectedAtoms: [
+          { path: program.path, ref: program.ref, axes: [] },
+          ...requests
+            .filter((request) => typeof request?.thing === 'string' && request.thing.trim())
+            .map((request) => ({ path: request.thing.trim(), axes: [] }))
+        ]
+      };
+      if (typeof this.diagnosticRecorder.enqueue === 'function') {
+        this.diagnosticRecorder.enqueue(diagnostic);
+        return;
+      }
       try {
-        await this.diagnosticRecorder.record({
-          id: crypto.randomUUID(),
-          type: 'program',
-          durationMs: performance.now() - startedAt,
-          outcome: error?.code === 'ATOM_PROGRAM_TIMEOUT'
-            ? 'timeout'
-            : error ? 'failure' : 'success',
-          program: programDiagnosticIdentity(program),
-          ...(error ? {
-            failure: {
-              code: error.code ?? 'ATOM_PROGRAM_FAILED',
-              message: error.message ?? 'Python Program failed'
-            }
-          } : {}),
-          affectedAtoms: [
-            { path: program.path, ref: program.ref, axes: [] },
-            ...requests
-              .filter((request) => typeof request?.thing === 'string' && request.thing.trim())
-              .map((request) => ({ path: request.thing.trim(), axes: [] }))
-          ]
-        });
+        await this.diagnosticRecorder.record(diagnostic);
       } catch (error) {
         diagnosticWarnings.push({
           code: 'PROGRAM_DIAGNOSTIC_RECORD_FAILED',

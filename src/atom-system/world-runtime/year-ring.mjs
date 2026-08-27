@@ -225,6 +225,87 @@ function sanitizeDiagnostic(input, now) {
   return Object.freeze(output);
 }
 
+// Runtime diagnostics are observational.  They must never make a command wait
+// for filesystem I/O, even when a repository is slow or temporarily wedged.
+export function createBoundedRuntimeDiagnosticRecorder({
+  recorder,
+  capacity = 32,
+  writeTimeoutMs = 250
+} = {}) {
+  if (typeof recorder?.record !== 'function') {
+    throw problem('INVALID_DIAGNOSTIC_RECORDER', 'bounded diagnostic recorder requires record()');
+  }
+  if (!Number.isInteger(capacity) || capacity < 1) {
+    throw problem('INVALID_DIAGNOSTIC_QUEUE_CAPACITY', 'diagnostic queue capacity must be a positive integer');
+  }
+  if (!Number.isFinite(writeTimeoutMs) || writeTimeoutMs < 1) {
+    throw problem('INVALID_DIAGNOSTIC_WRITE_TIMEOUT', 'diagnostic write timeout must be positive');
+  }
+  const pending = [];
+  let inFlight = false;
+  let accepted = 0;
+  let dropped = 0;
+  let failed = 0;
+  let timedOut = 0;
+  let drained = Promise.resolve();
+
+  function snapshot() {
+    return Object.freeze({
+      capacity, queued: pending.length, inFlight, accepted, dropped, failed, timedOut
+    });
+  }
+
+  function enqueue(input) {
+    if (pending.length + (inFlight ? 1 : 0) >= capacity) {
+      dropped += 1;
+      return false;
+    }
+    pending.push(structuredClone(input));
+    accepted += 1;
+    if (!inFlight) void drain();
+    return true;
+  }
+
+  async function writeOne(input) {
+    let timeoutId = null;
+    const write = Promise.resolve()
+      .then(() => recorder.record(input))
+      .then(() => 'written', () => 'failed');
+    const timeout = new Promise((resolve) => {
+      timeoutId = setTimeout(() => resolve('timed-out'), writeTimeoutMs);
+    });
+    const result = await Promise.race([write, timeout]);
+    if (timeoutId) clearTimeout(timeoutId);
+    if (result === 'timed-out') {
+      timedOut += 1;
+      failed += 1;
+      // Keep the worker serial even after the caller-visible timeout.  The
+      // write promise already absorbs its own rejection, so this cannot leak.
+      await write;
+    } else if (result === 'failed') {
+      failed += 1;
+    }
+  }
+
+  async function drain() {
+    if (inFlight) return drained;
+    inFlight = true;
+    drained = (async () => {
+      while (pending.length > 0) await writeOne(pending.shift());
+      inFlight = false;
+    })().catch(() => { inFlight = false; });
+    return drained;
+  }
+
+  async function flush() {
+    if (!inFlight && pending.length > 0) void drain();
+    await drained;
+    if (pending.length > 0) await flush();
+  }
+
+  return Object.freeze({ enqueue, flush, snapshot });
+}
+
 export function createRuntimeDiagnosticStore({
   repository = null,
   retentionMs = 7 * 24 * 60 * 60 * 1000,

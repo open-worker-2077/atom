@@ -270,6 +270,21 @@ export function createInteractionRuntime({
     if (diagnostics && result?.command === 'transform' && result?.ok === false) {
       const failure = diagnosticFailure(result);
       if (failure?.code) {
+        const transformDiagnostic = {
+          id: `${intent.correlationId}:transform`,
+          type: 'transform',
+          command: 'transform',
+          durationMs: performance.now() - interactionStartedAt,
+          outcome: 'failure',
+          errorCode: failure.code,
+          ...(transformProgramFingerprint(result) ? {
+            programFingerprint: transformProgramFingerprint(result)
+          } : {})
+        };
+        if (typeof diagnostics.enqueue === 'function') {
+          diagnostics.enqueue(transformDiagnostic);
+          return result;
+        }
         if (typeof diagnostics.findByInteractionId === 'function') {
           try {
             const stageDiagnostic = await diagnostics.findByInteractionId(intent.correlationId);
@@ -285,17 +300,7 @@ export function createInteractionRuntime({
           }
         }
         try {
-          await diagnostics.record({
-            id: `${intent.correlationId}:transform`,
-            type: 'transform',
-            command: 'transform',
-            durationMs: performance.now() - interactionStartedAt,
-            outcome: 'failure',
-            errorCode: failure.code,
-            ...(transformProgramFingerprint(result) ? {
-              programFingerprint: transformProgramFingerprint(result)
-            } : {})
-          });
+          await diagnostics.record(transformDiagnostic);
         } catch {
           // Diagnostics are observational: a persistence fault must not change a failed command result.
         }

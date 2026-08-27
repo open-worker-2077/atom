@@ -7,7 +7,10 @@ import test from 'node:test';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { createInteractionRuntime } from '../src/atom-system/public/interaction-runtime.mjs';
-import { createRuntimeDiagnosticStore } from '../src/atom-system/world-runtime/year-ring.mjs';
+import {
+  createBoundedRuntimeDiagnosticRecorder,
+  createRuntimeDiagnosticStore
+} from '../src/atom-system/world-runtime/year-ring.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
@@ -147,6 +150,35 @@ test('a failed Transform persists one redacted diagnostic keyed by its interacti
   assert.equal(Number.isFinite(durationMs), true);
   assert.equal(JSON.stringify(diagnostics).includes('Sensitive'), false);
   assert.equal(JSON.stringify(diagnostics).includes('fixed Agent'), false);
+});
+
+test('a failed Transform returns before a slow diagnostic repository write completes', async () => {
+  let release;
+  const blockedWrite = new Promise((resolve) => { release = resolve; });
+  const context = ports();
+  const queuedDiagnostics = createBoundedRuntimeDiagnosticRecorder({
+    recorder: { async record() { await blockedWrite; } },
+    capacity: 2,
+    writeTimeoutMs: 10
+  });
+  const diagnostics = {
+    record: async (value) => queuedDiagnostics.enqueue(value),
+    enqueue: queuedDiagnostics.enqueue
+  };
+  context.diagnostics = diagnostics;
+  context.world.execute = async () => ({
+    ok: false, command: 'transform', changed: false,
+    errors: [{ code: 'WINDOW_ACCESS_DENIED', message: 'denied' }]
+  });
+  const runtime = createInteractionRuntime(context);
+  const startedAt = performance.now();
+  const result = await runtime.execute({
+    source: 'transform {}', correlationId: 'slow-diagnostic-transform', history: []
+  });
+  assert.ok(performance.now() - startedAt < 40, 'business result must not await diagnostic persistence');
+  assert.equal(result.errors[0].code, 'WINDOW_ACCESS_DENIED');
+  release();
+  await queuedDiagnostics.flush();
 });
 
 test('failed Transform diagnostic persistence never changes the business result', async () => {
