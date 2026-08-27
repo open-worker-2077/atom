@@ -721,13 +721,31 @@ export async function executeAtomLanguage(options = {}) {
           preparedWorld
         })
       };
-      programCycle = await programOperation(atoms, programOptions);
+      try {
+        programCycle = await programOperation(atoms, programOptions);
+      } catch (error) {
+        await recordTransformStage('reconcile', programStartedAt, { outcome: 'failure' });
+        throw error;
+      }
+      await recordTransformStage('reconcile', programStartedAt, {
+        ...(programCycle.reconcileSummary ?? {})
+      });
       if (projectPrograms && (programCycle.failures?.length ?? 0) > 0) {
         // The first project pass records isolated failures as dormant; settle once so the
         // exact-world passive projection can persist without replaying workers on reads.
         const isolatedFailures = structuredClone(programCycle.failures);
         const initialRuntimeWarnings = structuredClone(programCycle.runtimeWarnings ?? []);
-        const settled = await programOperation(atoms, programOptions);
+        const settleStartedAt = performance.now();
+        let settled;
+        try {
+          settled = await programOperation(atoms, programOptions);
+        } catch (error) {
+          await recordTransformStage('reconcile', settleStartedAt, { outcome: 'failure' });
+          throw error;
+        }
+        await recordTransformStage('reconcile', settleStartedAt, {
+          ...(settled.reconcileSummary ?? {})
+        });
         programCycle = {
           ...settled,
           failures: [...isolatedFailures, ...(settled.failures ?? [])],

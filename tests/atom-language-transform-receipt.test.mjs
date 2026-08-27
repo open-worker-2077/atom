@@ -142,7 +142,9 @@ test('Transform reconcile timing diagnostic is observational and contains no fac
   assert.equal(result.ok, true, JSON.stringify(result.errors ?? result));
   const diagnostic = await diagnostics.findByInteractionId('transform-stage-observational');
   assert.equal(diagnostic.type, 'transform-stage');
-  assert.deepEqual(diagnostic.stages.map(({ stage }) => stage), ['request', 'reconcile', 'commit']);
+  assert.deepEqual(diagnostic.stages.map(({ stage }) => stage), [
+    'request', 'reconcile', 'reconcile', 'commit'
+  ]);
   assert.equal(JSON.stringify(diagnostic).includes('诊断对象'), false);
   assert.equal(JSON.stringify(diagnostic).includes('不得持久化'), false);
 });
