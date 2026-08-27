@@ -10,6 +10,7 @@ import { authorizeProgramLock, programLockState } from './program-locks.mjs';
 import { WORLD_OUTSIDE_NAME, worldOutsideAtom } from './world-root.mjs';
 import { authorizeWindowGraphPath } from './window-lock-v1.mjs';
 import { compileSlotStructureGraphLocks } from './slot-body-plan-runtime.mjs';
+import { isShortcutAtom, resolveShortcutMatch } from './shortcut-runtime.mjs';
 
 const preparedExploreSnapshots = new WeakMap();
 
@@ -194,6 +195,7 @@ export function describeAtom(match, includeFullDetail, options = {}) {
     result[field.rawKey] = structuredClone(field.value);
   }
   if (options.lockState) result.lockState = structuredClone(options.lockState);
+  if (options.resolvedThroughShortcut) result.resolvedThroughShortcut = structuredClone(options.resolvedThroughShortcut);
   return result;
 }
 
@@ -478,6 +480,30 @@ export async function executeExploreItem(
       })]
     };
   }
+  const shortcutMatch = isShortcutAtom(selected.matches[0].atom) ? selected.matches[0] : null;
+  let resolvedThroughShortcut = null;
+  if (shortcutMatch) {
+    let target;
+    try {
+      target = resolveShortcutMatch(atoms, shortcutMatch);
+    } catch (error) {
+      return { ok: false, index: item.index, errors: [diagnostic(
+        error.code ?? 'INVALID_SHORTCUT_RECORD', error.message ?? '虚拟引用无法解析'
+      )] };
+    }
+    for (const field of requestedReadFields) {
+      if ((await accessController.authorize(target, 'read', field)).decision !== 'allow') {
+        return { ok: false, index: item.index, errors: [diagnostic(
+          'SHORTCUT_TARGET_ACCESS_DENIED', '当前 Agent 无权访问虚拟引用目标'
+        )] };
+      }
+    }
+    selected.matches[0] = target;
+    resolvedThroughShortcut = {
+      path: shortcutMatch.path.join('/'),
+      thing: oneStoredField(shortcutMatch.atom, 'thing')?.value ?? null
+    };
+  }
   const includeFullDetail = item.fields.some((field) => field.baseKey === 'situation'
     && field.actions.some((action) => action.name === 'full'));
   const includeSupport = item.fields.some((field) => field.baseKey === 'support');
@@ -493,16 +519,42 @@ export async function executeExploreItem(
   const boundary = options.includeBoundary === false
     ? null
     : await exploreBoundary(anchor, allMatches, scoped, accessController);
+  const describedMatches = [];
+  for (const match of ordered) {
+    let describedMatch = match;
+    let marker = match === anchor ? resolvedThroughShortcut : null;
+    if (isShortcutAtom(match.atom)) {
+      try {
+        describedMatch = resolveShortcutMatch(atoms, match);
+      } catch (error) {
+        describedMatches.push({
+          path: match.path.join('/'), selector: shortestUniqueSelector(match, visibleMatches),
+          thing: oneStoredField(match.atom, 'thing')?.value ?? null, types: ['shortcut'],
+          description: null, shortcut: { state: 'broken', error: error.code ?? 'INVALID_SHORTCUT_RECORD' }
+        });
+        continue;
+      }
+      let allowed = true;
+      for (const field of requestedReadFields) {
+        if ((await accessController.authorize(describedMatch, 'read', field)).decision !== 'allow') {
+          allowed = false;
+          break;
+        }
+      }
+      if (!allowed) continue;
+      marker = { path: match.path.join('/'), thing: oneStoredField(match.atom, 'thing')?.value ?? null };
+    }
+    describedMatches.push(describeAtom(describedMatch, includeFullDetail, {
+      selector: shortestUniqueSelector(describedMatch, visibleMatches),
+      ...(includeSupport ? { supportFields: storedSupportFields(describedMatch.atom) } : {}),
+      lockState: programLockState(lockIndex, describedMatch.path.join('/')),
+      ...(marker ? { resolvedThroughShortcut: marker } : {})
+    }));
+  }
   return {
     ok: true,
     index: item.index,
-    matches: ordered.map((match) => describeAtom(match, includeFullDetail, {
-      selector: shortestUniqueSelector(match, visibleMatches),
-      ...(includeSupport
-        ? { supportFields: storedSupportFields(match.atom) }
-        : {}),
-      lockState: programLockState(lockIndex, match.path.join('/'))
-    })),
+    matches: describedMatches,
     ...(boundary ? { anchorPath: anchor.path.join('/'), boundary } : {}),
     presentation: routes.some((route) => route.axis === 'latitude' && route.parameter < 0)
       ? { kind: 'children-tree', anchorPath: anchor.path.join('/') }

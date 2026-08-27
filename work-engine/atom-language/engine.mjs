@@ -1,4 +1,5 @@
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { diagnostic } from './errors.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 
@@ -52,6 +53,7 @@ import {
 } from './program-locks.mjs';
 import { applySlotBodyEffect } from './slot-body-runtime.mjs';
 import { normalizeScopedTransformRequest } from './slot-relative-scope.mjs';
+import { applyShortcutEffect, breakShortcutTargets } from './shortcut-runtime.mjs';
 import { registerCurrentProgramAsAgent, validateAgentDelegation } from './window-lock-v1.mjs';
 import {
   createAccessController,
@@ -304,6 +306,11 @@ async function applyCreateTransform({
       'AGENT_REGISTRATION_REQUIRED',
       '公开 Transform 不能创建 @agent；请由当前 Program 调用 agent()'
     ) };
+  }
+  if (walkAtoms([atom]).some((match) => (
+    oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => type.raw === 'shortcut')
+  ))) {
+    return { error: diagnostic('SHORTCUT_PERSISTENCE_FORGERY_DENIED', '公开 Transform 不得创建或伪造内核虚拟引用记录') };
   }
   const createName = createNameField?.value;
   const createPath = createName.split('/');
@@ -657,6 +664,7 @@ export async function executeAtomLanguage(options = {}) {
           ...programCycle,
           messages: [],
           transforms: [],
+          shortcuts: [],
           slotBodies: []
         };
       }
@@ -664,6 +672,7 @@ export async function executeAtomLanguage(options = {}) {
         && !requestedProgramRun) {
         programCycle = {
           ...programCycle,
+          shortcuts: [],
           slotBodies: []
         };
       }
@@ -750,6 +759,42 @@ export async function executeAtomLanguage(options = {}) {
     agentSecurity: programCycle.agentSecurity,
     graphLocks
   });
+  const fatalShortcutFailure = requestedProgramRun
+    ? (programCycle.failures ?? []).find((failure) => typeof failure.code === 'string'
+      && (failure.code.startsWith('INVALID_SHORTCUT_') || failure.code.startsWith('SHORTCUT_')))
+    : null;
+  if (fatalShortcutFailure) {
+    return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+      fatalShortcutFailure.code, fatalShortcutFailure.message ?? '虚拟引用创建失败'
+    )]);
+  }
+  const programTransformLogs = [];
+  for (const effect of programCycle.shortcuts ?? []) {
+    const shortcut = await applyShortcutEffect({
+      atoms,
+      effect,
+      authorize: (match, operation, field, actor = {}) => accessController.authorize(
+        match, operation, field, { ...actor, programPath: effect.sourceProgramPath }
+      )
+    });
+    if (shortcut.error) return failureBase(parsed, contextFile, projectionFile, atoms, [shortcut.error]);
+    if (shortcut.changed) {
+      const before = revisionOf(atoms);
+      atoms = shortcut.atoms;
+      const after = revisionOf(atoms);
+      programChanged = true;
+      initialProgramTriggerNodes.push(shortcut.resultPath, shortcut.targetPath);
+      programTransformLogs.push({
+        id: crypto.randomUUID(), operation: 'program-shortcut',
+        source: { placement: effect.placement, thing: effect.thing, targetPath: effect.targetPath },
+        revisionBefore: before, revisionAfter: after
+      });
+      accessController = createAccessController(atoms, {
+        ...options, programLockIndex, agentPath: initialAgentPath,
+        agentSecurity: programCycle.agentSecurity, graphLocks
+      });
+    }
+  }
   const jumpEffects = (programCycle.jumps ?? []).filter((jump) => jump.action !== 'guard');
   const jumpBaseAtoms = atoms;
   if (jumpEffects.length > 1) {
@@ -865,6 +910,7 @@ export async function executeAtomLanguage(options = {}) {
         ? oneStoredField(selected.parent.atom, 'contain')?.value
         : candidate;
       container.splice(selected.index, 1);
+      breakShortcutTargets(candidate, agentPath);
       atoms = candidate;
       programChanged = true;
       interaction.agent = null;
@@ -885,7 +931,6 @@ export async function executeAtomLanguage(options = {}) {
       action: 'explore'
     }).decision === 'allow')
     .map((message) => ({ interactionId: interaction.id, ...message }));
-  const programTransformLogs = [];
   let strictSlotRecompute = false;
   for (const request of programCycle.transforms ?? []) {
     const {
@@ -1226,7 +1271,7 @@ export async function executeAtomLanguage(options = {}) {
           createNew || transformChangesStructure(item)
         )).length
       });
-      if (compiledRequests.length === 0 && (cycle.slotBodies?.length ?? 0) === 0) {
+      if (compiledRequests.length === 0 && (cycle.shortcuts?.length ?? 0) === 0 && (cycle.slotBodies?.length ?? 0) === 0) {
         return {
           atoms: reconciledAtoms,
           lockIndex: finalLockIndex,
@@ -1314,7 +1359,25 @@ export async function executeAtomLanguage(options = {}) {
 
       const before = revisionOf(reconciledAtoms);
       const applyStartedAt = performance.now();
-      let application = await applyCompiled(structuredClone(reconciledAtoms), true, true);
+      let shortcutAtoms = structuredClone(reconciledAtoms);
+      const appliedShortcuts = [];
+      for (const effect of cycle.shortcuts ?? []) {
+        const shortcut = await applyShortcutEffect({
+          atoms: shortcutAtoms,
+          effect,
+          authorize: (match, operation, field, actor = {}) => cycleAccessController.authorize(
+            match, operation, field, { ...actor, programPath: effect.sourceProgramPath }
+          )
+        });
+        if (shortcut.error) {
+          throw Object.assign(new Error(shortcut.error.message), {
+            code: shortcut.error.code, details: { program: effect.sourceProgramPath }
+          });
+        }
+        shortcutAtoms = shortcut.atoms;
+        if (shortcut.changed) appliedShortcuts.push({ effect, shortcut });
+      }
+      let application = await applyCompiled(shortcutAtoms, true, true);
       if (!application.failed) {
         try {
           projectAtomContext(application.atoms, {
@@ -1326,7 +1389,7 @@ export async function executeAtomLanguage(options = {}) {
         }
       }
       if (application.failed) {
-        application = await applyCompiled(reconciledAtoms, false, true);
+        application = await applyCompiled(shortcutAtoms, false, true);
       }
       const appliedSlotBodies = [];
       for (const request of cycle.slotBodies ?? []) {
@@ -1367,6 +1430,13 @@ export async function executeAtomLanguage(options = {}) {
       if (before !== after) {
         reconciledAtoms = application.atoms;
         passChanged = true;
+        for (const entry of appliedShortcuts) {
+          transformLogs.push({
+            id: crypto.randomUUID(), operation: 'program-shortcut',
+            source: { placement: entry.effect.placement, thing: entry.effect.thing, targetPath: entry.effect.targetPath },
+            revisionBefore: before, revisionAfter: after
+          });
+        }
         for (const { transformRequest, transformed } of application.applied) {
           if (transformed.sourcePath && transformed.resultPath) {
             pathChanges.push({

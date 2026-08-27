@@ -570,6 +570,23 @@ function validateResult(result, records, program, options = {}) {
       ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {})
     };
   });
+  const shortcuts = (result.shortcuts ?? []).map((entry) => {
+    const target = records.find((record) => record.ref === entry?.targetRef);
+    const sourceProgramPath = typeof entry?.__sourceProgramPath === 'string'
+      ? entry.__sourceProgramPath : program.path;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || entry.placement !== 'contain' || typeof entry.thing !== 'string' || !entry.thing.trim()
+      || entry.thing !== entry.thing.trim() || entry.thing.includes('/')
+      || !target || target.path !== entry.targetPath
+      || !recordsByPath.get(sourceProgramPath)?.types.includes('program')) {
+      throw Object.assign(new Error('shortcut() returned an invalid reference effect'), {
+        code: 'INVALID_SHORTCUT_EFFECT'
+      });
+    }
+    return { placement: 'contain', thing: entry.thing, targetRef: entry.targetRef,
+      targetPath: entry.targetPath, sourceProgramPath,
+      ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {}) };
+  });
   if (scopeRoot && (result.slotBodies?.length ?? 0) > 0) {
     throw Object.assign(new Error('相对域计算 Program 不得递归登记槽体效果'), {
       code: 'SLOT_BODY_NESTED_EFFECT_FORBIDDEN',
@@ -707,7 +724,7 @@ function validateResult(result, records, program, options = {}) {
   }
   const trigger = result.trigger == null ? null : structuredClone(result.trigger);
   if (supportDecision === true) {
-    if ([locks, messages, transforms, slotBodies, choices, jumps, agentRegistrations].some((entries) => entries.length > 0)) {
+    if ([locks, messages, transforms, shortcuts, slotBodies, choices, jumps, agentRegistrations].some((entries) => entries.length > 0)) {
       throw Object.assign(new Error('Support antecedent Program may only return bool and cannot emit effects'), {
         code: 'PROGRAM_SUPPORT_EFFECT_FORBIDDEN', details: { program: program.path }
       });
@@ -719,7 +736,7 @@ function validateResult(result, records, program, options = {}) {
     }
   }
   return {
-    locks, messages, transforms, slotBodies, choices, jumps, agentRegistrations, changedThings, trigger,
+    locks, messages, transforms, shortcuts, slotBodies, choices, jumps, agentRegistrations, changedThings, trigger,
     ...(supportDecision === true ? { supportDecision: result.supportDecision } : {})
   };
 }
@@ -1239,6 +1256,7 @@ export class ProgramRuntimeScheduler {
       exploreReadPaths: structuredClone(stored.exploreReadPaths ?? []),
       messages: [],
       transforms: [],
+      shortcuts: [],
       slotBodies: [],
       failures: structuredClone(stored.failures),
       contextIncomplete: stored.contextIncomplete === true
@@ -1287,7 +1305,7 @@ export class ProgramRuntimeScheduler {
     const key = fingerprint(records, programs, options.agentOrigin, isolateFailures);
     const completed = this.completed.get(key);
     if (completed) return this.overlayRequestDrivenLocks({
-      ...completed, cached: true, messages: [], transforms: [], slotBodies: []
+      ...completed, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: []
     }, options.agentOrigin);
 
     const reusable = reusableCandidates(
@@ -1306,6 +1324,7 @@ export class ProgramRuntimeScheduler {
         choices: structuredClone(reusable.value.choices ?? []),
         messages: [],
         transforms: [],
+        shortcuts: [],
         slotBodies: [],
         failures: structuredClone(reusable.value.failures ?? [])
       }, options.agentOrigin);
@@ -1335,6 +1354,7 @@ export class ProgramRuntimeScheduler {
           choices: [],
           messages: [],
           transforms: [],
+          shortcuts: [],
           slotBodies: [],
           failures: [],
           exploreReadPaths: [],
@@ -1372,12 +1392,12 @@ export class ProgramRuntimeScheduler {
     if (completed && completed.failures.length === 0) {
       const cached = completed;
       return this.overlayRequestDrivenLocks({
-        ...cached, cached: true, messages: [], transforms: [], slotBodies: []
+        ...cached, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: []
       }, options.agentOrigin);
     }
     if (this.inflight.has(key)) {
       return this.inflight.get(key).then((value) => ({
-        ...value, cached: true, messages: [], transforms: [], slotBodies: []
+        ...value, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: []
       }));
     }
 
@@ -1514,6 +1534,7 @@ export class ProgramRuntimeScheduler {
           choices: structuredClone(reusable.value.choices ?? []),
           messages: [],
           transforms: [],
+          shortcuts: [],
           slotBodies: [],
           failures: structuredClone(reusable.value.failures ?? [])
         }, options.agentOrigin);
@@ -1604,7 +1625,7 @@ export class ProgramRuntimeScheduler {
         return {
           programPath: program.path,
           result: {
-            locks: [], messages: [], transforms: [], slotBodies: [], choices: [], trigger: null
+            locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [], trigger: null
           },
           cached: true,
           requests: dormantFailure.requests,
@@ -1623,8 +1644,9 @@ export class ProgramRuntimeScheduler {
             locks: rebindLocks(previous.result.locks, previous.records, records),
             messages: [],
             transforms: [],
+            shortcuts: [],
             slotBodies: []
-          } : { locks: [], messages: [], transforms: [], slotBodies: [], choices: [], trigger: null },
+          } : { locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [], trigger: null },
           cached: true,
           requests: previous?.requests ?? [],
           contextDependent: previous?.contextDependent === true
@@ -1638,8 +1660,9 @@ export class ProgramRuntimeScheduler {
             locks: rebindLocks(previous.result.locks, previous.records, records),
             messages: [],
             transforms: [],
+            shortcuts: [],
             slotBodies: []
-          } : { locks: [], messages: [], transforms: [], slotBodies: [], choices: [], trigger: null },
+          } : { locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [], trigger: null },
           cached: true,
           requests: previous?.requests ?? [],
           contextDependent: previous?.contextDependent === true
@@ -1657,6 +1680,7 @@ export class ProgramRuntimeScheduler {
               locks: rebindLocks(previous.result.locks, previous.records, records),
               messages: [],
               transforms: [],
+              shortcuts: [],
               slotBodies: []
             },
             cached: true,
@@ -1819,6 +1843,7 @@ export class ProgramRuntimeScheduler {
       choices: results.flatMap((result) => result.choices ?? []),
       messages: results.flatMap((result) => result.messages),
       transforms: results.flatMap((result) => result.transforms),
+      shortcuts: results.flatMap((result) => result.shortcuts ?? []),
       slotBodies: results.flatMap((result) => result.slotBodies ?? []),
       jumps: applicable.flatMap((entry) => entry.cached === false
         ? entry.result?.jumps ?? []

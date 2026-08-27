@@ -8,6 +8,7 @@ import { matchesExactSelector } from './exact-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { programLockDeniedDiagnostic } from './program-locks.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
+import { breakShortcutTargets, isShortcutAtom, rewriteShortcutTargetPaths } from './shortcut-runtime.mjs';
 
 function fieldsByBase(atom) {
   const result = new Map();
@@ -563,6 +564,10 @@ export async function applyBatchRenames({
   for (const plan of plans) applyNameMetadata(plan.match.atom, plan.nameField);
   rewritePartnerBindings(nextAtoms, partnerBindings);
   const finalMatches = new Map(walkAtoms(nextAtoms).map((match) => [match.atom, match]));
+  rewriteShortcutTargetPaths(nextAtoms, plans.map((plan) => ({
+    sourcePath: plan.sourcePath,
+    resultPath: finalMatches.get(plan.match.atom)?.path.join('/') ?? null
+  })));
   return {
     atoms: nextAtoms,
     results: plans.map((plan) => ({
@@ -629,6 +634,9 @@ function applyExplicitChildren(target, field, atoms) {
     }
     if (matches.length === 0) {
       const created = atomFromFields(submitted.fields);
+      if (walkAtoms([created]).some((match) => isShortcutAtom(match.atom))) {
+        return diagnostic('SHORTCUT_PERSISTENCE_FORGERY_DENIED', '公开 Transform 不得创建或伪造内核虚拟引用记录');
+      }
       const required = ['thing', 'situation', 'contain', 'support'];
       const missing = required.filter((baseKey) => !storedField(created, baseKey));
       if (missing.length) {
@@ -797,6 +805,18 @@ export async function applyTransform({
   const nameCommands = item.fields
     .filter((field) => field.baseKey === 'thing')
     .flatMap((field) => field.commands ?? []);
+  if (nameCommands.some((command) => command.name === 'typ' && command.parameter === 'shortcut')) {
+    return { error: diagnostic('SHORTCUT_PERSISTENCE_FORGERY_DENIED', '公开 Transform 不得创建或伪造内核虚拟引用记录') };
+  }
+  if (isShortcutAtom(selected.match.atom)) {
+    const allowed = item.fields.every((field) => {
+      if (field.baseKey !== 'thing') return !field.valuePresent && field.commands.length === 0;
+      return field.commands.every((command) => ['ren', 'mov', 'dsc', 'rst'].includes(command.name));
+    });
+    if (!allowed || nameCommands.some((command) => command.name === 'cpy')) {
+      return { error: diagnostic('SHORTCUT_TRANSFORM_REDIRECT_FORBIDDEN', '首版 Transform 不经虚拟引用重定向；仅允许改名、移动或删除引用本身') };
+    }
+  }
   if (nameCommands.some((command) => command.name === 'typ' && command.parameter === 'agent')) {
     return { error: diagnostic(
       'AGENT_REGISTRATION_REQUIRED',
@@ -897,6 +917,7 @@ export async function applyTransform({
     const resultPath = rewritesPaths
       ? walkAtoms(nextAtoms).find((match) => match.atom === selected.match.atom)?.path.join('/') ?? null
       : sourcePath;
+    if (!error && resultPath && resultPath !== sourcePath) rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }]);
     return error
       ? rejectAfterMutation(error)
       : {
@@ -975,11 +996,13 @@ export async function applyTransform({
       rewritePartnerBindings(nextAtoms, partnerBindings);
     }
     const resultMatch = walkAtoms(nextAtoms).find((match) => match.atom === target.atom);
+    const resultPath = resultMatch?.path.join('/') ?? sourcePath;
+    rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }]);
     return {
       atoms: nextAtoms,
       resultName: nameField.value,
       sourcePath,
-      resultPath: resultMatch?.path.join('/') ?? sourcePath,
+      resultPath,
       changed: true
     };
   }
@@ -1009,6 +1032,7 @@ export async function applyTransform({
     originalContainer.splice(target.index, 1);
     immediateChildren(backup.match.atom).push(target.atom);
     rewritePartnerBindings(nextAtoms, partnerBindings);
+    breakShortcutTargets(nextAtoms, sourcePath);
     return {
       atoms: nextAtoms,
       resultName: targetName,

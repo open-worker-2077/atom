@@ -30,6 +30,29 @@
   "functions": [
     { "name": "explore", "layer": "kernel", "family": "graph", "scope": "public" },
     {
+      "name": "shortcut",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["placement", "thing", "target"],
+          "additionalProperties": false,
+          "properties": {
+            "placement": { "const": "contain", "meaning": "direct child of current Program" },
+            "thing": { "type": "string", "format": "single-atom-name" },
+            "target": { "$ref": "#/runtimeTypes/ThingCoordinate" }
+          }
+        },
+        "persistence": "kernel-owned-four-axis-reference-record",
+        "authorization": "same-current-agent-graph-explore-and-transform-evaluator",
+        "view": "transparent-target-with-resolvedThroughShortcut-marker",
+        "transformRedirect": "forbidden",
+        "errors": ["INVALID_SHORTCUT_TARGET_COORDINATE", "SHORTCUT_TARGET_ACCESS_DENIED", "SHORTCUT_TARGET_BROKEN", "SHORTCUT_REFERENCE_CYCLE", "SHORTCUT_REFERENCE_DEPTH_EXCEEDED"]
+      }
+    },
+    {
       "name": "agent",
       "layer": "kernel",
       "family": "graph",

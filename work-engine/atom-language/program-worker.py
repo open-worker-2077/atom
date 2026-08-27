@@ -495,7 +495,7 @@ def main():
     views = {ref: AtomView(record) for ref, record in by_ref.items()}
     effects = {
         "locks": [], "messages": [], "transforms": [], "choices": [],
-        "slotBodies": [], "jumps": [], "agents": [], "changedThings": []
+        "slotBodies": [], "jumps": [], "shortcuts": [], "agents": [], "changedThings": []
     }
 
     next_request_id = 0
@@ -571,6 +571,28 @@ def main():
     def transform(specification):
         specification = require_object(specification, "transform")
         effects["transforms"].append(specification)
+
+    def shortcut(specification):
+        try:
+            specification = require_object(specification, "shortcut")
+        except TypeError as error:
+            raise EngineCallError("INVALID_SHORTCUT_CONTRACT", str(error)) from error
+        if set(specification) != {"placement", "thing", "target"}:
+            raise EngineCallError("INVALID_SHORTCUT_CONTRACT", "shortcut() accepts exactly placement, thing, and target")
+        if specification["placement"] != "contain":
+            raise EngineCallError("INVALID_SHORTCUT_PLACEMENT", "shortcut.placement currently accepts only contain")
+        thing = specification["thing"]
+        if (not isinstance(thing, str) or not thing.strip() or thing != thing.strip() or "/" in thing):
+            raise EngineCallError("INVALID_SHORTCUT_THING", "shortcut.thing must be one non-empty Atom name")
+        target_coordinate = specification["target"]
+        if not isinstance(target_coordinate, AtomView):
+            raise EngineCallError("INVALID_SHORTCUT_TARGET_COORDINATE", "shortcut.target requires one exact ThingCoordinate from explore(); strings and refs are forbidden")
+        target = target_coordinate._record
+        effects["shortcuts"].append({
+            "placement": "contain", "thing": thing, "targetRef": target["ref"],
+            "targetPath": target["path"], "__sourceProgramPath": current_atom().path,
+        })
+        return None
 
     def slot_body(specification):
         specification = require_object(specification, "slot_body")
@@ -1233,6 +1255,7 @@ def main():
         "__builtins__": safe_builtins,
         "explore": explore,
         "transform": transform,
+        "shortcut": shortcut,
         "slot_body": slot_body,
         "lock": lock,
         "message": message,

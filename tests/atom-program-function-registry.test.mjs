@@ -54,7 +54,7 @@ test('Program function catalog filters declared groups without exposing a second
 
   assert.equal(
     cycle.messages[0].text,
-    'agent,changed,child_detail,direct_children,explore,jump,lock,slot_body,subtree_refs,transform|False'
+    'agent,changed,child_detail,direct_children,explore,jump,lock,shortcut,slot_body,subtree_refs,transform|False'
   );
 });
 
