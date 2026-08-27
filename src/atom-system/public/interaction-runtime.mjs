@@ -70,6 +70,11 @@ function diagnosticFailure(result) {
   };
 }
 
+function transformProgramFingerprint(result) {
+  const fingerprint = result?.program?.fingerprint ?? result?.programIdentity?.fingerprint;
+  return typeof fingerprint === 'string' && fingerprint.trim() ? fingerprint.trim() : undefined;
+}
+
 function withInteractionId(result, correlationId) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
   return { ...result, interactionId: correlationId };
@@ -260,6 +265,26 @@ export function createInteractionRuntime({
             }
           ]
         };
+      }
+    }
+    if (diagnostics && result?.command === 'transform' && result?.ok === false) {
+      const failure = diagnosticFailure(result);
+      if (failure?.code) {
+        try {
+          await diagnostics.record({
+            id: `${intent.correlationId}:transform`,
+            type: 'transform',
+            command: 'transform',
+            durationMs: performance.now() - interactionStartedAt,
+            outcome: 'failure',
+            errorCode: failure.code,
+            ...(transformProgramFingerprint(result) ? {
+              programFingerprint: transformProgramFingerprint(result)
+            } : {})
+          });
+        } catch {
+          // Diagnostics are observational: a persistence fault must not change a failed command result.
+        }
       }
     }
     return result;

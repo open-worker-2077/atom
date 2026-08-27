@@ -100,6 +100,35 @@ test('runtime diagnostics retain compact Program facts for a bounded period', as
   assert.equal(JSON.stringify(diagnostics).includes('不得复制'), false);
 });
 
+test('failed Transform diagnostics are queryable by interaction id without payload fields', async () => {
+  const store = createRuntimeDiagnosticStore({ maxEntries: 10 });
+  await store.record({
+    id: 'transform-correlation:transform',
+    type: 'transform',
+    command: 'transform',
+    durationMs: 3,
+    outcome: 'failure',
+    errorCode: 'WINDOW_ACCESS_DENIED',
+    programFingerprint: 'sha256:stable-program',
+    source: 'transform new {"thing":"must not persist"}',
+    path: 'Sensitive/Business/Path',
+    situation: 'must not persist'
+  });
+
+  assert.deepEqual(await store.findByInteractionId('transform-correlation'), {
+    id: 'transform-correlation:transform',
+    type: 'transform',
+    recordedAt: (await store.list())[0].recordedAt,
+    durationMs: 3,
+    outcome: 'failure',
+    command: 'transform',
+    errorCode: 'WINDOW_ACCESS_DENIED',
+    programFingerprint: 'sha256:stable-program'
+  });
+  assert.equal(JSON.stringify(await store.list()).includes('Sensitive'), false);
+  assert.equal(JSON.stringify(await store.list()).includes('must not persist'), false);
+});
+
 test('runtime diagnostics survive a repository restart and reject invalid persisted state', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-runtime-diagnostics-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

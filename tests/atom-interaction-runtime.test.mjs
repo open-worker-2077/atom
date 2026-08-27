@@ -106,6 +106,67 @@ test('failed interactions retain their correlation id for bounded server-side di
   assert.equal(result.interactionId, 'failed-create-correlation');
 });
 
+test('a failed Transform persists one redacted diagnostic keyed by its interaction id', async () => {
+  const context = ports();
+  const diagnostics = [];
+  context.diagnostics = {
+    async record(value) {
+      diagnostics.push(structuredClone(value));
+    }
+  };
+  context.world.execute = async () => ({
+    ok: false,
+    command: 'transform',
+    changed: false,
+    errors: [{
+      code: 'WINDOW_ACCESS_DENIED',
+      message: 'fixed Agent denied reading exact target',
+      details: { path: 'Sensitive/Business/Target', situation: 'must never persist' }
+    }]
+  });
+  const runtime = createInteractionRuntime(context);
+
+  const result = await runtime.execute({
+    source: 'transform new {"thing":"Sensitive/Business/Target"}',
+    correlationId: 'failed-transform-diagnostic',
+    agentPath: 'Sensitive/Agent',
+    history: []
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(diagnostics.length, 1);
+  const { durationMs, ...diagnostic } = diagnostics[0];
+  assert.deepEqual(diagnostic, {
+    id: 'failed-transform-diagnostic:transform',
+    type: 'transform',
+    command: 'transform',
+    outcome: 'failure',
+    errorCode: 'WINDOW_ACCESS_DENIED'
+  });
+  assert.equal(Number.isFinite(durationMs), true);
+  assert.equal(JSON.stringify(diagnostics).includes('Sensitive'), false);
+  assert.equal(JSON.stringify(diagnostics).includes('fixed Agent'), false);
+});
+
+test('failed Transform diagnostic persistence never changes the business result', async () => {
+  const context = ports();
+  context.diagnostics = { async record() { throw new Error('disk unavailable'); } };
+  const expected = {
+    ok: false,
+    command: 'transform',
+    changed: false,
+    errors: [{ code: 'WINDOW_ACCESS_DENIED', message: 'denied' }]
+  };
+  context.world.execute = async () => structuredClone(expected);
+  const runtime = createInteractionRuntime(context);
+
+  const result = await runtime.execute({
+    source: 'transform {}', correlationId: 'failed-transform-diagnostic-write', history: []
+  });
+
+  assert.deepEqual(result, { ...expected, interactionId: 'failed-transform-diagnostic-write' });
+});
+
 test('a committed write is exposed before disposable projection publication finishes', async () => {
   let releaseProjection;
   const projectionBlocked = new Promise((resolve) => {

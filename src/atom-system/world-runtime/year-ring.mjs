@@ -114,14 +114,33 @@ function sanitizeDiagnostic(input, now) {
     throw problem('INVALID_RUNTIME_DIAGNOSTIC', 'Runtime diagnostic must be an object');
   }
   const id = requireText(input.id, 'INVALID_DIAGNOSTIC_ID', 'diagnostic id');
-  if (!['read', 'program'].includes(input.type)) {
-    throw problem('INVALID_DIAGNOSTIC_TYPE', 'diagnostic type must be read or program');
+  if (!['read', 'program', 'transform'].includes(input.type)) {
+    throw problem('INVALID_DIAGNOSTIC_TYPE', 'diagnostic type must be read, program or transform');
   }
   if (!Number.isFinite(input.durationMs) || input.durationMs < 0) {
     throw problem('INVALID_DIAGNOSTIC_DURATION', 'durationMs must be a non-negative number');
   }
   if (!['success', 'failure', 'timeout'].includes(input.outcome)) {
     throw problem('INVALID_DIAGNOSTIC_OUTCOME', 'outcome must be success, failure, or timeout');
+  }
+  if (input.type === 'transform') {
+    if (input.command !== 'transform' || input.outcome !== 'failure') {
+      throw problem('INVALID_TRANSFORM_DIAGNOSTIC', 'Transform diagnostic must record one failed transform');
+    }
+    const errorCode = requireText(input.errorCode, 'INVALID_TRANSFORM_DIAGNOSTIC', 'transform error code');
+    const output = {
+      id,
+      type: 'transform',
+      recordedAt: diagnosticTime(input.recordedAt, now),
+      durationMs: Math.round(input.durationMs * 1000) / 1000,
+      outcome: 'failure',
+      command: 'transform',
+      errorCode
+    };
+    if (typeof input.programFingerprint === 'string' && input.programFingerprint.trim()) {
+      output.programFingerprint = input.programFingerprint.trim();
+    }
+    return Object.freeze(output);
   }
   const output = {
     id,
@@ -219,7 +238,15 @@ export function createRuntimeDiagnosticStore({
     });
   }
 
-  return Object.freeze({ record, list });
+  function findByInteractionId(interactionId) {
+    return serialize(async () => {
+      await load();
+      const id = requireText(interactionId, 'INVALID_INTERACTION_ID', 'interaction id');
+      return structuredClone(entries.find((entry) => entry.id === `${id}:transform`) ?? null);
+    });
+  }
+
+  return Object.freeze({ record, list, findByInteractionId });
 }
 
 function appendEvent(byAtom, affected, event) {
