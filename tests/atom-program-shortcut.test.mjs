@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { executeAtomLanguage as executeAtomLanguageKernel } from '../work-engine/atom-language/engine.mjs';
 import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
 import {
@@ -62,6 +63,14 @@ function creatorSource(targetPath, shortcutName) {
   return [
     `target = explore({"thing":${JSON.stringify(targetPath)}})[0]`,
     `shortcut({"placement":"contain","thing":${JSON.stringify(shortcutName)},"target":target})`
+  ].join('\n');
+}
+
+function deleteShortcutSource(parentPath) {
+  return [
+    `rows = explore({"thing":${JSON.stringify(parentPath)},"contain$latitude-1":True})`,
+    'reference = [row for row in rows if "shortcut" in row.types][0]',
+    'shortcut({"action":"delete","reference":reference})'
   ].join('\n');
 }
 
@@ -445,5 +454,134 @@ test('shortcut persistence survives a cold read and rolls back with the authorit
     correlationId: 'shortcut-rollback',
     expectedRevision: receipt.afterRevision
   });
+  assert.deepEqual(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), before);
+});
+
+test('shortcut delete removes only the reference while preserving target facts and both Programs', async (t) => {
+  const target = atom('权威目标', '目标正文', [atom('目标子项')]);
+  const creator = program('创建引用', 'created = True');
+  creator.contain.push(createShortcutAtom({
+    thing: '待删入口', targetPath: '权威目标', referenceId: 'delete-reference-id'
+  }));
+  const deleter = program('删除引用', deleteShortcutSource('创建引用'));
+  const before = [target, creator, deleter, atom('备份', '', [], ['backup', 'default'])];
+  const files = await fixture(t, before);
+  const targetRevision = revisionOfWorldFacts([target]);
+
+  const deleted = await executeAtomLanguage({
+    ...files,
+    programScheduler: createProgramRuntimeScheduler(),
+    source: 'transform {"thing.run.":"删除引用"}'
+  });
+
+  assert.equal(deleted.ok, true, JSON.stringify(deleted.errors));
+  assert.equal(deleted.changed, true);
+  const persisted = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.equal(findAtom(persisted, '创建引用/待删入口'), null);
+  assert.equal(revisionOfWorldFacts([findAtom(persisted, '权威目标')]), targetRevision);
+  assert.deepEqual(findAtom(persisted, '权威目标'), target);
+  assert.equal(findAtom(persisted, '创建引用').situation, 'created = True');
+  assert.equal(findAtom(persisted, '删除引用').situation, deleter.situation);
+});
+
+test('shortcut delete rejects strings and target coordinates without changing any facts', async (t) => {
+  const programs = [
+    program('字符串删除', 'shortcut({"action":"delete","reference":"创建引用/入口"})'),
+    program('目标删除', [
+      'target = explore({"thing":"权威目标"})[0]',
+      'shortcut({"action":"delete","reference":target})'
+    ].join('\n'))
+  ];
+  const creator = program('创建引用', 'created = True');
+  creator.contain.push(createShortcutAtom({
+    thing: '入口', targetPath: '权威目标', referenceId: 'protected-reference-id'
+  }));
+  const before = [atom('权威目标', '不可改变'), creator, ...programs];
+  const files = await fixture(t, before);
+
+  for (const [programPath, expectedCode] of [
+    ['字符串删除', 'INVALID_SHORTCUT_REFERENCE_COORDINATE'],
+    ['目标删除', 'SHORTCUT_DELETE_REFERENCE_REQUIRED']
+  ]) {
+    const result = await executeAtomLanguage({
+      ...files,
+      programScheduler: createProgramRuntimeScheduler(),
+      source: `transform {"thing.run.":${JSON.stringify(programPath)}}`
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.errors[0].code, expectedCode);
+    assert.deepEqual(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), before);
+  }
+});
+
+test('shortcut delete rejects unknown, denied, and repeated reference effects without extra mutation', async () => {
+  const creator = program('创建引用', 'created = True');
+  creator.contain.push(createShortcutAtom({
+    thing: '入口', targetPath: '权威目标', referenceId: 'stable-delete-id'
+  }));
+  const atoms = [atom('权威目标', '不可改变'), creator, program('删除器', 'deleted = True')];
+  const effect = {
+    action: 'delete', referenceRef: 'opaque-coordinate', referencePath: '创建引用/入口',
+    referenceIdentity: 'stable-delete-id', sourceProgramPath: '删除器'
+  };
+
+  const unknown = await applyShortcutEffect({
+    atoms,
+    effect: { ...effect, referencePath: '创建引用/不存在' },
+    authorize: async () => ({ decision: 'allow' })
+  });
+  assert.equal(unknown.error.code, 'SHORTCUT_REFERENCE_NOT_FOUND');
+  assert.strictEqual(unknown.atoms ?? atoms, atoms);
+
+  const denied = await applyShortcutEffect({
+    atoms,
+    effect,
+    authorize: async () => ({ decision: 'deny', code: 'GRAPH_LOCK_DENIED' })
+  });
+  assert.equal(denied.error.code, 'SHORTCUT_REFERENCE_ACCESS_DENIED');
+  assert.strictEqual(denied.atoms ?? atoms, atoms);
+
+  const first = await applyShortcutEffect({
+    atoms,
+    effect,
+    authorize: async () => ({ decision: 'allow' })
+  });
+  assert.equal(first.changed, true);
+  const afterFirst = structuredClone(first.atoms);
+  const repeated = await applyShortcutEffect({
+    atoms: first.atoms,
+    effect,
+    authorize: async () => ({ decision: 'allow' })
+  });
+  assert.equal(repeated.error.code, 'SHORTCUT_REFERENCE_NOT_FOUND');
+  assert.deepEqual(first.atoms, afterFirst);
+  assert.deepEqual(findAtom(first.atoms, '权威目标'), findAtom(atoms, '权威目标'));
+  assert.ok(findAtom(first.atoms, '创建引用'));
+});
+
+test('shortcut delete leaves the authoritative world unchanged when its central commit fails', async (t) => {
+  const creator = program('创建引用', 'created = True');
+  creator.contain.push(createShortcutAtom({
+    thing: '入口', targetPath: '权威目标', referenceId: 'rollback-delete-id'
+  }));
+  const before = [
+    atom('权威目标', '不可改变'), creator,
+    program('删除引用', deleteShortcutSource('创建引用'))
+  ];
+  const files = await fixture(t, before);
+
+  await assert.rejects(
+    () => executeAtomLanguageKernel({
+      ...files,
+      programScheduler: createProgramRuntimeScheduler(),
+      source: 'transform {"thing.run.":"删除引用"}',
+      commitWorld: async () => {
+        throw Object.assign(new Error('synthetic commit failure'), {
+          code: 'SYNTHETIC_COMMIT_FAILURE'
+        });
+      }
+    }),
+    (error) => error.code === 'SYNTHETIC_COMMIT_FAILURE'
+  );
   assert.deepEqual(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), before);
 });

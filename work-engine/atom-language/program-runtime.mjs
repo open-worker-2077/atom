@@ -9,6 +9,7 @@ import { executeProgramExplore, prepareExploreWorld } from './query-capability.m
 import { matchesExactSelector } from './exact-selector.mjs';
 import { normalizeTypePredicate } from './program-locks.mjs';
 import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
+import { shortcutMetadata } from './shortcut-runtime.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 
@@ -55,6 +56,9 @@ function worldRecords(atoms) {
       childrenRefs: [],
       partners: structuredClone(stored.get('support')?.value ?? [])
     };
+    if (record.types.includes('shortcut')) {
+      record.shortcutIdentity = shortcutMetadata(atom)?.referenceId ?? null;
+    }
     records.push(record);
     for (const [index, child] of (stored.get('contain')?.value ?? []).entries()) {
       const childRecord = visit(child, ref, [...parentPath, name], `${address}/${index}`);
@@ -571,10 +575,30 @@ function validateResult(result, records, program, options = {}) {
     };
   });
   const shortcuts = (result.shortcuts ?? []).map((entry) => {
-    const target = records.find((record) => record.ref === entry?.targetRef);
     const sourceProgramPath = typeof entry?.__sourceProgramPath === 'string'
       ? entry.__sourceProgramPath : program.path;
+    if (entry?.action === 'delete') {
+      const reference = records.find((record) => record.ref === entry.referenceRef);
+      if (!reference || reference.path !== entry.referencePath
+        || !reference.types.includes('shortcut')
+        || reference.shortcutIdentity !== entry.referenceIdentity
+        || !recordsByPath.get(sourceProgramPath)?.types.includes('program')) {
+        throw Object.assign(new Error('shortcut() returned an invalid delete effect'), {
+          code: 'INVALID_SHORTCUT_EFFECT'
+        });
+      }
+      return {
+        action: 'delete',
+        referenceRef: entry.referenceRef,
+        referencePath: entry.referencePath,
+        referenceIdentity: entry.referenceIdentity,
+        sourceProgramPath,
+        ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {})
+      };
+    }
+    const target = records.find((record) => record.ref === entry?.targetRef);
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || entry.action !== 'create'
       || entry.placement !== 'contain' || typeof entry.thing !== 'string' || !entry.thing.trim()
       || entry.thing !== entry.thing.trim() || entry.thing.includes('/')
       || !target || target.path !== entry.targetPath
@@ -583,7 +607,7 @@ function validateResult(result, records, program, options = {}) {
         code: 'INVALID_SHORTCUT_EFFECT'
       });
     }
-    return { placement: 'contain', thing: entry.thing, targetRef: entry.targetRef,
+    return { action: 'create', placement: 'contain', thing: entry.thing, targetRef: entry.targetRef,
       targetPath: entry.targetPath, sourceProgramPath,
       ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {}) };
   });

@@ -938,10 +938,14 @@ export async function executeAtomLanguage(options = {}) {
       atoms = shortcut.atoms;
       const after = revisionOf(atoms);
       programChanged = true;
-      initialProgramTriggerNodes.push(shortcut.resultPath, shortcut.targetPath);
+      initialProgramTriggerNodes.push(...(shortcut.triggerPaths ?? []));
       programTransformLogs.push({
         id: crypto.randomUUID(), operation: 'program-shortcut',
-        source: { placement: effect.placement, thing: effect.thing, targetPath: effect.targetPath },
+        source: effect.action === 'delete'
+          ? { action: 'delete', referencePath: effect.referencePath,
+            referenceIdentity: effect.referenceIdentity }
+          : { action: 'create', placement: effect.placement,
+            thing: effect.thing, targetPath: effect.targetPath },
         revisionBefore: before, revisionAfter: after
       });
       accessController = createAccessController(atoms, {
@@ -1684,7 +1688,11 @@ export async function executeAtomLanguage(options = {}) {
         for (const entry of appliedShortcuts) {
           transformLogs.push({
             id: crypto.randomUUID(), operation: 'program-shortcut',
-            source: { placement: entry.effect.placement, thing: entry.effect.thing, targetPath: entry.effect.targetPath },
+            source: entry.effect.action === 'delete'
+              ? { action: 'delete', referencePath: entry.effect.referencePath,
+                referenceIdentity: entry.effect.referenceIdentity }
+              : { action: 'create', placement: entry.effect.placement,
+                thing: entry.effect.thing, targetPath: entry.effect.targetPath },
             revisionBefore: before, revisionAfter: after
           });
         }

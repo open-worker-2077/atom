@@ -36,20 +36,34 @@
       "scope": "public",
       "contract": {
         "argument": {
-          "type": "object",
-          "required": ["placement", "thing", "target"],
-          "additionalProperties": false,
-          "properties": {
-            "placement": { "const": "contain", "meaning": "direct child of current Program" },
-            "thing": { "type": "string", "format": "single-atom-name" },
-            "target": { "$ref": "#/runtimeTypes/ThingCoordinate" }
-          }
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["placement", "thing", "target"],
+              "additionalProperties": false,
+              "properties": {
+                "placement": { "const": "contain", "meaning": "direct child of current Program" },
+                "thing": { "type": "string", "format": "single-atom-name" },
+                "target": { "$ref": "#/runtimeTypes/ThingCoordinate" }
+              }
+            },
+            {
+              "type": "object",
+              "required": ["action", "reference"],
+              "additionalProperties": false,
+              "properties": {
+                "action": { "const": "delete" },
+                "reference": { "$ref": "#/runtimeTypes/ThingCoordinate", "role": "shortcut-record" }
+              }
+            }
+          ]
         },
         "persistence": "kernel-owned-four-axis-reference-record",
         "authorization": "same-current-agent-graph-explore-and-transform-evaluator",
         "view": "transparent-target-with-resolvedThroughShortcut-marker",
+        "delete": "reference-only-central-atomic-commit",
         "transformRedirect": "forbidden",
-        "errors": ["INVALID_SHORTCUT_TARGET_COORDINATE", "SHORTCUT_TARGET_ACCESS_DENIED", "SHORTCUT_TARGET_BROKEN", "SHORTCUT_REFERENCE_CYCLE", "SHORTCUT_REFERENCE_DEPTH_EXCEEDED"]
+        "errors": ["INVALID_SHORTCUT_TARGET_COORDINATE", "SHORTCUT_TARGET_ACCESS_DENIED", "SHORTCUT_TARGET_BROKEN", "SHORTCUT_REFERENCE_CYCLE", "SHORTCUT_REFERENCE_DEPTH_EXCEEDED", "INVALID_SHORTCUT_REFERENCE_COORDINATE", "SHORTCUT_DELETE_REFERENCE_REQUIRED", "SHORTCUT_REFERENCE_NOT_FOUND", "SHORTCUT_REFERENCE_ACCESS_DENIED"]
       }
     },
     {

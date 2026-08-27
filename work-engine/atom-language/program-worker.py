@@ -351,7 +351,10 @@ def extract_trigger_contract(tree):
 
 
 class AtomView:
-    __slots__ = ("ref", "thing", "situation", "path", "types", "support", "_record")
+    __slots__ = (
+        "ref", "thing", "situation", "path", "types", "support",
+        "shortcut_identity", "_record"
+    )
 
     def __init__(self, record):
         self.ref = record["ref"]
@@ -360,6 +363,7 @@ class AtomView:
         self.path = record["path"]
         self.types = tuple(record["types"])
         self.support = tuple(record.get("partners", []))
+        self.shortcut_identity = record.get("shortcutIdentity")
         self._record = record
 
     def __repr__(self):
@@ -581,8 +585,39 @@ def main():
             specification = require_object(specification, "shortcut")
         except TypeError as error:
             raise EngineCallError("INVALID_SHORTCUT_CONTRACT", str(error)) from error
+        if set(specification) == {"action", "reference"}:
+            if specification["action"] != "delete":
+                raise EngineCallError(
+                    "INVALID_SHORTCUT_CONTRACT",
+                    "shortcut.action currently accepts only delete",
+                )
+            reference_coordinate = specification["reference"]
+            if not isinstance(reference_coordinate, AtomView):
+                raise EngineCallError(
+                    "INVALID_SHORTCUT_REFERENCE_COORDINATE",
+                    "shortcut.reference requires one exact shortcut ThingCoordinate; strings and refs are forbidden",
+                )
+            reference = reference_coordinate._record
+            if ("shortcut" not in reference["types"]
+                    or not isinstance(reference.get("shortcutIdentity"), str)
+                    or not reference["shortcutIdentity"]):
+                raise EngineCallError(
+                    "SHORTCUT_DELETE_REFERENCE_REQUIRED",
+                    "shortcut delete requires a ThingCoordinate for the shortcut record, not its target",
+                )
+            effects["shortcuts"].append({
+                "action": "delete",
+                "referenceRef": reference["ref"],
+                "referencePath": reference["path"],
+                "referenceIdentity": reference["shortcutIdentity"],
+                "__sourceProgramPath": current_atom().path,
+            })
+            return None
         if set(specification) != {"placement", "thing", "target"}:
-            raise EngineCallError("INVALID_SHORTCUT_CONTRACT", "shortcut() accepts exactly placement, thing, and target")
+            raise EngineCallError(
+                "INVALID_SHORTCUT_CONTRACT",
+                "shortcut() accepts create {placement, thing, target} or delete {action, reference}",
+            )
         if specification["placement"] != "contain":
             raise EngineCallError("INVALID_SHORTCUT_PLACEMENT", "shortcut.placement currently accepts only contain")
         thing = specification["thing"]
@@ -593,7 +628,7 @@ def main():
             raise EngineCallError("INVALID_SHORTCUT_TARGET_COORDINATE", "shortcut.target requires one exact ThingCoordinate from explore(); strings and refs are forbidden")
         target = target_coordinate._record
         effects["shortcuts"].append({
-            "placement": "contain", "thing": thing, "targetRef": target["ref"],
+            "action": "create", "placement": "contain", "thing": thing, "targetRef": target["ref"],
             "targetPath": target["path"], "__sourceProgramPath": current_atom().path,
         })
         return None

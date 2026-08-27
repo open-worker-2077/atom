@@ -183,6 +183,44 @@ export async function applyShortcutEffect({
       'shortcut() 的当前 Program 位置不存在'
     ) };
   }
+  if (effect?.action === 'delete') {
+    const reference = matches.find((match) => match.path.join('/') === effect.referencePath);
+    if (!reference) {
+      return { error: diagnostic('SHORTCUT_REFERENCE_NOT_FOUND', '待删除的虚拟引用不存在') };
+    }
+    if (!isShortcutAtom(reference.atom)
+      || parseMetadata(reference.atom).referenceId !== effect.referenceIdentity) {
+      return { error: diagnostic(
+        'SHORTCUT_DELETE_REFERENCE_REQUIRED',
+        'shortcut delete 只接受虚拟引用自身的精确 ThingCoordinate'
+      ) };
+    }
+    for (const [match, field] of [[reference, 'thing'], [reference.parent, 'contain']]) {
+      if (!match || (await authorize(
+        match, 'write', field, { programPath: effect.sourceProgramPath }
+      )).decision !== 'allow') {
+        return { error: diagnostic(
+          'SHORTCUT_REFERENCE_ACCESS_DENIED',
+          '当前 Agent 无权删除该虚拟引用'
+        ) };
+      }
+    }
+    const nextAtoms = structuredClone(atoms);
+    const nextReference = walk(nextAtoms)
+      .find((match) => match.path.join('/') === effect.referencePath);
+    const siblings = nextReference.parent
+      ? storedField(nextReference.parent.atom, 'contain').value
+      : nextAtoms;
+    siblings.splice(nextReference.index, 1);
+    return {
+      atoms: nextAtoms,
+      changed: true,
+      action: 'delete',
+      resultPath: effect.referencePath,
+      referenceIdentity: effect.referenceIdentity,
+      triggerPaths: [effect.referencePath]
+    };
+  }
   if (effect?.placement !== 'contain') {
     return { error: diagnostic(
       'INVALID_SHORTCUT_PLACEMENT',
@@ -232,7 +270,8 @@ export async function applyShortcutEffect({
           atoms,
           changed: false,
           resultPath: `${effect.sourceProgramPath}/${effect.thing}`,
-          targetPath: effect.targetPath
+          targetPath: effect.targetPath,
+          triggerPaths: []
         };
       }
     }
@@ -252,6 +291,7 @@ export async function applyShortcutEffect({
     atoms: nextAtoms,
     changed: true,
     resultPath: `${effect.sourceProgramPath}/${effect.thing}`,
-    targetPath: effect.targetPath
+    targetPath: effect.targetPath,
+    triggerPaths: [`${effect.sourceProgramPath}/${effect.thing}`, effect.targetPath]
   };
 }

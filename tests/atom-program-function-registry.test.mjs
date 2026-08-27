@@ -168,6 +168,34 @@ test('public registry exposes the deferred Program Transform create and update c
   ]);
 });
 
+test('public shortcut contract exposes coordinate-only create and delete operations', async () => {
+  const { programFunctionRegistry } = await import('../work-engine/atom-language/program-function-registry.mjs');
+  const shortcut = programFunctionRegistry().functions.find((item) => item.name === 'shortcut');
+  assert.deepEqual(shortcut.contract.argument.oneOf[1], {
+    type: 'object',
+    required: ['action', 'reference'],
+    additionalProperties: false,
+    properties: {
+      action: { const: 'delete' },
+      reference: { $ref: '#/runtimeTypes/ThingCoordinate', role: 'shortcut-record' }
+    }
+  });
+  assert.equal(shortcut.contract.delete, 'reference-only-central-atomic-commit');
+  assert.deepEqual(shortcut.contract.errors.slice(-4), [
+    'INVALID_SHORTCUT_REFERENCE_COORDINATE',
+    'SHORTCUT_DELETE_REFERENCE_REQUIRED',
+    'SHORTCUT_REFERENCE_NOT_FOUND',
+    'SHORTCUT_REFERENCE_ACCESS_DENIED'
+  ]);
+
+  const stdout = output();
+  const stderr = output();
+  const code = await runAtomCli(['--help'], { stdout: stdout.stream, stderr: stderr.stream });
+  assert.equal(code, 0, stderr.value());
+  assert.match(stdout.value(), /shortcut\(\{"action":"delete","reference":reference\}\)/u);
+  assert.match(stdout.value(), /只删除引用.*不改变目标.*不删除创建 Program/u);
+});
+
 test('public registry and CLI Help expose the complete槽体 kernel contract', async () => {
   const { programFunctionRegistry } = await import('../work-engine/atom-language/program-function-registry.mjs');
   const registry = programFunctionRegistry();
