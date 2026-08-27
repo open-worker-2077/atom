@@ -42,6 +42,7 @@ test('GitHub templates, CI and runtime-data exclusions are present', () => {
   const workflow = read('.github/workflows/test.yml');
   assert.match(workflow, /pull_request:/);
   assert.match(workflow, /node-version:\s*24/);
+  assert.match(workflow, /npm run check:online-control/);
   assert.match(workflow, /npm test/);
   assert.equal(JSON.parse(read('package.json')).engines.node, '>=24');
   assert.match(read('.github/pull_request_template.md'), /实际渲染/);
