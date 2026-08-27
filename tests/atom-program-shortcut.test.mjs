@@ -66,11 +66,18 @@ function creatorSource(targetPath, shortcutName) {
   ].join('\n');
 }
 
-function deleteShortcutSource(parentPath) {
+function deleteShortcutSource(shortcutPath) {
+  return [
+    `resolved = explore({"thing":${JSON.stringify(shortcutPath)}})[0]`,
+    'shortcut({"action":"delete","reference":resolved.shortcut_reference})'
+  ].join('\n');
+}
+
+function deleteShortcutFromParentSource(parentPath) {
   return [
     `rows = explore({"thing":${JSON.stringify(parentPath)},"contain$latitude-1":True})`,
-    'reference = [row for row in rows if "shortcut" in row.types][0]',
-    'shortcut({"action":"delete","reference":reference})'
+    'resolved = [row for row in rows if row.shortcut_reference is not None][0]',
+    'shortcut({"action":"delete","reference":resolved.shortcut_reference})'
   ].join('\n');
 }
 
@@ -463,7 +470,7 @@ test('shortcut delete removes only the reference while preserving target facts a
   creator.contain.push(createShortcutAtom({
     thing: '待删入口', targetPath: '权威目标', referenceId: 'delete-reference-id'
   }));
-  const deleter = program('删除引用', deleteShortcutSource('创建引用'));
+  const deleter = program('删除引用', deleteShortcutSource('创建引用/待删入口'));
   const before = [target, creator, deleter, atom('备份', '', [], ['backup', 'default'])];
   const files = await fixture(t, before);
   const targetRevision = revisionOfWorldFacts([target]);
@@ -566,7 +573,7 @@ test('shortcut delete leaves the authoritative world unchanged when its central 
   }));
   const before = [
     atom('权威目标', '不可改变'), creator,
-    program('删除引用', deleteShortcutSource('创建引用'))
+    program('删除引用', deleteShortcutFromParentSource('创建引用'))
   ];
   const files = await fixture(t, before);
 

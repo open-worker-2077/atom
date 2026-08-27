@@ -57,7 +57,11 @@ function worldRecords(atoms) {
       partners: structuredClone(stored.get('support')?.value ?? [])
     };
     if (record.types.includes('shortcut')) {
-      record.shortcutIdentity = shortcutMetadata(atom)?.referenceId ?? null;
+      const metadata = shortcutMetadata(atom);
+      record.shortcutIdentity = metadata?.referenceId ?? null;
+      record.shortcutTargetPath = metadata?.target?.state === 'linked'
+        ? metadata.target.path
+        : null;
     }
     records.push(record);
     for (const [index, child] of (stored.get('contain')?.value ?? []).entries()) {
@@ -247,11 +251,33 @@ function semanticRecord(record, recordsByRef) {
   };
 }
 
+function programExploreRecord(match, recordsByPath) {
+  const marker = match?.resolvedThroughShortcut;
+  if (!marker) return recordsByPath.get(match?.path) ?? null;
+  const reference = recordsByPath.get(marker.path);
+  const target = reference?.shortcutTargetPath
+    ? recordsByPath.get(reference.shortcutTargetPath)
+    : null;
+  if (!reference
+    || !reference.types.includes('shortcut')
+    || reference.shortcutIdentity !== marker.identity
+    || !target) {
+    throw Object.assign(
+      new Error(`Program explore returned an invalid shortcut resolution: ${marker.path}`),
+      { code: 'INVALID_PROGRAM_EXPLORE_RESULT' }
+    );
+  }
+  return { ...target, shortcutReference: reference };
+}
+
 function dependencySnapshot(request, matches, state) {
+  const records = matches.flatMap((match) => {
+    const record = programExploreRecord(match, state.recordsByPath);
+    return record ? [record, record.shortcutReference].filter(Boolean) : [];
+  });
   return {
     request,
-    matches: matches.map((match) => state.recordsByPath.get(match.path))
-      .filter(Boolean)
+    matches: [...new Map(records.map((record) => [record.path, record])).values()]
       .map((record) => semanticRecord(record, state.recordsByRef))
   };
 }
@@ -983,7 +1009,7 @@ export class ProgramRuntimeScheduler {
           programPath: selector
         });
         const byPath = new Map(records.map((record) => [record.path, record]));
-        return matches.map((match) => byPath.get(match.path)).filter(Boolean);
+        return matches.map((match) => programExploreRecord(match, byPath)).filter(Boolean);
       },
       scopeRoot: options.scopeRoot ?? null,
       programRoot: options.programRoot ?? null,
@@ -1251,7 +1277,7 @@ export class ProgramRuntimeScheduler {
         executeExplore: async (request) => {
           const matches = await executeExplore(request);
           return matches.map((match) => {
-            const record = recordsByPath.get(match.path);
+            const record = programExploreRecord(match, recordsByPath);
             if (!record) {
               throw Object.assign(
                 new Error(`Program explore returned an unknown path: ${match.path}`),
@@ -1817,7 +1843,7 @@ export class ProgramRuntimeScheduler {
               });
               rememberDependencySnapshot(dependencyCache, request, matches);
               return matches.map((match) => {
-                const record = byPath.get(match.path);
+                const record = programExploreRecord(match, byPath);
                 if (!record) throw Object.assign(new Error(`Program explore returned an unknown path: ${match.path}`), { code: 'INVALID_PROGRAM_EXPLORE_RESULT' });
                 return record;
               });

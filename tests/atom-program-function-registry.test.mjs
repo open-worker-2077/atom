@@ -177,7 +177,11 @@ test('public shortcut contract exposes coordinate-only create and delete operati
     additionalProperties: false,
     properties: {
       action: { const: 'delete' },
-      reference: { $ref: '#/runtimeTypes/ThingCoordinate', role: 'shortcut-record' }
+      reference: {
+        $ref: '#/runtimeTypes/ThingCoordinate',
+        role: 'shortcut-record',
+        source: 'authorized resolved AtomView.shortcut_reference'
+      }
     }
   });
   assert.equal(shortcut.contract.delete, 'reference-only-central-atomic-commit');
@@ -192,7 +196,8 @@ test('public shortcut contract exposes coordinate-only create and delete operati
   const stderr = output();
   const code = await runAtomCli(['--help'], { stdout: stdout.stream, stderr: stderr.stream });
   assert.equal(code, 0, stderr.value());
-  assert.match(stdout.value(), /shortcut\(\{"action":"delete","reference":reference\}\)/u);
+  assert.match(stdout.value(), /resolved\.shortcut_reference/u);
+  assert.match(stdout.value(), /shortcut\(\{"action":"delete","reference":resolved\.shortcut_reference\}\)/u);
   assert.match(stdout.value(), /只删除引用.*不改变目标.*不删除创建 Program/u);
 });
 

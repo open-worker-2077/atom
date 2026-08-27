@@ -353,7 +353,7 @@ def extract_trigger_contract(tree):
 class AtomView:
     __slots__ = (
         "ref", "thing", "situation", "path", "types", "support",
-        "shortcut_identity", "_record"
+        "shortcut_identity", "shortcut_reference", "_record"
     )
 
     def __init__(self, record):
@@ -364,6 +364,12 @@ class AtomView:
         self.types = tuple(record["types"])
         self.support = tuple(record.get("partners", []))
         self.shortcut_identity = record.get("shortcutIdentity")
+        shortcut_reference = record.get("shortcutReference")
+        self.shortcut_reference = (
+            AtomView(shortcut_reference)
+            if isinstance(shortcut_reference, dict)
+            else None
+        )
         self._record = record
 
     def __repr__(self):
