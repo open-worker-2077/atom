@@ -334,11 +334,11 @@ textarea:focus-visible {
   pointer-events: none;
 }
 
-.mobile-keyboard {
+.mobile-control-panel {
   display: none;
 }
 
-.mobile-keyboard button {
+.mobile-control-panel button {
   min-block-size: 2.75rem;
   min-inline-size: 3.25rem;
   padding: var(--space-xs) var(--space-sm);
@@ -348,35 +348,61 @@ textarea:focus-visible {
   color: var(--color-ink-2);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  touch-action: none;
+  touch-action: pan-x;
   user-select: none;
   white-space: nowrap;
 }
 
-.mobile-keyboard button[data-pressed="true"] {
+.mobile-control-panel button[data-pressed="true"] {
   border-color: var(--color-update);
   background: color-mix(in oklch, var(--color-update) 24%, var(--color-space-0));
   color: var(--color-ink);
   box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-update) 36%, transparent);
 }
 
-.mobile-keyboard__row {
+.mobile-control-panel__group {
+  display: grid;
+  gap: var(--space-2xs);
+  min-inline-size: 0;
+}
+
+.mobile-control-panel__title {
+  margin: 0;
+  color: var(--color-ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.12em;
+}
+
+.mobile-control-panel__scroll {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+  touch-action: pan-x;
+}
+
+.mobile-control-panel__rows {
+  display: grid;
+  gap: var(--space-xs);
+  min-inline-size: max-content;
+}
+
+.mobile-control-panel__row {
   display: flex;
   gap: var(--space-xs);
   min-inline-size: max-content;
 }
 
 @media (max-width: 48rem), (hover: none) and (pointer: coarse) {
-  .mobile-keyboard {
+  .mobile-control-panel {
     position: absolute;
     z-index: var(--z-modal);
     inset: auto var(--space-sm) max(var(--space-sm), env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--space-sm);
     padding: var(--space-xs);
-    overflow-x: auto;
-    overscroll-behavior-inline: contain;
     border-block: var(--rule-hairline) solid color-mix(in oklch, var(--color-update) 24%, transparent);
     background: color-mix(in oklch, var(--color-space-0) 86%, transparent);
     box-shadow: 0 0.75rem 2.5rem rgb(0 0 0 / 44%);
