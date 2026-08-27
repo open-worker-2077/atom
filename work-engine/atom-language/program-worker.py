@@ -425,6 +425,55 @@ def extract_agent_declaration(tree):
     return validate_agent_specification(specification)
 
 
+def extract_request_driven_lock_declarations(tree):
+    """Return persistent lock facts that can be reconstructed without executing Program code."""
+    declarations = []
+    top_level_calls = {
+        id(node.value): node.value for node in tree.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "lock"
+    }
+    literal_assignments = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            try:
+                literal_assignments[node.targets[0].id] = ast.literal_eval(node.value)
+            except (TypeError, ValueError, SyntaxError):
+                pass
+    for call in (
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "lock"
+    ):
+        specification = None
+        direct_literal = False
+        if not call.keywords and len(call.args) == 1:
+            try:
+                specification = ast.literal_eval(call.args[0])
+                direct_literal = True
+            except (TypeError, ValueError, SyntaxError):
+                if isinstance(call.args[0], ast.Name):
+                    specification = literal_assignments.get(call.args[0].id)
+        is_request_driven = (
+            isinstance(specification, dict)
+            and (specification.get("refresh") == {"policy": "on_request"}
+                 or "actions" in specification or "labels" in specification)
+        )
+        if not is_request_driven:
+            continue
+        if id(call) not in top_level_calls or not direct_literal:
+            raise EngineCallError(
+                "REQUEST_DRIVEN_LOCK_LITERAL_REQUIRED",
+                "request-driven lock() must be one top-level call with one literal argument",
+            )
+        declarations.append(specification)
+    return declarations
+
+
 def require_object(value, function_name):
     if not isinstance(value, dict):
         raise TypeError(f"{function_name}() requires one JSON object argument")
@@ -497,8 +546,22 @@ def main():
         effects["agents"].append(declaration)
         return {"registered": True, "path": current_atom().path}
 
+    request_lock_declarations = []
+
     def lock(specification):
         specification = require_object(specification, "lock")
+        if (specification.get("refresh") == {"policy": "on_request"}
+                or "actions" in specification or "labels" in specification):
+            canonical = json.dumps(specification, sort_keys=True, ensure_ascii=True, allow_nan=False)
+            declared = {
+                json.dumps(item, sort_keys=True, ensure_ascii=True, allow_nan=False)
+                for item in request_lock_declarations
+            }
+            if canonical not in declared:
+                raise EngineCallError(
+                    "REQUEST_DRIVEN_LOCK_LITERAL_REQUIRED",
+                    "request-driven lock() must match a top-level literal Program declaration",
+                )
         effects["locks"].append(specification)
 
     def message(specification):
@@ -1285,11 +1348,13 @@ def main():
     )
     trigger_contract = extract_trigger_contract(program_tree)
     agent_declaration = extract_agent_declaration(program_tree)
+    request_lock_declarations = extract_request_driven_lock_declarations(program_tree)
     if request.get("validateOnly") is True:
         sys.stdout.write(json.dumps(
             {
                 "type": "result", "ok": True, "trigger": trigger_contract,
                 **effects,
+                "locks": request_lock_declarations,
                 **({"agents": [agent_declaration]} if agent_declaration is not None else {}),
             },
             ensure_ascii=True,

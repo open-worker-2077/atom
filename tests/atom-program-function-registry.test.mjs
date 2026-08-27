@@ -259,9 +259,11 @@ test('public registry exposes the business state lock range, action, and label c
   assert.deepEqual(lock.contract.argument.required, ['targets', 'actions', 'labels']);
   assert.equal(lock.contract.argument.additionalProperties, false);
   assert.deepEqual(lock.contract.argument.properties.targets, {
-    type: 'object', required: ['refs'], additionalProperties: false,
+    type: 'object', additionalProperties: false,
+    oneOf: [{ required: ['refs'] }, { required: ['paths'] }],
     properties: {
       refs: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', format: 'atom-ref' } },
+      paths: { type: 'array', minItems: 1, maxItems: 1, uniqueItems: true, items: { type: 'string', format: 'exact-atom-path' } },
       scope: { enum: ['exact', 'subtree'], default: 'exact' }
     }
   });
@@ -269,6 +271,7 @@ test('public registry exposes the business state lock range, action, and label c
   assert.equal(lock.contract.argument.properties.labels.minItems, 1);
   assert.equal(lock.contract.authorization, 'shared-cli-graph-chain');
   assert.equal(lock.contract.denial, 'GRAPH_LOCK_DENIED');
+  assert.equal(lock.contract.persistence, 'literal-path-declaration-in-program-source');
 });
 
 test('public registry exposes indexed Transform trigger dispatch and function-reference entrypoints', async () => {

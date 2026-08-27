@@ -337,6 +337,14 @@ function rebindLocks(locks, previousRecords, records) {
   })).filter((lock) => Array.isArray(lock.targets?.paths) || lock.targets.refs.length);
 }
 
+function mergeDerivedLocks(...collections) {
+  const unique = new Map();
+  for (const lock of collections.flat()) {
+    unique.set(JSON.stringify(lock), structuredClone(lock));
+  }
+  return [...unique.values()];
+}
+
 function worldRevisionKey(records) {
   return records[0]?.ref ?? 'empty-world';
 }
@@ -359,9 +367,21 @@ function validateResult(result, records, program, options = {}) {
       throw Object.assign(new Error('lock() result must be a JSON object'), { code: 'INVALID_PROGRAM_LOCK' });
     }
     const refs = entry.targets?.refs;
+    const paths = entry.targets?.paths;
     if (Array.isArray(entry.actions) || Array.isArray(entry.labels)) {
       const scope = entry.targets?.scope ?? 'exact';
-      if (!Array.isArray(refs) || refs.length !== 1 || !knownRefs.has(refs[0])
+      const targetPath = Array.isArray(paths) && paths.length === 1
+        ? paths[0]
+        : (Array.isArray(refs) && refs.length === 1 && knownRefs.has(refs[0])
+          ? recordsByRef.get(refs[0]).path
+          : null);
+      if (typeof targetPath === 'string' && !recordsByPath.has(targetPath)) {
+        throw Object.assign(new Error('lock target path does not resolve in the current Graph'), {
+          code: 'INVALID_PROGRAM_LOCK_TARGET'
+        });
+      }
+      if (!targetPath || !recordsByPath.has(targetPath)
+        || (paths !== undefined && refs !== undefined)
         || !['exact', 'subtree'].includes(scope)
         || !Array.isArray(entry.actions) || entry.actions.length === 0
         || entry.actions.some((action) => !['explore', 'transform'].includes(action))
@@ -369,25 +389,33 @@ function validateResult(result, records, program, options = {}) {
         || !Array.isArray(entry.labels) || entry.labels.length === 0
         || entry.labels.some((label) => typeof label !== 'string' || !label)
         || new Set(entry.labels).size !== entry.labels.length
-        || Object.keys(entry).some((key) => !['targets', 'actions', 'labels'].includes(key))) {
+        || Object.keys(entry).some((key) => !['targets', 'actions', 'labels'].includes(key))
+        || Object.keys(entry.targets ?? {}).some((key) => !['refs', 'paths', 'scope'].includes(key))) {
         throw Object.assign(new Error('lock() requires one range, actions, and labels'), {
           code: 'INVALID_PROGRAM_LOCK'
         });
       }
       return {
         kind: scope === 'subtree' ? 'contain' : 'node',
-        path: recordsByRef.get(refs[0]).path,
+        path: targetPath,
         actions: [...entry.actions],
         labels: [...entry.labels],
         sourceProgramPath: program.path
       };
     }
-    if (!Array.isArray(refs) || !refs.length || refs.some((ref) => !knownRefs.has(ref))) {
-      throw Object.assign(new Error('lock.targets.refs contains an unknown Atom reference'), { code: 'INVALID_PROGRAM_LOCK_TARGET' });
+    const usesPaths = paths !== undefined;
+    if (usesPaths
+      ? (!Array.isArray(paths) || !paths.length || new Set(paths).size !== paths.length
+        || paths.some((path) => typeof path !== 'string' || !recordsByPath.has(path)))
+      : (!Array.isArray(refs) || !refs.length || refs.some((ref) => !knownRefs.has(ref)))) {
+      throw Object.assign(new Error('lock targets contain an unknown exact Atom coordinate'), {
+        code: 'INVALID_PROGRAM_LOCK_TARGET'
+      });
     }
     const targetKeys = Object.keys(entry.targets ?? {});
     const targetScope = entry.targets?.scope ?? 'exact';
-    if (targetKeys.some((key) => !['refs', 'scope'].includes(key))
+    if ((usesPaths && refs !== undefined)
+      || targetKeys.some((key) => !['refs', 'paths', 'scope'].includes(key))
       || !['exact', 'subtree'].includes(targetScope)) {
       throw Object.assign(new Error('lock.targets.scope must be exact or subtree'), {
         code: 'INVALID_PROGRAM_LOCK_TARGET_SCOPE'
@@ -500,10 +528,18 @@ function validateResult(result, records, program, options = {}) {
         });
       }
       refresh = { policy: 'on_request' };
+      if (!usesPaths) {
+        throw Object.assign(new Error('request-driven locks require literal exact Graph paths'), {
+          code: 'REQUEST_DRIVEN_LOCK_LITERAL_REQUIRED'
+        });
+      }
     }
     return {
       ...structuredClone(entry),
-      targets: { refs: [...refs], ...(targetScope === 'subtree' ? { scope: 'subtree' } : {}) },
+      targets: {
+        ...(usesPaths ? { paths: [...paths] } : { refs: [...refs] }),
+        ...(targetScope === 'subtree' ? { scope: 'subtree' } : {})
+      },
       fields, protect: { atom: protect.atom ?? true, messages: protect.messages ?? false },
       ...(allowedWindows ? { allowed_windows: allowedWindows } : {}),
       ...(allowedPrograms ? { allowed_programs: allowedPrograms } : {}),
@@ -824,6 +860,8 @@ export class ProgramRuntimeScheduler {
     this.projectionLoadWarning = null;
     this.requestDrivenLockRepository = options.requestDrivenLockRepository ?? null;
     this.requestDrivenLocks = undefined;
+    this.requestDrivenLocksWorldRevision = null;
+    this.requestDrivenLockRetirementChecked = false;
     this.triggerContracts = new Map();
     this.triggerIndex = new Map();
     this.triggerContractsInitialized = false;
@@ -925,14 +963,63 @@ export class ProgramRuntimeScheduler {
     return this.agentSecurity;
   }
 
-  async activeRequestDrivenLocks(atoms = null) {
-    if (atoms) await this.rebuildAgentSecurity(atoms);
-    if (this.requestDrivenLocks !== undefined) return this.requestDrivenLocks;
-    const stored = this.requestDrivenLockRepository
-      ? await this.requestDrivenLockRepository.load()
-      : { version: 1, locks: [] };
-    this.requestDrivenLocks = structuredClone(stored?.locks ?? []);
+  async rebuildRequestDrivenLocks(atoms) {
+    const revision = revisionOfWorldFacts(atoms);
+    if (this.requestDrivenLocksWorldRevision === revision) return this.requestDrivenLocks ?? [];
+    await this.rebuildAgentSecurity(atoms);
+    const records = worldRecords(atoms);
+    const programs = programRecords(records);
+    const lockPrograms = programs.filter((program) => /\block\s*\(/u.test(program.detail));
+    const inspected = await Promise.all(lockPrograms.map((program) => (
+      this.runBounded(() => {
+        const enclosingAgent = [...this.agentSecurity.entries()]
+          .filter(([agentPath]) => (
+            program.path === agentPath || program.path.startsWith(`${agentPath}/`)
+          ))
+          .sort(([left], [right]) => right.length - left.length)[0]?.[1] ?? null;
+        const allowedFunctions = enclosingAgent
+          ? [...new Set([
+            ...enclosingAgent.functions,
+            ...(program.types.includes('agent') ? ['agent'] : [])
+          ])]
+          : null;
+        return this.inspectProgram({
+          python: this.python,
+          records,
+          programs,
+          program,
+          timeoutMs: this.timeoutMs,
+          allowedFunctions,
+          executeExplore: async () => {
+            throw Object.assign(
+              new Error('Persistent lock reconstruction cannot execute Graph functions'),
+              { code: 'INVALID_REQUEST_DRIVEN_LOCK_RECONSTRUCTION_EFFECT' }
+            );
+          },
+          validateOnly: true
+        });
+      })
+    )));
+    const next = inspected.flatMap((result) => result.locks).sort((left, right) => (
+      left.sourceProgramPath.localeCompare(right.sourceProgramPath)
+      || JSON.stringify(left.targets ?? { path: left.path, kind: left.kind })
+        .localeCompare(JSON.stringify(right.targets ?? { path: right.path, kind: right.kind }))
+    ));
+    this.requestDrivenLocks = next;
+    this.requestDrivenLocksWorldRevision = revision;
     return this.requestDrivenLocks;
+  }
+
+  async activeRequestDrivenLocks(atoms = null) {
+    if (atoms) {
+      await this.rebuildAgentSecurity(atoms);
+      await this.rebuildRequestDrivenLocks(atoms);
+    }
+    if (this.requestDrivenLockRepository && !this.requestDrivenLockRetirementChecked) {
+      await this.requestDrivenLockRepository.load();
+      this.requestDrivenLockRetirementChecked = true;
+    }
+    return this.requestDrivenLocks ?? [];
   }
 
   async registerAgentWindow({ sourceProgramPath, labels, functionScopes, functions }) {
@@ -958,10 +1045,7 @@ export class ProgramRuntimeScheduler {
     const active = await this.activeRequestDrivenLocks();
     return {
       ...value,
-      locks: [
-        ...(value.locks ?? []).filter((lock) => lock.refresh?.policy !== 'on_request'),
-        ...structuredClone(active)
-      ],
+      locks: mergeDerivedLocks(value.locks ?? [], active),
       agentSecurity: (() => {
         const scopePath = agentScopePath(agentOrigin);
         return scopePath ? structuredClone(this.agentSecurity.get(scopePath) ?? null) : null;
@@ -971,35 +1055,7 @@ export class ProgramRuntimeScheduler {
 
   async mergeRequestDrivenLocks(value, records, options) {
     const active = await this.activeRequestDrivenLocks();
-    const automatic = value.locks.filter((lock) => lock.refresh?.policy !== 'on_request');
-    const explicitReplacement = options.force === true
-      && options.programSelector
-      && value.failures.length === 0;
-    if (explicitReplacement) {
-      const sourcePath = value.selectedProgram?.path ?? options.programSelector;
-      const pathByRef = new Map(records.map((record) => [record.ref, record.path]));
-      const replacement = value.locks
-        .filter((lock) => lock.refresh?.policy === 'on_request')
-        .map((lock) => ({
-          ...structuredClone(lock),
-          targets: {
-            paths: lock.targets.refs.map((ref) => pathByRef.get(ref)).filter(Boolean),
-            ...(lock.targets.scope === 'subtree' ? { scope: 'subtree' } : {})
-          }
-        }));
-      const next = [
-        ...active.filter((lock) => lock.sourceProgramPath !== sourcePath),
-        ...replacement
-      ];
-      if (this.requestDrivenLockRepository) {
-        await this.requestDrivenLockRepository.save({
-          version: 1,
-          locks: next
-        });
-      }
-      this.requestDrivenLocks = next;
-    }
-    value.locks = [...automatic, ...structuredClone(this.requestDrivenLocks ?? active)];
+    value.locks = mergeDerivedLocks(value.locks, active);
     return value;
   }
 

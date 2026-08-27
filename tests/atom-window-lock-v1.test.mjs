@@ -14,7 +14,6 @@ import { expandProgramFunctionSelection } from '../work-engine/atom-language/pro
 import { programFunctionRegistry } from '../work-engine/atom-language/program-function-registry.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
-import { createJsonRequestDrivenLockRepository } from '../src/atom-system/adapters/json-request-driven-lock-repository.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
@@ -174,7 +173,6 @@ test('registered Program Explore uses the same fixed Graph path before reading s
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  const lockFile = path.join(directory, 'request-driven-locks.json');
   await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
     atom('Area', '', [atom('Window', 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","message"]}})', [atom('Probe', [
       'outside = explore({"thing":"Root/Outside","situation$full":True})[0]',
@@ -182,13 +180,11 @@ test('registered Program Explore uses the same fixed Graph path before reading s
     ].join('\n'), [], 'program')], 'program@agent')]),
     atom('Outside', 'secret')
   ])], null, 2));
-  const repository = createJsonRequestDrivenLockRepository({ file: lockFile });
-  await repository.save({ version: 1, locks: [] });
   const result = await executeAtomLanguage({
     source: 'transform {"thing.run.":"Root/Area/Window/Probe"}',
     contextFile,
     projectionFile,
-    programScheduler: createProgramRuntimeScheduler({ requestDrivenLockRepository: repository }),
+    programScheduler: createProgramRuntimeScheduler(),
     interaction: { id: 'program-explore-auth', agent: { path: 'Root/Area/Window' } }
   });
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -202,10 +198,9 @@ test('lock() publishes only range, Explore or Transform actions, and required la
   assert.deepEqual(registryLock.contract.argument.required, ['targets', 'actions', 'labels']);
   const cycle = await createProgramRuntimeScheduler().refresh([
     atom('Target'),
-    atom('Locker', [
-      'target = explore({"thing":"Target"})[0]',
-      'lock({"targets":{"refs":[target.ref],"scope":"subtree"},"actions":["explore","transform"],"labels":["approved"]})'
-    ].join('\n'), [], 'program')
+    atom('Locker',
+      'lock({"targets":{"paths":["Target"],"scope":"subtree"},"actions":["explore","transform"],"labels":["approved"]})',
+      [], 'program')
   ], { programSelector: 'Locker', force: true });
   assert.deepEqual(cycle.locks, [{
     kind: 'contain', path: 'Target', actions: ['explore', 'transform'], labels: ['approved'],
@@ -213,7 +208,7 @@ test('lock() publishes only range, Explore or Transform actions, and required la
   }]);
 });
 
-test('agent() atomically registers its Program node while the sidecar remains locks-only', async (t) => {
+test('agent() atomically registers its Program node with no security sidecar authority', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-register-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -225,9 +220,7 @@ test('agent() atomically registers its Program node while the sidecar remains lo
       atom('Registrar', 'agent({"labels":["^","leaf"],"functions":{"groups":[],"names":["message"]}})', [], 'program')
     ])
   ], null, 2));
-  const scheduler = createProgramRuntimeScheduler({
-    requestDrivenLockRepository: createJsonRequestDrivenLockRepository({ file: lockFile })
-  });
+  const scheduler = createProgramRuntimeScheduler();
   const result = await executeAtomLanguage({
     source: 'transform {"thing.run.":"Root/Registrar"}',
     contextFile, projectionFile, programScheduler: scheduler,
@@ -236,11 +229,8 @@ test('agent() atomically registers its Program node while the sidecar remains lo
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(Object.hasOwn(world[0].contain[1], 'thing@program@agent'), true);
-  const snapshot = JSON.parse(await fs.readFile(lockFile, 'utf8'));
-  assert.deepEqual(snapshot, { version: 1, locks: [] });
-  const restarted = createProgramRuntimeScheduler({
-    requestDrivenLockRepository: createJsonRequestDrivenLockRepository({ file: lockFile })
-  });
+  await assert.rejects(fs.stat(lockFile), (error) => error.code === 'ENOENT');
+  const restarted = createProgramRuntimeScheduler();
   await restarted.rebuildAgentSecurity(world);
   assert.deepEqual(restarted.agentSecurity.get('Root/Registrar'), {
     labels: ['^', 'leaf'],

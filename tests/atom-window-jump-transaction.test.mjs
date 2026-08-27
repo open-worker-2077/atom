@@ -421,13 +421,9 @@ test('a symbolic Agent security declaration survives scheduler reconstruction', 
     atom('Job1', '', [windowAgent('Window')])
   ])])];
   const files = await fixture(t, initial);
-  const repository = createJsonRequestDrivenLockRepository({
-    file: path.join(path.dirname(files.contextFile), 'request-driven-locks.json')
-  });
   const interaction = { agent: { ref: 'window-ref', path: agentPath } };
-  await repository.save({ version: 1, locks: [] });
 
-  const restarted = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
+  const restarted = createProgramRuntimeScheduler();
   const cycle = await restarted.current(initial, {
     agentOrigin: interaction.agent,
     allowWindowLockSnapshot: true
@@ -508,10 +504,9 @@ test('startup projection remains readable when an existing jump registration is 
 test('business Graph lock denial leaves the window in place', async (t) => {
   const initial = jumpWorld();
   const window = initial[0].contain[0].contain.find((entry) => nameOf(entry) === 'Window');
-  window.contain.unshift(atom('Blocker', [
-    'target = explore({"thing":"Root/A/B"})[0]',
-    'lock({"targets":{"refs":[target.ref]},"actions":["explore"],"labels":["blocked"]})'
-  ].join('\n'), [], 'program'));
+  window.contain.unshift(atom('Blocker',
+    'lock({"targets":{"paths":["Root/A/B"]},"actions":["explore"],"labels":["blocked"]})',
+    [], 'program'));
   const files = await fixture(t, initial);
   const scheduler = await v1Scheduler('Root/A/Window');
   const result = await executeAtomLanguage({
@@ -556,10 +551,7 @@ test('an explicit jump recycle is the only transform allowed to remove its activ
     ])
   ])];
   const files = await fixture(t, initial);
-  const snapshotFile = path.join(path.dirname(files.contextFile), 'request-driven-locks.json');
-  const repository = createJsonRequestDrivenLockRepository({ file: snapshotFile });
-  await repository.save({ version: 1, locks: [] });
-  const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
+  const scheduler = createProgramRuntimeScheduler();
 
   const result = await executeAtomLanguage({
     source: 'transform {"thing.run.":"Root/A/Window/Registration"}',
@@ -572,7 +564,6 @@ test('an explicit jump recycle is the only transform allowed to remove its activ
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
   assert.deepEqual(childNames(stored[0].contain[0]), []);
   assert.equal(scheduler.agentSecurity.has('Root/A/Window'), false);
-  assert.deepEqual(await repository.load(), { version: 1, locks: [] });
 });
 
 test('a rejected recycle commit retains the Agent and its source-derived self-lock', async (t) => {
@@ -585,14 +576,7 @@ test('a rejected recycle commit retains the Agent and its source-derived self-lo
     ])
   ])];
   const files = await fixture(t, initial);
-  const snapshotFile = path.join(path.dirname(files.contextFile), 'request-driven-locks.json');
-  const repository = createJsonRequestDrivenLockRepository({ file: snapshotFile });
-  const snapshot = {
-    version: 1,
-    locks: []
-  };
-  await repository.save(snapshot);
-  const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
+  const scheduler = createProgramRuntimeScheduler();
 
   await assert.rejects(
     executeAtomLanguageWithoutWorldService({
@@ -611,7 +595,9 @@ test('a rejected recycle commit retains the Agent and its source-derived self-lo
   );
 
   assert.deepEqual(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), initial);
-  assert.deepEqual(await repository.load(), snapshot);
+  const restarted = createProgramRuntimeScheduler();
+  await restarted.rebuildAgentSecurity(initial);
+  assert.equal(restarted.agentSecurity.has('Root/A/Window'), true);
 });
 
 test('cyclic destination and downstream failure both roll back the moved window', async (t) => {
