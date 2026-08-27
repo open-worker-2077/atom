@@ -882,6 +882,7 @@ export class ProgramRuntimeScheduler {
     this.triggerContracts = new Map();
     this.triggerIndex = new Map();
     this.triggerContractsInitialized = false;
+    this.deferredTriggerContracts = new Map();
     this.slotInvocationCycles = new Map();
     this.agentSecurity = new Map();
     this.agentSecurityWorldRevision = null;
@@ -1135,6 +1136,7 @@ export class ProgramRuntimeScheduler {
   }
 
   removeTriggerContract(programPath) {
+    this.deferredTriggerContracts.delete(programPath);
     const existing = this.triggerContracts.get(programPath);
     if (existing) {
       const indexed = [
@@ -1170,12 +1172,19 @@ export class ProgramRuntimeScheduler {
     }
   }
 
-  async ensureTriggerContracts(records, programs, executeExplore) {
+  async ensureTriggerContracts(records, programs, executeExplore, agentOrigin = null) {
     if (this.triggerContractsInitialized) return;
     const recordsByPath = new Map(records.map((record) => [record.path, record]));
+    const deferredContext = [
+      worldRevisionKey(records),
+      agentScopePath(agentOrigin) ?? '',
+      this.agentSecurityWorldRevision ?? ''
+    ].join('\0');
     const candidates = programs.filter((program) => (
       /\b(?:trigger|changed)\s*\(/u.test(program.detail)
       && this.triggerContracts.get(program.path)?.detail !== program.detail
+      && (this.deferredTriggerContracts.get(program.path)?.context !== deferredContext
+        || this.deferredTriggerContracts.get(program.path)?.detail !== program.detail)
     ));
     const inspected = await Promise.allSettled(candidates.map((program) => this.runBounded(() => (
       this.runProgram({
@@ -1201,12 +1210,14 @@ export class ProgramRuntimeScheduler {
         changedNodes: []
       })
     ))));
-    const deferredByWindow = new Set();
     for (const [index, program] of candidates.entries()) {
       const result = inspected[index];
       if (result.status === 'rejected') {
         if (result.reason?.code !== 'WINDOW_ACCESS_DENIED') throw result.reason;
-        deferredByWindow.add(program.path);
+        this.deferredTriggerContracts.set(program.path, {
+          context: deferredContext,
+          detail: program.detail
+        });
         continue;
       }
       this.setTriggerContract(
@@ -1215,7 +1226,11 @@ export class ProgramRuntimeScheduler {
         result.value.changedThings ?? []
       );
     }
-    this.triggerContractsInitialized = deferredByWindow.size === 0;
+    const stillDeferred = programs.some((program) => {
+      const deferred = this.deferredTriggerContracts.get(program.path);
+      return deferred?.context === deferredContext && deferred.detail === program.detail;
+    });
+    this.triggerContractsInitialized = !stillDeferred;
   }
 
   async loadProjection() {
@@ -1454,7 +1469,9 @@ export class ProgramRuntimeScheduler {
         code: 'INVALID_PROGRAM_TRIGGER_EVENT'
       });
     }
-    if (triggerEvent) await this.ensureTriggerContracts(records, programs, executeExplore);
+    if (triggerEvent) await this.ensureTriggerContracts(
+      records, programs, executeExplore, options.agentOrigin
+    );
     const eventNodes = new Set((triggerEvent?.nodes ?? []).map((node) => node.trim()));
     const triggeredProgramPaths = new Set();
     if (triggerEvent) {

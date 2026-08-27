@@ -144,6 +144,7 @@ test('trigger contract discovery isolates an unrelated Program denied by the cur
 
 test('a denied trigger contract is retried under a later authorized Agent context', async () => {
   const scheduler = createProgramRuntimeScheduler();
+  let deniedContractInspections = 0;
   const watched = atom('Watched');
   const program = atom('Scoped Trigger', [
     "watched = explore({'thing': 'Watched'})[0]",
@@ -158,6 +159,7 @@ test('a denied trigger contract is retried under a later authorized Agent contex
     triggerEvent: { mode: 'transform', nodes: ['Watched'] },
     agentOrigin: { path: 'Root/Denied Window' },
     executeExplore: async () => {
+      deniedContractInspections += 1;
       throw Object.assign(new Error('fixed Agent cannot read outside scope'), {
         code: 'WINDOW_ACCESS_DENIED'
       });
@@ -165,14 +167,61 @@ test('a denied trigger contract is retried under a later authorized Agent contex
   });
 
   assert.equal(scheduler.triggerContracts.has('Scoped Trigger'), false);
+  await scheduler.refresh(world, {
+    triggerEvent: { mode: 'transform', nodes: ['Watched'] },
+    agentOrigin: { path: 'Root/Denied Window' },
+    executeExplore: async () => {
+      deniedContractInspections += 1;
+      throw Object.assign(new Error('fixed Agent cannot read outside scope'), {
+        code: 'WINDOW_ACCESS_DENIED'
+      });
+    }
+  });
+  assert.equal(deniedContractInspections, 1);
   const authorized = await scheduler.refresh(world, {
     triggerEvent: { mode: 'transform', nodes: ['Watched'] },
     agentOrigin: { path: 'Root/Authorized Window' },
     executeExplore: async () => [{ path: 'Watched' }]
   });
 
+  assert.equal(deniedContractInspections, 1);
   assert.deepEqual(authorized.executedProgramPaths, ['Scoped Trigger']);
   assert.deepEqual(authorized.messages.map(({ text }) => text), ['ran']);
+});
+
+test('a deferred contract does not rediscover already indexed Programs in the same context', async () => {
+  let healthyDiscoveries = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program, changedNodes }) => {
+      if (program.path === 'Deferred Trigger' && changedNodes.length === 0) {
+        throw Object.assign(new Error('fixed Agent cannot read outside scope'), {
+          code: 'WINDOW_ACCESS_DENIED'
+        });
+      }
+      if (program.path === 'Healthy Trigger' && changedNodes.length === 0) {
+        healthyDiscoveries += 1;
+      }
+      return {
+        locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+        trigger: null,
+        changedThings: program.path === 'Healthy Trigger' ? ['Writable Child'] : []
+      };
+    }
+  });
+  const world = [
+    atom('Writable Child'),
+    atom('Healthy Trigger', 'changed([])', [], 'program'),
+    atom('Deferred Trigger', 'changed([])', [], 'program')
+  ];
+  const request = {
+    triggerEvent: { mode: 'transform', nodes: ['Writable Child'] },
+    agentOrigin: { path: 'Root/Denied Window' }
+  };
+
+  await scheduler.refresh(world, request);
+  await scheduler.refresh(world, request);
+
+  assert.equal(healthyDiscoveries, 1);
 });
 
 test('trigger contract discovery keeps invalid Program failures visible', async () => {
