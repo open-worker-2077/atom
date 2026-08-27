@@ -634,7 +634,13 @@ export async function executeAtomLanguage(options = {}) {
     id: options.interaction?.id ?? crypto.randomUUID(),
     agent: options.interaction?.agent ? structuredClone(options.interaction.agent) : null
   };
-  const transformStageDiagnostics = [];
+  const existingTransformStage = parsed.command === 'transform'
+    && typeof options.diagnosticRecorder?.findByInteractionId === 'function'
+    ? await options.diagnosticRecorder.findByInteractionId(interaction.id).catch(() => null)
+    : null;
+  const transformStageDiagnostics = existingTransformStage?.type === 'transform-stage'
+    ? structuredClone(existingTransformStage.stages)
+    : [];
   async function recordTransformStage(stage, startedAt, details = {}) {
     if (parsed.command !== 'transform' || !options.diagnosticRecorder?.record) return;
     transformStageDiagnostics.push({
@@ -663,7 +669,9 @@ export async function executeAtomLanguage(options = {}) {
       // Timing diagnostics are observational and must never alter Transform behavior.
     }
   }
-  await recordTransformStage('request', operationStartedAt);
+  if (transformStageDiagnostics.length === 0) {
+    await recordTransformStage('request', operationStartedAt);
+  }
   const requestedProgramRun = parsed.command === 'transform'
     && !parsed.batch
     && parsed.items.length === 1

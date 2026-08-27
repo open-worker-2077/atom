@@ -254,11 +254,34 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
         || typeof payload.source !== 'string') {
         throw problem('INVALID_ATOM_COMMAND_REQUEST', 'Atom command endpoint requires source and optional interaction.agent');
       }
+      const correlationId = payload.interaction?.id ?? crypto.randomUUID();
+      const transformRequest = payload.source.trim().startsWith('transform');
+      const requestStartedAt = performance.now();
       let agent = payload.interaction?.agent;
       if ((!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string')
         && typeof payload.interaction?.agentSelector === 'string'
         && typeof options.resolveAgent === 'function') {
-        agent = await options.resolveAgent(payload.interaction.agentSelector);
+        try {
+          agent = await options.resolveAgent(payload.interaction.agentSelector);
+        } catch (error) {
+          if (transformRequest && options.diagnostics?.record) {
+            await options.diagnostics.record({
+              id: `${correlationId}:transform-stage`, type: 'transform-stage', command: 'transform',
+              durationMs: performance.now() - requestStartedAt, outcome: 'failure',
+              stages: [{ stage: 'request', durationMs: performance.now() - requestStartedAt,
+                candidateProgramCount: 0, executedProgramCount: 0, commitEntered: false }]
+            }).catch(() => {});
+          }
+          throw error;
+        }
+      }
+      if (transformRequest && options.diagnostics?.record) {
+        await options.diagnostics.record({
+          id: `${correlationId}:transform-stage`, type: 'transform-stage', command: 'transform',
+          durationMs: performance.now() - requestStartedAt, outcome: 'success',
+          stages: [{ stage: 'request', durationMs: performance.now() - requestStartedAt,
+            candidateProgramCount: 0, executedProgramCount: 0, commitEntered: false }]
+        }).catch(() => {});
       }
       if (!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string') {
         throw problem('AGENT_REQUIRED', 'Atom command endpoint requires a revision-local @agent origin');
@@ -270,7 +293,7 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
       });
       const result = await interactionRuntime.execute({
         source: payload.source,
-        correlationId: payload.interaction?.id ?? crypto.randomUUID(),
+        correlationId,
         agentPath: agent.path,
         history: Array.isArray(payload.history) ? payload.history : []
       }, {
@@ -358,6 +381,7 @@ export async function startAtomGraphServer(options = {}) {
     ...(options.projectionOrchestrator ? { projectionOrchestrator: options.projectionOrchestrator } : {})
   });
   const handlers = createAtomGraphHandlers(interactionRuntime, {
+    diagnostics,
     resolveAgent: async (selector) => resolveAgentContext(configuration.contextFile, selector, {
       compatibilityManifest: typeof worldService.compatibilityManifest === 'function'
         ? await worldService.compatibilityManifest({
