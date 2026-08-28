@@ -748,6 +748,15 @@ export async function executeAtomLanguage(options = {}) {
         || Boolean(requestedProgramRun?.selector);
       const projectPrograms = options.programMode === 'project';
       const passivePrograms = options.programMode === 'passive';
+      const agentOwnsLocalPrograms = passivePrograms && initialAgentPath
+        ? walkAtoms(atoms).some((match) => {
+            const candidatePath = match.path.join('/');
+            return candidatePath.startsWith(`${initialAgentPath}/`)
+              && oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => (
+                type.raw === 'program'
+              ));
+          })
+        : false;
       const programOperation = reconcilePrograms || projectPrograms || passivePrograms
         ? options.programScheduler.refresh.bind(options.programScheduler)
         : (typeof options.programScheduler.current === 'function'
@@ -757,7 +766,7 @@ export async function executeAtomLanguage(options = {}) {
       const programOptions = {
         agentOrigin: interaction.agent,
         isolateFailures: true,
-        ...(parsed.command === 'explore' ? {
+        ...(parsed.command === 'explore' || agentOwnsLocalPrograms ? {
           allowWindowLockSnapshot: true,
           allowContextIncomplete: true
         } : {}),

@@ -120,6 +120,7 @@ export function planGraphFourAxisWorldMigration({
     targetFacts: facts
   });
   const requestDrivenLocks = requestDrivenLockSnapshot === null
+    || requestDrivenLockSnapshot?.contract === 'atom.request-driven-security-retired'
     ? null
     : planRequestDrivenLockFourAxisMigration(requestDrivenLockSnapshot);
   const migrationId = `graph-four-axis-${digest({

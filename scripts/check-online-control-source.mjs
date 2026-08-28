@@ -12,11 +12,6 @@ const DURABLE_DOC_PREFIXES = Object.freeze([
 
 export const RETIRED_CONTROL_CATEGORIES = Object.freeze([
   Object.freeze({
-    id: 'openspec-change',
-    description: 'local OpenSpec change artifacts',
-    matches: (relativePath) => relativePath.startsWith('openspec/changes/')
-  }),
-  Object.freeze({
     id: 'development-plan-or-roadmap',
     description: 'local development plans and roadmap queues',
     matches: (relativePath) =>
@@ -81,7 +76,7 @@ async function main() {
     'GitHub Issues/Project is the sole Atom development control source.',
     'Retired local control categories must not exist in active discovery paths:',
     ...found.map(({ path: relativePath, category }) => `- [${category}] ${relativePath}`),
-    'Restore requirements, status, blockers, or acceptance boundaries in GitHub instead of recreating local OpenSpec changes, plans, roadmaps, handoffs, watch files, ledgers, or status files.'
+    'Restore requirements, status, blockers, or acceptance boundaries in GitHub instead of recreating local plans, roadmaps, handoffs, watch files, ledgers, or status files.'
   ].join('\n') + '\n');
   process.exitCode = 1;
 }

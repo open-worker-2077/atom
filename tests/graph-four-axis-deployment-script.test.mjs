@@ -36,7 +36,7 @@ test('deployment preflight passes exact test roots through the world migration o
   assert.equal(result.counts.upgradedPrograms, 2);
 });
 
-test('deployment apply backs up, upgrades, strictly reloads, and rolls back request-driven locks', async (t) => {
+test('deployment preserves and backs up the retired request-driven security tombstone', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-four-axis-lock-sidecar-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -44,18 +44,7 @@ test('deployment apply backs up, upgrades, strictly reloads, and rolls back requ
   const journalFile = path.join(directory, 'transactions.json');
   const lockFile = path.join(directory, 'request-driven-locks.json');
   const backupRoot = path.join(directory, 'private-backups');
-  const lockSnapshot = {
-    version: 1,
-    locks: [{
-      sourceProgramPath: 'World/Lock Program',
-      targets: { paths: ['World/Target'] },
-      mode: 'read_write',
-      fields: ['name', 'detail', 'children', 'partners', 'messages'],
-      protect: { atom: true, messages: false },
-      refresh: { policy: 'on_request' },
-      retained: { text: 'name/detail are ordinary values' }
-    }]
-  };
+  const lockSnapshot = { contract: 'atom.request-driven-security-retired', version: 1 };
   const originalLockBytes = `${JSON.stringify(lockSnapshot, null, 2)}\n`;
   await fs.writeFile(contextFile, `${JSON.stringify([legacyNode('World')], null, 2)}\n`, 'utf8');
   await fs.writeFile(lockFile, originalLockBytes, 'utf8');
@@ -67,8 +56,8 @@ test('deployment apply backs up, upgrades, strictly reloads, and rolls back requ
   ], { cwd: projectRoot })).stdout);
   const migrated = JSON.parse(await fs.readFile(lockFile, 'utf8'));
   assert.equal(applied.ok, true);
-  assert.deepEqual(migrated.locks[0].fields, ['thing', 'situation', 'contain', 'support', 'messages']);
-  assert.deepEqual(migrated.locks[0].retained, lockSnapshot.locks[0].retained);
+  assert.deepEqual(migrated, lockSnapshot);
+  assert.deepEqual(applied.requestDrivenLocks, { file: lockFile, present: false });
   assert.equal(await fs.readFile(path.join(applied.backupDirectory, 'request-driven-locks.json'), 'utf8'), originalLockBytes);
 
   const rolledBack = JSON.parse((await execFileAsync(process.execPath, [

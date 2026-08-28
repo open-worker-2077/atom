@@ -12,7 +12,6 @@ import {
 test('whole retired control categories are rejected rather than fixed paths', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-online-control-'));
   const retired = [
-    'openspec/changes/new-unlisted-change/proposal.md',
     'docs/plans/future-implementation.md',
     'docs/superpowers/plans/another-plan.md',
     'docs/roadmap/new-feature.md',
@@ -33,13 +32,12 @@ test('whole retired control categories are rejected rather than fixed paths', as
     [...retired].sort((left, right) => left.localeCompare(right))
   );
   assert.deepEqual(new Set(found.map(({ category }) => category)), new Set([
-    'openspec-change',
     'development-plan-or-roadmap',
     'handoff-watch-ledger-status'
   ]));
 });
 
-test('durable docs, code, tests, runtime config and OpenSpec config are not rejected', () => {
+test('durable docs, code, tests, runtime config and OpenSpec contracts are not rejected', () => {
   const allowed = [
     'docs/ARCHITECTURE.md',
     'docs/architecture/system-target.md',
@@ -49,6 +47,8 @@ test('durable docs, code, tests, runtime config and OpenSpec config are not reje
     'docs/releases/v0.3.0.md',
     'docs/product-design.md',
     'openspec/config.yaml',
+    'openspec/changes/linked-cross-layer-contract/proposal.md',
+    'openspec/changes/linked-cross-layer-contract/specs/runtime/spec.md',
     'tests/acceptance-status.test.mjs',
     'scripts/runtime-plan.mjs'
   ];
