@@ -16,11 +16,12 @@ function findAdr(id) {
 }
 
 test('repository exposes one GitHub-native handoff path', () => {
-  for (const file of ['AGENTS.md', 'CONTRIBUTING.md', 'CHANGELOG.md', 'docs/releases/v0.2.0.md']) {
+  for (const file of ['CONTRIBUTING.md', 'CHANGELOG.md', 'docs/releases/v0.2.0.md']) {
     assert.equal(fs.existsSync(path.join(root, file)), true, `${file} exists`);
   }
-  assert.match(read('AGENTS.md'), /GitHub Release/);
-  assert.match(read('AGENTS.md'), /npm\.cmd test/);
+  assert.equal(fs.existsSync(path.join(root, 'AGENTS.md')), false, 'AGENTS.md is retired');
+  assert.match(read('CONTRIBUTING.md'), /GitHub CLI/);
+  assert.match(read('CONTRIBUTING.md'), /npm\.cmd test/);
   assert.match(read('README.md'), /v0\.3\.0/);
   assert.match(read('CHANGELOG.md'), /\[0\.2\.0\]/);
 });
@@ -41,6 +42,7 @@ test('GitHub templates, CI and runtime-data exclusions are present', () => {
   const workflow = read('.github/workflows/test.yml');
   assert.match(workflow, /pull_request:/);
   assert.match(workflow, /node-version:\s*24/);
+  assert.match(workflow, /npm run check:online-control/);
   assert.match(workflow, /npm test/);
   assert.equal(JSON.parse(read('package.json')).engines.node, '>=24');
   assert.match(read('.github/pull_request_template.md'), /实际渲染/);

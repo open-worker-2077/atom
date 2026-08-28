@@ -1,0 +1,179 @@
+param(
+  [string]$RuntimeTaskName = "Atom Graph Runtime"
+)
+
+$ErrorActionPreference = "Stop"
+$stateDirectory = Join-Path $env:LOCALAPPDATA "AtomGraph"
+$markerFile = Join-Path $stateDirectory "private-access.json"
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$settingsScript = Join-Path $PSScriptRoot "atom-long-running-task.ps1"
+$serverScript = Join-Path $projectRoot "work-engine\atom-language\graph-server.mjs"
+$gatewayScript = Join-Path $projectRoot "work-engine\atom-language\private-mobile-gateway.mjs"
+$healthUrl = "http://127.0.0.1:4784/__spatial/api/health"
+$runtimeDescription = "Atom Graph runtime supervisor [atom.graph-runtime/1]"
+
+. $settingsScript
+
+if (-not (Test-Path -LiteralPath $markerFile)) {
+  throw "PRIVATE_ACCESS_MARKER_MISSING: install private mobile access first"
+}
+$marker = Get-Content -Raw -LiteralPath $markerFile | ConvertFrom-Json
+if ([string]$marker.contract -ne "atom.private-access") {
+  throw "PRIVATE_ACCESS_MARKER_INVALID: refusing to repair an unowned configuration"
+}
+if (-not (Test-Path -LiteralPath $serverScript)) {
+  throw "ATOM_GRAPH_SERVER_MISSING: $serverScript"
+}
+if (-not (Test-Path -LiteralPath $gatewayScript)) {
+  throw "PRIVATE_GATEWAY_MISSING: $gatewayScript"
+}
+
+$nodeCommand = Get-Command node.exe -ErrorAction Stop
+$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$settings = New-AtomLongRunningTaskSettings
+
+$gatewayDefinitions = @([pscustomobject]@{
+  Name = [string]$marker.taskName
+  Description = "Local identity gate for private Atom mobile access; owns no Atom data."
+  Arguments = '"{0}" --allowed-login "{1}" --host 127.0.0.1 --target "{2}" --port {3}' -f `
+    $gatewayScript, [string]$marker.allowedLogin, "http://127.0.0.1:4784", [int]$marker.gatewayPort
+})
+if (-not [string]::IsNullOrWhiteSpace([string]$marker.directTaskName)) {
+  $gatewayDefinitions += [pscustomobject]@{
+    Name = [string]$marker.directTaskName
+    Description = "Tailnet-IP-only Atom mobile gateway; accepts only the approved phone Tailscale address."
+    Arguments = '"{0}" --allowed-source "{1}" --host "{2}" --target "{3}" --port {4}' -f `
+      $gatewayScript, [string]$marker.directAllowedSource, `
+      ([uri][string]$marker.directGatewayUrl).Host, "http://127.0.0.1:4784", `
+      ([uri][string]$marker.directGatewayUrl).Port
+  }
+}
+
+$existingRuntime = Get-ScheduledTask -TaskName $RuntimeTaskName -ErrorAction SilentlyContinue
+if ($null -ne $existingRuntime -and [string]$existingRuntime.Description -ne $runtimeDescription) {
+  throw "ATOM_RUNTIME_TASK_EXISTS: refusing to replace an unowned task"
+}
+$existingGatewayTasks = @{}
+foreach ($definition in $gatewayDefinitions) {
+  $task = Get-ScheduledTask -TaskName $definition.Name -ErrorAction SilentlyContinue
+  if ($null -ne $task -and [string]$task.Description -ne $definition.Description) {
+    throw "PRIVATE_GATEWAY_TASK_EXISTS: refusing to replace an unowned task: $($definition.Name)"
+  }
+  $existingGatewayTasks[$definition.Name] = $task
+}
+
+$runtimeArguments = '"{0}"' -f $serverScript
+$runtimeAction = New-ScheduledTaskAction `
+  -Execute $nodeCommand.Source `
+  -Argument $runtimeArguments `
+  -WorkingDirectory $projectRoot
+$runtimeTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
+$runtimePrincipal = New-ScheduledTaskPrincipal `
+  -UserId $currentUser `
+  -LogonType Interactive `
+  -RunLevel Limited
+$gatewayTaskNames = @()
+$createdTaskNames = @()
+
+try {
+  Register-ScheduledTask `
+    -TaskName $RuntimeTaskName `
+    -Action $runtimeAction `
+    -Trigger $runtimeTrigger `
+    -Principal $runtimePrincipal `
+    -Settings $settings `
+    -Description $runtimeDescription `
+    -Force | Out-Null
+  if ($null -eq $existingRuntime) {
+    $createdTaskNames += $RuntimeTaskName
+  }
+
+  foreach ($definition in $gatewayDefinitions) {
+    $gatewayAction = New-ScheduledTaskAction `
+      -Execute $nodeCommand.Source `
+      -Argument $definition.Arguments `
+      -WorkingDirectory $projectRoot
+    Register-ScheduledTask `
+      -TaskName $definition.Name `
+      -Action $gatewayAction `
+      -Trigger $runtimeTrigger `
+      -Principal $runtimePrincipal `
+      -Settings $settings `
+      -Description $definition.Description `
+      -Force | Out-Null
+    if ($null -eq $existingGatewayTasks[$definition.Name]) {
+      $createdTaskNames += $definition.Name
+    }
+    $gatewayTaskNames += $definition.Name
+  }
+
+  foreach ($taskName in $gatewayTaskNames) {
+    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  }
+  $taskStopDeadline = (Get-Date).AddSeconds(10)
+  do {
+    $runningGatewayTasks = @($gatewayTaskNames | Where-Object {
+      (Get-ScheduledTask -TaskName $_).State -eq "Running"
+    })
+    if ($runningGatewayTasks.Count -eq 0) { break }
+    Start-Sleep -Milliseconds 200
+  } while ((Get-Date) -lt $taskStopDeadline)
+  if ($runningGatewayTasks.Count -ne 0) {
+    throw "PRIVATE_GATEWAY_TASK_STOP_TIMEOUT: $($runningGatewayTasks -join ', ')"
+  }
+
+  Start-ScheduledTask -TaskName $RuntimeTaskName
+  $deadline = (Get-Date).AddSeconds(30)
+  do {
+    try {
+      $health = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 2
+      if ($health.ok -eq $true) { break }
+    } catch {}
+    Start-Sleep -Milliseconds 300
+  } while ((Get-Date) -lt $deadline)
+  if ($null -eq $health -or $health.ok -ne $true) {
+    throw "ATOM_GRAPH_UNAVAILABLE: runtime supervisor did not produce a healthy 4784 service"
+  }
+
+  foreach ($taskName in $gatewayTaskNames) {
+    Start-ScheduledTask -TaskName $taskName
+  }
+
+  $gatewayUrl = [string]$marker.gatewayUrl
+  $allowedLogin = [string]$marker.allowedLogin
+  $deadline = (Get-Date).AddSeconds(20)
+  $gatewayReady = $false
+  do {
+    try {
+      Invoke-WebRequest `
+        -UseBasicParsing `
+        -Uri $gatewayUrl `
+        -Headers @{ "Tailscale-User-Login" = $allowedLogin } `
+        -TimeoutSec 2 | Out-Null
+      $gatewayReady = $true
+      break
+    } catch {}
+    Start-Sleep -Milliseconds 300
+  } while ((Get-Date) -lt $deadline)
+  if (-not $gatewayReady) {
+    throw "PRIVATE_GATEWAY_UNAVAILABLE: $gatewayUrl"
+  }
+
+  $marker | Add-Member -NotePropertyName runtimeTaskName -NotePropertyValue $RuntimeTaskName -Force
+  $marker | Add-Member -NotePropertyName repairedAt -NotePropertyValue ((Get-Date).ToUniversalTime().ToString("o")) -Force
+  $marker | ConvertTo-Json | Set-Content -LiteralPath $markerFile -Encoding utf8
+
+  Write-Output ([pscustomobject]@{
+    ok = $true
+    runtimeTask = $RuntimeTaskName
+    gatewayTasks = $gatewayTaskNames
+    gateway = $gatewayUrl
+  })
+} catch {
+  $repairError = $_
+  foreach ($taskName in @($createdTaskNames | Select-Object -Unique)) {
+    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+  }
+  throw $repairError
+}

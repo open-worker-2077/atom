@@ -2,6 +2,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import process from 'node:process';
 import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
@@ -14,10 +15,20 @@ import { createActionRegistry } from './registry.mjs';
 import { resolveAtomRuntime } from './runtime-config.mjs';
 import { TRANSFORM_COMMANDS } from './transform-key-parser.mjs';
 import { ATOM_RUNTIME_CONTRACT } from './runtime-contract.mjs';
+import { programFunctionRegistry } from './program-function-registry.mjs';
+import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
+
+const agentDirectories = new WeakMap();
 
 export const DEFAULT_ATOM_COMMAND_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/command';
+export const DEFAULT_WORK_ORDER_REGISTRY_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/work-order-registry';
+export const DEFAULT_PROGRAM_FUNCTION_REGISTRY_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/program-function-registry';
 
 export async function executeAtomCommandEndpoint(options, endpoint = DEFAULT_ATOM_COMMAND_ENDPOINT) {
+  const interaction = {
+    ...(options.interaction ?? {}),
+    id: options.interaction?.id ?? crypto.randomUUID()
+  };
   let response;
   try {
     response = await fetch(endpoint, {
@@ -25,7 +36,7 @@ export async function executeAtomCommandEndpoint(options, endpoint = DEFAULT_ATO
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         source: options.source,
-        interaction: options.interaction,
+        interaction,
         ...(Array.isArray(options.history) ? { history: options.history } : {})
       })
     });
@@ -45,22 +56,82 @@ export async function executeAtomCommandEndpoint(options, endpoint = DEFAULT_ATO
   return payload.result;
 }
 
+export async function executeAtomWorkOrderRegistryEndpoint(
+  endpoint = DEFAULT_WORK_ORDER_REGISTRY_ENDPOINT
+) {
+  let response;
+  try {
+    response = await fetch(endpoint);
+  } catch (cause) {
+    throw cliError(
+      'ATOM_ENGINE_UNAVAILABLE',
+      `Atom engineering service is unavailable at ${endpoint}: ${cause.message}`
+    );
+  }
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) {
+    throw cliError(
+      payload.error?.code ?? 'ATOM_ENGINE_REQUEST_FAILED',
+      payload.error?.message ?? 'Work-order registry request failed'
+    );
+  }
+  if (payload.result?.contract !== 'atom-work-order-registry'
+    || payload.result?.version !== 1
+    || payload.result?.runtimeContract !== ATOM_RUNTIME_CONTRACT) {
+    throw cliError(
+      'ATOM_RUNTIME_CONTRACT_MISMATCH',
+      `Work-order registry is stale or incompatible; restart the 4784 service (expected ${ATOM_RUNTIME_CONTRACT})`
+    );
+  }
+  return payload.result;
+}
+
+export async function executeAtomProgramFunctionRegistryEndpoint(
+  endpoint = DEFAULT_PROGRAM_FUNCTION_REGISTRY_ENDPOINT
+) {
+  let response;
+  try {
+    response = await fetch(endpoint);
+  } catch (cause) {
+    throw cliError(
+      'ATOM_ENGINE_UNAVAILABLE',
+      `Atom engineering service is unavailable at ${endpoint}: ${cause.message}`
+    );
+  }
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) {
+    throw cliError(
+      payload.error?.code ?? 'ATOM_ENGINE_REQUEST_FAILED',
+      payload.error?.message ?? 'Program function registry request failed'
+    );
+  }
+  if (payload.result?.contract !== 'atom-program-function-registry'
+    || payload.result?.version !== 5
+    || payload.result?.runtimeContract !== ATOM_RUNTIME_CONTRACT) {
+    throw cliError(
+      'ATOM_RUNTIME_CONTRACT_MISMATCH',
+      `Program function registry is stale or incompatible; restart the 4784 service (expected ${ATOM_RUNTIME_CONTRACT})`
+    );
+  }
+  return payload.result;
+}
+
 const TRANSFORM_HELP = Object.freeze({
-  rep: '{"name":"A","detail.rep.NEW"}；局部替换用 "detail.rep.NEW":"OLD"；关系全替换用 "partners.rep.":[...]',
-  sum: '{"name":"A","detail.sum.SUMMARY"}（只更新 detail 简介）',
-  typ: '{"name.typ.TYPE":"A"}（替换类型标记）；{"name.typ.":"A"}（移除类型标记）',
-  ren: '{"name.ren.NEW_NAME":"A"}（同级必须保持唯一）',
-  mov: '{"name.mov.DESTINATION_PATH":"A"}（移动子树；移至顶层时 DESTINATION_PATH 使用“世界之外”；拒绝形成循环）',
-  cpy: '{"name.cpy.DESTINATION_PATH":"A"}（复制子树）',
-  dsc: '{"name.dsc.":"A"}（可逆移入唯一默认备份仓）',
-  rst: '{"name.rst.":"BACKUP_PATH/A"}（按丢弃记录恢复原位置）',
-  run: '{"name.run.":"PROGRAM_PATH"}（显式运行唯一 @program）'
+  rep: '{"thing":"A","situation.rep.NEW"}；局部替换用 "situation.rep.NEW":"OLD"；support 全替换用 "support.rep.":[{"if@current":true,"then":[{"thing":"TARGET"}]}]',
+  sum: '{"thing":"A","situation.sum.SUMMARY"}（只更新 situation 简介）',
+  typ: '{"thing.typ.TYPE":"A"}（替换类型标记）；{"thing.typ.":"A"}（移除类型标记）',
+  ren: '{"thing.ren.NEW_THING":"A"}（同级必须保持唯一）',
+  mov: '{"thing.mov.DESTINATION_PATH":"A"}（移动 contain 子树；移至顶层时 DESTINATION_PATH 使用“世界之外”；拒绝形成循环）',
+  cpy: '{"thing.cpy.DESTINATION_PATH":"A"}（复制 contain 子树）',
+  dsc: '{"thing.dsc.":"A"}（可逆移入唯一默认备份仓）',
+  rst: '{"thing.rst.":"BACKUP_PATH/A"}（按丢弃记录恢复原位置）',
+  run: '{"thing.run.":"PROGRAM_PATH"}（显式运行唯一 @program）'
 });
 
 const EXPLORE_HELP = Object.freeze({
-  'detail\u0000full': 'detail$full（返回完整 detail；否则可只返回简介）',
-  'children\u0000latitude': 'children$latitude+1 / children$latitude-1（向上看一层 / 向下看一层；向下结果保留嵌套 children；数字可调整，0 为锚点层）',
-  'children\u0000longitude': 'children$longitude+1 / children$longitude-1（向后看一个同级 / 向前看一个同级；数字可调整，0 为锚点）'
+  'situation\u0000full': 'situation$full（返回完整 situation；否则可只返回简介）',
+  'contain\u0000latitude': 'contain$latitude+1 / contain$latitude-1（向上看一层 / 向下看一层；向下结果保留嵌套 contain；数字可调整，0 为锚点层）',
+  'contain\u0000longitude': 'contain$longitude+1 / contain$longitude-1（向后看一个同级 / 向前看一个同级；数字可调整，0 为锚点）'
 });
 
 function verifiedHelpLines() {
@@ -75,9 +146,25 @@ function verifiedHelpLines() {
     || activeActions.some(({ baseKey, name }) => !Object.hasOwn(EXPLORE_HELP, `${baseKey}\u0000${name}`))) {
     throw cliError('ATOM_HELP_CONTRACT_DRIFT', 'Explore 动作注册表与 help 契约不一致');
   }
+  const functionRegistry = programFunctionRegistry();
+  const familyLines = (layer) => functionRegistry.functionFamilies
+    .filter((family) => family.layer === layer)
+    .map((family) => {
+      const names = functionRegistry.functions
+        .filter((entry) => entry.layer === layer && entry.family === family.id)
+        .map((entry) => entry.name);
+      return names.length ? `  ${family.label}：${names.join('、')}` : null;
+    })
+    .filter(Boolean);
   return {
     transform: TRANSFORM_COMMANDS.map((name) => `  .${name}.  ${TRANSFORM_HELP[name]}`),
-    explore: activeActions.map(({ baseKey, name }) => `  ${EXPLORE_HELP[`${baseKey}\u0000${name}`]}`)
+    explore: activeActions.map(({ baseKey, name }) => `  ${EXPLORE_HELP[`${baseKey}\u0000${name}`]}`),
+    programFunctions: [
+      '内核函数：',
+      ...familyLines('kernel'),
+      '应用函数：',
+      ...familyLines('application')
+    ]
   };
 }
 
@@ -98,14 +185,16 @@ function help() {
     'Options:',
     '  --agent AGENT      必填；exact 且唯一的 @agent 短名或业务路径',
     '  --stdin            从标准输入读取一条完整 Atom 命令；用于变量、多行、长文本和特殊字符',
-    '  --json             已弃用的兼容选项；无行为差异，输出始终为 Graph-JSON',
+    '  --json             已弃用的兼容选项；Atom 命令结果仍为 Graph-JSON',
+    '  --program-function-registry  输出 CLI/Web/Program 共用的注册函数、分层职能组 scope 与 Atom 类型契约',
+    '  --work-order-registry  输出 CLI/Web 共用的工单动作、错误与回执契约',
     '  -h, --help         显示帮助',
     '',
     'Agent 入口：',
     '  --agent 只指定本次交互的上下文来源，不指定节点的归属或写入位置，也不代表身份、权限或锁。',
     '  查询或写入的事实目标不得代替 --agent 上下文来源；目标 Atom 本身不需要是 @agent。',
     '  会话已给出或已绑定唯一 @agent 时直接复用，不得重复询问；只有上下文来源确实未知或不唯一时才请求明确。',
-    '  每条非交互命令都原样携带已绑定的 @agent；CLI 不会把目标 name 自动当作 --agent。',
+    '  每条非交互命令都原样携带已绑定的 @agent；CLI 不会把目标 thing 自动当作 --agent。',
     '  短名必须唯一；重名时增加必要路径片段。仍无法确定上下文时联系任务派发方或维护入口。',
     '  进入交互会话：atom.cmd --agent AGENT；Ctrl+C 退出。',
     '  PowerShell 固定短 JSON 可使用 --%；--% 会停止变量展开，变量、多行或长文本必须通过 --stdin 传入。',
@@ -114,38 +203,86 @@ function help() {
     '  1. explore 当前锚点和最小必要邻域；只依据显式事实与用户授权决定下一步。',
     '     用户要求使用或创建一个命名节点时，先 explore 预定父节点及其直接子节点：已有相同或明确等价节点则复用；确实没有可复用节点时才 transform new。',
     '  2. 优先运行已有 Program/模板；没有适用能力时才执行最小 transform。',
-    '  3. 每次写入后重新 explore 实际写入的 Atom 及其必要 children、partners 和 detail。',
+    '  3. 每次写入后重新 explore 实际写入的 Atom 及其必要 contain、support 和 situation。',
     '  4. 以回读事实验收；Program 消息不是其他 Agent 已改变的证明。失败按下方错误动作处理。',
     '',
     'Graph-JSON 基础：',
-    '  name 使用能唯一表征目标的最短 exact 选择器；detail 是内容；children 是真实包含；partners 是 [{"verb":"...","object":"目标路径"}]。',
-    '  @type 写在 name 键上（如 name@agent、name@program）；#简介必须在键末尾；~hint 仅为返回提示。',
+    '  thing 使用最短唯一 exact 选择器；situation 是内容；contain 是真实包含；support 是 owner-local if→then 规则数组。',
+    '  1→N 写在起点：{"if@current":true,"then":[{"thing":"B"},{"thing":"C"}]}；N→1 写在终点：{"if":[{"and":[{"thing":"A"},{"thing":"B"}]}],"then@current":true}。',
+    '  每条 rule 必须且只能含一个 @current:true；if 永远是前件，then 永远是后件。首版禁止无 current、线载源码与原生 M→N。',
+    '  Program 端点写 {"thing@program":"selector"}：前件 Program 仅以 strict bool 决定本条支撑，且不得产生写入等副作用；后件 Program 只按自身触发/use_program/显式运行计算自己。',
+    '  M→N 必须建立真实枢纽 H，并在 H 分别写 M→H 与 H→N；Web 可压缩布局但不会隐藏 H。Program 机制放 exact thing@program 节点的 situation，沿用既有 Program ABI。',
+    '  @type 写在 thing 键上（如 thing@agent、thing@program）；#简介必须在键末尾；~hint 仅为返回提示。',
     '  Explore 接受对象或对象数组；Transform 对象数组把已有 Atom 改造作为一个原子批次执行，并逐项返回结果。所有结果只使用 Graph-JSON。',
     '',
     'Explore 契约（只读，不修复或写入投影）：',
-    '  atom.cmd --% --agent 工作Agent explore "{""name"":""目标节点"",""detail$full"":true,""children$latitude+1"":true,""children$longitude+1"":true,""partners"":true}"',
-    '  name 默认 exact；短名重名时逐步增加必要的上级路径片段。顶层同名目标使用“世界之外/目标名”精确选择。fuzzy、regex、vector 不支持。',
-    '  “世界之外”以 name@universe 暴露为不落盘的虚拟父级；用于读取、上下钻、顶层消歧，以及作为 .mov. 的顶层目的地。',
+    '  atom.cmd --% --agent 工作Agent explore "{""thing"":""目标节点"",""situation$full"":true,""contain$latitude+1"":true,""contain$longitude+1"":true,""support"":true}"',
+    '  thing 默认 exact；短名重名时逐步增加必要的上级路径片段。顶层同名目标使用“世界之外/目标名”精确选择。fuzzy、regex、vector 不支持。',
+    '  “世界之外”以 thing@universe 暴露为不落盘的虚拟父级；用于读取、上下钻、顶层消歧，以及作为 .mov. 的顶层目的地。',
     ...contract.explore,
-    '  读取投影推荐使用标准 JSON true（例如 ""detail$full"":true、""partners"":true）；旧的无值投影键继续兼容。',
-    '  partners（返回每个匹配 Atom 的完整有向关系数组；每项包含 verb 与 object）',
-    '  多层向下查询按真实包含关系返回嵌套 children；name 仅在需要消歧时增加最短必要路径片段。',
+    '  每次成功命中 exact 锚点都会返回 boundary~preview；up/down/left/right 分别给出视野外 state、hasMore、nodes、characters，并随重新锚定更新。protected 方向不公开精确数量且不得当作空白。',
+    '  读取投影推荐使用标准 JSON true（例如 ""situation$full"":true、""support"":true）；无值投影键继续兼容。',
+    '  support 按原始 ordinal 回读 owner 声明；从任一相关端查询会带出唯一 owner 节点及其完整 if→then rule，不复制持久声明。',
+    '  多层向下查询按真实包含关系返回嵌套 contain；thing 仅在需要消歧时增加最短必要路径片段。',
     '  explore new 使用同一查询契约，并重置本次探索上下文；空结果返回 explore~empty/new，不代表错误。',
     '',
-    'Transform 契约（目标 name 必须 exact 且唯一；写入后必须回读）：',
-    '  transform new 创建完整 Atom；新节点的归属由 name 中的精确父路径决定，与 --agent 无关。',
-    '  name 可用“精确父路径/新名称”创建子 Atom，省略父路径则创建顶层 Atom；父路径不明确时只询问父 Atom。',
-    '  Transform 对象数组批量更新已有 Atom 的 detail/partners：任一项失败整批不写；成功后整批只做一次权威提交。',
-    '  detail 和 partners 的全文替换必须显式使用 .rep.；每个对象的结构操作只能有一个。',
+    'Transform 契约（目标 thing 必须 exact 且唯一；写入后必须回读）：',
+    '  transform new 创建完整 Atom；新节点的归属由 thing 中的精确父路径决定，与 --agent 无关。',
+    '  thing 可用“精确父路径/新名称”创建子 Atom，省略父路径则创建顶层 Atom；父路径不明确时只询问父 Atom。',
+    '  Transform 对象数组可批量改名、移动或更新已有 Atom 的 situation/support：任一项失败整批不写；成功后整批只做一次权威提交。',
+    '  批量改名按最终状态统一校验，可交换同级名称；整批统一重写后代路径与 support selector。批量改名项不得混入移动、situation 或 support。',
+    '  situation 和 support 的全文替换必须显式使用 .rep.；每个对象的结构操作只能有一个。',
     ...contract.transform,
     '',
     'Program 模板与复用：',
-    '  @program 是唯一可执行类型，detail 直接保存 Python；普通交互不得手工替代已有 Program 或模板。',
-    '  世界函数：explore(query)->rows；transform(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
+    '  @program 是唯一可执行类型，situation 直接保存 Python；普通交互不得手工替代已有 Program 或模板。',
+    '  本 Atom Program 可自行研发、研磨并通过 use_program() 复用；成熟实现也可作为后续公共能力素材。',
+    '  注册表与底层运行时不通过 Program 开放修改；这项保护不限制 Agent 自行研发 Program。',
+    ...contract.programFunctions,
+    '  注册函数目录：function_catalog({layer?,family?,scope?})；完整公共契约可用 atom.cmd --program-function-registry 读取。',
+    '  Form 评估：form({"action":"evaluate","components":[{"name":"组件","activation":"required|optional|disabled","value":{},"requirements":[{"path":["JSON键","下级键"]}],"components":[]}]})；components 可递归嵌套。',
+    '  Form 返回 valid、required、optional、disabled、active、missing；missing 每项为 {"component":["组件路径"],"path":["缺失键路径"]}。required 必参与；optional 在自身或后代有内容时参与；disabled 子树不参与校验；未使用的 optional 不形成缺项。',
+    '  多选函数：choice({id,options:[{id,label}],selected:[id],empty})；参数必须使用双引号标准 JSON（同时是合法 Python），当前仅支持多选，返回 selected 数组并在显式 .run. 回执中公开 choices。',
+    '  Program 并发独立运行并共享单轮 10 秒时间预算；单项失败独立报告，超时自动中断。短期内避免编写超出该预算的复杂 Program。',
+    '  Program transform 创建：transform({"thing":"精确父路径/新节点","situation":"内容","contain":[],"support":[]})；完整四轴且无点号指令时创建，带点号指令按更新处理。',
+    '  transform() 返回 None，只表示登记了延后效果；实际提交必须以交互回执或后续 exact explore 回读确认。',
+    '  JSON 函数：json_parse({"text":"..."})->JSON值；json_stringify({"value":...,"indent"?:0..8})->string。序列化默认紧凑，拒绝 NaN、Infinity 和非 JSON 值；失败将终止整个 Program 评估且不发布已登记效果；不开放 import/eval；可配合 situation.rep. 写回。',
+    '  世界函数：explore(query)->rows；transform(spec)、shortcut(spec)、agent(spec)、slot_body(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
+    '  虚拟引用：target = explore({"thing":"EXACT目标"})[0]；shortcut({"placement":"contain","thing":"显示名","target":target})在当前 Program 直接 contain 下创建引用。resolved = explore({"thing":"EXACT快捷入口"})[0] 仍是透明目标 ThingCoordinate；仅在本次 Agent 已获统一 Graph 读取授权时，resolved.shortcut_reference 才提供该入口的精确引用记录 ThingCoordinate（父 contain Explore 的对应透明结果同样提供）。shortcut({"action":"delete","reference":resolved.shortcut_reference})只删除引用，不改变目标，也不删除创建 Program。目标坐标、路径字符串和 .ref 均不能代替引用坐标。引用不复制目标事实、不携带创建者权限；每次查看均以本次 Agent 的普通 Explore 鉴权解析目标。首版 Transform 不经引用重定向。',
+    '  Agent登记：当前 Program 调用 agent({"labels":["^^","业务标签"],"functions":{"groups":["form"],"names":["message"]}}) 即把本节点登记为 Agent；无 target／lock／mode。labels、groups、names 必须是源码中的 JSON literal，functions 必填且禁止 null、通配。',
+    '  职能 scope：groups 是正式分层权限，运行时按当前 registry 获得该组及后代组的函数；names 是冻结的具体函数授权。子窗口只能获得创建者 scope 本身、后代组或其函数，不能上铸祖先组、跨到同级其他职能树，仅持有 name 也不能铸造 group。',
+    '  标签边界：连续 ^ 只表示管辖等级，普通字符串是业务标签，两者不混算；自身或子 Agent 的 ^ 数量不得超过创建者。持有 ^ 的 Agent 可在既有 Graph 活动空间内定义普通标签；子 functions 必须通过创建者符号 scope 的同组或后代关系校验。',
+    '  Agent 重配：对 Agent Program 的 situation.rep 与普通 Transform 共用同一实际路径鉴权；当前 Agent 钥匙标签逐层匹配 contain／node 锁标签，自身与后代不设特殊管理通道，新的 labels／groups／names 不得超过调用方已持有范围。',
+    '  权限索引：软件在 Agent、标签、锁或路径变化时增量更新可丢弃索引；请求命中即用，缺失或失效则沿实际路径即时计算并回填。索引缺失不得阻断启动、Explore 或 Transform。',
+    '  窗口跳转：jump({"when":when_program,"where":where_program,"recycle":recycle_program})；三项均可省略，recycle=true 直接回收，随后才算 when，且仅 when=true 才算 where；省略 when 即守窗。jump 定位复用 Explore、移动复用 Transform，并通过同一 Graph 鉴权链。',
+    '  受控横向迁窗：上级 Program 须显式获授 names:["jump_authorize"]，并在自身合法域内用 window=explore({"thing":"EXACT窗口"})[0]、source=explore({"thing":"EXACT注册Program"})[0]、destination=explore({"thing":"EXACT目的地"})[0] 后调用 jump_authorize({"window":window,"source":source,"destination":destination})。函数只返回 {"planned":true}，凭据不暴露；内核在 source 下生成一次性授权坐标。执行窗口的 where 返回该授权的 explore() 坐标后，仍按 recycle→when→where 顺序消费；落地前复验签发方当前 Graph 权限并在中央事务内移动与删授权。',
+    '  受控迁窗边界：jump_authorize 只能用具体 names 授予且不可委派；执行窗口不能读取目的地 situation、改目的地、篡改／复制／重放授权。预传 ThingCoordinate、完整路径、短名、.ref、support 或 shortcut 都不携带迁移权限；签发方失权、Graph 世代变化、节点／contain 锁拒绝或提交失败时窗口原位不动。',
+    '  精确坐标：when_program = explore({"thing":"EXACT判定@program"})[0]；把 explore() 返回对象直接交给 jump 或锁规则，不使用 .ref。jump 的 when／where／recycle 及 where 返回值只接受 ThingCoordinate；短名字符串与完整 EXACT_PATH 字符串均拒绝，数组位置也不得猜测。精确字符串兼容仅保留于 use_program.name 与 CLI thing.run. 选择器，不扩散到 jump；旧 AtomView 仅由内部适配层兼容。',
+    '  变化探针：def main(arguments):\n    point = explore({"thing":"EXACT监测Thing"})[0]\n    if not changed([point]):\n        return\n    # 命中后才 explore／聚合／计算。changed 只返回 bool 并登记既有 Transform 反向索引，控制流必须由调用方显式短路。',
+    '  固定窗口锁：agent() 登记时由内核强制启用且不可关闭或自定义；可读 current／后代／同父普通节点／唯一直接父上下文，可写 current 后代。直接父不能成为新锚点进入其同层；exact path 不绕过。',
+    '  冷启动：内核从 @program@agent 正文中的 literal agent() 重建 labels 与符号职能 scope，并从 Program 中的 literal-path lock() 按当前 Graph 重编译锁；旧侧车 locks 返回 RETIRED_REQUEST_DRIVEN_LOCK_SNAPSHOT，agentRegistrations 返回 RETIRED_AGENT_REGISTRATION_SNAPSHOT，windowSelfLocks/windowSelfLockAgents 返回 RETIRED_WINDOW_SELF_LOCK_SNAPSHOT，均只能一次性审计清退且不作为鉴权输入。',
+    '  Transform 触发器：先定义无参数 main，再声明 trigger("transform", {"nodes":["exact 节点路径"]}, main)。main 是函数引用，不能写 main()；运行时按反向索引只运行命中的 Program；相同值写入仍属于 Transform 事件。未声明 trigger 的 Program 冷启动时遇到无关 Transform 不会重放；显式 .run.、其自身被 Transform 或已知 explore 依赖变化时仍运行。',
+    '  统一鉴权顺序：当前 Agent 起点 → 实际 contain 路径上的锁 → 目标 node 锁；Explore、Transform 及注册函数内部读写共用此链，标签不足返回锁拒绝且不读取目标 situation。',
     '  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。',
+    '  Program 复用：use_program({"name": explore({"thing":"EXACT @program 路径"})[0], "arguments": {...}})；坐标会按当前窗口与 Program 边界重新授权。精确字符串名称或路径继续兼容；不使用 .ref。',
+    '  槽体研发：槽体首次只放一棵普通可自运行候选 DataFlow（下级槽、contain、support、@program）；研发态可用 transform {"thing.run.EXACT候选根路径":"EXACT_PROGRAM_PATH"} 绑定当前域，Program 内仅用 . 或 ./相对 contain 路径。',
+    '  槽体封装：上层注册 Program 调用 slot_body({"action":"seal","body":"EXACT槽体路径"})；中央事务把同一候选保留为槽模，并生成“槽模／print@program／槽例”。不预建空槽例，print 计划在 Graph 中可 exact explore 审计。槽 detail／situation 是说明契约，计划不含默认料。',
+    '  槽体结构锁：seal 固定自动保护当前及未来映射槽 self 的名称／结构／support／Program 规则，不接受 lock 开关；槽下未映射料初始可写，伪造槽角色返回 SLOT_ROLE_FORGERY_DENIED。审核等业务冻结使用通用 lock()。',
+    '  业务状态锁：持久声明使用 lock({"targets":{"paths":["EXACT路径"],"scope":"exact|subtree"},"actions":["explore|transform"],"labels":["标签"]}) 的顶层 literal，冷启动按当前 Graph 重编译；动态或未知目标稳定拒绝。lock() 不能覆盖固定 Agent／槽体锁，条件优先复用既有 support 推线布尔结果。',
+    '  槽体打印：唯一公开调用是 use_program({"name":"EXACT槽体/print","arguments":{"name":"新槽例名"}})；name 是唯一打印参数，修订由当前 print@program 内部绑定，调用方不得传 revision。可用 explore {"thing":"EXACT槽体/print/修订","contain$latitude-1":true} 审计当前计划；内核复制全部抽象槽、嵌套 contain、support、类型和槽契约，不复制具体料，Program 只在槽模共享一份。',
+    '  槽例填写与计算：用 transform {"thing":"EXACT槽体/槽例/实例/槽","situation.rep.填写值"} 填写槽的 situation；具体料应作为槽下未映射普通 Thing 创建。字段事件按“所属槽例→相对角色→当前修订 support→共享 Program”只在当前槽例域运行，再用 exact explore 回读该实例结果与采用槽模修订。禁止绝对实例路径、越过嵌套槽例边界、跨槽例或外部资料访问。',
+    '  槽例填料与变量：带“槽模角色”的实例节点是抽象槽；在槽下 transform new 的未映射普通 Thing 子树才是本地料。外部变量必须先物化为目标槽例内的本地料 Thing，再触发该实例；共享 Program 只用 ./相对contain路径读取当前槽例域。',
+    '  槽模修订：修改同一槽模后再次 seal；一次调用自动同步全部所属槽例的映射槽、contain、support、契约元数据与共享 Program 引用，并逐字节保留未映射本地料 Thing 子树；删除含料槽整次冲突回滚，成功后统一重算全部实例。',
+    '  槽体错误：INVALID_SLOT_BODY_EFFECT、INVALID_SLOT_BODY_LAYOUT、INVALID_SLOT_PRINT_PLAN、SLOT_BODY_NOT_SEALED、SLOT_PRINT_PLAN_STALE、SLOT_BODY_EXAMPLE_EXISTS、SLOT_MATERIAL_CONTAINMENT_CONFLICT、SLOT_INSTANCE_REVISION_MISSING、SLOT_SCOPE_ROOT_UNBOUND、SLOT_RELATIVE_SELECTOR_REQUIRED、SLOT_RELATIVE_TARGET_NOT_FOUND、SLOT_RELATIVE_TARGET_AMBIGUOUS、SLOT_SCOPE_BOUNDARY_CROSSING、SLOT_SCOPE_ROLE_MISMATCH、SLOT_BODY_NESTED_EFFECT_FORBIDDEN；任一失败不产生半份槽例。',
+    '  工单函数：work_order_catalog({template?,version?})->contract；work_order({action,...})->result。v1 动作固定为 create/fill/validate/submit/reject/revise/read-back。',
+    '  工单公开契约：atom.cmd --work-order-registry；该只读命令无需 --agent，Web 帮助从同一注册表渲染动作、错误和提交回执字段。',
+    '  工单写入只能由 Program 发出并继续经过 Transform、修订检查和中央提交；调用时使用精确版本、稳定 creation_id 与 exact path，写后按 read-back 和世界回读验收。',
     '  规划函数：direct_children(rows,parent_path)、child_detail(rows,parent_path,name,default)、missing_details(rows,parent_path,names)、form_status(rows,parent_path,status_name)、first_pending(forms,completed_states)、transition_allowed(current,requested,transitions)、subtree_refs(rows,root_path)、plan_shards(sources,spec)、plan_form_flow(rows,parent_path,standard)、plan_template_instance(rows,parent_path,template)。',
     '  模板参数以 template_catalog({}) 返回的契约为准；被 use_program 调用的 Program 必须定义 main(arguments)。',
-    '  推进流配方：在指定的事实父 Atom 下建立“推进流” @program，其 detail 调用 instantiate({\'template\':\'advancement-flow\',\'version\':\'latest\',\'mode\':\'ensure\',\'parameters\':{\'title\':\'任务标题\'}})；新建 Agent 与追加 Program 分两次 transform。',
+    '  推进流两步配方：当前 Agent 必须实际持有下列 agent／instantiate 等固定函数名；第1步只创建 Program，第2步显式运行后，agent() 把当前 Program 登记为 Agent，instantiate() 在同一事务附加完整推进流。',
+    '    第1步：transform new {"thing@program":"当前Agent/任务区/任务名","situation":"agent({\\"labels\\":[],\\"functions\\":{\\"groups\\":[],\\"names\\":[\\"agent\\",\\"current_atom\\",\\"explore\\",\\"first_pending\\",\\"form_status\\",\\"instantiate\\",\\"lock\\",\\"message\\",\\"subtree_refs\\",\\"transform\\"]}})\\ninstantiate({\\"template\\":\\"advancement-flow\\",\\"version\\":\\"latest\\",\\"mode\\":\\"ensure\\",\\"parameters\\":{\\"title\\":\\"任务标题\\"}})","contain":[],"support":[]}',
+    '    第2步：transform {"thing.run.":"当前Agent/任务区/任务名"}',
+    '  “任务区”必须是当前窗口下已获准写入的普通事实父节点；不要通过给窗口自身追加 contain 绕过固定锁。两步均须使用当前已认证 --agent 并走统一 Graph 权限域；第2步成功回执后再 exact explore 回读新 Agent 与推进流。需要随职能树集中变更时使用 groups，需要冻结权限时使用最小 names；不得用公开 Transform 创建 thing@agent。',
     '',
     '反馈：',
     '  submit {"type":"bug|pain|requirement|optimization","detail":"1 至 10000 字说明"}',
@@ -161,7 +298,7 @@ function help() {
     '  WORLD_REVISION_CONFLICT：停止当前写入，重新读取最新事实，再基于新修订重新判断；不得盲目重放。',
     '  PROGRAM_LOCK_DENIED / WINDOW_ACCESS_DENIED：停止修改并按错误提示处理，不绕过锁。',
     '  ATOM_ENGINE_UNAVAILABLE：确认 4784 服务可用；仍失败则联系维护入口。',
-    '  WORLD_COMMITTED_PROJECTION_PENDING：事实已经提交，禁止重复命令；维护入口仅限本机 POST /__atom/api/recover-projection，并必须提交错误回执中的 expectedRevision。',
+    '  PROJECTION_RECOVERY_PENDING：事实写入已成功，只是可丢弃派生投影待恢复；禁止重复写入。4784 应继续服务；维护入口仅限本机 POST /__atom/api/recover-projection，并使用 projectionRecovery.expectedRevision。',
     '  ATOM_PROGRAM_TIMEOUT / ATOM_PROGRAM_CANCELLED / ATOM_PROGRAM_FAILED：不得手工仿制 Program；回读事实并按错误提示处理。',
     '  未知损坏或无法确认提交状态：停止写入并联系维护入口。日常 Agent 不直接执行事务或投影恢复。'
   ].join('\n');
@@ -191,6 +328,8 @@ function parseCliArgs(argv) {
   let explicitContext = false;
   let json = false;
   let readSourceFromStdin = false;
+  let workOrderRegistryRequested = false;
+  let programFunctionRegistryRequested = false;
   const source = [];
   let positionalOnly = false;
   for (let index = 0; index < argv.length; index += 1) {
@@ -208,6 +347,14 @@ function parseCliArgs(argv) {
     }
     if (!positionalOnly && argument === '--stdin') {
       readSourceFromStdin = true;
+      continue;
+    }
+    if (!positionalOnly && argument === '--work-order-registry') {
+      workOrderRegistryRequested = true;
+      continue;
+    }
+    if (!positionalOnly && argument === '--program-function-registry') {
+      programFunctionRegistryRequested = true;
       continue;
     }
     if (!positionalOnly && argument === '--global') {
@@ -256,13 +403,19 @@ function parseCliArgs(argv) {
     explicitContext,
     json,
     readSourceFromStdin,
+    workOrderRegistry: workOrderRegistryRequested,
+    programFunctionRegistry: programFunctionRegistryRequested,
     source
   };
 }
 
 async function readCommandSource(stream) {
   let source = '';
-  for await (const chunk of stream) source += chunk.toString('utf8');
+  const decoder = new StringDecoder('utf8');
+  for await (const chunk of stream) {
+    source += decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8'));
+  }
+  source += decoder.end();
   if (!source.trim()) {
     throw cliError('EMPTY_STDIN_COMMAND', '--stdin 未收到 Atom 命令');
   }
@@ -322,6 +475,9 @@ function isCompleteGraphJson(source) {
 }
 
 function writeDiagnostics(result, stderr) {
+  if (result?.ok === false && typeof result.interactionId === 'string' && result.interactionId) {
+    stderr.write(`关联 ${result.interactionId}\n`);
+  }
   for (const message of result.messages ?? []) {
     stderr.write(`Program ${message.level ?? 'info'}: ${message.text}\n`);
   }
@@ -343,28 +499,51 @@ function graphEntry(key, valuePresent = false, value) {
     : { key, valuePresent: false };
 }
 
-function graphMatch(match, hint = null) {
+function graphBoundary(boundary) {
+  const directions = ['up', 'down', 'left', 'right'];
+  return graphObject(directions.map((direction) => graphEntry(
+    direction,
+    true,
+    graphObject(Object.entries(boundary?.[direction] ?? {}).map(([key, value]) => (
+      graphEntry(key, true, value)
+    )))
+  )));
+}
+
+function graphMatch(match, hint = null, boundary = null) {
   const types = (match.types ?? []).map((type) => `@${type}`).join('');
   const transientHint = hint ? `~${hint}` : '';
   const entries = [
-    graphEntry(`name${types}${transientHint}`, true, match.selector ?? match.name)
+    graphEntry(`thing${types}${transientHint}`, true, match.selector ?? match.thing)
   ];
   const descriptionPresent = (
     match.description !== null && match.description !== undefined
   );
-  const detailPresent = Object.hasOwn(match, 'detail');
+  const detailPresent = Object.hasOwn(match, 'situation');
   if (descriptionPresent || detailPresent) {
     entries.push(graphEntry(
-      `detail${descriptionPresent ? `#${match.description}` : ''}`,
+      `situation${descriptionPresent ? `#${match.description}` : ''}`,
       detailPresent,
-      match.detail
+      match.situation
     ));
   }
-  if (Array.isArray(match.partners)) {
-    entries.push(graphEntry('partners', true, match.partners));
+  if (Array.isArray(match.support)) {
+    entries.push(graphEntry('support', true, match.support));
   }
   if (match.lockState) {
     entries.push(graphEntry('lock~active', true, match.lockState));
+  }
+  if (match.resolvedThroughShortcut) {
+    const marker = match.resolvedThroughShortcut;
+    entries.push(graphEntry('shortcut~resolved', true, graphObject([
+      graphEntry('identity', true, marker.identity),
+      graphEntry('thing', true, marker.thing),
+      graphEntry('placement', true, marker.placement),
+      graphEntry('path', true, marker.path)
+    ])));
+  }
+  if (boundary) {
+    entries.push(graphEntry('boundary~preview', true, graphBoundary(boundary)));
   }
   return graphObject(entries);
 }
@@ -382,14 +561,19 @@ function graphChildrenTree(item) {
     const value = graphMatch(match);
     const children = childrenByPath.get(match.path) ?? [];
     if (children.length) {
-      value.entries.push(graphEntry('children', true, {
+      value.entries.push(graphEntry('contain', true, {
         kind: 'array', values: children.map(build)
       }));
     }
     return value;
   }
   const root = byPath.get(item.presentation?.anchorPath);
-  return root ? build(root) : null;
+  if (!root) return null;
+  const tree = build(root);
+  if (item.boundary) {
+    tree.entries.push(graphEntry('boundary~preview', true, graphBoundary(item.boundary)));
+  }
+  return tree;
 }
 
 function graphResult(result) {
@@ -405,7 +589,11 @@ function graphResult(result) {
         const tree = graphChildrenTree(item);
         return tree ? [tree] : [];
       }
-      return (item.matches ?? []).map((match) => graphMatch(match));
+      return (item.matches ?? []).map((match) => graphMatch(
+        match,
+        null,
+        match.path === item.anchorPath ? item.boundary : null
+      ));
     });
     if (values.length === 1) return values[0];
     if (values.length > 1) return { kind: 'array', values };
@@ -428,8 +616,20 @@ function graphResult(result) {
       ? 'created'
       : (result.changed ? 'updated' : 'unchanged');
     const types = (result.result.types ?? []).map((type) => `@${type}`).join('');
+    const entries = [
+      graphEntry(`thing${types}~${hint}`, true, result.result.thing)
+    ];
+    if (Array.isArray(result.program?.choices)) {
+      entries.push(graphEntry('choices', true, result.program.choices));
+    }
+    return graphObject(entries);
+  }
+  if (result.command === 'submit' && result.submission) {
     return graphObject([
-      graphEntry(`name${types}~${hint}`, true, result.result.name)
+      graphEntry('submit~recorded'),
+      graphEntry('id', true, result.submission.id),
+      graphEntry('type', true, result.submission.type),
+      graphEntry('submittedAt', true, result.submission.submittedAt)
     ]);
   }
   if (result.ok) return graphObject([graphEntry('atom~done')]);
@@ -448,21 +648,13 @@ function storedField(atom, baseKey) {
     const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
     if (parsed.baseKey === baseKey) return { parsed, value };
   }
-  if (result.command === 'submit' && result.submission) {
-    return graphObject([
-      graphEntry('submit~recorded'),
-      graphEntry('id', true, result.submission.id),
-      graphEntry('type', true, result.submission.type),
-      graphEntry('submittedAt', true, result.submission.submittedAt)
-    ]);
-  }
   return null;
 }
 
 function atomEntries(atoms, parentPath = [], parentAddress = '') {
   const entries = [];
   for (const [index, atom] of (atoms ?? []).entries()) {
-    const nameField = storedField(atom, 'name');
+    const nameField = storedField(atom, 'thing');
     if (typeof nameField?.value !== 'string') continue;
     const path = [...parentPath, nameField.value];
     const address = parentAddress ? `${parentAddress}/${index}` : `${index}`;
@@ -472,10 +664,10 @@ function atomEntries(atoms, parentPath = [], parentAddress = '') {
       path: path.join('/'),
       address,
       parentAddress,
-      detail: storedField(atom, 'detail')?.value ?? '',
+      detail: storedField(atom, 'situation')?.value ?? '',
       agent: nameField.parsed.types.some((type) => type.raw === 'agent')
     });
-    const children = storedField(atom, 'children')?.value;
+    const children = storedField(atom, 'contain')?.value;
     if (Array.isArray(children)) entries.push(...atomEntries(children, path, address));
   }
   return entries;
@@ -503,7 +695,7 @@ async function formatAgentEntryContext(contextFile, agentPath) {
   const graphAtom = (entry, role = null, descendantDepth = 0) => {
     const types = [...(entry.types ?? [])];
     if (role && !types.includes(role)) types.push(role);
-    const nameKey = `name${types.map((type) => `@${type}`).join('')}`;
+    const nameKey = `thing${types.map((type) => `@${type}`).join('')}`;
     const executable = types.includes('program');
     const childEntries = descendantDepth > 0
       ? (childrenByParent.get(entry.address) ?? []).map((child) => (
@@ -512,9 +704,9 @@ async function formatAgentEntryContext(contextFile, agentPath) {
       : [];
     return graphObject([
       graphEntry(nameKey, true, entry.name),
-      graphEntry('detail', true, executable ? '' : entry.detail),
-      graphEntry('children', true, graphArray(childEntries)),
-      graphEntry('partners', true, graphArray([]))
+      graphEntry('situation', true, executable ? '' : entry.detail),
+      graphEntry('contain', true, graphArray(childEntries)),
+      graphEntry('support', true, graphArray([]))
     ]);
   };
   const descendantsOf = (entry) => entries.filter((candidate) => (
@@ -548,14 +740,14 @@ async function formatAgentEntryContext(contextFile, agentPath) {
     ), 0))
   ]);
   const context = graphObject([
-    graphEntry('name@context', true, current.path),
-    graphEntry('detail', true, ''),
-    graphEntry('children', true, graphArray([
+    graphEntry('thing@context', true, current.path),
+    graphEntry('situation', true, ''),
+    graphEntry('contain', true, graphArray([
       ...(parent ? [graphAtom(parent, 'parent')] : []),
       ...peers.map((entry) => graphAtom(entry, 'peer')),
       graphAtom(current, 'current', 2)
     ])),
-    graphEntry('partners', true, graphArray([])),
+    graphEntry('support', true, graphArray([])),
     graphEntry('boundary~preview', true, graphObject([
       graphEntry('up', true, previewStats(upOutside)),
       graphEntry('down', true, previewStats(downOutside)),
@@ -566,17 +758,21 @@ async function formatAgentEntryContext(contextFile, agentPath) {
   return formatGraphJson(context, { omitEmptyStructuralArrays: true });
 }
 
-export async function resolveAgentContext(contextFile, selector) {
+export async function resolveAgentContext(contextFile, selector, options = {}) {
   if (typeof selector !== 'string' || !selector.trim()) {
     throw cliError('AGENT_REQUIRED', '公开 Atom CLI 需要 --agent 上下文起点');
   }
   const requested = selector.trim();
-  const atoms = await readAtomContext(contextFile, { create: false });
-  const revision = crypto.createHash('sha256').update(JSON.stringify(atoms)).digest('hex');
-  const entries = atomEntries(atoms);
-  const exact = entries.filter((entry) => (
-    requested.includes('/') ? entry.path === requested : entry.name === requested
-  ));
+  const atoms = await readAtomContext(contextFile, {
+    create: false,
+    ...(options.compatibilityManifest
+      ? { compatibilityManifest: options.compatibilityManifest }
+      : {})
+  });
+  const directory = agentDirectoryFor(atoms, options);
+  const exact = requested.includes('/')
+    ? (directory.byPath.get(requested) ?? [])
+    : (directory.byName.get(requested) ?? []);
   const agents = exact.filter((entry) => entry.agent);
   if (agents.length > 1) {
     throw cliError('AMBIGUOUS_AGENT', '只能选择 exact 且唯一的 @agent Atom');
@@ -584,7 +780,7 @@ export async function resolveAgentContext(contextFile, selector) {
   if (agents.length === 1) {
     return {
       ref: crypto.createHash('sha256')
-        .update(`${revision}:${agents[0].address}`)
+        .update(`${directory.revision}:${agents[0].address}`)
         .digest('base64url')
         .slice(0, 24),
       path: agents[0].path
@@ -594,6 +790,34 @@ export async function resolveAgentContext(contextFile, selector) {
     throw cliError('AGENT_TYPE_REQUIRED', '--agent 上下文来源必须是 @agent Atom；查询或写入目标不得代替入口，目标本身无需是 @agent');
   }
   throw cliError('AGENT_NOT_FOUND', '未找到 exact 匹配的 @agent Atom');
+}
+
+function agentDirectoryFor(atoms, options = {}) {
+  let directory = agentDirectories.get(atoms);
+  if (directory) return directory;
+  const byName = new Map();
+  const byPath = new Map();
+  for (const entry of atomEntries(atoms)) {
+    const named = byName.get(entry.name) ?? [];
+    named.push(entry);
+    byName.set(entry.name, named);
+    byPath.set(entry.path, [entry]);
+  }
+  directory = {
+    revision: (options.worldRevision ?? revisionOfWorldFacts(atoms)).replace(/^sha256:/u, ''),
+    byName,
+    byPath
+  };
+  agentDirectories.set(atoms, directory);
+  return directory;
+}
+
+export async function primeAgentDirectory(contextFile, options = {}) {
+  const atoms = await readAtomContext(contextFile, {
+    create: false,
+    ...(options.compatibilityManifest ? { compatibilityManifest: options.compatibilityManifest } : {})
+  });
+  agentDirectoryFor(atoms, options);
 }
 
 export async function runAtomSession(options = {}) {
@@ -732,6 +956,47 @@ export async function runAtomCli(argv = [], overrides = {}) {
       stdout.write(`${help()}\n`);
       return 0;
     }
+    if (parsed.workOrderRegistry && parsed.programFunctionRegistry) {
+      throw cliError(
+        'AMBIGUOUS_COMMAND_SOURCE',
+        '--work-order-registry 与 --program-function-registry 必须单独使用'
+      );
+    }
+    if (parsed.workOrderRegistry) {
+      if (parsed.readSourceFromStdin || parsed.source.length) {
+        throw cliError(
+          'AMBIGUOUS_COMMAND_SOURCE',
+          '--work-order-registry 不能与 Atom 命令或 --stdin 同时使用'
+        );
+      }
+      const loadRegistry = overrides.workOrderRegistry ?? executeAtomWorkOrderRegistryEndpoint;
+      if (typeof loadRegistry !== 'function') {
+        throw cliError(
+          'ATOM_WORK_ORDER_REGISTRY_UNAVAILABLE',
+          'Atom CLI requires a work-order registry capability'
+        );
+      }
+      stdout.write(`${JSON.stringify(await loadRegistry(), null, 2)}\n`);
+      return 0;
+    }
+    if (parsed.programFunctionRegistry) {
+      if (parsed.readSourceFromStdin || parsed.source.length) {
+        throw cliError(
+          'AMBIGUOUS_COMMAND_SOURCE',
+          '--program-function-registry 不能与 Atom 命令或 --stdin 同时使用'
+        );
+      }
+      const loadRegistry = overrides.programFunctionRegistry
+        ?? executeAtomProgramFunctionRegistryEndpoint;
+      if (typeof loadRegistry !== 'function') {
+        throw cliError(
+          'ATOM_PROGRAM_FUNCTION_REGISTRY_UNAVAILABLE',
+          'Atom CLI requires a Program function registry capability'
+        );
+      }
+      stdout.write(`${JSON.stringify(await loadRegistry(), null, 2)}\n`);
+      return 0;
+    }
     if (parsed.readSourceFromStdin && parsed.source.length) {
       throw cliError('AMBIGUOUS_COMMAND_SOURCE', '--stdin 不能与命令行中的 Atom 命令同时使用');
     }
@@ -748,10 +1013,21 @@ export async function runAtomCli(argv = [], overrides = {}) {
       if (parsed.global) {
         throw cliError('DAILY_GLOBAL_MODE_REJECTED', '日常 Atom CLI 不允许进入全局模式');
       }
-      interaction = {
-        ...(interaction ?? {}),
-        agent: await resolveAgentContext(contextFile, parsed.agent)
-      };
+      if (typeof parsed.agent !== 'string' || !parsed.agent.trim()) {
+        throw cliError('AGENT_REQUIRED', '公开 Atom CLI 需要 --agent 上下文起点');
+      }
+      const remoteAgentResolution = overrides.remoteAgentResolution
+        ?? overrides.execute === executeAtomCommandEndpoint;
+      interaction = remoteAgentResolution
+        ? {
+            ...(interaction ?? {}),
+            agentSelector: parsed.agent.trim(),
+            agent: { path: parsed.agent.trim() }
+          }
+        : {
+            ...(interaction ?? {}),
+            agent: await resolveAgentContext(contextFile, parsed.agent)
+          };
     }
     const interactive = overrides.interactive
       ?? (parsed.source.length === 0 && Boolean(stdin.isTTY && stdout.isTTY));
@@ -784,7 +1060,7 @@ export async function runAtomCli(argv = [], overrides = {}) {
       ...(interaction ? { interaction } : {}),
       history: []
     });
-    if (interaction?.agent) result.agent = interaction.agent.path;
+    if (interaction?.agent && !result.agent) result.agent = interaction.agent.path;
     return writeGraphResult(result, stdout, stderr);
   } catch (error) {
     stderr.write(`错误 ${error.code || 'ATOM_LANGUAGE_CLI_ERROR'}：${error.message}\n`);

@@ -54,7 +54,7 @@ test('POST /parse returns normalized success and structured semantic errors', as
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      source: 'explore {"name":"石器工坊","detail$full"}'
+      source: 'explore {"thing":"石器工坊","situation$full"}'
     })
   });
   assert.equal(successResponse.status, 200);
@@ -67,7 +67,7 @@ test('POST /parse returns normalized success and structured semantic errors', as
   const semanticResponse = await fetch(`${running.url}/parse`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ source: 'explore {"detail$invent"}' })
+    body: JSON.stringify({ source: 'explore {"situation$invent"}' })
   });
   assert.equal(semanticResponse.status, 200);
   const semantic = await semanticResponse.json();

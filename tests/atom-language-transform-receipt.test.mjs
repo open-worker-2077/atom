@@ -5,6 +5,10 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
+import { executeAtomLanguage as executeRawAtomLanguage } from '../work-engine/atom-language/engine.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
+import { createRuntimeDiagnosticStore } from '../src/atom-system/world-runtime/year-ring.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import {
   materializeGraphJson,
@@ -56,21 +60,21 @@ test('Transform receipt keeps only the minimal Graph outline and never echoes lo
     'transform',
     'new',
     JSON.stringify({
-      name: '长正文',
-      detail,
-      children: [],
-      partners: []
+      thing: '长正文',
+      situation: detail,
+      contain: [],
+      support: []
     })
   ]);
 
   assert.equal(created.code, 0, created.stderr);
   assert.equal(created.stdout.includes(detail), false);
-  assert.equal(created.stdout.includes('"detail"'), false);
-  assert.equal(created.stdout.includes('"children"'), false);
-  assert.equal(created.stdout.includes('"partners"'), false);
+  assert.equal(created.stdout.includes('"situation"'), false);
+  assert.equal(created.stdout.includes('"contain"'), false);
+  assert.equal(created.stdout.includes('"support"'), false);
   assert.deepEqual(
     materializeGraphJson(parseGraphJson(created.stdout)),
-    { 'name~created': '长正文' }
+    { 'thing~created': '长正文' }
   );
 });
 
@@ -79,9 +83,9 @@ test('--json is a compatibility alias for the same Graph-JSON result, not a mach
   await run(files, [
     'transform',
     'new',
-    '{"name":"目标","detail":"正文","children":[],"partners":[]}'
+    '{"thing":"目标","situation":"正文","contain":[],"support":[]}'
   ]);
-  const source = ['transform', '{"name":"目标","detail.rep.正文"}'];
+  const source = ['transform', '{"thing":"目标","situation.rep.正文"}'];
   const ordinary = await run(files, source);
   const json = await run(files, source, { json: true });
 
@@ -92,7 +96,7 @@ test('--json is a compatibility alias for the same Graph-JSON result, not a mach
   assert.equal(json.stdout.includes('"result"'), false);
   assert.deepEqual(
     materializeGraphJson(parseGraphJson(json.stdout)),
-    { 'name~unchanged': '目标' }
+    { 'thing~unchanged': '目标' }
   );
 });
 
@@ -101,17 +105,48 @@ test('failed Transform emits no success receipt', async (t) => {
   await run(files, [
     'transform',
     'new',
-    '{"name":"目标","detail":"正文","children":[],"partners":[]}'
+    '{"thing":"目标","situation":"正文","contain":[],"support":[]}'
   ]);
   const failed = await run(files, [
     'transform',
-    '{"name":"目标","detail.rep.新片段":"不存在的旧片段"}'
+    '{"thing":"目标","situation.rep.新片段":"不存在的旧片段"}'
   ]);
 
   assert.equal(failed.code, 4);
   assert.equal(failed.stdout, '');
   assert.match(failed.stderr, /DETAIL_FRAGMENT_NOT_FOUND/u);
   assert.doesNotMatch(failed.stderr, /~created|~updated|~unchanged/u);
+});
+
+test('Transform reconcile timing diagnostic is observational and contains no fact fields', async (t) => {
+  const files = await fixture(t);
+  const diagnostics = createRuntimeDiagnosticStore({ maxEntries: 10 });
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async () => ({
+      locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [], trigger: null
+    })
+  });
+  const worldService = createLegacyWorldService({
+    execute: (request) => executeRawAtomLanguage({ ...request, diagnosticRecorder: diagnostics })
+  });
+  const result = await worldService.executeLegacy({
+    source: 'transform new {"thing":"诊断对象","situation":"不得持久化","contain":[],"support":[]}',
+    contextFile: files.contextFile,
+    projectionFile: files.projectionFile,
+    interaction: { id: 'transform-stage-observational' },
+    programMode: 'reconcile',
+    programScheduler: scheduler,
+    diagnosticRecorder: diagnostics
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors ?? result));
+  const diagnostic = await diagnostics.findByInteractionId('transform-stage-observational');
+  assert.equal(diagnostic.type, 'transform-stage');
+  assert.deepEqual(diagnostic.stages.map(({ stage }) => stage), [
+    'request', 'reconcile', 'reconcile', 'commit'
+  ]);
+  assert.equal(JSON.stringify(diagnostic).includes('诊断对象'), false);
+  assert.equal(JSON.stringify(diagnostic).includes('不得持久化'), false);
 });
 
 test('--json does not restore a machine envelope for CLI argument errors', async () => {

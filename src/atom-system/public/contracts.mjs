@@ -57,6 +57,30 @@ export function validateWorldReceipt(value) {
   if (!transitionIsValid) {
     throw contractError('INVALID_REVISION_TRANSITION', 'receipt revisions do not match its status');
   }
+  if (value.committedAt !== undefined
+    && (typeof value.committedAt !== 'string' || !Number.isFinite(Date.parse(value.committedAt)))) {
+    throw contractError('INVALID_RECEIPT_TIME', 'committedAt must be an ISO timestamp');
+  }
+  if (value.source !== undefined) requireText(value.source, 'INVALID_RECEIPT_SOURCE', 'source');
+  if (value.rollbackOf !== undefined) {
+    requireText(value.rollbackOf, 'INVALID_ROLLBACK_TARGET', 'rollbackOf');
+  }
+  if (value.affectedAtoms !== undefined) {
+    if (!Array.isArray(value.affectedAtoms)) {
+      throw contractError('INVALID_AFFECTED_ATOMS', 'affectedAtoms must be an array');
+    }
+    const graphAxes = new Set(['thing', 'situation', 'contain', 'support']);
+    for (const item of value.affectedAtoms) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)
+        || (!(typeof item.path === 'string' && item.path.trim())
+          && !(typeof item.ref === 'string' && item.ref.trim()))) {
+        throw contractError('INVALID_AFFECTED_ATOM', 'affected Atom requires path or ref');
+      }
+      if (!Array.isArray(item.axes) || item.axes.some((axis) => !graphAxes.has(axis))) {
+        throw contractError('INVALID_AFFECTED_AXES', 'affected Atom axes must use Graph axes');
+      }
+    }
+  }
   return immutableCopy(value);
 }
 

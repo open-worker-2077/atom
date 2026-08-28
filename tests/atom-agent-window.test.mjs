@@ -52,12 +52,34 @@ test('session tokens are opaque, hashed at rest, expiring, and bind allowed wind
   );
 });
 
+test('CLI prints a public interaction id with a failed result', async () => {
+  const stdout = output();
+  const stderr = output();
+  const code = await runAtomCli(['transform', '{}'], {
+    execute: async () => ({
+      ok: false,
+      command: 'transform',
+      changed: false,
+      interactionId: 'failed-create-correlation',
+      warnings: [],
+      errors: [{ code: 'WINDOW_ACCESS_DENIED', message: 'denied' }]
+    }),
+    stdin: { isTTY: false },
+    stdout: stdout.stream,
+    stderr: stderr.stream
+  });
+
+  assert.equal(code, 4);
+  assert.match(stderr.text(), /关联 failed-create-correlation/u);
+  assert.match(stderr.text(), /WINDOW_ACCESS_DENIED/u);
+});
+
 test('daily CLI requires one @agent origin and rejects retired session/window flags', async (t) => {
   const directory = await temp(t);
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    { 'name@agent': 'Work Agent', detail: '', children: [], partners: [] }
+    { 'thing@agent': 'Work Agent', detail: '', children: [], partners: [] }
   ]));
   const stdout = output();
   const stderr = output();
@@ -108,8 +130,8 @@ test('maintenance session issuance accepts only exact unique @agent windows', as
   const contextFile = path.join(directory, 'atom.json');
   const sessionsDirectory = path.join(directory, 'sessions');
   await fs.writeFile(contextFile, `${JSON.stringify([
-    { 'name@agent': 'Work Agent', detail: '', children: [], partners: [] },
-    { name: 'Not Agent', detail: '', children: [], partners: [] }
+    { 'thing@agent': 'Work Agent', situation: '', contain: [], support: [] },
+    { thing: 'Not Agent', situation: '', contain: [], support: [] }
   ])}\n`);
 
   const issued = await issueWorldAgentSession({

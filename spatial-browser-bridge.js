@@ -12,8 +12,7 @@
     }
   }
   const localFile = Boolean(localStorage);
-  const localHost = ["127.0.0.1", "localhost", "::1"].includes(global.location.hostname);
-  const supported = ["http:", "https:"].includes(global.location.protocol) && localHost && lab;
+  const supported = ["http:", "https:"].includes(global.location.protocol) && lab;
   document.body.dataset.spatialBridge = localFile ? "local" : supported ? "connecting" : "standalone";
 
   if (localFile) {
@@ -47,8 +46,10 @@
   if (!supported) return;
 
   const API = "/__spatial/api";
+  const initialLoadProgress = { service: 0, data: 0, scene: 0 };
   let revision = -1;
   let pulling = false;
+  let pullCompletion = Promise.resolve();
   let pushing = false;
   const queuedCommits = [];
   let bossMode = false;
@@ -56,7 +57,68 @@
   let lastKnowledge = null;
   let pendingRemoteRevision = -1;
   let workspaceOperationEpoch = 0;
+  const loadedPaths = new Set();
   const workspaceModel = global.SpatialWorkspaceModel;
+
+  function setInitialLoadProgress(stage, value) {
+    if (!(stage in initialLoadProgress)) return;
+    initialLoadProgress[stage] = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+    const stageName = stage[0].toUpperCase() + stage.slice(1);
+    const progressElement = typeof document.getElementById === "function"
+      ? document.getElementById(`spatialProgress${stageName}`)
+      : null;
+    const valueElement = typeof document.getElementById === "function"
+      ? document.getElementById(`spatialProgress${stageName}Value`)
+      : null;
+    if (progressElement) progressElement.value = initialLoadProgress[stage];
+    if (valueElement) valueElement.textContent = `${initialLoadProgress[stage]}%`;
+    const overall = Math.round((
+      initialLoadProgress.service + initialLoadProgress.data + initialLoadProgress.scene
+    ) / 3);
+    const overallProgress = typeof document.getElementById === "function"
+      ? document.getElementById("spatialProgressOverall")
+      : null;
+    const overallValue = typeof document.getElementById === "function"
+      ? document.getElementById("spatialProgressOverallValue")
+      : null;
+    if (overallProgress) overallProgress.value = overall;
+    if (overallValue) overallValue.textContent = `${overall}%`;
+  }
+
+  function nextVisualFrame() {
+    if (typeof global.requestAnimationFrame !== "function") return Promise.resolve();
+    return new Promise((resolve) => global.requestAnimationFrame(resolve));
+  }
+
+  setInitialLoadProgress("service", 10);
+
+  function itemIdentity(item, fallback) {
+    if (!item || typeof item !== "object") return fallback;
+    return item.key || item.id || fallback;
+  }
+
+  function mergeScopedKnowledge(previous, incoming) {
+    if (!previous) return incoming;
+    const mergeItems = (left, right) => [...new Map([
+      ...(Array.isArray(left) ? left : []),
+      ...(Array.isArray(right) ? right : [])
+    ].map((item, index) => [itemIdentity(item, index), item])).values()];
+    return {
+      ...previous,
+      ...incoming,
+      nodes: mergeItems(previous.nodes, incoming.nodes),
+      nodePatches: mergeItems(previous.nodePatches, incoming.nodePatches),
+      deletedNodeKeys: [...new Set([
+        ...(Array.isArray(previous.deletedNodeKeys) ? previous.deletedNodeKeys : []),
+        ...(Array.isArray(incoming.deletedNodeKeys) ? incoming.deletedNodeKeys : [])
+      ])],
+      edges: mergeItems(previous.edges, incoming.edges),
+      removedEdgeIds: [...new Set([
+        ...(Array.isArray(previous.removedEdgeIds) ? previous.removedEdgeIds : []),
+        ...(Array.isArray(incoming.removedEdgeIds) ? incoming.removedEdgeIds : [])
+      ])]
+    };
+  }
 
   function hasQueuedWorkspaceCommit() {
     return queuedCommits.some((entry) => entry && entry.kind === "workspace");
@@ -135,6 +197,20 @@
     global.dispatchEvent(new EventConstructor(type, { detail }));
   }
 
+  function reportPendingProjection(payload, persistenceId, operation) {
+    if (payload && payload.result && payload.result.projectionStatus === "pending") {
+      document.body.dataset.spatialBridge = "degraded";
+      reportPersistence("spatial-workspace-projection-pending", {
+        persistenceId,
+        operation,
+        projectionRecovery: payload.result.projectionRecovery,
+        projectionFailure: payload.result.projectionFailure
+      });
+      return true;
+    }
+    return false;
+  }
+
   async function request(path, options) {
     const response = await global.fetch(`${API}${path}`, {
       cache: "no-store",
@@ -150,20 +226,71 @@
     return payload;
   }
 
-  async function pullKnowledge() {
-    if (pulling || pushing || lab.state().transactionActive) return false;
+  async function pullKnowledge(requestedPath = lab.state().path || "root", options = {}) {
+    const allowDuringTransaction = options.allowDuringTransaction === true;
+    if (pulling) {
+      await pullCompletion;
+      return pullKnowledge(requestedPath, options);
+    }
+    if (pushing || (lab.state().transactionActive && !allowDuringTransaction)) return false;
+    let completePull;
+    pullCompletion = new Promise((resolve) => { completePull = resolve; });
     pulling = true;
     const pullOperationEpoch = workspaceOperationEpoch;
+    const initialLoad = document.body.dataset.spatialKnowledge !== "authoritative";
     try {
-      const payload = await request("/state");
-      const knowledge = payload.knowledge;
-      if (pullOperationEpoch !== workspaceOperationEpoch || pushing || hasQueuedWorkspaceCommit()) {
+      const normalizedPath = typeof requestedPath === "string" && requestedPath.trim()
+        ? requestedPath.trim()
+        : "root";
+      if (initialLoad) setInitialLoadProgress("data", 15);
+      const payload = await request(`/state?path=${encodeURIComponent(normalizedPath)}`);
+      if (initialLoad) {
+        setInitialLoadProgress("service", 100);
+        setInitialLoadProgress("data", 75);
+      }
+      const incoming = payload.knowledge;
+      const scopedPath = payload.scope && payload.scope.path;
+      if (
+        pullOperationEpoch !== workspaceOperationEpoch
+        || pushing
+        || hasQueuedWorkspaceCommit()
+        || (lab.state().transactionActive && !allowDuringTransaction)
+      ) {
         return false;
       }
-      if (knowledge && Number(knowledge.revision) > revision) {
-        if (!lab.importKnowledge(knowledge)) return false;
-        revision = Number(knowledge.revision) || 0;
+      const incomingRevision = Number(incoming && incoming.revision) || 0;
+      const newerRevision = incomingRevision > revision;
+      const unseenScope = scopedPath && !loadedPaths.has(scopedPath);
+      if (incoming && (newerRevision || unseenScope || !lastKnowledge)) {
+        if (newerRevision && scopedPath) {
+          loadedPaths.clear();
+          lastKnowledge = null;
+        }
+        const knowledge = scopedPath ? mergeScopedKnowledge(lastKnowledge, incoming) : incoming;
+        if (!lab.importKnowledge(knowledge, {
+          preserveTransaction: allowDuringTransaction && lab.state().transactionActive === true
+        })) return false;
+        if (
+          unseenScope
+          && scopedPath === (lab.state().path || "root")
+          && typeof lab.refitCurrentDomain === "function"
+        ) {
+          lab.refitCurrentDomain({ path: scopedPath, reason: "scope-loaded" });
+        } else if (unseenScope && typeof lab.refreshLoadedDomain === "function") {
+          lab.refreshLoadedDomain({ path: scopedPath, reason: "scope-loaded" });
+        }
+        if (initialLoad) {
+          setInitialLoadProgress("data", 100);
+          setInitialLoadProgress("scene", 70);
+        }
+        revision = incomingRevision;
         lastKnowledge = knowledge;
+        if (scopedPath) loadedPaths.add(scopedPath);
+        document.body.dataset.spatialKnowledge = "authoritative";
+      }
+      if (initialLoad) {
+        await nextVisualFrame();
+        setInitialLoadProgress("scene", 100);
       }
       document.body.dataset.spatialBridge = "connected";
       return true;
@@ -172,6 +299,7 @@
       return false;
     } finally {
       pulling = false;
+      completePull();
     }
   }
 
@@ -253,6 +381,7 @@
         if (!response.ok || payload.ok === false || payload.result?.ok === false) {
           throw new Error(payload.error?.message || payload.result?.errors?.[0]?.message || 'Atom workspace edit failed');
         }
+        if (reportPendingProjection(payload, persistenceId, operation)) return true;
         const persistedNode = reconcileCreatedNode(operation, payload.knowledge, previousKnowledge);
         if (payload.knowledge) {
           lastKnowledge = payload.knowledge;
@@ -289,6 +418,7 @@
             throw new Error(latest.error?.message || latest.result?.errors?.[0]?.message || 'Atom status update failed');
           }
         }
+        if (reportPendingProjection(latest, persistenceId, operation)) return true;
         if (latest && latest.knowledge) {
           lastKnowledge = latest.knowledge;
           revision = Number(latest.knowledge.revision) || revision;
@@ -306,6 +436,17 @@
         const payload = await response.json();
         if (!response.ok || payload.ok === false || payload.result?.ok === false) {
           throw new Error(payload.error?.message || payload.result?.errors?.[0]?.message || 'Atom workspace edit failed');
+        }
+        if (reportPendingProjection(payload, persistenceId, operation)) return true;
+        if (operation.kind === "node-land-batch") {
+          const expected = Array.isArray(operation.landings) ? operation.landings.length : 0;
+          const persistedBatch = workspaceModel
+            && typeof workspaceModel.persistedBatchLandingNodes === "function"
+            ? workspaceModel.persistedBatchLandingNodes(operation, payload.knowledge)
+            : [];
+          if (!expected || persistedBatch.length !== expected) {
+            throw new Error(`整批移动未完成：目标仅确认 ${persistedBatch.length}/${expected} 个节点，已恢复保存前状态`);
+          }
         }
         const persistedNode = operation.kind === "node-land"
           && workspaceModel
@@ -381,9 +522,22 @@
   async function pushView(event) {
     const view = event?.detail?.view ?? lab.exportField();
     if (!view || document.hidden) return false;
+    if (pulling) {
+      await pullCompletion;
+      return pushView(event);
+    }
     if (pushing) {
       queuedCommits.push({ kind: "view", view });
       return true;
+    }
+    const requiredPaths = [...new Set([
+      view.path,
+      ...(Array.isArray(view.expandedPaths) ? view.expandedPaths : [])
+    ].filter((path) => typeof path === "string" && path.trim()))];
+    for (const path of requiredPaths) {
+      if (!loadedPaths.has(path)) {
+        await pullKnowledge(path, { allowDuringTransaction: true });
+      }
     }
     pushing = true;
     try {
@@ -447,6 +601,9 @@
   global.addEventListener("spatial-view-committed", pushView);
   if (typeof global.EventSource === "function") {
     const changes = new global.EventSource(`${API}/events`);
+    changes.onopen = () => {
+      if (document.body.dataset.spatialBridge === "offline") void pullKnowledge();
+    };
     changes.onmessage = (event) => {
       try {
         const notice = JSON.parse(event.data);
@@ -459,6 +616,7 @@
   }
   request("/health")
     .then((payload) => {
+      setInitialLoadProgress("service", 100);
       bossMode = payload.mode === "boss";
       atomWorkspace = payload.atomWorkspace === true;
       document.body.dataset.spatialStore = bossMode ? "boss" : "single";

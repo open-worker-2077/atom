@@ -4,6 +4,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import playwrightConfig from '../playwright.config.mjs';
+
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 function trackedFiles() {
@@ -39,11 +41,31 @@ test('tracked JSON is limited to source manifests, public schemas and reviewed a
     'docs/architecture/atom-capability-graph.json',
     'package-lock.json',
     'package.json',
-    'work-engine/atom-language/package.json'
+    'work-engine/atom-language/package.json',
+    'work-engine/atom-language/program-function-registry.json',
+    'work-engine/atom-language/work-order-registry.json'
   ]);
   const violations = trackedFiles().filter((file) =>
     file.endsWith('.json') && !allowed.has(file) && !/^schemas\/[^/]+\.schema\.json$/.test(file)
   );
 
   assert.deepEqual(violations, []);
+});
+
+test('local Agent integrations are ignored and Playwright output stays outside the source tree', () => {
+  for (const file of [
+    '.agents/skills/local/SKILL.md',
+    '.claude/skills/local/SKILL.md',
+    'CLAUDE.md',
+    'test-results/.last-run.json'
+  ]) {
+    assert.doesNotThrow(() => execFileSync('git', ['check-ignore', '--quiet', '--', file], {
+      cwd: root,
+      stdio: 'ignore'
+    }), `${file} must be ignored`);
+  }
+
+  assert.equal(path.isAbsolute(playwrightConfig.outputDir), true);
+  const relativeOutput = path.relative(root, playwrightConfig.outputDir);
+  assert.equal(relativeOutput.startsWith('..') || path.isAbsolute(relativeOutput), true);
 });

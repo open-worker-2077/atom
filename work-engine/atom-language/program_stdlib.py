@@ -5,6 +5,115 @@ read files, mutate the Atom world, or emit effects.  World changes remain
 explicit calls to ``transform``, ``lock`` and ``message`` in Program source.
 """
 
+import json
+import math
+
+
+def _require_exact_object(specification, function_name, required, optional=()):
+    if not isinstance(specification, dict):
+        raise TypeError(f"{function_name}() requires one JSON object argument")
+    allowed = set(required) | set(optional)
+    unknown = set(specification) - allowed
+    if unknown:
+        raise ValueError(
+            f"{function_name}() contains unknown options: "
+            + ", ".join(sorted(unknown))
+        )
+    missing = [name for name in required if name not in specification]
+    if missing:
+        raise ValueError(
+            f"{function_name}() requires: " + ", ".join(missing)
+        )
+    return specification
+
+
+def _reject_nonstandard_json_constant(value):
+    raise ValueError(f"json_parse.text contains a non-standard JSON number: {value}")
+
+
+def json_parse(specification):
+    """Parse strict standard JSON without exposing Python's json module."""
+    specification = _require_exact_object(
+        specification, "json_parse", required=("text",)
+    )
+    text = specification["text"]
+    if not isinstance(text, str):
+        raise TypeError("json_parse.text must be a string")
+    try:
+        value = json.loads(text, parse_constant=_reject_nonstandard_json_constant)
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            "json_parse.text must contain valid standard JSON "
+            f"(line {error.lineno}, column {error.colno})"
+        ) from None
+    _validate_json_value(value)
+    return value
+
+
+def _validate_json_value(value, path="$", ancestors=None):
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"json_stringify.value contains a non-finite number at {path}")
+        return
+    if ancestors is None:
+        ancestors = set()
+    if isinstance(value, list):
+        identity = id(value)
+        if identity in ancestors:
+            raise ValueError(f"json_stringify.value contains a cycle at {path}")
+        ancestors.add(identity)
+        try:
+            for index, item in enumerate(value):
+                _validate_json_value(item, f"{path}[{index}]", ancestors)
+        finally:
+            ancestors.remove(identity)
+        return
+    if isinstance(value, dict):
+        identity = id(value)
+        if identity in ancestors:
+            raise ValueError(f"json_stringify.value contains a cycle at {path}")
+        ancestors.add(identity)
+        try:
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    raise TypeError(
+                        f"json_stringify.value requires string object keys at {path}"
+                    )
+                _validate_json_value(item, f"{path}.{key}", ancestors)
+        finally:
+            ancestors.remove(identity)
+        return
+    raise TypeError(
+        f"json_stringify.value contains a non-JSON value at {path}: "
+        f"{type(value).__name__}"
+    )
+
+
+def json_stringify(specification):
+    """Serialize only standard JSON values to compact or bounded-indented text."""
+    specification = _require_exact_object(
+        specification, "json_stringify", required=("value",), optional=("indent",)
+    )
+    value = specification["value"]
+    indent = specification.get("indent")
+    if "indent" in specification:
+        if isinstance(indent, bool) or not isinstance(indent, int):
+            raise TypeError("json_stringify.indent must be an integer from 0 through 8")
+        if indent < 0 or indent > 8:
+            raise ValueError("json_stringify.indent must be from 0 through 8")
+    _validate_json_value(value)
+    options = {
+        "ensure_ascii": False,
+        "allow_nan": False,
+    }
+    if "indent" in specification:
+        options["indent"] = indent
+    else:
+        options["separators"] = (",", ":")
+    return json.dumps(value, **options)
+
 
 def _join_path(parent_path, child_name):
     return f"{parent_path}/{child_name}" if parent_path else child_name
@@ -26,7 +135,7 @@ def child_detail(rows, parent_path, child_name, default=""):
     expected_path = _join_path(parent_path, child_name)
     for row in rows:
         if row.path == expected_path:
-            return row.detail
+            return row.situation
     return default
 
 
@@ -63,12 +172,12 @@ def subtree_refs(rows, root_path):
     return [row.ref for row in rows if row.path == root_path or row.path.startswith(prefix)]
 
 
-def _atom(name, detail="", children=None, partners=None):
+def _atom(thing, situation="", contain=None, support=None):
     return {
-        "name": name,
-        "detail": detail,
-        "children": list(children or []),
-        "partners": list(partners or []),
+        "thing": thing,
+        "situation": situation,
+        "contain": list(contain or []),
+        "support": list(support or []),
     }
 
 
@@ -77,15 +186,15 @@ def _field_definition(field):
         name = field
         detail = ""
     elif isinstance(field, dict):
-        name = field.get("name")
-        detail = field.get("detail", "")
+        name = field.get("thing")
+        detail = field.get("situation", "")
     else:
         raise TypeError("Each form field must be a name or JSON object")
     if not isinstance(name, str) or not name.strip():
         raise ValueError("Each form field requires a non-empty name")
     if not isinstance(detail, str):
         raise TypeError("Form field detail must be a string")
-    return {"name": name, "detail": detail}
+    return {"thing": name, "situation": detail}
 
 
 def plan_form_flow(rows, parent_path, standard):
@@ -94,7 +203,7 @@ def plan_form_flow(rows, parent_path, standard):
     forms = standard.get("forms")
     if not isinstance(forms, list):
         raise TypeError("plan_form_flow() standard.forms must be a list")
-    status_name = standard.get("status_name", "状态")
+    status_name = standard.get("status_thing", "状态")
     if not isinstance(status_name, str) or not status_name.strip():
         raise ValueError("plan_form_flow() status_name must be a non-empty string")
 
@@ -106,26 +215,21 @@ def plan_form_flow(rows, parent_path, standard):
     for form in forms:
         if not isinstance(form, dict):
             raise TypeError("Each form definition must be a JSON object")
-        form_name = form.get("name")
+        form_name = form.get("thing")
         if not isinstance(form_name, str) or not form_name.strip():
             raise ValueError("Each form requires a non-empty name")
         if form_name in seen_forms:
             raise ValueError(f"Duplicate form name: {form_name}")
         seen_forms.add(form_name)
 
-        detail = form.get("detail", "")
+        detail = form.get("situation", "")
         initial_status = form.get("status", "未进入")
-        routes = form.get("routes", [])
+        routes = _normalize_support_rules(form.get("support", []))
         if not isinstance(detail, str) or not isinstance(initial_status, str):
             raise TypeError("Form detail and status must be strings")
-        if not isinstance(routes, list) or any(not isinstance(route, dict) for route in routes):
-            raise TypeError("Form routes must be a list of JSON objects")
-        for route in routes:
-            if not isinstance(route.get("verb"), str) or not isinstance(route.get("object"), str):
-                raise TypeError("Each form route requires string verb and object values")
 
         field_definitions = [_field_definition(field) for field in form.get("fields", [])]
-        field_names = [field["name"] for field in field_definitions]
+        field_names = [field["thing"] for field in field_definitions]
         if status_name in field_names:
             raise ValueError(f"Status field {status_name!r} is created by the compiler")
         if len(set(field_names)) != len(field_names):
@@ -134,32 +238,32 @@ def plan_form_flow(rows, parent_path, standard):
         form_path = _join_path(parent_path, form_name)
         existing_form = row_paths.get(form_path)
         desired_fields = [
-            {"name": status_name, "detail": initial_status},
+            {"thing": status_name, "situation": initial_status},
             *field_definitions,
         ]
         if existing_form is None:
             submitted_children.append(_atom(
                 form_name,
                 detail,
-                [_atom(field["name"], field["detail"]) for field in desired_fields],
+                [_atom(field["thing"], field["situation"]) for field in desired_fields],
                 routes,
             ))
             continue
 
-        if detail and existing_form.detail != detail:
-            conflicts.append(f"{form_path}:detail")
-        if list(existing_form.partners) != routes:
-            conflicts.append(f"{form_path}:routes")
+        if detail and existing_form.situation != detail:
+            conflicts.append(f"{form_path}:situation")
+        if list(existing_form.support) != routes:
+            conflicts.append(f"{form_path}:support")
         missing = []
         for field in desired_fields:
-            field_path = _join_path(form_path, field["name"])
+            field_path = _join_path(form_path, field["thing"])
             if field_path not in row_paths:
-                missing.append(_atom(field["name"], field["detail"]))
+                missing.append(_atom(field["thing"], field["situation"]))
         if missing:
-            submitted_children.append({"name": form_name, "children": missing})
+            submitted_children.append({"thing": form_name, "contain": missing})
 
     return {
-        "children": submitted_children,
+        "contain": submitted_children,
         "conflicts": conflicts,
         "complete": not submitted_children and not conflicts,
     }
@@ -168,11 +272,11 @@ def plan_form_flow(rows, parent_path, standard):
 def _compile_atom_template(template):
     if not isinstance(template, dict):
         raise TypeError("Each Atom template must be a JSON object")
-    name = template.get("name")
-    detail = template.get("detail", "")
+    name = template.get("thing")
+    detail = template.get("situation", "")
     types = template.get("types", [])
-    children = template.get("children", [])
-    partners = template.get("partners", [])
+    children = template.get("contain", [])
+    partners = template.get("support", [])
     if not isinstance(name, str) or not name.strip():
         raise ValueError("Each Atom template requires a non-empty name")
     if not isinstance(detail, str):
@@ -185,22 +289,333 @@ def _compile_atom_template(template):
         raise TypeError("Atom template children must be a list")
     if not isinstance(partners, list) or any(not isinstance(item, dict) for item in partners):
         raise TypeError("Atom template partners must be a list of JSON objects")
-    child_names = [child.get("name") if isinstance(child, dict) else None for child in children]
+    child_names = [child.get("thing") if isinstance(child, dict) else None for child in children]
     if len(set(child_names)) != len(child_names):
         raise ValueError(f"Duplicate child name in Atom template {name!r}")
 
-    name_key = "name" + "".join(f"@{item}" for item in types)
+    name_key = "thing" + "".join(f"@{item}" for item in types)
     return {
         name_key: name,
-        "detail": detail,
-        "children": [_compile_atom_template(child) for child in children],
-        "partners": [dict(item) for item in partners],
+        "situation": detail,
+        "contain": [_compile_atom_template(child) for child in children],
+        "support": _normalize_support_rules(partners),
     }
+
+
+def _normalize_support_expr(expr):
+    if not isinstance(expr, dict) or len(expr) != 1:
+        raise ValueError("support Expr requires exactly one key")
+    kind, value = next(iter(expr.items()))
+    if kind == "satisfies":
+        raise ValueError("SUPPORT_INLINE_PROGRAM_UNSUPPORTED")
+    if kind in ("thing", "thing@program"):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("support thing requires a non-empty selector")
+        if kind == "thing@program" and any(token in value for token in ("satisfies(", "lambda", "def main", "\n", "\r")):
+            raise ValueError("SUPPORT_INLINE_PROGRAM_UNSUPPORTED")
+        return {kind: value}
+    if kind not in ("and", "or") or not isinstance(value, list) or len(value) < 2:
+        raise ValueError("support Expr must be thing or ordered and/or with at least two children")
+    return {kind: [_normalize_support_expr(child) for child in value]}
+
+
+def _support_expr_endpoints(expr):
+    if "thing" in expr or "thing@program" in expr:
+        return {expr.get("thing", expr.get("thing@program"))}
+    return set().union(*(_support_expr_endpoints(child)
+                         for child in expr[next(iter(expr))]))
+
+
+def _normalize_support_rules(rules):
+    if not isinstance(rules, list):
+        raise TypeError("support must be an array")
+    normalized = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            raise TypeError("support items must be rule objects")
+        unknown = set(rule) - {"if@current", "if", "then@current", "then"}
+        if unknown:
+            if "satisfies" in unknown or "support@program" in unknown:
+                raise ValueError("SUPPORT_INLINE_PROGRAM_UNSUPPORTED")
+            raise ValueError("support rule contains unknown fields: " + ", ".join(sorted(unknown)))
+        current_if = "if@current" in rule
+        current_then = "then@current" in rule
+        if current_if == current_then:
+            raise ValueError("CURRENT_ENDPOINT_ON_BOTH_SIDES" if current_if
+                             else "SUPPORT_OWNER_CURRENT_REQUIRED")
+        marker = "if@current" if current_if else "then@current"
+        if rule[marker] is not True:
+            raise ValueError("INVALID_CURRENT_MODIFIER")
+        antecedents = rule.get("if", [])
+        consequents = rule.get("then", [])
+        if not isinstance(antecedents, list) or len(antecedents) > 1:
+            raise ValueError("support if requires at most one root Expr")
+        if not isinstance(consequents, list):
+            raise TypeError("support then must be an array")
+        normalized_if = [_normalize_support_expr(expr) for expr in antecedents]
+        normalized_then = []
+        for target in consequents:
+            endpoint_keys = set(target) if isinstance(target, dict) else set()
+            if (endpoint_keys not in ({"thing"}, {"thing@program"})):
+                raise ValueError("support then items require exactly one thing endpoint")
+            endpoint_key = next(iter(endpoint_keys))
+            endpoint_value = target[endpoint_key]
+            if not isinstance(endpoint_value, str) or not endpoint_value.strip():
+                raise ValueError("support then endpoint requires a non-empty selector")
+            if endpoint_key == "thing@program" and any(token in endpoint_value for token in ("satisfies(", "lambda", "def main", "\n", "\r")):
+                raise ValueError("SUPPORT_INLINE_PROGRAM_UNSUPPORTED")
+            normalized_then.append({endpoint_key: endpoint_value})
+        if not current_if and not normalized_if:
+            raise ValueError("MISSING_SUPPORT_ANTECEDENT")
+        if not current_then and not normalized_then:
+            raise ValueError("MISSING_SUPPORT_CONSEQUENT")
+        antecedent_count = (1 if current_if else 0) + (len(_support_expr_endpoints(normalized_if[0])) if normalized_if else 0)
+        consequent_count = (1 if current_then else 0) + len({next(iter(target.values())) for target in normalized_then})
+        if antecedent_count > 1 and consequent_count > 1:
+            raise ValueError("NATIVE_MANY_TO_MANY_SUPPORT_UNSUPPORTED")
+        normalized.append({
+            **({"if@current": True} if current_if else {}),
+            **({"if": normalized_if} if "if" in rule else {}),
+            **({"then@current": True} if current_then else {}),
+            **({"then": normalized_then} if "then" in rule else {}),
+        })
+    return normalized
+
+
+def compile_form(specification):
+    """Compile one protected Form definition to the four native Graph axes."""
+    if not isinstance(specification, dict):
+        raise TypeError("form() requires one JSON object argument")
+    allowed = {"thing", "situation", "contain", "support"}
+    unknown = set(specification) - allowed
+    if unknown:
+        raise ValueError(
+            "form() contains unsupported Graph axes: " + ", ".join(sorted(unknown))
+        )
+    name = specification.get("thing")
+    detail = specification.get("situation", "")
+    children = specification.get("contain", [])
+    partners = specification.get("support", [])
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("form() requires a non-empty thing")
+    if not isinstance(detail, str):
+        raise TypeError("form.situation must be a string")
+    if not isinstance(children, list):
+        raise TypeError("form.contain must be an array")
+    if not isinstance(partners, list):
+        raise TypeError("form.support must be an array")
+    compiled_children = [compile_form(child) for child in children]
+    child_names = [child["thing"] for child in compiled_children]
+    if len(set(child_names)) != len(child_names):
+        raise ValueError(f"form() contains duplicate child names under {name!r}")
+    normalized_partners = _normalize_support_rules(partners)
+    return {
+        "thing": name,
+        "situation": detail,
+        "contain": compiled_children,
+        "support": normalized_partners,
+    }
+
+
+def _json_has_content(value):
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return True
+
+
+def _normalize_form_component(component, parent_path=()):
+    if not isinstance(component, dict):
+        raise TypeError("form.evaluate components must be JSON objects")
+    allowed = {"name", "activation", "value", "requirements", "components"}
+    unknown = set(component) - allowed
+    if unknown:
+        raise ValueError(
+            "form.evaluate component contains unknown keys: " + ", ".join(sorted(unknown))
+        )
+    name = component.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("form.evaluate component requires a non-empty name")
+    activation = component.get("activation")
+    if activation not in {"required", "optional", "disabled"}:
+        raise ValueError(
+            "form.evaluate component activation must be required, optional, or disabled"
+        )
+    requirements = component.get("requirements", [])
+    children = component.get("components", [])
+    if not isinstance(requirements, list):
+        raise TypeError("form.evaluate component requirements must be an array")
+    if not isinstance(children, list):
+        raise TypeError("form.evaluate nested components must be an array")
+    normalized_requirements = []
+    for requirement in requirements:
+        if not isinstance(requirement, dict) or set(requirement) != {"path"}:
+            raise ValueError("form.evaluate requirements require exactly one path array")
+        key_path = requirement["path"]
+        if (not isinstance(key_path, list) or not key_path
+                or any(not isinstance(key, str) or not key for key in key_path)):
+            raise ValueError(
+                "form.evaluate requirement path must contain non-empty JSON key strings"
+            )
+        normalized_requirements.append({"path": list(key_path)})
+    normalized_children = [
+        _normalize_form_component(child, (*parent_path, name)) for child in children
+    ]
+    child_names = [child["name"] for child in normalized_children]
+    if len(set(child_names)) != len(child_names):
+        location = "/".join((*parent_path, name))
+        raise ValueError(f"form.evaluate contains duplicate component names under {location}")
+    return {
+        "name": name,
+        "activation": activation,
+        "value": component.get("value", {}),
+        "requirements": normalized_requirements,
+        "components": normalized_children,
+    }
+
+
+def _component_has_content(component):
+    if component["activation"] == "disabled":
+        return False
+    if _json_has_content(component["value"]):
+        return True
+    return any(_component_has_content(child) for child in component["components"])
+
+
+def _required_value(value, key_path):
+    current = value
+    for key in key_path:
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+    return current
+
+
+def evaluate_form(specification):
+    """Evaluate caller-selected components without reading or changing the Atom world."""
+    if not isinstance(specification, dict):
+        raise TypeError("form() requires one JSON object argument")
+    unknown = set(specification) - {"action", "components"}
+    if unknown:
+        raise ValueError(
+            "form.evaluate contains unknown options: " + ", ".join(sorted(unknown))
+        )
+    if specification.get("action") != "evaluate":
+        raise ValueError("form.action must be evaluate when an action is supplied")
+    submitted = specification.get("components")
+    if not isinstance(submitted, list):
+        raise TypeError("form.evaluate components must be an array")
+    components = [_normalize_form_component(component) for component in submitted]
+    component_names = [component["name"] for component in components]
+    if len(set(component_names)) != len(component_names):
+        raise ValueError("form.evaluate contains duplicate top-level component names")
+
+    result = {
+        "valid": True,
+        "required": [],
+        "optional": [],
+        "disabled": [],
+        "active": [],
+        "missing": [],
+    }
+
+    def evaluate(component, parent_path=()):
+        component_path = (*parent_path, component["name"])
+        display_path = "/".join(component_path)
+        activation = component["activation"]
+        result[activation].append(display_path)
+        if activation == "disabled":
+            return
+        engaged = activation == "required" or _component_has_content(component)
+        if not engaged:
+            return
+        result["active"].append(display_path)
+        for requirement in component["requirements"]:
+            key_path = requirement["path"]
+            if not _json_has_content(_required_value(component["value"], key_path)):
+                result["missing"].append({
+                    "component": list(component_path),
+                    "path": list(key_path),
+                })
+        for child in component["components"]:
+            evaluate(child, component_path)
+
+    for component in components:
+        evaluate(component)
+    result["valid"] = not result["missing"]
+    return result
+
+
+def work_order_template(title, creation_id, version="1"):
+    """Build the first Graph-native work-order template without emitting effects."""
+    if str(version) != "1":
+        raise ValueError(f"Unsupported work-order version {version}")
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("work_order.create requires a non-empty title")
+    if not isinstance(creation_id, str) or not creation_id.strip():
+        raise ValueError("work_order.create requires a non-empty creation_id")
+
+    root_detail = {
+        "定义": "工单表示一项需要形成明确交付物并接受审核的工作任务。",
+        "template": "work-order",
+        "templateVersion": "1",
+        "creationId": creation_id,
+        "status": "待执行",
+        "状态": {
+            "定义": "表示整张工单从接收、执行、提交到审核结束的整体流转状态；不代替各Step的局部状态。",
+            "当前": "待执行",
+            "可选值": ["待执行", "执行中", "待验收", "已通过", "已驳回", "已暂缓"],
+            "流转": ["待执行→执行中", "执行中→待验收", "待验收→已通过", "待验收→已驳回", "已驳回→执行中"],
+        },
+        "当前节点": "Step",
+        "修订记录": [],
+    }
+    output_detail = {
+        "定义": "领导或派活方要求最终交付的成果事物；它不是Step中的动作，也不是未经产出的字段清单。",
+        "交付物": {"名称": None, "接收方": None, "成果引用": None, "版本": None},
+    }
+    step_detail = {
+        "定义": "把已有输入加工为工单交付物的作业步骤；本工单当前只有一个Step。",
+        "输入": {"定义": "进入本步骤并需要被加工的原始内容。", "内容": []},
+        "加工": {"定义": "针对输入实际实施的整理、判断和转化动作。", "内容": None},
+        "输出": {"定义": "本步骤加工完成后形成并交给工单Output的结果。", "目标": None},
+        "支撑": {"定义": "帮助Step正确执行但不直接等同于输入或交付物的数据、规范、工具和上下文。", "数据": []},
+        "操作": {"定义": "记录本Step的局部执行状态与实际发生事实；可与其他Step分别变化。", "状态": "未开始", "实际动作": [], "实际产出": [], "异常": []},
+    }
+    criteria_detail = {
+        "定义": "针对Output的一组条件及其审核结果；要求与验收是同一标准的事前规定和事后判定。",
+        "要求": {"定义": "执行前规定交付物必须符合的条件和不可越过的边界。", "条件": [], "边界": []},
+        "验收": {
+            "定义": "Output提交后，审核方依据同一组要求作出通过或驳回判定。",
+            "提交": {"成果引用": None, "版本": None, "提交时间": None},
+            "审核": {"结论": None, "意见": [], "审核人": None, "审核时间": None},
+            "驳回": {"返回": "Step", "原因": []},
+        },
+    }
+
+    def formatted(value):
+        import json
+        return json.dumps(value, ensure_ascii=False, indent=2)
+
+    return compile_form({
+        "thing": title,
+        "situation": formatted(root_detail),
+        "contain": [
+            {"thing": "Output", "situation": formatted(output_detail), "support": [{"if@current": True, "then": [{"thing": "Criteria"}]}]},
+            {"thing": "Step", "situation": formatted(step_detail), "support": [{"if@current": True, "then": [{"thing": "Output"}]}]},
+            {"thing": "Criteria", "situation": formatted(criteria_detail), "support": [
+                {"if@current": True, "then": [{"thing": "Step"}]},
+            ]},
+        ],
+    })
 
 
 def plan_template_instance(rows, parent_path, template):
     compiled = _compile_atom_template(template)
-    template_name = template.get("name")
+    template_name = template.get("thing")
     instance_path = _join_path(parent_path, template_name)
     existing = None
     for row in rows:
@@ -212,8 +627,8 @@ def plan_template_instance(rows, parent_path, template):
         conflicts = []
         if tuple(existing.types) != expected_types:
             conflicts.append(f"{instance_path}:types")
-        return {"children": [], "conflicts": conflicts, "exists": True}
-    return {"children": [compiled], "conflicts": [], "exists": False}
+        return {"contain": [], "conflicts": conflicts, "exists": True}
+    return {"contain": [compiled], "conflicts": [], "exists": False}
 
 
 def plan_shards(sources, specification):

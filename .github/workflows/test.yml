@@ -27,5 +27,7 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Enforce online development control source
+        run: npm run check:online-control
       - name: Run test suite
         run: npm test

@@ -85,7 +85,7 @@ test('http bridge preserves every rapid knowledge commit instead of keeping only
       exportField: () => ({ path: 'root' })
     },
     fetch: async (url, options = {}) => {
-      if (url.endsWith('/state') && options.method === 'PUT') {
+      if (url.includes('/state') && options.method === 'PUT') {
         statePutCount += 1;
         stateBodies.push(JSON.parse(options.body));
         if (statePutCount === 1) {
@@ -95,7 +95,7 @@ test('http bridge preserves every rapid knowledge commit instead of keeping only
         }
         return response({ result: { revision: statePutCount } });
       }
-      if (url.endsWith('/state')) return response({ knowledge: { revision: 0, nodes: [] } });
+      if (url.includes('/state')) return response({ knowledge: { revision: 0, nodes: [] } });
       return response({ result: {} });
     },
     addEventListener: (name, listener) => listeners.set(name, listener),
@@ -140,7 +140,7 @@ test('Atom Web reports semantic persistence confirmation and failure instead of 
       dispatchEvent: (event) => { lifecycle.push(event); return true; },
       fetch: async (url, options = {}) => {
         if (url.endsWith('/health')) return response({ mode: 'single' });
-        if (url.endsWith('/state') && !options.method) {
+        if (url.includes('/state') && !options.method) {
           return response({ knowledge: { revision: 1, nodes: [{ key: 'root::a', atomPath: 'A' }] } });
         }
         if (url.endsWith('/workspace-edit')) {
@@ -172,6 +172,389 @@ test('Atom Web reports semantic persistence confirmation and failure instead of 
   }
 });
 
+test('initial Atom load exposes separate service, data, and scene progress checkpoints', async () => {
+  const progressElements = Object.fromEntries([
+    'spatialProgressOverall',
+    'spatialProgressService',
+    'spatialProgressData',
+    'spatialProgressScene',
+    'spatialProgressOverallValue',
+    'spatialProgressServiceValue',
+    'spatialProgressDataValue',
+    'spatialProgressSceneValue'
+  ].map((id) => [id, { value: 0, textContent: '0%' }]));
+  let releaseHealth;
+  let releaseState;
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = {
+    body: { dataset: {} },
+    hidden: false,
+    getElementById: (id) => progressElements[id] || null
+  };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ path: 'root', transactionActive: false }),
+      importKnowledge: () => true,
+      exportField: () => ({ path: 'root' })
+    },
+    fetch: async (url) => {
+      if (url.endsWith('/health')) {
+        return new Promise((resolve) => { releaseHealth = () => resolve(response({ mode: 'single', atomWorkspace: true })); });
+      }
+      if (url.includes('/state')) {
+        return new Promise((resolve) => { releaseState = () => resolve(response({
+          knowledge: { revision: 1, nodes: [{ key: 'root::actual', atomPath: 'actual' }], edges: [] },
+          scope: { path: 'root' }
+        })); });
+      }
+      return response({ ok: true });
+    },
+    addEventListener: () => {},
+    setInterval: () => 0,
+    requestAnimationFrame: (callback) => callback()
+  };
+  window.window = window;
+
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  assert.ok(progressElements.spatialProgressService.value > 0);
+  assert.equal(progressElements.spatialProgressData.value, 0);
+  assert.equal(progressElements.spatialProgressScene.value, 0);
+
+  releaseHealth();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(progressElements.spatialProgressService.value, 100);
+  assert.ok(progressElements.spatialProgressData.value > 0);
+  assert.equal(progressElements.spatialProgressScene.value, 0);
+
+  releaseState();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(progressElements.spatialProgressData.value, 100);
+  assert.equal(progressElements.spatialProgressScene.value, 100);
+  assert.equal(progressElements.spatialProgressOverall.value, 100);
+  assert.equal(progressElements.spatialProgressOverallValue.textContent, '100%');
+});
+
+test('private HTTPS host loads authoritative Atom knowledge instead of standalone demo data', async () => {
+  const actualKnowledge = {
+    schemaVersion: 1,
+    revision: 5592,
+    nodes: [{ id: 'actual', key: 'root::actual', path: 'root', label: 'ESG计划' }],
+    edges: []
+  };
+  const requested = [];
+  let imported = null;
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: 'worker.tail33a2eb.ts.net', protocol: 'https:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge(knowledge) {
+        imported = knowledge;
+        return true;
+      },
+      exportField: () => ({ path: 'root' }),
+      exportKnowledge: () => actualKnowledge
+    },
+    fetch: async (url) => {
+      requested.push(url);
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) return response({ knowledge: actualKnowledge });
+      return response({});
+    },
+    addEventListener() {},
+    setInterval: () => 0
+  };
+  window.window = window;
+
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(document.body.dataset.spatialBridge, 'connected');
+  assert.deepEqual(JSON.parse(JSON.stringify(imported)), actualKnowledge);
+  assert.deepEqual(requested, ['/__spatial/api/health', '/__spatial/api/state?path=root']);
+});
+
+test('network bridge retries an initial actual-data failure instead of leaving synthetic knowledge visible', async () => {
+  const actualKnowledge = {
+    schemaVersion: 1,
+    revision: 7,
+    nodes: [{ id: 'actual', key: 'root::actual', path: 'root', label: 'atom.json' }],
+    edges: []
+  };
+  let stateAttempts = 0;
+  let changes = null;
+  let imported = null;
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: 'worker.tail33a2eb.ts.net', protocol: 'https:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge(knowledge) { imported = knowledge; return true; },
+      exportField: () => ({ path: 'root' }),
+      exportKnowledge: () => actualKnowledge
+    },
+    fetch: async (url) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      stateAttempts += 1;
+      if (stateAttempts === 1) throw new Error('temporary mobile network failure');
+      return response({ knowledge: actualKnowledge });
+    },
+    addEventListener() {},
+    EventSource: class {
+      constructor() { changes = this; }
+    }
+  };
+  window.window = window;
+
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(document.body.dataset.spatialBridge, 'offline');
+  assert.equal(imported, null);
+
+  changes.onopen();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(document.body.dataset.spatialBridge, 'connected');
+  assert.deepEqual(JSON.parse(JSON.stringify(imported)), actualKnowledge);
+});
+
+test('network bridge progressively loads the entered Atom path without downloading the whole world', async () => {
+  const listeners = new Map();
+  const requested = [];
+  const imports = [];
+  const rootKnowledge = {
+    schemaVersion: 1,
+    revision: 7,
+    nodes: [{ id: 'root-node', key: 'root::root-node', path: 'root', label: 'atom.json' }],
+    nodePatches: [], deletedNodeKeys: [], edges: [], removedEdgeIds: [], view: null
+  };
+  const childKnowledge = {
+    ...rootKnowledge,
+    nodes: [{ id: 'child-node', key: 'root/child::child-node', path: 'root/child', label: '项目' }]
+  };
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: 'worker.tail33a2eb.ts.net', protocol: 'https:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge(knowledge) { imports.push(structuredClone(knowledge)); return true; },
+      exportField: () => ({ path: 'root' }),
+      exportKnowledge: () => imports.at(-1) ?? rootKnowledge
+    },
+    fetch: async (url, options = {}) => {
+      requested.push([url, options.method ?? 'GET']);
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state?path=root')) return response({ knowledge: rootKnowledge, scope: { path: 'root' } });
+      if (url.endsWith('/state?path=root%2Fchild')) return response({ knowledge: childKnowledge, scope: { path: 'root/child' } });
+      return response({ ok: true });
+    },
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    EventSource: class {}
+  };
+  window.window = window;
+
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  await listeners.get('spatial-view-committed')({ detail: { view: { path: 'root/child' } } });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(requested.some(([url]) => url.endsWith('/state?path=root%2Fchild')), true);
+  assert.deepEqual(imports.at(-1).nodes.map((node) => node.label), ['atom.json', '项目']);
+});
+
+test('PageDown in nested A mode loads every expanded domain without moving the camera between scopes', async () => {
+  const listeners = new Map();
+  const requested = [];
+  const imports = [];
+  const refreshes = [];
+  const refits = [];
+  const rootKnowledge = {
+    schemaVersion: 1,
+    revision: 7,
+    nodes: [{ id: 'root-node', key: 'root::root-node', path: 'root', label: '发务' }],
+    nodePatches: [], deletedNodeKeys: [], edges: [], removedEdgeIds: [], view: null
+  };
+  const childKnowledge = {
+    ...rootKnowledge,
+    nodes: [
+      { id: 'inside', key: 'root/development::inside', path: 'root/development', label: '内务' },
+      { id: 'outside', key: 'root/development::outside', path: 'root/development', label: '外务' }
+    ]
+  };
+  const peerKnowledge = {
+    ...rootKnowledge,
+    nodes: [{ id: 'peer', key: 'root/operations::peer', path: 'root/operations', label: '推进' }]
+  };
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: 'worker.tail33a2eb.ts.net', protocol: 'https:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge(knowledge) { imports.push(structuredClone(knowledge)); return true; },
+      refitCurrentDomain({ path }) { refits.push(path); return true; },
+      refreshLoadedDomain({ path }) { refreshes.push(path); return true; },
+      exportField: () => ({ path: 'root' }),
+      exportKnowledge: () => imports.at(-1) ?? rootKnowledge
+    },
+    fetch: async (url) => {
+      requested.push(url);
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state?path=root')) {
+        return response({ knowledge: rootKnowledge, scope: { path: 'root' } });
+      }
+      if (url.endsWith('/state?path=root%2Fdevelopment')) {
+        return response({ knowledge: childKnowledge, scope: { path: 'root/development' } });
+      }
+      if (url.endsWith('/state?path=root%2Foperations')) {
+        return response({ knowledge: peerKnowledge, scope: { path: 'root/operations' } });
+      }
+      return response({ ok: true });
+    },
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    EventSource: class {}
+  };
+  window.window = window;
+
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  refits.length = 0;
+  await listeners.get('spatial-view-committed')({
+    detail: { view: { path: 'root', expandedPaths: ['root/development', 'root/operations'] } }
+  });
+
+  assert.equal(requested.filter((url) => url.endsWith('/state?path=root%2Fdevelopment')).length, 1);
+  assert.equal(requested.filter((url) => url.endsWith('/state?path=root%2Foperations')).length, 1);
+  assert.equal(imports.at(-1).nodes.some((node) => node.label === '内务'), true);
+  assert.equal(imports.at(-1).nodes.some((node) => node.label === '推进'), true);
+  assert.deepEqual(refreshes, ['root/development', 'root/operations']);
+  assert.deepEqual(refits, []);
+});
+
+test('a view entered during an earlier path pull loads on the first entry without another view event', async () => {
+  const listeners = new Map();
+  const requested = [];
+  const imports = [];
+  const refits = [];
+  let activePath = 'root';
+  let releaseRoot;
+  const rootKnowledge = {
+    schemaVersion: 1, revision: 7,
+    nodes: [{ id: 'root-node', key: 'root::root-node', path: 'root', label: 'atom.json' }],
+    nodePatches: [], deletedNodeKeys: [], edges: [], removedEdgeIds: [], view: null
+  };
+  const childKnowledge = {
+    ...rootKnowledge,
+    nodes: [{ id: 'child-node', key: 'root/child::child-node', path: 'root/child', label: '首次即显示' }]
+  };
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: 'worker.tail33a2eb.ts.net', protocol: 'https:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: activePath }),
+      importKnowledge(knowledge) { imports.push(structuredClone(knowledge)); return true; },
+      refitCurrentDomain({ path }) { refits.push(path); return true; },
+      exportField: () => ({ path: 'root' }),
+      exportKnowledge: () => imports.at(-1) ?? rootKnowledge
+    },
+    fetch: async (url, options = {}) => {
+      requested.push([url, options.method ?? 'GET']);
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.endsWith('/state?path=root')) {
+        return new Promise((resolve) => { releaseRoot = () => resolve(response({ knowledge: rootKnowledge, scope: { path: 'root' } })); });
+      }
+      if (url.endsWith('/state?path=root%2Fchild')) {
+        return response({ knowledge: childKnowledge, scope: { path: 'root/child' } });
+      }
+      return response({ ok: true });
+    },
+    addEventListener(type, listener) { listeners.set(type, listener); }
+  };
+  window.window = window;
+
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  activePath = 'root/child';
+  const firstEntry = listeners.get('spatial-view-committed')({ detail: { view: { path: 'root/child' } } });
+  releaseRoot();
+  await firstEntry;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(requested.filter(([url]) => url.endsWith('/state?path=root%2Fchild')).length, 1);
+  assert.equal(imports.at(-1).nodes.some((node) => node.label === '首次即显示'), true);
+  assert.deepEqual(refits, ['root/child']);
+});
+
+test('Atom Web reports committed facts with a pending projection without claiming failure or importing stale knowledge', async () => {
+  const listeners = new Map();
+  const lifecycle = [];
+  const imports = [];
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge: (knowledge) => { imports.push(knowledge); return true; },
+      exportField: () => ({ path: 'root' })
+    },
+    CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init.detail; } },
+    dispatchEvent: (event) => { lifecycle.push(event); return true; },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state') && !options.method) {
+        return response({ knowledge: { revision: 1, nodes: [{ key: 'root::a', atomPath: 'A' }] } });
+      }
+      if (url.endsWith('/workspace-edit')) {
+        return response({
+          result: {
+            ok: true,
+            projectionStatus: 'pending',
+            projectionRecovery: { expectedRevision: 'rev-2' },
+            projectionFailure: { projection: 'spatial', cause: 'EPERM' }
+          },
+          knowledge: { revision: 1, nodes: [{ key: 'root::a', atomPath: 'A' }] }
+        });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => 0
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  lifecycle.length = 0;
+  imports.length = 0;
+
+  const result = await listeners.get('spatial-workspace-committed')({ detail: {
+    persistenceId: 19,
+    operation: { kind: 'node-edit', nodeKey: 'root::a', node: { atomPath: 'A' }, draft: { label: 'A2' } },
+    knowledge: { revision: 1, nodes: [{ key: 'root::a', atomPath: 'A', label: 'A2' }] }
+  } });
+
+  assert.equal(result, true);
+  assert.equal(document.body.dataset.spatialBridge, 'degraded');
+  assert.equal(imports.length, 0, 'a stale projection must not replace the optimistic or authoritative view');
+  assert.equal(lifecycle.length, 1);
+  assert.equal(lifecycle[0].type, 'spatial-workspace-projection-pending');
+  assert.deepEqual(JSON.parse(JSON.stringify(lifecycle[0].detail.projectionRecovery)), {
+    expectedRevision: 'rev-2'
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(lifecycle[0].detail.projectionFailure)), {
+    projection: 'spatial', cause: 'EPERM'
+  });
+});
+
 test('http bridge preserves the semantic operation when a structural commit is queued', async () => {
   const listeners = new Map();
   const requests = [];
@@ -189,7 +572,7 @@ test('http bridge preserves the semantic operation when a structural commit is q
     fetch: async (url, options = {}) => {
       requests.push([url, options]);
       if (url.endsWith('/health')) return response({ mode: 'single' });
-      if (url.endsWith('/state') && !options.method) return response({ knowledge: { revision: 1, nodes: [] } });
+      if (url.includes('/state') && !options.method) return response({ knowledge: { revision: 1, nodes: [] } });
       if (url.endsWith('/workspace-edit')) {
         if (!releaseFirst) {
           return new Promise((resolve) => {
@@ -227,7 +610,7 @@ test('http bridge preserves the semantic operation when a structural commit is q
   assert.equal(imports.length, 1);
   assert.equal(imports[0].nodes[0].label, 'latest confirmation');
   assert.equal(JSON.parse(workspaceRequests[1][1].body).operation.kind, 'node-land');
-  assert.equal(requests.some(([url, options]) => url.endsWith('/state') && options.method === 'PUT'), false);
+  assert.equal(requests.some(([url, options]) => url.includes('/state') && options.method === 'PUT'), false);
 });
 
 test('a queued view save never prevents the latest authoritative move projection from landing', async () => {
@@ -245,7 +628,7 @@ test('a queued view save never prevents the latest authoritative move projection
     },
     fetch: async (url, options = {}) => {
       if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
-      if (url.endsWith('/state') && !options.method) {
+      if (url.includes('/state') && !options.method) {
         return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
       }
       if (url.endsWith('/workspace-edit')) {
@@ -300,7 +683,7 @@ test('Atom Web never lets an operation-less browser snapshot overwrite the Atom 
     fetch: async (url, options = {}) => {
       requests.push([url, options]);
       if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
-      if (url.endsWith('/state') && !options.method) {
+      if (url.includes('/state') && !options.method) {
         return response({ knowledge: { revision: 4, nodes: [{ key: 'root::current', label: 'Current' }] } });
       }
       return response({ result: { revision: 5 } });
@@ -317,7 +700,7 @@ test('Atom Web never lets an operation-less browser snapshot overwrite the Atom 
   }), false);
 
   assert.equal(
-    requests.some(([url, options]) => url.endsWith('/state') && options.method === 'PUT'),
+    requests.some(([url, options]) => url.includes('/state') && options.method === 'PUT'),
     false,
     'a derived Atom projection must not accept a whole stale browser snapshot'
   );
@@ -340,7 +723,7 @@ test('three rapid relation confirmations never redraw an older partial chain', a
     },
     fetch: async (url, options = {}) => {
       if (url.endsWith('/health')) return response({ mode: 'single' });
-      if (url.endsWith('/state') && !options.method) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+      if (url.includes('/state') && !options.method) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
       if (url.endsWith('/workspace-edit')) {
         return new Promise((resolve) => releases.push(() => {
           responseRevision += 1;
@@ -398,7 +781,7 @@ test('Atom Web keeps visual-only detail changes local instead of sending and rol
     fetch: async (url, options = {}) => {
       requests.push([url, options]);
       if (url.endsWith('/health')) return response({ mode: 'single' });
-      if (url.endsWith('/state') && !options.method) {
+      if (url.includes('/state') && !options.method) {
         return response({ knowledge: { revision: 1, nodes: [{ key: 'root::a', detailMode: 'surface' }] } });
       }
       if (url.endsWith('/workspace-edit')) {
@@ -441,7 +824,7 @@ test('Atom Web node creation enters the semantic workspace endpoint instead of o
     fetch: async (url, options = {}) => {
       requests.push([url, options]);
       if (url.endsWith('/health')) return response({ mode: 'single' });
-      if (url.endsWith('/state') && !options.method) {
+      if (url.includes('/state') && !options.method) {
         return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
       }
       if (url.endsWith('/workspace-edit')) return response({
@@ -481,7 +864,7 @@ test('Atom Web node creation enters the semantic workspace endpoint instead of o
   assert.deepEqual(JSON.parse(JSON.stringify(persisted.at(-1).persistedNode)), {
     id: 'projected-id', key: 'root::projected-id', path: 'root', label: 'New Atom', position: { x: 7, y: -3, z: 2 }, clusterLocalPositionLocked: false
   });
-  assert.equal(requests.some(([url, options]) => url.endsWith('/state') && options.method === 'PUT'), false);
+  assert.equal(requests.some(([url, options]) => url.includes('/state') && options.method === 'PUT'), false);
 });
 
 test('Atom node rename keeps the prior visual placement and reports the new projected identity', async () => {
@@ -504,7 +887,7 @@ test('Atom node rename keeps the prior visual placement and reports the new proj
     },
     fetch: async (url, options = {}) => {
       if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
-      if (url.endsWith('/state') && !options.method) {
+      if (url.includes('/state') && !options.method) {
         return response({ knowledge: { revision: 1, nodes: [oldNode], edges: [] } });
       }
       if (url.endsWith('/workspace-edit')) return response({
@@ -575,7 +958,7 @@ test('every Atom Web structural edit uses the semantic workspace boundary instea
       fetch: async (url, options = {}) => {
         requests.push([url, options]);
         if (url.endsWith('/health')) return response({ mode: 'single' });
-        if (url.endsWith('/state') && !options.method) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+        if (url.includes('/state') && !options.method) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
         if (url.endsWith('/workspace-edit')) return response({ result: { ok: true }, knowledge: { revision: 2, nodes: [], edges: [] } });
         return response({ result: {} });
       },
@@ -588,7 +971,7 @@ test('every Atom Web structural edit uses the semantic workspace boundary instea
       detail: { operation, knowledge: { revision: 1, nodes: [], edges: [] } }
     });
     assert.equal(requests.some(([url]) => url.endsWith('/workspace-edit')), true, operation.kind);
-    assert.equal(requests.some(([url, options]) => url.endsWith('/state') && options.method === 'PUT'), false, operation.kind);
+    assert.equal(requests.some(([url, options]) => url.includes('/state') && options.method === 'PUT'), false, operation.kind);
   }
 });
 
@@ -608,7 +991,7 @@ test('Atom Web persists view operations exactly and installs no periodic save or
     fetch: async (url, options = {}) => {
       requests.push([url, options]);
       if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
-      if (url.endsWith('/state')) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+      if (url.includes('/state')) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
       return response({ result: { revision: 1 } });
     },
     addEventListener: (name, listener) => listeners.set(name, listener),
@@ -651,7 +1034,7 @@ test('Atom Web refreshes from a committed remote operation instead of polling', 
     fetch: async (url, options = {}) => {
       requests.push([url, options]);
       if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
-      if (url.endsWith('/state')) {
+      if (url.includes('/state')) {
         return response({ knowledge: { revision: serverRevision, nodes: [{ label: `r${serverRevision}` }], edges: [] } });
       }
       return response({ result: {} });
@@ -669,7 +1052,7 @@ test('Atom Web refreshes from a committed remote operation instead of polling', 
   eventSource.onmessage({ data: '{"revision":2}' });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(imports.at(-1).nodes[0].label, 'r2');
-  assert.equal(requests.filter(([url]) => url.endsWith('/state')).length, 2);
+  assert.equal(requests.filter(([url]) => url.includes('/state')).length, 2);
 });
 
 test('a remote commit received during a local save is refreshed after the save queue settles', async () => {
@@ -694,7 +1077,7 @@ test('a remote commit received during a local save is refreshed after the save q
     EventSource: FakeEventSource,
     fetch: async (url, options = {}) => {
       if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
-      if (url.endsWith('/state')) return response({ knowledge: { revision: serverRevision, nodes: [], edges: [] } });
+      if (url.includes('/state')) return response({ knowledge: { revision: serverRevision, nodes: [], edges: [] } });
       if (url.endsWith('/view') && options.method === 'PUT') {
         await viewSaved;
         return response({ ok: true });
@@ -734,7 +1117,7 @@ test('an older pull already in flight cannot overwrite a newer optimistic worksp
     },
     fetch: async (url) => {
       if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
-      if (url.endsWith('/state')) {
+      if (url.includes('/state')) {
         return new Promise((resolve) => {
           releaseInitialPull = () => resolve(response({
             knowledge: { revision: 1, nodes: [], edges: [] }
@@ -776,4 +1159,71 @@ test('an older pull already in flight cannot overwrite a newer optimistic worksp
     'an in-flight stale pull must never redraw the page after a local operation begins');
   assert.equal(imports.at(-1).revision, 2);
   assert.equal(imports.at(-1).nodes[0].label, '编辑后');
+});
+
+test('batch landing is acknowledged only when every selected Atom exists in the authoritative destination', async () => {
+  const listeners = new Map();
+  const imports = [];
+  const persisted = [];
+  const failed = [];
+  const sourceA = { id: 'a', key: 'root::a', path: 'root', atomPath: 'A', label: 'A' };
+  const sourceB = { id: 'b', key: 'root::b', path: 'root', atomPath: 'B', label: 'B' };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge: (knowledge) => { imports.push(knowledge); return true; },
+      exportField: () => ({ path: 'root' })
+    },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state') && !options.method) {
+        return response({ knowledge: { revision: 1, nodes: [sourceA, sourceB], edges: [] } });
+      }
+      if (url.endsWith('/workspace-edit')) {
+        return response({
+          ok: true,
+          result: { ok: true },
+          knowledge: {
+            revision: 2,
+            nodes: [{ ...sourceA, id: 'a2', key: 'target::a2', path: 'target', atomPath: 'Target/A' }, sourceB],
+            edges: []
+          }
+        });
+      }
+      return response({ result: {} });
+    },
+    CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    dispatchEvent: (event) => {
+      if (event.type === 'spatial-workspace-persisted') persisted.push(event.detail);
+      if (event.type === 'spatial-workspace-persist-failed') failed.push(event.detail);
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => 0
+  };
+  installWorkspaceModel(window);
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  imports.length = 0;
+
+  const target = { path: 'target' };
+  await listeners.get('spatial-workspace-committed')({ detail: {
+    persistenceId: 41,
+    operation: {
+      kind: 'node-land-batch', target,
+      landings: [
+        { kind: 'node-land', source: { key: sourceA.key }, sourceNode: sourceA, target, draft: sourceA },
+        { kind: 'node-land', source: { key: sourceB.key }, sourceNode: sourceB, target, draft: sourceB }
+      ]
+    },
+    knowledge: { revision: 1, nodes: [sourceA, sourceB], edges: [] }
+  } });
+
+  assert.equal(persisted.length, 0, 'partial authoritative results must not be reported as saved');
+  assert.equal(failed.length, 1);
+  assert.match(failed[0].message, /整批|2|1/);
+  assert.equal(imports.at(-1).revision, 1, 'the optimistic preview rolls back to the last authoritative world');
 });

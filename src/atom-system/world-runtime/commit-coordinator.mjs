@@ -3,6 +3,7 @@ import {
   validateWorldReceipt,
   validateWorldSnapshot
 } from '../public/contracts.mjs';
+import { affectedAtomsBetween, normalizeAffectedAtoms } from './year-ring.mjs';
 import { revisionOfWorldFacts } from './world-revision.mjs';
 
 function problem(code, message, details = {}) {
@@ -19,15 +20,26 @@ function nextWorldSnapshot(current, facts) {
   });
 }
 
-function committedReceipt(command, beforeRevision, afterRevision, result) {
+function committedReceipt(command, before, after, result) {
+  const resultAffected = result?.affectedAtoms ?? [];
+  const affectedAtoms = normalizeAffectedAtoms([
+    ...affectedAtomsBetween(before.facts, after.facts),
+    ...resultAffected
+  ]);
+  const source = result?.source ?? command.payload?.source ?? command.name;
+  const rollbackOf = result?.restoredCommandId;
   return validateWorldReceipt({
     contract: 'atom.world-receipt',
     version: 1,
     commandId: command.commandId,
     correlationId: command.correlationId,
-    beforeRevision,
-    afterRevision,
+    beforeRevision: before.revision,
+    afterRevision: after.revision,
     status: 'committed',
+    committedAt: new Date().toISOString(),
+    source,
+    affectedAtoms,
+    ...(rollbackOf ? { rollbackOf } : {}),
     result: structuredClone(result ?? null)
   });
 }
@@ -110,7 +122,7 @@ export function createCommitCoordinator({
       if (after.revision === before.revision) {
         throw problem('WORLD_TRANSITION_NO_CHANGE', 'A world commit must change the authoritative facts');
       }
-      const receipt = committedReceipt(command, before.revision, after.revision, output.result);
+      const receipt = committedReceipt(command, before, after, output.result);
       const record = {
         commandId: command.commandId,
         correlationId: command.correlationId,

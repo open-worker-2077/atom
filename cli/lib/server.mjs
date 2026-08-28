@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +28,33 @@ function json(response, status, value) {
     'access-control-allow-origin': '*'
   });
   response.end(`${JSON.stringify(value)}\n`);
+}
+
+function knowledgeAtPath(knowledge, requestedPath) {
+  const pathValue = typeof requestedPath === 'string' ? requestedPath.trim() : '';
+  if (!pathValue || pathValue.length > 1024) {
+    throw new SpatialStoreError('INVALID_SPATIAL_PATH', '可视数据路径必须是 1 到 1024 个字符');
+  }
+  const nodes = Array.isArray(knowledge.nodes)
+    ? knowledge.nodes.filter((node) => node?.path === pathValue)
+    : [];
+  const edges = Array.isArray(knowledge.edges)
+    ? knowledge.edges.filter((edge) => edge?.from?.path === pathValue || edge?.to?.path === pathValue)
+    : [];
+  const belongsToPath = (key) => typeof key === 'string'
+    && key.slice(0, key.lastIndexOf('::')) === pathValue;
+  return {
+    ...knowledge,
+    nodes,
+    nodePatches: Array.isArray(knowledge.nodePatches)
+      ? knowledge.nodePatches.filter((entry) => belongsToPath(entry?.key))
+      : [],
+    deletedNodeKeys: Array.isArray(knowledge.deletedNodeKeys)
+      ? knowledge.deletedNodeKeys.filter(belongsToPath)
+      : [],
+    edges,
+    view: knowledge.view?.path === pathValue ? knowledge.view : null
+  };
 }
 
 async function body(request) {
@@ -58,6 +86,8 @@ export async function createSpatialServer(options = {}) {
     : null;
   backupTrigger?.start();
   let atomInteractionTail = Promise.resolve();
+  const atomCommandReceipts = new Map();
+  let spatialProjectionFailure = null;
   const knowledgeSubscribers = new Set();
   const mutatingSpatialMethods = new Set([
     'knowledge.replace', 'node.create', 'node.update', 'node.delete', 'node.land',
@@ -81,6 +111,72 @@ export async function createSpatialServer(options = {}) {
     return current;
   }
 
+  function readOnlyAtomCommand(payload) {
+    return typeof payload?.source === 'string'
+      && /^explore(?:\s|$)/u.test(payload.source.trim());
+  }
+
+  function executeAtomInteraction(payload, operation) {
+    if (!readOnlyAtomCommand(payload)) return enqueueAtomInteraction(operation);
+    const committedWrites = atomInteractionTail;
+    return committedWrites.then(operation, operation);
+  }
+
+  function atomCommandRequest(payload, operation) {
+    const interaction = payload?.interaction && typeof payload.interaction === 'object'
+      ? payload.interaction
+      : {};
+    const id = typeof interaction.id === 'string' && interaction.id.trim()
+      ? interaction.id.trim()
+      : crypto.randomUUID();
+    const normalized = { ...payload, interaction: { ...interaction, id } };
+    const fingerprint = JSON.stringify({
+      source: normalized.source,
+      agent: normalized.interaction.agent ?? null,
+      agentSelector: normalized.interaction.agentSelector ?? null,
+      history: normalized.history ?? []
+    });
+    const existing = atomCommandReceipts.get(id);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) {
+        throw new SpatialStoreError(
+          'ATOM_INTERACTION_ID_CONFLICT',
+          '同一 Atom 请求标识不能对应不同命令'
+        );
+      }
+      return existing.receipt;
+    }
+
+    let resolveReceipt;
+    let rejectReceipt;
+    let settled = false;
+    const receipt = new Promise((resolve, reject) => {
+      resolveReceipt = resolve;
+      rejectReceipt = reject;
+    });
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      resolveReceipt(result);
+    };
+    atomCommandReceipts.set(id, { fingerprint, receipt });
+    while (atomCommandReceipts.size > 1_000) {
+      atomCommandReceipts.delete(atomCommandReceipts.keys().next().value);
+    }
+
+    executeAtomInteraction(normalized, async () => {
+      try {
+        const result = await operation(normalized, settle);
+        settle(result);
+        return result;
+      } catch (error) {
+        if (!settled) rejectReceipt(error);
+        throw error;
+      }
+    }).catch(() => undefined);
+    return receipt;
+  }
+
   async function readKnowledge() {
     return bossStore ? (await bossStore.readAll()).knowledge : store.read();
   }
@@ -98,12 +194,19 @@ export async function createSpatialServer(options = {}) {
       }
       if (url.pathname === '/__spatial/api/health') {
         const knowledge = await readKnowledge();
+        const atomProjection = typeof options.atomProjectionStatus === 'function'
+          ? await options.atomProjectionStatus()
+          : null;
         return json(response, 200, {
           ok: true,
           version: VERSION,
           revision: knowledge.revision,
           mode: bossStore ? 'boss' : 'single',
           atomWorkspace: typeof options.atomWorkspaceEdit === 'function',
+          ...(atomProjection ? { atomProjection } : {}),
+          ...(spatialProjectionFailure ? {
+            spatialProjection: { status: 'pending', error: spatialProjectionFailure }
+          } : {}),
           store: bossStore ? bossDirectory : store.file,
           ...(graphFile ? { graphFile } : {})
         });
@@ -127,7 +230,38 @@ export async function createSpatialServer(options = {}) {
         return json(response, 200, JSON.parse(await fs.readFile(graphFile, 'utf8')));
       }
       if (url.pathname === '/__spatial/api/state' && request.method === 'GET') {
-        return json(response, 200, { ok: true, knowledge: await readKnowledge() });
+        const knowledge = await readKnowledge();
+        if (!url.searchParams.has('path')) return json(response, 200, { ok: true, knowledge });
+        const requestedPath = url.searchParams.get('path');
+        return json(response, 200, {
+          ok: true,
+          knowledge: knowledgeAtPath(knowledge, requestedPath),
+          scope: { path: requestedPath.trim() }
+        });
+      }
+      if (url.pathname === '/__atom/api/work-order-registry' && request.method === 'GET') {
+        if (typeof options.atomWorkOrderRegistry !== 'function') {
+          return json(response, 404, {
+            ok: false,
+            error: { code: 'ATOM_WORK_ORDER_REGISTRY_UNAVAILABLE' }
+          });
+        }
+        return json(response, 200, {
+          ok: true,
+          result: await options.atomWorkOrderRegistry()
+        });
+      }
+      if (url.pathname === '/__atom/api/program-function-registry' && request.method === 'GET') {
+        if (typeof options.atomProgramFunctionRegistry !== 'function') {
+          return json(response, 404, {
+            ok: false,
+            error: { code: 'ATOM_PROGRAM_FUNCTION_REGISTRY_UNAVAILABLE' }
+          });
+        }
+        return json(response, 200, {
+          ok: true,
+          result: await options.atomProgramFunctionRegistry()
+        });
       }
       if (url.pathname === '/__spatial/api/state' && request.method === 'PUT') {
         if (options.atomProjectionReadOnly === true) {
@@ -180,19 +314,27 @@ export async function createSpatialServer(options = {}) {
           return json(response, 404, { ok: false, error: { code: 'ATOM_COMMAND_UNAVAILABLE' } });
         }
         const payload = await body(request);
-        const result = await enqueueAtomInteraction(async () => {
-          const commandResult = await options.atomCommand(payload);
-          if (graphFile) {
-            const document = JSON.parse(await fs.readFile(graphFile, 'utf8'));
-            if (options.projectAtomKnowledge) {
-              await store.execute('knowledge.replace', {
-                knowledge: await options.projectAtomKnowledge(document, commandResult)
-              });
+        const result = await atomCommandRequest(payload, async (normalized, onCommitted) => {
+          const commandResult = await options.atomCommand(normalized, { onCommitted });
+          if (commandResult?.changed !== false && graphFile) {
+            try {
+              const document = JSON.parse(await fs.readFile(graphFile, 'utf8'));
+              if (options.projectAtomKnowledge) {
+                await store.execute('knowledge.replace', {
+                  knowledge: await options.projectAtomKnowledge(document, commandResult)
+                });
+              }
+              spatialProjectionFailure = null;
+              publishKnowledgeChange(await readKnowledge());
+            } catch (error) {
+              spatialProjectionFailure = {
+                code: error?.code ?? 'SPATIAL_PROJECTION_FAILED',
+                message: error?.message ?? 'Spatial projection failed after the world commit'
+              };
             }
           }
           return commandResult;
         });
-        publishKnowledgeChange(await readKnowledge());
         return json(response, 200, { ok: true, result });
       }
       if (url.pathname === '/__atom/api/human-status' && request.method === 'POST') {
@@ -280,7 +422,8 @@ export async function createSpatialServer(options = {}) {
     root,
     storeFile: bossStore ? bossDirectory : storeFile,
     graphFile,
-    mode: bossStore ? 'boss' : 'single'
+    mode: bossStore ? 'boss' : 'single',
+    drainAtomInteractions: () => atomInteractionTail
   };
 }
 

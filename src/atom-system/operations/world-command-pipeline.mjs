@@ -38,11 +38,18 @@ export function createWorldCommandPipeline({
       const projection = await recoverProjection({ expectedRevision: receipt.afterRevision });
       return Object.freeze({ receipt, projectionStatus: 'published', projection });
     } catch (error) {
-      throw problem(
-        'WORLD_COMMITTED_PROJECTION_PENDING',
-        'World command committed, but its replaceable projections require recovery',
-        { receipt, cause: error.code ?? error.name }
-      );
+      const details = error?.details && typeof error.details === 'object' ? error.details : {};
+      return Object.freeze({
+        receipt,
+        projectionStatus: 'pending',
+        projectionRecovery: { expectedRevision: receipt.afterRevision },
+        projectionFailure: Object.freeze({
+          ...(typeof details.projection === 'string' && details.projection
+            ? { projection: details.projection }
+            : {}),
+          cause: details.cause ?? error.code ?? error.name
+        })
+      });
     }
   }
 

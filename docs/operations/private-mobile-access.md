@@ -16,6 +16,8 @@
 
 安装器只接受当前 Tailscale 登录身份，拒绝覆盖既有 Serve 配置或同名计划任务，并在失败时撤回本次创建的入口。
 
+安装器同时登记 `Atom Graph Runtime` 监督任务，并把身份网关任务配置为长期运行：允许电池供电、取消三天执行上限，异常退出后每分钟自动重启。重复运行安装器会修复 Atom 自己拥有的既有任务，不会覆盖其他计划任务或 Serve 配置。
+
 主入口依赖 Android MagicDNS。若真机的域名链持续中断，可另启 Tailnet IP 直连网关：它只绑定电脑的 Tailscale IPv4，并只接受显式批准的手机 Tailscale IPv4；手机使用 `http://<电脑的 Tailscale IPv4>:<直连端口>/`。传输仍在 Tailscale 加密私网内，不经过公网。
 
 ## 停用
@@ -25,6 +27,7 @@ powershell -ExecutionPolicy Bypass -File scripts/disable-atom-private-access.ps1
 ```
 
 停用只移除 Atom 自己登记的 HTTPS 映射、身份网关和计划任务，不重置其他 Tailscale 配置，也不修改 Atom 数据。
+本地 `Atom Graph Runtime` 监督任务继续保留，使电脑端 `127.0.0.1:4784` 不因停用手机入口而失效。
 
 ## 安全边界
 

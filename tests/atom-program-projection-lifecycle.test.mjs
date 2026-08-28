@@ -7,8 +7,13 @@ import test from 'node:test';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return {
+    [`thing${type ? `@${type}` : ''}`]: thing,
+    situation: situation,
+    contain: contain,
+    support: []
+  };
 }
 
 function memoryProjectionRepository() {
@@ -90,6 +95,131 @@ test('a validated Program projection survives scheduler restart for the exact wo
   assert.equal(executions, 1);
 });
 
+test('a persisted Program projection restores only versioned exact Explore read paths', async () => {
+  const repository = memoryProjectionRepository();
+  const world = [atom('Target'), atom('Program', '# reads target', [], 'program')];
+  const first = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async ({ executeExplore }) => {
+      await executeExplore({ thing: 'Target', 'contain$latitude-1': true });
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+  await first.refresh(world, {
+    isolateFailures: true,
+    executeExplore: async () => [{ path: 'Target' }]
+  });
+
+  const stored = await repository.load();
+  assert.equal(stored.readSetVersion, 1);
+  assert.deepEqual(stored.exploreReadPaths, ['Target']);
+
+  const restarted = createProgramRuntimeScheduler({ projectionRepository: repository });
+  const restored = await restarted.current(structuredClone(world), { isolateFailures: true });
+  assert.deepEqual(restored.exploreReadPaths, ['Target']);
+
+});
+
+test('an explicit selected Program run cannot replace the persisted full-world projection', async () => {
+  const repository = memoryProjectionRepository();
+  const world = [
+    atom('Program A', '# selected', [], 'program'),
+    atom('Program B', '# remains active', [], 'program')
+  ];
+  const scheduler = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async () => ({ locks: [], messages: [], transforms: [] })
+  });
+
+  await scheduler.refresh(world, { isolateFailures: true });
+  await scheduler.refresh(structuredClone(world), {
+    isolateFailures: true,
+    programSelector: 'Program A',
+    force: true
+  });
+
+  const restarted = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async () => {
+      throw new Error('the preserved full-world projection must be restored');
+    }
+  });
+  const restored = await restarted.current(structuredClone(world), {
+    isolateFailures: true
+  });
+
+  assert.equal(restored.cached, true);
+  assert.deepEqual(restored.failures, []);
+});
+
+test('each committed Program create settles the next independent request onto its new revision', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-create-projection-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Root', '', [atom('Audit', '', [], 'agent')])
+  ], null, 2));
+  const projectionRepository = memoryProjectionRepository();
+  const programExecutions = [];
+  const scheduler = createProgramRuntimeScheduler({
+    projectionRepository,
+    runProgram: async ({ program }) => {
+      programExecutions.push(program.path);
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+  const interaction = { agent: { ref: 'audit-ref', path: 'Root/Audit' } };
+  const commitWorld = async ({ facts }) => {
+    await fs.writeFile(contextFile, JSON.stringify(facts, null, 2));
+  };
+
+  const initialized = await executeAtomLanguage({
+    source: 'atom', contextFile, projectionFile, programScheduler: scheduler,
+    programMode: 'project', interaction: { id: 'create-startup', agent: null }
+  });
+  assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
+
+  const createdPredicate = await executeAtomLanguage({
+    source: 'transform new {"thing@program":"Root/Predicate","situation":"def main(arguments):\\n    return False","contain":[],"support":[]}',
+    contextFile, projectionFile, programScheduler: scheduler, commitWorld,
+    interaction: { id: 'create-predicate', ...interaction }
+  });
+  assert.equal(createdPredicate.ok, true, JSON.stringify(createdPredicate.errors));
+  const predicateExecutionsAfterCreate = programExecutions.filter((programPath) => (
+    programPath === 'Root/Predicate'
+  )).length;
+  assert.ok(predicateExecutionsAfterCreate > 0);
+
+  const createdRegistration = await executeAtomLanguage({
+    source: 'transform new {"thing@program":"Root/Registration","situation":"def main(arguments):\\n    return None","contain":[],"support":[]}',
+    contextFile, projectionFile, programScheduler: scheduler, commitWorld,
+    interaction: { id: 'create-registration', ...interaction }
+  });
+  assert.equal(createdRegistration.ok, true, JSON.stringify(createdRegistration.errors));
+  assert.equal(programExecutions.filter((programPath) => (
+    programPath === 'Root/Predicate'
+  )).length, predicateExecutionsAfterCreate);
+  assert.ok(programExecutions.includes('Root/Registration'));
+
+  let readExecutions = 0;
+  const restarted = createProgramRuntimeScheduler({
+    projectionRepository,
+    runProgram: async () => {
+      readExecutions += 1;
+      throw new Error('ordinary exact Explore must consume the committed passive base');
+    }
+  });
+  const audited = await executeAtomLanguage({
+    source: 'explore {"thing":"Root/Registration","situation$full":true}',
+    contextFile, projectionFile, programScheduler: restarted,
+    interaction: { id: 'audit-registration', ...interaction }
+  });
+  assert.equal(audited.ok, true, JSON.stringify(audited.errors));
+  assert.equal(audited.items[0].matches[0].path, 'Root/Registration');
+  assert.equal(readExecutions, 0);
+});
+
 test('a persisted Program projection cannot be reused for a different world revision', async () => {
   const repository = memoryProjectionRepository();
   const scheduler = createProgramRuntimeScheduler({
@@ -107,6 +237,285 @@ test('a persisted Program projection cannot be reused for a different world revi
     }),
     (error) => error.code === 'ATOM_PROGRAM_PROJECTION_MISSING'
   );
+});
+
+test('passive read preparation computes on a cache miss and reuses the computed index', async () => {
+  let executions = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async () => {
+      executions += 1;
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+
+  const world = [atom('Program', '# compute once', [], 'program')];
+  const first = await scheduler.refresh(world, {
+    passive: true,
+    agentOrigin: { path: 'Agent' }
+  });
+  assert.equal(first.cached, false);
+  assert.equal(executions, 1);
+
+  const second = await scheduler.refresh(structuredClone(world), {
+    passive: true,
+    agentOrigin: { path: 'Agent' }
+  });
+  assert.equal(second.cached, true);
+  assert.equal(executions, 1);
+});
+
+test('Agent key, lock, and path changes invalidate accelerated Program results', async () => {
+  let executions = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async () => {
+      executions += 1;
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+  const world = [atom('Root', '', [
+    atom('Agent', 'agent({"labels":["^"],"functions":{"groups":[],"names":["transform"]}})', [], 'program@agent'),
+    atom('Lock', 'lock({"targets":{"paths":["Root/Agent"],"scope":"exact"},"actions":["transform"],"labels":["^"]})', [], 'program')
+  ])];
+
+  await scheduler.refresh(world);
+  assert.equal(executions, 2);
+  await scheduler.refresh(structuredClone(world));
+  assert.equal(executions, 2, 'an unchanged world should reuse accelerated results');
+
+  const keyChanged = structuredClone(world);
+  keyChanged[0].contain[0].situation = keyChanged[0].contain[0].situation.replace('["^"]', '["^^"]');
+  await scheduler.refresh(keyChanged);
+  assert.equal(executions, 3, 'an Agent key change must invalidate its affected accelerated result');
+
+  const lockChanged = structuredClone(keyChanged);
+  lockChanged[0].contain[1].situation = lockChanged[0].contain[1].situation.replace('["^"]', '["^^"]');
+  await scheduler.refresh(lockChanged);
+  assert.equal(executions, 4, 'a lock change must invalidate its affected accelerated result');
+
+  const pathChanged = structuredClone(lockChanged);
+  pathChanged[0].contain[0]['thing@program@agent'] = 'RenamedAgent';
+  pathChanged[0].contain[1].situation = pathChanged[0].contain[1].situation.replace('Root/Agent', 'Root/RenamedAgent');
+  await scheduler.refresh(pathChanged);
+  assert.equal(executions, 6, 'a valid path move must invalidate the Agent and its affected lock result');
+});
+
+test('startup isolates Agent-bound jump failures into a restartable context-free passive projection', async () => {
+  const repository = memoryProjectionRepository();
+  const world = [
+    atom('Stable Program', '# context-free lock', [], 'program'),
+    atom('Jump Program', '# Agent-bound jump', [], 'program')
+  ];
+  const startup = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async ({ program }) => {
+      if (program.path === 'Jump Program') {
+        throw Object.assign(new Error('jump requires one active Agent window'), {
+          code: 'WINDOW_JUMP_DESTINATION_INVALID'
+        });
+      }
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+
+  const built = await startup.refresh(world, { isolateFailures: true });
+  assert.deepEqual(built.failures, []);
+  assert.equal(built.contextIncomplete, true);
+  assert.ok(await repository.load(), 'startup must persist the validated context-free base');
+
+  const agentCycle = await startup.refresh(structuredClone(world), {
+    isolateFailures: true,
+    force: true,
+    agentOrigin: { ref: 'agent-ref', path: 'Root/Window' }
+  });
+  assert.deepEqual(agentCycle.failures.map(({ code }) => code), [
+    'WINDOW_JUMP_DESTINATION_INVALID'
+  ]);
+
+  let restartedExecutions = 0;
+  const restarted = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async () => {
+      restartedExecutions += 1;
+      throw new Error('passive restore must not execute Programs');
+    }
+  });
+  const restored = await restarted.refresh(structuredClone(world), {
+    isolateFailures: true,
+    passive: true,
+    allowContextIncomplete: true,
+    agentOrigin: { ref: 'agent-ref', path: 'Root/Window' }
+  });
+
+  assert.equal(restored.cached, true);
+  assert.equal(restored.contextIncomplete, true);
+  assert.equal(restartedExecutions, 0);
+});
+
+test('an Agent exact read reuses a valid context-incomplete projection without executing an unrelated jump', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-context-incomplete-exact-read-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const repository = memoryProjectionRepository();
+  const world = [atom('Root', '', [
+    atom('Audit', '', [], 'program@agent'),
+    atom('Target'),
+    atom('Legacy Jump', '# agent-bound jump', [], 'program')
+  ])];
+  await fs.writeFile(contextFile, JSON.stringify(world, null, 2));
+
+  const startup = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async ({ program }) => {
+      if (program.path === 'Root/Legacy Jump') {
+        throw Object.assign(new Error('missing destination'), {
+          code: 'WINDOW_JUMP_DESTINATION_INVALID'
+        });
+      }
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+  await startup.refresh(world, { isolateFailures: true });
+
+  let executions = 0;
+  const restarted = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async () => {
+      executions += 1;
+      throw new Error('an exact read must not rebuild unrelated Programs');
+    }
+  });
+  const result = await executeAtomLanguage({
+    source: 'explore {"thing":"Root/Target","situation$full":true}',
+    contextFile,
+    projectionFile,
+    programScheduler: restarted,
+    interaction: { id: 'context-incomplete-exact-read', agent: { ref: 'audit-ref', path: 'Root/Audit' } }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.items[0].matches[0].path, 'Root/Target');
+  assert.equal(executions, 0);
+});
+
+test('startup settles isolated Program failures before replacing a stale passive projection', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-startup-settle-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const repository = memoryProjectionRepository();
+  repository.replace({
+    version: 1,
+    readSetVersion: 1,
+    worldKey: 'stale-world',
+    programSetKey: 'stale-programs',
+    contextDependent: false,
+    contextIncomplete: false,
+    scopePath: null,
+    locks: [],
+    choices: [],
+    exploreReadPaths: [],
+    failures: []
+  });
+  const world = [
+    atom('Target'),
+    atom('Healthy Program', '# healthy', [], 'program'),
+    atom('Broken Program', '# deterministic isolated failure', [], 'program'),
+    atom('Scoped Program', '# requires one slot scope', [], 'program')
+  ];
+  await fs.writeFile(contextFile, JSON.stringify(world));
+  let startupExecutions = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async ({ program }) => {
+      startupExecutions += 1;
+      if (program.path === 'Broken Program') {
+        throw Object.assign(new Error('invalid isolated message effect'), {
+          code: 'INVALID_PROGRAM_MESSAGE'
+        });
+      }
+      if (program.path === 'Scoped Program') {
+        throw Object.assign(new Error('slot scope is required'), {
+          code: 'SLOT_SCOPE_ROOT_UNBOUND'
+        });
+      }
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+
+  const initialized = await executeAtomLanguage({
+    source: 'atom', contextFile, projectionFile,
+    programScheduler: scheduler,
+    programMode: 'project',
+    interaction: { id: 'startup-settle', agent: null }
+  });
+
+  assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
+  assert.equal(startupExecutions, 3, 'the settle pass must reuse success and isolated failure state');
+  assert.ok(initialized.warnings.some(({ code }) => code === 'INVALID_PROGRAM_MESSAGE'));
+  const stored = await repository.load();
+  assert.notEqual(stored.worldKey, 'stale-world');
+  assert.notEqual(stored.programSetKey, 'stale-programs');
+  assert.equal(stored.contextIncomplete, true);
+  assert.deepEqual(stored.failures, []);
+
+  let restartedExecutions = 0;
+  const restarted = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async () => {
+      restartedExecutions += 1;
+      throw new Error('same-revision passive restore must not execute Programs');
+    }
+  });
+  const restored = await restarted.refresh(structuredClone(world), {
+    isolateFailures: true,
+    passive: true,
+    allowContextIncomplete: true,
+    agentOrigin: { ref: 'agent-ref', path: 'Agent' }
+  });
+  assert.equal(restored.cached, true);
+  assert.equal(restartedExecutions, 0);
+});
+
+test('startup publishes with a persistent context-free Program failure kept as a warning', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-startup-isolated-warning-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root')]));
+  const failure = {
+    code: 'REQUEST_DRIVEN_LOCK_LITERAL_REQUIRED',
+    message: 'lock declaration requires literal paths',
+    programPath: 'Root/Legacy Lock'
+  };
+  const programScheduler = {
+    agentSecurity: new Map(),
+    async refresh() {
+      return {
+        cached: false,
+        records: [],
+        locks: [],
+        messages: [],
+        transforms: [],
+        failures: [failure],
+        runtimeWarnings: []
+      };
+    }
+  };
+
+  const initialized = await executeAtomLanguage({
+    source: 'atom',
+    contextFile,
+    projectionFile,
+    programScheduler,
+    programMode: 'project',
+    interaction: { id: 'startup-isolated-warning', agent: null }
+  });
+
+  assert.equal(initialized.ok, true, JSON.stringify(initialized));
+  assert.ok(initialized.warnings.some((warning) => (
+    warning.code === 'REQUEST_DRIVEN_LOCK_LITERAL_REQUIRED'
+  )), JSON.stringify(initialized));
 });
 
 test('a legacy persisted failure is rejected and retried instead of becoming authoritative', async () => {
@@ -141,12 +550,14 @@ test('a legacy persisted failure is rejected and retried instead of becoming aut
   assert.equal(executions, 2);
 });
 
-test('every Program receives its own full timeout budget', async () => {
+test('concurrent Programs share one cycle deadline', async () => {
   const budgets = [];
   const scheduler = createProgramRuntimeScheduler({
     timeoutMs: 12_345,
+    maxWorkers: 1,
     runProgram: async ({ timeoutMs }) => {
       budgets.push(timeoutMs);
+      await new Promise((resolve) => setTimeout(resolve, 10));
       return { locks: [], messages: [], transforms: [] };
     }
   });
@@ -157,7 +568,10 @@ test('every Program receives its own full timeout budget', async () => {
     atom('Program C', '# c', [], 'program')
   ]);
 
-  assert.deepEqual(budgets, [12_345, 12_345, 12_345]);
+  assert.equal(budgets.length, 3);
+  assert.equal(budgets.every((budget) => budget > 12_000 && budget <= 12_345), true);
+  assert.ok(budgets[1] < budgets[0]);
+  assert.ok(budgets[2] < budgets[1]);
 });
 
 test('a Program that explores the current Agent cannot reuse another Agent projection', async () => {
@@ -242,7 +656,7 @@ test('replaceable projection persistence failure does not discard a valid in-mem
   assert.equal(current.cached, true);
 });
 
-test('a transient Program failure is retried instead of becoming a reusable projection', async () => {
+test('a transient Program failure is retried by an explicit Program refresh', async () => {
   let executions = 0;
   const scheduler = createProgramRuntimeScheduler({
     runProgram: async () => {
@@ -260,11 +674,96 @@ test('a transient Program failure is retried instead of becoming a reusable proj
   });
   const recovered = await scheduler.refresh([
     atom('Fact', 'after'), structuredClone(program)
-  ], { isolateFailures: true });
+  ], { isolateFailures: true, force: true });
 
   assert.equal(failed.failures[0].code, 'ATOM_PROGRAM_TIMEOUT');
   assert.equal(executions, 2);
   assert.deepEqual(recovered.failures, []);
+});
+
+test('an isolated context-free startup failure stays dormant while Agent context is completed', async () => {
+  let executions = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program }) => {
+      executions += 1;
+      if (program.path !== 'Broken Program') {
+        return { locks: [], messages: [], transforms: [] };
+      }
+      throw Object.assign(new Error('unrelated persistent failure'), {
+        code: 'ATOM_PROGRAM_FAILED'
+      });
+    }
+  });
+  const world = [
+    atom('Agent', '', [], 'agent'),
+    atom('Broken Program', '# fails without reading the Agent', [], 'program')
+  ];
+
+  const startup = await scheduler.refresh(world, { isolateFailures: true });
+  const changedWorld = [
+    ...structuredClone(world),
+    atom('Unrelated New Program', '# added elsewhere', [], 'program')
+  ];
+  const agentProjection = await scheduler.refresh(changedWorld, {
+    isolateFailures: true,
+    agentOrigin: { ref: 'agent-ref', path: 'Agent' }
+  });
+
+  assert.equal(startup.failures.length, 1);
+  assert.equal(executions, 2);
+  assert.deepEqual(agentProjection.failures, []);
+  assert.equal(agentProjection.cached, false);
+});
+
+test('a cold Agent Transform does not replay or report an unrelated startup failure', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-cold-agent-transform-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Agent', '', [], 'agent'),
+    atom('Target', 'before'),
+    atom('Broken Program', "raise ValueError('unrelated persistent failure')", [], 'program')
+  ], null, 2));
+  let executions = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async () => {
+      executions += 1;
+      throw Object.assign(new Error('unrelated persistent failure'), {
+        code: 'ATOM_PROGRAM_FAILED'
+      });
+    }
+  });
+
+  const startup = await executeAtomLanguage({
+    source: 'atom', contextFile, projectionFile, programScheduler: scheduler,
+    programMode: 'project', interaction: { id: 'startup', agent: null }
+  });
+  const preparation = await executeAtomLanguage({
+    source: 'atom', contextFile, projectionFile, programScheduler: scheduler,
+    programMode: 'reconcile',
+    interaction: { id: 'agent-preparation', agent: { ref: 'agent-ref', path: 'Agent' } }
+  });
+  const transformed = await executeAtomLanguage({
+    source: 'transform {"thing":"Target","situation.rep.after"}',
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler,
+    commitWorld: async () => {},
+    interaction: { id: 'agent-transform', agent: { ref: 'agent-ref', path: 'Agent' } }
+  });
+
+  assert.equal(startup.ok, true, JSON.stringify(startup.errors));
+  assert.equal(preparation.ok, true, JSON.stringify(preparation.errors));
+  assert.equal(preparation.warnings.some((warning) => (
+    warning.code === 'ATOM_PROGRAM_FAILED'
+  )), false, JSON.stringify(preparation.warnings));
+  assert.equal(transformed.ok, true, JSON.stringify(transformed.errors));
+  assert.equal(transformed.changed, true, JSON.stringify(transformed));
+  assert.equal(executions, 1);
+  assert.equal(transformed.warnings.some((warning) => (
+    warning.code === 'ATOM_PROGRAM_FAILED'
+  )), false, JSON.stringify(transformed.warnings));
 });
 
 test('concurrent invalidated refreshes share the complete dependency-check and worker pipeline', async () => {
@@ -272,7 +771,7 @@ test('concurrent invalidated refreshes share the complete dependency-check and w
   const scheduler = createProgramRuntimeScheduler({
     runProgram: async ({ executeExplore }) => {
       executions += 1;
-      await executeExplore({ name: 'Fact' });
+        await executeExplore({ thing: 'Fact' });
       await new Promise((resolve) => setTimeout(resolve, 25));
       return { locks: [], messages: [], transforms: [] };
     }
@@ -299,12 +798,12 @@ test('Program structural facts invalidate reusable effects even without explore 
       return { locks: [], messages: [], transforms: [] };
     }
   });
-  const program = atom('Program', '# current_atom partners', [], 'program');
-  program.partners = [{ verb: 'before', object: 'Target' }];
+  const program = atom('Program', '# current_atom support', [], 'program');
+  program.support = [];
   await scheduler.refresh([atom('Target'), program]);
 
   const changed = structuredClone(program);
-  changed.partners = [{ verb: 'after', object: 'Target' }];
+  changed.support = [{ 'if@current': true, then: [{ thing: 'Target' }] }];
   await scheduler.refresh([atom('Target'), changed]);
 
   assert.equal(executions, 2);

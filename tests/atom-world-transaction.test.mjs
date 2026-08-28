@@ -87,13 +87,15 @@ test('a repeated command id is idempotent and returns the original receipt', asy
   assert.equal((await journalRepository.readState()).receipts.length, 1);
 });
 
-test('transaction history keeps one rollback snapshot and compacts older receipts', async (t) => {
+test('transaction history appends compact events and content-addressed snapshots without rewriting legacy history', async (t) => {
   const { coordinator, worldRepository, journalRepository, journalFile } = await fixture(t);
   const initial = await worldRepository.read();
   const first = await coordinator.execute({
     command: command('cmd-first-compact', initial.revision),
     transition: ({ facts }) => ({ facts: [...facts, { name: 'first' }] })
   });
+  const eventFile = path.join(`${journalFile}.d`, 'events.jsonl');
+  const eventsAfterFirst = await fs.readFile(eventFile, 'utf8');
   await coordinator.execute({
     command: command('cmd-second-compact', first.afterRevision),
     transition: ({ facts }) => ({ facts: [...facts, { name: 'second' }] })
@@ -101,11 +103,39 @@ test('transaction history keeps one rollback snapshot and compacts older receipt
 
   const history = await journalRepository.readState();
   assert.equal(history.receipts.length, 2);
-  assert.equal(history.receipts[0].before.facts, undefined);
-  assert.equal(history.receipts[0].after.facts, undefined);
-  assert.ok(Array.isArray(history.receipts[1].before.facts));
-  assert.ok(Array.isArray(history.receipts[1].after.facts));
-  assert.ok((await fs.stat(journalFile)).size < 20_000);
+  const eventsAfterSecond = await fs.readFile(eventFile, 'utf8');
+  assert.equal(eventsAfterSecond.startsWith(eventsAfterFirst), true);
+  assert.equal(eventsAfterSecond.length - eventsAfterFirst.length < 10_000, true);
+  const objects = await fs.readdir(path.join(`${journalFile}.d`, 'objects'));
+  assert.equal(objects.length, 3);
+  assert.equal(objects.every((name) => name.endsWith('.json.gz')), true);
+  await assert.rejects(fs.access(journalFile), { code: 'ENOENT' });
+});
+
+test('incremental history reads legacy receipts without modifying the legacy journal', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-legacy-journal-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const journalFile = path.join(directory, 'transactions.json');
+  const before = { contract: 'atom.world-snapshot', version: 1, worldId: 'primary', revision: revisionOf([]), facts: [] };
+  const afterFacts = [{ name: 'legacy' }];
+  const after = { contract: 'atom.world-snapshot', version: 1, worldId: 'primary', revision: revisionOf(afterFacts), facts: afterFacts };
+  const receipt = {
+    contract: 'atom.world-receipt', version: 1, commandId: 'legacy-command',
+    correlationId: 'legacy-correlation', beforeRevision: before.revision,
+    afterRevision: after.revision, status: 'committed', committedAt: new Date(0).toISOString(),
+    source: 'legacy', affectedAtoms: [], result: null
+  };
+  const legacy = {
+    schemaVersion: 1, historyMode: 'latest-rollback-snapshot', prepared: [],
+    receipts: [{ commandId: 'legacy-command', correlationId: 'legacy-correlation', command: command('legacy-command', before.revision), before, after, receipt }]
+  };
+  const original = `${JSON.stringify(legacy, null, 2)}\n`;
+  await fs.writeFile(journalFile, original, 'utf8');
+  const repository = createJsonTransactionJournal({ file: journalFile });
+
+  assert.deepEqual(await repository.findReceipt('legacy-command'), receipt);
+  assert.deepEqual((await repository.findCommitted('legacy-command')).before.facts, []);
+  assert.equal(await fs.readFile(journalFile, 'utf8'), original);
 });
 
 test('atomic JSON replacement retries a transient Windows rename refusal', async () => {

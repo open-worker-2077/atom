@@ -2,15 +2,25 @@ import { diagnostic } from './errors.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { createAtomLanguageReceiver } from './receiver.mjs';
+import { parseSlotRelativeSelector, resolveSlotRelativeSelector } from './slot-relative-scope.mjs';
 import { selectCoordinateScope } from './world-laws/coordinates.mjs';
 import { decodeLockAtoms, evaluateLockAccess } from './world-laws/locks.mjs';
 import { createDefaultWorldLawRegistry } from './world-laws/registry.mjs';
 import { authorizeProgramLock, programLockState } from './program-locks.mjs';
 import { WORLD_OUTSIDE_NAME, worldOutsideAtom } from './world-root.mjs';
+import { authorizeWindowGraphPath } from './window-lock-v1.mjs';
+import { compileSlotStructureGraphLocks } from './slot-body-plan-runtime.mjs';
+import {
+  isShortcutAtom,
+  resolveShortcutMatch,
+  shortcutMetadata
+} from './shortcut-runtime.mjs';
+
+const preparedExploreSnapshots = new WeakMap();
 
 export function fieldsByBase(atom) {
   const byBase = new Map();
-  for (const [rawKey, value] of Object.entries(atom)) {
+  for (const [rawKey, value] of Object.entries(atom ?? {})) {
     const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
     if (parsed.errors.length) continue;
     const list = byBase.get(parsed.baseKey) ?? [];
@@ -25,16 +35,20 @@ export function oneStoredField(atom, baseKey) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+function storedSupportFields(atom) {
+  return fieldsByBase(atom).get('support') ?? [];
+}
+
 export function walkAtoms(atoms, options = {}) {
   const visited = [];
   function visit(atom, parentPath, index, parent = null) {
     if (!atom || typeof atom !== 'object' || Array.isArray(atom)) return;
-    const nameField = oneStoredField(atom, 'name');
+    const nameField = oneStoredField(atom, 'thing');
     const name = typeof nameField?.value === 'string' ? nameField.value : `[${index}]`;
     const visiblePath = [...parentPath, name];
     const match = { atom, path: visiblePath, parent, index };
     visited.push(match);
-    const children = oneStoredField(atom, 'children')?.value;
+    const children = oneStoredField(atom, 'contain')?.value;
     if (Array.isArray(children)) {
       children.forEach((child, childIndex) => visit(child, visiblePath, childIndex, match));
     }
@@ -55,28 +69,36 @@ export function walkAtoms(atoms, options = {}) {
 }
 
 function nameFieldIn(item) {
-  return item.fields.find((field) => field.baseKey === 'name');
+  return item.fields.find((field) => field.baseKey === 'thing');
 }
 
-export function exactMatches(atoms, item, matcherRegistry, candidates = null) {
+export function exactMatches(atoms, item, matcherRegistry, candidates = null, exactIndex = null) {
   const nameField = nameFieldIn(item);
   if (!nameField?.valuePresent || typeof nameField.value !== 'string' || !nameField.value) {
-    return { error: diagnostic('ATOM_NAME_REQUIRED', '首轮 explore/transform 执行需要带 Value 的 name 精确锚点') };
+    return { error: diagnostic('ATOM_THING_REQUIRED', '首轮 explore/transform 执行需要带 Value 的 thing 精确锚点') };
   }
   const mode = nameField.matcher?.mode ?? 'exact';
   const matcher = matcherRegistry.resolve(mode);
   if (!matcher) {
     return { error: diagnostic('UNSUPPORTED_MATCHER', `不支持此匹配模式：${mode}`, { mode }) };
   }
-  const matches = (candidates ?? walkAtoms(atoms)).filter(({ atom, path: atomPath }) => {
+  const available = candidates ?? walkAtoms(atoms);
+  if (mode === 'exact' && exactIndex) {
+    const candidateSet = new Set(available);
+    return {
+      matches: (exactIndex.get(nameField.value) ?? []).filter((match) => candidateSet.has(match)),
+      expected: nameField.value
+    };
+  }
+  const matches = available.filter(({ atom, path: atomPath }) => {
     if (mode === 'exact') {
       return matchesExactSelector(
         atomPath,
-        oneStoredField(atom, 'name')?.value,
+        oneStoredField(atom, 'thing')?.value,
         nameField.value
       );
     }
-    return matcher.match(oneStoredField(atom, 'name')?.value, nameField.value);
+    return matcher.match(oneStoredField(atom, 'thing')?.value, nameField.value);
   });
   return { matches, expected: nameField.value };
 }
@@ -84,47 +106,147 @@ export function exactMatches(atoms, item, matcherRegistry, candidates = null) {
 export function createAccessController(atoms, options = {}) {
   const programLockIndex = options.programLockIndex?.byPath?.size ? options.programLockIndex : null;
   const legacyAccess = options.legacyAccess;
-  if ((!legacyAccess || legacyAccess.global === true) && !programLockIndex) {
+  const agentPath = options.agentPath ?? options.interaction?.agent?.path ?? null;
+  const fixedAgentWindow = Boolean(agentPath && options.agentSecurity);
+  const slotStructure = compileSlotStructureGraphLocks(atoms);
+  const graphLocks = [...(options.graphLocks ?? []), ...slotStructure.locks];
+  const slotStructureRestricted = slotStructure.locks.length > 0;
+  if ((!legacyAccess || legacyAccess.global === true) && !programLockIndex
+    && !fixedAgentWindow && !slotStructureRestricted && graphLocks.length === 0) {
     return { restricted: false, authorize: async () => ({ decision: 'allow', matchedLocks: [] }) };
   }
   const registry = options.worldLawRegistry ?? createDefaultWorldLawRegistry();
   const locks = legacyAccess && legacyAccess.global !== true ? decodeLockAtoms(atoms) : [];
   const access = legacyAccess;
+  const agentMatch = agentPath
+    ? walkAtoms(atoms).find((match) => match.path.join('/') === agentPath)
+    : null;
+  const agentTypes = oneStoredField(agentMatch?.atom, 'thing')?.parsed.types
+    .map((type) => type.raw) ?? [];
   return {
     restricted: true,
-    async authorize(match, operation, field) {
+    async authorize(match, operation, field, actor = {}) {
       const targetPath = Array.isArray(match.path) ? match.path.join('/') : match.path;
+      const createdTypes = actor.createdAtom
+        ? oneStoredField(actor.createdAtom, 'thing')?.parsed.types.map((type) => type.raw) ?? []
+        : [];
+      const targetTypes = oneStoredField(match.atom, 'thing')?.parsed.types
+        .map((type) => type.raw) ?? [];
+      if (operation === 'write' && targetTypes.includes('jump-authorization')
+        && actor.windowJumpAuthorization !== true) {
+        return {
+          decision: 'deny', code: 'WINDOW_JUMP_AUTHORIZATION_IMMUTABLE',
+          lockKind: 'window-jump-authorization', matchedLocks: []
+        };
+      }
+      const insideSlotDomain = slotStructure.domains.some(({ path }) => (
+        targetPath === path || targetPath.startsWith(`${path}/`)
+      ));
+      if (operation === 'write' && insideSlotDomain
+        && createdTypes.some((type) => type.startsWith('slot-role-'))) {
+        return {
+          decision: 'deny', code: 'SLOT_ROLE_FORGERY_DENIED',
+          lockKind: 'slot-structure-lock', matchedLocks: []
+        };
+      }
       if (programLockIndex) {
-        const decision = authorizeProgramLock({ lockIndex: programLockIndex, targetPath, operation, field });
+        const decision = authorizeProgramLock({
+          lockIndex: programLockIndex, targetPath, operation, field,
+          agentPath,
+          agentTypes,
+          programPath: actor.programPath ?? null,
+          targetTypes,
+          action: operation === 'read' ? 'explore' : 'transform'
+        });
         if (decision.decision !== 'allow') return decision;
       }
-      if (!access || access.global === true) return { decision: 'allow', matchedLocks: [] };
-      return evaluateLockAccess({
-        locks,
-        registry,
-        operation,
-        window: access.window,
-        keys: access.keys ?? [],
-        target: { name: oneStoredField(match.atom, 'name')?.value ?? match.name ?? null, path: targetPath }
-      });
+      if (access && access.global !== true) {
+        const legacyDecision = evaluateLockAccess({
+          locks,
+          registry,
+          operation,
+          window: access.window,
+          keys: access.keys ?? [],
+          target: { name: oneStoredField(match.atom, 'thing')?.value ?? match.name ?? null, path: targetPath }
+        });
+        if (legacyDecision.decision !== 'allow') return legacyDecision;
+      }
+      if (fixedAgentWindow || graphLocks.length > 0) {
+        const capabilities = [];
+        if (actor.slotMaterialCreate === true) capabilities.push('slot-material-create');
+        if (actor.slotMaterialMove === true) capabilities.push('slot-material-move');
+        if (actor.slotReseal === true) capabilities.push('slot-reseal');
+        const fixed = authorizeWindowGraphPath({
+          agentPath: fixedAgentWindow ? agentPath : null,
+          targetPath,
+          operation: operation === 'read' ? 'explore' : 'transform',
+          locks: graphLocks,
+          labels: options.agentSecurity?.labels ?? [],
+          capabilities,
+          windowLifecycle: actor.windowLifecycle ?? null
+        });
+        if (fixed.decision !== 'allow') return fixed;
+      }
+      return { decision: 'allow', matchedLocks: [] };
     }
   };
 }
 
 export function describeAtom(match, includeFullDetail, options = {}) {
-  const nameField = oneStoredField(match.atom, 'name');
-  const detailField = oneStoredField(match.atom, 'detail');
+  const nameField = oneStoredField(match.atom, 'thing');
+  const detailField = oneStoredField(match.atom, 'situation');
   const result = {
     path: match.path.join('/'),
     selector: options.selector ?? match.path.join('/'),
-    name: nameField?.value ?? null,
+    thing: nameField?.value ?? null,
     types: nameField?.parsed.types.map((type) => type.raw) ?? [],
     description: detailField?.parsed.descriptionPresent ? detailField.parsed.description : null
   };
-  if (includeFullDetail) result.detail = detailField?.value ?? null;
-  if (options.partners) result.partners = structuredClone(options.partners);
+  if (includeFullDetail) result.situation = detailField?.value ?? null;
+  for (const field of options.supportFields ?? []) {
+    result[field.rawKey] = structuredClone(field.value);
+  }
   if (options.lockState) result.lockState = structuredClone(options.lockState);
+  if (options.resolvedThroughShortcut) result.resolvedThroughShortcut = structuredClone(options.resolvedThroughShortcut);
   return result;
+}
+
+function shortcutResolutionMarker(match) {
+  const metadata = shortcutMetadata(match.atom);
+  return {
+    identity: metadata.referenceId,
+    thing: oneStoredField(match.atom, 'thing')?.value ?? null,
+    placement: 'contain',
+    path: match.path.join('/')
+  };
+}
+
+export function prepareExploreWorld(atoms) {
+  if (Object.isFrozen(atoms) && preparedExploreSnapshots.has(atoms)) {
+    return preparedExploreSnapshots.get(atoms);
+  }
+  const allMatches = walkAtoms(atoms, { virtualRoot: true });
+  const exactIndex = new Map();
+  const add = (selector, match) => {
+    if (!indexableSelector(selector)) return;
+    if (!exactIndex.has(selector)) exactIndex.set(selector, []);
+    exactIndex.get(selector).push(match);
+  };
+  for (const match of allMatches) {
+    const name = oneStoredField(match.atom, 'thing')?.value;
+    add(name, match);
+    for (let length = 2; length <= match.path.length; length += 1) {
+      add(match.path.slice(-length).join('/'), match);
+    }
+    if (!match.virtual) add(`${WORLD_OUTSIDE_NAME}/${match.path.join('/')}`, match);
+  }
+  const prepared = { allMatches, exactIndex };
+  if (Object.isFrozen(atoms)) preparedExploreSnapshots.set(atoms, prepared);
+  return prepared;
+}
+
+function indexableSelector(selector) {
+  return typeof selector === 'string' && selector.length > 0;
 }
 
 function shortestUniqueSelector(match, matches) {
@@ -144,44 +266,155 @@ function resolvePartnerTarget(source, target, matches) {
   if (target.includes('/')) return byPath.get(target) ?? null;
   const sibling = byPath.get([...source.path.slice(0, -1), target].join('/'));
   if (sibling) return sibling;
-  const named = matches.filter((match) => oneStoredField(match.atom, 'name')?.value === target);
+  const named = matches.filter((match) => oneStoredField(match.atom, 'thing')?.value === target);
+  for (let depth = source.path.length - 2; depth >= 0; depth -= 1) {
+    const domain = source.path.slice(0, depth + 1);
+    const scoped = named.filter((match) => domain.every((part, index) => match.path[index] === part));
+    if (scoped.length === 1) return scoped[0];
+    if (scoped.length > 1) return null;
+  }
   return named.length === 1 ? named[0] : null;
 }
 
-function outgoingPartners(match, matches) {
-  const partners = oneStoredField(match.atom, 'partners')?.value;
-  if (!Array.isArray(partners)) return [];
-  return partners.map((partner) => ({ partner, target: resolvePartnerTarget(match, partner?.object, matches) }));
+function supportRuleEndpoints(owner, matches) {
+  const selectorsInExpr = (expr) => {
+    if (!expr || typeof expr !== 'object' || Array.isArray(expr)) return [];
+    if (typeof expr.thing === 'string') return [expr.thing];
+    if (typeof expr['thing@program'] === 'string') return [expr['thing@program']];
+    return ['and', 'or'].flatMap((operator) => (
+      Array.isArray(expr[operator]) ? expr[operator].flatMap(selectorsInExpr) : []
+    ));
+  };
+  return storedSupportFields(owner.atom).flatMap((field) => (
+    Array.isArray(field.value) ? field.value.map((rule, ordinal) => {
+      const endpoints = new Set([owner]);
+      for (const selector of [
+        ...(Array.isArray(rule?.if) ? rule.if.flatMap(selectorsInExpr) : []),
+        ...(Array.isArray(rule?.then) ? rule.then.map((item) => item?.thing ?? item?.['thing@program']) : [])
+      ]) {
+        const target = resolvePartnerTarget(owner, selector, matches);
+        if (target) endpoints.add(target);
+      }
+      return { key: field.rawKey, ordinal, owner, endpoints };
+    }) : []
+  ));
 }
 
-export async function executeExploreItem(atoms, item, matcherRegistry, accessController, lockIndex = null) {
+function supportScope(anchor, matches) {
+  const selected = new Set([anchor]);
+  for (const owner of matches) {
+    for (const rule of supportRuleEndpoints(owner, matches)) {
+      if (!rule.endpoints.has(anchor)) continue;
+      selected.add(owner);
+      for (const endpoint of rule.endpoints) selected.add(endpoint);
+    }
+  }
+  return selected;
+}
+
+function boundaryCandidates(anchor, matches, selected) {
+  const outside = (candidate) => !selected.has(candidate);
+  const childrenByParent = new Map();
+  for (const match of matches) {
+    const children = childrenByParent.get(match.parent) ?? [];
+    children.push(match);
+    childrenByParent.set(match.parent, children);
+  }
+  const up = [];
+  let ancestor = anchor.parent;
+  while (ancestor) {
+    if (outside(ancestor)) up.push(ancestor);
+    ancestor = ancestor.parent;
+  }
+  const down = [];
+  const descendants = [...(childrenByParent.get(anchor) ?? [])];
+  for (let index = 0; index < descendants.length; index += 1) {
+    const candidate = descendants[index];
+    if (outside(candidate)) down.push(candidate);
+    descendants.push(...(childrenByParent.get(candidate) ?? []));
+  }
+  const siblings = childrenByParent.get(anchor.parent) ?? [];
+  const anchorIndex = siblings.indexOf(anchor);
+  const left = anchorIndex < 0
+    ? []
+    : siblings.slice(0, anchorIndex).filter(outside);
+  const right = anchorIndex < 0
+    ? []
+    : siblings.slice(anchorIndex + 1).filter(outside);
+  return { up, down, left, right };
+}
+
+async function boundaryDirection(candidates, accessController) {
+  let characters = 0;
+  for (const candidate of candidates) {
+    const nameField = oneStoredField(candidate.atom, 'thing');
+    const executable = nameField?.parsed.types.some((type) => type.raw === 'program') ?? false;
+    if (accessController.restricted) {
+      const nameAccess = await accessController.authorize(candidate, 'read', 'thing');
+      const detailAccess = executable
+        ? { decision: 'allow' }
+        : await accessController.authorize(candidate, 'read', 'situation');
+      if (nameAccess.decision !== 'allow' || detailAccess.decision !== 'allow') {
+        return { state: 'protected', hasMore: true };
+      }
+    }
+    const name = typeof nameField?.value === 'string' ? nameField.value : '';
+    const detail = oneStoredField(candidate.atom, 'situation')?.value;
+    characters += name.length + (executable ? 0 : String(detail ?? '').length);
+  }
+  return {
+    state: 'complete',
+    hasMore: candidates.length > 0,
+    nodes: candidates.length,
+    characters
+  };
+}
+
+async function exploreBoundary(anchor, matches, selected, accessController) {
+  const candidates = boundaryCandidates(anchor, matches, selected);
+  const entries = await Promise.all(Object.entries(candidates).map(async ([direction, values]) => (
+    [direction, await boundaryDirection(values, accessController)]
+  )));
+  return Object.fromEntries(entries);
+}
+
+export async function executeExploreItem(
+  atoms,
+  item,
+  matcherRegistry,
+  accessController,
+  lockIndex = null,
+  preparedWorld = null,
+  options = {}
+) {
   if (!item.ok) return { ok: false, index: item.index, errors: item.errors };
   const isProjection = (field) => !field.valuePresent || field.value === true;
   const unsupported = item.fields.filter((field) => {
-    if (field.baseKey === 'name') return false;
-    if (field.baseKey === 'detail') return !isProjection(field) || field.actions.some((action) => action.name !== 'full');
-    if (field.baseKey === 'children') {
+    if (field.baseKey === 'thing') return false;
+    if (field.baseKey === 'situation') return !isProjection(field) || field.actions.some((action) => action.name !== 'full');
+    if (field.baseKey === 'contain') {
       return !isProjection(field) || field.actions.some((action) => !['latitude', 'longitude'].includes(action.name));
     }
-    if (field.baseKey === 'partners') return !isProjection(field) || field.actions.length > 0;
+    if (field.baseKey === 'support') return !isProjection(field) || field.actions.length > 0;
     return field.valuePresent || field.actions.length > 0;
   });
   if (unsupported.length) {
     return {
       ok: false,
       index: item.index,
-      errors: [diagnostic('UNSUPPORTED_EXPLORE_EXECUTION', '当前 explore 只执行 exact name、detail$full、children$up/down/prev/next 与 partners$hop', {
+      errors: [diagnostic('UNSUPPORTED_EXPLORE_EXECUTION', '当前 explore 只执行 exact thing、situation$full、contain$latitude/longitude 与 support 投影', {
         fields: unsupported.map((field) => field.rawKey)
       })]
     };
   }
-  const allMatches = walkAtoms(atoms, { virtualRoot: true });
-  const visibleMatches = [];
-  const requestedReadFields = new Set(['name']);
-  if (item.fields.some((field) => field.baseKey === 'detail' && field.actions.some((action) => action.name === 'full'))) requestedReadFields.add('detail');
-  if (item.fields.some((field) => field.baseKey === 'children')) requestedReadFields.add('children');
-  if (item.fields.some((field) => field.baseKey === 'partners')) requestedReadFields.add('partners');
-  for (const match of allMatches) {
+  const prepared = preparedWorld ?? prepareExploreWorld(atoms);
+  const allMatches = prepared.allMatches;
+  const visibleMatches = accessController.restricted ? [] : allMatches;
+  const requestedReadFields = new Set(['thing']);
+  if (item.fields.some((field) => field.baseKey === 'situation' && field.actions.some((action) => action.name === 'full'))) requestedReadFields.add('situation');
+  if (item.fields.some((field) => field.baseKey === 'contain')) requestedReadFields.add('contain');
+  if (item.fields.some((field) => field.baseKey === 'support')) requestedReadFields.add('support');
+  for (const match of accessController.restricted ? allMatches : []) {
     if (match.virtual) {
       visibleMatches.push(match);
       continue;
@@ -196,16 +429,24 @@ export async function executeExploreItem(atoms, item, matcherRegistry, accessCon
     }
     if (allowed) visibleMatches.push(match);
   }
-  const selected = exactMatches(atoms, item, matcherRegistry, visibleMatches);
+  const selected = exactMatches(
+    atoms, item, matcherRegistry, visibleMatches, prepared.exactIndex
+  );
   if (selected.error) return { ok: false, index: item.index, errors: [selected.error] };
   if (selected.matches.length === 0) {
-    const unfiltered = exactMatches(atoms, item, matcherRegistry, allMatches);
+    const unfiltered = exactMatches(
+      atoms, item, matcherRegistry, allMatches, prepared.exactIndex
+    );
     if (unfiltered.error) return { ok: false, index: item.index, errors: [unfiltered.error] };
     if (unfiltered.matches.length > 0) {
       const programSources = [];
+      let windowAccessDenied = false;
       for (const match of unfiltered.matches) {
         for (const field of requestedReadFields) {
           const decision = await accessController.authorize(match, 'read', field);
+          if (decision.decision !== 'allow' && decision.code === 'WINDOW_ACCESS_DENIED') {
+            windowAccessDenied = true;
+          }
           for (const source of decision.matched ?? []) {
             if (!programSources.some((candidate) => candidate.sourceProgramPath === source.sourceProgramPath)) {
               programSources.push(source);
@@ -213,11 +454,26 @@ export async function executeExploreItem(atoms, item, matcherRegistry, accessCon
           }
         }
       }
+      if (windowAccessDenied) {
+        return {
+          ok: false,
+          index: item.index,
+          errors: [diagnostic(
+            'WINDOW_ACCESS_DENIED',
+            '固定 Agent 窗口边界拒绝读取该 exact 目标'
+          )]
+        };
+      }
       const source = programSources[0];
       const reason = source?.reason?.message?.trim();
+      const contextExplanation = source?.allowedWindows
+        || source?.allowedWindowTypes
+        || source?.allowedWindowRelation
+        ? '当前 @agent 上下文未满足放行条件。'
+        : '此限制不依赖 @agent 上下文。';
       const explanation = source?.sourceProgramPath
-        ? `目标存在，但读取受到 Program“${source.sourceProgramPath}”限制。${reason ? `原因：${reason}。` : ''}此限制与 @agent 上下文无关。`
-        : '目标存在，但读取受到世界规则限制；此限制与 @agent 上下文无关。';
+        ? `目标存在，但读取受到 Program“${source.sourceProgramPath}”限制。${reason ? `原因：${reason}。` : ''}${contextExplanation}`
+        : '目标存在，但读取受到世界规则限制；此限制不依赖 @agent 上下文。';
       return {
         ok: true,
         index: item.index,
@@ -246,25 +502,81 @@ export async function executeExploreItem(atoms, item, matcherRegistry, accessCon
       })]
     };
   }
-  const includeFullDetail = item.fields.some((field) => field.baseKey === 'detail'
+  const shortcutMatch = isShortcutAtom(selected.matches[0].atom) ? selected.matches[0] : null;
+  let resolvedThroughShortcut = null;
+  if (shortcutMatch) {
+    let target;
+    try {
+      target = resolveShortcutMatch(atoms, shortcutMatch);
+    } catch (error) {
+      return { ok: false, index: item.index, errors: [diagnostic(
+        error.code ?? 'INVALID_SHORTCUT_RECORD', error.message ?? '虚拟引用无法解析'
+      )] };
+    }
+    for (const field of requestedReadFields) {
+      if ((await accessController.authorize(target, 'read', field)).decision !== 'allow') {
+        return { ok: false, index: item.index, errors: [diagnostic(
+          'SHORTCUT_TARGET_ACCESS_DENIED', '当前 Agent 无权访问虚拟引用目标'
+        )] };
+      }
+    }
+    selected.matches[0] = target;
+    resolvedThroughShortcut = shortcutResolutionMarker(shortcutMatch);
+  }
+  const includeFullDetail = item.fields.some((field) => field.baseKey === 'situation'
     && field.actions.some((action) => action.name === 'full'));
-  const includePartners = item.fields.some((field) => field.baseKey === 'partners');
+  const includeSupport = item.fields.some((field) => field.baseKey === 'support');
   const anchor = visibleMatches.find((match) => match.atom === selected.matches[0].atom);
-  const routes = item.fields.filter((field) => field.baseKey === 'children').flatMap((field) => (
+  const routes = item.fields.filter((field) => field.baseKey === 'contain').flatMap((field) => (
     field.actions.map((action) => ({ axis: action.name, parameter: action.parameter }))
   ));
   const scoped = selectCoordinateScope(anchor, visibleMatches, routes);
+  if (includeSupport) {
+    for (const match of supportScope(anchor, visibleMatches)) scoped.add(match);
+  }
   const ordered = visibleMatches.filter((match) => scoped.has(match));
+  const boundary = options.includeBoundary === false
+    ? null
+    : await exploreBoundary(anchor, allMatches, scoped, accessController);
+  const describedMatches = [];
+  for (const match of ordered) {
+    let describedMatch = match;
+    let marker = match === anchor ? resolvedThroughShortcut : null;
+    if (isShortcutAtom(match.atom)) {
+      try {
+        describedMatch = resolveShortcutMatch(atoms, match);
+      } catch (error) {
+        describedMatches.push({
+          path: match.path.join('/'), selector: shortestUniqueSelector(match, visibleMatches),
+          thing: oneStoredField(match.atom, 'thing')?.value ?? null, types: ['shortcut'],
+          description: null, shortcut: { state: 'broken', error: error.code ?? 'INVALID_SHORTCUT_RECORD' }
+        });
+        continue;
+      }
+      let allowed = true;
+      for (const field of requestedReadFields) {
+        if ((await accessController.authorize(describedMatch, 'read', field)).decision !== 'allow') {
+          allowed = false;
+          break;
+        }
+      }
+      if (!allowed) continue;
+      marker = shortcutResolutionMarker(match);
+    }
+    const described = describeAtom(describedMatch, includeFullDetail, {
+      selector: shortestUniqueSelector(describedMatch, visibleMatches),
+      ...(includeSupport ? { supportFields: storedSupportFields(describedMatch.atom) } : {}),
+      lockState: programLockState(lockIndex, describedMatch.path.join('/')),
+      ...(marker ? { resolvedThroughShortcut: marker } : {})
+    });
+    if (isShortcutAtom(match.atom)) described.path = marker.path;
+    describedMatches.push(described);
+  }
   return {
     ok: true,
     index: item.index,
-    matches: ordered.map((match) => describeAtom(match, includeFullDetail, {
-      selector: shortestUniqueSelector(match, visibleMatches),
-      ...(includePartners
-        ? { partners: oneStoredField(match.atom, 'partners')?.value ?? [] }
-        : {}),
-      lockState: programLockState(lockIndex, match.path.join('/'))
-    })),
+    matches: describedMatches,
+    ...(boundary ? { anchorPath: anchor.path.join('/'), boundary } : {}),
     presentation: routes.some((route) => route.axis === 'latitude' && route.parameter < 0)
       ? { kind: 'children-tree', anchorPath: anchor.path.join('/') }
       : null,
@@ -287,18 +599,38 @@ export async function executeProgramExplore({
   request,
   receiver = createAtomLanguageReceiver(),
   accessController = { restricted: false, authorize: async () => ({ decision: 'allow' }) },
-  agentOrigin = null
+  agentOrigin = null,
+  scopeRoot = null,
+  preparedWorld = null
 }) {
-  const normalizedRequest = request.name === undefined && agentOrigin?.path
-    ? { ...request, name: agentOrigin.path }
-    : request;
+  const requestedThing = request.thing === undefined
+    ? (scopeRoot ? '.' : agentOrigin?.path)
+    : request.thing;
+  const relativeSelector = parseSlotRelativeSelector(requestedThing) !== null;
+  const effectiveScopeRoot = scopeRoot ?? (
+    relativeSelector ? agentOrigin?.path ?? null : null
+  );
+  const resolved = resolveSlotRelativeSelector({
+    atoms,
+    selector: requestedThing,
+    scopeRoot: effectiveScopeRoot
+  });
+  const normalizedRequest = { ...request, thing: resolved.selector };
   const parsed = receiver.receive(programObjectSource('explore', normalizedRequest));
   if (!parsed.ok || parsed.batch || parsed.items.length !== 1) {
     const error = new Error(parsed.errors?.[0]?.message ?? 'Invalid Program explore request');
     error.code = parsed.errors?.[0]?.code ?? 'INVALID_PROGRAM_EXPLORE';
     throw error;
   }
-  const result = await executeExploreItem(atoms, parsed.items[0], receiver.matcherRegistry, accessController);
+  const result = await executeExploreItem(
+    atoms,
+    parsed.items[0],
+    receiver.matcherRegistry,
+    accessController,
+    null,
+    preparedWorld,
+    { includeBoundary: false }
+  );
   if (!result.ok) {
     const error = new Error(result.errors?.[0]?.message ?? 'Program explore failed');
     error.code = result.errors?.[0]?.code ?? 'PROGRAM_EXPLORE_FAILED';

@@ -278,7 +278,7 @@ test('new-domain edit gestures remain available while only the camera is settlin
   const dispatchEnd = source.indexOf('function moveSelection(', dispatchStart);
   const dispatch = source.slice(dispatchStart, dispatchEnd);
 
-  assert.match(pointer, /transitionBlocksPointerEdit\s*\(\s*event\s*\)/);
+  assert.match(pointer, /transitionBlocksPointerEdit\s*\(\s*pointerInput\s*\)/);
   assert.match(dispatch, /transitionBlocksIntent\s*\(\s*intent\s*\)/);
   assert.match(source, /state\.transitionFieldReady\s*=\s*true/);
 });
@@ -291,6 +291,21 @@ test('engine exposes explicit knowledge and field projections without pointer si
   assert.match(source, /exportKnowledge:\s*\(\)\s*=>/);
   assert.match(source, /importKnowledge/);
   assert.doesNotMatch(source, /spatialLab[\s\S]{0,600}dispatchEvent\s*\(\s*new\s+(?:Mouse|Pointer|Keyboard)Event/);
+});
+
+test('batch landing resolves the complete selection against authoritative knowledge and fails closed', () => {
+  const establish = functionSource('establishPeerSelection');
+  const toggle = functionSource('toggleBatchSelectionAtHit');
+  const gesture = functionSource('beginEdgeGesture');
+
+  assert.match(source, /batchSelectionEntries:\s*new Map\(\)/);
+  assert.match(establish, /state\.batchSelectionEntries\s*=\s*new Map/);
+  assert.match(toggle, /batchSelectionEntries\.(?:set|delete)/);
+  assert.match(gesture, /workspaceModel\.batchLandingEntries\(/);
+  assert.match(gesture, /workspace\.exportKnowledge\(\)/);
+  assert.match(gesture, /batchEntries\.length\s*!==\s*state\.batchSelectionKeys\.size/);
+  assert.match(gesture, /workspace\.cancel\(\)/);
+  assert.doesNotMatch(gesture, /\.map\(\(key\)\s*=>\s*visualEntryForKey\(key\)\)/);
 });
 
 test('a node created at a pointer keeps that exact visual anchor after authoritative save', () => {
@@ -489,6 +504,14 @@ test('edge drafting keeps normal view-navigation keys available away from form f
   assert.match(keyboard, /transaction\.kind\.startsWith\s*\(\s*["']edge-["']\s*\)/);
   assert.match(keyboard, /input\.resolveKeyboard\s*\(\s*event\s*,\s*\{\s*editing:\s*false\s*\}\s*\)/);
   assert.match(keyboard, /EDGE_DRAFT_NAVIGATION_INTENTS/);
+  const navigationIntents = source.slice(
+    source.indexOf('const EDGE_DRAFT_NAVIGATION_INTENTS'),
+    source.indexOf('const transactionGuardedIntents')
+  );
+  for (const intent of ['setPeripheralView', 'setNestedView', 'setHierarchyView', 'setImmersiveView']) {
+    assert.match(navigationIntents, new RegExp(`input\\.intents\\.${intent}`));
+  }
+  assert.doesNotMatch(keyboard, /targetIsFormControl\s*=\s*\([\s\S]*HTMLButtonElement/);
 });
 
 test('pointer mapping distinguishes nodes, edges, and empty field under ctrl', () => {
@@ -496,7 +519,8 @@ test('pointer mapping distinguishes nodes, edges, and empty field under ctrl', (
   const end = source.indexOf('canvas.addEventListener("pointermove"', start);
   const pointer = source.slice(start, end);
 
-  assert.match(pointer, /ctrlKey:\s*event\.ctrlKey/);
+  assert.match(pointer, /mobileInput\.mergePointerEvent\(event, mobileKeyState\)/);
+  assert.match(pointer, /ctrlKey:\s*pointerInput\.ctrlKey/);
   assert.match(pointer, /onEdge/);
   assert.match(pointer, /item\s*&&\s*item\.kind\s*===\s*["']relationship["']/);
 });

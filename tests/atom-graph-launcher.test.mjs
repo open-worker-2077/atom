@@ -15,6 +15,8 @@ test('Atom Graph launcher starts 4784, waits for health, and opens the browser',
   assert.match(source, /__spatial\/api\/health/);
   assert.match(source, /Start-Process[\s\S]*graph-server\.mjs/);
   assert.match(source, /Invoke-RestMethod/);
+  assert.match(source, /\[int\]\$StartupTimeoutSeconds\s*=\s*90/);
+  assert.match(source, /AddSeconds\(\$StartupTimeoutSeconds\)/);
   assert.match(source, /Start-Process\s+\$WebUrl/);
   assert.match(source, /\$PSScriptRoot/);
   assert.doesNotMatch(source, /4783/);

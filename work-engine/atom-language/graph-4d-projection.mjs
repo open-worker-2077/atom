@@ -4,11 +4,41 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 import { parseGraphDocument } from '../../cli/lib/graph-json.mjs';
+import { parseAtomKey } from './key-parser.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const codecFile = path.resolve(here, '..', '..', 'spatial-json-codec.js');
 
 let cachedCodec = null;
+
+function baseKeyOf(rawKey) {
+  return String(rawKey).match(/^[^@#$~]+/u)?.[0] ?? '';
+}
+
+function axisValue(node, baseKey) {
+  for (const [rawKey, value] of Object.entries(node ?? {})) {
+    if (rawKey === baseKey || (rawKey.startsWith(baseKey) && baseKeyOf(rawKey) === baseKey)) return value;
+  }
+  return undefined;
+}
+
+const thingOf = (node) => axisValue(node, 'thing');
+const situationOf = (node) => axisValue(node, 'situation');
+const containOf = (node) => axisValue(node, 'contain') ?? [];
+function thingFieldOf(node) {
+  for (const [rawKey, value] of Object.entries(node ?? {})) {
+    if (rawKey === 'thing' || (rawKey.startsWith('thing') && baseKeyOf(rawKey) === 'thing')) {
+      return { rawKey, value };
+    }
+  }
+  return undefined;
+}
+
+function isProgramThingField(field) {
+  if (!field?.rawKey?.includes('@program')) return false;
+  return parseAtomKey(field.rawKey, { descriptionSymbolWarnings: false })
+    .types.some((type) => type.raw === 'program');
+}
 
 async function loadSpatialJsonCodec() {
   if (cachedCodec) return cachedCodec;
@@ -34,44 +64,54 @@ function resolvePartnerPath(sourcePath, target, pathIndex, nameIndex) {
 }
 
 /**
- * Atom partners are a directed predicate (verb) from the owning atom to a
- * referenced object, while graph-4d relations are an undirected from/to pair
- * by design (see README: 不推断业务含义、流程或箭头方向). This projection is
- * therefore lossy in one direction only: it turns atom's explicit direction
- * into graph-4d's from/to order (from = owning atom, to = resolved partner),
- * which graph-4d's own renderer does not yet visualise as directional.
+ * Atom support is an ordered directed relation. graph-4d keeps its fixed
+ * support label and from/to order; richer trunk/branch grouping stays in the
+ * Atom support bundle metadata rather than becoming a second world fact.
  */
-export function toGraph4dImportDocument(graph) {
+export function toGraph4dImportDocument(graph, options = {}) {
   const pathIndex = new Map();
   const nameIndex = new Map();
 
   function index(node, parentPath) {
-    const visiblePath = [...parentPath, node.name];
+    const thing = thingOf(node);
+    const visiblePath = [...parentPath, thing];
     pathIndex.set(visiblePath.join('/'), visiblePath);
-    if (!nameIndex.has(node.name)) nameIndex.set(node.name, []);
-    nameIndex.get(node.name).push(visiblePath);
-    node.children.forEach((child) => index(child, visiblePath));
+    if (!nameIndex.has(thing)) nameIndex.set(thing, []);
+    nameIndex.get(thing).push(visiblePath);
+    containOf(node).forEach((child) => index(child, visiblePath));
   }
   index(graph, []);
 
-  const relations = [];
-  function collectRelations(node, parentPath) {
-    const visiblePath = [...parentPath, node.name];
-    for (const partner of node.partners) {
-      const targetPath = resolvePartnerPath(visiblePath, partner.object, pathIndex, nameIndex);
-      if (!targetPath) continue;
-      relations.push({ from: visiblePath, to: targetPath, name: partner.verb });
-    }
-    node.children.forEach((child) => collectRelations(child, visiblePath));
-  }
-  collectRelations(graph, []);
+  const parsed = options.supportClauses
+    ? null
+    : parseGraphDocument({ config: { schema_version: '2.0.0' }, graph });
+  const supportClauses = options.supportClauses ?? parsed.supportClauses;
+  const supportDecisions = options.supportDecisions ?? null;
+  const relations = supportClauses.filter((clause) => (
+    !supportDecisions || supportDecisions.get(clause.id)?.decision === true
+  )).flatMap((clause) => (
+    clause.dependencyPaths.flatMap((sourcePath) => clause.then.map((target) => ({
+      from: sourcePath.split('/'),
+      to: target.targetPath.split('/'),
+      name: 'support'
+    })))
+  ));
 
-  function toGraph4dNode(node) {
-    const children = node.children.map(toGraph4dNode);
-    const detail = node.detail && node.detail.trim()
-      ? node.detail
-      : (children.length ? '' : `（来自 Atom：${node.name}，暂无详情）`);
-    return { name: node.name, detail, children };
+  function toGraph4dNode(node, parentPath = []) {
+    const currentPath = [...parentPath, thingOf(node)];
+    const children = containOf(node).map((child) => toGraph4dNode(child, currentPath));
+    const situation = situationOf(node);
+    const thingField = thingFieldOf(node);
+    const isProgram = isProgramThingField(thingField);
+    const detail = isProgram
+      ? 'Program'
+      : situation && situation.trim()
+        ? situation
+        : (children.length ? '' : `（来自 Atom：${thingOf(node)}，暂无详情）`);
+    return {
+      name: thingOf(node), detail, children,
+      ...(isProgram ? { programSource: situation ?? '' } : {})
+    };
   }
 
   return {
@@ -83,8 +123,15 @@ export function toGraph4dImportDocument(graph) {
 }
 
 export async function projectAtomGraphWithPaths(rawGraphDocument, options = {}) {
-  const { graph } = parseGraphDocument(rawGraphDocument);
-  const importDocument = toGraph4dImportDocument(graph);
+  const parsedDocument = Array.isArray(rawGraphDocument?.supportClauses)
+    && rawGraphDocument?.endpointIndex instanceof Map
+    ? rawGraphDocument
+    : parseGraphDocument(Array.isArray(rawGraphDocument?.supportClauses)
+      ? { config: rawGraphDocument.config, graph: rawGraphDocument.graph }
+      : rawGraphDocument);
+  const { graph, supportClauses } = parsedDocument;
+  const supportDecisions = options.supportDecisions ?? null;
+  const importDocument = toGraph4dImportDocument(graph, { supportClauses, supportDecisions });
   const codec = await loadSpatialJsonCodec();
   const parsed = codec.parse(importDocument);
   const { knowledge } = codec.planImport({}, parsed, { path: 'root' });
@@ -93,7 +140,17 @@ export async function projectAtomGraphWithPaths(rawGraphDocument, options = {}) 
     node.surfaceVisible = false;
     node.detailMode = 'floating';
   }
+  knowledge.supportClauses = supportClauses.map((clause) => ({
+    ...structuredClone(clause),
+    ...(supportDecisions?.has(clause.id)
+      ? { evaluation: structuredClone(supportDecisions.get(clause.id)) }
+      : {})
+  }));
+  knowledge.supportRelations = parsedDocument.supportRelations.filter((relation) => (
+    !supportDecisions || supportDecisions.get(relation.clauseId)?.decision === true
+  ));
   const atomPathByKey = new Map();
+  const graphPathsRequired = supportClauses.length > 0;
   const assigned = new Set();
   const childrenByParent = new Map();
   for (const node of nodes) {
@@ -101,16 +158,38 @@ export async function projectAtomGraphWithPaths(rawGraphDocument, options = {}) 
     if (!childrenByParent.has(parentPath)) childrenByParent.set(parentPath, []);
     childrenByParent.get(parentPath).push(node);
   }
-  function attachAtomPath(atom, parentKnowledgePath, parentAtomPath, root = false) {
-    const candidates = root
-      ? nodes.filter((node) => node.path === 'root')
-      : (childrenByParent.get(parentKnowledgePath) ?? []);
-    const knowledgeNode = candidates.find((node) => node.label === atom.name && !assigned.has(node.key));
+  const candidateBuckets = new Map();
+  function addCandidate(scope, node) {
+    const key = `${scope}\u0000${node.label}`;
+    if (!candidateBuckets.has(key)) candidateBuckets.set(key, []);
+    candidateBuckets.get(key).push(node);
+  }
+  nodes.filter((node) => node.path === 'root').forEach((node) => addCandidate('$root', node));
+  for (const [parentPath, children] of childrenByParent) {
+    children.forEach((node) => addCandidate(parentPath, node));
+  }
+  function attachAtomPath(atom, parentKnowledgePath, parentAtomPath, root = false, parentGraphPath = '') {
+    const atomThing = thingOf(atom);
+    const candidates = candidateBuckets.get(`${root ? '$root' : parentKnowledgePath}\u0000${atomThing}`) ?? [];
+    const knowledgeNode = candidates.find((node) => !assigned.has(node.key));
     if (!knowledgeNode) return;
-    const atomPath = root ? '' : (parentAtomPath ? `${parentAtomPath}/${atom.name}` : atom.name);
+    const atomPath = root ? '' : (parentAtomPath ? `${parentAtomPath}/${atomThing}` : atomThing);
+    const graphPath = graphPathsRequired
+      ? (parentGraphPath ? `${parentGraphPath}/${atomThing}` : atomThing)
+      : '';
     assigned.add(knowledgeNode.key);
+    if (graphPathsRequired) knowledgeNode.graphPath = graphPath;
+    const atomThingField = thingFieldOf(atom);
+    const isProgram = isProgramThingField(atomThingField);
+    if (isProgram) knowledgeNode.programSource = situationOf(atom) ?? '';
     if (atomPath) atomPathByKey.set(knowledgeNode.key, atomPath);
-    atom.children.forEach((child) => attachAtomPath(child, knowledgeNode.path, atomPath));
+    containOf(atom).forEach((child) => attachAtomPath(
+      child,
+      knowledgeNode.path,
+      atomPath,
+      false,
+      graphPath
+    ));
   }
   attachAtomPath(graph, '', '', true);
   const lockByPath = new Map((options.lockState ?? []).map((entry) => [entry.path, entry]));

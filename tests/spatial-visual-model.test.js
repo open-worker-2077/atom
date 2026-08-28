@@ -3,6 +3,90 @@ const assert = require('node:assert/strict');
 
 const SpatialVisualModel = require('../spatial-visual-model.js');
 
+test('builds an ordinary directed edge directly from if to then', () => {
+  const [bundle] = SpatialVisualModel.supportBundles([
+    {
+      id: 'support:世界/A:0',
+      currentSide: 'antecedent',
+      root: { kind: 'thing', targetPath: '世界/A', exprPath: [] },
+      then: [{ targetPath: '世界/B', thenOrdinal: 0 }]
+    }
+  ]);
+  assert.deepEqual(bundle.edge, { fromPath: '世界/A', toPath: '世界/B' });
+  assert.equal(bundle.currentSide, 'antecedent');
+});
+
+test('builds nested input junctions, one common trunk, and ordered then branches', () => {
+  assert.equal(typeof SpatialVisualModel.supportBundles, 'function');
+  const bundles = SpatialVisualModel.supportBundles([
+    {
+      id: 'support:世界/结果:0',
+      currentSide: 'consequent',
+      root: {
+        kind: 'and', exprPath: [], children: [
+          { kind: 'thing', targetPath: '世界/A', exprPath: [0] },
+          { kind: 'or', exprPath: [1], children: [
+            { kind: 'thing', targetPath: '世界/B', exprPath: [1, 0] },
+            { kind: 'program', targetPath: '世界/C', exprPath: [1, 1] }
+          ] }
+        ]
+      },
+      then: [
+        { targetPath: '世界/D', thenOrdinal: 0 },
+        { targetPath: '世界/E', thenOrdinal: 1 }
+      ]
+    }
+  ]);
+  assert.equal(bundles[0].junctionRatio, 0.5);
+  assert.equal(bundles[0].inputTopology.operator, 'and');
+  assert.equal(bundles[0].inputTopology.inputs[1].operator, 'or');
+  assert.equal(bundles[0].inputTopology.inputs[1].inputs[1].computed, true);
+  assert.deepEqual(bundles[0].trunk, {
+    from: 'support:世界/结果:0:if-junction',
+    to: 'support:世界/结果:0:then-junction'
+  });
+  assert.deepEqual(bundles[0].outputBranches.map(({ ordinal, toPath }) => ({ ordinal, toPath })), [
+    { ordinal: 0, toPath: '世界/D' },
+    { ordinal: 1, toPath: '世界/E' }
+  ]);
+});
+
+test('false and failed clauses do not produce forged visual lines', () => {
+  const clause = {
+    id: 'support:世界/A:0',
+    root: { kind: 'thing', targetPath: '世界/A', exprPath: [] },
+    then: [{ targetPath: '世界/B', thenOrdinal: 0 }]
+  };
+  assert.deepEqual(SpatialVisualModel.supportBundles([
+    { ...clause, evaluation: { status: 'false', decision: false } },
+    { ...clause, id: 'support:世界/A:1', evaluation: { status: 'failure' } }
+  ]), []);
+});
+
+test('three-to-hub-to-three renders two rules joined by one real hub', () => {
+  const bundles = SpatialVisualModel.supportBundles([
+    {
+      id: 'support:世界/H:0', currentSide: 'consequent',
+      root: {
+        kind: 'and', exprPath: [], children: ['A', 'B', 'C'].map((name, index) => ({
+          kind: 'thing', targetPath: `世界/${name}`, exprPath: [index]
+        }))
+      },
+      then: [{ targetPath: '世界/H', thenOrdinal: 0 }]
+    },
+    {
+      id: 'support:世界/H:1', currentSide: 'antecedent',
+      root: { kind: 'thing', targetPath: '世界/H', exprPath: [], implicit: true },
+      then: ['X', 'Y', 'Z'].map((name, thenOrdinal) => ({ targetPath: `世界/${name}`, thenOrdinal }))
+    }
+  ]);
+  assert.equal(bundles.length, 2);
+  assert.equal(bundles[0].inputTopology.inputs.length, 3);
+  assert.equal(bundles[0].outputBranches[0].toPath, '世界/H');
+  assert.equal(bundles[1].inputTopology.fromPath, '世界/H');
+  assert.equal(bundles[1].outputBranches.length, 3);
+});
+
 test('derives a tunnel for seeded and empty nodes alike', () => {
   assert.equal(SpatialVisualModel.deriveCarrierMode({ hasChildren: true }), 'tunnel');
   assert.equal(SpatialVisualModel.deriveCarrierMode({ hasChildren: false }), 'tunnel');
@@ -543,6 +627,21 @@ test('local child tension fields never exceed the parent radius', () => {
   for (const id of ['a', 'b', 'c']) {
     assert.ok(Math.hypot(layout[id].x, layout[id].y, layout[id].z) <= 1.0001, `${id} stays inside parent radius`);
   }
+});
+
+test('fixed manual nodes remain inside the readable field envelope', () => {
+  const layout = SpatialVisualModel.relaxRelationshipLayout([
+    { id: 'clustered', position: { x: 0, y: 0, z: 0 }, radius: 0.4 },
+    { id: 'escaped', position: { x: -100, y: 0, z: 0 }, radius: 0.4, fixed: true }
+  ], [], {
+    iterations: 1,
+    maxFieldRadius: 12
+  });
+
+  assert.ok(
+    Math.hypot(layout.escaped.x, layout.escaped.y, layout.escaped.z) <= 12.0001,
+    'manual placement cannot make a node disappear outside its domain'
+  );
 });
 
 test('child nodes never alter their parent-level topology', () => {

@@ -4,11 +4,21 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { programFunctionRegistry } from '../work-engine/atom-language/program-function-registry.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+}
+
+function output() {
+  let value = '';
+  return {
+    stream: { write(chunk) { value += chunk; } },
+    value: () => value
+  };
 }
 
 test('instantiate creates one complete advancement flow below the calling Program', async () => {
@@ -36,14 +46,14 @@ test('instantiate creates one complete advancement flow below the calling Progra
   assert.equal(first.changed, true);
 
   const afterFirst = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  const program = afterFirst[0].children[0];
-  assert.deepEqual(program.children.map((entry) => entry.name ?? entry['name@program']), [
+  const program = afterFirst[0].contain[0];
+  assert.deepEqual(program.contain.map((entry) => entry.thing ?? entry['thing@program']), [
     '编标版本', '任务标题', '导航坐标', '设标', '建标', '推进', '收尾', '内部路由'
   ]);
-  assert.equal(program.children.find((entry) => entry.name === '任务标题').detail, '新任务');
-  assert.equal(program.children.find((entry) => entry['name@program'] === '内部路由')['name@program'], '内部路由');
+  assert.equal(program.contain.find((entry) => entry.thing === '任务标题').situation, '新任务');
+  assert.equal(program.contain.find((entry) => entry['thing@program'] === '内部路由')['thing@program'], '内部路由');
   assert.deepEqual(
-    program.children.find((entry) => entry.name === '设标').children.map((entry) => entry.name),
+    program.contain.find((entry) => entry.thing === '设标').contain.map((entry) => entry.thing),
     ['定向', '调研', '策评']
   );
 
@@ -51,7 +61,11 @@ test('instantiate creates one complete advancement flow below the calling Progra
     source: 'atom', contextFile, projectionFile, programScheduler: scheduler
   });
   assert.equal(second.ok, true);
-  assert.equal(second.lockState.filter((entry) => entry.reasons.some((reason) => reason.code === 'FRAMEWORK_SCHEMA')).length, 5);
+  assert.equal(
+    second.lockState.filter((entry) => entry.reasons.some((reason) => reason.code === 'FRAMEWORK_SCHEMA')).length,
+    5,
+    JSON.stringify(second)
+  );
   const afterSecond = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.deepEqual(afterSecond, afterFirst);
 });
@@ -60,32 +74,66 @@ test('documented two-step commands create an Agent with one attached complete ad
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-help-new-flow-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, '[]\n', 'utf8');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('当前Agent', '', [atom('任务区')], 'agent')
+  ], null, 2), 'utf8');
   const scheduler = createProgramRuntimeScheduler();
 
+  const agentExample = programFunctionRegistry().functions
+    .find((entry) => entry.name === 'agent').contract.argument.example;
+  const registrationSource = [
+    `agent(${JSON.stringify(agentExample)})`,
+    'instantiate({"template":"advancement-flow","version":"latest","mode":"ensure","parameters":{"title":"任务标题"}})'
+  ].join('\n');
+  const createCommand = `transform new ${JSON.stringify({
+    'thing@program': '当前Agent/任务区/任务名', situation: registrationSource, contain: [], support: []
+  })}`;
+  const runCommand = 'transform {"thing.run.":"当前Agent/任务区/任务名"}';
+  await scheduler.registerAgentWindow({
+    sourceProgramPath: '当前Agent', labels: ['^'],
+    functionScopes: structuredClone(agentExample.functions),
+    functions: agentExample.functions.names
+  });
+
+  const stdout = output();
+  const stderr = output();
+  const helpCode = await runAtomCli(['--help'], {
+    stdout: stdout.stream, stderr: stderr.stream
+  });
+  assert.equal(helpCode, 0, stderr.value());
+  assert.ok(stdout.value().includes(`第1步：${createCommand}`));
+  assert.ok(stdout.value().includes(`第2步：${runCommand}`));
+
   const created = await executeAtomLanguage({
-    source: 'transform new {"name@agent":"任务名","detail":"","children":[],"partners":[]}',
+    source: createCommand,
     contextFile,
     projectionFile,
-    programScheduler: scheduler
+    programScheduler: scheduler,
+    interaction: { id: 'documented-agent-create', agent: { path: '当前Agent' } }
   });
-  assert.equal(created.ok, true);
+  assert.equal(created.ok, true, JSON.stringify(created.errors));
 
   const result = await executeAtomLanguage({
-    source: `transform {"name":"任务名","children":[{"name@program":"推进流","detail":"instantiate({'template': 'advancement-flow', 'version': 'latest', 'mode': 'ensure', 'parameters': {'title': '任务标题'}})","children":[],"partners":[]}]}`,
+    source: runCommand,
     contextFile,
     projectionFile,
-    programScheduler: scheduler
+    programScheduler: scheduler,
+    interaction: { id: 'documented-agent-register', agent: { path: '当前Agent' } }
   });
 
-  assert.equal(result.ok, true);
-  const [agent] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(agent['name@agent'], '任务名');
-  assert.equal(agent.children.length, 1);
-  assert.equal(agent.children[0]['name@program'], '推进流');
-  assert.deepEqual(agent.children[0].children.map((child) => child.name ?? child['name@program']), [
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  const [creator] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const [taskArea] = creator.contain;
+  const [agent] = taskArea.contain;
+  assert.equal(agent['thing@program@agent'], '任务名');
+  assert.deepEqual(agent.contain.map((child) => child.thing ?? child['thing@program']), [
     '编标版本', '任务标题', '导航坐标', '设标', '建标', '推进', '收尾', '内部路由'
   ]);
+  assert.deepEqual(scheduler.agentSecurity.get('当前Agent/任务区/任务名'), {
+    labels: [],
+    functionScopes: structuredClone(agentExample.functions),
+    functions: agentExample.functions.names
+  });
 });
 
 test('documented repair command attaches and instantiates a flow below an existing empty Agent', async () => {
@@ -96,7 +144,7 @@ test('documented repair command attaches and instantiates a flow below an existi
   const scheduler = createProgramRuntimeScheduler();
 
   const result = await executeAtomLanguage({
-    source: `transform {"name":"已有任务名","children":[{"name@program":"推进流","detail":"instantiate({'template': 'advancement-flow', 'version': 'latest', 'mode': 'ensure', 'parameters': {'title': '任务标题'}})","children":[],"partners":[]}]}`,
+    source: `transform {"thing":"已有任务名","contain":[{"thing@program":"推进流","situation":"instantiate({'template': 'advancement-flow', 'version': 'latest', 'mode': 'ensure', 'parameters': {'title': '任务标题'}})","contain":[],"support":[]}]}`,
     contextFile,
     projectionFile,
     programScheduler: scheduler
@@ -104,10 +152,10 @@ test('documented repair command attaches and instantiates a flow below an existi
 
   assert.equal(result.ok, true);
   const [agent] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(agent['name@agent'], '已有任务名');
-  assert.equal(agent.children.length, 1);
-  assert.equal(agent.children[0]['name@program'], '推进流');
-  assert.equal(agent.children[0].children.find((child) => child.name === '导航坐标').detail, '定向');
+  assert.equal(agent['thing@agent'], '已有任务名');
+  assert.equal(agent.contain.length, 1);
+  assert.equal(agent.contain[0]['thing@program'], '推进流');
+  assert.equal(agent.contain[0].contain.find((child) => child.thing === '导航坐标').situation, '定向');
 });
 
 test('advancement-flow data children can be edited without legacy uses partners', async () => {
@@ -126,7 +174,7 @@ test('advancement-flow data children can be edited without legacy uses partners'
   assert.equal(instantiated.ok, true);
 
   const edited = await executeAtomLanguage({
-    source: 'transform {"name":"Editable Flow/推进流/设标/定向/需求","detail.rep.真实需求"}',
+    source: 'transform {"thing":"Editable Flow/推进流/设标/定向/需求","situation.rep.真实需求"}',
     contextFile,
     projectionFile,
     programScheduler: scheduler
@@ -134,11 +182,11 @@ test('advancement-flow data children can be edited without legacy uses partners'
 
   assert.equal(edited.ok, true, JSON.stringify(edited.errors));
   const [agent] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  const requirement = agent.children[0].children
-    .find((child) => child.name === '设标').children
-    .find((child) => child.name === '定向').children
-    .find((child) => child.name === '需求');
-  assert.equal(requirement.detail, '真实需求');
+  const requirement = agent.contain[0].contain
+    .find((child) => child.thing === '设标').contain
+    .find((child) => child.thing === '定向').contain
+    .find((child) => child.thing === '需求');
+  assert.equal(requirement.situation, '真实需求');
 });
 
 test('instantiate rejects an unknown template and unsupported mode', async () => {

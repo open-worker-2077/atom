@@ -108,7 +108,7 @@ test('immersive blank right click remains blank-sensitive and exits to the paren
   const start = engine.indexOf('canvas.addEventListener("pointerdown"');
   const end = engine.indexOf('canvas.addEventListener("pointermove"', start);
   const pointer = engine.slice(start, end);
-  assert.match(pointer, /event\.button\s*===\s*2[\s\S]{0,180}blankSensitive/);
+  assert.match(pointer, /pointerInput\.button\s*===\s*2[\s\S]{0,220}blankSensitive/);
   assert.match(functionSource('applyParentView'), /exitDomain/);
 });
 
@@ -227,6 +227,19 @@ test('each cluster domain applies relationship repulsion before its shell is mea
   assert.match(visible, /planarRepulsion:\s*true/);
 });
 
+test('steady cluster frames reuse the committed layout and visible edge projection', () => {
+  const collect = functionSource('collectClusterNodes');
+  const connections = functionSource('drawClusterConnections');
+  const build = functionSource('buildClusterScene');
+
+  assert.doesNotMatch(collect, /buildClusterScene\s*\(/);
+  assert.match(collect, /state\.clusterScene/);
+  assert.doesNotMatch(connections, /visibleClusterDomains\s*\(/);
+  assert.doesNotMatch(connections, /workspace\.exportKnowledge\s*\(/);
+  assert.match(connections, /state\.clusterConnectionEdges/);
+  assert.match(build, /state\.clusterConnectionEdges\s*=/);
+});
+
 test('cluster-local lenses and command rings anchor to the transformed rendered node', () => {
   assert.match(engine, /const detailItems = items[\s\S]{0,260}item\.node\.lensOpen/);
   assert.match(engine, /detailItems\.forEach\(\(sourceItem, index\)/);
@@ -266,7 +279,7 @@ test('cluster blank edit and exit gestures use the visible sphere instead of its
   assert.match(engine, /blankSensitive && region\.item\.kind === ["']node["']/);
   assert.match(engine, /region\.item\.screen\.radius \+ 3/);
   assert.match(engine, /nodeOwnerPath\(region\.item\.node\) === domainContext\.path/);
-  assert.match(engine, /const blankSensitive = event\.button === 2[\s\S]{0,180}state\.clusterFieldOpen[\s\S]{0,160}event\.ctrlKey/);
+  assert.match(engine, /const blankSensitive = pointerInput\.button === 2[\s\S]{0,180}state\.clusterFieldOpen[\s\S]{0,180}pointerInput\.ctrlKey/);
   assert.match(engine, /findHit\(event\.clientX, event\.clientY, \{ blankSensitive, semanticEdit \}\)/);
 });
 

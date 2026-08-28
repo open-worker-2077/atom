@@ -7,8 +7,8 @@ import test from 'node:test';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(name, detail = '', children = [], type = '') {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners: [] };
+function atom(thing, situation = '', contain = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
 test('a compiler Program materializes a standard into an idempotent form flow', async () => {
@@ -16,14 +16,14 @@ test('a compiler Program materializes a standard into an idempotent form flow', 
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   const program = [
-    "rows = explore({'name': '任务流', 'children$latitude-2': None, 'detail$full': None})",
+    "rows = explore({'thing': '任务流', 'contain$latitude-2': None, 'situation$full': None})",
     "standard = {'forms': [",
-    "    {'name': '定向', 'detail': '明确需求与边界', 'status': '未进入', 'fields': ['需求', '边界']},",
-    "    {'name': '调研', 'detail': '研究高价值素材', 'status': '未进入', 'fields': ['渠道', '结论']}",
+    "    {'thing': '定向', 'situation': '明确需求与边界', 'status': '未进入', 'fields': ['需求', '边界']},",
+    "    {'thing': '调研', 'situation': '研究高价值素材', 'status': '未进入', 'fields': ['渠道', '结论']}",
     "]}",
     "plan = plan_form_flow(rows, '任务流', standard)",
-    "if plan['children']:",
-    "    transform({'name': '任务流', 'children': plan['children']})",
+    "if plan['contain']:",
+    "    transform({'thing': '任务流', 'contain': plan['contain']})",
     "    message({'level': 'info', 'text': '已按标准生成表单流'})"
   ].join('\n');
   await fs.writeFile(contextFile, JSON.stringify([
@@ -40,9 +40,9 @@ test('a compiler Program materializes a standard into an idempotent form flow', 
   assert.equal(first.messages[0].text, '已按标准生成表单流');
 
   const afterFirst = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  const flow = afterFirst.find((entry) => entry.name === '任务流');
-  assert.deepEqual(flow.children.map((entry) => entry.name), ['定向', '调研']);
-  assert.deepEqual(flow.children[0].children.map((entry) => entry.name), ['状态', '需求', '边界']);
+  const flow = afterFirst.find((entry) => entry.thing === '任务流');
+  assert.deepEqual(flow.contain.map((entry) => entry.thing), ['定向', '调研']);
+  assert.deepEqual(flow.contain[0].contain.map((entry) => entry.thing), ['状态', '需求', '边界']);
 
   const second = await executeAtomLanguage({
     source: 'atom', contextFile, projectionFile, programScheduler: scheduler

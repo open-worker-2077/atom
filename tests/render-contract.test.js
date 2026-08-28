@@ -84,7 +84,9 @@ test('cluster overview renders black void outside clipped domain tunnels', () =>
   const tunnel = functionSource('drawClusterTunnelInterior');
 
   assert.match(scene, /if\s*\(state\.clusterFieldOpen\)\s*\{[\s\S]*drawClusterVoid\(\)/);
-  assert.match(scene, /else\s*\{[\s\S]*drawStars\(\)[\s\S]*drawDomainBackdrop\(\)/);
+  assert.match(scene, /else\s*\{[\s\S]*drawStaticBackdrop\(\)/);
+  const backdrop = functionSource('drawStaticBackdrop');
+  assert.match(backdrop, /drawStars\(layerContext\)[\s\S]*drawDomainBackdrop\(layerContext\)/);
   assert.match(cluster, /drawClusterTunnelInterior\s*\(\s*cluster\s*,\s*screen\s*\)/);
   assert.match(tunnel, /context\.clip\s*\(\s*\)/);
   assert.match(tunnel, /context\.ellipse\s*\(/);
@@ -112,6 +114,13 @@ test('connections come from relationshipPairs without a hard-coded root index ch
     /visualModel\.relationshipPairs\s*\(\s*existingNodes\s*\(\s*state\.nodes\s*\)\s*\)/
   );
   assert.doesNotMatch(connections, /\brootPairs\b/);
+});
+
+test('real canvas consumes support bundles as branches, a common trunk, and ordered outputs', () => {
+  assert.match(source, /visualModel\.supportBundles\s*\(\s*state\.supportClauses/);
+  assert.match(source, /drawSupportBundle/);
+  assert.match(source, /junctionRatio/);
+  assert.match(source, /glyphs:\s*false/);
 });
 
 test('tunnel drawing is purely visual and does not reveal child topology', () => {
@@ -299,13 +308,15 @@ test('tunnel carrier restores a full deep radial well and complete nested contou
 
 test('child domains render a low-contrast fragmented deep tunnel and entry label', () => {
   const backdrop = functionSource('drawDomainBackdrop');
+  const staticBackdrop = functionSource('drawStaticBackdrop');
   const scene = functionSource('renderScene');
 
   assert.match(backdrop, /state\.depth\s*===\s*0/);
   assert.match(backdrop, /state\.domainStack\.at\s*\(\s*-1\s*\)/);
   assert.match(backdrop, /createRadialGradient\s*\(/);
   assert.match(backdrop, /entry\.nodeLabel/);
-  assert.match(scene, /drawStars\s*\(\s*\)[\s\S]*drawDomainBackdrop\s*\(\s*\)/);
+  assert.match(scene, /drawStaticBackdrop\s*\(\s*\)/);
+  assert.match(staticBackdrop, /drawStars\(layerContext\)[\s\S]*drawDomainBackdrop\(layerContext\)/);
   assert.match(backdrop, /DOMAIN_TUNNEL_DEPTH_LAYERS/);
   assert.match(backdrop, /DOMAIN_TUNNEL_FRAGMENTS/);
   assert.match(backdrop, /context\.shadowBlur/);
@@ -475,10 +486,11 @@ test('the large magnifier panel only lays out when its target or viewport change
   assert.match(source, /state\.detailMagnifier\.layoutKey\s*!==\s*layoutKey/);
 });
 
-test('magnifier resolves the live pointer hit and includes group carriers', () => {
+test('magnifier resolves only visible rendered targets and never leaks a hidden descendant carrier', () => {
   assert.match(source, /function currentMagnifierNode\(point\)/);
   assert.match(source, /!region\.item\.clusterShellProxy/);
-  assert.match(source, /regions:\s*state\.clusterHitRegions/);
+  const update = functionSource('updateDetailMagnifier');
+  assert.doesNotMatch(update, /regions:\s*state\.clusterHitRegions/);
   assert.match(source, /magnifierNode:/);
 });
 

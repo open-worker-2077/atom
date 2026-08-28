@@ -1,7 +1,10 @@
 import { defineConfig } from '@playwright/test';
+import os from 'node:os';
+import path from 'node:path';
 
 export default defineConfig({
   testDir: './tests/browser',
+  outputDir: path.join(os.tmpdir(), 'atom-playwright-test-results'),
   fullyParallel: false,
   workers: 1,
   retries: 0,

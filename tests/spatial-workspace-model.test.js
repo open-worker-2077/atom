@@ -95,6 +95,27 @@ test('import without a detail presentation defaults to floating while explicit s
   assert.equal(nodes[1].surfaceVisible, true);
 });
 
+test('workspace retains Graph identity and Program source separately from the visible summary', () => {
+  const model = loadModel();
+  const workspace = model.createWorkspace();
+  workspace.importKnowledge({
+    nodes: [{
+      id: 'program', path: 'root', label: 'Predicate', detail: 'Program',
+      graphPath: 'Root/Predicate', programSource: 'def main(arguments):\n    return True',
+      atomTypes: ['program']
+    }],
+    edges: []
+  });
+
+  const node = workspace.projectDomain('root', [])[0];
+  assert.equal(node.description, 'Program');
+  assert.match(node.programSource, /return True/u);
+  assert.equal(node.graphPath, 'Root/Predicate');
+  const exported = workspace.exportKnowledge().nodes[0];
+  assert.equal(exported.programSource, node.programSource);
+  assert.equal(exported.graphPath, node.graphPath);
+});
+
 test('imported knowledge replaces built-in validation nodes in the projected domain', () => {
   const model = loadModel();
   const workspace = model.createWorkspace();
@@ -111,6 +132,32 @@ test('imported knowledge replaces built-in validation nodes in the projected dom
   assert.deepEqual(
     plain(workspace.projectDomain('root', validationNodes).map((node) => node.label)),
     ['Logic Fire agent初加工']
+  );
+});
+
+test('scoped hydration can preserve an active cross-domain transaction', () => {
+  const model = loadModel();
+  const workspace = model.createWorkspace();
+  const sourceNode = { id: 'source', path: 'root', label: '待移动节点' };
+  workspace.importKnowledge({ nodes: [sourceNode], edges: [] });
+  workspace.beginEdgeCreate(
+    model.qualifiedEndpoint('root', sourceNode, ['全域']),
+    sourceNode
+  );
+
+  const hydrated = {
+    nodes: [
+      sourceNode,
+      { id: 'landing', path: 'root/target', label: '目标占位' }
+    ],
+    edges: []
+  };
+  assert.equal(workspace.importKnowledge(hydrated), false);
+  assert.equal(workspace.importKnowledge(hydrated, { preserveTransaction: true }), true);
+  assert.equal(workspace.transaction().source.key, 'root::source');
+  assert.deepEqual(
+    plain(workspace.projectDomain('root/target', []).map((node) => node.label)),
+    ['目标占位']
   );
 });
 
@@ -262,6 +309,19 @@ test('a landed node can change mirror state from inside its new domain', () => {
   assert.equal(reopened.projectDomain('root/child', [])[0].surfaceVisible, true);
 });
 
+test('node edit preserves long Program source without truncating registered controls', () => {
+  const model = loadModel();
+  const workspace = model.createWorkspace();
+  const source = `${'x = 1\n'.repeat(900)}selected = choice({"id":"status","options":[{"id":"todo","label":"待办"}],"selected":[]})`;
+  const node = { id: 'program-1', label: '流程', description: source, atomTypes: ['program'] };
+
+  workspace.beginNodeEdit('root', node);
+  const transaction = workspace.transaction();
+
+  assert.equal(transaction.draft.description, source);
+  assert.match(transaction.draft.description, /selected = choice/);
+});
+
 test('persisted landing resolves the moved node by target domain after its projected id changes', () => {
   const model = loadModel();
   const operation = {
@@ -281,6 +341,70 @@ test('persisted landing resolves the moved node by target domain after its proje
     plain(model.persistedLandingNode(operation, knowledge)),
     { id: 'new-id', path: 'root/classified', label: '网络' }
   );
+});
+
+test('batch landing keeps every selected source in one atomic move operation', () => {
+  const operation = loadModel().batchLandingOperation({
+    kind: 'node-land',
+    source: { key: 'root::a', nodeId: 'a' },
+    sourceNode: { id: 'a', label: 'A' },
+    target: { path: 'root/target', position: { x: 1, y: 2, z: 0 } },
+    draft: { id: 'a', label: 'A' }
+  }, [
+    { source: { key: 'root::a', nodeId: 'a' }, sourceNode: { id: 'a', label: 'A' } },
+    { source: { key: 'root::b', nodeId: 'b' }, sourceNode: { id: 'b', label: 'B' } }
+  ]);
+
+  assert.equal(operation.kind, 'node-land-batch');
+  assert.deepEqual(plain(operation.landings.map((landing) => landing.source.key)), ['root::a', 'root::b']);
+  assert.deepEqual(plain(operation.landings.map((landing) => landing.target.path)), ['root/target', 'root/target']);
+});
+
+test('batch landing resolves every selected identity from authoritative knowledge instead of stale render entries', () => {
+  const model = loadModel();
+  const knowledge = { nodes: [
+    { id: 'a', key: 'work::a', path: 'work', atomPath: 'work/来源甲', label: '来源甲', aliases: ['stale::a'] },
+    { id: 'b', key: 'work::b', path: 'work', atomPath: 'work/来源乙', label: '来源乙', aliases: ['stale::b'] }
+  ] };
+
+  const entries = model.batchLandingEntries(
+    ['stale::a', 'stale::b'],
+    knowledge,
+    new Map([['stale::a', { ownerPath: 'old', node: { id: 'old-a' } }]])
+  );
+
+  assert.deepEqual(plain(entries.map((entry) => ({
+    key: entry.source.key,
+    path: entry.source.path,
+    atomPath: entry.sourceNode.atomPath
+  }))), [
+    { key: 'work::a', path: 'work', atomPath: 'work/来源甲' },
+    { key: 'work::b', path: 'work', atomPath: 'work/来源乙' }
+  ]);
+});
+
+test('batch landing remaps every moved node after authoritative persistence', () => {
+  const model = loadModel();
+  const previousKnowledge = { nodes: [
+    { id: 'a', key: 'root::a', path: 'root', atomPath: '来源甲', label: '来源甲' },
+    { id: 'b', key: 'root::b', path: 'root', atomPath: '来源乙', label: '来源乙' }
+  ] };
+  const knowledge = { nodes: [
+    { id: 'a2', key: 'target::a2', path: 'target', atomPath: '目标域/来源甲', label: '来源甲' },
+    { id: 'b2', key: 'target::b2', path: 'target', atomPath: '目标域/来源乙', label: '来源乙' }
+  ] };
+  const transitions = model.operationIdentityTransitions({
+    kind: 'node-land-batch',
+    landings: [
+      { kind: 'node-land', source: { key: 'root::a' }, sourceNode: previousKnowledge.nodes[0], target: { path: 'target' } },
+      { kind: 'node-land', source: { key: 'root::b' }, sourceNode: previousKnowledge.nodes[1], target: { path: 'target' } }
+    ]
+  }, knowledge, previousKnowledge);
+
+  assert.deepEqual(plain(transitions.map((entry) => [entry.from.key, entry.to.key])), [
+    ['root::a', 'target::a2'],
+    ['root::b', 'target::b2']
+  ]);
 });
 
 test('manual cluster placement survives knowledge export and import', () => {
@@ -344,6 +468,33 @@ test('landing preserves historical edge endpoints and resolves them as visible l
   assert.equal(workspace.resolveEndpoint(edge.from).key, 'root/child::workspace-node-1');
   assert.equal(workspace.resolveEndpoint(edge.to).path, 'root');
   assert.deepEqual(plain(workspace.relationshipPairsForPath('root/child')), []);
+});
+
+test('relationship projection remains interactive when a large world references late nodes', () => {
+  const model = loadModel();
+  const workspace = model.createWorkspace();
+  const nodeCount = 10000;
+  const nodes = Array.from({ length: nodeCount }, (_, index) => ({
+    id: `node-${index}`,
+    path: 'root',
+    label: `Node ${index}`
+  }));
+  const edges = Array.from({ length: 349 }, (_, index) => {
+    const fromIndex = nodeCount - 1 - index * 2;
+    const toIndex = fromIndex - 1;
+    return {
+      from: { key: `root::node-${fromIndex}`, path: 'root', nodeId: `node-${fromIndex}` },
+      to: { key: `root::node-${toIndex}`, path: 'root', nodeId: `node-${toIndex}` }
+    };
+  });
+  workspace.importKnowledge({ nodes, edges });
+
+  const startedAt = performance.now();
+  const relationships = workspace.relationshipPairsForPath('root');
+  const elapsed = performance.now() - startedAt;
+
+  assert.equal(relationships.length, edges.length);
+  assert.ok(elapsed < 500, `relationship projection took ${elapsed.toFixed(1)}ms`);
 });
 
 test('a preserved long tail remains after cancel and is removed only after delete commit', () => {

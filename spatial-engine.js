@@ -4,12 +4,14 @@
   const canvas = document.getElementById("spaceCanvas");
   const context = canvas.getContext("2d", { alpha: true });
   const input = global.SpatialInputConfig;
+  const mobileInput = global.SpatialMobileInputModel;
   const visualModel = global.SpatialVisualModel;
   const gestureArbiter = global.SpatialGestureArbiter;
   const middleFrameTarget = global.SpatialMiddleFrameTarget;
   const registry = global.SpatialEntityRegistry;
   const grammar = global.SpatialViewGrammar;
   const workspaceModel = global.SpatialWorkspaceModel;
+  const programChoiceModel = global.SpatialProgramChoiceModel;
   const clusterField = global.SpatialClusterField;
   const viewModeModel = global.SpatialViewModeModel;
   const helpPageModel = global.SpatialHelpPageModel;
@@ -18,10 +20,12 @@
   const detailMagnifierModel = global.SpatialDetailMagnifierModel;
   const sceneAdapter = global.AtomSpatialScene;
 
-  if (!context || !input || !visualModel || !gestureArbiter || !middleFrameTarget || !registry || !grammar || !workspaceModel || !clusterField || !viewModeModel || !helpPageModel || !demoModel || !demoGeometry || !detailMagnifierModel || !sceneAdapter) {
+  if (!context || !input || !mobileInput || !visualModel || !gestureArbiter || !middleFrameTarget || !registry || !grammar || !workspaceModel || !programChoiceModel || !clusterField || !viewModeModel || !helpPageModel || !demoModel || !demoGeometry || !detailMagnifierModel || !sceneAdapter) {
     document.body.dataset.spatialUnavailable = "true";
     return;
   }
+
+  const mobileKeyState = mobileInput.createState();
 
   const ui = {
     path: document.getElementById("fieldPath"),
@@ -58,6 +62,11 @@
     attachmentInput: document.getElementById("attachmentInput"),
     attachmentMeta: document.getElementById("attachmentMeta"),
     editStatus: document.getElementById("editStatus"),
+    programChoicePanel: document.getElementById("programChoicePanel"),
+    programChoiceTitle: document.getElementById("programChoiceTitle"),
+    programChoiceControls: document.getElementById("programChoiceControls"),
+    programChoiceStatus: document.getElementById("programChoiceStatus"),
+    programChoiceClose: document.getElementById("programChoiceClose"),
     bindingList: document.getElementById("bindingList"),
     demoIdleSeconds: document.getElementById("demoIdleSeconds"),
     helpStartupToggle: document.getElementById("helpStartupToggle"),
@@ -171,6 +180,7 @@
 
   const rootStyles = getComputedStyle(document.documentElement);
   const theme = {};
+  let staticBackdropCache = null;
   [
     "space-0",
     "space-1",
@@ -233,7 +243,11 @@
     input.intents.exit,
     input.intents.backView,
     input.intents.forwardView,
-    input.intents.returnOverview
+    input.intents.returnOverview,
+    input.intents.setPeripheralView,
+    input.intents.setNestedView,
+    input.intents.setHierarchyView,
+    input.intents.setImmersiveView
   ]);
   const transactionGuardedIntents = new Set([
     "focus",
@@ -622,11 +636,13 @@
     appliedViewMode: "hierarchy",
     expandedClusterDomains: new Map(),
     clusterScene: { clusters: [], corridors: [], bounds: { center: { x: 0, y: 0, z: 0 }, radius: 0 } },
+    clusterConnectionEdges: [],
     interactionPhase: grammar.interactionPhases.idle,
     commitPulseUntil: 0,
     confirmationRipples: new Map(),
     wandGlowUntil: new Map(),
     batchSelectionKeys: new Set(),
+    batchSelectionEntries: new Map(),
     batchToggleKey: null,
     wand: {
       shiftHeld: false,
@@ -658,6 +674,7 @@
     rendered: [],
     hitRegions: [],
     relationHitRegions: [],
+    supportClauses: [],
     clusterHitRegions: [],
     clusterScreenOffsets: new Map(),
     clusterDetailCandidates: [],
@@ -937,12 +954,16 @@
     };
   }
 
-  function recordCurrentView(options) {
-    const snapshot = state.viewHistory.push(visualSnapshot(), options);
-    updateNavigationUI();
+  function publishCurrentView() {
     global.dispatchEvent(new CustomEvent("spatial-view-committed", {
       detail: Object.freeze({ view: exportFieldProjection() })
     }));
+  }
+
+  function recordCurrentView(options) {
+    const snapshot = state.viewHistory.push(visualSnapshot(), options);
+    updateNavigationUI();
+    publishCurrentView();
     return snapshot;
   }
 
@@ -1346,11 +1367,16 @@
       peripheralDepthShrinkPercent: state.demo.settings.peripheralDepthShrinkPercent
     });
     state.clusterScene = scene;
+    state.clusterConnectionEdges = (workspace.exportKnowledge().edges || []).map((edge) => ({
+      edge,
+      fromEndpoint: workspace.resolveEndpoint(edge.from),
+      toEndpoint: workspace.resolveEndpoint(edge.to)
+    }));
     return { routeDomains, scene };
   }
 
   function collectClusterNodes() {
-    const { scene } = buildClusterScene();
+    const scene = state.clusterScene;
     const compressionMultiplier = Math.max(
       1,
       Number(scene.compressionMultiplier) || 1
@@ -1523,7 +1549,8 @@
     }));
   }
 
-  function drawStars() {
+  function drawStars(renderContext = context) {
+    const context = renderContext;
     context.save();
     context.fillStyle = theme.star;
     for (const star of state.starField) {
@@ -1535,7 +1562,8 @@
     context.restore();
   }
 
-  function drawDomainBackdrop() {
+  function drawDomainBackdrop(renderContext = context) {
+    const context = renderContext;
     if (state.depth === 0) {
       return;
     }
@@ -1640,6 +1668,35 @@
     context.font = `500 ${labelSize}px ${theme.fontDisplay}`;
     context.fillText(entry.nodeLabel, centreX, centreY + labelSize * 0.08);
     context.restore();
+  }
+
+  function drawStaticBackdrop() {
+    const entry = state.domainStack.at(-1);
+    const key = [
+      state.width,
+      state.height,
+      state.dpr,
+      state.depth,
+      entry && (entry.nodeId || entry.nodeLabel),
+      theme.star,
+      theme["space-0"],
+      theme["space-2"],
+      theme["sphere-core"],
+      theme["sphere-edge"],
+      theme["accent-2"],
+      theme.ink
+    ].join("|");
+    if (!staticBackdropCache || staticBackdropCache.key !== key) {
+      const layer = document.createElement("canvas");
+      layer.width = canvas.width;
+      layer.height = canvas.height;
+      const layerContext = layer.getContext("2d", { alpha: true });
+      layerContext.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+      drawStars(layerContext);
+      drawDomainBackdrop(layerContext);
+      staticBackdropCache = { key, layer };
+    }
+    context.drawImage(staticBackdropCache.layer, 0, 0, state.width, state.height);
   }
 
   function drawLine(from, to, color, alpha, width) {
@@ -2165,7 +2222,7 @@
       const tangentX = end.x - controlTwo.x;
       const tangentY = end.y - controlTwo.y;
       const tangentLength = Math.hypot(tangentX, tangentY);
-      if (tangentLength > 0.5) {
+      if (relationship.glyphs !== false && tangentLength > 0.5) {
         const arrowAngle = Math.atan2(tangentY, tangentX);
         const arrowSize = clamp(distance * 0.034, 4, 10) * relationshipStyle.glyphScale;
         const spread = 0.4;
@@ -2187,7 +2244,7 @@
       const originTangentX = controlOne.x - start.x;
       const originTangentY = controlOne.y - start.y;
       const originTangentLength = Math.hypot(originTangentX, originTangentY);
-      if (originTangentLength > 0.5) {
+      if (relationship.glyphs !== false && originTangentLength > 0.5) {
         const originAngle = Math.atan2(originTangentY, originTangentX);
         const tailDepth = clamp(distance * 0.034, 5, 11) * relationshipStyle.glyphScale;
         const tailWidth = clamp(distance * 0.026, 4, 8) * relationshipStyle.glyphScale;
@@ -2268,6 +2325,38 @@
         .filter((item) => item.kind === "node" && item.node)
         .map((item) => [item.node.id, item])
     );
+    const renderedByGraphPath = new Map(
+      [...renderedNodes.values()]
+        .filter((item) => typeof item.node.graphPath === "string" && item.node.graphPath)
+        .map((item) => [item.node.graphPath, item])
+    );
+    const supportBundles = visualModel.supportBundles(state.supportClauses, { junctionRatio: 0.5 });
+    const drawableSupportBundles = supportBundles.filter((bundle) => {
+      const inputPaths = [];
+      function collectInputPaths(plan) {
+        if (!plan) return;
+        if (plan.kind === "leaf") inputPaths.push(plan.fromPath);
+        else if (Array.isArray(plan.inputs)) plan.inputs.forEach(collectInputPaths);
+      }
+      collectInputPaths(bundle.input || bundle.inputTopology);
+      const outputPaths = bundle.edge
+        ? [bundle.edge.toPath]
+        : bundle.outputBranches.map((branch) => branch.toPath);
+      return [...inputPaths, ...outputPaths].every((path) => renderedByGraphPath.has(path));
+    });
+    const drawableSupportPairs = new Set(drawableSupportBundles.flatMap((bundle) => {
+      const inputs = inputLeavesForBundle(bundle.input || bundle.inputTopology);
+      const outputs = bundle.edge
+        ? [bundle.edge.toPath]
+        : bundle.outputBranches.map((branch) => branch.toPath);
+      return inputs.flatMap((fromPath) => outputs.map((toPath) => `${fromPath}\u0000${toPath}`));
+    }));
+
+    function inputLeavesForBundle(plan) {
+      if (!plan) return [];
+      if (plan.kind === "leaf") return [plan.fromPath];
+      return Array.isArray(plan.inputs) ? plan.inputs.flatMap(inputLeavesForBundle) : [];
+    }
     const relationships = visualModel.relationshipPairs(existingNodes(state.nodes));
     const labelledHierarchyParents = new Set();
     const labelledAssociationSources = new Set();
@@ -2302,6 +2391,101 @@
       const x = side === "source" ? 72 : state.width - 72;
       const y = clamp(state.height * 0.34 + (seed % 290), 132, state.height - 132);
       return { screen: { x, y, radius: 7, depth: 6.4 }, node: null, focusContext: null };
+    }
+
+    function supportJunction(id, point) {
+      return {
+        node: null,
+        focusContext: null,
+        screen: { x: point.x, y: point.y, radius: 3, depth: 6.4 },
+        supportJunctionId: id
+      };
+    }
+
+    function averageScreen(items) {
+      return items.reduce((sum, item) => ({
+        x: sum.x + item.screen.x / items.length,
+        y: sum.y + item.screen.y / items.length
+      }), { x: 0, y: 0 });
+    }
+
+    function inputLeaves(plan) {
+      if (!plan) return [];
+      if (plan.kind === "leaf") return [renderedByGraphPath.get(plan.fromPath)].filter(Boolean);
+      return Array.isArray(plan.inputs) ? plan.inputs.flatMap(inputLeaves) : [];
+    }
+
+    function drawSupportInput(plan, target, bundleId, depth = 0) {
+      if (plan.kind === "leaf") {
+        const from = renderedByGraphPath.get(plan.fromPath);
+        drawTopologyLink(from, target, {
+          fromId: from.node.id,
+          toId: `${bundleId}:input:${depth}`,
+          kind: "association", label: "support", showLabel: false, glyphs: false
+        });
+        return;
+      }
+      const leaves = inputLeaves(plan);
+      if (!leaves.length) return;
+      const center = averageScreen(leaves);
+      const local = supportJunction(plan.id, {
+        x: center.x + (target.screen.x - center.x) * 0.62,
+        y: center.y + (target.screen.y - center.y) * 0.62
+      });
+      plan.inputs.forEach((child, index) => drawSupportInput(child, local, bundleId, depth + index + 1));
+      drawTopologyLink(local, target, {
+        fromId: plan.id,
+        toId: target.supportJunctionId,
+        kind: "association", label: "support", showLabel: false, glyphs: false
+      });
+      context.save();
+      context.globalAlpha = 0.72;
+      context.fillStyle = theme["accent-2"];
+      context.font = `600 10px ${theme.fontMono}`;
+      context.textAlign = "center";
+      context.fillText(String(plan.operator || "").toUpperCase(), local.screen.x, local.screen.y - 8);
+      context.restore();
+    }
+
+    function drawSupportBundle(bundle) {
+      if (bundle.edge) {
+        const from = renderedByGraphPath.get(bundle.edge.fromPath);
+        const to = renderedByGraphPath.get(bundle.edge.toPath);
+        drawTopologyLink(from, to, {
+          fromId: from.node.id, toId: to.node.id,
+          kind: "association", label: "support", showLabel: true
+        });
+        return;
+      }
+      const inputs = inputLeaves(bundle.inputTopology);
+      const outputs = bundle.outputBranches.map((branch) => renderedByGraphPath.get(branch.toPath));
+      const inputCenter = averageScreen(inputs);
+      const outputCenter = averageScreen(outputs);
+      const ratio = bundle.junctionRatio;
+      const center = {
+        x: inputCenter.x + (outputCenter.x - inputCenter.x) * ratio,
+        y: inputCenter.y + (outputCenter.y - inputCenter.y) * ratio
+      };
+      const length = Math.max(1, Math.hypot(outputCenter.x - inputCenter.x, outputCenter.y - inputCenter.y));
+      const unit = { x: (outputCenter.x - inputCenter.x) / length, y: (outputCenter.y - inputCenter.y) / length };
+      const ifJunction = supportJunction(bundle.trunk.from, {
+        x: center.x - unit.x * 10, y: center.y - unit.y * 10
+      });
+      const thenJunction = supportJunction(bundle.trunk.to, {
+        x: center.x + unit.x * 10, y: center.y + unit.y * 10
+      });
+      drawSupportInput(bundle.inputTopology, ifJunction, bundle.id);
+      drawTopologyLink(ifJunction, thenJunction, {
+        fromId: bundle.trunk.from, toId: bundle.trunk.to,
+        kind: "association", label: "support", showLabel: true
+      });
+      bundle.outputBranches.forEach((branch, index) => {
+        const to = outputs[index];
+        drawTopologyLink(thenJunction, to, {
+          fromId: bundle.trunk.to, toId: to.node.id,
+          kind: "association", label: "support", showLabel: false
+        });
+      });
     }
 
     function descendantPortalItem(endpoint) {
@@ -2348,7 +2532,17 @@
       }
     }
 
-    workspace.edgesForPath(state.currentPath).forEach((edge) => drawWorkspaceEdge(edge));
+    workspace.edgesForPath(state.currentPath).forEach((edge) => {
+      const fromNode = edge.from.path === state.currentPath
+        ? renderedNodes.get(edge.from.nodeId)?.node
+        : null;
+      const toNode = edge.to.path === state.currentPath
+        ? renderedNodes.get(edge.to.nodeId)?.node
+        : null;
+      if (edge.label === "support" && drawableSupportPairs.has(`${fromNode?.graphPath}\u0000${toNode?.graphPath}`)) return;
+      drawWorkspaceEdge(edge);
+    });
+    drawableSupportBundles.forEach(drawSupportBundle);
 
     const transaction = workspace.transaction();
     if (transaction && transaction.kind === "edge-create") {
@@ -3624,8 +3818,7 @@
     if (state.clusterFieldOpen) {
       drawClusterVoid();
     } else {
-      drawStars();
-      drawDomainBackdrop();
+      drawStaticBackdrop();
     }
 
     const basis = cameraBasis();
@@ -3922,10 +4115,6 @@
       nodeOwnerPath: nodeHit ? nodeHit.ownerPath : "",
       relations: relation ? [{ ...relation, edge: relation.item.edge, label: relation.item.label }] : [],
       boxes: state.renderedFloatingDetailBoxes,
-      regions: state.clusterHitRegions.map((region) => ({
-        ...region,
-        node: region.magnifierNode
-      })),
       x: point.x,
       y: point.y
     });
@@ -4105,7 +4294,11 @@
     if (!result) return false;
     if (result.path === state.currentPath) {
       closeSearch();
-      return locateNodeWithoutZoom(result.nodeId);
+      if (!locateNodeWithoutZoom(result.nodeId)) return false;
+      const node = currentNodeById(result.nodeId);
+      return !node || !node.capabilities || !node.capabilities.portal
+        ? true
+        : Boolean(enterNode(node, true));
     }
     const route = state.domainRoutes.get(result.path);
     if (!route) {
@@ -4123,7 +4316,11 @@
     state.hovered = null;
     state.menuFor = null;
     closeSearch();
-    const located = locateNodeWithoutZoom(result.nodeId);
+    if (!locateNodeWithoutZoom(result.nodeId)) return false;
+    const node = currentNodeById(result.nodeId);
+    const located = !node || !node.capabilities || !node.capabilities.portal
+      ? true
+      : Boolean(enterNode(node, true));
     recordCurrentView();
     return located;
   }
@@ -4149,9 +4346,100 @@
     ui.attachmentInput.value = "";
   }
 
+  let activeProgramChoice = null;
+
+  function closeProgramChoicePanel() {
+    activeProgramChoice = null;
+    ui.programChoicePanel.hidden = true;
+    ui.programChoiceControls.replaceChildren();
+    ui.programChoiceStatus.textContent = "";
+  }
+
+  function programNode(node) {
+    return Boolean(node && Array.isArray(node.atomTypes) && node.atomTypes.some((type) => (
+      String(type).replace(/^@+/u, "").toLocaleLowerCase() === "program"
+    )));
+  }
+
+  function renderProgramChoicePanel() {
+    if (!activeProgramChoice) return false;
+    const controls = programChoiceModel.parse(activeProgramChoice.source);
+    if (controls.length === 0) return false;
+    ui.programChoiceTitle.textContent = activeProgramChoice.node.label;
+    ui.programChoiceControls.replaceChildren();
+    for (const control of controls) {
+      const group = document.createElement("section");
+      group.className = "program-choice-control";
+      const title = document.createElement("strong");
+      title.textContent = control.id;
+      group.appendChild(title);
+      const options = document.createElement("div");
+      options.className = "program-choice-options";
+      for (const option of control.options) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = option.label;
+        button.dataset.controlId = control.id;
+        button.dataset.optionId = option.id;
+        button.setAttribute("aria-pressed", String(control.selected.includes(option.id)));
+        options.appendChild(button);
+      }
+      group.appendChild(options);
+      const value = document.createElement("small");
+      const labels = control.options
+        .filter((option) => control.selected.includes(option.id))
+        .map((option) => option.label);
+      value.textContent = labels.length ? labels.join("、") : control.empty;
+      group.appendChild(value);
+      ui.programChoiceControls.appendChild(group);
+    }
+    ui.programChoicePanel.hidden = false;
+    return true;
+  }
+
+  function openProgramChoicePanel(node) {
+    if (!programNode(node)) return false;
+    const source = String(node.programSource || node.description || "");
+    if (programChoiceModel.parse(source).length === 0) return false;
+    activeProgramChoice = { node, path: nodeOwnerPath(node), source };
+    ui.programChoiceStatus.textContent = "";
+    return renderProgramChoicePanel();
+  }
+
+  function saveProgramChoice(controlId, optionId) {
+    if (!activeProgramChoice || workspace.transaction()) return false;
+    let toggled;
+    try {
+      toggled = programChoiceModel.toggle(activeProgramChoice.source, controlId, optionId);
+    } catch (_error) {
+      announce("选项定义已变化，请重新打开");
+      return false;
+    }
+    const { node, path } = activeProgramChoice;
+    const resolved = nodeByIdInPath(path, node.id) || node;
+    if (!workspace.beginNodeEdit(path, resolved)) return false;
+    workspace.updateNodeDraft({
+      label: resolved.label,
+      atomTypes: resolved.atomTypes,
+      description: toggled.source,
+      attachment: resolved.attachment
+    });
+    const operation = workspace.commit();
+    if (!operation) {
+      workspace.cancel();
+      return false;
+    }
+    activeProgramChoice.source = toggled.source;
+    renderProgramChoicePanel();
+    ui.programChoiceStatus.textContent = "正在保存，等待 Atom 确认";
+    persistWorkspaceSnapshot(operation);
+    return true;
+  }
+
   function openNodeEditor(node, path = state.currentPath) {
     const transaction = workspace.transaction();
     if (!transaction || !["node-create", "node-edit"].includes(transaction.kind)) return;
+    closeProgramChoicePanel();
     const draft = transaction.draft;
     state.selected = workspace.projectNode(path, node) || node;
     ui.nodeNameEditor.value = draft.label || "";
@@ -4341,7 +4629,27 @@
     const endpointPath = node.__clusterOwnerPath || node.workspacePath || state.currentPath;
     const endpoint = workspaceModel.qualifiedEndpoint(endpointPath, node, pathLabelsForPath(endpointPath));
     if (!active) {
-      workspace.beginEdgeCreate(endpoint, node);
+      const transaction = workspace.beginEdgeCreate(endpoint, node);
+      const clickedKey = visualNodeKey(node, endpointPath);
+      if (transaction && state.batchSelectionKeys.size > 1 && state.batchSelectionKeys.has(clickedKey)) {
+        const batchEntries = workspaceModel.batchLandingEntries(
+          [...state.batchSelectionKeys],
+          workspace.exportKnowledge(),
+          state.batchSelectionEntries
+        );
+        if (batchEntries.length !== state.batchSelectionKeys.size) {
+          workspace.cancel();
+          announce("批量选择中存在无法确认的节点，本次未执行移动");
+          return false;
+        }
+        transaction.batchEntries = batchEntries.map((entry) => ({
+          source: {
+            ...entry.source,
+            pathLabels: pathLabelsForPath(entry.source.path)
+          },
+          sourceNode: entry.sourceNode
+        }));
+      }
       state.selected = node;
       updateSelectionUI();
       ui.editStatus.hidden = false;
@@ -4423,6 +4731,21 @@
     if (!event.detail || !Number.isFinite(Number(event.detail.persistenceId))) return;
     const operation = event.detail.operation;
     const kind = operation && operation.kind || "";
+    if (
+      kind === "node-edit"
+      && activeProgramChoice
+      && operation.path === activeProgramChoice.path
+      && operation.nodeKey === `${activeProgramChoice.path}::${activeProgramChoice.node.id}`
+    ) {
+      ui.programChoiceStatus.textContent = "已保存";
+    }
+    if (kind === "node-land-batch") {
+      const movedCount = Array.isArray(operation.landings) ? operation.landings.length : 0;
+      state.focused = null;
+      updateSelectionUI();
+      announce(`${movedCount} 个节点已移动并保存`);
+      return;
+    }
     if (kind === "node-land") {
       const persisted = workspaceModel.persistedLandingNode(operation, event.detail.knowledge);
       if (persisted) {
@@ -4449,9 +4772,16 @@
     announce(kind.startsWith("edge-") ? "关系已保存" : "节点已保存");
   });
 
+  global.addEventListener("spatial-workspace-projection-pending", (event) => {
+    if (!event.detail || !Number.isFinite(Number(event.detail.persistenceId))) return;
+    closeProgramChoicePanel();
+    announce("事实已保存，派生投影待恢复；请勿重复操作");
+  });
+
   global.addEventListener("spatial-workspace-persist-failed", (event) => {
     if (!event.detail || !Number.isFinite(Number(event.detail.persistenceId))) return;
     const message = String(event.detail.message || "服务未确认本次编辑");
+    closeProgramChoicePanel();
     announce(`保存失败，已恢复保存前内容：${message}`);
   });
 
@@ -4461,11 +4791,12 @@
       .filter((item) => item.kind === "node" && item.node && item.ownerPath)
       .map((item) => [`${item.ownerPath}::${item.node.id}`, item]));
 
-    for (const domain of visibleClusterDomains()) {
+    for (const cluster of state.clusterScene.clusters) {
       let labels = 0;
-      for (const relationship of visualModel.relationshipPairs(domain.nodes)) {
-        const from = renderedNodes.get(`${domain.path}::${relationship.fromId}`);
-        const to = renderedNodes.get(`${domain.path}::${relationship.toId}`);
+      const nodes = cluster.nodes.map((clusterNode) => clusterNode.sourceNode || clusterNode);
+      for (const relationship of visualModel.relationshipPairs(nodes)) {
+        const from = renderedNodes.get(`${cluster.path}::${relationship.fromId}`);
+        const to = renderedNodes.get(`${cluster.path}::${relationship.toId}`);
         if (!from || !to) continue;
         drawTopologyLink(from, to, {
           ...relationship,
@@ -4475,9 +4806,7 @@
       }
     }
 
-    for (const edge of workspace.exportKnowledge().edges || []) {
-      const fromEndpoint = workspace.resolveEndpoint(edge.from);
-      const toEndpoint = workspace.resolveEndpoint(edge.to);
+    for (const { edge, fromEndpoint, toEndpoint } of state.clusterConnectionEdges) {
       const from = renderedNodes.get(`${fromEndpoint.path}::${fromEndpoint.nodeId}`);
       const to = renderedNodes.get(`${toEndpoint.path}::${toEndpoint.nodeId}`);
       if (!from || !to) continue;
@@ -4525,11 +4854,12 @@
     if (transaction.kind === "edge-edit" && transaction.status !== "delete") {
       workspace.updateEdgeDraft({ label: ui.edgeNameEditor.value });
     }
-    const operation = workspace.commit();
+    let operation = workspace.commit();
     if (!operation) {
       announce("请先选择关系落脚节点");
       return false;
     }
+    operation = workspaceModel.batchLandingOperation(operation, operation.batchEntries);
     closeNodeEditor();
     if (operation.kind === "node-edit" && operation.status === "delete") {
       state.selected = null;
@@ -4544,14 +4874,15 @@
         ? nodeByIdInPath(operation.target.path, operation.target.nodeId)
         : null;
       announce("关系已提交");
-    } else if (operation.kind === "node-land") {
+    } else if (operation.kind === "node-land" || operation.kind === "node-land-batch") {
       state.selected = operation.target
-        ? nodeByIdInPath(operation.target.path, operation.draft.id)
+        ? nodeByIdInPath(operation.target.path, operation.draft && operation.draft.id)
         : null;
       const targetLabel = operation.target
         ? pathLabelsForPath(operation.target.path).at(-1) || "目标域"
         : "目标域";
-      announce(`节点已落到 ${targetLabel}，旧关系保留为跨域长尾`);
+      const movedCount = operation.kind === "node-land-batch" ? operation.landings.length : 1;
+      announce(`${movedCount} 个节点已落到 ${targetLabel}，旧关系保留为跨域长尾`);
     } else {
       const nodeId = operation.draft && operation.draft.id
         ? operation.draft.id
@@ -5133,6 +5464,23 @@
     });
   }
 
+  function refitCurrentDomain(optionsInput) {
+    optionsInput = optionsInput || {};
+    const path = typeof optionsInput.path === "string" ? optionsInput.path : state.currentPath;
+    if (path !== state.currentPath) return false;
+    startCameraTween(currentDomainSceneFrame(), 420);
+    return true;
+  }
+
+  function refreshLoadedDomain(optionsInput) {
+    optionsInput = optionsInput || {};
+    const path = typeof optionsInput.path === "string" ? optionsInput.path : state.currentPath;
+    if (!state.expandedClusterDomains.has(path)) return false;
+    buildClusterScene();
+    updateSelectionUI();
+    return true;
+  }
+
   function enterNode(node, forceImmersive = false) {
     if (
       !node
@@ -5163,6 +5511,10 @@
     state.nodes = prefetched && prefetched.path === nextPath
       ? prefetched.nodes
       : createChildDomainNodes(node, state.currentPath, state.depth);
+    // Announce the new scope before the camera tween finishes so the bridge can
+    // fetch its authoritative children during the transition. The history entry
+    // still records the settled camera in the tween completion callback below.
+    publishCurrentView();
     rememberDomainRoute(state.currentPath, state.domainStack);
     state.selected = null;
     state.focused = null;
@@ -5254,6 +5606,11 @@
     state.selected = null;
     state.focused = null;
     state.hovered = null;
+    state.batchSelectionKeys.clear();
+    state.batchSelectionEntries.clear();
+    state.batchToggleKey = null;
+    state.wand.tapCount = 0;
+    state.wand.lastTapAt = 0;
     state.menuFor = null;
     state.middleLabelFocus = null;
     state.prefetchedDomain = null;
@@ -5609,6 +5966,13 @@
     const anchor = regions.find((region) => region.key === state.latestInteractionKey)
       || regions.find((region) => state.hovered && region.key === visualNodeKey(state.hovered, nodeOwnerPath(state.hovered)));
     state.batchSelectionKeys = new Set(viewModeModel.planPeerBatch(regions, anchor, state.currentPath));
+    state.batchSelectionEntries = new Map(regions
+      .filter((region) => state.batchSelectionKeys.has(region.key) && region.node)
+      .map((region) => [region.key, {
+        key: region.key,
+        ownerPath: region.ownerPath,
+        node: region.node
+      }]));
     if (!state.batchSelectionKeys.size) return false;
     state.batchToggleKey = anchor ? anchor.key : null;
     updateSelectionUI();
@@ -5617,7 +5981,7 @@
   }
 
   function toggleBatchSelectionAtHit(hit) {
-    if (!state.wand.shiftHeld || !state.batchSelectionKeys.size) return false;
+    if (!state.wand.shiftHeld) return false;
     const item = hit && hit.item;
     const key = item && item.node
       ? visualNodeKey(item.node, item.ownerPath || nodeOwnerPath(item.node))
@@ -5628,6 +5992,17 @@
     }
     if (key === state.batchToggleKey) return false;
     state.batchSelectionKeys = new Set(viewModeModel.toggleSelectionKey(state.batchSelectionKeys, key));
+    if (state.batchSelectionKeys.has(key)) {
+      state.batchSelectionEntries.set(key, {
+        key,
+        ownerPath: item.ownerPath || nodeOwnerPath(item.node),
+        node: item.node
+      });
+    } else {
+      state.batchSelectionEntries.delete(key);
+    }
+    state.wand.tapCount = 0;
+    state.wand.lastTapAt = 0;
     state.batchToggleKey = key;
     updateSelectionUI();
     return true;
@@ -5664,6 +6039,7 @@
       .filter((region) => region.item && region.item.kind === "node" && region.item.node)
       .map((region) => ({
         key: visualNodeKey(region.item.node, region.item.ownerPath || nodeOwnerPath(region.item.node)),
+        node: region.item.node,
         ownerPath: region.item.ownerPath || nodeOwnerPath(region.item.node),
         level: Number(region.item.level) || 0,
         x: region.x,
@@ -5984,6 +6360,7 @@
     let changed = false;
     if (state.batchSelectionKeys.size) {
       state.batchSelectionKeys.clear();
+      state.batchSelectionEntries.clear();
       state.batchToggleKey = null;
       changed = true;
     }
@@ -6099,6 +6476,11 @@
       case "activate":
         if (!target) {
           return;
+        }
+        if (openProgramChoicePanel(target)) {
+          state.commitPulseUntil = performance.now() + 320;
+          announce(`${target.label} 选项已打开`);
+          break;
         }
         state.commitPulseUntil = performance.now() + 320;
         announce(`${target.label} 已触发使用`);
@@ -6571,54 +6953,60 @@
   }
 
   canvas.addEventListener("pointerdown", (event) => {
-    if (transitionBlocksPointerEdit(event)) {
+    const pointerInput = mobileInput.mergePointerEvent(event, mobileKeyState);
+    if (transitionBlocksPointerEdit(pointerInput)) {
       return;
     }
     const point = canvasPoint(event);
     state.pointerPosition = point;
-    if (event.button === 2 && event.shiftKey && !event.ctrlKey) {
+    if (pointerInput.button === 2 && pointerInput.shiftKey && !pointerInput.ctrlKey) {
       canvas.setPointerCapture(event.pointerId);
       canvas.focus({ preventScroll: true });
       beginWandStroke(event.pointerId, point);
       return;
     }
-    const blankSensitive = event.button === 2
-      || (state.clusterFieldOpen && event.ctrlKey && event.button === 0);
-    const semanticEdit = event.ctrlKey && (event.button === 0 || event.button === 2);
-    const hit = event.button === 1
+    const blankSensitive = pointerInput.button === 2
+      || (state.clusterFieldOpen && pointerInput.ctrlKey && pointerInput.button === 0);
+    const semanticEdit = pointerInput.ctrlKey && (pointerInput.button === 0 || pointerInput.button === 2);
+    const hit = pointerInput.button === 1
       ? findMiddleFrameHit(event.clientX, event.clientY)
       : findHit(event.clientX, event.clientY, { blankSensitive, semanticEdit });
     const item = hit ? hit.item : null;
     const node = item && item.node ? item.node : null;
-    if (node && (event.button === 0 || event.button === 1 || event.button === 2)) rememberLatestInteraction(item);
+    if (node && (pointerInput.button === 0 || pointerInput.button === 1 || pointerInput.button === 2)) rememberLatestInteraction(item);
     const onEdge = Boolean(item && item.kind === "relationship");
     const transaction = workspace.transaction();
     const edgeDraft = Boolean(transaction && transaction.kind === "edge-create" && !transaction.target);
     const mappingEvent = {
-      button: event.button,
+      button: pointerInput.button,
       detail: 1,
-      ctrlKey: event.ctrlKey,
-      shiftKey: event.shiftKey,
-      altKey: event.altKey,
-      metaKey: event.metaKey
+      ctrlKey: pointerInput.ctrlKey,
+      shiftKey: pointerInput.shiftKey,
+      altKey: pointerInput.altKey,
+      metaKey: pointerInput.metaKey
     };
-    const intent = input.resolvePointer(mappingEvent, { onNode: Boolean(node), onEdge, edgeDraft, gesture: "tap" });
+    const mappingContext = { onNode: Boolean(node), onEdge, edgeDraft };
+    const intent = input.resolvePointer(mappingEvent, { ...mappingContext, gesture: "tap" });
     if (state.clusterFieldOpen && intent === "createNode") {
       state.cameraTween = null;
     }
-    const dragIntent = input.resolvePointer(mappingEvent, { onNode: Boolean(node), onEdge, edgeDraft, gesture: "drag" });
+    const dragIntent = input.resolvePointer(mappingEvent, { ...mappingContext, gesture: "drag" });
     canvas.setPointerCapture(event.pointerId);
     canvas.focus({ preventScroll: true });
     state.pointerCandidate = {
       pointerId: event.pointerId,
       pointerType: event.pointerType || "mouse",
-      button: event.button,
+      button: pointerInput.button,
       start: point,
+      startedAt: performance.now(),
+      movementPx: 0,
       node,
       item,
       domainContext: hit ? hit.domainContext || null : null,
       intent,
       dragIntent,
+      mappingEvent,
+      mappingContext,
       direct: directPointerIntent(item),
       threshold: event.pointerType === "touch" ? 10 : 6,
       cancelled: false
@@ -6635,6 +7023,7 @@
     if (state.pointerCandidate && state.pointerCandidate.pointerId === event.pointerId) {
       const candidate = state.pointerCandidate;
       const distance = Math.hypot(point.x - candidate.start.x, point.y - candidate.start.y);
+      candidate.movementPx = Math.max(candidate.movementPx || 0, distance);
       if (distance >= candidate.threshold) {
         primaryClickArbiter.cancel();
         secondaryClickArbiter.cancel();
@@ -6697,6 +7086,40 @@
       const candidate = state.pointerCandidate;
       state.pointerCandidate = null;
       if (!cancelled) {
+        const releasePoint = canvasPoint(event);
+        candidate.movementPx = Math.max(
+          candidate.movementPx || 0,
+          Math.hypot(releasePoint.x - candidate.start.x, releasePoint.y - candidate.start.y)
+        );
+        if (candidate.pointerType === "touch" && candidate.button === 0) {
+          const touchButton = mobileInput.classifyTouchRelease({
+            durationMs: performance.now() - candidate.startedAt,
+            movementPx: candidate.movementPx
+          });
+          if (touchButton === 2) {
+            const secondaryHit = findHit(event.clientX, event.clientY, {
+              blankSensitive: true,
+              semanticEdit: Boolean(candidate.mappingEvent.ctrlKey)
+            });
+            candidate.item = secondaryHit ? secondaryHit.item || null : null;
+            candidate.node = candidate.item && candidate.item.node ? candidate.item.node : null;
+            candidate.domainContext = secondaryHit ? secondaryHit.domainContext || null : null;
+            candidate.direct = directPointerIntent(candidate.item);
+            if (candidate.node) rememberLatestInteraction(candidate.item);
+            const transaction = workspace.transaction();
+            candidate.mappingContext = {
+              onNode: Boolean(candidate.node),
+              onEdge: Boolean(candidate.item && candidate.item.kind === "relationship"),
+              edgeDraft: Boolean(transaction && transaction.kind === "edge-create" && !transaction.target)
+            };
+            candidate.button = 2;
+            candidate.mappingEvent = { ...candidate.mappingEvent, button: 2 };
+            candidate.intent = input.resolvePointer(
+              candidate.mappingEvent,
+              { ...candidate.mappingContext, gesture: "tap" }
+            );
+          }
+        }
         if (candidate.button === 1) {
           const releaseHit = findMiddleFrameHit(event.clientX, event.clientY);
           candidate.start = canvasPoint(event);
@@ -6734,6 +7157,11 @@
     state.wand.shiftHeld = false;
     state.wand.active = false;
     state.wand.points = [];
+    mobileInput.clear(mobileKeyState);
+    document.querySelectorAll("[data-mobile-key], [data-mobile-mouse-button]").forEach((button) => {
+      button.dataset.pressed = "false";
+      if (button.hasAttribute("aria-pressed")) button.setAttribute("aria-pressed", "false");
+    });
   });
 
   canvas.addEventListener("wheel", (event) => {
@@ -6883,8 +7311,7 @@
       return;
     }
     const targetIsFormControl = (
-      event.target instanceof HTMLButtonElement
-      || event.target instanceof HTMLInputElement
+      event.target instanceof HTMLInputElement
       || event.target instanceof HTMLTextAreaElement
     );
     if (targetIsFormControl) {
@@ -6954,6 +7381,68 @@
     if (state.wand.active) finishWandStroke(state.pointerPosition);
     releaseWandBatch();
     syncCanvasCursor();
+  });
+
+  function dispatchMobileKeyboardEvent(type, button) {
+    const held = mobileInput.heldModifiers(mobileKeyState);
+    document.dispatchEvent(new KeyboardEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      key: button.dataset.keyValue || button.dataset.mobileKey,
+      code: button.dataset.mobileKey,
+      ctrlKey: held.ctrlKey,
+      shiftKey: held.shiftKey,
+      altKey: held.altKey,
+      metaKey: held.metaKey
+    }));
+  }
+
+  document.querySelectorAll("[data-mobile-key]").forEach((button) => {
+    const releaseMobileKey = (event) => {
+      if (button.dataset.mobilePointer !== String(event.pointerId)) return;
+      dispatchMobileKeyboardEvent("keyup", button);
+      mobileInput.releasePointer(mobileKeyState, event.pointerId);
+      delete button.dataset.mobilePointer;
+      button.dataset.pressed = "false";
+      if (button.hasAttribute("data-mobile-modifier")) button.setAttribute("aria-pressed", "false");
+      if (button.hasPointerCapture(event.pointerId)) button.releasePointerCapture(event.pointerId);
+    };
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      if (button.dataset.mobilePointer) return;
+      button.dataset.mobilePointer = String(event.pointerId);
+      button.dataset.pressed = "true";
+      button.setPointerCapture(event.pointerId);
+      if (button.hasAttribute("data-mobile-modifier")) {
+        mobileInput.pressModifier(mobileKeyState, button.dataset.mobileKey, event.pointerId);
+        button.setAttribute("aria-pressed", "true");
+      }
+      dispatchMobileKeyboardEvent("keydown", button);
+    });
+    button.addEventListener("pointerup", releaseMobileKey);
+    button.addEventListener("pointercancel", releaseMobileKey);
+  });
+
+  document.querySelectorAll("[data-mobile-mouse-button]").forEach((button) => {
+    const releaseMobileButton = (event) => {
+      if (button.dataset.mobilePointer !== String(event.pointerId)) return;
+      mobileInput.releasePointer(mobileKeyState, event.pointerId);
+      delete button.dataset.mobilePointer;
+      button.dataset.pressed = "false";
+      button.setAttribute("aria-pressed", "false");
+      if (button.hasPointerCapture(event.pointerId)) button.releasePointerCapture(event.pointerId);
+    };
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      if (button.dataset.mobilePointer) return;
+      if (!mobileInput.pressButton(mobileKeyState, Number(button.dataset.mobileMouseButton), event.pointerId)) return;
+      button.dataset.mobilePointer = String(event.pointerId);
+      button.dataset.pressed = "true";
+      button.setAttribute("aria-pressed", "true");
+      button.setPointerCapture(event.pointerId);
+    });
+    button.addEventListener("pointerup", releaseMobileButton);
+    button.addEventListener("pointercancel", releaseMobileButton);
   });
 
   document.querySelectorAll("[data-intent]").forEach((button) => {
@@ -7818,6 +8307,13 @@
     ));
   });
 
+  ui.programChoiceClose.addEventListener("click", closeProgramChoicePanel);
+  ui.programChoiceControls.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-control-id][data-option-id]");
+    if (!button) return;
+    saveProgramChoice(button.dataset.controlId, button.dataset.optionId);
+  });
+
   ui.relationshipLineWidth.addEventListener("input", () => {
     updateDemoSettings(demoModel.withRelationshipLineWidthInput(
       state.demo.settings,
@@ -7979,20 +8475,24 @@
   function frame(now) {
     resizeCanvas();
     state.time = now / 1000;
-    updateCameraTween(now);
-    renderScene();
-    updateDetailMagnifier(state.pointerPosition, state.hovered);
-    if (state.frameCount % 12 === 0) {
-      updateMetrics();
-      if (
-        !state.demo.active
-        && demoModel.shouldStart({
-          idleSeconds: state.demo.settings.idleSeconds,
-          lastInputAt: state.demo.lastInputAt,
-          now: performance.now()
-        })
-      ) {
-        startDemoPresentation();
+    const waitingForAuthoritativeKnowledge = document.body.dataset.spatialBridge === "connecting"
+      && document.body.dataset.spatialKnowledge !== "authoritative";
+    if (!waitingForAuthoritativeKnowledge) {
+      updateCameraTween(now);
+      renderScene();
+      updateDetailMagnifier(state.pointerPosition, state.hovered);
+      if (state.frameCount % 12 === 0) {
+        updateMetrics();
+        if (
+          !state.demo.active
+          && demoModel.shouldStart({
+            idleSeconds: state.demo.settings.idleSeconds,
+            lastInputAt: state.demo.lastInputAt,
+            now: performance.now()
+          })
+        ) {
+          startDemoPresentation();
+        }
       }
     }
     state.frameCount += 1;
@@ -8106,6 +8606,7 @@
     }));
     return {
       path: state.currentPath,
+      expandedPaths: [...state.expandedClusterDomains.keys()],
       pathLabels: [...state.crumbs],
       depth: state.depth,
       selection: state.selected ? `${state.currentPath}::${state.selected.id}` : null,
@@ -8135,7 +8636,12 @@
       { path: focusedPath, id: focusedId },
       identityTransitions
     );
-    if (!workspace.importKnowledge(knowledge)) return false;
+    if (!workspace.importKnowledge(knowledge, {
+      preserveTransaction: options.preserveTransaction === true
+    })) return false;
+    state.supportClauses = Array.isArray(knowledge.supportClauses)
+      ? structuredClone(knowledge.supportClauses)
+      : [];
     cleanupOrphanedDemoKnowledge();
     state.hovered = null;
     currentDomainNodes();
@@ -8271,6 +8777,25 @@
       inputPreset: input.activePreset,
       phase: currentInteractionPhase(),
       transactionActive: Boolean(workspace.transaction()),
+      transactionBatchCount: Array.isArray(workspace.transaction() && workspace.transaction().batchEntries)
+        ? workspace.transaction().batchEntries.length
+        : 0,
+      batchSelectionCount: state.batchSelectionKeys.size,
+      shiftTapCount: state.wand.tapCount,
+      shiftLastTapAt: state.wand.lastTapAt,
+      peerBatchCandidateCount: peerViewBatchRegions().length,
+      latestInteractionKey: state.latestInteractionKey,
+      interactionTargets: state.hitRegions
+        .filter((region) => region.item && region.item.kind === "node" && region.item.node)
+        .map((region) => ({
+          key: visualNodeKey(region.item.node, region.item.ownerPath || nodeOwnerPath(region.item.node)),
+          label: region.item.node.label,
+          x: region.x,
+          y: region.y,
+          clientX: canvas.getBoundingClientRect().left + region.x,
+          clientY: canvas.getBoundingClientRect().top + region.y,
+          radius: Math.max(3, region.item.screen.radius)
+        })),
       semanticStage: state.selected ? state.selected.semanticStage : null,
       worldLensOpen: state.worldLens.open,
       clusterFieldOpen: state.clusterFieldOpen,
@@ -8316,6 +8841,8 @@
     exportField: exportFieldProjection,
     exportKnowledge: () => workspace.exportKnowledge(),
     importKnowledge,
+    refitCurrentDomain,
+    refreshLoadedDomain,
     mermaidTarget,
     locateKnowledgeNode,
     replaceKnowledge,

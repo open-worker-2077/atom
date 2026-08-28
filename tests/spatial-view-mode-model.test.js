@@ -91,6 +91,18 @@ test('double Shift selects peers while triple Shift remains reserved and inert',
     JSON.parse(JSON.stringify(model.resolveShiftTap({ highEnergy: false, lastTapAt: 1240, tapCount: 2 }, 1460))),
     { highEnergy: false, lastTapAt: 0, tapCount: 0, toggled: false, triple: true }
   );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(model.resolveShiftTap({ highEnergy: false, lastTapAt: 1000, tapCount: 1 }, 4800))),
+    { highEnergy: false, lastTapAt: 4800, tapCount: 2, toggled: false }
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(model.resolveShiftTap({ highEnergy: false, lastTapAt: 1000, tapCount: 1 }, 7000))),
+    { highEnergy: false, lastTapAt: 7000, tapCount: 2, toggled: false }
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(model.resolveShiftTap({ highEnergy: false, lastTapAt: 1000, tapCount: 1 }, 8001))),
+    { highEnergy: false, lastTapAt: 8001, tapCount: 1, toggled: false }
+  );
 });
 
 test('Shift gesture recognises physical and virtual keyboard events', () => {

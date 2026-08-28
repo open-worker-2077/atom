@@ -4,8 +4,6 @@ import { parseAtomKey } from './key-parser.mjs';
 import { createActionRegistry, createMatcherRegistry } from './registry.mjs';
 import { parseTransformKey } from './transform-key-parser.mjs';
 
-const PARTNER_FIELDS = new Set(['verb', 'object']);
-
 function entryResult() {
   return {
     ok: true,
@@ -89,78 +87,23 @@ function nestedDiagnostics(value, property) {
   return [];
 }
 
-function normalizePartners(value) {
+function normalizeSupportSelectors(value) {
   if (value?.kind !== 'array' || !Array.isArray(value.values)) {
     return {
       value: materializeGraphJson(value),
       errors: [diagnostic(
-        'INVALID_ATOM_PARTNERS',
-        'partners 必须是关系对象数组'
+        'INVALID_SUPPORT_ARRAY',
+        'support 必须是推支规则对象数组'
       )]
     };
   }
-
-  const errors = [];
-  const partners = value.values.map((partner, index) => {
-    if (partner?.kind !== 'object' || !Array.isArray(partner.entries)) {
-      errors.push(diagnostic(
-        'INVALID_GRAPH_PARTNER',
-        'partners 项必须是只含 verb 与 object 的对象',
-        { partnerIndex: index }
-      ));
-      return materializeGraphJson(partner);
-    }
-
-    const normalized = {};
-    for (const entry of partner.entries) {
-      if (!PARTNER_FIELDS.has(entry.key)) {
-        errors.push(diagnostic(
-          'UNKNOWN_GRAPH_PARTNER_FIELD',
-          `未知 partner 字段：${entry.key}`,
-          { partnerIndex: index, field: entry.key }
-        ));
-        continue;
-      }
-      if (Object.hasOwn(normalized, entry.key)) {
-        errors.push(diagnostic(
-          'DUPLICATE_GRAPH_PARTNER_FIELD',
-          `partner 字段不得重复：${entry.key}`,
-          { partnerIndex: index, field: entry.key }
-        ));
-        continue;
-      }
-      if (!entry.valuePresent) {
-        errors.push(diagnostic(
-          'INVALID_GRAPH_PARTNER',
-          `partner.${entry.key} 必须提交字符串 Value`,
-          { partnerIndex: index, field: entry.key }
-        ));
-        continue;
-      }
-      normalized[entry.key] = materializeGraphJson(entry.value);
-    }
-
-    for (const field of PARTNER_FIELDS) {
-      if (!Object.hasOwn(normalized, field)) {
-        errors.push(diagnostic(
-          'INVALID_GRAPH_PARTNER',
-          `partner 缺少 ${field}`,
-          { partnerIndex: index, field }
-        ));
-      } else if (
-        typeof normalized[field] !== 'string'
-        || !normalized[field].trim()
-      ) {
-        errors.push(diagnostic(
-          field === 'verb' ? 'INVALID_GRAPH_VERB' : 'INVALID_GRAPH_OBJECT',
-          `partner.${field} 必须是非空字符串`,
-          { partnerIndex: index, field }
-        ));
-      }
-    }
-    return normalized;
-  });
-  return { value: partners, errors };
+  const rules = value.values.map((rule) => materializeGraphJson(rule));
+  const errors = value.values.flatMap((rule, ruleIndex) => (
+    rule?.kind === 'object' && Array.isArray(rule.entries)
+      ? []
+      : [diagnostic('INVALID_SUPPORT_CLAUSE', 'support 项必须是推支规则对象', { ruleIndex })]
+  ));
+  return { value: rules, errors };
 }
 
 function normalizeField(entry, parserOptions, command) {
@@ -170,7 +113,7 @@ function normalizeField(entry, parserOptions, command) {
   if (!entry.valuePresent) return { ...parsed, valuePresent: false };
   if (
     command === 'explore'
-    && parsed.baseKey === 'partners'
+    && parsed.baseKey === 'support'
     && materializeGraphJson(entry.value) === true
   ) {
     return {
@@ -179,8 +122,8 @@ function normalizeField(entry, parserOptions, command) {
       value: true
     };
   }
-  if (parsed.baseKey === 'partners') {
-    const normalized = normalizePartners(entry.value);
+  if (parsed.baseKey === 'support') {
+    const normalized = normalizeSupportSelectors(entry.value);
     return {
       ...parsed,
       warnings: parsed.warnings,

@@ -11,11 +11,20 @@ import {
 } from '../../cli/lib/server.mjs';
 import { createLegacyWorldService } from '../../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createJsonProgramProjectionRepository } from '../../src/atom-system/adapters/json-program-projection-repository.mjs';
+import { createJsonRequestDrivenLockRepository } from '../../src/atom-system/adapters/json-request-driven-lock-repository.mjs';
+import { createJsonRuntimeDiagnosticRepository } from '../../src/atom-system/adapters/json-runtime-diagnostic-repository.mjs';
 import { createLegacyRuntimeComposition } from '../../src/atom-system/adapters/legacy-runtime-composition.mjs';
 import { createAtomRuntimeBackupTrigger } from '../../src/atom-system/operations/atom-runtime-backup-trigger.mjs';
+import {
+  createBoundedRuntimeDiagnosticRecorder,
+  createRuntimeDiagnosticStore
+} from '../../src/atom-system/world-runtime/year-ring.mjs';
 import { resolveAtomRuntime } from './runtime-config.mjs';
 import { createProgramRuntimeScheduler } from './program-runtime.mjs';
 import { ATOM_RUNTIME_CONTRACT } from './runtime-contract.mjs';
+import { workOrderRegistry } from './work-order-registry.mjs';
+import { programFunctionRegistry } from './program-function-registry.mjs';
+import { primeAgentDirectory, resolveAgentContext } from './cli.mjs';
 
 export const DEFAULT_ATOM_GRAPH_HOST = '127.0.0.1';
 export const DEFAULT_ATOM_GRAPH_PORT = 4784;
@@ -82,12 +91,16 @@ function pathIdentity(file) {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
-function validateDistinctPaths({ contextFile, graphFile, storeFile, programProjectionFile }) {
+function validateDistinctPaths({
+  contextFile, graphFile, storeFile, programProjectionFile, requestDrivenLockFile, diagnosticFile
+}) {
   const entries = [
     ['contextFile', contextFile],
     ['graphFile', graphFile],
     ['storeFile', storeFile],
-    ['programProjectionFile', programProjectionFile]
+    ['programProjectionFile', programProjectionFile],
+    ['requestDrivenLockFile', requestDrivenLockFile],
+    ['diagnosticFile', diagnosticFile]
   ];
   const seen = new Map();
   for (const [label, file] of entries) {
@@ -95,7 +108,7 @@ function validateDistinctPaths({ contextFile, graphFile, storeFile, programProje
     if (seen.has(identity)) {
       throw problem(
         'ATOM_GRAPH_PATH_COLLISION',
-        'Atom context、Graph 投影、Spatial store 和 Program 投影必须使用四个不同文件',
+        'Atom context、Graph 投影、Spatial store、Program 投影和运行诊断必须使用不同文件',
         {
           first: seen.get(identity),
           second: label,
@@ -128,6 +141,16 @@ function resolveConfiguration(options = {}) {
       options.programProjectionFile
         ?? path.join(path.dirname(contextFile), 'program-projection.json'),
       'Program 投影文件'
+    ),
+    requestDrivenLockFile: resolveJsonPath(
+      options.requestDrivenLockFile
+        ?? path.join(path.dirname(contextFile), 'request-driven-locks.json'),
+      '请求驱动锁快照文件'
+    ),
+    diagnosticFile: resolveJsonPath(
+      options.diagnosticFile
+        ?? path.join(path.dirname(contextFile), 'runtime-diagnostics.json'),
+      '运行诊断文件'
     )
   };
   validateDistinctPaths(configuration);
@@ -140,6 +163,28 @@ function optionValue(argv, index, name) {
     return { value: argument.slice(name.length + 1), consumed: 0 };
   }
   return { value: argv[index + 1], consumed: 1 };
+}
+
+function validateTimingInteractionId(value) {
+  if (typeof value !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)) {
+    throw problem('INVALID_TIMING_INTERACTION_ID', 'Timing interaction id must be one UUID');
+  }
+  return value.toLowerCase();
+}
+
+export function createOneShotTimingObserver({ interactionId, diagnostics }) {
+  let claimed = false;
+  const stages = [];
+  return (entry) => {
+    if (entry?.interactionId !== interactionId || (claimed && entry.stage === 'interactionOf')) return;
+    claimed = true;
+    stages.push({ stage: entry.stage, durationMs: entry.durationMs });
+    if (entry.stage === 'result.serialize') diagnostics.enqueue({
+      id: `${interactionId}:interaction-timing`, type: 'interaction-timing', command: 'transform', outcome: 'success',
+      durationMs: stages.reduce((total, item) => total + item.durationMs, 0), stages
+    });
+  };
 }
 
 export function parseAtomGraphServerArgs(argv = []) {
@@ -187,12 +232,37 @@ export function parseAtomGraphServerArgs(argv = []) {
       index += parsed.consumed;
       continue;
     }
+    if (argument === '--request-driven-locks' || argument.startsWith('--request-driven-locks=')) {
+      const parsed = optionValue(argv, index, '--request-driven-locks');
+      options.requestDrivenLockFile = parsed.value;
+      index += parsed.consumed;
+      continue;
+    }
+    if (argument === '--runtime-diagnostics' || argument.startsWith('--runtime-diagnostics=')) {
+      const parsed = optionValue(argv, index, '--runtime-diagnostics');
+      options.diagnosticFile = parsed.value;
+      index += parsed.consumed;
+      continue;
+    }
+    if (argument === '--timing-interaction-id' || argument.startsWith('--timing-interaction-id=')) {
+      if (options.timingInteractionId !== undefined) {
+        throw problem('DUPLICATE_TIMING_INTERACTION_ID', 'Timing interaction id may be supplied once');
+      }
+      const parsed = optionValue(argv, index, '--timing-interaction-id');
+      options.timingInteractionId = validateTimingInteractionId(parsed.value);
+      index += parsed.consumed;
+      continue;
+    }
     throw problem(
       'UNKNOWN_ATOM_GRAPH_OPTION',
       `未知 Atom Graph 服务参数：${argument}`
     );
   }
-  return { ...resolveConfiguration(options), help };
+  return {
+    ...resolveConfiguration(options),
+    ...(options.timingInteractionId ? { timingInteractionId: options.timingInteractionId } : {}),
+    help
+  };
 }
 
 function closeServer(server) {
@@ -209,7 +279,7 @@ function displayHost(host) {
   return host.includes(':') ? `[${host}]` : host;
 }
 
-export function createAtomGraphHandlers(interactionRuntime) {
+export function createAtomGraphHandlers(interactionRuntime, options = {}) {
   if (typeof interactionRuntime?.execute !== 'function'
     || typeof interactionRuntime?.updateHumanStatus !== 'function'
     || typeof interactionRuntime?.updateHumanWorkspace !== 'function'
@@ -217,22 +287,41 @@ export function createAtomGraphHandlers(interactionRuntime) {
     throw problem('INVALID_INTERACTION_RUNTIME', 'Atom Graph handlers require one interaction runtime');
   }
   return Object.freeze({
-    async atomCommand(payload) {
+    async atomCommand(payload, lifecycle = {}) {
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)
         || typeof payload.source !== 'string') {
         throw problem('INVALID_ATOM_COMMAND_REQUEST', 'Atom command endpoint requires source and optional interaction.agent');
       }
-      const agent = payload.interaction?.agent;
+      const correlationId = payload.interaction?.id ?? crypto.randomUUID();
+      let agent = payload.interaction?.agent;
+      if ((!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string')
+        && typeof payload.interaction?.agentSelector === 'string'
+        && typeof options.resolveAgent === 'function') {
+        try {
+          agent = await options.resolveAgent(payload.interaction.agentSelector);
+        } catch (error) {
+          throw error;
+        }
+      }
       if (!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string') {
         throw problem('AGENT_REQUIRED', 'Atom command endpoint requires a revision-local @agent origin');
       }
+      const decorate = (result) => ({
+        ...result,
+        agent: agent.path,
+        runtimeContract: ATOM_RUNTIME_CONTRACT
+      });
       const result = await interactionRuntime.execute({
         source: payload.source,
-        correlationId: payload.interaction?.id ?? crypto.randomUUID(),
+        correlationId,
         agentPath: agent.path,
         history: Array.isArray(payload.history) ? payload.history : []
+      }, {
+        ...(typeof lifecycle.onCommitted === 'function' ? {
+          onCommitted: (committed) => lifecycle.onCommitted(decorate(committed))
+        } : {})
       });
-      return { ...result, runtimeContract: ATOM_RUNTIME_CONTRACT };
+      return decorate(result);
     },
     async atomHumanStatus(payload) {
       if (!payload || typeof payload.key !== 'string' || typeof payload.detail !== 'string') {
@@ -258,12 +347,19 @@ export function createAtomGraphHandlers(interactionRuntime) {
         throw problem('INVALID_WORLD_REVISION', 'Projection recovery requires expectedRevision');
       }
       return interactionRuntime.recover({ expectedRevision: payload.expectedRevision.trim() });
+    },
+    async workOrderRegistry() {
+      return workOrderRegistry();
+    },
+    async programFunctionRegistry() {
+      return programFunctionRegistry();
     }
   });
 }
 
 export async function startAtomGraphServer(options = {}) {
   const configuration = resolveConfiguration(options);
+  const timingInteractionId = options.timingInteractionId ?? null;
   const backupRepository = options.backupRepository ?? process.env.ATOM_RUNTIME_BACKUP_REPO;
   const backupTriggerFactory = options.backupTriggerFactory ?? createAtomRuntimeBackupTrigger;
   const backupTrigger = options.backupTrigger ?? (backupRepository ? backupTriggerFactory({
@@ -276,10 +372,35 @@ export async function startAtomGraphServer(options = {}) {
     ?? createJsonProgramProjectionRepository({
       file: configuration.programProjectionFile
     });
+  const requestDrivenLockRepository = options.requestDrivenLockRepository
+    ?? createJsonRequestDrivenLockRepository({ file: configuration.requestDrivenLockFile });
+  const diagnosticRepository = options.diagnosticRepository
+    ?? createJsonRuntimeDiagnosticRepository({ file: configuration.diagnosticFile });
+  const diagnosticStore = options.diagnostics ?? createRuntimeDiagnosticStore({
+    repository: diagnosticRepository,
+    retentionMs: options.diagnosticRetentionMs,
+    maxEntries: options.diagnosticMaxEntries
+  });
+  const diagnosticQueue = createBoundedRuntimeDiagnosticRecorder({
+    recorder: diagnosticStore,
+    capacity: options.diagnosticQueueCapacity ?? 32,
+    writeTimeoutMs: options.diagnosticWriteTimeoutMs ?? 250
+  });
+  const diagnostics = Object.freeze({
+    record: diagnosticStore.record.bind(diagnosticStore),
+    list: diagnosticStore.list.bind(diagnosticStore),
+    findByInteractionId: diagnosticStore.findByInteractionId.bind(diagnosticStore),
+    enqueue: diagnosticQueue.enqueue,
+    flush: diagnosticQueue.flush,
+    snapshot: diagnosticQueue.snapshot
+  });
   const programScheduler = options.programScheduler ?? createProgramRuntimeScheduler({
-    projectionRepository: programProjectionRepository
+    projectionRepository: programProjectionRepository,
+    requestDrivenLockRepository,
+    diagnosticRecorder: diagnostics
   });
   const worldService = options.worldService ?? createLegacyWorldService({
+    publishLegacyProjection: false,
     onAuthoritativeWrite: () => backupTrigger?.schedule()
   });
   const interactionRuntime = options.interactionRuntime ?? createLegacyRuntimeComposition({
@@ -287,11 +408,24 @@ export async function startAtomGraphServer(options = {}) {
     graphFile: configuration.graphFile,
     storeFile: configuration.storeFile,
     programProjectionFile: configuration.programProjectionFile,
+    requestDrivenLockFile: configuration.requestDrivenLockFile,
     programScheduler,
+    diagnostics,
     worldService,
+    ...(timingInteractionId ? { onStage: createOneShotTimingObserver({ interactionId: timingInteractionId, diagnostics }) } : {}),
     ...(options.projectionOrchestrator ? { projectionOrchestrator: options.projectionOrchestrator } : {})
   });
-  const handlers = createAtomGraphHandlers(interactionRuntime);
+  const handlers = createAtomGraphHandlers(interactionRuntime, {
+    diagnostics,
+    resolveAgent: async (selector) => resolveAgentContext(configuration.contextFile, selector, {
+      compatibilityManifest: typeof worldService.compatibilityManifest === 'function'
+        ? await worldService.compatibilityManifest({
+          contextFile: configuration.contextFile,
+          projectionFile: configuration.graphFile
+        })
+        : null
+    })
+  });
 
   const initialized = await interactionRuntime.initialize({
     correlationId: options.startupCorrelationId ?? crypto.randomUUID()
@@ -304,6 +438,18 @@ export async function startAtomGraphServer(options = {}) {
       { errors: initialization.errors ?? [] }
     );
   }
+  const startupManifest = typeof worldService.compatibilityManifest === 'function'
+    ? await worldService.compatibilityManifest({
+      contextFile: configuration.contextFile,
+      projectionFile: configuration.graphFile
+    })
+    : null;
+  await primeAgentDirectory(configuration.contextFile, {
+    ...(startupManifest ? { compatibilityManifest: startupManifest } : {}),
+    ...(startupManifest?.currentWorldRevision
+      ? { worldRevision: startupManifest.currentWorldRevision }
+      : {})
+  });
 
   const instance = await createSpatialServer({
     root: options.root ?? projectRoot,
@@ -313,7 +459,12 @@ export async function startAtomGraphServer(options = {}) {
     atomCommand: handlers.atomCommand,
     atomHumanStatus: handlers.atomHumanStatus,
     atomWorkspaceEdit: handlers.atomWorkspaceEdit,
-    atomProjectionRecover: handlers.atomProjectionRecover
+    atomProjectionRecover: handlers.atomProjectionRecover,
+    atomProjectionStatus: typeof interactionRuntime.projectionStatus === 'function'
+      ? () => interactionRuntime.projectionStatus()
+      : undefined,
+    atomWorkOrderRegistry: handlers.workOrderRegistry,
+    atomProgramFunctionRegistry: handlers.programFunctionRegistry
   });
   backupTrigger?.start();
   instance.server.once('close', () => backupTrigger?.close());
@@ -349,12 +500,21 @@ export async function startAtomGraphServer(options = {}) {
     contextFile: configuration.contextFile,
     graphFile: configuration.graphFile,
     storeFile: configuration.storeFile,
+    programProjectionFile: configuration.programProjectionFile,
+    diagnosticFile: configuration.diagnosticFile,
     initialization,
     interactionRuntime,
     programScheduler,
     programProjectionRepository,
+    requestDrivenLockRepository,
+    diagnostics,
+    diagnosticRepository,
     backupTrigger,
-    close: () => closeServer(instance.server)
+    close: async () => {
+      const closing = closeServer(instance.server);
+      await instance.drainAtomInteractions?.();
+      await closing;
+    }
   });
 }
 
@@ -365,8 +525,9 @@ function help() {
     `  node graph-server.mjs [--host ${DEFAULT_ATOM_GRAPH_HOST}] [--port ${DEFAULT_ATOM_GRAPH_PORT}]`,
     '    [--context atom.json] [--graph graph.json] [--store knowledge.json]',
     '    [--program-projection program-projection.json]',
+    '    [--runtime-diagnostics runtime-diagnostics.json]',
     '',
-    `默认目录：${defaultLiveDirectory}`,
+    `默认目录：${path.dirname(defaultFiles.contextFile)}`,
     '4783 为现有服务保留，不能由本服务占用。'
   ].join('\n');
 }
@@ -385,6 +546,7 @@ if (invokedFile === currentFile) {
       process.stdout.write(`Graph projection：${running.graphFile}\n`);
       process.stdout.write(`Spatial store：${running.storeFile}\n`);
       process.stdout.write(`Program 投影：${running.programProjectionFile}\n`);
+      process.stdout.write(`运行诊断：${running.diagnosticFile}\n`);
     }
   } catch (error) {
     process.stderr.write(`${JSON.stringify({

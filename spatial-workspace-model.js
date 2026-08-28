@@ -3,7 +3,7 @@
 
   const MAX_QUERY_LENGTH = 80;
   const MAX_LABEL_LENGTH = 80;
-  const MAX_DETAIL_LENGTH = 4000;
+  const MAX_DETAIL_LENGTH = 1_000_000;
 
   function normalizedDetailMode(node) {
     if (node && node.surfaceVisible === true) {
@@ -97,10 +97,93 @@
   function persistedLandingNode(operation, knowledge) {
     if (!operation || operation.kind !== "node-land") return null;
     const targetPath = safeText(operation.target && operation.target.path, "", 512);
-    const label = safeText(operation.draft && operation.draft.label, "", MAX_LABEL_LENGTH);
+    const label = safeText(
+      operation.draft && operation.draft.label
+        || operation.sourceNode && operation.sourceNode.label,
+      "",
+      MAX_LABEL_LENGTH
+    );
     if (!targetPath || !label) return null;
     return (Array.isArray(knowledge && knowledge.nodes) ? knowledge.nodes : [])
       .find((node) => node && node.path === targetPath && node.label === label) || null;
+  }
+
+  function persistedBatchLandingNodes(operation, knowledge) {
+    if (!operation || operation.kind !== "node-land-batch") return [];
+    const persisted = [];
+    const identities = new Set();
+    (Array.isArray(operation.landings) ? operation.landings : []).forEach((landing) => {
+      const node = persistedLandingNode(landing, knowledge);
+      if (!node) return;
+      const identity = safeText(node.key, "", 1024)
+        || `${safeText(node.path, "", 512)}::${safeText(node.id || node.nodeId, "", 256)}`;
+      if (!identity || identities.has(identity)) return;
+      identities.add(identity);
+      persisted.push(node);
+    });
+    return persisted;
+  }
+
+  function batchLandingOperation(primary, entriesInput) {
+    if (!primary || primary.kind !== "node-land") return primary;
+    const entries = Array.isArray(entriesInput) ? entriesInput.filter(Boolean) : [];
+    if (entries.length <= 1) return primary;
+    const target = primary.target ? {
+      ...primary.target,
+      pathLabels: Array.isArray(primary.target.pathLabels) ? [...primary.target.pathLabels] : [],
+      position: primary.target.position ? { ...primary.target.position } : undefined
+    } : null;
+    const primaryKey = primary.source && primary.source.key;
+    const ordered = [
+      ...entries.filter((entry) => entry.source && entry.source.key === primaryKey),
+      ...entries.filter((entry) => !entry.source || entry.source.key !== primaryKey)
+    ];
+    return {
+      kind: "node-land-batch",
+      target,
+      landings: ordered.map((entry) => ({
+        kind: "node-land",
+        source: entry.source ? { ...entry.source } : null,
+        sourceNode: entry.sourceNode ? { ...entry.sourceNode } : null,
+        target: target ? { ...target, position: target.position ? { ...target.position } : undefined } : null,
+        draft: entry.sourceNode ? { ...entry.sourceNode } : null
+      }))
+    };
+  }
+
+  function batchLandingEntries(keysInput, knowledge, capturedEntriesInput) {
+    const keys = Array.isArray(keysInput)
+      ? [...new Set(keysInput.map((key) => safeText(key, "", 1024)).filter(Boolean))]
+      : [];
+    const nodes = Array.isArray(knowledge && knowledge.nodes) ? knowledge.nodes : [];
+    const capturedEntries = capturedEntriesInput instanceof Map ? capturedEntriesInput : new Map();
+    const nodesByIdentity = new Map();
+    nodes.forEach((node) => {
+      if (!node || typeof node !== "object") return;
+      const path = safeText(node.path || node.workspacePath, "", 512);
+      const id = safeText(node.id || node.nodeId, "", 256);
+      const key = safeText(node.key, "", 1024) || (path && id ? `${path}::${id}` : "");
+      [key, ...(Array.isArray(node.aliases) ? node.aliases : [])]
+        .map((identity) => safeText(identity, "", 1024))
+        .filter(Boolean)
+        .forEach((identity) => nodesByIdentity.set(identity, node));
+    });
+    return keys.map((requestedKey) => {
+      const authoritativeNode = nodesByIdentity.get(requestedKey);
+      if (authoritativeNode) {
+        const path = safeText(authoritativeNode.path || authoritativeNode.workspacePath, "", 512);
+        return {
+          source: qualifiedEndpoint(path, authoritativeNode, []),
+          sourceNode: authoritativeNode
+        };
+      }
+      const captured = capturedEntries.get(requestedKey);
+      if (!captured || !captured.node) return null;
+      return {
+        source: qualifiedEndpoint(captured.ownerPath, captured.node, []),
+        sourceNode: captured.node
+      };
+    }).filter(Boolean);
   }
 
   function nodeIdentity(node, fallbackPath = "") {
@@ -117,6 +200,15 @@
 
   function operationIdentityTransitions(operation, knowledge, previousKnowledge, persistedNode = null) {
     if (!operation || typeof operation !== "object") return [];
+    if (operation.kind === "node-land-batch") {
+      return (Array.isArray(operation.landings) ? operation.landings : [])
+        .flatMap((landing) => operationIdentityTransitions(
+          landing,
+          knowledge,
+          previousKnowledge,
+          null
+        ));
+    }
     const previousNodes = Array.isArray(previousKnowledge && previousKnowledge.nodes)
       ? previousKnowledge.nodes
       : [];
@@ -289,8 +381,10 @@
     }
 
     function findAddedNodeEntry(key) {
+      const directNode = addedNodes.get(key);
+      if (directNode) return { key, node: directNode };
       for (const [currentKey, node] of addedNodes.entries()) {
-        if (currentKey === key || sanitizeAliases(node.aliases, currentKey).includes(key)) {
+        if (sanitizeAliases(node.aliases, currentKey).includes(key)) {
           return { key: currentKey, node };
         }
       }
@@ -324,6 +418,12 @@
         label: safeText(node && node.label, endpoint && endpoint.label, MAX_LABEL_LENGTH) || "未命名节点",
         short: safeText(node && node.short, "", 32) || `K${id.slice(-4).toUpperCase()}`,
         description: safeText(node && (node.description ?? node.detail)),
+        ...(typeof node?.programSource === "string"
+          ? { programSource: safeText(node.programSource) }
+          : {}),
+        ...(typeof node?.graphPath === "string" && node.graphPath
+          ? { graphPath: safeText(node.graphPath, "", 4000) }
+          : {}),
         attachment: sanitizeAttachment(node && node.attachment),
         position: cleanPosition(node && (node.manualPosition || node.position)),
         clusterLocalPositionLocked: node && node.clusterLocalPositionLocked === true,
@@ -435,7 +535,10 @@
         node,
         draft: {
           label: safeText(projected.label, "未命名节点", MAX_LABEL_LENGTH),
-          description: safeText(projected.description),
+          description: sanitizeAtomTypes(projected.atomTypes).includes("program")
+            && typeof projected.programSource === "string"
+            ? safeText(projected.programSource)
+            : safeText(projected.description),
           atomTypes: sanitizeAtomTypes(projected.atomTypes),
           attachment: sanitizeAttachment(projected.attachment)
         }
@@ -735,6 +838,12 @@
             key,
             path,
             atomPath: safeText(node.atomPath, "", 4000),
+            ...(typeof node.graphPath === "string" && node.graphPath
+              ? { graphPath: safeText(node.graphPath, "", 4000) }
+              : {}),
+            ...(typeof node.programSource === "string"
+              ? { programSource: safeText(node.programSource) }
+              : {}),
             label: safeText(node.label, "未命名节点", MAX_LABEL_LENGTH) || "未命名节点",
             short: safeText(node.short, "", 32),
             detail: safeText(node.description),
@@ -766,8 +875,9 @@
       };
     }
 
-    function importKnowledge(knowledge) {
-      if (active || !knowledge || typeof knowledge !== "object") return false;
+    function importKnowledge(knowledge, options) {
+      const preserveTransaction = options && options.preserveTransaction === true;
+      if ((active && !preserveTransaction) || !knowledge || typeof knowledge !== "object") return false;
       authoritativeKnowledge = true;
       addedNodes.clear();
       nodePatches.clear();
@@ -794,6 +904,12 @@
           label: safeText(source.label, "未命名节点", MAX_LABEL_LENGTH) || "未命名节点",
           short: safeText(source.short, "", 32) || `K${id.slice(-4).toUpperCase()}`,
           description: safeText(source.detail ?? source.description),
+          ...(typeof source.programSource === "string"
+            ? { programSource: safeText(source.programSource) }
+            : {}),
+          ...(typeof source.graphPath === "string" && source.graphPath
+            ? { graphPath: safeText(source.graphPath, "", 4000) }
+            : {}),
           attachment: sanitizeAttachment(source.attachment),
           position: {
             x: Number(source.position && source.position.x) || 0,
@@ -880,6 +996,9 @@
     highlightSegments,
     normalizeQuery,
     persistedLandingNode,
+    persistedBatchLandingNodes,
+    batchLandingEntries,
+    batchLandingOperation,
     operationIdentityTransitions,
     remapIdentity,
     reconcileVisualItems,

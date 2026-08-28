@@ -8,6 +8,7 @@ import { matchesExactSelector } from './exact-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { programLockDeniedDiagnostic } from './program-locks.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
+import { breakShortcutTargets, isShortcutAtom, rewriteShortcutTargetPaths } from './shortcut-runtime.mjs';
 
 function fieldsByBase(atom) {
   const result = new Map();
@@ -70,7 +71,7 @@ function replaceStoredField(atom, baseKey, value, metadata = {}) {
 function walkAtoms(atoms) {
   const result = [];
   function visit(atom, parent, index, pathParts) {
-    const name = storedField(atom, 'name')?.value;
+    const name = storedField(atom, 'thing')?.value;
     const match = {
       atom,
       parent,
@@ -78,7 +79,7 @@ function walkAtoms(atoms) {
       path: [...pathParts, name]
     };
     result.push(match);
-    const children = storedField(atom, 'children')?.value;
+    const children = storedField(atom, 'contain')?.value;
     if (Array.isArray(children)) {
       children.forEach((child, childIndex) => (
         visit(child, match, childIndex, match.path)
@@ -89,11 +90,11 @@ function walkAtoms(atoms) {
   return result;
 }
 
-function partnerTarget(source, object, matches, rootName) {
-  if (typeof object !== 'string' || !object) return null;
-  const normalized = object.startsWith(`${rootName}/`)
-    ? object.slice(rootName.length + 1)
-    : object;
+function supportTarget(source, selector, matches, rootName) {
+  if (typeof selector !== 'string' || !selector) return null;
+  const normalized = rootName && selector.startsWith(`${rootName}/`)
+    ? selector.slice(rootName.length + 1)
+    : selector;
   const byPath = new Map(matches.map((match) => [
     match.path.join('/'),
     match
@@ -103,26 +104,73 @@ function partnerTarget(source, object, matches, rootName) {
   const sibling = byPath.get(siblingPath);
   if (sibling) return sibling;
   const named = matches.filter((match) => (
-    storedField(match.atom, 'name')?.value === normalized
+    storedField(match.atom, 'thing')?.value === normalized
   ));
+  for (let depth = source.path.length - 2; depth >= 0; depth -= 1) {
+    const domain = source.path.slice(0, depth + 1);
+    const scoped = named.filter((match) => domain.every((part, index) => match.path[index] === part));
+    if (scoped.length === 1) return scoped[0];
+    if (scoped.length > 1) return null;
+  }
   return named.length === 1 ? named[0] : null;
+}
+
+function supportSelectorRefs(rules) {
+  const refs = [];
+  function visitExpr(expr, locator) {
+    if (!expr || typeof expr !== 'object' || Array.isArray(expr)) return;
+    if (typeof expr.thing === 'string' || typeof expr['thing@program'] === 'string') {
+      refs.push({ selectorObject: expr, locator });
+    }
+    for (const operator of ['and', 'or']) {
+      if (Array.isArray(expr[operator])) {
+        expr[operator].forEach((child, index) => visitExpr(child, [...locator, operator, index]));
+      }
+    }
+  }
+  rules.forEach((rule, ruleIndex) => {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule)) return;
+    if (Array.isArray(rule.if)) rule.if.forEach((expr, index) => visitExpr(expr, [ruleIndex, 'if', index]));
+    if (Array.isArray(rule.then)) {
+      rule.then.forEach((selectorObject, index) => {
+        if (selectorObject && (typeof selectorObject.thing === 'string'
+          || typeof selectorObject['thing@program'] === 'string')) {
+          refs.push({ selectorObject, locator: [ruleIndex, 'then', index] });
+        }
+      });
+    }
+  });
+  return refs;
+}
+
+function valueAtLocator(value, locator) {
+  return locator.reduce((current, part) => current?.[part], value);
+}
+
+function supportSelectorValue(selectorObject) {
+  return selectorObject?.thing ?? selectorObject?.['thing@program'];
+}
+
+function setSupportSelectorValue(selectorObject, value) {
+  selectorObject[Object.hasOwn(selectorObject, 'thing@program') ? 'thing@program' : 'thing'] = value;
 }
 
 function capturePartnerBindings(atoms, rootName) {
   const matches = walkAtoms(atoms);
   const bindings = [];
   for (const source of matches) {
-    const partners = storedField(source.atom, 'partners')?.value;
+    const partners = storedField(source.atom, 'support')?.value;
     if (!Array.isArray(partners)) continue;
-    partners.forEach((partner, partnerIndex) => {
-      const target = partnerTarget(source, partner?.object, matches, rootName);
+    supportSelectorRefs(partners).forEach(({ selectorObject, locator }) => {
+      const selector = supportSelectorValue(selectorObject);
+      const target = supportTarget(source, selector, matches, rootName);
       if (!target) return;
       bindings.push({
         sourceAtom: source.atom,
         targetAtom: target.atom,
-        partner,
-        partnerIndex,
-        explicitPath: partner.object.includes('/')
+        selectorObject,
+        locator,
+        explicitPath: selector.includes('/')
       });
     });
   }
@@ -131,10 +179,10 @@ function capturePartnerBindings(atoms, rootName) {
 
 function canonicalPartnerObject(source, target, matches, explicitPath) {
   if (explicitPath) return target.path.join('/');
-  const targetName = storedField(target.atom, 'name').value;
+  const targetName = storedField(target.atom, 'thing').value;
   if (source.parent === target.parent) return targetName;
   const sameName = matches.filter((match) => (
-    storedField(match.atom, 'name')?.value === targetName
+    storedField(match.atom, 'thing')?.value === targetName
   ));
   return sameName.length === 1 ? targetName : target.path.join('/');
 }
@@ -146,15 +194,15 @@ function rewritePartnerBindings(atoms, bindings) {
     const source = byAtom.get(binding.sourceAtom);
     const target = byAtom.get(binding.targetAtom);
     if (!source || !target) continue;
-    const partners = storedField(source.atom, 'partners')?.value;
+    const partners = storedField(source.atom, 'support')?.value;
     if (!Array.isArray(partners)) continue;
-    if (partners[binding.partnerIndex] !== binding.partner) continue;
-    binding.partner.object = canonicalPartnerObject(
+    if (valueAtLocator(partners, binding.locator) !== binding.selectorObject) continue;
+    setSupportSelectorValue(binding.selectorObject, canonicalPartnerObject(
       source,
       target,
       matches,
       binding.explicitPath
-    );
+    ));
   }
 }
 
@@ -172,21 +220,21 @@ function copiedBindings(bindings, mapping) {
     .filter((binding) => mapping.has(binding.sourceAtom))
     .map((binding) => {
       const sourceAtom = mapping.get(binding.sourceAtom);
-      const partners = storedField(sourceAtom, 'partners')?.value;
+      const partners = storedField(sourceAtom, 'support')?.value;
       return {
         ...binding,
         sourceAtom,
         targetAtom: mapping.get(binding.targetAtom) ?? binding.targetAtom,
-        partner: partners[binding.partnerIndex]
+        selectorObject: valueAtLocator(partners, binding.locator)
       };
     });
 }
 
-function resolveUnique(atoms, selector) {
-  const matches = walkAtoms(atoms).filter((match) => (
+function resolveUnique(atoms, selector, exactIndex = null) {
+  const matches = exactIndex?.get(selector) ?? walkAtoms(atoms).filter((match) => (
     matchesExactSelector(
       match.path,
-      storedField(match.atom, 'name')?.value,
+      storedField(match.atom, 'thing')?.value,
       selector
     )
   ));
@@ -207,9 +255,119 @@ function resolveUnique(atoms, selector) {
   return { match: matches[0] };
 }
 
+function captureSubtreeBindings(sourceAtom, sourcePath) {
+  const sourceParts = sourcePath.split('/');
+  const prefix = sourceParts.slice(0, -1);
+  const matches = walkAtoms([sourceAtom]).map((match) => ({
+    ...match,
+    path: [...prefix, ...match.path]
+  }));
+  const bindings = [];
+  for (const source of matches) {
+    const partners = storedField(source.atom, 'support')?.value;
+    if (!Array.isArray(partners)) continue;
+    supportSelectorRefs(partners).forEach(({ selectorObject, locator }) => {
+      const selector = supportSelectorValue(selectorObject);
+      const target = supportTarget(source, selector, matches, null);
+      if (!target) return;
+      bindings.push({
+        sourceAtom: source.atom,
+        targetAtom: target.atom,
+        locator,
+        explicitPath: selector.includes('/')
+      });
+    });
+  }
+  return bindings;
+}
+
+function rewriteCopiedSubtreeBindings(clone, mapping, bindings, destinationPath) {
+  const clonedMatches = walkAtoms([clone]);
+  const byAtom = new Map(clonedMatches.map((match) => [match.atom, match]));
+  for (const binding of bindings) {
+    const source = byAtom.get(mapping.get(binding.sourceAtom));
+    const target = byAtom.get(mapping.get(binding.targetAtom));
+    if (!source || !target) continue;
+    const partners = storedField(source.atom, 'support')?.value;
+    const selectorObject = Array.isArray(partners) ? valueAtLocator(partners, binding.locator) : null;
+    if (!selectorObject) continue;
+    const sameParent = source.parent === target.parent;
+    setSupportSelectorValue(selectorObject, !binding.explicitPath && sameParent
+      ? storedField(target.atom, 'thing')?.value
+      : [destinationPath, ...target.path].join('/'));
+  }
+}
+
+export function insertAuthoritativeSubtreeCopy({
+  atoms,
+  sourceAtom,
+  destinationChildren,
+  newRootName = null,
+  rootName = null,
+  bindings = null,
+  sourcePath = null,
+  destinationPath = null,
+  scope = 'world'
+}) {
+  const partnerBindings = scope === 'subtree'
+    ? captureSubtreeBindings(sourceAtom, sourcePath)
+    : (bindings ?? capturePartnerBindings(atoms, rootName));
+  const clone = structuredClone(sourceAtom);
+  if (newRootName !== null) replaceStoredField(clone, 'thing', newRootName);
+  const mapping = new Map();
+  mapClonedSubtree(sourceAtom, clone, mapping);
+  destinationChildren.push(clone);
+  if (scope === 'subtree') {
+    rewriteCopiedSubtreeBindings(clone, mapping, partnerBindings, destinationPath);
+    return { clone, bindings: partnerBindings };
+  }
+  const allBindings = [
+    ...partnerBindings,
+    ...copiedBindings(partnerBindings, mapping)
+  ];
+  rewritePartnerBindings(atoms, allBindings);
+  return { clone, bindings: allBindings };
+}
+
+export function createExactTransformIndex(atoms) {
+  const index = new Map();
+  const add = (selector, match) => {
+    if (!index.has(selector)) index.set(selector, []);
+    index.get(selector).push(match);
+  };
+  for (const match of walkAtoms(atoms)) {
+    const parts = match.path;
+    add(storedField(match.atom, 'thing')?.value, match);
+    for (let start = 0; start < parts.length - 1; start += 1) {
+      add(parts.slice(start).join('/'), match);
+    }
+    add(`${WORLD_OUTSIDE_NAME}/${parts.join('/')}`, match);
+  }
+  return index;
+}
+
+export function transformChangesStructure(item) {
+  return item.fields.some((field) => (
+    (field.baseKey === 'contain' && field.valuePresent)
+    || (field.baseKey === 'thing' && field.commands.some((command) => (
+      ['ren', 'mov', 'cpy', 'dsc', 'rst'].includes(command.name)
+    )))
+  ));
+}
+
+export function isBatchRenameItem(item) {
+  return item.fields.length === 1
+    && item.fields[0].baseKey === 'thing'
+    && item.fields[0].valuePresent
+    && typeof item.fields[0].value === 'string'
+    && item.fields[0].value.length > 0
+    && item.fields[0].commands.length === 1
+    && item.fields[0].commands[0].name === 'ren';
+}
+
 function containerOf(atoms, match) {
   if (!match.parent) return atoms;
-  return storedField(match.parent.atom, 'children').value;
+  return storedField(match.parent.atom, 'contain').value;
 }
 
 function validateParameter(command, allowEmpty = false) {
@@ -222,7 +380,7 @@ function validateParameter(command, allowEmpty = false) {
 }
 
 function applyDetail(target, field) {
-  const current = storedField(target, 'detail');
+  const current = storedField(target, 'situation');
   if (!current || typeof current.value !== 'string') {
     return diagnostic('INVALID_ATOM_DETAIL', '目标 Atom 的 detail 必须是字符串');
   }
@@ -261,7 +419,7 @@ function applyDetail(target, field) {
       description = command.parameter;
     }
   }
-  replaceStoredField(target, 'detail', detail, {
+  replaceStoredField(target, 'situation', detail, {
     types: current.parsed.types.map((type) => type.raw),
     descriptionPresent,
     description
@@ -270,7 +428,7 @@ function applyDetail(target, field) {
 }
 
 function applyNameMetadata(target, field) {
-  const current = storedField(target, 'name');
+  const current = storedField(target, 'thing');
   let name = current.value;
   let types = current.parsed.types.map((type) => type.raw);
   for (const command of field.commands) {
@@ -283,7 +441,7 @@ function applyNameMetadata(target, field) {
       name = command.parameter;
     }
   }
-  replaceStoredField(target, 'name', name, {
+  replaceStoredField(target, 'thing', name, {
     types,
     descriptionPresent: current.parsed.descriptionPresent,
     description: current.parsed.description
@@ -291,61 +449,195 @@ function applyNameMetadata(target, field) {
   return null;
 }
 
+export async function applyBatchRenames({
+  atoms,
+  items,
+  contextFile,
+  authorize = async () => ({ decision: 'allow' })
+}) {
+  const nextAtoms = structuredClone(atoms);
+  const exactIndex = createExactTransformIndex(nextAtoms);
+  const rootName = path.basename(contextFile);
+  const partnerBindings = capturePartnerBindings(nextAtoms, rootName);
+  const plans = [];
+  const planByAtom = new Map();
+
+  for (const item of items) {
+    const nameField = item.fields[0];
+    const rename = nameField.commands[0];
+    const invalid = validateParameter(rename);
+    if (invalid) return { error: invalid, itemIndex: item.index };
+    const selected = resolveUnique(nextAtoms, nameField.value, exactIndex);
+    if (selected.error) return { error: selected.error, itemIndex: item.index };
+    if (planByAtom.has(selected.match.atom)) {
+      return {
+        error: diagnostic(
+          'DUPLICATE_TRANSFORM_BATCH_TARGET',
+          `批量 transform 重复改造同一 Atom：${nameField.value}`
+        ),
+        itemIndex: item.index
+      };
+    }
+    const plan = {
+      item,
+      nameField,
+      rename,
+      match: selected.match,
+      sourcePath: selected.match.path.join('/'),
+      before: JSON.stringify(selected.match.atom)
+    };
+    plans.push(plan);
+    planByAtom.set(selected.match.atom, plan);
+  }
+
+  const affectedContainers = new Set(plans.map((plan) => containerOf(nextAtoms, plan.match)));
+  for (const container of affectedContainers) {
+    const names = new Map();
+    for (const atom of container) {
+      const plan = planByAtom.get(atom);
+      const name = plan?.rename.parameter ?? storedField(atom, 'thing')?.value;
+      if (names.has(name)) {
+        const duplicatePlan = plan ?? planByAtom.get(names.get(name));
+        return {
+          error: diagnostic(
+            'DUPLICATE_DESTINATION_CHILD',
+            `批量改名后的同一 children 中会出现重名 Atom：${name}`
+          ),
+          itemIndex: duplicatePlan?.item.index ?? 0
+        };
+      }
+      names.set(name, atom);
+    }
+  }
+
+  const selectedAtoms = new Set();
+  const ownerPlanByAtom = new Map();
+  const authoritativeMatches = walkAtoms(nextAtoms);
+  for (const plan of plans) {
+    const decision = await authorize(plan.match, 'write', 'thing');
+    if (decision.decision !== 'allow') {
+      if (decision.matched) {
+        const denied = programLockDeniedDiagnostic(decision, 'thing');
+        return {
+          error: diagnostic(denied.code, denied.message, denied.details),
+          itemIndex: plan.item.index
+        };
+      }
+      return {
+        error: diagnostic(
+          'WINDOW_ACCESS_DENIED',
+          '当前窗口无权执行该批量改名；请反馈派发方',
+          { field: 'thing' }
+        ),
+        itemIndex: plan.item.index
+      };
+    }
+    const subtreeAtoms = new Set(walkAtoms([plan.match.atom]).map((match) => match.atom));
+    subtreeAtoms.forEach((atom) => {
+      selectedAtoms.add(atom);
+      if (!ownerPlanByAtom.has(atom)) ownerPlanByAtom.set(atom, plan);
+    });
+    for (const descendant of authoritativeMatches.filter((match) => (
+      match.atom !== plan.match.atom && subtreeAtoms.has(match.atom)
+    ))) {
+      if ((await authorize(descendant, 'write', 'contain')).decision !== 'allow') {
+        return {
+          error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造该批量改名子树；请反馈派发方'),
+          itemIndex: plan.item.index
+        };
+      }
+    }
+  }
+
+  const matchesByAtom = new Map(authoritativeMatches.map((match) => [match.atom, match]));
+  for (const binding of partnerBindings) {
+    if (!selectedAtoms.has(binding.targetAtom) || selectedAtoms.has(binding.sourceAtom)) continue;
+    const source = matchesByAtom.get(binding.sourceAtom);
+    if (source && (await authorize(source, 'write')).decision !== 'allow') {
+      return {
+        error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改写指向批量改名子树的关系；请反馈派发方'),
+        itemIndex: ownerPlanByAtom.get(binding.targetAtom)?.item.index ?? 0
+      };
+    }
+  }
+
+  for (const plan of plans) applyNameMetadata(plan.match.atom, plan.nameField);
+  rewritePartnerBindings(nextAtoms, partnerBindings);
+  const finalMatches = new Map(walkAtoms(nextAtoms).map((match) => [match.atom, match]));
+  rewriteShortcutTargetPaths(nextAtoms, plans.map((plan) => ({
+    sourcePath: plan.sourcePath,
+    resultPath: finalMatches.get(plan.match.atom)?.path.join('/') ?? null
+  })));
+  return {
+    atoms: nextAtoms,
+    results: plans.map((plan) => ({
+      index: plan.item.index,
+      sourcePath: plan.sourcePath,
+      resultPath: finalMatches.get(plan.match.atom)?.path.join('/') ?? null,
+      resultName: storedField(plan.match.atom, 'thing').value,
+      changed: JSON.stringify(plan.match.atom) !== plan.before
+    }))
+  };
+}
+
 function immediateChildren(atom) {
-  const children = storedField(atom, 'children')?.value;
+  const children = storedField(atom, 'contain')?.value;
   return Array.isArray(children) ? children : null;
 }
 
 function childNameCollision(parent, name, excludedAtom = null) {
   return immediateChildren(parent)?.some((child) => (
-    child !== excludedAtom && storedField(child, 'name')?.value === name
+    child !== excludedAtom && storedField(child, 'thing')?.value === name
   )) ?? false;
 }
 
 function siblingNameCollision(atoms, match, name) {
   return containerOf(atoms, match).some((candidate) => (
-    candidate !== match.atom && storedField(candidate, 'name')?.value === name
+    candidate !== match.atom && storedField(candidate, 'thing')?.value === name
   ));
 }
 
 function applyPartners(target, field) {
   if (field.commands.length !== 1 || field.commands[0].name !== 'rep') {
-    return diagnostic('INVALID_PARTNERS_TRANSFORM', 'partners 只接受单个 .rep. 完整替换');
+    return diagnostic('INVALID_SUPPORT_TRANSFORM', 'support 只接受单个 .rep. 完整替换');
   }
   if (field.commands[0].parameter !== '') {
-    return diagnostic('INVALID_PARTNERS_TRANSFORM', 'partners.rep 不接受键内参数');
+    return diagnostic('INVALID_SUPPORT_TRANSFORM', 'support.rep 不接受键内参数');
   }
   if (!field.valuePresent || !Array.isArray(field.value)) {
-    return diagnostic('INVALID_ATOM_PARTNERS', 'partners.rep 必须提交完整关系矩阵 Value');
+    return diagnostic('INVALID_SUPPORT_ARRAY', 'support.rep 必须提交完整 owner-local rule 数组 Value');
   }
-  replaceStoredField(target, 'partners', field.value);
+  replaceStoredField(target, 'support', field.value);
   return null;
 }
 
 function applyExplicitChildren(target, field, atoms) {
   if (!field.valuePresent || !Array.isArray(field.value)) {
-    return diagnostic('INVALID_ATOM_CHILDREN', 'children 必须提交明确节点数组');
+    return diagnostic('INVALID_ATOM_CHILDREN', 'contain 必须提交明确 Thing 数组');
   }
   const children = immediateChildren(target);
-  if (!children) return diagnostic('INVALID_ATOM_CHILDREN', '目标 children 不是数组');
+  if (!children) return diagnostic('INVALID_ATOM_CHILDREN', '目标 contain 不是数组');
 
   for (const submitted of field.value) {
     if (submitted?.kind !== 'graph-object') {
-      return diagnostic('INVALID_ATOM_CHILD', 'children 项必须是明确 Atom 对象');
+      return diagnostic('INVALID_ATOM_CHILD', 'contain 项必须是明确 Thing 对象');
     }
-    const nameField = submitted.fields.find((candidate) => candidate.baseKey === 'name');
+    const nameField = submitted.fields.find((candidate) => candidate.baseKey === 'thing');
     if (!nameField?.valuePresent || typeof nameField.value !== 'string' || !nameField.value) {
-      return diagnostic('ATOM_NAME_REQUIRED', '明确 children 节点必须提交 name Value');
+      return diagnostic('ATOM_NAME_REQUIRED', '明确 contain 节点必须提交 thing Value');
     }
     const matches = children.filter((child) => (
-      storedField(child, 'name')?.value === nameField.value
+      storedField(child, 'thing')?.value === nameField.value
     ));
     if (matches.length > 1) {
-      return diagnostic('AMBIGUOUS_ATOM_NAME', `同一 children 中名称不唯一：${nameField.value}`);
+      return diagnostic('AMBIGUOUS_ATOM_NAME', `同一 contain 中 thing 不唯一：${nameField.value}`);
     }
     if (matches.length === 0) {
       const created = atomFromFields(submitted.fields);
-      const required = ['name', 'detail', 'children', 'partners'];
+      if (walkAtoms([created]).some((match) => isShortcutAtom(match.atom))) {
+        return diagnostic('SHORTCUT_PERSISTENCE_FORGERY_DENIED', '公开 Transform 不得创建或伪造内核虚拟引用记录');
+      }
+      const required = ['thing', 'situation', 'contain', 'support'];
       const missing = required.filter((baseKey) => !storedField(created, baseKey));
       if (missing.length) {
         return diagnostic(
@@ -365,7 +657,7 @@ function applyExplicitChildren(target, field, atoms) {
 
 function applyFields(target, fields, atoms, options = {}) {
   for (const field of fields) {
-    if (field.baseKey === 'name') {
+    if (field.baseKey === 'thing') {
       const structural = field.commands.filter((command) => (
         ['mov', 'cpy', 'dsc', 'rst'].includes(command.name)
       ));
@@ -381,7 +673,7 @@ function applyFields(target, fields, atoms, options = {}) {
       }
       continue;
     }
-    if (field.baseKey === 'detail') {
+    if (field.baseKey === 'situation') {
       if (!field.commands.length) {
         if (field.valuePresent) {
           return diagnostic(
@@ -395,7 +687,7 @@ function applyFields(target, fields, atoms, options = {}) {
       if (error) return error;
       continue;
     }
-    if (field.baseKey === 'partners') {
+    if (field.baseKey === 'support') {
       if (!field.commands.length) {
         if (field.valuePresent) {
           return diagnostic(
@@ -409,7 +701,7 @@ function applyFields(target, fields, atoms, options = {}) {
       if (error) return error;
       continue;
     }
-    if (field.baseKey === 'children' && field.valuePresent) {
+    if (field.baseKey === 'contain' && field.valuePresent) {
       const error = applyExplicitChildren(target, field, atoms);
       if (error) return error;
     }
@@ -419,7 +711,7 @@ function applyFields(target, fields, atoms, options = {}) {
 
 function structuralCommand(item) {
   const commands = item.fields
-    .filter((field) => field.baseKey === 'name')
+    .filter((field) => field.baseKey === 'thing')
     .flatMap((field) => field.commands.map((command) => ({ field, command })))
     .filter(({ command }) => ['mov', 'cpy', 'dsc', 'rst'].includes(command.name));
   if (commands.length > 1) {
@@ -435,14 +727,14 @@ function structuralCommand(item) {
 
 function backupMatch(atoms) {
   const matches = walkAtoms(atoms).filter((match) => {
-    const types = storedField(match.atom, 'name')?.parsed.types.map((type) => type.raw) ?? [];
+    const types = storedField(match.atom, 'thing')?.parsed.types.map((type) => type.raw) ?? [];
     return types.includes('backup') && types.includes('default');
   });
   if (matches.length !== 1) {
     return {
       error: diagnostic(
         'DEFAULT_BACKUP_REQUIRED',
-        'World 必须存在唯一 name@backup@default'
+        'World 必须存在唯一 thing@backup@default'
       )
     };
   }
@@ -488,27 +780,65 @@ export async function applyTransform({
   atoms,
   item,
   contextFile,
-  authorize = async () => ({ decision: 'allow' })
+  authorize = async () => ({ decision: 'allow' }),
+  mutateInput = false,
+  exactIndex = null
 }) {
-  const nextAtoms = structuredClone(atoms);
+  const nextAtoms = mutateInput ? atoms : structuredClone(atoms);
   const rootName = path.basename(contextFile);
-  const partnerBindings = capturePartnerBindings(nextAtoms, rootName);
-  const nameField = item.fields.find((field) => field.baseKey === 'name');
+  const nameField = item.fields.find((field) => field.baseKey === 'thing');
   if (!nameField?.valuePresent || typeof nameField.value !== 'string' || !nameField.value) {
     return { error: diagnostic('ATOM_NAME_REQUIRED', 'transform 需要 name 精确锚点') };
   }
-  const selected = resolveUnique(nextAtoms, nameField.value);
+  const selected = resolveUnique(nextAtoms, nameField.value, exactIndex);
   if (selected.error) return selected;
+  const selectedBefore = JSON.stringify(selected.match.atom);
+  const selectedSnapshot = mutateInput ? structuredClone(selected.match.atom) : null;
+  const rejectAfterMutation = (error) => {
+    if (!selectedSnapshot || JSON.stringify(selected.match.atom) === selectedBefore) return { error };
+    for (const key of Object.keys(selected.match.atom)) delete selected.match.atom[key];
+    Object.assign(selected.match.atom, selectedSnapshot);
+    return { error, rolledBack: true };
+  };
+  const structural = structuralCommand(item);
+  if (structural.error) return structural;
+  const nameCommands = item.fields
+    .filter((field) => field.baseKey === 'thing')
+    .flatMap((field) => field.commands ?? []);
+  if (nameCommands.some((command) => command.name === 'typ' && command.parameter === 'shortcut')) {
+    return { error: diagnostic('SHORTCUT_PERSISTENCE_FORGERY_DENIED', '公开 Transform 不得创建或伪造内核虚拟引用记录') };
+  }
+  if (isShortcutAtom(selected.match.atom)) {
+    const allowed = item.fields.every((field) => {
+      if (field.baseKey !== 'thing') return !field.valuePresent && field.commands.length === 0;
+      return field.commands.every((command) => ['ren', 'mov', 'dsc', 'rst'].includes(command.name));
+    });
+    if (!allowed || nameCommands.some((command) => command.name === 'cpy')) {
+      return { error: diagnostic('SHORTCUT_TRANSFORM_REDIRECT_FORBIDDEN', '首版 Transform 不经虚拟引用重定向；仅允许改名、移动或删除引用本身') };
+    }
+  }
+  if (nameCommands.some((command) => command.name === 'typ' && command.parameter === 'agent')) {
+    return { error: diagnostic(
+      'AGENT_REGISTRATION_REQUIRED',
+      '公开 Transform 不能把 Thing 登记为 @agent；请由当前 Program 调用 agent()'
+    ) };
+  }
+  const rewritesPaths = nameCommands.some((command) => (
+    ['ren', 'mov', 'cpy', 'dsc', 'rst'].includes(command.name)
+  ));
+  const partnerBindings = rewritesPaths
+    ? capturePartnerBindings(nextAtoms, rootName)
+    : [];
   const sourcePath = selected.match.path.join('/');
   const changedFields = new Set();
   for (const field of item.fields) {
-    if (field.baseKey === 'name' && field.commands?.length) changedFields.add('name');
-    if (field.baseKey === 'detail' && (field.commands?.length || field.valuePresent)) changedFields.add('detail');
-    if (field.baseKey === 'partners' && (field.commands?.length || field.valuePresent)) changedFields.add('partners');
-    if (field.baseKey === 'children' && (field.commands?.length || field.valuePresent)) changedFields.add('children');
+    if (field.baseKey === 'thing' && field.commands?.length) changedFields.add('thing');
+    if (field.baseKey === 'situation' && (field.commands?.length || field.valuePresent)) changedFields.add('situation');
+    if (field.baseKey === 'support' && (field.commands?.length || field.valuePresent)) changedFields.add('support');
+    if (field.baseKey === 'contain' && (field.commands?.length || field.valuePresent)) changedFields.add('contain');
   }
-  if (nameField.commands?.some((command) => ['mov', 'cpy', 'dsc', 'rst'].includes(command.name))) {
-    changedFields.add('children');
+  if (nameCommands.some((command) => ['mov', 'cpy', 'dsc', 'rst'].includes(command.name))) {
+    changedFields.add('contain');
   }
   for (const field of changedFields) {
     const decision = await authorize(selected.match, 'write', field);
@@ -517,14 +847,25 @@ export async function applyTransform({
         const denied = programLockDeniedDiagnostic(decision, field);
         return { error: diagnostic(denied.code, denied.message, denied.details) };
       }
-      return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权执行该改造；请反馈派发方', { field }) };
+      return { error: diagnostic(
+        decision.code ?? 'WINDOW_ACCESS_DENIED',
+        decision.code === 'SLOT_STRUCTURE_LOCK_DENIED'
+          ? '槽体映射槽 self Transform 已被结构锁拒绝'
+          : '当前窗口无权执行该改造；请反馈派发方',
+        { field }
+      ) };
     }
   }
-  const selectedAtoms = new Set(walkAtoms([selected.match.atom]).map((match) => match.atom));
-  for (const descendant of walkAtoms(nextAtoms)) {
-    if (selectedAtoms.has(descendant.atom)
-      && (await authorize(descendant, 'write', 'children')).decision !== 'allow') {
-      return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造该子树；请反馈派发方') };
+  const selectedAtoms = new Set([selected.match.atom]);
+  const changesSubtree = rewritesPaths || changedFields.has('contain');
+  if (changesSubtree && (immediateChildren(selected.match.atom)?.length ?? 0) > 0) {
+    for (const match of walkAtoms([selected.match.atom])) selectedAtoms.add(match.atom);
+    for (const descendant of walkAtoms(nextAtoms)) {
+      if (descendant.atom !== selected.match.atom
+        && selectedAtoms.has(descendant.atom)
+        && (await authorize(descendant, 'write', 'contain')).decision !== 'allow') {
+        return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造该子树；请反馈派发方') };
+      }
     }
   }
   // Renames and structural changes rewrite incoming relations. Their source
@@ -538,11 +879,9 @@ export async function applyTransform({
     }
   }
 
-  const structural = structuralCommand(item);
-  if (structural.error) return structural;
   const operation = structural.operation;
   if (!operation) {
-    const rename = nameField.commands.find((command) => command.name === 'ren');
+    const rename = nameCommands.find((command) => command.name === 'ren');
     if (
       rename
       && siblingNameCollision(nextAtoms, selected.match, rename.parameter)
@@ -556,31 +895,37 @@ export async function applyTransform({
     }
     const error = applyFields(selected.match.atom, item.fields, nextAtoms);
     if (!error) {
-      const currentMatches = walkAtoms(nextAtoms);
-      const byAtom = new Map(currentMatches.map((match) => [match.atom, match]));
-      const outgoing = capturePartnerBindings(nextAtoms, rootName)
-        .filter((binding) => binding.sourceAtom === selected.match.atom);
-      for (const binding of outgoing) {
-        const relationTarget = byAtom.get(binding.targetAtom);
-        if (relationTarget && (await authorize(relationTarget, 'read')).decision !== 'allow') {
-          return {
-            error: diagnostic(
-              'WINDOW_ACCESS_DENIED',
-              '当前窗口无权建立指向该关系目标的连接；请反馈派发方'
-            )
-          };
+      if (changedFields.has('support')) {
+        const currentMatches = walkAtoms(nextAtoms);
+        const byAtom = new Map(currentMatches.map((match) => [match.atom, match]));
+        const outgoing = capturePartnerBindings(nextAtoms, rootName)
+          .filter((binding) => binding.sourceAtom === selected.match.atom);
+        for (const binding of outgoing) {
+          const relationTarget = byAtom.get(binding.targetAtom);
+          if (relationTarget && (await authorize(relationTarget, 'read')).decision !== 'allow') {
+            return rejectAfterMutation(
+              diagnostic(
+                'WINDOW_ACCESS_DENIED',
+                '当前窗口无权建立指向该关系目标的连接；请反馈派发方'
+              )
+            );
+          }
         }
       }
-      rewritePartnerBindings(nextAtoms, partnerBindings);
+      if (partnerBindings.length) rewritePartnerBindings(nextAtoms, partnerBindings);
     }
-    const resultMatch = walkAtoms(nextAtoms).find((match) => match.atom === selected.match.atom);
+    const resultPath = rewritesPaths
+      ? walkAtoms(nextAtoms).find((match) => match.atom === selected.match.atom)?.path.join('/') ?? null
+      : sourcePath;
+    if (!error && resultPath && resultPath !== sourcePath) rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }]);
     return error
-      ? { error }
+      ? rejectAfterMutation(error)
       : {
           atoms: nextAtoms,
-          resultName: storedField(selected.match.atom, 'name').value,
+          resultName: storedField(selected.match.atom, 'thing').value,
           sourcePath,
-          resultPath: resultMatch?.path.join('/') ?? null
+          resultPath,
+          changed: JSON.stringify(selected.match.atom) !== selectedBefore
         };
   }
 
@@ -592,13 +937,26 @@ export async function applyTransform({
     const worldRootDestination = command.name === 'mov' && command.parameter === WORLD_OUTSIDE_NAME;
     const destination = worldRootDestination
       ? { match: { atom: null, path: [], parent: null, index: -1 } }
-      : resolveUnique(nextAtoms, command.parameter);
+      : resolveUnique(nextAtoms, command.parameter, exactIndex);
     if (destination.error) return destination;
-    if (!worldRootDestination && (await authorize(destination.match, 'write')).decision !== 'allow') {
+    const targetName = storedField(target.atom, 'thing').value;
+    const futurePath = worldRootDestination
+      ? targetName
+      : `${destination.match.path.join('/')}/${targetName}`;
+    if ((await authorize({
+      atom: target.atom,
+      path: futurePath.split('/')
+    }, 'write')).decision !== 'allow') {
+      return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权把该料移入目标位置；请反馈派发方') };
+    }
+    if (!worldRootDestination && (await authorize(
+      destination.match, 'write', 'contain', { slotMaterialMove: true }
+    )).decision !== 'allow') {
       return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造目标位置；请反馈派发方') };
     }
-    if (command.name === 'mov' && destination.match.path.join('/').startsWith(
-      `${target.path.join('/')}/`
+    if (command.name === 'mov' && (
+      destination.match.path.join('/') === target.path.join('/')
+      || destination.match.path.join('/').startsWith(`${target.path.join('/')}/`)
     )) {
       return { error: diagnostic('ATOM_MOVE_CYCLE', '不能把 Atom 移入自身后代') };
     }
@@ -606,42 +964,46 @@ export async function applyTransform({
       ? nextAtoms
       : immediateChildren(destination.match.atom);
     if (!destinationChildren) {
-      return { error: diagnostic('INVALID_ATOM_CHILDREN', '目标上级 children 不是数组') };
+      return { error: diagnostic('INVALID_ATOM_CHILDREN', '目标上级 contain 不是数组') };
     }
-    const targetName = storedField(target.atom, 'name').value;
     const excluded = command.name === 'mov'
       && target.parent?.atom === destination.match.atom
       ? target.atom
       : null;
     const collision = worldRootDestination
-      ? destinationChildren.some((atom) => atom !== excluded && storedField(atom, 'name')?.value === targetName)
+      ? destinationChildren.some((atom) => atom !== excluded && storedField(atom, 'thing')?.value === targetName)
       : childNameCollision(destination.match.atom, targetName, excluded);
     if (collision) {
       return {
         error: diagnostic(
           'DUPLICATE_DESTINATION_CHILD',
-          `目标上级已存在同名 child：${targetName}`,
+            `目标上级已存在同名 Thing：${targetName}`,
           { destination: command.parameter, name: targetName }
         )
       };
     }
     if (command.name === 'cpy') {
-      const clone = structuredClone(target.atom);
-      const mapping = new Map();
-      mapClonedSubtree(target.atom, clone, mapping);
-      destinationChildren.push(clone);
-      partnerBindings.push(...copiedBindings(partnerBindings, mapping));
+      insertAuthoritativeSubtreeCopy({
+        atoms: nextAtoms,
+        sourceAtom: target.atom,
+        destinationChildren,
+        rootName,
+        bindings: partnerBindings
+      });
     } else {
       containerOf(nextAtoms, target).splice(target.index, 1);
       destinationChildren.push(target.atom);
+      rewritePartnerBindings(nextAtoms, partnerBindings);
     }
-    rewritePartnerBindings(nextAtoms, partnerBindings);
     const resultMatch = walkAtoms(nextAtoms).find((match) => match.atom === target.atom);
+    const resultPath = resultMatch?.path.join('/') ?? sourcePath;
+    rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }]);
     return {
       atoms: nextAtoms,
       resultName: nameField.value,
       sourcePath,
-      resultPath: resultMatch?.path.join('/') ?? sourcePath
+      resultPath,
+      changed: true
     };
   }
 
@@ -658,23 +1020,25 @@ export async function applyTransform({
       return { error: diagnostic('DEFAULT_BACKUP_DISCARD_REJECTED', '不能丢弃默认备份仓') };
     }
     const originalContainer = containerOf(nextAtoms, target);
-    const targetName = storedField(target.atom, 'name').value;
+    const targetName = storedField(target.atom, 'thing').value;
     if (childNameCollision(backup.match.atom, targetName)) {
       return {
         error: diagnostic(
           'DUPLICATE_DESTINATION_CHILD',
-          `默认备份仓已存在同名 child：${targetName}`
+          `默认备份仓已存在同名 Thing：${targetName}`
         )
       };
     }
     originalContainer.splice(target.index, 1);
     immediateChildren(backup.match.atom).push(target.atom);
     rewritePartnerBindings(nextAtoms, partnerBindings);
+    breakShortcutTargets(nextAtoms, sourcePath);
     return {
       atoms: nextAtoms,
       resultName: targetName,
       sourcePath,
       resultPath: walkAtoms(nextAtoms).find((match) => match.atom === target.atom)?.path.join('/') ?? null,
+      changed: true,
       logRecord: {
         id: crypto.randomUUID(),
         operation: 'discard',
@@ -698,7 +1062,7 @@ export async function applyTransform({
       return { error: diagnostic('RESTORE_TARGET_NOT_IN_BACKUP', '恢复目标不在默认备份仓') };
     }
     const entries = await readTransformLog(contextFile);
-    const targetName = storedField(target.atom, 'name').value;
+    const targetName = storedField(target.atom, 'thing').value;
     const discard = activeDiscard(entries, targetName);
     if (!discard) {
       return { error: diagnostic('RESTORE_RECORD_NOT_FOUND', '找不到可逆丢弃记录') };
@@ -707,7 +1071,7 @@ export async function applyTransform({
     if (discard.originalParentPath === null) {
       destination = nextAtoms;
     } else {
-      const parent = resolveUnique(nextAtoms, discard.originalParentPath);
+      const parent = resolveUnique(nextAtoms, discard.originalParentPath, exactIndex);
       if (parent.error) return parent;
       if ((await authorize(parent.match, 'write')).decision !== 'allow') {
         return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权恢复到目标位置；请反馈派发方') };
@@ -715,12 +1079,12 @@ export async function applyTransform({
       destination = immediateChildren(parent.match.atom);
     }
     if (destination.some((child) => (
-      child !== target.atom && storedField(child, 'name')?.value === targetName
+      child !== target.atom && storedField(child, 'thing')?.value === targetName
     ))) {
       return {
         error: diagnostic(
           'DUPLICATE_DESTINATION_CHILD',
-          `恢复位置已存在同名 child：${targetName}`
+          `恢复位置已存在同名 Thing：${targetName}`
         )
       };
     }
@@ -732,6 +1096,7 @@ export async function applyTransform({
       resultName: targetName,
       sourcePath,
       resultPath: walkAtoms(nextAtoms).find((match) => match.atom === target.atom)?.path.join('/') ?? null,
+      changed: true,
       logRecord: {
         id: crypto.randomUUID(),
         operation: 'restore',

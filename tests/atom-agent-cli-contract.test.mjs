@@ -5,15 +5,18 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 
-import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
+import { primeAgentDirectory, resolveAgentContext, runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
-function atom(name, { type = null, detail = '', children = [] } = {}) {
+function atom(thing, options = {}) {
+  const { type = null } = options;
+  const situation = options.situation ?? options.detail ?? '';
+  const contain = options.contain ?? options.children ?? [];
   return {
-    [`name${type ? `@${type}` : ''}`]: name,
-    detail,
-    children,
-    partners: []
+    [`thing${type ? `@${type}` : ''}`]: thing,
+    situation,
+    contain,
+    support: []
   };
 }
 
@@ -76,14 +79,44 @@ test('public CLI selects one @agent context with --agent and needs no session', 
   assert.equal(stderr.text(), '');
 });
 
+test('agent resolution reuses the indexed directory for one immutable large-world revision', async (t) => {
+  const files = await world(t, [
+    atom('Work Agent', { type: 'agent' }),
+    ...Array.from({ length: 10_000 }, (_, index) => atom(`Node ${index}`, {
+      detail: 'x'.repeat(1_000)
+    }))
+  ]);
+  await resolveAgentContext(files.contextFile, 'Work Agent');
+
+  const startedAt = performance.now();
+  const resolved = await resolveAgentContext(files.contextFile, 'Work Agent');
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.equal(resolved.path, 'Work Agent');
+  assert.ok(elapsedMs < 30, `cached agent resolution took ${elapsedMs}ms`);
+});
+
+test('startup can prime an immutable Agent directory before the first command', async (t) => {
+  const files = await world(t, [
+    atom('Work Agent', { type: 'agent' }),
+    ...Array.from({ length: 10_000 }, (_, index) => atom(`Node ${index}`, { detail: 'x'.repeat(1_000) }))
+  ]);
+  const revision = 'sha256:startup-proof';
+  await primeAgentDirectory(files.contextFile, { worldRevision: revision });
+  const startedAt = performance.now();
+  const resolved = await resolveAgentContext(files.contextFile, 'Work Agent', { worldRevision: revision });
+  assert.equal(resolved.path, 'Work Agent');
+  assert.ok(performance.now() - startedAt < 30, 'first command must reuse the startup Agent directory');
+});
+
 test('public CLI reads one complete multiline long-text command from stdin without shell quoting', async (t) => {
   const files = await world(t, [atom('Work Agent', { type: 'agent' })]);
   const detail = `# 中文结构图\n\n\`\`\`mermaid\nflowchart LR\n  A["起点"] -->|"包含：冒号、引号与 $变量"| B["终点"]\n\`\`\`\n${'长文本段落。'.repeat(1200)}`;
   const source = `transform new ${JSON.stringify({
-    name: '长文本节点',
-    'detail#结构化正文': detail,
-    children: [],
-    partners: []
+    thing: '长文本节点',
+    'situation#结构化正文': detail,
+    contain: [],
+    support: []
   }, null, 2)}`;
   const stdin = new PassThrough();
   stdin.end(source);
@@ -97,14 +130,14 @@ test('public CLI reads one complete multiline long-text command from stdin witho
   }));
 
   assert.equal(code, 0, stderr.text());
-  assert.match(stdout.text(), /"name~created": "长文本节点"/u);
+  assert.match(stdout.text(), /"thing~created": "长文本节点"/u);
   const explored = await executeAtomLanguage({
-    source: 'explore {"name":"长文本节点","detail$full":true}',
+    source: 'explore {"thing":"长文本节点","situation$full":true}',
     contextFile: files.contextFile,
     projectionFile: files.projectionFile
   });
   assert.equal(explored.ok, true);
-  assert.equal(explored.items[0].matches[0].detail, detail);
+  assert.equal(explored.items[0].matches[0].situation, detail);
 });
 
 test('public CLI rejects a missing, nonexistent, or non-agent context start', async (t) => {
@@ -146,12 +179,12 @@ test('an ordinary target is explored through the already bound agent context', a
 
   const code = await runAtomCli([
     '--agent', 'Work Agent',
-    'explore', '{"name":"目标节点","detail$full"}'
+    'explore', '{"thing":"目标节点","situation$full"}'
   ], publicCli(files, { stdout: stdout.stream, stderr: stderr.stream }));
 
   assert.equal(code, 0, stderr.text());
-  assert.match(stdout.text(), /"name": "目标节点"/u);
-  assert.match(stdout.text(), /"detail": "公开契约测试节点"/u);
+  assert.match(stdout.text(), /"thing": "目标节点"/u);
+  assert.match(stdout.text(), /"situation": "公开契约测试节点"/u);
   assert.equal(stderr.text(), '');
 });
 
@@ -240,18 +273,18 @@ test('interactive entry is Graph-JSON and does not expand @program source', asyn
   }));
 
   assert.equal(code, 0, stderr.text());
-  assert.match(stdout.text(), /"name@context": "Workspace\/Work Agent"/u);
-  assert.match(stdout.text(), /"name@parent": "Workspace"/u);
-  assert.match(stdout.text(), /"name@peer": "Peer"/u);
-  assert.match(stdout.text(), /"name@agent@current": "Work Agent"/u);
-  assert.match(stdout.text(), /"name": "Current Task"/u);
-  assert.match(stdout.text(), /"name": "Main Branch"/u);
-  assert.match(stdout.text(), /"name": "Form Node"/u);
+  assert.match(stdout.text(), /"thing@context": "Workspace\/Work Agent"/u);
+  assert.match(stdout.text(), /"thing@parent": "Workspace"/u);
+  assert.match(stdout.text(), /"thing@peer": "Peer"/u);
+  assert.match(stdout.text(), /"thing@agent@current": "Work Agent"/u);
+  assert.match(stdout.text(), /"thing": "Current Task"/u);
+  assert.match(stdout.text(), /"thing": "Main Branch"/u);
+  assert.match(stdout.text(), /"thing": "Form Node"/u);
   assert.doesNotMatch(stdout.text(), /Hidden Field|边界外字段/u);
-  assert.match(stdout.text(), /"name@program": "Router"/u);
-  assert.doesNotMatch(stdout.text(), /"children": \[\]/u);
-  assert.doesNotMatch(stdout.text(), /"partners": \[\]/u);
-  assert.match(stdout.text(), /"children": \[/u);
+  assert.match(stdout.text(), /"thing@program": "Router"/u);
+  assert.doesNotMatch(stdout.text(), /"contain": \[\]/u);
+  assert.doesNotMatch(stdout.text(), /"support": \[\]/u);
+  assert.match(stdout.text(), /"contain": \[/u);
   assert.doesNotMatch(stdout.text(), /SECRET_PROGRAM_SOURCE/u);
   assert.match(stdout.text(), /"boundary~preview"/u);
   assert.match(stdout.text(), /"down"[\s\S]*"nodes": 1[\s\S]*"characters": 17/u);
@@ -340,14 +373,14 @@ test('interactive submit forwards prior commands and complete receipts as this C
   const files = await world(t, [atom('Work Agent', { type: 'agent' })]);
   const stdin = new PassThrough();
   stdin.isTTY = false;
-  stdin.end('explore {"name":"Work Agent","detail$full"}\nsubmit {"type":"bug","detail":"示例"}\n');
+  stdin.end('explore {"thing":"Work Agent","situation$full"}\nsubmit {"type":"bug","detail":"示例"}\n');
   let submittedHistory = null;
   const execute = async (options) => {
     if (options.source.startsWith('submit ')) submittedHistory = options.history;
     if (options.source.startsWith('explore ')) {
       return {
         ok: true, command: 'explore', changed: false, warnings: [], errors: [],
-        items: [{ matches: [{ name: 'Work Agent', path: 'Work Agent', detail: '完整回执正文' }] }]
+        items: [{ matches: [{ thing: 'Work Agent', path: 'Work Agent', situation: '完整回执正文' }] }]
       };
     }
     if (options.source.startsWith('submit ')) {
@@ -360,8 +393,8 @@ test('interactive submit forwards prior commands and complete receipts as this C
   }));
   assert.equal(code, 0);
   assert.equal(submittedHistory.length, 1);
-  assert.equal(submittedHistory[0].source, 'explore {"name":"Work Agent","detail$full"}');
-  assert.equal(submittedHistory[0].receipt.items[0].matches[0].detail, '完整回执正文');
+  assert.equal(submittedHistory[0].source, 'explore {"thing":"Work Agent","situation$full"}');
+  assert.equal(submittedHistory[0].receipt.items[0].matches[0].situation, '完整回执正文');
   assert.equal(Object.hasOwn(submittedHistory[0].receipt, 'contextFile'), false);
 });
 
@@ -416,24 +449,29 @@ test('public help exposes only public Agent CLI options', async () => {
   assert.match(stdout.text(), /--json/u);
   assert.match(
     stdout.text(),
-    /atom\.cmd --% --agent 工作Agent explore .*""name"":""目标节点"".*""partners"":true/u
+    /atom\.cmd --% --agent 工作Agent explore .*""thing"":""目标节点"".*""support"":true/u
   );
   assert.match(stdout.text(), /Program 模板与复用/u);
   assert.match(stdout.text(), /template_catalog\(\{\}\)/u);
   assert.match(stdout.text(), /instantiate\(/u);
-  assert.match(stdout.text(), /'template':'advancement-flow'/u);
-  assert.match(stdout.text(), /新建 Agent 与追加 Program 分两次 transform/u);
+  assert.match(stdout.text(), /\\"template\\":\\"advancement-flow\\"/u);
+  assert.match(stdout.text(), /推进流两步配方/u);
+  assert.match(stdout.text(), /第1步：transform new \{"thing@program":"当前Agent\/任务区\/任务名"/u);
+  assert.match(stdout.text(), /agent\(\{\\"labels\\":\[\],\\"functions\\":/u);
+  assert.match(stdout.text(), /第2步：transform \{"thing\.run\.":"当前Agent\/任务区\/任务名"\}/u);
+  assert.match(stdout.text(), /“任务区”必须是当前窗口下已获准写入的普通事实父节点/u);
+  assert.match(stdout.text(), /不得用公开 Transform 创建 thing@agent/u);
   assert.match(stdout.text(), /use_program\(\{name,arguments\}\)/u);
   assert.match(stdout.text(), /--agent 只指定本次交互的上下文来源，不指定节点的归属或写入位置/u);
-  assert.match(stdout.text(), /新节点的归属由 name 中的精确父路径决定/u);
+  assert.match(stdout.text(), /新节点的归属由 thing 中的精确父路径决定/u);
   assert.match(stdout.text(), /会话已给出或已绑定唯一 @agent 时直接复用，不得重复询问/u);
-  assert.match(stdout.text(), /CLI 不会把目标 name 自动当作 --agent/u);
+  assert.match(stdout.text(), /CLI 不会把目标 thing 自动当作 --agent/u);
   assert.match(stdout.text(), /父路径不明确时只询问父 Atom/u);
   assert.match(stdout.text(), /每次写入后重新 explore 实际写入的 Atom/u);
   assert.match(stdout.text(), /先 explore 预定父节点及其直接子节点/u);
   assert.match(stdout.text(), /确实没有可复用节点时.*transform new/u);
   assert.doesNotMatch(stdout.text(), /目标 @agent/u);
-  assert.doesNotMatch(stdout.text(), /\\"name\\"/u);
+  assert.doesNotMatch(stdout.text(), /Graph-JSON 基础：[\s\S]*?name 使用/u);
   assert.doesNotMatch(stdout.text(), /--session|--window|--context|--projection|--global/u);
 });
 
@@ -459,29 +497,35 @@ test('public help is a complete daily Agent operation contract', async () => {
     assert.match(text, new RegExp(`\\.${command}\\.`, 'u'));
   }
   for (const example of [
-    '{"name":"A","detail.rep.NEW"}',
-    '{"name.typ.TYPE":"A"}',
-    '{"name.ren.NEW_NAME":"A"}',
-    '{"name.mov.DESTINATION_PATH":"A"}',
-    '{"name.cpy.DESTINATION_PATH":"A"}',
-    '{"name.dsc.":"A"}',
-    '{"name.rst.":"BACKUP_PATH/A"}',
-    '{"name.run.":"PROGRAM_PATH"}'
+    '{"thing":"A","situation.rep.NEW"}',
+    '{"thing.typ.TYPE":"A"}',
+    '{"thing.ren.NEW_THING":"A"}',
+    '{"thing.mov.DESTINATION_PATH":"A"}',
+    '{"thing.cpy.DESTINATION_PATH":"A"}',
+    '{"thing.dsc.":"A"}',
+    '{"thing.rst.":"BACKUP_PATH/A"}',
+    '{"thing.run.":"PROGRAM_PATH"}'
   ]) assert.match(text, new RegExp(example.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
-  assert.match(text, /detail\$full/u);
-  assert.match(text, /partners（返回每个匹配 Atom 的完整有向关系数组/u);
+  assert.match(text, /situation\$full/u);
+  assert.match(text, /support 按原始 ordinal 回读 owner 声明/u);
+  assert.match(text, /Program 端点写 \{"thing@program":"selector"\}/u);
   assert.match(text, /读取投影推荐使用标准 JSON true/u);
   assert.match(text, /任一项失败整批不写；成功后整批只做一次权威提交/u);
-  assert.match(text, /children\$latitude\+1.*children\$latitude-1/u);
-  assert.match(text, /children\$longitude\+1.*children\$longitude-1/u);
+  assert.match(text, /批量改名按最终状态统一校验/u);
+  assert.match(text, /contain\$latitude\+1.*contain\$latitude-1/u);
+  assert.match(text, /contain\$longitude\+1.*contain\$longitude-1/u);
   assert.doesNotMatch(text, /±N/u);
   assert.match(text, /AGENT_NOT_FOUND.*AGENT_TYPE_REQUIRED.*AMBIGUOUS_AGENT/us);
   assert.match(text, /查询或写入的事实目标不得代替 --agent 上下文来源/u);
   assert.match(text, /目标 Atom 本身不需要是 @agent/u);
+  assert.match(text, /Agent 重配.*普通 Transform.*实际路径鉴权.*自身与后代不设特殊管理通道/u);
+  assert.match(text, /权限索引.*请求命中即用.*缺失或失效.*即时计算并回填/u);
+  assert.match(text, /索引缺失不得阻断启动、Explore 或 Transform/u);
   assert.match(text, /AMBIGUOUS_ATOM_NAME.*ATOM_NOT_FOUND/us);
   assert.match(text, /ATOM_NOT_FOUND.*预定父节点.*复用.*transform new/us);
   assert.match(text, /WORLD_REVISION_CONFLICT.*重新读取/us);
-  assert.match(text, /WORLD_COMMITTED_PROJECTION_PENDING.*维护入口/us);
+  assert.match(text, /PROJECTION_RECOVERY_PENDING.*事实写入已成功.*维护入口/us);
+  assert.doesNotMatch(text, /WORLD_COMMITTED_PROJECTION_PENDING/u);
   assert.match(text, /纠正提示仍无法解除阻断.*submit/u);
   assert.doesNotMatch(text, /PROGRAM_LOCK_DENIED[^\n]*submit/u);
   assert.doesNotMatch(text, /ATOM_PROGRAM_TIMEOUT[^\n]*submit/u);

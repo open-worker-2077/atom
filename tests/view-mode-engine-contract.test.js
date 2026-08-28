@@ -112,6 +112,14 @@ test('successful A S D expansion frames the resulting child domain', () => {
   assert.match(toggle, /frameClusterDomain\(childPath/);
 });
 
+test('newly loaded active Atom scope can refit every current node into the viewport', () => {
+  const refit = functionSource('refitCurrentDomain');
+
+  assert.match(refit, /currentDomainSceneFrame\(\)/);
+  assert.match(refit, /startCameraTween\s*\(/);
+  assert.match(engine, /refitCurrentDomain,/);
+});
+
 test('legacy peer-batch atoms remain available without owning the active double-Shift path', () => {
   const arm = functionSource('armPeerViewBatch');
   const consume = functionSource('consumePeerViewBatch');
@@ -164,6 +172,32 @@ test('Shift right-drag records a visible wand stroke and resolves hit regions at
   assert.match(engine, /function releaseWandBatch\([\s\S]*executeWandTargets/);
   assert.match(engine, /function drawWandTrail\(/);
   assert.match(engine, /drawWandTrail\(\)/);
+});
+
+test('holding Shift can start and revise a batch by brushing nodes without prior peer selection', () => {
+  const toggle = functionSource('toggleBatchSelectionAtHit');
+  const pointerMoveStart = engine.indexOf('canvas.addEventListener("pointermove"');
+  const pointerMoveEnd = engine.indexOf('function releasePointer', pointerMoveStart);
+  const pointerMove = engine.slice(pointerMoveStart, pointerMoveEnd);
+
+  assert.match(toggle, /!state\.wand\.shiftHeld/);
+  assert.doesNotMatch(toggle, /!state\.batchSelectionKeys\.size/);
+  assert.match(toggle, /toggleSelectionKey/);
+  assert.match(toggle, /batchSelectionEntries\.set/);
+  assert.match(toggle, /batchSelectionEntries\.delete/);
+  assert.match(toggle, /state\.wand\.tapCount\s*=\s*0/);
+  assert.match(toggle, /state\.wand\.lastTapAt\s*=\s*0/);
+  assert.match(pointerMove, /toggleBatchSelectionAtHit/);
+});
+
+test('Home clears the contextual batch so Shift brushing starts cleanly in the overview', () => {
+  const overview = functionSource('returnOverview');
+
+  assert.match(overview, /batchSelectionKeys\.clear/);
+  assert.match(overview, /batchSelectionEntries\.clear/);
+  assert.match(overview, /batchToggleKey\s*=\s*null/);
+  assert.match(overview, /wand\.tapCount\s*=\s*0/);
+  assert.match(overview, /wand\.lastTapAt\s*=\s*0/);
 });
 
 test('Shift right-drag remembers the final hit node for the next middle-drag orbit', () => {
@@ -246,7 +280,7 @@ test('stationary middle click quickly frames the pointed node or cluster', () =>
   const middleHit = functionSource('findMiddleFrameHit');
   const release = functionSource('releasePointer');
   assert.match(commit, /candidate\.button\s*===\s*1[\s\S]*quickFrameMiddleTarget\s*\(\s*candidate\s*\)/);
-  assert.match(engine, /event\.button\s*===\s*1[\s\S]*findMiddleFrameHit\s*\(\s*event\.clientX\s*,\s*event\.clientY\s*\)/);
+  assert.match(engine, /pointerInput\.button\s*===\s*1[\s\S]*findMiddleFrameHit\s*\(\s*event\.clientX\s*,\s*event\.clientY\s*\)/);
   assert.match(middleHit, /middleFrameTarget\.chooseMostSpecificTarget\s*\(\s*state\.hitRegions/);
   assert.match(release, /candidate\.button\s*===\s*1[\s\S]*releaseHit\s*=\s*findMiddleFrameHit/);
   assert.match(quickFrame, /candidate\.node/);

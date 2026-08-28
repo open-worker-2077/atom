@@ -8,6 +8,7 @@
     "atom": "work-engine/atom-language/cli.mjs"
   },
   "scripts": {
+    "check:online-control": "node scripts/check-online-control-source.mjs",
     "start": "node work-engine/atom-language/graph-server.mjs",
     "build:browser": "node scripts/build-browser.mjs",
     "test:browser": "playwright test --config=playwright.config.mjs",

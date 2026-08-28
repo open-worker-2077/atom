@@ -97,12 +97,12 @@
     });
   }
 
-  function resolveShiftTap(stateInput, nowInput, windowMsInput = 680) {
+  function resolveShiftTap(stateInput, nowInput, windowMsInput = 6500) {
     const state = stateInput || {};
     const now = Math.max(0, Number(nowInput) || 0);
     const lastTapAt = Math.max(0, Number(state.lastTapAt) || 0);
     const priorTapCount = Math.max(0, Number(state.tapCount) || 0);
-    const windowMs = Math.max(240, Number(windowMsInput) || 680);
+    const windowMs = Math.max(240, Number(windowMsInput) || 6500);
     const withinWindow = lastTapAt > 0 && now >= lastTapAt && now - lastTapAt <= windowMs;
     const tapCount = withinWindow ? priorTapCount + 1 : 1;
     if (tapCount >= 3) {

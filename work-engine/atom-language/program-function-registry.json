@@ -1,0 +1,457 @@
+{
+  "contract": "atom-program-function-registry",
+  "version": 5,
+  "runtimeContract": "atom-interaction/3",
+  "types": [
+    { "id": "program", "layer": "kernel", "executable": true }
+  ],
+  "runtimeTypes": {
+    "ThingCoordinate": {
+      "type": "object",
+      "source": "explore exact result",
+      "opaque": true,
+      "stringOrRef": "forbidden"
+    }
+  },
+  "definitions": {},
+  "functionScopeHierarchy": {
+    "groupField": "functionFamilies[].id",
+    "parentField": "functionFamilies[].parent",
+    "rootWhenParentOmitted": true,
+    "functionMembership": "single-family",
+    "groupEffectiveMembership": "self-and-descendants"
+  },
+  "functionFamilies": [
+    { "layer": "kernel", "id": "graph", "label": "Graph 函数" },
+    { "layer": "kernel", "id": "form", "label": "Form 函数" },
+    { "layer": "kernel", "id": "program", "label": "Program 函数" },
+    { "layer": "application", "id": "work-order", "label": "工单应用" }
+  ],
+  "functions": [
+    { "name": "explore", "layer": "kernel", "family": "graph", "scope": "public" },
+    {
+      "name": "shortcut",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["placement", "thing", "target"],
+              "additionalProperties": false,
+              "properties": {
+                "placement": { "const": "contain", "meaning": "direct child of current Program" },
+                "thing": { "type": "string", "format": "single-atom-name" },
+                "target": { "$ref": "#/runtimeTypes/ThingCoordinate" }
+              }
+            },
+            {
+              "type": "object",
+              "required": ["action", "reference"],
+              "additionalProperties": false,
+              "properties": {
+                "action": { "const": "delete" },
+                "reference": {
+                  "$ref": "#/runtimeTypes/ThingCoordinate",
+                  "role": "shortcut-record",
+                  "source": "authorized resolved AtomView.shortcut_reference"
+                }
+              }
+            }
+          ]
+        },
+        "persistence": "kernel-owned-four-axis-reference-record",
+        "authorization": "same-current-agent-graph-explore-and-transform-evaluator",
+        "view": "transparent-target-with-resolvedThroughShortcut-marker",
+        "delete": "reference-only-central-atomic-commit",
+        "transformRedirect": "forbidden",
+        "errors": ["INVALID_SHORTCUT_TARGET_COORDINATE", "SHORTCUT_TARGET_ACCESS_DENIED", "SHORTCUT_TARGET_BROKEN", "SHORTCUT_REFERENCE_CYCLE", "SHORTCUT_REFERENCE_DEPTH_EXCEEDED", "INVALID_SHORTCUT_REFERENCE_COORDINATE", "SHORTCUT_DELETE_REFERENCE_REQUIRED", "SHORTCUT_REFERENCE_NOT_FOUND", "SHORTCUT_REFERENCE_ACCESS_DENIED"]
+      }
+    },
+    {
+      "name": "agent",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["functions"],
+          "additionalProperties": false,
+          "properties": {
+            "labels": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] },
+            "functions": {
+              "type": "object",
+              "required": ["groups", "names"],
+              "additionalProperties": false,
+              "properties": {
+                "groups": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                "names": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+              }
+            }
+          },
+          "example": {
+            "labels": [],
+            "functions": {
+              "groups": [],
+              "names": [
+                "agent", "current_atom", "explore", "first_pending", "form_status",
+                "instantiate", "lock", "message", "subtree_refs", "transform"
+              ]
+            }
+          }
+        },
+        "target": "current-program-node",
+        "fixedWindowLock": true,
+        "persistedFunctionScopes": "literal-symbolic-groups-and-names",
+        "groupResolution": "current-registry-descendant-union",
+        "delegation": "same-or-descendant-symbolic-scope"
+      }
+    },
+    {
+      "name": "jump",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "when": { "format": "exact-thing@program" },
+            "where": { "format": "exact-thing@program" },
+            "recycle": { "format": "exact-thing@program" }
+          }
+        },
+        "evaluation": ["recycle", "when", "where-on-true"],
+        "default": "guard-window",
+        "authorization": "shared-cli-graph-chain",
+        "transaction": "central-atomic-commit",
+        "coordinate": { "$ref": "#/runtimeTypes/ThingCoordinate" },
+        "coordinateInputs": {
+          "selectors": "ThingCoordinate-only",
+          "whereResult": "ThingCoordinate-only",
+          "exactPathString": "forbidden",
+          "shortNameString": "forbidden",
+          "ref": "forbidden"
+        },
+        "controlledMove": {
+          "issuer": "jump_authorize explicit-name-only registered function",
+          "consumer": "exact matching active window and source Program",
+          "targetSituationDisclosure": "forbidden-before-authorization",
+          "reuse": "forbidden-single-use",
+          "landingRevalidation": "issuer-current-shared-cli-graph-chain"
+        },
+        "errors": [
+          "INVALID_JUMP_CONTRACT",
+          "INVALID_WINDOW_JUMP_EFFECT",
+          "WINDOW_JUMP_DESTINATION_INVALID",
+          "WINDOW_JUMP_LOCK_DENIED"
+        ]
+      }
+    },
+    {
+      "name": "jump_authorize",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "explicitNameOnly": true,
+      "delegable": false,
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["window", "source", "destination"],
+          "additionalProperties": false,
+          "properties": {
+            "window": { "$ref": "#/runtimeTypes/ThingCoordinate" },
+            "source": { "$ref": "#/runtimeTypes/ThingCoordinate" },
+            "destination": { "$ref": "#/runtimeTypes/ThingCoordinate" }
+          }
+        },
+        "result": { "type": "object", "properties": { "planned": { "const": true } } },
+        "credentialExposure": "none",
+        "authorization": "issuer-shared-cli-graph-chain",
+        "persistence": "single-use-kernel-reserved-graph-fact",
+        "transaction": "central-atomic-commit",
+        "errors": [
+          "INVALID_JUMP_AUTHORIZATION_CONTRACT",
+          "INVALID_JUMP_AUTHORIZATION_COORDINATE",
+          "WINDOW_JUMP_AUTHORIZATION_DENIED"
+        ]
+      }
+    },
+    {
+      "name": "changed",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/runtimeTypes/ThingCoordinate" }
+        },
+        "dispatch": "shared-transform-reverse-index",
+        "result": "boolean",
+        "controlFlow": "caller-explicit-short-circuit"
+      }
+    },
+    {
+      "name": "transform",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "contract": {
+        "argument": { "type": "object", "name": "spec" },
+        "create": {
+          "requiredAxes": ["thing", "situation", "contain", "support"],
+          "dotCommands": "forbidden"
+        },
+        "update": { "dotCommands": "supported" },
+        "result": { "type": "null", "value": null, "meaning": "deferred-effect" },
+        "confirmation": ["interaction-receipt", "exact-explore"]
+      }
+    },
+    {
+      "name": "slot_body",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["action", "body"],
+          "additionalProperties": false,
+          "properties": {
+            "action": { "enum": ["seal", "print"] },
+            "body": { "type": "string", "format": "exact-atom-path" },
+            "name": { "type": "string", "format": "single-atom-name", "requiredWhen": { "action": "print" } }
+          }
+        },
+        "internalPrintEffect": {
+          "source": "current-body-print-program",
+          "callerAccessible": false,
+          "revisionBinding": "current-visible-print-plan"
+        },
+        "development": {
+          "initialLayout": "one ordinary self-runnable candidate DataFlow child",
+          "scopeBinding": "transform {\"thing.run.EXACT_SCOPE_ROOT\":\"EXACT_PROGRAM_PATH\"}",
+          "relativeSelectors": [".", "./direct/contain/path"]
+        },
+        "layout": {
+          "sealedChildren": ["槽模", "print", "槽例"],
+          "physicalBlankExample": "forbidden",
+          "sharedPrograms": "槽模-only",
+          "visiblePlan": "print@program plus immutable print/修订 records",
+          "material": "unmapped-Thing-subtree-below-mapped-slot",
+          "defaultMaterial": "forbidden"
+        },
+        "structureLock": {
+          "default": true,
+          "mappedSelf": "immutable-transform",
+          "unmappedDescendants": "ordinary-material-writable",
+          "forgery": "SLOT_ROLE_FORGERY_DENIED",
+          "reseal": "requires-node-and-window-lock-intersection"
+        },
+        "revisionSync": {
+          "trigger": "seal same body again",
+          "mode": "all-instances-one-seal",
+          "material": "byte-preserved",
+          "adoptionEvidence": "采用槽模修订 relation per instance",
+          "derivedRecompute": "all synchronized instances in candidate transaction"
+        },
+        "result": { "type": "object", "meaning": "deferred-effect-plan" },
+        "transaction": "central-atomic-commit",
+        "confirmation": ["interaction-receipt", "exact-explore"],
+        "errors": [
+          "INVALID_SLOT_BODY_EFFECT",
+          "INVALID_SLOT_BODY_LAYOUT",
+          "INVALID_SLOT_PRINT_PLAN",
+          "SLOT_BODY_NOT_SEALED",
+          "SLOT_BODY_EXAMPLE_EXISTS",
+          "SLOT_PRINT_PLAN_STALE",
+          "SLOT_MATERIAL_CONTAINMENT_CONFLICT",
+          "SLOT_INSTANCE_REVISION_MISSING",
+          "SLOT_SCOPE_ROOT_UNBOUND",
+          "SLOT_RELATIVE_SELECTOR_REQUIRED",
+          "SLOT_RELATIVE_TARGET_NOT_FOUND",
+          "SLOT_RELATIVE_TARGET_AMBIGUOUS",
+          "SLOT_SCOPE_BOUNDARY_CROSSING",
+          "SLOT_SCOPE_ROLE_MISMATCH",
+          "SLOT_BODY_NESTED_EFFECT_FORBIDDEN"
+        ]
+      }
+    },
+    {
+      "name": "lock", "layer": "kernel", "family": "graph", "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["targets", "actions", "labels"],
+          "additionalProperties": false,
+          "properties": {
+            "targets": {
+              "type": "object",
+              "additionalProperties": false,
+              "oneOf": [
+                { "required": ["refs"] },
+                { "required": ["paths"] }
+              ],
+              "properties": {
+                "refs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "atom-ref" } },
+                "paths": { "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "exact-atom-path" } },
+                "scope": { "enum": ["exact", "subtree"], "default": "exact" }
+              }
+            },
+            "actions": {
+              "type": "array", "minItems": 1, "uniqueItems": true,
+              "items": { "enum": ["explore", "transform"] }
+            },
+            "labels": {
+              "type": "array", "minItems": 1, "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "persistence": "literal-path-declaration-in-program-source",
+        "coldStart": "recompiled-from-program-and-current-graph",
+        "authorization": "shared-cli-graph-chain",
+        "denial": "GRAPH_LOCK_DENIED"
+      }
+    },
+    { "name": "direct_children", "layer": "kernel", "family": "graph", "scope": "public" },
+    { "name": "child_detail", "layer": "kernel", "family": "graph", "scope": "public" },
+    { "name": "subtree_refs", "layer": "kernel", "family": "graph", "scope": "public" },
+    { "name": "form", "layer": "kernel", "family": "form", "scope": "public" },
+    { "name": "missing_details", "layer": "kernel", "family": "form", "scope": "public" },
+    { "name": "form_status", "layer": "kernel", "family": "form", "scope": "public" },
+    { "name": "plan_form_flow", "layer": "kernel", "family": "form", "scope": "public" },
+    { "name": "message", "layer": "kernel", "family": "program", "scope": "public" },
+    { "name": "choice", "layer": "kernel", "family": "program", "scope": "public" },
+    { "name": "current_atom", "layer": "kernel", "family": "program", "scope": "public" },
+    {
+      "name": "trigger",
+      "layer": "kernel",
+      "family": "program",
+      "scope": "public",
+      "contract": {
+        "arguments": [
+          { "name": "mode", "const": "transform" },
+          {
+            "name": "parameters",
+            "type": "object",
+            "required": ["nodes"],
+            "additionalProperties": false,
+            "properties": {
+              "nodes": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "type": "string", "format": "exact-atom-path" }
+              }
+            }
+          },
+          { "name": "entrypoint", "type": "function-reference", "arguments": 0 }
+        ],
+        "dispatch": "reverse-index",
+        "event": "transform-request",
+        "sameValueTriggers": true,
+        "untriggeredProgramDispatch": "explicit-run-program-self-transform-or-known-dependency-change"
+      }
+    },
+    {
+      "name": "use_program",
+      "layer": "kernel",
+      "family": "program",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["name", "arguments"],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "oneOf": [
+                { "$ref": "#/runtimeTypes/ThingCoordinate" },
+                { "type": "string", "format": "exact-program-name-or-path" }
+              ]
+            },
+            "arguments": { "type": "object" }
+          }
+        },
+        "coordinateAuthorization": "repeat-exact-explore-current-access-boundary",
+        "errors": [
+          "USE_PROGRAM_COORDINATE_NOT_FOUND",
+          "USE_PROGRAM_TARGET_NOT_PROGRAM",
+          "WINDOW_ACCESS_DENIED"
+        ],
+        "slotBodyPrint": {
+          "selector": "EXACT-body/print",
+          "arguments": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "format": "single-atom-name" }
+            }
+          },
+          "revisionArgument": "forbidden",
+          "revisionBinding": "current-visible-print-plan"
+        }
+      }
+    },
+    { "name": "first_pending", "layer": "kernel", "family": "program", "scope": "public" },
+    { "name": "transition_allowed", "layer": "kernel", "family": "program", "scope": "public" },
+    { "name": "plan_shards", "layer": "kernel", "family": "program", "scope": "public" },
+    { "name": "plan_template_instance", "layer": "kernel", "family": "program", "scope": "public" },
+    { "name": "instantiate", "layer": "kernel", "family": "program", "scope": "public" },
+    { "name": "template_catalog", "layer": "kernel", "family": "program", "scope": "public" },
+    { "name": "function_catalog", "layer": "kernel", "family": "program", "scope": "public" },
+    {
+      "name": "json_parse",
+      "layer": "kernel",
+      "family": "program",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["text"],
+          "additionalProperties": false,
+          "properties": { "text": { "type": "string" } }
+        },
+        "result": { "type": "json" },
+        "strictNumbers": true,
+        "failureBoundary": "program-evaluation",
+        "effectsPublishedOnFailure": false,
+        "errors": ["TypeError", "ValueError"]
+      }
+    },
+    {
+      "name": "json_stringify",
+      "layer": "kernel",
+      "family": "program",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["value"],
+          "additionalProperties": false,
+          "properties": {
+            "value": { "type": "json" },
+            "indent": { "type": "integer", "minimum": 0, "maximum": 8 }
+          }
+        },
+        "result": { "type": "string" },
+        "strictNumbers": true,
+        "failureBoundary": "program-evaluation",
+        "effectsPublishedOnFailure": false,
+        "errors": ["TypeError", "ValueError"]
+      }
+    },
+    { "name": "work_order", "layer": "application", "family": "work-order", "scope": "public" },
+    { "name": "work_order_catalog", "layer": "application", "family": "work-order", "scope": "public" }
+  ]
+}

@@ -11,10 +11,15 @@
   `up`, `down`, `left`, and `right`, each with an approximate Atom count and
   character count. It never includes hidden names or detail, and executable
   Program source contributes zero characters.
+- Every successful ordinary `explore` recalculates that boundary from its exact
+  anchor and returned coordinate scope. Complete directions include `hasMore`,
+  `nodes`, and `characters`; a protected continuation reports `protected`
+  without exposing names, content, or exact quantities. Movement syntax remains
+  owned by `explore` rather than Form, `use_program()`, or application functions.
 - The CLI passes the origin to the engine only as `interaction.agent = { ref, path }`. The opaque `ref` is derived from the immutable world revision plus structural address; the Agent is not passed to lock evaluation.
 - `@program` is the only executable Atom type. Its `detail` is Python source.
 - Program source controls execution order. Atom world functions are ordinary Python calls whose single root argument is a JSON-shaped object (`dict`).
-- The world functions are `explore({...})`, `transform({...})`, `lock({...})`, and `message({...})`; `use_program({...})` composes reusable Program logic without adding another executable Atom type.
+- The world functions are `explore({...})`, `transform({...})`, `lock({...})`, `message({...})`, and `choice({...})`; `choice` takes a double-quoted JSON object (valid Python), registers a multi-select control, and returns its selected option ids, while `use_program({...})` composes reusable Program logic without adding another executable Atom type.
 - `explore` and `transform` compile into the same internal command model as the CLI; they do not launch a CLI subprocess or edit JSON storage.
 - `lock` receives targets only after Program logic has selected them. The stable target form is `{ "refs": [<opaque-ref>...] }`; the engine validates every reference against the same immutable world revision.
 - `message` is the only user-visible Program return channel. Python `return` remains local Python control flow.
@@ -33,7 +38,7 @@ world functions as its caller, so it cannot open storage or bypass locks.
 The runtime also exposes a small trusted Python standard library. These helpers
 only interpret Atom values already returned by `explore`; they cannot read
 storage, mutate the world, emit locks, or send messages. Programs keep all side
-effects explicit through the four world functions.
+effects explicit through the registered world functions.
 
 | Helper | Purpose |
 | --- | --- |
@@ -47,6 +52,52 @@ effects explicit through the four world functions.
 | `plan_form_flow(rows, parent_path, standard)` | Compile a form standard into safe, idempotent child additions. |
 | `plan_template_instance(rows, parent_path, template)` | Compile one complete typed Atom subtree only when that instance is absent. |
 | `plan_shards(sources, specification)` | Produce a deterministic, side-effect-free shard plan. |
+
+## Adaptive Form evaluation
+
+`form()` keeps its direct four-axis compiler contract and also accepts one
+explicit, pure evaluation action. Each component declares `required`, `optional`,
+or `disabled`; the runtime never infers activation from a stage name or scale.
+Requirements use JSON key-path arrays, and components may nest recursively.
+
+```python
+result = form({
+    "action": "evaluate",
+    "components": [{
+        "name": "直接操作",
+        "activation": "required",
+        "value": {"结果": "完成"},
+        "requirements": [{"path": ["结果"]}],
+        "components": []
+    }]
+})
+```
+
+The result reports `valid`, activation groups, active component paths, and exact
+missing component/key paths. Evaluation cannot explore, emit effects, choose
+workflow stages, or update status. An unused optional component adds no missing
+result; a disabled component excludes its whole subtree without requiring a skip
+reason.
+
+## Registered function catalog
+
+`function_catalog({})` returns the same read-only Program function inventory as
+`atom.cmd --program-function-registry` and
+`GET /__atom/api/program-function-registry`. Optional `layer`, `family`, and
+`scope` filters return subsets of that inventory. The functional catalog has
+two real objects: registered functions and Atom types. Registered functions use
+the `kernel` or `application` layer and a coarse family. Kernel families are
+`graph`, `form`, and `program`; `work_order` remains in an application-owned
+family. `@program` remains the only executable kernel type.
+
+Scope is the simple value `atom` or `public`; it does not declare public paths,
+inheritance, or allowed application structures. Agents can write, refine, and
+reuse Atom-local Programs through `use_program()` without formal registration.
+Help is the unified operational explanation: Program execution can read the
+registered catalog but exposes no function that rewrites the protected registry
+or runtime source. This protects formal registration without prohibiting local
+research or mature Program contributions. See
+`docs/architecture/program-function-ecosystem.md` for the complete boundary.
 
 ### Standard compilation before sharding
 
@@ -168,7 +219,7 @@ Every external CLI/Web interaction requests one Program refresh. A refresh reque
 3. Coalesce concurrent requests for the same fingerprint into one in-flight execution.
 4. Run dirty Programs concurrently in isolated Python workers.
 5. Program world-function calls belong to the existing interaction and never recursively trigger another cycle.
-6. Enforce one 60-second wall-clock budget per cycle. On timeout, terminate workers and return a structured failure instead of using an unknown lock state.
+6. Enforce one 10-second wall-clock budget per cycle. Programs run independently within that shared deadline; on timeout, terminate only the affected worker and return a structured failure instead of blocking Atom.
 7. Commit one validated result set for the revision. Messages are delivered once for the interaction that produced them; cached refreshes do not repeat old messages.
 
 The first implementation invalidates the cache on any world revision change. A later dependency index may record `explore` query descriptors and read Atom references, allowing unaffected Programs to reuse results across revisions without changing the public API.

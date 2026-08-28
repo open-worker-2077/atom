@@ -68,7 +68,7 @@ $request | atom.cmd --agent "已创建的 Agent 窗口" --stdin
 - [架构决策](docs/adr/)：重要取舍及其原因
 - [贡献指南](CONTRIBUTING.md)：开发与提交方式
 - [版本记录](CHANGELOG.md)：已发布变化
-- [Agent 接手规则](AGENTS.md)：Agent 在本仓库中的工作边界
+- [开发总控](https://github.com/users/open-worker-2077/projects/2)：实时需求、职责、阻断与交付状态
 
 ## 项目状态
 

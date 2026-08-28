@@ -6,8 +6,11 @@ import path from 'node:path';
 
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 
-function atom(name, detail = '', children = [], type = '', partners = []) {
-  return { [`name${type ? `@${type}` : ''}`]: name, detail, children, partners };
+function atom(thing, situation = '', contain = [], type = '', targets = []) {
+  const support = targets.length
+    ? [{ 'if@current': true, then: targets.map((target) => ({ thing: target })) }]
+    : [];
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support };
 }
 
 const requestedPort = Number(process.argv[2] || 4796);
@@ -19,32 +22,36 @@ const storeFile = path.join(directory, 'knowledge.json');
 await fs.writeFile(contextFile, JSON.stringify([
   atom('测试入口', '隔离的浏览器验收世界', [
     atom('第一节点', '用于检查视角稳定', [], '', [
-      { verb: '驱动', object: '测试入口/第二节点' },
-      { verb: '约束', object: '测试入口/第五节点' }
+      '测试入口/第二节点',
+      '测试入口/第五节点'
     ]),
     atom('第二节点', '用于检查编辑与移动', [], '', [
-      { verb: '驱动', object: '测试入口/第三节点' },
-      { verb: '约束', object: '测试入口/第六节点' }
+      '测试入口/第三节点',
+      '测试入口/第六节点'
     ]),
     atom('第三节点', '用于检查关系布局', [], '', [
-      { verb: '驱动', object: '测试入口/第四节点' },
-      { verb: '约束', object: '测试入口/第七节点' }
+      '测试入口/第四节点',
+      '测试入口/第七节点'
     ]),
     atom('第四节点', '用于检查关系布局', [], '', [
-      { verb: '驱动', object: '测试入口/第五节点' },
-      { verb: '约束', object: '测试入口/第八节点' }
+      '测试入口/第五节点',
+      '测试入口/第八节点'
     ]),
     atom('第五节点', '用于检查关系布局', [], '', [
-      { verb: '驱动', object: '测试入口/第六节点' }
+      '测试入口/第六节点'
     ]),
     atom('第六节点', '用于检查关系布局', [], '', [
-      { verb: '驱动', object: '测试入口/第七节点' }
+      '测试入口/第七节点'
     ]),
     atom('第七节点', '用于检查关系布局', [], '', [
-      { verb: '驱动', object: '测试入口/第八节点' }
+      '测试入口/第八节点'
     ]),
     atom('第八节点', '用于检查关系布局')
   ], 'agent'),
+  atom('批量目标', '用于验证真实跨域批量移动', [atom('目标占位')]),
+  atom('深层导航入口', '用于验证搜索进入深层可操作域', [
+    atom('深层可点击目标', '搜索命中后必须进入此域')
+  ]),
   atom('顶层参照', '用于检查顶层新增节点')
 ], null, 2));
 
