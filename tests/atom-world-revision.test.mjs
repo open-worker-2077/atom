@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import test from 'node:test';
 
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
@@ -31,4 +32,25 @@ test('mutable fact arrays are rehashed after in-place changes', () => {
   const before = revisionOfWorldFacts(facts);
   facts[0].detail = 'after';
   assert.notEqual(revisionOfWorldFacts(facts), before);
+});
+
+test('world revision hashing does not materialize the complete world as one JSON string', () => {
+  const facts = Array.from({ length: 1_000 }, (_, index) => ({
+    thing: `Fact ${index}`,
+    situation: 'x'.repeat(1_000),
+    contain: [],
+    support: []
+  }));
+  const stringify = JSON.stringify;
+  const expected = `sha256:${crypto.createHash('sha256').update(stringify(facts)).digest('hex')}`;
+  JSON.stringify = (value, ...options) => {
+    if (value === facts) throw new Error('complete-world JSON materialization');
+    return stringify(value, ...options);
+  };
+
+  try {
+    assert.equal(revisionOfWorldFacts(facts), expected);
+  } finally {
+    JSON.stringify = stringify;
+  }
 });

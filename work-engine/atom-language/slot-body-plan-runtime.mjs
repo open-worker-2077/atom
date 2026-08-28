@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 
 import {
   atomDescription,
@@ -27,6 +28,7 @@ const EXAMPLES_NAME = '槽例';
 const ROLES_NAME = '角色';
 const REVISIONS_NAME = '修订';
 const instancePrefixIndexes = new WeakMap();
+const compiledStructureLocks = new WeakMap();
 
 function slotError(code, message, details = {}) {
   return { code, message, details };
@@ -651,6 +653,9 @@ export function readVisibleSlotPlans(atoms) {
 }
 
 export function compileSlotStructureGraphLocks(atoms) {
+  const revision = revisionOfWorldFacts(atoms);
+  const cached = compiledStructureLocks.get(atoms);
+  if (cached?.revision === revision) return cached.value;
   const locks = [];
   const domains = [];
   const seen = new Set();
@@ -681,7 +686,9 @@ export function compileSlotStructureGraphLocks(atoms) {
       }
     }
   }
-  return { locks, domains };
+  const value = { locks, domains };
+  compiledStructureLocks.set(atoms, { revision, value });
+  return value;
 }
 
 function planAtRevision(layout, revision) {

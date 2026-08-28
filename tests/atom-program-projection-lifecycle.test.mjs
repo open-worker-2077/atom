@@ -120,6 +120,165 @@ test('a persisted Program projection restores only versioned exact Explore read 
 
 });
 
+test('an unrelated situation edit rebases the context-free projection without rerunning Programs', async () => {
+  const repository = memoryProjectionRepository();
+  const before = [
+    atom('Target', 'watched'),
+    atom('Unrelated', 'before'),
+    atom('Program', '# reads target', [], 'program')
+  ];
+  let executions = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async ({ executeExplore }) => {
+      executions += 1;
+      await executeExplore({ thing: 'Target' });
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+  await scheduler.refresh(before, {
+    isolateFailures: true,
+    executeExplore: async () => [{ path: 'Target' }]
+  });
+  const after = [
+    atom('Target', 'watched'),
+    atom('Unrelated', 'after'),
+    atom('Program', '# reads target', [], 'program')
+  ];
+
+  const result = await scheduler.rebaseContextFreeProjection(before, after, {
+    changedPaths: ['Unrelated'],
+    isolateFailures: true
+  });
+  const restored = await scheduler.current(after, { isolateFailures: true });
+
+  assert.equal(result.persisted, true);
+  assert.equal(executions, 1);
+  assert.deepEqual(restored.exploreReadPaths, ['Target']);
+});
+
+test('a dependency edit cannot rebase the context-free projection', async () => {
+  const repository = memoryProjectionRepository();
+  const before = [atom('Target', 'before'), atom('Program', '# reads target', [], 'program')];
+  const scheduler = createProgramRuntimeScheduler({
+    projectionRepository: repository,
+    runProgram: async ({ executeExplore }) => {
+      await executeExplore({ thing: 'Target' });
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+  await scheduler.refresh(before, {
+    isolateFailures: true,
+    executeExplore: async () => [{ path: 'Target' }]
+  });
+
+  const result = await scheduler.rebaseContextFreeProjection(
+    before,
+    [atom('Target', 'after'), atom('Program', '# reads target', [], 'program')],
+    { changedPaths: ['Target'], isolateFailures: true }
+  );
+
+  assert.equal(result.persisted, false);
+  assert.equal(result.reason, 'dependency-changed');
+});
+
+test('an ordinary situation Transform commits without a full Program projection rebuild', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-rebase-transform-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Agent', '', [atom('Target', 'before')], 'agent')
+  ]));
+  const security = { labels: [], functionScopes: { groups: [], names: [] }, functions: [] };
+  const scheduler = {
+    agentSecurity: new Map([['Agent', security]]),
+    activeRequestDrivenLocks: async () => [],
+    current: async () => ({
+      fingerprint: 'current', records: [], locks: [], messages: [], transforms: [],
+      shortcuts: [], slotBodies: [], failures: [], agentSecurity: security
+    }),
+    validateProgramSources: async () => [],
+    inspectAgentRegistration: async () => ({
+      labels: [], functionScopes: { groups: [], names: [] }, functions: []
+    }),
+    refresh: async (_atoms, options) => {
+      if (!options.triggerEvent) {
+        throw Object.assign(new Error('full rebuild must not run'), { code: 'FULL_REBUILD' });
+      }
+      return {
+        records: [], locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [],
+        failures: [], agentSecurity: security, reconcileSummary: {}
+      };
+    },
+    rebaseContextFreeProjection: async () => ({ persisted: true })
+  };
+
+  const result = await executeAtomLanguage({
+    source: 'transform {"thing":"Agent/Target","situation.rep.after"}',
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler,
+    commitWorld: async () => {},
+    interaction: { id: 'rebase-transform', agent: { ref: 'agent-ref', path: 'Agent' } }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.changed, true);
+  assert.equal(result.warnings.some(({ code }) => (
+    code === 'PROGRAM_PROJECTION_RECOVERY_PENDING'
+  )), false, JSON.stringify(result.warnings));
+});
+
+test('a failed projection rebase falls back to a complete context-free settlement', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-rebase-fallback-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Agent', '', [atom('Target', 'before')], 'agent')
+  ]));
+  const security = { labels: [], functionScopes: { groups: [], names: [] }, functions: [] };
+  let settlements = 0;
+  const cycle = {
+    fingerprint: 'current', records: [], locks: [], messages: [], transforms: [],
+    shortcuts: [], slotBodies: [], failures: [], agentSecurity: security, reconcileSummary: {}
+  };
+  const scheduler = {
+    agentSecurity: new Map([['Agent', security]]),
+    activeRequestDrivenLocks: async () => [],
+    current: async () => cycle,
+    validateProgramSources: async () => [],
+    inspectAgentRegistration: async () => ({
+      labels: [], functionScopes: { groups: [], names: [] }, functions: []
+    }),
+    refresh: async (_atoms, options) => {
+      if (!options.triggerEvent) settlements += 1;
+      return cycle;
+    },
+    rebaseContextFreeProjection: async () => {
+      throw Object.assign(new Error('synthetic corrupt projection'), {
+        code: 'SYNTHETIC_PROJECTION_REBASE_FAILED'
+      });
+    }
+  };
+
+  const result = await executeAtomLanguage({
+    source: 'transform {"thing":"Agent/Target","situation.rep.after"}',
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler,
+    commitWorld: async () => {},
+    interaction: { id: 'rebase-fallback', agent: { ref: 'agent-ref', path: 'Agent' } }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(settlements, 1);
+  assert.equal(result.warnings.some(({ code }) => (
+    code === 'PROGRAM_PROJECTION_RECOVERY_PENDING'
+  )), false, JSON.stringify(result.warnings));
+});
+
 test('an explicit selected Program run cannot replace the persisted full-world projection', async () => {
   const repository = memoryProjectionRepository();
   const world = [
@@ -277,25 +436,25 @@ test('Agent key, lock, and path changes invalidate accelerated Program results',
     atom('Lock', 'lock({"targets":{"paths":["Root/Agent"],"scope":"exact"},"actions":["transform"],"labels":["^"]})', [], 'program')
   ])];
 
-  await scheduler.refresh(world);
+  await scheduler.refresh(world, { agentOrigin: { path: 'Root/Agent' } });
   assert.equal(executions, 2);
-  await scheduler.refresh(structuredClone(world));
+  await scheduler.refresh(structuredClone(world), { agentOrigin: { path: 'Root/Agent' } });
   assert.equal(executions, 2, 'an unchanged world should reuse accelerated results');
 
   const keyChanged = structuredClone(world);
   keyChanged[0].contain[0].situation = keyChanged[0].contain[0].situation.replace('["^"]', '["^^"]');
-  await scheduler.refresh(keyChanged);
+  await scheduler.refresh(keyChanged, { agentOrigin: { path: 'Root/Agent' } });
   assert.equal(executions, 3, 'an Agent key change must invalidate its affected accelerated result');
 
   const lockChanged = structuredClone(keyChanged);
   lockChanged[0].contain[1].situation = lockChanged[0].contain[1].situation.replace('["^"]', '["^^"]');
-  await scheduler.refresh(lockChanged);
+  await scheduler.refresh(lockChanged, { agentOrigin: { path: 'Root/Agent' } });
   assert.equal(executions, 4, 'a lock change must invalidate its affected accelerated result');
 
   const pathChanged = structuredClone(lockChanged);
   pathChanged[0].contain[0]['thing@program@agent'] = 'RenamedAgent';
   pathChanged[0].contain[1].situation = pathChanged[0].contain[1].situation.replace('Root/Agent', 'Root/RenamedAgent');
-  await scheduler.refresh(pathChanged);
+  await scheduler.refresh(pathChanged, { agentOrigin: { path: 'Root/RenamedAgent' } });
   assert.equal(executions, 6, 'a valid path move must invalidate the Agent and its affected lock result');
 });
 

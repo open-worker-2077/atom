@@ -35,6 +35,17 @@ async function sealed() {
   return printed.atoms;
 }
 
+test('slot structure locks reuse one compiled result per mutable world revision', async () => {
+  const atoms = await sealed();
+  const first = compileSlotStructureGraphLocks(atoms);
+  const second = compileSlotStructureGraphLocks(atoms);
+  assert.equal(second, first);
+
+  find(atoms, '槽体/槽例/实例/输入').atom.situation = '新值';
+  const changed = compileSlotStructureGraphLocks(atoms);
+  assert.notEqual(changed, first);
+});
+
 test('slot_body seal lock protects mapped self but permits ordinary material below it', async () => {
   const atoms = await sealed();
   const input = find(atoms, '槽体/槽例/实例/输入');

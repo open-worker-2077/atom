@@ -38,8 +38,20 @@ export function matchesTypePredicate(types, predicate) {
 }
 
 export function buildProgramLockIndex({ revision, results = [], records = [] }) {
-  const known = new Map(records.map((record) => [record.ref, record]));
   const byPath = new Map();
+  if (results.length === 0) return Object.freeze({ revision, byPath });
+  const neededRefs = new Set(results.flatMap((result) => (
+    Array.isArray(result.targets?.paths) ? [] : (result.targets?.refs ?? [])
+  )));
+  const known = new Map();
+  if (neededRefs.size > 0) {
+    for (const record of records) {
+      if (!neededRefs.has(record.ref)) continue;
+      known.set(record.ref, record);
+      neededRefs.delete(record.ref);
+      if (neededRefs.size === 0) break;
+    }
+  }
   for (const result of results) {
     const targetPaths = Array.isArray(result.targets?.paths)
       ? result.targets.paths
