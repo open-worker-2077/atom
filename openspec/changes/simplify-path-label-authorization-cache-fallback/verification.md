@@ -27,7 +27,7 @@
 
 ## GitHub publication state
 
-Pushing the verified commits and posting this evidence to Issue #13 remain pending explicit authorization for public repository writes. Task 5.3 stays unchecked until that external record exists.
+The three verified commits were pushed to `origin/backup/web-convergence-checkpoint-20260817-154248`. The public-safe evidence was recorded on [GitHub Issue #13](https://github.com/open-worker-2077/atom/issues/13#issuecomment-5450281976), completing task 5.3.
 
 ## Issue #13 comment draft
 

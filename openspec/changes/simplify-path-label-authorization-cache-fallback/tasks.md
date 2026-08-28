@@ -26,4 +26,4 @@
 
 - [x] 5.1 Run focused window-lock, projection lifecycle, legacy runtime composition, and CLI contract tests, then run the adjacent regression suite.
 - [x] 5.2 Validate this OpenSpec change strictly and reconcile implementation, tests, Help, and registry metadata with its requirements.
-- [ ] 5.3 Deploy the exact verified revision, exercise cold startup with unavailable acceleration persistence plus positive and escalation-negative Agent replacement, and record the evidence on GitHub Issue #13.
+- [x] 5.3 Deploy the exact verified revision, exercise cold startup with unavailable acceleration persistence plus positive and escalation-negative Agent replacement, and record the evidence on GitHub Issue #13.
