@@ -49,6 +49,9 @@ await fs.writeFile(contextFile, JSON.stringify([
     atom('第八节点', '用于检查关系布局')
   ], 'agent'),
   atom('批量目标', '用于验证真实跨域批量移动', [atom('目标占位')]),
+  atom('深层导航入口', '用于验证搜索进入深层可操作域', [
+    atom('深层可点击目标', '搜索命中后必须进入此域')
+  ]),
   atom('顶层参照', '用于检查顶层新增节点')
 ], null, 2));
 

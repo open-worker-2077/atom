@@ -4294,7 +4294,11 @@
     if (!result) return false;
     if (result.path === state.currentPath) {
       closeSearch();
-      return locateNodeWithoutZoom(result.nodeId);
+      if (!locateNodeWithoutZoom(result.nodeId)) return false;
+      const node = currentNodeById(result.nodeId);
+      return !node || !node.capabilities || !node.capabilities.portal
+        ? true
+        : Boolean(enterNode(node, true));
     }
     const route = state.domainRoutes.get(result.path);
     if (!route) {
@@ -4312,7 +4316,11 @@
     state.hovered = null;
     state.menuFor = null;
     closeSearch();
-    const located = locateNodeWithoutZoom(result.nodeId);
+    if (!locateNodeWithoutZoom(result.nodeId)) return false;
+    const node = currentNodeById(result.nodeId);
+    const located = !node || !node.capabilities || !node.capabilities.portal
+      ? true
+      : Boolean(enterNode(node, true));
     recordCurrentView();
     return located;
   }

@@ -72,6 +72,21 @@ test('F entry keeps every intended child node inside the rendered viewport', asy
     .toEqual(result.field.nodes.map(({ label }) => label).sort());
 });
 
+test('searching a deep portal enters its child domain so the target is actionable', async ({ page }) => {
+  await openIsolatedWorld(page);
+  await enterAtomFile(page);
+  const parentPath = await page.evaluate(() => window.spatialLab.state().path);
+
+  await page.locator('[data-ui="search"]').click();
+  await page.locator('#spatialSearch').fill('深层导航入口');
+  await page.locator('.search-result').first().click();
+
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).not.toBe(parentPath);
+  await expect.poll(() => page.evaluate(() => (
+    window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label)
+  ))).toContain('深层可点击目标');
+});
+
 test('Enter-committed node creation stays visible and preserves the current view after authority replies', async ({ page }) => {
   await openIsolatedWorld(page);
   await enterAtomFile(page);
