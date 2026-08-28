@@ -13,7 +13,12 @@ import { createRuntimeCliExecutor } from '../src/atom-system/adapters/runtime-cl
 import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
-import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import {
+  createProgramRuntimeScheduler,
+  resolveExactPathFromCurrentContext,
+  validateProgramResult
+} from '../work-engine/atom-language/program-runtime.mjs';
+import { authorizeWindowGraphPath } from '../work-engine/atom-language/window-lock-v1.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
@@ -178,6 +183,57 @@ test('cold startup replaces a stale Program base before publishing and a restart
   });
   assert.equal(restored.cached, true);
   assert.equal(restored.locks.length, 1);
+});
+
+test('a literal path lock accepts the documented 世界之外 virtual root for an exact top-level target', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const world = [atom('test', '', [
+    atom('Target', 'synthetic'),
+    atom('Read Lock', 'lock({"targets":{"paths":["世界之外/test/Target"],"scope":"exact"},"actions":["explore"],"labels":["audit"]})', [], 'program')
+  ])];
+
+  await assert.doesNotReject(scheduler.validateProgramSources(world));
+});
+
+test('a ^ Agent can compile a ^ path lock for its nested Program result through the 世界之外 selector', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const targetPath = '世界之外/test/🧊/POS-01/确定性核验/核验结果';
+  const world = [atom('test', '', [
+    atom('🧊', 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","lock","transform"]}})', [
+      atom('POS-01', '', [
+        atom('确定性核验', 'message({"level":"info","text":"synthetic"})', [atom('核验结果', 'synthetic')], 'program'),
+        atom('结果锁定', `lock({"targets":{"paths":["${targetPath}"],"scope":"exact"},"actions":["transform"],"labels":["^"]})`, [], 'program')
+      ])
+    ], 'program@agent')
+  ])];
+
+  await assert.doesNotReject(scheduler.validateProgramSources(world));
+});
+
+test('a dynamically created readable descendant resolves through live exact context when the program record index has not observed it, then enforces its ^ lock', () => {
+  const target = 'test/🧊/核验程序/动态结果';
+  const lockSource = 'test/🧊/结果锁定';
+  const liveAtoms = [atom('test', '', [atom('🧊', '', [
+    atom('核验程序', '', [atom('动态结果', 'persisted-after-program')], 'program')
+  ], 'program@agent')])];
+  const compiled = validateProgramResult({
+    ok: true,
+    locks: [{
+      targets: { paths: ['世界之外/test/🧊/核验程序/动态结果'], scope: 'exact' },
+      actions: ['transform'],
+      labels: ['^']
+    }]
+  }, [{ ref: 'lock-ref', path: lockSource, types: ['program'] }], {
+    path: lockSource,
+    ref: 'lock-ref'
+  }, {
+    resolveExactPath: (selector) => resolveExactPathFromCurrentContext(liveAtoms, selector)
+  });
+
+  assert.equal(compiled.locks[0].path, target);
+  assert.equal(authorizeWindowGraphPath({
+    agentPath: 'test/🧊', targetPath: target, operation: 'transform', labels: ['^'], locks: compiled.locks
+  }).decision, 'allow');
 });
 
 test('cold startup publishes from computed permissions when the disposable index cannot persist', async (t) => {

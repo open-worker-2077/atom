@@ -117,6 +117,68 @@ test('agent() declares the current Program node and preserves symbolic scopes wi
   }]);
 });
 
+test('projection modes never turn concurrent agent declarations into a registration transaction', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-passive-agent-projection-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const initial = [atom('Root', '', [
+    atom('Registrar A', 'agent({"labels":["^"],"functions":{"groups":[],"names":["message"]}})', [], 'program'),
+    atom('Registrar B', 'agent({"labels":["^"],"functions":{"groups":[],"names":["message"]}})', [], 'program')
+  ])];
+  for (const programMode of ['project', 'passive']) {
+    const contextFile = path.join(directory, `${programMode}-atom.json`);
+    const projectionFile = path.join(directory, `${programMode}-graph.json`);
+    await fs.writeFile(contextFile, JSON.stringify(initial, null, 2));
+
+    const result = await executeAtomLanguage({
+      source: 'atom',
+      programMode,
+      contextFile,
+      projectionFile,
+      programScheduler: createProgramRuntimeScheduler(),
+      interaction: { id: `${programMode}-cold-program-context`, agent: null }
+    });
+
+    assert.equal(result.ok, true, `${programMode}: ${JSON.stringify(result.errors)}`);
+    assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), initial);
+  }
+});
+
+test('exact Explore never aggregates unrelated agent declarations into a registration transaction', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-explore-agent-read-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const initial = [atom('Root', '', [
+    atom('Registrar A', 'agent({"labels":["^"],"functions":{"groups":[],"names":["message"]}})', [], 'program'),
+    atom('Registrar B', 'agent({"labels":["^"],"functions":{"groups":[],"names":["message"]}})', [], 'program'),
+    atom('Target', 'must-remain-readable')
+  ])];
+  await fs.writeFile(contextFile, JSON.stringify(initial, null, 2));
+  const scheduler = createProgramRuntimeScheduler();
+  const initialized = await executeAtomLanguage({
+    source: 'atom',
+    programMode: 'project',
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler,
+    interaction: { id: 'initial-program-projection', agent: null }
+  });
+  assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
+
+  const result = await executeAtomLanguage({
+    source: 'explore {"thing":"Root/Target","situation$full":true}',
+    programMode: null,
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler,
+    interaction: { id: 'exact-read-with-unrelated-agent-declarations', agent: null }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.items[0].matches[0].situation, 'must-remain-readable');
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), initial);
+});
+
 test('agent() rejects target, lock, mode, missing functions, null and wildcard grants', async () => {
   for (const expression of [
     '{"target":"Elsewhere","functions":{"groups":[],"names":["message"]}}',

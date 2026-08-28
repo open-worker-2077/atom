@@ -78,3 +78,16 @@ test('transform 使用世界之外前缀只移动指定顶层同名 Atom', async
   assert.equal(world[1].contain[0].situation, '顶层程序');
   assert.equal(world[0].contain[0].situation, '项目程序');
 });
+
+test('transform new uses 世界之外 exact parent semantics without selecting a same-named nested Atom', async (t) => {
+  const files = await fixture(t);
+  const created = await executeAtomLanguage({
+    source: 'transform new {"thing":"世界之外/推进流/夜巡","situation":"synthetic","contain":[],"support":[]}',
+    ...files
+  });
+  assert.equal(created.ok, true, JSON.stringify(created.errors));
+  const world = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.equal(world[0].contain[0].thing, '夜巡');
+  assert.equal(world[1].contain[0].thing, '推进流');
+  assert.equal(world[1].contain[0].contain.length, 0);
+});

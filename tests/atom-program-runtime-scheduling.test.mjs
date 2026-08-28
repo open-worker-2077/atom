@@ -97,6 +97,28 @@ test('one mutable world revision shares one prepared record snapshot across inde
   assert.equal(recordSnapshots[0], recordSnapshots[1]);
 });
 
+test('a literal path lock below a non-Agent synthetic test root recompiles into the active index', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const root = '世界之外/test/夜巡-lock-index-regression';
+  const resultPath = `${root}/RESUME-05/补事实后继续/恢复结果`;
+  const world = [atom('test', '', [
+    atom('夜巡-lock-index-regression', '', [
+      atom('RESUME-05', '', [
+        atom('补事实后继续', 'pass', [atom('恢复结果', 'synthetic')], 'program'),
+        atom('结果锁定', `lock({"targets":{"paths":["${resultPath}"],"scope":"exact"},"actions":["transform"],"labels":["^"]})`, [], 'program')
+      ])
+    ])
+  ])];
+
+  const locks = await scheduler.activeRequestDrivenLocks(world);
+
+  assert.equal(locks.length, 1, JSON.stringify(locks));
+  assert.equal(locks[0].kind, 'node');
+  assert.equal(locks[0].path, 'test/夜巡-lock-index-regression/RESUME-05/补事实后继续/恢复结果');
+  assert.deepEqual(locks[0].actions, ['transform']);
+  assert.deepEqual(locks[0].labels, ['^']);
+});
+
 test('path changes rebuild request-driven locks while ordinary fact edits reuse them', async () => {
   let inspections = 0;
   const inspectedProgramCounts = [];

@@ -12,11 +12,15 @@ import {
   parseGraphJson
 } from '../work-engine/atom-language/graph-json.mjs';
 
-async function runCli(args) {
+async function runCli(args, execute = executeAtomLanguage) {
   let stdout = '';
   let stderr = '';
+  let result = null;
   const code = await runAtomCli(['--json', ...args], {
-    execute: executeAtomLanguage,
+    execute: async (options) => {
+      result = await execute(options);
+      return result;
+    },
     stdin: { isTTY: false },
     stdout: {
       isTTY: false,
@@ -34,6 +38,7 @@ async function runCli(args) {
     code,
     stdout,
     stderr,
+    result,
     output: stdout
       ? materializeGraphJson(parseGraphJson(stdout))
       : null
@@ -113,4 +118,66 @@ test('the atom CLI drives a graph served from a fully isolated 4784-style store'
   ]);
   assert.equal(explored.code, 0, explored.stderr);
   assert.match(explored.stdout, /第二版正文/u);
+});
+
+test('exact CLI Explore exposes an explicit read-only compiled-lock status without mutating the target', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-cli-lock-status-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const root = 'Lock Status Contract';
+  const target = `${root}/Target`;
+  const created = await runCli([
+    '--context', contextFile, '--projection', projectionFile,
+    'transform', 'new', JSON.stringify({
+      thing: root, situation: 'synthetic lock status contract', contain: [
+        { thing: 'Target', situation: 'unchanged', contain: [], support: [] }
+      ], support: []
+    })
+  ]);
+  assert.equal(created.code, 0, created.stderr);
+
+  const explored = await runCli([
+    '--context', contextFile, '--projection', projectionFile,
+    'explore', JSON.stringify({ thing: target, 'situation$lock': true })
+  ]);
+  assert.equal(explored.code, 0, explored.stderr);
+  assert.deepEqual(explored.output['lock~status'], {
+    active: false,
+    compiled: null
+  }, explored.stdout);
+});
+
+test('exact CLI Explore renders lock~active for a compiled literal path lock', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-cli-active-lock-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const root = 'Lock Active Contract';
+  const target = `${root}/Target`;
+  const guard = `${root}/Guard`;
+  await fs.writeFile(contextFile, JSON.stringify([{
+    thing: root, situation: 'synthetic active lock contract', contain: [
+      { thing: 'Target', situation: 'unchanged', contain: [], support: [] },
+      { 'thing@program': 'Guard', situation: `lock({"targets":{"paths":["${target}"],"scope":"exact"},"actions":["transform"],"labels":["^"]})`, contain: [], support: [] }
+    ], support: []
+  }]), 'utf8');
+  const compiledLock = { kind: 'node', path: target, actions: ['transform'], labels: ['^'], sourceProgramPath: guard };
+  const executeWithCompiledLock = (options) => executeAtomLanguage({
+    ...options,
+    programScheduler: {
+      async activeRequestDrivenLocks() { return [compiledLock]; },
+      async current() { return { locks: [compiledLock], records: [], messages: [], failures: [], runtimeWarnings: [] }; },
+      async refresh() { return { locks: [], records: [], messages: [], failures: [], runtimeWarnings: [] }; }
+    }
+  });
+
+  const explored = await runCli([
+    '--context', contextFile, '--projection', projectionFile,
+    'explore', JSON.stringify({ thing: target, 'situation$full': true })
+  ], executeWithCompiledLock);
+  assert.equal(explored.code, 0, explored.stderr);
+  assert.deepEqual(explored.output['lock~active'], {
+    kind: 'node', path: target, actions: ['transform'], labels: ['^'], sourceProgramPath: guard
+  }, `${explored.stdout}\n${JSON.stringify(explored.result)}`);
 });

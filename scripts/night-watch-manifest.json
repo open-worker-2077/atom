@@ -1,0 +1,20 @@
+{
+  "contract": "atom.night-watch-manifest",
+  "version": 1,
+  "caseCatalog": { "contract": "atom.night-watch-case-catalog", "version": 1 },
+  "steps": [
+    { "id": "health", "capability": "health", "dependsOn": [], "mutationClass": "none", "commandKind": "adapter", "timeoutMilliseconds": 10000, "evidencePolicy": "redacted-summary", "issueNodeId": "issue-7", "testCaseId": "TC-I7-HEALTH-RECOVERY" },
+    { "id": "web-entry", "capability": "web-entry", "dependsOn": ["health"], "mutationClass": "none", "commandKind": "browser", "timeoutMilliseconds": 30000, "evidencePolicy": "redacted-summary", "issueNodeId": "issue-10", "testCaseId": "TC-I10-WEB-DEEP-REFRESH" },
+    { "id": "mobile-entry", "capability": "mobile-entry", "dependsOn": ["health"], "mutationClass": "none", "commandKind": "browser", "timeoutMilliseconds": 30000, "evidencePolicy": "redacted-summary", "issueNodeId": "issue-17", "testCaseId": "TC-I17-MOBILE-AUTOMATED" },
+    { "id": "agent", "capability": "agent", "dependsOn": ["health"], "mutationClass": "read", "commandKind": "cli", "timeoutMilliseconds": 10000, "evidencePolicy": "redacted-summary", "issueNodeId": "issue-1", "testCaseId": "TC-I1-AGENT-EXACT" },
+    { "id": "program", "capability": "program", "dependsOn": ["agent"], "mutationClass": "write", "commandKind": "cli", "timeoutMilliseconds": 10000, "evidencePolicy": "redacted-summary", "issueNodeId": "issue-1", "testCaseId": "TC-I1-PROGRAM-RUN-READBACK" },
+    { "id": "explore-transform", "capability": "explore-transform", "dependsOn": ["program"], "mutationClass": "write", "commandKind": "cli", "timeoutMilliseconds": 10000, "evidencePolicy": "redacted-summary", "issueNodeId": "issue-10", "testCaseId": "TC-I10-TRANSFORM-VIRTUAL-ROOT" },
+    { "id": "authorization-locks", "capability": "authorization-locks", "dependsOn": ["explore-transform"], "mutationClass": "write", "commandKind": "cli", "timeoutMilliseconds": 10000, "evidencePolicy": "redacted-summary", "issueNodeId": "issue-13", "testCaseId": "TC-I13-LOCK-MATRIX" },
+    { "id": "jump", "capability": "jump", "dependsOn": ["authorization-locks"], "mutationClass": "write", "commandKind": "cli", "timeoutMilliseconds": 10000, "evidencePolicy": "redacted-summary", "issueNodeId": "issue-2", "testCaseId": "TC-I2-JUMP-LIFECYCLE" },
+    { "id": "shortcut", "capability": "shortcut", "dependsOn": ["explore-transform"], "mutationClass": "write", "commandKind": "cli", "timeoutMilliseconds": 10000, "evidencePolicy": "redacted-summary", "issueNodeId": "issue-11", "testCaseId": "TC-I11-SHORTCUT-LIFECYCLE" },
+    { "id": "slot-body", "capability": "slot-body", "dependsOn": ["explore-transform"], "mutationClass": "write", "commandKind": "cli", "timeoutMilliseconds": 10000, "evidencePolicy": "redacted-summary", "issueNodeId": "issue-4", "testCaseId": "TC-I4-SLOT-CONSERVATION" },
+    { "id": "work-order", "capability": "work-order", "dependsOn": ["explore-transform"], "mutationClass": "write", "commandKind": "cli", "timeoutMilliseconds": 10000, "evidencePolicy": "redacted-summary", "issueNodeId": "issue-1", "testCaseId": "TC-I1-WORK-ORDER-ATOMIC" },
+    { "id": "restart", "capability": "restart", "dependsOn": ["authorization-locks", "jump", "shortcut", "slot-body", "work-order"], "mutationClass": "restart", "commandKind": "adapter", "timeoutMilliseconds": 60000, "evidencePolicy": "redacted-summary", "issueNodeId": "issue-7", "testCaseId": "TC-I7-RESTART-ROLLBACK" },
+    { "id": "persistence-read-back", "capability": "persistence-read-back", "dependsOn": ["restart"], "mutationClass": "read", "commandKind": "cli", "timeoutMilliseconds": 10000, "evidencePolicy": "redacted-summary", "issueNodeId": "issue-7", "testCaseId": "TC-I7-PERSISTENCE-READBACK" }
+  ]
+}

@@ -130,6 +130,7 @@ const TRANSFORM_HELP = Object.freeze({
 
 const EXPLORE_HELP = Object.freeze({
   'situation\u0000full': 'situation$full（返回完整 situation；否则可只返回简介）',
+  'situation\u0000lock': 'situation$lock（只读返回当前 exact 节点的已编译锁状态，不读取或改写 backing JSON）',
   'contain\u0000latitude': 'contain$latitude+1 / contain$latitude-1（向上看一层 / 向下看一层；向下结果保留嵌套 contain；数字可调整，0 为锚点层）',
   'contain\u0000longitude': 'contain$longitude+1 / contain$longitude-1（向后看一个同级 / 向前看一个同级；数字可调整，0 为锚点）'
 });
@@ -532,6 +533,9 @@ function graphMatch(match, hint = null, boundary = null) {
   }
   if (match.lockState) {
     entries.push(graphEntry('lock~active', true, match.lockState));
+  }
+  if (match.lockStatus) {
+    entries.push(graphEntry('lock~status', true, match.lockStatus));
   }
   if (match.resolvedThroughShortcut) {
     const marker = match.resolvedThroughShortcut;

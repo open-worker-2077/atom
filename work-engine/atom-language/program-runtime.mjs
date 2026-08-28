@@ -5,11 +5,12 @@ import { fileURLToPath } from 'node:url';
 
 import { legacyAtomContextMetadata } from './context-store.mjs';
 import { parseAtomKey } from './key-parser.mjs';
-import { executeProgramExplore, prepareExploreWorld } from './query-capability.mjs';
+import { executeProgramExplore, oneStoredField, prepareExploreWorld, walkAtoms } from './query-capability.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
 import { normalizeTypePredicate } from './program-locks.mjs';
 import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
 import { shortcutMetadata } from './shortcut-runtime.mjs';
+import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 
@@ -427,8 +428,23 @@ function worldRevisionKey(records) {
   return records[0]?.ref ?? 'empty-world';
 }
 
-function validateResult(result, records, program, options = {}) {
-  const { scopeRoot = null, supportDecision = false } = options;
+function canonicalGraphPath(path) {
+  const prefix = `${WORLD_OUTSIDE_NAME}/`;
+  return typeof path === 'string' && path.startsWith(prefix) ? path.slice(prefix.length) : path;
+}
+
+export function resolveExactPathFromCurrentContext(atoms, selector) {
+  if (!Array.isArray(atoms) || typeof selector !== 'string' || !selector) return null;
+  const matches = walkAtoms(atoms).filter((match) => matchesExactSelector(
+    match.path,
+    oneStoredField(match.atom, 'thing')?.value,
+    selector
+  ));
+  return matches.length === 1 ? canonicalGraphPath(matches[0].path.join('/')) : null;
+}
+
+export function validateProgramResult(result, records, program, options = {}) {
+  const { scopeRoot = null, supportDecision = false, resolveExactPath = null } = options;
   if (!result?.ok) {
     const error = new Error(result?.error?.message || 'Python Program failed');
     error.code = typeof result?.error?.code === 'string'
@@ -448,17 +464,24 @@ function validateResult(result, records, program, options = {}) {
     const paths = entry.targets?.paths;
     if (Array.isArray(entry.actions) || Array.isArray(entry.labels)) {
       const scope = entry.targets?.scope ?? 'exact';
-      const targetPath = Array.isArray(paths) && paths.length === 1
-        ? paths[0]
+      const indexedTargetPath = Array.isArray(paths) && paths.length === 1
+        ? canonicalGraphPath(paths[0])
         : (Array.isArray(refs) && refs.length === 1 && knownRefs.has(refs[0])
           ? recordsByRef.get(refs[0]).path
           : null);
-      if (typeof targetPath === 'string' && !recordsByPath.has(targetPath)) {
+      const resolvedLivePath = Array.isArray(paths) && paths.length === 1 && typeof resolveExactPath === 'function'
+        ? canonicalGraphPath(resolveExactPath(paths[0]))
+        : null;
+      const targetPath = typeof indexedTargetPath === 'string' && recordsByPath.has(indexedTargetPath)
+        ? indexedTargetPath
+        : resolvedLivePath;
+      const targetExists = typeof targetPath === 'string' && targetPath.length > 0;
+      if (typeof indexedTargetPath === 'string' && !targetExists) {
         throw Object.assign(new Error('lock target path does not resolve in the current Graph'), {
           code: 'INVALID_PROGRAM_LOCK_TARGET'
         });
       }
-      if (!targetPath || !recordsByPath.has(targetPath)
+      if (!targetExists
         || (paths !== undefined && refs !== undefined)
         || !['exact', 'subtree'].includes(scope)
         || !Array.isArray(entry.actions) || entry.actions.length === 0
@@ -874,7 +897,7 @@ function runWorker({
   python, records, programs, program, timeoutMs, executeExplore, validateOnly = false,
   triggered = false, changedNodes = [], scopeRoot = null, programRoot = null,
   invokeMain = false, programArguments = {}, supportDecision = false,
-  allowedFunctions = null
+  allowedFunctions = null, resolveExactPath = null
 }) {
   return new Promise((resolve, reject) => {
     const child = spawn(python, ['-I', '-X', 'utf8', workerFile], {
@@ -949,8 +972,8 @@ function runWorker({
         return;
       }
       try {
-        resolve(validateResult(child.__atomResult ?? JSON.parse(stdout), records, program, {
-          scopeRoot, supportDecision
+        resolve(validateProgramResult(child.__atomResult ?? JSON.parse(stdout), records, program, {
+          scopeRoot, supportDecision, resolveExactPath
         }));
       } catch (error) {
         reject(error);
@@ -1249,6 +1272,7 @@ export class ProgramRuntimeScheduler {
   async rebuildRequestDrivenLocks(atoms) {
     await this.rebuildAgentSecurity(atoms);
     const records = worldRecords(atoms);
+    const resolveExactPath = (selector) => resolveExactPathFromCurrentContext(atoms, selector);
     const programs = programRecords(records);
     const lockPrograms = programs.filter((program) => /\block\s*\(/u.test(program.detail));
     const fingerprint = requestDrivenLockFingerprint(
@@ -1275,6 +1299,7 @@ export class ProgramRuntimeScheduler {
           program,
           timeoutMs: this.timeoutMs,
           allowedFunctions,
+          resolveExactPath,
           executeExplore: async () => {
             throw Object.assign(
               new Error('Persistent lock reconstruction cannot execute Graph functions'),
@@ -1361,6 +1386,7 @@ export class ProgramRuntimeScheduler {
 
   async validateProgramSources(atoms, previousAtoms = []) {
     const records = worldRecords(atoms);
+    const resolveExactPath = (selector) => resolveExactPathFromCurrentContext(atoms, selector);
     const previousRecords = worldRecords(previousAtoms);
     const previousByPath = new Map(previousRecords.map((record) => [record.path, record]));
     const activePrograms = programRecords(records);
@@ -1382,6 +1408,7 @@ export class ProgramRuntimeScheduler {
       programs: activePrograms,
       program,
       timeoutMs: this.timeoutMs,
+      resolveExactPath,
       executeExplore: async () => {
         throw Object.assign(
           new Error('Program validation cannot execute Graph functions'),

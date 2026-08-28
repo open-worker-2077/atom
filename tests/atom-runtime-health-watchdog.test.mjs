@@ -33,7 +33,7 @@ async function runWatchdog(t, options = {}) {
     'function global:Stop-ScheduledTask { param([string]$TaskName, [Parameter(ValueFromRemainingArguments = $true)]$Rest) [void]$global:calls.Add("stop:$TaskName"); $global:taskState = "Ready" }',
     `function global:Invoke-RestMethod { param([string]$Uri, [Parameter(ValueFromRemainingArguments = $true)]$Rest) [void]$global:calls.Add("health:$Uri"); ${options.healthEnteredPath ? `Set-Content -LiteralPath '${psQuote(options.healthEnteredPath)}' -Value entered` : ''}; ${options.healthDelayMilliseconds ? `Microsoft.PowerShell.Utility\\Start-Sleep -Milliseconds ${options.healthDelayMilliseconds}` : ''}; if ($global:health.Count -eq 0 -or -not [bool]$global:health.Dequeue()) { throw "UNHEALTHY" }; [pscustomobject]@{ ok = $true } }`,
     'function global:Start-Sleep { param([int]$Milliseconds, [int]$Seconds) if ($Milliseconds) { $global:now = $global:now.AddMilliseconds($Milliseconds) } elseif ($Seconds) { $global:now = $global:now.AddSeconds($Seconds) } }',
-    `$result = & '${psQuote(script)}' -TaskName 'Atom Graph Runtime' -HealthUrl 'http://127.0.0.1:4784/health' -StatePath '${psQuote(statePath)}' -MutexName '${psQuote(options.mutexName ?? `Local\\AtomGraphWatchdog-${path.basename(stateRoot)}`)}' -StartupGraceSeconds 30 -CooldownSeconds 120 -WaitTimeoutSeconds 2 -PollMilliseconds 100`,
+    `$result = & '${psQuote(script)}' -TaskName 'Atom Graph Runtime' -HealthUrl 'http://127.0.0.1:4784/health' -StatePath '${psQuote(statePath)}' -MutexName '${psQuote(options.mutexName ?? `Local\\AtomGraphWatchdog-${path.basename(stateRoot)}`)}'${options.useScriptDefault ? '' : ` -StartupGraceSeconds ${options.startupGraceSeconds ?? 30}`} -CooldownSeconds 120 -WaitTimeoutSeconds 2 -PollMilliseconds 100`,
     '$payload = [pscustomobject]@{ result = $result; calls = @($global:calls); taskState = $global:taskState } | ConvertTo-Json -Compress -Depth 8',
     'Write-Output ("@@RESULT64@@" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload)))'
   ].join('\n');
@@ -220,4 +220,18 @@ test('installer adds only a periodic watchdog while the runtime task keeps direc
   assert.match(observed.watchdog.Action.Execute, /powershell\.exe$/iu);
   assert.match(observed.watchdog.Action.Argument, /watch-atom-runtime-health\.ps1/u);
   assert.equal(observed.watchdogLogonType, 'S4U');
+});
+
+test('the default grace keeps a cold runtime alive for a one-minute listener delay', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
+  const observed = await runWatchdog(t, {
+    useScriptDefault: true,
+    taskState: 'Running',
+    health: [false],
+    state: { unhealthySince: '2026-08-27T23:59:00.0000000Z', lastRecoveryAt: null }
+  });
+
+  assert.equal(observed.result.action, 'grace');
+  assert.equal(observed.calls.some((call) => /^(?:stop|start):/u.test(call)), false);
 });

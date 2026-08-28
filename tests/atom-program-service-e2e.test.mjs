@@ -40,7 +40,7 @@ test('CLI rejects a stale 4784 runtime instead of trusting a newer local help co
   );
 });
 
-test('4784 command endpoint owns one scheduler and uses @agent as Program explore origin', async (t) => {
+test('4784 command endpoint retains compiled locks without replaying an untriggered Program', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-service-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -63,7 +63,8 @@ test('4784 command endpoint owns one scheduler and uses @agent as Program explor
 
   const first = await executeAtomCommandEndpoint({ source: 'atom', interaction: { agent } }, endpoint);
   assert.equal(first.ok, true, JSON.stringify(first));
-  assert.equal(first.messages[0]?.text, '当前起点:工作Agent', JSON.stringify(first));
+  assert.deepEqual(first.messages, [], 'ordinary reads must not replay an untriggered Program');
+  assert.equal(first.lockState[0]?.path, '工作Agent', JSON.stringify(first));
 
   const cached = await executeAtomCommandEndpoint({ source: 'atom', interaction: { agent } }, endpoint);
   assert.equal(cached.ok, true);
@@ -493,6 +494,44 @@ test('4784 Web workspace node creation commits atom.json before returning the re
   const finalWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(JSON.stringify(finalWorld).includes('Nested in Web'), true, 'discard remains recoverable in the backup area');
   assert.equal(finalWorld[0].contain.some((child) => child.thing === 'Nested in Web'), false);
+});
+
+test('cold-start state includes deep Graph facts on first entry and refreshes an authoritative Web rename', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-deep-cold-start-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Root', '', [atom('Level 1', '', [atom('Level 2', '', [atom('Level 3', 'cold-start fact')])])])
+  ], null, 2));
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile });
+  t.after(() => running.close());
+
+  const firstState = await fetch(`${running.url}/__spatial/api/state`).then((response) => response.json());
+  const deep = firstState.knowledge.nodes.find((node) => node.atomPath === 'Root/Level 1/Level 2/Level 3');
+  assert.ok(deep, JSON.stringify(firstState.knowledge));
+  assert.equal(deep.detail, 'cold-start fact');
+
+  const response = await fetch(`${running.url}/__atom/api/workspace-edit`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      operation: {
+        kind: 'node-edit', path: deep.path, nodeKey: deep.key,
+        draft: { label: 'Level 3 renamed', description: 'authoritative detail', atomTypes: [] }
+      }
+    })
+  });
+  const edited = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(edited));
+  assert.equal(edited.result.ok, true, JSON.stringify(edited.result.errors));
+
+  const refreshed = await fetch(`${running.url}/__spatial/api/state`).then((state) => state.json());
+  const renamed = refreshed.knowledge.nodes.find((node) => node.atomPath === 'Root/Level 1/Level 2/Level 3 renamed');
+  assert.ok(renamed, JSON.stringify(refreshed.knowledge));
+  assert.equal(renamed.detail, 'authoritative detail');
+  assert.equal(refreshed.knowledge.nodes.some((node) => node.atomPath === 'Root/Level 1/Level 2/Level 3'), false);
 });
 
 test('4784 Web batch landing moves every selected sibling into one nested Atom container', async (t) => {
