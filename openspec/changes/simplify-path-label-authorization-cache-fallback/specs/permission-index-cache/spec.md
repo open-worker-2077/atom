@@ -32,3 +32,10 @@ The system SHALL NOT reject runtime initialization, Explore, or Transform solely
 #### Scenario: Persistence failure does not block service
 - **WHEN** current permission results are computed but the disposable index cannot be saved
 - **THEN** the runtime publishes its normal projections, serves requests from current facts or memory, and reports only a recoverable warning
+
+### Requirement: Context-free preparation isolates Program-local failures
+The runtime SHALL NOT require every Program to produce a context-free result before the world becomes available. A Program that cannot run without request context or whose own facts fail validation SHALL remain unavailable and explicitly reported without preventing valid current facts and other derived results from being published. Invoking that Program SHALL still enforce its normal execution and validation failures.
+
+#### Scenario: One Program cannot form a context-free projection
+- **WHEN** cold-start preparation encounters a Program-local context or fact-validation failure
+- **THEN** the runtime publishes the world and reports that Program as unavailable without treating its failed result as authoritative

@@ -20,7 +20,7 @@
 
 - [x] 4.1 Make scheduler cache misses compute from current facts while preserving valid in-memory, dependency-valid, and persisted fast paths.
 - [x] 4.2 Make optional projection persistence failure warning-only after a correct in-memory result exists.
-- [x] 4.3 Remove persisted context-free projection availability as a runtime startup, Explore, or Transform gate while preserving genuine computation and fact-validation failures.
+- [x] 4.3 Remove persisted context-free projection availability as a runtime startup, Explore, or Transform gate while isolating Program-local context and fact-validation failures from global startup.
 
 ## 5. Verification and Delivery
 

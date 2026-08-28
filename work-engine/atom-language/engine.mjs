@@ -1951,13 +1951,17 @@ export async function executeAtomLanguage(options = {}) {
     if ((cycle.failures?.length ?? 0) > 0) {
       cycle = await options.programScheduler.refresh(candidateAtoms, refreshOptions);
     }
-    if ((cycle.failures?.length ?? 0) > 0) {
-      throw Object.assign(new Error('The context-free Program projection did not settle'), {
-        code: cycle.failures[0].code ?? 'ATOM_PROGRAM_FAILED',
-        details: cycle.failures[0].details ?? {}
-      });
-    }
-    let runtimeWarnings = cycle.runtimeWarnings ?? [];
+    let runtimeWarnings = [
+      ...(cycle.runtimeWarnings ?? []),
+      ...(cycle.failures ?? []).map((failure) => ({
+        code: failure.code ?? 'ATOM_PROGRAM_FAILED',
+        message: failure.message ?? 'A Program could not form a context-free projection',
+        details: {
+          ...(failure.details ?? {}),
+          ...(failure.programPath ? { program: failure.programPath } : {})
+        }
+      }))
+    ];
     if (runtimeWarnings.some((warning) => warning.code === 'PROGRAM_PROJECTION_PERSIST_FAILED')
       && options.programScheduler.persistComputedContextFreeProjection) {
       try {

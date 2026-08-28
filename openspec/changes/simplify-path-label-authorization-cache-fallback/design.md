@@ -48,9 +48,9 @@ Alternatives rejected:
 
 ### Publish from current in-memory results
 
-Runtime initialization and request preparation use the current computed result as the correctness source. Persisting a reusable projection is best-effort: a write failure produces a recoverable operational warning, while normal Graph and spatial publications continue.
+Runtime initialization and request preparation use current facts and successfully computed results as the correctness source. Persisting a reusable projection is best-effort: a write failure produces a recoverable operational warning, while normal Graph and spatial publications continue.
 
-This decision does not suppress genuine computation or fact-validation failures. Only failures confined to optional acceleration storage are downgraded.
+Cold-start context-free preparation is also fault-isolated per Program. A Program that needs request context or fails its own fact validation remains explicitly unavailable, but does not prevent the world and unrelated projections from publishing. The same failure remains authoritative when that Program is actually invoked; startup isolation does not convert an invalid Program result into a valid one.
 
 ## Risks / Trade-offs
 

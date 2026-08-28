@@ -477,6 +477,47 @@ test('startup settles isolated Program failures before replacing a stale passive
   assert.equal(restartedExecutions, 0);
 });
 
+test('startup publishes with a persistent context-free Program failure kept as a warning', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-startup-isolated-warning-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root')]));
+  const failure = {
+    code: 'REQUEST_DRIVEN_LOCK_LITERAL_REQUIRED',
+    message: 'lock declaration requires literal paths',
+    programPath: 'Root/Legacy Lock'
+  };
+  const programScheduler = {
+    agentSecurity: new Map(),
+    async refresh() {
+      return {
+        cached: false,
+        records: [],
+        locks: [],
+        messages: [],
+        transforms: [],
+        failures: [failure],
+        runtimeWarnings: []
+      };
+    }
+  };
+
+  const initialized = await executeAtomLanguage({
+    source: 'atom',
+    contextFile,
+    projectionFile,
+    programScheduler,
+    programMode: 'project',
+    interaction: { id: 'startup-isolated-warning', agent: null }
+  });
+
+  assert.equal(initialized.ok, true, JSON.stringify(initialized));
+  assert.ok(initialized.warnings.some((warning) => (
+    warning.code === 'REQUEST_DRIVEN_LOCK_LITERAL_REQUIRED'
+  )), JSON.stringify(initialized));
+});
+
 test('a legacy persisted failure is rejected and retried instead of becoming authoritative', async () => {
   const repository = memoryProjectionRepository();
   const world = [atom('Program', '# retry legacy failure', [], 'program')];
