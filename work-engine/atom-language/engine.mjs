@@ -835,6 +835,33 @@ export async function executeAtomLanguage(options = {}) {
   if (pendingAgentRegistrations.length === 1) {
     try {
       const registrationPath = pendingAgentRegistrations[0].sourceProgramPath;
+      const registrationMatch = walkAtoms(atoms).find((match) => (
+        match.path.join('/') === registrationPath
+      ));
+      if (!registrationMatch) {
+        throw Object.assign(new Error('Agent registration Program was not found'), {
+          code: 'AGENT_REGISTRATION_PROGRAM_NOT_FOUND'
+        });
+      }
+      const registrationAccess = createAccessController(atoms, {
+        ...options,
+        programLockIndex,
+        agentPath: interaction.agent?.path ?? null,
+        agentSecurity: programCycle.agentSecurity,
+        graphLocks
+      });
+      const registrationDecision = await registrationAccess.authorize(
+        registrationMatch,
+        'write',
+        'thing',
+        { programPath: registrationPath }
+      );
+      if (registrationDecision.decision !== 'allow') {
+        throw Object.assign(new Error('当前 Agent 无权登记该 Agent Program'), {
+          code: registrationDecision.code ?? 'WINDOW_ACCESS_DENIED',
+          details: { cause: registrationDecision.code ?? 'GRAPH_LOCK_DENIED' }
+        });
+      }
       const alreadyRegistered = (programCycle.records ?? []).some((record) => (
         record.path === registrationPath && record.types?.includes('agent')
       ));
