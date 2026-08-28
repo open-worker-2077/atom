@@ -22,6 +22,6 @@
 
 ## 4. Supporting entry and delivery checks
 
-- [ ] 4.1 Integrate Chromium Web and mobile control journeys plus private gateway initial-navigation recovery without replacing the live CLI lane; retain real-phone acceptance as `pending-user-acceptance` until the user's manual check.
+- [x] 4.1 Integrate Chromium Web and mobile control journeys plus private gateway initial-navigation recovery without replacing the live CLI lane; retain real-phone acceptance as `pending-user-acceptance` until the user's manual check.
 - [ ] 4.2 Run the authorized shared-runtime night watch under `test`, inspect every step independently, and retain the redacted report.
 - [ ] 4.3 Run focused and full regression gates, validate OpenSpec strictly, review the diff, then push, merge, deploy, and update the authorized GitHub delivery records.

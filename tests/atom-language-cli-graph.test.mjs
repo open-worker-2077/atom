@@ -5,8 +5,12 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createSpatialServer } from '../cli/lib/server.mjs';
-import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
+import {
+  executeAtomCommandEndpoint,
+  runAtomCli
+} from '../work-engine/atom-language/cli.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 import {
   materializeGraphJson,
   parseGraphJson
@@ -118,6 +122,36 @@ test('the atom CLI drives a graph served from a fully isolated 4784-style store'
   ]);
   assert.equal(explored.code, 0, explored.stderr);
   assert.match(explored.stdout, /第二版正文/u);
+});
+
+test('public CLI targets an explicitly isolated command endpoint', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-public-cli-endpoint-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    { 'thing@agent': '🧊', situation: 'isolated synthetic Agent', contain: [], support: [] },
+    { thing: 'test', situation: 'isolated synthetic domain', contain: [], support: [] }
+  ], null, 2));
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
+  });
+  t.after(() => running.close());
+
+  let stdout = '';
+  let stderr = '';
+  const code = await runAtomCli([
+    '--endpoint', `${running.url}/__atom/api/command`, '--agent', '🧊', 'atom'
+  ], {
+    execute: executeAtomCommandEndpoint,
+    requireAgent: true,
+    stdout: { isTTY: false, write(value) { stdout += value; } },
+    stderr: { write(value) { stderr += value; } }
+  });
+
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /"agent~current"\s*:\s*"🧊"/u);
 });
 
 test('exact CLI Explore exposes an explicit read-only compiled-lock status without mutating the target', async (t) => {
