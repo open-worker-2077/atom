@@ -64,16 +64,16 @@ async function runPrivateAccessRepairHarness(t, options = {}) {
     `function global:Test-Get-ScheduledTask { param([string]$TaskName) $global:taskCalls += ('get:' + $TaskName); if ($global:taskStore.ContainsKey($TaskName)) { return $global:taskStore[$TaskName] } }`,
     `function global:Test-New-ScheduledTaskAction { param([string]$Execute, [string]$Argument, [string]$WorkingDirectory) [pscustomobject]@{ Execute = $Execute; Argument = $Argument; WorkingDirectory = $WorkingDirectory } }`,
     `function global:Test-New-ScheduledTaskTrigger { param([Parameter(ValueFromRemainingArguments = $true)]$Arguments) [pscustomobject]@{} }`,
-    `function global:Test-New-ScheduledTaskPrincipal { param([Parameter(ValueFromRemainingArguments = $true)]$Arguments) [pscustomobject]@{} }`,
+    `function global:Test-New-ScheduledTaskPrincipal { param([string]$UserId, [string]$LogonType, [string]$RunLevel) [pscustomobject]@{ UserId = $UserId; LogonType = $LogonType; RunLevel = $RunLevel } }`,
     `function global:Test-New-ScheduledTaskSettings { param([Parameter(ValueFromRemainingArguments = $true)]$Arguments) [pscustomobject]@{} }`,
-    `function global:Test-Register-ScheduledTask { param([string]$TaskName, $Action, $Trigger, $Principal, $Settings, [string]$Description, [switch]$Force) $global:taskCalls += ('register:' + $TaskName); if ($TaskName -eq ${failOnTask}) { throw 'SIMULATED_TASK_REGISTRATION_FAILURE' }; $global:taskStore[$TaskName] = [pscustomobject]@{ TaskName = $TaskName; Description = $Description; State = 'Ready'; Action = $Action } }`,
+    `function global:Test-Register-ScheduledTask { param([string]$TaskName, $Action, $Trigger, $Principal, $Settings, [string]$Description, [switch]$Force) $global:taskCalls += ('register:' + $TaskName); if ($TaskName -eq ${failOnTask}) { throw 'SIMULATED_TASK_REGISTRATION_FAILURE' }; $global:taskStore[$TaskName] = [pscustomobject]@{ TaskName = $TaskName; Description = $Description; State = 'Ready'; Action = $Action; Principal = $Principal } }`,
     `function global:Test-Unregister-ScheduledTask { param([string]$TaskName, [switch]$Confirm) $global:taskCalls += ('unregister:' + $TaskName); $global:taskStore.Remove($TaskName) | Out-Null }`,
     `function global:Test-Start-ScheduledTask { param([string]$TaskName) $global:taskCalls += ('start:' + $TaskName); if ($global:taskStore.ContainsKey($TaskName)) { $global:taskStore[$TaskName].State = 'Running' } }`,
     `function global:Test-Stop-ScheduledTask { param([string]$TaskName) $global:taskCalls += ('stop:' + $TaskName); if ($global:taskStore.ContainsKey($TaskName)) { $global:taskStore[$TaskName].State = 'Ready' } }`,
     `function global:Invoke-RestMethod { param([Parameter(ValueFromRemainingArguments = $true)]$Arguments) [pscustomobject]@{ ok = $true } }`,
     `function global:Invoke-WebRequest { param([Parameter(ValueFromRemainingArguments = $true)]$Arguments) [pscustomobject]@{ StatusCode = 200 } }`,
     `try { & '${psQuote(harness)}'; $errorCode = $null } catch { $errorCode = $_.Exception.Message }`,
-    `$tasks = @($global:taskStore.Values | Sort-Object TaskName | ForEach-Object { [pscustomobject]@{ name = $_.TaskName; description = $_.Description; state = $_.State; execute = if ($null -eq $_.Action) { $null } else { $_.Action.Execute }; argument = if ($null -eq $_.Action) { $null } else { $_.Action.Argument } } })`,
+    `$tasks = @($global:taskStore.Values | Sort-Object TaskName | ForEach-Object { [pscustomobject]@{ name = $_.TaskName; description = $_.Description; state = $_.State; execute = if ($null -eq $_.Action) { $null } else { $_.Action.Execute }; argument = if ($null -eq $_.Action) { $null } else { $_.Action.Argument }; logonType = if ($null -eq $_.Principal) { $null } else { $_.Principal.LogonType } } })`,
     `$resultJson = [pscustomobject]@{ error = $errorCode; tasks = $tasks; calls = $global:taskCalls } | ConvertTo-Json -Compress -Depth 6`,
     `Write-Output ('@@RESULT64@@' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($resultJson)))`
   ].filter(Boolean).join('\n');
@@ -161,10 +161,12 @@ test('repair recreates every missing Atom-owned private access task from a valid
   const runtime = result.tasks.find((task) => task.name === 'Atom Graph Runtime');
   assert.equal(runtime.execute.toLowerCase().endsWith('node.exe'), true);
   assert.match(runtime.argument, /graph-server\.mjs/u);
+  assert.equal(runtime.logonType, 'S4U');
   for (const task of result.tasks.filter((task) => task.name !== 'Atom Graph Runtime')) {
     assert.match(task.description, /Atom mobile access|Tailnet-IP-only/u);
     assert.equal(task.execute.toLowerCase().endsWith('node.exe'), true);
     assert.match(task.argument, /private-mobile-gateway\.mjs/u);
+    assert.equal(task.logonType, 'S4U');
   }
 });
 
