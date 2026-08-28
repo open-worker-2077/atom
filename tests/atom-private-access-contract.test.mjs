@@ -212,11 +212,13 @@ test('private access disable script removes only owned entry and task', async ()
 test('Windows PowerShell 5 can decode the private access scripts without a UTF-8 BOM', async () => {
   for (const file of [
     'atom-long-running-task.ps1',
+    'install-atom-runtime-health-watchdog.ps1',
     'install-atom-private-access.ps1',
     'disable-atom-private-access.ps1',
     'repair-atom-private-access.ps1',
     'run-atom-graph-service.ps1',
-    'run-atom-private-mobile-gateway-service.ps1'
+    'run-atom-private-mobile-gateway-service.ps1',
+    'watch-atom-runtime-health.ps1'
   ]) {
     const source = await fs.readFile(path.join(root, 'scripts', file), 'utf8');
     assert.doesNotMatch(source, /[^\u0000-\u007f]/u, `${file} must remain ASCII-compatible`);
