@@ -49,6 +49,36 @@ function writeProblem(response, problem) {
   response.end(body);
 }
 
+function acceptsHtmlNavigation(request) {
+  if (request.method !== 'GET') return false;
+  const accept = request.headers.accept;
+  return typeof accept === 'string' && accept.toLowerCase().includes('text/html');
+}
+
+function writeRecoveryPage(response) {
+  const body = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="refresh" content="2">
+  <title>Atom reconnecting</title>
+  <style>
+    html,body{height:100%;margin:0;background:#0d0f11;color:#f4f6f8;font:18px system-ui,sans-serif}
+    body{display:grid;place-items:center;text-align:center}.status{opacity:.86}.detail{margin-top:.75rem;font-size:.82rem;opacity:.58}
+  </style>
+</head>
+<body><main><div class="status">Atom 正在重新连接…</div><div class="detail">本标签页会自动恢复</div></main></body>
+</html>`;
+  response.writeHead(503, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': Buffer.byteLength(body),
+    'cache-control': 'no-store',
+    'retry-after': '2'
+  });
+  response.end(body);
+}
+
 function canonicalLogin(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
@@ -189,6 +219,10 @@ export async function startPrivateMobileGateway(options = {}) {
     upstream.once('error', (error) => {
       if (response.headersSent) {
         response.destroy(error);
+        return;
+      }
+      if (acceptsHtmlNavigation(request)) {
+        writeRecoveryPage(response);
         return;
       }
       writeProblem(response, gatewayProblem(

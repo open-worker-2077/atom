@@ -82,7 +82,7 @@ $taskArguments = '"{0}" --allowed-login "{1}" --target "{2}" --port {3}' -f `
 $taskAction = New-ScheduledTaskAction -Execute $nodeCommand.Source -Argument $taskArguments
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
-$taskPrincipal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
+$taskPrincipal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType S4U -RunLevel Limited
 $taskSettings = New-AtomLongRunningTaskSettings
 
 try {

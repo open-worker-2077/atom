@@ -66,15 +66,15 @@ async function runInstaller() {
     'function global:Get-ScheduledTask { param([string]$TaskName, [Parameter(ValueFromRemainingArguments = $true)]$Rest) if ($global:tasks.ContainsKey($TaskName)) { $global:tasks[$TaskName] } }',
     'function global:New-ScheduledTaskAction { param([string]$Execute, [string]$Argument, [string]$WorkingDirectory) [pscustomobject]@{ Execute = $Execute; Argument = $Argument; WorkingDirectory = $WorkingDirectory } }',
     'function global:New-ScheduledTaskTrigger { param([Parameter(ValueFromRemainingArguments = $true)]$Arguments) [pscustomobject]@{ kind = "periodic" } }',
-    'function global:New-ScheduledTaskPrincipal { param([Parameter(ValueFromRemainingArguments = $true)]$Arguments) [pscustomobject]@{ kind = "current-user" } }',
+    'function global:New-ScheduledTaskPrincipal { param([string]$UserId, [string]$LogonType, [string]$RunLevel) [pscustomobject]@{ kind = "current-user"; LogonType = $LogonType } }',
     'function global:New-ScheduledTaskSettingsSet { param([Parameter(ValueFromRemainingArguments = $true)]$Arguments) [pscustomobject]@{ kind = "bounded-single-instance" } }',
-    'function global:Register-ScheduledTask { param([string]$TaskName, $Action, $Trigger, $Principal, $Settings, [string]$Description, [switch]$Force) [void]$global:calls.Add("register:$TaskName"); $global:tasks[$TaskName] = [pscustomobject]@{ TaskName = $TaskName; Description = $Description; Action = $Action; Trigger = $Trigger; Settings = $Settings } }',
+    'function global:Register-ScheduledTask { param([string]$TaskName, $Action, $Trigger, $Principal, $Settings, [string]$Description, [switch]$Force) [void]$global:calls.Add("register:$TaskName"); $global:tasks[$TaskName] = [pscustomobject]@{ TaskName = $TaskName; Description = $Description; Action = $Action; Trigger = $Trigger; Principal = $Principal; Settings = $Settings } }',
     'function global:Start-ScheduledTask { param([string]$TaskName) [void]$global:calls.Add("start:$TaskName") }',
     'function global:Stop-ScheduledTask { param([string]$TaskName) [void]$global:calls.Add("stop:$TaskName") }',
     `try { $result = & '${psQuote(script)}'; $errorMessage = $null } catch { $result = $null; $errorMessage = $_.Exception.Message }`,
     '$runtime = $global:tasks["Atom Graph Runtime"]',
     '$watchdog = $global:tasks["Atom Graph Runtime Health Watchdog"]',
-    '$payload = [pscustomobject]@{ result = $result; error = $errorMessage; calls = @($global:calls); runtimeExecute = $runtime.Actions[0].Execute; runtimeArguments = $runtime.Actions[0].Arguments; watchdog = $watchdog } | ConvertTo-Json -Compress -Depth 8',
+    '$payload = [pscustomobject]@{ result = $result; error = $errorMessage; calls = @($global:calls); runtimeExecute = $runtime.Actions[0].Execute; runtimeArguments = $runtime.Actions[0].Arguments; watchdog = $watchdog; watchdogLogonType = $watchdog.Principal.LogonType } | ConvertTo-Json -Compress -Depth 8',
     'Write-Output ("@@RESULT64@@" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload)))'
   ].join('\n');
   const { stdout } = await execFileAsync('powershell.exe', [
@@ -219,4 +219,5 @@ test('installer adds only a periodic watchdog while the runtime task keeps direc
   assert.deepEqual(observed.calls, ['register:Atom Graph Runtime Health Watchdog']);
   assert.match(observed.watchdog.Action.Execute, /powershell\.exe$/iu);
   assert.match(observed.watchdog.Action.Argument, /watch-atom-runtime-health\.ps1/u);
+  assert.equal(observed.watchdogLogonType, 'S4U');
 });

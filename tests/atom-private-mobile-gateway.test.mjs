@@ -193,3 +193,50 @@ test('approved POST body and SSE response stream through the same gateway bounda
   assert.match(events.headers['content-type'], /^text\/event-stream/u);
   assert.equal(events.body, 'data: {"revision":2}\n\n');
 });
+
+test('an initial browser navigation waits in the same tab when Atom is temporarily unavailable', async (t) => {
+  const unavailableTarget = http.createServer();
+  const targetAddress = await listen(unavailableTarget);
+  await close(unavailableTarget);
+  const gateway = await startPrivateMobileGateway({
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+    port: 0,
+    allowedLogins: ['worker@example.com']
+  });
+  t.after(() => gateway.close());
+
+  const response = await request(`${gateway.url}/`, {
+    headers: {
+      accept: 'text/html,application/xhtml+xml',
+      'Tailscale-User-Login': 'worker@example.com'
+    }
+  });
+
+  assert.equal(response.status, 503);
+  assert.match(response.headers['content-type'], /^text\/html/u);
+  assert.equal(response.headers['retry-after'], '2');
+  assert.match(response.body, /http-equiv="refresh" content="2"/u);
+  assert.match(response.body, /Atom.*reconnect/iu);
+});
+
+test('an unavailable Atom API still returns the structured gateway error', async (t) => {
+  const unavailableTarget = http.createServer();
+  const targetAddress = await listen(unavailableTarget);
+  await close(unavailableTarget);
+  const gateway = await startPrivateMobileGateway({
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+    port: 0,
+    allowedLogins: ['worker@example.com']
+  });
+  t.after(() => gateway.close());
+
+  const response = await request(`${gateway.url}/__atom/api/command`, {
+    headers: {
+      accept: 'application/json',
+      'Tailscale-User-Login': 'worker@example.com'
+    }
+  });
+
+  assert.equal(response.status, 502);
+  assert.equal(JSON.parse(response.body).error.code, 'ATOM_PRIVATE_UPSTREAM_UNAVAILABLE');
+});

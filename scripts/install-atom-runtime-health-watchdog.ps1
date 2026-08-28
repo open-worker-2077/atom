@@ -46,7 +46,7 @@ $trigger = New-ScheduledTaskTrigger `
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $principal = New-ScheduledTaskPrincipal `
   -UserId $currentUser `
-  -LogonType Interactive `
+  -LogonType S4U `
   -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet `
   -Hidden `

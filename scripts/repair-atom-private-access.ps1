@@ -70,7 +70,7 @@ $runtimeAction = New-ScheduledTaskAction `
 $runtimeTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
 $runtimePrincipal = New-ScheduledTaskPrincipal `
   -UserId $currentUser `
-  -LogonType Interactive `
+  -LogonType S4U `
   -RunLevel Limited
 $gatewayTaskNames = @()
 $createdTaskNames = @()
