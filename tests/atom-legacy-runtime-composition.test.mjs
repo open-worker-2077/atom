@@ -189,6 +189,76 @@ test('maintenance first-window creation prepares the same current context-free p
   });
 });
 
+test('trusted maintenance may reconfigure a registered Agent source while the Agent cannot modify itself', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-maintenance-agent-reconfigure-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const journalFile = path.join(directory, 'atom.transactions.json');
+  const agentPath = 'Root/Parent/Window';
+  const originalSource = 'agent({"functions":{"groups":[],"names":["agent"]}})';
+  const replacementSource = 'agent({"labels":[],"functions":{"groups":[],"names":["agent","explore","slot_body","transform","use_program"]}})';
+  const replace = `transform {"thing":${JSON.stringify(agentPath)},${JSON.stringify(`situation.rep.${replacementSource}`)}}`;
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+    atom('Parent', '', [atom('Window', originalSource, [], 'program@agent')])
+  ])]), 'utf8');
+
+  const server = createLegacyRuntimeComposition({ contextFile, graphFile, storeFile });
+  await server.initialize({ correlationId: 'server-startup' });
+  const selfChange = await server.execute({
+    source: replace,
+    correlationId: 'agent-self-reconfigure',
+    agentPath
+  });
+  assert.equal(selfChange.ok, false, JSON.stringify(selfChange));
+  assert.ok(selfChange.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), JSON.stringify(selfChange));
+  let world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(findAtom(world, agentPath).situation, originalSource);
+
+  const journal = createJsonTransactionJournal({ file: journalFile });
+  const receiptsBefore = (await journal.readState()).receipts.length;
+  const maintenance = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
+  const reconfigured = await maintenance({
+    source: replace,
+    interaction: { id: 'trusted-maintenance-agent-reconfigure' }
+  });
+  assert.equal(reconfigured.ok, true, JSON.stringify(reconfigured));
+  assert.equal(reconfigured.changed, true);
+  const receiptsAfter = (await createJsonTransactionJournal({ file: journalFile }).readState()).receipts.length;
+  assert.equal(receiptsAfter, receiptsBefore + 1);
+  world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(findAtom(world, agentPath).situation, replacementSource);
+
+  const coldScheduler = createProgramRuntimeScheduler();
+  await coldScheduler.rebuildAgentSecurity(world);
+  assert.deepEqual(coldScheduler.agentSecurity.get(agentPath), {
+    labels: [],
+    functionScopes: {
+      groups: [],
+      names: ['agent', 'explore', 'slot_body', 'transform', 'use_program']
+    },
+    functions: ['agent', 'explore', 'slot_body', 'transform', 'use_program']
+  });
+
+  const dynamicSource = [
+    'scope = {"groups": [], "names": ["agent", "explore"]}',
+    'agent({"labels": [], "functions": scope})'
+  ].join('\n');
+  const invalidReplace = `transform {"thing":${JSON.stringify(agentPath)},${JSON.stringify(`situation.rep.${dynamicSource}`)}}`;
+  const receiptsBeforeInvalid = (await createJsonTransactionJournal({ file: journalFile }).readState()).receipts.length;
+  const rejected = await maintenance({
+    source: invalidReplace,
+    interaction: { id: 'trusted-maintenance-agent-reconfigure-invalid' }
+  });
+  assert.equal(rejected.ok, false, JSON.stringify(rejected));
+  assert.ok(rejected.errors.some((error) => error.code === 'INVALID_PROGRAM_SOURCE'), JSON.stringify(rejected));
+  const receiptsAfterInvalid = (await createJsonTransactionJournal({ file: journalFile }).readState()).receipts.length;
+  assert.equal(receiptsAfterInvalid, receiptsBeforeInvalid);
+  world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(findAtom(world, agentPath).situation, replacementSource);
+});
+
 test('legacy composition binds world, Program, projection and spatial publication behind one runtime', async () => {
   const calls = [];
   const programScheduler = { id: 'scheduler' };
