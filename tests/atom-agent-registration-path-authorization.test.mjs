@@ -14,6 +14,43 @@ function atom(thing, situation = '', contain = [], type = '') {
 const CREATOR_SOURCE = 'agent({"labels":["^"],"functions":{"groups":[],"names":["agent","message","transform"]}})';
 const CHILD_SOURCE = 'agent({"labels":[],"functions":{"groups":[],"names":["message"]}})';
 
+const DELEGATION_CASES = [
+  {
+    name: 'delegates a lower jurisdiction, a new business label, and an explicit function beneath a held group',
+    creator: 'agent({"labels":["^^"],"functions":{"groups":["form"],"names":["agent","transform"]}})',
+    child: 'agent({"labels":["^","fresh-business"],"functions":{"groups":[],"names":["form_status"]}})',
+    expectedSecurity: {
+      labels: ['^', 'fresh-business'],
+      functionScopes: { groups: [], names: ['form_status'] },
+      functions: ['form_status']
+    }
+  },
+  {
+    name: 'rejects jurisdiction escalation',
+    creator: 'agent({"labels":["^^"],"functions":{"groups":[],"names":["agent","message","transform"]}})',
+    child: 'agent({"labels":["^^^"],"functions":{"groups":[],"names":["message"]}})',
+    error: 'AGENT_JURISDICTION_ESCALATION'
+  },
+  {
+    name: 'rejects a sibling function group outside the creator scope',
+    creator: 'agent({"labels":["^"],"functions":{"groups":["form"],"names":["agent","transform"]}})',
+    child: 'agent({"labels":[],"functions":{"groups":["graph"],"names":[]}})',
+    error: 'PROGRAM_FUNCTION_DELEGATION_DENIED'
+  },
+  {
+    name: 'rejects minting a group from a held concrete function name',
+    creator: 'agent({"labels":["^"],"functions":{"groups":[],"names":["agent","message","transform"]}})',
+    child: 'agent({"labels":[],"functions":{"groups":["form"],"names":[]}})',
+    error: 'PROGRAM_FUNCTION_DELEGATION_DENIED'
+  },
+  {
+    name: 'rejects an unheld business label without jurisdiction',
+    creator: 'agent({"labels":["owned"],"functions":{"groups":[],"names":["agent","message","transform"]}})',
+    child: 'agent({"labels":["fresh-business"],"functions":{"groups":[],"names":["message"]}})',
+    error: 'AGENT_LABEL_DELEGATION_DENIED'
+  }
+];
+
 async function fixture(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-registration-path-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
@@ -70,3 +107,47 @@ test('a registered Agent may register a descendant but cannot register an out-of
   assert.equal(findAtom(stored, 'ForbiddenChild').key, 'thing@program');
   assert.equal(scheduler.agentSecurity.has('Root/Outside/ForbiddenChild'), false);
 });
+
+for (const [index, scenario] of DELEGATION_CASES.entries()) {
+  test(`public Program registration ${scenario.name}`, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), `atom-agent-delegation-${index}-`));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const contextFile = path.join(directory, 'atom.json');
+    const projectionFile = path.join(directory, 'graph.json');
+    const creatorPath = `Root/Task/Creator${index}`;
+    const childPath = `${creatorPath}/Child${index}`;
+    await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+      atom('Task', '', [
+        atom(`Creator${index}`, scenario.creator, [
+          atom(`Child${index}`, scenario.child, [], 'program')
+        ], 'program@agent')
+      ])
+    ])], null, 2));
+    const scheduler = createProgramRuntimeScheduler();
+
+    const result = await executeAtomLanguage({
+      source: `transform {"thing.run.":${JSON.stringify(childPath)}}`,
+      contextFile,
+      projectionFile,
+      programScheduler: scheduler,
+      interaction: { id: `delegate-${index}`, agent: { path: creatorPath } }
+    });
+    const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+
+    if (scenario.error) {
+      assert.equal(result.ok, false, JSON.stringify(result));
+      assert.ok(result.errors.some((error) => error.code === scenario.error), JSON.stringify(result));
+      assert.equal(findAtom(stored, `Child${index}`).key, 'thing@program');
+      assert.equal(scheduler.agentSecurity.has(childPath), false);
+      return;
+    }
+
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(findAtom(stored, `Child${index}`).key, 'thing@program@agent');
+    assert.deepEqual(scheduler.agentSecurity.get(childPath), scenario.expectedSecurity);
+
+    const coldScheduler = createProgramRuntimeScheduler();
+    await coldScheduler.rebuildAgentSecurity(stored);
+    assert.deepEqual(coldScheduler.agentSecurity.get(childPath), scenario.expectedSecurity);
+  });
+}
