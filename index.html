@@ -4,6 +4,69 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>多球域 · 3D 交互范式实验场</title>
+  <script>
+    (() => {
+      if (!['http:', 'https:'].includes(location.protocol)) return;
+      const attemptKey = 'atom:main-entry-recovery-attempts';
+      const maxImmediateAttempts = 3;
+      let startupFailed = false;
+      let checking = false;
+
+      const connected = () => (
+        Boolean(window.spatialLab)
+        && document.body?.dataset.spatialBridge === 'connected'
+      );
+      const attempts = () => Number(sessionStorage.getItem(attemptKey) || 0);
+      const markConnected = () => sessionStorage.removeItem(attemptKey);
+
+      async function recoverWhenMainEntryReturns() {
+        if (checking || connected()) return;
+        checking = true;
+        try {
+          const response = await fetch('/__spatial/api/health', { cache: 'no-store' });
+          if (!response.ok) throw new Error('Atom main entry is unavailable');
+          const count = attempts();
+          if (count >= maxImmediateAttempts) {
+            sessionStorage.removeItem(attemptKey);
+            setTimeout(recoverWhenMainEntryReturns, 10_000);
+            return;
+          }
+          sessionStorage.setItem(attemptKey, String(count + 1));
+          location.reload();
+        } catch {
+          setTimeout(recoverWhenMainEntryReturns, 1_500);
+        } finally {
+          checking = false;
+        }
+      }
+
+      window.addEventListener('error', (event) => {
+        const failedScript = event.target instanceof HTMLScriptElement;
+        const startupRuntimeError = event.target === window && Boolean(event.error);
+        if (!failedScript && !startupRuntimeError) return;
+        startupFailed = true;
+        void recoverWhenMainEntryReturns();
+      }, true);
+      window.addEventListener('unhandledrejection', () => {
+        startupFailed = true;
+        void recoverWhenMainEntryReturns();
+      });
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          if (connected()) {
+            markConnected();
+            return;
+          }
+          if (startupFailed || !window.spatialLab) void recoverWhenMainEntryReturns();
+        }, 1_500);
+      }, { once: true });
+      const connectedMonitor = setInterval(() => {
+        if (!connected()) return;
+        markConnected();
+        clearInterval(connectedMonitor);
+      }, 1_000);
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500&family=Tomorrow:wght@400;500;600&display=swap" rel="stylesheet">
