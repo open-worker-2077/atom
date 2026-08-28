@@ -11,11 +11,23 @@ import {
 } from '../src/atom-system/adapters/legacy-runtime-composition.mjs';
 import { createRuntimeCliExecutor } from '../src/atom-system/adapters/runtime-cli-executor.mjs';
 import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
+import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+}
+
+function findAtom(atoms, expectedPath, parentPath = []) {
+  for (const current of atoms) {
+    const thing = Object.entries(current).find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1];
+    const currentPath = [...parentPath, thing];
+    if (currentPath.join('/') === expectedPath) return current;
+    const nested = findAtom(current.contain ?? [], expectedPath, currentPath);
+    if (nested) return nested;
+  }
+  return null;
 }
 
 test('maintenance CLI requests enter through the same interaction runtime contract', async () => {
@@ -36,6 +48,53 @@ test('maintenance CLI requests enter through the same interaction runtime contra
     agentPath: 'Root/Maintainer',
     history: [{ source: 'explore {}' }]
   }]);
+});
+
+test('maintenance CLI refuses an intent before world dispatch when projection preparation fails', async () => {
+  let dispatched = false;
+  const execute = createRuntimeCliExecutor({
+    interactionRuntime: {
+      async initialize() {
+        throw Object.assign(new Error('projection unavailable'), {
+          code: 'RUNTIME_INITIALIZATION_FAILED'
+        });
+      },
+      async execute() {
+        dispatched = true;
+        return { ok: true };
+      }
+    }
+  });
+
+  await assert.rejects(execute({
+    source: 'transform new {"thing":"Must Not Commit","situation":"","contain":[],"support":[]}',
+    interaction: { id: 'maintenance-projection-failure' }
+  }), (error) => error.code === 'RUNTIME_INITIALIZATION_FAILED');
+  assert.equal(dispatched, false);
+});
+
+test('maintenance CLI refuses an intent while prepared projection publication is pending', async () => {
+  let dispatched = false;
+  const execute = createRuntimeCliExecutor({
+    interactionRuntime: {
+      async initialize() {
+        return {
+          projectionStatus: 'pending',
+          projectionFailure: { projection: 'graph', cause: 'EPERM' }
+        };
+      },
+      async execute() {
+        dispatched = true;
+        return { ok: true };
+      }
+    }
+  });
+
+  await assert.rejects(execute({
+    source: 'transform new {"thing":"Must Not Commit","situation":"","contain":[],"support":[]}',
+    interaction: { id: 'maintenance-projection-pending' }
+  }), (error) => error.code === 'RUNTIME_INITIALIZATION_FAILED');
+  assert.equal(dispatched, false);
 });
 
 test('maintenance CLI reloads the persisted context-free Program projection for an agentless read', async (t) => {
@@ -68,6 +127,66 @@ test('maintenance CLI reloads the persisted context-free Program projection for 
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(result.items[0].matches[0].path, 'test');
+});
+
+test('maintenance first-window creation prepares the same current context-free projection as the server', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-maintenance-first-window-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const journalFile = path.join(directory, 'atom.transactions.json');
+  const programProjectionFile = path.join(directory, 'program-projection.json');
+  const existingAgentSource = 'agent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})';
+  const bootstrapSource = 'agent({"functions":{"groups":[],"names":["agent"]}})';
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+    atom('Existing', existingAgentSource, [atom('Work', '', [atom('Parent')])], 'program@agent')
+  ])]), 'utf8');
+
+  const serverScheduler = createProgramRuntimeScheduler();
+  const server = createLegacyRuntimeComposition({
+    contextFile, graphFile, storeFile, programScheduler: serverScheduler
+  });
+  await server.initialize({ correlationId: 'server-startup' });
+  const serverRead = await server.execute({
+    source: 'explore {"thing":"Root/Existing","situation$full":true}',
+    correlationId: 'server-self-read', agentPath: 'Root/Existing'
+  });
+  assert.equal(serverRead.ok, true, JSON.stringify(serverRead.errors));
+  await assert.rejects(fs.stat(programProjectionFile), (error) => error.code === 'ENOENT');
+
+  const journal = createJsonTransactionJournal({ file: journalFile });
+  const receiptsBefore = (await journal.readState()).receipts.length;
+  const maintenance = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
+  const created = await maintenance({
+    source: `transform new {"thing@program":"Root/Existing/Work/Parent/Bootstrap","situation":${JSON.stringify(bootstrapSource)},"contain":[],"support":[]}`,
+    interaction: { id: 'maintenance-create-bootstrap' }
+  });
+
+  assert.equal(created.ok, true, JSON.stringify(created.errors));
+  const preparedProjection = JSON.parse(await fs.readFile(programProjectionFile, 'utf8'));
+  assert.equal(preparedProjection.version, 1);
+  assert.equal(typeof preparedProjection.worldKey, 'string');
+  const receiptsAfterCreate = (await createJsonTransactionJournal({ file: journalFile }).readState()).receipts.length;
+  assert.equal(receiptsAfterCreate, receiptsBefore + 1);
+  let world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(findAtom(world, 'Root/Existing/Work/Parent/Bootstrap') !== null, true);
+
+  const registered = await maintenance({
+    source: 'transform {"thing.run.":"Root/Existing/Work/Parent/Bootstrap"}',
+    interaction: { id: 'maintenance-register-bootstrap' }
+  });
+  assert.equal(registered.ok, true, JSON.stringify(registered.errors));
+  world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(Object.hasOwn(findAtom(world, 'Root/Existing/Work/Parent/Bootstrap'), 'thing@program@agent'), true);
+
+  const coldScheduler = createProgramRuntimeScheduler();
+  await coldScheduler.rebuildAgentSecurity(world);
+  assert.deepEqual(coldScheduler.agentSecurity.get('Root/Existing/Work/Parent/Bootstrap'), {
+    labels: [],
+    functionScopes: { groups: [], names: ['agent'] },
+    functions: ['agent']
+  });
 });
 
 test('legacy composition binds world, Program, projection and spatial publication behind one runtime', async () => {
