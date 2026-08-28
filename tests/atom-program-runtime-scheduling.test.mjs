@@ -16,6 +16,159 @@ function atom(thing, situation = '', contain = [], type = '') {
   };
 }
 
+test('ordinary fact edits reuse the compiled Agent security directory', async () => {
+  let inspections = 0;
+  const inspectedProgramCounts = [];
+  const scheduler = createProgramRuntimeScheduler({
+    inspectProgram: async ({ programs }) => {
+      inspections += 1;
+      inspectedProgramCounts.push(programs.length);
+      return {
+        agentRegistrations: [{
+          labels: ['^'],
+          functionScopes: { groups: [], names: ['explore'] },
+          functions: ['explore']
+        }]
+      };
+    }
+  });
+  const agentProgram = atom(
+    'Worker',
+    'agent({"labels":["^"],"functions":{"groups":[],"names":["explore"]}})',
+    [],
+    'program@agent'
+  );
+
+  const unrelatedProgram = atom('Unrelated Program', 'pass', [], 'program');
+  await scheduler.rebuildAgentSecurity([
+    agentProgram, unrelatedProgram, atom('Fact', 'before')
+  ]);
+  await scheduler.rebuildAgentSecurity([
+    structuredClone(agentProgram), structuredClone(unrelatedProgram), atom('Fact', 'after')
+  ]);
+
+  assert.equal(inspections, 1);
+  assert.deepEqual(inspectedProgramCounts, [1]);
+  assert.deepEqual(scheduler.agentSecurity.get('Worker')?.labels, ['^']);
+});
+
+test('one mutable world revision shares one prepared record snapshot across index builders', async () => {
+  const recordSnapshots = [];
+  const scheduler = createProgramRuntimeScheduler({
+    inspectProgram: async ({ records, program }) => {
+      recordSnapshots.push(records);
+      return program.types.includes('agent')
+        ? {
+            agentRegistrations: [{
+              labels: ['^'],
+              functionScopes: { groups: [], names: ['explore'] },
+              functions: ['explore']
+            }]
+          }
+        : {
+            locks: [{
+              sourceProgramPath: 'Guard',
+              targets: { paths: ['Fact'], scope: 'exact' },
+              actions: ['explore'],
+              labels: ['team']
+            }]
+          };
+    }
+  });
+  const world = [
+    atom(
+      'Worker',
+      'agent({"labels":["^"],"functions":{"groups":[],"names":["explore"]}})',
+      [],
+      'program@agent'
+    ),
+    atom(
+      'Guard',
+      'lock({"targets":{"paths":["Fact"],"scope":"exact"},"actions":["explore"],"labels":["team"]})',
+      [],
+      'program'
+    ),
+    atom('Fact')
+  ];
+
+  await scheduler.activeRequestDrivenLocks(world);
+
+  assert.equal(recordSnapshots.length, 2);
+  assert.equal(recordSnapshots[0], recordSnapshots[1]);
+});
+
+test('path changes rebuild request-driven locks while ordinary fact edits reuse them', async () => {
+  let inspections = 0;
+  const inspectedProgramCounts = [];
+  const scheduler = createProgramRuntimeScheduler({
+    inspectProgram: async ({ programs }) => {
+      inspections += 1;
+      inspectedProgramCounts.push(programs.length);
+      return {
+        locks: [{
+          sourceProgramPath: 'Guard',
+          targets: { paths: ['Fact'], scope: 'exact' },
+          actions: ['explore'],
+          labels: ['team']
+        }]
+      };
+    }
+  });
+  const guard = atom(
+    'Guard',
+    'lock({"targets":{"paths":["Fact"],"scope":"exact"},"actions":["explore"],"labels":["team"]})',
+    [],
+    'program'
+  );
+  const unrelatedProgram = atom('Unrelated Program', 'pass', [], 'program');
+
+  await scheduler.rebuildRequestDrivenLocks([guard, unrelatedProgram, atom('Fact', 'before')]);
+  await scheduler.rebuildRequestDrivenLocks([
+    structuredClone(guard), structuredClone(unrelatedProgram), atom('Fact', 'after')
+  ]);
+  assert.equal(inspections, 1);
+
+  await scheduler.rebuildRequestDrivenLocks([
+    structuredClone(guard), structuredClone(unrelatedProgram), atom('Fact Moved', 'after')
+  ]);
+  assert.equal(inspections, 2);
+  assert.deepEqual(inspectedProgramCounts, [1, 1]);
+});
+
+test('request-driven locks rebuild when an allowed Program path loses its Program type', async () => {
+  let inspections = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    inspectProgram: async () => {
+      inspections += 1;
+      return {
+        locks: [{
+          sourceProgramPath: 'Guard',
+          targets: { paths: ['Fact'], scope: 'exact' },
+          allowed_programs: { paths: ['Scheduler'] },
+          mode: 'write',
+          fields: ['situation'],
+          protect: { atom: true, messages: false }
+        }]
+      };
+    }
+  });
+  const guard = atom(
+    'Guard',
+    'lock({"targets":{"paths":["Fact"]},"allowed_programs":{"paths":["Scheduler"]},"mode":"write"})',
+    [],
+    'program'
+  );
+
+  await scheduler.rebuildRequestDrivenLocks([
+    guard, atom('Scheduler', 'pass', [], 'program'), atom('Fact')
+  ]);
+  await scheduler.rebuildRequestDrivenLocks([
+    structuredClone(guard), atom('Scheduler'), atom('Fact')
+  ]);
+
+  assert.equal(inspections, 2);
+});
+
 test('transform trigger runs only Programs whose declared node list intersects the event', async () => {
   const triggeredProgram = (name, monitoredNode, text) => atom(name, [
     'def main():',
@@ -163,6 +316,88 @@ test('trigger contract discovery isolates an unrelated Program denied by the cur
 
   assert.deepEqual(cycle.executedProgramPaths, []);
   assert.deepEqual(cycle.failures, []);
+});
+
+test('literal trigger discovery sends only the declaring Program to its worker', async () => {
+  let discoveryProgramCount = null;
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program, programs, validateOnly }) => {
+      if (program.path === 'Trigger' && validateOnly) discoveryProgramCount = programs.length;
+      return {
+        locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+        trigger: program.path === 'Trigger'
+          ? { mode: 'transform', parameters: { nodes: ['Target'] } }
+          : null,
+        changedThings: []
+      };
+    }
+  });
+  const unrelated = Array.from(
+    { length: 100 },
+    (_, index) => atom(`Unrelated ${index}`, 'pass', [], 'program')
+  );
+
+  await scheduler.refresh([
+    atom('Target'),
+    atom('Trigger', "trigger('transform', {'nodes': ['Target']}, main)", [], 'program'),
+    ...unrelated
+  ], { triggerEvent: { mode: 'transform', nodes: ['Target'] } });
+
+  assert.equal(discoveryProgramCount, 1);
+});
+
+test('changed discovery without Program reuse sends only the declaring Program to its worker', async () => {
+  let discoveryProgramCount = null;
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program, programs, changedNodes }) => {
+      if (program.path === 'Changed' && changedNodes.length === 0) {
+        discoveryProgramCount = programs.length;
+      }
+      return {
+        locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+        trigger: null,
+        changedThings: program.path === 'Changed' ? ['Target'] : []
+      };
+    }
+  });
+  const unrelated = Array.from(
+    { length: 100 },
+    (_, index) => atom(`Unrelated ${index}`, 'pass', [], 'program')
+  );
+
+  await scheduler.refresh([
+    atom('Target'), atom('Changed', 'changed([])', [], 'program'), ...unrelated
+  ], { triggerEvent: { mode: 'transform', nodes: ['Target'] } });
+
+  assert.equal(discoveryProgramCount, 1);
+});
+
+test('a triggered Program without Program reuse executes with only its own source', async () => {
+  let executionProgramCount = null;
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program, programs, triggered }) => {
+      if (program.path === 'Trigger' && triggered) executionProgramCount = programs.length;
+      return {
+        locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+        trigger: program.path === 'Trigger'
+          ? { mode: 'transform', parameters: { nodes: ['Target'] } }
+          : null,
+        changedThings: []
+      };
+    }
+  });
+  const unrelated = Array.from(
+    { length: 100 },
+    (_, index) => atom(`Unrelated ${index}`, 'pass', [], 'program')
+  );
+
+  await scheduler.refresh([
+    atom('Target'),
+    atom('Trigger', "trigger('transform', {'nodes': ['Target']}, main)", [], 'program'),
+    ...unrelated
+  ], { triggerEvent: { mode: 'transform', nodes: ['Target'] } });
+
+  assert.equal(executionProgramCount, 1);
 });
 
 test('a denied trigger contract is retried under a later authorized Agent context', async () => {

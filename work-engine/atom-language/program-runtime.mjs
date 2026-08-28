@@ -36,11 +36,10 @@ function fields(atom) {
 }
 
 function worldRecords(atoms) {
-  if (Object.isFrozen(atoms) && preparedRecordSnapshots.has(atoms)) {
-    return preparedRecordSnapshots.get(atoms);
-  }
-  const records = [];
   const worldRevision = revisionOfWorldFacts(atoms).slice('sha256:'.length);
+  const cached = preparedRecordSnapshots.get(atoms);
+  if (cached?.worldRevision === worldRevision) return cached.records;
+  const records = [];
   function visit(atom, parentRef, parentPath, address) {
     const stored = fields(atom);
     const name = stored.get('thing')?.value;
@@ -75,10 +74,9 @@ function worldRecords(atoms) {
   if (legacy) {
     isolatedProgramPathsByRecords.set(records, new Set(legacy.isolatedProgramPaths ?? []));
   }
-  if (!Object.isFrozen(atoms)) return records;
   const prepared = freezePrepared(records);
   if (legacy) isolatedProgramPathsByRecords.set(prepared, new Set(legacy.isolatedProgramPaths ?? []));
-  preparedRecordSnapshots.set(atoms, prepared);
+  preparedRecordSnapshots.set(atoms, { worldRevision, records: prepared });
   return prepared;
 }
 
@@ -171,6 +169,35 @@ function programSetFingerprint(programs, isolateFailures, records) {
   })).digest('hex');
 }
 
+function sourceDefinitionFingerprint(programs) {
+  return crypto.createHash('sha256').update(JSON.stringify(programs.map((program) => ({
+    path: program.path,
+    detail: program.detail,
+    types: program.types
+  })))).digest('hex');
+}
+
+function agentSecurityFingerprint(programs) {
+  return sourceDefinitionFingerprint(programs.filter((program) => program.types.includes('agent')));
+}
+
+function requestDrivenLockFingerprint(records, programs, securityFingerprint, locks = []) {
+  const recordsByPath = new Map(records.map((record) => [record.path, record]));
+  const dependencyPaths = [...new Set(locks.flatMap((lock) => ([
+    ...(lock.targets?.paths ?? []),
+    ...(lock.allowed_windows?.paths ?? []),
+    ...(lock.allowed_programs?.paths ?? [])
+  ])))].sort();
+  return crypto.createHash('sha256').update(JSON.stringify({
+    programs: sourceDefinitionFingerprint(programs),
+    securityFingerprint,
+    dependencies: dependencyPaths.map((path) => ({
+      path,
+      types: recordsByPath.get(path)?.types ?? null
+    }))
+  })).digest('hex');
+}
+
 function reusableProgramSetFingerprint(programs, dependencyPrograms, isolateFailures, records) {
   return crypto.createHash('sha256').update(JSON.stringify({
     selectedPrograms: programSetFingerprint(programs, isolateFailures, records),
@@ -222,7 +249,7 @@ function reusableCandidates(
 }
 
 function programMayResolveAnotherProgram(program) {
-  return /\buse_program\b/u.test(program.detail);
+  return /\b(?:jump|use_program)\b/u.test(program.detail);
 }
 
 function reusableProgramCandidates(
@@ -1028,16 +1055,16 @@ export class ProgramRuntimeScheduler {
   }
 
   async rebuildAgentSecurity(atoms) {
-    const revision = revisionOfWorldFacts(atoms);
-    if (this.agentSecurityWorldRevision === revision) return this.agentSecurity;
     const records = worldRecords(atoms);
     const programs = programRecords(records);
     const registeredPrograms = programs.filter((program) => program.types.includes('agent'));
+    const fingerprint = agentSecurityFingerprint(registeredPrograms);
+    if (this.agentSecurityWorldRevision === fingerprint) return this.agentSecurity;
     const registrations = await Promise.all(registeredPrograms.map((program) => (
       this.runBounded(() => this.inspectProgram({
         python: this.python,
         records,
-        programs,
+        programs: [program],
         program,
         timeoutMs: this.timeoutMs,
         executeExplore: async () => {
@@ -1066,7 +1093,7 @@ export class ProgramRuntimeScheduler {
       });
     }
     this.agentSecurity = next;
-    this.agentSecurityWorldRevision = revision;
+    this.agentSecurityWorldRevision = fingerprint;
     return this.agentSecurity;
   }
 
@@ -1160,13 +1187,61 @@ export class ProgramRuntimeScheduler {
     return this.assertContextFreeProjection(atoms, { isolateFailures });
   }
 
+  async rebaseContextFreeProjection(previousAtoms, atoms, {
+    changedPaths = [], isolateFailures = true
+  } = {}) {
+    if (!this.projectionRepository) return Object.freeze({ persisted: false, reason: 'unavailable' });
+    const previousRecords = worldRecords(previousAtoms);
+    const records = worldRecords(atoms);
+    const previousPrograms = programRecords(previousRecords);
+    const programs = programRecords(records);
+    const stored = await this.projectionRepository.load();
+    if (!stored
+      || stored.worldKey !== worldRevisionKey(previousRecords)
+      || stored.contextDependent !== false
+      || !Array.isArray(stored.failures)
+      || stored.failures.length > 0) {
+      return Object.freeze({ persisted: false, reason: 'projection-stale' });
+    }
+    const previousProgramSet = programSetFingerprint(
+      previousPrograms, isolateFailures, previousRecords
+    );
+    const nextProgramSet = programSetFingerprint(programs, isolateFailures, records);
+    if (stored.programSetKey !== previousProgramSet || nextProgramSet !== previousProgramSet) {
+      return Object.freeze({ persisted: false, reason: 'program-set-changed' });
+    }
+    const readPaths = new Set(stored.exploreReadPaths ?? []);
+    if (changedPaths.some((path) => readPaths.has(path))) {
+      return Object.freeze({ persisted: false, reason: 'dependency-changed' });
+    }
+    const value = {
+      locks: rebindLocks(stored.locks ?? [], previousRecords, records),
+      choices: structuredClone(stored.choices ?? []),
+      exploreReadPaths: structuredClone(stored.exploreReadPaths ?? []),
+      failures: [],
+      contextIncomplete: stored.contextIncomplete === true
+    };
+    const warning = await this.saveProjection({
+      records,
+      programs,
+      isolateFailures,
+      value,
+      requests: [],
+      agentOrigin: null
+    });
+    if (warning) return Object.freeze({ persisted: false, reason: 'persist-failed' });
+    return Object.freeze({ persisted: true, worldKey: worldRevisionKey(records) });
+  }
+
   async rebuildRequestDrivenLocks(atoms) {
-    const revision = revisionOfWorldFacts(atoms);
-    if (this.requestDrivenLocksWorldRevision === revision) return this.requestDrivenLocks ?? [];
     await this.rebuildAgentSecurity(atoms);
     const records = worldRecords(atoms);
     const programs = programRecords(records);
     const lockPrograms = programs.filter((program) => /\block\s*\(/u.test(program.detail));
+    const fingerprint = requestDrivenLockFingerprint(
+      records, lockPrograms, this.agentSecurityWorldRevision, this.requestDrivenLocks
+    );
+    if (this.requestDrivenLocksWorldRevision === fingerprint) return this.requestDrivenLocks ?? [];
     const inspected = await Promise.all(lockPrograms.map((program) => (
       this.runBounded(() => {
         const enclosingAgent = [...this.agentSecurity.entries()]
@@ -1183,7 +1258,7 @@ export class ProgramRuntimeScheduler {
         return this.inspectProgram({
           python: this.python,
           records,
-          programs,
+          programs: [program],
           program,
           timeoutMs: this.timeoutMs,
           allowedFunctions,
@@ -1203,7 +1278,9 @@ export class ProgramRuntimeScheduler {
         .localeCompare(JSON.stringify(right.targets ?? { path: right.path, kind: right.kind }))
     ));
     this.requestDrivenLocks = next;
-    this.requestDrivenLocksWorldRevision = revision;
+    this.requestDrivenLocksWorldRevision = requestDrivenLockFingerprint(
+      records, lockPrograms, this.agentSecurityWorldRevision, next
+    );
     return this.requestDrivenLocks;
   }
 
@@ -1369,7 +1446,7 @@ export class ProgramRuntimeScheduler {
       this.runProgram({
         python: this.python,
         records,
-        programs,
+        programs: programMayResolveAnotherProgram(program) ? programs : [program],
         program,
         timeoutMs: this.timeoutMs,
         executeExplore: async (request) => {
@@ -1908,7 +1985,7 @@ export class ProgramRuntimeScheduler {
           return this.runProgram({
             python: this.python,
             records,
-            programs: availablePrograms,
+            programs: programMayResolveAnotherProgram(program) ? availablePrograms : [program],
             program,
             timeoutMs: remainingMs,
             triggered: options.force === true || forcedByTrigger,

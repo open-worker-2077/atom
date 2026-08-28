@@ -255,6 +255,42 @@ function resolveUnique(atoms, selector, exactIndex = null) {
   return { match: matches[0] };
 }
 
+function copyAtomAncestry(atoms, match) {
+  const ancestry = [];
+  for (let current = match; current; current = current.parent) ancestry.unshift(current);
+  const nextAtoms = atoms.slice();
+  let container = nextAtoms;
+  let parent = null;
+  let copiedMatch = null;
+  for (const [index, original] of ancestry.entries()) {
+    const copiedAtom = { ...original.atom };
+    container[original.index] = copiedAtom;
+    copiedMatch = {
+      atom: copiedAtom,
+      parent,
+      index: original.index,
+      path: [...original.path]
+    };
+    if (index < ancestry.length - 1) {
+      const contain = storedField(original.atom, 'contain');
+      const copiedChildren = contain.value.slice();
+      copiedAtom[contain.rawKey] = copiedChildren;
+      container = copiedChildren;
+    }
+    parent = copiedMatch;
+  }
+  return { atoms: nextAtoms, match: copiedMatch };
+}
+
+function copyNonContainState(atom) {
+  const state = {};
+  for (const [rawKey, value] of Object.entries(atom)) {
+    const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
+    if (parsed.baseKey !== 'contain') state[rawKey] = structuredClone(value);
+  }
+  return state;
+}
+
 function captureSubtreeBindings(sourceAtom, sourcePath) {
   const sourceParts = sourcePath.split('/');
   const prefix = sourceParts.slice(0, -1);
@@ -784,15 +820,25 @@ export async function applyTransform({
   mutateInput = false,
   exactIndex = null
 }) {
-  const nextAtoms = mutateInput ? atoms : structuredClone(atoms);
   const rootName = path.basename(contextFile);
   const nameField = item.fields.find((field) => field.baseKey === 'thing');
   if (!nameField?.valuePresent || typeof nameField.value !== 'string' || !nameField.value) {
     return { error: diagnostic('ATOM_NAME_REQUIRED', 'transform 需要 name 精确锚点') };
   }
-  const selected = resolveUnique(nextAtoms, nameField.value, exactIndex);
+  const copiesOnlyAncestry = !mutateInput && !transformChangesStructure(item);
+  const originalSelection = copiesOnlyAncestry
+    ? resolveUnique(atoms, nameField.value, exactIndex)
+    : null;
+  if (originalSelection?.error) return originalSelection;
+  const copied = copiesOnlyAncestry
+    ? copyAtomAncestry(atoms, originalSelection.match)
+    : null;
+  const nextAtoms = mutateInput ? atoms : (copied?.atoms ?? structuredClone(atoms));
+  const selected = copied ? { match: copied.match } : resolveUnique(nextAtoms, nameField.value, exactIndex);
   if (selected.error) return selected;
-  const selectedBefore = JSON.stringify(selected.match.atom);
+  const selectedBefore = copiesOnlyAncestry
+    ? copyNonContainState(selected.match.atom)
+    : JSON.stringify(selected.match.atom);
   const selectedSnapshot = mutateInput ? structuredClone(selected.match.atom) : null;
   const rejectAfterMutation = (error) => {
     if (!selectedSnapshot || JSON.stringify(selected.match.atom) === selectedBefore) return { error };
@@ -925,7 +971,9 @@ export async function applyTransform({
           resultName: storedField(selected.match.atom, 'thing').value,
           sourcePath,
           resultPath,
-          changed: JSON.stringify(selected.match.atom) !== selectedBefore
+          changed: copiesOnlyAncestry
+            ? !isDeepStrictEqual(copyNonContainState(selected.match.atom), selectedBefore)
+            : JSON.stringify(selected.match.atom) !== selectedBefore
         };
   }
 

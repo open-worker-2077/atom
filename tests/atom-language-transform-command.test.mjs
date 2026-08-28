@@ -2,10 +2,62 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
+import { applyTransform } from '../work-engine/atom-language/transform-executor.mjs';
 
 function fieldByBase(item, baseKey) {
   return item.fields.find((field) => field.baseKey === baseKey);
 }
+
+function atom(thing, situation = '', contain = []) {
+  return { thing, situation, contain, support: [] };
+}
+
+test('a non-structural Transform copies only the target ancestry', async () => {
+  const untouched = atom('Untouched', 'stable', [atom('Untouched Child', 'stable')]);
+  const target = atom('Target', 'before');
+  const branch = atom('Branch', '', [target]);
+  const atoms = [untouched, branch];
+  const parsed = createAtomLanguageReceiver().receive(
+    'transform {"thing":"Branch/Target","situation.rep.after"}'
+  );
+
+  const result = await applyTransform({
+    atoms,
+    item: parsed.items[0],
+    contextFile: 'atom.json'
+  });
+
+  assert.equal(result.atoms[0], untouched);
+  assert.notEqual(result.atoms[1], branch);
+  assert.notEqual(result.atoms[1].contain[0], target);
+  assert.equal(result.atoms[1].contain[0].situation, 'after');
+  assert.equal(target.situation, 'before');
+});
+
+test('a non-structural Transform does not serialize the untouched target subtree', async () => {
+  const children = [atom('Large Child', 'x'.repeat(10_000))];
+  const target = atom('Target', 'before', children);
+  const parsed = createAtomLanguageReceiver().receive(
+    'transform {"thing":"Target","situation.rep.after"}'
+  );
+  const stringify = JSON.stringify;
+  JSON.stringify = (value, ...options) => {
+    if (value?.contain === children) throw new Error('target subtree was serialized');
+    return stringify(value, ...options);
+  };
+
+  try {
+    const result = await applyTransform({
+      atoms: [target],
+      item: parsed.items[0],
+      contextFile: 'atom.json'
+    });
+    assert.equal(result.atoms[0].situation, 'after');
+    assert.equal(target.situation, 'before');
+  } finally {
+    JSON.stringify = stringify;
+  }
+});
 
 test('transform reuses Graph-JSON and key normalization without executing a change', () => {
   const result = createAtomLanguageReceiver().receive(`

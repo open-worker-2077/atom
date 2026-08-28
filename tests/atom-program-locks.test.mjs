@@ -15,6 +15,42 @@ const records = [
   { ref: 'r-denied', path: '推进流/其他窗口', types: ['agent', '执行'] }
 ];
 
+test('an empty Program lock result does not index unrelated world records', () => {
+  const unrelatedRecords = new Proxy([], {
+    get(target, property, receiver) {
+      if (property === 'map') throw new Error('unrelated records were indexed');
+      return Reflect.get(target, property, receiver);
+    }
+  });
+
+  const index = buildProgramLockIndex({
+    revision: 'rev-empty', records: unrelatedRecords, results: []
+  });
+
+  assert.equal(index.revision, 'rev-empty');
+  assert.equal(index.byPath.size, 0);
+});
+
+test('ref-based Program locks index only referenced records without cloning the world', () => {
+  const lazyRecords = new Proxy(records, {
+    get(target, property, receiver) {
+      if (property === 'map') throw new Error('complete record Map allocation');
+      return Reflect.get(target, property, receiver);
+    }
+  });
+
+  const index = buildProgramLockIndex({
+    revision: 'rev-ref', records: lazyRecords,
+    results: [{
+      targets: { refs: ['r-target'] }, mode: 'write', fields: ['thing'],
+      protect: { atom: true, messages: false },
+      sourceProgramRef: 'r-program', sourceProgramPath: '冻结程序'
+    }]
+  });
+
+  assert.equal(index.byPath.has('推进流/任务A'), true);
+});
+
 test('subtree spatial lock follows the window parent and admits only its scheduler Program', () => {
   const index = buildProgramLockIndex({
     revision: 'rev-spatial', records,

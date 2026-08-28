@@ -283,15 +283,19 @@ async function validateRegisteredAgentSourceDelegation({
       )]
     };
   }
-  const beforeSources = new Map(walkAtoms(beforeAtoms)
-    .filter((match) => graphTypesAtPath(beforeAtoms, match.path.join('/')).includes('agent'))
-    .map((match) => [
-      match.path.join('/'),
-      oneStoredField(match.atom, 'situation')?.value
-    ]));
+  const beforeSources = new Map();
+  for (const match of walkAtoms(beforeAtoms)) {
+    const types = oneStoredField(match.atom, 'thing')?.parsed.types.map((type) => type.raw) ?? [];
+    if (types.includes('agent') && types.includes('program')) {
+      beforeSources.set(
+        match.path.join('/'),
+        oneStoredField(match.atom, 'situation')?.value
+      );
+    }
+  }
   const changedAgents = walkAtoms(afterAtoms).filter((match) => {
     const targetPath = match.path.join('/');
-    const types = graphTypesAtPath(afterAtoms, targetPath);
+    const types = oneStoredField(match.atom, 'thing')?.parsed.types.map((type) => type.raw) ?? [];
     return types.includes('agent')
       && types.includes('program')
       && beforeSources.get(targetPath) !== oneStoredField(match.atom, 'situation')?.value;
@@ -1987,7 +1991,10 @@ export async function executeAtomLanguage(options = {}) {
     return runtimeWarnings;
   }
 
-  async function commitChangedGraph(candidateAtoms, { registrationChange = null } = {}) {
+  async function commitChangedGraph(candidateAtoms, {
+    registrationChange = null,
+    projectionRebase = null
+  } = {}) {
     const effectiveRegistrationChange = registrationChange
       ?? (windowRecycled ? 'window-recycle' : null);
     const commitStartedAt = performance.now();
@@ -2024,7 +2031,21 @@ export async function executeAtomLanguage(options = {}) {
       await options.programScheduler?.registerAgentWindow?.(pendingAgentRegistrations[0]);
     }
     try {
-      const settleWarnings = await settleContextFreeProgramProjectionForWorld(candidateAtoms);
+      let rebased = null;
+      if (projectionRebase && options.programScheduler?.rebaseContextFreeProjection) {
+        try {
+          rebased = await options.programScheduler.rebaseContextFreeProjection(
+            projectionRebase.previousAtoms,
+            candidateAtoms,
+            { changedPaths: projectionRebase.changedPaths, isolateFailures: true }
+          );
+        } catch {
+          rebased = null;
+        }
+      }
+      const settleWarnings = rebased?.persisted === true
+        ? []
+        : await settleContextFreeProgramProjectionForWorld(candidateAtoms);
       interactionWarnings.push(...settleWarnings.map((warning) => diagnostic(
         warning.code ?? 'PROGRAM_RUNTIME_WARNING',
         warning.message ?? 'Program runtime reported a recoverable warning',
@@ -2580,7 +2601,20 @@ export async function executeAtomLanguage(options = {}) {
     }
   }
   if (changed) {
-    await commitChangedGraph(nextAtoms);
+    const canRebaseProjection = !transformChangesStructure(item)
+      && programTransformLogs.length === 0
+      && postRefresh.transformLogs.length === 0
+      && postRefresh.pathChanges.length === 0;
+    await commitChangedGraph(nextAtoms, canRebaseProjection ? {
+      projectionRebase: {
+        previousAtoms: atoms,
+        changedPaths: [...new Set([
+          transformed.sourcePath,
+          transformed.resultPath,
+          transformed.resultName
+        ].filter(Boolean))]
+      }
+    } : {});
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
       await appendTransformLog(contextFile, record);
     }
