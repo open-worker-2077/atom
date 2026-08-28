@@ -461,7 +461,7 @@ test('an ordinary exact Explore passively prepares projections without replaying
     programMode: 'project', interaction: { id: 'startup', agent: null }
   });
   assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
-  assert.equal(storedProjection.contextIncomplete, true);
+  assert.equal(storedProjection.contextIncomplete, false);
   const runtime = createInteractionRuntime({
     world: {
       execute: (request) => executeAtomLanguage({

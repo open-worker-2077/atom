@@ -870,6 +870,41 @@ test('scheduler distinguishes @agent cycles while reusing context-independent Pr
   assert.notEqual(first.fingerprint, second.fingerprint);
 });
 
+test("an Agent cycle executes only Programs owned by that Agent", async () => {
+  const executed = [];
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program }) => {
+      executed.push(program.path);
+      if (program.path === 'Agent A/Jump Program') {
+        throw Object.assign(new Error('Program cycle exceeded 2266ms'), {
+          code: 'ATOM_PROGRAM_TIMEOUT'
+        });
+      }
+      return {
+        locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+        trigger: null
+      };
+    }
+  });
+  const world = [
+    atom('Agent A', '', [
+      atom('Jump Program', "jump({'thing':'A'})", [], 'program')
+    ], 'agent'),
+    atom('Agent B', '', [
+      atom('Own Program', "jump({'thing':'B'})", [], 'program')
+    ], 'agent')
+  ];
+
+  const cycle = await scheduler.refresh(world, {
+    agentOrigin: { ref: 'agent-b-ref', path: 'Agent B' },
+    force: true,
+    isolateFailures: true
+  });
+
+  assert.deepEqual(executed, ['Agent B/Own Program']);
+  assert.deepEqual(cycle.failures, []);
+});
+
 test('Programs with explicit explore anchors are reused across @agent context paths', async () => {
   const program = atom('Explicit Reporter', [
     "value = explore({'thing': 'Target'})[0].situation",

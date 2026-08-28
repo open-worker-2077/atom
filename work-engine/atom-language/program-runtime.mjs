@@ -211,6 +211,19 @@ function agentScopePath(agentOrigin) {
     : null;
 }
 
+function owningAgentPath(program, recordsByRef) {
+  let record = program;
+  while (record) {
+    if (record.types.includes('agent')) return record.path;
+    record = record.parentRef ? recordsByRef.get(record.parentRef) ?? null : null;
+  }
+  return null;
+}
+
+function programUsesJump(program) {
+  return /\bjump\s*\(/u.test(program.detail);
+}
+
 function contextualProgramSetFingerprint(
   programs, dependencyPrograms, isolateFailures, scopePath, records
 ) {
@@ -959,7 +972,7 @@ function runWorker({
 }
 
 function describeProgramFailure(error, program) {
-  const jumpFailure = /\bjump\s*\(/u.test(program.detail);
+  const jumpFailure = programUsesJump(program);
   return {
     code: error?.code === 'INVALID_JUMP_CONTRACT'
       ? error.code
@@ -1702,9 +1715,10 @@ export class ProgramRuntimeScheduler {
       }
     }
     const byPath = new Map(records.map((record) => [record.path, record]));
+    const recordsByRef = new Map(records.map((record) => [record.ref, record]));
     const dependencyCache = {
       recordsByPath: byPath,
-      recordsByRef: new Map(records.map((record) => [record.ref, record])),
+      recordsByRef,
       snapshots: new Map()
     };
     const preparedWorld = options.executeExplore ? null : prepareExploreWorld(atoms);
@@ -1875,6 +1889,8 @@ export class ProgramRuntimeScheduler {
       }
     };
     const operationEntries = programs.flatMap((program) => {
+      const ownerPath = owningAgentPath(program, recordsByRef);
+      if (programUsesJump(program) && ownerPath && ownerPath !== scopePath) return [];
       const scoped = slotInvocationsByProgram.get(program.path) ?? [];
       return scoped.length
         ? scoped.map((slotInvocation) => ({ program, slotInvocation }))
