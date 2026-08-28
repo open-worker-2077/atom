@@ -129,6 +129,112 @@ test('maintenance CLI reloads the persisted context-free Program projection for 
   assert.equal(result.items[0].matches[0].path, 'test');
 });
 
+test('cold startup replaces a stale Program base before publishing and a restarted scheduler consumes it', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-cold-program-base-settle-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const programProjectionFile = path.join(directory, 'program-projection.json');
+  const world = [atom('Root', '', [
+    atom('Target', 'classified'),
+    atom('Read Lock', 'lock({"targets":{"paths":["Root/Target"],"scope":"exact"},"actions":["explore"],"labels":["audit"]})', [], 'program')
+  ])];
+  await fs.writeFile(contextFile, JSON.stringify(world), 'utf8');
+  const repository = createJsonProgramProjectionRepository({ file: programProjectionFile });
+  await repository.save({
+    version: 1,
+    readSetVersion: 1,
+    worldKey: 'old-world-key',
+    programSetKey: 'old-program-set',
+    contextDependent: false,
+    contextIncomplete: false,
+    scopePath: null,
+    locks: [],
+    choices: [],
+    exploreReadPaths: [],
+    failures: []
+  });
+  const scheduler = createProgramRuntimeScheduler({ projectionRepository: repository });
+  const runtime = createLegacyRuntimeComposition({
+    contextFile, graphFile, storeFile, programScheduler: scheduler
+  });
+
+  const initialized = await runtime.initialize({ correlationId: 'cold-current-base' });
+  assert.equal(initialized.projectionStatus, 'published');
+  const currentWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  await scheduler.assertContextFreeProjection(currentWorld);
+  const stored = await repository.load();
+  assert.notEqual(stored.worldKey, 'old-world-key');
+  assert.notEqual(stored.programSetKey, 'old-program-set');
+  assert.equal(stored.contextDependent, false);
+  assert.deepEqual(stored.failures, []);
+
+  const restarted = createProgramRuntimeScheduler({ projectionRepository: repository });
+  const restored = await restarted.refresh(currentWorld, {
+    isolateFailures: true,
+    passive: true,
+    agentOrigin: null
+  });
+  assert.equal(restored.cached, true);
+  assert.equal(restored.locks.length, 1);
+});
+
+test('cold startup does not publish Graph or spatial projections when the current Program base cannot persist', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-cold-program-base-failure-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const programProjectionFile = path.join(directory, 'program-projection.json');
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+    atom('Target'),
+    atom('Read Lock', 'lock({"targets":{"paths":["Root/Target"],"scope":"exact"},"actions":["explore"],"labels":["audit"]})', [], 'program')
+  ])]), 'utf8');
+  const storedRepository = createJsonProgramProjectionRepository({ file: programProjectionFile });
+  await storedRepository.save({
+    version: 1,
+    readSetVersion: 1,
+    worldKey: 'old-world-key',
+    programSetKey: 'old-program-set',
+    contextDependent: false,
+    contextIncomplete: false,
+    scopePath: null,
+    locks: [],
+    choices: [],
+    exploreReadPaths: [],
+    failures: []
+  });
+  const projectionRepository = {
+    load: () => storedRepository.load(),
+    save: async () => {
+      throw Object.assign(new Error('synthetic projection persistence failure'), {
+        code: 'SYNTHETIC_PROGRAM_PROJECTION_WRITE_FAILED'
+      });
+    }
+  };
+  let graphPublications = 0;
+  let spatialPublications = 0;
+  const runtime = createLegacyRuntimeComposition({
+    contextFile,
+    graphFile,
+    storeFile,
+    programScheduler: createProgramRuntimeScheduler({ projectionRepository }),
+    graphPublisher: { publish: async () => { graphPublications += 1; } },
+    spatialPublisher: { publish: async () => { spatialPublications += 1; } }
+  });
+
+  await assert.rejects(
+    runtime.initialize({ correlationId: 'cold-base-persist-failure' }),
+    (error) => error.code === 'RUNTIME_INITIALIZATION_FAILED'
+  );
+  assert.equal(graphPublications, 0);
+  assert.equal(spatialPublications, 0);
+  const stored = await storedRepository.load();
+  assert.equal(stored.worldKey, 'old-world-key');
+  assert.equal(stored.programSetKey, 'old-program-set');
+});
+
 test('maintenance first-window creation prepares the same current context-free projection as the server', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-maintenance-first-window-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

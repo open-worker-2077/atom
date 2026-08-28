@@ -2069,6 +2069,22 @@ export async function executeAtomLanguage(options = {}) {
       });
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
+    if (options.programMode === 'project') {
+      try {
+        const settleWarnings = await settleContextFreeProgramProjectionForWorld(atoms);
+        interactionWarnings.push(...settleWarnings.map((warning) => diagnostic(
+          warning.code ?? 'PROGRAM_RUNTIME_WARNING',
+          warning.message ?? 'Program runtime reported a recoverable warning',
+          warning.details ?? {}
+        )));
+      } catch (error) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          error.code ?? 'ATOM_PROGRAM_PROJECTION_MISSING',
+          error.message,
+          error.details ?? {}
+        )]);
+      }
+    }
     const matches = walkAtoms(atoms);
     const visible = [];
     for (const match of matches) {
