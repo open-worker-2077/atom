@@ -15,7 +15,7 @@
 ## 3. CLI-driven complete journey
 
 - [x] 3.1 Read and validate `atom.cmd --help`, resolve one exact approved test Agent, and execute CLI commands through stdin without internal runtime imports.
-- [ ] 3.2 Implement small synthetic CLI steps for Program, Explore/Transform, path-label authorization and locks, jump, shortcut, slot body, and work order; keep approved BusinessCase scenarios as external pending application-side cases until their live adapters and evidence exist.
+- [x] 3.2 Implement small synthetic CLI steps for Program, Explore/Transform, path-label authorization and locks, jump, shortcut, slot body, and work order; keep approved BusinessCase scenarios as external pending application-side cases until their live adapters and evidence exist.
 - [ ] 3.3 Verify persistence with an authorized bounded runtime restart and exact CLI read-back, restoring service health on every exit path.
 
   - Local checkpoint (not complete): `TC-ESG-ACTIVITY-001-POS-01` resumed from exact-read committed state only. After a bounded 4784 task restart loaded the candidate, the missing temporary `^` result lock compiled through the live exact-path resolver and ran without replaying the deterministic Program or receipt. Final result exact-read preserved all six deterministic fields; Structure/Quantity/Conservation/Semantic gates passed. Evidence is local candidate `0.3.0`, run `nw-pos01-20260829-1750`, commit binding pending. Issue #1 now maps the five closed synthetic business scenarios `POS` / `REJECT` / `PENDING` / `REMAP` / `RESUME`; this audit did not rerun them. The full 3.2 synthetic CLI journey remains incomplete until its independently valid live adapters and evidence are attached.
