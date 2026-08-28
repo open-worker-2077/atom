@@ -357,14 +357,22 @@ async function evaluateSlotSupportExpr(expr, { recordsByPath, evaluateProgram })
 function rebindLocks(locks, previousRecords, records) {
   const oldPathByRef = new Map(previousRecords.map((record) => [record.ref, record.path]));
   const newRefByPath = new Map(records.map((record) => [record.path, record.ref]));
-  return locks.map((lock) => ({
-    ...structuredClone(lock),
-    sourceProgramRef: newRefByPath.get(lock.sourceProgramPath) ?? lock.sourceProgramRef,
-    targets: Array.isArray(lock.targets?.paths) ? structuredClone(lock.targets) : {
+  return locks.map((lock) => {
+    const rebound = {
+      ...structuredClone(lock),
+      sourceProgramRef: newRefByPath.get(lock.sourceProgramPath) ?? lock.sourceProgramRef
+    };
+    if (lock.kind === 'node' || lock.kind === 'contain') {
+      return newRefByPath.has(lock.path) ? rebound : null;
+    }
+    rebound.targets = Array.isArray(lock.targets?.paths) ? structuredClone(lock.targets) : {
       ...structuredClone(lock.targets),
       refs: lock.targets.refs.map((ref) => newRefByPath.get(oldPathByRef.get(ref))).filter(Boolean)
-    }
-  })).filter((lock) => Array.isArray(lock.targets?.paths) || lock.targets.refs.length);
+    };
+    return Array.isArray(rebound.targets?.paths) || rebound.targets.refs.length
+      ? rebound
+      : null;
+  }).filter(Boolean);
 }
 
 function mergeDerivedLocks(...collections) {
