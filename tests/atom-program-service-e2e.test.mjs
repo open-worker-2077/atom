@@ -63,7 +63,7 @@ test('4784 command endpoint owns one scheduler and uses @agent as Program explor
 
   const first = await executeAtomCommandEndpoint({ source: 'atom', interaction: { agent } }, endpoint);
   assert.equal(first.ok, true, JSON.stringify(first));
-  assert.equal(first.messages[0].text, '当前起点:工作Agent');
+  assert.equal(first.messages[0]?.text, '当前起点:工作Agent', JSON.stringify(first));
 
   const cached = await executeAtomCommandEndpoint({ source: 'atom', interaction: { agent } }, endpoint);
   assert.equal(cached.ok, true);
@@ -319,6 +319,16 @@ test('4784 Web workspace node creation commits atom.json before returning the re
     assert.equal(payload.result.ok, true, JSON.stringify(payload.result.errors));
     return payload;
   };
+  const rejectWebEdit = async (operation) => {
+    const response = await fetch(`${running.url}/__atom/api/workspace-edit`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ operation })
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(payload));
+    assert.equal(payload.result.ok, false, JSON.stringify(payload.result));
+    return payload;
+  };
 
   const response = await fetch(`${running.url}/__atom/api/workspace-edit`, {
     method: 'POST',
@@ -406,27 +416,28 @@ test('4784 Web workspace node creation commits atom.json before returning the re
   let existing = current.nodes.find((node) => node.label === 'Existing');
   assert.equal(renamed.detail, 'edited fact');
 
-  current = (await applyWebEdit({
+  const rejectedAgentType = await rejectWebEdit({
     kind: 'node-edit', path: renamed.path, nodeKey: renamed.key,
     atomTypesChanged: true,
     draft: { label: 'Renamed in Web', description: 'edited fact', atomTypes: ['agent'] }
-  })).knowledge;
-  renamed = current.nodes.find((node) => node.label === 'Renamed in Web');
-  assert.deepEqual(renamed.atomTypes, ['agent']);
+  });
+  assert.ok(rejectedAgentType.result.errors.some((error) => (
+    error.code === 'AGENT_REGISTRATION_REQUIRED'
+  )), JSON.stringify(rejectedAgentType));
 
   current = (await applyWebEdit({
     kind: 'node-edit', path: renamed.path, nodeKey: renamed.key,
-    draft: { label: 'Agent renamed only', description: 'edited fact', atomTypes: [] }
+    draft: { label: 'Node renamed only', description: 'edited fact', atomTypes: [] }
   })).knowledge;
-  renamed = current.nodes.find((node) => node.label === 'Agent renamed only');
-  assert.deepEqual(renamed.atomTypes, ['agent']);
+  renamed = current.nodes.find((node) => node.label === 'Node renamed only');
+  assert.deepEqual(renamed.atomTypes, []);
 
   current = (await applyWebEdit({
     kind: 'node-edit', path: renamed.path, nodeKey: renamed.key,
     atomTypesChanged: true,
-    draft: { label: 'Agent renamed only', description: 'edited fact', atomTypes: [] }
+    draft: { label: 'Node renamed only', description: 'edited fact', atomTypes: [] }
   })).knowledge;
-  renamed = current.nodes.find((node) => node.label === 'Agent renamed only');
+  renamed = current.nodes.find((node) => node.label === 'Node renamed only');
   assert.deepEqual(renamed.atomTypes, []);
 
   current = (await applyWebEdit({
@@ -435,7 +446,7 @@ test('4784 Web workspace node creation commits atom.json before returning the re
     target: { key: 'stale-edge-target', atomPath: renamed.atomPath }
   })).knowledge;
   existing = current.nodes.find((node) => node.label === 'Existing');
-  renamed = current.nodes.find((node) => node.label === 'Agent renamed only');
+  renamed = current.nodes.find((node) => node.label === 'Node renamed only');
   assert.equal(current.edges.length, 1);
 
   const labelEdit = await fetch(`${running.url}/__atom/api/workspace-edit`, {
@@ -455,7 +466,7 @@ test('4784 Web workspace node creation commits atom.json before returning the re
   assert.equal((await labelEdit.json()).error.code, 'INVALID_HUMAN_WORKSPACE_REQUEST');
   assert.equal(current.edges[0].label, 'support');
   existing = current.nodes.find((node) => node.label === 'Existing');
-  renamed = current.nodes.find((node) => node.label === 'Agent renamed only');
+  renamed = current.nodes.find((node) => node.label === 'Node renamed only');
 
   current = (await applyWebEdit({
     kind: 'edge-edit', status: 'delete',
@@ -467,12 +478,12 @@ test('4784 Web workspace node creation commits atom.json before returning the re
   })).knowledge;
   assert.equal(current.edges.length, 0);
   existing = current.nodes.find((node) => node.label === 'Existing');
-  renamed = current.nodes.find((node) => node.label === 'Agent renamed only');
+  renamed = current.nodes.find((node) => node.label === 'Node renamed only');
 
   current = (await applyWebEdit({
     kind: 'node-land', source: { key: renamed.key }, target: { path: childPath(existing) }, draft: { id: renamed.id }
   })).knowledge;
-  const moved = current.nodes.find((node) => node.label === 'Agent renamed only');
+  const moved = current.nodes.find((node) => node.label === 'Node renamed only');
   assert.equal(moved.path, childPath(current.nodes.find((node) => node.label === 'Existing')));
 
   const nested = current.nodes.find((node) => node.label === 'Nested in Web');

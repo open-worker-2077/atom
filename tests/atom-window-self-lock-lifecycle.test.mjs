@@ -23,7 +23,7 @@ test('the v1 scheduler does not expose the retired mutable self-lock control sur
   assert.equal(scheduler.activeWindowSelfLocks, undefined);
 });
 
-test('fixed Agent paths allow current descendants peers and one parent but deny ancestors', () => {
+test('fixed Agent paths allow current descendants peers and one parent while denying ancestors', () => {
   const authorize = (targetPath, operation = 'explore') => authorizeWindowGraphPath({
     agentPath: 'Root/Area/Window', targetPath, operation, labels: [], locks: []
   });
@@ -35,7 +35,7 @@ test('fixed Agent paths allow current descendants peers and one parent but deny 
     assert.equal(denied.decision, 'deny', target);
     assert.equal(denied.code, 'WINDOW_ACCESS_DENIED', target);
   }
-  assert.equal(authorize('Root/Area/Window', 'transform').decision, 'deny');
+  assert.equal(authorize('Root/Area/Window', 'transform').decision, 'allow');
   assert.equal(authorize('Root/Area/Window/Child', 'transform').decision, 'allow');
 });
 

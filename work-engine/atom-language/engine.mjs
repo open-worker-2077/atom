@@ -1957,21 +1957,21 @@ export async function executeAtomLanguage(options = {}) {
         details: cycle.failures[0].details ?? {}
       });
     }
-    try {
-      await options.programScheduler.assertContextFreeProjection?.(candidateAtoms, {
-        isolateFailures: true
-      });
-    } catch {
-      await options.programScheduler.persistComputedContextFreeProjection?.(candidateAtoms, {
-        isolateFailures: true
-      });
-      await options.programScheduler.assertContextFreeProjection?.(candidateAtoms, {
-        isolateFailures: true
-      });
+    let runtimeWarnings = cycle.runtimeWarnings ?? [];
+    if (runtimeWarnings.some((warning) => warning.code === 'PROGRAM_PROJECTION_PERSIST_FAILED')
+      && options.programScheduler.persistComputedContextFreeProjection) {
+      try {
+        await options.programScheduler.persistComputedContextFreeProjection(candidateAtoms, {
+          isolateFailures: true
+        });
+        runtimeWarnings = runtimeWarnings.filter((warning) => (
+          warning.code !== 'PROGRAM_PROJECTION_PERSIST_FAILED'
+        ));
+      } catch (error) {
+        if (error?.code !== 'PROGRAM_PROJECTION_PERSIST_FAILED') throw error;
+      }
     }
-    return (cycle.runtimeWarnings ?? []).filter((warning) => (
-      warning.code !== 'PROGRAM_PROJECTION_PERSIST_FAILED'
-    ));
+    return runtimeWarnings;
   }
 
   async function commitChangedGraph(candidateAtoms, { registrationChange = null } = {}) {
@@ -2069,7 +2069,7 @@ export async function executeAtomLanguage(options = {}) {
       });
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
-    if (options.programMode === 'project') {
+    if (options.programMode === 'project' && (programCycle.failures?.length ?? 0) > 0) {
       try {
         const settleWarnings = await settleContextFreeProgramProjectionForWorld(atoms);
         interactionWarnings.push(...settleWarnings.map((warning) => diagnostic(

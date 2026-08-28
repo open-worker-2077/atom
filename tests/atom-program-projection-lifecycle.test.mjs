@@ -239,7 +239,7 @@ test('a persisted Program projection cannot be reused for a different world revi
   );
 });
 
-test('passive read preparation fails closed without a validated context-free projection', async () => {
+test('passive read preparation computes on a cache miss and reuses the computed index', async () => {
   let executions = 0;
   const scheduler = createProgramRuntimeScheduler({
     runProgram: async () => {
@@ -248,14 +248,55 @@ test('passive read preparation fails closed without a validated context-free pro
     }
   });
 
-  await assert.rejects(
-    scheduler.refresh([atom('Program', '# must not execute', [], 'program')], {
-      passive: true,
-      agentOrigin: { path: 'Agent' }
-    }),
-    (error) => error.code === 'ATOM_PROGRAM_PROJECTION_MISSING'
-  );
-  assert.equal(executions, 0);
+  const world = [atom('Program', '# compute once', [], 'program')];
+  const first = await scheduler.refresh(world, {
+    passive: true,
+    agentOrigin: { path: 'Agent' }
+  });
+  assert.equal(first.cached, false);
+  assert.equal(executions, 1);
+
+  const second = await scheduler.refresh(structuredClone(world), {
+    passive: true,
+    agentOrigin: { path: 'Agent' }
+  });
+  assert.equal(second.cached, true);
+  assert.equal(executions, 1);
+});
+
+test('Agent key, lock, and path changes invalidate accelerated Program results', async () => {
+  let executions = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async () => {
+      executions += 1;
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+  const world = [atom('Root', '', [
+    atom('Agent', 'agent({"labels":["^"],"functions":{"groups":[],"names":["transform"]}})', [], 'program@agent'),
+    atom('Lock', 'lock({"targets":{"paths":["Root/Agent"],"scope":"exact"},"actions":["transform"],"labels":["^"]})', [], 'program')
+  ])];
+
+  await scheduler.refresh(world);
+  assert.equal(executions, 2);
+  await scheduler.refresh(structuredClone(world));
+  assert.equal(executions, 2, 'an unchanged world should reuse accelerated results');
+
+  const keyChanged = structuredClone(world);
+  keyChanged[0].contain[0].situation = keyChanged[0].contain[0].situation.replace('["^"]', '["^^"]');
+  await scheduler.refresh(keyChanged);
+  assert.equal(executions, 3, 'an Agent key change must invalidate its affected accelerated result');
+
+  const lockChanged = structuredClone(keyChanged);
+  lockChanged[0].contain[1].situation = lockChanged[0].contain[1].situation.replace('["^"]', '["^^"]');
+  await scheduler.refresh(lockChanged);
+  assert.equal(executions, 4, 'a lock change must invalidate its affected accelerated result');
+
+  const pathChanged = structuredClone(lockChanged);
+  pathChanged[0].contain[0]['thing@program@agent'] = 'RenamedAgent';
+  pathChanged[0].contain[1].situation = pathChanged[0].contain[1].situation.replace('Root/Agent', 'Root/RenamedAgent');
+  await scheduler.refresh(pathChanged);
+  assert.equal(executions, 6, 'a valid path move must invalidate the Agent and its affected lock result');
 });
 
 test('startup isolates Agent-bound jump failures into a restartable context-free passive projection', async () => {
@@ -301,6 +342,7 @@ test('startup isolates Agent-bound jump failures into a restartable context-free
   const restored = await restarted.refresh(structuredClone(world), {
     isolateFailures: true,
     passive: true,
+    allowContextIncomplete: true,
     agentOrigin: { ref: 'agent-ref', path: 'Root/Window' }
   });
 
@@ -428,6 +470,7 @@ test('startup settles isolated Program failures before replacing a stale passive
   const restored = await restarted.refresh(structuredClone(world), {
     isolateFailures: true,
     passive: true,
+    allowContextIncomplete: true,
     agentOrigin: { ref: 'agent-ref', path: 'Agent' }
   });
   assert.equal(restored.cached, true);

@@ -90,6 +90,21 @@ test('contain locks are checked before target node locks and labels are action-s
   assert.equal(decide('Root/Order/Agent/Area/Record', 'transform', ['edit']).decision, 'allow');
 });
 
+test('Agent targets use caret jurisdiction and exact business labels through the ordinary matcher', () => {
+  const targetPath = 'Root/Order/Agent';
+  const decide = (labels, required) => authorizeWindowGraphPath({
+    agentPath: targetPath,
+    targetPath,
+    operation: 'transform',
+    labels,
+    locks: [{ kind: 'node', path: targetPath, actions: ['transform'], labels: required }]
+  });
+
+  assert.equal(decide(['^^', 'finance'], ['^', 'finance']).decision, 'allow');
+  assert.equal(decide(['^', 'finance'], ['^^', 'finance']).code, 'GRAPH_LOCK_DENIED');
+  assert.equal(decide(['^^', 'Finance'], ['^', 'finance']).code, 'GRAPH_LOCK_DENIED');
+});
+
 test('agent() declares the current Program node and preserves symbolic scopes with effective names', async () => {
   const cycle = await createProgramRuntimeScheduler().refresh([
     atom('Registrar', 'agent({"labels":["^^","audit"],"functions":{"groups":["form"],"names":["message","form"]}})', [], 'program')
@@ -118,16 +133,9 @@ test('agent() rejects target, lock, mode, missing functions, null and wildcard g
   }
 });
 
-test('agent registry exposes ancestor-only daily management and a one-time trusted bootstrap boundary', () => {
+test('agent registry does not define a separate management authority', () => {
   const registration = programFunctionRegistry().functions.find((entry) => entry.name === 'agent');
-  assert.deepEqual(registration.contract.management, {
-    daily: 'registered-ancestor-agent-shared-cli-graph-chain',
-    selfReconfiguration: 'forbidden',
-    sourceUpdate: 'full-situation-replacement-with-delegation-validation',
-    orphanBootstrap: 'trusted-maintenance-create-reparent-register-verify-then-exit',
-    bootstrapUse: ['first-start', 'disaster-recovery', 'necessary-migration'],
-    authority: 'program-source-and-graph-only'
-  });
+  assert.equal(Object.hasOwn(registration.contract, 'management'), false);
 });
 
 test('ordinary Transform cannot create or type a Thing as Agent', async (t) => {
@@ -148,6 +156,67 @@ test('ordinary Transform cannot create or type a Thing as Agent', async (t) => {
   });
   assert.equal(typed.ok, false);
   assert.equal(typed.errors[0].code, 'AGENT_REGISTRATION_REQUIRED');
+});
+
+test('an Agent key may satisfy its own node lock and reconfigure without exceeding its authority', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-self-reconfigure-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const initialSource = 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","transform"]}})';
+  const updatedSource = 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore"]}})';
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+    atom('Window', initialSource, [], 'program@agent'),
+    atom(
+      'Window Lock',
+      'lock({"targets":{"paths":["Root/Window"],"scope":"exact"},"actions":["transform"],"labels":["^"]})',
+      [],
+      'program'
+    )
+  ])], null, 2));
+
+  const result = await executeAtomLanguage({
+    source: `transform {"thing":"Root/Window",${JSON.stringify(`situation.rep.${updatedSource}`)}}`,
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler(),
+    interaction: { id: 'agent-self-reconfigure', agent: { path: 'Root/Window' } }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(world[0].contain[0].situation, updatedSource);
+});
+
+test('an unmatched Agent node lock denies self-reconfiguration without mutation', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-self-lock-denied-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const initialSource = 'agent({"labels":["finance"],"functions":{"groups":[],"names":["explore","transform"]}})';
+  const updatedSource = 'agent({"labels":["finance"],"functions":{"groups":[],"names":["explore"]}})';
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+    atom('Window', initialSource, [], 'program@agent'),
+    atom(
+      'Window Lock',
+      'lock({"targets":{"paths":["Root/Window"],"scope":"exact"},"actions":["transform"],"labels":["audit"]})',
+      [],
+      'program'
+    )
+  ])], null, 2));
+
+  const result = await executeAtomLanguage({
+    source: `transform {"thing":"Root/Window",${JSON.stringify(`situation.rep.${updatedSource}`)}}`,
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler(),
+    interaction: { id: 'agent-self-lock-denied', agent: { path: 'Root/Window' } }
+  });
+
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.ok(result.errors.some((error) => error.code === 'GRAPH_LOCK_DENIED'), JSON.stringify(result));
+  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(world[0].contain[0].situation, initialSource);
 });
 
 test('jump and slot_body no longer expose caller-defined fixed-lock switches', async () => {

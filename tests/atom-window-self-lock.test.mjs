@@ -61,7 +61,7 @@ test('a source-derived Agent registration activates its fixed window in the same
 
   const controller = createAccessController(atoms, { agentPath, agentSecurity: cycle.agentSecurity });
   assert.equal(await decision(controller, atoms, '祖先', 'read'), 'deny');
-  assert.equal(await decision(controller, atoms, agentPath, 'write'), 'deny');
+  assert.equal(await decision(controller, atoms, agentPath, 'write'), 'allow');
   assert.equal(await decision(controller, atoms, agentPath, 'read'), 'allow');
 });
 
@@ -78,15 +78,15 @@ test('fixed window Explore allows current descendants peers and only the direct 
   }
 });
 
-test('fixed window Transform allows descendants only', async () => {
+test('fixed window Transform allows the current Agent and descendants only', async () => {
   const atoms = world();
   const controller = createAccessController(atoms, {
     agentPath: '祖先/父/窗口', agentSecurity: security
   });
-  for (const path of ['祖先/父/窗口/后代', '祖先/父/窗口/后代/深后代']) {
+  for (const path of ['祖先/父/窗口', '祖先/父/窗口/后代', '祖先/父/窗口/后代/深后代']) {
     assert.equal(await decision(controller, atoms, path, 'write'), 'allow', path);
   }
-  for (const path of ['祖先/父/窗口', '祖先/父/兄弟', '祖先/父', '祖先', '其他分支']) {
+  for (const path of ['祖先/父/兄弟', '祖先/父', '祖先', '其他分支']) {
     assert.equal(await decision(controller, atoms, path, 'write'), 'deny', path);
   }
 });

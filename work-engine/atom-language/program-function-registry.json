@@ -107,15 +107,7 @@
         "fixedWindowLock": true,
         "persistedFunctionScopes": "literal-symbolic-groups-and-names",
         "groupResolution": "current-registry-descendant-union",
-        "delegation": "same-or-descendant-symbolic-scope",
-        "management": {
-          "daily": "registered-ancestor-agent-shared-cli-graph-chain",
-          "selfReconfiguration": "forbidden",
-          "sourceUpdate": "full-situation-replacement-with-delegation-validation",
-          "orphanBootstrap": "trusted-maintenance-create-reparent-register-verify-then-exit",
-          "bootstrapUse": ["first-start", "disaster-recovery", "necessary-migration"],
-          "authority": "program-source-and-graph-only"
-        }
+        "delegation": "same-or-descendant-symbolic-scope"
       }
     },
     {

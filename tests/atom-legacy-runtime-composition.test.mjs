@@ -180,7 +180,7 @@ test('cold startup replaces a stale Program base before publishing and a restart
   assert.equal(restored.locks.length, 1);
 });
 
-test('cold startup does not publish Graph or spatial projections when the current Program base cannot persist', async (t) => {
+test('cold startup publishes from computed permissions when the disposable index cannot persist', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-cold-program-base-failure-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -224,12 +224,13 @@ test('cold startup does not publish Graph or spatial projections when the curren
     spatialPublisher: { publish: async () => { spatialPublications += 1; } }
   });
 
-  await assert.rejects(
-    runtime.initialize({ correlationId: 'cold-base-persist-failure' }),
-    (error) => error.code === 'RUNTIME_INITIALIZATION_FAILED'
-  );
-  assert.equal(graphPublications, 0);
-  assert.equal(spatialPublications, 0);
+  const initialized = await runtime.initialize({ correlationId: 'cold-base-persist-failure' });
+  assert.equal(initialized.projectionStatus, 'published');
+  assert.equal(graphPublications, 1);
+  assert.equal(spatialPublications, 1);
+  assert.ok(initialized.initialization.warnings.some((warning) => (
+    warning.code === 'PROGRAM_PROJECTION_PERSIST_FAILED'
+  )), JSON.stringify(initialized));
   const stored = await storedRepository.load();
   assert.equal(stored.worldKey, 'old-world-key');
   assert.equal(stored.programSetKey, 'old-program-set');
@@ -295,7 +296,7 @@ test('maintenance first-window creation prepares the same current context-free p
   });
 });
 
-test('trusted maintenance may reconfigure a registered Agent source while the Agent cannot modify itself', async (t) => {
+test('Agent self-reconfiguration reaches delegation validation while trusted maintenance remains recovery-only', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-maintenance-agent-reconfigure-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -318,7 +319,7 @@ test('trusted maintenance may reconfigure a registered Agent source while the Ag
     agentPath
   });
   assert.equal(selfChange.ok, false, JSON.stringify(selfChange));
-  assert.ok(selfChange.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), JSON.stringify(selfChange));
+  assert.ok(selfChange.errors.some((error) => error.code === 'PROGRAM_FUNCTION_DELEGATION_DENIED'), JSON.stringify(selfChange));
   let world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(findAtom(world, agentPath).situation, originalSource);
 
@@ -365,7 +366,7 @@ test('trusted maintenance may reconfigure a registered Agent source while the Ag
   assert.equal(findAtom(world, agentPath).situation, replacementSource);
 });
 
-test('one-time bootstrap establishes a real ancestor Agent and then exits the daily management path', async (t) => {
+test('bootstrap establishes an ancestor Agent and ordinary authorization governs subsequent reconfiguration', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-ancestor-agent-management-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -396,7 +397,7 @@ test('one-time bootstrap establishes a real ancestor Agent and then exits the da
     agentPath: siblingPath
   });
   assert.equal(selfDeniedBeforeBootstrap.ok, false, JSON.stringify(selfDeniedBeforeBootstrap));
-  assert.ok(selfDeniedBeforeBootstrap.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), JSON.stringify(selfDeniedBeforeBootstrap));
+  assert.ok(selfDeniedBeforeBootstrap.errors.some((error) => error.code === 'PROGRAM_FUNCTION_DELEGATION_DENIED'), JSON.stringify(selfDeniedBeforeBootstrap));
 
   const maintenance = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
   const created = await maintenance({
@@ -440,13 +441,12 @@ test('one-time bootstrap establishes a real ancestor Agent and then exits the da
   world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(findAtom(world, managedPath).situation, replacementSource);
 
-  const selfDenied = await daily.execute({
+  const selfReconfigured = await daily.execute({
     source: replacement(managerPath),
-    correlationId: 'manager-cannot-reconfigure-self',
+    correlationId: 'manager-reconfigures-self-within-authority',
     agentPath: managerPath
   });
-  assert.equal(selfDenied.ok, false, JSON.stringify(selfDenied));
-  assert.ok(selfDenied.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), JSON.stringify(selfDenied));
+  assert.equal(selfReconfigured.ok, true, JSON.stringify(selfReconfigured));
   const outsideDenied = await daily.execute({
     source: 'transform {"thing":"Root/Domain/Outside","situation.rep.changed"}',
     correlationId: 'manager-cannot-write-outside',

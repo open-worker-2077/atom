@@ -105,7 +105,7 @@ function fixedWindowAllows(agentPath, targetPath, operation, windowLifecycle = n
             || targetPath === futurePath
             || (futurePath && isBelow(futurePath, targetPath))));
     }
-    return isBelow(agentPath, targetPath);
+    return targetPath === agentPath || isBelow(agentPath, targetPath);
   }
   return targetPath === agentPath
     || isBelow(agentPath, targetPath)

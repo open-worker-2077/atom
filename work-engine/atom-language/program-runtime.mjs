@@ -1617,17 +1617,11 @@ export class ProgramRuntimeScheduler {
     if (options.force !== true && !options.programSelector && !options.triggerEvent) {
       const persisted = await this.persistedProjection({
         records, programs, isolateFailures, fingerprint: key, agentOrigin: options.agentOrigin,
-        allowContextIncomplete: options.passive === true
+        allowContextIncomplete: options.allowContextIncomplete === true
       });
       if (persisted) {
         this.completed.set(key, persisted);
         return persisted;
-      }
-      if (options.passive === true) {
-        const error = new Error('No validated context-free Program projection exists for passive read preparation');
-        error.code = 'ATOM_PROGRAM_PROJECTION_MISSING';
-        error.details = { worldKey: worldRevisionKey(records) };
-        throw error;
       }
     }
     const byPath = new Map(records.map((record) => [record.path, record]));
