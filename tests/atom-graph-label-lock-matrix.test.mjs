@@ -5,6 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
+import { createLegacyRuntimeComposition } from '../src/atom-system/adapters/legacy-runtime-composition.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
@@ -115,3 +117,98 @@ for (const kind of ['node', 'contain']) {
     });
   }
 }
+
+test('a successful action-split Transform publishes a current Program projection for the next locked Transform', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-node-lock-next-transform-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const programProjectionFile = path.join(directory, 'program-projection.json');
+  const unlabelledPath = 'Root/Holder/Unlabelled';
+  const nodeExplorePath = `${unlabelledPath}/NodeExplore`;
+  const nodeTransformPath = `${unlabelledPath}/NodeTransform`;
+  const holderSource = 'agent({"labels":["node-explore","node-transform"],"functions":{"groups":[],"names":["explore","lock","transform"]}})';
+  const unlabelledSource = 'agent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})';
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+    atom('Holder', holderSource, [
+      atom('Unlabelled', unlabelledSource, [
+        atom('NodeExplore', 'classified'),
+        atom('NodeTransform', 'classified')
+      ], 'program@agent'),
+      atom('Locks', '', [
+        atom('NodeExplore Lock', `lock(${pythonLiteral({
+          targets: { paths: [nodeExplorePath], scope: 'exact' },
+          actions: ['explore'], labels: ['node-explore']
+        })})`, [], 'program'),
+        atom('NodeTransform Lock', `lock(${pythonLiteral({
+          targets: { paths: [nodeTransformPath], scope: 'exact' },
+          actions: ['transform'], labels: ['node-transform']
+        })})`, [], 'program')
+      ])
+    ], 'program@agent')
+  ])]), 'utf8');
+
+  const storedProjectionRepository = createJsonProgramProjectionRepository({ file: programProjectionFile });
+  let failNextProjectionSave = false;
+  const projectionRepository = {
+    load: () => storedProjectionRepository.load(),
+    save: async (projection) => {
+      if (failNextProjectionSave) {
+        failNextProjectionSave = false;
+        throw Object.assign(new Error('synthetic first settlement write failure'), {
+          code: 'SYNTHETIC_PROGRAM_PROJECTION_WRITE_FAILED'
+        });
+      }
+      return storedProjectionRepository.save(projection);
+    }
+  };
+  const programScheduler = createProgramRuntimeScheduler({ projectionRepository });
+  const runtime = createLegacyRuntimeComposition({
+    contextFile,
+    graphFile,
+    storeFile,
+    programScheduler
+  });
+  await runtime.initialize({ correlationId: 'node-lock-startup' });
+  const initialProjection = await projectionRepository.load();
+  failNextProjectionSave = true;
+  const first = await runtime.execute({
+    source: `transform {"thing":${JSON.stringify(nodeExplorePath)},"situation.rep.updated"}`,
+    correlationId: 'node-explore-action-split',
+    agentPath: unlabelledPath
+  });
+  assert.equal(first.ok, true, JSON.stringify(first));
+  const persistedAfterFirst = await projectionRepository.load();
+  assert.notEqual(persistedAfterFirst.worldKey, initialProjection.worldKey);
+  assert.equal(persistedAfterFirst.contextDependent, false);
+  assert.deepEqual(persistedAfterFirst.failures, []);
+
+  const restarted = createLegacyRuntimeComposition({
+    contextFile,
+    graphFile,
+    storeFile,
+    programScheduler: createProgramRuntimeScheduler({
+      projectionRepository: storedProjectionRepository
+    })
+  });
+
+  const denied = await restarted.execute({
+    source: `transform {"thing":${JSON.stringify(nodeTransformPath)},"situation.rep.denied"}`,
+    correlationId: 'node-transform-unlabelled',
+    agentPath: unlabelledPath
+  });
+  assert.equal(denied.ok, false, JSON.stringify(denied));
+  assert.ok(denied.errors.some((error) => error.code === 'GRAPH_LOCK_DENIED'), JSON.stringify(denied));
+  assert.equal(denied.errors.some((error) => error.code === 'ATOM_PROGRAM_PROJECTION_MISSING'), false);
+
+  const allowed = await restarted.execute({
+    source: `transform {"thing":${JSON.stringify(nodeTransformPath)},"situation.rep.updated"}`,
+    correlationId: 'node-transform-holder',
+    agentPath: 'Root/Holder'
+  });
+  assert.equal(allowed.ok, true, JSON.stringify(allowed));
+  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(findAtom(world, nodeExplorePath).situation, 'updated');
+  assert.equal(findAtom(world, nodeTransformPath).situation, 'updated');
+});

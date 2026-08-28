@@ -118,6 +118,18 @@ test('agent() rejects target, lock, mode, missing functions, null and wildcard g
   }
 });
 
+test('agent registry exposes ancestor-only daily management and a one-time trusted bootstrap boundary', () => {
+  const registration = programFunctionRegistry().functions.find((entry) => entry.name === 'agent');
+  assert.deepEqual(registration.contract.management, {
+    daily: 'registered-ancestor-agent-shared-cli-graph-chain',
+    selfReconfiguration: 'forbidden',
+    sourceUpdate: 'full-situation-replacement-with-delegation-validation',
+    orphanBootstrap: 'trusted-maintenance-create-reparent-register-verify-then-exit',
+    bootstrapUse: ['first-start', 'disaster-recovery', 'necessary-migration'],
+    authority: 'program-source-and-graph-only'
+  });
+});
+
 test('ordinary Transform cannot create or type a Thing as Agent', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-forgery-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

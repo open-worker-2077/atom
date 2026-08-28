@@ -259,6 +259,110 @@ test('trusted maintenance may reconfigure a registered Agent source while the Ag
   assert.equal(findAtom(world, agentPath).situation, replacementSource);
 });
 
+test('one-time bootstrap establishes a real ancestor Agent and then exits the daily management path', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-ancestor-agent-management-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const managerPath = 'Root/Domain/Manager';
+  const siblingPath = 'Root/Domain/Worker';
+  const managedPath = `${managerPath}/Worker`;
+  const managerSource = 'agent({"labels":[],"functions":{"groups":[],"names":["agent","explore","slot_body","transform","use_program"]}})';
+  const workerSource = 'agent({"labels":[],"functions":{"groups":[],"names":["agent"]}})';
+  const replacementSource = 'agent({"labels":[],"functions":{"groups":[],"names":["agent","explore","slot_body","transform","use_program"]}})';
+  const overreachSource = 'agent({"labels":[],"functions":{"groups":[],"names":["agent","explore","message","slot_body","transform","use_program"]}})';
+  const replacement = (target) => (
+    `transform {"thing":${JSON.stringify(target)},${JSON.stringify(`situation.rep.${replacementSource}`)}}`
+  );
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+    atom('Domain', '', [
+      atom('Worker', workerSource, [], 'program@agent'),
+      atom('Outside', 'unchanged')
+    ])
+  ])]), 'utf8');
+
+  const worker = createLegacyRuntimeComposition({ contextFile, graphFile, storeFile });
+  await worker.initialize({ correlationId: 'before-bootstrap-startup' });
+  const selfDeniedBeforeBootstrap = await worker.execute({
+    source: replacement(siblingPath),
+    correlationId: 'orphan-cannot-expand-itself',
+    agentPath: siblingPath
+  });
+  assert.equal(selfDeniedBeforeBootstrap.ok, false, JSON.stringify(selfDeniedBeforeBootstrap));
+  assert.ok(selfDeniedBeforeBootstrap.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), JSON.stringify(selfDeniedBeforeBootstrap));
+
+  const maintenance = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
+  const created = await maintenance({
+    source: `transform new {"thing@program":${JSON.stringify(managerPath)},"situation":${JSON.stringify(managerSource)},"contain":[],"support":[]}`,
+    interaction: { id: 'one-time-bootstrap-create-manager' }
+  });
+  assert.equal(created.ok, true, JSON.stringify(created));
+  const reparented = await maintenance({
+    source: 'transform {"thing.mov.Root/Domain/Manager":"Root/Domain/Worker"}',
+    interaction: { id: 'one-time-bootstrap-reparent' }
+  });
+  assert.equal(reparented.ok, true, JSON.stringify(reparented));
+  let world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(Object.hasOwn(findAtom(world, managerPath), 'thing@program'), true);
+  const registered = await maintenance({
+    source: `transform {"thing.run.":${JSON.stringify(managerPath)}}`,
+    interaction: { id: 'one-time-bootstrap-register-manager' }
+  });
+  assert.equal(registered.ok, true, JSON.stringify(registered));
+  world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(Object.hasOwn(findAtom(world, managerPath), 'thing@program@agent'), true);
+
+  const daily = createLegacyRuntimeComposition({ contextFile, graphFile, storeFile });
+  await daily.initialize({ correlationId: 'daily-management-startup' });
+  const overreach = await daily.execute({
+    source: `transform {"thing":${JSON.stringify(managedPath)},${JSON.stringify(`situation.rep.${overreachSource}`)}}`,
+    correlationId: 'ancestor-cannot-overgrant-child',
+    agentPath: managerPath
+  });
+  assert.equal(overreach.ok, false, JSON.stringify(overreach));
+  assert.ok(overreach.errors.some((error) => error.code === 'PROGRAM_FUNCTION_DELEGATION_DENIED'), JSON.stringify(overreach));
+  world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(findAtom(world, managedPath).situation, workerSource);
+
+  const reconfigured = await daily.execute({
+    source: replacement(managedPath),
+    correlationId: 'ancestor-reconfigures-child',
+    agentPath: managerPath
+  });
+  assert.equal(reconfigured.ok, true, JSON.stringify(reconfigured));
+  world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(findAtom(world, managedPath).situation, replacementSource);
+
+  const selfDenied = await daily.execute({
+    source: replacement(managerPath),
+    correlationId: 'manager-cannot-reconfigure-self',
+    agentPath: managerPath
+  });
+  assert.equal(selfDenied.ok, false, JSON.stringify(selfDenied));
+  assert.ok(selfDenied.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), JSON.stringify(selfDenied));
+  const outsideDenied = await daily.execute({
+    source: 'transform {"thing":"Root/Domain/Outside","situation.rep.changed"}',
+    correlationId: 'manager-cannot-write-outside',
+    agentPath: managerPath
+  });
+  assert.equal(outsideDenied.ok, false, JSON.stringify(outsideDenied));
+  assert.ok(outsideDenied.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), JSON.stringify(outsideDenied));
+  world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(findAtom(world, 'Root/Domain/Outside').situation, 'unchanged');
+
+  const coldScheduler = createProgramRuntimeScheduler();
+  await coldScheduler.rebuildAgentSecurity(world);
+  assert.deepEqual(coldScheduler.agentSecurity.get(managedPath), {
+    labels: [],
+    functionScopes: {
+      groups: [],
+      names: ['agent', 'explore', 'slot_body', 'transform', 'use_program']
+    },
+    functions: ['agent', 'explore', 'slot_body', 'transform', 'use_program']
+  });
+});
+
 test('legacy composition binds world, Program, projection and spatial publication behind one runtime', async () => {
   const calls = [];
   const programScheduler = { id: 'scheduler' };

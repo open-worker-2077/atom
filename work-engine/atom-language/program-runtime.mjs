@@ -1070,6 +1070,96 @@ export class ProgramRuntimeScheduler {
     return this.agentSecurity;
   }
 
+  async inspectAgentRegistration(atoms, selector) {
+    const records = worldRecords(atoms);
+    const programs = programRecords(records);
+    const program = programs.find((entry) => entry.path === selector);
+    if (!program?.types.includes('agent')) {
+      throw Object.assign(
+        new Error(`Registered Agent Program was not found: ${selector}`),
+        { code: 'AGENT_REGISTRATION_PROGRAM_NOT_FOUND' }
+      );
+    }
+    const inspected = await this.runBounded(() => this.inspectProgram({
+      python: this.python,
+      records,
+      programs,
+      program,
+      timeoutMs: this.timeoutMs,
+      executeExplore: async () => {
+        throw Object.assign(
+          new Error('Agent registration inspection cannot execute Graph functions'),
+          { code: 'INVALID_AGENT_REGISTRATION_RECONSTRUCTION_EFFECT' }
+        );
+      },
+      validateOnly: true
+    }));
+    const declarations = inspected.agentRegistrations ?? [];
+    if (declarations.length !== 1) {
+      throw Object.assign(
+        new Error(`Registered Agent Program requires exactly one literal agent() declaration: ${selector}`),
+        { code: 'AGENT_REGISTRATION_SOURCE_REQUIRED' }
+      );
+    }
+    return structuredClone(declarations[0]);
+  }
+
+  async assertContextFreeProjection(atoms, { isolateFailures = true } = {}) {
+    if (!this.projectionRepository) return Object.freeze({ persisted: false });
+    const records = worldRecords(atoms);
+    const programs = programRecords(records);
+    const stored = await this.projectionRepository.load();
+    if (!stored
+      || stored.worldKey !== worldRevisionKey(records)
+      || stored.programSetKey !== programSetFingerprint(programs, isolateFailures, records)
+      || stored.contextDependent !== false
+      || !Array.isArray(stored.failures)
+      || stored.failures.length > 0) {
+      throw Object.assign(
+        new Error('The committed world does not have a consumable context-free Program projection'),
+        {
+          code: 'ATOM_PROGRAM_PROJECTION_MISSING',
+          details: { worldKey: worldRevisionKey(records) }
+        }
+      );
+    }
+    this.loadedProjection = structuredClone(stored);
+    return Object.freeze({ persisted: true, worldKey: stored.worldKey });
+  }
+
+  async persistComputedContextFreeProjection(atoms, { isolateFailures = true } = {}) {
+    if (!this.projectionRepository) return Object.freeze({ persisted: false });
+    const records = worldRecords(atoms);
+    const programs = programRecords(records);
+    const key = fingerprint(records, programs, null, isolateFailures);
+    const value = this.completed.get(key);
+    const requests = value?.exploreRequests ?? [];
+    if (!value
+      || (value.failures?.length ?? 0) > 0
+      || requestsDependOnAgent(requests)
+      || (value.jumps?.length ?? 0) > 0) {
+      throw Object.assign(
+        new Error('No computed context-free Program projection is available for persistence'),
+        { code: 'ATOM_PROGRAM_PROJECTION_MISSING', details: { worldKey: worldRevisionKey(records) } }
+      );
+    }
+    const warning = await this.saveProjection({
+      records,
+      programs,
+      isolateFailures,
+      value,
+      requests,
+      agentOrigin: null
+    });
+    if (warning) {
+      throw Object.assign(new Error(warning.message), {
+        code: warning.code,
+        details: warning.details ?? {}
+      });
+    }
+    return this.assertContextFreeProjection(atoms, { isolateFailures });
+  }
+
   async rebuildRequestDrivenLocks(atoms) {
     const revision = revisionOfWorldFacts(atoms);
     if (this.requestDrivenLocksWorldRevision === revision) return this.requestDrivenLocks ?? [];

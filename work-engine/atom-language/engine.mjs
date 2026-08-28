@@ -267,6 +267,52 @@ async function validatePrograms(atoms, contextFile, previousAtoms = null, progra
   }
 }
 
+async function validateRegisteredAgentSourceDelegation({
+  beforeAtoms,
+  afterAtoms,
+  creatorSecurity,
+  programScheduler
+}) {
+  if (!creatorSecurity) return { ok: true, errors: [] };
+  if (typeof programScheduler?.inspectAgentRegistration !== 'function') {
+    return {
+      ok: false,
+      errors: [diagnostic(
+        'AGENT_RECONFIGURATION_VALIDATOR_UNAVAILABLE',
+        'Registered Agent source changes require the Agent delegation validator'
+      )]
+    };
+  }
+  const beforeSources = new Map(walkAtoms(beforeAtoms)
+    .filter((match) => graphTypesAtPath(beforeAtoms, match.path.join('/')).includes('agent'))
+    .map((match) => [
+      match.path.join('/'),
+      oneStoredField(match.atom, 'situation')?.value
+    ]));
+  const changedAgents = walkAtoms(afterAtoms).filter((match) => {
+    const targetPath = match.path.join('/');
+    const types = graphTypesAtPath(afterAtoms, targetPath);
+    return types.includes('agent')
+      && types.includes('program')
+      && beforeSources.get(targetPath) !== oneStoredField(match.atom, 'situation')?.value;
+  });
+  try {
+    for (const match of changedAgents) {
+      const registration = await programScheduler.inspectAgentRegistration(
+        afterAtoms,
+        match.path.join('/')
+      );
+      validateAgentDelegation({ creator: creatorSecurity, child: registration });
+    }
+    return { ok: true, errors: [] };
+  } catch (error) {
+    return {
+      ok: false,
+      errors: [diagnostic(error.code ?? 'INVALID_AGENT_DELEGATION', error.message, error.details ?? {})]
+    };
+  }
+}
+
 function appendNestedAtom(atoms, parentMatch, atom) {
   const nextAtoms = structuredClone(atoms);
   const lineage = [];
@@ -1905,7 +1951,27 @@ export async function executeAtomLanguage(options = {}) {
     if ((cycle.failures?.length ?? 0) > 0) {
       cycle = await options.programScheduler.refresh(candidateAtoms, refreshOptions);
     }
-    return cycle.runtimeWarnings ?? [];
+    if ((cycle.failures?.length ?? 0) > 0) {
+      throw Object.assign(new Error('The context-free Program projection did not settle'), {
+        code: cycle.failures[0].code ?? 'ATOM_PROGRAM_FAILED',
+        details: cycle.failures[0].details ?? {}
+      });
+    }
+    try {
+      await options.programScheduler.assertContextFreeProjection?.(candidateAtoms, {
+        isolateFailures: true
+      });
+    } catch {
+      await options.programScheduler.persistComputedContextFreeProjection?.(candidateAtoms, {
+        isolateFailures: true
+      });
+      await options.programScheduler.assertContextFreeProjection?.(candidateAtoms, {
+        isolateFailures: true
+      });
+    }
+    return (cycle.runtimeWarnings ?? []).filter((warning) => (
+      warning.code !== 'PROGRAM_PROJECTION_PERSIST_FAILED'
+    ));
   }
 
   async function commitChangedGraph(candidateAtoms, { registrationChange = null } = {}) {
@@ -2242,6 +2308,18 @@ export async function executeAtomLanguage(options = {}) {
       if (!compiled.ok) {
         return failureBase(parsed, contextFile, projectionFile, atoms, compiled.errors);
       }
+      const delegated = await validateRegisteredAgentSourceDelegation({
+        beforeAtoms: atoms,
+        afterAtoms: nextAtoms,
+        creatorSecurity: interaction.agent?.path
+          ? options.programScheduler?.agentSecurity?.get(interaction.agent.path)
+            ?? programCycle.agentSecurity
+          : null,
+        programScheduler: options.programScheduler
+      });
+      if (!delegated.ok) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
+      }
       await commitChangedGraph(nextAtoms);
       for (const record of [...programTransformLogs, ...transformLogs]) {
         try {
@@ -2438,6 +2516,18 @@ export async function executeAtomLanguage(options = {}) {
         atoms,
         compiled.errors
       );
+    }
+    const delegated = await validateRegisteredAgentSourceDelegation({
+      beforeAtoms: atoms,
+      afterAtoms: nextAtoms,
+      creatorSecurity: interaction.agent?.path
+        ? options.programScheduler?.agentSecurity?.get(interaction.agent.path)
+          ?? programCycle.agentSecurity
+        : null,
+      programScheduler: options.programScheduler
+    });
+    if (!delegated.ok) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
     }
   }
   if (options.programScheduler) {

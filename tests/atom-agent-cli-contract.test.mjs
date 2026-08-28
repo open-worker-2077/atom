@@ -518,6 +518,9 @@ test('public help is a complete daily Agent operation contract', async () => {
   assert.match(text, /AGENT_NOT_FOUND.*AGENT_TYPE_REQUIRED.*AMBIGUOUS_AGENT/us);
   assert.match(text, /查询或写入的事实目标不得代替 --agent 上下文来源/u);
   assert.match(text, /目标 Atom 本身不需要是 @agent/u);
+  assert.match(text, /日常 Agent 管理.*真实 contain 上级 Agent.*完整 situation\.rep/u);
+  assert.match(text, /一次性 bootstrap.*首次启动.*灾难恢复.*必要迁移.*退出日常管理链/u);
+  assert.match(text, /管理 Agent 不得修改自身.*平行域/u);
   assert.match(text, /AMBIGUOUS_ATOM_NAME.*ATOM_NOT_FOUND/us);
   assert.match(text, /ATOM_NOT_FOUND.*预定父节点.*复用.*transform new/us);
   assert.match(text, /WORLD_REVISION_CONFLICT.*重新读取/us);
