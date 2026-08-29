@@ -9,20 +9,20 @@ async function openIsolatedWorld(page) {
   ));
 }
 
-async function waitForViewToSettle(page) {
-  await page.waitForFunction(() => {
+async function waitForViewToSettle(page, { allowTransaction = false } = {}) {
+  await page.waitForFunction((transactionMayRemainActive) => {
     const state = window.spatialLab.state();
-    return state.phase === 'idle' && state.transactionActive === false;
-  });
+    return state.phase === 'idle' && (transactionMayRemainActive || state.transactionActive === false);
+  }, allowTransaction);
   await page.waitForTimeout(550);
 }
 
-async function enterAtomFile(page) {
+async function enterAtomFile(page, options) {
   const selected = await page.evaluate(() => window.spatialLab.selectByLabel('atom.json'));
   expect(selected).toBe(true);
   await page.keyboard.press('f');
   await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
-  await waitForViewToSettle(page);
+  await waitForViewToSettle(page, options);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).not.toBe('root');
 }
 
@@ -295,6 +295,96 @@ test('single Web landing is authoritative, survives F5, and leaves no source cop
   expect(await page.evaluate((expected) => (
     window.spatialLab.state().visibleNodeDescriptors.some(({ label: actual }) => actual === expected)
   ), label)).toBe(false);
+});
+
+test('deep Web landing moves the whole work subtree to the exact nested destination', async ({ page }) => {
+  test.setTimeout(120_000);
+  const label = 'work';
+  const workspaceRequests = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith('/__atom/api/workspace-edit')) {
+      workspaceRequests.push(request.postDataJSON());
+    }
+  });
+
+  await openIsolatedWorld(page);
+  await enterAtomFile(page);
+  for (const portal of ['🧊manage', '工务']) {
+    expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
+    await page.keyboard.press('f');
+    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await waitForViewToSettle(page);
+  }
+
+  const sourcePath = await page.evaluate(() => window.spatialLab.state().path);
+  const source = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .find((entry) => entry.label === label);
+  expect(source).toBeTruthy();
+  await page.keyboard.down('Control');
+  await page.mouse.click(source.clientX, source.clientY, { button: 'right' });
+  await page.keyboard.up('Control');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().transactionActive)).toBe(true);
+
+  await page.keyboard.press('Home');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe('root');
+  await enterAtomFile(page, { allowTransaction: true });
+  for (const portal of ['🧊manage', '办包', '究谋', '个务', '外务', '推进']) {
+    expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
+    await page.keyboard.press('f');
+    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await waitForViewToSettle(page, { allowTransaction: true });
+  }
+  const targetPath = await page.evaluate(() => window.spatialLab.state().path);
+
+  const persisted = page.evaluate(() => new Promise((resolve) => {
+    window.addEventListener('spatial-workspace-persisted', (event) => resolve(event.detail), { once: true });
+  }));
+  await page.keyboard.down('Control');
+  await page.mouse.click(48, 360, { button: 'right' });
+  await page.keyboard.up('Control');
+  await page.keyboard.press('Enter');
+  await persisted;
+
+  expect(workspaceRequests.filter(({ operation }) => operation?.kind === 'node-land')).toHaveLength(1);
+  const authoritative = await page.evaluate(async ({ expectedLabel, expectedSource, expectedTarget }) => {
+    const payload = await fetch('/__spatial/api/state').then((response) => response.json());
+    const matching = payload.knowledge.nodes.filter(({ label }) => label === expectedLabel);
+    const child = payload.knowledge.nodes.filter(({ label }) => label === 'test');
+    return {
+      total: matching.length,
+      source: matching.filter(({ path }) => path === expectedSource).length,
+      target: matching.filter(({ path }) => path === expectedTarget).length,
+      workAtomPath: matching[0]?.atomPath,
+      childAtomPath: child[0]?.atomPath
+    };
+  }, { expectedLabel: label, expectedSource: sourcePath, expectedTarget: targetPath });
+  expect(authoritative).toMatchObject({
+    total: 1,
+    source: 0,
+    target: 1,
+    workAtomPath: '🧊manage/办包/究谋/个务/外务/推进/work',
+    childAtomPath: '🧊manage/办包/究谋/个务/外务/推进/work/test'
+  });
+
+  await page.reload();
+  await openIsolatedWorld(page);
+  await enterAtomFile(page);
+  for (const portal of ['🧊manage', '办包', '究谋', '个务', '外务', '推进']) {
+    expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
+    await page.keyboard.press('f');
+    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await waitForViewToSettle(page);
+  }
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('work'))).toBe(true);
+  await page.keyboard.press('Home');
+  await enterAtomFile(page);
+  for (const portal of ['🧊manage', '工务']) {
+    expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
+    await page.keyboard.press('f');
+    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await waitForViewToSettle(page);
+  }
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('work'))).toBe(false);
 });
 
 test('holding Shift brushes individual nodes into and out of a batch without peer preselection', async ({ page }) => {

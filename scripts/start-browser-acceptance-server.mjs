@@ -52,6 +52,20 @@ await fs.writeFile(contextFile, JSON.stringify([
   atom('深层导航入口', '用于验证搜索进入深层可操作域', [
     atom('深层可点击目标', '搜索命中后必须进入此域')
   ]),
+  atom('🧊manage', '脱敏同构管理域', [
+    atom('工务', '', [
+      atom('work', '待移动的 contain 子树', [atom('test', '子树守恒哨兵')])
+    ]),
+    atom('办包', '', [
+      atom('究谋', '', [
+        atom('个务', '', [
+          atom('外务', '', [
+            atom('推进', '目标父级', [atom('目标占位')])
+          ])
+        ])
+      ])
+    ])
+  ]),
   atom('顶层参照', '用于检查顶层新增节点')
 ], null, 2));
 
