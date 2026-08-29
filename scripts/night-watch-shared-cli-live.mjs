@@ -327,7 +327,7 @@ async function main() {
   });
   const evidenceId = `NW-SHARED-${sha256(JSON.stringify(evidence)).slice(0, 16)}`;
   const report = {
-    contract: 'atom.night-watch.shared-cli-live', version: 1, evidenceId,
+    contract: 'atom.night-watch.shared-cli-live', version: 1, status: 'accepted', evidenceId,
     generatedAt: new Date().toISOString(), runId: options.runId,
     candidate: process.env.ATOM_CANDIDATE ?? 'local-candidate',
     scope: 'redacted-synthetic-subtree',

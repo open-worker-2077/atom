@@ -1,6 +1,7 @@
 {
   "contract": "atom.night-watch.shared-cli-live",
   "version": 1,
+  "status": "accepted",
   "evidenceId": "NW-SHARED-532b79373224dec3",
   "generatedAt": "2026-08-29T10:17:17.783Z",
   "runId": "nw-20260829-shared-01",

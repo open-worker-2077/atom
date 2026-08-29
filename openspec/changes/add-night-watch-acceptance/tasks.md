@@ -16,14 +16,14 @@
 
 - [x] 3.1 Read and validate `atom.cmd --help`, resolve one exact approved test Agent, and execute CLI commands through stdin without internal runtime imports.
 - [x] 3.2 Implement small synthetic CLI steps for Program, Explore/Transform, path-label authorization and locks, jump, shortcut, slot body, and work order; keep approved BusinessCase scenarios as external pending application-side cases until their live adapters and evidence exist.
-- [ ] 3.3 Verify persistence with an authorized bounded runtime restart and exact CLI read-back, restoring service health on every exit path.
+- [x] 3.3 Verify persistence with an authorized bounded runtime restart and exact CLI read-back, restoring service health on every exit path (`NW-SHARED-532b79373224dec3`; shared revisions 6912–6914 healthy/published).
 
   - Issue #20 diagnosis: HTTP health and command readiness require separate gates. Shared cold-start evidence must prove the first public Agent command, exact read-back, required lock state, and final running service without leaking unrelated Program failures.
 
-  - Local checkpoint (not complete): `TC-ESG-ACTIVITY-001-POS-01` resumed from exact-read committed state only. After a bounded 4784 task restart loaded the candidate, the missing temporary `^` result lock compiled through the live exact-path resolver and ran without replaying the deterministic Program or receipt. Final result exact-read preserved all six deterministic fields; Structure/Quantity/Conservation/Semantic gates passed. Evidence is local candidate `0.3.0`, run `nw-pos01-20260829-1750`, commit binding pending. Issue #1 now maps the five closed synthetic business scenarios `POS` / `REJECT` / `PENDING` / `REMAP` / `RESUME`; this audit did not rerun them. The full 3.2 synthetic CLI journey remains incomplete until its independently valid live adapters and evidence are attached.
+  - Shared completion: `NW-SHARED-532b79373224dec3` binds the exact authorized synthetic subtree, public CLI steps, expected lock rejection, jump, shortcut, slot body, work order, bounded restart, post-restart exact read-back, and final healthy/published runtime. The five ESG scenarios retain their separately mapped Issue #3 evidence and are not inferred from the generic mechanism run.
 
 ## 4. Supporting entry and delivery checks
 
 - [x] 4.1 Integrate Chromium Web and mobile control journeys plus private gateway initial-navigation recovery without replacing the live CLI lane; retain real-phone acceptance as `pending-user-acceptance` until the user's manual check.
 - [x] 4.2 Run the authorized shared-runtime night watch under `🧊manage/工务/work/test/<run-id>`, inspect every step independently, and retain the redacted report (`NW-SHARED-532b79373224dec3`).
-- [ ] 4.3 Run only the focused gates mapped by Issue #1 (plus any additional gate justified by the actual changed boundary), validate OpenSpec strictly, review the diff, then push, merge, deploy, and update the authorized GitHub delivery records.
+- [x] 4.3 Run only the focused gates mapped by Issue #1 (plus any additional gate justified by the actual changed boundary), validate OpenSpec strictly, review the diff, then push, merge, deploy, and update the authorized GitHub delivery records (`main@f02ce5e`, shared revision 6914).
