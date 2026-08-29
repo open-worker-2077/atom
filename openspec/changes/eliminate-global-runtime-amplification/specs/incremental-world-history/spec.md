@@ -28,3 +28,10 @@ The runtime SHALL preserve read compatibility with existing full-snapshot histor
 #### Scenario: Read legacy transaction
 - **WHEN** a user inspects or recovers an older transaction containing complete-world snapshots
 - **THEN** the runtime reads it without converting or deleting the historical evidence
+
+### Requirement: Interaction history is append-only on the hot path
+The steady commit path SHALL append one compact prepared/committed Patch record and SHALL NOT replay or materialize historical receipts to serve an ordinary interaction.
+
+#### Scenario: Commit after a long history
+- **WHEN** an ordinary local Transform commits after many historical transactions
+- **THEN** its hot-path history work remains proportional to the new Patch and receipt rather than total history length

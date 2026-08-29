@@ -3,7 +3,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { constants as zlibConstants, gzip, gunzip } from 'node:zlib';
-import { revisionOfWorldFacts } from '../world-runtime/world-revision.mjs';
+import {
+  revisionOfWorldFacts,
+  prepareWorldFactsRevision,
+  sealWorldFactsRevision
+} from '../world-runtime/world-revision.mjs';
 
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
@@ -26,7 +30,7 @@ export async function writeJsonAtomically(file, value, options = {}) {
   await fileSystem.mkdir(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
-    await fileSystem.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, {
+    await fileSystem.writeFile(temporary, options.serialized ?? `${JSON.stringify(value, null, 2)}\n`, {
       encoding: 'utf8',
       flag: 'wx'
     });
@@ -48,33 +52,54 @@ function snapshot(worldId, facts, { ownsFacts = false } = {}) {
   if (!Array.isArray(facts)) {
     throw problem('INVALID_WORLD_FILE', 'Atom world facts must be a JSON array');
   }
+  const ownedFacts = ownsFacts ? facts : structuredClone(facts);
   return Object.freeze({
     contract: 'atom.world-snapshot',
     version: 1,
     worldId,
-    revision: revisionOfWorldFacts(facts),
-    facts: ownsFacts ? facts : structuredClone(facts)
+    revision: sealWorldFactsRevision(ownedFacts),
+    facts: ownedFacts
   });
 }
 
 export function createJsonWorldRepository({ file, worldId, initialFacts }) {
   if (!file || !worldId) throw problem('INVALID_WORLD_REPOSITORY', 'file and worldId are required');
+  let cached = null;
+  let cachedSignature = null;
+
+  async function signature() {
+    const stat = await fs.stat(file, { bigint: true });
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+  }
 
   async function read() {
+    let beforeSignature;
     let value;
     try {
-      value = JSON.parse(await fs.readFile(file, 'utf8'));
+      beforeSignature = await signature();
+      if (cached && cachedSignature === beforeSignature) return cached;
+      const raw = await fs.readFile(file, 'utf8');
+      const afterSignature = await signature();
+      if (afterSignature !== beforeSignature) return read();
+      value = JSON.parse(raw);
+      cachedSignature = afterSignature;
     } catch (error) {
       if (error.code === 'ENOENT' && Array.isArray(initialFacts)) {
-        return snapshot(worldId, initialFacts);
+        cached = snapshot(worldId, initialFacts);
+        cachedSignature = null;
+        return cached;
       }
       throw problem('WORLD_READ_FAILED', `Cannot read Atom world ${worldId}`, { cause: error.code });
     }
-    return snapshot(worldId, value, { ownsFacts: true });
+    cached = snapshot(worldId, value, { ownsFacts: true });
+    return cached;
   }
 
-  async function compareAndSwap({ expectedRevision, nextSnapshot }) {
-    const current = await read();
+  async function compareAndSwap({ expectedRevision, nextSnapshot, currentSnapshot = null }) {
+    const current = currentSnapshot ?? await read();
+    if (current.worldId !== worldId || !Array.isArray(current.facts)) {
+      throw problem('INVALID_WORLD_SNAPSHOT', 'The current world snapshot is invalid');
+    }
     if (current.revision !== expectedRevision) {
       throw problem('WORLD_REVISION_CONFLICT', 'Atom world changed before commit', {
         expectedRevision,
@@ -84,10 +109,17 @@ export function createJsonWorldRepository({ file, worldId, initialFacts }) {
     if (nextSnapshot.worldId !== worldId || !Array.isArray(nextSnapshot.facts)) {
       throw problem('INVALID_WORLD_SNAPSHOT', 'The next world snapshot is invalid');
     }
-    if (revisionOfWorldFacts(nextSnapshot.facts) !== nextSnapshot.revision) {
+    const prepared = prepareWorldFactsRevision(nextSnapshot.facts);
+    if (prepared.revision !== nextSnapshot.revision) {
       throw problem('INVALID_WORLD_REVISION', 'The next snapshot revision does not match its facts');
     }
-    await writeJsonAtomically(file, nextSnapshot.facts);
+    await writeJsonAtomically(file, nextSnapshot.facts, {
+      serialized: `${prepared.json}\n`
+    });
+    cached = snapshot(worldId, nextSnapshot.facts, {
+      ownsFacts: Object.isFrozen(nextSnapshot.facts)
+    });
+    cachedSignature = await signature();
     return nextSnapshot;
   }
 

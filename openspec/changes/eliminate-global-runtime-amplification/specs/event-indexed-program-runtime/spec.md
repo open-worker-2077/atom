@@ -32,4 +32,8 @@ Reverse indexes MUST remain derived from `atom.json`, SHALL update with each com
 
 #### Scenario: Restart rebuilds derived indexes
 - **WHEN** the runtime restarts with missing derived indexes
-- **THEN** authoritative behavior is preserved and indexes are rebuilt or locally backfilled without changing facts
+- **THEN** authoritative behavior is preserved and complete indexes are rebuilt before readiness without changing facts
+
+#### Scenario: Zero-candidate local event
+- **WHEN** affected paths have no entries in the prepared trigger, read-dependency, or slot indexes
+- **THEN** Program reconciliation returns zero candidates immediately without constructing whole-world Program records

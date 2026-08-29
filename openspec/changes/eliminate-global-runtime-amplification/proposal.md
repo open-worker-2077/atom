@@ -5,10 +5,12 @@ Atom currently amplifies small local reads and transforms into unrelated whole-w
 ## What Changes
 
 - Establish an affected-path closure for every read and Transform and carry it through authorization, Program selection, persistence, history, and projection.
+- Split runtime work into one process-level cold preparation phase and a steady interaction phase: the 4784 service must prepare the complete immutable world snapshot and all security/dependency indexes before declaring readiness; CLI/Web requests must never trigger a whole-world warm-up.
 - Maintain disposable reverse indexes for Program dependencies and triggers, support endpoints, locks, shortcuts, and descendant path rewrites; missing entries may be backfilled from the local closure only.
 - Persist local Transform commits atomically as Patch/inverse Patch history while keeping `atom.json` as the sole authoritative fact source.
 - Invalidate derived state by affected paths rather than by treating every revision change as a whole-world invalidation.
 - Update only the affected Web domain and related endpoints, while retaining authoritative refresh and restart behavior.
+- Return a successful interaction after the authoritative fact commit and compact receipt are durable; publish disposable Graph/Spatial files after the response path and expose their revision/pending state.
 - Add focused correctness, rollback, work-count, and shared-local-world latency evidence mapped to GitHub Issue #29.
 
 ## Capabilities

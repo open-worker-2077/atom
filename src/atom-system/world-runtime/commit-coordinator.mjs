@@ -16,7 +16,23 @@ function problem(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
 }
 
-function nextWorldSnapshot(current, facts) {
+function nextWorldSnapshot(current, facts, { trusted = false, revision = null } = {}) {
+  if (trusted) {
+    const computedRevision = revisionOfWorldFacts(facts);
+    if (revision && computedRevision !== revision) {
+      throw problem('INVALID_WORLD_REVISION', 'Trusted transition revision does not match facts', {
+        revision,
+        computedRevision
+      });
+    }
+    return Object.freeze({
+      contract: 'atom.world-snapshot',
+      version: 1,
+      worldId: current.worldId,
+      revision: revision ?? computedRevision,
+      facts
+    });
+  }
   return validateWorldSnapshot({
     contract: 'atom.world-snapshot',
     version: 1,
@@ -95,7 +111,8 @@ export function createCommitCoordinator({
       }
       await worldRepository.compareAndSwap({
         expectedRevision: beforeRevision,
-        nextSnapshot
+        nextSnapshot,
+        currentSnapshot: current
       });
     } else if (current.revision !== afterRevision) {
       throw problem('TRANSACTION_RECOVERY_CONFLICT', 'World diverged from a prepared transaction', {
@@ -153,7 +170,10 @@ export function createCommitCoordinator({
       if (!output || !Array.isArray(output.facts)) {
         throw problem('INVALID_WORLD_TRANSITION', 'transition must return a facts array');
       }
-      const after = nextWorldSnapshot(before, output.facts);
+      const after = nextWorldSnapshot(before, output.facts, {
+        trusted: transitionInputMode === 'trusted-readonly',
+        revision: output.revision ?? null
+      });
       if (after.revision === before.revision) {
         throw problem('WORLD_TRANSITION_NO_CHANGE', 'A world commit must change the authoritative facts');
       }
@@ -204,7 +224,11 @@ export function createCommitCoordinator({
 
       await journalRepository.prepare(record);
       await faultInjector('after-prepare', structuredClone(record));
-      await worldRepository.compareAndSwap({ expectedRevision: before.revision, nextSnapshot: after });
+      await worldRepository.compareAndSwap({
+        expectedRevision: before.revision,
+        nextSnapshot: after,
+        currentSnapshot: before
+      });
       await faultInjector('after-world-write', structuredClone(record));
       return journalRepository.commit(command.commandId, receipt);
   }

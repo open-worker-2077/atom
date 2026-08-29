@@ -15,6 +15,13 @@ After a committed Patch, the Web projection SHALL update the current affected do
 - **WHEN** a committed Patch changes a relationship whose endpoints occupy different domains
 - **THEN** only the endpoint domains and their shared relationship projection are invalidated
 
+### Requirement: Disposable publication does not block authoritative success
+After authoritative facts and the compact receipt are durable, Graph/Spatial publication SHALL proceed outside the interaction response critical path. Projection status MUST identify the committed revision and MUST NOT expose a stale projection as current.
+
+#### Scenario: Slow projection file synchronization
+- **WHEN** an affected projection takes longer to serialize or synchronize than the authoritative Patch commit
+- **THEN** the interaction returns the committed receipt with projection status pending, and the serialized publisher completes or reports recoverable failure without repeating the fact mutation
+
 ### Requirement: Authoritative refresh is preserved
 Web projection MUST remain disposable; browser refresh and runtime restart SHALL reconstruct the visible result from `atom.json` and committed derived metadata without treating the projection as fact.
 

@@ -1,7 +1,10 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 
-import { writeAtomGraphProjection } from '../../../work-engine/atom-language/context-store.mjs';
+import {
+  adoptAtomContextSnapshot,
+  writeAtomGraphProjection
+} from '../../../work-engine/atom-language/context-store.mjs';
 import {
   advanceCompatibilityManifest,
   validateCompatibilityManifest
@@ -141,6 +144,7 @@ export function createTransactionalWorldPersistence({
           : null;
         return {
           facts,
+          revision: canonicalNextRevision,
           ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
           result: {
             source,
@@ -156,6 +160,9 @@ export function createTransactionalWorldPersistence({
     });
     cachedManifest = structuredClone(receipt.result?.compatibilityManifest ?? previousManifest ?? null);
     manifestLoaded = true;
+    await adoptAtomContextSnapshot(contextFile, facts, {
+      ...(nextManifest ? { compatibilityManifest: nextManifest } : {})
+    });
     await onAuthoritativeWrite({
       operation: 'commit',
       contextFile,

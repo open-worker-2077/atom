@@ -119,10 +119,26 @@ async function contextSignature(file) {
   return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
 }
 
-async function rememberContextSnapshot(file, value) {
-  const snapshot = freezeSnapshot(structuredClone(value));
-  contextSnapshots.set(file, { signature: await contextSignature(file), value: snapshot });
+export async function adoptAtomContextSnapshot(file, value, options = {}) {
+  const contextFile = resolveAtomContextFile(file);
+  const snapshot = freezeSnapshot(value);
+  const manifestRevision = options.compatibilityManifest?.currentWorldRevision ?? '';
+  if (options.compatibilityManifest) {
+    legacySnapshotMetadata.set(
+      snapshot,
+      compatibilityMetadata(options.compatibilityManifest, snapshot)
+    );
+  }
+  contextSnapshots.set(contextFile, {
+    signature: await contextSignature(contextFile),
+    manifestRevision,
+    value: snapshot
+  });
   return snapshot;
+}
+
+async function rememberContextSnapshot(file, value, options = {}) {
+  return adoptAtomContextSnapshot(file, structuredClone(value), options);
 }
 
 function isPlainObject(value) {
@@ -448,7 +464,7 @@ export async function writeAtomContext(file, atoms, options = {}) {
   const trusted = legacy?.mode === 'versioned-compatibility' || Boolean(options.compatibilityManifest);
   projectAtomContext(atoms, { allowLegacySupport: trusted });
   await atomicWriteJson(contextFile, atoms);
-  await rememberContextSnapshot(contextFile, atoms);
+  await rememberContextSnapshot(contextFile, atoms, options);
   return contextFile;
 }
 

@@ -6,6 +6,7 @@ See `proposal.md` for motivation and the four delta specs for observable behavio
 
 **Goals:**
 
+- Establish a strict cold-start/steady-state boundary: one process startup performs complete preparation; ordinary CLI/Web interactions perform only path-local work.
 - Carry one exact affected-path set from parsing through commit and publication.
 - Share one prepared authoritative snapshot and revision within an interaction.
 - Make Program/support/lock/shortcut selection proportional to affected dependencies.
@@ -20,6 +21,14 @@ See `proposal.md` for motivation and the four delta specs for observable behavio
 - Using a full-world periodic backup as part of every local transaction.
 
 ## Decisions
+
+### 0. Runtime readiness means the complete hot state already exists
+
+Before port 4784 reports ready, the process reads and validates `atom.json` once, computes its revision once, and builds one immutable prepared world containing the exact-path directory, structural ancestry, Program records, Agent security, lock indexes, trigger/read dependencies, support endpoints, shortcuts, and descendant rewrite entries. The service retains that prepared state across commands. A CLI/Web request may locally backfill a genuinely missing affected entry, but it may not initialize or rebuild the complete world.
+
+After a Patch commits, the process updates the prepared world and intersecting indexes from the same Patch/affected closure. An unrelated fact edit does not invalidate Agent, lock, Program, or trigger definitions. A definition/dependency edit recomputes only the intersecting entries. Process restart is the only normal full preparation boundary.
+
+Alternative considered: lazily warm each subsystem on the first request after every world revision. Rejected because revision-wide invalidation moves startup work into user latency and makes a local command repeatedly pay whole-world cost.
 
 ### 1. Patch envelope is the shared transaction boundary
 
@@ -45,6 +54,8 @@ Validation works against a copy-on-write path overlay. The repository verifies t
 
 Alternative considered: modify `atom.json` in place. Rejected because atomic replacement and recoverability are more important than avoiding one final serialization in the first increment. The design removes repeated clones/hashes/snapshots first; a page-oriented storage migration is not required.
 
+The steady commit path computes the canonical revision once and carries it through validation, journal preparation, compare-and-swap, receipt, cache update, and publication. The journal appends the command/Patch/receipt as a compact sequential record; ordinary requests do not replay historical records. Startup recovery reads the compact checkpoint and only the uncheckpointed tail.
+
 ### 5. Revision identity and cache validity are separated
 
 The commit revision remains a whole-world identity for compare-and-swap. Cache entries additionally carry dependency fingerprints or affected-path generations, so a new revision invalidates only intersecting entries. This preserves concurrency safety without equating every commit with global cache invalidation.
@@ -56,6 +67,8 @@ Alternative considered: eliminate revision checks. Rejected because that would w
 Graph topology and scene records are stored as disposable revisioned read-model segments keyed by domain and relationship endpoint. A Patch invalidates only intersecting segments. The current-domain response is published immediately; other affected segments may publish in the same bounded transaction or deterministic follow-up, but unrelated domains are reused. Refresh can always reconstruct from authoritative facts.
 
 Alternative considered: keep rebuilding complete Graph and scene documents in both projectors. Rejected because it duplicates the largest derived computation and makes local latency depend on unrelated nodes.
+
+Authoritative durability gates success; disposable Graph/Spatial file synchronization does not. After the authoritative commit, the response carries the committed revision and projection state, while affected projection publication continues through a bounded serialized publisher. Immediate in-process reads consume the committed prepared world/delta; refresh never silently presents an older revision as current.
 
 ### 7. Acceptance uses work counts plus wall-clock evidence
 

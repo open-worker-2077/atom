@@ -195,6 +195,8 @@ test('an ordinary situation Transform commits without a full Program projection 
     atom('Agent', '', [atom('Target', 'before')], 'agent')
   ]));
   const security = { labels: [], functionScopes: { groups: [], names: [] }, functions: [] };
+  let sourceValidations = 0;
+  let registrationInspections = 0;
   const scheduler = {
     agentSecurity: new Map([['Agent', security]]),
     activeRequestDrivenLocks: async () => [],
@@ -202,10 +204,13 @@ test('an ordinary situation Transform commits without a full Program projection 
       fingerprint: 'current', records: [], locks: [], messages: [], transforms: [],
       shortcuts: [], slotBodies: [], failures: [], agentSecurity: security
     }),
-    validateProgramSources: async () => [],
-    inspectAgentRegistration: async () => ({
+    validateProgramSources: async () => { sourceValidations += 1; },
+    inspectAgentRegistration: async () => {
+      registrationInspections += 1;
+      return ({
       labels: [], functionScopes: { groups: [], names: [] }, functions: []
-    }),
+      });
+    },
     refresh: async (_atoms, options) => {
       if (!options.triggerEvent) {
         throw Object.assign(new Error('full rebuild must not run'), { code: 'FULL_REBUILD' });
@@ -229,6 +234,8 @@ test('an ordinary situation Transform commits without a full Program projection 
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(result.changed, true);
+  assert.equal(sourceValidations, 0);
+  assert.equal(registrationInspections, 0);
   assert.equal(result.warnings.some(({ code }) => (
     code === 'PROGRAM_PROJECTION_RECOVERY_PENDING'
   )), false, JSON.stringify(result.warnings));

@@ -1,7 +1,10 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { diagnostic } from './errors.mjs';
-import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
+import {
+  revisionOfWorldFacts,
+  sealWorldFactsRevision
+} from '../../src/atom-system/world-runtime/world-revision.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 
 function mergeWarnings(...groups) {
@@ -107,6 +110,40 @@ function exactMatchAtPath(atoms, targetPath) {
     children = oneStoredField(match.atom, 'contain')?.value ?? [];
   }
   return parent;
+}
+
+function subtreeContainsTypedProgram(atom) {
+  if (!atom) return false;
+  if (oneStoredField(atom, 'thing')?.parsed.types.some((type) => type.raw === 'program')) {
+    return true;
+  }
+  return (oneStoredField(atom, 'contain')?.value ?? []).some(subtreeContainsTypedProgram);
+}
+
+function transformChangesProgramSurface(beforeAtoms, afterAtoms, transformed) {
+  const paths = [...new Set([
+    transformed?.sourcePath,
+    transformed?.resultPath,
+    transformed?.resultName
+  ].filter(Boolean))];
+  return paths.some((targetPath) => (
+    subtreeContainsTypedProgram(exactMatchAtPath(beforeAtoms, targetPath)?.atom)
+    || subtreeContainsTypedProgram(exactMatchAtPath(afterAtoms, targetPath)?.atom)
+  ));
+}
+
+function isLocalizedSituationTransform(item) {
+  let situationChanged = false;
+  for (const field of item.fields ?? []) {
+    if (field.baseKey === 'thing') {
+      if ((field.commands?.length ?? 0) > 0) return false;
+      continue;
+    }
+    if (field.baseKey !== 'situation') return false;
+    if ((field.commands?.length ?? 0) === 0 && !field.valuePresent) continue;
+    situationChanged = true;
+  }
+  return situationChanged;
 }
 
 function newlyAddedProgramPaths(beforeAtoms, afterAtoms) {
@@ -587,14 +624,17 @@ async function persistChangedGraph({
   changedPaths = null,
   affectedAtoms = null,
   registrationChange = null,
-  compatibilityManifest
+  compatibilityManifest,
+  localizedSituationValidation = false
 }) {
-  // Validate the full projection before either active file is changed.
-  const validationStartedAt = performance.now();
-  projectAtomContext(atoms, { rootName, allowLegacySupport: Boolean(compatibilityManifest) });
-  performanceTrace('world-precommit-validation', {
-    elapsedMs: Math.round(performance.now() - validationStartedAt)
-  });
+  if (!localizedSituationValidation) {
+    // Structural, support, type and Program changes retain the complete projection gate.
+    const validationStartedAt = performance.now();
+    projectAtomContext(atoms, { rootName, allowLegacySupport: Boolean(compatibilityManifest) });
+    performanceTrace('world-precommit-validation', {
+      elapsedMs: Math.round(performance.now() - validationStartedAt)
+    });
+  }
   if (typeof commitWorld !== 'function') {
     const error = new Error('World mutation requires an explicit commit capability');
     error.code = 'WORLD_COMMIT_CAPABILITY_REQUIRED';
@@ -760,6 +800,7 @@ export async function executeAtomLanguage(options = {}) {
     transformStageDiagnostics.push({
       stage,
       durationMs: performance.now() - startedAt,
+      elapsedMs: performance.now() - operationStartedAt,
       candidateProgramCount: details.candidateProgramCount ?? 0,
       executedProgramCount: details.executedProgramCount ?? 0,
       ...(details.slowestProgramFingerprint ? {
@@ -799,19 +840,16 @@ export async function executeAtomLanguage(options = {}) {
   let programCycle = { messages: [], locks: [], records: [] };
   let activeRequestDrivenLocks = [];
   if (options.programScheduler) {
+    const indexPreparationStartedAt = performance.now();
     try {
       activeRequestDrivenLocks = await options.programScheduler.activeRequestDrivenLocks?.(atoms) ?? [];
       const initialAgentPath = interaction.agent?.path ?? null;
       const initialAgentSecurity = initialAgentPath
         ? structuredClone(options.programScheduler.agentSecurity?.get(initialAgentPath) ?? null)
         : null;
-      const programAccess = createAccessController(atoms, {
-        ...options,
-        agentPath: initialAgentPath,
-        agentSecurity: initialAgentSecurity,
-        graphLocks: []
-      });
-      const preparedWorld = prepareExploreWorld(atoms);
+      let programAccess = null;
+      let preparedWorld = null;
+      await recordTransformStage('index-preparation', indexPreparationStartedAt);
       const reconcilePrograms = options.programMode === 'reconcile'
         || Boolean(requestedProgramRun?.selector);
       const projectPrograms = options.programMode === 'project';
@@ -842,6 +880,7 @@ export async function executeAtomLanguage(options = {}) {
         ...(passivePrograms ? {
           reuseDormantContextFailureCodes: ['WINDOW_JUMP_DESTINATION_INVALID']
         } : {}),
+        ...(projectPrograms ? { prepareAllIndexes: true } : {}),
         ...(requestedProgramRun?.selector
           ? {
               programSelector: requestedProgramRun.selector,
@@ -855,10 +894,15 @@ export async function executeAtomLanguage(options = {}) {
           atoms,
           request,
           receiver,
-          accessController: programAccess,
+          accessController: programAccess ??= createAccessController(atoms, {
+            ...options,
+            agentPath: initialAgentPath,
+            agentSecurity: initialAgentSecurity,
+            graphLocks: []
+          }),
           agentOrigin: interaction.agent,
           scopeRoot: executionContext.scopeRoot ?? null,
-          preparedWorld
+          preparedWorld: preparedWorld ??= prepareExploreWorld(atoms)
         })
       };
       try {
@@ -1613,14 +1657,8 @@ export async function executeAtomLanguage(options = {}) {
         ? structuredClone(options.programScheduler.agentSecurity?.get(cycleAgentPath)
           ?? programCycle.agentSecurity ?? null)
         : null;
-      const programAccess = createAccessController(reconciledAtoms, {
-        ...options,
-        programLockIndex: finalLockIndex,
-        agentPath: cycleAgentPath,
-        agentSecurity: cycleAgentSecurity,
-        graphLocks: finalGraphLocks
-      });
-      const preparedWorld = prepareExploreWorld(reconciledAtoms);
+      let programAccess = null;
+      let preparedWorld = null;
       const refreshStartedAt = performance.now();
       let cycle;
       try {
@@ -1633,10 +1671,16 @@ export async function executeAtomLanguage(options = {}) {
             atoms: reconciledAtoms,
             request,
             receiver,
-            accessController: programAccess,
+            accessController: programAccess ??= createAccessController(reconciledAtoms, {
+              ...options,
+              programLockIndex: finalLockIndex,
+              agentPath: cycleAgentPath,
+              agentSecurity: cycleAgentSecurity,
+              graphLocks: finalGraphLocks
+            }),
             agentOrigin: interaction.agent,
             scopeRoot: executionContext.scopeRoot ?? null,
-            preparedWorld
+            preparedWorld: preparedWorld ??= prepareExploreWorld(reconciledAtoms)
           })
         });
       } catch (error) {
@@ -1672,19 +1716,41 @@ export async function executeAtomLanguage(options = {}) {
         warning.message ?? 'Program runtime reported a recoverable warning',
         warning.details ?? {}
       )));
-      const refreshedLockIndex = buildProgramLockIndex({
-        revision: revisionOf(reconciledAtoms),
-        results: options.bypassProgramLocks ? [] : cycle.locks,
-        records: cycle.records
-      });
-      finalLockIndex = pendingTriggerEvent
-        ? mergeProgramLockIndexes({
-          revision: revisionOf(reconciledAtoms),
-          previous: finalLockIndex,
-          next: refreshedLockIndex,
-          replacedSources: new Set(cycle.executedProgramPaths ?? [])
-        })
-        : refreshedLockIndex;
+      const executedProgramPaths = new Set(cycle.executedProgramPaths ?? []);
+      if (!pendingTriggerEvent || executedProgramPaths.size > 0) {
+        const reconciledRevision = revisionOf(reconciledAtoms);
+        const refreshedLockIndex = buildProgramLockIndex({
+          revision: reconciledRevision,
+          results: options.bypassProgramLocks ? [] : cycle.locks,
+          records: cycle.records
+        });
+        finalLockIndex = pendingTriggerEvent
+          ? mergeProgramLockIndexes({
+            revision: reconciledRevision,
+            previous: finalLockIndex,
+            next: refreshedLockIndex,
+            replacedSources: executedProgramPaths
+          })
+          : refreshedLockIndex;
+      }
+      const noProgramEffects = executedProgramPaths.size === 0
+        && (cycle.transforms?.length ?? 0) === 0
+        && (cycle.messages?.length ?? 0) === 0
+        && (cycle.shortcuts?.length ?? 0) === 0
+        && (cycle.slotBodies?.length ?? 0) === 0
+        && (cycle.jumps?.length ?? 0) === 0
+        && (cycle.jumpAuthorizations?.length ?? 0) === 0
+        && (cycle.agentRegistrations?.length ?? 0) === 0;
+      if (pendingTriggerEvent && cycle.reconcileSummary?.preparedIndexHit === true
+        && noProgramEffects) {
+        return {
+          atoms: reconciledAtoms,
+          lockIndex: finalLockIndex,
+          messages,
+          transformLogs,
+          pathChanges
+        };
+      }
       const cycleAccessController = createAccessController(reconciledAtoms, {
         ...options,
         programLockIndex: finalLockIndex,
@@ -2065,7 +2131,8 @@ export async function executeAtomLanguage(options = {}) {
     registrationChange = null,
     projectionRebase = null,
     changedPaths = projectionRebase?.changedPaths ?? null,
-    affectedAtoms = null
+    affectedAtoms = null,
+    localizedSituationValidation = false
   } = {}) {
     const effectiveRegistrationChange = registrationChange
       ?? (windowRecycled ? 'window-recycle' : null);
@@ -2087,7 +2154,8 @@ export async function executeAtomLanguage(options = {}) {
           axes: ['contain', 'situation', 'support', 'thing']
         })) : null),
         registrationChange: effectiveRegistrationChange,
-        compatibilityManifest: options.compatibilityManifest
+        compatibilityManifest: options.compatibilityManifest,
+        localizedSituationValidation
       });
       committedAffectedPaths = [...new Set((receipt?.affectedAtoms ?? [])
         .map(({ path }) => path)
@@ -2138,6 +2206,10 @@ export async function executeAtomLanguage(options = {}) {
       const settleWarnings = rebased?.persisted === true
         ? []
         : await settleContextFreeProgramProjectionForWorld(candidateAtoms);
+      await recordTransformStage('program-projection', projectionSettleStartedAt, {
+        candidateProgramCount: 0,
+        executedProgramCount: 0
+      });
       performanceTrace('program-projection-settle', {
         elapsedMs: Math.round(performance.now() - projectionSettleStartedAt),
         rebased: rebased?.persisted === true,
@@ -2660,6 +2732,7 @@ export async function executeAtomLanguage(options = {}) {
     };
   }
 
+  const transformApplyStartedAt = performance.now();
   const transformed = await applyTransform({
     atoms,
     item,
@@ -2671,8 +2744,10 @@ export async function executeAtomLanguage(options = {}) {
   }
 
   let nextAtoms = transformed.atoms;
-  let revisionAfter = revisionOf(nextAtoms);
-  let changed = revisionAfter !== revisionBefore;
+  let revisionAfter = revisionBefore;
+  let changed = transformed.changed === true || programChanged;
+  const programSurfaceChanged = changed
+    && transformChangesProgramSurface(atoms, nextAtoms, transformed);
   let postRefresh = {
     atoms: nextAtoms,
     lockIndex: programLockIndex,
@@ -2680,7 +2755,7 @@ export async function executeAtomLanguage(options = {}) {
     transformLogs: [],
     pathChanges: []
   };
-  if (changed) {
+  if (programSurfaceChanged) {
     const compiled = await validatePrograms(
       nextAtoms, contextFile, atoms, options.programScheduler
     );
@@ -2707,20 +2782,23 @@ export async function executeAtomLanguage(options = {}) {
       return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
     }
   }
+  await recordTransformStage('transform-apply', transformApplyStartedAt);
   if (options.programScheduler) {
     try {
       postRefresh = await reconcileProgramsForWorld(nextAtoms, {
         mode: 'transform',
+        preparedIndexesValid: !programSurfaceChanged,
         nodes: [...new Set([
           transformed.sourcePath,
           transformed.resultPath,
           transformed.resultName,
-          ...newlyAddedProgramPaths(atoms, nextAtoms)
+          ...(programSurfaceChanged ? newlyAddedProgramPaths(atoms, nextAtoms) : [])
         ].filter(Boolean))]
       });
       nextAtoms = postRefresh.atoms;
-      revisionAfter = revisionOf(nextAtoms);
-      changed = revisionAfter !== revisionBefore;
+      changed = changed
+        || postRefresh.transformLogs.length > 0
+        || postRefresh.pathChanges.length > 0;
     } catch (error) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
@@ -2728,6 +2806,7 @@ export async function executeAtomLanguage(options = {}) {
     }
   }
   if (changed) {
+    revisionAfter = sealWorldFactsRevision(nextAtoms).slice('sha256:'.length);
     const canRebaseProjection = programTransformLogs.length === 0
       && postRefresh.transformLogs.length === 0
       && postRefresh.pathChanges.length === 0;
@@ -2740,7 +2819,9 @@ export async function executeAtomLanguage(options = {}) {
           ...(transformed.relationPaths ?? []),
           ...(transformed.shortcutPaths ?? [])
         ].filter(Boolean))]
-      }
+      },
+      localizedSituationValidation: !programSurfaceChanged
+        && isLocalizedSituationTransform(item)
     } : {
       changedPaths: [...new Set([
         transformed.sourcePath,

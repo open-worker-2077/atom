@@ -12,6 +12,8 @@
 - [x] 2.2 Derive a monotonic affected-path closure for replace, rename, move, discard, and restore, including required ancestors and old/new descendants.
 - [ ] 2.3 Carry the same prepared authoritative snapshot, revision, Patch envelope, and closure through one runtime interaction without duplicate reads or cloning.
 - [ ] 2.4 Separate commit revision identity from path-scoped cache validity and expose closure-expansion diagnostics.
+- [ ] 2.5 Establish one 4784 cold-preparation/readiness boundary and retain the prepared immutable world across all steady interactions.
+- [ ] 2.6 Compute the canonical revision once per committed interaction and carry it through persistence, receipt, cache adoption, and publication.
 
 ## 3. Indexed runtime effects
 
@@ -19,6 +21,7 @@
 - [ ] 3.2 Update only intersecting reverse-index entries after a committed Patch and implement bounded local backfill for missing entries.
 - [ ] 3.3 Route Program reconciliation and authorization/lock/support/shortcut selection through the affected closure and reverse indexes.
 - [ ] 3.4 Verify indexed selection against focused shadow calculations and report candidate/executed counts in diagnostics.
+- [ ] 3.5 Return zero-candidate Transform events directly from the prepared reverse indexes without constructing whole-world Program records.
 
 ## 4. Incremental commit and projection
 
@@ -27,6 +30,7 @@
 - [x] 4.3 Make recovery idempotent across failures before and after authoritative atomic replacement.
 - [x] 4.4 Share Graph construction and publish only affected Web domain segments and relationship endpoints.
 - [x] 4.5 Reuse unaffected projection segments across revisions and preserve authoritative refresh/restart reconstruction.
+- [ ] 4.6 Move disposable Graph/Spatial synchronization outside the authoritative response path while exposing revisioned pending/recovery state.
 
 ## 5. Acceptance and delivery
 

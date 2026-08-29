@@ -109,12 +109,18 @@ test('a prepared transition can skip cloning unused world and payload inputs', a
 test('a trusted read-only transition reuses the repository snapshot by reference', async (t) => {
   const files = await fixture(t);
   let lastRead = null;
+  let reads = 0;
+  let compareSnapshot = null;
   const worldRepository = {
     read: async () => {
+      reads += 1;
       lastRead = await files.worldRepository.read();
       return lastRead;
     },
-    compareAndSwap: (request) => files.worldRepository.compareAndSwap(request)
+    compareAndSwap: (request) => {
+      compareSnapshot = request.currentSnapshot;
+      return files.worldRepository.compareAndSwap(request);
+    }
   };
   const coordinator = createCommitCoordinator({
     worldRepository,
@@ -133,6 +139,8 @@ test('a trusted read-only transition reuses the repository snapshot by reference
   });
 
   assert.equal(transitionSnapshot, lastRead);
+  assert.equal(compareSnapshot, lastRead);
+  assert.equal(reads, 1);
 });
 
 test('transaction history appends compact events and content-addressed snapshots without rewriting legacy history', async (t) => {
@@ -370,6 +378,26 @@ test('repository read does not clone facts that JSON parsing already owns', asyn
 
   assert.deepEqual(snapshot.facts, facts);
   assert.equal(completeWorldCloneCount, 0);
+});
+
+test('repository reuses one unchanged disk snapshot and invalidates it on external replacement', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-world-read-cache-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  await fs.writeFile(worldFile, `${JSON.stringify([{ marker: 'first' }])}\n`, 'utf8');
+  const worldRepository = createJsonWorldRepository({ file: worldFile, worldId: 'primary' });
+
+  const first = await worldRepository.read();
+  const reused = await worldRepository.read();
+  assert.equal(reused, first);
+  assert.equal(Object.isFrozen(first.facts), true);
+
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  await fs.writeFile(worldFile, `${JSON.stringify([{ marker: 'second-value' }])}\n`, 'utf8');
+  const replaced = await worldRepository.read();
+
+  assert.notEqual(replaced, first);
+  assert.equal(replaced.facts[0].marker, 'second-value');
 });
 
 test('recovery completes a prepared transaction interrupted before the world write', async (t) => {
