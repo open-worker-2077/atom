@@ -657,11 +657,16 @@ export async function executeAtomLanguage(options = {}) {
   }
   if (parsed.command === 'transform' && parsed.batch) {
     const renameBatch = parsed.items.every(isBatchRenameItem);
+    const maintenanceStructuralBatch = options.trustedMaintenance === true
+      && parsed.items.every((item) => item.fields.every((field) => (
+        field.baseKey === 'thing'
+        && field.commands.every((command) => command.name === 'mov' || command.name === 'ren')
+      )));
     const hasRename = parsed.items.some((item) => item.fields.some((field) => (
       field.baseKey === 'thing'
       && field.commands.some((command) => command.name === 'ren')
     )));
-    if (hasRename && !renameBatch) {
+    if (hasRename && !renameBatch && !maintenanceStructuralBatch) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         'UNSUPPORTED_MIXED_BATCH_RENAME',
         '批量改名必须由纯 thing.ren 项组成；请将移动、situation 与 support 放入另一批事务'
@@ -671,7 +676,8 @@ export async function executeAtomLanguage(options = {}) {
       .filter((field) => (
         !['thing', 'situation', 'support'].includes(field.baseKey)
         || (field.baseKey === 'thing' && field.commands.some((command) => (
-          command.name !== 'mov' && !(renameBatch && command.name === 'ren')
+          command.name !== 'mov'
+          && !((renameBatch || maintenanceStructuralBatch) && command.name === 'ren')
         )))
       ))
       .map((field) => ({ item, field })))[0];

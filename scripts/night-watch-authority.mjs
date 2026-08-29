@@ -1,5 +1,6 @@
 export const NIGHT_WATCH_AUTHORITY_CONTRACT = 'atom.night-watch-authority-receipt';
 export const NIGHT_WATCH_AUTHORITY_VERSION = 1;
+const NIGHT_WATCH_TEST_DOMAIN_PREFIX = '🧊manage/工务/work/test/';
 
 function authorityError(code, message, details = {}) {
   const error = new Error(message);
@@ -53,8 +54,12 @@ export function validateNightWatchAuthorityReceipt(receipt, options = {}) {
       requestedAgent: options.agent
     });
   }
-  if (receipt.testDomain !== 'test') {
-    throw authorityError('NIGHT_WATCH_AUTHORITY_TEST_DOMAIN_INVALID', 'Night-watch authority is limited to the test domain', {
+  const testRunId = typeof receipt.testDomain === 'string'
+    && receipt.testDomain.startsWith(NIGHT_WATCH_TEST_DOMAIN_PREFIX)
+    ? receipt.testDomain.slice(NIGHT_WATCH_TEST_DOMAIN_PREFIX.length)
+    : '';
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(testRunId) || testRunId === '.' || testRunId === '..') {
+    throw authorityError('NIGHT_WATCH_AUTHORITY_TEST_DOMAIN_INVALID', 'Night-watch authority is limited to one exact synthetic run below 🧊manage/工务/work/test', {
       testDomain: receipt.testDomain
     });
   }

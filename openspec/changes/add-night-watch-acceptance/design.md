@@ -7,7 +7,7 @@ See `proposal.md` for motivation and `specs/night-watch-acceptance/spec.md` for 
 **Goals:**
 
 - Drive real commands through the PATH-resolved `atom.cmd` contract with one exact test Agent.
-- Keep the acceptance journey external to the kernel and use small synthetic facts below `test`.
+- Keep the acceptance journey external to the kernel and use small synthetic facts below `🧊manage/工务/work/test/<run-id>` without adding a top-level Atom beyond the approved `🧊manage` and default backup warehouse set.
 - Produce one ordered, resumable, redacted report and always restore service health.
 - Make the required capability set explicit so a large test count cannot hide a missing journey.
 
@@ -38,7 +38,7 @@ Each required step has an id, capability, dependencies, mutation class, command 
 
 ### Authority receipt before live mutation
 
-The run consumes a local authority receipt naming the allowed Agent, `test` domain, synthetic cleanup policy, restart scope, GitHub publication scope, expiry, and issuer. The receipt authorizes actions but contains no credentials. Missing authority blocks only the affected step and prevents an unattended run from expanding its own scope.
+The run consumes a local authority receipt naming the allowed Agent, the exact `🧊manage/工务/work/test/<run-id>` domain, synthetic cleanup policy, restart scope, GitHub publication scope, expiry, and issuer. The receipt authorizes actions but contains no credentials. Missing authority blocks only the affected step and prevents an unattended run from expanding its own scope.
 
 ### Checkpointed report without payloads
 
@@ -56,7 +56,7 @@ Evidence attachments are separate only in storage, not in control. The external 
 
 ## Risks / Trade-offs
 
-- **Shared-runtime test writes could interfere with use** → use one unique subtree below `test`, expected revisions, and an explicit authority receipt; stop on any ambiguity.
+- **Shared-runtime test writes could interfere with use** → use one unique subtree below `🧊manage/工务/work/test`, expected revisions, and an explicit authority receipt; stop on any ambiguity.
 - **Restart verification briefly interrupts users** → require separate restart authorization, bound the outage, keep gateways up, and restore service in `finally`.
 - **A scripted runner can look like real use while bypassing UI** → require `atom.cmd` for the main fact path and retain separate Chromium/private-entry steps.
 - **Application evolution can stale the manifest** → version the manifest and fail closed when required Help/registry contracts no longer match.
@@ -66,6 +66,6 @@ Evidence attachments are separate only in storage, not in control. The external 
 
 1. Add the manifest validator, authority receipt validator, report/checkpoint writer, and dry-run mode.
 2. Add CLI-driven synthetic steps and supporting browser/mobile/restart adapters with focused tests.
-3. Run dry-run locally, then run the authorized shared-runtime journey under `test` and verify restart/read-back.
+3. Run dry-run locally, then run the authorized shared-runtime journey under `🧊manage/工务/work/test/<run-id>` and verify restart/read-back.
 4. Add the package command and CI-safe dry-run contract; shared-runtime execution remains an explicit operator action.
 5. Roll back by removing the package command and runner; generated evidence and synthetic test facts remain separately recoverable and are never silently deleted.

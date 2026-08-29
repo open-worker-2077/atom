@@ -4,7 +4,7 @@ Atom has broad unit and subsystem coverage, but delivery still depends on manual
 
 ## What Changes
 
-- Add one operator-facing night-watch command that drives the documented public CLI through a fixed, versioned acceptance manifest against isolated `test` data.
+- Add one operator-facing night-watch command that drives the documented public CLI through a fixed, versioned acceptance manifest against uniquely named synthetic data below `🧊manage/工务/work/test/<run-id>`; the world root remains limited to `🧊manage` and the default backup warehouse.
 - Keep a separate versioned scenario/case catalog: every required capability names its explicit stable case IDs and each case declares its prerequisites, operation, expected result, rejection, read-back, redacted evidence policy, IssueNode/TestCase mapping, and pending state when live evidence is not yet available.
 - Project the approved desensitized `BC-ESG-ACTIVITY-001@v1` contract only into an external application-side catalog: its five synthetic business scenarios belong to Issue #3, while dependent generic mechanism cases belong to Issue #10; no referenced business file or factual baseline enters Atom or the runner.
 - Cover service health, command readiness, Web and private-mobile entry, Agent and Program use, Explore and Transform, authorization and locks, jump, shortcut, slot body, work order, persistence restart, and read-back.
