@@ -997,9 +997,13 @@ export async function applyTransform({
               )
             );
           }
+          if (relationTarget) relationPaths.push(relationTarget.path.join('/'));
         }
       }
-      if (partnerBindings.length) relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings);
+      if (partnerBindings.length) {
+        relationPaths.push(...rewritePartnerBindings(nextAtoms, partnerBindings));
+      }
+      relationPaths = [...new Set(relationPaths)];
     }
     const resultPath = rewritesPaths
       ? walkAtoms(nextAtoms).find((match) => match.atom === selected.match.atom)?.path.join('/') ?? null

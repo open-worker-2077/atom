@@ -165,7 +165,15 @@ function fingerprint(records, programs, agentOrigin, isolateFailures) {
 function programSetFingerprint(programs, isolateFailures, records) {
   const recordsByRef = new Map(records.map((record) => [record.ref, record]));
   return crypto.createHash('sha256').update(JSON.stringify({
-    programs: programs.map((program) => semanticRecord(program, recordsByRef)),
+    programs: programs.map((program) => {
+      const definition = semanticRecord(program, recordsByRef);
+      // An @agent Program is the security/window declaration carried by the
+      // Agent node. Ordinary business children are its managed contents, not
+      // part of that declaration's executable definition.
+      return program.types.includes('agent')
+        ? { ...definition, childrenPaths: [] }
+        : definition;
+    }),
     isolateFailures
   })).digest('hex');
 }

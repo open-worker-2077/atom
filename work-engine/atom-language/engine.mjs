@@ -440,6 +440,9 @@ async function applyCreateTransform({
   }
   const createName = createNameField?.value;
   const createPath = createName.split('/');
+  const persistedCreatePath = createPath[0] === WORLD_OUTSIDE_NAME
+    ? createPath.slice(1).join('/')
+    : createName;
   const createDecision = await authorize({ atom, name: createName, path: createPath }, 'write');
   if (createDecision.decision !== 'allow') {
     const programDenied = createDecision.matched
@@ -452,7 +455,7 @@ async function applyCreateTransform({
     ) };
   }
 
-  const exactCreateMatch = exactMatchAtPath(atoms, createName);
+  const exactCreateMatch = exactMatchAtPath(atoms, persistedCreatePath);
   const selected = exactCreateMatch
     ? { matches: [exactCreateMatch], expected: createName }
     : { matches: [], expected: createName };
@@ -513,7 +516,7 @@ async function applyCreateTransform({
     atoms: nextAtoms,
     changed: true,
     resultName: createPath.at(-1),
-    resultPath: createName,
+    resultPath: persistedCreatePath,
     warnings: compiled.warnings
   };
 }
