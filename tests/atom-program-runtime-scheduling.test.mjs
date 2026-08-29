@@ -487,6 +487,30 @@ test('TC-PERF-AFFECTED-CLOSURE: a warm unrelated event returns from prepared ind
   assert.equal(cycle.reconcileSummary.executedProgramCount, 0);
 });
 
+test('TC-PERF-AFFECTED-CLOSURE: prepared indexes preserve explore-read dependency triggers', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const world = [
+    atom('Watched', 'wait'),
+    atom('Dependency Watcher', [
+      "watched = explore({'thing': 'Watched', 'situation$full': None})[0]",
+      "if watched.situation == 'go':",
+      "    message({'level': 'info', 'text': 'dependency fired'})"
+    ].join('\n'), [], 'program')
+  ];
+  await scheduler.refresh(world);
+  const changed = structuredClone(world);
+  changed[0].situation = 'go';
+
+  const cycle = await scheduler.refresh(changed, {
+    triggerEvent: {
+      mode: 'transform', nodes: ['Watched'], preparedIndexesValid: true
+    }
+  });
+
+  assert.deepEqual(cycle.executedProgramPaths, ['Dependency Watcher']);
+  assert.equal(cycle.messages[0]?.text, 'dependency fired');
+});
+
 test('TC-PERF-COLD-INDEX: startup prepares changed dependencies outside request Agent windows', async () => {
   let requestScopedReads = 0;
   const scheduler = createProgramRuntimeScheduler();

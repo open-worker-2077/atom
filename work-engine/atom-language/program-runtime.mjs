@@ -1846,6 +1846,21 @@ export class ProgramRuntimeScheduler {
           `${preparedTriggerEvent.mode}\0${node.trim()}`
         ) ?? []) candidatePaths.add(programPath);
       }
+      const eventNodes = new Set((preparedTriggerEvent.nodes ?? []).map((node) => node.trim()));
+      const programs = programRecords(this.latestRecords);
+      for (const program of programs) {
+        const previous = reusableProgramCandidates(
+          this.programReusable,
+          program,
+          options.isolateFailures === true,
+          options.agentOrigin,
+          this.latestRecords,
+          programs
+        )[0]?.[1];
+        if (previous?.requests?.some((request) => requestMayObserveEvent(request, eventNodes))) {
+          candidatePaths.add(program.path);
+        }
+      }
       const slotCandidates = slotProgramInvocationsForEvent(atoms, preparedTriggerEvent);
       if (candidatePaths.size === 0 && slotCandidates.length === 0) {
         const locks = await this.activeRequestDrivenLocks();

@@ -119,10 +119,15 @@ async function contextSignature(file) {
   return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
 }
 
+function compatibilityCacheKey(manifest) {
+  if (!manifest) return '';
+  return crypto.createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
+}
+
 export async function adoptAtomContextSnapshot(file, value, options = {}) {
   const contextFile = resolveAtomContextFile(file);
   const snapshot = freezeSnapshot(value);
-  const manifestRevision = options.compatibilityManifest?.currentWorldRevision ?? '';
+  const manifestRevision = compatibilityCacheKey(options.compatibilityManifest);
   if (options.compatibilityManifest) {
     legacySnapshotMetadata.set(
       snapshot,
@@ -413,7 +418,7 @@ export async function readAtomContext(file, options = {}) {
     }
     throw error;
   }
-  const manifestRevision = options.compatibilityManifest?.currentWorldRevision ?? '';
+  const manifestRevision = compatibilityCacheKey(options.compatibilityManifest);
   const cached = contextSnapshots.get(contextFile);
   if (cached?.signature === signature && cached.manifestRevision === manifestRevision) return cached.value;
   const loadKey = `${contextFile}\0${signature}\0${manifestRevision}`;
