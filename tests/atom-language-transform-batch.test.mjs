@@ -167,6 +167,66 @@ test('batch Transform moves multiple existing Atoms in one authoritative commit'
   assert.deepEqual(current[0].contain.map((item) => item.thing), ['来源甲', '来源乙']);
 });
 
+test('trusted maintenance atomically moves the backup root and renames its former parent', async (t) => {
+  const files = await fixture(t);
+  await fs.writeFile(files.contextFile, `${JSON.stringify([{
+    ...atom('🧊'),
+    contain: [{
+      'thing@backup@default': '默认备份仓', situation: '', contain: [], support: []
+    }, atom('工务')]
+  }], null, 2)}\n`, 'utf8');
+  const writes = [];
+  const world = createLegacyWorldService({
+    onAuthoritativeWrite: (write) => writes.push(write)
+  });
+
+  const result = await world.executeLegacy({
+    ...files,
+    trustedMaintenance: true,
+    source: `transform ${JSON.stringify([
+      { 'thing.mov.世界之外': '🧊/默认备份仓' },
+      { 'thing.ren.🧊manage': '🧊' }
+    ])}`
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(writes.length, 1, 'the maintenance migration is one authoritative commit');
+  const current = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.deepEqual(current.map((item) => item.thing ?? item['thing@backup@default']), [
+    '🧊manage', '默认备份仓'
+  ]);
+  assert.deepEqual(current[0].contain.map((item) => item.thing), ['工务']);
+});
+
+test('trusted maintenance mixed structural batch rolls back every item when a later rename fails', async (t) => {
+  const files = await fixture(t);
+  await fs.writeFile(files.contextFile, `${JSON.stringify([{
+    ...atom('🧊'),
+    contain: [{
+      'thing@backup@default': '默认备份仓', situation: '', contain: [], support: []
+    }]
+  }], null, 2)}\n`, 'utf8');
+  const before = await fs.readFile(files.contextFile, 'utf8');
+  const writes = [];
+  const world = createLegacyWorldService({
+    onAuthoritativeWrite: (write) => writes.push(write)
+  });
+
+  const result = await world.executeLegacy({
+    ...files,
+    trustedMaintenance: true,
+    source: `transform ${JSON.stringify([
+      { 'thing.mov.世界之外': '🧊/默认备份仓' },
+      { 'thing.ren.默认备份仓': '🧊' }
+    ])}`
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.changed, false);
+  assert.equal(writes.length, 0);
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
+});
+
 test('batch Transform swaps sibling names from one final-state plan and rewrites relations once', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-transform-batch-rename-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

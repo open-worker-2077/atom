@@ -343,6 +343,30 @@ test('persisted landing resolves the moved node by target domain after its proje
   );
 });
 
+test('persisted landing rejects an authoritative result that retains the source or duplicates the target', () => {
+  const model = loadModel();
+  const source = {
+    id: 'old-id', key: 'root/source::old-id', path: 'root/source',
+    atomPath: '来源域/待移动节点', label: '待移动节点'
+  };
+  const operation = {
+    kind: 'node-land',
+    source: { key: source.key },
+    sourceNode: source,
+    target: { path: 'root/target' },
+    draft: source
+  };
+  const target = {
+    id: 'new-id', key: 'root/target::new-id', path: 'root/target',
+    atomPath: '目标域/待移动节点', label: '待移动节点'
+  };
+
+  assert.equal(model.persistedLandingNode(operation, { nodes: [source, target] }), null);
+  assert.equal(model.persistedLandingNode(operation, {
+    nodes: [target, { ...target, id: 'duplicate-id', key: 'root/target::duplicate-id' }]
+  }), null);
+});
+
 test('batch landing keeps every selected source in one atomic move operation', () => {
   const operation = loadModel().batchLandingOperation({
     kind: 'node-land',

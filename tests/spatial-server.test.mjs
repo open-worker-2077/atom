@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createSpatialServer } from '../cli/lib/server.mjs';
+import { childDomainPath } from '../cli/lib/probe.mjs';
 import { VERSION } from '../cli/lib/version.mjs';
 
 test('local server exposes one store to the page bridge and command API', async (context) => {
@@ -68,7 +69,7 @@ test('local server notifies connected pages immediately after a committed operat
   await reader.cancel().catch(() => {});
 });
 
-test('mobile state projection returns only the requested visible path', async (context) => {
+test('path state includes one child-domain lookahead without downloading deeper descendants', async (context) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-path-state-'));
   const instance = await createSpatialServer({
     root: path.resolve(import.meta.dirname, '..'),
@@ -78,18 +79,22 @@ test('mobile state projection returns only the requested visible path', async (c
   context.after(() => new Promise((resolve) => instance.server.close(resolve)));
   const address = instance.server.address();
   const origin = `http://127.0.0.1:${address.port}`;
-  const create = (pathValue, label) => fetch(`${origin}/__spatial/api/command`, {
+  const create = async (pathValue, label) => (await fetch(`${origin}/__spatial/api/command`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ method: 'node.create', params: { path: pathValue, label } })
-  });
-  await create('root', 'atom.json');
-  await create('root/child-domain', '项目');
+  })).json();
+  const rootNode = (await create('root', 'atom.json')).result.node;
+  const childPath = childDomainPath(rootNode);
+  const childNode = (await create(childPath, '项目')).result.node;
+  const grandchildPath = childDomainPath(childNode);
+  await create(grandchildPath, '不应预取的孙级节点');
 
   const response = await fetch(`${origin}/__spatial/api/state?path=root`);
   assert.equal(response.status, 200);
   const state = await response.json();
   assert.deepEqual(state.scope, { path: 'root' });
-  assert.deepEqual(state.knowledge.nodes.map((node) => node.label), ['atom.json']);
-  assert.equal(state.knowledge.revision, 2);
+  assert.deepEqual(state.knowledge.nodes.map((node) => node.label), ['atom.json', '项目']);
+  assert.deepEqual([...new Set(state.knowledge.nodes.map((node) => node.path))], ['root', childPath]);
+  assert.equal(state.knowledge.revision, 3);
 });

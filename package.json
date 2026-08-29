@@ -19,6 +19,7 @@
     "atom:serve": "node work-engine/atom-language/graph-server.mjs",
     "atom:parse-debug": "node work-engine/atom-language/dev-server.mjs --host 127.0.0.1 --port 4794"
     ,"night-watch": "node scripts/night-watch-cli.mjs --dry-run"
+    ,"night-watch:shared": "node scripts/night-watch-shared-cli-live.mjs"
   },
   "engines": {
     "node": ">=24"

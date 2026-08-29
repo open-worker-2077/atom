@@ -6,7 +6,7 @@ const liveModuleUrl = new URL('../scripts/night-watch-business-case-live.mjs', i
 const candidate = { commit: '2eac377dd1609619d771e85981deecc5d5c4aa0e', version: '0.3.0', worktree: 'uncommitted' };
 const authorityReceipt = {
   contract: 'atom.night-watch-authority-receipt', version: 1, receiptId: 'ATOM-NIGHT-WATCH-20260829-01',
-  agent: '🧊', testDomain: 'test', syntheticCleanup: { allowed: true, scope: 'unique-subtree' },
+  agent: '🧊manage', testDomain: '🧊manage/工务/work/test/night-watch-business-cases', syntheticCleanup: { allowed: true, scope: 'unique-subtree' },
   restart: { allowed: true, deadlineSeconds: 60 }, githubPublication: { allowed: true }, unattended: false,
   expiresAt: '2026-08-30T00:00:00.000Z'
 };
@@ -43,8 +43,8 @@ test('POS-01 accepts a generic Program receipt only when its exact result-node r
         return { stdout: '{"ok":true,"revision":"r-17"}' };
       }
     },
-    agent: '🧊', authorityReceipt, runId: 'nw-pos-01', candidate, timestamp: '2026-08-29T00:00:00.000Z',
-    rootPath: '世界之外/test/夜巡-nw-pos-01'
+    agent: '🧊manage', authorityReceipt, runId: 'nw-pos-01', candidate, timestamp: '2026-08-29T00:00:00.000Z',
+    rootPath: '世界之外/🧊manage/工务/work/test/夜巡-nw-pos-01'
   });
 
   assert.equal(result.status, 'passed');
@@ -58,8 +58,8 @@ test('POS-01 accepts a generic Program receipt only when its exact result-node r
     assert.equal(JSON.stringify(evidence).includes('SYNTHETIC_SOURCE_SENTINEL'), false);
     assert.equal(JSON.stringify(evidence).includes('PROGRAM_SOURCE_SENTINEL'), false);
   }
-  assert.equal(calls.every(({ agent }) => agent === '🧊'), true);
-  assert.equal(calls.some(({ source }) => source.startsWith('explore {"thing":"世界之外/test"')), true);
+  assert.equal(calls.every(({ agent }) => agent === '🧊manage'), true);
+  assert.equal(calls.some(({ source }) => source.startsWith('explore {"thing":"世界之外/🧊manage/工务/work/test"')), true);
   assert.equal(calls.some(({ source }) => source.startsWith('transform new ')), true);
   assert.equal(calls.some(({ source }) => source.includes('thing.run.')), true);
   const programReadback = result.evidence.find((item) => item.commandClass === 'deterministic-program-readback');
@@ -98,7 +98,7 @@ test('REJECT-02 rejects the adjacent-role candidate without writing a mapping an
 
 test('REJECT-02 uses the public CLI to reject an adjacent-role mapping atomically, then proves the four gates, receipt, live ^ lock, and final read-back', async () => {
   const { runReject02LiveCase } = await import(liveModuleUrl);
-  const rootPath = '世界之外/test/夜巡-nw-reject-02';
+  const rootPath = '世界之外/🧊manage/工务/work/test/夜巡-nw-reject-02';
   const resultPath = `${rootPath}/REJECT-02/相邻角色核验/拒绝结果`;
   const wrongMappingPath = `${rootPath}/REJECT-02/错误映射`;
   const receiptPath = `${rootPath}/REJECT-02/拒绝回单`;
@@ -110,8 +110,8 @@ test('REJECT-02 uses the public CLI to reject an adjacent-role mapping atomicall
     adapter: {
       async executeStdin(agent, source) {
         calls.push({ agent, source });
-        if (source.startsWith('explore ') && source.includes('"thing":"🧊"')) {
-          return { stdout: JSON.stringify({ thing: '🧊', situation: 'ordinary public Agent detail; registration labels are not exposed here.', revision: 'agent-r-1' }) };
+        if (source.startsWith('explore ') && source.includes('"thing":"🧊manage"')) {
+          return { stdout: JSON.stringify({ thing: '🧊manage', situation: 'ordinary public Agent detail; registration labels are not exposed here.', revision: 'agent-r-1' }) };
         }
         if (source.startsWith('explore ') && source.includes(wrongMappingPath)) {
           return { stdout: '{"ok":false,"errors":[{"code":"ATOM_NOT_FOUND"}]}' };
@@ -123,7 +123,7 @@ test('REJECT-02 uses the public CLI to reject an adjacent-role mapping atomicall
           return { stdout: JSON.stringify({ thing: '拒绝回单', situation: 'rejected', revision: 'receipt-r-3' }) };
         }
         if (source.startsWith('explore ') && source.includes(lockPath)) {
-          return { stdout: JSON.stringify({ thing: '结果锁定', situation: 'lock({"targets":{"paths":["世界之外/test/夜巡-nw-reject-02/REJECT-02/相邻角色核验/拒绝结果"],"scope":"exact"},"actions":["transform"],"labels":["^"]})', revision: 'lock-r-4' }) };
+          return { stdout: JSON.stringify({ thing: '结果锁定', situation: 'lock({"targets":{"paths":["世界之外/🧊manage/工务/work/test/夜巡-nw-reject-02/REJECT-02/相邻角色核验/拒绝结果"],"scope":"exact"},"actions":["transform"],"labels":["^"]})', revision: 'lock-r-4' }) };
         }
         if (source.includes('thing.run.') && source.includes('/相邻角色核验')) {
           return { stdout: '{"thing@program~unchanged":"相邻角色核验","revision":"program-r-2"}' };
@@ -134,18 +134,18 @@ test('REJECT-02 uses the public CLI to reject an adjacent-role mapping atomicall
         return { stdout: '{"ok":true,"revision":"write-r-1"}' };
       }
     },
-    agent: '🧊', authorityReceipt, runId: 'nw-reject-02', candidate, timestamp: '2026-08-29T00:00:00.000Z', rootPath,
+    agent: '🧊manage', authorityReceipt, runId: 'nw-reject-02', candidate, timestamp: '2026-08-29T00:00:00.000Z', rootPath,
     lockLabels: ['^']
   });
 
   assert.equal(result.status, 'passed');
   assert.deepEqual(result.gates, { StructureGate: 'passed', QuantityGate: 'passed', ConservationGate: 'passed', SemanticGate: 'passed' });
   assert.deepEqual(result.proofs.map((proof) => proof.gate), ['StructureGate', 'QuantityGate', 'ConservationGate', 'SemanticGate']);
-  assert.equal(calls.every(({ agent }) => agent === '🧊'), true);
+  assert.equal(calls.every(({ agent }) => agent === '🧊manage'), true);
   assert.equal(calls.filter(({ source }) => source.startsWith('transform new ') && source.includes(`\"thing\":\"${rootPath}\"`)).length, 1);
   assert.equal(calls.some(({ source }) => source.startsWith('explore ') && source.includes(wrongMappingPath)), true);
   assert.equal(calls.some(({ source }) => source.startsWith('transform ') && source.includes(receiptPath) && source.includes('situation.rep.rejected')), true);
-  assert.equal(calls.some(({ source }) => source.startsWith('explore ') && source.includes('"thing":"🧊"')), true);
+  assert.equal(calls.some(({ source }) => source.startsWith('explore ') && source.includes('"thing":"🧊manage"')), true);
   assert.equal(calls.some(({ source }) => source.startsWith('transform ') && source.includes(lockPath) && source.includes('labels')),
     true);
   assert.equal(calls.at(-1).source.startsWith('explore ') && calls.at(-1).source.includes(wrongMappingPath), true);
@@ -153,7 +153,7 @@ test('REJECT-02 uses the public CLI to reject an adjacent-role mapping atomicall
 
 test('PENDING-03 uses the public CLI to preserve the exact missing assignment without selecting a role, then records a pending semantic gate', async () => {
   const { runPending03LiveCase } = await import(liveModuleUrl);
-  const rootPath = '世界之外/test/夜巡-nw-pending-03';
+  const rootPath = '世界之外/🧊manage/工务/work/test/夜巡-nw-pending-03';
   const programPath = `${rootPath}/PENDING-03/待核核验`;
   const resultPath = `${programPath}/待核结果`;
   const queryPath = `${programPath}/待核问询`;
@@ -205,7 +205,7 @@ test('PENDING-03 uses the public CLI to preserve the exact missing assignment wi
         return { stdout: '{"ok":true,"revision":"pending-write-r-1"}' };
       }
     },
-    agent: '🧊', authorityReceipt, runId: 'nw-pending-03', candidate, timestamp: '2026-08-29T00:00:00.000Z', rootPath,
+    agent: '🧊manage', authorityReceipt, runId: 'nw-pending-03', candidate, timestamp: '2026-08-29T00:00:00.000Z', rootPath,
     lockLabels: ['^']
   });
 
@@ -213,7 +213,7 @@ test('PENDING-03 uses the public CLI to preserve the exact missing assignment wi
   assert.equal(result.accepted, true);
   assert.deepEqual(result.gates, { StructureGate: 'passed', QuantityGate: 'passed', ConservationGate: 'passed', SemanticGate: 'pending' });
   assert.equal(result.proofs.find((proof) => proof.gate === 'SemanticGate')?.status, 'pending');
-  assert.equal(calls.every(({ agent }) => agent === '🧊'), true);
+  assert.equal(calls.every(({ agent }) => agent === '🧊manage'), true);
   assert.equal(calls[0].source.startsWith('explore ') && calls[0].source.includes(rootPath), true);
   assert.equal(calls.filter(({ source }) => source.startsWith('transform new ') && source.includes(`\"thing\":\"${rootPath}\"`)).length, 1);
   assert.equal(calls.some(({ source }) => source.startsWith('explore ') && source.includes(queryPath)), true);
@@ -225,7 +225,7 @@ test('PENDING-03 uses the public CLI to preserve the exact missing assignment wi
 
 test('PENDING-03 resumes only an exact known synthetic root and does not replay its root creation after an unknown write', async () => {
   const { runPending03LiveCase } = await import(liveModuleUrl);
-  const rootPath = '世界之外/test/夜巡-nw-pending-03-resume';
+  const rootPath = '世界之外/🧊manage/工务/work/test/夜巡-nw-pending-03-resume';
   const programPath = `${rootPath}/PENDING-03/待核核验`;
   const resultPath = `${programPath}/待核结果`;
   const queryPath = `${programPath}/待核问询`;
@@ -254,7 +254,7 @@ test('PENDING-03 resumes only an exact known synthetic root and does not replay 
         return { stdout: '{"ok":true,"revision":"write-r-1"}' };
       }
     },
-    agent: '🧊', authorityReceipt, runId: 'nw-pending-03-resume', candidate, timestamp: '2026-08-29T00:00:00.000Z', rootPath,
+    agent: '🧊manage', authorityReceipt, runId: 'nw-pending-03-resume', candidate, timestamp: '2026-08-29T00:00:00.000Z', rootPath,
     lockLabels: ['^'], resumeExistingRoot: true
   });
 
@@ -293,8 +293,8 @@ test('POS-01 rejects a Program receipt that spoofs counts when the result node h
           return { stdout: '{"ok":true,"revision":"r-17"}' };
         }
       },
-      agent: '🧊', authorityReceipt, runId: 'nw-pos-01-spoof', candidate, timestamp: '2026-08-29T00:00:00.000Z',
-      rootPath: '世界之外/test/夜巡-nw-pos-01-spoof'
+      agent: '🧊manage', authorityReceipt, runId: 'nw-pos-01-spoof', candidate, timestamp: '2026-08-29T00:00:00.000Z',
+      rootPath: '世界之外/🧊manage/工务/work/test/夜巡-nw-pos-01-spoof'
     }),
     (error) => error.code === 'NIGHT_WATCH_POS01_PROGRAM_PROOF_INVALID'
   );
@@ -312,13 +312,13 @@ test('POS-01 adapter exact-reads an unknown write and does not replay it', async
           return { stdout: '{"ok":true,"revision":"r-17"}' };
         }
       },
-      agent: '🧊', authorityReceipt, runId: 'nw-pos-01', candidate, timestamp: '2026-08-29T00:00:00.000Z',
-      rootPath: '世界之外/test/夜巡-nw-pos-01'
+      agent: '🧊manage', authorityReceipt, runId: 'nw-pos-01', candidate, timestamp: '2026-08-29T00:00:00.000Z',
+      rootPath: '世界之外/🧊manage/工务/work/test/夜巡-nw-pos-01'
     }),
     (error) => error.code === 'NIGHT_WATCH_POS01_WRITE_UNCONFIRMED'
   );
   assert.equal(calls.filter((source) => source.startsWith('transform new ')).length, 1);
-  assert.equal(calls.at(-1).startsWith('explore {"thing":"世界之外/test/夜巡-nw-pos-01"'), true);
+  assert.equal(calls.at(-1).startsWith('explore {"thing":"世界之外/🧊manage/工务/work/test/夜巡-nw-pos-01"'), true);
 });
 
 test('POS-01 exact-reads the result node once after an unknown Program run and does not replay it', async () => {
@@ -333,13 +333,13 @@ test('POS-01 exact-reads the result node once after an unknown Program run and d
           return { stdout: '{"ok":true,"revision":"r-17"}' };
         }
       },
-      agent: '🧊', authorityReceipt, runId: 'nw-pos-01-unknown-run', candidate, timestamp: '2026-08-29T00:00:00.000Z',
-      rootPath: '世界之外/test/夜巡-nw-pos-01-unknown-run'
+      agent: '🧊manage', authorityReceipt, runId: 'nw-pos-01-unknown-run', candidate, timestamp: '2026-08-29T00:00:00.000Z',
+      rootPath: '世界之外/🧊manage/工务/work/test/夜巡-nw-pos-01-unknown-run'
     }),
     (error) => error.code === 'NIGHT_WATCH_POS01_WRITE_UNCONFIRMED'
   );
   assert.equal(calls.filter((source) => source.includes('thing.run.') && source.includes('确定性核验')).length, 1);
-  assert.equal(calls.at(-1).startsWith('explore {"thing":"世界之外/test/夜巡-nw-pos-01-unknown-run/POS-01/确定性核验/核验结果"'), true);
+  assert.equal(calls.at(-1).startsWith('explore {"thing":"世界之外/🧊manage/工务/work/test/夜巡-nw-pos-01-unknown-run/POS-01/确定性核验/核验结果"'), true);
 });
 
 test('REMAP-04 keeps plan and actual separate while independently proving four gates', async () => {
@@ -366,7 +366,7 @@ test('REMAP-04 keeps plan and actual separate while independently proving four g
 
 test('REMAP-04 uses public CLI on a new synthetic root, changes only remapped fields, locks the live result, and exact-reads the final state', async () => {
   const { runRemap04LiveCase } = await import(liveModuleUrl);
-  const rootPath = '世界之外/test/夜巡-remap04-tdd';
+  const rootPath = '世界之外/🧊manage/工务/work/test/夜巡-remap04-tdd';
   const casePath = `${rootPath}/REMAP-04`;
   const paths = {
     plan: `${casePath}/计划锚定对象`, actual: `${casePath}/实际形成对象`, responsibility: `${casePath}/责任关系`,
@@ -416,13 +416,13 @@ test('REMAP-04 uses public CLI on a new synthetic root, changes only remapped fi
         return { stdout: '{"ok":true,"revision":"remap-write-r-1"}' };
       }
     },
-    agent: '🧊', authorityReceipt, runId: 'nw-remap-04-tdd', candidate, timestamp: '2026-08-29T00:00:00.000Z', rootPath,
+    agent: '🧊manage', authorityReceipt, runId: 'nw-remap-04-tdd', candidate, timestamp: '2026-08-29T00:00:00.000Z', rootPath,
     lockLabels: ['^']
   });
 
   assert.equal(result.status, 'passed');
   assert.deepEqual(result.gates, { StructureGate: 'passed', QuantityGate: 'passed', ConservationGate: 'passed', SemanticGate: 'passed' });
-  assert.equal(calls.every(({ agent }) => agent === '🧊'), true);
+  assert.equal(calls.every(({ agent }) => agent === '🧊manage'), true);
   assert.equal(calls[0].source.startsWith('explore ') && calls[0].source.includes(rootPath), true);
   assert.equal(calls.filter(({ source }) => source.includes('thing.run.') && source.includes('/计划实际重映射')).length, 1);
   assert.equal(calls.some(({ source }) => source.startsWith('explore ') && source.includes(paths.receipt)), true);
@@ -433,7 +433,7 @@ test('REMAP-04 uses public CLI on a new synthetic root, changes only remapped fi
 
 test('REMAP-04 resumes only an exactly read-back synthetic root and never replays its confirmed root creation', async () => {
   const { runRemap04LiveCase } = await import(liveModuleUrl);
-  const rootPath = '世界之外/test/夜巡-remap04-resume';
+  const rootPath = '世界之外/🧊manage/工务/work/test/夜巡-remap04-resume';
   const calls = [];
   await assert.rejects(
     runRemap04LiveCase({
@@ -449,7 +449,7 @@ test('REMAP-04 resumes only an exactly read-back synthetic root and never replay
           return { stdout: '{"ok":true,"revision":"generic-r-1"}' };
         }
       },
-      agent: '🧊', authorityReceipt, runId: 'nw-remap-04-resume', candidate, timestamp: '2026-08-29T00:00:00.000Z', rootPath,
+      agent: '🧊manage', authorityReceipt, runId: 'nw-remap-04-resume', candidate, timestamp: '2026-08-29T00:00:00.000Z', rootPath,
       lockLabels: ['^'], resumeExistingRoot: true
     }),
     (error) => error.code === 'NIGHT_WATCH_REMAP04_READBACK_FAILED'
@@ -460,7 +460,7 @@ test('REMAP-04 resumes only an exactly read-back synthetic root and never replay
 
 test('REMAP-04 continues a confirmed initial case only when its result is exactly absent', async () => {
   const { runRemap04LiveCase } = await import(liveModuleUrl);
-  const rootPath = '世界之外/test/夜巡-remap04-resume-initial';
+  const rootPath = '世界之外/🧊manage/工务/work/test/夜巡-remap04-resume-initial';
   const casePath = `${rootPath}/REMAP-04`;
   const paths = {
     plan: `${casePath}/计划锚定对象`, actual: `${casePath}/实际形成对象`, responsibility: `${casePath}/责任关系`,
@@ -527,12 +527,12 @@ test('REMAP-04 continues a confirmed initial case only when its result is exactl
         return { stdout: '{"ok":true,"revision":"resume-write-r-1"}' };
       }
     },
-    agent: '🧊', authorityReceipt, runId: 'nw-remap-04-resume-initial', candidate,
+    agent: '🧊manage', authorityReceipt, runId: 'nw-remap-04-resume-initial', candidate,
     timestamp: '2026-08-29T00:00:00.000Z', rootPath, lockLabels: ['^'], resumeExistingRoot: true
   });
 
   assert.equal(result.status, 'passed');
-  assert.equal(calls.every(({ agent }) => agent === '🧊'), true);
+  assert.equal(calls.every(({ agent }) => agent === '🧊manage'), true);
   assert.equal(calls.filter(({ source }) => source.startsWith('transform new ') && source.includes(`"thing":"${rootPath}"`)).length, 0);
   assert.equal(calls.filter(({ source }) => source.startsWith('transform new ') && source.includes(`"thing":"${casePath}"`)).length, 0);
   assert.equal(calls.filter(({ source }) => source.includes('thing.run.') && source.includes('/计划实际重映射')).length, 1);
@@ -540,7 +540,7 @@ test('REMAP-04 continues a confirmed initial case only when its result is exactl
 
 test('RESUME-05 establishes a new synthetic PENDING root, supplements only the missing fact, reuses conservation evidence, and locks the exact final result', async () => {
   const { runResume05LiveCase } = await import(liveModuleUrl);
-  const rootPath = '世界之外/test/夜巡-resume05-tdd';
+  const rootPath = '世界之外/🧊manage/工务/work/test/夜巡-resume05-tdd';
   const pendingPath = `${rootPath}/PENDING-03`;
   const pendingProgramPath = `${pendingPath}/待核核验`;
   const pendingResultPath = `${pendingProgramPath}/待核结果`;
@@ -619,14 +619,14 @@ test('RESUME-05 establishes a new synthetic PENDING root, supplements only the m
         return { stdout: '{"ok":true,"revision":"resume05-write"}' };
       }
     },
-    agent: '🧊', authorityReceipt, runId: 'nw-resume-05-tdd', candidate,
+    agent: '🧊manage', authorityReceipt, runId: 'nw-resume-05-tdd', candidate,
     timestamp: '2026-08-29T00:00:00.000Z', rootPath, lockLabels: ['^']
   });
 
   assert.deepEqual(result.gates, { StructureGate: 'passed', QuantityGate: 'passed', ConservationGate: 'passed', SemanticGate: 'passed' });
   assert.deepEqual(result.recomputedFields, ['responsibility', 'icon', 'SemanticGate']);
   assert.equal(result.reusedConservationEvidence, true);
-  assert.equal(calls.every(({ agent }) => agent === '🧊'), true);
+  assert.equal(calls.every(({ agent }) => agent === '🧊manage'), true);
   assert.equal(calls[0].source.includes(`"thing":"${rootPath}"`), true);
   assert.equal(calls.filter(({ source }) => source.startsWith('transform new ') && source.includes(`"thing":"${rootPath}"`)).length, 1);
   assert.equal(calls.filter(({ source }) => source.includes('thing.run.') && source.includes('/待核核验')).length, 1);
@@ -640,7 +640,7 @@ test('RESUME-05 establishes a new synthetic PENDING root, supplements only the m
 
 test('RESUME-05 continues from an exact read-back root after an unknown root-write without replaying that root creation', async () => {
   const { runResume05LiveCase } = await import(liveModuleUrl);
-  const rootPath = '世界之外/test/夜巡-resume05-known-root';
+  const rootPath = '世界之外/🧊manage/工务/work/test/夜巡-resume05-known-root';
   const calls = [];
   let pendingCaseExists = false;
   await assert.rejects(
@@ -660,7 +660,7 @@ test('RESUME-05 continues from an exact read-back root after an unknown root-wri
           return { stdout: '{"ok":true,"revision":"generic-r-1"}' };
         }
       },
-      agent: '🧊', authorityReceipt, runId: 'nw-resume-05-known-root', candidate,
+      agent: '🧊manage', authorityReceipt, runId: 'nw-resume-05-known-root', candidate,
       timestamp: '2026-08-29T00:00:00.000Z', rootPath, lockLabels: ['^'], resumeExistingRoot: true
     }),
     (error) => error.code === 'NIGHT_WATCH_PENDING03_QUERY_INVALID'
@@ -671,7 +671,7 @@ test('RESUME-05 continues from an exact read-back root after an unknown root-wri
 
 test('RESUME-05 exact-reads an already pending synthetic case instead of replaying its Program', async () => {
   const { runResume05LiveCase } = await import(liveModuleUrl);
-  const rootPath = '世界之外/test/夜巡-resume05-pending-readback';
+  const rootPath = '世界之外/🧊manage/工务/work/test/夜巡-resume05-pending-readback';
   const pendingPath = `${rootPath}/PENDING-03`;
   const pendingProgramPath = `${pendingPath}/待核核验`;
   const calls = [];
@@ -705,7 +705,7 @@ test('RESUME-05 exact-reads an already pending synthetic case instead of replayi
           return { stdout: '{"ok":true,"revision":"generic-r-1"}' };
         }
       },
-      agent: '🧊', authorityReceipt, runId: 'nw-resume-05-pending-readback', candidate,
+      agent: '🧊manage', authorityReceipt, runId: 'nw-resume-05-pending-readback', candidate,
       timestamp: '2026-08-29T00:00:00.000Z', rootPath, lockLabels: ['^'], resumeExistingRoot: true
     }),
     (error) => error.code === 'NIGHT_WATCH_RESUME05_CASE_NOT_ABSENT'

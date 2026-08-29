@@ -45,7 +45,7 @@ The night-watch mode SHALL obtain the current command contract from `atom.cmd --
 - **THEN** its external acceptance step can change without changing the generic Atom authorization, persistence, Program, or Graph kernel
 
 ### Requirement: Isolated authorized facts
-The night-watch mode SHALL write only uniquely named synthetic facts below the approved top-level `test` domain and SHALL require an explicit authority record for shared-runtime writes, synthetic cleanup, service restart, and external GitHub publication.
+The night-watch mode SHALL preserve exactly two approved top-level Atoms: `🧊manage` and the default backup warehouse. It SHALL write only uniquely named synthetic facts below the approved `🧊manage/工务/work/test/<run-id>` domain and SHALL require an explicit authority record for shared-runtime writes, synthetic cleanup, service restart, and external GitHub publication.
 
 #### Scenario: Authority is incomplete
 - **WHEN** any required live action is outside the recorded authority envelope

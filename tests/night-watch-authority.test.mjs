@@ -8,8 +8,8 @@ function receipt(overrides = {}) {
     contract: 'atom.night-watch-authority-receipt',
     version: 1,
     receiptId: 'ATOM-NIGHT-WATCH-20260829-01',
-    agent: '🧊',
-    testDomain: 'test',
+    agent: '🧊manage',
+    testDomain: '🧊manage/工务/work/test/nw-20260829-001',
     syntheticCleanup: { allowed: true, scope: 'unique-subtree' },
     restart: { allowed: true, deadlineSeconds: 60 },
     githubPublication: { allowed: false },
@@ -27,11 +27,11 @@ test('night-watch authority receipt authorizes only its exact Agent and bounded 
   const { validateNightWatchAuthorityReceipt } = await loadValidator();
 
   const validated = validateNightWatchAuthorityReceipt(receipt(), {
-    agent: '🧊',
+    agent: '🧊manage',
     now: '2026-08-29T00:00:00.000Z'
   });
 
-  assert.equal(validated.testDomain, 'test');
+  assert.equal(validated.testDomain, '🧊manage/工务/work/test/nw-20260829-001');
   assert.equal(validated.githubPublication.allowed, false);
 });
 
@@ -40,14 +40,14 @@ test('night-watch authority receipt rejects an Agent mismatch and an expired rec
 
   assert.throws(
     () => validateNightWatchAuthorityReceipt(receipt(), {
-      agent: 'not-🧊',
+      agent: 'not-🧊manage',
       now: '2026-08-29T00:00:00.000Z'
     }),
     (error) => error.code === 'NIGHT_WATCH_AUTHORITY_AGENT_MISMATCH'
   );
   assert.throws(
     () => validateNightWatchAuthorityReceipt(receipt({ expiresAt: '2026-08-28T00:00:00.000Z' }), {
-      agent: '🧊',
+      agent: '🧊manage',
       now: '2026-08-29T00:00:00.000Z'
     }),
     (error) => error.code === 'NIGHT_WATCH_AUTHORITY_EXPIRED'
@@ -61,16 +61,24 @@ test('night-watch authority receipt rejects omitted live-action and unattended b
 
   assert.throws(
     () => validateNightWatchAuthorityReceipt(invalid, {
-      agent: '🧊',
+      agent: '🧊manage',
       now: '2026-08-29T00:00:00.000Z'
     }),
     (error) => error.code === 'NIGHT_WATCH_AUTHORITY_RESTART_INVALID'
   );
-  assert.throws(
-    () => validateNightWatchAuthorityReceipt(receipt({ testDomain: 'business' }), {
-      agent: '🧊',
-      now: '2026-08-29T00:00:00.000Z'
-    }),
-    (error) => error.code === 'NIGHT_WATCH_AUTHORITY_TEST_DOMAIN_INVALID'
-  );
+  for (const testDomain of [
+    'test',
+    '🧊manage/工务/work/test',
+    '🧊manage/工务/work/test/../业务',
+    '🧊manage/办包/test/nw-20260829-001'
+  ]) {
+    assert.throws(
+      () => validateNightWatchAuthorityReceipt(receipt({ testDomain }), {
+        agent: '🧊manage',
+        now: '2026-08-29T00:00:00.000Z'
+      }),
+      (error) => error.code === 'NIGHT_WATCH_AUTHORITY_TEST_DOMAIN_INVALID',
+      testDomain
+    );
+  }
 });

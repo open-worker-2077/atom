@@ -453,6 +453,9 @@
           && typeof workspaceModel.persistedLandingNode === "function"
           ? workspaceModel.persistedLandingNode(operation, payload.knowledge)
           : reconcileEditedNode(operation, payload.knowledge, previousKnowledge);
+        if (operation.kind === "node-land" && !persistedNode) {
+          throw new Error("单节点移动未完成：目标必须恰有一份且来源必须为零，已恢复保存前状态");
+        }
         if (payload.knowledge) {
           lastKnowledge = payload.knowledge;
           revision = Number(payload.knowledge.revision) || revision;

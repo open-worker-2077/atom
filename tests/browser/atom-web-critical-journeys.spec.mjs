@@ -26,6 +26,25 @@ async function enterAtomFile(page) {
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).not.toBe('root');
 }
 
+test('first domain entry renders its authoritative child nodes on the next visual frame', async ({ page }) => {
+  await openIsolatedWorld(page);
+  const selected = await page.evaluate(() => window.spatialLab.selectByLabel('atom.json'));
+  expect(selected).toBe(true);
+  await page.keyboard.press('f');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+
+  const firstFrame = await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => resolve(window.spatialLab.state()));
+  }));
+  expect(firstFrame.path).not.toBe('root');
+  expect(firstFrame.visibleNodeDescriptors.map(({ label }) => label)).toEqual(expect.arrayContaining([
+    '测试入口',
+    '批量目标',
+    '深层导航入口',
+    '顶层参照'
+  ]));
+});
+
 test('Web help renders work-order actions, errors, and receipt fields from the shared registry endpoint', async ({ page }) => {
   await openIsolatedWorld(page);
   await page.keyboard.press('h');
@@ -179,6 +198,86 @@ test('double-Shift selection survives the real ctrl-right landing gesture as one
     .map(({ atomPath }) => atomPath);
   expect(movedPaths).toHaveLength(targets.length);
   expect(movedPaths.every((atomPath) => atomPath.startsWith('批量目标/'))).toBe(true);
+});
+
+test('single Web landing is authoritative, survives F5, and leaves no source copy', async ({ page }) => {
+  test.setTimeout(90_000);
+  const label = '单节点搬移验收';
+  await openIsolatedWorld(page);
+  await enterAtomFile(page);
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('测试入口'))).toBe(true);
+  await page.keyboard.press('f');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await waitForViewToSettle(page);
+
+  await page.evaluate(() => window.spatialLab.dispatch('createNode', {
+    point: { x: window.innerWidth * 0.58, y: window.innerHeight * 0.52 }
+  }));
+  const name = page.locator('#nodeNameEditor');
+  await expect(name).toBeVisible();
+  await name.fill(label);
+  await name.press('Enter');
+  await expect.poll(() => page.evaluate((expected) => (
+    window.spatialLab.state().visibleNodeDescriptors.some(({ label: actual }) => actual === expected)
+  ), label)).toBe(true);
+
+  const sourcePath = await page.evaluate(() => window.spatialLab.state().path);
+  const source = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .find((entry) => entry.label === label);
+  expect(source).toBeTruthy();
+  await page.keyboard.down('Control');
+  await page.mouse.click(source.clientX, source.clientY, { button: 'right' });
+  await page.keyboard.up('Control');
+
+  await page.getByRole('button', { name: '上层' }).click();
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).not.toBe(sourcePath);
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('批量目标'))).toBe(true);
+  await page.keyboard.press('f');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().phase)).toBe('idle');
+  await page.waitForTimeout(550);
+  const targetPath = await page.evaluate(() => window.spatialLab.state().path);
+
+  const persisted = page.evaluate(() => new Promise((resolve) => {
+    window.addEventListener('spatial-workspace-persisted', (event) => resolve(event.detail), { once: true });
+  }));
+  await page.keyboard.down('Control');
+  await page.mouse.click(48, 360, { button: 'right' });
+  await page.keyboard.up('Control');
+  await page.keyboard.press('Enter');
+  const receipt = await persisted;
+  expect(receipt.operation.kind).toBe('node-land');
+
+  const authoritative = await page.evaluate(async ({ expectedLabel, expectedSource, expectedTarget }) => {
+    const payload = await fetch('/__spatial/api/state').then((response) => response.json());
+    const matching = payload.knowledge.nodes.filter(({ label }) => label === expectedLabel);
+    return {
+      total: matching.length,
+      source: matching.filter(({ path }) => path === expectedSource).length,
+      target: matching.filter(({ path }) => path === expectedTarget).length
+    };
+  }, { expectedLabel: label, expectedSource: sourcePath, expectedTarget: targetPath });
+  expect(authoritative).toEqual({ total: 1, source: 0, target: 1 });
+
+  await page.reload();
+  await openIsolatedWorld(page);
+  await enterAtomFile(page);
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('批量目标'))).toBe(true);
+  await page.keyboard.press('f');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await waitForViewToSettle(page);
+  await expect.poll(() => page.evaluate((expected) => (
+    window.spatialLab.state().visibleNodeDescriptors.filter(({ label: actual }) => actual === expected).length
+  ), label)).toBe(1);
+
+  await page.getByRole('button', { name: '上层' }).click();
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('测试入口'))).toBe(true);
+  await page.keyboard.press('f');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await waitForViewToSettle(page);
+  expect(await page.evaluate((expected) => (
+    window.spatialLab.state().visibleNodeDescriptors.some(({ label: actual }) => actual === expected)
+  ), label)).toBe(false);
 });
 
 test('holding Shift brushes individual nodes into and out of a batch without peer preselection', async ({ page }) => {
