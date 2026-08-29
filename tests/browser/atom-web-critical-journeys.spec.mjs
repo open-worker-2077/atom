@@ -26,6 +26,25 @@ async function enterAtomFile(page) {
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).not.toBe('root');
 }
 
+test('first domain entry renders its authoritative child nodes on the next visual frame', async ({ page }) => {
+  await openIsolatedWorld(page);
+  const selected = await page.evaluate(() => window.spatialLab.selectByLabel('atom.json'));
+  expect(selected).toBe(true);
+  await page.keyboard.press('f');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+
+  const firstFrame = await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => resolve(window.spatialLab.state()));
+  }));
+  expect(firstFrame.path).not.toBe('root');
+  expect(firstFrame.visibleNodeDescriptors.map(({ label }) => label)).toEqual(expect.arrayContaining([
+    '测试入口',
+    '批量目标',
+    '深层导航入口',
+    '顶层参照'
+  ]));
+});
+
 test('Web help renders work-order actions, errors, and receipt fields from the shared registry endpoint', async ({ page }) => {
   await openIsolatedWorld(page);
   await page.keyboard.press('h');

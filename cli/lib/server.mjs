@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { createBossStore } from './boss-store.mjs';
 import { createBossBackupTrigger } from './boss-backup-trigger.mjs';
+import { childDomainPath } from './probe.mjs';
 import { SpatialStoreError, createStore } from './store.mjs';
 import { VERSION } from './version.mjs';
 
@@ -35,14 +36,22 @@ function knowledgeAtPath(knowledge, requestedPath) {
   if (!pathValue || pathValue.length > 1024) {
     throw new SpatialStoreError('INVALID_SPATIAL_PATH', '可视数据路径必须是 1 到 1024 个字符');
   }
-  const nodes = Array.isArray(knowledge.nodes)
-    ? knowledge.nodes.filter((node) => node?.path === pathValue)
-    : [];
+  const allNodes = Array.isArray(knowledge.nodes) ? knowledge.nodes : [];
+  const currentNodes = allNodes.filter((node) => node?.path === pathValue);
+  const visiblePaths = new Set([
+    pathValue,
+    ...currentNodes
+      .filter((node) => node?.hasChildren === true)
+      .map((node) => childDomainPath(node))
+  ]);
+  const nodes = allNodes.filter((node) => visiblePaths.has(node?.path));
   const edges = Array.isArray(knowledge.edges)
-    ? knowledge.edges.filter((edge) => edge?.from?.path === pathValue || edge?.to?.path === pathValue)
+    ? knowledge.edges.filter((edge) => (
+        visiblePaths.has(edge?.from?.path) || visiblePaths.has(edge?.to?.path)
+      ))
     : [];
   const belongsToPath = (key) => typeof key === 'string'
-    && key.slice(0, key.lastIndexOf('::')) === pathValue;
+    && visiblePaths.has(key.slice(0, key.lastIndexOf('::')));
   return {
     ...knowledge,
     nodes,
