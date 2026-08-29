@@ -54,7 +54,8 @@ try {
     const execute = createRuntimeCliExecutor({
       contextFile: runtime.contextFile,
       graphFile: runtime.graphFile,
-      storeFile: runtime.storeFile
+      storeFile: runtime.storeFile,
+      trustedMaintenance: true
     });
     process.exitCode = await runAtomCli([
       '--context', runtime.contextFile,

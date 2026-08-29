@@ -6,7 +6,8 @@ import { createLegacyRuntimeComposition } from './legacy-runtime-composition.mjs
 import { createProgramRuntimeScheduler } from '../../../work-engine/atom-language/program-runtime.mjs';
 
 export function createRuntimeCliExecutor(options = {}) {
-  const programScheduler = options.programScheduler ?? (
+  const trustedMaintenance = options.trustedMaintenance === true;
+  const programScheduler = trustedMaintenance ? null : (options.programScheduler ?? (
     typeof options.contextFile === 'string' && options.contextFile
       ? createProgramRuntimeScheduler({
           projectionRepository: createJsonProgramProjectionRepository({
@@ -14,12 +15,12 @@ export function createRuntimeCliExecutor(options = {}) {
           })
         })
       : undefined
-  );
+  ));
   const interactionRuntime = options.interactionRuntime ?? createLegacyRuntimeComposition({
     contextFile: options.contextFile,
     graphFile: options.graphFile,
     storeFile: options.storeFile,
-    ...(programScheduler ? { programScheduler } : {})
+    programScheduler
   });
   const randomId = options.randomId ?? crypto.randomUUID;
   let preparation = null;
@@ -43,11 +44,17 @@ export function createRuntimeCliExecutor(options = {}) {
       });
       await preparation;
     }
-    return interactionRuntime.execute({
+    const intent = {
       source: request.source,
       correlationId,
       ...(request.interaction?.agent?.path ? { agentPath: request.interaction.agent.path } : {}),
       history: structuredClone(request.history ?? [])
-    });
+    };
+    return trustedMaintenance
+      ? interactionRuntime.execute(intent, {
+          trustedMaintenance: true,
+          programMode: 'project'
+        })
+      : interactionRuntime.execute(intent);
   };
 }

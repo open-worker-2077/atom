@@ -89,6 +89,28 @@ test('command follows one agent, Program, world and revision-labelled projection
   ]);
 });
 
+test('trusted maintenance is an internal execution option and is forwarded only to the world port', async () => {
+  const context = ports();
+  const runtime = createInteractionRuntime(context);
+
+  await runtime.execute({
+    source: 'transform {"thing.mov.Root/B":"Root/A"}',
+    correlationId: 'trusted-maintenance-1',
+    history: []
+  }, { trustedMaintenance: true });
+
+  assert.deepEqual(context.calls, [
+    ['world', {
+      source: 'transform {"thing.mov.Root/B":"Root/A"}',
+      interaction: { id: 'trusted-maintenance-1', agent: null },
+      history: [],
+      trustedMaintenance: true,
+      programRuntime: 'program-runtime'
+    }],
+    ['projection', { expectedRevision: 'rev-2', lockState: { revision: 'rev-2' } }]
+  ]);
+});
+
 test('failed interactions retain their correlation id for bounded server-side diagnosis', async () => {
   const context = ports();
   context.world.execute = async () => ({

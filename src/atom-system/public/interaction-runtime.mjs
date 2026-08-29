@@ -208,6 +208,7 @@ export function createInteractionRuntime({
       source,
       interaction: currentInteraction,
       history: intent.history,
+      ...(currentOptions.trustedMaintenance ? { trustedMaintenance: true } : {}),
       ...(currentOptions.bypassProgramLocks ? { bypassProgramLocks: true } : {}),
       ...(currentOptions.programMode ? { programMode: currentOptions.programMode } : {}),
       programRuntime
