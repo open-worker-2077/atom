@@ -807,6 +807,47 @@ export function transformLogFileFor(contextFile) {
   return path.join(path.dirname(contextFile), 'atom.transform-log.json');
 }
 
+function copyAtomClosure(atoms, matches, deepValueAtoms = new Set()) {
+  const required = new Set();
+  for (const match of matches) {
+    for (let current = match; current; current = current.parent) required.add(current.atom);
+  }
+  const mapping = new Map();
+  function copyAtom(atom) {
+    if (!required.has(atom)) return atom;
+    const copied = { ...atom };
+    mapping.set(atom, copied);
+    for (const [rawKey, value] of Object.entries(atom)) {
+      const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
+      if (parsed.baseKey === 'contain' && Array.isArray(value)) {
+        copied[rawKey] = value.map(copyAtom);
+      } else if (deepValueAtoms.has(atom) && (parsed.baseKey === 'support' || parsed.baseKey === 'situation')) {
+        copied[rawKey] = structuredClone(value);
+      }
+    }
+    return copied;
+  }
+  return {
+    atoms: atoms.map(copyAtom),
+    mapping
+  };
+}
+
+function remapPartnerBindings(bindings, mapping) {
+  return bindings.map((binding) => {
+    const sourceAtom = mapping.get(binding.sourceAtom) ?? binding.sourceAtom;
+    const partners = storedField(sourceAtom, 'support')?.value;
+    return {
+      ...binding,
+      sourceAtom,
+      targetAtom: mapping.get(binding.targetAtom) ?? binding.targetAtom,
+      selectorObject: Array.isArray(partners)
+        ? valueAtLocator(partners, binding.locator)
+        : binding.selectorObject
+    };
+  });
+}
+
 function cloneWorldFacts(atoms) {
   // Authoritative Atom facts are JSON data. Node's generic structuredClone is
   // disproportionately slow for the 16+ MB world, while the JSON-native path
@@ -889,16 +930,73 @@ export async function applyTransform({
   if (!nameField?.valuePresent || typeof nameField.value !== 'string' || !nameField.value) {
     return { error: diagnostic('ATOM_NAME_REQUIRED', 'transform 需要 name 精确锚点') };
   }
+  const structural = structuralCommand(item);
+  if (structural.error) return structural;
+  const nameCommands = item.fields
+    .filter((field) => field.baseKey === 'thing')
+    .flatMap((field) => field.commands ?? []);
+  const rewritesPaths = nameCommands.some((command) => (
+    ['ren', 'mov', 'cpy', 'dsc', 'rst'].includes(command.name)
+  ));
   const copiesOnlyAncestry = !mutateInput && !transformChangesStructure(item);
-  const originalSelection = copiesOnlyAncestry
+  const originalSelection = !mutateInput
     ? resolveUnique(atoms, nameField.value, exactIndex)
     : null;
   if (originalSelection?.error) return originalSelection;
-  const copied = copiesOnlyAncestry
+  let copied = copiesOnlyAncestry
     ? copyAtomAncestry(atoms, originalSelection.match)
     : null;
+  let partnerBindings = [];
+  if (!mutateInput && rewritesPaths) {
+    const originalMatches = walkAtoms(atoms);
+    const byAtom = new Map(originalMatches.map((match) => [match.atom, match]));
+    const relevantAtoms = new Set(
+      walkAtoms([originalSelection.match.atom]).map((match) => match.atom)
+    );
+    partnerBindings = capturePartnerBindings(atoms, rootName, {
+      atoms: relevantAtoms,
+      names: new Set([...relevantAtoms].map((atom) => storedField(atom, 'thing')?.value))
+    });
+    const closureMatches = [originalSelection.match];
+    const deepValueAtoms = new Set();
+    for (const binding of partnerBindings) {
+      const source = byAtom.get(binding.sourceAtom);
+      if (source) closureMatches.push(source);
+      deepValueAtoms.add(binding.sourceAtom);
+    }
+    for (const match of originalMatches) {
+      if (!isShortcutAtom(match.atom)) continue;
+      closureMatches.push(match);
+      deepValueAtoms.add(match.atom);
+    }
+    const command = structural.operation?.command;
+    if (['mov', 'cpy'].includes(command?.name) && command.parameter !== WORLD_OUTSIDE_NAME) {
+      const destination = resolveUnique(atoms, command.parameter, exactIndex);
+      if (destination.error) return destination;
+      closureMatches.push(destination.match);
+    }
+    if (['dsc', 'rst'].includes(command?.name)) {
+      const backup = backupMatch(atoms);
+      if (backup.error) return backup;
+      closureMatches.push(backup.match);
+    }
+    if (command?.name === 'rst') {
+      const entries = await readTransformLog(contextFile);
+      const targetName = storedField(originalSelection.match.atom, 'thing').value;
+      const discard = activeDiscard(entries, targetName);
+      if (discard?.originalParentPath !== null && discard?.originalParentPath !== undefined) {
+        const parent = resolveUnique(atoms, discard.originalParentPath, exactIndex);
+        if (parent.error) return parent;
+        closureMatches.push(parent.match);
+      }
+    }
+    copied = copyAtomClosure(atoms, closureMatches, deepValueAtoms);
+    partnerBindings = remapPartnerBindings(partnerBindings, copied.mapping);
+  }
   const nextAtoms = mutateInput ? atoms : (copied?.atoms ?? cloneWorldFacts(atoms));
-  const selected = copied ? { match: copied.match } : resolveUnique(nextAtoms, nameField.value, exactIndex);
+  const selected = copiesOnlyAncestry
+    ? { match: copied.match }
+    : resolveUnique(nextAtoms, nameField.value, mutateInput ? exactIndex : null);
   if (selected.error) return selected;
   const selectedBefore = copiesOnlyAncestry
     ? copyNonContainState(selected.match.atom)
@@ -910,12 +1008,7 @@ export async function applyTransform({
     Object.assign(selected.match.atom, selectedSnapshot);
     return { error, rolledBack: true };
   };
-  const structural = structuralCommand(item);
-  if (structural.error) return structural;
   const restoresFromKernelBackup = structural.operation?.command.name === 'rst';
-  const nameCommands = item.fields
-    .filter((field) => field.baseKey === 'thing')
-    .flatMap((field) => field.commands ?? []);
   if (nameCommands.some((command) => command.name === 'typ' && command.parameter === 'shortcut')) {
     return { error: diagnostic('SHORTCUT_PERSISTENCE_FORGERY_DENIED', '公开 Transform 不得创建或伪造内核虚拟引用记录') };
   }
@@ -934,18 +1027,15 @@ export async function applyTransform({
       '公开 Transform 不能把 Thing 登记为 @agent；请由当前 Program 调用 agent()'
     ) };
   }
-  const rewritesPaths = nameCommands.some((command) => (
-    ['ren', 'mov', 'cpy', 'dsc', 'rst'].includes(command.name)
-  ));
   const relevantSubtree = rewritesPaths
     ? new Set(walkAtoms([selected.match.atom]).map((match) => match.atom))
     : null;
-  const partnerBindings = rewritesPaths
-    ? capturePartnerBindings(nextAtoms, rootName, {
+  if (rewritesPaths && (mutateInput || partnerBindings.length === 0)) {
+    partnerBindings = capturePartnerBindings(nextAtoms, rootName, {
         atoms: relevantSubtree,
         names: new Set([...relevantSubtree].map((atom) => storedField(atom, 'thing')?.value))
-      })
-    : [];
+      });
+  }
   const sourcePath = selected.match.path.join('/');
   const changedFields = new Set();
   for (const field of item.fields) {
