@@ -83,6 +83,14 @@ test('rename preserves sibling and cross-tree partner targets', async (t) => {
     'transform {"thing.ren.新目标":"甲/目标"}'
   );
   assert.equal(renamed.ok, true, JSON.stringify(renamed.errors));
+  assert.deepEqual(renamed.affectedPaths, [
+    '乙',
+    '乙/跨树来源',
+    '甲',
+    '甲/同级来源',
+    '甲/新目标',
+    '甲/目标'
+  ]);
   const atoms = await readAtoms(files.contextFile);
   assert.equal(partnersOf(findByPath(atoms, '甲/同级来源'))[0].thing, '新目标');
   assert.equal(partnersOf(findByPath(atoms, '乙/跨树来源'))[0].thing, '甲/新目标');
@@ -109,6 +117,18 @@ test('move rewrites affected paths while keeping internal subtree relations loca
   ]);
   const moved = await execute(files, 'transform {"thing.mov.乙":"甲/分支"}');
   assert.equal(moved.ok, true, JSON.stringify(moved.errors));
+  assert.deepEqual(moved.affectedPaths, [
+    '乙',
+    '乙/分支',
+    '乙/分支/内部来源',
+    '乙/分支/叶',
+    '乙/新同级来源',
+    '乙/深层来源',
+    '甲',
+    '甲/分支',
+    '甲/分支/内部来源',
+    '甲/分支/叶'
+  ]);
   const atoms = await readAtoms(files.contextFile);
   assert.equal(partnersOf(findByPath(atoms, '甲/原同级来源'))[0].thing, '分支');
   assert.equal(partnersOf(findByPath(atoms, '乙/新同级来源'))[0].thing, '乙/分支');

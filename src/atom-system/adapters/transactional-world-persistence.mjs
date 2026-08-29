@@ -1,7 +1,10 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 
-import { writeAtomGraphProjection } from '../../../work-engine/atom-language/context-store.mjs';
+import {
+  adoptAtomContextSnapshot,
+  writeAtomGraphProjection
+} from '../../../work-engine/atom-language/context-store.mjs';
 import {
   advanceCompatibilityManifest,
   validateCompatibilityManifest
@@ -90,22 +93,13 @@ export function createTransactionalWorldPersistence({
     nextRevision,
     facts,
     source = 'legacy-interaction',
+    changedPaths = null,
+    affectedAtoms = null,
     registrationChange = null,
     compatibilityManifest: suppliedManifest = null
   }) {
     await recover();
-    const current = await worldRepository.read();
     const previousManifest = await compatibilityManifest();
-    if (
-      agentRegistrationCount(facts) < agentRegistrationCount(current.facts)
-      && !explicitlyChangesRegistration(source)
-      && registrationChange !== 'window-recycle'
-    ) {
-      throw problem(
-        'AGENT_REGISTRATION_LOSS',
-        'Ordinary Atom updates cannot erase an existing @agent registration'
-      );
-    }
     const computedRevision = revisionOfWorldFacts(facts);
     const canonicalNextRevision = canonicalRevision(nextRevision);
     const canonicalExpectedRevision = canonicalRevision(expectedRevision);
@@ -120,11 +114,9 @@ export function createTransactionalWorldPersistence({
       expectedRevision: canonicalExpectedRevision,
       nextRevision: canonicalNextRevision
     });
-    const nextManifest = suppliedManifest
+    let nextManifest = suppliedManifest
       ? (validateCompatibilityManifest(suppliedManifest, facts), structuredClone(suppliedManifest))
-      : previousManifest
-        ? advanceCompatibilityManifest(previousManifest, current.facts, facts)
-        : null;
+      : null;
     const receipt = await coordinator.execute({
       command: {
         contract: 'atom.world-command',
@@ -135,17 +127,42 @@ export function createTransactionalWorldPersistence({
         name: 'legacy-transition',
         payload: { source }
       },
-      transition: () => ({
-        facts: structuredClone(facts),
-        result: {
-          source,
-          ...(nextManifest ? { compatibilityManifest: nextManifest } : {}),
-          ...(previousManifest ? { previousCompatibilityManifest: previousManifest } : {})
+      transitionInputMode: 'trusted-readonly',
+      transition: (current) => {
+        if (
+          agentRegistrationCount(facts) < agentRegistrationCount(current.facts)
+          && !explicitlyChangesRegistration(source)
+          && registrationChange !== 'window-recycle'
+        ) {
+          throw problem(
+            'AGENT_REGISTRATION_LOSS',
+            'Ordinary Atom updates cannot erase an existing @agent registration'
+          );
         }
-      })
+        nextManifest ??= previousManifest
+          ? advanceCompatibilityManifest(previousManifest, current.facts, facts)
+          : null;
+        return {
+          facts,
+          revision: canonicalNextRevision,
+          ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
+          result: {
+            source,
+            ...(Array.isArray(affectedAtoms) ? {
+              affectedAtoms,
+              affectedAtomsComplete: true
+            } : {}),
+            ...(nextManifest ? { compatibilityManifest: nextManifest } : {}),
+            ...(previousManifest ? { previousCompatibilityManifest: previousManifest } : {})
+          }
+        };
+      }
     });
-    cachedManifest = structuredClone(nextManifest);
+    cachedManifest = structuredClone(receipt.result?.compatibilityManifest ?? previousManifest ?? null);
     manifestLoaded = true;
+    await adoptAtomContextSnapshot(contextFile, facts, {
+      ...(nextManifest ? { compatibilityManifest: nextManifest } : {})
+    });
     await onAuthoritativeWrite({
       operation: 'commit',
       contextFile,

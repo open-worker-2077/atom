@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
+import { readAtomContext } from '../work-engine/atom-language/context-store.mjs';
 
 const serviceUrl = new URL('../src/atom-system/public/world-service.mjs', import.meta.url);
 const adapterUrl = new URL('../src/atom-system/adapters/legacy-engine-adapter.mjs', import.meta.url);
@@ -303,6 +304,8 @@ test('transactional persistence rollback restores only authoritative facts and l
     nextRevision: `sha256:${crypto.createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`,
     facts
   });
+  assert.equal(await readAtomContext(contextFile, { create: false }), facts);
+  assert.equal(Object.isFrozen(facts), true);
 
   const rolledBack = await persistence.rollback({
     targetCommandId: committed.commandId,

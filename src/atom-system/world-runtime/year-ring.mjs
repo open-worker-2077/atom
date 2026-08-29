@@ -120,7 +120,9 @@ function sanitizeTransformStage(stage) {
   if (!stage || typeof stage !== 'object' || Array.isArray(stage)) {
     throw problem('INVALID_TRANSFORM_STAGE_DIAGNOSTIC', 'Transform stage must be an object');
   }
-  if (!['request', 'reconcile', 'commit'].includes(stage.stage)) {
+  if (![
+    'request', 'index-preparation', 'reconcile', 'transform-apply', 'commit', 'program-projection'
+  ].includes(stage.stage)) {
     throw problem('INVALID_TRANSFORM_STAGE_DIAGNOSTIC', 'Transform stage is invalid');
   }
   if (!Number.isFinite(stage.durationMs) || stage.durationMs < 0) {
@@ -129,6 +131,9 @@ function sanitizeTransformStage(stage) {
   const output = {
     stage: stage.stage,
     durationMs: Math.round(stage.durationMs * 1000) / 1000,
+    ...(Number.isFinite(stage.elapsedMs) && stage.elapsedMs >= 0 ? {
+      elapsedMs: Math.round(stage.elapsedMs * 1000) / 1000
+    } : {}),
     candidateProgramCount: nonNegativeInteger(
       stage.candidateProgramCount ?? 0,
       'INVALID_TRANSFORM_STAGE_DIAGNOSTIC',

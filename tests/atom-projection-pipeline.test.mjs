@@ -89,6 +89,53 @@ test('projectors receive isolated facts and cannot mutate the world snapshot or 
   assert.equal(stored.projections.observer.value.name, 'original');
 });
 
+test('incremental projection publishes only projectors reached by affected paths and reuses the rest', async () => {
+  const repository = createMemoryProjectionRepository();
+  const calls = [];
+  const pipeline = createProjectionPipeline({
+    repository,
+    projectors: [
+      {
+        id: 'domain-a',
+        affectedBy: (paths) => paths.some((path) => path.startsWith('A/')),
+        project: ({ facts }, context) => {
+          calls.push({ id: 'domain-a', paths: context.affectedPaths });
+          return { value: facts.find(({ name }) => name === 'A')?.value };
+        }
+      },
+      {
+        id: 'domain-b',
+        affectedBy: (paths) => paths.some((path) => path.startsWith('B/')),
+        project: ({ facts }, context) => {
+          calls.push({ id: 'domain-b', paths: context.affectedPaths });
+          return { value: facts.find(({ name }) => name === 'B')?.value };
+        }
+      }
+    ]
+  });
+  await pipeline.rebuild(snapshot('rev-base', [
+    { name: 'A', value: 1 }, { name: 'B', value: 1 }
+  ]));
+  calls.length = 0;
+
+  const result = await pipeline.rebuild(snapshot('rev-next', [
+    { name: 'A', value: 2 }, { name: 'B', value: 1 }
+  ]), { affectedPaths: ['A/Target'] });
+
+  assert.deepEqual(calls, [{ id: 'domain-a', paths: ['A/Target'] }]);
+  assert.deepEqual(result, {
+    worldId: 'primary',
+    sourceRevision: 'rev-next',
+    projections: ['domain-a', 'domain-b'],
+    rebuiltProjections: ['domain-a'],
+    reusedProjections: ['domain-b'],
+    affectedPaths: ['A/Target']
+  });
+  const stored = await repository.readCurrent('primary', 'rev-next');
+  assert.deepEqual(stored.projections['domain-a'].value, { value: 2 });
+  assert.deepEqual(stored.projections['domain-b'].value, { value: 1 });
+});
+
 test('duplicate projection ids are rejected before any projector runs', async () => {
   const repository = createMemoryProjectionRepository();
   let calls = 0;
@@ -124,6 +171,112 @@ test('legacy Graph and Spatial projectors fit the pipeline without changing thei
 
   assert.equal(JSON.stringify(stored.projections.graph.value), JSON.stringify(expectedGraph));
   assert.equal(JSON.stringify(stored.projections.spatial.value), JSON.stringify(expectedSpatial));
+});
+
+test('legacy Spatial consumes the Graph built earlier in the same projection batch', async () => {
+  const facts = [{ thing: 'Root', situation: '', contain: [], support: [] }];
+  let graphBuilds = 0;
+  const projectContext = (value, options) => {
+    graphBuilds += 1;
+    return projectAtomContext(value, options);
+  };
+  const repository = createMemoryProjectionRepository();
+  const pipeline = createProjectionPipeline({
+    projectors: createLegacyProjectionProjectors({ projectContext }),
+    repository
+  });
+
+  await pipeline.rebuild(snapshot('rev-shared-graph', facts));
+
+  assert.equal(graphBuilds, 1);
+  const stored = await repository.readCurrent('primary', 'rev-shared-graph');
+  assert.equal(stored.projections.spatial.value.nodes.length, 2);
+});
+
+test('TC-PERF-WEB-DOMAIN: legacy Graph and Spatial rebuild only the affected top-level domain', async () => {
+  const before = [
+    { thing: 'A', situation: 'before', contain: [{ thing: 'A1', situation: '', contain: [], support: [] }], support: [] },
+    { thing: 'B', situation: 'stable', contain: [{ thing: 'B1', situation: '', contain: [], support: [] }], support: [] },
+    { thing: 'C', situation: 'stable', contain: [], support: [] }
+  ];
+  const after = structuredClone(before);
+  after[0].situation = 'after';
+  const graphDomainCounts = [];
+  const spatialDomainCounts = [];
+  const repository = createMemoryProjectionRepository();
+  const pipeline = createProjectionPipeline({
+    projectors: createLegacyProjectionProjectors({
+      projectContext(value, options) {
+        graphDomainCounts.push(value.length);
+        return projectAtomContext(value, options);
+      },
+      async projectSpatial(graph, options) {
+        spatialDomainCounts.push(graph.graph.contain.length);
+        return projectAtomGraphToKnowledge(graph, options);
+      }
+    }),
+    repository
+  });
+
+  await pipeline.rebuild(snapshot('rev-domain-before', before));
+  const previous = await repository.readCurrent('primary', 'rev-domain-before');
+  await pipeline.rebuild(snapshot('rev-domain-after', after), { affectedPaths: ['A', 'A/A1'] });
+  const current = await repository.readCurrent('primary', 'rev-domain-after');
+  const expectedGraph = projectAtomContext(after);
+  const expectedSpatial = await projectAtomGraphToKnowledge(expectedGraph);
+
+  assert.deepEqual(graphDomainCounts, [3, 1]);
+  assert.deepEqual(spatialDomainCounts, [3, 1]);
+  assert.equal(JSON.stringify(current.projections.graph.value), JSON.stringify(expectedGraph));
+  assert.equal(JSON.stringify(current.projections.spatial.value), JSON.stringify(expectedSpatial));
+  assert.deepEqual(
+    current.projections.spatial.value.nodes.find((node) => node.atomPath === 'B/B1').position,
+    previous.projections.spatial.value.nodes.find((node) => node.atomPath === 'B/B1').position
+  );
+});
+
+test('incremental Web projection includes a cross-domain support endpoint without rebuilding an unrelated domain', async () => {
+  const support = [{ 'if@current': true, then: [{ thing: 'B/Target' }] }];
+  const before = [
+    { thing: 'A', situation: '', contain: [{ thing: 'Source', situation: 'before', contain: [], support }], support: [] },
+    { thing: 'B', situation: '', contain: [{ thing: 'Target', situation: '', contain: [], support: [] }], support: [] },
+    { thing: 'C', situation: 'unrelated', contain: [], support: [] }
+  ];
+  const after = structuredClone(before);
+  after[0].contain[0].situation = 'after';
+  const graphDomainCounts = [];
+  const spatialDomainCounts = [];
+  const repository = createMemoryProjectionRepository();
+  const pipeline = createProjectionPipeline({
+    projectors: createLegacyProjectionProjectors({
+      projectContext(value, options) {
+        graphDomainCounts.push(value.length);
+        return projectAtomContext(value, options);
+      },
+      async projectSpatial(graph, options) {
+        spatialDomainCounts.push(graph.graph.contain.length);
+        return projectAtomGraphToKnowledge(graph, options);
+      }
+    }),
+    repository
+  });
+
+  await pipeline.rebuild(snapshot('rev-support-before', before));
+  await pipeline.rebuild(snapshot('rev-support-after', after), { affectedPaths: ['A', 'A/Source'] });
+  const current = await repository.readCurrent('primary', 'rev-support-after');
+  const fullRepository = createMemoryProjectionRepository();
+  const fullPipeline = createProjectionPipeline({
+    projectors: createLegacyProjectionProjectors(),
+    repository: fullRepository
+  });
+  await fullPipeline.rebuild(snapshot('rev-support-after', after));
+  const expected = await fullRepository.readCurrent('primary', 'rev-support-after');
+
+  assert.deepEqual(graphDomainCounts, [3, 2]);
+  assert.deepEqual(spatialDomainCounts, [3, 2]);
+  assert.equal(JSON.stringify(current.projections.graph.value), JSON.stringify(expected.projections.graph.value));
+  assert.equal(JSON.stringify(current.projections.spatial.value), JSON.stringify(expected.projections.spatial.value));
+  assert.equal(current.projections.spatial.value.supportRelations.length, 1);
 });
 
 test('spatial projection preserves Atom registration types as presentation metadata', async () => {

@@ -87,6 +87,62 @@ test('a repeated command id is idempotent and returns the original receipt', asy
   assert.equal((await journalRepository.readState()).receipts.length, 1);
 });
 
+test('a prepared transition can skip cloning unused world and payload inputs', async (t) => {
+  const { coordinator, worldRepository } = await fixture(t);
+  const initial = await worldRepository.read();
+  const nextFacts = [{ name: 'prepared' }];
+  let receivedArguments = null;
+
+  await coordinator.execute({
+    command: command('cmd-prepared-transition', initial.revision),
+    transitionReadsSnapshot: false,
+    transition: (...args) => {
+      receivedArguments = args;
+      return { facts: nextFacts };
+    }
+  });
+
+  assert.deepEqual(receivedArguments, []);
+  assert.deepEqual((await worldRepository.read()).facts, nextFacts);
+});
+
+test('a trusted read-only transition reuses the repository snapshot by reference', async (t) => {
+  const files = await fixture(t);
+  let lastRead = null;
+  let reads = 0;
+  let compareSnapshot = null;
+  const worldRepository = {
+    read: async () => {
+      reads += 1;
+      lastRead = await files.worldRepository.read();
+      return lastRead;
+    },
+    compareAndSwap: (request) => {
+      compareSnapshot = request.currentSnapshot;
+      return files.worldRepository.compareAndSwap(request);
+    }
+  };
+  const coordinator = createCommitCoordinator({
+    worldRepository,
+    journalRepository: files.journalRepository
+  });
+  const initial = await files.worldRepository.read();
+  let transitionSnapshot = null;
+
+  await coordinator.execute({
+    command: command('cmd-trusted-transition', initial.revision),
+    transitionInputMode: 'trusted-readonly',
+    transition: (snapshot) => {
+      transitionSnapshot = snapshot;
+      return { facts: [{ name: 'trusted' }] };
+    }
+  });
+
+  assert.equal(transitionSnapshot, lastRead);
+  assert.equal(compareSnapshot, lastRead);
+  assert.equal(reads, 1);
+});
+
 test('transaction history appends compact events and content-addressed snapshots without rewriting legacy history', async (t) => {
   const { coordinator, worldRepository, journalRepository, journalFile } = await fixture(t);
   const initial = await worldRepository.read();
@@ -110,6 +166,128 @@ test('transaction history appends compact events and content-addressed snapshots
   assert.equal(objects.length, 3);
   assert.equal(objects.every((name) => name.endsWith('.json.gz')), true);
   await assert.rejects(fs.access(journalFile), { code: 'ENOENT' });
+});
+
+test('local transaction records exact patch history without complete-world snapshot objects', async (t) => {
+  const { coordinator, worldRepository, journalRepository, journalFile } = await fixture(t);
+  const initialFacts = [{ thing: 'Root', situation: '', contain: [
+    { thing: 'Target', situation: 'before', contain: [], support: [] },
+    { thing: 'Unrelated', situation: 'unchanged', contain: [], support: [] }
+  ], support: [] }];
+  await writeJsonAtomically(worldRepository.file, initialFacts);
+  const initial = await worldRepository.read();
+  const nextFacts = structuredClone(initialFacts);
+  nextFacts[0].contain[0].situation = 'after';
+
+  const receipt = await coordinator.execute({
+    command: command('cmd-local-patch', initial.revision),
+    transition: () => ({
+      facts: nextFacts,
+      changedPaths: ['Root/Target'],
+      result: { affectedAtoms: [{ path: 'Root/Target', axes: ['situation'] }] }
+    })
+  });
+
+  assert.deepEqual(receipt.affectedAtoms, [
+    { path: 'Root', axes: [] },
+    { path: 'Root/Target', axes: ['situation'] }
+  ]);
+  const committed = await journalRepository.findCommitted('cmd-local-patch');
+  assert.equal(committed.historyMode, 'local-patch');
+  assert.equal(committed.before, undefined);
+  assert.equal(committed.after, undefined);
+  assert.deepEqual(committed.patch.changedPaths, ['Root/Target']);
+  assert.deepEqual(committed.inversePatch.changedPaths, ['Root/Target']);
+  await assert.rejects(fs.access(path.join(`${journalFile}.d`, 'objects')), { code: 'ENOENT' });
+});
+
+test('rollback applies the inverse local patch without restoring an unrelated world snapshot', async (t) => {
+  const { coordinator, worldRepository } = await fixture(t);
+  const initialFacts = [{ thing: 'Root', situation: '', contain: [
+    { thing: 'Target', situation: 'before', contain: [], support: [] },
+    { thing: 'Unrelated', situation: 'keep', contain: [], support: [] }
+  ], support: [] }];
+  await writeJsonAtomically(worldRepository.file, initialFacts);
+  const initial = await worldRepository.read();
+  const nextFacts = structuredClone(initialFacts);
+  nextFacts[0].contain[0].situation = 'after';
+  const committed = await coordinator.execute({
+    command: command('cmd-local-change', initial.revision),
+    transition: () => ({
+      facts: nextFacts,
+      changedPaths: ['Root/Target'],
+      result: {
+        affectedAtoms: [{ path: 'Root/Target', axes: ['situation'] }],
+        compatibilityManifest: { currentWorldRevision: 'after' },
+        previousCompatibilityManifest: { currentWorldRevision: 'before' }
+      }
+    })
+  });
+
+  const externalFacts = structuredClone((await worldRepository.read()).facts);
+  externalFacts[0].contain[1].situation = 'still keep';
+  await writeJsonAtomically(worldRepository.file, externalFacts);
+  const external = await worldRepository.read();
+  await assert.rejects(
+    coordinator.rollback({
+      targetCommandId: 'cmd-local-change',
+      command: command('cmd-local-rollback-stale', external.revision)
+    }),
+    (error) => error.code === 'ROLLBACK_WORLD_DIVERGED'
+  );
+  assert.equal((await worldRepository.read()).facts[0].contain[1].situation, 'still keep');
+
+  await writeJsonAtomically(worldRepository.file, nextFacts);
+  const rolledBack = await coordinator.rollback({
+    targetCommandId: 'cmd-local-change',
+    command: command('cmd-local-rollback', committed.afterRevision)
+  });
+  const restored = await worldRepository.read();
+  assert.equal(restored.facts[0].contain[0].situation, 'before');
+  assert.equal(restored.facts[0].contain[1].situation, 'keep');
+  assert.deepEqual(rolledBack.result.compatibilityManifest, { currentWorldRevision: 'before' });
+});
+
+test('relation and shortcut side effects share the structural patch and inverse rollback', async (t) => {
+  const { coordinator, worldRepository, journalRepository } = await fixture(t);
+  const initialFacts = [
+    { thing: 'Source', situation: '', contain: [], support: [
+      { 'if@current': true, then: [{ thing: 'Tree/Target' }] }
+    ] },
+    { thing: 'Tree', situation: '', contain: [
+      { thing: 'Target', situation: 'before', contain: [], support: [] }
+    ], support: [] },
+    { 'thing@shortcut': 'Entry', situation: JSON.stringify({
+      contract: 'atom.shortcut', version: 1, referenceId: 'local-reference',
+      target: { state: 'linked', path: 'Tree/Target' }
+    }), contain: [], support: [] }
+  ];
+  const nextFacts = structuredClone(initialFacts);
+  nextFacts[0].support[0].then[0].thing = 'Target';
+  nextFacts[1].contain[0].thing = 'Renamed';
+  const shortcutRecord = JSON.parse(nextFacts[2].situation);
+  shortcutRecord.target.path = 'Tree/Renamed';
+  nextFacts[2].situation = JSON.stringify(shortcutRecord);
+  await writeJsonAtomically(worldRepository.file, initialFacts);
+  const initial = await worldRepository.read();
+
+  const committed = await coordinator.execute({
+    command: command('cmd-local-relation-shortcut', initial.revision),
+    transition: () => ({
+      facts: nextFacts,
+      changedPaths: ['Tree/Target', 'Tree/Renamed', 'Source', 'Entry']
+    })
+  });
+  const history = await journalRepository.findCommitted('cmd-local-relation-shortcut');
+  assert.deepEqual(history.patch.changedPaths, ['Entry', 'Source', 'Tree/Renamed', 'Tree/Target']);
+  assert.equal(history.patch.operations.some((operation) => operation.path === 'Source'), true);
+  assert.equal(history.patch.operations.some((operation) => operation.path === 'Entry'), true);
+
+  await coordinator.rollback({
+    targetCommandId: committed.commandId,
+    command: command('cmd-local-relation-shortcut-rollback', committed.afterRevision)
+  });
+  assert.deepEqual((await worldRepository.read()).facts, initialFacts);
 });
 
 test('incremental history reads legacy receipts without modifying the legacy journal', async (t) => {
@@ -158,6 +336,70 @@ test('atomic JSON replacement retries a transient Windows rename refusal', async
   assert.equal(renameAttempts, 3);
 });
 
+test('compare-and-swap returns the prepared snapshot without reading and cloning it again', async (t) => {
+  const { worldRepository } = await fixture(t);
+  const initial = await worldRepository.read();
+  const facts = [{ name: 'prepared-once' }];
+  const nextSnapshot = Object.freeze({
+    contract: 'atom.world-snapshot',
+    version: 1,
+    worldId: 'primary',
+    revision: revisionOf(facts),
+    facts
+  });
+
+  const committed = await worldRepository.compareAndSwap({
+    expectedRevision: initial.revision,
+    nextSnapshot
+  });
+
+  assert.equal(committed, nextSnapshot);
+  assert.deepEqual(JSON.parse(await fs.readFile(worldRepository.file, 'utf8')), facts);
+});
+
+test('repository read does not clone facts that JSON parsing already owns', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-world-read-owned-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  const facts = [{ marker: 'owned-json-facts', contain: [{ value: 1 }] }];
+  await fs.writeFile(worldFile, `${JSON.stringify(facts)}\n`, 'utf8');
+  const worldRepository = createJsonWorldRepository({ file: worldFile, worldId: 'primary' });
+  const originalStructuredClone = globalThis.structuredClone;
+  let completeWorldCloneCount = 0;
+  globalThis.structuredClone = (value, options) => {
+    if (Array.isArray(value) && value[0]?.marker === 'owned-json-facts') {
+      completeWorldCloneCount += 1;
+    }
+    return originalStructuredClone(value, options);
+  };
+  t.after(() => { globalThis.structuredClone = originalStructuredClone; });
+
+  const snapshot = await worldRepository.read();
+
+  assert.deepEqual(snapshot.facts, facts);
+  assert.equal(completeWorldCloneCount, 0);
+});
+
+test('repository reuses one unchanged disk snapshot and invalidates it on external replacement', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-world-read-cache-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  await fs.writeFile(worldFile, `${JSON.stringify([{ marker: 'first' }])}\n`, 'utf8');
+  const worldRepository = createJsonWorldRepository({ file: worldFile, worldId: 'primary' });
+
+  const first = await worldRepository.read();
+  const reused = await worldRepository.read();
+  assert.equal(reused, first);
+  assert.equal(Object.isFrozen(first.facts), true);
+
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  await fs.writeFile(worldFile, `${JSON.stringify([{ marker: 'second-value' }])}\n`, 'utf8');
+  const replaced = await worldRepository.read();
+
+  assert.notEqual(replaced, first);
+  assert.equal(replaced.facts[0].marker, 'second-value');
+});
+
 test('recovery completes a prepared transaction interrupted before the world write', async (t) => {
   let interrupted = true;
   const files = await fixture(t, {
@@ -189,6 +431,47 @@ test('recovery completes a prepared transaction interrupted before the world wri
   assert.equal((await files.journalRepository.readState()).receipts.length, 1);
 });
 
+test('local patch recovery completes an interrupted prepare without snapshot objects', async (t) => {
+  let interrupted = true;
+  const files = await fixture(t, {
+    faultInjector: async (point) => {
+      if (point === 'after-prepare' && interrupted) {
+        interrupted = false;
+        throw Object.assign(new Error('simulated interruption'), { code: 'SIMULATED_INTERRUPTION' });
+      }
+    }
+  });
+  const initialFacts = [{ thing: 'Root', situation: '', contain: [
+    { thing: 'Target', situation: 'before', contain: [], support: [] }
+  ], support: [] }];
+  await writeJsonAtomically(files.worldFile, initialFacts);
+  const initial = await files.worldRepository.read();
+  const nextFacts = structuredClone(initialFacts);
+  nextFacts[0].contain[0].situation = 'after';
+
+  await assert.rejects(files.coordinator.execute({
+    command: command('cmd-local-recover-before', initial.revision),
+    transition: () => ({
+      facts: nextFacts,
+      changedPaths: ['Root/Target'],
+      result: {
+        affectedAtoms: [{ path: 'Root/Target', axes: ['situation'] }],
+        affectedAtomsComplete: true
+      }
+    })
+  }), (error) => error.code === 'SIMULATED_INTERRUPTION');
+
+  const restarted = createCommitCoordinator({
+    worldRepository: files.worldRepository,
+    journalRepository: files.journalRepository
+  });
+  assert.deepEqual(await restarted.recover(), { recovered: 1 });
+  assert.equal((await files.worldRepository.read()).facts[0].contain[0].situation, 'after');
+  const committed = await files.journalRepository.findCommitted('cmd-local-recover-before');
+  assert.equal(committed.historyMode, 'local-patch');
+  await assert.rejects(fs.access(path.join(`${files.journalFile}.d`, 'objects')), { code: 'ENOENT' });
+});
+
 test('recovery finalizes history interrupted after the world write without applying twice', async (t) => {
   let interrupted = true;
   const files = await fixture(t, {
@@ -216,6 +499,45 @@ test('recovery finalizes history interrupted after the world write without apply
   });
   assert.deepEqual(await restarted.recover(), { recovered: 1 });
   assert.equal((await files.worldRepository.read()).facts.length, 1);
+  assert.equal((await files.journalRepository.readState()).receipts.length, 1);
+});
+
+test('local patch recovery finalizes an interrupted committed world without applying twice', async (t) => {
+  let interrupted = true;
+  const files = await fixture(t, {
+    faultInjector: async (point) => {
+      if (point === 'after-world-write' && interrupted) {
+        interrupted = false;
+        throw Object.assign(new Error('simulated interruption'), { code: 'SIMULATED_INTERRUPTION' });
+      }
+    }
+  });
+  const initialFacts = [{ thing: 'Root', situation: '', contain: [
+    { thing: 'Target', situation: 'before', contain: [], support: [] }
+  ], support: [] }];
+  await writeJsonAtomically(files.worldFile, initialFacts);
+  const initial = await files.worldRepository.read();
+  const nextFacts = structuredClone(initialFacts);
+  nextFacts[0].contain[0].situation = 'after';
+
+  await assert.rejects(files.coordinator.execute({
+    command: command('cmd-local-recover-after', initial.revision),
+    transition: () => ({
+      facts: nextFacts,
+      changedPaths: ['Root/Target'],
+      result: {
+        affectedAtoms: [{ path: 'Root/Target', axes: ['situation'] }],
+        affectedAtomsComplete: true
+      }
+    })
+  }), (error) => error.code === 'SIMULATED_INTERRUPTION');
+
+  const restarted = createCommitCoordinator({
+    worldRepository: files.worldRepository,
+    journalRepository: files.journalRepository
+  });
+  assert.deepEqual(await restarted.recover(), { recovered: 1 });
+  assert.equal((await files.worldRepository.read()).facts[0].contain[0].situation, 'after');
   assert.equal((await files.journalRepository.readState()).receipts.length, 1);
 });
 

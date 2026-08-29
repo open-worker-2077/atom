@@ -87,6 +87,35 @@ test('subtree spatial lock follows the window parent and admits only its schedul
   }).decision, 'allow');
 });
 
+test('TC-PERF-AFFECTED-CLOSURE: lock selection reads only the exact target and its ancestor chain', () => {
+  const reads = [];
+  const subtreeSource = {
+    readFields: new Set(), writeFields: new Set(['situation']),
+    targetScope: 'subtree', sourceProgramPath: 'Root/Guard'
+  };
+  const index = {
+    byPath: {
+      get(path) {
+        reads.push(path);
+        return path === 'Root'
+          ? { read: new Set(), write: new Set(['situation']), sources: [subtreeSource] }
+          : null;
+      }
+    }
+  };
+
+  const decision = authorizeProgramLock({
+    lockIndex: index,
+    targetPath: 'Root/Branch/Leaf',
+    operation: 'write',
+    field: 'situation'
+  });
+
+  assert.equal(decision.decision, 'deny');
+  assert.deepEqual(reads, ['Root/Branch/Leaf', 'Root/Branch', 'Root']);
+  assert.equal(reads.includes('Unrelated'), false);
+});
+
 test('field-specific Program locks restrict only the requested Atom fields', () => {
   const index = buildProgramLockIndex({
     revision: 'rev-1', records,

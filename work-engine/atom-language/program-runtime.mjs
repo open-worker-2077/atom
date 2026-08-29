@@ -165,7 +165,15 @@ function fingerprint(records, programs, agentOrigin, isolateFailures) {
 function programSetFingerprint(programs, isolateFailures, records) {
   const recordsByRef = new Map(records.map((record) => [record.ref, record]));
   return crypto.createHash('sha256').update(JSON.stringify({
-    programs: programs.map((program) => semanticRecord(program, recordsByRef)),
+    programs: programs.map((program) => {
+      const definition = semanticRecord(program, recordsByRef);
+      // An @agent Program is the security/window declaration carried by the
+      // Agent node. Ordinary business children are its managed contents, not
+      // part of that declaration's executable definition.
+      return program.types.includes('agent')
+        ? { ...definition, childrenPaths: [] }
+        : definition;
+    }),
     isolateFailures
   })).digest('hex');
 }
@@ -426,6 +434,99 @@ function mergeDerivedLocks(...collections) {
 
 function worldRevisionKey(records) {
   return records[0]?.ref ?? 'empty-world';
+}
+
+function requestMayObserveEvent(request, eventNodes) {
+  const selector = request?.thing;
+  if (typeof selector !== 'string' || !selector.trim()
+    || selector === '.' || selector.startsWith('./')) return true;
+  const target = selector.trim();
+  return [...eventNodes].some((node) => (
+    node === target
+    || node.endsWith(`/${target}`)
+    || target.startsWith(`${node}/`)
+    || node.startsWith(`${target}/`)
+  ));
+}
+
+function worldKeyFromRevision(revision, atoms) {
+  if (!atoms.length) return 'empty-world';
+  const canonical = `${revision}`.replace(/^sha256:/u, '');
+  return crypto.createHash('sha256').update(`${canonical}:0`).digest('base64url').slice(0, 24);
+}
+
+function exactAtomAddress(atoms, selector) {
+  const parts = `${selector ?? ''}`.split('/').filter(Boolean);
+  let children = atoms;
+  let current = null;
+  let address = '';
+  for (const part of parts) {
+    const matches = children.flatMap((atom, index) => (
+      oneStoredField(atom, 'thing')?.value === part ? [{ atom, index }] : []
+    ));
+    if (matches.length !== 1) return null;
+    current = matches[0].atom;
+    address = address ? `${address}/${matches[0].index}` : `${matches[0].index}`;
+    children = oneStoredField(current, 'contain')?.value ?? [];
+  }
+  return current ? { atom: current, address } : null;
+}
+
+function subtreeContainsProgram(atom) {
+  if (!atom) return false;
+  if (oneStoredField(atom, 'thing')?.parsed.types.some((type) => type.raw === 'program')) {
+    return true;
+  }
+  return (oneStoredField(atom, 'contain')?.value ?? []).some(subtreeContainsProgram);
+}
+
+function pathsIntersect(left, right) {
+  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+}
+
+function localProjectionRebaseEligible(previousAtoms, atoms, changedPaths, stored) {
+  if (!Array.isArray(changedPaths) || changedPaths.length === 0) return false;
+  const dependencyPaths = stored.exploreReadPaths ?? [];
+  if (changedPaths.some((changed) => dependencyPaths.some((path) => pathsIntersect(changed, path)))) {
+    return false;
+  }
+  const lockPaths = (stored.locks ?? []).flatMap((lock) => ([
+    lock.sourceProgramPath,
+    lock.path,
+    ...(lock.targets?.paths ?? []),
+    ...(lock.allowed_windows?.paths ?? []),
+    ...(lock.allowed_programs?.paths ?? [])
+  ])).filter(Boolean);
+  if (changedPaths.some((changed) => lockPaths.some((path) => pathsIntersect(changed, path)))) {
+    return false;
+  }
+  if ((stored.locks ?? []).some((lock) => (
+    Array.isArray(lock.targets?.refs) && !Array.isArray(lock.targets?.paths)
+  ))) return false;
+  return !changedPaths.some((changed) => (
+    subtreeContainsProgram(exactAtomAddress(previousAtoms, changed)?.atom)
+    || subtreeContainsProgram(exactAtomAddress(atoms, changed)?.atom)
+  ));
+}
+
+function rebindPathLocks(locks, atoms, revision) {
+  return locks.map((lock) => {
+    const source = lock.sourceProgramPath
+      ? exactAtomAddress(atoms, lock.sourceProgramPath)
+      : null;
+    if (lock.sourceProgramPath && !source) return null;
+    if ((lock.kind === 'node' || lock.kind === 'contain')
+      && !exactAtomAddress(atoms, lock.path)) return null;
+    return {
+      ...structuredClone(lock),
+      ...(source ? {
+        sourceProgramRef: crypto.createHash('sha256')
+          .update(`${`${revision}`.replace(/^sha256:/u, '')}:${source.address}`)
+          .digest('base64url')
+          .slice(0, 24)
+      } : {})
+    };
+  }).filter(Boolean);
 }
 
 function canonicalGraphPath(path) {
@@ -1038,6 +1139,7 @@ export class ProgramRuntimeScheduler {
     this.slotInvocationCycles = new Map();
     this.agentSecurity = new Map();
     this.agentSecurityWorldRevision = null;
+    this.latestRecords = null;
     if (this.projectionRepository
       && (typeof this.projectionRepository.load !== 'function'
         || typeof this.projectionRepository.save !== 'function')) {
@@ -1224,14 +1326,34 @@ export class ProgramRuntimeScheduler {
   }
 
   async rebaseContextFreeProjection(previousAtoms, atoms, {
-    changedPaths = [], isolateFailures = true
+    changedPaths = [], isolateFailures = true, previousRevision = null, revision = null
   } = {}) {
     if (!this.projectionRepository) return Object.freeze({ persisted: false, reason: 'unavailable' });
+    const stored = await this.projectionRepository.load();
+    if (previousRevision && revision
+      && stored
+      && stored.worldKey === worldKeyFromRevision(previousRevision, previousAtoms)
+      && stored.contextDependent === false
+      && Array.isArray(stored.failures)
+      && stored.failures.length === 0
+      && localProjectionRebaseEligible(previousAtoms, atoms, changedPaths, stored)) {
+      const projection = {
+        ...structuredClone(stored),
+        worldKey: worldKeyFromRevision(revision, atoms),
+        locks: rebindPathLocks(stored.locks ?? [], atoms, revision)
+      };
+      try {
+        await this.projectionRepository.save(projection);
+      } catch {
+        return Object.freeze({ persisted: false, reason: 'persist-failed' });
+      }
+      this.loadedProjection = structuredClone(projection);
+      return Object.freeze({ persisted: true, worldKey: projection.worldKey, local: true });
+    }
     const previousRecords = worldRecords(previousAtoms);
     const records = worldRecords(atoms);
     const previousPrograms = programRecords(previousRecords);
     const programs = programRecords(records);
-    const stored = await this.projectionRepository.load();
     if (!stored
       || stored.worldKey !== worldRevisionKey(previousRecords)
       || stored.contextDependent !== false
@@ -1468,6 +1590,28 @@ export class ProgramRuntimeScheduler {
     }
   }
 
+  backfillTriggerIndexForEvent(triggerEvent) {
+    if (!triggerEvent) return 0;
+    let backfilled = 0;
+    for (const node of triggerEvent.nodes ?? []) {
+      const key = `${triggerEvent.mode}\0${node}`;
+      if (this.triggerIndex.has(key)) continue;
+      const matches = new Set();
+      for (const [programPath, entry] of this.triggerContracts) {
+        const contractMatch = entry.contract?.mode === triggerEvent.mode
+          && entry.contract.parameters?.nodes?.includes(node);
+        const changedMatch = triggerEvent.mode === 'transform'
+          && entry.changedThings?.includes(node);
+        if (contractMatch || changedMatch) matches.add(programPath);
+      }
+      if (matches.size) {
+        this.triggerIndex.set(key, matches);
+        backfilled += matches.size;
+      }
+    }
+    return backfilled;
+  }
+
   async ensureTriggerContracts(records, programs, executeExplore, agentOrigin = null) {
     if (this.triggerContractsInitialized) return;
     const recordsByPath = new Map(records.map((record) => [record.path, record]));
@@ -1615,6 +1759,7 @@ export class ProgramRuntimeScheduler {
   async current(atoms, options = {}) {
     await this.activeRequestDrivenLocks(atoms);
     const records = worldRecords(atoms);
+    this.latestRecords = records;
     const availablePrograms = programRecords(records);
     const programs = options.programSelector
       ? programRecords(records, options.programSelector)
@@ -1689,8 +1834,70 @@ export class ProgramRuntimeScheduler {
   }
 
   async refresh(atoms, options = {}) {
+    const preparedTriggerEvent = options.triggerEvent ?? null;
+    if (preparedTriggerEvent?.preparedIndexesValid === true
+      && this.triggerContractsInitialized
+      && this.latestRecords
+      && this.requestDrivenLocks !== undefined) {
+      const triggerIndexBackfilled = this.backfillTriggerIndexForEvent(preparedTriggerEvent);
+      const candidatePaths = new Set();
+      for (const node of preparedTriggerEvent.nodes ?? []) {
+        for (const programPath of this.triggerIndex.get(
+          `${preparedTriggerEvent.mode}\0${node.trim()}`
+        ) ?? []) candidatePaths.add(programPath);
+      }
+      const eventNodes = new Set((preparedTriggerEvent.nodes ?? []).map((node) => node.trim()));
+      const programs = programRecords(this.latestRecords);
+      for (const program of programs) {
+        const previous = reusableProgramCandidates(
+          this.programReusable,
+          program,
+          options.isolateFailures === true,
+          options.agentOrigin,
+          this.latestRecords,
+          programs
+        )[0]?.[1];
+        if (previous?.requests?.some((request) => requestMayObserveEvent(request, eventNodes))) {
+          candidatePaths.add(program.path);
+        }
+      }
+      const slotCandidates = slotProgramInvocationsForEvent(atoms, preparedTriggerEvent);
+      if (candidatePaths.size === 0 && slotCandidates.length === 0) {
+        const locks = await this.activeRequestDrivenLocks();
+        return {
+          fingerprint: `prepared-index:${crypto.randomUUID()}`,
+          cached: true,
+          records: this.latestRecords,
+          selectedProgram: null,
+          locks,
+          choices: [],
+          messages: [],
+          transforms: [],
+          shortcuts: [],
+          slotBodies: [],
+          jumps: [],
+          jumpAuthorizations: [],
+          agentRegistrations: [],
+          exploreRequests: [],
+          exploreReadPaths: [],
+          failures: [],
+          executedProgramPaths: [],
+          reconcileSummary: {
+            candidateProgramCount: 0,
+            executedProgramCount: 0,
+            triggerIndexBackfilled,
+            preparedIndexHit: true
+          },
+          contextIncomplete: false,
+          agentSecurity: agentScopePath(options.agentOrigin)
+            ? structuredClone(this.agentSecurity.get(agentScopePath(options.agentOrigin)) ?? null)
+            : null
+        };
+      }
+    }
     await this.activeRequestDrivenLocks(atoms);
     const records = worldRecords(atoms);
+    this.latestRecords = records;
     const compatibility = legacyAtomContextMetadata(atoms);
     if (compatibility) {
       isolatedProgramPathsByRecords.set(records, new Set(compatibility.isolatedProgramPaths ?? []));
@@ -1731,6 +1938,15 @@ export class ProgramRuntimeScheduler {
     records, programs, availablePrograms, isolateFailures, key
   }) {
     const cycleDeadline = Date.now() + this.timeoutMs;
+    const indexWorld = options.prepareAllIndexes === true ? prepareExploreWorld(atoms) : null;
+    if (indexWorld) {
+      await this.ensureTriggerContracts(
+        records,
+        programs,
+        (request) => executeProgramExplore({ atoms, request, preparedWorld: indexWorld }),
+        null
+      );
+    }
     if (options.force !== true && !options.programSelector && !options.triggerEvent) {
       const persisted = await this.persistedProjection({
         records, programs, isolateFailures, fingerprint: key, agentOrigin: options.agentOrigin,
@@ -1748,7 +1964,7 @@ export class ProgramRuntimeScheduler {
       recordsByRef,
       snapshots: new Map()
     };
-    const preparedWorld = options.executeExplore ? null : prepareExploreWorld(atoms);
+    const preparedWorld = options.executeExplore ? null : (indexWorld ?? prepareExploreWorld(atoms));
     const executeExplore = options.executeExplore ?? ((request) => executeProgramExplore({
       atoms, request, preparedWorld
     }));
@@ -1764,6 +1980,7 @@ export class ProgramRuntimeScheduler {
     if (triggerEvent) await this.ensureTriggerContracts(
       records, programs, executeExplore, options.agentOrigin
     );
+    const triggerIndexBackfilled = this.backfillTriggerIndexForEvent(triggerEvent);
     const eventNodes = new Set((triggerEvent?.nodes ?? []).map((node) => node.trim()));
     const triggeredProgramPaths = new Set();
     if (triggerEvent) {
@@ -1915,7 +2132,26 @@ export class ProgramRuntimeScheduler {
         });
       }
     };
-    const operationEntries = programs.flatMap((program) => {
+    const dependencyTriggeredProgramPaths = new Set(triggerEvent
+      ? programs.flatMap((program) => {
+          const previous = reusableProgramCandidates(
+            this.programReusable, program, isolateFailures, options.agentOrigin,
+            records, availablePrograms
+          )[0]?.[1];
+          return previous?.requests?.some((request) => requestMayObserveEvent(request, eventNodes))
+            ? [program.path]
+            : [];
+        })
+      : []);
+    const indexedPrograms = triggerEvent
+      ? programs.filter((program) => (
+          triggeredProgramPaths.has(program.path)
+          || dependencyTriggeredProgramPaths.has(program.path)
+          || eventNodes.has(program.path)
+          || slotInvocationsByProgram.has(program.path)
+        ))
+      : programs;
+    const operationEntries = indexedPrograms.flatMap((program) => {
       const ownerPath = owningAgentPath(program, recordsByRef);
       if (programUsesJump(program) && ownerPath && ownerPath !== scopePath) return [];
       const scoped = slotInvocationsByProgram.get(program.path) ?? [];
@@ -1964,7 +2200,7 @@ export class ProgramRuntimeScheduler {
         && !hasIndexedContract
         && !eventNodes.has(program.path)
         && !slotInvocation
-        && (this.triggerIndex.size > 0 || !previous)) {
+        && !previous) {
         return {
           programPath: program.path,
           result: previous ? {
@@ -2182,6 +2418,12 @@ export class ProgramRuntimeScheduler {
       }
     });
     const settled = await Promise.all(operations);
+    if (!triggerEvent && !options.programSelector && !options.slotScopeRoot) {
+      const triggerSources = programs.filter((program) => /\b(?:trigger|changed)\s*\(/u.test(program.detail));
+      this.triggerContractsInitialized = triggerSources.every((program) => (
+        this.triggerContracts.get(program.path)?.detail === program.detail
+      ));
+    }
     const applicable = settled.filter((entry) => !(entry.contextDependent === true && !scopePath));
     const contextIncomplete = settled.some((entry) => (
       entry.contextDependent === true && !scopePath
@@ -2200,7 +2442,9 @@ export class ProgramRuntimeScheduler {
     ), null);
     const value = {
       fingerprint: key,
-      cached: applicable.length > 0 && applicable.every((entry) => entry.cached),
+      cached: triggerEvent
+        ? applicable.every((entry) => entry.cached)
+        : applicable.length > 0 && applicable.every((entry) => entry.cached),
       records,
       selectedProgram: options.programSelector ? programs[0] : null,
       locks: results.flatMap((result) => result.locks),
@@ -2227,6 +2471,7 @@ export class ProgramRuntimeScheduler {
       reconcileSummary: {
         candidateProgramCount: operationEntries.length,
         executedProgramCount: executedEntries.length,
+        triggerIndexBackfilled,
         ...(slowestExecution ? {
           slowestProgramFingerprint: slowestExecution.execution.fingerprint,
           slowestProgramDurationMs: Math.round(slowestExecution.execution.durationMs * 1000) / 1000

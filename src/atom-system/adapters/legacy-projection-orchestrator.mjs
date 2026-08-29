@@ -26,15 +26,15 @@ function performanceTrace(event, details) {
 export function createLegacyProjectionOrchestrator({
   contextFile,
   worldId = 'primary',
-  repository = createMemoryProjectionRepository(),
+  repository = createMemoryProjectionRepository({ immutableReferences: true }),
   programScheduler = null,
   journalFile = path.join(path.dirname(contextFile), 'atom.transactions.json')
 }) {
   if (!contextFile) throw problem('INVALID_PROJECTION_CONTEXT', 'Atom context file is required');
+  const journal = createJsonTransactionJournal({ file: journalFile });
 
-  async function projectCurrent({ expectedRevision, lockState = [] } = {}) {
+  async function projectCurrent({ expectedRevision, lockState = [], affectedPaths = null } = {}) {
     const readStartedAt = performance.now();
-    const journal = createJsonTransactionJournal({ file: journalFile });
     const journalState = await journal.readState();
     const compatibilityManifest = journalState.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null;
     const facts = await readAtomContext(contextFile, {
@@ -58,16 +58,17 @@ export function createLegacyProjectionOrchestrator({
         compatibilityManifest,
         compatibilityMetadata: legacyAtomContextMetadata(facts)
       }),
-      repository
+      repository,
+      shareImmutableSnapshot: true
     });
     const rebuildStartedAt = performance.now();
-    await pipeline.rebuild({
+    const projectionResult = await pipeline.rebuild({
       contract: 'atom.world-snapshot',
       version: 1,
       worldId,
       revision: sourceRevision,
       facts
-    });
+    }, { affectedPaths });
     performanceTrace('projection-rebuild', {
       elapsedMs: Math.round(performance.now() - rebuildStartedAt)
     });
@@ -77,6 +78,7 @@ export function createLegacyProjectionOrchestrator({
     }
     return Object.freeze({
       sourceRevision,
+      projectionScope: projectionResult,
       graph: batch.projections.graph.value,
       spatial: batch.projections.spatial.value
     });

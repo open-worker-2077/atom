@@ -190,6 +190,7 @@ function canonicalPartnerObject(source, target, matches, explicitPath) {
 function rewritePartnerBindings(atoms, bindings) {
   const matches = walkAtoms(atoms);
   const byAtom = new Map(matches.map((match) => [match.atom, match]));
+  const changedPaths = new Set();
   for (const binding of bindings) {
     const source = byAtom.get(binding.sourceAtom);
     const target = byAtom.get(binding.targetAtom);
@@ -197,13 +198,17 @@ function rewritePartnerBindings(atoms, bindings) {
     const partners = storedField(source.atom, 'support')?.value;
     if (!Array.isArray(partners)) continue;
     if (valueAtLocator(partners, binding.locator) !== binding.selectorObject) continue;
-    setSupportSelectorValue(binding.selectorObject, canonicalPartnerObject(
+    const before = supportSelectorValue(binding.selectorObject);
+    const after = canonicalPartnerObject(
       source,
       target,
       matches,
       binding.explicitPath
-    ));
+    );
+    setSupportSelectorValue(binding.selectorObject, after);
+    if (before !== after) changedPaths.add(source.path.join('/'));
   }
+  return [...changedPaths].sort();
 }
 
 function mapClonedSubtree(original, clone, mapping) {
@@ -598,14 +603,17 @@ export async function applyBatchRenames({
   }
 
   for (const plan of plans) applyNameMetadata(plan.match.atom, plan.nameField);
-  rewritePartnerBindings(nextAtoms, partnerBindings);
+  const relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings);
   const finalMatches = new Map(walkAtoms(nextAtoms).map((match) => [match.atom, match]));
+  const shortcutPaths = [];
   rewriteShortcutTargetPaths(nextAtoms, plans.map((plan) => ({
     sourcePath: plan.sourcePath,
     resultPath: finalMatches.get(plan.match.atom)?.path.join('/') ?? null
-  })));
+  })), shortcutPaths);
   return {
     atoms: nextAtoms,
+    relationPaths,
+    shortcutPaths,
     results: plans.map((plan) => ({
       index: plan.item.index,
       sourcePath: plan.sourcePath,
@@ -781,21 +789,52 @@ export function transformLogFileFor(contextFile) {
   return path.join(path.dirname(contextFile), 'atom.transform-log.json');
 }
 
-async function readTransformLog(contextFile) {
+export function transformLogEventFileFor(contextFile) {
+  return path.join(`${transformLogFileFor(contextFile)}.d`, 'events.jsonl');
+}
+
+const transformLogCache = new Map();
+
+async function readTransformLogEvents(contextFile) {
   try {
-    const value = JSON.parse(await fs.readFile(transformLogFileFor(contextFile), 'utf8'));
-    return Array.isArray(value) ? value : [];
+    const text = await fs.readFile(transformLogEventFileFor(contextFile), 'utf8');
+    return text.split('\n').filter(Boolean).map((line) => JSON.parse(line));
   } catch (error) {
     if (error.code === 'ENOENT') return [];
     throw error;
   }
 }
 
+export async function readTransformLog(contextFile) {
+  if (transformLogCache.has(contextFile)) {
+    return structuredClone(transformLogCache.get(contextFile));
+  }
+  let legacy;
+  try {
+    const value = JSON.parse(await fs.readFile(transformLogFileFor(contextFile), 'utf8'));
+    legacy = Array.isArray(value) ? value : [];
+  } catch (error) {
+    if (error.code === 'ENOENT') legacy = [];
+    else throw error;
+  }
+  const entries = [...legacy, ...await readTransformLogEvents(contextFile)];
+  transformLogCache.set(contextFile, entries);
+  return structuredClone(entries);
+}
+
 export async function appendTransformLog(contextFile, record) {
-  const file = transformLogFileFor(contextFile);
-  const entries = await readTransformLog(contextFile);
-  entries.push(record);
-  await fs.writeFile(file, `${JSON.stringify(entries, null, 2)}\n`, 'utf8');
+  const file = transformLogEventFileFor(contextFile);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const handle = await fs.open(file, 'a');
+  try {
+    await handle.writeFile(`${JSON.stringify(record)}\n`, 'utf8');
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  if (transformLogCache.has(contextFile)) {
+    transformLogCache.get(contextFile).push(structuredClone(record));
+  }
   return file;
 }
 
@@ -940,6 +979,8 @@ export async function applyTransform({
       };
     }
     const error = applyFields(selected.match.atom, item.fields, nextAtoms);
+    let relationPaths = [];
+    const shortcutPaths = [];
     if (!error) {
       if (changedFields.has('support')) {
         const currentMatches = walkAtoms(nextAtoms);
@@ -956,14 +997,20 @@ export async function applyTransform({
               )
             );
           }
+          if (relationTarget) relationPaths.push(relationTarget.path.join('/'));
         }
       }
-      if (partnerBindings.length) rewritePartnerBindings(nextAtoms, partnerBindings);
+      if (partnerBindings.length) {
+        relationPaths.push(...rewritePartnerBindings(nextAtoms, partnerBindings));
+      }
+      relationPaths = [...new Set(relationPaths)];
     }
     const resultPath = rewritesPaths
       ? walkAtoms(nextAtoms).find((match) => match.atom === selected.match.atom)?.path.join('/') ?? null
       : sourcePath;
-    if (!error && resultPath && resultPath !== sourcePath) rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }]);
+    if (!error && resultPath && resultPath !== sourcePath) {
+      rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }], shortcutPaths);
+    }
     return error
       ? rejectAfterMutation(error)
       : {
@@ -971,6 +1018,8 @@ export async function applyTransform({
           resultName: storedField(selected.match.atom, 'thing').value,
           sourcePath,
           resultPath,
+          relationPaths,
+          shortcutPaths,
           changed: copiesOnlyAncestry
             ? !isDeepStrictEqual(copyNonContainState(selected.match.atom), selectedBefore)
             : JSON.stringify(selected.match.atom) !== selectedBefore
@@ -1030,27 +1079,33 @@ export async function applyTransform({
         )
       };
     }
+    let relationPaths = [];
+    let resultAtom = target.atom;
     if (command.name === 'cpy') {
-      insertAuthoritativeSubtreeCopy({
+      const copied = insertAuthoritativeSubtreeCopy({
         atoms: nextAtoms,
         sourceAtom: target.atom,
         destinationChildren,
         rootName,
         bindings: partnerBindings
       });
+      resultAtom = copied.clone;
     } else {
       containerOf(nextAtoms, target).splice(target.index, 1);
       destinationChildren.push(target.atom);
-      rewritePartnerBindings(nextAtoms, partnerBindings);
+      relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings);
     }
-    const resultMatch = walkAtoms(nextAtoms).find((match) => match.atom === target.atom);
+    const resultMatch = walkAtoms(nextAtoms).find((match) => match.atom === resultAtom);
     const resultPath = resultMatch?.path.join('/') ?? sourcePath;
-    rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }]);
+    const shortcutPaths = [];
+    rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }], shortcutPaths);
     return {
       atoms: nextAtoms,
       resultName: nameField.value,
       sourcePath,
       resultPath,
+      relationPaths,
+      shortcutPaths,
       changed: true
     };
   }
@@ -1079,13 +1134,16 @@ export async function applyTransform({
     }
     originalContainer.splice(target.index, 1);
     immediateChildren(backup.match.atom).push(target.atom);
-    rewritePartnerBindings(nextAtoms, partnerBindings);
-    breakShortcutTargets(nextAtoms, sourcePath);
+    const relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings);
+    const shortcutPaths = [];
+    breakShortcutTargets(nextAtoms, sourcePath, shortcutPaths);
     return {
       atoms: nextAtoms,
       resultName: targetName,
       sourcePath,
       resultPath: walkAtoms(nextAtoms).find((match) => match.atom === target.atom)?.path.join('/') ?? null,
+      relationPaths,
+      shortcutPaths,
       changed: true,
       logRecord: {
         id: crypto.randomUUID(),
@@ -1138,12 +1196,14 @@ export async function applyTransform({
     }
     containerOf(nextAtoms, target).splice(target.index, 1);
     destination.splice(Math.min(discard.originalIndex, destination.length), 0, target.atom);
-    rewritePartnerBindings(nextAtoms, partnerBindings);
+    const relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings);
     return {
       atoms: nextAtoms,
       resultName: targetName,
       sourcePath,
       resultPath: walkAtoms(nextAtoms).find((match) => match.atom === target.atom)?.path.join('/') ?? null,
+      relationPaths,
+      shortcutPaths: [],
       changed: true,
       logRecord: {
         id: crypto.randomUUID(),

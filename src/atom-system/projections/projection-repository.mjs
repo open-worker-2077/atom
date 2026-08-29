@@ -2,8 +2,16 @@ function problem(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
 }
 
-export function createMemoryProjectionRepository() {
+function freezeTree(value) {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  if (value instanceof Map || value instanceof Set) return Object.freeze(value);
+  for (const child of Object.values(value)) freezeTree(child);
+  return Object.freeze(value);
+}
+
+export function createMemoryProjectionRepository(options = {}) {
   const worlds = new Map();
+  const immutableReferences = options.immutableReferences === true;
 
   async function replaceBatch(batch) {
     if (!batch || typeof batch.worldId !== 'string' || !batch.worldId
@@ -11,7 +19,9 @@ export function createMemoryProjectionRepository() {
       || !batch.projections || typeof batch.projections !== 'object') {
       throw problem('INVALID_PROJECTION_BATCH', 'Projection batch is invalid');
     }
-    worlds.set(batch.worldId, structuredClone(batch));
+    worlds.set(batch.worldId, immutableReferences
+      ? freezeTree(batch)
+      : structuredClone(batch));
   }
 
   async function readCurrent(worldId, requestedRevision) {
@@ -28,9 +38,14 @@ export function createMemoryProjectionRepository() {
       current: true,
       worldId,
       sourceRevision: batch.sourceRevision,
-      projections: structuredClone(batch.projections)
+      projections: immutableReferences ? batch.projections : structuredClone(batch.projections)
     };
   }
 
-  return Object.freeze({ replaceBatch, readCurrent });
+  async function readLatest(worldId) {
+    const batch = worlds.get(worldId);
+    return batch ? (immutableReferences ? batch : structuredClone(batch)) : null;
+  }
+
+  return Object.freeze({ replaceBatch, readCurrent, readLatest });
 }

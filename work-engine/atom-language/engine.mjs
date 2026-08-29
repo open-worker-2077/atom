@@ -1,7 +1,10 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { diagnostic } from './errors.mjs';
-import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
+import {
+  revisionOfWorldFacts,
+  sealWorldFactsRevision
+} from '../../src/atom-system/world-runtime/world-revision.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 
 function mergeWarnings(...groups) {
@@ -84,6 +87,63 @@ function graphTypesAtPath(atoms, targetPath) {
   const match = walkAtoms(atoms).find((candidate) => candidate.path.join('/') === targetPath);
   if (!match) return [];
   return oneStoredField(match.atom, 'thing')?.parsed.types.map((type) => type.raw) ?? [];
+}
+
+function exactMatchAtPath(atoms, targetPath) {
+  const parts = `${targetPath ?? ''}`.split('/').filter(Boolean);
+  let children = atoms;
+  let parent = null;
+  const pathParts = [];
+  for (const part of parts) {
+    const matches = children.flatMap((atom, index) => (
+      oneStoredField(atom, 'thing')?.value === part ? [{ atom, index }] : []
+    ));
+    if (matches.length !== 1) return null;
+    pathParts.push(part);
+    const match = {
+      atom: matches[0].atom,
+      index: matches[0].index,
+      parent,
+      path: [...pathParts]
+    };
+    parent = match;
+    children = oneStoredField(match.atom, 'contain')?.value ?? [];
+  }
+  return parent;
+}
+
+function subtreeContainsTypedProgram(atom) {
+  if (!atom) return false;
+  if (oneStoredField(atom, 'thing')?.parsed.types.some((type) => type.raw === 'program')) {
+    return true;
+  }
+  return (oneStoredField(atom, 'contain')?.value ?? []).some(subtreeContainsTypedProgram);
+}
+
+function transformChangesProgramSurface(beforeAtoms, afterAtoms, transformed) {
+  const paths = [...new Set([
+    transformed?.sourcePath,
+    transformed?.resultPath,
+    transformed?.resultName
+  ].filter(Boolean))];
+  return paths.some((targetPath) => (
+    subtreeContainsTypedProgram(exactMatchAtPath(beforeAtoms, targetPath)?.atom)
+    || subtreeContainsTypedProgram(exactMatchAtPath(afterAtoms, targetPath)?.atom)
+  ));
+}
+
+function isLocalizedSituationTransform(item) {
+  let situationChanged = false;
+  for (const field of item.fields ?? []) {
+    if (field.baseKey === 'thing') {
+      if ((field.commands?.length ?? 0) > 0) return false;
+      continue;
+    }
+    if (field.baseKey !== 'situation') return false;
+    if ((field.commands?.length ?? 0) === 0 && !field.valuePresent) continue;
+    situationChanged = true;
+  }
+  return situationChanged;
 }
 
 function newlyAddedProgramPaths(beforeAtoms, afterAtoms) {
@@ -319,13 +379,22 @@ async function validateRegisteredAgentSourceDelegation({
 }
 
 function appendNestedAtom(atoms, parentMatch, atom) {
-  const nextAtoms = structuredClone(atoms);
   const lineage = [];
   for (let current = parentMatch; current; current = current.parent) lineage.unshift(current.index);
-  let parent = nextAtoms[lineage.shift()];
-  for (const index of lineage) parent = oneStoredField(parent, 'contain').value[index];
-  oneStoredField(parent, 'contain').value.push(atom);
-  return nextAtoms;
+  function appendAt(items, depth) {
+    const index = lineage[depth];
+    const nextItems = [...items];
+    const nextParent = { ...items[index] };
+    nextItems[index] = nextParent;
+    const contain = oneStoredField(nextParent, 'contain');
+    if (depth === lineage.length - 1) {
+      nextParent[contain.rawKey] = [...contain.value, structuredClone(atom)];
+    } else {
+      nextParent[contain.rawKey] = appendAt(contain.value, depth + 1);
+    }
+    return nextItems;
+  }
+  return appendAt(atoms, 0);
 }
 
 function removeWindowJumpAuthorization(atoms, operationId) {
@@ -390,12 +459,13 @@ async function applyCreateTransform({
       '公开 Transform 不能创建 @agent；请由当前 Program 调用 agent()'
     ) };
   }
-  if (walkAtoms([atom]).some((match) => (
+  const createdMatches = walkAtoms([atom]);
+  if (createdMatches.some((match) => (
     oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => type.raw === 'shortcut')
   ))) {
     return { error: diagnostic('SHORTCUT_PERSISTENCE_FORGERY_DENIED', '公开 Transform 不得创建或伪造内核虚拟引用记录') };
   }
-  if (walkAtoms([atom]).some((match) => (
+  if (createdMatches.some((match) => (
     oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => (
       type.raw === WINDOW_JUMP_AUTHORIZATION_TYPE
     ))
@@ -407,6 +477,9 @@ async function applyCreateTransform({
   }
   const createName = createNameField?.value;
   const createPath = createName.split('/');
+  const persistedCreatePath = createPath[0] === WORLD_OUTSIDE_NAME
+    ? createPath.slice(1).join('/')
+    : createName;
   const createDecision = await authorize({ atom, name: createName, path: createPath }, 'write');
   if (createDecision.decision !== 'allow') {
     const programDenied = createDecision.matched
@@ -419,7 +492,10 @@ async function applyCreateTransform({
     ) };
   }
 
-  const selected = exactMatches(atoms, item, matcherRegistry);
+  const exactCreateMatch = exactMatchAtPath(atoms, persistedCreatePath);
+  const selected = exactCreateMatch
+    ? { matches: [exactCreateMatch], expected: createName }
+    : { matches: [], expected: createName };
   if (selected.error) return { error: selected.error };
   if (selected.matches.length) {
     return { error: diagnostic(
@@ -440,7 +516,8 @@ async function applyCreateTransform({
       : requestedParentPath.startsWith(`${WORLD_OUTSIDE_NAME}/`)
         ? requestedParentPath.slice(WORLD_OUTSIDE_NAME.length + 1)
         : requestedParentPath;
-    const parentMatches = walkAtoms(atoms).filter((match) => match.path.join('/') === parentPath);
+    const exactParentMatch = exactMatchAtPath(atoms, parentPath);
+    const parentMatches = exactParentMatch ? [exactParentMatch] : [];
     if (parentMatches.length !== 1) {
       return { error: diagnostic(
         parentMatches.length ? 'AMBIGUOUS_ATOM_NAME' : 'ATOM_NOT_FOUND',
@@ -465,13 +542,18 @@ async function applyCreateTransform({
     nextAtoms = appendNestedAtom(atoms, parentMatches[0], atom);
   }
 
-  const compiled = await validatePrograms(nextAtoms, contextFile, atoms, programScheduler);
+  const introducesProgram = createdMatches.some((match) => (
+    oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => type.raw === 'program')
+  ));
+  const compiled = introducesProgram
+    ? await validatePrograms(nextAtoms, contextFile, atoms, programScheduler)
+    : { ok: true, errors: [], warnings: [] };
   if (!compiled.ok) return { error: compiled.errors[0], warnings: compiled.warnings };
   return {
     atoms: nextAtoms,
     changed: true,
     resultName: createPath.at(-1),
-    resultPath: createName,
+    resultPath: persistedCreatePath,
     warnings: compiled.warnings
   };
 }
@@ -539,32 +621,40 @@ async function persistChangedGraph({
   expectedRevision,
   correlationId,
   source,
+  changedPaths = null,
+  affectedAtoms = null,
   registrationChange = null,
-  compatibilityManifest
+  compatibilityManifest,
+  localizedSituationValidation = false
 }) {
-  // Validate the full projection before either active file is changed.
-  const validationStartedAt = performance.now();
-  projectAtomContext(atoms, { rootName, allowLegacySupport: Boolean(compatibilityManifest) });
-  performanceTrace('world-precommit-validation', {
-    elapsedMs: Math.round(performance.now() - validationStartedAt)
-  });
+  if (!localizedSituationValidation) {
+    // Structural, support, type and Program changes retain the complete projection gate.
+    const validationStartedAt = performance.now();
+    projectAtomContext(atoms, { rootName, allowLegacySupport: Boolean(compatibilityManifest) });
+    performanceTrace('world-precommit-validation', {
+      elapsedMs: Math.round(performance.now() - validationStartedAt)
+    });
+  }
   if (typeof commitWorld !== 'function') {
     const error = new Error('World mutation requires an explicit commit capability');
     error.code = 'WORLD_COMMIT_CAPABILITY_REQUIRED';
     throw error;
   }
   const commitStartedAt = performance.now();
-  await commitWorld({
+  const receipt = await commitWorld({
     expectedRevision,
     nextRevision: revisionOf(atoms),
-    facts: structuredClone(atoms),
+    facts: atoms,
     correlationId,
     source,
+    ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
+    ...(Array.isArray(affectedAtoms) ? { affectedAtoms } : {}),
     registrationChange
   });
   performanceTrace('world-commit', {
     elapsedMs: Math.round(performance.now() - commitStartedAt)
   });
+  return receipt;
 }
 
 export async function executeAtomLanguage(options = {}) {
@@ -633,6 +723,7 @@ export async function executeAtomLanguage(options = {}) {
     };
   }
   const revisionBefore = revisionOf(atoms);
+  let committedAffectedPaths = [];
   const legacyMetadata = legacyAtomContextMetadata(atoms);
   if (parsed.command === 'transform' && legacyMetadata?.mode === 'legacy-read-only') {
     return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
@@ -709,6 +800,7 @@ export async function executeAtomLanguage(options = {}) {
     transformStageDiagnostics.push({
       stage,
       durationMs: performance.now() - startedAt,
+      elapsedMs: performance.now() - operationStartedAt,
       candidateProgramCount: details.candidateProgramCount ?? 0,
       executedProgramCount: details.executedProgramCount ?? 0,
       ...(details.slowestProgramFingerprint ? {
@@ -748,19 +840,16 @@ export async function executeAtomLanguage(options = {}) {
   let programCycle = { messages: [], locks: [], records: [] };
   let activeRequestDrivenLocks = [];
   if (options.programScheduler) {
+    const indexPreparationStartedAt = performance.now();
     try {
       activeRequestDrivenLocks = await options.programScheduler.activeRequestDrivenLocks?.(atoms) ?? [];
       const initialAgentPath = interaction.agent?.path ?? null;
       const initialAgentSecurity = initialAgentPath
         ? structuredClone(options.programScheduler.agentSecurity?.get(initialAgentPath) ?? null)
         : null;
-      const programAccess = createAccessController(atoms, {
-        ...options,
-        agentPath: initialAgentPath,
-        agentSecurity: initialAgentSecurity,
-        graphLocks: []
-      });
-      const preparedWorld = prepareExploreWorld(atoms);
+      let programAccess = null;
+      let preparedWorld = null;
+      await recordTransformStage('index-preparation', indexPreparationStartedAt);
       const reconcilePrograms = options.programMode === 'reconcile'
         || Boolean(requestedProgramRun?.selector);
       const projectPrograms = options.programMode === 'project';
@@ -791,6 +880,7 @@ export async function executeAtomLanguage(options = {}) {
         ...(passivePrograms ? {
           reuseDormantContextFailureCodes: ['WINDOW_JUMP_DESTINATION_INVALID']
         } : {}),
+        ...(projectPrograms ? { prepareAllIndexes: true } : {}),
         ...(requestedProgramRun?.selector
           ? {
               programSelector: requestedProgramRun.selector,
@@ -804,10 +894,15 @@ export async function executeAtomLanguage(options = {}) {
           atoms,
           request,
           receiver,
-          accessController: programAccess,
+          accessController: programAccess ??= createAccessController(atoms, {
+            ...options,
+            agentPath: initialAgentPath,
+            agentSecurity: initialAgentSecurity,
+            graphLocks: []
+          }),
           agentOrigin: interaction.agent,
           scopeRoot: executionContext.scopeRoot ?? null,
-          preparedWorld
+          preparedWorld: preparedWorld ??= prepareExploreWorld(atoms)
         })
       };
       try {
@@ -1562,14 +1657,8 @@ export async function executeAtomLanguage(options = {}) {
         ? structuredClone(options.programScheduler.agentSecurity?.get(cycleAgentPath)
           ?? programCycle.agentSecurity ?? null)
         : null;
-      const programAccess = createAccessController(reconciledAtoms, {
-        ...options,
-        programLockIndex: finalLockIndex,
-        agentPath: cycleAgentPath,
-        agentSecurity: cycleAgentSecurity,
-        graphLocks: finalGraphLocks
-      });
-      const preparedWorld = prepareExploreWorld(reconciledAtoms);
+      let programAccess = null;
+      let preparedWorld = null;
       const refreshStartedAt = performance.now();
       let cycle;
       try {
@@ -1582,10 +1671,16 @@ export async function executeAtomLanguage(options = {}) {
             atoms: reconciledAtoms,
             request,
             receiver,
-            accessController: programAccess,
+            accessController: programAccess ??= createAccessController(reconciledAtoms, {
+              ...options,
+              programLockIndex: finalLockIndex,
+              agentPath: cycleAgentPath,
+              agentSecurity: cycleAgentSecurity,
+              graphLocks: finalGraphLocks
+            }),
             agentOrigin: interaction.agent,
             scopeRoot: executionContext.scopeRoot ?? null,
-            preparedWorld
+            preparedWorld: preparedWorld ??= prepareExploreWorld(reconciledAtoms)
           })
         });
       } catch (error) {
@@ -1621,19 +1716,41 @@ export async function executeAtomLanguage(options = {}) {
         warning.message ?? 'Program runtime reported a recoverable warning',
         warning.details ?? {}
       )));
-      const refreshedLockIndex = buildProgramLockIndex({
-        revision: revisionOf(reconciledAtoms),
-        results: options.bypassProgramLocks ? [] : cycle.locks,
-        records: cycle.records
-      });
-      finalLockIndex = pendingTriggerEvent
-        ? mergeProgramLockIndexes({
-          revision: revisionOf(reconciledAtoms),
-          previous: finalLockIndex,
-          next: refreshedLockIndex,
-          replacedSources: new Set(cycle.executedProgramPaths ?? [])
-        })
-        : refreshedLockIndex;
+      const executedProgramPaths = new Set(cycle.executedProgramPaths ?? []);
+      if (!pendingTriggerEvent || executedProgramPaths.size > 0) {
+        const reconciledRevision = revisionOf(reconciledAtoms);
+        const refreshedLockIndex = buildProgramLockIndex({
+          revision: reconciledRevision,
+          results: options.bypassProgramLocks ? [] : cycle.locks,
+          records: cycle.records
+        });
+        finalLockIndex = pendingTriggerEvent
+          ? mergeProgramLockIndexes({
+            revision: reconciledRevision,
+            previous: finalLockIndex,
+            next: refreshedLockIndex,
+            replacedSources: executedProgramPaths
+          })
+          : refreshedLockIndex;
+      }
+      const noProgramEffects = executedProgramPaths.size === 0
+        && (cycle.transforms?.length ?? 0) === 0
+        && (cycle.messages?.length ?? 0) === 0
+        && (cycle.shortcuts?.length ?? 0) === 0
+        && (cycle.slotBodies?.length ?? 0) === 0
+        && (cycle.jumps?.length ?? 0) === 0
+        && (cycle.jumpAuthorizations?.length ?? 0) === 0
+        && (cycle.agentRegistrations?.length ?? 0) === 0;
+      if (pendingTriggerEvent && cycle.reconcileSummary?.preparedIndexHit === true
+        && noProgramEffects) {
+        return {
+          atoms: reconciledAtoms,
+          lockIndex: finalLockIndex,
+          messages,
+          transformLogs,
+          pathChanges
+        };
+      }
       const cycleAccessController = createAccessController(reconciledAtoms, {
         ...options,
         programLockIndex: finalLockIndex,
@@ -2012,13 +2129,17 @@ export async function executeAtomLanguage(options = {}) {
 
   async function commitChangedGraph(candidateAtoms, {
     registrationChange = null,
-    projectionRebase = null
+    projectionRebase = null,
+    changedPaths = projectionRebase?.changedPaths ?? null,
+    affectedAtoms = null,
+    localizedSituationValidation = false
   } = {}) {
     const effectiveRegistrationChange = registrationChange
       ?? (windowRecycled ? 'window-recycle' : null);
     const commitStartedAt = performance.now();
+    let receipt = null;
     try {
-      await persistChangedGraph({
+      receipt = await persistChangedGraph({
         atoms: candidateAtoms,
         contextFile,
         projectionFile,
@@ -2027,9 +2148,18 @@ export async function executeAtomLanguage(options = {}) {
         expectedRevision: revisionBefore,
         correlationId: interaction.id,
         source,
+        changedPaths,
+        affectedAtoms: affectedAtoms ?? (Array.isArray(changedPaths) ? changedPaths.map((path) => ({
+          path,
+          axes: ['contain', 'situation', 'support', 'thing']
+        })) : null),
         registrationChange: effectiveRegistrationChange,
-        compatibilityManifest: options.compatibilityManifest
+        compatibilityManifest: options.compatibilityManifest,
+        localizedSituationValidation
       });
+      committedAffectedPaths = [...new Set((receipt?.affectedAtoms ?? [])
+        .map(({ path }) => path)
+        .filter(Boolean))].sort();
     } catch (error) {
       await recordTransformStage('commit', commitStartedAt, {
         commitEntered: true,
@@ -2038,6 +2168,11 @@ export async function executeAtomLanguage(options = {}) {
       throw error;
     }
     await recordTransformStage('commit', commitStartedAt, { commitEntered: true });
+    if (!committedAffectedPaths.length) {
+      committedAffectedPaths = Array.isArray(changedPaths)
+        ? [...new Set(changedPaths.filter(Boolean))].sort()
+        : [];
+    }
     if (recycledAgentPath) {
       await options.programScheduler?.recycleAgentWindow?.(recycledAgentPath);
     }
@@ -2051,12 +2186,18 @@ export async function executeAtomLanguage(options = {}) {
     }
     try {
       let rebased = null;
+      const projectionSettleStartedAt = performance.now();
       if (projectionRebase && options.programScheduler?.rebaseContextFreeProjection) {
         try {
           rebased = await options.programScheduler.rebaseContextFreeProjection(
             projectionRebase.previousAtoms,
             candidateAtoms,
-            { changedPaths: projectionRebase.changedPaths, isolateFailures: true }
+            {
+              changedPaths: projectionRebase.changedPaths,
+              isolateFailures: true,
+              previousRevision: receipt?.beforeRevision ?? revisionBefore,
+              revision: receipt?.afterRevision ?? revisionOf(candidateAtoms)
+            }
           );
         } catch {
           rebased = null;
@@ -2065,6 +2206,16 @@ export async function executeAtomLanguage(options = {}) {
       const settleWarnings = rebased?.persisted === true
         ? []
         : await settleContextFreeProgramProjectionForWorld(candidateAtoms);
+      await recordTransformStage('program-projection', projectionSettleStartedAt, {
+        candidateProgramCount: 0,
+        executedProgramCount: 0
+      });
+      performanceTrace('program-projection-settle', {
+        elapsedMs: Math.round(performance.now() - projectionSettleStartedAt),
+        rebased: rebased?.persisted === true,
+        local: rebased?.local === true,
+        reason: rebased?.reason ?? null
+      });
       interactionWarnings.push(...settleWarnings.map((warning) => diagnostic(
         warning.code ?? 'PROGRAM_RUNTIME_WARNING',
         warning.message ?? 'Program runtime reported a recoverable warning',
@@ -2077,6 +2228,7 @@ export async function executeAtomLanguage(options = {}) {
         { cause: error.code ?? error.name ?? 'PROGRAM_PROJECTION_SETTLE_FAILED' }
       ));
     }
+    return receipt;
   }
 
   function rewritePath(initialPath, pathChanges) {
@@ -2277,6 +2429,9 @@ export async function executeAtomLanguage(options = {}) {
           if (path) transformEventNodes.add(path);
         }
       }
+      for (const path of [...(renamed.relationPaths ?? []), ...(renamed.shortcutPaths ?? [])]) {
+        if (path) transformEventNodes.add(path);
+      }
     }
     for (const candidate of renameBatch ? [] : parsed.items) {
       let transformed;
@@ -2320,6 +2475,9 @@ export async function executeAtomLanguage(options = {}) {
       for (const path of [transformed.sourcePath, transformed.resultPath]) {
         if (path) transformEventNodes.add(path);
       }
+      for (const path of [...(transformed.relationPaths ?? []), ...(transformed.shortcutPaths ?? [])]) {
+        if (path) transformEventNodes.add(path);
+      }
       if (transformed.logRecord) {
         transformLogs.push({
           ...transformed.logRecord,
@@ -2352,6 +2510,11 @@ export async function executeAtomLanguage(options = {}) {
       finalProgramLockIndex = reconciled.lockIndex;
       finalProgramMessages.push(...reconciled.messages);
       programTransformLogs.push(...reconciled.transformLogs);
+      for (const change of reconciled.pathChanges ?? []) {
+        for (const path of [change.sourcePath, change.resultPath]) {
+          if (path) transformEventNodes.add(path);
+        }
+      }
       for (const receipt of results) {
         const rewritten = rewritePath(receipt.result?.path, reconciled.pathChanges);
         if (rewritten && receipt.result) {
@@ -2389,7 +2552,9 @@ export async function executeAtomLanguage(options = {}) {
       if (!delegated.ok) {
         return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
       }
-      await commitChangedGraph(nextAtoms);
+      await commitChangedGraph(nextAtoms, {
+        changedPaths: [...transformEventNodes]
+      });
       for (const record of [...programTransformLogs, ...transformLogs]) {
         try {
           await appendTransformLog(contextFile, {
@@ -2421,6 +2586,7 @@ export async function executeAtomLanguage(options = {}) {
       errors: [],
       messages: [...interactionMessages, ...finalProgramMessages],
       interactionId: interaction.id,
+      affectedPaths: committedAffectedPaths,
       lockState: programLockState(finalProgramLockIndex)
     };
   }
@@ -2471,7 +2637,19 @@ export async function executeAtomLanguage(options = {}) {
       }
     }
     const finalCreatePath = rewritePath(created.resultPath, postRefresh.pathChanges);
-    await commitChangedGraph(nextAtoms);
+    const createChangedPaths = [
+      created.resultPath,
+      ...postRefresh.pathChanges.flatMap((change) => [change.sourcePath, change.resultPath])
+    ].filter(Boolean);
+    const canRebaseCreateProjection = programTransformLogs.length === 0
+      && postRefresh.transformLogs.length === 0
+      && postRefresh.pathChanges.length === 0;
+    const commitReceipt = await commitChangedGraph(nextAtoms, canRebaseCreateProjection ? {
+      projectionRebase: {
+        previousAtoms: atoms,
+        changedPaths: createChangedPaths
+      }
+    } : { changedPaths: createChangedPaths });
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
       await appendTransformLog(contextFile, record);
     }
@@ -2484,16 +2662,17 @@ export async function executeAtomLanguage(options = {}) {
       contextFile,
       projectionFile,
       revisionBefore,
-      revisionAfter: revisionOf(nextAtoms),
+      revisionAfter: commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
+        ?? revisionOf(nextAtoms),
       result: describeAtom(
-        walkAtoms(nextAtoms).find((match) => match.path.join('/') === finalCreatePath)
-          ?? walkAtoms(nextAtoms).at(-1),
+        exactMatchAtPath(nextAtoms, finalCreatePath) ?? walkAtoms(nextAtoms).at(-1),
         false
       ),
       warnings: mergeWarnings(interactionWarnings),
       errors: [],
       messages: [...interactionMessages, ...postRefresh.messages],
       interactionId: interaction.id,
+      affectedPaths: committedAffectedPaths,
       lockState: programLockState(postRefresh.lockIndex)
     };
   }
@@ -2548,10 +2727,12 @@ export async function executeAtomLanguage(options = {}) {
       errors: [],
       messages: interactionMessages,
       interactionId: interaction.id,
+      affectedPaths: committedAffectedPaths,
       lockState: programLockState(finalProgramLockIndex)
     };
   }
 
+  const transformApplyStartedAt = performance.now();
   const transformed = await applyTransform({
     atoms,
     item,
@@ -2563,8 +2744,10 @@ export async function executeAtomLanguage(options = {}) {
   }
 
   let nextAtoms = transformed.atoms;
-  let revisionAfter = revisionOf(nextAtoms);
-  let changed = revisionAfter !== revisionBefore;
+  let revisionAfter = revisionBefore;
+  let changed = transformed.changed === true || programChanged;
+  const programSurfaceChanged = changed
+    && transformChangesProgramSurface(atoms, nextAtoms, transformed);
   let postRefresh = {
     atoms: nextAtoms,
     lockIndex: programLockIndex,
@@ -2572,7 +2755,7 @@ export async function executeAtomLanguage(options = {}) {
     transformLogs: [],
     pathChanges: []
   };
-  if (changed) {
+  if (programSurfaceChanged) {
     const compiled = await validatePrograms(
       nextAtoms, contextFile, atoms, options.programScheduler
     );
@@ -2599,20 +2782,23 @@ export async function executeAtomLanguage(options = {}) {
       return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
     }
   }
+  await recordTransformStage('transform-apply', transformApplyStartedAt);
   if (options.programScheduler) {
     try {
       postRefresh = await reconcileProgramsForWorld(nextAtoms, {
         mode: 'transform',
+        preparedIndexesValid: !programSurfaceChanged,
         nodes: [...new Set([
           transformed.sourcePath,
           transformed.resultPath,
           transformed.resultName,
-          ...newlyAddedProgramPaths(atoms, nextAtoms)
+          ...(programSurfaceChanged ? newlyAddedProgramPaths(atoms, nextAtoms) : [])
         ].filter(Boolean))]
       });
       nextAtoms = postRefresh.atoms;
-      revisionAfter = revisionOf(nextAtoms);
-      changed = revisionAfter !== revisionBefore;
+      changed = changed
+        || postRefresh.transformLogs.length > 0
+        || postRefresh.pathChanges.length > 0;
     } catch (error) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
@@ -2620,8 +2806,8 @@ export async function executeAtomLanguage(options = {}) {
     }
   }
   if (changed) {
-    const canRebaseProjection = !transformChangesStructure(item)
-      && programTransformLogs.length === 0
+    revisionAfter = sealWorldFactsRevision(nextAtoms).slice('sha256:'.length);
+    const canRebaseProjection = programTransformLogs.length === 0
       && postRefresh.transformLogs.length === 0
       && postRefresh.pathChanges.length === 0;
     await commitChangedGraph(nextAtoms, canRebaseProjection ? {
@@ -2630,10 +2816,22 @@ export async function executeAtomLanguage(options = {}) {
         changedPaths: [...new Set([
           transformed.sourcePath,
           transformed.resultPath,
-          transformed.resultName
+          ...(transformed.relationPaths ?? []),
+          ...(transformed.shortcutPaths ?? [])
         ].filter(Boolean))]
-      }
-    } : {});
+      },
+      localizedSituationValidation: !programSurfaceChanged
+        && isLocalizedSituationTransform(item)
+    } : {
+      changedPaths: [...new Set([
+        transformed.sourcePath,
+        transformed.resultPath,
+        ...(transformed.relationPaths ?? []),
+        ...(transformed.shortcutPaths ?? []),
+        ...postRefresh.pathChanges.flatMap((change) => [change.sourcePath, change.resultPath])
+      ].filter(Boolean))]
+    });
+    const auditStartedAt = performance.now();
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
       await appendTransformLog(contextFile, record);
     }
@@ -2644,7 +2842,11 @@ export async function executeAtomLanguage(options = {}) {
         revisionAfter
       });
     }
+    performanceTrace('transform-audit-append', {
+      elapsedMs: Math.round(performance.now() - auditStartedAt)
+    });
   }
+  const resultLookupStartedAt = performance.now();
   const finalResultPath = rewritePath(
     transformed.resultPath ?? transformed.resultName,
     postRefresh.pathChanges
@@ -2652,6 +2854,9 @@ export async function executeAtomLanguage(options = {}) {
   const resultMatch = walkAtoms(nextAtoms).find((match) => (
     match.path.join('/') === finalResultPath
   ));
+  performanceTrace('transform-result-lookup', {
+    elapsedMs: Math.round(performance.now() - resultLookupStartedAt)
+  });
   return {
     ok: true,
     language: 'atom',
@@ -2669,6 +2874,7 @@ export async function executeAtomLanguage(options = {}) {
     errors: [],
     messages: [...interactionMessages, ...postRefresh.messages],
     interactionId: interaction.id,
+    affectedPaths: committedAffectedPaths,
     lockState: programLockState(postRefresh.lockIndex)
   };
 

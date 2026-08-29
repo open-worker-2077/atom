@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
-import { executeAtomCommandEndpoint, resolveAgentContext } from '../work-engine/atom-language/cli.mjs';
+import { executeAtomCommandEndpoint } from '../work-engine/atom-language/cli.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 
 if (process.argv.includes('--trace')) process.env.ATOM_PERF_TRACE = '1';
@@ -47,6 +47,15 @@ try {
 } catch (error) {
   if (error.code !== 'ENOENT') throw error;
 }
+for (const name of ['atom.transactions.json', 'atom.transactions.json.d']) {
+  try {
+    await fs.cp(path.join(path.dirname(sourceContext), name), path.join(directory, name), {
+      recursive: true
+    });
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
 
 let running;
 let monitor;
@@ -55,13 +64,14 @@ try {
   const requestedAgent = argument('--agent');
   const agentPath = requestedAgent ?? agentPaths(copiedWorld)[0];
   if (!agentPath) throw new Error('The copied world has no @agent context');
-  const agent = await resolveAgentContext(contextFile, agentPath);
+  const interaction = { agentSelector: agentPath, agent: { path: agentPath } };
   running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
   });
   const endpoint = `${running.url}/__atom/api/command`;
   const port = running.port;
   const testName = `__write_acceptance_${Date.now()}`;
+  const testPath = [argument('--parent'), testName].filter(Boolean).join('/');
   const delays = [];
   let expectedAt = Date.now() + 100;
   monitor = setInterval(() => {
@@ -71,8 +81,8 @@ try {
   }, 100);
   const startedAt = Date.now();
   const write = await executeAtomCommandEndpoint({
-    source: `transform new {"thing":"${testName}","situation":"acceptance","contain":[],"support":[]}`,
-    interaction: { agent }
+    source: `transform new {"thing":"${testPath}","situation":"acceptance","contain":[],"support":[]}`,
+    interaction
   }, endpoint);
   const writeMs = Date.now() - startedAt;
   clearInterval(monitor);
@@ -80,8 +90,8 @@ try {
 
   const readStartedAt = Date.now();
   const readback = await executeAtomCommandEndpoint({
-    source: `explore {"thing":"${testName}","situation$full":true}`,
-    interaction: { agent }
+    source: `explore {"thing":"${testPath}","situation$full":true}`,
+    interaction
   }, endpoint);
   const readMs = Date.now() - readStartedAt;
   const healthResponse = await fetch(`${running.url}/__spatial/api/health`);
@@ -114,6 +124,9 @@ try {
     healthOk: healthResponse.status === 200 && health.ok === true,
     programFailures,
   };
+  if (process.argv.includes('--trace')) {
+    process.stderr.write(`${JSON.stringify({ event: 'acceptance-pre-rollback', ...preRollback, warnings: write.warnings ?? [] })}\n`);
+  }
   await running.close();
   running = null;
 
@@ -123,7 +136,7 @@ try {
     throw new Error('Acceptance write did not produce a rollback-capable receipt');
   }
   const persistence = createTransactionalWorldPersistence({
-    contextFile, projectionFile: graphFile, journalFile
+    contextFile, projectionFile: graphFile, journalFile, publishLegacyProjection: false
   });
   const rollback = await persistence.rollback({
     targetCommandId: committed.commandId,

@@ -4654,8 +4654,8 @@
       updateSelectionUI();
       ui.editStatus.hidden = false;
       setEditVisualState("update");
-      ui.editStatus.textContent = `连接起点 · ${node.label} · Ctrl + 右键选择落脚`;
-      announce(`已选择关系起点 ${node.label}`);
+      ui.editStatus.textContent = `关系起点 · ${node.label} · 建边：Ctrl + 右键节点；移动：进入目标父级后 Ctrl + 右键空白`;
+      announce(`已选择 ${node.label}；点节点建立关系，进入目标父级后点空白移动 contain`);
       return true;
     }
     if (active.kind === "edge-create" && !active.target) {
@@ -7133,7 +7133,7 @@
       if (state.drag.type === "node") {
         broadcastIntent("release", { phase: cancelled ? "cancel" : "end" }, state.drag.node);
         if (!cancelled) {
-          announce(`${state.drag.node.label} 已移动到当前工作区位置`);
+          announce(`${state.drag.node.label} 仅调整视觉位置，未改变父级，未提交 Atom`);
         }
       } else if (state.drag.type === "orbit") {
         recordCurrentView();

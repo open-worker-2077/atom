@@ -226,10 +226,11 @@ test('a refresh exposes only bounded anonymous reconcile timing summary', async 
 
   assert.deepEqual(Object.keys(cycle.reconcileSummary).sort(), [
     'candidateProgramCount', 'executedProgramCount', 'slowestProgramDurationMs',
-    'slowestProgramFingerprint'
+    'slowestProgramFingerprint', 'triggerIndexBackfilled'
   ]);
   assert.equal(cycle.reconcileSummary.candidateProgramCount, 2);
   assert.equal(cycle.reconcileSummary.executedProgramCount, 2);
+  assert.equal(cycle.reconcileSummary.triggerIndexBackfilled, 0);
   assert.match(cycle.reconcileSummary.slowestProgramFingerprint, /^sha256:[a-f0-9]{64}$/u);
   assert.equal(cycle.reconcileSummary.slowestProgramDurationMs >= 0, true);
   assert.equal(JSON.stringify(cycle.reconcileSummary).includes('Slow Program'), false);
@@ -420,6 +421,207 @@ test('a triggered Program without Program reuse executes with only its own sourc
   ], { triggerEvent: { mode: 'transform', nodes: ['Target'] } });
 
   assert.equal(executionProgramCount, 1);
+});
+
+test('TC-PERF-AFFECTED-CLOSURE: a warm trigger event counts only indexed candidates', async () => {
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program }) => ({
+      locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+      trigger: program.path === 'Trigger'
+        ? { mode: 'transform', parameters: { nodes: ['Target'] } }
+        : null,
+      changedThings: []
+    })
+  });
+  const unrelated = Array.from(
+    { length: 100 },
+    (_, index) => atom(`Unrelated ${index}`, 'pass', [], 'program')
+  );
+  const world = [
+    atom('Target'),
+    atom('Trigger', "trigger('transform', {'nodes': ['Target']}, main)", [], 'program'),
+    ...unrelated
+  ];
+  await scheduler.refresh(world);
+
+  const cycle = await scheduler.refresh(structuredClone(world), {
+    triggerEvent: { mode: 'transform', nodes: ['Target'] }
+  });
+
+  assert.equal(cycle.reconcileSummary.candidateProgramCount, 1);
+  assert.equal(cycle.reconcileSummary.executedProgramCount, 1);
+  assert.deepEqual(cycle.executedProgramPaths, ['Trigger']);
+});
+
+test('TC-PERF-AFFECTED-CLOSURE: a warm unrelated event returns from prepared indexes', async () => {
+  let executions = 0;
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program }) => {
+      executions += 1;
+      return {
+        locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+        trigger: program.path === 'Trigger'
+          ? { mode: 'transform', parameters: { nodes: ['Watched'] } }
+          : null,
+        changedThings: []
+      };
+    }
+  });
+  const world = [
+    atom('Watched'),
+    atom('Unrelated'),
+    atom('Trigger', "trigger('transform', {'nodes': ['Watched']}, main)", [], 'program')
+  ];
+  await scheduler.refresh(world);
+  executions = 0;
+
+  const cycle = await scheduler.refresh(structuredClone(world), {
+    triggerEvent: {
+      mode: 'transform', nodes: ['Unrelated'], preparedIndexesValid: true
+    }
+  });
+
+  assert.equal(executions, 0);
+  assert.equal(cycle.reconcileSummary.preparedIndexHit, true);
+  assert.equal(cycle.reconcileSummary.candidateProgramCount, 0);
+  assert.equal(cycle.reconcileSummary.executedProgramCount, 0);
+});
+
+test('TC-PERF-AFFECTED-CLOSURE: prepared indexes preserve explore-read dependency triggers', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const world = [
+    atom('Watched', 'wait'),
+    atom('Dependency Watcher', [
+      "watched = explore({'thing': 'Watched', 'situation$full': None})[0]",
+      "if watched.situation == 'go':",
+      "    message({'level': 'info', 'text': 'dependency fired'})"
+    ].join('\n'), [], 'program')
+  ];
+  await scheduler.refresh(world);
+  const changed = structuredClone(world);
+  changed[0].situation = 'go';
+
+  const cycle = await scheduler.refresh(changed, {
+    triggerEvent: {
+      mode: 'transform', nodes: ['Watched'], preparedIndexesValid: true
+    }
+  });
+
+  assert.deepEqual(cycle.executedProgramPaths, ['Dependency Watcher']);
+  assert.equal(cycle.messages[0]?.text, 'dependency fired');
+});
+
+test('TC-PERF-COLD-INDEX: startup prepares changed dependencies outside request Agent windows', async () => {
+  let requestScopedReads = 0;
+  const scheduler = createProgramRuntimeScheduler();
+  const world = [
+    atom('Watched'),
+    atom('Unrelated'),
+    atom('Scoped Watcher', [
+      "watched = explore({'thing': 'Watched'})[0]",
+      'def main():',
+      "    message({'level': 'info', 'text': 'ran'})",
+      'if changed([watched]):',
+      '    main()'
+    ].join('\n'), [], 'program')
+  ];
+
+  await scheduler.refresh(world, {
+    prepareAllIndexes: true,
+    isolateFailures: true,
+    executeExplore: async () => {
+      requestScopedReads += 1;
+      throw Object.assign(new Error('no request Agent may read Watched'), {
+        code: 'WINDOW_ACCESS_DENIED'
+      });
+    }
+  });
+  const readsAfterStartup = requestScopedReads;
+
+  const cycle = await scheduler.refresh(structuredClone(world), {
+    triggerEvent: {
+      mode: 'transform', nodes: ['Unrelated'], preparedIndexesValid: true
+    },
+    executeExplore: async () => {
+      requestScopedReads += 1;
+      throw new Error('steady-state dependency discovery must not run');
+    }
+  });
+
+  assert.equal(scheduler.triggerContractsInitialized, true);
+  assert.deepEqual(scheduler.triggerContracts.get('Scoped Watcher')?.changedThings, ['Watched']);
+  assert.equal(requestScopedReads, readsAfterStartup);
+  assert.equal(cycle.reconcileSummary.preparedIndexHit, true);
+  assert.equal(cycle.reconcileSummary.candidateProgramCount, 0);
+});
+
+test('TC-PERF-COLD-INDEX: persisted projection cannot bypass startup dependency preparation', async () => {
+  let stored = null;
+  const projectionRepository = {
+    async load() { return structuredClone(stored); },
+    async save(value) { stored = structuredClone(value); }
+  };
+  const world = [
+    atom('Watched'),
+    atom('Unrelated'),
+    atom('Scoped Watcher', [
+      "watched = explore({'thing': 'Watched'})[0]",
+      'if changed([watched]):',
+      '    pass'
+    ].join('\n'), [], 'program')
+  ];
+  await createProgramRuntimeScheduler({ projectionRepository }).refresh(world);
+  const restarted = createProgramRuntimeScheduler({ projectionRepository });
+
+  await restarted.refresh(world, {
+    prepareAllIndexes: true,
+    isolateFailures: true,
+    executeExplore: async () => {
+      throw Object.assign(new Error('request window is unavailable during startup'), {
+        code: 'WINDOW_ACCESS_DENIED'
+      });
+    }
+  });
+  const cycle = await restarted.refresh(structuredClone(world), {
+    triggerEvent: {
+      mode: 'transform', nodes: ['Unrelated'], preparedIndexesValid: true
+    }
+  });
+
+  assert.equal(restarted.triggerContractsInitialized, true);
+  assert.deepEqual(restarted.triggerContracts.get('Scoped Watcher')?.changedThings, ['Watched']);
+  assert.equal(cycle.reconcileSummary.preparedIndexHit, true);
+});
+
+test('TC-PERF-AFFECTED-CLOSURE: a missing trigger index backfills from compiled contracts without unrelated execution', async () => {
+  const executions = [];
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program, triggered }) => {
+      if (triggered) executions.push(program.path);
+      return {
+        locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+        trigger: program.path === 'Trigger'
+          ? { mode: 'transform', parameters: { nodes: ['Target'] } }
+          : null,
+        changedThings: []
+      };
+    }
+  });
+  const world = [
+    atom('Target'),
+    atom('Trigger', "trigger('transform', {'nodes': ['Target']}, main)", [], 'program'),
+    ...Array.from({ length: 100 }, (_, index) => atom(`Unrelated ${index}`, 'pass', [], 'program'))
+  ];
+  await scheduler.refresh(world);
+  scheduler.triggerIndex.clear();
+
+  const cycle = await scheduler.refresh(structuredClone(world), {
+    triggerEvent: { mode: 'transform', nodes: ['Target'] }
+  });
+
+  assert.equal(cycle.reconcileSummary.triggerIndexBackfilled, 1);
+  assert.equal(cycle.reconcileSummary.candidateProgramCount, 1);
+  assert.deepEqual(executions, ['Trigger']);
 });
 
 test('a denied trigger contract is retried under a later authorized Agent context', async () => {

@@ -245,6 +245,14 @@ test('blank ctrl-secondary landing unprojects a 3d point and starts a node landi
   assert.match(pointer, /workspace\.transaction\s*\(\s*\)/);
 });
 
+test('Web copy distinguishes relation creation, visual repositioning, and contain movement', () => {
+  const gesture = functionSource('beginEdgeGesture');
+  const release = functionSource('releasePointer');
+
+  assert.match(gesture, /关系起点[\s\S]*目标父级[\s\S]*Ctrl\s*\+\s*右键空白/);
+  assert.match(release, /仅调整视觉位置[\s\S]*未改变父级[\s\S]*未提交 Atom/);
+});
+
 test('workspace edge rendering resolves historical endpoints before drawing long tails', () => {
   const connections = functionSource('drawConnections');
   const commit = functionSource('commitWorkspaceEdit');
