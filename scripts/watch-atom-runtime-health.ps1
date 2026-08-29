@@ -3,7 +3,7 @@ param(
   [string]$HealthUrl = "http://127.0.0.1:4784/__spatial/api/health",
   [string]$StatePath = (Join-Path $env:LOCALAPPDATA "AtomGraph\runtime-health-watchdog.json"),
   [string]$MutexName = "Local\AtomGraphRuntimeHealthWatchdog",
-  [int]$StartupGraceSeconds = 30,
+  [int]$StartupGraceSeconds = 120,
   [int]$CooldownSeconds = 120,
   [int]$WaitTimeoutSeconds = 30,
   [int]$PollMilliseconds = 300

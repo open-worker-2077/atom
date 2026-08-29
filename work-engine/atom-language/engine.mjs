@@ -2,6 +2,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { diagnostic } from './errors.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
+import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 
 function mergeWarnings(...groups) {
   const warnings = [];
@@ -433,7 +434,12 @@ async function applyCreateTransform({
     nextAtoms = [...structuredClone(atoms), atom];
   } else {
     const childName = createPath.at(-1);
-    const parentPath = createPath.slice(0, -1).join('/');
+    const requestedParentPath = createPath.slice(0, -1).join('/');
+    const parentPath = requestedParentPath === WORLD_OUTSIDE_NAME
+      ? requestedParentPath
+      : requestedParentPath.startsWith(`${WORLD_OUTSIDE_NAME}/`)
+        ? requestedParentPath.slice(WORLD_OUTSIDE_NAME.length + 1)
+        : requestedParentPath;
     const parentMatches = walkAtoms(atoms).filter((match) => match.path.join('/') === parentPath);
     if (parentMatches.length !== 1) {
       return { error: diagnostic(
@@ -734,9 +740,10 @@ export async function executeAtomLanguage(options = {}) {
     ? programRunRequest(parsed.items[0])
     : null;
   let programCycle = { messages: [], locks: [], records: [] };
+  let activeRequestDrivenLocks = [];
   if (options.programScheduler) {
     try {
-      await options.programScheduler.activeRequestDrivenLocks?.(atoms);
+      activeRequestDrivenLocks = await options.programScheduler.activeRequestDrivenLocks?.(atoms) ?? [];
       const initialAgentPath = interaction.agent?.path ?? null;
       const initialAgentSecurity = initialAgentPath
         ? structuredClone(options.programScheduler.agentSecurity?.get(initialAgentPath) ?? null)
@@ -825,13 +832,14 @@ export async function executeAtomLanguage(options = {}) {
           runtimeWarnings: [...initialRuntimeWarnings, ...(settled.runtimeWarnings ?? [])]
         };
       }
-      if (projectPrograms) {
+      if (projectPrograms || passivePrograms) {
         programCycle = {
           ...programCycle,
           messages: [],
           transforms: [],
           shortcuts: [],
-          slotBodies: []
+          slotBodies: [],
+          agentRegistrations: []
         };
       }
       if ((parsed.command === 'atom' || parsed.command === 'explore')
@@ -839,7 +847,8 @@ export async function executeAtomLanguage(options = {}) {
         programCycle = {
           ...programCycle,
           shortcuts: [],
-          slotBodies: []
+          slotBodies: [],
+          agentRegistrations: []
         };
       }
       performanceTrace('program-initial-cycle', {
@@ -878,12 +887,13 @@ export async function executeAtomLanguage(options = {}) {
       { ...(fatalJumpFailure.details ?? {}), program: fatalJumpFailure.programPath }
     )]);
   }
+  const activeLocks = [...programCycle.locks, ...activeRequestDrivenLocks];
   let programLockIndex = buildProgramLockIndex({
     revision: revisionBefore,
-    results: options.bypassProgramLocks ? [] : programCycle.locks.filter((lock) => !lock.kind),
+    results: options.bypassProgramLocks ? [] : activeLocks.filter((lock) => !lock.kind),
     records: programCycle.records
   });
-  const graphLocks = programCycle.locks.filter((lock) => lock.kind);
+  const graphLocks = activeLocks.filter((lock) => lock.kind);
   let programChanged = false;
   const pendingAgentRegistrations = programCycle.agentRegistrations ?? [];
   if (pendingAgentRegistrations.length > 1) {
@@ -2159,7 +2169,7 @@ export async function executeAtomLanguage(options = {}) {
       };
     }
     const items = await Promise.all(parsed.items.map((item) => (
-      executeExploreItem(atoms, item, receiver.matcherRegistry, accessController, programLockIndex)
+      executeExploreItem(atoms, item, receiver.matcherRegistry, accessController, programLockIndex, null, { graphLocks })
     )));
     const errors = items.flatMap((item) => (
       (item.errors ?? []).map((error) => ({ ...error, itemIndex: item.index }))

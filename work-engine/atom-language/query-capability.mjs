@@ -207,8 +207,28 @@ export function describeAtom(match, includeFullDetail, options = {}) {
     result[field.rawKey] = structuredClone(field.value);
   }
   if (options.lockState) result.lockState = structuredClone(options.lockState);
+  if (options.lockStatus) result.lockStatus = structuredClone(options.lockStatus);
   if (options.resolvedThroughShortcut) result.resolvedThroughShortcut = structuredClone(options.resolvedThroughShortcut);
   return result;
+}
+
+function graphLockState(graphLocks, targetPath) {
+  const matches = (graphLocks ?? []).filter((lock) => (
+    lock?.kind === 'node' ? lock.path === targetPath
+      : lock?.kind === 'contain' && (targetPath === lock.path || targetPath.startsWith(`${lock.path}/`))
+  ));
+  if (!matches.length) return null;
+  return Object.freeze({
+    kind: matches.some((lock) => lock.kind === 'contain') ? 'contain' : 'node',
+    path: targetPath,
+    actions: [...new Set(matches.flatMap((lock) => lock.actions ?? []))].sort(),
+    labels: [...new Set(matches.flatMap((lock) => lock.labels ?? []))].sort(),
+    sourceProgramPath: matches.map((lock) => lock.sourceProgramPath).sort().join(',')
+  });
+}
+
+function compiledLockState(lockIndex, graphLocks, targetPath) {
+  return graphLockState(graphLocks, targetPath) ?? programLockState(lockIndex, targetPath);
 }
 
 function shortcutResolutionMarker(match) {
@@ -391,7 +411,7 @@ export async function executeExploreItem(
   const isProjection = (field) => !field.valuePresent || field.value === true;
   const unsupported = item.fields.filter((field) => {
     if (field.baseKey === 'thing') return false;
-    if (field.baseKey === 'situation') return !isProjection(field) || field.actions.some((action) => action.name !== 'full');
+    if (field.baseKey === 'situation') return !isProjection(field) || field.actions.some((action) => !['full', 'lock'].includes(action.name));
     if (field.baseKey === 'contain') {
       return !isProjection(field) || field.actions.some((action) => !['latitude', 'longitude'].includes(action.name));
     }
@@ -525,6 +545,9 @@ export async function executeExploreItem(
   }
   const includeFullDetail = item.fields.some((field) => field.baseKey === 'situation'
     && field.actions.some((action) => action.name === 'full'));
+  const includeLockStatus = item.fields.some((field) => field.baseKey === 'situation'
+    && field.actions.some((action) => action.name === 'lock'));
+  const graphLocks = options.graphLocks ?? [];
   const includeSupport = item.fields.some((field) => field.baseKey === 'support');
   const anchor = visibleMatches.find((match) => match.atom === selected.matches[0].atom);
   const routes = item.fields.filter((field) => field.baseKey === 'contain').flatMap((field) => (
@@ -566,7 +589,13 @@ export async function executeExploreItem(
     const described = describeAtom(describedMatch, includeFullDetail, {
       selector: shortestUniqueSelector(describedMatch, visibleMatches),
       ...(includeSupport ? { supportFields: storedSupportFields(describedMatch.atom) } : {}),
-      lockState: programLockState(lockIndex, describedMatch.path.join('/')),
+      lockState: compiledLockState(lockIndex, graphLocks, describedMatch.path.join('/')),
+      ...(includeLockStatus ? {
+        lockStatus: (() => {
+          const compiled = compiledLockState(lockIndex, graphLocks, describedMatch.path.join('/'));
+          return { active: compiled !== null, compiled };
+        })()
+      } : {}),
       ...(marker ? { resolvedThroughShortcut: marker } : {})
     });
     if (isShortcutAtom(match.atom)) described.path = marker.path;

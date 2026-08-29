@@ -74,6 +74,7 @@ export class ActionRegistry {
 export function createActionRegistry() {
   const registry = new ActionRegistry();
   registry.register('situation', 'full');
+  registry.register('situation', 'lock');
   for (const name of ['latitude', 'longitude']) {
     registry.register('contain', name, { parameter: 'integer' });
   }

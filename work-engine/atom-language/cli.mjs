@@ -130,6 +130,7 @@ const TRANSFORM_HELP = Object.freeze({
 
 const EXPLORE_HELP = Object.freeze({
   'situation\u0000full': 'situation$full（返回完整 situation；否则可只返回简介）',
+  'situation\u0000lock': 'situation$lock（只读返回当前 exact 节点的已编译锁状态，不读取或改写 backing JSON）',
   'contain\u0000latitude': 'contain$latitude+1 / contain$latitude-1（向上看一层 / 向下看一层；向下结果保留嵌套 contain；数字可调整，0 为锚点层）',
   'contain\u0000longitude': 'contain$longitude+1 / contain$longitude-1（向后看一个同级 / 向前看一个同级；数字可调整，0 为锚点）'
 });
@@ -184,6 +185,7 @@ function help() {
     '',
     'Options:',
     '  --agent AGENT      必填；exact 且唯一的 @agent 短名或业务路径',
+    '  --endpoint URL     显式指定隔离 Atom command endpoint；省略时使用本机 4784',
     '  --stdin            从标准输入读取一条完整 Atom 命令；用于变量、多行、长文本和特殊字符',
     '  --json             已弃用的兼容选项；Atom 命令结果仍为 Graph-JSON',
     '  --program-function-registry  输出 CLI/Web/Program 共用的注册函数、分层职能组 scope 与 Atom 类型契约',
@@ -323,6 +325,7 @@ function requireExecutionCapability(execute) {
 function parseCliArgs(argv) {
   let contextFile;
   let projectionFile;
+  let endpoint;
   let agent;
   let global = false;
   let explicitContext = false;
@@ -347,6 +350,19 @@ function parseCliArgs(argv) {
     }
     if (!positionalOnly && argument === '--stdin') {
       readSourceFromStdin = true;
+      continue;
+    }
+    if (!positionalOnly && argument === '--endpoint') {
+      const value = argv[index + 1];
+      if (!value) throw cliError('MISSING_CLI_OPTION_VALUE', '--endpoint 需要 URL 参数值');
+      try {
+        const parsedEndpoint = new URL(value);
+        if (!['http:', 'https:'].includes(parsedEndpoint.protocol)) throw new TypeError('protocol');
+      } catch {
+        throw cliError('INVALID_CLI_ENDPOINT', '--endpoint 必须是 http(s) command endpoint URL');
+      }
+      endpoint = value;
+      index += 1;
       continue;
     }
     if (!positionalOnly && argument === '--work-order-registry') {
@@ -398,6 +414,7 @@ function parseCliArgs(argv) {
     help: false,
     contextFile,
     projectionFile,
+    endpoint,
     agent,
     global,
     explicitContext,
@@ -532,6 +549,9 @@ function graphMatch(match, hint = null, boundary = null) {
   }
   if (match.lockState) {
     entries.push(graphEntry('lock~active', true, match.lockState));
+  }
+  if (match.lockStatus) {
+    entries.push(graphEntry('lock~status', true, match.lockStatus));
   }
   if (match.resolvedThroughShortcut) {
     const marker = match.resolvedThroughShortcut;
@@ -976,7 +996,10 @@ export async function runAtomCli(argv = [], overrides = {}) {
           'Atom CLI requires a work-order registry capability'
         );
       }
-      stdout.write(`${JSON.stringify(await loadRegistry(), null, 2)}\n`);
+      const endpoint = parsed.endpoint
+        ? new URL('/__atom/api/work-order-registry', parsed.endpoint).toString()
+        : undefined;
+      stdout.write(`${JSON.stringify(await loadRegistry(endpoint), null, 2)}\n`);
       return 0;
     }
     if (parsed.programFunctionRegistry) {
@@ -994,7 +1017,10 @@ export async function runAtomCli(argv = [], overrides = {}) {
           'Atom CLI requires a Program function registry capability'
         );
       }
-      stdout.write(`${JSON.stringify(await loadRegistry(), null, 2)}\n`);
+      const endpoint = parsed.endpoint
+        ? new URL('/__atom/api/program-function-registry', parsed.endpoint).toString()
+        : undefined;
+      stdout.write(`${JSON.stringify(await loadRegistry(endpoint), null, 2)}\n`);
       return 0;
     }
     if (parsed.readSourceFromStdin && parsed.source.length) {
@@ -1031,6 +1057,10 @@ export async function runAtomCli(argv = [], overrides = {}) {
     }
     const interactive = overrides.interactive
       ?? (parsed.source.length === 0 && Boolean(stdin.isTTY && stdout.isTTY));
+    const execute = requireExecutionCapability(overrides.execute);
+    const executeAtEndpoint = parsed.endpoint
+      ? (options) => execute(options, parsed.endpoint)
+      : execute;
     if (interactive) {
       return runAtomSession({
         stdin,
@@ -1039,7 +1069,7 @@ export async function runAtomCli(argv = [], overrides = {}) {
         contextFile,
         projectionFile,
         receiverOptions: overrides.receiverOptions,
-        execute: overrides.execute,
+        execute: executeAtEndpoint,
         terminal: overrides.terminal,
         interaction
       });
@@ -1052,7 +1082,7 @@ export async function runAtomCli(argv = [], overrides = {}) {
     const source = parsed.readSourceFromStdin
       ? await readCommandSource(stdin)
       : (parsed.source.length ? parsed.source.join(' ') : 'atom');
-    const result = await requireExecutionCapability(overrides.execute)({
+    const result = await executeAtEndpoint({
       source,
       contextFile,
       projectionFile,
