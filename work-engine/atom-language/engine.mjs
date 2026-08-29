@@ -2159,7 +2159,8 @@ export async function executeAtomLanguage(options = {}) {
     projectionRebase = null,
     changedPaths = projectionRebase?.changedPaths ?? null,
     affectedAtoms = null,
-    localizedSituationValidation = false
+    localizedSituationValidation = false,
+    preparedRuntimeRecordsPromise = null
   } = {}) {
     const effectiveRegistrationChange = registrationChange
       ?? (windowRecycled ? 'window-recycle' : null);
@@ -2233,6 +2234,17 @@ export async function executeAtomLanguage(options = {}) {
       const settleWarnings = rebased?.persisted === true
         ? []
         : await settleContextFreeProgramProjectionForWorld(candidateAtoms);
+      if (preparedRuntimeRecordsPromise) {
+        try {
+          const preparedRuntimeRecords = await preparedRuntimeRecordsPromise;
+          await options.programScheduler?.installPreparedRuntimeIndexes?.(
+            candidateAtoms,
+            preparedRuntimeRecords
+          );
+        } catch {
+          // A failed performance cache never changes an already committed business result.
+        }
+      }
       await recordTransformStage('program-projection', projectionSettleStartedAt, {
         candidateProgramCount: 0,
         executedProgramCount: 0
@@ -2842,6 +2854,11 @@ export async function executeAtomLanguage(options = {}) {
     const canRebaseProjection = programTransformLogs.length === 0
       && postRefresh.transformLogs.length === 0
       && postRefresh.pathChanges.length === 0;
+    const preparedRuntimeRecordsPromise = canRebaseProjection
+      ? Promise.resolve().then(() => (
+          options.programScheduler?.prepareRuntimeRecords?.(nextAtoms) ?? null
+        ))
+      : null;
     await commitChangedGraph(nextAtoms, canRebaseProjection ? {
       projectionRebase: {
         previousAtoms: atoms,
@@ -2853,7 +2870,8 @@ export async function executeAtomLanguage(options = {}) {
         ].filter(Boolean))]
       },
       localizedSituationValidation: !programSurfaceChanged
-        && isLocalizedSituationTransform(item)
+        && isLocalizedSituationTransform(item),
+      preparedRuntimeRecordsPromise
     } : {
       changedPaths: [...new Set([
         transformed.sourcePath,

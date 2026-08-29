@@ -117,6 +117,13 @@ test('prepared runtime indexes are reusable only for the exact authoritative wor
     scheduler.hasPreparedIndexesForRevision(revisionOfWorldFacts(changedWorld), changedWorld),
     false
   );
+
+  const prepared = scheduler.prepareRuntimeRecords(changedWorld);
+  await scheduler.installPreparedRuntimeIndexes(changedWorld, prepared);
+  assert.equal(
+    scheduler.hasPreparedIndexesForRevision(revisionOfWorldFacts(changedWorld), changedWorld),
+    true
+  );
 });
 
 test('a literal path lock below a non-Agent synthetic test root recompiles into the active index', async () => {

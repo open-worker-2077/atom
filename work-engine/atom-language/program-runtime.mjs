@@ -1467,6 +1467,22 @@ export class ProgramRuntimeScheduler {
     );
   }
 
+  prepareRuntimeRecords(atoms) {
+    return worldRecords(atoms);
+  }
+
+  async installPreparedRuntimeIndexes(atoms, records) {
+    if (worldRecords(atoms) !== records) {
+      throw Object.assign(new Error('Prepared runtime records do not belong to this world snapshot'), {
+        code: 'PREPARED_RUNTIME_RECORDS_MISMATCH'
+      });
+    }
+    await this.rebuildAgentSecurity(atoms);
+    await this.rebuildRequestDrivenLocks(atoms);
+    this.latestRecords = records;
+    return true;
+  }
+
   async registerAgentWindow({ sourceProgramPath, labels, functionScopes, functions }) {
     this.agentSecurity.set(sourceProgramPath, {
       labels: [...labels], functionScopes: structuredClone(functionScopes), functions: [...functions]
