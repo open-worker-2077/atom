@@ -245,11 +245,7 @@ function shortcutResolutionMarker(match) {
   };
 }
 
-export function prepareExploreWorld(atoms) {
-  if (Object.isFrozen(atoms) && preparedExploreSnapshots.has(atoms)) {
-    return preparedExploreSnapshots.get(atoms);
-  }
-  const allMatches = walkAtoms(atoms, { virtualRoot: true });
+function prepareExploreMatches(allMatches) {
   const exactIndex = new Map();
   const add = (selector, match) => {
     if (!indexableSelector(selector)) return;
@@ -264,7 +260,14 @@ export function prepareExploreWorld(atoms) {
     }
     if (!match.virtual) add(`${WORLD_OUTSIDE_NAME}/${match.path.join('/')}`, match);
   }
-  const prepared = { allMatches, exactIndex };
+  return { allMatches, exactIndex };
+}
+
+export function prepareExploreWorld(atoms) {
+  if (Object.isFrozen(atoms) && preparedExploreSnapshots.has(atoms)) {
+    return preparedExploreSnapshots.get(atoms);
+  }
+  const prepared = prepareExploreMatches(walkAtoms(atoms, { virtualRoot: true }));
   if (Object.isFrozen(atoms)) preparedExploreSnapshots.set(atoms, prepared);
   return prepared;
 }

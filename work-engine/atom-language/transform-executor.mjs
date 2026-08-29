@@ -203,8 +203,8 @@ function canonicalPartnerObject(source, target, matches, explicitPath, byName = 
   return sameName.length === 1 ? targetName : target.path.join('/');
 }
 
-function rewritePartnerBindings(atoms, bindings) {
-  const matches = walkAtoms(atoms);
+function rewritePartnerBindings(atoms, bindings, preparedMatches = null) {
+  const matches = preparedMatches ?? walkAtoms(atoms);
   const lookup = supportLookup(matches);
   const byAtom = new Map(matches.map((match) => [match.atom, match]));
   const changedPaths = new Set();
@@ -1137,12 +1137,12 @@ export async function applyTransform({
   }
 
   const operation = structural.operation;
-  const preservePreparedRelations = () => {
+  const preservePreparedRelations = (matches = null) => {
     if (inheritedRelationBindings && operation?.command.name !== 'cpy') {
       preparedTransformRelations.set(nextAtoms, {
         rootName,
-        matches: null,
-        exactIndex: null,
+        matches,
+        exactIndex: matches ? createExactTransformIndexFromMatches(matches) : null,
         bindings: inheritedRelationBindings
       });
     }
@@ -1163,11 +1163,11 @@ export async function applyTransform({
     const error = applyFields(selected.match.atom, item.fields, nextAtoms);
     let relationPaths = [];
     const shortcutPaths = [];
+    const postMatches = error ? null : walkAtoms(nextAtoms);
     if (!error) {
       if (changedFields.has('support')) {
-        const currentMatches = walkAtoms(nextAtoms);
-        const byAtom = new Map(currentMatches.map((match) => [match.atom, match]));
-        const outgoing = capturePartnerBindings(nextAtoms, rootName)
+        const byAtom = new Map(postMatches.map((match) => [match.atom, match]));
+        const outgoing = capturePartnerBindings(nextAtoms, rootName, null, postMatches)
           .filter((binding) => binding.sourceAtom === selected.match.atom);
         for (const binding of outgoing) {
           const relationTarget = byAtom.get(binding.targetAtom);
@@ -1183,18 +1183,23 @@ export async function applyTransform({
         }
       }
       if (partnerBindings.length) {
-        relationPaths.push(...rewritePartnerBindings(nextAtoms, partnerBindings));
+        relationPaths.push(...rewritePartnerBindings(nextAtoms, partnerBindings, postMatches));
       }
       relationPaths = [...new Set(relationPaths)];
     }
     const resultPath = rewritesPaths
-      ? walkAtoms(nextAtoms).find((match) => match.atom === selected.match.atom)?.path.join('/') ?? null
+      ? postMatches.find((match) => match.atom === selected.match.atom)?.path.join('/') ?? null
       : sourcePath;
     if (!error && resultPath && resultPath !== sourcePath) {
-      rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }], shortcutPaths);
+      rewriteShortcutTargetPaths(
+        nextAtoms,
+        [{ sourcePath, resultPath }],
+        shortcutPaths,
+        postMatches
+      );
     }
     if (error) return rejectAfterMutation(error);
-    preservePreparedRelations();
+    preservePreparedRelations(postMatches);
     return {
           atoms: nextAtoms,
           resultName: storedField(selected.match.atom, 'thing').value,
@@ -1202,6 +1207,7 @@ export async function applyTransform({
           resultPath,
           relationPaths,
           shortcutPaths,
+          matches: postMatches,
           changed: copiesOnlyAncestry
             ? !isDeepStrictEqual(copyNonContainState(selected.match.atom), selectedBefore)
             : JSON.stringify(selected.match.atom) !== selectedBefore
@@ -1277,13 +1283,16 @@ export async function applyTransform({
     } else {
       containerOf(nextAtoms, target).splice(target.index, 1);
       destinationChildren.push(target.atom);
-      relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings);
     }
-    const resultMatch = walkAtoms(nextAtoms).find((match) => match.atom === resultAtom);
+    const postMatches = walkAtoms(nextAtoms);
+    if (command.name !== 'cpy') {
+      relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings, postMatches);
+    }
+    const resultMatch = postMatches.find((match) => match.atom === resultAtom);
     const resultPath = resultMatch?.path.join('/') ?? sourcePath;
     const shortcutPaths = [];
-    rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }], shortcutPaths);
-    preservePreparedRelations();
+    rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }], shortcutPaths, postMatches);
+    preservePreparedRelations(postMatches);
     return {
       atoms: nextAtoms,
       resultName: nameField.value,
@@ -1291,6 +1300,7 @@ export async function applyTransform({
       resultPath,
       relationPaths,
       shortcutPaths,
+      matches: postMatches,
       changed: true
     };
   }
@@ -1321,17 +1331,19 @@ export async function applyTransform({
     }
     originalContainer.splice(target.index, 1);
     immediateChildren(backup.match.atom).push(target.atom);
-    const relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings);
+    const postMatches = walkAtoms(nextAtoms);
+    const relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings, postMatches);
     const shortcutPaths = [];
-    breakShortcutTargets(nextAtoms, sourcePath, shortcutPaths);
-    preservePreparedRelations();
+    breakShortcutTargets(nextAtoms, sourcePath, shortcutPaths, postMatches);
+    preservePreparedRelations(postMatches);
     return {
       atoms: nextAtoms,
       resultName: targetName,
       sourcePath,
-      resultPath: walkAtoms(nextAtoms).find((match) => match.atom === target.atom)?.path.join('/') ?? null,
+      resultPath: postMatches.find((match) => match.atom === target.atom)?.path.join('/') ?? null,
       relationPaths,
       shortcutPaths,
+      matches: postMatches,
       changed: true,
       logRecord: {
         id: crypto.randomUUID(),
@@ -1387,15 +1399,17 @@ export async function applyTransform({
     }
     containerOf(nextAtoms, target).splice(target.index, 1);
     destination.splice(Math.min(discard.originalIndex, destination.length), 0, target.atom);
-    const relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings);
-    preservePreparedRelations();
+    const postMatches = walkAtoms(nextAtoms);
+    const relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings, postMatches);
+    preservePreparedRelations(postMatches);
     return {
       atoms: nextAtoms,
       resultName: targetName,
       sourcePath,
-      resultPath: walkAtoms(nextAtoms).find((match) => match.atom === target.atom)?.path.join('/') ?? null,
+      resultPath: postMatches.find((match) => match.atom === target.atom)?.path.join('/') ?? null,
       relationPaths,
       shortcutPaths: [],
+      matches: postMatches,
       changed: true,
       logRecord: {
         id: crypto.randomUUID(),
