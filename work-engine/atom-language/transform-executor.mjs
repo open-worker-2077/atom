@@ -234,7 +234,9 @@ const preparedTransformRelations = new WeakMap();
 export function prepareTransformRelationIndex(atoms, rootName) {
   const prepared = preparedTransformRelations.get(atoms);
   if (prepared?.rootName === rootName && prepared.matches && prepared.exactIndex) return prepared;
-  const matches = walkAtoms(atoms);
+  const matches = prepared?.rootName === rootName && prepared.matches
+    ? prepared.matches
+    : walkAtoms(atoms);
   const next = {
     rootName,
     matches,
@@ -1142,7 +1144,7 @@ export async function applyTransform({
       preparedTransformRelations.set(nextAtoms, {
         rootName,
         matches,
-        exactIndex: matches ? createExactTransformIndexFromMatches(matches) : null,
+        exactIndex: null,
         bindings: inheritedRelationBindings
       });
     }

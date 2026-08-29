@@ -2855,9 +2855,10 @@ export async function executeAtomLanguage(options = {}) {
       && postRefresh.transformLogs.length === 0
       && postRefresh.pathChanges.length === 0;
     const preparedRuntimeRecordsPromise = canRebaseProjection
-      ? Promise.resolve().then(() => (
-          options.programScheduler?.prepareRuntimeRecords?.(nextAtoms) ?? null
-        ))
+      ? Promise.resolve().then(() => {
+          prepareTransformRelationIndex(nextAtoms, path.basename(contextFile));
+          return options.programScheduler?.prepareRuntimeRecords?.(nextAtoms) ?? null;
+        })
       : null;
     await commitChangedGraph(nextAtoms, canRebaseProjection ? {
       projectionRebase: {
