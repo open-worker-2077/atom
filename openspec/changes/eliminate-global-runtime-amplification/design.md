@@ -74,6 +74,12 @@ Authoritative durability gates success; disposable Graph/Spatial file synchroniz
 
 Focused tests assert affected paths, candidate counts, unrelated-domain skips, Patch shape, rollback, and legacy compatibility. Shared-local-world acceptance separately measures `<5s` latency. Work-count assertions prevent a fast test machine from hiding renewed global amplification; wall-clock evidence verifies user experience.
 
+### 8. Public CLI entry remains on the resident runtime boundary
+
+After 4784 resolves and accepts an Agent selector, interactive entry requests its bounded context through the same command endpoint. The CLI does not reopen `atom.json`, rebuild Graph JSON, or independently recreate compatibility authority. Local direct-fact formatting remains available only to injected maintenance/test runtimes that explicitly own the context capability.
+
+Alternative considered: pass the compatibility manifest into every public CLI process. Rejected because it duplicates runtime authority and preserves a second fact/projection path at the user entry.
+
 ## Risks / Trade-offs
 
 - **[Incomplete dependency index misses an effect]** → Compare indexed selection with a diagnostic shadow calculation in focused tests and maintenance verification; fail closed for authorization/lock uncertainty while keeping the scan local.
