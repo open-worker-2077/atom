@@ -88,7 +88,7 @@ export function createJsonWorldRepository({ file, worldId, initialFacts }) {
       throw problem('INVALID_WORLD_REVISION', 'The next snapshot revision does not match its facts');
     }
     await writeJsonAtomically(file, nextSnapshot.facts);
-    return read();
+    return nextSnapshot;
   }
 
   return Object.freeze({ file, worldId, read, compareAndSwap });

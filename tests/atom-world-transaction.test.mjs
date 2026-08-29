@@ -87,6 +87,54 @@ test('a repeated command id is idempotent and returns the original receipt', asy
   assert.equal((await journalRepository.readState()).receipts.length, 1);
 });
 
+test('a prepared transition can skip cloning unused world and payload inputs', async (t) => {
+  const { coordinator, worldRepository } = await fixture(t);
+  const initial = await worldRepository.read();
+  const nextFacts = [{ name: 'prepared' }];
+  let receivedArguments = null;
+
+  await coordinator.execute({
+    command: command('cmd-prepared-transition', initial.revision),
+    transitionReadsSnapshot: false,
+    transition: (...args) => {
+      receivedArguments = args;
+      return { facts: nextFacts };
+    }
+  });
+
+  assert.deepEqual(receivedArguments, []);
+  assert.deepEqual((await worldRepository.read()).facts, nextFacts);
+});
+
+test('a trusted read-only transition reuses the repository snapshot by reference', async (t) => {
+  const files = await fixture(t);
+  let lastRead = null;
+  const worldRepository = {
+    read: async () => {
+      lastRead = await files.worldRepository.read();
+      return lastRead;
+    },
+    compareAndSwap: (request) => files.worldRepository.compareAndSwap(request)
+  };
+  const coordinator = createCommitCoordinator({
+    worldRepository,
+    journalRepository: files.journalRepository
+  });
+  const initial = await files.worldRepository.read();
+  let transitionSnapshot = null;
+
+  await coordinator.execute({
+    command: command('cmd-trusted-transition', initial.revision),
+    transitionInputMode: 'trusted-readonly',
+    transition: (snapshot) => {
+      transitionSnapshot = snapshot;
+      return { facts: [{ name: 'trusted' }] };
+    }
+  });
+
+  assert.equal(transitionSnapshot, lastRead);
+});
+
 test('transaction history appends compact events and content-addressed snapshots without rewriting legacy history', async (t) => {
   const { coordinator, worldRepository, journalRepository, journalFile } = await fixture(t);
   const initial = await worldRepository.read();
@@ -278,6 +326,27 @@ test('atomic JSON replacement retries a transient Windows rename refusal', async
   });
 
   assert.equal(renameAttempts, 3);
+});
+
+test('compare-and-swap returns the prepared snapshot without reading and cloning it again', async (t) => {
+  const { worldRepository } = await fixture(t);
+  const initial = await worldRepository.read();
+  const facts = [{ name: 'prepared-once' }];
+  const nextSnapshot = Object.freeze({
+    contract: 'atom.world-snapshot',
+    version: 1,
+    worldId: 'primary',
+    revision: revisionOf(facts),
+    facts
+  });
+
+  const committed = await worldRepository.compareAndSwap({
+    expectedRevision: initial.revision,
+    nextSnapshot
+  });
+
+  assert.equal(committed, nextSnapshot);
+  assert.deepEqual(JSON.parse(await fs.readFile(worldRepository.file, 'utf8')), facts);
 });
 
 test('recovery completes a prepared transaction interrupted before the world write', async (t) => {

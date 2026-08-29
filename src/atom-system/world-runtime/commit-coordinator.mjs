@@ -118,7 +118,12 @@ export function createCommitCoordinator({
     return serialize(recoverUnsafe);
   }
 
-  async function executeUnsafe({ command: rawCommand, transition }) {
+  async function executeUnsafe({
+    command: rawCommand,
+    transition,
+    transitionReadsSnapshot = true,
+    transitionInputMode = transitionReadsSnapshot ? 'isolated-copy' : 'none'
+  }) {
       const command = validateWorldCommandEnvelope(rawCommand);
       const existingReceipt = await journalRepository.findReceipt(command.commandId);
       if (existingReceipt) return existingReceipt;
@@ -127,6 +132,9 @@ export function createCommitCoordinator({
       if (pending) return recoverRecord(pending);
       if (typeof transition !== 'function') {
         throw problem('INVALID_WORLD_TRANSITION', 'transition must be a function');
+      }
+      if (!['isolated-copy', 'trusted-readonly', 'none'].includes(transitionInputMode)) {
+        throw problem('INVALID_WORLD_TRANSITION', 'transitionInputMode is invalid');
       }
 
       const before = await worldRepository.read();
@@ -137,7 +145,11 @@ export function createCommitCoordinator({
         });
       }
 
-      const output = await transition(structuredClone(before), structuredClone(command.payload));
+      const output = transitionInputMode === 'none'
+        ? await transition()
+        : transitionInputMode === 'trusted-readonly'
+          ? await transition(before, command.payload)
+          : await transition(structuredClone(before), structuredClone(command.payload));
       if (!output || !Array.isArray(output.facts)) {
         throw problem('INVALID_WORLD_TRANSITION', 'transition must return a facts array');
       }
@@ -223,6 +235,7 @@ export function createCommitCoordinator({
       }
       return executeUnsafe({
         command,
+        transitionReadsSnapshot: false,
         transition: () => target.historyMode === 'local-patch'
           ? ({
               facts: applyLocalWorldPatch(current.facts, target.inversePatch),
