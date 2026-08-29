@@ -1926,6 +1926,9 @@ export class ProgramRuntimeScheduler {
     const operations = operationEntries.map(async ({ program, slotInvocation }) => {
       const dormantKey = programSetFingerprint([program], isolateFailures, records);
       const dormantFailure = this.dormantFailures.get(dormantKey) ?? null;
+      const reuseDormantContextFailure = dormantFailure?.contextDependent === true
+        && Array.isArray(options.reuseDormantContextFailureCodes)
+        && options.reuseDormantContextFailureCodes.includes(dormantFailure.failure?.code);
       const previousEntry = options.force === true
         ? null
         : reusableProgramCandidates(
@@ -1944,7 +1947,9 @@ export class ProgramRuntimeScheduler {
         && options.force !== true
         && !forcedByTrigger
         && !eventNodes.has(program.path)
-        && !(dormantFailure.contextDependent === true && scopePath)) {
+        && !(dormantFailure.contextDependent === true
+          && scopePath
+          && !reuseDormantContextFailure)) {
         return {
           programPath: program.path,
           result: {
