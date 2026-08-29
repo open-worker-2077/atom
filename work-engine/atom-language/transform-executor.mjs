@@ -894,6 +894,7 @@ export async function applyTransform({
   };
   const structural = structuralCommand(item);
   if (structural.error) return structural;
+  const restoresFromKernelBackup = structural.operation?.command.name === 'rst';
   const nameCommands = item.fields
     .filter((field) => field.baseKey === 'thing')
     .flatMap((field) => field.commands ?? []);
@@ -933,6 +934,7 @@ export async function applyTransform({
     changedFields.add('contain');
   }
   for (const field of changedFields) {
+    if (restoresFromKernelBackup) continue;
     const decision = await authorize(selected.match, 'write', field);
     if (decision.decision !== 'allow') {
       if (decision.matched) {
@@ -950,7 +952,8 @@ export async function applyTransform({
   }
   const selectedAtoms = new Set([selected.match.atom]);
   const changesSubtree = rewritesPaths || changedFields.has('contain');
-  if (changesSubtree && (immediateChildren(selected.match.atom)?.length ?? 0) > 0) {
+  if (!restoresFromKernelBackup && changesSubtree
+    && (immediateChildren(selected.match.atom)?.length ?? 0) > 0) {
     for (const match of walkAtoms([selected.match.atom])) selectedAtoms.add(match.atom);
     for (const descendant of walkAtoms(nextAtoms)) {
       if (descendant.atom !== selected.match.atom
@@ -1168,9 +1171,8 @@ export async function applyTransform({
     }
     const backup = backupMatch(nextAtoms);
     if (backup.error) return backup;
-    if ((await authorize(backup.match, 'write')).decision !== 'allow') {
-      return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权访问备份位置；请反馈派发方') };
-    }
+    // Restore is the inverse kernel relocation. Authority is checked against
+    // the recorded original destination below, not against backup storage.
     if (target.parent?.atom !== backup.match.atom) {
       return { error: diagnostic('RESTORE_TARGET_NOT_IN_BACKUP', '恢复目标不在默认备份仓') };
     }
