@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
   return {
@@ -148,11 +149,14 @@ test('an unrelated situation edit rebases the context-free projection without re
 
   const result = await scheduler.rebaseContextFreeProjection(before, after, {
     changedPaths: ['Unrelated'],
-    isolateFailures: true
+    isolateFailures: true,
+    previousRevision: revisionOfWorldFacts(before),
+    revision: revisionOfWorldFacts(after)
   });
   const restored = await scheduler.current(after, { isolateFailures: true });
 
   assert.equal(result.persisted, true);
+  assert.equal(result.local, true);
   assert.equal(executions, 1);
   assert.deepEqual(restored.exploreReadPaths, ['Target']);
 });

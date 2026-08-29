@@ -86,6 +86,29 @@ function graphTypesAtPath(atoms, targetPath) {
   return oneStoredField(match.atom, 'thing')?.parsed.types.map((type) => type.raw) ?? [];
 }
 
+function exactMatchAtPath(atoms, targetPath) {
+  const parts = `${targetPath ?? ''}`.split('/').filter(Boolean);
+  let children = atoms;
+  let parent = null;
+  const pathParts = [];
+  for (const part of parts) {
+    const matches = children.flatMap((atom, index) => (
+      oneStoredField(atom, 'thing')?.value === part ? [{ atom, index }] : []
+    ));
+    if (matches.length !== 1) return null;
+    pathParts.push(part);
+    const match = {
+      atom: matches[0].atom,
+      index: matches[0].index,
+      parent,
+      path: [...pathParts]
+    };
+    parent = match;
+    children = oneStoredField(match.atom, 'contain')?.value ?? [];
+  }
+  return parent;
+}
+
 function newlyAddedProgramPaths(beforeAtoms, afterAtoms) {
   const previousPaths = new Set(walkAtoms(beforeAtoms).map((match) => match.path.join('/')));
   return walkAtoms(afterAtoms)
@@ -2025,8 +2048,9 @@ export async function executeAtomLanguage(options = {}) {
     const effectiveRegistrationChange = registrationChange
       ?? (windowRecycled ? 'window-recycle' : null);
     const commitStartedAt = performance.now();
+    let receipt = null;
     try {
-      const receipt = await persistChangedGraph({
+      receipt = await persistChangedGraph({
         atoms: candidateAtoms,
         contextFile,
         projectionFile,
@@ -2072,12 +2096,18 @@ export async function executeAtomLanguage(options = {}) {
     }
     try {
       let rebased = null;
+      const projectionSettleStartedAt = performance.now();
       if (projectionRebase && options.programScheduler?.rebaseContextFreeProjection) {
         try {
           rebased = await options.programScheduler.rebaseContextFreeProjection(
             projectionRebase.previousAtoms,
             candidateAtoms,
-            { changedPaths: projectionRebase.changedPaths, isolateFailures: true }
+            {
+              changedPaths: projectionRebase.changedPaths,
+              isolateFailures: true,
+              previousRevision: receipt?.beforeRevision ?? revisionBefore,
+              revision: receipt?.afterRevision ?? revisionOf(candidateAtoms)
+            }
           );
         } catch {
           rebased = null;
@@ -2086,6 +2116,12 @@ export async function executeAtomLanguage(options = {}) {
       const settleWarnings = rebased?.persisted === true
         ? []
         : await settleContextFreeProgramProjectionForWorld(candidateAtoms);
+      performanceTrace('program-projection-settle', {
+        elapsedMs: Math.round(performance.now() - projectionSettleStartedAt),
+        rebased: rebased?.persisted === true,
+        local: rebased?.local === true,
+        reason: rebased?.reason ?? null
+      });
       interactionWarnings.push(...settleWarnings.map((warning) => diagnostic(
         warning.code ?? 'PROGRAM_RUNTIME_WARNING',
         warning.message ?? 'Program runtime reported a recoverable warning',
@@ -2098,6 +2134,7 @@ export async function executeAtomLanguage(options = {}) {
         { cause: error.code ?? error.name ?? 'PROGRAM_PROJECTION_SETTLE_FAILED' }
       ));
     }
+    return receipt;
   }
 
   function rewritePath(initialPath, pathChanges) {
@@ -2506,9 +2543,19 @@ export async function executeAtomLanguage(options = {}) {
       }
     }
     const finalCreatePath = rewritePath(created.resultPath, postRefresh.pathChanges);
-    await commitChangedGraph(nextAtoms, {
-      changedPaths: [created.resultPath].filter(Boolean)
-    });
+    const createChangedPaths = [
+      created.resultPath,
+      ...postRefresh.pathChanges.flatMap((change) => [change.sourcePath, change.resultPath])
+    ].filter(Boolean);
+    const canRebaseCreateProjection = programTransformLogs.length === 0
+      && postRefresh.transformLogs.length === 0
+      && postRefresh.pathChanges.length === 0;
+    const commitReceipt = await commitChangedGraph(nextAtoms, canRebaseCreateProjection ? {
+      projectionRebase: {
+        previousAtoms: atoms,
+        changedPaths: createChangedPaths
+      }
+    } : { changedPaths: createChangedPaths });
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
       await appendTransformLog(contextFile, record);
     }
@@ -2521,10 +2568,10 @@ export async function executeAtomLanguage(options = {}) {
       contextFile,
       projectionFile,
       revisionBefore,
-      revisionAfter: revisionOf(nextAtoms),
+      revisionAfter: commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
+        ?? revisionOf(nextAtoms),
       result: describeAtom(
-        walkAtoms(nextAtoms).find((match) => match.path.join('/') === finalCreatePath)
-          ?? walkAtoms(nextAtoms).at(-1),
+        exactMatchAtPath(nextAtoms, finalCreatePath) ?? walkAtoms(nextAtoms).at(-1),
         false
       ),
       warnings: mergeWarnings(interactionWarnings),
@@ -2659,8 +2706,7 @@ export async function executeAtomLanguage(options = {}) {
     }
   }
   if (changed) {
-    const canRebaseProjection = !transformChangesStructure(item)
-      && programTransformLogs.length === 0
+    const canRebaseProjection = programTransformLogs.length === 0
       && postRefresh.transformLogs.length === 0
       && postRefresh.pathChanges.length === 0;
     await commitChangedGraph(nextAtoms, canRebaseProjection ? {
@@ -2682,6 +2728,7 @@ export async function executeAtomLanguage(options = {}) {
         ...postRefresh.pathChanges.flatMap((change) => [change.sourcePath, change.resultPath])
       ].filter(Boolean))]
     });
+    const auditStartedAt = performance.now();
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
       await appendTransformLog(contextFile, record);
     }
@@ -2692,7 +2739,11 @@ export async function executeAtomLanguage(options = {}) {
         revisionAfter
       });
     }
+    performanceTrace('transform-audit-append', {
+      elapsedMs: Math.round(performance.now() - auditStartedAt)
+    });
   }
+  const resultLookupStartedAt = performance.now();
   const finalResultPath = rewritePath(
     transformed.resultPath ?? transformed.resultName,
     postRefresh.pathChanges
@@ -2700,6 +2751,9 @@ export async function executeAtomLanguage(options = {}) {
   const resultMatch = walkAtoms(nextAtoms).find((match) => (
     match.path.join('/') === finalResultPath
   ));
+  performanceTrace('transform-result-lookup', {
+    elapsedMs: Math.round(performance.now() - resultLookupStartedAt)
+  });
   return {
     ok: true,
     language: 'atom',

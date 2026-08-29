@@ -789,21 +789,52 @@ export function transformLogFileFor(contextFile) {
   return path.join(path.dirname(contextFile), 'atom.transform-log.json');
 }
 
-async function readTransformLog(contextFile) {
+export function transformLogEventFileFor(contextFile) {
+  return path.join(`${transformLogFileFor(contextFile)}.d`, 'events.jsonl');
+}
+
+const transformLogCache = new Map();
+
+async function readTransformLogEvents(contextFile) {
   try {
-    const value = JSON.parse(await fs.readFile(transformLogFileFor(contextFile), 'utf8'));
-    return Array.isArray(value) ? value : [];
+    const text = await fs.readFile(transformLogEventFileFor(contextFile), 'utf8');
+    return text.split('\n').filter(Boolean).map((line) => JSON.parse(line));
   } catch (error) {
     if (error.code === 'ENOENT') return [];
     throw error;
   }
 }
 
+export async function readTransformLog(contextFile) {
+  if (transformLogCache.has(contextFile)) {
+    return structuredClone(transformLogCache.get(contextFile));
+  }
+  let legacy;
+  try {
+    const value = JSON.parse(await fs.readFile(transformLogFileFor(contextFile), 'utf8'));
+    legacy = Array.isArray(value) ? value : [];
+  } catch (error) {
+    if (error.code === 'ENOENT') legacy = [];
+    else throw error;
+  }
+  const entries = [...legacy, ...await readTransformLogEvents(contextFile)];
+  transformLogCache.set(contextFile, entries);
+  return structuredClone(entries);
+}
+
 export async function appendTransformLog(contextFile, record) {
-  const file = transformLogFileFor(contextFile);
-  const entries = await readTransformLog(contextFile);
-  entries.push(record);
-  await fs.writeFile(file, `${JSON.stringify(entries, null, 2)}\n`, 'utf8');
+  const file = transformLogEventFileFor(contextFile);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const handle = await fs.open(file, 'a');
+  try {
+    await handle.writeFile(`${JSON.stringify(record)}\n`, 'utf8');
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  if (transformLogCache.has(contextFile)) {
+    transformLogCache.get(contextFile).push(structuredClone(record));
+  }
   return file;
 }
 

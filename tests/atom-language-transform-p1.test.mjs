@@ -8,6 +8,7 @@ import { parseGraphDocument } from '../cli/lib/graph-json.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { writeAtomGraphProjection } from '../work-engine/atom-language/context-store.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
+import { readTransformLog } from '../work-engine/atom-language/transform-executor.mjs';
 import {
   TRANSFORM_COMMANDS,
   parseTransformKey
@@ -211,8 +212,7 @@ test('move, copy, discard, and restore use explicit thing-axis commands and reve
   assert.equal(discarded.ok, true, JSON.stringify(discarded.errors));
   const backup = findAtom(await readAtoms(files.contextFile), '默认备份仓');
   assert.ok(findAtom(backup.contain, '目标'));
-  const logFile = path.join(files.directory, 'atom.transform-log.json');
-  const log = JSON.parse(await fs.readFile(logFile, 'utf8'));
+  const log = await readTransformLog(files.contextFile);
   assert.equal(log.at(-1).operation, 'discard');
   assert.equal(log.at(-1).target, '目标');
   assert.equal(Object.hasOwn(findAtom(backup.contain, '目标'), 'transform_log'), false);

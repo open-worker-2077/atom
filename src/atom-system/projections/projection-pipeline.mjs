@@ -26,7 +26,11 @@ function validateProjectors(projectors) {
   return Object.freeze(projectors.map((projector) => Object.freeze({ ...projector })));
 }
 
-export function createProjectionPipeline({ projectors: inputProjectors, repository }) {
+export function createProjectionPipeline({
+  projectors: inputProjectors,
+  repository,
+  shareImmutableSnapshot = false
+}) {
   const projectors = validateProjectors(inputProjectors);
   if (!repository?.replaceBatch || !repository?.readCurrent) {
     throw problem('INVALID_PROJECTION_REPOSITORY', 'Projection repository must replace and read batches');
@@ -60,11 +64,15 @@ export function createProjectionPipeline({ projectors: inputProjectors, reposito
           projectionValues[projector.id] = projections[projector.id].value;
           continue;
         }
-        const isolatedSnapshot = structuredClone(snapshot);
+        const isolatedSnapshot = shareImmutableSnapshot ? snapshot : structuredClone(snapshot);
         const value = await projector.project(isolatedSnapshot, Object.freeze({
           affectedPaths: affectedPaths ? [...affectedPaths] : null,
-          previousProjection: previousProjection ? structuredClone(previousProjection) : null,
-          projections: structuredClone(projections),
+          previousProjection: previousProjection
+            ? (shareImmutableSnapshot ? previousProjection : structuredClone(previousProjection))
+            : null,
+          projections: shareImmutableSnapshot
+            ? Object.freeze({ ...projections })
+            : structuredClone(projections),
           values: Object.freeze({ ...projectionValues })
         }));
         projections[projector.id] = validateProjectionEnvelope({

@@ -428,6 +428,86 @@ function worldRevisionKey(records) {
   return records[0]?.ref ?? 'empty-world';
 }
 
+function worldKeyFromRevision(revision, atoms) {
+  if (!atoms.length) return 'empty-world';
+  const canonical = `${revision}`.replace(/^sha256:/u, '');
+  return crypto.createHash('sha256').update(`${canonical}:0`).digest('base64url').slice(0, 24);
+}
+
+function exactAtomAddress(atoms, selector) {
+  const parts = `${selector ?? ''}`.split('/').filter(Boolean);
+  let children = atoms;
+  let current = null;
+  let address = '';
+  for (const part of parts) {
+    const matches = children.flatMap((atom, index) => (
+      oneStoredField(atom, 'thing')?.value === part ? [{ atom, index }] : []
+    ));
+    if (matches.length !== 1) return null;
+    current = matches[0].atom;
+    address = address ? `${address}/${matches[0].index}` : `${matches[0].index}`;
+    children = oneStoredField(current, 'contain')?.value ?? [];
+  }
+  return current ? { atom: current, address } : null;
+}
+
+function subtreeContainsProgram(atom) {
+  if (!atom) return false;
+  if (oneStoredField(atom, 'thing')?.parsed.types.some((type) => type.raw === 'program')) {
+    return true;
+  }
+  return (oneStoredField(atom, 'contain')?.value ?? []).some(subtreeContainsProgram);
+}
+
+function pathsIntersect(left, right) {
+  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+}
+
+function localProjectionRebaseEligible(previousAtoms, atoms, changedPaths, stored) {
+  if (!Array.isArray(changedPaths) || changedPaths.length === 0) return false;
+  const dependencyPaths = stored.exploreReadPaths ?? [];
+  if (changedPaths.some((changed) => dependencyPaths.some((path) => pathsIntersect(changed, path)))) {
+    return false;
+  }
+  const lockPaths = (stored.locks ?? []).flatMap((lock) => ([
+    lock.sourceProgramPath,
+    lock.path,
+    ...(lock.targets?.paths ?? []),
+    ...(lock.allowed_windows?.paths ?? []),
+    ...(lock.allowed_programs?.paths ?? [])
+  ])).filter(Boolean);
+  if (changedPaths.some((changed) => lockPaths.some((path) => pathsIntersect(changed, path)))) {
+    return false;
+  }
+  if ((stored.locks ?? []).some((lock) => (
+    Array.isArray(lock.targets?.refs) && !Array.isArray(lock.targets?.paths)
+  ))) return false;
+  return !changedPaths.some((changed) => (
+    subtreeContainsProgram(exactAtomAddress(previousAtoms, changed)?.atom)
+    || subtreeContainsProgram(exactAtomAddress(atoms, changed)?.atom)
+  ));
+}
+
+function rebindPathLocks(locks, atoms, revision) {
+  return locks.map((lock) => {
+    const source = lock.sourceProgramPath
+      ? exactAtomAddress(atoms, lock.sourceProgramPath)
+      : null;
+    if (lock.sourceProgramPath && !source) return null;
+    if ((lock.kind === 'node' || lock.kind === 'contain')
+      && !exactAtomAddress(atoms, lock.path)) return null;
+    return {
+      ...structuredClone(lock),
+      ...(source ? {
+        sourceProgramRef: crypto.createHash('sha256')
+          .update(`${`${revision}`.replace(/^sha256:/u, '')}:${source.address}`)
+          .digest('base64url')
+          .slice(0, 24)
+      } : {})
+    };
+  }).filter(Boolean);
+}
+
 function canonicalGraphPath(path) {
   const prefix = `${WORLD_OUTSIDE_NAME}/`;
   return typeof path === 'string' && path.startsWith(prefix) ? path.slice(prefix.length) : path;
@@ -1224,14 +1304,34 @@ export class ProgramRuntimeScheduler {
   }
 
   async rebaseContextFreeProjection(previousAtoms, atoms, {
-    changedPaths = [], isolateFailures = true
+    changedPaths = [], isolateFailures = true, previousRevision = null, revision = null
   } = {}) {
     if (!this.projectionRepository) return Object.freeze({ persisted: false, reason: 'unavailable' });
+    const stored = await this.projectionRepository.load();
+    if (previousRevision && revision
+      && stored
+      && stored.worldKey === worldKeyFromRevision(previousRevision, previousAtoms)
+      && stored.contextDependent === false
+      && Array.isArray(stored.failures)
+      && stored.failures.length === 0
+      && localProjectionRebaseEligible(previousAtoms, atoms, changedPaths, stored)) {
+      const projection = {
+        ...structuredClone(stored),
+        worldKey: worldKeyFromRevision(revision, atoms),
+        locks: rebindPathLocks(stored.locks ?? [], atoms, revision)
+      };
+      try {
+        await this.projectionRepository.save(projection);
+      } catch {
+        return Object.freeze({ persisted: false, reason: 'persist-failed' });
+      }
+      this.loadedProjection = structuredClone(projection);
+      return Object.freeze({ persisted: true, worldKey: projection.worldKey, local: true });
+    }
     const previousRecords = worldRecords(previousAtoms);
     const records = worldRecords(atoms);
     const previousPrograms = programRecords(previousRecords);
     const programs = programRecords(records);
-    const stored = await this.projectionRepository.load();
     if (!stored
       || stored.worldKey !== worldRevisionKey(previousRecords)
       || stored.contextDependent !== false
