@@ -148,6 +148,15 @@ function isLocalizedSituationTransform(item) {
   return situationChanged;
 }
 
+function isStructurePreservingTransform(item) {
+  if ((item.fields?.length ?? 0) !== 1) return false;
+  const [field] = item.fields;
+  return field.baseKey === 'thing'
+    && field.valuePresent
+    && (field.commands?.length ?? 0) === 1
+    && ['ren', 'mov', 'cpy', 'dsc', 'rst'].includes(field.commands[0].name);
+}
+
 function newlyAddedProgramPaths(beforeAtoms, afterAtoms) {
   const previousPaths = new Set(walkAtoms(beforeAtoms).map((match) => match.path.join('/')));
   return walkAtoms(afterAtoms)
@@ -627,9 +636,10 @@ async function persistChangedGraph({
   affectedAtoms = null,
   registrationChange = null,
   compatibilityManifest,
-  localizedSituationValidation = false
+  localizedSituationValidation = false,
+  structurePreservingValidation = false
 }) {
-  if (!localizedSituationValidation) {
+  if (!localizedSituationValidation && !structurePreservingValidation) {
     // Structural, support, type and Program changes retain the complete projection gate.
     const validationStartedAt = performance.now();
     projectAtomContext(atoms, { rootName, allowLegacySupport: Boolean(compatibilityManifest) });
@@ -2160,6 +2170,7 @@ export async function executeAtomLanguage(options = {}) {
     changedPaths = projectionRebase?.changedPaths ?? null,
     affectedAtoms = null,
     localizedSituationValidation = false,
+    structurePreservingValidation = false,
     preparedRuntimeRecordsPromise = null
   } = {}) {
     const effectiveRegistrationChange = registrationChange
@@ -2183,7 +2194,8 @@ export async function executeAtomLanguage(options = {}) {
         })) : null),
         registrationChange: effectiveRegistrationChange,
         compatibilityManifest: options.compatibilityManifest,
-        localizedSituationValidation
+        localizedSituationValidation,
+        structurePreservingValidation
       });
       committedAffectedPaths = [...new Set((receipt?.affectedAtoms ?? [])
         .map(({ path }) => path)
@@ -2872,6 +2884,8 @@ export async function executeAtomLanguage(options = {}) {
       },
       localizedSituationValidation: !programSurfaceChanged
         && isLocalizedSituationTransform(item),
+      structurePreservingValidation: !programSurfaceChanged
+        && isStructurePreservingTransform(item),
       preparedRuntimeRecordsPromise
     } : {
       changedPaths: [...new Set([
