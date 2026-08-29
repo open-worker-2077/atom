@@ -557,6 +557,46 @@ test('an Agent exact read reuses a valid context-incomplete projection without e
   assert.equal(executions, 0);
 });
 
+test('passive Agent readiness completes contextual Programs without retrying a startup-isolated failure', async () => {
+  const executions = new Map();
+  const world = [
+    atom('Agent', '', [], 'agent'),
+    atom('Context Lock', '# reads current Agent', [], 'program'),
+    atom('Broken Jump', '# invalid without an explicit repair', [], 'program')
+  ];
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program, executeExplore }) => {
+      executions.set(program.path, (executions.get(program.path) ?? 0) + 1);
+      if (program.path === 'Broken Jump') {
+        throw Object.assign(new Error('missing destination'), {
+          code: 'WINDOW_JUMP_DESTINATION_INVALID'
+        });
+      }
+      await executeExplore({});
+      return { locks: [], messages: [], transforms: [] };
+    }
+  });
+
+  const startup = await scheduler.refresh(world, {
+    isolateFailures: true,
+    executeExplore: async () => []
+  });
+  assert.equal(startup.contextIncomplete, true);
+  assert.equal(executions.get('Broken Jump'), 1);
+
+  const ready = await scheduler.refresh(structuredClone(world), {
+    isolateFailures: true,
+    passive: true,
+    reuseDormantContextFailureCodes: ['WINDOW_JUMP_DESTINATION_INVALID'],
+    agentOrigin: { ref: 'agent-ref', path: 'Agent' },
+    executeExplore: async () => [{ path: 'Agent' }]
+  });
+
+  assert.deepEqual(ready.failures, []);
+  assert.equal(executions.get('Context Lock'), 2);
+  assert.equal(executions.get('Broken Jump'), 1);
+});
+
 test('startup settles isolated Program failures before replacing a stale passive projection', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-startup-settle-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

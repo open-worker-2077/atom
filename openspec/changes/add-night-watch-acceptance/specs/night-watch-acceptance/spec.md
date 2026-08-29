@@ -67,11 +67,15 @@ The night-watch mode SHALL record each step's identifier, start time, end time, 
 - **THEN** the report declares the manifest version Accepted and contains no business payloads
 
 ### Requirement: Normal-use reliability
-The night-watch mode SHALL exercise one ordinary end-to-end path, including a bounded service restart and same-entry recovery, and SHALL restore a healthy service before terminating even when the run fails.
+The night-watch mode SHALL exercise one ordinary end-to-end path, including a bounded service restart and same-entry recovery, and SHALL restore a healthy service before terminating even when the run fails. HTTP health SHALL NOT by itself constitute readiness: the first public Agent command and an exact read-back SHALL also complete. Readiness SHALL preserve required Agent-context lock compilation and SHALL NOT report isolated unrelated Program failures as command results.
 
 #### Scenario: Restart recovery passes
 - **WHEN** the persistence phase temporarily restarts the authorized local runtime
-- **THEN** the same public entry becomes healthy, the synthetic committed facts remain readable, and the final service state is running
+- **THEN** the same public entry becomes healthy, the first public Agent command succeeds without unrelated Program execution, the synthetic committed facts remain readable, and the final service state is running
+
+#### Scenario: Health precedes command readiness
+- **WHEN** HTTP health is green but the first public Agent command has not yet completed
+- **THEN** the restart gate remains pending and no dependent night-watch step starts
 
 #### Scenario: Recovery fails
 - **WHEN** the runtime does not recover within the bounded deadline

@@ -782,6 +782,9 @@ export async function executeAtomLanguage(options = {}) {
           allowContextIncomplete: true
         } : {}),
         ...(passivePrograms ? { passive: true } : {}),
+        ...(passivePrograms ? {
+          reuseDormantContextFailureCodes: ['WINDOW_JUMP_DESTINATION_INVALID']
+        } : {}),
         ...(requestedProgramRun?.selector
           ? {
               programSelector: requestedProgramRun.selector,

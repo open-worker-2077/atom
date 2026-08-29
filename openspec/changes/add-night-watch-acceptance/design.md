@@ -44,6 +44,10 @@ The run consumes a local authority receipt naming the allowed Agent, `test` doma
 
 Write append-safe JSON evidence under an ignored local runtime directory. Evidence records hashes, revisions, error codes, timing, and bounded summaries; it never stores CLI command bodies, Program source, Atom details, identities beyond the approved Agent path, or business facts. Resume rechecks health, manifest version, Agent path, and last committed synthetic coordinates before continuing.
 
+### Command readiness after cold start
+
+Treat HTTP health and command readiness as separate observations. After a bounded restart, the runner waits for health and then proves the first public Agent command before allowing dependent steps. The readiness probe must preserve required Agent-context lock compilation while preventing isolated failures from leaking into unrelated commands. Every restart adapter restores the runtime in `finally`, including timeout, assertion, and operator-interruption paths.
+
 ### Issue-rooted status projection
 
 Keep the delivery-control source external to Atom: its sole root is Issue #1 (`https://github.com/open-worker-2077/atom/issues/1`), with concrete Issues as child instance nodes. Each instance maps to requirement, test-case, and evidence nodes; the root alone aggregates delivery gates. A pure generator renders the graph as redacted GitHub Markdown, preserves individual status rather than aggregating counts, and returns the first node not in a closed state. Real-device acceptance is a distinct `pending-user-acceptance` node; local gateway, viewport/control-panel, and entry-recovery evidence do not silently promote it, but also do not block unrelated local nodes.
