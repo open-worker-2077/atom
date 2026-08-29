@@ -160,7 +160,7 @@ function setSupportSelectorValue(selectorObject, value) {
   selectorObject[Object.hasOwn(selectorObject, 'thing@program') ? 'thing@program' : 'thing'] = value;
 }
 
-function capturePartnerBindings(atoms, rootName) {
+function capturePartnerBindings(atoms, rootName, relevance = null) {
   const matches = walkAtoms(atoms);
   const lookup = supportLookup(matches);
   const bindings = [];
@@ -169,8 +169,18 @@ function capturePartnerBindings(atoms, rootName) {
     if (!Array.isArray(partners)) continue;
     supportSelectorRefs(partners).forEach(({ selectorObject, locator }) => {
       const selector = supportSelectorValue(selectorObject);
+      const normalized = rootName && selector.startsWith(`${rootName}/`)
+        ? selector.slice(rootName.length + 1)
+        : selector;
+      const selectorName = normalized.split('/').at(-1);
+      if (relevance
+        && !relevance.atoms.has(source.atom)
+        && !relevance.names.has(selectorName)) return;
       const target = supportTarget(source, selector, matches, rootName, lookup);
       if (!target) return;
+      if (relevance
+        && !relevance.atoms.has(source.atom)
+        && !relevance.atoms.has(target.atom)) return;
       bindings.push({
         sourceAtom: source.atom,
         targetAtom: target.atom,
@@ -927,8 +937,14 @@ export async function applyTransform({
   const rewritesPaths = nameCommands.some((command) => (
     ['ren', 'mov', 'cpy', 'dsc', 'rst'].includes(command.name)
   ));
+  const relevantSubtree = rewritesPaths
+    ? new Set(walkAtoms([selected.match.atom]).map((match) => match.atom))
+    : null;
   const partnerBindings = rewritesPaths
-    ? capturePartnerBindings(nextAtoms, rootName)
+    ? capturePartnerBindings(nextAtoms, rootName, {
+        atoms: relevantSubtree,
+        names: new Set([...relevantSubtree].map((atom) => storedField(atom, 'thing')?.value))
+      })
     : [];
   const sourcePath = selected.match.path.join('/');
   const changedFields = new Set();
@@ -958,7 +974,7 @@ export async function applyTransform({
       ) };
     }
   }
-  const selectedAtoms = new Set([selected.match.atom]);
+  const selectedAtoms = relevantSubtree ?? new Set([selected.match.atom]);
   const changesSubtree = rewritesPaths || changedFields.has('contain');
   if (!restoresFromKernelBackup && changesSubtree
     && (immediateChildren(selected.match.atom)?.length ?? 0) > 0) {

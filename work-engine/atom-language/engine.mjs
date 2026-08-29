@@ -2799,7 +2799,7 @@ export async function executeAtomLanguage(options = {}) {
     try {
       postRefresh = await reconcileProgramsForWorld(nextAtoms, {
         mode: 'transform',
-        preparedIndexesValid: !programSurfaceChanged && isLocalizedSituationTransform(item),
+        preparedIndexesValid: !programSurfaceChanged,
         nodes: [...new Set([
           transformed.sourcePath,
           transformed.resultPath,
