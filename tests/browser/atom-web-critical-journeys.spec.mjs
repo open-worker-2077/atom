@@ -45,6 +45,23 @@ test('first domain entry renders its authoritative child nodes on the next visua
   ]));
 });
 
+test('rapid consecutive domain entry renders the second domain on its first visual frame', async ({ page }) => {
+  await openIsolatedWorld(page);
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('atom.json'))).toBe(true);
+  await page.keyboard.press('f');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).not.toBe('root');
+
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('测试入口'))).toBe(true);
+  await page.keyboard.press('f');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  const firstFrame = await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => resolve(window.spatialLab.state()));
+  }));
+
+  expect(firstFrame.visibleNodeDescriptors.length).toBeGreaterThan(0);
+});
+
 test('Web help renders work-order actions, errors, and receipt fields from the shared registry endpoint', async ({ page }) => {
   await openIsolatedWorld(page);
   await page.keyboard.press('h');

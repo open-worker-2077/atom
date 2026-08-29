@@ -38,12 +38,15 @@ function knowledgeAtPath(knowledge, requestedPath) {
   }
   const allNodes = Array.isArray(knowledge.nodes) ? knowledge.nodes : [];
   const currentNodes = allNodes.filter((node) => node?.path === pathValue);
-  const visiblePaths = new Set([
-    pathValue,
-    ...currentNodes
+  const visiblePaths = new Set([pathValue]);
+  let frontier = currentNodes;
+  for (let depth = 0; depth < 2; depth += 1) {
+    const nextPaths = new Set(frontier
       .filter((node) => node?.hasChildren === true)
-      .map((node) => childDomainPath(node))
-  ]);
+      .map((node) => childDomainPath(node)));
+    for (const nextPath of nextPaths) visiblePaths.add(nextPath);
+    frontier = allNodes.filter((node) => nextPaths.has(node?.path));
+  }
   const nodes = allNodes.filter((node) => visiblePaths.has(node?.path));
   const edges = Array.isArray(knowledge.edges)
     ? knowledge.edges.filter((edge) => (
