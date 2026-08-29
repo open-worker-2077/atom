@@ -67,6 +67,7 @@ import {
 } from './window-jump-authorization.mjs';
 import {
   createAccessController,
+  inheritPreparedAccessWorld,
   describeAtom,
   executeExploreItem,
   executeProgramExplore,
@@ -811,6 +812,10 @@ export async function executeAtomLanguage(options = {}) {
       } : {}),
       commitEntered: details.commitEntered === true
     });
+    const terminalStage = details.outcome === 'failure'
+      || stage === 'program-projection'
+      || (stage === 'commit' && !options.programScheduler);
+    if (!terminalStage) return;
     try {
       const diagnostic = {
         id: `${interaction.id}:transform-stage`,
@@ -842,7 +847,9 @@ export async function executeAtomLanguage(options = {}) {
   if (options.programScheduler) {
     const indexPreparationStartedAt = performance.now();
     try {
-      activeRequestDrivenLocks = await options.programScheduler.activeRequestDrivenLocks?.(atoms) ?? [];
+      activeRequestDrivenLocks = await options.programScheduler.activeRequestDrivenLocks?.(atoms, {
+        preparedIndexesValid: options.programMode !== 'project'
+      }) ?? [];
       const initialAgentPath = interaction.agent?.path ?? null;
       const initialAgentSecurity = initialAgentPath
         ? structuredClone(options.programScheduler.agentSecurity?.get(initialAgentPath) ?? null)
@@ -872,6 +879,7 @@ export async function executeAtomLanguage(options = {}) {
       const programOptions = {
         agentOrigin: interaction.agent,
         isolateFailures: true,
+        preparedIndexesValid: !projectPrograms,
         ...(parsed.command === 'explore' || agentOwnsLocalPrograms ? {
           allowWindowLockSnapshot: true,
           allowContextIncomplete: true
@@ -2807,6 +2815,9 @@ export async function executeAtomLanguage(options = {}) {
   }
   if (changed) {
     revisionAfter = sealWorldFactsRevision(nextAtoms).slice('sha256:'.length);
+    if (!programSurfaceChanged && isLocalizedSituationTransform(item)) {
+      inheritPreparedAccessWorld(atoms, nextAtoms);
+    }
     const canRebaseProjection = programTransformLogs.length === 0
       && postRefresh.transformLogs.length === 0
       && postRefresh.pathChanges.length === 0;

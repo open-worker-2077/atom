@@ -64,13 +64,13 @@ export function createAtomRuntimeBackupTrigger(options = {}) {
     }
   }
 
-  function start() {
+  function start({ initialBackup = true } = {}) {
     if (watcher || closed) return;
     watcher = watch(worldDirectory, { persistent: false }, (_event, filename) => {
       const name = typeof filename === 'string' ? filename.toLowerCase() : '';
       if (name === 'atom.json' || name === 'submissions.jsonl') schedule();
     });
-    void flush();
+    if (initialBackup) void flush();
   }
 
   function close() {

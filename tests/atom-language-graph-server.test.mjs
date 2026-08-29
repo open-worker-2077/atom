@@ -667,6 +667,7 @@ test('graph server queues private backup from a committed operation instead of r
   await fs.writeFile(contextFile, `${JSON.stringify(atomFixture(), null, 2)}\n`, 'utf8');
   const calls = [];
   const trigger = {
+    flush: async () => calls.push('flush'),
     start: () => calls.push('start'),
     schedule: () => calls.push('schedule'),
     close: () => calls.push('close')
@@ -682,7 +683,7 @@ test('graph server queues private backup from a committed operation instead of r
     backupTriggerFactory: () => trigger
   });
   t.after(() => running.close());
-  assert.deepEqual(calls, ['start']);
+  assert.deepEqual(calls, ['flush', 'start']);
 
   const response = await fetch(`${running.url}/__atom/api/command`, {
     method: 'POST',
@@ -697,7 +698,7 @@ test('graph server queues private backup from a committed operation instead of r
     })
   });
   assert.equal(response.status, 200, await response.text());
-  assert.deepEqual(calls, ['start', 'schedule']);
+  assert.deepEqual(calls, ['flush', 'start', 'schedule']);
   const barrier = await fetch(`${running.url}/__atom/api/command`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

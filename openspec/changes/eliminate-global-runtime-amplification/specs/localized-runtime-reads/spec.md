@@ -11,6 +11,10 @@ The 4784 runtime SHALL complete one full authoritative read, validation, revisio
 - **WHEN** the runtime has reported ready and the first exact CLI request arrives
 - **THEN** the request uses the already prepared path, Agent, lock, Program, support, shortcut, and descendant indexes without a full-world scan
 
+#### Scenario: Startup recovery backup
+- **WHEN** the runtime is configured with a private recovery backup
+- **THEN** its initial copy/push finishes before 4784 reports ready, and later authoritative writes join the delayed backup window instead of competing with the next CLI interaction
+
 #### Scenario: Unrelated local commit
 - **WHEN** a Patch changes an ordinary node outside Agent, lock, Program, trigger, support, shortcut, or descendant-index definitions
 - **THEN** those prepared indexes remain valid and only the affected fact/path entries advance
