@@ -54,8 +54,8 @@ function requireCandidate(candidate) {
 }
 
 function requireRoot(rootPath) {
-  if (typeof rootPath !== 'string' || !/^世界之外\/test\/夜巡-[A-Za-z0-9-]+$/u.test(rootPath)) {
-    throw liveError('NIGHT_WATCH_POS01_ROOT_INVALID', 'POS-01 requires one unique synthetic night-watch subtree below 世界之外/test');
+  if (typeof rootPath !== 'string' || !/^世界之外\/🧊manage\/工务\/work\/test\/夜巡-[A-Za-z0-9-]+$/u.test(rootPath)) {
+    throw liveError('NIGHT_WATCH_POS01_ROOT_INVALID', 'POS-01 requires one unique synthetic night-watch subtree below 世界之外/🧊manage/工务/work/test');
   }
   return rootPath;
 }
@@ -294,7 +294,7 @@ export async function runReject02LiveCase({ adapter, agent, authorityReceipt, ru
   if (!adapter || typeof adapter.executeStdin !== 'function') {
     throw liveError('NIGHT_WATCH_REJECT02_ADAPTER_INVALID', 'REJECT-02 requires a public CLI stdin adapter');
   }
-  if (agent !== '🧊') throw liveError('NIGHT_WATCH_REJECT02_AGENT_INVALID', 'REJECT-02 is authorized only for the exact Agent 🧊');
+  if (agent !== '🧊manage') throw liveError('NIGHT_WATCH_REJECT02_AGENT_INVALID', 'REJECT-02 is authorized only for the exact Agent 🧊manage');
   validateNightWatchAuthorityReceipt(authorityReceipt, { agent, now: timestamp });
   requireCandidate(candidate);
   requireRoot(rootPath);
@@ -335,7 +335,7 @@ export async function runReject02LiveCase({ adapter, agent, authorityReceipt, ru
     record(step);
   };
 
-  await read('parent-explore', '世界之外/test');
+  await read('parent-explore', '世界之外/🧊manage/工务/work/test');
   await write('subtree-create', exactSource('transform new', {
     thing: rootPath, situation: 'Synthetic night-watch subtree; no business facts.', contain: [], support: []
   }), rootPath);
@@ -466,7 +466,7 @@ export async function runPending03LiveCase({ adapter, agent, authorityReceipt, r
   if (!adapter || typeof adapter.executeStdin !== 'function') {
     throw liveError('NIGHT_WATCH_PENDING03_ADAPTER_INVALID', 'PENDING-03 requires a public CLI stdin adapter');
   }
-  if (agent !== '🧊') throw liveError('NIGHT_WATCH_PENDING03_AGENT_INVALID', 'PENDING-03 is authorized only for the exact Agent 🧊');
+  if (agent !== '🧊manage') throw liveError('NIGHT_WATCH_PENDING03_AGENT_INVALID', 'PENDING-03 is authorized only for the exact Agent 🧊manage');
   validateNightWatchAuthorityReceipt(authorityReceipt, { agent, now: timestamp });
   requireCandidate(candidate);
   requireRoot(rootPath);
@@ -521,7 +521,7 @@ export async function runPending03LiveCase({ adapter, agent, authorityReceipt, r
     }
     record('root-preflight-absent');
   }
-  await read('parent-explore', '世界之外/test');
+  await read('parent-explore', '世界之外/🧊manage/工务/work/test');
   if (!rootAlreadyKnown) {
     await write('subtree-create', exactSource('transform new', {
       thing: rootPath, situation: SYNTHETIC_ROOT_SITUATION, contain: [], support: []
@@ -694,7 +694,7 @@ export function evaluateResume05ExternalFourGates({ before, after, expectedGates
 
 export async function runResume05LiveCase({ adapter, agent, authorityReceipt, runId, candidate, timestamp, rootPath, lockLabels, resumeExistingRoot = false }) {
   if (!adapter || typeof adapter.executeStdin !== 'function') throw liveError('NIGHT_WATCH_RESUME05_ADAPTER_INVALID', 'RESUME-05 requires a public CLI stdin adapter');
-  if (agent !== '🧊') throw liveError('NIGHT_WATCH_RESUME05_AGENT_INVALID', 'RESUME-05 is authorized only for the exact Agent 🧊');
+  if (agent !== '🧊manage') throw liveError('NIGHT_WATCH_RESUME05_AGENT_INVALID', 'RESUME-05 is authorized only for the exact Agent 🧊manage');
   validateNightWatchAuthorityReceipt(authorityReceipt, { agent, now: timestamp });
   requireCandidate(candidate);
   requireRoot(rootPath);
@@ -931,7 +931,7 @@ function isRemap04InitialSnapshot(snapshot) {
 
 export async function runRemap04LiveCase({ adapter, agent, authorityReceipt, runId, candidate, timestamp, rootPath, lockLabels, resumeExistingRoot = false }) {
   if (!adapter || typeof adapter.executeStdin !== 'function') throw liveError('NIGHT_WATCH_REMAP04_ADAPTER_INVALID', 'REMAP-04 requires a public CLI stdin adapter');
-  if (agent !== '🧊') throw liveError('NIGHT_WATCH_REMAP04_AGENT_INVALID', 'REMAP-04 is authorized only for the exact Agent 🧊');
+  if (agent !== '🧊manage') throw liveError('NIGHT_WATCH_REMAP04_AGENT_INVALID', 'REMAP-04 is authorized only for the exact Agent 🧊manage');
   validateNightWatchAuthorityReceipt(authorityReceipt, { agent, now: timestamp });
   requireCandidate(candidate);
   requireRoot(rootPath);
@@ -985,7 +985,7 @@ export async function runRemap04LiveCase({ adapter, agent, authorityReceipt, run
   } else {
     record('root-preflight-absent');
   }
-  await read('parent-explore', '世界之外/test');
+  await read('parent-explore', '世界之外/🧊manage/工务/work/test');
   if (!rootAlreadyKnown) {
     await write('subtree-create', exactSource('transform new', { thing: rootPath, situation: REMAP04_ROOT_SITUATION, contain: [], support: [] }), rootPath);
   } else {
@@ -1071,7 +1071,7 @@ export async function runPos01LiveCase({ adapter, agent, authorityReceipt, runId
   if (!adapter || typeof adapter.executeStdin !== 'function') {
     throw liveError('NIGHT_WATCH_POS01_ADAPTER_INVALID', 'POS-01 requires a public CLI stdin adapter');
   }
-  if (agent !== '🧊') throw liveError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 is authorized only for the exact Agent 🧊');
+  if (agent !== '🧊manage') throw liveError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 is authorized only for the exact Agent 🧊manage');
   validateNightWatchAuthorityReceipt(authorityReceipt, { agent, now: timestamp });
   requireCandidate(candidate);
   requireRoot(rootPath);
@@ -1119,7 +1119,7 @@ export async function runPos01LiveCase({ adapter, agent, authorityReceipt, runId
     }
   };
 
-  await read('parent-explore', '世界之外/test');
+  await read('parent-explore', '世界之外/🧊manage/工务/work/test');
   await write('subtree-create', exactSource('transform new', {
     thing: rootPath, situation: 'Synthetic night-watch subtree; no business facts.', contain: [], support: []
   }), rootPath);

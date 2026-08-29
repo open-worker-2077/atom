@@ -134,11 +134,11 @@ export function lockLabelsFromArgs(argv) {
   return labels;
 }
 
-export async function inspectPos01Result({ adapter, agent = '🧊', rootPath }) {
+export async function inspectPos01Result({ adapter, agent = '🧊manage', rootPath }) {
   if (!adapter || typeof adapter.executeStdin !== 'function') {
     throw entryError('NIGHT_WATCH_POS01_ADAPTER_INVALID', 'POS-01 result inspection requires a public CLI stdin adapter');
   }
-  if (agent !== '🧊') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 result inspection requires the exact Agent 🧊');
+  if (agent !== '🧊manage') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 result inspection requires the exact Agent 🧊manage');
   const { resultPath } = pos01Paths(rootPath);
   const resultReadback = await readExact(adapter, agent, resultPath);
   const situation = readSituation(resultReadback?.stdout);
@@ -151,11 +151,11 @@ export async function inspectPos01Result({ adapter, agent = '🧊', rootPath }) 
   });
 }
 
-export async function inspectPos01Program({ adapter, agent = '🧊', rootPath }) {
+export async function inspectPos01Program({ adapter, agent = '🧊manage', rootPath }) {
   if (!adapter || typeof adapter.executeStdin !== 'function') {
     throw entryError('NIGHT_WATCH_POS01_ADAPTER_INVALID', 'POS-01 Program inspection requires a public CLI stdin adapter');
   }
-  if (agent !== '🧊') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 Program inspection requires the exact Agent 🧊');
+  if (agent !== '🧊manage') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 Program inspection requires the exact Agent 🧊manage');
   const { programPath } = pos01Paths(rootPath);
   const sourceReadback = await readExact(adapter, agent, programPath);
   return Object.freeze({
@@ -164,11 +164,11 @@ export async function inspectPos01Program({ adapter, agent = '🧊', rootPath })
   });
 }
 
-export async function inspectPos01Receipt({ adapter, agent = '🧊', rootPath }) {
+export async function inspectPos01Receipt({ adapter, agent = '🧊manage', rootPath }) {
   if (!adapter || typeof adapter.executeStdin !== 'function') {
     throw entryError('NIGHT_WATCH_POS01_ADAPTER_INVALID', 'POS-01 receipt inspection requires a public CLI stdin adapter');
   }
-  if (agent !== '🧊') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 receipt inspection requires the exact Agent 🧊');
+  if (agent !== '🧊manage') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 receipt inspection requires the exact Agent 🧊manage');
   const { casePath } = pos01Paths(rootPath);
   const receiptReadback = await readExact(adapter, agent, `${casePath}/槽体候选/提交回单`);
   const situation = readSituation(receiptReadback?.stdout);
@@ -179,11 +179,11 @@ export async function inspectPos01Receipt({ adapter, agent = '🧊', rootPath })
   });
 }
 
-export async function inspectPos01ResultParent({ adapter, agent = '🧊', rootPath }) {
+export async function inspectPos01ResultParent({ adapter, agent = '🧊manage', rootPath }) {
   if (!adapter || typeof adapter.executeStdin !== 'function') {
     throw entryError('NIGHT_WATCH_POS01_ADAPTER_INVALID', 'POS-01 containment inspection requires a public CLI stdin adapter');
   }
-  if (agent !== '🧊') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 containment inspection requires the exact Agent 🧊');
+  if (agent !== '🧊manage') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 containment inspection requires the exact Agent 🧊manage');
   const { programPath } = pos01Paths(rootPath);
   const readback = await adapter.executeStdin(agent, exactSource('explore', { thing: programPath, 'contain$latitude+1': true }));
   const childNames = readDirectContainNames(readback?.stdout);
@@ -200,22 +200,22 @@ export async function inspectPos01ResultParent({ adapter, agent = '🧊', rootPa
   return Object.freeze({ childNames: Object.freeze(childNames), revision: revisionFrom(readback.stdout) });
 }
 
-export async function inspectExactAgentLabels({ adapter, agent = '🧊' }) {
+export async function inspectExactAgentLabels({ adapter, agent = '🧊manage' }) {
   if (!adapter || typeof adapter.executeStdin !== 'function') {
     throw entryError('NIGHT_WATCH_POS01_ADAPTER_INVALID', 'POS-01 lock preparation requires a public CLI stdin adapter');
   }
-  if (agent !== '🧊') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 lock preparation requires the exact Agent 🧊');
+  if (agent !== '🧊manage') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 lock preparation requires the exact Agent 🧊manage');
   const readback = await readExact(adapter, agent, agent);
   const labels = literalAgentLabels(readSituation(readback?.stdout));
   if (labels === null) throw entryError('NIGHT_WATCH_POS01_AGENT_LABELS_UNAVAILABLE', 'POS-01 cannot derive exact Agent labels for a temporary lock');
   return Object.freeze({ labels: Object.freeze(labels), revision: revisionFrom(readback.stdout) });
 }
 
-export async function updateCommittedPos01Program({ adapter, agent = '🧊', rootPath }) {
+export async function updateCommittedPos01Program({ adapter, agent = '🧊manage', rootPath }) {
   if (!adapter || typeof adapter.executeStdin !== 'function') {
     throw entryError('NIGHT_WATCH_POS01_ADAPTER_INVALID', 'POS-01 source update requires a public CLI stdin adapter');
   }
-  if (agent !== '🧊') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 source update requires the exact Agent 🧊');
+  if (agent !== '🧊manage') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 source update requires the exact Agent 🧊manage');
 
   const { programPath, resultPath } = pos01Paths(rootPath);
   const expectedProgram = createPos01ProgramSource(rootPath);
@@ -244,11 +244,11 @@ export async function updateCommittedPos01Program({ adapter, agent = '🧊', roo
   });
 }
 
-export async function attachCommittedPos01ProgramLock({ adapter, agent = '🧊', rootPath, lockLabels }) {
+export async function attachCommittedPos01ProgramLock({ adapter, agent = '🧊manage', rootPath, lockLabels }) {
   if (!adapter || typeof adapter.executeStdin !== 'function') {
     throw entryError('NIGHT_WATCH_POS01_ADAPTER_INVALID', 'POS-01 lock attachment requires a public CLI stdin adapter');
   }
-  if (agent !== '🧊') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 lock attachment requires the exact Agent 🧊');
+  if (agent !== '🧊manage') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 lock attachment requires the exact Agent 🧊manage');
   requireLockLabels(lockLabels);
   const { programPath } = pos01Paths(rootPath);
   const baselineSource = createPos01ProgramSource(rootPath);
@@ -291,11 +291,11 @@ function isAtomNotFound(error) {
   return error?.code === 'ATOM_NOT_FOUND' || /\bATOM_NOT_FOUND\b/u.test(String(error?.message ?? ''));
 }
 
-export async function finalizeCommittedPos01({ adapter, agent = '🧊', rootPath, expectedGates = expectedPos01Gates(), lockLabels }) {
+export async function finalizeCommittedPos01({ adapter, agent = '🧊manage', rootPath, expectedGates = expectedPos01Gates(), lockLabels }) {
   if (!adapter || typeof adapter.executeStdin !== 'function') {
     throw entryError('NIGHT_WATCH_POS01_ADAPTER_INVALID', 'POS-01 finalization requires a public CLI stdin adapter');
   }
-  if (agent !== '🧊') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 finalization requires the exact Agent 🧊');
+  if (agent !== '🧊manage') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 finalization requires the exact Agent 🧊manage');
   requireLockLabels(lockLabels);
   const { casePath, resultPath } = pos01Paths(rootPath);
   const receiptPath = `${casePath}/槽体候选/提交回单`;
@@ -336,11 +336,11 @@ export async function finalizeCommittedPos01({ adapter, agent = '🧊', rootPath
   return Object.freeze({ status: 'passed', gates: external.gates, gateProofs: external.proofs, finalRevision: final.revision, resultPath });
 }
 
-export async function completeCommittedPos01Lock({ adapter, agent = '🧊', rootPath, expectedGates = expectedPos01Gates(), lockLabels }) {
+export async function completeCommittedPos01Lock({ adapter, agent = '🧊manage', rootPath, expectedGates = expectedPos01Gates(), lockLabels }) {
   if (!adapter || typeof adapter.executeStdin !== 'function') {
     throw entryError('NIGHT_WATCH_POS01_ADAPTER_INVALID', 'POS-01 lock recovery requires a public CLI stdin adapter');
   }
-  if (agent !== '🧊') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 lock recovery requires the exact Agent 🧊');
+  if (agent !== '🧊manage') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 lock recovery requires the exact Agent 🧊manage');
   requireLockLabels(lockLabels);
   const receipt = await inspectPos01Receipt({ adapter, agent, rootPath });
   if (receipt.status !== 'submitted') {
@@ -399,7 +399,7 @@ async function main() {
   const lockLabels = lockLabelsFromArgs(process.argv);
   const adapter = createAtomCliAdapter();
   await adapter.validateHelp();
-  await adapter.resolveExactAgent('🧊');
+  await adapter.resolveExactAgent('🧊manage');
   const result = process.argv.includes('--inspect-program')
     ? await inspectPos01Program({ adapter, rootPath })
     : process.argv.includes('--inspect')

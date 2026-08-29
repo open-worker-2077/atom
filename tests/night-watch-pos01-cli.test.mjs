@@ -3,7 +3,7 @@ import test from 'node:test';
 
 const entryUrl = new URL('../scripts/night-watch-pos01-cli.mjs', import.meta.url);
 
-const rootPath = '世界之外/test/夜巡-nw-pos01-update';
+const rootPath = '世界之外/🧊manage/工务/work/test/夜巡-nw-pos01-update';
 const expectedResult = JSON.stringify({
   matter_count: 4,
   source_atom_count: 7,
@@ -21,8 +21,8 @@ test('POS-01 Node entry serializes multiline quoted Program source exactly once 
   assert.equal(expectedProgram.startsWith('def main'), false, 'explicit CLI .run. must expose its public transform effect at Program top level');
   assert.equal(expectedProgram.includes('\\'), false, 'Python source must not depend on backslash-escaped Graph-JSON keys');
   assert.equal(expectedProgram.includes('situation.rep.'), false, 'an outer situation.rep update must not contain a nested dot-command marker');
-  assert.match(expectedProgram, /transform\(\{"thing": "世界之外\/test\/夜巡-nw-pos01-update\/POS-01\/确定性核验\/核验结果", "situation": json_stringify\(\{"value": result\}\), "contain": \[\], "support": \[\]\}\)/u);
-  assert.match(source, /^transform \{"thing":"世界之外\/test\/夜巡-nw-pos01-update\/POS-01\/确定性核验",/u);
+  assert.match(expectedProgram, /transform\(\{"thing": "世界之外\/🧊manage\/工务\/work\/test\/夜巡-nw-pos01-update\/POS-01\/确定性核验\/核验结果", "situation": json_stringify\(\{"value": result\}\), "contain": \[\], "support": \[\]\}\)/u);
+  assert.match(source, /^transform \{"thing":"世界之外\/🧊manage\/工务\/work\/test\/夜巡-nw-pos01-update\/POS-01\/确定性核验",/u);
   assert.equal(source, `transform {"thing":${JSON.stringify(`${rootPath}/POS-01/确定性核验`)},${JSON.stringify(`situation.rep.${expectedProgram}`)}}`);
   assert.equal(source.includes('\\\\n'), false, 'the source must contain one JSON newline escape, not a shell-produced double escape');
 
@@ -38,13 +38,13 @@ test('POS-01 Node entry serializes multiline quoted Program source exactly once 
         throw new Error(`Unexpected request: ${request}`);
       }
     },
-    agent: '🧊',
+    agent: '🧊manage',
     rootPath
   });
 
   assert.equal(result.status, 'passed');
   assert.equal(result.revision, 'result-r-21');
-  assert.deepEqual(calls.map((call) => call.agent), ['🧊', '🧊', '🧊', '🧊']);
+  assert.deepEqual(calls.map((call) => call.agent), ['🧊manage', '🧊manage', '🧊manage', '🧊manage']);
   assert.equal(calls[0].request, source);
   assert.equal(calls[2].request.includes('thing.run.'), true);
 });
@@ -55,7 +55,7 @@ test('POS-01 can attach the current Agent temporary path lock to its existing de
   const locking = createPos01ProgramLockingSource(rootPath, ['^']);
 
   assert.ok(locking.startsWith(`${baseline}\n`));
-  assert.match(locking, /lock\(\{"targets":\{"paths":\["世界之外\/test\/夜巡-nw-pos01-update\/POS-01\/确定性核验\/核验结果"\],"scope":"exact"\},"actions":\["transform"\],"labels":\["\^"\]\}\)/u);
+  assert.match(locking, /lock\(\{"targets":\{"paths":\["世界之外\/🧊manage\/工务\/work\/test\/夜巡-nw-pos01-update\/POS-01\/确定性核验\/核验结果"\],"scope":"exact"\},"actions":\["transform"\],"labels":\["\^"\]\}\)/u);
   assert.equal(locking.includes('submitted'), false);
   assert.equal(locking.includes('matter_count'), true);
 });
@@ -80,7 +80,7 @@ test('POS-01 attaches a Program-local lock only after the committed source exact
 
   assert.equal(result.status, 'locked-source-attached');
   assert.equal(calls.length, 3);
-  assert.equal(calls.every(({ agent }) => agent === '🧊'), true);
+  assert.equal(calls.every(({ agent }) => agent === '🧊manage'), true);
   assert.equal(calls[1].request.includes('situation.rep.'), true);
   assert.equal(calls.some(({ request }) => request.includes('thing.run.')), false);
 });
@@ -90,9 +90,9 @@ test('POS-01 Node entry inspects the exact result node without exposing Program 
   const inspected = await inspectPos01Result({
     adapter: {
       async executeStdin(agent, request) {
-        assert.equal(agent, '🧊');
-        assert.equal(request.startsWith('explore {"thing":"世界之外/test/夜巡-nw-pos01-update/POS-01/确定性核验/核验结果"'), true);
-        return { stdout: '{"thing":"核验结果","path":"世界之外/test/夜巡-nw-pos01-update/POS-01/确定性核验/核验结果","situation":"Pending deterministic verification.","revision":"result-r-22"}' };
+        assert.equal(agent, '🧊manage');
+        assert.equal(request.startsWith('explore {"thing":"世界之外/🧊manage/工务/work/test/夜巡-nw-pos01-update/POS-01/确定性核验/核验结果"'), true);
+        return { stdout: '{"thing":"核验结果","path":"世界之外/🧊manage/工务/work/test/夜巡-nw-pos01-update/POS-01/确定性核验/核验结果","situation":"Pending deterministic verification.","revision":"result-r-22"}' };
       }
     },
     rootPath
@@ -100,7 +100,7 @@ test('POS-01 Node entry inspects the exact result node without exposing Program 
   assert.deepEqual(inspected, {
     status: 'revalidation-required',
     revision: 'result-r-22',
-    path: '世界之外/test/夜巡-nw-pos01-update/POS-01/确定性核验/核验结果',
+    path: '世界之外/🧊manage/工务/work/test/夜巡-nw-pos01-update/POS-01/确定性核验/核验结果',
     situation: 'Pending deterministic verification.'
   });
   assert.equal(JSON.stringify(inspected).includes('def main'), false);
@@ -111,7 +111,7 @@ test('POS-01 Node entry reports only whether the exact Program source is current
   const inspected = await inspectPos01Program({
     adapter: {
       async executeStdin(agent, request) {
-        assert.equal(agent, '🧊');
+        assert.equal(agent, '🧊manage');
         assert.equal(request.endsWith('/确定性核验","situation$full":true}'), true);
         return { stdout: JSON.stringify({ thing: '确定性核验', situation: createPos01ProgramSource(rootPath), revision: 'program-r-23' }) };
       }
@@ -142,7 +142,7 @@ test('POS-01 finalization submits and locks only after all externally evaluated 
           return { stdout: '{"ok":true,"revision":"lock-source-r-33"}' };
         }
         if (request.startsWith('explore ') && request.includes('/结果锁定')) {
-          return { stdout: '{"thing":"结果锁定","situation":"lock({\\"targets\\":{\\"paths\\":[\\"世界之外/test/夜巡-nw-pos01-update/POS-01/确定性核验/核验结果\\"],\\"scope\\":\\"exact\\"},\\"actions\\":[\\"transform\\"],\\"labels\\":[\\"^^\\"]})","revision":"lock-source-r-33"}' };
+          return { stdout: '{"thing":"结果锁定","situation":"lock({\\"targets\\":{\\"paths\\":[\\"世界之外/🧊manage/工务/work/test/夜巡-nw-pos01-update/POS-01/确定性核验/核验结果\\"],\\"scope\\":\\"exact\\"},\\"actions\\":[\\"transform\\"],\\"labels\\":[\\"^^\\"]})","revision":"lock-source-r-33"}' };
         }
         if (request.includes('thing.run.') && request.includes('/结果锁定')) {
           return { stdout: '{"thing@program~unchanged":"结果锁定","choices":[]}' };
@@ -150,7 +150,7 @@ test('POS-01 finalization submits and locks only after all externally evaluated 
         throw new Error(`Unexpected request: ${request}`);
       }
     },
-    agent: '🧊', rootPath, lockLabels: ['^^'],
+    agent: '🧊manage', rootPath, lockLabels: ['^^'],
     expectedGates: { StructureGate: 'passed', QuantityGate: 'passed', ConservationGate: 'passed', SemanticGate: 'passed' }
   });
 
@@ -159,7 +159,7 @@ test('POS-01 finalization submits and locks only after all externally evaluated 
     StructureGate: 'passed', QuantityGate: 'passed', ConservationGate: 'passed', SemanticGate: 'passed'
   });
   assert.equal(finalization.finalRevision, 'result-r-31');
-  assert.equal(calls.every(({ agent }) => agent === '🧊'), true);
+  assert.equal(calls.every(({ agent }) => agent === '🧊manage'), true);
   assert.equal(calls.findIndex(({ request }) => request.includes('/提交回单')) > calls.findIndex(({ request }) => request.includes('/确定性核验/核验结果')), true);
   assert.equal(calls.some(({ request }) => request.includes('thing.run.') && request.includes('/结果锁定')), true);
   assert.equal(calls.at(-1).request.includes('/确定性核验/核验结果'), true);
@@ -176,7 +176,7 @@ test('POS-01 finalization refuses to submit or lock when an external gate is pen
           return { stdout: JSON.stringify({ thing: '核验结果', situation: expectedResult, revision: 'result-r-34' }) };
         }
       },
-      agent: '🧊', rootPath, lockLabels: ['^'],
+      agent: '🧊manage', rootPath, lockLabels: ['^'],
       expectedGates: { StructureGate: 'passed', QuantityGate: 'passed', ConservationGate: 'passed', SemanticGate: 'pending' }
     }),
     (error) => error.code === 'NIGHT_WATCH_POS01_GATE_FAILED'
@@ -189,8 +189,8 @@ test('POS-01 finalization inspector exact-reads the synthetic receipt without ex
   const inspected = await inspectPos01Receipt({
     adapter: {
       async executeStdin(agent, request) {
-        assert.equal(agent, '🧊');
-        assert.equal(request.startsWith('explore {"thing":"世界之外/test/夜巡-nw-pos01-update/POS-01/槽体候选/提交回单"'), true);
+        assert.equal(agent, '🧊manage');
+        assert.equal(request.startsWith('explore {"thing":"世界之外/🧊manage/工务/work/test/夜巡-nw-pos01-update/POS-01/槽体候选/提交回单"'), true);
         return { stdout: '{"thing":"提交回单","situation":"submitted","revision":"receipt-r-35"}' };
       }
     },
@@ -217,7 +217,7 @@ test('POS-01 lock recovery creates only a missing synthetic lock Program after e
           return { stdout: '{"ok":true,"revision":"lock-create-r-37"}' };
         }
         if (request.startsWith('explore ') && request.includes('/结果锁定')) {
-          return { stdout: '{"thing":"结果锁定","situation":"lock({\\"targets\\":{\\"paths\\":[\\"世界之外/test/夜巡-nw-pos01-update/POS-01/确定性核验/核验结果\\"],\\"scope\\":\\"exact\\"},\\"actions\\":[\\"transform\\"],\\"labels\\":[\\"^^\\"]})","revision":"lock-r-37"}' };
+          return { stdout: '{"thing":"结果锁定","situation":"lock({\\"targets\\":{\\"paths\\":[\\"世界之外/🧊manage/工务/work/test/夜巡-nw-pos01-update/POS-01/确定性核验/核验结果\\"],\\"scope\\":\\"exact\\"},\\"actions\\":[\\"transform\\"],\\"labels\\":[\\"^^\\"]})","revision":"lock-r-37"}' };
         }
         if (request.includes('thing.run.') && request.includes('/结果锁定')) {
           return { stdout: '{"thing@program~unchanged":"结果锁定","choices":[]}' };
@@ -228,7 +228,7 @@ test('POS-01 lock recovery creates only a missing synthetic lock Program after e
         throw new Error(`Unexpected request: ${request}`);
       }
     },
-    agent: '🧊', rootPath, lockLabels: ['^^']
+    agent: '🧊manage', rootPath, lockLabels: ['^^']
   });
 
   assert.equal(result.status, 'passed');
@@ -243,8 +243,8 @@ test('POS-01 diagnostic reads only the deterministic Program direct-child names 
   const inspected = await inspectPos01ResultParent({
     adapter: {
       async executeStdin(agent, request) {
-        assert.equal(agent, '🧊');
-        assert.equal(request, 'explore {"thing":"世界之外/test/夜巡-nw-pos01-update/POS-01/确定性核验","contain$latitude+1":true}');
+        assert.equal(agent, '🧊manage');
+        assert.equal(request, 'explore {"thing":"世界之外/🧊manage/工务/work/test/夜巡-nw-pos01-update/POS-01/确定性核验","contain$latitude+1":true}');
         return { stdout: '{"thing":"确定性核验","contain":[{"thing":"核验结果"}],"revision":"program-r-39"}' };
       }
     },
@@ -313,10 +313,10 @@ test('POS-01 lock preparation derives only the exact Agent literal labels and ne
   const inspected = await inspectExactAgentLabels({
     adapter: {
       async executeStdin(agent, request) {
-        assert.equal(agent, '🧊');
-        assert.equal(request, 'explore {"thing":"🧊","situation$full":true}');
+        assert.equal(agent, '🧊manage');
+        assert.equal(request, 'explore {"thing":"🧊manage","situation$full":true}');
         return { stdout: JSON.stringify({
-          thing: '🧊',
+          thing: '🧊manage',
           situation: 'agent({"labels":["^^","night-watch"],"functions":{"groups":[],"names":["lock"]}})',
           revision: 'agent-r-40'
         }) };
@@ -333,7 +333,7 @@ test('POS-01 lock recovery rejects a missing exact-Agent label set before any pu
   await assert.rejects(
     completeCommittedPos01Lock({
       adapter: { async executeStdin() { calls += 1; return { stdout: '{}' }; } },
-      agent: '🧊', rootPath
+      agent: '🧊manage', rootPath
     }),
     (error) => error.code === 'NIGHT_WATCH_POS01_LOCK_LABELS_REQUIRED'
   );

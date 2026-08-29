@@ -334,7 +334,7 @@ async function main() {
     initialHealth: jsonReceipt(initialHealth.stdout), finalHealth: jsonReceipt(finalHealth.stdout),
     steps: evidence
   };
-  await fs.writeFile(path.join(options.evidenceDir, 'shared-cli-live-report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  await fs.writeFile(path.join(options.evidenceDir, 'shared-cli-live-report.jsonl'), `${JSON.stringify(report)}\n`, 'utf8');
   process.stdout.write(`${JSON.stringify({ ok: true, evidenceId, evidenceCount: evidence.length })}\n`);
 }
 
