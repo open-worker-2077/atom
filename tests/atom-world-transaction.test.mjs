@@ -349,6 +349,29 @@ test('compare-and-swap returns the prepared snapshot without reading and cloning
   assert.deepEqual(JSON.parse(await fs.readFile(worldRepository.file, 'utf8')), facts);
 });
 
+test('repository read does not clone facts that JSON parsing already owns', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-world-read-owned-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  const facts = [{ marker: 'owned-json-facts', contain: [{ value: 1 }] }];
+  await fs.writeFile(worldFile, `${JSON.stringify(facts)}\n`, 'utf8');
+  const worldRepository = createJsonWorldRepository({ file: worldFile, worldId: 'primary' });
+  const originalStructuredClone = globalThis.structuredClone;
+  let completeWorldCloneCount = 0;
+  globalThis.structuredClone = (value, options) => {
+    if (Array.isArray(value) && value[0]?.marker === 'owned-json-facts') {
+      completeWorldCloneCount += 1;
+    }
+    return originalStructuredClone(value, options);
+  };
+  t.after(() => { globalThis.structuredClone = originalStructuredClone; });
+
+  const snapshot = await worldRepository.read();
+
+  assert.deepEqual(snapshot.facts, facts);
+  assert.equal(completeWorldCloneCount, 0);
+});
+
 test('recovery completes a prepared transaction interrupted before the world write', async (t) => {
   let interrupted = true;
   const files = await fixture(t, {

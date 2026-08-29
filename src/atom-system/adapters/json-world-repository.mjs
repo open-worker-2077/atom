@@ -44,7 +44,7 @@ export async function writeJsonAtomically(file, value, options = {}) {
   }
 }
 
-function snapshot(worldId, facts) {
+function snapshot(worldId, facts, { ownsFacts = false } = {}) {
   if (!Array.isArray(facts)) {
     throw problem('INVALID_WORLD_FILE', 'Atom world facts must be a JSON array');
   }
@@ -53,7 +53,7 @@ function snapshot(worldId, facts) {
     version: 1,
     worldId,
     revision: revisionOfWorldFacts(facts),
-    facts: structuredClone(facts)
+    facts: ownsFacts ? facts : structuredClone(facts)
   });
 }
 
@@ -70,7 +70,7 @@ export function createJsonWorldRepository({ file, worldId, initialFacts }) {
       }
       throw problem('WORLD_READ_FAILED', `Cannot read Atom world ${worldId}`, { cause: error.code });
     }
-    return snapshot(worldId, value);
+    return snapshot(worldId, value, { ownsFacts: true });
   }
 
   async function compareAndSwap({ expectedRevision, nextSnapshot }) {
