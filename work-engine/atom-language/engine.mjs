@@ -851,7 +851,13 @@ export async function executeAtomLanguage(options = {}) {
   const canReusePreparedRuntimeIndexes = parsed.command === 'transform'
     && !parsed.batch
     && parsed.items.length === 1
-    && isLocalizedSituationTransform(parsed.items[0]);
+    && (
+      isLocalizedSituationTransform(parsed.items[0])
+      || options.programScheduler?.hasPreparedIndexesForRevision?.(
+        revisionBefore,
+        atoms
+      ) === true
+    );
   let programCycle = { messages: [], locks: [], records: [] };
   let activeRequestDrivenLocks = [];
   if (options.programScheduler) {

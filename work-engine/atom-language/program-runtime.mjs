@@ -1458,6 +1458,15 @@ export class ProgramRuntimeScheduler {
     return this.requestDrivenLocks ?? [];
   }
 
+  hasPreparedIndexesForRevision(revision, atoms = []) {
+    return Boolean(
+      this.latestRecords
+      && this.requestDrivenLocks !== undefined
+      && this.agentSecurityWorldRevision !== null
+      && worldRevisionKey(this.latestRecords) === worldKeyFromRevision(revision, atoms)
+    );
+  }
+
   async registerAgentWindow({ sourceProgramPath, labels, functionScopes, functions }) {
     this.agentSecurity.set(sourceProgramPath, {
       labels: [...labels], functionScopes: structuredClone(functionScopes), functions: [...functions]
