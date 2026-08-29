@@ -539,6 +539,8 @@ async function persistChangedGraph({
   expectedRevision,
   correlationId,
   source,
+  changedPaths = null,
+  affectedAtoms = null,
   registrationChange = null,
   compatibilityManifest
 }) {
@@ -554,17 +556,20 @@ async function persistChangedGraph({
     throw error;
   }
   const commitStartedAt = performance.now();
-  await commitWorld({
+  const receipt = await commitWorld({
     expectedRevision,
     nextRevision: revisionOf(atoms),
-    facts: structuredClone(atoms),
+    facts: atoms,
     correlationId,
     source,
+    ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
+    ...(Array.isArray(affectedAtoms) ? { affectedAtoms } : {}),
     registrationChange
   });
   performanceTrace('world-commit', {
     elapsedMs: Math.round(performance.now() - commitStartedAt)
   });
+  return receipt;
 }
 
 export async function executeAtomLanguage(options = {}) {
@@ -633,6 +638,7 @@ export async function executeAtomLanguage(options = {}) {
     };
   }
   const revisionBefore = revisionOf(atoms);
+  let committedAffectedPaths = [];
   const legacyMetadata = legacyAtomContextMetadata(atoms);
   if (parsed.command === 'transform' && legacyMetadata?.mode === 'legacy-read-only') {
     return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
@@ -2012,13 +2018,15 @@ export async function executeAtomLanguage(options = {}) {
 
   async function commitChangedGraph(candidateAtoms, {
     registrationChange = null,
-    projectionRebase = null
+    projectionRebase = null,
+    changedPaths = projectionRebase?.changedPaths ?? null,
+    affectedAtoms = null
   } = {}) {
     const effectiveRegistrationChange = registrationChange
       ?? (windowRecycled ? 'window-recycle' : null);
     const commitStartedAt = performance.now();
     try {
-      await persistChangedGraph({
+      const receipt = await persistChangedGraph({
         atoms: candidateAtoms,
         contextFile,
         projectionFile,
@@ -2027,9 +2035,17 @@ export async function executeAtomLanguage(options = {}) {
         expectedRevision: revisionBefore,
         correlationId: interaction.id,
         source,
+        changedPaths,
+        affectedAtoms: affectedAtoms ?? (Array.isArray(changedPaths) ? changedPaths.map((path) => ({
+          path,
+          axes: ['contain', 'situation', 'support', 'thing']
+        })) : null),
         registrationChange: effectiveRegistrationChange,
         compatibilityManifest: options.compatibilityManifest
       });
+      committedAffectedPaths = [...new Set((receipt?.affectedAtoms ?? [])
+        .map(({ path }) => path)
+        .filter(Boolean))].sort();
     } catch (error) {
       await recordTransformStage('commit', commitStartedAt, {
         commitEntered: true,
@@ -2038,6 +2054,11 @@ export async function executeAtomLanguage(options = {}) {
       throw error;
     }
     await recordTransformStage('commit', commitStartedAt, { commitEntered: true });
+    if (!committedAffectedPaths.length) {
+      committedAffectedPaths = Array.isArray(changedPaths)
+        ? [...new Set(changedPaths.filter(Boolean))].sort()
+        : [];
+    }
     if (recycledAgentPath) {
       await options.programScheduler?.recycleAgentWindow?.(recycledAgentPath);
     }
@@ -2277,6 +2298,9 @@ export async function executeAtomLanguage(options = {}) {
           if (path) transformEventNodes.add(path);
         }
       }
+      for (const path of [...(renamed.relationPaths ?? []), ...(renamed.shortcutPaths ?? [])]) {
+        if (path) transformEventNodes.add(path);
+      }
     }
     for (const candidate of renameBatch ? [] : parsed.items) {
       let transformed;
@@ -2320,6 +2344,9 @@ export async function executeAtomLanguage(options = {}) {
       for (const path of [transformed.sourcePath, transformed.resultPath]) {
         if (path) transformEventNodes.add(path);
       }
+      for (const path of [...(transformed.relationPaths ?? []), ...(transformed.shortcutPaths ?? [])]) {
+        if (path) transformEventNodes.add(path);
+      }
       if (transformed.logRecord) {
         transformLogs.push({
           ...transformed.logRecord,
@@ -2352,6 +2379,11 @@ export async function executeAtomLanguage(options = {}) {
       finalProgramLockIndex = reconciled.lockIndex;
       finalProgramMessages.push(...reconciled.messages);
       programTransformLogs.push(...reconciled.transformLogs);
+      for (const change of reconciled.pathChanges ?? []) {
+        for (const path of [change.sourcePath, change.resultPath]) {
+          if (path) transformEventNodes.add(path);
+        }
+      }
       for (const receipt of results) {
         const rewritten = rewritePath(receipt.result?.path, reconciled.pathChanges);
         if (rewritten && receipt.result) {
@@ -2389,7 +2421,9 @@ export async function executeAtomLanguage(options = {}) {
       if (!delegated.ok) {
         return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
       }
-      await commitChangedGraph(nextAtoms);
+      await commitChangedGraph(nextAtoms, {
+        changedPaths: [...transformEventNodes]
+      });
       for (const record of [...programTransformLogs, ...transformLogs]) {
         try {
           await appendTransformLog(contextFile, {
@@ -2421,6 +2455,7 @@ export async function executeAtomLanguage(options = {}) {
       errors: [],
       messages: [...interactionMessages, ...finalProgramMessages],
       interactionId: interaction.id,
+      affectedPaths: committedAffectedPaths,
       lockState: programLockState(finalProgramLockIndex)
     };
   }
@@ -2471,7 +2506,9 @@ export async function executeAtomLanguage(options = {}) {
       }
     }
     const finalCreatePath = rewritePath(created.resultPath, postRefresh.pathChanges);
-    await commitChangedGraph(nextAtoms);
+    await commitChangedGraph(nextAtoms, {
+      changedPaths: [created.resultPath].filter(Boolean)
+    });
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
       await appendTransformLog(contextFile, record);
     }
@@ -2494,6 +2531,7 @@ export async function executeAtomLanguage(options = {}) {
       errors: [],
       messages: [...interactionMessages, ...postRefresh.messages],
       interactionId: interaction.id,
+      affectedPaths: committedAffectedPaths,
       lockState: programLockState(postRefresh.lockIndex)
     };
   }
@@ -2548,6 +2586,7 @@ export async function executeAtomLanguage(options = {}) {
       errors: [],
       messages: interactionMessages,
       interactionId: interaction.id,
+      affectedPaths: committedAffectedPaths,
       lockState: programLockState(finalProgramLockIndex)
     };
   }
@@ -2630,10 +2669,19 @@ export async function executeAtomLanguage(options = {}) {
         changedPaths: [...new Set([
           transformed.sourcePath,
           transformed.resultPath,
-          transformed.resultName
+          ...(transformed.relationPaths ?? []),
+          ...(transformed.shortcutPaths ?? [])
         ].filter(Boolean))]
       }
-    } : {});
+    } : {
+      changedPaths: [...new Set([
+        transformed.sourcePath,
+        transformed.resultPath,
+        ...(transformed.relationPaths ?? []),
+        ...(transformed.shortcutPaths ?? []),
+        ...postRefresh.pathChanges.flatMap((change) => [change.sourcePath, change.resultPath])
+      ].filter(Boolean))]
+    });
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
       await appendTransformLog(contextFile, record);
     }
@@ -2669,6 +2717,7 @@ export async function executeAtomLanguage(options = {}) {
     errors: [],
     messages: [...interactionMessages, ...postRefresh.messages],
     interactionId: interaction.id,
+    affectedPaths: committedAffectedPaths,
     lockState: programLockState(postRefresh.lockIndex)
   };
 

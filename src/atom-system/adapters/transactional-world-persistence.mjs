@@ -90,6 +90,8 @@ export function createTransactionalWorldPersistence({
     nextRevision,
     facts,
     source = 'legacy-interaction',
+    changedPaths = null,
+    affectedAtoms = null,
     registrationChange = null,
     compatibilityManifest: suppliedManifest = null
   }) {
@@ -136,9 +138,14 @@ export function createTransactionalWorldPersistence({
         payload: { source }
       },
       transition: () => ({
-        facts: structuredClone(facts),
+        facts,
+        ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
         result: {
           source,
+          ...(Array.isArray(affectedAtoms) ? {
+            affectedAtoms,
+            affectedAtomsComplete: true
+          } : {}),
           ...(nextManifest ? { compatibilityManifest: nextManifest } : {}),
           ...(previousManifest ? { previousCompatibilityManifest: previousManifest } : {})
         }

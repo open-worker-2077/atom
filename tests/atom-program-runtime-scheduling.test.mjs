@@ -226,10 +226,11 @@ test('a refresh exposes only bounded anonymous reconcile timing summary', async 
 
   assert.deepEqual(Object.keys(cycle.reconcileSummary).sort(), [
     'candidateProgramCount', 'executedProgramCount', 'slowestProgramDurationMs',
-    'slowestProgramFingerprint'
+    'slowestProgramFingerprint', 'triggerIndexBackfilled'
   ]);
   assert.equal(cycle.reconcileSummary.candidateProgramCount, 2);
   assert.equal(cycle.reconcileSummary.executedProgramCount, 2);
+  assert.equal(cycle.reconcileSummary.triggerIndexBackfilled, 0);
   assert.match(cycle.reconcileSummary.slowestProgramFingerprint, /^sha256:[a-f0-9]{64}$/u);
   assert.equal(cycle.reconcileSummary.slowestProgramDurationMs >= 0, true);
   assert.equal(JSON.stringify(cycle.reconcileSummary).includes('Slow Program'), false);
@@ -420,6 +421,67 @@ test('a triggered Program without Program reuse executes with only its own sourc
   ], { triggerEvent: { mode: 'transform', nodes: ['Target'] } });
 
   assert.equal(executionProgramCount, 1);
+});
+
+test('TC-PERF-AFFECTED-CLOSURE: a warm trigger event counts only indexed candidates', async () => {
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program }) => ({
+      locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+      trigger: program.path === 'Trigger'
+        ? { mode: 'transform', parameters: { nodes: ['Target'] } }
+        : null,
+      changedThings: []
+    })
+  });
+  const unrelated = Array.from(
+    { length: 100 },
+    (_, index) => atom(`Unrelated ${index}`, 'pass', [], 'program')
+  );
+  const world = [
+    atom('Target'),
+    atom('Trigger', "trigger('transform', {'nodes': ['Target']}, main)", [], 'program'),
+    ...unrelated
+  ];
+  await scheduler.refresh(world);
+
+  const cycle = await scheduler.refresh(structuredClone(world), {
+    triggerEvent: { mode: 'transform', nodes: ['Target'] }
+  });
+
+  assert.equal(cycle.reconcileSummary.candidateProgramCount, 1);
+  assert.equal(cycle.reconcileSummary.executedProgramCount, 1);
+  assert.deepEqual(cycle.executedProgramPaths, ['Trigger']);
+});
+
+test('TC-PERF-AFFECTED-CLOSURE: a missing trigger index backfills from compiled contracts without unrelated execution', async () => {
+  const executions = [];
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program, triggered }) => {
+      if (triggered) executions.push(program.path);
+      return {
+        locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+        trigger: program.path === 'Trigger'
+          ? { mode: 'transform', parameters: { nodes: ['Target'] } }
+          : null,
+        changedThings: []
+      };
+    }
+  });
+  const world = [
+    atom('Target'),
+    atom('Trigger', "trigger('transform', {'nodes': ['Target']}, main)", [], 'program'),
+    ...Array.from({ length: 100 }, (_, index) => atom(`Unrelated ${index}`, 'pass', [], 'program'))
+  ];
+  await scheduler.refresh(world);
+  scheduler.triggerIndex.clear();
+
+  const cycle = await scheduler.refresh(structuredClone(world), {
+    triggerEvent: { mode: 'transform', nodes: ['Target'] }
+  });
+
+  assert.equal(cycle.reconcileSummary.triggerIndexBackfilled, 1);
+  assert.equal(cycle.reconcileSummary.candidateProgramCount, 1);
+  assert.deepEqual(executions, ['Trigger']);
 });
 
 test('a denied trigger contract is retried under a later authorized Agent context', async () => {

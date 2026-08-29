@@ -32,5 +32,10 @@ export function createMemoryProjectionRepository() {
     };
   }
 
-  return Object.freeze({ replaceBatch, readCurrent });
+  async function readLatest(worldId) {
+    const batch = worlds.get(worldId);
+    return batch ? structuredClone(batch) : null;
+  }
+
+  return Object.freeze({ replaceBatch, readCurrent, readLatest });
 }

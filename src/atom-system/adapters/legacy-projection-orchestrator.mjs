@@ -32,7 +32,7 @@ export function createLegacyProjectionOrchestrator({
 }) {
   if (!contextFile) throw problem('INVALID_PROJECTION_CONTEXT', 'Atom context file is required');
 
-  async function projectCurrent({ expectedRevision, lockState = [] } = {}) {
+  async function projectCurrent({ expectedRevision, lockState = [], affectedPaths = null } = {}) {
     const readStartedAt = performance.now();
     const journal = createJsonTransactionJournal({ file: journalFile });
     const journalState = await journal.readState();
@@ -61,13 +61,13 @@ export function createLegacyProjectionOrchestrator({
       repository
     });
     const rebuildStartedAt = performance.now();
-    await pipeline.rebuild({
+    const projectionResult = await pipeline.rebuild({
       contract: 'atom.world-snapshot',
       version: 1,
       worldId,
       revision: sourceRevision,
       facts
-    });
+    }, { affectedPaths });
     performanceTrace('projection-rebuild', {
       elapsedMs: Math.round(performance.now() - rebuildStartedAt)
     });
@@ -77,6 +77,7 @@ export function createLegacyProjectionOrchestrator({
     }
     return Object.freeze({
       sourceRevision,
+      projectionScope: projectionResult,
       graph: batch.projections.graph.value,
       spatial: batch.projections.spatial.value
     });

@@ -169,7 +169,10 @@ export function createInteractionRuntime({
       const startedAt = performance.now();
       const published = await projections.publish({
         expectedRevision: result.revisionAfter,
-        lockState: result.lockState
+        lockState: result.lockState,
+        ...(Array.isArray(result.affectedPaths) && result.affectedPaths.length
+          ? { affectedPaths: result.affectedPaths }
+          : {})
       });
       performanceTrace('projection-publish', {
         elapsedMs: Math.round(performance.now() - startedAt)

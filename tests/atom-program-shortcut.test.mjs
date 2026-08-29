@@ -260,6 +260,52 @@ test('shortcut locator follows target move and becomes broken when the target is
   assert.equal(JSON.stringify(broken).includes('乙/权威 Thing'), false);
 });
 
+test('persisted shortcut target rewrites are part of the exact local transaction closure', async (t) => {
+  const files = await fixture(t, [
+    atom('甲', '', [atom('权威 Thing', '唯一正文')]),
+    atom('乙'),
+    atom('其他目标'),
+    atom('引用域', '', [
+      createShortcutAtom({
+        thing: '入口',
+        targetPath: '甲/权威 Thing',
+        referenceId: 'persisted-reference'
+      }),
+      createShortcutAtom({
+        thing: '无关入口',
+        targetPath: '其他目标',
+        referenceId: 'unrelated-reference'
+      })
+    ]),
+    atom('备份', '', [], ['backup', 'default'])
+  ]);
+
+  const moved = await executeAtomLanguage({
+    ...files, source: 'transform {"thing.mov.乙":"甲/权威 Thing"}'
+  });
+  assert.equal(moved.ok, true, JSON.stringify(moved.errors));
+  assert.equal(moved.affectedPaths.includes('引用域/入口'), true, JSON.stringify(moved.affectedPaths));
+  assert.equal(moved.affectedPaths.includes('引用域/无关入口'), false);
+  assert.equal(
+    shortcutMetadata(findAtom(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), '引用域/入口')).target.path,
+    '乙/权威 Thing'
+  );
+
+  const discarded = await executeAtomLanguage({
+    ...files, source: 'transform {"thing.dsc.":"乙/权威 Thing"}'
+  });
+  assert.equal(discarded.ok, true, JSON.stringify(discarded.errors));
+  assert.equal(discarded.affectedPaths.includes('引用域/入口'), true, JSON.stringify(discarded.affectedPaths));
+  assert.equal(
+    shortcutMetadata(findAtom(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), '引用域/入口')).target.state,
+    'broken'
+  );
+  assert.deepEqual(
+    shortcutMetadata(findAtom(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), '引用域/无关入口')).target,
+    { state: 'linked', path: '其他目标' }
+  );
+});
+
 test('discarding a shortcut does not mutate the target facts', async (t) => {
   const world = [
     atom('目标', '权威正文'),

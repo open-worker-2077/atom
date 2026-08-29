@@ -200,6 +200,7 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
   }
 
   async function compactRecord(record) {
+    if (record?.historyMode === 'local-patch') return structuredClone(record);
     const [before, after] = await Promise.all([
       persistSnapshot(record.before),
       persistSnapshot(record.after)
@@ -209,6 +210,7 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
 
   async function hydrateRecord(record) {
     if (!record) return null;
+    if (record.historyMode === 'local-patch') return structuredClone(record);
     const [before, after] = await Promise.all([
       readSnapshot(record.before),
       readSnapshot(record.after)

@@ -1468,6 +1468,28 @@ export class ProgramRuntimeScheduler {
     }
   }
 
+  backfillTriggerIndexForEvent(triggerEvent) {
+    if (!triggerEvent) return 0;
+    let backfilled = 0;
+    for (const node of triggerEvent.nodes ?? []) {
+      const key = `${triggerEvent.mode}\0${node}`;
+      if (this.triggerIndex.has(key)) continue;
+      const matches = new Set();
+      for (const [programPath, entry] of this.triggerContracts) {
+        const contractMatch = entry.contract?.mode === triggerEvent.mode
+          && entry.contract.parameters?.nodes?.includes(node);
+        const changedMatch = triggerEvent.mode === 'transform'
+          && entry.changedThings?.includes(node);
+        if (contractMatch || changedMatch) matches.add(programPath);
+      }
+      if (matches.size) {
+        this.triggerIndex.set(key, matches);
+        backfilled += matches.size;
+      }
+    }
+    return backfilled;
+  }
+
   async ensureTriggerContracts(records, programs, executeExplore, agentOrigin = null) {
     if (this.triggerContractsInitialized) return;
     const recordsByPath = new Map(records.map((record) => [record.path, record]));
@@ -1764,6 +1786,7 @@ export class ProgramRuntimeScheduler {
     if (triggerEvent) await this.ensureTriggerContracts(
       records, programs, executeExplore, options.agentOrigin
     );
+    const triggerIndexBackfilled = this.backfillTriggerIndexForEvent(triggerEvent);
     const eventNodes = new Set((triggerEvent?.nodes ?? []).map((node) => node.trim()));
     const triggeredProgramPaths = new Set();
     if (triggerEvent) {
@@ -1915,7 +1938,14 @@ export class ProgramRuntimeScheduler {
         });
       }
     };
-    const operationEntries = programs.flatMap((program) => {
+    const indexedPrograms = triggerEvent
+      ? programs.filter((program) => (
+          triggeredProgramPaths.has(program.path)
+          || eventNodes.has(program.path)
+          || slotInvocationsByProgram.has(program.path)
+        ))
+      : programs;
+    const operationEntries = indexedPrograms.flatMap((program) => {
       const ownerPath = owningAgentPath(program, recordsByRef);
       if (programUsesJump(program) && ownerPath && ownerPath !== scopePath) return [];
       const scoped = slotInvocationsByProgram.get(program.path) ?? [];
@@ -2200,7 +2230,9 @@ export class ProgramRuntimeScheduler {
     ), null);
     const value = {
       fingerprint: key,
-      cached: applicable.length > 0 && applicable.every((entry) => entry.cached),
+      cached: triggerEvent
+        ? applicable.every((entry) => entry.cached)
+        : applicable.length > 0 && applicable.every((entry) => entry.cached),
       records,
       selectedProgram: options.programSelector ? programs[0] : null,
       locks: results.flatMap((result) => result.locks),
@@ -2227,6 +2259,7 @@ export class ProgramRuntimeScheduler {
       reconcileSummary: {
         candidateProgramCount: operationEntries.length,
         executedProgramCount: executedEntries.length,
+        triggerIndexBackfilled,
         ...(slowestExecution ? {
           slowestProgramFingerprint: slowestExecution.execution.fingerprint,
           slowestProgramDurationMs: Math.round(slowestExecution.execution.durationMs * 1000) / 1000
