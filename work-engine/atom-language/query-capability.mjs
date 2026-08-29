@@ -112,7 +112,10 @@ export function createAccessController(atoms, options = {}) {
   const legacyAccess = options.legacyAccess;
   const agentPath = options.agentPath ?? options.interaction?.agent?.path ?? null;
   const fixedAgentWindow = Boolean(agentPath && options.agentSecurity);
-  const { slotStructure, exploreWorld } = prepareAccessWorld(atoms);
+  const exploreWorld = Array.isArray(options.preparedAccessMatches)
+    ? { allMatches: options.preparedAccessMatches }
+    : prepareExploreWorld(atoms);
+  const slotStructure = prepareSlotStructureWorld(atoms);
   const graphLocks = [...(options.graphLocks ?? []), ...slotStructure.locks];
   const slotStructureRestricted = slotStructure.locks.length > 0;
   if ((!legacyAccess || legacyAccess.global === true) && !programLockIndex
@@ -274,6 +277,11 @@ export function prepareExploreWorld(atoms) {
 
 export function prepareAccessWorld(atoms) {
   const exploreWorld = prepareExploreWorld(atoms);
+  const slotStructure = prepareSlotStructureWorld(atoms);
+  return { exploreWorld, slotStructure };
+}
+
+export function prepareSlotStructureWorld(atoms) {
   let slotStructure = Object.isFrozen(atoms)
     ? preparedSlotStructureSnapshots.get(atoms)
     : null;
@@ -281,7 +289,7 @@ export function prepareAccessWorld(atoms) {
     slotStructure = compileSlotStructureGraphLocks(atoms);
     if (Object.isFrozen(atoms)) preparedSlotStructureSnapshots.set(atoms, slotStructure);
   }
-  return { exploreWorld, slotStructure };
+  return slotStructure;
 }
 
 export function inheritPreparedAccessWorld(previousAtoms, nextAtoms) {

@@ -728,6 +728,7 @@ export async function executeAtomLanguage(options = {}) {
     atoms,
     path.basename(contextFile)
   );
+  const preparedTransformAtoms = atoms;
   const revisionBefore = revisionOf(atoms);
   let committedAffectedPaths = [];
   const legacyMetadata = legacyAtomContextMetadata(atoms);
@@ -1081,7 +1082,10 @@ export async function executeAtomLanguage(options = {}) {
   let accessController = createAccessController(atoms, {
     ...options, programLockIndex, agentPath: initialAgentPath,
     agentSecurity: programCycle.agentSecurity,
-    graphLocks
+    graphLocks,
+    ...(atoms === preparedTransformAtoms
+      ? { preparedAccessMatches: preparedTransformWorld.matches }
+      : {})
   });
   const fatalShortcutFailure = requestedProgramRun
     ? (programCycle.failures ?? []).find((failure) => typeof failure.code === 'string'
