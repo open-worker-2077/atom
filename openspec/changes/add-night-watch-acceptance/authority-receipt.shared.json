@@ -1,0 +1,12 @@
+{
+  "contract": "atom.night-watch-authority-receipt",
+  "version": 1,
+  "receiptId": "ATOM-NIGHT-WATCH-20260829-01",
+  "agent": "🧊manage",
+  "testDomain": "🧊manage/工务/work/test/nw-20260829-shared-01",
+  "syntheticCleanup": { "allowed": true, "scope": "unique-subtree" },
+  "restart": { "allowed": true, "deadlineSeconds": 60 },
+  "githubPublication": { "allowed": true },
+  "unattended": true,
+  "expiresAt": "2026-08-31T00:00:00+08:00"
+}

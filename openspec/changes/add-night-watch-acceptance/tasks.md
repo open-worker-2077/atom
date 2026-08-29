@@ -25,5 +25,5 @@
 ## 4. Supporting entry and delivery checks
 
 - [x] 4.1 Integrate Chromium Web and mobile control journeys plus private gateway initial-navigation recovery without replacing the live CLI lane; retain real-phone acceptance as `pending-user-acceptance` until the user's manual check.
-- [ ] 4.2 Run the authorized shared-runtime night watch under `🧊manage/工务/work/test/<run-id>`, inspect every step independently, and retain the redacted report.
+- [x] 4.2 Run the authorized shared-runtime night watch under `🧊manage/工务/work/test/<run-id>`, inspect every step independently, and retain the redacted report (`NW-SHARED-532b79373224dec3`).
 - [ ] 4.3 Run only the focused gates mapped by Issue #1 (plus any additional gate justified by the actual changed boundary), validate OpenSpec strictly, review the diff, then push, merge, deploy, and update the authorized GitHub delivery records.
