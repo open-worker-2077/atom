@@ -69,7 +69,7 @@ test('local server notifies connected pages immediately after a committed operat
   await reader.cancel().catch(() => {});
 });
 
-test('path state includes one child-domain lookahead without downloading deeper descendants', async (context) => {
+test('path state includes two bounded child-domain lookaheads for rapid consecutive entry', async (context) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-path-state-'));
   const instance = await createSpatialServer({
     root: path.resolve(import.meta.dirname, '..'),
@@ -88,13 +88,13 @@ test('path state includes one child-domain lookahead without downloading deeper 
   const childPath = childDomainPath(rootNode);
   const childNode = (await create(childPath, '项目')).result.node;
   const grandchildPath = childDomainPath(childNode);
-  await create(grandchildPath, '不应预取的孙级节点');
+  await create(grandchildPath, '连续进入所需孙级节点');
 
   const response = await fetch(`${origin}/__spatial/api/state?path=root`);
   assert.equal(response.status, 200);
   const state = await response.json();
   assert.deepEqual(state.scope, { path: 'root' });
-  assert.deepEqual(state.knowledge.nodes.map((node) => node.label), ['atom.json', '项目']);
-  assert.deepEqual([...new Set(state.knowledge.nodes.map((node) => node.path))], ['root', childPath]);
+  assert.deepEqual(state.knowledge.nodes.map((node) => node.label), ['atom.json', '项目', '连续进入所需孙级节点']);
+  assert.deepEqual([...new Set(state.knowledge.nodes.map((node) => node.path))], ['root', childPath, grandchildPath]);
   assert.equal(state.knowledge.revision, 3);
 });
