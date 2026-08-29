@@ -10,18 +10,15 @@ import { programLockDeniedDiagnostic } from './program-locks.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { breakShortcutTargets, isShortcutAtom, rewriteShortcutTargetPaths } from './shortcut-runtime.mjs';
 
-function fieldsByBase(atom) {
-  const result = new Map();
-  for (const [rawKey, value] of Object.entries(atom)) {
-    const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
-    if (!result.has(parsed.baseKey)) result.set(parsed.baseKey, []);
-    result.get(parsed.baseKey).push({ rawKey, parsed, value });
-  }
-  return result;
-}
-
 function storedField(atom, baseKey) {
-  const fields = fieldsByBase(atom).get(baseKey) ?? [];
+  const fields = [];
+  for (const [rawKey, value] of Object.entries(atom ?? {})) {
+    if (rawKey !== baseKey
+      && !rawKey.startsWith(`${baseKey}@`)
+      && !rawKey.startsWith(`${baseKey}#`)) continue;
+    const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
+    if (parsed.baseKey === baseKey) fields.push({ rawKey, parsed, value });
+  }
   return fields.length === 1 ? fields[0] : null;
 }
 
