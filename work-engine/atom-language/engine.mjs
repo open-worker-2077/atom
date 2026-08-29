@@ -40,6 +40,7 @@ import {
   applyTransform,
   createExactTransformIndex,
   isBatchRenameItem,
+  prepareTransformRelationIndex,
   transformChangesStructure
 } from './transform-executor.mjs';
 import {
@@ -723,6 +724,10 @@ export async function executeAtomLanguage(options = {}) {
       )]
     };
   }
+  const preparedTransformWorld = prepareTransformRelationIndex(
+    atoms,
+    path.basename(contextFile)
+  );
   const revisionBefore = revisionOf(atoms);
   let committedAffectedPaths = [];
   const legacyMetadata = legacyAtomContextMetadata(atoms);
@@ -2749,7 +2754,9 @@ export async function executeAtomLanguage(options = {}) {
     atoms,
     item,
     contextFile,
-    authorize: accessController.authorize
+    authorize: accessController.authorize,
+    exactIndex: preparedTransformWorld.exactIndex,
+    allMatches: preparedTransformWorld.allMatches
   });
   if (transformed.error) {
     return failureBase(parsed, contextFile, projectionFile, atoms, [transformed.error], { messages: interactionMessages });

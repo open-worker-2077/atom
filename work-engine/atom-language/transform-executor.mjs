@@ -160,8 +160,8 @@ function setSupportSelectorValue(selectorObject, value) {
   selectorObject[Object.hasOwn(selectorObject, 'thing@program') ? 'thing@program' : 'thing'] = value;
 }
 
-function capturePartnerBindings(atoms, rootName, relevance = null) {
-  const matches = walkAtoms(atoms);
+function capturePartnerBindings(atoms, rootName, relevance = null, preparedMatches = null) {
+  const matches = preparedMatches ?? walkAtoms(atoms);
   const lookup = supportLookup(matches);
   const bindings = [];
   for (const source of matches) {
@@ -227,6 +227,24 @@ function rewritePartnerBindings(atoms, bindings) {
     if (before !== after) changedPaths.add(source.path.join('/'));
   }
   return [...changedPaths].sort();
+}
+
+const preparedTransformRelations = new WeakMap();
+
+export function prepareTransformRelationIndex(atoms, rootName) {
+  const prepared = preparedTransformRelations.get(atoms);
+  if (prepared?.rootName === rootName && prepared.matches && prepared.exactIndex) return prepared;
+  const matches = walkAtoms(atoms);
+  const next = {
+    rootName,
+    matches,
+    exactIndex: createExactTransformIndexFromMatches(matches),
+    bindings: prepared?.rootName === rootName
+      ? prepared.bindings
+      : capturePartnerBindings(atoms, rootName, null, matches)
+  };
+  preparedTransformRelations.set(atoms, next);
+  return next;
 }
 
 function mapClonedSubtree(original, clone, mapping) {
@@ -388,13 +406,13 @@ export function insertAuthoritativeSubtreeCopy({
   return { clone, bindings: allBindings };
 }
 
-export function createExactTransformIndex(atoms) {
+function createExactTransformIndexFromMatches(matches) {
   const index = new Map();
   const add = (selector, match) => {
     if (!index.has(selector)) index.set(selector, []);
     index.get(selector).push(match);
   };
-  for (const match of walkAtoms(atoms)) {
+  for (const match of matches) {
     const parts = match.path;
     add(storedField(match.atom, 'thing')?.value, match);
     for (let start = 0; start < parts.length - 1; start += 1) {
@@ -403,6 +421,10 @@ export function createExactTransformIndex(atoms) {
     add(`${WORLD_OUTSIDE_NAME}/${parts.join('/')}`, match);
   }
   return index;
+}
+
+export function createExactTransformIndex(atoms) {
+  return createExactTransformIndexFromMatches(walkAtoms(atoms));
 }
 
 export function transformChangesStructure(item) {
@@ -923,7 +945,8 @@ export async function applyTransform({
   contextFile,
   authorize = async () => ({ decision: 'allow' }),
   mutateInput = false,
-  exactIndex = null
+  exactIndex = null,
+  allMatches = null
 }) {
   const rootName = path.basename(contextFile);
   const nameField = item.fields.find((field) => field.baseKey === 'thing');
@@ -947,16 +970,17 @@ export async function applyTransform({
     ? copyAtomAncestry(atoms, originalSelection.match)
     : null;
   let partnerBindings = [];
+  let inheritedRelationBindings = null;
   if (!mutateInput && rewritesPaths) {
-    const originalMatches = walkAtoms(atoms);
+    const originalMatches = allMatches?.filter((match) => !match.virtual) ?? walkAtoms(atoms);
     const byAtom = new Map(originalMatches.map((match) => [match.atom, match]));
     const relevantAtoms = new Set(
       walkAtoms([originalSelection.match.atom]).map((match) => match.atom)
     );
-    partnerBindings = capturePartnerBindings(atoms, rootName, {
-      atoms: relevantAtoms,
-      names: new Set([...relevantAtoms].map((atom) => storedField(atom, 'thing')?.value))
-    });
+    const preparedRelations = prepareTransformRelationIndex(atoms, rootName);
+    partnerBindings = preparedRelations.bindings.filter((binding) => (
+      relevantAtoms.has(binding.sourceAtom) || relevantAtoms.has(binding.targetAtom)
+    ));
     const closureMatches = [originalSelection.match];
     const deepValueAtoms = new Set();
     for (const binding of partnerBindings) {
@@ -992,6 +1016,10 @@ export async function applyTransform({
     }
     copied = copyAtomClosure(atoms, closureMatches, deepValueAtoms);
     partnerBindings = remapPartnerBindings(partnerBindings, copied.mapping);
+    inheritedRelationBindings = remapPartnerBindings(
+      preparedRelations.bindings,
+      copied.mapping
+    );
   }
   const nextAtoms = mutateInput ? atoms : (copied?.atoms ?? cloneWorldFacts(atoms));
   const selected = copiesOnlyAncestry
@@ -1089,6 +1117,16 @@ export async function applyTransform({
   }
 
   const operation = structural.operation;
+  const preservePreparedRelations = () => {
+    if (inheritedRelationBindings && operation?.command.name !== 'cpy') {
+      preparedTransformRelations.set(nextAtoms, {
+        rootName,
+        matches: null,
+        exactIndex: null,
+        bindings: inheritedRelationBindings
+      });
+    }
+  };
   if (!operation) {
     const rename = nameCommands.find((command) => command.name === 'ren');
     if (
@@ -1135,9 +1173,9 @@ export async function applyTransform({
     if (!error && resultPath && resultPath !== sourcePath) {
       rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }], shortcutPaths);
     }
-    return error
-      ? rejectAfterMutation(error)
-      : {
+    if (error) return rejectAfterMutation(error);
+    preservePreparedRelations();
+    return {
           atoms: nextAtoms,
           resultName: storedField(selected.match.atom, 'thing').value,
           sourcePath,
@@ -1158,7 +1196,7 @@ export async function applyTransform({
     const worldRootDestination = command.name === 'mov' && command.parameter === WORLD_OUTSIDE_NAME;
     const destination = worldRootDestination
       ? { match: { atom: null, path: [], parent: null, index: -1 } }
-      : resolveUnique(nextAtoms, command.parameter, exactIndex);
+      : resolveUnique(nextAtoms, command.parameter, mutateInput ? exactIndex : null);
     if (destination.error) return destination;
     const targetName = storedField(target.atom, 'thing').value;
     const futurePath = worldRootDestination
@@ -1223,6 +1261,7 @@ export async function applyTransform({
     const resultPath = resultMatch?.path.join('/') ?? sourcePath;
     const shortcutPaths = [];
     rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }], shortcutPaths);
+    preservePreparedRelations();
     return {
       atoms: nextAtoms,
       resultName: nameField.value,
@@ -1261,6 +1300,7 @@ export async function applyTransform({
     const relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings);
     const shortcutPaths = [];
     breakShortcutTargets(nextAtoms, sourcePath, shortcutPaths);
+    preservePreparedRelations();
     return {
       atoms: nextAtoms,
       resultName: targetName,
@@ -1300,7 +1340,11 @@ export async function applyTransform({
     if (discard.originalParentPath === null) {
       destination = nextAtoms;
     } else {
-      const parent = resolveUnique(nextAtoms, discard.originalParentPath, exactIndex);
+      const parent = resolveUnique(
+        nextAtoms,
+        discard.originalParentPath,
+        mutateInput ? exactIndex : null
+      );
       if (parent.error) return parent;
       if ((await authorize(parent.match, 'write')).decision !== 'allow') {
         return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权恢复到目标位置；请反馈派发方') };
@@ -1320,6 +1364,7 @@ export async function applyTransform({
     containerOf(nextAtoms, target).splice(target.index, 1);
     destination.splice(Math.min(discard.originalIndex, destination.length), 0, target.atom);
     const relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings);
+    preservePreparedRelations();
     return {
       atoms: nextAtoms,
       resultName: targetName,
