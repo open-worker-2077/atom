@@ -778,6 +778,23 @@ async function formatAgentEntryContext(contextFile, agentPath) {
   return formatGraphJson(context, { omitEmptyStructuralArrays: true });
 }
 
+async function formatRuntimeAgentEntryContext(execute, executionOptions, agentPath) {
+  if (!agentPath) return '';
+  const result = await execute({
+    ...executionOptions,
+    source: `explore ${JSON.stringify({
+      thing: agentPath,
+      'contain$latitude+1': true,
+      'contain$latitude-2': true,
+      'contain$longitude+1': true,
+      'contain$longitude-1': true
+    })}`
+  });
+  if (!result?.ok) return '';
+  const value = graphResult(result);
+  return value ? formatGraphJson(value, { omitEmptyStructuralArrays: true }) : '';
+}
+
 export async function resolveAgentContext(contextFile, selector, options = {}) {
   if (typeof selector !== 'string' || !selector.trim()) {
     throw cliError('AGENT_REQUIRED', '公开 Atom CLI 需要 --agent 上下文起点');
@@ -853,13 +870,16 @@ export async function runAtomSession(options = {}) {
     ...(interaction ? { interaction } : {})
   };
   const entered = await execute({ ...executionOptions, source: 'atom' });
-  if (interaction?.agent) entered.agent = interaction.agent.path;
+  if (interaction?.agent && !entered.agent) entered.agent = interaction.agent.path;
   const writer = writeGraphResult;
   if (!entered.ok) return writer(entered, stdout, stderr);
 
   const count = Number.isInteger(entered.atomCount) ? `（${entered.atomCount} 个 Atom）` : '';
   stdout.write(`Atom Language 已就绪${count}\n`);
-  const entryContext = await formatAgentEntryContext(options.contextFile, interaction?.agent?.path);
+  const activeAgentPath = entered.agent ?? interaction?.agent?.path;
+  const entryContext = options.remoteEntryContext === true
+    ? await formatRuntimeAgentEntryContext(execute, executionOptions, activeAgentPath)
+    : await formatAgentEntryContext(options.contextFile, activeAgentPath);
   if (entryContext) stdout.write(`${entryContext}\n`);
   stdout.write('Ctrl+C 退出\n');
 
@@ -1029,6 +1049,7 @@ export async function runAtomCli(argv = [], overrides = {}) {
     const contextFile = parsed.contextFile ?? overrides.defaultContextFile;
     const projectionFile = parsed.projectionFile ?? overrides.defaultProjectionFile;
     let interaction = overrides.interaction ?? null;
+    let remoteAgentResolution = false;
     if (overrides.requireAgent) {
       if (parsed.explicitContext || parsed.projectionFile) {
         throw cliError(
@@ -1042,7 +1063,7 @@ export async function runAtomCli(argv = [], overrides = {}) {
       if (typeof parsed.agent !== 'string' || !parsed.agent.trim()) {
         throw cliError('AGENT_REQUIRED', '公开 Atom CLI 需要 --agent 上下文起点');
       }
-      const remoteAgentResolution = overrides.remoteAgentResolution
+      remoteAgentResolution = overrides.remoteAgentResolution
         ?? overrides.execute === executeAtomCommandEndpoint;
       interaction = remoteAgentResolution
         ? {
@@ -1070,6 +1091,7 @@ export async function runAtomCli(argv = [], overrides = {}) {
         projectionFile,
         receiverOptions: overrides.receiverOptions,
         execute: executeAtEndpoint,
+        remoteEntryContext: remoteAgentResolution,
         terminal: overrides.terminal,
         interaction
       });

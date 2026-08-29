@@ -237,6 +237,62 @@ test('interactive prompt identifies the selected @agent context', async (t) => {
   assert.match(stdout.text(), /"agent~current": "Workspace\/Work Agent"/u);
 });
 
+test('remote interactive entry obtains context from the runtime without reading backing facts', async (t) => {
+  const files = await world(t, [{
+    name: 'legacy remote facts', detail: '', children: [], partners: [{ object: 'target' }]
+  }]);
+  const stdin = new PassThrough();
+  stdin.isTTY = false;
+  stdin.end();
+  const stdout = output();
+  const stderr = output();
+  const calls = [];
+  const execute = async ({ source }) => {
+    calls.push(source);
+    if (source === 'atom') {
+      return {
+        ok: true,
+        command: 'atom',
+        atomCount: 2,
+        agent: 'Root/Remote Agent'
+      };
+    }
+    return {
+      ok: true,
+      command: 'explore',
+      items: [{
+        anchorPath: 'Root/Remote Agent',
+        matches: [{
+          thing: 'Remote Agent',
+          path: 'Root/Remote Agent',
+          types: ['program', 'agent']
+        }],
+        boundary: {
+          up: { state: 'complete', hasMore: false, nodes: 0, characters: 0 },
+          down: { state: 'complete', hasMore: false, nodes: 0, characters: 0 },
+          left: { state: 'complete', hasMore: false, nodes: 0, characters: 0 },
+          right: { state: 'complete', hasMore: false, nodes: 0, characters: 0 }
+        }
+      }]
+    };
+  };
+
+  const code = await runAtomCli(['--agent', 'Remote Agent'], publicCli(files, {
+    interactive: true,
+    remoteAgentResolution: true,
+    execute,
+    stdin,
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    terminal: false
+  }));
+
+  assert.equal(code, 0, stderr.text());
+  assert.deepEqual(calls.map((source) => source.split(' ')[0]), ['atom', 'explore']);
+  assert.match(stdout.text(), /"thing@program@agent": "Remote Agent"/u);
+  assert.doesNotMatch(stdout.text(), /SUPPORT_OWNER_CURRENT_REQUIRED/u);
+});
+
 test('interactive entry is Graph-JSON and does not expand @program source', async (t) => {
   const files = await world(t, [
     atom('Workspace', {

@@ -46,3 +46,10 @@ A steady Transform SHALL reuse one prepared snapshot and one computed revision t
 #### Scenario: Ordinary detail replacement work count
 - **WHEN** a detail-only Transform commits
 - **THEN** diagnostics show zero whole-world warm-ups, zero historical replay, one canonical revision computation, one authoritative `atom.json` replacement, and only affected-index updates
+
+### Requirement: Public CLI entry consumes the resident runtime context
+The public interactive CLI SHALL obtain Agent resolution and its entry-context projection from the configured 4784 command endpoint. It MUST NOT reopen or project the backing `atom.json` inside the CLI process after the runtime has accepted the Agent.
+
+#### Scenario: Interactive entry on a versioned compatibility world
+- **WHEN** `atom.cmd --agent AGENT` enters an interactive session against a world whose legacy support provenance is authorized only by the resident runtime manifest
+- **THEN** the CLI renders the runtime-provided bounded Agent context and reaches its prompt without directly parsing backing facts or requiring a second compatibility authority

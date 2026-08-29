@@ -10,10 +10,10 @@
 
 - [x] 2.1 Introduce a normalized Patch envelope with forward operations, inverse operations, base/commit revisions, and explicit changed paths.
 - [x] 2.2 Derive a monotonic affected-path closure for replace, rename, move, discard, and restore, including required ancestors and old/new descendants.
-- [ ] 2.3 Carry the same prepared authoritative snapshot, revision, Patch envelope, and closure through one runtime interaction without duplicate reads or cloning.
+- [x] 2.3 Carry the same prepared authoritative snapshot, revision, Patch envelope, and closure through one runtime interaction without duplicate reads or cloning.
 - [ ] 2.4 Separate commit revision identity from path-scoped cache validity and expose closure-expansion diagnostics.
-- [ ] 2.5 Establish one 4784 cold-preparation/readiness boundary and retain the prepared immutable world across all steady interactions.
-- [ ] 2.6 Compute the canonical revision once per committed interaction and carry it through persistence, receipt, cache adoption, and publication.
+- [x] 2.5 Establish one 4784 cold-preparation/readiness boundary and retain the prepared immutable world across all steady interactions.
+- [x] 2.6 Compute the canonical revision once per committed interaction and carry it through persistence, receipt, cache adoption, and publication.
 
 ## 3. Indexed runtime effects
 
@@ -21,7 +21,7 @@
 - [ ] 3.2 Update only intersecting reverse-index entries after a committed Patch and implement bounded local backfill for missing entries.
 - [ ] 3.3 Route Program reconciliation and authorization/lock/support/shortcut selection through the affected closure and reverse indexes.
 - [ ] 3.4 Verify indexed selection against focused shadow calculations and report candidate/executed counts in diagnostics.
-- [ ] 3.5 Return zero-candidate Transform events directly from the prepared reverse indexes without constructing whole-world Program records.
+- [x] 3.5 Return zero-candidate Transform events directly from the prepared reverse indexes without constructing whole-world Program records.
 
 ## 4. Incremental commit and projection
 
@@ -30,12 +30,13 @@
 - [x] 4.3 Make recovery idempotent across failures before and after authoritative atomic replacement.
 - [x] 4.4 Share Graph construction and publish only affected Web domain segments and relationship endpoints.
 - [x] 4.5 Reuse unaffected projection segments across revisions and preserve authoritative refresh/restart reconstruction.
-- [ ] 4.6 Move disposable Graph/Spatial synchronization outside the authoritative response path while exposing revisioned pending/recovery state.
+- [x] 4.6 Move disposable Graph/Spatial synchronization outside the authoritative response path while exposing revisioned pending/recovery state.
+- [x] 4.7 Route public interactive Agent entry context through 4784 and remove the direct backing-fact projection from that entry path.
 
 ## 5. Acceptance and delivery
 
 - [x] 5.1 Run focused tests for all five Issue #29 TestCases and record work-count evidence.
 - [ ] 5.2 Run `.rep/.ren/.mov/.dsc/.rst` plus steady exact Explore on the shared local acceptance world and verify every operation is under five seconds.
 - [ ] 5.3 Verify failure rollback, runtime restart, authoritative readback, Web refresh, and zero unrelated Program execution.
-- [ ] 5.4 Map each TestCase to an evidence ID and Issue #29, update Issue #1, and validate the OpenSpec change strictly.
+- [x] 5.4 Map each TestCase to an evidence ID and Issue #29, update Issue #1, and validate the OpenSpec change strictly.
 - [ ] 5.5 Commit, push, open and merge the PR after focused CI passes, deploy the shared runtime, and repeat the acceptance measurements.
