@@ -42,7 +42,7 @@ The run consumes a local authority receipt naming the allowed Agent, the exact `
 
 ### Checkpointed report without payloads
 
-Write append-safe JSON evidence under an ignored local runtime directory. Evidence records hashes, revisions, error codes, timing, and bounded summaries; it never stores CLI command bodies, Program source, Atom details, identities beyond the approved Agent path, or business facts. Resume rechecks health, manifest version, Agent path, and last committed synthetic coordinates before continuing.
+Write append-safe JSONL evidence under the run directory. Raw runtime material remains ignored; a redacted report may be committed under `deliverables/` only when it is bidirectionally mapped to its Issue and TestCase. Evidence records hashes, revisions, error codes, timing, and bounded summaries; it never stores CLI command bodies, Program source, Atom details, identities beyond the approved Agent path, or business facts. Resume rechecks health, manifest version, Agent path, and last committed synthetic coordinates before continuing.
 
 ### Command readiness after cold start
 
