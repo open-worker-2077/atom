@@ -412,6 +412,9 @@ export async function startAtomGraphServer(options = {}) {
     programScheduler,
     diagnostics,
     worldService,
+    ...(options.projectionDelayMs !== undefined
+      ? { projectionDelayMs: options.projectionDelayMs }
+      : {}),
     ...(timingInteractionId ? { onStage: createOneShotTimingObserver({ interactionId: timingInteractionId, diagnostics }) } : {}),
     ...(options.projectionOrchestrator ? { projectionOrchestrator: options.projectionOrchestrator } : {})
   });

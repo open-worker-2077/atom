@@ -287,6 +287,13 @@ export function inheritPreparedAccessWorld(previousAtoms, nextAtoms) {
   const previousSlotStructure = preparedSlotStructureSnapshots.get(previousAtoms);
   if (!previousExplore || !previousSlotStructure) return false;
   const currentByPath = new Map(walkAtoms(nextAtoms).map((match) => [match.path.join('/'), match]));
+  const previousPaths = previousExplore.allMatches
+    .filter((match) => !match.virtual)
+    .map((match) => match.path.join('/'));
+  if (previousPaths.length !== currentByPath.size
+    || previousPaths.some((candidatePath) => !currentByPath.has(candidatePath))) {
+    return false;
+  }
   const replacements = new Map();
   const allMatches = previousExplore.allMatches.map((previous) => {
     if (previous.virtual) return previous;

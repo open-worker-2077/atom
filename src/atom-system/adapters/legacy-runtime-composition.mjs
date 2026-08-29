@@ -283,6 +283,7 @@ export function createLegacyRuntimeComposition(options) {
     projectionOrchestrator = null,
     diagnostics = null,
     onStage = null,
+    projectionDelayMs = 4_000,
     programScheduler = createProgramRuntimeScheduler({ diagnosticRecorder: diagnostics }),
     graphPublisher = defaultGraphPublisher(graphFile),
     spatialPublisher = defaultSpatialPublisher(storeFile),
@@ -412,6 +413,7 @@ export function createLegacyRuntimeComposition(options) {
     humanWorkspace: humanWorkspaceTranslator,
     programRuntime: programScheduler,
     diagnostics,
-    onStage
+    onStage,
+    projectionDelayMs
   });
 }

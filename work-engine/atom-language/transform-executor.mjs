@@ -789,6 +789,13 @@ export function transformLogFileFor(contextFile) {
   return path.join(path.dirname(contextFile), 'atom.transform-log.json');
 }
 
+function cloneWorldFacts(atoms) {
+  // Authoritative Atom facts are JSON data. Node's generic structuredClone is
+  // disproportionately slow for the 16+ MB world, while the JSON-native path
+  // preserves the exact persistence domain and avoids cloning runtime objects.
+  return JSON.parse(JSON.stringify(atoms));
+}
+
 export function transformLogEventFileFor(contextFile) {
   return path.join(`${transformLogFileFor(contextFile)}.d`, 'events.jsonl');
 }
@@ -872,7 +879,7 @@ export async function applyTransform({
   const copied = copiesOnlyAncestry
     ? copyAtomAncestry(atoms, originalSelection.match)
     : null;
-  const nextAtoms = mutateInput ? atoms : (copied?.atoms ?? structuredClone(atoms));
+  const nextAtoms = mutateInput ? atoms : (copied?.atoms ?? cloneWorldFacts(atoms));
   const selected = copied ? { match: copied.match } : resolveUnique(nextAtoms, nameField.value, exactIndex);
   if (selected.error) return selected;
   const selectedBefore = copiesOnlyAncestry
@@ -1116,9 +1123,9 @@ export async function applyTransform({
     }
     const backup = backupMatch(nextAtoms);
     if (backup.error) return backup;
-    if ((await authorize(backup.match, 'write')).decision !== 'allow') {
-      return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权访问备份位置；请反馈派发方') };
-    }
+    // Discard is one kernel-owned reversible relocation. The caller must own
+    // the source subtree (checked above), but must not need browsing or write
+    // authority over the world-level backup container itself.
     if (target.atom === backup.match.atom) {
       return { error: diagnostic('DEFAULT_BACKUP_DISCARD_REJECTED', '不能丢弃默认备份仓') };
     }

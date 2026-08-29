@@ -22,6 +22,33 @@ function childPath(node) {
   return `${node.path}/${(hash >>> 0).toString(36)}`;
 }
 
+async function waitForKnowledge(url, predicate, message, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = await fetch(`${url}/__spatial/api/state`).then((response) => response.json());
+    if (predicate(state.knowledge)) return state.knowledge;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(message);
+}
+
+async function settleWorkspaceProjection(running, payload, timeoutMs = 2_000) {
+  const expectedRevision = payload.result?.projectionRecovery?.expectedRevision;
+  if (!expectedRevision) return payload;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = running.interactionRuntime.projectionStatus();
+    if (status.status === 'published' && status.expectedRevision === expectedRevision) {
+      payload.knowledge = await fetch(`${running.url}/__spatial/api/state`)
+        .then((response) => response.json())
+        .then((state) => state.knowledge);
+      return payload;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(`workspace projection ${expectedRevision} was not published`);
+}
+
 test('CLI rejects a stale 4784 runtime instead of trusting a newer local help contract', async (t) => {
   const server = http.createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'application/json' });
@@ -297,7 +324,7 @@ test('4784 keeps one isolated Program effect set fast across structural and reje
   }
 });
 
-test('4784 Web workspace node creation commits atom.json before returning the rebuilt projection', async (t) => {
+test('4784 Web workspace edits commit atom.json before asynchronously publishing the exact projection', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-web-create-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -307,7 +334,9 @@ test('4784 Web workspace node creation commits atom.json before returning the re
     atom('Existing', 'keep'),
     atom('Default Backup', '', [], 'backup@default')
   ], null, 2));
-  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile });
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, projectionDelayMs: 0
+  });
   t.after(() => running.close());
 
   const applyWebEdit = async (operation) => {
@@ -318,7 +347,7 @@ test('4784 Web workspace node creation commits atom.json before returning the re
     const payload = await response.json();
     assert.equal(response.status, 200, JSON.stringify(payload));
     assert.equal(payload.result.ok, true, JSON.stringify(payload.result.errors));
-    return payload;
+    return settleWorkspaceProjection(running, payload);
   };
   const rejectWebEdit = async (operation) => {
     const response = await fetch(`${running.url}/__atom/api/workspace-edit`, {
@@ -342,10 +371,16 @@ test('4784 Web workspace node creation commits atom.json before returning the re
 
   assert.equal(response.status, 200, JSON.stringify(payload));
   assert.equal(payload.result.ok, true, JSON.stringify(payload.result.errors));
+  await settleWorkspaceProjection(running, payload);
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(world[0].thing, 'Existing');
   assert.equal(world[2].thing, 'Created in Web');
-  assert.equal(payload.knowledge.nodes.some((node) => node.label === 'Created in Web'), true);
+  const createdKnowledge = await waitForKnowledge(
+    running.url,
+    (knowledge) => knowledge.nodes.some((node) => node.label === 'Created in Web'),
+    'created node projection was not published'
+  );
+  payload.knowledge = createdKnowledge;
 
   const refreshedState = await (await fetch(`${running.url}/__spatial/api/state`)).json();
   const refreshedCreated = refreshedState.knowledge.nodes.find((node) => node.label === 'Created in Web');
@@ -366,6 +401,7 @@ test('4784 Web workspace node creation commits atom.json before returning the re
   });
   const nestedPayload = await nestedResponse.json();
   assert.equal(nestedPayload.result.ok, true, JSON.stringify(nestedPayload));
+  await settleWorkspaceProjection(running, nestedPayload);
   const nestedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(nestedWorld[0].contain[0].thing, 'Nested in Web');
 
@@ -505,7 +541,9 @@ test('cold-start state includes deep Graph facts on first entry and refreshes an
   await fs.writeFile(contextFile, JSON.stringify([
     atom('Root', '', [atom('Level 1', '', [atom('Level 2', '', [atom('Level 3', 'cold-start fact')])])])
   ], null, 2));
-  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile });
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, projectionDelayMs: 0
+  });
   t.after(() => running.close());
 
   const firstState = await fetch(`${running.url}/__spatial/api/state`).then((response) => response.json());
@@ -527,7 +565,14 @@ test('cold-start state includes deep Graph facts on first entry and refreshes an
   assert.equal(response.status, 200, JSON.stringify(edited));
   assert.equal(edited.result.ok, true, JSON.stringify(edited.result.errors));
 
-  const refreshed = await fetch(`${running.url}/__spatial/api/state`).then((state) => state.json());
+  const refreshedKnowledge = await waitForKnowledge(
+    running.url,
+    (knowledge) => knowledge.nodes.some((node) => (
+      node.atomPath === 'Root/Level 1/Level 2/Level 3 renamed'
+    )),
+    'renamed deep node projection was not published'
+  );
+  const refreshed = { knowledge: refreshedKnowledge };
   const renamed = refreshed.knowledge.nodes.find((node) => node.atomPath === 'Root/Level 1/Level 2/Level 3 renamed');
   assert.ok(renamed, JSON.stringify(refreshed.knowledge));
   assert.equal(renamed.detail, 'authoritative detail');
@@ -548,7 +593,9 @@ test('4784 Web batch landing moves every selected sibling into one nested Atom c
     ]),
     atom('工作Agent', '', [], 'agent')
   ], null, 2));
-  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile });
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, projectionDelayMs: 0
+  });
   t.after(() => running.close());
 
   const initial = (await (await fetch(`${running.url}/__spatial/api/state`)).json()).knowledge;
@@ -578,7 +625,14 @@ test('4784 Web batch landing moves every selected sibling into one nested Atom c
   const payload = await response.json();
   assert.equal(response.status, 200, JSON.stringify(payload));
   assert.equal(payload.result.ok, true, JSON.stringify(payload.result.errors));
-  const movedPaths = payload.knowledge.nodes
+  const movedKnowledge = await waitForKnowledge(
+    running.url,
+    (knowledge) => sources.every((source) => knowledge.nodes.some((node) => (
+      node.atomPath === `work/项目/${source.label}`
+    ))),
+    'batch landing projection was not published'
+  );
+  const movedPaths = movedKnowledge.nodes
     .filter((node) => node.label.startsWith('工业气系统说明书-'))
     .map((node) => node.atomPath)
     .sort();

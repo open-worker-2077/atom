@@ -842,13 +842,17 @@ export async function executeAtomLanguage(options = {}) {
     && parsed.items.length === 1
     ? programRunRequest(parsed.items[0])
     : null;
+  const canReusePreparedRuntimeIndexes = parsed.command === 'transform'
+    && !parsed.batch
+    && parsed.items.length === 1
+    && isLocalizedSituationTransform(parsed.items[0]);
   let programCycle = { messages: [], locks: [], records: [] };
   let activeRequestDrivenLocks = [];
   if (options.programScheduler) {
     const indexPreparationStartedAt = performance.now();
     try {
       activeRequestDrivenLocks = await options.programScheduler.activeRequestDrivenLocks?.(atoms, {
-        preparedIndexesValid: options.programMode !== 'project'
+        preparedIndexesValid: canReusePreparedRuntimeIndexes
       }) ?? [];
       const initialAgentPath = interaction.agent?.path ?? null;
       const initialAgentSecurity = initialAgentPath
@@ -879,7 +883,7 @@ export async function executeAtomLanguage(options = {}) {
       const programOptions = {
         agentOrigin: interaction.agent,
         isolateFailures: true,
-        preparedIndexesValid: !projectPrograms,
+        preparedIndexesValid: canReusePreparedRuntimeIndexes,
         ...(parsed.command === 'explore' || agentOwnsLocalPrograms ? {
           allowWindowLockSnapshot: true,
           allowContextIncomplete: true
@@ -2795,7 +2799,7 @@ export async function executeAtomLanguage(options = {}) {
     try {
       postRefresh = await reconcileProgramsForWorld(nextAtoms, {
         mode: 'transform',
-        preparedIndexesValid: !programSurfaceChanged,
+        preparedIndexesValid: !programSurfaceChanged && isLocalizedSituationTransform(item),
         nodes: [...new Set([
           transformed.sourcePath,
           transformed.resultPath,
