@@ -579,12 +579,22 @@ test('http bridge preserves the semantic operation when a structural commit is q
             releaseFirst = () => resolve(response({ ok: true, knowledge: { revision: 2, nodes: [{ label: 'older confirmation' }] } }));
           });
         }
-        return response({ ok: true, knowledge: { revision: 3, nodes: [{ label: 'latest confirmation' }] } });
+        return response({
+          ok: true,
+          knowledge: {
+            revision: 3,
+            nodes: [{
+              id: 'moved-b', key: 'root/doubtful::moved-b', path: 'root/doubtful',
+              label: 'latest confirmation'
+            }]
+          }
+        });
       }
       return response({ result: { revision: 2 } });
     },
     addEventListener: (name, listener) => listeners.set(name, listener), setInterval: () => 0
   };
+  installWorkspaceModel(window);
   window.window = window;
   vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
   await new Promise((resolve) => setImmediate(resolve));
@@ -597,7 +607,10 @@ test('http bridge preserves the semantic operation when a structural commit is q
   } });
   await Promise.resolve();
   committed({ detail: {
-    operation: { kind: 'node-land', source: { key: 'root::b' }, target: { path: 'root/doubtful' } },
+    operation: {
+      kind: 'node-land', source: { key: 'root::b', path: 'root' },
+      target: { path: 'root/doubtful' }, draft: { label: 'latest confirmation' }
+    },
     knowledge: { revision: 1, nodes: [] }
   } });
   releaseFirst();
@@ -645,6 +658,7 @@ test('a queued view save never prevents the latest authoritative move projection
     addEventListener: (name, listener) => listeners.set(name, listener),
     setInterval: () => 0
   };
+  installWorkspaceModel(window);
   window.window = window;
   vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
   await new Promise((resolve) => setImmediate(resolve));
@@ -1225,5 +1239,67 @@ test('batch landing is acknowledged only when every selected Atom exists in the 
   assert.equal(persisted.length, 0, 'partial authoritative results must not be reported as saved');
   assert.equal(failed.length, 1);
   assert.match(failed[0].message, /整批|2|1/);
+  assert.equal(imports.at(-1).revision, 1, 'the optimistic preview rolls back to the last authoritative world');
+});
+
+test('single landing is failed and rolled back when authority keeps the source without one destination node', async () => {
+  const listeners = new Map();
+  const imports = [];
+  const persisted = [];
+  const failed = [];
+  const sourceNode = {
+    id: 'source-id', key: 'source::source-id', path: 'source',
+    atomPath: '来源域/待移动节点', label: '待移动节点'
+  };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge: (knowledge) => { imports.push(knowledge); return true; },
+      exportField: () => ({ path: 'source' })
+    },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state') && !options.method) {
+        return response({ knowledge: { revision: 1, nodes: [sourceNode], edges: [] } });
+      }
+      if (url.endsWith('/workspace-edit')) {
+        return response({
+          ok: true,
+          result: { ok: true },
+          knowledge: { revision: 2, nodes: [sourceNode], edges: [] }
+        });
+      }
+      return response({ result: {} });
+    },
+    CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    dispatchEvent: (event) => {
+      if (event.type === 'spatial-workspace-persisted') persisted.push(event.detail);
+      if (event.type === 'spatial-workspace-persist-failed') failed.push(event.detail);
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => 0
+  };
+  installWorkspaceModel(window);
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  imports.length = 0;
+
+  await listeners.get('spatial-workspace-committed')({ detail: {
+    persistenceId: 42,
+    operation: {
+      kind: 'node-land',
+      source: { key: sourceNode.key }, sourceNode,
+      target: { path: 'target' }, draft: sourceNode
+    },
+    knowledge: { revision: 1, nodes: [], edges: [] }
+  } });
+
+  assert.equal(persisted.length, 0, 'an unchanged authority must never be reported as a saved move');
+  assert.equal(failed.length, 1);
+  assert.match(failed[0].message, /单节点|目标|来源/);
   assert.equal(imports.at(-1).revision, 1, 'the optimistic preview rolls back to the last authoritative world');
 });

@@ -104,8 +104,27 @@
       MAX_LABEL_LENGTH
     );
     if (!targetPath || !label) return null;
-    return (Array.isArray(knowledge && knowledge.nodes) ? knowledge.nodes : [])
-      .find((node) => node && node.path === targetPath && node.label === label) || null;
+    const nodes = Array.isArray(knowledge && knowledge.nodes) ? knowledge.nodes : [];
+    const targets = nodes.filter((node) => node && node.path === targetPath && node.label === label);
+    if (targets.length !== 1) return null;
+    const sourceNode = operation.sourceNode || operation.draft || null;
+    const sourcePath = safeText(
+      operation.source && operation.source.path
+        || sourceNode && (sourceNode.path || sourceNode.workspacePath),
+      "",
+      512
+    );
+    if (sourcePath && sourcePath !== targetPath) {
+      const sourceKey = safeText(operation.source && operation.source.key, "", 1024);
+      const sourceAtomPath = safeText(sourceNode && sourceNode.atomPath, "", 4000);
+      const sourceRemains = nodes.some((node) => node && (
+        (sourceKey && node.key === sourceKey)
+        || (sourceAtomPath && node.atomPath === sourceAtomPath)
+        || (node.path === sourcePath && node.label === label)
+      ));
+      if (sourceRemains) return null;
+    }
+    return targets[0];
   }
 
   function persistedBatchLandingNodes(operation, knowledge) {
