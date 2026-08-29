@@ -55,6 +55,56 @@ test('maintenance CLI requests enter through the same interaction runtime contra
   }]);
 });
 
+test('trusted maintenance is composition-only and reaches the interaction runtime as an execution option', async () => {
+  const calls = [];
+  const trusted = createRuntimeCliExecutor({
+    trustedMaintenance: true,
+    interactionRuntime: {
+      initialize: async () => ({ projectionStatus: 'published' }),
+      execute: async (...args) => { calls.push(args); return { ok: true }; }
+    },
+    randomId: () => 'trusted-maintenance-correlation'
+  });
+
+  await trusted({ source: 'atom', history: [] });
+
+  assert.deepEqual(calls, [[{
+    source: 'atom', correlationId: 'trusted-maintenance-correlation', history: []
+  }, { trustedMaintenance: true, programMode: 'project' }]]);
+});
+
+test('trusted maintenance atomically moves a Program-locked subtree while ordinary maintenance-shaped execution stays denied', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-trusted-maintenance-move-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Root', '', [
+      atom('Locked', 'preserve', [atom('Child', 'preserve')]),
+      atom('Destination'),
+      atom('Guard', 'lock({"targets":{"paths":["Root/Locked"],"scope":"subtree"},"actions":["transform"],"labels":["migration-key"]})', [], 'program')
+    ])
+  ]), 'utf8');
+  const source = 'transform {"thing.mov.Root/Destination":"Root/Locked"}';
+
+  const ordinary = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
+  const denied = await ordinary({ source, interaction: { id: 'ordinary-maintenance-shaped' } });
+  assert.equal(denied.ok, false, JSON.stringify(denied));
+  assert.ok(denied.errors.some((error) => ['GRAPH_LOCK_DENIED', 'WINDOW_ACCESS_DENIED'].includes(error.code)), JSON.stringify(denied));
+  assert.ok(findAtom(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Root/Locked'));
+
+  const trusted = createRuntimeCliExecutor({
+    contextFile, graphFile, storeFile, trustedMaintenance: true
+  });
+  const moved = await trusted({ source, interaction: { id: 'approved-maintenance-move' } });
+  assert.equal(moved.ok, true, JSON.stringify(moved));
+  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(findAtom(world, 'Root/Locked'), null);
+  assert.equal(findAtom(world, 'Root/Destination/Locked').situation, 'preserve');
+  assert.equal(findAtom(world, 'Root/Destination/Locked/Child').situation, 'preserve');
+});
+
 test('maintenance CLI refuses an intent before world dispatch when projection preparation fails', async () => {
   let dispatched = false;
   const execute = createRuntimeCliExecutor({
