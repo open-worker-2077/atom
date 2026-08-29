@@ -90,22 +90,30 @@ function walkAtoms(atoms) {
   return result;
 }
 
-function supportTarget(source, selector, matches, rootName) {
+function supportLookup(matches) {
+  const byPath = new Map();
+  const byName = new Map();
+  for (const match of matches) {
+    byPath.set(match.path.join('/'), match);
+    const name = storedField(match.atom, 'thing')?.value;
+    const named = byName.get(name) ?? [];
+    named.push(match);
+    byName.set(name, named);
+  }
+  return { byPath, byName };
+}
+
+function supportTarget(source, selector, matches, rootName, lookup = null) {
   if (typeof selector !== 'string' || !selector) return null;
   const normalized = rootName && selector.startsWith(`${rootName}/`)
     ? selector.slice(rootName.length + 1)
     : selector;
-  const byPath = new Map(matches.map((match) => [
-    match.path.join('/'),
-    match
-  ]));
+  const { byPath, byName } = lookup ?? supportLookup(matches);
   if (normalized.includes('/')) return byPath.get(normalized) ?? null;
   const siblingPath = [...source.path.slice(0, -1), normalized].join('/');
   const sibling = byPath.get(siblingPath);
   if (sibling) return sibling;
-  const named = matches.filter((match) => (
-    storedField(match.atom, 'thing')?.value === normalized
-  ));
+  const named = byName.get(normalized) ?? [];
   for (let depth = source.path.length - 2; depth >= 0; depth -= 1) {
     const domain = source.path.slice(0, depth + 1);
     const scoped = named.filter((match) => domain.every((part, index) => match.path[index] === part));
@@ -157,13 +165,14 @@ function setSupportSelectorValue(selectorObject, value) {
 
 function capturePartnerBindings(atoms, rootName) {
   const matches = walkAtoms(atoms);
+  const lookup = supportLookup(matches);
   const bindings = [];
   for (const source of matches) {
     const partners = storedField(source.atom, 'support')?.value;
     if (!Array.isArray(partners)) continue;
     supportSelectorRefs(partners).forEach(({ selectorObject, locator }) => {
       const selector = supportSelectorValue(selectorObject);
-      const target = supportTarget(source, selector, matches, rootName);
+      const target = supportTarget(source, selector, matches, rootName, lookup);
       if (!target) return;
       bindings.push({
         sourceAtom: source.atom,
@@ -177,11 +186,11 @@ function capturePartnerBindings(atoms, rootName) {
   return bindings;
 }
 
-function canonicalPartnerObject(source, target, matches, explicitPath) {
+function canonicalPartnerObject(source, target, matches, explicitPath, byName = null) {
   if (explicitPath) return target.path.join('/');
   const targetName = storedField(target.atom, 'thing').value;
   if (source.parent === target.parent) return targetName;
-  const sameName = matches.filter((match) => (
+  const sameName = byName?.get(targetName) ?? matches.filter((match) => (
     storedField(match.atom, 'thing')?.value === targetName
   ));
   return sameName.length === 1 ? targetName : target.path.join('/');
@@ -189,6 +198,7 @@ function canonicalPartnerObject(source, target, matches, explicitPath) {
 
 function rewritePartnerBindings(atoms, bindings) {
   const matches = walkAtoms(atoms);
+  const lookup = supportLookup(matches);
   const byAtom = new Map(matches.map((match) => [match.atom, match]));
   const changedPaths = new Set();
   for (const binding of bindings) {
@@ -203,7 +213,8 @@ function rewritePartnerBindings(atoms, bindings) {
       source,
       target,
       matches,
-      binding.explicitPath
+      binding.explicitPath,
+      lookup.byName
     );
     setSupportSelectorValue(binding.selectorObject, after);
     if (before !== after) changedPaths.add(source.path.join('/'));
