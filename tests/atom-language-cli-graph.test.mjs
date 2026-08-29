@@ -192,7 +192,9 @@ test('the isolated live runner launches public atom.cmd through the Windows shel
   assert.equal(atomCmdSpawnOptions().shell, process.platform === 'win32' ? true : undefined);
 });
 
-test('the Windows atom.cmd wrapper preserves --agent for an isolated endpoint', async (t) => {
+test('the Windows atom.cmd wrapper preserves --agent for an isolated endpoint', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-external-cli-agent-'));
   const fixture = createNightWatchCliFixture(directory);
   await fs.writeFile(fixture.contextFile, JSON.stringify(fixture.world, null, 2));
@@ -300,7 +302,9 @@ test('an explicitly registered ^ synthetic Agent proves path-lock fail-closed an
   assert.match(`${overreach.stdout}\n${overreach.stderr}`, /AGENT_JURISDICTION_ESCALATION/u);
 });
 
-test('the full isolated public-CLI journey keeps shortcut execution in the moved Agent domain', async (t) => {
+test('the full isolated public-CLI journey keeps shortcut execution in the moved Agent domain', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
   const evidenceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-night-watch-cli-journey-'));
   t.after(() => fs.rm(evidenceDir, { recursive: true, force: true }));
   const result = await runIsolatedCliJourney(evidenceDir);

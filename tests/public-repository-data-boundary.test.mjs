@@ -41,6 +41,7 @@ test('tracked JSON is limited to source manifests, public schemas and reviewed a
     'docs/architecture/atom-capability-graph.json',
     'package-lock.json',
     'package.json',
+    'scripts/night-watch-manifest.json',
     'work-engine/atom-language/package.json',
     'work-engine/atom-language/program-function-registry.json',
     'work-engine/atom-language/work-order-registry.json'
