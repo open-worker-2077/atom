@@ -34,3 +34,52 @@ test('shared night-watch readiness follows the current atomProjection health fie
     (error) => error.code === 'NIGHT_WATCH_SHARED_NOT_READY'
   );
 });
+
+test('shared evidence entries carry timing, dependency, and exact Issue-TestCase refs', async () => {
+  const { createSharedEvidenceEntry } = await import(moduleUrl);
+  const entry = createSharedEvidenceEntry({
+    id: 'verify.lock-denied',
+    status: 'passed',
+    startedAt: '2026-08-29T00:00:00.000Z',
+    endedAt: '2026-08-29T00:00:01.250Z',
+    receiptText: 'expected denial',
+    diagnostics: ['GRAPH_LOCK_DENIED']
+  });
+
+  assert.equal(entry.durationMilliseconds, 1250);
+  assert.equal(entry.dependencyStatus, 'ready');
+  assert.equal(entry.errorCode, 'OK');
+  assert.equal(entry.issueNodeId, 'issue-13');
+  assert.equal(entry.testCaseId, 'TC-I13-LOCK-MATRIX');
+  assert.match(entry.receiptHash, /^[a-f0-9]{64}$/u);
+  assert.throws(
+    () => createSharedEvidenceEntry({
+      id: 'unmapped-step', status: 'passed', startedAt: '2026-08-29T00:00:00.000Z',
+      endedAt: '2026-08-29T00:00:00.001Z', receiptText: '', diagnostics: []
+    }),
+    (error) => error.code === 'NIGHT_WATCH_SHARED_STEP_UNMAPPED'
+  );
+});
+
+test('shared runtime exit recovery starts the service once when the journey leaves it unavailable', async () => {
+  const { runWithSharedServiceRecovery } = await import(moduleUrl);
+  let probes = 0;
+  let starts = 0;
+
+  await assert.rejects(
+    runWithSharedServiceRecovery(
+      async () => { throw Object.assign(new Error('journey failed'), { code: 'JOURNEY_FAILED' }); },
+      {
+        probeHealth: async () => {
+          probes += 1;
+          if (probes === 1) throw Object.assign(new Error('offline'), { code: 'OFFLINE' });
+          return { ok: true };
+        },
+        startService: async () => { starts += 1; }
+      }
+    ),
+    (error) => error.code === 'JOURNEY_FAILED'
+  );
+  assert.equal(starts, 1);
+  assert.equal(probes, 2);
+});
