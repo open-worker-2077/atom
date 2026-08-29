@@ -8,10 +8,57 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { validateNightWatchAuthorityReceipt } from './night-watch-authority.mjs';
+import { nightWatchCaseCatalog } from './night-watch-case-catalog.mjs';
 import { createAtomCliAdapter } from './night-watch-cli-adapter.mjs';
+import { validateNightWatchManifest } from './night-watch-manifest.mjs';
 
 const TEST_PREFIX = '🧊manage/工务/work/test/';
 const execFileAsync = promisify(execFile);
+
+const SHARED_STEP_CASES = Object.freeze({
+  'health.before': ['issue-7', 'TC-I7-HEALTH-RECOVERY'],
+  'health.after': ['issue-7', 'TC-I7-HEALTH-RECOVERY'],
+  'cli.help': ['issue-1', 'TC-I1-AGENT-EXACT'],
+  'agent.exact': ['issue-1', 'TC-I1-AGENT-EXACT'],
+  'fixture.create': ['issue-10', 'TC-I10-TRANSFORM-VIRTUAL-ROOT'],
+  'fixture.resume-readback': ['issue-10', 'TC-I10-TRANSFORM-VIRTUAL-ROOT'],
+  'runner.register': ['issue-1', 'TC-I1-AGENT-EXACT'],
+  'nolabel.register': ['issue-13', 'TC-I13-LOCK-MATRIX'],
+  'runner.resolve': ['issue-1', 'TC-I1-AGENT-EXACT'],
+  'program.create': ['issue-1', 'TC-I1-PROGRAM-RUN-READBACK'],
+  'program.run': ['issue-1', 'TC-I1-PROGRAM-RUN-READBACK'],
+  'program.readback': ['issue-1', 'TC-I1-PROGRAM-RUN-READBACK'],
+  'verify.program-result': ['issue-1', 'TC-I1-PROGRAM-RUN-READBACK'],
+  'transform.create': ['issue-10', 'TC-I10-TRANSFORM-VIRTUAL-ROOT'],
+  'transform.update': ['issue-10', 'TC-I10-TRANSFORM-VIRTUAL-ROOT'],
+  'transform.readback': ['issue-10', 'TC-I10-TRANSFORM-VIRTUAL-ROOT'],
+  'verify.transform-result': ['issue-10', 'TC-I10-TRANSFORM-VIRTUAL-ROOT'],
+  'lock.activate': ['issue-13', 'TC-I13-LOCK-MATRIX'],
+  'lock.denied': ['issue-13', 'TC-I13-LOCK-MATRIX'],
+  'verify.lock-denied': ['issue-13', 'TC-I13-LOCK-MATRIX'],
+  'verify.lock-unchanged': ['issue-13', 'TC-I13-LOCK-MATRIX'],
+  'shortcut.create': ['issue-11', 'TC-I11-SHORTCUT-LIFECYCLE'],
+  'shortcut.run': ['issue-11', 'TC-I11-SHORTCUT-LIFECYCLE'],
+  'shortcut.readback': ['issue-11', 'TC-I11-SHORTCUT-LIFECYCLE'],
+  'verify.shortcut': ['issue-11', 'TC-I11-SHORTCUT-LIFECYCLE'],
+  'jump.programs.create': ['issue-2', 'TC-I2-JUMP-LIFECYCLE'],
+  'jump.register': ['issue-2', 'TC-I2-JUMP-LIFECYCLE'],
+  'jump.trigger': ['issue-2', 'TC-I2-JUMP-LIFECYCLE'],
+  'jump.resolve': ['issue-2', 'TC-I2-JUMP-LIFECYCLE'],
+  'slot.create': ['issue-4', 'TC-I4-SLOT-CONSERVATION'],
+  'slot.seal-program.create': ['issue-4', 'TC-I4-SLOT-CONSERVATION'],
+  'slot.seal': ['issue-4', 'TC-I4-SLOT-CONSERVATION'],
+  'slot.print': ['issue-4', 'TC-I4-SLOT-CONSERVATION'],
+  'slot.print.run': ['issue-4', 'TC-I4-SLOT-CONSERVATION'],
+  'slot.readback': ['issue-4', 'TC-I4-SLOT-CONSERVATION'],
+  'verify.slot-instance': ['issue-4', 'TC-I4-SLOT-CONSERVATION'],
+  'work-order.program.create': ['issue-1', 'TC-I1-WORK-ORDER-ATOMIC'],
+  'work-order.create': ['issue-1', 'TC-I1-WORK-ORDER-ATOMIC'],
+  'work-order.readback': ['issue-1', 'TC-I1-WORK-ORDER-ATOMIC'],
+  'verify.work-order': ['issue-1', 'TC-I1-WORK-ORDER-ATOMIC'],
+  restart: ['issue-7', 'TC-I7-RESTART-ROLLBACK'],
+  'persistence.readback': ['issue-7', 'TC-I7-PERSISTENCE-READBACK']
+});
 
 function sharedError(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -63,6 +110,43 @@ export function assertSharedHealth(health) {
 
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+export function createSharedEvidenceEntry(input) {
+  const refs = SHARED_STEP_CASES[input.id];
+  if (!refs) {
+    throw sharedError('NIGHT_WATCH_SHARED_STEP_UNMAPPED', 'Shared night-watch step lacks an exact IssueNode and TestCase mapping', { id: input.id });
+  }
+  const durationMilliseconds = Date.parse(input.endedAt) - Date.parse(input.startedAt);
+  if (!Number.isInteger(durationMilliseconds) || durationMilliseconds < 0) {
+    throw sharedError('NIGHT_WATCH_SHARED_TIMING_INVALID', 'Shared night-watch step timing is invalid', { id: input.id });
+  }
+  return {
+    id: input.id,
+    status: input.status,
+    startedAt: input.startedAt,
+    endedAt: input.endedAt,
+    durationMilliseconds,
+    dependencyStatus: input.dependencyStatus ?? 'ready',
+    errorCode: input.errorCode ?? (input.status === 'passed' ? 'OK' : 'NIGHT_WATCH_SHARED_STEP_FAILED'),
+    issueNodeId: refs[0],
+    testCaseId: refs[1],
+    receiptHash: sha256(input.receiptText ?? ''),
+    diagnostics: input.diagnostics ?? []
+  };
+}
+
+export async function runWithSharedServiceRecovery(action, { probeHealth, startService }) {
+  try {
+    return await action();
+  } finally {
+    try {
+      await probeHealth();
+    } catch {
+      await startService();
+      await probeHealth();
+    }
+  }
 }
 
 function jsonReceipt(stdout) {
@@ -121,8 +205,30 @@ async function restartSharedRuntime(deadlineSeconds) {
   });
 }
 
+async function probeSharedRuntime() {
+  const response = await fetch('http://127.0.0.1:4784/__spatial/api/health');
+  return assertSharedHealth(await response.json());
+}
+
+async function startSharedRuntimeOnce() {
+  await execFileAsync('schtasks.exe', ['/Run', '/TN', 'Atom Graph Runtime'], { windowsHide: true });
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
+    try {
+      return await probeSharedRuntime();
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  throw sharedError('NIGHT_WATCH_SHARED_RECOVERY_FAILED', 'Shared Atom runtime did not recover after one authorized start attempt');
+}
+
 async function main() {
   const options = parseSharedNightWatchOptions(process.argv.slice(2));
+  const manifest = validateNightWatchManifest(
+    JSON.parse(await fs.readFile(new URL('./night-watch-manifest.json', import.meta.url), 'utf8')),
+    nightWatchCaseCatalog
+  );
   if (!options.authorityFile) {
     throw sharedError('NIGHT_WATCH_SHARED_AUTHORITY_REQUIRED', 'Use --authority with the approved receipt JSON');
   }
@@ -141,12 +247,18 @@ async function main() {
     try {
       const result = await action();
       const text = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`;
-      const entry = { id, status: 'passed', startedAt, endedAt: new Date().toISOString(), receiptHash: sha256(text), diagnostics: diagnosticCode(text) };
+      const entry = createSharedEvidenceEntry({
+        id, status: 'passed', startedAt, endedAt: new Date().toISOString(), receiptText: text,
+        diagnostics: diagnosticCode(text)
+      });
       evidence.push(entry);
       await fs.appendFile(path.join(options.evidenceDir, 'shared-cli-live-attempts.jsonl'), `${JSON.stringify(entry)}\n`, 'utf8');
       return result;
     } catch (error) {
-      const entry = { id, status: 'failed', startedAt, endedAt: new Date().toISOString(), errorCode: error.code ?? 'NIGHT_WATCH_SHARED_STEP_FAILED' };
+      const entry = createSharedEvidenceEntry({
+        id, status: 'failed', startedAt, endedAt: new Date().toISOString(),
+        errorCode: error.code ?? 'NIGHT_WATCH_SHARED_STEP_FAILED', receiptText: error.code ?? error.name ?? 'failure'
+      });
       evidence.push(entry);
       await fs.appendFile(path.join(options.evidenceDir, 'shared-cli-live-attempts.jsonl'), `${JSON.stringify(entry)}\n`, 'utf8');
       throw error;
@@ -327,7 +439,7 @@ async function main() {
   });
   const evidenceId = `NW-SHARED-${sha256(JSON.stringify(evidence)).slice(0, 16)}`;
   const report = {
-    contract: 'atom.night-watch.shared-cli-live', version: 1, status: 'accepted', evidenceId,
+    contract: 'atom.night-watch.shared-cli-live', version: 1, manifestVersion: manifest.version, status: 'accepted', evidenceId,
     generatedAt: new Date().toISOString(), runId: options.runId,
     candidate: process.env.ATOM_CANDIDATE ?? 'local-candidate',
     scope: 'redacted-synthetic-subtree',
@@ -340,4 +452,9 @@ async function main() {
 
 const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : null;
 const currentFile = path.resolve(fileURLToPath(import.meta.url));
-if (invokedFile === currentFile) await main();
+if (invokedFile === currentFile) {
+  await runWithSharedServiceRecovery(main, {
+    probeHealth: probeSharedRuntime,
+    startService: startSharedRuntimeOnce
+  });
+}
