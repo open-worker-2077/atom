@@ -230,12 +230,20 @@ export function createCommitCoordinator({
               result: {
                 restoredCommandId: targetCommandId,
                 affectedAtoms: target.receipt.affectedAtoms,
-                affectedAtomsComplete: true
+                affectedAtomsComplete: true,
+                ...(target.receipt.result?.previousCompatibilityManifest
+                  ? { compatibilityManifest: target.receipt.result.previousCompatibilityManifest }
+                  : {})
               }
             })
           : ({
               facts: structuredClone(target.before.facts),
-              result: { restoredCommandId: targetCommandId }
+              result: {
+                restoredCommandId: targetCommandId,
+                ...(target.receipt.result?.previousCompatibilityManifest
+                  ? { compatibilityManifest: target.receipt.result.previousCompatibilityManifest }
+                  : {})
+              }
             })
       });
     });

@@ -160,7 +160,11 @@ test('rollback applies the inverse local patch without restoring an unrelated wo
     transition: () => ({
       facts: nextFacts,
       changedPaths: ['Root/Target'],
-      result: { affectedAtoms: [{ path: 'Root/Target', axes: ['situation'] }] }
+      result: {
+        affectedAtoms: [{ path: 'Root/Target', axes: ['situation'] }],
+        compatibilityManifest: { currentWorldRevision: 'after' },
+        previousCompatibilityManifest: { currentWorldRevision: 'before' }
+      }
     })
   });
 
@@ -178,13 +182,14 @@ test('rollback applies the inverse local patch without restoring an unrelated wo
   assert.equal((await worldRepository.read()).facts[0].contain[1].situation, 'still keep');
 
   await writeJsonAtomically(worldRepository.file, nextFacts);
-  await coordinator.rollback({
+  const rolledBack = await coordinator.rollback({
     targetCommandId: 'cmd-local-change',
     command: command('cmd-local-rollback', committed.afterRevision)
   });
   const restored = await worldRepository.read();
   assert.equal(restored.facts[0].contain[0].situation, 'before');
   assert.equal(restored.facts[0].contain[1].situation, 'keep');
+  assert.deepEqual(rolledBack.result.compatibilityManifest, { currentWorldRevision: 'before' });
 });
 
 test('relation and shortcut side effects share the structural patch and inverse rollback', async (t) => {

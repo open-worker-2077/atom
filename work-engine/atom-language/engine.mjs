@@ -342,13 +342,22 @@ async function validateRegisteredAgentSourceDelegation({
 }
 
 function appendNestedAtom(atoms, parentMatch, atom) {
-  const nextAtoms = structuredClone(atoms);
   const lineage = [];
   for (let current = parentMatch; current; current = current.parent) lineage.unshift(current.index);
-  let parent = nextAtoms[lineage.shift()];
-  for (const index of lineage) parent = oneStoredField(parent, 'contain').value[index];
-  oneStoredField(parent, 'contain').value.push(atom);
-  return nextAtoms;
+  function appendAt(items, depth) {
+    const index = lineage[depth];
+    const nextItems = [...items];
+    const nextParent = { ...items[index] };
+    nextItems[index] = nextParent;
+    const contain = oneStoredField(nextParent, 'contain');
+    if (depth === lineage.length - 1) {
+      nextParent[contain.rawKey] = [...contain.value, structuredClone(atom)];
+    } else {
+      nextParent[contain.rawKey] = appendAt(contain.value, depth + 1);
+    }
+    return nextItems;
+  }
+  return appendAt(atoms, 0);
 }
 
 function removeWindowJumpAuthorization(atoms, operationId) {
@@ -413,12 +422,13 @@ async function applyCreateTransform({
       '公开 Transform 不能创建 @agent；请由当前 Program 调用 agent()'
     ) };
   }
-  if (walkAtoms([atom]).some((match) => (
+  const createdMatches = walkAtoms([atom]);
+  if (createdMatches.some((match) => (
     oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => type.raw === 'shortcut')
   ))) {
     return { error: diagnostic('SHORTCUT_PERSISTENCE_FORGERY_DENIED', '公开 Transform 不得创建或伪造内核虚拟引用记录') };
   }
-  if (walkAtoms([atom]).some((match) => (
+  if (createdMatches.some((match) => (
     oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => (
       type.raw === WINDOW_JUMP_AUTHORIZATION_TYPE
     ))
@@ -442,7 +452,10 @@ async function applyCreateTransform({
     ) };
   }
 
-  const selected = exactMatches(atoms, item, matcherRegistry);
+  const exactCreateMatch = exactMatchAtPath(atoms, createName);
+  const selected = exactCreateMatch
+    ? { matches: [exactCreateMatch], expected: createName }
+    : { matches: [], expected: createName };
   if (selected.error) return { error: selected.error };
   if (selected.matches.length) {
     return { error: diagnostic(
@@ -463,7 +476,8 @@ async function applyCreateTransform({
       : requestedParentPath.startsWith(`${WORLD_OUTSIDE_NAME}/`)
         ? requestedParentPath.slice(WORLD_OUTSIDE_NAME.length + 1)
         : requestedParentPath;
-    const parentMatches = walkAtoms(atoms).filter((match) => match.path.join('/') === parentPath);
+    const exactParentMatch = exactMatchAtPath(atoms, parentPath);
+    const parentMatches = exactParentMatch ? [exactParentMatch] : [];
     if (parentMatches.length !== 1) {
       return { error: diagnostic(
         parentMatches.length ? 'AMBIGUOUS_ATOM_NAME' : 'ATOM_NOT_FOUND',
@@ -488,7 +502,12 @@ async function applyCreateTransform({
     nextAtoms = appendNestedAtom(atoms, parentMatches[0], atom);
   }
 
-  const compiled = await validatePrograms(nextAtoms, contextFile, atoms, programScheduler);
+  const introducesProgram = createdMatches.some((match) => (
+    oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => type.raw === 'program')
+  ));
+  const compiled = introducesProgram
+    ? await validatePrograms(nextAtoms, contextFile, atoms, programScheduler)
+    : { ok: true, errors: [], warnings: [] };
   if (!compiled.ok) return { error: compiled.errors[0], warnings: compiled.warnings };
   return {
     atoms: nextAtoms,

@@ -428,6 +428,19 @@ function worldRevisionKey(records) {
   return records[0]?.ref ?? 'empty-world';
 }
 
+function requestMayObserveEvent(request, eventNodes) {
+  const selector = request?.thing;
+  if (typeof selector !== 'string' || !selector.trim()
+    || selector === '.' || selector.startsWith('./')) return true;
+  const target = selector.trim();
+  return [...eventNodes].some((node) => (
+    node === target
+    || node.endsWith(`/${target}`)
+    || target.startsWith(`${node}/`)
+    || node.startsWith(`${target}/`)
+  ));
+}
+
 function worldKeyFromRevision(revision, atoms) {
   if (!atoms.length) return 'empty-world';
   const canonical = `${revision}`.replace(/^sha256:/u, '');
@@ -2038,9 +2051,21 @@ export class ProgramRuntimeScheduler {
         });
       }
     };
+    const dependencyTriggeredProgramPaths = new Set(triggerEvent
+      ? programs.flatMap((program) => {
+          const previous = reusableProgramCandidates(
+            this.programReusable, program, isolateFailures, options.agentOrigin,
+            records, availablePrograms
+          )[0]?.[1];
+          return previous?.requests?.some((request) => requestMayObserveEvent(request, eventNodes))
+            ? [program.path]
+            : [];
+        })
+      : []);
     const indexedPrograms = triggerEvent
       ? programs.filter((program) => (
           triggeredProgramPaths.has(program.path)
+          || dependencyTriggeredProgramPaths.has(program.path)
           || eventNodes.has(program.path)
           || slotInvocationsByProgram.has(program.path)
         ))
@@ -2094,7 +2119,7 @@ export class ProgramRuntimeScheduler {
         && !hasIndexedContract
         && !eventNodes.has(program.path)
         && !slotInvocation
-        && (this.triggerIndex.size > 0 || !previous)) {
+        && !previous) {
         return {
           programPath: program.path,
           result: previous ? {

@@ -234,6 +234,46 @@ test('an ordinary situation Transform commits without a full Program projection 
   )), false, JSON.stringify(result.warnings));
 });
 
+test('an ordinary nested create skips whole-world Program source validation', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-rebase-create-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Agent', '', [atom('Work')], 'agent')
+  ]));
+  const security = { labels: [], functionScopes: { groups: [], names: [] }, functions: [] };
+  let validations = 0;
+  const cycle = {
+    fingerprint: 'current', records: [], locks: [], messages: [], transforms: [],
+    shortcuts: [], slotBodies: [], failures: [], agentSecurity: security, reconcileSummary: {}
+  };
+  const scheduler = {
+    agentSecurity: new Map([['Agent', security]]),
+    activeRequestDrivenLocks: async () => [],
+    current: async () => cycle,
+    validateProgramSources: async () => { validations += 1; },
+    refresh: async () => cycle,
+    rebaseContextFreeProjection: async () => ({ persisted: true })
+  };
+
+  const result = await executeAtomLanguage({
+    source: 'transform new {"thing":"Agent/Work/Note","situation":"local","contain":[],"support":[]}',
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler,
+    commitWorld: async () => ({
+      afterRevision: 'sha256:synthetic-after',
+      result: { affectedAtoms: [{ path: 'Agent/Work/Note', axes: ['thing', 'situation', 'contain', 'support'] }] }
+    }),
+    interaction: { id: 'rebase-create', agent: { ref: 'agent-ref', path: 'Agent' } }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.changed, true);
+  assert.equal(validations, 0);
+});
+
 test('a failed projection rebase falls back to a complete context-free settlement', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-rebase-fallback-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

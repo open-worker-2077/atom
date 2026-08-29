@@ -71,6 +71,7 @@ try {
   const endpoint = `${running.url}/__atom/api/command`;
   const port = running.port;
   const testName = `__write_acceptance_${Date.now()}`;
+  const testPath = [argument('--parent'), testName].filter(Boolean).join('/');
   const delays = [];
   let expectedAt = Date.now() + 100;
   monitor = setInterval(() => {
@@ -80,7 +81,7 @@ try {
   }, 100);
   const startedAt = Date.now();
   const write = await executeAtomCommandEndpoint({
-    source: `transform new {"thing":"${testName}","situation":"acceptance","contain":[],"support":[]}`,
+    source: `transform new {"thing":"${testPath}","situation":"acceptance","contain":[],"support":[]}`,
     interaction
   }, endpoint);
   const writeMs = Date.now() - startedAt;
@@ -89,7 +90,7 @@ try {
 
   const readStartedAt = Date.now();
   const readback = await executeAtomCommandEndpoint({
-    source: `explore {"thing":"${testName}","situation$full":true}`,
+    source: `explore {"thing":"${testPath}","situation$full":true}`,
     interaction
   }, endpoint);
   const readMs = Date.now() - readStartedAt;
