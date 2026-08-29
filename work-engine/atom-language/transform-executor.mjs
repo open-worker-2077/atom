@@ -870,6 +870,18 @@ function remapPartnerBindings(bindings, mapping) {
   });
 }
 
+function remapMatch(match, mapping, memo = new Map()) {
+  if (!match) return null;
+  if (memo.has(match)) return memo.get(match);
+  const remapped = {
+    ...match,
+    atom: mapping.get(match.atom) ?? match.atom,
+    parent: remapMatch(match.parent, mapping, memo)
+  };
+  memo.set(match, remapped);
+  return remapped;
+}
+
 function cloneWorldFacts(atoms) {
   // Authoritative Atom facts are JSON data. Node's generic structuredClone is
   // disproportionately slow for the 16+ MB world, while the JSON-native path
@@ -971,6 +983,9 @@ export async function applyTransform({
     : null;
   let partnerBindings = [];
   let inheritedRelationBindings = null;
+  let preparedDestinationMatch = null;
+  let preparedBackupMatch = null;
+  let preparedRestoreParentMatch = null;
   if (!mutateInput && rewritesPaths) {
     const originalMatches = allMatches?.filter((match) => !match.virtual) ?? walkAtoms(atoms);
     const byAtom = new Map(originalMatches.map((match) => [match.atom, match]));
@@ -997,11 +1012,13 @@ export async function applyTransform({
     if (['mov', 'cpy'].includes(command?.name) && command.parameter !== WORLD_OUTSIDE_NAME) {
       const destination = resolveUnique(atoms, command.parameter, exactIndex);
       if (destination.error) return destination;
+      preparedDestinationMatch = destination.match;
       closureMatches.push(destination.match);
     }
     if (['dsc', 'rst'].includes(command?.name)) {
       const backup = backupMatch(atoms);
       if (backup.error) return backup;
+      preparedBackupMatch = backup.match;
       closureMatches.push(backup.match);
     }
     if (command?.name === 'rst') {
@@ -1011,6 +1028,7 @@ export async function applyTransform({
       if (discard?.originalParentPath !== null && discard?.originalParentPath !== undefined) {
         const parent = resolveUnique(atoms, discard.originalParentPath, exactIndex);
         if (parent.error) return parent;
+        preparedRestoreParentMatch = parent.match;
         closureMatches.push(parent.match);
       }
     }
@@ -1024,7 +1042,9 @@ export async function applyTransform({
   const nextAtoms = mutateInput ? atoms : (copied?.atoms ?? cloneWorldFacts(atoms));
   const selected = copiesOnlyAncestry
     ? { match: copied.match }
-    : resolveUnique(nextAtoms, nameField.value, mutateInput ? exactIndex : null);
+    : (!mutateInput && copied?.mapping
+        ? { match: remapMatch(originalSelection.match, copied.mapping) }
+        : resolveUnique(nextAtoms, nameField.value, mutateInput ? exactIndex : null));
   if (selected.error) return selected;
   const selectedBefore = copiesOnlyAncestry
     ? copyNonContainState(selected.match.atom)
@@ -1196,7 +1216,9 @@ export async function applyTransform({
     const worldRootDestination = command.name === 'mov' && command.parameter === WORLD_OUTSIDE_NAME;
     const destination = worldRootDestination
       ? { match: { atom: null, path: [], parent: null, index: -1 } }
-      : resolveUnique(nextAtoms, command.parameter, mutateInput ? exactIndex : null);
+      : (!mutateInput && preparedDestinationMatch
+          ? { match: remapMatch(preparedDestinationMatch, copied.mapping) }
+          : resolveUnique(nextAtoms, command.parameter, exactIndex));
     if (destination.error) return destination;
     const targetName = storedField(target.atom, 'thing').value;
     const futurePath = worldRootDestination
@@ -1277,7 +1299,9 @@ export async function applyTransform({
     if (command.parameter !== '') {
       return { error: diagnostic('INVALID_DISCARD_PARAMETER', '.dsc. 不接受参数') };
     }
-    const backup = backupMatch(nextAtoms);
+    const backup = !mutateInput && preparedBackupMatch
+      ? { match: remapMatch(preparedBackupMatch, copied.mapping) }
+      : backupMatch(nextAtoms);
     if (backup.error) return backup;
     // Discard is one kernel-owned reversible relocation. The caller must own
     // the source subtree (checked above), but must not need browsing or write
@@ -1323,7 +1347,9 @@ export async function applyTransform({
     if (command.parameter !== '') {
       return { error: diagnostic('INVALID_RESTORE_PARAMETER', '.rst. 不接受参数') };
     }
-    const backup = backupMatch(nextAtoms);
+    const backup = !mutateInput && preparedBackupMatch
+      ? { match: remapMatch(preparedBackupMatch, copied.mapping) }
+      : backupMatch(nextAtoms);
     if (backup.error) return backup;
     // Restore is the inverse kernel relocation. Authority is checked against
     // the recorded original destination below, not against backup storage.
@@ -1340,11 +1366,9 @@ export async function applyTransform({
     if (discard.originalParentPath === null) {
       destination = nextAtoms;
     } else {
-      const parent = resolveUnique(
-        nextAtoms,
-        discard.originalParentPath,
-        mutateInput ? exactIndex : null
-      );
+      const parent = !mutateInput && preparedRestoreParentMatch
+        ? { match: remapMatch(preparedRestoreParentMatch, copied.mapping) }
+        : resolveUnique(nextAtoms, discard.originalParentPath, exactIndex);
       if (parent.error) return parent;
       if ((await authorize(parent.match, 'write')).decision !== 'allow') {
         return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权恢复到目标位置；请反馈派发方') };
