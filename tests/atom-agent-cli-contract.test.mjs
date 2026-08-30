@@ -611,6 +611,10 @@ test('public help is a complete daily Agent operation contract', async () => {
   assert.match(text, /Agent 重配.*普通 Transform.*实际路径鉴权.*自身与后代不设特殊管理通道/u);
   assert.match(text, /权限索引.*请求命中即用.*缺失或失效.*即时计算并回填/u);
   assert.match(text, /索引缺失不得阻断启动、Explore 或 Transform/u);
+  assert.match(
+    text,
+    /Program 停用：.*thing@backup@default.*保留.*situation.*不进入活跃运行、trigger、changed 或 explore 依赖索引.*\.rst\..*当前事实重新激活/us
+  );
   assert.match(text, /AMBIGUOUS_ATOM_NAME.*ATOM_NOT_FOUND/us);
   assert.match(text, /ATOM_NOT_FOUND.*预定父节点.*复用.*transform new/us);
   assert.match(text, /WORLD_REVISION_CONFLICT.*重新读取/us);
