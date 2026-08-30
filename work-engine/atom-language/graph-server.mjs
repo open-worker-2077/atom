@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -43,6 +44,28 @@ function problem(code, message, details = {}) {
   error.code = code;
   error.details = details;
   return error;
+}
+
+export function normalizeOwnProcessPriority({
+  getPriority = os.getPriority,
+  setPriority = os.setPriority,
+  normalPriority = os.constants.priority.PRIORITY_NORMAL
+} = {}) {
+  try {
+    const before = getPriority(0);
+    if (before <= normalPriority) {
+      return { changed: false, before, after: before };
+    }
+    setPriority(0, normalPriority);
+    return { changed: true, before, after: normalPriority };
+  } catch (error) {
+    return {
+      changed: false,
+      before: null,
+      after: null,
+      error: error.code ?? error.name
+    };
+  }
 }
 
 function validateHost(value) {
@@ -359,6 +382,7 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
 }
 
 export async function startAtomGraphServer(options = {}) {
+  normalizeOwnProcessPriority();
   const configuration = resolveConfiguration(options);
   const timingInteractionId = options.timingInteractionId ?? null;
   const backupRepository = options.backupRepository ?? process.env.ATOM_RUNTIME_BACKUP_REPO;

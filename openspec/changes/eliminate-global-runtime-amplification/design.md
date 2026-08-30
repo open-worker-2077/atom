@@ -26,6 +26,8 @@ See `proposal.md` for motivation and the four delta specs for observable behavio
 
 Before port 4784 reports ready, the process reads and validates `atom.json` once, computes its revision once, and builds one immutable prepared world containing the exact-path directory, structural ancestry, Program records, Agent security, lock indexes, trigger/read dependencies, support endpoints, shortcuts, and descendant rewrite entries. The service retains that prepared state across commands. A CLI/Web request may locally backfill a genuinely missing affected entry, but it may not initialize or rebuild the complete world.
 
+The runtime also normalizes its own inherited process priority to the platform's normal class before readiness. This is a code-level fallback for existing Windows scheduled tasks that were registered with an I/O-throttled priority and cannot be repaired without an administrator token; new task registrations still declare normal priority explicitly.
+
 When private recovery backup is configured, its initial filesystem/Git work is also part of readiness and completes before the listener is exposed. Later writes retain the fixed delayed/coalesced backup window; startup backup must not run beside the first user commands.
 
 After a Patch commits, the process updates the prepared world and intersecting indexes from the same Patch/affected closure. An unrelated fact edit does not invalidate Agent, lock, Program, or trigger definitions. A definition/dependency edit recomputes only the intersecting entries. Process restart is the only normal full preparation boundary.
