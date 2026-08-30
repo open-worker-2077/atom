@@ -338,13 +338,6 @@ export function parseGraphDocument(input) {
       const clauseId = `support:${pending.source.path.join('/')}:${clauseOrdinal}`;
       const dependencyPaths = [...new Set(dependencies(root))];
       const antecedentPaths = relationAntecedentPaths(root);
-      if (antecedentPaths.length > 1 && then.length > 1) {
-        throw graphError(
-          'NATIVE_MANY_TO_MANY_SUPPORT_UNSUPPORTED',
-          '首版不支持原生 M→N support；请建立真实枢纽 Thing，并拆为 M→hub 与 hub→N 两条规则',
-          { ...details, antecedentCount: antecedentPaths.length, consequentCount: then.length }
-        );
-      }
       const signature = JSON.stringify([
         expressionSignature(root),
         then.map((target) => target.targetPath)
