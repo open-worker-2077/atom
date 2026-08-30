@@ -44,4 +44,5 @@
 - [x] 7.2 Reject Program consequents consistently while keeping Program selectors valid only as `if` decision dependencies.
 - [x] 7.3 Count only ordinary fact antecedents for N/M arity and preserve valid Program-gated one-to-many rules.
 - [x] 7.4 Migrate slot fixtures and night-watch synthetic scripts from `then → Program` to ordinary consequents plus independent decision/trigger Programs.
-- [ ] 7.5 Run the precise Graph/Form/slot/night-watch chain, deploy the merged version, and bind current evidence to #4/#10/#1.
+- [x] 7.5 Add the public-CLI RED/GREEN seam for one-Program model edit + same-body reseal, while direct model edits remain locked.
+- [ ] 7.6 Run the precise Graph/Form/slot chain, deploy the merged version, and bind current evidence to #4/#10/#1.

@@ -33,6 +33,16 @@ function relevantProgramMessages(items, messages) {
   const visiblePaths = visibleExplorePaths(items);
   return messages.filter((message) => visiblePaths.has(message.sourceProgramPath));
 }
+
+function programResealsModelPath(slotBodies, sourceProgramPath, targetPath) {
+  if (typeof sourceProgramPath !== 'string' || typeof targetPath !== 'string') return false;
+  return (slotBodies ?? []).some((request) => {
+    if (request?.action !== 'seal' || request.sourceProgramPath !== sourceProgramPath
+      || typeof request.body !== 'string') return false;
+    const modelPath = `${request.body.replace(/\/+$/u, '')}/\u69fd\u6a21`;
+    return targetPath === modelPath || targetPath.startsWith(`${modelPath}/`);
+  });
+}
 import { createAtomLanguageReceiver } from './receiver.mjs';
 import {
   appendTransformLog,
@@ -1529,11 +1539,16 @@ export async function executeAtomLanguage(options = {}) {
       continue;
     }
     let transformed;
-    const authorizeProgramEffect = (match, operation, field, actor = {}) => (
-      accessController.authorize(match, operation, field, {
-        ...actor, programPath: sourceProgramPath
-      })
-    );
+    const authorizeProgramEffect = (match, operation, field, actor = {}) => {
+      const targetPath = match.path.join('/');
+      return accessController.authorize(match, operation, field, {
+        ...actor,
+        programPath: sourceProgramPath,
+        slotReseal: actor.slotReseal === true || programResealsModelPath(
+          programCycle.slotBodies, sourceProgramPath, targetPath
+        )
+      });
+    };
     try {
       transformed = compiled.createNew
         ? await applyCreateTransform({
@@ -1881,11 +1896,18 @@ export async function executeAtomLanguage(options = {}) {
         let structuralChanged = 0;
         for (const entry of compiledRequests) {
           let transformed;
-          const authorizeProgramEffect = (match, operation, field, actor = {}) => (
-            cycleAccessController.authorize(
-              match, operation, field, { ...actor, programPath: entry.sourceProgramPath }
-            )
-          );
+          const authorizeProgramEffect = (match, operation, field, actor = {}) => {
+            const targetPath = match.path.join('/');
+            return cycleAccessController.authorize(
+              match, operation, field, {
+                ...actor,
+                programPath: entry.sourceProgramPath,
+                slotReseal: actor.slotReseal === true || programResealsModelPath(
+                  cycle.slotBodies, entry.sourceProgramPath, targetPath
+                )
+              }
+            );
+          };
           try {
             transformed = entry.createNew
               ? await applyCreateTransform({

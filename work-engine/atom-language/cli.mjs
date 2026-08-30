@@ -275,7 +275,7 @@ function help() {
     '  槽体打印：唯一公开调用是 use_program({"name":"EXACT槽体/print","arguments":{"name":"新槽例名"}})；name 是唯一打印参数，修订由当前 print@program 内部绑定，调用方不得传 revision。可用 explore {"thing":"EXACT槽体/print/修订","contain$latitude-1":true} 审计当前计划；内核复制全部抽象槽、嵌套 contain、support、类型和槽契约，不复制具体料，Program 只在槽模共享一份。',
     '  槽例填写与计算：用 transform {"thing":"EXACT槽体/槽例/实例/槽","situation.rep.填写值"} 填写槽的 situation；具体料应作为槽下未映射普通 Thing 创建。字段事件按“所属槽例→相对角色→当前修订 support→共享 Program”只在当前槽例域运行，再用 exact explore 回读该实例结果与采用槽模修订。禁止绝对实例路径、越过嵌套槽例边界、跨槽例或外部资料访问。',
     '  槽例填料与变量：带“槽模角色”的实例节点是抽象槽；在槽下 transform new 的未映射普通 Thing 子树才是本地料。外部变量必须先物化为目标槽例内的本地料 Thing，再触发该实例；共享 Program 只用 ./相对contain路径读取当前槽例域。',
-    '  槽模修订：修改同一槽模后再次 seal；一次调用自动同步全部所属槽例的映射槽、contain、support、契约元数据与共享 Program 引用，并逐字节保留未映射本地料 Thing 子树；删除含料槽整次冲突回滚，成功后统一重算全部实例。',
+    '  槽模修订：由同一 Program 在同一中央事务内先 transform 同一槽体的槽模，再 slot_body({"action":"seal","body":"EXACT槽体路径"})；只有这种同 Program、同槽体的组合获得 slot-reseal 能力，普通直改仍被结构锁拒绝。成功后自动同步全部所属槽例的映射槽、contain、support、契约元数据与共享 Program 引用，并逐字节保留未映射本地料 Thing 子树；删除含料槽整次冲突回滚。',
     '  槽体错误：INVALID_SLOT_BODY_EFFECT、INVALID_SLOT_BODY_LAYOUT、INVALID_SLOT_PRINT_PLAN、SLOT_BODY_NOT_SEALED、SLOT_PRINT_PLAN_STALE、SLOT_BODY_EXAMPLE_EXISTS、SLOT_MATERIAL_CONTAINMENT_CONFLICT、SLOT_INSTANCE_REVISION_MISSING、SLOT_SCOPE_ROOT_UNBOUND、SLOT_RELATIVE_SELECTOR_REQUIRED、SLOT_RELATIVE_TARGET_NOT_FOUND、SLOT_RELATIVE_TARGET_AMBIGUOUS、SLOT_SCOPE_BOUNDARY_CROSSING、SLOT_SCOPE_ROLE_MISMATCH、SLOT_BODY_NESTED_EFFECT_FORBIDDEN；任一失败不产生半份槽例。',
     '  工单函数：work_order_catalog({template?,version?})->contract；work_order({action,...})->result。v1 动作固定为 create/fill/validate/submit/reject/revise/read-back。',
     '  工单公开契约：atom.cmd --work-order-registry；该只读命令无需 --agent，Web 帮助从同一注册表渲染动作、错误和提交回执字段。',

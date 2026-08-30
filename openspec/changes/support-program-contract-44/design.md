@@ -29,6 +29,8 @@ The parser therefore rejects every support rule whose owner is `thing@program`, 
 
 Graph parser, Program form normalization, and slot-plan compilation enforce the same boundary. N/M arity counts include only ordinary fact endpoints; a decision Program never turns a valid one-to-many rule into native many-to-many. Existing slot fixtures and night-watch scripts are migrated so calculation runs through its own `trigger` contract and support points only to ordinary facts.
 
+Public reseal stays atomic: a Program may change mapped nodes under one slot body's `槽模` only when that same Program emits `slot_body({"action":"seal","body":...})` for that exact body in the same central transaction. The capability is derived from the paired effects, is path-bounded to that model, and is not granted to direct CLI transforms or a Program sealing another body.
+
 ### Characterize before editing runtime code
 
 The first implementation action will add the complete focused regression against the current main-based branch. If it passes, the change will be limited to the regression and terminology corrections. If it fails for a contract reason, the failure will define the minimal runtime edit.
