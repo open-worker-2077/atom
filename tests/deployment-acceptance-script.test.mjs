@@ -56,3 +56,31 @@ test('deployment acceptance removes its temporary copy when agent resolution fai
   ], { cwd: projectRoot }));
   assert.deepEqual(await acceptanceDirectories(), directoriesBefore);
 });
+
+test('deployment acceptance measures the complete structural latency chain and rolls every copy commit back', async (t) => {
+  const { contextFile, source } = await createContext(t);
+  const directoriesBefore = await acceptanceDirectories();
+  const { stdout } = await execFileAsync(process.execPath, [
+    script,
+    '--context', contextFile,
+    '--agent', '部署验收窗口',
+    '--structural-latency',
+    '--cleanup'
+  ], { cwd: projectRoot });
+  const result = JSON.parse(stdout);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(Object.keys(result.structuralTimingsMs), ['ren', 'mov', 'dsc', 'rst']);
+  for (const [operation, elapsedMs] of Object.entries(result.structuralTimingsMs)) {
+    assert.ok(elapsedMs < 5_000, `${operation} took ${elapsedMs}ms`);
+  }
+  assert.deepEqual(Object.keys(result.steadyTimingsMs), ['rep', 'explore']);
+  for (const [operation, elapsedMs] of Object.entries(result.steadyTimingsMs)) {
+    assert.ok(elapsedMs < 5_000, `${operation} took ${elapsedMs}ms`);
+  }
+  assert.equal(result.structuralReadbackOk, true);
+  assert.ok(result.rollbackCount >= 6);
+  assert.equal(result.sourceRevisionRestored, true);
+  assert.equal(await fs.readFile(contextFile, 'utf8'), source);
+  assert.deepEqual(await acceptanceDirectories(), directoriesBefore);
+});
