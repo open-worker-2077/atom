@@ -154,6 +154,48 @@ test('Enter-committed node creation stays visible and preserves the current view
   expect(after.state.camera).toEqual(before.camera);
 });
 
+test('TC-I24-CLI-WEB-LOCAL-FRESHNESS keeps the open page and F5 on the CLI value', async ({ page, request }) => {
+  test.setTimeout(60_000);
+  const atomPath = '测试入口/第一节点';
+  const beforeDetail = '用于检查视角稳定';
+  const cliDetail = 'CLI 刷新后的正文';
+  const readDetail = () => page.evaluate((expectedPath) => (
+    window.spatialLab.exportKnowledge().nodes.find(({ atomPath }) => atomPath === expectedPath)?.detail
+  ), atomPath);
+
+  await openIsolatedWorld(page);
+  await enterAtomFile(page);
+  expect(await readDetail()).toBe(beforeDetail);
+
+  const response = await request.post('/__atom/api/command', {
+    data: {
+      source: `transform {"thing":"${atomPath}","situation.rep.${cliDetail}"}`,
+      interaction: {
+        id: 'cli-web-browser-local-freshness',
+        agentSelector: '测试入口',
+        agent: { path: '测试入口' }
+      },
+      history: []
+    }
+  });
+  const receipt = await response.json();
+  expect({ status: response.status(), receipt }).toMatchObject({
+    status: 200,
+    receipt: { ok: true, result: { ok: true } }
+  });
+
+  await expect.poll(readDetail, { timeout: 20_000 }).toBe(cliDetail);
+
+  await page.reload();
+  await page.waitForFunction(() => (
+    document.body.dataset.spatialBridge === 'connected'
+    && window.spatialLab
+    && window.spatialLab.state().visibleNodes > 0
+  ));
+  await enterAtomFile(page);
+  await expect.poll(readDetail, { timeout: 20_000 }).toBe(cliDetail);
+});
+
 test('double-Shift selection survives the real ctrl-right landing gesture as one batch', async ({ page }) => {
   test.setTimeout(90_000);
   await openIsolatedWorld(page);
