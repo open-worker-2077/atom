@@ -73,3 +73,26 @@ test('form rejects missing or unknown component activation instead of choosing f
     );
   }
 });
+
+test('form compilation rejects a Program used as a support consequent fact', async () => {
+  await assert.rejects(
+    runProgram([
+      'form({"thing":"非法推支","situation":"","contain":[],"support":[',
+      '  {"if@current":True,"then":[{"thing@program":"判定"}]}',
+      ']})'
+    ].join('\n')),
+    (error) => error?.code === 'ATOM_PROGRAM_FAILED'
+      && /SUPPORT_FACT_CONSEQUENT_REQUIRED/u.test(error?.message ?? '')
+  );
+});
+
+test('form compilation does not count a decision Program as a fact antecedent in one-to-many support', async () => {
+  const cycle = await runProgram([
+    'compiled = form({"thing":"前项","situation":"","contain":[],"support":[',
+    '  {"if@current":True,"if":[{"thing@program":"判定"}],"then":[{"thing":"后项甲"},{"thing":"后项乙"}]}',
+    ']})',
+    'message({"level":"info","text":str(len(compiled["support"][0]["then"]))})'
+  ].join('\n'));
+
+  assert.equal(cycle.messages[0].text, '2');
+});

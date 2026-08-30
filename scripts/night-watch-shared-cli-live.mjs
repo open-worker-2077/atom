@@ -404,8 +404,13 @@ async function main() {
     thing: slotBodyPath, situation: 'synthetic slot body', contain: [{
       thing: 'flow', situation: 'synthetic flow', contain: [
         { 'thing@text': 'input', situation: 'input slot', contain: [], support: [{ 'if@current': true, then: [{ thing: 'output' }] }] },
-        { 'thing@number': 'output', situation: 'output slot', contain: [], support: [{ 'if@current': true, then: [{ 'thing@program': 'compute' }] }] },
-        { 'thing@program': 'compute', situation: 'def main(arguments):\n    return arguments', contain: [], support: [] }
+        { 'thing@number': 'output', situation: 'output slot', contain: [], support: [{
+          'if@current': true,
+          if: [{ 'thing@program': 'compute' }],
+          then: [{ thing: 'result' }]
+        }] },
+        { thing: 'result', situation: 'ordinary result fact', contain: [], support: [] },
+        { 'thing@program': 'compute', situation: 'def main(arguments):\n    return True', contain: [], support: [] }
       ], support: []
     }], support: []
   })}`));

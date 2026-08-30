@@ -320,8 +320,10 @@ def _normalize_support_expr(expr):
 
 
 def _support_expr_endpoints(expr):
-    if "thing" in expr or "thing@program" in expr:
-        return {expr.get("thing", expr.get("thing@program"))}
+    if "thing" in expr:
+        return {expr["thing"]}
+    if "thing@program" in expr:
+        return set()
     return set().union(*(_support_expr_endpoints(child)
                          for child in expr[next(iter(expr))]))
 
@@ -356,14 +358,14 @@ def _normalize_support_rules(rules):
         normalized_then = []
         for target in consequents:
             endpoint_keys = set(target) if isinstance(target, dict) else set()
-            if (endpoint_keys not in ({"thing"}, {"thing@program"})):
-                raise ValueError("support then items require exactly one thing endpoint")
+            if endpoint_keys == {"thing@program"}:
+                raise ValueError("SUPPORT_FACT_CONSEQUENT_REQUIRED")
+            if endpoint_keys != {"thing"}:
+                raise ValueError("support then items require exactly one ordinary thing endpoint")
             endpoint_key = next(iter(endpoint_keys))
             endpoint_value = target[endpoint_key]
             if not isinstance(endpoint_value, str) or not endpoint_value.strip():
                 raise ValueError("support then endpoint requires a non-empty selector")
-            if endpoint_key == "thing@program" and any(token in endpoint_value for token in ("satisfies(", "lambda", "def main", "\n", "\r")):
-                raise ValueError("SUPPORT_INLINE_PROGRAM_UNSUPPORTED")
             normalized_then.append({endpoint_key: endpoint_value})
         if not current_if and not normalized_if:
             raise ValueError("MISSING_SUPPORT_ANTECEDENT")

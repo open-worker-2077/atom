@@ -28,6 +28,11 @@ The system SHALL distinguish the ordinary antecedent Thing, the independent `thi
 - **THEN** Graph rejects the rule with `SUPPORT_FACT_ANTECEDENT_REQUIRED`
 - **AND** the owner must add at least one ordinary fact antecedent while keeping each Program only as a decision dependency
 
+#### Scenario: Decision Program cannot replace an ordinary consequent
+- **WHEN** a rule names a `thing@program` selector in `then`
+- **THEN** Graph rejects the rule with `SUPPORT_FACT_CONSEQUENT_REQUIRED`
+- **AND** the rule must name an ordinary consequent Thing while keeping the Program only inside `if` as a decision dependency
+
 ### Requirement: Boolean decision gates support establishment
 The system SHALL establish the declared ordinary Thing-to-Thing support only when the referenced support-decision Program returns strict boolean `true`. It SHALL leave the support unestablished when that Program returns strict boolean `false`, and SHALL reject a non-boolean result.
 

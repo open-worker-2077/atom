@@ -337,6 +337,13 @@ export function parseGraphDocument(input) {
       }
       for (const item of consequentValues) {
         const parsed = parseSelector(item, pending.source, { ...details, thenOrdinal: then.length });
+        if (parsed.isProgram) {
+          throw graphError(
+            'SUPPORT_FACT_CONSEQUENT_REQUIRED',
+            'support 后项必须是普通事实 Thing；thing@program 只可作为 if 内的独立判定依赖',
+            { ...details, thenOrdinal: then.length }
+          );
+        }
         if (parsed.targetPath === ownerPath) {
           throw graphError('CURRENT_ENDPOINT_REQUIRES_MODIFIER', 'current consequent 必须使用 then@current:true', details);
         }

@@ -212,7 +212,7 @@ function help() {
     '  thing 使用最短唯一 exact 选择器；situation 是内容；contain 是真实包含；support 是 owner-local if→then 规则数组。',
     '  1→N 写在起点：{"if@current":true,"then":[{"thing":"B"},{"thing":"C"}]}；N→1 写在终点：{"if":[{"and":[{"thing":"A"},{"thing":"B"}]}],"then@current":true}。',
     '  每条 rule 必须且只能含一个 @current:true；if 永远是前项，then 永远是后项。禁止无 current、线载源码和 Program 自持 current 端点；禁止原生 N→M，事实前项与独立判定 Program 保持分层。',
-    '  Program 端点写 {"thing@program":"selector"}：独立推支判定 Program 仅以 strict bool 决定本条支撑，且不得产生写入等副作用；后项 Program 只按自身触发/use_program/显式运行计算自己。',
+    '  if 内的独立判定 Program 写 {"thing@program":"selector"}：仅以 strict bool 决定本条支撑，且不得产生写入等副作用；then 只接受普通事实 Thing。后项自己的 Program 只按自身 trigger/use_program/显式运行计算自己。',
     '  N→1、1→N 各自保留 support clause 身份；Web 在归一化 0.5 形成共享汇流／分流线干。多入多出必须建立显式枢纽 H，拆为 N→H 与 H→M 两条规则；H 保持可见可审计。Program 源码只放 exact thing@program 节点的 situation。',
     '  @type 写在 thing 键上（如 thing@agent、thing@program）；#简介必须在键末尾；~hint 仅为返回提示。',
     '  Explore 接受对象或对象数组；Transform 对象数组把已有 Atom 改造作为一个原子批次执行，并逐项返回结果。所有结果只使用 Graph-JSON。',

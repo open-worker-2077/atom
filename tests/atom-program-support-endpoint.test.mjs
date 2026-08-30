@@ -111,14 +111,18 @@ test('support-decision Program cannot emit effects or directly write a consequen
   assert.equal(world[0].situation, 'before');
 });
 
-test('and/or short-circuit support-decision Programs and never execute a consequent Program', async () => {
+test('and/or short-circuits decision Programs and never executes a Program contained by an ordinary consequent', async () => {
   const input = {
     config: { schema_version: '2.0.0' },
     graph: {
       thing: '世界', situation: '', support: [], contain: [
         atom('False Program', '', 'program'),
         atom('Skipped Program', '', 'program'),
-        atom('Consequent Program', '', 'program'),
+        {
+          thing: 'Consequent', situation: '', support: [], contain: [
+            atom('Consequent Program', '', 'program')
+          ]
+        },
         atom('Hub Source'),
         atom('Hub', '', '', [{
           if: [{ and: [
@@ -130,7 +134,7 @@ test('and/or short-circuit support-decision Programs and never execute a consequ
         }]),
         atom('Source', '', '', [{
           'if@current': true,
-          then: [{ 'thing@program': 'Consequent Program' }]
+          then: [{ thing: 'Consequent' }]
         }])
       ]
     }

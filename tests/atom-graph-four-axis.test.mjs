@@ -183,6 +183,16 @@ test('a Program cannot own a current support endpoint or become its own boolean 
   ])), { code: 'SUPPORT_DECISION_PROGRAM_MUST_BE_INDEPENDENT' });
 });
 
+test('a Program cannot replace an ordinary consequent fact endpoint', () => {
+  assert.throws(() => parseGraphDocument(graphDocument([
+    leaf('Fact', '', [{
+      'if@current': true,
+      then: [{ 'thing@program': 'Decision' }]
+    }]),
+    { 'thing@program': 'Decision', situation: 'def main(arguments):\n    return True', contain: [], support: [] }
+  ])), { code: 'SUPPORT_FACT_CONSEQUENT_REQUIRED' });
+});
+
 test('explicit 3-to-hub-to-3 remains two independently auditable rules', () => {
   const parsed = parseGraphDocument(graphDocument([
     leaf('A'), leaf('B'), leaf('C'),
