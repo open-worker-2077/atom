@@ -14,6 +14,7 @@
 - [ ] 2.4 Separate commit revision identity from path-scoped cache validity and expose closure-expansion diagnostics.
 - [x] 2.5 Establish one 4784 cold-preparation/readiness boundary and retain the prepared immutable world across all steady interactions.
 - [x] 2.6 Compute the canonical revision once per committed interaction and carry it through persistence, receipt, cache adoption, and publication.
+- [x] 2.7 Complete the initial private recovery backup before 4784 readiness so it cannot contend with first user interactions.
 
 ## 3. Indexed runtime effects
 
@@ -36,7 +37,9 @@
 ## 5. Acceptance and delivery
 
 - [x] 5.1 Run focused tests for all five Issue #29 TestCases and record work-count evidence.
-- [ ] 5.2 Run `.rep/.ren/.mov/.dsc/.rst` plus steady exact Explore on the shared local acceptance world and verify every operation is under five seconds.
-- [ ] 5.3 Verify failure rollback, runtime restart, authoritative readback, Web refresh, and zero unrelated Program execution.
+- [x] 5.2 Run `.rep/.ren/.mov/.dsc/.rst` plus steady exact Explore on the shared local acceptance world and verify every operation is under five seconds.
+  - Evidence `EV-I29-REAL-COPY-20260830-K`: `.rep/.ren/.mov/.dsc/.rst/Explore = 1.747/1.736/1.488/1.408/1.280/0.747s` on the 16.7MB isolated copy of the shared world.
+- [x] 5.3 Verify failure rollback, runtime restart, authoritative readback, Web refresh, and zero unrelated Program execution.
+  - Evidence: seven copy-only commits rolled back to the source revision; source bytes unchanged; restart healthy; zero Program failures; `TC-I24-WEB-MOVE-*` covers authoritative F5 persistence and failure rollback.
 - [x] 5.4 Map each TestCase to an evidence ID and Issue #29, update Issue #1, and validate the OpenSpec change strictly.
 - [ ] 5.5 Commit, push, open and merge the PR after focused CI passes, deploy the shared runtime, and repeat the acceptance measurements.

@@ -10,6 +10,7 @@ import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.
 
 if (process.argv.includes('--trace')) process.env.ATOM_PERF_TRACE = '1';
 const cleanupCopy = process.argv.includes('--cleanup');
+const measureStructuralLatency = process.argv.includes('--structural-latency');
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -56,6 +57,8 @@ for (const name of ['atom.transactions.json', 'atom.transactions.json.d']) {
     if (error.code !== 'ENOENT') throw error;
   }
 }
+const initialJournal = await createJsonTransactionJournal({ file: journalFile }).readState();
+const initialReceiptCount = initialJournal.receipts.length;
 
 let running;
 let monitor;
@@ -85,6 +88,79 @@ try {
     interaction
   }, endpoint);
   const writeMs = Date.now() - startedAt;
+  let structuralTimingsMs = null;
+  let steadyTimingsMs = null;
+  let structuralReadbackOk = true;
+  let structuralOperationsOk = true;
+  const structuralWarnings = [];
+  if (measureStructuralLatency) {
+    const anchorName = `${testName}_structural`;
+    const anchorPath = [argument('--parent'), anchorName].filter(Boolean).join('/');
+    const sourcePath = `${anchorPath}/Source/Probe`;
+    const renamedPath = `${anchorPath}/Source/ProbeRenamed`;
+    const destinationPath = `${anchorPath}/Destination`;
+    const movedPath = `${destinationPath}/ProbeRenamed`;
+    const setup = await executeAtomCommandEndpoint({
+      source: `transform new ${JSON.stringify({
+        thing: anchorPath,
+        situation: 'isolated structural latency acceptance',
+        contain: [
+          {
+            thing: 'Source', situation: '', support: [], contain: [
+              {
+                thing: 'Probe', situation: 'preserve', support: [], contain: [
+                  { thing: 'Child', situation: 'preserve child', contain: [], support: [] }
+                ]
+              }
+            ]
+          },
+          { thing: 'Destination', situation: '', contain: [], support: [] }
+        ],
+        support: []
+      })}`,
+      interaction
+    }, endpoint);
+    structuralOperationsOk = setup.ok === true;
+    structuralWarnings.push(...(setup.warnings ?? []));
+    structuralTimingsMs = {};
+    steadyTimingsMs = {};
+    const runStructural = async (operation, source) => {
+      const operationStartedAt = Date.now();
+      const result = await executeAtomCommandEndpoint({ source, interaction }, endpoint);
+      structuralTimingsMs[operation] = Date.now() - operationStartedAt;
+      structuralOperationsOk &&= result.ok === true;
+      structuralWarnings.push(...(result.warnings ?? []));
+      return result;
+    };
+    if (structuralOperationsOk) {
+      const replaceStartedAt = Date.now();
+      const replaced = await executeAtomCommandEndpoint({
+        source: `transform {"thing":${JSON.stringify(sourcePath)},"situation.rep.after"}`,
+        interaction
+      }, endpoint);
+      steadyTimingsMs.rep = Date.now() - replaceStartedAt;
+      structuralOperationsOk &&= replaced.ok === true;
+      structuralWarnings.push(...(replaced.warnings ?? []));
+      await runStructural('ren', `transform ${JSON.stringify({ 'thing.ren.ProbeRenamed': sourcePath })}`);
+      await runStructural('mov', `transform ${JSON.stringify({ [`thing.mov.${destinationPath}`]: renamedPath })}`);
+      await runStructural('dsc', `transform ${JSON.stringify({ 'thing.dsc.': movedPath })}`);
+      await runStructural('rst', 'transform {"thing.rst.":"默认备份仓/ProbeRenamed"}');
+      const exploreStartedAt = Date.now();
+      const restored = await executeAtomCommandEndpoint({
+        source: `explore ${JSON.stringify({ thing: movedPath })}`, interaction
+      }, endpoint);
+      steadyTimingsMs.explore = Date.now() - exploreStartedAt;
+      const child = await executeAtomCommandEndpoint(
+        { source: `explore ${JSON.stringify({ thing: `${movedPath}/Child` })}`, interaction },
+        endpoint
+      );
+      structuralReadbackOk = restored.ok === true && child.ok === true
+        && JSON.stringify(restored).includes(movedPath)
+        && JSON.stringify(child).includes(`${movedPath}/Child`);
+    } else {
+      structuralReadbackOk = false;
+    }
+  }
   clearInterval(monitor);
   monitor = null;
 
@@ -101,7 +177,13 @@ try {
     && health.graphFile === path.resolve(graphFile);
   const programFailures = (write.warnings ?? []).filter((warning) => (
     warning.code?.startsWith('ATOM_PROGRAM_')
-  )).length;
+  )).length + structuralWarnings.filter((warning) => warning.code?.startsWith('ATOM_PROGRAM_')).length;
+  const structuralLatencyOk = structuralTimingsMs === null || (
+    Object.keys(structuralTimingsMs).length === 4
+    && Object.values(structuralTimingsMs).every((elapsedMs) => elapsedMs < 5_000)
+    && Object.keys(steadyTimingsMs).length === 2
+    && Object.values(steadyTimingsMs).every((elapsedMs) => elapsedMs < 5_000)
+  );
 
   const preRollback = {
     ok: write.ok === true
@@ -111,7 +193,10 @@ try {
       && health.ok === true
       && port !== 4784
       && tempPathsOk
-      && programFailures === 0,
+      && programFailures === 0
+      && structuralOperationsOk
+      && structuralReadbackOk
+      && structuralLatencyOk,
     port,
     ephemeralPort: port !== 4784,
     tempPathsOk,
@@ -123,6 +208,13 @@ try {
     readbackFound,
     healthOk: healthResponse.status === 200 && health.ok === true,
     programFailures,
+    ...(structuralTimingsMs ? {
+      structuralTimingsMs,
+      steadyTimingsMs,
+      structuralReadbackOk,
+      structuralOperationsOk,
+      structuralLatencyOk
+    } : {}),
   };
   if (process.argv.includes('--trace')) {
     process.stderr.write(`${JSON.stringify({ event: 'acceptance-pre-rollback', ...preRollback, warnings: write.warnings ?? [] })}\n`);
@@ -131,18 +223,26 @@ try {
   running = null;
 
   const journal = await createJsonTransactionJournal({ file: journalFile }).readState();
-  const committed = journal.receipts.at(-1)?.receipt;
+  const newCommits = journal.receipts.slice(initialReceiptCount).map((entry) => entry.receipt);
+  const committed = newCommits.at(-1);
   if (!committed?.commandId || !committed.afterRevision) {
     throw new Error('Acceptance write did not produce a rollback-capable receipt');
   }
   const persistence = createTransactionalWorldPersistence({
     contextFile, projectionFile: graphFile, journalFile, publishLegacyProjection: false
   });
-  const rollback = await persistence.rollback({
-    targetCommandId: committed.commandId,
-    correlationId: `deployment-acceptance-rollback-${Date.now()}`,
-    expectedRevision: committed.afterRevision
-  });
+  let rollback = null;
+  let rollbackRevision = committed.afterRevision;
+  let rollbackCount = 0;
+  for (const target of [...newCommits].reverse()) {
+    rollback = await persistence.rollback({
+      targetCommandId: target.commandId,
+      correlationId: `deployment-acceptance-rollback-${rollbackCount}-${Date.now()}`,
+      expectedRevision: rollbackRevision
+    });
+    rollbackRevision = rollback.afterRevision;
+    rollbackCount += 1;
+  }
   const restoredRevision = revisionOfWorldFacts(JSON.parse(await fs.readFile(contextFile, 'utf8')));
 
   running = await startAtomGraphServer({
@@ -155,14 +255,15 @@ try {
   const result = {
     ok: preRollback.ok
       && sourceRevision === restoredRevision
-      && rollback.afterRevision === committed.beforeRevision
+      && rollbackRevision === sourceRevision
       && restoredHealthResponse.status === 200
       && restoredHealth.ok === true
       && restartPort !== 4784
       && sourceContextUnchanged,
     ...preRollback,
     restartPort,
-    rollbackOk: rollback.afterRevision === committed.beforeRevision,
+    rollbackOk: rollbackRevision === sourceRevision,
+    rollbackCount,
     sourceRevisionRestored: sourceRevision === restoredRevision,
     sourceContextUnchanged,
     restartHealthOk: restoredHealthResponse.status === 200 && restoredHealth.ok === true,

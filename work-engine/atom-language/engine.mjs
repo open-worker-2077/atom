@@ -40,6 +40,7 @@ import {
   applyTransform,
   createExactTransformIndex,
   isBatchRenameItem,
+  prepareTransformRelationIndex,
   transformChangesStructure
 } from './transform-executor.mjs';
 import {
@@ -67,12 +68,15 @@ import {
 } from './window-jump-authorization.mjs';
 import {
   createAccessController,
+  inheritPreparedAccessWorld,
+  inheritPreparedSlotStructureWorld,
   describeAtom,
   executeExploreItem,
   executeProgramExplore,
   fieldsByBase,
   oneStoredField,
   prepareExploreWorld,
+  prepareSlotStructureWorld,
   walkAtoms
 } from './query-capability.mjs';
 
@@ -144,6 +148,15 @@ function isLocalizedSituationTransform(item) {
     situationChanged = true;
   }
   return situationChanged;
+}
+
+function isStructurePreservingTransform(item) {
+  if ((item.fields?.length ?? 0) !== 1) return false;
+  const [field] = item.fields;
+  return field.baseKey === 'thing'
+    && field.valuePresent
+    && (field.commands?.length ?? 0) === 1
+    && ['ren', 'mov', 'cpy', 'dsc', 'rst'].includes(field.commands[0].name);
 }
 
 function newlyAddedProgramPaths(beforeAtoms, afterAtoms) {
@@ -625,9 +638,10 @@ async function persistChangedGraph({
   affectedAtoms = null,
   registrationChange = null,
   compatibilityManifest,
-  localizedSituationValidation = false
+  localizedSituationValidation = false,
+  structurePreservingValidation = false
 }) {
-  if (!localizedSituationValidation) {
+  if (!localizedSituationValidation && !structurePreservingValidation) {
     // Structural, support, type and Program changes retain the complete projection gate.
     const validationStartedAt = performance.now();
     projectAtomContext(atoms, { rootName, allowLegacySupport: Boolean(compatibilityManifest) });
@@ -722,6 +736,11 @@ export async function executeAtomLanguage(options = {}) {
       )]
     };
   }
+  const preparedTransformWorld = prepareTransformRelationIndex(
+    atoms,
+    path.basename(contextFile)
+  );
+  const preparedTransformAtoms = atoms;
   const revisionBefore = revisionOf(atoms);
   let committedAffectedPaths = [];
   const legacyMetadata = legacyAtomContextMetadata(atoms);
@@ -811,6 +830,10 @@ export async function executeAtomLanguage(options = {}) {
       } : {}),
       commitEntered: details.commitEntered === true
     });
+    const terminalStage = details.outcome === 'failure'
+      || stage === 'program-projection'
+      || (stage === 'commit' && !options.programScheduler);
+    if (!terminalStage) return;
     try {
       const diagnostic = {
         id: `${interaction.id}:transform-stage`,
@@ -837,12 +860,24 @@ export async function executeAtomLanguage(options = {}) {
     && parsed.items.length === 1
     ? programRunRequest(parsed.items[0])
     : null;
+  const canReusePreparedRuntimeIndexes = parsed.command === 'transform'
+    && !parsed.batch
+    && parsed.items.length === 1
+    && (
+      isLocalizedSituationTransform(parsed.items[0])
+      || options.programScheduler?.hasPreparedIndexesForRevision?.(
+        revisionBefore,
+        atoms
+      ) === true
+    );
   let programCycle = { messages: [], locks: [], records: [] };
   let activeRequestDrivenLocks = [];
   if (options.programScheduler) {
     const indexPreparationStartedAt = performance.now();
     try {
-      activeRequestDrivenLocks = await options.programScheduler.activeRequestDrivenLocks?.(atoms) ?? [];
+      activeRequestDrivenLocks = await options.programScheduler.activeRequestDrivenLocks?.(atoms, {
+        preparedIndexesValid: canReusePreparedRuntimeIndexes
+      }) ?? [];
       const initialAgentPath = interaction.agent?.path ?? null;
       const initialAgentSecurity = initialAgentPath
         ? structuredClone(options.programScheduler.agentSecurity?.get(initialAgentPath) ?? null)
@@ -872,6 +907,7 @@ export async function executeAtomLanguage(options = {}) {
       const programOptions = {
         agentOrigin: interaction.agent,
         isolateFailures: true,
+        preparedIndexesValid: canReusePreparedRuntimeIndexes,
         ...(parsed.command === 'explore' || agentOwnsLocalPrograms ? {
           allowWindowLockSnapshot: true,
           allowContextIncomplete: true
@@ -1064,7 +1100,10 @@ export async function executeAtomLanguage(options = {}) {
   let accessController = createAccessController(atoms, {
     ...options, programLockIndex, agentPath: initialAgentPath,
     agentSecurity: programCycle.agentSecurity,
-    graphLocks
+    graphLocks,
+    ...(atoms === preparedTransformAtoms
+      ? { preparedAccessMatches: preparedTransformWorld.matches }
+      : {})
   });
   const fatalShortcutFailure = requestedProgramRun
     ? (programCycle.failures ?? []).find((failure) => typeof failure.code === 'string'
@@ -2132,7 +2171,9 @@ export async function executeAtomLanguage(options = {}) {
     projectionRebase = null,
     changedPaths = projectionRebase?.changedPaths ?? null,
     affectedAtoms = null,
-    localizedSituationValidation = false
+    localizedSituationValidation = false,
+    structurePreservingValidation = false,
+    preparedRuntimeRecordsPromise = null
   } = {}) {
     const effectiveRegistrationChange = registrationChange
       ?? (windowRecycled ? 'window-recycle' : null);
@@ -2155,7 +2196,8 @@ export async function executeAtomLanguage(options = {}) {
         })) : null),
         registrationChange: effectiveRegistrationChange,
         compatibilityManifest: options.compatibilityManifest,
-        localizedSituationValidation
+        localizedSituationValidation,
+        structurePreservingValidation
       });
       committedAffectedPaths = [...new Set((receipt?.affectedAtoms ?? [])
         .map(({ path }) => path)
@@ -2206,6 +2248,17 @@ export async function executeAtomLanguage(options = {}) {
       const settleWarnings = rebased?.persisted === true
         ? []
         : await settleContextFreeProgramProjectionForWorld(candidateAtoms);
+      if (preparedRuntimeRecordsPromise) {
+        try {
+          const preparedRuntimeRecords = await preparedRuntimeRecordsPromise;
+          await options.programScheduler?.installPreparedRuntimeIndexes?.(
+            candidateAtoms,
+            preparedRuntimeRecords
+          );
+        } catch {
+          // A failed performance cache never changes an already committed business result.
+        }
+      }
       await recordTransformStage('program-projection', projectionSettleStartedAt, {
         candidateProgramCount: 0,
         executedProgramCount: 0
@@ -2737,7 +2790,9 @@ export async function executeAtomLanguage(options = {}) {
     atoms,
     item,
     contextFile,
-    authorize: accessController.authorize
+    authorize: accessController.authorize,
+    exactIndex: preparedTransformWorld.exactIndex,
+    allMatches: preparedTransformWorld.allMatches
   });
   if (transformed.error) {
     return failureBase(parsed, contextFile, projectionFile, atoms, [transformed.error], { messages: interactionMessages });
@@ -2807,21 +2862,37 @@ export async function executeAtomLanguage(options = {}) {
   }
   if (changed) {
     revisionAfter = sealWorldFactsRevision(nextAtoms).slice('sha256:'.length);
+    if (!programSurfaceChanged && isLocalizedSituationTransform(item)) {
+      inheritPreparedAccessWorld(atoms, nextAtoms);
+    }
     const canRebaseProjection = programTransformLogs.length === 0
       && postRefresh.transformLogs.length === 0
       && postRefresh.pathChanges.length === 0;
+    const transformedPaths = [...new Set([
+      transformed.sourcePath,
+      transformed.resultPath,
+      ...(transformed.relationPaths ?? []),
+      ...(transformed.shortcutPaths ?? [])
+    ].filter(Boolean))];
+    const inheritedSlotStructure = isStructurePreservingTransform(item)
+      && inheritPreparedSlotStructureWorld(atoms, nextAtoms, transformedPaths);
+    const preparedRuntimeRecordsPromise = canRebaseProjection
+      ? Promise.resolve().then(() => {
+          prepareTransformRelationIndex(nextAtoms, path.basename(contextFile));
+          if (!inheritedSlotStructure) prepareSlotStructureWorld(nextAtoms);
+          return options.programScheduler?.prepareRuntimeRecords?.(nextAtoms) ?? null;
+        })
+      : null;
     await commitChangedGraph(nextAtoms, canRebaseProjection ? {
       projectionRebase: {
         previousAtoms: atoms,
-        changedPaths: [...new Set([
-          transformed.sourcePath,
-          transformed.resultPath,
-          ...(transformed.relationPaths ?? []),
-          ...(transformed.shortcutPaths ?? [])
-        ].filter(Boolean))]
+        changedPaths: transformedPaths
       },
       localizedSituationValidation: !programSurfaceChanged
-        && isLocalizedSituationTransform(item)
+        && isLocalizedSituationTransform(item),
+      structurePreservingValidation: !programSurfaceChanged
+        && isStructurePreservingTransform(item),
+      preparedRuntimeRecordsPromise
     } : {
       changedPaths: [...new Set([
         transformed.sourcePath,

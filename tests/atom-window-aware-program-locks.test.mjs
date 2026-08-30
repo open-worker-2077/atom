@@ -180,7 +180,10 @@ test('scheduler Program moves one fixed window while its spatial scope follows t
     programScheduler: scheduler, interaction: movedInteraction
   });
   assert.equal(current.ok, true, JSON.stringify(current.errors));
-  assert.ok(current.items[0].matches.some((item) => item.path === 'Root/工单2/执行窗口'));
+  assert.ok(
+    current.items[0].matches.some((item) => item.path === 'Root/工单2/执行窗口'),
+    JSON.stringify(current)
+  );
 
   const upper = await executeAtomLanguage({
     source: 'explore {"thing":"Root/状态","situation$full":true}', contextFile, projectionFile,

@@ -426,6 +426,9 @@ export async function startAtomGraphServer(options = {}) {
     diagnostics,
     worldService,
     spatialPublisher,
+    ...(options.projectionDelayMs !== undefined
+      ? { projectionDelayMs: options.projectionDelayMs }
+      : {}),
     ...(timingInteractionId ? { onStage: createOneShotTimingObserver({ interactionId: timingInteractionId, diagnostics }) } : {}),
     ...(options.projectionOrchestrator ? { projectionOrchestrator: options.projectionOrchestrator } : {})
   });
@@ -465,6 +468,11 @@ export async function startAtomGraphServer(options = {}) {
       : {})
   });
 
+  // Complete the startup recovery backup before exposing 4784. Running the
+  // initial Git/copy workload beside the first CLI requests makes otherwise
+  // local interactions contend for the same disk and violates readiness.
+  await backupTrigger?.flush?.();
+
   const instance = await createSpatialServer({
     root: options.root ?? projectRoot,
     storeFile: configuration.storeFile,
@@ -481,7 +489,7 @@ export async function startAtomGraphServer(options = {}) {
     atomProgramFunctionRegistry: handlers.programFunctionRegistry
   });
   notifySpatialProjection = instance.publishKnowledgeChange;
-  backupTrigger?.start();
+  backupTrigger?.start({ initialBackup: false });
   instance.server.once('close', () => backupTrigger?.close());
   await new Promise((resolve, reject) => {
     const onError = (error) => {
@@ -528,6 +536,8 @@ export async function startAtomGraphServer(options = {}) {
     close: async () => {
       const closing = closeServer(instance.server);
       await instance.drainAtomInteractions?.();
+      await interactionRuntime.close?.();
+      await diagnostics.flush?.();
       await closing;
     }
   });
