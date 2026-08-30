@@ -12,6 +12,12 @@ import {
 import { createRuntimeCliExecutor } from '../src/atom-system/adapters/runtime-cli-executor.mjs';
 import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
+import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
+import {
+  advanceCompatibilityManifest,
+  createCompatibilityManifest
+} from '../src/atom-system/world-runtime/legacy-graph-compat.mjs';
+import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import {
   createProgramRuntimeScheduler,
@@ -641,6 +647,94 @@ test('legacy composition binds world, Program, projection and spatial publicatio
     ['graph', {}],
     ['spatial', { nodes: [] }]
   ]);
+});
+
+test('default projection consumes the current compatibility manifest after a local commit and recover', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-current-manifest-projection-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const source = [{
+    thing: 'Root',
+    situation: 'source',
+    contain: [],
+    support: [{ verb: 'legacy relation', object: 'Target' }]
+  }];
+  await fs.writeFile(contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+
+  const persistence = createTransactionalWorldPersistence({
+    contextFile,
+    projectionFile: graphFile,
+    publishLegacyProjection: false
+  });
+  const sourceManifest = createCompatibilityManifest({
+    sourceRevision: 'sha256:legacy-source',
+    targetFacts: source
+  });
+  let currentFacts = structuredClone(source);
+  currentFacts[0].situation = 'first commit';
+  await persistence.commit({
+    correlationId: 'first-local-commit',
+    expectedRevision: revisionOfWorldFacts(source),
+    nextRevision: revisionOfWorldFacts(currentFacts),
+    facts: currentFacts,
+    compatibilityManifest: advanceCompatibilityManifest(sourceManifest, source, currentFacts)
+  });
+
+  const worldService = {
+    compatibilityManifest: () => persistence.compatibilityManifest(),
+    async executeLegacy(request) {
+      if (request.source === 'atom') {
+        return {
+          ok: true,
+          changed: false,
+          revisionAfter: revisionOfWorldFacts(currentFacts),
+          lockState: {}
+        };
+      }
+      const before = currentFacts;
+      const next = structuredClone(before);
+      next[0].situation = 'second commit';
+      const receipt = await persistence.commit({
+        correlationId: request.interaction.id,
+        expectedRevision: revisionOfWorldFacts(before),
+        nextRevision: revisionOfWorldFacts(next),
+        facts: next
+      });
+      currentFacts = next;
+      return {
+        ok: true,
+        changed: true,
+        revisionAfter: receipt.afterRevision,
+        lockState: {},
+        affectedPaths: ['Root']
+      };
+    }
+  };
+  const runtime = createLegacyRuntimeComposition({
+    contextFile,
+    graphFile,
+    worldService,
+    projectionDelayMs: 0,
+    graphPublisher: { publish: async () => {} },
+    spatialPublisher: { publish: async () => {} },
+    feedbackRecorder: async () => ({ ok: true }),
+    agentResolver: async () => null,
+    humanStatusTranslator: { translate: async () => 'transform {}' }
+  });
+
+  const initialized = await runtime.initialize({ correlationId: 'current-manifest-startup' });
+  assert.equal(initialized.projectionStatus, 'published');
+  const committed = await runtime.execute({
+    source: 'transform {}', correlationId: 'second-local-commit', history: []
+  });
+  const expectedRevision = revisionOfWorldFacts(currentFacts);
+  assert.equal(committed.revisionAfter, expectedRevision);
+  const recovered = await runtime.recover({ expectedRevision });
+  assert.equal(recovered.sourceRevision, expectedRevision);
+  assert.deepEqual(runtime.projectionStatus(), { status: 'published', expectedRevision });
+  assert.equal((await persistence.compatibilityManifest()).currentWorldRevision, expectedRevision);
+  await runtime.close();
 });
 
 test('legacy composition primes and revision-binds Agent resolution without caching a denied Agent', async () => {

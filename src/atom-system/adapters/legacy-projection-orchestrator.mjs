@@ -28,15 +28,25 @@ export function createLegacyProjectionOrchestrator({
   worldId = 'primary',
   repository = createMemoryProjectionRepository({ immutableReferences: true }),
   programScheduler = null,
+  compatibilityManifestProvider = null,
   journalFile = path.join(path.dirname(contextFile), 'atom.transactions.json')
 }) {
   if (!contextFile) throw problem('INVALID_PROJECTION_CONTEXT', 'Atom context file is required');
-  const journal = createJsonTransactionJournal({ file: journalFile });
+  let fallbackJournal = null;
+
+  async function currentCompatibilityManifest() {
+    if (typeof compatibilityManifestProvider === 'function') {
+      const manifest = await compatibilityManifestProvider();
+      return manifest ? structuredClone(manifest) : null;
+    }
+    fallbackJournal ??= createJsonTransactionJournal({ file: journalFile });
+    const journalState = await fallbackJournal.readState();
+    return journalState.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null;
+  }
 
   async function projectCurrent({ expectedRevision, lockState = [], affectedPaths = null } = {}) {
     const readStartedAt = performance.now();
-    const journalState = await journal.readState();
-    const compatibilityManifest = journalState.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null;
+    const compatibilityManifest = await currentCompatibilityManifest();
     const facts = await readAtomContext(contextFile, {
       create: false,
       compatibilityManifest
