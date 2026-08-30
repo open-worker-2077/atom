@@ -323,6 +323,40 @@ test('network bridge retries an initial actual-data failure instead of leaving s
   assert.deepEqual(JSON.parse(JSON.stringify(imported)), actualKnowledge);
 });
 
+test('network bridge reports an initial state failure to the main-entry recovery guard', async () => {
+  const recoveryEvents = [];
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: 'worker.tail33a2eb.ts.net', protocol: 'https:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge() { throw new Error('state must not import after the failed request'); },
+      exportField: () => ({ path: 'root' }),
+      exportKnowledge: () => ({ revision: 0, nodes: [], edges: [] })
+    },
+    fetch: async (url) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      throw new Error('projection is temporarily unavailable');
+    },
+    addEventListener() {},
+    EventSource: class {},
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    dispatchEvent(event) { recoveryEvents.push(event); }
+  };
+  window.window = window;
+
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(document.body.dataset.spatialBridge, 'offline');
+  assert.deepEqual(JSON.parse(JSON.stringify(recoveryEvents)), [{
+    type: 'atom-main-entry-unavailable',
+    detail: { stage: 'state' }
+  }]);
+});
+
 test('network bridge progressively loads the entered Atom path without downloading the whole world', async () => {
   const listeners = new Map();
   const requested = [];
