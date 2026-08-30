@@ -62,7 +62,7 @@ def _atom(name, detail="", children=None, support=None, types=None):
     return result
 
 
-def _form(name, purpose, fields, next_name=None):
+def _legacy_form(name, purpose, fields, next_name=None):
     routes = ([{"if@current": True, "then": [{"thing": next_name}]}]
               if next_name else [])
     return _atom(
@@ -73,7 +73,24 @@ def _form(name, purpose, fields, next_name=None):
     )
 
 
-def advancement_flow_roots(parameters):
+COMPLETION_GATE_SOURCE = """def main(arguments):
+    form_path = current_atom().path.rsplit('/', 1)[0]
+    rows = explore({'thing': form_path + '/状态', 'situation$full': None})
+    return bool(rows and rows[0].situation in ['已通过', '已冻结'])"""
+
+
+def _gated_form(name, purpose, fields, previous_name=None, has_next=False):
+    routes = ([{
+        "if": [{"thing@program": f"{previous_name}完成门"}],
+        "then@current": True,
+    }] if previous_name else [])
+    children = [_atom("状态", "未进入"), *[_atom(field) for field in fields]]
+    if has_next:
+        children.append(_atom(f"{name}完成门", COMPLETION_GATE_SOURCE, types=["program"]))
+    return _atom(name, purpose, children, routes)
+
+
+def _advancement_flow_roots(parameters, version, gated):
     title = parameters.get("title", "")
     if not isinstance(title, str):
         raise TypeError("advancement-flow parameter 'title' must be a string")
@@ -86,10 +103,17 @@ def advancement_flow_roots(parameters):
         for index, current in enumerate(ADVANCEMENT_FORMS[:-1])
     }
     grouped = {}
+    previous_name = None
     for name, block, purpose, fields in ADVANCEMENT_FORMS:
-        grouped.setdefault(block, []).append(_form(name, purpose, fields, next_by_name.get(name)))
+        form = (_gated_form(
+            name, purpose, fields, previous_name, name in next_by_name
+        ) if gated else _legacy_form(
+            name, purpose, fields, next_by_name.get(name)
+        ))
+        grouped.setdefault(block, []).append(form)
+        previous_name = name
     return [
-        _atom("编标版本", "1"),
+        _atom("编标版本", version),
         _atom("任务标题", title),
         _atom("导航坐标", "定向"),
         _atom("设标", "人工主导方法逻辑。", grouped["设标"]),
@@ -100,12 +124,23 @@ def advancement_flow_roots(parameters):
     ]
 
 
+def advancement_flow_roots_v1(parameters):
+    return _advancement_flow_roots(parameters, "1", False)
+
+
+def advancement_flow_roots_v2(parameters):
+    return _advancement_flow_roots(parameters, "2", True)
+
+
 TEMPLATE_CATALOG = {
     "advancement-flow": {
         "label": "推进流",
         "description": "生成设标、建标、推进、收尾及内部路由 Program。",
-        "latest": "1",
-        "versions": {"1": advancement_flow_roots},
+        "latest": "2",
+        "versions": {
+            "1": advancement_flow_roots_v1,
+            "2": advancement_flow_roots_v2,
+        },
         "parameters": {
             "type": "object",
             "properties": {"title": {"type": "string", "description": "任务标题"}},
