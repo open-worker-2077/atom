@@ -598,7 +598,7 @@ test('public help is a complete daily Agent operation contract', async () => {
   ]) assert.match(text, new RegExp(example.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
   assert.match(text, /situation\$full/u);
   assert.match(text, /support 按原始 ordinal 回读 owner 声明/u);
-  assert.match(text, /Program 端点写 \{"thing@program":"selector"\}/u);
+  assert.match(text, /if 内的独立判定 Program 写 \{"thing@program":"selector"\}.*then 只接受普通事实 Thing/u);
   assert.match(text, /禁止原生 N→M/u);
   assert.match(text, /显式枢纽 H/u);
   assert.doesNotMatch(text, /前件 Program/u);
