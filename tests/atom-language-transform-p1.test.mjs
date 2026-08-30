@@ -7,12 +7,14 @@ import test from 'node:test';
 import { parseGraphDocument } from '../cli/lib/graph-json.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { executeAtomLanguage as executeAtomLanguageKernel } from '../work-engine/atom-language/engine.mjs';
+import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { writeAtomGraphProjection } from '../work-engine/atom-language/context-store.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
 import {
   appendTransformLog,
   applyTransform,
-  readTransformLog
+  readTransformLog,
+  transformLogEventFileFor
 } from '../work-engine/atom-language/transform-executor.mjs';
 import {
   TRANSFORM_COMMANDS,
@@ -500,6 +502,56 @@ test('discard commit failure leaves authoritative world, projection, and transfo
   assert.equal(await fs.readFile(files.contextFile, 'utf8'), contextBefore);
   assert.equal(await fs.readFile(files.projectionFile, 'utf8'), projectionBefore);
   assert.deepEqual(await readTransformLog(files.contextFile), []);
+});
+
+test('audit mirror failure cannot turn a committed discard into a failed unrecoverable request', async (t) => {
+  const initial = [
+    atom('Synthetic East', '', [atom('Disposable', 'recoverable payload')]),
+    {
+      'thing@backup@default': 'Synthetic Backup',
+      situation: '',
+      contain: [],
+      support: []
+    }
+  ];
+  const files = await fixture(t, initial);
+  await writeAtomGraphProjection(files.projectionFile, initial, {
+    rootName: path.basename(files.contextFile)
+  });
+  const auditDirectory = path.dirname(transformLogEventFileFor(files.contextFile));
+  await fs.writeFile(auditDirectory, 'synthetic obstruction', 'utf8');
+
+  let discarded;
+  await assert.doesNotReject(async () => {
+    discarded = await execute(files, 'transform {"thing.dsc.":"Synthetic East/Disposable"}');
+  });
+  assert.equal(discarded.ok, true, JSON.stringify(discarded));
+  assert.ok(discarded.warnings.some((warning) => (
+    warning.code === 'TRANSFORM_LOG_MIRROR_FAILED'
+  )), JSON.stringify(discarded));
+  assert.equal(findAtom(await readAtoms(files.contextFile), 'Synthetic East').contain.length, 0);
+  assert.match(await fs.readFile(files.projectionFile, 'utf8'), /Synthetic Backup/u);
+  const transactionEvents = (await fs.readFile(
+    path.join(files.directory, 'atom.transactions.json.d', 'events.jsonl'),
+    'utf8'
+  )).trim().split('\n').map(JSON.parse);
+  const committedDiscard = transactionEvents.findLast((event) => (
+    event.type === 'committed'
+    && event.receipt?.result?.transformLogRecord?.id === discarded.archive.discardId
+  ));
+  assert.equal(committedDiscard.receipt.result.transformLogRecord.operation, 'discard');
+
+  await fs.unlink(auditDirectory);
+  const restarted = createLegacyWorldService();
+  const restored = await restarted.executeLegacy({
+    ...files,
+    source: `transform {"thing.rst.":${JSON.stringify(discarded.archive.restoreCoordinate)}}`
+  });
+  assert.equal(restored.ok, true, JSON.stringify(restored));
+  assert.equal(
+    findAtom(findAtom(await readAtoms(files.contextFile), 'Synthetic East').contain, 'Disposable').situation,
+    'recoverable payload'
+  );
 });
 
 test('Atom to Graph projection preserves long multilingual situation without clipping', async (t) => {

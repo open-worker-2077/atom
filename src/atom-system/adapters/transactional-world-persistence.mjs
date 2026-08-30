@@ -71,6 +71,7 @@ export function createTransactionalWorldPersistence({
   const coordinator = createCommitCoordinator({ worldRepository, journalRepository });
   let recovery = null;
   let cachedManifest = null;
+  let cachedTransformLog = null;
   let manifestLoaded = false;
 
   function recover() {
@@ -87,6 +88,17 @@ export function createTransactionalWorldPersistence({
     return structuredClone(cachedManifest);
   }
 
+  async function transformLogEntries() {
+    await recover();
+    if (cachedTransformLog) return structuredClone(cachedTransformLog);
+    const state = await journalRepository.readState();
+    cachedTransformLog = state.receipts.flatMap((entry) => {
+      const record = entry.receipt?.result?.transformLogRecord;
+      return record ? [structuredClone(record)] : [];
+    });
+    return structuredClone(cachedTransformLog);
+  }
+
   async function commit({
     correlationId,
     expectedRevision,
@@ -96,6 +108,7 @@ export function createTransactionalWorldPersistence({
     changedPaths = null,
     affectedAtoms = null,
     registrationChange = null,
+    transformLogRecord = null,
     compatibilityManifest: suppliedManifest = null
   }) {
     await recover();
@@ -153,13 +166,19 @@ export function createTransactionalWorldPersistence({
               affectedAtomsComplete: true
             } : {}),
             ...(nextManifest ? { compatibilityManifest: nextManifest } : {}),
-            ...(previousManifest ? { previousCompatibilityManifest: previousManifest } : {})
+            ...(previousManifest ? { previousCompatibilityManifest: previousManifest } : {}),
+            ...(transformLogRecord ? {
+              transformLogRecord: structuredClone(transformLogRecord)
+            } : {})
           }
         };
       }
     });
     cachedManifest = structuredClone(receipt.result?.compatibilityManifest ?? previousManifest ?? null);
     manifestLoaded = true;
+    if (transformLogRecord && cachedTransformLog) {
+      cachedTransformLog.push(structuredClone(transformLogRecord));
+    }
     await adoptAtomContextSnapshot(contextFile, facts, {
       ...(nextManifest ? { compatibilityManifest: nextManifest } : {})
     });
@@ -230,5 +249,11 @@ export function createTransactionalWorldPersistence({
     return receipt;
   }
 
-  return Object.freeze({ commit, compatibilityManifest, recover, rollback });
+  return Object.freeze({
+    commit,
+    compatibilityManifest,
+    recover,
+    rollback,
+    transformLogEntries
+  });
 }

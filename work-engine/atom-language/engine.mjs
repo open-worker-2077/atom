@@ -637,6 +637,7 @@ async function persistChangedGraph({
   changedPaths = null,
   affectedAtoms = null,
   registrationChange = null,
+  transformLogRecord = null,
   compatibilityManifest,
   localizedSituationValidation = false,
   structurePreservingValidation = false
@@ -663,7 +664,8 @@ async function persistChangedGraph({
     source,
     ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
     ...(Array.isArray(affectedAtoms) ? { affectedAtoms } : {}),
-    registrationChange
+    registrationChange,
+    ...(transformLogRecord ? { transformLogRecord } : {})
   });
   performanceTrace('world-commit', {
     elapsedMs: Math.round(performance.now() - commitStartedAt)
@@ -2173,6 +2175,7 @@ export async function executeAtomLanguage(options = {}) {
     projectionRebase = null,
     changedPaths = projectionRebase?.changedPaths ?? null,
     affectedAtoms = null,
+    transformLogRecord = null,
     localizedSituationValidation = false,
     structurePreservingValidation = false,
     preparedRuntimeRecordsPromise = null
@@ -2197,6 +2200,7 @@ export async function executeAtomLanguage(options = {}) {
           axes: ['contain', 'situation', 'support', 'thing']
         })) : null),
         registrationChange: effectiveRegistrationChange,
+        transformLogRecord,
         compatibilityManifest: options.compatibilityManifest,
         localizedSituationValidation,
         structurePreservingValidation
@@ -2794,7 +2798,8 @@ export async function executeAtomLanguage(options = {}) {
     contextFile,
     authorize: accessController.authorize,
     exactIndex: preparedTransformWorld.exactIndex,
-    allMatches: preparedTransformWorld.allMatches
+    allMatches: preparedTransformWorld.allMatches,
+    transactionTransformLog: options.transactionTransformLog ?? []
   });
   if (transformed.error) {
     return failureBase(parsed, contextFile, projectionFile, atoms, [transformed.error], { messages: interactionMessages });
@@ -2864,6 +2869,11 @@ export async function executeAtomLanguage(options = {}) {
   }
   if (changed) {
     revisionAfter = sealWorldFactsRevision(nextAtoms).slice('sha256:'.length);
+    const transformLogRecord = transformed.logRecord ? {
+      ...transformed.logRecord,
+      revisionBefore,
+      revisionAfter
+    } : null;
     if (!programSurfaceChanged && isLocalizedSituationTransform(item)) {
       inheritPreparedAccessWorld(atoms, nextAtoms);
     }
@@ -2885,7 +2895,7 @@ export async function executeAtomLanguage(options = {}) {
           return options.programScheduler?.prepareRuntimeRecords?.(nextAtoms) ?? null;
         })
       : null;
-    await commitChangedGraph(nextAtoms, canRebaseProjection ? {
+    const commitReceipt = await commitChangedGraph(nextAtoms, canRebaseProjection ? {
       projectionRebase: {
         previousAtoms: atoms,
         changedPaths: transformedPaths
@@ -2894,7 +2904,8 @@ export async function executeAtomLanguage(options = {}) {
         && isLocalizedSituationTransform(item),
       structurePreservingValidation: !programSurfaceChanged
         && isStructurePreservingTransform(item),
-      preparedRuntimeRecordsPromise
+      preparedRuntimeRecordsPromise,
+      transformLogRecord
     } : {
       changedPaths: [...new Set([
         transformed.sourcePath,
@@ -2902,18 +2913,35 @@ export async function executeAtomLanguage(options = {}) {
         ...(transformed.relationPaths ?? []),
         ...(transformed.shortcutPaths ?? []),
         ...postRefresh.pathChanges.flatMap((change) => [change.sourcePath, change.resultPath])
-      ].filter(Boolean))]
+      ].filter(Boolean))],
+      transformLogRecord
     });
+    const reversibleRecordCommitted = transformLogRecord
+      && commitReceipt?.result?.transformLogRecord?.id === transformLogRecord.id;
     const auditStartedAt = performance.now();
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
-      await appendTransformLog(contextFile, record);
+      try {
+        await appendTransformLog(contextFile, record);
+      } catch (error) {
+        if (!reversibleRecordCommitted) throw error;
+        if (!reversibleRecordCommitted) throw error;
+        interactionWarnings.push(diagnostic(
+          'TRANSFORM_LOG_MIRROR_FAILED',
+          '事实已由中央事务提交，但辅助 Transform 日志镜像写入失败',
+          { cause: error.code ?? error.name }
+        ));
+      }
     }
-    if (transformed.logRecord) {
-      await appendTransformLog(contextFile, {
-        ...transformed.logRecord,
-        revisionBefore,
-        revisionAfter
-      });
+    if (transformLogRecord) {
+      try {
+        await appendTransformLog(contextFile, transformLogRecord);
+      } catch (error) {
+        interactionWarnings.push(diagnostic(
+          'TRANSFORM_LOG_MIRROR_FAILED',
+          '事实与可逆记录已由中央事务提交，但辅助 Transform 日志镜像写入失败',
+          { cause: error.code ?? error.name }
+        ));
+      }
     }
     performanceTrace('transform-audit-append', {
       elapsedMs: Math.round(performance.now() - auditStartedAt)

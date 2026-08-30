@@ -929,6 +929,19 @@ export async function readTransformLog(contextFile) {
   return structuredClone(entries);
 }
 
+async function mergedTransformLog(contextFile, transactionEntries = []) {
+  const entries = [...await readTransformLog(contextFile), ...transactionEntries];
+  const seen = new Set();
+  return entries.filter((entry) => {
+    const identity = typeof entry?.id === 'string' && entry.id
+      ? entry.id
+      : JSON.stringify(entry);
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
 export async function appendTransformLog(contextFile, record) {
   const file = transformLogEventFileFor(contextFile);
   await fs.mkdir(path.dirname(file), { recursive: true });
@@ -978,7 +991,8 @@ export async function applyTransform({
   authorize = async () => ({ decision: 'allow' }),
   mutateInput = false,
   exactIndex = null,
-  allMatches = null
+  allMatches = null,
+  transactionTransformLog = []
 }) {
   const canMutateInput = mutateInput && !Object.isFrozen(atoms);
   const rootName = path.basename(contextFile);
@@ -1045,7 +1059,7 @@ export async function applyTransform({
       closureMatches.push(backup.match);
     }
     if (command?.name === 'rst') {
-      const entries = await readTransformLog(contextFile);
+      const entries = await mergedTransformLog(contextFile, transactionTransformLog);
       const archiveName = storedField(originalSelection.match.atom, 'thing').value;
       const discard = activeDiscard(entries, {
         archivePath: originalSelection.match.path.join('/'), archiveName
@@ -1402,7 +1416,7 @@ export async function applyTransform({
     if (target.parent?.atom !== backup.match.atom) {
       return { error: diagnostic('RESTORE_TARGET_NOT_IN_BACKUP', '恢复目标不在默认备份仓') };
     }
-    const entries = await readTransformLog(contextFile);
+    const entries = await mergedTransformLog(contextFile, transactionTransformLog);
     const archiveName = storedField(target.atom, 'thing').value;
     const discard = activeDiscard(entries, { archivePath: sourcePath, archiveName });
     if (!discard) {
