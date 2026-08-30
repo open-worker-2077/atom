@@ -74,12 +74,12 @@ test('actual data reconnects in the original document after one state failure', 
   await page.goto('/');
 
   await expect.poll(() => stateAttempts, { timeout: 5_000 }).toBeGreaterThanOrEqual(2);
-  await expect.poll(() => page.evaluate(() => document.body.dataset.spatialBridge), {
+  await expect(page.locator('body')).toHaveAttribute('data-spatial-bridge', 'connected', {
     timeout: 15_000
-  }).toBe('connected');
-  await expect.poll(() => page.evaluate(() => document.body.dataset.spatialKnowledge), {
+  });
+  await expect(page.locator('body')).toHaveAttribute('data-spatial-knowledge', 'authoritative', {
     timeout: 15_000
-  }).toBe('authoritative');
+  });
   expect(stateAttempts).toBeGreaterThanOrEqual(2);
   expect(documentLoads).toBeGreaterThanOrEqual(2);
   expect(new URL(page.url()).pathname).toBe('/');
@@ -108,12 +108,12 @@ test('actual data recovery does not wait forever when health is unavailable', as
 
   await page.goto('/');
 
-  await expect.poll(() => page.evaluate(() => document.body.dataset.spatialBridge), {
+  await expect(page.locator('body')).toHaveAttribute('data-spatial-bridge', 'connected', {
     timeout: 15_000
-  }).toBe('connected');
-  await expect.poll(() => page.evaluate(() => document.body.dataset.spatialKnowledge), {
+  });
+  await expect(page.locator('body')).toHaveAttribute('data-spatial-knowledge', 'authoritative', {
     timeout: 15_000
-  }).toBe('authoritative');
+  });
   expect(healthAttempts).toBeGreaterThanOrEqual(2);
   expect(stateAttempts).toBeGreaterThanOrEqual(3);
   expect(documentLoads).toBeGreaterThanOrEqual(2);
