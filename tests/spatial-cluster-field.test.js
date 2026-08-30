@@ -305,6 +305,42 @@ test('S repulsion interval leaves automatic packing intact while widening edge c
   assert.ok(middle.clusters[0].radius >= loose.clusters[0].radius);
 });
 
+test('S repulsion interval preserves nested child display scale while widening its node gaps', () => {
+  const field = loadClusterField();
+  const domains = [
+    {
+      path: 'root', depth: 0, projectionMode: 'nested',
+      nodes: [
+        { id: 'mother', radius: 0.82, position: { x: -1, y: 0, z: 0 } },
+        { id: 'root-peer', radius: 0.82, position: { x: 1, y: 0, z: 0 } }
+      ]
+    },
+    {
+      path: 'root/mother', depth: 1, projectionMode: 'nested', parentPath: 'root', parentNodeId: 'mother',
+      nodes: [
+        { id: 'child-a', radius: 0.82, position: { x: -1, y: 0, z: 0 } },
+        { id: 'child-b', radius: 0.82, position: { x: 1, y: 0, z: 0 } }
+      ]
+    }
+  ];
+  const minimum = field.buildScene(domains, { compact: true, compactPercent: 0 });
+  const maximum = field.buildScene(domains, { compact: true, compactPercent: 1000 });
+  const child = (scene) => scene.clusters.find((cluster) => cluster.path === 'root/mother');
+  const edgeGap = (scene) => {
+    const [left, right] = child(scene).nodes;
+    return Math.hypot(
+      right.position.x - left.position.x,
+      right.position.y - left.position.y
+    ) - left.__clusterRadius - right.__clusterRadius;
+  };
+
+  assert.ok(edgeGap(maximum) > edgeGap(minimum) + 1, 'S widens the real same-level edge interval');
+  assert.equal(maximum.clusters[0].nodeScale, minimum.clusters[0].nodeScale, 'parent scale remains stable');
+  assert.equal(child(maximum).nodeScale, child(minimum).nodeScale, 'nested child scale remains stable');
+  assert.equal(child(maximum).nodes[0].__clusterRadius, child(minimum).nodes[0].__clusterRadius);
+  assert.equal(child(maximum).nodes[1].__clusterRadius, child(minimum).nodes[1].__clusterRadius);
+});
+
 test('adaptive shell contraction stops only at locally contacted node edges', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'spatial-cluster-field.js'), 'utf8');
   assert.match(source, /function contractShellToLocalEdges\(/);
