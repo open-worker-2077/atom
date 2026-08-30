@@ -301,7 +301,13 @@ export function createLegacyRuntimeComposition(options) {
     } : {})
   });
   const activeProjectionOrchestrator = projectionOrchestrator
-    ?? createLegacyProjectionOrchestrator({ contextFile, programScheduler });
+    ?? createLegacyProjectionOrchestrator({
+      contextFile,
+      programScheduler,
+      compatibilityManifestProvider: typeof worldService.compatibilityManifest === 'function'
+        ? () => worldService.compatibilityManifest({ contextFile, projectionFile: graphFile })
+        : null
+    });
 
   if (typeof contextFile !== 'string' || !contextFile || typeof graphFile !== 'string' || !graphFile) {
     throw problem('INVALID_RUNTIME_PATHS', 'Legacy runtime composition requires contextFile and graphFile');
