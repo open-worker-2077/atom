@@ -6,8 +6,10 @@ import test from 'node:test';
 
 import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { projectAtomContext } from '../work-engine/atom-language/context-store.mjs';
 import { programFunctionRegistry } from '../work-engine/atom-language/program-function-registry.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { evaluateSupportClausesWithPrograms } from '../work-engine/atom-language/support-runtime.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
@@ -68,6 +70,53 @@ test('instantiate creates one complete advancement flow below the calling Progra
   );
   const afterSecond = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.deepEqual(afterSecond, afterFirst);
+});
+
+test('advancement-flow transitions consume independent strict-bool Programs without writing the next form', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-instantiate-support-gate-'));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Synthetic Flow', '', [
+      atom('Generator', "instantiate({'template':'advancement-flow','version':'latest','mode':'ensure','parameters':{'title':'Synthetic'}})", [], 'program')
+    ])
+  ], null, 2));
+  const scheduler = createProgramRuntimeScheduler();
+  const instantiated = await executeAtomLanguage({
+    source: 'atom', contextFile, projectionFile, programScheduler: scheduler
+  });
+  assert.equal(instantiated.ok, true, JSON.stringify(instantiated.errors));
+
+  const initialWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const initialGraph = projectAtomContext(initialWorld);
+  const transition = initialGraph.supportClauses.find((clause) => clause.sourcePath.endsWith('/调研'));
+  assert.equal(transition.root.kind, 'program');
+  assert.equal(transition.root.targetPath.endsWith('/定向完成门'), true);
+
+  const evaluate = (world, graph) => evaluateSupportClausesWithPrograms(graph, {
+    evaluateProgram: (graphPath) => scheduler.evaluateSupportProgram(
+      world,
+      graph.atomPathByGraphPath.get(graphPath)
+    )
+  });
+  const beforeFalseEvaluation = structuredClone(initialWorld);
+  const falseDecisions = await evaluate(initialWorld, initialGraph);
+  assert.equal(falseDecisions.get(transition.id).decision, false);
+  assert.deepEqual(initialWorld, beforeFalseEvaluation);
+
+  const completedWorld = structuredClone(initialWorld);
+  const generator = completedWorld[0].contain[0];
+  const direction = generator.contain
+    .find((child) => child.thing === '设标').contain
+    .find((child) => child.thing === '定向');
+  direction.contain.find((child) => child.thing === '状态').situation = '已通过';
+  const completedGraph = projectAtomContext(completedWorld);
+  const completedTransition = completedGraph.supportClauses
+    .find((clause) => clause.sourcePath.endsWith('/调研'));
+  const beforeTrueEvaluation = structuredClone(completedWorld);
+  const trueDecisions = await evaluate(completedWorld, completedGraph);
+  assert.equal(trueDecisions.get(completedTransition.id).decision, true);
+  assert.deepEqual(completedWorld, beforeTrueEvaluation);
 });
 
 test('documented two-step commands create an Agent with one attached complete advancement flow', async () => {
