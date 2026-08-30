@@ -79,13 +79,14 @@ COMPLETION_GATE_SOURCE = """def main(arguments):
     return bool(rows and rows[0].situation in ['已通过', '已冻结'])"""
 
 
-def _gated_form(name, purpose, fields, previous_name=None, has_next=False):
+def _gated_form(name, purpose, fields, next_name=None):
     routes = ([{
-        "if": [{"thing@program": f"{previous_name}完成门"}],
-        "then@current": True,
-    }] if previous_name else [])
+        "if@current": True,
+        "if": [{"thing@program": f"{name}完成门"}],
+        "then": [{"thing": next_name}],
+    }] if next_name else [])
     children = [_atom("状态", "未进入"), *[_atom(field) for field in fields]]
-    if has_next:
+    if next_name:
         children.append(_atom(f"{name}完成门", COMPLETION_GATE_SOURCE, types=["program"]))
     return _atom(name, purpose, children, routes)
 
@@ -103,15 +104,13 @@ def _advancement_flow_roots(parameters, version, gated):
         for index, current in enumerate(ADVANCEMENT_FORMS[:-1])
     }
     grouped = {}
-    previous_name = None
     for name, block, purpose, fields in ADVANCEMENT_FORMS:
         form = (_gated_form(
-            name, purpose, fields, previous_name, name in next_by_name
+            name, purpose, fields, next_by_name.get(name)
         ) if gated else _legacy_form(
             name, purpose, fields, next_by_name.get(name)
         ))
         grouped.setdefault(block, []).append(form)
-        previous_name = name
     return [
         _atom("编标版本", version),
         _atom("任务标题", title),

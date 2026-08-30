@@ -34,10 +34,11 @@ function find(atoms, selector) {
 
 function world() {
   const calculate = [
-    'def main(arguments):',
+    'def run():',
     '    rows = explore({"thing":"./输入/变量料","situation$full":True})',
     '    transform({"thing":"./输出/结果料","situation.rep." + rows[0].situation:None})',
-    '    return {"computed":True}'
+    '    return {"computed":True}',
+    'trigger("transform", {"nodes":["./输入"]}, run)'
   ].join('\n');
   const printer = (name) => (
     `use_program({"name":"Root/订单槽体/print","arguments":{"name":"${name}"}})`
@@ -46,7 +47,7 @@ function world() {
     atom('研发窗口', '', [], [], ['agent']),
     atom('订单槽体', '', [
       atom('候选流', '', [
-        atom('输入', '输入槽契约', [], [{ 'if@current': true, then: [{ 'thing@program': '计算' }] }]),
+        atom('输入', '输入槽契约', [], [{ 'if@current': true, then: [{ thing: '输出' }] }]),
         atom('输出', '输出槽契约'),
         atom('备注', '备注槽契约'),
         atom('计算', calculate, [], [], ['program'])
@@ -86,9 +87,13 @@ function conditionalWorld() {
     '        return False'
   ].join('\n');
   const calculate = [
-    'def main(arguments):',
+    'def run():',
+    '    allowed = use_program({"name":"Root/条件槽体/槽模/判定","arguments":{}})',
+    '    if allowed is not True:',
+    '        return {"computed":False}',
     '    transform({"thing":"./结果/结果料","situation.rep.已计算":None})',
-    '    return {"computed":True}'
+    '    return {"computed":True}',
+    'trigger("transform", {"nodes":["./字段甲","./字段乙"]}, run)'
   ].join('\n');
   const printer = (name) => (
     `use_program({"name":"Root/条件槽体/print","arguments":{"name":"${name}"}})`
@@ -97,14 +102,19 @@ function conditionalWorld() {
     atom('研发窗口', '', [], [], ['agent']),
     atom('条件槽体', '', [
       atom('候选流', '', [
-        atom('字段甲', '字段甲槽契约'),
+        atom('字段甲', '字段甲槽契约', [], [{
+          'if@current': true,
+          if: [{ and: [
+            { thing: '字段乙' },
+            { 'thing@program': '判定' }
+          ] }],
+          then: [{ thing: '执行' }]
+        }]),
         atom('字段乙', '字段乙槽契约'),
         atom('结果', '结果槽契约'),
+        atom('执行', '普通事实后项'),
         atom('判定', predicate, [], [], ['program']),
-        atom('计算', calculate, [], [{
-          if: [{ 'thing@program': '判定' }],
-          'then@current': true
-        }], ['program'])
+        atom('计算', calculate, [], [], ['program'])
       ])
     ]),
     atom('封装条件槽体', 'slot_body({"action":"seal","body":"Root/条件槽体"})', [], [], ['program']),
@@ -165,7 +175,10 @@ test('generated print Program seals and prints without a blank template in centr
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.deepEqual(slotProgramInvocationsForEvent(committed, {
     mode: 'transform', nodes: ['Root/订单槽体/槽例/订单001/输入']
-  }).map((item) => item.programPath), ['Root/订单槽体/槽模/计算']);
+  }), [], 'support edges alone must not schedule a Program');
+  assert.deepEqual(slotProgramInvocationsForEvent(committed, {
+    mode: 'transform', nodes: ['Root/订单槽体/槽例/订单001/输入']
+  }, scheduler.triggerContracts).map((item) => item.programPath), ['Root/订单槽体/槽模/计算']);
   assert.ok(find(committed, 'Root/订单槽体/print'));
   assert.equal(find(committed, 'Root/订单槽体/槽例/空槽例'), null);
   assert.ok(find(committed, 'Root/订单槽体/槽例/订单001/输入'), JSON.stringify(printed));
@@ -212,13 +225,26 @@ test('one atomic batch evaluates one owner-local condition and dispatches its co
   diagnostics.length = 0;
 
   const before = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  assert.deepEqual(find(before, 'Root/条件槽体/槽例/实例001/字段甲').support, [
+    {
+      'if@current': true,
+      if: [{ and: [
+        { thing: 'Root/条件槽体/槽例/实例001/字段乙' },
+        { 'thing@program': 'Root/条件槽体/槽模/判定' }
+      ] }],
+      then: [{ thing: 'Root/条件槽体/槽例/实例001/执行' }]
+    }
+  ]);
+  assert.deepEqual(find(before, 'Root/条件槽体/槽例/实例001/执行').support, []);
+  assert.deepEqual(find(before, 'Root/条件槽体/槽模/判定').support, []);
+  assert.deepEqual(find(before, 'Root/条件槽体/槽模/计算').support, []);
   const invocations = slotProgramInvocationsForEvent(before, {
     mode: 'transform',
     nodes: [
       'Root/条件槽体/槽例/实例001/字段甲/值料',
       'Root/条件槽体/槽例/实例001/字段乙/值料'
     ]
-  });
+  }, scheduler.triggerContracts);
   assert.equal(invocations.length, 1);
   assert.equal(invocations[0].programPath, 'Root/条件槽体/槽模/计算');
 
@@ -266,7 +292,7 @@ test('a strict-false owner-local condition does not dispatch its consequent', as
   const before = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(slotProgramInvocationsForEvent(before, {
     mode: 'transform', nodes: ['Root/条件槽体/槽例/实例001/字段甲/值料']
-  }).length, 1);
+  }, scheduler.triggerContracts).length, 1);
 
   const changed = await run(runtime, triggerFields('实例001', ['字段甲']), scheduler);
 
@@ -275,7 +301,7 @@ test('a strict-false owner-local condition does not dispatch its consequent', as
   assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果/结果料').situation, '');
   assert.equal(
     diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/槽模/计算').length,
-    0
+    1
   );
 });
 
@@ -316,7 +342,7 @@ test('re-seal recomputes every synchronized instance with the new shared Program
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.deepEqual(slotProgramInvocationsForEvent(committed, {
     mode: 'transform', nodes: ['Root/订单槽体/槽例/订单001/输入']
-  }).map((item) => item.programPath), ['Root/订单槽体/槽模/计算']);
+  }, scheduler.triggerContracts).map((item) => item.programPath), ['Root/订单槽体/槽模/计算']);
   assert.equal(
     find(committed, 'Root/订单槽体/槽例/订单001/输出/结果料').situation,
     '一',

@@ -89,9 +89,30 @@ test('advancement-flow transitions consume independent strict-bool Programs with
 
   const initialWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   const initialGraph = projectAtomContext(initialWorld);
-  const transition = initialGraph.supportClauses.find((clause) => clause.sourcePath.endsWith('/调研'));
-  assert.equal(transition.root.kind, 'program');
-  assert.equal(transition.root.targetPath.endsWith('/定向完成门'), true);
+  const transition = initialGraph.supportClauses.find((clause) => clause.sourcePath.endsWith('/定向'));
+  assert.ok(transition, '定向 ordinary Thing 应持有前往调研的推支关系');
+  assert.equal(transition.root.kind, 'and');
+  assert.deepEqual(
+    transition.root.children.map(({ kind, targetPath, implicit }) => ({
+      kind,
+      target: targetPath.split('/').at(-1),
+      implicit: implicit === true
+    })),
+    [
+      { kind: 'thing', target: '定向', implicit: true },
+      { kind: 'program', target: '定向完成门', implicit: false }
+    ]
+  );
+  assert.deepEqual(
+    transition.then.map(({ kind, targetPath }) => ({ kind, target: targetPath.split('/').at(-1) })),
+    [{ kind: 'thing', target: '调研' }]
+  );
+  assert.deepEqual(transition.antecedentPaths.map((entry) => entry.split('/').at(-1)), ['定向']);
+  assert.deepEqual(
+    transition.dependencyPaths.map((entry) => entry.split('/').at(-1)),
+    ['定向', '定向完成门']
+  );
+  assert.equal(initialGraph.supportClauses.some((clause) => clause.sourcePath.endsWith('/定向完成门')), false);
 
   const evaluate = (world, graph) => evaluateSupportClausesWithPrograms(graph, {
     evaluateProgram: (graphPath) => scheduler.evaluateSupportProgram(
@@ -112,7 +133,7 @@ test('advancement-flow transitions consume independent strict-bool Programs with
   direction.contain.find((child) => child.thing === '状态').situation = '已通过';
   const completedGraph = projectAtomContext(completedWorld);
   const completedTransition = completedGraph.supportClauses
-    .find((clause) => clause.sourcePath.endsWith('/调研'));
+    .find((clause) => clause.sourcePath.endsWith('/定向'));
   const beforeTrueEvaluation = structuredClone(completedWorld);
   const trueDecisions = await evaluate(completedWorld, completedGraph);
   assert.equal(trueDecisions.get(completedTransition.id).decision, true);

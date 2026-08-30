@@ -18,6 +18,16 @@ The system SHALL distinguish the ordinary antecedent Thing, the independent `thi
 - **THEN** the clause is unconditionally established without querying Thing existence as a boolean
 - **AND** its decision trace is empty
 
+#### Scenario: Decision Program cannot own the current support endpoint
+- **WHEN** a `thing@program` node attempts to declare itself as the current antecedent or current consequent of the same support rule
+- **THEN** Graph rejects the rule with `SUPPORT_DECISION_PROGRAM_MUST_BE_INDEPENDENT`
+- **AND** the rule must instead be owned by an ordinary fact endpoint and reference the independent Program only inside `if`
+
+#### Scenario: Program-only condition cannot replace the ordinary fact antecedent
+- **WHEN** a rule targets an ordinary current consequent but its `if` expression contains only `thing@program` selectors
+- **THEN** Graph rejects the rule with `SUPPORT_FACT_ANTECEDENT_REQUIRED`
+- **AND** the owner must add at least one ordinary fact antecedent while keeping each Program only as a decision dependency
+
 ### Requirement: Boolean decision gates support establishment
 The system SHALL establish the declared ordinary Thing-to-Thing support only when the referenced support-decision Program returns strict boolean `true`. It SHALL leave the support unestablished when that Program returns strict boolean `false`, and SHALL reject a non-boolean result.
 

@@ -23,3 +23,10 @@
 - [x] 4.1 Add a synchronous regression proving ordinary static support is unconditional and has an empty boolean decision trace.
 - [x] 4.2 Remove ordinary Thing existence from synchronous boolean evaluation while preserving parser-valid static support propagation.
 - [x] 4.3 Rerun the affected support and projection regressions, validate OpenSpec, and commit the review correction.
+
+## 5. Latest-decision correction
+
+- [x] 5.1 Add RED parser coverage proving a `thing@program` owner cannot use `if@current` or `then@current` as a fact endpoint and Program-only conditions cannot replace ordinary facts.
+- [x] 5.2 Reject Program-owned and Program-only fact support rules while retaining ordinary static support as unconditional and Program-backed support as strict bool.
+- [x] 5.3 Inspect and migrate the current allowed DataFlow wiring through the public Atom interface; publish only sanitized counts/contracts.
+- [ ] 5.4 Re-run focused kernel, projection, current DataFlow readback and same-version deployment evidence; bind it to #44/#10/#1.

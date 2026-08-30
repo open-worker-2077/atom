@@ -168,17 +168,18 @@ test('summary, field type, rename, and complete support replacement strip comman
   const files = await fixture(t, [
     {
       'thing@agent': '甲',
-      'situation#旧简介': '正文',
+      'situation#旧简介': 'def main(arguments):\n    return True',
       contain: [],
-      support: [{ 'if@current': true, then: [{ thing: '乙' }] }]
+      support: []
     },
+    atom('甲事实', '', [], [{ 'if@current': true, then: [{ thing: '乙' }] }]),
     atom('乙')
   ]);
   for (const source of [
     'transform {"thing":"甲","situation.sum.新简介"}',
     'transform {"thing.typ.program":"甲"}',
     'transform {"thing.ren.甲新版":"甲"}',
-    'transform {"thing":"甲新版","support.rep.":[{"if@current":true,"then":[{"thing":"乙"}]}]}'
+    'transform {"thing":"甲事实","support.rep.":[{"if@current":true,"if":[{"thing@program":"甲新版"}],"then":[{"thing":"乙"}]}]}'
   ]) {
     const result = await execute(files, source);
     assert.equal(result.ok, true, `${source}\n${JSON.stringify(result.errors)}`);
@@ -187,8 +188,13 @@ test('summary, field type, rename, and complete support replacement strip comman
   const updated = findAtom(await readAtoms(files.contextFile), '甲新版');
   assert.ok(updated);
   assert.equal(updated['thing@program'], '甲新版');
-  assert.equal(updated['situation#新简介'], '正文');
-  assert.deepEqual(updated.support, [{ 'if@current': true, then: [{ thing: '乙' }] }]);
+  assert.equal(updated['situation#新简介'], 'def main(arguments):\n    return True');
+  assert.deepEqual(updated.support, []);
+  assert.deepEqual(findAtom(await readAtoms(files.contextFile), '甲事实').support, [{
+    'if@current': true,
+    if: [{ 'thing@program': '甲新版' }],
+    then: [{ thing: '乙' }]
+  }]);
   assert.equal(
     JSON.stringify(await readAtoms(files.contextFile)).includes('.rep.'),
     false

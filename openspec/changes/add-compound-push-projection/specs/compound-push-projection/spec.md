@@ -8,7 +8,7 @@
 系统 SHALL 直接使用现有 support clause 身份、`antecedentPaths` 事实前项、`dependencyPaths` 唤醒依赖、后项顺序与端点角色形成一项投影；独立 `thing@program` SHALL 只作为推支判定角色，普通前后项 SHALL 只作为事实端点，不得从布尔表达树或节点名称反猜事实分组或布尔值。
 
 #### Scenario: Compound clause projection identity
-- **WHEN** 一个已判定为 true 的 clause 包含多个普通前项、一个独立判定 Program 和多个普通后项
+- **WHEN** 一个已判定为 true 的 clause 包含多个普通前项、一个独立判定 Program 和一个普通后项，或包含一个普通前项和多个普通后项
 - **THEN** 投影产生一项具有原 clause identity、前项路径、判定 Program 路径及有序后项角色的复合组
 
 ### Requirement: Fan-in shares one outgoing trunk after 50 percent
@@ -25,12 +25,18 @@
 - **WHEN** 同一可见 clause 具有一个普通前项和两个或更多普通后项
 - **THEN** 分叉前只有一条干线，所有后项分支从 0.5 分叉且保持 `thenOrdinal` 顺序
 
-### Requirement: Many-to-many has a centered shared trunk
-系统 SHALL 允许同一既有 clause 表达 N→M；汇合点与分叉点 SHALL 均以归一化路径 0.5 为语义位置，并允许仅为可读性施加对称的最小屏幕空间偏移，从而形成非零共享干线。
+### Requirement: Many-to-many requires one explicit auditable hub
+系统 MUST 拒绝单个 support clause 的原生 N→M 声明。多入多出必须建立一个真实、可见、可审计的普通 Thing `H`，并分别声明 N→H 与 H→M 两条 clause；两条 clause SHALL 保持各自身份，H SHALL 保留为事实端点。
 
-#### Scenario: N-to-M compound geometry
-- **WHEN** 同一可见 clause 具有多个普通前项和多个普通后项
-- **THEN** 投影依次呈现前项汇流、以 0.5 为共同语义位置的非零共享干线及后项分流，并以同一 clause identity 标记全部分段
+#### Scenario: Explicit N-to-H-to-M composition
+- **WHEN** 用户需要多个普通前项支持多个普通后项
+- **THEN** Graph 只接受 N→H 与 H→M 两条独立 clause
+- **AND** Web 分别在前段 0.5 汇流、后段 0.5 分流，并显示真实 H
+- **AND** Web 不得把两条 clause 合并成原生 N→M 或隐藏 H
+
+#### Scenario: Native many-to-many is rejected
+- **WHEN** 单个 clause 同时具有多个事实前项和多个后项
+- **THEN** Graph 以 `NATIVE_MANY_TO_MANY_SUPPORT_UNSUPPORTED` 拒绝该声明
 
 ### Requirement: Ordinary binary support remains compatible
 系统 MUST 保持 1→1 普通 support 的既有直接连线、方向箭头、燕尾、标签与交互身份，不得为其创建复合汇合点或分叉点。

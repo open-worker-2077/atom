@@ -119,8 +119,10 @@ test('and/or short-circuit support-decision Programs and never execute a consequ
         atom('False Program', '', 'program'),
         atom('Skipped Program', '', 'program'),
         atom('Consequent Program', '', 'program'),
+        atom('Hub Source'),
         atom('Hub', '', '', [{
           if: [{ and: [
+            { thing: 'Hub Source' },
             { 'thing@program': 'False Program' },
             { 'thing@program': 'Skipped Program' }
           ] }],
