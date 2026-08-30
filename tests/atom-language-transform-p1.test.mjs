@@ -504,6 +504,34 @@ test('discard commit failure leaves authoritative world, projection, and transfo
   assert.deepEqual(await readTransformLog(files.contextFile), []);
 });
 
+test('audit mirror failure stays fatal when a custom commit receipt does not confirm the reversible record', async (t) => {
+  const initial = [
+    atom('Synthetic East', '', [atom('Disposable', 'must remain recoverable')]),
+    {
+      'thing@backup@default': 'Synthetic Backup',
+      situation: '',
+      contain: [],
+      support: []
+    }
+  ];
+  const files = await fixture(t, initial);
+  const auditDirectory = path.dirname(transformLogEventFileFor(files.contextFile));
+  await fs.writeFile(auditDirectory, 'synthetic obstruction', 'utf8');
+
+  await assert.rejects(
+    executeAtomLanguageKernel({
+      ...files,
+      source: 'transform {"thing.dsc.":"Synthetic East/Disposable"}',
+      commitWorld: async ({ expectedRevision, nextRevision }) => ({
+        beforeRevision: expectedRevision,
+        afterRevision: nextRevision,
+        result: {}
+      })
+    }),
+    (error) => error.code === 'EEXIST'
+  );
+});
+
 test('audit mirror failure cannot turn a committed discard into a failed unrecoverable request', async (t) => {
   const initial = [
     atom('Synthetic East', '', [atom('Disposable', 'recoverable payload')]),

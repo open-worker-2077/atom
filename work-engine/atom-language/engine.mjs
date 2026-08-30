@@ -2924,7 +2924,6 @@ export async function executeAtomLanguage(options = {}) {
         await appendTransformLog(contextFile, record);
       } catch (error) {
         if (!reversibleRecordCommitted) throw error;
-        if (!reversibleRecordCommitted) throw error;
         interactionWarnings.push(diagnostic(
           'TRANSFORM_LOG_MIRROR_FAILED',
           '事实已由中央事务提交，但辅助 Transform 日志镜像写入失败',
@@ -2936,6 +2935,7 @@ export async function executeAtomLanguage(options = {}) {
       try {
         await appendTransformLog(contextFile, transformLogRecord);
       } catch (error) {
+        if (!reversibleRecordCommitted) throw error;
         interactionWarnings.push(diagnostic(
           'TRANSFORM_LOG_MIRROR_FAILED',
           '事实与可逆记录已由中央事务提交，但辅助 Transform 日志镜像写入失败',
