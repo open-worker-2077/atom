@@ -3,7 +3,10 @@ import test from 'node:test';
 
 import { parseGraphDocument } from '../cli/lib/graph-json.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
-import { evaluateSupportClausesWithPrograms } from '../work-engine/atom-language/support-runtime.mjs';
+import {
+  evaluateSupportClausesWithPrograms,
+  propagateSupportClauses
+} from '../work-engine/atom-language/support-runtime.mjs';
 
 const atom = (thing, situation = '', type = '', support = []) => ({
   [`thing${type ? `@${type}` : ''}`]: thing,
@@ -12,7 +15,72 @@ const atom = (thing, situation = '', type = '', support = []) => ({
   support
 });
 
-test('antecedent Program endpoints return strict true or false through their own main(arguments)', async () => {
+test('an independent support-decision Program gates one ordinary Thing-to-Thing support', async () => {
+  const graph = {
+    config: { schema_version: '2.0.0' },
+    graph: {
+      thing: '世界', situation: '', support: [], contain: [
+        atom('前项', 'ordinary facts do not provide booleans', '', [{
+          'if@current': true,
+          if: [{ 'thing@program': '推支判定' }],
+          then: [{ thing: '后项' }]
+        }]),
+        atom('推支判定', 'def main(arguments):\n    return True', 'program'),
+        {
+          thing: '后项', situation: 'ordinary consequent', support: [], contain: [
+            atom('后项 Program', "raise ValueError('must not execute')", 'program')
+          ]
+        },
+        atom('无关前项', 'unrelated', '', [{
+          'if@current': true,
+          if: [{ 'thing@program': '无关判定' }],
+          then: [{ thing: '无关后项' }]
+        }]),
+        atom('无关判定', 'def main(arguments):\n    return True', 'program'),
+        atom('无关后项')
+      ]
+    }
+  };
+  const parsed = parseGraphDocument(graph);
+  const scheduler = createProgramRuntimeScheduler();
+  const clauseId = 'support:世界/前项:0';
+
+  const evaluate = async (decision) => {
+    const calls = [];
+    const world = structuredClone(graph.graph.contain);
+    world.find((node) => node['thing@program'] === '推支判定').situation = [
+      'def main(arguments):',
+      `    return ${decision ? 'True' : 'False'}`
+    ].join('\n');
+    const decisions = await evaluateSupportClausesWithPrograms(parsed, {
+      changedPaths: ['世界/前项'],
+      evaluateProgram: async (programPath) => {
+        calls.push(programPath);
+        return scheduler.evaluateSupportProgram(world, programPath.replace(/^世界\//u, ''));
+      }
+    });
+    return { calls, decisions, propagation: propagateSupportClauses(parsed, { decisions }) };
+  };
+
+  const denied = await evaluate(false);
+  assert.deepEqual([...denied.decisions.keys()], [clauseId]);
+  assert.deepEqual(denied.calls, ['世界/推支判定']);
+  assert.equal(denied.decisions.get(clauseId).decision, false);
+  assert.deepEqual(denied.decisions.get(clauseId).trace, ['世界/推支判定']);
+  assert.deepEqual(denied.propagation.edges, []);
+
+  const established = await evaluate(true);
+  assert.deepEqual([...established.decisions.keys()], [clauseId]);
+  assert.deepEqual(established.calls, ['世界/推支判定']);
+  assert.equal(established.decisions.get(clauseId).decision, true);
+  assert.deepEqual(established.decisions.get(clauseId).trace, ['世界/推支判定']);
+  assert.deepEqual(
+    established.propagation.edges.map(({ fromPath, toPath }) => ({ fromPath, toPath })),
+    [{ fromPath: '世界/前项', toPath: '世界/后项' }]
+  );
+});
+
+test('support-decision Programs return strict true or false through their own main(arguments)', async () => {
   const world = [
     atom('True Program', 'def main(arguments):\n    return True', 'program'),
     atom('False Program', 'def main(arguments):\n    return False', 'program')
@@ -27,7 +95,7 @@ test('antecedent Program endpoints return strict true or false through their own
   });
 });
 
-test('antecedent Program cannot emit effects or directly write a consequent', async () => {
+test('support-decision Program cannot emit effects or directly write a consequent', async () => {
   const world = [
     atom('Target', 'before'),
     atom('Writer', [
@@ -43,7 +111,7 @@ test('antecedent Program cannot emit effects or directly write a consequent', as
   assert.equal(world[0].situation, 'before');
 });
 
-test('and/or short-circuit Program antecedents and never execute a Program consequent', async () => {
+test('and/or short-circuit support-decision Programs and never execute a consequent Program', async () => {
   const input = {
     config: { schema_version: '2.0.0' },
     graph: {

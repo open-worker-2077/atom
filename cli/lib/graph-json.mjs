@@ -256,6 +256,19 @@ export function parseGraphDocument(input) {
     return expr.children.flatMap(dependencies);
   }
 
+  function antecedents(expr) {
+    if (expr.kind === 'thing' || expr.kind === 'program') {
+      return [{ kind: expr.kind, targetPath: expr.targetPath }];
+    }
+    return expr.children.flatMap(antecedents);
+  }
+
+  function relationAntecedentPaths(expr) {
+    const candidates = antecedents(expr);
+    const ordinary = candidates.filter(({ kind }) => kind === 'thing');
+    return [...new Set((ordinary.length ? ordinary : candidates).map(({ targetPath }) => targetPath))];
+  }
+
   function expressionSignature(expr) {
     if (expr.kind === 'thing') return ['thing', expr.targetPath];
     if (expr.kind === 'program') return ['program', expr.targetPath];
@@ -324,11 +337,12 @@ export function parseGraphDocument(input) {
       }
       const clauseId = `support:${pending.source.path.join('/')}:${clauseOrdinal}`;
       const dependencyPaths = [...new Set(dependencies(root))];
-      if (dependencyPaths.length > 1 && then.length > 1) {
+      const antecedentPaths = relationAntecedentPaths(root);
+      if (antecedentPaths.length > 1 && then.length > 1) {
         throw graphError(
           'NATIVE_MANY_TO_MANY_SUPPORT_UNSUPPORTED',
           '首版不支持原生 M→N support；请建立真实枢纽 Thing，并拆为 M→hub 与 hub→N 两条规则',
-          { ...details, antecedentCount: dependencyPaths.length, consequentCount: then.length }
+          { ...details, antecedentCount: antecedentPaths.length, consequentCount: then.length }
         );
       }
       const signature = JSON.stringify([
@@ -343,7 +357,7 @@ export function parseGraphDocument(input) {
         id: clauseId, sourcePath: ownerPath,
         currentSide: current.currentAntecedent ? 'antecedent'
           : current.currentConsequent ? 'consequent' : null,
-        clauseOrdinal, root, then, dependencyPaths, signature
+        clauseOrdinal, root, then, antecedentPaths, dependencyPaths, signature
       };
       supportClauses.push(normalized);
       for (const dependencyPath of dependencyPaths) {
@@ -356,7 +370,7 @@ export function parseGraphDocument(input) {
     });
   }
 
-  const supportRelations = supportClauses.flatMap((clause) => clause.dependencyPaths.flatMap((sourcePath, inputOrdinal) => (
+  const supportRelations = supportClauses.flatMap((clause) => clause.antecedentPaths.flatMap((sourcePath, inputOrdinal) => (
     clause.then.map((target) => ({
       sourcePath,
       targetPath: target.targetPath,

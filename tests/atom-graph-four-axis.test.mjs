@@ -7,12 +7,30 @@ import {
   parseGraphDocument
 } from '../cli/lib/graph-json.mjs';
 import { parseAtomKey } from '../work-engine/atom-language/key-parser.mjs';
-import { propagateSupportClauses } from '../work-engine/atom-language/support-runtime.mjs';
+import {
+  evaluateSupportClauses,
+  propagateSupportClauses
+} from '../work-engine/atom-language/support-runtime.mjs';
 
 const leaf = (thing, situation = '', support = []) => ({ thing, situation, contain: [], support });
 const graphDocument = (contain, support = []) => ({
   config: { schema_version: '2.0.0' },
   graph: { thing: '世界', situation: '', contain, support }
+});
+
+test('ordinary static support is unconditional and does not evaluate Things as booleans', () => {
+  const parsed = parseGraphDocument(graphDocument([
+    leaf('前项', 'ordinary fact', [{ 'if@current': true, then: [{ thing: '后项' }] }]),
+    leaf('后项')
+  ]));
+
+  const decisions = evaluateSupportClauses(parsed, { nodesByPath: new Map() });
+
+  assert.deepEqual(decisions.get('support:世界/前项:0'), {
+    status: 'true',
+    decision: true,
+    trace: []
+  });
 });
 
 test('only four axes are active and support accepts no key type markers', () => {
