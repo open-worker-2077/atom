@@ -724,7 +724,7 @@
     for (const item of [...prepared].sort((left, right) => left.depth - right.depth || left.originalIndex - right.originalIndex)) {
       const parent = preparedByPath.get(item.parentPath);
       if (compact && item.projectionMode === "nested" && parent) {
-        item.displayScale = parent.displayScale * item.nestedScale;
+        item.displayScale = parent.displayScale * item.nestedScale * peripheralDepthScale;
       } else if (item.projectionMode === "peripheral" && parent) {
         item.displayScale = parent.displayScale * peripheralDepthScale;
       } else {

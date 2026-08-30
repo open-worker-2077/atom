@@ -1214,3 +1214,17 @@ test('A peripheral expansion shrinks each child layer cumulatively while preserv
     }
   }
 });
+
+test('A child shrink also scales nested child layers in the visible inner view', () => {
+  const field = loadClusterField();
+  const node = (id) => ({ id, radius: 1, position: { x: 0, y: 0, z: 0 } });
+  const domains = [
+    { path: 'root', depth: 0, nodes: [node('root-node')] },
+    { path: 'root/child', depth: 1, projectionMode: 'nested', parentPath: 'root', parentNodeId: 'root-node', nodes: [node('child-node')] }
+  ];
+  const unscaled = field.buildScene(domains, { compact: true, peripheralDepthShrinkPercent: 0 });
+  const scaled = field.buildScene(domains, { compact: true, peripheralDepthShrinkPercent: 80 });
+  const unscaledChild = unscaled.clusters.find((cluster) => cluster.path === 'root/child');
+  const scaledChild = scaled.clusters.find((cluster) => cluster.path === 'root/child');
+  assert.ok(scaledChild.nodeScale < unscaledChild.nodeScale);
+});
