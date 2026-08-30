@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { performance } = require('node:perf_hooks');
 
 function loadClusterField() {
   const sandbox = { window: {} };
@@ -588,6 +589,7 @@ test('tenfold adaptive compactness keeps eighteen unequal nested groups mutually
     radius: 0.62 + index % 4 * 0.08,
     position: { x: (index % 6) * 0.002, y: Math.floor(index / 6) * 0.002, z: 0 }
   }));
+  const startedAt = performance.now();
   const scene = field.buildScene([
     { path: 'root', depth: 0, nodes: rootNodes },
     ...rootNodes.map((mother, index) => ({
@@ -603,6 +605,9 @@ test('tenfold adaptive compactness keeps eighteen unequal nested groups mutually
       }))
     }))
   ], { compact: true, compactPercent: 1000 });
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.ok(elapsedMs < 1300, `heavy S layout stays interactive (${elapsedMs.toFixed(1)}ms)`);
   const root = scene.clusters.find((cluster) => cluster.path === 'root');
   const children = scene.clusters.filter((cluster) => cluster.parentPath === 'root');
 

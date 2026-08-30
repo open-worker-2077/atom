@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { spawnSync } = require('node:child_process');
+const os = require('node:os');
+const { pathToFileURL } = require('node:url');
 
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
@@ -39,20 +40,33 @@ test('browser build id is derived from the executable asset contents', () => {
   assert.equal(actual, expectedContentBuildId(html));
 });
 
-test('consecutive browser builds keep the stamped revision equal to final asset contents', () => {
-  const revisions = [];
-  for (let run = 0; run < 2; run += 1) {
-    const result = spawnSync(process.execPath, ['scripts/build-browser.mjs'], {
-      cwd: root,
-      encoding: 'utf8'
-    });
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    const builtHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-    const revision = builtHtml.match(/data-build="([^"]+)"/)[1];
-    assert.equal(revision, expectedContentBuildId(builtHtml));
-    revisions.push(revision);
+test('consecutive revision stamps are idempotent in an isolated browser-entry copy', async () => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'atom-browser-revision-'));
+  try {
+    fs.writeFileSync(path.join(temporaryRoot, 'index.html'), html);
+    const assets = [...new Set(
+      [...html.matchAll(/(?:href|src)="((?:spatial|input|tokens|vendor\/)[^"]+)"/g)]
+        .map((match) => new URL(match[1], 'https://local.invalid/').pathname.slice(1))
+    )];
+    for (const asset of assets) {
+      const destination = path.join(temporaryRoot, asset);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.copyFileSync(path.join(root, asset), destination);
+    }
+    const moduleUrl = pathToFileURL(path.join(root, 'scripts', 'browser-build-revision.mjs')).href;
+    const { stampBrowserEntryRevision } = await import(moduleUrl);
+    const first = await stampBrowserEntryRevision({ root: temporaryRoot });
+    const firstHtml = fs.readFileSync(path.join(temporaryRoot, 'index.html'), 'utf8');
+    const second = await stampBrowserEntryRevision({ root: temporaryRoot });
+    const secondHtml = fs.readFileSync(path.join(temporaryRoot, 'index.html'), 'utf8');
+
+    assert.equal(first.revision, expectedContentBuildId(firstHtml));
+    assert.equal(second.revision, first.revision);
+    assert.equal(second.changed, false);
+    assert.equal(secondHtml, firstHtml);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
   }
-  assert.equal(revisions[1], revisions[0]);
 });
 
 test('knowledge bridge loads after the visual engine', () => {

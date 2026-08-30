@@ -694,26 +694,19 @@
       );
       item.localLayout = contracted.layout;
       item.radius = contracted.radius;
-      // S owns sibling edge clearance only. Derive nested display scale from a
-      // zero-gap reference tree so widening S cannot masquerade as child zoom.
+      // S owns sibling edge clearance only. Derive nested display scale from
+      // the O(n) zero-gap structural radius so widening S cannot masquerade as
+      // child zoom or require a second collision solve for every domain.
       const scaleReferenceOptions = {
         compact,
         compactPercent: 0,
         displayScale: 1
       };
-      const scaleReference = contractShellToLocalEdges(
+      item.scaleReferenceRadius = clusterRadius(
         item.sourceNodes,
-        { x: 0, y: 0, z: 0 },
-        clusterRadius(
-          item.sourceNodes,
-          item.scaleReferenceNestedCarrierByNodeId,
-          scaleReferenceOptions
-        ),
-        path,
         item.scaleReferenceNestedCarrierByNodeId,
         scaleReferenceOptions
       );
-      item.scaleReferenceRadius = scaleReference.radius;
     };
     prepared.forEach(solvePreparedLayout);
     const nestedChildren = prepared
