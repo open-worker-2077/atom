@@ -222,6 +222,45 @@ test('transform new creates a three-level ternary Graph with adjacent sibling su
   ]);
 });
 
+test('CLI keeps dot-command literals inside a situation rep replacement', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-language-rep-literal-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const replacement = [
+    'def main(arguments):',
+    "    transform({'thing.ren.X': 'Target', 'situation.rep.done': None})",
+    "    return '.dsc. remains source text'"
+  ].join('\n');
+  await fs.writeFile(contextFile, `${JSON.stringify([{
+    'thing@program': '合成Program',
+    situation: '旧源码',
+    contain: [],
+    support: []
+  }], null, 2)}\n`, 'utf8');
+
+  let stdout = '';
+  let stderr = '';
+  const code = await runAtomCli([
+    '--context', contextFile,
+    '--projection', projectionFile,
+    'transform', JSON.stringify({
+      thing: '合成Program',
+      [`situation.rep.${replacement}`]: '旧源码'
+    })
+  ], {
+    execute: executeAtomLanguage,
+    stdin: { isTTY: false },
+    stdout: { isTTY: false, write(value) { stdout += value; } },
+    stderr: { write(value) { stderr += value; } }
+  });
+
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /合成Program/u);
+  const [updated] = JSON.parse(await fileText(contextFile));
+  assert.equal(updated.situation, replacement);
+});
+
 test('operational Atom Language closes one isolated transform/explore/projection loop', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-language-operation-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

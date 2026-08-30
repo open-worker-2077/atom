@@ -77,11 +77,19 @@ export function parseTransformKey(rawKey, options = {}) {
 
   const baseRaw = rawKey.slice(0, matches[0].index);
   const persistent = parseAtomKey(baseRaw, options);
-  const commands = matches.map((match, index) => ({
+  // Situation replacement is an opaque text payload. Once .rep. begins, its
+  // Program/body bytes must never be re-lexed as outer Transform commands.
+  const replacementIndex = persistent.baseKey === 'situation'
+    ? matches.findIndex((match) => match.name === 'rep')
+    : -1;
+  const commandMarkers = replacementIndex < 0
+    ? matches
+    : matches.slice(0, replacementIndex + 1);
+  const commands = commandMarkers.map((match, index) => ({
     name: match.name,
     parameter: rawKey.slice(
       match.end,
-      matches[index + 1]?.index ?? rawKey.length
+      commandMarkers[index + 1]?.index ?? rawKey.length
     )
   }));
   const errors = [...persistent.errors];
