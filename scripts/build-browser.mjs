@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { stampBrowserEntryRevision } from "./browser-build-revision.mjs";
 
 await build({
   entryPoints: ["src/spatial-markdown-editor.mjs"],
@@ -23,3 +24,7 @@ await build({
   minify: true,
   sourcemap: false
 });
+
+// Stamp only after every tracked bundle is final, otherwise the build would
+// invalidate its own content revision later in this process.
+await stampBrowserEntryRevision();

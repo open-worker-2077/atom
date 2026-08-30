@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { performance } = require('node:perf_hooks');
 
 function loadClusterField() {
   const sandbox = { window: {} };
@@ -305,6 +306,42 @@ test('S repulsion interval leaves automatic packing intact while widening edge c
   assert.ok(middle.clusters[0].radius >= loose.clusters[0].radius);
 });
 
+test('S repulsion interval preserves nested child display scale while widening its node gaps', () => {
+  const field = loadClusterField();
+  const domains = [
+    {
+      path: 'root', depth: 0, projectionMode: 'nested',
+      nodes: [
+        { id: 'mother', radius: 0.82, position: { x: -1, y: 0, z: 0 } },
+        { id: 'root-peer', radius: 0.82, position: { x: 1, y: 0, z: 0 } }
+      ]
+    },
+    {
+      path: 'root/mother', depth: 1, projectionMode: 'nested', parentPath: 'root', parentNodeId: 'mother',
+      nodes: [
+        { id: 'child-a', radius: 0.82, position: { x: -1, y: 0, z: 0 } },
+        { id: 'child-b', radius: 0.82, position: { x: 1, y: 0, z: 0 } }
+      ]
+    }
+  ];
+  const minimum = field.buildScene(domains, { compact: true, compactPercent: 0 });
+  const maximum = field.buildScene(domains, { compact: true, compactPercent: 1000 });
+  const child = (scene) => scene.clusters.find((cluster) => cluster.path === 'root/mother');
+  const edgeGap = (scene) => {
+    const [left, right] = child(scene).nodes;
+    return Math.hypot(
+      right.position.x - left.position.x,
+      right.position.y - left.position.y
+    ) - left.__clusterRadius - right.__clusterRadius;
+  };
+
+  assert.ok(edgeGap(maximum) > edgeGap(minimum) + 1, 'S widens the real same-level edge interval');
+  assert.equal(maximum.clusters[0].nodeScale, minimum.clusters[0].nodeScale, 'parent scale remains stable');
+  assert.equal(child(maximum).nodeScale, child(minimum).nodeScale, 'nested child scale remains stable');
+  assert.equal(child(maximum).nodes[0].__clusterRadius, child(minimum).nodes[0].__clusterRadius);
+  assert.equal(child(maximum).nodes[1].__clusterRadius, child(minimum).nodes[1].__clusterRadius);
+});
+
 test('adaptive shell contraction stops only at locally contacted node edges', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'spatial-cluster-field.js'), 'utf8');
   assert.match(source, /function contractShellToLocalEdges\(/);
@@ -552,6 +589,7 @@ test('tenfold adaptive compactness keeps eighteen unequal nested groups mutually
     radius: 0.62 + index % 4 * 0.08,
     position: { x: (index % 6) * 0.002, y: Math.floor(index / 6) * 0.002, z: 0 }
   }));
+  const startedAt = performance.now();
   const scene = field.buildScene([
     { path: 'root', depth: 0, nodes: rootNodes },
     ...rootNodes.map((mother, index) => ({
@@ -567,6 +605,9 @@ test('tenfold adaptive compactness keeps eighteen unequal nested groups mutually
       }))
     }))
   ], { compact: true, compactPercent: 1000 });
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.ok(elapsedMs < 1300, `heavy S layout stays interactive (${elapsedMs.toFixed(1)}ms)`);
   const root = scene.clusters.find((cluster) => cluster.path === 'root');
   const children = scene.clusters.filter((cluster) => cluster.parentPath === 'root');
 

@@ -2,10 +2,27 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
+const os = require('node:os');
+const { pathToFileURL } = require('node:url');
 
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'spatial.css'), 'utf8');
+
+function expectedContentBuildId(entryHtml) {
+  const assets = [...new Set(
+    [...entryHtml.matchAll(/(?:href|src)="((?:spatial|input|tokens|vendor\/)[^"]+)"/g)]
+      .map((match) => new URL(match[1], 'https://local.invalid/').pathname.slice(1))
+  )].sort();
+  const digest = crypto.createHash('sha256');
+  for (const asset of assets) {
+    digest.update(`${asset}\0`);
+    digest.update(fs.readFileSync(path.join(root, asset)));
+    digest.update('\0');
+  }
+  return `sha256-${digest.digest('hex').slice(0, 16)}`;
+}
 
 test('file entry versions every local executable asset with one build id', () => {
   const assets = [...html.matchAll(/(?:href|src)="((?:spatial|input|tokens)[^"]+)"/g)]
@@ -15,6 +32,41 @@ test('file entry versions every local executable asset with one build id', () =>
   assert.ok(versions.every(Boolean));
   assert.equal(new Set(versions).size, 1);
   assert.match(html, /data-build="[^"]+"/);
+});
+
+test('browser build id is derived from the executable asset contents', () => {
+  const actual = html.match(/data-build="([^"]+)"/)[1];
+
+  assert.equal(actual, expectedContentBuildId(html));
+});
+
+test('consecutive revision stamps are idempotent in an isolated browser-entry copy', async () => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'atom-browser-revision-'));
+  try {
+    fs.writeFileSync(path.join(temporaryRoot, 'index.html'), html);
+    const assets = [...new Set(
+      [...html.matchAll(/(?:href|src)="((?:spatial|input|tokens|vendor\/)[^"]+)"/g)]
+        .map((match) => new URL(match[1], 'https://local.invalid/').pathname.slice(1))
+    )];
+    for (const asset of assets) {
+      const destination = path.join(temporaryRoot, asset);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.copyFileSync(path.join(root, asset), destination);
+    }
+    const moduleUrl = pathToFileURL(path.join(root, 'scripts', 'browser-build-revision.mjs')).href;
+    const { stampBrowserEntryRevision } = await import(moduleUrl);
+    const first = await stampBrowserEntryRevision({ root: temporaryRoot });
+    const firstHtml = fs.readFileSync(path.join(temporaryRoot, 'index.html'), 'utf8');
+    const second = await stampBrowserEntryRevision({ root: temporaryRoot });
+    const secondHtml = fs.readFileSync(path.join(temporaryRoot, 'index.html'), 'utf8');
+
+    assert.equal(first.revision, expectedContentBuildId(firstHtml));
+    assert.equal(second.revision, first.revision);
+    assert.equal(second.changed, false);
+    assert.equal(secondHtml, firstHtml);
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
 });
 
 test('knowledge bridge loads after the visual engine', () => {

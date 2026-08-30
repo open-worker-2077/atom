@@ -660,6 +660,8 @@
           compactPercent: options.compactPercent
         }),
         nestedCarrierByNodeId: new Map(),
+        scaleReferenceNestedCarrierByNodeId: new Map(),
+        scaleReferenceRadius: 0,
         depth,
         parentPath,
         parentNodeId: domain.parentNodeId || null,
@@ -692,6 +694,19 @@
       );
       item.localLayout = contracted.layout;
       item.radius = contracted.radius;
+      // S owns sibling edge clearance only. Derive nested display scale from
+      // the O(n) zero-gap structural radius so widening S cannot masquerade as
+      // child zoom or require a second collision solve for every domain.
+      const scaleReferenceOptions = {
+        compact,
+        compactPercent: 0,
+        displayScale: 1
+      };
+      item.scaleReferenceRadius = clusterRadius(
+        item.sourceNodes,
+        item.scaleReferenceNestedCarrierByNodeId,
+        scaleReferenceOptions
+      );
     };
     prepared.forEach(solvePreparedLayout);
     const nestedChildren = prepared
@@ -707,12 +722,18 @@
       for (const item of nestedChildren.filter((candidate) => candidate.depth === depth)) {
         const parent = preparedByPath.get(item.parentPath);
         const motherNode = parent.sourceNodes.find((node) => node.id === item.parentNodeId) || null;
-        item.nestedScale = adaptiveNestedScale(item.radius, motherNode, compactness);
+        item.nestedScale = adaptiveNestedScale(item.scaleReferenceRadius, motherNode, compactness);
         parent.nestedCarrierByNodeId.set(item.parentNodeId, {
           path: item.domain.path || "root",
           radius: item.radius * item.nestedScale,
           // The hard collision gap already represents x; another carrier moat
           // would double-count the visible edge interval.
+          clearance: compact ? 0 : 0.34,
+          minimumRadius: Number(motherNode && motherNode.radius) || 0.82
+        });
+        parent.scaleReferenceNestedCarrierByNodeId.set(item.parentNodeId, {
+          path: item.domain.path || "root",
+          radius: item.scaleReferenceRadius * item.nestedScale,
           clearance: compact ? 0 : 0.34,
           minimumRadius: Number(motherNode && motherNode.radius) || 0.82
         });
