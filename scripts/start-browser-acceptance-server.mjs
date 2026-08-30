@@ -54,7 +54,8 @@ await fs.writeFile(contextFile, JSON.stringify([
   ]),
   atom('🧊manage', '脱敏同构管理域', [
     atom('工务', '', [
-      atom('work', '待移动的 contain 子树', [atom('test', '子树守恒哨兵')])
+      atom('work', '待移动的 contain 子树', [atom('test', '子树守恒哨兵')]),
+      atom('回滚work', '待验证权威失败回滚的 contain 子树', [atom('回滚test', '原子回滚守恒哨兵')])
     ]),
     atom('办包', '', [
       atom('究谋', '', [

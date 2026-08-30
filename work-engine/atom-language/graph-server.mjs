@@ -9,6 +9,7 @@ import {
   createSpatialServer,
   projectRoot
 } from '../../cli/lib/server.mjs';
+import { createStore } from '../../cli/lib/store.mjs';
 import { createLegacyWorldService } from '../../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createJsonProgramProjectionRepository } from '../../src/atom-system/adapters/json-program-projection-repository.mjs';
 import { createJsonRequestDrivenLockRepository } from '../../src/atom-system/adapters/json-request-driven-lock-repository.mjs';
@@ -403,6 +404,18 @@ export async function startAtomGraphServer(options = {}) {
     publishLegacyProjection: false,
     onAuthoritativeWrite: () => backupTrigger?.schedule()
   });
+  let notifySpatialProjection = null;
+  const spatialProjectionStore = createStore(configuration.storeFile);
+  const baseSpatialPublisher = options.spatialPublisher ?? Object.freeze({
+    publish: (knowledge) => spatialProjectionStore.execute('knowledge.replace', { knowledge })
+  });
+  const spatialPublisher = Object.freeze({
+    async publish(knowledge) {
+      const result = await baseSpatialPublisher.publish(knowledge);
+      notifySpatialProjection?.(result?.knowledge ?? knowledge);
+      return result;
+    }
+  });
   const interactionRuntime = options.interactionRuntime ?? createLegacyRuntimeComposition({
     contextFile: configuration.contextFile,
     graphFile: configuration.graphFile,
@@ -412,6 +425,7 @@ export async function startAtomGraphServer(options = {}) {
     programScheduler,
     diagnostics,
     worldService,
+    spatialPublisher,
     ...(options.projectionDelayMs !== undefined
       ? { projectionDelayMs: options.projectionDelayMs }
       : {}),
@@ -474,6 +488,7 @@ export async function startAtomGraphServer(options = {}) {
     atomWorkOrderRegistry: handlers.workOrderRegistry,
     atomProgramFunctionRegistry: handlers.programFunctionRegistry
   });
+  notifySpatialProjection = instance.publishKnowledgeChange;
   backupTrigger?.start({ initialBackup: false });
   instance.server.once('close', () => backupTrigger?.close());
   await new Promise((resolve, reject) => {
