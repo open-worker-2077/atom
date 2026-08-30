@@ -120,7 +120,15 @@ test('failed Transform emits no success receipt', async (t) => {
 
 test('Transform reconcile timing diagnostic is observational and contains no fact fields', async (t) => {
   const files = await fixture(t);
-  const diagnostics = createRuntimeDiagnosticStore({ maxEntries: 10 });
+  const store = createRuntimeDiagnosticStore({ maxEntries: 10 });
+  let persisted = 0;
+  const diagnostics = {
+    async record(entry) {
+      persisted += 1;
+      return store.record(entry);
+    },
+    findByInteractionId: (...args) => store.findByInteractionId(...args)
+  };
   const scheduler = createProgramRuntimeScheduler({
     runProgram: async () => ({
       locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [], trigger: null
@@ -140,7 +148,8 @@ test('Transform reconcile timing diagnostic is observational and contains no fac
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors ?? result));
-  const diagnostic = await diagnostics.findByInteractionId('transform-stage-observational');
+  const diagnostic = await store.findByInteractionId('transform-stage-observational');
+  assert.equal(persisted, 1);
   assert.equal(diagnostic.type, 'transform-stage');
   assert.deepEqual(diagnostic.stages.map(({ stage }) => stage), [
     'request', 'index-preparation', 'reconcile', 'reconcile', 'commit', 'program-projection'

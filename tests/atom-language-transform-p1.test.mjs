@@ -8,7 +8,11 @@ import { parseGraphDocument } from '../cli/lib/graph-json.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { writeAtomGraphProjection } from '../work-engine/atom-language/context-store.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
-import { readTransformLog } from '../work-engine/atom-language/transform-executor.mjs';
+import {
+  appendTransformLog,
+  applyTransform,
+  readTransformLog
+} from '../work-engine/atom-language/transform-executor.mjs';
 import {
   TRANSFORM_COMMANDS,
   parseTransformKey
@@ -221,6 +225,57 @@ test('move, copy, discard, and restore use explicit thing-axis commands and reve
   assert.equal(restored.ok, true, JSON.stringify(restored.errors));
   assert.ok(findAtom(findAtom(await readAtoms(files.contextFile), '目的父').contain, '目标'));
   assert.equal(findAtom(await readAtoms(files.contextFile), '默认备份仓').contain.length, 0);
+});
+
+test('discard moves an authorized descendant into kernel backup without granting backup access', async (t) => {
+  const files = await fixture(t, [
+    atom('Agent', '', [atom('可丢弃')]),
+    { 'thing@backup@default': '默认备份仓', situation: '', contain: [], support: [] }
+  ]);
+  const atoms = await readAtoms(files.contextFile);
+  const parsed = createAtomLanguageReceiver().receive(
+    'transform {"thing.dsc.":"Agent/可丢弃"}'
+  );
+  const authorizationPaths = [];
+  const result = await applyTransform({
+    atoms,
+    item: parsed.items[0],
+    contextFile: files.contextFile,
+    authorize: async (match) => {
+      const targetPath = match.path.join('/');
+      authorizationPaths.push(targetPath);
+      return targetPath === 'Agent' || targetPath.startsWith('Agent/')
+        ? { decision: 'allow' }
+        : { decision: 'deny', code: 'WINDOW_ACCESS_DENIED' };
+    }
+  });
+
+  assert.equal(result.error, undefined, JSON.stringify(result.error));
+  assert.equal(authorizationPaths.includes('默认备份仓'), false);
+  assert.ok(findAtom(findAtom(result.atoms, '默认备份仓').contain, '可丢弃'));
+  assert.equal(findAtom(result.atoms, 'Agent').contain.length, 0);
+
+  await appendTransformLog(files.contextFile, result.logRecord);
+  const restoreParsed = createAtomLanguageReceiver().receive(
+    'transform {"thing.rst.":"默认备份仓/可丢弃"}'
+  );
+  authorizationPaths.length = 0;
+  const restored = await applyTransform({
+    atoms: result.atoms,
+    item: restoreParsed.items[0],
+    contextFile: files.contextFile,
+    authorize: async (match) => {
+      const targetPath = match.path.join('/');
+      authorizationPaths.push(targetPath);
+      return targetPath === 'Agent' || targetPath.startsWith('Agent/')
+        ? { decision: 'allow' }
+        : { decision: 'deny', code: 'WINDOW_ACCESS_DENIED' };
+    }
+  });
+  assert.equal(restored.error, undefined, JSON.stringify(restored.error));
+  assert.equal(authorizationPaths.includes('默认备份仓'), false);
+  assert.ok(findAtom(findAtom(restored.atoms, 'Agent').contain, '可丢弃'));
+  assert.equal(findAtom(restored.atoms, '默认备份仓').contain.length, 0);
 });
 
 test('Atom to Graph projection preserves long multilingual situation without clipping', async (t) => {

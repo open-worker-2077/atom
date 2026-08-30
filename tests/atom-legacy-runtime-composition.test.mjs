@@ -24,6 +24,16 @@ function atom(thing, situation = '', contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
+async function waitUntil(predicate, message, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = await predicate();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(message);
+}
+
 function findAtom(atoms, expectedPath, parentPath = []) {
   for (const current of atoms) {
     const thing = Object.entries(current).find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1];
@@ -582,6 +592,7 @@ test('legacy composition binds world, Program, projection and spatial publicatio
     contextFile: 'atom.json',
     graphFile: 'graph.json',
     programScheduler,
+    projectionDelayMs: 0,
     worldService: {
       executeLegacy: async (request) => {
         calls.push(['world', { ...request, programScheduler: request.programScheduler?.id }]);
@@ -605,11 +616,17 @@ test('legacy composition binds world, Program, projection and spatial publicatio
     humanStatusTranslator: { translate: async () => 'transform {}' }
   });
 
-  await runtime.execute({
+  const result = await runtime.execute({
     source: 'transform {}',
     correlationId: 'interaction-1',
     agentPath: 'Root/Sol'
   });
+
+  assert.equal(result.projectionStatus, 'pending');
+  await waitUntil(
+    () => runtime.projectionStatus().status === 'published',
+    'scheduled projection was not published'
+  );
 
   assert.deepEqual(calls, [
     ['world', {
@@ -679,6 +696,7 @@ test('legacy composition identifies the disposable projection stage without expo
     contextFile: 'atom.json',
     graphFile: 'graph.json',
     programScheduler: {},
+    projectionDelayMs: 0,
     worldService: {
       executeLegacy: async () => ({ ok: true, revisionAfter: 'rev-2', lockState: {} })
     },
@@ -700,7 +718,14 @@ test('legacy composition identifies the disposable projection stage without expo
 
   assert.equal(result.ok, true);
   assert.equal(result.projectionStatus, 'pending');
-  assert.deepEqual(result.projectionFailure, { projection: 'graph', cause: 'EPERM' });
+  assert.deepEqual(result.projectionFailure, {
+    projection: 'publisher', cause: 'PROJECTION_PUBLICATION_SCHEDULED'
+  });
+  await waitUntil(
+    () => runtime.projectionStatus().failure?.cause === 'EPERM',
+    'scheduled projection failure was not recorded'
+  );
+  assert.deepEqual(runtime.projectionStatus().failure, { projection: 'graph', cause: 'EPERM' });
   assert.equal(JSON.stringify(result).includes('graph.json'), false);
 });
 

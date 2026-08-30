@@ -17,6 +17,7 @@ import {
 } from './shortcut-runtime.mjs';
 
 const preparedExploreSnapshots = new WeakMap();
+const preparedSlotStructureSnapshots = new WeakMap();
 
 export function fieldsByBase(atom) {
   const byBase = new Map();
@@ -111,7 +112,10 @@ export function createAccessController(atoms, options = {}) {
   const legacyAccess = options.legacyAccess;
   const agentPath = options.agentPath ?? options.interaction?.agent?.path ?? null;
   const fixedAgentWindow = Boolean(agentPath && options.agentSecurity);
-  const slotStructure = compileSlotStructureGraphLocks(atoms);
+  const exploreWorld = Array.isArray(options.preparedAccessMatches)
+    ? { allMatches: options.preparedAccessMatches }
+    : prepareExploreWorld(atoms);
+  const slotStructure = prepareSlotStructureWorld(atoms);
   const graphLocks = [...(options.graphLocks ?? []), ...slotStructure.locks];
   const slotStructureRestricted = slotStructure.locks.length > 0;
   if ((!legacyAccess || legacyAccess.global === true) && !programLockIndex
@@ -122,7 +126,7 @@ export function createAccessController(atoms, options = {}) {
   const locks = legacyAccess && legacyAccess.global !== true ? decodeLockAtoms(atoms) : [];
   const access = legacyAccess;
   const agentMatch = agentPath
-    ? walkAtoms(atoms).find((match) => match.path.join('/') === agentPath)
+    ? exploreWorld.allMatches.find((match) => match.path.join('/') === agentPath)
     : null;
   const agentTypes = oneStoredField(agentMatch?.atom, 'thing')?.parsed.types
     .map((type) => type.raw) ?? [];
@@ -244,11 +248,7 @@ function shortcutResolutionMarker(match) {
   };
 }
 
-export function prepareExploreWorld(atoms) {
-  if (Object.isFrozen(atoms) && preparedExploreSnapshots.has(atoms)) {
-    return preparedExploreSnapshots.get(atoms);
-  }
-  const allMatches = walkAtoms(atoms, { virtualRoot: true });
+function prepareExploreMatches(allMatches) {
   const exactIndex = new Map();
   const add = (selector, match) => {
     if (!indexableSelector(selector)) return;
@@ -263,9 +263,85 @@ export function prepareExploreWorld(atoms) {
     }
     if (!match.virtual) add(`${WORLD_OUTSIDE_NAME}/${match.path.join('/')}`, match);
   }
-  const prepared = { allMatches, exactIndex };
+  return { allMatches, exactIndex };
+}
+
+export function prepareExploreWorld(atoms) {
+  if (Object.isFrozen(atoms) && preparedExploreSnapshots.has(atoms)) {
+    return preparedExploreSnapshots.get(atoms);
+  }
+  const prepared = prepareExploreMatches(walkAtoms(atoms, { virtualRoot: true }));
   if (Object.isFrozen(atoms)) preparedExploreSnapshots.set(atoms, prepared);
   return prepared;
+}
+
+export function prepareAccessWorld(atoms) {
+  const exploreWorld = prepareExploreWorld(atoms);
+  const slotStructure = prepareSlotStructureWorld(atoms);
+  return { exploreWorld, slotStructure };
+}
+
+export function prepareSlotStructureWorld(atoms) {
+  let slotStructure = Object.isFrozen(atoms)
+    ? preparedSlotStructureSnapshots.get(atoms)
+    : null;
+  if (!slotStructure) {
+    slotStructure = compileSlotStructureGraphLocks(atoms);
+    if (Object.isFrozen(atoms)) preparedSlotStructureSnapshots.set(atoms, slotStructure);
+  }
+  return slotStructure;
+}
+
+function pathsOverlap(left, right) {
+  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+}
+
+export function inheritPreparedSlotStructureWorld(previousAtoms, nextAtoms, changedPaths = []) {
+  if (!Object.isFrozen(nextAtoms)) return false;
+  const previousSlotStructure = preparedSlotStructureSnapshots.get(previousAtoms);
+  if (!previousSlotStructure) return false;
+  const protectedPaths = [
+    ...previousSlotStructure.domains.flatMap(({ path, body }) => [path, body]),
+    ...previousSlotStructure.locks.flatMap(({ path, body }) => [path, body])
+  ].filter(Boolean);
+  if (changedPaths.some((changedPath) => (
+    protectedPaths.some((protectedPath) => pathsOverlap(changedPath, protectedPath))
+  ))) return false;
+  preparedSlotStructureSnapshots.set(nextAtoms, previousSlotStructure);
+  return true;
+}
+
+export function inheritPreparedAccessWorld(previousAtoms, nextAtoms) {
+  if (!Object.isFrozen(nextAtoms)) return false;
+  const previousExplore = preparedExploreSnapshots.get(previousAtoms);
+  const previousSlotStructure = preparedSlotStructureSnapshots.get(previousAtoms);
+  if (!previousExplore || !previousSlotStructure) return false;
+  const currentByPath = new Map(walkAtoms(nextAtoms).map((match) => [match.path.join('/'), match]));
+  const previousPaths = previousExplore.allMatches
+    .filter((match) => !match.virtual)
+    .map((match) => match.path.join('/'));
+  if (previousPaths.length !== currentByPath.size
+    || previousPaths.some((candidatePath) => !currentByPath.has(candidatePath))) {
+    return false;
+  }
+  const replacements = new Map();
+  const allMatches = previousExplore.allMatches.map((previous) => {
+    if (previous.virtual) return previous;
+    const current = currentByPath.get(previous.path.join('/'));
+    if (!current) return previous;
+    const replacement = {
+      ...current,
+      parent: previous.parent ? (replacements.get(previous.parent) ?? previous.parent) : null
+    };
+    replacements.set(previous, replacement);
+    return replacement;
+  });
+  const exactIndex = new Map([...previousExplore.exactIndex].map(([selector, matches]) => (
+    [selector, matches.map((match) => replacements.get(match) ?? match)]
+  )));
+  preparedExploreSnapshots.set(nextAtoms, { allMatches, exactIndex });
+  preparedSlotStructureSnapshots.set(nextAtoms, previousSlotStructure);
+  return true;
 }
 
 function indexableSelector(selector) {

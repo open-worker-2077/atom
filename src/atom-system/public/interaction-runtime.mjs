@@ -89,7 +89,8 @@ export function createInteractionRuntime({
   humanWorkspace,
   programRuntime,
   diagnostics = null,
-  onStage = null
+  onStage = null,
+  projectionDelayMs = 4_000
 }) {
   requireMethod(world, 'execute', 'INVALID_WORLD_PORT', 'Interaction runtime world port');
   requireMethod(projections, 'publish', 'INVALID_PROJECTION_PORT', 'Interaction runtime projection port');
@@ -102,6 +103,12 @@ export function createInteractionRuntime({
   }
 
   let latestProjectionState = Object.freeze({ status: 'uninitialized' });
+  let projectionGeneration = 0;
+  let projectionTimer = null;
+  let projectionTail = Promise.resolve();
+  let scheduledProjection = null;
+  let activeInteractions = 0;
+  let closing = false;
 
   async function timedStage(stage, work, interactionId = null) {
     const startedAt = performance.now();
@@ -163,7 +170,7 @@ export function createInteractionRuntime({
     };
   }
 
-  async function publish(result) {
+  async function publish(result, generation = null) {
     if (!result?.ok || typeof result.revisionAfter !== 'string' || !result.revisionAfter) return null;
     try {
       const startedAt = performance.now();
@@ -177,18 +184,22 @@ export function createInteractionRuntime({
       performanceTrace('projection-publish', {
         elapsedMs: Math.round(performance.now() - startedAt)
       });
-      latestProjectionState = Object.freeze({
-        status: 'published',
-        expectedRevision: result.revisionAfter
-      });
+      if (generation === null || generation === projectionGeneration) {
+        latestProjectionState = Object.freeze({
+          status: 'published',
+          expectedRevision: result.revisionAfter
+        });
+      }
       return Object.freeze({ status: 'published', projection: published });
     } catch (error) {
       const failure = projectionFailure(error);
-      latestProjectionState = Object.freeze({
-        status: 'pending',
-        expectedRevision: result.revisionAfter,
-        failure
-      });
+      if (generation === null || generation === projectionGeneration) {
+        latestProjectionState = Object.freeze({
+          status: 'pending',
+          expectedRevision: result.revisionAfter,
+          failure
+        });
+      }
       return Object.freeze({
         status: 'pending',
         expectedRevision: result.revisionAfter,
@@ -197,7 +208,40 @@ export function createInteractionRuntime({
     }
   }
 
-  async function executeValidated(intent, options = {}) {
+  function armScheduledProjection() {
+    if (closing || activeInteractions > 0 || projectionTimer || !scheduledProjection) return;
+    projectionTimer = setTimeout(() => {
+      projectionTimer = null;
+      const scheduled = scheduledProjection;
+      scheduledProjection = null;
+      projectionTail = projectionTail.catch(() => {}).then(async () => {
+        if (!scheduled || scheduled.generation !== projectionGeneration) return null;
+        return publish(scheduled.result, scheduled.generation);
+      });
+    }, Math.max(0, Number(projectionDelayMs) || 0));
+    projectionTimer.unref?.();
+  }
+
+  function scheduleProjection(result) {
+    if (closing) return null;
+    const generation = ++projectionGeneration;
+    const expectedRevision = result.revisionAfter;
+    if (projectionTimer) clearTimeout(projectionTimer);
+    projectionTimer = null;
+    scheduledProjection = { generation, result };
+    latestProjectionState = Object.freeze({ status: 'pending', expectedRevision });
+    armScheduledProjection();
+    return Object.freeze({
+      status: 'pending',
+      expectedRevision,
+      failure: Object.freeze({
+        projection: 'publisher',
+        cause: 'PROJECTION_PUBLICATION_SCHEDULED'
+      })
+    });
+  }
+
+  async function executeValidatedCore(intent, options = {}) {
     const interactionStartedAt = performance.now();
     const interaction = await interactionOf(intent);
     if (feedbackSource(intent.source)) {
@@ -267,7 +311,7 @@ export function createInteractionRuntime({
       options.onCommitted(structuredClone(result));
     }
     if (options.publish !== false && result?.changed !== false) {
-      result = withProjectionOutcome(result, await publish(result));
+      result = withProjectionOutcome(result, scheduleProjection(result));
     }
     if (diagnostics && result?.command === 'explore') {
       try {
@@ -335,6 +379,18 @@ export function createInteractionRuntime({
     return timedStage('result.serialize', () => result, intent.correlationId);
   }
 
+  async function executeValidated(intent, options = {}) {
+    activeInteractions += 1;
+    if (projectionTimer) clearTimeout(projectionTimer);
+    projectionTimer = null;
+    try {
+      return await executeValidatedCore(intent, options);
+    } finally {
+      activeInteractions -= 1;
+      armScheduledProjection();
+    }
+  }
+
   async function execute(rawIntent, options = {}) {
     return executeValidated(validateIntent(rawIntent), options);
   }
@@ -396,6 +452,10 @@ export function createInteractionRuntime({
       throw problem('INVALID_WORLD_REVISION', 'Recovery requires a non-empty expected revision');
     }
     try {
+      projectionGeneration += 1;
+      if (projectionTimer) clearTimeout(projectionTimer);
+      projectionTimer = null;
+      scheduledProjection = null;
       const projection = await projections.recover({ expectedRevision });
       latestProjectionState = Object.freeze({ status: 'published', expectedRevision });
       return projection;
@@ -413,12 +473,22 @@ export function createInteractionRuntime({
     return structuredClone(latestProjectionState);
   }
 
+  async function close() {
+    closing = true;
+    projectionGeneration += 1;
+    if (projectionTimer) clearTimeout(projectionTimer);
+    projectionTimer = null;
+    scheduledProjection = null;
+    await projectionTail.catch(() => {});
+  }
+
   return Object.freeze({
     initialize,
     execute,
     updateHumanStatus,
     updateHumanWorkspace,
     recover,
-    projectionStatus
+    projectionStatus,
+    close
   });
 }

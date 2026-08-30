@@ -67,7 +67,7 @@ function ports() {
 
 test('command follows one agent, Program, world and revision-labelled projection lifecycle', async () => {
   const context = ports();
-  const runtime = createInteractionRuntime(context);
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
 
   const result = await runtime.execute({
     source: 'transform {"name":"Root"}',
@@ -75,6 +75,7 @@ test('command follows one agent, Program, world and revision-labelled projection
     agentPath: 'Root/Sol',
     history: []
   });
+  await new Promise((resolve) => setTimeout(resolve, 5));
 
   assert.equal(result.revisionAfter, 'rev-2');
   assert.deepEqual(context.calls, [
@@ -91,13 +92,14 @@ test('command follows one agent, Program, world and revision-labelled projection
 
 test('trusted maintenance is an internal execution option and is forwarded only to the world port', async () => {
   const context = ports();
-  const runtime = createInteractionRuntime(context);
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
 
   await runtime.execute({
     source: 'transform {"thing.mov.Root/B":"Root/A"}',
     correlationId: 'trusted-maintenance-1',
     history: []
   }, { trustedMaintenance: true });
+  await new Promise((resolve) => setTimeout(resolve, 5));
 
   assert.deepEqual(context.calls, [
     ['world', {
@@ -322,10 +324,10 @@ test('a committed write is exposed before disposable projection publication fini
     revisionAfter: 'rev-2',
     lockState: { revision: 'rev-2' }
   });
-  const runtime = createInteractionRuntime(context);
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
   let committed;
 
-  const completion = runtime.execute({
+  const result = await runtime.execute({
     source: 'transform {"thing":"Root"}',
     correlationId: 'receipt-before-projection',
     history: []
@@ -335,13 +337,128 @@ test('a committed write is exposed before disposable projection publication fini
     }
   });
 
-  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(committed?.revisionAfter, 'rev-2');
   assert.equal(committed?.changed, true);
+  assert.equal(result.projectionStatus, 'pending');
+
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseProjection();
+  for (let attempt = 0; attempt < 20 && runtime.projectionStatus().status !== 'published'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  assert.equal(runtime.projectionStatus().status, 'published');
+});
+
+test('rapid committed writes coalesce before disposable projection work starts', async () => {
+  const publications = [];
+  const context = ports();
+  context.projections.publish = async ({ expectedRevision }) => {
+    publications.push(expectedRevision);
+    return { sourceRevision: expectedRevision };
+  };
+  let revision = 0;
+  context.world.execute = async () => ({
+    ok: true,
+    command: 'transform',
+    changed: true,
+    revisionAfter: `rev-${++revision}`,
+    lockState: { revision: `rev-${revision}` }
+  });
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 10 });
+
+  await runtime.execute({ source: 'transform {"thing":"A"}', correlationId: 'rapid-a', history: [] });
+  await runtime.execute({ source: 'transform {"thing":"B"}', correlationId: 'rapid-b', history: [] });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  assert.deepEqual(publications, ['rev-2']);
+  assert.equal(runtime.projectionStatus().status, 'published');
+  assert.equal(runtime.projectionStatus().expectedRevision, 'rev-2');
+});
+
+test('closing the runtime cancels disposable projection work that has not started', async () => {
+  const publications = [];
+  const context = ports();
+  context.projections.publish = async ({ expectedRevision }) => {
+    publications.push(expectedRevision);
+    return { sourceRevision: expectedRevision };
+  };
+  context.world.execute = async () => ({
+    ok: true,
+    command: 'transform',
+    changed: true,
+    revisionAfter: 'rev-close-pending',
+    lockState: { revision: 'rev-close-pending' }
+  });
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 25 });
+
+  await runtime.execute({ source: 'transform {"thing":"A"}', correlationId: 'close-pending', history: [] });
+  await runtime.close();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  assert.deepEqual(publications, []);
+});
+
+test('closing the runtime waits for disposable projection work already in flight', async () => {
+  let releaseProjection;
+  let projectionStarted;
+  const started = new Promise((resolve) => { projectionStarted = resolve; });
+  const context = ports();
+  context.projections.publish = async ({ expectedRevision }) => {
+    projectionStarted();
+    await new Promise((resolve) => { releaseProjection = resolve; });
+    return { sourceRevision: expectedRevision };
+  };
+  context.world.execute = async () => ({
+    ok: true,
+    command: 'transform',
+    changed: true,
+    revisionAfter: 'rev-close-active',
+    lockState: { revision: 'rev-close-active' }
+  });
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
+
+  await runtime.execute({ source: 'transform {"thing":"A"}', correlationId: 'close-active', history: [] });
+  await started;
+  let closed = false;
+  const closing = runtime.close().then(() => { closed = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(closed, false);
 
   releaseProjection();
-  const result = await completion;
-  assert.equal(result.projectionStatus, 'published');
+  await closing;
+  assert.equal(closed, true);
+});
+
+test('an immediate authoritative read defers pending disposable publication until the read returns', async () => {
+  const events = [];
+  const context = ports();
+  context.projections.publish = async ({ expectedRevision }) => {
+    events.push(`publish:${expectedRevision}`);
+    return { sourceRevision: expectedRevision };
+  };
+  context.world.execute = async ({ source }) => {
+    if (source.startsWith('explore')) {
+      events.push('read:start');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      events.push('read:end');
+      return { ok: true, command: 'explore', changed: false, revisionAfter: 'rev-1' };
+    }
+    return {
+      ok: true,
+      command: 'transform',
+      changed: true,
+      revisionAfter: 'rev-1',
+      lockState: { revision: 'rev-1' }
+    };
+  };
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 10 });
+
+  await runtime.execute({ source: 'transform {"thing":"A"}', correlationId: 'write', history: [] });
+  const read = runtime.execute({ source: 'explore {"thing":"A"}', correlationId: 'read', history: [] });
+  await read;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.deepEqual(events, ['read:start', 'read:end', 'publish:rev-1']);
 });
 
 test('the first use of an Agent prepares its scoped Program projection once and retries the intent', async () => {
@@ -686,13 +803,14 @@ test('feedback stays in the same interaction boundary without entering world mut
 
 test('human status translation re-enters the same world lifecycle as an explicit privileged intent', async () => {
   const context = ports();
-  const runtime = createInteractionRuntime(context);
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
 
   await runtime.updateHumanStatus({
     key: 'Root/状态',
     detail: '进行中',
     correlationId: 'interaction-3'
   });
+  await new Promise((resolve) => setTimeout(resolve, 5));
 
   assert.deepEqual(context.calls, [
     ['human-status', { key: 'Root/状态', atomPath: '', detail: '进行中' }],
@@ -710,12 +828,13 @@ test('human status translation re-enters the same world lifecycle as an explicit
 
 test('human workspace changes rebuild the context-free Program projection in the same world lifecycle', async () => {
   const context = ports();
-  const runtime = createInteractionRuntime(context);
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
 
   await runtime.updateHumanWorkspace({
     operation: { type: 'move', sourcePath: 'Root/A', targetPath: 'Root/B' },
     correlationId: 'interaction-workspace'
   });
+  await new Promise((resolve) => setTimeout(resolve, 5));
 
   assert.deepEqual(context.calls, [
     ['human-workspace', {
@@ -755,7 +874,7 @@ test('projection failure preserves the committed result without turning it into 
       details: { projection: 'graph', cause: 'EPERM' }
     });
   };
-  const runtime = createInteractionRuntime(context);
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
 
   const result = await runtime.execute({
     source: 'transform {"name":"Root"}',
@@ -766,8 +885,12 @@ test('projection failure preserves the committed result without turning it into 
   assert.equal(result.revisionAfter, 'rev-2');
   assert.equal(result.projectionStatus, 'pending');
   assert.deepEqual(result.projectionRecovery, { expectedRevision: 'rev-2' });
-  assert.deepEqual(result.projectionFailure, { projection: 'graph', cause: 'EPERM' });
+  assert.deepEqual(result.projectionFailure, {
+    projection: 'publisher', cause: 'PROJECTION_PUBLICATION_SCHEDULED'
+  });
   assert.equal(result.warnings.at(-1).code, 'PROJECTION_RECOVERY_PENDING');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(runtime.projectionStatus().failure, { projection: 'graph', cause: 'EPERM' });
 
   const recovered = await runtime.recover({ expectedRevision: 'rev-2' });
   assert.equal(recovered.sourceRevision, 'rev-2');
