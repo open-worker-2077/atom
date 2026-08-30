@@ -5,7 +5,13 @@ import { fileURLToPath } from 'node:url';
 
 import { legacyAtomContextMetadata } from './context-store.mjs';
 import { parseAtomKey } from './key-parser.mjs';
-import { executeProgramExplore, oneStoredField, prepareExploreWorld, walkAtoms } from './query-capability.mjs';
+import {
+  executeProgramExplore,
+  oneStoredField,
+  prepareExploreWorld,
+  prepareSlotStructureWorld,
+  walkAtoms
+} from './query-capability.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
 import { normalizeTypePredicate } from './program-locks.mjs';
 import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
@@ -1961,6 +1967,7 @@ export class ProgramRuntimeScheduler {
     const cycleDeadline = Date.now() + this.timeoutMs;
     const indexWorld = options.prepareAllIndexes === true ? prepareExploreWorld(atoms) : null;
     if (indexWorld) {
+      prepareSlotStructureWorld(atoms);
       await this.ensureTriggerContracts(
         records,
         programs,

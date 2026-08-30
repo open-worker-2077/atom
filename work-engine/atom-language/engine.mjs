@@ -75,6 +75,7 @@ import {
   fieldsByBase,
   oneStoredField,
   prepareExploreWorld,
+  prepareSlotStructureWorld,
   walkAtoms
 } from './query-capability.mjs';
 
@@ -2869,6 +2870,7 @@ export async function executeAtomLanguage(options = {}) {
     const preparedRuntimeRecordsPromise = canRebaseProjection
       ? Promise.resolve().then(() => {
           prepareTransformRelationIndex(nextAtoms, path.basename(contextFile));
+          prepareSlotStructureWorld(nextAtoms);
           return options.programScheduler?.prepareRuntimeRecords?.(nextAtoms) ?? null;
         })
       : null;
