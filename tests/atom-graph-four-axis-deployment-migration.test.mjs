@@ -68,6 +68,20 @@ test('legacy persisted axes load losslessly without making legacy relations into
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), legacy);
 });
 
+test('four-axis storage keeps directionless legacy relations inert without a compatibility manifest', () => {
+  const source = [{
+    thing: 'Root',
+    situation: 'current four-axis fact',
+    contain: [],
+    support: [{ verb: '历史关联', object: 'Unknown Direction' }]
+  }];
+
+  const projected = projectAtomContext(source);
+
+  assert.equal(projected.supportClauses.length, 0);
+  assert.deepEqual(source[0].support, [{ verb: '历史关联', object: 'Unknown Direction' }]);
+});
+
 test('relation-only compatibility manifest advances across unrelated commits', () => {
   const source = [atom('Root', '', [
     { 'thing@program': 'Legacy', situation: "explore({'name':'Root'})", contain: [], support: [] },
