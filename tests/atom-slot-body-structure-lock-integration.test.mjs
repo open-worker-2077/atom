@@ -6,6 +6,10 @@ import test from 'node:test';
 
 import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
 import { readVisibleSlotPlans } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
+import {
+  inheritPreparedSlotStructureWorld,
+  prepareSlotStructureWorld
+} from '../work-engine/atom-language/query-capability.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
@@ -90,4 +94,29 @@ test('authorized reseal replaces its own mapped projections without a structural
     ...files
   });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+test('structure-preserving edits reuse slot locks only when changed paths stay outside slot domains', async () => {
+  const previous = await lockedWorld();
+  previous.push(atom('普通区', '', [atom('待移动')]));
+  Object.freeze(previous);
+  const prepared = prepareSlotStructureWorld(previous);
+
+  const unrelatedNext = structuredClone(previous);
+  Object.freeze(unrelatedNext);
+  assert.equal(inheritPreparedSlotStructureWorld(
+    previous,
+    unrelatedNext,
+    ['普通区/待移动', '普通区/目标/待移动']
+  ), true);
+  assert.equal(prepareSlotStructureWorld(unrelatedNext), prepared);
+
+  const protectedNext = structuredClone(previous);
+  Object.freeze(protectedNext);
+  assert.equal(inheritPreparedSlotStructureWorld(
+    previous,
+    protectedNext,
+    ['槽体/槽模/输入']
+  ), false);
+  assert.notEqual(prepareSlotStructureWorld(protectedNext), prepared);
 });

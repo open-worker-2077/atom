@@ -140,13 +140,13 @@ function pathWithin(path, root) {
   return path === root || path.startsWith(`${root}/`);
 }
 
-export function rewriteShortcutTargetPaths(atoms, changes, affectedPaths = null) {
+export function rewriteShortcutTargetPaths(atoms, changes, affectedPaths = null, preparedMatches = null) {
   const normalized = changes.filter(({ sourcePath, resultPath }) => (
     typeof sourcePath === 'string' && sourcePath
     && typeof resultPath === 'string' && resultPath
   ));
   if (!normalized.length) return atoms;
-  for (const { atom, path } of walk(atoms)) {
+  for (const { atom, path } of preparedMatches ?? walk(atoms)) {
     if (!isShortcutAtom(atom)) continue;
     const metadata = parseMetadata(atom);
     if (metadata.target.state !== 'linked') continue;
@@ -159,9 +159,9 @@ export function rewriteShortcutTargetPaths(atoms, changes, affectedPaths = null)
   return atoms;
 }
 
-export function breakShortcutTargets(atoms, removedPath, affectedPaths = null) {
+export function breakShortcutTargets(atoms, removedPath, affectedPaths = null, preparedMatches = null) {
   if (typeof removedPath !== 'string' || !removedPath) return atoms;
-  for (const { atom, path } of walk(atoms)) {
+  for (const { atom, path } of preparedMatches ?? walk(atoms)) {
     if (!isShortcutAtom(atom)) continue;
     const metadata = parseMetadata(atom);
     if (metadata.target.state !== 'linked' || !pathWithin(metadata.target.path, removedPath)) continue;

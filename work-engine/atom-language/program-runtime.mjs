@@ -5,7 +5,13 @@ import { fileURLToPath } from 'node:url';
 
 import { legacyAtomContextMetadata } from './context-store.mjs';
 import { parseAtomKey } from './key-parser.mjs';
-import { executeProgramExplore, oneStoredField, prepareExploreWorld, walkAtoms } from './query-capability.mjs';
+import {
+  executeProgramExplore,
+  oneStoredField,
+  prepareExploreWorld,
+  prepareSlotStructureWorld,
+  walkAtoms
+} from './query-capability.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
 import { normalizeTypePredicate } from './program-locks.mjs';
 import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
@@ -1134,6 +1140,7 @@ export class ProgramRuntimeScheduler {
     this.requestDrivenLockRetirementChecked = false;
     this.triggerContracts = new Map();
     this.triggerIndex = new Map();
+    this.programReadDependencies = new Map();
     this.triggerContractsInitialized = false;
     this.deferredTriggerContracts = new Map();
     this.slotInvocationCycles = new Map();
@@ -1444,8 +1451,9 @@ export class ProgramRuntimeScheduler {
     return this.requestDrivenLocks;
   }
 
-  async activeRequestDrivenLocks(atoms = null) {
-    if (atoms) {
+  async activeRequestDrivenLocks(atoms = null, options = {}) {
+    const reusePreparedIndexes = options.preparedIndexesValid === true && this.latestRecords;
+    if (atoms && !reusePreparedIndexes) {
       await this.rebuildAgentSecurity(atoms);
       await this.rebuildRequestDrivenLocks(atoms);
     }
@@ -1454,6 +1462,31 @@ export class ProgramRuntimeScheduler {
       this.requestDrivenLockRetirementChecked = true;
     }
     return this.requestDrivenLocks ?? [];
+  }
+
+  hasPreparedIndexesForRevision(revision, atoms = []) {
+    return Boolean(
+      this.latestRecords
+      && this.requestDrivenLocks !== undefined
+      && this.agentSecurityWorldRevision !== null
+      && worldRevisionKey(this.latestRecords) === worldKeyFromRevision(revision, atoms)
+    );
+  }
+
+  prepareRuntimeRecords(atoms) {
+    return worldRecords(atoms);
+  }
+
+  async installPreparedRuntimeIndexes(atoms, records) {
+    if (worldRecords(atoms) !== records) {
+      throw Object.assign(new Error('Prepared runtime records do not belong to this world snapshot'), {
+        code: 'PREPARED_RUNTIME_RECORDS_MISMATCH'
+      });
+    }
+    await this.rebuildAgentSecurity(atoms);
+    await this.rebuildRequestDrivenLocks(atoms);
+    this.latestRecords = records;
+    return true;
   }
 
   async registerAgentWindow({ sourceProgramPath, labels, functionScopes, functions }) {
@@ -1757,9 +1790,10 @@ export class ProgramRuntimeScheduler {
   }
 
   async current(atoms, options = {}) {
-    await this.activeRequestDrivenLocks(atoms);
-    const records = worldRecords(atoms);
-    this.latestRecords = records;
+    const reusePreparedIndexes = options.preparedIndexesValid === true && this.latestRecords;
+    await this.activeRequestDrivenLocks(reusePreparedIndexes ? null : atoms);
+    const records = reusePreparedIndexes ? this.latestRecords : worldRecords(atoms);
+    if (!reusePreparedIndexes) this.latestRecords = records;
     const availablePrograms = programRecords(records);
     const programs = options.programSelector
       ? programRecords(records, options.programSelector)
@@ -1847,18 +1881,11 @@ export class ProgramRuntimeScheduler {
         ) ?? []) candidatePaths.add(programPath);
       }
       const eventNodes = new Set((preparedTriggerEvent.nodes ?? []).map((node) => node.trim()));
-      const programs = programRecords(this.latestRecords);
-      for (const program of programs) {
-        const previous = reusableProgramCandidates(
-          this.programReusable,
-          program,
-          options.isolateFailures === true,
-          options.agentOrigin,
-          this.latestRecords,
-          programs
-        )[0]?.[1];
-        if (previous?.requests?.some((request) => requestMayObserveEvent(request, eventNodes))) {
-          candidatePaths.add(program.path);
+      const activeScopePath = agentScopePath(options.agentOrigin);
+      for (const [programPath, dependency] of this.programReadDependencies) {
+        if (dependency.contextDependent === true && dependency.scopePath !== activeScopePath) continue;
+        if (dependency.requests.some((request) => requestMayObserveEvent(request, eventNodes))) {
+          candidatePaths.add(programPath);
         }
       }
       const slotCandidates = slotProgramInvocationsForEvent(atoms, preparedTriggerEvent);
@@ -1940,6 +1967,7 @@ export class ProgramRuntimeScheduler {
     const cycleDeadline = Date.now() + this.timeoutMs;
     const indexWorld = options.prepareAllIndexes === true ? prepareExploreWorld(atoms) : null;
     if (indexWorld) {
+      prepareSlotStructureWorld(atoms);
       await this.ensureTriggerContracts(
         records,
         programs,
@@ -2133,15 +2161,12 @@ export class ProgramRuntimeScheduler {
       }
     };
     const dependencyTriggeredProgramPaths = new Set(triggerEvent
-      ? programs.flatMap((program) => {
-          const previous = reusableProgramCandidates(
-            this.programReusable, program, isolateFailures, options.agentOrigin,
-            records, availablePrograms
-          )[0]?.[1];
-          return previous?.requests?.some((request) => requestMayObserveEvent(request, eventNodes))
-            ? [program.path]
-            : [];
-        })
+      ? [...this.programReadDependencies.entries()].flatMap(([programPath, dependency]) => (
+          (dependency.contextDependent !== true || dependency.scopePath === scopePath)
+          && dependency.requests.some((request) => requestMayObserveEvent(request, eventNodes))
+            ? [programPath]
+            : []
+        ))
       : []);
     const indexedPrograms = triggerEvent
       ? programs.filter((program) => (
@@ -2418,6 +2443,22 @@ export class ProgramRuntimeScheduler {
       }
     });
     const settled = await Promise.all(operations);
+    const activeProgramPaths = new Set(programs.map((program) => program.path));
+    for (const programPath of this.programReadDependencies.keys()) {
+      if (!activeProgramPaths.has(programPath)) this.programReadDependencies.delete(programPath);
+    }
+    const programByPath = new Map(programs.map((program) => [program.path, program]));
+    for (const entry of settled) {
+      if (!Array.isArray(entry.requests)) continue;
+      const program = programByPath.get(entry.programPath);
+      if (!program) continue;
+      this.programReadDependencies.set(entry.programPath, {
+        detail: program.detail,
+        requests: structuredClone(entry.requests),
+        contextDependent: entry.contextDependent === true,
+        scopePath: entry.contextDependent === true ? scopePath : null
+      });
+    }
     if (!triggerEvent && !options.programSelector && !options.slotScopeRoot) {
       const triggerSources = programs.filter((program) => /\b(?:trigger|changed)\s*\(/u.test(program.detail));
       this.triggerContractsInitialized = triggerSources.every((program) => (

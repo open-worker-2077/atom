@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
   return {
@@ -95,6 +96,34 @@ test('one mutable world revision shares one prepared record snapshot across inde
 
   assert.equal(recordSnapshots.length, 2);
   assert.equal(recordSnapshots[0], recordSnapshots[1]);
+});
+
+test('prepared runtime indexes are reusable only for the exact authoritative world revision', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const world = Object.freeze([
+    Object.freeze(atom('Fact', 'before'))
+  ]);
+  await scheduler.refresh(world);
+
+  assert.equal(
+    scheduler.hasPreparedIndexesForRevision(revisionOfWorldFacts(world), world),
+    true
+  );
+
+  const changedWorld = Object.freeze([
+    Object.freeze(atom('Fact', 'after'))
+  ]);
+  assert.equal(
+    scheduler.hasPreparedIndexesForRevision(revisionOfWorldFacts(changedWorld), changedWorld),
+    false
+  );
+
+  const prepared = scheduler.prepareRuntimeRecords(changedWorld);
+  await scheduler.installPreparedRuntimeIndexes(changedWorld, prepared);
+  assert.equal(
+    scheduler.hasPreparedIndexesForRevision(revisionOfWorldFacts(changedWorld), changedWorld),
+    true
+  );
 });
 
 test('a literal path lock below a non-Agent synthetic test root recompiles into the active index', async () => {

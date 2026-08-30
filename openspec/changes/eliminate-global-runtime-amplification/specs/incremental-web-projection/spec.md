@@ -22,6 +22,10 @@ After authoritative facts and the compact receipt are durable, Graph/Spatial pub
 - **WHEN** an affected projection takes longer to serialize or synchronize than the authoritative Patch commit
 - **THEN** the interaction returns the committed receipt with projection status pending, and the serialized publisher completes or reports recoverable failure without repeating the fact mutation
 
+#### Scenario: Rapid consecutive commits
+- **WHEN** another authoritative commit arrives before a scheduled disposable publication starts
+- **THEN** the older scheduled publication is cancelled, only the latest committed revision is published, and neither command waits for Graph/Spatial serialization
+
 ### Requirement: Authoritative refresh is preserved
 Web projection MUST remain disposable; browser refresh and runtime restart SHALL reconstruct the visible result from `atom.json` and committed derived metadata without treating the projection as fact.
 
