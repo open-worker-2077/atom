@@ -71,14 +71,13 @@ test('Transform P1 freezes one short dot-command registry without aliases', () =
   ]);
 });
 
-test('transform dot lexer segments only exact registered .word. markers', () => {
+test('transform dot lexer keeps situation rep replacement bytes opaque', () => {
   const parsed = parseTransformKey(
     'situation.rep.新句有 v1.2、#标题与普通句点.sum.新的简介'
   );
   assert.equal(parsed.baseKey, 'situation');
   assert.deepEqual(parsed.commands, [
-    { name: 'rep', parameter: '新句有 v1.2、#标题与普通句点' },
-    { name: 'sum', parameter: '新的简介' }
+    { name: 'rep', parameter: '新句有 v1.2、#标题与普通句点.sum.新的简介' }
   ]);
   assert.equal(parsed.persistentKey, 'situation');
   assert.equal(parsed.errors.length, 0);
@@ -86,6 +85,41 @@ test('transform dot lexer segments only exact registered .word. markers', () => 
   const ordinary = parseTransformKey('situation.v1.2.not-a-command');
   assert.equal(ordinary.baseKey, 'situation.v1.2.not-a-command');
   assert.deepEqual(ordinary.commands, []);
+});
+
+test('situation rep preserves command-like Program source and rejects a real outer invalid axis', async (t) => {
+  const original = '开始\n旧片段\n结束';
+  const files = await fixture(t, [atom('文档', original)]);
+  const replacement = [
+    'def main(arguments):',
+    "    transform({'thing.ren.X': 'Target', 'situation.rep.done': None})",
+    "    return '.dsc. and .rep. remain bytes'"
+  ].join('\n');
+
+  const localSource = `transform ${JSON.stringify({
+    thing: '文档',
+    [`situation.rep.${replacement}`]: '旧片段'
+  })}`;
+  const local = await execute(files, localSource);
+  assert.equal(local.ok, true, JSON.stringify(local.errors));
+  assert.equal(
+    findAtom(await readAtoms(files.contextFile), '文档').situation,
+    `开始\n${replacement}\n结束`
+  );
+
+  const fullSource = `transform {"thing":"文档",${JSON.stringify(`situation.rep.${replacement}`)}}`;
+  const full = await execute(files, fullSource);
+  assert.equal(full.ok, true, JSON.stringify(full.errors));
+  assert.equal(findAtom(await readAtoms(files.contextFile), '文档').situation, replacement);
+
+  const beforeRejected = await fs.readFile(files.contextFile, 'utf8');
+  const rejected = await execute(
+    files,
+    'transform {"thing":"文档","situation.ren.不得写入"}'
+  );
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.errors.at(-1).code, 'INVALID_TRANSFORM_COMMAND_AXIS');
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), beforeRejected);
 });
 
 test('transform parsing is isolated from unchanged explore $ parsing', async (t) => {
