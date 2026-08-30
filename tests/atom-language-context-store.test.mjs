@@ -142,6 +142,30 @@ test('projects decorated Atom keys recursively through parseAtomKey onto a virtu
   assert.deepEqual(atoms, atomsFixture(), 'projection must not turn the virtual root into a factual Atom');
 });
 
+test('typed default backup preserves archived facts but excludes inactive support from Graph validation', () => {
+  const archivedSupport = [{
+    if: [{ 'thing@program': '旧判定' }],
+    'then@current': true
+  }];
+  const atoms = [{
+    'thing@backup@default': '默认备份仓',
+    situation: '',
+    contain: [{
+      'thing@program': '旧判定',
+      situation: 'def main(arguments):\n    return True',
+      contain: [],
+      support: archivedSupport
+    }],
+    support: []
+  }];
+
+  const projection = projectAtomContext(atoms);
+  assert.equal(projection.graph.contain[0].contain[0]['thing@program'], '旧判定');
+  assert.deepEqual(projection.graph.contain[0].contain[0].support, []);
+  assert.deepEqual(atoms[0].contain[0].support, archivedSupport);
+  assert.equal(projection.supportClauses.length, 0);
+});
+
 test('writes the Atom context and its strict Graph projection as separate atomic files', async (t) => {
   const directory = await temporaryDirectory(t);
   const contextFile = path.join(directory, 'contexts', 'stone-workshop.json');
