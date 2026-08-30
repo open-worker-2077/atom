@@ -155,6 +155,28 @@ textarea:focus-visible {
   overflow: clip;
 }
 
+.scope-load-state {
+  position: absolute;
+  z-index: var(--z-toast);
+  top: clamp(4.5rem, 11vh, 7rem);
+  left: 50%;
+  translate: -50% 0;
+  max-width: min(34rem, calc(100% - 2rem));
+  padding: 0.65rem 0.9rem;
+  border: 1px solid color-mix(in oklch, var(--color-accent) 46%, transparent);
+  background: color-mix(in oklch, var(--color-space-0) 88%, transparent);
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  text-align: center;
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+}
+
+body[data-spatial-scope-state="failed"] .scope-load-state {
+  border-color: color-mix(in oklch, var(--color-delete) 58%, transparent);
+  color: var(--color-delete);
+}
+
 .spatial-shell::before,
 .spatial-shell::after {
   position: absolute;
