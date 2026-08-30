@@ -3929,7 +3929,9 @@
       .filter((candidate) => candidate.normalizedDistance <= 1)
       .sort((left, right) => left.normalizedDistance - right.normalizedDistance)[0];
     if (relation) {
-      return relation.region;
+      return relation.region.item && relation.region.item.kind === "support-clause"
+        ? relation.region
+        : { ...relation.region, item: { ...relation.region.item, kind: "relationship" } };
     }
     return domainContext ? { item: null, domainContext } : null;
   }
