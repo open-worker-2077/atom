@@ -23,8 +23,16 @@
         if (checking || connected()) return;
         checking = true;
         try {
-          const response = await fetch('/__spatial/api/health', { cache: 'no-store' });
-          if (!response.ok) throw new Error('Atom main entry is unavailable');
+          let available = false;
+          try {
+            const health = await fetch('/__spatial/api/health', { cache: 'no-store' });
+            available = health.ok;
+          } catch {}
+          if (!available) {
+            const state = await fetch('/__spatial/api/state?path=root', { cache: 'no-store' });
+            available = state.ok;
+          }
+          if (!available) throw new Error('Atom main entry is unavailable');
           const count = attempts();
           if (count >= maxImmediateAttempts) {
             sessionStorage.removeItem(attemptKey);
@@ -42,12 +50,19 @@
 
       window.addEventListener('error', (event) => {
         const failedScript = event.target instanceof HTMLScriptElement;
+        const failedLocalStylesheet = event.target instanceof HTMLLinkElement
+          && event.target.relList.contains('stylesheet')
+          && new URL(event.target.href, location.href).origin === location.origin;
         const startupRuntimeError = event.target === window && Boolean(event.error);
-        if (!failedScript && !startupRuntimeError) return;
+        if (!failedScript && !failedLocalStylesheet && !startupRuntimeError) return;
         startupFailed = true;
         void recoverWhenMainEntryReturns();
       }, true);
       window.addEventListener('unhandledrejection', () => {
+        startupFailed = true;
+        void recoverWhenMainEntryReturns();
+      });
+      window.addEventListener('atom-main-entry-unavailable', () => {
         startupFailed = true;
         void recoverWhenMainEntryReturns();
       });

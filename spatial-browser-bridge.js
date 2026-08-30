@@ -226,6 +226,13 @@
     return payload;
   }
 
+  function reportMainEntryUnavailable(stage) {
+    if (typeof global.dispatchEvent !== "function" || typeof global.CustomEvent !== "function") return;
+    global.dispatchEvent(new global.CustomEvent("atom-main-entry-unavailable", {
+      detail: { stage }
+    }));
+  }
+
   async function pullKnowledge(requestedPath = lab.state().path || "root", options = {}) {
     const allowDuringTransaction = options.allowDuringTransaction === true;
     if (pulling) {
@@ -296,6 +303,7 @@
       return true;
     } catch (error) {
       document.body.dataset.spatialBridge = "offline";
+      if (initialLoad) reportMainEntryUnavailable("state");
       return false;
     } finally {
       pulling = false;
