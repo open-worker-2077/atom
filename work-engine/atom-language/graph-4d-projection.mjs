@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { parseGraphDocument } from '../../cli/lib/graph-json.mjs';
 import { parseAtomKey } from './key-parser.mjs';
+import { shortcutMetadata } from './shortcut-runtime.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const codecFile = path.resolve(here, '..', '..', 'spatial-json-codec.js');
@@ -182,6 +183,10 @@ export async function projectAtomGraphWithPaths(rawGraphDocument, options = {}) 
     const atomThingField = thingFieldOf(atom);
     const isProgram = isProgramThingField(atomThingField);
     if (isProgram) knowledgeNode.programSource = situationOf(atom) ?? '';
+    const shortcut = shortcutMetadata(atom);
+    if (shortcut?.target?.state === 'linked') {
+      knowledgeNode.shortcutTargetPath = shortcut.target.path;
+    }
     if (atomPath) atomPathByKey.set(knowledgeNode.key, atomPath);
     containOf(atom).forEach((child) => attachAtomPath(
       child,
