@@ -281,6 +281,112 @@ test('an unmatched Agent node lock denies self-reconfiguration without mutation'
   assert.equal(world[0].contain[0].situation, initialSource);
 });
 
+async function descendantAgentCandidateFixture(t, suffix, lockFields = ['thing']) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), `atom-agent-descendant-${suffix}-`));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const agentSource = 'agent({"labels":["worker"],"functions":{"groups":[],"names":["agent","explore","lock","transform"]}})';
+  const initialProgramSource = 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})';
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+    atom('Window', agentSource, [
+      atom('Child Program', initialProgramSource, [], 'program')
+    ], 'program@agent'),
+    ...(lockFields ? [atom(
+      'Registration Lock',
+      `lock({"targets":{"paths":["Root/Window/Child Program"]},"mode":"write","fields":${JSON.stringify(lockFields)}})`,
+      [],
+      'program'
+    )] : []),
+    atom('Default Backup', '', [], 'backup@default')
+  ])], null, 2));
+  return { contextFile, projectionFile };
+}
+
+const UPDATED_DESCENDANT_AGENT_SOURCE = 'agent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})';
+
+for (const scenario of [
+  {
+    name: 'situation',
+    source: `transform {"thing":"Root/Window/Child Program",${JSON.stringify(`situation.rep.${UPDATED_DESCENDANT_AGENT_SOURCE}`)}}`,
+    assertStored(world) {
+      assert.match(world[0].contain[0].contain[0].situation, /"transform"/u);
+    }
+  },
+  {
+    name: 'support',
+    source: 'transform {"thing":"Root/Window/Child Program","support.rep.":[{"if@current":true,"then":[{"thing":"Root"}]}]}',
+    assertStored(world) {
+      assert.equal(world[0].contain[0].contain[0].support[0].then[0].thing, 'Root');
+    }
+  },
+  {
+    name: 'discard',
+    lockFields: null,
+    source: 'transform {"thing.dsc.":"Root/Window/Child Program"}',
+    assertStored(world) {
+      assert.deepEqual(world[0].contain[0].contain, []);
+      const backup = world[0].contain.find((entry) => Object.entries(entry).some(([key, value]) => (
+        key.startsWith('thing') && value === 'Default Backup'
+      )));
+      assert.equal(backup.contain[0]['thing@program'], 'Child Program');
+      assert.equal(Object.hasOwn(backup.contain[0], 'thing@program@agent'), false);
+    }
+  }
+]) {
+  test(`${scenario.name} Transform on a descendant Agent candidate does not register it`, async (t) => {
+    const files = await descendantAgentCandidateFixture(t, scenario.name, scenario.lockFields);
+
+    const result = await executeAtomLanguage({
+      source: scenario.source,
+      ...files,
+      programScheduler: createProgramRuntimeScheduler(),
+      interaction: { id: `agent-descendant-${scenario.name}`, agent: { path: 'Root/Window' } }
+    });
+
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const world = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+    scenario.assertStored(world);
+    const child = world[0].contain[0].contain[0];
+    if (child) {
+      assert.equal(Object.hasOwn(child, 'thing@program'), true);
+      assert.equal(Object.hasOwn(child, 'thing@program@agent'), false);
+    }
+  });
+}
+
+test('explicitly running an out-of-window Agent candidate still uses the registration gate', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-registration-gate-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const candidateSource = 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})';
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+    atom('Task', '', [
+      atom(
+        'Window',
+        'agent({"labels":["worker"],"functions":{"groups":[],"names":["agent","explore","transform"]}})',
+        [],
+        'program@agent'
+      )
+    ]),
+    atom('Outside Candidate', candidateSource, [], 'program')
+  ])], null, 2));
+  const result = await executeAtomLanguage({
+    source: 'transform {"thing.run.":"Root/Outside Candidate"}',
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler(),
+    interaction: { id: 'agent-outside-registration-denied', agent: { path: 'Root/Task/Window' } }
+  });
+
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.ok(result.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), JSON.stringify(result));
+  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(world[0].contain[1].situation, candidateSource);
+  assert.equal(Object.hasOwn(world[0].contain[1], 'thing@program@agent'), false);
+});
+
 test('jump and slot_body no longer expose caller-defined fixed-lock switches', async () => {
   const registry = programFunctionRegistry();
   const jump = registry.functions.find((entry) => entry.name === 'jump');

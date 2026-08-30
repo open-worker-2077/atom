@@ -1035,7 +1035,9 @@ export async function executeAtomLanguage(options = {}) {
   });
   const graphLocks = activeLocks.filter((lock) => lock.kind);
   let programChanged = false;
-  const pendingAgentRegistrations = programCycle.agentRegistrations ?? [];
+  const pendingAgentRegistrations = requestedProgramRun?.selector
+    ? programCycle.agentRegistrations ?? []
+    : [];
   if (pendingAgentRegistrations.length > 1) {
     return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
       'AGENT_REGISTRATION_CONFLICT', '一个候选事务只能登记一个 Agent'
