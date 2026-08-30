@@ -51,6 +51,112 @@ test('builds nested input junctions, one common trunk, and ordered then branches
   ]);
 });
 
+test('compound bundle separates ordinary fact endpoints from predicate Programs', () => {
+  const [bundle] = SpatialVisualModel.supportBundles([{
+    id: 'support:Flow/A:0',
+    antecedentPaths: ['Flow/A', 'Flow/B'],
+    dependencyPaths: ['Flow/A', 'Flow/B', 'Flow/Gate'],
+    root: {
+      kind: 'and', exprPath: [], children: [
+        { kind: 'thing', targetPath: 'Flow/A', exprPath: [0] },
+        { kind: 'thing', targetPath: 'Flow/B', exprPath: [1] },
+        { kind: 'program', targetPath: 'Flow/Gate', exprPath: [2] }
+      ]
+    },
+    then: [
+      { kind: 'thing', targetPath: 'Flow/Y', thenOrdinal: 0 },
+      { kind: 'thing', targetPath: 'Flow/Z', thenOrdinal: 1 }
+    ],
+    evaluation: { status: 'true', decision: true }
+  }]);
+
+  assert.equal(bundle.id, 'support:Flow/A:0');
+  assert.deepEqual(bundle.antecedents.map(({ path }) => path), ['Flow/A', 'Flow/B']);
+  assert.deepEqual(bundle.predicatePrograms.map(({ path }) => path), ['Flow/Gate']);
+  assert.deepEqual(bundle.consequents.map(({ path, ordinal }) => ({ path, ordinal })), [
+    { path: 'Flow/Y', ordinal: 0 },
+    { path: 'Flow/Z', ordinal: 1 }
+  ]);
+});
+
+test('fan-in merges at 50 percent and has one outgoing shared trunk', () => {
+  const bundle = {
+    id: 'support:fan-in', junctionRatio: 0.5,
+    antecedents: [{ path: 'A' }, { path: 'B' }],
+    predicatePrograms: [], consequents: [{ path: 'Z', ordinal: 0 }]
+  };
+  const geometry = SpatialVisualModel.supportBundleGeometry(bundle, {
+    A: { x: 0, y: 0 }, B: { x: 0, y: 10 }, Z: { x: 20, y: 5 }
+  });
+
+  assert.deepEqual(geometry.junctions, [
+    { id: 'support:fan-in:merge', role: 'merge', ratio: 0.5, x: 10, y: 5 }
+  ]);
+  assert.deepEqual(geometry.segments.map(({ role, from, to }) => ({ role, from, to })), [
+    { role: 'antecedent', from: { x: 0, y: 0 }, to: { x: 10, y: 5 } },
+    { role: 'antecedent', from: { x: 0, y: 10 }, to: { x: 10, y: 5 } },
+    { role: 'trunk', from: { x: 10, y: 5 }, to: { x: 20, y: 5 } }
+  ]);
+});
+
+test('fan-out splits at 50 percent after one incoming shared trunk', () => {
+  const bundle = {
+    id: 'support:fan-out', junctionRatio: 0.5,
+    antecedents: [{ path: 'A' }], predicatePrograms: [],
+    consequents: [{ path: 'Y', ordinal: 0 }, { path: 'Z', ordinal: 1 }]
+  };
+  const geometry = SpatialVisualModel.supportBundleGeometry(bundle, {
+    A: { x: 0, y: 5 }, Y: { x: 20, y: 0 }, Z: { x: 20, y: 10 }
+  });
+
+  assert.deepEqual(geometry.junctions, [
+    { id: 'support:fan-out:split', role: 'split', ratio: 0.5, x: 10, y: 5 }
+  ]);
+  assert.deepEqual(geometry.segments.map(({ role, from, to }) => ({ role, from, to })), [
+    { role: 'trunk', from: { x: 0, y: 5 }, to: { x: 10, y: 5 } },
+    { role: 'consequent', from: { x: 10, y: 5 }, to: { x: 20, y: 0 } },
+    { role: 'consequent', from: { x: 10, y: 5 }, to: { x: 20, y: 10 } }
+  ]);
+});
+
+test('N-to-M shared trunk is non-zero and centered on the 50 percent path', () => {
+  const bundle = {
+    id: 'support:n-to-m', junctionRatio: 0.5,
+    antecedents: [{ path: 'A' }, { path: 'B' }], predicatePrograms: [{ path: 'Gate' }],
+    consequents: [{ path: 'Y', ordinal: 0 }, { path: 'Z', ordinal: 1 }]
+  };
+  const geometry = SpatialVisualModel.supportBundleGeometry(bundle, {
+    A: { x: 0, y: 0 }, B: { x: 0, y: 10 }, Y: { x: 20, y: 0 }, Z: { x: 20, y: 10 }
+  });
+  const trunk = geometry.segments.find(({ role }) => role === 'trunk');
+
+  assert.deepEqual(geometry.junctions, [
+    { id: 'support:n-to-m:merge', role: 'merge', ratio: 0.5, x: 8, y: 5 },
+    { id: 'support:n-to-m:split', role: 'split', ratio: 0.5, x: 12, y: 5 }
+  ]);
+  assert.ok(Math.hypot(trunk.to.x - trunk.from.x, trunk.to.y - trunk.from.y) > 0);
+  assert.deepEqual({ x: (trunk.from.x + trunk.to.x) / 2, y: (trunk.from.y + trunk.to.y) / 2 }, {
+    x: 10, y: 5
+  });
+  assert.ok(geometry.segments.every(({ clauseId }) => clauseId === 'support:n-to-m'));
+});
+
+test('binary support remains one direct segment without junctions', () => {
+  const bundle = {
+    id: 'support:binary', junctionRatio: 0.5,
+    antecedents: [{ path: 'A' }], predicatePrograms: [],
+    consequents: [{ path: 'B', ordinal: 0 }]
+  };
+  const geometry = SpatialVisualModel.supportBundleGeometry(bundle, {
+    A: { x: 0, y: 0 }, B: { x: 10, y: 0 }
+  });
+
+  assert.deepEqual(geometry.junctions, []);
+  assert.deepEqual(geometry.segments.map(({ role, from, to }) => ({ role, from, to })), [
+    { role: 'binary', from: { x: 0, y: 0 }, to: { x: 10, y: 0 } }
+  ]);
+});
+
 test('false and failed clauses do not produce forged visual lines', () => {
   const clause = {
     id: 'support:世界/A:0',
@@ -61,6 +167,33 @@ test('false and failed clauses do not produce forged visual lines', () => {
     { ...clause, evaluation: { status: 'false', decision: false } },
     { ...clause, id: 'support:世界/A:1', evaluation: { status: 'failure' } }
   ]), []);
+});
+
+test('visible path filtering returns only clauses whose fact endpoints are in the current group', () => {
+  const clauses = [
+    {
+      id: 'support:visible', antecedentPaths: ['A'], dependencyPaths: ['A', 'Gate'],
+      root: { kind: 'and', children: [
+        { kind: 'thing', targetPath: 'A' },
+        { kind: 'program', targetPath: 'Gate' }
+      ] },
+      then: [{ kind: 'thing', targetPath: 'Y', thenOrdinal: 0 }]
+    },
+    {
+      id: 'support:hidden', antecedentPaths: ['A', 'Hidden'], dependencyPaths: ['A', 'Hidden'],
+      root: { kind: 'and', children: [
+        { kind: 'thing', targetPath: 'A' },
+        { kind: 'thing', targetPath: 'Hidden' }
+      ] },
+      then: [{ kind: 'thing', targetPath: 'Y', thenOrdinal: 0 }]
+    }
+  ];
+
+  const bundles = SpatialVisualModel.supportBundles(clauses, {
+    visiblePaths: new Set(['A', 'Y'])
+  });
+
+  assert.deepEqual(bundles.map(({ id }) => id), ['support:visible']);
 });
 
 test('three-to-hub-to-three renders two rules joined by one real hub', () => {

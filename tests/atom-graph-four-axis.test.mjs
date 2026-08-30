@@ -149,17 +149,27 @@ test('thing@program is a typed endpoint selector and never line-carried source c
   ])), { code: 'SUPPORT_INLINE_PROGRAM_UNSUPPORTED' });
 });
 
-test('native 3-to-3 is rejected and explicit 3-to-hub-to-3 uses two rules', () => {
-  assert.throws(() => parseGraphDocument(graphDocument([
-    leaf('A'), leaf('B'), leaf('C'),
-    leaf('H', '', [{
-      if: [{ and: [{ thing: 'A' }, { thing: 'B' }, { thing: 'C' }] }],
-      'then@current': true,
+test('one clause preserves N-to-M fact roles and an independent predicate Program', () => {
+  const parsed = parseGraphDocument(graphDocument([
+    leaf('A', '', [{
+      'if@current': true,
+      if: [{ and: [{ thing: 'B' }, { 'thing@program': 'Gate' }] }],
       then: [{ thing: 'Y' }, { thing: 'Z' }]
     }]),
+    leaf('B'),
+    { 'thing@program': 'Gate', situation: 'def main(arguments):\n    return True', contain: [], support: [] },
     leaf('Y'), leaf('Z')
-  ])), { code: 'NATIVE_MANY_TO_MANY_SUPPORT_UNSUPPORTED' });
+  ]));
+  const [clause] = parsed.supportClauses;
+  assert.equal(clause.id, 'support:世界/A:0');
+  assert.deepEqual(clause.dependencyPaths, ['世界/A', '世界/B', '世界/Gate']);
+  assert.deepEqual(clause.then.map(({ targetPath, thenOrdinal }) => ({ targetPath, thenOrdinal })), [
+    { targetPath: '世界/Y', thenOrdinal: 0 },
+    { targetPath: '世界/Z', thenOrdinal: 1 }
+  ]);
+});
 
+test('explicit 3-to-hub-to-3 remains two independently auditable rules', () => {
   const parsed = parseGraphDocument(graphDocument([
     leaf('A'), leaf('B'), leaf('C'),
     leaf('H', '', [

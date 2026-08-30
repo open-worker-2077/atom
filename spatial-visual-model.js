@@ -118,6 +118,12 @@
 
   function supportBundles(clauses, options) {
     var junctionRatio = Number(options && options.junctionRatio);
+    var visiblePaths = options && options.visiblePaths;
+    var hasVisiblePath = visiblePaths && typeof visiblePaths.has === 'function'
+      ? function (path) { return visiblePaths.has(path); }
+      : Array.isArray(visiblePaths)
+        ? function (path) { return visiblePaths.includes(path); }
+        : null;
     if (!Number.isFinite(junctionRatio) || junctionRatio <= 0 || junctionRatio >= 1) {
       junctionRatio = 0.5;
     }
@@ -142,14 +148,53 @@
       };
     }
 
+    function leafRoles(expr, roles) {
+      if (!isNode(expr)) return roles;
+      if ((expr.kind === 'thing' || expr.kind === 'program') && typeof expr.targetPath === 'string') {
+        roles.set(expr.targetPath, expr.kind);
+        return roles;
+      }
+      if (Array.isArray(expr.children)) {
+        expr.children.forEach(function (child) { leafRoles(child, roles); });
+      }
+      return roles;
+    }
+
     return (Array.isArray(clauses) ? clauses : []).flatMap(function (clause) {
       if (!isNode(clause) || typeof clause.id !== 'string' || !clause.id
         || !isNode(clause.root) || !Array.isArray(clause.then) || !clause.then.length) return [];
       var evaluation = clause.evaluation;
       if (evaluation && evaluation.decision !== true) return [];
-      var inputs = inputPlan(clause.root, clause.id);
+      var roles = leafRoles(clause.root, new Map());
+      var dependencyPaths = Array.isArray(clause.dependencyPaths)
+        ? clause.dependencyPaths.slice()
+        : Array.from(roles.keys());
       var outputs = clause.then.slice().sort(function (left, right) {
         return left.thenOrdinal - right.thenOrdinal;
+      });
+      var predicatePrograms = dependencyPaths.filter(function (path) {
+        return roles.get(path) === 'program';
+      }).map(function (path, ordinal) {
+        return { path: path, ordinal: ordinal, role: 'predicate-program' };
+      });
+      var antecedentPaths = Array.isArray(clause.antecedentPaths)
+        ? clause.antecedentPaths.slice()
+        : dependencyPaths.filter(function (path) { return roles.get(path) !== 'program'; });
+      if (!antecedentPaths.length) antecedentPaths = dependencyPaths.slice();
+      if (hasVisiblePath && antecedentPaths.concat(outputs.map(function (target) {
+        return target.targetPath;
+      })).some(function (path) { return !hasVisiblePath(path); })) return [];
+      var inputs = inputPlan(clause.root, clause.id);
+      var antecedents = antecedentPaths.map(function (path, ordinal) {
+        return { path: path, ordinal: ordinal, role: 'antecedent' };
+      });
+      var consequents = outputs.map(function (target) {
+        return {
+          path: target.targetPath,
+          ordinal: target.thenOrdinal,
+          role: 'consequent',
+          kind: target.kind || 'thing'
+        };
       });
       if (inputs && inputs.kind === 'leaf' && outputs.length === 1) {
         return [{
@@ -158,7 +203,10 @@
           junctionRatio: junctionRatio,
           edge: { fromPath: inputs.fromPath, toPath: outputs[0].targetPath },
           input: inputs,
-          outputOrdinal: outputs[0].thenOrdinal
+          outputOrdinal: outputs[0].thenOrdinal,
+          antecedents: antecedents,
+          predicatePrograms: predicatePrograms,
+          consequents: consequents
         }];
       }
       var ifJunction = clause.id + ':if-junction';
@@ -169,6 +217,9 @@
         junctionRatio: junctionRatio,
         inputTopology: inputs,
         trunk: { from: ifJunction, to: thenJunction },
+        antecedents: antecedents,
+        predicatePrograms: predicatePrograms,
+        consequents: consequents,
         outputBranches: outputs.map(function (target) {
           return {
             id: clause.id + ':then:' + target.thenOrdinal,
@@ -179,6 +230,117 @@
         })
       }];
     });
+  }
+
+  function supportBundleGeometry(bundle, points, options) {
+    if (!isNode(bundle) || typeof bundle.id !== 'string') return null;
+    var pointFor = typeof points === 'function'
+      ? points
+      : function (path) { return isNode(points) ? points[path] : null; };
+    var antecedents = Array.isArray(bundle.antecedents) ? bundle.antecedents : [];
+    var consequents = Array.isArray(bundle.consequents) ? bundle.consequents : [];
+    var inputs = antecedents.map(function (entry) {
+      return { entry: entry, point: pointFor(entry.path) };
+    });
+    var outputs = consequents.map(function (entry) {
+      return { entry: entry, point: pointFor(entry.path) };
+    });
+    if (!inputs.length || !outputs.length || inputs.concat(outputs).some(function (item) {
+      return !isNode(item.point) || !Number.isFinite(item.point.x) || !Number.isFinite(item.point.y);
+    })) return null;
+
+    function point(value) {
+      return { x: Number(value.x), y: Number(value.y) };
+    }
+    function average(items) {
+      return items.reduce(function (sum, item) {
+        return { x: sum.x + item.point.x / items.length, y: sum.y + item.point.y / items.length };
+      }, { x: 0, y: 0 });
+    }
+    function interpolate(from, to, ratio) {
+      return { x: from.x + (to.x - from.x) * ratio, y: from.y + (to.y - from.y) * ratio };
+    }
+    function segment(role, ordinal, from, to, fromPath, toPath) {
+      return {
+        id: bundle.id + ':' + role + ':' + ordinal,
+        clauseId: bundle.id,
+        role: role,
+        from: point(from),
+        to: point(to),
+        ...(fromPath ? { fromPath: fromPath } : {}),
+        ...(toPath ? { toPath: toPath } : {})
+      };
+    }
+
+    var ratio = Number(bundle.junctionRatio);
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) ratio = 0.5;
+    var inputCenter = average(inputs);
+    var outputCenter = average(outputs);
+    var junctions = [];
+    var segments = [];
+
+    if (inputs.length === 1 && outputs.length === 1) {
+      segments.push(segment(
+        'binary', 0, inputs[0].point, outputs[0].point,
+        inputs[0].entry.path, outputs[0].entry.path
+      ));
+      return { id: bundle.id, clauseId: bundle.id, kind: 'binary', junctions: junctions, segments: segments };
+    }
+
+    if (inputs.length > 1 && outputs.length === 1) {
+      var merge = interpolate(inputCenter, outputs[0].point, ratio);
+      junctions.push({ id: bundle.id + ':merge', role: 'merge', ratio: ratio, x: merge.x, y: merge.y });
+      inputs.forEach(function (item, index) {
+        segments.push(segment('antecedent', index, item.point, merge, item.entry.path, null));
+      });
+      segments.push(segment('trunk', 0, merge, outputs[0].point, null, outputs[0].entry.path));
+      return { id: bundle.id, clauseId: bundle.id, kind: 'fan-in', junctions: junctions, segments: segments };
+    }
+
+    if (inputs.length === 1 && outputs.length > 1) {
+      var split = interpolate(inputs[0].point, outputCenter, ratio);
+      junctions.push({ id: bundle.id + ':split', role: 'split', ratio: ratio, x: split.x, y: split.y });
+      segments.push(segment('trunk', 0, inputs[0].point, split, inputs[0].entry.path, null));
+      outputs.forEach(function (item, index) {
+        segments.push(segment('consequent', index, split, item.point, null, item.entry.path));
+      });
+      return { id: bundle.id, clauseId: bundle.id, kind: 'fan-out', junctions: junctions, segments: segments };
+    }
+
+    var center = interpolate(inputCenter, outputCenter, ratio);
+    var centerDelta = {
+      x: outputCenter.x - inputCenter.x,
+      y: outputCenter.y - inputCenter.y
+    };
+    var centerDistance = Math.hypot(centerDelta.x, centerDelta.y);
+    var requestedHalfLength = Number(options && options.trunkHalfLengthPx);
+    if (!Number.isFinite(requestedHalfLength) || requestedHalfLength <= 0) requestedHalfLength = 10;
+    var visualHalfLength = centerDistance > 1e-6
+      ? Math.min(requestedHalfLength, centerDistance * 0.1)
+      : 1;
+    var unit = centerDistance > 1e-6
+      ? { x: centerDelta.x / centerDistance, y: centerDelta.y / centerDistance }
+      : { x: 1, y: 0 };
+    var mergePoint = {
+      x: center.x - unit.x * visualHalfLength,
+      y: center.y - unit.y * visualHalfLength
+    };
+    var splitPoint = {
+      x: center.x + unit.x * visualHalfLength,
+      y: center.y + unit.y * visualHalfLength
+    };
+    junctions.push(
+      { id: bundle.id + ':merge', role: 'merge', ratio: ratio, x: mergePoint.x, y: mergePoint.y },
+      { id: bundle.id + ':split', role: 'split', ratio: ratio, x: splitPoint.x, y: splitPoint.y }
+    );
+    inputs.forEach(function (item, index) {
+      segments.push(segment('antecedent', index, item.point, mergePoint, item.entry.path, null));
+    });
+    segments.push(segment('trunk', 0, mergePoint, splitPoint, null, null));
+    outputs.forEach(function (item, index) {
+      segments.push(segment('consequent', index, splitPoint, item.point, null, item.entry.path));
+    });
+    return { id: bundle.id, clauseId: bundle.id, kind: 'many-to-many', junctions: junctions, segments: segments };
   }
 
   function findNodeById(nodes, id) {
@@ -1091,6 +1253,7 @@
     descendantPortalId: descendantPortalId,
     visiblePortalRelationship: visiblePortalRelationship,
     supportBundles: supportBundles,
+    supportBundleGeometry: supportBundleGeometry,
     hydrateNodePath: hydrateNodePath,
     restoreRevealedNodes: restoreRevealedNodes,
     resetSnapshotNodeState: resetSnapshotNodeState,

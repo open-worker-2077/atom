@@ -237,7 +237,8 @@
 
   const visualIntentSet = new Set([
     ...Object.values(input.intents),
-    "exitToDepth"
+    "exitToDepth",
+    "selectSupportClause"
   ]);
   const EDGE_DRAFT_NAVIGATION_INTENTS = new Set([
     input.intents.enter,
@@ -676,6 +677,8 @@
     hitRegions: [],
     relationHitRegions: [],
     supportClauses: [],
+    supportGeometry: [],
+    selectedSupportClause: null,
     scopeLoadStates: new Map(),
     clusterHitRegions: [],
     clusterScreenOffsets: new Map(),
@@ -2166,6 +2169,9 @@
     const magnifierFocusActive = state.detailMagnifier.enabled
       && Boolean(state.detailMagnifier.targetKey);
     const editState = relationship.edge ? workspace.edgeVisualState(relationship.edge) : "idle";
+    const supportSelected = Boolean(
+      relationship.clauseId && relationship.clauseId === state.selectedSupportClause
+    );
     const editColor = editState === "delete"
       ? theme.delete
       : editState === "update"
@@ -2188,6 +2194,11 @@
       : relationshipStyle.alpha;
     context.strokeStyle = editColor;
     context.lineWidth = relationshipStyle.lineWidth;
+    if (supportSelected) {
+      context.lineWidth = Math.max(2.8, context.lineWidth * 1.8);
+      context.shadowColor = theme.accent;
+      context.shadowBlur = 10;
+    }
     if (relationshipStyle.glowStrength > 0) {
       context.shadowColor = editColor;
       context.shadowBlur = 7 * relationshipStyle.glowStrength;
@@ -2297,7 +2308,7 @@
       context.shadowBlur = 5;
       context.fillText(relationship.label, labelX, labelY);
     }
-    if (relationship.edge) {
+    if (relationship.edge || relationship.clauseId) {
       for (const sample of [0.2, 0.35, 0.5, 0.65, 0.8]) {
         const inverse = 1 - sample;
         const hitX = inverse ** 3 * start.x
@@ -2309,7 +2320,15 @@
           + 3 * inverse * sample ** 2 * controlTwo.y
           + sample ** 3 * end.y;
         state.relationHitRegions.push({
-          item: { kind: "relationship", edge: relationship.edge, node: null, label: relationship.label },
+          item: relationship.edge
+            ? { kind: "relationship", edge: relationship.edge, node: null, label: relationship.label }
+            : {
+                kind: "support-clause",
+                clauseId: relationship.clauseId,
+                segmentRole: relationship.segmentRole,
+                node: null,
+                label: relationship.label
+              },
           x: hitX,
           y: hitY,
           radius: Math.max(14, Math.min(30, distance * 0.09)),
@@ -2322,6 +2341,7 @@
 
   function drawConnections(rendered) {
     state.relationHitRegions = [];
+    state.supportGeometry = [];
     const renderedNodes = new Map(
       rendered
         .filter((item) => item.kind === "node" && item.node)
@@ -2332,33 +2352,26 @@
         .filter((item) => typeof item.node.graphPath === "string" && item.node.graphPath)
         .map((item) => [item.node.graphPath, item])
     );
-    const supportBundles = visualModel.supportBundles(state.supportClauses, { junctionRatio: 0.5 });
+    const supportBundles = visualModel.supportBundles(state.supportClauses, {
+      junctionRatio: 0.5,
+      visiblePaths: new Set(renderedByGraphPath.keys())
+    });
     const drawableSupportBundles = supportBundles.filter((bundle) => {
-      const inputPaths = [];
-      function collectInputPaths(plan) {
-        if (!plan) return;
-        if (plan.kind === "leaf") inputPaths.push(plan.fromPath);
-        else if (Array.isArray(plan.inputs)) plan.inputs.forEach(collectInputPaths);
-      }
-      collectInputPaths(bundle.input || bundle.inputTopology);
-      const outputPaths = bundle.edge
-        ? [bundle.edge.toPath]
-        : bundle.outputBranches.map((branch) => branch.toPath);
-      return [...inputPaths, ...outputPaths].every((path) => renderedByGraphPath.has(path));
+      const endpointPaths = [
+        ...(bundle.antecedents || []).map((entry) => entry.path),
+        ...(bundle.consequents || []).map((entry) => entry.path)
+      ];
+      return endpointPaths.length >= 2
+        && endpointPaths.every((path) => renderedByGraphPath.has(path));
     });
     const drawableSupportPairs = new Set(drawableSupportBundles.flatMap((bundle) => {
-      const inputs = inputLeavesForBundle(bundle.input || bundle.inputTopology);
-      const outputs = bundle.edge
-        ? [bundle.edge.toPath]
-        : bundle.outputBranches.map((branch) => branch.toPath);
+      const inputs = [
+        ...(bundle.antecedents || []),
+        ...(bundle.predicatePrograms || [])
+      ].map((entry) => entry.path);
+      const outputs = (bundle.consequents || []).map((entry) => entry.path);
       return inputs.flatMap((fromPath) => outputs.map((toPath) => `${fromPath}\u0000${toPath}`));
     }));
-
-    function inputLeavesForBundle(plan) {
-      if (!plan) return [];
-      if (plan.kind === "leaf") return [plan.fromPath];
-      return Array.isArray(plan.inputs) ? plan.inputs.flatMap(inputLeavesForBundle) : [];
-    }
     const relationships = visualModel.relationshipPairs(existingNodes(state.nodes));
     const labelledHierarchyParents = new Set();
     const labelledAssociationSources = new Set();
@@ -2404,88 +2417,41 @@
       };
     }
 
-    function averageScreen(items) {
-      return items.reduce((sum, item) => ({
-        x: sum.x + item.screen.x / items.length,
-        y: sum.y + item.screen.y / items.length
-      }), { x: 0, y: 0 });
-    }
-
-    function inputLeaves(plan) {
-      if (!plan) return [];
-      if (plan.kind === "leaf") return [renderedByGraphPath.get(plan.fromPath)].filter(Boolean);
-      return Array.isArray(plan.inputs) ? plan.inputs.flatMap(inputLeaves) : [];
-    }
-
-    function drawSupportInput(plan, target, bundleId, depth = 0) {
-      if (plan.kind === "leaf") {
-        const from = renderedByGraphPath.get(plan.fromPath);
-        drawTopologyLink(from, target, {
-          fromId: from.node.id,
-          toId: `${bundleId}:input:${depth}`,
-          kind: "association", label: "support", showLabel: false, glyphs: false
-        });
-        return;
-      }
-      const leaves = inputLeaves(plan);
-      if (!leaves.length) return;
-      const center = averageScreen(leaves);
-      const local = supportJunction(plan.id, {
-        x: center.x + (target.screen.x - center.x) * 0.62,
-        y: center.y + (target.screen.y - center.y) * 0.62
-      });
-      plan.inputs.forEach((child, index) => drawSupportInput(child, local, bundleId, depth + index + 1));
-      drawTopologyLink(local, target, {
-        fromId: plan.id,
-        toId: target.supportJunctionId,
-        kind: "association", label: "support", showLabel: false, glyphs: false
-      });
-      context.save();
-      context.globalAlpha = 0.72;
-      context.fillStyle = theme["accent-2"];
-      context.font = `600 10px ${theme.fontMono}`;
-      context.textAlign = "center";
-      context.fillText(String(plan.operator || "").toUpperCase(), local.screen.x, local.screen.y - 8);
-      context.restore();
-    }
-
     function drawSupportBundle(bundle) {
-      if (bundle.edge) {
-        const from = renderedByGraphPath.get(bundle.edge.fromPath);
-        const to = renderedByGraphPath.get(bundle.edge.toPath);
-        drawTopologyLink(from, to, {
-          fromId: from.node.id, toId: to.node.id,
-          kind: "association", label: "support", showLabel: true
-        });
-        return;
+      const geometry = visualModel.supportBundleGeometry(bundle, (path) => {
+        const item = renderedByGraphPath.get(path);
+        return item ? { x: item.screen.x, y: item.screen.y } : null;
+      });
+      if (!geometry) return;
+      state.supportGeometry.push(geometry);
+      const junctionByRole = new Map(
+        geometry.junctions.map((junction) => [
+          junction.role,
+          supportJunction(junction.id, { x: junction.x, y: junction.y })
+        ])
+      );
+      function segmentEndpoint(segment, side) {
+        const path = side === "from" ? segment.fromPath : segment.toPath;
+        if (path) return renderedByGraphPath.get(path);
+        const role = side === "from"
+          ? (segment.role === "consequent" ? "split" : "merge")
+          : (segment.role === "antecedent" ? "merge" : "split");
+        return junctionByRole.get(role);
       }
-      const inputs = inputLeaves(bundle.inputTopology);
-      const outputs = bundle.outputBranches.map((branch) => renderedByGraphPath.get(branch.toPath));
-      const inputCenter = averageScreen(inputs);
-      const outputCenter = averageScreen(outputs);
-      const ratio = bundle.junctionRatio;
-      const center = {
-        x: inputCenter.x + (outputCenter.x - inputCenter.x) * ratio,
-        y: inputCenter.y + (outputCenter.y - inputCenter.y) * ratio
-      };
-      const length = Math.max(1, Math.hypot(outputCenter.x - inputCenter.x, outputCenter.y - inputCenter.y));
-      const unit = { x: (outputCenter.x - inputCenter.x) / length, y: (outputCenter.y - inputCenter.y) / length };
-      const ifJunction = supportJunction(bundle.trunk.from, {
-        x: center.x - unit.x * 10, y: center.y - unit.y * 10
-      });
-      const thenJunction = supportJunction(bundle.trunk.to, {
-        x: center.x + unit.x * 10, y: center.y + unit.y * 10
-      });
-      drawSupportInput(bundle.inputTopology, ifJunction, bundle.id);
-      drawTopologyLink(ifJunction, thenJunction, {
-        fromId: bundle.trunk.from, toId: bundle.trunk.to,
-        kind: "association", label: "support", showLabel: true
-      });
-      bundle.outputBranches.forEach((branch, index) => {
-        const to = outputs[index];
-        drawTopologyLink(thenJunction, to, {
-          fromId: bundle.trunk.to, toId: to.node.id,
-          kind: "association", label: "support", showLabel: false
+      geometry.segments.forEach((segment) => {
+        const from = segmentEndpoint(segment, "from");
+        const to = segmentEndpoint(segment, "to");
+        if (!from || !to) return;
+        drawTopologyLink(from, to, {
+          fromId: segment.fromPath || from.supportJunctionId,
+          toId: segment.toPath || to.supportJunctionId,
+          kind: "association",
+          label: "support",
+          clauseId: geometry.clauseId,
+          segmentRole: segment.role,
+          showLabel: segment.role === "binary" || segment.role === "trunk",
+          glyphs: false,
+          ...(segment.role !== "antecedent" ? { glyphs: true } : {})
         });
       });
     }
@@ -3963,7 +3929,9 @@
       .filter((candidate) => candidate.normalizedDistance <= 1)
       .sort((left, right) => left.normalizedDistance - right.normalizedDistance)[0];
     if (relation) {
-      return { ...relation.region, item: { ...relation.region.item, kind: "relationship" } };
+      return relation.region.item && relation.region.item.kind === "support-clause"
+        ? relation.region
+        : { ...relation.region, item: { ...relation.region.item, kind: "relationship" } };
     }
     return domainContext ? { item: null, domainContext } : null;
   }
@@ -4639,6 +4607,15 @@
 
   function beginEdgeGesture(node, item, point = state.pointerPosition, domainContext = null) {
     const active = workspace.transaction();
+    if (item && item.kind === "support-clause") {
+      if (active) {
+        announce("请先用 Enter 或 Esc 结束当前关系编辑");
+        return false;
+      }
+      state.selectedSupportClause = item.clauseId;
+      announce(`复合推支已选中 · ${item.clauseId}`);
+      return true;
+    }
     if (item && item.kind === "relationship") {
       if (active) {
         announce("请先用 Enter 或 Esc 结束当前关系编辑");
@@ -6589,6 +6566,14 @@
           visualMeta.domainContext || null
         );
         break;
+      case "selectSupportClause":
+        beginEdgeGesture(
+          null,
+          visualMeta.item || null,
+          visualMeta.point || state.pointerPosition,
+          visualMeta.domainContext || null
+        );
+        break;
       case "confirmEdit":
         commitWorkspaceEdit();
         break;
@@ -6859,6 +6844,9 @@
     if (item.kind === "lens") {
       return { intent: "inspect", visualMeta: {}, target: item.node };
     }
+    if (item.kind === "support-clause") {
+      return { intent: "selectSupportClause", visualMeta: { item }, target: null };
+    }
     return null;
   }
 
@@ -6962,6 +6950,15 @@
   }
 
   function commitPointerCandidate(candidate) {
+    if (candidate && candidate.direct) {
+      primaryClickArbiter.cancel();
+      secondaryClickArbiter.cancel();
+      const directAction = gestureArbiter.classifyTap(candidate);
+      if (directAction) {
+        dispatchIntent(directAction.intent, directAction.visualMeta, directAction.target);
+      }
+      return;
+    }
     if (candidate && ["createNode", "editNode", "editEdge"].includes(candidate.intent)) {
       primaryClickArbiter.cancel();
       secondaryClickArbiter.cancel();
@@ -6975,15 +6972,6 @@
     if (candidate && candidate.button === 1 && quickFrameMiddleTarget(candidate)) {
       primaryClickArbiter.cancel();
       secondaryClickArbiter.cancel();
-      return;
-    }
-    if (candidate && candidate.direct) {
-      primaryClickArbiter.cancel();
-      secondaryClickArbiter.cancel();
-      const directAction = gestureArbiter.classifyTap(candidate);
-      if (directAction) {
-        dispatchIntent(directAction.intent, directAction.visualMeta, directAction.target);
-      }
       return;
     }
     const action = gestureArbiter.classifyTap(candidate);
@@ -8779,6 +8767,10 @@
     state.supportClauses = Array.isArray(knowledge.supportClauses)
       ? structuredClone(knowledge.supportClauses)
       : [];
+    state.supportGeometry = [];
+    if (!state.supportClauses.some((clause) => clause && clause.id === state.selectedSupportClause)) {
+      state.selectedSupportClause = null;
+    }
     cleanupOrphanedDemoKnowledge();
     state.hovered = null;
     currentDomainNodes();
@@ -8932,6 +8924,19 @@
           clientX: canvas.getBoundingClientRect().left + region.x,
           clientY: canvas.getBoundingClientRect().top + region.y,
           radius: Math.max(3, region.item.screen.radius)
+        })),
+      supportGeometry: structuredClone(state.supportGeometry),
+      selectedSupportClause: state.selectedSupportClause,
+      supportClauseTargets: state.relationHitRegions
+        .filter((region) => region.item && region.item.kind === "support-clause")
+        .map((region) => ({
+          clauseId: region.item.clauseId,
+          segmentRole: region.item.segmentRole,
+          x: region.x,
+          y: region.y,
+          clientX: canvas.getBoundingClientRect().left + region.x,
+          clientY: canvas.getBoundingClientRect().top + region.y,
+          radius: region.radius
         })),
       semanticStage: state.selected ? state.selected.semanticStage : null,
       worldLensOpen: state.worldLens.open,
