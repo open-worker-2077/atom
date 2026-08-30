@@ -237,6 +237,40 @@ test('interactive prompt identifies the selected @agent context', async (t) => {
   assert.match(stdout.text(), /"agent~current": "Workspace\/Work Agent"/u);
 });
 
+test('interactive public CLI continues after discarding a descendant', async (t) => {
+  const files = await world(t, [
+    atom('Synthetic Agent', { type: 'agent', children: [atom('Disposable')] }),
+    {
+      'thing@backup@default': 'Synthetic Backup',
+      situation: '',
+      contain: [],
+      support: []
+    }
+  ]);
+  const stdin = new PassThrough();
+  stdin.isTTY = false;
+  stdin.end([
+    'transform {"thing.dsc.":"Synthetic Agent/Disposable"}',
+    'explore {"thing":"Synthetic Backup/Disposable"}',
+    ''
+  ].join('\n'));
+  const stdout = output();
+  const stderr = output();
+
+  const code = await runAtomCli(['--agent', 'Synthetic Agent'], publicCli(files, {
+    interactive: true,
+    stdin,
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    terminal: false
+  }));
+
+  assert.equal(code, 0, stderr.text());
+  assert.equal(stderr.text(), '');
+  assert.match(stdout.text(), /"thing~updated": "Disposable"/u);
+  assert.match(stdout.text(), /"thing": "Disposable"/u);
+});
+
 test('remote interactive entry obtains context from the runtime without reading backing facts', async (t) => {
   const files = await world(t, [{
     name: 'legacy remote facts', detail: '', children: [], partners: [{ object: 'target' }]

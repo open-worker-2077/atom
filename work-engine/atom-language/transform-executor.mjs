@@ -962,6 +962,7 @@ export async function applyTransform({
   exactIndex = null,
   allMatches = null
 }) {
+  const canMutateInput = mutateInput && !Object.isFrozen(atoms);
   const rootName = path.basename(contextFile);
   const nameField = item.fields.find((field) => field.baseKey === 'thing');
   if (!nameField?.valuePresent || typeof nameField.value !== 'string' || !nameField.value) {
@@ -975,8 +976,8 @@ export async function applyTransform({
   const rewritesPaths = nameCommands.some((command) => (
     ['ren', 'mov', 'cpy', 'dsc', 'rst'].includes(command.name)
   ));
-  const copiesOnlyAncestry = !mutateInput && !transformChangesStructure(item);
-  const originalSelection = !mutateInput
+  const copiesOnlyAncestry = !canMutateInput && !transformChangesStructure(item);
+  const originalSelection = !canMutateInput
     ? resolveUnique(atoms, nameField.value, exactIndex)
     : null;
   if (originalSelection?.error) return originalSelection;
@@ -989,7 +990,7 @@ export async function applyTransform({
   let preparedDestinationMatch = null;
   let preparedBackupMatch = null;
   let preparedRestoreParentMatch = null;
-  if (!mutateInput && rewritesPaths) {
+  if (!canMutateInput && rewritesPaths) {
     const originalMatches = allMatches?.filter((match) => !match.virtual) ?? walkAtoms(atoms);
     const byAtom = new Map(originalMatches.map((match) => [match.atom, match]));
     const relevantAtoms = new Set(
@@ -1043,17 +1044,17 @@ export async function applyTransform({
       copied.mapping
     );
   }
-  const nextAtoms = mutateInput ? atoms : (copied?.atoms ?? cloneWorldFacts(atoms));
+  const nextAtoms = canMutateInput ? atoms : (copied?.atoms ?? cloneWorldFacts(atoms));
   const selected = copiesOnlyAncestry
     ? { match: copied.match }
-    : (!mutateInput && copied?.mapping
+    : (!canMutateInput && copied?.mapping
         ? { match: remapMatch(originalSelection.match, copied.mapping) }
-        : resolveUnique(nextAtoms, nameField.value, mutateInput ? exactIndex : null));
+        : resolveUnique(nextAtoms, nameField.value, canMutateInput ? exactIndex : null));
   if (selected.error) return selected;
   const selectedBefore = copiesOnlyAncestry
     ? copyNonContainState(selected.match.atom)
     : JSON.stringify(selected.match.atom);
-  const selectedSnapshot = mutateInput ? structuredClone(selected.match.atom) : null;
+  const selectedSnapshot = canMutateInput ? structuredClone(selected.match.atom) : null;
   const rejectAfterMutation = (error) => {
     if (!selectedSnapshot || JSON.stringify(selected.match.atom) === selectedBefore) return { error };
     for (const key of Object.keys(selected.match.atom)) delete selected.match.atom[key];
@@ -1082,7 +1083,7 @@ export async function applyTransform({
   const relevantSubtree = rewritesPaths
     ? new Set(walkAtoms([selected.match.atom]).map((match) => match.atom))
     : null;
-  if (rewritesPaths && (mutateInput || !hasPreparedRelationIndex)) {
+  if (rewritesPaths && (canMutateInput || !hasPreparedRelationIndex)) {
     partnerBindings = capturePartnerBindings(nextAtoms, rootName, {
         atoms: relevantSubtree,
         names: new Set([...relevantSubtree].map((atom) => storedField(atom, 'thing')?.value))
@@ -1226,7 +1227,7 @@ export async function applyTransform({
     const worldRootDestination = command.name === 'mov' && command.parameter === WORLD_OUTSIDE_NAME;
     const destination = worldRootDestination
       ? { match: { atom: null, path: [], parent: null, index: -1 } }
-      : (!mutateInput && preparedDestinationMatch
+      : (!canMutateInput && preparedDestinationMatch
           ? { match: remapMatch(preparedDestinationMatch, copied.mapping) }
           : resolveUnique(nextAtoms, command.parameter, exactIndex));
     if (destination.error) return destination;
@@ -1313,7 +1314,7 @@ export async function applyTransform({
     if (command.parameter !== '') {
       return { error: diagnostic('INVALID_DISCARD_PARAMETER', '.dsc. 不接受参数') };
     }
-    const backup = !mutateInput && preparedBackupMatch
+    const backup = !canMutateInput && preparedBackupMatch
       ? { match: remapMatch(preparedBackupMatch, copied.mapping) }
       : backupMatch(nextAtoms);
     if (backup.error) return backup;
@@ -1363,7 +1364,7 @@ export async function applyTransform({
     if (command.parameter !== '') {
       return { error: diagnostic('INVALID_RESTORE_PARAMETER', '.rst. 不接受参数') };
     }
-    const backup = !mutateInput && preparedBackupMatch
+    const backup = !canMutateInput && preparedBackupMatch
       ? { match: remapMatch(preparedBackupMatch, copied.mapping) }
       : backupMatch(nextAtoms);
     if (backup.error) return backup;
@@ -1382,7 +1383,7 @@ export async function applyTransform({
     if (discard.originalParentPath === null) {
       destination = nextAtoms;
     } else {
-      const parent = !mutateInput && preparedRestoreParentMatch
+      const parent = !canMutateInput && preparedRestoreParentMatch
         ? { match: remapMatch(preparedRestoreParentMatch, copied.mapping) }
         : resolveUnique(nextAtoms, discard.originalParentPath, exactIndex);
       if (parent.error) return parent;
