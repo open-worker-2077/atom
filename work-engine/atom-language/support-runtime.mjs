@@ -68,26 +68,34 @@ export function evaluateSupportClauses(parsedDocument, options = {}) {
 }
 
 async function evaluateExprWithPrograms(expr, evaluateProgram, trace) {
-  trace.push(expr.targetPath ?? expr.kind);
-  if (expr.kind === 'thing') return true;
+  if (expr.kind === 'thing') return undefined;
   if (expr.kind === 'program') {
+    trace.push(expr.targetPath);
     const result = await evaluateProgram(expr.targetPath);
     if (typeof result !== 'boolean') {
-      throw runtimeError('INVALID_PROGRAM_SUPPORT_RESULT', '前件 Program 必须严格返回 boolean');
+      throw runtimeError('INVALID_PROGRAM_SUPPORT_RESULT', '推支判定 Program 必须严格返回 boolean');
     }
     return result;
   }
   if (expr.kind === 'and') {
+    let hasDecision = false;
     for (const child of expr.children) {
-      if (await evaluateExprWithPrograms(child, evaluateProgram, trace) === false) return false;
+      const decision = await evaluateExprWithPrograms(child, evaluateProgram, trace);
+      if (decision === undefined) continue;
+      hasDecision = true;
+      if (decision === false) return false;
     }
-    return true;
+    return hasDecision ? true : undefined;
   }
   if (expr.kind === 'or') {
+    let hasDecision = false;
     for (const child of expr.children) {
-      if (await evaluateExprWithPrograms(child, evaluateProgram, trace) === true) return true;
+      const decision = await evaluateExprWithPrograms(child, evaluateProgram, trace);
+      if (decision === undefined) continue;
+      hasDecision = true;
+      if (decision === true) return true;
     }
-    return false;
+    return hasDecision ? false : undefined;
   }
   throw runtimeError('INVALID_SUPPORT_EXPR', `未知规范 Expr：${expr.kind}`);
 }
@@ -105,7 +113,7 @@ export async function evaluateSupportClausesWithPrograms(parsedDocument, options
     if (selectedIds && !selectedIds.has(clause.id)) continue;
     const trace = [];
     try {
-      const decision = await evaluateExprWithPrograms(clause.root, evaluateProgram, trace);
+      const decision = (await evaluateExprWithPrograms(clause.root, evaluateProgram, trace)) ?? true;
       results.set(clause.id, { status: decision ? 'true' : 'false', decision, trace });
     } catch (error) {
       results.set(clause.id, {
@@ -131,7 +139,7 @@ export function propagateSupportClauses(parsedDocument, options = {}) {
     visited.add(clauseId);
     const clause = parsedDocument.supportClauses.find((candidate) => candidate.id === clauseId);
     if (!clause) continue;
-    for (const sourcePath of clause.dependencyPaths) {
+    for (const sourcePath of clause.antecedentPaths ?? clause.dependencyPaths) {
       for (const target of clause.then) {
         const edgeId = `${clauseId}:${sourcePath}:${target.thenOrdinal}`;
         edges.push({ id: edgeId, clauseId, fromPath: sourcePath, toPath: target.targetPath });

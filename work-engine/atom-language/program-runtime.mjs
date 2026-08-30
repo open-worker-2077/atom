@@ -983,12 +983,12 @@ export function validateProgramResult(result, records, program, options = {}) {
   const trigger = result.trigger == null ? null : structuredClone(result.trigger);
   if (supportDecision === true) {
     if ([locks, messages, transforms, shortcuts, slotBodies, choices, jumps, agentRegistrations].some((entries) => entries.length > 0)) {
-      throw Object.assign(new Error('Support antecedent Program may only return bool and cannot emit effects'), {
+      throw Object.assign(new Error('Support-decision Program may only return bool and cannot emit effects'), {
         code: 'PROGRAM_SUPPORT_EFFECT_FORBIDDEN', details: { program: program.path }
       });
     }
     if (typeof result.supportDecision !== 'boolean') {
-      throw Object.assign(new Error('Support antecedent Program must return a strict JSON boolean'), {
+      throw Object.assign(new Error('Support-decision Program must return a strict JSON boolean'), {
         code: 'INVALID_PROGRAM_SUPPORT_RESULT', details: { program: program.path }
       });
     }

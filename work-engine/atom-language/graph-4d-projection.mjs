@@ -91,7 +91,7 @@ export function toGraph4dImportDocument(graph, options = {}) {
   const relations = supportClauses.filter((clause) => (
     !supportDecisions || supportDecisions.get(clause.id)?.decision === true
   )).flatMap((clause) => (
-    clause.dependencyPaths.flatMap((sourcePath) => clause.then.map((target) => ({
+    (clause.antecedentPaths ?? clause.dependencyPaths).flatMap((sourcePath) => clause.then.map((target) => ({
       from: sourcePath.split('/'),
       to: target.targetPath.split('/'),
       name: 'support'
