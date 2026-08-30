@@ -278,6 +278,64 @@ test('discard moves an authorized descendant into kernel backup without granting
   assert.equal(findAtom(restored.atoms, '默认备份仓').contain.length, 0);
 });
 
+test('discard copies a frozen optimized snapshot instead of mutating its contain arrays', async (t) => {
+  const files = await fixture(t, [
+    atom('Synthetic Agent', '', [atom('Disposable')]),
+    { 'thing@backup@default': 'Synthetic Backup', situation: '', contain: [], support: [] }
+  ]);
+  const freeze = (value) => {
+    if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+    for (const child of Object.values(value)) freeze(child);
+    return Object.freeze(value);
+  };
+  const atoms = freeze(await readAtoms(files.contextFile));
+  const before = JSON.stringify(atoms);
+  const parsed = createAtomLanguageReceiver().receive(
+    'transform {"thing.dsc.":"Synthetic Agent/Disposable"}'
+  );
+
+  const result = await applyTransform({
+    atoms,
+    item: parsed.items[0],
+    contextFile: files.contextFile,
+    mutateInput: true
+  });
+
+  assert.equal(result.error, undefined, JSON.stringify(result.error));
+  assert.equal(JSON.stringify(atoms), before, 'the immutable input snapshot remains byte-equivalent');
+  assert.equal(findAtom(result.atoms, 'Synthetic Agent').contain.length, 0);
+  assert.ok(findAtom(findAtom(result.atoms, 'Synthetic Backup').contain, 'Disposable'));
+});
+
+test('discard collision leaves world revision and projection unchanged', async (t) => {
+  const files = await fixture(t, [
+    atom('Synthetic Agent', '', [atom('Duplicate')]),
+    {
+      'thing@backup@default': 'Synthetic Backup',
+      situation: '',
+      contain: [atom('Duplicate')],
+      support: []
+    }
+  ]);
+  const atoms = await readAtoms(files.contextFile);
+  await writeAtomGraphProjection(files.projectionFile, atoms, {
+    rootName: path.basename(files.contextFile)
+  });
+  const contextBefore = await fs.readFile(files.contextFile, 'utf8');
+  const projectionBefore = await fs.readFile(files.projectionFile, 'utf8');
+
+  const result = await execute(
+    files,
+    'transform {"thing.dsc.":"Synthetic Agent/Duplicate"}'
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'DUPLICATE_DESTINATION_CHILD');
+  assert.equal(result.revisionAfter, result.revisionBefore);
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), contextBefore);
+  assert.equal(await fs.readFile(files.projectionFile, 'utf8'), projectionBefore);
+});
+
 test('Atom to Graph projection preserves long multilingual situation without clipping', async (t) => {
   const longDetail = `${'长正文\n@$~= 工程符号。'.repeat(401)}尾`;
   assert.ok(longDetail.length > 4000);
