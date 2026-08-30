@@ -984,6 +984,7 @@ export async function applyTransform({
     ? copyAtomAncestry(atoms, originalSelection.match)
     : null;
   let partnerBindings = [];
+  let hasPreparedRelationIndex = false;
   let inheritedRelationBindings = null;
   let preparedDestinationMatch = null;
   let preparedBackupMatch = null;
@@ -995,6 +996,7 @@ export async function applyTransform({
       walkAtoms([originalSelection.match.atom]).map((match) => match.atom)
     );
     const preparedRelations = prepareTransformRelationIndex(atoms, rootName);
+    hasPreparedRelationIndex = true;
     partnerBindings = preparedRelations.bindings.filter((binding) => (
       relevantAtoms.has(binding.sourceAtom) || relevantAtoms.has(binding.targetAtom)
     ));
@@ -1080,7 +1082,7 @@ export async function applyTransform({
   const relevantSubtree = rewritesPaths
     ? new Set(walkAtoms([selected.match.atom]).map((match) => match.atom))
     : null;
-  if (rewritesPaths && (mutateInput || partnerBindings.length === 0)) {
+  if (rewritesPaths && (mutateInput || !hasPreparedRelationIndex)) {
     partnerBindings = capturePartnerBindings(nextAtoms, rootName, {
         atoms: relevantSubtree,
         names: new Set([...relevantSubtree].map((atom) => storedField(atom, 'thing')?.value))
