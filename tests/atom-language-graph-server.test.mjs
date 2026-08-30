@@ -82,10 +82,12 @@ test('Atom HTTP handlers translate transport payloads into one interaction runti
   ]);
 });
 
-async function temporaryDirectory(t) {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-graph-server-'));
+async function temporaryDirectory() {
+  return fs.mkdtemp(path.join(os.tmpdir(), 'atom-graph-server-'));
+}
+
+function removeTemporaryDirectoryAfter(t, directory) {
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  return directory;
 }
 
 function atomFixture() {
@@ -105,8 +107,8 @@ function atomFixture() {
   ];
 }
 
-async function migratedLegacySupportWorld(t) {
-  const directory = await temporaryDirectory(t);
+async function migratedLegacySupportWorld() {
+  const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -136,6 +138,7 @@ async function migratedLegacySupportWorld(t) {
     correlationId: 'graph-server-agent-manifest-fixture'
   });
   return {
+    directory,
     contextFile,
     graphFile,
     storeFile,
@@ -212,7 +215,8 @@ test('one-shot timing observer records only one matching interaction under concu
 });
 
 test('graph server rejects 4783 and colliding context, projection, and store paths before startup', async (t) => {
-  const directory = await temporaryDirectory(t);
+  const directory = await temporaryDirectory();
+  removeTemporaryDirectoryAfter(t, directory);
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -255,7 +259,7 @@ test('graph server rejects 4783 and colliding context, projection, and store pat
 });
 
 test('graph server initializes the projection, serves the full UI health and Graph API, and stays isolated', async (t) => {
-  const directory = await temporaryDirectory(t);
+  const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'live', 'atom.json');
   const graphFile = path.join(directory, 'live', 'graph.json');
   const storeFile = path.join(directory, 'live', 'knowledge.json');
@@ -270,6 +274,7 @@ test('graph server initializes the projection, serves the full UI health and Gra
     storeFile
   });
   t.after(() => running.close());
+  removeTemporaryDirectoryAfter(t, directory);
 
   assert.equal(running.host, '127.0.0.1');
   assert.notEqual(running.port, 4783);
@@ -360,9 +365,10 @@ test('4784 resolves an Agent selector inside the resident world instead of every
 });
 
 test('deployed Agent resolution reuses the world compatibility manifest for exact explore', async (t) => {
-  const files = await migratedLegacySupportWorld(t);
+  const files = await migratedLegacySupportWorld();
   const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, ...files });
   t.after(() => running.close());
+  removeTemporaryDirectoryAfter(t, files.directory);
 
   const response = await fetch(`${running.url}/__atom/api/command`, {
     method: 'POST',
@@ -381,9 +387,10 @@ test('deployed Agent resolution reuses the world compatibility manifest for exac
 });
 
 test('deployed legacy-support provenance permits a new four-axis Agent transform', async (t) => {
-  const files = await migratedLegacySupportWorld(t);
+  const files = await migratedLegacySupportWorld();
   const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, ...files });
   t.after(() => running.close());
+  removeTemporaryDirectoryAfter(t, files.directory);
 
   const response = await fetch(`${running.url}/__atom/api/command`, {
     method: 'POST',
@@ -402,9 +409,10 @@ test('deployed legacy-support provenance permits a new four-axis Agent transform
 });
 
 test('deployed legacy-support provenance remains valid while a new Program seals a slot body', async (t) => {
-  const files = await migratedLegacySupportWorld(t);
+  const files = await migratedLegacySupportWorld();
   const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, ...files });
   t.after(() => running.close());
+  removeTemporaryDirectoryAfter(t, files.directory);
   const execute = async (source, id) => {
     const response = await fetch(`${running.url}/__atom/api/command`, {
       method: 'POST',
@@ -432,7 +440,8 @@ test('deployed legacy-support provenance remains valid while a new Program seals
 });
 
 test('public Agent resolution rejects unauthorized and forged legacy support provenance', async (t) => {
-  const files = await migratedLegacySupportWorld(t);
+  const files = await migratedLegacySupportWorld();
+  removeTemporaryDirectoryAfter(t, files.directory);
   await assert.rejects(resolveAgentContext(files.contextFile, '冰'), {
     code: 'SUPPORT_OWNER_CURRENT_REQUIRED'
   });
@@ -445,7 +454,7 @@ test('public Agent resolution rejects unauthorized and forged legacy support pro
 });
 
 test('graph server remains available and reports degraded health when only a disposable projection is pending', async (t) => {
-  const directory = await temporaryDirectory(t);
+  const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -479,6 +488,7 @@ test('graph server remains available and reports degraded health when only a dis
     interactionRuntime
   });
   t.after(() => running.close());
+  removeTemporaryDirectoryAfter(t, directory);
 
   const response = await fetch(`${running.url}/__spatial/api/health`);
   assert.equal(response.status, 200);
@@ -488,7 +498,7 @@ test('graph server remains available and reports degraded health when only a dis
 });
 
 test('graph server persists compact read diagnostics through the shared interaction runtime', async (t) => {
-  const directory = await temporaryDirectory(t);
+  const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -498,6 +508,7 @@ test('graph server persists compact read diagnostics through the shared interact
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, diagnosticFile
   });
   t.after(() => running.close());
+  removeTemporaryDirectoryAfter(t, directory);
 
   const response = await fetch(`${running.url}/__atom/api/command`, {
     method: 'POST',
@@ -523,7 +534,7 @@ test('graph server persists compact read diagnostics through the shared interact
 });
 
 test('unchanged explore does not load, republish, or rewrite the complete spatial projection', async (t) => {
-  const directory = await temporaryDirectory(t);
+  const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -532,6 +543,7 @@ test('unchanged explore does not load, republish, or rewrite the complete spatia
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
   });
   t.after(() => running.close());
+  removeTemporaryDirectoryAfter(t, directory);
 
   const beforeState = await (await fetch(`${running.url}/__spatial/api/state`)).json();
   const beforeStat = await fs.stat(storeFile);
@@ -557,7 +569,7 @@ test('unchanged explore does not load, republish, or rewrite the complete spatia
 });
 
 test('independent explore requests execute concurrently against one initialized runtime', async (t) => {
-  const directory = await temporaryDirectory(t);
+  const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -585,6 +597,7 @@ test('independent explore requests execute concurrently against one initialized 
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, interactionRuntime
   });
   t.after(() => running.close());
+  removeTemporaryDirectoryAfter(t, directory);
   const request = (id) => fetch(`${running.url}/__atom/api/command`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -601,7 +614,7 @@ test('independent explore requests execute concurrently against one initialized 
 });
 
 test('duplicate HTTP requests with one interaction id execute one authoritative command', async (t) => {
-  const directory = await temporaryDirectory(t);
+  const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -632,6 +645,7 @@ test('duplicate HTTP requests with one interaction id execute one authoritative 
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, interactionRuntime
   });
   t.after(() => running.close());
+  removeTemporaryDirectoryAfter(t, directory);
   const request = (source = 'transform new {"thing":"Root","situation":"","contain":[],"support":[]}') => fetch(`${running.url}/__atom/api/command`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -659,7 +673,7 @@ test('duplicate HTTP requests with one interaction id execute one authoritative 
 });
 
 test('graph server queues private backup from a committed operation instead of relying on polling', async (t) => {
-  const directory = await temporaryDirectory(t);
+  const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'live', 'atom.json');
   const graphFile = path.join(directory, 'live', 'graph.json');
   const storeFile = path.join(directory, 'live', 'knowledge.json');
@@ -683,6 +697,7 @@ test('graph server queues private backup from a committed operation instead of r
     backupTriggerFactory: () => trigger
   });
   t.after(() => running.close());
+  removeTemporaryDirectoryAfter(t, directory);
   assert.deepEqual(calls, ['flush', 'start']);
 
   const response = await fetch(`${running.url}/__atom/api/command`, {

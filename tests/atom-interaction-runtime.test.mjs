@@ -375,6 +375,60 @@ test('rapid committed writes coalesce before disposable projection work starts',
   assert.equal(runtime.projectionStatus().expectedRevision, 'rev-2');
 });
 
+test('closing the runtime cancels disposable projection work that has not started', async () => {
+  const publications = [];
+  const context = ports();
+  context.projections.publish = async ({ expectedRevision }) => {
+    publications.push(expectedRevision);
+    return { sourceRevision: expectedRevision };
+  };
+  context.world.execute = async () => ({
+    ok: true,
+    command: 'transform',
+    changed: true,
+    revisionAfter: 'rev-close-pending',
+    lockState: { revision: 'rev-close-pending' }
+  });
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 25 });
+
+  await runtime.execute({ source: 'transform {"thing":"A"}', correlationId: 'close-pending', history: [] });
+  await runtime.close();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  assert.deepEqual(publications, []);
+});
+
+test('closing the runtime waits for disposable projection work already in flight', async () => {
+  let releaseProjection;
+  let projectionStarted;
+  const started = new Promise((resolve) => { projectionStarted = resolve; });
+  const context = ports();
+  context.projections.publish = async ({ expectedRevision }) => {
+    projectionStarted();
+    await new Promise((resolve) => { releaseProjection = resolve; });
+    return { sourceRevision: expectedRevision };
+  };
+  context.world.execute = async () => ({
+    ok: true,
+    command: 'transform',
+    changed: true,
+    revisionAfter: 'rev-close-active',
+    lockState: { revision: 'rev-close-active' }
+  });
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
+
+  await runtime.execute({ source: 'transform {"thing":"A"}', correlationId: 'close-active', history: [] });
+  await started;
+  let closed = false;
+  const closing = runtime.close().then(() => { closed = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(closed, false);
+
+  releaseProjection();
+  await closing;
+  assert.equal(closed, true);
+});
+
 test('an immediate authoritative read defers pending disposable publication until the read returns', async () => {
   const events = [];
   const context = ports();

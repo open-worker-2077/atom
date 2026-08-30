@@ -108,6 +108,7 @@ export function createInteractionRuntime({
   let projectionTail = Promise.resolve();
   let scheduledProjection = null;
   let activeInteractions = 0;
+  let closing = false;
 
   async function timedStage(stage, work, interactionId = null) {
     const startedAt = performance.now();
@@ -208,7 +209,7 @@ export function createInteractionRuntime({
   }
 
   function armScheduledProjection() {
-    if (activeInteractions > 0 || projectionTimer || !scheduledProjection) return;
+    if (closing || activeInteractions > 0 || projectionTimer || !scheduledProjection) return;
     projectionTimer = setTimeout(() => {
       projectionTimer = null;
       const scheduled = scheduledProjection;
@@ -222,6 +223,7 @@ export function createInteractionRuntime({
   }
 
   function scheduleProjection(result) {
+    if (closing) return null;
     const generation = ++projectionGeneration;
     const expectedRevision = result.revisionAfter;
     if (projectionTimer) clearTimeout(projectionTimer);
@@ -471,12 +473,22 @@ export function createInteractionRuntime({
     return structuredClone(latestProjectionState);
   }
 
+  async function close() {
+    closing = true;
+    projectionGeneration += 1;
+    if (projectionTimer) clearTimeout(projectionTimer);
+    projectionTimer = null;
+    scheduledProjection = null;
+    await projectionTail.catch(() => {});
+  }
+
   return Object.freeze({
     initialize,
     execute,
     updateHumanStatus,
     updateHumanWorkspace,
     recover,
-    projectionStatus
+    projectionStatus,
+    close
   });
 }

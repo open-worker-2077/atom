@@ -521,6 +521,8 @@ export async function startAtomGraphServer(options = {}) {
     close: async () => {
       const closing = closeServer(instance.server);
       await instance.drainAtomInteractions?.();
+      await interactionRuntime.close?.();
+      await diagnostics.flush?.();
       await closing;
     }
   });
