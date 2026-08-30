@@ -13,6 +13,11 @@ The system SHALL distinguish the ordinary antecedent Thing, the independent `thi
 - **AND** it obtains the boolean decision only from the support-decision Program
 - **AND** the decision trace contains the support-decision Program but not the ordinary antecedent
 
+#### Scenario: Static support has no boolean producer
+- **WHEN** a valid support clause contains only ordinary antecedent and consequent Things and references no support-decision Program
+- **THEN** the clause is unconditionally established without querying Thing existence as a boolean
+- **AND** its decision trace is empty
+
 ### Requirement: Boolean decision gates support establishment
 The system SHALL establish the declared ordinary Thing-to-Thing support only when the referenced support-decision Program returns strict boolean `true`. It SHALL leave the support unestablished when that Program returns strict boolean `false`, and SHALL reject a non-boolean result.
 

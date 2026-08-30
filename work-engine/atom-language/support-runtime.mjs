@@ -2,49 +2,32 @@ function runtimeError(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
 }
 
-function evaluateExpr(expr, nodesByPath, trace) {
-  if (expr.kind === 'thing') {
-    trace.push(expr.targetPath);
-    return nodesByPath.has(expr.targetPath);
-  }
+function evaluateExpr(expr) {
+  if (expr.kind === 'thing') return undefined;
   if (expr.kind === 'and') {
+    let hasDecision = false;
     for (const child of expr.children) {
-      if (evaluateExpr(child, nodesByPath, trace) === false) return false;
+      const decision = evaluateExpr(child);
+      if (decision === undefined) continue;
+      hasDecision = true;
+      if (decision === false) return false;
     }
-    return true;
+    return hasDecision ? true : undefined;
   }
   if (expr.kind === 'or') {
+    let hasDecision = false;
     for (const child of expr.children) {
-      if (evaluateExpr(child, nodesByPath, trace) === true) return true;
+      const decision = evaluateExpr(child);
+      if (decision === undefined) continue;
+      hasDecision = true;
+      if (decision === true) return true;
     }
-    return false;
+    return hasDecision ? false : undefined;
   }
   throw runtimeError('INVALID_SUPPORT_EXPR', `未知规范 Expr：${expr.kind}`);
 }
 
-function nodeViews(graph) {
-  const result = new Map();
-  function visit(node, parent = []) {
-    const thingKey = Object.keys(node).find((key) => key === 'thing' || key.startsWith('thing@'));
-    const situationKey = Object.keys(node).find((key) => key === 'situation' || key.startsWith('situation@'));
-    const containKey = Object.keys(node).find((key) => key === 'contain' || key.startsWith('contain@'));
-    const path = [...parent, node[thingKey]].join('/');
-    result.set(path, Object.freeze({
-      thing: node[thingKey],
-      situation: node[situationKey],
-      contain: structuredClone(node[containKey] ?? []),
-      support: structuredClone(node.support ?? []),
-      path,
-      types: thingKey.split('@').slice(1)
-    }));
-    for (const child of node[containKey] ?? []) visit(child, path.split('/'));
-  }
-  visit(graph);
-  return result;
-}
-
 export function evaluateSupportClauses(parsedDocument, options = {}) {
-  const nodes = options.nodesByPath ?? nodeViews(parsedDocument.graph);
   const changed = options.changedPaths ? new Set(options.changedPaths) : null;
   const selectedIds = changed
     ? new Set([...changed].flatMap((path) => parsedDocument.dependencyIndex.get(path) ?? []))
@@ -54,7 +37,7 @@ export function evaluateSupportClauses(parsedDocument, options = {}) {
     if (selectedIds && !selectedIds.has(clause.id)) continue;
     const trace = [];
     try {
-      const decision = evaluateExpr(clause.root, nodes, trace);
+      const decision = evaluateExpr(clause.root) ?? true;
       results.set(clause.id, { status: decision ? 'true' : 'false', decision, trace });
     } catch (error) {
       results.set(clause.id, {

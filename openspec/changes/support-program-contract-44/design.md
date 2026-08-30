@@ -1,6 +1,6 @@
 ## Context
 
-See `proposal.md` for motivation and `specs/support-program-decision/spec.md` for the normative role and execution contract. The parser already represents `if@current: true` plus an additional Program condition as an `and` root containing an implicit ordinary current antecedent and an explicit Program leaf. The support evaluator already has changed-path indexing and a dedicated Program callback, while the Program scheduler has a support-evaluation entry point with strict-result and effect checks. Existing tests cover these pieces separately but call the Program an “antecedent Program” and do not exercise the complete three-role Transform contract.
+See `proposal.md` for motivation and `specs/support-program-decision/spec.md` for the normative role and execution contract. The parser already represents `if@current: true` plus an additional Program condition as an `and` root containing an implicit ordinary current antecedent and an explicit Program leaf. The support runtime has both synchronous static evaluation and asynchronous Program-backed evaluation; both must keep ordinary Things outside boolean evaluation. The Program scheduler has a support-evaluation entry point with strict-result and effect checks. Existing tests cover these pieces separately but call the Program an “antecedent Program” and do not exercise the complete three-role Transform contract.
 
 ## Goals / Non-Goals
 
@@ -42,6 +42,12 @@ Alternative considered: mock internal parser or scheduler helpers. Rejected beca
 The Transform acceptance will use its reported `changedPaths` as the support evaluator's selection input. Unrelated clauses and a consequent-side Program will be present as sentinels so an accidental global evaluation is observable.
 
 Alternative considered: run a full deployment or business graph. Rejected because it would add unrelated persistence and business-data risk without improving the contract evidence.
+
+### Treat Program-free support as unconditional
+
+The synchronous static evaluator will treat a parser-valid clause with only ordinary Thing endpoints as established without consulting a node-presence lookup. Parser validation already guarantees every selector resolves, so checking existence again produces no new fact and incorrectly turns a Thing into a boolean operand. Both synchronous and asynchronous traces therefore record only actual decision Programs.
+
+Alternative considered: keep the node lookup but hide it from trace. Rejected because that preserves the forbidden boolean source and can still turn a valid clause false when a partial view is supplied.
 
 ## Risks / Trade-offs
 

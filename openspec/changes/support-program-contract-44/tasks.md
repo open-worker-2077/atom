@@ -17,3 +17,9 @@
 - [x] 3.1 Run the focused support endpoint test and the nearest projection integration regression with zero failures.
 - [x] 3.2 Run strict OpenSpec validation, inspect the final diff for scope, and confirm no `atom.json`, business fact, external state, or unrelated production file changed.
 - [x] 3.3 Commit the verified local candidate on `fix/support-program-contract-44` and report the SHA, exact test evidence, and the actual kernel-behavior verdict.
+
+## 4. Review Follow-up
+
+- [x] 4.1 Add a synchronous regression proving ordinary static support is unconditional and has an empty boolean decision trace.
+- [x] 4.2 Remove ordinary Thing existence from synchronous boolean evaluation while preserving parser-valid static support propagation.
+- [x] 4.3 Rerun the affected support and projection regressions, validate OpenSpec, and commit the review correction.
