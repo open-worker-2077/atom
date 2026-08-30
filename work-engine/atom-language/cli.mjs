@@ -264,6 +264,7 @@ function help() {
     '  固定窗口锁：agent() 登记时由内核强制启用且不可关闭或自定义；可读 current／后代／同父普通节点／唯一直接父上下文，可写 current 后代。直接父不能成为新锚点进入其同层；exact path 不绕过。',
     '  冷启动：内核从 @program@agent 正文中的 literal agent() 重建 labels 与符号职能 scope，并从 Program 中的 literal-path lock() 按当前 Graph 重编译锁；旧侧车 locks 返回 RETIRED_REQUEST_DRIVEN_LOCK_SNAPSHOT，agentRegistrations 返回 RETIRED_AGENT_REGISTRATION_SNAPSHOT，windowSelfLocks/windowSelfLockAgents 返回 RETIRED_WINDOW_SELF_LOCK_SNAPSHOT，均只能一次性审计清退且不作为鉴权输入。',
     '  Transform 触发器：先定义无参数 main，再声明 trigger("transform", {"nodes":["exact 节点路径"]}, main)。main 是函数引用，不能写 main()；运行时按反向索引只运行命中的 Program；相同值写入仍属于 Transform 事件。未声明 trigger 的 Program 冷启动时遇到无关 Transform 不会重放；显式 .run.、其自身被 Transform 或已知 explore 依赖变化时仍运行。',
+    '  Program 停用：把 Program 本身或其普通 contain 上级通过 .dsc. 可逆移入唯一 thing@backup@default 子树；其中 @program 保留类型与 situation 源码，但不进入活跃运行、trigger、changed 或 explore 依赖索引，也不能由 thing.run/use_program 执行。.rst. 恢复原位后按当前事实重新激活并重建索引。停用只认显式 backup@default 类型，不根据容器显示名猜测。',
     '  统一鉴权顺序：当前 Agent 起点 → 实际 contain 路径上的锁 → 目标 node 锁；Explore、Transform 及注册函数内部读写共用此链，标签不足返回锁拒绝且不读取目标 situation。',
     '  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。',
     '  Program 复用：use_program({"name": explore({"thing":"EXACT @program 路径"})[0], "arguments": {...}})；坐标会按当前窗口与 Program 边界重新授权。精确字符串名称或路径继续兼容；不使用 .ref。',

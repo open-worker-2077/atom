@@ -11,6 +11,92 @@ function atom(thing, situation = '', contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
 
+test('discard deactivates nested Program indexes and restore rebuilds them from facts', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-backup-deactivation-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const watcherSource = [
+    "dependency = explore({'thing': 'Dependency', 'situation$full': None})[0]",
+    'def on_source_change():',
+    "    transform({'thing': 'Target', 'situation.rep.triggered': None})",
+    "trigger('transform', {'nodes': ['Source']}, on_source_change)"
+  ].join('\n');
+  const activeSource = [
+    "dependency = explore({'thing': 'Dependency', 'situation$full': None})[0]",
+    'def on_source_change():',
+    "    message({'level': 'info', 'text': 'active watcher ran'})",
+    "trigger('transform', {'nodes': ['Source']}, on_source_change)"
+  ].join('\n');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Source'),
+    atom('Dependency'),
+    atom('Target', 'stable'),
+    atom('Program Container', '', [atom('Watcher', watcherSource, [], 'program')]),
+    atom('Active Watcher', activeSource, [], 'program'),
+    atom('Default Backup', '', [], 'backup@default')
+  ], null, 2));
+  const scheduler = createProgramRuntimeScheduler();
+  const execute = (source) => executeAtomLanguage({
+    source, contextFile, projectionFile, programScheduler: scheduler
+  });
+
+  const discarded = await execute('transform {"thing.dsc.":"Program Container"}');
+  assert.equal(discarded.ok, true, JSON.stringify(discarded.errors));
+  const archivedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const archivedContainer = archivedWorld
+    .find((candidate) => candidate['thing@backup@default'] === 'Default Backup')
+    .contain[0];
+  assert.equal(archivedContainer['thing'], 'Program Container');
+  assert.equal(archivedContainer.contain[0]['thing@program'], 'Watcher');
+  assert.equal(archivedContainer.contain[0].situation, watcherSource);
+  assert.deepEqual([...scheduler.triggerContracts.keys()], ['Active Watcher']);
+  assert.deepEqual(
+    [...scheduler.triggerIndex.values()].map((paths) => [...paths]),
+    [['Active Watcher']]
+  );
+  assert.deepEqual([...scheduler.programReadDependencies.keys()], ['Active Watcher']);
+
+  const restartedScheduler = createProgramRuntimeScheduler();
+  const executeAfterRestart = (source) => executeAtomLanguage({
+    source, contextFile, projectionFile, programScheduler: restartedScheduler
+  });
+  const renamedWhileArchived = await executeAfterRestart(
+    'transform {"thing.ren.Source Renamed":"Source"}'
+  );
+  assert.equal(renamedWhileArchived.ok, true, JSON.stringify(renamedWhileArchived.errors));
+  assert.deepEqual(
+    renamedWhileArchived.messages.map((message) => message.text),
+    ['active watcher ran']
+  );
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[2].situation, 'stable');
+  assert.deepEqual([...restartedScheduler.triggerContracts.keys()], ['Active Watcher']);
+  assert.deepEqual([...restartedScheduler.programReadDependencies.keys()], ['Active Watcher']);
+
+  const restored = await executeAfterRestart(
+    'transform {"thing.rst.":"Default Backup/Program Container"}'
+  );
+  assert.equal(restored.ok, true, JSON.stringify(restored.errors));
+  assert.deepEqual(
+    new Set(restartedScheduler.triggerContracts.keys()),
+    new Set(['Active Watcher', 'Program Container/Watcher'])
+  );
+  assert.deepEqual(
+    new Set(restartedScheduler.programReadDependencies.keys()),
+    new Set(['Active Watcher', 'Program Container/Watcher'])
+  );
+
+  const renamedAfterRestore = await executeAfterRestart(
+    'transform {"thing.ren.Source":"Source Renamed"}'
+  );
+  assert.equal(renamedAfterRestore.ok, true, JSON.stringify(renamedAfterRestore.errors));
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[2].situation, 'triggered');
+  assert.deepEqual(
+    renamedAfterRestore.messages.map((message) => message.text),
+    ['active watcher ran']
+  );
+});
+
 test('external transform refreshes Python Program, emits message, and rejects a condition-filtered locked write', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-e2e-'));
   const contextFile = path.join(directory, 'atom.json');
