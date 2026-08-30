@@ -7589,6 +7589,12 @@
     syncPresentationControls();
   }
 
+  function refreshClusterSceneAfterLayoutSetting() {
+    if (!state.clusterFieldOpen) return;
+    buildClusterScene();
+    updateSelectionUI();
+  }
+
   function setHelpPanelVisible(visible, persist = true) {
     ui.helpPanel.hidden = !visible;
     ui.helpPanel.dataset.state = visible ? "open" : "closed";
@@ -8437,6 +8443,7 @@
       state.demo.settings,
       ui.nestedCompactness.value
     ));
+    refreshClusterSceneAfterLayoutSetting();
   });
 
   ui.peripheralDepthShrink.addEventListener("input", () => {
@@ -8444,6 +8451,7 @@
       state.demo.settings,
       ui.peripheralDepthShrink.value
     ));
+    refreshClusterSceneAfterLayoutSetting();
   });
 
   ui.nestedTunnelStrength.addEventListener("input", () => {
@@ -8894,6 +8902,13 @@
           y: item.screen.y,
           radius: item.screen.radius
         }))
+        : [],
+      clusterGeometry: state.clusterFieldOpen
+        ? state.clusterScene.clusters.map((cluster) => ({
+            path: cluster.path,
+            radius: cluster.radius,
+            nodeScale: cluster.nodeScale
+          }))
         : [],
       viewHistory: {
         size: state.viewHistory.size,

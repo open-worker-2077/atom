@@ -342,6 +342,20 @@ test('mapping keeps a 100 percent display while sending a tenfold S interval to 
   assert.match(build, /nestedCompactnessPercent\s*\*\s*10/);
 });
 
+test('S interval and A child shrink controls rebuild the currently visible cluster scene', () => {
+  const refresh = functionSource('refreshClusterSceneAfterLayoutSetting');
+  assert.match(refresh, /state\.clusterFieldOpen/);
+  assert.match(refresh, /buildClusterScene\(\)/);
+  assert.match(refresh, /updateSelectionUI\(\)/);
+
+  const compactStart = engine.indexOf('ui.nestedCompactness.addEventListener');
+  const shrinkStart = engine.indexOf('ui.peripheralDepthShrink.addEventListener');
+  const nextStart = engine.indexOf('ui.nestedTunnelStrength.addEventListener');
+  assert.ok(compactStart > -1 && shrinkStart > compactStart && nextStart > shrinkStart);
+  assert.match(engine.slice(compactStart, shrinkStart), /refreshClusterSceneAfterLayoutSetting\(\)/);
+  assert.match(engine.slice(shrinkStart, nextStart), /refreshClusterSceneAfterLayoutSetting\(\)/);
+});
+
 test('Home closes every expanded branch and returns to the top-level Boss field', () => {
   const overview = functionSource('returnOverview');
 
