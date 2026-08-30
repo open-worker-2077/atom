@@ -51,6 +51,12 @@ The synchronous static evaluator will treat a parser-valid clause with only ordi
 
 Alternative considered: keep the node lookup but hide it from trace. Rejected because that preserves the forbidden boolean source and can still turn a valid clause false when a partial view is supplied.
 
+### Keep the default backup factual but inactive
+
+The typed default backup is the recoverable destination for soft-deleted Atom subtrees. Its complete Atom facts, including historical support declarations, remain in the authoritative context; however, support below that boundary is not part of the active world and therefore must not enter Graph validation, support indexes, or Program scheduling. Context projection carries the full subtree while projecting empty support arrays only below the typed default backup. Restoration outside the backup naturally re-enables current validation without a migration or a second source of truth.
+
+Alternative considered: rewrite or delete legacy support while archiving. Rejected because soft deletion must remain lossless and recoverable. Alternative considered: weaken active parser validation globally. Rejected because archived inactivity is the actual boundary and active invalid rules must still fail.
+
 ## Risks / Trade-offs
 
 - [A unit-level composition could miss projection orchestration behavior] → Run the nearest existing projection integration test after the focused regression, and add kernel code only if the focused failure identifies an orchestration gap.
@@ -60,4 +66,4 @@ Alternative considered: keep the node lookup but hide it from trace. Rejected be
 
 ## Migration Plan
 
-No data or deployment migration is required. Apply by adding the focused regression first, then make a minimal runtime change only if the regression proves one is necessary. Rollback is the local commit reversal; no persisted world state is touched.
+No persisted-data rewrite is required. Apply by adding focused regressions first, then make minimal runtime changes only at proven failing seams. The default-backup correction changes only derived active projection: archived facts remain byte-for-byte recoverable, while restored facts are validated normally. Rollback is the local commit reversal; no persisted world state is touched.

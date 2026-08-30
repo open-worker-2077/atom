@@ -283,6 +283,9 @@ function projectedSupport(clause, rootThing) {
 function projectAtom(atom, location, rootThing, options = {}) {
   const fields = atomFields(atom, location);
   const thing = fields.get('thing').value;
+  const thingTypes = new Set(fields.get('thing').parsed.types.map(({ name }) => name));
+  const insideDefaultBackup = options.insideDefaultBackup === true
+    || (thingTypes.has('backup') && thingTypes.has('default'));
   const situation = fields.get('situation').value;
   const contain = fields.get('contain').value;
   const support = fields.get('support').value;
@@ -324,16 +327,19 @@ function projectAtom(atom, location, rootThing, options = {}) {
     [fields.get('contain').rawKey]: contain.map((child, index) => (
       projectAtom(child, `${location}.contain[${index}]`, rootThing, {
         ...options,
-        parentAtomPath: atomPath
+        parentAtomPath: atomPath,
+        insideDefaultBackup
       })
     ))
   };
   for (const [rawKey, value] of Object.entries(atom)) {
     const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
     if (parsed.baseKey !== 'support') continue;
-    projected[rawKey] = value
-      .filter((selector) => options.allowLegacySupport !== true || !isLegacySupportEntry(selector))
-      .map((selector) => projectedSupport(selector, rootThing));
+    projected[rawKey] = insideDefaultBackup
+      ? []
+      : value
+        .filter((selector) => options.allowLegacySupport !== true || !isLegacySupportEntry(selector))
+        .map((selector) => projectedSupport(selector, rootThing));
   }
   return projected;
 }

@@ -66,3 +66,16 @@ A support-decision Program SHALL be evaluated in a mode that forbids externally 
 - **WHEN** a support-decision Program attempts to mutate a Thing and then returns `true`
 - **THEN** evaluation fails with `PROGRAM_SUPPORT_EFFECT_FORBIDDEN`
 - **AND** the target Thing retains its pre-evaluation state
+
+### Requirement: Archived support is preserved but inactive
+The system SHALL preserve support declarations stored below the typed default backup subtree as recoverable Atom facts, but SHALL exclude those declarations from the active Graph projection, validation, indexing, and Program execution. When an archived subtree is restored outside the typed default backup, its support declarations SHALL re-enter normal active validation before use.
+
+#### Scenario: Legacy support remains recoverable in the default backup
+- **WHEN** a typed default backup contains a support declaration that is invalid under the current active support contract
+- **THEN** Atom context projection preserves the archived Thing and its original support declaration in the authoritative Atom facts
+- **AND** the active Graph receives no support clause from that archived subtree
+- **AND** the archived declaration cannot block cold start or execute a Program
+
+#### Scenario: Restored support returns to active validation
+- **WHEN** the archived subtree is restored outside the typed default backup
+- **THEN** its support declaration is projected and validated under the current active support contract before it can participate in Graph or Program execution
