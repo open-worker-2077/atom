@@ -599,7 +599,9 @@ test('public help is a complete daily Agent operation contract', async () => {
   assert.match(text, /situation\$full/u);
   assert.match(text, /support 按原始 ordinal 回读 owner 声明/u);
   assert.match(text, /Program 端点写 \{"thing@program":"selector"\}/u);
-  assert.match(text, /同一 rule 可声明 N→M/u);
+  assert.match(text, /禁止原生 N→M/u);
+  assert.match(text, /显式枢纽 H/u);
+  assert.doesNotMatch(text, /前件 Program/u);
   assert.match(text, /事实前项与独立判定 Program 保持分层/u);
   assert.match(text, /归一化 0\.5 形成共享汇流／分流线干/u);
   assert.doesNotMatch(text, /首版禁止.*原生 M→N/u);

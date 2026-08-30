@@ -133,10 +133,18 @@ test('nested A and (B or C) preserves explicit topology and order at a real hub'
 
 test('thing@program is a typed endpoint selector and never line-carried source code', () => {
   const parsed = parseGraphDocument(graphDocument([
+    leaf('Source'),
+    { 'thing@program': 'Predicate', situation: 'def main(arguments):\n    return True', contain: [], support: [] },
+    leaf('H', '', [{
+      if: [{ and: [{ thing: 'Source' }, { 'thing@program': 'Predicate' }] }],
+      'then@current': true
+    }])
+  ]));
+  assert.equal(parsed.supportClauses[0].root.kind, 'and');
+  assert.throws(() => parseGraphDocument(graphDocument([
     { 'thing@program': 'Predicate', situation: 'def main(arguments):\n    return True', contain: [], support: [] },
     leaf('H', '', [{ if: [{ 'thing@program': 'Predicate' }], 'then@current': true }])
-  ]));
-  assert.equal(parsed.supportClauses[0].root.kind, 'program');
+  ])), { code: 'SUPPORT_FACT_ANTECEDENT_REQUIRED' });
   assert.throws(() => parseGraphDocument(graphDocument([
     leaf('Ordinary'), leaf('H', '', [{ if: [{ 'thing@program': 'Ordinary' }], 'then@current': true }])
   ])), { code: 'SUPPORT_PROGRAM_ENDPOINT_TYPE_MISMATCH' });
@@ -149,8 +157,8 @@ test('thing@program is a typed endpoint selector and never line-carried source c
   ])), { code: 'SUPPORT_INLINE_PROGRAM_UNSUPPORTED' });
 });
 
-test('one clause preserves N-to-M fact roles and an independent predicate Program', () => {
-  const parsed = parseGraphDocument(graphDocument([
+test('native N-to-M is rejected even when its predicate Program is independent', () => {
+  assert.throws(() => parseGraphDocument(graphDocument([
     leaf('A', '', [{
       'if@current': true,
       if: [{ and: [{ thing: 'B' }, { 'thing@program': 'Gate' }] }],
@@ -159,14 +167,20 @@ test('one clause preserves N-to-M fact roles and an independent predicate Progra
     leaf('B'),
     { 'thing@program': 'Gate', situation: 'def main(arguments):\n    return True', contain: [], support: [] },
     leaf('Y'), leaf('Z')
-  ]));
-  const [clause] = parsed.supportClauses;
-  assert.equal(clause.id, 'support:世界/A:0');
-  assert.deepEqual(clause.dependencyPaths, ['世界/A', '世界/B', '世界/Gate']);
-  assert.deepEqual(clause.then.map(({ targetPath, thenOrdinal }) => ({ targetPath, thenOrdinal })), [
-    { targetPath: '世界/Y', thenOrdinal: 0 },
-    { targetPath: '世界/Z', thenOrdinal: 1 }
+  ])), { code: 'NATIVE_MANY_TO_MANY_SUPPORT_UNSUPPORTED' });
+});
+
+test('a Program cannot own a current support endpoint or become its own boolean fact', () => {
+  const programOwner = (support) => graphDocument([
+    { 'thing@program': 'Decision', situation: 'def main(arguments):\n    return True', contain: [], support },
+    leaf('Fact')
   ]);
+  assert.throws(() => parseGraphDocument(programOwner([
+    { 'if@current': true, then: [{ thing: 'Fact' }] }
+  ])), { code: 'SUPPORT_DECISION_PROGRAM_MUST_BE_INDEPENDENT' });
+  assert.throws(() => parseGraphDocument(programOwner([
+    { if: [{ thing: 'Fact' }], 'then@current': true }
+  ])), { code: 'SUPPORT_DECISION_PROGRAM_MUST_BE_INDEPENDENT' });
 });
 
 test('explicit 3-to-hub-to-3 remains two independently auditable rules', () => {

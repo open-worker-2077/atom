@@ -25,6 +25,8 @@ The regression will construct an ordinary antecedent with `if@current: true`, ad
 
 Alternative considered: test a Program-only antecedent with `then@current`. Rejected because it collapses the decision Program into the support antecedent and cannot prove the terminology or ordinary-Thing boundary required by Issue #44.
 
+The parser therefore rejects every support rule whose owner is `thing@program`: a decision Program may be referenced by `if`, but cannot use `if@current` or `then@current` to become the same rule's fact endpoint. Program-to-Program workflow relationships, when needed, must be represented through ordinary auditable fact nodes rather than turning executable nodes into boolean facts.
+
 ### Characterize before editing runtime code
 
 The first implementation action will add the complete focused regression against the current main-based branch. If it passes, the change will be limited to the regression and terminology corrections. If it fails for a contract reason, the failure will define the minimal runtime edit.

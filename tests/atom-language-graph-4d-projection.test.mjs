@@ -83,10 +83,17 @@ test('projection keeps a server-side key to Atom path index for human status edi
 });
 
 test('projection keeps Graph paths, support clauses, and Program source for the real Web renderer', async () => {
-  const document = graphDocument([{ if: [{ thing: '石斧' }], 'then@current': true }]);
+  const document = graphDocument();
   document.graph.contain[0]['thing@program'] = document.graph.contain[0].thing;
   delete document.graph.contain[0].thing;
   document.graph.contain[0].situation = 'def main(arguments):\n    return True';
+  document.graph.contain.push({
+    thing: '工坊状态', situation: '', contain: [], support: [{
+      'if@current': true,
+      if: [{ 'thing@program': '石器工坊' }],
+      then: [{ thing: '石斧' }]
+    }]
+  });
   const { knowledge } = await projectAtomGraphWithPaths(document);
   const workshop = knowledge.nodes.find((node) => node.label === '石器工坊');
 
@@ -94,7 +101,7 @@ test('projection keeps Graph paths, support clauses, and Program source for the 
   assert.equal(workshop.programSource, 'def main(arguments):\n    return True');
   assert.equal(workshop.detail, 'Program');
   assert.equal(knowledge.supportClauses.length, 1);
-  assert.equal(knowledge.supportClauses[0].currentSide, 'consequent');
+  assert.equal(knowledge.supportClauses[0].currentSide, 'antecedent');
 });
 
 test('projection exposes derived lock state without changing Atom detail', async () => {

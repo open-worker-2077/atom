@@ -119,26 +119,16 @@ test('fan-out splits at 50 percent after one incoming shared trunk', () => {
   ]);
 });
 
-test('N-to-M shared trunk is non-zero and centered on the 50 percent path', () => {
-  const bundle = {
-    id: 'support:n-to-m', junctionRatio: 0.5,
+test('native many-to-many bundles are not rendered as a hidden compound relation', () => {
+  const geometry = SpatialVisualModel.supportBundleGeometry({
+    id: 'support:native-n-to-m', junctionRatio: 0.5,
     antecedents: [{ path: 'A' }, { path: 'B' }], predicatePrograms: [{ path: 'Gate' }],
     consequents: [{ path: 'Y', ordinal: 0 }, { path: 'Z', ordinal: 1 }]
-  };
-  const geometry = SpatialVisualModel.supportBundleGeometry(bundle, {
+  }, {
     A: { x: 0, y: 0 }, B: { x: 0, y: 10 }, Y: { x: 20, y: 0 }, Z: { x: 20, y: 10 }
   });
-  const trunk = geometry.segments.find(({ role }) => role === 'trunk');
 
-  assert.deepEqual(geometry.junctions, [
-    { id: 'support:n-to-m:merge', role: 'merge', ratio: 0.5, x: 8, y: 5 },
-    { id: 'support:n-to-m:split', role: 'split', ratio: 0.5, x: 12, y: 5 }
-  ]);
-  assert.ok(Math.hypot(trunk.to.x - trunk.from.x, trunk.to.y - trunk.from.y) > 0);
-  assert.deepEqual({ x: (trunk.from.x + trunk.to.x) / 2, y: (trunk.from.y + trunk.to.y) / 2 }, {
-    x: 10, y: 5
-  });
-  assert.ok(geometry.segments.every(({ clauseId }) => clauseId === 'support:n-to-m'));
+  assert.equal(geometry, null);
 });
 
 test('binary support remains one direct segment without junctions', () => {

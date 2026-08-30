@@ -311,12 +311,24 @@ test('spatial support resolves Program endpoints by Atom identity across the syn
   const ordinary = (thing, support = []) => ({ thing, situation: '', contain: [], support });
   const facts = [{
     thing: 'Flow', situation: '', support: [], contain: [
-      program('Forward', [{ 'if@current': true, then: [{ thing: 'Forward result' }] }]),
+      program('Forward'),
       program('Gate A'),
       program('Gate B'),
+      ordinary('Forward condition', [{
+        'if@current': true,
+        if: [{ 'thing@program': 'Forward' }],
+        then: [{ thing: 'Forward result' }]
+      }]),
+      ordinary('Input A'),
+      ordinary('Input B'),
       ordinary('Hub', [
         {
-          if: [{ and: [{ 'thing@program': 'Gate A' }, { 'thing@program': 'Gate B' }] }],
+          if: [{ and: [
+            { thing: 'Input A' },
+            { thing: 'Input B' },
+            { 'thing@program': 'Gate A' },
+            { 'thing@program': 'Gate B' }
+          ] }],
           'then@current': true
         },
         { 'if@current': true, then: [{ thing: 'Result A' }, { thing: 'Result B' }] }

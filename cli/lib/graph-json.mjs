@@ -266,7 +266,7 @@ export function parseGraphDocument(input) {
   function relationAntecedentPaths(expr) {
     const candidates = antecedents(expr);
     const ordinary = candidates.filter(({ kind }) => kind === 'thing');
-    return [...new Set((ordinary.length ? ordinary : candidates).map(({ targetPath }) => targetPath))];
+    return [...new Set(ordinary.map(({ targetPath }) => targetPath))];
   }
 
   function expressionSignature(expr) {
@@ -286,6 +286,13 @@ export function parseGraphDocument(input) {
       const clause = object(value, 'INVALID_SUPPORT_CLAUSE', 'support clause 必须是对象', details);
       const current = classifySupportCurrentEndpoints(clause);
       onlyFields(clause, CLAUSE_FIELDS, 'UNKNOWN_SUPPORT_CLAUSE_FIELD', 'support clause', details);
+      if (pending.source.isProgram) {
+        throw graphError(
+          'SUPPORT_DECISION_PROGRAM_MUST_BE_INDEPENDENT',
+          '推支判定 Program 必须独立于普通事实端点；thing@program 不能用 @current 成为本条 support 的前项或后项',
+          details
+        );
+      }
       for (const marker of ['if@current', 'then@current']) {
         if (Object.hasOwn(clause, marker) && clause[marker] !== true) {
           throw graphError('INVALID_CURRENT_MODIFIER', `${marker} 必须严格等于 boolean true`, details);
@@ -338,6 +345,20 @@ export function parseGraphDocument(input) {
       const clauseId = `support:${pending.source.path.join('/')}:${clauseOrdinal}`;
       const dependencyPaths = [...new Set(dependencies(root))];
       const antecedentPaths = relationAntecedentPaths(root);
+      if (antecedentPaths.length === 0) {
+        throw graphError(
+          'SUPPORT_FACT_ANTECEDENT_REQUIRED',
+          'support 必须包含至少一个普通事实前项；thing@program 只可作为独立判定依赖',
+          details
+        );
+      }
+      if (antecedentPaths.length > 1 && then.length > 1) {
+        throw graphError(
+          'NATIVE_MANY_TO_MANY_SUPPORT_UNSUPPORTED',
+          '禁止原生 N→M support；请建立真实枢纽 Thing H，并拆为 N→H 与 H→M 两条规则',
+          { ...details, antecedentCount: antecedentPaths.length, consequentCount: then.length }
+        );
+      }
       const signature = JSON.stringify([
         expressionSignature(root),
         then.map((target) => target.targetPath)

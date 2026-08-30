@@ -307,40 +307,7 @@
       return { id: bundle.id, clauseId: bundle.id, kind: 'fan-out', junctions: junctions, segments: segments };
     }
 
-    var center = interpolate(inputCenter, outputCenter, ratio);
-    var centerDelta = {
-      x: outputCenter.x - inputCenter.x,
-      y: outputCenter.y - inputCenter.y
-    };
-    var centerDistance = Math.hypot(centerDelta.x, centerDelta.y);
-    var requestedHalfLength = Number(options && options.trunkHalfLengthPx);
-    if (!Number.isFinite(requestedHalfLength) || requestedHalfLength <= 0) requestedHalfLength = 10;
-    var visualHalfLength = centerDistance > 1e-6
-      ? Math.min(requestedHalfLength, centerDistance * 0.1)
-      : 1;
-    var unit = centerDistance > 1e-6
-      ? { x: centerDelta.x / centerDistance, y: centerDelta.y / centerDistance }
-      : { x: 1, y: 0 };
-    var mergePoint = {
-      x: center.x - unit.x * visualHalfLength,
-      y: center.y - unit.y * visualHalfLength
-    };
-    var splitPoint = {
-      x: center.x + unit.x * visualHalfLength,
-      y: center.y + unit.y * visualHalfLength
-    };
-    junctions.push(
-      { id: bundle.id + ':merge', role: 'merge', ratio: ratio, x: mergePoint.x, y: mergePoint.y },
-      { id: bundle.id + ':split', role: 'split', ratio: ratio, x: splitPoint.x, y: splitPoint.y }
-    );
-    inputs.forEach(function (item, index) {
-      segments.push(segment('antecedent', index, item.point, mergePoint, item.entry.path, null));
-    });
-    segments.push(segment('trunk', 0, mergePoint, splitPoint, null, null));
-    outputs.forEach(function (item, index) {
-      segments.push(segment('consequent', index, splitPoint, item.point, null, item.entry.path));
-    });
-    return { id: bundle.id, clauseId: bundle.id, kind: 'many-to-many', junctions: junctions, segments: segments };
+    return null;
   }
 
   function findNodeById(nodes, id) {

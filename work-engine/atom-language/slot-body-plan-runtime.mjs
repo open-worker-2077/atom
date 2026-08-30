@@ -739,34 +739,23 @@ function instanceContextForEvent(atoms, eventPath) {
   return null;
 }
 
-export function slotProgramInvocationsForEvent(atoms, triggerEvent) {
+export function slotProgramInvocationsForEvent(atoms, triggerEvent, triggerContracts = new Map()) {
   if (triggerEvent?.mode !== 'transform' || !Array.isArray(triggerEvent.nodes)) return [];
   const invocations = [];
   const invocationByKey = new Map();
-  const addInvocation = (context, eventPath, source, role, condition = null) => {
+  const addInvocation = (context, eventPath, source, role) => {
     const programPath = role.path === '.'
       ? context.layout.modelPath
       : `${context.layout.modelPath}/${role.path.slice(2)}`;
     const key = `${programPath}\0${context.instancePath}\0${context.revision}`;
-    const existing = invocationByKey.get(key);
-    if (existing) {
-      if (!condition) delete existing.conditions;
-      else if (existing.conditions) {
-        const fingerprint = stableStringify(condition);
-        if (!existing.conditions.some((entry) => stableStringify(entry) === fingerprint)) {
-          existing.conditions.push(condition);
-        }
-      }
-      return;
-    }
+    if (invocationByKey.has(key)) return;
     const invocation = {
       programPath,
       programRoot: context.layout.modelPath,
       scopeRoot: context.instancePath,
       revision: context.revision,
       eventPath,
-      sourceRole: source.path,
-      ...(condition ? { conditions: [condition] } : {})
+      sourceRole: source.path
     };
     invocationByKey.set(key, invocation);
     invocations.push(invocation);
@@ -797,39 +786,14 @@ export function slotProgramInvocationsForEvent(atoms, triggerEvent) {
         }
       });
     }
-    const outgoing = new Map();
-    const byId = new Map(context.plan.roles.map((role) => [role.role_id, role]));
-    for (const entry of context.plan.support) {
-      const sides = supportRoleSides(entry);
-      for (const antecedent of sides.antecedent) {
-        if (!outgoing.has(antecedent)) outgoing.set(antecedent, []);
-        outgoing.get(antecedent).push(...sides.consequent);
-      }
-      const owner = byId.get(entry.owner_role_id);
-      if (owner?.kind === 'program'
-        && entry.rule['then@current'] === true
-        && entry.rule.if?.length === 1) {
-        addInvocation(
-          context,
-          eventPath,
-          source,
-          owner,
-          materializeExpr(entry.rule.if[0], context.plan, context.layout, context.instancePath)
-        );
-      }
-    }
-    const queue = [...(outgoing.get(source.role_id) ?? [])];
-    const visited = new Set([source.role_id]);
-    while (queue.length) {
-      const roleId = queue.shift();
-      if (visited.has(roleId)) continue;
-      visited.add(roleId);
-      const role = byId.get(roleId);
-      if (!role) continue;
-      if (role.kind === 'program') {
-        addInvocation(context, eventPath, source, role);
-      }
-      queue.push(...(outgoing.get(roleId) ?? []));
+    for (const role of context.plan.roles.filter((candidate) => candidate.kind === 'program')) {
+      const programPath = role.path === '.'
+        ? context.layout.modelPath
+        : `${context.layout.modelPath}/${role.path.slice(2)}`;
+      const contract = triggerContracts.get(programPath)?.contract;
+      if (contract?.mode !== 'transform') continue;
+      if (!(contract.parameters?.nodes ?? []).includes(source.path)) continue;
+      addInvocation(context, eventPath, source, role);
     }
   }
   return invocations;
