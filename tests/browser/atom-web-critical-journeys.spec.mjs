@@ -297,7 +297,7 @@ test('single Web landing is authoritative, survives F5, and leaves no source cop
   ), label)).toBe(false);
 });
 
-test('deep Web landing moves the whole work subtree to the exact nested destination', async ({ page }) => {
+test('TC-I24-WEB-MOVE-PERSISTENCE moves the whole work subtree to the exact nested destination', async ({ page }) => {
   test.setTimeout(120_000);
   const label = 'work';
   const workspaceRequests = [];
@@ -385,6 +385,120 @@ test('deep Web landing moves the whole work subtree to the exact nested destinat
     await waitForViewToSettle(page);
   }
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('work'))).toBe(false);
+});
+
+test('TC-I24-WEB-MOVE-ATOMIC-ROLLBACK restores the source atom and view without a target copy', async ({ page }) => {
+  test.setTimeout(120_000);
+  const label = '回滚work';
+  const persistenceEvents = { failed: [], persisted: [] };
+
+  await openIsolatedWorld(page);
+  await page.evaluate((events) => {
+    window.addEventListener('spatial-workspace-persist-failed', (event) => {
+      events.failed.push(event.detail);
+    });
+    window.addEventListener('spatial-workspace-persisted', (event) => {
+      events.persisted.push(event.detail);
+    });
+    window.__landingPersistenceEvents = events;
+  }, persistenceEvents);
+  await enterAtomFile(page);
+  for (const portal of ['🧊manage', '工务']) {
+    expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
+    await page.keyboard.press('f');
+    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await waitForViewToSettle(page);
+  }
+
+  const sourcePath = await page.evaluate(() => window.spatialLab.state().path);
+  const source = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .find((entry) => entry.label === label);
+  expect(source).toBeTruthy();
+  await page.keyboard.down('Control');
+  await page.mouse.click(source.clientX, source.clientY, { button: 'right' });
+  await page.keyboard.up('Control');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().transactionActive)).toBe(true);
+
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('回滚work'))).toBe(true);
+  await page.keyboard.press('f');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await waitForViewToSettle(page, { allowTransaction: true });
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('回滚test'))).toBe(true);
+  await page.keyboard.press('f');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await waitForViewToSettle(page, { allowTransaction: true });
+  const targetPath = await page.evaluate(() => window.spatialLab.state().path);
+
+  const workspaceResponsePromise = page.waitForResponse((response) => (
+    response.url().endsWith('/__atom/api/workspace-edit')
+  ));
+  await page.keyboard.down('Control');
+  await page.mouse.click(48, 360, { button: 'right' });
+  await page.keyboard.up('Control');
+  await page.keyboard.press('Enter');
+
+  await expect(page.locator('#ariaLive')).toContainText('保存失败，已恢复保存前内容');
+  await expect(page.locator('#ariaLive')).toContainText('不能把 Atom 移入自身后代');
+  await expect.poll(() => page.evaluate(() => ({
+    failed: window.__landingPersistenceEvents.failed.length,
+    persisted: window.__landingPersistenceEvents.persisted.length
+  }))).toEqual({ failed: 1, persisted: 0 });
+
+  const workspaceResponse = await workspaceResponsePromise;
+  expect({ status: workspaceResponse.status(), body: await workspaceResponse.json() }).toMatchObject({
+    status: 200,
+    body: {
+      ok: true,
+      result: { ok: false, errors: [{ code: 'ATOM_MOVE_CYCLE' }] }
+    }
+  });
+  const authoritative = await page.evaluate(async ({ expectedLabel, expectedSource, expectedTarget }) => {
+    const payload = await fetch('/__spatial/api/state').then((response) => response.json());
+    const matching = payload.knowledge.nodes.filter(({ label: actual }) => actual === expectedLabel);
+    return {
+      total: matching.length,
+      source: matching.filter(({ path }) => path === expectedSource).length,
+      target: matching.filter(({ path }) => path === expectedTarget).length,
+      workAtomPath: matching[0]?.atomPath
+    };
+  }, { expectedLabel: label, expectedSource: sourcePath, expectedTarget: targetPath });
+  expect(authoritative).toEqual({
+    total: 1,
+    source: 1,
+    target: 0,
+    workAtomPath: '🧊manage/工务/回滚work'
+  });
+  expect(await page.evaluate((expected) => window.spatialLab.state().path === expected, targetPath)).toBe(true);
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('回滚work'))).toBe(false);
+
+  await page.keyboard.press('Home');
+  await enterAtomFile(page);
+  for (const portal of ['🧊manage', '工务']) {
+    expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
+    await page.keyboard.press('f');
+    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await waitForViewToSettle(page);
+  }
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('回滚work'))).toBe(true);
+
+  await page.reload();
+  await openIsolatedWorld(page);
+  await enterAtomFile(page);
+  for (const portal of ['🧊manage', '工务']) {
+    expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
+    await page.keyboard.press('f');
+    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await waitForViewToSettle(page);
+  }
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('回滚work'))).toBe(true);
+  await page.keyboard.press('f');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await waitForViewToSettle(page);
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('回滚test'))).toBe(true);
+  await page.keyboard.press('f');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await waitForViewToSettle(page);
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('回滚work'))).toBe(false);
 });
 
 test('holding Shift brushes individual nodes into and out of a batch without peer preselection', async ({ page }) => {
