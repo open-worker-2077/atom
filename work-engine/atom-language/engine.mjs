@@ -2941,6 +2941,7 @@ export async function executeAtomLanguage(options = {}) {
     revisionBefore,
     revisionAfter,
     result: resultMatch ? describeAtom(resultMatch, false) : null,
+    ...(transformed.archive ? { archive: structuredClone(transformed.archive) } : {}),
     warnings: [
       ...mergeWarnings(interactionWarnings)
     ],

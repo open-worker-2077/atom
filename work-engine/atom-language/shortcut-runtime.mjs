@@ -159,13 +159,49 @@ export function rewriteShortcutTargetPaths(atoms, changes, affectedPaths = null,
   return atoms;
 }
 
-export function breakShortcutTargets(atoms, removedPath, affectedPaths = null, preparedMatches = null) {
+export function breakShortcutTargets(
+  atoms,
+  removedPath,
+  affectedPaths = null,
+  preparedMatches = null,
+  restorations = null
+) {
   if (typeof removedPath !== 'string' || !removedPath) return atoms;
   for (const { atom, path } of preparedMatches ?? walk(atoms)) {
     if (!isShortcutAtom(atom)) continue;
     const metadata = parseMetadata(atom);
     if (metadata.target.state !== 'linked' || !pathWithin(metadata.target.path, removedPath)) continue;
+    restorations?.push({
+      referenceId: metadata.referenceId,
+      targetPath: metadata.target.path
+    });
     metadata.target = { state: 'broken', path: null };
+    replaceSituation(atom, metadata);
+    affectedPaths?.push(path.join('/'));
+  }
+  return atoms;
+}
+
+export function restoreShortcutTargets(
+  atoms,
+  restorations,
+  { originalPath, restoredPath },
+  affectedPaths = null,
+  preparedMatches = null
+) {
+  if (!Array.isArray(restorations) || !originalPath || !restoredPath) return atoms;
+  const byIdentity = new Map(restorations.map((entry) => [entry.referenceId, entry]));
+  for (const { atom, path } of preparedMatches ?? walk(atoms)) {
+    if (!isShortcutAtom(atom)) continue;
+    const metadata = parseMetadata(atom);
+    const restoration = byIdentity.get(metadata.referenceId);
+    if (!restoration
+      || metadata.target.state !== 'broken'
+      || !pathWithin(restoration.targetPath, originalPath)) continue;
+    metadata.target = {
+      state: 'linked',
+      path: `${restoredPath}${restoration.targetPath.slice(originalPath.length)}`
+    };
     replaceSituation(atom, metadata);
     affectedPaths?.push(path.join('/'));
   }

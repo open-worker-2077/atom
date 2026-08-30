@@ -8,7 +8,12 @@ import { matchesExactSelector } from './exact-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { programLockDeniedDiagnostic } from './program-locks.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
-import { breakShortcutTargets, isShortcutAtom, rewriteShortcutTargetPaths } from './shortcut-runtime.mjs';
+import {
+  breakShortcutTargets,
+  isShortcutAtom,
+  restoreShortcutTargets,
+  rewriteShortcutTargetPaths
+} from './shortcut-runtime.mjs';
 
 function storedField(atom, baseKey) {
   const fields = [];
@@ -940,7 +945,7 @@ export async function appendTransformLog(contextFile, record) {
   return file;
 }
 
-function activeDiscard(entries, target) {
+function activeDiscard(entries, { archivePath, archiveName }) {
   const restored = new Set(
     entries
       .filter((entry) => entry.operation === 'restore')
@@ -948,9 +953,22 @@ function activeDiscard(entries, target) {
   );
   return entries.findLast((entry) => (
     entry.operation === 'discard'
-    && entry.target === target
+    && (entry.archivePath === archivePath
+      || (!entry.archivePath && entry.target === archiveName))
     && !restored.has(entry.id)
   ));
+}
+
+function archiveIdentity(backup, originalName, sourcePath) {
+  let id = crypto.randomUUID();
+  if (!childNameCollision(backup, originalName)) return { id, name: originalName };
+  const origin = sourcePath.split('/').slice(0, -1).join(' › ') || '顶层';
+  let name = `${originalName} · 归档自 ${origin} · ${id}`;
+  while (childNameCollision(backup, name)) {
+    id = crypto.randomUUID();
+    name = `${originalName} · 归档自 ${origin} · ${id}`;
+  }
+  return { id, name };
 }
 
 export async function applyTransform({
@@ -1028,8 +1046,10 @@ export async function applyTransform({
     }
     if (command?.name === 'rst') {
       const entries = await readTransformLog(contextFile);
-      const targetName = storedField(originalSelection.match.atom, 'thing').value;
-      const discard = activeDiscard(entries, targetName);
+      const archiveName = storedField(originalSelection.match.atom, 'thing').value;
+      const discard = activeDiscard(entries, {
+        archivePath: originalSelection.match.path.join('/'), archiveName
+      });
       if (discard?.originalParentPath !== null && discard?.originalParentPath !== undefined) {
         const parent = resolveUnique(atoms, discard.originalParentPath, exactIndex);
         if (parent.error) return parent;
@@ -1325,37 +1345,46 @@ export async function applyTransform({
       return { error: diagnostic('DEFAULT_BACKUP_DISCARD_REJECTED', '不能丢弃默认备份仓') };
     }
     const originalContainer = containerOf(nextAtoms, target);
-    const targetName = storedField(target.atom, 'thing').value;
-    if (childNameCollision(backup.match.atom, targetName)) {
-      return {
-        error: diagnostic(
-          'DUPLICATE_DESTINATION_CHILD',
-          `默认备份仓已存在同名 Thing：${targetName}`
-        )
-      };
-    }
+    const originalName = storedField(target.atom, 'thing').value;
+    const archive = archiveIdentity(backup.match.atom, originalName, sourcePath);
+    replaceStoredField(target.atom, 'thing', archive.name);
     originalContainer.splice(target.index, 1);
     immediateChildren(backup.match.atom).push(target.atom);
     const postMatches = walkAtoms(nextAtoms);
+    const archivePath = postMatches.find((match) => match.atom === target.atom)?.path.join('/') ?? null;
     const relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings, postMatches);
     const shortcutPaths = [];
-    breakShortcutTargets(nextAtoms, sourcePath, shortcutPaths, postMatches);
+    const shortcutRestorations = [];
+    breakShortcutTargets(
+      nextAtoms, sourcePath, shortcutPaths, postMatches, shortcutRestorations
+    );
     preservePreparedRelations(postMatches);
     return {
       atoms: nextAtoms,
-      resultName: targetName,
+      resultName: archive.name,
       sourcePath,
-      resultPath: postMatches.find((match) => match.atom === target.atom)?.path.join('/') ?? null,
+      resultPath: archivePath,
       relationPaths,
       shortcutPaths,
       matches: postMatches,
       changed: true,
+      archive: {
+        discardId: archive.id,
+        identity: archive.name,
+        path: archivePath,
+        restoreCoordinate: archivePath
+      },
       logRecord: {
-        id: crypto.randomUUID(),
+        id: archive.id,
         operation: 'discard',
-        target: targetName,
+        target: originalName,
+        originalName,
+        archiveName: archive.name,
+        archivePath,
+        originalPath: sourcePath,
         originalParentPath: target.parent ? target.parent.path.join('/') : null,
-        originalIndex: target.index
+        originalIndex: target.index,
+        shortcutRestorations
       }
     };
   }
@@ -1374,11 +1403,12 @@ export async function applyTransform({
       return { error: diagnostic('RESTORE_TARGET_NOT_IN_BACKUP', '恢复目标不在默认备份仓') };
     }
     const entries = await readTransformLog(contextFile);
-    const targetName = storedField(target.atom, 'thing').value;
-    const discard = activeDiscard(entries, targetName);
+    const archiveName = storedField(target.atom, 'thing').value;
+    const discard = activeDiscard(entries, { archivePath: sourcePath, archiveName });
     if (!discard) {
       return { error: diagnostic('RESTORE_RECORD_NOT_FOUND', '找不到可逆丢弃记录') };
     }
+    const targetName = discard.originalName ?? discard.target;
     let destination;
     if (discard.originalParentPath === null) {
       destination = nextAtoms;
@@ -1403,17 +1433,24 @@ export async function applyTransform({
       };
     }
     containerOf(nextAtoms, target).splice(target.index, 1);
+    replaceStoredField(target.atom, 'thing', targetName);
     destination.splice(Math.min(discard.originalIndex, destination.length), 0, target.atom);
     const postMatches = walkAtoms(nextAtoms);
     const relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings, postMatches);
+    const resultPath = postMatches.find((match) => match.atom === target.atom)?.path.join('/') ?? null;
+    const shortcutPaths = [];
+    restoreShortcutTargets(nextAtoms, discard.shortcutRestorations, {
+      originalPath: discard.originalPath,
+      restoredPath: resultPath
+    }, shortcutPaths, postMatches);
     preservePreparedRelations(postMatches);
     return {
       atoms: nextAtoms,
       resultName: targetName,
       sourcePath,
-      resultPath: postMatches.find((match) => match.atom === target.atom)?.path.join('/') ?? null,
+      resultPath,
       relationPaths,
-      shortcutPaths: [],
+      shortcutPaths,
       matches: postMatches,
       changed: true,
       logRecord: {

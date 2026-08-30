@@ -640,6 +640,13 @@ function graphResult(result) {
     const entries = [
       graphEntry(`thing${types}~${hint}`, true, result.result.thing)
     ];
+    if (result.archive) {
+      entries.push(
+        graphEntry('archive~id', true, result.archive.discardId),
+        graphEntry('archive~path', true, result.archive.path),
+        graphEntry('restore~coordinate', true, result.archive.restoreCoordinate)
+      );
+    }
     if (Array.isArray(result.program?.choices)) {
       entries.push(graphEntry('choices', true, result.program.choices));
     }
