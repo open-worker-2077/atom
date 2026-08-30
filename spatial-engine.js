@@ -5584,7 +5584,9 @@
     state.crumbs = route.crumbs;
     state.nodes = prefetched && prefetched.path === nextPath
       ? prefetched.nodes
-      : createChildDomainNodes(enteredNode, state.currentPath, state.depth);
+      : isShortcut
+        ? createChildDomainNodes(enteredNode, state.currentPath, state.depth)
+        : createChildDomainNodes(node, state.currentPath, state.depth);
     // Announce the new scope before the camera tween finishes so the bridge can
     // fetch its authoritative children during the transition. The history entry
     // still records the settled camera in the tween completion callback below.
