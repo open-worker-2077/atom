@@ -78,6 +78,33 @@ test('Transform receipt keeps only the minimal Graph outline and never echoes lo
   );
 });
 
+test('discard receipt exposes the readable archive identity and exact restore coordinate', async (t) => {
+  const files = await fixture(t);
+  await fs.writeFile(files.contextFile, JSON.stringify([{
+    thing: 'Synthetic Root',
+    situation: '',
+    contain: [
+      { thing: 'East', situation: '', contain: [{ thing: 'Duplicate', situation: 'east', contain: [], support: [] }], support: [] },
+      { thing: 'West', situation: '', contain: [{ thing: 'Duplicate', situation: 'west', contain: [], support: [] }], support: [] },
+      { 'thing@backup@default': 'Backup', situation: '', contain: [], support: [] }
+    ],
+    support: []
+  }], null, 2));
+
+  const east = await run(files, ['transform', '{"thing.dsc.":"Synthetic Root/East/Duplicate"}']);
+  const west = await run(files, ['transform', '{"thing.dsc.":"Synthetic Root/West/Duplicate"}']);
+  assert.equal(east.code, 0, east.stderr);
+  assert.equal(west.code, 0, west.stderr);
+  const receipt = materializeGraphJson(parseGraphJson(west.stdout));
+  assert.match(
+    receipt['thing~updated'],
+    /^Duplicate · 归档自 Synthetic Root › West · [0-9a-f-]{36}$/u
+  );
+  assert.match(receipt['archive~id'], /^[0-9a-f-]{36}$/u);
+  assert.equal(receipt['archive~path'], `Synthetic Root/Backup/${receipt['thing~updated']}`);
+  assert.equal(receipt['restore~coordinate'], receipt['archive~path']);
+});
+
 test('--json is a compatibility alias for the same Graph-JSON result, not a machine envelope', async (t) => {
   const files = await fixture(t);
   await run(files, [

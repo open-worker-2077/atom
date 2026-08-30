@@ -5,6 +5,10 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  createShortcutAtom,
+  shortcutMetadata
+} from '../work-engine/atom-language/shortcut-runtime.mjs';
 
 function atom(thing, situation = '', contain = [], support = []) {
   const normalizedSupport = support.length && support.every((item) => Object.keys(item).length === 1 && item.thing)
@@ -162,6 +166,51 @@ test('discard and restore keep external relations bound to the same Atom', async
   assert.equal(restored.ok, true, JSON.stringify(restored.errors));
   atoms = await readAtoms(files.contextFile);
   assert.equal(partnersOf(findByPath(atoms, '来源'))[0].thing, '甲/目标');
+});
+
+test('restore recovers a discarded subtree with support and shortcut references intact', async (t) => {
+  const files = await fixture(t, [
+    atom('Synthetic East', '', [
+      atom('Duplicate', 'payload', [atom('Leaf', 'nested')], [{ thing: 'Leaf' }])
+    ]),
+    atom('Synthetic Source', '', [], [{ thing: 'Synthetic East/Duplicate' }]),
+    atom('Synthetic References', '', [createShortcutAtom({
+      thing: 'Duplicate Link',
+      targetPath: 'Synthetic East/Duplicate',
+      referenceId: 'synthetic-duplicate-link'
+    })]),
+    {
+      'thing@backup@default': 'Synthetic Backup',
+      situation: '',
+      contain: [],
+      support: []
+    }
+  ]);
+
+  const discarded = await execute(files, 'transform {"thing.dsc.":"Synthetic East/Duplicate"}');
+  assert.equal(discarded.ok, true, JSON.stringify(discarded.errors));
+  let world = await readAtoms(files.contextFile);
+  assert.equal(partnersOf(findByPath(world, 'Synthetic Source'))[0].thing, discarded.result.path);
+  assert.equal(
+    shortcutMetadata(findByPath(world, 'Synthetic References/Duplicate Link')).target.state,
+    'broken'
+  );
+
+  const restored = await execute(
+    files,
+    `transform {"thing.rst.":${JSON.stringify(discarded.result.path)}}`
+  );
+  assert.equal(restored.ok, true, JSON.stringify(restored.errors));
+  world = await readAtoms(files.contextFile);
+  const target = findByPath(world, 'Synthetic East/Duplicate');
+  assert.equal(namedField(target, 'situation'), 'payload');
+  assert.equal(namedField(findByPath(world, 'Synthetic East/Duplicate/Leaf'), 'situation'), 'nested');
+  assert.equal(partnersOf(target)[0].thing, 'Leaf');
+  assert.equal(partnersOf(findByPath(world, 'Synthetic Source'))[0].thing, 'Synthetic East/Duplicate');
+  assert.deepEqual(
+    shortcutMetadata(findByPath(world, 'Synthetic References/Duplicate Link')).target,
+    { state: 'linked', path: 'Synthetic East/Duplicate' }
+  );
 });
 
 test('copy preserves original bindings and redirects copied internal relations', async (t) => {

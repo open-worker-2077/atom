@@ -79,9 +79,13 @@ export function createLegacyWorldService(options = {}) {
       const persistence = transactionFor(request);
       await recoverPersistence(persistence);
       const compatibilityManifest = await manifestFor(persistence);
+      const transactionTransformLog = typeof persistence.transformLogEntries === 'function'
+        ? await timed('transform-log', () => persistence.transformLogEntries())
+        : [];
       return timed('engine.execute', () => execute({
         ...request,
         compatibilityManifest,
+        transactionTransformLog,
         commitWorld: async (transition) => {
           const receipt = await persistence.commit({
             ...transition,

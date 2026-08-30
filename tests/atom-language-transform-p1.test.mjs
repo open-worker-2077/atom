@@ -6,12 +6,15 @@ import test from 'node:test';
 
 import { parseGraphDocument } from '../cli/lib/graph-json.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { executeAtomLanguage as executeAtomLanguageKernel } from '../work-engine/atom-language/engine.mjs';
+import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { writeAtomGraphProjection } from '../work-engine/atom-language/context-store.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
 import {
   appendTransformLog,
   applyTransform,
-  readTransformLog
+  readTransformLog,
+  transformLogEventFileFor
 } from '../work-engine/atom-language/transform-executor.mjs';
 import {
   TRANSFORM_COMMANDS,
@@ -341,13 +344,14 @@ test('discard copies a frozen optimized snapshot instead of mutating its contain
   assert.ok(findAtom(findAtom(result.atoms, 'Synthetic Backup').contain, 'Disposable'));
 });
 
-test('discard collision leaves world revision and projection unchanged', async (t) => {
+test('same-name Things from different paths receive distinct traceable archive coordinates', async (t) => {
   const files = await fixture(t, [
-    atom('Synthetic Agent', '', [atom('Duplicate')]),
+    atom('Synthetic East', '', [atom('Duplicate', 'east payload')]),
+    atom('Synthetic West', '', [atom('Duplicate', 'west payload')]),
     {
       'thing@backup@default': 'Synthetic Backup',
       situation: '',
-      contain: [atom('Duplicate')],
+      contain: [],
       support: []
     }
   ]);
@@ -355,19 +359,227 @@ test('discard collision leaves world revision and projection unchanged', async (
   await writeAtomGraphProjection(files.projectionFile, atoms, {
     rootName: path.basename(files.contextFile)
   });
+  const east = await execute(files, 'transform {"thing.dsc.":"Synthetic East/Duplicate"}');
+  const west = await execute(files, 'transform {"thing.dsc.":"Synthetic West/Duplicate"}');
+
+  assert.equal(east.ok, true, JSON.stringify(east.errors));
+  assert.equal(west.ok, true, JSON.stringify(west.errors));
+  assert.notEqual(east.result.path, west.result.path);
+  assert.match(east.result.path, /^Synthetic Backup\/Duplicate/u);
+  assert.match(west.result.path, /^Synthetic Backup\/Duplicate/u);
+  assert.match(
+    west.result.thing,
+    /^Duplicate · 归档自 Synthetic West · [0-9a-f-]{36}$/u
+  );
+  assert.ok(west.archive, 'discard receipt must expose the exact archive contract');
+  assert.equal(west.archive.identity, west.result.thing);
+  assert.equal(west.archive.path, west.result.path);
+  assert.equal(west.archive.restoreCoordinate, west.result.path);
+  assert.match(west.archive.discardId, /^[0-9a-f-]{36}$/u);
+
+  const backup = findAtom(await readAtoms(files.contextFile), 'Synthetic Backup');
+  assert.equal(backup.contain.length, 2);
+  assert.equal(new Set(backup.contain.map((entry) => entry.thing)).size, 2);
+  assert.deepEqual(
+    backup.contain.map((entry) => entry.situation).sort(),
+    ['east payload', 'west payload']
+  );
+  const discards = (await readTransformLog(files.contextFile)).filter((entry) => (
+    entry.operation === 'discard'
+  ));
+  assert.deepEqual(discards.map((entry) => entry.originalParentPath), [
+    'Synthetic East',
+    'Synthetic West'
+  ]);
+  assert.deepEqual(discards.map((entry) => entry.archivePath), [
+    east.result.path,
+    west.result.path
+  ]);
+});
+
+test('each archive coordinate restores only its own original Thing and name', async (t) => {
+  const files = await fixture(t, [
+    atom('Synthetic East', '', [atom('Duplicate', 'east payload')]),
+    atom('Synthetic West', '', [atom('Duplicate', 'west payload')]),
+    {
+      'thing@backup@default': 'Synthetic Backup',
+      situation: '',
+      contain: [],
+      support: []
+    }
+  ]);
+  const east = await execute(files, 'transform {"thing.dsc.":"Synthetic East/Duplicate"}');
+  const west = await execute(files, 'transform {"thing.dsc.":"Synthetic West/Duplicate"}');
+  assert.equal(east.ok, true, JSON.stringify(east.errors));
+  assert.equal(west.ok, true, JSON.stringify(west.errors));
+
+  const restoredWest = await execute(
+    files,
+    `transform {"thing.rst.":${JSON.stringify(west.result.path)}}`
+  );
+  assert.equal(restoredWest.ok, true, JSON.stringify(restoredWest.errors));
+  let world = await readAtoms(files.contextFile);
+  const westThing = findAtom(findAtom(world, 'Synthetic West').contain, 'Duplicate');
+  assert.ok(westThing, 'the selected archive must recover its original business name');
+  assert.equal(westThing.situation, 'west payload');
+  assert.equal(findAtom(world, 'Synthetic East').contain.length, 0);
+
+  const restoredEast = await execute(
+    files,
+    `transform {"thing.rst.":${JSON.stringify(east.result.path)}}`
+  );
+  assert.equal(restoredEast.ok, true, JSON.stringify(restoredEast.errors));
+  world = await readAtoms(files.contextFile);
+  const eastThing = findAtom(findAtom(world, 'Synthetic East').contain, 'Duplicate');
+  assert.ok(eastThing, 'the remaining archive must retain its independent restore record');
+  assert.equal(eastThing.situation, 'east payload');
+  assert.equal(westThing.situation, 'west payload');
+  assert.equal(findAtom(world, 'Synthetic Backup').contain.length, 0);
+});
+
+test('restore conflict preserves the existing Thing, archive, projection, and active discard record', async (t) => {
+  const files = await fixture(t, [
+    atom('Synthetic East', '', [atom('Duplicate', 'archived payload')]),
+    {
+      'thing@backup@default': 'Synthetic Backup',
+      situation: '',
+      contain: [],
+      support: []
+    }
+  ]);
+  const discarded = await execute(files, 'transform {"thing.dsc.":"Synthetic East/Duplicate"}');
+  assert.equal(discarded.ok, true, JSON.stringify(discarded.errors));
+  const recreated = await execute(
+    files,
+    'transform new {"thing":"Synthetic East/Duplicate","situation":"current payload","contain":[],"support":[]}'
+  );
+  assert.equal(recreated.ok, true, JSON.stringify(recreated.errors));
+  const contextBefore = await fs.readFile(files.contextFile, 'utf8');
+  const projectionBefore = await fs.readFile(files.projectionFile, 'utf8');
+  const logBefore = await readTransformLog(files.contextFile);
+
+  const restored = await execute(
+    files,
+    `transform {"thing.rst.":${JSON.stringify(discarded.archive.restoreCoordinate)}}`
+  );
+
+  assert.equal(restored.ok, false, JSON.stringify(restored));
+  assert.equal(restored.errors[0].code, 'DUPLICATE_DESTINATION_CHILD');
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), contextBefore);
+  assert.equal(await fs.readFile(files.projectionFile, 'utf8'), projectionBefore);
+  assert.deepEqual(await readTransformLog(files.contextFile), logBefore);
+});
+
+test('discard commit failure leaves authoritative world, projection, and transform log unchanged', async (t) => {
+  const initial = [
+    atom('Synthetic East', '', [atom('Disposable', 'must remain')]),
+    {
+      'thing@backup@default': 'Synthetic Backup',
+      situation: '',
+      contain: [],
+      support: []
+    }
+  ];
+  const files = await fixture(t, initial);
+  await writeAtomGraphProjection(files.projectionFile, initial, {
+    rootName: path.basename(files.contextFile)
+  });
   const contextBefore = await fs.readFile(files.contextFile, 'utf8');
   const projectionBefore = await fs.readFile(files.projectionFile, 'utf8');
 
-  const result = await execute(
-    files,
-    'transform {"thing.dsc.":"Synthetic Agent/Duplicate"}'
+  await assert.rejects(
+    executeAtomLanguageKernel({
+      ...files,
+      source: 'transform {"thing.dsc.":"Synthetic East/Disposable"}',
+      commitWorld: async () => {
+        throw Object.assign(new Error('synthetic central commit failure'), {
+          code: 'SYNTHETIC_COMMIT_FAILURE'
+        });
+      }
+    }),
+    (error) => error.code === 'SYNTHETIC_COMMIT_FAILURE'
   );
-
-  assert.equal(result.ok, false);
-  assert.equal(result.errors[0].code, 'DUPLICATE_DESTINATION_CHILD');
-  assert.equal(result.revisionAfter, result.revisionBefore);
   assert.equal(await fs.readFile(files.contextFile, 'utf8'), contextBefore);
   assert.equal(await fs.readFile(files.projectionFile, 'utf8'), projectionBefore);
+  assert.deepEqual(await readTransformLog(files.contextFile), []);
+});
+
+test('audit mirror failure stays fatal when a custom commit receipt does not confirm the reversible record', async (t) => {
+  const initial = [
+    atom('Synthetic East', '', [atom('Disposable', 'must remain recoverable')]),
+    {
+      'thing@backup@default': 'Synthetic Backup',
+      situation: '',
+      contain: [],
+      support: []
+    }
+  ];
+  const files = await fixture(t, initial);
+  const auditDirectory = path.dirname(transformLogEventFileFor(files.contextFile));
+  await fs.writeFile(auditDirectory, 'synthetic obstruction', 'utf8');
+
+  await assert.rejects(
+    executeAtomLanguageKernel({
+      ...files,
+      source: 'transform {"thing.dsc.":"Synthetic East/Disposable"}',
+      commitWorld: async ({ expectedRevision, nextRevision }) => ({
+        beforeRevision: expectedRevision,
+        afterRevision: nextRevision,
+        result: {}
+      })
+    }),
+    (error) => error.code === 'EEXIST'
+  );
+});
+
+test('audit mirror failure cannot turn a committed discard into a failed unrecoverable request', async (t) => {
+  const initial = [
+    atom('Synthetic East', '', [atom('Disposable', 'recoverable payload')]),
+    {
+      'thing@backup@default': 'Synthetic Backup',
+      situation: '',
+      contain: [],
+      support: []
+    }
+  ];
+  const files = await fixture(t, initial);
+  await writeAtomGraphProjection(files.projectionFile, initial, {
+    rootName: path.basename(files.contextFile)
+  });
+  const auditDirectory = path.dirname(transformLogEventFileFor(files.contextFile));
+  await fs.writeFile(auditDirectory, 'synthetic obstruction', 'utf8');
+
+  let discarded;
+  await assert.doesNotReject(async () => {
+    discarded = await execute(files, 'transform {"thing.dsc.":"Synthetic East/Disposable"}');
+  });
+  assert.equal(discarded.ok, true, JSON.stringify(discarded));
+  assert.ok(discarded.warnings.some((warning) => (
+    warning.code === 'TRANSFORM_LOG_MIRROR_FAILED'
+  )), JSON.stringify(discarded));
+  assert.equal(findAtom(await readAtoms(files.contextFile), 'Synthetic East').contain.length, 0);
+  assert.match(await fs.readFile(files.projectionFile, 'utf8'), /Synthetic Backup/u);
+  const transactionEvents = (await fs.readFile(
+    path.join(files.directory, 'atom.transactions.json.d', 'events.jsonl'),
+    'utf8'
+  )).trim().split('\n').map(JSON.parse);
+  const committedDiscard = transactionEvents.findLast((event) => (
+    event.type === 'committed'
+    && event.receipt?.result?.transformLogRecord?.id === discarded.archive.discardId
+  ));
+  assert.equal(committedDiscard.receipt.result.transformLogRecord.operation, 'discard');
+
+  await fs.unlink(auditDirectory);
+  const restarted = createLegacyWorldService();
+  const restored = await restarted.executeLegacy({
+    ...files,
+    source: `transform {"thing.rst.":${JSON.stringify(discarded.archive.restoreCoordinate)}}`
+  });
+  assert.equal(restored.ok, true, JSON.stringify(restored));
+  assert.equal(
+    findAtom(findAtom(await readAtoms(files.contextFile), 'Synthetic East').contain, 'Disposable').situation,
+    'recoverable payload'
+  );
 });
 
 test('Atom to Graph projection preserves long multilingual situation without clipping', async (t) => {
