@@ -328,14 +328,12 @@ export async function createSpatialServer(options = {}) {
         const payload = await body(request);
         const result = await atomCommandRequest(payload, async (normalized, onCommitted) => {
           const commandResult = await options.atomCommand(normalized, { onCommitted });
-          if (commandResult?.changed !== false && graphFile) {
+          if (commandResult?.changed !== false && graphFile && options.projectAtomKnowledge) {
             try {
               const document = JSON.parse(await fs.readFile(graphFile, 'utf8'));
-              if (options.projectAtomKnowledge) {
-                await store.execute('knowledge.replace', {
-                  knowledge: await options.projectAtomKnowledge(document, commandResult)
-                });
-              }
+              await store.execute('knowledge.replace', {
+                knowledge: await options.projectAtomKnowledge(document, commandResult)
+              });
               spatialProjectionFailure = null;
               publishKnowledgeChange(await readKnowledge());
             } catch (error) {
@@ -435,6 +433,7 @@ export async function createSpatialServer(options = {}) {
     storeFile: bossStore ? bossDirectory : storeFile,
     graphFile,
     mode: bossStore ? 'boss' : 'single',
+    publishKnowledgeChange,
     drainAtomInteractions: () => atomInteractionTail
   };
 }

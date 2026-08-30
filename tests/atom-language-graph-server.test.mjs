@@ -712,3 +712,57 @@ test('graph server queues private backup from a committed operation instead of r
   });
   assert.equal(barrier.status, 200, await barrier.text());
 });
+
+test('CLI commit notifies Web only after the affected Spatial projection is current', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, `${JSON.stringify(atomFixture(), null, 2)}\n`, 'utf8');
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1',
+    port: 0,
+    contextFile,
+    graphFile,
+    storeFile,
+    projectionDelayMs: 0
+  });
+
+  const before = await fetch(`${running.url}/__spatial/api/state?path=root`)
+    .then((response) => response.json());
+  const abort = new AbortController();
+  t.after(async () => {
+    abort.abort();
+    await running.close();
+  });
+  const events = await fetch(`${running.url}/__spatial/api/events`, { signal: abort.signal });
+  const reader = events.body.getReader();
+  const decoder = new TextDecoder();
+  await reader.read();
+
+  const response = await fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source: 'transform {"thing":"石斧","situation.rep.局部刷新后的正文"}',
+      interaction: {
+        id: 'cli-web-local-freshness',
+        agent: { ref: 'fixture-agent-ref', path: '石器工坊' }
+      },
+      history: []
+    })
+  });
+  assert.equal(response.status, 200, await response.text());
+
+  const noticeText = decoder.decode((await reader.read()).value);
+  const notice = JSON.parse(noticeText.match(/data: (\{[^\n]+\})/u)[1]);
+  const after = await fetch(`${running.url}/__spatial/api/state?path=root`)
+    .then((stateResponse) => stateResponse.json());
+  const updated = after.knowledge.nodes.find((node) => node.label === '石斧');
+
+  assert.ok(notice.revision > before.knowledge.revision);
+  assert.equal(notice.revision, after.knowledge.revision);
+  assert.equal(updated.detail, '局部刷新后的正文');
+  abort.abort();
+  await reader.cancel().catch(() => {});
+});
