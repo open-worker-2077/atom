@@ -43,6 +43,12 @@ function programResealsModelPath(slotBodies, sourceProgramPath, targetPath) {
     return targetPath === modelPath || targetPath.startsWith(`${modelPath}/`);
   });
 }
+
+function programDeclaresSlotSeal(slotBodies, sourceProgramPath) {
+  return (slotBodies ?? []).some((request) => (
+    request?.action === 'seal' && request.sourceProgramPath === sourceProgramPath
+  ));
+}
 import { createAtomLanguageReceiver } from './receiver.mjs';
 import {
   appendTransformLog,
@@ -1524,6 +1530,13 @@ export async function executeAtomLanguage(options = {}) {
     }
     const compiled = compileProgramTransform({ request: transformRequest, receiver });
     if (!compiled.ok) {
+      if (programDeclaresSlotSeal(programCycle.slotBodies, sourceProgramPath)) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          'INVALID_PROGRAM_TRANSFORM',
+          compiled.errors?.[0]?.message ?? 'Program transform 无法编译',
+          { program: sourceProgramPath, errors: compiled.errors ?? [] }
+        )]);
+      }
       if (jumpEffects.length) {
         return failureBase(parsed, contextFile, projectionFile, jumpBaseAtoms, [diagnostic(
           'WINDOW_JUMP_DOWNSTREAM_FAILED',
@@ -1572,6 +1585,12 @@ export async function executeAtomLanguage(options = {}) {
           { program: sourceProgramPath, cause: error.code }
         )]);
       }
+      if (programDeclaresSlotSeal(programCycle.slotBodies, sourceProgramPath)) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          error.code ?? 'PROGRAM_TRANSFORM_FAILED', error.message,
+          { program: sourceProgramPath }
+        )]);
+      }
       interactionWarnings.push(diagnostic(
         error.code ?? 'PROGRAM_TRANSFORM_FAILED', error.message,
         { program: sourceProgramPath }
@@ -1583,6 +1602,13 @@ export async function executeAtomLanguage(options = {}) {
         return failureBase(parsed, contextFile, projectionFile, jumpBaseAtoms, [diagnostic(
           'WINDOW_JUMP_DOWNSTREAM_FAILED', transformed.error.message,
           { program: sourceProgramPath, cause: transformed.error.code }
+        )]);
+      }
+      if (programDeclaresSlotSeal(programCycle.slotBodies, sourceProgramPath)) {
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          transformed.error.code ?? 'PROGRAM_TRANSFORM_REJECTED',
+          transformed.error.message,
+          { program: sourceProgramPath }
         )]);
       }
       interactionWarnings.push(diagnostic(
@@ -1847,6 +1873,12 @@ export async function executeAtomLanguage(options = {}) {
             scopeRoot: sourceScopeRoot
           });
         } catch (error) {
+          if (programDeclaresSlotSeal(cycle.slotBodies, sourceProgramPath)) {
+            throw Object.assign(new Error(error.message), {
+              code: error.code ?? 'INVALID_PROGRAM_TRANSFORM',
+              details: { program: sourceProgramPath, ...(error.details ?? {}) }
+            });
+          }
           interactionWarnings.push(diagnostic(
             error.code ?? 'INVALID_PROGRAM_TRANSFORM', error.message,
             { program: sourceProgramPath, ...(error.details ?? {}) }
@@ -1855,6 +1887,14 @@ export async function executeAtomLanguage(options = {}) {
         }
         const compiled = compileProgramTransform({ request: transformRequest, receiver });
         if (!compiled.ok) {
+          if (programDeclaresSlotSeal(cycle.slotBodies, sourceProgramPath)) {
+            throw Object.assign(new Error(
+              compiled.errors?.[0]?.message ?? 'Program transform 无法编译'
+            ), {
+              code: 'INVALID_PROGRAM_TRANSFORM',
+              details: { program: sourceProgramPath, errors: compiled.errors ?? [] }
+            });
+          }
           interactionWarnings.push(diagnostic(
             'INVALID_PROGRAM_TRANSFORM',
             compiled.errors?.[0]?.message ?? 'Program transform 无法编译',
@@ -1927,6 +1967,16 @@ export async function executeAtomLanguage(options = {}) {
                   exactIndex
                 });
           } catch (error) {
+            if (programDeclaresSlotSeal(cycle.slotBodies, entry.sourceProgramPath)) {
+              return {
+                failed: true,
+                fatal: {
+                  code: error.code ?? 'PROGRAM_TRANSFORM_FAILED',
+                  message: error.message,
+                  program: entry.sourceProgramPath
+                }
+              };
+            }
             if (reportFailure) {
               rejected += 1;
               interactionWarnings.push(diagnostic(
@@ -1941,6 +1991,16 @@ export async function executeAtomLanguage(options = {}) {
           if (transformed.error) {
             if (mutateInput && transformed.rolledBack) {
               exactIndex = createExactTransformIndex(candidateAtoms);
+            }
+            if (programDeclaresSlotSeal(cycle.slotBodies, entry.sourceProgramPath)) {
+              return {
+                failed: true,
+                fatal: {
+                  code: transformed.error.code ?? 'PROGRAM_TRANSFORM_REJECTED',
+                  message: transformed.error.message,
+                  program: entry.sourceProgramPath
+                }
+              };
             }
             if (reportFailure) {
               rejected += 1;
@@ -1991,6 +2051,12 @@ export async function executeAtomLanguage(options = {}) {
         if (shortcut.changed) appliedShortcuts.push({ effect, shortcut });
       }
       let application = await applyCompiled(shortcutAtoms, true, true);
+      if (application.fatal) {
+        throw Object.assign(new Error(application.fatal.message), {
+          code: application.fatal.code,
+          details: { program: application.fatal.program }
+        });
+      }
       if (!application.failed) {
         try {
           projectAtomContext(application.atoms, {
@@ -2003,6 +2069,12 @@ export async function executeAtomLanguage(options = {}) {
       }
       if (application.failed) {
         application = await applyCompiled(shortcutAtoms, false, true);
+      }
+      if (application.fatal) {
+        throw Object.assign(new Error(application.fatal.message), {
+          code: application.fatal.code,
+          details: { program: application.fatal.program }
+        });
       }
       const appliedSlotBodies = [];
       for (const request of cycle.slotBodies ?? []) {

@@ -11,6 +11,8 @@ Atom already accepts `thing@program` references inside a support condition, but 
 - Forbid implicit execution of the consequent Thing or any Program associated with the consequent while deciding support.
 - Reject every side effect emitted by a support-decision Program.
 - Treat the test as a characterization gate: change runtime code only if the focused regression first demonstrates that the current kernel violates the contract.
+- Reject Program-owned and Program-consequent fact endpoints, keep directionless legacy relations inert, and keep archived backup support outside the active Graph.
+- Permit slot-model revision only as one same-Program, same-body Transform + reseal transaction; reject cross-body capability borrowing atomically.
 
 ## Capabilities
 
@@ -24,6 +26,6 @@ Atom already accepts `thing@program` references inside a support condition, but 
 
 ## Impact
 
-- Primary regression surface: `tests/atom-program-support-endpoint.test.mjs` and the support projection/runtime integration tests selected by the contract.
-- Runtime surfaces to inspect only after a failing characterization: `work-engine/atom-language/support-runtime.mjs`, Program support evaluation in `work-engine/atom-language/program-runtime.mjs`, and projection wiring in `src/atom-system/adapters/legacy-projection-adapter.mjs`.
-- No production data, `atom.json`, business nodes, external API, or GitHub state is modified.
+- Primary regression surface: support endpoint/projection tests plus the directly affected slot structure-lock and public CLI chain.
+- Runtime surfaces changed only at proven seams: Graph/Form/slot endpoint validation, inactive-backup projection, legacy directionless-relation projection, and same-transaction slot reseal authorization.
+- Existing Program-consequent relations are migrated through an authorized, backed-up central transaction. Business facts remain private; GitHub carries only sanitized counts, hashes, contracts, and test evidence.

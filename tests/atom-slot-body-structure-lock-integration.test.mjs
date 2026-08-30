@@ -59,6 +59,15 @@ async function setup(t) {
     ].join('\n'),
     contain: [], support: []
   });
+  atoms.push(atom('OtherBody', '', [atom('Candidate', '', [atom('Field')])]));
+  atoms.push({
+    'thing@program': 'CrossBodySeal',
+    situation: [
+      'transform({"thing":"\u69fd\u4f53/\u69fd\u6a21/\u8f93\u5165","situation.rep.v3":None})',
+      'slot_body({"action":"seal","body":"OtherBody"})'
+    ].join('\n'),
+    contain: [], support: []
+  });
   await fs.writeFile(contextFile, `${JSON.stringify(atoms, null, 2)}\n`, 'utf8');
   return { contextFile, projectionFile };
 }
@@ -138,6 +147,19 @@ test('one Program may edit its model and reseal the same slot body atomically', 
   assert.equal(modelInput.situation, 'v2');
   assert.equal(instanceInput.situation, 'v2');
   assert.equal(JSON.stringify(instanceInput.contain), before);
+});
+
+test('a Program cannot borrow reseal capability from another slot body', async (t) => {
+  const files = await setup(t);
+  const before = await fs.readFile(files.contextFile, 'utf8');
+  const result = await executeAtomLanguage({
+    source: 'transform {"thing.run.":"CrossBodySeal"}',
+    programScheduler: createProgramRuntimeScheduler(),
+    ...files
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.code === 'SLOT_STRUCTURE_LOCK_DENIED'));
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
 });
 
 test('structure-preserving edits reuse slot locks only when changed paths stay outside slot domains', async () => {

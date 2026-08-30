@@ -29,14 +29,14 @@
 - [x] 5.1 Add RED parser coverage proving a `thing@program` owner cannot use `if@current` or `then@current` as a fact endpoint and Program-only conditions cannot replace ordinary facts.
 - [x] 5.2 Reject Program-owned and Program-only fact support rules while retaining ordinary static support as unconditional and Program-backed support as strict bool.
 - [x] 5.3 Inspect and migrate the current allowed DataFlow wiring through the public Atom interface; publish only sanitized counts/contracts.
-- [ ] 5.4 Re-run focused kernel, projection, current DataFlow readback and same-version deployment evidence; bind it to #44/#10/#1.
+- [x] 5.4 Re-run focused kernel, projection, current DataFlow readback and same-version deployment evidence; bind it to #44/#10/#1.
 
 ## 6. Default-backup active boundary
 
 - [x] 6.1 Add RED coverage proving invalid historical support below the typed default backup is preserved in Atom facts but excluded from active Graph validation.
 - [x] 6.2 Project empty support arrays only inside the typed default backup while preserving its complete Thing, contain, and situation facts.
 - [x] 6.3 Verify the affected context, Graph projection, and Program scheduling chain, including inactive Program and restoration behavior.
-- [ ] 6.4 Validate OpenSpec, run release regression, deploy the same merged version, and bind cold-start evidence to #44/#10/#1.
+- [x] 6.4 Validate OpenSpec, run release regression, deploy the same merged version, and bind cold-start evidence to #44/#10/#1.
 
 ## 7. Ordinary consequent closure
 
@@ -45,4 +45,4 @@
 - [x] 7.3 Count only ordinary fact antecedents for N/M arity and preserve valid Program-gated one-to-many rules.
 - [x] 7.4 Migrate slot fixtures and night-watch synthetic scripts from `then → Program` to ordinary consequents plus independent decision/trigger Programs.
 - [x] 7.5 Add the public-CLI RED/GREEN seam for one-Program model edit + same-body reseal, while direct model edits remain locked.
-- [ ] 7.6 Run the precise Graph/Form/slot chain, deploy the merged version, and bind current evidence to #4/#10/#1.
+- [x] 7.6 Run the precise Graph/Form/slot chain, deploy the merged version, and bind current evidence to #4/#10/#1.
