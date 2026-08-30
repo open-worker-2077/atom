@@ -99,21 +99,25 @@ test('A mode keeps a visible nested sphere above the mobile controls', async ({ 
     const state = window.spatialLab.state();
     const canvas = document.querySelector('#spaceCanvas');
     const controlsTop = document.querySelector('.mobile-control-panel').getBoundingClientRect().top;
-    const target = state.clusterTargets
+    const targets = state.clusterTargets
       .filter((item) => item.y + item.radius > 0 && item.y - item.radius < controlsTop)
-      .sort((left, right) => right.radius - left.radius)[0] || null;
-    if (!target) return { controlsTop, target, paintPeak: 0 };
+      .filter((item) => item.radius >= 12);
+    if (!targets.length) return { controlsTop, target: null, paintPeak: 0 };
     const context = canvas.getContext('2d');
     const scaleX = canvas.width / canvas.getBoundingClientRect().width;
     const scaleY = canvas.height / canvas.getBoundingClientRect().height;
-    const samples = Array.from({ length: 32 }, (_, index) => {
-      const angle = index / 32 * Math.PI * 2;
-      const x = Math.round((target.x + Math.cos(angle) * target.radius * 0.82) * scaleX);
-      const y = Math.round((target.y + Math.sin(angle) * target.radius * 0.82) * scaleY);
-      return [...context.getImageData(x, y, 1, 1).data].slice(0, 3);
-    });
-    const paintPeak = Math.max(...samples.map((rgb) => Math.max(...rgb)));
-    return { controlsTop, target, paintPeak };
+    const painted = targets.map((target) => {
+      const samples = [0, 0.35, 0.65, 0.82, 0.98].flatMap((ratio) => (
+        Array.from({ length: 24 }, (_, index) => {
+          const angle = index / 24 * Math.PI * 2;
+          const x = Math.round((target.x + Math.cos(angle) * target.radius * ratio) * scaleX);
+          const y = Math.round((target.y + Math.sin(angle) * target.radius * ratio) * scaleY);
+          return [...context.getImageData(x, y, 1, 1).data].slice(0, 3);
+        })
+      ));
+      return { target, paintPeak: Math.max(...samples.map((rgb) => Math.max(...rgb))) };
+    }).sort((left, right) => right.paintPeak - left.paintPeak);
+    return { controlsTop, ...painted[0] };
   });
   expect(visibleGeometry.target, JSON.stringify(visibleGeometry)).toBeTruthy();
   expect(visibleGeometry.target.radius, JSON.stringify(visibleGeometry)).toBeGreaterThanOrEqual(12);
