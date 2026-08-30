@@ -15,7 +15,7 @@ See `proposal.md` for motivation and `specs/support-program-decision/spec.md` fo
 
 - Redesign the support AST, Graph schema, Program language, or general reconcile scheduler.
 - Execute consequent-side Programs, introduce a propagation workflow, or make ordinary Things return booleans.
-- Modify real `atom.json`, business facts, projection stores, GitHub state, or deployment state.
+- Change application-layer business meaning, publish business facts, or make a second state machine outside GitHub Issue #1.
 
 ## Decisions
 
@@ -70,4 +70,4 @@ Alternative considered: rewrite or delete legacy support while archiving. Reject
 
 ## Migration Plan
 
-No persisted-data rewrite is required. Apply by adding focused regressions first, then make minimal runtime changes only at proven failing seams. The default-backup correction changes only derived active projection: archived facts remain byte-for-byte recoverable, while restored facts are validated normally. Rollback is the local commit reversal; no persisted world state is touched.
+Apply focused regressions first, then change only proven runtime seams. Preserve directionless legacy relations as inert facts. For active Program consequents, first rehearse on an exact private clone, verify backup and source hash, then use one authorized central transaction to remove obsolete support relations and add each Program's own local transform trigger. The default-backup correction changes only derived active projection: archived facts remain recoverable and restored facts re-enter current validation. Deploy only a merged revision, then bind sanitized same-version evidence to #4/#10/#1. Rollback uses the verified private backup plus the merged code rollback path; no business content enters GitHub.
