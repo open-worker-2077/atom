@@ -290,7 +290,8 @@ async function descendantAgentCandidateFixture(t, suffix, lockFields = ['thing']
   const initialProgramSource = 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})';
   await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
     atom('Window', agentSource, [
-      atom('Child Program', initialProgramSource, [], 'program')
+      atom('Child Program', initialProgramSource, [atom('Support Fact')], 'program'),
+      atom('Support Decision', 'def main(arguments):\n    return True', [], 'program')
     ], 'program@agent'),
     ...(lockFields ? [atom(
       'Registration Lock',
@@ -315,9 +316,11 @@ for (const scenario of [
   },
   {
     name: 'support',
-    source: 'transform {"thing":"Root/Window/Child Program","support.rep.":[{"if@current":true,"then":[{"thing":"Root"}]}]}',
+    source: 'transform {"thing":"Root/Window/Child Program/Support Fact","support.rep.":[{"if@current":true,"if":[{"thing@program":"Root/Window/Support Decision"}],"then":[{"thing":"Root"}]}]}',
     assertStored(world) {
-      assert.equal(world[0].contain[0].contain[0].support[0].then[0].thing, 'Root');
+      const support = world[0].contain[0].contain[0].contain[0].support[0];
+      assert.equal(support.if[0]['thing@program'], 'Root/Window/Support Decision');
+      assert.equal(support.then[0].thing, 'Root');
     }
   },
   {
@@ -325,7 +328,10 @@ for (const scenario of [
     lockFields: null,
     source: 'transform {"thing.dsc.":"Root/Window/Child Program"}',
     assertStored(world) {
-      assert.deepEqual(world[0].contain[0].contain, []);
+      assert.deepEqual(
+        world[0].contain[0].contain.map((entry) => entry['thing@program'] ?? entry.thing),
+        ['Support Decision']
+      );
       const backup = world[0].contain.find((entry) => Object.entries(entry).some(([key, value]) => (
         key.startsWith('thing') && value === 'Default Backup'
       )));

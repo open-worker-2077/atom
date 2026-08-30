@@ -18,6 +18,14 @@ const supports = (...targets) => targets.length === 0
   ? []
   : [{ 'if@current': true, then: targets.map((thing) => ({ thing })) }];
 
+const gatedSupport = (program, ...targets) => targets.length === 0
+  ? []
+  : [{
+      'if@current': true,
+      if: [{ 'thing@program': program }],
+      then: targets.map((thing) => ({ thing }))
+    }];
+
 function atomsFixture() {
   return [
     {
@@ -26,9 +34,15 @@ function atomsFixture() {
       contain: [
         {
           'thing@program': '锤子',
-          'situation#工具': '锻造工具',
+          'situation#工具': 'def main(arguments):\n    return True',
           contain: [],
-          support: supports('石器工坊')
+          support: []
+        },
+        {
+          thing: '锤击事实',
+          situation: '锤击已完成',
+          contain: [],
+          support: gatedSupport('锤子', '石器工坊')
         }
       ],
       support: supports('河岸')
@@ -102,9 +116,15 @@ test('projects decorated Atom keys recursively through parseAtomKey onto a virtu
         contain: [
           {
             'thing@program': '锤子',
-            'situation#工具': '锻造工具',
+            'situation#工具': 'def main(arguments):\n    return True',
             contain: [],
-            support: supports('石器工坊')
+            support: []
+          },
+          {
+            thing: '锤击事实',
+            situation: '锤击已完成',
+            contain: [],
+            support: gatedSupport('锤子', '石器工坊')
           }
         ],
         support: supports('河岸')
