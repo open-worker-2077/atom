@@ -382,10 +382,32 @@ textarea:focus-visible {
   touch-action: pan-x;
 }
 
-.mobile-control-panel__rows {
-  display: grid;
+.mobile-control-panel__key-groups {
+  display: flex;
   gap: var(--space-xs);
   min-inline-size: max-content;
+}
+
+.mobile-control-panel__key-group {
+  display: grid;
+  gap: var(--space-2xs);
+  padding-inline-end: var(--space-xs);
+  border-inline-end: var(--rule-hairline) solid color-mix(in oklch, var(--color-rule) 64%, transparent);
+}
+
+.mobile-control-panel__key-title,
+.mobile-control-panel__hint {
+  margin: 0;
+  color: var(--color-ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 400;
+}
+
+.mobile-control-panel__hint {
+  align-self: center;
+  max-inline-size: 42rem;
+  white-space: nowrap;
 }
 
 .mobile-control-panel__row {
