@@ -135,3 +135,30 @@ test('an optional external font failure does not reload the main entry', async (
 
   expect(documentLoads).toBe(1);
 });
+
+test('a stalled optional external font request does not block the Atom runtime', async ({ page }) => {
+  test.setTimeout(20_000);
+  let releaseFontRequest;
+  const stalledFontRequest = new Promise((resolve) => {
+    releaseFontRequest = resolve;
+  });
+  await page.route('https://fonts.googleapis.com/**', async (route) => {
+    await stalledFontRequest;
+    await route.abort('timedout');
+  });
+
+  try {
+    await page.goto('/', { waitUntil: 'commit' });
+    await expect.poll(() => page.evaluate(() => ({
+      bridge: document.body?.dataset.spatialBridge,
+      authoritative: document.body?.dataset.spatialKnowledge,
+      runtimeReady: Boolean(window.spatialLab)
+    })), { timeout: 5_000 }).toEqual({
+      bridge: 'connected',
+      authoritative: 'authoritative',
+      runtimeReady: true
+    });
+  } finally {
+    releaseFontRequest();
+  }
+});
