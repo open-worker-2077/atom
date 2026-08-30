@@ -5350,6 +5350,71 @@
     return { entries, path, depth: targetDepth, crumbs, lineage };
   }
 
+  function buildShortcutTargetRoute(shortcutNode, parentCamera) {
+    const targetAtomPath = typeof shortcutNode?.shortcutTargetPath === "string"
+      ? shortcutNode.shortcutTargetPath.trim()
+      : "";
+    if (!targetAtomPath) return null;
+    const descriptors = workspace.exportKnowledge().nodes || [];
+    const target = descriptors.find((candidate) => candidate.atomPath === targetAtomPath);
+    if (!target) return null;
+
+    const lineage = [];
+    let ownerPath = "root";
+    while (ownerPath !== target.path) {
+      if (!target.path.startsWith(`${ownerPath}/`)) return null;
+      const nextSegment = target.path.slice(ownerPath.length + 1).split("/")[0];
+      const nextPath = `${ownerPath}/${nextSegment}`;
+      const owner = descriptors.find((candidate) => (
+        candidate.path === ownerPath && childPathFor(candidate, ownerPath) === nextPath
+      ));
+      const ownerNode = owner && nodeByIdInPath(ownerPath, owner.id);
+      if (!ownerNode) return null;
+      lineage.push(ownerNode);
+      ownerPath = nextPath;
+    }
+    const targetNode = nodeByIdInPath(target.path, target.id);
+    if (!targetNode) return null;
+    lineage.push(targetNode);
+
+    const entries = [];
+    let path = "root";
+    let depth = 0;
+    let crumbs = [];
+    lineage.forEach((lineageNode, index) => {
+      entries.push({
+        path,
+        crumbs: [...crumbs],
+        depth,
+        camera: index === 0
+          ? { ...parentCamera, target: { ...parentCamera.target } }
+          : {
+              target: { x: 0, y: 0, z: 0 },
+              yaw: parentCamera.yaw,
+              pitch: parentCamera.pitch,
+              distance: NORMAL_FIELD_DISTANCE
+            },
+        entryDirection: { yaw: parentCamera.yaw, pitch: parentCamera.pitch },
+        entryNearDistance: clamp(
+          Math.min(parentCamera.distance - 0.35, lineageNode.radius * 1.55),
+          1.25,
+          2.8
+        ),
+        childFarDistance: clamp(
+          NORMAL_FIELD_DISTANCE + lineageNode.radius * 2.4,
+          17.8,
+          21.5
+        ),
+        nodeId: lineageNode.id,
+        nodeLabel: lineageNode.label
+      });
+      path = childPathFor(lineageNode, path);
+      depth += 1;
+      crumbs = [...crumbs, lineageNode.label];
+    });
+    return { entries, path, depth, crumbs, targetNode };
+  }
+
   function clusterDepthForPath(path) {
     if (path === state.currentPath) return state.depth;
     const expanded = state.expandedClusterDomains.get(path);
@@ -5499,18 +5564,27 @@
     if (forceImmersive) state.clusterFieldOpen = false;
     recordCurrentView();
     const parentCamera = cameraSnapshot();
-    const route = buildDirectDomainRoute(node, parentCamera);
-    const prefetched = route.entries.length === 1 ? prefetchChildDomain(node) : null;
+    const isShortcut = Array.isArray(node.atomTypes) && node.atomTypes.includes("shortcut");
+    const route = isShortcut
+      ? buildShortcutTargetRoute(node, parentCamera)
+      : buildDirectDomainRoute(node, parentCamera);
+    if (!route) {
+      announce("快捷目标不可用，已留在当前位置");
+      return false;
+    }
+    const enteredNode = route.targetNode || node;
+    const prefetched = !isShortcut && route.entries.length === 1 ? prefetchChildDomain(node) : null;
     const nextPath = route.path;
     state.menuFor = null;
     node.peekOpen = false;
-    state.domainStack.push(...route.entries);
+    if (isShortcut) state.domainStack = route.entries;
+    else state.domainStack.push(...route.entries);
     state.depth = route.depth;
     state.currentPath = nextPath;
     state.crumbs = route.crumbs;
     state.nodes = prefetched && prefetched.path === nextPath
       ? prefetched.nodes
-      : createChildDomainNodes(node, state.currentPath, state.depth);
+      : createChildDomainNodes(enteredNode, state.currentPath, state.depth);
     // Announce the new scope before the camera tween finishes so the bridge can
     // fetch its authoritative children during the transition. The history entry
     // still records the settled camera in the tween completion callback below.
@@ -5524,7 +5598,7 @@
     const immersiveFrame = currentDomainSceneFrame();
     updateSelectionUI();
     startCameraTween(immersiveFrame, 420, recordCurrentView);
-    announce(`已进入 ${node.label}，当前深度 ${state.depth}`);
+    announce(`已进入 ${enteredNode.label}，当前深度 ${state.depth}`);
     return true;
   }
 

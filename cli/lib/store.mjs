@@ -104,6 +104,9 @@ function cleanNode(input) {
     ...(typeof input.programSource === 'string'
       ? { programSource: text(input.programSource, 1_000_000) }
       : {}),
+    ...(typeof input.shortcutTargetPath === 'string' && input.shortcutTargetPath.trim()
+      ? { shortcutTargetPath: text(input.shortcutTargetPath, 4000).trim() }
+      : {}),
     attachment: cleanAttachment(input.attachment),
     position: {
       x: Number(input.position?.x) || 0,

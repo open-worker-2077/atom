@@ -440,6 +440,9 @@
         ...(typeof node?.programSource === "string"
           ? { programSource: safeText(node.programSource) }
           : {}),
+        ...(typeof node?.shortcutTargetPath === "string" && node.shortcutTargetPath
+          ? { shortcutTargetPath: safeText(node.shortcutTargetPath, "", 4000) }
+          : {}),
         ...(typeof node?.graphPath === "string" && node.graphPath
           ? { graphPath: safeText(node.graphPath, "", 4000) }
           : {}),
@@ -863,6 +866,9 @@
             ...(typeof node.programSource === "string"
               ? { programSource: safeText(node.programSource) }
               : {}),
+            ...(typeof node.shortcutTargetPath === "string" && node.shortcutTargetPath
+              ? { shortcutTargetPath: safeText(node.shortcutTargetPath, "", 4000) }
+              : {}),
             label: safeText(node.label, "未命名节点", MAX_LABEL_LENGTH) || "未命名节点",
             short: safeText(node.short, "", 32),
             detail: safeText(node.description),
@@ -925,6 +931,9 @@
           description: safeText(source.detail ?? source.description),
           ...(typeof source.programSource === "string"
             ? { programSource: safeText(source.programSource) }
+            : {}),
+          ...(typeof source.shortcutTargetPath === "string" && source.shortcutTargetPath
+            ? { shortcutTargetPath: safeText(source.shortcutTargetPath, "", 4000) }
             : {}),
           ...(typeof source.graphPath === "string" && source.graphPath
             ? { graphPath: safeText(source.graphPath, "", 4000) }

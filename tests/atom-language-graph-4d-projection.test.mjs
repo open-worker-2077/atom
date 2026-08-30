@@ -106,6 +106,28 @@ test('projection exposes derived lock state without changing Atom detail', async
   assert.equal(workshop.detail, '可核查的正文');
 });
 
+test('projection exposes only a validated linked shortcut target to the Web knowledge node', async () => {
+  const document = graphDocument();
+  document.graph.contain.push({
+    'thing@shortcut': '快捷入口',
+    situation: JSON.stringify({
+      contract: 'atom.shortcut',
+      version: 1,
+      referenceId: '11111111-1111-4111-8111-111111111111',
+      target: { state: 'linked', path: '石器工坊' }
+    }),
+    contain: [],
+    support: []
+  });
+
+  const { knowledge } = await projectAtomGraphWithPaths(document, {
+    atomTypesByPath: new Map([['快捷入口', ['shortcut']]])
+  });
+  const shortcut = knowledge.nodes.find((node) => node.label === '快捷入口');
+
+  assert.equal(shortcut.shortcutTargetPath, '石器工坊');
+});
+
 test('spatial projection hides every relation entering or leaving the default backup subtree', async () => {
   const document = {
     config: { schema_version: '2.0.0' },
