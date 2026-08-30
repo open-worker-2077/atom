@@ -44,4 +44,5 @@
 - [x] 5.3 Verify failure rollback, runtime restart, authoritative readback, Web refresh, and zero unrelated Program execution.
   - Evidence: seven copy-only commits rolled back to the source revision; source bytes unchanged; restart healthy; zero Program failures; `TC-I24-WEB-MOVE-*` covers authoritative F5 persistence and failure rollback.
 - [x] 5.4 Map each TestCase to an evidence ID and Issue #29, update Issue #1, and validate the OpenSpec change strictly.
-- [ ] 5.5 Commit, push, open and merge the PR after focused CI passes, deploy the shared runtime, and repeat the acceptance measurements.
+- [x] 5.5 Commit, push, open and merge the PR after focused CI passes, deploy the shared runtime, and repeat the acceptance measurements.
+  - Evidence `EV-I29-DEPLOYED-20260830-L`: `main@92ed07c`, shared 4784 health/published, Windows process priority Normal, and three consecutive deployed `.rep` writes at `3.727/3.742/3.705s` with zero candidate/executed Programs.
