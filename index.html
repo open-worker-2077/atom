@@ -276,39 +276,54 @@
         <div class="mobile-control-panel__scroll" aria-label="鼠标按键">
           <div class="mobile-control-panel__row">
             <button type="button" data-mobile-mouse-button="1" aria-pressed="false">中键</button>
+            <p class="mobile-control-panel__hint">按住中键，再在图区域拖动：横向转向，纵向抬头／俯视；前后远近当前仅支持鼠标滚轮。</p>
           </div>
         </div>
       </section>
       <section class="mobile-control-panel__group" data-mobile-control-group="keyboard" aria-labelledby="mobileKeyboardControls">
         <h2 class="mobile-control-panel__title" id="mobileKeyboardControls">键盘</h2>
         <div class="mobile-control-panel__scroll" aria-label="键盘按键">
-          <div class="mobile-control-panel__rows">
-            <div class="mobile-control-panel__row">
-              <button type="button" data-mobile-key="Escape" data-key-value="Escape">Esc</button>
-              <button type="button" data-mobile-key="ControlLeft" data-key-value="Control" data-mobile-modifier aria-pressed="false">Ctrl</button>
-              <button type="button" data-mobile-key="ShiftLeft" data-key-value="Shift" data-mobile-modifier aria-pressed="false">Shift</button>
-              <button type="button" data-mobile-key="AltLeft" data-key-value="Alt" data-mobile-modifier aria-pressed="false">Alt</button>
-              <button type="button" data-mobile-key="KeyA" data-key-value="a">A</button>
-              <button type="button" data-mobile-key="KeyS" data-key-value="s">S</button>
-              <button type="button" data-mobile-key="KeyD" data-key-value="d">D</button>
-              <button type="button" data-mobile-key="KeyF" data-key-value="f">F</button>
+          <div class="mobile-control-panel__key-groups">
+            <div class="mobile-control-panel__key-group" data-mobile-key-group="wandering">
+              <h3 class="mobile-control-panel__key-title">游走模式</h3>
+              <div class="mobile-control-panel__row">
+                <button type="button" data-mobile-key="KeyA" data-key-value="a">A</button>
+                <button type="button" data-mobile-key="KeyS" data-key-value="s">S</button>
+                <button type="button" data-mobile-key="KeyD" data-key-value="d">D</button>
+                <button type="button" data-mobile-key="KeyF" data-key-value="f">F</button>
+              </div>
             </div>
-            <div class="mobile-control-panel__row">
-              <button type="button" data-mobile-key="CapsLock" data-key-value="CapsLock">CapsLock</button>
+            <div class="mobile-control-panel__key-group" data-mobile-key-group="navigation">
+              <h3 class="mobile-control-panel__key-title">导航</h3>
+              <div class="mobile-control-panel__row">
               <button type="button" data-mobile-key="KeyZ" data-key-value="z">Z</button>
               <button type="button" data-mobile-key="KeyX" data-key-value="x">X</button>
               <button type="button" data-mobile-key="Home" data-key-value="Home">Home</button>
               <button type="button" data-mobile-key="End" data-key-value="End">End</button>
               <button type="button" data-mobile-key="PageUp" data-key-value="PageUp">PageUp</button>
               <button type="button" data-mobile-key="PageDown" data-key-value="PageDown">PageDown</button>
+              </div>
             </div>
-            <div class="mobile-control-panel__row">
-              <button type="button" data-mobile-key="KeyO" data-key-value="o">O</button>
-              <button type="button" data-mobile-key="KeyK" data-key-value="k">K</button>
-              <button type="button" data-mobile-key="KeyH" data-key-value="h">H</button>
-              <button type="button" data-mobile-key="KeyP" data-key-value="p">P</button>
-              <button type="button" data-mobile-key="Enter" data-key-value="Enter">Enter</button>
-              <button type="button" data-mobile-key="Delete" data-key-value="Delete">Delete</button>
+            <div class="mobile-control-panel__key-group" data-mobile-key-group="view">
+              <h3 class="mobile-control-panel__key-title">视图工具</h3>
+              <div class="mobile-control-panel__row">
+                <button type="button" data-mobile-key="CapsLock" data-key-value="CapsLock">CapsLock</button>
+                <button type="button" data-mobile-key="KeyO" data-key-value="o">O</button>
+                <button type="button" data-mobile-key="KeyH" data-key-value="h">H</button>
+                <button type="button" data-mobile-key="KeyP" data-key-value="p">P</button>
+              </div>
+            </div>
+            <div class="mobile-control-panel__key-group" data-mobile-key-group="operation">
+              <h3 class="mobile-control-panel__key-title">操作与编辑</h3>
+              <div class="mobile-control-panel__row">
+                <button type="button" data-mobile-key="Escape" data-key-value="Escape">Esc</button>
+                <button type="button" data-mobile-key="ControlLeft" data-key-value="Control" data-mobile-modifier aria-pressed="false">Ctrl</button>
+                <button type="button" data-mobile-key="ShiftLeft" data-key-value="Shift" data-mobile-modifier aria-pressed="false">Shift</button>
+                <button type="button" data-mobile-key="AltLeft" data-key-value="Alt" data-mobile-modifier aria-pressed="false">Alt</button>
+                <button type="button" data-mobile-key="KeyK" data-key-value="k">K</button>
+                <button type="button" data-mobile-key="Enter" data-key-value="Enter">Enter</button>
+                <button type="button" data-mobile-key="Delete" data-key-value="Delete">Delete</button>
+              </div>
             </div>
           </div>
         </div>
@@ -552,8 +567,8 @@
             <div><dt><kbd>单指按住后释放</kbd></dt><dd>等同鼠标右键，节点应用当前 A／S／D／F 视角，空白返回直接母域</dd></div>
             <div><dt><kbd>底部键盘</kbd></dt><dd>直接对应电脑键位，不另设业务动作按钮</dd></div>
             <div><dt><kbd>组合操作</kbd></dt><dd>一指按住 Ctrl／Shift／Alt，另一指点按或按住图区域</dd></div>
-            <div><dt><kbd>中键</kbd></dt><dd>一指按住底部“中键”，另一指在图区域点按可聚焦，拖动可旋转</dd></div>
-            <div><dt><kbd>滚轮</kbd></dt><dd>当前仍使用鼠标；尚未伪装成触控手势</dd></div>
+            <div><dt><kbd>中键</kbd></dt><dd>一指按住底部“中键”，另一指在图区域点按可聚焦；横向拖动转向，纵向拖动抬头／俯视</dd></div>
+            <div><dt><kbd>前后远近</kbd></dt><dd>当前仅支持鼠标滚轮，手机控制面尚无等价触控手势</dd></div>
           </dl>
           <p class="help-keyboard-note">按住 Ctrl 再点按图区域，即为 Ctrl + 鼠标左键；按住中键再在图区域点按或拖动，即为鼠标中键操作；抬手时释放。</p>
         </section>

@@ -24,6 +24,21 @@ test('coarse-pointer panel separates mouse controls from real keyboard keys', ()
   assert.ok(panel.length > 0);
   assert.match(mouseGroup, />鼠标</u);
   assert.match(keyboardGroup, />键盘</u);
+  for (const [group, label] of [
+    ['wandering', '游走模式'],
+    ['navigation', '导航'],
+    ['view', '视图工具'],
+    ['operation', '操作与编辑']
+  ]) {
+    assert.match(keyboardGroup, new RegExp(`data-mobile-key-group="${group}"[\\s\\S]*?>${label}<`, 'u'));
+  }
+  const wanderingGroup = keyboardGroup.slice(
+    keyboardGroup.indexOf('data-mobile-key-group="wandering"'),
+    keyboardGroup.indexOf('data-mobile-key-group="navigation"')
+  );
+  for (const code of ['KeyA', 'KeyS', 'KeyD', 'KeyF']) {
+    assert.match(wanderingGroup, new RegExp(`data-mobile-key="${code}"`, 'u'), code);
+  }
   assert.match(mouseGroup, /data-mobile-mouse-button="1"[^>]*>中键</u);
   assert.doesNotMatch(keyboardGroup, /data-mobile-mouse-button=/u);
   assert.doesNotMatch(mouseGroup, /data-mobile-key=/u);
@@ -65,4 +80,6 @@ test('input mapping exposes a dedicated route to mobile Web operation help', () 
   assert.match(html, /按住.*Ctrl.*图区域/u);
   assert.match(html, /按住后释放.*右键/u);
   assert.match(html, /按住.*中键.*图区域.*点按.*拖动/u);
+  assert.match(html, /中键[^<]*横向[^<]*转向[^<]*纵向[^<]*抬头[^<]*俯视/u);
+  assert.match(html, /前后[^<]*远近[^<]*仅支持[^<]*鼠标滚轮/u);
 });

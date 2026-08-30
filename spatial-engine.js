@@ -8501,7 +8501,11 @@
 
   syncPresentationControls();
   setHelpPage(activeHelpPage);
-  setHelpPanelVisible(state.demo.settings.helpVisible, false);
+  const mobileControlSurface = Boolean(global.matchMedia) && (
+    global.matchMedia("(max-width: 48rem)").matches
+    || global.matchMedia("(hover: none) and (pointer: coarse)").matches
+  );
+  setHelpPanelVisible(state.demo.settings.helpVisible && !mobileControlSurface, false);
   renderBindings();
   updateSelectionUI();
   updateMetrics();
