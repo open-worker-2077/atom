@@ -15,6 +15,7 @@
 - [x] 2.5 Establish one 4784 cold-preparation/readiness boundary and retain the prepared immutable world across all steady interactions.
 - [x] 2.6 Compute the canonical revision once per committed interaction and carry it through persistence, receipt, cache adoption, and publication.
 - [x] 2.7 Complete the initial private recovery backup before 4784 readiness so it cannot contend with first user interactions.
+- [x] 2.8 Install the Windows long-running runtime at normal scheduler priority so steady commits are not I/O-throttled after readiness.
 
 ## 3. Indexed runtime effects
 

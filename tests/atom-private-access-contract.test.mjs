@@ -108,6 +108,7 @@ test('long-running Atom task settings survive battery changes and restart crashe
     '  executionTimeLimit = [string]$settings.ExecutionTimeLimit',
     '  restartCount = $settings.RestartCount',
     '  restartInterval = [string]$settings.RestartInterval',
+    '  priority = $settings.Priority',
     '  unifiedScheduling = $settings.UseUnifiedSchedulingEngine',
     '} | ConvertTo-Json -Compress'
   ].join('\n');
@@ -121,6 +122,7 @@ test('long-running Atom task settings survive battery changes and restart crashe
     executionTimeLimit: 'PT0S',
     restartCount: 999,
     restartInterval: 'PT1M',
+    priority: 4,
     unifiedScheduling: false
   });
 });

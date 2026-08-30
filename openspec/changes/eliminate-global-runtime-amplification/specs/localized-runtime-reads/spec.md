@@ -15,6 +15,10 @@ The 4784 runtime SHALL complete one full authoritative read, validation, revisio
 - **WHEN** the runtime is configured with a private recovery backup
 - **THEN** its initial copy/push finishes before 4784 reports ready, and later authoritative writes join the delayed backup window instead of competing with the next CLI interaction
 
+#### Scenario: Windows runtime supervisor priority
+- **WHEN** the 4784 runtime is installed or repaired as an Atom-owned Windows scheduled task
+- **THEN** it runs at normal scheduler priority so ready-state commits are not throttled below an equivalent foreground runtime
+
 #### Scenario: Unrelated local commit
 - **WHEN** a Patch changes an ordinary node outside Agent, lock, Program, trigger, support, shortcut, or descendant-index definitions
 - **THEN** those prepared indexes remain valid and only the affected fact/path entries advance
