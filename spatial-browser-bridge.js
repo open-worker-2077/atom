@@ -233,6 +233,11 @@
     }));
   }
 
+  function setScopeLoadState(path, status, message = "") {
+    if (typeof lab.setScopeLoadState !== "function") return false;
+    return lab.setScopeLoadState(path, status, { message });
+  }
+
   async function pullKnowledge(requestedPath = lab.state().path || "root", options = {}) {
     const allowDuringTransaction = options.allowDuringTransaction === true;
     if (pulling) {
@@ -245,10 +250,13 @@
     pulling = true;
     const pullOperationEpoch = workspaceOperationEpoch;
     const initialLoad = document.body.dataset.spatialKnowledge !== "authoritative";
+    const normalizedPath = typeof requestedPath === "string" && requestedPath.trim()
+      ? requestedPath.trim()
+      : "root";
     try {
-      const normalizedPath = typeof requestedPath === "string" && requestedPath.trim()
-        ? requestedPath.trim()
-        : "root";
+      if (!initialLoad && !loadedPaths.has(normalizedPath)) {
+        setScopeLoadState(normalizedPath, "loading");
+      }
       if (initialLoad) setInitialLoadProgress("data", 15);
       const payload = await request(`/state?path=${encodeURIComponent(normalizedPath)}`);
       if (initialLoad) {
@@ -300,9 +308,11 @@
         setInitialLoadProgress("scene", 100);
       }
       document.body.dataset.spatialBridge = "connected";
+      setScopeLoadState(normalizedPath, "loaded");
       return true;
     } catch (error) {
       document.body.dataset.spatialBridge = "offline";
+      setScopeLoadState(normalizedPath, "failed", error && error.message || "");
       if (initialLoad) reportMainEntryUnavailable("state");
       return false;
     } finally {
@@ -547,6 +557,7 @@
     ].filter((path) => typeof path === "string" && path.trim()))];
     for (const path of requiredPaths) {
       if (!loadedPaths.has(path)) {
+        setScopeLoadState(path, "loading");
         await pullKnowledge(path, { allowDuringTransaction: true });
       }
     }

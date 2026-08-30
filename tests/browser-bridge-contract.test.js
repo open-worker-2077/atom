@@ -1276,6 +1276,12 @@ test('batch landing is acknowledged only when every selected Atom exists in the 
   assert.equal(imports.at(-1).revision, 1, 'the optimistic preview rolls back to the last authoritative world');
 });
 
+test('remote bridge publishes current-path loading and terminal scope states', () => {
+  assert.match(source, /setScopeLoadState\(path,\s*["']loading["']/u);
+  assert.match(source, /setScopeLoadState\(normalizedPath,\s*["']loaded["']/u);
+  assert.match(source, /setScopeLoadState\(normalizedPath,\s*["']failed["']/u);
+});
+
 test('single landing is failed and rolled back when authority keeps the source without one destination node', async () => {
   const listeners = new Map();
   const imports = [];

@@ -32,6 +32,7 @@
     selectionLabel: document.getElementById("selectionLabel"),
     selectionCopy: document.getElementById("selectionCopy"),
     selectionCaps: document.getElementById("selectionCaps"),
+    scopeLoadState: document.getElementById("scopeLoadState"),
     metricDepth: document.getElementById("metricDepth"),
     metricVisible: document.getElementById("metricVisible"),
     metricScale: document.getElementById("metricScale"),
@@ -675,6 +676,7 @@
     hitRegions: [],
     relationHitRegions: [],
     supportClauses: [],
+    scopeLoadStates: new Map(),
     clusterHitRegions: [],
     clusterScreenOffsets: new Map(),
     clusterDetailCandidates: [],
@@ -4041,6 +4043,44 @@
     });
   }
 
+  function scopeBlocksWorkspaceEdit(path = state.currentPath) {
+    const status = state.scopeLoadStates.get(path)?.status;
+    return status === "loading" || status === "failed";
+  }
+
+  function renderScopeLoadState() {
+    if (!ui.scopeLoadState) return;
+    const entry = state.scopeLoadStates.get(state.currentPath);
+    const normalizedStatus = entry?.status || "loaded";
+    const visibleCount = existingNodes(currentDomainNodes()).length;
+    let displayState = normalizedStatus;
+    let message = "";
+    if (normalizedStatus === "loading") {
+      message = "当前节点内容正在加载；完成前不会按空节点处理，也不能编辑或删除";
+    } else if (normalizedStatus === "failed") {
+      message = entry.message
+        ? `当前节点内容加载失败：${entry.message}；请重试，当前不可编辑或删除`
+        : "当前节点内容加载失败；请重试，当前不可编辑或删除";
+    } else if (visibleCount === 0) {
+      displayState = "loaded-empty";
+      message = "已加载，当前节点没有子内容";
+    }
+    document.body.dataset.spatialScopeState = displayState;
+    ui.scopeLoadState.textContent = message;
+    ui.scopeLoadState.hidden = !message;
+  }
+
+  function setScopeLoadState(path, status, detail = {}) {
+    const normalizedPath = typeof path === "string" && path.trim() ? path.trim() : "root";
+    const normalizedStatus = ["loading", "loaded", "failed"].includes(status) ? status : "loading";
+    state.scopeLoadStates.set(normalizedPath, {
+      status: normalizedStatus,
+      message: String(detail.message || "")
+    });
+    if (normalizedPath === state.currentPath) renderScopeLoadState();
+    return true;
+  }
+
   function hideDetailMagnifierPanel() {
     state.detailMagnifier.targetKey = "";
     state.detailMagnifier.layoutKey = "";
@@ -4919,6 +4959,10 @@
   }
 
   function markWorkspaceDelete() {
+    if (scopeBlocksWorkspaceEdit()) {
+      announce("当前节点内容尚未确认，不能删除");
+      return false;
+    }
     const transaction = workspace.transaction();
     if (!transaction) return false;
     if (!workspace.markDelete()) {
@@ -4946,6 +4990,7 @@
   }
 
   function updateSelectionUI() {
+    renderScopeLoadState();
     if (!state.selected) {
       const viewLabel = viewModeModel.modeLabels[state.viewMode] || state.viewMode;
       ui.selectionLabel.textContent = state.clusterFieldOpen
@@ -6517,6 +6562,10 @@
     }
     if (transactionGuardedIntents.has(intent) && transactionBlocksViewChange()) {
       announce("请先用 Enter 或 Esc 结束当前编辑");
+      return false;
+    }
+    if (["createNode", "editNode", "editEdge", "deleteEdit"].includes(intent) && scopeBlocksWorkspaceEdit()) {
+      announce("当前节点内容尚未确认，不能编辑或删除");
       return false;
     }
     const target = arguments.length >= 3 ? explicitTarget : state.selected;
@@ -8936,6 +8985,7 @@
     exportField: exportFieldProjection,
     exportKnowledge: () => workspace.exportKnowledge(),
     importKnowledge,
+    setScopeLoadState,
     refitCurrentDomain,
     refreshLoadedDomain,
     mermaidTarget,

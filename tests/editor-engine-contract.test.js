@@ -543,3 +543,13 @@ test('all ASDF modes resolve structural editing through facts instead of visual 
   assert.match(pointerDown, /semanticEdit/);
   assert.doesNotMatch(pointerDown, /state\.viewMode\s*===/);
 });
+
+test('current scope loading is visible and blocks edits until authority is known', () => {
+  assert.match(source, /function setScopeLoadState\s*\(/u);
+  assert.match(source, /scopeLoadStates:\s*new Map/u);
+  assert.match(source, /当前节点内容正在加载/u);
+  assert.match(source, /当前节点内容加载失败/u);
+  assert.match(source, /已加载，当前节点没有子内容/u);
+  assert.match(source, /function scopeBlocksWorkspaceEdit\s*\(/u);
+  assert.match(functionSource('markWorkspaceDelete'), /scopeBlocksWorkspaceEdit\(\)/u);
+});
