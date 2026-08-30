@@ -292,6 +292,25 @@ export function prepareSlotStructureWorld(atoms) {
   return slotStructure;
 }
 
+function pathsOverlap(left, right) {
+  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+}
+
+export function inheritPreparedSlotStructureWorld(previousAtoms, nextAtoms, changedPaths = []) {
+  if (!Object.isFrozen(nextAtoms)) return false;
+  const previousSlotStructure = preparedSlotStructureSnapshots.get(previousAtoms);
+  if (!previousSlotStructure) return false;
+  const protectedPaths = [
+    ...previousSlotStructure.domains.flatMap(({ path, body }) => [path, body]),
+    ...previousSlotStructure.locks.flatMap(({ path, body }) => [path, body])
+  ].filter(Boolean);
+  if (changedPaths.some((changedPath) => (
+    protectedPaths.some((protectedPath) => pathsOverlap(changedPath, protectedPath))
+  ))) return false;
+  preparedSlotStructureSnapshots.set(nextAtoms, previousSlotStructure);
+  return true;
+}
+
 export function inheritPreparedAccessWorld(previousAtoms, nextAtoms) {
   if (!Object.isFrozen(nextAtoms)) return false;
   const previousExplore = preparedExploreSnapshots.get(previousAtoms);

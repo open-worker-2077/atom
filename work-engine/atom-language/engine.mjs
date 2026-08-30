@@ -69,6 +69,7 @@ import {
 import {
   createAccessController,
   inheritPreparedAccessWorld,
+  inheritPreparedSlotStructureWorld,
   describeAtom,
   executeExploreItem,
   executeProgramExplore,
@@ -2867,22 +2868,25 @@ export async function executeAtomLanguage(options = {}) {
     const canRebaseProjection = programTransformLogs.length === 0
       && postRefresh.transformLogs.length === 0
       && postRefresh.pathChanges.length === 0;
+    const transformedPaths = [...new Set([
+      transformed.sourcePath,
+      transformed.resultPath,
+      ...(transformed.relationPaths ?? []),
+      ...(transformed.shortcutPaths ?? [])
+    ].filter(Boolean))];
+    const inheritedSlotStructure = isStructurePreservingTransform(item)
+      && inheritPreparedSlotStructureWorld(atoms, nextAtoms, transformedPaths);
     const preparedRuntimeRecordsPromise = canRebaseProjection
       ? Promise.resolve().then(() => {
           prepareTransformRelationIndex(nextAtoms, path.basename(contextFile));
-          prepareSlotStructureWorld(nextAtoms);
+          if (!inheritedSlotStructure) prepareSlotStructureWorld(nextAtoms);
           return options.programScheduler?.prepareRuntimeRecords?.(nextAtoms) ?? null;
         })
       : null;
     await commitChangedGraph(nextAtoms, canRebaseProjection ? {
       projectionRebase: {
         previousAtoms: atoms,
-        changedPaths: [...new Set([
-          transformed.sourcePath,
-          transformed.resultPath,
-          ...(transformed.relationPaths ?? []),
-          ...(transformed.shortcutPaths ?? [])
-        ].filter(Boolean))]
+        changedPaths: transformedPaths
       },
       localizedSituationValidation: !programSurfaceChanged
         && isLocalizedSituationTransform(item),
