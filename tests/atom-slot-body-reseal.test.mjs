@@ -44,10 +44,15 @@ function adopted(value) {
 
 function fixture() {
   return [atom('表单槽体', '', [atom('候选表单', '表单契约', [
-    atom('姓名', '姓名槽契约', [], [{ 'if@current': true, then: [{ 'thing@program': '计算' }] }], ['text'], '旧说明'),
+    atom('姓名', '姓名槽契约', [], [{
+      'if@current': true,
+      if: [{ 'thing@program': '计算' }],
+      then: [{ thing: '状态' }]
+    }], ['text'], '旧说明'),
     atom('空备注', '备注槽契约'),
+    atom('状态', '状态事实契约'),
     atom('分组', '分组槽契约', [atom('城市', '城市槽契约')]),
-    atom('计算', 'def main(arguments):\n    return arguments', [], [], ['program'])
+    atom('计算', 'def main(arguments):\n    return True', [], [], ['program'])
   ])])];
 }
 
@@ -104,7 +109,11 @@ test('re-seal updates every mapped slot while preserving two nested material sub
   name[`thing@rich@${roleType}#新说明`] = '联系人';
   setField(name, 'situation', '联系人新契约');
   field(group, 'contain').push(name);
-  field(model, 'contain').push(atom('新增槽', '新增槽契约', [], [{ 'if@current': true, then: [{ 'thing@program': '计算' }] }], ['new']));
+  field(model, 'contain').push(atom('新增槽', '新增槽契约', [], [{
+    'if@current': true,
+    if: [{ 'thing@program': '计算' }],
+    then: [{ thing: '状态' }]
+  }], ['new']));
 
   const result = await seal(atoms);
 

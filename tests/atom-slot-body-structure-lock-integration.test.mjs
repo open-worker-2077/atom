@@ -17,6 +17,10 @@ function atom(thing, situation = '', contain = [], support = []) {
   return { thing, situation, contain, support };
 }
 
+function thingOf(value) {
+  return Object.entries(value).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
+}
+
 async function lockedWorld() {
   const sealed = await applySlotBodyEffect({
     atoms: [atom('槽体', '', [atom('候选', '', [atom('输入'), atom('输出')])])],
@@ -45,6 +49,14 @@ async function setup(t) {
   atoms.push({
     'thing@program': 'Seal',
     situation: 'slot_body({"action":"seal","body":"\u69fd\u4f53"})',
+    contain: [], support: []
+  });
+  atoms.push({
+    'thing@program': 'ModifyAndSeal',
+    situation: [
+      'transform({"thing":"\u69fd\u4f53/\u69fd\u6a21/\u8f93\u5165","situation.rep.v2":None})',
+      'slot_body({"action":"seal","body":"\u69fd\u4f53"})'
+    ].join('\n'),
     contain: [], support: []
   });
   await fs.writeFile(contextFile, `${JSON.stringify(atoms, null, 2)}\n`, 'utf8');
@@ -94,6 +106,38 @@ test('authorized reseal replaces its own mapped projections without a structural
     ...files
   });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+test('one Program may edit its model and reseal the same slot body atomically', async (t) => {
+  const files = await setup(t);
+  const material = await executeAtomLanguage({
+    source: 'transform new {"thing":"\u69fd\u4f53/\u69fd\u4f8b/\u5b9e\u4f8b/\u8f93\u5165/\u672c\u5730\u6599","situation":"\u4fdd\u7559","contain":[],"support":[]}',
+    ...files
+  });
+  assert.equal(material.ok, true, JSON.stringify(material.errors));
+  const materialWorld = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const before = JSON.stringify(materialWorld
+    .find((entry) => thingOf(entry) === '\u69fd\u4f53').contain
+    .find((entry) => thingOf(entry) === '\u69fd\u4f8b').contain
+    .find((entry) => thingOf(entry) === '\u5b9e\u4f8b').contain
+    .find((entry) => thingOf(entry) === '\u8f93\u5165').contain);
+
+  const result = await executeAtomLanguage({
+    source: 'transform {"thing.run.":"ModifyAndSeal"}',
+    programScheduler: createProgramRuntimeScheduler(),
+    ...files
+  });
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  const committed = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const body = committed.find((entry) => thingOf(entry) === '\u69fd\u4f53');
+  const modelInput = body.contain.find((entry) => thingOf(entry) === '\u69fd\u6a21')
+    .contain.find((entry) => thingOf(entry) === '\u8f93\u5165');
+  const instanceInput = body.contain.find((entry) => thingOf(entry) === '\u69fd\u4f8b')
+    .contain.find((entry) => thingOf(entry) === '\u5b9e\u4f8b').contain
+    .find((entry) => thingOf(entry) === '\u8f93\u5165');
+  assert.equal(modelInput.situation, 'v2');
+  assert.equal(instanceInput.situation, 'v2');
+  assert.equal(JSON.stringify(instanceInput.contain), before);
 });
 
 test('structure-preserving edits reuse slot locks only when changed paths stay outside slot domains', async () => {

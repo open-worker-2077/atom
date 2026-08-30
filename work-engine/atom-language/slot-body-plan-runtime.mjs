@@ -194,6 +194,17 @@ function compilePlan(layout, structureLock = null) {
   const support = [];
   for (const record of records) {
     for (const rule of directedSupports(record.atom)) {
+      if (Array.isArray(rule.then) && rule.then.some((endpoint) => (
+        Object.hasOwn(endpoint ?? {}, 'thing@program')
+      ))) {
+        return {
+          error: slotError('INVALID_SLOT_PRINT_PLAN', '槽模 support 后项必须是普通事实 Thing', {
+            source: record.absolute,
+            rule,
+            causeCode: 'SUPPORT_FACT_CONSEQUENT_REQUIRED'
+          })
+        };
+      }
       const compiledRule = compileSupportRule(record, rule, records, roleByRelative);
       if (!compiledRule) {
         return {

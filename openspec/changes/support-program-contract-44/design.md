@@ -25,7 +25,11 @@ The regression will construct an ordinary antecedent with `if@current: true`, ad
 
 Alternative considered: test a Program-only antecedent with `then@current`. Rejected because it collapses the decision Program into the support antecedent and cannot prove the terminology or ordinary-Thing boundary required by Issue #44.
 
-The parser therefore rejects every support rule whose owner is `thing@program`: a decision Program may be referenced by `if`, but cannot use `if@current` or `then@current` to become the same rule's fact endpoint. Program-to-Program workflow relationships, when needed, must be represented through ordinary auditable fact nodes rather than turning executable nodes into boolean facts.
+The parser therefore rejects every support rule whose owner is `thing@program`, every Program-only antecedent, and every `thing@program` consequent: a decision Program may be referenced only by `if`, while both fact sides remain ordinary Things. Program-to-Program workflow relationships, when needed, must be represented through ordinary auditable fact nodes rather than turning executable nodes into boolean facts.
+
+Graph parser, Program form normalization, and slot-plan compilation enforce the same boundary. N/M arity counts include only ordinary fact endpoints; a decision Program never turns a valid one-to-many rule into native many-to-many. Existing slot fixtures and night-watch scripts are migrated so calculation runs through its own `trigger` contract and support points only to ordinary facts.
+
+Public reseal stays atomic: a Program may change mapped nodes under one slot body's `槽模` only when that same Program emits `slot_body({"action":"seal","body":...})` for that exact body in the same central transaction. The capability is derived from the paired effects, is path-bounded to that model, and is not granted to direct CLI transforms or a Program sealing another body.
 
 ### Characterize before editing runtime code
 

@@ -215,11 +215,16 @@ async function main() {
           },
           {
             'thing@number': '金额', situation: 'output slot contract', contain: [],
-            support: [{ 'if@current': true, then: [{ 'thing@program': '共享计算' }] }]
+            support: [{
+              'if@current': true,
+              if: [{ 'thing@program': '共享计算' }],
+              then: [{ thing: '结果' }]
+            }]
           },
+          { thing: '结果', situation: 'ordinary result fact', contain: [], support: [] },
           {
             'thing@program': '共享计算',
-            situation: 'def main(arguments):\n    return arguments', contain: [], support: []
+            situation: 'def main(arguments):\n    return True', contain: [], support: []
           }
         ], support: []
       }], support: []

@@ -2,7 +2,7 @@ import path from 'node:path';
 
 const FUNCTION_NAMES = Object.freeze([
   'agent', 'current_atom', 'explore', 'jump', 'lock', 'message',
-  'json_parse', 'shortcut', 'slot_body', 'transform', 'use_program', 'work_order'
+  'json_parse', 'shortcut', 'slot_body', 'transform', 'trigger', 'use_program', 'work_order'
 ]);
 
 function atom(thing, situation = '', contain = [], type = '') {

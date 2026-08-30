@@ -33,13 +33,18 @@ function fixture() {
     atom('客户', '客户槽契约', [
       atom('地址', '地址槽契约', [atom('城市', '城市槽契约', [], [], ['text'], '城市说明')])
     ], [{ 'if@current': true, then: [{ thing: '金额' }] }], ['text'], '客户说明'),
-    atom('金额', '金额槽契约', [], [{ 'if@current': true, then: [{ 'thing@program': '共享计算' }] }], ['number']),
+    atom('金额', '金额槽契约', [], [{
+      'if@current': true,
+      if: [{ 'thing@program': '共享计算' }],
+      then: [{ thing: '结果' }]
+    }], ['number']),
+    atom('结果', '结果槽契约'),
     atom('备选客户', '备选槽契约'),
     atom('审核枢纽', '审核契约', [], [{
       if: [{ and: [{ thing: '客户' }, { thing: '备选客户' }] }],
       'then@current': true
     }]),
-    atom('共享计算', 'def main(arguments):\n    return arguments', [], [], ['program'], '共享源码')
+    atom('共享计算', 'def main(arguments):\n    return True', [], [], ['program'], '共享源码')
   ], [], ['dataflow'], '普通候选槽模')])];
 }
 function planOf(atoms) {
@@ -76,11 +81,18 @@ test('seal stores a deterministic complete owner-local support AST and no defaul
   const amount = plan.roles.find((role) => role.path === './金额');
   const alternate = plan.roles.find((role) => role.path === './备选客户');
   const hub = plan.roles.find((role) => role.path === './审核枢纽');
+  const result = plan.roles.find((role) => role.path === './结果');
+  const decision = plan.roles.find((role) => role.path === './共享计算');
   assert.deepEqual(plan.support.find((item) => item.owner_role_id === customer.role_id).rule, {
     'if@current': true, then: [{ thing: amount.role_id }]
   });
   assert.deepEqual(plan.support.find((item) => item.owner_role_id === hub.role_id).rule, {
     if: [{ and: [{ thing: customer.role_id }, { thing: alternate.role_id }] }], 'then@current': true
+  });
+  assert.deepEqual(plan.support.find((item) => item.owner_role_id === amount.role_id).rule, {
+    'if@current': true,
+    if: [{ 'thing@program': decision.role_id }],
+    then: [{ thing: result.role_id }]
   });
   const repeated = await seal(once.atoms);
   assert.equal(planOf(repeated.atoms).revision, plan.revision);
@@ -103,7 +115,9 @@ test('print rewrites complete support AST to the current instance and shares mod
     'then@current': true
   }]);
   assert.deepEqual(field(find(printed.atoms, '订单槽体/槽例/订单001/金额'), 'support'), [{
-    'if@current': true, then: [{ 'thing@program': '订单槽体/槽模/共享计算' }]
+    'if@current': true,
+    if: [{ 'thing@program': '订单槽体/槽模/共享计算' }],
+    then: [{ thing: '订单槽体/槽例/订单001/结果' }]
   }]);
 });
 
@@ -145,4 +159,22 @@ test('seal rejects the retired physical blank-example layout', async () => {
   const result = await applySlotBodyEffect({ atoms: legacy, effect: { action: 'seal', body: '旧槽体' } });
   assert.equal(result.error?.code, 'INVALID_SLOT_BODY_LAYOUT');
   assert.deepEqual(legacy, before);
+});
+
+test('seal rejects a Program used as a support consequent fact', async () => {
+  const invalid = [atom('非法槽体', '', [atom('候选流', '', [
+    atom('事实', '', [], [{ 'if@current': true, then: [{ 'thing@program': '判定' }] }]),
+    atom('判定', 'def main(arguments):\n    return True', [], [], ['program'])
+  ])])];
+  const before = structuredClone(invalid);
+
+  const result = await applySlotBodyEffect({
+    atoms: invalid,
+    effect: { action: 'seal', body: '非法槽体' },
+    sourceProgramPath: '注册'
+  });
+
+  assert.equal(result.error?.code, 'INVALID_SLOT_PRINT_PLAN');
+  assert.equal(result.error?.details?.causeCode, 'SUPPORT_FACT_CONSEQUENT_REQUIRED');
+  assert.deepEqual(invalid, before);
 });

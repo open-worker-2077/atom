@@ -464,12 +464,10 @@ test('deployed legacy-support provenance remains valid while a new Program seals
   assert.equal(sealed.result.ok, true, JSON.stringify(sealed));
 });
 
-test('public Agent resolution rejects unauthorized and forged legacy support provenance', async (t) => {
+test('directionless legacy relations stay inert while forged provenance is rejected', async (t) => {
   const files = await migratedLegacySupportWorld();
   removeTemporaryDirectoryAfter(t, files.directory);
-  await assert.rejects(resolveAgentContext(files.contextFile, '冰'), {
-    code: 'SUPPORT_OWNER_CURRENT_REQUIRED'
-  });
+  await assert.doesNotReject(resolveAgentContext(files.contextFile, '冰'));
   await assert.rejects(resolveAgentContext(files.contextFile, '冰', {
     compatibilityManifest: {
       ...files.compatibilityManifest,

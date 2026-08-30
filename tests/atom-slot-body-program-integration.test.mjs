@@ -28,8 +28,13 @@ function world() {
     atom('研发窗口', '', [], [], ['agent', '研发']),
     atom('订单槽体', '', [atom('候选流', '', [
       atom('客户', '客户槽契约', [], [{ 'if@current': true, then: [{ thing: '金额' }] }], ['text']),
-      atom('金额', '金额槽契约', [], [{ 'if@current': true, then: [{ 'thing@program': '共享计算' }] }], ['number']),
-      atom('共享计算', 'def main(arguments):\n    return arguments', [], [], ['program'])
+      atom('金额', '金额槽契约', [], [{
+        'if@current': true,
+        if: [{ 'thing@program': '共享计算' }],
+        then: [{ thing: '结果' }]
+      }], ['number']),
+      atom('结果', '结果槽契约'),
+      atom('共享计算', 'def main(arguments):\n    return True', [], [], ['program'])
     ])]),
     atom('槽体封装程序', 'slot_body({"action":"seal","body":"Root/订单槽体"})', [], [], ['program']),
     atom('槽体打印程序', 'use_program({"name":"Root/订单槽体/print","arguments":{"name":"订单001"}})', [], [], ['program'])
@@ -59,7 +64,9 @@ test('Program seals then prints one instance with shared Program and owner-local
   assert.ok(find(committed, 'Root/订单槽体/槽例/订单001'));
   assert.equal(find(committed, 'Root/订单槽体/槽例/订单001/共享计算'), null);
   assert.deepEqual(find(committed, 'Root/订单槽体/槽例/订单001/金额').support, [{
-    'if@current': true, then: [{ 'thing@program': 'Root/订单槽体/槽模/共享计算' }]
+    'if@current': true,
+    if: [{ 'thing@program': 'Root/订单槽体/槽模/共享计算' }],
+    then: [{ thing: 'Root/订单槽体/槽例/订单001/结果' }]
   }]);
   const projected = await executeAtomLanguage({
     ...runtime, source: 'atom', programScheduler: createProgramRuntimeScheduler(), programMode: 'project'

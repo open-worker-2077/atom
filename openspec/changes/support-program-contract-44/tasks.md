@@ -37,3 +37,12 @@
 - [x] 6.2 Project empty support arrays only inside the typed default backup while preserving its complete Thing, contain, and situation facts.
 - [x] 6.3 Verify the affected context, Graph projection, and Program scheduling chain, including inactive Program and restoration behavior.
 - [ ] 6.4 Validate OpenSpec, run release regression, deploy the same merged version, and bind cold-start evidence to #44/#10/#1.
+
+## 7. Ordinary consequent closure
+
+- [x] 7.1 Add RED coverage for `thing@program` consequents at Graph parser, Program form, and slot-plan compilation boundaries.
+- [x] 7.2 Reject Program consequents consistently while keeping Program selectors valid only as `if` decision dependencies.
+- [x] 7.3 Count only ordinary fact antecedents for N/M arity and preserve valid Program-gated one-to-many rules.
+- [x] 7.4 Migrate slot fixtures and night-watch synthetic scripts from `then → Program` to ordinary consequents plus independent decision/trigger Programs.
+- [x] 7.5 Add the public-CLI RED/GREEN seam for one-Program model edit + same-body reseal, while direct model edits remain locked.
+- [ ] 7.6 Run the precise Graph/Form/slot chain, deploy the merged version, and bind current evidence to #4/#10/#1.

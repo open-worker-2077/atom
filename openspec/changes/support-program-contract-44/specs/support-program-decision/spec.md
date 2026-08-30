@@ -28,6 +28,11 @@ The system SHALL distinguish the ordinary antecedent Thing, the independent `thi
 - **THEN** Graph rejects the rule with `SUPPORT_FACT_ANTECEDENT_REQUIRED`
 - **AND** the owner must add at least one ordinary fact antecedent while keeping each Program only as a decision dependency
 
+#### Scenario: Decision Program cannot replace an ordinary consequent
+- **WHEN** a rule names a `thing@program` selector in `then`
+- **THEN** Graph rejects the rule with `SUPPORT_FACT_CONSEQUENT_REQUIRED`
+- **AND** the rule must name an ordinary consequent Thing while keeping the Program only inside `if` as a decision dependency
+
 ### Requirement: Boolean decision gates support establishment
 The system SHALL establish the declared ordinary Thing-to-Thing support only when the referenced support-decision Program returns strict boolean `true`. It SHALL leave the support unestablished when that Program returns strict boolean `false`, and SHALL reject a non-boolean result.
 
@@ -79,3 +84,16 @@ The system SHALL preserve support declarations stored below the typed default ba
 #### Scenario: Restored support returns to active validation
 - **WHEN** the archived subtree is restored outside the typed default backup
 - **THEN** its support declaration is projected and validated under the current active support contract before it can participate in Graph or Program execution
+
+### Requirement: Slot model revision and reseal are one bounded Program transaction
+The system SHALL allow a Program to transform mapped nodes under one slot model only when that same Program seals that exact slot body in the same central transaction. It SHALL keep direct model edits locked, SHALL NOT transfer the capability across Programs or slot bodies, and SHALL roll back the complete transaction if reseal fails.
+
+#### Scenario: Same Program revises and reseals one model
+- **WHEN** one Program transforms a mapped model node and emits `slot_body(action=seal)` for that exact body
+- **THEN** the model revision and every derived instance update commit atomically
+- **AND** unmapped instance-local material remains byte-for-byte unchanged
+
+#### Scenario: Direct or cross-body revision remains denied
+- **WHEN** a caller directly transforms a mapped model node, or a Program transforms one model while sealing another body
+- **THEN** the structure lock rejects the model transform
+- **AND** no partial model or instance revision is committed

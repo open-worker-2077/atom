@@ -338,7 +338,7 @@ function projectAtom(atom, location, rootThing, options = {}) {
     projected[rawKey] = insideDefaultBackup
       ? []
       : value
-        .filter((selector) => options.allowLegacySupport !== true || !isLegacySupportEntry(selector))
+        .filter((selector) => !isLegacySupportEntry(selector))
         .map((selector) => projectedSupport(selector, rootThing));
   }
   return projected;
