@@ -10,6 +10,7 @@ import {
   DEFAULT_ATOM_GRAPH_PORT,
   createOneShotTimingObserver,
   createAtomGraphHandlers,
+  normalizeOwnProcessPriority,
   parseAtomGraphServerArgs,
   startAtomGraphServer
 } from '../work-engine/atom-language/graph-server.mjs';
@@ -24,6 +25,30 @@ import {
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+test('Atom runtime promotes its own inherited below-normal priority without administrator access', () => {
+  const calls = [];
+  const result = normalizeOwnProcessPriority({
+    getPriority: () => 10,
+    setPriority: (pid, priority) => calls.push([pid, priority]),
+    normalPriority: 0
+  });
+
+  assert.deepEqual(calls, [[0, 0]]);
+  assert.deepEqual(result, { changed: true, before: 10, after: 0 });
+});
+
+test('Atom runtime keeps an already normal or higher own-process priority', () => {
+  let called = false;
+  const result = normalizeOwnProcessPriority({
+    getPriority: () => 0,
+    setPriority: () => { called = true; },
+    normalPriority: 0
+  });
+
+  assert.equal(called, false);
+  assert.deepEqual(result, { changed: false, before: 0, after: 0 });
+});
 
 test('Atom HTTP handlers translate transport payloads into one interaction runtime', async () => {
   const calls = [];

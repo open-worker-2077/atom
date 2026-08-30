@@ -16,6 +16,7 @@
 - [x] 2.6 Compute the canonical revision once per committed interaction and carry it through persistence, receipt, cache adoption, and publication.
 - [x] 2.7 Complete the initial private recovery backup before 4784 readiness so it cannot contend with first user interactions.
 - [x] 2.8 Install the Windows long-running runtime at normal scheduler priority so steady commits are not I/O-throttled after readiness.
+- [x] 2.9 Normalize the runtime's own inherited process priority before readiness so an existing task can recover without administrator-only re-registration.
 
 ## 3. Indexed runtime effects
 
