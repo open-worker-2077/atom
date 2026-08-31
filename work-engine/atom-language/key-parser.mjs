@@ -160,6 +160,20 @@ export function parseAtomKey(rawKey, options = {}) {
     if (section.symbol === '~') hints.push(command);
   }
 
+  if (baseKey === 'thing'
+    && options.allowRetiredAgentKey === false
+    && types.some((type) => type.raw === 'agent')) {
+    errors.push(diagnostic(
+      'RETIRED_AGENT_KEY_TYPE',
+      'Agent 不再是 Key 类型；请使用包含一个顶层字面量 agent({...}) 的 thing@program',
+      {
+        rawKey,
+        replacement: 'thing@program with one literal agent({...}) declaration',
+        details: { rawKey, replacement: 'thing@program with one literal agent({...}) declaration' }
+      }
+    ));
+  }
+
   if (baseKey === 'support') {
     const markerError = validateSupportTypes(types);
     if (markerError) errors.push(diagnostic(markerError.code, markerError.message, {
