@@ -12,8 +12,12 @@ import {
   planAgentProgramMigration,
   rollbackAgentProgramMigration
 } from '../src/atom-system/operations/agent-program-migration.mjs';
-import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
+import {
+  createJsonTransactionJournal,
+  createJsonWorldRepository
+} from '../src/atom-system/adapters/json-world-repository.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
+import { createCommitCoordinator } from '../src/atom-system/world-runtime/commit-coordinator.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
@@ -583,7 +587,108 @@ test('same apply attempt reconstructs a missing deployment receipt from verified
   assert.equal(recovered.recovered, true);
   assert.equal(recovered.transaction.commandId, committed.commandId);
   assert.equal(after.receipts.length, 1);
+  assert.deepEqual(recovered.warnings, [{
+    code: 'AGENT_MIGRATION_DEPLOYMENT_RECEIPT_RECOVERED'
+  }, {
+    code: 'AGENT_MIGRATION_PROJECTION_RECOVERY_PENDING',
+    projection: 'graph',
+    cause: 'RECOVERED_COMMIT_PROJECTION_UNVERIFIED'
+  }]);
   assert.equal(JSON.parse(await fs.readFile(recovered.receiptFile, 'utf8')).rollback.targetCommandId, committed.commandId);
+});
+
+test('same apply attempt finalizes an after-world-write prepared migration before reconstructing its receipt', async (t) => {
+  const localAppData = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-migration-prepared-'));
+  t.after(() => fs.rm(localAppData, { recursive: true, force: true }));
+  const worldDirectory = path.join(localAppData, 'AtomGraph', 'worlds', 'primary');
+  const contextFile = path.join(worldDirectory, 'atom.json');
+  const graphFile = path.join(worldDirectory, 'graph.json');
+  const journalFile = path.join(worldDirectory, 'atom.transactions.json');
+  const attemptId = 'prepared-1';
+  const source = [atom('thing@agent', 'Legacy', 'prepared recovery source')];
+  const sourceBytes = Buffer.from(`${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  await fs.mkdir(worldDirectory, { recursive: true });
+  await fs.writeFile(contextFile, sourceBytes);
+  const plan = await planAgentProgramMigration({
+    snapshot: { facts: source, revision: revisionOfWorldFacts(source) },
+    programScheduler
+  });
+  const backupDirectory = path.join(
+    worldDirectory, 'migration-backups', 'agent-program', plan.migrationId, attemptId
+  );
+  const copiedFile = path.join(backupDirectory, 'atom.json');
+  const backupReceiptFile = path.join(backupDirectory, 'backup-receipt.json');
+  await fs.mkdir(backupDirectory, { recursive: true });
+  await fs.writeFile(copiedFile, sourceBytes, { flag: 'wx' });
+  await fs.writeFile(backupReceiptFile, `${JSON.stringify({
+    contract: 'atom.agent-program-private-backup',
+    version: 1,
+    migrationId: plan.migrationId,
+    attemptId,
+    directory: backupDirectory,
+    sourceFile: contextFile,
+    copiedFile,
+    sourceFileHash: hashBytes(sourceBytes),
+    copiedFileHash: hashBytes(sourceBytes),
+    sourceRevision: plan.expectedRevision,
+    sourceFactsHash: plan.sourceFactsHash,
+    targetRevision: plan.nextRevision,
+    targetFactsHash: plan.nextFactsHash,
+    summary: plan.summary,
+    receiptFile: backupReceiptFile
+  }, null, 2)}\n`, 'utf8');
+
+  const journal = createJsonTransactionJournal({ file: journalFile });
+  const coordinator = createCommitCoordinator({
+    worldRepository: createJsonWorldRepository({
+      file: contextFile,
+      worldId: 'primary',
+      initialFacts: []
+    }),
+    journalRepository: journal,
+    faultInjector: async (point) => {
+      if (point === 'after-world-write') throw Object.assign(new Error('prepared fault'), {
+        code: 'TEST_AFTER_WORLD_WRITE'
+      });
+    }
+  });
+  const correlationId = `${plan.migrationId}:attempt:${attemptId}`;
+  const commandId = 'legacy-prepared-agent-migration';
+  await assert.rejects(coordinator.execute({
+    command: {
+      contract: 'atom.world-command',
+      version: 1,
+      commandId,
+      correlationId,
+      expectedRevision: plan.expectedRevision,
+      name: 'legacy-transition',
+      payload: { source: `agent-program-migration:${plan.migrationId}` }
+    },
+    transition: async () => ({
+      facts: plan.facts,
+      result: { source: `agent-program-migration:${plan.migrationId}` }
+    })
+  }), { code: 'TEST_AFTER_WORLD_WRITE' });
+  const interrupted = await journal.readState();
+  assert.equal(interrupted.prepared.length, 1);
+  assert.equal(interrupted.receipts.length, 0);
+  assert.equal(revisionOfWorldFacts(JSON.parse(await fs.readFile(contextFile, 'utf8'))), plan.nextRevision);
+
+  const recovered = JSON.parse((await execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', attemptId
+  ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } })).stdout);
+  const finalized = await createJsonTransactionJournal({ file: journalFile }).readState();
+  const deployment = JSON.parse(await fs.readFile(recovered.receiptFile, 'utf8'));
+
+  assert.equal(recovered.recovered, true);
+  assert.equal(recovered.transaction.commandId, commandId);
+  assert.equal(finalized.prepared.length, 0);
+  assert.equal(finalized.receipts.length, 1);
+  assert.equal(finalized.receipts[0].commandId, commandId);
+  assert.equal(revisionOfWorldFacts(JSON.parse(await fs.readFile(contextFile, 'utf8'))), plan.nextRevision);
+  await assert.rejects(fs.access(graphFile), { code: 'ENOENT' });
+  assert.equal(recovered.warnings[1].code, 'AGENT_MIGRATION_PROJECTION_RECOVERY_PENDING');
+  assert.deepEqual(deployment.warnings, recovered.warnings);
 });
 
 test('operator rejects a deployment receipt whose persistence paths do not match the configured world', async (t) => {

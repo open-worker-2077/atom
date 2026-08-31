@@ -417,8 +417,14 @@ async function recoverApplyAttempt({ runtime, attemptId, programScheduler }) {
     attemptId,
     programScheduler
   });
-  const current = await readWorld(runtime.contextFile);
   const journalFile = path.join(runtime.worldDirectory, 'atom.transactions.json');
+  const persistence = createTransactionalWorldPersistence({
+    contextFile: runtime.contextFile,
+    projectionFile: runtime.graphFile,
+    journalFile
+  });
+  await persistence.recover();
+  const current = await readWorld(runtime.contextFile);
   const state = await createJsonTransactionJournal({ file: journalFile }).readState();
   const correlationId = `${plan.migrationId}:attempt:${attemptId}`;
   const matches = state.receipts.filter((record) => (
@@ -451,7 +457,13 @@ async function recoverApplyAttempt({ runtime, attemptId, programScheduler }) {
       expectedRevision: plan.nextRevision
     }
   };
-  const warnings = [{ code: 'AGENT_MIGRATION_DEPLOYMENT_RECEIPT_RECOVERED' }];
+  const warnings = [{
+    code: 'AGENT_MIGRATION_DEPLOYMENT_RECEIPT_RECOVERED'
+  }, {
+    code: 'AGENT_MIGRATION_PROJECTION_RECOVERY_PENDING',
+    projection: 'graph',
+    cause: 'RECOVERED_COMMIT_PROJECTION_UNVERIFIED'
+  }];
   const deployment = deploymentReceipt({
     runtime,
     journalFile,
