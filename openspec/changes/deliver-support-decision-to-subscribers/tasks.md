@@ -14,5 +14,5 @@
 ## 3. Focused verification and delivery
 
 - [x] 3.1 Run only the support delivery, slot chain, node-lock, and Agent-lock affected tests plus syntax and strict OpenSpec validation.
-- [ ] 3.2 Commit, push, open and merge one PR, deploy the merged runtime, and run the same focused synthetic chain against the formal local service.
-- [ ] 3.3 Write TestCase→Evidence→Issue backlinks to the instance issue and Issue #1, then update the sole state machine from the verified result.
+- [x] 3.2 Commit, push, open and merge one PR, deploy the merged runtime, and run the same focused synthetic chain against the formal local service.
+- [x] 3.3 Write TestCase→Evidence→Issue backlinks to the instance issue and Issue #1, then update the sole state machine from the verified result.
