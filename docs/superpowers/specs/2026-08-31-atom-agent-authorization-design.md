@@ -11,15 +11,23 @@
 
 ### 2.1 唯一注册格式
 
-- **合法形态**：注册 Agent 必须是 `thing@program@agent`，同时具备普通 Thing 身份、可执行 Program 与 Agent 注册含义。
-- **唯一声明**：其 Situation 中恰有一个可静态识别的字面量 `agent({...})`；零个、多个或动态拼装均稳定拒绝。
-- **唯一权威**：Agent 的身份、钥匙标签、函数作用域和窗口约束来自这个世界事实，不来自 Session 记忆或侧车注册表。
-- **退役格式**：纯 `thing@agent` 不再是有效注册格式；公共解析、Help、CLI 和写入入口返回稳定的 retired-format 错误。
+- **合法载体**：Agent 不是 Key 类型或标签；合法载体只有 `thing@program`，Agent 能力并入该 Thing 的 Program。
+- **唯一声明**：Program 的 Situation 中恰有一个可静态识别的字面量 `agent({...})`；零个、多个或动态拼装均稳定拒绝。
+- **唯一权威**：Agent 的身份、钥匙标签、函数作用域和窗口约束来自这个 Program 世界事实，不来自 Key 上的 `@agent`、Session 记忆或侧车注册表。
+- **退役格式**：`thing@agent`、`thing@program@agent` 以及任何 Key 中的 `@agent` 均无效；公共解析、Help、CLI 和写入入口返回稳定的 retired-format 错误。
 
-### 2.2 当前实现差距
+### 2.2 Program 派发 Agent
+
+- **Program 能力**：Agent 的构造、上下文生成、派发和结果回收进入 Program 的正常能力边界，不建立 Agent 专用执行旁路。
+- **统一接口**：Agent 派发复用 Program 的寻址、组合、授权、修订、超时、事务和回执机制；Program 能调用的更大工程组件沿同一扩展点演进。
+- **声明与执行**：`agent({...})` 声明 Agent 配置，Program 运行时负责按该配置形成受控 Agent 执行；Key 只标识 Program Thing。
+- **失败边界**：声明非法、派发失败、超时或返回异常均由 Program 运行合同处理，不产生半注册 Agent、旁路权限或孤立 Session。
+- **生态约束**：不得以“Agent 特例”绕过 Program；若 Program 不能稳定派发 Agent，则视为 Program 组合能力缺口并在 Program 内修复。
+
+### 2.3 当前实现差距
 
 - **代码现状**：当前 CLI 帮助与多项测试仍引用或接受 `thing@agent`，因此旧格式退役尚未完成。
-- **迁移结果**：活跃旧 Agent 原地升级为合法 `thing@program@agent`；已归档旧 Agent 降级为普通可恢复事实，不在备份域激活权限。
+- **迁移结果**：活跃旧 Agent 原地升级为带合法 `agent({...})` 的 `thing@program`；已归档旧 Agent 降级为普通可恢复事实，不在备份域激活权限。
 - **内容守恒**：迁移不得丢失名称、Situation、层级、关系、历史归档身份或可恢复坐标。
 - **不可假绿**：OpenSpec 的 0/12 与现有 legacy 测试是待实施证据；任何 Closed Issue 或旧验收不得吞掉此缺口。
 
@@ -96,7 +104,7 @@
 
 ### 6.2 必要验收场景
 
-- **格式矩阵**：合法复合格式、纯旧格式、零/多 `agent()`、动态声明、归档 Agent 和普通 Thing 全部有正反例。
+- **格式矩阵**：合法 `thing@program` Agent、所有含 `@agent` 的旧 Key、零/多 `agent()`、动态声明、归档 Agent 和普通 Thing 全部有正反例。
 - **权限矩阵**：后代允许、同级/上级/越界拒绝，业务标签不赋权，缺少函数拒绝，Explore/Transform/jump 结论一致。
 - **缓存矩阵**：命中、缺失、陈旧、损坏与冷启动均得出相同授权结果，不因侧车存在与否改变权限。
 - **迁移矩阵**：活跃升级、归档降级、失败全回滚、内容字节守恒以及旧格式永久拒绝。
