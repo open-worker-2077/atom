@@ -295,10 +295,35 @@ function redactedBackupReceipt(receipt) {
   if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) return null;
   const allowed = [
     'id', 'hash', 'contract', 'version', 'migrationId', 'attemptId', 'directory',
-    'sourceFile', 'copiedFile', 'sourceFileHash', 'copiedFileHash', 'receiptFile'
+    'sourceFile', 'copiedFile', 'sourceFileHash', 'copiedFileHash', 'sourceRevision',
+    'sourceFactsHash', 'targetRevision', 'targetFactsHash', 'summary', 'receiptFile'
   ];
   return Object.fromEntries(allowed.filter((key) => Object.hasOwn(receipt, key))
     .map((key) => [key, structuredClone(receipt[key])]));
+}
+
+function normalizeCommittedProjection(error, {
+  expectedCorrelationId,
+  expectedBeforeRevision,
+  expectedAfterRevision
+}) {
+  const receipt = error?.details?.receipt;
+  if (error?.code !== 'WORLD_COMMITTED_PROJECTION_PENDING'
+    || receipt?.contract !== 'atom.world-receipt'
+    || receipt.version !== 1
+    || receipt?.status !== 'committed'
+    || typeof receipt.commandId !== 'string'
+    || receipt.correlationId !== expectedCorrelationId
+    || receipt.beforeRevision !== expectedBeforeRevision
+    || receipt.afterRevision !== expectedAfterRevision) throw error;
+  return Object.freeze({
+    receipt,
+    warning: Object.freeze({
+      code: 'AGENT_MIGRATION_PROJECTION_RECOVERY_PENDING',
+      projection: error.details?.projection ?? 'graph',
+      cause: error.details?.cause ?? error.name
+    })
+  });
 }
 
 function redactedTransactionReceipt(receipt) {
@@ -386,6 +411,9 @@ export async function applyAgentProgramMigration({
     attemptId,
     revision: plan.expectedRevision,
     factsHash: plan.sourceFactsHash,
+    targetRevision: plan.nextRevision,
+    targetFactsHash: plan.nextFactsHash,
+    summary: structuredClone(plan.summary),
     facts: structuredClone(plan.sourceFacts)
   });
   const verified = await backup.verify({
@@ -399,13 +427,25 @@ export async function applyAgentProgramMigration({
       'Private Agent Program migration backup could not be verified'
     );
   }
-  const receipt = await persistence.commit({
-    correlationId: transactionCorrelationId,
-    expectedRevision: plan.expectedRevision,
-    nextRevision: plan.nextRevision,
-    facts: structuredClone(plan.facts),
-    source: `agent-program-migration:${plan.migrationId}`
-  });
+  let receipt;
+  let warnings = [];
+  try {
+    receipt = await persistence.commit({
+      correlationId: transactionCorrelationId,
+      expectedRevision: plan.expectedRevision,
+      nextRevision: plan.nextRevision,
+      facts: structuredClone(plan.facts),
+      source: `agent-program-migration:${plan.migrationId}`
+    });
+  } catch (error) {
+    const normalized = normalizeCommittedProjection(error, {
+      expectedCorrelationId: transactionCorrelationId,
+      expectedBeforeRevision: plan.expectedRevision,
+      expectedAfterRevision: plan.nextRevision
+    });
+    receipt = normalized.receipt;
+    warnings = [normalized.warning];
+  }
   if (!receipt?.commandId || receipt.afterRevision !== plan.nextRevision) {
     throw problem(
       'AGENT_MIGRATION_TRANSACTION_REQUIRED',
@@ -420,6 +460,7 @@ export async function applyAgentProgramMigration({
     sourceRevision: plan.expectedRevision,
     targetRevision: plan.nextRevision,
     summary: structuredClone(plan.summary),
+    warnings,
     backup: redactedBackupReceipt(backupReceipt),
     receipt: redactedTransactionReceipt(receipt),
     rollback: Object.freeze({
@@ -436,6 +477,7 @@ export async function rollbackAgentProgramMigration({
 }) {
   if (migration?.contract !== RECEIPT_CONTRACT || migration.version !== 1
     || typeof migration.migrationId !== 'string'
+    || typeof migration.sourceRevision !== 'string'
     || typeof migration.rollback?.targetCommandId !== 'string'
     || typeof migration.rollback?.expectedRevision !== 'string') {
     throw problem(
@@ -449,9 +491,23 @@ export async function rollbackAgentProgramMigration({
       'Agent Program migration rollback requires the transactional rollback port'
     );
   }
-  return persistence.rollback({
-    targetCommandId: migration.rollback.targetCommandId,
-    expectedRevision: migration.rollback.expectedRevision,
-    correlationId: correlationId ?? `${migration.migrationId}:rollback`
-  });
+  const transactionCorrelationId = correlationId ?? `${migration.migrationId}:rollback`;
+  let receipt;
+  let warnings = [];
+  try {
+    receipt = await persistence.rollback({
+      targetCommandId: migration.rollback.targetCommandId,
+      expectedRevision: migration.rollback.expectedRevision,
+      correlationId: transactionCorrelationId
+    });
+  } catch (error) {
+    const normalized = normalizeCommittedProjection(error, {
+      expectedCorrelationId: transactionCorrelationId,
+      expectedBeforeRevision: migration.rollback.expectedRevision,
+      expectedAfterRevision: migration.sourceRevision
+    });
+    receipt = normalized.receipt;
+    warnings = [normalized.warning];
+  }
+  return Object.freeze({ ...receipt, warnings });
 }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +12,8 @@ import {
   planAgentProgramMigration,
   rollbackAgentProgramMigration
 } from '../src/atom-system/operations/agent-program-migration.mjs';
+import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
+import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
@@ -18,6 +21,10 @@ const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(import.meta.dirname, '..');
 const operator = path.join(projectRoot, 'scripts', 'deploy-agent-program-world.mjs');
 const programScheduler = createProgramRuntimeScheduler({ timeoutMs: 2_000 });
+
+function hashBytes(bytes) {
+  return `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
+}
 
 function atom(key, name, situation = '', contain = []) {
   return { [key]: name, situation, contain, support: [] };
@@ -298,6 +305,7 @@ test('apply and rollback reject missing recovery ports and malformed receipts wi
       contract: 'atom.agent-program-migration-receipt',
       version: 1,
       migrationId: 'migration',
+      sourceRevision: 'sha256:source',
       rollback: { targetCommandId: 'command', expectedRevision: 'sha256:target' }
     },
     persistence: null
@@ -312,6 +320,7 @@ test('rollback consumes only the durable command and revision receipt', async ()
     contract: 'atom.agent-program-migration-receipt',
     version: 1,
     migrationId: plan.migrationId,
+    sourceRevision: plan.expectedRevision,
     rollback: { targetCommandId: 'durable-command', expectedRevision: plan.nextRevision },
     sourceFacts: [{ forbidden: 'must not be consumed' }]
   };
@@ -331,6 +340,83 @@ test('rollback consumes only the durable command and revision receipt', async ()
     }
   });
   assert.equal(restored.afterRevision, plan.expectedRevision);
+});
+
+test('apply and rollback normalize committed projection failures into revision-bound recovery warnings', async () => {
+  const plan = await validPlan();
+  const committed = {
+    contract: 'atom.world-receipt',
+    version: 1,
+    commandId: 'projection-pending-command',
+    correlationId: `${plan.migrationId}:attempt:projection-pending`,
+    beforeRevision: plan.expectedRevision,
+    afterRevision: plan.nextRevision,
+    status: 'committed'
+  };
+  const pending = Object.assign(new Error('projection pending'), {
+    code: 'WORLD_COMMITTED_PROJECTION_PENDING',
+    details: { receipt: committed, projection: 'graph', cause: 'EISDIR' }
+  });
+  const applied = await applyAgentProgramMigration({
+    plan,
+    confirmation: true,
+    backup: backupPort(true),
+    persistence: {
+      commit: async () => { throw pending; },
+      rollback: async () => {}
+    },
+    attemptId: 'projection-pending'
+  });
+  assert.equal(applied.receipt.commandId, committed.commandId);
+  assert.deepEqual(applied.warnings, [{
+    code: 'AGENT_MIGRATION_PROJECTION_RECOVERY_PENDING',
+    projection: 'graph',
+    cause: 'EISDIR'
+  }]);
+
+  const rollbackReceipt = {
+    ...committed,
+    commandId: 'projection-pending-rollback',
+    correlationId: `${plan.migrationId}:rollback`,
+    beforeRevision: plan.nextRevision,
+    afterRevision: plan.expectedRevision
+  };
+  const restored = await rollbackAgentProgramMigration({
+    migration: applied,
+    persistence: {
+      rollback: async () => {
+        throw Object.assign(new Error('rollback projection pending'), {
+          code: 'WORLD_COMMITTED_PROJECTION_PENDING',
+          details: { receipt: rollbackReceipt, projection: 'graph', cause: 'EACCES' }
+        });
+      }
+    }
+  });
+  assert.equal(restored.afterRevision, plan.expectedRevision);
+  assert.deepEqual(restored.warnings, [{
+    code: 'AGENT_MIGRATION_PROJECTION_RECOVERY_PENDING',
+    projection: 'graph',
+    cause: 'EACCES'
+  }]);
+
+  const unbound = Object.assign(new Error('unbound projection pending'), {
+    code: 'WORLD_COMMITTED_PROJECTION_PENDING',
+    details: {
+      receipt: { ...committed, afterRevision: plan.expectedRevision },
+      projection: 'graph',
+      cause: 'EIO'
+    }
+  });
+  await assert.rejects(applyAgentProgramMigration({
+    plan,
+    confirmation: true,
+    backup: backupPort(true),
+    persistence: {
+      commit: async () => { throw unbound; },
+      rollback: async () => {}
+    },
+    attemptId: 'projection-pending'
+  }), (error) => error === unbound);
 });
 
 test('operator rejects mixed or malformed modes before creating runtime files', async (t) => {
@@ -393,6 +479,15 @@ test('operator apply writes a redacted receipt and receipt-only rollback restore
   assert.equal(deployment.backup.sourceFileHash, deployment.hashes.sourceFile);
   assert.equal(deployment.backup.copiedFileHash, deployment.hashes.sourceFile);
 
+  const retried = JSON.parse((await execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', 'apply-1'
+  ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } })).stdout);
+  assert.equal(retried.recovered, true);
+  assert.equal(retried.transaction.commandId, deployment.transaction.commandId);
+  assert.equal((await createJsonTransactionJournal({
+    file: deployment.paths.journalFile
+  }).readState()).receipts.length, 1);
+
   const rolledBack = JSON.parse((await execFileAsync(process.execPath, [
     operator, '--rollback', applied.receiptFile
   ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } })).stdout);
@@ -400,6 +495,95 @@ test('operator apply writes a redacted receipt and receipt-only rollback restore
   assert.equal(rolledBack.action, 'rollback');
   assert.equal(rolledBack.revision, sourceRevision);
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), source);
+});
+
+test('operator persists projection-recovery warnings after durable apply and rollback commits', async (t) => {
+  const localAppData = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-migration-projection-'));
+  t.after(() => fs.rm(localAppData, { recursive: true, force: true }));
+  const worldDirectory = path.join(localAppData, 'AtomGraph', 'worlds', 'primary');
+  const contextFile = path.join(worldDirectory, 'atom.json');
+  const graphFile = path.join(worldDirectory, 'graph.json');
+  const source = [atom('thing@agent', 'Legacy', 'projection source')];
+  await fs.mkdir(worldDirectory, { recursive: true });
+  await fs.mkdir(graphFile);
+  await fs.writeFile(contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+
+  const applied = JSON.parse((await execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', 'projection-1'
+  ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } })).stdout);
+  assert.equal(applied.warnings[0].code, 'AGENT_MIGRATION_PROJECTION_RECOVERY_PENDING');
+  const deployment = JSON.parse(await fs.readFile(applied.receiptFile, 'utf8'));
+  assert.deepEqual(deployment.warnings, applied.warnings);
+
+  const restored = JSON.parse((await execFileAsync(process.execPath, [
+    operator, '--rollback', applied.receiptFile
+  ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } })).stdout);
+  assert.equal(restored.warnings[0].code, 'AGENT_MIGRATION_PROJECTION_RECOVERY_PENDING');
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), source);
+});
+
+test('same apply attempt reconstructs a missing deployment receipt from verified backup and journal without a second commit', async (t) => {
+  const localAppData = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-migration-recover-'));
+  t.after(() => fs.rm(localAppData, { recursive: true, force: true }));
+  const worldDirectory = path.join(localAppData, 'AtomGraph', 'worlds', 'primary');
+  const contextFile = path.join(worldDirectory, 'atom.json');
+  const graphFile = path.join(worldDirectory, 'graph.json');
+  const journalFile = path.join(worldDirectory, 'atom.transactions.json');
+  const attemptId = 'recover-1';
+  const source = [atom('thing@agent', 'Legacy', 'recovery source')];
+  const sourceBytes = Buffer.from(`${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  await fs.mkdir(worldDirectory, { recursive: true });
+  await fs.writeFile(contextFile, sourceBytes);
+  const plan = await planAgentProgramMigration({
+    snapshot: { facts: source, revision: revisionOfWorldFacts(source) },
+    programScheduler
+  });
+  const backupDirectory = path.join(
+    worldDirectory, 'migration-backups', 'agent-program', plan.migrationId, attemptId
+  );
+  await fs.mkdir(backupDirectory, { recursive: true });
+  const copiedFile = path.join(backupDirectory, 'atom.json');
+  const backupReceiptFile = path.join(backupDirectory, 'backup-receipt.json');
+  await fs.writeFile(copiedFile, sourceBytes, { flag: 'wx' });
+  const backupReceipt = {
+    contract: 'atom.agent-program-private-backup',
+    version: 1,
+    migrationId: plan.migrationId,
+    attemptId,
+    directory: backupDirectory,
+    sourceFile: contextFile,
+    copiedFile,
+    sourceFileHash: hashBytes(sourceBytes),
+    copiedFileHash: hashBytes(sourceBytes),
+    sourceRevision: plan.expectedRevision,
+    sourceFactsHash: plan.sourceFactsHash,
+    targetRevision: plan.nextRevision,
+    targetFactsHash: plan.nextFactsHash,
+    summary: plan.summary,
+    receiptFile: backupReceiptFile
+  };
+  await fs.writeFile(backupReceiptFile, `${JSON.stringify(backupReceipt, null, 2)}\n`, 'utf8');
+  const persistence = createTransactionalWorldPersistence({ contextFile, projectionFile: graphFile, journalFile });
+  const committed = await persistence.commit({
+    correlationId: `${plan.migrationId}:attempt:${attemptId}`,
+    expectedRevision: plan.expectedRevision,
+    nextRevision: plan.nextRevision,
+    facts: plan.facts,
+    source: `agent-program-migration:${plan.migrationId}`
+  });
+  const before = await createJsonTransactionJournal({ file: journalFile }).readState();
+  assert.equal(before.receipts.length, 1);
+  await assert.rejects(fs.access(path.join(backupDirectory, 'deployment-receipt.json')), { code: 'ENOENT' });
+
+  const recovered = JSON.parse((await execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', attemptId
+  ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } })).stdout);
+  const after = await createJsonTransactionJournal({ file: journalFile }).readState();
+
+  assert.equal(recovered.recovered, true);
+  assert.equal(recovered.transaction.commandId, committed.commandId);
+  assert.equal(after.receipts.length, 1);
+  assert.equal(JSON.parse(await fs.readFile(recovered.receiptFile, 'utf8')).rollback.targetCommandId, committed.commandId);
 });
 
 test('operator rejects a deployment receipt whose persistence paths do not match the configured world', async (t) => {
@@ -424,4 +608,83 @@ test('operator rejects a deployment receipt whose persistence paths do not match
     error.stderr.includes('INVALID_AGENT_MIGRATION_RECEIPT')
   ));
   assert.equal(revisionOfWorldFacts(JSON.parse(await fs.readFile(contextFile, 'utf8'))), deployment.revisions.target);
+});
+
+test('operator rejects a forged receipt for an unrelated latest command before rollback writes', async (t) => {
+  const localAppData = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-migration-forged-'));
+  t.after(() => fs.rm(localAppData, { recursive: true, force: true }));
+  const worldDirectory = path.join(localAppData, 'AtomGraph', 'worlds', 'primary');
+  const contextFile = path.join(worldDirectory, 'atom.json');
+  const graphFile = path.join(worldDirectory, 'graph.json');
+  const journalFile = path.join(worldDirectory, 'atom.transactions.json');
+  const source = [atom('thing@agent', 'Legacy', 'forged source')];
+  await fs.mkdir(worldDirectory, { recursive: true });
+  await fs.writeFile(contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  const applied = JSON.parse((await execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', 'forged-1'
+  ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } })).stdout);
+  const migrated = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const later = [...migrated, atom('thing', 'Unrelated', 'latest')];
+  const persistence = createTransactionalWorldPersistence({ contextFile, projectionFile: graphFile, journalFile });
+  const unrelated = await persistence.commit({
+    correlationId: 'unrelated-command',
+    expectedRevision: revisionOfWorldFacts(migrated),
+    nextRevision: revisionOfWorldFacts(later),
+    facts: later,
+    source: 'ordinary-test'
+  });
+  const forged = JSON.parse(await fs.readFile(applied.receiptFile, 'utf8'));
+  forged.transaction = {
+    ...forged.transaction,
+    commandId: unrelated.commandId,
+    correlationId: unrelated.correlationId,
+    beforeRevision: unrelated.beforeRevision,
+    afterRevision: unrelated.afterRevision
+  };
+  forged.rollback = { targetCommandId: unrelated.commandId, expectedRevision: unrelated.afterRevision };
+  forged.revisions = {
+    ...forged.revisions,
+    source: unrelated.beforeRevision,
+    target: unrelated.afterRevision,
+    deployed: unrelated.afterRevision
+  };
+  const forgedFile = path.join(localAppData, 'forged-receipt.json');
+  await fs.writeFile(forgedFile, JSON.stringify(forged), 'utf8');
+
+  await assert.rejects(execFileAsync(process.execPath, [
+    operator, '--rollback', forgedFile
+  ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } }), (error) => (
+    error.stderr.includes('INVALID_AGENT_MIGRATION_RECEIPT')
+  ));
+  assert.equal(revisionOfWorldFacts(JSON.parse(await fs.readFile(contextFile, 'utf8'))), unrelated.afterRevision);
+});
+
+test('operator rejects a reparse-point backup ancestor before writing outside the configured world', async (t) => {
+  const localAppData = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-migration-link-'));
+  t.after(() => fs.rm(localAppData, { recursive: true, force: true }));
+  const worldDirectory = path.join(localAppData, 'AtomGraph', 'worlds', 'primary');
+  const contextFile = path.join(worldDirectory, 'atom.json');
+  const source = [atom('thing@agent', 'Legacy', 'link source')];
+  const outside = path.join(localAppData, 'outside');
+  await fs.mkdir(worldDirectory, { recursive: true });
+  await fs.mkdir(outside);
+  await fs.writeFile(contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  try {
+    await fs.symlink(outside, path.join(worldDirectory, 'migration-backups'),
+      process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'UNKNOWN'].includes(error.code)) {
+      t.skip(`reparse-point creation unsupported: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+
+  await assert.rejects(execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', 'link-1'
+  ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } }), (error) => (
+    error.stderr.includes('AGENT_MIGRATION_UNSAFE_BACKUP_PATH')
+  ));
+  assert.deepEqual(await fs.readdir(outside), []);
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), source);
 });
