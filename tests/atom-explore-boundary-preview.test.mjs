@@ -11,7 +11,12 @@ import { createAtomLanguageReceiver } from '../work-engine/atom-language/receive
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+  const agentProgram = type === 'agent';
+  const storedType = agentProgram ? 'program' : type;
+  const storedSituation = agentProgram
+    ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\nagent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})`
+    : situation;
+  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, contain, support: [] };
 }
 
 async function filesFor(t, atoms, prefix = 'atom-boundary-preview-') {

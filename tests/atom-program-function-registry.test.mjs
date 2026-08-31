@@ -106,7 +106,8 @@ test('CLI and Web expose equivalent function registry data without an Agent cont
   const webPayload = await response.json();
   assert.equal(webPayload.ok, true);
   assert.equal(webPayload.result.contract, 'atom-program-function-registry');
-  assert.equal(webPayload.result.version, 5);
+  assert.equal(webPayload.result.version, 6);
+  assert.equal(webPayload.result.runtimeContract, 'atom-interaction/4');
 
   const stdout = output();
   const stderr = output();
@@ -118,6 +119,18 @@ test('CLI and Web expose equivalent function registry data without an Agent cont
   });
   assert.equal(code, 0, stderr.value());
   assert.deepEqual(JSON.parse(stdout.value()), webPayload.result);
+});
+
+test('public registry declares Agent as source-derived Program capability only', async () => {
+  const { programFunctionRegistry } = await import('../work-engine/atom-language/program-function-registry.mjs');
+  const agent = programFunctionRegistry().functions.find((item) => item.name === 'agent');
+
+  assert.equal(agent.contract.role, 'one static top-level declaration on the current thing@program');
+  assert.equal(agent.contract.identity, 'source-derived Agent Program');
+  assert.equal(agent.contract.keyType, 'forbidden');
+  assert.equal(agent.contract.dispatch, 'ordinary use_program and Program scheduler paths');
+  assert.equal(agent.contract.persistence, 'world Program source');
+  assert.equal(agent.contract.sidecarAuthority, 'forbidden');
 });
 
 test('CLI Help renders coarse families and keeps local Program research open', async () => {

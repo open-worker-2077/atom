@@ -11,7 +11,7 @@ function atom(thing, contain = [], type = '') {
 const AGENT_SOURCE = 'agent({"labels":["^","approved"],"functions":{"groups":[],"names":["explore","jump","transform"]}})';
 
 function registeredWindow(thing, contain = []) {
-  const value = atom(thing, contain, 'program@agent');
+  const value = atom(thing, contain, 'program');
   value.situation = AGENT_SOURCE;
   return value;
 }

@@ -11,8 +11,16 @@ import { programFunctionRegistry } from '../work-engine/atom-language/program-fu
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { evaluateSupportClausesWithPrograms } from '../work-engine/atom-language/support-runtime.mjs';
 
+const fixtureAgentSpecification = programFunctionRegistry().functions
+  .find((entry) => entry.name === 'agent').contract.argument.example;
+
 function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+  const agentProgram = type === 'agent';
+  const storedType = agentProgram ? 'program' : type;
+  const storedSituation = agentProgram
+    ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\nagent(${JSON.stringify(fixtureAgentSpecification)})`
+    : situation;
+  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, contain, support: [] };
 }
 
 function output() {
@@ -202,23 +210,27 @@ test('documented two-step commands create an Agent with one attached complete ad
   });
 });
 
-test('documented repair command attaches and instantiates a flow below an existing empty Agent', async () => {
+test('documented repair command attaches and instantiates a flow below an existing Agent Program', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-help-repair-flow-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([atom('已有任务名', '', [], 'agent')], null, 2), 'utf8');
+  const existingAgentSource = `agent(${JSON.stringify(fixtureAgentSpecification)})`;
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('已有任务名', existingAgentSource, [], 'program')
+  ], null, 2), 'utf8');
   const scheduler = createProgramRuntimeScheduler();
 
   const result = await executeAtomLanguage({
     source: `transform {"thing":"已有任务名","contain":[{"thing@program":"推进流","situation":"instantiate({'template': 'advancement-flow', 'version': 'latest', 'mode': 'ensure', 'parameters': {'title': '任务标题'}})","contain":[],"support":[]}]}`,
     contextFile,
     projectionFile,
-    programScheduler: scheduler
+    programScheduler: scheduler,
+    interaction: { agent: { ref: 'existing-agent-ref', path: '已有任务名' } }
   });
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, JSON.stringify({ errors: result.errors, warnings: result.warnings }));
   const [agent] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(agent['thing@agent'], '已有任务名');
+  assert.equal(agent['thing@program'], '已有任务名');
   assert.equal(agent.contain.length, 1);
   assert.equal(agent.contain[0]['thing@program'], '推进流');
   assert.equal(agent.contain[0].contain.find((child) => child.thing === '导航坐标').situation, '定向');
@@ -237,13 +249,14 @@ test('advancement-flow data children can be edited without legacy uses partners'
   const instantiated = await executeAtomLanguage({
     source: 'atom', contextFile, projectionFile, programScheduler: scheduler
   });
-  assert.equal(instantiated.ok, true);
+  assert.equal(instantiated.ok, true, JSON.stringify({ errors: instantiated.errors, warnings: instantiated.warnings }));
 
   const edited = await executeAtomLanguage({
     source: 'transform {"thing":"Editable Flow/推进流/设标/定向/需求","situation.rep.真实需求"}',
     contextFile,
     projectionFile,
-    programScheduler: scheduler
+    programScheduler: scheduler,
+    interaction: { agent: { ref: 'editable-agent-ref', path: 'Editable Flow' } }
   });
 
   assert.equal(edited.ok, true, JSON.stringify(edited.errors));

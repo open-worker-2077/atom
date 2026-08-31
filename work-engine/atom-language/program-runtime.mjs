@@ -1127,6 +1127,7 @@ function runWorker({
       invokeMain,
       programArguments,
       supportDecision,
+      agentProgramPaths,
       ...(allowedFunctions ? { allowedFunctions } : {})
     });
   });

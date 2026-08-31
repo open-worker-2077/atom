@@ -65,7 +65,7 @@ function world({ includeForge = false } = {}) {
             [],
             'program'
           )] : [])
-        ], 'program@agent')
+        ], 'program')
       ]),
       atom('Job2'),
       atom('Job3')
@@ -78,7 +78,7 @@ function world({ includeForge = false } = {}) {
       [],
       'program'
     )] : [])
-  ], 'program@agent')];
+  ], 'program')];
 }
 
 async function fixture(t, options = {}) {

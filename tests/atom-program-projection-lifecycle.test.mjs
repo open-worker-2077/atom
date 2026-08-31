@@ -9,9 +9,14 @@ import { createProgramRuntimeScheduler } from '../work-engine/atom-language/prog
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
+  const agentProgram = type === 'agent';
+  const storedType = agentProgram ? 'program' : type;
+  const storedSituation = agentProgram
+    ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\nagent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})`
+    : situation;
   return {
-    [`thing${type ? `@${type}` : ''}`]: thing,
-    situation: situation,
+    [`thing${storedType ? `@${storedType}` : ''}`]: thing,
+    situation: storedSituation,
     contain: contain,
     support: []
   };
@@ -368,7 +373,7 @@ test('each committed Program create settles the next independent request onto it
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    atom('Root', '', [atom('Audit', '', [], 'agent')])
+    atom('Root', '', [], 'agent')
   ], null, 2));
   const projectionRepository = memoryProjectionRepository();
   const programExecutions = [];
@@ -379,7 +384,7 @@ test('each committed Program create settles the next independent request onto it
       return { locks: [], messages: [], transforms: [] };
     }
   });
-  const interaction = { agent: { ref: 'audit-ref', path: 'Root/Audit' } };
+  const interaction = { agent: { ref: 'audit-ref', path: 'Root' } };
   const commitWorld = async ({ facts }) => {
     await fs.writeFile(contextFile, JSON.stringify(facts, null, 2));
   };
@@ -483,7 +488,7 @@ test('Agent key, lock, and path changes invalidate accelerated Program results',
     }
   });
   const world = [atom('Root', '', [
-    atom('Agent', 'agent({"labels":["^"],"functions":{"groups":[],"names":["transform"]}})', [], 'program@agent'),
+    atom('Agent', 'agent({"labels":["^"],"functions":{"groups":[],"names":["transform"]}})', [], 'program'),
     atom('Lock', 'lock({"targets":{"paths":["Root/Agent"],"scope":"exact"},"actions":["transform"],"labels":["^"]})', [], 'program')
   ])];
 
@@ -503,7 +508,7 @@ test('Agent key, lock, and path changes invalidate accelerated Program results',
   assert.equal(executions, 4, 'a lock change must invalidate its affected accelerated result');
 
   const pathChanged = structuredClone(lockChanged);
-  pathChanged[0].contain[0]['thing@program@agent'] = 'RenamedAgent';
+  pathChanged[0].contain[0]['thing@program'] = 'RenamedAgent';
   pathChanged[0].contain[1].situation = pathChanged[0].contain[1].situation.replace('Root/Agent', 'Root/RenamedAgent');
   await scheduler.refresh(pathChanged, { agentOrigin: { path: 'Root/RenamedAgent' } });
   assert.equal(executions, 6, 'a valid path move must invalidate the Agent and its affected lock result');
@@ -568,7 +573,7 @@ test('an Agent exact read reuses a valid context-incomplete projection without e
   const projectionFile = path.join(directory, 'graph.json');
   const repository = memoryProjectionRepository();
   const world = [atom('Root', '', [
-    atom('Audit', '', [], 'program@agent'),
+    atom('Audit', 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})', [], 'program'),
     atom('Target'),
     atom('Legacy Jump', '# agent-bound jump', [], 'program')
   ])];
@@ -827,8 +832,8 @@ test('concurrent Programs share one cycle deadline', async () => {
 test('a Program that explores the current Agent cannot reuse another Agent projection', async () => {
   let executions = 0;
   const scheduler = createProgramRuntimeScheduler({
-    runProgram: async ({ executeExplore }) => {
-      executions += 1;
+    runProgram: async ({ program, executeExplore }) => {
+      if (program.path === 'Program') executions += 1;
       await executeExplore({});
       return { locks: [], messages: [], transforms: [] };
     }
@@ -935,7 +940,7 @@ test('an isolated context-free startup failure stays dormant while Agent context
   let executions = 0;
   const scheduler = createProgramRuntimeScheduler({
     runProgram: async ({ program }) => {
-      executions += 1;
+      if (program.path !== 'Agent') executions += 1;
       if (program.path !== 'Broken Program') {
         return { locks: [], messages: [], transforms: [] };
       }
@@ -971,13 +976,17 @@ test('a cold Agent Transform does not replay or report an unrelated startup fail
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    atom('Agent', '', [], 'agent'),
-    atom('Target', 'before'),
-    atom('Broken Program', "raise ValueError('unrelated persistent failure')", [], 'program')
+    atom('Agent', '', [
+      atom('Target', 'before'),
+      atom('Broken Program', "raise ValueError('unrelated persistent failure')", [], 'program')
+    ], 'agent')
   ], null, 2));
   let executions = 0;
   const scheduler = createProgramRuntimeScheduler({
-    runProgram: async () => {
+    runProgram: async ({ program }) => {
+      if (program.path === 'Agent') {
+        return { locks: [], messages: [], transforms: [] };
+      }
       executions += 1;
       throw Object.assign(new Error('unrelated persistent failure'), {
         code: 'ATOM_PROGRAM_FAILED'
@@ -995,7 +1004,7 @@ test('a cold Agent Transform does not replay or report an unrelated startup fail
     interaction: { id: 'agent-preparation', agent: { ref: 'agent-ref', path: 'Agent' } }
   });
   const transformed = await executeAtomLanguage({
-    source: 'transform {"thing":"Target","situation.rep.after"}',
+    source: 'transform {"thing":"Agent/Target","situation.rep.after"}',
     contextFile,
     projectionFile,
     programScheduler: scheduler,

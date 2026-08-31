@@ -223,7 +223,7 @@ test('scheduler Program moves one fixed window while its spatial scope follows t
   });
   assert.equal(upper.items[0].matches.length, 0);
   assert.equal(upper.warnings[0].code, 'ATOM_READ_PROTECTED');
-  assert.match(upper.warnings[0].message, /当前 @agent 上下文未满足放行条件/u);
+  assert.match(upper.warnings[0].message, /当前已声明 Agent Program 上下文未满足放行条件/u);
 
   const otherOrder = await executeAtomLanguage({
     source: 'explore {"thing":"Root/控制器/工单1","situation$full":true}', contextFile, projectionFile,
@@ -231,7 +231,7 @@ test('scheduler Program moves one fixed window while its spatial scope follows t
   });
   assert.equal(otherOrder.items[0].matches.length, 0);
   assert.equal(otherOrder.warnings[0].code, 'ATOM_READ_PROTECTED');
-  assert.match(otherOrder.warnings[0].message, /当前 @agent 上下文未满足放行条件/u);
+  assert.match(otherOrder.warnings[0].message, /当前已声明 Agent Program 上下文未满足放行条件/u);
 
   const selfMove = await executeAtomLanguage({
     source: 'transform {"thing.mov.Root/控制器/工单1":"Root/控制器/工单2/执行窗口"}', contextFile, projectionFile,

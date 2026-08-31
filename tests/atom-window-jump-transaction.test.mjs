@@ -21,7 +21,7 @@ function atom(thing, situation = '', contain = [], type = '') {
 const WINDOW_AGENT_SOURCE = 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","jump","lock","transform"]}})';
 
 function windowAgent(thing, contain = []) {
-  return atom(thing, WINDOW_AGENT_SOURCE, contain, 'program@agent');
+  return atom(thing, WINDOW_AGENT_SOURCE, contain, 'program');
 }
 
 async function fixture(t, atoms) {
@@ -719,10 +719,11 @@ test('cyclic destination and downstream failure both roll back the moved window'
 });
 
 test('rebinding a scoped changed probe removes instance A and triggers only instance B without rewriting template support', async () => {
+  const probeAgentSource = 'agent({"labels":[],"functions":{"groups":[],"names":["changed","explore","message","transform"]}})';
   const world = [atom('Root', '', [
     atom('Template', '', [], ''),
-    atom('A', '', [atom('Monitor')]),
-    atom('B', '', [atom('Monitor')]),
+    atom('A', '', [atom('Monitor'), atom('Window', probeAgentSource, [], 'program')]),
+    atom('B', '', [atom('Monitor'), atom('Window', probeAgentSource, [], 'program')]),
     atom('Probe', [
       'point = explore({"thing":"./Monitor"})[0]',
       'if changed([point]):',

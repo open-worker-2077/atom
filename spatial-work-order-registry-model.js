@@ -7,7 +7,7 @@
 
   function summarize(registry) {
     if (!registry || registry.contract !== "atom-work-order-registry"
-      || registry.version !== 1 || registry.runtimeContract !== "atom-interaction/3") invalid();
+      || registry.version !== 1 || registry.runtimeContract !== "atom-interaction/4") invalid();
     const template = Array.isArray(registry.templates)
       ? registry.templates.find((item) => item && item.id === "work-order")
       : null;

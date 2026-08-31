@@ -107,7 +107,7 @@ export async function executeAtomProgramFunctionRegistryEndpoint(
     );
   }
   if (payload.result?.contract !== 'atom-program-function-registry'
-    || payload.result?.version !== 5
+    || payload.result?.version !== 6
     || payload.result?.runtimeContract !== ATOM_RUNTIME_CONTRACT) {
     throw cliError(
       'ATOM_RUNTIME_CONTRACT_MISMATCH',
@@ -186,6 +186,7 @@ function help() {
     '',
     'Options:',
     '  --agent AGENT      必填；exact 且唯一的已声明 Agent Program 名称或路径',
+    '                     Agent 是 thing@program 上由源码派生的能力：Situation 必须恰有一个顶层字面量 agent({...})；不是 Key 类型。',
     '  --endpoint URL     显式指定隔离 Atom command endpoint；省略时使用本机 4784',
     '  --stdin            从标准输入读取一条完整 Atom 命令；用于变量、多行、长文本和特殊字符',
     '  --json             已弃用的兼容选项；Atom 命令结果仍为 Graph-JSON',
@@ -196,6 +197,7 @@ function help() {
     'Agent 入口：',
     '  --agent 只指定本次交互的上下文来源，不指定节点的归属或写入位置，也不代表身份、权限或锁。',
     '  查询或写入的事实目标不得代替 --agent 上下文来源；目标 Atom 本身不需要是 Agent Program。',
+    '  Agent Program 与其他 Program 共用调度器和 use_program() 分派；Agent、锁、Jump 与触发目录均是当前世界修订绑定的派生缓存。',
     '  会话已给出或已绑定唯一已声明 Agent Program 时直接复用，不得重复询问；只有上下文来源确实未知或不唯一时才请求明确。',
     '  每条非交互命令都原样携带已绑定的 Agent Program；CLI 不会把目标 thing 自动当作 --agent。',
     '  短名必须唯一；重名时增加必要路径片段。仍无法确定上下文时联系任务派发方或维护入口。',

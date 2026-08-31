@@ -270,7 +270,7 @@ test('a ^ Agent can compile a ^ path lock for its nested Program result through 
         atom('确定性核验', 'message({"level":"info","text":"synthetic"})', [atom('核验结果', 'synthetic')], 'program'),
         atom('结果锁定', `lock({"targets":{"paths":["${targetPath}"],"scope":"exact"},"actions":["transform"],"labels":["^"]})`, [], 'program')
       ])
-    ], 'program@agent')
+    ], 'program')
   ])];
 
   await assert.doesNotReject(scheduler.validateProgramSources(world));
@@ -281,7 +281,7 @@ test('a dynamically created readable descendant resolves through live exact cont
   const lockSource = 'test/🧊/结果锁定';
   const liveAtoms = [atom('test', '', [atom('🧊', '', [
     atom('核验程序', '', [atom('动态结果', 'persisted-after-program')], 'program')
-  ], 'program@agent')])];
+  ], 'program')])];
   const compiled = validateProgramResult({
     ok: true,
     locks: [{
@@ -358,18 +358,17 @@ test('cold startup publishes from computed permissions when the disposable index
   assert.equal(stored.programSetKey, 'old-program-set');
 });
 
-test('maintenance first-window creation prepares the same current context-free projection as the server', async (t) => {
+test('a declared creator adds a child Agent Program and prepares the server projection', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-maintenance-first-window-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
   const journalFile = path.join(directory, 'atom.transactions.json');
-  const programProjectionFile = path.join(directory, 'program-projection.json');
-  const existingAgentSource = 'agent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})';
+  const existingAgentSource = 'agent({"labels":[],"functions":{"groups":[],"names":["agent","explore","transform"]}})';
   const bootstrapSource = 'agent({"functions":{"groups":[],"names":["agent"]}})';
   await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
-    atom('Existing', existingAgentSource, [atom('Work', '', [atom('Parent')])], 'program@agent')
+    atom('Existing', existingAgentSource, [atom('Work', '', [atom('Parent')])], 'program')
   ])]), 'utf8');
 
   const serverScheduler = createProgramRuntimeScheduler();
@@ -382,33 +381,36 @@ test('maintenance first-window creation prepares the same current context-free p
     correlationId: 'server-self-read', agentPath: 'Root/Existing'
   });
   assert.equal(serverRead.ok, true, JSON.stringify(serverRead.errors));
-  await assert.rejects(fs.stat(programProjectionFile), (error) => error.code === 'ENOENT');
 
   const journal = createJsonTransactionJournal({ file: journalFile });
   const receiptsBefore = (await journal.readState()).receipts.length;
-  const maintenance = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
-  const created = await maintenance({
+  const created = await server.execute({
     source: `transform new {"thing@program":"Root/Existing/Work/Parent/Bootstrap","situation":${JSON.stringify(bootstrapSource)},"contain":[],"support":[]}`,
-    interaction: { id: 'maintenance-create-bootstrap' }
+    correlationId: 'creator-adds-bootstrap',
+    agentPath: 'Root/Existing'
   });
 
   assert.equal(created.ok, true, JSON.stringify(created.errors));
-  const preparedProjection = JSON.parse(await fs.readFile(programProjectionFile, 'utf8'));
-  assert.equal(preparedProjection.version, 1);
-  assert.equal(typeof preparedProjection.worldKey, 'string');
+  const prepared = await server.execute({
+    source: 'explore {"thing":"Root/Existing/Work/Parent/Bootstrap","situation$full":true}',
+    correlationId: 'creator-read-bootstrap',
+    agentPath: 'Root/Existing'
+  });
+  assert.equal(prepared.ok, true, JSON.stringify(prepared.errors));
+  assert.equal(prepared.items[0].matches[0].path, 'Root/Existing/Work/Parent/Bootstrap');
   const receiptsAfterCreate = (await createJsonTransactionJournal({ file: journalFile }).readState()).receipts.length;
   assert.equal(receiptsAfterCreate, receiptsBefore + 1);
   let world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(findAtom(world, 'Root/Existing/Work/Parent/Bootstrap') !== null, true);
 
-  const registered = await maintenance({
+  const registered = await server.execute({
     source: 'transform {"thing.run.":"Root/Existing/Work/Parent/Bootstrap"}',
-    interaction: { id: 'maintenance-register-bootstrap' }
+    correlationId: 'creator-runs-bootstrap',
+    agentPath: 'Root/Existing'
   });
   assert.equal(registered.ok, true, JSON.stringify(registered.errors));
   world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(Object.hasOwn(findAtom(world, 'Root/Existing/Work/Parent/Bootstrap'), 'thing@program'), true);
-  assert.equal(Object.hasOwn(findAtom(world, 'Root/Existing/Work/Parent/Bootstrap'), 'thing@program@agent'), false);
 
   const coldScheduler = createProgramRuntimeScheduler();
   await coldScheduler.rebuildAgentSecurity(world);
@@ -419,7 +421,7 @@ test('maintenance first-window creation prepares the same current context-free p
   });
 });
 
-test('Agent self-reconfiguration reaches delegation validation while trusted maintenance remains recovery-only', async (t) => {
+test('Agent self-reconfiguration reaches delegation validation and maintenance cannot bypass creator authority', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-maintenance-agent-reconfigure-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -431,7 +433,7 @@ test('Agent self-reconfiguration reaches delegation validation while trusted mai
   const replacementSource = 'agent({"labels":[],"functions":{"groups":[],"names":["agent","explore","slot_body","transform","use_program"]}})';
   const replace = `transform {"thing":${JSON.stringify(agentPath)},${JSON.stringify(`situation.rep.${replacementSource}`)}}`;
   await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
-    atom('Parent', '', [atom('Window', originalSource, [], 'program@agent')])
+    atom('Parent', '', [atom('Window', originalSource, [], 'program')])
   ])]), 'utf8');
 
   const server = createLegacyRuntimeComposition({ contextFile, graphFile, storeFile });
@@ -453,43 +455,17 @@ test('Agent self-reconfiguration reaches delegation validation while trusted mai
     source: replace,
     interaction: { id: 'trusted-maintenance-agent-reconfigure' }
   });
-  assert.equal(reconfigured.ok, true, JSON.stringify(reconfigured));
-  assert.equal(reconfigured.changed, true);
+  assert.equal(reconfigured.ok, false, JSON.stringify(reconfigured));
+  assert.ok(reconfigured.errors.some((error) => (
+    error.code === 'AGENT_RECONFIGURATION_CREATOR_REQUIRED'
+  )), JSON.stringify(reconfigured));
   const receiptsAfter = (await createJsonTransactionJournal({ file: journalFile }).readState()).receipts.length;
-  assert.equal(receiptsAfter, receiptsBefore + 1);
+  assert.equal(receiptsAfter, receiptsBefore);
   world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(findAtom(world, agentPath).situation, replacementSource);
-
-  const coldScheduler = createProgramRuntimeScheduler();
-  await coldScheduler.rebuildAgentSecurity(world);
-  assert.deepEqual(coldScheduler.agentSecurity.get(agentPath), {
-    labels: [],
-    functionScopes: {
-      groups: [],
-      names: ['agent', 'explore', 'slot_body', 'transform', 'use_program']
-    },
-    functions: ['agent', 'explore', 'slot_body', 'transform', 'use_program']
-  });
-
-  const dynamicSource = [
-    'scope = {"groups": [], "names": ["agent", "explore"]}',
-    'agent({"labels": [], "functions": scope})'
-  ].join('\n');
-  const invalidReplace = `transform {"thing":${JSON.stringify(agentPath)},${JSON.stringify(`situation.rep.${dynamicSource}`)}}`;
-  const receiptsBeforeInvalid = (await createJsonTransactionJournal({ file: journalFile }).readState()).receipts.length;
-  const rejected = await maintenance({
-    source: invalidReplace,
-    interaction: { id: 'trusted-maintenance-agent-reconfigure-invalid' }
-  });
-  assert.equal(rejected.ok, false, JSON.stringify(rejected));
-  assert.ok(rejected.errors.some((error) => error.code === 'INVALID_PROGRAM_SOURCE'), JSON.stringify(rejected));
-  const receiptsAfterInvalid = (await createJsonTransactionJournal({ file: journalFile }).readState()).receipts.length;
-  assert.equal(receiptsAfterInvalid, receiptsBeforeInvalid);
-  world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(findAtom(world, agentPath).situation, replacementSource);
+  assert.equal(findAtom(world, agentPath).situation, originalSource);
 });
 
-test('bootstrap establishes an ancestor Agent and ordinary authorization governs subsequent reconfiguration', async (t) => {
+test('an ancestor Agent Program governs descendant reconfiguration without a maintenance bootstrap bypass', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-ancestor-agent-management-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -507,7 +483,10 @@ test('bootstrap establishes an ancestor Agent and ordinary authorization governs
   );
   await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
     atom('Domain', '', [
-      atom('Worker', workerSource, [], 'program@agent'),
+      atom('Worker', workerSource, [], 'program'),
+      atom('Manager', managerSource, [
+        atom('Worker', workerSource, [], 'program')
+      ], 'program'),
       atom('Outside', 'unchanged')
     ])
   ])]), 'utf8');
@@ -522,27 +501,8 @@ test('bootstrap establishes an ancestor Agent and ordinary authorization governs
   assert.equal(selfDeniedBeforeBootstrap.ok, false, JSON.stringify(selfDeniedBeforeBootstrap));
   assert.ok(selfDeniedBeforeBootstrap.errors.some((error) => error.code === 'PROGRAM_FUNCTION_DELEGATION_DENIED'), JSON.stringify(selfDeniedBeforeBootstrap));
 
-  const maintenance = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
-  const created = await maintenance({
-    source: `transform new {"thing@program":${JSON.stringify(managerPath)},"situation":${JSON.stringify(managerSource)},"contain":[],"support":[]}`,
-    interaction: { id: 'one-time-bootstrap-create-manager' }
-  });
-  assert.equal(created.ok, true, JSON.stringify(created));
-  const reparented = await maintenance({
-    source: 'transform {"thing.mov.Root/Domain/Manager":"Root/Domain/Worker"}',
-    interaction: { id: 'one-time-bootstrap-reparent' }
-  });
-  assert.equal(reparented.ok, true, JSON.stringify(reparented));
   let world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(Object.hasOwn(findAtom(world, managerPath), 'thing@program'), true);
-  const registered = await maintenance({
-    source: `transform {"thing.run.":${JSON.stringify(managerPath)}}`,
-    interaction: { id: 'one-time-bootstrap-register-manager' }
-  });
-  assert.equal(registered.ok, true, JSON.stringify(registered));
-  world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(Object.hasOwn(findAtom(world, managerPath), 'thing@program'), true);
-  assert.equal(Object.hasOwn(findAtom(world, managerPath), 'thing@program@agent'), false);
 
   const daily = createLegacyRuntimeComposition({
     contextFile,

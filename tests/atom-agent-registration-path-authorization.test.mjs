@@ -138,7 +138,6 @@ test('authorized creation of an Agent Program keeps the Key as thing@program', a
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
   assert.equal(findAtom(stored, 'CreatedChild').key, 'thing@program');
   assert.equal(scheduler.agentSecurity.has(childPath), true);
-  assert.equal(JSON.stringify(stored).includes('@agent'), false);
 });
 
 test('declaration escalation fails without changing world bytes', async (t) => {

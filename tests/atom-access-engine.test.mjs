@@ -17,9 +17,14 @@ async function publishProjection(files) {
 }
 
 function atom(thing, situation = '', contain = [], support = [], type = '') {
+  const agentProgram = type === 'agent';
+  const storedType = agentProgram ? 'program' : type;
+  const storedSituation = agentProgram
+    ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\nagent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})`
+    : situation;
   return {
-    [`thing${type ? `@${type}` : ''}`]: thing,
-    situation,
+    [`thing${storedType ? `@${storedType}` : ''}`]: thing,
+    situation: storedSituation,
     contain,
     support
   };

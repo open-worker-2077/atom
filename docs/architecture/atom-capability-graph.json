@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-16T17:54:08+08:00",
+  "updatedAt": "2026-09-01T00:00:00+08:00",
   "system": {
     "id": "atom",
     "name": "Atom",
-    "positioning": "可执行的高维事实世界：统一承载事实、关系、Program、Agent 与空间交互；Graph 和 Web 均为投影或交互形态，不是第二事实源。",
+    "positioning": "可执行的高维事实世界：统一承载事实、关系、Program、作为 Program 源码能力的 Agent 与空间交互；Graph 和 Web 均为投影或交互形态，不是第二事实源。",
     "authoritativeFactSource": "atom.json through the world repository port"
   },
   "components": [
-    { "id": "world-kernel", "name": "世界内核", "owns": ["Atom语义", "层级", "关系", "Program源码", "Agent注册"] },
+    { "id": "world-kernel", "name": "世界内核", "owns": ["Atom语义", "层级", "关系", "Program源码", "Agent Program派生目录"] },
     { "id": "interaction-runtime", "name": "运行脊柱", "owns": ["交互生命周期", "世界修订", "提交顺序", "Program运行结果", "事务历史"] },
     { "id": "projection-system", "name": "投影系统", "owns": ["Graph读模型", "Spatial读模型", "投影来源修订"] },
     { "id": "spatial-experience", "name": "空间体验", "owns": ["相机", "焦点", "选择集", "展开状态", "视图模式", "显式布局覆盖"] },
@@ -24,8 +24,8 @@
     },
     {
       "id": "agent-context", "name": "Agent上下文", "owner": "world-kernel", "status": "partial",
-      "purpose": "让任意任务在明确告知已有 @agent 后进入对应工作窗口，不把 Session 当作默认绑定。",
-      "acceptance": [{ "kind": "contract-test", "ref": "tests/atom-language-context-store.test.mjs", "claim": "Agent 类型与上下文解析有契约覆盖，但跨任务真实使用仍需持续验收" }]
+      "purpose": "让任意任务选择带一个顶层字面量 agent({...}) 声明的 thing@program 进入对应工作窗口；Agent 不是 Key 类型，Session 也不是默认绑定。",
+      "acceptance": [{ "kind": "contract-test", "ref": "tests/atom-agent-program-runtime.test.mjs", "claim": "Agent Program 从当前世界修订的 Program 源码派生，并沿普通 Program 调度与 use_program 分派" }]
     },
     {
       "id": "program-runtime", "name": "Program运行", "owner": "interaction-runtime", "status": "achieved",

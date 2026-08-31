@@ -21,7 +21,7 @@ Atom 将内容、包含关系、有向关系、可执行逻辑和交互窗口统
 | --- | --- |
 | **Atom** | 承载可持续识别的事实，并通过包含与有向关系组成世界 |
 | **Program** | 承载规则、判断、约束、推进与自动化，让世界具有可执行性 |
-| **Agent** | 作为可指定的交互窗口，使任意任务能在明确上下文中工作 |
+| **Agent** | `thing@program` 上由源码声明的能力；作为可指定交互窗口，使任意任务能在明确上下文中工作 |
 | **Spatial Interaction** | 将同一事实世界投影为可进入、可观察、可编辑的多尺度空间 |
 
 Atom 使用 JSON 表达当前事实数据，并使用 Python 承载当前 Program 运行时。它们是可替换、可演进的实现载体，不是 Atom 的定义边界。
@@ -41,14 +41,18 @@ Agent 和工程工具通过公开 CLI 契约交互：
 
 ```powershell
 atom.cmd --help
-atom.cmd --agent "已创建的 Agent 窗口"
+atom.cmd --agent "已声明的 Agent Program 名称或路径"
 ```
 
 变量、多行文本或特殊字符通过标准输入传递：
 
 ```powershell
-$request | atom.cmd --agent "已创建的 Agent 窗口" --stdin
+$request | atom.cmd --agent "已声明的 Agent Program 名称或路径" --stdin
 ```
+
+Agent 不是 Atom Key 类型。一个 Agent Program 是普通 `thing@program`，其
+Situation 中恰有一个顶层字面量 `agent({...})` 声明；Program 之间统一通过
+`use_program()` 分派，Agent 目录由当前世界修订派生，不形成第二事实源。
 
 ## 当前能力边界
 

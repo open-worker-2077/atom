@@ -137,7 +137,7 @@ test('manage-agent reconstruction never guesses a lock absent from its Program d
     atom('manage-agent', [
       'agent({"labels":[],"functions":{"groups":[],"names":["message"]}})',
       'message({"level":"info","text":"manage"})'
-    ].join('\n'), [], 'program@agent'),
+    ].join('\n'), [], 'program'),
     atom('Managed Target')
   ])];
   const scheduler = createProgramRuntimeScheduler();
@@ -155,7 +155,7 @@ test('an Agent Program cannot reconstruct a lock outside its registered function
           targets: { paths: ['Root/Managed Target'] },
           actions: ['transform'], labels: ['reviewed']
         }), [], 'program')
-      ], 'program@agent'),
+      ], 'program'),
     atom('Managed Target')
   ])];
   await assert.rejects(

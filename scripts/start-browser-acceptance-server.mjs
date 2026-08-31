@@ -7,10 +7,15 @@ import path from 'node:path';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 
 function atom(thing, situation = '', contain = [], type = '', targets = []) {
+  const agentProgram = type === 'agent';
+  const storedType = agentProgram ? 'program' : type;
+  const storedSituation = agentProgram
+    ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\nagent({"labels":[],"functions":{"groups":[],"names":["agent","explore","jump","lock","message","shortcut","slot_body","transform","use_program"]}})`
+    : situation;
   const support = targets.length
     ? [{ 'if@current': true, then: targets.map((target) => ({ thing: target })) }]
     : [];
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support };
+  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, contain, support };
 }
 
 const requestedPort = Number(process.argv[2] || 4796);

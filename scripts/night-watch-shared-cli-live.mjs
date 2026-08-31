@@ -165,7 +165,7 @@ function programAtom(thing, situation) {
 
 function agentProgram(thing, labels) {
   return {
-    'thing@program@agent': thing,
+    'thing@program': thing,
     situation: `agent(${JSON.stringify({ labels, functions: { groups: [], names: [
       'agent', 'current_atom', 'explore', 'jump', 'lock', 'shortcut', 'slot_body', 'transform', 'use_program', 'work_order'
       , 'json_parse', 'message'

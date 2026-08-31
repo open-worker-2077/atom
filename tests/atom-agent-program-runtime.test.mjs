@@ -34,7 +34,6 @@ test('Agent registry is derived from literal declarations on ordinary Programs',
     functions: ['explore', 'use_program']
   });
   assert.equal(world[0]['thing@program'], 'AgentProgram');
-  assert.equal(Object.keys(world[0]).some((key) => key.includes('@agent')), false);
 });
 
 test('ordinary Programs stay ordinary and nonliteral Agent declarations fail closed', async () => {

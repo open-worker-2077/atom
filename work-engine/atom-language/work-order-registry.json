@@ -1,7 +1,7 @@
 {
   "contract": "atom-work-order-registry",
   "version": 1,
-  "runtimeContract": "atom-interaction/3",
+  "runtimeContract": "atom-interaction/4",
   "templates": [
     {
       "id": "work-order",

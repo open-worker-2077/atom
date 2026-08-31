@@ -2,9 +2,14 @@
 
 ## Stable concepts
 
-- `@agent` is an Atom whose position is the context origin. It is not an identity or permission system.
-- Public CLI interaction selects one exact unique context origin with `atom.cmd --agent "<@agent name-or-path>"` and displays its full path in the prompt and command receipt.
-- Interactive entry displays the current `@agent` as layer 1 and recursively
+- Agent is a source-derived capability of an ordinary `thing@program`, never an
+  Atom Key type. The retired `@agent` format exists only as migration input and
+  is rejected by normal parsing.
+- Exactly one static top-level literal `agent({...})` declaration in Program
+  Situation identifies an Agent Program. Zero, multiple, dynamic, nested, or
+  aliased declarations do not register an Agent.
+- Public CLI interaction selects one exact unique context origin with `atom.cmd --agent "<Agent Program name-or-path>"` and displays its full path in the prompt and command receipt.
+- Interactive entry displays the current Agent Program as layer 1 and recursively
   includes its descendants through layer 3. One parent and same-level peers
   remain visible without expanding their content branches.
 - `boundary~preview` reports non-content metadata for undisplayed directions:
@@ -23,6 +28,21 @@
 - `explore` and `transform` compile into the same internal command model as the CLI; they do not launch a CLI subprocess or edit JSON storage.
 - `lock` receives targets only after Program logic has selected them. The stable target form is `{ "refs": [<opaque-ref>...] }`; the engine validates every reference against the same immutable world revision.
 - `message` is the only user-visible Program return channel. Python `return` remains local Python control flow.
+- Agent Program execution and Program-to-Program composition both use the
+  ordinary Program scheduler and `use_program()` dispatch path. Agent status
+  does not create a sidecar executor, permission engine, or persistence model.
+- Agent, lock, jump, trigger, and Program registries are revision-bound derived
+  caches rebuilt from immutable world Program source. They are never a second
+  fact owner and cannot preserve authority across a revision change.
+
+## Retired Agent Key migration
+
+The active migration upgrades a legacy Agent Key into a `thing@program` with one
+literal declaration. Content under the configured backup/archive subtree is
+demoted to ordinary non-executable facts. Apply and rollback are authorized only
+by the durable, redacted, revision-bound Agent Program migration receipt; the
+receipt records the active conversion and archived demotion without copying
+private Program source into deployment evidence.
 
 ## Reusable Program references
 

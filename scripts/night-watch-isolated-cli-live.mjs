@@ -19,11 +19,17 @@ function cliError(message, details = {}) {
 }
 
 function parseArgs(argv) {
-  const index = argv.indexOf('--evidence-dir');
-  if (index < 0 || !argv[index + 1] || argv.length !== 2) {
-    throw cliError('Usage: node scripts/night-watch-isolated-cli-live.mjs --evidence-dir <directory>');
+  const evidenceIndex = argv.indexOf('--evidence-dir');
+  const cliEntryIndex = argv.indexOf('--cli-entry');
+  const expectedLength = cliEntryIndex < 0 ? 2 : 4;
+  if (evidenceIndex < 0 || !argv[evidenceIndex + 1] || argv.length !== expectedLength
+    || (cliEntryIndex >= 0 && !argv[cliEntryIndex + 1])) {
+    throw cliError('Usage: node scripts/night-watch-isolated-cli-live.mjs --evidence-dir <directory> [--cli-entry <file>]');
   }
-  return { evidenceDir: path.resolve(argv[index + 1]) };
+  return {
+    evidenceDir: path.resolve(argv[evidenceIndex + 1]),
+    cliEntry: cliEntryIndex < 0 ? null : path.resolve(argv[cliEntryIndex + 1])
+  };
 }
 
 function sourceReplace(pathname, next) {
@@ -45,17 +51,17 @@ function pathLockProgram(pathname, targetPath) {
   })})`);
 }
 
-export function atomCmdSpawnOptions() {
+export function atomCmdSpawnOptions(command = 'atom.cmd') {
   return {
     cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
     // Arguments are generated fixed selectors and loopback URLs; Program text is stdin.
-    ...(process.platform === 'win32' ? { shell: true } : {})
+    ...(process.platform === 'win32' && command === 'atom.cmd' ? { shell: true } : {})
   };
 }
 
 function childProcess(command, args, input) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, atomCmdSpawnOptions());
+    const child = spawn(command, args, atomCmdSpawnOptions(command));
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8');
@@ -73,7 +79,7 @@ function safePayload(stdout) {
     const value = JSON.parse(stdout);
     return {
       keys: Object.keys(value).sort(),
-      thing: value.thing ?? value['thing@program'] ?? value['thing@program@agent'] ?? null,
+      thing: value.thing ?? value['thing@program'] ?? null,
       agent: value.agent ?? value['agent~current'] ?? null,
       situationHash: typeof value.situation === 'string' ? sha256(value.situation) : null,
       shortcut: value['shortcut~resolved']?.identity ?? null,
@@ -106,7 +112,7 @@ function requireFailure(result, label, code) {
 }
 
 async function main() {
-  const { evidenceDir } = parseArgs(process.argv.slice(2));
+  const { evidenceDir, cliEntry } = parseArgs(process.argv.slice(2));
   await fs.mkdir(evidenceDir, { recursive: true });
   const runtimeDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-night-watch-live-'));
   const fixture = createNightWatchCliFixture(runtimeDirectory);
@@ -119,7 +125,10 @@ async function main() {
   const agents = Object.freeze({ bootstrap: 'Bootstrap', synthetic: '🧊', journey: '旅程', noLabel: '无标签' });
   const evidence = [];
   const run = async (step, agent, source, expected = 'success') => {
-    const result = await childProcess('atom.cmd', ['--endpoint', endpoint, '--agent', agent, '--stdin'], source);
+    const args = ['--endpoint', endpoint, '--agent', agent, '--stdin'];
+    const result = cliEntry
+      ? await childProcess(process.execPath, [cliEntry, ...args], source)
+      : await childProcess('atom.cmd', args, source);
     const entry = {
       step,
       outcome: expected === 'success' ? 'passed' : 'expected-fail-closed',

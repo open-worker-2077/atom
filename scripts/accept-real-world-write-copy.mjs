@@ -7,6 +7,7 @@ import { createTransactionalWorldPersistence } from '../src/atom-system/adapters
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { executeAtomCommandEndpoint } from '../work-engine/atom-language/cli.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
 if (process.argv.includes('--trace')) process.env.ATOM_PERF_TRACE = '1';
 const cleanupCopy = process.argv.includes('--cleanup');
@@ -15,22 +16,6 @@ const measureStructuralLatency = process.argv.includes('--structural-latency');
 function argument(name) {
   const index = process.argv.indexOf(name);
   return index === -1 ? null : process.argv[index + 1];
-}
-
-function agentPaths(atoms, parent = []) {
-  const results = [];
-  for (const atom of atoms) {
-    if (!atom || typeof atom !== 'object' || Array.isArray(atom)) continue;
-    const thingKey = Object.keys(atom).find((key) => (
-      key === 'thing' || key.startsWith('thing@') || key === 'name' || key.startsWith('name@')
-    ));
-    if (!thingKey || typeof atom[thingKey] !== 'string') continue;
-    const current = [...parent, atom[thingKey]];
-    if (thingKey.split('@').slice(1).includes('agent')) results.push(current.join('/'));
-    const contain = atom.contain ?? atom.children;
-    if (Array.isArray(contain)) results.push(...agentPaths(contain, current));
-  }
-  return results;
 }
 
 const sourceContext = path.resolve(argument('--context') ?? 'atom.json');
@@ -64,12 +49,14 @@ let running;
 let monitor;
 try {
   const copiedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const programScheduler = createProgramRuntimeScheduler();
+  const agentSecurity = await programScheduler.rebuildAgentSecurity(copiedWorld);
   const requestedAgent = argument('--agent');
-  const agentPath = requestedAgent ?? agentPaths(copiedWorld)[0];
-  if (!agentPath) throw new Error('The copied world has no @agent context');
+  const agentPath = requestedAgent ?? agentSecurity.keys().next().value;
+  if (!agentPath) throw new Error('The copied world has no declared Agent Program context');
   const interaction = { agentSelector: agentPath, agent: { path: agentPath } };
   running = await startAtomGraphServer({
-    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, programScheduler
   });
   const endpoint = `${running.url}/__atom/api/command`;
   const port = running.port;

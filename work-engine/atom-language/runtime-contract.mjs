@@ -1,1 +1,1 @@
-export const ATOM_RUNTIME_CONTRACT = 'atom-interaction/3';
+export const ATOM_RUNTIME_CONTRACT = 'atom-interaction/4';

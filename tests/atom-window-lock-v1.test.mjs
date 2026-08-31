@@ -199,24 +199,10 @@ test('agent registry does not define a separate management authority', () => {
   assert.equal(Object.hasOwn(registration.contract, 'management'), false);
 });
 
-test('ordinary Transform cannot create or type a Thing as Agent', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-forgery-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const contextFile = path.join(directory, 'atom.json');
-  const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([atom('Root')], null, 2));
-  const created = await executeAtomLanguage({
-    source: 'transform new {"thing@agent":"Forged","situation":"","contain":[],"support":[]}',
-    contextFile, projectionFile, programScheduler: createProgramRuntimeScheduler()
-  });
-  assert.equal(created.ok, false);
-  assert.equal(created.errors[0].code, 'AGENT_REGISTRATION_REQUIRED');
-  const typed = await executeAtomLanguage({
-    source: 'transform {"thing.typ.agent":"Root"}',
-    contextFile, projectionFile, programScheduler: createProgramRuntimeScheduler()
-  });
-  assert.equal(typed.ok, false);
-  assert.equal(typed.errors[0].code, 'AGENT_REGISTRATION_REQUIRED');
+test('public Agent contract forbids Key-type identity and sidecar authority', () => {
+  const registration = programFunctionRegistry().functions.find((entry) => entry.name === 'agent');
+  assert.equal(registration.contract.keyType, 'forbidden');
+  assert.equal(registration.contract.sidecarAuthority, 'forbidden');
 });
 
 test('an Agent key may satisfy its own node lock and reconfigure without exceeding its authority', async (t) => {
@@ -227,7 +213,7 @@ test('an Agent key may satisfy its own node lock and reconfigure without exceedi
   const initialSource = 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","transform"]}})';
   const updatedSource = 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore"]}})';
   await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
-    atom('Window', initialSource, [], 'program@agent'),
+    atom('Window', initialSource, [], 'program'),
     atom(
       'Window Lock',
       'lock({"targets":{"paths":["Root/Window"],"scope":"exact"},"actions":["transform"],"labels":["^"]})',
@@ -257,7 +243,7 @@ test('an unmatched Agent node lock denies self-reconfiguration without mutation'
   const initialSource = 'agent({"labels":["finance"],"functions":{"groups":[],"names":["explore","transform"]}})';
   const updatedSource = 'agent({"labels":["finance"],"functions":{"groups":[],"names":["explore"]}})';
   await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
-    atom('Window', initialSource, [], 'program@agent'),
+    atom('Window', initialSource, [], 'program'),
     atom(
       'Window Lock',
       'lock({"targets":{"paths":["Root/Window"],"scope":"exact"},"actions":["transform"],"labels":["audit"]})',
@@ -291,7 +277,7 @@ async function descendantAgentCandidateFixture(t, suffix, lockFields = ['thing']
     atom('Window', agentSource, [
       atom('Child Program', initialProgramSource, [atom('Support Fact')], 'program'),
       atom('Support Decision', 'def main(arguments):\n    return True', [], 'program')
-    ], 'program@agent'),
+    ], 'program'),
     ...(lockFields ? [atom(
       'Registration Lock',
       `lock({"targets":{"paths":["Root/Window/Child Program"]},"mode":"write","fields":${JSON.stringify(lockFields)}})`,
@@ -335,7 +321,10 @@ for (const scenario of [
         key.startsWith('thing') && value === 'Default Backup'
       )));
       assert.equal(backup.contain[0]['thing@program'], 'Child Program');
-      assert.equal(Object.hasOwn(backup.contain[0], 'thing@program@agent'), false);
+      assert.deepEqual(
+        Object.keys(backup.contain[0]).filter((key) => key.startsWith('thing')),
+        ['thing@program']
+      );
     }
   }
 ]) {
@@ -355,7 +344,10 @@ for (const scenario of [
     const child = world[0].contain[0].contain[0];
     if (child) {
       assert.equal(Object.hasOwn(child, 'thing@program'), true);
-      assert.equal(Object.hasOwn(child, 'thing@program@agent'), false);
+      assert.deepEqual(
+        Object.keys(child).filter((key) => key.startsWith('thing')),
+        ['thing@program']
+      );
     }
   });
 }
@@ -390,7 +382,10 @@ test('an out-of-window Agent declaration edit uses the normal Transform gate', a
   assert.ok(result.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), JSON.stringify(result));
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(world[0].contain[1].situation, 'value = 1');
-  assert.equal(Object.hasOwn(world[0].contain[1], 'thing@program@agent'), false);
+  assert.deepEqual(
+    Object.keys(world[0].contain[1]).filter((key) => key.startsWith('thing')),
+    ['thing@program']
+  );
 });
 
 test('jump and slot_body no longer expose caller-defined fixed-lock switches', async () => {
@@ -417,7 +412,7 @@ test('registered Agent execution only exposes functions resolved from its persis
     atom('Root', '', [
       atom('Agent', 'agent({"labels":["^"],"functions":{"groups":[],"names":["message"]}})', [
         atom('Writer', 'transform({"thing":"Root/Agent","situation.rep.x":None})', [], 'program')
-      ], 'program@agent')
+      ], 'program')
     ])
   ], { programSelector: 'Root/Agent/Writer', force: true, agentOrigin: { path: 'Root/Agent' } }),
   (error) => error.code === 'PROGRAM_FUNCTION_DENIED');
@@ -432,7 +427,7 @@ test('registered Program Explore uses the same fixed Graph path before reading s
     atom('Area', '', [atom('Window', 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","message"]}})', [atom('Probe', [
       'outside = explore({"thing":"Root/Outside","situation$full":True})[0]',
       'message({"level":"info","text":outside.situation})'
-    ].join('\n'), [], 'program')], 'program@agent')]),
+    ].join('\n'), [], 'program')], 'program')]),
     atom('Outside', 'secret')
   ])], null, 2));
   const result = await executeAtomLanguage({

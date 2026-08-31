@@ -46,8 +46,8 @@ def load_program_function_registry():
     value = json.loads(module_path.read_text(encoding="utf-8"))
     hierarchy = value.get("functionScopeHierarchy", {})
     if (value.get("contract") != "atom-program-function-registry"
-            or value.get("version") != 5
-            or value.get("runtimeContract") != "atom-interaction/3"
+            or value.get("version") != 6
+            or value.get("runtimeContract") != "atom-interaction/4"
             or hierarchy.get("groupField") != "functionFamilies[].id"
             or hierarchy.get("parentField") != "functionFamilies[].parent"
             or hierarchy.get("rootWhenParentOmitted") is not True
@@ -509,6 +509,7 @@ LEGACY_GRAPH_AXES = {
 def main():
     request = json.loads(sys.stdin.readline())
     records = request["world"]
+    agent_program_paths = set(request.get("agentProgramPaths", []))
     by_ref = {record["ref"]: record for record in records}
     views = {ref: AtomView(record) for ref, record in by_ref.items()}
     effects = {
@@ -851,7 +852,7 @@ def main():
                     f"jump_authorize.{name} requires an exact ThingCoordinate returned by explore()",
                 )
             resolved[name] = value._record
-        if "agent" not in resolved["window"].get("types", []):
+        if resolved["window"]["path"] not in agent_program_paths:
             raise EngineCallError(
                 "INVALID_JUMP_AUTHORIZATION_WINDOW",
                 "jump_authorize.window must identify one registered Agent Program",

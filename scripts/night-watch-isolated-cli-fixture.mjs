@@ -42,13 +42,13 @@ export function createNightWatchCliFixture(directory) {
   const syntheticAgentSource = agentSource(['^']);
   const overreachAgentSource = agentSource(['^^']);
   const world = [atom(testPath, 'night-watch disposable domain', [
-    atom('Bootstrap', agentSource(['^^']), [], 'program@agent'),
-    atom('旅程', agentSource(['^']), [], 'program@agent'),
+    atom('Bootstrap', agentSource(['^^']), [], 'program'),
+    atom('旅程', agentSource(['^']), [], 'program'),
     atom('目的地', 'jump destination'),
     atom('无标签', agentSource([]), [
       atom('受锁结果', 'unchanged'),
       atom('路径锁', exactLockSource(noLabelTargetPath), [], 'program')
-    ], 'program@agent')
+    ], 'program')
   ])];
 
   return Object.freeze({

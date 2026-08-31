@@ -36,6 +36,16 @@ GET /__atom/api/program-function-registry
 
 当前 `@program` 是内核类型，也是唯一可执行 Atom 类型。函数的内核／应用层级不会生成新的 Atom 类型；应用类型和新的形态字段仍待真实需求出现后再设计。
 
+Agent 是普通 `thing@program` 的源码能力，不是 Key 类型。Program 的 Situation
+中恰有一个顶层字面量 `agent({...})` 时，当前修订的派生目录才将其识别为
+Agent Program；零个、多个、动态或嵌套声明均不注册。Agent Program 与其他
+Program 使用同一调度器，并统一通过 `use_program()` 完成 Program 间分派。
+
+Agent、锁、Jump、触发器及 Program 目录都是由不可变世界修订中的 Program
+源码重建的修订绑定缓存，不持有世界事实，也不形成旁路权限。旧 `@agent`
+格式只作为迁移输入被解释：活跃对象转换为带单一字面量声明的 Program，归档
+对象降级为普通事实；应用和回滚以脱敏、持久、修订绑定的迁移回执为唯一依据。
+
 ## Program 研发与注册边界
 
 Agent 可按生产需要自行编写和研磨本 Atom 的 `@program`，并直接通过 `use_program()` 复用；不要求先获得平台注册，也不限制其研究深度。代码、组件和应用模式无论成熟或零碎，都可以成为后续提炼公共能力的素材。
@@ -99,16 +109,9 @@ Form 只返回 `valid`、分类后的组件路径、实际参与评估的路径�
 - 不修改推进流模板的固定阶段；外层 Program 可采用 Form 评估结果自行形成应用逻辑。
 - 不在本变更中实施 `use_program()` 的 Explore-ref 迁移。
 
-## 迁移前历史验证记录（2026-08-20）
+## 实施历史
 
-以下记录仅保存迁移前的 OpenSpec 验证结果作为历史证据，不构成当前验收权威。当前验收以批准的 Superpowers 规格、当前实施计划、检出的 Git revision 与绑定该 revision 的新鲜验证证据为准。
-
-- 当时的 OpenSpec 严格校验通过。
-- Form、Program 标准库、工单、推进流、CLI/Web 和数据边界聚焦回归 61/61 通过。
-- 架构测试 10/10、系统测试 87/87 通过。
-- 浏览器构建与真实关键路径 1/1 通过；测试输出位于系统临时目录。
-- 完整仓库回归 886/888 通过。
-- 两项未通过均位于既有 `tests/render-contract.test.js`：仍断言旧的
-  `drawStars()/drawDomainBackdrop()` 调用，而当前渲染器使用
-  `drawStaticBackdrop()`。本变更未修改渲染器或渲染契约测试，不将这两项
-  既有基线失败表述为本变更完成。
+迁移前的控制材料和旧验证记录只作为历史证据保存在
+[`docs/history/development-control/`](../history/development-control/)；当前合同、
+实现和完成状态分别以批准规格、检出 revision 及绑定该 revision 的新鲜验证
+证据为准。

@@ -27,10 +27,14 @@ const gatedSupport = (program, ...targets) => targets.length === 0
     }];
 
 function atomsFixture() {
+  const workshopAgentSource = [
+    'LEGACY_AGENT_SITUATION = "工坊正文"',
+    'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})'
+  ].join('\n');
   return [
     {
-      'thing@agent': '石器工坊',
-      'situation#主观窗口': '工坊正文',
+      'thing@program': '石器工坊',
+      'situation#主观窗口': workshopAgentSource,
       contain: [
         {
           'thing@program': '锤子',
@@ -42,16 +46,16 @@ function atomsFixture() {
           thing: '锤击事实',
           situation: '锤击已完成',
           contain: [],
-          support: gatedSupport('锤子', '石器工坊')
+          support: gatedSupport('锤子', '河岸')
         }
       ],
-      support: supports('河岸')
+      support: []
     },
     {
       thing: '河岸',
       situation: '河岸正文',
       contain: [],
-      support: []
+      support: supports('锤击事实')
     }
   ];
 }
@@ -111,8 +115,11 @@ test('projects decorated Atom keys recursively through parseAtomKey onto a virtu
     situation: '',
     contain: [
       {
-        'thing@agent': '石器工坊',
-        'situation#主观窗口': '工坊正文',
+        'thing@program': '石器工坊',
+        'situation#主观窗口': [
+          'LEGACY_AGENT_SITUATION = "工坊正文"',
+          'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})'
+        ].join('\n'),
         contain: [
           {
             'thing@program': '锤子',
@@ -124,16 +131,16 @@ test('projects decorated Atom keys recursively through parseAtomKey onto a virtu
             thing: '锤击事实',
             situation: '锤击已完成',
             contain: [],
-            support: gatedSupport('锤子', '石器工坊')
+            support: gatedSupport('锤子', '河岸')
           }
         ],
-        support: supports('河岸')
+        support: []
       },
       {
         thing: '河岸',
         situation: '河岸正文',
         contain: [],
-        support: []
+        support: supports('锤击事实')
       }
     ],
     support: []
@@ -217,7 +224,7 @@ test('validates the projected Graph before either persistent file can be written
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const invalid = atomsFixture();
-  invalid[0].support[0].then[0].thing = '不存在的 Atom';
+  invalid[0].contain[1].support[0].then[0].thing = '不存在的 Atom';
 
   await assert.rejects(
     writeAtomContext(contextFile, invalid),

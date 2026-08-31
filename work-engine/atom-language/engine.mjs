@@ -505,7 +505,7 @@ async function applyCreateTransform({
   if (createNameField?.parsed.types.some((type) => type.raw === 'agent')) {
     return { error: diagnostic(
       'AGENT_REGISTRATION_REQUIRED',
-      '公开 Transform 不能创建 @agent；请由当前 Program 调用 agent()'
+      '公开 Transform 不能创建退役 Agent Key；请使用含字面量 agent({...}) 声明的 Program'
     ) };
   }
   const createdMatches = walkAtoms([atom]);

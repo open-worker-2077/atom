@@ -586,24 +586,26 @@ test('transform new reports Program lock denial instead of an undefined decision
   assert.equal(result.errors[0].code, 'PROGRAM_LOCK_DENIED');
 });
 
-test('renaming an Agent ignores uses on Program data children', async () => {
+test('renaming an Agent Program ignores uses on Program data children', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-legacy-validation-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    atom('Legacy Agent', '', [
+    atom('Legacy Agent', 'agent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})', [
       atom('Legacy Program', '', [atom('Legacy Step')], 'program')
-    ], 'agent')
+    ], 'program')
   ], null, 2));
 
   const result = await executeAtomLanguage({
     source: 'transform {"thing.ren.Renamed Agent":"Legacy Agent"}',
     contextFile,
-    projectionFile
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler(),
+    interaction: { agent: { ref: 'legacy-agent-ref', path: 'Legacy Agent' } }
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0]['thing@agent'], 'Renamed Agent');
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0]['thing@program'], 'Renamed Agent');
   assert.equal(result.warnings.some((warning) => warning.code === 'PROGRAM_USES_REQUIRED'), false);
 });
 

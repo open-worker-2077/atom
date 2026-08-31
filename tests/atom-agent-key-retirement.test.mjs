@@ -5,7 +5,7 @@ import { parseAtomKey } from '../work-engine/atom-language/key-parser.mjs';
 
 test('strict Agent Program parsing rejects Agent as a type', () => {
   for (const rawKey of ['thing@agent', 'thing@program@agent', 'thing@agent@program#legacy']) {
-    const parsed = parseAtomKey(rawKey, { allowRetiredAgentKey: false });
+    const parsed = parseAtomKey(rawKey);
     assert.equal(parsed.errors.find((error) => error.code === 'RETIRED_AGENT_KEY_TYPE')?.details.rawKey, rawKey);
   }
   assert.deepEqual(parseAtomKey('thing@program').errors, []);

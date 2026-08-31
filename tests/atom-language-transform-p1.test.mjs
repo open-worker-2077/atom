@@ -203,14 +203,14 @@ test('summary, field type, rename, and complete support replacement strip comman
   );
 });
 
-test('an empty thing typ command removes the registration type without changing the thing', async (t) => {
-  const files = await fixture(t, [{ 'thing@agent': 'Window', situation: '', contain: [], support: [] }]);
+test('an empty thing typ command removes a generic type without changing the thing', async (t) => {
+  const files = await fixture(t, [{ 'thing@draft': 'Window', situation: '', contain: [], support: [] }]);
   const result = await execute(files, 'transform {"thing.typ.":"Window"}');
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const updated = findAtom(await readAtoms(files.contextFile), 'Window');
   assert.equal(updated.thing, 'Window');
-  assert.equal(Object.hasOwn(updated, 'thing@agent'), false);
+  assert.equal(Object.hasOwn(updated, 'thing@draft'), false);
 });
 
 test('contain only creates or transforms explicitly submitted nodes', async (t) => {

@@ -42,7 +42,7 @@ test('Graph-JSON result formatting preserves decorated and absent-Value keys', (
     kind: 'object',
     entries: [
       {
-        key: 'thing@agent~updated',
+        key: 'thing@program~updated',
         valuePresent: true,
         value: '石器工坊'
       },
@@ -54,7 +54,7 @@ test('Graph-JSON result formatting preserves decorated and absent-Value keys', (
   };
   const text = formatGraphJson(value);
   assert.equal(text, `{
-  "thing@agent~updated": "石器工坊",
+  "thing@program~updated": "石器工坊",
   "situation#简介中的 @/$/~ 都是原文"
 }`);
   assert.deepEqual(parseGraphJson(text), value);
@@ -197,7 +197,7 @@ test('6. absent Value, null, empty string, and an absent key stay distinct', () 
 });
 
 test('7. the first # terminates engineering-symbol execution', () => {
-  const rawKey = 'situation#简介中的@agent$full~more438';
+  const rawKey = 'situation#简介中的@custom$full~more438';
   const result = createAtomLanguageReceiver().receive(`explore {${JSON.stringify(rawKey)}}`);
   const parsed = field(result.items[0], rawKey);
   assert.equal(result.ok, true);
@@ -206,12 +206,12 @@ test('7. the first # terminates engineering-symbol execution', () => {
   assert.deepEqual(parsed.actions, []);
   assert.deepEqual(parsed.hints, []);
   assert.equal(parsed.descriptionPresent, true);
-  assert.equal(parsed.description, '简介中的@agent$full~more438');
+  assert.equal(parsed.description, '简介中的@custom$full~more438');
   assert.equal(parsed.persistentKey, rawKey);
 });
 
 test('8. symbols after # produce a warning that can be disabled without changing parsing', () => {
-  const rawKey = 'situation#简介中的@agent$full~more438';
+  const rawKey = 'situation#简介中的@custom$full~more438';
   const source = `explore {${JSON.stringify(rawKey)}}`;
   const warned = createAtomLanguageReceiver().receive(source);
   assert.equal(warned.items[0].warnings[0].code, 'DESCRIPTION_NOT_LAST');
@@ -229,14 +229,14 @@ test('8. symbols after # produce a warning that can be disabled without changing
 });
 
 test('9. the left side of # is split and dispatched by @, $, and ~', () => {
-  const rawKey = 'thing@agent$exact~hidden12#石器工坊窗口';
+  const rawKey = 'thing@program$exact~hidden12#石器工坊窗口';
   const result = createAtomLanguageReceiver().receive(
     `explore {${JSON.stringify(rawKey)}:"窗口一"}`
   );
   const parsed = field(result.items[0], rawKey);
   assert.deepEqual(
     parsed.types.map(({ name, parameter }) => ({ name, parameter })),
-    [{ name: 'agent', parameter: null }]
+    [{ name: 'program', parameter: null }]
   );
   assert.deepEqual(
     parsed.actions.map(({ name, parameter }) => ({ name, parameter })),
@@ -331,7 +331,7 @@ test('15. transient $ actions and ~ hints are stripped from the persistent key',
 
 test('16. ordinary field merging preserves existing @ type and # description', () => {
   const existing = {
-    'thing@agent': '旧窗口',
+    'thing@program': '旧窗口',
     'situation#石器工坊简介': '旧正文',
     contain: [],
     support: []
@@ -341,7 +341,7 @@ test('16. ordinary field merging preserves existing @ type and # description', (
   );
   const merged = mergePersistentAtom(existing, request.items[0]);
   assert.deepEqual(merged, {
-    'thing@agent': '新窗口',
+    'thing@program': '新窗口',
     'situation#石器工坊简介': '新正文',
     contain: [],
     support: []
@@ -366,15 +366,15 @@ test('17. batch requests keep every item when one item fails', () => {
 });
 
 test('18. Chinese, quotes, newlines, and accidental description symbols are never executed', () => {
-  const rawKey = 'situation#第一段“引号”\n第二段#仍是简介@agent$full~more9';
-  const value = '正文写到“@agent”、“$full”和“~more”，但它们只是正文。';
+  const rawKey = 'situation#第一段“引号”\n第二段#仍是简介@custom$full~more9';
+  const value = '正文写到“@custom”、“$full”和“~more”，但它们只是正文。';
   const result = createAtomLanguageReceiver().receive(
     `explore {${JSON.stringify(rawKey)}:${JSON.stringify(value)}}`
   );
   const parsed = field(result.items[0], rawKey);
   assert.equal(result.ok, true);
   assert.deepEqual(parsed.errors, []);
-  assert.equal(parsed.description, '第一段“引号”\n第二段#仍是简介@agent$full~more9');
+  assert.equal(parsed.description, '第一段“引号”\n第二段#仍是简介@custom$full~more9');
   assert.equal(parsed.value, value);
   assert.deepEqual(parsed.types, []);
   assert.deepEqual(parsed.actions, []);
@@ -393,7 +393,7 @@ test('19. persistence defaults to atom.json while allowing contextual JSON files
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-language-p0-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const document = {
-    'thing@agent': 'agent001',
+    'thing@note': 'agent001',
     'situation#主观窗口': '严格 JSON 正文',
     contain: [],
     support: []
@@ -441,29 +441,29 @@ test('20. the new writer rejects and never creates active world.json names', asy
 });
 
 test('21. type sections come only from keys and never from a situation Value scan', () => {
-  const value = '正文中提到 @agent、@program、@backup，但正文不能决定 Atom 类型。';
+  const value = '正文中提到 @custom、@program、@backup，但正文不能决定 Atom 类型。';
   const result = createAtomLanguageReceiver().receive(`explore {
     "situation#类型说明":${JSON.stringify(value)},
-    "thing":"普通节点正文也提到 @agent @program @backup"
+    "thing":"普通节点正文也提到 @custom @program @backup"
   }`);
   assert.deepEqual(fieldByBase(result.items[0], 'situation').types, []);
   assert.deepEqual(fieldByBase(result.items[0], 'thing').types, []);
 
   const typed = createAtomLanguageReceiver().receive(
-    'explore {"thing@agent":"agent001","situation":"普通正文"}'
+    'explore {"thing@program":"agent001","situation":"普通正文"}'
   );
   assert.deepEqual(
     fieldByBase(typed.items[0], 'thing').types.map((type) => type.name),
-    ['agent']
+    ['program']
   );
 
   const numberedType = createAtomLanguageReceiver().receive(
-    'explore {"thing@agent2":"agent002"}'
+    'explore {"thing@custom2":"agent002"}'
   );
   assert.deepEqual(fieldByBase(numberedType.items[0], 'thing').types[0], {
     symbol: '@',
-    raw: 'agent2',
-    name: 'agent2',
+    raw: 'custom2',
+    name: 'custom2',
     parameter: null
   });
 });

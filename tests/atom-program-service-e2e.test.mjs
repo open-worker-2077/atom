@@ -10,7 +10,12 @@ import { projectAtomGraphToKnowledge } from '../work-engine/atom-language/graph-
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+  const agentProgram = type === 'agent';
+  const storedType = agentProgram ? 'program' : type;
+  const storedSituation = agentProgram
+    ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\nagent({"labels":[],"functions":{"groups":[],"names":["agent","explore","jump","lock","message","shortcut","slot_body","transform","trigger","use_program","work_order"]}})`
+    : situation;
+  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, contain, support: [] };
 }
 
 function childPath(node) {
@@ -111,9 +116,10 @@ test('4784 serializes concurrent writes as complete world interactions without l
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    atom('工作Agent', '起点', [], 'agent'),
-    atom('任务甲', '旧甲'),
-    atom('任务乙', '旧乙')
+    atom('工作Agent', '起点', [
+      atom('任务甲', '旧甲'),
+      atom('任务乙', '旧乙')
+    ], 'agent')
   ], null, 2));
 
   const running = await startAtomGraphServer({
@@ -125,21 +131,21 @@ test('4784 serializes concurrent writes as complete world interactions without l
 
   const [left, right] = await Promise.all([
     executeAtomCommandEndpoint({
-      source: 'transform {"thing":"任务甲","situation.rep.新甲"}', interaction: { agent }
+      source: 'transform {"thing":"工作Agent/任务甲","situation.rep.新甲"}', interaction: { agent }
     }, endpoint),
     executeAtomCommandEndpoint({
-      source: 'transform {"thing":"任务乙","situation.rep.新乙"}', interaction: { agent }
+      source: 'transform {"thing":"工作Agent/任务乙","situation.rep.新乙"}', interaction: { agent }
     }, endpoint)
   ]);
 
   assert.equal(left.ok, true);
   assert.equal(right.ok, true);
   const context = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(context.find((entry) => entry.thing === '任务甲')?.situation, '新甲');
-  assert.equal(context.find((entry) => entry.thing === '任务乙')?.situation, '新乙');
+  assert.equal(context[0].contain.find((entry) => entry.thing === '任务甲')?.situation, '新甲');
+  assert.equal(context[0].contain.find((entry) => entry.thing === '任务乙')?.situation, '新乙');
 
   const projectionBarrier = await executeAtomCommandEndpoint({
-    source: 'explore {"thing":"任务乙","situation$full":true}', interaction: { agent }
+    source: 'explore {"thing":"工作Agent/任务乙","situation$full":true}', interaction: { agent }
   }, endpoint);
   assert.equal(projectionBarrier.ok, true, JSON.stringify(projectionBarrier.errors));
 
@@ -173,10 +179,11 @@ test('4784 applies one Program effect set without cloning the whole world per tr
     (_, index) => atom(`Ballast ${index}`, 'x'.repeat(200))
   );
   await fs.writeFile(contextFile, JSON.stringify([
-    atom('工作Agent', '起点', [], 'agent'),
-    atom('Switch', 'before'),
-    ...targets,
-    ...ballast
+    atom('工作Agent', '起点', [
+      atom('Switch', 'before'),
+      ...targets,
+      ...ballast
+    ], 'agent')
   ], null, 2));
 
   const emptyCycle = () => ({
@@ -189,7 +196,13 @@ test('4784 applies one Program effect set without cloning the whole world per tr
     runtimeWarnings: []
   });
   let refreshCount = 0;
+  const agentSecurity = new Map([['工作Agent', {
+    labels: [], functionScopes: { groups: [], names: ['explore', 'transform'] },
+    functions: ['explore', 'transform']
+  }]]);
   const programScheduler = {
+    agentSecurity,
+    rebuildAgentSecurity: async () => agentSecurity,
     current: async () => emptyCycle(),
     refresh: async () => {
       refreshCount += 1;
@@ -221,7 +234,7 @@ test('4784 applies one Program effect set without cloning the whole world per tr
 
   const startedAt = Date.now();
   const result = await executeAtomCommandEndpoint({
-    source: 'transform {"thing":"Switch","situation.rep.after"}',
+    source: 'transform {"thing":"工作Agent/Switch","situation.rep.after"}',
     interaction: { agent }
   }, `${running.url}/__atom/api/command`);
   const elapsedMs = Date.now() - startedAt;
@@ -229,11 +242,11 @@ test('4784 applies one Program effect set without cloning the whole world per tr
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.ok(elapsedMs < 4_000, `one effect set took ${elapsedMs}ms`);
   const projectionBarrier = await executeAtomCommandEndpoint({
-    source: 'explore {"thing":"Target 0","situation$full":true}',
+    source: 'explore {"thing":"工作Agent/Target 0","situation$full":true}',
     interaction: { agent }
   }, `${running.url}/__atom/api/command`);
   assert.equal(projectionBarrier.ok, true, JSON.stringify(projectionBarrier.errors));
-  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].contain;
   for (let index = 0; index < targets.length; index += 1) {
     assert.equal(world.find((entry) => entry.thing === `Target ${index}`)?.situation, 'after');
   }
@@ -254,11 +267,12 @@ test('4784 keeps one isolated Program effect set fast across structural and reje
     (_, index) => atom(`Ballast ${index}`, 'x'.repeat(400))
   );
   await fs.writeFile(contextFile, JSON.stringify([
-    atom('工作Agent', '起点', [], 'agent'),
-    atom('Switch', 'before'),
-    atom('Destination'),
-    ...targets,
-    ...ballast
+    atom('工作Agent', '起点', [
+      atom('Switch', 'before'),
+      atom('Destination'),
+      ...targets,
+      ...ballast
+    ], 'agent')
   ], null, 2));
 
   const emptyCycle = () => ({
@@ -271,7 +285,13 @@ test('4784 keeps one isolated Program effect set fast across structural and reje
     runtimeWarnings: []
   });
   let refreshCount = 0;
+  const agentSecurity = new Map([['工作Agent', {
+    labels: [], functionScopes: { groups: [], names: ['explore', 'transform'] },
+    functions: ['explore', 'transform']
+  }]]);
   const programScheduler = {
+    agentSecurity,
+    rebuildAgentSecurity: async () => agentSecurity,
     current: async () => emptyCycle(),
     refresh: async () => {
       refreshCount += 1;
@@ -309,14 +329,14 @@ test('4784 keeps one isolated Program effect set fast across structural and reje
 
   const startedAt = Date.now();
   const result = await executeAtomCommandEndpoint({
-    source: 'transform {"thing":"Switch","situation.rep.after"}',
+    source: 'transform {"thing":"工作Agent/Switch","situation.rep.after"}',
     interaction: { agent }
   }, `${running.url}/__atom/api/command`);
   const elapsedMs = Date.now() - startedAt;
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.ok(elapsedMs < 5_000, `structural effect set took ${elapsedMs}ms`);
-  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].contain;
   assert.equal(world.find((entry) => entry.thing === 'Target 0'), undefined);
   assert.equal(world.find((entry) => entry.thing === 'Destination').contain[0].thing, 'Target 0');
   for (let index = 1; index < targets.length; index += 1) {
@@ -671,34 +691,36 @@ test('4784 continues an ordinary command without replaying an unrelated startup 
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    atom('工作Agent', '旧值', [], 'agent'),
-    atom('故障Program', "raise ValueError('broken on purpose')", [], 'program')
+    atom('工作Agent', '', [
+      atom('目标', '旧值'),
+      atom('故障Program', "raise ValueError('broken on purpose')", [], 'program')
+    ], 'agent')
   ], null, 2));
   const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile });
   t.after(() => running.close());
   const agent = await resolveAgentContext(contextFile, '工作Agent');
 
   const result = await executeAtomCommandEndpoint({
-    source: 'transform {"thing":"工作Agent","situation.rep.新值"}',
+    source: 'transform {"thing":"工作Agent/目标","situation.rep.新值"}',
     interaction: { agent }
   }, `${running.url}/__atom/api/command`);
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].situation, '新值');
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].contain[0].situation, '新值');
   assert.equal(result.warnings.some((warning) => (
     warning.code === 'ATOM_PROGRAM_FAILED'
     && warning.program === '故障Program'
   )), false, JSON.stringify(result.warnings));
 
   const created = await executeAtomCommandEndpoint({
-    source: 'transform new {"thing@program":"新增Program","situation":"def main(arguments):\\n    return None","contain":[],"support":[]}',
+    source: 'transform new {"thing@program":"工作Agent/新增Program","situation":"def main(arguments):\\n    return None","contain":[],"support":[]}',
     interaction: { agent }
   }, `${running.url}/__atom/api/command`);
   assert.equal(created.ok, true, JSON.stringify(created.errors));
   assert.equal(created.warnings.some((warning) => warning.program === '故障Program'), false);
 
   const readBack = await executeAtomCommandEndpoint({
-    source: 'explore {"thing":"新增Program","situation$full":true}',
+    source: 'explore {"thing":"工作Agent/新增Program","situation$full":true}',
     interaction: { agent }
   }, `${running.url}/__atom/api/command`);
   assert.equal(readBack.ok, true, JSON.stringify(readBack.errors));
@@ -712,13 +734,14 @@ test('4784 exact Explore does not replay an unrelated slot effect after an expli
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    atom('工作Agent', '', [], 'agent'),
-    atom('目标', 'before'),
-    atom('改值Program', "transform({'thing':'目标','situation.rep.after':None})", [], 'program'),
-    atom('无关槽体Program', [
-      "origin = explore({})[0]",
-      "slot_body({'action':'print','body':'不存在槽体','revision':'synthetic','name':'不应创建'})"
-    ].join('\n'), [], 'program')
+    atom('工作Agent', '', [
+      atom('目标', 'before'),
+      atom('改值Program', "transform({'thing':'工作Agent/目标','situation.rep.after':None})", [], 'program'),
+      atom('无关槽体Program', [
+        "origin = explore({})[0]",
+        "slot_body({'action':'print','body':'不存在槽体','revision':'synthetic','name':'不应创建'})"
+      ].join('\n'), [], 'program')
+    ], 'agent')
   ], null, 2));
   const running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
@@ -728,13 +751,13 @@ test('4784 exact Explore does not replay an unrelated slot effect after an expli
   const agent = await resolveAgentContext(contextFile, '工作Agent');
 
   const changed = await executeAtomCommandEndpoint({
-    source: 'transform {"thing.run.":"改值Program"}', interaction: { agent }
+    source: 'transform {"thing.run.":"工作Agent/改值Program"}', interaction: { agent }
   }, endpoint);
   assert.equal(changed.ok, true, JSON.stringify(changed));
   assert.equal(changed.changed, true, JSON.stringify(changed));
 
   const readBack = await executeAtomCommandEndpoint({
-    source: 'explore {"thing":"目标","situation$full":true}', interaction: { agent }
+    source: 'explore {"thing":"工作Agent/目标","situation$full":true}', interaction: { agent }
   }, endpoint);
   assert.equal(readBack.ok, true, JSON.stringify(readBack));
   assert.equal(readBack.items[0].matches[0].situation, 'after');

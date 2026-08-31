@@ -360,7 +360,7 @@ test('each authoritative commit and rollback emits one recovery-backup signal', 
   ]);
 });
 
-test('ordinary world commits cannot silently erase an existing agent registration', async (t) => {
+test('world persistence remains semantic-neutral for Agent Program facts', async (t) => {
   const { createTransactionalWorldPersistence } = await import(
     new URL('../src/atom-system/adapters/transactional-world-persistence.mjs', import.meta.url)
   );
@@ -368,22 +368,26 @@ test('ordinary world commits cannot silently erase an existing agent registratio
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  const initial = [{ 'thing@agent': '测试Agent', situation: '', contain: [], support: [] }];
+  const initial = [{
+    'thing@program': '测试Agent',
+    situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})',
+    contain: [],
+    support: []
+  }];
   await fs.writeFile(contextFile, `${JSON.stringify(initial)}\n`, 'utf8');
   const persistence = createTransactionalWorldPersistence({ contextFile, projectionFile });
   const beforeRevision = `sha256:${crypto.createHash('sha256').update(JSON.stringify(initial)).digest('hex')}`;
   const withoutAgent = [];
   const nextRevision = `sha256:${crypto.createHash('sha256').update(JSON.stringify(withoutAgent)).digest('hex')}`;
 
-  await assert.rejects(
-    persistence.commit({
-      correlationId: 'unrelated-write',
-      expectedRevision: beforeRevision,
-      nextRevision,
-      facts: withoutAgent,
-      source: 'transform {"thing":"Other","situation.rep.changed"}'
-    }),
-    (error) => error.code === 'AGENT_REGISTRATION_LOSS'
-  );
-  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), initial);
+  const committed = await persistence.commit({
+    correlationId: 'authorized-engine-transition',
+    expectedRevision: beforeRevision,
+    nextRevision,
+    facts: withoutAgent,
+    source: 'authorized-engine-transition'
+  });
+  assert.equal(committed.beforeRevision, beforeRevision);
+  assert.equal(committed.afterRevision, nextRevision);
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), withoutAgent);
 });

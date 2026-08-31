@@ -30,7 +30,7 @@ test('work-order registry exposes one exact public contract for actions, errors,
 
   assert.equal(registry.contract, 'atom-work-order-registry');
   assert.equal(registry.version, 1);
-  assert.equal(registry.runtimeContract, 'atom-interaction/3');
+  assert.equal(registry.runtimeContract, 'atom-interaction/4');
   assert.equal(registry.templates[0].id, 'work-order');
   assert.equal(registry.templates[0].latest, '1');
   assert.deepEqual(version.groups, ['Output', 'Step', 'Criteria']);
@@ -87,7 +87,12 @@ test('Web endpoint and CLI return byte-equivalent registry data without requirin
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    atom('接口Agent', '接口测试', [], 'agent')
+    atom(
+      '接口Agent',
+      'LEGACY_AGENT_SITUATION = "接口测试"\nagent({"labels":[],"functions":{"groups":[],"names":["explore"]}})',
+      [],
+      'program'
+    )
   ]), 'utf8');
   const running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile

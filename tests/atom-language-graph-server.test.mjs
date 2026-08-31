@@ -137,9 +137,14 @@ async function migratedLegacySupportWorld() {
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
+  const agentSource = [
+    'agent({"labels":[],"functions":{"groups":[],"names":["explore","transform","slot_body"]}})',
+    'def main(arguments):',
+    '    return arguments'
+  ].join('\n');
   const legacyFacts = [
     {
-      'name@agent': '冰', detail: '上下文', children: [
+      'name@program': '冰', detail: agentSource, children: [
         { name: 'test', detail: '目标', children: [], partners: [] }
       ],
       partners: [{ verb: '原关系字符', object: '冰/test' }]
@@ -162,23 +167,6 @@ async function migratedLegacySupportWorld() {
     },
     persistence,
     correlationId: 'graph-server-agent-manifest-fixture'
-  });
-  const migratedFacts = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  const agent = migratedFacts.find((atom) => typeof atom['thing@agent'] === 'string');
-  agent['thing@program'] = agent['thing@agent'];
-  delete agent['thing@agent'];
-  agent.situation = [
-    'agent({"labels":[],"functions":{"groups":[],"names":["explore","transform","slot_body"]}})',
-    'def main(arguments):',
-    '    return arguments'
-  ].join('\n');
-  const migratedRevision = revisionOfWorldFacts(migratedFacts);
-  await persistence.commit({
-    correlationId: 'graph-server-agent-program-fixture',
-    expectedRevision: plan.nextRevision,
-    nextRevision: migratedRevision,
-    facts: migratedFacts,
-    source: 'test-agent-program-fixture'
   });
   return {
     directory,

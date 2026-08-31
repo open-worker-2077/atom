@@ -6,7 +6,12 @@ import { programFunctionRegistry } from '../work-engine/atom-language/program-fu
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+  const agentProgram = type === 'agent';
+  const storedType = agentProgram ? 'program' : type;
+  const storedSituation = agentProgram
+    ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\nagent({"labels":[],"functions":{"groups":[],"names":["changed","explore","jump","message","transform"]}})`
+    : situation;
+  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, contain, support: [] };
 }
 
 function output() {
@@ -62,6 +67,7 @@ test('jump guards without when, skips where when false, and recycle true wins', 
   ];
   for (const scenario of cases) {
     const world = [
+      atom('窗口', '', [], 'agent'),
       atom('目标'),
       atom('是', 'def main(arguments):\n    return True', [], 'program'),
       atom('否', 'def main(arguments):\n    return False', [], 'program'),
@@ -82,7 +88,7 @@ test('jump rejects every exact-path string selector and accepts ThingCoordinate 
     ['where', 'Root/定位'],
     ['recycle', 'Root/判定']
   ]) {
-    const invalid = [atom('Root', '', [
+    const invalid = [atom('窗口', '', [], 'agent'), atom('Root', '', [
       atom('判定', 'def main(arguments):\n    return True', [], 'program'),
       atom('目标'),
       atom('定位', 'def main(arguments):\n    return explore({"thing":"Root/目标"})[0]', [], 'program'),
@@ -96,6 +102,7 @@ test('jump rejects every exact-path string selector and accepts ThingCoordinate 
   }
 
   const adapted = [
+    atom('窗口', '', [], 'agent'),
     atom('判定', 'def main(arguments):\n    return True', [], 'program'),
     atom('目标'),
     atom('定位', 'def main(arguments):\n    return explore({"thing":"目标"})[0]', [], 'program'),
@@ -109,6 +116,7 @@ test('jump rejects every exact-path string selector and accepts ThingCoordinate 
 
 test('jump rejects an exact-path string returned by where as an invalid destination', async () => {
   const world = [
+    atom('窗口', '', [], 'agent'),
     atom('判定', 'def main(arguments):\n    return True', [], 'program'),
     atom('定位', 'def main(arguments):\n    return "目标"', [], 'program'),
     atom('目标'),
@@ -160,6 +168,7 @@ test('changed rejects empty, duplicate, string, and ref arrays', async () => {
       ? `point = explore({"thing":"\u76d1\u6d4b\u70b9"})[0]\nchanged(${expression})`
       : `changed(${expression})`;
     await assert.rejects(createProgramRuntimeScheduler().refresh([
+      atom('\u7a97\u53e3', '', [], 'agent'),
       atom('\u76d1\u6d4b\u70b9'), atom('\u975e\u6cd5\u63a2\u9488', source, [], 'program')
     ], { agentOrigin: { path: '\u7a97\u53e3' } }), { code: 'ATOM_PROGRAM_FAILED' });
   }

@@ -1,7 +1,7 @@
 {
   "contract": "atom-program-function-registry",
-  "version": 5,
-  "runtimeContract": "atom-interaction/3",
+  "version": 6,
+  "runtimeContract": "atom-interaction/4",
   "types": [
     { "id": "program", "layer": "kernel", "executable": true }
   ],
@@ -76,6 +76,12 @@
       "family": "graph",
       "scope": "public",
       "contract": {
+        "role": "one static top-level declaration on the current thing@program",
+        "identity": "source-derived Agent Program",
+        "keyType": "forbidden",
+        "dispatch": "ordinary use_program and Program scheduler paths",
+        "persistence": "world Program source",
+        "sidecarAuthority": "forbidden",
         "argument": {
           "type": "object",
           "required": ["functions"],

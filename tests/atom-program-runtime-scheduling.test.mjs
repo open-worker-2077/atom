@@ -234,7 +234,7 @@ test('ordinary fact edits reuse the compiled Agent security directory', async ()
     'Worker',
     'agent({"labels":["^"],"functions":{"groups":[],"names":["explore"]}})',
     [],
-    'program@agent'
+    'program'
   );
 
   const unrelatedProgram = atom('Unrelated Program', 'pass', [], 'program');
@@ -266,7 +266,7 @@ test('one mutable world revision shares one prepared record snapshot across inde
             }
           : { agentRegistrations: [] };
       }
-      return program.types.includes('agent')
+      return program.path === 'Worker'
         ? {
             agentRegistrations: [{
               labels: ['^'],
@@ -289,7 +289,7 @@ test('one mutable world revision shares one prepared record snapshot across inde
       'Worker',
       'agent({"labels":["^"],"functions":{"groups":[],"names":["explore"]}})',
       [],
-      'program@agent'
+      'program'
     ),
     atom(
       'Guard',
@@ -1336,7 +1336,7 @@ test('one immutable large-world revision reuses its Program cycle fingerprint', 
   assert.ok(elapsedMs < 30, `cached Program fingerprint took ${elapsedMs}ms`);
 });
 
-test('a revision-local @agent ref change does not replay Programs for the same context path', async () => {
+test('a revision-local Agent ref change does not replay Programs for the same context path', async () => {
   const program = atom('Context Reporter', [
     "value = explore({'thing': 'Agent/Status'})[0].situation",
     "message({'level': 'info', 'text': value})"
@@ -1364,7 +1364,7 @@ test('a revision-local @agent ref change does not replay Programs for the same c
   assert.deepEqual(unrelatedChange.messages, []);
 });
 
-test('scheduler distinguishes @agent cycles while reusing context-independent Program results', async () => {
+test('scheduler distinguishes Agent cycles while reusing context-independent Program results', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const world = [atom('No Program')];
   const first = await scheduler.refresh(world, { agentOrigin: { ref: 'agent-a', path: 'A/Agent' } });
@@ -1409,7 +1409,7 @@ test("an Agent cycle executes only Programs owned by that Agent", async () => {
   assert.deepEqual(cycle.failures, []);
 });
 
-test('Programs with explicit explore anchors are reused across @agent context paths', async () => {
+test('Programs with explicit explore anchors are reused across Agent context paths', async () => {
   const program = atom('Explicit Reporter', [
     "value = explore({'thing': 'Target'})[0].situation",
     "message({'level': 'info', 'text': value})"

@@ -13,7 +13,12 @@ import {
 } from '../src/atom-system/world-runtime/year-ring.mjs';
 
 function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+  const agentProgram = type === 'agent';
+  const storedType = agentProgram ? 'program' : type;
+  const storedSituation = agentProgram
+    ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\nagent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})`
+    : situation;
+  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, contain, support: [] };
 }
 
 function ports() {
@@ -574,7 +579,6 @@ test('an ordinary exact Explore passively prepares projections without replaying
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
-    atom('Audit', '', [], 'agent'),
     atom('Acceptance', '', [
       atom('Job1'),
       atom('Job2', '', [
@@ -584,7 +588,7 @@ test('an ordinary exact Explore passively prepares projections without replaying
         ].join('\n'), [], 'program')], 'agent')
       ])
     ])
-  ])], null, 2));
+  ], 'agent')], null, 2));
   let storedProjection = null;
   const scheduler = createProgramRuntimeScheduler({
     projectionRepository: {
@@ -621,7 +625,7 @@ test('an ordinary exact Explore passively prepares projections without replaying
   const result = await runtime.execute({
     source: 'explore {"thing":"Root/Acceptance/Job2/Window","situation$full":true}',
     correlationId: 'ordinary-read-after-window-reset',
-    agentPath: 'Root/Audit'
+    agentPath: 'Root'
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));

@@ -53,7 +53,7 @@ async function fixture(t, { kind, action, held }) {
     atom('Window', agentSource, [
       ...(kind === 'node' ? [target] : [atom('Area', '', [target])]),
       atom('Lock Program', `lock(${pythonLiteral(lockDeclaration)})`, [], 'program')
-    ], 'program@agent')
+    ], 'program')
   ])], null, 2));
   return { contextFile, projectionFile, targetPath };
 }
@@ -135,7 +135,7 @@ test('a successful action-split Transform publishes a current Program projection
       atom('Unlabelled', unlabelledSource, [
         atom('NodeExplore', 'classified'),
         atom('NodeTransform', 'classified')
-      ], 'program@agent'),
+      ], 'program'),
       atom('Locks', '', [
         atom('NodeExplore Lock', `lock(${pythonLiteral({
           targets: { paths: [nodeExplorePath], scope: 'exact' },
@@ -146,7 +146,7 @@ test('a successful action-split Transform publishes a current Program projection
           actions: ['transform'], labels: ['node-transform']
         })})`, [], 'program')
       ])
-    ], 'program@agent')
+    ], 'program')
   ])]), 'utf8');
 
   const storedProjectionRepository = createJsonProgramProjectionRepository({ file: programProjectionFile });

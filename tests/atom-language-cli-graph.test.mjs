@@ -19,9 +19,13 @@ import {
 import { createNightWatchCliFixture } from '../scripts/night-watch-isolated-cli-fixture.mjs';
 import { atomCmdSpawnOptions } from '../scripts/night-watch-isolated-cli-live.mjs';
 
+const currentCliEntry = path.resolve(import.meta.dirname, '../work-engine/atom-language/cli.mjs');
+
 function runExternalAtom(args, input) {
   return new Promise((resolve, reject) => {
-    const child = spawn('atom.cmd', args, atomCmdSpawnOptions());
+    const child = spawn(process.execPath, [currentCliEntry, ...args], {
+      cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true
+    });
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8');
@@ -37,7 +41,8 @@ function runExternalAtom(args, input) {
 function runIsolatedCliJourney(evidenceDir) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [
-      'scripts/night-watch-isolated-cli-live.mjs', '--evidence-dir', evidenceDir
+      'scripts/night-watch-isolated-cli-live.mjs', '--evidence-dir', evidenceDir,
+      '--cli-entry', currentCliEntry
     ], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '';
     let stderr = '';
@@ -48,19 +53,6 @@ function runIsolatedCliJourney(evidenceDir) {
     child.once('error', reject);
     child.once('close', (code) => resolve({ code, stdout, stderr }));
   });
-}
-
-function declaredAgentProgramWorld(world) {
-  const rewrite = (atoms) => atoms.map((atom) => {
-    const next = structuredClone(atom);
-    if (typeof next['thing@program@agent'] === 'string') {
-      next['thing@program'] = next['thing@program@agent'];
-      delete next['thing@program@agent'];
-    }
-    if (Array.isArray(next.contain)) next.contain = rewrite(next.contain);
-    return next;
-  });
-  return rewrite(world);
 }
 
 async function runCli(args, execute = executeAtomLanguage) {
@@ -203,14 +195,15 @@ test('public CLI targets an explicitly isolated command endpoint', async (t) => 
 
 test('the isolated live runner launches public atom.cmd through the Windows shell only for fixed generated arguments', () => {
   assert.equal(atomCmdSpawnOptions().shell, process.platform === 'win32' ? true : undefined);
+  assert.equal(atomCmdSpawnOptions(process.execPath).shell, undefined);
 });
 
-test('the Windows atom.cmd wrapper preserves --agent for an isolated endpoint', {
+test('the current CLI entry preserves --agent for an isolated endpoint', {
   skip: process.platform !== 'win32'
 }, async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-external-cli-agent-'));
   const fixture = createNightWatchCliFixture(directory);
-  await fs.writeFile(fixture.contextFile, JSON.stringify(declaredAgentProgramWorld(fixture.world), null, 2));
+  await fs.writeFile(fixture.contextFile, JSON.stringify(fixture.world, null, 2));
   const running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0,
     contextFile: fixture.contextFile, graphFile: fixture.graphFile, storeFile: fixture.storeFile
@@ -230,7 +223,7 @@ test('an explicitly registered ^ synthetic Agent proves path-lock fail-closed an
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-night-watch-cli-labels-'));
   const fixture = createNightWatchCliFixture(directory);
   assert.match(fixture.syntheticAgentSource, /"json_parse"/u);
-  await fs.writeFile(fixture.contextFile, JSON.stringify(declaredAgentProgramWorld(fixture.world), null, 2));
+  await fs.writeFile(fixture.contextFile, JSON.stringify(fixture.world, null, 2));
   const running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0,
     contextFile: fixture.contextFile, graphFile: fixture.graphFile, storeFile: fixture.storeFile

@@ -279,10 +279,10 @@ test('incremental Web projection includes a cross-domain support endpoint withou
   assert.equal(current.projections.spatial.value.supportRelations.length, 1);
 });
 
-test('spatial projection preserves Atom registration types as presentation metadata', async () => {
+test('spatial projection represents an Agent capability by its Program type only', async () => {
   const facts = [{
-    'thing@agent': 'Work Agent',
-    situation: '',
+    'thing@program': 'Work Agent',
+    situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})',
     contain: [{ 'thing@program': 'Router', situation: 'pass', contain: [], support: [] }],
     support: []
   }];
@@ -297,7 +297,7 @@ test('spatial projection preserves Atom registration types as presentation metad
   const agent = spatial.nodes.find((node) => node.label === 'Work Agent');
   const program = spatial.nodes.find((node) => node.label === 'Router');
 
-  assert.deepEqual(agent.atomTypes, ['agent']);
+  assert.deepEqual(agent.atomTypes, ['program']);
   assert.deepEqual(program.atomTypes, ['program']);
 });
 

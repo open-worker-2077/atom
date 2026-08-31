@@ -18,7 +18,7 @@ function fixture() {
   return {
     contract: 'atom-work-order-registry',
     version: 1,
-    runtimeContract: 'atom-interaction/3',
+    runtimeContract: 'atom-interaction/4',
     templates: [{
       id: 'work-order', label: '工单', latest: '1', versions: [{
         version: '1', groups: ['Output', 'Step', 'Criteria'],

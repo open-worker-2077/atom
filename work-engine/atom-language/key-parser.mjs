@@ -161,7 +161,7 @@ export function parseAtomKey(rawKey, options = {}) {
   }
 
   if (baseKey === 'thing'
-    && options.allowRetiredAgentKey === false
+    && options.allowRetiredAgentKey !== true
     && types.some((type) => type.raw === 'agent')) {
     errors.push(diagnostic(
       'RETIRED_AGENT_KEY_TYPE',
