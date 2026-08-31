@@ -75,7 +75,7 @@ import {
 import { applySlotBodyEffect } from './slot-body-runtime.mjs';
 import { normalizeScopedTransformRequest } from './slot-relative-scope.mjs';
 import { applyShortcutEffect, breakShortcutTargets } from './shortcut-runtime.mjs';
-import { registerCurrentProgramAsAgent, validateAgentDelegation } from './window-lock-v1.mjs';
+import { validateAgentDelegation } from './window-lock-v1.mjs';
 import {
   createWindowJumpAuthorization,
   parseWindowJumpAuthorization,
@@ -357,46 +357,38 @@ async function validatePrograms(atoms, contextFile, previousAtoms = null, progra
   }
 }
 
-async function validateRegisteredAgentSourceDelegation({
+async function validateAgentProgramDelegation({
   beforeAtoms,
   afterAtoms,
   creatorSecurity,
   programScheduler
 }) {
-  if (!creatorSecurity) return { ok: true, errors: [] };
-  if (typeof programScheduler?.inspectAgentRegistration !== 'function') {
+  if (typeof programScheduler?.deriveAgentSecurity !== 'function') {
     return {
       ok: false,
       errors: [diagnostic(
         'AGENT_RECONFIGURATION_VALIDATOR_UNAVAILABLE',
-        'Registered Agent source changes require the Agent delegation validator'
+        'Agent Program source changes require the Program declaration validator'
       )]
     };
   }
-  const beforeSources = new Map();
-  for (const match of walkAtoms(beforeAtoms)) {
-    const types = oneStoredField(match.atom, 'thing')?.parsed.types.map((type) => type.raw) ?? [];
-    if (types.includes('agent') && types.includes('program')) {
-      beforeSources.set(
-        match.path.join('/'),
-        oneStoredField(match.atom, 'situation')?.value
+  try {
+    const before = await programScheduler.deriveAgentSecurity(beforeAtoms);
+    const after = await programScheduler.deriveAgentSecurity(afterAtoms);
+    const changed = [...new Set([...before.keys(), ...after.keys()])]
+      .filter((programPath) => (
+        JSON.stringify(before.get(programPath) ?? null)
+          !== JSON.stringify(after.get(programPath) ?? null)
+      ));
+    if (changed.length > 0 && !creatorSecurity) {
+      throw Object.assign(
+        new Error('Agent Program changes require a current creator Agent'),
+        { code: 'AGENT_RECONFIGURATION_CREATOR_REQUIRED' }
       );
     }
-  }
-  const changedAgents = walkAtoms(afterAtoms).filter((match) => {
-    const targetPath = match.path.join('/');
-    const types = oneStoredField(match.atom, 'thing')?.parsed.types.map((type) => type.raw) ?? [];
-    return types.includes('agent')
-      && types.includes('program')
-      && beforeSources.get(targetPath) !== oneStoredField(match.atom, 'situation')?.value;
-  });
-  try {
-    for (const match of changedAgents) {
-      const registration = await programScheduler.inspectAgentRegistration(
-        afterAtoms,
-        match.path.join('/')
-      );
-      validateAgentDelegation({ creator: creatorSecurity, child: registration });
+    for (const programPath of changed) {
+      const child = after.get(programPath);
+      if (child) validateAgentDelegation({ creator: creatorSecurity, child });
     }
     return { ok: true, errors: [] };
   } catch (error) {
@@ -652,7 +644,6 @@ async function persistChangedGraph({
   source,
   changedPaths = null,
   affectedAtoms = null,
-  registrationChange = null,
   transformLogRecord = null,
   compatibilityManifest,
   localizedSituationValidation = false,
@@ -680,7 +671,6 @@ async function persistChangedGraph({
     source,
     ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
     ...(Array.isArray(affectedAtoms) ? { affectedAtoms } : {}),
-    registrationChange,
     ...(transformLogRecord ? { transformLogRecord } : {})
   });
   performanceTrace('world-commit', {
@@ -906,6 +896,7 @@ export async function executeAtomLanguage(options = {}) {
     );
   let programCycle = { messages: [], locks: [], records: [] };
   let activeRequestDrivenLocks = [];
+  let creatorSecurity = null;
   if (options.programScheduler) {
     const indexPreparationStartedAt = performance.now();
     try {
@@ -916,6 +907,7 @@ export async function executeAtomLanguage(options = {}) {
       const initialAgentSecurity = initialAgentPath
         ? structuredClone(options.programScheduler.agentSecurity?.get(initialAgentPath) ?? null)
         : null;
+      creatorSecurity = initialAgentSecurity;
       let programAccess = null;
       let preparedWorld = null;
       await recordTransformStage('index-preparation', indexPreparationStartedAt);
@@ -1080,68 +1072,6 @@ export async function executeAtomLanguage(options = {}) {
   });
   const graphLocks = activeLocks.filter((lock) => lock.kind);
   let programChanged = false;
-  const pendingAgentRegistrations = requestedProgramRun?.selector
-    ? programCycle.agentRegistrations ?? []
-    : [];
-  if (pendingAgentRegistrations.length > 1) {
-    return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
-      'AGENT_REGISTRATION_CONFLICT', '一个候选事务只能登记一个 Agent'
-    )]);
-  }
-  if (pendingAgentRegistrations.length === 1) {
-    try {
-      const registrationPath = pendingAgentRegistrations[0].sourceProgramPath;
-      const registrationMatch = walkAtoms(atoms).find((match) => (
-        match.path.join('/') === registrationPath
-      ));
-      if (!registrationMatch) {
-        throw Object.assign(new Error('Agent registration Program was not found'), {
-          code: 'AGENT_REGISTRATION_PROGRAM_NOT_FOUND'
-        });
-      }
-      const registrationAccess = createAccessController(atoms, {
-        ...options,
-        programLockIndex,
-        agentPath: interaction.agent?.path ?? null,
-        agentSecurity: programCycle.agentSecurity,
-        graphLocks
-      });
-      const registrationDecision = await registrationAccess.authorize(
-        registrationMatch,
-        'write',
-        'thing',
-        { programPath: registrationPath }
-      );
-      if (registrationDecision.decision !== 'allow') {
-        throw Object.assign(new Error('当前 Agent 无权登记该 Agent Program'), {
-          code: registrationDecision.code ?? 'WINDOW_ACCESS_DENIED',
-          details: { cause: registrationDecision.code ?? 'GRAPH_LOCK_DENIED' }
-        });
-      }
-      const alreadyRegistered = (programCycle.records ?? []).some((record) => (
-        record.path === registrationPath && record.types?.includes('agent')
-      ));
-      if (programCycle.agentSecurity) {
-        const delegated = validateAgentDelegation({
-          creator: programCycle.agentSecurity,
-          child: pendingAgentRegistrations[0]
-        });
-        pendingAgentRegistrations[0] = {
-          ...pendingAgentRegistrations[0],
-          ...delegated
-        };
-      }
-      atoms = registerCurrentProgramAsAgent(atoms, registrationPath);
-      programChanged = !alreadyRegistered;
-    } catch (error) {
-      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
-        error.code ?? 'INVALID_AGENT_REGISTRATION', error.message
-      )]);
-    }
-  }
-  let windowRecycled = false;
-  let recycledAgentPath = null;
-  let movedAgentPaths = null;
   const initialProgramTriggerNodes = [];
   const initialAgentPath = interaction.agent?.path ?? null;
   let accessController = createAccessController(atoms, {
@@ -1476,7 +1406,6 @@ export async function executeAtomLanguage(options = {}) {
       programChanged = true;
       initialProgramTriggerNodes.push(moved.resultPath, destinationPath);
       interaction.agent.path = moved.resultPath;
-      movedAgentPaths = { previousPath: agentPath, nextPath: moved.resultPath };
       accessController = createAccessController(atoms, {
         ...options,
         programLockIndex,
@@ -1518,8 +1447,6 @@ export async function executeAtomLanguage(options = {}) {
       atoms = candidate;
       programChanged = true;
       interaction.agent = null;
-      windowRecycled = true;
-      recycledAgentPath = agentPath;
       accessController = createAccessController(atoms, { ...options, agentPath: null, programLockIndex });
     }
   }
@@ -2313,7 +2240,6 @@ export async function executeAtomLanguage(options = {}) {
   }
 
   async function commitChangedGraph(candidateAtoms, {
-    registrationChange = null,
     projectionRebase = null,
     changedPaths = projectionRebase?.changedPaths ?? null,
     affectedAtoms = null,
@@ -2322,8 +2248,6 @@ export async function executeAtomLanguage(options = {}) {
     structurePreservingValidation = false,
     preparedRuntimeRecordsPromise = null
   } = {}) {
-    const effectiveRegistrationChange = registrationChange
-      ?? (windowRecycled ? 'window-recycle' : null);
     const commitStartedAt = performance.now();
     let receipt = null;
     try {
@@ -2341,7 +2265,6 @@ export async function executeAtomLanguage(options = {}) {
           path,
           axes: ['contain', 'situation', 'support', 'thing']
         })) : null),
-        registrationChange: effectiveRegistrationChange,
         transformLogRecord,
         compatibilityManifest: options.compatibilityManifest,
         localizedSituationValidation,
@@ -2360,21 +2283,11 @@ export async function executeAtomLanguage(options = {}) {
     }
     confirmSupportDeliveryClaims();
     await recordTransformStage('commit', commitStartedAt, { commitEntered: true });
+    await options.programScheduler?.rebuildAgentSecurity?.(candidateAtoms);
     if (!committedAffectedPaths.length) {
       committedAffectedPaths = Array.isArray(changedPaths)
         ? [...new Set(changedPaths.filter(Boolean))].sort()
         : [];
-    }
-    if (recycledAgentPath) {
-      await options.programScheduler?.recycleAgentWindow?.(recycledAgentPath);
-    }
-    if (movedAgentPaths) {
-      await options.programScheduler?.remapAgentWindow?.(
-        movedAgentPaths.previousPath, movedAgentPaths.nextPath
-      );
-    }
-    if (pendingAgentRegistrations.length === 1) {
-      await options.programScheduler?.registerAgentWindow?.(pendingAgentRegistrations[0]);
     }
     try {
       let rebased = null;
@@ -2473,9 +2386,7 @@ export async function executeAtomLanguage(options = {}) {
 
   if (parsed.command === 'atom') {
     if (programChanged) {
-      await commitChangedGraph(atoms, {
-        registrationChange: windowRecycled ? 'window-recycle' : null
-      });
+      await commitChangedGraph(atoms);
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
     if (options.programMode === 'project' && (programCycle.failures?.length ?? 0) > 0) {
@@ -2510,9 +2421,7 @@ export async function executeAtomLanguage(options = {}) {
 
   if (parsed.command === 'explore') {
     if (programChanged) {
-      await commitChangedGraph(atoms, {
-        registrationChange: windowRecycled ? 'window-recycle' : null
-      });
+      await commitChangedGraph(atoms);
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
     if (!parsed.items.length) {
@@ -2746,18 +2655,21 @@ export async function executeAtomLanguage(options = {}) {
         releaseSupportDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, compiled.errors);
       }
-      const delegated = await validateRegisteredAgentSourceDelegation({
-        beforeAtoms: atoms,
-        afterAtoms: nextAtoms,
-        creatorSecurity: interaction.agent?.path
-          ? options.programScheduler?.agentSecurity?.get(interaction.agent.path)
-            ?? programCycle.agentSecurity
-          : null,
-        programScheduler: options.programScheduler
-      });
-      if (!delegated.ok) {
-        releaseSupportDeliveryClaims();
-        return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
+      const programSurfaceChanged = [...transformEventNodes].some((targetPath) => (
+        subtreeContainsTypedProgram(exactMatchAtPath(atoms, targetPath)?.atom)
+        || subtreeContainsTypedProgram(exactMatchAtPath(nextAtoms, targetPath)?.atom)
+      ));
+      if (programSurfaceChanged) {
+        const delegated = await validateAgentProgramDelegation({
+          beforeAtoms: atoms,
+          afterAtoms: nextAtoms,
+          creatorSecurity,
+          programScheduler: options.programScheduler
+        });
+        if (!delegated.ok) {
+          releaseSupportDeliveryClaims();
+          return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
+        }
       }
       await commitChangedGraph(nextAtoms, {
         changedPaths: [...transformEventNodes]
@@ -2825,6 +2737,18 @@ export async function executeAtomLanguage(options = {}) {
       });
     }
     let nextAtoms = created.atoms;
+    if (transformChangesProgramSurface(atoms, nextAtoms, { resultPath: created.resultPath })) {
+      const delegated = await validateAgentProgramDelegation({
+        beforeAtoms: atoms,
+        afterAtoms: nextAtoms,
+        creatorSecurity,
+        programScheduler: options.programScheduler
+      });
+      if (!delegated.ok) {
+        releaseSupportDeliveryClaims();
+        return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
+      }
+    }
     let postRefresh = {
       atoms: nextAtoms,
       lockIndex: programLockIndex,
@@ -2985,13 +2909,10 @@ export async function executeAtomLanguage(options = {}) {
         compiled.errors
       );
     }
-    const delegated = await validateRegisteredAgentSourceDelegation({
+    const delegated = await validateAgentProgramDelegation({
       beforeAtoms: atoms,
       afterAtoms: nextAtoms,
-      creatorSecurity: interaction.agent?.path
-        ? options.programScheduler?.agentSecurity?.get(interaction.agent.path)
-          ?? programCycle.agentSecurity
-        : null,
+      creatorSecurity,
       programScheduler: options.programScheduler
     });
     if (!delegated.ok) {

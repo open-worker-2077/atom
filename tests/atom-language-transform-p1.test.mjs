@@ -7,6 +7,7 @@ import test from 'node:test';
 import { parseGraphDocument } from '../cli/lib/graph-json.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { executeAtomLanguage as executeAtomLanguageKernel } from '../work-engine/atom-language/engine.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { writeAtomGraphProjection } from '../work-engine/atom-language/context-store.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
@@ -34,8 +35,8 @@ async function fixture(t, atoms) {
   return { directory, contextFile, projectionFile };
 }
 
-async function execute(files, source) {
-  return executeAtomLanguage({ source, ...files });
+async function execute(files, source, options = {}) {
+  return executeAtomLanguage({ source, ...files, ...options });
 }
 
 async function readAtoms(file) {
@@ -167,7 +168,7 @@ test('situation rep performs local replacement with Value and full replacement w
 test('summary, field type, rename, and complete support replacement strip commands', async (t) => {
   const files = await fixture(t, [
     {
-      'thing@agent': '甲',
+      thing: '甲',
       'situation#旧简介': 'def main(arguments):\n    return True',
       contain: [],
       support: []
@@ -175,13 +176,14 @@ test('summary, field type, rename, and complete support replacement strip comman
     atom('甲事实', '', [], [{ 'if@current': true, then: [{ thing: '乙' }] }]),
     atom('乙')
   ]);
+  const programScheduler = createProgramRuntimeScheduler();
   for (const source of [
     'transform {"thing":"甲","situation.sum.新简介"}',
     'transform {"thing.typ.program":"甲"}',
     'transform {"thing.ren.甲新版":"甲"}',
     'transform {"thing":"甲事实","support.rep.":[{"if@current":true,"if":[{"thing@program":"甲新版"}],"then":[{"thing":"乙"}]}]}'
   ]) {
-    const result = await execute(files, source);
+    const result = await execute(files, source, { programScheduler });
     assert.equal(result.ok, true, `${source}\n${JSON.stringify(result.errors)}`);
   }
 

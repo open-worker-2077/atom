@@ -60,7 +60,7 @@ async function fixture(t) {
     atom('Task', '', [
       atom('Creator', CREATOR_SOURCE, [
         atom('AllowedChild', CHILD_SOURCE, [], 'program')
-      ], 'program@agent')
+      ], 'program')
     ]),
     atom('Outside', '', [
       atom('ForbiddenChild', CHILD_SOURCE, [], 'program')
@@ -81,22 +81,28 @@ function findAtom(atoms, expected) {
   return null;
 }
 
-test('a registered Agent may register a descendant but cannot register an out-of-window Program', async (t) => {
+test('a declared Agent may reconfigure a descendant but not an out-of-window declaration', async (t) => {
   const files = await fixture(t);
   const scheduler = createProgramRuntimeScheduler();
+  const allowedSource = 'agent({"labels":["worker"],"functions":{"groups":[],"names":["message"]}})';
 
   const allowed = await executeAtomLanguage({
-    source: 'transform {"thing.run.":"Root/Task/Creator/AllowedChild"}',
+    source: 'transform {' + JSON.stringify('thing') + ':'
+      + JSON.stringify('Root/Task/Creator/AllowedChild') + ','
+      + JSON.stringify(`situation.rep.${allowedSource}`) + '}',
     ...files,
     programScheduler: scheduler,
     interaction: { id: 'register-descendant', agent: { path: 'Root/Task/Creator' } }
   });
   assert.equal(allowed.ok, true, JSON.stringify(allowed));
   let stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.equal(findAtom(stored, 'AllowedChild').key, 'thing@program@agent');
+  assert.equal(findAtom(stored, 'AllowedChild').key, 'thing@program');
+  assert.equal(findAtom(stored, 'AllowedChild').atom.situation, allowedSource);
 
   const denied = await executeAtomLanguage({
-    source: 'transform {"thing.run.":"Root/Outside/ForbiddenChild"}',
+    source: 'transform {' + JSON.stringify('thing') + ':'
+      + JSON.stringify('Root/Outside/ForbiddenChild') + ','
+      + JSON.stringify('situation.rep.value = 1') + '}',
     ...files,
     programScheduler: scheduler,
     interaction: { id: 'reject-outside-registration', agent: { path: 'Root/Task/Creator' } }
@@ -105,7 +111,98 @@ test('a registered Agent may register a descendant but cannot register an out-of
   assert.ok(denied.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), JSON.stringify(denied));
   stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
   assert.equal(findAtom(stored, 'ForbiddenChild').key, 'thing@program');
-  assert.equal(scheduler.agentSecurity.has('Root/Outside/ForbiddenChild'), false);
+  assert.equal(findAtom(stored, 'ForbiddenChild').atom.situation, CHILD_SOURCE);
+  assert.equal(scheduler.agentSecurity.has('Root/Outside/ForbiddenChild'), true);
+});
+
+test('authorized creation of an Agent Program keeps the Key as thing@program', async (t) => {
+  const files = await fixture(t);
+  const scheduler = createProgramRuntimeScheduler();
+  const childPath = 'Root/Task/Creator/CreatedChild';
+  const childSource = 'agent({"labels":[],"functions":{"groups":[],"names":["message"]}})';
+  const result = await executeAtomLanguage({
+    source: 'transform new ' + JSON.stringify({
+      'thing@program': childPath,
+      situation: childSource,
+      contain: [],
+      support: []
+    }),
+    ...files,
+    programScheduler: scheduler,
+    interaction: {
+      id: 'create-declared-child',
+      agent: { path: 'Root/Task/Creator' }
+    }
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.equal(findAtom(stored, 'CreatedChild').key, 'thing@program');
+  assert.equal(scheduler.agentSecurity.has(childPath), true);
+  assert.equal(JSON.stringify(stored).includes('@agent'), false);
+});
+
+test('declaration escalation fails without changing world bytes', async (t) => {
+  const files = await fixture(t);
+  const scheduler = createProgramRuntimeScheduler();
+  const childPath = 'Root/Task/Creator/AllowedChild';
+  const escalated = 'agent({"labels":["^^"],"functions":{"groups":[],"names":["message"]}})';
+  const before = await fs.readFile(files.contextFile, 'utf8');
+  const result = await executeAtomLanguage({
+    source: 'transform {' + JSON.stringify('thing') + ':' + JSON.stringify(childPath)
+      + ',' + JSON.stringify('situation.rep.' + escalated) + '}',
+    ...files,
+    programScheduler: scheduler,
+    interaction: {
+      id: 'reject-declaration-escalation',
+      agent: { path: 'Root/Task/Creator' }
+    }
+  });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.ok(result.errors.some((error) => (
+    error.code === 'AGENT_JURISDICTION_ESCALATION'
+  )), JSON.stringify(result));
+  assert.equal(result.revisionAfter, result.revisionBefore);
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
+});
+
+test('an authorized parent may demote its child Program without mutating its Key', async (t) => {
+  const files = await fixture(t);
+  const scheduler = createProgramRuntimeScheduler();
+  const childPath = 'Root/Task/Creator/AllowedChild';
+  const result = await executeAtomLanguage({
+    source: 'transform {' + JSON.stringify('thing') + ':' + JSON.stringify(childPath)
+      + ',' + JSON.stringify('situation.rep.value = 1') + '}',
+    ...files,
+    programScheduler: scheduler,
+    interaction: {
+      id: 'demote-declared-child',
+      agent: { path: 'Root/Task/Creator' }
+    }
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.equal(findAtom(stored, 'AllowedChild').key, 'thing@program');
+  assert.equal(scheduler.agentSecurity.has(childPath), false);
+});
+
+test('creator-less declaration changes fail without changing world bytes', async (t) => {
+  const files = await fixture(t);
+  const scheduler = createProgramRuntimeScheduler();
+  const childPath = 'Root/Task/Creator/AllowedChild';
+  const before = await fs.readFile(files.contextFile, 'utf8');
+  const result = await executeAtomLanguage({
+    source: 'transform {' + JSON.stringify('thing') + ':' + JSON.stringify(childPath)
+      + ',' + JSON.stringify('situation.rep.value = 1') + '}',
+    ...files,
+    programScheduler: scheduler,
+    interaction: { id: 'reject-creator-less-declaration-change', agent: null }
+  });
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.ok(result.errors.some((error) => (
+    error.code === 'AGENT_RECONFIGURATION_CREATOR_REQUIRED'
+  )), JSON.stringify(result));
+  assert.equal(result.revisionAfter, result.revisionBefore);
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
 });
 
 for (const [index, scenario] of DELEGATION_CASES.entries()) {
@@ -119,14 +216,15 @@ for (const [index, scenario] of DELEGATION_CASES.entries()) {
     await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
       atom('Task', '', [
         atom(`Creator${index}`, scenario.creator, [
-          atom(`Child${index}`, scenario.child, [], 'program')
-        ], 'program@agent')
+          atom(`Child${index}`, 'value = 1', [], 'program')
+        ], 'program')
       ])
     ])], null, 2));
     const scheduler = createProgramRuntimeScheduler();
 
     const result = await executeAtomLanguage({
-      source: `transform {"thing.run.":${JSON.stringify(childPath)}}`,
+      source: 'transform {' + JSON.stringify('thing') + ':' + JSON.stringify(childPath)
+        + ',' + JSON.stringify(`situation.rep.${scenario.child}`) + '}',
       contextFile,
       projectionFile,
       programScheduler: scheduler,
@@ -143,7 +241,7 @@ for (const [index, scenario] of DELEGATION_CASES.entries()) {
     }
 
     assert.equal(result.ok, true, JSON.stringify(result));
-    assert.equal(findAtom(stored, `Child${index}`).key, 'thing@program@agent');
+    assert.equal(findAtom(stored, `Child${index}`).key, 'thing@program');
     assert.deepEqual(scheduler.agentSecurity.get(childPath), scenario.expectedSecurity);
 
     const coldScheduler = createProgramRuntimeScheduler();

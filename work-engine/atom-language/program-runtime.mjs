@@ -1569,25 +1569,6 @@ export class ProgramRuntimeScheduler {
     return true;
   }
 
-  async registerAgentWindow({ sourceProgramPath, labels, functionScopes, functions }) {
-    this.agentSecurity.set(sourceProgramPath, {
-      labels: [...labels], functionScopes: structuredClone(functionScopes), functions: [...functions]
-    });
-    this.agentSecurityWorldRevision = null;
-  }
-
-  async recycleAgentWindow(agentPath) {
-    this.agentSecurity.delete(agentPath);
-    this.agentSecurityWorldRevision = null;
-  }
-
-  async remapAgentWindow(previousPath, nextPath) {
-    const security = this.agentSecurity.get(previousPath);
-    this.agentSecurity.delete(previousPath);
-    if (security) this.agentSecurity.set(nextPath, security);
-    this.agentSecurityWorldRevision = null;
-  }
-
   async overlayRequestDrivenLocks(value, agentOrigin = null) {
     const active = await this.activeRequestDrivenLocks();
     return {

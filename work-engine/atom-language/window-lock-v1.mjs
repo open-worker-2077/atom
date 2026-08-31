@@ -2,7 +2,6 @@ function problem(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
 }
 
-import { parseAtomKey } from './key-parser.mjs';
 import { validateProgramFunctionDelegation } from './program-function-registry.mjs';
 
 function parts(value) {
@@ -146,42 +145,4 @@ export function authorizeWindowGraphPath({
     if (!permits(lock)) return denial(lock);
   }
   return { decision: 'allow', matchedLocks: [...containLocks, ...nodeLocks] };
-}
-
-export function registerCurrentProgramAsAgent(atoms, programPath) {
-  const next = structuredClone(atoms);
-  let registered = false;
-  function visit(items, parentParts = []) {
-    for (const atom of items ?? []) {
-      const thingEntry = Object.entries(atom).find(([key]) => (
-        parseAtomKey(key, { descriptionSymbolWarnings: false }).baseKey === 'thing'
-      ));
-      if (!thingEntry) continue;
-      const [rawKey, value] = thingEntry;
-      const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
-      const path = [...parentParts, value].join('/');
-      if (path === programPath) {
-        const types = new Set(parsed.types.map((type) => type.raw));
-        if (!types.has('program')) {
-          throw problem('AGENT_REGISTRATION_PROGRAM_REQUIRED', 'agent() may register only its current Program node');
-        }
-        types.add('agent');
-        const nextKey = `thing${[...types].map((type) => `@${type}`).join('')}${
-          parsed.descriptionPresent ? `#${parsed.description}` : ''
-        }`;
-        if (nextKey !== rawKey) {
-          delete atom[rawKey];
-          atom[nextKey] = value;
-        }
-        registered = true;
-      }
-      const contain = Object.entries(atom).find(([key]) => (
-        parseAtomKey(key, { descriptionSymbolWarnings: false }).baseKey === 'contain'
-      ))?.[1];
-      if (Array.isArray(contain)) visit(contain, [...parentParts, value]);
-    }
-  }
-  visit(next);
-  if (!registered) throw problem('AGENT_REGISTRATION_PROGRAM_NOT_FOUND', 'Current Program node was not found');
-  return next;
 }

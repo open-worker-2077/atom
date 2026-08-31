@@ -106,15 +106,14 @@ test('Agent targets use caret jurisdiction and exact business labels through the
 });
 
 test('agent() declares the current Program node and preserves symbolic scopes with effective names', async () => {
-  const cycle = await createProgramRuntimeScheduler().refresh([
+  const security = await createProgramRuntimeScheduler().deriveAgentSecurity([
     atom('Registrar', 'agent({"labels":["^^","audit"],"functions":{"groups":["form"],"names":["message","form"]}})', [], 'program')
-  ], { programSelector: 'Registrar', force: true, agentOrigin: { path: 'Root/Controller' } });
-  assert.deepEqual(cycle.agentRegistrations, [{
-    sourceProgramPath: 'Registrar',
+  ]);
+  assert.deepEqual(security.get('Registrar'), {
     labels: ['^^', 'audit'],
     functionScopes: { groups: ['form'], names: ['form', 'message'] },
     functions: ['form', 'form_status', 'message', 'missing_details', 'plan_form_flow']
-  }]);
+  });
 });
 
 test('projection modes never turn concurrent agent declarations into a registration transaction', async (t) => {
@@ -361,7 +360,7 @@ for (const scenario of [
   });
 }
 
-test('explicitly running an out-of-window Agent candidate still uses the registration gate', async (t) => {
+test('an out-of-window Agent declaration edit uses the normal Transform gate', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-registration-gate-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -373,13 +372,14 @@ test('explicitly running an out-of-window Agent candidate still uses the registr
         'Window',
         'agent({"labels":["worker"],"functions":{"groups":[],"names":["agent","explore","transform"]}})',
         [],
-        'program@agent'
+        'program'
       )
     ]),
-    atom('Outside Candidate', candidateSource, [], 'program')
+    atom('Outside Candidate', 'value = 1', [], 'program')
   ])], null, 2));
   const result = await executeAtomLanguage({
-    source: 'transform {"thing.run.":"Root/Outside Candidate"}',
+    source: 'transform {' + JSON.stringify('thing') + ':' + JSON.stringify('Root/Outside Candidate')
+      + ',' + JSON.stringify(`situation.rep.${candidateSource}`) + '}',
     contextFile,
     projectionFile,
     programScheduler: createProgramRuntimeScheduler(),
@@ -389,7 +389,7 @@ test('explicitly running an out-of-window Agent candidate still uses the registr
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.ok(result.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), JSON.stringify(result));
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(world[0].contain[1].situation, candidateSource);
+  assert.equal(world[0].contain[1].situation, 'value = 1');
   assert.equal(Object.hasOwn(world[0].contain[1], 'thing@program@agent'), false);
 });
 
@@ -406,7 +406,7 @@ test('jump and slot_body no longer expose caller-defined fixed-lock switches', a
   ]) {
     await assert.rejects(createProgramRuntimeScheduler().refresh([
       atom('Root'), atom(name, source, [], 'program')
-    ], { programSelector: name, force: true, agentOrigin: { path: 'Root/Controller' } }),
+    ], { programSelector: name, force: true }),
     (error) => ['INVALID_JUMP_CONTRACT', 'INVALID_SLOT_BODY_EFFECT'].includes(error.code));
   }
 });
@@ -463,68 +463,77 @@ test('lock() publishes only range, Explore or Transform actions, and required la
   }]);
 });
 
-test('agent() atomically registers its Program node with no security sidecar authority', async (t) => {
+test('running an already-declared Agent Program does not mutate world facts or revision', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-register-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   const lockFile = path.join(directory, 'request-driven-locks.json');
-  await fs.writeFile(contextFile, JSON.stringify([
-    atom('Root', '', [
-      atom('Controller', '', [], 'agent'),
+  const initial = [atom('Root', '', [
+    atom('Controller', 'agent({"labels":["^"],"functions":{"groups":[],"names":["agent","transform"]}})', [
       atom('Registrar', 'agent({"labels":["^","leaf"],"functions":{"groups":[],"names":["message"]}})', [], 'program')
-    ])
-  ], null, 2));
+    ], 'program')
+  ])];
+  const before = JSON.stringify(initial, null, 2);
+  await fs.writeFile(contextFile, before);
   const scheduler = createProgramRuntimeScheduler();
   const result = await executeAtomLanguage({
-    source: 'transform {"thing.run.":"Root/Registrar"}',
+    source: 'transform {"thing.run.":"Root/Controller/Registrar"}',
     contextFile, projectionFile, programScheduler: scheduler,
     interaction: { id: 'register-leaf', agent: { path: 'Root/Controller' } }
   });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.changed, false);
+  assert.equal(result.revisionAfter, result.revisionBefore);
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(Object.hasOwn(world[0].contain[1], 'thing@program@agent'), true);
+  assert.equal(await fs.readFile(contextFile, 'utf8'), before);
+  assert.equal(Object.hasOwn(world[0].contain[0].contain[0], 'thing@program'), true);
   await assert.rejects(fs.stat(lockFile), (error) => error.code === 'ENOENT');
-  const restarted = createProgramRuntimeScheduler();
-  await restarted.rebuildAgentSecurity(world);
-  assert.deepEqual(restarted.agentSecurity.get('Root/Registrar'), {
+  assert.deepEqual(scheduler.agentSecurity.get('Root/Controller/Registrar'), {
     labels: ['^', 'leaf'],
     functionScopes: { groups: [], names: ['message'] },
     functions: ['message']
   });
 });
 
-test('agent() in-memory publication never writes registration authority to the sidecar', async () => {
+test('source-derived registry rebuild never writes registration authority to the sidecar', async () => {
   let saves = 0;
   const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: {
     async load() { return { version: 1, locks: [] }; },
     async save() { saves += 1; }
   } });
-  await scheduler.registerAgentWindow({
-    sourceProgramPath: 'Root/Registrar',
-    labels: ['^'],
-    functionScopes: { groups: [], names: ['message'] },
-    functions: ['message']
-  });
+  await scheduler.rebuildAgentSecurity([atom(
+    'Root', '', [
+      atom('Registrar', 'agent({"labels":["^"],"functions":{"groups":[],"names":["message"]}})', [], 'program')
+    ]
+  )]);
   assert.equal(saves, 0);
   assert.equal(scheduler.agentSecurity.has('Root/Registrar'), true);
 });
 
-test('Agent move and recycle update only reconstructible in-memory paths, never sidecar authority', async () => {
+test('Agent creation, demotion, move, and recycle are reconstructed only from world facts', async () => {
   let saves = 0;
   const repository = {
     async load() { return { version: 1, locks: [] }; },
     async save() { saves += 1; }
   };
   const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
-  await scheduler.registerAgentWindow({
-    sourceProgramPath: 'Root/Window', labels: ['^'],
-    functionScopes: { groups: [], names: ['jump'] }, functions: ['jump']
-  });
-  await scheduler.remapAgentWindow('Root/Window', 'Root/Next/Window');
+  const source = 'agent({"labels":["^"],"functions":{"groups":[],"names":["jump"]}})';
+  await scheduler.rebuildAgentSecurity([atom('Root', '', [atom('Window', source, [], 'program')])]);
+  assert.equal(scheduler.agentSecurity.has('Root/Window'), true);
+  await scheduler.rebuildAgentSecurity([atom('Root', '', [
+    atom('Next', '', [atom('Window', source, [], 'program')])
+  ])]);
   assert.equal(scheduler.agentSecurity.has('Root/Window'), false);
   assert.equal(scheduler.agentSecurity.has('Root/Next/Window'), true);
-  await scheduler.recycleAgentWindow('Root/Next/Window');
+  await scheduler.rebuildAgentSecurity([atom('Root', '', [
+    atom('Next', '', [atom('Window', 'value = 1', [], 'program')])
+  ])]);
   assert.equal(scheduler.agentSecurity.has('Root/Next/Window'), false);
+  await scheduler.rebuildAgentSecurity([atom('Root')]);
+  assert.deepEqual([...scheduler.agentSecurity.keys()], []);
+  assert.equal(typeof scheduler.registerAgentWindow, 'undefined');
+  assert.equal(typeof scheduler.remapAgentWindow, 'undefined');
+  assert.equal(typeof scheduler.recycleAgentWindow, 'undefined');
   assert.equal(saves, 0);
 });

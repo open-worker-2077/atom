@@ -9,7 +9,6 @@ import {
   advanceCompatibilityManifest,
   validateCompatibilityManifest
 } from '../world-runtime/legacy-graph-compat.mjs';
-import { parseAtomKey } from '../../../work-engine/atom-language/key-parser.mjs';
 import { createCommitCoordinator } from '../world-runtime/commit-coordinator.mjs';
 import { revisionOfWorldFacts } from '../world-runtime/world-revision.mjs';
 import {
@@ -37,25 +36,6 @@ function rollbackCommandIdFor({ correlationId, expectedRevision, targetCommandId
 
 function canonicalRevision(value) {
   return String(value).startsWith('sha256:') ? String(value) : `sha256:${value}`;
-}
-
-function agentRegistrationCount(atoms) {
-  let count = 0;
-  const visit = (items) => {
-    for (const atom of Array.isArray(items) ? items : []) {
-      for (const [key, value] of Object.entries(atom ?? {})) {
-        const parsed = parseAtomKey(key, { descriptionSymbolWarnings: false });
-        if (parsed.baseKey === 'thing' && parsed.types.some((type) => type.raw === 'agent')) count += 1;
-        if (parsed.baseKey === 'contain') visit(value);
-      }
-    }
-  };
-  visit(atoms);
-  return count;
-}
-
-function explicitlyChangesRegistration(source) {
-  return typeof source === 'string' && /["']thing\.typ\./u.test(source);
 }
 
 export function createTransactionalWorldPersistence({
@@ -107,7 +87,6 @@ export function createTransactionalWorldPersistence({
     source = 'legacy-interaction',
     changedPaths = null,
     affectedAtoms = null,
-    registrationChange = null,
     transformLogRecord = null,
     compatibilityManifest: suppliedManifest = null
   }) {
@@ -142,16 +121,6 @@ export function createTransactionalWorldPersistence({
       },
       transitionInputMode: 'trusted-readonly',
       transition: (current) => {
-        if (
-          agentRegistrationCount(facts) < agentRegistrationCount(current.facts)
-          && !explicitlyChangesRegistration(source)
-          && registrationChange !== 'window-recycle'
-        ) {
-          throw problem(
-            'AGENT_REGISTRATION_LOSS',
-            'Ordinary Atom updates cannot erase an existing @agent registration'
-          );
-        }
         nextManifest ??= previousManifest
           ? advanceCompatibilityManifest(previousManifest, current.facts, facts)
           : null;
