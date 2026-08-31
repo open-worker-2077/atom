@@ -19,7 +19,7 @@ export function validateRequestDrivenLockSnapshot(value) {
   if (value && typeof value === 'object' && Object.hasOwn(value, 'agentRegistrations')) {
     throw problem(
       'RETIRED_AGENT_REGISTRATION_SNAPSHOT',
-      'Agent registrations are reconstructed from literal @program@agent declarations'
+      'Agent security is reconstructed from one literal agent({...}) declaration in each active thing@program source'
     );
   }
   if (value && typeof value === 'object' && Object.hasOwn(value, 'locks')) {

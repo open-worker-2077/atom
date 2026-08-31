@@ -1336,7 +1336,19 @@ test('scheduler distinguishes @agent cycles while reusing context-independent Pr
 test("an Agent cycle executes only Programs owned by that Agent", async () => {
   const executed = [];
   const scheduler = createProgramRuntimeScheduler({
-    runProgram: async ({ program }) => {
+    runProgram: async ({ program, agentDeclarationOnly = false }) => {
+      if (agentDeclarationOnly) {
+        const declaredAgent = ['Agent A', 'Agent B'].includes(program.path);
+        return {
+          agentRegistrations: declaredAgent ? [{
+            labels: [],
+            functionScopes: { groups: [], names: ['jump'] },
+            functions: ['jump']
+          }] : [],
+          locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+          trigger: null
+        };
+      }
       executed.push(program.path);
       if (program.path === 'Agent A/Jump Program') {
         throw Object.assign(new Error('Program cycle exceeded 2266ms'), {
@@ -1350,12 +1362,12 @@ test("an Agent cycle executes only Programs owned by that Agent", async () => {
     }
   });
   const world = [
-    atom('Agent A', '', [
+    atom('Agent A', 'agent({"labels":[],"functions":{"groups":[],"names":["jump"]}})', [
       atom('Jump Program', "jump({'thing':'A'})", [], 'program')
-    ], 'agent'),
-    atom('Agent B', '', [
+    ], 'program'),
+    atom('Agent B', 'agent({"labels":[],"functions":{"groups":[],"names":["jump"]}})', [
       atom('Own Program', "jump({'thing':'B'})", [], 'program')
-    ], 'agent')
+    ], 'program')
   ];
 
   const cycle = await scheduler.refresh(world, {
@@ -1364,7 +1376,7 @@ test("an Agent cycle executes only Programs owned by that Agent", async () => {
     isolateFailures: true
   });
 
-  assert.deepEqual(executed, ['Agent B/Own Program']);
+  assert.deepEqual(executed.filter((programPath) => programPath.includes('/')), ['Agent B/Own Program']);
   assert.deepEqual(cycle.failures, []);
 });
 

@@ -407,7 +407,8 @@ test('maintenance first-window creation prepares the same current context-free p
   });
   assert.equal(registered.ok, true, JSON.stringify(registered.errors));
   world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(Object.hasOwn(findAtom(world, 'Root/Existing/Work/Parent/Bootstrap'), 'thing@program@agent'), true);
+  assert.equal(Object.hasOwn(findAtom(world, 'Root/Existing/Work/Parent/Bootstrap'), 'thing@program'), true);
+  assert.equal(Object.hasOwn(findAtom(world, 'Root/Existing/Work/Parent/Bootstrap'), 'thing@program@agent'), false);
 
   const coldScheduler = createProgramRuntimeScheduler();
   await coldScheduler.rebuildAgentSecurity(world);
@@ -540,9 +541,15 @@ test('bootstrap establishes an ancestor Agent and ordinary authorization governs
   });
   assert.equal(registered.ok, true, JSON.stringify(registered));
   world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(Object.hasOwn(findAtom(world, managerPath), 'thing@program@agent'), true);
+  assert.equal(Object.hasOwn(findAtom(world, managerPath), 'thing@program'), true);
+  assert.equal(Object.hasOwn(findAtom(world, managerPath), 'thing@program@agent'), false);
 
-  const daily = createLegacyRuntimeComposition({ contextFile, graphFile, storeFile });
+  const daily = createLegacyRuntimeComposition({
+    contextFile,
+    graphFile,
+    storeFile,
+    agentResolver: async (_file, agentPath) => ({ ref: 'resolved', path: agentPath })
+  });
   await daily.initialize({ correlationId: 'daily-management-startup' });
   const overreach = await daily.execute({
     source: `transform {"thing":${JSON.stringify(managedPath)},${JSON.stringify(`situation.rep.${overreachSource}`)}}`,

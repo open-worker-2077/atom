@@ -215,15 +215,15 @@ function fingerprint(records, programs, agentOrigin, isolateFailures) {
   })).digest('hex');
 }
 
-function programSetFingerprint(programs, isolateFailures, records) {
+function programSetFingerprint(programs, isolateFailures, records, agentProgramPaths = new Set()) {
   const recordsByRef = new Map(records.map((record) => [record.ref, record]));
   return crypto.createHash('sha256').update(JSON.stringify({
     programs: programs.map((program) => {
       const definition = semanticRecord(program, recordsByRef);
-      // An @agent Program is the security/window declaration carried by the
+      // A declared Agent Program is the security/window declaration carried by the
       // Agent node. Ordinary business children are its managed contents, not
       // part of that declaration's executable definition.
-      return program.types.includes('agent')
+      return agentProgramPaths.has(program.path)
         ? { ...definition, childrenPaths: [] }
         : definition;
     }),
@@ -260,10 +260,14 @@ function requestDrivenLockFingerprint(records, programs, securityFingerprint, lo
   })).digest('hex');
 }
 
-function reusableProgramSetFingerprint(programs, dependencyPrograms, isolateFailures, records) {
+function reusableProgramSetFingerprint(
+  programs, dependencyPrograms, isolateFailures, records, agentProgramPaths = new Set()
+) {
   return crypto.createHash('sha256').update(JSON.stringify({
-    selectedPrograms: programSetFingerprint(programs, isolateFailures, records),
-    availablePrograms: programSetFingerprint(dependencyPrograms, isolateFailures, records)
+    selectedPrograms: programSetFingerprint(programs, isolateFailures, records, agentProgramPaths),
+    availablePrograms: programSetFingerprint(
+      dependencyPrograms, isolateFailures, records, agentProgramPaths
+    )
   })).digest('hex');
 }
 
@@ -273,10 +277,10 @@ function agentScopePath(agentOrigin) {
     : null;
 }
 
-function owningAgentPath(program, recordsByRef) {
+function owningAgentPath(program, recordsByRef, agentProgramPaths) {
   let record = program;
   while (record) {
-    if (record.types.includes('agent')) return record.path;
+    if (agentProgramPaths.has(record.path)) return record.path;
     record = record.parentRef ? recordsByRef.get(record.parentRef) ?? null : null;
   }
   return null;
@@ -287,11 +291,11 @@ function programUsesJump(program) {
 }
 
 function contextualProgramSetFingerprint(
-  programs, dependencyPrograms, isolateFailures, scopePath, records
+  programs, dependencyPrograms, isolateFailures, scopePath, records, agentProgramPaths = new Set()
 ) {
   return crypto.createHash('sha256').update(JSON.stringify({
     programSet: reusableProgramSetFingerprint(
-      programs, dependencyPrograms, isolateFailures, records
+      programs, dependencyPrograms, isolateFailures, records, agentProgramPaths
     ),
     scopePath
   })).digest('hex');
@@ -306,14 +310,15 @@ function requestsDependOnAgent(requests) {
 }
 
 function reusableCandidates(
-  cache, programs, isolateFailures, agentOrigin, records, dependencyPrograms = programs
+  cache, programs, isolateFailures, agentOrigin, records, dependencyPrograms = programs,
+  agentProgramPaths = new Set()
 ) {
   const scopePath = agentScopePath(agentOrigin);
   const contextualKey = contextualProgramSetFingerprint(
-    programs, dependencyPrograms, isolateFailures, scopePath, records
+    programs, dependencyPrograms, isolateFailures, scopePath, records, agentProgramPaths
   );
   const globalKey = reusableProgramSetFingerprint(
-    programs, dependencyPrograms, isolateFailures, records
+    programs, dependencyPrograms, isolateFailures, records, agentProgramPaths
   );
   return [
     [contextualKey, cache.get(contextualKey)],
@@ -328,16 +333,17 @@ function programMayResolveAnotherProgram(program) {
 }
 
 function reusableProgramCandidates(
-  cache, program, isolateFailures, agentOrigin, records, availablePrograms
+  cache, program, isolateFailures, agentOrigin, records, availablePrograms,
+  agentProgramPaths = new Set()
 ) {
   const completeSetCandidates = reusableCandidates(
-    cache, [program], isolateFailures, agentOrigin, records, availablePrograms
+    cache, [program], isolateFailures, agentOrigin, records, availablePrograms, agentProgramPaths
   );
   if (completeSetCandidates.length || programMayResolveAnotherProgram(program)) {
     return completeSetCandidates;
   }
   return reusableCandidates(
-    cache, [program], isolateFailures, agentOrigin, records, [program]
+    cache, [program], isolateFailures, agentOrigin, records, [program], agentProgramPaths
   );
 }
 
@@ -572,7 +578,9 @@ export function resolveExactPathFromCurrentContext(atoms, selector) {
 }
 
 export function validateProgramResult(result, records, program, options = {}) {
-  const { scopeRoot = null, supportDecision = false, resolveExactPath = null } = options;
+  const {
+    scopeRoot = null, supportDecision = false, resolveExactPath = null, agentProgramPaths = []
+  } = options;
   if (!result?.ok) {
     const error = new Error(result?.error?.message || 'Python Program failed');
     error.code = typeof result?.error?.code === 'string'
@@ -584,6 +592,7 @@ export function validateProgramResult(result, records, program, options = {}) {
   const knownRefs = new Set(records.map((record) => record.ref));
   const recordsByRef = new Map(records.map((record) => [record.ref, record]));
   const recordsByPath = new Map(records.map((record) => [record.path, record]));
+  const agentPaths = new Set(agentProgramPaths);
   const locks = (result.locks ?? []).map((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
       throw Object.assign(new Error('lock() result must be a JSON object'), { code: 'INVALID_PROGRAM_LOCK' });
@@ -680,9 +689,9 @@ export function validateProgramResult(result, records, program, options = {}) {
           || new Set(paths).size !== paths.length
           || paths.some((path) => {
             const record = recordsByPath.get(path);
-            return !record || !record.types?.includes('agent');
+            return !record || !agentPaths.has(record.path);
           })) {
-          throw Object.assign(new Error('lock.allowed_windows.paths must contain unique exact full paths resolving to @agent Atoms'), {
+          throw Object.assign(new Error('lock.allowed_windows.paths must contain unique exact full paths resolving to declared Agent Programs'), {
             code: 'INVALID_PROGRAM_LOCK_ALLOWED_WINDOWS'
           });
         }
@@ -956,7 +965,7 @@ export function validateProgramResult(result, records, program, options = {}) {
     const source = recordsByPath.get(entry?.sourcePath);
     const destination = recordsByPath.get(entry?.destinationPath);
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)
-      || !window?.types.includes('agent') || !source?.types.includes('program') || !destination
+      || !agentPaths.has(window?.path) || !source?.types.includes('program') || !destination
       || !recordsByPath.get(sourceProgramPath)?.types.includes('program')
       || !source.path.startsWith(`${window.path}/`)) {
       throw Object.assign(new Error('jump_authorize() returned an invalid controlled migration effect'), {
@@ -1025,7 +1034,7 @@ function runWorker({
   python, records, programs, program, timeoutMs, executeExplore, validateOnly = false,
   triggered = false, changedNodes = [], scopeRoot = null, programRoot = null,
   invokeMain = false, programArguments = {}, supportDecision = false,
-  allowedFunctions = null, resolveExactPath = null, agentDeclarationOnly = false
+  allowedFunctions = null, resolveExactPath = null, agentDeclarationOnly = false, agentProgramPaths = []
 }) {
   return new Promise((resolve, reject) => {
     const child = spawn(python, ['-I', '-X', 'utf8', workerFile], {
@@ -1101,7 +1110,7 @@ function runWorker({
       }
       try {
         resolve(validateProgramResult(child.__atomResult ?? JSON.parse(stdout), records, program, {
-          scopeRoot, supportDecision, resolveExactPath
+          scopeRoot, supportDecision, resolveExactPath, agentProgramPaths
         }));
       } catch (error) {
         reject(error);
@@ -1245,7 +1254,8 @@ export class ProgramRuntimeScheduler {
       scopeRoot: options.scopeRoot ?? null,
       programRoot: options.programRoot ?? null,
       supportDecision: true,
-      triggered: true
+      triggered: true,
+      agentProgramPaths: [...this.agentSecurity.keys()]
     }));
     return result.supportDecision;
   }
@@ -1267,7 +1277,8 @@ export class ProgramRuntimeScheduler {
           );
         },
         agentDeclarationOnly: true,
-        validateOnly: true
+        validateOnly: true,
+        agentProgramPaths: [...this.agentSecurity.keys()]
       }))
     )));
     const derived = new Map();
@@ -1322,7 +1333,8 @@ export class ProgramRuntimeScheduler {
           { code: 'INVALID_AGENT_REGISTRATION_RECONSTRUCTION_EFFECT' }
         );
       },
-      validateOnly: true
+      validateOnly: true,
+      agentProgramPaths: [...this.agentSecurity.keys()]
     }));
     const declarations = inspected.agentRegistrations ?? [];
     if (declarations.length !== 1) {
@@ -1486,6 +1498,7 @@ export class ProgramRuntimeScheduler {
           timeoutMs: this.timeoutMs,
           allowedFunctions,
           resolveExactPath,
+          agentProgramPaths: [...this.agentSecurity.keys()],
           executeExplore: async () => {
             throw Object.assign(
               new Error('Persistent lock reconstruction cannot execute Graph functions'),
@@ -1627,7 +1640,8 @@ export class ProgramRuntimeScheduler {
           { code: 'INVALID_PROGRAM_VALIDATION_EFFECT' }
         );
       },
-      validateOnly: true
+      validateOnly: true,
+      agentProgramPaths: [...this.agentSecurity.keys()]
     }))));
     for (const [index, program] of programs.entries()) {
       if (/\bchanged\s*\(/u.test(program.detail)) {
@@ -1737,7 +1751,8 @@ export class ProgramRuntimeScheduler {
           });
         },
         validateOnly: !/\bchanged\s*\(/u.test(program.detail),
-        changedNodes: []
+        changedNodes: [],
+        agentProgramPaths: [...this.agentSecurity.keys()]
       })
     ))));
     for (const [index, program] of candidates.entries()) {
@@ -1852,6 +1867,7 @@ export class ProgramRuntimeScheduler {
     const records = reusePreparedIndexes ? this.latestRecords : worldRecords(atoms);
     if (!reusePreparedIndexes) this.latestRecords = records;
     const availablePrograms = programRecords(records);
+    const agentProgramPaths = new Set(this.agentSecurity.keys());
     const programs = options.programSelector
       ? programRecords(records, options.programSelector)
       : availablePrograms;
@@ -1864,7 +1880,7 @@ export class ProgramRuntimeScheduler {
 
     const reusable = reusableCandidates(
       this.reusable, programs, isolateFailures, options.agentOrigin, records,
-      availablePrograms
+      availablePrograms, agentProgramPaths
     ).map(([, entry]) => entry).find((entry) => (
       entry.worldKey === worldRevisionKey(records)
     ));
@@ -2024,6 +2040,7 @@ export class ProgramRuntimeScheduler {
       isolatedProgramPathsByRecords.set(records, new Set(compatibility.isolatedProgramPaths ?? []));
     }
     const availablePrograms = programRecords(records);
+    const agentProgramPaths = new Set(this.agentSecurity.keys());
     const programs = options.programSelector
       ? programRecords(records, options.programSelector)
       : availablePrograms;
@@ -2077,6 +2094,7 @@ export class ProgramRuntimeScheduler {
     attemptSupportDeliveryClaims
   }) {
     const cycleDeadline = Date.now() + this.timeoutMs;
+    const agentProgramPaths = new Set(this.agentSecurity.keys());
     const indexWorld = options.prepareAllIndexes === true ? prepareExploreWorld(atoms) : null;
     if (indexWorld) {
       prepareSlotStructureWorld(atoms);
@@ -2240,7 +2258,7 @@ export class ProgramRuntimeScheduler {
       ? null
       : reusableCandidates(
         this.reusable, programs, isolateFailures, options.agentOrigin, records,
-        availablePrograms
+        availablePrograms, agentProgramPaths
       )[0];
     const reusable = reusableEntry?.[1] ?? null;
     if (reusable) {
@@ -2340,7 +2358,7 @@ export class ProgramRuntimeScheduler {
         ))
       : programs;
     const operationEntries = indexedPrograms.flatMap((program) => {
-      const ownerPath = owningAgentPath(program, recordsByRef);
+      const ownerPath = owningAgentPath(program, recordsByRef, agentProgramPaths);
       if (programUsesJump(program) && ownerPath && ownerPath !== scopePath) return [];
       const scoped = slotInvocationsByProgram.get(program.path) ?? [];
       if (scoped.length) return scoped.map((slotInvocation) => ({
@@ -2364,7 +2382,7 @@ export class ProgramRuntimeScheduler {
         ? null
         : reusableProgramCandidates(
           this.programReusable, program, isolateFailures, options.agentOrigin,
-          records, availablePrograms
+          records, availablePrograms, agentProgramPaths
         )[0];
       let previous = previousEntry?.[1] ?? null;
       const triggerEntry = this.triggerContracts.get(program.path) ?? null;
@@ -2529,6 +2547,7 @@ export class ProgramRuntimeScheduler {
                 ? allowed
                 : [...new Set([...allowed, 'agent'])];
             })(),
+            agentProgramPaths: [...agentProgramPaths],
             executeExplore: async (request) => {
               requests.push(structuredClone(request));
               const matches = await executeExplore(request, {

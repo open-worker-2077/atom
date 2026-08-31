@@ -74,3 +74,37 @@ test('executing an Agent Program does not emit a registration mutation', async (
   assert.deepEqual(result.agentRegistrations, []);
   assert.equal(scheduler.agentSecurity.get('AgentProgram').functions.includes('explore'), true);
 });
+
+test('an Agent Program dispatches another Agent Program through use_program', async () => {
+  const scheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
+  const child = [
+    'agent({"labels":[],"functions":{"groups":[],"names":["agent"]}})',
+    'def main(arguments):',
+    '    return {"value": arguments["value"] + "-child"}'
+  ].join('\n');
+  const parent = [
+    'agent({"labels":[],"functions":{"groups":[],"names":["agent","message","use_program"]}})',
+    'result = use_program({"name":"Parent/Child","arguments":{"value":"program"}})',
+    'message({"level":"info","text":result["value"]})'
+  ].join('\n');
+  const world = [atom('thing@program', 'Parent', parent, [
+    atom('thing@program', 'Child', child)
+  ])];
+  await scheduler.rebuildAgentSecurity(world);
+  const cycle = await scheduler.refresh(world, {
+    programSelector: 'Parent',
+    isolateFailures: false
+  });
+  assert.deepEqual(cycle.failures, []);
+  assert.deepEqual(cycle.messages.map((message) => message.text), ['program-child']);
+});
+
+test('Agent ownership follows the nearest declared Program, not a Key type', async () => {
+  const scheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
+  const world = [atom('thing@program', 'Window', agentSource, [
+    atom('thing@program', 'Worker', 'value = 1')
+  ])];
+  await scheduler.rebuildAgentSecurity(world);
+  assert.equal(scheduler.agentSecurity.has('Window'), true);
+  assert.equal(scheduler.agentSecurity.has('Window/Worker'), false);
+});
