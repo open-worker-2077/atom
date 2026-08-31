@@ -17,6 +17,200 @@ function atom(thing, situation = '', contain = [], type = '') {
   };
 }
 
+test('an exact support subscriber receives one typed true argument while unrelated Programs stay idle', async () => {
+  const subscriber = atom('Subscriber', [
+    'def receive(delivery):',
+    '    message({"level":"info","text":delivery["clauseId"] + ":" + str(delivery["decision"])})',
+    'trigger("support", {"nodes":["Result"]}, receive)'
+  ].join('\n'), [], 'program');
+  const unrelated = atom('Unrelated', [
+    'def receive(delivery):',
+    '    message({"level":"info","text":"must-not-run"})',
+    'trigger("support", {"nodes":["Other"]}, receive)'
+  ].join('\n'), [], 'program');
+  const world = [atom('Result'), atom('Other'), subscriber, unrelated];
+  const scheduler = createProgramRuntimeScheduler();
+  await scheduler.refresh(world);
+  const delivery = {
+    mode: 'support', revision: 'sha256:r1', clauseId: 'support:Source:0', decision: true,
+    antecedentPaths: ['Source'], consequentPath: 'Result', consequentOrdinal: 0
+  };
+
+  const cycle = await scheduler.refresh(world, {
+    triggerEvent: {
+      mode: 'support',
+      nodes: ['Result'],
+      deliveries: [delivery, structuredClone(delivery)]
+    }
+  });
+
+  assert.deepEqual(cycle.executedProgramPaths, ['Subscriber']);
+  assert.deepEqual(cycle.messages.map(({ text }) => text), ['support:Source:0:True']);
+});
+
+test('one support delivery executes its direct subscriber once across sequential and concurrent refreshes', async () => {
+  const subscriber = atom('Subscriber', [
+    'def receive(delivery):',
+    '    message({"level":"info","text":delivery["clauseId"]})',
+    'trigger("support", {"nodes":["Result"]}, receive)'
+  ].join('\n'), [], 'program');
+  const world = [atom('Result'), subscriber];
+  const delivery = {
+    mode: 'support', revision: 'sha256:r1', clauseId: 'support:Source:0', decision: true,
+    antecedentPaths: ['Source'], consequentPath: 'Result', consequentOrdinal: 0
+  };
+  const event = { mode: 'support', nodes: ['Result'], deliveries: [delivery] };
+
+  const sequential = createProgramRuntimeScheduler();
+  await sequential.refresh(world);
+  const first = await sequential.refresh(world, { triggerEvent: event });
+  sequential.confirmSupportDeliveries(first.supportDeliveryClaims);
+  const second = await sequential.refresh(world, { triggerEvent: event });
+  assert.deepEqual(first.messages.map(({ text }) => text), ['support:Source:0']);
+  assert.deepEqual(second.messages, []);
+
+  const concurrent = createProgramRuntimeScheduler();
+  await concurrent.refresh(world);
+  const firstConcurrent = concurrent.refresh(world, { triggerEvent: event });
+  const secondConcurrent = concurrent.refresh(world, { triggerEvent: event });
+  const firstCycle = await firstConcurrent;
+  concurrent.confirmSupportDeliveries(firstCycle.supportDeliveryClaims);
+  const cycles = [firstCycle, await secondConcurrent];
+  assert.equal(cycles.flatMap((cycle) => cycle.messages).length, 1);
+});
+
+test('a context-dependent support result filtered without Agent scope releases its delivery claim', { timeout: 3000 }, async () => {
+  const subscriber = atom('Subscriber', [
+    'def receive(delivery):',
+    '    explore({"thing":"./Result"})',
+    '    message({"level":"info","text":"filtered"})',
+    'trigger("support", {"nodes":["Result"]}, receive)'
+  ].join('\n'), [], 'program');
+  const world = [atom('Result'), subscriber];
+  const scheduler = createProgramRuntimeScheduler();
+  const runProgram = scheduler.runProgram;
+  let calls = 0;
+  scheduler.runProgram = async (request) => {
+    if (request.program.path === 'Subscriber' && request.programArguments?.mode === 'support') calls += 1;
+    return runProgram(request);
+  };
+  await scheduler.refresh(world);
+  const delivery = {
+    mode: 'support', revision: 'sha256:r1', clauseId: 'support:Source:0', decision: true,
+    antecedentPaths: ['Source'], consequentPath: 'Result', consequentOrdinal: 0
+  };
+  const options = {
+    triggerEvent: { mode: 'support', nodes: ['Result'], deliveries: [delivery] },
+    executeExplore: async () => []
+  };
+
+  assert.deepEqual((await scheduler.refresh(world, options)).messages, []);
+  assert.deepEqual((await scheduler.refresh(world, options)).messages, []);
+  assert.equal(calls, 2);
+});
+
+test('localized support evaluation reuses only the exact base-revision graph after a structural edit', async () => {
+  const source = (consequent) => {
+    const value = atom('Source', 'before');
+    value.support = [{
+      'if@current': true,
+      if: [{ 'thing@program': 'Predicate' }],
+      then: [{ thing: consequent }]
+    }];
+    return value;
+  };
+  const subscriber = (name, result) => atom(name, [
+    'def receive(delivery):',
+    `    message({"level":"info","text":"${result}"})`,
+    `trigger("support", {"nodes":["${result}"]}, receive)`
+  ].join('\n'), [], 'program');
+  const initial = [
+    source('OldResult'), atom('OldResult'), atom('NewResult'),
+    atom('Predicate', 'def main(arguments):\n    return True', [], 'program'),
+    subscriber('OldSubscriber', 'OldResult'), subscriber('NewSubscriber', 'NewResult')
+  ];
+  const scheduler = createProgramRuntimeScheduler();
+  await scheduler.refresh(initial);
+
+  const structural = structuredClone(initial);
+  structural[0] = source('NewResult');
+  await scheduler.refresh(structural, {
+    triggerEvent: {
+      mode: 'transform', nodes: ['Source'], affectedPaths: ['Source'],
+      preparedIndexesValid: false, preparedSupportIndexValid: false
+    }
+  });
+
+  const localized = structuredClone(structural);
+  localized[0].situation = 'after';
+  const cycle = await scheduler.refresh(localized, {
+    triggerEvent: {
+      mode: 'transform', nodes: ['Source'], affectedPaths: ['Source'],
+      preparedIndexesValid: true, preparedSupportIndexValid: true,
+      supportBaseRevision: revisionOfWorldFacts(structural)
+    }
+  });
+
+  assert.deepEqual(cycle.messages.map(({ text }) => text), ['NewResult']);
+  assert.deepEqual(cycle.executedProgramPaths, ['NewSubscriber']);
+});
+
+test('an explicit run cannot manufacture a support delivery', async () => {
+  const subscriber = atom('Subscriber', [
+    'def receive(delivery):',
+    '    message({"level":"info","text":"must-not-run"})',
+    'trigger("support", {"nodes":["Result"]}, receive)'
+  ].join('\n'), [], 'program');
+  const world = [atom('Result'), subscriber];
+  const scheduler = createProgramRuntimeScheduler();
+  await scheduler.refresh(world);
+
+  const cycle = await scheduler.refresh(world, {
+    programSelector: 'Subscriber',
+    force: true,
+    isolateFailures: true
+  });
+
+  assert.equal(cycle.failures.length, 1);
+  assert.equal(cycle.failures[0].code, 'SUPPORT_DELIVERY_REQUIRED');
+  assert.deepEqual(cycle.messages, []);
+});
+
+test('support selection consumes exact affected paths instead of a legacy bare result name', async () => {
+  const topLevelSource = atom('Leaf', '', [], '');
+  topLevelSource.support = [{
+    'if@current': true,
+    if: [{ 'thing@program': 'Predicate' }],
+    then: [{ thing: 'Result' }]
+  }];
+  const world = [
+    topLevelSource,
+    atom('Result'),
+    atom('Predicate', 'def main(arguments):\n    return True', [], 'program'),
+    atom('Subscriber', [
+      'def receive(delivery):',
+      '    message({"level":"info","text":"wrong-domain"})',
+      'trigger("support", {"nodes":["Result"]}, receive)'
+    ].join('\n'), [], 'program'),
+    atom('Root', '', [atom('Leaf', 'changed')])
+  ];
+  const scheduler = createProgramRuntimeScheduler();
+  await scheduler.refresh(world);
+
+  const cycle = await scheduler.refresh(structuredClone(world), {
+    triggerEvent: {
+      mode: 'transform',
+      nodes: ['Root/Leaf', 'Leaf'],
+      affectedPaths: ['Root/Leaf'],
+      preparedIndexesValid: true,
+      preparedSupportIndexValid: true
+    }
+  });
+
+  assert.deepEqual(cycle.messages, []);
+  assert.deepEqual(cycle.executedProgramPaths, []);
+});
+
 test('ordinary fact edits reuse the compiled Agent security directory', async () => {
   let inspections = 0;
   const inspectedProgramCounts = [];

@@ -329,10 +329,14 @@ def extract_trigger_contract(tree):
     function = functions.get(entrypoint)
     if function is None:
         raise ProgramSecurityError(f"trigger() entrypoint is not defined: {entrypoint}")
-    if function.args.args or function.args.vararg or function.args.kwarg:
-        raise ProgramSecurityError("trigger() entrypoint must accept no arguments")
-    if mode != "transform":
-        raise ProgramSecurityError("trigger() currently supports only transform mode")
+    if mode == "transform":
+        if function.args.args or function.args.vararg or function.args.kwarg:
+            raise ProgramSecurityError("trigger transform entrypoint must accept no arguments")
+    elif mode == "support":
+        if len(function.args.args) != 1 or function.args.vararg or function.args.kwarg:
+            raise ProgramSecurityError("trigger support entrypoint must accept one delivery argument")
+    else:
+        raise ProgramSecurityError("trigger() supports only transform or support mode")
     if (not isinstance(parameters, dict)
             or set(parameters) != {"nodes"}
             or not isinstance(parameters.get("nodes"), list)
@@ -341,7 +345,7 @@ def extract_trigger_contract(tree):
                    for value in parameters["nodes"])
             or len(set(parameters["nodes"])) != len(parameters["nodes"])):
         raise ProgramSecurityError(
-            "trigger transform parameters require one non-empty unique nodes string list"
+            "trigger parameters require one non-empty unique nodes string list"
         )
     return {
         "mode": mode,
@@ -664,7 +668,23 @@ def main():
 
     def trigger(mode, parameters, entrypoint):
         if request.get("triggered") is True:
-            entrypoint()
+            if mode == "support":
+                delivery = request.get("programArguments")
+                required = {
+                    "mode", "revision", "clauseId", "decision",
+                    "antecedentPaths", "consequentPath", "consequentOrdinal",
+                }
+                if (not isinstance(delivery, dict)
+                        or set(delivery) != required
+                        or delivery.get("mode") != "support"
+                        or delivery.get("decision") is not True):
+                    raise EngineCallError(
+                        "SUPPORT_DELIVERY_REQUIRED",
+                        "support subscriber requires one strict typed true delivery",
+                    )
+                entrypoint(delivery)
+            else:
+                entrypoint()
 
     program_stack = [request["program"]["ref"]]
 

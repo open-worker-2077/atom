@@ -96,7 +96,11 @@ export async function evaluateSupportClausesWithPrograms(parsedDocument, options
     if (selectedIds && !selectedIds.has(clause.id)) continue;
     const trace = [];
     try {
-      const decision = (await evaluateExprWithPrograms(clause.root, evaluateProgram, trace)) ?? true;
+      const decision = (await evaluateExprWithPrograms(
+        clause.root,
+        (programPath) => evaluateProgram(programPath, { clause }),
+        trace
+      )) ?? true;
       results.set(clause.id, { status: decision ? 'true' : 'false', decision, trace });
     } catch (error) {
       results.set(clause.id, {
@@ -107,6 +111,30 @@ export async function evaluateSupportClausesWithPrograms(parsedDocument, options
     }
   }
   return results;
+}
+
+export function buildSupportDeliveries(parsedDocument, options = {}) {
+  const decisions = options.decisions ?? new Map();
+  const revision = options.revision;
+  if (typeof revision !== 'string' || !revision) {
+    throw runtimeError('SUPPORT_DELIVERY_REVISION_REQUIRED', 'Support delivery requires one revision');
+  }
+  const deliveries = [];
+  for (const clause of parsedDocument.supportClauses ?? []) {
+    if (decisions.get(clause.id)?.decision !== true) continue;
+    for (const target of clause.then ?? []) {
+      deliveries.push(Object.freeze({
+        mode: 'support',
+        revision,
+        clauseId: clause.id,
+        decision: true,
+        antecedentPaths: Object.freeze([...(clause.antecedentPaths ?? clause.dependencyPaths ?? [])]),
+        consequentPath: target.targetPath,
+        consequentOrdinal: target.thenOrdinal
+      }));
+    }
+  }
+  return Object.freeze(deliveries);
 }
 
 export function propagateSupportClauses(parsedDocument, options = {}) {

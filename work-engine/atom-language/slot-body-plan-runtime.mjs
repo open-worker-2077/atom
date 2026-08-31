@@ -751,7 +751,7 @@ function instanceContextForEvent(atoms, eventPath) {
 }
 
 export function slotProgramInvocationsForEvent(atoms, triggerEvent, triggerContracts = new Map()) {
-  if (triggerEvent?.mode !== 'transform' || !Array.isArray(triggerEvent.nodes)) return [];
+  if (!['transform', 'support'].includes(triggerEvent?.mode) || !Array.isArray(triggerEvent.nodes)) return [];
   const invocations = [];
   const invocationByKey = new Map();
   const addInvocation = (context, eventPath, source, role) => {
@@ -802,7 +802,7 @@ export function slotProgramInvocationsForEvent(atoms, triggerEvent, triggerContr
         ? context.layout.modelPath
         : `${context.layout.modelPath}/${role.path.slice(2)}`;
       const contract = triggerContracts.get(programPath)?.contract;
-      if (contract?.mode !== 'transform') continue;
+      if (contract?.mode !== triggerEvent.mode) continue;
       if (!(contract.parameters?.nodes ?? []).includes(source.path)) continue;
       addInvocation(context, eventPath, source, role);
     }
