@@ -13,6 +13,13 @@ const agentSource = [
   '    return arguments'
 ].join('\n');
 
+const lineContinuedAgentSource = [
+  'agent \\',
+  '  ({"labels":["^"],"functions":{"groups":[],"names":["explore"]}})',
+  'def main(arguments):',
+  '    return arguments'
+].join('\n');
+
 test('Agent registry is derived from literal declarations on ordinary Programs', async () => {
   const scheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
   const world = [
@@ -44,6 +51,19 @@ test('ordinary Programs stay ordinary and nonliteral Agent declarations fail clo
     ]),
     (error) => error.code === 'AGENT_REGISTRATION_LITERAL_REQUIRED'
   );
+});
+
+test('Agent registry recognizes a literal declaration using Python explicit line continuation', async () => {
+  const scheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
+  const security = await scheduler.deriveAgentSecurity([
+    atom('thing@program', 'ContinuedAgentProgram', lineContinuedAgentSource)
+  ]);
+
+  assert.deepEqual(security.get('ContinuedAgentProgram'), {
+    labels: ['^'],
+    functionScopes: { groups: [], names: ['explore'] },
+    functions: ['explore']
+  });
 });
 
 test('executing an Agent Program does not emit a registration mutation', async () => {

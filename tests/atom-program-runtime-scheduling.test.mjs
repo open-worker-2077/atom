@@ -215,9 +215,12 @@ test('ordinary fact edits reuse the compiled Agent security directory', async ()
   let inspections = 0;
   const inspectedProgramCounts = [];
   const scheduler = createProgramRuntimeScheduler({
-    inspectProgram: async ({ programs }) => {
+    inspectProgram: async ({ programs, program, agentDeclarationOnly }) => {
       inspections += 1;
       inspectedProgramCounts.push(programs.length);
+      if (agentDeclarationOnly && program.path === 'Unrelated Program') {
+        return { agentRegistrations: [] };
+      }
       return {
         agentRegistrations: [{
           labels: ['^'],
@@ -242,16 +245,27 @@ test('ordinary fact edits reuse the compiled Agent security directory', async ()
     structuredClone(agentProgram), structuredClone(unrelatedProgram), atom('Fact', 'after')
   ]);
 
-  assert.equal(inspections, 1);
-  assert.deepEqual(inspectedProgramCounts, [1]);
+  assert.equal(inspections, 2);
+  assert.deepEqual(inspectedProgramCounts, [1, 1]);
   assert.deepEqual(scheduler.agentSecurity.get('Worker')?.labels, ['^']);
 });
 
 test('one mutable world revision shares one prepared record snapshot across index builders', async () => {
   const recordSnapshots = [];
   const scheduler = createProgramRuntimeScheduler({
-    inspectProgram: async ({ records, program }) => {
+    inspectProgram: async ({ records, program, agentDeclarationOnly }) => {
       recordSnapshots.push(records);
+      if (agentDeclarationOnly) {
+        return program.path === 'Worker'
+          ? {
+              agentRegistrations: [{
+                labels: ['^'],
+                functionScopes: { groups: [], names: ['explore'] },
+                functions: ['explore']
+              }]
+            }
+          : { agentRegistrations: [] };
+      }
       return program.types.includes('agent')
         ? {
             agentRegistrations: [{
@@ -288,7 +302,7 @@ test('one mutable world revision shares one prepared record snapshot across inde
 
   await scheduler.activeRequestDrivenLocks(world);
 
-  assert.equal(recordSnapshots.length, 2);
+  assert.equal(recordSnapshots.length, 3);
   assert.equal(recordSnapshots[0], recordSnapshots[1]);
 });
 
@@ -346,7 +360,8 @@ test('path changes rebuild request-driven locks while ordinary fact edits reuse 
   let inspections = 0;
   const inspectedProgramCounts = [];
   const scheduler = createProgramRuntimeScheduler({
-    inspectProgram: async ({ programs }) => {
+    inspectProgram: async ({ programs, agentDeclarationOnly }) => {
+      if (agentDeclarationOnly) return { agentRegistrations: [] };
       inspections += 1;
       inspectedProgramCounts.push(programs.length);
       return {
@@ -383,7 +398,8 @@ test('path changes rebuild request-driven locks while ordinary fact edits reuse 
 test('request-driven locks rebuild when an allowed Program path loses its Program type', async () => {
   let inspections = 0;
   const scheduler = createProgramRuntimeScheduler({
-    inspectProgram: async () => {
+    inspectProgram: async ({ agentDeclarationOnly }) => {
+      if (agentDeclarationOnly) return { agentRegistrations: [] };
       inspections += 1;
       return {
         locks: [{

@@ -516,6 +516,25 @@ def main():
         "slotBodies": [], "jumps": [], "jumpAuthorizations": [], "shortcuts": [], "agents": [], "changedThings": []
     }
 
+    if request.get("agentDeclarationOnly") is True:
+        tree = ast.parse(
+            request["program"]["detail"],
+            filename=request["program"]["path"],
+            mode="exec",
+        )
+        agent_declaration = extract_agent_declaration(tree)
+        sys.stdout.write(json.dumps(
+            {
+                "type": "result", "ok": True,
+                **effects,
+                **({"agents": [agent_declaration]} if agent_declaration is not None else {}),
+            },
+            ensure_ascii=True,
+            allow_nan=False,
+        ) + "\n")
+        sys.stdout.flush()
+        return
+
     next_request_id = 0
 
     def call_engine(function_name, specification):

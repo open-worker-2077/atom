@@ -1025,7 +1025,7 @@ function runWorker({
   python, records, programs, program, timeoutMs, executeExplore, validateOnly = false,
   triggered = false, changedNodes = [], scopeRoot = null, programRoot = null,
   invokeMain = false, programArguments = {}, supportDecision = false,
-  allowedFunctions = null, resolveExactPath = null
+  allowedFunctions = null, resolveExactPath = null, agentDeclarationOnly = false
 }) {
   return new Promise((resolve, reject) => {
     const child = spawn(python, ['-I', '-X', 'utf8', workerFile], {
@@ -1111,6 +1111,7 @@ function runWorker({
       world: programs ?? programRecords(records),
       program,
       validateOnly,
+      agentDeclarationOnly,
       triggered,
       changedNodes,
       programRoot,
@@ -1252,8 +1253,7 @@ export class ProgramRuntimeScheduler {
   async deriveAgentSecurity(atoms) {
     const records = worldRecords(atoms);
     const programs = programRecords(records);
-    const declarationCandidates = programs.filter((program) => /\bagent\s*\(/u.test(program.detail));
-    const inspected = await Promise.all(declarationCandidates.map((program) => (
+    const inspected = await Promise.all(programs.map((program) => (
       this.runBounded(() => this.inspectProgram({
         python: this.python,
         records,
@@ -1266,11 +1266,12 @@ export class ProgramRuntimeScheduler {
             { code: 'INVALID_AGENT_REGISTRATION_RECONSTRUCTION_EFFECT' }
           );
         },
+        agentDeclarationOnly: true,
         validateOnly: true
       }))
     )));
     const derived = new Map();
-    for (const [index, program] of declarationCandidates.entries()) {
+    for (const [index, program] of programs.entries()) {
       const declarations = inspected[index].agentRegistrations ?? [];
       if (declarations.length === 0) continue;
       if (declarations.length !== 1) {
