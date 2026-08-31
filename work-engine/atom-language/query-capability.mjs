@@ -111,7 +111,8 @@ export function createAccessController(atoms, options = {}) {
   const programLockIndex = options.programLockIndex?.byPath?.size ? options.programLockIndex : null;
   const legacyAccess = options.legacyAccess;
   const agentPath = options.agentPath ?? options.interaction?.agent?.path ?? null;
-  const fixedAgentWindow = Boolean(agentPath && options.agentSecurity);
+  const agentIdentity = Boolean(agentPath && options.agentSecurity);
+  const fixedAgentWindow = agentIdentity;
   const exploreWorld = Array.isArray(options.preparedAccessMatches)
     ? { allMatches: options.preparedAccessMatches }
     : prepareExploreWorld(atoms);
@@ -161,6 +162,7 @@ export function createAccessController(atoms, options = {}) {
           lockIndex: programLockIndex, targetPath, operation, field,
           agentPath,
           agentTypes,
+          agentIdentity,
           programPath: actor.programPath ?? null,
           targetTypes,
           action: operation === 'read' ? 'explore' : 'transform'

@@ -67,23 +67,23 @@ test('subtree spatial lock follows the window parent and admits only its schedul
 
   assert.equal(authorizeProgramLock({
     lockIndex: index, targetPath: '推进流/任务A/字段', operation: 'read', field: 'situation',
-    agentPath: '推进流/任务A/执行窗口'
+    agentPath: '推进流/任务A/执行窗口', agentIdentity: true
   }).decision, 'allow');
   assert.equal(authorizeProgramLock({
     lockIndex: index, targetPath: '推进流/任务B', operation: 'read', field: 'situation',
-    agentPath: '推进流/任务A/执行窗口'
+    agentPath: '推进流/任务A/执行窗口', agentIdentity: true
   }).decision, 'truncate');
   assert.equal(authorizeProgramLock({
     lockIndex: index, targetPath: '推进流/状态', operation: 'read', field: 'situation',
-    agentPath: '推进流/任务A/执行窗口'
+    agentPath: '推进流/任务A/执行窗口', agentIdentity: true
   }).decision, 'truncate');
   assert.equal(authorizeProgramLock({
     lockIndex: index, targetPath: '推进流/任务A/执行窗口', operation: 'write', field: 'thing',
-    agentPath: '推进流/任务A/执行窗口'
+    agentPath: '推进流/任务A/执行窗口', agentIdentity: true
   }).decision, 'deny');
   assert.equal(authorizeProgramLock({
     lockIndex: index, targetPath: '推进流/任务A/执行窗口', operation: 'write', field: 'thing',
-    agentPath: '推进流/任务A/执行窗口', programPath: '推进流/调度程序'
+    agentPath: '推进流/任务A/执行窗口', agentIdentity: true, programPath: '推进流/调度程序'
   }).decision, 'allow');
 });
 
@@ -156,22 +156,22 @@ test('an allowed Agent window bypasses only its matching Program lock', () => {
     targetPath: '推进流/任务A',
     operation: 'write',
     field: 'situation',
-    agentPath: '推进流/允许窗口'
+    agentPath: '推进流/允许窗口', agentIdentity: true
   }).decision, 'allow');
   assert.equal(authorizeProgramLock({
     lockIndex: index,
     targetPath: '推进流/任务A',
     operation: 'write',
     field: 'situation',
-    agentPath: '推进流/其他窗口'
+    agentPath: '推进流/其他窗口', agentIdentity: true
   }).decision, 'deny');
   assert.equal(authorizeProgramLock({
     lockIndex: index, targetPath: '推进流/任务A', operation: 'read', field: 'situation',
-    agentPath: '推进流/允许窗口'
+    agentPath: '推进流/允许窗口', agentIdentity: true
   }).decision, 'allow');
   assert.equal(authorizeProgramLock({
     lockIndex: index, targetPath: '推进流/任务A', operation: 'read', field: 'situation',
-    agentPath: '推进流/其他窗口'
+    agentPath: '推进流/其他窗口', agentIdentity: true
   }).decision, 'truncate');
 });
 
@@ -188,12 +188,78 @@ test('window Graph types admit a class without matching a concrete path or name'
 
   assert.equal(authorizeProgramLock({
     lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'situation',
-    agentPath: '任意新路径', agentTypes: ['agent', '研发'], targetTypes: ['槽例', '待处理'], action: 'transform'
+    agentPath: '任意新路径', agentTypes: ['agent', '研发'], agentIdentity: true, targetTypes: ['槽例', '待处理'], action: 'transform'
   }).decision, 'allow');
   assert.equal(authorizeProgramLock({
     lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'situation',
-    agentPath: '推进流/其他窗口', agentTypes: ['agent', '执行'], targetTypes: ['槽例', '待处理'], action: 'transform'
+    agentPath: '推进流/其他窗口', agentTypes: ['agent', '执行'], agentIdentity: true, targetTypes: ['槽例', '待处理'], action: 'transform'
   }).decision, 'deny');
+});
+
+test('undeclared origins cannot satisfy exact, type, or relation Program-lock window exceptions', () => {
+  const target = '推进流/任务A';
+  const cases = [
+    {
+      name: 'ordinary Program path',
+      allowed_windows: { paths: ['推进流/普通程序'] },
+      agentPath: '推进流/普通程序',
+      agentTypes: ['program']
+    },
+    {
+      name: 'legacy Agent Key without a declaration',
+      allowed_windows: { types: { all: ['agent'], any: ['研发'] } },
+      agentPath: '推进流/遗留窗口',
+      agentTypes: ['agent', '研发']
+    },
+    {
+      name: 'relation-matching non-Agent path',
+      allowed_windows: { relation: 'target_within_window_parent' },
+      agentPath: '推进流/任务A/普通程序',
+      agentTypes: ['program']
+    }
+  ];
+
+  for (const entry of cases) {
+    const index = buildProgramLockIndex({
+      revision: `undeclared-${entry.name}`,
+      records,
+      results: [{
+        targets: { refs: ['r-target'] }, mode: 'write', fields: ['situation'],
+        protect: { atom: true, messages: false }, allowed_windows: entry.allowed_windows,
+        sourceProgramRef: 'r-program', sourceProgramPath: '冻结程序'
+      }]
+    });
+    assert.equal(authorizeProgramLock({
+      lockIndex: index,
+      targetPath: target,
+      operation: 'write',
+      field: 'situation',
+      agentPath: entry.agentPath,
+      agentTypes: entry.agentTypes,
+      agentIdentity: false
+    }).decision, 'deny', entry.name);
+  }
+});
+
+test('Program-lock window exceptions require an explicit derived Agent identity', () => {
+  const index = buildProgramLockIndex({
+    revision: 'implicit-agent-identity', records,
+    results: [{
+      targets: { refs: ['r-target'] }, mode: 'write', fields: ['situation'],
+      protect: { atom: true, messages: false },
+      allowed_windows: { paths: ['推进流/允许窗口'] },
+      sourceProgramRef: 'r-program', sourceProgramPath: '冻结程序'
+    }]
+  });
+
+  assert.equal(authorizeProgramLock({
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'situation',
+    agentPath: '推进流/允许窗口'
+  }).decision, 'deny');
+  assert.equal(authorizeProgramLock({
+    lockIndex: index, targetPath: '推进流/任务A', operation: 'write', field: 'situation',
+    agentPath: '推进流/允许窗口', agentIdentity: true
+  }).decision, 'allow');
 });
 
 test('target state and interaction action independently decide whether a lock is active', () => {

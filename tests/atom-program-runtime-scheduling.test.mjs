@@ -874,10 +874,16 @@ test('a denied trigger contract is retried under a later authorized Agent contex
     'if changed([watched]):',
     '    main()'
   ].join('\n'), [], 'program');
-  const world = [watched, program];
+  const agentSource = 'agent({"labels":[],"functions":{"groups":[],"names":["changed","explore","message"]}})';
+  const world = [atom('Root', '', [
+    atom('Denied Window', agentSource, [], 'program'),
+    atom('Authorized Window', agentSource, [], 'program'),
+    watched,
+    program
+  ])];
 
   await scheduler.refresh(world, {
-    triggerEvent: { mode: 'transform', nodes: ['Watched'] },
+    triggerEvent: { mode: 'transform', nodes: ['Root/Watched'] },
     agentOrigin: { path: 'Root/Denied Window' },
     executeExplore: async () => {
       deniedContractInspections += 1;
@@ -889,7 +895,7 @@ test('a denied trigger contract is retried under a later authorized Agent contex
 
   assert.equal(scheduler.triggerContracts.has('Scoped Trigger'), false);
   await scheduler.refresh(world, {
-    triggerEvent: { mode: 'transform', nodes: ['Watched'] },
+    triggerEvent: { mode: 'transform', nodes: ['Root/Watched'] },
     agentOrigin: { path: 'Root/Denied Window' },
     executeExplore: async () => {
       deniedContractInspections += 1;
@@ -900,13 +906,13 @@ test('a denied trigger contract is retried under a later authorized Agent contex
   });
   assert.equal(deniedContractInspections, 1);
   const authorized = await scheduler.refresh(world, {
-    triggerEvent: { mode: 'transform', nodes: ['Watched'] },
+    triggerEvent: { mode: 'transform', nodes: ['Root/Watched'] },
     agentOrigin: { path: 'Root/Authorized Window' },
-    executeExplore: async () => [{ path: 'Watched' }]
+    executeExplore: async () => [{ path: 'Root/Watched' }]
   });
 
   assert.equal(deniedContractInspections, 1);
-  assert.deepEqual(authorized.executedProgramPaths, ['Scoped Trigger']);
+  assert.deepEqual(authorized.executedProgramPaths, ['Root/Scoped Trigger']);
   assert.deepEqual(authorized.messages.map(({ text }) => text), ['ran']);
 });
 
@@ -1099,6 +1105,36 @@ test('a changed world revision recomputes Programs instead of reusing the previo
   assert.equal(changed.cached, false);
   assert.notEqual(changed.fingerprint, first.fingerprint);
   assert.equal(changed.messages[0].text, '42');
+});
+
+test('a supplied undeclared origin cannot call registered Program functions while no context remains context-free', async () => {
+  const world = [atom('Reporter', "message({'level':'info','text':'ran'})", [], 'program')];
+  const unknownOrigin = await createProgramRuntimeScheduler().refresh(structuredClone(world), {
+    agentOrigin: { ref: 'unknown-ref', path: 'Unknown Origin' }, isolateFailures: true
+  });
+  const contextFree = await createProgramRuntimeScheduler().refresh(structuredClone(world), {
+    isolateFailures: true
+  });
+
+  assert.equal(unknownOrigin.failures[0].code, 'PROGRAM_FUNCTION_DENIED');
+  assert.deepEqual(contextFree.messages.map(({ text }) => text), ['ran']);
+});
+
+test('derived Agent Program cache keys reuse child Program results across an unrelated revision', async () => {
+  const agentSource = 'agent({"labels":[],"functions":{"groups":[],"names":["message"]}})';
+  const world = (unrelated) => [
+    atom('Agent', agentSource, [
+      atom('Child', "message({'level':'info','text':'child-ran'})", [], 'program')
+    ], 'program'),
+    atom('Unrelated', unrelated)
+  ];
+  const scheduler = createProgramRuntimeScheduler();
+  const first = await scheduler.refresh(world('before'));
+  const reused = await scheduler.refresh(world('after'));
+
+  assert.deepEqual(first.messages.map(({ text }) => text), ['child-ran']);
+  assert.equal(reused.cached, true);
+  assert.deepEqual(reused.messages, []);
 });
 
 test('an unrelated fact change reuses Program results without replaying the Program', async () => {
@@ -1302,18 +1338,23 @@ test('one immutable large-world revision reuses its Program cycle fingerprint', 
 
 test('a revision-local @agent ref change does not replay Programs for the same context path', async () => {
   const program = atom('Context Reporter', [
-    "value = explore({'thing': 'Agent'})[0].situation",
+    "value = explore({'thing': 'Agent/Status'})[0].situation",
     "message({'level': 'info', 'text': value})"
   ].join('\n'), [], 'program');
   const scheduler = createProgramRuntimeScheduler();
+  const agent = () => atom('Agent',
+    'agent({"labels":[],"functions":{"groups":[],"names":["explore","message"]}})',
+    [atom('Status', 'stable')],
+    'program'
+  );
 
   const first = await scheduler.refresh([
-    atom('Agent', 'stable', [], 'agent'),
+    agent(),
     atom('Unrelated', 'before'),
     program
   ], { agentOrigin: { ref: 'revision-one-ref', path: 'Agent' } });
   const unrelatedChange = await scheduler.refresh([
-    atom('Agent', 'stable', [], 'agent'),
+    agent(),
     atom('Unrelated', 'after'),
     structuredClone(program)
   ], { agentOrigin: { ref: 'revision-two-ref', path: 'Agent' } });
@@ -1336,21 +1377,9 @@ test('scheduler distinguishes @agent cycles while reusing context-independent Pr
 test("an Agent cycle executes only Programs owned by that Agent", async () => {
   const executed = [];
   const scheduler = createProgramRuntimeScheduler({
-    runProgram: async ({ program, agentDeclarationOnly = false }) => {
-      if (agentDeclarationOnly) {
-        const declaredAgent = ['Agent A', 'Agent B'].includes(program.path);
-        return {
-          agentRegistrations: declaredAgent ? [{
-            labels: [],
-            functionScopes: { groups: [], names: ['jump'] },
-            functions: ['jump']
-          }] : [],
-          locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
-          trigger: null
-        };
-      }
+    runProgram: async ({ program }) => {
       executed.push(program.path);
-      if (program.path === 'Agent A/Jump Program') {
+      if (program.path === 'Outer/Outer Jump Program') {
         throw Object.assign(new Error('Program cycle exceeded 2266ms'), {
           code: 'ATOM_PROGRAM_TIMEOUT'
         });
@@ -1362,21 +1391,21 @@ test("an Agent cycle executes only Programs owned by that Agent", async () => {
     }
   });
   const world = [
-    atom('Agent A', 'agent({"labels":[],"functions":{"groups":[],"names":["jump"]}})', [
-      atom('Jump Program', "jump({'thing':'A'})", [], 'program')
-    ], 'program'),
-    atom('Agent B', 'agent({"labels":[],"functions":{"groups":[],"names":["jump"]}})', [
-      atom('Own Program', "jump({'thing':'B'})", [], 'program')
+    atom('Outer', 'agent({"labels":[],"functions":{"groups":[],"names":["jump"]}})', [
+      atom('Outer Jump Program', "jump({'thing':'Outer'})", [], 'program'),
+      atom('Inner', 'agent({"labels":[],"functions":{"groups":[],"names":["jump"]}})', [
+        atom('Inner Jump Program', "jump({'thing':'Inner'})", [], 'program')
+      ], 'program')
     ], 'program')
   ];
 
   const cycle = await scheduler.refresh(world, {
-    agentOrigin: { ref: 'agent-b-ref', path: 'Agent B' },
+    agentOrigin: { ref: 'inner-agent-ref', path: 'Outer/Inner' },
     force: true,
     isolateFailures: true
   });
 
-  assert.deepEqual(executed.filter((programPath) => programPath.includes('/')), ['Agent B/Own Program']);
+  assert.deepEqual(executed.filter((programPath) => programPath.endsWith('Jump Program')), ['Outer/Inner/Inner Jump Program']);
   assert.deepEqual(cycle.failures, []);
 });
 
@@ -1386,7 +1415,13 @@ test('Programs with explicit explore anchors are reused across @agent context pa
     "message({'level': 'info', 'text': value})"
   ].join('\n'), [], 'program');
   const scheduler = createProgramRuntimeScheduler();
-  const world = [atom('Target', 'stable'), program];
+  const agentSource = 'agent({"labels":[],"functions":{"groups":[],"names":["explore","message"]}})';
+  const world = [
+    atom('A', '', [atom('Agent', agentSource, [], 'program')]),
+    atom('B', '', [atom('Agent', agentSource, [], 'program')]),
+    atom('Target', 'stable'),
+    program
+  ];
   let dependencyReads = 0;
   const executeExplore = async (request) => {
     dependencyReads += 1;

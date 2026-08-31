@@ -1531,6 +1531,7 @@ export async function executeAtomLanguage(options = {}) {
       field: 'messages',
       agentPath: interaction.agent?.path ?? null,
       agentTypes: graphTypesAtPath(atoms, interaction.agent?.path),
+      agentIdentity: Boolean(interaction.agent?.path && programCycle.agentSecurity),
       targetTypes: graphTypesAtPath(atoms, message.sourceProgramPath),
       action: 'explore'
     }).decision === 'allow')
@@ -1881,6 +1882,7 @@ export async function executeAtomLanguage(options = {}) {
           field: 'messages',
           agentPath: interaction.agent?.path ?? null,
           agentTypes: graphTypesAtPath(reconciledAtoms, interaction.agent?.path),
+          agentIdentity: Boolean(interaction.agent?.path && (cycle.agentSecurity ?? programCycle.agentSecurity)),
           targetTypes: graphTypesAtPath(reconciledAtoms, message.sourceProgramPath),
           action: 'explore'
         }).decision === 'allow')

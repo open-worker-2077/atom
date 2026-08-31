@@ -99,12 +99,35 @@ test('an Agent Program dispatches another Agent Program through use_program', as
   assert.deepEqual(cycle.messages.map((message) => message.text), ['program-child']);
 });
 
-test('Agent ownership follows the nearest declared Program, not a Key type', async () => {
-  const scheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
-  const world = [atom('thing@program', 'Window', agentSource, [
-    atom('thing@program', 'Worker', 'value = 1')
+test('Agent ownership dispatches only the nearest nested Agent Program Jump descendants', async () => {
+  const executed = [];
+  const scheduler = createProgramRuntimeScheduler({
+    timeoutMs: 2000,
+    runProgram: async ({ program }) => {
+      executed.push(program.path);
+      if (program.path === 'Outer/Outer Jump') {
+        throw Object.assign(new Error('outer jump must not run for an inner Agent cycle'), {
+          code: 'ATOM_PROGRAM_TIMEOUT'
+        });
+      }
+      return {
+        locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+        trigger: null
+      };
+    }
+  });
+  const jumpAgentSource = 'agent({"labels":[],"functions":{"groups":[],"names":["jump"]}})';
+  const world = [atom('thing@program', 'Outer', jumpAgentSource, [
+    atom('thing@program', 'Outer Jump', "jump({'thing':'Outer'})"),
+    atom('thing@program', 'Inner', jumpAgentSource, [
+      atom('thing@program', 'Inner Jump', "jump({'thing':'Inner'})")
+    ])
   ])];
-  await scheduler.rebuildAgentSecurity(world);
-  assert.equal(scheduler.agentSecurity.has('Window'), true);
-  assert.equal(scheduler.agentSecurity.has('Window/Worker'), false);
+
+  const cycle = await scheduler.refresh(world, {
+    agentOrigin: { path: 'Outer/Inner' }, force: true, isolateFailures: true
+  });
+
+  assert.deepEqual(executed.filter((path) => path.endsWith('Jump')), ['Outer/Inner/Inner Jump']);
+  assert.deepEqual(cycle.failures, []);
 });

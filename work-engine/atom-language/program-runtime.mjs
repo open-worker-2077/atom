@@ -215,7 +215,7 @@ function fingerprint(records, programs, agentOrigin, isolateFailures) {
   })).digest('hex');
 }
 
-function programSetFingerprint(programs, isolateFailures, records, agentProgramPaths = new Set()) {
+function programSetFingerprint(programs, isolateFailures, records, agentProgramPaths) {
   const recordsByRef = new Map(records.map((record) => [record.ref, record]));
   return crypto.createHash('sha256').update(JSON.stringify({
     programs: programs.map((program) => {
@@ -261,7 +261,7 @@ function requestDrivenLockFingerprint(records, programs, securityFingerprint, lo
 }
 
 function reusableProgramSetFingerprint(
-  programs, dependencyPrograms, isolateFailures, records, agentProgramPaths = new Set()
+  programs, dependencyPrograms, isolateFailures, records, agentProgramPaths
 ) {
   return crypto.createHash('sha256').update(JSON.stringify({
     selectedPrograms: programSetFingerprint(programs, isolateFailures, records, agentProgramPaths),
@@ -291,7 +291,7 @@ function programUsesJump(program) {
 }
 
 function contextualProgramSetFingerprint(
-  programs, dependencyPrograms, isolateFailures, scopePath, records, agentProgramPaths = new Set()
+  programs, dependencyPrograms, isolateFailures, scopePath, records, agentProgramPaths
 ) {
   return crypto.createHash('sha256').update(JSON.stringify({
     programSet: reusableProgramSetFingerprint(
@@ -311,7 +311,7 @@ function requestsDependOnAgent(requests) {
 
 function reusableCandidates(
   cache, programs, isolateFailures, agentOrigin, records, dependencyPrograms = programs,
-  agentProgramPaths = new Set()
+  agentProgramPaths
 ) {
   const scopePath = agentScopePath(agentOrigin);
   const contextualKey = contextualProgramSetFingerprint(
@@ -334,7 +334,7 @@ function programMayResolveAnotherProgram(program) {
 
 function reusableProgramCandidates(
   cache, program, isolateFailures, agentOrigin, records, availablePrograms,
-  agentProgramPaths = new Set()
+  agentProgramPaths
 ) {
   const completeSetCandidates = reusableCandidates(
     cache, [program], isolateFailures, agentOrigin, records, availablePrograms, agentProgramPaths
@@ -1348,12 +1348,15 @@ export class ProgramRuntimeScheduler {
 
   async assertContextFreeProjection(atoms, { isolateFailures = true } = {}) {
     if (!this.projectionRepository) return Object.freeze({ persisted: false });
+    const agentProgramPaths = new Set((await this.rebuildAgentSecurity(atoms)).keys());
     const records = worldRecords(atoms);
     const programs = programRecords(records);
     const stored = await this.projectionRepository.load();
     if (!stored
       || stored.worldKey !== worldRevisionKey(records)
-      || stored.programSetKey !== programSetFingerprint(programs, isolateFailures, records)
+      || stored.programSetKey !== programSetFingerprint(
+        programs, isolateFailures, records, agentProgramPaths
+      )
       || stored.contextDependent !== false
       || !Array.isArray(stored.failures)
       || stored.failures.length > 0) {
@@ -1371,6 +1374,7 @@ export class ProgramRuntimeScheduler {
 
   async persistComputedContextFreeProjection(atoms, { isolateFailures = true } = {}) {
     if (!this.projectionRepository) return Object.freeze({ persisted: false });
+    const agentProgramPaths = new Set((await this.rebuildAgentSecurity(atoms)).keys());
     const records = worldRecords(atoms);
     const programs = programRecords(records);
     const key = fingerprint(records, programs, null, isolateFailures);
@@ -1391,7 +1395,8 @@ export class ProgramRuntimeScheduler {
       isolateFailures,
       value,
       requests,
-      agentOrigin: null
+      agentOrigin: null,
+      agentProgramPaths
     });
     if (warning) {
       throw Object.assign(new Error(warning.message), {
@@ -1438,10 +1443,14 @@ export class ProgramRuntimeScheduler {
       || stored.failures.length > 0) {
       return Object.freeze({ persisted: false, reason: 'projection-stale' });
     }
+    const previousAgentProgramPaths = new Set((await this.deriveAgentSecurity(previousAtoms)).keys());
+    const agentProgramPaths = new Set((await this.rebuildAgentSecurity(atoms)).keys());
     const previousProgramSet = programSetFingerprint(
-      previousPrograms, isolateFailures, previousRecords
+      previousPrograms, isolateFailures, previousRecords, previousAgentProgramPaths
     );
-    const nextProgramSet = programSetFingerprint(programs, isolateFailures, records);
+    const nextProgramSet = programSetFingerprint(
+      programs, isolateFailures, records, agentProgramPaths
+    );
     if (stored.programSetKey !== previousProgramSet || nextProgramSet !== previousProgramSet) {
       return Object.freeze({ persisted: false, reason: 'program-set-changed' });
     }
@@ -1462,7 +1471,8 @@ export class ProgramRuntimeScheduler {
       isolateFailures,
       value,
       requests: [],
-      agentOrigin: null
+      agentOrigin: null,
+      agentProgramPaths
     });
     if (warning) return Object.freeze({ persisted: false, reason: 'persist-failed' });
     return Object.freeze({ persisted: true, worldKey: worldRevisionKey(records) });
@@ -1800,7 +1810,9 @@ export class ProgramRuntimeScheduler {
     allowContextIncomplete = false
   }) {
     const stored = await this.loadProjection();
-    const programSetKey = programSetFingerprint(programs, isolateFailures, records);
+    const programSetKey = programSetFingerprint(
+      programs, isolateFailures, records, new Set(this.agentSecurity.keys())
+    );
     if (!stored || stored.version !== 1
       || stored.worldKey !== worldRevisionKey(records)
       || stored.programSetKey !== programSetKey
@@ -1830,7 +1842,9 @@ export class ProgramRuntimeScheduler {
     }, agentOrigin);
   }
 
-  async saveProjection({ records, programs, isolateFailures, value, requests, agentOrigin }) {
+  async saveProjection({
+    records, programs, isolateFailures, value, requests, agentOrigin, agentProgramPaths
+  }) {
     if (!this.projectionRepository) return;
     const contextDependent = requestsDependOnAgent(requests);
     const scopePath = contextDependent ? agentScopePath(agentOrigin) : null;
@@ -1839,7 +1853,7 @@ export class ProgramRuntimeScheduler {
       version: 1,
       readSetVersion: 1,
       worldKey: worldRevisionKey(records),
-      programSetKey: programSetFingerprint(programs, isolateFailures, records),
+      programSetKey: programSetFingerprint(programs, isolateFailures, records, agentProgramPaths),
       contextDependent,
       contextIncomplete: value.contextIncomplete === true,
       scopePath,
@@ -2290,7 +2304,8 @@ export class ProgramRuntimeScheduler {
             isolateFailures,
             value,
             requests: reusable.requests,
-            agentOrigin: options.agentOrigin
+            agentOrigin: options.agentOrigin,
+            agentProgramPaths
           });
           if (projectionWarning) {
             value.runtimeWarnings = [
@@ -2373,7 +2388,9 @@ export class ProgramRuntimeScheduler {
       return [{ program, slotInvocation: null, supportDelivery: null }];
     });
     const operations = operationEntries.map(async ({ program, slotInvocation, supportDelivery }) => {
-      const dormantKey = programSetFingerprint([program], isolateFailures, records);
+      const dormantKey = programSetFingerprint(
+        [program], isolateFailures, records, agentProgramPaths
+      );
       const dormantFailure = this.dormantFailures.get(dormantKey) ?? null;
       const reuseDormantContextFailure = dormantFailure?.contextDependent === true
         && Array.isArray(options.reuseDormantContextFailureCodes)
@@ -2539,11 +2556,11 @@ export class ProgramRuntimeScheduler {
               revision: slotInvocation.revision
             } : {}),
             allowedFunctions: (() => {
+              const originPath = agentScopePath(options.agentOrigin);
+              const originSecurity = originPath ? this.agentSecurity.get(originPath) ?? null : null;
               const isAgentProgram = this.agentSecurity.has(program.path);
-              const allowed = this.agentSecurity.get(
-                agentScopePath(options.agentOrigin)
-              )?.functions ?? null;
-              return !allowed || !isAgentProgram
+              const allowed = originPath ? originSecurity?.functions ?? [] : null;
+              return !originSecurity || !isAgentProgram
                 ? allowed
                 : [...new Set([...allowed, 'agent'])];
             })(),
@@ -2584,10 +2601,10 @@ export class ProgramRuntimeScheduler {
         this.setTriggerContract(program, result.trigger ?? null, result.changedThings ?? []);
         const stateKey = contextDependent
           ? contextualProgramSetFingerprint(
-            [program], availablePrograms, isolateFailures, scopePath, records
+            [program], availablePrograms, isolateFailures, scopePath, records, agentProgramPaths
           )
           : reusableProgramSetFingerprint(
-            [program], availablePrograms, isolateFailures, records
+            [program], availablePrograms, isolateFailures, records, agentProgramPaths
           );
         if (!slotInvocation && !(options.slotScopeRoot) && (!contextDependent || scopePath)) {
           const reusableState = {
@@ -2603,9 +2620,11 @@ export class ProgramRuntimeScheduler {
           if (!programMayResolveAnotherProgram(program)) {
             const independentStateKey = contextDependent
               ? contextualProgramSetFingerprint(
-                [program], [program], isolateFailures, scopePath, records
+                [program], [program], isolateFailures, scopePath, records, agentProgramPaths
               )
-              : reusableProgramSetFingerprint([program], [program], isolateFailures, records);
+              : reusableProgramSetFingerprint(
+                [program], [program], isolateFailures, records, agentProgramPaths
+              );
             this.programReusable.set(independentStateKey, reusableState);
           }
         }
@@ -2799,10 +2818,10 @@ export class ProgramRuntimeScheduler {
     if (value.failures.length === 0 && !triggerEvent) {
       const reusableKey = contextDependent
         ? contextualProgramSetFingerprint(
-          programs, availablePrograms, isolateFailures, scopePath, records
+          programs, availablePrograms, isolateFailures, scopePath, records, agentProgramPaths
         )
         : reusableProgramSetFingerprint(
-          programs, availablePrograms, isolateFailures, records
+          programs, availablePrograms, isolateFailures, records, agentProgramPaths
         );
       this.reusable.set(reusableKey, {
         contextDependent,
@@ -2820,7 +2839,8 @@ export class ProgramRuntimeScheduler {
           isolateFailures,
           value,
           requests: uniqueRequests,
-          agentOrigin: options.agentOrigin
+          agentOrigin: options.agentOrigin,
+          agentProgramPaths
         });
         if (projectionWarning) runtimeWarnings.push(projectionWarning);
       }

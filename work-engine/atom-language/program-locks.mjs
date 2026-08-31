@@ -178,6 +178,7 @@ export function authorizeProgramLock({
   field,
   agentPath = null,
   agentTypes = [],
+  agentIdentity = false,
   programPath = null,
   targetTypes = [],
   action = operation === 'read' ? 'explore' : 'transform'
@@ -197,10 +198,10 @@ export function authorizeProgramLock({
     if (source.when?.target_types
       && !matchesTypePredicate(targetTypes, source.when.target_types)) return false;
     if (source.allowedPrograms?.includes(programPath)) return false;
-    if (source.allowedWindows?.includes(agentPath)) return false;
-    if (source.allowedWindowTypes
+    if (agentIdentity && source.allowedWindows?.includes(agentPath)) return false;
+    if (agentIdentity && source.allowedWindowTypes
       && matchesTypePredicate(agentTypes, source.allowedWindowTypes)) return false;
-    if (source.allowedWindowRelation === 'target_within_window_parent' && agentPath) {
+    if (agentIdentity && source.allowedWindowRelation === 'target_within_window_parent' && agentPath) {
       const parentPath = agentPath.split('/').slice(0, -1).join('/');
       const withinParent = parentPath
         && (targetPath === parentPath || targetPath.startsWith(`${parentPath}/`));
