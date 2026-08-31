@@ -260,11 +260,15 @@ async function main() {
       await read(`work-order.${pass}.read-back`, agents.journey, workOrderPath);
     }
 
-    // Deliberately last: an invalid Agent declaration is expected to remain a
-    // failed Program candidate and must not be allowed to contaminate later writes.
+    // Deliberately last: declaration-time validation must fail closed before
+    // an overreaching Agent Program can enter the world or be run.
     const movedOverreachPath = `${activePath}/越级`;
-    await create('lock.overreach.program.write', agents.journey, programAtom(movedOverreachPath, fixture.overreachAgentSource));
-    await run('lock.overreach.denied', agents.journey, sourceRun(movedOverreachPath), 'AGENT_JURISDICTION_ESCALATION');
+    await run(
+      'lock.overreach.declaration-denied',
+      agents.journey,
+      `transform new ${JSON.stringify(programAtom(movedOverreachPath, fixture.overreachAgentSource))}`,
+      'AGENT_JURISDICTION_ESCALATION'
+    );
 
     const evidenceId = `NW-CLI-${sha256(JSON.stringify(evidence.map((entry) => [entry.step, entry.stdoutSha256, entry.stderrSha256]))).slice(0, 16)}`;
     const report = {
