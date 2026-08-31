@@ -24,7 +24,7 @@ const WINDOW_AGENT_SOURCE = [
   'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","jump","transform"]}})'
 ].join('\n');
 
-function world({ includeForge = false } = {}) {
+function world({ includeForge = false, includeOrdinaryWindowController = false } = {}) {
   const windowPath = 'Root/Work/Job1/Window';
   const sourcePath = `${windowPath}/Registration`;
   const destinationPath = 'Root/Work/Job2';
@@ -65,7 +65,13 @@ function world({ includeForge = false } = {}) {
             [],
             'program'
           )] : [])
-        ], 'program')
+        ], 'program'),
+        ...(includeOrdinaryWindowController ? [atom(
+          'OrdinaryWindow',
+          'message({"level":"info","text":"ordinary Program"})',
+          [],
+          'program'
+        )] : [])
       ]),
       atom('Job2'),
       atom('Job3')
@@ -75,6 +81,17 @@ function world({ includeForge = false } = {}) {
       'jump_authorize({"window":{"thing":"Root/Work/Job1/Window"},'
         + '"source":{"thing":"Root/Work/Job1/Window/Registration"},'
         + '"destination":{"thing":"Root/Work/Job2"}})',
+      [],
+      'program'
+    )] : []),
+    ...(includeOrdinaryWindowController ? [atom(
+      'OrdinaryWindowController',
+      [
+        'window = explore({"thing":"Root/Work/Job1/OrdinaryWindow"})[0]',
+        'source = explore({"thing":"Root/Work/Job1/Window/Registration"})[0]',
+        'destination = explore({"thing":"Root/Work/Job2"})[0]',
+        'jump_authorize({"window":window,"source":source,"destination":destination})'
+      ].join('\n'),
       [],
       'program'
     )] : [])
@@ -270,6 +287,24 @@ test('authorization coordinates cannot be forged, altered, or delegated by the c
       || error.code === 'ATOM_NOT_FOUND'
   )), JSON.stringify(altered.errors));
 
+});
+
+test('a real ordinary Program coordinate cannot authorize a controlled Jump window', async (t) => {
+  const files = await fixture(t, { includeOrdinaryWindowController: true });
+  const before = await fs.readFile(files.contextFile, 'utf8');
+  const result = await executeAtomLanguage({
+    source: 'transform {"thing.run.":"Root/OrdinaryWindowController"}',
+    ...files,
+    programScheduler: createProgramRuntimeScheduler(),
+    interaction: { agent: { ref: 'root-ref', path: 'Root' } }
+  });
+
+  assert.equal(result.changed, false, JSON.stringify(result));
+  assert.ok([...(result.errors ?? []), ...(result.warnings ?? [])].some((error) => (
+    error.code === 'INVALID_JUMP_AUTHORIZATION_WINDOW'
+  )), JSON.stringify(result));
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
+  assert.equal(findTyped(JSON.parse(before), 'jump-authorization'), null);
 });
 
 test('issuer authority generation changes invalidate a pending authorization without moving', async (t) => {

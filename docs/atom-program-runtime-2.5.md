@@ -39,10 +39,11 @@
 
 The active migration upgrades a legacy Agent Key into a `thing@program` with one
 literal declaration. Content under the configured backup/archive subtree is
-demoted to ordinary non-executable facts. Apply and rollback are authorized only
-by the durable, redacted, revision-bound Agent Program migration receipt; the
-receipt records the active conversion and archived demotion without copying
-private Program source into deployment evidence.
+demoted to ordinary non-executable facts. Apply consumes an immutable migration
+plan together with explicit confirmation and a verified private backup. After
+commit, apply emits a durable, redacted, revision-bound Agent Program migration
+receipt that records the active conversion and archived demotion without copying
+private Program source into deployment evidence. Rollback consumes that receipt.
 
 ## Reusable Program references
 
