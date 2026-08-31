@@ -65,3 +65,9 @@ test('project routing uses official Superpowers without shadowing it', () => {
   assert.match(instructions, /read-only historical evidence/);
   assert.match(instructions, /must not edit, copy, wrap, override, or shadow/);
 });
+
+test('contributor prerequisites require the supported Node.js runtime', () => {
+  const contributing = read('CONTRIBUTING.md');
+  assert.match(contributing, /Node\.js 24 或更高版本/);
+  assert.doesNotMatch(contributing, /Node\.js 22 或更高版本/);
+});

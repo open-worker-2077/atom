@@ -2,7 +2,7 @@
 
 ## 开始之前
 
-需要 Node.js 22 或更高版本、Git 与已登录的 GitHub CLI。开始实质开发前，调用全局安装的官方 superpowers:using-superpowers，读取相关 docs/superpowers/specs 与当前 docs/superpowers/plans。GitHub Issue 可以接收线索或承载外部协作，但不是需求、状态或完成权威；docs/history/development-control 只用于追溯。
+需要 Node.js 24 或更高版本、Git 与已登录的 GitHub CLI。开始实质开发前，调用全局安装的官方 superpowers:using-superpowers，读取相关 docs/superpowers/specs 与当前 docs/superpowers/plans。GitHub Issue 可以接收线索或承载外部协作，但不是需求、状态或完成权威；docs/history/development-control 只用于追溯。
 
 ```powershell
 git switch main
