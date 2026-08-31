@@ -125,9 +125,13 @@ safe rollback snapshot.
 - Treat the year ring as audit/query projection, never as an editable source of
   world truth.
 
-## Acceptance commands
+## Acceptance authority
 
-The change is accepted only after the OpenSpec validation, focused form/runtime/
-transaction/interface suites, isolated top-level `test` Atom workflow, Web
-Chromium rendering check, and repository-wide regression have been run. Exact
-results and any unrelated baseline failures are recorded in the dated handoff.
+Current acceptance is determined by the approved Superpowers specification, the
+current implementation plan, the checked-out Git revision, and fresh verification
+evidence bound to that revision. The required focused form/runtime/transaction/
+interface suites, isolated top-level `test` Atom workflow, Web Chromium rendering
+check, and repository-wide regression are selected from those current artifacts;
+their exact results and any unrelated baseline failures are recorded with the
+verified revision. OpenSpec records are pre-migration historical evidence only and
+do not define current acceptance.

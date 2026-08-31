@@ -2,7 +2,7 @@
 
 ## 开始之前
 
-需要 Node.js 24 或更高版本、Git 与已登录的 GitHub CLI。开始实质开发前，调用全局安装的官方 superpowers:using-superpowers，读取相关 docs/superpowers/specs 与当前 docs/superpowers/plans。GitHub Issue 可以接收线索或承载外部协作，但不是需求、状态或完成权威；docs/history/development-control 只用于追溯。
+需要 Node.js 24 或更高版本与 Git。仅在使用 GitHub 远程协作时，需要已登录的 GitHub CLI。开始实质开发前，调用全局安装的官方 superpowers:using-superpowers，读取相关 docs/superpowers/specs 与当前 docs/superpowers/plans。GitHub Issue 可以接收线索或承载外部协作，但不是需求、状态或完成权威；docs/history/development-control 只用于追溯。
 
 ```powershell
 git switch main
@@ -39,6 +39,8 @@ npm.cmd test
 `data/knowledge.json` 属于本机知识库，不参与版本控制。测试必须使用临时文件，禁止将用户节点、附件、域径或关系提交到 GitHub。暂存时使用显式文件列表，不使用 `git add -A`。
 
 ## Commit 与 Pull Request
+
+使用 GitHub 远程协作时，Pull Request 作为代码评审与协作载体：
 
 - Commit 保持单一目的，标题使用简洁祈使句。
 - PR 描述必须包含：修改内容、修改原因、用户影响、架构边界、自动化测试和实际渲染。

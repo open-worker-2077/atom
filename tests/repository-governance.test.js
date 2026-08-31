@@ -15,13 +15,22 @@ function findAdr(id) {
   return fs.readdirSync(directory).filter((file) => file.startsWith(`${id}-`));
 }
 
-test('repository exposes one GitHub-native handoff path', () => {
+test('repository keeps durable local authority and makes GitHub collaboration optional', () => {
   for (const file of ['CONTRIBUTING.md', 'CHANGELOG.md', 'docs/releases/v0.2.0.md']) {
     assert.equal(fs.existsSync(path.join(root, file)), true, `${file} exists`);
   }
-  assert.match(read('CONTRIBUTING.md'), /GitHub CLI/);
-  assert.match(read('CONTRIBUTING.md'), /npm\.cmd test/);
-  assert.match(read('README.md'), /v0\.3\.0/);
+  const contributing = read('CONTRIBUTING.md');
+  const readme = read('README.md');
+  assert.match(contributing, /需要 Node\.js 24 或更高版本与 Git。/);
+  assert.match(contributing, /仅在使用 GitHub 远程协作时，需要已登录的 GitHub CLI。/);
+  assert.match(contributing, /npm\.cmd test/);
+  assert.match(readme, /批准的 Superpowers 规格定义产品合同/);
+  assert.match(readme, /当前检出的代码与 Git 记录当前实现/);
+  assert.match(readme, /绑定当前 revision 的新鲜验证证据定义完成/);
+  assert.match(readme, /GitHub Releases 只承载已发布产物/);
+  assert.match(readme, /发布产物：\[Atom v0\.3\.0\]/);
+  assert.match(readme, /可选反馈与讨论：\[GitHub Issues\]/);
+  assert.match(readme, /代码评审与协作：\[GitHub Pull Requests\]/);
   assert.match(read('CHANGELOG.md'), /\[0\.2\.0\]/);
 });
 
@@ -52,6 +61,17 @@ test('GitHub templates, CI and runtime-data exclusions are present', () => {
   assert.match(developmentTemplate, /不构成 Atom 的需求、状态或完成权威/);
   assert.doesNotMatch(developmentTemplate, /label: OpenSpec/);
   assert.doesNotMatch(developmentTemplate, /专职 Session/);
+  const bodyItems = developmentTemplate.match(/^  - type: [^\r\n]+(?:\r?\n(?!  - type: )[^\r\n]*)*/gm) ?? [];
+  const superpowersArtifactItem = bodyItems.find((item) =>
+    /^    id: superpowers_artifact\r?$/m.test(item)
+  );
+  assert.ok(superpowersArtifactItem, 'superpowers_artifact body item exists');
+  assert.match(superpowersArtifactItem, /^  - type: input\r?$/m);
+  assert.match(superpowersArtifactItem, /^    id: superpowers_artifact\r?$/m);
+  assert.doesNotMatch(
+    superpowersArtifactItem,
+    /^    validations:\s*$[\s\S]*?^      required:/m
+  );
   assert.match(pullRequestTemplate, /Superpowers 规格\/计划/);
   assert.match(pullRequestTemplate, /可选关联 Issue/);
   assert.doesNotMatch(pullRequestTemplate, /关联 Issue 保持打开/);

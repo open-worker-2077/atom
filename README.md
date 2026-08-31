@@ -59,7 +59,7 @@ $request | atom.cmd --agent "已创建的 Agent 窗口" --stdin
 - 多尺度空间观察、局部聚焦和方向关系呈现；
 - 事务提交、修订冲突、投影恢复与写后回读。
 
-它仍在快速演化。当前代码与契约以 `main`、最新 GitHub Release 及通过的自动测试为准。
+它仍在快速演化。批准的 Superpowers 规格定义产品合同；当前检出的代码与 Git 记录当前实现；只有绑定当前 revision 的新鲜验证证据定义完成。GitHub Releases 只承载已发布产物，不定义当前合同、实现或完成。
 
 ## 文档导航
 
@@ -74,6 +74,6 @@ $request | atom.cmd --agent "已创建的 Agent 窗口" --stdin
 
 ## 项目状态
 
-- 稳定版本：[Atom v0.3.0](https://github.com/open-worker-2077/atom/releases/tag/v0.3.0)
-- 问题与需求：[GitHub Issues](https://github.com/open-worker-2077/atom/issues)
-- 变更与评审：[GitHub Pull Requests](https://github.com/open-worker-2077/atom/pulls)
+- 发布产物：[Atom v0.3.0](https://github.com/open-worker-2077/atom/releases/tag/v0.3.0)
+- 可选反馈与讨论：[GitHub Issues](https://github.com/open-worker-2077/atom/issues)
+- 代码评审与协作：[GitHub Pull Requests](https://github.com/open-worker-2077/atom/pulls)
