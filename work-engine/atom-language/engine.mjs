@@ -1562,7 +1562,7 @@ export async function executeAtomLanguage(options = {}) {
             contextFile,
             authorize: authorizeProgramEffect,
             matcherRegistry: receiver.matcherRegistry,
-            programScheduler: options.programScheduler
+            programScheduler: candidateProgramScheduler
           })
         : await applyTransform({
             atoms,
@@ -2751,7 +2751,7 @@ export async function executeAtomLanguage(options = {}) {
     }
     if (changed) {
       const compiled = await validatePrograms(
-        nextAtoms, contextFile, atoms, options.programScheduler
+        nextAtoms, contextFile, atoms, candidateProgramScheduler
       );
       interactionWarnings.push(...compiled.warnings);
       if (!compiled.ok) {
@@ -2827,7 +2827,7 @@ export async function executeAtomLanguage(options = {}) {
       contextFile,
       authorize: accessController.authorize,
       matcherRegistry: receiver.matcherRegistry,
-      programScheduler: options.programScheduler
+      programScheduler: candidateProgramScheduler
     });
     interactionWarnings.push(...(created.warnings ?? []));
     if (created.error) {
@@ -2992,7 +2992,7 @@ export async function executeAtomLanguage(options = {}) {
   };
   if (programSurfaceChanged) {
     const compiled = await validatePrograms(
-      nextAtoms, contextFile, atoms, options.programScheduler
+      nextAtoms, contextFile, atoms, candidateProgramScheduler
     );
     interactionWarnings.push(...compiled.warnings);
     if (!compiled.ok) {

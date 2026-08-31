@@ -15,6 +15,7 @@ function atom(thing, situation = '', contain = [], type = '') {
 const CREATOR_PATH = 'Root/Task/Creator';
 const CHILD_PATH = `${CREATOR_PATH}/AllowedChild`;
 const TARGET_PATH = `${CREATOR_PATH}/Target`;
+const COMMITTED_TRIGGER_PATH = `${CREATOR_PATH}/Committed Trigger`;
 const CREATOR_SOURCE = 'agent({"labels":["^"],"functions":{"groups":[],"names":["agent","message","transform","trigger"]}})';
 const CHILD_SOURCE = 'agent({"labels":[],"functions":{"groups":[],"names":["message"]}})';
 const ESCALATED_SOURCE = 'agent({"labels":["^^"],"functions":{"groups":[],"names":["message"]}})';
@@ -31,6 +32,19 @@ function triggerProgramSource(triggerPath, targetPath = CHILD_PATH, nextSource =
     `    ${transformProgramSource(targetPath, nextSource)}`,
     `trigger('transform', {'nodes': [${JSON.stringify(triggerPath)}]}, main)`
   ].join('\n');
+}
+
+function declaredTriggerSource(declaration, triggerPath = TARGET_PATH) {
+  return [
+    declaration,
+    triggerProgramSource(triggerPath, `${CREATOR_PATH}/Leak`, 'candidate')
+  ].join('\n');
+}
+
+function situationReplacement(path, detail) {
+  return `{${JSON.stringify('thing')}:${JSON.stringify(path)},${
+    JSON.stringify(`situation.rep.${detail}`)
+  }}`;
 }
 
 async function fixture(t, programs = [], childPrograms = []) {
@@ -59,6 +73,41 @@ async function assertRejectedWithoutCommit(result, files, before) {
   assert.ok(result.errors.some(({ code }) => code === 'AGENT_JURISDICTION_ESCALATION'), JSON.stringify(result));
   assert.equal(result.revisionAfter, result.revisionBefore);
   assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
+}
+
+async function seedCommittedSharedRuntime(initial) {
+  let projection = Object.freeze({ marker: 'committed-projection' });
+  const scheduler = createProgramRuntimeScheduler({
+    projectionRepository: {
+      async load() { return structuredClone(projection); },
+      async save(value) { projection = structuredClone(value); }
+    }
+  });
+  await scheduler.refresh(initial, { isolateFailures: true, passive: true });
+  assert.equal(scheduler.triggerContractsInitialized, true);
+  assert.ok(scheduler.triggerContracts.has(COMMITTED_TRIGGER_PATH));
+  assert.ok(scheduler.triggerIndex.size > 0);
+  return scheduler;
+}
+
+function sharedRuntimeSnapshot(scheduler) {
+  return {
+    agentSecurity: structuredClone(scheduler.agentSecurity),
+    triggerContracts: structuredClone(scheduler.triggerContracts),
+    triggerIndex: structuredClone(scheduler.triggerIndex),
+    triggerContractsInitialized: scheduler.triggerContractsInitialized,
+    latestRecords: scheduler.latestRecords,
+    loadedProjection: structuredClone(scheduler.loadedProjection)
+  };
+}
+
+function assertSharedRuntimeUnchanged(scheduler, before) {
+  assert.deepEqual(scheduler.agentSecurity, before.agentSecurity);
+  assert.deepEqual(scheduler.triggerContracts, before.triggerContracts);
+  assert.deepEqual(scheduler.triggerIndex, before.triggerIndex);
+  assert.equal(scheduler.triggerContractsInitialized, before.triggerContractsInitialized);
+  assert.deepEqual(scheduler.latestRecords, before.latestRecords);
+  assert.deepEqual(scheduler.loadedProjection, before.loadedProjection);
 }
 
 test('an explicit Program run cannot commit an unauthorized declaration effect', async (t) => {
@@ -126,6 +175,49 @@ test('single Transform rejects an unauthorized declaration produced by reconcile
   await assertRejectedWithoutCommit(result, files, before);
 });
 
+for (const scenario of [
+  {
+    name: 'create',
+    source: (unauthorizedSource) => `transform new ${JSON.stringify({
+      'thing@program': `${CREATOR_PATH}/Rejected Candidate`,
+      situation: unauthorizedSource,
+      contain: [],
+      support: []
+    })}`
+  },
+  {
+    name: 'single',
+    source: (unauthorizedSource) => `transform ${
+      situationReplacement(CHILD_PATH, unauthorizedSource)
+    }`
+  }
+]) {
+  test(`${scenario.name} rejection cannot publish candidate source contracts to shared runtime`, async (t) => {
+    const files = await fixture(t, [
+      atom(
+        'Committed Trigger',
+        triggerProgramSource(TARGET_PATH, `${CREATOR_PATH}/Leak`, 'committed'),
+        [],
+        'program'
+      )
+    ]);
+    const scheduler = await seedCommittedSharedRuntime(files.initial);
+    const sharedBefore = sharedRuntimeSnapshot(scheduler);
+    const worldBefore = await fs.readFile(files.contextFile, 'utf8');
+    const unauthorizedSource = declaredTriggerSource(ESCALATED_SOURCE);
+
+    const result = await executeAtomLanguage({
+      ...files,
+      source: scenario.source(unauthorizedSource),
+      programScheduler: scheduler,
+      interaction: interaction(`reject-${scenario.name}-candidate-contract`)
+    });
+
+    await assertRejectedWithoutCommit(result, files, worldBefore);
+    assertSharedRuntimeUnchanged(scheduler, sharedBefore);
+  });
+}
+
 test('rejected batch isolates candidate authority and blocks it before the next reconcile pass', async (t) => {
   const maliciousSource = 'agent({"labels":["^^"],"functions":{"groups":[],"names":["message","transform","trigger"]}})';
   const unauthorizedWorkerSource = [
@@ -161,46 +253,64 @@ test('rejected batch isolates candidate authority and blocks it before the next 
   assert.deepEqual([...scheduler.agentSecurity], committedSecurity);
 });
 
-test('candidate reconcile and an injected commit failure cannot pollute shared runtime indexes', async (t) => {
-  const files = await fixture(t, [
-    atom('Ordinary Trigger', triggerProgramSource(TARGET_PATH, `${CREATOR_PATH}/Leak`, 'candidate'), [], 'program')
-  ]);
-  const scheduler = createProgramRuntimeScheduler();
-  await scheduler.refresh(files.initial, { isolateFailures: true, passive: true });
-  const initialRecords = scheduler.latestRecords;
-  const initialAgentSecurity = structuredClone([...scheduler.agentSecurity]);
-
-  let commitAttempts = 0;
-  let commitError = null;
-  const world = createLegacyWorldService({
-    transactionProvider: () => ({
-      async recover() {},
-      async compatibilityManifest() { return null; },
-      async transformLogEntries() { return []; },
-      async commit() {
-        commitAttempts += 1;
-        throw Object.assign(new Error('synthetic commit failure'), { code: 'SYNTHETIC_COMMIT_FAILED' });
-      }
-    })
-  });
-  let executionResult = null;
-  try {
-    executionResult = await world.executeLegacy({
-      ...files,
-      source: `transform {"thing":${JSON.stringify(TARGET_PATH)},"situation.rep.after"}`,
-      programScheduler: scheduler,
-      interaction: interaction('reject-commit-after-reconcile')
-    });
-  } catch (error) {
-    commitError = error;
+for (const scenario of [
+  {
+    name: 'single',
+    source: (replacement) => `transform ${replacement}`
+  },
+  {
+    name: 'batch',
+    source: (replacement) => `transform [${replacement},${
+      situationReplacement(`${CREATOR_PATH}/Leak`, 'batch-uncommitted')
+    }]`
   }
+]) {
+  test(`uncommitted ${scenario.name} source validation and commit failure cannot pollute shared runtime`, async (t) => {
+    const files = await fixture(t, [
+      atom(
+        'Committed Trigger',
+        triggerProgramSource(TARGET_PATH, `${CREATOR_PATH}/Leak`, 'committed'),
+        [],
+        'program'
+      )
+    ]);
+    const scheduler = await seedCommittedSharedRuntime(files.initial);
+    const sharedBefore = sharedRuntimeSnapshot(scheduler);
 
-  assert.equal(commitAttempts, 1, JSON.stringify(executionResult));
-  assert.equal(commitError?.code, 'SYNTHETIC_COMMIT_FAILED');
+    let commitAttempts = 0;
+    let commitError = null;
+    const world = createLegacyWorldService({
+      transactionProvider: () => ({
+        async recover() {},
+        async compatibilityManifest() { return null; },
+        async transformLogEntries() { return []; },
+        async commit() {
+          commitAttempts += 1;
+          throw Object.assign(new Error('synthetic commit failure'), { code: 'SYNTHETIC_COMMIT_FAILED' });
+        }
+      })
+    });
+    let executionResult = null;
+    try {
+      const replacement = situationReplacement(
+        COMMITTED_TRIGGER_PATH,
+        triggerProgramSource(CHILD_PATH, `${CREATOR_PATH}/Leak`, 'uncommitted')
+      );
+      executionResult = await world.executeLegacy({
+        ...files,
+        source: scenario.source(replacement),
+        programScheduler: scheduler,
+        interaction: interaction(`reject-${scenario.name}-commit-after-source-validation`)
+      });
+    } catch (error) {
+      commitError = error;
+    }
 
-  assert.deepEqual([...scheduler.agentSecurity], initialAgentSecurity);
-  assert.equal(scheduler.latestRecords, initialRecords);
-});
+    assert.equal(commitAttempts, 1, JSON.stringify(executionResult));
+    assert.equal(commitError?.code, 'SYNTHETIC_COMMIT_FAILED');
+    assertSharedRuntimeUnchanged(scheduler, sharedBefore);
+  });
+}
 
 test('durable commit survives shared Agent-security rebuild failure and recovers on next use', async (t) => {
   const files = await fixture(t);
