@@ -424,6 +424,11 @@ export async function startAtomGraphServer(options = {}) {
     requestDrivenLockRepository,
     diagnosticRecorder: diagnostics
   });
+  const resolveServerAgentContext = (contextFile, selector, resolverOptions = {}) => resolveAgentContext(
+    contextFile,
+    selector,
+    { ...resolverOptions, programScheduler }
+  );
   const worldService = options.worldService ?? createLegacyWorldService({
     publishLegacyProjection: false,
     onAuthoritativeWrite: () => backupTrigger?.schedule()
@@ -447,6 +452,7 @@ export async function startAtomGraphServer(options = {}) {
     programProjectionFile: configuration.programProjectionFile,
     requestDrivenLockFile: configuration.requestDrivenLockFile,
     programScheduler,
+    agentResolver: resolveServerAgentContext,
     diagnostics,
     worldService,
     spatialPublisher,
@@ -458,8 +464,7 @@ export async function startAtomGraphServer(options = {}) {
   });
   const handlers = createAtomGraphHandlers(interactionRuntime, {
     diagnostics,
-    resolveAgent: async (selector) => resolveAgentContext(configuration.contextFile, selector, {
-      programScheduler,
+    resolveAgent: async (selector) => resolveServerAgentContext(configuration.contextFile, selector, {
       compatibilityManifest: typeof worldService.compatibilityManifest === 'function'
         ? await worldService.compatibilityManifest({
           contextFile: configuration.contextFile,

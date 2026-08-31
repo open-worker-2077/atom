@@ -407,7 +407,7 @@ test('4784 resolves an Agent selector inside the resident world instead of every
   assert.equal(calls[0].agentPath, 'Root/冰');
 });
 
-test('graph server shares its supplied scheduler between directory priming and Agent resolution', async (t) => {
+test('graph server uses its supplied scheduler for handler and interaction Agent resolution', async (t) => {
   const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
@@ -415,9 +415,9 @@ test('graph server shares its supplied scheduler between directory priming and A
   await fs.writeFile(contextFile, `${JSON.stringify(atomFixture(), null, 2)}\n`, 'utf8');
   const programScheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
   const rebuild = programScheduler.rebuildAgentSecurity.bind(programScheduler);
-  let rebuilds = 0;
+  const resolutionWorldRevisions = [];
   programScheduler.rebuildAgentSecurity = async (atoms) => {
-    rebuilds += 1;
+    resolutionWorldRevisions.push(revisionOfWorldFacts(atoms));
     return rebuild(atoms);
   };
   const running = await startAtomGraphServer({
@@ -425,19 +425,23 @@ test('graph server shares its supplied scheduler between directory priming and A
   });
   t.after(() => running.close());
   removeTemporaryDirectoryAfter(t, directory);
-  const primedRebuilds = rebuilds;
+  resolutionWorldRevisions.length = 0;
 
   const response = await fetch(`${running.url}/__atom/api/command`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      source: 'explore {"thing":"石器工坊"}',
+      source: 'submit {"type":"bug","detail":"verify supplied scheduler resolution"}',
       interaction: { id: 'shared-scheduler-resolution', agentSelector: '石器工坊', agent: { path: '石器工坊' } },
       history: []
     })
   });
   assert.equal(response.status, 200, await response.text());
-  assert.ok(rebuilds > primedRebuilds, 'resolver must reuse the supplied scheduler after startup priming');
+  assert.deepEqual(
+    resolutionWorldRevisions,
+    [revisionOfWorldFacts(atomFixture()), revisionOfWorldFacts(atomFixture())],
+    'one request resolves its declared Agent at the handler and interaction-runtime boundaries through the supplied scheduler'
+  );
 });
 
 test('deployed Agent resolution reuses the world compatibility manifest for exact explore', async (t) => {
