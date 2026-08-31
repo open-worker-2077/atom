@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Issue 是该事项的工作事实入口。代码完成不等于交付完成；只有真实验收成立后才能关闭。
+        GitHub Issue 是可选线索入口，用于外部反馈或协作讨论；它不构成 Atom 的需求、状态或完成权威。需要实施时，以仓库内批准的 Superpowers 规格、当前计划、代码与新证据为准。
   - type: textarea
     id: goal
     attributes:
@@ -42,28 +42,15 @@ body:
     validations:
       required: true
   - type: input
-    id: session
+    id: superpowers_artifact
     attributes:
-      label: 专职 Session
-      description: 填写持续负责该职责的 Codex Session 标题或链接；不得使用一次性 Agent。
-    validations:
-      required: true
+      label: Superpowers 规格或计划
+      description: 已进入实施时填写仓库相对路径；仅提交线索时可以留空。
   - type: textarea
     id: dependencies
     attributes:
       label: 依赖与阻断关系
       description: 列出 blocked by / blocking 的 Issue；没有则写“无”。
-    validations:
-      required: true
-  - type: dropdown
-    id: openspec
-    attributes:
-      label: OpenSpec
-      description: 只有长期稳定、跨层或难回退的契约变更才需要 OpenSpec。
-      options:
-        - 不需要
-        - 已有关联变更
-        - 需要新建
     validations:
       required: true
   - type: checkboxes

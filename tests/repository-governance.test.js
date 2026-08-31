@@ -39,13 +39,22 @@ test('architecture and accepted decisions are durable repository facts', () => {
 
 test('GitHub templates, CI and runtime-data exclusions are present', () => {
   const workflow = read('.github/workflows/test.yml');
+  const developmentTemplate = read('.github/ISSUE_TEMPLATE/development.yml');
+  const pullRequestTemplate = read('.github/pull_request_template.md');
   assert.match(workflow, /pull_request:/);
   assert.match(workflow, /node-version:\s*24/);
   assert.match(workflow, /npm run check:development-control/);
   assert.doesNotMatch(workflow, /check:online-control/);
   assert.match(workflow, /npm test/);
   assert.equal(JSON.parse(read('package.json')).engines.node, '>=24');
-  assert.match(read('.github/pull_request_template.md'), /实际渲染/);
+  assert.match(pullRequestTemplate, /实际渲染/);
+  assert.match(developmentTemplate, /可选线索入口/);
+  assert.match(developmentTemplate, /不构成 Atom 的需求、状态或完成权威/);
+  assert.doesNotMatch(developmentTemplate, /label: OpenSpec/);
+  assert.doesNotMatch(developmentTemplate, /专职 Session/);
+  assert.match(pullRequestTemplate, /Superpowers 规格\/计划/);
+  assert.match(pullRequestTemplate, /可选关联 Issue/);
+  assert.doesNotMatch(pullRequestTemplate, /关联 Issue 保持打开/);
   assert.match(read('.github/ISSUE_TEMPLATE/bug.yml'), /复现步骤/);
   assert.match(read('.github/ISSUE_TEMPLATE/spatial-research.yml'), /视觉交互范式/);
   assert.match(read('.gitignore'), /data\/knowledge\.json/);
