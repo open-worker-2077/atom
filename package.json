@@ -20,6 +20,7 @@
     "atom:parse-debug": "node work-engine/atom-language/dev-server.mjs --host 127.0.0.1 --port 4794"
     ,"night-watch": "node scripts/night-watch-cli.mjs --dry-run"
     ,"night-watch:shared": "node scripts/night-watch-shared-cli-live.mjs"
+    ,"migrate:agent-program": "node scripts/deploy-agent-program-world.mjs --dry-run"
   },
   "engines": {
     "node": ">=24"
