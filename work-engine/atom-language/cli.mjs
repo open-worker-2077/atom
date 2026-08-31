@@ -16,6 +16,7 @@ import { resolveAtomRuntime } from './runtime-config.mjs';
 import { TRANSFORM_COMMANDS } from './transform-key-parser.mjs';
 import { ATOM_RUNTIME_CONTRACT } from './runtime-contract.mjs';
 import { programFunctionRegistry } from './program-function-registry.mjs';
+import { createProgramRuntimeScheduler } from './program-runtime.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 
 const agentDirectories = new WeakMap();
@@ -184,7 +185,7 @@ function help() {
     '  PowerShell：$request | atom.cmd --agent AGENT --stdin',
     '',
     'Options:',
-    '  --agent AGENT      必填；exact 且唯一的 @agent 短名或业务路径',
+    '  --agent AGENT      必填；exact 且唯一的已声明 Agent Program 名称或路径',
     '  --endpoint URL     显式指定隔离 Atom command endpoint；省略时使用本机 4784',
     '  --stdin            从标准输入读取一条完整 Atom 命令；用于变量、多行、长文本和特殊字符',
     '  --json             已弃用的兼容选项；Atom 命令结果仍为 Graph-JSON',
@@ -194,9 +195,9 @@ function help() {
     '',
     'Agent 入口：',
     '  --agent 只指定本次交互的上下文来源，不指定节点的归属或写入位置，也不代表身份、权限或锁。',
-    '  查询或写入的事实目标不得代替 --agent 上下文来源；目标 Atom 本身不需要是 @agent。',
-    '  会话已给出或已绑定唯一 @agent 时直接复用，不得重复询问；只有上下文来源确实未知或不唯一时才请求明确。',
-    '  每条非交互命令都原样携带已绑定的 @agent；CLI 不会把目标 thing 自动当作 --agent。',
+    '  查询或写入的事实目标不得代替 --agent 上下文来源；目标 Atom 本身不需要是 Agent Program。',
+    '  会话已给出或已绑定唯一已声明 Agent Program 时直接复用，不得重复询问；只有上下文来源确实未知或不唯一时才请求明确。',
+    '  每条非交互命令都原样携带已绑定的 Agent Program；CLI 不会把目标 thing 自动当作 --agent。',
     '  短名必须唯一；重名时增加必要路径片段。仍无法确定上下文时联系任务派发方或维护入口。',
     '  进入交互会话：atom.cmd --agent AGENT；Ctrl+C 退出。',
     '  PowerShell 固定短 JSON 可使用 --%；--% 会停止变量展开，变量、多行或长文本必须通过 --stdin 传入。',
@@ -214,7 +215,7 @@ function help() {
     '  每条 rule 必须且只能含一个 @current:true；if 永远是前项，then 永远是后项。禁止无 current、线载源码和 Program 自持 current 端点；禁止原生 N→M，事实前项与独立判定 Program 保持分层。',
     '  if 内的独立判定 Program 写 {"thing@program":"selector"}：仅以 strict bool 决定本条支撑，且不得产生写入等副作用；then 只接受普通事实 Thing。后项自己的 Program 只按自身 trigger/use_program/显式运行计算自己。',
     '  N→1、1→N 各自保留 support clause 身份；Web 在归一化 0.5 形成共享汇流／分流线干。多入多出必须建立显式枢纽 H，拆为 N→H 与 H→M 两条规则；H 保持可见可审计。Program 源码只放 exact thing@program 节点的 situation。',
-    '  @type 写在 thing 键上（如 thing@agent、thing@program）；#简介必须在键末尾；~hint 仅为返回提示。',
+    '  @type 写在 thing 键上（如 thing@program）；#简介必须在键末尾；~hint 仅为返回提示。Agent 是 Situation 中一个顶层字面量 agent({...}) 声明，不是 Key 类型。',
     '  Explore 接受对象或对象数组；Transform 对象数组把已有 Atom 改造作为一个原子批次执行，并逐项返回结果。所有结果只使用 Graph-JSON。',
     '',
     'Explore 契约（只读，不修复或写入投影）：',
@@ -262,7 +263,7 @@ function help() {
     '  精确坐标：when_program = explore({"thing":"EXACT判定@program"})[0]；把 explore() 返回对象直接交给 jump 或锁规则，不使用 .ref。jump 的 when／where／recycle 及 where 返回值只接受 ThingCoordinate；短名字符串与完整 EXACT_PATH 字符串均拒绝，数组位置也不得猜测。精确字符串兼容仅保留于 use_program.name 与 CLI thing.run. 选择器，不扩散到 jump；旧 AtomView 仅由内部适配层兼容。',
     '  变化探针：def main(arguments):\n    point = explore({"thing":"EXACT监测Thing"})[0]\n    if not changed([point]):\n        return\n    # 命中后才 explore／聚合／计算。changed 只返回 bool 并登记既有 Transform 反向索引，控制流必须由调用方显式短路。',
     '  固定窗口锁：agent() 登记时由内核强制启用且不可关闭或自定义；可读 current／后代／同父普通节点／唯一直接父上下文，可写 current 后代。直接父不能成为新锚点进入其同层；exact path 不绕过。',
-    '  冷启动：内核从 @program@agent 正文中的 literal agent() 重建 labels 与符号职能 scope，并从 Program 中的 literal-path lock() 按当前 Graph 重编译锁；旧侧车 locks 返回 RETIRED_REQUEST_DRIVEN_LOCK_SNAPSHOT，agentRegistrations 返回 RETIRED_AGENT_REGISTRATION_SNAPSHOT，windowSelfLocks/windowSelfLockAgents 返回 RETIRED_WINDOW_SELF_LOCK_SNAPSHOT，均只能一次性审计清退且不作为鉴权输入。',
+    '  冷启动：内核从包含一个顶层字面量 agent({...}) 声明的 thing@program Situation 重建 labels 与符号职能 scope，并从 Program 中的 literal-path lock() 按当前 Graph 重编译锁；旧侧车 locks 返回 RETIRED_REQUEST_DRIVEN_LOCK_SNAPSHOT，agentRegistrations 返回 RETIRED_AGENT_REGISTRATION_SNAPSHOT，windowSelfLocks/windowSelfLockAgents 返回 RETIRED_WINDOW_SELF_LOCK_SNAPSHOT，均只能一次性审计清退且不作为鉴权输入。',
     '  Transform 触发器：先定义无参数 main，再声明 trigger("transform", {"nodes":["exact 节点路径"]}, main)。main 是函数引用，不能写 main()；运行时按反向索引只运行命中的 Program；相同值写入仍属于 Transform 事件。未声明 trigger 的 Program 冷启动时遇到无关 Transform 不会重放；显式 .run.、其自身被 Transform 或已知 explore 依赖变化时仍运行。',
     '  推支触发器：普通前项／后项不保存布尔值；独立判定 Program strict true 后只形成 typed delivery，不直接执行后项。后项自己的 Program 可声明 trigger("support", {"nodes":["exact 或槽例相对后项路径"]}, main)，其中 main(delivery) 接收 decision、clauseId、antecedentPaths、consequentPath 与 revision；未显式订阅、false、仅 contain／support 关联均不执行。',
     '  Program 停用：把 Program 本身或其普通 contain 上级通过 .dsc. 可逆移入唯一 thing@backup@default 子树；其中 @program 保留类型与 situation 源码，但不进入活跃运行、trigger、changed 或 explore 依赖索引，也不能由 thing.run/use_program 执行。.rst. 恢复原位后按当前事实重新激活并重建索引。停用只认显式 backup@default 类型，不根据容器显示名猜测。',
@@ -286,15 +287,15 @@ function help() {
     '  推进流两步配方：当前 Agent 必须实际持有下列 agent／instantiate 等固定函数名；第1步只创建 Program，第2步显式运行后，agent() 把当前 Program 登记为 Agent，instantiate() 在同一事务附加完整推进流。',
     '    第1步：transform new {"thing@program":"当前Agent/任务区/任务名","situation":"agent({\\"labels\\":[],\\"functions\\":{\\"groups\\":[],\\"names\\":[\\"agent\\",\\"current_atom\\",\\"explore\\",\\"first_pending\\",\\"form_status\\",\\"instantiate\\",\\"lock\\",\\"message\\",\\"subtree_refs\\",\\"transform\\"]}})\\ninstantiate({\\"template\\":\\"advancement-flow\\",\\"version\\":\\"latest\\",\\"mode\\":\\"ensure\\",\\"parameters\\":{\\"title\\":\\"任务标题\\"}})","contain":[],"support":[]}',
     '    第2步：transform {"thing.run.":"当前Agent/任务区/任务名"}',
-    '  “任务区”必须是当前窗口下已获准写入的普通事实父节点；不要通过给窗口自身追加 contain 绕过固定锁。两步均须使用当前已认证 --agent 并走统一 Graph 权限域；第2步成功回执后再 exact explore 回读新 Agent 与推进流。需要随职能树集中变更时使用 groups，需要冻结权限时使用最小 names；不得用公开 Transform 创建 thing@agent。',
+    '  “任务区”必须是当前窗口下已获准写入的普通事实父节点；不要通过给窗口自身追加 contain 绕过固定锁。两步均须使用当前已认证 --agent 选择已声明 Agent Program 并走统一 Graph 权限域；第2步成功回执后再 exact explore 回读新 Agent 与推进流。需要随职能树集中变更时使用 groups，需要冻结权限时使用最小 names；不得用公开 Transform 创建 Agent Key 类型。',
     '',
     '反馈：',
     '  submit {"type":"bug|pain|requirement|optimization","detail":"1 至 10000 字说明"}',
-    '  反馈记录当前 @agent 和本会话最近历史；反馈不绕过锁，也不证明问题已修复。',
+    '  反馈记录当前 Agent Program 和本会话最近历史；反馈不绕过锁，也不证明问题已修复。',
     '',
     '错误处理与下一步动作：',
     '  先按对应错误的纠正提示处理；纠正提示仍无法解除阻断、CLI 已无法正常使用时，才 submit bug 或 requirement。',
-    '  AGENT_NOT_FOUND / AGENT_TYPE_REQUIRED / AMBIGUOUS_AGENT：只修正 --agent 上下文来源；不得把查询目标改成 @agent 或拿它代替入口；未知入口联系派发方。',
+    '  AGENT_NOT_FOUND / AGENT_TYPE_REQUIRED / AMBIGUOUS_AGENT：只修正 --agent 上下文来源；不得把查询目标改成 Agent Program 或拿它代替入口；未知入口联系派发方。',
     '  INVALID_GRAPH_JSON：固定短 JSON 检查语法后重试；变量、多行或长文本改用 --stdin，不猜测、不改 backing JSON。',
     '  UNKNOWN_* / INVALID_*：按错误中的纠正提示修正输入后重试。',
     '  AMBIGUOUS_ATOM_NAME：重新 explore 预定父节点及必要同级；使用能唯一表征目标的最短 exact 路径。',
@@ -389,7 +390,7 @@ function parseCliArgs(argv) {
     if (!positionalOnly && (argument === '--session' || argument === '--window')) {
       throw cliError(
         'LEGACY_AGENT_ENTRY_OPTION',
-        `${argument} 已停用；请使用 --agent 选择 @agent 上下文起点`
+        `${argument} 已停用；请使用 --agent 选择已声明 Agent Program 上下文起点`
       );
     }
     if (!positionalOnly && (argument === '--context' || argument === '--file')) {
@@ -680,7 +681,7 @@ function storedField(atom, baseKey) {
   return null;
 }
 
-function atomEntries(atoms, parentPath = [], parentAddress = '') {
+function atomEntries(atoms, agentProgramPaths, parentPath = [], parentAddress = '') {
   const entries = [];
   for (const [index, atom] of (atoms ?? []).entries()) {
     const nameField = storedField(atom, 'thing');
@@ -694,18 +695,21 @@ function atomEntries(atoms, parentPath = [], parentAddress = '') {
       address,
       parentAddress,
       detail: storedField(atom, 'situation')?.value ?? '',
-      agent: nameField.parsed.types.some((type) => type.raw === 'agent')
+      agent: agentProgramPaths.has(path.join('/'))
     });
     const children = storedField(atom, 'contain')?.value;
-    if (Array.isArray(children)) entries.push(...atomEntries(children, path, address));
+    if (Array.isArray(children)) entries.push(...atomEntries(children, agentProgramPaths, path, address));
   }
   return entries;
 }
 
 async function formatAgentEntryContext(contextFile, agentPath) {
   if (!contextFile || !agentPath) return '';
-  const entries = atomEntries(await readAtomContext(contextFile, { create: false }));
-  const current = entries.find((entry) => entry.path === agentPath && entry.agent);
+  const entries = atomEntries(
+    await readAtomContext(contextFile, { create: false }),
+    new Set([agentPath])
+  );
+  const current = entries.find((entry) => entry.path === agentPath);
   if (!current) return '';
   const parent = current.parentAddress
     ? entries.find((entry) => entry.address === current.parentAddress)
@@ -815,13 +819,15 @@ export async function resolveAgentContext(contextFile, selector, options = {}) {
       ? { compatibilityManifest: options.compatibilityManifest }
       : {})
   });
-  const directory = agentDirectoryFor(atoms, options);
+  const scheduler = options.programScheduler ?? createProgramRuntimeScheduler({});
+  const security = await scheduler.rebuildAgentSecurity(atoms);
+  const directory = agentDirectoryFor(atoms, new Set(security.keys()), options);
   const exact = requested.includes('/')
     ? (directory.byPath.get(requested) ?? [])
     : (directory.byName.get(requested) ?? []);
   const agents = exact.filter((entry) => entry.agent);
   if (agents.length > 1) {
-    throw cliError('AMBIGUOUS_AGENT', '只能选择 exact 且唯一的 @agent Atom');
+    throw cliError('AMBIGUOUS_AGENT', '只能选择 exact 且唯一的已声明 Agent Program');
   }
   if (agents.length === 1) {
     return {
@@ -833,17 +839,17 @@ export async function resolveAgentContext(contextFile, selector, options = {}) {
     };
   }
   if (exact.length) {
-    throw cliError('AGENT_TYPE_REQUIRED', '--agent 上下文来源必须是 @agent Atom；查询或写入目标不得代替入口，目标本身无需是 @agent');
+    throw cliError('AGENT_TYPE_REQUIRED', '--agent 上下文来源必须是包含一个顶层字面量 agent({...}) 声明的 thing@program；查询或写入目标不得代替入口，目标本身无需是 Agent Program');
   }
-  throw cliError('AGENT_NOT_FOUND', '未找到 exact 匹配的 @agent Atom');
+  throw cliError('AGENT_NOT_FOUND', '未找到 exact 匹配的已声明 Agent Program');
 }
 
-function agentDirectoryFor(atoms, options = {}) {
+function agentDirectoryFor(atoms, agentProgramPaths, options = {}) {
   let directory = agentDirectories.get(atoms);
   if (directory) return directory;
   const byName = new Map();
   const byPath = new Map();
-  for (const entry of atomEntries(atoms)) {
+  for (const entry of atomEntries(atoms, agentProgramPaths)) {
     const named = byName.get(entry.name) ?? [];
     named.push(entry);
     byName.set(entry.name, named);
@@ -863,7 +869,9 @@ export async function primeAgentDirectory(contextFile, options = {}) {
     create: false,
     ...(options.compatibilityManifest ? { compatibilityManifest: options.compatibilityManifest } : {})
   });
-  agentDirectoryFor(atoms, options);
+  const scheduler = options.programScheduler ?? createProgramRuntimeScheduler({});
+  const security = await scheduler.rebuildAgentSecurity(atoms);
+  agentDirectoryFor(atoms, new Set(security.keys()), options);
 }
 
 export async function runAtomSession(options = {}) {
@@ -1082,7 +1090,9 @@ export async function runAtomCli(argv = [], overrides = {}) {
           }
         : {
             ...(interaction ?? {}),
-            agent: await resolveAgentContext(contextFile, parsed.agent)
+            agent: await resolveAgentContext(contextFile, parsed.agent, {
+              ...(overrides.programScheduler ? { programScheduler: overrides.programScheduler } : {})
+            })
           };
     }
     const interactive = overrides.interactive

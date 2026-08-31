@@ -50,6 +50,19 @@ function runIsolatedCliJourney(evidenceDir) {
   });
 }
 
+function declaredAgentProgramWorld(world) {
+  const rewrite = (atoms) => atoms.map((atom) => {
+    const next = structuredClone(atom);
+    if (typeof next['thing@program@agent'] === 'string') {
+      next['thing@program'] = next['thing@program@agent'];
+      delete next['thing@program@agent'];
+    }
+    if (Array.isArray(next.contain)) next.contain = rewrite(next.contain);
+    return next;
+  });
+  return rewrite(world);
+}
+
 async function runCli(args, execute = executeAtomLanguage) {
   let stdout = '';
   let stderr = '';
@@ -165,7 +178,7 @@ test('public CLI targets an explicitly isolated command endpoint', async (t) => 
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    { 'thing@agent': '🧊', situation: 'isolated synthetic Agent', contain: [], support: [] },
+    { 'thing@program': '🧊', situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})', contain: [], support: [] },
     { thing: 'test', situation: 'isolated synthetic domain', contain: [], support: [] }
   ], null, 2));
   const running = await startAtomGraphServer({
@@ -197,7 +210,7 @@ test('the Windows atom.cmd wrapper preserves --agent for an isolated endpoint', 
 }, async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-external-cli-agent-'));
   const fixture = createNightWatchCliFixture(directory);
-  await fs.writeFile(fixture.contextFile, JSON.stringify(fixture.world, null, 2));
+  await fs.writeFile(fixture.contextFile, JSON.stringify(declaredAgentProgramWorld(fixture.world), null, 2));
   const running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0,
     contextFile: fixture.contextFile, graphFile: fixture.graphFile, storeFile: fixture.storeFile
@@ -217,7 +230,7 @@ test('an explicitly registered ^ synthetic Agent proves path-lock fail-closed an
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-night-watch-cli-labels-'));
   const fixture = createNightWatchCliFixture(directory);
   assert.match(fixture.syntheticAgentSource, /"json_parse"/u);
-  await fs.writeFile(fixture.contextFile, JSON.stringify(fixture.world, null, 2));
+  await fs.writeFile(fixture.contextFile, JSON.stringify(declaredAgentProgramWorld(fixture.world), null, 2));
   const running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0,
     contextFile: fixture.contextFile, graphFile: fixture.graphFile, storeFile: fixture.storeFile
@@ -255,7 +268,7 @@ test('an explicitly registered ^ synthetic Agent proves path-lock fail-closed an
     'explore', JSON.stringify({ thing: fixture.syntheticPath, 'situation$full': true })
   ]);
   assert.equal(readBack.code, 0, readBack.stderr);
-  assert.match(readBack.stdout, /"thing@program@agent"\s*:\s*"🧊"/u);
+  assert.match(readBack.stdout, /"thing@program"\s*:\s*"🧊"/u);
   assert.match(JSON.parse(readBack.stdout).situation, /"labels"\s*:\s*\["\^"\]/u);
 
   const targetCreated = await command(fixture.syntheticPath, [
@@ -294,12 +307,8 @@ test('an explicitly registered ^ synthetic Agent proves path-lock fail-closed an
       contain: [], support: []
     })
   ]);
-  assert.equal(overreachCreated.code, 0, overreachCreated.stderr);
-  const overreach = await command(fixture.syntheticPath, [
-    'transform', JSON.stringify({ 'thing.run.': fixture.overreachPath })
-  ]);
-  assert.notEqual(overreach.code, 0, overreach.stdout);
-  assert.match(`${overreach.stdout}\n${overreach.stderr}`, /AGENT_JURISDICTION_ESCALATION/u);
+  assert.notEqual(overreachCreated.code, 0, overreachCreated.stdout);
+  assert.match(`${overreachCreated.stdout}\n${overreachCreated.stderr}`, /AGENT_JURISDICTION_ESCALATION/u);
 });
 
 test('the full isolated public-CLI journey keeps shortcut execution in the moved Agent domain', {

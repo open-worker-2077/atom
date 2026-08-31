@@ -8,6 +8,7 @@ import test from 'node:test';
 import { runAtomCli, runAtomSession } from '../work-engine/atom-language/cli.mjs';
 import { issueAgentSession, loadAgentSession } from '../work-engine/atom-language/world-laws/sessions.mjs';
 import { issueWorldAgentSession } from '../work-engine/atom-language/admin.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
 const SIGNING_KEY = 'test-only-signing-key-with-at-least-32-bytes';
 
@@ -74,12 +75,12 @@ test('CLI prints a public interaction id with a failed result', async () => {
   assert.match(stderr.text(), /WINDOW_ACCESS_DENIED/u);
 });
 
-test('daily CLI requires one @agent origin and rejects retired session/window flags', async (t) => {
+test('daily CLI requires one declared Agent Program origin and rejects retired session/window flags', async (t) => {
   const directory = await temp(t);
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    { 'thing@agent': 'Work Agent', detail: '', children: [], partners: [] }
+    { 'thing@program': 'Work Agent', situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})', contain: [], support: [] }
   ]));
   const stdout = output();
   const stderr = output();
@@ -99,7 +100,7 @@ test('daily CLI requires one @agent origin and rejects retired session/window fl
   assert.match(stderr.text(), /LEGACY_AGENT_ENTRY_OPTION/u);
 });
 
-test('interactive prompt keeps the selected @agent origin without a window-switch command', async () => {
+test('interactive prompt keeps the selected Agent Program origin without a window-switch command', async () => {
   const stdin = new PassThrough();
   stdin.isTTY = false;
   const stdout = output();
@@ -125,21 +126,22 @@ test('interactive prompt keeps the selected @agent origin without a window-switc
   assert.equal(stderr.text(), '');
 });
 
-test('maintenance session issuance accepts only exact unique @agent windows', async (t) => {
+test('maintenance session issuance accepts only exact unique declared Agent Program windows', async (t) => {
   const directory = await temp(t);
   const contextFile = path.join(directory, 'atom.json');
   const sessionsDirectory = path.join(directory, 'sessions');
   await fs.writeFile(contextFile, `${JSON.stringify([
-    { 'thing@agent': 'Work Agent', situation: '', contain: [], support: [] },
-    { thing: 'Not Agent', situation: '', contain: [], support: [] }
+    { 'thing@program': 'Work Agent', situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})', contain: [], support: [] },
+    { 'thing@program': 'Ordinary Program', situation: 'value = 1', contain: [], support: [] }
   ])}\n`);
 
+  const programScheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
   const issued = await issueWorldAgentSession({
-    contextFile, sessionsDirectory, windows: ['Work Agent'], signingKey: SIGNING_KEY
+    contextFile, sessionsDirectory, windows: ['Work Agent'], signingKey: SIGNING_KEY, programScheduler
   });
   assert.ok(issued.token);
   await assert.rejects(
-    issueWorldAgentSession({ contextFile, sessionsDirectory, windows: ['Not Agent'], signingKey: SIGNING_KEY }),
+    issueWorldAgentSession({ contextFile, sessionsDirectory, windows: ['Ordinary Program'], signingKey: SIGNING_KEY, programScheduler }),
     { code: 'WINDOW_AGENT_NOT_FOUND' }
   );
 });

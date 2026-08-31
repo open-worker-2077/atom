@@ -1111,7 +1111,7 @@ export async function applyTransform({
   if (nameCommands.some((command) => command.name === 'typ' && command.parameter === 'agent')) {
     return { error: diagnostic(
       'AGENT_REGISTRATION_REQUIRED',
-      '公开 Transform 不能把 Thing 登记为 @agent；请由当前 Program 调用 agent()'
+      '公开 Transform 不能把 Thing 登记为 Agent Key 类型；请在 thing@program Situation 中声明一个顶层字面量 agent({...})'
     ) };
   }
   const relevantSubtree = rewritesPaths

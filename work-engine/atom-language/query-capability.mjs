@@ -570,11 +570,11 @@ export async function executeExploreItem(
       const contextExplanation = source?.allowedWindows
         || source?.allowedWindowTypes
         || source?.allowedWindowRelation
-        ? '当前 @agent 上下文未满足放行条件。'
-        : '此限制不依赖 @agent 上下文。';
+        ? '当前已声明 Agent Program 上下文未满足放行条件。'
+        : '此限制不依赖 Agent Program 上下文。';
       const explanation = source?.sourceProgramPath
         ? `目标存在，但读取受到 Program“${source.sourceProgramPath}”限制。${reason ? `原因：${reason}。` : ''}${contextExplanation}`
-        : '目标存在，但读取受到世界规则限制；此限制不依赖 @agent 上下文。';
+        : '目标存在，但读取受到世界规则限制；此限制不依赖 Agent Program 上下文。';
       return {
         ok: true,
         index: item.index,

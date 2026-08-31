@@ -40,7 +40,7 @@ export async function recordAtomFeedback(options = {}) {
   const { type, detail } = parseFeedbackSource(options.source);
   const agentPath = options.interaction?.agent?.path;
   if (typeof agentPath !== 'string' || !agentPath) {
-    throw feedbackError('AGENT_REQUIRED', 'submit 需要当前 @agent 上下文起点');
+    throw feedbackError('AGENT_REQUIRED', 'submit 需要当前已声明 Agent Program 上下文起点');
   }
   const record = {
     id: crypto.randomUUID(),

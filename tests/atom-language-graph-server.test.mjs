@@ -16,6 +16,7 @@ import {
 } from '../work-engine/atom-language/graph-server.mjs';
 import * as graphSchema from '../work-engine/atom-language/graph-schema.mjs';
 import { resolveAgentContext } from '../work-engine/atom-language/cli.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { resolveAtomRuntime } from '../work-engine/atom-language/runtime-config.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import {
@@ -118,16 +119,15 @@ function removeTemporaryDirectoryAfter(t, directory) {
 function atomFixture() {
   return [
     {
-      'thing@agent': '石器工坊',
-      'situation#工坊简介': '可核查的正文',
-      contain: [],
-      support: [{ 'if@current': true, then: [{ thing: '石斧' }] }]
+      'thing@program': '石器工坊',
+      'situation#工坊简介': '# 可核查的正文\nagent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})\ndef main(arguments):\n    return arguments',
+      contain: [{ thing: '石斧', situation: '可核查的物件', contain: [], support: [] }], support: []
     },
     {
-      'thing@item': '石斧',
-      'situation#物件简介': '可核查的物件',
+      thing: '工坊事实',
+      situation: '可核查的事实',
       contain: [],
-      support: []
+      support: [{ 'if@current': true, then: [{ thing: '石器工坊/石斧' }] }]
     }
   ];
 }
@@ -139,10 +139,11 @@ async function migratedLegacySupportWorld() {
   const storeFile = path.join(directory, 'knowledge.json');
   const legacyFacts = [
     {
-      'name@agent': '冰', detail: '上下文', children: [],
-      partners: [{ verb: '原关系字符', object: 'test' }]
-    },
-    { name: 'test', detail: '目标', children: [], partners: [] }
+      'name@agent': '冰', detail: '上下文', children: [
+        { name: 'test', detail: '目标', children: [], partners: [] }
+      ],
+      partners: [{ verb: '原关系字符', object: '冰/test' }]
+    }
   ];
   await fs.writeFile(contextFile, `${JSON.stringify(legacyFacts, null, 2)}\n`, 'utf8');
   const plan = planGraphFourAxisWorldMigration({
@@ -161,6 +162,23 @@ async function migratedLegacySupportWorld() {
     },
     persistence,
     correlationId: 'graph-server-agent-manifest-fixture'
+  });
+  const migratedFacts = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const agent = migratedFacts.find((atom) => typeof atom['thing@agent'] === 'string');
+  agent['thing@program'] = agent['thing@agent'];
+  delete agent['thing@agent'];
+  agent.situation = [
+    'agent({"labels":[],"functions":{"groups":[],"names":["explore","transform","slot_body"]}})',
+    'def main(arguments):',
+    '    return arguments'
+  ].join('\n');
+  const migratedRevision = revisionOfWorldFacts(migratedFacts);
+  await persistence.commit({
+    correlationId: 'graph-server-agent-program-fixture',
+    expectedRevision: plan.nextRevision,
+    nextRevision: migratedRevision,
+    facts: migratedFacts,
+    source: 'test-agent-program-fixture'
   });
   return {
     directory,
@@ -337,8 +355,8 @@ test('graph server initializes the projection, serves the full UI health and Gra
   assert.equal(graphResponse.status, 200);
   const graph = await graphResponse.json();
   assert.equal(graph.graph.thing, 'atom.json');
-  assert.equal(graph.graph.contain[0]['thing@agent'], '石器工坊');
-  assert.equal(graph.graph.contain[0]['situation#工坊简介'], '可核查的正文');
+  assert.equal(graph.graph.contain[0]['thing@program'], '石器工坊');
+  assert.match(graph.graph.contain[0]['situation#工坊简介'], /可核查的正文/u);
 
   const pageResponse = await fetch(`${running.url}/`);
   assert.equal(pageResponse.status, 200);
@@ -346,7 +364,7 @@ test('graph server initializes the projection, serves the full UI health and Gra
   assert.match(await pageResponse.text(), /<canvas\b|Spatial|空间/u);
 
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), atomFixture());
-  assert.equal(JSON.parse(await fs.readFile(graphFile, 'utf8')).graph.contain[0]['thing@agent'], '石器工坊');
+  assert.equal(JSON.parse(await fs.readFile(graphFile, 'utf8')).graph.contain[0]['thing@program'], '石器工坊');
   assert.equal((await fs.stat(storeFile)).isFile(), true);
   await assert.rejects(
     fs.access(path.join(directory, 'data', 'knowledge.json')),
@@ -389,6 +407,39 @@ test('4784 resolves an Agent selector inside the resident world instead of every
   assert.equal(calls[0].agentPath, 'Root/冰');
 });
 
+test('graph server shares its supplied scheduler between directory priming and Agent resolution', async (t) => {
+  const directory = await temporaryDirectory();
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, `${JSON.stringify(atomFixture(), null, 2)}\n`, 'utf8');
+  const programScheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
+  const rebuild = programScheduler.rebuildAgentSecurity.bind(programScheduler);
+  let rebuilds = 0;
+  programScheduler.rebuildAgentSecurity = async (atoms) => {
+    rebuilds += 1;
+    return rebuild(atoms);
+  };
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, programScheduler
+  });
+  t.after(() => running.close());
+  removeTemporaryDirectoryAfter(t, directory);
+  const primedRebuilds = rebuilds;
+
+  const response = await fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source: 'explore {"thing":"石器工坊"}',
+      interaction: { id: 'shared-scheduler-resolution', agentSelector: '石器工坊', agent: { path: '石器工坊' } },
+      history: []
+    })
+  });
+  assert.equal(response.status, 200, await response.text());
+  assert.ok(rebuilds > primedRebuilds, 'resolver must reuse the supplied scheduler after startup priming');
+});
+
 test('deployed Agent resolution reuses the world compatibility manifest for exact explore', async (t) => {
   const files = await migratedLegacySupportWorld();
   const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, ...files });
@@ -407,7 +458,7 @@ test('deployed Agent resolution reuses the world compatibility manifest for exac
   const body = await response.json();
 
   assert.equal(response.status, 200, JSON.stringify(body));
-  assert.equal(body.result.ok, true);
+  assert.equal(body.result.ok, true, JSON.stringify(body));
   assert.equal(body.result.agent, '冰');
 });
 
@@ -421,7 +472,7 @@ test('deployed legacy-support provenance permits a new four-axis Agent transform
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      source: 'transform new {"thing":"test/写入验收","situation":"四轴","contain":[],"support":[]}',
+      source: 'transform new {"thing":"冰/test/写入验收","situation":"四轴","contain":[],"support":[]}',
       interaction: { id: 'trusted-legacy-agent-transform', agentSelector: '冰', agent: { path: '冰' } },
       history: []
     })
@@ -452,13 +503,13 @@ test('deployed legacy-support provenance remains valid while a new Program seals
   };
 
   const created = await execute(
-    'transform new {"thing":"test/合成槽体验收","situation":"合成验收","contain":[{"thing":"槽体","situation":"","contain":[{"thing":"候选流","situation":"","contain":[{"thing":"原文","situation":"待填写","contain":[],"support":[]},{"thing":"结论","situation":"待计算","contain":[],"support":[]}],"support":[]}],"support":[]},{"thing@program":"封装","situation":"slot_body({\\"action\\":\\"seal\\",\\"body\\":\\"test/合成槽体验收/槽体\\"})","contain":[],"support":[]}],"support":[]}',
+    'transform new {"thing":"冰/test/合成槽体验收","situation":"合成验收","contain":[{"thing":"槽体","situation":"","contain":[{"thing":"候选流","situation":"","contain":[{"thing":"原文","situation":"待填写","contain":[],"support":[]},{"thing":"结论","situation":"待计算","contain":[],"support":[]}],"support":[]}],"support":[]},{"thing@program":"封装","situation":"slot_body({\\"action\\":\\"seal\\",\\"body\\":\\"冰/test/合成槽体验收/槽体\\"})","contain":[],"support":[]}],"support":[]}',
     'trusted-legacy-slot-create'
   );
   assert.equal(created.result.ok, true, JSON.stringify(created));
 
   const sealed = await execute(
-    'transform {"thing.run.":"test/合成槽体验收/封装"}',
+    'transform {"thing.run.":"冰/test/合成槽体验收/封装"}',
     'trusted-legacy-slot-seal'
   );
   assert.equal(sealed.result.ok, true, JSON.stringify(sealed));
@@ -467,7 +518,9 @@ test('deployed legacy-support provenance remains valid while a new Program seals
 test('directionless legacy relations stay inert while forged provenance is rejected', async (t) => {
   const files = await migratedLegacySupportWorld();
   removeTemporaryDirectoryAfter(t, files.directory);
-  await assert.doesNotReject(resolveAgentContext(files.contextFile, '冰'));
+  await assert.doesNotReject(resolveAgentContext(files.contextFile, '冰', {
+    programScheduler: createProgramRuntimeScheduler({ timeoutMs: 2000 })
+  }));
   await assert.rejects(resolveAgentContext(files.contextFile, '冰', {
     compatibilityManifest: {
       ...files.compatibilityManifest,
@@ -548,8 +601,9 @@ test('graph server persists compact read diagnostics through the shared interact
   assert.equal(response.status, 200, await response.text());
   const persisted = JSON.parse(await fs.readFile(diagnosticFile, 'utf8'));
   assert.equal(running.diagnosticFile, path.resolve(diagnosticFile));
-  assert.deepEqual(persisted.diagnostics.map((item) => item.id), ['service-read-diagnostic:read']);
-  assert.deepEqual(persisted.diagnostics[0].affectedAtoms, [{
+  const readDiagnostic = persisted.diagnostics.find((item) => item.id === 'service-read-diagnostic:read');
+  assert.ok(readDiagnostic);
+  assert.deepEqual(readDiagnostic.affectedAtoms, [{
     path: '石器工坊',
     axes: []
   }]);

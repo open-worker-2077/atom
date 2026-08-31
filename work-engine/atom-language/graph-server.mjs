@@ -328,7 +328,7 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
         }
       }
       if (!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string') {
-        throw problem('AGENT_REQUIRED', 'Atom command endpoint requires a revision-local @agent origin');
+        throw problem('AGENT_REQUIRED', 'Atom command endpoint requires a revision-local declared Agent Program origin');
       }
       const decorate = (result) => ({
         ...result,
@@ -459,6 +459,7 @@ export async function startAtomGraphServer(options = {}) {
   const handlers = createAtomGraphHandlers(interactionRuntime, {
     diagnostics,
     resolveAgent: async (selector) => resolveAgentContext(configuration.contextFile, selector, {
+      programScheduler,
       compatibilityManifest: typeof worldService.compatibilityManifest === 'function'
         ? await worldService.compatibilityManifest({
           contextFile: configuration.contextFile,
@@ -486,6 +487,7 @@ export async function startAtomGraphServer(options = {}) {
     })
     : null;
   await primeAgentDirectory(configuration.contextFile, {
+    programScheduler,
     ...(startupManifest ? { compatibilityManifest: startupManifest } : {}),
     ...(startupManifest?.currentWorldRevision
       ? { worldRevision: startupManifest.currentWorldRevision }

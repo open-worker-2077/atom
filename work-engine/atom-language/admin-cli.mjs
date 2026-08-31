@@ -4,6 +4,7 @@ import process from 'node:process';
 import { createRuntimeCliExecutor } from '../../src/atom-system/adapters/runtime-cli-executor.mjs';
 import { issueWorldAgentSession } from './admin.mjs';
 import { runAtomCli } from './cli.mjs';
+import { createProgramRuntimeScheduler } from './program-runtime.mjs';
 import { assertMaintenanceToken, resolveAtomRuntime } from './runtime-config.mjs';
 
 function parseIssue(argv) {
@@ -47,6 +48,7 @@ try {
       signingKey,
       windows: parsed.windows,
       keys: parsed.keys,
+      programScheduler: createProgramRuntimeScheduler({}),
       expiresAt: new Date(Date.now() + parsed.hours * 60 * 60 * 1000).toISOString()
     });
     process.stdout.write(`${JSON.stringify({ token: issued.token, windows: issued.session.windows })}\n`);

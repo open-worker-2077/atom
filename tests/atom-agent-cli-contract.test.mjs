@@ -6,11 +6,17 @@ import { PassThrough } from 'node:stream';
 import test from 'node:test';
 
 import { primeAgentDirectory, resolveAgentContext, runAtomCli } from '../work-engine/atom-language/cli.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
+const AGENT_SOURCE = 'agent({"labels":[],"functions":{"groups":[],"names":["explore","transform","message","use_program"]}})';
+
 function atom(thing, options = {}) {
-  const { type = null } = options;
-  const situation = options.situation ?? options.detail ?? '';
+  const requestedType = options.type ?? null;
+  const type = requestedType === 'agent' ? 'program' : requestedType;
+  const situation = requestedType === 'agent'
+    ? (options.situation ?? AGENT_SOURCE)
+    : (options.situation ?? options.detail ?? '');
   const contain = options.contain ?? options.children ?? [];
   return {
     [`thing${type ? `@${type}` : ''}`]: thing,
@@ -51,11 +57,12 @@ function publicCli(files, overrides = {}) {
     defaultProjectionFile: files.projectionFile,
     stdin: { isTTY: false },
     execute: executeAtomLanguage,
+    programScheduler: createProgramRuntimeScheduler({ timeoutMs: 2000 }),
     ...overrides
   };
 }
 
-test('public CLI selects one @agent context with --agent and needs no session', async (t) => {
+test('public CLI selects one declared Agent Program context with --agent and needs no session', async (t) => {
   const files = await world(t, [
     atom('Workspace', {
       children: [
@@ -79,17 +86,18 @@ test('public CLI selects one @agent context with --agent and needs no session', 
   assert.equal(stderr.text(), '');
 });
 
-test('agent resolution reuses the indexed directory for one immutable large-world revision', async (t) => {
+test('Agent Program resolution reuses one injected scheduler for an immutable large-world revision', async (t) => {
   const files = await world(t, [
     atom('Work Agent', { type: 'agent' }),
     ...Array.from({ length: 10_000 }, (_, index) => atom(`Node ${index}`, {
       detail: 'x'.repeat(1_000)
     }))
   ]);
-  await resolveAgentContext(files.contextFile, 'Work Agent');
+  const programScheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
+  await resolveAgentContext(files.contextFile, 'Work Agent', { programScheduler });
 
   const startedAt = performance.now();
-  const resolved = await resolveAgentContext(files.contextFile, 'Work Agent');
+  const resolved = await resolveAgentContext(files.contextFile, 'Work Agent', { programScheduler });
   const elapsedMs = performance.now() - startedAt;
 
   assert.equal(resolved.path, 'Work Agent');
@@ -102,9 +110,10 @@ test('startup can prime an immutable Agent directory before the first command', 
     ...Array.from({ length: 10_000 }, (_, index) => atom(`Node ${index}`, { detail: 'x'.repeat(1_000) }))
   ]);
   const revision = 'sha256:startup-proof';
-  await primeAgentDirectory(files.contextFile, { worldRevision: revision });
+  const programScheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
+  await primeAgentDirectory(files.contextFile, { programScheduler, worldRevision: revision });
   const startedAt = performance.now();
-  const resolved = await resolveAgentContext(files.contextFile, 'Work Agent', { worldRevision: revision });
+  const resolved = await resolveAgentContext(files.contextFile, 'Work Agent', { programScheduler, worldRevision: revision });
   assert.equal(resolved.path, 'Work Agent');
   assert.ok(performance.now() - startedAt < 30, 'first command must reuse the startup Agent directory');
 });
@@ -188,7 +197,7 @@ test('an ordinary target is explored through the already bound agent context', a
   assert.equal(stderr.text(), '');
 });
 
-test('a short ambiguous agent name is rejected while its exact path selects one @agent', async (t) => {
+test('a short ambiguous Agent Program name is rejected while its exact path selects one declared Agent Program', async (t) => {
   const files = await world(t, [
     atom('Workspace A', { children: [atom('Worker', { type: 'agent' })] }),
     atom('Workspace B', { children: [atom('Worker', { type: 'agent' })] })
@@ -214,7 +223,7 @@ test('a short ambiguous agent name is rejected while its exact path selects one 
   assert.match(exactOut.text(), /"agent~current": "Workspace B\/Worker"/u);
 });
 
-test('interactive prompt identifies the selected @agent context', async (t) => {
+test('interactive prompt identifies the selected Agent Program context', async (t) => {
   const files = await world(t, [
     atom('Workspace', { children: [atom('Work Agent', { type: 'agent' })] })
   ]);
@@ -299,7 +308,7 @@ test('remote interactive entry obtains context from the runtime without reading 
         matches: [{
           thing: 'Remote Agent',
           path: 'Root/Remote Agent',
-          types: ['program', 'agent']
+        types: ['program']
         }],
         boundary: {
           up: { state: 'complete', hasMore: false, nodes: 0, characters: 0 },
@@ -323,7 +332,7 @@ test('remote interactive entry obtains context from the runtime without reading 
 
   assert.equal(code, 0, stderr.text());
   assert.deepEqual(calls.map((source) => source.split(' ')[0]), ['atom', 'explore']);
-  assert.match(stdout.text(), /"thing@program@agent": "Remote Agent"/u);
+  assert.match(stdout.text(), /"thing@program": "Remote Agent"/u);
   assert.doesNotMatch(stdout.text(), /SUPPORT_OWNER_CURRENT_REQUIRED/u);
 });
 
@@ -366,7 +375,7 @@ test('interactive entry is Graph-JSON and does not expand @program source', asyn
   assert.match(stdout.text(), /"thing@context": "Workspace\/Work Agent"/u);
   assert.match(stdout.text(), /"thing@parent": "Workspace"/u);
   assert.match(stdout.text(), /"thing@peer": "Peer"/u);
-  assert.match(stdout.text(), /"thing@agent@current": "Work Agent"/u);
+  assert.match(stdout.text(), /"thing@program@current": "Work Agent"/u);
   assert.match(stdout.text(), /"thing": "Current Task"/u);
   assert.match(stdout.text(), /"thing": "Main Branch"/u);
   assert.match(stdout.text(), /"thing": "Form Node"/u);
@@ -409,7 +418,7 @@ test('interactive entry previews hidden peer branches to the left and right with
   assert.match(stdout.text(), /"right"[\s\S]*"nodes": 1[\s\S]*"characters": 15/u);
 });
 
-test('@agent is forwarded only as a context start, never as lock identity or permission', async (t) => {
+test('an Agent Program is forwarded only as a context start, never as lock identity or permission', async (t) => {
   const files = await world(t, [
     atom('Workspace', { children: [atom('Work Agent', { type: 'agent' })] })
   ]);
@@ -488,7 +497,7 @@ test('interactive submit forwards prior commands and complete receipts as this C
   assert.equal(Object.hasOwn(submittedHistory[0].receipt, 'contextFile'), false);
 });
 
-test('@agent ref is revision-local rather than a hash of its path alone', async (t) => {
+test('Agent Program ref is revision-local rather than a hash of its path alone', async (t) => {
   const atoms = [
     atom('Workspace', { children: [atom('Work Agent', { type: 'agent' })] })
   ];
@@ -550,17 +559,17 @@ test('public help exposes only public Agent CLI options', async () => {
   assert.match(stdout.text(), /agent\(\{\\"labels\\":\[\],\\"functions\\":/u);
   assert.match(stdout.text(), /第2步：transform \{"thing\.run\.":"当前Agent\/任务区\/任务名"\}/u);
   assert.match(stdout.text(), /“任务区”必须是当前窗口下已获准写入的普通事实父节点/u);
-  assert.match(stdout.text(), /不得用公开 Transform 创建 thing@agent/u);
+  assert.match(stdout.text(), /不得用公开 Transform 创建 Agent Key 类型/u);
   assert.match(stdout.text(), /use_program\(\{name,arguments\}\)/u);
   assert.match(stdout.text(), /--agent 只指定本次交互的上下文来源，不指定节点的归属或写入位置/u);
   assert.match(stdout.text(), /新节点的归属由 thing 中的精确父路径决定/u);
-  assert.match(stdout.text(), /会话已给出或已绑定唯一 @agent 时直接复用，不得重复询问/u);
+  assert.match(stdout.text(), /会话已给出或已绑定唯一已声明 Agent Program 时直接复用，不得重复询问/u);
   assert.match(stdout.text(), /CLI 不会把目标 thing 自动当作 --agent/u);
   assert.match(stdout.text(), /父路径不明确时只询问父 Atom/u);
   assert.match(stdout.text(), /每次写入后重新 explore 实际写入的 Atom/u);
   assert.match(stdout.text(), /先 explore 预定父节点及其直接子节点/u);
   assert.match(stdout.text(), /确实没有可复用节点时.*transform new/u);
-  assert.doesNotMatch(stdout.text(), /目标 @agent/u);
+  assert.doesNotMatch(stdout.text(), /目标 Agent Program/u);
   assert.doesNotMatch(stdout.text(), /Graph-JSON 基础：[\s\S]*?name 使用/u);
   assert.doesNotMatch(stdout.text(), /--session|--window|--context|--projection|--global/u);
 });
@@ -614,7 +623,7 @@ test('public help is a complete daily Agent operation contract', async () => {
   assert.doesNotMatch(text, /±N/u);
   assert.match(text, /AGENT_NOT_FOUND.*AGENT_TYPE_REQUIRED.*AMBIGUOUS_AGENT/us);
   assert.match(text, /查询或写入的事实目标不得代替 --agent 上下文来源/u);
-  assert.match(text, /目标 Atom 本身不需要是 @agent/u);
+  assert.match(text, /目标 Atom 本身不需要是 Agent Program/u);
   assert.match(text, /Agent 重配.*普通 Transform.*实际路径鉴权.*自身与后代不设特殊管理通道/u);
   assert.match(text, /权限索引.*请求命中即用.*缺失或失效.*即时计算并回填/u);
   assert.match(text, /索引缺失不得阻断启动、Explore 或 Transform/u);
