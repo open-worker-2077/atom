@@ -64,6 +64,16 @@ function supportAffectedGraphPaths(graphDocument, triggerEvent) {
   }))];
 }
 
+function projectSupportContext(atoms) {
+  try {
+    return projectAtomContext(atoms);
+  } catch {
+    // Program scheduling is not a second world validator. Invalid candidate Graph facts are
+    // rejected by the central transaction; unrelated Program triggers must remain usable.
+    return null;
+  }
+}
+
 function freezePrepared(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
   for (const child of Object.values(value)) freezePrepared(child);
@@ -1918,18 +1928,20 @@ export class ProgramRuntimeScheduler {
         ? preparedTriggerEvent.supportBaseRevision
         : null;
       supportGraphDocument = typeof preparedBaseRevision === 'string'
-        ? this.preparedSupportGraphs.get(preparedBaseRevision) ?? projectAtomContext(atoms)
-        : projectAtomContext(atoms);
-      this.preparedSupportGraphs.set(supportWorldRevision, supportGraphDocument);
-      while (this.preparedSupportGraphs.size > this.maxCompleted) {
-        this.preparedSupportGraphs.delete(this.preparedSupportGraphs.keys().next().value);
+        ? this.preparedSupportGraphs.get(preparedBaseRevision) ?? projectSupportContext(atoms)
+        : projectSupportContext(atoms);
+      if (supportGraphDocument) {
+        this.preparedSupportGraphs.set(supportWorldRevision, supportGraphDocument);
+        while (this.preparedSupportGraphs.size > this.maxCompleted) {
+          this.preparedSupportGraphs.delete(this.preparedSupportGraphs.keys().next().value);
+        }
+        changedSupportGraphPaths = supportAffectedGraphPaths(
+          supportGraphDocument, preparedTriggerEvent
+        );
+        affectedSupportClauseIds = new Set(changedSupportGraphPaths.flatMap((affectedPath) => (
+          supportGraphDocument.dependencyIndex.get(affectedPath) ?? []
+        )));
       }
-      changedSupportGraphPaths = supportAffectedGraphPaths(
-        supportGraphDocument, preparedTriggerEvent
-      );
-      affectedSupportClauseIds = new Set(changedSupportGraphPaths.flatMap((affectedPath) => (
-        supportGraphDocument.dependencyIndex.get(affectedPath) ?? []
-      )));
     }
     if (preparedTriggerEvent?.preparedIndexesValid === true
       && this.triggerContractsInitialized
@@ -1991,9 +2003,10 @@ export class ProgramRuntimeScheduler {
     await this.activeRequestDrivenLocks(atoms);
     const records = worldRecords(atoms);
     this.latestRecords = records;
-    if (!preparedTriggerEvent) {
+    if (!preparedTriggerEvent && options.prepareAllIndexes === true) {
       if (!this.preparedSupportGraphs.has(supportWorldRevision)) {
-        this.preparedSupportGraphs.set(supportWorldRevision, projectAtomContext(atoms));
+        const supportGraph = projectSupportContext(atoms);
+        if (supportGraph) this.preparedSupportGraphs.set(supportWorldRevision, supportGraph);
         while (this.preparedSupportGraphs.size > this.maxCompleted) {
           this.preparedSupportGraphs.delete(this.preparedSupportGraphs.keys().next().value);
         }
@@ -2112,8 +2125,8 @@ export class ProgramRuntimeScheduler {
       records, programs, executeExplore, options.agentOrigin
     );
     let derivedSupportDeliveries = [];
-    if (triggerEvent?.mode === 'transform') {
-      const graphDocument = supportGraphDocument ?? projectAtomContext(atoms);
+    if (triggerEvent?.mode === 'transform' && supportGraphDocument) {
+      const graphDocument = supportGraphDocument;
       const graphChangedPaths = changedSupportGraphPaths.length
         ? changedSupportGraphPaths
         : supportAffectedGraphPaths(graphDocument, triggerEvent);
