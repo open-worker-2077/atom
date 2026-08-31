@@ -1156,6 +1156,7 @@ export class ProgramRuntimeScheduler {
     this.maxWorkers = options.maxWorkers ?? DEFAULT_MAX_WORKERS;
     this.activeWorkers = 0;
     this.workerQueue = [];
+    this.delegatedRunBounded = options.runBounded ?? null;
     this.reusable = new Map();
     this.programReusable = new Map();
     this.dormantFailures = new Map();
@@ -1569,6 +1570,39 @@ export class ProgramRuntimeScheduler {
     return true;
   }
 
+  createCandidateRuntime() {
+    return new ProgramRuntimeScheduler({
+      python: this.python,
+      timeoutMs: this.timeoutMs,
+      maxCompleted: this.maxCompleted,
+      maxWorkers: this.maxWorkers,
+      runProgram: this.runProgram,
+      inspectProgram: this.inspectProgram,
+      runBounded: (operation) => this.runBounded(operation)
+    });
+  }
+
+  invalidateDerivedWorldState() {
+    this.completed.clear();
+    this.reusable.clear();
+    this.programReusable.clear();
+    this.dormantFailures.clear();
+    this.triggerContracts.clear();
+    this.triggerIndex.clear();
+    this.programReadDependencies.clear();
+    this.deferredTriggerContracts.clear();
+    this.slotInvocationCycles.clear();
+    this.preparedSupportGraphs.clear();
+    this.agentSecurity = new Map();
+    this.agentSecurityWorldRevision = null;
+    this.requestDrivenLocks = undefined;
+    this.requestDrivenLocksWorldRevision = null;
+    this.latestRecords = null;
+    this.loadedProjection = undefined;
+    this.projectionLoadWarning = null;
+    this.triggerContractsInitialized = false;
+  }
+
   async overlayRequestDrivenLocks(value, agentOrigin = null) {
     const active = await this.activeRequestDrivenLocks();
     return {
@@ -1588,6 +1622,7 @@ export class ProgramRuntimeScheduler {
   }
 
   async runBounded(operation) {
+    if (this.delegatedRunBounded) return this.delegatedRunBounded(operation);
     if (this.activeWorkers >= this.maxWorkers) {
       await new Promise((resolve) => this.workerQueue.push(resolve));
     }

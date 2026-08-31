@@ -18,6 +18,16 @@ function mergeWarnings(...groups) {
   return warnings;
 }
 
+function immutableClone(value) {
+  const clone = structuredClone(value);
+  const freeze = (candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Object.isFrozen(candidate)) return candidate;
+    for (const child of Object.values(candidate)) freeze(child);
+    return Object.freeze(candidate);
+  };
+  return freeze(clone);
+}
+
 function visibleExplorePaths(items) {
   return new Set(items.flatMap((item) => (
     (item.matches ?? []).map((match) => Array.isArray(match.path) ? match.path.join('/') : match.path)
@@ -150,6 +160,20 @@ function transformChangesProgramSurface(beforeAtoms, afterAtoms, transformed) {
     subtreeContainsTypedProgram(exactMatchAtPath(beforeAtoms, targetPath)?.atom)
     || subtreeContainsTypedProgram(exactMatchAtPath(afterAtoms, targetPath)?.atom)
   ));
+}
+
+function programDeclarationSurface(atoms) {
+  return walkAtoms(atoms).flatMap((match) => {
+    const thing = oneStoredField(match.atom, 'thing');
+    if (!thing?.parsed.types.some((type) => type.raw === 'program')) return [];
+    const situation = oneStoredField(match.atom, 'situation');
+    return [{
+      path: match.path.join('/'),
+      thingKey: thing.rawKey,
+      situationKey: situation?.rawKey ?? null,
+      situation: situation?.value ?? null
+    }];
+  });
 }
 
 function isLocalizedSituationTransform(item) {
@@ -363,6 +387,10 @@ async function validateAgentProgramDelegation({
   creatorSecurity,
   programScheduler
 }) {
+  if (JSON.stringify(programDeclarationSurface(beforeAtoms))
+    === JSON.stringify(programDeclarationSurface(afterAtoms))) {
+    return { ok: true, errors: [] };
+  }
   if (typeof programScheduler?.deriveAgentSecurity !== 'function') {
     return {
       ok: false,
@@ -764,6 +792,7 @@ export async function executeAtomLanguage(options = {}) {
     atoms,
     path.basename(contextFile)
   );
+  const requestStartAtoms = atoms;
   const preparedTransformAtoms = atoms;
   const revisionBefore = revisionOf(atoms);
   let committedAffectedPaths = [];
@@ -897,6 +926,13 @@ export async function executeAtomLanguage(options = {}) {
   let programCycle = { messages: [], locks: [], records: [] };
   let activeRequestDrivenLocks = [];
   let creatorSecurity = null;
+  const candidateProgramScheduler = options.programScheduler
+    ? (typeof options.programScheduler.createCandidateRuntime === 'function'
+      ? options.programScheduler.createCandidateRuntime()
+      : typeof options.programScheduler.deriveAgentSecurity !== 'function'
+        ? options.programScheduler
+        : null)
+    : null;
   if (options.programScheduler) {
     const indexPreparationStartedAt = performance.now();
     try {
@@ -905,7 +941,7 @@ export async function executeAtomLanguage(options = {}) {
       }) ?? [];
       const initialAgentPath = interaction.agent?.path ?? null;
       const initialAgentSecurity = initialAgentPath
-        ? structuredClone(options.programScheduler.agentSecurity?.get(initialAgentPath) ?? null)
+        ? immutableClone(options.programScheduler.agentSecurity?.get(initialAgentPath) ?? null)
         : null;
       creatorSecurity = initialAgentSecurity;
       let programAccess = null;
@@ -1670,6 +1706,31 @@ export async function executeAtomLanguage(options = {}) {
     }
   }
 
+  async function validateRequestCandidate(candidateAtoms) {
+    return validateAgentProgramDelegation({
+      beforeAtoms: requestStartAtoms,
+      afterAtoms: candidateAtoms,
+      creatorSecurity,
+      programScheduler: candidateProgramScheduler
+    });
+  }
+
+  function throwCandidateDelegationFailure(errors) {
+    const first = errors[0] ?? diagnostic(
+      'INVALID_AGENT_DELEGATION', 'Agent Program declaration change was rejected'
+    );
+    throw Object.assign(new Error(first.message), {
+      code: first.code,
+      details: first.details ?? {},
+      diagnostics: errors
+    });
+  }
+
+  async function assertRequestCandidateAuthority(candidateAtoms) {
+    const delegated = await validateRequestCandidate(candidateAtoms);
+    if (!delegated.ok) throwCandidateDelegationFailure(delegated.errors);
+  }
+
   async function reconcileProgramsForWorld(
     candidateAtoms, initialTriggerEvent = null, failOnProgramFailure = false
   ) {
@@ -1682,6 +1743,13 @@ export async function executeAtomLanguage(options = {}) {
         pathChanges: []
       };
     }
+    if (!candidateProgramScheduler) {
+      throw Object.assign(new Error('Candidate Program evaluation requires an isolated runtime'), {
+        code: 'PROGRAM_CANDIDATE_RUNTIME_UNAVAILABLE'
+      });
+    }
+    await assertRequestCandidateAuthority(candidateAtoms);
+    const runtimeScheduler = candidateProgramScheduler;
     let reconciledAtoms = candidateAtoms;
     const messages = [];
     const transformLogs = [];
@@ -1694,7 +1762,7 @@ export async function executeAtomLanguage(options = {}) {
     for (let pass = 1; pass <= maxPasses; pass += 1) {
       const cycleAgentPath = interaction.agent?.path ?? null;
       const cycleAgentSecurity = cycleAgentPath
-        ? structuredClone(options.programScheduler.agentSecurity?.get(cycleAgentPath)
+        ? structuredClone(runtimeScheduler.agentSecurity?.get(cycleAgentPath)
           ?? programCycle.agentSecurity ?? null)
         : null;
       let programAccess = null;
@@ -1702,7 +1770,7 @@ export async function executeAtomLanguage(options = {}) {
       const refreshStartedAt = performance.now();
       let cycle;
       try {
-        cycle = await options.programScheduler.refresh(reconciledAtoms, {
+        cycle = await runtimeScheduler.refresh(reconciledAtoms, {
           agentOrigin: interaction.agent,
           isolateFailures: true,
           slotTriggerCycleId: interaction.id,
@@ -1919,7 +1987,7 @@ export async function executeAtomLanguage(options = {}) {
                   contextFile,
                   authorize: authorizeProgramEffect,
                   matcherRegistry: receiver.matcherRegistry,
-                  programScheduler: options.programScheduler
+                  programScheduler: runtimeScheduler
                 })
               : await applyTransform({
                   atoms: candidateAtoms,
@@ -2078,6 +2146,7 @@ export async function executeAtomLanguage(options = {}) {
         changed: before !== after
       });
       if (before !== after) {
+        await assertRequestCandidateAuthority(application.atoms);
         reconciledAtoms = application.atoms;
         passChanged = true;
         for (const entry of appliedShortcuts) {
@@ -2158,19 +2227,25 @@ export async function executeAtomLanguage(options = {}) {
 
   async function refreshProgramProjectionForWorld(candidateAtoms, triggerNodes) {
     if (!options.programScheduler || triggerNodes.length === 0) return programLockIndex;
+    if (!candidateProgramScheduler) {
+      throw Object.assign(new Error('Candidate Program evaluation requires an isolated runtime'), {
+        code: 'PROGRAM_CANDIDATE_RUNTIME_UNAVAILABLE'
+      });
+    }
+    await assertRequestCandidateAuthority(candidateAtoms);
     const currentAgentPath = interaction.agent?.path ?? null;
     const programAccess = createAccessController(candidateAtoms, {
       ...options,
       programLockIndex,
       agentPath: currentAgentPath,
       agentSecurity: currentAgentPath
-        ? structuredClone(options.programScheduler.agentSecurity?.get(currentAgentPath)
+        ? structuredClone(candidateProgramScheduler.agentSecurity?.get(currentAgentPath)
           ?? programCycle.agentSecurity ?? null)
         : null,
       graphLocks
     });
     const preparedWorld = prepareExploreWorld(candidateAtoms);
-    const cycle = await options.programScheduler.refresh(candidateAtoms, {
+    const cycle = await candidateProgramScheduler.refresh(candidateAtoms, {
       agentOrigin: interaction.agent,
       isolateFailures: true,
       triggerEvent: { mode: 'transform', nodes: triggerNodes, affectedPaths: triggerNodes },
@@ -2248,6 +2323,14 @@ export async function executeAtomLanguage(options = {}) {
     structurePreservingValidation = false,
     preparedRuntimeRecordsPromise = null
   } = {}) {
+    const delegated = await validateRequestCandidate(candidateAtoms);
+    if (!delegated.ok) {
+      return {
+        authorizationFailure: failureBase(
+          parsed, contextFile, projectionFile, requestStartAtoms, delegated.errors
+        )
+      };
+    }
     const commitStartedAt = performance.now();
     let receipt = null;
     try {
@@ -2283,11 +2366,29 @@ export async function executeAtomLanguage(options = {}) {
     }
     confirmSupportDeliveryClaims();
     await recordTransformStage('commit', commitStartedAt, { commitEntered: true });
-    await options.programScheduler?.rebuildAgentSecurity?.(candidateAtoms);
+    let derivedRecoveryPending = false;
+    try {
+      await options.programScheduler?.rebuildAgentSecurity?.(candidateAtoms);
+    } catch (error) {
+      derivedRecoveryPending = true;
+      options.programScheduler?.invalidateDerivedWorldState?.();
+      interactionWarnings.push(diagnostic(
+        'AGENT_SECURITY_REBUILD_RECOVERY_PENDING',
+        'World facts are committed, but Agent security requires reconstruction on next use',
+        { cause: error.code ?? error.name ?? 'AGENT_SECURITY_REBUILD_FAILED' }
+      ));
+    }
     if (!committedAffectedPaths.length) {
       committedAffectedPaths = Array.isArray(changedPaths)
         ? [...new Set(changedPaths.filter(Boolean))].sort()
         : [];
+    }
+    if (derivedRecoveryPending) {
+      await recordTransformStage('program-projection', performance.now(), {
+        candidateProgramCount: 0,
+        executedProgramCount: 0
+      });
+      return receipt;
     }
     try {
       let rebased = null;
@@ -2386,7 +2487,8 @@ export async function executeAtomLanguage(options = {}) {
 
   if (parsed.command === 'atom') {
     if (programChanged) {
-      await commitChangedGraph(atoms);
+      const commitReceipt = await commitChangedGraph(atoms);
+      if (commitReceipt?.authorizationFailure) return commitReceipt.authorizationFailure;
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
     if (options.programMode === 'project' && (programCycle.failures?.length ?? 0) > 0) {
@@ -2421,7 +2523,8 @@ export async function executeAtomLanguage(options = {}) {
 
   if (parsed.command === 'explore') {
     if (programChanged) {
-      await commitChangedGraph(atoms);
+      const commitReceipt = await commitChangedGraph(atoms);
+      if (commitReceipt?.authorizationFailure) return commitReceipt.authorizationFailure;
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
     if (!parsed.items.length) {
@@ -2660,20 +2763,16 @@ export async function executeAtomLanguage(options = {}) {
         || subtreeContainsTypedProgram(exactMatchAtPath(nextAtoms, targetPath)?.atom)
       ));
       if (programSurfaceChanged) {
-        const delegated = await validateAgentProgramDelegation({
-          beforeAtoms: atoms,
-          afterAtoms: nextAtoms,
-          creatorSecurity,
-          programScheduler: options.programScheduler
-        });
+        const delegated = await validateRequestCandidate(nextAtoms);
         if (!delegated.ok) {
           releaseSupportDeliveryClaims();
           return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
         }
       }
-      await commitChangedGraph(nextAtoms, {
+      const commitReceipt = await commitChangedGraph(nextAtoms, {
         changedPaths: [...transformEventNodes]
       });
+      if (commitReceipt?.authorizationFailure) return commitReceipt.authorizationFailure;
       for (const record of [...programTransformLogs, ...transformLogs]) {
         try {
           await appendTransformLog(contextFile, {
@@ -2738,12 +2837,7 @@ export async function executeAtomLanguage(options = {}) {
     }
     let nextAtoms = created.atoms;
     if (transformChangesProgramSurface(atoms, nextAtoms, { resultPath: created.resultPath })) {
-      const delegated = await validateAgentProgramDelegation({
-        beforeAtoms: atoms,
-        afterAtoms: nextAtoms,
-        creatorSecurity,
-        programScheduler: options.programScheduler
-      });
+      const delegated = await validateRequestCandidate(nextAtoms);
       if (!delegated.ok) {
         releaseSupportDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
@@ -2783,6 +2877,7 @@ export async function executeAtomLanguage(options = {}) {
         changedPaths: createChangedPaths
       }
     } : { changedPaths: createChangedPaths });
+    if (commitReceipt?.authorizationFailure) return commitReceipt.authorizationFailure;
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
       await appendTransformLog(contextFile, record);
     }
@@ -2834,7 +2929,8 @@ export async function executeAtomLanguage(options = {}) {
       }
     }
     if (changed) {
-      await commitChangedGraph(nextAtoms);
+      const commitReceipt = await commitChangedGraph(nextAtoms);
+      if (commitReceipt?.authorizationFailure) return commitReceipt.authorizationFailure;
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
     const resultMatch = walkAtoms(nextAtoms).find((match) => (
@@ -2909,12 +3005,7 @@ export async function executeAtomLanguage(options = {}) {
         compiled.errors
       );
     }
-    const delegated = await validateAgentProgramDelegation({
-      beforeAtoms: atoms,
-      afterAtoms: nextAtoms,
-      creatorSecurity,
-      programScheduler: options.programScheduler
-    });
+    const delegated = await validateRequestCandidate(nextAtoms);
     if (!delegated.ok) {
       releaseSupportDeliveryClaims();
       return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
@@ -2997,6 +3088,7 @@ export async function executeAtomLanguage(options = {}) {
       ].filter(Boolean))],
       transformLogRecord
     });
+    if (commitReceipt?.authorizationFailure) return commitReceipt.authorizationFailure;
     const reversibleRecordCommitted = transformLogRecord
       && commitReceipt?.result?.transformLogRecord?.id === transformLogRecord.id;
     const auditStartedAt = performance.now();

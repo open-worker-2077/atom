@@ -238,6 +238,7 @@ test('CLI keeps dot-command literals inside a situation rep replacement', async 
     contain: [],
     support: []
   }], null, 2)}\n`, 'utf8');
+  const scheduler = createProgramRuntimeScheduler();
 
   let stdout = '';
   let stderr = '';
@@ -249,7 +250,7 @@ test('CLI keeps dot-command literals inside a situation rep replacement', async 
       [`situation.rep.${replacement}`]: '旧源码'
     })
   ], {
-    execute: executeAtomLanguage,
+    execute: (request) => executeAtomLanguage({ ...request, programScheduler: scheduler }),
     stdin: { isTTY: false },
     stdout: { isTTY: false, write(value) { stdout += value; } },
     stderr: { write(value) { stderr += value; } }
@@ -287,9 +288,9 @@ test('operational Atom Language closes one isolated transform/explore/projection
   const agentExample = programFunctionRegistry().functions
     .find((entry) => entry.name === 'agent').contract.argument.example;
   const scheduler = createProgramRuntimeScheduler();
-  await fs.writeFile(contextFile, `${JSON.stringify([{
-    'thing@agent': '创建Agent',
-    situation: '',
+  const initialWorld = [{
+    'thing@program': '创建Agent',
+    situation: `agent(${JSON.stringify(agentExample)})`,
     contain: [{
       thing: '工坊区',
       situation: '',
@@ -297,12 +298,9 @@ test('operational Atom Language closes one isolated transform/explore/projection
       support: []
     }],
     support: []
-  }], null, 2)}\n`, 'utf8');
-  await scheduler.registerAgentWindow({
-    sourceProgramPath: '创建Agent', labels: ['^'],
-    functionScopes: structuredClone(agentExample.functions),
-    functions: agentExample.functions.names
-  });
+  }];
+  await fs.writeFile(contextFile, `${JSON.stringify(initialWorld, null, 2)}\n`, 'utf8');
+  await scheduler.rebuildAgentSecurity(initialWorld);
   const execute = (request) => executeAtomLanguage({
     ...request, programScheduler: scheduler
   });
@@ -311,6 +309,7 @@ test('operational Atom Language closes one isolated transform/explore/projection
     let stderr = '';
     const code = await runAtomCli(['--agent', agent, ...source], {
       requireAgent: true,
+      remoteAgentResolution: true,
       defaultContextFile: contextFile,
       defaultProjectionFile: projectionFile,
       execute,
@@ -381,7 +380,7 @@ test('operational Atom Language closes one isolated transform/explore/projection
   );
   assert.equal(
     fieldEntry(workshop, 'thing')[0],
-    'thing@program@agent#保存石器与工具的工坊'
+    'thing@program#保存石器与工具的工坊'
   );
   assert.equal(fieldEntry(workshop, 'thing')[1], '石器工坊');
   assert.equal(fieldEntry(workshop, 'situation')[1], registrationSource);
@@ -548,6 +547,7 @@ test('stdin keeps a split UTF-8 Program situation intact through persistence', a
   const source = `transform new ${JSON.stringify({
     'thing@program': 'UTF-8 Program', situation, contain: [], support: []
   })}`;
+  const scheduler = createProgramRuntimeScheduler();
   const bytes = Buffer.from(source, 'utf8');
   const splitAt = bytes.indexOf(Buffer.from('验', 'utf8')) + 1;
   const stdin = {
@@ -563,7 +563,7 @@ test('stdin keeps a split UTF-8 Program situation intact through persistence', a
   const code = await runAtomCli([
     '--stdin', '--context', contextFile, '--projection', projectionFile
   ], {
-    execute: executeAtomLanguage,
+    execute: (request) => executeAtomLanguage({ ...request, programScheduler: scheduler }),
     stdin,
     stdout: { isTTY: false, write(value) { stdout += value; } },
     stderr: { write(value) { stderr += value; } }

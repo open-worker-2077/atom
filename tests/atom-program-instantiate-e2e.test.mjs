@@ -144,13 +144,15 @@ test('documented two-step commands create an Agent with one attached complete ad
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-help-new-flow-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
-    atom('当前Agent', '', [atom('任务区')], 'agent')
-  ], null, 2), 'utf8');
   const scheduler = createProgramRuntimeScheduler();
 
   const agentExample = programFunctionRegistry().functions
     .find((entry) => entry.name === 'agent').contract.argument.example;
+  const initialWorld = [
+    atom('当前Agent', `agent(${JSON.stringify(agentExample)})`, [atom('任务区')], 'program')
+  ];
+  await fs.writeFile(contextFile, JSON.stringify(initialWorld, null, 2), 'utf8');
+  await scheduler.rebuildAgentSecurity(initialWorld);
   const registrationSource = [
     `agent(${JSON.stringify(agentExample)})`,
     'instantiate({"template":"advancement-flow","version":"latest","mode":"ensure","parameters":{"title":"任务标题"}})'
@@ -159,12 +161,6 @@ test('documented two-step commands create an Agent with one attached complete ad
     'thing@program': '当前Agent/任务区/任务名', situation: registrationSource, contain: [], support: []
   })}`;
   const runCommand = 'transform {"thing.run.":"当前Agent/任务区/任务名"}';
-  await scheduler.registerAgentWindow({
-    sourceProgramPath: '当前Agent', labels: ['^'],
-    functionScopes: structuredClone(agentExample.functions),
-    functions: agentExample.functions.names
-  });
-
   const stdout = output();
   const stderr = output();
   const helpCode = await runAtomCli(['--help'], {
@@ -195,7 +191,7 @@ test('documented two-step commands create an Agent with one attached complete ad
   const [creator] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   const [taskArea] = creator.contain;
   const [agent] = taskArea.contain;
-  assert.equal(agent['thing@program@agent'], '任务名');
+  assert.equal(agent['thing@program'], '任务名');
   assert.deepEqual(agent.contain.map((child) => child.thing ?? child['thing@program']), [
     '编标版本', '任务标题', '导航坐标', '设标', '建标', '推进', '收尾', '内部路由'
   ]);
