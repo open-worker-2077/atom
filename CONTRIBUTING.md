@@ -2,7 +2,7 @@
 
 ## 开始之前
 
-需要 Node.js 22 或更高版本、Git 与已登录的 GitHub CLI。阅读 `README.md`、`docs/ARCHITECTURE.md` 和相关 ADR，并确认工作对应真实 Issue 或用户明确要求。
+需要 Node.js 22 或更高版本、Git 与已登录的 GitHub CLI。开始实质开发前，调用全局安装的官方 superpowers:using-superpowers，读取相关 docs/superpowers/specs 与当前 docs/superpowers/plans。GitHub Issue 可以接收线索或承载外部协作，但不是需求、状态或完成权威；docs/history/development-control 只用于追溯。
 
 ```powershell
 git switch main
@@ -16,7 +16,7 @@ npm.cmd test
 - 视觉交互层只负责空间呈现、视角、节点命中和视觉意图。
 - 业务计算、权限、审批和数据流转不得进入3D引擎。
 - 输入设备与功能意图分离；新增设备映射优先修改 `input-config.js`。
-- 新增跨项目通用工作流时再考虑 Skill，单项目事实留在仓库文档与 GitHub。
+- Atom 产品合同保存在批准的 Superpowers 规格中；实施步骤保存在当前 Superpowers 计划中。不得建立平行状态表或复制官方 Skill 定义。
 
 ## 测试与实际渲染
 

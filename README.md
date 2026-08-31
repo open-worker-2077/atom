@@ -68,7 +68,9 @@ $request | atom.cmd --agent "已创建的 Agent 窗口" --stdin
 - [架构决策](docs/adr/)：重要取舍及其原因
 - [贡献指南](CONTRIBUTING.md)：开发与提交方式
 - [版本记录](CHANGELOG.md)：已发布变化
-- [开发总控](https://github.com/users/open-worker-2077/projects/2)：实时需求、职责、阻断与交付状态
+- [设计规格](docs/superpowers/specs/)：当前产品边界、关系、不变量与验收
+- [实施计划](docs/superpowers/plans/)：按官方 Superpowers writing-plans 生成的当前执行步骤
+- [历史控制材料](docs/history/development-control/)：GitHub 与 OpenSpec 的只读演进证据
 
 ## 项目状态
 
