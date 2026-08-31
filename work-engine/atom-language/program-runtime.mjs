@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { legacyAtomContextMetadata } from './context-store.mjs';
+import { legacyAtomContextMetadata, projectAtomContext } from './context-store.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import {
   executeProgramExplore,
@@ -15,6 +15,7 @@ import {
 import { matchesExactSelector } from './exact-selector.mjs';
 import { normalizeTypePredicate } from './program-locks.mjs';
 import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
+import { buildSupportDeliveries, evaluateSupportClausesWithPrograms } from './support-runtime.mjs';
 import { shortcutMetadata } from './shortcut-runtime.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
@@ -26,6 +27,52 @@ const workerFile = path.join(path.dirname(fileURLToPath(import.meta.url)), 'prog
 const preparedRecordSnapshots = new WeakMap();
 const preparedProgramSnapshots = new WeakMap();
 const isolatedProgramPathsByRecords = new WeakMap();
+
+function withoutGraphRoot(graphDocument, graphPath) {
+  const root = graphDocument?.graph?.thing;
+  const prefix = typeof root === 'string' ? `${root}/` : '';
+  return prefix && graphPath.startsWith(prefix) ? graphPath.slice(prefix.length) : graphPath;
+}
+
+function slotScopeRoot(path) {
+  const parts = String(path).split('/');
+  const index = parts.lastIndexOf('槽例');
+  return index >= 0 && parts[index + 1] ? parts.slice(0, index + 2).join('/') : null;
+}
+
+function supportDeliveryKey(delivery) {
+  return [
+    delivery?.revision,
+    delivery?.clauseId,
+    delivery?.consequentPath,
+    delivery?.consequentOrdinal
+  ].join('\0');
+}
+
+function uniqueSupportDeliveries(deliveries = []) {
+  return [...new Map(deliveries.map((delivery) => [supportDeliveryKey(delivery), delivery])).values()];
+}
+
+function supportAffectedGraphPaths(graphDocument, triggerEvent) {
+  const graphRoot = graphDocument.graph.thing;
+  const exactPaths = Array.isArray(triggerEvent?.affectedPaths)
+    ? triggerEvent.affectedPaths
+    : triggerEvent?.nodes ?? [];
+  return [...new Set(exactPaths.flatMap((node) => {
+    const parts = String(node).split('/').filter(Boolean);
+    return parts.map((_, index) => `${graphRoot}/${parts.slice(0, index + 1).join('/')}`);
+  }))];
+}
+
+function projectSupportContext(atoms) {
+  try {
+    return projectAtomContext(atoms);
+  } catch {
+    // Program scheduling is not a second world validator. Invalid candidate Graph facts are
+    // rejected by the central transaction; unrelated Program triggers must remain usable.
+    return null;
+  }
+}
 
 function freezePrepared(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
@@ -1121,6 +1168,8 @@ export class ProgramRuntimeScheduler {
     this.agentSecurity = new Map();
     this.agentSecurityWorldRevision = null;
     this.latestRecords = null;
+    this.preparedSupportGraphs = new Map();
+    this.supportDeliveryExecutions = new Map();
     if (this.projectionRepository
       && (typeof this.projectionRepository.load !== 'function'
         || typeof this.projectionRepository.save !== 'function')) {
@@ -1144,12 +1193,39 @@ export class ProgramRuntimeScheduler {
     }
   }
 
+  confirmSupportDeliveries(keys = []) {
+    for (const key of new Set(keys.filter(Boolean))) {
+      const entry = this.supportDeliveryExecutions.get(key);
+      if (!entry || entry.status === 'confirmed') continue;
+      entry.status = 'confirmed';
+      entry.resolve('confirmed');
+    }
+    const limit = this.maxCompleted * Math.max(1, this.maxWorkers);
+    for (const [key, entry] of this.supportDeliveryExecutions) {
+      if (this.supportDeliveryExecutions.size <= limit) break;
+      if (entry.status === 'confirmed') this.supportDeliveryExecutions.delete(key);
+    }
+  }
+
+  releaseSupportDeliveries(keys = []) {
+    for (const key of new Set(keys.filter(Boolean))) {
+      const entry = this.supportDeliveryExecutions.get(key);
+      if (!entry || entry.status === 'confirmed') continue;
+      this.supportDeliveryExecutions.delete(key);
+      entry.status = 'released';
+      entry.resolve('released');
+    }
+  }
+
   async evaluateSupportProgram(atoms, selector, options = {}) {
     const records = worldRecords(atoms);
     const [program] = programRecords(records, selector);
     const preparedWorld = options.executeExplore ? null : prepareExploreWorld(atoms);
-    const executeExplore = options.executeExplore ?? ((request) => executeProgramExplore({
-      atoms, request, preparedWorld
+    const executeExplore = options.executeExplore ?? ((request, executionContext = {}) => executeProgramExplore({
+      atoms,
+      request,
+      preparedWorld,
+      scopeRoot: executionContext.scopeRoot ?? null
     }));
     const result = await this.runBounded(() => this.runProgram({
       python: this.python,
@@ -1843,6 +1919,30 @@ export class ProgramRuntimeScheduler {
 
   async refresh(atoms, options = {}) {
     const preparedTriggerEvent = options.triggerEvent ?? null;
+    const supportWorldRevision = revisionOfWorldFacts(atoms);
+    let supportGraphDocument = null;
+    let changedSupportGraphPaths = [];
+    let affectedSupportClauseIds = new Set();
+    if (preparedTriggerEvent?.mode === 'transform') {
+      const preparedBaseRevision = preparedTriggerEvent.preparedSupportIndexValid === true
+        ? preparedTriggerEvent.supportBaseRevision
+        : null;
+      supportGraphDocument = typeof preparedBaseRevision === 'string'
+        ? this.preparedSupportGraphs.get(preparedBaseRevision) ?? projectSupportContext(atoms)
+        : projectSupportContext(atoms);
+      if (supportGraphDocument) {
+        this.preparedSupportGraphs.set(supportWorldRevision, supportGraphDocument);
+        while (this.preparedSupportGraphs.size > this.maxCompleted) {
+          this.preparedSupportGraphs.delete(this.preparedSupportGraphs.keys().next().value);
+        }
+        changedSupportGraphPaths = supportAffectedGraphPaths(
+          supportGraphDocument, preparedTriggerEvent
+        );
+        affectedSupportClauseIds = new Set(changedSupportGraphPaths.flatMap((affectedPath) => (
+          supportGraphDocument.dependencyIndex.get(affectedPath) ?? []
+        )));
+      }
+    }
     if (preparedTriggerEvent?.preparedIndexesValid === true
       && this.triggerContractsInitialized
       && this.latestRecords
@@ -1865,7 +1965,9 @@ export class ProgramRuntimeScheduler {
       const slotCandidates = slotProgramInvocationsForEvent(
         atoms, preparedTriggerEvent, this.triggerContracts
       );
-      if (candidatePaths.size === 0 && slotCandidates.length === 0) {
+      if (candidatePaths.size === 0
+        && slotCandidates.length === 0
+        && affectedSupportClauseIds.size === 0) {
         const locks = await this.activeRequestDrivenLocks();
         return {
           fingerprint: `prepared-index:${crypto.randomUUID()}`,
@@ -1901,6 +2003,15 @@ export class ProgramRuntimeScheduler {
     await this.activeRequestDrivenLocks(atoms);
     const records = worldRecords(atoms);
     this.latestRecords = records;
+    if (!preparedTriggerEvent && options.prepareAllIndexes === true) {
+      if (!this.preparedSupportGraphs.has(supportWorldRevision)) {
+        const supportGraph = projectSupportContext(atoms);
+        if (supportGraph) this.preparedSupportGraphs.set(supportWorldRevision, supportGraph);
+        while (this.preparedSupportGraphs.size > this.maxCompleted) {
+          this.preparedSupportGraphs.delete(this.preparedSupportGraphs.keys().next().value);
+        }
+      }
+    }
     const compatibility = legacyAtomContextMetadata(atoms);
     if (compatibility) {
       isolatedProgramPathsByRecords.set(records, new Set(compatibility.isolatedProgramPaths ?? []));
@@ -1930,15 +2041,33 @@ export class ProgramRuntimeScheduler {
       }));
     }
 
+    const attemptSupportDeliveryClaims = new Set();
     const pending = this.computeRefresh(atoms, options, {
-      records, programs, availablePrograms, isolateFailures, key
+      records,
+      programs,
+      availablePrograms,
+      isolateFailures,
+      key,
+      supportGraphDocument,
+      changedSupportGraphPaths,
+      attemptSupportDeliveryClaims
+    }).catch((error) => {
+      this.releaseSupportDeliveries([...attemptSupportDeliveryClaims]);
+      throw error;
     }).finally(() => this.inflight.delete(key));
     this.inflight.set(key, pending);
     return pending;
   }
 
   async computeRefresh(atoms, options, {
-    records, programs, availablePrograms, isolateFailures, key
+    records,
+    programs,
+    availablePrograms,
+    isolateFailures,
+    key,
+    supportGraphDocument,
+    changedSupportGraphPaths,
+    attemptSupportDeliveryClaims
   }) {
     const cycleDeadline = Date.now() + this.timeoutMs;
     const indexWorld = options.prepareAllIndexes === true ? prepareExploreWorld(atoms) : null;
@@ -1969,21 +2098,66 @@ export class ProgramRuntimeScheduler {
       snapshots: new Map()
     };
     const preparedWorld = options.executeExplore ? null : (indexWorld ?? prepareExploreWorld(atoms));
-    const executeExplore = options.executeExplore ?? ((request) => executeProgramExplore({
-      atoms, request, preparedWorld
+    const executeExplore = options.executeExplore ?? ((request, executionContext = {}) => executeProgramExplore({
+      atoms,
+      request,
+      preparedWorld,
+      scopeRoot: executionContext.scopeRoot ?? null
     }));
     const triggerEvent = options.triggerEvent ?? null;
-    if (triggerEvent && (triggerEvent.mode !== 'transform'
+    if (triggerEvent && (!['transform', 'support'].includes(triggerEvent.mode)
       || !Array.isArray(triggerEvent.nodes)
       || triggerEvent.nodes.length === 0
-      || triggerEvent.nodes.some((node) => typeof node !== 'string' || !node.trim()))) {
-      throw Object.assign(new Error('transform trigger event requires one non-empty nodes string list'), {
+      || triggerEvent.nodes.some((node) => typeof node !== 'string' || !node.trim())
+      || (triggerEvent.affectedPaths !== undefined
+        && (!Array.isArray(triggerEvent.affectedPaths)
+          || triggerEvent.affectedPaths.some((node) => typeof node !== 'string' || !node.trim())))
+      || (triggerEvent.mode === 'support' && (!Array.isArray(triggerEvent.deliveries)
+        || triggerEvent.deliveries.length === 0
+        || triggerEvent.deliveries.some((delivery) => delivery?.mode !== 'support'
+          || delivery.decision !== true
+          || !triggerEvent.nodes.includes(delivery.consequentPath)))))) {
+      throw Object.assign(new Error('trigger event requires one valid transform or support payload'), {
         code: 'INVALID_PROGRAM_TRIGGER_EVENT'
       });
     }
     if (triggerEvent) await this.ensureTriggerContracts(
       records, programs, executeExplore, options.agentOrigin
     );
+    let derivedSupportDeliveries = [];
+    if (triggerEvent?.mode === 'transform' && supportGraphDocument) {
+      const graphDocument = supportGraphDocument;
+      const graphChangedPaths = changedSupportGraphPaths.length
+        ? changedSupportGraphPaths
+        : supportAffectedGraphPaths(graphDocument, triggerEvent);
+      const decisions = await evaluateSupportClausesWithPrograms(graphDocument, {
+        changedPaths: graphChangedPaths,
+        evaluateProgram: (selector, { clause }) => {
+          const atomPath = graphDocument.atomPathByGraphPath?.get(selector);
+          if (!atomPath) {
+            throw Object.assign(new Error(`Program support endpoint has no Atom identity: ${selector}`), {
+              code: 'SUPPORT_PROGRAM_IDENTITY_REQUIRED'
+            });
+          }
+          const antecedentPath = graphDocument.atomPathByGraphPath?.get(clause.antecedentPaths?.[0]);
+          const scopeRoot = slotScopeRoot(antecedentPath);
+          return this.evaluateSupportProgram(atoms, atomPath, {
+            executeExplore,
+            ...(scopeRoot ? { scopeRoot } : {})
+          });
+        }
+      });
+      derivedSupportDeliveries = uniqueSupportDeliveries(buildSupportDeliveries(graphDocument, {
+        decisions,
+        revision: revisionOfWorldFacts(atoms)
+      }).map((delivery) => Object.freeze({
+        ...delivery,
+        antecedentPaths: Object.freeze(delivery.antecedentPaths.map((value) => (
+          withoutGraphRoot(graphDocument, value)
+        ))),
+        consequentPath: withoutGraphRoot(graphDocument, delivery.consequentPath)
+      })));
+    }
     const triggerIndexBackfilled = this.backfillTriggerIndexForEvent(triggerEvent);
     const eventNodes = new Set((triggerEvent?.nodes ?? []).map((node) => node.trim()));
     const triggeredProgramPaths = new Set();
@@ -1994,7 +2168,24 @@ export class ProgramRuntimeScheduler {
         }
       }
     }
-    const slotCandidates = slotProgramInvocationsForEvent(atoms, triggerEvent, this.triggerContracts);
+    const activeSupportDeliveries = uniqueSupportDeliveries(triggerEvent?.mode === 'support'
+      ? triggerEvent.deliveries
+      : derivedSupportDeliveries);
+    const supportEvent = activeSupportDeliveries.length ? {
+      mode: 'support',
+      nodes: [...new Set(activeSupportDeliveries.map((delivery) => delivery.consequentPath))]
+    } : null;
+    if (supportEvent) this.backfillTriggerIndexForEvent(supportEvent);
+    const slotCandidates = [
+      ...(triggerEvent?.mode === 'transform'
+        ? slotProgramInvocationsForEvent(atoms, triggerEvent, this.triggerContracts)
+        : []),
+      ...activeSupportDeliveries.flatMap((supportDelivery) => (
+        slotProgramInvocationsForEvent(atoms, {
+          mode: 'support', nodes: [supportDelivery.consequentPath]
+        }, this.triggerContracts).map((invocation) => ({ ...invocation, supportDelivery }))
+      ))
+    ];
     let cycleInvocations = null;
     if (typeof options.slotTriggerCycleId === 'string' && options.slotTriggerCycleId) {
       if (!this.slotInvocationCycles.has(options.slotTriggerCycleId)) {
@@ -2007,7 +2198,12 @@ export class ProgramRuntimeScheduler {
     }
     const slotInvocations = [];
     for (const invocation of slotCandidates) {
-      const invocationKey = `${invocation.programPath}\0${invocation.scopeRoot}\0${invocation.revision}`;
+      const invocationKey = [
+        invocation.programPath,
+        invocation.scopeRoot,
+        invocation.revision,
+        invocation.supportDelivery ? supportDeliveryKey(invocation.supportDelivery) : ''
+      ].join('\0');
       if (cycleInvocations?.has(invocationKey)) continue;
       cycleInvocations?.add(invocationKey);
       slotInvocations.push(invocation);
@@ -2018,6 +2214,15 @@ export class ProgramRuntimeScheduler {
         slotInvocationsByProgram.set(invocation.programPath, []);
       }
       slotInvocationsByProgram.get(invocation.programPath).push(invocation);
+    }
+    const supportInvocationsByProgram = new Map();
+    if (activeSupportDeliveries.length) {
+      for (const delivery of activeSupportDeliveries) {
+        for (const programPath of this.triggerIndex.get(`support\0${delivery.consequentPath}`) ?? []) {
+          if (!supportInvocationsByProgram.has(programPath)) supportInvocationsByProgram.set(programPath, []);
+          supportInvocationsByProgram.get(programPath).push(delivery);
+        }
+      }
     }
     const fingerprintDependencies = (requests) => dependencyFingerprint(
       requests, executeExplore, records, dependencyCache
@@ -2124,17 +2329,25 @@ export class ProgramRuntimeScheduler {
           || dependencyTriggeredProgramPaths.has(program.path)
           || eventNodes.has(program.path)
           || slotInvocationsByProgram.has(program.path)
+          || supportInvocationsByProgram.has(program.path)
         ))
       : programs;
     const operationEntries = indexedPrograms.flatMap((program) => {
       const ownerPath = owningAgentPath(program, recordsByRef);
       if (programUsesJump(program) && ownerPath && ownerPath !== scopePath) return [];
       const scoped = slotInvocationsByProgram.get(program.path) ?? [];
-      return scoped.length
-        ? scoped.map((slotInvocation) => ({ program, slotInvocation }))
-        : [{ program, slotInvocation: null }];
+      if (scoped.length) return scoped.map((slotInvocation) => ({
+        program,
+        slotInvocation,
+        supportDelivery: slotInvocation.supportDelivery ?? null
+      }));
+      const supportDeliveries = supportInvocationsByProgram.get(program.path) ?? [];
+      if (supportDeliveries.length) {
+        return supportDeliveries.map((supportDelivery) => ({ program, slotInvocation: null, supportDelivery }));
+      }
+      return [{ program, slotInvocation: null, supportDelivery: null }];
     });
-    const operations = operationEntries.map(async ({ program, slotInvocation }) => {
+    const operations = operationEntries.map(async ({ program, slotInvocation, supportDelivery }) => {
       const dormantKey = programSetFingerprint([program], isolateFailures, records);
       const dormantFailure = this.dormantFailures.get(dormantKey) ?? null;
       const reuseDormantContextFailure = dormantFailure?.contextDependent === true
@@ -2153,7 +2366,7 @@ export class ProgramRuntimeScheduler {
         triggerContract || (triggerEntry?.changedThings?.length ?? 0) > 0
       );
       const forcedByTrigger = triggerEvent
-        && (triggeredProgramPaths.has(program.path) || Boolean(slotInvocation));
+        && (triggeredProgramPaths.has(program.path) || Boolean(slotInvocation) || Boolean(supportDelivery));
       if (dormantFailure
         && options.force !== true
         && !forcedByTrigger
@@ -2229,6 +2442,45 @@ export class ProgramRuntimeScheduler {
         }
       }
 
+      const deliveryExecutionKey = supportDelivery ? [
+        program.path,
+        slotInvocation?.scopeRoot ?? options.slotScopeRoot ?? '',
+        supportDeliveryKey(supportDelivery)
+      ].join('\0') : null;
+      let claimedDelivery = false;
+      if (deliveryExecutionKey) {
+        while (!claimedDelivery) {
+          const existing = this.supportDeliveryExecutions.get(deliveryExecutionKey);
+          if (existing) {
+            const status = existing.status === 'confirmed'
+              ? 'confirmed'
+              : await existing.finalized;
+            if (status === 'confirmed') {
+              return {
+                programPath: program.path,
+                result: {
+                  locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+                  trigger: null
+                },
+                cached: true,
+                requests: [],
+                contextDependent: false
+              };
+            }
+            continue;
+          }
+          let resolveFinalization;
+          const finalized = new Promise((resolve) => { resolveFinalization = resolve; });
+          this.supportDeliveryExecutions.set(deliveryExecutionKey, {
+            status: 'claimed',
+            finalized,
+            resolve: resolveFinalization
+          });
+          attemptSupportDeliveryClaims.add(deliveryExecutionKey);
+          claimedDelivery = true;
+        }
+      }
+
       const requests = [];
       const executionStartedAt = performance.now();
       try {
@@ -2252,7 +2504,7 @@ export class ProgramRuntimeScheduler {
             scopeRoot: effectiveScopeRoot,
             programRoot: slotInvocation?.programRoot ?? options.slotScopeRoot ?? null,
             invokeMain: false,
-            programArguments: slotInvocation ? {
+            programArguments: supportDelivery ?? (slotInvocation ? {
               event: {
                 mode: triggerEvent.mode,
                 path: slotInvocation.eventPath,
@@ -2260,7 +2512,7 @@ export class ProgramRuntimeScheduler {
               },
               scope_root: slotInvocation.scopeRoot,
               revision: slotInvocation.revision
-            } : {},
+            } : {}),
             allowedFunctions: (() => {
               const allowed = this.agentSecurity.get(
                 agentScopePath(options.agentOrigin)
@@ -2283,9 +2535,16 @@ export class ProgramRuntimeScheduler {
             }
           });
         });
-        const result = program.types.includes('agent')
+        const normalizedResult = program.types.includes('agent')
           ? { ...rawResult, agentRegistrations: [] }
           : rawResult;
+        const result = supportDelivery ? {
+          ...normalizedResult,
+          transforms: (normalizedResult.transforms ?? []).map((request) => ({
+            ...request,
+            sourceSupportDeliveryClaim: deliveryExecutionKey
+          }))
+        } : normalizedResult;
         const uniqueRequests = [...new Map(requests.map((request) => (
           [JSON.stringify(request), request]
         ))).values()];
@@ -2322,9 +2581,10 @@ export class ProgramRuntimeScheduler {
             this.programReusable.set(independentStateKey, reusableState);
           }
         }
-        return {
+        const operation = {
           programPath: program.path,
           result,
+          ...(deliveryExecutionKey ? { supportDeliveryClaim: deliveryExecutionKey } : {}),
           cached: false,
           requests: uniqueRequests,
           contextDependent,
@@ -2333,8 +2593,19 @@ export class ProgramRuntimeScheduler {
             durationMs: performance.now() - executionStartedAt
           }
         };
+        return operation;
       } catch (error) {
-        const failure = describeProgramFailure(error, program);
+        const describedFailure = describeProgramFailure(error, program);
+        const failure = supportDelivery
+          ? {
+              ...describedFailure,
+              blocking: true,
+              details: {
+                ...(describedFailure.details ?? {}),
+                supportDelivery: supportDeliveryKey(supportDelivery)
+              }
+            }
+          : describedFailure;
         const uniqueRequests = [...new Map(requests.map((request) => (
           [JSON.stringify(request), request]
         ))).values()];
@@ -2355,7 +2626,7 @@ export class ProgramRuntimeScheduler {
               this.dormantFailures.delete(this.dormantFailures.keys().next().value);
             }
           }
-          return {
+          const operation = {
             programPath: program.path,
             failure,
             cached: false,
@@ -2366,6 +2637,8 @@ export class ProgramRuntimeScheduler {
               durationMs: performance.now() - executionStartedAt
             }
           };
+          if (claimedDelivery) this.releaseSupportDeliveries([deliveryExecutionKey]);
+          return operation;
         }
         if (isolateFailures) {
           if (!slotInvocation && !options.slotScopeRoot && !contextDependent) {
@@ -2377,18 +2650,20 @@ export class ProgramRuntimeScheduler {
               this.dormantFailures.delete(this.dormantFailures.keys().next().value);
             }
           }
-          return {
-            programPath: program.path,
-            failure,
+        const operation = {
+          programPath: program.path,
+          failure,
             cached: false,
             requests: uniqueRequests,
             contextDependent,
             execution: {
               fingerprint: programDiagnosticIdentity(program).fingerprint,
-              durationMs: performance.now() - executionStartedAt
-            }
-          };
-        }
+            durationMs: performance.now() - executionStartedAt
+          }
+        };
+        if (claimedDelivery) this.releaseSupportDeliveries([deliveryExecutionKey]);
+        return operation;
+      }
         throw error;
       }
     });
@@ -2416,6 +2691,11 @@ export class ProgramRuntimeScheduler {
       ));
     }
     const applicable = settled.filter((entry) => !(entry.contextDependent === true && !scopePath));
+    const ignoredSupportDeliveryClaims = settled
+      .filter((entry) => entry.contextDependent === true && !scopePath)
+      .map((entry) => entry.supportDeliveryClaim)
+      .filter(Boolean);
+    this.releaseSupportDeliveries(ignoredSupportDeliveryClaims);
     const contextIncomplete = settled.some((entry) => (
       entry.contextDependent === true && !scopePath
     ));
@@ -2456,6 +2736,9 @@ export class ProgramRuntimeScheduler {
       exploreRequests: structuredClone(uniqueRequests),
       exploreReadPaths,
       failures: applicable.flatMap((entry) => entry.failure ? [entry.failure] : []),
+      supportDeliveryClaims: applicable
+        .filter((entry) => entry.cached === false && entry.result && entry.supportDeliveryClaim)
+        .map((entry) => entry.supportDeliveryClaim),
       executedProgramPaths: applicable
         .filter((entry) => entry.cached === false && entry.result)
         .map((entry) => entry.programPath),

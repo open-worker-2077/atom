@@ -4,6 +4,7 @@ import test from 'node:test';
 import { parseGraphDocument } from '../cli/lib/graph-json.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import {
+  buildSupportDeliveries,
   evaluateSupportClausesWithPrograms,
   propagateSupportClauses
 } from '../work-engine/atom-language/support-runtime.mjs';
@@ -78,6 +79,43 @@ test('an independent support-decision Program gates one ordinary Thing-to-Thing 
     established.propagation.edges.map(({ fromPath, toPath }) => ({ fromPath, toPath })),
     [{ fromPath: '世界/前项', toPath: '世界/后项' }]
   );
+});
+
+test('strict true produces immutable revision-bound deliveries while false produces none', async () => {
+  const parsed = parseGraphDocument({
+    config: { schema_version: '2.0.0' },
+    graph: {
+      thing: '世界', situation: '', support: [], contain: [
+        atom('前项', '', '', [{
+          'if@current': true,
+          if: [{ 'thing@program': '判定' }],
+          then: [{ thing: '后项甲' }, { thing: '后项乙' }]
+        }]),
+        atom('判定', 'def main(arguments):\n    return True', 'program'),
+        atom('后项甲'),
+        atom('后项乙')
+      ]
+    }
+  });
+  const clauseId = 'support:世界/前项:0';
+  const truth = new Map([[clauseId, { status: 'true', decision: true, trace: ['世界/判定'] }]]);
+  const deliveries = buildSupportDeliveries(parsed, { decisions: truth, revision: 'sha256:r1' });
+
+  assert.deepEqual(deliveries, [
+    {
+      mode: 'support', revision: 'sha256:r1', clauseId, decision: true,
+      antecedentPaths: ['世界/前项'], consequentPath: '世界/后项甲', consequentOrdinal: 0
+    },
+    {
+      mode: 'support', revision: 'sha256:r1', clauseId, decision: true,
+      antecedentPaths: ['世界/前项'], consequentPath: '世界/后项乙', consequentOrdinal: 1
+    }
+  ]);
+  assert.ok(deliveries.every(Object.isFrozen));
+  assert.deepEqual(buildSupportDeliveries(parsed, {
+    decisions: new Map([[clauseId, { status: 'false', decision: false, trace: ['世界/判定'] }]]),
+    revision: 'sha256:r1'
+  }), []);
 });
 
 test('support-decision Programs return strict true or false through their own main(arguments)', async () => {

@@ -293,7 +293,7 @@ function exactMatches(atoms, item, matcherRegistry, candidates = null) {
   return { matches, expected: nameField.value };
 }
 
-function failureBase(parsed, contextFile, projectionFile, atoms, errors, extra = {}) {
+function buildFailureBase(parsed, contextFile, projectionFile, atoms, errors, extra = {}) {
   const revision = revisionOf(atoms);
   return {
     ok: false,
@@ -690,6 +690,22 @@ async function persistChangedGraph({
 }
 
 export async function executeAtomLanguage(options = {}) {
+  const pendingSupportDeliveryClaims = new Set();
+  function rememberSupportDeliveryClaims(keys = []) {
+    for (const key of keys) if (key) pendingSupportDeliveryClaims.add(key);
+  }
+  function confirmSupportDeliveryClaims() {
+    options.programScheduler?.confirmSupportDeliveries?.([...pendingSupportDeliveryClaims]);
+    pendingSupportDeliveryClaims.clear();
+  }
+  function releaseSupportDeliveryClaims() {
+    options.programScheduler?.releaseSupportDeliveries?.([...pendingSupportDeliveryClaims]);
+    pendingSupportDeliveryClaims.clear();
+  }
+  function failureBase(...args) {
+    releaseSupportDeliveryClaims();
+    return buildFailureBase(...args);
+  }
   const operationStartedAt = performance.now();
   const source = options.source;
   const receiver = options.receiver ?? createAtomLanguageReceiver(options.receiverOptions);
@@ -1015,6 +1031,7 @@ export async function executeAtomLanguage(options = {}) {
         cached: programCycle.cached === true
       });
     } catch (error) {
+      releaseSupportDeliveryClaims();
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
       )]);
@@ -1043,6 +1060,16 @@ export async function executeAtomLanguage(options = {}) {
       fatalJumpFailure.code,
       fatalJumpFailure.message ?? '窗口跳转候选失败',
       { ...(fatalJumpFailure.details ?? {}), program: fatalJumpFailure.programPath }
+    )]);
+  }
+  const missingSupportDelivery = (programCycle.failures ?? []).find((failure) => (
+    failure.code === 'SUPPORT_DELIVERY_REQUIRED'
+  ));
+  if (missingSupportDelivery && options.programMode !== 'project') {
+    return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+      missingSupportDelivery.code,
+      missingSupportDelivery.message ?? 'support subscriber requires one typed true delivery',
+      { ...(missingSupportDelivery.details ?? {}), program: missingSupportDelivery.programPath }
     )]);
   }
   const activeLocks = [...programCycle.locks, ...activeRequestDrivenLocks];
@@ -1203,6 +1230,7 @@ export async function executeAtomLanguage(options = {}) {
           recordsByPath
         });
       } catch (error) {
+        releaseSupportDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
           error.code ?? 'WINDOW_JUMP_AUTHORIZATION_INVALID', error.message
         )]);
@@ -1771,11 +1799,13 @@ export async function executeAtomLanguage(options = {}) {
         await recordTransformStage('reconcile', refreshStartedAt, { outcome: 'failure' });
         throw error;
       }
+      rememberSupportDeliveryClaims(cycle.supportDeliveryClaims);
       await recordTransformStage('reconcile', refreshStartedAt, {
         ...(cycle.reconcileSummary ?? {})
       });
-      if (failOnProgramFailure && (cycle.failures?.length ?? 0) > 0) {
-        const failure = cycle.failures[0];
+      const blockingFailure = (cycle.failures ?? []).find((failure) => failure.blocking === true);
+      if ((failOnProgramFailure && (cycle.failures?.length ?? 0) > 0) || blockingFailure) {
+        const failure = blockingFailure ?? cycle.failures[0];
         throw Object.assign(new Error(failure.message ?? '槽例派生重算失败'), {
           code: failure.code ?? 'ATOM_PROGRAM_FAILED',
           details: { ...(failure.details ?? {}), program: failure.programPath }
@@ -1863,6 +1893,7 @@ export async function executeAtomLanguage(options = {}) {
           sourceProgramRef: _sourceProgramRef,
           sourceProgramPath,
           sourceScopeRoot = null,
+          sourceSupportDeliveryClaim = null,
           ...rawTransformRequest
         } = request;
         let transformRequest;
@@ -1873,7 +1904,8 @@ export async function executeAtomLanguage(options = {}) {
             scopeRoot: sourceScopeRoot
           });
         } catch (error) {
-          if (programDeclaresSlotSeal(cycle.slotBodies, sourceProgramPath)) {
+          if (sourceSupportDeliveryClaim
+            || programDeclaresSlotSeal(cycle.slotBodies, sourceProgramPath)) {
             throw Object.assign(new Error(error.message), {
               code: error.code ?? 'INVALID_PROGRAM_TRANSFORM',
               details: { program: sourceProgramPath, ...(error.details ?? {}) }
@@ -1887,7 +1919,8 @@ export async function executeAtomLanguage(options = {}) {
         }
         const compiled = compileProgramTransform({ request: transformRequest, receiver });
         if (!compiled.ok) {
-          if (programDeclaresSlotSeal(cycle.slotBodies, sourceProgramPath)) {
+          if (sourceSupportDeliveryClaim
+            || programDeclaresSlotSeal(cycle.slotBodies, sourceProgramPath)) {
             throw Object.assign(new Error(
               compiled.errors?.[0]?.message ?? 'Program transform 无法编译'
             ), {
@@ -1904,6 +1937,7 @@ export async function executeAtomLanguage(options = {}) {
         }
         compiledRequests.push({
           sourceProgramPath,
+          sourceSupportDeliveryClaim,
           transformRequest,
           item: compiled.item,
           createNew: compiled.createNew
@@ -1967,7 +2001,8 @@ export async function executeAtomLanguage(options = {}) {
                   exactIndex
                 });
           } catch (error) {
-            if (programDeclaresSlotSeal(cycle.slotBodies, entry.sourceProgramPath)) {
+            if (entry.sourceSupportDeliveryClaim
+              || programDeclaresSlotSeal(cycle.slotBodies, entry.sourceProgramPath)) {
               return {
                 failed: true,
                 fatal: {
@@ -1992,7 +2027,8 @@ export async function executeAtomLanguage(options = {}) {
             if (mutateInput && transformed.rolledBack) {
               exactIndex = createExactTransformIndex(candidateAtoms);
             }
-            if (programDeclaresSlotSeal(cycle.slotBodies, entry.sourceProgramPath)) {
+            if (entry.sourceSupportDeliveryClaim
+              || programDeclaresSlotSeal(cycle.slotBodies, entry.sourceProgramPath)) {
               return {
                 failed: true,
                 fatal: {
@@ -2161,8 +2197,18 @@ export async function executeAtomLanguage(options = {}) {
           receipt?.target,
           ...(receipt?.recompute_targets ?? [])
         ]))).filter(Boolean))];
+        const affectedPaths = [...new Set(application.applied.flatMap(({ transformed }) => ([
+          transformed.sourcePath,
+          transformed.resultPath,
+          ...(transformed.relationPaths ?? []),
+          ...(transformed.shortcutPaths ?? [])
+        ])).concat(appliedSlotBodies.flatMap(({ receipt }) => ([
+          receipt?.body,
+          receipt?.target,
+          ...(receipt?.recompute_targets ?? [])
+        ]))).filter(Boolean))];
         pendingTriggerEvent = triggeredNodes.length
-          ? { mode: 'transform', nodes: triggeredNodes }
+          ? { mode: 'transform', nodes: triggeredNodes, affectedPaths }
           : null;
       }
       if (!passChanged) {
@@ -2198,7 +2244,7 @@ export async function executeAtomLanguage(options = {}) {
     const cycle = await options.programScheduler.refresh(candidateAtoms, {
       agentOrigin: interaction.agent,
       isolateFailures: true,
-      triggerEvent: { mode: 'transform', nodes: triggerNodes },
+      triggerEvent: { mode: 'transform', nodes: triggerNodes, affectedPaths: triggerNodes },
       executeExplore: (request, executionContext = {}) => executeProgramExplore({
         atoms: candidateAtoms,
         request,
@@ -2303,12 +2349,14 @@ export async function executeAtomLanguage(options = {}) {
         .map(({ path }) => path)
         .filter(Boolean))].sort();
     } catch (error) {
+      releaseSupportDeliveryClaims();
       await recordTransformStage('commit', commitStartedAt, {
         commitEntered: true,
         outcome: 'failure'
       });
       throw error;
     }
+    confirmSupportDeliveryClaims();
     await recordTransformStage('commit', commitStartedAt, { commitEntered: true });
     if (!committedAffectedPaths.length) {
       committedAffectedPaths = Array.isArray(changedPaths)
@@ -2406,6 +2454,7 @@ export async function executeAtomLanguage(options = {}) {
         strictSlotRecompute
       );
     } catch (error) {
+      releaseSupportDeliveryClaims();
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
       )]);
@@ -2655,6 +2704,7 @@ export async function executeAtomLanguage(options = {}) {
           nodes: [...transformEventNodes]
         });
       } catch (error) {
+        releaseSupportDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
           error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
         )]);
@@ -2691,6 +2741,7 @@ export async function executeAtomLanguage(options = {}) {
       );
       interactionWarnings.push(...compiled.warnings);
       if (!compiled.ok) {
+        releaseSupportDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, compiled.errors);
       }
       const delegated = await validateRegisteredAgentSourceDelegation({
@@ -2703,6 +2754,7 @@ export async function executeAtomLanguage(options = {}) {
         programScheduler: options.programScheduler
       });
       if (!delegated.ok) {
+        releaseSupportDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
       }
       await commitChangedGraph(nextAtoms, {
@@ -2723,6 +2775,7 @@ export async function executeAtomLanguage(options = {}) {
         }
       }
     }
+    if (!changed) confirmSupportDeliveryClaims();
     return {
       ok: true,
       language: 'atom',
@@ -2780,10 +2833,11 @@ export async function executeAtomLanguage(options = {}) {
     if (options.programScheduler) {
       try {
         postRefresh = await reconcileProgramsForWorld(nextAtoms, {
-          mode: 'transform', nodes: [created.resultPath]
+          mode: 'transform', nodes: [created.resultPath], affectedPaths: [created.resultPath]
         });
         nextAtoms = postRefresh.atoms;
       } catch (error) {
+        releaseSupportDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
           error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
         )]);
@@ -2832,6 +2886,7 @@ export async function executeAtomLanguage(options = {}) {
 
   const run = programRunRequest(item);
   if (run?.error) {
+    releaseSupportDeliveryClaims();
     return failureBase(parsed, contextFile, projectionFile, atoms, [run.error]);
   }
   if (run) {
@@ -2846,6 +2901,7 @@ export async function executeAtomLanguage(options = {}) {
           [...new Set(initialProgramTriggerNodes.filter(Boolean))]
         );
       } catch (error) {
+        releaseSupportDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
           error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
         )]);
@@ -2896,6 +2952,7 @@ export async function executeAtomLanguage(options = {}) {
     transactionTransformLog: options.transactionTransformLog ?? []
   });
   if (transformed.error) {
+    releaseSupportDeliveryClaims();
     return failureBase(parsed, contextFile, projectionFile, atoms, [transformed.error], { messages: interactionMessages });
   }
 
@@ -2917,6 +2974,7 @@ export async function executeAtomLanguage(options = {}) {
     );
     interactionWarnings.push(...compiled.warnings);
     if (!compiled.ok) {
+      releaseSupportDeliveryClaims();
       return failureBase(
         parsed,
         contextFile,
@@ -2935,15 +2993,25 @@ export async function executeAtomLanguage(options = {}) {
       programScheduler: options.programScheduler
     });
     if (!delegated.ok) {
+      releaseSupportDeliveryClaims();
       return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
     }
   }
   await recordTransformStage('transform-apply', transformApplyStartedAt);
+  const transformAffectedPaths = [...new Set([
+    transformed.sourcePath,
+    transformed.resultPath,
+    ...(transformed.relationPaths ?? []),
+    ...(transformed.shortcutPaths ?? [])
+  ].filter(Boolean))];
   if (options.programScheduler) {
     try {
       postRefresh = await reconcileProgramsForWorld(nextAtoms, {
         mode: 'transform',
         preparedIndexesValid: !programSurfaceChanged,
+        preparedSupportIndexValid: !programSurfaceChanged && isLocalizedSituationTransform(item),
+        supportBaseRevision: revisionOfWorldFacts(atoms),
+        affectedPaths: transformAffectedPaths,
         nodes: [...new Set([
           transformed.sourcePath,
           transformed.resultPath,
@@ -2956,6 +3024,7 @@ export async function executeAtomLanguage(options = {}) {
         || postRefresh.transformLogs.length > 0
         || postRefresh.pathChanges.length > 0;
     } catch (error) {
+      releaseSupportDeliveryClaims();
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
       )]);
@@ -2974,12 +3043,7 @@ export async function executeAtomLanguage(options = {}) {
     const canRebaseProjection = programTransformLogs.length === 0
       && postRefresh.transformLogs.length === 0
       && postRefresh.pathChanges.length === 0;
-    const transformedPaths = [...new Set([
-      transformed.sourcePath,
-      transformed.resultPath,
-      ...(transformed.relationPaths ?? []),
-      ...(transformed.shortcutPaths ?? [])
-    ].filter(Boolean))];
+    const transformedPaths = transformAffectedPaths;
     const inheritedSlotStructure = isStructurePreservingTransform(item)
       && inheritPreparedSlotStructureWorld(atoms, nextAtoms, transformedPaths);
     const preparedRuntimeRecordsPromise = canRebaseProjection
@@ -3052,6 +3116,7 @@ export async function executeAtomLanguage(options = {}) {
   performanceTrace('transform-result-lookup', {
     elapsedMs: Math.round(performance.now() - resultLookupStartedAt)
   });
+  if (!changed) confirmSupportDeliveryClaims();
   return {
     ok: true,
     language: 'atom',
