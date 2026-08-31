@@ -1,0 +1,56 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+
+function atom(key, name, situation = '', contain = []) {
+  return { [key]: name, situation, contain, support: [] };
+}
+
+const agentSource = [
+  'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","use_program"]}})',
+  'def main(arguments):',
+  '    return arguments'
+].join('\n');
+
+test('Agent registry is derived from literal declarations on ordinary Programs', async () => {
+  const scheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
+  const world = [
+    atom('thing@program', 'AgentProgram', agentSource),
+    atom('thing@program', 'OrdinaryProgram', 'value = 1')
+  ];
+  const security = await scheduler.deriveAgentSecurity(world);
+  assert.deepEqual([...security.keys()], ['AgentProgram']);
+  assert.deepEqual(security.get('AgentProgram'), {
+    labels: ['^'],
+    functionScopes: { groups: [], names: ['explore', 'use_program'] },
+    functions: ['explore', 'use_program']
+  });
+  assert.equal(world[0]['thing@program'], 'AgentProgram');
+  assert.equal(Object.keys(world[0]).some((key) => key.includes('@agent')), false);
+});
+
+test('ordinary Programs stay ordinary and nonliteral Agent declarations fail closed', async () => {
+  const scheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
+  assert.deepEqual(
+    [...(await scheduler.deriveAgentSecurity([
+      atom('thing@program', 'Ordinary', 'value = 1')
+    ])).keys()],
+    []
+  );
+  await assert.rejects(
+    scheduler.deriveAgentSecurity([
+      atom('thing@program', 'Dynamic', 'spec = {"functions":{"groups":[],"names":["explore"]}}\nagent(spec)')
+    ]),
+    (error) => error.code === 'AGENT_REGISTRATION_LITERAL_REQUIRED'
+  );
+});
+
+test('executing an Agent Program does not emit a registration mutation', async () => {
+  const scheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
+  const result = await scheduler.refresh([
+    atom('thing@program', 'AgentProgram', agentSource)
+  ], { programSelector: 'AgentProgram', isolateFailures: false });
+  assert.deepEqual(result.agentRegistrations, []);
+  assert.equal(scheduler.agentSecurity.get('AgentProgram').functions.includes('explore'), true);
+});

@@ -240,7 +240,7 @@ function sourceDefinitionFingerprint(programs) {
 }
 
 function agentSecurityFingerprint(programs) {
-  return sourceDefinitionFingerprint(programs.filter((program) => program.types.includes('agent')));
+  return sourceDefinitionFingerprint(programs);
 }
 
 function requestDrivenLockFingerprint(records, programs, securityFingerprint, locks = []) {
@@ -1249,13 +1249,11 @@ export class ProgramRuntimeScheduler {
     return result.supportDecision;
   }
 
-  async rebuildAgentSecurity(atoms) {
+  async deriveAgentSecurity(atoms) {
     const records = worldRecords(atoms);
     const programs = programRecords(records);
-    const registeredPrograms = programs.filter((program) => program.types.includes('agent'));
-    const fingerprint = agentSecurityFingerprint(registeredPrograms);
-    if (this.agentSecurityWorldRevision === fingerprint) return this.agentSecurity;
-    const registrations = await Promise.all(registeredPrograms.map((program) => (
+    const declarationCandidates = programs.filter((program) => /\bagent\s*\(/u.test(program.detail));
+    const inspected = await Promise.all(declarationCandidates.map((program) => (
       this.runBounded(() => this.inspectProgram({
         python: this.python,
         records,
@@ -1271,23 +1269,32 @@ export class ProgramRuntimeScheduler {
         validateOnly: true
       }))
     )));
-    const next = new Map();
-    for (const [index, program] of registeredPrograms.entries()) {
-      const declarations = registrations[index].agentRegistrations ?? [];
+    const derived = new Map();
+    for (const [index, program] of declarationCandidates.entries()) {
+      const declarations = inspected[index].agentRegistrations ?? [];
+      if (declarations.length === 0) continue;
       if (declarations.length !== 1) {
         throw Object.assign(
-          new Error(`Registered Agent Program requires exactly one literal agent() declaration: ${program.path}`),
+          new Error('Agent Program requires exactly one literal agent() declaration: ' + program.path),
           { code: 'AGENT_REGISTRATION_SOURCE_REQUIRED' }
         );
       }
-      const registration = declarations[0];
-      next.set(program.path, {
-        labels: [...registration.labels],
-        functionScopes: structuredClone(registration.functionScopes),
-        functions: [...registration.functions]
+      const declaration = declarations[0];
+      derived.set(program.path, {
+        labels: [...declaration.labels],
+        functionScopes: structuredClone(declaration.functionScopes),
+        functions: [...declaration.functions]
       });
     }
-    this.agentSecurity = next;
+    return derived;
+  }
+
+  async rebuildAgentSecurity(atoms) {
+    const records = worldRecords(atoms);
+    const programs = programRecords(records);
+    const fingerprint = agentSecurityFingerprint(programs);
+    if (this.agentSecurityWorldRevision === fingerprint) return this.agentSecurity;
+    this.agentSecurity = await this.deriveAgentSecurity(atoms);
     this.agentSecurityWorldRevision = fingerprint;
     return this.agentSecurity;
   }
@@ -1296,9 +1303,9 @@ export class ProgramRuntimeScheduler {
     const records = worldRecords(atoms);
     const programs = programRecords(records);
     const program = programs.find((entry) => entry.path === selector);
-    if (!program?.types.includes('agent')) {
+    if (!program) {
       throw Object.assign(
-        new Error(`Registered Agent Program was not found: ${selector}`),
+        new Error(`Agent Program was not found: ${selector}`),
         { code: 'AGENT_REGISTRATION_PROGRAM_NOT_FOUND' }
       );
     }
@@ -1465,12 +1472,11 @@ export class ProgramRuntimeScheduler {
             program.path === agentPath || program.path.startsWith(`${agentPath}/`)
           ))
           .sort(([left], [right]) => right.length - left.length)[0]?.[1] ?? null;
-        const allowedFunctions = enclosingAgent
-          ? [...new Set([
-            ...enclosingAgent.functions,
-            ...(program.types.includes('agent') ? ['agent'] : [])
-          ])]
-          : null;
+        const isAgentProgram = this.agentSecurity.has(program.path);
+        const allowed = enclosingAgent?.functions ?? null;
+        const allowedFunctions = !allowed || !isAgentProgram
+          ? allowed
+          : [...new Set([...allowed, 'agent'])];
         return this.inspectProgram({
           python: this.python,
           records,
@@ -2514,11 +2520,13 @@ export class ProgramRuntimeScheduler {
               revision: slotInvocation.revision
             } : {}),
             allowedFunctions: (() => {
+              const isAgentProgram = this.agentSecurity.has(program.path);
               const allowed = this.agentSecurity.get(
                 agentScopePath(options.agentOrigin)
               )?.functions ?? null;
-              if (!allowed || !program.types.includes('agent')) return allowed;
-              return [...new Set([...allowed, 'agent'])];
+              return !allowed || !isAgentProgram
+                ? allowed
+                : [...new Set([...allowed, 'agent'])];
             })(),
             executeExplore: async (request) => {
               requests.push(structuredClone(request));
@@ -2535,7 +2543,7 @@ export class ProgramRuntimeScheduler {
             }
           });
         });
-        const normalizedResult = program.types.includes('agent')
+        const normalizedResult = this.agentSecurity.has(program.path)
           ? { ...rawResult, agentRegistrations: [] }
           : rawResult;
         const result = supportDelivery ? {

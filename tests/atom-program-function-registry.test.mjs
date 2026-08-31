@@ -95,7 +95,7 @@ test('CLI and Web expose equivalent function registry data without an Agent cont
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
-  await fs.writeFile(contextFile, JSON.stringify([atom('接口Agent', '', [], 'agent')]), 'utf8');
+  await fs.writeFile(contextFile, JSON.stringify([atom('接口普通Program', '', [], 'program')]), 'utf8');
   const running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
   });

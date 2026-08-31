@@ -100,14 +100,14 @@ test('function registry rejects unknown parents and group cycles', () => {
     (error) => error.code === 'INVALID_PROGRAM_FUNCTION_REGISTRY');
 });
 
-test('cold start rebuilds symbolic Agent security only from literal @program@agent source', async () => {
+test('cold start rebuilds symbolic Agent security only from literal Program source', async () => {
   let saves = 0;
   const scheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: {
     async load() { return { version: 1, locks: [] }; },
     async save() { saves += 1; }
   } });
   const world = [atom('Root', '', [
-    atom('Window', 'agent({"labels":["^","audit"],"functions":{"groups":["form"],"names":["message"]}})', [], 'program@agent')
+    atom('Window', 'agent({"labels":["^","audit"],"functions":{"groups":["form"],"names":["message"]}})', [], 'program')
   ])];
 
   await scheduler.rebuildAgentSecurity(world);
@@ -119,7 +119,7 @@ test('cold start rebuilds symbolic Agent security only from literal @program@age
   assert.equal(saves, 0);
 });
 
-test('cold start rejects dynamic Agent grants, unknown scopes, and forged @agent facts', async () => {
+test('cold start rejects dynamic Agent grants, unknown scopes, and undeclared Programs', async () => {
   for (const [source, code] of [
     [
       'grant = {"labels":[],"functions":{"groups":[],"names":["message"]}}\nagent(grant)',
@@ -128,12 +128,11 @@ test('cold start rejects dynamic Agent grants, unknown scopes, and forged @agent
     [
       'agent({"labels":[],"functions":{"groups":["missing"],"names":[]}})',
       'UNKNOWN_PROGRAM_FUNCTION_GROUP'
-    ],
-    ['message({"level":"info","text":"forged"})', 'AGENT_REGISTRATION_SOURCE_REQUIRED']
+    ]
   ]) {
     const scheduler = createProgramRuntimeScheduler();
     await assert.rejects(scheduler.rebuildAgentSecurity([
-      atom('Root', '', [atom('Window', source, [], 'program@agent')])
+      atom('Root', '', [atom('Window', source, [], 'program')])
     ]), (error) => error.code === code);
   }
 });

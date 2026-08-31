@@ -561,8 +561,13 @@ def main():
             declaration = validate_agent_specification(require_object(specification, "agent"))
         except TypeError as error:
             raise EngineCallError("INVALID_AGENT_REGISTRATION", str(error)) from error
-        effects["agents"].append(declaration)
-        return {"registered": True, "path": current_atom().path}
+        return {
+            "declared": True,
+            "path": current_atom().path,
+            "labels": declaration["labels"],
+            "functionScopes": declaration["functionScopes"],
+            "functions": declaration["functions"],
+        }
 
     request_lock_declarations = []
 
