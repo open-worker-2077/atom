@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 依次关闭用户在真实 4784 使用中报告的 Shortcut 原地返回、ASDF 双击命中上级、Strut 端点不贴边、CLI 更新后场景紊乱四项 Web 故障。
+**Goal:** 依次关闭用户在真实 4784 使用中报告的 Shortcut 原地返回、ASDF 双击命中上级、Strut 端点不贴边、CLI 更新后场景紊乱，以及手机私网域名不可访问等现场故障。
 
 **Architecture:** 事实仍由 Atom/4784 权威投影提供；Web 只维护加载、命中、几何和视图连续性。每项先用真实故障边界写 RED，再作单一根因修复，并以浏览器最终路径或屏幕几何验收，不用内部变量假代用户结果。
 
@@ -24,8 +24,9 @@
 - **当前证据**：ASDF Strut 用例先以几何缺失 RED，修复后目标用例`1/1`、完整复合 Strut 浏览器旅程`2/2`、结构几何与渲染合同`109/109`。完整回归为`1590/1591`；唯一失败是既有重型布局性能门槛在全套负载下为`1316.8ms > 1300ms`，同一用例隔离复跑为`1187.6ms`并通过，未发现 Strut 功能回归。
 - **Task 1 实现提交**：`89a879a`（`fix(web): load remote shortcut routes`）。
 - **Task 2 实现提交**：`9a61ff2`（`fix(web): keep ASDF double-click on deepest target`）。
-- **下一动作**：提交 Task 3 安全回退点，继续消除全量性能抖动并合入、推送`main`；随后从 Task 4 Step 1 继续。
-- **仍未完成**：CLI 更新后的视图连续性。
+- **Task 3 安全回退提交**：`83f63f1`（`fix(web): attach strut endpoints to visible boundaries`）。
+- **下一动作**：继续消除全量性能抖动并将 Task 3 合入、推送`main`；随后从 Task 4 Step 1 继续。
+- **仍未完成**：CLI 更新后的视图连续性；手机访问`worker.tail33a2eb.ts.net`的现场链路不可用。
 
 ---
 
@@ -78,7 +79,7 @@
 - [x] **Step 1: Reproduce RED**：构造 ASDF 内包域的二元 Strut，断言首末点到中心距离等于最终屏幕半径；旧实现首先暴露 ASDF 未进入 Strut 语义绘制层，几何为零条。
 - [x] **Step 2: Identify coordinate mismatch**：ASDF 仅画普通 workspace edge，普通视图则把 Strut 中心几何与`0.94R/0.28D`裁剪分开维护；两条路径既丢语义又无法用最终可见半径验收。
 - [x] **Step 3: Clip using final screen geometry**：两种视图共用`prepareStrutLayer`；每条线以最终`screen.radius`裁剪并把实际首末点写回可验证几何，Graph clause、50% junction 与事实不变。
-- [ ] **Step 4: Verify and commit**：运行 unit、compound Playwright 与全量回归，提交`fix(web): attach strut endpoints to visible boundaries`。
+- [x] **Step 4: Verify and checkpoint**：unit/合同`109/109`、compound Playwright`2/2`；完整回归`1590/1591`，唯一性能门槛在全套负载下超时`16.8ms`、隔离复跑通过；安全回退提交为`83f63f1`，全绿后再合入推送。
 
 ### Task 4: CLI 更新保持当前场景连续
 
@@ -96,3 +97,12 @@
 - [ ] **Step 2: Locate replacement boundary**：区分 scoped merge、`importKnowledge()`和布局 identity 重建，找出首次丢失稳定视图事实的位置。
 - [ ] **Step 3: Preserve surviving identities**：只对删除或不可见目标清理视图状态；改名/移动按稳定 identity 重绑，迟到 revision 不得覆盖。
 - [ ] **Step 4: Verify and commit**：运行 bridge contract、真实浏览器 CLI 旅程与全量回归，提交`fix(web): preserve scene across CLI projections`并推送`main`。
+
+### Task 5: 手机私网域名现场连通
+
+**现场证据：** 2026-09-01 用户从手机访问`worker.tail33a2eb.ts.net`仍然无法打开。现有私有网关、身份白名单、POST/SSE、等待页和 4784 隔离单测通过，只证明代码合同，不证明真实手机、Tailscale DNS、证书、监听和任务进程组成的现场链路已通。
+
+- [ ] **Step 1: Reproduce from the real boundary**：核对域名解析、Tailscale 身份、HTTPS/端口入口、网关与 4784 健康状态，保留每一跳证据。
+- [ ] **Step 2: Locate the first broken hop**：区分客户端网络/DNS、TLS、网关授权、服务任务和 4784 上游，不以单测替代现场判断。
+- [ ] **Step 3: Fix the single root cause**：只修首个实际断点，不开放公网入口，不削弱身份白名单。
+- [ ] **Step 4: Verify on phone**：以用户手机成功打开并完成一次只读 Graph 请求为最终验收；自动化回归仅作辅助证据。
