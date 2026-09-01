@@ -21,11 +21,11 @@
 
 - **当前分支**：`fix/web-strut-visible-boundaries`，隔离目录仍为`.worktrees/esg-auto-jump`。
 - **已完成代码**：Shortcut 远端路线与 ASDF 双击最深命中已推送；普通视图与 ASDF 现共用一条 Strut 语义绘制层，记录的几何即实际边界裁剪几何。
-- **当前证据**：ASDF Strut 用例先以几何缺失 RED，修复后目标用例`1/1`、完整复合 Strut 浏览器旅程`2/2`、结构几何与渲染合同`109/109`。完整回归为`1590/1591`；唯一失败是既有重型布局性能门槛在全套负载下为`1316.8ms > 1300ms`，同一用例隔离复跑为`1187.6ms`并通过，未发现 Strut 功能回归。
+- **当前证据**：ASDF Strut 用例先以几何缺失 RED，修复后目标用例`1/1`、完整复合 Strut 浏览器旅程`2/2`、结构几何与渲染合同`109/109`。第一次完整回归仅既有重型布局性能门槛受全套负载影响为`1316.8ms > 1300ms`，隔离复跑为`1187.6ms`；第二次完整回归为`1591/1591`、退出码 0。
 - **Task 1 实现提交**：`89a879a`（`fix(web): load remote shortcut routes`）。
 - **Task 2 实现提交**：`9a61ff2`（`fix(web): keep ASDF double-click on deepest target`）。
 - **Task 3 安全回退提交**：`83f63f1`（`fix(web): attach strut endpoints to visible boundaries`）。
-- **下一动作**：继续消除全量性能抖动并将 Task 3 合入、推送`main`；随后从 Task 4 Step 1 继续。
+- **下一动作**：将 Task 3 快进合入并推送`main`；随后从 Task 4 Step 1 继续。
 - **仍未完成**：CLI 更新后的视图连续性；手机访问`worker.tail33a2eb.ts.net`的现场链路不可用。
 
 ---
@@ -79,7 +79,7 @@
 - [x] **Step 1: Reproduce RED**：构造 ASDF 内包域的二元 Strut，断言首末点到中心距离等于最终屏幕半径；旧实现首先暴露 ASDF 未进入 Strut 语义绘制层，几何为零条。
 - [x] **Step 2: Identify coordinate mismatch**：ASDF 仅画普通 workspace edge，普通视图则把 Strut 中心几何与`0.94R/0.28D`裁剪分开维护；两条路径既丢语义又无法用最终可见半径验收。
 - [x] **Step 3: Clip using final screen geometry**：两种视图共用`prepareStrutLayer`；每条线以最终`screen.radius`裁剪并把实际首末点写回可验证几何，Graph clause、50% junction 与事实不变。
-- [x] **Step 4: Verify and checkpoint**：unit/合同`109/109`、compound Playwright`2/2`；完整回归`1590/1591`，唯一性能门槛在全套负载下超时`16.8ms`、隔离复跑通过；安全回退提交为`83f63f1`，全绿后再合入推送。
+- [x] **Step 4: Verify and commit**：unit/合同`109/109`、compound Playwright`2/2`；第二次完整回归`1591/1591`、退出码 0；实现提交为`83f63f1`。
 
 ### Task 4: CLI 更新保持当前场景连续
 
