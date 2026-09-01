@@ -33,6 +33,7 @@
 - **连续链修正**：五阶段隔离验收先后暴露“单 Program 多 trigger 非法”“监听🏃‍♀️会自级联”“固定历史路径会被官方路径重写带走”“全邻接不等于有向后继”四个问题；最终总控只监听✅结果，从唯一执行 Agent 上钻当前槽例，读取该槽例自身`strut.then`的唯一后继，一次只推进一步。
 - **性能根因**：两项 4784 大世界门槛在未改动`main`也波动失败；CPU profile 定位到`parseAtomKey`每次解析都重建默认 matcher/action registry。模块级复用默认只读注册表后，Program effect apply 从约 1.8—2.8s 降到约 0.49—0.65s；完整测试中的两项总耗时约 2.81s/3.43s，低于 4s/5s 门槛。
 - **当前验证**：邻接权限/事务/批量回归`67/67`；最终完整`npm test`为`1590/1590`、0 failure，包含五阶段线性 Strut 链连续四次完成与迁窗、授权重试及多后继歧义拒绝；最终无授权和业务锁残留。语法检查与`git diff --check`通过。
+- **Task 2 实现提交**：`fe8ad8f`（`feat: hand off completed slot agents`）；真实 4784 ESG 世界事实未被测试或实现过程改写。
 - **下一动作**：提交功能分支，集成到`main`后复验并推送`origin/main`；不得改动真实 ESG 完成事实。
 - **范围外记录**：Web 的双击目标错位、支线未贴边、CLI 交互后布局紊乱和 Shortcut 原地返回由 Web 空间规格记录，不属于 Task 2 的顺手修复范围。
 
@@ -97,4 +98,4 @@
 - [x] **Step 4: Preserve partial-failure truth**：触发签发或迁窗失败作为明确 warning 保留业务变更；歧义签发不产生半项授权，迁窗失败保留执行 Agent 原位和可复验授权。相邻权限、事务和批量改名回归`56/56`通过。
 - [x] **Step 5: Run the isolated ESG journey**：五阶段线性 Strut 链连续完成四个当前阶段；每次仅唯一后继变为🏃‍♀️，执行 Agent 迁入该槽例，旧槽例不再包含执行 Agent，授权即时消费；另有多后继歧义测试确认不猜测、不迁窗、不留授权。
 - [x] **Step 6: Run adjacent and full regression**：邻接套件`67/67`；最终完整`npm test`为`1590/1590`、0 failure，性能门槛恢复稳定余量，并覆盖五阶段连续迁窗和保留授权重试。
-- [ ] **Step 7: Update this recovery point and commit**：把实际 commit、测试数量、隔离旅程结果和下一未完成项写回“恢复断点”，提交`feat: hand off completed slot agents`；未经用户另行授权不把真实 ESG 阶段标成完成。
+- [x] **Step 7: Update this recovery point and commit**：实现提交`fe8ad8f`；最终完整回归`1590/1590`，隔离五阶段旅程连续四次迁窗通过；真实 ESG 阶段未被标成完成。
