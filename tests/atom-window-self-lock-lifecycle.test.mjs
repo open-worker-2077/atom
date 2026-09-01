@@ -11,8 +11,14 @@ function atom(thing, situation = '', contain = [], type = '') {
 
 test('jump.lock is a retired permission ABI and is rejected before any effect', async () => {
   await assert.rejects(createProgramRuntimeScheduler().refresh([
-    atom('Root'),
-    atom('Registration', 'jump({"lock":{"read":{"allow":[]}}})', [], 'program')
+    atom('Root', '', [
+      atom(
+        'Window',
+        'agent({"labels":[],"functions":{"groups":[],"names":["jump"]}})',
+        [atom('Registration', 'jump({"lock":{"read":{"allow":[]}}})', [], 'program')],
+        'program'
+      )
+    ])
   ], { programSelector: 'Registration', force: true, agentOrigin: { path: 'Root/Window' } }),
   (error) => error.code === 'INVALID_JUMP_CONTRACT');
 });

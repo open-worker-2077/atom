@@ -61,7 +61,8 @@ try {
   const endpoint = `${running.url}/__atom/api/command`;
   const port = running.port;
   const testName = `__write_acceptance_${Date.now()}`;
-  const testPath = [argument('--parent'), testName].filter(Boolean).join('/');
+  const acceptanceParent = argument('--parent') ?? agentPath;
+  const testPath = [acceptanceParent, testName].filter(Boolean).join('/');
   const delays = [];
   let expectedAt = Date.now() + 100;
   monitor = setInterval(() => {
@@ -82,7 +83,7 @@ try {
   const structuralWarnings = [];
   if (measureStructuralLatency) {
     const anchorName = `${testName}_structural`;
-    const anchorPath = [argument('--parent'), anchorName].filter(Boolean).join('/');
+    const anchorPath = [acceptanceParent, anchorName].filter(Boolean).join('/');
     const sourcePath = `${anchorPath}/Source/Probe`;
     const renamedPath = `${anchorPath}/Source/ProbeRenamed`;
     const destinationPath = `${anchorPath}/Destination`;
@@ -213,7 +214,13 @@ try {
   const newCommits = journal.receipts.slice(initialReceiptCount).map((entry) => entry.receipt);
   const committed = newCommits.at(-1);
   if (!committed?.commandId || !committed.afterRevision) {
-    throw new Error('Acceptance write did not produce a rollback-capable receipt');
+    throw new Error(`Acceptance write did not produce a rollback-capable receipt: ${JSON.stringify({
+      writeOk: write.ok === true,
+      writeErrorCodes: (write.errors ?? []).map(({ code }) => code),
+      initialReceiptCount,
+      journalReceiptCount: journal.receipts.length,
+      preparedCount: journal.prepared.length
+    })}`);
   }
   const persistence = createTransactionalWorldPersistence({
     contextFile, projectionFile: graphFile, journalFile, publishLegacyProjection: false
