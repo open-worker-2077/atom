@@ -19,6 +19,7 @@ import {
 } from '../src/atom-system/world-runtime/legacy-graph-compat.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
+import { rewriteProgramSourcePathLiterals } from '../work-engine/atom-language/transform-executor.mjs';
 import {
   createProgramRuntimeScheduler,
   resolveExactPathFromCurrentContext,
@@ -29,6 +30,21 @@ import { authorizeWindowGraphPath } from '../work-engine/atom-language/window-lo
 function atom(thing, situation = '', contain = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
 }
+
+test('Program relocation rewrites an exact ancestor-qualified suffix but leaves prose intact', () => {
+  const source = [
+    '# Area/LockedSuffix is prose.',
+    'lock({"targets":{"paths":["Area/Locked/Child"]}})',
+    'lock({"targets":{"paths":["世界之外/World/Area/Locked/Child"]}})'
+  ].join('\n');
+  const rewritten = rewriteProgramSourcePathLiterals(source, [{
+    sourcePath: 'World/Area/Locked',
+    resultPath: 'World/Destination/Locked'
+  }]);
+  assert.match(rewritten, /World\/Destination\/Locked\/Child/u);
+  assert.match(rewritten, /世界之外\/World\/Destination\/Locked\/Child/u);
+  assert.match(rewritten, /Area\/LockedSuffix/u);
+});
 
 async function waitUntil(predicate, message, timeoutMs = 2_000) {
   const deadline = Date.now() + timeoutMs;
@@ -97,9 +113,31 @@ test('trusted maintenance atomically moves a Program-locked subtree while ordina
   const storeFile = path.join(directory, 'knowledge.json');
   await fs.writeFile(contextFile, JSON.stringify([
     atom('Root', '', [
-      atom('Locked', 'preserve', [atom('Child', 'preserve')]),
+      atom('Locked', 'preserve', [
+        atom('Child', 'preserve'),
+        atom(
+          'Nested Agent',
+          [
+            'agent({"labels":[],"functions":{"groups":[],"names":["agent","lock"]}})',
+            'lock({"targets":{"paths":["Root/Locked/Child"],"scope":"exact"},"actions":["transform"],"labels":["nested"]})'
+          ].join('\n'),
+          [],
+          'program'
+        ),
+        atom(
+          'Reactive Program',
+          [
+            '# Root/LockedSuffix is prose, not a path reference.',
+            'def main():',
+            "    transform({'thing': 'Root/Locked/Child', 'situation.rep.fired': None})",
+            "trigger('transform', {'nodes': ['Root/Locked']}, main)"
+          ].join('\n'),
+          [],
+          'program'
+        )
+      ]),
       atom('Destination'),
-      atom('Guard', 'lock({"targets":{"paths":["Root/Locked"],"scope":"subtree"},"actions":["transform"],"labels":["migration-key"]})', [], 'program')
+      atom('Guard', 'lock({"targets":{"paths":["Root"],"scope":"subtree"},"actions":["transform"],"labels":["migration-key"]})', [], 'program')
     ])
   ]), 'utf8');
   const source = 'transform {"thing.mov.Root/Destination":"Root/Locked"}';
@@ -119,6 +157,113 @@ test('trusted maintenance atomically moves a Program-locked subtree while ordina
   assert.equal(findAtom(world, 'Root/Locked'), null);
   assert.equal(findAtom(world, 'Root/Destination/Locked').situation, 'preserve');
   assert.equal(findAtom(world, 'Root/Destination/Locked/Child').situation, 'preserve');
+  assert.match(
+    findAtom(world, 'Root/Destination/Locked/Reactive Program').situation,
+    /Root\/Destination\/Locked\/Child/u
+  );
+  assert.match(
+    findAtom(world, 'Root/Destination/Locked/Reactive Program').situation,
+    /Root\/LockedSuffix/u
+  );
+  assert.equal(
+    findAtom(world, 'Root/Destination/Locked/Nested Agent').situation,
+    [
+      'agent({"labels":[],"functions":{"groups":[],"names":["agent","lock"]}})',
+      'lock({"targets":{"paths":["Root/Destination/Locked/Child"],"scope":"exact"},"actions":["transform"],"labels":["nested"]})'
+    ].join('\n')
+  );
+  const rebuilt = createProgramRuntimeScheduler();
+  await rebuilt.rebuildAgentSecurity(world);
+  assert.equal(rebuilt.agentSecurity.has('Root/Locked/Nested Agent'), false);
+  assert.equal(rebuilt.agentSecurity.has('Root/Destination/Locked/Nested Agent'), true);
+
+  const reconfigured = await trusted({
+    source: `transform {"thing":"Root/Destination/Locked/Nested Agent",${JSON.stringify('situation.rep.agent({"labels":["expanded"],"functions":{"groups":[],"names":["agent"]}})')}}`,
+    interaction: { id: 'maintenance-must-not-bypass-agent-reconfiguration' }
+  });
+  assert.equal(reconfigured.ok, false, JSON.stringify(reconfigured));
+  assert.ok(reconfigured.errors.some(({ code }) => (
+    code === 'AGENT_RECONFIGURATION_CREATOR_REQUIRED'
+  )), JSON.stringify(reconfigured));
+});
+
+test('an upper Agent window moves a descendant subtree while a lower Agent window cannot move upward', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-ordinary-agent-subtree-move-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Root', 'agent({"labels":[],"functions":{"groups":[],"names":["agent","lock","transform"]}})', [
+      atom('Locked', 'preserve', [
+        atom('Child', 'preserve'),
+        atom(
+          'Nested Agent',
+          'agent({"labels":[],"functions":{"groups":[],"names":["agent","transform"]}})',
+          [],
+          'program'
+        ),
+        atom(
+          'Reactive Program',
+          [
+            'def main():',
+            "    transform({'thing': 'Root/Locked/Child', 'situation.rep.fired': None})",
+            "trigger('transform', {'nodes': ['Root/Locked']}, main)"
+          ].join('\n'),
+          [],
+          'program'
+        )
+      ]),
+      atom('Destination'),
+      {
+        ...atom('External Source'),
+        support: [{ 'if@current': true, then: [{ thing: 'Root/Locked/Child' }] }]
+      },
+      atom(
+        'External Guard',
+        'lock({"targets":{"paths":["Root/External Source"],"scope":"exact"},"actions":["transform"],"labels":["external"]})',
+        [],
+        'program'
+      )
+    ], 'program')
+  ]), 'utf8');
+
+  const execute = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
+  const lowerDenied = await execute({
+    source: 'transform {"thing.mov.Root/Destination":"Root/Locked"}',
+    interaction: {
+      id: 'lower-agent-cannot-move-its-parent',
+      agent: { path: 'Root/Locked/Nested Agent' }
+    }
+  });
+  assert.equal(lowerDenied.ok, false, JSON.stringify(lowerDenied));
+  assert.ok(lowerDenied.errors.some(({ code }) => code === 'WINDOW_ACCESS_DENIED'));
+  assert.ok(findAtom(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Root/Locked'));
+
+  const moved = await execute({
+    source: 'transform {"thing.mov.Root/Destination":"Root/Locked"}',
+    interaction: {
+      id: 'upper-agent-moves-descendant-subtree',
+      agent: { path: 'Root' }
+    }
+  });
+
+  assert.equal(moved.ok, true, JSON.stringify(moved));
+  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(findAtom(world, 'Root/Locked'), null);
+  assert.equal(findAtom(world, 'Root/Destination/Locked/Child').situation, 'preserve');
+  assert.deepEqual(
+    findAtom(world, 'Root/External Source').support,
+    [{ 'if@current': true, then: [{ thing: 'Root/Destination/Locked/Child' }] }]
+  );
+  assert.match(
+    findAtom(world, 'Root/Destination/Locked/Reactive Program').situation,
+    /Root\/Destination\/Locked\/Child/u
+  );
+  const rebuilt = createProgramRuntimeScheduler();
+  await rebuilt.rebuildAgentSecurity(world);
+  assert.equal(rebuilt.agentSecurity.has('Root/Locked/Nested Agent'), false);
+  assert.equal(rebuilt.agentSecurity.has('Root/Destination/Locked/Nested Agent'), true);
 });
 
 test('maintenance CLI refuses an intent before world dispatch when projection preparation fails', async () => {

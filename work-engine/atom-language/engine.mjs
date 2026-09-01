@@ -67,6 +67,7 @@ import {
   createExactTransformIndex,
   isBatchRenameItem,
   prepareTransformRelationIndex,
+  rewriteProgramSourcePathLiterals,
   transformChangesStructure
 } from './transform-executor.mjs';
 import {
@@ -174,6 +175,21 @@ function programDeclarationSurface(atoms) {
       situation: situation?.value ?? null
     }];
   });
+}
+
+function relocatedProgramDeclarationSurface(atoms, pathChanges = []) {
+  const rewritePath = (value) => pathChanges.reduce((current, { sourcePath, resultPath }) => (
+    current === sourcePath || current?.startsWith(`${sourcePath}/`)
+      ? `${resultPath}${current.slice(sourcePath.length)}`
+      : current
+  ), value);
+  return programDeclarationSurface(atoms)
+    .map((declaration) => ({
+      ...declaration,
+      path: rewritePath(declaration.path),
+      situation: rewriteProgramSourcePathLiterals(declaration.situation, pathChanges)
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
 }
 
 function isLocalizedSituationTransform(item) {
@@ -385,10 +401,16 @@ async function validateAgentProgramDelegation({
   beforeAtoms,
   afterAtoms,
   creatorSecurity,
-  programScheduler
+  programScheduler,
+  declarationRelocations = []
 }) {
   if (JSON.stringify(programDeclarationSurface(beforeAtoms))
     === JSON.stringify(programDeclarationSurface(afterAtoms))) {
+    return { ok: true, errors: [] };
+  }
+  if (declarationRelocations.length > 0
+    && JSON.stringify(relocatedProgramDeclarationSurface(beforeAtoms, declarationRelocations))
+      === JSON.stringify(relocatedProgramDeclarationSurface(afterAtoms))) {
     return { ok: true, errors: [] };
   }
   if (typeof programScheduler?.deriveAgentSecurity !== 'function') {
@@ -1707,12 +1729,17 @@ export async function executeAtomLanguage(options = {}) {
     }
   }
 
-  async function validateRequestCandidate(candidateAtoms) {
+  let requestDeclarationRelocations = [];
+
+  async function validateRequestCandidate(
+    candidateAtoms, declarationRelocations = requestDeclarationRelocations
+  ) {
     return validateAgentProgramDelegation({
       beforeAtoms: requestStartAtoms,
       afterAtoms: candidateAtoms,
       creatorSecurity,
-      programScheduler: candidateProgramScheduler
+      programScheduler: candidateProgramScheduler,
+      declarationRelocations
     });
   }
 
@@ -1727,13 +1754,16 @@ export async function executeAtomLanguage(options = {}) {
     });
   }
 
-  async function assertRequestCandidateAuthority(candidateAtoms) {
-    const delegated = await validateRequestCandidate(candidateAtoms);
+  async function assertRequestCandidateAuthority(
+    candidateAtoms, declarationRelocations = requestDeclarationRelocations
+  ) {
+    const delegated = await validateRequestCandidate(candidateAtoms, declarationRelocations);
     if (!delegated.ok) throwCandidateDelegationFailure(delegated.errors);
   }
 
   async function reconcileProgramsForWorld(
-    candidateAtoms, initialTriggerEvent = null, failOnProgramFailure = false
+    candidateAtoms, initialTriggerEvent = null, failOnProgramFailure = false,
+    declarationRelocations = requestDeclarationRelocations
   ) {
     if (!options.programScheduler) {
       return {
@@ -1749,7 +1779,7 @@ export async function executeAtomLanguage(options = {}) {
         code: 'PROGRAM_CANDIDATE_RUNTIME_UNAVAILABLE'
       });
     }
-    await assertRequestCandidateAuthority(candidateAtoms);
+    await assertRequestCandidateAuthority(candidateAtoms, declarationRelocations);
     const runtimeScheduler = candidateProgramScheduler;
     let reconciledAtoms = candidateAtoms;
     const messages = [];
@@ -2140,6 +2170,12 @@ export async function executeAtomLanguage(options = {}) {
         appliedSlotBodies.push({ sourceProgramPath, effect, receipt: slotResult.receipt });
       }
       const after = revisionOf(application.atoms);
+      const applicationRelocations = (application.applied ?? []).flatMap(({ transformed }) => (
+        transformed.sourcePath && transformed.resultPath
+          && transformed.sourcePath !== transformed.resultPath
+          ? [{ sourcePath: transformed.sourcePath, resultPath: transformed.resultPath }]
+          : []
+      ));
       performanceTrace('program-reconcile-apply', {
         pass,
         elapsedMs: Math.round(performance.now() - applyStartedAt),
@@ -2147,7 +2183,11 @@ export async function executeAtomLanguage(options = {}) {
         changed: before !== after
       });
       if (before !== after) {
-        await assertRequestCandidateAuthority(application.atoms);
+        await assertRequestCandidateAuthority(application.atoms, [
+          ...declarationRelocations,
+          ...pathChanges,
+          ...applicationRelocations
+        ]);
         reconciledAtoms = application.atoms;
         passChanged = true;
         for (const entry of appliedShortcuts) {
@@ -2615,6 +2655,7 @@ export async function executeAtomLanguage(options = {}) {
     let nextAtoms = structuredClone(atoms);
     let exactIndex = createExactTransformIndex(nextAtoms);
     const results = [];
+    const batchDeclarationRelocations = [];
     const transformLogs = [];
     const transformEventNodes = new Set();
     const renameBatch = parsed.items.every(isBatchRenameItem);
@@ -2659,7 +2700,8 @@ export async function executeAtomLanguage(options = {}) {
           contextFile,
           authorize: accessController.authorize,
           mutateInput: true,
-          exactIndex
+          exactIndex,
+          rewriteProgramPathReferences: true
         });
       } catch (error) {
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
@@ -2692,7 +2734,19 @@ export async function executeAtomLanguage(options = {}) {
       for (const path of [transformed.sourcePath, transformed.resultPath]) {
         if (path) transformEventNodes.add(path);
       }
-      for (const path of [...(transformed.relationPaths ?? []), ...(transformed.shortcutPaths ?? [])]) {
+      if (transformed.structuralCommand === 'mov'
+        && transformed.sourcePath && transformed.resultPath
+        && transformed.sourcePath !== transformed.resultPath) {
+        batchDeclarationRelocations.push({
+          sourcePath: transformed.sourcePath,
+          resultPath: transformed.resultPath
+        });
+      }
+      for (const path of [
+        ...(transformed.relationPaths ?? []),
+        ...(transformed.programSourcePaths ?? []),
+        ...(transformed.shortcutPaths ?? [])
+      ]) {
         if (path) transformEventNodes.add(path);
       }
       if (transformed.logRecord) {
@@ -2709,9 +2763,11 @@ export async function executeAtomLanguage(options = {}) {
     }
     let revisionAfter = revisionOf(nextAtoms);
     let changed = revisionAfter !== revisionBefore;
+    requestDeclarationRelocations = batchDeclarationRelocations;
     let finalProgramLockIndex = programLockIndex;
     const finalProgramMessages = [];
-    if (options.programScheduler) {
+    if (options.programScheduler && options.trustedMaintenance !== true
+      && requestDeclarationRelocations.length === 0) {
       let reconciled;
       try {
         reconciled = await reconcileProgramsForWorld(nextAtoms, {
@@ -2764,7 +2820,7 @@ export async function executeAtomLanguage(options = {}) {
         || subtreeContainsTypedProgram(exactMatchAtPath(nextAtoms, targetPath)?.atom)
       ));
       if (programSurfaceChanged) {
-        const delegated = await validateRequestCandidate(nextAtoms);
+        const delegated = await validateRequestCandidate(nextAtoms, batchDeclarationRelocations);
         if (!delegated.ok) {
           releaseSupportDeliveryClaims();
           return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
@@ -2851,7 +2907,8 @@ export async function executeAtomLanguage(options = {}) {
       transformLogs: [],
       pathChanges: []
     };
-    if (options.programScheduler) {
+    if (options.programScheduler && options.trustedMaintenance !== true
+      && requestDeclarationRelocations.length === 0) {
       try {
         postRefresh = await reconcileProgramsForWorld(nextAtoms, {
           mode: 'transform', nodes: [created.resultPath], affectedPaths: [created.resultPath]
@@ -2972,7 +3029,8 @@ export async function executeAtomLanguage(options = {}) {
     authorize: accessController.authorize,
     exactIndex: preparedTransformWorld.exactIndex,
     allMatches: preparedTransformWorld.allMatches,
-    transactionTransformLog: options.transactionTransformLog ?? []
+    transactionTransformLog: options.transactionTransformLog ?? [],
+    rewriteProgramPathReferences: true
   });
   if (transformed.error) {
     releaseSupportDeliveryClaims();
@@ -2982,6 +3040,12 @@ export async function executeAtomLanguage(options = {}) {
   let nextAtoms = transformed.atoms;
   let revisionAfter = revisionBefore;
   let changed = transformed.changed === true || programChanged;
+  const declarationRelocations = transformed.structuralCommand === 'mov'
+    && transformed.sourcePath && transformed.resultPath
+    && transformed.sourcePath !== transformed.resultPath
+    ? [{ sourcePath: transformed.sourcePath, resultPath: transformed.resultPath }]
+    : [];
+  requestDeclarationRelocations = declarationRelocations;
   const programSurfaceChanged = changed
     && transformChangesProgramSurface(atoms, nextAtoms, transformed);
   let postRefresh = {
@@ -3006,7 +3070,7 @@ export async function executeAtomLanguage(options = {}) {
         compiled.errors
       );
     }
-    const delegated = await validateRequestCandidate(nextAtoms);
+    const delegated = await validateRequestCandidate(nextAtoms, declarationRelocations);
     if (!delegated.ok) {
       releaseSupportDeliveryClaims();
       return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
@@ -3017,9 +3081,11 @@ export async function executeAtomLanguage(options = {}) {
     transformed.sourcePath,
     transformed.resultPath,
     ...(transformed.relationPaths ?? []),
+    ...(transformed.programSourcePaths ?? []),
     ...(transformed.shortcutPaths ?? [])
   ].filter(Boolean))];
-  if (options.programScheduler) {
+  if (options.programScheduler && options.trustedMaintenance !== true
+    && requestDeclarationRelocations.length === 0) {
     try {
       postRefresh = await reconcileProgramsForWorld(nextAtoms, {
         mode: 'transform',
@@ -3033,7 +3099,7 @@ export async function executeAtomLanguage(options = {}) {
           transformed.resultName,
           ...(programSurfaceChanged ? newlyAddedProgramPaths(atoms, nextAtoms) : [])
         ].filter(Boolean))]
-      });
+      }, false, declarationRelocations);
       nextAtoms = postRefresh.atoms;
       changed = changed
         || postRefresh.transformLogs.length > 0

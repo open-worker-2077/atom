@@ -92,6 +92,57 @@ function walkAtoms(atoms) {
   return result;
 }
 
+export function rewriteProgramSourcePathLiterals(source, pathChanges) {
+  if (typeof source !== 'string') return source;
+  const aliases = pathChanges.flatMap(({ sourcePath, resultPath }) => {
+    const parts = sourcePath.split('/');
+    const suffixes = parts.slice(0, -1).map((_, index) => ({
+      sourcePath: parts.slice(index).join('/'),
+      resultPath
+    }));
+    return suffixes.flatMap((change) => [
+      change,
+      {
+        sourcePath: `${WORLD_OUTSIDE_NAME}/${change.sourcePath}`,
+        resultPath: `${WORLD_OUTSIDE_NAME}/${change.resultPath}`
+      }
+    ]);
+  }).sort((left, right) => right.sourcePath.length - left.sourcePath.length);
+  return source.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/gu, (literal) => {
+    const quote = literal[0];
+    const value = literal.slice(1, -1);
+    const change = aliases.find(({ sourcePath }) => (
+      value === sourcePath || value.startsWith(`${sourcePath}/`)
+    ));
+    const rewritten = change
+      ? `${change.resultPath}${value.slice(change.sourcePath.length)}`
+      : value;
+    return `${quote}${rewritten}${quote}`;
+  });
+}
+
+function programSourceReferencesPath(source, sourcePath) {
+  return rewriteProgramSourcePathLiterals(source, [{
+    sourcePath,
+    resultPath: '\u0000atom-relocated-path'
+  }]) !== source;
+}
+
+function rewriteProgramPathReferences(atoms, pathChanges, preparedMatches = null) {
+  const changedPaths = [];
+  for (const match of preparedMatches ?? walkAtoms(atoms)) {
+    const thing = storedField(match.atom, 'thing');
+    if (!thing?.parsed.types.some((type) => type.raw === 'program')) continue;
+    const situation = storedField(match.atom, 'situation');
+    if (typeof situation?.value !== 'string') continue;
+    const rewritten = rewriteProgramSourcePathLiterals(situation.value, pathChanges);
+    if (rewritten === situation.value) continue;
+    replaceStoredField(match.atom, 'situation', rewritten);
+    changedPaths.push(match.path.join('/'));
+  }
+  return changedPaths;
+}
+
 function supportLookup(matches) {
   const byPath = new Map();
   const byName = new Map();
@@ -992,7 +1043,8 @@ export async function applyTransform({
   mutateInput = false,
   exactIndex = null,
   allMatches = null,
-  transactionTransformLog = []
+  transactionTransformLog = [],
+  rewriteProgramPathReferences: rewriteProgramReferences = true
 }) {
   const canMutateInput = mutateInput && !Object.isFrozen(atoms);
   const rootName = path.basename(contextFile);
@@ -1035,6 +1087,7 @@ export async function applyTransform({
     ));
     const closureMatches = [originalSelection.match];
     const deepValueAtoms = new Set();
+    const command = structural.operation?.command;
     for (const binding of partnerBindings) {
       const source = byAtom.get(binding.sourceAtom);
       if (source) closureMatches.push(source);
@@ -1045,7 +1098,19 @@ export async function applyTransform({
       closureMatches.push(match);
       deepValueAtoms.add(match.atom);
     }
-    const command = structural.operation?.command;
+    if (rewriteProgramReferences && command?.name === 'mov') {
+      const sourcePath = originalSelection.match.path.join('/');
+      for (const match of originalMatches) {
+        const thing = storedField(match.atom, 'thing');
+        const situation = storedField(match.atom, 'situation');
+        if (thing?.parsed.types.some((type) => type.raw === 'program')
+          && typeof situation?.value === 'string'
+          && programSourceReferencesPath(situation.value, sourcePath)) {
+          closureMatches.push(match);
+          deepValueAtoms.add(match.atom);
+        }
+      }
+    }
     if (['mov', 'cpy'].includes(command?.name) && command.parameter !== WORLD_OUTSIDE_NAME) {
       const destination = resolveUnique(atoms, command.parameter, exactIndex);
       if (destination.error) return destination;
@@ -1154,23 +1219,30 @@ export async function applyTransform({
   const selectedAtoms = relevantSubtree ?? new Set([selected.match.atom]);
   const changesSubtree = rewritesPaths || changedFields.has('contain');
   if (!restoresFromKernelBackup && changesSubtree
+    && structural.operation?.command.name !== 'mov'
     && (immediateChildren(selected.match.atom)?.length ?? 0) > 0) {
     for (const match of walkAtoms([selected.match.atom])) selectedAtoms.add(match.atom);
     for (const descendant of walkAtoms(nextAtoms)) {
       if (descendant.atom !== selected.match.atom
         && selectedAtoms.has(descendant.atom)
         && (await authorize(descendant, 'write', 'contain')).decision !== 'allow') {
-        return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造该子树；请反馈派发方') };
+        return { error: diagnostic(
+          'WINDOW_ACCESS_DENIED',
+          '当前窗口无权改造该子树；请反馈派发方',
+          { structuralCommand: structural.operation?.command.name ?? null }
+        ) };
       }
     }
   }
   // Renames and structural changes rewrite incoming relations. Their source
   // atoms are mutations too, so authorize them before any in-memory rewrite.
-  for (const binding of partnerBindings) {
-    if (selectedAtoms.has(binding.targetAtom) && !selectedAtoms.has(binding.sourceAtom)) {
-      const source = walkAtoms(nextAtoms).find((match) => match.atom === binding.sourceAtom);
-      if (source && (await authorize(source, 'write')).decision !== 'allow') {
-        return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改写指向该子树的关系；请反馈派发方') };
+  if (structural.operation?.command.name !== 'mov') {
+    for (const binding of partnerBindings) {
+      if (selectedAtoms.has(binding.targetAtom) && !selectedAtoms.has(binding.sourceAtom)) {
+        const source = walkAtoms(nextAtoms).find((match) => match.atom === binding.sourceAtom);
+        if (source && (await authorize(source, 'write')).decision !== 'allow') {
+          return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改写指向该子树的关系；请反馈派发方') };
+        }
       }
     }
   }
@@ -1329,6 +1401,9 @@ export async function applyTransform({
     }
     const resultMatch = postMatches.find((match) => match.atom === resultAtom);
     const resultPath = resultMatch?.path.join('/') ?? sourcePath;
+    const programSourcePaths = command.name === 'mov' && rewriteProgramReferences
+      ? rewriteProgramPathReferences(nextAtoms, [{ sourcePath, resultPath }], postMatches)
+      : [];
     const shortcutPaths = [];
     rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }], shortcutPaths, postMatches);
     preservePreparedRelations(postMatches);
@@ -1337,7 +1412,9 @@ export async function applyTransform({
       resultName: nameField.value,
       sourcePath,
       resultPath,
+      structuralCommand: command.name,
       relationPaths,
+      programSourcePaths,
       shortcutPaths,
       matches: postMatches,
       changed: true

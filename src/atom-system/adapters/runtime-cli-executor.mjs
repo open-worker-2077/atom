@@ -7,7 +7,7 @@ import { createProgramRuntimeScheduler } from '../../../work-engine/atom-languag
 
 export function createRuntimeCliExecutor(options = {}) {
   const trustedMaintenance = options.trustedMaintenance === true;
-  const programScheduler = trustedMaintenance ? null : (options.programScheduler ?? (
+  const programScheduler = options.programScheduler ?? (
     typeof options.contextFile === 'string' && options.contextFile
       ? createProgramRuntimeScheduler({
           projectionRepository: createJsonProgramProjectionRepository({
@@ -15,7 +15,7 @@ export function createRuntimeCliExecutor(options = {}) {
           })
         })
       : undefined
-  ));
+  );
   const interactionRuntime = options.interactionRuntime ?? createLegacyRuntimeComposition({
     contextFile: options.contextFile,
     graphFile: options.graphFile,

@@ -615,7 +615,8 @@ export function validateProgramResult(result, records, program, options = {}) {
       const targetExists = typeof targetPath === 'string' && targetPath.length > 0;
       if (typeof indexedTargetPath === 'string' && !targetExists) {
         throw Object.assign(new Error('lock target path does not resolve in the current Graph'), {
-          code: 'INVALID_PROGRAM_LOCK_TARGET'
+          code: 'INVALID_PROGRAM_LOCK_TARGET',
+          details: { program: program.path, target: paths[0] }
         });
       }
       if (!targetExists
