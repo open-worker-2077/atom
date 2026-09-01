@@ -9,8 +9,12 @@ import { slotProgramInvocationsForEvent } from '../work-engine/atom-language/slo
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
 function atom(thing, situation = '', contain = [], support = [], types = []) {
+  const agentProgram = types.includes('agent');
+  const storedTypes = agentProgram
+    ? ['program', ...types.filter((type) => type !== 'agent' && type !== 'program')]
+    : types;
   return {
-    [`thing${types.map((type) => `@${type}`).join('')}`]: thing,
+    [`thing${storedTypes.map((type) => `@${type}`).join('')}`]: thing,
     situation,
     contain,
     support

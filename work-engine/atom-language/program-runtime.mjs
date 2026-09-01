@@ -1181,7 +1181,7 @@ export class ProgramRuntimeScheduler {
     this.agentSecurityWorldRevision = null;
     this.latestRecords = null;
     this.preparedSupportGraphs = new Map();
-    this.supportDeliveryExecutions = new Map();
+    this.supportDeliveryExecutions = options.supportDeliveryExecutions ?? new Map();
     if (this.projectionRepository
       && (typeof this.projectionRepository.load !== 'function'
         || typeof this.projectionRepository.save !== 'function')) {
@@ -1572,15 +1572,42 @@ export class ProgramRuntimeScheduler {
   }
 
   createCandidateRuntime() {
-    return new ProgramRuntimeScheduler({
+    const candidate = new ProgramRuntimeScheduler({
       python: this.python,
       timeoutMs: this.timeoutMs,
       maxCompleted: this.maxCompleted,
       maxWorkers: this.maxWorkers,
       runProgram: this.runProgram,
       inspectProgram: this.inspectProgram,
-      runBounded: (operation) => this.runBounded(operation)
+      diagnosticRecorder: this.diagnosticRecorder,
+      runBounded: (operation) => this.runBounded(operation),
+      supportDeliveryExecutions: this.supportDeliveryExecutions
     });
+    candidate.reusable = new Map(this.reusable);
+    candidate.programReusable = new Map(this.programReusable);
+    candidate.dormantFailures = new Map(this.dormantFailures);
+    candidate.triggerContracts = new Map([...this.triggerContracts].map(([path, contract]) => (
+      [path, structuredClone(contract)]
+    )));
+    candidate.triggerIndex = new Map([...this.triggerIndex].map(([key, paths]) => (
+      [key, new Set(paths)]
+    )));
+    candidate.programReadDependencies = new Map(
+      [...this.programReadDependencies].map(([path, dependency]) => (
+        [path, structuredClone(dependency)]
+      ))
+    );
+    candidate.triggerContractsInitialized = this.triggerContractsInitialized;
+    candidate.deferredTriggerContracts = new Map(this.deferredTriggerContracts);
+    candidate.agentSecurity = new Map([...this.agentSecurity].map(([path, security]) => (
+      [path, structuredClone(security)]
+    )));
+    candidate.agentSecurityWorldRevision = this.agentSecurityWorldRevision;
+    candidate.requestDrivenLocks = structuredClone(this.requestDrivenLocks);
+    candidate.requestDrivenLocksWorldRevision = this.requestDrivenLocksWorldRevision;
+    candidate.requestDrivenLockRetirementChecked = this.requestDrivenLockRetirementChecked;
+    candidate.latestRecords = this.latestRecords;
+    return candidate;
   }
 
   invalidateDerivedWorldState() {
@@ -1602,6 +1629,16 @@ export class ProgramRuntimeScheduler {
     this.loadedProjection = undefined;
     this.projectionLoadWarning = null;
     this.triggerContractsInitialized = false;
+  }
+
+  pruneInactiveProgramIndexes(records) {
+    const activePaths = new Set(programRecords(records).map((record) => record.path));
+    for (const path of this.triggerContracts.keys()) {
+      if (!activePaths.has(path)) this.removeTriggerContract(path);
+    }
+    for (const path of this.programReadDependencies.keys()) {
+      if (!activePaths.has(path)) this.programReadDependencies.delete(path);
+    }
   }
 
   async overlayRequestDrivenLocks(value, agentOrigin = null) {
@@ -1678,9 +1715,12 @@ export class ProgramRuntimeScheduler {
         this.setTriggerContract(program, validated[index].trigger ?? null);
       }
     }
-    const activePaths = new Set(records.map((record) => record.path));
+    const activePaths = activeProgramPaths;
     for (const path of this.triggerContracts.keys()) {
       if (!activePaths.has(path)) this.removeTriggerContract(path);
+    }
+    for (const path of this.programReadDependencies.keys()) {
+      if (!activePaths.has(path)) this.programReadDependencies.delete(path);
     }
   }
 
@@ -2057,6 +2097,7 @@ export class ProgramRuntimeScheduler {
     await this.activeRequestDrivenLocks(atoms);
     const records = worldRecords(atoms);
     this.latestRecords = records;
+    this.pruneInactiveProgramIndexes(records);
     if (!preparedTriggerEvent && options.prepareAllIndexes === true) {
       if (!this.preparedSupportGraphs.has(supportWorldRevision)) {
         const supportGraph = projectSupportContext(atoms);

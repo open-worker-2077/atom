@@ -9,9 +9,10 @@ import { promisify } from 'node:util';
 
 import {
   applyAgentProgramMigration,
-  planAgentProgramMigration,
+  planAgentProgramMigration as planAgentProgramMigrationOperation,
   rollbackAgentProgramMigration
 } from '../src/atom-system/operations/agent-program-migration.mjs';
+import { parseLegacyPersistentAtomKey } from '../src/atom-system/adapters/legacy-atom-key-parser.mjs';
 import {
   createJsonTransactionJournal,
   createJsonWorldRepository
@@ -25,6 +26,10 @@ const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(import.meta.dirname, '..');
 const operator = path.join(projectRoot, 'scripts', 'deploy-agent-program-world.mjs');
 const programScheduler = createProgramRuntimeScheduler({ timeoutMs: 2_000 });
+const planAgentProgramMigration = (options) => planAgentProgramMigrationOperation({
+  ...options,
+  parseLegacyPersistentAtomKey
+});
 
 function hashBytes(bytes) {
   return `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;

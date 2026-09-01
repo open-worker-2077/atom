@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
 
 import { revisionOfWorldFacts } from '../world-runtime/world-revision.mjs';
-import { parseAtomKey } from '../../../work-engine/atom-language/key-parser.mjs';
 
 const PLAN_CONTRACT = 'atom.agent-program-migration-plan';
 const RECEIPT_CONTRACT = 'atom.agent-program-migration-receipt';
@@ -21,11 +20,8 @@ function legacyAgentProgramSource(originalSituation) {
   ].join('\n');
 }
 
-function parsePersistentKey(rawKey, location) {
-  const parsed = parseAtomKey(rawKey, {
-    allowRetiredAgentKey: true,
-    descriptionSymbolWarnings: false
-  });
+function parsePersistentKey(rawKey, location, parseLegacyPersistentAtomKey) {
+  const parsed = parseLegacyPersistentAtomKey(rawKey);
   if (parsed.errors.length > 0 || parsed.actions.length > 0 || parsed.hints.length > 0) {
     throw problem(
       'AGENT_MIGRATION_SOURCE_AMBIGUOUS',
@@ -67,7 +63,7 @@ function migrationIdFor({ expectedRevision, nextRevision, sourceFactsHash, nextF
   }).slice('sha256:'.length, 'sha256:'.length + 20)}`;
 }
 
-function rewriteWorld(sourceFacts) {
+function rewriteWorld(sourceFacts, parseLegacyPersistentAtomKey) {
   const summary = {
     activePureAgentsUpgraded: 0,
     activeProgramAgentsUpgraded: 0,
@@ -89,7 +85,7 @@ function rewriteWorld(sourceFacts) {
     const entries = Object.entries(source).map(([rawKey, value]) => ({
       rawKey,
       value,
-      parsed: parsePersistentKey(rawKey, `${address}:${rawKey}`)
+      parsed: parsePersistentKey(rawKey, `${address}:${rawKey}`, parseLegacyPersistentAtomKey)
     }));
     const possibleThingFields = entries.filter(({ parsed }) => parsed.baseKey === 'thing');
     const possiblyArchived = insideDefaultBackup || possibleThingFields.some(({ parsed }) => {
@@ -176,7 +172,9 @@ function rewriteWorld(sourceFacts) {
       rewrittenEntries.push({
         rawKey: 'situation',
         value: legacyAgentProgramSource(''),
-        parsed: parsePersistentKey('situation', `${address}:situation`)
+        parsed: parsePersistentKey(
+          'situation', `${address}:situation`, parseLegacyPersistentAtomKey
+        )
       });
     }
 
@@ -209,13 +207,15 @@ function rewriteWorld(sourceFacts) {
   return { facts, summary, upgradedPaths, activeProgramAgentPaths, archivedDemotedPaths };
 }
 
-function assertNoRetiredAgentKeys(facts) {
+function assertNoRetiredAgentKeys(facts, parseLegacyPersistentAtomKey) {
   function visit(records, location) {
     for (const [index, record] of records.entries()) {
       const recordLocation = `${location}/${index}`;
       let contain = null;
       for (const [rawKey, value] of Object.entries(record)) {
-        const parsed = parsePersistentKey(rawKey, `${recordLocation}:${rawKey}`);
+        const parsed = parsePersistentKey(
+          rawKey, `${recordLocation}:${rawKey}`, parseLegacyPersistentAtomKey
+        );
         if (parsed.types.some(({ raw }) => raw === 'agent')) {
           throw problem(
             'AGENT_MIGRATION_TARGET_VERIFICATION_FAILED',
@@ -336,17 +336,22 @@ function redactedTransactionReceipt(receipt) {
     .map((key) => [key, structuredClone(receipt[key])]));
 }
 
-export async function planAgentProgramMigration({ snapshot, programScheduler }) {
+export async function planAgentProgramMigration({
+  snapshot,
+  programScheduler,
+  parseLegacyPersistentAtomKey
+}) {
   if (!snapshot || !Array.isArray(snapshot.facts) || typeof snapshot.revision !== 'string'
-    || revisionOfWorldFacts(snapshot.facts) !== snapshot.revision) {
+    || revisionOfWorldFacts(snapshot.facts) !== snapshot.revision
+    || typeof parseLegacyPersistentAtomKey !== 'function') {
     throw problem(
       'INVALID_AGENT_MIGRATION_PLAN',
       'Agent Program migration planning requires one revision-bound world snapshot'
     );
   }
   const sourceFacts = structuredClone(snapshot.facts);
-  const rewritten = rewriteWorld(sourceFacts);
-  assertNoRetiredAgentKeys(rewritten.facts);
+  const rewritten = rewriteWorld(sourceFacts, parseLegacyPersistentAtomKey);
+  assertNoRetiredAgentKeys(rewritten.facts, parseLegacyPersistentAtomKey);
   await verifyTargetSecurity({
     facts: rewritten.facts,
     programScheduler,

@@ -7,8 +7,22 @@ import test from 'node:test';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
+const AGENT_SOURCE = 'agent({"labels":["^^"],"functions":{"groups":[],"names":["agent","explore","json_parse","slot_body","transform","use_program"]}})';
+
 function atom(thing, situation = '', contain = [], support = [], types = []) {
-  return { [`thing${types.map((type) => `@${type}`).join('')}`]: thing, situation, contain, support };
+  const agentProgram = types.includes('agent');
+  const storedTypes = agentProgram
+    ? ['program', ...types.filter((type) => type !== 'agent' && type !== 'program')]
+    : types;
+  const storedSituation = agentProgram
+    ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\n${AGENT_SOURCE}`
+    : situation;
+  return {
+    [`thing${storedTypes.map((type) => `@${type}`).join('')}`]: thing,
+    situation: storedSituation,
+    contain,
+    support
+  };
 }
 function thingOf(value) {
   return Object.entries(value).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
@@ -25,7 +39,7 @@ function find(atoms, selector) {
 }
 function world() {
   return [atom('Root', '', [
-    atom('研发窗口', '', [], [], ['agent', '研发']),
+    atom('研发窗口', '', [], [], ['研发']),
     atom('订单槽体', '', [atom('候选流', '', [
       atom('客户', '客户槽契约', [], [{ 'if@current': true, then: [{ thing: '金额' }] }], ['text']),
       atom('金额', '金额槽契约', [], [{
@@ -38,7 +52,7 @@ function world() {
     ])]),
     atom('槽体封装程序', 'slot_body({"action":"seal","body":"Root/订单槽体"})', [], [], ['program']),
     atom('槽体打印程序', 'use_program({"name":"Root/订单槽体/print","arguments":{"name":"订单001"}})', [], [], ['program'])
-  ])];
+  ], [], ['agent'])];
 }
 async function setup(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-slot-body-program-'));
@@ -48,7 +62,7 @@ async function setup(t) {
   await fs.writeFile(contextFile, JSON.stringify(world(), null, 2), 'utf8');
   return {
     contextFile, projectionFile, programScheduler: createProgramRuntimeScheduler(),
-    interaction: { agent: { ref: 'agent:Root/研发窗口', path: 'Root/研发窗口' } }
+    interaction: { agent: { ref: 'agent:Root', path: 'Root' } }
   };
 }
 const run = (runtime, source) => executeAtomLanguage({ ...runtime, source });

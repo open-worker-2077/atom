@@ -926,13 +926,7 @@ export async function executeAtomLanguage(options = {}) {
   let programCycle = { messages: [], locks: [], records: [] };
   let activeRequestDrivenLocks = [];
   let creatorSecurity = null;
-  const candidateProgramScheduler = options.programScheduler
-    ? (typeof options.programScheduler.createCandidateRuntime === 'function'
-      ? options.programScheduler.createCandidateRuntime()
-      : typeof options.programScheduler.deriveAgentSecurity !== 'function'
-        ? options.programScheduler
-        : null)
-    : null;
+  let candidateProgramScheduler = null;
   if (options.programScheduler) {
     const indexPreparationStartedAt = performance.now();
     try {
@@ -1065,6 +1059,13 @@ export async function executeAtomLanguage(options = {}) {
       )]);
     }
   }
+  candidateProgramScheduler = options.programScheduler
+    ? (typeof options.programScheduler.createCandidateRuntime === 'function'
+      ? options.programScheduler.createCandidateRuntime()
+      : typeof options.programScheduler.deriveAgentSecurity !== 'function'
+        ? options.programScheduler
+        : null)
+    : null;
   const programWarnings = (programCycle.failures ?? []).map((failure) => diagnostic(
     failure.code ?? 'ATOM_PROGRAM_FAILED',
     failure.message ?? 'Python Program failed',

@@ -8,10 +8,19 @@ import { createProgramRuntimeScheduler } from '../work-engine/atom-language/prog
 import { slotProgramInvocationsForEvent } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
+const AGENT_SOURCE = 'agent({"labels":["^^"],"functions":{"groups":[],"names":["agent","explore","json_parse","slot_body","transform","trigger","use_program"]}})';
+
 function atom(thing, situation = '', contain = [], support = [], types = []) {
+  const agentProgram = types.includes('agent');
+  const storedTypes = agentProgram
+    ? ['program', ...types.filter((type) => type !== 'agent' && type !== 'program')]
+    : types;
+  const storedSituation = agentProgram
+    ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\n${AGENT_SOURCE}`
+    : situation;
   return {
-    [`thing${types.map((type) => `@${type}`).join('')}`]: thing,
-    situation,
+    [`thing${storedTypes.map((type) => `@${type}`).join('')}`]: thing,
+    situation: storedSituation,
     contain,
     support
   };
@@ -44,7 +53,7 @@ function world() {
     `use_program({"name":"Root/订单槽体/print","arguments":{"name":"${name}"}})`
   );
   return [atom('Root', '', [
-    atom('研发窗口', '', [], [], ['agent']),
+    atom('研发窗口'),
     atom('订单槽体', '', [
       atom('候选流', '', [
         atom('输入', '输入槽契约', [], [{ 'if@current': true, then: [{ thing: '输出' }] }]),
@@ -56,7 +65,7 @@ function world() {
     atom('封装', 'slot_body({"action":"seal","body":"Root/订单槽体"})', [], [], ['program']),
     atom('打印001', printer('订单001'), [], [], ['program']),
     atom('打印002', printer('订单002'), [], [], ['program'])
-  ])];
+  ], [], ['agent'])];
 }
 
 async function setup(t) {
@@ -68,7 +77,7 @@ async function setup(t) {
   return {
     contextFile,
     projectionFile,
-    interaction: { agent: { ref: 'agent:Root/研发窗口', path: 'Root/研发窗口' } }
+    interaction: { agent: { ref: 'agent:Root', path: 'Root' } }
   };
 }
 
@@ -99,7 +108,7 @@ function conditionalWorld() {
     `use_program({"name":"Root/条件槽体/print","arguments":{"name":"${name}"}})`
   );
   return [atom('Root', '', [
-    atom('研发窗口', '', [], [], ['agent']),
+    atom('研发窗口'),
     atom('条件槽体', '', [
       atom('候选流', '', [
         atom('字段甲', '字段甲槽契约', [], [{
@@ -120,7 +129,7 @@ function conditionalWorld() {
     atom('封装条件槽体', 'slot_body({"action":"seal","body":"Root/条件槽体"})', [], [], ['program']),
     atom('打印条件001', printer('实例001'), [], [], ['program']),
     atom('打印条件002', printer('实例002'), [], [], ['program'])
-  ])];
+  ], [], ['agent'])];
 }
 
 async function setupConditional(t) {

@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
+import { parseLegacyPersistentAtomKey } from '../src/atom-system/adapters/legacy-atom-key-parser.mjs';
 import {
   applyAgentProgramMigration,
   planAgentProgramMigration,
@@ -317,7 +318,8 @@ async function loadVerifiedBackup({ runtime, directory, attemptId, programSchedu
   const revision = revisionOfWorldFacts(facts);
   const plan = await planAgentProgramMigration({
     snapshot: { facts, revision },
-    programScheduler
+    programScheduler,
+    parseLegacyPersistentAtomKey
   });
   if (receipt?.contract !== 'atom.agent-program-private-backup'
     || receipt.version !== 1
@@ -502,7 +504,8 @@ async function apply(mode, runtime) {
   const source = await readWorld(runtime.contextFile);
   const plan = await planAgentProgramMigration({
     snapshot: { facts: source.facts, revision: source.revision },
-    programScheduler
+    programScheduler,
+    parseLegacyPersistentAtomKey
   });
   const preflight = {
     contract: 'atom.agent-program-migration-preflight',

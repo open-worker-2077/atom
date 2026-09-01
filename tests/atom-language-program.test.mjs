@@ -9,6 +9,7 @@ import { compileProgramTransform } from '../work-engine/atom-language/engine.mjs
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
 import { TRANSFORM_COMMANDS } from '../work-engine/atom-language/transform-key-parser.mjs';
 import { executeProgram } from '../work-engine/atom-language/program.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
 function atom(thing, situation = '', contain = [], support = [], types = []) {
   const key = `thing${types.map((type) => `@${type}`).join('')}`;
@@ -116,9 +117,30 @@ test('a valid Program is published immediately but never runs during write', asy
   const world = baseWorld();
   const program = world.pop();
   const files = await fixture(t, world);
+  const validator = createProgramRuntimeScheduler();
+  const validationOnlyScheduler = {
+    deriveAgentSecurity: validator.deriveAgentSecurity.bind(validator),
+    validateProgramSources: validator.validateProgramSources.bind(validator),
+    async current() {
+      return { messages: [], locks: [], records: [], transforms: [], failures: [] };
+    },
+    async refresh() {
+      return { messages: [], locks: [], records: [], transforms: [], failures: [] };
+    },
+    createCandidateRuntime() {
+      return {
+        deriveAgentSecurity: validator.deriveAgentSecurity.bind(validator),
+        validateProgramSources: validator.validateProgramSources.bind(validator),
+        async refresh() {
+          return { messages: [], locks: [], records: [], transforms: [], failures: [] };
+        }
+      };
+    }
+  };
   const result = await executeAtomLanguage({
     ...files,
-    source: `transform new ${JSON.stringify(program)}`
+    source: `transform new ${JSON.stringify(program)}`,
+    programScheduler: validationOnlyScheduler
   });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(findAtom(await readAtoms(files.contextFile), '任务').situation, '待办');

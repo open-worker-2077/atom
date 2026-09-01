@@ -425,6 +425,7 @@ test('a real Program creates then updates one new Atom inside the triggering cen
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(writes.length, 1);
   const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(persisted[0].contain.length, 1, JSON.stringify({ result, persisted }));
   assert.equal(persisted[0].contain[0].thing, 'Created In Reconcile');
   assert.equal(persisted[0].contain[0].situation, 'final');
   assert.equal(result.revisionAfter, crypto.createHash('sha256')

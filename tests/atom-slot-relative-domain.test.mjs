@@ -8,10 +8,19 @@ import { executeProgramExplore } from '../work-engine/atom-language/query-capabi
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
+const AGENT_SOURCE = 'agent({"labels":["^^"],"functions":{"groups":[],"names":["agent","explore","transform","use_program"]}})';
+
 function atom(thing, situation = '', contain = [], support = [], types = []) {
+  const agentProgram = types.includes('agent');
+  const storedTypes = agentProgram
+    ? ['program', ...types.filter((type) => type !== 'agent' && type !== 'program')]
+    : types;
+  const storedSituation = agentProgram
+    ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\n${AGENT_SOURCE}`
+    : situation;
   return {
-    [`thing${types.map((type) => `@${type}`).join('')}`]: thing,
-    situation,
+    [`thing${storedTypes.map((type) => `@${type}`).join('')}`]: thing,
+    situation: storedSituation,
     contain,
     support
   };
@@ -114,7 +123,7 @@ test('explicit development run binds one candidate scope and inherited use_progr
     'transform({"thing":"./结果","situation.rep." + value:None})'
   ].join('\n');
   const world = [atom('Root', '', [
-    atom('研发窗口', '', [], [], ['agent']),
+    atom('研发窗口'),
     atom('候选', '', [
       atom('客户', '张三'),
       atom('结果', '未运行'),
@@ -122,7 +131,7 @@ test('explicit development run binds one candidate scope and inherited use_progr
       atom('编排', orchestrator, [], [], ['program'])
     ]),
     atom('无关域', '', [atom('结果', '保持不变')])
-  ])];
+  ], [], ['agent'])];
   await fs.writeFile(contextFile, JSON.stringify(world, null, 2), 'utf8');
 
   const result = await executeAtomLanguage({
@@ -130,7 +139,7 @@ test('explicit development run binds one candidate scope and inherited use_progr
     contextFile,
     projectionFile,
     programScheduler: createProgramRuntimeScheduler(),
-    interaction: { agent: { ref: 'agent:Root/研发窗口', path: 'Root/研发窗口' } }
+    interaction: { agent: { ref: 'agent:Root', path: 'Root' } }
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
