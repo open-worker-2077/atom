@@ -14,6 +14,7 @@
 
 - **当前规格**：[`specs/2026-08-31-atom-web-spatial-design.md`](specs/2026-08-31-atom-web-spatial-design.md)
 - **当前计划**：[`plans/2026-09-01-atom-web-bug-patrol.md`](plans/2026-09-01-atom-web-bug-patrol.md)
+- **并行裁定账本**：[`plans/2026-09-02-atom-cli-feedback-triage.md`](plans/2026-09-02-atom-cli-feedback-triage.md)；45 条 CLI `submit` 已逐条登记，但只有重新取得当前复现证据的条目才进入修复链。
 - **最近完成**：[`plans/2026-09-01-atom-esg-stage-progression.md`](plans/2026-09-01-atom-esg-stage-progression.md)；真实 ESG 自动迁窗初态已部署并回读，后续只由真实业务`✅`事实触发。
 - **跨 Session 规则**：[`specs/2026-08-31-atom-acceptance-operations-design.md`](specs/2026-08-31-atom-acceptance-operations-design.md)
 - **相关世界合同**：[`specs/2026-08-31-atom-world-program-design.md`](specs/2026-08-31-atom-world-program-design.md)
@@ -26,5 +27,5 @@
 以下场景的产品合同保存在[`specs/2026-08-31-atom-web-spatial-design.md`](specs/2026-08-31-atom-web-spatial-design.md)，实施前分别执行 Superpowers brainstorming；不得在当前迁窗任务中顺手修改：
 
 - **待设计实现**：输入层识别同一目标的点击次数，并允许 Program 把三点击声明为运行触发条件；不得硬编码三点击用途。
-- **待手机验收**：手机访问`worker.tail33a2eb.ts.net`仍失败；服务端链已通，继续从手机 DNS/浏览器边界取证，安全直连入口为`http://100.116.206.105:4786/`。
+- **待手机验收**：唯一正式入口是`https://worker.tail33a2eb.ts.net/`，手机访问仍失败；服务端链已通，继续从手机 DNS/浏览器边界取证。`100.116.206.105:4786`只保留为内部诊断探针，不是用户入口、替代地址或完成方案。
 - **已完成**：A 模式双击最深目标、ASDF Strut 端点贴边、CLI 更新后的场景连续性和 Shortcut 跨域目标路线均已有测试、真实浏览器证据和远端提交。

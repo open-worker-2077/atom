@@ -19,14 +19,14 @@
 
 ## 恢复断点
 
-- **当前分支**：`fix/mobile-private-access`，隔离目录仍为`.worktrees/esg-auto-jump`。
+- **当前分支**：`main`；以仓库当前 checkout 和远端提交为准，不再沿用历史隔离分支名称判断状态。
 - **已完成代码**：Shortcut、ASDF 双击与 Strut 边界修复均已推送；CLI 新 revision 现先拉齐当前路径和全部展开路径，再把同一 revision 原子导入场景。
 - **当前证据**：Task 4 桥接合同`29/29`、CLI 相关真实浏览器旅程`3/3`、完整回归`1592/1592`均通过并已推送。2026-09-02 再次现场确认 4784/4785/4786 均监听，Tailscale Serve 仍把 HTTPS 域名代理到 4785；使用域名与指定 Tailnet IP 请求根路径返回 200，`pixel-10a`可被 Tailscale peer ping 通。电脑访问 4786 返回 403，符合仅允许手机 IP 的白名单合同。用户手机仍报告域名无法打开，剩余首个未证实边界仍是手机 DNS/浏览器入口。
 - **Task 1 实现提交**：`89a879a`（`fix(web): load remote shortcut routes`）。
 - **Task 2 实现提交**：`9a61ff2`（`fix(web): keep ASDF double-click on deepest target`）。
 - **Task 3 安全回退提交**：`83f63f1`（`fix(web): attach strut endpoints to visible boundaries`）。
 - **Task 4 实现提交**：`67a2fd0`（`fix(web): refresh expanded scopes atomically`）。
-- **下一动作**：请手机先验证项目既有安全直连入口`http://100.116.206.105:4786/`；若直连成功，再修正手机 Tailscale DNS/Android Private DNS/浏览器安全 DNS设置后复验 HTTPS 主域名。
+- **下一动作**：只围绕正式入口`https://worker.tail33a2eb.ts.net/`取得手机侧 DNS、Tailscale 与浏览器错误证据并修复；不得要求用户改用 Tailnet IP。`100.116.206.105:4786`只允许作为开发侧分层诊断探针，用于区分身份网关与名称解析，不构成产品入口。
 - **仍未完成**：手机端最终读取验收；电脑不能代替手机观察其 DNS 选择与浏览器结果。
 
 ---
@@ -105,5 +105,5 @@
 
 - [x] **Step 1: Reproduce from the real boundary**：4784 health、4785 身份网关任务、Serve HTTPS 根路径/health、手机 peer 与对等 ping 均通过；公网/系统 DNS 对私有名称返回 NXDOMAIN，Tailscale 内部 DNS query 返回`100.116.206.105`。
 - [x] **Step 2: Locate the first broken hop**：服务端 TLS、Serve、4785、4784及手机对等链路均通；剩余首个未证实边界是手机是否把`*.ts.net`交给 Tailscale 内部 DNS，而非 Android Private DNS/浏览器安全 DNS。
-- [x] **Step 3: Keep the secure fallback available**：既有直连网关任务 Running，监听`100.116.206.105:4786`且只批准手机`100.102.183.62`；电脑来源访问返回 403，证明未放宽白名单。
+- [x] **Step 3: Keep the diagnostic probe isolated**：诊断网关任务 Running，监听`100.116.206.105:4786`且只批准手机`100.102.183.62`；电脑来源访问返回 403，证明未放宽白名单。该探针不是用户入口，正式合同始终是 HTTPS 域名。
 - [ ] **Step 4: Verify on phone**：以用户手机成功打开并完成一次只读 Graph 请求为最终验收；自动化回归仅作辅助证据。
