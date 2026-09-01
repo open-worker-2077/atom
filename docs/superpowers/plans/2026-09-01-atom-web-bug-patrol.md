@@ -21,7 +21,7 @@
 
 - **当前分支**：`fix/mobile-private-access`，隔离目录仍为`.worktrees/esg-auto-jump`。
 - **已完成代码**：Shortcut、ASDF 双击与 Strut 边界修复均已推送；CLI 新 revision 现先拉齐当前路径和全部展开路径，再把同一 revision 原子导入场景。
-- **当前证据**：Task 4 桥接合同`29/29`、CLI 相关真实浏览器旅程`3/3`、完整回归`1592/1592`均通过并已推送。Task 5 已确认手机 Tailscale peer Online/Active、电脑到手机 ping 成功、Serve→4785→4784 的 HTTPS 根路径与 health 均为 200；Tailscale 内部 DNS 查询成功，但电脑系统 DNS 因`TailscaleDNS=false`不接管该名称，手机侧 DNS 行为仍待真机验证。
+- **当前证据**：Task 4 桥接合同`29/29`、CLI 相关真实浏览器旅程`3/3`、完整回归`1592/1592`均通过并已推送。2026-09-02 再次现场确认 4784/4785/4786 均监听，Tailscale Serve 仍把 HTTPS 域名代理到 4785；使用域名与指定 Tailnet IP 请求根路径返回 200，`pixel-10a`可被 Tailscale peer ping 通。电脑访问 4786 返回 403，符合仅允许手机 IP 的白名单合同。用户手机仍报告域名无法打开，剩余首个未证实边界仍是手机 DNS/浏览器入口。
 - **Task 1 实现提交**：`89a879a`（`fix(web): load remote shortcut routes`）。
 - **Task 2 实现提交**：`9a61ff2`（`fix(web): keep ASDF double-click on deepest target`）。
 - **Task 3 安全回退提交**：`83f63f1`（`fix(web): attach strut endpoints to visible boundaries`）。
