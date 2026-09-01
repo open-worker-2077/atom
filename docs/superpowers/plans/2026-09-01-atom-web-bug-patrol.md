@@ -19,12 +19,12 @@
 
 ## 恢复断点
 
-- **当前分支**：`fix/web-shortcut-lazy-route`，隔离目录仍为`.worktrees/esg-auto-jump`。
-- **已完成代码**：Shortcut scoped state 补入远端目标的最小载体路线；未扩大全世界加载。
-- **当前证据**：目标服务测试按预期 RED 后 GREEN；相邻服务/投影`13/13`；浏览器 Shortcut 旅程`4/4`；完整`npm test`为`1591/1591`、0 failure。
+- **当前分支**：`fix/web-asdf-deep-hit`，隔离目录仍为`.worktrees/esg-auto-jump`。
+- **已完成代码**：Shortcut scoped state 补入远端目标的最小载体路线；ASDF 重叠命中已在外层壳与可见内层节点之间优先采用内层节点。
+- **当前证据**：ASDF 浏览器用例按预期取得 RED（期望`overlap-child-id`，实际`overlap-parent-id`），相同用例修复后`1/1` GREEN；命中、手势与输入邻接单测`46/46`；完整`npm test`为`1591/1591`、0 failure。
 - **Task 1 实现提交**：`89a879a`（`fix(web): load remote shortcut routes`）。
-- **下一动作**：提交、合入并推送`main`；随后从 Task 2 Step 1 继续。
-- **仍未完成**：ASDF 双击最深命中、Strut 可见边界贴合、CLI 更新后的视图连续性。
+- **下一动作**：提交、合入并推送`main`；随后从 Task 3 Step 1 继续。
+- **仍未完成**：Strut 可见边界贴合、CLI 更新后的视图连续性。
 
 ---
 
@@ -58,10 +58,10 @@
 - Consumes: 当前帧`state.hitRegions`、命中节点的稳定 visual key、secondary double-click intent。
 - Produces: 两击必须绑定同一稳定目标；重叠命中选择屏幕上最深可见节点，外层 carrier 不得替换第二击目标。
 
-- [ ] **Step 1: Reproduce RED**：在 A 模式展开父子重叠场景，对子节点坐标双击，断言最终路径属于子节点而非外部父节点。
-- [ ] **Step 2: Trace hit selection**：记录两次 pointer hit 的候选深度、ownerPath 与 stable key，证明错误发生在命中排序或双击目标复用边界。
-- [ ] **Step 3: Implement one stable-target rule**：只修正已证实的命中/仲裁层；单击选择、右键投影和空白双击合同保持不变。
-- [ ] **Step 4: Verify and commit**：运行目标单测、关键浏览器旅程及全量回归，提交`fix(web): keep ASDF double-click on deepest target`。
+- [x] **Step 1: Reproduce RED**：在 A 模式展开父子重叠场景，对子节点坐标双击，断言`activate`目标为子节点；旧实现实际交付外部父节点。
+- [x] **Step 2: Trace hit selection**：两击稳定落在同一错误目标；根因是已选中的外层 cluster shell hit priority 压过其内部实际可见节点，不是点击次数仲裁器换靶。
+- [x] **Step 3: Implement one stable-target rule**：仅当 ASDF 最高候选为 cluster shell 且指针确实位于非 shell 可见节点圆内时，将最具体内层节点提升为目标；其余排序合同不变。
+- [x] **Step 4: Verify and commit**：目标 Playwright`1/1`、命中/手势/输入邻接单测`46/46`、完整`npm test`为`1591/1591`；提交号在代码提交后回写。
 
 ### Task 3: Strut 端点贴合可见节点边界
 

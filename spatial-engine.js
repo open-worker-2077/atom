@@ -3917,6 +3917,26 @@
       })
       .filter((candidate) => candidate.normalizedDistance <= 1.14)
       .sort((a, b) => b.score - a.score);
+    const highestPriorityCandidate = candidates[0] || null;
+    if (
+      state.clusterFieldOpen
+      && highestPriorityCandidate
+      && highestPriorityCandidate.region.item.clusterShellProxy
+    ) {
+      const visibleChild = middleFrameTarget.chooseMostSpecificTarget(
+        candidates
+          .map((candidate) => candidate.region)
+          .filter((region) => !region.item.clusterShellProxy),
+        x,
+        y
+      );
+      if (visibleChild) {
+        const childIndex = candidates.findIndex((candidate) => candidate.region === visibleChild);
+        if (childIndex > 0) {
+          candidates.unshift(candidates.splice(childIndex, 1)[0]);
+        }
+      }
+    }
     state.ambiguity = candidates.length > 1 && candidates[0].score - candidates[1].score < 9
       ? candidates.slice(0, 3).map((candidate) => candidate.region)
       : [];

@@ -1,5 +1,14 @@
 import { test, expect } from '@playwright/test';
 
+function hashText(value) {
+  let hash = 2166136261;
+  for (const character of String(value || '')) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
 async function openIsolatedWorld(page) {
   await page.goto('/');
   await page.waitForFunction(() => (
@@ -25,6 +34,59 @@ async function enterAtomFile(page, options) {
   await waitForViewToSettle(page, options);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).not.toBe('root');
 }
+
+test('A-mode double-click activates the visible child instead of its selected outer carrier', async ({ page }) => {
+  const parentPath = `root/${hashText('overlap-parent-id').toString(36)}`;
+  const knowledge = {
+    revision: 1,
+    nodes: [
+      {
+        id: 'overlap-parent-id', key: 'root::overlap-parent-id', path: 'root',
+        atomPath: '外层', label: '外层', detail: '', hasChildren: true
+      },
+      {
+        id: 'overlap-child-id', key: `${parentPath}::overlap-child-id`, path: parentPath,
+        atomPath: '外层/内层目标', label: '内层目标', detail: '', hasChildren: false
+      }
+    ],
+    edges: []
+  };
+  await page.route('**/__spatial/api/state?*', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, scope: { path: 'root' }, knowledge })
+  }));
+  await page.goto('/');
+  await page.waitForFunction(() => (
+    window.spatialLab
+    && document.body.dataset.spatialBridge === 'connected'
+    && window.spatialLab.state().visibleNodeDescriptors.some(({ label }) => label === '外层')
+  ));
+
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('外层'))).toBe(true);
+  await page.keyboard.press('a');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterFieldOpen)).toBe(true);
+  const readChild = () => page.evaluate(() => (
+    window.spatialLab.state().interactionTargets.find(({ label }) => label === '内层目标')
+  ));
+  await expect.poll(readChild).toBeTruthy();
+  const child = await readChild();
+  expect(child).toBeTruthy();
+  await page.evaluate(() => {
+    window.__activationTargets = [];
+    window.addEventListener('spatial-visual-intent', (event) => {
+      if (event.detail && event.detail.intent === 'activate') {
+        window.__activationTargets.push(event.detail.targetId);
+      }
+    });
+  });
+
+  await page.mouse.dblclick(child.clientX, child.clientY);
+
+  await expect.poll(() => page.evaluate(() => window.__activationTargets.at(-1)))
+    .toBe('overlap-child-id');
+});
 
 test('first domain entry renders its authoritative child nodes on the next visual frame', async ({ page }) => {
   await openIsolatedWorld(page);
