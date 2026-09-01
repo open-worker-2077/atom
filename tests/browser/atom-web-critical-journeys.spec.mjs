@@ -258,6 +258,60 @@ test('TC-I24-CLI-WEB-LOCAL-FRESHNESS keeps the open page and F5 on the CLI value
   await expect.poll(readDetail, { timeout: 20_000 }).toBe(cliDetail);
 });
 
+test('a CLI revision preserves the complete expanded scene instead of mixing old and partial scopes', async ({ page, request }) => {
+  test.setTimeout(60_000);
+  const atomPath = '测试入口/第一节点';
+  await openIsolatedWorld(page);
+  await enterAtomFile(page);
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('测试入口'))).toBe(true);
+  await page.keyboard.press('a');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await expect.poll(() => page.evaluate(() => window.spatialLab.exportField().expandedPaths.length))
+    .toBeGreaterThan(0);
+  await page.waitForTimeout(700);
+
+  const before = await page.evaluate(() => ({
+    camera: window.spatialLab.state().camera,
+    expandedPaths: window.spatialLab.exportField().expandedPaths,
+    targets: window.spatialLab.state().interactionTargets.map(({ key, label, clientX, clientY }) => ({
+      key, label, clientX, clientY
+    }))
+  }));
+  const response = await request.post('/__atom/api/command', {
+    data: {
+      source: `transform {"thing":"${atomPath}","situation.rep.CLI 场景连续性"}`,
+      interaction: {
+        id: 'cli-web-expanded-scene-continuity',
+        agentSelector: '测试入口',
+        agent: { path: '测试入口' }
+      },
+      history: []
+    }
+  });
+  expect(response.status()).toBe(200);
+  await expect.poll(() => page.evaluate((expectedPath) => (
+    window.spatialLab.exportKnowledge().nodes.find(({ atomPath: actual }) => actual === expectedPath)?.detail
+  ), atomPath), { timeout: 20_000 }).toBe('CLI 场景连续性');
+  await page.waitForTimeout(700);
+
+  const after = await page.evaluate(() => ({
+    camera: window.spatialLab.state().camera,
+    expandedPaths: window.spatialLab.exportField().expandedPaths,
+    targets: window.spatialLab.state().interactionTargets.map(({ key, label, clientX, clientY }) => ({
+      key, label, clientX, clientY
+    }))
+  }));
+  expect(after.expandedPaths).toEqual(before.expandedPaths);
+  expect(after.camera).toEqual(before.camera);
+  const beforeByKey = new Map(before.targets.map((target) => [target.key, target]));
+  for (const target of after.targets) {
+    const prior = beforeByKey.get(target.key);
+    if (!prior) continue;
+    expect(Math.hypot(target.clientX - prior.clientX, target.clientY - prior.clientY)).toBeLessThan(1);
+  }
+  expect(after.targets.length).toBe(before.targets.length);
+});
+
 test('double-Shift selection survives the real ctrl-right landing gesture as one batch', async ({ page }) => {
   test.setTimeout(90_000);
   await openIsolatedWorld(page);

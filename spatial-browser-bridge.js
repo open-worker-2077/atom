@@ -124,6 +124,41 @@
     return queuedCommits.some((entry) => entry && entry.kind === "workspace");
   }
 
+  function activeViewPaths(fallbackPath) {
+    const view = typeof lab.exportField === "function" ? lab.exportField() : null;
+    return [...new Set([
+      fallbackPath,
+      view && view.path,
+      ...(Array.isArray(view && view.expandedPaths) ? view.expandedPaths : [])
+    ].filter((path) => typeof path === "string" && path.trim()))];
+  }
+
+  async function refreshExpandedRoute(seedPayload, fallbackPath) {
+    const seedRevision = Number(seedPayload?.knowledge?.revision) || 0;
+    const seedScope = seedPayload?.scope?.path || fallbackPath;
+    const paths = activeViewPaths(fallbackPath);
+    if (!seedRevision || paths.length < 2) {
+      return { payload: seedPayload, scopes: [seedScope] };
+    }
+    let knowledge = seedPayload.knowledge;
+    const scopes = [seedScope];
+    for (const path of paths) {
+      if (path === seedScope) continue;
+      const payload = await request(`/state?path=${encodeURIComponent(path)}`);
+      const incomingRevision = Number(payload?.knowledge?.revision) || 0;
+      if (incomingRevision !== seedRevision) {
+        pendingRemoteRevision = Math.max(pendingRemoteRevision, incomingRevision, seedRevision);
+        return null;
+      }
+      knowledge = mergeScopedKnowledge(knowledge, payload.knowledge);
+      scopes.push(payload?.scope?.path || path);
+    }
+    return {
+      payload: { ...seedPayload, knowledge },
+      scopes
+    };
+  }
+
   function reconcileCreatedNode(operation, knowledge, previousKnowledge) {
     if (!operation || operation.kind !== "node-create" || !knowledge) return null;
     const priorKeys = new Set(((previousKnowledge && previousKnowledge.nodes) || [])
@@ -258,13 +293,13 @@
         setScopeLoadState(normalizedPath, "loading");
       }
       if (initialLoad) setInitialLoadProgress("data", 15);
-      const payload = await request(`/state?path=${encodeURIComponent(normalizedPath)}`);
+      let payload = await request(`/state?path=${encodeURIComponent(normalizedPath)}`);
       if (initialLoad) {
         setInitialLoadProgress("service", 100);
         setInitialLoadProgress("data", 75);
       }
-      const incoming = payload.knowledge;
-      const scopedPath = payload.scope && payload.scope.path;
+      let incoming = payload.knowledge;
+      let scopedPath = payload.scope && payload.scope.path;
       if (
         pullOperationEpoch !== workspaceOperationEpoch
         || pushing
@@ -276,6 +311,15 @@
       const incomingRevision = Number(incoming && incoming.revision) || 0;
       const newerRevision = incomingRevision > revision;
       const unseenScope = scopedPath && !loadedPaths.has(scopedPath);
+      let refreshedScopes = scopedPath ? [scopedPath] : [];
+      if (newerRevision && !initialLoad && lastKnowledge) {
+        const refreshedRoute = await refreshExpandedRoute(payload, normalizedPath);
+        if (!refreshedRoute) return false;
+        payload = refreshedRoute.payload;
+        incoming = payload.knowledge;
+        scopedPath = payload.scope && payload.scope.path;
+        refreshedScopes = refreshedRoute.scopes;
+      }
       if (incoming && (newerRevision || unseenScope || !lastKnowledge)) {
         if (newerRevision && scopedPath) {
           loadedPaths.clear();
@@ -300,7 +344,7 @@
         }
         revision = incomingRevision;
         lastKnowledge = knowledge;
-        if (scopedPath) loadedPaths.add(scopedPath);
+        refreshedScopes.forEach((path) => loadedPaths.add(path));
         document.body.dataset.spatialKnowledge = "authoritative";
       }
       if (initialLoad) {

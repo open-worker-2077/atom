@@ -1103,6 +1103,62 @@ test('Atom Web refreshes from a committed remote operation instead of polling', 
   assert.equal(requests.filter(([url]) => url.includes('/state')).length, 2);
 });
 
+test('a remote CLI revision reloads every expanded scope before one atomic scene import', async () => {
+  const listeners = new Map();
+  const imports = [];
+  const requestedPaths = [];
+  let serverRevision = 1;
+  let eventSource = null;
+  class FakeEventSource {
+    constructor() { eventSource = this; }
+  }
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge: (knowledge) => { imports.push(structuredClone(knowledge)); return true; },
+      exportField: () => ({ path: 'root', expandedPaths: ['root/child'] })
+    },
+    EventSource: FakeEventSource,
+    fetch: async (url) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) {
+        const requestedPath = new URL(`http://atom.test${url}`).searchParams.get('path');
+        requestedPaths.push(requestedPath);
+        return response({
+          scope: { path: requestedPath },
+          knowledge: {
+            revision: serverRevision,
+            nodes: requestedPath === 'root'
+              ? [{ id: 'carrier', key: 'root::carrier', path: 'root', label: `root-r${serverRevision}` }]
+              : [{ id: 'leaf', key: 'root/child::leaf', path: 'root/child', label: `child-r${serverRevision}` }],
+            edges: []
+          }
+        });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document, URL }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  imports.length = 0;
+  requestedPaths.length = 0;
+
+  serverRevision = 2;
+  eventSource.onmessage({ data: '{"revision":2}' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(requestedPaths, ['root', 'root/child']);
+  assert.equal(imports.length, 1, 'the scene must not render a partial refreshed route');
+  assert.deepEqual(imports[0].nodes.map((node) => node.label), ['root-r2', 'child-r2']);
+});
+
 test('a remote commit received during a local save is refreshed after the save queue settles', async () => {
   const listeners = new Map();
   const imports = [];
