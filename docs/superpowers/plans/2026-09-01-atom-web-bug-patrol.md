@@ -19,13 +19,13 @@
 
 ## 恢复断点
 
-- **当前分支**：`fix/web-asdf-deep-hit`，隔离目录仍为`.worktrees/esg-auto-jump`。
-- **已完成代码**：Shortcut scoped state 补入远端目标的最小载体路线；ASDF 重叠命中已在外层壳与可见内层节点之间优先采用内层节点。
-- **当前证据**：ASDF 浏览器用例按预期取得 RED（期望`overlap-child-id`，实际`overlap-parent-id`），相同用例修复后`1/1` GREEN；命中、手势与输入邻接单测`46/46`；完整`npm test`为`1591/1591`、0 failure。
+- **当前分支**：`fix/web-strut-visible-boundaries`，隔离目录仍为`.worktrees/esg-auto-jump`。
+- **已完成代码**：Shortcut 远端路线与 ASDF 双击最深命中已推送；普通视图与 ASDF 现共用一条 Strut 语义绘制层，记录的几何即实际边界裁剪几何。
+- **当前证据**：ASDF Strut 用例先以几何缺失 RED，修复后目标用例`1/1`、完整复合 Strut 浏览器旅程`2/2`、结构几何与渲染合同`109/109`。完整回归为`1590/1591`；唯一失败是既有重型布局性能门槛在全套负载下为`1316.8ms > 1300ms`，同一用例隔离复跑为`1187.6ms`并通过，未发现 Strut 功能回归。
 - **Task 1 实现提交**：`89a879a`（`fix(web): load remote shortcut routes`）。
 - **Task 2 实现提交**：`9a61ff2`（`fix(web): keep ASDF double-click on deepest target`）。
-- **下一动作**：提交、合入并推送`main`；随后从 Task 3 Step 1 继续。
-- **仍未完成**：Strut 可见边界贴合、CLI 更新后的视图连续性。
+- **下一动作**：提交 Task 3 安全回退点，继续消除全量性能抖动并合入、推送`main`；随后从 Task 4 Step 1 继续。
+- **仍未完成**：CLI 更新后的视图连续性。
 
 ---
 
@@ -75,9 +75,9 @@
 - Consumes: 关系端节点最终屏幕中心、最终可见半径、junction/trunk 几何。
 - Produces: 每条可见 Strut 的首末点与对应圆边界距离误差在`1px`内；fan-in/fan-out 的 50% junction 身份不变。
 
-- [ ] **Step 1: Reproduce RED**：构造 ASDF 下缩放不同的两端节点，直接断言首末点到中心距离等于最终屏幕半径，旧实现显示悬空或入球。
-- [ ] **Step 2: Identify coordinate mismatch**：比较 world radius、cluster scale 与 screen radius，锁定哪一层把未缩放半径用于端点裁剪。
-- [ ] **Step 3: Clip using final screen geometry**：只在最终屏幕几何层裁剪端点，不改 Graph clause、布局力或节点事实。
+- [x] **Step 1: Reproduce RED**：构造 ASDF 内包域的二元 Strut，断言首末点到中心距离等于最终屏幕半径；旧实现首先暴露 ASDF 未进入 Strut 语义绘制层，几何为零条。
+- [x] **Step 2: Identify coordinate mismatch**：ASDF 仅画普通 workspace edge，普通视图则把 Strut 中心几何与`0.94R/0.28D`裁剪分开维护；两条路径既丢语义又无法用最终可见半径验收。
+- [x] **Step 3: Clip using final screen geometry**：两种视图共用`prepareStrutLayer`；每条线以最终`screen.radius`裁剪并把实际首末点写回可验证几何，Graph clause、50% junction 与事实不变。
 - [ ] **Step 4: Verify and commit**：运行 unit、compound Playwright 与全量回归，提交`fix(web): attach strut endpoints to visible boundaries`。
 
 ### Task 4: CLI 更新保持当前场景连续

@@ -117,8 +117,13 @@ test('connections come from relationshipPairs without a hard-coded root index ch
 });
 
 test('real canvas consumes strut bundles as branches, a common trunk, and ordered outputs', () => {
+  const ordinaryConnections = functionSource('drawConnections');
+  const clusterConnections = functionSource('drawClusterConnections');
+
   assert.match(source, /visualModel\.strutBundles\s*\(\s*state\.strutClauses/);
-  assert.match(source, /drawStrutBundle/);
+  assert.match(source, /function\s+prepareStrutLayer/);
+  assert.match(ordinaryConnections, /prepareStrutLayer\s*\(\s*renderedByGraphPath\s*\)/);
+  assert.match(clusterConnections, /prepareStrutLayer\s*\(\s*renderedByGraphPath\s*\)/);
   assert.match(source, /junctionRatio/);
   assert.match(source, /glyphs:\s*false/);
 });

@@ -2127,8 +2127,8 @@
     const directionY = deltaY / distance;
     const normalX = -directionY;
     const normalY = directionX;
-    const startInset = Math.min(from.screen.radius * 0.94, distance * 0.28);
-    const endInset = Math.min(to.screen.radius * 0.94, distance * 0.28);
+    const startInset = Math.min(from.screen.radius, distance * 0.48);
+    const endInset = Math.min(to.screen.radius, distance * 0.48);
     const start = {
       x: from.screen.x + directionX * startInset,
       y: from.screen.y + directionY * startInset
@@ -2337,6 +2337,93 @@
       }
     }
     context.restore();
+    return { start, end };
+  }
+
+  function prepareStrutLayer(renderedByGraphPath) {
+    const strutBundles = visualModel.strutBundles(state.strutClauses, {
+      junctionRatio: 0.5,
+      visiblePaths: new Set(renderedByGraphPath.keys())
+    });
+    const drawableBundles = strutBundles.filter((bundle) => {
+      const endpointPaths = [
+        ...(bundle.antecedents || []).map((entry) => entry.path),
+        ...(bundle.consequents || []).map((entry) => entry.path)
+      ];
+      return endpointPaths.length >= 2
+        && endpointPaths.every((path) => renderedByGraphPath.has(path));
+    });
+    const drawablePairs = new Set(drawableBundles.flatMap((bundle) => {
+      const inputs = [
+        ...(bundle.antecedents || []),
+        ...(bundle.predicatePrograms || [])
+      ].map((entry) => entry.path);
+      const outputs = (bundle.consequents || []).map((entry) => entry.path);
+      return inputs.flatMap((fromPath) => outputs.map((toPath) => `${fromPath}\u0000${toPath}`));
+    }));
+
+    function strutJunction(id, point) {
+      return {
+        node: null,
+        focusContext: null,
+        screen: { x: point.x, y: point.y, radius: 3, depth: 6.4 },
+        strutJunctionId: id
+      };
+    }
+
+    function drawBundle(bundle) {
+      const geometry = visualModel.strutBundleGeometry(bundle, (path) => {
+        const item = renderedByGraphPath.get(path);
+        return item ? { x: item.screen.x, y: item.screen.y } : null;
+      });
+      if (!geometry) return;
+      const junctionByRole = new Map(
+        geometry.junctions.map((junction) => [
+          junction.role,
+          strutJunction(junction.id, { x: junction.x, y: junction.y })
+        ])
+      );
+      function segmentEndpoint(segment, side) {
+        const path = side === "from" ? segment.fromPath : segment.toPath;
+        if (path) return renderedByGraphPath.get(path);
+        const role = side === "from"
+          ? (segment.role === "consequent" ? "split" : "merge")
+          : (segment.role === "antecedent" ? "merge" : "split");
+        return junctionByRole.get(role);
+      }
+      const renderedSegments = [];
+      geometry.segments.forEach((segment) => {
+        const from = segmentEndpoint(segment, "from");
+        const to = segmentEndpoint(segment, "to");
+        if (!from || !to) return;
+        const renderedPath = drawTopologyLink(from, to, {
+          fromId: segment.fromPath || from.strutJunctionId,
+          toId: segment.toPath || to.strutJunctionId,
+          kind: "association",
+          label: "strut",
+          clauseId: geometry.clauseId,
+          segmentRole: segment.role,
+          showLabel: segment.role === "binary" || segment.role === "trunk",
+          glyphs: false,
+          ...(segment.role !== "antecedent" ? { glyphs: true } : {})
+        });
+        if (renderedPath) {
+          renderedSegments.push({
+            ...segment,
+            from: renderedPath.start,
+            to: renderedPath.end
+          });
+        }
+      });
+      state.strutGeometry.push({ ...geometry, segments: renderedSegments });
+    }
+
+    return {
+      drawablePairs,
+      draw() {
+        drawableBundles.forEach(drawBundle);
+      }
+    };
   }
 
   function drawConnections(rendered) {
@@ -2352,26 +2439,7 @@
         .filter((item) => typeof item.node.graphPath === "string" && item.node.graphPath)
         .map((item) => [item.node.graphPath, item])
     );
-    const strutBundles = visualModel.strutBundles(state.strutClauses, {
-      junctionRatio: 0.5,
-      visiblePaths: new Set(renderedByGraphPath.keys())
-    });
-    const drawableStrutBundles = strutBundles.filter((bundle) => {
-      const endpointPaths = [
-        ...(bundle.antecedents || []).map((entry) => entry.path),
-        ...(bundle.consequents || []).map((entry) => entry.path)
-      ];
-      return endpointPaths.length >= 2
-        && endpointPaths.every((path) => renderedByGraphPath.has(path));
-    });
-    const drawableStrutPairs = new Set(drawableStrutBundles.flatMap((bundle) => {
-      const inputs = [
-        ...(bundle.antecedents || []),
-        ...(bundle.predicatePrograms || [])
-      ].map((entry) => entry.path);
-      const outputs = (bundle.consequents || []).map((entry) => entry.path);
-      return inputs.flatMap((fromPath) => outputs.map((toPath) => `${fromPath}\u0000${toPath}`));
-    }));
+    const strutLayer = prepareStrutLayer(renderedByGraphPath);
     const relationships = visualModel.relationshipPairs(existingNodes(state.nodes));
     const labelledHierarchyParents = new Set();
     const labelledAssociationSources = new Set();
@@ -2406,54 +2474,6 @@
       const x = side === "source" ? 72 : state.width - 72;
       const y = clamp(state.height * 0.34 + (seed % 290), 132, state.height - 132);
       return { screen: { x, y, radius: 7, depth: 6.4 }, node: null, focusContext: null };
-    }
-
-    function strutJunction(id, point) {
-      return {
-        node: null,
-        focusContext: null,
-        screen: { x: point.x, y: point.y, radius: 3, depth: 6.4 },
-        strutJunctionId: id
-      };
-    }
-
-    function drawStrutBundle(bundle) {
-      const geometry = visualModel.strutBundleGeometry(bundle, (path) => {
-        const item = renderedByGraphPath.get(path);
-        return item ? { x: item.screen.x, y: item.screen.y } : null;
-      });
-      if (!geometry) return;
-      state.strutGeometry.push(geometry);
-      const junctionByRole = new Map(
-        geometry.junctions.map((junction) => [
-          junction.role,
-          strutJunction(junction.id, { x: junction.x, y: junction.y })
-        ])
-      );
-      function segmentEndpoint(segment, side) {
-        const path = side === "from" ? segment.fromPath : segment.toPath;
-        if (path) return renderedByGraphPath.get(path);
-        const role = side === "from"
-          ? (segment.role === "consequent" ? "split" : "merge")
-          : (segment.role === "antecedent" ? "merge" : "split");
-        return junctionByRole.get(role);
-      }
-      geometry.segments.forEach((segment) => {
-        const from = segmentEndpoint(segment, "from");
-        const to = segmentEndpoint(segment, "to");
-        if (!from || !to) return;
-        drawTopologyLink(from, to, {
-          fromId: segment.fromPath || from.strutJunctionId,
-          toId: segment.toPath || to.strutJunctionId,
-          kind: "association",
-          label: "strut",
-          clauseId: geometry.clauseId,
-          segmentRole: segment.role,
-          showLabel: segment.role === "binary" || segment.role === "trunk",
-          glyphs: false,
-          ...(segment.role !== "antecedent" ? { glyphs: true } : {})
-        });
-      });
     }
 
     function descendantPortalItem(endpoint) {
@@ -2507,10 +2527,10 @@
       const toNode = edge.to.path === state.currentPath
         ? renderedNodes.get(edge.to.nodeId)?.node
         : null;
-      if (edge.label === "strut" && drawableStrutPairs.has(`${fromNode?.graphPath}\u0000${toNode?.graphPath}`)) return;
+      if (edge.label === "strut" && strutLayer.drawablePairs.has(`${fromNode?.graphPath}\u0000${toNode?.graphPath}`)) return;
       drawWorkspaceEdge(edge);
     });
-    drawableStrutBundles.forEach(drawStrutBundle);
+    strutLayer.draw();
 
     const transaction = workspace.transaction();
     if (transaction && transaction.kind === "edge-create") {
@@ -4824,9 +4844,16 @@
 
   function drawClusterConnections(rendered) {
     state.relationHitRegions = [];
+    state.strutGeometry = [];
     const renderedNodes = new Map(rendered
       .filter((item) => item.kind === "node" && item.node && item.ownerPath)
       .map((item) => [`${item.ownerPath}::${item.node.id}`, item]));
+    const renderedByGraphPath = new Map(
+      [...renderedNodes.values()]
+        .filter((item) => typeof item.node.graphPath === "string" && item.node.graphPath)
+        .map((item) => [item.node.graphPath, item])
+    );
+    const strutLayer = prepareStrutLayer(renderedByGraphPath);
 
     for (const cluster of state.clusterScene.clusters) {
       let labels = 0;
@@ -4847,6 +4874,10 @@
       const from = renderedNodes.get(`${fromEndpoint.path}::${fromEndpoint.nodeId}`);
       const to = renderedNodes.get(`${toEndpoint.path}::${toEndpoint.nodeId}`);
       if (!from || !to) continue;
+      if (
+        edge.label === "strut"
+        && strutLayer.drawablePairs.has(`${from.node.graphPath}\u0000${to.node.graphPath}`)
+      ) continue;
       drawTopologyLink(from, to, {
         fromId: fromEndpoint.nodeId,
         toId: toEndpoint.nodeId,
@@ -4856,6 +4887,7 @@
         edge
       });
     }
+    strutLayer.draw();
 
     const transaction = workspace.transaction();
     if (transaction && transaction.kind === "edge-create" && transaction.target) {
