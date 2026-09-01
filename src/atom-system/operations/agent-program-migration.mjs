@@ -380,6 +380,134 @@ export async function planAgentProgramMigration({
   });
 }
 
+export async function planGeneratedLegacyAgentDemotion({
+  snapshot,
+  programScheduler,
+  parseLegacyPersistentAtomKey,
+  targetPath
+}) {
+  if (!snapshot || !Array.isArray(snapshot.facts) || typeof snapshot.revision !== 'string'
+    || revisionOfWorldFacts(snapshot.facts) !== snapshot.revision
+    || typeof parseLegacyPersistentAtomKey !== 'function'
+    || typeof targetPath !== 'string' || !targetPath) {
+    throw problem(
+      'INVALID_AGENT_MIGRATION_PLAN',
+      'Generated legacy Agent demotion requires a revision-bound world and target'
+    );
+  }
+  if (typeof programScheduler?.deriveAgentSecurity !== 'function'
+    || typeof programScheduler?.rebuildRequestDrivenLocks !== 'function') {
+    throw problem(
+      'AGENT_MIGRATION_SOURCE_AMBIGUOUS',
+      'Generated legacy Agent demotion requires the Program declaration and lock scheduler'
+    );
+  }
+  const sourceFacts = structuredClone(snapshot.facts);
+  const facts = structuredClone(snapshot.facts);
+  let target = null;
+  function visit(records, parentPath = []) {
+    for (const record of records) {
+      const entries = Object.entries(record).map(([rawKey, value]) => ({
+        rawKey,
+        value,
+        parsed: parsePersistentKey(rawKey, [...parentPath, rawKey].join(':'), parseLegacyPersistentAtomKey)
+      }));
+      const thing = uniqueField(entries, 'thing', parentPath.join('/') || 'facts');
+      if (!thing || typeof thing.value !== 'string') continue;
+      const path = [...parentPath, thing.value].join('/');
+      if (path === targetPath) target = { record, entries, thing, path };
+      const contain = uniqueField(entries, 'contain', path);
+      if (Array.isArray(contain?.value)) visit(contain.value, [...parentPath, thing.value]);
+    }
+  }
+  visit(facts);
+  if (!target) {
+    throw problem('AGENT_MIGRATION_SOURCE_AMBIGUOUS', 'Demotion target was not found', {
+      path: targetPath
+    });
+  }
+  const types = target.thing.parsed.types.map(({ raw }) => raw);
+  const situation = uniqueField(target.entries, 'situation', targetPath);
+  const generatedDeclaration = 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})';
+  const prefix = 'LEGACY_AGENT_SITUATION = ';
+  const suffix = `\n${generatedDeclaration}`;
+  if (!types.includes('program') || types.includes('agent')
+    || typeof situation?.value !== 'string'
+    || !situation.value.startsWith(prefix)
+    || !situation.value.endsWith(suffix)) {
+    throw problem(
+      'AGENT_MIGRATION_SOURCE_AMBIGUOUS',
+      'Demotion only accepts an exact generated minimal legacy Agent Program',
+      { path: targetPath }
+    );
+  }
+  let originalSituation;
+  try {
+    originalSituation = JSON.parse(situation.value.slice(prefix.length, -suffix.length));
+  } catch (error) {
+    throw problem(
+      'AGENT_MIGRATION_SOURCE_AMBIGUOUS',
+      'Generated legacy Agent Situation cannot be restored exactly',
+      { path: targetPath, cause: error.name }
+    );
+  }
+  if (typeof originalSituation !== 'string') {
+    throw problem(
+      'AGENT_MIGRATION_SOURCE_AMBIGUOUS',
+      'Generated legacy Agent Situation is not a string',
+      { path: targetPath }
+    );
+  }
+  const demotedThingKey = keyFromMetadata(
+    target.thing.parsed,
+    types.filter((type) => type !== 'program')
+  );
+  const replacement = {};
+  for (const [rawKey, value] of Object.entries(target.record)) {
+    replacement[rawKey === target.thing.rawKey ? demotedThingKey : rawKey]
+      = rawKey === situation.rawKey ? originalSituation : value;
+  }
+  for (const rawKey of Object.keys(target.record)) delete target.record[rawKey];
+  Object.assign(target.record, replacement);
+  let security;
+  try {
+    security = await programScheduler.deriveAgentSecurity(facts);
+    await programScheduler.rebuildRequestDrivenLocks(facts);
+  } catch (error) {
+    throw problem(
+      'AGENT_MIGRATION_SOURCE_AMBIGUOUS',
+      'Demoted legacy Agent does not produce a cold-start-valid target',
+      { path: targetPath, cause: error.code ?? error.name }
+    );
+  }
+  if (security.has(targetPath)) {
+    throw problem(
+      'AGENT_MIGRATION_TARGET_VERIFICATION_FAILED',
+      'Demoted legacy Agent remains active in the target world',
+      { path: targetPath }
+    );
+  }
+  const nextRevision = revisionOfWorldFacts(facts);
+  const sourceFactsHash = digest(sourceFacts);
+  const nextFactsHash = digest(facts);
+  const summary = Object.freeze({ generatedLegacyAgentsDemoted: 1 });
+  const identity = {
+    expectedRevision: snapshot.revision,
+    nextRevision,
+    sourceFactsHash,
+    nextFactsHash,
+    summary
+  };
+  return Object.freeze({
+    contract: PLAN_CONTRACT,
+    version: 1,
+    migrationId: migrationIdFor(identity),
+    ...identity,
+    sourceFacts,
+    facts
+  });
+}
+
 export async function applyAgentProgramMigration({
   plan,
   confirmation = false,

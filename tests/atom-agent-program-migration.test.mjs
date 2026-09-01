@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 
 import {
   applyAgentProgramMigration,
+  planGeneratedLegacyAgentDemotion,
   planAgentProgramMigration as planAgentProgramMigrationOperation,
   rollbackAgentProgramMigration
 } from '../src/atom-system/operations/agent-program-migration.mjs';
@@ -221,6 +222,37 @@ test('migration fails closed when target derivation does not prove every upgrade
     (error) => error.code === 'AGENT_MIGRATION_SOURCE_AMBIGUOUS'
       && error.details.paths[0] === 'Legacy'
   );
+});
+
+test('forward repair demotes an unrelated generated legacy Agent and restores its exact Situation', async () => {
+  const target = 'Root/Legacy Controller';
+  const world = [atom('thing@program', 'Root', [
+    'agent({"labels":["^"],"functions":{"groups":["graph","program"],"names":[]}})'
+  ].join('\n'), [
+    atom('thing@program', 'Legacy Controller', [
+      'LEGACY_AGENT_SITUATION = "legacy controller"',
+      'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})'
+    ].join('\n'), [
+      atom('thing@program', 'Route', [
+        'lock({"targets":{"paths":["Root"],"scope":"exact"},"actions":["explore"],"labels":["^"]})',
+        'def main(arguments):',
+        '    first_pending([], [])',
+        '    return use_program({"name":"Missing","arguments":{}})'
+      ].join('\n'))
+    ])
+  ])];
+  const plan = await planGeneratedLegacyAgentDemotion({
+    snapshot: { facts: world, revision: revisionOfWorldFacts(world) },
+    programScheduler,
+    parseLegacyPersistentAtomKey,
+    targetPath: target
+  });
+
+  assert.equal(plan.summary.generatedLegacyAgentsDemoted, 1);
+  assert.equal(plan.facts[0].contain[0].situation, 'legacy controller');
+  assert.equal(plan.facts[0].contain[0].thing, 'Legacy Controller');
+  assert.equal(Object.hasOwn(plan.facts[0].contain[0], 'thing@program'), false);
+  assert.equal(plan.sourceFacts[0].contain[0].situation.endsWith('["explore"]}})'), true);
 });
 
 test('apply validates confirmation and immutable plan hashes before any side effect', async () => {
