@@ -4,10 +4,10 @@ import test from 'node:test';
 import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
 import { parseAtomKey } from '../work-engine/atom-language/key-parser.mjs';
 
-function atom(thing, situation = '', contain = [], support = [], types = [], description = null) {
+function atom(thing, situation = '', slot = [], strut = [], types = [], description = null) {
   return {
     [`thing${types.map((type) => `@${type}`).join('')}${description == null ? '' : `#${description}`}`]: thing,
-    situation, contain, support
+    situation, slot, strut
   };
 }
 function entry(value, baseKey) {
@@ -19,12 +19,12 @@ const field = (value, baseKey) => entry(value, baseKey)?.[1];
 const thingOf = (value) => field(value, 'thing');
 const typesOf = (value) => entry(value, 'thing')[0].split('@').slice(1).map((value) => value.split('#')[0]);
 function find(atoms, selector) {
-  let contain = atoms;
+  let slot = atoms;
   let current = null;
   for (const segment of selector.split('/')) {
-    current = contain.find((candidate) => thingOf(candidate) === segment);
+    current = slot.find((candidate) => thingOf(candidate) === segment);
     if (!current) return null;
-    contain = field(current, 'contain') ?? [];
+    slot = field(current, 'slot') ?? [];
   }
   return current;
 }
@@ -48,7 +48,7 @@ function fixture() {
   ], [], ['dataflow'], '普通候选槽模')])];
 }
 function planOf(atoms) {
-  const records = field(find(atoms, '订单槽体/print/修订'), 'contain');
+  const records = field(find(atoms, '订单槽体/print/修订'), 'slot');
   return JSON.parse(field(records.at(-1), 'situation'));
 }
 const seal = (atoms = fixture(), effect = { action: 'seal', body: '订单槽体' }) => (
@@ -63,14 +63,14 @@ const print = (atoms, thing, revision = planOf(atoms).revision) => applySlotBody
 test('seal creates model, visible print plan and empty example container without a physical blank', async () => {
   const result = await seal();
   assert.equal(result.error, undefined);
-  assert.deepEqual(field(find(result.atoms, '订单槽体'), 'contain').map(thingOf), ['槽模', 'print', '槽例']);
+  assert.deepEqual(field(find(result.atoms, '订单槽体'), 'slot').map(thingOf), ['槽模', 'print', '槽例']);
   assert.ok(typesOf(find(result.atoms, '订单槽体/print')).includes('program'));
-  assert.deepEqual(field(find(result.atoms, '订单槽体/槽例'), 'contain'), []);
+  assert.deepEqual(field(find(result.atoms, '订单槽体/槽例'), 'slot'), []);
   assert.equal(find(result.atoms, '订单槽体/槽例/空槽例'), null);
   assert.match(field(find(result.atoms, '订单槽体/槽模/共享计算'), 'situation'), /def main/u);
 });
 
-test('seal stores a deterministic complete owner-local support AST and no default material', async () => {
+test('seal stores a deterministic complete owner-local strut AST and no default material', async () => {
   const once = await seal();
   const plan = planOf(once.atoms);
   assert.match(plan.revision, /^sha256:[a-f0-9]{64}$/u);
@@ -83,38 +83,38 @@ test('seal stores a deterministic complete owner-local support AST and no defaul
   const hub = plan.roles.find((role) => role.path === './审核枢纽');
   const result = plan.roles.find((role) => role.path === './结果');
   const decision = plan.roles.find((role) => role.path === './共享计算');
-  assert.deepEqual(plan.support.find((item) => item.owner_role_id === customer.role_id).rule, {
+  assert.deepEqual(plan.strut.find((item) => item.owner_role_id === customer.role_id).rule, {
     'if@current': true, then: [{ thing: amount.role_id }]
   });
-  assert.deepEqual(plan.support.find((item) => item.owner_role_id === hub.role_id).rule, {
+  assert.deepEqual(plan.strut.find((item) => item.owner_role_id === hub.role_id).rule, {
     if: [{ and: [{ thing: customer.role_id }, { thing: alternate.role_id }] }], 'then@current': true
   });
-  assert.deepEqual(plan.support.find((item) => item.owner_role_id === amount.role_id).rule, {
+  assert.deepEqual(plan.strut.find((item) => item.owner_role_id === amount.role_id).rule, {
     'if@current': true,
     if: [{ 'thing@program': decision.role_id }],
     then: [{ thing: result.role_id }]
   });
   const repeated = await seal(once.atoms);
   assert.equal(planOf(repeated.atoms).revision, plan.revision);
-  assert.equal(field(find(repeated.atoms, '订单槽体/print/修订'), 'contain').length, 1);
+  assert.equal(field(find(repeated.atoms, '订单槽体/print/修订'), 'slot').length, 1);
 });
 
-test('print rewrites complete support AST to the current instance and shares model Program', async () => {
+test('print rewrites complete strut AST to the current instance and shares model Program', async () => {
   const sealed = await seal();
   const printed = await print(sealed.atoms, '订单001');
   assert.equal(printed.error, undefined);
   assert.equal(find(printed.atoms, '订单槽体/槽例/订单001/共享计算'), null);
-  assert.deepEqual(field(find(printed.atoms, '订单槽体/槽例/订单001/客户'), 'support'), [{
+  assert.deepEqual(field(find(printed.atoms, '订单槽体/槽例/订单001/客户'), 'strut'), [{
     'if@current': true, then: [{ thing: '订单槽体/槽例/订单001/金额' }]
   }]);
-  assert.deepEqual(field(find(printed.atoms, '订单槽体/槽例/订单001/审核枢纽'), 'support'), [{
+  assert.deepEqual(field(find(printed.atoms, '订单槽体/槽例/订单001/审核枢纽'), 'strut'), [{
     if: [{ and: [
       { thing: '订单槽体/槽例/订单001/客户' },
       { thing: '订单槽体/槽例/订单001/备选客户' }
     ] }],
     'then@current': true
   }]);
-  assert.deepEqual(field(find(printed.atoms, '订单槽体/槽例/订单001/金额'), 'support'), [{
+  assert.deepEqual(field(find(printed.atoms, '订单槽体/槽例/订单001/金额'), 'strut'), [{
     'if@current': true,
     if: [{ 'thing@program': '订单槽体/槽模/共享计算' }],
     then: [{ thing: '订单槽体/槽例/订单001/结果' }]
@@ -161,7 +161,7 @@ test('seal rejects the retired physical blank-example layout', async () => {
   assert.deepEqual(legacy, before);
 });
 
-test('seal rejects a Program used as a support consequent fact', async () => {
+test('seal rejects a Program used as a strut consequent fact', async () => {
   const invalid = [atom('非法槽体', '', [atom('候选流', '', [
     atom('事实', '', [], [{ 'if@current': true, then: [{ 'thing@program': '判定' }] }]),
     atom('判定', 'def main(arguments):\n    return True', [], [], ['program'])
@@ -175,6 +175,6 @@ test('seal rejects a Program used as a support consequent fact', async () => {
   });
 
   assert.equal(result.error?.code, 'INVALID_SLOT_PRINT_PLAN');
-  assert.equal(result.error?.details?.causeCode, 'SUPPORT_FACT_CONSEQUENT_REQUIRED');
+  assert.equal(result.error?.details?.causeCode, 'STRUT_FACT_CONSEQUENT_REQUIRED');
   assert.deepEqual(invalid, before);
 });

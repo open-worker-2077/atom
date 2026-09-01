@@ -5,13 +5,13 @@ import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { programFunctionRegistry } from '../work-engine/atom-language/program-function-registry.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
+function atom(thing, situation = '', slot = [], type = '') {
   const agentProgram = type === 'agent';
   const storedType = agentProgram ? 'program' : type;
   const storedSituation = agentProgram
     ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\nagent({"labels":[],"functions":{"groups":[],"names":["changed","explore","jump","message","transform"]}})`
     : situation;
-  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, contain, support: [] };
+  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, slot, strut: [] };
 }
 
 function output() {

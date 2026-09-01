@@ -14,11 +14,11 @@ import {
 } from '../work-engine/atom-language/context-store.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
-const supports = (...targets) => targets.length === 0
+const struts = (...targets) => targets.length === 0
   ? []
   : [{ 'if@current': true, then: targets.map((thing) => ({ thing })) }];
 
-const gatedSupport = (program, ...targets) => targets.length === 0
+const gatedStrut = (program, ...targets) => targets.length === 0
   ? []
   : [{
       'if@current': true,
@@ -35,27 +35,27 @@ function atomsFixture() {
     {
       'thing@program': '石器工坊',
       'situation#主观窗口': workshopAgentSource,
-      contain: [
+      slot: [
         {
           'thing@program': '锤子',
           'situation#工具': 'def main(arguments):\n    return True',
-          contain: [],
-          support: []
+          slot: [],
+          strut: []
         },
         {
           thing: '锤击事实',
           situation: '锤击已完成',
-          contain: [],
-          support: gatedSupport('锤子', '河岸')
+          slot: [],
+          strut: gatedStrut('锤子', '河岸')
         }
       ],
-      support: []
+      strut: []
     },
     {
       thing: '河岸',
       situation: '河岸正文',
-      contain: [],
-      support: supports('锤击事实')
+      slot: [],
+      strut: struts('锤击事实')
     }
   ];
 }
@@ -96,7 +96,7 @@ test('repeated reads reuse one immutable context snapshot until the file revisio
   const second = await readAtomContext(contextFile, { create: false });
   assert.strictEqual(second, first);
   assert.equal(Object.isFrozen(first), true);
-  assert.equal(Object.isFrozen(first[0].contain), true);
+  assert.equal(Object.isFrozen(first[0].slot), true);
 
   const changed = atomsFixture();
   changed[0]['situation#主观窗口'] = '新正文';
@@ -109,68 +109,68 @@ test('repeated reads reuse one immutable context snapshot until the file revisio
 test('projects decorated Atom keys recursively through parseAtomKey onto a virtual Graph root', () => {
   const atoms = atomsFixture();
   const projection = projectAtomContext(atoms);
-  assert.equal(projection.config.schema_version, '2.0.0');
+  assert.equal(projection.config.schema_version, '3.0.0');
   assert.deepEqual(projection.graph, {
     thing: 'atom.json',
     situation: '',
-    contain: [
+    slot: [
       {
         'thing@program': '石器工坊',
         'situation#主观窗口': [
           'LEGACY_AGENT_SITUATION = "工坊正文"',
           'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})'
         ].join('\n'),
-        contain: [
+        slot: [
           {
             'thing@program': '锤子',
             'situation#工具': 'def main(arguments):\n    return True',
-            contain: [],
-            support: []
+            slot: [],
+            strut: []
           },
           {
             thing: '锤击事实',
             situation: '锤击已完成',
-            contain: [],
-            support: gatedSupport('锤子', '河岸')
+            slot: [],
+            strut: gatedStrut('锤子', '河岸')
           }
         ],
-        support: []
+        strut: []
       },
       {
         thing: '河岸',
         situation: '河岸正文',
-        contain: [],
-        support: supports('锤击事实')
+        slot: [],
+        strut: struts('锤击事实')
       }
     ],
-    support: []
+    strut: []
   });
   assert.doesNotThrow(() => parseGraphDocument({ config: projection.config, graph: projection.graph }));
   assert.deepEqual(atoms, atomsFixture(), 'projection must not turn the virtual root into a factual Atom');
 });
 
-test('typed default backup preserves archived facts but excludes inactive support from Graph validation', () => {
-  const archivedSupport = [{
+test('typed default backup preserves archived facts but excludes inactive strut from Graph validation', () => {
+  const archivedStrut = [{
     if: [{ 'thing@program': '旧判定' }],
     'then@current': true
   }];
   const atoms = [{
     'thing@backup@default': '默认备份仓',
     situation: '',
-    contain: [{
+    slot: [{
       'thing@program': '旧判定',
       situation: 'def main(arguments):\n    return True',
-      contain: [],
-      support: archivedSupport
+      slot: [],
+      strut: archivedStrut
     }],
-    support: []
+    strut: []
   }];
 
   const projection = projectAtomContext(atoms);
-  assert.equal(projection.graph.contain[0].contain[0]['thing@program'], '旧判定');
-  assert.deepEqual(projection.graph.contain[0].contain[0].support, []);
-  assert.deepEqual(atoms[0].contain[0].support, archivedSupport);
-  assert.equal(projection.supportClauses.length, 0);
+  assert.equal(projection.graph.slot[0].slot[0]['thing@program'], '旧判定');
+  assert.deepEqual(projection.graph.slot[0].slot[0].strut, []);
+  assert.deepEqual(atoms[0].slot[0].strut, archivedStrut);
+  assert.equal(projection.strutClauses.length, 0);
 });
 
 test('writes the Atom context and its strict Graph projection as separate atomic files', async (t) => {
@@ -192,7 +192,7 @@ test('writes the Atom context and its strict Graph projection as separate atomic
   await writeAtomContext(contextFile, atoms);
   await writeAtomGraphProjection(graphFile, atoms);
   assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0]['situation#主观窗口'], '更新后的正文');
-  assert.equal(JSON.parse(await fs.readFile(graphFile, 'utf8')).graph.contain[0]['situation#主观窗口'], '更新后的正文');
+  assert.equal(JSON.parse(await fs.readFile(graphFile, 'utf8')).graph.slot[0]['situation#主观窗口'], '更新后的正文');
 
   const generated = await fs.readdir(directory, { recursive: true });
   assert.equal(generated.some((thing) => thing.endsWith('.tmp')), false);
@@ -224,15 +224,15 @@ test('validates the projected Graph before either persistent file can be written
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const invalid = atomsFixture();
-  invalid[0].contain[1].support[0].then[0].thing = '不存在的 Atom';
+  invalid[0].slot[1].strut[0].then[0].thing = '不存在的 Atom';
 
   await assert.rejects(
     writeAtomContext(contextFile, invalid),
-    (error) => error.code === 'SUPPORT_SELECTOR_NOT_FOUND'
+    (error) => error.code === 'STRUT_SELECTOR_NOT_FOUND'
   );
   await assert.rejects(
     writeAtomGraphProjection(graphFile, invalid),
-    (error) => error.code === 'SUPPORT_SELECTOR_NOT_FOUND'
+    (error) => error.code === 'STRUT_SELECTOR_NOT_FOUND'
   );
   await assert.rejects(fs.access(contextFile), { code: 'ENOENT' });
   await assert.rejects(fs.access(graphFile), { code: 'ENOENT' });
@@ -248,10 +248,10 @@ test('rejects non-array context documents and malformed recursive Atom fields', 
   );
 
   const malformed = atomsFixture();
-  malformed[0].contain[0] = {
+  malformed[0].slot[0] = {
     thing: '缺字段',
     situation: '',
-    contain: []
+    slot: []
   };
   assert.throws(
     () => projectAtomContext(malformed),
@@ -261,13 +261,13 @@ test('rejects non-array context documents and malformed recursive Atom fields', 
 
 test('partner short names resolve inside the nearest containing flow before the global graph', () => {
   const form = (thing, next) => ({
-    thing, situation: '', contain: [],
-    support: next ? supports(next) : []
+    thing, situation: '', slot: [],
+    strut: next ? struts(next) : []
   });
   const flow = (thing) => ({
-    thing, situation: '', support: [], contain: [
-      { thing: 'Stage A', situation: '', support: [], contain: [form('Review', 'Build')] },
-      { thing: 'Stage B', situation: '', support: [], contain: [form('Build')] }
+    thing, situation: '', strut: [], slot: [
+      { thing: 'Stage A', situation: '', strut: [], slot: [form('Review', 'Build')] },
+      { thing: 'Stage B', situation: '', strut: [], slot: [form('Build')] }
     ]
   });
 

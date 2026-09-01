@@ -8,8 +8,8 @@ function fieldByBase(item, baseKey) {
   return item.fields.find((field) => field.baseKey === baseKey);
 }
 
-function atom(thing, situation = '', contain = []) {
-  return { thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = []) {
+  return { thing, situation, slot, strut: [] };
 }
 
 test('a non-structural Transform copies only the target ancestry', async () => {
@@ -29,8 +29,8 @@ test('a non-structural Transform copies only the target ancestry', async () => {
 
   assert.equal(result.atoms[0], untouched);
   assert.notEqual(result.atoms[1], branch);
-  assert.notEqual(result.atoms[1].contain[0], target);
-  assert.equal(result.atoms[1].contain[0].situation, 'after');
+  assert.notEqual(result.atoms[1].slot[0], target);
+  assert.equal(result.atoms[1].slot[0].situation, 'after');
   assert.equal(target.situation, 'before');
 });
 
@@ -42,7 +42,7 @@ test('a non-structural Transform does not serialize the untouched target subtree
   );
   const stringify = JSON.stringify;
   JSON.stringify = (value, ...options) => {
-    if (value?.contain === children) throw new Error('target subtree was serialized');
+    if (value?.slot === children) throw new Error('target subtree was serialized');
     return stringify(value, ...options);
   };
 
@@ -91,8 +91,8 @@ test('transform new is marked explicitly while preserving persistent key metadat
     transform new {
       "thing@program": "工坊程序",
       "situation#首轮程序": "正文",
-      "contain": [],
-      "support": []
+      "slot": [],
+      "strut": []
     }
   `);
 

@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 test('Python Program filters explored Atoms before passing validated refs to lock', async () => {
@@ -14,10 +14,10 @@ test('Python Program filters explored Atoms before passing validated refs to loc
       atom('任务B', '', [atom('状态', '执行中')])
     ]),
     atom('冻结程序', [
-      "flow = explore({'thing': '推进流', 'contain$latitude-2': None})",
+      "flow = explore({'thing': '推进流', 'slot$latitude-2': None})",
       "approved = []",
       "for candidate in flow:",
-      "    direct = explore({'thing': candidate.path, 'contain$latitude-1': None})",
+      "    direct = explore({'thing': candidate.path, 'slot$latitude-1': None})",
       "    if any(item.ref != candidate.ref and item.thing == '状态' and item.situation == '已人工冻结' for item in direct):",
       "        approved.append(candidate)",
       "if approved:",

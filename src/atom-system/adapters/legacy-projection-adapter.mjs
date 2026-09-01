@@ -1,7 +1,7 @@
 import { projectAtomContext } from '../../../work-engine/atom-language/context-store.mjs';
 import { projectAtomGraphToKnowledge } from '../../../work-engine/atom-language/graph-4d-projection.mjs';
 import { parseAtomKey } from '../../../work-engine/atom-language/key-parser.mjs';
-import { evaluateSupportClausesWithPrograms } from '../../../work-engine/atom-language/support-runtime.mjs';
+import { evaluateStrutClausesWithPrograms } from '../../../work-engine/atom-language/strut-runtime.mjs';
 
 const baseKeyOf = (rawKey) => String(rawKey).match(/^[^@#$~]+/u)?.[0] ?? '';
 
@@ -44,8 +44,8 @@ function referencedTopDomains(atom, knownDomains, rootThing) {
   const scanAtom = (current) => {
     for (const [rawKey, value] of Object.entries(current ?? {})) {
       const baseKey = baseKeyOf(rawKey);
-      if (baseKey === 'support') visit(value);
-      if (baseKey === 'contain' && Array.isArray(value)) value.forEach(scanAtom);
+      if (baseKey === 'strut') visit(value);
+      if (baseKey === 'slot' && Array.isArray(value)) value.forEach(scanAtom);
     }
   };
   scanAtom(atom);
@@ -90,9 +90,9 @@ function atomPathMap(graphDocument) {
     const name = atomName(atom);
     const atomPath = parentPath ? `${parentPath}/${name}` : name;
     result.set(`${rootThing}/${atomPath}`, atomPath);
-    for (const child of fieldValue(atom, 'contain') ?? []) visit(child, atomPath);
+    for (const child of fieldValue(atom, 'slot') ?? []) visit(child, atomPath);
   };
-  for (const atom of fieldValue(graphDocument.graph, 'contain') ?? []) visit(atom);
+  for (const atom of fieldValue(graphDocument.graph, 'slot') ?? []) visit(atom);
   return result;
 }
 
@@ -102,13 +102,13 @@ function incrementalGraphProjection({ facts, previous, affectedPaths, projectCon
   if (!affectedDomains.size) return { value: previous, affectedDomains, partial: previous };
   const partialFacts = projectionDomainFacts(facts, affectedDomains, rootThing);
   const partial = projectContext(partialFacts, options);
-  const previousChildren = new Map((fieldValue(previous.graph, 'contain') ?? [])
+  const previousChildren = new Map((fieldValue(previous.graph, 'slot') ?? [])
     .map((atom) => [atomName(atom), atom]));
-  const partialChildren = new Map((fieldValue(partial.graph, 'contain') ?? [])
+  const partialChildren = new Map((fieldValue(partial.graph, 'slot') ?? [])
     .map((atom) => [atomName(atom), atom]));
   const graph = {
     ...previous.graph,
-    contain: facts.map((atom) => {
+    slot: facts.map((atom) => {
       const domain = atomName(atom);
       return affectedDomains.has(domain)
         ? partialChildren.get(domain)
@@ -116,27 +116,27 @@ function incrementalGraphProjection({ facts, previous, affectedPaths, projectCon
     }).filter(Boolean)
   };
   const affectsClause = (clause) => affectedDomains.has(topDomain(clause.sourcePath, rootThing));
-  const supportClauses = [
-    ...(previous.supportClauses ?? []).filter((clause) => !affectsClause(clause)),
-    ...(partial.supportClauses ?? []).filter(affectsClause)
+  const strutClauses = [
+    ...(previous.strutClauses ?? []).filter((clause) => !affectsClause(clause)),
+    ...(partial.strutClauses ?? []).filter(affectsClause)
   ].sort((left, right) => left.id.localeCompare(right.id));
-  const supportRelations = [
-    ...(previous.supportRelations ?? []).filter((relation) => !affectedDomains.has(topDomain(relation.sourcePath, rootThing))),
-    ...(partial.supportRelations ?? []).filter((relation) => affectedDomains.has(topDomain(relation.sourcePath, rootThing)))
+  const strutRelations = [
+    ...(previous.strutRelations ?? []).filter((relation) => !affectedDomains.has(topDomain(relation.sourcePath, rootThing))),
+    ...(partial.strutRelations ?? []).filter((relation) => affectedDomains.has(topDomain(relation.sourcePath, rootThing)))
   ].sort((left, right) => (
     left.clauseId.localeCompare(right.clauseId)
     || left.inputOrdinal - right.inputOrdinal
     || left.thenOrdinal - right.thenOrdinal
   ));
   const affectedRuleIds = new Set([
-    ...(previous.supportClauses ?? []).filter(affectsClause),
-    ...(partial.supportClauses ?? []).filter(affectsClause)
+    ...(previous.strutClauses ?? []).filter(affectsClause),
+    ...(partial.strutClauses ?? []).filter(affectsClause)
   ].map((clause) => clause.id));
   const value = {
     ...previous,
     graph,
-    supportClauses,
-    supportRelations,
+    strutClauses,
+    strutRelations,
     dependencyIndex: mergeIndex(previous.dependencyIndex, partial.dependencyIndex, affectedRuleIds),
     endpointIndex: mergeIndex(previous.endpointIndex, partial.endpointIndex, affectedRuleIds)
   };
@@ -162,9 +162,9 @@ function mergeSpatialProjection(previous, partial, affectedDomains, fullGraph) {
     const name = atomName(atom);
     const current = parent ? `${parent}/${name}` : name;
     orderedAtomPaths.push(current);
-    for (const child of fieldValue(atom, 'contain') ?? []) visit(child, current);
+    for (const child of fieldValue(atom, 'slot') ?? []) visit(child, current);
   };
-  for (const atom of fieldValue(fullGraph.graph, 'contain') ?? []) visit(atom);
+  for (const atom of fieldValue(fullGraph.graph, 'slot') ?? []) visit(atom);
   const root = (previous.nodes ?? []).find((node) => !node.atomPath)
     ?? (partial.nodes ?? []).find((node) => !node.atomPath);
   const nodes = [root, ...orderedAtomPaths.map((atomPath) => {
@@ -193,13 +193,13 @@ function mergeSpatialProjection(previous, partial, affectedDomains, fullGraph) {
     nodePatches: [],
     deletedNodeKeys: [],
     removedEdgeIds: [],
-    supportClauses: [
-      ...(previous.supportClauses ?? []).filter((clause) => !affectedClause(clause)),
-      ...(partial.supportClauses ?? []).filter(affectedClause)
+    strutClauses: [
+      ...(previous.strutClauses ?? []).filter((clause) => !affectedClause(clause)),
+      ...(partial.strutClauses ?? []).filter(affectedClause)
     ].sort((left, right) => left.id.localeCompare(right.id)),
-    supportRelations: [
-      ...(previous.supportRelations ?? []).filter((relation) => !affectedDomains.has(topDomain(relation.sourcePath))),
-      ...(partial.supportRelations ?? []).filter((relation) => affectedDomains.has(topDomain(relation.sourcePath)))
+    strutRelations: [
+      ...(previous.strutRelations ?? []).filter((relation) => !affectedDomains.has(topDomain(relation.sourcePath))),
+      ...(partial.strutRelations ?? []).filter((relation) => affectedDomains.has(topDomain(relation.sourcePath)))
     ].sort((left, right) => left.clauseId.localeCompare(right.clauseId))
   };
 }
@@ -213,8 +213,8 @@ function atomTypesByPath(facts) {
     const path = parentPath ? `${parentPath}/${name}` : name;
     const types = parseAtomKey(key).types.map((type) => type.name);
     if (types.length) result.set(path, types);
-    const containField = Object.entries(atom).find(([rawKey]) => baseKeyOf(rawKey) === 'contain');
-    for (const child of containField?.[1] ?? []) visit(child, path);
+    const slotField = Object.entries(atom).find(([rawKey]) => baseKeyOf(rawKey) === 'slot');
+    for (const child of slotField?.[1] ?? []) visit(child, path);
   };
   for (const atom of facts) visit(atom);
   return result;
@@ -226,7 +226,7 @@ export function createLegacyProjectionProjectors(options = {}) {
   const projectContext = options.projectContext ?? projectAtomContext;
   const projectSpatial = options.projectSpatial ?? projectAtomGraphToKnowledge;
   const graphOptions = {
-    allowLegacySupport: Boolean(options.compatibilityManifest)
+    allowLegacyStrut: Boolean(options.compatibilityManifest)
   };
   return Object.freeze([
     Object.freeze({
@@ -249,29 +249,29 @@ export function createLegacyProjectionProjectors(options = {}) {
       id: 'spatial',
       async project({ facts }, context = {}) {
         const graphDocument = context.values?.graph ?? projectContext(facts, {
-          allowLegacySupport: Boolean(options.compatibilityManifest)
+          allowLegacyStrut: Boolean(options.compatibilityManifest)
         });
-        const supportDecisions = await evaluateSupportClausesWithPrograms(graphDocument, {
+        const strutDecisions = await evaluateStrutClausesWithPrograms(graphDocument, {
           evaluateProgram: (selector) => {
-            if (!programScheduler?.evaluateSupportProgram) {
-              throw Object.assign(new Error('Program support endpoint requires Program runtime'), {
-                code: 'SUPPORT_PROGRAM_EVALUATOR_REQUIRED'
+            if (!programScheduler?.evaluateStrutProgram) {
+              throw Object.assign(new Error('Program strut endpoint requires Program runtime'), {
+                code: 'STRUT_PROGRAM_EVALUATOR_REQUIRED'
               });
             }
             const atomPath = graphDocument.atomPathByGraphPath?.get(selector);
             if (!atomPath) {
-              throw Object.assign(new Error(`Program support endpoint has no Atom identity: ${selector}`), {
-                code: 'SUPPORT_PROGRAM_IDENTITY_REQUIRED',
+              throw Object.assign(new Error(`Program strut endpoint has no Atom identity: ${selector}`), {
+                code: 'STRUT_PROGRAM_IDENTITY_REQUIRED',
                 details: { selector }
               });
             }
-            return programScheduler.evaluateSupportProgram(facts, atomPath);
+            return programScheduler.evaluateStrutProgram(facts, atomPath);
           }
         });
         const spatialOptions = {
           lockState,
           atomTypesByPath: atomTypesByPath(facts),
-          supportDecisions
+          strutDecisions
         };
         const affectedDomains = graphDocument.incrementalAffectedDomains;
         const partialDocument = graphDocument.incrementalPartialDocument;

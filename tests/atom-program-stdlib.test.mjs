@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 async function runProgram(source, world = []) {
@@ -17,7 +17,7 @@ test('Program form helpers read direct fields and report missing details', async
     atom('定向', '', [atom('目标', '交付可验证结果'), atom('边界', '   '), atom('状态', '进行中')])
   ])];
   const cycle = await runProgram([
-    "rows = explore({'thing': '推进流/定向', 'contain$latitude-1': None, 'situation$full': None})",
+    "rows = explore({'thing': '推进流/定向', 'slot$latitude-1': None, 'situation$full': None})",
     "field_count = len(direct_children(rows, '推进流/定向'))",
     "missing = missing_details(rows, '推进流/定向', ['目标', '边界', '完成标准'])",
     "message({'level': 'info', 'text': str(field_count) + '|' + child_detail(rows, '推进流/定向', '目标') + '|' + form_status(rows, '推进流/定向') + '|' + ','.join(missing)})"
@@ -123,7 +123,7 @@ test('Program subtree_refs selects only the requested subtree', async () => {
     atom('其他层', '', [atom('分片C')])
   ])];
   const cycle = await runProgram([
-    "rows = explore({'thing': '世界', 'contain$latitude-2': None})",
+    "rows = explore({'thing': '世界', 'slot$latitude-2': None})",
     "refs = subtree_refs(rows, '世界/当前层')",
     "lock({'targets': {'refs': refs}, 'mode': 'write', 'fields': ['situation'], 'protect': {'atom': True, 'messages': False}})"
   ].join('\n'), world);
@@ -134,7 +134,7 @@ test('Program subtree_refs selects only the requested subtree', async () => {
 test('Program shard planner supports per-item and fixed-size deterministic plans', async () => {
   const world = [atom('来源', '', [atom('A'), atom('B'), atom('C'), atom('D'), atom('E')])];
   const cycle = await runProgram([
-    "rows = explore({'thing': '来源', 'contain$latitude-1': None})",
+    "rows = explore({'thing': '来源', 'slot$latitude-1': None})",
     "items = [row for row in rows if row.path != '来源']",
     "each = plan_shards(items, {'mode': 'each', 'name_prefix': '片'})",
     "fixed = plan_shards(items, {'mode': 'fixed_size', 'size': 2, 'name_prefix': '批'})",
@@ -161,30 +161,30 @@ test('Program form-flow planner creates complete missing forms without overwriti
     atom('定向', '人工已修订的说明', [atom('目标', '已填写')])
   ])];
   const cycle = await runProgram([
-    "rows = explore({'thing': '任务流', 'contain$latitude-2': None, 'situation$full': None})",
+    "rows = explore({'thing': '任务流', 'slot$latitude-2': None, 'situation$full': None})",
     "standard = {'forms': [",
     "    {'thing': '定向', 'situation': '标准说明', 'status': '未进入', 'fields': ['目标', '边界']},",
-    "    {'thing': '调研', 'situation': '调研说明', 'status': '未进入', 'fields': ['渠道'], 'support': [{'if@current': True, 'then': [{'thing': '策评'}]}]}",
+    "    {'thing': '调研', 'situation': '调研说明', 'status': '未进入', 'fields': ['渠道'], 'strut': [{'if@current': True, 'then': [{'thing': '策评'}]}]}",
     "]}",
     "plan = plan_form_flow(rows, '任务流', standard)",
-    "if plan['contain']:",
-    "    transform({'thing': '任务流', 'contain': plan['contain']})",
-    "message({'level': 'info', 'text': str(len(plan['contain'])) + '|' + ','.join(plan['conflicts'])})"
+    "if plan['slot']:",
+    "    transform({'thing': '任务流', 'slot': plan['slot']})",
+    "message({'level': 'info', 'text': str(len(plan['slot'])) + '|' + ','.join(plan['conflicts'])})"
   ].join('\n'), world);
 
   assert.equal(cycle.transforms.length, 1);
-  const [directionPatch, researchForm] = cycle.transforms[0].contain;
+  const [directionPatch, researchForm] = cycle.transforms[0].slot;
   assert.deepEqual(directionPatch, {
     thing: '定向',
-    contain: [
-      { thing: '状态', situation: '未进入', contain: [], support: [] },
-      { thing: '边界', situation: '', contain: [], support: [] }
+    slot: [
+      { thing: '状态', situation: '未进入', slot: [], strut: [] },
+      { thing: '边界', situation: '', slot: [], strut: [] }
     ]
   });
   assert.equal(researchForm.thing, '调研');
-  assert.equal(researchForm.contain[0].thing, '状态');
-  assert.equal(researchForm.contain[1].thing, '渠道');
-  assert.deepEqual(researchForm.support, [{ 'if@current': true, then: [{ thing: '策评' }] }]);
+  assert.equal(researchForm.slot[0].thing, '状态');
+  assert.equal(researchForm.slot[1].thing, '渠道');
+  assert.deepEqual(researchForm.strut, [{ 'if@current': true, then: [{ thing: '策评' }] }]);
   assert.equal(cycle.messages[0].text, '2|任务流/定向:situation');
 });
 
@@ -193,10 +193,10 @@ test('Program form-flow planner is a no-op when the generated structure already 
     atom('定向', '说明', [atom('状态', '未进入'), atom('目标')])
   ])];
   const cycle = await runProgram([
-    "rows = explore({'thing': '任务流', 'contain$latitude-2': None, 'situation$full': None})",
+    "rows = explore({'thing': '任务流', 'slot$latitude-2': None, 'situation$full': None})",
     "plan = plan_form_flow(rows, '任务流', {'forms': [{'thing': '定向', 'situation': '说明', 'status': '未进入', 'fields': ['目标']}]})",
-    "if plan['contain']:",
-    "    transform({'thing': '任务流', 'contain': plan['contain']})",
+    "if plan['slot']:",
+    "    transform({'thing': '任务流', 'slot': plan['slot']})",
     "message({'level': 'info', 'text': str(plan['complete'])})"
   ].join('\n'), world);
 
@@ -218,34 +218,34 @@ test('Program form-flow planner rejects duplicate form and field names', async (
 
 test('Program form-flow planner reports an existing route mismatch without resetting runtime status', async () => {
   const existingForm = atom('定向', '说明', [atom('状态', '进行中'), atom('目标')]);
-  existingForm.support = [{ 'if@current': true, then: [{ thing: '旧节点' }] }];
+  existingForm.strut = [{ 'if@current': true, then: [{ thing: '旧节点' }] }];
   const world = [atom('任务流', '', [existingForm])];
   const cycle = await runProgram([
-    "rows = explore({'thing': '任务流', 'contain$latitude-2': None, 'situation$full': None})",
-    "standard = {'forms': [{'thing': '定向', 'situation': '说明', 'status': '未进入', 'fields': ['目标'], 'support': [{'if@current': True, 'then': [{'thing': '调研'}]}]}]}",
+    "rows = explore({'thing': '任务流', 'slot$latitude-2': None, 'situation$full': None})",
+    "standard = {'forms': [{'thing': '定向', 'situation': '说明', 'status': '未进入', 'fields': ['目标'], 'strut': [{'if@current': True, 'then': [{'thing': '调研'}]}]}]}",
     "plan = plan_form_flow(rows, '任务流', standard)",
-    "message({'level': 'warning', 'text': ','.join(plan['conflicts']) + '|' + str(len(plan['contain']))})"
+    "message({'level': 'warning', 'text': ','.join(plan['conflicts']) + '|' + str(len(plan['slot']))})"
   ].join('\n'), world);
 
-  assert.equal(cycle.messages[0].text, '任务流/定向:support|0');
+  assert.equal(cycle.messages[0].text, '任务流/定向:strut|0');
 });
 
 test('Program template planner creates one typed nested instance and then becomes a no-op', async () => {
-  const template = "{'thing': '推进流', 'situation': '任务推进入口', 'contain': [{'thing': '定向', 'situation': '填写方向'}, {'thing': '路由', 'types': ['program'], 'situation': \"message({'level': 'info', 'text': '路由已运行'})\"}]}";
+  const template = "{'thing': '推进流', 'situation': '任务推进入口', 'slot': [{'thing': '定向', 'situation': '填写方向'}, {'thing': '路由', 'types': ['program'], 'situation': \"message({'level': 'info', 'text': '路由已运行'})\"}]}";
   const missing = await runProgram([
     `plan = plan_template_instance([], '项目A', ${template})`,
-    "transform({'thing': '项目A', 'contain': plan['contain']})",
-    "message({'level': 'info', 'text': plan['contain'][0]['contain'][1]['thing@program']})"
+    "transform({'thing': '项目A', 'slot': plan['slot']})",
+    "message({'level': 'info', 'text': plan['slot'][0]['slot'][1]['thing@program']})"
   ].join('\n'), [atom('项目A')]);
-  assert.equal(missing.transforms[0].contain[0].thing, '推进流');
-  assert.equal(missing.transforms[0].contain[0].contain[1]['thing@program'], '路由');
+  assert.equal(missing.transforms[0].slot[0].thing, '推进流');
+  assert.equal(missing.transforms[0].slot[0].slot[1]['thing@program'], '路由');
   assert.equal(missing.messages[0].text, '路由');
 
   const existingRowsWorld = [atom('项目A', '', [atom('推进流')])];
   const existing = await runProgram([
-    "rows = explore({'thing': '项目A', 'contain$latitude-1': None})",
+    "rows = explore({'thing': '项目A', 'slot$latitude-1': None})",
     `plan = plan_template_instance(rows, '项目A', ${template})`,
-    "message({'level': 'info', 'text': str(plan['exists']) + '|' + str(len(plan['contain']))})"
+    "message({'level': 'info', 'text': str(plan['exists']) + '|' + str(len(plan['slot']))})"
   ].join('\n'), existingRowsWorld);
   assert.equal(existing.messages[0].text, 'True|0');
 });

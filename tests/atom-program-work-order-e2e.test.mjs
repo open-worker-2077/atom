@@ -10,12 +10,12 @@ import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-rev
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 function child(parent, name) {
-  return parent.contain.find((item) => item.thing === name || item[`thing@program`] === name);
+  return parent.slot.find((item) => item.thing === name || item[`thing@program`] === name);
 }
 
 function workOrderFact(name = '并发工单', status = '执行中') {
@@ -37,7 +37,7 @@ test('a top-level test Program completes create fill validate submit read-back i
   const journalFile = path.join(directory, 'atom.transactions.json');
   const source = [
     "order_path = current_atom().path + '/闭环工单'",
-    "rows = explore({'thing': current_atom().path, 'contain$latitude-1': None, 'situation$full': None})",
+    "rows = explore({'thing': current_atom().path, 'slot$latitude-1': None, 'situation$full': None})",
     "if not any(row.path == order_path for row in rows):",
     "    work_order({'action': 'create', 'title': '闭环工单', 'creation_id': 'e2e-20260820', 'version': '1'})",
     "else:",
@@ -78,7 +78,7 @@ test('a top-level test Program completes create fill validate submit read-back i
   assert.equal(world.length, 1, 'test world remains isolated from business data');
   const order = child(world[0], '闭环工单');
   assert.ok(order, 'the work order is persisted below the dedicated test Atom');
-  assert.deepEqual(order.contain.map((item) => item.thing), ['Output', 'Step', 'Criteria']);
+  assert.deepEqual(order.slot.map((item) => item.thing), ['Output', 'Step', 'Criteria']);
   assert.equal(JSON.parse(order.situation).status, '待验收');
   assert.equal(JSON.parse(child(order, 'Output').situation).交付物.成果引用, 'doc://e2e.rep.segment');
   assert.deepEqual(JSON.parse(child(order, 'Step').situation).操作.实际产出, ['doc://e2e.rep.segment']);
@@ -141,10 +141,10 @@ test('two work-order writes from one old revision allow at most one central comm
   const expectedRevision = revisionOfWorldFacts(initialFacts);
   const candidate = (reference) => {
     const facts = structuredClone(initialFacts);
-    const output = JSON.parse(facts[0].contain[0].situation);
+    const output = JSON.parse(facts[0].slot[0].situation);
     output.交付物.成果引用 = reference;
     output.交付物.版本 = 'v1';
-    facts[0].contain[0].situation = JSON.stringify(output);
+    facts[0].slot[0].situation = JSON.stringify(output);
     return facts;
   };
   const a = candidate('doc://A');
@@ -165,7 +165,7 @@ test('two work-order writes from one old revision allow at most one central comm
   const rejected = settled.find((item) => item.status === 'rejected');
   assert.equal(rejected?.reason?.code, 'WORLD_REVISION_CONFLICT');
   const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(['doc://A', 'doc://B'].includes(JSON.parse(persisted[0].contain[0].situation).交付物.成果引用), true);
+  assert.equal(['doc://A', 'doc://B'].includes(JSON.parse(persisted[0].slot[0].situation).交付物.成果引用), true);
   const journal = await createJsonTransactionJournal({ file: journalFile }).readState();
   assert.equal(journal.prepared.length, 0);
   assert.equal(journal.receipts.length, 1);

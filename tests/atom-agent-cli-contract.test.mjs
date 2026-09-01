@@ -17,12 +17,12 @@ function atom(thing, options = {}) {
   const situation = requestedType === 'agent'
     ? (options.situation ?? AGENT_SOURCE)
     : (options.situation ?? options.detail ?? '');
-  const contain = options.contain ?? options.children ?? [];
+  const slot = options.slot ?? options.children ?? [];
   return {
     [`thing${type ? `@${type}` : ''}`]: thing,
     situation,
-    contain,
-    support: []
+    slot,
+    strut: []
   };
 }
 
@@ -124,8 +124,8 @@ test('public CLI reads one complete multiline long-text command from stdin witho
   const source = `transform new ${JSON.stringify({
     thing: '长文本节点',
     'situation#结构化正文': detail,
-    contain: [],
-    support: []
+    slot: [],
+    strut: []
   }, null, 2)}`;
   const stdin = new PassThrough();
   stdin.end(source);
@@ -252,8 +252,8 @@ test('interactive public CLI continues after discarding a descendant', async (t)
     {
       'thing@backup@default': 'Synthetic Backup',
       situation: '',
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     }
   ]);
   const stdin = new PassThrough();
@@ -333,7 +333,7 @@ test('remote interactive entry obtains context from the runtime without reading 
   assert.equal(code, 0, stderr.text());
   assert.deepEqual(calls.map((source) => source.split(' ')[0]), ['atom', 'explore']);
   assert.match(stdout.text(), /"thing@program": "Remote Agent"/u);
-  assert.doesNotMatch(stdout.text(), /SUPPORT_OWNER_CURRENT_REQUIRED/u);
+  assert.doesNotMatch(stdout.text(), /STRUT_OWNER_CURRENT_REQUIRED/u);
 });
 
 test('interactive entry is Graph-JSON and does not expand @program source', async (t) => {
@@ -381,9 +381,9 @@ test('interactive entry is Graph-JSON and does not expand @program source', asyn
   assert.match(stdout.text(), /"thing": "Form Node"/u);
   assert.doesNotMatch(stdout.text(), /Hidden Field|边界外字段/u);
   assert.match(stdout.text(), /"thing@program": "Router"/u);
-  assert.doesNotMatch(stdout.text(), /"contain": \[\]/u);
-  assert.doesNotMatch(stdout.text(), /"support": \[\]/u);
-  assert.match(stdout.text(), /"contain": \[/u);
+  assert.doesNotMatch(stdout.text(), /"slot": \[\]/u);
+  assert.doesNotMatch(stdout.text(), /"strut": \[\]/u);
+  assert.match(stdout.text(), /"slot": \[/u);
   assert.doesNotMatch(stdout.text(), /SECRET_PROGRAM_SOURCE/u);
   assert.match(stdout.text(), /"boundary~preview"/u);
   assert.match(stdout.text(), /"down"[\s\S]*"nodes": 1[\s\S]*"characters": 17/u);
@@ -548,7 +548,7 @@ test('public help exposes only public Agent CLI options', async () => {
   assert.match(stdout.text(), /--json/u);
   assert.match(
     stdout.text(),
-    /atom\.cmd --% --agent 工作Agent explore .*""thing"":""目标节点"".*""support"":true/u
+    /atom\.cmd --% --agent 工作Agent explore .*""thing"":""目标节点"".*""strut"":true/u
   );
   assert.match(stdout.text(), /Program 模板与复用/u);
   assert.match(stdout.text(), /template_catalog\(\{\}\)/u);
@@ -606,7 +606,7 @@ test('public help is a complete daily Agent operation contract', async () => {
     '{"thing.run.":"PROGRAM_PATH"}'
   ]) assert.match(text, new RegExp(example.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
   assert.match(text, /situation\$full/u);
-  assert.match(text, /support 按原始 ordinal 回读 owner 声明/u);
+  assert.match(text, /strut 按原始 ordinal 回读 owner 声明/u);
   assert.match(text, /if 内的独立判定 Program 写 \{"thing@program":"selector"\}.*then 只接受普通事实 Thing/u);
   assert.match(text, /禁止原生 N→M/u);
   assert.match(text, /显式枢纽 H/u);
@@ -618,8 +618,8 @@ test('public help is a complete daily Agent operation contract', async () => {
   assert.match(text, /读取投影推荐使用标准 JSON true/u);
   assert.match(text, /任一项失败整批不写；成功后整批只做一次权威提交/u);
   assert.match(text, /批量改名按最终状态统一校验/u);
-  assert.match(text, /contain\$latitude\+1.*contain\$latitude-1/u);
-  assert.match(text, /contain\$longitude\+1.*contain\$longitude-1/u);
+  assert.match(text, /slot\$latitude\+1.*slot\$latitude-1/u);
+  assert.match(text, /slot\$longitude\+1.*slot\$longitude-1/u);
   assert.doesNotMatch(text, /±N/u);
   assert.match(text, /AGENT_NOT_FOUND.*AGENT_TYPE_REQUIRED.*AMBIGUOUS_AGENT/us);
   assert.match(text, /查询或写入的事实目标不得代替 --agent 上下文来源/u);

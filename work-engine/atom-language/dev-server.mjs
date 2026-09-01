@@ -30,7 +30,7 @@ const DEBUG_PAGE = `<!doctype html>
   <textarea id="source">explore {
   "thing": "石器工坊",
   "situation$full",
-  "contain$latitude+2"
+  "slot$latitude+2"
 }</textarea>
   <button id="parse" type="button">解析</button>
   <pre id="result" aria-live="polite">等待输入。</pre>

@@ -1,7 +1,6 @@
 function runtimeError(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
 }
-
 function evaluateExpr(expr) {
   if (expr.kind === 'thing') return undefined;
   if (expr.kind === 'and') {
@@ -24,16 +23,16 @@ function evaluateExpr(expr) {
     }
     return hasDecision ? false : undefined;
   }
-  throw runtimeError('INVALID_SUPPORT_EXPR', `未知规范 Expr：${expr.kind}`);
+  throw runtimeError('INVALID_STRUT_EXPR', `未知规范 Expr：${expr.kind}`);
 }
 
-export function evaluateSupportClauses(parsedDocument, options = {}) {
+export function evaluateStrutClauses(parsedDocument, options = {}) {
   const changed = options.changedPaths ? new Set(options.changedPaths) : null;
   const selectedIds = changed
     ? new Set([...changed].flatMap((path) => parsedDocument.dependencyIndex.get(path) ?? []))
     : null;
   const results = new Map();
-  for (const clause of parsedDocument.supportClauses) {
+  for (const clause of parsedDocument.strutClauses) {
     if (selectedIds && !selectedIds.has(clause.id)) continue;
     const trace = [];
     try {
@@ -42,7 +41,7 @@ export function evaluateSupportClauses(parsedDocument, options = {}) {
     } catch (error) {
       results.set(clause.id, {
         status: 'failure',
-        error: { code: error.code ?? 'SUPPORT_EVALUATION_FAILED', message: error.message },
+        error: { code: error.code ?? 'STRUT_EVALUATION_FAILED', message: error.message },
         trace
       });
     }
@@ -56,7 +55,7 @@ async function evaluateExprWithPrograms(expr, evaluateProgram, trace) {
     trace.push(expr.targetPath);
     const result = await evaluateProgram(expr.targetPath);
     if (typeof result !== 'boolean') {
-      throw runtimeError('INVALID_PROGRAM_SUPPORT_RESULT', '推支判定 Program 必须严格返回 boolean');
+      throw runtimeError('INVALID_PROGRAM_STRUT_RESULT', '推支判定 Program 必须严格返回 boolean');
     }
     return result;
   }
@@ -80,19 +79,19 @@ async function evaluateExprWithPrograms(expr, evaluateProgram, trace) {
     }
     return hasDecision ? false : undefined;
   }
-  throw runtimeError('INVALID_SUPPORT_EXPR', `未知规范 Expr：${expr.kind}`);
+  throw runtimeError('INVALID_STRUT_EXPR', `未知规范 Expr：${expr.kind}`);
 }
 
-export async function evaluateSupportClausesWithPrograms(parsedDocument, options = {}) {
+export async function evaluateStrutClausesWithPrograms(parsedDocument, options = {}) {
   const evaluateProgram = options.evaluateProgram ?? (() => {
-    throw runtimeError('SUPPORT_PROGRAM_EVALUATOR_REQUIRED', 'Program 端点求值需要 Program runtime');
+    throw runtimeError('STRUT_PROGRAM_EVALUATOR_REQUIRED', 'Program 端点求值需要 Program runtime');
   });
   const changed = options.changedPaths ? new Set(options.changedPaths) : null;
   const selectedIds = changed
     ? new Set([...changed].flatMap((path) => parsedDocument.dependencyIndex.get(path) ?? []))
     : null;
   const results = new Map();
-  for (const clause of parsedDocument.supportClauses) {
+  for (const clause of parsedDocument.strutClauses) {
     if (selectedIds && !selectedIds.has(clause.id)) continue;
     const trace = [];
     try {
@@ -105,7 +104,7 @@ export async function evaluateSupportClausesWithPrograms(parsedDocument, options
     } catch (error) {
       results.set(clause.id, {
         status: 'failure',
-        error: { code: error.code ?? 'SUPPORT_EVALUATION_FAILED', message: error.message },
+        error: { code: error.code ?? 'STRUT_EVALUATION_FAILED', message: error.message },
         trace
       });
     }
@@ -113,18 +112,18 @@ export async function evaluateSupportClausesWithPrograms(parsedDocument, options
   return results;
 }
 
-export function buildSupportDeliveries(parsedDocument, options = {}) {
+export function buildStrutDeliveries(parsedDocument, options = {}) {
   const decisions = options.decisions ?? new Map();
   const revision = options.revision;
   if (typeof revision !== 'string' || !revision) {
-    throw runtimeError('SUPPORT_DELIVERY_REVISION_REQUIRED', 'Support delivery requires one revision');
+    throw runtimeError('STRUT_DELIVERY_REVISION_REQUIRED', 'Strut delivery requires one revision');
   }
   const deliveries = [];
-  for (const clause of parsedDocument.supportClauses ?? []) {
+  for (const clause of parsedDocument.strutClauses ?? []) {
     if (decisions.get(clause.id)?.decision !== true) continue;
     for (const target of clause.then ?? []) {
       deliveries.push(Object.freeze({
-        mode: 'support',
+        mode: 'strut',
         revision,
         clauseId: clause.id,
         decision: true,
@@ -137,9 +136,9 @@ export function buildSupportDeliveries(parsedDocument, options = {}) {
   return Object.freeze(deliveries);
 }
 
-export function propagateSupportClauses(parsedDocument, options = {}) {
-  const decisions = options.decisions ?? evaluateSupportClauses(parsedDocument, options);
-  const queue = parsedDocument.supportClauses
+export function propagateStrutClauses(parsedDocument, options = {}) {
+  const decisions = options.decisions ?? evaluateStrutClauses(parsedDocument, options);
+  const queue = parsedDocument.strutClauses
     .filter((clause) => decisions.get(clause.id)?.decision === true)
     .map((clause) => clause.id);
   const visited = new Set();
@@ -148,7 +147,7 @@ export function propagateSupportClauses(parsedDocument, options = {}) {
     const clauseId = queue.shift();
     if (visited.has(clauseId)) continue;
     visited.add(clauseId);
-    const clause = parsedDocument.supportClauses.find((candidate) => candidate.id === clauseId);
+    const clause = parsedDocument.strutClauses.find((candidate) => candidate.id === clauseId);
     if (!clause) continue;
     for (const sourcePath of clause.antecedentPaths ?? clause.dependencyPaths) {
       for (const target of clause.then) {

@@ -40,8 +40,8 @@ test('bounded diagnostic queue never makes a caller wait for a slow repository w
   assert.equal(recorder.snapshot().inFlight, false);
 });
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 test('committed receipts retain compact affected Atom and Graph-axis metadata', async (t) => {
@@ -72,7 +72,7 @@ test('committed receipts retain compact affected Atom and Graph-axis metadata', 
   });
 
   assert.deepEqual(receipt.affectedAtoms, [{
-    path: '项目', axes: ['contain', 'situation', 'support', 'thing']
+    path: '项目', axes: ['situation', 'slot', 'strut', 'thing']
   }]);
   assert.equal(typeof receipt.committedAt, 'string');
   assert.equal(receipt.source, 'web');
@@ -320,7 +320,7 @@ test('compacted transaction history retains enough receipts to rebuild every aff
   const history = queryYearRing(rebuildYearRingIndex({ journal }), '项目');
   assert.deepEqual(history.map((item) => item.id), ['compact-1', 'compact-2', 'compact-3']);
   assert.deepEqual(history.map((item) => item.atom.axes), [
-    ['contain', 'situation', 'support', 'thing'],
+    ['situation', 'slot', 'strut', 'thing'],
     ['situation'],
     ['situation']
   ]);

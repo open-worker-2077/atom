@@ -238,7 +238,7 @@
   const visualIntentSet = new Set([
     ...Object.values(input.intents),
     "exitToDepth",
-    "selectSupportClause"
+    "selectStrutClause"
   ]);
   const EDGE_DRAFT_NAVIGATION_INTENTS = new Set([
     input.intents.enter,
@@ -676,9 +676,9 @@
     rendered: [],
     hitRegions: [],
     relationHitRegions: [],
-    supportClauses: [],
-    supportGeometry: [],
-    selectedSupportClause: null,
+    strutClauses: [],
+    strutGeometry: [],
+    selectedStrutClause: null,
     scopeLoadStates: new Map(),
     clusterHitRegions: [],
     clusterScreenOffsets: new Map(),
@@ -852,7 +852,7 @@
     return node;
   }
 
-  function pathContains(ancestorPath, candidatePath) {
+  function pathSlots(ancestorPath, candidatePath) {
     return Boolean(
       ancestorPath
       && candidatePath
@@ -1150,7 +1150,7 @@
     return V.add(parentPosition, boundedLocal);
   }
 
-  function nodeContains(ancestor, candidate) {
+  function nodeSlots(ancestor, candidate) {
     let current = candidate && candidate.parent;
     while (current) {
       if (current === ancestor) {
@@ -1172,7 +1172,7 @@
     if (node.parent === focus || focus.parent === node) {
       return grammar.focusRelations.direct;
     }
-    if (nodeContains(node, focus) || nodeContains(focus, node)) {
+    if (nodeSlots(node, focus) || nodeSlots(focus, node)) {
       return grammar.focusRelations.ancestor;
     }
     if (node.parent && node.parent === focus.parent) {
@@ -2169,8 +2169,8 @@
     const magnifierFocusActive = state.detailMagnifier.enabled
       && Boolean(state.detailMagnifier.targetKey);
     const editState = relationship.edge ? workspace.edgeVisualState(relationship.edge) : "idle";
-    const supportSelected = Boolean(
-      relationship.clauseId && relationship.clauseId === state.selectedSupportClause
+    const strutSelected = Boolean(
+      relationship.clauseId && relationship.clauseId === state.selectedStrutClause
     );
     const editColor = editState === "delete"
       ? theme.delete
@@ -2194,7 +2194,7 @@
       : relationshipStyle.alpha;
     context.strokeStyle = editColor;
     context.lineWidth = relationshipStyle.lineWidth;
-    if (supportSelected) {
+    if (strutSelected) {
       context.lineWidth = Math.max(2.8, context.lineWidth * 1.8);
       context.shadowColor = theme.accent;
       context.shadowBlur = 10;
@@ -2323,7 +2323,7 @@
           item: relationship.edge
             ? { kind: "relationship", edge: relationship.edge, node: null, label: relationship.label }
             : {
-                kind: "support-clause",
+                kind: "strut-clause",
                 clauseId: relationship.clauseId,
                 segmentRole: relationship.segmentRole,
                 node: null,
@@ -2341,7 +2341,7 @@
 
   function drawConnections(rendered) {
     state.relationHitRegions = [];
-    state.supportGeometry = [];
+    state.strutGeometry = [];
     const renderedNodes = new Map(
       rendered
         .filter((item) => item.kind === "node" && item.node)
@@ -2352,11 +2352,11 @@
         .filter((item) => typeof item.node.graphPath === "string" && item.node.graphPath)
         .map((item) => [item.node.graphPath, item])
     );
-    const supportBundles = visualModel.supportBundles(state.supportClauses, {
+    const strutBundles = visualModel.strutBundles(state.strutClauses, {
       junctionRatio: 0.5,
       visiblePaths: new Set(renderedByGraphPath.keys())
     });
-    const drawableSupportBundles = supportBundles.filter((bundle) => {
+    const drawableStrutBundles = strutBundles.filter((bundle) => {
       const endpointPaths = [
         ...(bundle.antecedents || []).map((entry) => entry.path),
         ...(bundle.consequents || []).map((entry) => entry.path)
@@ -2364,7 +2364,7 @@
       return endpointPaths.length >= 2
         && endpointPaths.every((path) => renderedByGraphPath.has(path));
     });
-    const drawableSupportPairs = new Set(drawableSupportBundles.flatMap((bundle) => {
+    const drawableStrutPairs = new Set(drawableStrutBundles.flatMap((bundle) => {
       const inputs = [
         ...(bundle.antecedents || []),
         ...(bundle.predicatePrograms || [])
@@ -2408,26 +2408,26 @@
       return { screen: { x, y, radius: 7, depth: 6.4 }, node: null, focusContext: null };
     }
 
-    function supportJunction(id, point) {
+    function strutJunction(id, point) {
       return {
         node: null,
         focusContext: null,
         screen: { x: point.x, y: point.y, radius: 3, depth: 6.4 },
-        supportJunctionId: id
+        strutJunctionId: id
       };
     }
 
-    function drawSupportBundle(bundle) {
-      const geometry = visualModel.supportBundleGeometry(bundle, (path) => {
+    function drawStrutBundle(bundle) {
+      const geometry = visualModel.strutBundleGeometry(bundle, (path) => {
         const item = renderedByGraphPath.get(path);
         return item ? { x: item.screen.x, y: item.screen.y } : null;
       });
       if (!geometry) return;
-      state.supportGeometry.push(geometry);
+      state.strutGeometry.push(geometry);
       const junctionByRole = new Map(
         geometry.junctions.map((junction) => [
           junction.role,
-          supportJunction(junction.id, { x: junction.x, y: junction.y })
+          strutJunction(junction.id, { x: junction.x, y: junction.y })
         ])
       );
       function segmentEndpoint(segment, side) {
@@ -2443,10 +2443,10 @@
         const to = segmentEndpoint(segment, "to");
         if (!from || !to) return;
         drawTopologyLink(from, to, {
-          fromId: segment.fromPath || from.supportJunctionId,
-          toId: segment.toPath || to.supportJunctionId,
+          fromId: segment.fromPath || from.strutJunctionId,
+          toId: segment.toPath || to.strutJunctionId,
           kind: "association",
-          label: "support",
+          label: "strut",
           clauseId: geometry.clauseId,
           segmentRole: segment.role,
           showLabel: segment.role === "binary" || segment.role === "trunk",
@@ -2507,10 +2507,10 @@
       const toNode = edge.to.path === state.currentPath
         ? renderedNodes.get(edge.to.nodeId)?.node
         : null;
-      if (edge.label === "support" && drawableSupportPairs.has(`${fromNode?.graphPath}\u0000${toNode?.graphPath}`)) return;
+      if (edge.label === "strut" && drawableStrutPairs.has(`${fromNode?.graphPath}\u0000${toNode?.graphPath}`)) return;
       drawWorkspaceEdge(edge);
     });
-    drawableSupportBundles.forEach(drawSupportBundle);
+    drawableStrutBundles.forEach(drawStrutBundle);
 
     const transaction = workspace.transaction();
     if (transaction && transaction.kind === "edge-create") {
@@ -3929,7 +3929,7 @@
       .filter((candidate) => candidate.normalizedDistance <= 1)
       .sort((left, right) => left.normalizedDistance - right.normalizedDistance)[0];
     if (relation) {
-      return relation.region.item && relation.region.item.kind === "support-clause"
+      return relation.region.item && relation.region.item.kind === "strut-clause"
         ? relation.region
         : { ...relation.region, item: { ...relation.region.item, kind: "relationship" } };
     }
@@ -4607,12 +4607,12 @@
 
   function beginEdgeGesture(node, item, point = state.pointerPosition, domainContext = null) {
     const active = workspace.transaction();
-    if (item && item.kind === "support-clause") {
+    if (item && item.kind === "strut-clause") {
       if (active) {
         announce("请先用 Enter 或 Esc 结束当前关系编辑");
         return false;
       }
-      state.selectedSupportClause = item.clauseId;
+      state.selectedStrutClause = item.clauseId;
       announce(`复合推支已选中 · ${item.clauseId}`);
       return true;
     }
@@ -4672,7 +4672,7 @@
       ui.editStatus.hidden = false;
       setEditVisualState("update");
       ui.editStatus.textContent = `关系起点 · ${node.label} · 建边：Ctrl + 右键节点；移动：进入目标父级后 Ctrl + 右键空白`;
-      announce(`已选择 ${node.label}；点节点建立关系，进入目标父级后点空白移动 contain`);
+      announce(`已选择 ${node.label}；点节点建立关系，进入目标父级后点空白移动 slot`);
       return true;
     }
     if (active.kind === "edge-create" && !active.target) {
@@ -5452,7 +5452,7 @@
     if (!descriptor) return false;
     sceneAdapter.commitViewIntent(state, { type: "remove-view", targetId: targetPath });
     const selectedPath = nodeOwnerPath(state.selected, null);
-    if (pathContains(targetPath, selectedPath)) {
+    if (pathSlots(targetPath, selectedPath)) {
       state.selected = null;
       state.focused = null;
       state.hovered = null;
@@ -5463,7 +5463,7 @@
         ? state.middleLabelFocus.path
         : state.middleLabelFocus.descendantPath
     );
-    if (pathContains(targetPath, detailFocusPath)) state.middleLabelFocus = null;
+    if (pathSlots(targetPath, detailFocusPath)) state.middleLabelFocus = null;
     if (options.render !== false) buildClusterScene();
     if (options.updateSelection !== false) updateSelectionUI();
     if (options.announce !== false) announce(`已收起 ${descriptor.label} 的子域团`);
@@ -6566,7 +6566,7 @@
           visualMeta.domainContext || null
         );
         break;
-      case "selectSupportClause":
+      case "selectStrutClause":
         beginEdgeGesture(
           null,
           visualMeta.item || null,
@@ -6844,8 +6844,8 @@
     if (item.kind === "lens") {
       return { intent: "inspect", visualMeta: {}, target: item.node };
     }
-    if (item.kind === "support-clause") {
-      return { intent: "selectSupportClause", visualMeta: { item }, target: null };
+    if (item.kind === "strut-clause") {
+      return { intent: "selectStrutClause", visualMeta: { item }, target: null };
     }
     return null;
   }
@@ -8764,12 +8764,12 @@
     if (!workspace.importKnowledge(knowledge, {
       preserveTransaction: options.preserveTransaction === true
     })) return false;
-    state.supportClauses = Array.isArray(knowledge.supportClauses)
-      ? structuredClone(knowledge.supportClauses)
+    state.strutClauses = Array.isArray(knowledge.strutClauses)
+      ? structuredClone(knowledge.strutClauses)
       : [];
-    state.supportGeometry = [];
-    if (!state.supportClauses.some((clause) => clause && clause.id === state.selectedSupportClause)) {
-      state.selectedSupportClause = null;
+    state.strutGeometry = [];
+    if (!state.strutClauses.some((clause) => clause && clause.id === state.selectedStrutClause)) {
+      state.selectedStrutClause = null;
     }
     cleanupOrphanedDemoKnowledge();
     state.hovered = null;
@@ -8925,10 +8925,10 @@
           clientY: canvas.getBoundingClientRect().top + region.y,
           radius: Math.max(3, region.item.screen.radius)
         })),
-      supportGeometry: structuredClone(state.supportGeometry),
-      selectedSupportClause: state.selectedSupportClause,
-      supportClauseTargets: state.relationHitRegions
-        .filter((region) => region.item && region.item.kind === "support-clause")
+      strutGeometry: structuredClone(state.strutGeometry),
+      selectedStrutClause: state.selectedStrutClause,
+      strutClauseTargets: state.relationHitRegions
+        .filter((region) => region.item && region.item.kind === "strut-clause")
         .map((region) => ({
           clauseId: region.item.clauseId,
           segmentRole: region.item.segmentRole,

@@ -8,8 +8,8 @@ import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 const CREATOR_PATH = 'Root/Task/Creator';
@@ -153,7 +153,7 @@ test('create rejects an unauthorized declaration produced by post-create reconci
   const result = await executeAtomLanguage({
     ...files,
     source: `transform new ${JSON.stringify({
-      thing: createdPath, situation: 'go', contain: [], support: []
+      thing: createdPath, situation: 'go', slot: [], strut: []
     })}`,
     programScheduler: createProgramRuntimeScheduler(),
     interaction: interaction('reject-create-reconcile-effect')
@@ -181,8 +181,8 @@ for (const scenario of [
     source: (unauthorizedSource) => `transform new ${JSON.stringify({
       'thing@program': `${CREATOR_PATH}/Rejected Candidate`,
       situation: unauthorizedSource,
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     })}`
   },
   {
@@ -318,7 +318,7 @@ test('durable commit survives shared Agent-security rebuild failure and recovers
   const rebuild = scheduler.rebuildAgentSecurity.bind(scheduler);
   let injected = false;
   scheduler.rebuildAgentSecurity = async (atoms) => {
-    const target = atoms[0]?.contain?.[0]?.contain?.[0]?.contain
+    const target = atoms[0]?.slot?.[0]?.slot?.[0]?.slot
       ?.find((entry) => entry.thing === 'Target');
     if (!injected && target?.situation === 'after') {
       injected = true;
@@ -340,7 +340,7 @@ test('durable commit survives shared Agent-security rebuild failure and recovers
     code === 'AGENT_SECURITY_REBUILD_RECOVERY_PENDING'
   )), JSON.stringify(committed));
   assert.equal(JSON.parse(await fs.readFile(files.contextFile, 'utf8'))[0]
-    .contain[0].contain[0].contain.find((entry) => entry.thing === 'Target').situation, 'after');
+    .slot[0].slot[0].slot.find((entry) => entry.thing === 'Target').situation, 'after');
   assert.equal(scheduler.agentSecurityWorldRevision, null);
 
   const recovered = await executeAtomLanguage({

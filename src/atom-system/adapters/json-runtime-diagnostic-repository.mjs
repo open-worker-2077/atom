@@ -10,7 +10,7 @@ function validateState(value) {
   if (value?.version !== 1 || !Array.isArray(value.diagnostics)) {
     throw problem(
       'INVALID_RUNTIME_DIAGNOSTIC_FILE',
-      'Runtime diagnostic file must contain version 1 diagnostics'
+      'Runtime diagnostic file must slot version 1 diagnostics'
     );
   }
   return { version: 1, diagnostics: structuredClone(value.diagnostics) };

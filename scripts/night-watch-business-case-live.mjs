@@ -65,7 +65,7 @@ export function createPos01ProgramSource(rootPath) {
   const pythonResult = JSON.stringify(DETERMINISTIC_RESULT).replace(/\btrue\b/gu, 'True');
   return [
     `result = ${pythonResult}`,
-    `transform({"thing": ${JSON.stringify(resultPath)}, "situation": json_stringify({"value": result}), "contain": [], "support": []})`
+    `transform({"thing": ${JSON.stringify(resultPath)}, "situation": json_stringify({"value": result}), "slot": [], "strut": []})`
   ].join('\n');
 }
 
@@ -108,20 +108,20 @@ function structure(rootPath) {
   return {
     thing: casePath,
     situation: 'Synthetic POS-01 acceptance instance; no business facts.',
-    contain: [
-      { thing: '空槽例', situation: 'Synthetic empty slot example.', contain: [], support: [] },
-      { thing: '槽体候选', situation: 'Synthetic slot-body candidate with instance-local material.', contain: [
-        { thing: '最小上下文', situation: 'Synthetic scope only.', contain: [], support: [] },
-        { thing: '合成源片段', situation: 'Synthetic source fragments only.', contain: [], support: [] },
-        { thing: '候选结构', situation: 'Pending synthetic structure.', contain: [], support: [] },
-        { thing: '提交回单', situation: 'Pending synthetic receipt.', contain: [], support: [] },
-        { thing: '核验结果', situation: 'Pending deterministic verification.', contain: [], support: [] }
-      ], support: [] },
-      { thing: '只读规程引用', situation: 'BC-ESG-ACTIVITY-001@v1 external contract reference.', contain: [], support: [] },
-      { 'thing@program': '确定性核验', situation: createPos01ProgramSource(rootPath), contain: [], support: [] },
-      { 'thing@program': '结果锁定', situation: lockProgramSource(resultPath), contain: [], support: [] }
+    slot: [
+      { thing: '空槽例', situation: 'Synthetic empty slot example.', slot: [], strut: [] },
+      { thing: '槽体候选', situation: 'Synthetic slot-body candidate with instance-local material.', slot: [
+        { thing: '最小上下文', situation: 'Synthetic scope only.', slot: [], strut: [] },
+        { thing: '合成源片段', situation: 'Synthetic source fragments only.', slot: [], strut: [] },
+        { thing: '候选结构', situation: 'Pending synthetic structure.', slot: [], strut: [] },
+        { thing: '提交回单', situation: 'Pending synthetic receipt.', slot: [], strut: [] },
+        { thing: '核验结果', situation: 'Pending deterministic verification.', slot: [], strut: [] }
+      ], strut: [] },
+      { thing: '只读规程引用', situation: 'BC-ESG-ACTIVITY-001@v1 external contract reference.', slot: [], strut: [] },
+      { 'thing@program': '确定性核验', situation: createPos01ProgramSource(rootPath), slot: [], strut: [] },
+      { 'thing@program': '结果锁定', situation: lockProgramSource(resultPath), slot: [], strut: [] }
     ],
-    support: []
+    strut: []
   };
 }
 
@@ -219,7 +219,7 @@ function createReject02ProgramSource(rootPath) {
   const { resultPath } = reject02Paths(rootPath);
   return [
     'result = {"source_count": 3, "candidate_role": "adjacent-role", "mapping_written": False, "rejection_reason": "adjacent-role"}',
-    `transform({"thing": ${JSON.stringify(resultPath)}, "situation": json_stringify({"value": result}), "contain": [], "support": []})`
+    `transform({"thing": ${JSON.stringify(resultPath)}, "situation": json_stringify({"value": result}), "slot": [], "strut": []})`
   ].join('\n');
 }
 
@@ -245,15 +245,15 @@ function reject02Structure(rootPath) {
   return {
     thing: casePath,
     situation: 'Synthetic REJECT-02 acceptance instance; no business facts.',
-    contain: [
-      { thing: '合成源片段-1', situation: 'synthetic-source-a', contain: [], support: [] },
-      { thing: '合成源片段-2', situation: 'synthetic-source-b', contain: [], support: [] },
-      { thing: '合成源片段-3', situation: 'synthetic-source-c', contain: [], support: [] },
-      { thing: '拒绝回单', situation: 'pending', contain: [], support: [] },
-      { 'thing@program': '相邻角色核验', situation: createReject02ProgramSource(rootPath), contain: [], support: [] },
-      { 'thing@program': '结果锁定', situation: 'message({"level":"info","text":"synthetic temporary lock placeholder"})', contain: [], support: [] }
+    slot: [
+      { thing: '合成源片段-1', situation: 'synthetic-source-a', slot: [], strut: [] },
+      { thing: '合成源片段-2', situation: 'synthetic-source-b', slot: [], strut: [] },
+      { thing: '合成源片段-3', situation: 'synthetic-source-c', slot: [], strut: [] },
+      { thing: '拒绝回单', situation: 'pending', slot: [], strut: [] },
+      { 'thing@program': '相邻角色核验', situation: createReject02ProgramSource(rootPath), slot: [], strut: [] },
+      { 'thing@program': '结果锁定', situation: 'message({"level":"info","text":"synthetic temporary lock placeholder"})', slot: [], strut: [] }
     ],
-    support: []
+    strut: []
   };
 }
 
@@ -337,7 +337,7 @@ export async function runReject02LiveCase({ adapter, agent, authorityReceipt, ru
 
   await read('parent-explore', '世界之外/🧊manage/工务/work/test');
   await write('subtree-create', exactSource('transform new', {
-    thing: rootPath, situation: 'Synthetic night-watch subtree; no business facts.', contain: [], support: []
+    thing: rootPath, situation: 'Synthetic night-watch subtree; no business facts.', slot: [], strut: []
   }), rootPath);
   await write('case-create', exactSource('transform new', reject02Structure(rootPath)), paths.casePath);
   for (const source of ['合成源片段-1', '合成源片段-2', '合成源片段-3']) await read(`necessary-context-${source}`, `${paths.casePath}/${source}`);
@@ -389,9 +389,9 @@ function createPending03ProgramSource(rootPath) {
   const { resultPath, queryPath, receiptPath } = pending03Paths(rootPath);
   return [
     'result = {"source_count": 3, "historical_marker_count": 2, "review_item_present": True, "role_selected": False, "mapping_written": False, "missing_fact": "具体审核分工", "query_status": "pending"}',
-    `transform({"thing": ${JSON.stringify(resultPath)}, "situation": json_stringify({"value": result}), "contain": [], "support": []})`,
-    `transform({"thing": ${JSON.stringify(queryPath)}, "situation": "具体审核分工", "contain": [], "support": []})`,
-    `transform({"thing": ${JSON.stringify(receiptPath)}, "situation": "pending", "contain": [], "support": []})`
+    `transform({"thing": ${JSON.stringify(resultPath)}, "situation": json_stringify({"value": result}), "slot": [], "strut": []})`,
+    `transform({"thing": ${JSON.stringify(queryPath)}, "situation": "具体审核分工", "slot": [], "strut": []})`,
+    `transform({"thing": ${JSON.stringify(receiptPath)}, "situation": "pending", "slot": [], "strut": []})`
   ].join('\n');
 }
 
@@ -415,16 +415,16 @@ function pending03Structure(rootPath) {
   return {
     thing: casePath,
     situation: SYNTHETIC_PENDING03_CASE_SITUATION,
-    contain: [
-      { thing: '合成源片段-1', situation: 'synthetic-source-a', contain: [], support: [] },
-      { thing: '合成源片段-2', situation: 'synthetic-source-b', contain: [], support: [] },
-      { thing: '合成源片段-3', situation: 'synthetic-source-c', contain: [], support: [] },
-      { thing: '历史标记-1', situation: 'synthetic-historical-marker-a', contain: [], support: [] },
-      { thing: '历史标记-2', situation: 'synthetic-historical-marker-b', contain: [], support: [] },
-      { 'thing@program': '待核核验', situation: createPending03ProgramSource(rootPath), contain: [], support: [] },
-      { 'thing@program': '待核状态锁定', situation: 'message({"level":"info","text":"synthetic pending lock placeholder"})', contain: [], support: [] }
+    slot: [
+      { thing: '合成源片段-1', situation: 'synthetic-source-a', slot: [], strut: [] },
+      { thing: '合成源片段-2', situation: 'synthetic-source-b', slot: [], strut: [] },
+      { thing: '合成源片段-3', situation: 'synthetic-source-c', slot: [], strut: [] },
+      { thing: '历史标记-1', situation: 'synthetic-historical-marker-a', slot: [], strut: [] },
+      { thing: '历史标记-2', situation: 'synthetic-historical-marker-b', slot: [], strut: [] },
+      { 'thing@program': '待核核验', situation: createPending03ProgramSource(rootPath), slot: [], strut: [] },
+      { 'thing@program': '待核状态锁定', situation: 'message({"level":"info","text":"synthetic pending lock placeholder"})', slot: [], strut: [] }
     ],
-    support: []
+    strut: []
   };
 }
 
@@ -524,7 +524,7 @@ export async function runPending03LiveCase({ adapter, agent, authorityReceipt, r
   await read('parent-explore', '世界之外/🧊manage/工务/work/test');
   if (!rootAlreadyKnown) {
     await write('subtree-create', exactSource('transform new', {
-      thing: rootPath, situation: SYNTHETIC_ROOT_SITUATION, contain: [], support: []
+      thing: rootPath, situation: SYNTHETIC_ROOT_SITUATION, slot: [], strut: []
     }), rootPath);
   }
   let caseAlreadyKnown = false;
@@ -620,7 +620,7 @@ function createResume05ProgramSource(rootPath) {
     `transform({"thing":${JSON.stringify(paths.iconPath)},"situation.rep.${RESUME05_RESULT.icon}":None})`,
     `transform({"thing":${JSON.stringify(paths.semanticPath)},"situation.rep.passed":None})`,
     `transform({"thing":${JSON.stringify(paths.receiptPath)},"situation.rep.resumed":None})`,
-    `transform({"thing":${JSON.stringify(paths.resultPath)},"situation":json_stringify({"value":${JSON.stringify(RESUME05_RESULT)}}),"contain":[],"support":[]})`
+    `transform({"thing":${JSON.stringify(paths.resultPath)},"situation":json_stringify({"value":${JSON.stringify(RESUME05_RESULT)}}),"slot":[],"strut":[]})`
   ].join('\n');
 }
 
@@ -634,15 +634,15 @@ function resume05Structure(rootPath) {
   const paths = resume05Paths(rootPath);
   return {
     thing: paths.casePath, situation: RESUME05_CASE_SITUATION,
-    contain: [
-      { thing: '补充事实', situation: 'pending', contain: [], support: [] },
-      { thing: '责任关系', situation: 'pending', contain: [], support: [] },
-      { thing: '图标', situation: 'pending', contain: [], support: [] },
-      { thing: 'SemanticGate', situation: 'pending', contain: [], support: [] },
-      { thing: '恢复回单', situation: 'pending', contain: [], support: [] },
-      { 'thing@program': '补事实后继续', situation: createResume05ProgramSource(rootPath), contain: [], support: [] },
-      { 'thing@program': '结果锁定', situation: 'message({"level":"info","text":"synthetic resume lock placeholder"})', contain: [], support: [] }
-    ], support: []
+    slot: [
+      { thing: '补充事实', situation: 'pending', slot: [], strut: [] },
+      { thing: '责任关系', situation: 'pending', slot: [], strut: [] },
+      { thing: '图标', situation: 'pending', slot: [], strut: [] },
+      { thing: 'SemanticGate', situation: 'pending', slot: [], strut: [] },
+      { thing: '恢复回单', situation: 'pending', slot: [], strut: [] },
+      { 'thing@program': '补事实后继续', situation: createResume05ProgramSource(rootPath), slot: [], strut: [] },
+      { 'thing@program': '结果锁定', situation: 'message({"level":"info","text":"synthetic resume lock placeholder"})', slot: [], strut: [] }
+    ], strut: []
   };
 }
 
@@ -703,7 +703,7 @@ export async function runResume05LiveCase({ adapter, agent, authorityReceipt, ru
     throw liveError('NIGHT_WATCH_RESUME05_RUN_INVALID', 'RESUME-05 requires a stable run id and timestamp');
   }
 
-  // A known synthetic root may already contain the completed PENDING-03
+  // A known synthetic root may already slot the completed PENDING-03
   // instance after an earlier, otherwise unconfirmed continuation attempt.
   // Read that exact instance first: re-running its Program would replay work
   // whose state is already observable and would invalidate the continuation.
@@ -858,7 +858,7 @@ function createRemap04ProgramSource(rootPath) {
     `transform({"thing":${JSON.stringify(paths.iconPath)},"situation.rep.actual-icon":None})`,
     `transform({"thing":${JSON.stringify(paths.semanticPath)},"situation.rep.planned-and-actual-separated":None})`,
     `transform({"thing":${JSON.stringify(paths.receiptPath)},"situation.rep.remapped":None})`,
-    `transform({"thing":${JSON.stringify(paths.resultPath)},"situation":json_stringify({"value":${JSON.stringify(result)}}),"contain":[],"support":[]})`
+    `transform({"thing":${JSON.stringify(paths.resultPath)},"situation":json_stringify({"value":${JSON.stringify(result)}}),"slot":[],"strut":[]})`
   ].join('\n');
 }
 
@@ -872,18 +872,18 @@ function remap04Structure(rootPath) {
   const paths = remap04Paths(rootPath);
   return {
     thing: paths.casePath, situation: REMAP04_CASE_SITUATION,
-    contain: [
-      { thing: '计划锚定对象', situation: 'initialization-material', contain: [], support: [] },
-      { thing: '实际形成对象', situation: 'pending', contain: [], support: [] },
-      { thing: '责任关系', situation: 'planned-owner', contain: [], support: [] },
-      { thing: '图标', situation: 'planned-icon', contain: [], support: [] },
-      { thing: '语义关系', situation: 'plan-only', contain: [], support: [] },
-      { thing: '源片段', situation: '["plan-source","completion-source"]', contain: [], support: [] },
-      { thing: '无关字段', situation: '{"procedure_version":"v1"}', contain: [], support: [] },
-      { thing: '重映射回单', situation: 'pending', contain: [], support: [] },
-      { 'thing@program': '计划实际重映射', situation: createRemap04ProgramSource(rootPath), contain: [], support: [] },
-      { 'thing@program': '结果锁定', situation: 'message({"level":"info","text":"synthetic remap lock placeholder"})', contain: [], support: [] }
-    ], support: []
+    slot: [
+      { thing: '计划锚定对象', situation: 'initialization-material', slot: [], strut: [] },
+      { thing: '实际形成对象', situation: 'pending', slot: [], strut: [] },
+      { thing: '责任关系', situation: 'planned-owner', slot: [], strut: [] },
+      { thing: '图标', situation: 'planned-icon', slot: [], strut: [] },
+      { thing: '语义关系', situation: 'plan-only', slot: [], strut: [] },
+      { thing: '源片段', situation: '["plan-source","completion-source"]', slot: [], strut: [] },
+      { thing: '无关字段', situation: '{"procedure_version":"v1"}', slot: [], strut: [] },
+      { thing: '重映射回单', situation: 'pending', slot: [], strut: [] },
+      { 'thing@program': '计划实际重映射', situation: createRemap04ProgramSource(rootPath), slot: [], strut: [] },
+      { 'thing@program': '结果锁定', situation: 'message({"level":"info","text":"synthetic remap lock placeholder"})', slot: [], strut: [] }
+    ], strut: []
   };
 }
 
@@ -987,7 +987,7 @@ export async function runRemap04LiveCase({ adapter, agent, authorityReceipt, run
   }
   await read('parent-explore', '世界之外/🧊manage/工务/work/test');
   if (!rootAlreadyKnown) {
-    await write('subtree-create', exactSource('transform new', { thing: rootPath, situation: REMAP04_ROOT_SITUATION, contain: [], support: [] }), rootPath);
+    await write('subtree-create', exactSource('transform new', { thing: rootPath, situation: REMAP04_ROOT_SITUATION, slot: [], strut: [] }), rootPath);
   } else {
     const casePreflight = await adapter.executeStdin(agent, exactSource('explore', { thing: paths.casePath, 'situation$full': true }));
     if (!failureReceipt(casePreflight?.stdout)) {
@@ -1121,7 +1121,7 @@ export async function runPos01LiveCase({ adapter, agent, authorityReceipt, runId
 
   await read('parent-explore', '世界之外/🧊manage/工务/work/test');
   await write('subtree-create', exactSource('transform new', {
-    thing: rootPath, situation: 'Synthetic night-watch subtree; no business facts.', contain: [], support: []
+    thing: rootPath, situation: 'Synthetic night-watch subtree; no business facts.', slot: [], strut: []
   }), rootPath);
   await write('slot-structure-create', exactSource('transform new', structure(rootPath)), casePath);
   await write('instance-receive', exactSituationReplacement(`${casePath}/空槽例`, 'received'), `${casePath}/空槽例`);

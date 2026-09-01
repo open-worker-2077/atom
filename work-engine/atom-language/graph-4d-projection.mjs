@@ -25,7 +25,7 @@ function axisValue(node, baseKey) {
 
 const thingOf = (node) => axisValue(node, 'thing');
 const situationOf = (node) => axisValue(node, 'situation');
-const containOf = (node) => axisValue(node, 'contain') ?? [];
+const slotOf = (node) => axisValue(node, 'slot') ?? [];
 function thingFieldOf(node) {
   for (const [rawKey, value] of Object.entries(node ?? {})) {
     if (rawKey === 'thing' || (rawKey.startsWith('thing') && baseKeyOf(rawKey) === 'thing')) {
@@ -65,9 +65,9 @@ function resolvePartnerPath(sourcePath, target, pathIndex, nameIndex) {
 }
 
 /**
- * Atom support is an ordered directed relation. graph-4d keeps its fixed
- * support label and from/to order; richer trunk/branch grouping stays in the
- * Atom support bundle metadata rather than becoming a second world fact.
+ * Atom strut is an ordered directed relation. graph-4d keeps its fixed
+ * strut label and from/to order; richer trunk/branch grouping stays in the
+ * Atom strut bundle metadata rather than becoming a second world fact.
  */
 export function toGraph4dImportDocument(graph, options = {}) {
   const pathIndex = new Map();
@@ -79,28 +79,28 @@ export function toGraph4dImportDocument(graph, options = {}) {
     pathIndex.set(visiblePath.join('/'), visiblePath);
     if (!nameIndex.has(thing)) nameIndex.set(thing, []);
     nameIndex.get(thing).push(visiblePath);
-    containOf(node).forEach((child) => index(child, visiblePath));
+    slotOf(node).forEach((child) => index(child, visiblePath));
   }
   index(graph, []);
 
-  const parsed = options.supportClauses
+  const parsed = options.strutClauses
     ? null
-    : parseGraphDocument({ config: { schema_version: '2.0.0' }, graph });
-  const supportClauses = options.supportClauses ?? parsed.supportClauses;
-  const supportDecisions = options.supportDecisions ?? null;
-  const relations = supportClauses.filter((clause) => (
-    !supportDecisions || supportDecisions.get(clause.id)?.decision === true
+    : parseGraphDocument({ config: { schema_version: '3.0.0' }, graph });
+  const strutClauses = options.strutClauses ?? parsed.strutClauses;
+  const strutDecisions = options.strutDecisions ?? null;
+  const relations = strutClauses.filter((clause) => (
+    !strutDecisions || strutDecisions.get(clause.id)?.decision === true
   )).flatMap((clause) => (
     (clause.antecedentPaths ?? clause.dependencyPaths).flatMap((sourcePath) => clause.then.map((target) => ({
       from: sourcePath.split('/'),
       to: target.targetPath.split('/'),
-      name: 'support'
+      name: 'strut'
     })))
   ));
 
   function toGraph4dNode(node, parentPath = []) {
     const currentPath = [...parentPath, thingOf(node)];
-    const children = containOf(node).map((child) => toGraph4dNode(child, currentPath));
+    const children = slotOf(node).map((child) => toGraph4dNode(child, currentPath));
     const situation = situationOf(node);
     const thingField = thingFieldOf(node);
     const isProgram = isProgramThingField(thingField);
@@ -124,15 +124,15 @@ export function toGraph4dImportDocument(graph, options = {}) {
 }
 
 export async function projectAtomGraphWithPaths(rawGraphDocument, options = {}) {
-  const parsedDocument = Array.isArray(rawGraphDocument?.supportClauses)
+  const parsedDocument = Array.isArray(rawGraphDocument?.strutClauses)
     && rawGraphDocument?.endpointIndex instanceof Map
     ? rawGraphDocument
-    : parseGraphDocument(Array.isArray(rawGraphDocument?.supportClauses)
+    : parseGraphDocument(Array.isArray(rawGraphDocument?.strutClauses)
       ? { config: rawGraphDocument.config, graph: rawGraphDocument.graph }
       : rawGraphDocument);
-  const { graph, supportClauses } = parsedDocument;
-  const supportDecisions = options.supportDecisions ?? null;
-  const importDocument = toGraph4dImportDocument(graph, { supportClauses, supportDecisions });
+  const { graph, strutClauses } = parsedDocument;
+  const strutDecisions = options.strutDecisions ?? null;
+  const importDocument = toGraph4dImportDocument(graph, { strutClauses, strutDecisions });
   const codec = await loadSpatialJsonCodec();
   const parsed = codec.parse(importDocument);
   const { knowledge } = codec.planImport({}, parsed, { path: 'root' });
@@ -141,17 +141,17 @@ export async function projectAtomGraphWithPaths(rawGraphDocument, options = {}) 
     node.surfaceVisible = false;
     node.detailMode = 'floating';
   }
-  knowledge.supportClauses = supportClauses.map((clause) => ({
+  knowledge.strutClauses = strutClauses.map((clause) => ({
     ...structuredClone(clause),
-    ...(supportDecisions?.has(clause.id)
-      ? { evaluation: structuredClone(supportDecisions.get(clause.id)) }
+    ...(strutDecisions?.has(clause.id)
+      ? { evaluation: structuredClone(strutDecisions.get(clause.id)) }
       : {})
   }));
-  knowledge.supportRelations = parsedDocument.supportRelations.filter((relation) => (
-    !supportDecisions || supportDecisions.get(relation.clauseId)?.decision === true
+  knowledge.strutRelations = parsedDocument.strutRelations.filter((relation) => (
+    !strutDecisions || strutDecisions.get(relation.clauseId)?.decision === true
   ));
   const atomPathByKey = new Map();
-  const graphPathsRequired = supportClauses.length > 0;
+  const graphPathsRequired = strutClauses.length > 0;
   const assigned = new Set();
   const childrenByParent = new Map();
   for (const node of nodes) {
@@ -188,7 +188,7 @@ export async function projectAtomGraphWithPaths(rawGraphDocument, options = {}) 
       knowledgeNode.shortcutTargetPath = shortcut.target.path;
     }
     if (atomPath) atomPathByKey.set(knowledgeNode.key, atomPath);
-    containOf(atom).forEach((child) => attachAtomPath(
+    slotOf(atom).forEach((child) => attachAtomPath(
       child,
       knowledgeNode.path,
       atomPath,

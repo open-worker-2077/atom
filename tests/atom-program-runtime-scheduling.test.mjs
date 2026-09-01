@@ -8,65 +8,65 @@ import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
+function atom(thing, situation = '', slot = [], type = '') {
   return {
     [`thing${type ? `@${type}` : ''}`]: thing,
     situation: situation,
-    contain: contain,
-    support: []
+    slot: slot,
+    strut: []
   };
 }
 
-test('an exact support subscriber receives one typed true argument while unrelated Programs stay idle', async () => {
+test('an exact strut subscriber receives one typed true argument while unrelated Programs stay idle', async () => {
   const subscriber = atom('Subscriber', [
     'def receive(delivery):',
     '    message({"level":"info","text":delivery["clauseId"] + ":" + str(delivery["decision"])})',
-    'trigger("support", {"nodes":["Result"]}, receive)'
+    'trigger("strut", {"nodes":["Result"]}, receive)'
   ].join('\n'), [], 'program');
   const unrelated = atom('Unrelated', [
     'def receive(delivery):',
     '    message({"level":"info","text":"must-not-run"})',
-    'trigger("support", {"nodes":["Other"]}, receive)'
+    'trigger("strut", {"nodes":["Other"]}, receive)'
   ].join('\n'), [], 'program');
   const world = [atom('Result'), atom('Other'), subscriber, unrelated];
   const scheduler = createProgramRuntimeScheduler();
   await scheduler.refresh(world);
   const delivery = {
-    mode: 'support', revision: 'sha256:r1', clauseId: 'support:Source:0', decision: true,
+    mode: 'strut', revision: 'sha256:r1', clauseId: 'strut:Source:0', decision: true,
     antecedentPaths: ['Source'], consequentPath: 'Result', consequentOrdinal: 0
   };
 
   const cycle = await scheduler.refresh(world, {
     triggerEvent: {
-      mode: 'support',
+      mode: 'strut',
       nodes: ['Result'],
       deliveries: [delivery, structuredClone(delivery)]
     }
   });
 
   assert.deepEqual(cycle.executedProgramPaths, ['Subscriber']);
-  assert.deepEqual(cycle.messages.map(({ text }) => text), ['support:Source:0:True']);
+  assert.deepEqual(cycle.messages.map(({ text }) => text), ['strut:Source:0:True']);
 });
 
-test('one support delivery executes its direct subscriber once across sequential and concurrent refreshes', async () => {
+test('one strut delivery executes its direct subscriber once across sequential and concurrent refreshes', async () => {
   const subscriber = atom('Subscriber', [
     'def receive(delivery):',
     '    message({"level":"info","text":delivery["clauseId"]})',
-    'trigger("support", {"nodes":["Result"]}, receive)'
+    'trigger("strut", {"nodes":["Result"]}, receive)'
   ].join('\n'), [], 'program');
   const world = [atom('Result'), subscriber];
   const delivery = {
-    mode: 'support', revision: 'sha256:r1', clauseId: 'support:Source:0', decision: true,
+    mode: 'strut', revision: 'sha256:r1', clauseId: 'strut:Source:0', decision: true,
     antecedentPaths: ['Source'], consequentPath: 'Result', consequentOrdinal: 0
   };
-  const event = { mode: 'support', nodes: ['Result'], deliveries: [delivery] };
+  const event = { mode: 'strut', nodes: ['Result'], deliveries: [delivery] };
 
   const sequential = createProgramRuntimeScheduler();
   await sequential.refresh(world);
   const first = await sequential.refresh(world, { triggerEvent: event });
-  sequential.confirmSupportDeliveries(first.supportDeliveryClaims);
+  sequential.confirmStrutDeliveries(first.strutDeliveryClaims);
   const second = await sequential.refresh(world, { triggerEvent: event });
-  assert.deepEqual(first.messages.map(({ text }) => text), ['support:Source:0']);
+  assert.deepEqual(first.messages.map(({ text }) => text), ['strut:Source:0']);
   assert.deepEqual(second.messages, []);
 
   const concurrent = createProgramRuntimeScheduler();
@@ -74,33 +74,33 @@ test('one support delivery executes its direct subscriber once across sequential
   const firstConcurrent = concurrent.refresh(world, { triggerEvent: event });
   const secondConcurrent = concurrent.refresh(world, { triggerEvent: event });
   const firstCycle = await firstConcurrent;
-  concurrent.confirmSupportDeliveries(firstCycle.supportDeliveryClaims);
+  concurrent.confirmStrutDeliveries(firstCycle.strutDeliveryClaims);
   const cycles = [firstCycle, await secondConcurrent];
   assert.equal(cycles.flatMap((cycle) => cycle.messages).length, 1);
 });
 
-test('a context-dependent support result filtered without Agent scope releases its delivery claim', { timeout: 3000 }, async () => {
+test('a context-dependent strut result filtered without Agent scope releases its delivery claim', { timeout: 3000 }, async () => {
   const subscriber = atom('Subscriber', [
     'def receive(delivery):',
     '    explore({"thing":"./Result"})',
     '    message({"level":"info","text":"filtered"})',
-    'trigger("support", {"nodes":["Result"]}, receive)'
+    'trigger("strut", {"nodes":["Result"]}, receive)'
   ].join('\n'), [], 'program');
   const world = [atom('Result'), subscriber];
   const scheduler = createProgramRuntimeScheduler();
   const runProgram = scheduler.runProgram;
   let calls = 0;
   scheduler.runProgram = async (request) => {
-    if (request.program.path === 'Subscriber' && request.programArguments?.mode === 'support') calls += 1;
+    if (request.program.path === 'Subscriber' && request.programArguments?.mode === 'strut') calls += 1;
     return runProgram(request);
   };
   await scheduler.refresh(world);
   const delivery = {
-    mode: 'support', revision: 'sha256:r1', clauseId: 'support:Source:0', decision: true,
+    mode: 'strut', revision: 'sha256:r1', clauseId: 'strut:Source:0', decision: true,
     antecedentPaths: ['Source'], consequentPath: 'Result', consequentOrdinal: 0
   };
   const options = {
-    triggerEvent: { mode: 'support', nodes: ['Result'], deliveries: [delivery] },
+    triggerEvent: { mode: 'strut', nodes: ['Result'], deliveries: [delivery] },
     executeExplore: async () => []
   };
 
@@ -109,10 +109,10 @@ test('a context-dependent support result filtered without Agent scope releases i
   assert.equal(calls, 2);
 });
 
-test('localized support evaluation reuses only the exact base-revision graph after a structural edit', async () => {
+test('localized strut evaluation reuses only the exact base-revision graph after a structural edit', async () => {
   const source = (consequent) => {
     const value = atom('Source', 'before');
-    value.support = [{
+    value.strut = [{
       'if@current': true,
       if: [{ 'thing@program': 'Predicate' }],
       then: [{ thing: consequent }]
@@ -122,7 +122,7 @@ test('localized support evaluation reuses only the exact base-revision graph aft
   const subscriber = (name, result) => atom(name, [
     'def receive(delivery):',
     `    message({"level":"info","text":"${result}"})`,
-    `trigger("support", {"nodes":["${result}"]}, receive)`
+    `trigger("strut", {"nodes":["${result}"]}, receive)`
   ].join('\n'), [], 'program');
   const initial = [
     source('OldResult'), atom('OldResult'), atom('NewResult'),
@@ -137,7 +137,7 @@ test('localized support evaluation reuses only the exact base-revision graph aft
   await scheduler.refresh(structural, {
     triggerEvent: {
       mode: 'transform', nodes: ['Source'], affectedPaths: ['Source'],
-      preparedIndexesValid: false, preparedSupportIndexValid: false
+      preparedIndexesValid: false, preparedStrutIndexValid: false
     }
   });
 
@@ -146,8 +146,8 @@ test('localized support evaluation reuses only the exact base-revision graph aft
   const cycle = await scheduler.refresh(localized, {
     triggerEvent: {
       mode: 'transform', nodes: ['Source'], affectedPaths: ['Source'],
-      preparedIndexesValid: true, preparedSupportIndexValid: true,
-      supportBaseRevision: revisionOfWorldFacts(structural)
+      preparedIndexesValid: true, preparedStrutIndexValid: true,
+      strutBaseRevision: revisionOfWorldFacts(structural)
     }
   });
 
@@ -155,11 +155,11 @@ test('localized support evaluation reuses only the exact base-revision graph aft
   assert.deepEqual(cycle.executedProgramPaths, ['NewSubscriber']);
 });
 
-test('an explicit run cannot manufacture a support delivery', async () => {
+test('an explicit run cannot manufacture a strut delivery', async () => {
   const subscriber = atom('Subscriber', [
     'def receive(delivery):',
     '    message({"level":"info","text":"must-not-run"})',
-    'trigger("support", {"nodes":["Result"]}, receive)'
+    'trigger("strut", {"nodes":["Result"]}, receive)'
   ].join('\n'), [], 'program');
   const world = [atom('Result'), subscriber];
   const scheduler = createProgramRuntimeScheduler();
@@ -172,13 +172,13 @@ test('an explicit run cannot manufacture a support delivery', async () => {
   });
 
   assert.equal(cycle.failures.length, 1);
-  assert.equal(cycle.failures[0].code, 'SUPPORT_DELIVERY_REQUIRED');
+  assert.equal(cycle.failures[0].code, 'STRUT_DELIVERY_REQUIRED');
   assert.deepEqual(cycle.messages, []);
 });
 
-test('support selection consumes exact affected paths instead of a legacy bare result name', async () => {
+test('strut selection consumes exact affected paths instead of a legacy bare result name', async () => {
   const topLevelSource = atom('Leaf', '', [], '');
-  topLevelSource.support = [{
+  topLevelSource.strut = [{
     'if@current': true,
     if: [{ 'thing@program': 'Predicate' }],
     then: [{ thing: 'Result' }]
@@ -190,7 +190,7 @@ test('support selection consumes exact affected paths instead of a legacy bare r
     atom('Subscriber', [
       'def receive(delivery):',
       '    message({"level":"info","text":"wrong-domain"})',
-      'trigger("support", {"nodes":["Result"]}, receive)'
+      'trigger("strut", {"nodes":["Result"]}, receive)'
     ].join('\n'), [], 'program'),
     atom('Root', '', [atom('Leaf', 'changed')])
   ];
@@ -203,7 +203,7 @@ test('support selection consumes exact affected paths instead of a legacy bare r
       nodes: ['Root/Leaf', 'Leaf'],
       affectedPaths: ['Root/Leaf'],
       preparedIndexesValid: true,
-      preparedSupportIndexValid: true
+      preparedStrutIndexValid: true
     }
   });
 
@@ -1319,8 +1319,8 @@ test('one immutable world revision reuses its prepared Program records', async (
 test('one immutable large-world revision reuses its Program cycle fingerprint', async () => {
   const freezeAtom = (value) => Object.freeze({
     ...value,
-    children: Object.freeze(value.contain ?? []),
-    partners: Object.freeze(value.support ?? [])
+    children: Object.freeze(value.slot ?? []),
+    partners: Object.freeze(value.strut ?? [])
   });
   const world = Object.freeze(Array.from({ length: 10_000 }, (_, index) => freezeAtom(
     atom(`Fact ${index}`, 'x'.repeat(1_000))

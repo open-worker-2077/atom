@@ -27,8 +27,8 @@ import {
 } from '../work-engine/atom-language/program-runtime.mjs';
 import { authorizeWindowGraphPath } from '../work-engine/atom-language/window-lock-v1.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 test('Program relocation rewrites an exact ancestor-qualified suffix but leaves prose intact', () => {
@@ -61,7 +61,7 @@ function findAtom(atoms, expectedPath, parentPath = []) {
     const thing = Object.entries(current).find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1];
     const currentPath = [...parentPath, thing];
     if (currentPath.join('/') === expectedPath) return current;
-    const nested = findAtom(current.contain ?? [], expectedPath, currentPath);
+    const nested = findAtom(current.slot ?? [], expectedPath, currentPath);
     if (nested) return nested;
   }
   return null;
@@ -217,7 +217,7 @@ test('an upper Agent window moves a descendant subtree while a lower Agent windo
       atom('Destination'),
       {
         ...atom('External Source'),
-        support: [{ 'if@current': true, then: [{ thing: 'Root/Locked/Child' }] }]
+        strut: [{ 'if@current': true, then: [{ thing: 'Root/Locked/Child' }] }]
       },
       atom(
         'External Guard',
@@ -253,7 +253,7 @@ test('an upper Agent window moves a descendant subtree while a lower Agent windo
   assert.equal(findAtom(world, 'Root/Locked'), null);
   assert.equal(findAtom(world, 'Root/Destination/Locked/Child').situation, 'preserve');
   assert.deepEqual(
-    findAtom(world, 'Root/External Source').support,
+    findAtom(world, 'Root/External Source').strut,
     [{ 'if@current': true, then: [{ thing: 'Root/Destination/Locked/Child' }] }]
   );
   assert.match(
@@ -283,7 +283,7 @@ test('maintenance CLI refuses an intent before world dispatch when projection pr
   });
 
   await assert.rejects(execute({
-    source: 'transform new {"thing":"Must Not Commit","situation":"","contain":[],"support":[]}',
+    source: 'transform new {"thing":"Must Not Commit","situation":"","slot":[],"strut":[]}',
     interaction: { id: 'maintenance-projection-failure' }
   }), (error) => error.code === 'RUNTIME_INITIALIZATION_FAILED');
   assert.equal(dispatched, false);
@@ -307,7 +307,7 @@ test('maintenance CLI refuses an intent while prepared projection publication is
   });
 
   await assert.rejects(execute({
-    source: 'transform new {"thing":"Must Not Commit","situation":"","contain":[],"support":[]}',
+    source: 'transform new {"thing":"Must Not Commit","situation":"","slot":[],"strut":[]}',
     interaction: { id: 'maintenance-projection-pending' }
   }), (error) => error.code === 'RUNTIME_INITIALIZATION_FAILED');
   assert.equal(dispatched, false);
@@ -337,7 +337,7 @@ test('maintenance CLI reloads the persisted context-free Program projection for 
     storeFile
   });
   const result = await execute({
-    source: 'explore {"thing":"test","contain$latitude-1":true}',
+    source: 'explore {"thing":"test","slot$latitude-1":true}',
     interaction: { id: 'maintenance-read' }
   });
 
@@ -530,7 +530,7 @@ test('a declared creator adds a child Agent Program and prepares the server proj
   const journal = createJsonTransactionJournal({ file: journalFile });
   const receiptsBefore = (await journal.readState()).receipts.length;
   const created = await server.execute({
-    source: `transform new {"thing@program":"Root/Existing/Work/Parent/Bootstrap","situation":${JSON.stringify(bootstrapSource)},"contain":[],"support":[]}`,
+    source: `transform new {"thing@program":"Root/Existing/Work/Parent/Bootstrap","situation":${JSON.stringify(bootstrapSource)},"slot":[],"strut":[]}`,
     correlationId: 'creator-adds-bootstrap',
     agentPath: 'Root/Existing'
   });
@@ -769,8 +769,8 @@ test('default projection consumes the current compatibility manifest after a loc
   const source = [{
     thing: 'Root',
     situation: 'source',
-    contain: [],
-    support: [{ verb: 'legacy relation', object: 'Target' }]
+    slot: [],
+    strut: [{ verb: 'legacy relation', object: 'Target' }]
   }];
   await fs.writeFile(contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
 
@@ -1057,7 +1057,7 @@ test('human workspace translator treats the single synthetic root domain as the 
         draft: { label: 'Top-level from Web', description: 'saved' }
       }
     }),
-    'transform new {"thing":"Top-level from Web","situation":"saved","contain":[],"support":[]}'
+    'transform new {"thing":"Top-level from Web","situation":"saved","slot":[],"strut":[]}'
   );
 });
 

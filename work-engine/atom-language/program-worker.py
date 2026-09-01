@@ -332,11 +332,11 @@ def extract_trigger_contract(tree):
     if mode == "transform":
         if function.args.args or function.args.vararg or function.args.kwarg:
             raise ProgramSecurityError("trigger transform entrypoint must accept no arguments")
-    elif mode == "support":
+    elif mode == "strut":
         if len(function.args.args) != 1 or function.args.vararg or function.args.kwarg:
-            raise ProgramSecurityError("trigger support entrypoint must accept one delivery argument")
+            raise ProgramSecurityError("trigger strut entrypoint must accept one delivery argument")
     else:
-        raise ProgramSecurityError("trigger() supports only transform or support mode")
+        raise ProgramSecurityError("trigger() supports only transform or strut mode")
     if (not isinstance(parameters, dict)
             or set(parameters) != {"nodes"}
             or not isinstance(parameters.get("nodes"), list)
@@ -356,7 +356,7 @@ def extract_trigger_contract(tree):
 
 class AtomView:
     __slots__ = (
-        "ref", "thing", "situation", "path", "types", "support",
+        "ref", "thing", "situation", "path", "types", "strut",
         "shortcut_identity", "shortcut_reference", "_record"
     )
 
@@ -366,7 +366,7 @@ class AtomView:
         self.situation = record["detail"]
         self.path = record["path"]
         self.types = tuple(record["types"])
-        self.support = tuple(record.get("partners", []))
+        self.strut = tuple(record.get("partners", []))
         self.shortcut_identity = record.get("shortcutIdentity")
         shortcut_reference = record.get("shortcutReference")
         self.shortcut_reference = (
@@ -501,8 +501,8 @@ def require_object(value, function_name):
 LEGACY_GRAPH_AXES = {
     "name": "thing",
     "detail": "situation",
-    "children": "contain",
-    "partners": "support",
+    "children": "slot",
+    "partners": "strut",
 }
 
 
@@ -653,8 +653,8 @@ def main():
                 "INVALID_SHORTCUT_CONTRACT",
                 "shortcut() accepts create {placement, thing, target} or delete {action, reference}",
             )
-        if specification["placement"] != "contain":
-            raise EngineCallError("INVALID_SHORTCUT_PLACEMENT", "shortcut.placement currently accepts only contain")
+        if specification["placement"] != "slot":
+            raise EngineCallError("INVALID_SHORTCUT_PLACEMENT", "shortcut.placement currently accepts only slot")
         thing = specification["thing"]
         if (not isinstance(thing, str) or not thing.strip() or thing != thing.strip() or "/" in thing):
             raise EngineCallError("INVALID_SHORTCUT_THING", "shortcut.thing must be one non-empty Atom name")
@@ -663,7 +663,7 @@ def main():
             raise EngineCallError("INVALID_SHORTCUT_TARGET_COORDINATE", "shortcut.target requires one exact ThingCoordinate from explore(); strings and refs are forbidden")
         target = target_coordinate._record
         effects["shortcuts"].append({
-            "action": "create", "placement": "contain", "thing": thing, "targetRef": target["ref"],
+            "action": "create", "placement": "slot", "thing": thing, "targetRef": target["ref"],
             "targetPath": target["path"], "__sourceProgramPath": current_atom().path,
         })
         return None
@@ -693,7 +693,7 @@ def main():
 
     def trigger(mode, parameters, entrypoint):
         if request.get("triggered") is True:
-            if mode == "support":
+            if mode == "strut":
                 delivery = request.get("programArguments")
                 required = {
                     "mode", "revision", "clauseId", "decision",
@@ -701,11 +701,11 @@ def main():
                 }
                 if (not isinstance(delivery, dict)
                         or set(delivery) != required
-                        or delivery.get("mode") != "support"
+                        or delivery.get("mode") != "strut"
                         or delivery.get("decision") is not True):
                     raise EngineCallError(
-                        "SUPPORT_DELIVERY_REQUIRED",
-                        "support subscriber requires one strict typed true delivery",
+                        "STRUT_DELIVERY_REQUIRED",
+                        "strut subscriber requires one strict typed true delivery",
                     )
                 entrypoint(delivery)
             else:
@@ -891,7 +891,7 @@ def main():
         program = current_atom()
         result_refs = remember(call_engine("explore", {
             "thing": program.path,
-            "contain$latitude-1": None,
+            "slot$latitude-1": None,
             "situation$full": None,
         }))
         rows = [views[ref] for ref in result_refs]
@@ -899,10 +899,10 @@ def main():
         conflicts = []
         for template in resolved["roots"]:
             plan = plan_template_instance(rows, program.path, template)
-            children.extend(plan["contain"])
+            children.extend(plan["slot"])
             conflicts.extend(plan["conflicts"])
         if children:
-            effects["transforms"].append({"thing": program.path, "contain": children})
+            effects["transforms"].append({"thing": program.path, "slot": children})
         if conflicts:
             effects["messages"].append({
                 "level": "warning",
@@ -1087,7 +1087,7 @@ def main():
             raise ValueError("work_order action requires one exact path")
         rows = explore({
             "thing": selector,
-            "contain$latitude-1": None,
+            "slot$latitude-1": None,
             "situation$full": None,
         })
         records = [by_ref[row.ref] for row in rows]
@@ -1156,7 +1156,7 @@ def main():
             template = work_order_template(title, creation_id, version)
             rows = explore({
                 "thing": current_atom().path,
-                "contain$latitude-1": None,
+                "slot$latitude-1": None,
                 "situation$full": None,
             })
             identities = []
@@ -1177,7 +1177,7 @@ def main():
                 if str(existing_detail.get("templateVersion")) != version:
                     raise ValueError(f"Work-order creation identity {creation_id} has another template version")
                 return {"template": "work-order", "version": version, "created": False, "path": existing["path"]}
-            effects["transforms"].append({"thing": current_atom().path, "contain": [template]})
+            effects["transforms"].append({"thing": current_atom().path, "slot": [template]})
             return {"template": "work-order", "version": version, "created": True, "path": current_atom().path + "/" + title}
         selector = specification.get("path")
         allowed_options = {
@@ -1525,22 +1525,22 @@ def main():
         entrypoint = namespace.get("main")
         if not callable(entrypoint):
             raise ValueError(
-                "Support-target Program must define main(arguments): "
+                "Strut-target Program must define main(arguments): "
                 + request["program"]["path"]
             )
         entrypoint(request.get("programArguments", {}))
     if codec_failure is not None:
         raise codec_failure
-    support_decision = None
-    if request.get("supportDecision") is True:
+    strut_decision = None
+    if request.get("strutDecision") is True:
         entrypoint = namespace.get("main")
         if not callable(entrypoint):
-            raise ValueError("Support antecedent Program must define main(arguments)")
-        support_decision = entrypoint({})
+            raise ValueError("Strut antecedent Program must define main(arguments)")
+        strut_decision = entrypoint({})
     sys.stdout.write(json.dumps(
         {
             "type": "result", "ok": True, "trigger": trigger_contract,
-            **({"supportDecision": support_decision} if request.get("supportDecision") is True else {}),
+            **({"strutDecision": strut_decision} if request.get("strutDecision") is True else {}),
             **effects,
         },
         ensure_ascii=True,

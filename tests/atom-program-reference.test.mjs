@@ -3,14 +3,14 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 test('a Program can call one exact reusable Program with JSON arguments', async () => {
   const reusable = [
     'def main(arguments):',
-    "    rows = explore({'thing': arguments['root'], 'contain$latitude-1': None, 'situation$full': None})",
+    "    rows = explore({'thing': arguments['root'], 'slot$latitude-1': None, 'situation$full': None})",
     "    refs = [row.ref for row in rows if row.situation.strip()]",
     "    lock({'targets': {'refs': refs}, 'mode': 'write', 'fields': ['thing', 'situation'], 'protect': {'atom': True, 'messages': False}, 'reason': {'code': 'PREDEFINED_CONTENT', 'message': '预定义内容已锁定'}})",
     "    return {'locked': len(refs)}",
@@ -160,7 +160,7 @@ test('Programs resolve exact sibling, ancestor, descendant, and partner paths wi
     "message({'level': 'info', 'text': '|'.join(resolved)})"
   ].join('\n');
   const caller = atom('调用方', callerSource, [atom('下级库', library('descendant'), [], 'program')], 'program');
-  caller.support = [{ 'if@current': true, then: [{ thing: '外部/伙伴库' }] }];
+  caller.strut = [{ 'if@current': true, then: [{ thing: '外部/伙伴库' }] }];
   const world = [
     atom('领域', library('ancestor'), [atom('同级库', library('sibling'), [], 'program'), caller], 'program'),
     atom('外部', '', [atom('伙伴库', library('partner'), [], 'program')])

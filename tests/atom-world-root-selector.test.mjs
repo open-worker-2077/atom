@@ -12,13 +12,13 @@ async function fixture(t) {
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, `${JSON.stringify([
-    { thing: '推进流', situation: '顶层程序', contain: [], support: [] },
+    { thing: '推进流', situation: '顶层程序', slot: [], strut: [] },
     {
-      thing: '项目', situation: '', support: [], contain: [
-        { thing: '推进流', situation: '项目程序', contain: [], support: [] }
+      thing: '项目', situation: '', strut: [], slot: [
+        { thing: '推进流', situation: '项目程序', slot: [], strut: [] }
       ]
     },
-    { thing: '备份', situation: '', contain: [], support: [] }
+    { thing: '备份', situation: '', slot: [], strut: [] }
   ], null, 2)}\n`, 'utf8');
   return { contextFile, projectionFile };
 }
@@ -26,7 +26,7 @@ async function fixture(t) {
 test('世界之外虚拟父级可见，并把当前世界顶层 Atom 暴露为直接子级', async (t) => {
   const files = await fixture(t);
   const result = await executeAtomLanguage({
-    source: 'explore {"thing":"世界之外","situation$full":true,"contain$latitude-1":true}',
+    source: 'explore {"thing":"世界之外","situation$full":true,"slot$latitude-1":true}',
     ...files
   });
 
@@ -74,20 +74,20 @@ test('transform 使用世界之外前缀只移动指定顶层同名 Atom', async
 
   const world = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
   assert.deepEqual(world.map(({ thing }) => thing), ['项目', '备份']);
-  assert.equal(world[1].contain[0].thing, '推进流');
-  assert.equal(world[1].contain[0].situation, '顶层程序');
-  assert.equal(world[0].contain[0].situation, '项目程序');
+  assert.equal(world[1].slot[0].thing, '推进流');
+  assert.equal(world[1].slot[0].situation, '顶层程序');
+  assert.equal(world[0].slot[0].situation, '项目程序');
 });
 
 test('transform new uses 世界之外 exact parent semantics without selecting a same-named nested Atom', async (t) => {
   const files = await fixture(t);
   const created = await executeAtomLanguage({
-    source: 'transform new {"thing":"世界之外/推进流/夜巡","situation":"synthetic","contain":[],"support":[]}',
+    source: 'transform new {"thing":"世界之外/推进流/夜巡","situation":"synthetic","slot":[],"strut":[]}',
     ...files
   });
   assert.equal(created.ok, true, JSON.stringify(created.errors));
   const world = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.equal(world[0].contain[0].thing, '夜巡');
-  assert.equal(world[1].contain[0].thing, '推进流');
-  assert.equal(world[1].contain[0].contain.length, 0);
+  assert.equal(world[0].slot[0].thing, '夜巡');
+  assert.equal(world[1].slot[0].thing, '推进流');
+  assert.equal(world[1].slot[0].slot.length, 0);
 });

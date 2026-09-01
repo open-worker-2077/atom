@@ -14,7 +14,7 @@ test('one pasted block executes every complete multiline Atom command in order',
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   const seeded = await executeAtomLanguage({
-    source: 'transform new {"thing":"石器工坊","situation#工坊简介":"旧正文","contain":[],"support":[]}',
+    source: 'transform new {"thing":"石器工坊","situation#工坊简介":"旧正文","slot":[],"strut":[]}',
     contextFile,
     projectionFile
   });

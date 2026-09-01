@@ -10,7 +10,7 @@ import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
 const AGENT_SOURCE = 'agent({"labels":["^^"],"functions":{"groups":[],"names":["agent","explore","json_parse","slot_body","transform","trigger","use_program"]}})';
 
-function atom(thing, situation = '', contain = [], support = [], types = []) {
+function atom(thing, situation = '', slot = [], strut = [], types = []) {
   const agentProgram = types.includes('agent');
   const storedTypes = agentProgram
     ? ['program', ...types.filter((type) => type !== 'agent' && type !== 'program')]
@@ -21,8 +21,8 @@ function atom(thing, situation = '', contain = [], support = [], types = []) {
   return {
     [`thing${storedTypes.map((type) => `@${type}`).join('')}`]: thing,
     situation: storedSituation,
-    contain,
-    support
+    slot,
+    strut
   };
 }
 
@@ -36,7 +36,7 @@ function find(atoms, selector) {
   for (const segment of selector.split('/')) {
     current = children.find((candidate) => nameOf(candidate) === segment);
     if (!current) return null;
-    children = current.contain;
+    children = current.slot;
   }
   return current;
 }
@@ -144,9 +144,9 @@ async function sealAndPrintConditional(runtime, scheduler, second = false) {
   const printed = await run(runtime, 'transform {"thing.run.":"Root/打印条件001"}', scheduler);
   assert.equal(printed.ok, true, JSON.stringify(printed.errors));
   for (const material of [
-    { thing: 'Root/条件槽体/槽例/实例001/结果/结果料', situation: '', contain: [], support: [] },
-    { thing: 'Root/条件槽体/槽例/实例001/字段甲/值料', situation: '字段甲槽契约', contain: [], support: [] },
-    { thing: 'Root/条件槽体/槽例/实例001/字段乙/值料', situation: '字段乙槽契约', contain: [], support: [] }
+    { thing: 'Root/条件槽体/槽例/实例001/结果/结果料', situation: '', slot: [], strut: [] },
+    { thing: 'Root/条件槽体/槽例/实例001/字段甲/值料', situation: '字段甲槽契约', slot: [], strut: [] },
+    { thing: 'Root/条件槽体/槽例/实例001/字段乙/值料', situation: '字段乙槽契约', slot: [], strut: [] }
   ]) {
     const initialized = await run(runtime, `transform new ${JSON.stringify(material)}`, scheduler);
     assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
@@ -155,9 +155,9 @@ async function sealAndPrintConditional(runtime, scheduler, second = false) {
     const printedSecond = await run(runtime, 'transform {"thing.run.":"Root/打印条件002"}', scheduler);
     assert.equal(printedSecond.ok, true, JSON.stringify(printedSecond.errors));
     for (const material of [
-      { thing: 'Root/条件槽体/槽例/实例002/结果/结果料', situation: '', contain: [], support: [] },
-      { thing: 'Root/条件槽体/槽例/实例002/字段甲/值料', situation: '字段甲槽契约', contain: [], support: [] },
-      { thing: 'Root/条件槽体/槽例/实例002/字段乙/值料', situation: '字段乙槽契约', contain: [], support: [] }
+      { thing: 'Root/条件槽体/槽例/实例002/结果/结果料', situation: '', slot: [], strut: [] },
+      { thing: 'Root/条件槽体/槽例/实例002/字段甲/值料', situation: '字段甲槽契约', slot: [], strut: [] },
+      { thing: 'Root/条件槽体/槽例/实例002/字段乙/值料', situation: '字段乙槽契约', slot: [], strut: [] }
     ]) {
       const initializedSecond = await run(runtime, `transform new ${JSON.stringify(material)}`, scheduler);
       assert.equal(initializedSecond.ok, true, JSON.stringify(initializedSecond.errors));
@@ -184,7 +184,7 @@ test('generated print Program seals and prints without a blank template in centr
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.deepEqual(slotProgramInvocationsForEvent(committed, {
     mode: 'transform', nodes: ['Root/订单槽体/槽例/订单001/输入']
-  }), [], 'support edges alone must not schedule a Program');
+  }), [], 'strut edges alone must not schedule a Program');
   assert.deepEqual(slotProgramInvocationsForEvent(committed, {
     mode: 'transform', nodes: ['Root/订单槽体/槽例/订单001/输入']
   }, scheduler.triggerContracts).map((item) => item.programPath), ['Root/订单槽体/槽模/计算']);
@@ -201,12 +201,12 @@ test('outside orchestration materializes a local variable Thing before triggerin
   await run(runtime, 'transform {"thing.run.":"Root/打印001"}', scheduler);
   await run(runtime, 'transform {"thing.run.":"Root/打印002"}', scheduler);
 
-  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单001/输出/结果料","situation":"","contain":[],"support":[]}', scheduler);
-  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单002/输出/结果料","situation":"","contain":[],"support":[]}', scheduler);
+  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单001/输出/结果料","situation":"","slot":[],"strut":[]}', scheduler);
+  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单002/输出/结果料","situation":"","slot":[],"strut":[]}', scheduler);
 
   const materialized = await run(
     runtime,
-    'transform new {"thing":"Root/订单槽体/槽例/订单001/输入/变量料","situation":"实例一","contain":[],"support":[]}',
+    'transform new {"thing":"Root/订单槽体/槽例/订单001/输入/变量料","situation":"实例一","slot":[],"strut":[]}',
     scheduler
   );
   assert.equal(materialized.ok, true, JSON.stringify(materialized.errors));
@@ -216,7 +216,7 @@ test('outside orchestration materializes a local variable Thing before triggerin
 
   const unrelated = await run(
     runtime,
-    'transform new {"thing":"Root/订单槽体/槽例/订单002/备注/旁注料","situation":"不触发","contain":[],"support":[]}',
+    'transform new {"thing":"Root/订单槽体/槽例/订单002/备注/旁注料","situation":"不触发","slot":[],"strut":[]}',
     scheduler
   );
   assert.equal(unrelated.ok, true, JSON.stringify(unrelated.errors));
@@ -234,7 +234,7 @@ test('one atomic batch evaluates one owner-local condition and dispatches its co
   diagnostics.length = 0;
 
   const before = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
-  assert.deepEqual(find(before, 'Root/条件槽体/槽例/实例001/字段甲').support, [
+  assert.deepEqual(find(before, 'Root/条件槽体/槽例/实例001/字段甲').strut, [
     {
       'if@current': true,
       if: [{ and: [
@@ -244,9 +244,9 @@ test('one atomic batch evaluates one owner-local condition and dispatches its co
       then: [{ thing: 'Root/条件槽体/槽例/实例001/执行' }]
     }
   ]);
-  assert.deepEqual(find(before, 'Root/条件槽体/槽例/实例001/执行').support, []);
-  assert.deepEqual(find(before, 'Root/条件槽体/槽模/判定').support, []);
-  assert.deepEqual(find(before, 'Root/条件槽体/槽模/计算').support, []);
+  assert.deepEqual(find(before, 'Root/条件槽体/槽例/实例001/执行').strut, []);
+  assert.deepEqual(find(before, 'Root/条件槽体/槽模/判定').strut, []);
+  assert.deepEqual(find(before, 'Root/条件槽体/槽模/计算').strut, []);
   const invocations = slotProgramInvocationsForEvent(before, {
     mode: 'transform',
     nodes: [
@@ -268,7 +268,7 @@ test('one atomic batch evaluates one owner-local condition and dispatches its co
   );
 });
 
-test('a same-value local-material Transform still evaluates and dispatches owner-local support', async (t) => {
+test('a same-value local-material Transform still evaluates and dispatches owner-local strut', async (t) => {
   const runtime = await setupConditional(t);
   const diagnostics = [];
   const scheduler = createProgramRuntimeScheduler({
@@ -314,7 +314,7 @@ test('a strict-false owner-local condition does not dispatch its consequent', as
   );
 });
 
-test('owner-local support never dispatches the same revision in a sibling instance', async (t) => {
+test('owner-local strut never dispatches the same revision in a sibling instance', async (t) => {
   const runtime = await setupConditional(t);
   const scheduler = createProgramRuntimeScheduler();
   await sealAndPrintConditional(runtime, scheduler, true);
@@ -333,10 +333,10 @@ test('re-seal recomputes every synchronized instance with the new shared Program
   await run(runtime, 'transform {"thing.run.":"Root/封装"}', scheduler);
   await run(runtime, 'transform {"thing.run.":"Root/打印001"}', scheduler);
   await run(runtime, 'transform {"thing.run.":"Root/打印002"}', scheduler);
-  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单001/输出/结果料","situation":"","contain":[],"support":[]}', scheduler);
-  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单002/输出/结果料","situation":"","contain":[],"support":[]}', scheduler);
-  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单001/输入/变量料","situation":"一","contain":[],"support":[]}', scheduler);
-  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单002/输入/变量料","situation":"二","contain":[],"support":[]}', scheduler);
+  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单001/输出/结果料","situation":"","slot":[],"strut":[]}', scheduler);
+  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单002/输出/结果料","situation":"","slot":[],"strut":[]}', scheduler);
+  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单001/输入/变量料","situation":"一","slot":[],"strut":[]}', scheduler);
+  await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单002/输入/变量料","situation":"二","slot":[],"strut":[]}', scheduler);
   await run(runtime, 'transform {"thing":"Root/订单槽体/槽例/订单001/输出/结果料","situation.rep.陈旧一"}', scheduler);
   await run(runtime, 'transform {"thing":"Root/订单槽体/槽例/订单002/输出/结果料","situation.rep.陈旧二"}', scheduler);
 
@@ -391,7 +391,7 @@ test('exact Explore, cold projection, and unrelated Program creation never repla
 
   const explored = await run(
     runtime,
-    'explore {"thing":"Root/订单槽体/槽例/订单001","contain$latitude-1":true}',
+    'explore {"thing":"Root/订单槽体/槽例/订单001","slot$latitude-1":true}',
     scheduler
   );
   assert.equal(explored.ok, true, JSON.stringify(explored.errors));
@@ -409,13 +409,13 @@ test('exact Explore, cold projection, and unrelated Program creation never repla
 
   const created = await run(
     runtime,
-    'transform new {"thing@program":"Root/无关程序","situation":"def main(arguments):\\n    return arguments","contain":[],"support":[]}',
+    'transform new {"thing@program":"Root/无关程序","situation":"def main(arguments):\\n    return arguments","slot":[],"strut":[]}',
     scheduler
   );
   assert.equal(created.ok, true, JSON.stringify(created.errors));
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(
-    find(committed, 'Root/订单槽体/槽例').contain.filter((child) => nameOf(child) === '订单001').length,
+    find(committed, 'Root/订单槽体/槽例').slot.filter((child) => nameOf(child) === '订单001').length,
     1
   );
 });

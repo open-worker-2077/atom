@@ -29,11 +29,11 @@ export function atomDescription(atom) {
   return field?.parsed.descriptionPresent ? field.parsed.description : null;
 }
 export function childrenOf(atom) {
-  const value = fieldValue(atom, 'contain');
+  const value = fieldValue(atom, 'slot');
   return Array.isArray(value) ? value : null;
 }
 export function partnersOf(atom) {
-  const value = fieldValue(atom, 'support');
+  const value = fieldValue(atom, 'strut');
   return Array.isArray(value) ? value : null;
 }
 
@@ -49,12 +49,12 @@ export function replaceStoredField(atom, baseKey, value, metadata = {}) {
   atom[rawKey] = structuredClone(value);
 }
 
-export function createAtom({ thing, situation = '', contain = [], support = [], types = [], description = null }) {
+export function createAtom({ thing, situation = '', slot = [], strut = [], types = [], description = null }) {
   const atom = {};
   replaceStoredField(atom, 'thing', thing, { types, descriptionPresent: description != null, description });
   replaceStoredField(atom, 'situation', situation);
-  replaceStoredField(atom, 'contain', contain);
-  replaceStoredField(atom, 'support', support);
+  replaceStoredField(atom, 'slot', slot);
+  replaceStoredField(atom, 'strut', strut);
   return atom;
 }
 
@@ -94,7 +94,7 @@ export function directChild(parent, thing) {
   const matches = (childrenOf(parent) ?? []).filter((child) => atomName(child) === thing);
   return matches.length === 1 ? matches[0] : null;
 }
-export const directedSupports = (atom) => partnersOf(atom) ?? [];
+export const directedStruts = (atom) => partnersOf(atom) ?? [];
 
 export function roleIdOf(atom) {
   const marker = atomTypes(atom).find((type) => type.startsWith(SLOT_ROLE_TYPE_PREFIX));
@@ -120,5 +120,5 @@ export function setInstanceRevision(atom, revision) {
 }
 
 export const SLOT_GRAPH_SEMANTICS = Object.freeze({
-  directChildren: childrenOf, directedSupports, roleIdOf, instanceRevisionOf
+  directChildren: childrenOf, directedStruts, roleIdOf, instanceRevisionOf
 });

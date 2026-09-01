@@ -20,11 +20,11 @@ test('POS-01 Node entry serializes multiline quoted Program source exactly once 
   const expectedProgram = createPos01ProgramSource(rootPath);
   assert.equal(expectedProgram.startsWith('def main'), false, 'explicit CLI .run. must expose its public transform effect at Program top level');
   assert.equal(expectedProgram.includes('\\'), false, 'Python source must not depend on backslash-escaped Graph-JSON keys');
-  assert.equal(expectedProgram.includes('situation.rep.'), false, 'an outer situation.rep update must not contain a nested dot-command marker');
-  assert.match(expectedProgram, /transform\(\{"thing": "世界之外\/🧊manage\/工务\/work\/test\/夜巡-nw-pos01-update\/POS-01\/确定性核验\/核验结果", "situation": json_stringify\(\{"value": result\}\), "contain": \[\], "support": \[\]\}\)/u);
+  assert.equal(expectedProgram.includes('situation.rep.'), false, 'an outer situation.rep update must not slot a nested dot-command marker');
+  assert.match(expectedProgram, /transform\(\{"thing": "世界之外\/🧊manage\/工务\/work\/test\/夜巡-nw-pos01-update\/POS-01\/确定性核验\/核验结果", "situation": json_stringify\(\{"value": result\}\), "slot": \[\], "strut": \[\]\}\)/u);
   assert.match(source, /^transform \{"thing":"世界之外\/🧊manage\/工务\/work\/test\/夜巡-nw-pos01-update\/POS-01\/确定性核验",/u);
   assert.equal(source, `transform {"thing":${JSON.stringify(`${rootPath}/POS-01/确定性核验`)},${JSON.stringify(`situation.rep.${expectedProgram}`)}}`);
-  assert.equal(source.includes('\\\\n'), false, 'the source must contain one JSON newline escape, not a shell-produced double escape');
+  assert.equal(source.includes('\\\\n'), false, 'the source must slot one JSON newline escape, not a shell-produced double escape');
 
   const calls = [];
   const result = await updateCommittedPos01Program({
@@ -244,8 +244,8 @@ test('POS-01 diagnostic reads only the deterministic Program direct-child names 
     adapter: {
       async executeStdin(agent, request) {
         assert.equal(agent, '🧊manage');
-        assert.equal(request, 'explore {"thing":"世界之外/🧊manage/工务/work/test/夜巡-nw-pos01-update/POS-01/确定性核验","contain$latitude+1":true}');
-        return { stdout: '{"thing":"确定性核验","contain":[{"thing":"核验结果"}],"revision":"program-r-39"}' };
+        assert.equal(request, 'explore {"thing":"世界之外/🧊manage/工务/work/test/夜巡-nw-pos01-update/POS-01/确定性核验","slot$latitude+1":true}');
+        return { stdout: '{"thing":"确定性核验","slot":[{"thing":"核验结果"}],"revision":"program-r-39"}' };
       }
     },
     rootPath
@@ -264,7 +264,7 @@ test('POS-01 containment diagnostic accepts the public Graph-JSON children-tree 
             kind: 'object',
             entries: [
               { key: 'thing@program', value: '确定性核验' },
-              { key: 'contain', value: { kind: 'array', values: [
+              { key: 'slot', value: { kind: 'array', values: [
                 { kind: 'object', entries: [{ key: 'thing', value: '核验结果' }] }
               ] } }
             ]

@@ -22,7 +22,7 @@ const businessCases = [
 ];
 
 const mechanismCases = [
-  { id: 'TC-I10-ESG-EXPLORE-CONTEXT', kind: 'mechanism', issueNodeId: 'issue-10', status: 'pending', operation: 'Explore reads only the current slot example and explicitly necessary support', assertion: 'missing necessary support returns the precise gap', evidence: { status: 'pending' } },
+  { id: 'TC-I10-ESG-EXPLORE-CONTEXT', kind: 'mechanism', issueNodeId: 'issue-10', status: 'pending', operation: 'Explore reads only the current slot example and explicitly necessary strut', assertion: 'missing necessary strut returns the precise gap', evidence: { status: 'pending' } },
   { id: 'TC-I10-ESG-TRANSFORM-BOUNDS', kind: 'mechanism', issueNodeId: 'issue-10', status: 'pending', operation: 'Transform writes only allowed output material in the current instance', assertion: 'field, procedure, and other-instance slots remain unchanged', evidence: { status: 'pending' } },
   { id: 'TC-I10-ESG-PROGRAM-GATES', kind: 'mechanism', issueNodeId: 'issue-10', status: 'pending', operation: 'Program performs deterministic counting, character reconstruction, state advance, and gate aggregation', assertion: 'the Program does not make the business semantic decision', evidence: { status: 'pending' } },
   { id: 'TC-I10-ESG-FORM-PENDING', kind: 'mechanism', issueNodeId: 'issue-10', status: 'pending', operation: 'Form displays the one pending decision and reconnects the response to its original gap', assertion: 'the Form cannot select a role without supplied fact', evidence: { status: 'pending' } },
@@ -51,7 +51,7 @@ export function validateNightWatchBusinessCaseCatalog(catalog) {
   }
   if (!Array.isArray(catalog.businessCases) || catalog.businessCases.length !== SCENARIO_IDS.length
     || !Array.isArray(catalog.mechanismCases) || catalog.mechanismCases.length === 0) {
-    throw catalogError('NIGHT_WATCH_BUSINESS_CASE_CATALOG_INVALID', 'BusinessCase catalog must contain all scenarios and mechanisms');
+    throw catalogError('NIGHT_WATCH_BUSINESS_CASE_CATALOG_INVALID', 'BusinessCase catalog must slot all scenarios and mechanisms');
   }
   const ids = new Set();
   for (const item of [...catalog.businessCases, ...catalog.mechanismCases]) {

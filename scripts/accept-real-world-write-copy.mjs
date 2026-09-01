@@ -72,7 +72,7 @@ try {
   }, 100);
   const startedAt = Date.now();
   const write = await executeAtomCommandEndpoint({
-    source: `transform new {"thing":"${testPath}","situation":"acceptance","contain":[],"support":[]}`,
+    source: `transform new {"thing":"${testPath}","situation":"acceptance","slot":[],"strut":[]}`,
     interaction
   }, endpoint);
   const writeMs = Date.now() - startedAt;
@@ -92,19 +92,19 @@ try {
       source: `transform new ${JSON.stringify({
         thing: anchorPath,
         situation: 'isolated structural latency acceptance',
-        contain: [
+        slot: [
           {
-            thing: 'Source', situation: '', support: [], contain: [
+            thing: 'Source', situation: '', strut: [], slot: [
               {
-                thing: 'Probe', situation: 'preserve', support: [], contain: [
-                  { thing: 'Child', situation: 'preserve child', contain: [], support: [] }
+                thing: 'Probe', situation: 'preserve', strut: [], slot: [
+                  { thing: 'Child', situation: 'preserve child', slot: [], strut: [] }
                 ]
               }
             ]
           },
-          { thing: 'Destination', situation: '', contain: [], support: [] }
+          { thing: 'Destination', situation: '', slot: [], strut: [] }
         ],
-        support: []
+        strut: []
       })}`,
       interaction
     }, endpoint);

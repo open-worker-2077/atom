@@ -8,7 +8,7 @@ import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
+function atom(thing, situation = '', slot = [], type = '') {
   const agentProgram = type === 'agent';
   const storedType = agentProgram ? 'program' : type;
   const storedSituation = agentProgram
@@ -17,8 +17,8 @@ function atom(thing, situation = '', contain = [], type = '') {
   return {
     [`thing${storedType ? `@${storedType}` : ''}`]: thing,
     situation: storedSituation,
-    contain: contain,
-    support: []
+    slot: slot,
+    strut: []
   };
 }
 
@@ -107,7 +107,7 @@ test('a persisted Program projection restores only versioned exact Explore read 
   const first = createProgramRuntimeScheduler({
     projectionRepository: repository,
     runProgram: async ({ executeExplore }) => {
-      await executeExplore({ thing: 'Target', 'contain$latitude-1': true });
+      await executeExplore({ thing: 'Target', 'slot$latitude-1': true });
       return { locks: [], messages: [], transforms: [] };
     }
   });
@@ -270,13 +270,13 @@ test('an ordinary nested create skips whole-world Program source validation', as
   };
 
   const result = await executeAtomLanguage({
-    source: 'transform new {"thing":"Agent/Work/Note","situation":"local","contain":[],"support":[]}',
+    source: 'transform new {"thing":"Agent/Work/Note","situation":"local","slot":[],"strut":[]}',
     contextFile,
     projectionFile,
     programScheduler: scheduler,
     commitWorld: async () => ({
       afterRevision: 'sha256:synthetic-after',
-      result: { affectedAtoms: [{ path: 'Agent/Work/Note', axes: ['thing', 'situation', 'contain', 'support'] }] }
+      result: { affectedAtoms: [{ path: 'Agent/Work/Note', axes: ['thing', 'situation', 'slot', 'strut'] }] }
     }),
     interaction: { id: 'rebase-create', agent: { ref: 'agent-ref', path: 'Agent' } }
   });
@@ -396,7 +396,7 @@ test('each committed Program create settles the next independent request onto it
   assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
 
   const createdPredicate = await executeAtomLanguage({
-    source: 'transform new {"thing@program":"Root/Predicate","situation":"def main(arguments):\\n    return False","contain":[],"support":[]}',
+    source: 'transform new {"thing@program":"Root/Predicate","situation":"def main(arguments):\\n    return False","slot":[],"strut":[]}',
     contextFile, projectionFile, programScheduler: scheduler, commitWorld,
     interaction: { id: 'create-predicate', ...interaction }
   });
@@ -407,7 +407,7 @@ test('each committed Program create settles the next independent request onto it
   assert.ok(predicateExecutionsAfterCreate > 0);
 
   const createdRegistration = await executeAtomLanguage({
-    source: 'transform new {"thing@program":"Root/Registration","situation":"def main(arguments):\\n    return None","contain":[],"support":[]}',
+    source: 'transform new {"thing@program":"Root/Registration","situation":"def main(arguments):\\n    return None","slot":[],"strut":[]}',
     contextFile, projectionFile, programScheduler: scheduler, commitWorld,
     interaction: { id: 'create-registration', ...interaction }
   });
@@ -498,18 +498,18 @@ test('Agent key, lock, and path changes invalidate accelerated Program results',
   assert.equal(executions, 2, 'an unchanged world should reuse accelerated results');
 
   const keyChanged = structuredClone(world);
-  keyChanged[0].contain[0].situation = keyChanged[0].contain[0].situation.replace('["^"]', '["^^"]');
+  keyChanged[0].slot[0].situation = keyChanged[0].slot[0].situation.replace('["^"]', '["^^"]');
   await scheduler.refresh(keyChanged, { agentOrigin: { path: 'Root/Agent' } });
   assert.equal(executions, 3, 'an Agent key change must invalidate its affected accelerated result');
 
   const lockChanged = structuredClone(keyChanged);
-  lockChanged[0].contain[1].situation = lockChanged[0].contain[1].situation.replace('["^"]', '["^^"]');
+  lockChanged[0].slot[1].situation = lockChanged[0].slot[1].situation.replace('["^"]', '["^^"]');
   await scheduler.refresh(lockChanged, { agentOrigin: { path: 'Root/Agent' } });
   assert.equal(executions, 4, 'a lock change must invalidate its affected accelerated result');
 
   const pathChanged = structuredClone(lockChanged);
-  pathChanged[0].contain[0]['thing@program'] = 'RenamedAgent';
-  pathChanged[0].contain[1].situation = pathChanged[0].contain[1].situation.replace('Root/Agent', 'Root/RenamedAgent');
+  pathChanged[0].slot[0]['thing@program'] = 'RenamedAgent';
+  pathChanged[0].slot[1].situation = pathChanged[0].slot[1].situation.replace('Root/Agent', 'Root/RenamedAgent');
   await scheduler.refresh(pathChanged, { agentOrigin: { path: 'Root/RenamedAgent' } });
   assert.equal(executions, 6, 'a valid path move must invalidate the Agent and its affected lock result');
 });
@@ -1057,12 +1057,12 @@ test('Program structural facts invalidate reusable effects even without explore 
       return { locks: [], messages: [], transforms: [] };
     }
   });
-  const program = atom('Program', '# current_atom support', [], 'program');
-  program.support = [];
+  const program = atom('Program', '# current_atom strut', [], 'program');
+  program.strut = [];
   await scheduler.refresh([atom('Target'), program]);
 
   const changed = structuredClone(program);
-  changed.support = [{ 'if@current': true, then: [{ thing: 'Target' }] }];
+  changed.strut = [{ 'if@current': true, then: [{ thing: 'Target' }] }];
   await scheduler.refresh([atom('Target'), changed]);
 
   assert.equal(executions, 2);

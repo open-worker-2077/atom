@@ -69,7 +69,7 @@ export function validateWorldReceipt(value) {
     if (!Array.isArray(value.affectedAtoms)) {
       throw contractError('INVALID_AFFECTED_ATOMS', 'affectedAtoms must be an array');
     }
-    const graphAxes = new Set(['thing', 'situation', 'contain', 'support']);
+    const graphAxes = new Set(['thing', 'situation', 'slot', 'strut']);
     for (const item of value.affectedAtoms) {
       if (!item || typeof item !== 'object' || Array.isArray(item)
         || (!(typeof item.path === 'string' && item.path.trim())

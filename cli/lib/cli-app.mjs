@@ -190,7 +190,7 @@ async function executeConfirmed(store, budget, resolution, io, compactFallback) 
   }
   const request = resolution.request;
   if (!request || !READ_METHODS.has(request.method)) {
-    throw new QueryBudgetError('INVALID_CONFIRMATION_REQUEST', 'Confirmation does not contain a safe read query');
+    throw new QueryBudgetError('INVALID_CONFIRMATION_REQUEST', 'Confirmation does not slot a safe read query');
   }
   const result = await store.execute(request.method, request.params || {});
   const measured = usageFor(request.method, result, request.compact === true);

@@ -36,8 +36,8 @@ export function oneStoredField(atom, baseKey) {
   return matches.length === 1 ? matches[0] : null;
 }
 
-function storedSupportFields(atom) {
-  return fieldsByBase(atom).get('support') ?? [];
+function storedStrutFields(atom) {
+  return fieldsByBase(atom).get('strut') ?? [];
 }
 
 export function walkAtoms(atoms, options = {}) {
@@ -49,7 +49,7 @@ export function walkAtoms(atoms, options = {}) {
     const visiblePath = [...parentPath, name];
     const match = { atom, path: visiblePath, parent, index };
     visited.push(match);
-    const children = oneStoredField(atom, 'contain')?.value;
+    const children = oneStoredField(atom, 'slot')?.value;
     if (Array.isArray(children)) {
       children.forEach((child, childIndex) => visit(child, visiblePath, childIndex, match));
     }
@@ -212,7 +212,7 @@ export function describeAtom(match, includeFullDetail, options = {}) {
     description: detailField?.parsed.descriptionPresent ? detailField.parsed.description : null
   };
   if (includeFullDetail) result.situation = detailField?.value ?? null;
-  for (const field of options.supportFields ?? []) {
+  for (const field of options.strutFields ?? []) {
     result[field.rawKey] = structuredClone(field.value);
   }
   if (options.lockState) result.lockState = structuredClone(options.lockState);
@@ -224,11 +224,11 @@ export function describeAtom(match, includeFullDetail, options = {}) {
 function graphLockState(graphLocks, targetPath) {
   const matches = (graphLocks ?? []).filter((lock) => (
     lock?.kind === 'node' ? lock.path === targetPath
-      : lock?.kind === 'contain' && (targetPath === lock.path || targetPath.startsWith(`${lock.path}/`))
+      : lock?.kind === 'slot' && (targetPath === lock.path || targetPath.startsWith(`${lock.path}/`))
   ));
   if (!matches.length) return null;
   return Object.freeze({
-    kind: matches.some((lock) => lock.kind === 'contain') ? 'contain' : 'node',
+    kind: matches.some((lock) => lock.kind === 'slot') ? 'slot' : 'node',
     path: targetPath,
     actions: [...new Set(matches.flatMap((lock) => lock.actions ?? []))].sort(),
     labels: [...new Set(matches.flatMap((lock) => lock.labels ?? []))].sort(),
@@ -245,7 +245,7 @@ function shortcutResolutionMarker(match) {
   return {
     identity: metadata.referenceId,
     thing: oneStoredField(match.atom, 'thing')?.value ?? null,
-    placement: 'contain',
+    placement: 'slot',
     path: match.path.join('/')
   };
 }
@@ -377,7 +377,7 @@ function resolvePartnerTarget(source, target, matches) {
   return named.length === 1 ? named[0] : null;
 }
 
-function supportRuleEndpoints(owner, matches) {
+function strutRuleEndpoints(owner, matches) {
   const selectorsInExpr = (expr) => {
     if (!expr || typeof expr !== 'object' || Array.isArray(expr)) return [];
     if (typeof expr.thing === 'string') return [expr.thing];
@@ -386,7 +386,7 @@ function supportRuleEndpoints(owner, matches) {
       Array.isArray(expr[operator]) ? expr[operator].flatMap(selectorsInExpr) : []
     ));
   };
-  return storedSupportFields(owner.atom).flatMap((field) => (
+  return storedStrutFields(owner.atom).flatMap((field) => (
     Array.isArray(field.value) ? field.value.map((rule, ordinal) => {
       const endpoints = new Set([owner]);
       for (const selector of [
@@ -401,10 +401,10 @@ function supportRuleEndpoints(owner, matches) {
   ));
 }
 
-function supportScope(anchor, matches) {
+function strutScope(anchor, matches) {
   const selected = new Set([anchor]);
   for (const owner of matches) {
-    for (const rule of supportRuleEndpoints(owner, matches)) {
+    for (const rule of strutRuleEndpoints(owner, matches)) {
       if (!rule.endpoints.has(anchor)) continue;
       selected.add(owner);
       for (const endpoint of rule.endpoints) selected.add(endpoint);
@@ -493,17 +493,17 @@ export async function executeExploreItem(
   const unsupported = item.fields.filter((field) => {
     if (field.baseKey === 'thing') return false;
     if (field.baseKey === 'situation') return !isProjection(field) || field.actions.some((action) => !['full', 'lock'].includes(action.name));
-    if (field.baseKey === 'contain') {
+    if (field.baseKey === 'slot') {
       return !isProjection(field) || field.actions.some((action) => !['latitude', 'longitude'].includes(action.name));
     }
-    if (field.baseKey === 'support') return !isProjection(field) || field.actions.length > 0;
+    if (field.baseKey === 'strut') return !isProjection(field) || field.actions.length > 0;
     return field.valuePresent || field.actions.length > 0;
   });
   if (unsupported.length) {
     return {
       ok: false,
       index: item.index,
-      errors: [diagnostic('UNSUPPORTED_EXPLORE_EXECUTION', '当前 explore 只执行 exact thing、situation$full、contain$latitude/longitude 与 support 投影', {
+      errors: [diagnostic('UNSUPPORTED_EXPLORE_EXECUTION', '当前 explore 只执行 exact thing、situation$full、slot$latitude/longitude 与 strut 投影', {
         fields: unsupported.map((field) => field.rawKey)
       })]
     };
@@ -513,8 +513,8 @@ export async function executeExploreItem(
   const visibleMatches = accessController.restricted ? [] : allMatches;
   const requestedReadFields = new Set(['thing']);
   if (item.fields.some((field) => field.baseKey === 'situation' && field.actions.some((action) => action.name === 'full'))) requestedReadFields.add('situation');
-  if (item.fields.some((field) => field.baseKey === 'contain')) requestedReadFields.add('contain');
-  if (item.fields.some((field) => field.baseKey === 'support')) requestedReadFields.add('support');
+  if (item.fields.some((field) => field.baseKey === 'slot')) requestedReadFields.add('slot');
+  if (item.fields.some((field) => field.baseKey === 'strut')) requestedReadFields.add('strut');
   for (const match of accessController.restricted ? allMatches : []) {
     if (match.virtual) {
       visibleMatches.push(match);
@@ -629,14 +629,14 @@ export async function executeExploreItem(
   const includeLockStatus = item.fields.some((field) => field.baseKey === 'situation'
     && field.actions.some((action) => action.name === 'lock'));
   const graphLocks = options.graphLocks ?? [];
-  const includeSupport = item.fields.some((field) => field.baseKey === 'support');
+  const includeStrut = item.fields.some((field) => field.baseKey === 'strut');
   const anchor = visibleMatches.find((match) => match.atom === selected.matches[0].atom);
-  const routes = item.fields.filter((field) => field.baseKey === 'contain').flatMap((field) => (
+  const routes = item.fields.filter((field) => field.baseKey === 'slot').flatMap((field) => (
     field.actions.map((action) => ({ axis: action.name, parameter: action.parameter }))
   ));
   const scoped = selectCoordinateScope(anchor, visibleMatches, routes);
-  if (includeSupport) {
-    for (const match of supportScope(anchor, visibleMatches)) scoped.add(match);
+  if (includeStrut) {
+    for (const match of strutScope(anchor, visibleMatches)) scoped.add(match);
   }
   const ordered = visibleMatches.filter((match) => scoped.has(match));
   const boundary = options.includeBoundary === false
@@ -669,7 +669,7 @@ export async function executeExploreItem(
     }
     const described = describeAtom(describedMatch, includeFullDetail, {
       selector: shortestUniqueSelector(describedMatch, visibleMatches),
-      ...(includeSupport ? { supportFields: storedSupportFields(describedMatch.atom) } : {}),
+      ...(includeStrut ? { strutFields: storedStrutFields(describedMatch.atom) } : {}),
       lockState: compiledLockState(lockIndex, graphLocks, describedMatch.path.join('/')),
       ...(includeLockStatus ? {
         lockStatus: (() => {

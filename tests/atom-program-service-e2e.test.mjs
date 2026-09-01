@@ -9,13 +9,13 @@ import { executeAtomCommandEndpoint, resolveAgentContext } from '../work-engine/
 import { projectAtomGraphToKnowledge } from '../work-engine/atom-language/graph-4d-projection.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
+function atom(thing, situation = '', slot = [], type = '') {
   const agentProgram = type === 'agent';
   const storedType = agentProgram ? 'program' : type;
   const storedSituation = agentProgram
     ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\nagent({"labels":[],"functions":{"groups":[],"names":["agent","explore","jump","lock","message","shortcut","slot_body","transform","trigger","use_program","work_order"]}})`
     : situation;
-  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, contain, support: [] };
+  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, slot, strut: [] };
 }
 
 function childPath(node) {
@@ -141,8 +141,8 @@ test('4784 serializes concurrent writes as complete world interactions without l
   assert.equal(left.ok, true);
   assert.equal(right.ok, true);
   const context = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(context[0].contain.find((entry) => entry.thing === '任务甲')?.situation, '新甲');
-  assert.equal(context[0].contain.find((entry) => entry.thing === '任务乙')?.situation, '新乙');
+  assert.equal(context[0].slot.find((entry) => entry.thing === '任务甲')?.situation, '新甲');
+  assert.equal(context[0].slot.find((entry) => entry.thing === '任务乙')?.situation, '新乙');
 
   const projectionBarrier = await executeAtomCommandEndpoint({
     source: 'explore {"thing":"工作Agent/任务乙","situation$full":true}', interaction: { agent }
@@ -246,7 +246,7 @@ test('4784 applies one Program effect set without cloning the whole world per tr
     interaction: { agent }
   }, `${running.url}/__atom/api/command`);
   assert.equal(projectionBarrier.ok, true, JSON.stringify(projectionBarrier.errors));
-  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].contain;
+  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot;
   for (let index = 0; index < targets.length; index += 1) {
     assert.equal(world.find((entry) => entry.thing === `Target ${index}`)?.situation, 'after');
   }
@@ -336,9 +336,9 @@ test('4784 keeps one isolated Program effect set fast across structural and reje
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.ok(elapsedMs < 5_000, `structural effect set took ${elapsedMs}ms`);
-  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].contain;
+  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot;
   assert.equal(world.find((entry) => entry.thing === 'Target 0'), undefined);
-  assert.equal(world.find((entry) => entry.thing === 'Destination').contain[0].thing, 'Target 0');
+  assert.equal(world.find((entry) => entry.thing === 'Destination').slot[0].thing, 'Target 0');
   for (let index = 1; index < targets.length; index += 1) {
     assert.equal(world.find((entry) => entry.thing === `Target ${index}`)?.situation, 'after');
   }
@@ -423,7 +423,7 @@ test('4784 Web workspace edits commit atom.json before asynchronously publishing
   assert.equal(nestedPayload.result.ok, true, JSON.stringify(nestedPayload));
   await settleWorkspaceProjection(running, nestedPayload);
   const nestedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(nestedWorld[0].contain[0].thing, 'Nested in Web');
+  assert.equal(nestedWorld[0].slot[0].thing, 'Nested in Web');
 
   const returnable = (await applyWebEdit({
     kind: 'node-create', path: childPath(parent), draft: { label: 'Return to top', description: 'root move' }
@@ -521,7 +521,7 @@ test('4784 Web workspace edits commit atom.json before asynchronously publishing
   });
   assert.equal(labelEdit.status, 400);
   assert.equal((await labelEdit.json()).error.code, 'INVALID_HUMAN_WORKSPACE_REQUEST');
-  assert.equal(current.edges[0].label, 'support');
+  assert.equal(current.edges[0].label, 'strut');
   existing = current.nodes.find((node) => node.label === 'Existing');
   renamed = current.nodes.find((node) => node.label === 'Node renamed only');
 
@@ -530,7 +530,7 @@ test('4784 Web workspace edits commit atom.json before asynchronously publishing
     edge: {
       from: { key: 'stale-edge-source', atomPath: existing.atomPath },
       to: { key: 'stale-edge-target', atomPath: renamed.atomPath },
-      label: 'support'
+      label: 'strut'
     }
   })).knowledge;
   assert.equal(current.edges.length, 0);
@@ -549,7 +549,7 @@ test('4784 Web workspace edits commit atom.json before asynchronously publishing
   });
   const finalWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(JSON.stringify(finalWorld).includes('Nested in Web'), true, 'discard remains recoverable in the backup area');
-  assert.equal(finalWorld[0].contain.some((child) => child.thing === 'Nested in Web'), false);
+  assert.equal(finalWorld[0].slot.some((child) => child.thing === 'Nested in Web'), false);
 });
 
 test('cold-start state includes deep Graph facts on first entry and refreshes an authoritative Web rename', async (t) => {
@@ -706,14 +706,14 @@ test('4784 continues an ordinary command without replaying an unrelated startup 
   }, `${running.url}/__atom/api/command`);
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].contain[0].situation, '新值');
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot[0].situation, '新值');
   assert.equal(result.warnings.some((warning) => (
     warning.code === 'ATOM_PROGRAM_FAILED'
     && warning.program === '故障Program'
   )), false, JSON.stringify(result.warnings));
 
   const created = await executeAtomCommandEndpoint({
-    source: 'transform new {"thing@program":"工作Agent/新增Program","situation":"def main(arguments):\\n    return None","contain":[],"support":[]}',
+    source: 'transform new {"thing@program":"工作Agent/新增Program","situation":"def main(arguments):\\n    return None","slot":[],"strut":[]}',
     interaction: { agent }
   }, `${running.url}/__atom/api/command`);
   assert.equal(created.ok, true, JSON.stringify(created.errors));

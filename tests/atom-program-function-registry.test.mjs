@@ -8,8 +8,8 @@ import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 function output() {
@@ -167,7 +167,7 @@ test('public registry exposes the deferred Program Transform create and update c
 
   assert.deepEqual(transform.contract.argument, { type: 'object', name: 'spec' });
   assert.deepEqual(transform.contract.create.requiredAxes, [
-    'thing', 'situation', 'contain', 'support'
+    'thing', 'situation', 'slot', 'strut'
   ]);
   assert.equal(transform.contract.create.dotCommands, 'forbidden');
   assert.equal(transform.contract.update.dotCommands, 'supported');
@@ -273,7 +273,7 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   assert.doesNotMatch(slotBody.contract.development.scopeBinding, /name\.run/u);
   assert.equal(slotBody.contract.transaction, 'central-atomic-commit');
   assert.deepEqual(slotBody.contract.confirmation, ['interaction-receipt', 'exact-explore']);
-  assert.ok(slotBody.contract.errors.includes('SLOT_MATERIAL_CONTAINMENT_CONFLICT'));
+  assert.ok(slotBody.contract.errors.includes('SLOT_MATERIAL_SLOTMENT_CONFLICT'));
   assert.equal(slotBody.contract.errors.some((code) => code.includes('CURSOR')), false);
   assert.ok(slotBody.contract.errors.includes('SLOT_SCOPE_BOUNDARY_CROSSING'));
 
@@ -283,18 +283,18 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   assert.equal(code, 0, stderr.value());
   assert.match(stdout.value(), /普通可自运行候选 DataFlow/u);
   assert.match(stdout.value(), /槽模／print@program／槽例/u);
-  assert.match(stdout.value(), /explore \{"thing":"EXACT槽体\/print\/修订","contain\$latitude-1":true\}/u);
+  assert.match(stdout.value(), /explore \{"thing":"EXACT槽体\/print\/修订","slot\$latitude-1":true\}/u);
   assert.doesNotMatch(stdout.value(), /explore \{"name":"EXACT槽体\/print\/修订"|复制[^\n]*默认料/u);
   assert.match(stdout.value(), /use_program[\s\S]*arguments[\s\S]*name[\s\S]*修订由当前 print@program 内部绑定/u);
   assert.match(stdout.value(), /use_program\(\{"name": explore\(\{.*\}\)\[0\], "arguments": \{.*\}\}\)/u);
   assert.match(stdout.value(), /坐标会按当前窗口与 Program 边界重新授权/u);
   assert.match(stdout.value(), /精确字符串名称或路径继续兼容/u);
   assert.match(stdout.value(), /调用方不得传 revision/u);
-  assert.match(stdout.value(), /thing\.run\.EXACT候选根路径[\s\S]*\.\/相对 contain 路径[\s\S]*当前槽例域/u);
+  assert.match(stdout.value(), /thing\.run\.EXACT候选根路径[\s\S]*\.\/相对 slot 路径[\s\S]*当前槽例域/u);
   assert.match(stdout.value(), /"thing":"EXACT槽体\/槽例\/实例\/槽"[\s\S]*situation\.rep\.填写值/u);
   assert.doesNotMatch(stdout.value(), /name\.run\.EXACT候选根路径|detail\.rep\.填写值/u);
   assert.match(stdout.value(), /本地料 Thing[\s\S]*逐字节/u);
-  assert.match(stdout.value(), /SLOT_MATERIAL_CONTAINMENT_CONFLICT[\s\S]*不产生半份槽例/u);
+  assert.match(stdout.value(), /SLOT_MATERIAL_SLOTMENT_CONFLICT[\s\S]*不产生半份槽例/u);
   assert.doesNotMatch(stdout.value(), /next_cursor|SLOT_SYNC_CURSOR|三方比较/u);
 });
 
@@ -373,7 +373,7 @@ test('CLI Help explains fixed Agent registration and the shared Graph authorizat
   assert.match(stdout.value(), /groups 是正式分层权限[\s\S]*当前 registry/u);
   assert.match(stdout.value(), /names 是冻结的具体函数授权/u);
   assert.match(stdout.value(), /后代组[\s\S]*不能上铸祖先组[\s\S]*同级其他职能树/u);
-  assert.match(stdout.value(), /当前 Agent 起点[\s\S]*contain 路径[\s\S]*目标 node 锁/u);
+  assert.match(stdout.value(), /当前 Agent 起点[\s\S]*slot 路径[\s\S]*目标 node 锁/u);
   assert.match(stdout.value(), /jump 定位复用 Explore、移动复用 Transform/u);
   assert.match(stdout.value(), /windowSelfLocks[\s\S]*RETIRED_WINDOW_SELF_LOCK_SNAPSHOT/u);
   assert.match(stdout.value(), /agentRegistrations[\s\S]*RETIRED_AGENT_REGISTRATION_SNAPSHOT/u);
@@ -387,7 +387,7 @@ test('CLI Help explains Program Transform creation, compatibility and confirmati
 
   assert.equal(code, 0, stderr.value());
   assert.match(stdout.value(), /Program transform 创建/u);
-  assert.match(stdout.value(), /thing[\s\S]*situation[\s\S]*contain[\s\S]*support/u);
+  assert.match(stdout.value(), /thing[\s\S]*situation[\s\S]*slot[\s\S]*strut/u);
   assert.match(stdout.value(), /完整四轴[\s\S]*无点号指令[\s\S]*创建/u);
   assert.match(stdout.value(), /点号指令[\s\S]*更新/u);
   assert.match(stdout.value(), /返回 None[\s\S]*交互回执[\s\S]*exact explore/u);

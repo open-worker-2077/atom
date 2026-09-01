@@ -245,7 +245,7 @@ test('blank ctrl-secondary landing unprojects a 3d point and starts a node landi
   assert.match(pointer, /workspace\.transaction\s*\(\s*\)/);
 });
 
-test('Web copy distinguishes relation creation, visual repositioning, and contain movement', () => {
+test('Web copy distinguishes relation creation, visual repositioning, and slot movement', () => {
   const gesture = functionSource('beginEdgeGesture');
   const release = functionSource('releasePointer');
 

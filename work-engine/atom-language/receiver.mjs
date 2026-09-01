@@ -87,13 +87,13 @@ function nestedDiagnostics(value, property) {
   return [];
 }
 
-function normalizeSupportSelectors(value) {
+function normalizeStrutSelectors(value) {
   if (value?.kind !== 'array' || !Array.isArray(value.values)) {
     return {
       value: materializeGraphJson(value),
       errors: [diagnostic(
-        'INVALID_SUPPORT_ARRAY',
-        'support 必须是推支规则对象数组'
+        'INVALID_STRUT_ARRAY',
+        'strut 必须是推支规则对象数组'
       )]
     };
   }
@@ -101,7 +101,7 @@ function normalizeSupportSelectors(value) {
   const errors = value.values.flatMap((rule, ruleIndex) => (
     rule?.kind === 'object' && Array.isArray(rule.entries)
       ? []
-      : [diagnostic('INVALID_SUPPORT_CLAUSE', 'support 项必须是推支规则对象', { ruleIndex })]
+      : [diagnostic('INVALID_STRUT_CLAUSE', 'strut 项必须是推支规则对象', { ruleIndex })]
   ));
   return { value: rules, errors };
 }
@@ -113,7 +113,7 @@ function normalizeField(entry, parserOptions, command) {
   if (!entry.valuePresent) return { ...parsed, valuePresent: false };
   if (
     command === 'explore'
-    && parsed.baseKey === 'support'
+    && parsed.baseKey === 'strut'
     && materializeGraphJson(entry.value) === true
   ) {
     return {
@@ -122,8 +122,8 @@ function normalizeField(entry, parserOptions, command) {
       value: true
     };
   }
-  if (parsed.baseKey === 'support') {
-    const normalized = normalizeSupportSelectors(entry.value);
+  if (parsed.baseKey === 'strut') {
+    const normalized = normalizeStrutSelectors(entry.value);
     return {
       ...parsed,
       warnings: parsed.warnings,

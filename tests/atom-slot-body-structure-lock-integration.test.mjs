@@ -13,8 +13,8 @@ import {
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], support = []) {
-  return { thing, situation, contain, support };
+function atom(thing, situation = '', slot = [], strut = []) {
+  return { thing, situation, slot, strut };
 }
 
 function thingOf(value) {
@@ -49,7 +49,7 @@ async function setup(t) {
   atoms.push({
     'thing@program': 'Seal',
     situation: 'slot_body({"action":"seal","body":"\u69fd\u4f53"})',
-    contain: [], support: []
+    slot: [], strut: []
   });
   atoms.push({
     'thing@program': 'ModifyAndSeal',
@@ -57,7 +57,7 @@ async function setup(t) {
       'transform({"thing":"\u69fd\u4f53/\u69fd\u6a21/\u8f93\u5165","situation.rep.v2":None})',
       'slot_body({"action":"seal","body":"\u69fd\u4f53"})'
     ].join('\n'),
-    contain: [], support: []
+    slot: [], strut: []
   });
   atoms.push(atom('OtherBody', '', [atom('Candidate', '', [atom('Field')])]));
   atoms.push({
@@ -66,7 +66,7 @@ async function setup(t) {
       'transform({"thing":"\u69fd\u4f53/\u69fd\u6a21/\u8f93\u5165","situation.rep.v3":None})',
       'slot_body({"action":"seal","body":"OtherBody"})'
     ].join('\n'),
-    contain: [], support: []
+    slot: [], strut: []
   });
   await fs.writeFile(contextFile, `${JSON.stringify(atoms, null, 2)}\n`, 'utf8');
   return { contextFile, projectionFile };
@@ -81,7 +81,7 @@ test('central Transform denies mapped self, permits material fill, and rejects f
   assert.ok(mapped.errors.some((error) => error.code === 'SLOT_STRUCTURE_LOCK_DENIED'));
 
   const material = await executeAtomLanguage({
-    source: 'transform new {"thing":"槽体/槽例/实例/输入/料","situation":"值","contain":[],"support":[]}',
+    source: 'transform new {"thing":"槽体/槽例/实例/输入/料","situation":"值","slot":[],"strut":[]}',
     ...files
   });
   assert.equal(material.ok, true, JSON.stringify(material.errors));
@@ -100,7 +100,7 @@ test('central Transform denies mapped self, permits material fill, and rejects f
   assert.ok(movedRole.errors.some((error) => error.code === 'SLOT_STRUCTURE_LOCK_DENIED'));
 
   const forged = await executeAtomLanguage({
-    source: 'transform new {"thing@slot-role-fake":"槽体/槽例/实例/输入/伪槽","situation":"","contain":[],"support":[]}',
+    source: 'transform new {"thing@slot-role-fake":"槽体/槽例/实例/输入/伪槽","situation":"","slot":[],"strut":[]}',
     ...files
   });
   assert.equal(forged.ok, false);
@@ -120,16 +120,16 @@ test('authorized reseal replaces its own mapped projections without a structural
 test('one Program may edit its model and reseal the same slot body atomically', async (t) => {
   const files = await setup(t);
   const material = await executeAtomLanguage({
-    source: 'transform new {"thing":"\u69fd\u4f53/\u69fd\u4f8b/\u5b9e\u4f8b/\u8f93\u5165/\u672c\u5730\u6599","situation":"\u4fdd\u7559","contain":[],"support":[]}',
+    source: 'transform new {"thing":"\u69fd\u4f53/\u69fd\u4f8b/\u5b9e\u4f8b/\u8f93\u5165/\u672c\u5730\u6599","situation":"\u4fdd\u7559","slot":[],"strut":[]}',
     ...files
   });
   assert.equal(material.ok, true, JSON.stringify(material.errors));
   const materialWorld = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
   const before = JSON.stringify(materialWorld
-    .find((entry) => thingOf(entry) === '\u69fd\u4f53').contain
-    .find((entry) => thingOf(entry) === '\u69fd\u4f8b').contain
-    .find((entry) => thingOf(entry) === '\u5b9e\u4f8b').contain
-    .find((entry) => thingOf(entry) === '\u8f93\u5165').contain);
+    .find((entry) => thingOf(entry) === '\u69fd\u4f53').slot
+    .find((entry) => thingOf(entry) === '\u69fd\u4f8b').slot
+    .find((entry) => thingOf(entry) === '\u5b9e\u4f8b').slot
+    .find((entry) => thingOf(entry) === '\u8f93\u5165').slot);
 
   const result = await executeAtomLanguage({
     source: 'transform {"thing.run.":"ModifyAndSeal"}',
@@ -139,14 +139,14 @@ test('one Program may edit its model and reseal the same slot body atomically', 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const committed = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
   const body = committed.find((entry) => thingOf(entry) === '\u69fd\u4f53');
-  const modelInput = body.contain.find((entry) => thingOf(entry) === '\u69fd\u6a21')
-    .contain.find((entry) => thingOf(entry) === '\u8f93\u5165');
-  const instanceInput = body.contain.find((entry) => thingOf(entry) === '\u69fd\u4f8b')
-    .contain.find((entry) => thingOf(entry) === '\u5b9e\u4f8b').contain
+  const modelInput = body.slot.find((entry) => thingOf(entry) === '\u69fd\u6a21')
+    .slot.find((entry) => thingOf(entry) === '\u8f93\u5165');
+  const instanceInput = body.slot.find((entry) => thingOf(entry) === '\u69fd\u4f8b')
+    .slot.find((entry) => thingOf(entry) === '\u5b9e\u4f8b').slot
     .find((entry) => thingOf(entry) === '\u8f93\u5165');
   assert.equal(modelInput.situation, 'v2');
   assert.equal(instanceInput.situation, 'v2');
-  assert.equal(JSON.stringify(instanceInput.contain), before);
+  assert.equal(JSON.stringify(instanceInput.slot), before);
 });
 
 test('a Program cannot borrow reseal capability from another slot body', async (t) => {

@@ -42,7 +42,7 @@
               "required": ["placement", "thing", "target"],
               "additionalProperties": false,
               "properties": {
-                "placement": { "const": "contain", "meaning": "direct child of current Program" },
+                "placement": { "const": "slot", "meaning": "direct child of current Program" },
                 "thing": { "type": "string", "format": "single-atom-name" },
                 "target": { "$ref": "#/runtimeTypes/ThingCoordinate" }
               }
@@ -213,7 +213,7 @@
       "contract": {
         "argument": { "type": "object", "name": "spec" },
         "create": {
-          "requiredAxes": ["thing", "situation", "contain", "support"],
+          "requiredAxes": ["thing", "situation", "slot", "strut"],
           "dotCommands": "forbidden"
         },
         "update": { "dotCommands": "supported" },
@@ -245,7 +245,7 @@
         "development": {
           "initialLayout": "one ordinary self-runnable candidate DataFlow child",
           "scopeBinding": "transform {\"thing.run.EXACT_SCOPE_ROOT\":\"EXACT_PROGRAM_PATH\"}",
-          "relativeSelectors": [".", "./direct/contain/path"]
+          "relativeSelectors": [".", "./direct/slot/path"]
         },
         "layout": {
           "sealedChildren": ["槽模", "print", "槽例"],
@@ -279,7 +279,7 @@
           "SLOT_BODY_NOT_SEALED",
           "SLOT_BODY_EXAMPLE_EXISTS",
           "SLOT_PRINT_PLAN_STALE",
-          "SLOT_MATERIAL_CONTAINMENT_CONFLICT",
+          "SLOT_MATERIAL_SLOTMENT_CONFLICT",
           "SLOT_INSTANCE_REVISION_MISSING",
           "SLOT_SCOPE_ROOT_UNBOUND",
           "SLOT_RELATIVE_SELECTOR_REQUIRED",

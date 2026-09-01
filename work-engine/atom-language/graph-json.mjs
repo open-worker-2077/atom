@@ -192,7 +192,7 @@ function formatGraphJsonValue(value, depth, indent, options) {
     const visibleEntries = options.omitEmptyStructuralArrays
       ? value.entries.filter((entry) => !(
         entry?.valuePresent
-        && (entry.key === 'contain' || entry.key === 'support')
+        && (entry.key === 'slot' || entry.key === 'strut')
         && entry.value?.kind === 'array'
         && Array.isArray(entry.value.values)
         && entry.value.values.length === 0

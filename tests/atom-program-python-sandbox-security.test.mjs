@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 async function rejectsAsSecurityViolation(source) {
@@ -48,7 +48,7 @@ test('Program sandbox rejects private and dunder attribute traversal before exec
 
 test('Program sandbox preserves ordinary Python control flow and registered world functions', async () => {
   const program = [
-    "items = explore({'thing': 'Work', 'contain$latitude-1': None})",
+    "items = explore({'thing': 'Work', 'slot$latitude-1': None})",
     'values = []',
     'for item in items:',
     "    if item.thing.startswith('Score'):",

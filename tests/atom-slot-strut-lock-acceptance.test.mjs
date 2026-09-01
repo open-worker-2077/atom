@@ -8,7 +8,7 @@ import { createProgramRuntimeScheduler } from '../work-engine/atom-language/prog
 import { slotProgramInvocationsForEvent } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], support = [], types = []) {
+function atom(thing, situation = '', slot = [], strut = [], types = []) {
   const agentProgram = types.includes('agent');
   const storedTypes = agentProgram
     ? ['program', ...types.filter((type) => type !== 'agent' && type !== 'program')]
@@ -16,8 +16,8 @@ function atom(thing, situation = '', contain = [], support = [], types = []) {
   return {
     [`thing${storedTypes.map((type) => `@${type}`).join('')}`]: thing,
     situation,
-    contain,
-    support
+    slot,
+    strut
   };
 }
 
@@ -31,7 +31,7 @@ function find(atoms, selector) {
   for (const segment of selector.split('/')) {
     current = children.find((candidate) => nameOf(candidate) === segment);
     if (!current) return null;
-    children = current.contain;
+    children = current.slot;
   }
   return current;
 }
@@ -57,7 +57,7 @@ function world() {
     '    transform({"thing":"./状态锁","situation.rep." + lock_source:None})',
     '    transform({"thing":"./结果/结果料","situation.rep.已批准":None})',
     '    return {"locked":True}',
-    'trigger("support", {"nodes":["./执行"]}, run)'
+    'trigger("strut", {"nodes":["./执行"]}, run)'
   ].join('\n');
   const printer = (name) => `use_program({"name":"${body}/print","arguments":{"name":"${name}"}})`;
   const agent = (labels) => `agent(${JSON.stringify({
@@ -94,12 +94,12 @@ async function execute(runtime, source, agentPath) {
   return executeAtomLanguage({
     ...runtime,
     source,
-    interaction: { id: `slot-support-lock-${crypto.randomUUID()}`, agent: { path: agentPath } }
+    interaction: { id: `slot-strut-lock-${crypto.randomUUID()}`, agent: { path: agentPath } }
   });
 }
 
-test('a slot support true lets its own triggered action arm a node lock without locking a sibling example', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-slot-support-lock-'));
+test('a slot strut true lets its own triggered action arm a node lock without locking a sibling example', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-slot-strut-lock-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
@@ -132,7 +132,7 @@ test('a slot support true lets its own triggered action arm a node lock without 
       }
     ]) {
       const created = await execute(runtime, `transform new ${JSON.stringify({
-        ...material, contain: [], support: []
+        ...material, slot: [], strut: []
       })}`, unlabelled);
       assert.equal(created.ok, true, JSON.stringify(created.errors));
     }
@@ -172,8 +172,8 @@ test('a slot support true lets its own triggered action arm a node lock without 
 
   const consequentPath = `${body}/槽例/实例001/执行`;
   const deliveries = ['clause-a', 'clause-b'].map((clauseId, consequentOrdinal) => ({
-    mode: 'support',
-    revision: 'sha256:direct-support-acceptance',
+    mode: 'strut',
+    revision: 'sha256:direct-strut-acceptance',
     clauseId,
     decision: true,
     antecedentPaths: [`${body}/槽例/实例001/字段甲`],
@@ -181,7 +181,7 @@ test('a slot support true lets its own triggered action arm a node lock without 
     consequentOrdinal
   }));
   assert.deepEqual(slotProgramInvocationsForEvent(stored, {
-    mode: 'support', nodes: [consequentPath]
+    mode: 'strut', nodes: [consequentPath]
   }, scheduler.triggerContracts).map((invocation) => invocation.scopeRoot), [
     `${body}/槽例/实例001`
   ]);
@@ -196,10 +196,10 @@ test('a slot support true lets its own triggered action arm a node lock without 
     }
     return runProgram(request);
   };
-  const directSupport = await scheduler.refresh(stored, {
+  const directStrut = await scheduler.refresh(stored, {
     agentOrigin: { path: holder },
     isolateFailures: true,
-    triggerEvent: { mode: 'support', nodes: [consequentPath], deliveries }
+    triggerEvent: { mode: 'strut', nodes: [consequentPath], deliveries }
   });
   assert.deepEqual(subscriberCalls.map((call) => ({
     scopeRoot: call.scopeRoot,
@@ -208,16 +208,15 @@ test('a slot support true lets its own triggered action arm a node lock without 
     { scopeRoot: `${body}/槽例/实例001`, clauseId: 'clause-a' },
     { scopeRoot: `${body}/槽例/实例001`, clauseId: 'clause-b' }
   ]);
-  assert.deepEqual(directSupport.failures, [], JSON.stringify(directSupport.failures));
-  assert.deepEqual(directSupport.executedProgramPaths, [
+  assert.deepEqual(directStrut.failures, [], JSON.stringify(directStrut.failures));
+  assert.deepEqual(directStrut.executedProgramPaths, [
     `${body}/槽模/执行动作`,
     `${body}/槽模/执行动作`
   ]);
-  assert.equal(directSupport.transforms.length, 4);
+  assert.equal(directStrut.transforms.length, 4);
 });
-
-test('a failing support subscriber rolls back the warm source Transform', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-support-rollback-'));
+test('a failing strut subscriber rolls back the warm source Transform', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-strut-rollback-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
@@ -233,7 +232,7 @@ test('a failing support subscriber rolls back the warm source Transform', async 
     atom('FailingSubscriber', [
       'def receive(delivery):',
       '    return delivery["missing"]',
-      'trigger("support", {"nodes":["Result"]}, receive)'
+      'trigger("strut", {"nodes":["Result"]}, receive)'
     ].join('\n'), [], [], ['program'])
   ];
   await fs.writeFile(contextFile, JSON.stringify(initial, null, 2), 'utf8');
@@ -243,7 +242,7 @@ test('a failing support subscriber rolls back the warm source Transform', async 
     projectionFile,
     programScheduler: scheduler,
     source: 'transform {"thing":"Source","situation.rep.after":"before"}',
-    interaction: { id: `support-rollback-${crypto.randomUUID()}` }
+    interaction: { id: `strut-rollback-${crypto.randomUUID()}` }
   });
 
   assert.equal(result.ok, false, JSON.stringify(result));
@@ -255,7 +254,7 @@ test('a failing support subscriber rolls back the warm source Transform', async 
 });
 
 test('a rolled-back multi-subscriber delivery releases every claim for a complete retry', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-support-retry-'));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-strut-retry-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
@@ -271,12 +270,12 @@ test('a rolled-back multi-subscriber delivery releases every claim for a complet
     atom('ApplySubscriber', [
       'def receive(delivery):',
       '    transform({"thing":"Result","situation.rep.after":"before"})',
-      'trigger("support", {"nodes":["Result"]}, receive)'
+      'trigger("strut", {"nodes":["Result"]}, receive)'
     ].join('\n'), [], [], ['program']),
     atom('TransientSubscriber', [
       'def receive(delivery):',
       '    return {"accepted": delivery["decision"]}',
-      'trigger("support", {"nodes":["Result"]}, receive)'
+      'trigger("strut", {"nodes":["Result"]}, receive)'
     ].join('\n'), [], [], ['program'])
   ];
   await fs.writeFile(contextFile, JSON.stringify(initial, null, 2), 'utf8');
@@ -285,11 +284,11 @@ test('a rolled-back multi-subscriber delivery releases every claim for a complet
   let failTransientOnce = true;
   let applyCalls = 0;
   scheduler.runProgram = async (request) => {
-    if (request.program.path === 'ApplySubscriber' && request.programArguments?.mode === 'support') {
+    if (request.program.path === 'ApplySubscriber' && request.programArguments?.mode === 'strut') {
       applyCalls += 1;
     }
     if (request.program.path === 'TransientSubscriber'
-      && request.programArguments?.mode === 'support'
+      && request.programArguments?.mode === 'strut'
       && failTransientOnce) {
       failTransientOnce = false;
       throw Object.assign(new Error('transient subscriber failure'), { code: 'TRANSIENT_FAILURE' });
@@ -300,22 +299,22 @@ test('a rolled-back multi-subscriber delivery releases every claim for a complet
 
   const failed = await executeAtomLanguage({
     contextFile, projectionFile, programScheduler: scheduler, source: command,
-    interaction: { id: `support-retry-fail-${crypto.randomUUID()}` }
+    interaction: { id: `strut-retry-fail-${crypto.randomUUID()}` }
   });
   assert.equal(failed.ok, false, JSON.stringify(failed));
   assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Result').situation, 'before');
 
   const retried = await executeAtomLanguage({
     contextFile, projectionFile, programScheduler: scheduler, source: command,
-    interaction: { id: `support-retry-pass-${crypto.randomUUID()}` }
+    interaction: { id: `strut-retry-pass-${crypto.randomUUID()}` }
   });
   assert.equal(retried.ok, true, JSON.stringify(retried));
   assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Result').situation, 'after');
   assert.equal(applyCalls, 2);
 });
 
-test('a support subscriber effect rejected after worker success releases its claim for retry', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-support-effect-retry-'));
+test('a strut subscriber effect rejected after worker success releases its claim for retry', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-strut-effect-retry-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
@@ -331,7 +330,7 @@ test('a support subscriber effect rejected after worker success releases its cla
     atom('ApplySubscriber', [
       'def receive(delivery):',
       '    transform({"thing":"Result","situation.rep.after":"before"})',
-      'trigger("support", {"nodes":["Result"]}, receive)'
+      'trigger("strut", {"nodes":["Result"]}, receive)'
     ].join('\n'), [], [], ['program'])
   ], null, 2), 'utf8');
   const scheduler = createProgramRuntimeScheduler();
@@ -340,7 +339,7 @@ test('a support subscriber effect rejected after worker success releases its cla
   let calls = 0;
   scheduler.runProgram = async (request) => {
     const result = await runProgram(request);
-    if (request.program.path === 'ApplySubscriber' && request.programArguments?.mode === 'support') {
+    if (request.program.path === 'ApplySubscriber' && request.programArguments?.mode === 'strut') {
       calls += 1;
       if (replaceEffectOnce) {
         replaceEffectOnce = false;
@@ -356,22 +355,22 @@ test('a support subscriber effect rejected after worker success releases its cla
 
   const failed = await executeAtomLanguage({
     contextFile, projectionFile, programScheduler: scheduler, source: command,
-    interaction: { id: `support-effect-fail-${crypto.randomUUID()}` }
+    interaction: { id: `strut-effect-fail-${crypto.randomUUID()}` }
   });
   assert.equal(failed.ok, false, JSON.stringify(failed));
   assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Source').situation, 'before');
 
   const retried = await executeAtomLanguage({
     contextFile, projectionFile, programScheduler: scheduler, source: command,
-    interaction: { id: `support-effect-pass-${crypto.randomUUID()}` }
+    interaction: { id: `strut-effect-pass-${crypto.randomUUID()}` }
   });
   assert.equal(retried.ok, true, JSON.stringify(retried));
   assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Result').situation, 'after');
   assert.equal(calls, 2);
 });
 
-test('a successful no-op source Transform confirms message-only support delivery without hanging', { timeout: 4000 }, async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-support-noop-'));
+test('a successful no-op source Transform confirms message-only strut delivery without hanging', { timeout: 4000 }, async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-strut-noop-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
@@ -387,7 +386,7 @@ test('a successful no-op source Transform confirms message-only support delivery
     atom('MessageSubscriber', [
       'def receive(delivery):',
       '    message({"level":"info","text":"delivered"})',
-      'trigger("support", {"nodes":["Result"]}, receive)'
+      'trigger("strut", {"nodes":["Result"]}, receive)'
     ].join('\n'), [], [], ['program'])
   ], null, 2), 'utf8');
   const scheduler = createProgramRuntimeScheduler();
@@ -395,11 +394,11 @@ test('a successful no-op source Transform confirms message-only support delivery
 
   const first = await executeAtomLanguage({
     contextFile, projectionFile, programScheduler: scheduler, source: command,
-    interaction: { id: `support-noop-first-${crypto.randomUUID()}` }
+    interaction: { id: `strut-noop-first-${crypto.randomUUID()}` }
   });
   const second = await executeAtomLanguage({
     contextFile, projectionFile, programScheduler: scheduler, source: command,
-    interaction: { id: `support-noop-second-${crypto.randomUUID()}` }
+    interaction: { id: `strut-noop-second-${crypto.randomUUID()}` }
   });
 
   assert.equal(first.ok, true, JSON.stringify(first));

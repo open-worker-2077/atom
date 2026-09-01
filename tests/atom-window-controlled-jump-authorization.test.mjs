@@ -13,8 +13,8 @@ import {
 import { executeAtomLanguage as executeAtomLanguageWithoutWorldService }
   from '../work-engine/atom-language/engine.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 const ROOT_AGENT_SOURCE = [
@@ -40,12 +40,12 @@ function world({ includeForge = false, includeOrdinaryWindowController = false }
         atom('Window', WINDOW_AGENT_SOURCE, [
           atom('When', [
             'def main(arguments):',
-            '    records = explore({"thing":"Registration","contain$latitude-1":True})',
+            '    records = explore({"thing":"Registration","slot$latitude-1":True})',
             '    return any("jump-authorization" in record.types for record in records)'
           ].join('\n'), [], 'program'),
           atom('Where', [
             'def main(arguments):',
-            '    records = explore({"thing":"Registration","contain$latitude-1":True})',
+            '    records = explore({"thing":"Registration","slot$latitude-1":True})',
             '    grants = [record for record in records if "jump-authorization" in record.types]',
             '    if len(grants) != 1:',
             '        raise ValueError("one controlled jump authorization is required")',
@@ -108,7 +108,7 @@ async function fixture(t, options = {}) {
 }
 
 function names(atomValue) {
-  return (atomValue.contain ?? []).map((entry) => Object.entries(entry)
+  return (atomValue.slot ?? []).map((entry) => Object.entries(entry)
     .find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1]);
 }
 
@@ -121,7 +121,7 @@ function findTyped(atoms, type, prefix = []) {
     if (entry[0].split('@').slice(1).includes(type)) {
       return { atom: current, path: currentPath.join('/') };
     }
-    const nested = findTyped(current.contain ?? [], type, currentPath);
+    const nested = findTyped(current.slot ?? [], type, currentPath);
     if (nested) return nested;
   }
   return null;
@@ -133,7 +133,7 @@ function findThing(atoms, expected) {
       key === 'thing' || key.startsWith('thing@')
     ));
     if (entry?.[1] === expected) return current;
-    const nested = findThing(current.contain ?? [], expected);
+    const nested = findThing(current.slot ?? [], expected);
     if (nested) return nested;
   }
   return null;
@@ -179,8 +179,8 @@ test('an authorized controller moves a fixed child window that has no horizontal
   const guarded = await consumeAuthorization(files, scheduler);
   assert.equal(guarded.ok, true, JSON.stringify(guarded.errors));
   const guardedWorld = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(names(guardedWorld[0].contain[1].contain[0]), ['Window']);
-  assert.deepEqual(names(guardedWorld[0].contain[1].contain[1]), []);
+  assert.deepEqual(names(guardedWorld[0].slot[1].slot[0]), ['Window']);
+  assert.deepEqual(names(guardedWorld[0].slot[1].slot[1]), []);
 
   const issued = await issueAuthorization(files, scheduler);
   assert.equal(issued.ok, true, JSON.stringify(issued.errors));
@@ -190,8 +190,8 @@ test('an authorized controller moves a fixed child window that has no horizontal
   const moved = await consumeAuthorization(files, createProgramRuntimeScheduler());
   assert.equal(moved.ok, true, JSON.stringify(moved.errors));
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(names(stored[0].contain[1].contain[0]), []);
-  assert.deepEqual(names(stored[0].contain[1].contain[1]), ['Window']);
+  assert.deepEqual(names(stored[0].slot[1].slot[0]), []);
+  assert.deepEqual(names(stored[0].slot[1].slot[1]), ['Window']);
 
   const oldDomain = await executeAtomLanguage({
     source: 'explore {"thing":"Root/Work/Job1","situation$full":true}',
@@ -213,7 +213,7 @@ test('an authorized controller moves a fixed child window that has no horizontal
   assert.equal(currentParent.ok, true, JSON.stringify(currentParent.errors));
 
   const replayedWorld = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  findThing(replayedWorld, 'Registration').contain.push(issuedGrant);
+  findThing(replayedWorld, 'Registration').slot.push(issuedGrant);
   await fs.writeFile(files.contextFile, `${JSON.stringify(replayedWorld, null, 2)}\n`);
   const replayed = await consumeAuthorization(
     files,
@@ -225,8 +225,8 @@ test('an authorized controller moves a fixed child window that has no horizontal
     error.code === 'WINDOW_JUMP_AUTHORIZATION_INVALID'
   )), JSON.stringify(replayed.errors));
   const afterReplay = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(names(afterReplay[0].contain[1].contain[0]), []);
-  assert.deepEqual(names(afterReplay[0].contain[1].contain[1]), ['Window']);
+  assert.deepEqual(names(afterReplay[0].slot[1].slot[0]), []);
+  assert.deepEqual(names(afterReplay[0].slot[1].slot[1]), ['Window']);
 });
 
 test('authorization coordinates cannot be forged, altered, or delegated by the child window', async (t) => {
@@ -234,7 +234,7 @@ test('authorization coordinates cannot be forged, altered, or delegated by the c
   const scheduler = createProgramRuntimeScheduler();
   const forgedFact = await executeAtomLanguage({
     source: 'transform new {"thing@jump-authorization":"Forged",'
-      + '"situation":"{}","contain":[],"support":[]}',
+      + '"situation":"{}","slot":[],"strut":[]}',
     ...files,
     programScheduler: scheduler,
     interaction: { agent: { ref: 'window-ref', path: 'Root/Work/Job1/Window' } }
@@ -322,8 +322,8 @@ test('issuer authority generation changes invalidate a pending authorization wit
     error.code === 'WINDOW_JUMP_AUTHORIZATION_INVALID'
   )), JSON.stringify(result.errors));
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(names(stored[0].contain[1].contain[0]), ['Window']);
-  assert.deepEqual(names(stored[0].contain[1].contain[1]), []);
+  assert.deepEqual(names(stored[0].slot[1].slot[0]), ['Window']);
+  assert.deepEqual(names(stored[0].slot[1].slot[1]), []);
 });
 
 test('a rejected central commit publishes neither the controlled move nor grant consumption', async (t) => {
@@ -351,7 +351,7 @@ test('a rejected central commit publishes neither the controlled move nor grant 
 
   assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
   const stored = JSON.parse(before);
-  assert.deepEqual(names(stored[0].contain[1].contain[0]), ['Window']);
+  assert.deepEqual(names(stored[0].slot[1].slot[0]), ['Window']);
   assert.ok(findTyped(stored, 'jump-authorization'));
 });
 

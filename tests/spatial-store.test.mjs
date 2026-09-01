@@ -248,12 +248,12 @@ test('knowledge replacement preserves projected Atom registration types', async 
 });
 
 test('knowledge replacement preserves bounded Web-only Graph projection metadata', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-support-projection-'));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-strut-projection-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const store = createStore(path.join(directory, 'knowledge.json'));
   await store.init();
   const clause = {
-    id: 'support:Root/Hub:0', currentSide: 'consequent',
+    id: 'strut:Root/Hub:0', currentSide: 'consequent',
     root: { kind: 'thing', targetPath: 'Root/A', exprPath: [] },
     then: [{ targetPath: 'Root/Hub', thenOrdinal: 0 }]
   };
@@ -264,14 +264,14 @@ test('knowledge replacement preserves bounded Web-only Graph projection metadata
         path: 'root', id: 'hub', label: 'Hub', graphPath: 'Root/Hub',
         programSource: 'def main(arguments):\n    return True'
       }],
-      supportClauses: [clause]
+      strutClauses: [clause]
     }
   });
 
   const state = await store.execute('field.get', { scope: 'all' });
   assert.equal(state.nodes[0].graphPath, 'Root/Hub');
   assert.match(state.nodes[0].programSource, /return True/u);
-  assert.deepEqual(state.supportClauses, [clause]);
+  assert.deepEqual(state.strutClauses, [clause]);
 });
 
 test('new spatial nodes default to floating details instead of mirror surfaces', async () => {

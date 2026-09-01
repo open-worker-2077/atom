@@ -10,13 +10,13 @@ import { executeProgramExplore } from '../work-engine/atom-language/query-capabi
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
+function atom(thing, situation = '', slot = [], type = '') {
   const agentProgram = type === 'agent';
   const storedType = agentProgram ? 'program' : type;
   const storedSituation = agentProgram
     ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\nagent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})`
     : situation;
-  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, contain, support: [] };
+  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, slot, strut: [] };
 }
 
 async function filesFor(t, atoms, prefix = 'atom-boundary-preview-') {
@@ -63,7 +63,7 @@ test('ordinary Explore reports unreturned coordinate nodes and readable characte
   const files = await filesFor(t, routeFixture());
   const result = await executeAtomLanguage({
     ...files,
-    source: 'explore {"thing":"Center","situation$full":true,"contain$latitude-1":true,"contain$longitude+1":true}'
+    source: 'explore {"thing":"Center","situation$full":true,"slot$latitude-1":true,"slot$longitude+1":true}'
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
@@ -82,11 +82,11 @@ test('ordinary Explore recalculates the boundary after re-anchoring along the ro
   const files = await filesFor(t, routeFixture());
   const center = await executeAtomLanguage({
     ...files,
-    source: 'explore {"thing":"Center","contain$latitude-1":true}'
+    source: 'explore {"thing":"Center","slot$latitude-1":true}'
   });
   const child = await executeAtomLanguage({
     ...files,
-    source: 'explore {"thing":"Center/Child","contain$latitude-1":true}'
+    source: 'explore {"thing":"Center/Child","slot$latitude-1":true}'
   });
 
   assert.equal(center.items[0].boundary.down.nodes, 2);
@@ -104,7 +104,7 @@ test('protected continuation is explicit without leaking names, content, or exac
     {
       'thing@lock': 'Secret seal',
       situation: '',
-      contain: [
+      slot: [
         property('law', 'atom.lock.basic'),
         property('effect', 'seal'),
         property('actions', 'read,write'),
@@ -115,7 +115,7 @@ test('protected continuation is explicit without leaking names, content, or exac
         property('applies_to', 'Work Agent'),
         property('enabled', 'true')
       ],
-      support: []
+      strut: []
     }
   ], 'atom-protected-boundary-');
   const result = await executeAtomLanguage({
@@ -137,7 +137,7 @@ test('protected continuation is explicit without leaking names, content, or exac
 
 test('CLI projects the query boundary beside the anchor as Graph-JSON', async (t) => {
   const files = await filesFor(t, routeFixture());
-  const result = await runCli(files, '{"thing":"Center","contain$latitude-1":true}');
+  const result = await runCli(files, '{"thing":"Center","slot$latitude-1":true}');
 
   assert.equal(result.code, 0, result.stderr);
   const receipt = JSON.parse(result.stdout);
@@ -145,13 +145,13 @@ test('CLI projects the query boundary beside the anchor as Graph-JSON', async (t
     state: 'complete', hasMore: true, nodes: 2, characters: 13
   });
   assert.equal(receipt.thing, 'Center');
-  assert.deepEqual(receipt.contain.map((child) => child.thing), ['Child']);
+  assert.deepEqual(receipt.slot.map((child) => child.thing), ['Child']);
 });
 
 test('Program Explore remains a list containing only real Atom matches', async () => {
   const program = await executeProgramExplore({
     atoms: routeFixture(),
-    request: { thing: 'Center', 'contain$latitude-1': true },
+    request: { thing: 'Center', 'slot$latitude-1': true },
     receiver: createAtomLanguageReceiver()
   });
 

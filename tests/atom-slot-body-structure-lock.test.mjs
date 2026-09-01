@@ -6,8 +6,8 @@ import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runt
 import { compileSlotStructureGraphLocks } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
 import { authorizeWindowGraphPath } from '../work-engine/atom-language/window-lock-v1.mjs';
 
-function atom(thing, situation = '', contain = [], support = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support };
+function atom(thing, situation = '', slot = [], strut = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut };
 }
 
 function fixture() {
@@ -49,7 +49,7 @@ test('slot structure locks reuse one compiled result per mutable world revision'
 test('slot_body seal lock protects mapped self but permits ordinary material below it', async () => {
   const atoms = await sealed();
   const input = find(atoms, '槽体/槽例/实例/输入');
-  input.atom.contain.push(atom('料', '可写'));
+  input.atom.slot.push(atom('料', '可写'));
   const material = find(atoms, '槽体/槽例/实例/输入/料');
   const controller = createAccessController(atoms, {});
 
@@ -58,7 +58,7 @@ test('slot_body seal lock protects mapped self but permits ordinary material bel
   assert.equal(mapped.code, 'SLOT_STRUCTURE_LOCK_DENIED');
   assert.equal((await controller.authorize(material, 'write', 'situation')).decision, 'allow');
   assert.equal((await controller.authorize(
-    input, 'write', 'contain', { slotMaterialCreate: true }
+    input, 'write', 'slot', { slotMaterialCreate: true }
   )).decision, 'allow');
   const forged = await controller.authorize({
     atom: atom('伪槽', '', [], [], 'slot-role-fake'),
@@ -121,7 +121,7 @@ test('reseal still requires the caller lock intersection and denial rolls back e
   assert.equal(denied.error.code, 'PROGRAM_LOCK_DENIED');
   assert.deepEqual(atoms, before);
 
-  find(atoms, '\u69fd\u4f53/\u69fd\u4f8b/\u5b9e\u4f8b/\u8f93\u5165').atom.contain.push(atom('\u672c\u5730\u6599', '\u4fdd\u7559'));
+  find(atoms, '\u69fd\u4f53/\u69fd\u4f8b/\u5b9e\u4f8b/\u8f93\u5165').atom.slot.push(atom('\u672c\u5730\u6599', '\u4fdd\u7559'));
   const allowed = await applySlotBodyEffect({
     atoms,
     effect: { action: 'seal', body: '\u69fd\u4f53' },

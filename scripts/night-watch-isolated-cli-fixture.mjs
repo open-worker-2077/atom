@@ -5,8 +5,8 @@ const FUNCTION_NAMES = Object.freeze([
   'json_parse', 'shortcut', 'slot_body', 'transform', 'trigger', 'use_program', 'work_order'
 ]);
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 function agentSource(labels) {
@@ -68,18 +68,18 @@ export function createNightWatchCliFixture(directory) {
     syntheticAgentSource,
     overreachAgentSource,
     createSyntheticTarget: () => ({
-      thing: syntheticTargetPath, situation: 'unchanged', contain: [], support: []
+      thing: syntheticTargetPath, situation: 'unchanged', slot: [], strut: []
     }),
     createSyntheticLock: () => ({
       'thing@program': syntheticLockPath,
-      situation: exactLockSource(syntheticTargetPath), contain: [], support: []
+      situation: exactLockSource(syntheticTargetPath), slot: [], strut: []
     }),
     createJourneyTarget: () => ({
-      thing: journeyTargetPath, situation: 'unchanged', contain: [], support: []
+      thing: journeyTargetPath, situation: 'unchanged', slot: [], strut: []
     }),
     createJourneyLock: () => ({
       'thing@program': journeyLockPath,
-      situation: exactLockSource(journeyTargetPath), contain: [], support: []
+      situation: exactLockSource(journeyTargetPath), slot: [], strut: []
     }),
     world
   });

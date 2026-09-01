@@ -14,14 +14,14 @@ import {
   executeProgramExplore
 } from '../work-engine/atom-language/engine.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 const WINDOW_AGENT_SOURCE = 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","jump","lock","transform"]}})';
 
-function windowAgent(thing, contain = []) {
-  return atom(thing, WINDOW_AGENT_SOURCE, contain, 'program');
+function windowAgent(thing, slot = []) {
+  return atom(thing, WINDOW_AGENT_SOURCE, slot, 'program');
 }
 
 async function fixture(t, atoms) {
@@ -93,7 +93,7 @@ function contaminateInternalExploreSnapshot(scheduler) {
 }
 
 function childNames(atomValue) {
-  return (atomValue.contain ?? []).map((entry) => Object.entries(entry)
+  return (atomValue.slot ?? []).map((entry) => Object.entries(entry)
     .find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1]);
 }
 
@@ -111,8 +111,8 @@ test('successful jump moves the active Agent in the same authoritative commit', 
   });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(childNames(stored[0].contain[0]), ['B']);
-  assert.deepEqual(childNames(stored[0].contain[0].contain[0]), ['Window']);
+  assert.deepEqual(childNames(stored[0].slot[0]), ['B']);
+  assert.deepEqual(childNames(stored[0].slot[0].slot[0]), ['Window']);
   assert.equal(scheduler.agentSecurity.has('Root/A/Window'), false);
   assert.equal(scheduler.agentSecurity.has('Root/A/B/Window'), true);
   const restarted = createProgramRuntimeScheduler();
@@ -142,8 +142,8 @@ test('the next public exact Explore after a jump enforces the remapped active se
     Object.entries(request).map(([key, value]) => [
       key.replace(/^thing(?=$|[.@$])/u, 'name')
         .replace(/^situation(?=$|[.@$])/u, 'detail')
-        .replace(/^contain(?=$|[.@$])/u, 'children')
-        .replace(/^support(?=$|[.@$])/u, 'partners'),
+        .replace(/^slot(?=$|[.@$])/u, 'children')
+        .replace(/^strut(?=$|[.@$])/u, 'partners'),
       value
     ])
   );
@@ -197,13 +197,13 @@ test('the next public exact Explore after a jump enforces the remapped active se
   assert.equal(denied.items[0].ok, false);
 });
 
-test('public contain Explore is independent from stale internal projection axes around jump guards and moves', async (t) => {
+test('public slot Explore is independent from stale internal projection axes around jump guards and moves', async (t) => {
   for (const when of [false, true]) {
     const files = await fixture(t, fourAxisJumpWorld(when));
     const scheduler = contaminateInternalExploreSnapshot(await v1Scheduler('Root/Window'));
     const source = when
-      ? 'explore {"thing":"Root/B/Window","contain$latitude-1":true}'
-      : 'explore {"thing":"Root/Window","contain$latitude-1":true}';
+      ? 'explore {"thing":"Root/B/Window","slot$latitude-1":true}'
+      : 'explore {"thing":"Root/Window","slot$latitude-1":true}';
     const result = await executeAtomLanguage({
       source, ...files, programScheduler: scheduler,
       interaction: { agent: { ref: 'window-ref', path: 'Root/Window' } }
@@ -215,7 +215,7 @@ test('public contain Explore is independent from stale internal projection axes 
   const auditFiles = await fixture(t, fourAxisJumpWorld(false));
   const auditScheduler = contaminateInternalExploreSnapshot(await v1Scheduler('Root/Audit'));
   const audit = await executeAtomLanguage({
-    source: 'explore {"thing":"Root/Audit","contain$latitude-1":true}',
+    source: 'explore {"thing":"Root/Audit","slot$latitude-1":true}',
     ...auditFiles,
     programMode: null,
     programScheduler: auditScheduler,
@@ -267,7 +267,7 @@ test('explicit run binds a window-relative jump guard while preserving its exact
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
   assert.deepEqual(childNames(stored[0]), ['Job2']);
-  assert.deepEqual(childNames(stored[0].contain[0]), ['Window']);
+  assert.deepEqual(childNames(stored[0].slot[0]), ['Window']);
 });
 
 test('explicit jump commit persists a new passive base before later exact CLI requests', async (t) => {
@@ -594,8 +594,8 @@ test('startup projection remains readable when an existing jump registration is 
 
 test('business Graph lock denial leaves the window in place', async (t) => {
   const initial = jumpWorld();
-  const window = initial[0].contain[0].contain.find((entry) => nameOf(entry) === 'Window');
-  window.contain.unshift(atom('Blocker',
+  const window = initial[0].slot[0].slot.find((entry) => nameOf(entry) === 'Window');
+  window.slot.unshift(atom('Blocker',
     'lock({"targets":{"paths":["Root/A/B"]},"actions":["explore"],"labels":["blocked"]})',
     [], 'program'));
   const files = await fixture(t, initial);
@@ -628,7 +628,7 @@ test('recycle true removes the active window without evaluating when or where', 
   });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(childNames(stored[0].contain[0]), []);
+  assert.deepEqual(childNames(stored[0].slot[0]), []);
   assert.equal(scheduler.agentSecurity.has('Root/A/Window'), false);
   const restarted = createProgramRuntimeScheduler();
   await restarted.rebuildAgentSecurity(stored);
@@ -656,7 +656,7 @@ test('an explicit jump recycle is the only transform allowed to remove its activ
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(childNames(stored[0].contain[0]), []);
+  assert.deepEqual(childNames(stored[0].slot[0]), []);
   assert.equal(scheduler.agentSecurity.has('Root/A/Window'), false);
 });
 
@@ -700,7 +700,7 @@ test('cyclic destination and downstream failure both roll back the moved window'
       ? jumpWorld('Root/A/Window')
       : jumpWorld();
     if (mode === 'downstream') {
-      initial[0].contain.push(atom(
+      initial[0].slot.push(atom(
         'BrokenEffect',
         'transform({"thing":"Missing","situation.rep.value":None})',
         [], 'program'
@@ -718,7 +718,7 @@ test('cyclic destination and downstream failure both roll back the moved window'
   }
 });
 
-test('rebinding a scoped changed probe removes instance A and triggers only instance B without rewriting template support', async () => {
+test('rebinding a scoped changed probe removes instance A and triggers only instance B without rewriting template strut', async () => {
   const probeAgentSource = 'agent({"labels":[],"functions":{"groups":[],"names":["changed","explore","message","transform"]}})';
   const world = [atom('Root', '', [
     atom('Template', '', [], ''),
@@ -730,8 +730,8 @@ test('rebinding a scoped changed probe removes instance A and triggers only inst
       '    message({"level":"info","text":"hit"})'
     ].join('\n'), [], 'program')
   ])];
-  world[0].contain[0].support = [{ 'if@current': true, then: [{ thing: './Monitor' }] }];
-  const supportBefore = JSON.stringify(world[0].contain[0].support);
+  world[0].slot[0].strut = [{ 'if@current': true, then: [{ thing: './Monitor' }] }];
+  const strutBefore = JSON.stringify(world[0].slot[0].strut);
   const scheduler = createProgramRuntimeScheduler();
   const scopedExplore = (request, context = {}) => executeProgramExplore({
     atoms: world, request, scopeRoot: context.scopeRoot ?? null
@@ -761,5 +761,5 @@ test('rebinding a scoped changed probe removes instance A and triggers only inst
     executeExplore: scopedExplore
   });
   assert.deepEqual(hit.messages.map((entry) => entry.text), ['hit']);
-  assert.equal(JSON.stringify(world[0].contain[0].support), supportBefore);
+  assert.equal(JSON.stringify(world[0].slot[0].strut), strutBefore);
 });

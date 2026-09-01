@@ -185,7 +185,7 @@ export function validateNightWatchManifest(manifest, catalog) {
   const visited = new Set();
   const visit = (id) => {
     if (visiting.has(id)) {
-      throw manifestError('NIGHT_WATCH_DEPENDENCY_CYCLE', 'Night-watch dependencies contain a cycle', { id });
+      throw manifestError('NIGHT_WATCH_DEPENDENCY_CYCLE', 'Night-watch dependencies slot a cycle', { id });
     }
     if (visited.has(id)) return;
     visiting.add(id);

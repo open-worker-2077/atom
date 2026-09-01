@@ -5,8 +5,8 @@ import { validateRequestDrivenLockSnapshot } from '../src/atom-system/public/req
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { authorizeWindowGraphPath } from '../work-engine/atom-language/window-lock-v1.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 test('jump.lock is a retired permission ABI and is rejected before any effect', async () => {

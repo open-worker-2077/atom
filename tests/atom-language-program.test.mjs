@@ -11,9 +11,9 @@ import { TRANSFORM_COMMANDS } from '../work-engine/atom-language/transform-key-p
 import { executeProgram } from '../work-engine/atom-language/program.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], support = [], types = []) {
+function atom(thing, situation = '', slot = [], strut = [], types = []) {
   const key = `thing${types.map((type) => `@${type}`).join('')}`;
-  return { [key]: thing, situation, contain, support };
+  return { [key]: thing, situation, slot, strut };
 }
 
 function capability(name, id) {
@@ -46,7 +46,7 @@ function findAtom(atoms, name) {
     ));
     if (nameEntry?.[1] === name) return candidate;
     const childrenEntry = Object.entries(candidate).find(([key]) => (
-      key === 'contain' || key.startsWith('contain@') || key.startsWith('contain#')
+      key === 'slot' || key.startsWith('slot@') || key.startsWith('slot#')
     ));
     queue.push(...(childrenEntry?.[1] ?? []));
   }

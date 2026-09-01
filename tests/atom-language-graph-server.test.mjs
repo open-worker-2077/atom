@@ -121,18 +121,18 @@ function atomFixture() {
     {
       'thing@program': '石器工坊',
       'situation#工坊简介': '# 可核查的正文\nagent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})\ndef main(arguments):\n    return arguments',
-      contain: [{ thing: '石斧', situation: '可核查的物件', contain: [], support: [] }], support: []
+      slot: [{ thing: '石斧', situation: '可核查的物件', slot: [], strut: [] }], strut: []
     },
     {
       thing: '工坊事实',
       situation: '可核查的事实',
-      contain: [],
-      support: [{ 'if@current': true, then: [{ thing: '石器工坊/石斧' }] }]
+      slot: [],
+      strut: [{ 'if@current': true, then: [{ thing: '石器工坊/石斧' }] }]
     }
   ];
 }
 
-async function migratedLegacySupportWorld() {
+async function migratedLegacyStrutWorld() {
   const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
@@ -343,8 +343,8 @@ test('graph server initializes the projection, serves the full UI health and Gra
   assert.equal(graphResponse.status, 200);
   const graph = await graphResponse.json();
   assert.equal(graph.graph.thing, 'atom.json');
-  assert.equal(graph.graph.contain[0]['thing@program'], '石器工坊');
-  assert.match(graph.graph.contain[0]['situation#工坊简介'], /可核查的正文/u);
+  assert.equal(graph.graph.slot[0]['thing@program'], '石器工坊');
+  assert.match(graph.graph.slot[0]['situation#工坊简介'], /可核查的正文/u);
 
   const pageResponse = await fetch(`${running.url}/`);
   assert.equal(pageResponse.status, 200);
@@ -352,7 +352,7 @@ test('graph server initializes the projection, serves the full UI health and Gra
   assert.match(await pageResponse.text(), /<canvas\b|Spatial|空间/u);
 
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), atomFixture());
-  assert.equal(JSON.parse(await fs.readFile(graphFile, 'utf8')).graph.contain[0]['thing@program'], '石器工坊');
+  assert.equal(JSON.parse(await fs.readFile(graphFile, 'utf8')).graph.slot[0]['thing@program'], '石器工坊');
   assert.equal((await fs.stat(storeFile)).isFile(), true);
   await assert.rejects(
     fs.access(path.join(directory, 'data', 'knowledge.json')),
@@ -364,9 +364,9 @@ test('graph server initializes the projection, serves the full UI health and Gra
   const state = await stateResponse.json();
   const labels = state.knowledge.nodes.map((node) => node.label);
   assert.ok(labels.includes('石器工坊'), 'atom node projects into the spatial knowledge store');
-  assert.ok(labels.includes('石斧'), 'support target projects as its own node');
+  assert.ok(labels.includes('石斧'), 'strut target projects as its own node');
   assert.equal(state.knowledge.edges.length, 1);
-  assert.equal(state.knowledge.edges[0].label, 'support');
+  assert.equal(state.knowledge.edges[0].label, 'strut');
 });
 
 test('4784 resolves an Agent selector inside the resident world instead of every CLI process', async () => {
@@ -433,7 +433,7 @@ test('graph server uses its supplied scheduler for handler and interaction Agent
 });
 
 test('deployed Agent resolution reuses the world compatibility manifest for exact explore', async (t) => {
-  const files = await migratedLegacySupportWorld();
+  const files = await migratedLegacyStrutWorld();
   const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, ...files });
   t.after(() => running.close());
   removeTemporaryDirectoryAfter(t, files.directory);
@@ -454,8 +454,8 @@ test('deployed Agent resolution reuses the world compatibility manifest for exac
   assert.equal(body.result.agent, '冰');
 });
 
-test('deployed legacy-support provenance permits a new four-axis Agent transform', async (t) => {
-  const files = await migratedLegacySupportWorld();
+test('deployed legacy-strut provenance permits a new four-axis Agent transform', async (t) => {
+  const files = await migratedLegacyStrutWorld();
   const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, ...files });
   t.after(() => running.close());
   removeTemporaryDirectoryAfter(t, files.directory);
@@ -464,7 +464,7 @@ test('deployed legacy-support provenance permits a new four-axis Agent transform
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      source: 'transform new {"thing":"冰/test/写入验收","situation":"四轴","contain":[],"support":[]}',
+      source: 'transform new {"thing":"冰/test/写入验收","situation":"四轴","slot":[],"strut":[]}',
       interaction: { id: 'trusted-legacy-agent-transform', agentSelector: '冰', agent: { path: '冰' } },
       history: []
     })
@@ -476,8 +476,8 @@ test('deployed legacy-support provenance permits a new four-axis Agent transform
   assert.equal(body.result.changed, true, JSON.stringify(body));
 });
 
-test('deployed legacy-support provenance remains valid while a new Program seals a slot body', async (t) => {
-  const files = await migratedLegacySupportWorld();
+test('deployed legacy-strut provenance remains valid while a new Program seals a slot body', async (t) => {
+  const files = await migratedLegacyStrutWorld();
   const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, ...files });
   t.after(() => running.close());
   removeTemporaryDirectoryAfter(t, files.directory);
@@ -495,7 +495,7 @@ test('deployed legacy-support provenance remains valid while a new Program seals
   };
 
   const created = await execute(
-    'transform new {"thing":"冰/test/合成槽体验收","situation":"合成验收","contain":[{"thing":"槽体","situation":"","contain":[{"thing":"候选流","situation":"","contain":[{"thing":"原文","situation":"待填写","contain":[],"support":[]},{"thing":"结论","situation":"待计算","contain":[],"support":[]}],"support":[]}],"support":[]},{"thing@program":"封装","situation":"slot_body({\\"action\\":\\"seal\\",\\"body\\":\\"冰/test/合成槽体验收/槽体\\"})","contain":[],"support":[]}],"support":[]}',
+    'transform new {"thing":"冰/test/合成槽体验收","situation":"合成验收","slot":[{"thing":"槽体","situation":"","slot":[{"thing":"候选流","situation":"","slot":[{"thing":"原文","situation":"待填写","slot":[],"strut":[]},{"thing":"结论","situation":"待计算","slot":[],"strut":[]}],"strut":[]}],"strut":[]},{"thing@program":"封装","situation":"slot_body({\\"action\\":\\"seal\\",\\"body\\":\\"冰/test/合成槽体验收/槽体\\"})","slot":[],"strut":[]}],"strut":[]}',
     'trusted-legacy-slot-create'
   );
   assert.equal(created.result.ok, true, JSON.stringify(created));
@@ -508,7 +508,7 @@ test('deployed legacy-support provenance remains valid while a new Program seals
 });
 
 test('directionless legacy relations stay inert while forged provenance is rejected', async (t) => {
-  const files = await migratedLegacySupportWorld();
+  const files = await migratedLegacyStrutWorld();
   removeTemporaryDirectoryAfter(t, files.directory);
   await assert.doesNotReject(resolveAgentContext(files.contextFile, '冰', {
     programScheduler: createProgramRuntimeScheduler({ timeoutMs: 2000 })
@@ -516,7 +516,7 @@ test('directionless legacy relations stay inert while forged provenance is rejec
   await assert.rejects(resolveAgentContext(files.contextFile, '冰', {
     compatibilityManifest: {
       ...files.compatibilityManifest,
-      legacySupport: [{ fingerprint: `sha256:${'0'.repeat(64)}`, occurrences: 1 }]
+      legacyStrut: [{ fingerprint: `sha256:${'0'.repeat(64)}`, occurrences: 1 }]
     }
   }), { code: 'GRAPH_COMPATIBILITY_PROVENANCE_MISMATCH' });
 });
@@ -715,7 +715,7 @@ test('duplicate HTTP requests with one interaction id execute one authoritative 
   });
   t.after(() => running.close());
   removeTemporaryDirectoryAfter(t, directory);
-  const request = (source = 'transform new {"thing":"Root","situation":"","contain":[],"support":[]}') => fetch(`${running.url}/__atom/api/command`, {
+  const request = (source = 'transform new {"thing":"Root","situation":"","slot":[],"strut":[]}') => fetch(`${running.url}/__atom/api/command`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({

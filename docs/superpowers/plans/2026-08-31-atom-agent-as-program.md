@@ -182,8 +182,8 @@ Create tests/atom-agent-program-runtime.test.mjs with this fixture and assertion
 
     import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-    function atom(key, name, situation = '', contain = []) {
-      return { [key]: name, situation, contain, support: [] };
+    function atom(key, name, situation = '', slot = []) {
+      return { [key]: name, situation, slot, strut: [] };
     }
 
     const agentSource = [
@@ -538,8 +538,8 @@ First change the fixture's Creator Key from program@agent to program; its existi
         source: 'transform new ' + JSON.stringify({
           'thing@program': childPath,
           situation: childSource,
-          contain: [],
-          support: []
+          slot: [],
+          strut: []
         }),
         ...files,
         programScheduler: scheduler,
@@ -740,8 +740,8 @@ Update fixtures to use:
     {
       'thing@program': 'Operator',
       situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})',
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     }
 
 Import createProgramRuntimeScheduler into tests/atom-agent-cli-contract.test.mjs and create the scheduler inside each test:
@@ -788,7 +788,7 @@ Import createProgramRuntimeScheduler in cli.mjs. Change atomEntries to receive a
           detail: storedField(atom, 'situation')?.value ?? '',
           agent: agentProgramPaths.has(atomPath)
         });
-        const children = storedField(atom, 'contain')?.value;
+        const children = storedField(atom, 'slot')?.value;
         if (Array.isArray(children)) {
           entries.push(...atomEntries(children, agentProgramPaths, pathParts, address));
         }
@@ -883,8 +883,8 @@ Create tests/atom-agent-program-migration.test.mjs with this prelude:
     import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
     import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-    function atom(key, name, situation = '', contain = []) {
-      return { [key]: name, situation, contain, support: [] };
+    function atom(key, name, situation = '', slot = []) {
+      return { [key]: name, situation, slot, strut: [] };
     }
 
     const programScheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
@@ -953,8 +953,8 @@ Then add these cases:
       assert.match(plan.facts[0].situation, /original human context/);
       assert.equal(plan.facts[1]['thing@program'], 'LegacyProgram');
       assert.equal(plan.facts[1].situation, world[1].situation);
-      assert.equal(plan.facts[2].contain[0].thing, 'ArchivedProgram');
-      assert.equal(plan.facts[2].contain[0].situation, 'archived bytes');
+      assert.equal(plan.facts[2].slot[0].thing, 'ArchivedProgram');
+      assert.equal(plan.facts[2].slot[0].situation, 'archived bytes');
       assert.deepEqual(plan.summary, {
         activePureAgentsUpgraded: 1,
         activeProgramAgentsUpgraded: 1,
@@ -1032,7 +1032,7 @@ Use parseAtomKey(rawKey, { allowRetiredAgentKey: true }) and preserve all non-ag
 - active thing@agent becomes thing@program and uses legacyAgentProgramSource so the exact old Situation remains recoverable inside the Program source;
 - active thing@program@agent loses only the agent type and preserves its Situation bytes;
 - an active Program with a missing declaration receives no inferred privileged labels or functions; if it is a pure legacy Agent, the fixed minimal explore declaration above is used; if it already contains dynamic or multiple agent calls, fail the complete plan as ambiguous;
-- inside the one typed thing@backup@default subtree, remove agent and program types and keep name, Situation, contain, support, remaining types, and description unchanged.
+- inside the one typed thing@backup@default subtree, remove agent and program types and keep name, Situation, slot, strut, remaining types, and description unchanged.
 
 Reject duplicate reconstructed keys before changing the cloned object.
 
@@ -1071,7 +1071,7 @@ Use stable codes AGENT_MIGRATION_CONFIRMATION_REQUIRED, INVALID_AGENT_MIGRATION_
 
 - [ ] **Step 6: Implement the operator entry**
 
-scripts/deploy-agent-program-world.mjs must support exactly:
+scripts/deploy-agent-program-world.mjs must strut exactly:
 
     node scripts/deploy-agent-program-world.mjs --dry-run --attempt agent-program-20260831
     node scripts/deploy-agent-program-world.mjs --apply --attempt agent-program-20260831

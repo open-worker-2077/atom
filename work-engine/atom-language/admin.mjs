@@ -26,7 +26,7 @@ function windowsIn(atoms, agentProgramPaths, parent = []) {
     if (agentProgramPaths.has(path.join('/'))) {
       result.push({ name: nameField.value, path: path.join('/') });
     }
-    const children = field(atom, 'contain')?.value;
+    const children = field(atom, 'slot')?.value;
     if (Array.isArray(children)) result.push(...windowsIn(children, agentProgramPaths, path));
   }
   return result;

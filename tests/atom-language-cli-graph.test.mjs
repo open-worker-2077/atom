@@ -93,7 +93,7 @@ function findGraphNode(document, thing) {
   while (queue.length) {
     const node = queue.shift();
     if (node.thing === thing) return node;
-    queue.push(...node.contain);
+    queue.push(...node.slot);
   }
   return null;
 }
@@ -112,7 +112,7 @@ test('the atom CLI drives a graph served from a fully isolated 4784-style store'
     projectionFile,
     'transform',
     'new',
-    '{"thing":"石器工坊","situation#工坊简介":"第一版正文","contain":[],"support":[]}'
+    '{"thing":"石器工坊","situation#工坊简介":"第一版正文","slot":[],"strut":[]}'
   ]);
   assert.equal(created.code, 0, created.stderr);
   assert.deepEqual(created.output, { 'thing~created': '石器工坊' });
@@ -170,8 +170,8 @@ test('public CLI targets an explicitly isolated command endpoint', async (t) => 
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    { 'thing@program': '🧊', situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})', contain: [], support: [] },
-    { thing: 'test', situation: 'isolated synthetic domain', contain: [], support: [] }
+    { 'thing@program': '🧊', situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})', slot: [], strut: [] },
+    { thing: 'test', situation: 'isolated synthetic domain', slot: [], strut: [] }
   ], null, 2));
   const running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
@@ -249,7 +249,7 @@ test('an explicitly registered ^ synthetic Agent proves path-lock fail-closed an
     'transform', 'new', JSON.stringify({
       'thing@program': fixture.syntheticPath,
       situation: fixture.syntheticAgentSource,
-      contain: [], support: []
+      slot: [], strut: []
     })
   ]);
   assert.equal(registered.code, 0, registered.stderr);
@@ -297,7 +297,7 @@ test('an explicitly registered ^ synthetic Agent proves path-lock fail-closed an
     'transform', 'new', JSON.stringify({
       'thing@program': fixture.overreachPath,
       situation: fixture.overreachAgentSource,
-      contain: [], support: []
+      slot: [], strut: []
     })
   ]);
   assert.notEqual(overreachCreated.code, 0, overreachCreated.stdout);
@@ -326,9 +326,9 @@ test('exact CLI Explore exposes an explicit read-only compiled-lock status witho
   const created = await runCli([
     '--context', contextFile, '--projection', projectionFile,
     'transform', 'new', JSON.stringify({
-      thing: root, situation: 'synthetic lock status contract', contain: [
-        { thing: 'Target', situation: 'unchanged', contain: [], support: [] }
-      ], support: []
+      thing: root, situation: 'synthetic lock status contract', slot: [
+        { thing: 'Target', situation: 'unchanged', slot: [], strut: [] }
+      ], strut: []
     })
   ]);
   assert.equal(created.code, 0, created.stderr);
@@ -353,10 +353,10 @@ test('exact CLI Explore renders lock~active for a compiled literal path lock', a
   const target = `${root}/Target`;
   const guard = `${root}/Guard`;
   await fs.writeFile(contextFile, JSON.stringify([{
-    thing: root, situation: 'synthetic active lock contract', contain: [
-      { thing: 'Target', situation: 'unchanged', contain: [], support: [] },
-      { 'thing@program': 'Guard', situation: `lock({"targets":{"paths":["${target}"],"scope":"exact"},"actions":["transform"],"labels":["^"]})`, contain: [], support: [] }
-    ], support: []
+    thing: root, situation: 'synthetic active lock contract', slot: [
+      { thing: 'Target', situation: 'unchanged', slot: [], strut: [] },
+      { 'thing@program': 'Guard', situation: `lock({"targets":{"paths":["${target}"],"scope":"exact"},"actions":["transform"],"labels":["^"]})`, slot: [], strut: [] }
+    ], strut: []
   }]), 'utf8');
   const compiledLock = { kind: 'node', path: target, actions: ['transform'], labels: ['^'], sourceProgramPath: guard };
   const executeWithCompiledLock = (options) => executeAtomLanguage({

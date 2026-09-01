@@ -83,7 +83,7 @@ test('trusted retirement replaces every legacy authority field with one strict t
   assert.deepEqual(await repository.load(), TARGET);
   const coldScheduler = createProgramRuntimeScheduler({ requestDrivenLockRepository: repository });
   assert.deepEqual(await coldScheduler.activeRequestDrivenLocks([{
-    thing: 'Root', situation: '', contain: [], support: []
+    thing: 'Root', situation: '', slot: [], strut: []
   }]), []);
   assert.deepEqual(receipt.retired, {
     locks: 1, agentRegistrations: 1, windowSelfLocks: 1, windowSelfLockAgents: 1

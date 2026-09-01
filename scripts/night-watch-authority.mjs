@@ -42,7 +42,7 @@ export function validateNightWatchAuthorityReceipt(receipt, options = {}) {
   }
   for (const field of ['credentials', 'password', 'secret', 'token']) {
     if (Object.hasOwn(receipt, field)) {
-      throw authorityError('NIGHT_WATCH_AUTHORITY_SENSITIVE_FIELD', 'Night-watch authority receipt must not contain sensitive material', { field });
+      throw authorityError('NIGHT_WATCH_AUTHORITY_SENSITIVE_FIELD', 'Night-watch authority receipt must not slot sensitive material', { field });
     }
   }
 

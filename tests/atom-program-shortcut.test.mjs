@@ -23,12 +23,12 @@ import {
   shortcutMetadata
 } from '../work-engine/atom-language/shortcut-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], types = []) {
+function atom(thing, situation = '', slot = [], types = []) {
   return {
     [`thing${types.map((type) => `@${type}`).join('')}`]: thing,
     situation,
-    contain,
-    support: []
+    slot,
+    strut: []
   };
 }
 
@@ -54,7 +54,7 @@ function findAtom(atoms, exactPath) {
       (key === 'thing' || key.startsWith('thing@') || key.startsWith('thing#')) && value === part
     )));
     if (!current) return null;
-    children = current.contain;
+    children = current.slot;
   }
   return current;
 }
@@ -62,7 +62,7 @@ function findAtom(atoms, exactPath) {
 function creatorSource(targetPath, shortcutName) {
   return [
     `target = explore({"thing":${JSON.stringify(targetPath)}})[0]`,
-    `shortcut({"placement":"contain","thing":${JSON.stringify(shortcutName)},"target":target})`
+    `shortcut({"placement":"slot","thing":${JSON.stringify(shortcutName)},"target":target})`
   ].join('\n');
 }
 
@@ -75,7 +75,7 @@ function deleteShortcutSource(shortcutPath) {
 
 function deleteShortcutFromParentSource(parentPath) {
   return [
-    `rows = explore({"thing":${JSON.stringify(parentPath)},"contain$latitude-1":True})`,
+    `rows = explore({"thing":${JSON.stringify(parentPath)},"slot$latitude-1":True})`,
     'resolved = [row for row in rows if row.shortcut_reference is not None][0]',
     'shortcut({"action":"delete","reference":resolved.shortcut_reference})'
   ].join('\n');
@@ -108,7 +108,7 @@ test('exact Graph-JSON exposes the resolved target with stable shortcut audit me
     atom('备份', '', [], ['backup', 'default'])
   ]);
   const atoms = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  findAtom(atoms, '引用域/创建引用').contain.push(createShortcutAtom({
+  findAtom(atoms, '引用域/创建引用').slot.push(createShortcutAtom({
     thing: '常用入口',
     targetPath: '目标域/权威 Thing',
     referenceId: 'shortcut-audit-id'
@@ -125,19 +125,19 @@ test('exact Graph-JSON exposes the resolved target with stable shortcut audit me
   assert.deepEqual(explored.output['shortcut~resolved'], {
     identity: 'shortcut-audit-id',
     thing: '常用入口',
-    placement: 'contain',
+    placement: 'slot',
     path: '引用域/创建引用/常用入口'
   });
 });
 
-test('a parent Graph-JSON contain projection keeps its shortcut as one direct auditable member', async (t) => {
+test('a parent Graph-JSON slot projection keeps its shortcut as one direct auditable member', async (t) => {
   const files = await fixture(t, [
     atom('目标域', '', [atom('权威 Thing', '唯一正文')]),
     atom('引用域', '', [program('创建引用', '')]),
     atom('备份', '', [], ['backup', 'default'])
   ]);
   const atoms = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  findAtom(atoms, '引用域/创建引用').contain.push(createShortcutAtom({
+  findAtom(atoms, '引用域/创建引用').slot.push(createShortcutAtom({
     thing: '常用入口',
     targetPath: '目标域/权威 Thing',
     referenceId: 'shortcut-member-id'
@@ -145,18 +145,18 @@ test('a parent Graph-JSON contain projection keeps its shortcut as one direct au
   await fs.writeFile(files.contextFile, `${JSON.stringify(atoms, null, 2)}\n`, 'utf8');
 
   const explored = await runCli(files, [
-    'explore', '{"thing":"引用域/创建引用","contain$latitude-1","situation$full"}'
+    'explore', '{"thing":"引用域/创建引用","slot$latitude-1","situation$full"}'
   ]);
 
   assert.equal(explored.code, 0, explored.stderr);
   assert.equal(explored.output['thing@program'], '创建引用');
-  assert.equal(explored.output.contain.length, 1);
-  assert.equal(explored.output.contain[0].thing, '权威 Thing');
-  assert.equal(explored.output.contain[0].situation, '唯一正文');
-  assert.deepEqual(explored.output.contain[0]['shortcut~resolved'], {
+  assert.equal(explored.output.slot.length, 1);
+  assert.equal(explored.output.slot[0].thing, '权威 Thing');
+  assert.equal(explored.output.slot[0].situation, '唯一正文');
+  assert.deepEqual(explored.output.slot[0]['shortcut~resolved'], {
     identity: 'shortcut-member-id',
     thing: '常用入口',
-    placement: 'contain',
+    placement: 'slot',
     path: '引用域/创建引用/常用入口'
   });
 });
@@ -181,11 +181,11 @@ test('shortcut() creates one owner-local reference without copying target facts 
   const target = findAtom(persisted, '目标域/权威 Thing');
   const shortcut = findAtom(persisted, '引用域/创建引用/常用入口');
   assert.equal(target.situation, '唯一正文');
-  assert.equal(target.contain.length, 1);
+  assert.equal(target.slot.length, 1);
   assert.ok(shortcut);
   assert.equal(shortcut.situation.includes('唯一正文'), false);
-  assert.deepEqual(shortcut.contain, []);
-  assert.deepEqual(shortcut.support, []);
+  assert.deepEqual(shortcut.slot, []);
+  assert.deepEqual(shortcut.strut, []);
 
   const explored = await executeAtomLanguage({
     ...files,
@@ -197,14 +197,14 @@ test('shortcut() creates one owner-local reference without copying target facts 
   assert.equal(explored.items[0].matches[0].situation, '唯一正文');
   assert.deepEqual(explored.items[0].matches[0].resolvedThroughShortcut, {
     identity: shortcutMetadata(shortcut).referenceId,
-    placement: 'contain',
+    placement: 'slot',
     path: '引用域/创建引用/常用入口',
     thing: '常用入口'
   });
 
   const ordinary = await executeAtomLanguage({
     ...files,
-    source: 'explore {"thing":"引用域/创建引用","contain$latitude-1","situation$full"}'
+    source: 'explore {"thing":"引用域/创建引用","slot$latitude-1","situation$full"}'
   });
   assert.equal(ordinary.ok, true, JSON.stringify(ordinary.errors));
   const ordinaryShortcut = ordinary.items[0].matches.find((match) => (
@@ -332,7 +332,7 @@ test('shortcut creation requires an opaque exact ThingCoordinate and never accep
   const files = await fixture(t, [
     atom('目标'),
     atom('引用域', '', [program('坏创建', [
-      'shortcut({"placement":"contain","thing":"入口","target":"目标"})'
+      'shortcut({"placement":"slot","thing":"入口","target":"目标"})'
     ].join('\n'))])
   ]);
   const result = await executeAtomLanguage({
@@ -392,7 +392,7 @@ test('shortcut creation checks target read and placement write through one suppl
   const denied = await applyShortcutEffect({
     atoms,
     effect: {
-      placement: 'contain', thing: '入口', targetPath: '目标', targetRef: 'coordinate-ref',
+      placement: 'slot', thing: '入口', targetPath: '目标', targetRef: 'coordinate-ref',
       sourceProgramPath: '创建器'
     },
     authorize: async (match, operation, field) => {
@@ -404,7 +404,7 @@ test('shortcut creation checks target read and placement write through one suppl
   });
   assert.equal(denied.error.code, 'SHORTCUT_TARGET_ACCESS_DENIED');
   assert.deepEqual(calls, [{ path: '目标', operation: 'read', field: 'thing' }]);
-  assert.equal(findAtom(atoms, '创建器').contain.length, 0);
+  assert.equal(findAtom(atoms, '创建器').slot.length, 0);
 });
 
 test('shortcut resolver rejects forged cycles and chains beyond the fixed maximum depth', () => {
@@ -433,7 +433,7 @@ test('public Transform cannot forge shortcut persistence or redirect a write thr
   const files = await fixture(t, [atom('目标', '原文')]);
   const forged = await executeAtomLanguage({
     ...files,
-    source: 'transform new {"thing@shortcut":"伪造","situation":"{}","contain":[],"support":[]}'
+    source: 'transform new {"thing@shortcut":"伪造","situation":"{}","slot":[],"strut":[]}'
   });
   assert.equal(forged.ok, false);
   assert.equal(forged.errors[0].code, 'SHORTCUT_PERSISTENCE_FORGERY_DENIED');
@@ -465,7 +465,7 @@ test('public Transform cannot forge shortcut persistence or redirect a write thr
   const effect = await applyShortcutEffect({
     atoms,
     effect: {
-      placement: 'contain', thing: '入口', targetPath: '目标', targetRef: 'coordinate-ref',
+      placement: 'slot', thing: '入口', targetPath: '目标', targetRef: 'coordinate-ref',
       sourceProgramPath: '创建器'
     },
     authorize: async () => ({ decision: 'allow' })
@@ -513,7 +513,7 @@ test('shortcut persistence survives a cold read and rolls back with the authorit
 test('shortcut delete removes only the reference while preserving target facts and both Programs', async (t) => {
   const target = atom('权威目标', '目标正文', [atom('目标子项')]);
   const creator = program('创建引用', 'created = True');
-  creator.contain.push(createShortcutAtom({
+  creator.slot.push(createShortcutAtom({
     thing: '待删入口', targetPath: '权威目标', referenceId: 'delete-reference-id'
   }));
   const deleter = program('删除引用', deleteShortcutSource('创建引用/待删入口'));
@@ -546,7 +546,7 @@ test('shortcut delete rejects strings and target coordinates without changing an
     ].join('\n'))
   ];
   const creator = program('创建引用', 'created = True');
-  creator.contain.push(createShortcutAtom({
+  creator.slot.push(createShortcutAtom({
     thing: '入口', targetPath: '权威目标', referenceId: 'protected-reference-id'
   }));
   const before = [atom('权威目标', '不可改变'), creator, ...programs];
@@ -569,7 +569,7 @@ test('shortcut delete rejects strings and target coordinates without changing an
 
 test('shortcut delete rejects unknown, denied, and repeated reference effects without extra mutation', async () => {
   const creator = program('创建引用', 'created = True');
-  creator.contain.push(createShortcutAtom({
+  creator.slot.push(createShortcutAtom({
     thing: '入口', targetPath: '权威目标', referenceId: 'stable-delete-id'
   }));
   const atoms = [atom('权威目标', '不可改变'), creator, program('删除器', 'deleted = True')];
@@ -614,7 +614,7 @@ test('shortcut delete rejects unknown, denied, and repeated reference effects wi
 
 test('shortcut delete leaves the authoritative world unchanged when its central commit fails', async (t) => {
   const creator = program('创建引用', 'created = True');
-  creator.contain.push(createShortcutAtom({
+  creator.slot.push(createShortcutAtom({
     thing: '入口', targetPath: '权威目标', referenceId: 'rollback-delete-id'
   }));
   const before = [

@@ -9,8 +9,8 @@ import { createJsonProgramProjectionRepository } from '../src/atom-system/adapte
 import { createLegacyRuntimeComposition } from '../src/atom-system/adapters/legacy-runtime-composition.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 function pythonLiteral(value) {
@@ -25,7 +25,7 @@ function findAtom(atoms, expectedPath, parentPath = []) {
     const thing = Object.entries(current).find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1];
     const currentPath = [...parentPath, thing];
     if (currentPath.join('/') === expectedPath) return current;
-    const nested = findAtom(current.contain ?? [], expectedPath, currentPath);
+    const nested = findAtom(current.slot ?? [], expectedPath, currentPath);
     if (nested) return nested;
   }
   return null;
@@ -70,7 +70,7 @@ async function execute({ files, action, id }) {
   });
 }
 
-for (const kind of ['node', 'contain']) {
+for (const kind of ['node', 'slot']) {
   for (const lockedAction of ['explore', 'transform']) {
     test(`${kind} ${lockedAction} label lock denies an unlabelled Agent before disclosure or mutation`, async (t) => {
       const files = await fixture(t, { kind, action: lockedAction, held: false });

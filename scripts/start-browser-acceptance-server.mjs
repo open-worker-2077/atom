@@ -6,16 +6,16 @@ import path from 'node:path';
 
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 
-function atom(thing, situation = '', contain = [], type = '', targets = []) {
+function atom(thing, situation = '', slot = [], type = '', targets = []) {
   const agentProgram = type === 'agent';
   const storedType = agentProgram ? 'program' : type;
   const storedSituation = agentProgram
     ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\nagent({"labels":[],"functions":{"groups":[],"names":["agent","explore","jump","lock","message","shortcut","slot_body","transform","use_program"]}})`
     : situation;
-  const support = targets.length
+  const strut = targets.length
     ? [{ 'if@current': true, then: targets.map((target) => ({ thing: target })) }]
     : [];
-  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, contain, support };
+  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, slot, strut };
 }
 
 const requestedPort = Number(process.argv[2] || 4796);
@@ -59,8 +59,8 @@ await fs.writeFile(contextFile, JSON.stringify([
   ]),
   atom('🧊manage', '脱敏同构管理域', [
     atom('工务', '', [
-      atom('work', '待移动的 contain 子树', [atom('test', '子树守恒哨兵')]),
-      atom('回滚work', '待验证权威失败回滚的 contain 子树', [atom('回滚test', '原子回滚守恒哨兵')])
+      atom('work', '待移动的 slot 子树', [atom('test', '子树守恒哨兵')]),
+      atom('回滚work', '待验证权威失败回滚的 slot 子树', [atom('回滚test', '原子回滚守恒哨兵')])
     ]),
     atom('办包', '', [
       atom('究谋', '', [

@@ -80,7 +80,7 @@ test('daily CLI requires one declared Agent Program origin and rejects retired s
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    { 'thing@program': 'Work Agent', situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})', contain: [], support: [] }
+    { 'thing@program': 'Work Agent', situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})', slot: [], strut: [] }
   ]));
   const stdout = output();
   const stderr = output();
@@ -131,8 +131,8 @@ test('maintenance session issuance accepts only exact unique declared Agent Prog
   const contextFile = path.join(directory, 'atom.json');
   const sessionsDirectory = path.join(directory, 'sessions');
   await fs.writeFile(contextFile, `${JSON.stringify([
-    { 'thing@program': 'Work Agent', situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})', contain: [], support: [] },
-    { 'thing@program': 'Ordinary Program', situation: 'value = 1', contain: [], support: [] }
+    { 'thing@program': 'Work Agent', situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})', slot: [], strut: [] },
+    { 'thing@program': 'Ordinary Program', situation: 'value = 1', slot: [], strut: [] }
   ])}\n`);
 
   const programScheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });

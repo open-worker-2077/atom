@@ -76,11 +76,11 @@ export function createActionRegistry() {
   registry.register('situation', 'full');
   registry.register('situation', 'lock');
   for (const name of ['latitude', 'longitude']) {
-    registry.register('contain', name, { parameter: 'integer' });
+    registry.register('slot', name, { parameter: 'integer' });
   }
   for (const name of ['up', 'down', 'prev', 'next']) {
-    registry.register('contain', name, { parameter: 'retiredRoute' });
+    registry.register('slot', name, { parameter: 'retiredRoute' });
   }
-  registry.register('support', 'hop', { parameter: 'retiredRoute' });
+  registry.register('strut', 'hop', { parameter: 'retiredRoute' });
   return registry;
 }

@@ -116,7 +116,7 @@
     };
   }
 
-  function supportBundles(clauses, options) {
+  function strutBundles(clauses, options) {
     var junctionRatio = Number(options && options.junctionRatio);
     var visiblePaths = options && options.visiblePaths;
     var hasVisiblePath = visiblePaths && typeof visiblePaths.has === 'function'
@@ -232,7 +232,7 @@
     });
   }
 
-  function supportBundleGeometry(bundle, points, options) {
+  function strutBundleGeometry(bundle, points, options) {
     if (!isNode(bundle) || typeof bundle.id !== 'string') return null;
     var pointFor = typeof points === 'function'
       ? points
@@ -1219,8 +1219,8 @@
     toggleFieldChildren: toggleFieldChildren,
     descendantPortalId: descendantPortalId,
     visiblePortalRelationship: visiblePortalRelationship,
-    supportBundles: supportBundles,
-    supportBundleGeometry: supportBundleGeometry,
+    strutBundles: strutBundles,
+    strutBundleGeometry: strutBundleGeometry,
     hydrateNodePath: hydrateNodePath,
     restoreRevealedNodes: restoreRevealedNodes,
     resetSnapshotNodeState: resetSnapshotNodeState,

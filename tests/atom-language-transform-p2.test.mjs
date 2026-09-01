@@ -10,11 +10,11 @@ import {
   shortcutMetadata
 } from '../work-engine/atom-language/shortcut-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], support = []) {
-  const normalizedSupport = support.length && support.every((item) => Object.keys(item).length === 1 && item.thing)
-    ? [{ 'if@current': true, then: support }]
-    : support;
-  return { thing, situation, contain, support: normalizedSupport };
+function atom(thing, situation = '', slot = [], strut = []) {
+  const normalizedStrut = strut.length && strut.every((item) => Object.keys(item).length === 1 && item.thing)
+    ? [{ 'if@current': true, then: strut }]
+    : strut;
+  return { thing, situation, slot, strut: normalizedStrut };
 }
 
 async function fixture(t, atoms) {
@@ -43,9 +43,9 @@ function namedField(atomValue, baseKey) {
 }
 
 function findByPath(atoms, selector) {
-  let current = { contain: atoms };
+  let current = { slot: atoms };
   for (const segment of selector.split('/')) {
-    current = namedField(current, 'contain')
+    current = namedField(current, 'slot')
       .find((candidate) => namedField(candidate, 'thing') === segment);
     if (!current) return null;
   }
@@ -53,7 +53,7 @@ function findByPath(atoms, selector) {
 }
 
 function partnersOf(atomValue) {
-  return namedField(atomValue, 'support').flatMap((rule) => rule.then ?? []);
+  return namedField(atomValue, 'strut').flatMap((rule) => rule.then ?? []);
 }
 
 test('complete Atom paths precisely select duplicate names', async (t) => {
@@ -100,7 +100,7 @@ test('rename preserves sibling and cross-tree partner targets', async (t) => {
   assert.equal(partnersOf(findByPath(atoms, '乙/跨树来源'))[0].thing, '甲/新目标');
   const projection = JSON.parse(await fs.readFile(files.projectionFile, 'utf8'));
   assert.equal(
-    projection.graph.contain[1].contain[1].support[0].then[0].thing,
+    projection.graph.slot[1].slot[1].strut[0].then[0].thing,
     'atom.json/甲/新目标'
   );
 });
@@ -147,8 +147,8 @@ test('discard and restore keep external relations bound to the same Atom', async
     {
       'thing@backup@default': '默认备份仓',
       situation: '',
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     }
   ]);
   const discarded = await execute(files, 'transform {"thing.dsc.":"甲/目标"}');
@@ -168,7 +168,7 @@ test('discard and restore keep external relations bound to the same Atom', async
   assert.equal(partnersOf(findByPath(atoms, '来源'))[0].thing, '甲/目标');
 });
 
-test('restore recovers a discarded subtree with support and shortcut references intact', async (t) => {
+test('restore recovers a discarded subtree with strut and shortcut references intact', async (t) => {
   const files = await fixture(t, [
     atom('Synthetic East', '', [
       atom('Duplicate', 'payload', [atom('Leaf', 'nested')], [{ thing: 'Leaf' }])
@@ -182,8 +182,8 @@ test('restore recovers a discarded subtree with support and shortcut references 
     {
       'thing@backup@default': 'Synthetic Backup',
       situation: '',
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     }
   ]);
 

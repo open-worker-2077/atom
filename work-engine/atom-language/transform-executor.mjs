@@ -81,7 +81,7 @@ function walkAtoms(atoms) {
       path: [...pathParts, name]
     };
     result.push(match);
-    const children = storedField(atom, 'contain')?.value;
+    const children = storedField(atom, 'slot')?.value;
     if (Array.isArray(children)) {
       children.forEach((child, childIndex) => (
         visit(child, match, childIndex, match.path)
@@ -143,7 +143,7 @@ function rewriteProgramPathReferences(atoms, pathChanges, preparedMatches = null
   return changedPaths;
 }
 
-function supportLookup(matches) {
+function strutLookup(matches) {
   const byPath = new Map();
   const byName = new Map();
   for (const match of matches) {
@@ -156,12 +156,12 @@ function supportLookup(matches) {
   return { byPath, byName };
 }
 
-function supportTarget(source, selector, matches, rootName, lookup = null) {
+function strutTarget(source, selector, matches, rootName, lookup = null) {
   if (typeof selector !== 'string' || !selector) return null;
   const normalized = rootName && selector.startsWith(`${rootName}/`)
     ? selector.slice(rootName.length + 1)
     : selector;
-  const { byPath, byName } = lookup ?? supportLookup(matches);
+  const { byPath, byName } = lookup ?? strutLookup(matches);
   if (normalized.includes('/')) return byPath.get(normalized) ?? null;
   const siblingPath = [...source.path.slice(0, -1), normalized].join('/');
   const sibling = byPath.get(siblingPath);
@@ -176,7 +176,7 @@ function supportTarget(source, selector, matches, rootName, lookup = null) {
   return named.length === 1 ? named[0] : null;
 }
 
-function supportSelectorRefs(rules) {
+function strutSelectorRefs(rules) {
   const refs = [];
   function visitExpr(expr, locator) {
     if (!expr || typeof expr !== 'object' || Array.isArray(expr)) return;
@@ -208,23 +208,23 @@ function valueAtLocator(value, locator) {
   return locator.reduce((current, part) => current?.[part], value);
 }
 
-function supportSelectorValue(selectorObject) {
+function strutSelectorValue(selectorObject) {
   return selectorObject?.thing ?? selectorObject?.['thing@program'];
 }
 
-function setSupportSelectorValue(selectorObject, value) {
+function setStrutSelectorValue(selectorObject, value) {
   selectorObject[Object.hasOwn(selectorObject, 'thing@program') ? 'thing@program' : 'thing'] = value;
 }
 
 function capturePartnerBindings(atoms, rootName, relevance = null, preparedMatches = null) {
   const matches = preparedMatches ?? walkAtoms(atoms);
-  const lookup = supportLookup(matches);
+  const lookup = strutLookup(matches);
   const bindings = [];
   for (const source of matches) {
-    const partners = storedField(source.atom, 'support')?.value;
+    const partners = storedField(source.atom, 'strut')?.value;
     if (!Array.isArray(partners)) continue;
-    supportSelectorRefs(partners).forEach(({ selectorObject, locator }) => {
-      const selector = supportSelectorValue(selectorObject);
+    strutSelectorRefs(partners).forEach(({ selectorObject, locator }) => {
+      const selector = strutSelectorValue(selectorObject);
       const normalized = rootName && selector.startsWith(`${rootName}/`)
         ? selector.slice(rootName.length + 1)
         : selector;
@@ -232,7 +232,7 @@ function capturePartnerBindings(atoms, rootName, relevance = null, preparedMatch
       if (relevance
         && !relevance.atoms.has(source.atom)
         && !relevance.names.has(selectorName)) return;
-      const target = supportTarget(source, selector, matches, rootName, lookup);
+      const target = strutTarget(source, selector, matches, rootName, lookup);
       if (!target) return;
       if (relevance
         && !relevance.atoms.has(source.atom)
@@ -261,17 +261,17 @@ function canonicalPartnerObject(source, target, matches, explicitPath, byName = 
 
 function rewritePartnerBindings(atoms, bindings, preparedMatches = null) {
   const matches = preparedMatches ?? walkAtoms(atoms);
-  const lookup = supportLookup(matches);
+  const lookup = strutLookup(matches);
   const byAtom = new Map(matches.map((match) => [match.atom, match]));
   const changedPaths = new Set();
   for (const binding of bindings) {
     const source = byAtom.get(binding.sourceAtom);
     const target = byAtom.get(binding.targetAtom);
     if (!source || !target) continue;
-    const partners = storedField(source.atom, 'support')?.value;
+    const partners = storedField(source.atom, 'strut')?.value;
     if (!Array.isArray(partners)) continue;
     if (valueAtLocator(partners, binding.locator) !== binding.selectorObject) continue;
-    const before = supportSelectorValue(binding.selectorObject);
+    const before = strutSelectorValue(binding.selectorObject);
     const after = canonicalPartnerObject(
       source,
       target,
@@ -279,7 +279,7 @@ function rewritePartnerBindings(atoms, bindings, preparedMatches = null) {
       binding.explicitPath,
       lookup.byName
     );
-    setSupportSelectorValue(binding.selectorObject, after);
+    setStrutSelectorValue(binding.selectorObject, after);
     if (before !== after) changedPaths.add(source.path.join('/'));
   }
   return [...changedPaths].sort();
@@ -319,7 +319,7 @@ function copiedBindings(bindings, mapping) {
     .filter((binding) => mapping.has(binding.sourceAtom))
     .map((binding) => {
       const sourceAtom = mapping.get(binding.sourceAtom);
-      const partners = storedField(sourceAtom, 'support')?.value;
+      const partners = storedField(sourceAtom, 'strut')?.value;
       return {
         ...binding,
         sourceAtom,
@@ -371,9 +371,9 @@ function copyAtomAncestry(atoms, match) {
       path: [...original.path]
     };
     if (index < ancestry.length - 1) {
-      const contain = storedField(original.atom, 'contain');
-      const copiedChildren = contain.value.slice();
-      copiedAtom[contain.rawKey] = copiedChildren;
+      const slot = storedField(original.atom, 'slot');
+      const copiedChildren = slot.value.slice();
+      copiedAtom[slot.rawKey] = copiedChildren;
       container = copiedChildren;
     }
     parent = copiedMatch;
@@ -381,11 +381,11 @@ function copyAtomAncestry(atoms, match) {
   return { atoms: nextAtoms, match: copiedMatch };
 }
 
-function copyNonContainState(atom) {
+function copyNonSlotState(atom) {
   const state = {};
   for (const [rawKey, value] of Object.entries(atom)) {
     const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
-    if (parsed.baseKey !== 'contain') state[rawKey] = structuredClone(value);
+    if (parsed.baseKey !== 'slot') state[rawKey] = structuredClone(value);
   }
   return state;
 }
@@ -399,11 +399,11 @@ function captureSubtreeBindings(sourceAtom, sourcePath) {
   }));
   const bindings = [];
   for (const source of matches) {
-    const partners = storedField(source.atom, 'support')?.value;
+    const partners = storedField(source.atom, 'strut')?.value;
     if (!Array.isArray(partners)) continue;
-    supportSelectorRefs(partners).forEach(({ selectorObject, locator }) => {
-      const selector = supportSelectorValue(selectorObject);
-      const target = supportTarget(source, selector, matches, null);
+    strutSelectorRefs(partners).forEach(({ selectorObject, locator }) => {
+      const selector = strutSelectorValue(selectorObject);
+      const target = strutTarget(source, selector, matches, null);
       if (!target) return;
       bindings.push({
         sourceAtom: source.atom,
@@ -423,11 +423,11 @@ function rewriteCopiedSubtreeBindings(clone, mapping, bindings, destinationPath)
     const source = byAtom.get(mapping.get(binding.sourceAtom));
     const target = byAtom.get(mapping.get(binding.targetAtom));
     if (!source || !target) continue;
-    const partners = storedField(source.atom, 'support')?.value;
+    const partners = storedField(source.atom, 'strut')?.value;
     const selectorObject = Array.isArray(partners) ? valueAtLocator(partners, binding.locator) : null;
     if (!selectorObject) continue;
     const sameParent = source.parent === target.parent;
-    setSupportSelectorValue(selectorObject, !binding.explicitPath && sameParent
+    setStrutSelectorValue(selectorObject, !binding.explicitPath && sameParent
       ? storedField(target.atom, 'thing')?.value
       : [destinationPath, ...target.path].join('/'));
   }
@@ -487,7 +487,7 @@ export function createExactTransformIndex(atoms) {
 
 export function transformChangesStructure(item) {
   return item.fields.some((field) => (
-    (field.baseKey === 'contain' && field.valuePresent)
+    (field.baseKey === 'slot' && field.valuePresent)
     || (field.baseKey === 'thing' && field.commands.some((command) => (
       ['ren', 'mov', 'cpy', 'dsc', 'rst'].includes(command.name)
     )))
@@ -506,7 +506,7 @@ export function isBatchRenameItem(item) {
 
 function containerOf(atoms, match) {
   if (!match.parent) return atoms;
-  return storedField(match.parent.atom, 'contain').value;
+  return storedField(match.parent.atom, 'slot').value;
 }
 
 function validateParameter(command, allowEmpty = false) {
@@ -679,7 +679,7 @@ export async function applyBatchRenames({
     for (const descendant of authoritativeMatches.filter((match) => (
       match.atom !== plan.match.atom && subtreeAtoms.has(match.atom)
     ))) {
-      if ((await authorize(descendant, 'write', 'contain')).decision !== 'allow') {
+      if ((await authorize(descendant, 'write', 'slot')).decision !== 'allow') {
         return {
           error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造该批量改名子树；请反馈派发方'),
           itemIndex: plan.item.index
@@ -723,7 +723,7 @@ export async function applyBatchRenames({
 }
 
 function immediateChildren(atom) {
-  const children = storedField(atom, 'contain')?.value;
+  const children = storedField(atom, 'slot')?.value;
   return Array.isArray(children) ? children : null;
 }
 
@@ -741,45 +741,45 @@ function siblingNameCollision(atoms, match, name) {
 
 function applyPartners(target, field) {
   if (field.commands.length !== 1 || field.commands[0].name !== 'rep') {
-    return diagnostic('INVALID_SUPPORT_TRANSFORM', 'support 只接受单个 .rep. 完整替换');
+    return diagnostic('INVALID_STRUT_TRANSFORM', 'strut 只接受单个 .rep. 完整替换');
   }
   if (field.commands[0].parameter !== '') {
-    return diagnostic('INVALID_SUPPORT_TRANSFORM', 'support.rep 不接受键内参数');
+    return diagnostic('INVALID_STRUT_TRANSFORM', 'strut.rep 不接受键内参数');
   }
   if (!field.valuePresent || !Array.isArray(field.value)) {
-    return diagnostic('INVALID_SUPPORT_ARRAY', 'support.rep 必须提交完整 owner-local rule 数组 Value');
+    return diagnostic('INVALID_STRUT_ARRAY', 'strut.rep 必须提交完整 owner-local rule 数组 Value');
   }
-  replaceStoredField(target, 'support', field.value);
+  replaceStoredField(target, 'strut', field.value);
   return null;
 }
 
 function applyExplicitChildren(target, field, atoms) {
   if (!field.valuePresent || !Array.isArray(field.value)) {
-    return diagnostic('INVALID_ATOM_CHILDREN', 'contain 必须提交明确 Thing 数组');
+    return diagnostic('INVALID_ATOM_CHILDREN', 'slot 必须提交明确 Thing 数组');
   }
   const children = immediateChildren(target);
-  if (!children) return diagnostic('INVALID_ATOM_CHILDREN', '目标 contain 不是数组');
+  if (!children) return diagnostic('INVALID_ATOM_CHILDREN', '目标 slot 不是数组');
 
   for (const submitted of field.value) {
     if (submitted?.kind !== 'graph-object') {
-      return diagnostic('INVALID_ATOM_CHILD', 'contain 项必须是明确 Thing 对象');
+      return diagnostic('INVALID_ATOM_CHILD', 'slot 项必须是明确 Thing 对象');
     }
     const nameField = submitted.fields.find((candidate) => candidate.baseKey === 'thing');
     if (!nameField?.valuePresent || typeof nameField.value !== 'string' || !nameField.value) {
-      return diagnostic('ATOM_NAME_REQUIRED', '明确 contain 节点必须提交 thing Value');
+      return diagnostic('ATOM_NAME_REQUIRED', '明确 slot 节点必须提交 thing Value');
     }
     const matches = children.filter((child) => (
       storedField(child, 'thing')?.value === nameField.value
     ));
     if (matches.length > 1) {
-      return diagnostic('AMBIGUOUS_ATOM_NAME', `同一 contain 中 thing 不唯一：${nameField.value}`);
+      return diagnostic('AMBIGUOUS_ATOM_NAME', `同一 slot 中 thing 不唯一：${nameField.value}`);
     }
     if (matches.length === 0) {
       const created = atomFromFields(submitted.fields);
       if (walkAtoms([created]).some((match) => isShortcutAtom(match.atom))) {
         return diagnostic('SHORTCUT_PERSISTENCE_FORGERY_DENIED', '公开 Transform 不得创建或伪造内核虚拟引用记录');
       }
-      const required = ['thing', 'situation', 'contain', 'support'];
+      const required = ['thing', 'situation', 'slot', 'strut'];
       const missing = required.filter((baseKey) => !storedField(created, baseKey));
       if (missing.length) {
         return diagnostic(
@@ -829,7 +829,7 @@ function applyFields(target, fields, atoms, options = {}) {
       if (error) return error;
       continue;
     }
-    if (field.baseKey === 'support') {
+    if (field.baseKey === 'strut') {
       if (!field.commands.length) {
         if (field.valuePresent) {
           return diagnostic(
@@ -843,7 +843,7 @@ function applyFields(target, fields, atoms, options = {}) {
       if (error) return error;
       continue;
     }
-    if (field.baseKey === 'contain' && field.valuePresent) {
+    if (field.baseKey === 'slot' && field.valuePresent) {
       const error = applyExplicitChildren(target, field, atoms);
       if (error) return error;
     }
@@ -899,9 +899,9 @@ function copyAtomClosure(atoms, matches, deepValueAtoms = new Set()) {
     mapping.set(atom, copied);
     for (const [rawKey, value] of Object.entries(atom)) {
       const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
-      if (parsed.baseKey === 'contain' && Array.isArray(value)) {
+      if (parsed.baseKey === 'slot' && Array.isArray(value)) {
         copied[rawKey] = value.map(copyAtom);
-      } else if (deepValueAtoms.has(atom) && (parsed.baseKey === 'support' || parsed.baseKey === 'situation')) {
+      } else if (deepValueAtoms.has(atom) && (parsed.baseKey === 'strut' || parsed.baseKey === 'situation')) {
         copied[rawKey] = structuredClone(value);
       }
     }
@@ -916,7 +916,7 @@ function copyAtomClosure(atoms, matches, deepValueAtoms = new Set()) {
 function remapPartnerBindings(bindings, mapping) {
   return bindings.map((binding) => {
     const sourceAtom = mapping.get(binding.sourceAtom) ?? binding.sourceAtom;
-    const partners = storedField(sourceAtom, 'support')?.value;
+    const partners = storedField(sourceAtom, 'strut')?.value;
     return {
       ...binding,
       sourceAtom,
@@ -1151,7 +1151,7 @@ export async function applyTransform({
         : resolveUnique(nextAtoms, nameField.value, canMutateInput ? exactIndex : null));
   if (selected.error) return selected;
   const selectedBefore = copiesOnlyAncestry
-    ? copyNonContainState(selected.match.atom)
+    ? copyNonSlotState(selected.match.atom)
     : JSON.stringify(selected.match.atom);
   const selectedSnapshot = canMutateInput ? structuredClone(selected.match.atom) : null;
   const rejectAfterMutation = (error) => {
@@ -1193,11 +1193,11 @@ export async function applyTransform({
   for (const field of item.fields) {
     if (field.baseKey === 'thing' && field.commands?.length) changedFields.add('thing');
     if (field.baseKey === 'situation' && (field.commands?.length || field.valuePresent)) changedFields.add('situation');
-    if (field.baseKey === 'support' && (field.commands?.length || field.valuePresent)) changedFields.add('support');
-    if (field.baseKey === 'contain' && (field.commands?.length || field.valuePresent)) changedFields.add('contain');
+    if (field.baseKey === 'strut' && (field.commands?.length || field.valuePresent)) changedFields.add('strut');
+    if (field.baseKey === 'slot' && (field.commands?.length || field.valuePresent)) changedFields.add('slot');
   }
   if (nameCommands.some((command) => ['mov', 'cpy', 'dsc', 'rst'].includes(command.name))) {
-    changedFields.add('contain');
+    changedFields.add('slot');
   }
   for (const field of changedFields) {
     if (restoresFromKernelBackup) continue;
@@ -1217,7 +1217,7 @@ export async function applyTransform({
     }
   }
   const selectedAtoms = relevantSubtree ?? new Set([selected.match.atom]);
-  const changesSubtree = rewritesPaths || changedFields.has('contain');
+  const changesSubtree = rewritesPaths || changedFields.has('slot');
   if (!restoresFromKernelBackup && changesSubtree
     && structural.operation?.command.name !== 'mov'
     && (immediateChildren(selected.match.atom)?.length ?? 0) > 0) {
@@ -1225,7 +1225,7 @@ export async function applyTransform({
     for (const descendant of walkAtoms(nextAtoms)) {
       if (descendant.atom !== selected.match.atom
         && selectedAtoms.has(descendant.atom)
-        && (await authorize(descendant, 'write', 'contain')).decision !== 'allow') {
+        && (await authorize(descendant, 'write', 'slot')).decision !== 'allow') {
         return { error: diagnostic(
           'WINDOW_ACCESS_DENIED',
           '当前窗口无权改造该子树；请反馈派发方',
@@ -1276,7 +1276,7 @@ export async function applyTransform({
     const shortcutPaths = [];
     const postMatches = error ? null : walkAtoms(nextAtoms);
     if (!error) {
-      if (changedFields.has('support')) {
+      if (changedFields.has('strut')) {
         const byAtom = new Map(postMatches.map((match) => [match.atom, match]));
         const outgoing = capturePartnerBindings(nextAtoms, rootName, null, postMatches)
           .filter((binding) => binding.sourceAtom === selected.match.atom);
@@ -1320,7 +1320,7 @@ export async function applyTransform({
           shortcutPaths,
           matches: postMatches,
           changed: copiesOnlyAncestry
-            ? !isDeepStrictEqual(copyNonContainState(selected.match.atom), selectedBefore)
+            ? !isDeepStrictEqual(copyNonSlotState(selected.match.atom), selectedBefore)
             : JSON.stringify(selected.match.atom) !== selectedBefore
         };
   }
@@ -1348,7 +1348,7 @@ export async function applyTransform({
       return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权把该料移入目标位置；请反馈派发方') };
     }
     if (!worldRootDestination && (await authorize(
-      destination.match, 'write', 'contain', { slotMaterialMove: true }
+      destination.match, 'write', 'slot', { slotMaterialMove: true }
     )).decision !== 'allow') {
       return { error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造目标位置；请反馈派发方') };
     }
@@ -1362,7 +1362,7 @@ export async function applyTransform({
       ? nextAtoms
       : immediateChildren(destination.match.atom);
     if (!destinationChildren) {
-      return { error: diagnostic('INVALID_ATOM_CHILDREN', '目标上级 contain 不是数组') };
+      return { error: diagnostic('INVALID_ATOM_CHILDREN', '目标上级 slot 不是数组') };
     }
     const excluded = command.name === 'mov'
       && target.parent?.atom === destination.match.atom

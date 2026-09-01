@@ -170,14 +170,14 @@ test('transaction history appends compact events and content-addressed snapshots
 
 test('local transaction records exact patch history without complete-world snapshot objects', async (t) => {
   const { coordinator, worldRepository, journalRepository, journalFile } = await fixture(t);
-  const initialFacts = [{ thing: 'Root', situation: '', contain: [
-    { thing: 'Target', situation: 'before', contain: [], support: [] },
-    { thing: 'Unrelated', situation: 'unchanged', contain: [], support: [] }
-  ], support: [] }];
+  const initialFacts = [{ thing: 'Root', situation: '', slot: [
+    { thing: 'Target', situation: 'before', slot: [], strut: [] },
+    { thing: 'Unrelated', situation: 'unchanged', slot: [], strut: [] }
+  ], strut: [] }];
   await writeJsonAtomically(worldRepository.file, initialFacts);
   const initial = await worldRepository.read();
   const nextFacts = structuredClone(initialFacts);
-  nextFacts[0].contain[0].situation = 'after';
+  nextFacts[0].slot[0].situation = 'after';
 
   const receipt = await coordinator.execute({
     command: command('cmd-local-patch', initial.revision),
@@ -203,14 +203,14 @@ test('local transaction records exact patch history without complete-world snaps
 
 test('rollback applies the inverse local patch without restoring an unrelated world snapshot', async (t) => {
   const { coordinator, worldRepository } = await fixture(t);
-  const initialFacts = [{ thing: 'Root', situation: '', contain: [
-    { thing: 'Target', situation: 'before', contain: [], support: [] },
-    { thing: 'Unrelated', situation: 'keep', contain: [], support: [] }
-  ], support: [] }];
+  const initialFacts = [{ thing: 'Root', situation: '', slot: [
+    { thing: 'Target', situation: 'before', slot: [], strut: [] },
+    { thing: 'Unrelated', situation: 'keep', slot: [], strut: [] }
+  ], strut: [] }];
   await writeJsonAtomically(worldRepository.file, initialFacts);
   const initial = await worldRepository.read();
   const nextFacts = structuredClone(initialFacts);
-  nextFacts[0].contain[0].situation = 'after';
+  nextFacts[0].slot[0].situation = 'after';
   const committed = await coordinator.execute({
     command: command('cmd-local-change', initial.revision),
     transition: () => ({
@@ -225,7 +225,7 @@ test('rollback applies the inverse local patch without restoring an unrelated wo
   });
 
   const externalFacts = structuredClone((await worldRepository.read()).facts);
-  externalFacts[0].contain[1].situation = 'still keep';
+  externalFacts[0].slot[1].situation = 'still keep';
   await writeJsonAtomically(worldRepository.file, externalFacts);
   const external = await worldRepository.read();
   await assert.rejects(
@@ -235,7 +235,7 @@ test('rollback applies the inverse local patch without restoring an unrelated wo
     }),
     (error) => error.code === 'ROLLBACK_WORLD_DIVERGED'
   );
-  assert.equal((await worldRepository.read()).facts[0].contain[1].situation, 'still keep');
+  assert.equal((await worldRepository.read()).facts[0].slot[1].situation, 'still keep');
 
   await writeJsonAtomically(worldRepository.file, nextFacts);
   const rolledBack = await coordinator.rollback({
@@ -243,28 +243,28 @@ test('rollback applies the inverse local patch without restoring an unrelated wo
     command: command('cmd-local-rollback', committed.afterRevision)
   });
   const restored = await worldRepository.read();
-  assert.equal(restored.facts[0].contain[0].situation, 'before');
-  assert.equal(restored.facts[0].contain[1].situation, 'keep');
+  assert.equal(restored.facts[0].slot[0].situation, 'before');
+  assert.equal(restored.facts[0].slot[1].situation, 'keep');
   assert.deepEqual(rolledBack.result.compatibilityManifest, { currentWorldRevision: 'before' });
 });
 
 test('relation and shortcut side effects share the structural patch and inverse rollback', async (t) => {
   const { coordinator, worldRepository, journalRepository } = await fixture(t);
   const initialFacts = [
-    { thing: 'Source', situation: '', contain: [], support: [
+    { thing: 'Source', situation: '', slot: [], strut: [
       { 'if@current': true, then: [{ thing: 'Tree/Target' }] }
     ] },
-    { thing: 'Tree', situation: '', contain: [
-      { thing: 'Target', situation: 'before', contain: [], support: [] }
-    ], support: [] },
+    { thing: 'Tree', situation: '', slot: [
+      { thing: 'Target', situation: 'before', slot: [], strut: [] }
+    ], strut: [] },
     { 'thing@shortcut': 'Entry', situation: JSON.stringify({
       contract: 'atom.shortcut', version: 1, referenceId: 'local-reference',
       target: { state: 'linked', path: 'Tree/Target' }
-    }), contain: [], support: [] }
+    }), slot: [], strut: [] }
   ];
   const nextFacts = structuredClone(initialFacts);
-  nextFacts[0].support[0].then[0].thing = 'Target';
-  nextFacts[1].contain[0].thing = 'Renamed';
+  nextFacts[0].strut[0].then[0].thing = 'Target';
+  nextFacts[1].slot[0].thing = 'Renamed';
   const shortcutRecord = JSON.parse(nextFacts[2].situation);
   shortcutRecord.target.path = 'Tree/Renamed';
   nextFacts[2].situation = JSON.stringify(shortcutRecord);
@@ -361,7 +361,7 @@ test('repository read does not clone facts that JSON parsing already owns', asyn
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-world-read-owned-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const worldFile = path.join(directory, 'atom.json');
-  const facts = [{ marker: 'owned-json-facts', contain: [{ value: 1 }] }];
+  const facts = [{ marker: 'owned-json-facts', slot: [{ value: 1 }] }];
   await fs.writeFile(worldFile, `${JSON.stringify(facts)}\n`, 'utf8');
   const worldRepository = createJsonWorldRepository({ file: worldFile, worldId: 'primary' });
   const originalStructuredClone = globalThis.structuredClone;
@@ -441,13 +441,13 @@ test('local patch recovery completes an interrupted prepare without snapshot obj
       }
     }
   });
-  const initialFacts = [{ thing: 'Root', situation: '', contain: [
-    { thing: 'Target', situation: 'before', contain: [], support: [] }
-  ], support: [] }];
+  const initialFacts = [{ thing: 'Root', situation: '', slot: [
+    { thing: 'Target', situation: 'before', slot: [], strut: [] }
+  ], strut: [] }];
   await writeJsonAtomically(files.worldFile, initialFacts);
   const initial = await files.worldRepository.read();
   const nextFacts = structuredClone(initialFacts);
-  nextFacts[0].contain[0].situation = 'after';
+  nextFacts[0].slot[0].situation = 'after';
 
   await assert.rejects(files.coordinator.execute({
     command: command('cmd-local-recover-before', initial.revision),
@@ -466,7 +466,7 @@ test('local patch recovery completes an interrupted prepare without snapshot obj
     journalRepository: files.journalRepository
   });
   assert.deepEqual(await restarted.recover(), { recovered: 1 });
-  assert.equal((await files.worldRepository.read()).facts[0].contain[0].situation, 'after');
+  assert.equal((await files.worldRepository.read()).facts[0].slot[0].situation, 'after');
   const committed = await files.journalRepository.findCommitted('cmd-local-recover-before');
   assert.equal(committed.historyMode, 'local-patch');
   await assert.rejects(fs.access(path.join(`${files.journalFile}.d`, 'objects')), { code: 'ENOENT' });
@@ -512,13 +512,13 @@ test('local patch recovery finalizes an interrupted committed world without appl
       }
     }
   });
-  const initialFacts = [{ thing: 'Root', situation: '', contain: [
-    { thing: 'Target', situation: 'before', contain: [], support: [] }
-  ], support: [] }];
+  const initialFacts = [{ thing: 'Root', situation: '', slot: [
+    { thing: 'Target', situation: 'before', slot: [], strut: [] }
+  ], strut: [] }];
   await writeJsonAtomically(files.worldFile, initialFacts);
   const initial = await files.worldRepository.read();
   const nextFacts = structuredClone(initialFacts);
-  nextFacts[0].contain[0].situation = 'after';
+  nextFacts[0].slot[0].situation = 'after';
 
   await assert.rejects(files.coordinator.execute({
     command: command('cmd-local-recover-after', initial.revision),
@@ -537,7 +537,7 @@ test('local patch recovery finalizes an interrupted committed world without appl
     journalRepository: files.journalRepository
   });
   assert.deepEqual(await restarted.recover(), { recovered: 1 });
-  assert.equal((await files.worldRepository.read()).facts[0].contain[0].situation, 'after');
+  assert.equal((await files.worldRepository.read()).facts[0].slot[0].situation, 'after');
   assert.equal((await files.journalRepository.readState()).receipts.length, 1);
 });
 

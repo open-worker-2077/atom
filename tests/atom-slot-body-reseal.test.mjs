@@ -4,12 +4,12 @@ import test from 'node:test';
 import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
 import { parseAtomKey } from '../work-engine/atom-language/key-parser.mjs';
 
-function atom(thing, situation = '', contain = [], support = [], types = [], description = null) {
+function atom(thing, situation = '', slot = [], strut = [], types = [], description = null) {
   return {
     [`thing${types.map((type) => `@${type}`).join('')}${description == null ? '' : `#${description}`}`]: thing,
     situation,
-    contain,
-    support
+    slot,
+    strut
   };
 }
 
@@ -22,9 +22,9 @@ function entry(value, baseKey) {
 function field(value, baseKey) { return entry(value, baseKey)?.[1]; }
 function nameOf(value) { return field(value, 'thing'); }
 function find(atoms, selector) {
-  let current = { contain: atoms };
+  let current = { slot: atoms };
   for (const segment of selector.split('/')) {
-    current = field(current, 'contain')?.find((candidate) => nameOf(candidate) === segment);
+    current = field(current, 'slot')?.find((candidate) => nameOf(candidate) === segment);
     if (!current) return null;
   }
   return current;
@@ -34,7 +34,7 @@ function setField(value, baseKey, next) {
   value[key] = next;
 }
 function revision(atoms) {
-  const records = field(find(atoms, '表单槽体/print/修订'), 'contain');
+  const records = field(find(atoms, '表单槽体/print/修订'), 'slot');
   return JSON.parse(field(records.at(-1), 'situation')).revision;
 }
 function adopted(value) {
@@ -87,7 +87,7 @@ function addNestedMaterial(atoms, instanceName, text) {
       { 'if@current': true, then: [{ thing: `${slotPath}/${instanceName}料` }] }
     ], ['material-leaf'], '料节点说明')
   ], [{ 'if@current': true, then: [{ thing: `${slotPath}/${instanceName}料/料明细` }] }], ['material'], '料根说明');
-  field(find(atoms, slotPath), 'contain').push(material);
+  field(find(atoms, slotPath), 'slot').push(material);
   return material;
 }
 
@@ -101,15 +101,15 @@ test('re-seal updates every mapped slot while preserving two nested material sub
   const model = find(atoms, '表单槽体/槽模');
   const name = find(atoms, '表单槽体/槽模/姓名');
   const group = find(atoms, '表单槽体/槽模/分组');
-  field(model, 'contain').splice(field(model, 'contain').indexOf(name), 1);
+  field(model, 'slot').splice(field(model, 'slot').indexOf(name), 1);
   setField(name, 'thing', '联系人');
   const nameKey = entry(name, 'thing')[0];
   const roleType = nameKey.split('@').find((item) => item.startsWith('slot-role-')).split('#')[0];
   delete name[nameKey];
   name[`thing@rich@${roleType}#新说明`] = '联系人';
   setField(name, 'situation', '联系人新契约');
-  field(group, 'contain').push(name);
-  field(model, 'contain').push(atom('新增槽', '新增槽契约', [], [{
+  field(group, 'slot').push(name);
+  field(model, 'slot').push(atom('新增槽', '新增槽契约', [], [{
     'if@current': true,
     if: [{ 'thing@program': '计算' }],
     then: [{ thing: '状态' }]
@@ -141,7 +141,7 @@ test('re-seal updates every mapped slot while preserving two nested material sub
 
 test('re-seal deletes an empty mapped slot from every instance', async () => {
   const atoms = await twoInstances();
-  const modelChildren = field(find(atoms, '表单槽体/槽模'), 'contain');
+  const modelChildren = field(find(atoms, '表单槽体/槽模'), 'slot');
   modelChildren.splice(modelChildren.findIndex((item) => nameOf(item) === '空备注'), 1);
 
   const result = await seal(atoms);
@@ -154,13 +154,13 @@ test('re-seal deletes an empty mapped slot from every instance', async () => {
 test('deleting a mapped slot containing local material reports exact paths and rolls back the whole seal', async () => {
   const atoms = await twoInstances();
   addNestedMaterial(atoms, '乙', '不得丢失');
-  const modelChildren = field(find(atoms, '表单槽体/槽模'), 'contain');
+  const modelChildren = field(find(atoms, '表单槽体/槽模'), 'slot');
   modelChildren.splice(modelChildren.findIndex((item) => nameOf(item) === '姓名'), 1);
   const before = structuredClone(atoms);
 
   const result = await seal(atoms, {}, { mutateInput: true });
 
-  assert.equal(result.error?.code, 'SLOT_MATERIAL_CONTAINMENT_CONFLICT');
+  assert.equal(result.error?.code, 'SLOT_MATERIAL_SLOTMENT_CONFLICT');
   assert.equal(result.error?.details.instance, '表单槽体/槽例/乙');
   assert.equal(result.error?.details.slot, '表单槽体/槽例/乙/姓名');
   assert.equal(result.error?.details.material, '表单槽体/槽例/乙/姓名/乙料');

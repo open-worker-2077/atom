@@ -43,7 +43,7 @@ def json_parse(specification):
         value = json.loads(text, parse_constant=_reject_nonstandard_json_constant)
     except json.JSONDecodeError as error:
         raise ValueError(
-            "json_parse.text must contain valid standard JSON "
+            "json_parse.text must slot valid standard JSON "
             f"(line {error.lineno}, column {error.colno})"
         ) from None
     _validate_json_value(value)
@@ -156,7 +156,7 @@ def first_pending(forms, completed_states=("已通过", "已冻结")):
     completed = set(completed_states)
     for form in forms:
         if len(form) < 2:
-            raise ValueError("Each form must contain a name and status")
+            raise ValueError("Each form must slot a name and status")
         if form[-1] not in completed:
             return form
     return None
@@ -172,12 +172,12 @@ def subtree_refs(rows, root_path):
     return [row.ref for row in rows if row.path == root_path or row.path.startswith(prefix)]
 
 
-def _atom(thing, situation="", contain=None, support=None):
+def _atom(thing, situation="", slot=None, strut=None):
     return {
         "thing": thing,
         "situation": situation,
-        "contain": list(contain or []),
-        "support": list(support or []),
+        "slot": list(slot or []),
+        "strut": list(strut or []),
     }
 
 
@@ -224,7 +224,7 @@ def plan_form_flow(rows, parent_path, standard):
 
         detail = form.get("situation", "")
         initial_status = form.get("status", "未进入")
-        routes = _normalize_support_rules(form.get("support", []))
+        routes = _normalize_strut_rules(form.get("strut", []))
         if not isinstance(detail, str) or not isinstance(initial_status, str):
             raise TypeError("Form detail and status must be strings")
 
@@ -252,18 +252,18 @@ def plan_form_flow(rows, parent_path, standard):
 
         if detail and existing_form.situation != detail:
             conflicts.append(f"{form_path}:situation")
-        if list(existing_form.support) != routes:
-            conflicts.append(f"{form_path}:support")
+        if list(existing_form.strut) != routes:
+            conflicts.append(f"{form_path}:strut")
         missing = []
         for field in desired_fields:
             field_path = _join_path(form_path, field["thing"])
             if field_path not in row_paths:
                 missing.append(_atom(field["thing"], field["situation"]))
         if missing:
-            submitted_children.append({"thing": form_name, "contain": missing})
+            submitted_children.append({"thing": form_name, "slot": missing})
 
     return {
-        "contain": submitted_children,
+        "slot": submitted_children,
         "conflicts": conflicts,
         "complete": not submitted_children and not conflicts,
     }
@@ -275,8 +275,8 @@ def _compile_atom_template(template):
     name = template.get("thing")
     detail = template.get("situation", "")
     types = template.get("types", [])
-    children = template.get("contain", [])
-    partners = template.get("support", [])
+    children = template.get("slot", [])
+    partners = template.get("strut", [])
     if not isinstance(name, str) or not name.strip():
         raise ValueError("Each Atom template requires a non-empty name")
     if not isinstance(detail, str):
@@ -297,84 +297,84 @@ def _compile_atom_template(template):
     return {
         name_key: name,
         "situation": detail,
-        "contain": [_compile_atom_template(child) for child in children],
-        "support": _normalize_support_rules(partners),
+        "slot": [_compile_atom_template(child) for child in children],
+        "strut": _normalize_strut_rules(partners),
     }
 
 
-def _normalize_support_expr(expr):
+def _normalize_strut_expr(expr):
     if not isinstance(expr, dict) or len(expr) != 1:
-        raise ValueError("support Expr requires exactly one key")
+        raise ValueError("strut Expr requires exactly one key")
     kind, value = next(iter(expr.items()))
     if kind == "satisfies":
-        raise ValueError("SUPPORT_INLINE_PROGRAM_UNSUPPORTED")
+        raise ValueError("STRUT_INLINE_PROGRAM_UNSUPPORTED")
     if kind in ("thing", "thing@program"):
         if not isinstance(value, str) or not value.strip():
-            raise ValueError("support thing requires a non-empty selector")
+            raise ValueError("strut thing requires a non-empty selector")
         if kind == "thing@program" and any(token in value for token in ("satisfies(", "lambda", "def main", "\n", "\r")):
-            raise ValueError("SUPPORT_INLINE_PROGRAM_UNSUPPORTED")
+            raise ValueError("STRUT_INLINE_PROGRAM_UNSUPPORTED")
         return {kind: value}
     if kind not in ("and", "or") or not isinstance(value, list) or len(value) < 2:
-        raise ValueError("support Expr must be thing or ordered and/or with at least two children")
-    return {kind: [_normalize_support_expr(child) for child in value]}
+        raise ValueError("strut Expr must be thing or ordered and/or with at least two children")
+    return {kind: [_normalize_strut_expr(child) for child in value]}
 
 
-def _support_expr_endpoints(expr):
+def _strut_expr_endpoints(expr):
     if "thing" in expr:
         return {expr["thing"]}
     if "thing@program" in expr:
         return set()
-    return set().union(*(_support_expr_endpoints(child)
+    return set().union(*(_strut_expr_endpoints(child)
                          for child in expr[next(iter(expr))]))
 
 
-def _normalize_support_rules(rules):
+def _normalize_strut_rules(rules):
     if not isinstance(rules, list):
-        raise TypeError("support must be an array")
+        raise TypeError("strut must be an array")
     normalized = []
     for rule in rules:
         if not isinstance(rule, dict):
-            raise TypeError("support items must be rule objects")
+            raise TypeError("strut items must be rule objects")
         unknown = set(rule) - {"if@current", "if", "then@current", "then"}
         if unknown:
-            if "satisfies" in unknown or "support@program" in unknown:
-                raise ValueError("SUPPORT_INLINE_PROGRAM_UNSUPPORTED")
-            raise ValueError("support rule contains unknown fields: " + ", ".join(sorted(unknown)))
+            if "satisfies" in unknown or "strut@program" in unknown:
+                raise ValueError("STRUT_INLINE_PROGRAM_UNSUPPORTED")
+            raise ValueError("strut rule contains unknown fields: " + ", ".join(sorted(unknown)))
         current_if = "if@current" in rule
         current_then = "then@current" in rule
         if current_if == current_then:
             raise ValueError("CURRENT_ENDPOINT_ON_BOTH_SIDES" if current_if
-                             else "SUPPORT_OWNER_CURRENT_REQUIRED")
+                             else "STRUT_OWNER_CURRENT_REQUIRED")
         marker = "if@current" if current_if else "then@current"
         if rule[marker] is not True:
             raise ValueError("INVALID_CURRENT_MODIFIER")
         antecedents = rule.get("if", [])
         consequents = rule.get("then", [])
         if not isinstance(antecedents, list) or len(antecedents) > 1:
-            raise ValueError("support if requires at most one root Expr")
+            raise ValueError("strut if requires at most one root Expr")
         if not isinstance(consequents, list):
-            raise TypeError("support then must be an array")
-        normalized_if = [_normalize_support_expr(expr) for expr in antecedents]
+            raise TypeError("strut then must be an array")
+        normalized_if = [_normalize_strut_expr(expr) for expr in antecedents]
         normalized_then = []
         for target in consequents:
             endpoint_keys = set(target) if isinstance(target, dict) else set()
             if endpoint_keys == {"thing@program"}:
-                raise ValueError("SUPPORT_FACT_CONSEQUENT_REQUIRED")
+                raise ValueError("STRUT_FACT_CONSEQUENT_REQUIRED")
             if endpoint_keys != {"thing"}:
-                raise ValueError("support then items require exactly one ordinary thing endpoint")
+                raise ValueError("strut then items require exactly one ordinary thing endpoint")
             endpoint_key = next(iter(endpoint_keys))
             endpoint_value = target[endpoint_key]
             if not isinstance(endpoint_value, str) or not endpoint_value.strip():
-                raise ValueError("support then endpoint requires a non-empty selector")
+                raise ValueError("strut then endpoint requires a non-empty selector")
             normalized_then.append({endpoint_key: endpoint_value})
         if not current_if and not normalized_if:
-            raise ValueError("MISSING_SUPPORT_ANTECEDENT")
+            raise ValueError("MISSING_STRUT_ANTECEDENT")
         if not current_then and not normalized_then:
-            raise ValueError("MISSING_SUPPORT_CONSEQUENT")
-        antecedent_count = (1 if current_if else 0) + (len(_support_expr_endpoints(normalized_if[0])) if normalized_if else 0)
+            raise ValueError("MISSING_STRUT_CONSEQUENT")
+        antecedent_count = (1 if current_if else 0) + (len(_strut_expr_endpoints(normalized_if[0])) if normalized_if else 0)
         consequent_count = (1 if current_then else 0) + len({next(iter(target.values())) for target in normalized_then})
         if antecedent_count > 1 and consequent_count > 1:
-            raise ValueError("NATIVE_MANY_TO_MANY_SUPPORT_UNSUPPORTED")
+            raise ValueError("NATIVE_MANY_TO_MANY_STRUT_UNSUPPORTED")
         normalized.append({
             **({"if@current": True} if current_if else {}),
             **({"if": normalized_if} if "if" in rule else {}),
@@ -388,7 +388,7 @@ def compile_form(specification):
     """Compile one protected Form definition to the four native Graph axes."""
     if not isinstance(specification, dict):
         raise TypeError("form() requires one JSON object argument")
-    allowed = {"thing", "situation", "contain", "support"}
+    allowed = {"thing", "situation", "slot", "strut"}
     unknown = set(specification) - allowed
     if unknown:
         raise ValueError(
@@ -396,26 +396,26 @@ def compile_form(specification):
         )
     name = specification.get("thing")
     detail = specification.get("situation", "")
-    children = specification.get("contain", [])
-    partners = specification.get("support", [])
+    children = specification.get("slot", [])
+    partners = specification.get("strut", [])
     if not isinstance(name, str) or not name.strip():
         raise ValueError("form() requires a non-empty thing")
     if not isinstance(detail, str):
         raise TypeError("form.situation must be a string")
     if not isinstance(children, list):
-        raise TypeError("form.contain must be an array")
+        raise TypeError("form.slot must be an array")
     if not isinstance(partners, list):
-        raise TypeError("form.support must be an array")
+        raise TypeError("form.strut must be an array")
     compiled_children = [compile_form(child) for child in children]
     child_names = [child["thing"] for child in compiled_children]
     if len(set(child_names)) != len(child_names):
         raise ValueError(f"form() contains duplicate child names under {name!r}")
-    normalized_partners = _normalize_support_rules(partners)
+    normalized_partners = _normalize_strut_rules(partners)
     return {
         "thing": name,
         "situation": detail,
-        "contain": compiled_children,
-        "support": normalized_partners,
+        "slot": compiled_children,
+        "strut": normalized_partners,
     }
 
 
@@ -460,7 +460,7 @@ def _normalize_form_component(component, parent_path=()):
         if (not isinstance(key_path, list) or not key_path
                 or any(not isinstance(key, str) or not key for key in key_path)):
             raise ValueError(
-                "form.evaluate requirement path must contain non-empty JSON key strings"
+                "form.evaluate requirement path must slot non-empty JSON key strings"
             )
         normalized_requirements.append({"path": list(key_path)})
     normalized_children = [
@@ -605,10 +605,10 @@ def work_order_template(title, creation_id, version="1"):
     return compile_form({
         "thing": title,
         "situation": formatted(root_detail),
-        "contain": [
-            {"thing": "Output", "situation": formatted(output_detail), "support": [{"if@current": True, "then": [{"thing": "Criteria"}]}]},
-            {"thing": "Step", "situation": formatted(step_detail), "support": [{"if@current": True, "then": [{"thing": "Output"}]}]},
-            {"thing": "Criteria", "situation": formatted(criteria_detail), "support": [
+        "slot": [
+            {"thing": "Output", "situation": formatted(output_detail), "strut": [{"if@current": True, "then": [{"thing": "Criteria"}]}]},
+            {"thing": "Step", "situation": formatted(step_detail), "strut": [{"if@current": True, "then": [{"thing": "Output"}]}]},
+            {"thing": "Criteria", "situation": formatted(criteria_detail), "strut": [
                 {"if@current": True, "then": [{"thing": "Step"}]},
             ]},
         ],
@@ -629,8 +629,8 @@ def plan_template_instance(rows, parent_path, template):
         conflicts = []
         if tuple(existing.types) != expected_types:
             conflicts.append(f"{instance_path}:types")
-        return {"contain": [], "conflicts": conflicts, "exists": True}
-    return {"contain": [compiled], "conflicts": [], "exists": False}
+        return {"slot": [], "conflicts": conflicts, "exists": True}
+    return {"slot": [compiled], "conflicts": [], "exists": False}
 
 
 def plan_shards(sources, specification):

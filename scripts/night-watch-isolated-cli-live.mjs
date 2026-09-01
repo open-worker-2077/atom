@@ -41,7 +41,7 @@ function sourceRun(pathname) {
 }
 
 function programAtom(pathname, situation) {
-  return { 'thing@program': pathname, situation, contain: [], support: [] };
+  return { 'thing@program': pathname, situation, slot: [], strut: [] };
 }
 
 function pathLockProgram(pathname, targetPath) {
@@ -177,13 +177,13 @@ async function main() {
     const programPath = `${activePath}/Program`;
     const programResultPath = `${programPath}/结果`;
     await create('program.write', agents.journey, programAtom(programPath, [
-      `transform({"thing":${JSON.stringify(programResultPath)},"situation":"program-passed","contain":[],"support":[]})`
+      `transform({"thing":${JSON.stringify(programResultPath)},"situation":"program-passed","slot":[],"strut":[]})`
     ].join('\n')));
     await read('program.read-back', agents.journey, programResultPath);
 
     const transformPath = `${activePath}/ExploreTransform`;
     await create('explore-transform.write', agents.journey, {
-      thing: transformPath, situation: 'draft', contain: [], support: []
+      thing: transformPath, situation: 'draft', slot: [], strut: []
     });
     await run('explore-transform.transform', agents.journey, sourceReplace(transformPath, 'transformed'));
     await read('explore-transform.read-back', agents.journey, transformPath);
@@ -191,7 +191,7 @@ async function main() {
     const lockedTargetPath = `${activePath}/受锁结果`;
     const lockPath = `${activePath}/路径锁`;
     await create('lock.target.write', agents.journey, {
-      thing: lockedTargetPath, situation: 'unchanged', contain: [], support: []
+      thing: lockedTargetPath, situation: 'unchanged', slot: [], strut: []
     });
     await create('lock.program.write', agents.journey, pathLockProgram(lockPath, lockedTargetPath));
     await run('lock.program.run', agents.journey, sourceRun(lockPath));
@@ -204,10 +204,10 @@ async function main() {
     const shortcutPath = `${shortcutProgramPath}/快捷入口`;
     await create('shortcut.program.write', agents.journey, programAtom(shortcutProgramPath, [
         `target = explore({"thing":${JSON.stringify(shortcutTargetPath)}})[0]`,
-        'shortcut({"placement":"contain","thing":"快捷入口","target":target})'
+        'shortcut({"placement":"slot","thing":"快捷入口","target":target})'
     ].join('\n')));
     await create('shortcut.target.write', agents.journey, {
-      thing: shortcutTargetPath, situation: 'authoritative-shortcut-target', contain: [], support: []
+      thing: shortcutTargetPath, situation: 'authoritative-shortcut-target', slot: [], strut: []
     });
     await run('shortcut.program.run', agents.journey, sourceRun(shortcutProgramPath));
     await read('shortcut.read-back', agents.journey, shortcutPath);
@@ -216,27 +216,27 @@ async function main() {
     const sealPath = `${activePath}/封装槽体`;
     const printPath = `${activePath}/打印槽例`;
     await create('slot-body.candidate.write', agents.journey, {
-      thing: bodyPath, situation: 'synthetic slot body', contain: [{
-        thing: '候选流', situation: 'candidate data flow', contain: [
+      thing: bodyPath, situation: 'synthetic slot body', slot: [{
+        thing: '候选流', situation: 'candidate data flow', slot: [
           {
-            'thing@text': '客户', situation: 'input slot contract', contain: [],
-            support: [{ 'if@current': true, then: [{ thing: '金额' }] }]
+            'thing@text': '客户', situation: 'input slot contract', slot: [],
+            strut: [{ 'if@current': true, then: [{ thing: '金额' }] }]
           },
           {
-            'thing@number': '金额', situation: 'output slot contract', contain: [],
-            support: [{
+            'thing@number': '金额', situation: 'output slot contract', slot: [],
+            strut: [{
               'if@current': true,
               if: [{ 'thing@program': '共享计算' }],
               then: [{ thing: '结果' }]
             }]
           },
-          { thing: '结果', situation: 'ordinary result fact', contain: [], support: [] },
+          { thing: '结果', situation: 'ordinary result fact', slot: [], strut: [] },
           {
             'thing@program': '共享计算',
-            situation: 'def main(arguments):\n    return True', contain: [], support: []
+            situation: 'def main(arguments):\n    return True', slot: [], strut: []
           }
-        ], support: []
-      }], support: []
+        ], strut: []
+      }], strut: []
     });
     await create('slot-body.seal-program.write', agents.journey, programAtom(sealPath, `slot_body({"action":"seal","body":${JSON.stringify(bodyPath)}})`));
     await run('slot-body.seal-program.run', agents.journey, sourceRun(sealPath));
@@ -250,7 +250,7 @@ async function main() {
     const workOrderPath = `${workOrderProgramPath}/闭环工单`;
     await create('work-order.program.write', agents.journey, programAtom(workOrderProgramPath, [
       'order_path = current_atom().path + "/闭环工单"',
-      'rows = explore({"thing": current_atom().path, "contain$latitude-1": None, "situation$full": None})',
+      'rows = explore({"thing": current_atom().path, "slot$latitude-1": None, "situation$full": None})',
       'if not any(row.path == order_path for row in rows):',
       '    work_order({"action":"create","title":"闭环工单","creation_id":"night-watch-isolated-20260829","version":"1"})',
       'else:',

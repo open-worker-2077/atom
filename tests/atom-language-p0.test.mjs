@@ -60,7 +60,7 @@ test('Graph-JSON result formatting preserves decorated and absent-Value keys', (
   assert.deepEqual(parseGraphJson(text), value);
 });
 
-test('Graph-JSON display formatting omits only explicitly empty contain and support', () => {
+test('Graph-JSON display formatting omits only explicitly empty slot and strut', () => {
   const empty = { kind: 'array', values: [] };
   const child = {
     kind: 'object',
@@ -70,23 +70,23 @@ test('Graph-JSON display formatting omits only explicitly empty contain and supp
     kind: 'object',
     entries: [
       { key: 'thing', valuePresent: true, value: '入口' },
-      { key: 'contain', valuePresent: true, value: { kind: 'array', values: [child] } },
-      { key: 'support', valuePresent: true, value: empty },
-      { key: 'contain~truncated', valuePresent: false }
+      { key: 'slot', valuePresent: true, value: { kind: 'array', values: [child] } },
+      { key: 'strut', valuePresent: true, value: empty },
+      { key: 'slot~truncated', valuePresent: false }
     ]
   };
 
-  assert.match(formatGraphJson(value), /"support": \[\]/u);
+  assert.match(formatGraphJson(value), /"strut": \[\]/u);
   const text = formatGraphJson(value, { omitEmptyStructuralArrays: true });
 
-  assert.match(text, /"contain": \[/u);
-  assert.doesNotMatch(text, /"support"/u);
-  assert.match(text, /"contain~truncated"/u);
+  assert.match(text, /"slot": \[/u);
+  assert.doesNotMatch(text, /"strut"/u);
+  assert.match(text, /"slot~truncated"/u);
   assert.deepEqual(formatGraphJson({
     kind: 'object',
     entries: [
-      { key: 'contain', valuePresent: true, value: empty },
-      { key: 'support', valuePresent: true, value: empty }
+      { key: 'slot', valuePresent: true, value: empty },
+      { key: 'strut', valuePresent: true, value: empty }
     ]
   }, { omitEmptyStructuralArrays: true }), '{}');
 });
@@ -121,7 +121,7 @@ test('2. explore recognizes the complete first-round request', () => {
     explore {
       "thing": "石器工坊",
       "situation$full",
-      "contain$latitude2$latitude-3$longitude-4$longitude4"
+      "slot$latitude2$latitude-3$longitude-4$longitude4"
     }
   `);
   assert.equal(result.ok, true);
@@ -130,7 +130,7 @@ test('2. explore recognizes the complete first-round request', () => {
   assert.equal(result.batch, false);
   assert.equal(result.items.length, 1);
   assert.deepEqual(
-    fieldByBase(result.items[0], 'contain').actions.map(({ name, parameter }) => ({ name, parameter })),
+    fieldByBase(result.items[0], 'slot').actions.map(({ name, parameter }) => ({ name, parameter })),
     [
       { name: 'latitude', parameter: 2 },
       { name: 'latitude', parameter: -3 },
@@ -151,7 +151,7 @@ test('3. explore new starts a new exploration line, not a new World', () => {
 
 test('4. ordinary strict JSON remains valid input', () => {
   const result = createAtomLanguageReceiver().receive(
-    'explore {"thing":"石器工坊","situation":null,"contain":[],"support":[]}'
+    'explore {"thing":"石器工坊","situation":null,"slot":[],"strut":[]}'
   );
   assert.equal(result.ok, true);
   assert.equal(result.items[0].fields.length, 4);
@@ -161,7 +161,7 @@ test('4. ordinary strict JSON remains valid input', () => {
 
 test('5. Graph-JSON accepts keys whose Value is absent', () => {
   const result = createAtomLanguageReceiver().receive(
-    'explore {"situation$full","contain$latitude-2"}'
+    'explore {"situation$full","slot$latitude-2"}'
   );
   assert.equal(result.ok, true);
   for (const parsed of result.items[0].fields) {
@@ -170,9 +170,9 @@ test('5. Graph-JSON accepts keys whose Value is absent', () => {
   }
 
   const nested = createAtomLanguageReceiver().receive(
-    'explore {"contain":[{"thing":"子节点","situation$full"}]}'
+    'explore {"slot":[{"thing":"子节点","situation$full"}]}'
   );
-  const nestedObject = fieldByBase(nested.items[0], 'contain').value[0];
+  const nestedObject = fieldByBase(nested.items[0], 'slot').value[0];
   assert.equal(nestedObject.kind, 'graph-object');
   const nestedDetail = fieldByBase(nestedObject, 'situation');
   assert.equal(nestedDetail.valuePresent, false);
@@ -181,19 +181,19 @@ test('5. Graph-JSON accepts keys whose Value is absent', () => {
 
 test('6. absent Value, null, empty string, and an absent key stay distinct', () => {
   const result = createAtomLanguageReceiver().receive(
-    'explore {"situation$full","thing":null,"contain":""}'
+    'explore {"situation$full","thing":null,"slot":""}'
   );
   const item = result.items[0];
   const situation = fieldByBase(item, 'situation');
   const thing = fieldByBase(item, 'thing');
-  const contain = fieldByBase(item, 'contain');
+  const slot = fieldByBase(item, 'slot');
   assert.equal(situation.valuePresent, false);
   assert.equal(Object.hasOwn(situation, 'value'), false);
   assert.equal(thing.valuePresent, true);
   assert.equal(thing.value, null);
-  assert.equal(contain.valuePresent, true);
-  assert.equal(contain.value, '');
-  assert.equal(fieldByBase(item, 'support'), undefined);
+  assert.equal(slot.valuePresent, true);
+  assert.equal(slot.value, '');
+  assert.equal(fieldByBase(item, 'strut'), undefined);
 });
 
 test('7. the first # terminates engineering-symbol execution', () => {
@@ -251,8 +251,8 @@ test('9. the left side of # is split and dispatched by @, $, and ~', () => {
 });
 
 test('10. latitude-2 becomes a signed coordinate action', () => {
-  const result = createAtomLanguageReceiver().receive('explore {"contain$latitude-2"}');
-  const action = fieldByBase(result.items[0], 'contain').actions[0];
+  const result = createAtomLanguageReceiver().receive('explore {"slot$latitude-2"}');
+  const action = fieldByBase(result.items[0], 'slot').actions[0];
   assert.equal(result.ok, true);
   assert.equal(action.name, 'latitude');
   assert.equal(action.parameter, -2);
@@ -333,8 +333,8 @@ test('16. ordinary field merging preserves existing @ type and # description', (
   const existing = {
     'thing@program': '旧窗口',
     'situation#石器工坊简介': '旧正文',
-    contain: [],
-    support: []
+    slot: [],
+    strut: []
   };
   const request = createAtomLanguageReceiver().receive(
     'explore {"thing~candidate3":"新窗口","situation":"新正文"}'
@@ -343,8 +343,8 @@ test('16. ordinary field merging preserves existing @ type and # description', (
   assert.deepEqual(merged, {
     'thing@program': '新窗口',
     'situation#石器工坊简介': '新正文',
-    contain: [],
-    support: []
+    slot: [],
+    strut: []
   });
   assert.equal(Object.keys(merged).some((key) => key.includes('~') || key.includes('$')), false);
 });
@@ -352,7 +352,7 @@ test('16. ordinary field merging preserves existing @ type and # description', (
 test('17. batch requests keep every item when one item fails', () => {
   const result = createAtomLanguageReceiver().receive(`
     explore [
-      {"thing":"工具房","contain$latitude-2"},
+      {"thing":"工具房","slot$latitude-2"},
       {"thing":"河岸","situation$invent"},
       {"thing":"石器工坊","situation$full"}
     ]
@@ -395,8 +395,8 @@ test('19. persistence defaults to atom.json while allowing contextual JSON files
   const document = {
     'thing@note': 'agent001',
     'situation#主观窗口': '严格 JSON 正文',
-    contain: [],
-    support: []
+    slot: [],
+    strut: []
   };
 
   const defaultFile = await writeAtomJson(directory, document);
@@ -415,8 +415,8 @@ test('20. the new writer rejects and never creates active world.json names', asy
   const document = {
     thing: '上下文节点',
     situation: '',
-    contain: [],
-    support: []
+    slot: [],
+    strut: []
   };
   const worldFile = path.join(directory, 'world.json');
   const legacyWorldFile = path.join(directory, 'legacy.world.json');

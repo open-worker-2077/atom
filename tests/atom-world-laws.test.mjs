@@ -12,7 +12,7 @@ import {
 import { selectCoordinateScope } from '../work-engine/atom-language/world-laws/coordinates.mjs';
 import { parseAtomKey } from '../work-engine/atom-language/key-parser.mjs';
 
-function atom(thing, situation = '', contain = [], support = [], type = '') {
+function atom(thing, situation = '', slot = [], strut = [], type = '') {
   const agentProgram = type === 'agent';
   const storedType = agentProgram ? 'program' : type;
   const storedSituation = agentProgram
@@ -21,8 +21,8 @@ function atom(thing, situation = '', contain = [], support = [], type = '') {
   return {
     [`thing${storedType ? `@${storedType}` : ''}`]: thing,
     situation: storedSituation,
-    contain,
-    support
+    slot,
+    strut
   };
 }
 
@@ -226,9 +226,9 @@ test('latitude and longitude select a concurrent union from one anchor', () => {
 });
 
 test('coordinate actions accept signed integers and retired routes explain migration', () => {
-  const latitude = parseAtomKey('contain$latitude-2');
-  const longitude = parseAtomKey('contain$longitude+3');
-  const retired = parseAtomKey('contain$up2');
+  const latitude = parseAtomKey('slot$latitude-2');
+  const longitude = parseAtomKey('slot$longitude+3');
+  const retired = parseAtomKey('slot$up2');
 
   assert.equal(latitude.errors.length, 0);
   assert.deepEqual(latitude.actions[0], {

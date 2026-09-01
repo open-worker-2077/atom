@@ -3,7 +3,20 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const RETIRED = Object.freeze({ name: 'thing', detail: 'situation', children: 'contain', partners: 'support' });
+const GRAPH_GENERATIONS = Object.freeze([
+  Object.freeze({
+    id: '1.0',
+    sourceByTarget: Object.freeze({ thing: 'name', situation: 'detail', slot: 'children', strut: 'partners' })
+  }),
+  Object.freeze({
+    id: '2.0',
+    sourceByTarget: Object.freeze({ thing: 'thing', situation: 'situation', slot: 'contain', strut: 'support' })
+  })
+]);
+const RETIRED = Object.freeze(Object.fromEntries(GRAPH_GENERATIONS.flatMap(({ sourceByTarget }) => (
+  Object.entries(sourceByTarget).map(([target, source]) => [source, target])
+))));
+const MIGRATION_INPUT_AXES = new Set([...Object.keys(RETIRED), 'slot', 'strut']);
 const tool = path.join(path.dirname(fileURLToPath(import.meta.url)), 'program-graph-abi-migration.py');
 
 function problem(code, message, details = {}) {
@@ -32,7 +45,7 @@ function fieldsOf(value, parentPath) {
   const fields = new Map();
   for (const [rawKey, fieldValue] of Object.entries(value)) {
     const base = baseKey(rawKey);
-    if (!Object.hasOwn(RETIRED, base)) {
+    if (!MIGRATION_INPUT_AXES.has(base)) {
       throw problem('UNKNOWN_LEGACY_GRAPH_FIELD', `旧 Graph 节点包含未知字段：${rawKey}`, {
         parent: parentPath.join('/'), rawKey
       });
@@ -44,14 +57,31 @@ function fieldsOf(value, parentPath) {
     }
     fields.set(base, { rawKey, value: fieldValue });
   }
-  for (const required of Object.keys(RETIRED)) {
-    if (!fields.has(required)) {
-      throw problem('MISSING_LEGACY_GRAPH_AXIS', `旧 Graph 缺少轴：${required}`, {
-        parent: parentPath.join('/'), required
+  if ((fields.has('slot') || fields.has('strut'))
+    && (fields.has('contain') || fields.has('support'))) {
+    throw problem('MIXED_GRAPH_AXIS_GENERATION', '同一持久 Atom 不得混用不同 Graph 轴世代', {
+      parent: parentPath.join('/'), fields: [...fields.keys()]
+    });
+  }
+  const generations = GRAPH_GENERATIONS.filter(({ sourceByTarget }) => (
+    Object.values(sourceByTarget).every((required) => fields.has(required))
+  ));
+  if (generations.length !== 1 || fields.size !== 4) {
+    const represented = GRAPH_GENERATIONS.filter(({ sourceByTarget }) => (
+      Object.values(sourceByTarget).some((axis) => fields.has(axis))
+    ));
+    if (represented.length > 1) {
+      throw problem('MIXED_GRAPH_AXIS_GENERATION', '同一持久 Atom 不得混用不同 Graph 轴世代', {
+        parent: parentPath.join('/'), fields: [...fields.keys()]
       });
     }
+    const generation = represented[0] ?? GRAPH_GENERATIONS[0];
+    const required = Object.values(generation.sourceByTarget).find((axis) => !fields.has(axis));
+    throw problem('MISSING_LEGACY_GRAPH_AXIS', `旧 Graph 缺少轴：${required}`, {
+      parent: parentPath.join('/'), required
+    });
   }
-  return fields;
+  return { fields, generation: generations[0] };
 }
 
 function analyzePrograms(programs, python) {
@@ -91,8 +121,8 @@ export function planGraphFourAxisMigration(root, options = {}) {
     throw problem('INVALID_GRAPH_MIGRATION_TEST_ROOT', 'Program test 分类根必须是非空 exact path');
   }
   const summary = {
-    nodes: 0, supports: 0, situationBytes: 0, paths: [], typedNodes: [],
-    supportEndpoints: [], programs: [], legacyRelations: [], legacySupportSources: [],
+    nodes: 0, struts: 0, situationBytes: 0, paths: [], typedNodes: [],
+    strutEndpoints: [], programs: [], legacyRelations: [], legacyStrutSources: [],
     blockedPrograms: [], readyToCommit: false
   };
   const seen = new Set();
@@ -100,11 +130,12 @@ export function planGraphFourAxisMigration(root, options = {}) {
   let defaultBackupPath = null;
 
   function convert(value, parentPath = []) {
-    const fields = fieldsOf(value, parentPath);
-    const thing = fields.get('name').value;
-    const situation = fields.get('detail').value;
-    const children = fields.get('children').value;
-    const partners = fields.get('partners').value;
+    const { fields, generation } = fieldsOf(value, parentPath);
+    const field = (target) => fields.get(generation.sourceByTarget[target]);
+    const thing = field('thing').value;
+    const situation = field('situation').value;
+    const children = field('slot').value;
+    const partners = field('strut').value;
     if (typeof thing !== 'string' || !thing.trim() || typeof situation !== 'string'
       || !Array.isArray(children) || !Array.isArray(partners)) {
       throw problem('INVALID_LEGACY_GRAPH_AXES', '旧 Graph 四轴类型无效', { parent: parentPath.join('/') });
@@ -113,7 +144,7 @@ export function planGraphFourAxisMigration(root, options = {}) {
     const pathText = pathParts.join('/');
     if (seen.has(pathText)) throw problem('DUPLICATE_LEGACY_GRAPH_PATH', `旧 Graph 路径重复：${pathText}`);
     seen.add(pathText);
-    const thingKey = migratedKey(fields.get('name').rawKey);
+    const thingKey = migratedKey(field('thing').rawKey);
     const types = thingKey.split('@').slice(1).map((part) => part.split('#')[0]);
     if (types.includes('backup') && types.includes('default')) {
       if (defaultBackupPath) {
@@ -123,12 +154,12 @@ export function planGraphFourAxisMigration(root, options = {}) {
       }
       defaultBackupPath = pathText;
     }
-    const situationKey = migratedKey(fields.get('detail').rawKey);
+    const situationKey = migratedKey(field('situation').rawKey);
     const converted = {
       [thingKey]: thing,
       [situationKey]: situation,
-      contain: [],
-      support: structuredClone(partners)
+      slot: [],
+      strut: structuredClone(partners)
     };
     summary.nodes += 1;
     summary.situationBytes += Buffer.byteLength(situation);
@@ -137,7 +168,8 @@ export function planGraphFourAxisMigration(root, options = {}) {
     if (types.includes('program')) {
       programs.push({ path: pathText, source: situation, converted, thingKey, situationKey });
     }
-    for (const [ordinal, partner] of partners.entries()) {
+    summary.struts += partners.length;
+    for (const [ordinal, partner] of generation.id === '1.0' ? partners.entries() : []) {
       if (!partner || typeof partner !== 'object' || Array.isArray(partner)
         || typeof partner.object !== 'string' || !partner.object.trim()
         || typeof partner.verb !== 'string') {
@@ -148,13 +180,13 @@ export function planGraphFourAxisMigration(root, options = {}) {
       summary.legacyRelations.push({ source: pathText, ordinal, verb: partner.verb, object: partner.object });
     }
     if (partners.length) {
-      summary.legacySupportSources.push({
+      summary.legacyStrutSources.push({
         path: pathText,
         fingerprint: digest(partners),
         entries: partners.length
       });
     }
-    converted.contain = children.map((child) => convert(child, pathParts));
+    converted.slot = children.map((child) => convert(child, pathParts));
     return converted;
   }
 
@@ -217,7 +249,6 @@ export function planGraphFourAxisMigration(root, options = {}) {
       disposition, reason
     });
   }
-  summary.supports = summary.legacyRelations.length;
   summary.counts = counts;
   summary.readyToCommit = summary.blockedPrograms.length === 0;
   summary.sourceFactsHash = digest(root);

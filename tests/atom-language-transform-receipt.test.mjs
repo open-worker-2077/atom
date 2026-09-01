@@ -62,16 +62,16 @@ test('Transform receipt keeps only the minimal Graph outline and never echoes lo
     JSON.stringify({
       thing: '长正文',
       situation: detail,
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     })
   ]);
 
   assert.equal(created.code, 0, created.stderr);
   assert.equal(created.stdout.includes(detail), false);
   assert.equal(created.stdout.includes('"situation"'), false);
-  assert.equal(created.stdout.includes('"contain"'), false);
-  assert.equal(created.stdout.includes('"support"'), false);
+  assert.equal(created.stdout.includes('"slot"'), false);
+  assert.equal(created.stdout.includes('"strut"'), false);
   assert.deepEqual(
     materializeGraphJson(parseGraphJson(created.stdout)),
     { 'thing~created': '长正文' }
@@ -83,12 +83,12 @@ test('discard receipt exposes the readable archive identity and exact restore co
   await fs.writeFile(files.contextFile, JSON.stringify([{
     thing: 'Synthetic Root',
     situation: '',
-    contain: [
-      { thing: 'East', situation: '', contain: [{ thing: 'Duplicate', situation: 'east', contain: [], support: [] }], support: [] },
-      { thing: 'West', situation: '', contain: [{ thing: 'Duplicate', situation: 'west', contain: [], support: [] }], support: [] },
-      { 'thing@backup@default': 'Backup', situation: '', contain: [], support: [] }
+    slot: [
+      { thing: 'East', situation: '', slot: [{ thing: 'Duplicate', situation: 'east', slot: [], strut: [] }], strut: [] },
+      { thing: 'West', situation: '', slot: [{ thing: 'Duplicate', situation: 'west', slot: [], strut: [] }], strut: [] },
+      { 'thing@backup@default': 'Backup', situation: '', slot: [], strut: [] }
     ],
-    support: []
+    strut: []
   }], null, 2));
 
   const east = await run(files, ['transform', '{"thing.dsc.":"Synthetic Root/East/Duplicate"}']);
@@ -110,7 +110,7 @@ test('--json is a compatibility alias for the same Graph-JSON result, not a mach
   await run(files, [
     'transform',
     'new',
-    '{"thing":"目标","situation":"正文","contain":[],"support":[]}'
+    '{"thing":"目标","situation":"正文","slot":[],"strut":[]}'
   ]);
   const source = ['transform', '{"thing":"目标","situation.rep.正文"}'];
   const ordinary = await run(files, source);
@@ -132,7 +132,7 @@ test('failed Transform emits no success receipt', async (t) => {
   await run(files, [
     'transform',
     'new',
-    '{"thing":"目标","situation":"正文","contain":[],"support":[]}'
+    '{"thing":"目标","situation":"正文","slot":[],"strut":[]}'
   ]);
   const failed = await run(files, [
     'transform',
@@ -165,7 +165,7 @@ test('Transform reconcile timing diagnostic is observational and contains no fac
     execute: (request) => executeRawAtomLanguage({ ...request, diagnosticRecorder: diagnostics })
   });
   const result = await worldService.executeLegacy({
-    source: 'transform new {"thing":"诊断对象","situation":"不得持久化","contain":[],"support":[]}',
+    source: 'transform new {"thing":"诊断对象","situation":"不得持久化","slot":[],"strut":[]}',
     contextFile: files.contextFile,
     projectionFile: files.projectionFile,
     interaction: { id: 'transform-stage-observational' },

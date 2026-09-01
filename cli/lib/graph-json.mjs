@@ -11,7 +11,7 @@ const CONFIG_FIELDS = new Set(['schema_version']);
 const CLAUSE_FIELDS = new Set(['if@current', 'if', 'then@current', 'then']);
 const SELECTOR_FIELDS = new Set(['thing', 'thing@program']);
 const EXPR_FIELDS = new Set(['thing', 'thing@program', 'and', 'or']);
-const NODE_AXIS_FIELDS = new Set(['thing', 'situation', 'contain', 'support']);
+const NODE_AXIS_FIELDS = new Set(['thing', 'situation', 'slot', 'strut']);
 
 function graphError(code, message, details = {}) {
   return new SpatialStoreError(code, message, details);
@@ -36,19 +36,19 @@ function requiredText(value, code, message, details = {}) {
   return value;
 }
 
-export function classifySupportCurrentEndpoints(value) {
+export function classifyStrutCurrentEndpoints(value) {
   const currentAntecedent = Object.hasOwn(value, 'if@current');
   const currentConsequent = Object.hasOwn(value, 'then@current');
   if (currentAntecedent && currentConsequent) {
     throw graphError(
       'CURRENT_ENDPOINT_ON_BOTH_SIDES',
-      'current 不得在同一 support rule 中同时属于 antecedent 与 consequent'
+      'current 不得在同一 strut rule 中同时属于 antecedent 与 consequent'
     );
   }
   if (!currentAntecedent && !currentConsequent) {
     throw graphError(
-      'SUPPORT_OWNER_CURRENT_REQUIRED',
-      '每条 support rule 必须且只能用 if@current:true 或 then@current:true 声明承载 Thing'
+      'STRUT_OWNER_CURRENT_REQUIRED',
+      '每条 strut rule 必须且只能用 if@current:true 或 then@current:true 声明承载 Thing'
     );
   }
   return { currentAntecedent, currentConsequent };
@@ -68,7 +68,7 @@ export function parseGraphDocument(input) {
   const nodesByPath = new Map();
   const nodesByThing = new Map();
   const pendingClauses = [];
-  const supportClauses = [];
+  const strutClauses = [];
   const dependencyIndex = new Map();
   const endpointIndex = new Map();
   const signatures = new Set();
@@ -91,7 +91,7 @@ export function parseGraphDocument(input) {
       }
       fields.set(parsed.baseKey, { rawKey, parsed, value: fieldValue });
     }
-    for (const axis of ['thing', 'situation', 'contain', 'support']) {
+    for (const axis of ['thing', 'situation', 'slot', 'strut']) {
       if (!fields.has(axis)) {
         throw graphError('INVALID_GRAPH_NODE_FIELDS', `Graph 节点必须恰好包含一个 ${axis} 字段`, {
           parent: parentPath.join('/'), baseKey: axis, count: 0
@@ -100,20 +100,20 @@ export function parseGraphDocument(input) {
     }
     const thingField = fields.get('thing');
     const situationField = fields.get('situation');
-    const containField = fields.get('contain');
-    const supportField = fields.get('support');
+    const slotField = fields.get('slot');
+    const strutField = fields.get('strut');
     const thing = requiredText(thingField.value, 'INVALID_GRAPH_THING', '节点 thing 不能为空', {
       parent: parentPath.join('/')
     });
     if (thing.includes('/')) throw graphError('RESERVED_GRAPH_THING', `节点 thing 不能包含“/”：${thing}`);
-    if (typeof situationField.value !== 'string' || !Array.isArray(containField.value)
-      || !Array.isArray(supportField.value)) {
-      throw graphError('INVALID_GRAPH_NODE_FIELDS', 'Graph 节点必须包含字符串 thing/situation 与数组 contain/support', {
+    if (typeof situationField.value !== 'string' || !Array.isArray(slotField.value)
+      || !Array.isArray(strutField.value)) {
+      throw graphError('INVALID_GRAPH_NODE_FIELDS', 'Graph 节点必须包含字符串 thing/situation 与数组 slot/strut', {
         parent: parentPath.join('/')
       });
     }
     if (siblingThings.has(thing)) {
-      throw graphError('DUPLICATE_GRAPH_THING', `同一层 contain 不得重名：${thing}`, {
+      throw graphError('DUPLICATE_GRAPH_THING', `同一层 slot 不得重名：${thing}`, {
         parent: parentPath.join('/'), thing
       });
     }
@@ -123,8 +123,8 @@ export function parseGraphDocument(input) {
     const normalized = {
       [thingField.rawKey]: thing,
       [situationField.rawKey]: situationField.value,
-      [containField.rawKey]: [],
-      support: []
+      [slotField.rawKey]: [],
+      strut: []
     };
     const entry = {
       path, node: normalized, thing, situation: situationField.value,
@@ -133,18 +133,18 @@ export function parseGraphDocument(input) {
     nodesByPath.set(path.join('/'), entry);
     if (!nodesByThing.has(thing)) nodesByThing.set(thing, []);
     nodesByThing.get(thing).push(entry);
-    pendingClauses.push({ source: entry, values: supportField.value });
+    pendingClauses.push({ source: entry, values: strutField.value });
     const childThings = new Set();
-    normalized[containField.rawKey] = containField.value.map((child) => parseNode(child, path, childThings));
+    normalized[slotField.rawKey] = slotField.value.map((child) => parseNode(child, path, childThings));
     return normalized;
   }
 
   const graph = parseNode(source.graph, [], new Set());
 
   function resolveSelector(rawSelector, sourceEntry, details) {
-    const selector = requiredText(rawSelector, 'INVALID_SUPPORT_SELECTOR', 'thing selector 不能为空', details);
+    const selector = requiredText(rawSelector, 'INVALID_STRUT_SELECTOR', 'thing selector 不能为空', details);
     if (selector.startsWith('/') || selector.endsWith('/') || selector.includes('//')) {
-      throw graphError('INVALID_SUPPORT_SELECTOR', `thing selector 路径无效：${selector}`, details);
+      throw graphError('INVALID_STRUT_SELECTOR', `thing selector 路径无效：${selector}`, details);
     }
     if (selector === '.') return sourceEntry;
     if (selector.startsWith('./')) {
@@ -154,7 +154,7 @@ export function parseGraphDocument(input) {
       if (!match) {
         const outside = [...nodesByPath.values()].filter((candidate) => candidate.path.at(-1) === relative.split('/').at(-1));
         throw graphError(
-          outside.length ? 'SUPPORT_SELECTOR_OUT_OF_DOMAIN' : 'SUPPORT_SELECTOR_NOT_FOUND',
+          outside.length ? 'STRUT_SELECTOR_OUT_OF_DOMAIN' : 'STRUT_SELECTOR_NOT_FOUND',
           outside.length ? '相对 selector 超出当前域' : '相对 selector 在当前域不存在',
           { ...details, selector, domain: sourceEntry.path.slice(0, -1).join('/') }
         );
@@ -164,25 +164,25 @@ export function parseGraphDocument(input) {
     if (selector.includes('/')) {
       const match = nodesByPath.get(selector)
         ?? nodesByPath.get(`${sourceEntry.path[0]}/${selector}`);
-      if (!match) throw graphError('SUPPORT_SELECTOR_NOT_FOUND', `selector 指向不存在的节点：${selector}`, details);
+      if (!match) throw graphError('STRUT_SELECTOR_NOT_FOUND', `selector 指向不存在的节点：${selector}`, details);
       return match;
     }
     const sibling = nodesByPath.get([...sourceEntry.path.slice(0, -1), selector].join('/'));
     if (sibling) return sibling;
     const candidates = nodesByThing.get(selector) ?? [];
-    if (!candidates.length) throw graphError('SUPPORT_SELECTOR_NOT_FOUND', `selector 指向不存在的节点：${selector}`, details);
+    if (!candidates.length) throw graphError('STRUT_SELECTOR_NOT_FOUND', `selector 指向不存在的节点：${selector}`, details);
     for (let depth = sourceEntry.path.length - 2; depth >= 0; depth -= 1) {
       const domain = sourceEntry.path.slice(0, depth + 1);
       const scoped = candidates.filter((candidate) => domain.every((part, index) => candidate.path[index] === part));
       if (scoped.length === 1) return scoped[0];
       if (scoped.length > 1) {
-        throw graphError('AMBIGUOUS_SUPPORT_SELECTOR', `selector 在最近当前域内名称不唯一：${selector}`, {
+        throw graphError('AMBIGUOUS_STRUT_SELECTOR', `selector 在最近当前域内名称不唯一：${selector}`, {
           ...details, domain: domain.join('/'), candidates: scoped.map((candidate) => candidate.path.join('/'))
         });
       }
     }
     if (candidates.length > 1) {
-      throw graphError('AMBIGUOUS_SUPPORT_SELECTOR', `selector 名称不唯一：${selector}`, {
+      throw graphError('AMBIGUOUS_STRUT_SELECTOR', `selector 名称不唯一：${selector}`, {
         ...details, candidates: candidates.map((candidate) => candidate.path.join('/'))
       });
     }
@@ -190,17 +190,17 @@ export function parseGraphDocument(input) {
   }
 
   function parseSelector(value, sourceEntry, details) {
-    const selector = object(value, 'INVALID_SUPPORT_SELECTOR', 'thing selector 必须是对象', details);
-    onlyFields(selector, SELECTOR_FIELDS, 'UNKNOWN_SUPPORT_SELECTOR_FIELD', 'thing selector', details);
+    const selector = object(value, 'INVALID_STRUT_SELECTOR', 'thing selector 必须是对象', details);
+    onlyFields(selector, SELECTOR_FIELDS, 'UNKNOWN_STRUT_SELECTOR_FIELD', 'thing selector', details);
     const keys = Object.keys(selector);
     if (keys.length !== 1 || !SELECTOR_FIELDS.has(keys[0])) {
-      throw graphError('INVALID_SUPPORT_SELECTOR', '端点必须恰好包含 thing 或 thing@program', details);
+      throw graphError('INVALID_STRUT_SELECTOR', '端点必须恰好包含 thing 或 thing@program', details);
     }
     const [kind] = keys;
-    const raw = requiredText(selector[kind], 'INVALID_SUPPORT_SELECTOR', 'thing selector 不能为空', details);
+    const raw = requiredText(selector[kind], 'INVALID_STRUT_SELECTOR', 'thing selector 不能为空', details);
     if (kind === 'thing@program' && /(?:satisfies\s*\(|lambda\b|def\s+main\b|\r|\n)/u.test(raw)) {
       throw graphError(
-        'SUPPORT_INLINE_PROGRAM_UNSUPPORTED',
+        'STRUT_INLINE_PROGRAM_UNSUPPORTED',
         'thing@program RHS 只能是 Program selector；源码只允许位于目标节点 situation',
         details
       );
@@ -208,7 +208,7 @@ export function parseGraphDocument(input) {
     const target = resolveSelector(raw, sourceEntry, details);
     if (kind === 'thing@program' && !target.isProgram) {
       throw graphError(
-        'SUPPORT_PROGRAM_ENDPOINT_TYPE_MISMATCH',
+        'STRUT_PROGRAM_ENDPOINT_TYPE_MISMATCH',
         `thing@program selector 未指向 Program 节点：${raw}`,
         details
       );
@@ -218,17 +218,17 @@ export function parseGraphDocument(input) {
 
   function parseExpr(value, sourceEntry, clauseOrdinal, exprPath = []) {
     const details = { source: sourceEntry.path.join('/'), clauseOrdinal, exprPath };
-    const expr = object(value, 'INVALID_SUPPORT_EXPR', 'support Expr 必须是对象', details);
+    const expr = object(value, 'INVALID_STRUT_EXPR', 'strut Expr 必须是对象', details);
     if (Object.hasOwn(expr, 'satisfies')) {
       throw graphError(
-        'SUPPORT_INLINE_PROGRAM_UNSUPPORTED',
-        'support 不支持 satisfies/线载源码；请引用显式 thing@program 节点',
+        'STRUT_INLINE_PROGRAM_UNSUPPORTED',
+        'strut 不支持 satisfies/线载源码；请引用显式 thing@program 节点',
         details
       );
     }
-    onlyFields(expr, EXPR_FIELDS, 'UNKNOWN_SUPPORT_EXPR_FIELD', 'support Expr', details);
+    onlyFields(expr, EXPR_FIELDS, 'UNKNOWN_STRUT_EXPR_FIELD', 'strut Expr', details);
     const keys = Object.keys(expr);
-    if (keys.length !== 1) throw graphError('INVALID_SUPPORT_EXPR', 'support Expr 必须恰好包含一个根 key', details);
+    if (keys.length !== 1) throw graphError('INVALID_STRUT_EXPR', 'strut Expr 必须恰好包含一个根 key', details);
     const [kind] = keys;
     if (kind === 'thing' || kind === 'thing@program') {
       const leaf = parseSelector(expr, sourceEntry, details);
@@ -241,7 +241,7 @@ export function parseGraphDocument(input) {
       };
     }
     if (!Array.isArray(expr[kind]) || expr[kind].length < 2) {
-      throw graphError('INVALID_SUPPORT_COMPOSITE', `${kind} 必须至少包含两个有序 Expr`, details);
+      throw graphError('INVALID_STRUT_COMPOSITE', `${kind} 必须至少包含两个有序 Expr`, details);
     }
     return {
       kind, exprPath,
@@ -281,15 +281,15 @@ export function parseGraphDocument(input) {
   }
 
   for (const pending of pendingClauses) {
-    pending.source.node.support = pending.values.map((value, clauseOrdinal) => {
+    pending.source.node.strut = pending.values.map((value, clauseOrdinal) => {
       const details = { source: pending.source.path.join('/'), clauseOrdinal };
-      const clause = object(value, 'INVALID_SUPPORT_CLAUSE', 'support clause 必须是对象', details);
-      const current = classifySupportCurrentEndpoints(clause);
-      onlyFields(clause, CLAUSE_FIELDS, 'UNKNOWN_SUPPORT_CLAUSE_FIELD', 'support clause', details);
+      const clause = object(value, 'INVALID_STRUT_CLAUSE', 'strut clause 必须是对象', details);
+      const current = classifyStrutCurrentEndpoints(clause);
+      onlyFields(clause, CLAUSE_FIELDS, 'UNKNOWN_STRUT_CLAUSE_FIELD', 'strut clause', details);
       if (pending.source.isProgram) {
         throw graphError(
-          'SUPPORT_DECISION_PROGRAM_MUST_BE_INDEPENDENT',
-          '推支判定 Program 必须独立于普通事实端点；thing@program 不能用 @current 成为本条 support 的前项或后项',
+          'STRUT_DECISION_PROGRAM_MUST_BE_INDEPENDENT',
+          '推支判定 Program 必须独立于普通事实端点；thing@program 不能用 @current 成为本条 strut 的前项或后项',
           details
         );
       }
@@ -301,16 +301,16 @@ export function parseGraphDocument(input) {
       const antecedentValues = clause.if ?? [];
       const consequentValues = clause.then ?? [];
       if (!Array.isArray(antecedentValues) || antecedentValues.length > 1) {
-        throw graphError('INVALID_SUPPORT_IF', 'if 必须缺省、为空或恰好包含一个根 Expr', details);
+        throw graphError('INVALID_STRUT_IF', 'if 必须缺省、为空或恰好包含一个根 Expr', details);
       }
       if (!Array.isArray(consequentValues)) {
-        throw graphError('INVALID_SUPPORT_THEN', 'then 必须是 consequent thing 引用数组', details);
+        throw graphError('INVALID_STRUT_THEN', 'then 必须是 consequent thing 引用数组', details);
       }
       if (!current.currentAntecedent && antecedentValues.length === 0) {
-        throw graphError('MISSING_SUPPORT_ANTECEDENT', 'support rule 的 antecedent 不能为空', details);
+        throw graphError('MISSING_STRUT_ANTECEDENT', 'strut rule 的 antecedent 不能为空', details);
       }
       if (!current.currentConsequent && consequentValues.length === 0) {
-        throw graphError('MISSING_SUPPORT_CONSEQUENT', 'support rule 的 consequent 不能为空', details);
+        throw graphError('MISSING_STRUT_CONSEQUENT', 'strut rule 的 consequent 不能为空', details);
       }
       const ownerPath = pending.source.path.join('/');
       let root;
@@ -339,8 +339,8 @@ export function parseGraphDocument(input) {
         const parsed = parseSelector(item, pending.source, { ...details, thenOrdinal: then.length });
         if (parsed.isProgram) {
           throw graphError(
-            'SUPPORT_FACT_CONSEQUENT_REQUIRED',
-            'support 后项必须是普通事实 Thing；thing@program 只可作为 if 内的独立判定依赖',
+            'STRUT_FACT_CONSEQUENT_REQUIRED',
+            'strut 后项必须是普通事实 Thing；thing@program 只可作为 if 内的独立判定依赖',
             { ...details, thenOrdinal: then.length }
           );
         }
@@ -349,20 +349,20 @@ export function parseGraphDocument(input) {
         }
         then.push({ ...parsed, thenOrdinal: then.length });
       }
-      const clauseId = `support:${pending.source.path.join('/')}:${clauseOrdinal}`;
+      const clauseId = `strut:${pending.source.path.join('/')}:${clauseOrdinal}`;
       const dependencyPaths = [...new Set(dependencies(root))];
       const antecedentPaths = relationAntecedentPaths(root);
       if (antecedentPaths.length === 0) {
         throw graphError(
-          'SUPPORT_FACT_ANTECEDENT_REQUIRED',
-          'support 必须包含至少一个普通事实前项；thing@program 只可作为独立判定依赖',
+          'STRUT_FACT_ANTECEDENT_REQUIRED',
+          'strut 必须包含至少一个普通事实前项；thing@program 只可作为独立判定依赖',
           details
         );
       }
       if (antecedentPaths.length > 1 && then.length > 1) {
         throw graphError(
-          'NATIVE_MANY_TO_MANY_SUPPORT_UNSUPPORTED',
-          '禁止原生 N→M support；请建立真实枢纽 Thing H，并拆为 N→H 与 H→M 两条规则',
+          'NATIVE_MANY_TO_MANY_STRUT_UNSUPPORTED',
+          '禁止原生 N→M strut；请建立真实枢纽 Thing H，并拆为 N→H 与 H→M 两条规则',
           { ...details, antecedentCount: antecedentPaths.length, consequentCount: then.length }
         );
       }
@@ -371,7 +371,7 @@ export function parseGraphDocument(input) {
         then.map((target) => target.targetPath)
       ]);
       if (signatures.has(signature)) {
-        throw graphError('DUPLICATE_SUPPORT_RULE', '同一 support rule 只能持久声明一次', details);
+        throw graphError('DUPLICATE_STRUT_RULE', '同一 strut rule 只能持久声明一次', details);
       }
       signatures.add(signature);
       const normalized = {
@@ -380,7 +380,7 @@ export function parseGraphDocument(input) {
           : current.currentConsequent ? 'consequent' : null,
         clauseOrdinal, root, then, antecedentPaths, dependencyPaths, signature
       };
-      supportClauses.push(normalized);
+      strutClauses.push(normalized);
       for (const dependencyPath of dependencyPaths) {
         if (!dependencyIndex.has(dependencyPath)) dependencyIndex.set(dependencyPath, []);
         dependencyIndex.get(dependencyPath).push(clauseId);
@@ -391,7 +391,7 @@ export function parseGraphDocument(input) {
     });
   }
 
-  const supportRelations = supportClauses.flatMap((clause) => clause.antecedentPaths.flatMap((sourcePath, inputOrdinal) => (
+  const strutRelations = strutClauses.flatMap((clause) => clause.antecedentPaths.flatMap((sourcePath, inputOrdinal) => (
     clause.then.map((target) => ({
       sourcePath,
       targetPath: target.targetPath,
@@ -406,8 +406,8 @@ export function parseGraphDocument(input) {
   return {
     config: { schema_version: GRAPH_JSON_SCHEMA_VERSION },
     graph,
-    supportClauses,
-    supportRelations,
+    strutClauses,
+    strutRelations,
     dependencyIndex,
     endpointIndex
   };
@@ -464,8 +464,8 @@ export function exportGraphDocument(knowledgeInput, options = {}) {
     const serialized = {
       thing,
       situation: typeof node.detail === 'string' ? node.detail : '',
-      contain: uniqueChildren.map((child) => serializeNode(child, path)),
-      support: []
+      slot: uniqueChildren.map((child) => serializeNode(child, path)),
+      strut: []
     };
     serializedByNode.set(node, serialized);
     active.delete(node);
@@ -477,8 +477,8 @@ export function exportGraphDocument(knowledgeInput, options = {}) {
     graph = {
       thing: GRAPH_COLLECTION_ROOT_NAME,
       situation: '',
-      contain: roots.map((candidate) => serializeNode(candidate, [GRAPH_COLLECTION_ROOT_NAME])),
-      support: []
+      slot: roots.map((candidate) => serializeNode(candidate, [GRAPH_COLLECTION_ROOT_NAME])),
+      strut: []
     };
   } else graph = serializeNode(root, []);
 
@@ -491,7 +491,7 @@ export function exportGraphDocument(knowledgeInput, options = {}) {
     const to = nodesByIdentity.get(edge.to?.key)
       || nodesByIdentity.get(nodeKey(edge.to?.path || 'root', edge.to?.nodeId));
     if (!from || !to || !included.has(from) || !included.has(to)) continue;
-    serializedByNode.get(from).support.push({
+    serializedByNode.get(from).strut.push({
       'if@current': true,
       then: [{ thing: selectorFor(to) }]
     });

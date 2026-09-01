@@ -16,7 +16,7 @@ async function publishProjection(files) {
   );
 }
 
-function atom(thing, situation = '', contain = [], support = [], type = '') {
+function atom(thing, situation = '', slot = [], strut = [], type = '') {
   const agentProgram = type === 'agent';
   const storedType = agentProgram ? 'program' : type;
   const storedSituation = agentProgram
@@ -25,8 +25,8 @@ function atom(thing, situation = '', contain = [], support = [], type = '') {
   return {
     [`thing${storedType ? `@${storedType}` : ''}`]: thing,
     situation: storedSituation,
-    contain,
-    support
+    slot,
+    strut
   };
 }
 
@@ -155,12 +155,12 @@ test('window entry reports only the visible Atom count and does not rewrite the 
   assert.equal(await fs.readFile(files.projectionFile, 'utf8'), beforeProjection);
 });
 
-test('support replacement cannot create a relation to a sealed target', async (t) => {
+test('strut replacement cannot create a relation to a sealed target', async (t) => {
   const files = await isolated(t);
   const before = await fs.readFile(files.contextFile, 'utf8');
   const result = await executeAtomLanguage({
     ...files, legacyAccess,
-    source: 'transform {"thing":"Task","support.rep.":[{"if@current":true,"then":[{"thing":"Personal/Diary"}]}]}'
+    source: 'transform {"thing":"Task","strut.rep.":[{"if@current":true,"then":[{"thing":"Personal/Diary"}]}]}'
   });
 
   assert.equal(result.ok, false);

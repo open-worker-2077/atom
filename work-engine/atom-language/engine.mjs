@@ -138,17 +138,17 @@ function exactMatchAtPath(atoms, targetPath) {
       path: [...pathParts]
     };
     parent = match;
-    children = oneStoredField(match.atom, 'contain')?.value ?? [];
+    children = oneStoredField(match.atom, 'slot')?.value ?? [];
   }
   return parent;
 }
 
-function subtreeContainsTypedProgram(atom) {
+function subtreeSlotsTypedProgram(atom) {
   if (!atom) return false;
   if (oneStoredField(atom, 'thing')?.parsed.types.some((type) => type.raw === 'program')) {
     return true;
   }
-  return (oneStoredField(atom, 'contain')?.value ?? []).some(subtreeContainsTypedProgram);
+  return (oneStoredField(atom, 'slot')?.value ?? []).some(subtreeSlotsTypedProgram);
 }
 
 function transformChangesProgramSurface(beforeAtoms, afterAtoms, transformed) {
@@ -158,8 +158,8 @@ function transformChangesProgramSurface(beforeAtoms, afterAtoms, transformed) {
     transformed?.resultName
   ].filter(Boolean))];
   return paths.some((targetPath) => (
-    subtreeContainsTypedProgram(exactMatchAtPath(beforeAtoms, targetPath)?.atom)
-    || subtreeContainsTypedProgram(exactMatchAtPath(afterAtoms, targetPath)?.atom)
+    subtreeSlotsTypedProgram(exactMatchAtPath(beforeAtoms, targetPath)?.atom)
+    || subtreeSlotsTypedProgram(exactMatchAtPath(afterAtoms, targetPath)?.atom)
   ));
 }
 
@@ -269,29 +269,29 @@ function persistentAtomFromItem(item) {
 
 function validateNewAtom(atom) {
   const byBase = fieldsByBase(atom);
-  const required = ['thing', 'situation', 'contain', 'support'];
+  const required = ['thing', 'situation', 'slot', 'strut'];
   const missing = required.filter((baseKey) => (byBase.get(baseKey) ?? []).length !== 1);
   if (missing.length) {
     return diagnostic(
       'TRANSFORM_NEW_REQUIRES_FOUR_AXES',
-      'transform new 首轮要求完整提交 thing、situation、contain、support 四轴',
+      'transform new 首轮要求完整提交 thing、situation、slot、strut 四轴',
       { missing }
     );
   }
   const thing = byBase.get('thing')[0].value;
   const situation = byBase.get('situation')[0].value;
-  const contain = byBase.get('contain')[0].value;
-  const support = byBase.get('support')[0].value;
+  const slot = byBase.get('slot')[0].value;
+  const strut = byBase.get('strut')[0].value;
   if (typeof thing !== 'string' || !thing.trim()) {
     return diagnostic('INVALID_ATOM_NAME', 'Atom thing 必须是非空字符串');
   }
   if (typeof situation !== 'string') {
     return diagnostic('INVALID_ATOM_DETAIL', 'Atom situation 必须是字符串');
   }
-  if (!Array.isArray(contain) || !Array.isArray(support)) {
+  if (!Array.isArray(slot) || !Array.isArray(strut)) {
     return diagnostic(
       'INVALID_ATOM_GRAPH_AXES',
-      'Atom contain 与 support 必须是数组'
+      'Atom slot 与 strut 必须是数组'
     );
   }
   return null;
@@ -457,11 +457,11 @@ function appendNestedAtom(atoms, parentMatch, atom) {
     const nextItems = [...items];
     const nextParent = { ...items[index] };
     nextItems[index] = nextParent;
-    const contain = oneStoredField(nextParent, 'contain');
+    const slot = oneStoredField(nextParent, 'slot');
     if (depth === lineage.length - 1) {
-      nextParent[contain.rawKey] = [...contain.value, structuredClone(atom)];
+      nextParent[slot.rawKey] = [...slot.value, structuredClone(atom)];
     } else {
-      nextParent[contain.rawKey] = appendAt(contain.value, depth + 1);
+      nextParent[slot.rawKey] = appendAt(slot.value, depth + 1);
     }
     return nextItems;
   }
@@ -486,7 +486,7 @@ function removeWindowJumpAuthorization(atoms, operationId) {
           continue;
         }
       }
-      const children = oneStoredField(atom, 'contain')?.value;
+      const children = oneStoredField(atom, 'slot')?.value;
       if (Array.isArray(children)) visit(children);
     }
   }
@@ -495,7 +495,7 @@ function removeWindowJumpAuthorization(atoms, operationId) {
 }
 
 function isCompletePersistentAtomItem(item) {
-  const required = new Set(['thing', 'situation', 'contain', 'support']);
+  const required = new Set(['thing', 'situation', 'slot', 'strut']);
   return item.fields.length === required.size
     && item.fields.every((field) => (
       required.has(field.baseKey) && (field.commands ?? []).length === 0
@@ -597,11 +597,11 @@ async function applyCreateTransform({
       ) };
     }
     const parentDecision = await authorize(
-      parentMatches[0], 'write', 'contain', { slotMaterialCreate: true, createdAtom: atom }
+      parentMatches[0], 'write', 'slot', { slotMaterialCreate: true, createdAtom: atom }
     );
     if (parentDecision.decision !== 'allow') {
       const programDenied = parentDecision.matched
-        ? programLockDeniedDiagnostic(parentDecision, 'contain')
+        ? programLockDeniedDiagnostic(parentDecision, 'slot')
         : null;
       return { error: diagnostic(
         programDenied?.code ?? parentDecision.code ?? 'WINDOW_ACCESS_DENIED',
@@ -700,9 +700,9 @@ async function persistChangedGraph({
   structurePreservingValidation = false
 }) {
   if (!localizedSituationValidation && !structurePreservingValidation) {
-    // Structural, support, type and Program changes retain the complete projection gate.
+    // Structural, strut, type and Program changes retain the complete projection gate.
     const validationStartedAt = performance.now();
-    projectAtomContext(atoms, { rootName, allowLegacySupport: Boolean(compatibilityManifest) });
+    projectAtomContext(atoms, { rootName, allowLegacyStrut: Boolean(compatibilityManifest) });
     performanceTrace('world-precommit-validation', {
       elapsedMs: Math.round(performance.now() - validationStartedAt)
     });
@@ -730,20 +730,20 @@ async function persistChangedGraph({
 }
 
 export async function executeAtomLanguage(options = {}) {
-  const pendingSupportDeliveryClaims = new Set();
-  function rememberSupportDeliveryClaims(keys = []) {
-    for (const key of keys) if (key) pendingSupportDeliveryClaims.add(key);
+  const pendingStrutDeliveryClaims = new Set();
+  function rememberStrutDeliveryClaims(keys = []) {
+    for (const key of keys) if (key) pendingStrutDeliveryClaims.add(key);
   }
-  function confirmSupportDeliveryClaims() {
-    options.programScheduler?.confirmSupportDeliveries?.([...pendingSupportDeliveryClaims]);
-    pendingSupportDeliveryClaims.clear();
+  function confirmStrutDeliveryClaims() {
+    options.programScheduler?.confirmStrutDeliveries?.([...pendingStrutDeliveryClaims]);
+    pendingStrutDeliveryClaims.clear();
   }
-  function releaseSupportDeliveryClaims() {
-    options.programScheduler?.releaseSupportDeliveries?.([...pendingSupportDeliveryClaims]);
-    pendingSupportDeliveryClaims.clear();
+  function releaseStrutDeliveryClaims() {
+    options.programScheduler?.releaseStrutDeliveries?.([...pendingStrutDeliveryClaims]);
+    pendingStrutDeliveryClaims.clear();
   }
   function failureBase(...args) {
-    releaseSupportDeliveryClaims();
+    releaseStrutDeliveryClaims();
     return buildFailureBase(...args);
   }
   const operationStartedAt = performance.now();
@@ -854,12 +854,12 @@ export async function executeAtomLanguage(options = {}) {
     if (hasRename && !renameBatch && !maintenanceStructuralBatch) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         'UNSUPPORTED_MIXED_BATCH_RENAME',
-        '批量改名必须由纯 thing.ren 项组成；请将移动、situation 与 support 放入另一批事务'
+        '批量改名必须由纯 thing.ren 项组成；请将移动、situation 与 strut 放入另一批事务'
       )]);
     }
     const unsupported = parsed.items.flatMap((item) => item.fields
       .filter((field) => (
-        !['thing', 'situation', 'support'].includes(field.baseKey)
+        !['thing', 'situation', 'strut'].includes(field.baseKey)
         || (field.baseKey === 'thing' && field.commands.some((command) => (
           command.name !== 'mov'
           && !((renameBatch || maintenanceStructuralBatch) && command.name === 'ren')
@@ -870,7 +870,7 @@ export async function executeAtomLanguage(options = {}) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [{
         ...diagnostic(
           'UNSUPPORTED_TRANSFORM_BATCH_AXIS',
-          '批量 transform 当前支持已有 Atom 的纯批量改名、移动、situation 与 support 改造',
+          '批量 transform 当前支持已有 Atom 的纯批量改名、移动、situation 与 strut 改造',
           { axis: unsupported.field.baseKey }
         ),
         itemIndex: unsupported.item.index
@@ -1075,7 +1075,7 @@ export async function executeAtomLanguage(options = {}) {
         cached: programCycle.cached === true
       });
     } catch (error) {
-      releaseSupportDeliveryClaims();
+      releaseStrutDeliveryClaims();
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
       )]);
@@ -1113,14 +1113,14 @@ export async function executeAtomLanguage(options = {}) {
       { ...(fatalJumpFailure.details ?? {}), program: fatalJumpFailure.programPath }
     )]);
   }
-  const missingSupportDelivery = (programCycle.failures ?? []).find((failure) => (
-    failure.code === 'SUPPORT_DELIVERY_REQUIRED'
+  const missingStrutDelivery = (programCycle.failures ?? []).find((failure) => (
+    failure.code === 'STRUT_DELIVERY_REQUIRED'
   ));
-  if (missingSupportDelivery && options.programMode !== 'project') {
+  if (missingStrutDelivery && options.programMode !== 'project') {
     return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
-      missingSupportDelivery.code,
-      missingSupportDelivery.message ?? 'support subscriber requires one typed true delivery',
-      { ...(missingSupportDelivery.details ?? {}), program: missingSupportDelivery.programPath }
+      missingStrutDelivery.code,
+      missingStrutDelivery.message ?? 'strut subscriber requires one typed true delivery',
+      { ...(missingStrutDelivery.details ?? {}), program: missingStrutDelivery.programPath }
     )]);
   }
   const activeLocks = [...programCycle.locks, ...activeRequestDrivenLocks];
@@ -1170,13 +1170,13 @@ export async function executeAtomLanguage(options = {}) {
         programPath: effect.issuerProgramPath,
         windowLifecycle: { action: 'move', destinationPath: effect.destinationPath }
       })).decision !== 'allow'
-      || (await accessController.authorize(source, 'write', 'contain', {
+      || (await accessController.authorize(source, 'write', 'slot', {
         programPath: effect.issuerProgramPath
       })).decision !== 'allow'
       || (await accessController.authorize(destination, 'read', 'thing', {
         programPath: effect.issuerProgramPath
       })).decision !== 'allow'
-      || (await accessController.authorize(destination, 'write', 'contain', {
+      || (await accessController.authorize(destination, 'write', 'slot', {
         programPath: effect.issuerProgramPath,
         windowLifecycle: { action: 'move', destinationPath: effect.destinationPath }
       })).decision !== 'allow';
@@ -1219,7 +1219,7 @@ export async function executeAtomLanguage(options = {}) {
           recordsByPath
         });
       } catch (error) {
-        releaseSupportDeliveryClaims();
+        releaseStrutDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
           error.code ?? 'WINDOW_JUMP_AUTHORIZATION_INVALID', error.message
         )]);
@@ -1395,7 +1395,7 @@ export async function executeAtomLanguage(options = {}) {
           issuerController.authorize(destination, 'read', 'thing', {
             programPath: payload.issuerProgramPath
           }),
-          issuerController.authorize(destination, 'write', 'contain', {
+          issuerController.authorize(destination, 'write', 'slot', {
             programPath: payload.issuerProgramPath,
             windowLifecycle: { action: 'move', destinationPath }
           })
@@ -1488,7 +1488,7 @@ export async function executeAtomLanguage(options = {}) {
       for (const entry of walkAtoms([selected.atom])) {
         const actual = walkAtoms(candidate).find((match) => match.atom === entry.atom);
         if ((await nodeLockController.authorize(
-          actual, 'write', 'contain', {
+          actual, 'write', 'slot', {
             programPath: jump.sourceProgramPath,
             windowLifecycle: { action: 'recycle' }
           }
@@ -1499,7 +1499,7 @@ export async function executeAtomLanguage(options = {}) {
         }
       }
       const container = selected.parent
-        ? oneStoredField(selected.parent.atom, 'contain')?.value
+        ? oneStoredField(selected.parent.atom, 'slot')?.value
         : candidate;
       container.splice(selected.index, 1);
       breakShortcutTargets(candidate, agentPath);
@@ -1636,7 +1636,7 @@ export async function executeAtomLanguage(options = {}) {
     try {
       projectAtomContext(transformed.atoms, {
         rootName: path.basename(contextFile),
-        allowLegacySupport: Boolean(options.compatibilityManifest)
+        allowLegacyStrut: Boolean(options.compatibilityManifest)
       });
     } catch (error) {
       if (jumpEffects.length) {
@@ -1681,7 +1681,7 @@ export async function executeAtomLanguage(options = {}) {
         const match = walkAtoms(atoms).find((candidate) => candidate.path.join('/') === targetPath);
         if (!match) return { decision: 'deny' };
         return accessController.authorize(
-          match, 'write', 'contain', {
+          match, 'write', 'slot', {
             programPath: sourceProgramPath,
             slotReseal: effect.action === 'seal'
           }
@@ -1698,7 +1698,7 @@ export async function executeAtomLanguage(options = {}) {
     try {
       projectAtomContext(result.atoms, {
         rootName: path.basename(contextFile),
-        allowLegacySupport: Boolean(options.compatibilityManifest)
+        allowLegacyStrut: Boolean(options.compatibilityManifest)
       });
     } catch (error) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
@@ -1826,7 +1826,7 @@ export async function executeAtomLanguage(options = {}) {
         await recordTransformStage('reconcile', refreshStartedAt, { outcome: 'failure' });
         throw error;
       }
-      rememberSupportDeliveryClaims(cycle.supportDeliveryClaims);
+      rememberStrutDeliveryClaims(cycle.strutDeliveryClaims);
       await recordTransformStage('reconcile', refreshStartedAt, {
         ...(cycle.reconcileSummary ?? {})
       });
@@ -1921,7 +1921,7 @@ export async function executeAtomLanguage(options = {}) {
           sourceProgramRef: _sourceProgramRef,
           sourceProgramPath,
           sourceScopeRoot = null,
-          sourceSupportDeliveryClaim = null,
+          sourceStrutDeliveryClaim = null,
           ...rawTransformRequest
         } = request;
         let transformRequest;
@@ -1932,7 +1932,7 @@ export async function executeAtomLanguage(options = {}) {
             scopeRoot: sourceScopeRoot
           });
         } catch (error) {
-          if (sourceSupportDeliveryClaim
+          if (sourceStrutDeliveryClaim
             || programDeclaresSlotSeal(cycle.slotBodies, sourceProgramPath)) {
             throw Object.assign(new Error(error.message), {
               code: error.code ?? 'INVALID_PROGRAM_TRANSFORM',
@@ -1947,7 +1947,7 @@ export async function executeAtomLanguage(options = {}) {
         }
         const compiled = compileProgramTransform({ request: transformRequest, receiver });
         if (!compiled.ok) {
-          if (sourceSupportDeliveryClaim
+          if (sourceStrutDeliveryClaim
             || programDeclaresSlotSeal(cycle.slotBodies, sourceProgramPath)) {
             throw Object.assign(new Error(
               compiled.errors?.[0]?.message ?? 'Program transform 无法编译'
@@ -1965,7 +1965,7 @@ export async function executeAtomLanguage(options = {}) {
         }
         compiledRequests.push({
           sourceProgramPath,
-          sourceSupportDeliveryClaim,
+          sourceStrutDeliveryClaim,
           transformRequest,
           item: compiled.item,
           createNew: compiled.createNew
@@ -2029,7 +2029,7 @@ export async function executeAtomLanguage(options = {}) {
                   exactIndex
                 });
           } catch (error) {
-            if (entry.sourceSupportDeliveryClaim
+            if (entry.sourceStrutDeliveryClaim
               || programDeclaresSlotSeal(cycle.slotBodies, entry.sourceProgramPath)) {
               return {
                 failed: true,
@@ -2055,7 +2055,7 @@ export async function executeAtomLanguage(options = {}) {
             if (mutateInput && transformed.rolledBack) {
               exactIndex = createExactTransformIndex(candidateAtoms);
             }
-            if (entry.sourceSupportDeliveryClaim
+            if (entry.sourceStrutDeliveryClaim
               || programDeclaresSlotSeal(cycle.slotBodies, entry.sourceProgramPath)) {
               return {
                 failed: true,
@@ -2125,7 +2125,7 @@ export async function executeAtomLanguage(options = {}) {
         try {
           projectAtomContext(application.atoms, {
             rootName: path.basename(contextFile),
-            allowLegacySupport: Boolean(options.compatibilityManifest)
+            allowLegacyStrut: Boolean(options.compatibilityManifest)
           });
         } catch {
           application = { failed: true };
@@ -2152,7 +2152,7 @@ export async function executeAtomLanguage(options = {}) {
               .find((candidate) => candidate.path.join('/') === targetPath);
             if (!match) return { decision: 'deny' };
             return cycleAccessController.authorize(
-              match, 'write', 'contain', {
+              match, 'write', 'slot', {
                 programPath: sourceProgramPath,
                 slotReseal: effect.action === 'seal'
               }
@@ -2387,7 +2387,7 @@ export async function executeAtomLanguage(options = {}) {
         changedPaths,
         affectedAtoms: affectedAtoms ?? (Array.isArray(changedPaths) ? changedPaths.map((path) => ({
           path,
-          axes: ['contain', 'situation', 'support', 'thing']
+          axes: ['slot', 'situation', 'strut', 'thing']
         })) : null),
         transformLogRecord,
         compatibilityManifest: options.compatibilityManifest,
@@ -2398,14 +2398,14 @@ export async function executeAtomLanguage(options = {}) {
         .map(({ path }) => path)
         .filter(Boolean))].sort();
     } catch (error) {
-      releaseSupportDeliveryClaims();
+      releaseStrutDeliveryClaims();
       await recordTransformStage('commit', commitStartedAt, {
         commitEntered: true,
         outcome: 'failure'
       });
       throw error;
     }
-    confirmSupportDeliveryClaims();
+    confirmStrutDeliveryClaims();
     await recordTransformStage('commit', commitStartedAt, { commitEntered: true });
     let derivedRecoveryPending = false;
     try {
@@ -2511,7 +2511,7 @@ export async function executeAtomLanguage(options = {}) {
         strictSlotRecompute
       );
     } catch (error) {
-      releaseSupportDeliveryClaims();
+      releaseStrutDeliveryClaims();
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
       )]);
@@ -2775,7 +2775,7 @@ export async function executeAtomLanguage(options = {}) {
           nodes: [...transformEventNodes]
         });
       } catch (error) {
-        releaseSupportDeliveryClaims();
+        releaseStrutDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
           error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
         )]);
@@ -2812,17 +2812,17 @@ export async function executeAtomLanguage(options = {}) {
       );
       interactionWarnings.push(...compiled.warnings);
       if (!compiled.ok) {
-        releaseSupportDeliveryClaims();
+        releaseStrutDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, compiled.errors);
       }
       const programSurfaceChanged = [...transformEventNodes].some((targetPath) => (
-        subtreeContainsTypedProgram(exactMatchAtPath(atoms, targetPath)?.atom)
-        || subtreeContainsTypedProgram(exactMatchAtPath(nextAtoms, targetPath)?.atom)
+        subtreeSlotsTypedProgram(exactMatchAtPath(atoms, targetPath)?.atom)
+        || subtreeSlotsTypedProgram(exactMatchAtPath(nextAtoms, targetPath)?.atom)
       ));
       if (programSurfaceChanged) {
         const delegated = await validateRequestCandidate(nextAtoms, batchDeclarationRelocations);
         if (!delegated.ok) {
-          releaseSupportDeliveryClaims();
+          releaseStrutDeliveryClaims();
           return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
         }
       }
@@ -2845,7 +2845,7 @@ export async function executeAtomLanguage(options = {}) {
         }
       }
     }
-    if (!changed) confirmSupportDeliveryClaims();
+    if (!changed) confirmStrutDeliveryClaims();
     return {
       ok: true,
       language: 'atom',
@@ -2896,7 +2896,7 @@ export async function executeAtomLanguage(options = {}) {
     if (transformChangesProgramSurface(atoms, nextAtoms, { resultPath: created.resultPath })) {
       const delegated = await validateRequestCandidate(nextAtoms);
       if (!delegated.ok) {
-        releaseSupportDeliveryClaims();
+        releaseStrutDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
       }
     }
@@ -2915,7 +2915,7 @@ export async function executeAtomLanguage(options = {}) {
         });
         nextAtoms = postRefresh.atoms;
       } catch (error) {
-        releaseSupportDeliveryClaims();
+        releaseStrutDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
           error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
         )]);
@@ -2965,7 +2965,7 @@ export async function executeAtomLanguage(options = {}) {
 
   const run = programRunRequest(item);
   if (run?.error) {
-    releaseSupportDeliveryClaims();
+    releaseStrutDeliveryClaims();
     return failureBase(parsed, contextFile, projectionFile, atoms, [run.error]);
   }
   if (run) {
@@ -2980,7 +2980,7 @@ export async function executeAtomLanguage(options = {}) {
           [...new Set(initialProgramTriggerNodes.filter(Boolean))]
         );
       } catch (error) {
-        releaseSupportDeliveryClaims();
+        releaseStrutDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
           error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
         )]);
@@ -3033,7 +3033,7 @@ export async function executeAtomLanguage(options = {}) {
     rewriteProgramPathReferences: true
   });
   if (transformed.error) {
-    releaseSupportDeliveryClaims();
+    releaseStrutDeliveryClaims();
     return failureBase(parsed, contextFile, projectionFile, atoms, [transformed.error], { messages: interactionMessages });
   }
 
@@ -3061,7 +3061,7 @@ export async function executeAtomLanguage(options = {}) {
     );
     interactionWarnings.push(...compiled.warnings);
     if (!compiled.ok) {
-      releaseSupportDeliveryClaims();
+      releaseStrutDeliveryClaims();
       return failureBase(
         parsed,
         contextFile,
@@ -3072,7 +3072,7 @@ export async function executeAtomLanguage(options = {}) {
     }
     const delegated = await validateRequestCandidate(nextAtoms, declarationRelocations);
     if (!delegated.ok) {
-      releaseSupportDeliveryClaims();
+      releaseStrutDeliveryClaims();
       return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
     }
   }
@@ -3090,8 +3090,8 @@ export async function executeAtomLanguage(options = {}) {
       postRefresh = await reconcileProgramsForWorld(nextAtoms, {
         mode: 'transform',
         preparedIndexesValid: !programSurfaceChanged,
-        preparedSupportIndexValid: !programSurfaceChanged && isLocalizedSituationTransform(item),
-        supportBaseRevision: revisionOfWorldFacts(atoms),
+        preparedStrutIndexValid: !programSurfaceChanged && isLocalizedSituationTransform(item),
+        strutBaseRevision: revisionOfWorldFacts(atoms),
         affectedPaths: transformAffectedPaths,
         nodes: [...new Set([
           transformed.sourcePath,
@@ -3105,7 +3105,7 @@ export async function executeAtomLanguage(options = {}) {
         || postRefresh.transformLogs.length > 0
         || postRefresh.pathChanges.length > 0;
     } catch (error) {
-      releaseSupportDeliveryClaims();
+      releaseStrutDeliveryClaims();
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
       )]);
@@ -3198,7 +3198,7 @@ export async function executeAtomLanguage(options = {}) {
   performanceTrace('transform-result-lookup', {
     elapsedMs: Math.round(performance.now() - resultLookupStartedAt)
   });
-  if (!changed) confirmSupportDeliveryClaims();
+  if (!changed) confirmStrutDeliveryClaims();
   return {
     ok: true,
     language: 'atom',

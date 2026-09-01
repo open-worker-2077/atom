@@ -55,8 +55,8 @@ export function createWindowJumpAuthorization({
     atom: {
       [`thing@${WINDOW_JUMP_AUTHORIZATION_TYPE}`]: `迁窗授权-${operationId}`,
       situation: JSON.stringify(payload),
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     },
     payload
   };

@@ -7,8 +7,8 @@ import test from 'node:test';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 test('discard deactivates nested Program indexes and restore rebuilds them from facts', async (t) => {
@@ -46,10 +46,10 @@ test('discard deactivates nested Program indexes and restore rebuilds them from 
   const archivedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   const archivedContainer = archivedWorld
     .find((candidate) => candidate['thing@backup@default'] === 'Default Backup')
-    .contain[0];
+    .slot[0];
   assert.equal(archivedContainer['thing'], 'Program Container');
-  assert.equal(archivedContainer.contain[0]['thing@program'], 'Watcher');
-  assert.equal(archivedContainer.contain[0].situation, watcherSource);
+  assert.equal(archivedContainer.slot[0]['thing@program'], 'Watcher');
+  assert.equal(archivedContainer.slot[0].situation, watcherSource);
   assert.deepEqual([...scheduler.triggerContracts.keys()], ['Active Watcher']);
   assert.deepEqual(
     [...scheduler.triggerIndex.values()].map((paths) => [...paths]),
@@ -107,8 +107,8 @@ test('external transform refreshes Python Program, emits message, and rejects a 
       atom('任务B', '原文', [atom('状态', '执行中')])
     ]),
     atom('冻结程序', [
-      "nodes = explore({'thing': '推进流', 'contain$latitude-2': None, 'situation$full': None})",
-      "approved = [node for node in nodes if node.thing != '状态' and any(s.thing == '状态' and s.situation == '已人工冻结' for s in explore({'thing': node.path, 'contain$latitude-1': None, 'situation$full': None}))]",
+      "nodes = explore({'thing': '推进流', 'slot$latitude-2': None, 'situation$full': None})",
+      "approved = [node for node in nodes if node.thing != '状态' and any(s.thing == '状态' and s.situation == '已人工冻结' for s in explore({'thing': node.path, 'slot$latitude-1': None, 'situation$full': None}))]",
       "if approved:",
       "    lock({'targets': {'refs': [node.ref for node in approved]}, 'mode': 'write', 'fields': ['situation'], 'protect': {'atom': True, 'messages': False}})",
       "    message({'level': 'info', 'text': f'已冻结{len(approved)}个任务'})"
@@ -221,7 +221,7 @@ test('explicit Program run creates a nested four-axis Atom and leaves assignment
   await fs.writeFile(contextFile, JSON.stringify([
     atom('test'),
     atom('Creator', [
-      "result = transform({'thing': 'test/Created', 'situation': '{\"probe\":true}', 'contain': [], 'support': []})",
+      "result = transform({'thing': 'test/Created', 'situation': '{\"probe\":true}', 'slot': [], 'strut': []})",
       "message({'level': 'info', 'text': str(result)})"
     ].join('\n'), [], 'program')
   ], null, 2));
@@ -236,8 +236,8 @@ test('explicit Program run creates a nested four-axis Atom and leaves assignment
   assert.equal(result.changed, true);
   assert.equal(result.messages.some((message) => message.text === 'None'), true);
   const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(persisted[0].contain[0].thing, 'Created');
-  assert.equal(persisted[0].contain[0].situation, '{"probe":true}');
+  assert.equal(persisted[0].slot[0].thing, 'Created');
+  assert.equal(persisted[0].slot[0].situation, '{"probe":true}');
 });
 
 test('Program creation rejects a missing parent without persisting a partial Atom', async (t) => {
@@ -246,7 +246,7 @@ test('Program creation rejects a missing parent without persisting a partial Ato
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    atom('Creator', "transform({'thing': 'missing/Created', 'situation': '', 'contain': [], 'support': []})", [], 'program')
+    atom('Creator', "transform({'thing': 'missing/Created', 'situation': '', 'slot': [], 'strut': []})", [], 'program')
   ], null, 2));
 
   const result = await executeAtomLanguage({
@@ -270,7 +270,7 @@ test('Program creation rejects a duplicate exact target without overwriting it',
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
     atom('test', '', [atom('Created', 'original')]),
-    atom('Creator', "transform({'thing': 'test/Created', 'situation': 'replacement', 'contain': [], 'support': []})", [], 'program')
+    atom('Creator', "transform({'thing': 'test/Created', 'situation': 'replacement', 'slot': [], 'strut': []})", [], 'program')
   ], null, 2));
 
   const result = await executeAtomLanguage({
@@ -284,7 +284,7 @@ test('Program creation rejects a duplicate exact target without overwriting it',
   assert.equal(result.changed, false);
   assert.equal(result.warnings[0].code, 'PROGRAM_TRANSFORM_REJECTED');
   assert.equal(result.warnings[0].cause, 'DUPLICATE_ATOM_NAME');
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].contain[0].situation, 'original');
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot[0].situation, 'original');
 });
 
 test('Program creation cannot append a child through a parent children write lock', async (t) => {
@@ -296,8 +296,8 @@ test('Program creation cannot append a child through a parent children write loc
     atom('Parent'),
     atom('Creator', [
       "parent = explore({'thing': 'Parent'})[0]",
-      "lock({'targets': {'refs': [parent.ref]}, 'mode': 'write', 'fields': ['contain']})",
-      "transform({'thing': 'Parent/Unauthorized', 'situation': '', 'contain': [], 'support': []})"
+      "lock({'targets': {'refs': [parent.ref]}, 'mode': 'write', 'fields': ['slot']})",
+      "transform({'thing': 'Parent/Unauthorized', 'situation': '', 'slot': [], 'strut': []})"
     ].join('\n'), [], 'program')
   ], null, 2));
 
@@ -325,7 +325,7 @@ test('Program creation rejects an introduced Program that violates the sandbox g
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
     atom('test'),
-    atom('Creator', "transform({'thing@program': 'test/Bad Program', 'situation': 'import os', 'contain': [], 'support': []})", [], 'program')
+    atom('Creator', "transform({'thing@program': 'test/Bad Program', 'situation': 'import os', 'slot': [], 'strut': []})", [], 'program')
   ], null, 2));
 
   const before = await fs.readFile(contextFile, 'utf8');
@@ -456,7 +456,7 @@ test('batch rename preflights descendant locks with authoritative full paths', a
     ]),
     atom('后代锁', [
       "target = explore({'thing': '域/甲/受保护后代'})[0]",
-      "lock({'targets': {'refs': [target.ref]}, 'mode': 'write', 'fields': ['contain']})"
+      "lock({'targets': {'refs': [target.ref]}, 'mode': 'write', 'fields': ['slot']})"
     ].join('\n'), [], 'program')
   ], null, 2));
   const before = await fs.readFile(contextFile, 'utf8');
@@ -524,7 +524,7 @@ test('a transform that satisfies a lock condition refreshes Programs before retu
   await fs.writeFile(contextFile, JSON.stringify([
     atom('任务', '原文', [atom('状态', '未冻结')]),
     atom('冻结器', [
-      "rows = explore({'thing': '任务', 'contain$latitude-1': None, 'situation$full': None})",
+      "rows = explore({'thing': '任务', 'slot$latitude-1': None, 'situation$full': None})",
       "if any(row.path == '任务/状态' and row.situation == '已冻结' for row in rows):",
       "    lock({'targets': {'refs': [row.ref for row in rows]}, 'mode': 'write', 'fields': ['thing', 'situation'], 'reason': {'code': 'MANUAL_FREEZE', 'message': '任务已人工冻结'}})"
     ].join('\n'), [], 'program')
@@ -575,11 +575,11 @@ test('transform new reports Program lock denial instead of an undefined decision
     atom('已有目标', '原文'),
     atom('创建锁', [
       "target = explore({'thing': '已有目标'})[0]",
-      "lock({'targets': {'refs': [target.ref]}, 'mode': 'write', 'fields': ['thing', 'situation', 'contain', 'support']})"
+      "lock({'targets': {'refs': [target.ref]}, 'mode': 'write', 'fields': ['thing', 'situation', 'slot', 'strut']})"
     ].join('\n'), [], 'program')
   ], null, 2));
   const result = await executeAtomLanguage({
-    source: 'transform new {"thing":"已有目标","situation":"","contain":[],"support":[]}',
+    source: 'transform new {"thing":"已有目标","situation":"","slot":[],"strut":[]}',
     contextFile, projectionFile, programScheduler: createProgramRuntimeScheduler()
   });
   assert.equal(result.ok, false);
@@ -624,7 +624,7 @@ test('Program children are data and never require uses even when detail is empty
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].contain[0].situation, 'value');
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot[0].situation, 'value');
 });
 
 test('thing.run forces the selected Python Program detail to execute again', async () => {

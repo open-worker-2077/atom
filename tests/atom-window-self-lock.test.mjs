@@ -4,14 +4,14 @@ import test from 'node:test';
 import { createAccessController, walkAtoms } from '../work-engine/atom-language/query-capability.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation: '', contain, support: [] };
+function atom(thing, slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation: '', slot, strut: [] };
 }
 
 const AGENT_SOURCE = 'agent({"labels":["^","approved"],"functions":{"groups":[],"names":["explore","jump","transform"]}})';
 
-function registeredWindow(thing, contain = []) {
-  const value = atom(thing, contain, 'program');
+function registeredWindow(thing, slot = []) {
+  const value = atom(thing, slot, 'program');
   value.situation = AGENT_SOURCE;
   return value;
 }

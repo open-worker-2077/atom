@@ -22,8 +22,8 @@ import {
   parseTransformKey
 } from '../work-engine/atom-language/transform-key-parser.mjs';
 
-function atom(thing, situation = '', contain = [], support = []) {
-  return { thing, situation, contain, support };
+function atom(thing, situation = '', slot = [], strut = []) {
+  return { thing, situation, slot, strut };
 }
 
 async function fixture(t, atoms) {
@@ -52,9 +52,9 @@ function findAtom(atoms, thing) {
     ));
     if (nameEntry?.[1] === thing) return candidate;
     const childrenEntry = Object.entries(candidate).find(([rawKey]) => (
-      rawKey === 'contain'
-      || rawKey.startsWith('contain@')
-      || rawKey.startsWith('contain#')
+      rawKey === 'slot'
+      || rawKey.startsWith('slot@')
+      || rawKey.startsWith('slot#')
     ));
     queue.push(...(childrenEntry?.[1] ?? []));
   }
@@ -128,7 +128,7 @@ test('situation rep preserves command-like Program source and rejects a real out
 
 test('transform parsing is isolated from unchanged explore $ parsing', async (t) => {
   const files = await fixture(t, [atom('根', '正文', [atom('子')])]);
-  const explored = await execute(files, 'explore {"thing":"根","contain$latitude-1","situation$full"}');
+  const explored = await execute(files, 'explore {"thing":"根","slot$latitude-1","situation$full"}');
   assert.equal(explored.ok, true, JSON.stringify(explored.errors));
   assert.deepEqual(explored.items[0].matches.map((item) => item.thing), ['根', '子']);
   assert.equal(explored.items[0].matches[0].situation, '正文');
@@ -165,13 +165,13 @@ test('situation rep performs local replacement with Value and full replacement w
   assert.equal(findAtom(await readAtoms(files.contextFile), '文档').situation, '');
 });
 
-test('summary, field type, rename, and complete support replacement strip commands', async (t) => {
+test('summary, field type, rename, and complete strut replacement strip commands', async (t) => {
   const files = await fixture(t, [
     {
       thing: '甲',
       'situation#旧简介': 'def main(arguments):\n    return True',
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     },
     atom('甲事实', '', [], [{ 'if@current': true, then: [{ thing: '乙' }] }]),
     atom('乙')
@@ -181,7 +181,7 @@ test('summary, field type, rename, and complete support replacement strip comman
     'transform {"thing":"甲","situation.sum.新简介"}',
     'transform {"thing.typ.program":"甲"}',
     'transform {"thing.ren.甲新版":"甲"}',
-    'transform {"thing":"甲事实","support.rep.":[{"if@current":true,"if":[{"thing@program":"甲新版"}],"then":[{"thing":"乙"}]}]}'
+    'transform {"thing":"甲事实","strut.rep.":[{"if@current":true,"if":[{"thing@program":"甲新版"}],"then":[{"thing":"乙"}]}]}'
   ]) {
     const result = await execute(files, source, { programScheduler });
     assert.equal(result.ok, true, `${source}\n${JSON.stringify(result.errors)}`);
@@ -191,8 +191,8 @@ test('summary, field type, rename, and complete support replacement strip comman
   assert.ok(updated);
   assert.equal(updated['thing@program'], '甲新版');
   assert.equal(updated['situation#新简介'], 'def main(arguments):\n    return True');
-  assert.deepEqual(updated.support, []);
-  assert.deepEqual(findAtom(await readAtoms(files.contextFile), '甲事实').support, [{
+  assert.deepEqual(updated.strut, []);
+  assert.deepEqual(findAtom(await readAtoms(files.contextFile), '甲事实').strut, [{
     'if@current': true,
     if: [{ 'thing@program': '甲新版' }],
     then: [{ thing: '乙' }]
@@ -204,7 +204,7 @@ test('summary, field type, rename, and complete support replacement strip comman
 });
 
 test('an empty thing typ command removes a generic type without changing the thing', async (t) => {
-  const files = await fixture(t, [{ 'thing@draft': 'Window', situation: '', contain: [], support: [] }]);
+  const files = await fixture(t, [{ 'thing@draft': 'Window', situation: '', slot: [], strut: [] }]);
   const result = await execute(files, 'transform {"thing.typ.":"Window"}');
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
@@ -213,7 +213,7 @@ test('an empty thing typ command removes a generic type without changing the thi
   assert.equal(Object.hasOwn(updated, 'thing@draft'), false);
 });
 
-test('contain only creates or transforms explicitly submitted nodes', async (t) => {
+test('slot only creates or transforms explicitly submitted nodes', async (t) => {
   const files = await fixture(t, [
     atom('父', '', [
       atom('显式子', '旧正文', [atom('未提交后代', '保持原样')]),
@@ -222,9 +222,9 @@ test('contain only creates or transforms explicitly submitted nodes', async (t) 
   ]);
   const result = await execute(files, `transform {
     "thing": "父",
-    "contain": [
+    "slot": [
       {"thing":"显式子","situation.rep.新正文"},
-      {"thing":"新增子","situation":"完整正文","contain":[],"support":[]}
+      {"thing":"新增子","situation":"完整正文","slot":[],"strut":[]}
     ]
   }`);
   assert.equal(result.ok, true, JSON.stringify(result.errors));
@@ -243,39 +243,39 @@ test('move, copy, discard, and restore use explicit thing-axis commands and reve
     {
       'thing@backup@default': '默认备份仓',
       situation: '',
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     }
   ]);
 
   const moved = await execute(files, 'transform {"thing.mov.目的父":"目标"}');
   assert.equal(moved.ok, true, JSON.stringify(moved.errors));
-  assert.equal(findAtom(await readAtoms(files.contextFile), '源父').contain.length, 0);
-  assert.ok(findAtom(findAtom(await readAtoms(files.contextFile), '目的父').contain, '目标'));
+  assert.equal(findAtom(await readAtoms(files.contextFile), '源父').slot.length, 0);
+  assert.ok(findAtom(findAtom(await readAtoms(files.contextFile), '目的父').slot, '目标'));
 
   const copied = await execute(files, 'transform {"thing.cpy.源父":"目标"}');
   assert.equal(copied.ok, true, JSON.stringify(copied.errors));
-  assert.ok(findAtom(findAtom(await readAtoms(files.contextFile), '源父').contain, '目标'));
+  assert.ok(findAtom(findAtom(await readAtoms(files.contextFile), '源父').slot, '目标'));
 
   const discarded = await execute(files, 'transform {"thing.dsc.":"目的父/目标"}');
   assert.equal(discarded.ok, true, JSON.stringify(discarded.errors));
   const backup = findAtom(await readAtoms(files.contextFile), '默认备份仓');
-  assert.ok(findAtom(backup.contain, '目标'));
+  assert.ok(findAtom(backup.slot, '目标'));
   const log = await readTransformLog(files.contextFile);
   assert.equal(log.at(-1).operation, 'discard');
   assert.equal(log.at(-1).target, '目标');
-  assert.equal(Object.hasOwn(findAtom(backup.contain, '目标'), 'transform_log'), false);
+  assert.equal(Object.hasOwn(findAtom(backup.slot, '目标'), 'transform_log'), false);
 
   const restored = await execute(files, 'transform {"thing.rst.":"默认备份仓/目标"}');
   assert.equal(restored.ok, true, JSON.stringify(restored.errors));
-  assert.ok(findAtom(findAtom(await readAtoms(files.contextFile), '目的父').contain, '目标'));
-  assert.equal(findAtom(await readAtoms(files.contextFile), '默认备份仓').contain.length, 0);
+  assert.ok(findAtom(findAtom(await readAtoms(files.contextFile), '目的父').slot, '目标'));
+  assert.equal(findAtom(await readAtoms(files.contextFile), '默认备份仓').slot.length, 0);
 });
 
 test('discard moves an authorized descendant into kernel backup without granting backup access', async (t) => {
   const files = await fixture(t, [
     atom('Agent', '', [atom('可丢弃')]),
-    { 'thing@backup@default': '默认备份仓', situation: '', contain: [], support: [] }
+    { 'thing@backup@default': '默认备份仓', situation: '', slot: [], strut: [] }
   ]);
   const atoms = await readAtoms(files.contextFile);
   const parsed = createAtomLanguageReceiver().receive(
@@ -297,8 +297,8 @@ test('discard moves an authorized descendant into kernel backup without granting
 
   assert.equal(result.error, undefined, JSON.stringify(result.error));
   assert.equal(authorizationPaths.includes('默认备份仓'), false);
-  assert.ok(findAtom(findAtom(result.atoms, '默认备份仓').contain, '可丢弃'));
-  assert.equal(findAtom(result.atoms, 'Agent').contain.length, 0);
+  assert.ok(findAtom(findAtom(result.atoms, '默认备份仓').slot, '可丢弃'));
+  assert.equal(findAtom(result.atoms, 'Agent').slot.length, 0);
 
   await appendTransformLog(files.contextFile, result.logRecord);
   const restoreParsed = createAtomLanguageReceiver().receive(
@@ -319,14 +319,14 @@ test('discard moves an authorized descendant into kernel backup without granting
   });
   assert.equal(restored.error, undefined, JSON.stringify(restored.error));
   assert.equal(authorizationPaths.includes('默认备份仓'), false);
-  assert.ok(findAtom(findAtom(restored.atoms, 'Agent').contain, '可丢弃'));
-  assert.equal(findAtom(restored.atoms, '默认备份仓').contain.length, 0);
+  assert.ok(findAtom(findAtom(restored.atoms, 'Agent').slot, '可丢弃'));
+  assert.equal(findAtom(restored.atoms, '默认备份仓').slot.length, 0);
 });
 
-test('discard copies a frozen optimized snapshot instead of mutating its contain arrays', async (t) => {
+test('discard copies a frozen optimized snapshot instead of mutating its slot arrays', async (t) => {
   const files = await fixture(t, [
     atom('Synthetic Agent', '', [atom('Disposable')]),
-    { 'thing@backup@default': 'Synthetic Backup', situation: '', contain: [], support: [] }
+    { 'thing@backup@default': 'Synthetic Backup', situation: '', slot: [], strut: [] }
   ]);
   const freeze = (value) => {
     if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
@@ -348,8 +348,8 @@ test('discard copies a frozen optimized snapshot instead of mutating its contain
 
   assert.equal(result.error, undefined, JSON.stringify(result.error));
   assert.equal(JSON.stringify(atoms), before, 'the immutable input snapshot remains byte-equivalent');
-  assert.equal(findAtom(result.atoms, 'Synthetic Agent').contain.length, 0);
-  assert.ok(findAtom(findAtom(result.atoms, 'Synthetic Backup').contain, 'Disposable'));
+  assert.equal(findAtom(result.atoms, 'Synthetic Agent').slot.length, 0);
+  assert.ok(findAtom(findAtom(result.atoms, 'Synthetic Backup').slot, 'Disposable'));
 });
 
 test('same-name Things from different paths receive distinct traceable archive coordinates', async (t) => {
@@ -359,8 +359,8 @@ test('same-name Things from different paths receive distinct traceable archive c
     {
       'thing@backup@default': 'Synthetic Backup',
       situation: '',
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     }
   ]);
   const atoms = await readAtoms(files.contextFile);
@@ -386,10 +386,10 @@ test('same-name Things from different paths receive distinct traceable archive c
   assert.match(west.archive.discardId, /^[0-9a-f-]{36}$/u);
 
   const backup = findAtom(await readAtoms(files.contextFile), 'Synthetic Backup');
-  assert.equal(backup.contain.length, 2);
-  assert.equal(new Set(backup.contain.map((entry) => entry.thing)).size, 2);
+  assert.equal(backup.slot.length, 2);
+  assert.equal(new Set(backup.slot.map((entry) => entry.thing)).size, 2);
   assert.deepEqual(
-    backup.contain.map((entry) => entry.situation).sort(),
+    backup.slot.map((entry) => entry.situation).sort(),
     ['east payload', 'west payload']
   );
   const discards = (await readTransformLog(files.contextFile)).filter((entry) => (
@@ -412,8 +412,8 @@ test('each archive coordinate restores only its own original Thing and name', as
     {
       'thing@backup@default': 'Synthetic Backup',
       situation: '',
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     }
   ]);
   const east = await execute(files, 'transform {"thing.dsc.":"Synthetic East/Duplicate"}');
@@ -427,10 +427,10 @@ test('each archive coordinate restores only its own original Thing and name', as
   );
   assert.equal(restoredWest.ok, true, JSON.stringify(restoredWest.errors));
   let world = await readAtoms(files.contextFile);
-  const westThing = findAtom(findAtom(world, 'Synthetic West').contain, 'Duplicate');
+  const westThing = findAtom(findAtom(world, 'Synthetic West').slot, 'Duplicate');
   assert.ok(westThing, 'the selected archive must recover its original business name');
   assert.equal(westThing.situation, 'west payload');
-  assert.equal(findAtom(world, 'Synthetic East').contain.length, 0);
+  assert.equal(findAtom(world, 'Synthetic East').slot.length, 0);
 
   const restoredEast = await execute(
     files,
@@ -438,11 +438,11 @@ test('each archive coordinate restores only its own original Thing and name', as
   );
   assert.equal(restoredEast.ok, true, JSON.stringify(restoredEast.errors));
   world = await readAtoms(files.contextFile);
-  const eastThing = findAtom(findAtom(world, 'Synthetic East').contain, 'Duplicate');
+  const eastThing = findAtom(findAtom(world, 'Synthetic East').slot, 'Duplicate');
   assert.ok(eastThing, 'the remaining archive must retain its independent restore record');
   assert.equal(eastThing.situation, 'east payload');
   assert.equal(westThing.situation, 'west payload');
-  assert.equal(findAtom(world, 'Synthetic Backup').contain.length, 0);
+  assert.equal(findAtom(world, 'Synthetic Backup').slot.length, 0);
 });
 
 test('restore conflict preserves the existing Thing, archive, projection, and active discard record', async (t) => {
@@ -451,15 +451,15 @@ test('restore conflict preserves the existing Thing, archive, projection, and ac
     {
       'thing@backup@default': 'Synthetic Backup',
       situation: '',
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     }
   ]);
   const discarded = await execute(files, 'transform {"thing.dsc.":"Synthetic East/Duplicate"}');
   assert.equal(discarded.ok, true, JSON.stringify(discarded.errors));
   const recreated = await execute(
     files,
-    'transform new {"thing":"Synthetic East/Duplicate","situation":"current payload","contain":[],"support":[]}'
+    'transform new {"thing":"Synthetic East/Duplicate","situation":"current payload","slot":[],"strut":[]}'
   );
   assert.equal(recreated.ok, true, JSON.stringify(recreated.errors));
   const contextBefore = await fs.readFile(files.contextFile, 'utf8');
@@ -484,8 +484,8 @@ test('discard commit failure leaves authoritative world, projection, and transfo
     {
       'thing@backup@default': 'Synthetic Backup',
       situation: '',
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     }
   ];
   const files = await fixture(t, initial);
@@ -518,8 +518,8 @@ test('audit mirror failure stays fatal when a custom commit receipt does not con
     {
       'thing@backup@default': 'Synthetic Backup',
       situation: '',
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     }
   ];
   const files = await fixture(t, initial);
@@ -546,8 +546,8 @@ test('audit mirror failure cannot turn a committed discard into a failed unrecov
     {
       'thing@backup@default': 'Synthetic Backup',
       situation: '',
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     }
   ];
   const files = await fixture(t, initial);
@@ -565,7 +565,7 @@ test('audit mirror failure cannot turn a committed discard into a failed unrecov
   assert.ok(discarded.warnings.some((warning) => (
     warning.code === 'TRANSFORM_LOG_MIRROR_FAILED'
   )), JSON.stringify(discarded));
-  assert.equal(findAtom(await readAtoms(files.contextFile), 'Synthetic East').contain.length, 0);
+  assert.equal(findAtom(await readAtoms(files.contextFile), 'Synthetic East').slot.length, 0);
   assert.match(await fs.readFile(files.projectionFile, 'utf8'), /Synthetic Backup/u);
   const transactionEvents = (await fs.readFile(
     path.join(files.directory, 'atom.transactions.json.d', 'events.jsonl'),
@@ -585,7 +585,7 @@ test('audit mirror failure cannot turn a committed discard into a failed unrecov
   });
   assert.equal(restored.ok, true, JSON.stringify(restored));
   assert.equal(
-    findAtom(findAtom(await readAtoms(files.contextFile), 'Synthetic East').contain, 'Disposable').situation,
+    findAtom(findAtom(await readAtoms(files.contextFile), 'Synthetic East').slot, 'Disposable').situation,
     'recoverable payload'
   );
 });
@@ -598,30 +598,30 @@ test('Atom to Graph projection preserves long multilingual situation without cli
     rootName: path.basename(files.contextFile)
   });
   const graph = parseGraphDocument(JSON.parse(await fs.readFile(files.projectionFile, 'utf8')));
-  assert.equal(graph.graph.contain[0].situation, longDetail);
+  assert.equal(graph.graph.slot[0].situation, longDetail);
 });
 
 test('Graph validator and public schema impose no business length caps', async () => {
   const longName = '长名称'.repeat(1500);
   const longVerb = '长关系'.repeat(1500);
   const parsed = parseGraphDocument({
-    config: { schema_version: '2.0.0' },
+    config: { schema_version: '3.0.0' },
     graph: {
       thing: '根',
       situation: '',
-      contain: [
+      slot: [
         {
           thing: '来源',
           situation: '',
-          contain: [],
-          support: [{ 'if@current': true, then: [{ thing: longName }] }]
+          slot: [],
+          strut: [{ 'if@current': true, then: [{ thing: longName }] }]
         },
         atom(longName)
       ],
-      support: []
+      strut: []
     }
   });
-  assert.equal(parsed.graph.contain[0].support[0].then[0].thing, longName);
+  assert.equal(parsed.graph.slot[0].strut[0].then[0].thing, longName);
 
   const schema = JSON.parse(await fs.readFile(
     new URL('../schemas/graph-json-2.0.0.schema.json', import.meta.url),

@@ -23,7 +23,7 @@ test('one explicit N-to-H plus H-to-M composition keeps the real hub and two cla
     }
   });
   const fanInClause = {
-    id: 'support:Flow/H:0',
+    id: 'strut:Flow/H:0',
     antecedentPaths: ['Flow/A', 'Flow/B'],
     dependencyPaths: ['Flow/A', 'Flow/B', 'Flow/Gate'],
     root: {
@@ -37,7 +37,7 @@ test('one explicit N-to-H plus H-to-M composition keeps the real hub and two cla
     evaluation: { status: 'true', decision: true }
   };
   const fanOutClause = {
-    id: 'support:Flow/H:1',
+    id: 'strut:Flow/H:1',
     antecedentPaths: ['Flow/H'],
     dependencyPaths: ['Flow/H'],
     root: { kind: 'thing', targetPath: 'Flow/H', exprPath: [], implicit: true },
@@ -49,7 +49,7 @@ test('one explicit N-to-H plus H-to-M composition keeps the real hub and two cla
   };
   const hiddenClause = {
     ...fanInClause,
-    id: 'support:Flow/A:1',
+    id: 'strut:Flow/A:1',
     antecedentPaths: ['Flow/A', 'Flow/Hidden'],
     dependencyPaths: ['Flow/A', 'Flow/Hidden'],
     root: {
@@ -70,7 +70,7 @@ test('one explicit N-to-H plus H-to-M composition keeps the real hub and two cla
       node('Z', 'Flow/Z', 4, 2)
     ],
     edges: [],
-    supportClauses: [fanInClause, fanOutClause, hiddenClause]
+    strutClauses: [fanInClause, fanOutClause, hiddenClause]
   };
   await page.route('**/__spatial/api/state*', async (route) => {
     const requestUrl = new URL(route.request().url());
@@ -90,11 +90,11 @@ test('one explicit N-to-H plus H-to-M composition keeps the real hub and two cla
     window.spatialLab
     && document.body.dataset.spatialBridge === 'connected'
   ));
-  await expect.poll(() => page.evaluate(() => window.spatialLab.state().supportGeometry)).toHaveLength(2);
-  const geometries = await page.evaluate(() => window.spatialLab.state().supportGeometry);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().strutGeometry)).toHaveLength(2);
+  const geometries = await page.evaluate(() => window.spatialLab.state().strutGeometry);
   expect(geometries.map(({ id, kind }) => ({ id, kind }))).toEqual([
-    { id: 'support:Flow/H:0', kind: 'fan-in' },
-    { id: 'support:Flow/H:1', kind: 'fan-out' }
+    { id: 'strut:Flow/H:0', kind: 'fan-in' },
+    { id: 'strut:Flow/H:1', kind: 'fan-out' }
   ]);
   expect(geometries[0].junctions.map(({ role, ratio }) => ({ role, ratio }))).toEqual([
     { role: 'merge', ratio: 0.5 }
@@ -119,27 +119,27 @@ test('one explicit N-to-H plus H-to-M composition keeps the real hub and two cla
   await page.mouse.click(hub.clientX, hub.clientY, { button: 'middle' });
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().selected)).toBe('H');
   await page.getByRole('button', { name: '全域', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => window.spatialLab.state().supportGeometry)).toHaveLength(2);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().strutGeometry)).toHaveLength(2);
   expect(await page.evaluate(() => ({
-    geometryIds: window.spatialLab.state().supportGeometry.map(({ id }) => id),
+    geometryIds: window.spatialLab.state().strutGeometry.map(({ id }) => id),
     targetClauseIds: [...new Set(
-      window.spatialLab.state().supportClauseTargets.map(({ clauseId }) => clauseId)
+      window.spatialLab.state().strutClauseTargets.map(({ clauseId }) => clauseId)
     )]
   }))).toEqual({
-    geometryIds: ['support:Flow/H:0', 'support:Flow/H:1'],
-    targetClauseIds: ['support:Flow/H:0', 'support:Flow/H:1']
+    geometryIds: ['strut:Flow/H:0', 'strut:Flow/H:1'],
+    targetClauseIds: ['strut:Flow/H:0', 'strut:Flow/H:1']
   });
   const target = await page.evaluate(() => (
-    window.spatialLab.state().supportClauseTargets
+    window.spatialLab.state().strutClauseTargets
       .filter(({ clauseId, segmentRole }) => (
-        clauseId === 'support:Flow/H:0' && segmentRole === 'trunk'
+        clauseId === 'strut:Flow/H:0' && segmentRole === 'trunk'
       ))[2]
   ));
   expect(target).toBeTruthy();
   await page.mouse.click(target.clientX, target.clientY);
   await expect.poll(() => page.evaluate(() => (
-    window.spatialLab.state().selectedSupportClause
-  ))).toBe('support:Flow/H:0');
+    window.spatialLab.state().selectedStrutClause
+  ))).toBe('strut:Flow/H:0');
   expect(mutatingRequests.filter(({ url }) => (
     new URL(url).pathname !== '/__spatial/api/view'
   ))).toEqual([]);

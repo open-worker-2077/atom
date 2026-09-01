@@ -33,7 +33,7 @@ function legacyLockSnapshot(fields = ['name', 'detail', 'children', 'partners', 
 test('request-driven lock snapshots are retired instead of becoming a second authorization authority', () => {
   for (const fields of [
     ['name', 'detail', 'children', 'partners', 'messages'],
-    ['thing', 'situation', 'contain', 'support', 'messages']
+    ['thing', 'situation', 'slot', 'strut', 'messages']
   ]) {
     assert.throws(
       () => planRequestDrivenLockFourAxisMigration(legacyLockSnapshot(fields)),
@@ -61,22 +61,22 @@ test('request-driven lock migration rejects mixed, colliding, and invalid field 
 
 test('migration planner is a pure structural conversion that preserves situation bytes', () => {
   assert.equal(typeof graphSchema.planGraphFourAxisMigration, 'function');
-  const body = '正文包含 name detail children partners situation support，均不得替换。';
+  const body = '正文包含 name detail children partners situation strut，均不得替换。';
   const result = graphSchema.planGraphFourAxisMigration({
     name: '世界', detail: body, partners: [], children: [
       { name: 'A', detail: 'A', children: [], partners: [] }
     ]
   });
   assert.deepEqual(result.graph, {
-    thing: '世界', situation: body, support: [], contain: [
-      { thing: 'A', situation: 'A', contain: [], support: [] }
+    thing: '世界', situation: body, strut: [], slot: [
+      { thing: 'A', situation: 'A', slot: [], strut: [] }
     ]
   });
   assert.equal(result.summary.nodes, 2);
   assert.equal(result.summary.situationBytes, Buffer.byteLength(body) + Buffer.byteLength('A'));
 });
 
-test('migration planner preserves every non-empty partners item without assigning support semantics', () => {
+test('migration planner preserves every non-empty partners item without assigning strut semantics', () => {
   const result = graphSchema.planGraphFourAxisMigration({
     name: '世界', detail: '', partners: [], children: [
       { name: 'A', detail: '', children: [], partners: [
@@ -85,12 +85,12 @@ test('migration planner preserves every non-empty partners item without assignin
       { name: 'B', detail: '', children: [], partners: [] },
       { name: 'C', detail: '', children: [], partners: [] }
     ]
-  }, { allowEmptyVerbAsSupport: true });
+  }, { allowEmptyVerbAsStrut: true });
   assert.deepEqual(result.summary.legacyRelations, [
       { source: '世界/A', ordinal: 0, verb: '', object: 'B' },
       { source: '世界/A', ordinal: 1, verb: '', object: 'C' }
   ]);
-  assert.deepEqual(result.graph.contain[0].support, [
+  assert.deepEqual(result.graph.slot[0].strut, [
     { verb: '', object: 'B' }, { verb: '', object: 'C' }
   ]);
   assert.equal(JSON.stringify(result.graph).includes('if@current'), false);
@@ -106,7 +106,7 @@ test('migration planner preserves a legacy verb instead of losing or guessing it
   assert.deepEqual(result.summary.legacyRelations[0], {
     source: '世界/A', ordinal: 0, verb: '依赖', object: 'B'
   });
-  assert.deepEqual(result.graph.contain[0].support[0], { verb: '依赖', object: 'B' });
+  assert.deepEqual(result.graph.slot[0].strut[0], { verb: '依赖', object: 'B' });
 });
 
 test('migration upgrades only proven Graph API keys and AtomView attributes', () => {
@@ -128,7 +128,7 @@ test('migration upgrades only proven Graph API keys and AtomView attributes', ()
   assert.equal(result.summary.programs[0].sourceHashBefore, result.summary.programs[0].sourceHash);
   assert.notEqual(result.summary.programs[0].sourceHashAfter, result.summary.programs[0].sourceHashBefore);
   assert.deepEqual(result.summary.programs[0].blockers, []);
-  assert.equal(result.graph.contain[0].situation, [
+  assert.equal(result.graph.slot[0].situation, [
     '# name stays in this comment',
     'def main(arguments):',
     "    nodes = explore({'thing': 'Target', 'situation': 'name stays'})",
@@ -159,8 +159,8 @@ test('migration reports every ambiguous executable Program and closes the commit
       Number.isInteger(line) && Number.isInteger(column) && reason
     )));
   }
-  assert.equal(result.graph.contain[0].situation, legacy.children[0].detail);
-  assert.equal(result.graph.contain[1].situation, legacy.children[1].detail);
+  assert.equal(result.graph.slot[0].situation, legacy.children[0].detail);
+  assert.equal(result.graph.slot[1].situation, legacy.children[1].detail);
 });
 
 test('default backup Program preserves source while exact test Program is upgraded', () => {
@@ -172,8 +172,8 @@ test('default backup Program preserves source while exact test Program is upgrad
   ]);
   const result = graphSchema.planGraphFourAxisMigration(legacy, { testRoots: ['Root/test'] });
 
-  assert.equal(result.graph.contain[0].contain[0].situation, archivedSource);
-  assert.equal(result.graph.contain[1].contain[0].situation, "explore({'thing':'Fixture'})");
+  assert.equal(result.graph.slot[0].slot[0].situation, archivedSource);
+  assert.equal(result.graph.slot[1].slot[0].situation, "explore({'thing':'Fixture'})");
   assert.deepEqual(result.summary.programs.map(({ path, disposition }) => ({ path, disposition })), [
     { path: 'Root/Backup/Archived', disposition: 'historical-non-executable' },
     { path: 'Root/test/Fixture', disposition: 'upgraded-test' }
@@ -193,11 +193,11 @@ test('Program upgrader follows proven current_atom and explore loop views only',
   ));
 
   assert.equal(result.summary.readyToCommit, true);
-  assert.equal(result.graph.contain[0].situation, [
+  assert.equal(result.graph.slot[0].situation, [
     "label = 'detail stays text'",
     'current = current_atom()',
     'message({\'level\':\'info\', \'text\': current.situation})',
-    "for node in explore({'contain': []}):",
+    "for node in explore({'slot': []}):",
     '    message({\'level\':\'info\', \'text\': node.thing})'
   ].join('\n'));
 });
@@ -214,7 +214,7 @@ test('ordinary object attributes remain byte-identical when no Graph view exists
   ));
 
   assert.equal(result.summary.readyToCommit, true);
-  assert.equal(result.graph.contain[0].situation, source);
+  assert.equal(result.graph.slot[0].situation, source);
   assert.deepEqual(result.summary.programs[0].edits, []);
 });
 
@@ -229,7 +229,7 @@ test('Program upgrader rewrites only a retired axis prefix in a composite Graph 
   ));
 
   assert.equal(result.summary.readyToCommit, true);
-  assert.equal(result.graph.contain[0].situation, [
+  assert.equal(result.graph.slot[0].situation, [
     "text = arguments['payload']",
     "transform({'thing':'Root', 'situation#' + text: None})",
     "message({'level':'info','text':text})"
@@ -246,7 +246,7 @@ test('Program upgrader follows a single-use local binding for a composite Graph 
   ));
 
   assert.equal(result.summary.readyToCommit, true);
-  assert.equal(result.graph.contain[0].situation, [
+  assert.equal(result.graph.slot[0].situation, [
     "command = 'situation' + '.rep.' + arguments['navigation']",
     "transform({'thing':'Root', command: None})"
   ].join('\n'));
@@ -264,7 +264,7 @@ test('Program upgrader proves one composite Graph key binding inside one module 
   ));
 
   assert.equal(result.summary.readyToCommit, true);
-  assert.equal(result.graph.contain[0].situation, [
+  assert.equal(result.graph.slot[0].situation, [
     "navigation_value = arguments['navigation']",
     "if arguments['enabled']:",
     "    command = 'situation' + '.rep.' + navigation_value",
@@ -285,10 +285,10 @@ test('Program upgrader follows one local Graph specification through mutation an
   ));
 
   assert.equal(result.summary.readyToCommit, true);
-  assert.equal(result.graph.contain[0].situation, [
+  assert.equal(result.graph.slot[0].situation, [
     'def main(arguments):',
     "    query = {'thing': arguments['root'], 'situation$full': None}",
-    "    query['contain#' + str(arguments['depth'])] = None",
+    "    query['slot#' + str(arguments['depth'])] = None",
     '    rows = explore(query)',
     '    return [row.situation.strip() for row in rows]'
   ].join('\n'));
@@ -307,9 +307,9 @@ test('Program upgrader follows a local list of literal Graph specifications into
   ));
 
   assert.equal(result.summary.readyToCommit, true);
-  assert.equal(result.graph.contain[0].situation, [
+  assert.equal(result.graph.slot[0].situation, [
     'def main(arguments):',
-    "    updates = [{'thing':'A','situation':'x'}, {'thing':'B','support':[]}]",
+    "    updates = [{'thing':'A','situation':'x'}, {'thing':'B','strut':[]}]",
     '    for update in updates:',
     '        transform(update)',
     "    return {'updated': len(updates)}"
@@ -335,16 +335,16 @@ test('Program upgrader proves AtomView identity through the registered direct_ch
   ));
 
   assert.equal(result.summary.readyToCommit, true);
-  assert.equal(result.graph.contain[0].situation, [
+  assert.equal(result.graph.slot[0].situation, [
     'def main(arguments):',
     "    instance = arguments['instance']",
-    "    rows = explore({'thing':instance,'situation$full':None,'contain$latitude-1':None,'support':None})",
+    "    rows = explore({'thing':instance,'situation$full':None,'slot$latitude-1':None,'strut':None})",
     '    children = direct_children(rows, instance)',
     '    result = []',
     '    for child in children:',
     '        result.append(child.thing)',
     '        result.append(child.situation)',
-    '        for partner in child.support:',
+    '        for partner in child.strut:',
     "            result.append(partner['object'])",
     '    return result'
   ].join('\n'));
@@ -361,7 +361,7 @@ test('Program upgrader still blocks a composite key without a retired-axis const
 
   assert.equal(result.summary.readyToCommit, false);
   assert.equal(result.summary.blockedPrograms[0].blockers[0].reason, 'dynamic-graph-key');
-  assert.equal(result.graph.contain[0].situation, source);
+  assert.equal(result.graph.slot[0].situation, source);
 });
 
 test('world migration refuses to commit a plan with Program source blockers', async () => {
@@ -426,7 +426,7 @@ test('world migration requires a verified recovery backup before one revision-bo
   assert.equal(calls[2][1].expectedRevision, snapshot.revision);
   assert.equal(calls[2][1].facts[0].situation, sourceFacts[0].detail);
   assert.equal(calls[0][1].facts[0].children[0].detail, programSource);
-  assert.equal(calls[2][1].facts[0].contain[0].situation,
+  assert.equal(calls[2][1].facts[0].slot[0].situation,
     "nodes = explore({'thing':'A'})\nmessage({'level':'info','text':nodes[0].thing})");
   assert.equal(JSON.stringify(calls[2][1].facts).includes('situation 中的 name 不得替换'), true);
 

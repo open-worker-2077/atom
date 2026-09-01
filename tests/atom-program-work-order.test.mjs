@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 async function runProgram(source, world = [], programChildren = []) {
@@ -66,11 +66,11 @@ function transformedDetail(item) {
 
 test('form compiles only the four authoritative Graph axes', async () => {
   const cycle = await runProgram([
-    "compiled = form({'thing': '最小单', 'situation': '说明', 'contain': [{'thing': '内容'}], 'support': []})",
+    "compiled = form({'thing': '最小单', 'situation': '说明', 'slot': [{'thing': '内容'}], 'strut': []})",
     "message({'level': 'info', 'text': ','.join(sorted(compiled.keys()))})"
   ].join('\n'));
 
-  assert.equal(cycle.messages[0].text, 'contain,situation,support,thing');
+  assert.equal(cycle.messages[0].text, 'situation,slot,strut,thing');
 
   await assert.rejects(
     runProgram("form({'thing': '错误单', 'fields': []})"),
@@ -86,10 +86,10 @@ test('work_order creates one versioned Graph-native instance with exactly three 
   ].join('\n'));
 
   assert.equal(cycle.transforms.length, 1);
-  const [instance] = cycle.transforms[0].contain;
+  const [instance] = cycle.transforms[0].slot;
   assert.equal(instance.thing, 'ESG计划');
-  assert.deepEqual(instance.contain.map((child) => child.thing), ['Output', 'Step', 'Criteria']);
-  assert.deepEqual(instance.contain.map((child) => child.support), [
+  assert.deepEqual(instance.slot.map((child) => child.thing), ['Output', 'Step', 'Criteria']);
+  assert.deepEqual(instance.slot.map((child) => child.strut), [
     [{ 'if@current': true, then: [{ thing: 'Criteria' }] }],
     [{ 'if@current': true, then: [{ thing: 'Output' }] }],
     [{ 'if@current': true, then: [{ thing: 'Step' }] }]
@@ -97,7 +97,7 @@ test('work_order creates one versioned Graph-native instance with exactly three 
   assert.equal(JSON.parse(instance.situation).template, 'work-order');
   assert.equal(JSON.parse(instance.situation).templateVersion, '1');
   assert.equal(JSON.parse(instance.situation).creationId, 'esg-2026');
-  const [output, step, criteria] = instance.contain.map((item) => JSON.parse(item.situation));
+  const [output, step, criteria] = instance.slot.map((item) => JSON.parse(item.situation));
   assert.deepEqual(Object.keys(output.交付物), ['名称', '接收方', '成果引用', '版本']);
   assert.deepEqual(Object.keys(step.操作), ['定义', '状态', '实际动作', '实际产出', '异常']);
   assert.deepEqual(Object.keys(criteria.要求), ['定义', '条件', '边界']);

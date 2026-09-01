@@ -10,7 +10,7 @@ import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
 const AGENT_SOURCE = 'agent({"labels":["^^"],"functions":{"groups":[],"names":["agent","explore","transform","use_program"]}})';
 
-function atom(thing, situation = '', contain = [], support = [], types = []) {
+function atom(thing, situation = '', slot = [], strut = [], types = []) {
   const agentProgram = types.includes('agent');
   const storedTypes = agentProgram
     ? ['program', ...types.filter((type) => type !== 'agent' && type !== 'program')]
@@ -21,8 +21,8 @@ function atom(thing, situation = '', contain = [], support = [], types = []) {
   return {
     [`thing${storedTypes.map((type) => `@${type}`).join('')}`]: thing,
     situation: storedSituation,
-    contain,
-    support
+    slot,
+    strut
   };
 }
 
@@ -34,12 +34,12 @@ function find(atoms, selector) {
       Object.entries(candidate).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1] === segment
     ));
     if (!current) return null;
-    children = current.contain;
+    children = current.slot;
   }
   return current;
 }
 
-test('relative Program Explore resolves only unique direct contain segments below the bound scope root', async () => {
+test('relative Program Explore resolves only unique direct slot segments below the bound scope root', async () => {
   const atoms = [
     atom('Root', '', [
       atom('候选', '', [atom('客户', '当前客户', [atom('地址', '', [atom('城市', '上海')])])]),

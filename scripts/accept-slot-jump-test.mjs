@@ -8,12 +8,12 @@ import { createProgramRuntimeScheduler } from '../work-engine/atom-language/prog
 
 const worldService = createLegacyWorldService();
 
-function atom(thing, situation = '', contain = [], support = [], types = []) {
+function atom(thing, situation = '', slot = [], strut = [], types = []) {
   return {
     [`thing${types.map((type) => `@${type}`).join('')}`]: thing,
     situation,
-    contain,
-    support
+    slot,
+    strut
   };
 }
 
@@ -23,11 +23,11 @@ function thingOf(value) {
 
 function find(atoms, selector) {
   let current = null;
-  let contain = atoms;
+  let slot = atoms;
   for (const segment of selector.split('/')) {
-    current = contain.find((candidate) => thingOf(candidate) === segment);
+    current = slot.find((candidate) => thingOf(candidate) === segment);
     if (!current) return null;
-    contain = current.contain ?? [];
+    slot = current.slot ?? [];
   }
   return current;
 }

@@ -35,13 +35,13 @@ if framework_refs:
     lock({'targets': {'refs': framework_refs}, 'mode': 'write', 'fields': ['thing', 'situation'], 'protect': {'atom': True, 'messages': False}, 'reason': {'code': 'FRAMEWORK_SCHEMA', 'message': '推进流第1至2级框架由模板维护；请填写下级表单字段，不要修改框架名称与总说明'}})
 for form_name, relative_path in definitions:
     form_path = flow_path + '/' + relative_path
-    rows = explore({'thing': form_path, 'contain$latitude-1': None, 'situation$full': None})
+    rows = explore({'thing': form_path, 'slot$latitude-1': None, 'situation$full': None})
     status = form_status(rows, form_path)
     states.append((form_name, form_path, status))
     if status == '已冻结':
         refs = subtree_refs(rows, form_path)
         if refs:
-            lock({'targets': {'refs': refs}, 'mode': 'write', 'fields': ['thing', 'situation', 'contain', 'support'], 'protect': {'atom': True, 'messages': False}, 'reason': {'code': 'MANUAL_FREEZE', 'message': '该表单已人工冻结；如需继续，请向人工反馈解冻需求'}})
+            lock({'targets': {'refs': refs}, 'mode': 'write', 'fields': ['thing', 'situation', 'slot', 'strut'], 'protect': {'atom': True, 'messages': False}, 'reason': {'code': 'MANUAL_FREEZE', 'message': '该表单已人工冻结；如需继续，请向人工反馈解冻需求'}})
 pending = first_pending(states, ['已通过', '已冻结'])
 navigation_value = pending[0] if pending else '已完成'
 navigation = explore({'thing': flow_path + '/导航坐标', 'situation$full': None})
@@ -51,14 +51,14 @@ if navigation and navigation[0].situation != navigation_value:
 message({'level': 'info', 'text': '推进流当前节点：' + navigation_value})"""
 
 
-def _atom(name, detail="", children=None, support=None, types=None):
+def _atom(name, detail="", children=None, strut=None, types=None):
     result = {"thing": name, "situation": detail}
     if types:
         result["types"] = list(types)
     if children:
-        result["contain"] = list(children)
-    if support:
-        result["support"] = list(support)
+        result["slot"] = list(children)
+    if strut:
+        result["strut"] = list(strut)
     return result
 
 

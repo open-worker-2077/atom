@@ -17,7 +17,7 @@ function atomName(atom) {
 }
 
 function childrenOf(atom) {
-  const entry = axisEntry(atom, 'contain');
+  const entry = axisEntry(atom, 'slot');
   return Array.isArray(entry?.[1]) ? entry[1] : null;
 }
 
@@ -26,7 +26,7 @@ function pathParts(value) {
     throw problem('INVALID_PATCH_PATH', 'Patch paths must be non-empty strings');
   }
   const parts = value.split('/').map((part) => part.trim()).filter(Boolean);
-  if (!parts.length) throw problem('INVALID_PATCH_PATH', 'Patch paths must contain an Atom name');
+  if (!parts.length) throw problem('INVALID_PATCH_PATH', 'Patch paths must slot an Atom name');
   return parts;
 }
 

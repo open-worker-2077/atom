@@ -7,19 +7,19 @@ import {
 import { executeProgramExplore } from '../work-engine/atom-language/query-capability.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
 
-function atom(thing, situation = '', contain = []) {
-  return { thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = []) {
+  return { thing, situation, slot, strut: [] };
 }
 
 test('Program explore uses the same coordinate execution as CLI explore', async () => {
   const atoms = [atom('推进流', '', [atom('任务A', '', [atom('状态', '已人工冻结')])])];
   const receiver = createAtomLanguageReceiver();
-  const cli = receiver.receive('explore {"thing":"推进流","contain$latitude-2","situation$full"}');
+  const cli = receiver.receive('explore {"thing":"推进流","slot$latitude-2","situation$full"}');
   assert.equal(cli.ok, true);
 
   const program = await executeProgramExplore({
     atoms,
-    request: { thing: '推进流', 'contain$latitude-2': null, 'situation$full': null },
+    request: { thing: '推进流', 'slot$latitude-2': null, 'situation$full': null },
     receiver
   });
 
@@ -49,21 +49,21 @@ test('Program transform classifies only a complete command-free four-axis Atom a
     request: {
       thing: 'test/创建结果',
       situation: '{"probe":true}',
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     },
     receiver
   });
   const partial = compileProgramTransform({
-    request: { thing: '已有目标', contain: [] },
+    request: { thing: '已有目标', slot: [] },
     receiver
   });
   const fourAxesWithCommand = compileProgramTransform({
     request: {
       thing: '已有目标',
       situation: '保留值',
-      contain: [],
-      'support.rep.': []
+      slot: [],
+      'strut.rep.': []
     },
     receiver
   });

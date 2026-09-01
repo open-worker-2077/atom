@@ -36,8 +36,8 @@ function hashBytes(bytes) {
   return `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
 }
 
-function atom(key, name, situation = '', contain = []) {
-  return { [key]: name, situation, contain, support: [] };
+function atom(key, name, situation = '', slot = []) {
+  return { [key]: name, situation, slot, strut: [] };
 }
 
 function fieldByBase(record, base) {
@@ -114,10 +114,10 @@ test('migration upgrades active legacy Agents and demotes archived ones without 
   assert.deepEqual(fieldByBase(plan.facts[1], 'thing'), ['thing@program#declared', 'LegacyProgram']);
   assert.equal(plan.facts[1].situation, legacyProgramSource);
   assert.deepEqual(
-    fieldByBase(plan.facts[2].contain[0], 'thing'),
+    fieldByBase(plan.facts[2].slot[0], 'thing'),
     ['thing@marker#archived', 'ArchivedProgram']
   );
-  assert.equal(plan.facts[2].contain[0].situation, 'archived bytes');
+  assert.equal(plan.facts[2].slot[0].situation, 'archived bytes');
   assert.deepEqual(plan.summary, {
     activePureAgentsUpgraded: 1,
     activeProgramAgentsUpgraded: 1,
@@ -154,8 +154,8 @@ test('migration rejects reconstructed-key collisions without mutating the source
     'thing@agent': 'Legacy',
     'thing@program': 'Collision',
     situation: 'original',
-    contain: [],
-    support: []
+    slot: [],
+    strut: []
   }];
   const before = structuredClone(world);
 
@@ -169,9 +169,9 @@ test('migration rejects reconstructed-key collisions without mutating the source
   assert.deepEqual(world, before);
 });
 
-test('migration preserves support payload objects without interpreting them as Atom fields', async () => {
+test('migration preserves strut payload objects without interpreting them as Atom fields', async () => {
   const world = [atom('thing@agent', 'Legacy', 'source')];
-  world[0].support = [
+  world[0].strut = [
     { verb: '历史关联', object: 'Target/对象' },
     { 'if@current': true, then: [{ thing: 'Target' }] }
   ];
@@ -181,7 +181,7 @@ test('migration preserves support payload objects without interpreting them as A
     programScheduler
   });
 
-  assert.deepEqual(plan.facts[0].support, world[0].support);
+  assert.deepEqual(plan.facts[0].strut, world[0].strut);
 });
 
 test('migration plan is revision-bound, independently cloned, and target-authorized by the scheduler', async () => {
@@ -249,10 +249,10 @@ test('forward repair demotes an unrelated generated legacy Agent and restores it
   });
 
   assert.equal(plan.summary.generatedLegacyAgentsDemoted, 1);
-  assert.equal(plan.facts[0].contain[0].situation, 'legacy controller');
-  assert.equal(plan.facts[0].contain[0].thing, 'Legacy Controller');
-  assert.equal(Object.hasOwn(plan.facts[0].contain[0], 'thing@program'), false);
-  assert.equal(plan.sourceFacts[0].contain[0].situation.endsWith('["explore"]}})'), true);
+  assert.equal(plan.facts[0].slot[0].situation, 'legacy controller');
+  assert.equal(plan.facts[0].slot[0].thing, 'Legacy Controller');
+  assert.equal(Object.hasOwn(plan.facts[0].slot[0], 'thing@program'), false);
+  assert.equal(plan.sourceFacts[0].slot[0].situation.endsWith('["explore"]}})'), true);
 });
 
 test('apply validates confirmation and immutable plan hashes before any side effect', async () => {

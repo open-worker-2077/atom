@@ -168,7 +168,7 @@ test('branch and mode changes cannot strand an active editor or hidden selection
   assert.match(engine, /const transactionGuardedIntents = new Set/);
   assert.match(engine, /transactionGuardedIntents\.has\(intent\)/);
   assert.match(engine, /function toggleClusterChildDomain[\s\S]{0,1200}transactionBlocksViewChange\(\)/);
-  assert.match(engine, /pathContains\(targetPath, selectedPath\)/);
+  assert.match(engine, /pathSlots\(targetPath, selectedPath\)/);
   assert.match(engine, /state\.selected = null/);
   assert.match(engine, /function nodeByIdInPath\(path, id\)/);
   assert.match(engine, /operation\.target\.path[\s\S]{0,240}nodeByIdInPath/);

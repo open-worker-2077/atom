@@ -7,8 +7,8 @@ import test from 'node:test';
 import { createRuntimeCliExecutor } from '../src/atom-system/adapters/runtime-cli-executor.mjs';
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 test('TC-PERF-LOCAL-EXPLORE / TC-PERF-LOCAL-TRANSFORM: a 20 MB unrelated sibling set stays local', async (t) => {
@@ -93,9 +93,9 @@ test('TC-PERF-LOCAL-TRANSFORM: structural operations stay local and reversible',
   await run('perf-rst', 'transform {"thing.rst.":"Backup/Renamed"}');
 
   const restored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  const destination = restored[0].contain.find(({ thing }) => thing === 'Destination');
-  assert.equal(destination.contain[0].thing, 'Renamed');
-  assert.equal(destination.contain[0].contain[0].thing, 'Child');
+  const destination = restored[0].slot.find(({ thing }) => thing === 'Destination');
+  assert.equal(destination.slot[0].thing, 'Renamed');
+  assert.equal(destination.slot[0].slot[0].thing, 'Child');
   const history = await createJsonTransactionJournal({ file: journalFile }).readState();
   assert.equal(history.receipts.length, 4);
   assert.equal(history.receipts.every((entry) => entry.historyMode === 'local-patch'), true);

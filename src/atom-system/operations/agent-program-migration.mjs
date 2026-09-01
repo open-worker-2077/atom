@@ -124,11 +124,11 @@ function rewriteWorld(sourceFacts, parseLegacyPersistentAtomKey) {
       );
     }
     const situation = uniqueField(entries, 'situation', address);
-    const contain = uniqueField(entries, 'contain', address);
-    if (contain && !Array.isArray(contain.value)) {
+    const slot = uniqueField(entries, 'slot', address);
+    if (slot && !Array.isArray(slot.value)) {
       throw problem(
         'AGENT_MIGRATION_SOURCE_AMBIGUOUS',
-        `Legacy Agent migration requires contain to be an array at ${address}`,
+        `Legacy Agent migration requires slot to be an array at ${address}`,
         { address }
       );
     }
@@ -194,10 +194,10 @@ function rewriteWorld(sourceFacts, parseLegacyPersistentAtomKey) {
     for (const entry of rewrittenEntries) {
       target[entry.rawKey] = entry.value;
     }
-    const targetContain = rewrittenEntries.find(({ parsed }) => parsed.baseKey === 'contain');
-    if (targetContain) {
-      target[targetContain.rawKey] = targetContain.value.map((child, index) => (
-        rewriteRecord(child, [...parentPath, thing.value], archived, `${address}/contain/${index}`)
+    const targetSlot = rewrittenEntries.find(({ parsed }) => parsed.baseKey === 'slot');
+    if (targetSlot) {
+      target[targetSlot.rawKey] = targetSlot.value.map((child, index) => (
+        rewriteRecord(child, [...parentPath, thing.value], archived, `${address}/slot/${index}`)
       ));
     }
     return target;
@@ -211,7 +211,7 @@ function assertNoRetiredAgentKeys(facts, parseLegacyPersistentAtomKey) {
   function visit(records, location) {
     for (const [index, record] of records.entries()) {
       const recordLocation = `${location}/${index}`;
-      let contain = null;
+      let slot = null;
       for (const [rawKey, value] of Object.entries(record)) {
         const parsed = parsePersistentKey(
           rawKey, `${recordLocation}:${rawKey}`, parseLegacyPersistentAtomKey
@@ -223,9 +223,9 @@ function assertNoRetiredAgentKeys(facts, parseLegacyPersistentAtomKey) {
             { location: recordLocation, rawKey }
           );
         }
-        if (parsed.baseKey === 'contain') contain = value;
+        if (parsed.baseKey === 'slot') slot = value;
       }
-      if (Array.isArray(contain)) visit(contain, `${recordLocation}/contain`);
+      if (Array.isArray(slot)) visit(slot, `${recordLocation}/slot`);
     }
   }
   visit(facts, 'facts');
@@ -416,8 +416,8 @@ export async function planGeneratedLegacyAgentDemotion({
       if (!thing || typeof thing.value !== 'string') continue;
       const path = [...parentPath, thing.value].join('/');
       if (path === targetPath) target = { record, entries, thing, path };
-      const contain = uniqueField(entries, 'contain', path);
-      if (Array.isArray(contain?.value)) visit(contain.value, [...parentPath, thing.value]);
+      const slot = uniqueField(entries, 'slot', path);
+      if (Array.isArray(slot?.value)) visit(slot.value, [...parentPath, thing.value]);
     }
   }
   visit(facts);

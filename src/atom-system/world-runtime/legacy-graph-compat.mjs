@@ -23,40 +23,40 @@ function entryAt(atom, axis) {
   return Object.entries(atom ?? {}).find(([rawKey]) => baseKey(rawKey) === axis);
 }
 
-export function isLegacySupportEntry(value) {
+export function isLegacyStrutEntry(value) {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value)
     && Object.keys(value).length === 2
     && Object.hasOwn(value, 'verb') && typeof value.verb === 'string'
     && Object.hasOwn(value, 'object') && typeof value.object === 'string' && value.object.trim());
 }
 
-export function legacySupportFingerprint(entries) {
+export function legacyStrutFingerprint(entries) {
   return digest(entries);
 }
 
 export function scanCompatibilityFacts(facts) {
-  const supportGroups = [];
+  const strutGroups = [];
   function visit(atom, parentPath = []) {
     const thingEntry = entryAt(atom, 'thing') ?? entryAt(atom, 'name');
-    const containEntry = entryAt(atom, 'contain') ?? entryAt(atom, 'children');
-    const supportEntry = entryAt(atom, 'support') ?? entryAt(atom, 'partners');
+    const slotEntry = entryAt(atom, 'slot') ?? entryAt(atom, 'children');
+    const strutEntry = entryAt(atom, 'strut') ?? entryAt(atom, 'partners');
     const thing = thingEntry?.[1];
     const pathParts = [...parentPath, thing];
     const path = pathParts.join('/');
-    const legacyEntries = Array.isArray(supportEntry?.[1])
-      ? supportEntry[1].filter(isLegacySupportEntry)
+    const legacyEntries = Array.isArray(strutEntry?.[1])
+      ? strutEntry[1].filter(isLegacyStrutEntry)
       : [];
     if (legacyEntries.length) {
-      supportGroups.push({
+      strutGroups.push({
         path,
-        fingerprint: legacySupportFingerprint(legacyEntries),
+        fingerprint: legacyStrutFingerprint(legacyEntries),
         entries: structuredClone(legacyEntries)
       });
     }
-    for (const child of Array.isArray(containEntry?.[1]) ? containEntry[1] : []) visit(child, pathParts);
+    for (const child of Array.isArray(slotEntry?.[1]) ? slotEntry[1] : []) visit(child, pathParts);
   }
   for (const atom of Array.isArray(facts) ? facts : [facts]) visit(atom);
-  return { supportGroups };
+  return { strutGroups };
 }
 
 function countedFingerprints(groups) {
@@ -77,7 +77,7 @@ export function createCompatibilityManifest({
     version: MANIFEST_VERSION,
     sourceRevision,
     currentWorldRevision,
-    legacySupport: countedFingerprints(scanned.supportGroups)
+    legacyStrut: countedFingerprints(scanned.strutGroups)
   });
 }
 
@@ -94,11 +94,11 @@ export function validateCompatibilityManifest(manifest, facts) {
     });
   }
   const scanned = scanCompatibilityFacts(facts);
-  const actualCounts = new Map(countedFingerprints(scanned.supportGroups)
+  const actualCounts = new Map(countedFingerprints(scanned.strutGroups)
     .map(({ fingerprint, occurrences }) => [fingerprint, occurrences]));
-  for (const entry of manifest.legacySupport ?? []) {
+  for (const entry of manifest.legacyStrut ?? []) {
     if ((actualCounts.get(entry.fingerprint) ?? 0) < entry.occurrences) {
-      throw problem('GRAPH_COMPATIBILITY_PROVENANCE_MISMATCH', 'Trusted legacy-support provenance is missing from current facts', {
+      throw problem('GRAPH_COMPATIBILITY_PROVENANCE_MISMATCH', 'Trusted legacy-strut provenance is missing from current facts', {
         fingerprint: entry.fingerprint,
         expectedOccurrences: entry.occurrences,
         actualOccurrences: actualCounts.get(entry.fingerprint) ?? 0
@@ -111,25 +111,25 @@ export function validateCompatibilityManifest(manifest, facts) {
 export function advanceCompatibilityManifest(manifest, currentFacts, nextFacts) {
   validateCompatibilityManifest(manifest, currentFacts);
   const scanned = scanCompatibilityFacts(nextFacts);
-  const authorized = new Map((manifest.legacySupport ?? [])
+  const authorized = new Map((manifest.legacyStrut ?? [])
     .map(({ fingerprint, occurrences }) => [fingerprint, occurrences]));
-  const nextCounts = countedFingerprints(scanned.supportGroups).flatMap((entry) => {
+  const nextCounts = countedFingerprints(scanned.strutGroups).flatMap((entry) => {
     const occurrences = Math.min(entry.occurrences, authorized.get(entry.fingerprint) ?? 0);
     return occurrences ? [{ fingerprint: entry.fingerprint, occurrences }] : [];
   });
   return Object.freeze({
     ...structuredClone(manifest),
     currentWorldRevision: revisionOfWorldFacts(nextFacts),
-    legacySupport: nextCounts
+    legacyStrut: nextCounts
   });
 }
 
 export function compatibilityMetadata(manifest, facts) {
   validateCompatibilityManifest(manifest, facts);
-  const remaining = new Map((manifest.legacySupport ?? [])
+  const remaining = new Map((manifest.legacyStrut ?? [])
     .map(({ fingerprint, occurrences }) => [fingerprint, occurrences]));
   const trustedGroups = [];
-  for (const group of scanCompatibilityFacts(facts).supportGroups) {
+  for (const group of scanCompatibilityFacts(facts).strutGroups) {
     const count = remaining.get(group.fingerprint) ?? 0;
     if (!count) continue;
     trustedGroups.push(group);
@@ -140,7 +140,7 @@ export function compatibilityMetadata(manifest, facts) {
     version: MANIFEST_VERSION,
     mode: 'versioned-compatibility',
     currentWorldRevision: manifest.currentWorldRevision,
-    legacySupportPaths: Object.freeze(trustedGroups.map(({ path }) => path)),
+    legacyStrutPaths: Object.freeze(trustedGroups.map(({ path }) => path)),
     relations: Object.freeze(trustedGroups.flatMap((group) => group.entries.map((entry, ordinal) => Object.freeze({
       source: group.path, ordinal, verb: entry.verb, object: entry.object
     }))))

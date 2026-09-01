@@ -2,7 +2,7 @@ import { diagnostic } from './errors.mjs';
 import {
   GRAPH_AXIS_SET,
   RETIRED_GRAPH_AXES,
-  validateSupportTypes
+  validateStrutTypes
 } from './graph-schema.mjs';
 import { createActionRegistry, createMatcherRegistry } from './registry.mjs';
 
@@ -55,7 +55,7 @@ function actionParameterError(action, definition) {
   if (definition.parameter === 'retiredRoute') {
     return diagnostic(
       'RETIRED_ROUTE_ACTION',
-      `路线 $${action.name} 已停用；请改用 contain$latitude+1、contain$latitude-1、contain$longitude+1 或 contain$longitude-1（数字可调整）`,
+      `路线 $${action.name} 已停用；请改用 slot$latitude+1、slot$latitude-1、slot$longitude+1 或 slot$longitude-1（数字可调整）`,
       { action: action.name }
     );
   }
@@ -174,8 +174,8 @@ export function parseAtomKey(rawKey, options = {}) {
     ));
   }
 
-  if (baseKey === 'support') {
-    const markerError = validateSupportTypes(types);
+  if (baseKey === 'strut') {
+    const markerError = validateStrutTypes(types);
     if (markerError) errors.push(diagnostic(markerError.code, markerError.message, {
       rawKey,
       markers: markerError.markers

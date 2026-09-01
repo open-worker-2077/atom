@@ -46,8 +46,8 @@ test('a finalized world is sealed once and reuses one canonical revision downstr
       reads += 1;
       return 'final';
     },
-    contain: [{ thing: 'B', situation: '', contain: [], support: [] }],
-    support: []
+    slot: [{ thing: 'B', situation: '', slot: [], strut: [] }],
+    strut: []
   }];
 
   const prepared = sealWorldFactsRevision(facts);
@@ -58,15 +58,15 @@ test('a finalized world is sealed once and reuses one canonical revision downstr
   assert.equal(reads, readsAfterSeal);
   assert.equal(Object.isFrozen(facts), true);
   assert.equal(Object.isFrozen(facts[0]), true);
-  assert.equal(Object.isFrozen(facts[0].contain[0]), true);
+  assert.equal(Object.isFrozen(facts[0].slot[0]), true);
 });
 
 test('world revision is the sha256 of the canonical persisted JSON value', () => {
   const facts = Array.from({ length: 1_000 }, (_, index) => ({
     thing: `Fact ${index}`,
     situation: 'x'.repeat(1_000),
-    contain: [],
-    support: []
+    slot: [],
+    strut: []
   }));
   const expected = `sha256:${crypto.createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`;
   const prepared = prepareWorldFactsRevision(Object.freeze(facts));

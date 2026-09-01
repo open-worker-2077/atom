@@ -61,15 +61,15 @@ function readPath(stdout) {
   }
 }
 
-function readDirectContainNames(stdout) {
+function readDirectSlotNames(stdout) {
   try {
     const response = JSON.parse(stdout);
     const entries = Array.isArray(response) ? response : [response];
-    const direct = entries.find((entry) => Array.isArray(entry?.contain))?.contain;
+    const direct = entries.find((entry) => Array.isArray(entry?.slot))?.slot;
     if (Array.isArray(direct)) return direct.map((item) => item?.thing).filter((thing) => typeof thing === 'string');
     const graph = entries.find((entry) => Array.isArray(entry?.entries));
-    const contain = graph?.entries.find((entry) => entry?.key === 'contain')?.value;
-    const values = contain?.kind === 'array' && Array.isArray(contain.values) ? contain.values : null;
+    const slot = graph?.entries.find((entry) => entry?.key === 'slot')?.value;
+    const values = slot?.kind === 'array' && Array.isArray(slot.values) ? slot.values : null;
     return values === null ? null : values.map((value) => {
       const thing = value?.entries?.find((entry) => /^thing(?:@[^~#]+)?(?:[~#].*)?$/u.test(entry?.key ?? ''))?.value;
       return typeof thing === 'string' ? thing : null;
@@ -185,8 +185,8 @@ export async function inspectPos01ResultParent({ adapter, agent = '🧊manage', 
   }
   if (agent !== '🧊manage') throw entryError('NIGHT_WATCH_POS01_AGENT_INVALID', 'POS-01 containment inspection requires the exact Agent 🧊manage');
   const { programPath } = pos01Paths(rootPath);
-  const readback = await adapter.executeStdin(agent, exactSource('explore', { thing: programPath, 'contain$latitude+1': true }));
-  const childNames = readDirectContainNames(readback?.stdout);
+  const readback = await adapter.executeStdin(agent, exactSource('explore', { thing: programPath, 'slot$latitude+1': true }));
+  const childNames = readDirectSlotNames(readback?.stdout);
   if (childNames === null) {
     const projectionKeys = publicProjectionKeys(readback?.stdout);
     if (projectionKeys.length) return Object.freeze({
@@ -362,7 +362,7 @@ export async function completeCommittedPos01Lock({ adapter, agent = '🧊manage'
   } catch (error) {
     if (!isAtomNotFound(error)) throw error;
     const create = await adapter.executeStdin(agent, exactSource('transform new', {
-      'thing@program': lockPath, situation: lockSource, contain: [], support: []
+      'thing@program': lockPath, situation: lockSource, slot: [], strut: []
     }));
     lockSourceReadback = await readExact(adapter, agent, lockPath);
     if (failedReceipt(create?.stdout)) {

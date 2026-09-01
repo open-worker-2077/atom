@@ -57,7 +57,7 @@ test('subtree spatial lock follows the window parent and admits only its schedul
     results: [{
       targets: { refs: ['r-root'], scope: 'subtree' },
       mode: 'read_write',
-      fields: ['thing', 'situation', 'contain', 'support'],
+      fields: ['thing', 'situation', 'slot', 'strut'],
       protect: { atom: true, messages: false },
       allowed_windows: { relation: 'target_within_window_parent' },
       allowed_programs: { paths: ['推进流/调度程序'] },

@@ -12,13 +12,13 @@ import {
   createRuntimeDiagnosticStore
 } from '../src/atom-system/world-runtime/year-ring.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
+function atom(thing, situation = '', slot = [], type = '') {
   const agentProgram = type === 'agent';
   const storedType = agentProgram ? 'program' : type;
   const storedSituation = agentProgram
     ? `LEGACY_AGENT_SITUATION = ${JSON.stringify(situation)}\nagent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})`
     : situation;
-  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, contain, support: [] };
+  return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, slot, strut: [] };
 }
 
 function ports() {
@@ -129,7 +129,7 @@ test('failed interactions retain their correlation id for bounded server-side di
   const runtime = createInteractionRuntime(context);
 
   const result = await runtime.execute({
-    source: 'transform new {"thing":"Agent/Task/New","situation":"","contain":[],"support":[]}',
+    source: 'transform new {"thing":"Agent/Task/New","situation":"","slot":[],"strut":[]}',
     correlationId: 'failed-create-correlation',
     agentPath: 'Agent',
     history: []

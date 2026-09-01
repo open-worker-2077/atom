@@ -7,8 +7,8 @@ import test from 'node:test';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 const CREATOR_SOURCE = 'agent({"labels":["^"],"functions":{"groups":[],"names":["agent","message","transform"]}})';
@@ -75,7 +75,7 @@ function findAtom(atoms, expected) {
       key === 'thing' || key.startsWith('thing@')
     ));
     if (entry?.[1] === expected) return { atom: current, key: entry[0] };
-    const nested = findAtom(current.contain ?? [], expected);
+    const nested = findAtom(current.slot ?? [], expected);
     if (nested) return nested;
   }
   return null;
@@ -124,8 +124,8 @@ test('authorized creation of an Agent Program keeps the Key as thing@program', a
     source: 'transform new ' + JSON.stringify({
       'thing@program': childPath,
       situation: childSource,
-      contain: [],
-      support: []
+      slot: [],
+      strut: []
     }),
     ...files,
     programScheduler: scheduler,

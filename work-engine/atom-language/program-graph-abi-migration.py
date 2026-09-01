@@ -7,8 +7,10 @@ import sys
 RETIRED = {
     "name": "thing",
     "detail": "situation",
-    "children": "contain",
-    "partners": "support",
+    "children": "slot",
+    "partners": "strut",
+    "contain": "slot",
+    "support": "strut",
 }
 GRAPH_CALLS = {"explore", "transform"}
 ACTIVE = set(RETIRED.values())

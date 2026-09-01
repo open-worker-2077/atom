@@ -4,9 +4,9 @@ const assert = require('node:assert/strict');
 const SpatialVisualModel = require('../spatial-visual-model.js');
 
 test('builds an ordinary directed edge directly from if to then', () => {
-  const [bundle] = SpatialVisualModel.supportBundles([
+  const [bundle] = SpatialVisualModel.strutBundles([
     {
-      id: 'support:世界/A:0',
+      id: 'strut:世界/A:0',
       currentSide: 'antecedent',
       root: { kind: 'thing', targetPath: '世界/A', exprPath: [] },
       then: [{ targetPath: '世界/B', thenOrdinal: 0 }]
@@ -17,10 +17,10 @@ test('builds an ordinary directed edge directly from if to then', () => {
 });
 
 test('builds nested input junctions, one common trunk, and ordered then branches', () => {
-  assert.equal(typeof SpatialVisualModel.supportBundles, 'function');
-  const bundles = SpatialVisualModel.supportBundles([
+  assert.equal(typeof SpatialVisualModel.strutBundles, 'function');
+  const bundles = SpatialVisualModel.strutBundles([
     {
-      id: 'support:世界/结果:0',
+      id: 'strut:世界/结果:0',
       currentSide: 'consequent',
       root: {
         kind: 'and', exprPath: [], children: [
@@ -42,8 +42,8 @@ test('builds nested input junctions, one common trunk, and ordered then branches
   assert.equal(bundles[0].inputTopology.inputs[1].operator, 'or');
   assert.equal(bundles[0].inputTopology.inputs[1].inputs[1].computed, true);
   assert.deepEqual(bundles[0].trunk, {
-    from: 'support:世界/结果:0:if-junction',
-    to: 'support:世界/结果:0:then-junction'
+    from: 'strut:世界/结果:0:if-junction',
+    to: 'strut:世界/结果:0:then-junction'
   });
   assert.deepEqual(bundles[0].outputBranches.map(({ ordinal, toPath }) => ({ ordinal, toPath })), [
     { ordinal: 0, toPath: '世界/D' },
@@ -52,8 +52,8 @@ test('builds nested input junctions, one common trunk, and ordered then branches
 });
 
 test('compound bundle separates ordinary fact endpoints from predicate Programs', () => {
-  const [bundle] = SpatialVisualModel.supportBundles([{
-    id: 'support:Flow/A:0',
+  const [bundle] = SpatialVisualModel.strutBundles([{
+    id: 'strut:Flow/A:0',
     antecedentPaths: ['Flow/A', 'Flow/B'],
     dependencyPaths: ['Flow/A', 'Flow/B', 'Flow/Gate'],
     root: {
@@ -70,7 +70,7 @@ test('compound bundle separates ordinary fact endpoints from predicate Programs'
     evaluation: { status: 'true', decision: true }
   }]);
 
-  assert.equal(bundle.id, 'support:Flow/A:0');
+  assert.equal(bundle.id, 'strut:Flow/A:0');
   assert.deepEqual(bundle.antecedents.map(({ path }) => path), ['Flow/A', 'Flow/B']);
   assert.deepEqual(bundle.predicatePrograms.map(({ path }) => path), ['Flow/Gate']);
   assert.deepEqual(bundle.consequents.map(({ path, ordinal }) => ({ path, ordinal })), [
@@ -81,16 +81,16 @@ test('compound bundle separates ordinary fact endpoints from predicate Programs'
 
 test('fan-in merges at 50 percent and has one outgoing shared trunk', () => {
   const bundle = {
-    id: 'support:fan-in', junctionRatio: 0.5,
+    id: 'strut:fan-in', junctionRatio: 0.5,
     antecedents: [{ path: 'A' }, { path: 'B' }],
     predicatePrograms: [], consequents: [{ path: 'Z', ordinal: 0 }]
   };
-  const geometry = SpatialVisualModel.supportBundleGeometry(bundle, {
+  const geometry = SpatialVisualModel.strutBundleGeometry(bundle, {
     A: { x: 0, y: 0 }, B: { x: 0, y: 10 }, Z: { x: 20, y: 5 }
   });
 
   assert.deepEqual(geometry.junctions, [
-    { id: 'support:fan-in:merge', role: 'merge', ratio: 0.5, x: 10, y: 5 }
+    { id: 'strut:fan-in:merge', role: 'merge', ratio: 0.5, x: 10, y: 5 }
   ]);
   assert.deepEqual(geometry.segments.map(({ role, from, to }) => ({ role, from, to })), [
     { role: 'antecedent', from: { x: 0, y: 0 }, to: { x: 10, y: 5 } },
@@ -101,16 +101,16 @@ test('fan-in merges at 50 percent and has one outgoing shared trunk', () => {
 
 test('fan-out splits at 50 percent after one incoming shared trunk', () => {
   const bundle = {
-    id: 'support:fan-out', junctionRatio: 0.5,
+    id: 'strut:fan-out', junctionRatio: 0.5,
     antecedents: [{ path: 'A' }], predicatePrograms: [],
     consequents: [{ path: 'Y', ordinal: 0 }, { path: 'Z', ordinal: 1 }]
   };
-  const geometry = SpatialVisualModel.supportBundleGeometry(bundle, {
+  const geometry = SpatialVisualModel.strutBundleGeometry(bundle, {
     A: { x: 0, y: 5 }, Y: { x: 20, y: 0 }, Z: { x: 20, y: 10 }
   });
 
   assert.deepEqual(geometry.junctions, [
-    { id: 'support:fan-out:split', role: 'split', ratio: 0.5, x: 10, y: 5 }
+    { id: 'strut:fan-out:split', role: 'split', ratio: 0.5, x: 10, y: 5 }
   ]);
   assert.deepEqual(geometry.segments.map(({ role, from, to }) => ({ role, from, to })), [
     { role: 'trunk', from: { x: 0, y: 5 }, to: { x: 10, y: 5 } },
@@ -120,8 +120,8 @@ test('fan-out splits at 50 percent after one incoming shared trunk', () => {
 });
 
 test('native many-to-many bundles are not rendered as a hidden compound relation', () => {
-  const geometry = SpatialVisualModel.supportBundleGeometry({
-    id: 'support:native-n-to-m', junctionRatio: 0.5,
+  const geometry = SpatialVisualModel.strutBundleGeometry({
+    id: 'strut:native-n-to-m', junctionRatio: 0.5,
     antecedents: [{ path: 'A' }, { path: 'B' }], predicatePrograms: [{ path: 'Gate' }],
     consequents: [{ path: 'Y', ordinal: 0 }, { path: 'Z', ordinal: 1 }]
   }, {
@@ -131,13 +131,13 @@ test('native many-to-many bundles are not rendered as a hidden compound relation
   assert.equal(geometry, null);
 });
 
-test('binary support remains one direct segment without junctions', () => {
+test('binary strut remains one direct segment without junctions', () => {
   const bundle = {
-    id: 'support:binary', junctionRatio: 0.5,
+    id: 'strut:binary', junctionRatio: 0.5,
     antecedents: [{ path: 'A' }], predicatePrograms: [],
     consequents: [{ path: 'B', ordinal: 0 }]
   };
-  const geometry = SpatialVisualModel.supportBundleGeometry(bundle, {
+  const geometry = SpatialVisualModel.strutBundleGeometry(bundle, {
     A: { x: 0, y: 0 }, B: { x: 10, y: 0 }
   });
 
@@ -149,20 +149,20 @@ test('binary support remains one direct segment without junctions', () => {
 
 test('false and failed clauses do not produce forged visual lines', () => {
   const clause = {
-    id: 'support:世界/A:0',
+    id: 'strut:世界/A:0',
     root: { kind: 'thing', targetPath: '世界/A', exprPath: [] },
     then: [{ targetPath: '世界/B', thenOrdinal: 0 }]
   };
-  assert.deepEqual(SpatialVisualModel.supportBundles([
+  assert.deepEqual(SpatialVisualModel.strutBundles([
     { ...clause, evaluation: { status: 'false', decision: false } },
-    { ...clause, id: 'support:世界/A:1', evaluation: { status: 'failure' } }
+    { ...clause, id: 'strut:世界/A:1', evaluation: { status: 'failure' } }
   ]), []);
 });
 
 test('visible path filtering returns only clauses whose fact endpoints are in the current group', () => {
   const clauses = [
     {
-      id: 'support:visible', antecedentPaths: ['A'], dependencyPaths: ['A', 'Gate'],
+      id: 'strut:visible', antecedentPaths: ['A'], dependencyPaths: ['A', 'Gate'],
       root: { kind: 'and', children: [
         { kind: 'thing', targetPath: 'A' },
         { kind: 'program', targetPath: 'Gate' }
@@ -170,7 +170,7 @@ test('visible path filtering returns only clauses whose fact endpoints are in th
       then: [{ kind: 'thing', targetPath: 'Y', thenOrdinal: 0 }]
     },
     {
-      id: 'support:hidden', antecedentPaths: ['A', 'Hidden'], dependencyPaths: ['A', 'Hidden'],
+      id: 'strut:hidden', antecedentPaths: ['A', 'Hidden'], dependencyPaths: ['A', 'Hidden'],
       root: { kind: 'and', children: [
         { kind: 'thing', targetPath: 'A' },
         { kind: 'thing', targetPath: 'Hidden' }
@@ -179,17 +179,17 @@ test('visible path filtering returns only clauses whose fact endpoints are in th
     }
   ];
 
-  const bundles = SpatialVisualModel.supportBundles(clauses, {
+  const bundles = SpatialVisualModel.strutBundles(clauses, {
     visiblePaths: new Set(['A', 'Y'])
   });
 
-  assert.deepEqual(bundles.map(({ id }) => id), ['support:visible']);
+  assert.deepEqual(bundles.map(({ id }) => id), ['strut:visible']);
 });
 
 test('three-to-hub-to-three renders two rules joined by one real hub', () => {
-  const bundles = SpatialVisualModel.supportBundles([
+  const bundles = SpatialVisualModel.strutBundles([
     {
-      id: 'support:世界/H:0', currentSide: 'consequent',
+      id: 'strut:世界/H:0', currentSide: 'consequent',
       root: {
         kind: 'and', exprPath: [], children: ['A', 'B', 'C'].map((name, index) => ({
           kind: 'thing', targetPath: `世界/${name}`, exprPath: [index]
@@ -198,7 +198,7 @@ test('three-to-hub-to-three renders two rules joined by one real hub', () => {
       then: [{ targetPath: '世界/H', thenOrdinal: 0 }]
     },
     {
-      id: 'support:世界/H:1', currentSide: 'antecedent',
+      id: 'strut:世界/H:1', currentSide: 'antecedent',
       root: { kind: 'thing', targetPath: '世界/H', exprPath: [], implicit: true },
       then: ['X', 'Y', 'Z'].map((name, thenOrdinal) => ({ targetPath: `世界/${name}`, thenOrdinal }))
     }

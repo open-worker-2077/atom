@@ -30,9 +30,9 @@ function walk(atoms) {
     const path = [...parentPath, thing];
     const match = { atom, parent, index, path };
     matches.push(match);
-    const contain = storedField(atom, 'contain')?.value;
-    if (Array.isArray(contain)) {
-      contain.forEach((child, childIndex) => visit(child, match, childIndex, path));
+    const slot = storedField(atom, 'slot')?.value;
+    if (Array.isArray(slot)) {
+      slot.forEach((child, childIndex) => visit(child, match, childIndex, path));
     }
   }
   (Array.isArray(atoms) ? atoms : []).forEach((atom, index) => visit(atom, null, index, []));
@@ -45,8 +45,8 @@ function shortcutFailure(code, message) {
 
 function parseMetadata(atom) {
   const situation = storedField(atom, 'situation')?.value;
-  const contain = storedField(atom, 'contain')?.value;
-  const support = storedField(atom, 'support')?.value;
+  const slot = storedField(atom, 'slot')?.value;
+  const strut = storedField(atom, 'strut')?.value;
   let metadata;
   try {
     metadata = JSON.parse(situation);
@@ -62,8 +62,8 @@ function parseMetadata(atom) {
     || (metadata.target.state === 'linked'
       && (typeof metadata.target.path !== 'string' || !metadata.target.path.trim()))
     || (metadata.target.state === 'broken' && metadata.target.path !== null)
-    || !Array.isArray(contain) || contain.length !== 0
-    || !Array.isArray(support) || support.length !== 0) {
+    || !Array.isArray(slot) || slot.length !== 0
+    || !Array.isArray(strut) || strut.length !== 0) {
     throw shortcutFailure('INVALID_SHORTCUT_RECORD', '虚拟引用的内核记录无效');
   }
   return metadata;
@@ -92,8 +92,8 @@ export function createShortcutAtom({ thing, targetPath, referenceId = crypto.ran
       referenceId,
       target: { state: 'linked', path: targetPath.trim() }
     }),
-    contain: [],
-    support: []
+    slot: [],
+    strut: []
   };
 }
 
@@ -233,7 +233,7 @@ export async function applyShortcutEffect({
         'shortcut delete 只接受虚拟引用自身的精确 ThingCoordinate'
       ) };
     }
-    for (const [match, field] of [[reference, 'thing'], [reference.parent, 'contain']]) {
+    for (const [match, field] of [[reference, 'thing'], [reference.parent, 'slot']]) {
       if (!match || (await authorize(
         match, 'write', field, { programPath: effect.sourceProgramPath }
       )).decision !== 'allow') {
@@ -247,7 +247,7 @@ export async function applyShortcutEffect({
     const nextReference = walk(nextAtoms)
       .find((match) => match.path.join('/') === effect.referencePath);
     const siblings = nextReference.parent
-      ? storedField(nextReference.parent.atom, 'contain').value
+      ? storedField(nextReference.parent.atom, 'slot').value
       : nextAtoms;
     siblings.splice(nextReference.index, 1);
     return {
@@ -259,10 +259,10 @@ export async function applyShortcutEffect({
       triggerPaths: [effect.referencePath]
     };
   }
-  if (effect?.placement !== 'contain') {
+  if (effect?.placement !== 'slot') {
     return { error: diagnostic(
       'INVALID_SHORTCUT_PLACEMENT',
-      'shortcut.placement 首版只接受 contain'
+      'shortcut.placement 首版只接受 slot'
     ) };
   }
   if (typeof effect.thing !== 'string' || !effect.thing.trim()
@@ -288,7 +288,7 @@ export async function applyShortcutEffect({
   const placementDecision = await authorize(
     source,
     'write',
-    'contain',
+    'slot',
     { programPath: effect.sourceProgramPath }
   );
   if (placementDecision.decision !== 'allow') {
@@ -298,7 +298,7 @@ export async function applyShortcutEffect({
     ) };
   }
 
-  const children = storedField(source.atom, 'contain')?.value;
+  const children = storedField(source.atom, 'slot')?.value;
   const existing = children.find((child) => storedField(child, 'thing')?.value === effect.thing);
   if (existing) {
     if (isShortcutAtom(existing)) {
@@ -321,7 +321,7 @@ export async function applyShortcutEffect({
 
   const nextAtoms = structuredClone(atoms);
   const nextSource = walk(nextAtoms).find((match) => match.path.join('/') === effect.sourceProgramPath);
-  storedField(nextSource.atom, 'contain').value.push(createShortcutAtom({
+  storedField(nextSource.atom, 'slot').value.push(createShortcutAtom({
     thing: effect.thing,
     targetPath: effect.targetPath
   }));

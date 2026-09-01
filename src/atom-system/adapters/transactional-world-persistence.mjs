@@ -161,7 +161,7 @@ export function createTransactionalWorldPersistence({
       try {
         await writeAtomGraphProjection(projectionFile, facts, {
           rootName: path.basename(contextFile),
-          allowLegacySupport: Boolean(nextManifest)
+          allowLegacyStrut: Boolean(nextManifest)
         });
       } catch (error) {
         throw problem(
@@ -205,7 +205,7 @@ export function createTransactionalWorldPersistence({
       try {
         await writeAtomGraphProjection(projectionFile, restored.facts, {
           rootName: path.basename(contextFile),
-          allowLegacySupport: Boolean(await compatibilityManifest())
+          allowLegacyStrut: Boolean(await compatibilityManifest())
         });
       } catch (error) {
         throw problem(

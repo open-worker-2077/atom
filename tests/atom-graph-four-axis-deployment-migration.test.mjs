@@ -25,16 +25,16 @@ function legacyNode(name, detail = '', children = [], partners = [], suffix = ''
   return { [`name${suffix}`]: name, detail, children, partners };
 }
 
-function atom(thing, situation = '', contain = [], type = '') {
+function atom(thing, situation = '', slot = [], type = '') {
   return {
     [`thing${type ? `@${type}` : ''}`]: thing,
     situation,
-    contain,
-    support: []
+    slot,
+    strut: []
   };
 }
 
-test('legacy persisted axes load losslessly without making legacy relations into support rules', async (t) => {
+test('legacy persisted axes load losslessly without making legacy relations into strut rules', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-legacy-deploy-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -49,13 +49,13 @@ test('legacy persisted axes load losslessly without making legacy relations into
   assert.deepEqual(loaded[0], {
     thing: 'Root',
     situation: legacy[0].detail,
-    contain: [{
+    slot: [{
       'thing@program': 'Legacy Program',
       situation: legacy[0].children[0].detail,
-      contain: [],
-    support: []
+      slot: [],
+    strut: []
     }],
-    support: [{ verb: '依赖→原文', object: 'Target/对象' }]
+    strut: [{ verb: '依赖→原文', object: 'Target/对象' }]
   });
   const metadata = legacyAtomContextMetadata(loaded);
   assert.equal(metadata.mode, 'legacy-read-only');
@@ -72,58 +72,58 @@ test('four-axis storage keeps directionless legacy relations inert without a com
   const source = [{
     thing: 'Root',
     situation: 'current four-axis fact',
-    contain: [],
-    support: [{ verb: '历史关联', object: 'Unknown Direction' }]
+    slot: [],
+    strut: [{ verb: '历史关联', object: 'Unknown Direction' }]
   }];
 
   const projected = projectAtomContext(source);
 
-  assert.equal(projected.supportClauses.length, 0);
-  assert.deepEqual(source[0].support, [{ verb: '历史关联', object: 'Unknown Direction' }]);
+  assert.equal(projected.strutClauses.length, 0);
+  assert.deepEqual(source[0].strut, [{ verb: '历史关联', object: 'Unknown Direction' }]);
 });
 
 test('relation-only compatibility manifest advances across unrelated commits', () => {
   const source = [atom('Root', '', [
-    { 'thing@program': 'Legacy', situation: "explore({'name':'Root'})", contain: [], support: [] },
-    { thing: 'Relations', situation: '', contain: [], support: [{ verb: '原字符→', object: 'Target' }] }
+    { 'thing@program': 'Legacy', situation: "explore({'name':'Root'})", slot: [], strut: [] },
+    { thing: 'Relations', situation: '', slot: [], strut: [{ verb: '原字符→', object: 'Target' }] }
   ])];
   const manifest = createCompatibilityManifest({
     sourceRevision: 'sha256:source', targetFacts: source
   });
   const next = structuredClone(source);
-  next[0].contain.push(atom('Unrelated'));
+  next[0].slot.push(atom('Unrelated'));
   const advanced = advanceCompatibilityManifest(manifest, source, next);
   assert.doesNotThrow(() => validateCompatibilityManifest(advanced, next));
   assert.equal(Object.hasOwn(advanced, 'programs'), false);
-  assert.equal(advanced.legacySupport.length, 1);
+  assert.equal(advanced.legacyStrut.length, 1);
 });
 
 test('legacy relation provenance survives node movement without any Program qualification', () => {
   const source = [atom('Root', '', [
-    { 'thing@program': 'Legacy', situation: "explore({'name':'Root'})", contain: [], support: [] },
-    { thing: 'Relations', situation: '', contain: [], support: [{ verb: 'v', object: 'O' }] }
+    { 'thing@program': 'Legacy', situation: "explore({'name':'Root'})", slot: [], strut: [] },
+    { thing: 'Relations', situation: '', slot: [], strut: [{ verb: 'v', object: 'O' }] }
   ])];
   const manifest = createCompatibilityManifest({
     sourceRevision: 'sha256:source', targetFacts: source
   });
   const moved = structuredClone(source);
-  moved[0].contain[0]['thing@program'] = 'Moved Legacy';
-  moved[0].contain[1].thing = 'Moved Relations';
+  moved[0].slot[0]['thing@program'] = 'Moved Legacy';
+  moved[0].slot[1].thing = 'Moved Relations';
   const advanced = advanceCompatibilityManifest(manifest, source, moved);
   assert.equal(Object.hasOwn(advanced, 'programs'), false);
-  assert.equal(advanced.legacySupport[0].occurrences, 1);
+  assert.equal(advanced.legacyStrut[0].occurrences, 1);
   const metadata = compatibilityMetadata(advanced, moved);
-  assert.deepEqual(metadata.legacySupportPaths, ['Root/Moved Relations']);
+  assert.deepEqual(metadata.legacyStrutPaths, ['Root/Moved Relations']);
 });
 
 test('Program source changes never create manifest ABI authorization', () => {
-  const source = [{ 'thing@program': 'Legacy', situation: "explore({'name':'Root'})", contain: [], support: [] }];
+  const source = [{ 'thing@program': 'Legacy', situation: "explore({'name':'Root'})", slot: [], strut: [] }];
   const manifest = createCompatibilityManifest({
     sourceRevision: 'sha256:source', targetFacts: source
   });
   const changed = structuredClone(source);
   changed[0].situation += '\npass';
-  changed.push({ 'thing@program': 'Copy', situation: source[0].situation, contain: [], support: [] });
+  changed.push({ 'thing@program': 'Copy', situation: source[0].situation, slot: [], strut: [] });
   const advanced = advanceCompatibilityManifest(manifest, source, changed);
   assert.equal(Object.hasOwn(advanced, 'programs'), false);
   assert.throws(() => validateCompatibilityManifest(manifest, changed), {
@@ -136,7 +136,7 @@ test('central transaction advances compatibility manifest with the same authoriz
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'knowledge.json');
-  const source = [{ thing: 'Root', situation: '', contain: [], support: [{ verb: 'v', object: 'O' }] }];
+  const source = [{ thing: 'Root', situation: '', slot: [], strut: [{ verb: 'v', object: 'O' }] }];
   await fs.writeFile(contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
   const manifest = createCompatibilityManifest({
     sourceRevision: 'sha256:legacy', targetFacts: source
@@ -150,7 +150,7 @@ test('central transaction advances compatibility manifest with the same authoriz
     compatibilityManifest: advanceCompatibilityManifest(manifest, source, next)
   });
   const later = structuredClone(next);
-  later[0].contain.push(atom('Child'));
+  later[0].slot.push(atom('Child'));
   await persistence.commit({
     correlationId: 'ordinary', expectedRevision: revisionOfWorldFacts(next),
     nextRevision: revisionOfWorldFacts(later), facts: later
@@ -165,10 +165,10 @@ test('compatibility manifest never authorizes a legacy Program ABI', async (t) =
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const source = [{
-    thing: 'Root', situation: '', support: [], contain: [{
+    thing: 'Root', situation: '', strut: [], slot: [{
       'thing@program': 'Legacy',
       situation: "nodes = explore({'name':'Root'})\nmessage({'level':'info','text':nodes[0].name})",
-      contain: [], support: []
+      slot: [], strut: []
     }]
   }];
   const manifest = createCompatibilityManifest({
@@ -188,7 +188,7 @@ test('compatibility manifest never authorizes a legacy Program ABI', async (t) =
   }), { code: 'ATOM_PROGRAM_FAILED' });
 });
 
-test('migration planner preserves partners in place as trusted directionless support entries', () => {
+test('migration planner preserves partners in place as trusted directionless strut entries', () => {
   const legacy = legacyNode('世界', '', [
     legacyNode('A', '', [], [
       { verb: '', object: 'B' },
@@ -205,8 +205,8 @@ test('migration planner preserves partners in place as trusted directionless sup
     { source: '世界/A', ordinal: 1, verb: '依赖→原文', object: 'C/对象' }
   ]);
   assert.equal(first.summary.nodes, 4);
-  assert.equal(first.graph.contain.length, 3);
-  assert.deepEqual(first.graph.contain[0].support, legacy.children[0].partners);
+  assert.equal(first.graph.slot.length, 3);
+  assert.deepEqual(first.graph.slot[0].strut, legacy.children[0].partners);
   assert.equal(JSON.stringify(first.graph).includes('if@current'), false);
 });
 
@@ -242,10 +242,10 @@ test('one preflight collects all Program and relation clusters without first-err
     { path: 'World/Active Safe', disposition: 'upgraded', reason: 'ast-proven-graph-structure-edits' },
     { path: 'World/Active Unsafe', disposition: 'blocked', reason: 'program-source-upgrade-ambiguous' }
   ]);
-  assert.equal(graph.contain[2].situation.includes("note = 'name stays text'"), true);
-  assert.equal(graph.contain[2].situation.includes("explore({'contain':[]})"), true);
-  assert.equal(graph.contain[3]['thing@program'], 'Active Unsafe');
-  assert.equal(graph.contain[3].situation, world.children[3].detail);
+  assert.equal(graph.slot[2].situation.includes("note = 'name stays text'"), true);
+  assert.equal(graph.slot[2].situation.includes("explore({'slot':[]})"), true);
+  assert.equal(graph.slot[3]['thing@program'], 'Active Unsafe');
+  assert.equal(graph.slot[3].situation, world.children[3].detail);
   assert.equal(summary.readyToCommit, false);
   assert.deepEqual(summary.blockedPrograms.map(({ path }) => path), ['World/Active Unsafe']);
 });

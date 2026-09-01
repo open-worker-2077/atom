@@ -14,7 +14,7 @@ export const TRANSFORM_COMMANDS = Object.freeze([
 ]);
 
 const COMMAND_AXES = Object.freeze({
-  rep: new Set(['situation', 'support']),
+  rep: new Set(['situation', 'strut']),
   sum: new Set(['situation']),
   typ: new Set(['thing']),
   ren: new Set(['thing']),

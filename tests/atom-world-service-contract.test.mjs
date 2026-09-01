@@ -228,7 +228,7 @@ test('the command engine cannot mutate world facts without a commit capability',
 
   await assert.rejects(
     executeAtomLanguage({
-      source: 'transform new {"thing":"Root","situation":"","contain":[],"support":[]}',
+      source: 'transform new {"thing":"Root","situation":"","slot":[],"strut":[]}',
       contextFile,
       projectionFile,
       interaction: { id: 'interaction-without-commit-port' }
@@ -265,7 +265,7 @@ test('real legacy transform advances atom facts through the durable transaction 
   const service = createLegacyWorldService();
 
   const result = await service.executeLegacy({
-    source: 'transform new {"thing":"Root","situation":"","contain":[],"support":[]}',
+    source: 'transform new {"thing":"Root","situation":"","slot":[],"strut":[]}',
     contextFile,
     projectionFile,
     interaction: { id: 'interaction-real-1' }
@@ -297,7 +297,7 @@ test('transactional persistence rollback restores only authoritative facts and l
     publishLegacyProjection: false
   });
 
-  const facts = [{ thing: 'temporary', situation: 'must disappear', contain: [], support: [] }];
+  const facts = [{ thing: 'temporary', situation: 'must disappear', slot: [], strut: [] }];
   const committed = await persistence.commit({
     correlationId: 'rollback-rehearsal',
     expectedRevision: 'sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
@@ -339,7 +339,7 @@ test('each authoritative commit and rollback emits one recovery-backup signal', 
     onAuthoritativeWrite: (signal) => signals.push(signal)
   });
 
-  const facts = [{ thing: 'recoverable', situation: '', contain: [], support: [] }];
+  const facts = [{ thing: 'recoverable', situation: '', slot: [], strut: [] }];
   const committed = await persistence.commit({
     correlationId: 'backup-signal-commit',
     expectedRevision: 'sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
@@ -371,8 +371,8 @@ test('world persistence remains semantic-neutral for Agent Program facts', async
   const initial = [{
     'thing@program': '测试Agent',
     situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})',
-    contain: [],
-    support: []
+    slot: [],
+    strut: []
   }];
   await fs.writeFile(contextFile, `${JSON.stringify(initial)}\n`, 'utf8');
   const persistence = createTransactionalWorldPersistence({ contextFile, projectionFile });

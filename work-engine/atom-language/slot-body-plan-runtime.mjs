@@ -9,7 +9,7 @@ import {
   childrenOf,
   createAtom,
   directChild,
-  directedSupports,
+  directedStruts,
   fieldValue,
   instanceRevisionOf,
   partnersOf,
@@ -55,7 +55,7 @@ function layoutOf(atoms, bodySelector) {
   const bodyPath = selected.match.path.join('/');
   const children = childrenOf(body);
   if (!children) {
-    return { error: slotError('INVALID_SLOT_BODY_LAYOUT', '槽体必须具有完整 contain Graph', { body: bodyPath }) };
+    return { error: slotError('INVALID_SLOT_BODY_LAYOUT', '槽体必须具有完整 slot Graph', { body: bodyPath }) };
   }
   const model = directChild(body, MODEL_NAME);
   const print = directChild(body, PRINT_NAME);
@@ -105,7 +105,7 @@ function roleIdFor(layout, record) {
   return digest(`${layout.bodyPath}\0${record.relative}`).slice(0, 24);
 }
 
-function resolveSupportEndpoint(source, endpoint, records) {
+function resolveStrutEndpoint(source, endpoint, records) {
   const key = Object.hasOwn(endpoint ?? {}, 'thing@program') ? 'thing@program' : 'thing';
   const selector = endpoint?.[key];
   if (typeof selector !== 'string' || !selector.trim()) return null;
@@ -130,37 +130,37 @@ function resolveSupportEndpoint(source, endpoint, records) {
   return named.length === 1 ? named[0] : null;
 }
 
-function compileSupportEndpoint(source, endpoint, records, roleByRelative) {
+function compileStrutEndpoint(source, endpoint, records, roleByRelative) {
   const key = Object.hasOwn(endpoint ?? {}, 'thing@program') ? 'thing@program' : 'thing';
-  const target = resolveSupportEndpoint(source, endpoint, records);
+  const target = resolveStrutEndpoint(source, endpoint, records);
   if (!target) return null;
   return { [key]: roleByRelative.get(target.relative).role_id };
 }
 
-function compileSupportExpr(source, expr, records, roleByRelative) {
+function compileStrutExpr(source, expr, records, roleByRelative) {
   if (Object.hasOwn(expr ?? {}, 'thing') || Object.hasOwn(expr ?? {}, 'thing@program')) {
-    return compileSupportEndpoint(source, expr, records, roleByRelative);
+    return compileStrutEndpoint(source, expr, records, roleByRelative);
   }
   for (const key of ['and', 'or']) {
     if (Array.isArray(expr?.[key])) {
-      const children = expr[key].map((child) => compileSupportExpr(source, child, records, roleByRelative));
+      const children = expr[key].map((child) => compileStrutExpr(source, child, records, roleByRelative));
       return children.every(Boolean) ? { [key]: children } : null;
     }
   }
   return null;
 }
 
-function compileSupportRule(source, rule, records, roleByRelative) {
+function compileStrutRule(source, rule, records, roleByRelative) {
   const compiled = {};
   if (rule['if@current'] === true) compiled['if@current'] = true;
   if (Array.isArray(rule.if)) {
-    const root = rule.if.length === 0 ? [] : [compileSupportExpr(source, rule.if[0], records, roleByRelative)];
+    const root = rule.if.length === 0 ? [] : [compileStrutExpr(source, rule.if[0], records, roleByRelative)];
     if (root.some((entry) => !entry)) return null;
     compiled.if = root;
   }
   if (rule['then@current'] === true) compiled['then@current'] = true;
   if (Array.isArray(rule.then)) {
-    compiled.then = rule.then.map((entry) => compileSupportEndpoint(source, entry, records, roleByRelative));
+    compiled.then = rule.then.map((entry) => compileStrutEndpoint(source, entry, records, roleByRelative));
     if (compiled.then.some((entry) => !entry)) return null;
   }
   return compiled;
@@ -191,41 +191,41 @@ function compilePlan(layout, structureLock = null) {
     };
   });
   const roleByRelative = new Map(roles.map((role) => [role.path, role]));
-  const support = [];
+  const strut = [];
   for (const record of records) {
-    for (const rule of directedSupports(record.atom)) {
+    for (const rule of directedStruts(record.atom)) {
       if (Array.isArray(rule.then) && rule.then.some((endpoint) => (
         Object.hasOwn(endpoint ?? {}, 'thing@program')
       ))) {
         return {
-          error: slotError('INVALID_SLOT_PRINT_PLAN', '槽模 support 后项必须是普通事实 Thing', {
+          error: slotError('INVALID_SLOT_PRINT_PLAN', '槽模 strut 后项必须是普通事实 Thing', {
             source: record.absolute,
             rule,
-            causeCode: 'SUPPORT_FACT_CONSEQUENT_REQUIRED'
+            causeCode: 'STRUT_FACT_CONSEQUENT_REQUIRED'
           })
         };
       }
-      const compiledRule = compileSupportRule(record, rule, records, roleByRelative);
+      const compiledRule = compileStrutRule(record, rule, records, roleByRelative);
       if (!compiledRule) {
         return {
-          error: slotError('INVALID_SLOT_PRINT_PLAN', '槽模 support 必须指向槽模内唯一角色', {
+          error: slotError('INVALID_SLOT_PRINT_PLAN', '槽模 strut 必须指向槽模内唯一角色', {
             source: record.absolute,
             rule
           })
         };
       }
-      support.push({
+      strut.push({
         owner_role_id: roleByRelative.get(record.relative).role_id,
         rule: compiledRule
       });
     }
   }
   const roleOrder = new Map(roles.map((role, index) => [role.role_id, index]));
-  support.sort((left, right) => (
+  strut.sort((left, right) => (
     roleOrder.get(left.owner_role_id) - roleOrder.get(right.owner_role_id)
   ));
   const planBase = {
-    schema: 'atom-slot-print-plan/v1', body: layout.bodyPath, roles, support,
+    schema: 'atom-slot-print-plan/v1', body: layout.bodyPath, roles, strut,
     ...(structureLock === true ? { structureLock: true } : {})
   };
   const revision = `sha256:${digest(stableStringify(planBase))}`;
@@ -299,7 +299,7 @@ function initialSeal(atoms, layout) {
     createAtom({
       thing: PRINT_NAME,
       situation: 'def main(arguments):\n    return arguments',
-      contain: [
+      slot: [
         createAtom({ thing: ROLES_NAME }),
         createAtom({ thing: REVISIONS_NAME })
       ],
@@ -357,7 +357,7 @@ function roleIdsInExpr(expr) {
   return [];
 }
 
-function supportRoleSides(entry) {
+function strutRoleSides(entry) {
   const antecedent = entry.rule['if@current'] === true ? [entry.owner_role_id] : [];
   antecedent.push(...(entry.rule.if ?? []).flatMap(roleIdsInExpr));
   const consequent = entry.rule['then@current'] === true ? [entry.owner_role_id] : [];
@@ -387,13 +387,13 @@ function buildInstance(layout, plan, name) {
   }
   const root = created.get(slots.find((role) => role.path === '.').role_id);
   setInstanceRevision(root, plan.revision);
-  for (const edge of plan.support) {
+  for (const edge of plan.strut) {
     const sourceRole = plan.roles.find((role) => role.role_id === edge.owner_role_id);
     if (sourceRole.kind !== 'slot') continue;
     const source = created.get(sourceRole.role_id);
     const retained = partnersOf(source) ?? [];
     retained.push(materializeRule(edge.rule, plan, layout, instancePath));
-    replaceStoredField(source, 'support', retained);
+    replaceStoredField(source, 'strut', retained);
   }
   return root;
 }
@@ -477,7 +477,7 @@ function synchronizeInstance(layout, instance, oldPlan, newPlan, receipt) {
     if (material) {
       return {
         error: slotError(
-          'SLOT_MATERIAL_CONTAINMENT_CONFLICT',
+          'SLOT_MATERIAL_SLOTMENT_CONFLICT',
           '待删除映射槽仍包含实例本地料，重封装已回滚',
           { instance: instancePath, slot: slotPath, material }
         )
@@ -492,7 +492,7 @@ function retireUnreferencedPlans(layout, currentRevision) {
     instanceRevision(layout, instance)
   )).filter(Boolean));
   const revisions = revisionContainer(layout);
-  replaceStoredField(revisions, 'contain', (childrenOf(revisions) ?? []).filter((record) => (
+  replaceStoredField(revisions, 'slot', (childrenOf(revisions) ?? []).filter((record) => (
     atomName(record) === currentRevision || adopted.has(atomName(record))
   )));
 }
@@ -559,8 +559,8 @@ async function seal(atoms, effect, authorize) {
     const position = childrenOf(layout.examples).indexOf(instance);
     childrenOf(layout.examples)[position] = synchronized.replacement;
     receipt.processed.push(name);
-    const sourceIds = new Set(recompiled.plan.support.flatMap((entry) => (
-      supportRoleSides(entry).antecedent
+    const sourceIds = new Set(recompiled.plan.strut.flatMap((entry) => (
+      strutRoleSides(entry).antecedent
     )));
     for (const role of recompiled.plan.roles) {
       if (role.kind === 'slot' && sourceIds.has(role.role_id)) {
@@ -751,7 +751,7 @@ function instanceContextForEvent(atoms, eventPath) {
 }
 
 export function slotProgramInvocationsForEvent(atoms, triggerEvent, triggerContracts = new Map()) {
-  if (!['transform', 'support'].includes(triggerEvent?.mode) || !Array.isArray(triggerEvent.nodes)) return [];
+  if (!['transform', 'strut'].includes(triggerEvent?.mode) || !Array.isArray(triggerEvent.nodes)) return [];
   const invocations = [];
   const invocationByKey = new Map();
   const addInvocation = (context, eventPath, source, role) => {

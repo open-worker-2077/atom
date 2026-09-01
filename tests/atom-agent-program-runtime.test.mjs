@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(key, name, situation = '', contain = []) {
-  return { [key]: name, situation, contain, support: [] };
+function atom(key, name, situation = '', slot = []) {
+  return { [key]: name, situation, slot, strut: [] };
 }
 
 const agentSource = [

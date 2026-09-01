@@ -116,9 +116,9 @@ test('connections come from relationshipPairs without a hard-coded root index ch
   assert.doesNotMatch(connections, /\brootPairs\b/);
 });
 
-test('real canvas consumes support bundles as branches, a common trunk, and ordered outputs', () => {
-  assert.match(source, /visualModel\.supportBundles\s*\(\s*state\.supportClauses/);
-  assert.match(source, /drawSupportBundle/);
+test('real canvas consumes strut bundles as branches, a common trunk, and ordered outputs', () => {
+  assert.match(source, /visualModel\.strutBundles\s*\(\s*state\.strutClauses/);
+  assert.match(source, /drawStrutBundle/);
   assert.match(source, /junctionRatio/);
   assert.match(source, /glyphs:\s*false/);
 });

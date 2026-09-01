@@ -195,8 +195,8 @@ export function normalizeKnowledge(value) {
     deletedNodeKeys: Array.isArray(input.deletedNodeKeys) ? [...new Set(input.deletedNodeKeys.filter((key) => typeof key === 'string'))] : [],
     edges: [...new Map(edges.map((edge) => [edge.id, edge])).values()],
     removedEdgeIds: Array.isArray(input.removedEdgeIds) ? [...new Set(input.removedEdgeIds.filter((id) => typeof id === 'string'))] : [],
-    supportClauses: Array.isArray(input.supportClauses)
-      ? structuredClone(input.supportClauses.slice(0, 10_000))
+    strutClauses: Array.isArray(input.strutClauses)
+      ? structuredClone(input.strutClauses.slice(0, 10_000))
       : [],
     view: input.view && typeof input.view === 'object' ? input.view : null
   };
@@ -274,7 +274,7 @@ export function createStore(file) {
         revision: knowledge.revision,
         nodes,
         edges,
-        supportClauses: knowledge.supportClauses,
+        strutClauses: knowledge.strutClauses,
         view: knowledge.view
       };
     }

@@ -2,59 +2,59 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  classifySupportCurrentEndpoints,
+  classifyStrutCurrentEndpoints,
   exportGraphDocument,
   parseGraphDocument
 } from '../cli/lib/graph-json.mjs';
 import { parseAtomKey } from '../work-engine/atom-language/key-parser.mjs';
 import {
-  evaluateSupportClauses,
-  propagateSupportClauses
-} from '../work-engine/atom-language/support-runtime.mjs';
+  evaluateStrutClauses,
+  propagateStrutClauses
+} from '../work-engine/atom-language/strut-runtime.mjs';
 
-const leaf = (thing, situation = '', support = []) => ({ thing, situation, contain: [], support });
-const graphDocument = (contain, support = []) => ({
-  config: { schema_version: '2.0.0' },
-  graph: { thing: '世界', situation: '', contain, support }
+const leaf = (thing, situation = '', strut = []) => ({ thing, situation, slot: [], strut });
+const graphDocument = (slot, strut = []) => ({
+  config: { schema_version: '3.0.0' },
+  graph: { thing: '世界', situation: '', slot, strut }
 });
 
-test('ordinary static support is unconditional and does not evaluate Things as booleans', () => {
+test('ordinary static strut is unconditional and does not evaluate Things as booleans', () => {
   const parsed = parseGraphDocument(graphDocument([
     leaf('前项', 'ordinary fact', [{ 'if@current': true, then: [{ thing: '后项' }] }]),
     leaf('后项')
   ]));
 
-  const decisions = evaluateSupportClauses(parsed, { nodesByPath: new Map() });
+  const decisions = evaluateStrutClauses(parsed, { nodesByPath: new Map() });
 
-  assert.deepEqual(decisions.get('support:世界/前项:0'), {
+  assert.deepEqual(decisions.get('strut:世界/前项:0'), {
     status: 'true',
     decision: true,
     trace: []
   });
 });
 
-test('only four axes are active and support accepts no key type markers', () => {
-  for (const axis of ['thing', 'situation', 'contain', 'support']) assert.deepEqual(parseAtomKey(axis).errors, []);
+test('only four axes are active and strut accepts no key type markers', () => {
+  for (const axis of ['thing', 'situation', 'slot', 'strut']) assert.deepEqual(parseAtomKey(axis).errors, []);
   for (const retired of ['name', 'detail', 'children', 'partners']) {
     assert.equal(parseAtomKey(retired).errors[0]?.code, 'RETIRED_GRAPH_AXIS');
   }
-  for (const key of ['support@program', 'support@reverse', 'support@consequent']) {
-    assert.equal(parseAtomKey(key).errors[0]?.code, 'INVALID_SUPPORT_KEY');
+  for (const key of ['strut@program', 'strut@reverse', 'strut@consequent']) {
+    assert.equal(parseAtomKey(key).errors[0]?.code, 'INVALID_STRUT_KEY');
   }
 });
 
 test('current owner is classified O(1) without reading if or then', () => {
   const inaccessible = new Proxy([], { get() { throw new Error('must not scan'); } });
-  assert.deepEqual(classifySupportCurrentEndpoints({ 'if@current': true, then: inaccessible }), {
+  assert.deepEqual(classifyStrutCurrentEndpoints({ 'if@current': true, then: inaccessible }), {
     currentAntecedent: true, currentConsequent: false
   });
-  assert.deepEqual(classifySupportCurrentEndpoints({ if: inaccessible, 'then@current': true }), {
+  assert.deepEqual(classifyStrutCurrentEndpoints({ if: inaccessible, 'then@current': true }), {
     currentAntecedent: false, currentConsequent: true
   });
-  assert.throws(() => classifySupportCurrentEndpoints({ if: inaccessible, then: inaccessible }), {
-    code: 'SUPPORT_OWNER_CURRENT_REQUIRED'
+  assert.throws(() => classifyStrutCurrentEndpoints({ if: inaccessible, then: inaccessible }), {
+    code: 'STRUT_OWNER_CURRENT_REQUIRED'
   });
-  assert.throws(() => classifySupportCurrentEndpoints({ 'if@current': true, 'then@current': true }), {
+  assert.throws(() => classifyStrutCurrentEndpoints({ 'if@current': true, 'then@current': true }), {
     code: 'CURRENT_ENDPOINT_ON_BOTH_SIDES'
   });
 });
@@ -66,7 +66,7 @@ test('1-to-N is declared once at its current source and preserves order', () => 
   ]);
   const parsed = parseGraphDocument(input);
   assert.deepEqual(parsed.graph, input.graph);
-  const [rule] = parsed.supportClauses;
+  const [rule] = parsed.strutClauses;
   assert.equal(rule.currentSide, 'antecedent');
   assert.deepEqual(rule.dependencyPaths, ['世界/A']);
   assert.deepEqual(rule.then.map((item) => item.targetPath), ['世界/B', '世界/C', '世界/D']);
@@ -80,7 +80,7 @@ test('N-to-1 is declared once at its current hub target', () => {
       'then@current': true
     }])
   ]));
-  const [rule] = parsed.supportClauses;
+  const [rule] = parsed.strutClauses;
   assert.equal(rule.currentSide, 'consequent');
   assert.equal(rule.root.kind, 'and');
   assert.deepEqual(rule.dependencyPaths, ['世界/A', '世界/B', '世界/C']);
@@ -92,19 +92,19 @@ test('current may combine with external antecedents only for a single consequent
     leaf('A', '', [{ 'if@current': true, if: [{ thing: 'B' }], then: [{ thing: 'C' }] }]),
     leaf('B'), leaf('C')
   ]));
-  assert.equal(parsed.supportClauses[0].root.kind, 'and');
-  assert.deepEqual(parsed.supportClauses[0].dependencyPaths, ['世界/A', '世界/B']);
+  assert.equal(parsed.strutClauses[0].root.kind, 'and');
+  assert.deepEqual(parsed.strutClauses[0].dependencyPaths, ['世界/A', '世界/B']);
 });
 
 test('modifiers are strict true, exactly one is required and both sides are non-empty', () => {
   const cases = [
     [[{ 'if@current': false, then: [{ thing: 'B' }] }], 'INVALID_CURRENT_MODIFIER'],
     [[{ 'if@current': 'true', then: [{ thing: 'B' }] }], 'INVALID_CURRENT_MODIFIER'],
-    [[{ if: [{ thing: 'B' }], then: [{ thing: 'B' }] }], 'SUPPORT_OWNER_CURRENT_REQUIRED'],
-    [[{ 'if@current': true }], 'MISSING_SUPPORT_CONSEQUENT']
+    [[{ if: [{ thing: 'B' }], then: [{ thing: 'B' }] }], 'STRUT_OWNER_CURRENT_REQUIRED'],
+    [[{ 'if@current': true }], 'MISSING_STRUT_CONSEQUENT']
   ];
-  for (const [support, code] of cases) {
-    assert.throws(() => parseGraphDocument(graphDocument([leaf('A', '', support), leaf('B')])), { code });
+  for (const [strut, code] of cases) {
+    assert.throws(() => parseGraphDocument(graphDocument([leaf('A', '', strut), leaf('B')])), { code });
   }
 });
 
@@ -125,7 +125,7 @@ test('nested A and (B or C) preserves explicit topology and order at a real hub'
       'then@current': true
     }])
   ]));
-  const [rule] = parsed.supportClauses;
+  const [rule] = parsed.strutClauses;
   assert.equal(rule.root.kind, 'and');
   assert.equal(rule.root.children[1].kind, 'or');
   assert.deepEqual(rule.dependencyPaths, ['世界/A', '世界/B', '世界/C']);
@@ -134,27 +134,27 @@ test('nested A and (B or C) preserves explicit topology and order at a real hub'
 test('thing@program is a typed endpoint selector and never line-carried source code', () => {
   const parsed = parseGraphDocument(graphDocument([
     leaf('Source'),
-    { 'thing@program': 'Predicate', situation: 'def main(arguments):\n    return True', contain: [], support: [] },
+    { 'thing@program': 'Predicate', situation: 'def main(arguments):\n    return True', slot: [], strut: [] },
     leaf('H', '', [{
       if: [{ and: [{ thing: 'Source' }, { 'thing@program': 'Predicate' }] }],
       'then@current': true
     }])
   ]));
-  assert.equal(parsed.supportClauses[0].root.kind, 'and');
+  assert.equal(parsed.strutClauses[0].root.kind, 'and');
   assert.throws(() => parseGraphDocument(graphDocument([
-    { 'thing@program': 'Predicate', situation: 'def main(arguments):\n    return True', contain: [], support: [] },
+    { 'thing@program': 'Predicate', situation: 'def main(arguments):\n    return True', slot: [], strut: [] },
     leaf('H', '', [{ if: [{ 'thing@program': 'Predicate' }], 'then@current': true }])
-  ])), { code: 'SUPPORT_FACT_ANTECEDENT_REQUIRED' });
+  ])), { code: 'STRUT_FACT_ANTECEDENT_REQUIRED' });
   assert.throws(() => parseGraphDocument(graphDocument([
     leaf('Ordinary'), leaf('H', '', [{ if: [{ 'thing@program': 'Ordinary' }], 'then@current': true }])
-  ])), { code: 'SUPPORT_PROGRAM_ENDPOINT_TYPE_MISMATCH' });
+  ])), { code: 'STRUT_PROGRAM_ENDPOINT_TYPE_MISMATCH' });
   assert.throws(() => parseGraphDocument(graphDocument([
-    { 'thing@program': 'Predicate', situation: '', contain: [], support: [] },
+    { 'thing@program': 'Predicate', situation: '', slot: [], strut: [] },
     leaf('H', '', [{
       if: [{ 'thing@program': "satisfies({'thing':'Predicate'}, lambda node: True)" }],
       'then@current': true
     }])
-  ])), { code: 'SUPPORT_INLINE_PROGRAM_UNSUPPORTED' });
+  ])), { code: 'STRUT_INLINE_PROGRAM_UNSUPPORTED' });
 });
 
 test('native N-to-M is rejected even when its predicate Program is independent', () => {
@@ -165,22 +165,22 @@ test('native N-to-M is rejected even when its predicate Program is independent',
       then: [{ thing: 'Y' }, { thing: 'Z' }]
     }]),
     leaf('B'),
-    { 'thing@program': 'Gate', situation: 'def main(arguments):\n    return True', contain: [], support: [] },
+    { 'thing@program': 'Gate', situation: 'def main(arguments):\n    return True', slot: [], strut: [] },
     leaf('Y'), leaf('Z')
-  ])), { code: 'NATIVE_MANY_TO_MANY_SUPPORT_UNSUPPORTED' });
+  ])), { code: 'NATIVE_MANY_TO_MANY_STRUT_UNSUPPORTED' });
 });
 
-test('a Program cannot own a current support endpoint or become its own boolean fact', () => {
-  const programOwner = (support) => graphDocument([
-    { 'thing@program': 'Decision', situation: 'def main(arguments):\n    return True', contain: [], support },
+test('a Program cannot own a current strut endpoint or become its own boolean fact', () => {
+  const programOwner = (strut) => graphDocument([
+    { 'thing@program': 'Decision', situation: 'def main(arguments):\n    return True', slot: [], strut },
     leaf('Fact')
   ]);
   assert.throws(() => parseGraphDocument(programOwner([
     { 'if@current': true, then: [{ thing: 'Fact' }] }
-  ])), { code: 'SUPPORT_DECISION_PROGRAM_MUST_BE_INDEPENDENT' });
+  ])), { code: 'STRUT_DECISION_PROGRAM_MUST_BE_INDEPENDENT' });
   assert.throws(() => parseGraphDocument(programOwner([
     { if: [{ thing: 'Fact' }], 'then@current': true }
-  ])), { code: 'SUPPORT_DECISION_PROGRAM_MUST_BE_INDEPENDENT' });
+  ])), { code: 'STRUT_DECISION_PROGRAM_MUST_BE_INDEPENDENT' });
 });
 
 test('a Program cannot replace an ordinary consequent fact endpoint', () => {
@@ -189,8 +189,8 @@ test('a Program cannot replace an ordinary consequent fact endpoint', () => {
       'if@current': true,
       then: [{ 'thing@program': 'Decision' }]
     }]),
-    { 'thing@program': 'Decision', situation: 'def main(arguments):\n    return True', contain: [], support: [] }
-  ])), { code: 'SUPPORT_FACT_CONSEQUENT_REQUIRED' });
+    { 'thing@program': 'Decision', situation: 'def main(arguments):\n    return True', slot: [], strut: [] }
+  ])), { code: 'STRUT_FACT_CONSEQUENT_REQUIRED' });
 });
 
 test('explicit 3-to-hub-to-3 remains two independently auditable rules', () => {
@@ -202,7 +202,7 @@ test('explicit 3-to-hub-to-3 remains two independently auditable rules', () => {
     ]),
     leaf('X'), leaf('Y'), leaf('Z')
   ]));
-  assert.equal(parsed.supportClauses.length, 2);
+  assert.equal(parsed.strutClauses.length, 2);
   assert.equal(parsed.endpointIndex.get('世界/H').length, 2);
   for (const endpoint of ['世界/A', '世界/B', '世界/C', '世界/X', '世界/Y', '世界/Z']) {
     assert.equal(parsed.endpointIndex.get(endpoint).length, 1);
@@ -218,7 +218,7 @@ test('AND OR and three auditable independent rules remain distinct', () => {
     leaf('OR Hub', '', [{ if: [{ or: [{ thing: 'A' }, { thing: 'B' }, { thing: 'C' }] }], 'then@current': true }]),
     leaf('Z')
   ]));
-  assert.deepEqual(parsed.supportClauses.map((rule) => rule.root.kind), ['thing', 'thing', 'thing', 'and', 'or']);
+  assert.deepEqual(parsed.strutClauses.map((rule) => rule.root.kind), ['thing', 'thing', 'thing', 'and', 'or']);
 });
 
 test('duplicate canonical owner rules are rejected instead of copied for visibility', () => {
@@ -227,16 +227,16 @@ test('duplicate canonical owner rules are rejected instead of copied for visibil
       { 'if@current': true, then: [{ thing: 'B' }] },
       { 'if@current': true, then: [{ thing: 'B' }] }
     ]), leaf('B')
-  ])), { code: 'DUPLICATE_SUPPORT_RULE' });
+  ])), { code: 'DUPLICATE_STRUT_RULE' });
 });
 
 test('relative selector cannot escape current domain', () => {
   assert.throws(() => parseGraphDocument(graphDocument([
-    { thing: '域A', situation: '', support: [], contain: [leaf('H', '', [{
+    { thing: '域A', situation: '', strut: [], slot: [leaf('H', '', [{
       if: [{ thing: './秘密' }], 'then@current': true
     }])] },
-    { thing: '域B', situation: '', support: [], contain: [leaf('秘密')] }
-  ])), { code: 'SUPPORT_SELECTOR_OUT_OF_DOMAIN' });
+    { thing: '域B', situation: '', strut: [], slot: [leaf('秘密')] }
+  ])), { code: 'STRUT_SELECTOR_OUT_OF_DOMAIN' });
 });
 
 test('cyclic topology terminates with stable rule and edge identities', () => {
@@ -244,7 +244,7 @@ test('cyclic topology terminates with stable rule and edge identities', () => {
     leaf('P', '', [{ 'if@current': true, then: [{ thing: 'Q' }] }]),
     leaf('Q', '', [{ 'if@current': true, then: [{ thing: 'P' }] }])
   ]));
-  const propagated = propagateSupportClauses(parsed);
+  const propagated = propagateStrutClauses(parsed);
   assert.equal(propagated.visitedClauseIds.length, 2);
   assert.equal(new Set(propagated.edges.map((edge) => edge.id)).size, 2);
 });
@@ -253,9 +253,9 @@ test('spatial export emits one owner-local current source rule', () => {
   const a = { id: 'a', key: 'root::a', path: 'root', label: 'A', detail: 'a', aliases: [] };
   const b = { id: 'b', key: 'root::b', path: 'root', label: 'B', detail: 'b', aliases: [] };
   const result = exportGraphDocument({ nodes: [a, b], edges: [{
-    from: { key: a.key }, to: { key: b.key }, label: 'support'
+    from: { key: a.key }, to: { key: b.key }, label: 'strut'
   }] }, { collection: true });
-  assert.deepEqual(result.graph.contain[0].support, [{
+  assert.deepEqual(result.graph.slot[0].strut, [{
     'if@current': true, then: [{ thing: 'B' }]
   }]);
 });
@@ -264,7 +264,7 @@ test('large rule owner classification stays independent of expression size', () 
   const inaccessible = new Proxy(Array.from({ length: 4000 }), {
     get() { throw new Error('must not scan'); }
   });
-  assert.deepEqual(classifySupportCurrentEndpoints({
+  assert.deepEqual(classifyStrutCurrentEndpoints({
     'if@current': true, if: inaccessible, then: inaccessible
   }), { currentAntecedent: true, currentConsequent: false });
 });

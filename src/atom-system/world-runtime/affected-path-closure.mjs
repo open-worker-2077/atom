@@ -14,7 +14,7 @@ function atomName(atom) {
 }
 
 function childrenOf(atom) {
-  const value = axisEntry(atom, 'contain')?.[1];
+  const value = axisEntry(atom, 'slot')?.[1];
   return Array.isArray(value) ? value : [];
 }
 

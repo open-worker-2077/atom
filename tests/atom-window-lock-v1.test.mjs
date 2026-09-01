@@ -15,8 +15,8 @@ import { programFunctionRegistry } from '../work-engine/atom-language/program-fu
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 test('function groups resolve through the current registry to deduplicated effective names', () => {
@@ -76,15 +76,15 @@ test('fixed Agent window lock authorizes the real path and only peeks at the dir
   assert.equal(decide('Root/Other').code, 'WINDOW_ACCESS_DENIED');
 });
 
-test('contain locks are checked before target node locks and labels are action-specific', () => {
+test('slot locks are checked before target node locks and labels are action-specific', () => {
   const locks = [
-    { kind: 'contain', path: 'Root/Order/Agent/Area', actions: ['explore'], labels: ['pass'] },
+    { kind: 'slot', path: 'Root/Order/Agent/Area', actions: ['explore'], labels: ['pass'] },
     { kind: 'node', path: 'Root/Order/Agent/Area/Record', actions: ['transform'], labels: ['edit'] }
   ];
   const decide = (targetPath, operation, labels) => authorizeWindowGraphPath({
     agentPath: 'Root/Order/Agent', targetPath, operation, locks, labels
   });
-  assert.equal(decide('Root/Order/Agent/Area/Record', 'explore', []).lockKind, 'contain');
+  assert.equal(decide('Root/Order/Agent/Area/Record', 'explore', []).lockKind, 'slot');
   assert.equal(decide('Root/Order/Agent/Area/Record', 'explore', ['pass']).decision, 'allow');
   assert.equal(decide('Root/Order/Agent/Area/Record', 'transform', ['pass']).lockKind, 'node');
   assert.equal(decide('Root/Order/Agent/Area/Record', 'transform', ['edit']).decision, 'allow');
@@ -232,7 +232,7 @@ test('an Agent key may satisfy its own node lock and reconfigure without exceedi
 
   assert.equal(result.ok, true, JSON.stringify(result));
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(world[0].contain[0].situation, updatedSource);
+  assert.equal(world[0].slot[0].situation, updatedSource);
 });
 
 test('an unmatched Agent node lock denies self-reconfiguration without mutation', async (t) => {
@@ -263,7 +263,7 @@ test('an unmatched Agent node lock denies self-reconfiguration without mutation'
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.ok(result.errors.some((error) => error.code === 'GRAPH_LOCK_DENIED'), JSON.stringify(result));
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(world[0].contain[0].situation, initialSource);
+  assert.equal(world[0].slot[0].situation, initialSource);
 });
 
 async function descendantAgentCandidateFixture(t, suffix, lockFields = ['thing']) {
@@ -275,8 +275,8 @@ async function descendantAgentCandidateFixture(t, suffix, lockFields = ['thing']
   const initialProgramSource = 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})';
   await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
     atom('Window', agentSource, [
-      atom('Child Program', initialProgramSource, [atom('Support Fact')], 'program'),
-      atom('Support Decision', 'def main(arguments):\n    return True', [], 'program')
+      atom('Child Program', initialProgramSource, [atom('Strut Fact')], 'program'),
+      atom('Strut Decision', 'def main(arguments):\n    return True', [], 'program')
     ], 'program'),
     ...(lockFields ? [atom(
       'Registration Lock',
@@ -296,16 +296,16 @@ for (const scenario of [
     name: 'situation',
     source: `transform {"thing":"Root/Window/Child Program",${JSON.stringify(`situation.rep.${UPDATED_DESCENDANT_AGENT_SOURCE}`)}}`,
     assertStored(world) {
-      assert.match(world[0].contain[0].contain[0].situation, /"transform"/u);
+      assert.match(world[0].slot[0].slot[0].situation, /"transform"/u);
     }
   },
   {
-    name: 'support',
-    source: 'transform {"thing":"Root/Window/Child Program/Support Fact","support.rep.":[{"if@current":true,"if":[{"thing@program":"Root/Window/Support Decision"}],"then":[{"thing":"Root"}]}]}',
+    name: 'strut',
+    source: 'transform {"thing":"Root/Window/Child Program/Strut Fact","strut.rep.":[{"if@current":true,"if":[{"thing@program":"Root/Window/Strut Decision"}],"then":[{"thing":"Root"}]}]}',
     assertStored(world) {
-      const support = world[0].contain[0].contain[0].contain[0].support[0];
-      assert.equal(support.if[0]['thing@program'], 'Root/Window/Support Decision');
-      assert.equal(support.then[0].thing, 'Root');
+      const strut = world[0].slot[0].slot[0].slot[0].strut[0];
+      assert.equal(strut.if[0]['thing@program'], 'Root/Window/Strut Decision');
+      assert.equal(strut.then[0].thing, 'Root');
     }
   },
   {
@@ -314,15 +314,15 @@ for (const scenario of [
     source: 'transform {"thing.dsc.":"Root/Window/Child Program"}',
     assertStored(world) {
       assert.deepEqual(
-        world[0].contain[0].contain.map((entry) => entry['thing@program'] ?? entry.thing),
-        ['Support Decision']
+        world[0].slot[0].slot.map((entry) => entry['thing@program'] ?? entry.thing),
+        ['Strut Decision']
       );
-      const backup = world[0].contain.find((entry) => Object.entries(entry).some(([key, value]) => (
+      const backup = world[0].slot.find((entry) => Object.entries(entry).some(([key, value]) => (
         key.startsWith('thing') && value === 'Default Backup'
       )));
-      assert.equal(backup.contain[0]['thing@program'], 'Child Program');
+      assert.equal(backup.slot[0]['thing@program'], 'Child Program');
       assert.deepEqual(
-        Object.keys(backup.contain[0]).filter((key) => key.startsWith('thing')),
+        Object.keys(backup.slot[0]).filter((key) => key.startsWith('thing')),
         ['thing@program']
       );
     }
@@ -341,7 +341,7 @@ for (const scenario of [
     assert.equal(result.ok, true, JSON.stringify(result));
     const world = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
     scenario.assertStored(world);
-    const child = world[0].contain[0].contain[0];
+    const child = world[0].slot[0].slot[0];
     if (child) {
       assert.equal(Object.hasOwn(child, 'thing@program'), true);
       assert.deepEqual(
@@ -381,9 +381,9 @@ test('an out-of-window Agent declaration edit uses the normal Transform gate', a
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.ok(result.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), JSON.stringify(result));
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(world[0].contain[1].situation, 'value = 1');
+  assert.equal(world[0].slot[1].situation, 'value = 1');
   assert.deepEqual(
-    Object.keys(world[0].contain[1]).filter((key) => key.startsWith('thing')),
+    Object.keys(world[0].slot[1]).filter((key) => key.startsWith('thing')),
     ['thing@program']
   );
 });
@@ -453,7 +453,7 @@ test('lock() publishes only range, Explore or Transform actions, and required la
       [], 'program')
   ], { programSelector: 'Locker', force: true });
   assert.deepEqual(cycle.locks, [{
-    kind: 'contain', path: 'Target', actions: ['explore', 'transform'], labels: ['approved'],
+    kind: 'slot', path: 'Target', actions: ['explore', 'transform'], labels: ['approved'],
     sourceProgramPath: 'Locker'
   }]);
 });
@@ -482,7 +482,7 @@ test('running an already-declared Agent Program does not mutate world facts or r
   assert.equal(result.revisionAfter, result.revisionBefore);
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(await fs.readFile(contextFile, 'utf8'), before);
-  assert.equal(Object.hasOwn(world[0].contain[0].contain[0], 'thing@program'), true);
+  assert.equal(Object.hasOwn(world[0].slot[0].slot[0], 'thing@program'), true);
   await assert.rejects(fs.stat(lockFile), (error) => error.code === 'ENOENT');
   assert.deepEqual(scheduler.agentSecurity.get('Root/Controller/Registrar'), {
     labels: ['^', 'leaf'],

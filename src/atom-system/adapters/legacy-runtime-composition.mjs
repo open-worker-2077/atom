@@ -133,10 +133,10 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
         if (typeof thing !== 'string' || !thing) return;
         const path = parentPath ? `${parentPath}/${thing}` : thing;
         graphByPath.set(path, node);
-        for (const child of axisEntry(node, 'contain')?.[1] ?? []) visit(child, path);
+        for (const child of axisEntry(node, 'slot')?.[1] ?? []) visit(child, path);
       };
-      for (const child of axisEntry(rawGraphDocument.graph, 'contain')?.[1] ?? []) visit(child);
-      const resolveSupportPath = (sourcePath, selector) => {
+      for (const child of axisEntry(rawGraphDocument.graph, 'slot')?.[1] ?? []) visit(child);
+      const resolveStrutPath = (sourcePath, selector) => {
         if (graphByPath.has(selector)) return selector;
         const sibling = `${sourcePath.split('/').slice(0, -1).join('/')}/${selector}`.replace(/^\//u, '');
         if (graphByPath.has(sibling)) return sibling;
@@ -149,8 +149,8 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
         if (!path) throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Web edit target does not map to one Atom');
         return path;
       };
-      const replaceSupport = (sourcePath, support) => (
-        `transform ${JSON.stringify({ thing: sourcePath, 'support.rep.': support })}`
+      const replaceStrut = (sourcePath, strut) => (
+        `transform ${JSON.stringify({ thing: sourcePath, 'strut.rep.': strut })}`
       );
       const landingTransform = (landing) => {
         const destinationPath = containerPath(landing.target?.path);
@@ -168,7 +168,7 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
           if (type && (!/^[\p{L}\p{N}_-]+$/u.test(type) || type.length > 80)) {
             throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Legacy Web node requires one safe @type name');
           }
-          return { new: { [`thing${type ? `@${type}` : ''}`]: `${destinationPath}/${label}`, situation: detail, contain: [], support: [] } };
+          return { new: { [`thing${type ? `@${type}` : ''}`]: `${destinationPath}/${label}`, situation: detail, slot: [], strut: [] } };
         }
         return { [`thing.mov.${destinationPath || WORLD_OUTSIDE_NAME}`]: sourcePath };
       };
@@ -185,7 +185,7 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
         }
         const parentAtomPath = containerPath(operation.path);
         const thing = parentAtomPath ? `${parentAtomPath}/${label}` : label;
-        return `transform new ${JSON.stringify({ [`thing${type ? `@${type}` : ''}`]: thing, situation: detail, contain: [], support: [] })}`;
+        return `transform new ${JSON.stringify({ [`thing${type ? `@${type}` : ''}`]: thing, situation: detail, slot: [], strut: [] })}`;
       }
 
       if (operation?.kind === 'node-edit') {
@@ -231,42 +231,42 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
         const sourcePath = requireAtomPath(operation.source?.key, operation.source);
         const targetPath = requireAtomPath(operation.target?.key, operation.target);
         const source = graphByPath.get(sourcePath);
-        const support = structuredClone(axisEntry(source, 'support')?.[1] ?? []);
-        const outbound = support.find((rule) => (
+        const strut = structuredClone(axisEntry(source, 'strut')?.[1] ?? []);
+        const outbound = strut.find((rule) => (
           rule?.['if@current'] === true && !Object.hasOwn(rule, 'if') && Array.isArray(rule.then)
         ));
         if (outbound) {
-          if (outbound.then.some((selector) => resolveSupportPath(sourcePath, selector?.thing) === targetPath)) {
-            throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Web cannot duplicate one directed Atom support relation');
+          if (outbound.then.some((selector) => resolveStrutPath(sourcePath, selector?.thing) === targetPath)) {
+            throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Web cannot duplicate one directed Atom strut relation');
           }
           outbound.then.push({ thing: targetPath });
         } else {
-          support.push({ 'if@current': true, then: [{ thing: targetPath }] });
+          strut.push({ 'if@current': true, then: [{ thing: targetPath }] });
         }
-        return replaceSupport(sourcePath, support);
+        return replaceStrut(sourcePath, strut);
       }
 
       if (operation?.kind === 'edge-edit') {
         const sourcePath = requireAtomPath(operation.edge?.from?.key, operation.edge?.from);
         const targetPath = requireAtomPath(operation.edge?.to?.key, operation.edge?.to);
         const source = graphByPath.get(sourcePath);
-        const support = structuredClone(axisEntry(source, 'support')?.[1] ?? []);
-        const matching = support.flatMap((rule, ruleIndex) => (
+        const strut = structuredClone(axisEntry(source, 'strut')?.[1] ?? []);
+        const matching = strut.flatMap((rule, ruleIndex) => (
           rule?.['if@current'] === true && !Object.hasOwn(rule, 'if') && Array.isArray(rule.then)
             ? rule.then.map((selector, thenIndex) => ({ rule, ruleIndex, selector, thenIndex }))
             : []
-        )).filter(({ selector }) => resolveSupportPath(sourcePath, selector.thing) === targetPath);
+        )).filter(({ selector }) => resolveStrutPath(sourcePath, selector.thing) === targetPath);
         if (matching.length !== 1) {
           throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Web relation edit requires one exact directed Atom relation');
         }
         if (operation.status === 'delete') {
           matching[0].rule.then.splice(matching[0].thenIndex, 1);
-          if (matching[0].rule.then.length === 0) support.splice(matching[0].ruleIndex, 1);
+          if (matching[0].rule.then.length === 0) strut.splice(matching[0].ruleIndex, 1);
         }
-        else if (operation.edge?.label && operation.edge.label !== 'support') {
-          throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Atom support relation label is fixed');
+        else if (operation.edge?.label && operation.edge.label !== 'strut') {
+          throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Atom strut relation label is fixed');
         }
-        return replaceSupport(sourcePath, support);
+        return replaceStrut(sourcePath, strut);
       }
 
       throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Unsupported Human Web workspace operation');

@@ -9,7 +9,7 @@ import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
 const AGENT_SOURCE = 'agent({"labels":["^^"],"functions":{"groups":[],"names":["agent","explore","json_parse","slot_body","transform","use_program"]}})';
 
-function atom(thing, situation = '', contain = [], support = [], types = []) {
+function atom(thing, situation = '', slot = [], strut = [], types = []) {
   const agentProgram = types.includes('agent');
   const storedTypes = agentProgram
     ? ['program', ...types.filter((type) => type !== 'agent' && type !== 'program')]
@@ -20,20 +20,20 @@ function atom(thing, situation = '', contain = [], support = [], types = []) {
   return {
     [`thing${storedTypes.map((type) => `@${type}`).join('')}`]: thing,
     situation: storedSituation,
-    contain,
-    support
+    slot,
+    strut
   };
 }
 function thingOf(value) {
   return Object.entries(value).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
 }
 function find(atoms, selector) {
-  let contain = atoms;
+  let slot = atoms;
   let current = null;
   for (const segment of selector.split('/')) {
-    current = contain.find((candidate) => thingOf(candidate) === segment);
+    current = slot.find((candidate) => thingOf(candidate) === segment);
     if (!current) return null;
-    contain = current.contain;
+    slot = current.slot;
   }
   return current;
 }
@@ -67,7 +67,7 @@ async function setup(t) {
 }
 const run = (runtime, source) => executeAtomLanguage({ ...runtime, source });
 
-test('Program seals then prints one instance with shared Program and owner-local support', async (t) => {
+test('Program seals then prints one instance with shared Program and owner-local strut', async (t) => {
   const runtime = await setup(t);
   const sealed = await run(runtime, 'transform {"thing.run.":"Root/槽体封装程序"}');
   assert.equal(sealed.ok, true, JSON.stringify(sealed.errors));
@@ -77,7 +77,7 @@ test('Program seals then prints one instance with shared Program and owner-local
   const committed = JSON.parse(committedText);
   assert.ok(find(committed, 'Root/订单槽体/槽例/订单001'));
   assert.equal(find(committed, 'Root/订单槽体/槽例/订单001/共享计算'), null);
-  assert.deepEqual(find(committed, 'Root/订单槽体/槽例/订单001/金额').support, [{
+  assert.deepEqual(find(committed, 'Root/订单槽体/槽例/订单001/金额').strut, [{
     'if@current': true,
     if: [{ 'thing@program': 'Root/订单槽体/槽模/共享计算' }],
     then: [{ thing: 'Root/订单槽体/槽例/订单001/结果' }]
@@ -97,9 +97,9 @@ test('unrelated Program creation does not replay an existing print effect', asyn
   const runtime = await setup(t);
   assert.equal((await run(runtime, 'transform {"thing.run.":"Root/槽体封装程序"}')).ok, true);
   assert.equal((await run(runtime, 'transform {"thing.run.":"Root/槽体打印程序"}')).ok, true);
-  const created = await run(runtime, 'transform new {"thing@program":"Root/无关共享程序","situation":"def main(arguments):\\n    return arguments","contain":[],"support":[]}');
+  const created = await run(runtime, 'transform new {"thing@program":"Root/无关共享程序","situation":"def main(arguments):\\n    return arguments","slot":[],"strut":[]}');
   assert.equal(created.ok, true, JSON.stringify(created.errors));
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.ok(find(committed, 'Root/无关共享程序'));
-  assert.equal(find(committed, 'Root/订单槽体/槽例').contain.filter((child) => thingOf(child) === '订单001').length, 1);
+  assert.equal(find(committed, 'Root/订单槽体/槽例').slot.filter((child) => thingOf(child) === '订单001').length, 1);
 });

@@ -37,12 +37,12 @@ function atomName(atom) {
 }
 
 function directChildren(atom) {
-  const children = storedField(atom, 'contain')?.value;
+  const children = storedField(atom, 'slot')?.value;
   return Array.isArray(children) ? children : [];
 }
 
 function atomPartners(atom) {
-  const partners = storedField(atom, 'support')?.value;
+  const partners = storedField(atom, 'strut')?.value;
   return Array.isArray(partners) ? partners : [];
 }
 
@@ -309,7 +309,7 @@ function atomToNormalized(atom) {
       ...parsed,
       commands: [],
       valuePresent: true,
-      value: parsed.baseKey === 'contain' && Array.isArray(value)
+      value: parsed.baseKey === 'slot' && Array.isArray(value)
         ? value.map((item) => (
           item && typeof item === 'object' && !Array.isArray(item)
             ? { kind: 'graph-object', fields: atomToNormalized(item).fields }
@@ -339,7 +339,7 @@ function transformItemForChild(targetPath, child) {
     fields: [
       { baseKey: 'thing', valuePresent: true, value: targetPath, commands: [] },
       {
-        baseKey: 'contain',
+        baseKey: 'slot',
         valuePresent: true,
         commands: [],
         value: [atomToNormalized(child)]

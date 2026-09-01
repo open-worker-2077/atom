@@ -15,7 +15,7 @@ import {
 import { matchesExactSelector } from './exact-selector.mjs';
 import { normalizeTypePredicate } from './program-locks.mjs';
 import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
-import { buildSupportDeliveries, evaluateSupportClausesWithPrograms } from './support-runtime.mjs';
+import { buildStrutDeliveries, evaluateStrutClausesWithPrograms } from './strut-runtime.mjs';
 import { shortcutMetadata } from './shortcut-runtime.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
@@ -40,7 +40,7 @@ function slotScopeRoot(path) {
   return index >= 0 && parts[index + 1] ? parts.slice(0, index + 2).join('/') : null;
 }
 
-function supportDeliveryKey(delivery) {
+function strutDeliveryKey(delivery) {
   return [
     delivery?.revision,
     delivery?.clauseId,
@@ -49,11 +49,11 @@ function supportDeliveryKey(delivery) {
   ].join('\0');
 }
 
-function uniqueSupportDeliveries(deliveries = []) {
-  return [...new Map(deliveries.map((delivery) => [supportDeliveryKey(delivery), delivery])).values()];
+function uniqueStrutDeliveries(deliveries = []) {
+  return [...new Map(deliveries.map((delivery) => [strutDeliveryKey(delivery), delivery])).values()];
 }
 
-function supportAffectedGraphPaths(graphDocument, triggerEvent) {
+function strutAffectedGraphPaths(graphDocument, triggerEvent) {
   const graphRoot = graphDocument.graph.thing;
   const exactPaths = Array.isArray(triggerEvent?.affectedPaths)
     ? triggerEvent.affectedPaths
@@ -64,7 +64,7 @@ function supportAffectedGraphPaths(graphDocument, triggerEvent) {
   }))];
 }
 
-function projectSupportContext(atoms) {
+function projectStrutContext(atoms) {
   try {
     return projectAtomContext(atoms);
   } catch {
@@ -107,7 +107,7 @@ function worldRecords(atoms) {
       types: stored.get('thing')?.parsed.types.map((type) => type.raw) ?? [],
       parentRef,
       childrenRefs: [],
-      partners: structuredClone(stored.get('support')?.value ?? [])
+      partners: structuredClone(stored.get('strut')?.value ?? [])
     };
     if (record.types.includes('shortcut')) {
       const metadata = shortcutMetadata(atom);
@@ -117,7 +117,7 @@ function worldRecords(atoms) {
         : null;
     }
     records.push(record);
-    for (const [index, child] of (stored.get('contain')?.value ?? []).entries()) {
+    for (const [index, child] of (stored.get('slot')?.value ?? []).entries()) {
       const childRecord = visit(child, ref, [...parentPath, name], `${address}/${index}`);
       record.childrenRefs.push(childRecord.ref);
     }
@@ -444,7 +444,7 @@ function rebindLocks(locks, previousRecords, records) {
       ...structuredClone(lock),
       sourceProgramRef: newRefByPath.get(lock.sourceProgramPath) ?? lock.sourceProgramRef
     };
-    if (lock.kind === 'node' || lock.kind === 'contain') {
+    if (lock.kind === 'node' || lock.kind === 'slot') {
       return newRefByPath.has(lock.path) ? rebound : null;
     }
     rebound.targets = Array.isArray(lock.targets?.paths) ? structuredClone(lock.targets) : {
@@ -500,17 +500,17 @@ function exactAtomAddress(atoms, selector) {
     if (matches.length !== 1) return null;
     current = matches[0].atom;
     address = address ? `${address}/${matches[0].index}` : `${matches[0].index}`;
-    children = oneStoredField(current, 'contain')?.value ?? [];
+    children = oneStoredField(current, 'slot')?.value ?? [];
   }
   return current ? { atom: current, address } : null;
 }
 
-function subtreeContainsProgram(atom) {
+function subtreeSlotsProgram(atom) {
   if (!atom) return false;
   if (oneStoredField(atom, 'thing')?.parsed.types.some((type) => type.raw === 'program')) {
     return true;
   }
-  return (oneStoredField(atom, 'contain')?.value ?? []).some(subtreeContainsProgram);
+  return (oneStoredField(atom, 'slot')?.value ?? []).some(subtreeSlotsProgram);
 }
 
 function pathsIntersect(left, right) {
@@ -537,8 +537,8 @@ function localProjectionRebaseEligible(previousAtoms, atoms, changedPaths, store
     Array.isArray(lock.targets?.refs) && !Array.isArray(lock.targets?.paths)
   ))) return false;
   return !changedPaths.some((changed) => (
-    subtreeContainsProgram(exactAtomAddress(previousAtoms, changed)?.atom)
-    || subtreeContainsProgram(exactAtomAddress(atoms, changed)?.atom)
+    subtreeSlotsProgram(exactAtomAddress(previousAtoms, changed)?.atom)
+    || subtreeSlotsProgram(exactAtomAddress(atoms, changed)?.atom)
   ));
 }
 
@@ -548,7 +548,7 @@ function rebindPathLocks(locks, atoms, revision) {
       ? exactAtomAddress(atoms, lock.sourceProgramPath)
       : null;
     if (lock.sourceProgramPath && !source) return null;
-    if ((lock.kind === 'node' || lock.kind === 'contain')
+    if ((lock.kind === 'node' || lock.kind === 'slot')
       && !exactAtomAddress(atoms, lock.path)) return null;
     return {
       ...structuredClone(lock),
@@ -579,7 +579,7 @@ export function resolveExactPathFromCurrentContext(atoms, selector) {
 
 export function validateProgramResult(result, records, program, options = {}) {
   const {
-    scopeRoot = null, supportDecision = false, resolveExactPath = null, agentProgramPaths = []
+    scopeRoot = null, strutDecision = false, resolveExactPath = null, agentProgramPaths = []
   } = options;
   if (!result?.ok) {
     const error = new Error(result?.error?.message || 'Python Program failed');
@@ -635,7 +635,7 @@ export function validateProgramResult(result, records, program, options = {}) {
         });
       }
       return {
-        kind: scope === 'subtree' ? 'contain' : 'node',
+        kind: scope === 'subtree' ? 'slot' : 'node',
         path: targetPath,
         actions: [...entry.actions],
         labels: [...entry.labels],
@@ -647,7 +647,7 @@ export function validateProgramResult(result, records, program, options = {}) {
       ? (!Array.isArray(paths) || !paths.length || new Set(paths).size !== paths.length
         || paths.some((path) => typeof path !== 'string' || !recordsByPath.has(path)))
       : (!Array.isArray(refs) || !refs.length || refs.some((ref) => !knownRefs.has(ref)))) {
-      throw Object.assign(new Error('lock targets contain an unknown exact Atom coordinate'), {
+      throw Object.assign(new Error('lock targets slot an unknown exact Atom coordinate'), {
         code: 'INVALID_PROGRAM_LOCK_TARGET'
       });
     }
@@ -663,9 +663,9 @@ export function validateProgramResult(result, records, program, options = {}) {
     if (!['write', 'read_write'].includes(entry.mode)) {
       throw Object.assign(new Error('lock.mode must be write or read_write'), { code: 'INVALID_PROGRAM_LOCK_MODE' });
     }
-    const fields = entry.fields ?? ['thing', 'situation', 'contain', 'support'];
+    const fields = entry.fields ?? ['thing', 'situation', 'slot', 'strut'];
     if (!Array.isArray(fields) || !fields.length
-      || fields.some((field) => !['thing', 'situation', 'contain', 'support', 'messages'].includes(field))) {
+      || fields.some((field) => !['thing', 'situation', 'slot', 'strut', 'messages'].includes(field))) {
       throw Object.assign(new Error('lock.fields contains an unsupported Atom field'), { code: 'INVALID_PROGRAM_LOCK_FIELDS' });
     }
     const protect = entry.protect ?? { atom: true, messages: false };
@@ -692,7 +692,7 @@ export function validateProgramResult(result, records, program, options = {}) {
             const record = recordsByPath.get(path);
             return !record || !agentPaths.has(record.path);
           })) {
-          throw Object.assign(new Error('lock.allowed_windows.paths must contain unique exact full paths resolving to declared Agent Programs'), {
+          throw Object.assign(new Error('lock.allowed_windows.paths must slot unique exact full paths resolving to declared Agent Programs'), {
             code: 'INVALID_PROGRAM_LOCK_ALLOWED_WINDOWS'
           });
         }
@@ -724,7 +724,7 @@ export function validateProgramResult(result, records, program, options = {}) {
           const record = recordsByPath.get(path);
           return !record || !record.types?.includes('program');
         })) {
-        throw Object.assign(new Error('lock.allowed_programs.paths must contain unique exact paths resolving to @program Atoms'), {
+        throw Object.assign(new Error('lock.allowed_programs.paths must slot unique exact paths resolving to @program Atoms'), {
           code: 'INVALID_PROGRAM_LOCK_ALLOWED_PROGRAMS'
         });
       }
@@ -834,7 +834,7 @@ export function validateProgramResult(result, records, program, options = {}) {
     const target = records.find((record) => record.ref === entry?.targetRef);
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)
       || entry.action !== 'create'
-      || entry.placement !== 'contain' || typeof entry.thing !== 'string' || !entry.thing.trim()
+      || entry.placement !== 'slot' || typeof entry.thing !== 'string' || !entry.thing.trim()
       || entry.thing !== entry.thing.trim() || entry.thing.includes('/')
       || !target || target.path !== entry.targetPath
       || !recordsByPath.get(sourceProgramPath)?.types.includes('program')) {
@@ -842,7 +842,7 @@ export function validateProgramResult(result, records, program, options = {}) {
         code: 'INVALID_SHORTCUT_EFFECT'
       });
     }
-    return { action: 'create', placement: 'contain', thing: entry.thing, targetRef: entry.targetRef,
+    return { action: 'create', placement: 'slot', thing: entry.thing, targetRef: entry.targetRef,
       targetPath: entry.targetPath, sourceProgramPath,
       ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {}) };
   });
@@ -919,7 +919,7 @@ export function validateProgramResult(result, records, program, options = {}) {
     const selected = entry.selected ?? [];
     if (!Array.isArray(selected) || new Set(selected).size !== selected.length
       || selected.some((optionId) => typeof optionId !== 'string' || !optionIds.has(optionId))) {
-      throw Object.assign(new Error('choice.selected must contain unique declared option ids'), { code: 'INVALID_PROGRAM_CHOICE_SELECTED' });
+      throw Object.assign(new Error('choice.selected must slot unique declared option ids'), { code: 'INVALID_PROGRAM_CHOICE_SELECTED' });
     }
     if (entry.empty !== undefined && (typeof entry.empty !== 'string' || !entry.empty.trim())) {
       throw Object.assign(new Error('choice.empty must be a non-empty string'), { code: 'INVALID_PROGRAM_CHOICE_EMPTY' });
@@ -1012,29 +1012,29 @@ export function validateProgramResult(result, records, program, options = {}) {
     });
   }
   const trigger = result.trigger == null ? null : structuredClone(result.trigger);
-  if (supportDecision === true) {
+  if (strutDecision === true) {
     if ([locks, messages, transforms, shortcuts, slotBodies, choices, jumps, agentRegistrations].some((entries) => entries.length > 0)) {
-      throw Object.assign(new Error('Support-decision Program may only return bool and cannot emit effects'), {
-        code: 'PROGRAM_SUPPORT_EFFECT_FORBIDDEN', details: { program: program.path }
+      throw Object.assign(new Error('Strut-decision Program may only return bool and cannot emit effects'), {
+        code: 'PROGRAM_STRUT_EFFECT_FORBIDDEN', details: { program: program.path }
       });
     }
-    if (typeof result.supportDecision !== 'boolean') {
-      throw Object.assign(new Error('Support-decision Program must return a strict JSON boolean'), {
-        code: 'INVALID_PROGRAM_SUPPORT_RESULT', details: { program: program.path }
+    if (typeof result.strutDecision !== 'boolean') {
+      throw Object.assign(new Error('Strut-decision Program must return a strict JSON boolean'), {
+        code: 'INVALID_PROGRAM_STRUT_RESULT', details: { program: program.path }
       });
     }
   }
   return {
     locks, messages, transforms, shortcuts, slotBodies, choices, jumps, jumpAuthorizations,
     agentRegistrations, changedThings, trigger,
-    ...(supportDecision === true ? { supportDecision: result.supportDecision } : {})
+    ...(strutDecision === true ? { strutDecision: result.strutDecision } : {})
   };
 }
 
 function runWorker({
   python, records, programs, program, timeoutMs, executeExplore, validateOnly = false,
   triggered = false, changedNodes = [], scopeRoot = null, programRoot = null,
-  invokeMain = false, programArguments = {}, supportDecision = false,
+  invokeMain = false, programArguments = {}, strutDecision = false,
   allowedFunctions = null, resolveExactPath = null, agentDeclarationOnly = false, agentProgramPaths = []
 }) {
   return new Promise((resolve, reject) => {
@@ -1111,7 +1111,7 @@ function runWorker({
       }
       try {
         resolve(validateProgramResult(child.__atomResult ?? JSON.parse(stdout), records, program, {
-          scopeRoot, supportDecision, resolveExactPath, agentProgramPaths
+          scopeRoot, strutDecision, resolveExactPath, agentProgramPaths
         }));
       } catch (error) {
         reject(error);
@@ -1127,7 +1127,7 @@ function runWorker({
       programRoot,
       invokeMain,
       programArguments,
-      supportDecision,
+      strutDecision,
       agentProgramPaths,
       ...(allowedFunctions ? { allowedFunctions } : {})
     });
@@ -1181,8 +1181,8 @@ export class ProgramRuntimeScheduler {
     this.agentSecurity = new Map();
     this.agentSecurityWorldRevision = null;
     this.latestRecords = null;
-    this.preparedSupportGraphs = new Map();
-    this.supportDeliveryExecutions = options.supportDeliveryExecutions ?? new Map();
+    this.preparedStrutGraphs = new Map();
+    this.strutDeliveryExecutions = options.strutDeliveryExecutions ?? new Map();
     if (this.projectionRepository
       && (typeof this.projectionRepository.load !== 'function'
         || typeof this.projectionRepository.save !== 'function')) {
@@ -1206,31 +1206,31 @@ export class ProgramRuntimeScheduler {
     }
   }
 
-  confirmSupportDeliveries(keys = []) {
+  confirmStrutDeliveries(keys = []) {
     for (const key of new Set(keys.filter(Boolean))) {
-      const entry = this.supportDeliveryExecutions.get(key);
+      const entry = this.strutDeliveryExecutions.get(key);
       if (!entry || entry.status === 'confirmed') continue;
       entry.status = 'confirmed';
       entry.resolve('confirmed');
     }
     const limit = this.maxCompleted * Math.max(1, this.maxWorkers);
-    for (const [key, entry] of this.supportDeliveryExecutions) {
-      if (this.supportDeliveryExecutions.size <= limit) break;
-      if (entry.status === 'confirmed') this.supportDeliveryExecutions.delete(key);
+    for (const [key, entry] of this.strutDeliveryExecutions) {
+      if (this.strutDeliveryExecutions.size <= limit) break;
+      if (entry.status === 'confirmed') this.strutDeliveryExecutions.delete(key);
     }
   }
 
-  releaseSupportDeliveries(keys = []) {
+  releaseStrutDeliveries(keys = []) {
     for (const key of new Set(keys.filter(Boolean))) {
-      const entry = this.supportDeliveryExecutions.get(key);
+      const entry = this.strutDeliveryExecutions.get(key);
       if (!entry || entry.status === 'confirmed') continue;
-      this.supportDeliveryExecutions.delete(key);
+      this.strutDeliveryExecutions.delete(key);
       entry.status = 'released';
       entry.resolve('released');
     }
   }
 
-  async evaluateSupportProgram(atoms, selector, options = {}) {
+  async evaluateStrutProgram(atoms, selector, options = {}) {
     const records = worldRecords(atoms);
     const [program] = programRecords(records, selector);
     const preparedWorld = options.executeExplore ? null : prepareExploreWorld(atoms);
@@ -1256,11 +1256,11 @@ export class ProgramRuntimeScheduler {
       },
       scopeRoot: options.scopeRoot ?? null,
       programRoot: options.programRoot ?? null,
-      supportDecision: true,
+      strutDecision: true,
       triggered: true,
       agentProgramPaths: [...this.agentSecurity.keys()]
     }));
-    return result.supportDecision;
+    return result.strutDecision;
   }
 
   async deriveAgentSecurity(atoms) {
@@ -1582,7 +1582,7 @@ export class ProgramRuntimeScheduler {
       inspectProgram: this.inspectProgram,
       diagnosticRecorder: this.diagnosticRecorder,
       runBounded: (operation) => this.runBounded(operation),
-      supportDeliveryExecutions: this.supportDeliveryExecutions
+      strutDeliveryExecutions: this.strutDeliveryExecutions
     });
     candidate.reusable = new Map(this.reusable);
     candidate.programReusable = new Map(this.programReusable);
@@ -1621,7 +1621,7 @@ export class ProgramRuntimeScheduler {
     this.programReadDependencies.clear();
     this.deferredTriggerContracts.clear();
     this.slotInvocationCycles.clear();
-    this.preparedSupportGraphs.clear();
+    this.preparedStrutGraphs.clear();
     this.agentSecurity = new Map();
     this.agentSecurityWorldRevision = null;
     this.requestDrivenLocks = undefined;
@@ -2014,27 +2014,27 @@ export class ProgramRuntimeScheduler {
 
   async refresh(atoms, options = {}) {
     const preparedTriggerEvent = options.triggerEvent ?? null;
-    const supportWorldRevision = revisionOfWorldFacts(atoms);
-    let supportGraphDocument = null;
-    let changedSupportGraphPaths = [];
-    let affectedSupportClauseIds = new Set();
+    const strutWorldRevision = revisionOfWorldFacts(atoms);
+    let strutGraphDocument = null;
+    let changedStrutGraphPaths = [];
+    let affectedStrutClauseIds = new Set();
     if (preparedTriggerEvent?.mode === 'transform') {
-      const preparedBaseRevision = preparedTriggerEvent.preparedSupportIndexValid === true
-        ? preparedTriggerEvent.supportBaseRevision
+      const preparedBaseRevision = preparedTriggerEvent.preparedStrutIndexValid === true
+        ? preparedTriggerEvent.strutBaseRevision
         : null;
-      supportGraphDocument = typeof preparedBaseRevision === 'string'
-        ? this.preparedSupportGraphs.get(preparedBaseRevision) ?? projectSupportContext(atoms)
-        : projectSupportContext(atoms);
-      if (supportGraphDocument) {
-        this.preparedSupportGraphs.set(supportWorldRevision, supportGraphDocument);
-        while (this.preparedSupportGraphs.size > this.maxCompleted) {
-          this.preparedSupportGraphs.delete(this.preparedSupportGraphs.keys().next().value);
+      strutGraphDocument = typeof preparedBaseRevision === 'string'
+        ? this.preparedStrutGraphs.get(preparedBaseRevision) ?? projectStrutContext(atoms)
+        : projectStrutContext(atoms);
+      if (strutGraphDocument) {
+        this.preparedStrutGraphs.set(strutWorldRevision, strutGraphDocument);
+        while (this.preparedStrutGraphs.size > this.maxCompleted) {
+          this.preparedStrutGraphs.delete(this.preparedStrutGraphs.keys().next().value);
         }
-        changedSupportGraphPaths = supportAffectedGraphPaths(
-          supportGraphDocument, preparedTriggerEvent
+        changedStrutGraphPaths = strutAffectedGraphPaths(
+          strutGraphDocument, preparedTriggerEvent
         );
-        affectedSupportClauseIds = new Set(changedSupportGraphPaths.flatMap((affectedPath) => (
-          supportGraphDocument.dependencyIndex.get(affectedPath) ?? []
+        affectedStrutClauseIds = new Set(changedStrutGraphPaths.flatMap((affectedPath) => (
+          strutGraphDocument.dependencyIndex.get(affectedPath) ?? []
         )));
       }
     }
@@ -2062,7 +2062,7 @@ export class ProgramRuntimeScheduler {
       );
       if (candidatePaths.size === 0
         && slotCandidates.length === 0
-        && affectedSupportClauseIds.size === 0) {
+        && affectedStrutClauseIds.size === 0) {
         const locks = await this.activeRequestDrivenLocks();
         return {
           fingerprint: `prepared-index:${crypto.randomUUID()}`,
@@ -2100,11 +2100,11 @@ export class ProgramRuntimeScheduler {
     this.latestRecords = records;
     this.pruneInactiveProgramIndexes(records);
     if (!preparedTriggerEvent && options.prepareAllIndexes === true) {
-      if (!this.preparedSupportGraphs.has(supportWorldRevision)) {
-        const supportGraph = projectSupportContext(atoms);
-        if (supportGraph) this.preparedSupportGraphs.set(supportWorldRevision, supportGraph);
-        while (this.preparedSupportGraphs.size > this.maxCompleted) {
-          this.preparedSupportGraphs.delete(this.preparedSupportGraphs.keys().next().value);
+      if (!this.preparedStrutGraphs.has(strutWorldRevision)) {
+        const strutGraph = projectStrutContext(atoms);
+        if (strutGraph) this.preparedStrutGraphs.set(strutWorldRevision, strutGraph);
+        while (this.preparedStrutGraphs.size > this.maxCompleted) {
+          this.preparedStrutGraphs.delete(this.preparedStrutGraphs.keys().next().value);
         }
       }
     }
@@ -2138,18 +2138,18 @@ export class ProgramRuntimeScheduler {
       }));
     }
 
-    const attemptSupportDeliveryClaims = new Set();
+    const attemptStrutDeliveryClaims = new Set();
     const pending = this.computeRefresh(atoms, options, {
       records,
       programs,
       availablePrograms,
       isolateFailures,
       key,
-      supportGraphDocument,
-      changedSupportGraphPaths,
-      attemptSupportDeliveryClaims
+      strutGraphDocument,
+      changedStrutGraphPaths,
+      attemptStrutDeliveryClaims
     }).catch((error) => {
-      this.releaseSupportDeliveries([...attemptSupportDeliveryClaims]);
+      this.releaseStrutDeliveries([...attemptStrutDeliveryClaims]);
       throw error;
     }).finally(() => this.inflight.delete(key));
     this.inflight.set(key, pending);
@@ -2162,9 +2162,9 @@ export class ProgramRuntimeScheduler {
     availablePrograms,
     isolateFailures,
     key,
-    supportGraphDocument,
-    changedSupportGraphPaths,
-    attemptSupportDeliveryClaims
+    strutGraphDocument,
+    changedStrutGraphPaths,
+    attemptStrutDeliveryClaims
   }) {
     const cycleDeadline = Date.now() + this.timeoutMs;
     const agentProgramPaths = new Set(this.agentSecurity.keys());
@@ -2203,49 +2203,49 @@ export class ProgramRuntimeScheduler {
       scopeRoot: executionContext.scopeRoot ?? null
     }));
     const triggerEvent = options.triggerEvent ?? null;
-    if (triggerEvent && (!['transform', 'support'].includes(triggerEvent.mode)
+    if (triggerEvent && (!['transform', 'strut'].includes(triggerEvent.mode)
       || !Array.isArray(triggerEvent.nodes)
       || triggerEvent.nodes.length === 0
       || triggerEvent.nodes.some((node) => typeof node !== 'string' || !node.trim())
       || (triggerEvent.affectedPaths !== undefined
         && (!Array.isArray(triggerEvent.affectedPaths)
           || triggerEvent.affectedPaths.some((node) => typeof node !== 'string' || !node.trim())))
-      || (triggerEvent.mode === 'support' && (!Array.isArray(triggerEvent.deliveries)
+      || (triggerEvent.mode === 'strut' && (!Array.isArray(triggerEvent.deliveries)
         || triggerEvent.deliveries.length === 0
-        || triggerEvent.deliveries.some((delivery) => delivery?.mode !== 'support'
+        || triggerEvent.deliveries.some((delivery) => delivery?.mode !== 'strut'
           || delivery.decision !== true
           || !triggerEvent.nodes.includes(delivery.consequentPath)))))) {
-      throw Object.assign(new Error('trigger event requires one valid transform or support payload'), {
+      throw Object.assign(new Error('trigger event requires one valid transform or strut payload'), {
         code: 'INVALID_PROGRAM_TRIGGER_EVENT'
       });
     }
     if (triggerEvent) await this.ensureTriggerContracts(
       records, programs, executeExplore, options.agentOrigin
     );
-    let derivedSupportDeliveries = [];
-    if (triggerEvent?.mode === 'transform' && supportGraphDocument) {
-      const graphDocument = supportGraphDocument;
-      const graphChangedPaths = changedSupportGraphPaths.length
-        ? changedSupportGraphPaths
-        : supportAffectedGraphPaths(graphDocument, triggerEvent);
-      const decisions = await evaluateSupportClausesWithPrograms(graphDocument, {
+    let derivedStrutDeliveries = [];
+    if (triggerEvent?.mode === 'transform' && strutGraphDocument) {
+      const graphDocument = strutGraphDocument;
+      const graphChangedPaths = changedStrutGraphPaths.length
+        ? changedStrutGraphPaths
+        : strutAffectedGraphPaths(graphDocument, triggerEvent);
+      const decisions = await evaluateStrutClausesWithPrograms(graphDocument, {
         changedPaths: graphChangedPaths,
         evaluateProgram: (selector, { clause }) => {
           const atomPath = graphDocument.atomPathByGraphPath?.get(selector);
           if (!atomPath) {
-            throw Object.assign(new Error(`Program support endpoint has no Atom identity: ${selector}`), {
-              code: 'SUPPORT_PROGRAM_IDENTITY_REQUIRED'
+            throw Object.assign(new Error(`Program strut endpoint has no Atom identity: ${selector}`), {
+              code: 'STRUT_PROGRAM_IDENTITY_REQUIRED'
             });
           }
           const antecedentPath = graphDocument.atomPathByGraphPath?.get(clause.antecedentPaths?.[0]);
           const scopeRoot = slotScopeRoot(antecedentPath);
-          return this.evaluateSupportProgram(atoms, atomPath, {
+          return this.evaluateStrutProgram(atoms, atomPath, {
             executeExplore,
             ...(scopeRoot ? { scopeRoot } : {})
           });
         }
       });
-      derivedSupportDeliveries = uniqueSupportDeliveries(buildSupportDeliveries(graphDocument, {
+      derivedStrutDeliveries = uniqueStrutDeliveries(buildStrutDeliveries(graphDocument, {
         decisions,
         revision: revisionOfWorldFacts(atoms)
       }).map((delivery) => Object.freeze({
@@ -2266,22 +2266,22 @@ export class ProgramRuntimeScheduler {
         }
       }
     }
-    const activeSupportDeliveries = uniqueSupportDeliveries(triggerEvent?.mode === 'support'
+    const activeStrutDeliveries = uniqueStrutDeliveries(triggerEvent?.mode === 'strut'
       ? triggerEvent.deliveries
-      : derivedSupportDeliveries);
-    const supportEvent = activeSupportDeliveries.length ? {
-      mode: 'support',
-      nodes: [...new Set(activeSupportDeliveries.map((delivery) => delivery.consequentPath))]
+      : derivedStrutDeliveries);
+    const strutEvent = activeStrutDeliveries.length ? {
+      mode: 'strut',
+      nodes: [...new Set(activeStrutDeliveries.map((delivery) => delivery.consequentPath))]
     } : null;
-    if (supportEvent) this.backfillTriggerIndexForEvent(supportEvent);
+    if (strutEvent) this.backfillTriggerIndexForEvent(strutEvent);
     const slotCandidates = [
       ...(triggerEvent?.mode === 'transform'
         ? slotProgramInvocationsForEvent(atoms, triggerEvent, this.triggerContracts)
         : []),
-      ...activeSupportDeliveries.flatMap((supportDelivery) => (
+      ...activeStrutDeliveries.flatMap((strutDelivery) => (
         slotProgramInvocationsForEvent(atoms, {
-          mode: 'support', nodes: [supportDelivery.consequentPath]
-        }, this.triggerContracts).map((invocation) => ({ ...invocation, supportDelivery }))
+          mode: 'strut', nodes: [strutDelivery.consequentPath]
+        }, this.triggerContracts).map((invocation) => ({ ...invocation, strutDelivery }))
       ))
     ];
     let cycleInvocations = null;
@@ -2300,7 +2300,7 @@ export class ProgramRuntimeScheduler {
         invocation.programPath,
         invocation.scopeRoot,
         invocation.revision,
-        invocation.supportDelivery ? supportDeliveryKey(invocation.supportDelivery) : ''
+        invocation.strutDelivery ? strutDeliveryKey(invocation.strutDelivery) : ''
       ].join('\0');
       if (cycleInvocations?.has(invocationKey)) continue;
       cycleInvocations?.add(invocationKey);
@@ -2313,12 +2313,12 @@ export class ProgramRuntimeScheduler {
       }
       slotInvocationsByProgram.get(invocation.programPath).push(invocation);
     }
-    const supportInvocationsByProgram = new Map();
-    if (activeSupportDeliveries.length) {
-      for (const delivery of activeSupportDeliveries) {
-        for (const programPath of this.triggerIndex.get(`support\0${delivery.consequentPath}`) ?? []) {
-          if (!supportInvocationsByProgram.has(programPath)) supportInvocationsByProgram.set(programPath, []);
-          supportInvocationsByProgram.get(programPath).push(delivery);
+    const strutInvocationsByProgram = new Map();
+    if (activeStrutDeliveries.length) {
+      for (const delivery of activeStrutDeliveries) {
+        for (const programPath of this.triggerIndex.get(`strut\0${delivery.consequentPath}`) ?? []) {
+          if (!strutInvocationsByProgram.has(programPath)) strutInvocationsByProgram.set(programPath, []);
+          strutInvocationsByProgram.get(programPath).push(delivery);
         }
       }
     }
@@ -2428,7 +2428,7 @@ export class ProgramRuntimeScheduler {
           || dependencyTriggeredProgramPaths.has(program.path)
           || eventNodes.has(program.path)
           || slotInvocationsByProgram.has(program.path)
-          || supportInvocationsByProgram.has(program.path)
+          || strutInvocationsByProgram.has(program.path)
         ))
       : programs;
     const operationEntries = indexedPrograms.flatMap((program) => {
@@ -2438,15 +2438,15 @@ export class ProgramRuntimeScheduler {
       if (scoped.length) return scoped.map((slotInvocation) => ({
         program,
         slotInvocation,
-        supportDelivery: slotInvocation.supportDelivery ?? null
+        strutDelivery: slotInvocation.strutDelivery ?? null
       }));
-      const supportDeliveries = supportInvocationsByProgram.get(program.path) ?? [];
-      if (supportDeliveries.length) {
-        return supportDeliveries.map((supportDelivery) => ({ program, slotInvocation: null, supportDelivery }));
+      const strutDeliveries = strutInvocationsByProgram.get(program.path) ?? [];
+      if (strutDeliveries.length) {
+        return strutDeliveries.map((strutDelivery) => ({ program, slotInvocation: null, strutDelivery }));
       }
-      return [{ program, slotInvocation: null, supportDelivery: null }];
+      return [{ program, slotInvocation: null, strutDelivery: null }];
     });
-    const operations = operationEntries.map(async ({ program, slotInvocation, supportDelivery }) => {
+    const operations = operationEntries.map(async ({ program, slotInvocation, strutDelivery }) => {
       const dormantKey = programSetFingerprint(
         [program], isolateFailures, records, agentProgramPaths
       );
@@ -2467,7 +2467,7 @@ export class ProgramRuntimeScheduler {
         triggerContract || (triggerEntry?.changedThings?.length ?? 0) > 0
       );
       const forcedByTrigger = triggerEvent
-        && (triggeredProgramPaths.has(program.path) || Boolean(slotInvocation) || Boolean(supportDelivery));
+        && (triggeredProgramPaths.has(program.path) || Boolean(slotInvocation) || Boolean(strutDelivery));
       if (dormantFailure
         && options.force !== true
         && !forcedByTrigger
@@ -2543,15 +2543,15 @@ export class ProgramRuntimeScheduler {
         }
       }
 
-      const deliveryExecutionKey = supportDelivery ? [
+      const deliveryExecutionKey = strutDelivery ? [
         program.path,
         slotInvocation?.scopeRoot ?? options.slotScopeRoot ?? '',
-        supportDeliveryKey(supportDelivery)
+        strutDeliveryKey(strutDelivery)
       ].join('\0') : null;
       let claimedDelivery = false;
       if (deliveryExecutionKey) {
         while (!claimedDelivery) {
-          const existing = this.supportDeliveryExecutions.get(deliveryExecutionKey);
+          const existing = this.strutDeliveryExecutions.get(deliveryExecutionKey);
           if (existing) {
             const status = existing.status === 'confirmed'
               ? 'confirmed'
@@ -2572,12 +2572,12 @@ export class ProgramRuntimeScheduler {
           }
           let resolveFinalization;
           const finalized = new Promise((resolve) => { resolveFinalization = resolve; });
-          this.supportDeliveryExecutions.set(deliveryExecutionKey, {
+          this.strutDeliveryExecutions.set(deliveryExecutionKey, {
             status: 'claimed',
             finalized,
             resolve: resolveFinalization
           });
-          attemptSupportDeliveryClaims.add(deliveryExecutionKey);
+          attemptStrutDeliveryClaims.add(deliveryExecutionKey);
           claimedDelivery = true;
         }
       }
@@ -2605,7 +2605,7 @@ export class ProgramRuntimeScheduler {
             scopeRoot: effectiveScopeRoot,
             programRoot: slotInvocation?.programRoot ?? options.slotScopeRoot ?? null,
             invokeMain: false,
-            programArguments: supportDelivery ?? (slotInvocation ? {
+            programArguments: strutDelivery ?? (slotInvocation ? {
               event: {
                 mode: triggerEvent.mode,
                 path: slotInvocation.eventPath,
@@ -2642,11 +2642,11 @@ export class ProgramRuntimeScheduler {
         const normalizedResult = this.agentSecurity.has(program.path)
           ? { ...rawResult, agentRegistrations: [] }
           : rawResult;
-        const result = supportDelivery ? {
+        const result = strutDelivery ? {
           ...normalizedResult,
           transforms: (normalizedResult.transforms ?? []).map((request) => ({
             ...request,
-            sourceSupportDeliveryClaim: deliveryExecutionKey
+            sourceStrutDeliveryClaim: deliveryExecutionKey
           }))
         } : normalizedResult;
         const uniqueRequests = [...new Map(requests.map((request) => (
@@ -2690,7 +2690,7 @@ export class ProgramRuntimeScheduler {
         const operation = {
           programPath: program.path,
           result,
-          ...(deliveryExecutionKey ? { supportDeliveryClaim: deliveryExecutionKey } : {}),
+          ...(deliveryExecutionKey ? { strutDeliveryClaim: deliveryExecutionKey } : {}),
           cached: false,
           requests: uniqueRequests,
           contextDependent,
@@ -2702,13 +2702,13 @@ export class ProgramRuntimeScheduler {
         return operation;
       } catch (error) {
         const describedFailure = describeProgramFailure(error, program);
-        const failure = supportDelivery
+        const failure = strutDelivery
           ? {
               ...describedFailure,
               blocking: true,
               details: {
                 ...(describedFailure.details ?? {}),
-                supportDelivery: supportDeliveryKey(supportDelivery)
+                strutDelivery: strutDeliveryKey(strutDelivery)
               }
             }
           : describedFailure;
@@ -2743,7 +2743,7 @@ export class ProgramRuntimeScheduler {
               durationMs: performance.now() - executionStartedAt
             }
           };
-          if (claimedDelivery) this.releaseSupportDeliveries([deliveryExecutionKey]);
+          if (claimedDelivery) this.releaseStrutDeliveries([deliveryExecutionKey]);
           return operation;
         }
         if (isolateFailures) {
@@ -2767,7 +2767,7 @@ export class ProgramRuntimeScheduler {
             durationMs: performance.now() - executionStartedAt
           }
         };
-        if (claimedDelivery) this.releaseSupportDeliveries([deliveryExecutionKey]);
+        if (claimedDelivery) this.releaseStrutDeliveries([deliveryExecutionKey]);
         return operation;
       }
         throw error;
@@ -2797,11 +2797,11 @@ export class ProgramRuntimeScheduler {
       ));
     }
     const applicable = settled.filter((entry) => !(entry.contextDependent === true && !scopePath));
-    const ignoredSupportDeliveryClaims = settled
+    const ignoredStrutDeliveryClaims = settled
       .filter((entry) => entry.contextDependent === true && !scopePath)
-      .map((entry) => entry.supportDeliveryClaim)
+      .map((entry) => entry.strutDeliveryClaim)
       .filter(Boolean);
-    this.releaseSupportDeliveries(ignoredSupportDeliveryClaims);
+    this.releaseStrutDeliveries(ignoredStrutDeliveryClaims);
     const contextIncomplete = settled.some((entry) => (
       entry.contextDependent === true && !scopePath
     ));
@@ -2842,9 +2842,9 @@ export class ProgramRuntimeScheduler {
       exploreRequests: structuredClone(uniqueRequests),
       exploreReadPaths,
       failures: applicable.flatMap((entry) => entry.failure ? [entry.failure] : []),
-      supportDeliveryClaims: applicable
-        .filter((entry) => entry.cached === false && entry.result && entry.supportDeliveryClaim)
-        .map((entry) => entry.supportDeliveryClaim),
+      strutDeliveryClaims: applicable
+        .filter((entry) => entry.cached === false && entry.result && entry.strutDeliveryClaim)
+        .map((entry) => entry.strutDeliveryClaim),
       executedProgramPaths: applicable
         .filter((entry) => entry.cached === false && entry.result)
         .map((entry) => entry.programPath),

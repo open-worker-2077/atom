@@ -135,14 +135,14 @@ export function authorizeWindowGraphPath({
   const applicable = locks.filter((lock) => (
     Array.isArray(lock.actions) && lock.actions.includes(operation)
   ));
-  const containLocks = applicable.filter((lock) => lock.kind === 'contain'
+  const slotLocks = applicable.filter((lock) => lock.kind === 'slot'
     && (targetPath === lock.path || isBelow(lock.path, targetPath)));
-  for (const lock of containLocks) {
+  for (const lock of slotLocks) {
     if (!permits(lock)) return denial(lock);
   }
   const nodeLocks = applicable.filter((lock) => lock.kind === 'node' && lock.path === targetPath);
   for (const lock of nodeLocks) {
     if (!permits(lock)) return denial(lock);
   }
-  return { decision: 'allow', matchedLocks: [...containLocks, ...nodeLocks] };
+  return { decision: 'allow', matchedLocks: [...slotLocks, ...nodeLocks] };
 }

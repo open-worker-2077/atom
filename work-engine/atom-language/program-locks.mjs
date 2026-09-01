@@ -1,4 +1,4 @@
-const LOCK_FIELDS = new Set(['thing', 'situation', 'contain', 'support', 'messages']);
+const LOCK_FIELDS = new Set(['thing', 'situation', 'slot', 'strut', 'messages']);
 const TYPE_PREDICATE_KEYS = new Set(['all', 'any', 'none']);
 
 export function normalizeTypePredicate(value, {
@@ -17,7 +17,7 @@ export function normalizeTypePredicate(value, {
     if (!Array.isArray(types) || types.length === 0
       || types.some((type) => typeof type !== 'string' || !type.trim())
       || new Set(types.map((type) => type.trim())).size !== types.length) {
-      throw Object.assign(new Error(`${label}.${key} must contain unique non-empty Graph types`), { code });
+      throw Object.assign(new Error(`${label}.${key} must slot unique non-empty Graph types`), { code });
     }
     normalized[key] = types.map((type) => type.trim());
   }
@@ -206,7 +206,7 @@ export function authorizeProgramLock({
       const withinParent = parentPath
         && (targetPath === parentPath || targetPath.startsWith(`${parentPath}/`));
       const selfStructuralWrite = operation === 'write'
-        && targetPath === agentPath && ['thing', 'contain'].includes(field);
+        && targetPath === agentPath && ['thing', 'slot'].includes(field);
       if (withinParent && !selfStructuralWrite) return false;
     }
     const fields = source[fieldKey];

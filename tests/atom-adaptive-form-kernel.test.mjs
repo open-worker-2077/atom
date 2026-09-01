@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
-function atom(thing, situation = '', contain = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, contain, support: [] };
+function atom(thing, situation = '', slot = [], type = '') {
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 async function runProgram(source) {
@@ -54,8 +54,8 @@ test('form accepts zero components and one required component without synthesizi
     'single = form({"action": "evaluate", "components": [',
     '  {"name": "直接操作", "activation": "required", "value": {"结果": "完成"}, "requirements": [{"path": ["结果"]}], "components": []}',
     ']})',
-    'compiled = form({"thing": "极简单", "situation": "", "contain": [{"thing": "直接操作"}], "support": []})',
-    'message({"level": "info", "text": str(empty["valid"]) + "|" + ",".join(single["active"]) + "|" + ",".join([child["thing"] for child in compiled["contain"]])})'
+    'compiled = form({"thing": "极简单", "situation": "", "slot": [{"thing": "直接操作"}], "strut": []})',
+    'message({"level": "info", "text": str(empty["valid"]) + "|" + ",".join(single["active"]) + "|" + ",".join([child["thing"] for child in compiled["slot"]])})'
   ].join('\n'));
 
   assert.equal(cycle.messages[0].text, 'True|直接操作|直接操作');
@@ -74,24 +74,24 @@ test('form rejects missing or unknown component activation instead of choosing f
   }
 });
 
-test('form compilation rejects a Program used as a support consequent fact', async () => {
+test('form compilation rejects a Program used as a strut consequent fact', async () => {
   await assert.rejects(
     runProgram([
-      'form({"thing":"非法推支","situation":"","contain":[],"support":[',
+      'form({"thing":"非法推支","situation":"","slot":[],"strut":[',
       '  {"if@current":True,"then":[{"thing@program":"判定"}]}',
       ']})'
     ].join('\n')),
     (error) => error?.code === 'ATOM_PROGRAM_FAILED'
-      && /SUPPORT_FACT_CONSEQUENT_REQUIRED/u.test(error?.message ?? '')
+      && /STRUT_FACT_CONSEQUENT_REQUIRED/u.test(error?.message ?? '')
   );
 });
 
-test('form compilation does not count a decision Program as a fact antecedent in one-to-many support', async () => {
+test('form compilation does not count a decision Program as a fact antecedent in one-to-many strut', async () => {
   const cycle = await runProgram([
-    'compiled = form({"thing":"前项","situation":"","contain":[],"support":[',
+    'compiled = form({"thing":"前项","situation":"","slot":[],"strut":[',
     '  {"if@current":True,"if":[{"thing@program":"判定"}],"then":[{"thing":"后项甲"},{"thing":"后项乙"}]}',
     ']})',
-    'message({"level":"info","text":str(len(compiled["support"][0]["then"]))})'
+    'message({"level":"info","text":str(len(compiled["strut"][0]["then"]))})'
   ].join('\n'));
 
   assert.equal(cycle.messages[0].text, '2');

@@ -32,14 +32,14 @@ function walk(atoms, parentPath = []) {
     if (typeof name !== 'string') continue;
     const path = [...parentPath, name];
     result.push({ atom, name, path: path.join('/'), types: nameField.types });
-    const children = field(atom, 'contain')?.value;
+    const children = field(atom, 'slot')?.value;
     if (Array.isArray(children)) result.push(...walk(children, path));
   }
   return result;
 }
 
 function properties(atom) {
-  const children = field(atom, 'contain')?.value;
+  const children = field(atom, 'slot')?.value;
   return new Map((Array.isArray(children) ? children : []).map((child) => [
     atomName(child), atomDetail(child)
   ]));

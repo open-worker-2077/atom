@@ -160,7 +160,7 @@ function diagnosticCode(text) {
 }
 
 function programAtom(thing, situation) {
-  return { 'thing@program': thing, situation, contain: [], support: [] };
+  return { 'thing@program': thing, situation, slot: [], strut: [] };
 }
 
 function agentProgram(thing, labels) {
@@ -170,7 +170,7 @@ function agentProgram(thing, labels) {
       'agent', 'current_atom', 'explore', 'jump', 'lock', 'shortcut', 'slot_body', 'transform', 'use_program', 'work_order'
       , 'json_parse', 'message'
     ] } })})`,
-    contain: [], support: []
+    slot: [], strut: []
   };
 }
 
@@ -284,15 +284,15 @@ async function main() {
   const fixture = {
     thing: options.rootPath,
     situation: 'Synthetic Atom night-watch run; no business facts.',
-    contain: [
+    slot: [
       agentProgram(runnerName, ['^']),
-      { ...agentProgram(noLabelName, []), contain: [
-        { thing: 'locked', situation: 'unchanged', contain: [], support: [] },
+      { ...agentProgram(noLabelName, []), slot: [
+        { thing: 'locked', situation: 'unchanged', slot: [], strut: [] },
         programAtom('guard', `lock(${JSON.stringify({ targets: { paths: [`世界之外/${noLabelPath}/locked`], scope: 'exact' }, actions: ['transform'], labels: ['^'] })})`)
       ] },
-      { thing: 'destination', situation: 'synthetic jump destination', contain: [], support: [] }
+      { thing: 'destination', situation: 'synthetic jump destination', slot: [], strut: [] }
     ],
-    support: []
+    strut: []
   };
   if (options.resume) {
     await record('fixture.resume-readback', () => adapter.executeStdin(
@@ -339,7 +339,7 @@ async function main() {
     const programPath = `${runnerPath}/program`;
     const resultProgram = programAtom(
       programPath,
-      `transform({"thing":${JSON.stringify(resultPath)},"situation":"passed","contain":[],"support":[]})`
+      `transform({"thing":${JSON.stringify(resultPath)},"situation":"passed","slot":[],"strut":[]})`
     );
     await record('program.create', () => adapter.executeStdin(
       runnerAgent,
@@ -352,7 +352,7 @@ async function main() {
       return result;
     });
 
-    await record('transform.create', () => adapter.executeStdin(runnerAgent, `transform new ${JSON.stringify({ thing: transformPath, situation: 'before', contain: [], support: [] })}`));
+    await record('transform.create', () => adapter.executeStdin(runnerAgent, `transform new ${JSON.stringify({ thing: transformPath, situation: 'before', slot: [], strut: [] })}`));
   }
   await record('transform.update', () => adapter.executeStdin(runnerAgent, `transform {"thing":${JSON.stringify(transformPath)},"situation.rep.after"}`));
   await record('transform.readback', async () => {
@@ -373,8 +373,8 @@ async function main() {
     const shortcutProgramPath = `${runnerPath}/shortcut-program`;
     const shortcutTargetPath = `${shortcutProgramPath}/target`;
     await record('shortcut.create', () => adapter.executeStdin(runnerAgent, `transform new ${JSON.stringify({
-      ...programAtom(shortcutProgramPath, `target = explore({"thing":${JSON.stringify(shortcutTargetPath)}})[0]\nshortcut({"placement":"contain","thing":"entry","target":target})`),
-      contain: [{ thing: 'target', situation: 'authoritative', contain: [], support: [] }]
+      ...programAtom(shortcutProgramPath, `target = explore({"thing":${JSON.stringify(shortcutTargetPath)}})[0]\nshortcut({"placement":"slot","thing":"entry","target":target})`),
+      slot: [{ thing: 'target', situation: 'authoritative', slot: [], strut: [] }]
     })}`));
     await record('shortcut.run', () => adapter.executeStdin(runnerAgent, `transform ${JSON.stringify({ 'thing.run.': shortcutProgramPath })}`));
     await record('shortcut.readback', () => adapter.executeStdin(runnerAgent, `explore ${JSON.stringify({ thing: `世界之外/${shortcutProgramPath}/entry`, 'situation$full': true })}`));
@@ -385,11 +385,11 @@ async function main() {
   const jumpWhere = `${jumpSuite}/where`;
   const jumpRegister = `${jumpSuite}/register`;
   await record('jump.programs.create', () => adapter.executeStdin(runnerAgent, `transform new ${JSON.stringify({
-    thing: jumpSuite, situation: 'synthetic jump suite', contain: [
+    thing: jumpSuite, situation: 'synthetic jump suite', slot: [
       programAtom('when', 'def main(arguments):\n    return True'),
       programAtom('where', `def main(arguments):\n    return explore({"thing":${JSON.stringify(destinationPath)}})[0]`),
       programAtom('register', `when_program = explore({"thing":${JSON.stringify(jumpWhen)}})[0]\nwhere_program = explore({"thing":${JSON.stringify(jumpWhere)}})[0]\njump({"when":when_program,"where":where_program})`)
-    ], support: []
+    ], strut: []
   })}`));
   await record('jump.register', () => adapter.executeStdin(runnerAgent, `transform ${JSON.stringify({ 'thing.run.': jumpRegister })}`));
   await record('jump.trigger', () => adapter.resolveExactAgent(runnerAgent));
@@ -401,18 +401,18 @@ async function main() {
   const printPath = `${movedRunnerPath}/print-slot`;
   if (!options.resumeAfterRestart) {
   await record('slot.create', () => adapter.executeStdin(movedRunnerAgent, `transform new ${JSON.stringify({
-    thing: slotBodyPath, situation: 'synthetic slot body', contain: [{
-      thing: 'flow', situation: 'synthetic flow', contain: [
-        { 'thing@text': 'input', situation: 'input slot', contain: [], support: [{ 'if@current': true, then: [{ thing: 'output' }] }] },
-        { 'thing@number': 'output', situation: 'output slot', contain: [], support: [{
+    thing: slotBodyPath, situation: 'synthetic slot body', slot: [{
+      thing: 'flow', situation: 'synthetic flow', slot: [
+        { 'thing@text': 'input', situation: 'input slot', slot: [], strut: [{ 'if@current': true, then: [{ thing: 'output' }] }] },
+        { 'thing@number': 'output', situation: 'output slot', slot: [], strut: [{
           'if@current': true,
           if: [{ 'thing@program': 'compute' }],
           then: [{ thing: 'result' }]
         }] },
-        { thing: 'result', situation: 'ordinary result fact', contain: [], support: [] },
-        { 'thing@program': 'compute', situation: 'def main(arguments):\n    return True', contain: [], support: [] }
-      ], support: []
-    }], support: []
+        { thing: 'result', situation: 'ordinary result fact', slot: [], strut: [] },
+        { 'thing@program': 'compute', situation: 'def main(arguments):\n    return True', slot: [], strut: [] }
+      ], strut: []
+    }], strut: []
   })}`));
   await record('slot.seal-program.create', () => adapter.executeStdin(movedRunnerAgent, `transform new ${JSON.stringify(programAtom(sealPath, `slot_body({"action":"seal","body":${JSON.stringify(slotBodyPath)}})`))}`));
   await record('slot.seal', () => adapter.executeStdin(movedRunnerAgent, `transform ${JSON.stringify({ 'thing.run.': sealPath })}`));
@@ -424,7 +424,7 @@ async function main() {
   const orderPath = `${orderProgramPath}/night-watch-order`;
   const orderSource = [
     'order_path = current_atom().path + "/night-watch-order"',
-    'rows = explore({"thing": current_atom().path, "contain$latitude-1": None, "situation$full": None})',
+    'rows = explore({"thing": current_atom().path, "slot$latitude-1": None, "situation$full": None})',
     'if not any(row.path == order_path for row in rows):',
     '    work_order({"action":"create","title":"night-watch-order","creation_id":"nw-shared-20260829","version":"1"})',
     'else:',

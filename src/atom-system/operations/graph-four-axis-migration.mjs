@@ -7,8 +7,8 @@ import { createCompatibilityManifest } from '../world-runtime/legacy-graph-compa
 const REQUEST_DRIVEN_LOCK_AXIS_MAP = Object.freeze({
   name: 'thing',
   detail: 'situation',
-  children: 'contain',
-  partners: 'support'
+  children: 'slot',
+  partners: 'strut'
 });
 const LEGACY_REQUEST_DRIVEN_LOCK_AXES = new Set(Object.keys(REQUEST_DRIVEN_LOCK_AXIS_MAP));
 const CURRENT_REQUEST_DRIVEN_LOCK_AXES = new Set(Object.values(REQUEST_DRIVEN_LOCK_AXIS_MAP));

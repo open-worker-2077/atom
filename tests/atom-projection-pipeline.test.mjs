@@ -156,8 +156,8 @@ test('legacy Graph and Spatial projectors fit the pipeline without changing thei
   const facts = [{
     thing: 'Root',
     situation: 'root detail',
-    contain: [{ thing: 'Child', situation: 'child detail', contain: [], support: [] }],
-    support: []
+    slot: [{ thing: 'Child', situation: 'child detail', slot: [], strut: [] }],
+    strut: []
   }];
   const repository = createMemoryProjectionRepository();
   const pipeline = createProjectionPipeline({
@@ -174,7 +174,7 @@ test('legacy Graph and Spatial projectors fit the pipeline without changing thei
 });
 
 test('legacy Spatial consumes the Graph built earlier in the same projection batch', async () => {
-  const facts = [{ thing: 'Root', situation: '', contain: [], support: [] }];
+  const facts = [{ thing: 'Root', situation: '', slot: [], strut: [] }];
   let graphBuilds = 0;
   const projectContext = (value, options) => {
     graphBuilds += 1;
@@ -195,9 +195,9 @@ test('legacy Spatial consumes the Graph built earlier in the same projection bat
 
 test('TC-PERF-WEB-DOMAIN: legacy Graph and Spatial rebuild only the affected top-level domain', async () => {
   const before = [
-    { thing: 'A', situation: 'before', contain: [{ thing: 'A1', situation: '', contain: [], support: [] }], support: [] },
-    { thing: 'B', situation: 'stable', contain: [{ thing: 'B1', situation: '', contain: [], support: [] }], support: [] },
-    { thing: 'C', situation: 'stable', contain: [], support: [] }
+    { thing: 'A', situation: 'before', slot: [{ thing: 'A1', situation: '', slot: [], strut: [] }], strut: [] },
+    { thing: 'B', situation: 'stable', slot: [{ thing: 'B1', situation: '', slot: [], strut: [] }], strut: [] },
+    { thing: 'C', situation: 'stable', slot: [], strut: [] }
   ];
   const after = structuredClone(before);
   after[0].situation = 'after';
@@ -211,7 +211,7 @@ test('TC-PERF-WEB-DOMAIN: legacy Graph and Spatial rebuild only the affected top
         return projectAtomContext(value, options);
       },
       async projectSpatial(graph, options) {
-        spatialDomainCounts.push(graph.graph.contain.length);
+        spatialDomainCounts.push(graph.graph.slot.length);
         return projectAtomGraphToKnowledge(graph, options);
       }
     }),
@@ -235,15 +235,15 @@ test('TC-PERF-WEB-DOMAIN: legacy Graph and Spatial rebuild only the affected top
   );
 });
 
-test('incremental Web projection includes a cross-domain support endpoint without rebuilding an unrelated domain', async () => {
-  const support = [{ 'if@current': true, then: [{ thing: 'B/Target' }] }];
+test('incremental Web projection includes a cross-domain strut endpoint without rebuilding an unrelated domain', async () => {
+  const strut = [{ 'if@current': true, then: [{ thing: 'B/Target' }] }];
   const before = [
-    { thing: 'A', situation: '', contain: [{ thing: 'Source', situation: 'before', contain: [], support }], support: [] },
-    { thing: 'B', situation: '', contain: [{ thing: 'Target', situation: '', contain: [], support: [] }], support: [] },
-    { thing: 'C', situation: 'unrelated', contain: [], support: [] }
+    { thing: 'A', situation: '', slot: [{ thing: 'Source', situation: 'before', slot: [], strut }], strut: [] },
+    { thing: 'B', situation: '', slot: [{ thing: 'Target', situation: '', slot: [], strut: [] }], strut: [] },
+    { thing: 'C', situation: 'unrelated', slot: [], strut: [] }
   ];
   const after = structuredClone(before);
-  after[0].contain[0].situation = 'after';
+  after[0].slot[0].situation = 'after';
   const graphDomainCounts = [];
   const spatialDomainCounts = [];
   const repository = createMemoryProjectionRepository();
@@ -254,37 +254,37 @@ test('incremental Web projection includes a cross-domain support endpoint withou
         return projectAtomContext(value, options);
       },
       async projectSpatial(graph, options) {
-        spatialDomainCounts.push(graph.graph.contain.length);
+        spatialDomainCounts.push(graph.graph.slot.length);
         return projectAtomGraphToKnowledge(graph, options);
       }
     }),
     repository
   });
 
-  await pipeline.rebuild(snapshot('rev-support-before', before));
-  await pipeline.rebuild(snapshot('rev-support-after', after), { affectedPaths: ['A', 'A/Source'] });
-  const current = await repository.readCurrent('primary', 'rev-support-after');
+  await pipeline.rebuild(snapshot('rev-strut-before', before));
+  await pipeline.rebuild(snapshot('rev-strut-after', after), { affectedPaths: ['A', 'A/Source'] });
+  const current = await repository.readCurrent('primary', 'rev-strut-after');
   const fullRepository = createMemoryProjectionRepository();
   const fullPipeline = createProjectionPipeline({
     projectors: createLegacyProjectionProjectors(),
     repository: fullRepository
   });
-  await fullPipeline.rebuild(snapshot('rev-support-after', after));
-  const expected = await fullRepository.readCurrent('primary', 'rev-support-after');
+  await fullPipeline.rebuild(snapshot('rev-strut-after', after));
+  const expected = await fullRepository.readCurrent('primary', 'rev-strut-after');
 
   assert.deepEqual(graphDomainCounts, [3, 2]);
   assert.deepEqual(spatialDomainCounts, [3, 2]);
   assert.equal(JSON.stringify(current.projections.graph.value), JSON.stringify(expected.projections.graph.value));
   assert.equal(JSON.stringify(current.projections.spatial.value), JSON.stringify(expected.projections.spatial.value));
-  assert.equal(current.projections.spatial.value.supportRelations.length, 1);
+  assert.equal(current.projections.spatial.value.strutRelations.length, 1);
 });
 
 test('spatial projection represents an Agent capability by its Program type only', async () => {
   const facts = [{
     'thing@program': 'Work Agent',
     situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})',
-    contain: [{ 'thing@program': 'Router', situation: 'pass', contain: [], support: [] }],
-    support: []
+    slot: [{ 'thing@program': 'Router', situation: 'pass', slot: [], strut: [] }],
+    strut: []
   }];
   const repository = createMemoryProjectionRepository();
   const pipeline = createProjectionPipeline({
@@ -301,16 +301,16 @@ test('spatial projection represents an Agent capability by its Program type only
   assert.deepEqual(program.atomTypes, ['program']);
 });
 
-test('spatial support resolves Program endpoints by Atom identity across the synthetic graph root', async () => {
-  const program = (thing, support = []) => ({
+test('spatial strut resolves Program endpoints by Atom identity across the synthetic graph root', async () => {
+  const program = (thing, strut = []) => ({
     [`thing@program`]: thing,
     situation: 'def main(arguments):\n    return True',
-    contain: [],
-    support
+    slot: [],
+    strut
   });
-  const ordinary = (thing, support = []) => ({ thing, situation: '', contain: [], support });
+  const ordinary = (thing, strut = []) => ({ thing, situation: '', slot: [], strut });
   const facts = [{
-    thing: 'Flow', situation: '', support: [], contain: [
+    thing: 'Flow', situation: '', strut: [], slot: [
       program('Forward'),
       program('Gate A'),
       program('Gate B'),
@@ -346,24 +346,24 @@ test('spatial support resolves Program endpoints by Atom identity across the syn
     repository
   });
 
-  await pipeline.rebuild(snapshot('rev-support-program-path-domain', facts));
+  await pipeline.rebuild(snapshot('rev-strut-program-path-domain', facts));
 
   const spatial = (await repository.readCurrent(
-    'primary', 'rev-support-program-path-domain'
+    'primary', 'rev-strut-program-path-domain'
   )).projections.spatial.value;
   assert.deepEqual(
-    spatial.supportClauses.map((clause) => clause.evaluation.status),
+    spatial.strutClauses.map((clause) => clause.evaluation.status),
     ['true', 'true', 'true']
   );
-  assert.equal(spatial.supportRelations.length, 5);
-  assert.equal(spatial.edges.filter((edge) => edge.label === 'support').length, 5);
+  assert.equal(spatial.strutRelations.length, 5);
+  assert.equal(spatial.edges.filter((edge) => edge.label === 'strut').length, 5);
 });
 
 test('legacy projection orchestration rejects a stale command revision before publishing Spatial state', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-projection-orchestrator-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
-  const facts = [{ thing: 'Root', situation: '', contain: [], support: [] }];
+  const facts = [{ thing: 'Root', situation: '', slot: [], strut: [] }];
   await fs.writeFile(contextFile, JSON.stringify(facts), 'utf8');
   const orchestrator = createLegacyProjectionOrchestrator({ contextFile });
 
@@ -373,6 +373,6 @@ test('legacy projection orchestration rejects a stale command revision before pu
   );
   const current = await orchestrator.projectCurrent();
   assert.match(current.sourceRevision, /^sha256:/u);
-  assert.equal(current.graph.config.schema_version, '2.0.0');
+  assert.equal(current.graph.config.schema_version, '3.0.0');
   assert.ok(Array.isArray(current.spatial.nodes));
 });

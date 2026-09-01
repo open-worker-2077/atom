@@ -11,7 +11,7 @@ import { RETIRED_GRAPH_AXES } from './graph-schema.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import {
   compatibilityMetadata,
-  isLegacySupportEntry,
+  isLegacyStrutEntry,
   validateCompatibilityManifest
 } from '../../src/atom-system/world-runtime/legacy-graph-compat.mjs';
 
@@ -22,10 +22,12 @@ const legacySnapshotMetadata = new WeakMap();
 const REQUIRED_ATOM_FIELDS = Object.freeze([
   'thing',
   'situation',
-  'contain',
-  'support'
+  'slot',
+  'strut'
 ]);
 const GRAPH_BASES = new Set(REQUIRED_ATOM_FIELDS);
+const LEGACY_V1_AXES = Object.freeze(['name', 'detail', 'children', 'partners']);
+const LEGACY_V1_AXIS_SET = new Set(LEGACY_V1_AXES);
 
 function rawBaseKey(rawKey) {
   return String(rawKey).match(/^[^@#$~]+/u)?.[0] ?? '';
@@ -45,16 +47,16 @@ function normalizePersistedContext(value) {
   function visit(atom, parentPath = []) {
     if (!isPlainObject(atom)) return atom;
     const entries = Object.entries(atom);
-    const oldEntries = entries.filter(([key]) => Object.hasOwn(RETIRED_GRAPH_AXES, rawBaseKey(key)));
+    const oldEntries = entries.filter(([key]) => LEGACY_V1_AXIS_SET.has(rawBaseKey(key)));
     const newEntries = entries.filter(([key]) => GRAPH_BASES.has(rawBaseKey(key)));
     if (!oldEntries.length) {
       if (!newEntries.length) return atom;
       const thing = newEntries.find(([key]) => rawBaseKey(key) === 'thing')?.[1];
-      const contain = newEntries.find(([key]) => rawBaseKey(key) === 'contain');
-      if (!Array.isArray(contain?.[1])) return atom;
+      const slot = newEntries.find(([key]) => rawBaseKey(key) === 'slot');
+      if (!Array.isArray(slot?.[1])) return atom;
       return {
         ...atom,
-        [contain[0]]: contain[1].map((child) => visit(child, [...parentPath, String(thing ?? '')]))
+        [slot[0]]: slot[1].map((child) => visit(child, [...parentPath, String(thing ?? '')]))
       };
     }
     if (newEntries.length) {
@@ -65,7 +67,7 @@ function normalizePersistedContext(value) {
     const fields = new Map(oldEntries.map(([key, fieldValue]) => [
       rawBaseKey(key), { rawKey: key, value: fieldValue }
     ]));
-    if (Object.keys(RETIRED_GRAPH_AXES).some((required) => !fields.has(required))) return atom;
+    if (LEGACY_V1_AXES.some((required) => !fields.has(required))) return atom;
     const thing = fields.get('name').value;
     const pathParts = [...parentPath, thing];
     const pathText = pathParts.join('/');
@@ -82,10 +84,10 @@ function normalizePersistedContext(value) {
     return {
       [thingKey]: thing,
       [migratedLegacyKey(fields.get('detail').rawKey)]: fields.get('detail').value,
-      contain: Array.isArray(fields.get('children').value)
+      slot: Array.isArray(fields.get('children').value)
         ? fields.get('children').value.map((child) => visit(child, pathParts))
         : fields.get('children').value,
-      support: structuredClone(fields.get('partners').value)
+      strut: structuredClone(fields.get('partners').value)
     };
   }
 
@@ -228,7 +230,7 @@ function atomFields(atom, location) {
         { location, rawKey, persistentKey: parsed.persistentKey }
       );
     }
-    if (fields.has(parsed.baseKey) && parsed.baseKey !== 'support') {
+    if (fields.has(parsed.baseKey) && parsed.baseKey !== 'strut') {
       throw atomLanguageError(
         'DUPLICATE_ATOM_FIELD',
         `${location} 重复声明基础字段 ${parsed.baseKey}`,
@@ -239,7 +241,7 @@ function atomFields(atom, location) {
         }
       );
     }
-    if (!fields.has(parsed.baseKey) || rawKey === 'support') fields.set(parsed.baseKey, {
+    if (!fields.has(parsed.baseKey) || rawKey === 'strut') fields.set(parsed.baseKey, {
       rawKey,
       parsed,
       value: atom[rawKey]
@@ -258,7 +260,7 @@ function atomFields(atom, location) {
   return fields;
 }
 
-function projectedSupport(clause, rootThing) {
+function projectedStrut(clause, rootThing) {
   const projected = structuredClone(clause);
   const qualify = (selector) => {
     const key = typeof selector?.thing === 'string' ? 'thing'
@@ -287,8 +289,8 @@ function projectAtom(atom, location, rootThing, options = {}) {
   const insideDefaultBackup = options.insideDefaultBackup === true
     || (thingTypes.has('backup') && thingTypes.has('default'));
   const situation = fields.get('situation').value;
-  const contain = fields.get('contain').value;
-  const support = fields.get('support').value;
+  const slot = fields.get('slot').value;
+  const strut = fields.get('strut').value;
   if (typeof thing !== 'string' || !thing.trim() || thing !== thing.trim()) {
     throw atomLanguageError(
       'INVALID_ATOM_THING',
@@ -303,17 +305,17 @@ function projectAtom(atom, location, rootThing, options = {}) {
       { location }
     );
   }
-  if (!Array.isArray(contain)) {
+  if (!Array.isArray(slot)) {
     throw atomLanguageError(
-      'INVALID_ATOM_CONTAIN',
-      `${location} 的 contain 必须是数组`,
+      'INVALID_ATOM_SLOT',
+      `${location} 的 slot 必须是数组`,
       { location }
     );
   }
-  if (!Array.isArray(support)) {
+  if (!Array.isArray(strut)) {
     throw atomLanguageError(
-      'INVALID_ATOM_SUPPORT',
-      `${location} 的 support 必须是数组`,
+      'INVALID_ATOM_STRUT',
+      `${location} 的 strut 必须是数组`,
       { location }
     );
   }
@@ -324,8 +326,8 @@ function projectAtom(atom, location, rootThing, options = {}) {
   const projected = {
     [fields.get('thing').rawKey]: thing,
     [fields.get('situation').rawKey]: situation,
-    [fields.get('contain').rawKey]: contain.map((child, index) => (
-      projectAtom(child, `${location}.contain[${index}]`, rootThing, {
+    [fields.get('slot').rawKey]: slot.map((child, index) => (
+      projectAtom(child, `${location}.slot[${index}]`, rootThing, {
         ...options,
         parentAtomPath: atomPath,
         insideDefaultBackup
@@ -334,12 +336,12 @@ function projectAtom(atom, location, rootThing, options = {}) {
   };
   for (const [rawKey, value] of Object.entries(atom)) {
     const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
-    if (parsed.baseKey !== 'support') continue;
+    if (parsed.baseKey !== 'strut') continue;
     projected[rawKey] = insideDefaultBackup
       ? []
       : value
-        .filter((selector) => !isLegacySupportEntry(selector))
-        .map((selector) => projectedSupport(selector, rootThing));
+        .filter((selector) => !isLegacyStrutEntry(selector))
+        .map((selector) => projectedStrut(selector, rootThing));
   }
   return projected;
 }
@@ -359,7 +361,7 @@ export function projectAtomContext(atoms, options = {}) {
   const rootName = options.rootName ?? DEFAULT_CONTEXT_FILENAME;
   const projectionOptions = {
     ...options,
-    allowLegacySupport: options.allowLegacySupport === true || legacySnapshotMetadata.has(atoms),
+    allowLegacyStrut: options.allowLegacyStrut === true || legacySnapshotMetadata.has(atoms),
     atomPathByGraphPath: new Map(),
     parentAtomPath: ''
   };
@@ -370,8 +372,8 @@ export function projectAtomContext(atoms, options = {}) {
     graph: {
       thing: rootName,
       situation: '',
-      contain: atoms.map((atom, index) => projectAtom(atom, `$[${index}]`, rootName, projectionOptions)),
-      support: []
+      slot: atoms.map((atom, index) => projectAtom(atom, `$[${index}]`, rootName, projectionOptions)),
+      strut: []
     }
   };
   const parsed = parseGraphDocument(candidate);
@@ -447,7 +449,7 @@ export async function readAtomContext(file, options = {}) {
     const metadata = options.compatibilityManifest
       ? compatibilityMetadata(options.compatibilityManifest, normalized.atoms)
       : normalized.metadata;
-    projectAtomContext(normalized.atoms, { allowLegacySupport: Boolean(metadata) });
+    projectAtomContext(normalized.atoms, { allowLegacyStrut: Boolean(metadata) });
     const snapshot = freezeSnapshot(normalized.atoms);
     if (metadata) legacySnapshotMetadata.set(snapshot, metadata);
     contextSnapshots.set(contextFile, { signature, manifestRevision, value: snapshot });
@@ -473,7 +475,7 @@ export async function writeAtomContext(file, atoms, options = {}) {
   }
   if (options.compatibilityManifest) validateCompatibilityManifest(options.compatibilityManifest, atoms);
   const trusted = legacy?.mode === 'versioned-compatibility' || Boolean(options.compatibilityManifest);
-  projectAtomContext(atoms, { allowLegacySupport: trusted });
+  projectAtomContext(atoms, { allowLegacyStrut: trusted });
   await atomicWriteJson(contextFile, atoms);
   await rememberContextSnapshot(contextFile, atoms, options);
   return contextFile;
