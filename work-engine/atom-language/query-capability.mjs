@@ -83,14 +83,18 @@ export function exactMatches(atoms, item, matcherRegistry, candidates = null, ex
   if (!matcher) {
     return { error: diagnostic('UNSUPPORTED_MATCHER', `不支持此匹配模式：${mode}`, { mode }) };
   }
-  const available = candidates ?? walkAtoms(atoms);
   if (mode === 'exact' && exactIndex) {
-    const candidateSet = new Set(available);
+    const indexed = exactIndex.get(nameField.value) ?? [];
+    if (!candidates) {
+      return { matches: indexed, expected: nameField.value };
+    }
+    const candidateSet = new Set(candidates);
     return {
-      matches: (exactIndex.get(nameField.value) ?? []).filter((match) => candidateSet.has(match)),
+      matches: indexed.filter((match) => candidateSet.has(match)),
       expected: nameField.value
     };
   }
+  const available = candidates ?? walkAtoms(atoms);
   const matches = available.filter(({ atom, path: atomPath }) => {
     if (mode === 'exact') {
       return matchesExactSelector(

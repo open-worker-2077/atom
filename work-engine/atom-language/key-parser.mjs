@@ -7,6 +7,8 @@ import {
 import { createActionRegistry, createMatcherRegistry } from './registry.mjs';
 
 const LEFT_ENGINEERING_SYMBOLS = new Set(['@', '$', '~']);
+const DEFAULT_MATCHER_REGISTRY = createMatcherRegistry();
+const DEFAULT_ACTION_REGISTRY = createActionRegistry();
 
 function parseCommandSegment(symbol, raw) {
   if (symbol === '@') {
@@ -89,8 +91,8 @@ function actionParameterError(action, definition) {
  * engineering-symbol dispatch, so its right side can never become a command.
  */
 export function parseAtomKey(rawKey, options = {}) {
-  const matcherRegistry = options.matcherRegistry ?? createMatcherRegistry();
-  const actionRegistry = options.actionRegistry ?? createActionRegistry();
+  const matcherRegistry = options.matcherRegistry ?? DEFAULT_MATCHER_REGISTRY;
+  const actionRegistry = options.actionRegistry ?? DEFAULT_ACTION_REGISTRY;
   const descriptionSymbolWarnings = options.descriptionSymbolWarnings !== false;
   const warnings = [];
   const errors = [];

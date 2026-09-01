@@ -376,3 +376,140 @@ test('a rejected authorization commit leaves no half-issued Graph fact', async (
   assert.equal(await fs.readFile(files.contextFile, 'utf8'), initial);
   assert.equal(findTyped(JSON.parse(initial), 'jump-authorization'), null);
 });
+
+test('a matching retained authorization wakes the execution registration on retry', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-triggered-jump-retry-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const windowPath = 'Root/Work/Job1/Window';
+  const registrationPath = `${windowPath}/Registration`;
+  const destinationPath = 'Root/Work/Job2';
+  const whenFalse = 'def main(arguments):\n    return False';
+  const whenTrue = 'def main(arguments):\n    return True';
+  const rootSource = [
+    'agent({"labels":["^^"],"functions":{"groups":[],"names":["explore","jump","jump_authorize","transform","trigger"]}})',
+    'def authorize_retry():',
+    `    window = explore({"thing":${JSON.stringify(windowPath)}})[0]`,
+    `    source = explore({"thing":${JSON.stringify(registrationPath)}})[0]`,
+    `    destination = explore({"thing":${JSON.stringify(destinationPath)}})[0]`,
+    '    jump_authorize({"window":window,"source":source,"destination":destination})',
+    'trigger("transform", {"nodes":["Root/Signal"]}, authorize_retry)'
+  ].join('\n');
+  const windowSource = 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","jump","trigger"]}})';
+  const whereSource = [
+    'def main(arguments):',
+    '    records = explore({"thing":"Registration","slot$latitude-1":True})',
+    '    grants = [record for record in records if "jump-authorization" in record.types]',
+    '    if len(grants) != 1:',
+    '        raise ValueError("one controlled jump authorization is required")',
+    '    return grants[0]'
+  ].join('\n');
+  const registrationSource = [
+    'def handoff():',
+    '    jump({',
+    '      "when": explore({"thing":"When"})[0],',
+    '      "where": explore({"thing":"Where"})[0]',
+    '    })',
+    `trigger("transform", {"nodes":[${JSON.stringify(registrationPath)}]}, handoff)`
+  ].join('\n');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Root', rootSource, [
+      atom('Signal', 'before'),
+      atom('Work', '', [
+        atom('Job1', '', [
+          atom('Window', windowSource, [
+            atom('When', whenFalse, [], 'program'),
+            atom('Where', whereSource, [], 'program'),
+            atom('Registration', registrationSource, [], 'program')
+          ], 'program')
+        ]),
+        atom('Job2')
+      ])
+    ], 'program')
+  ], null, 2));
+
+  const scheduler = createProgramRuntimeScheduler();
+  const retained = await executeAtomLanguage({
+    contextFile,
+    projectionFile,
+    source: 'transform {"thing":"Root/Signal","situation.rep.after":"before"}',
+    programScheduler: scheduler,
+    interaction: { id: 'retain-controlled-jump', agent: { path: 'Root' } }
+  });
+  assert.equal(retained.ok, true, JSON.stringify(retained));
+  assert.ok(findTyped(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'jump-authorization'));
+
+  const enabled = await executeAtomLanguage({
+    contextFile,
+    projectionFile,
+    source: `transform {${JSON.stringify('thing')}:${JSON.stringify(`${windowPath}/When`)},${JSON.stringify(`situation.rep.${whenTrue}`)}:${JSON.stringify(whenFalse)}}`,
+    programScheduler: scheduler,
+    interaction: { id: 'enable-controlled-jump', agent: { path: 'Root' } }
+  });
+  assert.equal(enabled.ok, true, JSON.stringify(enabled));
+
+  const retried = await executeAtomLanguage({
+    contextFile,
+    projectionFile,
+    source: 'transform {"thing":"Root/Signal","situation.rep.after":"after"}',
+    programScheduler: scheduler,
+    interaction: { id: 'retry-controlled-jump', agent: { path: 'Root' } }
+  });
+  assert.equal(retried.ok, true, JSON.stringify(retried));
+  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.deepEqual(names(stored[0].slot[1].slot[0]), []);
+  assert.deepEqual(names(stored[0].slot[1].slot[1]), ['Window']);
+  assert.equal(findTyped(stored, 'jump-authorization'), null);
+});
+
+test('a triggered controller reports ambiguous successors without granting or moving a window', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-triggered-jump-ambiguity-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const windowPath = 'Root/Work/Job1/Window';
+  const registrationPath = `${windowPath}/Registration`;
+  const rootSource = [
+    'agent({"labels":["^^"],"functions":{"groups":[],"names":["explore","jump","jump_authorize","transform","trigger"]}})',
+    'def handoff():',
+    `    window = explore({"thing":${JSON.stringify(windowPath)}})[0]`,
+    `    source = explore({"thing":${JSON.stringify(registrationPath)}})[0]`,
+    '    first = explore({"thing":"Root/Work/Job2"})[0]',
+    '    second = explore({"thing":"Root/Work/Job3"})[0]',
+    '    jump_authorize({"window":window,"source":source,"destination":first})',
+    '    jump_authorize({"window":window,"source":source,"destination":second})',
+    'trigger("transform", {"nodes":["Root/Signal"]}, handoff)'
+  ].join('\n');
+  const initial = [atom('Root', rootSource, [
+    atom('Signal', 'before'),
+    atom('Work', '', [
+      atom('Job1', '', [
+        atom('Window', WINDOW_AGENT_SOURCE, [
+          atom('Registration', 'def main(arguments):\n    return True', [], 'program')
+        ], 'program')
+      ]),
+      atom('Job2'),
+      atom('Job3')
+    ])
+  ], 'program')];
+  await fs.writeFile(contextFile, `${JSON.stringify(initial, null, 2)}\n`);
+
+  const result = await executeAtomLanguage({
+    contextFile,
+    projectionFile,
+    source: 'transform {"thing":"Root/Signal","situation.rep.after":"before"}',
+    programScheduler: createProgramRuntimeScheduler(),
+    interaction: { id: 'ambiguous-triggered-handoff', agent: { path: 'Root' } }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.ok(result.warnings.some(({ code }) => (
+    code === 'WINDOW_JUMP_AUTHORIZATION_CONFLICT'
+  )), JSON.stringify(result.warnings));
+  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(findThing(stored, 'Signal').situation, 'after');
+  assert.deepEqual(names(stored[0].slot[1].slot[0]), ['Window']);
+  assert.deepEqual(names(stored[0].slot[1].slot[1]), []);
+  assert.equal(findTyped(stored, 'jump-authorization'), null);
+});

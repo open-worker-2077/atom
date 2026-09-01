@@ -120,6 +120,26 @@ function graphTypesAtPath(atoms, targetPath) {
   return oneStoredField(match.atom, 'thing')?.parsed.types.map((type) => type.raw) ?? [];
 }
 
+function graphRecordsByPath(atoms) {
+  return new Map(walkAtoms(atoms).map((match) => {
+    const thing = oneStoredField(match.atom, 'thing');
+    return [match.path.join('/'), {
+      path: match.path.join('/'),
+      types: thing?.parsed.types.map((type) => type.raw) ?? [],
+      detail: oneStoredField(match.atom, 'situation')?.value ?? ''
+    }];
+  }));
+}
+
+function owningAgentPath(agentSecurity, programPath) {
+  if (!agentSecurity || typeof programPath !== 'string') return null;
+  return [...agentSecurity.keys()]
+    .filter((candidate) => (
+      programPath === candidate || programPath.startsWith(`${candidate}/`)
+    ))
+    .sort((left, right) => right.length - left.length)[0] ?? null;
+}
+
 function exactMatchAtPath(atoms, targetPath) {
   const parts = `${targetPath ?? ''}`.split('/').filter(Boolean);
   let children = atoms;
@@ -1802,10 +1822,330 @@ export async function executeAtomLanguage(options = {}) {
     let finalLockIndex = programLockIndex;
     let finalGraphLocks = graphLocks;
     let pendingTriggerEvent = initialTriggerEvent;
+    const pendingAuthorizedTriggers = new Map();
     const maxPasses = 8;
 
+    async function applyTriggeredJumpAuthorizations(baseAtoms, effects, relocations) {
+      if ((effects?.length ?? 0) === 0) {
+        return { atoms: baseAtoms, changed: false, triggerPaths: [], triggerContexts: [], logs: [] };
+      }
+      const normalized = effects.map((effect) => ({
+        windowPath: rewritePath(effect.windowPath, relocations),
+        sourcePath: rewritePath(effect.sourcePath, relocations),
+        destinationPath: rewritePath(effect.destinationPath, relocations),
+        issuerProgramPath: rewritePath(effect.issuerProgramPath, relocations)
+      }));
+      const destinationsBySource = new Map();
+      for (const effect of normalized) {
+        const signature = JSON.stringify({
+          windowPath: effect.windowPath,
+          destinationPath: effect.destinationPath,
+          issuerProgramPath: effect.issuerProgramPath
+        });
+        const signatures = destinationsBySource.get(effect.sourcePath) ?? new Set();
+        signatures.add(signature);
+        destinationsBySource.set(effect.sourcePath, signatures);
+      }
+      if ([...destinationsBySource.values()].some((signatures) => signatures.size > 1)) {
+        return { error: diagnostic(
+          'WINDOW_JUMP_AUTHORIZATION_CONFLICT',
+          '同一 jump source 不能在一个触发周期签发多个不同迁窗目标'
+        ) };
+      }
+
+      let nextAtoms = baseAtoms;
+      const triggerPaths = [];
+      const triggerContexts = [];
+      const logs = [];
+      for (const effect of normalized.filter((entry, index, entries) => (
+        entries.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(entry)) === index
+      ))) {
+        const issuerAgentPath = owningAgentPath(runtimeScheduler.agentSecurity, effect.issuerProgramPath);
+        const issuerSecurity = issuerAgentPath
+          ? runtimeScheduler.agentSecurity.get(issuerAgentPath) ?? null
+          : null;
+        const matches = new Map(walkAtoms(nextAtoms).map((match) => [match.path.join('/'), match]));
+        const source = matches.get(effect.sourcePath);
+        const window = matches.get(effect.windowPath);
+        const destination = matches.get(effect.destinationPath);
+        const issuerProgram = matches.get(effect.issuerProgramPath);
+        if (!issuerAgentPath || !issuerSecurity || !source || !window || !destination
+          || !issuerProgram || !issuerSecurity.functions?.includes('jump_authorize')) {
+          return { error: diagnostic(
+            'WINDOW_JUMP_AUTHORIZATION_DENIED',
+            '触发签发方无权控制当前窗口与迁移目的地'
+          ) };
+        }
+        const issuerController = createAccessController(nextAtoms, {
+          ...options,
+          programLockIndex: finalLockIndex,
+          agentPath: issuerAgentPath,
+          agentSecurity: structuredClone(issuerSecurity),
+          graphLocks: finalGraphLocks
+        });
+        const decisions = await Promise.all([
+          issuerController.authorize(issuerProgram, 'read', 'thing', {
+            programPath: effect.issuerProgramPath
+          }),
+          issuerController.authorize(window, 'write', 'thing', {
+            programPath: effect.issuerProgramPath,
+            windowLifecycle: { action: 'move', destinationPath: effect.destinationPath }
+          }),
+          issuerController.authorize(source, 'write', 'slot', {
+            programPath: effect.issuerProgramPath
+          }),
+          issuerController.authorize(destination, 'read', 'thing', {
+            programPath: effect.issuerProgramPath
+          }),
+          issuerController.authorize(destination, 'write', 'slot', {
+            programPath: effect.issuerProgramPath,
+            windowLifecycle: { action: 'move', destinationPath: effect.destinationPath }
+          })
+        ]);
+        if (decisions.some((decision) => decision.decision !== 'allow')) {
+          return { error: diagnostic(
+            'WINDOW_JUMP_AUTHORIZATION_DENIED',
+            '触发签发方当前无权控制窗口或迁移目的地'
+          ) };
+        }
+        const recordsByPath = graphRecordsByPath(nextAtoms);
+        const existing = [...matches.values()].filter((match) => (
+          match.parent?.atom === source.atom
+          && oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => (
+            type.raw === WINDOW_JUMP_AUTHORIZATION_TYPE
+          ))
+        ));
+        if (existing.length > 0) {
+          const existingRecord = existing.length === 1
+            ? recordsByPath.get(existing[0].path.join('/')) : null;
+          const payload = parseWindowJumpAuthorization(existingRecord);
+          if (!payload || payload.windowPath !== effect.windowPath
+            || payload.sourcePath !== effect.sourcePath
+            || payload.destinationPath !== effect.destinationPath
+            || payload.issuerAgentPath !== issuerAgentPath
+            || payload.issuerProgramPath !== effect.issuerProgramPath) {
+            return { error: diagnostic(
+              'WINDOW_JUMP_AUTHORIZATION_CONFLICT',
+              '同一 jump source 已存在另一项未消费迁窗授权'
+            ) };
+          }
+          try {
+            validateWindowJumpAuthorization({
+              payload,
+              windowPath: effect.windowPath,
+              sourcePath: effect.sourcePath,
+              destinationPath: effect.destinationPath,
+              issuerSecurity,
+              recordsByPath
+            });
+          } catch (error) {
+            return { error: diagnostic(
+              error.code ?? 'WINDOW_JUMP_AUTHORIZATION_INVALID', error.message
+            ) };
+          }
+          triggerPaths.push(effect.sourcePath);
+          triggerContexts.push({
+            sourcePath: effect.sourcePath,
+            windowPath: effect.windowPath
+          });
+          continue;
+        }
+        const operationId = crypto.randomUUID();
+        let authorization;
+        try {
+          authorization = createWindowJumpAuthorization({
+            operationId,
+            effect,
+            issuerAgentPath,
+            issuerSecurity,
+            recordsByPath
+          });
+        } catch (error) {
+          return { error: diagnostic(
+            error.code ?? 'WINDOW_JUMP_AUTHORIZATION_INVALID', error.message
+          ) };
+        }
+        const before = revisionOf(nextAtoms);
+        nextAtoms = appendNestedAtom(nextAtoms, source, authorization.atom);
+        triggerPaths.push(effect.sourcePath);
+        triggerContexts.push({
+          sourcePath: effect.sourcePath,
+          windowPath: effect.windowPath
+        });
+        logs.push({
+          id: operationId,
+          operation: 'window-jump-authorize',
+          source: { ...effect },
+          revisionBefore: before,
+          revisionAfter: revisionOf(nextAtoms)
+        });
+      }
+      return {
+        atoms: nextAtoms,
+        changed: revisionOf(nextAtoms) !== revisionOf(baseAtoms),
+        triggerPaths,
+        triggerContexts,
+        logs
+      };
+    }
+
+    async function applyTriggeredJump(baseAtoms, effects) {
+      const moves = (effects ?? []).filter((effect) => effect.action !== 'guard');
+      if (moves.length === 0) {
+        return { atoms: baseAtoms, changed: false, triggerPaths: [], relocations: [], logs: [] };
+      }
+      if (moves.length > 1) {
+        return { error: diagnostic(
+          'WINDOW_JUMP_CONFLICT',
+          '一个触发周期只能迁移或回收一个执行 Agent 窗口'
+        ) };
+      }
+      const [jump] = moves;
+      const agentPath = owningAgentPath(runtimeScheduler.agentSecurity, jump.sourceProgramPath);
+      if (!agentPath) {
+        return { error: diagnostic(
+          'WINDOW_JUMP_AGENT_REQUIRED',
+          '触发迁窗的注册 Program 不属于任何已声明执行 Agent'
+        ) };
+      }
+      if (jump.action !== 'move' || !jump.authorizationPath) {
+        return { error: diagnostic(
+          'WINDOW_JUMP_AUTHORIZATION_REQUIRED',
+          '自动迁窗只接受由上级签发的一次性受控迁窗授权'
+        ) };
+      }
+      const recordsByPath = graphRecordsByPath(baseAtoms);
+      const authorizationRecord = recordsByPath.get(jump.authorizationPath);
+      const payload = parseWindowJumpAuthorization(authorizationRecord);
+      if (!payload || payload.windowPath !== agentPath
+        || payload.sourcePath !== jump.sourceProgramPath) {
+        return { error: diagnostic(
+          'WINDOW_JUMP_AUTHORIZATION_INVALID',
+          '触发迁窗授权与执行 Agent 或注册 Program 不匹配'
+        ) };
+      }
+      const issuerSecurity = runtimeScheduler.agentSecurity.get(payload.issuerAgentPath) ?? null;
+      try {
+        validateWindowJumpAuthorization({
+          payload,
+          windowPath: agentPath,
+          sourcePath: jump.sourceProgramPath,
+          destinationPath: payload.destinationPath,
+          issuerSecurity,
+          recordsByPath
+        });
+      } catch (error) {
+        return { error: diagnostic(
+          error.code ?? 'WINDOW_JUMP_AUTHORIZATION_INVALID', error.message
+        ) };
+      }
+      const matches = new Map(walkAtoms(baseAtoms).map((match) => [match.path.join('/'), match]));
+      const source = matches.get(jump.sourceProgramPath);
+      const window = matches.get(agentPath);
+      const destination = matches.get(payload.destinationPath);
+      if (!source || !window || !destination || !issuerSecurity) {
+        return { error: diagnostic(
+          'WINDOW_JUMP_AUTHORIZATION_INVALID',
+          '触发迁窗授权绑定的 Graph 节点已失效'
+        ) };
+      }
+      const issuerController = createAccessController(baseAtoms, {
+        ...options,
+        programLockIndex: finalLockIndex,
+        agentPath: payload.issuerAgentPath,
+        agentSecurity: structuredClone(issuerSecurity),
+        graphLocks: finalGraphLocks
+      });
+      const decisions = await Promise.all([
+        issuerController.authorize(source, 'read', 'thing', {
+          programPath: payload.issuerProgramPath
+        }),
+        issuerController.authorize(window, 'write', 'thing', {
+          programPath: payload.issuerProgramPath,
+          windowLifecycle: { action: 'move', destinationPath: payload.destinationPath }
+        }),
+        issuerController.authorize(destination, 'read', 'thing', {
+          programPath: payload.issuerProgramPath
+        }),
+        issuerController.authorize(destination, 'write', 'slot', {
+          programPath: payload.issuerProgramPath,
+          windowLifecycle: { action: 'move', destinationPath: payload.destinationPath }
+        })
+      ]);
+      if (decisions.some((decision) => decision.decision !== 'allow')) {
+        return { error: diagnostic(
+          'WINDOW_JUMP_AUTHORIZATION_DENIED',
+          '签发方当前已无权控制执行 Agent 或迁移目的地'
+        ) };
+      }
+      const compiled = compileProgramTransform({
+        request: { [`thing.mov.${payload.destinationPath}`]: agentPath }, receiver
+      });
+      if (!compiled.ok) {
+        return { error: diagnostic(
+          'WINDOW_JUMP_DESTINATION_INVALID',
+          compiled.errors?.[0]?.message ?? '触发迁窗目标无法编译'
+        ) };
+      }
+      const moved = await applyTransform({
+        atoms: baseAtoms,
+        item: compiled.item,
+        contextFile,
+        authorize: (match, operation, field, actor = {}) => issuerController.authorize(
+          match, operation, field, {
+            ...actor,
+            programPath: jump.sourceProgramPath,
+            windowJumpAuthorization: true,
+            windowLifecycle: { action: 'move', destinationPath: payload.destinationPath }
+          }
+        )
+      });
+      if (moved.error) {
+        return { error: diagnostic(
+          moved.error.code === 'WINDOW_ACCESS_DENIED'
+            ? 'WINDOW_JUMP_LOCK_DENIED' : 'WINDOW_JUMP_DESTINATION_INVALID',
+          moved.error.message,
+          { cause: moved.error.code }
+        ) };
+      }
+      const consumed = removeWindowJumpAuthorization(moved.atoms, payload.operationId);
+      if (!consumed.removed) {
+        return { error: diagnostic(
+          'WINDOW_JUMP_AUTHORIZATION_INVALID',
+          '触发迁窗授权无法在候选事务中精确消费'
+        ) };
+      }
+      return {
+        atoms: consumed.atoms,
+        changed: true,
+        triggerPaths: [moved.resultPath, payload.destinationPath],
+        relocations: [{ sourcePath: agentPath, resultPath: moved.resultPath }],
+        logs: [{
+          id: payload.operationId,
+          operation: 'window-jump-authorized-move',
+          source: {
+            windowPath: agentPath,
+            sourcePath: jump.sourceProgramPath,
+            destinationPath: payload.destinationPath,
+            issuerProgramPath: payload.issuerProgramPath
+          }
+        }]
+      };
+    }
+
     for (let pass = 1; pass <= maxPasses; pass += 1) {
-      const cycleAgentPath = interaction.agent?.path ?? null;
+      const authorizedPaths = [...new Set((pendingTriggerEvent?.nodes ?? [])
+        .map((node) => pendingAuthorizedTriggers.get(node))
+        .filter(Boolean))];
+      const authorizedAgentPath = authorizedPaths.length === 1
+        ? authorizedPaths[0] : null;
+      for (const node of pendingTriggerEvent?.nodes ?? []) {
+        pendingAuthorizedTriggers.delete(node);
+      }
+      const cycleAgentPath = authorizedAgentPath ?? interaction.agent?.path ?? null;
+      const cycleAgentOrigin = authorizedAgentPath
+        ? { path: authorizedAgentPath }
+        : interaction.agent;
       const cycleAgentSecurity = cycleAgentPath
         ? structuredClone(runtimeScheduler.agentSecurity?.get(cycleAgentPath)
           ?? programCycle.agentSecurity ?? null)
@@ -1816,7 +2156,7 @@ export async function executeAtomLanguage(options = {}) {
       let cycle;
       try {
         cycle = await runtimeScheduler.refresh(reconciledAtoms, {
-          agentOrigin: interaction.agent,
+          agentOrigin: cycleAgentOrigin,
           isolateFailures: true,
           slotTriggerCycleId: interaction.id,
           ...(pendingTriggerEvent ? { triggerEvent: pendingTriggerEvent } : {}),
@@ -1831,7 +2171,7 @@ export async function executeAtomLanguage(options = {}) {
               agentSecurity: cycleAgentSecurity,
               graphLocks: finalGraphLocks
             }),
-            agentOrigin: interaction.agent,
+            agentOrigin: cycleAgentOrigin,
             scopeRoot: executionContext.scopeRoot ?? null,
             preparedWorld: preparedWorld ??= prepareExploreWorld(reconciledAtoms)
           })
@@ -1856,6 +2196,8 @@ export async function executeAtomLanguage(options = {}) {
         pass,
         elapsedMs: Math.round(performance.now() - refreshStartedAt),
         transforms: cycle.transforms?.length ?? 0,
+        jumps: cycle.jumps?.length ?? 0,
+        jumpAuthorizations: cycle.jumpAuthorizations?.length ?? 0,
         failures: cycle.failures?.length ?? 0,
         cached: cycle.cached === true
       });
@@ -1993,7 +2335,11 @@ export async function executeAtomLanguage(options = {}) {
           createNew || transformChangesStructure(item)
         )).length
       });
-      if (compiledRequests.length === 0 && (cycle.shortcuts?.length ?? 0) === 0 && (cycle.slotBodies?.length ?? 0) === 0) {
+      if (compiledRequests.length === 0
+        && (cycle.shortcuts?.length ?? 0) === 0
+        && (cycle.slotBodies?.length ?? 0) === 0
+        && (cycle.jumpAuthorizations?.length ?? 0) === 0
+        && (cycle.jumps?.filter((jump) => jump.action !== 'guard').length ?? 0) === 0) {
         return {
           atoms: reconciledAtoms,
           lockIndex: finalLockIndex,
@@ -2194,13 +2540,36 @@ export async function executeAtomLanguage(options = {}) {
         failOnProgramFailure ||= (slotResult.receipt?.recompute_targets?.length ?? 0) > 0;
         appliedSlotBodies.push({ sourceProgramPath, effect, receipt: slotResult.receipt });
       }
-      const after = revisionOf(application.atoms);
       const applicationRelocations = (application.applied ?? []).flatMap(({ transformed }) => (
         transformed.sourcePath && transformed.resultPath
           && transformed.sourcePath !== transformed.resultPath
           ? [{ sourcePath: transformed.sourcePath, resultPath: transformed.resultPath }]
           : []
       ));
+      const authorization = await applyTriggeredJumpAuthorizations(
+        application.atoms,
+        cycle.jumpAuthorizations,
+        [...pathChanges, ...applicationRelocations]
+      );
+      if (authorization.error) {
+        interactionWarnings.push(authorization.error);
+      } else {
+        application.atoms = authorization.atoms;
+        for (const context of authorization.triggerContexts ?? []) {
+          pendingAuthorizedTriggers.set(context.sourcePath, context.windowPath);
+        }
+      }
+      const jump = await applyTriggeredJump(application.atoms, cycle.jumps);
+      if (jump.error) {
+        interactionWarnings.push(jump.error);
+      } else {
+        application.atoms = jump.atoms;
+      }
+      const cycleRelocations = [
+        ...applicationRelocations,
+        ...(jump.relocations ?? [])
+      ];
+      const after = revisionOf(application.atoms);
       performanceTrace('program-reconcile-apply', {
         pass,
         elapsedMs: Math.round(performance.now() - applyStartedAt),
@@ -2211,7 +2580,7 @@ export async function executeAtomLanguage(options = {}) {
         await assertRequestCandidateAuthority(application.atoms, [
           ...declarationRelocations,
           ...pathChanges,
-          ...applicationRelocations
+          ...cycleRelocations
         ]);
         reconciledAtoms = application.atoms;
         passChanged = true;
@@ -2242,6 +2611,13 @@ export async function executeAtomLanguage(options = {}) {
             revisionAfter: after
           });
         }
+        transformLogs.push(
+          ...(authorization.logs ?? []),
+          ...(jump.logs ?? [])
+        );
+        for (const relocation of jump.relocations ?? []) {
+          pathChanges.push(relocation);
+        }
         for (const entry of appliedSlotBodies) {
           transformLogs.push({
             id: crypto.randomUUID(),
@@ -2260,7 +2636,10 @@ export async function executeAtomLanguage(options = {}) {
           receipt?.body,
           receipt?.target,
           ...(receipt?.recompute_targets ?? [])
-        ]))).filter(Boolean))];
+        ]))).concat(
+          authorization.triggerPaths ?? [],
+          jump.triggerPaths ?? []
+        ).filter(Boolean))];
         const affectedPaths = [...new Set(application.applied.flatMap(({ transformed }) => ([
           transformed.sourcePath,
           transformed.resultPath,
@@ -2274,6 +2653,13 @@ export async function executeAtomLanguage(options = {}) {
         pendingTriggerEvent = triggeredNodes.length
           ? { mode: 'transform', nodes: triggeredNodes, affectedPaths }
           : null;
+      }
+      if (!passChanged && (authorization.triggerPaths?.length ?? 0) > 0) {
+        const triggerPaths = [...new Set(authorization.triggerPaths.filter(Boolean))];
+        pendingTriggerEvent = {
+          mode: 'transform', nodes: triggerPaths, affectedPaths: triggerPaths
+        };
+        passChanged = true;
       }
       if (!passChanged) {
         return {

@@ -260,6 +260,136 @@ test('a completed stage lets its total-control Agent activate and unlock the nex
   assert.deepEqual(await programScheduler.activeRequestDrivenLocks(stored), []);
 });
 
+test('a five-stage strut chain hands one execution Agent to each activated successor', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-triggered-stage-handoff-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const controllerPath = 'Root/Controller';
+  const stageNames = ['第一步', '第二步', '第三步', '第四步', '第五步'];
+  const activePath = (index) => `${controllerPath}/🏃‍♀️${stageNames[index]}`;
+  const pendingPath = (index) => `${controllerPath}/⌛️🔒${stageNames[index]}`;
+  const completedPath = (index) => `${controllerPath}/✅${stageNames[index]}`;
+  const executionPath = (index) => `${activePath(index)}/执行`;
+  const registrationPath = (index) => `${executionPath(index)}/Registration`;
+  const inertGuard = 'def main(arguments):\n    return True';
+  const disableGuard = `situation.rep.${inertGuard}`;
+  const controllerSource = [
+    'agent({"labels":["总控"],"functions":{"groups":[],"names":["explore","jump","jump_authorize","lock","transform","trigger"]}})',
+    'def activate():',
+    '    window = explore({"thing":"执行"})[0]',
+    '    source = explore({"thing":"Registration"})[0]',
+    '    ancestry = explore({"thing":window.path,"slot$latitude+1":True})',
+    '    stages = [record for record in ancestry if record.path != window.path]',
+    '    if len(stages) != 1:',
+    '        raise ValueError("execution window must have one direct stage")',
+    '    stage = stages[0]',
+    '    declared = explore({"thing":stage.path,"strut":True})',
+    '    owner = [record for record in declared if record.path == stage.path][0]',
+    '    if len(owner.strut) != 1 or len(owner.strut[0]["then"]) != 1:',
+    '        raise ValueError("completed stage must declare one successor")',
+    '    destination = explore({"thing":owner.strut[0]["then"][0]["thing"]})[0]',
+    `    transform({"thing":destination.path + "/业务锁",${JSON.stringify(disableGuard)}:None})`,
+    '    active_name = "🏃‍♀️" + destination.thing.replace("⌛️🔒", "", 1)',
+    '    transform({"thing.ren." + active_name:destination.path})',
+    '    jump_authorize({"window":window,"source":source,"destination":destination})',
+    `trigger("transform", {"nodes":[${stageNames.slice(0, -1).map((_, index) => JSON.stringify(completedPath(index))).join(',')}]}, activate)`
+  ].join('\n');
+  const executionSource = 'agent({"labels":["总控"],"functions":{"groups":[],"names":["explore","jump","trigger"]}})';
+  const whenSource = [
+    'def main(arguments):',
+    '    records = explore({"thing":"Registration","slot$latitude-1":True})',
+    '    return any("jump-authorization" in record.types for record in records)'
+  ].join('\n');
+  const whereSource = [
+    'def main(arguments):',
+    '    records = explore({"thing":"Registration","slot$latitude-1":True})',
+    '    grants = [record for record in records if "jump-authorization" in record.types]',
+    '    if len(grants) != 1:',
+    '        raise ValueError("one controlled jump authorization is required")',
+    '    return grants[0]'
+  ].join('\n');
+  const registrationSource = [
+    'def handoff():',
+    '    jump({',
+    '      "when": explore({"thing":"When"})[0],',
+    '      "where": explore({"thing":"Where"})[0]',
+    '    })',
+    `trigger("transform", {"nodes":[${JSON.stringify(registrationPath(0))}]}, handoff)`
+  ].join('\n');
+  const stageAtoms = stageNames.map((name, index) => {
+    const strut = index < stageNames.length - 1
+      ? [{ 'if@current': true, then: [{ thing: pendingPath(index + 1) }] }]
+      : [];
+    if (index === 0) {
+      return {
+        thing: `🏃‍♀️${name}`, situation: '', strut, slot: [
+          atom('执行', executionSource, [
+            atom('When', whenSource, [], 'program'),
+            atom('Where', whereSource, [], 'program'),
+            atom('Registration', registrationSource, [], 'program')
+          ], 'program')
+        ]
+      };
+    }
+    return {
+      thing: `⌛️🔒${name}`,
+      situation: '',
+      strut,
+      slot: [atom(
+        '业务锁',
+        `lock({"targets":{"paths":[${JSON.stringify(pendingPath(index))}],"scope":"subtree"},"actions":["transform"],"labels":["总控"]})`,
+        [],
+        'program'
+      )]
+    };
+  });
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Root', '', [
+      atom('Controller', controllerSource, [
+        ...stageAtoms
+      ], 'program')
+    ])
+  ], null, 2));
+
+  const programScheduler = createProgramRuntimeScheduler();
+  for (let index = 0; index < stageNames.length - 1; index += 1) {
+    const result = await executeAtomLanguage({
+      contextFile,
+      projectionFile,
+      source: `transform {${JSON.stringify(`thing.ren.✅${stageNames[index]}`)}:${JSON.stringify(activePath(index))}}`,
+      programScheduler,
+      interaction: {
+        id: `complete-stage-and-handoff-${index + 1}`,
+        agent: { path: controllerPath }
+      }
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+    const paths = new Set((function walk(atoms, prefix = []) {
+      return atoms.flatMap((entry) => {
+        const thing = Object.entries(entry).find(([key]) => (
+          key === 'thing' || key.startsWith('thing@')
+        ))[1];
+        const current = [...prefix, thing];
+        return [current.join('/'), ...walk(entry.slot ?? [], current)];
+      });
+    })(stored));
+    assert.ok(paths.has(completedPath(index)));
+    assert.ok(
+      paths.has(activePath(index + 1)),
+      `${JSON.stringify(result.warnings)}\n${[...paths].join('\n')}`
+    );
+    assert.ok(paths.has(executionPath(index + 1)), [...paths].join('\n'));
+    assert.equal(paths.has(`${completedPath(index)}/执行`), false);
+    assert.equal([...paths].some((entry) => entry.includes('迁窗授权-')), false);
+  }
+
+  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.deepEqual(await programScheduler.activeRequestDrivenLocks(stored), []);
+});
+
 test('renaming an editable antecedent preserves a strut stored on a business-locked consequent', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-locked-incoming-strut-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

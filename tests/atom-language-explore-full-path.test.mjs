@@ -8,7 +8,7 @@ import test from 'node:test';
 import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { writeAtomGraphProjection } from '../work-engine/atom-language/context-store.mjs';
-import { prepareExploreWorld } from '../work-engine/atom-language/query-capability.mjs';
+import { exactMatches, prepareExploreWorld } from '../work-engine/atom-language/query-capability.mjs';
 
 const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
@@ -17,6 +17,41 @@ test('one immutable world reuses its exact Explore index', () => {
     Object.freeze({ thing: 'Root', situation: '', slot: Object.freeze([]), strut: Object.freeze([]) })
   ]);
   assert.strictEqual(prepareExploreWorld(atoms), prepareExploreWorld(atoms));
+});
+
+test('an unrestricted exact-index lookup does not rescan the world', () => {
+  const match = {
+    atom: { thing: 'Root', situation: '', slot: [], strut: [] },
+    path: ['Root'],
+    parent: null,
+    index: 0
+  };
+  const atoms = {
+    forEach() {
+      assert.fail('an exact index must avoid a redundant whole-world scan');
+    }
+  };
+  const item = {
+    fields: [{
+      baseKey: 'thing', valuePresent: true, value: 'Root', matcher: { mode: 'exact' }
+    }]
+  };
+  const matcherRegistry = {
+    resolve(mode) {
+      return mode === 'exact' ? { match: (value, expected) => value === expected } : null;
+    }
+  };
+
+  const result = exactMatches(
+    atoms,
+    item,
+    matcherRegistry,
+    null,
+    new Map([['Root', [match]]])
+  );
+
+  assert.deepEqual(result.matches, [match]);
+  assert.equal(result.expected, 'Root');
 });
 
 async function fixture(t) {

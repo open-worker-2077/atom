@@ -27,8 +27,14 @@
 - **已完成**：Task 1 的触发 Agent 身份、业务锁解锁、引用维护、阶段改名和全链隔离演练。
 - **真实状态**：4784 中`🏃‍♀️原表守恒`未加业务锁；抽查`⌛️🔒活动建模`、`⌛️🔒完成映射`和`⌛️🔒总装成件`均由`总控`锁定；普通写入返回`GRAPH_LOCK_DENIED`。
 - **恢复备份**：部署前世界文件位于桌面`AtomGraph-backups/esg-chain-before-deploy-20260901-1725`；备份位置只用于本机恢复，不进入产品运行逻辑。
-- **下一动作**：从 Task 2 Step 1 开始，为“当前槽例完成后自动迁窗”建立失败测试；不得重做 Task 1 或重新研讨已批准的阶段链。
-- **明确未完成**：自动迁窗尚未实现；Web 的双击、支线贴边、CLI 后布局紊乱和 Shortcut 原地返回由 Web 空间规格记录，不属于本计划 Task 2 的顺手修复范围。
+- **Task 2 隔离工作区**：`D:\Project\〇\subprojects\atom\.worktrees\esg-auto-jump`，分支`feature/esg-auto-jump`，起点`5e09d9e`；不得在正在运行 4784 的主工作区直接试改。
+- **改动前基线**：全量`1585/1586`；唯一既有失败为`spatial-cluster-field`的“tenfold adaptive compactness”性能门槛，单独重跑仍失败（约 1400ms），与迁窗链无关并已归入 Web 布局问题。
+- **Task 2 RED/GREEN**：初始 RED 证明触发归并漏掉`jump_authorize`与`jump`；实现后仅在完整复验签发方、窗口、source、destination 及 Graph 世代后，以同轮新签授权唤醒内嵌执行 Agent，并在迁窗后消费授权。歧义后继保留业务事实、窗口原位且不留授权；首次`when=False`保留的同一授权在条件修复后可重新唤醒注册并被消费。
+- **连续链修正**：五阶段隔离验收先后暴露“单 Program 多 trigger 非法”“监听🏃‍♀️会自级联”“固定历史路径会被官方路径重写带走”“全邻接不等于有向后继”四个问题；最终总控只监听✅结果，从唯一执行 Agent 上钻当前槽例，读取该槽例自身`strut.then`的唯一后继，一次只推进一步。
+- **性能根因**：两项 4784 大世界门槛在未改动`main`也波动失败；CPU profile 定位到`parseAtomKey`每次解析都重建默认 matcher/action registry。模块级复用默认只读注册表后，Program effect apply 从约 1.8—2.8s 降到约 0.49—0.65s；完整测试中的两项总耗时约 2.81s/3.43s，低于 4s/5s 门槛。
+- **当前验证**：邻接权限/事务/批量回归`67/67`；最终完整`npm test`为`1590/1590`、0 failure，包含五阶段线性 Strut 链连续四次完成与迁窗、授权重试及多后继歧义拒绝；最终无授权和业务锁残留。语法检查与`git diff --check`通过。
+- **下一动作**：提交功能分支，集成到`main`后复验并推送`origin/main`；不得改动真实 ESG 完成事实。
+- **范围外记录**：Web 的双击目标错位、支线未贴边、CLI 交互后布局紊乱和 Shortcut 原地返回由 Web 空间规格记录，不属于 Task 2 的顺手修复范围。
 
 ### Task 1: 总控业务锁与阶段推进
 
@@ -66,27 +72,29 @@
 - Consumes: Task 1 已提交的阶段完成 trigger、`总控`标签和下一阶段解锁结果；现有`jump_authorize({window,source,destination})`一次性授权合同。
 - Produces: `完成当前槽例 → 解锁下一槽例 → 签发授权 → 执行 Agent 消费授权并迁窗`的可恢复事务序列。
 
-- [ ] **Step 1: Write the failing single-successor test**：在`tests/atom-agent-candidate-runtime.test.mjs`建立父级总控、当前槽例执行 Agent、完成触发和唯一下一槽例；断言完成提交后下一槽例可编辑且执行 Agent 的实际 Slot 路径迁入下一槽例。运行`node --test tests/atom-agent-candidate-runtime.test.mjs`，预期因尚未签发/消费受控迁窗授权而失败。
-- [ ] **Step 2: Write the failing safety tests**：在`tests/atom-window-controlled-jump-authorization.test.mjs`覆盖授权缺失、目标仍锁定、签发方失权、Graph revision 变化及多个后项无唯一分派；断言执行 Agent 原位不动且一次性授权不能重放。运行该测试文件，预期新增场景失败且既有授权场景保持通过。
-- [ ] **Step 3: Implement the minimal controller handoff**：给总控 Agent 的字面量函数授权增加`jump_authorize`，保持其他函数不变：
+- [x] **Step 1: Write the failing single-successor test**：在`tests/atom-agent-candidate-runtime.test.mjs`建立父级总控、当前槽例执行 Agent、完成触发和唯一下一槽例；断言完成提交后下一槽例可编辑且执行 Agent 的实际 Slot 路径迁入下一槽例。定向测试按预期失败：下一槽例已激活且解锁，但执行 Agent 未迁移。
+- [x] **Step 2: Write the failing safety tests**：新增多后继歧义触发测试，既有授权套件继续覆盖授权缺失、目标锁定、签发方失权、Graph revision 变化、提交拒绝和重放；歧义场景保留业务事实、窗口原位、不留授权并返回`WINDOW_JUMP_AUTHORIZATION_CONFLICT`。
+- [x] **Step 3: Implement the minimal controller handoff**：给总控 Agent 的字面量函数授权增加`jump_authorize`，保持其他函数不变：
 
   ```python
   agent({"labels":["总控"],"functions":{"groups":[],"names":["agent","explore","jump_authorize","lock","transform","trigger"]}})
   ```
 
-  完成 trigger 只在下一节点已经改成`🏃‍♀️`且候选目标唯一时，用`explore()`返回的三个 ThingCoordinate 签发授权：
+  完成 trigger 只监听`✅`结果；回调从唯一执行 Agent 上钻当前槽例，并从当前槽例自身的`strut.then`读取唯一后继。它先解除后继业务锁、把后继改为`🏃‍♀️`，再用`explore()`返回的三个 ThingCoordinate 签发授权。不得按次数建立历史路径分支：
 
   ```python
-  EXECUTION_AGENT = "🧊manage/办包/究谋/个务/外务/职务·FDE/设计/研策/ESG计划/ESG计划总控Agent/✅原表守恒/执行Agent"
-  NEXT_STAGE = "🧊manage/办包/究谋/个务/外务/职务·FDE/设计/研策/ESG计划/ESG计划总控Agent/🏃‍♀️活动建模"
-  window = explore({"thing": EXECUTION_AGENT})[0]
-  source = explore({"thing": EXECUTION_AGENT + "/迁窗注册"})[0]
-  destination = explore({"thing": NEXT_STAGE})[0]
+  window = explore({"thing": "执行"})[0]
+  source = explore({"thing": "迁窗注册"})[0]
+  current = [item for item in explore({"thing": window.path, "slot$latitude+1": True)
+             if item.path != window.path][0]
+  owner = [item for item in explore({"thing": current.path, "strut": True)
+           if item.path == current.path][0]
+  destination = explore({"thing": owner.strut[0]["then"][0]["thing"]})[0]
   jump_authorize({"window": window, "source": source, "destination": destination})
   ```
 
   `执行Agent`声明最小`explore`与`jump`能力；其`迁窗注册`只通过`when`检查唯一授权、通过`where`返回该授权坐标，并由既有 jump 事务消费。Program 不接收目标路径参数，不读取兄弟槽例正文，也不自行 Transform 目的地。
-- [ ] **Step 4: Preserve partial-failure truth**：在`work-engine/atom-language/engine.mjs`和`program-runtime.mjs`保持完成事实与迁窗错误边界；迁窗失败不回滚已经独立提交的业务完成，不把目标误报为未解锁，也不移动执行 Agent。运行`node --test tests/atom-window-jump-transaction.test.mjs tests/atom-window-controlled-jump-authorization.test.mjs`，预期 0 failure。
-- [ ] **Step 5: Run the isolated ESG journey**：在隔离世界创建单后项、分支多后项和汇合后项三种阶段；逐项完成并回读节点状态、锁、授权消耗和执行 Agent 实际路径，预期只有唯一已声明目标发生迁窗。
-- [ ] **Step 6: Run adjacent and full regression**：运行`node --test tests/atom-agent-candidate-runtime.test.mjs tests/atom-window-controlled-jump-authorization.test.mjs tests/atom-window-jump-transaction.test.mjs tests/atom-language-transform-batch.test.mjs`，随后因该变化跨越 Program、权限和事务层运行`npm test`；两次均预期 0 failure。
+- [x] **Step 4: Preserve partial-failure truth**：触发签发或迁窗失败作为明确 warning 保留业务变更；歧义签发不产生半项授权，迁窗失败保留执行 Agent 原位和可复验授权。相邻权限、事务和批量改名回归`56/56`通过。
+- [x] **Step 5: Run the isolated ESG journey**：五阶段线性 Strut 链连续完成四个当前阶段；每次仅唯一后继变为🏃‍♀️，执行 Agent 迁入该槽例，旧槽例不再包含执行 Agent，授权即时消费；另有多后继歧义测试确认不猜测、不迁窗、不留授权。
+- [x] **Step 6: Run adjacent and full regression**：邻接套件`67/67`；最终完整`npm test`为`1590/1590`、0 failure，性能门槛恢复稳定余量，并覆盖五阶段连续迁窗和保留授权重试。
 - [ ] **Step 7: Update this recovery point and commit**：把实际 commit、测试数量、隔离旅程结果和下一未完成项写回“恢复断点”，提交`feat: hand off completed slot agents`；未经用户另行授权不把真实 ESG 阶段标成完成。
