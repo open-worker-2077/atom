@@ -23,6 +23,7 @@
 - **已完成代码**：Shortcut scoped state 补入远端目标的最小载体路线；ASDF 重叠命中已在外层壳与可见内层节点之间优先采用内层节点。
 - **当前证据**：ASDF 浏览器用例按预期取得 RED（期望`overlap-child-id`，实际`overlap-parent-id`），相同用例修复后`1/1` GREEN；命中、手势与输入邻接单测`46/46`；完整`npm test`为`1591/1591`、0 failure。
 - **Task 1 实现提交**：`89a879a`（`fix(web): load remote shortcut routes`）。
+- **Task 2 实现提交**：`9a61ff2`（`fix(web): keep ASDF double-click on deepest target`）。
 - **下一动作**：提交、合入并推送`main`；随后从 Task 3 Step 1 继续。
 - **仍未完成**：Strut 可见边界贴合、CLI 更新后的视图连续性。
 
