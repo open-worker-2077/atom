@@ -118,7 +118,7 @@ export async function executeAtomProgramFunctionRegistryEndpoint(
 }
 
 const TRANSFORM_HELP = Object.freeze({
-  rep: '{"thing":"A","situation.rep.NEW"}；局部替换用 "situation.rep.NEW":"OLD"；strut 全替换用 "strut.rep.":[{"if@current":true,"then":[{"thing":"TARGET"}]}]',
+  rep: '{"thing":"A","situation.rep.NEW"}；全文替换键没有 Value；不得写 :null，null 是一个已提供的局部替换 Value；局部替换用 "situation.rep.NEW":"OLD"；strut 全替换用 "strut.rep.":[{"if@current":true,"then":[{"thing":"TARGET"}]}]',
   sum: '{"thing":"A","situation.sum.SUMMARY"}（只更新 situation 简介）',
   typ: '{"thing.typ.TYPE":"A"}（替换类型标记）；{"thing.typ.":"A"}（移除类型标记）',
   ren: '{"thing.ren.NEW_THING":"A"}（同级必须保持唯一）',

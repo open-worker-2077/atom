@@ -8,7 +8,7 @@
 
 ## 当前主干
 
-- **首个代码缺口**：全文`situation.rep`的 Help 示例不是标准 JSON，历史记录 26、28 也证明使用`:null`会被当作局部替换。先以当前 CLI 写 RED，统一“可复制的标准 Graph-JSON”与执行器合同。
+- **当前功能项**：通用点击次数与 Program 声明三点击运行尚未实现；下一步进入 brainstorming 与规格化，输入层不得硬编码三点击用途。
 - **首个现场缺口**：手机只验收`https://worker.tail33a2eb.ts.net/`；IP 仅是内部诊断探针。当前无 ADB 设备，服务端、Tailscale Serve 和 peer 连通均已证实，缺手机 DNS/浏览器侧证据。
 - **后续功能**：点击次数作为通用输入事实、Program 声明三点击运行仍未设计实现；完成当前 CLI 缺口后先执行`superpowers:brainstorming`，不得把“三点击用途”硬编码进输入层。
 
@@ -37,23 +37,23 @@
 - **35、36、38 `1de10c7d`、`7870bf52`、`bf1cd480`**：`3014382 fix(atom): keep unrelated failed programs dormant`及后续 trigger/changed 隔离合同覆盖“无关 Program 冷重放污染”。
 - **37 `f163b30f`、39 `dbc95b90`**：固定窗口、受控迁窗与跳窗隔离已有系列实现和验收；最新真实 ESG 初态也已部署。只等待真实业务完成事件，不伪造`✅`。
 - **42 `46e7f1a8`**：`5c79dad fix(transform): copy frozen snapshots before discard`及同名归档补丁`fc5e09c`直接覆盖冻结数组崩溃。
-- **43 `b2824f62`**：Agent Program身份与子树移动已由`d5e1bb6`、`57230c0`等修复并经真实工务迁移/ESG部署使用；仍保留一个“后代普通改造”最小回归，避免用相近场景代替原报告。
+- **43 `b2824f62`**：Agent Program身份与子树移动已由`d5e1bb6`、`57230c0`等修复并经真实工务迁移/ESG部署使用；2026-09-02 现行 Agent 登记/固定窗口回归`35/35`通过，正文、Strut、丢弃三类后代 Transform 均不会再触发错误登记。
 - **44 `327e3858`**：`0fb665d fix(transform): keep situation replacement text opaque`及正文不透明规格直接覆盖嵌套`.ren.`误解析。
 
 ### 必须用当前版本复现后才能裁定
 
-- **07、09 `244fc9de`、`7cacb888`**：Windows备份任务可见终端；先检查当前计划任务 action 和真实弹窗，不能从 2026-08-11 环境直接判现状。
-- **16 `567796a1`**：旧 advancement-flow 填表触发`PROGRAM_USES_REQUIRED`；现行模板和四轴已大改，需创建隔离槽例重跑。
-- **26、28 `c1f35b6f`、`d7fd2bb2`**：全文 replacement 当前 Help 示例仍不可作为标准 JSON 复制，列为当前第一代码缺口；旧路由回退部分另行隔离，不与语法修复混做。
-- **31 `89a8a3a7`**：提交后 Explore 无回执；需当前版本加入有界超时与 revision 证据重跑。
-- **33 `02932576`**：旧`name.run.`路径已退役；需用当前`thing.run.`对深层 Program 做最小回归，只验证现行运行选择器。
-- **45 `946650ae`**：Explore 与 Transform 对同名 Thing 的候选集可能不一致；先用不会写入真实业务正文的测试 fixture 复现，重点比较隐藏/backup候选与“世界之外”选择器。
+- **07、09 `244fc9de`、`7cacb888`**：2026-09-02 现场回读“Atom Data Private Backup”计划任务，Action 为`wscript.exe`→`run-atom-data-backup-hidden.vbs`→PowerShell备份脚本，已采用无窗口宿主；旧弹窗路径不再存在。
+- **16 `567796a1`**：2026-09-02 现行 advancement-flow 的完整实例化、两步创建、修复挂接、严格布尔迁移和无 legacy uses 的数据填写回归`7/7`通过；旧`PROGRAM_USES_REQUIRED`阻断已不存在。
+- **26、28 `c1f35b6f`、`d7fd2bb2`**：根因不是执行器损坏，而是 Agent 把 Graph-JSON 的“无 Value”误写成`:null`；当前执行器与测试已证明无 Value 全文替换正常。2026-09-02 新增 Help 合同，明确“全文键无 Value，null 是已提供的局部替换 Value”；旧路由回退部分另行隔离。
+- **31 `89a8a3a7`**：2026-09-02 通过真实 4784 测试服务器验证“创建 Program 后立即 exact Explore”及“显式 Program 改世界后立即回读”，`2/2`均在有界时间内返回且不重放无关 Program。
+- **33 `02932576`**：旧`name.run.`路径已退役；2026-09-02 现行`thing.run.`强制重跑及与 Explore/Transform 共用的最短唯一深层路径回归`2/2`通过，测试包含原反馈的 ESG 路径形态。
+- **45 `946650ae`**：旧短名在顶层与子树同名时不足以安全写入；现行“世界之外/顶层名”合同已提供全局唯一顶层选择。2026-09-02 顶层同名、完整路径与移动回归`12/12`通过，不增加“按可见候选猜 Transform 目标”的第二套逻辑。
 
 ## 执行顺序
 
-- [ ] **Task 1 — 全文 replacement 合同**：RED证明 Help 给不出可执行标准 JSON；定位 parser/executor边界，作最小修复并跑相关测试。
-- [ ] **Task 2 — Explore/Transform唯一性**：为反馈 45 写隔离 RED；若不能复现则记录当前候选集证据而不改代码。
-- [ ] **Task 3 — 剩余当前回归**：依次验证 43、33、31、16、07/09，每项单独 RED/裁定，禁止合并猜修。
+- [x] **Task 1 — 全文 replacement 合同**：RED证明 Help 未区分无 Value 与 null；根因定位为合同表达而非 parser/executor，最小修复后`atom-agent-cli-contract`为`19/19`。
+- [x] **Task 2 — Explore/Transform唯一性**：现行“世界之外”选择器已覆盖旧反馈，相关回归`12/12`；无需生产代码改动。
+- [x] **Task 3 — 剩余当前回归**：43、33、31、16、07/09 均取得现行代码测试或现场任务证据；没有把旧 submit 直接当成新缺陷猜修。
 - [ ] **Task 4 — 通用点击次数设计**：完成 brainstorming、规格和计划后 TDD 实现，三点击运行由 Program 声明。
 - [ ] **Task 5 — 手机正式域名验收**：取得手机侧错误后修复首个断点，以正式 HTTPS 域名完成只读 Graph 请求收口。
 

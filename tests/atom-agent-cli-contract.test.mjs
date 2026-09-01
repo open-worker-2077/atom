@@ -605,6 +605,11 @@ test('public help is a complete daily Agent operation contract', async () => {
     '{"thing.rst.":"BACKUP_PATH/A"}',
     '{"thing.run.":"PROGRAM_PATH"}'
   ]) assert.match(text, new RegExp(example.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+  assert.match(
+    text,
+    /全文替换键没有 Value；不得写 :null，null 是一个已提供的局部替换 Value/u,
+    'Help must prevent agents from confusing Graph-JSON absent Value with JSON null'
+  );
   assert.match(text, /situation\$full/u);
   assert.match(text, /strut 按原始 ordinal 回读 owner 声明/u);
   assert.match(text, /if 内的独立判定 Program 写 \{"thing@program":"selector"\}.*then 只接受普通事实 Thing/u);
