@@ -19,15 +19,15 @@
 
 ## 恢复断点
 
-- **当前分支**：`fix/web-cli-view-continuity`，隔离目录仍为`.worktrees/esg-auto-jump`。
+- **当前分支**：`fix/mobile-private-access`，隔离目录仍为`.worktrees/esg-auto-jump`。
 - **已完成代码**：Shortcut、ASDF 双击与 Strut 边界修复均已推送；CLI 新 revision 现先拉齐当前路径和全部展开路径，再把同一 revision 原子导入场景。
-- **当前证据**：Task 3 第二次完整回归`1591/1591`、退出码 0；Task 4 桥接 RED 精确暴露旧实现只重载当前路径，修复后桥接合同`29/29`、CLI 相关真实浏览器旅程`3/3`、完整回归`1592/1592`均通过。
+- **当前证据**：Task 4 桥接合同`29/29`、CLI 相关真实浏览器旅程`3/3`、完整回归`1592/1592`均通过并已推送。Task 5 已确认手机 Tailscale peer Online/Active、电脑到手机 ping 成功、Serve→4785→4784 的 HTTPS 根路径与 health 均为 200；Tailscale 内部 DNS 查询成功，但电脑系统 DNS 因`TailscaleDNS=false`不接管该名称，手机侧 DNS 行为仍待真机验证。
 - **Task 1 实现提交**：`89a879a`（`fix(web): load remote shortcut routes`）。
 - **Task 2 实现提交**：`9a61ff2`（`fix(web): keep ASDF double-click on deepest target`）。
 - **Task 3 安全回退提交**：`83f63f1`（`fix(web): attach strut endpoints to visible boundaries`）。
 - **Task 4 实现提交**：`67a2fd0`（`fix(web): refresh expanded scopes atomically`）。
-- **下一动作**：将 Task 4 快进合入并推送`main`；随后处理手机私网域名现场连通。
-- **仍未完成**：CLI 更新后的视图连续性；手机访问`worker.tail33a2eb.ts.net`的现场链路不可用。
+- **下一动作**：请手机先验证项目既有安全直连入口`http://100.116.206.105:4786/`；若直连成功，再修正手机 Tailscale DNS/Android Private DNS/浏览器安全 DNS设置后复验 HTTPS 主域名。
+- **仍未完成**：手机端最终读取验收；电脑不能代替手机观察其 DNS 选择与浏览器结果。
 
 ---
 
@@ -103,7 +103,7 @@
 
 **现场证据：** 2026-09-01 用户从手机访问`worker.tail33a2eb.ts.net`仍然无法打开。现有私有网关、身份白名单、POST/SSE、等待页和 4784 隔离单测通过，只证明代码合同，不证明真实手机、Tailscale DNS、证书、监听和任务进程组成的现场链路已通。
 
-- [ ] **Step 1: Reproduce from the real boundary**：核对域名解析、Tailscale 身份、HTTPS/端口入口、网关与 4784 健康状态，保留每一跳证据。
-- [ ] **Step 2: Locate the first broken hop**：区分客户端网络/DNS、TLS、网关授权、服务任务和 4784 上游，不以单测替代现场判断。
-- [ ] **Step 3: Fix the single root cause**：只修首个实际断点，不开放公网入口，不削弱身份白名单。
+- [x] **Step 1: Reproduce from the real boundary**：4784 health、4785 身份网关任务、Serve HTTPS 根路径/health、手机 peer 与对等 ping 均通过；公网/系统 DNS 对私有名称返回 NXDOMAIN，Tailscale 内部 DNS query 返回`100.116.206.105`。
+- [x] **Step 2: Locate the first broken hop**：服务端 TLS、Serve、4785、4784及手机对等链路均通；剩余首个未证实边界是手机是否把`*.ts.net`交给 Tailscale 内部 DNS，而非 Android Private DNS/浏览器安全 DNS。
+- [x] **Step 3: Keep the secure fallback available**：既有直连网关任务 Running，监听`100.116.206.105:4786`且只批准手机`100.102.183.62`；电脑来源访问返回 403，证明未放宽白名单。
 - [ ] **Step 4: Verify on phone**：以用户手机成功打开并完成一次只读 Graph 请求为最终验收；自动化回归仅作辅助证据。
