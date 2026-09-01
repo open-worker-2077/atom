@@ -47,14 +47,51 @@ function knowledgeAtPath(knowledge, requestedPath) {
     for (const nextPath of nextPaths) visiblePaths.add(nextPath);
     frontier = allNodes.filter((node) => nextPaths.has(node?.path));
   }
-  const nodes = allNodes.filter((node) => visiblePaths.has(node?.path));
+  const carrierByChildPath = new Map(allNodes
+    .filter((node) => node?.hasChildren === true)
+    .map((node) => [childDomainPath(node), node]));
+  const nodeByAtomPath = new Map(allNodes
+    .filter((node) => typeof node?.atomPath === 'string' && node.atomPath)
+    .map((node) => [node.atomPath, node]));
+  const shortcutRouteKeys = new Set();
+  for (const shortcut of allNodes.filter((node) => (
+    visiblePaths.has(node?.path)
+    && typeof node?.shortcutTargetPath === 'string'
+    && node.shortcutTargetPath
+  ))) {
+    const target = nodeByAtomPath.get(shortcut.shortcutTargetPath);
+    if (!target) continue;
+    const route = [target];
+    const visitedPaths = new Set();
+    let ownerPath = target.path;
+    while (ownerPath !== 'root' && !visitedPaths.has(ownerPath)) {
+      visitedPaths.add(ownerPath);
+      const owner = carrierByChildPath.get(ownerPath);
+      if (!owner) break;
+      route.push(owner);
+      ownerPath = owner.path;
+    }
+    if (ownerPath === 'root') {
+      for (const node of route) shortcutRouteKeys.add(node.key);
+    }
+  }
+  const nodes = allNodes.filter((node) => (
+    visiblePaths.has(node?.path) || shortcutRouteKeys.has(node?.key)
+  ));
+  const returnedKeys = new Set(nodes.map((node) => node?.key).filter(Boolean));
   const edges = Array.isArray(knowledge.edges)
     ? knowledge.edges.filter((edge) => (
-        visiblePaths.has(edge?.from?.path) || visiblePaths.has(edge?.to?.path)
+        visiblePaths.has(edge?.from?.path)
+        || visiblePaths.has(edge?.to?.path)
+        || returnedKeys.has(edge?.from?.key)
+        || returnedKeys.has(edge?.to?.key)
       ))
     : [];
   const belongsToPath = (key) => typeof key === 'string'
-    && visiblePaths.has(key.slice(0, key.lastIndexOf('::')));
+    && (
+      visiblePaths.has(key.slice(0, key.lastIndexOf('::')))
+      || shortcutRouteKeys.has(key)
+    );
   return {
     ...knowledge,
     nodes,

@@ -98,3 +98,52 @@ test('path state includes two bounded child-domain lookaheads for rapid consecut
   assert.deepEqual([...new Set(state.knowledge.nodes.map((node) => node.path))], ['root', childPath, grandchildPath]);
   assert.equal(state.knowledge.revision, 3);
 });
+
+test('path state includes the minimal remote route required by a visible linked shortcut', async (context) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-shortcut-scope-'));
+  const instance = await createSpatialServer({
+    root: path.resolve(import.meta.dirname, '..'),
+    storeFile: path.join(directory, 'knowledge.json')
+  });
+  await new Promise((resolve) => instance.server.listen(0, '127.0.0.1', resolve));
+  context.after(() => new Promise((resolve) => instance.server.close(resolve)));
+  const address = instance.server.address();
+  const origin = `http://127.0.0.1:${address.port}`;
+  const create = async (params) => (await fetch(`${origin}/__spatial/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ method: 'node.create', params })
+  })).json();
+
+  const west = (await create({ path: 'root', atomPath: '西部', label: '西部', hasChildren: true })).result.node;
+  const westPath = childDomainPath(west);
+  const district = (await create({
+    path: westPath, atomPath: '西部/城区', label: '城区', hasChildren: true
+  })).result.node;
+  const districtPath = childDomainPath(district);
+  const building = (await create({
+    path: districtPath, atomPath: '西部/城区/大楼', label: '大楼', hasChildren: true
+  })).result.node;
+  const buildingPath = childDomainPath(building);
+  const room = (await create({
+    path: buildingPath, atomPath: '西部/城区/大楼/房间', label: '房间', hasChildren: true
+  })).result.node;
+  const roomPath = childDomainPath(room);
+  await create({
+    path: roomPath, atomPath: '西部/城区/大楼/房间/目标', label: '目标'
+  });
+  await create({
+    path: 'root', atomPath: '东部快捷入口', label: '东部快捷入口',
+    atomTypes: ['shortcut'], shortcutTargetPath: '西部/城区/大楼/房间/目标'
+  });
+
+  const response = await fetch(`${origin}/__spatial/api/state?path=root`);
+  assert.equal(response.status, 200);
+  const state = await response.json();
+  const returned = new Map(state.knowledge.nodes.map((node) => [node.atomPath, node]));
+
+  assert.equal(returned.get('东部快捷入口')?.shortcutTargetPath, '西部/城区/大楼/房间/目标');
+  assert.equal(returned.get('西部/城区/大楼')?.path, districtPath);
+  assert.equal(returned.get('西部/城区/大楼/房间')?.path, buildingPath);
+  assert.equal(returned.get('西部/城区/大楼/房间/目标')?.path, roomPath);
+});

@@ -84,3 +84,52 @@ test('a broken shortcut stays in place and reports the failure', async ({ page }
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe('root');
   await expect(page.locator('#ariaLive')).toContainText('快捷目标不可用');
 });
+
+test('a progressively loaded shortcut can enter a remote target outside the normal lookahead', async ({ page, request }) => {
+  const create = async (params) => {
+    const response = await request.post('/__spatial/api/command', {
+      data: { method: 'node.create', params }
+    });
+    expect(response.ok()).toBe(true);
+  };
+  const westPath = `root/${hashText('remote-west-id').toString(36)}`;
+  const districtPath = `${westPath}/${hashText('remote-district-id').toString(36)}`;
+  const buildingPath = `${districtPath}/${hashText('remote-building-id').toString(36)}`;
+  const roomPath = `${buildingPath}/${hashText('remote-room-id').toString(36)}`;
+
+  await create({
+    id: 'remote-west-id', path: 'root', atomPath: '远端西部',
+    label: '远端西部', hasChildren: true
+  });
+  await create({
+    id: 'remote-district-id', path: westPath, atomPath: '远端西部/城区',
+    label: '城区', hasChildren: true
+  });
+  await create({
+    id: 'remote-building-id', path: districtPath, atomPath: '远端西部/城区/大楼',
+    label: '大楼', hasChildren: true
+  });
+  await create({
+    id: 'remote-room-id', path: buildingPath, atomPath: '远端西部/城区/大楼/房间',
+    label: '房间', hasChildren: true
+  });
+  await create({
+    id: 'remote-target-id', path: roomPath,
+    atomPath: '远端西部/城区/大楼/房间/目标', label: '远端目标'
+  });
+  await create({
+    id: 'remote-shortcut-id', path: 'root', atomPath: '远端快捷入口',
+    label: '远端快捷入口', atomTypes: ['shortcut'],
+    shortcutTargetPath: '远端西部/城区/大楼/房间/目标'
+  });
+
+  await page.goto('/');
+  await page.waitForFunction(() => (
+    window.spatialLab && document.body.dataset.spatialKnowledge === 'authoritative'
+  ));
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('远端快捷入口'))).toBe(true);
+  await page.evaluate(() => window.spatialLab.dispatch('enter'));
+
+  const targetPath = `${roomPath}/${hashText('remote-target-id').toString(36)}`;
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(targetPath);
+});
