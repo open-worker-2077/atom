@@ -21,11 +21,12 @@
 
 - **当前分支**：`fix/web-cli-view-continuity`，隔离目录仍为`.worktrees/esg-auto-jump`。
 - **已完成代码**：Shortcut、ASDF 双击与 Strut 边界修复均已推送；CLI 新 revision 现先拉齐当前路径和全部展开路径，再把同一 revision 原子导入场景。
-- **当前证据**：Task 3 第二次完整回归`1591/1591`、退出码 0；Task 4 桥接 RED 精确暴露旧实现只重载当前路径，修复后桥接合同`29/29`、CLI 相关真实浏览器旅程`3/3`通过，完整回归待执行。
+- **当前证据**：Task 3 第二次完整回归`1591/1591`、退出码 0；Task 4 桥接 RED 精确暴露旧实现只重载当前路径，修复后桥接合同`29/29`、CLI 相关真实浏览器旅程`3/3`、完整回归`1592/1592`均通过。
 - **Task 1 实现提交**：`89a879a`（`fix(web): load remote shortcut routes`）。
 - **Task 2 实现提交**：`9a61ff2`（`fix(web): keep ASDF double-click on deepest target`）。
 - **Task 3 安全回退提交**：`83f63f1`（`fix(web): attach strut endpoints to visible boundaries`）。
-- **下一动作**：提交 Task 4 安全回退点并执行全量回归，通过后合入、推送`main`；随后处理手机私网域名现场连通。
+- **Task 4 实现提交**：`67a2fd0`（`fix(web): refresh expanded scopes atomically`）。
+- **下一动作**：将 Task 4 快进合入并推送`main`；随后处理手机私网域名现场连通。
 - **仍未完成**：CLI 更新后的视图连续性；手机访问`worker.tail33a2eb.ts.net`的现场链路不可用。
 
 ---
@@ -96,7 +97,7 @@
 - [x] **Step 1: Reproduce RED**：桥接合同令当前视图包含一个展开子域，SSE 升级 revision 后断言当前路径和展开路径一次性导入；旧实现只请求当前路径，RED 精确落在缺失的展开 scope。
 - [x] **Step 2: Locate replacement boundary**：`pullKnowledge()`遇到新 revision 会清空`loadedPaths/lastKnowledge`并立即导入单个当前 scope，旧展开描述与不完整新投影因此混帧；首个断点位于 scoped refresh，而非相机代码。
 - [x] **Step 3: Preserve the complete active route**：以`exportField()`中的当前路径和`expandedPaths`构造活动路线；所有 scope 必须属于同一 revision 才合并并只导入一次，revision 竞态则拒绝半批次。
-- [ ] **Step 4: Verify and commit**：运行 bridge contract、真实浏览器 CLI 旅程与全量回归，提交`fix(web): preserve scene across CLI projections`并推送`main`。
+- [x] **Step 4: Verify and commit**：桥接合同`29/29`、CLI 相关真实浏览器旅程`3/3`、完整回归`1592/1592`；实现提交为`67a2fd0`，待快进推送`main`。
 
 ### Task 5: 手机私网域名现场连通
 
