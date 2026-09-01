@@ -124,6 +124,193 @@ test('an explicit Program run cannot commit an unauthorized declaration effect',
   await assertRejectedWithoutCommit(result, files, before);
 });
 
+test('a context-free transform trigger authorizes an Agent Program with its own window and labels', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-triggered-agent-authority-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const controllerPath = 'Root/Controller';
+  const signalPath = `${controllerPath}/Signal`;
+  const targetPath = `${controllerPath}/Target`;
+  const controllerSource = [
+    'agent({"labels":["总控"],"functions":{"groups":[],"names":["lock","transform","trigger"]}})',
+    'def advance():',
+    `    transform({"thing":${JSON.stringify(targetPath)},"situation.rep.advanced":"locked"})`,
+    `trigger("transform", {"nodes":[${JSON.stringify(signalPath)}]}, advance)`
+  ].join('\n');
+  const guardSource = `lock({"targets":{"paths":[${JSON.stringify(targetPath)}],"scope":"exact"},"actions":["transform"],"labels":["总控"]})`;
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Root', '', [
+      atom('Controller', controllerSource, [
+        atom('Signal', 'before'),
+        atom('Target', 'locked'),
+        atom('Guard', guardSource, [], 'program')
+      ], 'program')
+    ])
+  ], null, 2));
+
+  const programScheduler = createProgramRuntimeScheduler();
+  const result = await executeAtomLanguage({
+    contextFile,
+    projectionFile,
+    source: `transform {"thing":${JSON.stringify(signalPath)},"situation.rep.after":"before"}`,
+    programScheduler
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(programScheduler.agentSecurity.get(controllerPath)?.labels, ['总控']);
+  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(stored[0].slot[0].slot[1].situation, 'advanced', JSON.stringify(result));
+  assert.equal(
+    result.warnings.some(({ code }) => code === 'PROGRAM_TRANSFORM_REJECTED'),
+    false,
+    JSON.stringify(result.warnings)
+  );
+});
+
+test('a context-free ordinary Program does not inherit its enclosing Agent labels', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-triggered-program-no-agent-authority-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const controllerPath = 'Root/Controller';
+  const signalPath = `${controllerPath}/Signal`;
+  const targetPath = `${controllerPath}/Target`;
+  const workerSource = [
+    'def advance():',
+    `    transform({"thing":${JSON.stringify(targetPath)},"situation.rep.leaked":"locked"})`,
+    `trigger("transform", {"nodes":[${JSON.stringify(signalPath)}]}, advance)`
+  ].join('\n');
+  const guardSource = `lock({"targets":{"paths":[${JSON.stringify(targetPath)}],"scope":"exact"},"actions":["transform"],"labels":["总控"]})`;
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Root', '', [
+      atom('Controller', 'agent({"labels":["总控"],"functions":{"groups":[],"names":["lock","transform","trigger"]}})', [
+        atom('Signal', 'before'),
+        atom('Target', 'locked'),
+        atom('Worker', workerSource, [], 'program'),
+        atom('Guard', guardSource, [], 'program')
+      ], 'program')
+    ])
+  ], null, 2));
+
+  const result = await executeAtomLanguage({
+    contextFile,
+    projectionFile,
+    source: `transform {"thing":${JSON.stringify(signalPath)},"situation.rep.after":"before"}`,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(stored[0].slot[0].slot[1].situation, 'locked');
+  assert.equal(
+    result.warnings.some(({ code, cause }) => (
+      code === 'PROGRAM_TRANSFORM_REJECTED' && cause === 'GRAPH_LOCK_DENIED'
+    )),
+    true,
+    JSON.stringify(result.warnings)
+  );
+});
+
+test('a completed stage lets its total-control Agent activate and unlock the next strut stage', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-triggered-stage-advance-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const controllerPath = 'Root/Controller';
+  const firstPath = `${controllerPath}/🏃‍♀️第一步`;
+  const nextPath = `${controllerPath}/⌛️🔒第二步`;
+  const guardPath = `${controllerPath}/第二步业务锁`;
+  const inertGuard = 'def main(arguments):\n    return True';
+  const disableGuard = `situation.rep.${inertGuard}`;
+  const controllerSource = [
+    'agent({"labels":["总控"],"functions":{"groups":[],"names":["lock","transform","trigger"]}})',
+    'def advance():',
+    `    transform({${JSON.stringify('thing')}:${JSON.stringify(guardPath)},${JSON.stringify(disableGuard)}:None})`,
+    `    transform({${JSON.stringify('thing.ren.🏃‍♀️第二步')}:${JSON.stringify(nextPath)}})`,
+    `trigger("transform", {"nodes":[${JSON.stringify(firstPath)}]}, advance)`
+  ].join('\n');
+  const guardSource = `lock({"targets":{"paths":[${JSON.stringify(nextPath)}],"scope":"subtree"},"actions":["transform"],"labels":["总控"]})`;
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Root', '', [
+      atom('Controller', controllerSource, [
+        {
+          'thing': '🏃‍♀️第一步', situation: '', slot: [],
+          strut: [{ 'if@current': true, then: [{ thing: nextPath }] }]
+        },
+        atom('⌛️🔒第二步'),
+        atom('第二步业务锁', guardSource, [], 'program')
+      ], 'program')
+    ])
+  ], null, 2));
+
+  const programScheduler = createProgramRuntimeScheduler();
+  const result = await executeAtomLanguage({
+    contextFile,
+    projectionFile,
+    source: `transform {${JSON.stringify('thing.ren.✅第一步')}:${JSON.stringify(firstPath)}}`,
+    programScheduler
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(stored[0].slot[0].slot[0].thing, '✅第一步');
+  assert.equal(stored[0].slot[0].slot[1].thing, '🏃‍♀️第二步');
+  assert.equal(stored[0].slot[0].slot[2].situation, inertGuard);
+  assert.deepEqual(await programScheduler.activeRequestDrivenLocks(stored), []);
+});
+
+test('renaming an editable antecedent preserves a strut stored on a business-locked consequent', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-locked-incoming-strut-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const rootPath = 'Root';
+  const activePath = `${rootPath}/🏃‍♀️前项`;
+  const pendingPath = `${rootPath}/⌛️🔒后项`;
+  const rootSource = 'agent({"labels":[],"functions":{"groups":[],"names":["lock","transform"]}})';
+  const guardSource = `lock({"targets":{"paths":[${JSON.stringify(pendingPath)}],"scope":"subtree"},"actions":["transform"],"labels":["总控"]})`;
+  await fs.writeFile(contextFile, JSON.stringify([
+    {
+      'thing@program': rootPath,
+      situation: rootSource,
+      slot: [
+        atom('🏃‍♀️前项'),
+        {
+          thing: '⌛️🔒后项', situation: '', slot: [],
+          strut: [{ if: [{ thing: activePath }], 'then@current': true }]
+        },
+        atom('业务锁', guardSource, [], 'program')
+      ],
+      strut: []
+    }
+  ], null, 2));
+
+  const programScheduler = createProgramRuntimeScheduler();
+  const renamed = await executeAtomLanguage({
+    contextFile,
+    projectionFile,
+    source: `transform {${JSON.stringify('thing.ren.✅前项')}:${JSON.stringify(activePath)}}`,
+    programScheduler,
+    interaction: { id: 'rename-active-stage', agent: { path: rootPath } }
+  });
+
+  assert.equal(renamed.ok, true, JSON.stringify(renamed.errors));
+  const [root] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(root.slot[0].thing, '✅前项');
+  assert.equal(root.slot[1].strut[0].if[0].thing, `${rootPath}/✅前项`);
+
+  const directPendingEdit = await executeAtomLanguage({
+    contextFile,
+    projectionFile,
+    source: `transform {"thing":${JSON.stringify(pendingPath)},"situation.rep.should-not-write"}`,
+    programScheduler,
+    interaction: { id: 'direct-pending-edit', agent: { path: rootPath } }
+  });
+  assert.equal(directPendingEdit.ok, false);
+  assert.equal(directPendingEdit.errors[0].code, 'GRAPH_LOCK_DENIED');
+});
+
 for (const [name, source] of [
   ['atom', 'atom'],
   ['explore', `explore {"thing":${JSON.stringify(CREATOR_PATH)}}`]

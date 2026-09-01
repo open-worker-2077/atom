@@ -1141,6 +1141,19 @@ export async function executeAtomLanguage(options = {}) {
       ? { preparedAccessMatches: preparedTransformWorld.matches }
       : {})
   });
+  const accessControllerForProgramEffect = (sourceProgramPath) => {
+    const sourceAgentSecurity = candidateProgramScheduler?.agentSecurity?.get(sourceProgramPath)
+      ?? options.programScheduler?.agentSecurity?.get(sourceProgramPath)
+      ?? null;
+    if (!sourceAgentSecurity) return accessController;
+    return createAccessController(atoms, {
+      ...options,
+      programLockIndex,
+      agentPath: sourceProgramPath,
+      agentSecurity: structuredClone(sourceAgentSecurity),
+      graphLocks
+    });
+  };
   const fatalShortcutFailure = requestedProgramRun
     ? (programCycle.failures ?? []).find((failure) => typeof failure.code === 'string'
       && (failure.code.startsWith('INVALID_SHORTCUT_') || failure.code.startsWith('SHORTCUT_')))
@@ -1567,9 +1580,10 @@ export async function executeAtomLanguage(options = {}) {
       continue;
     }
     let transformed;
+    const effectAccessController = accessControllerForProgramEffect(sourceProgramPath);
     const authorizeProgramEffect = (match, operation, field, actor = {}) => {
       const targetPath = match.path.join('/');
-      return accessController.authorize(match, operation, field, {
+      return effectAccessController.authorize(match, operation, field, {
         ...actor,
         programPath: sourceProgramPath,
         slotReseal: actor.slotReseal === true || programResealsModelPath(
@@ -1998,9 +2012,20 @@ export async function executeAtomLanguage(options = {}) {
         let structuralChanged = 0;
         for (const entry of compiledRequests) {
           let transformed;
+          const sourceAgentSecurity = runtimeScheduler.agentSecurity?.get(entry.sourceProgramPath)
+            ?? null;
+          const effectAccessController = sourceAgentSecurity
+            ? createAccessController(candidateAtoms, {
+                ...options,
+                programLockIndex: finalLockIndex,
+                agentPath: entry.sourceProgramPath,
+                agentSecurity: structuredClone(sourceAgentSecurity),
+                graphLocks: finalGraphLocks
+              })
+            : cycleAccessController;
           const authorizeProgramEffect = (match, operation, field, actor = {}) => {
             const targetPath = match.path.join('/');
-            return cycleAccessController.authorize(
+            return effectAccessController.authorize(
               match, operation, field, {
                 ...actor,
                 programPath: entry.sourceProgramPath,
@@ -2687,7 +2712,11 @@ export async function executeAtomLanguage(options = {}) {
           if (path) transformEventNodes.add(path);
         }
       }
-      for (const path of [...(renamed.relationPaths ?? []), ...(renamed.shortcutPaths ?? [])]) {
+      for (const path of [
+        ...(renamed.relationPaths ?? []),
+        ...(renamed.programSourcePaths ?? []),
+        ...(renamed.shortcutPaths ?? [])
+      ]) {
         if (path) transformEventNodes.add(path);
       }
     }

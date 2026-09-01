@@ -222,14 +222,15 @@ test('shortcut locator follows target move and becomes broken when the target is
     atom('备份', '', [], ['backup', 'default'])
   ];
   const files = await fixture(t, world);
+  const programScheduler = createProgramRuntimeScheduler();
   assert.equal((await executeAtomLanguage({
     ...files,
-    programScheduler: createProgramRuntimeScheduler(),
+    programScheduler,
     source: 'transform {"thing.run.":"引用域/创建引用"}'
   })).ok, true);
 
   const moved = await executeAtomLanguage({
-    ...files, source: 'transform {"thing.mov.乙":"甲/权威 Thing"}'
+    ...files, programScheduler, source: 'transform {"thing.mov.乙":"甲/权威 Thing"}'
   });
   assert.equal(moved.ok, true, JSON.stringify(moved.errors));
   const afterMove = await executeAtomLanguage({
@@ -239,7 +240,7 @@ test('shortcut locator follows target move and becomes broken when the target is
   assert.equal(afterMove.items[0].matches[0].path, '乙/权威 Thing');
 
   const renamed = await executeAtomLanguage({
-    ...files, source: 'transform {"thing.ren.权威新名":"乙/权威 Thing"}'
+    ...files, programScheduler, source: 'transform {"thing.ren.权威新名":"乙/权威 Thing"}'
   });
   assert.equal(renamed.ok, true, JSON.stringify(renamed.errors));
   const afterRename = await executeAtomLanguage({

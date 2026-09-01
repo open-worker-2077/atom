@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import {
   createShortcutAtom,
   shortcutMetadata
@@ -103,6 +104,31 @@ test('rename preserves sibling and cross-tree partner targets', async (t) => {
     projection.graph.slot[1].slot[1].strut[0].then[0].thing,
     'atom.json/甲/新目标'
   );
+});
+
+test('rename rewrites exact path literals in Program sources', async (t) => {
+  const oldPath = '甲/目标';
+  const newPath = '甲/新目标';
+  const files = await fixture(t, [
+    atom('甲', '', [atom('目标')]),
+    {
+      'thing@program': '监听器',
+      situation: `def main():\n    explore({"thing":${JSON.stringify(oldPath)}})\ntrigger("transform", {"nodes":[${JSON.stringify(oldPath)}]}, main)`,
+      slot: [],
+      strut: []
+    }
+  ]);
+
+  const renamed = await executeAtomLanguage({
+    ...files,
+    source: 'transform {"thing.ren.新目标":"甲/目标"}',
+    programScheduler: createProgramRuntimeScheduler()
+  });
+
+  assert.equal(renamed.ok, true, JSON.stringify(renamed.errors));
+  const watcher = findByPath(await readAtoms(files.contextFile), '监听器');
+  assert.equal(watcher.situation.includes(oldPath), false);
+  assert.equal(watcher.situation.match(new RegExp(newPath, 'gu')).length, 2);
 });
 
 test('move rewrites affected paths while keeping internal subtree relations local', async (t) => {

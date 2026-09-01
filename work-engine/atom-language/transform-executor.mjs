@@ -650,7 +650,6 @@ export async function applyBatchRenames({
   }
 
   const selectedAtoms = new Set();
-  const ownerPlanByAtom = new Map();
   const authoritativeMatches = walkAtoms(nextAtoms);
   for (const plan of plans) {
     const decision = await authorize(plan.match, 'write', 'thing');
@@ -674,7 +673,6 @@ export async function applyBatchRenames({
     const subtreeAtoms = new Set(walkAtoms([plan.match.atom]).map((match) => match.atom));
     subtreeAtoms.forEach((atom) => {
       selectedAtoms.add(atom);
-      if (!ownerPlanByAtom.has(atom)) ownerPlanByAtom.set(atom, plan);
     });
     for (const descendant of authoritativeMatches.filter((match) => (
       match.atom !== plan.match.atom && subtreeAtoms.has(match.atom)
@@ -688,29 +686,20 @@ export async function applyBatchRenames({
     }
   }
 
-  const matchesByAtom = new Map(authoritativeMatches.map((match) => [match.atom, match]));
-  for (const binding of partnerBindings) {
-    if (!selectedAtoms.has(binding.targetAtom) || selectedAtoms.has(binding.sourceAtom)) continue;
-    const source = matchesByAtom.get(binding.sourceAtom);
-    if (source && (await authorize(source, 'write')).decision !== 'allow') {
-      return {
-        error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改写指向批量改名子树的关系；请反馈派发方'),
-        itemIndex: ownerPlanByAtom.get(binding.targetAtom)?.item.index ?? 0
-      };
-    }
-  }
-
   for (const plan of plans) applyNameMetadata(plan.match.atom, plan.nameField);
   const relationPaths = rewritePartnerBindings(nextAtoms, partnerBindings);
   const finalMatches = new Map(walkAtoms(nextAtoms).map((match) => [match.atom, match]));
-  const shortcutPaths = [];
-  rewriteShortcutTargetPaths(nextAtoms, plans.map((plan) => ({
+  const pathChanges = plans.map((plan) => ({
     sourcePath: plan.sourcePath,
     resultPath: finalMatches.get(plan.match.atom)?.path.join('/') ?? null
-  })), shortcutPaths);
+  })).filter(({ resultPath }) => resultPath !== null);
+  const programSourcePaths = rewriteProgramPathReferences(nextAtoms, pathChanges);
+  const shortcutPaths = [];
+  rewriteShortcutTargetPaths(nextAtoms, pathChanges, shortcutPaths);
   return {
     atoms: nextAtoms,
     relationPaths,
+    programSourcePaths,
     shortcutPaths,
     results: plans.map((plan) => ({
       index: plan.item.index,
@@ -1088,6 +1077,7 @@ export async function applyTransform({
     const closureMatches = [originalSelection.match];
     const deepValueAtoms = new Set();
     const command = structural.operation?.command;
+    const pathCommand = command ?? nameCommands.find(({ name }) => name === 'ren');
     for (const binding of partnerBindings) {
       const source = byAtom.get(binding.sourceAtom);
       if (source) closureMatches.push(source);
@@ -1098,7 +1088,7 @@ export async function applyTransform({
       closureMatches.push(match);
       deepValueAtoms.add(match.atom);
     }
-    if (rewriteProgramReferences && command?.name === 'mov') {
+    if (rewriteProgramReferences && ['ren', 'mov'].includes(pathCommand?.name)) {
       const sourcePath = originalSelection.match.path.join('/');
       for (const match of originalMatches) {
         const thing = storedField(match.atom, 'thing');
@@ -1234,9 +1224,11 @@ export async function applyTransform({
       }
     }
   }
-  // Renames and structural changes rewrite incoming relations. Their source
-  // atoms are mutations too, so authorize them before any in-memory rewrite.
-  if (structural.operation?.command.name !== 'mov') {
+  // A rename owns its referential-integrity rewrites once the renamed target is
+  // authorized. Other structural operations still require authority over an
+  // external relation owner before mutating that owner.
+  if (structural.operation?.command.name !== 'mov'
+    && !nameCommands.some(({ name }) => name === 'ren')) {
     for (const binding of partnerBindings) {
       if (selectedAtoms.has(binding.targetAtom) && !selectedAtoms.has(binding.sourceAtom)) {
         const source = walkAtoms(nextAtoms).find((match) => match.atom === binding.sourceAtom);
@@ -1301,6 +1293,17 @@ export async function applyTransform({
     const resultPath = rewritesPaths
       ? postMatches.find((match) => match.atom === selected.match.atom)?.path.join('/') ?? null
       : sourcePath;
+    const programSourcePaths = !error
+      && rename
+      && resultPath
+      && resultPath !== sourcePath
+      && rewriteProgramReferences
+      ? rewriteProgramPathReferences(
+          nextAtoms,
+          [{ sourcePath, resultPath }],
+          postMatches
+        )
+      : [];
     if (!error && resultPath && resultPath !== sourcePath) {
       rewriteShortcutTargetPaths(
         nextAtoms,
@@ -1317,6 +1320,7 @@ export async function applyTransform({
           sourcePath,
           resultPath,
           relationPaths,
+          programSourcePaths,
           shortcutPaths,
           matches: postMatches,
           changed: copiesOnlyAncestry
@@ -1401,7 +1405,7 @@ export async function applyTransform({
     }
     const resultMatch = postMatches.find((match) => match.atom === resultAtom);
     const resultPath = resultMatch?.path.join('/') ?? sourcePath;
-    const programSourcePaths = command.name === 'mov' && rewriteProgramReferences
+    const programSourcePaths = ['ren', 'mov'].includes(command.name) && rewriteProgramReferences
       ? rewriteProgramPathReferences(nextAtoms, [{ sourcePath, resultPath }], postMatches)
       : [];
     const shortcutPaths = [];

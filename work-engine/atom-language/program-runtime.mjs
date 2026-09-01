@@ -2617,9 +2617,12 @@ export class ProgramRuntimeScheduler {
             allowedFunctions: (() => {
               const originPath = agentScopePath(options.agentOrigin);
               const originSecurity = originPath ? this.agentSecurity.get(originPath) ?? null : null;
-              const isAgentProgram = this.agentSecurity.has(program.path);
+              const ownSecurity = this.agentSecurity.get(program.path) ?? null;
+              if (ownSecurity && !originSecurity) {
+                return [...new Set([...(ownSecurity.functions ?? []), 'agent'])];
+              }
               const allowed = originPath ? originSecurity?.functions ?? [] : null;
-              return !originSecurity || !isAgentProgram
+              return !originSecurity || !ownSecurity
                 ? allowed
                 : [...new Set([...allowed, 'agent'])];
             })(),

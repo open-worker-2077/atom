@@ -271,6 +271,55 @@ test('batch Transform swaps sibling names from one final-state plan and rewrites
   );
 });
 
+test('batch rename rewrites Program path literals from the same final-state plan', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-transform-batch-program-paths-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const watchedPath = '域/甲/甲子';
+  await fs.writeFile(contextFile, `${JSON.stringify([
+    {
+      ...atom('域'),
+      slot: [
+        { ...atom('甲'), slot: [atom('甲子')] },
+        atom('乙')
+      ]
+    },
+    {
+      'thing@program': '监听器',
+      situation: `def main():\n    return None\ntrigger("transform", {"nodes":[${JSON.stringify(watchedPath)}]}, main)`,
+      slot: [],
+      strut: []
+    }
+  ], null, 2)}\n`, 'utf8');
+  const world = createLegacyWorldService();
+  const programScheduler = createProgramRuntimeScheduler();
+  const initialized = await world.executeLegacy({
+    contextFile,
+    projectionFile,
+    source: 'atom',
+    programMode: 'reconcile',
+    programScheduler
+  });
+  assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
+
+  const result = await world.executeLegacy({
+    contextFile,
+    projectionFile,
+    source: `transform ${JSON.stringify([
+      { 'thing.ren.乙': '域/甲' },
+      { 'thing.ren.甲': '域/乙' }
+    ])}`,
+    programMode: 'reconcile',
+    programScheduler
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  const watcher = JSON.parse(await fs.readFile(contextFile, 'utf8'))[1];
+  assert.equal(watcher.situation.includes(watchedPath), false);
+  assert.equal(watcher.situation.includes('域/乙/甲子'), true);
+});
+
 test('batch Transform rejects a final sibling-thing collision without writing any item', async (t) => {
   const files = await fixture(t);
   const before = await fs.readFile(files.contextFile, 'utf8');
