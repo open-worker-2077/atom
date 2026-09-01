@@ -22,6 +22,7 @@
 - **当前分支**：`fix/web-shortcut-lazy-route`，隔离目录仍为`.worktrees/esg-auto-jump`。
 - **已完成代码**：Shortcut scoped state 补入远端目标的最小载体路线；未扩大全世界加载。
 - **当前证据**：目标服务测试按预期 RED 后 GREEN；相邻服务/投影`13/13`；浏览器 Shortcut 旅程`4/4`；完整`npm test`为`1591/1591`、0 failure。
+- **Task 1 实现提交**：`89a879a`（`fix(web): load remote shortcut routes`）。
 - **下一动作**：提交、合入并推送`main`；随后从 Task 2 Step 1 继续。
 - **仍未完成**：ASDF 双击最深命中、Strut 可见边界贴合、CLI 更新后的视图连续性。
 
