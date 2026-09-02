@@ -45,14 +45,14 @@
 
 ## 4. 执行状态与下一步
 
-- **已完成**：Slot规格已写入工作区，但尚未提交；本恢复断点与 README入口正在同一轮落盘。
-- **未开始**：没有修改生产代码，没有创建 Slot功能 worktree，没有编写实施计划或测试。
+- **已完成**：Slot规格、恢复断点与 README入口已由本地提交`67be623`持久化。
+- **计划已形成**：实施计划见[`2026-09-03-atom-slot-signal.md`](2026-09-03-atom-slot-signal.md)；生产代码、Slot功能 worktree与测试尚未开始。
 - **恢复顺序**：
   1. 运行`atom.cmd --help`并读取本文件及 Slot规格。
   2. 检查`git status --short --branch`与`git log -5 --oneline --decorate`。
   3. 校验两份文档无缺失后提交本次规格/断点。
-  4. 按 Superpowers `writing-plans`编写 Slot实施计划。
-  5. 建隔离 worktree，按 TDD先写 Slot RED，再实现、评审、验证。
+  4. 按[`2026-09-03-atom-slot-signal.md`](2026-09-03-atom-slot-signal.md)建隔离 worktree，使用 `executing-plans`逐任务执行。
+  5. 按 TDD先写 Slot RED，再实现、评审、验证；每个任务独立提交。
   6. Slot完成后处理 P0队列失活；Transform context另行 brainstorming，不把未设计字段顺手塞入 Slot。
 
 ## 5. 其他暂停工作
