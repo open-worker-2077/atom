@@ -69,6 +69,9 @@ function slotSignalClaimKey(programPath, signal) {
 function validSlotTriggerEvent(triggerEvent) {
   if (Object.keys(triggerEvent).length !== 3
     || !['mode', 'nodes', 'signals'].every((key) => Object.hasOwn(triggerEvent, key))
+    || !Array.isArray(triggerEvent.nodes)
+    || triggerEvent.nodes.length === 0
+    || triggerEvent.nodes.some((node) => typeof node !== 'string' || !node.trim())
     || !Array.isArray(triggerEvent.signals)
     || triggerEvent.signals.length === 0
     || triggerEvent.signals.some((signal) => !signal || typeof signal !== 'object'
@@ -2175,6 +2178,13 @@ export class ProgramRuntimeScheduler {
 
   async refresh(atoms, options = {}) {
     const preparedTriggerEvent = options.triggerEvent ?? null;
+    if (preparedTriggerEvent?.mode === 'slot'
+      && !validSlotTriggerEvent(preparedTriggerEvent)) {
+      throw Object.assign(
+        new Error('trigger event requires one valid transform, strut, or slot payload'),
+        { code: 'INVALID_PROGRAM_TRIGGER_EVENT' }
+      );
+    }
     const strutWorldRevision = revisionOfWorldFacts(atoms);
     let strutGraphDocument = null;
     let changedStrutGraphPaths = [];
@@ -2212,10 +2222,12 @@ export class ProgramRuntimeScheduler {
       }
       const eventNodes = new Set((preparedTriggerEvent.nodes ?? []).map((node) => node.trim()));
       const activeScopePath = agentScopePath(options.agentOrigin);
-      for (const [programPath, dependency] of this.programReadDependencies) {
-        if (dependency.contextDependent === true && dependency.scopePath !== activeScopePath) continue;
-        if (dependency.requests.some((request) => requestMayObserveEvent(request, eventNodes))) {
-          candidatePaths.add(programPath);
+      if (preparedTriggerEvent.mode !== 'slot') {
+        for (const [programPath, dependency] of this.programReadDependencies) {
+          if (dependency.contextDependent === true && dependency.scopePath !== activeScopePath) continue;
+          if (dependency.requests.some((request) => requestMayObserveEvent(request, eventNodes))) {
+            candidatePaths.add(programPath);
+          }
         }
       }
       const slotCandidates = slotProgramInvocationsForEvent(
@@ -2594,7 +2606,7 @@ export class ProgramRuntimeScheduler {
         });
       }
     };
-    const dependencyTriggeredProgramPaths = new Set(triggerEvent
+    const dependencyTriggeredProgramPaths = new Set(triggerEvent && triggerEvent.mode !== 'slot'
       ? [...this.programReadDependencies.entries()].flatMap(([programPath, dependency]) => (
           (dependency.contextDependent !== true || dependency.scopePath === scopePath)
           && dependency.requests.some((request) => requestMayObserveEvent(request, eventNodes))
@@ -2606,7 +2618,7 @@ export class ProgramRuntimeScheduler {
       ? programs.filter((program) => (
           triggeredProgramPaths.has(program.path)
           || dependencyTriggeredProgramPaths.has(program.path)
-          || eventNodes.has(program.path)
+          || (triggerEvent.mode !== 'slot' && eventNodes.has(program.path))
           || slotInvocationsByProgram.has(program.path)
           || strutInvocationsByProgram.has(program.path)
           || slotSignalInvocationsByProgram.has(program.path)

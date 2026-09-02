@@ -201,3 +201,27 @@ test('the owning runtime can confirm a slot signal claimed by its candidate runt
   assert.deepEqual(first.messages.map(({ text }) => text), ['up:A']);
   assert.deepEqual(second.messages, []);
 });
+
+test('slot routing nodes cannot execute a Program without a matching slot trigger', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const world = [program('Receiver', 'message({"level":"info","text":"unexpected"})')];
+
+  const cycle = await scheduler.refresh(world, {
+    triggerEvent: slotEvent([delivery('s1', 'Receiver', 'up', ['A'])])
+  });
+
+  assert.deepEqual(cycle.messages, []);
+  assert.deepEqual(cycle.executedProgramPaths, []);
+});
+
+test('prepared indexes cannot bypass strict slot trigger event validation', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const world = [program('Receiver', receiver('up', ['A'], 'all'))];
+  await scheduler.refresh(world, { prepareAllIndexes: true });
+
+  await assert.rejects(scheduler.refresh(world, {
+    triggerEvent: {
+      mode: 'slot', nodes: [], signals: [], preparedIndexesValid: true
+    }
+  }), { code: 'INVALID_PROGRAM_TRIGGER_EVENT' });
+});
