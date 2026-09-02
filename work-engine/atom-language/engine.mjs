@@ -3499,11 +3499,27 @@ export async function executeAtomLanguage(options = {}) {
     ...(transformed.programSourcePaths ?? []),
     ...(transformed.shortcutPaths ?? [])
   ].filter(Boolean))];
+  const requestedTransformActions = item.fields.flatMap((field) => (
+    (field.transformActions ?? []).map((action) => ({
+      ...action,
+      axis: field.baseKey
+    }))
+  ));
+  const transformAction = requestedTransformActions.length === 1
+    ? Object.freeze({
+      targetPath: transformed.sourcePath,
+      action: requestedTransformActions[0].name,
+      parameter: requestedTransformActions[0].parameter,
+      payload: null,
+      source: options.interactionSource ?? 'cli'
+    })
+    : null;
   if (options.programScheduler && options.trustedMaintenance !== true
     && requestDeclarationRelocations.length === 0) {
     try {
       postRefresh = await reconcileProgramsForWorld(nextAtoms, {
         mode: 'transform',
+        ...(transformAction ? { action: transformAction } : {}),
         preparedIndexesValid: !programSurfaceChanged,
         preparedStrutIndexValid: !programSurfaceChanged && isLocalizedSituationTransform(item),
         strutBaseRevision: revisionOfWorldFacts(atoms),

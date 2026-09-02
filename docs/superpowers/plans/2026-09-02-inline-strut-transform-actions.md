@@ -14,19 +14,19 @@
 
 ## Task 2：通用 Transform `$动作`
 
-- [ ] 失败测试：`thing$click` 解析为注册动作，不再作为 Explore matcher；未知动作稳定拒绝。
-- [ ] 扩展性测试：测试注册第二种 `$动作` 时不修改 Strut parser/runtime/delivery。
-- [ ] 最小实现：输出统一 `{name, parameter, targetPath, payload, source}` 动作信封；不伪造事实改动。
+- [x] 失败测试：`thing$click` 解析为注册动作，不再作为 Explore matcher；未知动作稳定拒绝。
+- [x] 扩展性测试：测试注册第二种 `$动作` 时不修改 Strut parser/runtime/delivery。
+- [x] 最小实现：输出统一 `{name, parameter, targetPath, payload, source}` 动作信封；不伪造事实改动。
 
 ## Task 3：判定执行与布尔投递
 
-- [ ] 失败测试：内嵌 Program收到 clause、前项、后项、Transform 动作；严格 `true` 才投递，`false` 零投递，非布尔失败。
-- [ ] 最小实现：复用受限 Python worker执行临时 Program，禁止效果、调度与持久注册。
-- [ ] 调度接入：事实变化或目标动作均只重算受影响推支线；复合前项一次取得一致快照。
+- [x] 失败测试：内嵌 Program收到 clause、前项、后项、Transform 动作；严格 `true` 才投递，`false` 零投递，非布尔失败。
+- [x] 最小实现：复用受限 Python worker执行临时 Program，禁止效果、调度与持久注册。
+- [x] 调度接入：事实变化或目标动作均只重算受影响推支线；复合前项一次取得一致快照。
 
 ## Task 4：入口与真实验收
 
-- [ ] CLI：`transform {"thing$click":"精确路径"}` 进入同一 Transform 链。
+- [x] CLI：`transform {"thing$click":"精确路径"}` 进入同一 Transform 链。
 - [ ] Web：点击适配为相同动作，不新增 click 专用 endpoint 或独立 trigger。
 - [ ] 用测试 Graph 跑通“前项完成 → true → 后项解锁/状态推进”，不等待 ESG 真实数据。
 - [ ] 更新 Help、规范和持久化账本；运行聚焦测试、相关回归与完整测试。

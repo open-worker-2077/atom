@@ -74,6 +74,36 @@ function projectStrutContext(atoms) {
   }
 }
 
+function strutFactSnapshot(graphDocument, recordsByPath, graphPath) {
+  const atomPath = graphDocument.atomPathByGraphPath?.get(graphPath)
+    ?? withoutGraphRoot(graphDocument, graphPath);
+  const record = recordsByPath.get(atomPath);
+  if (!record) {
+    throw Object.assign(new Error(`Strut endpoint has no Atom identity: ${graphPath}`), {
+      code: 'STRUT_ENDPOINT_IDENTITY_REQUIRED',
+      details: { graphPath, atomPath }
+    });
+  }
+  return Object.freeze({
+    path: atomPath,
+    thing: record.name,
+    situation: record.detail
+  });
+}
+
+function inlineStrutContext(graphDocument, clause, recordsByPath, triggerEvent) {
+  return Object.freeze({
+    clauseId: clause.id,
+    antecedents: Object.freeze((clause.antecedentPaths ?? []).map((graphPath) => (
+      strutFactSnapshot(graphDocument, recordsByPath, graphPath)
+    ))),
+    consequents: Object.freeze((clause.then ?? []).map(({ targetPath }) => (
+      strutFactSnapshot(graphDocument, recordsByPath, targetPath)
+    ))),
+    transform: triggerEvent?.action ? freezePrepared(structuredClone(triggerEvent.action)) : null
+  });
+}
+
 function freezePrepared(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
   for (const child of Object.values(value)) freezePrepared(child);
@@ -1263,6 +1293,54 @@ export class ProgramRuntimeScheduler {
     return result.strutDecision;
   }
 
+  async evaluateInlineStrutProgram(atoms, predicate, options = {}) {
+    if (!predicate || predicate.kind !== 'program'
+      || typeof predicate.source !== 'string' || !predicate.source.trim()) {
+      throw Object.assign(new Error('Inline Strut predicate requires non-empty Program source'), {
+        code: 'INVALID_STRUT_INLINE_PROGRAM'
+      });
+    }
+    const records = worldRecords(atoms);
+    const digest = crypto.createHash('sha256')
+      .update(`${predicate.predicateId}\0${predicate.source}`)
+      .digest('base64url')
+      .slice(0, 24);
+    const program = Object.freeze({
+      ref: `inline-strut-${digest}`,
+      name: predicate.predicateId,
+      detail: predicate.source,
+      path: `@inline-strut/${predicate.predicateId}`,
+      types: Object.freeze(['program']),
+      parentRef: null,
+      childrenRefs: Object.freeze([]),
+      partners: Object.freeze([])
+    });
+    const preparedWorld = options.executeExplore ? null : prepareExploreWorld(atoms);
+    const executeExplore = options.executeExplore ?? ((request, executionContext = {}) => executeProgramExplore({
+      atoms,
+      request,
+      preparedWorld,
+      scopeRoot: executionContext.scopeRoot ?? null
+    }));
+    const result = await this.runBounded(() => this.runProgram({
+      python: this.python,
+      records,
+      programs: [program],
+      program,
+      timeoutMs: options.timeoutMs ?? this.timeoutMs,
+      executeExplore: (request) => executeExplore(request, {
+        scopeRoot: options.scopeRoot ?? null,
+        programPath: program.path
+      }),
+      scopeRoot: options.scopeRoot ?? null,
+      strutDecision: true,
+      programArguments: structuredClone(options.context ?? {}),
+      triggered: true,
+      agentProgramPaths: [...this.agentSecurity.keys()]
+    }));
+    return result.strutDecision;
+  }
+
   async deriveAgentSecurity(atoms) {
     const records = worldRecords(atoms);
     const programs = programRecords(records);
@@ -2230,17 +2308,12 @@ export class ProgramRuntimeScheduler {
         : strutAffectedGraphPaths(graphDocument, triggerEvent);
       const decisions = await evaluateStrutClausesWithPrograms(graphDocument, {
         changedPaths: graphChangedPaths,
-        evaluateProgram: (selector, { clause }) => {
-          const atomPath = graphDocument.atomPathByGraphPath?.get(selector);
-          if (!atomPath) {
-            throw Object.assign(new Error(`Program strut endpoint has no Atom identity: ${selector}`), {
-              code: 'STRUT_PROGRAM_IDENTITY_REQUIRED'
-            });
-          }
+        evaluateProgram: (predicate, { clause }) => {
           const antecedentPath = graphDocument.atomPathByGraphPath?.get(clause.antecedentPaths?.[0]);
           const scopeRoot = slotScopeRoot(antecedentPath);
-          return this.evaluateStrutProgram(atoms, atomPath, {
+          return this.evaluateInlineStrutProgram(atoms, predicate, {
             executeExplore,
+            context: inlineStrutContext(graphDocument, clause, byPath, triggerEvent),
             ...(scopeRoot ? { scopeRoot } : {})
           });
         }

@@ -17,6 +17,41 @@ function atom(thing, situation = '', slot = [], type = '') {
   };
 }
 
+test('a Transform $ action is decided by the Strut inline Program and delivers strict true downstream', async () => {
+  const source = atom('Source', 'plain number: 42');
+  source.strut = [{
+    'if@current': true,
+    if: [{ program: [
+      'def main(context):',
+      "    return (context['antecedents'][0]['situation'] == 'plain number: 42'",
+      "            and context['transform']['action'] == 'click')"
+    ].join('\n') }],
+    then: [{ thing: 'Result' }]
+  }];
+  const subscriber = atom('Subscriber', [
+    'def receive(delivery):',
+    '    message({"level":"info","text":delivery["consequentPath"]})',
+    'trigger("strut", {"nodes":["Result"]}, receive)'
+  ].join('\n'), [], 'program');
+  const world = [source, atom('Result'), subscriber];
+  const scheduler = createProgramRuntimeScheduler();
+  await scheduler.refresh(world);
+
+  const cycle = await scheduler.refresh(world, {
+    triggerEvent: {
+      mode: 'transform',
+      nodes: ['Source'],
+      affectedPaths: ['Source'],
+      action: {
+        targetPath: 'Source', action: 'click', parameter: null, payload: null, source: 'cli'
+      }
+    }
+  });
+
+  assert.deepEqual(cycle.messages.map(({ text }) => text), ['Result']);
+  assert.deepEqual(cycle.executedProgramPaths, ['Subscriber']);
+});
+
 test('an exact strut subscriber receives one typed true argument while unrelated Programs stay idle', async () => {
   const subscriber = atom('Subscriber', [
     'def receive(delivery):',
@@ -114,7 +149,7 @@ test('localized strut evaluation reuses only the exact base-revision graph after
     const value = atom('Source', 'before');
     value.strut = [{
       'if@current': true,
-      if: [{ 'thing@program': 'Predicate' }],
+      if: [{ program: 'def main(context):\n    return True' }],
       then: [{ thing: consequent }]
     }];
     return value;
@@ -126,7 +161,6 @@ test('localized strut evaluation reuses only the exact base-revision graph after
   ].join('\n'), [], 'program');
   const initial = [
     source('OldResult'), atom('OldResult'), atom('NewResult'),
-    atom('Predicate', 'def main(arguments):\n    return True', [], 'program'),
     subscriber('OldSubscriber', 'OldResult'), subscriber('NewSubscriber', 'NewResult')
   ];
   const scheduler = createProgramRuntimeScheduler();

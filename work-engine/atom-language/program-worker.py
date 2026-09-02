@@ -1536,7 +1536,7 @@ def main():
         entrypoint = namespace.get("main")
         if not callable(entrypoint):
             raise ValueError("Strut antecedent Program must define main(arguments)")
-        strut_decision = entrypoint({})
+        strut_decision = entrypoint(request.get("programArguments", {}))
     sys.stdout.write(json.dumps(
         {
             "type": "result", "ok": True, "trigger": trigger_contract,

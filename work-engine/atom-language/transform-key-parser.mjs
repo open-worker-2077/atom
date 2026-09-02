@@ -64,15 +64,42 @@ export function parseTransformKey(rawKey, options = {}) {
   const matches = commandMatches(rawKey);
   if (!matches.length) {
     const ordinary = parseAtomKey(rawKey, options);
-    const errors = [...ordinary.errors];
+    const transformActions = ordinary.actions.map(({ name, parameter }) => ({ name, parameter }));
+    const matcherOnlyCodes = new Set([
+      'MULTIPLE_MATCHERS',
+      'UNSUPPORTED_MATCHER',
+      'INVALID_MATCHER_PARAMETER'
+    ]);
+    const errors = ordinary.actions.length
+      ? ordinary.errors.filter((error) => !matcherOnlyCodes.has(error.code))
+      : [...ordinary.errors];
     if (ordinary.actions.length) {
-      errors.push(diagnostic(
-        'TRANSFORM_DOLLAR_COMMAND_REJECTED',
-        'Transform 指令只使用已登记的完整点号指令，不使用 $',
-        { rawKey }
-      ));
+      for (const action of ordinary.actions) {
+        const definition = options.actionRegistry?.resolve(ordinary.baseKey, action.name) ?? null;
+        if (!definition) {
+          errors.push(diagnostic(
+            'UNKNOWN_TRANSFORM_ACTION',
+            `未知 Transform $ 动作：${ordinary.baseKey}$${action.raw}`,
+            { baseKey: ordinary.baseKey, action: action.name }
+          ));
+          continue;
+        }
+        if (definition.parameter === 'none' && action.parameter !== null) {
+          errors.push(diagnostic(
+            'INVALID_TRANSFORM_ACTION_PARAMETER',
+            `Transform 动作 ${ordinary.baseKey}$${action.name} 不接受数字参数`,
+            { baseKey: ordinary.baseKey, action: action.name, parameter: action.parameter }
+          ));
+        }
+      }
     }
-    return { ...ordinary, commands: [], errors };
+    return {
+      ...ordinary,
+      matcher: ordinary.actions.length ? null : ordinary.matcher,
+      transformActions,
+      commands: [],
+      errors
+    };
   }
 
   const baseRaw = rawKey.slice(0, matches[0].index);
@@ -106,6 +133,7 @@ export function parseTransformKey(rawKey, options = {}) {
     ...persistent,
     rawKey,
     commands,
+    transformActions: [],
     persistentKey: persistent.persistentKey,
     errors
   };

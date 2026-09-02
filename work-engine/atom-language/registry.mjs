@@ -73,6 +73,7 @@ export class ActionRegistry {
 
 export function createActionRegistry() {
   const registry = new ActionRegistry();
+  registry.register('thing', 'click');
   registry.register('situation', 'full');
   registry.register('situation', 'lock');
   for (const name of ['latitude', 'longitude']) {

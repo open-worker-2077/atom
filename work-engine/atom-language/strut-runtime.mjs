@@ -52,8 +52,8 @@ export function evaluateStrutClauses(parsedDocument, options = {}) {
 async function evaluateExprWithPrograms(expr, evaluateProgram, trace) {
   if (expr.kind === 'thing') return undefined;
   if (expr.kind === 'program') {
-    trace.push(expr.targetPath);
-    const result = await evaluateProgram(expr.targetPath);
+    trace.push(expr.predicateId);
+    const result = await evaluateProgram(expr);
     if (typeof result !== 'boolean') {
       throw runtimeError('INVALID_PROGRAM_STRUT_RESULT', '推支判定 Program 必须严格返回 boolean');
     }
@@ -97,7 +97,7 @@ export async function evaluateStrutClausesWithPrograms(parsedDocument, options =
     try {
       const decision = (await evaluateExprWithPrograms(
         clause.root,
-        (programPath) => evaluateProgram(programPath, { clause }),
+        (predicate) => evaluateProgram(predicate, { clause }),
         trace
       )) ?? true;
       results.set(clause.id, { status: decision ? 'true' : 'false', decision, trace });
