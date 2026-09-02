@@ -920,6 +920,34 @@ export function validateProgramResult(result, records, program, options = {}) {
       ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {})
     };
   });
+  const rawSlotSignals = result.slotSignals ?? [];
+  if (!Array.isArray(rawSlotSignals)) {
+    throw Object.assign(new Error('slot() must return an array of adjacent signal effects'), {
+      code: 'INVALID_SLOT_SIGNAL_EFFECT'
+    });
+  }
+  const slotSignals = rawSlotSignals.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || Object.keys(entry).length !== 3
+      || !Object.hasOwn(entry, 'sourceProgramPath')
+      || !Object.hasOwn(entry, 'to')
+      || !Object.hasOwn(entry, 'labels')
+      || entry.sourceProgramPath !== program.path
+      || !recordsByPath.get(entry.sourceProgramPath)?.types.includes('program')
+      || !['up', 'down'].includes(entry.to)
+      || !Array.isArray(entry.labels) || entry.labels.length === 0
+      || entry.labels.some((label) => typeof label !== 'string' || !label)
+      || new Set(entry.labels).size !== entry.labels.length) {
+      throw Object.assign(new Error('slot() returned an invalid adjacent signal effect'), {
+        code: 'INVALID_SLOT_SIGNAL_EFFECT'
+      });
+    }
+    return {
+      sourceProgramPath: program.path,
+      to: entry.to,
+      labels: [...entry.labels]
+    };
+  });
   const choiceIds = new Set();
   const choices = (result.choices ?? []).map((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -1043,7 +1071,7 @@ export function validateProgramResult(result, records, program, options = {}) {
   }
   const trigger = result.trigger == null ? null : structuredClone(result.trigger);
   if (strutDecision === true) {
-    if ([locks, messages, transforms, shortcuts, slotBodies, choices, jumps, agentRegistrations].some((entries) => entries.length > 0)) {
+    if ([locks, messages, transforms, shortcuts, slotBodies, slotSignals, choices, jumps, agentRegistrations].some((entries) => entries.length > 0)) {
       throw Object.assign(new Error('Strut-decision Program may only return bool and cannot emit effects'), {
         code: 'PROGRAM_STRUT_EFFECT_FORBIDDEN', details: { program: program.path }
       });
@@ -1055,7 +1083,7 @@ export function validateProgramResult(result, records, program, options = {}) {
     }
   }
   return {
-    locks, messages, transforms, shortcuts, slotBodies, choices, jumps, jumpAuthorizations,
+    locks, messages, transforms, shortcuts, slotBodies, slotSignals, choices, jumps, jumpAuthorizations,
     agentRegistrations, changedThings, trigger,
     ...(strutDecision === true ? { strutDecision: result.strutDecision } : {})
   };
@@ -1955,6 +1983,7 @@ export class ProgramRuntimeScheduler {
       transforms: [],
       shortcuts: [],
       slotBodies: [],
+      slotSignals: [],
       failures: structuredClone(stored.failures),
       contextIncomplete: stored.contextIncomplete === true
     }, agentOrigin);
@@ -2007,7 +2036,7 @@ export class ProgramRuntimeScheduler {
     const key = fingerprint(records, programs, options.agentOrigin, isolateFailures);
     const completed = this.completed.get(key);
     if (completed) return this.overlayRequestDrivenLocks({
-      ...completed, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: []
+      ...completed, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: []
     }, options.agentOrigin);
 
     const reusable = reusableCandidates(
@@ -2028,6 +2057,7 @@ export class ProgramRuntimeScheduler {
         transforms: [],
         shortcuts: [],
         slotBodies: [],
+        slotSignals: [],
         failures: structuredClone(reusable.value.failures ?? [])
       }, options.agentOrigin);
       this.completed.set(key, value);
@@ -2059,6 +2089,7 @@ export class ProgramRuntimeScheduler {
           transforms: [],
           shortcuts: [],
           slotBodies: [],
+          slotSignals: [],
           failures: [],
           exploreReadPaths: [],
           contextIncomplete: true,
@@ -2135,6 +2166,7 @@ export class ProgramRuntimeScheduler {
           transforms: [],
           shortcuts: [],
           slotBodies: [],
+          slotSignals: [],
           jumps: [],
           jumpAuthorizations: [],
           agentRegistrations: [],
@@ -2189,12 +2221,12 @@ export class ProgramRuntimeScheduler {
     if (completed && completed.failures.length === 0) {
       const cached = completed;
       return this.overlayRequestDrivenLocks({
-        ...cached, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: []
+        ...cached, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: []
       }, options.agentOrigin);
     }
     if (this.inflight.has(key)) {
       return this.inflight.get(key).then((value) => ({
-        ...value, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: []
+        ...value, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: []
       }));
     }
 
@@ -2405,6 +2437,7 @@ export class ProgramRuntimeScheduler {
           transforms: [],
           shortcuts: [],
           slotBodies: [],
+          slotSignals: [],
           failures: structuredClone(reusable.value.failures ?? [])
         }, options.agentOrigin);
         this.completed.set(key, value);
@@ -2533,7 +2566,7 @@ export class ProgramRuntimeScheduler {
         return {
           programPath: program.path,
           result: {
-            locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [], trigger: null
+            locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: [], choices: [], trigger: null
           },
           cached: true,
           requests: dormantFailure.requests,
@@ -2553,8 +2586,9 @@ export class ProgramRuntimeScheduler {
             messages: [],
             transforms: [],
             shortcuts: [],
-            slotBodies: []
-          } : { locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [], trigger: null },
+            slotBodies: [],
+            slotSignals: []
+          } : { locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: [], choices: [], trigger: null },
           cached: true,
           requests: previous?.requests ?? [],
           contextDependent: previous?.contextDependent === true
@@ -2569,8 +2603,9 @@ export class ProgramRuntimeScheduler {
             messages: [],
             transforms: [],
             shortcuts: [],
-            slotBodies: []
-          } : { locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [], trigger: null },
+            slotBodies: [],
+            slotSignals: []
+          } : { locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: [], choices: [], trigger: null },
           cached: true,
           requests: previous?.requests ?? [],
           contextDependent: previous?.contextDependent === true
@@ -2589,7 +2624,8 @@ export class ProgramRuntimeScheduler {
               messages: [],
               transforms: [],
               shortcuts: [],
-              slotBodies: []
+              slotBodies: [],
+              slotSignals: []
             },
             cached: true,
             requests: previous.requests,
@@ -2615,7 +2651,7 @@ export class ProgramRuntimeScheduler {
               return {
                 programPath: program.path,
                 result: {
-                  locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], choices: [],
+                  locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: [], choices: [],
                   trigger: null
                 },
                 cached: true,
@@ -2888,6 +2924,9 @@ export class ProgramRuntimeScheduler {
       transforms: results.flatMap((result) => result.transforms),
       shortcuts: results.flatMap((result) => result.shortcuts ?? []),
       slotBodies: results.flatMap((result) => result.slotBodies ?? []),
+      slotSignals: applicable.flatMap((entry) => entry.cached === false
+        ? entry.result?.slotSignals ?? []
+        : []),
       jumps: applicable.flatMap((entry) => entry.cached === false
         ? entry.result?.jumps ?? []
         : []),

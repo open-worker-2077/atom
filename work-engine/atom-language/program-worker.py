@@ -219,7 +219,7 @@ ALLOWED_FUNCTIONS = {
     "int", "len", "list", "map", "max", "min", "range", "set",
     "sorted", "str", "sum", "tuple", "zip",
     "Exception", "ValueError", "TypeError",
-    "explore", "transform", "lock", "message", "choice", "current_atom", "trigger",
+    "explore", "transform", "lock", "message", "choice", "current_atom", "trigger", "slot", "signal",
     "direct_children", "child_detail", "missing_details", "form_status",
     "first_pending", "transition_allowed", "subtree_refs", "plan_form_flow",
     "plan_template_instance", "plan_shards", "instantiate", "template_catalog",
@@ -335,8 +335,35 @@ def extract_trigger_contract(tree):
     elif mode == "strut":
         if len(function.args.args) != 1 or function.args.vararg or function.args.kwarg:
             raise ProgramSecurityError("trigger strut entrypoint must accept one delivery argument")
+    elif mode == "slot":
+        if function.args.args or function.args.vararg or function.args.kwarg:
+            raise ProgramSecurityError("trigger slot entrypoint must accept no arguments")
     else:
-        raise ProgramSecurityError("trigger() supports only transform or strut mode")
+        raise ProgramSecurityError("trigger() supports only transform, strut, or slot mode")
+    if mode == "slot":
+        if (not isinstance(parameters, dict)
+                or set(parameters) - {"from", "labels", "match"}
+                or "from" not in parameters
+                or "labels" not in parameters
+                or parameters["from"] not in {"up", "down"}
+                or not isinstance(parameters["labels"], list)
+                or not parameters["labels"]
+                or any(not isinstance(value, str) or not value
+                       for value in parameters["labels"])
+                or len(set(parameters["labels"])) != len(parameters["labels"])
+                or parameters.get("match", "all") not in {"all", "exact"}):
+            raise ProgramSecurityError(
+                "slot trigger parameters require from, labels, and optional match"
+            )
+        return {
+            "mode": "slot",
+            "parameters": {
+                "from": parameters["from"],
+                "labels": list(parameters["labels"]),
+                "match": parameters.get("match", "all"),
+            },
+            "entrypoint": entrypoint,
+        }
     if (not isinstance(parameters, dict)
             or set(parameters) != {"nodes"}
             or not isinstance(parameters.get("nodes"), list)
@@ -514,7 +541,7 @@ def main():
     views = {ref: AtomView(record) for ref, record in by_ref.items()}
     effects = {
         "locks": [], "messages": [], "transforms": [], "choices": [],
-        "slotBodies": [], "jumps": [], "jumpAuthorizations": [], "shortcuts": [], "agents": [], "changedThings": []
+        "slotBodies": [], "slotSignals": [], "jumps": [], "jumpAuthorizations": [], "shortcuts": [], "agents": [], "changedThings": []
     }
 
     if request.get("agentDeclarationOnly") is True:
@@ -690,6 +717,30 @@ def main():
         if not isinstance(selected, list):
             raise TypeError("choice.selected must be an array")
         return list(selected)
+
+    def slot(specification):
+        specification = require_object(specification, "slot")
+        if set(specification) != {"to", "labels"}:
+            raise EngineCallError("INVALID_SLOT_SIGNAL", "slot() requires only to and labels")
+        if specification["to"] not in {"up", "down"}:
+            raise EngineCallError("INVALID_SLOT_SIGNAL_DIRECTION", "slot.to must be up or down")
+        labels = specification["labels"]
+        if (not isinstance(labels, list) or not labels
+                or any(not isinstance(label, str) or not label for label in labels)
+                or len(set(labels)) != len(labels)):
+            raise EngineCallError("INVALID_SLOT_SIGNAL_LABELS", "slot.labels must be unique non-empty strings")
+        effects["slotSignals"].append({
+            "sourceProgramPath": current_atom().path,
+            "to": specification["to"],
+            "labels": list(labels),
+        })
+
+    def signal():
+        value = request.get("programArguments")
+        if (request.get("triggered") is not True or not isinstance(value, dict)
+                or value.get("mode") != "slot"):
+            raise EngineCallError("SLOT_SIGNAL_REQUIRED", "signal() requires one active Slot signal invocation")
+        return {"from": value["from"], "labels": list(value["labels"])}
 
     def trigger(mode, parameters, entrypoint):
         if request.get("triggered") is True:
@@ -1395,6 +1446,8 @@ def main():
         "message": message,
         "choice": choice,
         "trigger": trigger,
+        "slot": slot,
+        "signal": signal,
         "jump": jump,
         "jump_authorize": jump_authorize,
         "changed": changed,
