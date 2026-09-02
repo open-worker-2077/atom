@@ -1152,6 +1152,16 @@ export async function executeAtomLanguage(options = {}) {
       { ...(missingStrutDelivery.details ?? {}), program: missingStrutDelivery.programPath }
     )]);
   }
+  const missingSlotSignal = (programCycle.failures ?? []).find((failure) => (
+    failure.code === 'SLOT_SIGNAL_REQUIRED'
+  ));
+  if (missingSlotSignal && options.programMode !== 'project') {
+    return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+      missingSlotSignal.code,
+      missingSlotSignal.message ?? 'signal() requires one active Slot signal invocation',
+      { ...(missingSlotSignal.details ?? {}), program: missingSlotSignal.programPath }
+    )]);
+  }
   const activeLocks = [...programCycle.locks, ...activeRequestDrivenLocks];
   let programLockIndex = buildProgramLockIndex({
     revision: revisionBefore,
@@ -2200,25 +2210,12 @@ export async function executeAtomLanguage(options = {}) {
       }
       rememberStrutDeliveryClaims(cycle.strutDeliveryClaims);
       rememberSlotSignalClaims(cycle.slotSignalClaims);
-      const deliveries = resolveSlotSignalDeliveries(
-        reconciledAtoms,
-        cycle.slotSignals ?? [],
-        {
-          revision: revisionOf(reconciledAtoms),
-          createId: () => crypto.randomUUID()
-        }
-      );
-      if (deliveries.length) {
-        pendingTriggerEvents.push({
-          mode: 'slot',
-          nodes: [...new Set(deliveries.map(({ recipientPath }) => recipientPath))],
-          signals: deliveries
-        });
-      }
       await recordTransformStage('reconcile', refreshStartedAt, {
         ...(cycle.reconcileSummary ?? {})
       });
-      const blockingFailure = (cycle.failures ?? []).find((failure) => failure.blocking === true);
+      const blockingFailure = (cycle.failures ?? []).find((failure) => (
+        failure.blocking === true || failure.code === 'SLOT_SIGNAL_REQUIRED'
+      ));
       if ((failOnProgramFailure && (cycle.failures?.length ?? 0) > 0) || blockingFailure) {
         const failure = blockingFailure ?? cycle.failures[0];
         throw Object.assign(new Error(failure.message ?? '槽例派生重算失败'), {
@@ -2382,6 +2379,7 @@ export async function executeAtomLanguage(options = {}) {
       if (compiledRequests.length === 0
         && (cycle.shortcuts?.length ?? 0) === 0
         && (cycle.slotBodies?.length ?? 0) === 0
+        && (cycle.slotSignals?.length ?? 0) === 0
         && (cycle.jumpAuthorizations?.length ?? 0) === 0
         && (cycle.jumps?.filter((jump) => jump.action !== 'guard').length ?? 0) === 0
         && pendingTriggerEvents.length === 0) {
@@ -2626,6 +2624,28 @@ export async function executeAtomLanguage(options = {}) {
         ...applicationRelocations,
         ...(jump.relocations ?? [])
       ];
+      const relocatedSlotSignals = (cycle.slotSignals ?? []).map((effect) => ({
+        ...effect,
+        sourceProgramPath: rewritePath(
+          effect.sourceProgramPath,
+          [...pathChanges, ...cycleRelocations]
+        )
+      }));
+      const deliveries = resolveSlotSignalDeliveries(
+        application.atoms,
+        relocatedSlotSignals,
+        {
+          revision: revisionOf(application.atoms),
+          createId: () => crypto.randomUUID()
+        }
+      );
+      const slotTriggerEvent = deliveries.length
+        ? {
+          mode: 'slot',
+          nodes: [...new Set(deliveries.map(({ recipientPath }) => recipientPath))],
+          signals: deliveries
+        }
+        : null;
       const after = revisionOf(application.atoms);
       performanceTrace('program-reconcile-apply', {
         pass,
@@ -2718,6 +2738,7 @@ export async function executeAtomLanguage(options = {}) {
         });
         passChanged = true;
       }
+      if (slotTriggerEvent) pendingTriggerEvents.push(slotTriggerEvent);
       if (!passChanged && pendingTriggerEvents.length === 0) {
         return {
           atoms: reconciledAtoms,

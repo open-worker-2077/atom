@@ -1,6 +1,6 @@
 # Atom 当前开发恢复断点
 
-**更新时间：** 2026-09-03（Slot 相邻信号 Task 4 评审修复完成）
+**更新时间：** 2026-09-03（Slot 相邻信号 Task 4 最终评审修复完成）
 **权威分支：** `main`  
 **记录前 HEAD：** `9280289`  
 **当前实现分支：** `feat/slot-signal`；隔离 worktree 为 `D:\Project\〇\subprojects\atom\.worktrees\slot-signal`
@@ -46,8 +46,9 @@
 
 ## 4. 执行状态与下一步
 
-- **已完成提交**：`67be623`持久化规格恢复上下文；`5a3ce51`形成实施计划；`d0947a1`增加 Program ABI；`036b542`解析直接 Slot 亲属；`565e9ee`增加 receiver-owned 调度与 claim；`397ed9a`保证内部 routing nodes 不执行无匹配 trigger 的 Program，并让严格事件校验先于 prepared-index 快路；`f9aad65`完成 Task 4 原子引擎接入与公开合同。
-- **Task 4 评审修复**：本文件所在提交把显式`.run.`的 sender Transform 与 Slot 事件一起送入完整候选事务队列，不再让 Transform 事件只刷新 lock projection；Slot claim 周期中的 jump authorization/jump 应用失败改为阻断并回滚，claim 保持可重试。队列只新增原始 sender Transform 节点，不把 jump authorization 等其他 effect 扩张成新的自动触发语义。
+- **已完成提交**：`67be623`持久化规格恢复上下文；`5a3ce51`形成实施计划；`d0947a1`增加 Program ABI；`036b542`解析直接 Slot 亲属；`565e9ee`增加 receiver-owned 调度与 claim；`397ed9a`保证内部 routing nodes 不执行无匹配 trigger 的 Program，并让严格事件校验先于 prepared-index 快路；`f9aad65`完成 Task 4 原子引擎接入与公开合同；`3d24506`修复显式运行后果与 Slot receiver jump 失败原子性。
+- **Task 4 评审修复 round 1**：`3d24506`把显式`.run.`的 sender Transform 与 Slot 事件一起送入完整候选事务队列，并让 Slot claim 周期中的 jump authorization/jump 失败阻断回滚。
+- **Task 4 最终评审修复**：本文件所在提交将 Slot effect 延后到 cycle 结构 effect 应用后的候选世界解析，并按 relocation 改写 sender path；结构 co-effect 时先排 Transform 刷新事件、后排 Slot 投递，使普通 Transform trigger 与显式`.run.`在 receiver 改名/移动后一致。`SLOT_SIGNAL_REQUIRED`现在会阻断并回滚显式运行与调和 cycle；`use_program()`的 Slot sender 身份保留为实际 referenced Program path；Slot callback 对 positional-only、普通位置、vararg、keyword-only 和 kwarg 都要求真正零参数。
 - **Task 4 验证**：
   - 原 Task 4 的真实顺序为：首次聚焦`44/44 PASS`；随后增强“同一 sender 同时发 Transform 与 Slot”后 E2E `4/4 PASS`；最后重新运行完整聚焦集并得到`44/44 PASS`。此前把最终 44/44 写在增强之前，现已纠正。
   - 评审修复 RED：E2E 共6项，`3 pass / 3 fail`；失败精确对应 Transform observer 未执行、Slot receiver jump authorization 错误被降级、Slot receiver jump 错误被降级。
@@ -56,7 +57,11 @@
   - `npm run test:system`：220/220 PASS，0 fail，duration 50163.5484 ms。
   - `npm test`：1642/1642 PASS，0 fail，duration 467236.6105 ms；构建只机械刷新`index.html` build-id，已恢复且未纳入提交。
   - `git diff --check`：0 error。
-  - Task 1 延后 Minor 已由`one slot signal executes its receiver once across duplicate, sequential, and concurrent refreshes`覆盖：cycle 只聚合`cached === false`结果，确认后的同一 delivery 不重放，无需重复测试。
+  - 最终评审 RED：`node --test --test-isolation=none tests/atom-slot-signal-e2e.test.mjs tests/atom-slot-signal-scheduling.test.mjs`得到`29 tests / 21 pass / 8 fail`，duration 19414.0787 ms；失败精确覆盖普通 trigger 改名/移动丢投递、两类越界`signal()`、CLI exit、referenced sender 身份与两种隐藏参数。
+  - 最终评审 GREEN：同一命令`29/29 PASS`，duration 18419.7105 ms；Slot/runtime/registry 聚焦集`57/57 PASS`，duration 19247.7115 ms。
+  - Program/Strut/jump 相关回归`182/182 PASS`，duration 113358.8231 ms；`npm run test:system`为`220/220 PASS`，duration 49762.7958 ms；`npm test`为`1653/1653 PASS`，duration 502129.4535 ms。
+  - 全量构建只机械刷新`index.html` build-id，已恢复且未纳入提交；Node syntax、Python AST、`git diff --check`全部通过。
+  - Task 1 延后 Minor 现有专用回归`cached producers never replay slot signals and mixed cycles include only uncached producers`：完全缓存 cycle 返回零 Slot effect，混合 cycle 只聚合未缓存 producer。
 - **真实命令验收**：临时世界位于`C:\Users\worker\AppData\Local\Temp\atom-slot-signal-task4-20260903-01`；实际 server 首次使用临时端口61952，重启后使用59632，所有 CLI 都显式传`--endpoint`，未访问4784世界。down/up分别只改变直接子/父接收目标，未匹配、孙级、祖父级和同级目标保持`before`；消息分别为`down-payload:from,labels:up:handoff`、`up-payload:from,labels:down:report`。signal-only前后世界 SHA256 同为`59FC64A44E4BDC08C4170957D10B04CD592B00E14B0127C853140979BD2ECFAA`，回执 revision before/after 同为`130260388d03469c79ca0b8cc4bdd00999ac6a9d9d7e0c919e8b8b91f56cf7b9`。权限失败连续两次返回`GRAPH_LOCK_DENIED`/exit 4且世界 SHA不变，证明失败可重试；重启后`down-ok`/`up-ok`仍在，两个 sender 再运行仍得到正确 payload。
 - **仍未完成 P0**：4784命令端队列失活的总交互预算、取消、队列释放和终态诊断仍未实现；不得把临时重启当修复。
 - **恢复顺序**：

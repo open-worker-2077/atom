@@ -336,7 +336,9 @@ def extract_trigger_contract(tree):
         if len(function.args.args) != 1 or function.args.vararg or function.args.kwarg:
             raise ProgramSecurityError("trigger strut entrypoint must accept one delivery argument")
     elif mode == "slot":
-        if function.args.args or function.args.vararg or function.args.kwarg:
+        if (function.args.posonlyargs or function.args.args
+                or function.args.vararg or function.args.kwonlyargs
+                or function.args.kwarg):
             raise ProgramSecurityError("trigger slot entrypoint must accept no arguments")
     else:
         raise ProgramSecurityError("trigger() supports only transform, strut, or slot mode")

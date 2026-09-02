@@ -968,13 +968,13 @@ export function validateProgramResult(result, records, program, options = {}) {
     });
   }
   const slotSignals = rawSlotSignals.map((entry) => {
+    const sourceProgramPath = entry?.sourceProgramPath;
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)
       || Object.keys(entry).length !== 3
       || !Object.hasOwn(entry, 'sourceProgramPath')
       || !Object.hasOwn(entry, 'to')
       || !Object.hasOwn(entry, 'labels')
-      || entry.sourceProgramPath !== program.path
-      || !recordsByPath.get(entry.sourceProgramPath)?.types.includes('program')
+      || !recordsByPath.get(sourceProgramPath)?.types.includes('program')
       || !['up', 'down'].includes(entry.to)
       || !Array.isArray(entry.labels) || entry.labels.length === 0
       || entry.labels.some((label) => typeof label !== 'string' || !label)
@@ -984,7 +984,7 @@ export function validateProgramResult(result, records, program, options = {}) {
       });
     }
     return {
-      sourceProgramPath: program.path,
+      sourceProgramPath,
       to: entry.to,
       labels: [...entry.labels]
     };

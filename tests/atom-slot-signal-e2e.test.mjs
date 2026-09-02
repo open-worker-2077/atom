@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
@@ -55,6 +56,44 @@ async function executeFixture(files, source, scheduler = createProgramRuntimeSch
   });
   const bytes = await fs.readFile(files.contextFile, 'utf8');
   return { result, bytes, world: JSON.parse(bytes), scheduler };
+}
+
+async function executeFixtureCli(files, source) {
+  let stdout = '';
+  let stderr = '';
+  const code = await runAtomCli([
+    '--context', files.contextFile,
+    '--projection', files.projectionFile,
+    source
+  ], {
+    execute: (request) => executeAtomLanguage({
+      ...request,
+      programScheduler: createProgramRuntimeScheduler()
+    }),
+    stdin: { isTTY: false },
+    stdout: { isTTY: false, write(value) { stdout += value; } },
+    stderr: { isTTY: false, write(value) { stderr += value; } }
+  });
+  return { code, stdout, stderr, bytes: await fs.readFile(files.contextFile, 'utf8') };
+}
+
+function slotReceiver(target, label) {
+  return [
+    'def receive():',
+    '    signal()',
+    `    transform({"thing":${JSON.stringify(target)},"situation.rep.delivered":None})`,
+    `trigger("slot", {"from":"up","labels":[${JSON.stringify(label)}]}, receive)`
+  ].join('\n');
+}
+
+function structuralSender(effect, label, ordinary) {
+  if (!ordinary) return [effect, `slot({"to":"down","labels":[${JSON.stringify(label)}]})`].join('\n');
+  return [
+    'def send():',
+    `    ${effect}`,
+    `    slot({"to":"down","labels":[${JSON.stringify(label)}]})`,
+    'trigger("transform", {"nodes":["Go"]}, send)'
+  ].join('\n');
 }
 
 function injectSlotClaimedEffect(scheduler, field, effects) {
@@ -221,6 +260,132 @@ test('signal-only delivery returns the original world bytes and revision', async
   assert.equal(result.revisionAfter, result.revisionBefore);
   assert.equal(bytes, files.before);
   assert.deepEqual(result.messages.map(({ text }) => text), ['up:通知']);
+});
+
+test('ordinary Transform and explicit run both deliver after renaming a direct receiver', async (t) => {
+  for (const ordinary of [false, true]) {
+    await t.test(ordinary ? 'ordinary Transform trigger' : 'explicit run', async (t) => {
+      const label = '改名后投递';
+      const world = [
+        program('Parent', structuralSender(
+          'transform({"thing.ren.Receiver Renamed":"Parent/Receiver"})',
+          label,
+          ordinary
+        ), [program('Receiver', slotReceiver('Rename Target', label))]),
+        atom('Go', 'before'),
+        atom('Rename Target', 'before')
+      ];
+      const files = await fixture(t, world);
+      const { result, world: stored } = await executeFixture(
+        files,
+        ordinary
+          ? 'transform {"thing":"Go","situation.rep.changed"}'
+          : 'transform {"thing.run.":"Parent"}'
+      );
+
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.ok(findAtom(stored, 'Parent/Receiver Renamed'));
+      assert.equal(readSituation(stored, 'Rename Target'), 'delivered');
+    });
+  }
+});
+
+test('ordinary Transform and explicit run both deliver after moving a receiver beside the sender', async (t) => {
+  for (const ordinary of [false, true]) {
+    await t.test(ordinary ? 'ordinary Transform trigger' : 'explicit run', async (t) => {
+      const label = '移动后投递';
+      const sender = structuralSender(
+        'transform({"thing.mov.Parent/Sender":"Parent/Receiver"})',
+        label,
+        ordinary
+      );
+      const world = [
+        program('Parent', '', [
+          program('Sender', sender),
+          program('Receiver', slotReceiver('Move Target', label))
+        ]),
+        atom('Go', 'before'),
+        atom('Move Target', 'before')
+      ];
+      const files = await fixture(t, world);
+      const { result, world: stored } = await executeFixture(
+        files,
+        ordinary
+          ? 'transform {"thing":"Go","situation.rep.changed"}'
+          : 'transform {"thing.run.":"Parent/Sender"}'
+      );
+
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.ok(findAtom(stored, 'Parent/Sender/Receiver'));
+      assert.equal(readSituation(stored, 'Move Target'), 'delivered');
+    });
+  }
+});
+
+test('signal outside Slot invocation blocks an explicit run and returns a nonzero CLI status', async (t) => {
+  const world = [program('Invalid Sender', 'signal()'), atom('Untouched', 'before')];
+  const directFiles = await fixture(t, world);
+  const direct = await executeFixture(directFiles, 'transform {"thing.run.":"Invalid Sender"}');
+
+  assert.equal(direct.result.ok, false, JSON.stringify(direct.result));
+  assert.ok(direct.result.errors.some(({ code }) => code === 'SLOT_SIGNAL_REQUIRED'));
+  assert.equal(direct.result.revisionAfter, direct.result.revisionBefore);
+  assert.equal(direct.bytes, directFiles.before);
+
+  const cliFiles = await fixture(t, world);
+  const cli = await executeFixtureCli(
+    cliFiles,
+    'transform {"thing.run.":"Invalid Sender"}'
+  );
+  assert.equal(cli.code, 4, cli.stderr);
+  assert.match(cli.stderr, /SLOT_SIGNAL_REQUIRED/u);
+  assert.equal(cli.bytes, cliFiles.before);
+});
+
+test('signal outside Slot invocation blocks and rolls back a Transform-triggered cycle', async (t) => {
+  const world = [
+    program('Invalid Listener', [
+      'def receive():',
+      '    signal()',
+      'trigger("transform", {"nodes":["Go"]}, receive)'
+    ].join('\n')),
+    atom('Go', 'before')
+  ];
+  const files = await fixture(t, world);
+  const { result, bytes } = await executeFixture(
+    files,
+    'transform {"thing":"Go","situation.rep.changed"}'
+  );
+
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.ok(result.errors.some(({ code }) => code === 'SLOT_SIGNAL_REQUIRED'));
+  assert.equal(result.revisionAfter, result.revisionBefore);
+  assert.equal(bytes, files.before);
+});
+
+test('a referenced Program emits a Slot signal from its own adjacent position', async (t) => {
+  const label = '引用投递';
+  const world = [
+    program('Caller', 'use_program({"name":"Library/Sender","arguments":{}})'),
+    atom('Library', '', [
+      program('Sender', [
+        'def main(arguments):',
+        `    slot({"to":"down","labels":[${JSON.stringify(label)}]})`,
+        '    return {}'
+      ].join('\n'), [
+        program('Receiver', slotReceiver('Referenced Target', label))
+      ])
+    ]),
+    atom('Referenced Target', 'before')
+  ];
+  const files = await fixture(t, world);
+  const { result, world: stored } = await executeFixture(
+    files,
+    'transform {"thing.run.":"Caller"}'
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(readSituation(stored, 'Referenced Target'), 'delivered');
 });
 
 test('a later denied receiver Transform rolls back an earlier sender effect and releases its signal claim', async (t) => {

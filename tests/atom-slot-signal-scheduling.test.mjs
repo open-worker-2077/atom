@@ -62,6 +62,47 @@ test('slot effect contains direction and labels but no destination', async () =>
   }]);
 });
 
+test('slot trigger source validation rejects positional-only and keyword-only callback parameters', async () => {
+  for (const signature of ['value, /', '*, value']) {
+    const scheduler = createProgramRuntimeScheduler();
+    await assert.rejects(
+      scheduler.validateProgramSources([program('Receiver', [
+        `def receive(${signature}):`,
+        '    signal()',
+        'trigger("slot", {"from":"up","labels":["A"]}, receive)'
+      ].join('\n'))]),
+      (error) => error?.code === 'ATOM_PROGRAM_FAILED'
+        && /slot entrypoint must accept no arguments/u.test(error.message)
+    );
+  }
+});
+
+test('cached producers never replay slot signals and mixed cycles include only uncached producers', async () => {
+  const calls = [];
+  const scheduler = createProgramRuntimeScheduler({
+    runProgram: async ({ program: source }) => {
+      calls.push(source.path);
+      return {
+        locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [],
+        slotSignals: [{ sourceProgramPath: source.path, to: 'up', labels: [source.detail] }],
+        choices: [], jumps: [], jumpAuthorizations: [], agentRegistrations: [],
+        changedThings: [], trigger: null
+      };
+    }
+  });
+  const firstWorld = [program('A', 'a-v1'), program('B', 'b-v1')];
+  const cold = await scheduler.refresh(firstWorld);
+  const cached = await scheduler.refresh(firstWorld);
+  const mixed = await scheduler.refresh([program('A', 'a-v1'), program('B', 'b-v2')]);
+
+  assert.deepEqual(cold.slotSignals.map(({ sourceProgramPath }) => sourceProgramPath), ['A', 'B']);
+  assert.deepEqual(cached.slotSignals, []);
+  assert.deepEqual(mixed.slotSignals, [{
+    sourceProgramPath: 'B', to: 'up', labels: ['b-v2']
+  }]);
+  assert.deepEqual(calls.sort(), ['A', 'B', 'B']);
+});
+
 test('slot effects reject a non-array Python effect envelope', () => {
   assert.throws(() => validateProgramResult(
     { ok: true, slotSignals: {} },
