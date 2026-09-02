@@ -5629,16 +5629,16 @@
     ) {
       return;
     }
-    if (state.clusterFieldOpen && !forceImmersive) {
+    const isShortcut = Array.isArray(node.atomTypes) && node.atomTypes.includes("shortcut");
+    if (state.clusterFieldOpen && !forceImmersive && !isShortcut) {
       recordCurrentView();
       const ownerPath = node.__clusterOwnerPath || node.workspacePath || state.currentPath;
       toggleClusterChildDomain(node, ownerPath);
       return;
     }
-    if (forceImmersive) state.clusterFieldOpen = false;
+    if (forceImmersive || isShortcut) state.clusterFieldOpen = false;
     recordCurrentView();
     const parentCamera = cameraSnapshot();
-    const isShortcut = Array.isArray(node.atomTypes) && node.atomTypes.includes("shortcut");
     const route = isShortcut
       ? buildShortcutTargetRoute(node, parentCamera)
       : buildDirectDomainRoute(node, parentCamera);

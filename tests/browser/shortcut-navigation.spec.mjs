@@ -66,6 +66,39 @@ test('activating a linked shortcut reconstructs an unvisited deep target route',
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(targetPath);
 });
 
+test('activating a linked shortcut from A-mode leaves the local entry and enters the target route', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => window.spatialLab);
+  const parentPath = `root/${hashText('a-mode-target-parent').toString(36)}`;
+  await page.evaluate(({ parentPath }) => window.spatialLab.importKnowledge({
+    nodes: [
+      {
+        id: 'a-mode-target-parent', key: 'root::a-mode-target-parent', path: 'root',
+        atomPath: '西部', label: '西部', detail: '', hasChildren: true
+      },
+      {
+        id: 'a-mode-target', key: `${parentPath}::a-mode-target`, path: parentPath,
+        atomPath: '西部/目标', label: '西部目标', detail: '目标', hasChildren: false
+      },
+      {
+        id: 'a-mode-shortcut', key: 'root::a-mode-shortcut', path: 'root',
+        atomPath: '东部入口', label: '东部入口', detail: '', atomTypes: ['shortcut'],
+        shortcutTargetPath: '西部/目标', hasChildren: false
+      }
+    ],
+    edges: []
+  }), { parentPath });
+
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('东部入口'))).toBe(true);
+  await page.evaluate(() => window.spatialLab.dispatch('toggleClusterField'));
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterFieldOpen)).toBe(true);
+  await page.evaluate(() => window.spatialLab.dispatch('enter'));
+
+  const targetPath = `${parentPath}/${hashText('a-mode-target').toString(36)}`;
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(targetPath);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterFieldOpen)).toBe(false);
+});
+
 test('a broken shortcut stays in place and reports the failure', async ({ page }) => {
   await page.goto('/');
   await page.waitForFunction(() => window.spatialLab);
