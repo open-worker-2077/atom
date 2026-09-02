@@ -86,10 +86,10 @@ test('form compilation rejects a Program used as a strut consequent fact', async
   );
 });
 
-test('form compilation does not count a decision Program as a fact antecedent in one-to-many strut', async () => {
+test('form compilation does not count an inline decision Program as a fact antecedent in one-to-many strut', async () => {
   const cycle = await runProgram([
     'compiled = form({"thing":"前项","situation":"","slot":[],"strut":[',
-    '  {"if@current":True,"if":[{"thing@program":"判定"}],"then":[{"thing":"后项甲"},{"thing":"后项乙"}]}',
+    '  {"if@current":True,"if":[{"program":"def main(context):\\n    return True"}],"then":[{"thing":"后项甲"},{"thing":"后项乙"}]}',
     ']})',
     'message({"level":"info","text":str(len(compiled["strut"][0]["then"]))})'
   ].join('\n'));

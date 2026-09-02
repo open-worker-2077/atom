@@ -46,7 +46,7 @@ function fixture() {
   return [atom('表单槽体', '', [atom('候选表单', '表单契约', [
     atom('姓名', '姓名槽契约', [], [{
       'if@current': true,
-      if: [{ 'thing@program': '计算' }],
+      if: [{ program: 'def main(context):\n    return True' }],
       then: [{ thing: '状态' }]
     }], ['text'], '旧说明'),
     atom('空备注', '备注槽契约'),
@@ -111,7 +111,7 @@ test('re-seal updates every mapped slot while preserving two nested material sub
   field(group, 'slot').push(name);
   field(model, 'slot').push(atom('新增槽', '新增槽契约', [], [{
     'if@current': true,
-    if: [{ 'thing@program': '计算' }],
+    if: [{ program: 'def main(context):\n    return True' }],
     then: [{ thing: '状态' }]
   }], ['new']));
 

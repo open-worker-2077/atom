@@ -90,7 +90,7 @@ test('projection keeps Graph paths, strut clauses, and Program source for the re
   document.graph.slot.push({
     thing: '工坊状态', situation: '', slot: [], strut: [{
       'if@current': true,
-      if: [{ 'thing@program': '石器工坊' }],
+      if: [{ program: 'def main(context):\n    return True' }],
       then: [{ thing: '石斧' }]
     }]
   });

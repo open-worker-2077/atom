@@ -226,7 +226,7 @@ async function main() {
             'thing@number': '金额', situation: 'output slot contract', slot: [],
             strut: [{
               'if@current': true,
-              if: [{ 'thing@program': '共享计算' }],
+              if: [{ program: 'def main(context):\n    return True' }],
               then: [{ thing: '结果' }]
             }]
           },

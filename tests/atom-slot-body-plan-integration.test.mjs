@@ -9,6 +9,15 @@ import { slotProgramInvocationsForEvent } from '../work-engine/atom-language/slo
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
 const AGENT_SOURCE = 'agent({"labels":["^^"],"functions":{"groups":[],"names":["agent","explore","json_parse","slot_body","transform","trigger","use_program"]}})';
+const INLINE_FIELD_PREDICATE = [
+  'def main(context):',
+  '    try:',
+  '        left = explore({"thing":"./字段甲/值料","situation$full":True})',
+  '        right = explore({"thing":"./字段乙/值料","situation$full":True})',
+  '        return left[0].situation == "值甲" and right[0].situation == "值乙"',
+  '    except Exception:',
+  '        return False'
+].join('\n');
 
 function atom(thing, situation = '', slot = [], strut = [], types = []) {
   const agentProgram = types.includes('agent');
@@ -86,23 +95,13 @@ async function run(runtime, source, scheduler) {
 }
 
 function conditionalWorld() {
-  const predicate = [
-    'def main(arguments):',
-    '    try:',
-    '        left = explore({"thing":"./字段甲/值料","situation$full":True})',
-    '        right = explore({"thing":"./字段乙/值料","situation$full":True})',
-    '        return left[0].situation == "值甲" and right[0].situation == "值乙"',
-    '    except Exception:',
-    '        return False'
-  ].join('\n');
   const calculate = [
-    'def run():',
-    '    allowed = use_program({"name":"Root/条件槽体/槽模/判定","arguments":{}})',
-    '    if allowed is not True:',
+    'def run(delivery):',
+    '    if delivery["decision"] is not True:',
     '        return {"computed":False}',
     '    transform({"thing":"./结果/结果料","situation.rep.已计算":None})',
     '    return {"computed":True}',
-    'trigger("transform", {"nodes":["./字段甲","./字段乙"]}, run)'
+    'trigger("strut", {"nodes":["./执行"]}, run)'
   ].join('\n');
   const printer = (name) => (
     `use_program({"name":"Root/条件槽体/print","arguments":{"name":"${name}"}})`
@@ -115,14 +114,13 @@ function conditionalWorld() {
           'if@current': true,
           if: [{ and: [
             { thing: '字段乙' },
-            { 'thing@program': '判定' }
+            { program: INLINE_FIELD_PREDICATE }
           ] }],
           then: [{ thing: '执行' }]
         }]),
         atom('字段乙', '字段乙槽契约'),
         atom('结果', '结果槽契约'),
         atom('执行', '普通事实后项'),
-        atom('判定', predicate, [], [], ['program']),
         atom('计算', calculate, [], [], ['program'])
       ])
     ]),
@@ -239,20 +237,16 @@ test('one atomic batch evaluates one owner-local condition and dispatches its co
       'if@current': true,
       if: [{ and: [
         { thing: 'Root/条件槽体/槽例/实例001/字段乙' },
-        { 'thing@program': 'Root/条件槽体/槽模/判定' }
+        { program: INLINE_FIELD_PREDICATE }
       ] }],
       then: [{ thing: 'Root/条件槽体/槽例/实例001/执行' }]
     }
   ]);
   assert.deepEqual(find(before, 'Root/条件槽体/槽例/实例001/执行').strut, []);
-  assert.deepEqual(find(before, 'Root/条件槽体/槽模/判定').strut, []);
   assert.deepEqual(find(before, 'Root/条件槽体/槽模/计算').strut, []);
   const invocations = slotProgramInvocationsForEvent(before, {
-    mode: 'transform',
-    nodes: [
-      'Root/条件槽体/槽例/实例001/字段甲/值料',
-      'Root/条件槽体/槽例/实例001/字段乙/值料'
-    ]
+    mode: 'strut',
+    nodes: ['Root/条件槽体/槽例/实例001/执行']
   }, scheduler.triggerContracts);
   assert.equal(invocations.length, 1);
   assert.equal(invocations[0].programPath, 'Root/条件槽体/槽模/计算');
@@ -300,7 +294,7 @@ test('a strict-false owner-local condition does not dispatch its consequent', as
 
   const before = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(slotProgramInvocationsForEvent(before, {
-    mode: 'transform', nodes: ['Root/条件槽体/槽例/实例001/字段甲/值料']
+    mode: 'strut', nodes: ['Root/条件槽体/槽例/实例001/执行']
   }, scheduler.triggerContracts).length, 1);
 
   const changed = await run(runtime, triggerFields('实例001', ['字段甲']), scheduler);
@@ -310,7 +304,8 @@ test('a strict-false owner-local condition does not dispatch its consequent', as
   assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果/结果料').situation, '');
   assert.equal(
     diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/槽模/计算').length,
-    1
+    0,
+    'strict false must not dispatch the downstream subscriber'
   );
 });
 

@@ -316,7 +316,7 @@ test('spatial strut resolves Program endpoints by Atom identity across the synth
       program('Gate B'),
       ordinary('Forward condition', [{
         'if@current': true,
-        if: [{ 'thing@program': 'Forward' }],
+        if: [{ program: 'def main(context):\n    return True' }],
         then: [{ thing: 'Forward result' }]
       }]),
       ordinary('Input A'),
@@ -326,8 +326,8 @@ test('spatial strut resolves Program endpoints by Atom identity across the synth
           if: [{ and: [
             { thing: 'Input A' },
             { thing: 'Input B' },
-            { 'thing@program': 'Gate A' },
-            { 'thing@program': 'Gate B' }
+            { program: 'def main(context):\n    return True' },
+            { program: 'def main(context):\n    return True' }
           ] }],
           'then@current': true
         },

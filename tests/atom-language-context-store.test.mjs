@@ -18,11 +18,11 @@ const struts = (...targets) => targets.length === 0
   ? []
   : [{ 'if@current': true, then: targets.map((thing) => ({ thing })) }];
 
-const gatedStrut = (program, ...targets) => targets.length === 0
+const gatedStrut = (_program, ...targets) => targets.length === 0
   ? []
   : [{
       'if@current': true,
-      if: [{ 'thing@program': program }],
+      if: [{ program: 'def main(context):\n    return True' }],
       then: targets.map((thing) => ({ thing }))
     }];
 

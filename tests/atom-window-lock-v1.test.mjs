@@ -301,10 +301,10 @@ for (const scenario of [
   },
   {
     name: 'strut',
-    source: 'transform {"thing":"Root/Window/Child Program/Strut Fact","strut.rep.":[{"if@current":true,"if":[{"thing@program":"Root/Window/Strut Decision"}],"then":[{"thing":"Root"}]}]}',
+    source: 'transform {"thing":"Root/Window/Child Program/Strut Fact","strut.rep.":[{"if@current":true,"if":[{"program":"def main(context):\\n    return True"}],"then":[{"thing":"Root"}]}]}',
     assertStored(world) {
       const strut = world[0].slot[0].slot[0].slot[0].strut[0];
-      assert.equal(strut.if[0]['thing@program'], 'Root/Window/Strut Decision');
+      assert.equal(strut.if[0].program, 'def main(context):\n    return True');
       assert.equal(strut.then[0].thing, 'Root');
     }
   },

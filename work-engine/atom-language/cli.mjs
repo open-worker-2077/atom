@@ -220,7 +220,7 @@ function help() {
     '  每条 rule 必须且只能含一个 @current:true；if 永远是前项，then 永远是后项。禁止无 current、外部 thing@program 判定引用和 Program 自持 current 端点；禁止原生 N→M。',
     '  if 内嵌判定写 {"program":"def main(context):\\n    return ..."}：context 含全部事实前项、后项与本次规范化 Transform $动作信封；仅 strict bool 决定本条推支，且不得产生写入等副作用。then 只接受普通事实 Thing。',
     '  Transform 注册动作写在 Key 区，例如 transform {"thing$click":"EXACT路径"}；$click 只是动作注册表中的一项，CLI/Web 共用同一动作信封，Explore 不触发动作。',
-    '  N→1、1→N 各自保留 strut clause 身份；Web 在归一化 0.5 形成共享汇流／分流线干。多入多出必须建立显式枢纽 H，拆为 N→H 与 H→M 两条规则；H 保持可见可审计。Program 源码只放 exact thing@program 节点的 situation。',
+    '  N→1、1→N 各自保留 strut clause 身份；Web 在归一化 0.5 形成共享汇流／分流线干。多入多出必须建立显式枢纽 H，拆为 N→H 与 H→M 两条规则；H 保持可见可审计。可复用／可调度 Program 源码放 exact thing@program 的 situation；仅 Strut 纯判定源码内嵌在本 clause 的 if.program。',
     '  @type 写在 thing 键上（如 thing@program）；#简介必须在键末尾；~hint 仅为返回提示。Agent 是 Situation 中一个顶层字面量 agent({...}) 声明，不是 Key 类型。',
     '  Explore 接受对象或对象数组；Transform 对象数组把已有 Atom 改造作为一个原子批次执行，并逐项返回结果。所有结果只使用 Graph-JSON。',
     '',

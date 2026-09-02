@@ -40,7 +40,7 @@ function world() {
   const root = 'Root/Holder/Unlabelled';
   const body = `${root}/条件槽体`;
   const predicate = [
-    'def main(arguments):',
+    'def main(context):',
     '    try:',
     '        left = explore({"thing":"./字段甲/值料","situation$full":True})',
     '        right = explore({"thing":"./字段乙/值料","situation$full":True})',
@@ -72,13 +72,12 @@ function world() {
           atom('候选流', '', [
             atom('字段甲', '字段甲槽契约', [], [{
               'if@current': true,
-              if: [{ and: [{ thing: '字段乙' }, { 'thing@program': '判定' }] }],
+              if: [{ and: [{ thing: '字段乙' }, { program: predicate }] }],
               then: [{ thing: '执行' }]
             }]),
             atom('字段乙', '字段乙槽契约'),
             atom('结果', '结果槽契约'),
             atom('执行', '普通事实后项'),
-            atom('判定', predicate, [], [], ['program']),
             atom('执行动作', action, [], [], ['program'])
           ])
         ]),
@@ -139,7 +138,7 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
   }
 
   let stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.ok(find(stored, `${body}/槽模/判定`));
+  assert.equal(find(stored, `${body}/槽模/判定`), null);
   assert.ok(find(stored, `${body}/槽例/实例001`));
   assert.ok(find(stored, `${body}/槽例/实例002`));
 
@@ -222,13 +221,12 @@ test('a failing strut subscriber rolls back the warm source Transform', async (t
   const projectionFile = path.join(directory, 'graph.json');
   const source = atom('Source', 'before', [], [{
     'if@current': true,
-    if: [{ 'thing@program': 'Predicate' }],
+    if: [{ program: 'def main(context):\n    return True' }],
     then: [{ thing: 'Result' }]
   }]);
   const initial = [
     source,
     atom('Result'),
-    atom('Predicate', 'def main(arguments):\n    return True', [], [], ['program']),
     atom('FailingSubscriber', [
       'def receive(delivery):',
       '    return delivery["missing"]',
@@ -260,13 +258,12 @@ test('a rolled-back multi-subscriber delivery releases every claim for a complet
   const projectionFile = path.join(directory, 'graph.json');
   const source = atom('Source', 'before', [], [{
     'if@current': true,
-    if: [{ 'thing@program': 'Predicate' }],
+    if: [{ program: 'def main(context):\n    return True' }],
     then: [{ thing: 'Result' }]
   }]);
   const initial = [
     source,
     atom('Result', 'before'),
-    atom('Predicate', 'def main(arguments):\n    return True', [], [], ['program']),
     atom('ApplySubscriber', [
       'def receive(delivery):',
       '    transform({"thing":"Result","situation.rep.after":"before"})',
@@ -320,13 +317,12 @@ test('a strut subscriber effect rejected after worker success releases its claim
   const projectionFile = path.join(directory, 'graph.json');
   const source = atom('Source', 'before', [], [{
     'if@current': true,
-    if: [{ 'thing@program': 'Predicate' }],
+    if: [{ program: 'def main(context):\n    return True' }],
     then: [{ thing: 'Result' }]
   }]);
   await fs.writeFile(contextFile, JSON.stringify([
     source,
     atom('Result', 'before'),
-    atom('Predicate', 'def main(arguments):\n    return True', [], [], ['program']),
     atom('ApplySubscriber', [
       'def receive(delivery):',
       '    transform({"thing":"Result","situation.rep.after":"before"})',
@@ -376,13 +372,12 @@ test('a successful no-op source Transform confirms message-only strut delivery w
   const projectionFile = path.join(directory, 'graph.json');
   const source = atom('Source', 'before', [], [{
     'if@current': true,
-    if: [{ 'thing@program': 'Predicate' }],
+    if: [{ program: 'def main(context):\n    return True' }],
     then: [{ thing: 'Result' }]
   }]);
   await fs.writeFile(contextFile, JSON.stringify([
     source,
     atom('Result'),
-    atom('Predicate', 'def main(arguments):\n    return True', [], [], ['program']),
     atom('MessageSubscriber', [
       'def receive(delivery):',
       '    message({"level":"info","text":"delivered"})',

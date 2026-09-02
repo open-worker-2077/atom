@@ -406,7 +406,7 @@ async function main() {
         { 'thing@text': 'input', situation: 'input slot', slot: [], strut: [{ 'if@current': true, then: [{ thing: 'output' }] }] },
         { 'thing@number': 'output', situation: 'output slot', slot: [], strut: [{
           'if@current': true,
-          if: [{ 'thing@program': 'compute' }],
+          if: [{ program: 'def main(context):\n    return True' }],
           then: [{ thing: 'result' }]
         }] },
         { thing: 'result', situation: 'ordinary result fact', slot: [], strut: [] },

@@ -44,11 +44,11 @@ function world() {
       atom('客户', '客户槽契约', [], [{ 'if@current': true, then: [{ thing: '金额' }] }], ['text']),
       atom('金额', '金额槽契约', [], [{
         'if@current': true,
-        if: [{ 'thing@program': '共享计算' }],
+        if: [{ program: 'def main(context):\n    return True' }],
         then: [{ thing: '结果' }]
       }], ['number']),
       atom('结果', '结果槽契约'),
-      atom('共享计算', 'def main(arguments):\n    return True', [], [], ['program'])
+      atom('共享计算', 'def main(arguments):\n    return arguments', [], [], ['program'])
     ])]),
     atom('槽体封装程序', 'slot_body({"action":"seal","body":"Root/订单槽体"})', [], [], ['program']),
     atom('槽体打印程序', 'use_program({"name":"Root/订单槽体/print","arguments":{"name":"订单001"}})', [], [], ['program'])
@@ -79,7 +79,7 @@ test('Program seals then prints one instance with shared Program and owner-local
   assert.equal(find(committed, 'Root/订单槽体/槽例/订单001/共享计算'), null);
   assert.deepEqual(find(committed, 'Root/订单槽体/槽例/订单001/金额').strut, [{
     'if@current': true,
-    if: [{ 'thing@program': 'Root/订单槽体/槽模/共享计算' }],
+    if: [{ program: 'def main(context):\n    return True' }],
     then: [{ thing: 'Root/订单槽体/槽例/订单001/结果' }]
   }]);
   const projected = await executeAtomLanguage({

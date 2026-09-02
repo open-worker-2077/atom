@@ -214,7 +214,7 @@ test('strut selection consumes exact affected paths instead of a legacy bare res
   const topLevelSource = atom('Leaf', '', [], '');
   topLevelSource.strut = [{
     'if@current': true,
-    if: [{ 'thing@program': 'Predicate' }],
+    if: [{ program: 'def main(context):\n    return True' }],
     then: [{ thing: 'Result' }]
   }];
   const world = [

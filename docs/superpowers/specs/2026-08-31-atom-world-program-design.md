@@ -44,7 +44,7 @@
 - **False 语义**：`false` 保留为本 clause 的可审计判定，不向后项伪造 delivery，也不改变任一前项或后项事实。
 - **不隐式执行**：delivery 不等于强制执行后项或后项全部 Program；没有精确订阅就不执行。
 - **原子边界**：来源 Transform、订阅 effects、锁、修订和投影发布属于同一可解释结果；失败释放 claim，不留下半交付。
-- **旧模型退役**：当前代码把 `if` 中的 `thing@program` 当作独立 Program Thing 选择器，只证明 strict-bool、索引和 delivery 子机制可运行，不符合本规格，必须由 Strut 内嵌 Program 合同替换；旧测试不得继续作为本能力完成证据。
+- **旧模型退役**：正常运行已拒绝 `if` 中的外部 `thing@program` 选择器；Strut 只接受 clause 内嵌 Program 合同。历史资料只保留迁移审计意义，旧测试不得作为本能力完成证据。
 
 ### 3.3 复合 Strut
 
