@@ -128,6 +128,21 @@ function observeSlotClaimLifecycle(scheduler) {
   return { confirmed, released };
 }
 
+function observeSlotInvocations(scheduler) {
+  const invocations = [];
+  const runProgram = scheduler.runProgram;
+  scheduler.runProgram = async (request) => {
+    if (request.programArguments?.mode === 'slot') {
+      invocations.push({
+        programPath: request.program.path,
+        signal: structuredClone(request.programArguments)
+      });
+    }
+    return runProgram(request);
+  };
+  return invocations;
+}
+
 test('down signal triggers only a matching direct child and atomically persists its effect', async (t) => {
   const world = [
     program('Parent', [
@@ -320,6 +335,171 @@ test('ordinary Transform and explicit run both deliver after moving a receiver b
       assert.equal(readSituation(stored, 'Move Target'), 'delivered');
     });
   }
+});
+
+test('explicit run resolves Slot delivery after relocating the sender or its ancestor', async (t) => {
+  const cases = [
+    {
+      name: 'sender rename',
+      effect: 'transform({"thing.ren.Sender Final":"Parent/Sender"})',
+      runPath: 'Parent/Sender',
+      finalReceiverPath: 'Parent/Sender Final/Receiver'
+    },
+    {
+      name: 'ancestor rename',
+      effect: 'transform({"thing.ren.Parent Final":"Parent"})',
+      runPath: 'Parent/Sender',
+      finalReceiverPath: 'Parent Final/Sender/Receiver'
+    }
+  ];
+
+  for (const entry of cases) {
+    await t.test(entry.name, async (t) => {
+      const label = `初始迁移-${entry.name}`;
+      const world = [
+        atom('Parent', '', [
+          program('Sender', [
+            entry.effect,
+            `slot({"to":"down","labels":[${JSON.stringify(label)}]})`
+          ].join('\n'), [
+            program('Receiver', slotReceiver('Initial Relocation Target', label))
+          ])
+        ]),
+        atom('Initial Relocation Target', 'before')
+      ];
+      const files = await fixture(t, world);
+      const scheduler = createProgramRuntimeScheduler();
+      const lifecycle = observeSlotClaimLifecycle(scheduler);
+      const invocations = observeSlotInvocations(scheduler);
+
+      const { result, world: stored } = await executeFixture(
+        files,
+        `transform {"thing.run.":${JSON.stringify(entry.runPath)}}`,
+        scheduler
+      );
+
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.ok(findAtom(stored, entry.finalReceiverPath));
+      assert.equal(readSituation(stored, 'Initial Relocation Target'), 'delivered');
+      assert.deepEqual(invocations.map(({ programPath }) => programPath), [entry.finalReceiverPath]);
+      assert.equal(invocations[0].signal.sourcePath, entry.finalReceiverPath.replace(/\/Receiver$/u, ''));
+      assert.equal(invocations[0].signal.recipientPath, entry.finalReceiverPath);
+      assert.equal(lifecycle.confirmed.length, 1);
+      assert.deepEqual(lifecycle.released, []);
+      assert.equal(scheduler.slotSignalExecutions.size, 1);
+    });
+  }
+});
+
+test('queued Slot delivery follows one receiver through chained relocation without capturing its new neighbor', async (t) => {
+  const label = '排队迁移';
+  const world = [
+    program('Parent', structuralSender(
+      'transform({"thing":"Relocate","situation.rep.changed":None})',
+      label,
+      true
+    ), [
+      program('Receiver', slotReceiver('Relocated Receiver Target', label))
+    ]),
+    program('Relocator', [
+      'def relocate():',
+      '    transform({"thing.ren.Receiver Final":"Parent/Receiver"})',
+      '    transform({"thing.mov.Destination":"Parent/Receiver Final"})',
+      '    transform({"thing.mov.Parent":"Holding Final/Receiver Final"})',
+      '    transform({"thing.mov.Parent":"Holding/Receiver"})',
+      'trigger("transform", {"nodes":["Relocate"]}, relocate)'
+    ].join('\n')),
+    atom('Destination'),
+    atom('Holding Final', '', [
+      program('Receiver Final', slotReceiver('Intermediate Neighbor Target', label))
+    ]),
+    atom('Holding', '', [
+      program('Receiver', slotReceiver('New Neighbor Target', label))
+    ]),
+    atom('Go', 'before'),
+    atom('Relocate', 'before'),
+    atom('Relocated Receiver Target', 'before'),
+    atom('Intermediate Neighbor Target', 'before'),
+    atom('New Neighbor Target', 'before')
+  ];
+  const files = await fixture(t, world);
+  const scheduler = createProgramRuntimeScheduler();
+  const lifecycle = observeSlotClaimLifecycle(scheduler);
+  const invocations = observeSlotInvocations(scheduler);
+
+  const { result, world: stored } = await executeFixture(
+    files,
+    'transform {"thing":"Go","situation.rep.changed"}',
+    scheduler
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.ok(findAtom(stored, 'Destination/Receiver Final'));
+  assert.ok(findAtom(stored, 'Parent/Receiver Final'));
+  assert.ok(findAtom(stored, 'Parent/Receiver'));
+  assert.equal(readSituation(stored, 'Relocated Receiver Target'), 'delivered');
+  assert.equal(readSituation(stored, 'Intermediate Neighbor Target'), 'before');
+  assert.equal(readSituation(stored, 'New Neighbor Target'), 'before');
+  assert.equal(invocations.length, 1);
+  assert.equal(invocations[0].programPath, 'Destination/Receiver Final');
+  assert.deepEqual(invocations[0].signal, {
+    mode: 'slot',
+    id: invocations[0].signal.id,
+    revision: invocations[0].signal.revision,
+    sourcePath: 'Parent',
+    recipientPath: 'Destination/Receiver Final',
+    from: 'up',
+    labels: [label]
+  });
+  assert.ok(invocations[0].signal.id);
+  assert.ok(invocations[0].signal.revision);
+  assert.equal(lifecycle.confirmed.length, 1);
+  assert.deepEqual(lifecycle.released, []);
+  assert.equal(scheduler.slotSignalExecutions.size, 1);
+  assert.deepEqual(
+    [...scheduler.slotSignalExecutions.values()].map(({ status }) => status),
+    ['confirmed']
+  );
+});
+
+test('queued Slot delivery does not execute a receiver invalidated after relocation', async (t) => {
+  const label = '迁移后失效';
+  const world = [
+    program('Parent', structuralSender(
+      'transform({"thing":"Invalidate","situation.rep.changed":None})',
+      label,
+      true
+    ), [
+      program('Receiver', slotReceiver('Invalidated Receiver Target', label))
+    ]),
+    program('Invalidator', [
+      'def invalidate():',
+      '    transform({"thing.ren.Receiver Invalid":"Parent/Receiver"})',
+      '    transform({"thing":"Parent/Receiver Invalid","situation.rep.pass":None})',
+      'trigger("transform", {"nodes":["Invalidate"]}, invalidate)'
+    ].join('\n')),
+    atom('Go', 'before'),
+    atom('Invalidate', 'before'),
+    atom('Invalidated Receiver Target', 'before')
+  ];
+  const files = await fixture(t, world);
+  const scheduler = createProgramRuntimeScheduler();
+  const lifecycle = observeSlotClaimLifecycle(scheduler);
+  const invocations = observeSlotInvocations(scheduler);
+
+  const { result, world: stored } = await executeFixture(
+    files,
+    'transform {"thing":"Go","situation.rep.changed"}',
+    scheduler
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.ok(findAtom(stored, 'Parent/Receiver Invalid'));
+  assert.equal(readSituation(stored, 'Invalidated Receiver Target'), 'before');
+  assert.deepEqual(invocations, []);
+  assert.deepEqual(lifecycle.confirmed, []);
+  assert.deepEqual(lifecycle.released, []);
+  assert.equal(scheduler.slotSignalExecutions.size, 0);
 });
 
 test('signal outside Slot invocation blocks an explicit run and returns a nonzero CLI status', async (t) => {
