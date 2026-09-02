@@ -1714,13 +1714,8 @@ export async function executeAtomLanguage(options = {}) {
     const after = revisionOf(atoms);
     if (before !== after) {
       programChanged = true;
-      if (transformed.sourcePath && transformed.resultPath
-        && transformed.sourcePath !== transformed.resultPath) {
-        initialProgramRelocations.push({
-          sourcePath: transformed.sourcePath,
-          resultPath: transformed.resultPath
-        });
-      }
+      const relocation = transformRelocation(transformed);
+      if (relocation) initialProgramRelocations.push(relocation);
       initialProgramTriggerNodes.push(
         transformed.sourcePath,
         transformed.resultPath,
@@ -2594,12 +2589,10 @@ export async function executeAtomLanguage(options = {}) {
         failOnProgramFailure ||= (slotResult.receipt?.recompute_targets?.length ?? 0) > 0;
         appliedSlotBodies.push({ sourceProgramPath, effect, receipt: slotResult.receipt });
       }
-      const applicationRelocations = (application.applied ?? []).flatMap(({ transformed }) => (
-        transformed.sourcePath && transformed.resultPath
-          && transformed.sourcePath !== transformed.resultPath
-          ? [{ sourcePath: transformed.sourcePath, resultPath: transformed.resultPath }]
-          : []
-      ));
+      const applicationRelocations = (application.applied ?? []).flatMap(({ transformed }) => {
+        const relocation = transformRelocation(transformed);
+        return relocation ? [relocation] : [];
+      });
       const authorization = await applyTriggeredJumpAuthorizations(
         application.atoms,
         cycle.jumpAuthorizations,
@@ -2635,23 +2628,7 @@ export async function executeAtomLanguage(options = {}) {
         ...applicationRelocations,
         ...(jump.relocations ?? [])
       ];
-      if (cycleRelocations.length) {
-        for (let index = 0; index < pendingTriggerEvents.length; index += 1) {
-          const event = pendingTriggerEvents[index];
-          if (event.mode !== 'slot') continue;
-          const signals = event.signals.map((signal) => (
-            rewriteSlotSignalPaths(signal, cycleRelocations)
-          ));
-          if (signals.every((signal, signalIndex) => signal === event.signals[signalIndex])) {
-            continue;
-          }
-          pendingTriggerEvents[index] = {
-            ...event,
-            nodes: [...new Set(signals.map(({ recipientPath }) => recipientPath))],
-            signals
-          };
-        }
-      }
+      rewritePendingSlotTriggerEvents(pendingTriggerEvents, cycleRelocations);
       const relocatedSlotSignals = (cycle.slotSignals ?? []).map((effect) => ({
         ...rewriteSlotSignalPaths(effect, [...pathChanges, ...cycleRelocations])
       }));
@@ -2697,12 +2674,8 @@ export async function executeAtomLanguage(options = {}) {
           });
         }
         for (const { transformRequest, transformed } of application.applied) {
-          if (transformed.sourcePath && transformed.resultPath) {
-            pathChanges.push({
-              sourcePath: transformed.sourcePath,
-              resultPath: transformed.resultPath
-            });
-          }
+          const relocation = transformRelocation(transformed);
+          if (relocation) pathChanges.push(relocation);
           if (transformed.changed !== true) continue;
           transformLogs.push({
             id: crypto.randomUUID(),
@@ -2752,12 +2725,7 @@ export async function executeAtomLanguage(options = {}) {
           ...(receipt?.recompute_targets ?? [])
         ]))).filter(Boolean))];
         if (triggeredNodes.length) {
-          const triggerEvent = { mode: 'transform', nodes: triggeredNodes, affectedPaths };
-          const pendingSlotIndex = cycleRelocations.length
-            ? pendingTriggerEvents.findIndex(({ mode }) => mode === 'slot')
-            : -1;
-          if (pendingSlotIndex >= 0) pendingTriggerEvents.splice(pendingSlotIndex, 0, triggerEvent);
-          else pendingTriggerEvents.push(triggerEvent);
+          pendingTriggerEvents.push({ mode: 'transform', nodes: triggeredNodes, affectedPaths });
         }
       }
       if (!passChanged && (authorization.triggerPaths?.length ?? 0) > 0) {
@@ -2993,6 +2961,45 @@ export async function executeAtomLanguage(options = {}) {
       [sourceKey]: sourcePath,
       ...(Object.hasOwn(signal, 'recipientPath') ? { recipientPath } : {})
     };
+  }
+
+  function transformRelocation(transformed) {
+    if (!transformed.sourcePath || !transformed.resultPath
+      || transformed.sourcePath === transformed.resultPath
+      || transformed.structuralCommand === 'cpy') return null;
+    return {
+      sourcePath: transformed.sourcePath,
+      resultPath: transformed.resultPath
+    };
+  }
+
+  function rewritePendingSlotTriggerEvents(events, pathChanges) {
+    if (pathChanges.length === 0) return;
+    for (let index = 0; index < events.length; index += 1) {
+      const event = events[index];
+      if (event.mode !== 'slot') continue;
+      const signals = event.signals.map((signal) => rewriteSlotSignalPaths(signal, pathChanges));
+      if (signals.every((signal, signalIndex) => signal === event.signals[signalIndex])) {
+        continue;
+      }
+      const rewrittenRecipients = [...new Set(signals.flatMap((signal, signalIndex) => (
+        signal.recipientPath !== event.signals[signalIndex].recipientPath
+          ? [signal.recipientPath]
+          : []
+      )))];
+      events[index] = {
+        ...event,
+        nodes: [...new Set(signals.map(({ recipientPath }) => recipientPath))],
+        signals
+      };
+      if (rewrittenRecipients.length === 0) continue;
+      events.splice(index, 0, {
+        mode: 'transform',
+        nodes: rewrittenRecipients,
+        affectedPaths: rewrittenRecipients
+      });
+      index += 1;
+    }
   }
 
   if (programChanged && (

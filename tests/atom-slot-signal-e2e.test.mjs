@@ -391,6 +391,178 @@ test('explicit run resolves Slot delivery after relocating the sender or its anc
   }
 });
 
+test('explicit run does not redirect its initial Slot delivery when copying the sender', async (t) => {
+  const label = '显式复制不迁移';
+  const world = [
+    atom('Parent', '', [
+      program('Sender', [
+        'transform({"thing.cpy.Destination":"Parent/Sender"})',
+        `slot({"to":"down","labels":[${JSON.stringify(label)}]})`
+      ].join('\n'), [
+        program('Receiver', slotReceiver('Explicit Copy Target', label))
+      ])
+    ]),
+    atom('Destination'),
+    atom('Explicit Copy Target', 'before')
+  ];
+  const files = await fixture(t, world);
+  const scheduler = createProgramRuntimeScheduler();
+  const lifecycle = observeSlotClaimLifecycle(scheduler);
+  const invocations = observeSlotInvocations(scheduler);
+
+  const { result, world: stored } = await executeFixture(
+    files,
+    'transform {"thing.run.":"Parent/Sender"}',
+    scheduler
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.ok(findAtom(stored, 'Parent/Sender/Receiver'));
+  assert.ok(findAtom(stored, 'Destination/Sender/Receiver'));
+  assert.equal(readSituation(stored, 'Explicit Copy Target'), 'delivered');
+  assert.deepEqual(invocations.map(({ programPath }) => programPath), [
+    'Parent/Sender/Receiver',
+    'Destination/Sender/Receiver'
+  ]);
+  assert.equal(invocations[0].signal.sourcePath, 'Parent/Sender');
+  assert.equal(invocations[0].signal.recipientPath, 'Parent/Sender/Receiver');
+  assert.equal(invocations[1].signal.sourcePath, 'Destination/Sender');
+  assert.equal(invocations[1].signal.recipientPath, 'Destination/Sender/Receiver');
+  assert.equal(new Set(invocations.map(({ signal }) => signal.id)).size, 2);
+  assert.equal(lifecycle.confirmed.length, 2);
+  assert.deepEqual(lifecycle.released, []);
+  assert.equal(scheduler.slotSignalExecutions.size, 2);
+});
+
+test('queued Slot delivery stays on the original receiver when an earlier Transform copies it', async (t) => {
+  const label = '排队复制不迁移';
+  const world = [
+    program('Parent', structuralSender(
+      'transform({"thing":"Copy Receiver","situation.rep.changed":None})',
+      label,
+      true
+    ), [
+      program('Receiver', slotReceiver('Queued Copy Target', label))
+    ]),
+    program('Copier', [
+      'def copy_receiver():',
+      '    transform({"thing.cpy.Destination":"Parent/Receiver"})',
+      'trigger("transform", {"nodes":["Copy Receiver"]}, copy_receiver)'
+    ].join('\n')),
+    atom('Destination'),
+    atom('Go', 'before'),
+    atom('Copy Receiver', 'before'),
+    atom('Queued Copy Target', 'before')
+  ];
+  const files = await fixture(t, world);
+  const scheduler = createProgramRuntimeScheduler();
+  const lifecycle = observeSlotClaimLifecycle(scheduler);
+  const invocations = observeSlotInvocations(scheduler);
+
+  const { result, world: stored } = await executeFixture(
+    files,
+    'transform {"thing":"Go","situation.rep.changed"}',
+    scheduler
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.ok(findAtom(stored, 'Parent/Receiver'));
+  assert.ok(findAtom(stored, 'Destination/Receiver'));
+  assert.equal(readSituation(stored, 'Queued Copy Target'), 'delivered');
+  assert.deepEqual(invocations.map(({ programPath }) => programPath), ['Parent/Receiver']);
+  assert.equal(invocations[0].signal.sourcePath, 'Parent');
+  assert.equal(invocations[0].signal.recipientPath, 'Parent/Receiver');
+  assert.equal(lifecycle.confirmed.length, 1);
+  assert.deepEqual(lifecycle.released, []);
+  assert.equal(scheduler.slotSignalExecutions.size, 1);
+});
+
+test('queued Slot delivery refreshes a descendant receiver after relocating its ancestor', async (t) => {
+  const label = '祖先迁移刷新';
+  const world = [
+    program('Parent', structuralSender(
+      'transform({"thing":"Relocate Parent","situation.rep.changed":None})',
+      label,
+      true
+    ), [
+      program('Receiver', slotReceiver('Ancestor Relocation Target', label))
+    ]),
+    program('Relocator', [
+      'def relocate_parent():',
+      '    transform({"thing.ren.Parent Final":"Parent"})',
+      'trigger("transform", {"nodes":["Relocate Parent"]}, relocate_parent)'
+    ].join('\n')),
+    atom('Go', 'before'),
+    atom('Relocate Parent', 'before'),
+    atom('Ancestor Relocation Target', 'before')
+  ];
+  const files = await fixture(t, world);
+  const scheduler = createProgramRuntimeScheduler();
+  const lifecycle = observeSlotClaimLifecycle(scheduler);
+  const invocations = observeSlotInvocations(scheduler);
+
+  const { result, world: stored } = await executeFixture(
+    files,
+    'transform {"thing":"Go","situation.rep.changed"}',
+    scheduler
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.ok(findAtom(stored, 'Parent Final/Receiver'));
+  assert.equal(readSituation(stored, 'Ancestor Relocation Target'), 'delivered');
+  assert.deepEqual(invocations.map(({ programPath }) => programPath), ['Parent Final/Receiver']);
+  assert.equal(invocations[0].signal.sourcePath, 'Parent Final');
+  assert.equal(invocations[0].signal.recipientPath, 'Parent Final/Receiver');
+  assert.equal(lifecycle.confirmed.length, 1);
+  assert.deepEqual(lifecycle.released, []);
+  assert.equal(scheduler.slotSignalExecutions.size, 1);
+});
+
+test('queued Slot delivery keeps unrelated Transform observers behind its FIFO position', async (t) => {
+  const label = '迁移顺序';
+  const receiver = [
+    'def receive():',
+    '    signal()',
+    '    message({"level":"info","text":"slot"})',
+    `trigger("slot", {"from":"up","labels":[${JSON.stringify(label)}]}, receive)`
+  ].join('\n');
+  const world = [
+    program('Parent', structuralSender(
+      'transform({"thing":"Relocate Receiver","situation.rep.changed":None})',
+      label,
+      true
+    ), [program('Receiver', receiver)]),
+    program('Relocator', [
+      'def relocate_receiver():',
+      '    transform({"thing.ren.Receiver Final":"Parent/Receiver"})',
+      '    transform({"thing":"Unrelated","situation.rep.changed":None})',
+      'trigger("transform", {"nodes":["Relocate Receiver"]}, relocate_receiver)'
+    ].join('\n')),
+    program('Unrelated Observer', [
+      'def observe():',
+      '    message({"level":"info","text":"observer"})',
+      'trigger("transform", {"nodes":["Unrelated"]}, observe)'
+    ].join('\n')),
+    atom('Go', 'before'),
+    atom('Relocate Receiver', 'before'),
+    atom('Unrelated', 'before')
+  ];
+  const files = await fixture(t, world);
+  const scheduler = createProgramRuntimeScheduler();
+  const invocations = observeSlotInvocations(scheduler);
+
+  const { result } = await executeFixture(
+    files,
+    'transform {"thing":"Go","situation.rep.changed"}',
+    scheduler
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.messages.map(({ text }) => text), ['slot', 'observer']);
+  assert.deepEqual(invocations.map(({ programPath }) => programPath), ['Parent/Receiver Final']);
+  assert.equal(scheduler.slotSignalExecutions.size, 1);
+});
+
 test('queued Slot delivery follows one receiver through chained relocation without capturing its new neighbor', async (t) => {
   const label = '排队迁移';
   const world = [
