@@ -53,6 +53,44 @@ function uniqueStrutDeliveries(deliveries = []) {
   return [...new Map(deliveries.map((delivery) => [strutDeliveryKey(delivery), delivery])).values()];
 }
 
+function slotSignalMatches(parameters, signal) {
+  if (parameters.from !== signal.from) return false;
+  const required = new Set(parameters.labels);
+  const actual = new Set(signal.labels);
+  return parameters.match === 'exact'
+    ? required.size === actual.size && [...required].every((label) => actual.has(label))
+    : [...required].every((label) => actual.has(label));
+}
+
+function slotSignalClaimKey(programPath, signal) {
+  return [programPath, signal.revision, signal.id, signal.recipientPath].join('\0');
+}
+
+function validSlotTriggerEvent(triggerEvent) {
+  if (Object.keys(triggerEvent).length !== 3
+    || !['mode', 'nodes', 'signals'].every((key) => Object.hasOwn(triggerEvent, key))
+    || !Array.isArray(triggerEvent.signals)
+    || triggerEvent.signals.length === 0
+    || triggerEvent.signals.some((signal) => !signal || typeof signal !== 'object'
+      || Array.isArray(signal)
+      || Object.keys(signal).length !== 7
+      || !['mode', 'id', 'revision', 'sourcePath', 'recipientPath', 'from', 'labels']
+        .every((key) => Object.hasOwn(signal, key))
+      || signal.mode !== 'slot'
+      || ['id', 'revision', 'sourcePath', 'recipientPath']
+        .some((key) => typeof signal[key] !== 'string' || !signal[key].trim())
+      || !['up', 'down'].includes(signal.from)
+      || !Array.isArray(signal.labels) || signal.labels.length === 0
+      || signal.labels.some((label) => typeof label !== 'string' || !label)
+      || new Set(signal.labels).size !== signal.labels.length)) {
+    return false;
+  }
+  const recipients = new Set(triggerEvent.signals.map((signal) => signal.recipientPath));
+  return new Set(triggerEvent.nodes).size === triggerEvent.nodes.length
+    && recipients.size === triggerEvent.nodes.length
+    && triggerEvent.nodes.every((node) => recipients.has(node));
+}
+
 function strutAffectedGraphPaths(graphDocument, triggerEvent) {
   const graphRoot = graphDocument.graph.thing;
   const exactPaths = Array.isArray(triggerEvent?.affectedPaths)
@@ -1241,6 +1279,7 @@ export class ProgramRuntimeScheduler {
     this.latestRecords = null;
     this.preparedStrutGraphs = new Map();
     this.strutDeliveryExecutions = options.strutDeliveryExecutions ?? new Map();
+    this.slotSignalExecutions = options.slotSignalExecutions ?? new Map();
     if (this.projectionRepository
       && (typeof this.projectionRepository.load !== 'function'
         || typeof this.projectionRepository.save !== 'function')) {
@@ -1283,6 +1322,30 @@ export class ProgramRuntimeScheduler {
       const entry = this.strutDeliveryExecutions.get(key);
       if (!entry || entry.status === 'confirmed') continue;
       this.strutDeliveryExecutions.delete(key);
+      entry.status = 'released';
+      entry.resolve('released');
+    }
+  }
+
+  confirmSlotSignals(keys = []) {
+    for (const key of new Set(keys.filter(Boolean))) {
+      const entry = this.slotSignalExecutions.get(key);
+      if (!entry || entry.status === 'confirmed') continue;
+      entry.status = 'confirmed';
+      entry.resolve('confirmed');
+    }
+    const limit = this.maxCompleted * Math.max(1, this.maxWorkers);
+    for (const [key, entry] of this.slotSignalExecutions) {
+      if (this.slotSignalExecutions.size <= limit) break;
+      if (entry.status === 'confirmed') this.slotSignalExecutions.delete(key);
+    }
+  }
+
+  releaseSlotSignals(keys = []) {
+    for (const key of new Set(keys.filter(Boolean))) {
+      const entry = this.slotSignalExecutions.get(key);
+      if (!entry || entry.status === 'confirmed') continue;
+      this.slotSignalExecutions.delete(key);
       entry.status = 'released';
       entry.resolve('released');
     }
@@ -1670,7 +1733,8 @@ export class ProgramRuntimeScheduler {
       inspectProgram: this.inspectProgram,
       diagnosticRecorder: this.diagnosticRecorder,
       runBounded: (operation) => this.runBounded(operation),
-      strutDeliveryExecutions: this.strutDeliveryExecutions
+      strutDeliveryExecutions: this.strutDeliveryExecutions,
+      slotSignalExecutions: this.slotSignalExecutions
     });
     candidate.reusable = new Map(this.reusable);
     candidate.programReusable = new Map(this.programReusable);
@@ -1818,9 +1882,11 @@ export class ProgramRuntimeScheduler {
     const existing = this.triggerContracts.get(programPath);
     if (existing) {
       const indexed = [
-        ...(existing.contract?.parameters?.nodes ?? []).map((node) => ({
-          mode: existing.contract.mode, node
-        })),
+        ...(existing.contract?.mode === 'slot'
+          ? [{ mode: 'slot', node: programPath }]
+          : (existing.contract?.parameters?.nodes ?? []).map((node) => ({
+              mode: existing.contract.mode, node
+            }))),
         ...(existing.changedThings ?? []).map((node) => ({ mode: 'transform', node }))
       ];
       for (const { mode, node } of indexed) {
@@ -1839,7 +1905,9 @@ export class ProgramRuntimeScheduler {
       detail: program.detail, contract, changedThings: [...new Set(changedThings)]
     });
     const indexed = [
-      ...(contract?.parameters?.nodes ?? []).map((node) => ({ mode: contract.mode, node })),
+      ...(contract?.mode === 'slot'
+        ? [{ mode: 'slot', node: program.path }]
+        : (contract?.parameters?.nodes ?? []).map((node) => ({ mode: contract.mode, node }))),
       ...[...new Set(changedThings)].map((node) => ({ mode: 'transform', node }))
     ];
     for (const { mode, node } of indexed) {
@@ -1859,7 +1927,9 @@ export class ProgramRuntimeScheduler {
       const matches = new Set();
       for (const [programPath, entry] of this.triggerContracts) {
         const contractMatch = entry.contract?.mode === triggerEvent.mode
-          && entry.contract.parameters?.nodes?.includes(node);
+          && (triggerEvent.mode === 'slot'
+            ? programPath === node
+            : entry.contract.parameters?.nodes?.includes(node));
         const changedMatch = triggerEvent.mode === 'transform'
           && entry.changedThings?.includes(node);
         if (contractMatch || changedMatch) matches.add(programPath);
@@ -2231,6 +2301,7 @@ export class ProgramRuntimeScheduler {
     }
 
     const attemptStrutDeliveryClaims = new Set();
+    const attemptSlotSignalClaims = new Set();
     const pending = this.computeRefresh(atoms, options, {
       records,
       programs,
@@ -2239,9 +2310,11 @@ export class ProgramRuntimeScheduler {
       key,
       strutGraphDocument,
       changedStrutGraphPaths,
-      attemptStrutDeliveryClaims
+      attemptStrutDeliveryClaims,
+      attemptSlotSignalClaims
     }).catch((error) => {
       this.releaseStrutDeliveries([...attemptStrutDeliveryClaims]);
+      this.releaseSlotSignals([...attemptSlotSignalClaims]);
       throw error;
     }).finally(() => this.inflight.delete(key));
     this.inflight.set(key, pending);
@@ -2256,7 +2329,8 @@ export class ProgramRuntimeScheduler {
     key,
     strutGraphDocument,
     changedStrutGraphPaths,
-    attemptStrutDeliveryClaims
+    attemptStrutDeliveryClaims,
+    attemptSlotSignalClaims
   }) {
     const cycleDeadline = Date.now() + this.timeoutMs;
     const agentProgramPaths = new Set(this.agentSecurity.keys());
@@ -2295,7 +2369,7 @@ export class ProgramRuntimeScheduler {
       scopeRoot: executionContext.scopeRoot ?? null
     }));
     const triggerEvent = options.triggerEvent ?? null;
-    if (triggerEvent && (!['transform', 'strut'].includes(triggerEvent.mode)
+    if (triggerEvent && (!['transform', 'strut', 'slot'].includes(triggerEvent.mode)
       || !Array.isArray(triggerEvent.nodes)
       || triggerEvent.nodes.length === 0
       || triggerEvent.nodes.some((node) => typeof node !== 'string' || !node.trim())
@@ -2306,8 +2380,9 @@ export class ProgramRuntimeScheduler {
         || triggerEvent.deliveries.length === 0
         || triggerEvent.deliveries.some((delivery) => delivery?.mode !== 'strut'
           || delivery.decision !== true
-          || !triggerEvent.nodes.includes(delivery.consequentPath)))))) {
-      throw Object.assign(new Error('trigger event requires one valid transform or strut payload'), {
+          || !triggerEvent.nodes.includes(delivery.consequentPath))))
+      || (triggerEvent.mode === 'slot' && !validSlotTriggerEvent(triggerEvent)))) {
+      throw Object.assign(new Error('trigger event requires one valid transform, strut, or slot payload'), {
         code: 'INVALID_PROGRAM_TRIGGER_EVENT'
       });
     }
@@ -2346,7 +2421,7 @@ export class ProgramRuntimeScheduler {
     const triggerIndexBackfilled = this.backfillTriggerIndexForEvent(triggerEvent);
     const eventNodes = new Set((triggerEvent?.nodes ?? []).map((node) => node.trim()));
     const triggeredProgramPaths = new Set();
-    if (triggerEvent) {
+    if (triggerEvent && triggerEvent.mode !== 'slot') {
       for (const node of eventNodes) {
         for (const programPath of this.triggerIndex.get(`${triggerEvent.mode}\0${node}`) ?? []) {
           triggeredProgramPaths.add(programPath);
@@ -2406,6 +2481,23 @@ export class ProgramRuntimeScheduler {
         for (const programPath of this.triggerIndex.get(`strut\0${delivery.consequentPath}`) ?? []) {
           if (!strutInvocationsByProgram.has(programPath)) strutInvocationsByProgram.set(programPath, []);
           strutInvocationsByProgram.get(programPath).push(delivery);
+        }
+      }
+    }
+    const slotSignalInvocationsByProgram = new Map();
+    if (triggerEvent?.mode === 'slot') {
+      const seenSlotSignals = new Set();
+      for (const signal of triggerEvent.signals) {
+        for (const programPath of this.triggerIndex.get(`slot\0${signal.recipientPath}`) ?? []) {
+          const parameters = this.triggerContracts.get(programPath)?.contract?.parameters;
+          if (signal.recipientPath !== programPath || !slotSignalMatches(parameters, signal)) continue;
+          const claimKey = slotSignalClaimKey(programPath, signal);
+          if (seenSlotSignals.has(claimKey)) continue;
+          seenSlotSignals.add(claimKey);
+          if (!slotSignalInvocationsByProgram.has(programPath)) {
+            slotSignalInvocationsByProgram.set(programPath, []);
+          }
+          slotSignalInvocationsByProgram.get(programPath).push(signal);
         }
       }
     }
@@ -2517,6 +2609,7 @@ export class ProgramRuntimeScheduler {
           || eventNodes.has(program.path)
           || slotInvocationsByProgram.has(program.path)
           || strutInvocationsByProgram.has(program.path)
+          || slotSignalInvocationsByProgram.has(program.path)
         ))
       : programs;
     const operationEntries = indexedPrograms.flatMap((program) => {
@@ -2530,11 +2623,21 @@ export class ProgramRuntimeScheduler {
       }));
       const strutDeliveries = strutInvocationsByProgram.get(program.path) ?? [];
       if (strutDeliveries.length) {
-        return strutDeliveries.map((strutDelivery) => ({ program, slotInvocation: null, strutDelivery }));
+        return strutDeliveries.map((strutDelivery) => ({
+          program, slotInvocation: null, strutDelivery, slotSignal: null
+        }));
       }
-      return [{ program, slotInvocation: null, strutDelivery: null }];
+      const slotSignals = slotSignalInvocationsByProgram.get(program.path) ?? [];
+      if (slotSignals.length) {
+        return slotSignals.map((slotSignal) => ({
+          program, slotInvocation: null, strutDelivery: null, slotSignal
+        }));
+      }
+      return [{ program, slotInvocation: null, strutDelivery: null, slotSignal: null }];
     });
-    const operations = operationEntries.map(async ({ program, slotInvocation, strutDelivery }) => {
+    const operations = operationEntries.map(async ({
+      program, slotInvocation, strutDelivery, slotSignal
+    }) => {
       const dormantKey = programSetFingerprint(
         [program], isolateFailures, records, agentProgramPaths
       );
@@ -2555,7 +2658,8 @@ export class ProgramRuntimeScheduler {
         triggerContract || (triggerEntry?.changedThings?.length ?? 0) > 0
       );
       const forcedByTrigger = triggerEvent
-        && (triggeredProgramPaths.has(program.path) || Boolean(slotInvocation) || Boolean(strutDelivery));
+        && (triggeredProgramPaths.has(program.path) || Boolean(slotInvocation)
+          || Boolean(strutDelivery) || Boolean(slotSignal));
       if (dormantFailure
         && options.force !== true
         && !forcedByTrigger
@@ -2639,6 +2743,9 @@ export class ProgramRuntimeScheduler {
         slotInvocation?.scopeRoot ?? options.slotScopeRoot ?? '',
         strutDeliveryKey(strutDelivery)
       ].join('\0') : null;
+      const slotSignalExecutionKey = slotSignal
+        ? slotSignalClaimKey(program.path, slotSignal)
+        : null;
       let claimedDelivery = false;
       if (deliveryExecutionKey) {
         while (!claimedDelivery) {
@@ -2672,6 +2779,39 @@ export class ProgramRuntimeScheduler {
           claimedDelivery = true;
         }
       }
+      let claimedSlotSignal = false;
+      if (slotSignalExecutionKey) {
+        while (!claimedSlotSignal) {
+          const existing = this.slotSignalExecutions.get(slotSignalExecutionKey);
+          if (existing) {
+            const status = existing.status === 'confirmed'
+              ? 'confirmed'
+              : await existing.finalized;
+            if (status === 'confirmed') {
+              return {
+                programPath: program.path,
+                result: {
+                  locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: [], choices: [],
+                  trigger: null
+                },
+                cached: true,
+                requests: [],
+                contextDependent: false
+              };
+            }
+            continue;
+          }
+          let resolveFinalization;
+          const finalized = new Promise((resolve) => { resolveFinalization = resolve; });
+          this.slotSignalExecutions.set(slotSignalExecutionKey, {
+            status: 'claimed',
+            finalized,
+            resolve: resolveFinalization
+          });
+          attemptSlotSignalClaims.add(slotSignalExecutionKey);
+          claimedSlotSignal = true;
+        }
+      }
 
       const requests = [];
       const executionStartedAt = performance.now();
@@ -2696,7 +2836,7 @@ export class ProgramRuntimeScheduler {
             scopeRoot: effectiveScopeRoot,
             programRoot: slotInvocation?.programRoot ?? options.slotScopeRoot ?? null,
             invokeMain: false,
-            programArguments: strutDelivery ?? (slotInvocation ? {
+            programArguments: slotSignal ?? strutDelivery ?? (slotInvocation ? {
               event: {
                 mode: triggerEvent.mode,
                 path: slotInvocation.eventPath,
@@ -2785,6 +2925,7 @@ export class ProgramRuntimeScheduler {
           programPath: program.path,
           result,
           ...(deliveryExecutionKey ? { strutDeliveryClaim: deliveryExecutionKey } : {}),
+          ...(slotSignalExecutionKey ? { slotSignalClaim: slotSignalExecutionKey } : {}),
           cached: false,
           requests: uniqueRequests,
           contextDependent,
@@ -2796,13 +2937,14 @@ export class ProgramRuntimeScheduler {
         return operation;
       } catch (error) {
         const describedFailure = describeProgramFailure(error, program);
-        const failure = strutDelivery
+        const failure = strutDelivery || slotSignal
           ? {
               ...describedFailure,
               blocking: true,
               details: {
                 ...(describedFailure.details ?? {}),
-                strutDelivery: strutDeliveryKey(strutDelivery)
+                ...(strutDelivery ? { strutDelivery: strutDeliveryKey(strutDelivery) } : {}),
+                ...(slotSignal ? { slotSignal: slotSignal.id } : {})
               }
             }
           : describedFailure;
@@ -2838,6 +2980,7 @@ export class ProgramRuntimeScheduler {
             }
           };
           if (claimedDelivery) this.releaseStrutDeliveries([deliveryExecutionKey]);
+          if (claimedSlotSignal) this.releaseSlotSignals([slotSignalExecutionKey]);
           return operation;
         }
         if (isolateFailures) {
@@ -2862,6 +3005,7 @@ export class ProgramRuntimeScheduler {
           }
         };
         if (claimedDelivery) this.releaseStrutDeliveries([deliveryExecutionKey]);
+        if (claimedSlotSignal) this.releaseSlotSignals([slotSignalExecutionKey]);
         return operation;
       }
         throw error;
@@ -2896,6 +3040,11 @@ export class ProgramRuntimeScheduler {
       .map((entry) => entry.strutDeliveryClaim)
       .filter(Boolean);
     this.releaseStrutDeliveries(ignoredStrutDeliveryClaims);
+    const ignoredSlotSignalClaims = settled
+      .filter((entry) => entry.contextDependent === true && !scopePath)
+      .map((entry) => entry.slotSignalClaim)
+      .filter(Boolean);
+    this.releaseSlotSignals(ignoredSlotSignalClaims);
     const contextIncomplete = settled.some((entry) => (
       entry.contextDependent === true && !scopePath
     ));
@@ -2942,6 +3091,9 @@ export class ProgramRuntimeScheduler {
       strutDeliveryClaims: applicable
         .filter((entry) => entry.cached === false && entry.result && entry.strutDeliveryClaim)
         .map((entry) => entry.strutDeliveryClaim),
+      slotSignalClaims: applicable
+        .filter((entry) => entry.cached === false && entry.result && entry.slotSignalClaim)
+        .map((entry) => entry.slotSignalClaim),
       executedProgramPaths: applicable
         .filter((entry) => entry.cached === false && entry.result)
         .map((entry) => entry.programPath),

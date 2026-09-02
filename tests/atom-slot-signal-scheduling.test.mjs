@@ -17,6 +17,27 @@ function program(path, situation, slot = []) {
   return value;
 }
 
+function receiver(from, labels, match = 'all') {
+  return [
+    'def receive():',
+    '    notice = signal()',
+    '    message({"level":"info","text":notice["from"] + ":" + ",".join(notice["labels"])})',
+    `trigger("slot", {"from":"${from}","labels":${JSON.stringify(labels)},"match":"${match}"}, receive)`
+  ].join('\n');
+}
+
+function delivery(id, recipientPath, from, labels) {
+  return {
+    mode: 'slot', id, revision: 'sha256:r1', sourcePath: 'Sender', recipientPath, from, labels
+  };
+}
+
+function slotEvent(signals) {
+  return {
+    mode: 'slot', nodes: [...new Set(signals.map(({ recipientPath }) => recipientPath))], signals
+  };
+}
+
 test('slot trigger declares receiver-owned labels without nodes', async () => {
   const world = [program('Root/Receiver', [
     'def receive():',
@@ -47,4 +68,136 @@ test('slot effects reject a non-array Python effect envelope', () => {
     [{ ref: 'sender', path: 'Sender', types: ['program'] }],
     { ref: 'sender', path: 'Sender' }
   ), { code: 'INVALID_SLOT_SIGNAL_EFFECT' });
+});
+
+test('all and exact match independently on the receiver path', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const world = [
+    program('Root/All', receiver('up', ['A'], 'all')),
+    program('Root/Exact', receiver('up', ['A'], 'exact')),
+    program('Other', receiver('up', ['A'], 'all'))
+  ];
+  await scheduler.refresh(world);
+  const cycle = await scheduler.refresh(world, { triggerEvent: slotEvent([
+    delivery('s1', 'Root/All', 'up', ['A', 'B']),
+    delivery('s2', 'Root/Exact', 'up', ['A', 'B'])
+  ]) });
+  assert.deepEqual(cycle.messages.map(({ text }) => text), ['up:A,B']);
+  assert.deepEqual(cycle.executedProgramPaths, ['Root/All']);
+});
+
+test('signal context is invocation-local during concurrent refreshes', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const world = [program('Receiver', receiver('up', ['A'], 'all'))];
+  await scheduler.refresh(world);
+  const cycles = await Promise.all([
+    scheduler.refresh(world, { triggerEvent: slotEvent([delivery('s1', 'Receiver', 'up', ['A'])]) }),
+    scheduler.refresh(world, { triggerEvent: slotEvent([delivery('s2', 'Receiver', 'up', ['A', 'B'])]) })
+  ]);
+  assert.deepEqual(cycles.flatMap((cycle) => cycle.messages.map(({ text }) => text)).sort(), [
+    'up:A', 'up:A,B'
+  ]);
+});
+
+test('one slot signal executes its receiver once across duplicate, sequential, and concurrent refreshes', async () => {
+  const world = [program('Receiver', receiver('up', ['A'], 'all'))];
+  const signal = delivery('s1', 'Receiver', 'up', ['A']);
+  const event = slotEvent([signal, structuredClone(signal)]);
+
+  const sequential = createProgramRuntimeScheduler();
+  await sequential.refresh(world);
+  const first = await sequential.refresh(world, { triggerEvent: event });
+  sequential.confirmSlotSignals(first.slotSignalClaims);
+  const second = await sequential.refresh(world, { triggerEvent: event });
+  assert.deepEqual(first.messages.map(({ text }) => text), ['up:A']);
+  assert.deepEqual(second.messages, []);
+
+  const concurrent = createProgramRuntimeScheduler();
+  await concurrent.refresh(world);
+  const firstConcurrent = concurrent.refresh(world, { triggerEvent: event });
+  const secondConcurrent = concurrent.refresh(world, { triggerEvent: event });
+  const firstCycle = await firstConcurrent;
+  concurrent.confirmSlotSignals(firstCycle.slotSignalClaims);
+  const cycles = [firstCycle, await secondConcurrent];
+  assert.equal(cycles.flatMap((cycle) => cycle.messages).length, 1);
+});
+
+test('a failed slot receiver is blocking and releases its signal claim for retry', async () => {
+  const world = [program('Receiver', [
+    'def receive():',
+    '    signal()',
+    '    message("receiver failed")',
+    'trigger("slot", {"from":"up","labels":["A"]}, receive)'
+  ].join('\n'))];
+  const scheduler = createProgramRuntimeScheduler();
+  const runProgram = scheduler.runProgram;
+  let calls = 0;
+  scheduler.runProgram = async (request) => {
+    if (request.program.path === 'Receiver' && request.programArguments?.mode === 'slot') calls += 1;
+    return runProgram(request);
+  };
+  await scheduler.refresh(world, { isolateFailures: true });
+  const options = {
+    isolateFailures: true,
+    triggerEvent: slotEvent([delivery('s1', 'Receiver', 'up', ['A'])])
+  };
+
+  const first = await scheduler.refresh(world, options);
+  const second = await scheduler.refresh(world, options);
+  assert.equal(first.failures[0]?.blocking, true);
+  assert.equal(second.failures[0]?.blocking, true);
+  assert.equal(calls, 2);
+});
+
+test('a context-dependent slot result filtered without Agent scope releases its signal claim', async () => {
+  const subscriber = program('Subscriber', [
+    'def receive():',
+    '    signal()',
+    '    explore({"thing":"./Result"})',
+    '    message({"level":"info","text":"filtered"})',
+    'trigger("slot", {"from":"up","labels":["A"]}, receive)'
+  ].join('\n'));
+  const world = [atom('Result'), subscriber];
+  const scheduler = createProgramRuntimeScheduler();
+  const runProgram = scheduler.runProgram;
+  let calls = 0;
+  scheduler.runProgram = async (request) => {
+    if (request.program.path === 'Subscriber' && request.programArguments?.mode === 'slot') calls += 1;
+    return runProgram(request);
+  };
+  await scheduler.refresh(world);
+  const options = {
+    triggerEvent: slotEvent([delivery('s1', 'Subscriber', 'up', ['A'])]),
+    executeExplore: async () => []
+  };
+
+  assert.deepEqual((await scheduler.refresh(world, options)).messages, []);
+  assert.deepEqual((await scheduler.refresh(world, options)).messages, []);
+  assert.equal(calls, 2);
+});
+
+test('slot trigger events reject fields outside the internal routing contract', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const world = [program('Receiver', receiver('up', ['A'], 'all'))];
+  await scheduler.refresh(world);
+  await assert.rejects(scheduler.refresh(world, {
+    triggerEvent: {
+      ...slotEvent([delivery('s1', 'Receiver', 'up', ['A'])]),
+      deliveries: []
+    }
+  }), { code: 'INVALID_PROGRAM_TRIGGER_EVENT' });
+});
+
+test('the owning runtime can confirm a slot signal claimed by its candidate runtime', async () => {
+  const owner = createProgramRuntimeScheduler();
+  const world = [program('Receiver', receiver('up', ['A'], 'all'))];
+  await owner.refresh(world);
+  const candidate = owner.createCandidateRuntime();
+  const event = slotEvent([delivery('s1', 'Receiver', 'up', ['A'])]);
+
+  const first = await candidate.refresh(world, { triggerEvent: event });
+  owner.confirmSlotSignals(first.slotSignalClaims);
+  const second = await owner.refresh(world, { triggerEvent: event });
+  assert.deepEqual(first.messages.map(({ text }) => text), ['up:A']);
+  assert.deepEqual(second.messages, []);
 });
