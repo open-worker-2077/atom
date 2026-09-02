@@ -1836,7 +1836,8 @@ export async function executeAtomLanguage(options = {}) {
         lockIndex: programLockIndex,
         messages: [],
         transformLogs: [],
-        pathChanges: []
+        pathChanges: [],
+        changedPaths: []
       };
     }
     if (!candidateProgramScheduler) {
@@ -1850,6 +1851,7 @@ export async function executeAtomLanguage(options = {}) {
     const messages = [];
     const transformLogs = [];
     const pathChanges = [];
+    const programChangedPaths = new Set();
     let finalLockIndex = programLockIndex;
     let finalGraphLocks = graphLocks;
     const pendingTriggerEvents = Array.isArray(initialTriggerEvent)
@@ -2283,7 +2285,8 @@ export async function executeAtomLanguage(options = {}) {
           lockIndex: finalLockIndex,
           messages,
           transformLogs,
-          pathChanges
+          pathChanges,
+          changedPaths: [...programChangedPaths]
         };
       }
       const cycleAccessController = createAccessController(reconciledAtoms, {
@@ -2394,7 +2397,8 @@ export async function executeAtomLanguage(options = {}) {
           lockIndex: finalLockIndex,
           messages,
           transformLogs,
-          pathChanges
+          pathChanges,
+          changedPaths: [...programChangedPaths]
         };
       }
       const applyCompiled = async (baseAtoms, mutateInput, reportFailure) => {
@@ -2689,6 +2693,14 @@ export async function executeAtomLanguage(options = {}) {
           const relocation = transformRelocation(transformed);
           if (relocation) pathChanges.push(relocation);
           if (transformed.changed !== true) continue;
+          for (const changedPath of [
+            transformed.sourcePath,
+            transformed.resultPath,
+            ...(transformed.relationPaths ?? []),
+            ...(transformed.shortcutPaths ?? [])
+          ]) {
+            if (changedPath) programChangedPaths.add(changedPath);
+          }
           transformLogs.push({
             id: crypto.randomUUID(),
             operation: 'program-transform',
@@ -2754,7 +2766,8 @@ export async function executeAtomLanguage(options = {}) {
           lockIndex: finalLockIndex,
           messages,
           transformLogs,
-          pathChanges
+          pathChanges,
+          changedPaths: [...programChangedPaths]
         };
       }
     }
@@ -3723,6 +3736,7 @@ export async function executeAtomLanguage(options = {}) {
         transformed.resultPath,
         ...(transformed.relationPaths ?? []),
         ...(transformed.shortcutPaths ?? []),
+        ...(postRefresh.changedPaths ?? []),
         ...postRefresh.pathChanges.flatMap((change) => [change.sourcePath, change.resultPath])
       ].filter(Boolean))],
       transformLogRecord
