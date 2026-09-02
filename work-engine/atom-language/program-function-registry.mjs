@@ -10,7 +10,7 @@ function problem(code, message) {
 export function validateProgramFunctionRegistry(value) {
   const hierarchy = value?.functionScopeHierarchy;
   if (value?.contract !== 'atom-program-function-registry'
-    || value?.version !== 6
+    || value?.version !== 7
     || value?.runtimeContract !== ATOM_RUNTIME_CONTRACT
     || !Array.isArray(value.types)
     || !Array.isArray(value.functionFamilies)

@@ -84,6 +84,7 @@ import {
   programLockState
 } from './program-locks.mjs';
 import { applySlotBodyEffect } from './slot-body-runtime.mjs';
+import { resolveSlotSignalDeliveries } from './slot-signal-runtime.mjs';
 import { normalizeScopedTransformRequest } from './slot-relative-scope.mjs';
 import { applyShortcutEffect, breakShortcutTargets } from './shortcut-runtime.mjs';
 import { validateAgentDelegation } from './window-lock-v1.mjs';
@@ -751,16 +752,24 @@ async function persistChangedGraph({
 
 export async function executeAtomLanguage(options = {}) {
   const pendingStrutDeliveryClaims = new Set();
+  const pendingSlotSignalClaims = new Set();
   function rememberStrutDeliveryClaims(keys = []) {
     for (const key of keys) if (key) pendingStrutDeliveryClaims.add(key);
   }
+  function rememberSlotSignalClaims(keys = []) {
+    for (const key of keys) if (key) pendingSlotSignalClaims.add(key);
+  }
   function confirmStrutDeliveryClaims() {
     options.programScheduler?.confirmStrutDeliveries?.([...pendingStrutDeliveryClaims]);
+    options.programScheduler?.confirmSlotSignals?.([...pendingSlotSignalClaims]);
     pendingStrutDeliveryClaims.clear();
+    pendingSlotSignalClaims.clear();
   }
   function releaseStrutDeliveryClaims() {
     options.programScheduler?.releaseStrutDeliveries?.([...pendingStrutDeliveryClaims]);
+    options.programScheduler?.releaseSlotSignals?.([...pendingSlotSignalClaims]);
     pendingStrutDeliveryClaims.clear();
+    pendingSlotSignalClaims.clear();
   }
   function failureBase(...args) {
     releaseStrutDeliveryClaims();
@@ -1821,7 +1830,7 @@ export async function executeAtomLanguage(options = {}) {
     const pathChanges = [];
     let finalLockIndex = programLockIndex;
     let finalGraphLocks = graphLocks;
-    let pendingTriggerEvent = initialTriggerEvent;
+    const pendingTriggerEvents = initialTriggerEvent ? [initialTriggerEvent] : [];
     const pendingAuthorizedTriggers = new Map();
     const maxPasses = 8;
 
@@ -2134,6 +2143,7 @@ export async function executeAtomLanguage(options = {}) {
     }
 
     for (let pass = 1; pass <= maxPasses; pass += 1) {
+      const pendingTriggerEvent = pendingTriggerEvents.shift() ?? null;
       const authorizedPaths = [...new Set((pendingTriggerEvent?.nodes ?? [])
         .map((node) => pendingAuthorizedTriggers.get(node))
         .filter(Boolean))];
@@ -2181,6 +2191,22 @@ export async function executeAtomLanguage(options = {}) {
         throw error;
       }
       rememberStrutDeliveryClaims(cycle.strutDeliveryClaims);
+      rememberSlotSignalClaims(cycle.slotSignalClaims);
+      const deliveries = resolveSlotSignalDeliveries(
+        reconciledAtoms,
+        cycle.slotSignals ?? [],
+        {
+          revision: revisionOf(reconciledAtoms),
+          createId: () => crypto.randomUUID()
+        }
+      );
+      if (deliveries.length) {
+        pendingTriggerEvents.push({
+          mode: 'slot',
+          nodes: [...new Set(deliveries.map(({ recipientPath }) => recipientPath))],
+          signals: deliveries
+        });
+      }
       await recordTransformStage('reconcile', refreshStartedAt, {
         ...(cycle.reconcileSummary ?? {})
       });
@@ -2235,11 +2261,12 @@ export async function executeAtomLanguage(options = {}) {
         && (cycle.messages?.length ?? 0) === 0
         && (cycle.shortcuts?.length ?? 0) === 0
         && (cycle.slotBodies?.length ?? 0) === 0
+        && (cycle.slotSignals?.length ?? 0) === 0
         && (cycle.jumps?.length ?? 0) === 0
         && (cycle.jumpAuthorizations?.length ?? 0) === 0
         && (cycle.agentRegistrations?.length ?? 0) === 0;
       if (pendingTriggerEvent && cycle.reconcileSummary?.preparedIndexHit === true
-        && noProgramEffects) {
+        && noProgramEffects && pendingTriggerEvents.length === 0) {
         return {
           atoms: reconciledAtoms,
           lockIndex: finalLockIndex,
@@ -2272,6 +2299,13 @@ export async function executeAtomLanguage(options = {}) {
 
       let passChanged = false;
       const compiledRequests = [];
+      const slotSignalClaimsByProgram = new Map();
+      for (const claim of cycle.slotSignalClaims ?? []) {
+        const programPath = claim.split('\0', 1)[0];
+        if (programPath && !slotSignalClaimsByProgram.has(programPath)) {
+          slotSignalClaimsByProgram.set(programPath, claim);
+        }
+      }
       for (const request of cycle.transforms ?? []) {
         const {
           sourceProgramRef: _sourceProgramRef,
@@ -2280,6 +2314,7 @@ export async function executeAtomLanguage(options = {}) {
           sourceStrutDeliveryClaim = null,
           ...rawTransformRequest
         } = request;
+        const sourceSlotSignalClaim = slotSignalClaimsByProgram.get(sourceProgramPath) ?? null;
         let transformRequest;
         try {
           transformRequest = normalizeScopedTransformRequest({
@@ -2288,7 +2323,7 @@ export async function executeAtomLanguage(options = {}) {
             scopeRoot: sourceScopeRoot
           });
         } catch (error) {
-          if (sourceStrutDeliveryClaim
+          if (sourceStrutDeliveryClaim || sourceSlotSignalClaim
             || programDeclaresSlotSeal(cycle.slotBodies, sourceProgramPath)) {
             throw Object.assign(new Error(error.message), {
               code: error.code ?? 'INVALID_PROGRAM_TRANSFORM',
@@ -2303,7 +2338,7 @@ export async function executeAtomLanguage(options = {}) {
         }
         const compiled = compileProgramTransform({ request: transformRequest, receiver });
         if (!compiled.ok) {
-          if (sourceStrutDeliveryClaim
+          if (sourceStrutDeliveryClaim || sourceSlotSignalClaim
             || programDeclaresSlotSeal(cycle.slotBodies, sourceProgramPath)) {
             throw Object.assign(new Error(
               compiled.errors?.[0]?.message ?? 'Program transform 无法编译'
@@ -2322,6 +2357,7 @@ export async function executeAtomLanguage(options = {}) {
         compiledRequests.push({
           sourceProgramPath,
           sourceStrutDeliveryClaim,
+          sourceSlotSignalClaim,
           transformRequest,
           item: compiled.item,
           createNew: compiled.createNew
@@ -2339,7 +2375,8 @@ export async function executeAtomLanguage(options = {}) {
         && (cycle.shortcuts?.length ?? 0) === 0
         && (cycle.slotBodies?.length ?? 0) === 0
         && (cycle.jumpAuthorizations?.length ?? 0) === 0
-        && (cycle.jumps?.filter((jump) => jump.action !== 'guard').length ?? 0) === 0) {
+        && (cycle.jumps?.filter((jump) => jump.action !== 'guard').length ?? 0) === 0
+        && pendingTriggerEvents.length === 0) {
         return {
           atoms: reconciledAtoms,
           lockIndex: finalLockIndex,
@@ -2400,7 +2437,7 @@ export async function executeAtomLanguage(options = {}) {
                   exactIndex
                 });
           } catch (error) {
-            if (entry.sourceStrutDeliveryClaim
+            if (entry.sourceStrutDeliveryClaim || entry.sourceSlotSignalClaim
               || programDeclaresSlotSeal(cycle.slotBodies, entry.sourceProgramPath)) {
               return {
                 failed: true,
@@ -2426,7 +2463,7 @@ export async function executeAtomLanguage(options = {}) {
             if (mutateInput && transformed.rolledBack) {
               exactIndex = createExactTransformIndex(candidateAtoms);
             }
-            if (entry.sourceStrutDeliveryClaim
+            if (entry.sourceStrutDeliveryClaim || entry.sourceSlotSignalClaim
               || programDeclaresSlotSeal(cycle.slotBodies, entry.sourceProgramPath)) {
               return {
                 failed: true,
@@ -2650,18 +2687,18 @@ export async function executeAtomLanguage(options = {}) {
           receipt?.target,
           ...(receipt?.recompute_targets ?? [])
         ]))).filter(Boolean))];
-        pendingTriggerEvent = triggeredNodes.length
-          ? { mode: 'transform', nodes: triggeredNodes, affectedPaths }
-          : null;
+        if (triggeredNodes.length) {
+          pendingTriggerEvents.push({ mode: 'transform', nodes: triggeredNodes, affectedPaths });
+        }
       }
       if (!passChanged && (authorization.triggerPaths?.length ?? 0) > 0) {
         const triggerPaths = [...new Set(authorization.triggerPaths.filter(Boolean))];
-        pendingTriggerEvent = {
+        pendingTriggerEvents.push({
           mode: 'transform', nodes: triggerPaths, affectedPaths: triggerPaths
-        };
+        });
         passChanged = true;
       }
-      if (!passChanged) {
+      if (!passChanged && pendingTriggerEvents.length === 0) {
         return {
           atoms: reconciledAtoms,
           lockIndex: finalLockIndex,
@@ -3384,11 +3421,40 @@ export async function executeAtomLanguage(options = {}) {
     return failureBase(parsed, contextFile, projectionFile, atoms, [run.error]);
   }
   if (run) {
-    const nextAtoms = atoms;
-    const revisionAfter = revisionOf(nextAtoms);
-    const changed = programChanged;
+    let nextAtoms = atoms;
+    let revisionAfter = revisionOf(nextAtoms);
+    let changed = programChanged;
     let finalProgramLockIndex = programLockIndex;
-    if (changed && !strictSlotRecompute) {
+    const finalProgramMessages = [];
+    const initialDeliveries = resolveSlotSignalDeliveries(
+      nextAtoms,
+      programCycle.slotSignals ?? [],
+      {
+        revision: revisionOf(nextAtoms),
+        createId: () => crypto.randomUUID()
+      }
+    );
+    if (initialDeliveries.length) {
+      try {
+        const reconciled = await reconcileProgramsForWorld(nextAtoms, {
+          mode: 'slot',
+          nodes: [...new Set(initialDeliveries.map(({ recipientPath }) => recipientPath))],
+          signals: initialDeliveries
+        });
+        nextAtoms = reconciled.atoms;
+        finalProgramLockIndex = reconciled.lockIndex;
+        finalProgramMessages.push(...reconciled.messages);
+        programTransformLogs.push(...reconciled.transformLogs);
+        revisionAfter = revisionOf(nextAtoms);
+        changed ||= revisionAfter !== revisionBefore;
+      } catch (error) {
+        releaseStrutDeliveryClaims();
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
+        )]);
+      }
+    }
+    if (changed && !strictSlotRecompute && initialProgramTriggerNodes.length > 0) {
       try {
         finalProgramLockIndex = await refreshProgramProjectionForWorld(
           nextAtoms,
@@ -3406,6 +3472,7 @@ export async function executeAtomLanguage(options = {}) {
       if (commitReceipt?.authorizationFailure) return commitReceipt.authorizationFailure;
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
+    if (!changed) confirmStrutDeliveryClaims();
     const resultMatch = walkAtoms(nextAtoms).find((match) => (
       match.path.join('/') === programCycle.selectedProgram?.path
     ));
@@ -3429,7 +3496,7 @@ export async function executeAtomLanguage(options = {}) {
       },
       warnings: interactionWarnings,
       errors: [],
-      messages: interactionMessages,
+      messages: [...interactionMessages, ...finalProgramMessages],
       interactionId: interaction.id,
       affectedPaths: committedAffectedPaths,
       lockState: programLockState(finalProgramLockIndex)

@@ -107,7 +107,7 @@ export async function executeAtomProgramFunctionRegistryEndpoint(
     );
   }
   if (payload.result?.contract !== 'atom-program-function-registry'
-    || payload.result?.version !== 6
+    || payload.result?.version !== 7
     || payload.result?.runtimeContract !== ATOM_RUNTIME_CONTRACT) {
     throw cliError(
       'ATOM_RUNTIME_CONTRACT_MISMATCH',
@@ -256,7 +256,7 @@ function help() {
     '  Program transform 创建：transform({"thing":"精确父路径/新节点","situation":"内容","slot":[],"strut":[]})；完整四轴且无点号指令时创建，带点号指令按更新处理。',
     '  transform() 返回 None，只表示登记了延后效果；实际提交必须以交互回执或后续 exact explore 回读确认。',
     '  JSON 函数：json_parse({"text":"..."})->JSON值；json_stringify({"value":...,"indent"?:0..8})->string。序列化默认紧凑，拒绝 NaN、Infinity 和非 JSON 值；失败将终止整个 Program 评估且不发布已登记效果；不开放 import/eval；可配合 situation.rep. 写回。',
-    '  世界函数：explore(query)->rows；transform(spec)、shortcut(spec)、agent(spec)、slot_body(spec)、lock(spec)、message(spec)->effect；current_atom()->Program。',
+    '  世界函数：explore(query)->rows；transform(spec)、shortcut(spec)、agent(spec)、slot(spec)、slot_body(spec)、lock(spec)、message(spec)->effect；current_atom()->Program；signal()->当前 Slot 信号。',
     '  虚拟引用：target = explore({"thing":"EXACT目标"})[0]；shortcut({"placement":"slot","thing":"显示名","target":target})在当前 Program 直接 slot 下创建引用。resolved = explore({"thing":"EXACT快捷入口"})[0] 仍是透明目标 ThingCoordinate；仅在本次 Agent 已获统一 Graph 读取授权时，resolved.shortcut_reference 才提供该入口的精确引用记录 ThingCoordinate（父 slot Explore 的对应透明结果同样提供）。shortcut({"action":"delete","reference":resolved.shortcut_reference})只删除引用，不改变目标，也不删除创建 Program。目标坐标、路径字符串和 .ref 均不能代替引用坐标。引用不复制目标事实、不携带创建者权限；每次查看均以本次 Agent 的普通 Explore 鉴权解析目标。首版 Transform 不经引用重定向。',
     '  Agent登记：当前 Program 调用 agent({"labels":["^^","业务标签"],"functions":{"groups":["form"],"names":["message"]}}) 即把本节点登记为 Agent；无 target／lock／mode。labels、groups、names 必须是源码中的 JSON literal，functions 必填且禁止 null、通配。',
     '  职能 scope：groups 是正式分层权限，运行时按当前 registry 获得该组及后代组的函数；names 是冻结的具体函数授权。子窗口只能获得创建者 scope 本身、后代组或其函数，不能上铸祖先组、跨到同级其他职能树，仅持有 name 也不能铸造 group。',
@@ -271,6 +271,7 @@ function help() {
     '  固定窗口锁：agent() 登记时由内核强制启用且不可关闭或自定义；可读 current／后代／同父普通节点／唯一直接父上下文，可写 current 后代。直接父不能成为新锚点进入其同层；exact path 不绕过。',
     '  冷启动：内核从包含一个顶层字面量 agent({...}) 声明的 thing@program Situation 重建 labels 与符号职能 scope，并从 Program 中的 literal-path lock() 按当前 Graph 重编译锁；旧侧车 locks 返回 RETIRED_REQUEST_DRIVEN_LOCK_SNAPSHOT，agentRegistrations 返回 RETIRED_AGENT_REGISTRATION_SNAPSHOT，windowSelfLocks/windowSelfLockAgents 返回 RETIRED_WINDOW_SELF_LOCK_SNAPSHOT，均只能一次性审计清退且不作为鉴权输入。',
     '  Transform 触发器：先定义无参数 main，再声明 trigger("transform", {"nodes":["exact 节点路径"]}, main)。main 是函数引用，不能写 main()；运行时按反向索引只运行命中的 Program；相同值写入仍属于 Transform 事件。未声明 trigger 的 Program 冷启动时遇到无关 Transform 不会重放；显式 .run.、其自身被 Transform 或已知 explore 依赖变化时仍运行。',
+    '  Slot信号：slot({"to":"up|down","labels":[...]})只沿直接父子Slot投递；接收节点自己的Program用trigger("slot", {"from":"up|down","labels":[...],"match":"all|exact"}, main)，回调内signal()读取本次来源与标签。信号不写事实、不自动续传、不授予权限。',
     '  推支触发器：普通前项／后项不保存布尔值；推支线 if 内嵌 Program strict true 后只形成 typed delivery，不直接执行后项。后项自己的 Program 可声明 trigger("strut", {"nodes":["exact 或槽例相对后项路径"]}, main)，其中 main(delivery) 接收 decision、clauseId、antecedentPaths、consequentPath 与 revision；未显式订阅、false、仅 slot／strut 关联均不执行。',
     '  Program 停用：把 Program 本身或其普通 slot 上级通过 .dsc. 可逆移入唯一 thing@backup@default 子树；其中 @program 保留类型与 situation 源码，但不进入活跃运行、trigger、changed 或 explore 依赖索引，也不能由 thing.run/use_program 执行。.rst. 恢复原位后按当前事实重新激活并重建索引。停用只认显式 backup@default 类型，不根据容器显示名猜测。',
     '  统一鉴权顺序：当前 Agent 起点 → 实际 slot 路径上的锁 → 目标 node 锁；Explore、Transform 及注册函数内部读写共用此链，标签不足返回锁拒绝且不读取目标 situation。',

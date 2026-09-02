@@ -46,7 +46,7 @@ def load_program_function_registry():
     value = json.loads(module_path.read_text(encoding="utf-8"))
     hierarchy = value.get("functionScopeHierarchy", {})
     if (value.get("contract") != "atom-program-function-registry"
-            or value.get("version") != 6
+            or value.get("version") != 7
             or value.get("runtimeContract") != "atom-interaction/4"
             or hierarchy.get("groupField") != "functionFamilies[].id"
             or hierarchy.get("parentField") != "functionFamilies[].parent"

@@ -54,7 +54,7 @@ test('Program function catalog filters declared groups without exposing a second
 
   assert.equal(
     cycle.messages[0].text,
-    'agent,changed,child_detail,direct_children,explore,jump,jump_authorize,lock,shortcut,slot_body,subtree_refs,transform|False'
+    'agent,changed,child_detail,direct_children,explore,jump,jump_authorize,lock,shortcut,slot,slot_body,subtree_refs,transform|False'
   );
 });
 
@@ -106,7 +106,7 @@ test('CLI and Web expose equivalent function registry data without an Agent cont
   const webPayload = await response.json();
   assert.equal(webPayload.ok, true);
   assert.equal(webPayload.result.contract, 'atom-program-function-registry');
-  assert.equal(webPayload.result.version, 6);
+  assert.equal(webPayload.result.version, 7);
   assert.equal(webPayload.result.runtimeContract, 'atom-interaction/4');
 
   const stdout = output();
@@ -347,6 +347,90 @@ test('public registry exposes indexed Transform trigger dispatch and function-re
     trigger.contract.untriggeredProgramDispatch,
     'explicit-run-program-self-transform-or-known-dependency-change'
   );
+});
+
+test('public registry exposes only the current adjacent Slot signal ABI', async () => {
+  const { programFunctionRegistry } = await import('../work-engine/atom-language/program-function-registry.mjs');
+  const registry = programFunctionRegistry();
+  const slot = registry.functions.find((item) => item.name === 'slot');
+  const signal = registry.functions.find((item) => item.name === 'signal');
+  const trigger = registry.functions.find((item) => item.name === 'trigger');
+
+  assert.equal(registry.version, 7);
+  assert.deepEqual(slot.contract.argument, {
+    type: 'object',
+    required: ['to', 'labels'],
+    additionalProperties: false,
+    properties: {
+      to: { enum: ['up', 'down'] },
+      labels: {
+        type: 'array', minItems: 1, uniqueItems: true,
+        items: { type: 'string', minLength: 1 }
+      }
+    }
+  });
+  assert.deepEqual(slot.contract.result, {
+    type: 'null', value: null, meaning: 'ephemeral-effect'
+  });
+  assert.equal(slot.contract.delivery, 'direct-slot-relatives-only');
+  assert.equal(slot.contract.persistence, 'none');
+  assert.equal(slot.contract.forwarding, 'explicit-only');
+  assert.equal(slot.contract.authorization, 'does-not-grant');
+  assert.deepEqual(slot.contract.errors, [
+    'INVALID_SLOT_SIGNAL',
+    'INVALID_SLOT_SIGNAL_DIRECTION',
+    'INVALID_SLOT_SIGNAL_LABELS'
+  ]);
+
+  assert.deepEqual(signal.contract.argument, { type: 'none' });
+  assert.deepEqual(signal.contract.result, {
+    type: 'object',
+    required: ['from', 'labels'],
+    additionalProperties: false,
+    properties: {
+      from: { enum: ['up', 'down'] },
+      labels: {
+        type: 'array', minItems: 1, uniqueItems: true,
+        items: { type: 'string', minLength: 1 }
+      }
+    }
+  });
+  assert.equal(signal.contract.context, 'active-slot-trigger-invocation-only');
+  assert.deepEqual(signal.contract.errors, ['SLOT_SIGNAL_REQUIRED']);
+
+  assert.deepEqual(trigger.contract.slot.arguments, [
+    { name: 'mode', const: 'slot' },
+    {
+      name: 'parameters',
+      type: 'object',
+      required: ['from', 'labels'],
+      additionalProperties: false,
+      properties: {
+        from: { enum: ['up', 'down'] },
+        labels: {
+          type: 'array', minItems: 1, uniqueItems: true,
+          items: { type: 'string', minLength: 1 }
+        },
+        match: { enum: ['all', 'exact'], default: 'all' }
+      }
+    },
+    { name: 'entrypoint', type: 'function-reference', arguments: 0 }
+  ]);
+  assert.equal(Object.hasOwn(trigger.contract.slot.arguments[1].properties, 'nodes'), false);
+  assert.equal(trigger.contract.slot.dispatch, 'receiver-owned-reverse-index');
+  assert.equal(trigger.contract.slot.event, 'ephemeral-adjacent-slot-signal');
+});
+
+test('CLI Help publishes the exact adjacent Slot signal contract and function lists', async () => {
+  const stdout = output();
+  const stderr = output();
+  const code = await runAtomCli(['--help'], { stdout: stdout.stream, stderr: stderr.stream });
+  const help = stdout.value();
+
+  assert.equal(code, 0, stderr.value());
+  assert.ok(help.includes('Slot信号：slot({"to":"up|down","labels":[...]})只沿直接父子Slot投递；接收节点自己的Program用trigger("slot", {"from":"up|down","labels":[...],"match":"all|exact"}, main)，回调内signal()读取本次来源与标签。信号不写事实、不自动续传、不授予权限。'));
+  assert.match(help, /Graph 函数：[^\n]*\bslot\b/u);
+  assert.match(help, /Program 函数：[^\n]*\bsignal\b/u);
 });
 
 test('CLI Help documents the three-argument Transform trigger without eager main invocation', async () => {

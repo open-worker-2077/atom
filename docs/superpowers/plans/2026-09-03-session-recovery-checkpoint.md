@@ -1,8 +1,9 @@
 # Atom 当前开发恢复断点
 
-**更新时间：** 2026-09-03（ChatGPT 软件更新前）  
+**更新时间：** 2026-09-03（Slot 相邻信号 Task 4 完成）
 **权威分支：** `main`  
 **记录前 HEAD：** `9280289`  
+**当前实现分支：** `feat/slot-signal`；隔离 worktree 为 `D:\Project\〇\subprojects\atom\.worktrees\slot-signal`
 **用途：** 新 Session 不依赖聊天历史，按本文恢复当前用户定论、证据与执行顺序。
 
 ## 1. 当前唯一首要功能
@@ -45,15 +46,21 @@
 
 ## 4. 执行状态与下一步
 
-- **已完成**：Slot规格、恢复断点与 README入口已由本地提交`67be623`持久化。
-- **计划已形成**：实施计划见[`2026-09-03-atom-slot-signal.md`](2026-09-03-atom-slot-signal.md)；生产代码、Slot功能 worktree与测试尚未开始。
+- **已完成提交**：`67be623`持久化规格恢复上下文；`5a3ce51`形成实施计划；`d0947a1`增加 Program ABI；`036b542`解析直接 Slot 亲属；`565e9ee`增加 receiver-owned 调度与 claim；`397ed9a`保证内部 routing nodes 不执行无匹配 trigger 的 Program，并让严格事件校验先于 prepared-index 快路。
+- **Task 4 实现**：当前待提交改动把 Slot/Transform 事件放入同一 FIFO 队列，沿不变世界修订继续调和，把接收方 effects 留在候选世界事务中；成功提交或 signal-only 成功才 confirm，所有失败路径 release。Program 注册表统一升到 v7，Work Order 注册表仍为 v1；Help 公开唯一 Slot ABI。
+- **Task 4 验证**：
+  - `node --test tests/atom-slot-signal-runtime.test.mjs tests/atom-slot-signal-scheduling.test.mjs tests/atom-slot-signal-e2e.test.mjs tests/atom-program-function-registry.test.mjs`：44/44 PASS；随后增强“同一 sender 同时发 Transform 与 Slot”断言，`node --test tests/atom-slot-signal-e2e.test.mjs`：4/4 PASS。
+  - `npm run test:system`：220/220 PASS，0 fail。
+  - `npm test`：1640/1640 PASS，0 fail；构建只机械刷新`index.html` build-id，已恢复且未纳入提交。
+  - `git diff --check`：0 error。
+  - Task 1 延后 Minor 已由`one slot signal executes its receiver once across duplicate, sequential, and concurrent refreshes`覆盖：cycle 只聚合`cached === false`结果，确认后的同一 delivery 不重放，无需重复测试。
+- **真实命令验收**：临时世界位于`C:\Users\worker\AppData\Local\Temp\atom-slot-signal-task4-20260903-01`；实际 server 首次使用临时端口61952，重启后使用59632，所有 CLI 都显式传`--endpoint`，未访问4784世界。down/up分别只改变直接子/父接收目标，未匹配、孙级、祖父级和同级目标保持`before`；消息分别为`down-payload:from,labels:up:handoff`、`up-payload:from,labels:down:report`。signal-only前后世界 SHA256 同为`59FC64A44E4BDC08C4170957D10B04CD592B00E14B0127C853140979BD2ECFAA`，回执 revision before/after 同为`130260388d03469c79ca0b8cc4bdd00999ac6a9d9d7e0c919e8b8b91f56cf7b9`。权限失败连续两次返回`GRAPH_LOCK_DENIED`/exit 4且世界 SHA不变，证明失败可重试；重启后`down-ok`/`up-ok`仍在，两个 sender 再运行仍得到正确 payload。
+- **仍未完成 P0**：4784命令端队列失活的总交互预算、取消、队列释放和终态诊断仍未实现；不得把临时重启当修复。
 - **恢复顺序**：
-  1. 运行`atom.cmd --help`并读取本文件及 Slot规格。
-  2. 检查`git status --short --branch`与`git log -5 --oneline --decorate`。
-  3. 校验两份文档无缺失后提交本次规格/断点。
-  4. 按[`2026-09-03-atom-slot-signal.md`](2026-09-03-atom-slot-signal.md)建隔离 worktree，使用 `executing-plans`逐任务执行。
-  5. 按 TDD先写 Slot RED，再实现、评审、验证；每个任务独立提交。
-  6. Slot完成后处理 P0队列失活；Transform context另行 brainstorming，不把未设计字段顺手塞入 Slot。
+  1. 在`feat/slot-signal`回读 Task 4提交与本断点，确认工作区只剩刻意保留的任务报告。
+  2. 按项目集成流程复核 Slot四个实现提交；不得在本 worktree自行 push、merge或改生产世界。
+  3. Slot集成完成后，以独立规格/TDD处理 P0队列失活：先稳定复现占队列交互，再实现总预算、取消、原子回滚、queue tail释放和终态诊断。
+  4. Transform context另行 brainstorming，不把旧/新值等未设计字段混入 Slot。
 
 ## 5. 其他暂停工作
 

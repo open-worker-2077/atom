@@ -1,6 +1,6 @@
 {
   "contract": "atom-program-function-registry",
-  "version": 6,
+  "version": 7,
   "runtimeContract": "atom-interaction/4",
   "types": [
     { "id": "program", "layer": "kernel", "executable": true }
@@ -222,6 +222,34 @@
       }
     },
     {
+      "name": "slot",
+      "layer": "kernel",
+      "family": "graph",
+      "scope": "public",
+      "contract": {
+        "argument": {
+          "type": "object",
+          "required": ["to", "labels"],
+          "additionalProperties": false,
+          "properties": {
+            "to": { "enum": ["up", "down"] },
+            "labels": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "result": { "type": "null", "value": null, "meaning": "ephemeral-effect" },
+        "delivery": "direct-slot-relatives-only",
+        "persistence": "none",
+        "forwarding": "explicit-only",
+        "authorization": "does-not-grant",
+        "errors": ["INVALID_SLOT_SIGNAL", "INVALID_SLOT_SIGNAL_DIRECTION", "INVALID_SLOT_SIGNAL_LABELS"]
+      }
+    },
+    {
       "name": "slot_body",
       "layer": "kernel",
       "family": "graph",
@@ -339,6 +367,31 @@
     { "name": "choice", "layer": "kernel", "family": "program", "scope": "public" },
     { "name": "current_atom", "layer": "kernel", "family": "program", "scope": "public" },
     {
+      "name": "signal",
+      "layer": "kernel",
+      "family": "program",
+      "scope": "public",
+      "contract": {
+        "argument": { "type": "none" },
+        "result": {
+          "type": "object",
+          "required": ["from", "labels"],
+          "additionalProperties": false,
+          "properties": {
+            "from": { "enum": ["up", "down"] },
+            "labels": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "context": "active-slot-trigger-invocation-only",
+        "errors": ["SLOT_SIGNAL_REQUIRED"]
+      }
+    },
+    {
       "name": "trigger",
       "layer": "kernel",
       "family": "program",
@@ -365,7 +418,31 @@
         "dispatch": "reverse-index",
         "event": "transform-request",
         "sameValueTriggers": true,
-        "untriggeredProgramDispatch": "explicit-run-program-self-transform-or-known-dependency-change"
+        "untriggeredProgramDispatch": "explicit-run-program-self-transform-or-known-dependency-change",
+        "slot": {
+          "arguments": [
+            { "name": "mode", "const": "slot" },
+            {
+              "name": "parameters",
+              "type": "object",
+              "required": ["from", "labels"],
+              "additionalProperties": false,
+              "properties": {
+                "from": { "enum": ["up", "down"] },
+                "labels": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                "match": { "enum": ["all", "exact"], "default": "all" }
+              }
+            },
+            { "name": "entrypoint", "type": "function-reference", "arguments": 0 }
+          ],
+          "dispatch": "receiver-owned-reverse-index",
+          "event": "ephemeral-adjacent-slot-signal"
+        }
       }
     },
     {
