@@ -57,9 +57,11 @@ Expected: all PASS；10,000 实体的三个首请求均低于 1 秒。
 
 2026-09-02 补充根因与回归证据：真实 22MB 投影的单个局部请求约 0.17—0.25 秒，但旧读取路径会为每个 scope 同步复制完整投影，16 路并发放大至 3.49 秒、24 路放大至 5.27 秒。新增 10,000 实体、约生产体量的 16 路局部并发 RED，旧实现最慢 1067.7ms；Store 增加驻留快照局部 projector 后只复制裁剪结果，聚焦回归 38/38、系统回归 219/219 通过。
 
-- [ ] **Step 5: Deploy and verify the real 4784**
+- [x] **Step 5: Deploy and verify the real 4784**
 
 提交并快进合并到 `main`，安全重启 4784；记录健康、root state、当前深层 state 的首字节和总耗时，确认进程不再因重复全量读取持续膨胀。保留部署前 Git revision 作为代码回退点。
+
+2026-09-02 真实世界验收：以`6340fda`重启本机计划任务后，4784 在全局初始化完成并发布 revision 7220、projection published 后才就绪。连续请求中 health 最慢 35.3ms、root state 最慢 44.8ms、已知深层 state 最慢 16.4ms；8/16/24 路深层并发最慢分别 208.0/381.9/546.1ms，均低于 1 秒。Node 工作集约 627MB，未再出现逐 scope 完整投影复制造成的线性秒级排队。
 
 - [ ] **Step 6: Commit and push**
 
