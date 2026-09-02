@@ -48,6 +48,7 @@ async function copyIfPresent(source, target) {
 async function createBackup(runtime, plan, attemptId, sourceBytes) {
   const directory = path.join(runtime.worldDirectory, 'migration-backups',
     'inline-strut', plan.migrationId, attemptId);
+  await fs.mkdir(path.dirname(directory), { recursive: true });
   await fs.mkdir(directory, { recursive: false });
   const journalFile = path.join(runtime.worldDirectory, 'atom.transactions.json');
   const files = (await Promise.all([
