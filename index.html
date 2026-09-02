@@ -148,15 +148,7 @@
     </header>
 
     <nav class="field-actions" aria-label="视角与空间工具">
-      <button class="edge-action" id="viewBackAction" type="button" data-intent="backView">视角后退</button>
-      <button class="edge-action" id="viewForwardAction" type="button" data-intent="forwardView" data-priority="wide">前进</button>
-      <button class="edge-action" id="exitAction" type="button" data-intent="exit">上层</button>
-      <button class="edge-action" type="button" data-intent="returnOverview" data-priority="wide">全域</button>
-      <button class="edge-action" type="button" data-ui="search">搜索</button>
-      <button class="edge-action" type="button" data-ui="mermaid">导入/导出</button>
-      <button class="edge-action" id="worldLensAction" type="button" data-intent="toggleWorldLens" data-priority="wide" aria-pressed="false">域径图</button>
-      <button class="edge-action" type="button" data-ui="mapping">映射</button>
-      <button class="edge-action" type="button" data-ui="help" data-priority="wide" aria-keyshortcuts="H">帮助 H</button>
+      <button class="edge-action orbital-settings-action" id="settingsAction" type="button" data-ui="settings" aria-label="设置" aria-haspopup="dialog">✦</button>
     </nav>
 
     <section class="spatial-search" id="searchPanel" role="search" aria-labelledby="searchTitle" hidden>
@@ -341,14 +333,34 @@
       </section>
     </nav>
 
-    <aside class="edge-panel" id="mappingPanel" aria-labelledby="mappingTitle" hidden>
+    <aside class="edge-panel settings-panel" id="settingsPanel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
       <div class="edge-panel__head">
         <div>
-          <h2 id="mappingTitle">输入映射</h2>
-          <p>功能意图与物理按键彻底分离。</p>
+          <h2 id="settingsTitle">空间设置</h2>
+          <p>游走、工具、映射、显示与启动入口集中在同一轨道。</p>
         </div>
-        <button class="panel-close" type="button" data-close="mapping" aria-label="关闭输入映射">关闭</button>
+        <button class="panel-close" type="button" data-close="settings" aria-label="关闭设置">关闭</button>
       </div>
+      <section class="settings-window-section" aria-labelledby="journeySettingsTitle">
+        <h3 id="journeySettingsTitle">游走</h3>
+        <div class="settings-action-row">
+          <button class="edge-action" id="viewBackAction" type="button" data-intent="backView">视角后退</button>
+          <button class="edge-action" id="viewForwardAction" type="button" data-intent="forwardView">前进</button>
+          <button class="edge-action" id="exitAction" type="button" data-intent="exit">上层</button>
+          <button class="edge-action" type="button" data-intent="returnOverview">全域</button>
+        </div>
+      </section>
+      <section class="settings-window-section" aria-labelledby="toolSettingsTitle">
+        <h3 id="toolSettingsTitle">空间工具</h3>
+        <div class="settings-action-row">
+          <button class="edge-action" type="button" data-ui="search">搜索</button>
+          <button class="edge-action" type="button" data-ui="mermaid">导入/导出</button>
+          <button class="edge-action" id="worldLensAction" type="button" data-intent="toggleWorldLens" aria-pressed="false">域径图</button>
+          <button class="edge-action" type="button" data-ui="help" aria-keyshortcuts="H">帮助 H</button>
+        </div>
+      </section>
+      <section class="settings-window-section" aria-labelledby="mappingWindowTitle">
+        <h3 id="mappingWindowTitle">映射</h3>
       <button class="mapping-help-route" type="button" data-open-help-page="mobile">
         <span>手机 Web 操作</span>
         <small>手指替代鼠标；键盘沿用电脑端键位</small>
@@ -357,6 +369,18 @@
         <button type="button" data-preset="explorer" aria-pressed="true">标准探索</button>
         <button type="button" data-preset="oneHand" aria-pressed="false">单手试验</button>
       </div>
+      <label class="setting-select" for="defaultDetailMode">
+        <span>CapsLock 默认展示</span>
+        <select id="defaultDetailMode">
+          <option value="name">节点名称</option>
+          <option value="surface">镜面</option>
+          <option value="floating">悬浮框</option>
+        </select>
+        <small>新会话与新进入域采用此模式；已恢复的历史快照保持其记录。</small>
+      </label>
+      </section>
+      <section class="settings-window-section" aria-labelledby="displayWindowTitle">
+        <h3 id="displayWindowTitle">显示</h3>
       <nav class="settings-sections" aria-label="映射设置分栏">
         <a href="#viewSettingsTitle">视图</a>
         <a href="#nodeSettingsTitle">节点</a>
@@ -365,7 +389,7 @@
         <a href="#startupSettingsTitle">启动</a>
       </nav>
       <section class="presentation-settings" aria-labelledby="viewSettingsTitle">
-        <h3 id="viewSettingsTitle">视图布局</h3>
+        <h4 id="viewSettingsTitle">视图布局</h4>
         <label class="range-setting">
           <span>S 同层互斥间隔</span>
           <span class="range-setting__control">
@@ -407,7 +431,7 @@
         </label>
       </section>
       <section class="presentation-settings" aria-labelledby="nodeSettingsTitle">
-        <h3 id="nodeSettingsTitle">节点文字</h3>
+        <h4 id="nodeSettingsTitle">节点文字</h4>
         <label class="range-setting">
           <span>中键名称高亮层级</span>
           <span class="range-setting__control">
@@ -431,7 +455,7 @@
         </label>
       </section>
       <section class="presentation-settings" aria-labelledby="relationshipSettingsTitle">
-        <h3 id="relationshipSettingsTitle">关联线</h3>
+        <h4 id="relationshipSettingsTitle">关联线</h4>
         <label class="range-setting">
           <span>箭身与端点粗度</span>
           <span class="range-setting__control">
@@ -449,7 +473,7 @@
         <p class="settings-note">粗度同时作用于箭头、燕尾和箭身；亮度独立调节，不改变布局。</p>
       </section>
       <section class="presentation-settings" aria-labelledby="detailFocusSettingsTitle">
-        <h3 id="detailFocusSettingsTitle">详情聚焦</h3>
+        <h4 id="detailFocusSettingsTitle">详情聚焦</h4>
         <label class="range-setting">
           <span>中键详情显示层级</span>
           <span class="range-setting__control">
@@ -480,8 +504,11 @@
         </label>
         <p class="settings-note">中键选择节点或团后，CapsLock 详情只重点显示所设层数；默认隐藏范围外详情。</p>
       </section>
+      </section>
+      <section class="settings-window-section" aria-labelledby="startupWindowTitle">
+        <h3 id="startupWindowTitle">启动与帮助</h3>
       <section class="presentation-settings" aria-labelledby="startupSettingsTitle">
-        <h3 id="startupSettingsTitle">启动与演示</h3>
+        <h4 id="startupSettingsTitle">启动与演示</h4>
         <label>
           <span>P 空闲演示秒数</span>
           <input id="demoIdleSeconds" type="number" min="1" max="3600" step="1" inputmode="numeric" placeholder="留空关闭">
@@ -493,6 +520,7 @@
       </section>
       <div class="binding-groups" id="bindingList"></div>
       <p class="edge-panel__foot">未来触控、手柄、凝视与手势只需增加适配器，不改球域逻辑。</p>
+      </section>
     </aside>
 
     <aside id="helpPanel" class="edge-panel help-overlay" aria-labelledby="helpTitle" aria-modal="false" hidden>

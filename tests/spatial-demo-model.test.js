@@ -19,7 +19,7 @@ test('first visit keeps automatic presentation off until the user explicitly ena
   assert.ok(model, 'SpatialDemoModel must exist');
   assert.deepEqual(
     JSON.parse(JSON.stringify(model.normalizeSettings(null))),
-    { idleSeconds: null, lastIdleSeconds: 5, helpVisible: true, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 
@@ -31,11 +31,11 @@ test('blank idle seconds disables presentation while retaining the last valid de
       lastIdleSeconds: 12,
       helpVisible: false
     }))),
-    { idleSeconds: null, lastIdleSeconds: 12, helpVisible: false, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 12, helpVisible: false, defaultDetailMode: 'floating', peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(model.withIdleInput({ idleSeconds: 8, lastIdleSeconds: 8, helpVisible: true }, ''))),
-    { idleSeconds: null, lastIdleSeconds: 8, helpVisible: true, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 8, helpVisible: true, defaultDetailMode: 'floating', peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 
@@ -45,6 +45,17 @@ test('P toggles the same enabled value used by the settings field', () => {
   assert.equal(disabled.idleSeconds, null);
   const enabled = model.toggleDemo(disabled);
   assert.equal(enabled.idleSeconds, 7);
+});
+
+test('CapsLock default detail mode accepts only name, surface, or floating and preserves the selected value', () => {
+  const model = loadModel();
+  assert.equal(model.normalizeSettings({ defaultDetailMode: 'name' }).defaultDetailMode, 'name');
+  assert.equal(model.normalizeSettings({ defaultDetailMode: 'surface' }).defaultDetailMode, 'surface');
+  assert.equal(model.normalizeSettings({ defaultDetailMode: 'floating' }).defaultDetailMode, 'floating');
+  assert.equal(model.normalizeSettings({ defaultDetailMode: 'invalid' }).defaultDetailMode, 'floating');
+  assert.equal(model.normalizeSettings({}).defaultDetailMode, 'floating');
+  assert.equal(model.withDefaultDetailModeInput(null, 'surface').defaultDetailMode, 'surface');
+  assert.equal(model.withDefaultDetailModeInput({ defaultDetailMode: 'surface' }, 'invalid').defaultDetailMode, 'floating');
 });
 
 test('S tunnel strength is persisted and clamped from zero through one hundred percent', () => {
@@ -405,7 +416,7 @@ test('invalid persisted settings recover without leaking unknown fields', () => 
   });
   assert.deepEqual(
     JSON.parse(JSON.stringify(settings)),
-    { idleSeconds: 5, lastIdleSeconds: 5, helpVisible: true, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: 5, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 

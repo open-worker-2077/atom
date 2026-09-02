@@ -62,6 +62,25 @@ test('demo model loads before the engine and the mapping panel owns persistent P
   assert.match(engine, /withRelationshipBrightnessInput/);
 });
 
+test('one orbital settings entry opens a centered five-section window with the CapsLock default in mapping', () => {
+  assert.equal((html.match(/data-ui="settings"/g) || []).length, 1);
+  assert.match(html, /id="settingsAction"[^>]*aria-label="设置"/);
+  assert.match(html, /id="settingsPanel"[^>]*role="dialog"[^>]*aria-modal="true"/);
+  for (const section of ['游走', '空间工具', '映射', '显示', '启动与帮助']) {
+    assert.match(html, new RegExp(`<h3[^>]*>${section}</h3>`));
+  }
+  const mappingStart = html.indexOf('id="mappingWindowTitle">映射</h3>');
+  const mappingEnd = html.indexOf('id="displayWindowTitle">显示</h3>');
+  const mappingSection = html.slice(mappingStart, mappingEnd);
+  assert.match(mappingSection, /id="defaultDetailMode"/);
+  assert.match(mappingSection, /CapsLock 默认展示/);
+  assert.match(engine, /withDefaultDetailModeInput/);
+  assert.match(functionSource('prepareWorkspaceNode'), /state\.demo\.settings\.defaultDetailMode/);
+  assert.match(functionSource('restoreVisualSnapshot'), /detailModes\.has\(node\.id\)/);
+  assert.match(css, /\.settings-panel[\s\S]*position:\s*fixed/);
+  assert.match(css, /\.settings-panel[\s\S]*inset:\s*50%\s+auto\s+auto\s+50%/);
+});
+
 test('presentation cue is central non-blocking live UI', () => {
   assert.match(html, /id="demoCue"[^>]*aria-live="polite"/);
   assert.match(css, /\.demo-cue[\s\S]*position:\s*fixed/);

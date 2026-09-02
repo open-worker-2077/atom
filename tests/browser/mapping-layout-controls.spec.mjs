@@ -68,6 +68,26 @@ async function screenTargets(page, ids) {
   }, ids);
 }
 
+test('orbital settings centralize tools and persist the CapsLock default detail mode', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => window.spatialLab && document.body.dataset.spatialBridge === 'connected');
+  await expect(page.locator('.field-actions [data-ui="settings"]')).toHaveCount(1);
+  await page.locator('#settingsAction').click();
+  await expect(page.locator('#settingsPanel')).toBeVisible();
+  await expect(page.locator('#settingsPanel')).toHaveAttribute('aria-modal', 'true');
+  await expect(page.locator('#settingsPanel h3')).toHaveText(['游走', '空间工具', '映射', '显示', '启动与帮助']);
+  await page.locator('#defaultDetailMode').selectOption('surface');
+  await expect.poll(() => page.evaluate(() => JSON.parse(
+    localStorage.getItem('graph-4d.presentation-settings.v2') || '{}'
+  ).defaultDetailMode)).toBe('surface');
+  await page.reload();
+  await page.waitForFunction(() => window.spatialLab && document.body.dataset.spatialBridge === 'connected');
+  await page.locator('#settingsAction').click();
+  await expect(page.locator('#defaultDetailMode')).toHaveValue('surface');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#settingsPanel')).toBeHidden();
+});
+
 test('S interval changes same-level screen edge gap without resizing those nodes', async ({ page }) => {
   test.setTimeout(60_000);
   await loadTwoLevelField(page, 'setNestedView');

@@ -16,6 +16,7 @@
   const DEFAULT_HIGHLIGHTED_DETAIL_BRIGHTNESS_PERCENT = 100;
   const DEFAULT_OTHER_DETAIL_BRIGHTNESS_PERCENT = 0;
   const DEFAULT_FLOATING_DETAIL_BACKDROP_OPACITY_PERCENT = 82;
+  const DEFAULT_DETAIL_MODE = "floating";
 
   function validSeconds(value) {
     const number = Number(value);
@@ -80,6 +81,12 @@
       : DEFAULT_PERIPHERAL_DEPTH_SHRINK_PERCENT;
   }
 
+  function validDetailMode(value) {
+    return ["name", "surface", "floating"].includes(value)
+      ? value
+      : DEFAULT_DETAIL_MODE;
+  }
+
   function normalizeSettings(input) {
     const source = input && typeof input === "object" ? input : {};
     const lastIdleSeconds = validSeconds(source.lastIdleSeconds) || DEFAULT_IDLE_SECONDS;
@@ -92,6 +99,7 @@
       idleSeconds,
       lastIdleSeconds,
       helpVisible: typeof source.helpVisible === "boolean" ? source.helpVisible : true,
+      defaultDetailMode: validDetailMode(source.defaultDetailMode),
       peripheralDepthShrinkPercent: validPeripheralDepthShrink(source.peripheralDepthShrinkPercent),
       nestedCompactnessPercent: validNestedCompactness(source.nestedCompactnessPercent),
       nestedTunnelPercent: validPercent(source.nestedTunnelPercent),
@@ -144,6 +152,11 @@
       ...settings,
       idleSeconds: settings.idleSeconds === null ? settings.lastIdleSeconds : null
     });
+  }
+
+  function withDefaultDetailModeInput(settingsInput, value) {
+    const settings = normalizeSettings(settingsInput);
+    return normalizeSettings({ ...settings, defaultDetailMode: validDetailMode(value) });
   }
 
   function withNestedTunnelInput(settingsInput, value) {
@@ -449,6 +462,7 @@
     defaultIdleSeconds: DEFAULT_IDLE_SECONDS,
     normalizeSettings,
     withIdleInput,
+    withDefaultDetailModeInput,
     withPeripheralDepthShrinkInput,
     withNestedCompactnessInput,
     withNestedTunnelInput,

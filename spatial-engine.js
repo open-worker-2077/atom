@@ -38,7 +38,7 @@
     metricScale: document.getElementById("metricScale"),
     metricPhase: document.getElementById("metricPhase"),
     hint: document.getElementById("fieldHint"),
-    mappingPanel: document.getElementById("mappingPanel"),
+    mappingPanel: document.getElementById("settingsPanel"),
     helpPanel: document.getElementById("helpPanel"),
     mermaidPanel: document.getElementById("mermaidPanel"),
     searchPanel: document.getElementById("searchPanel"),
@@ -75,6 +75,7 @@
     bindingList: document.getElementById("bindingList"),
     demoIdleSeconds: document.getElementById("demoIdleSeconds"),
     helpStartupToggle: document.getElementById("helpStartupToggle"),
+    defaultDetailMode: document.getElementById("defaultDetailMode"),
     zoomSpeed: document.getElementById("zoomSpeed"),
     zoomSpeedValue: document.getElementById("zoomSpeedValue"),
     relationshipLineWidth: document.getElementById("relationshipLineWidth"),
@@ -943,7 +944,6 @@
       .filter((node) => node.surfaceVisible)
       .map((node) => node.id);
     const detailModes = snapshotNodes
-      .filter((node) => visualModel.detailModeFor(node) !== "name")
       .map((node) => ({ id: node.id, mode: visualModel.detailModeFor(node) }));
     return {
       path: state.currentPath,
@@ -1049,7 +1049,9 @@
     for (const node of existingNodes(snapshotNodes)) {
       node.lensOpen = detailLensIds.has(node.id);
       node.surfaceVisible = surfaceIds.has(node.id);
-      node.detailMode = detailModes.get(node.id) || (node.surfaceVisible ? "surface" : "floating");
+      node.detailMode = detailModes.has(node.id)
+        ? detailModes.get(node.id)
+        : (node.surfaceVisible ? "surface" : state.demo.settings.defaultDetailMode);
       node.surfaceOpenedAt = node.surfaceVisible ? surfaceOpenedAt : 0;
     }
     updateSelectionUI();
@@ -4508,7 +4510,7 @@
   }
 
   function prepareWorkspaceNode(node, path = state.currentPath) {
-    const detailMode = visualModel.detailModeFor(node);
+    const detailMode = state.demo.settings.defaultDetailMode;
     Object.assign(node, {
       definitionId: null,
       preview: "lens",
@@ -7647,7 +7649,7 @@
   });
 
   function closePanels(except) {
-    ui.mappingPanel.hidden = except === "mapping" ? ui.mappingPanel.hidden : true;
+    ui.mappingPanel.hidden = except === "settings" ? ui.mappingPanel.hidden : true;
     ui.helpPanel.hidden = except === "help" ? ui.helpPanel.hidden : true;
     ui.searchPanel.hidden = except === "search" ? ui.searchPanel.hidden : true;
     ui.mermaidPanel.hidden = except === "mermaid" ? ui.mermaidPanel.hidden : true;
@@ -7665,6 +7667,7 @@
       ? ""
       : String(state.demo.settings.idleSeconds);
     ui.helpStartupToggle.checked = state.demo.settings.helpVisible;
+    ui.defaultDetailMode.value = state.demo.settings.defaultDetailMode;
     ui.zoomSpeed.value = String(state.demo.settings.zoomSpeedPercent);
     ui.zoomSpeedValue.textContent = `${state.demo.settings.zoomSpeedPercent}%`;
     ui.relationshipLineWidth.value = String(state.demo.settings.relationshipLineWidthPercent);
@@ -8424,7 +8427,7 @@
         toggleHelpPanel();
         return;
       }
-      const panel = panelName === "mapping"
+      const panel = panelName === "settings"
         ? ui.mappingPanel
         : panelName === "mermaid"
           ? ui.mermaidPanel
@@ -8445,7 +8448,7 @@
 
   document.querySelectorAll("[data-close]").forEach((button) => {
     button.addEventListener("click", () => {
-      const panel = button.dataset.close === "mapping"
+      const panel = button.dataset.close === "settings"
         ? ui.mappingPanel
         : button.dataset.close === "search"
           ? ui.searchPanel
@@ -8480,6 +8483,13 @@
     const visible = ui.helpStartupToggle.checked;
     if (visible) closePanels("help");
     setHelpPanelVisible(visible);
+  });
+
+  ui.defaultDetailMode.addEventListener("change", () => {
+    updateDemoSettings(demoModel.withDefaultDetailModeInput(
+      state.demo.settings,
+      ui.defaultDetailMode.value
+    ));
   });
 
   ui.zoomSpeed.addEventListener("input", () => {
@@ -8767,7 +8777,9 @@
     for (const node of existingNodes(state.nodes)) {
       node.lensOpen = detailLensIds.has(node.id);
       node.surfaceVisible = surfaceIds.has(node.id);
-      node.detailMode = detailModes.get(node.id) || (node.surfaceVisible ? "surface" : "floating");
+      node.detailMode = detailModes.has(node.id)
+        ? detailModes.get(node.id)
+        : (node.surfaceVisible ? "surface" : state.demo.settings.defaultDetailMode);
       node.surfaceOpenedAt = node.surfaceVisible ? surfaceOpenedAt : 0;
     }
     state.rendered = [];
