@@ -26,8 +26,8 @@
 - **Task 2 实现提交**：`9a61ff2`（`fix(web): keep ASDF double-click on deepest target`）。
 - **Task 3 安全回退提交**：`83f63f1`（`fix(web): attach strut endpoints to visible boundaries`）。
 - **Task 4 实现提交**：`67a2fd0`（`fix(web): refresh expanded scopes atomically`）。
-- **下一动作**：先完成 4784 启动全局热态修复；随后复现并修复真实深层 Shortcut 的“激活→目标路线加载→进入→选中”完整链；手机正式入口继续保持未完成。
-- **仍未完成**：Shortcut 深层真实激活、手机端最终读取验收；电脑不能代替手机观察其 DNS 选择与浏览器结果。
+- **下一动作**：Shortcut 深层真实激活已收口；手机正式入口继续保持未完成，电脑不能代替手机观察其 DNS 选择与浏览器结果。
+- **仍未完成**：手机端最终读取验收。
 
 ---
 
@@ -47,8 +47,8 @@
 - [x] **Step 2: Implement minimal route closure**：用`atomPath→target`与`childDomainPath→carrier`索引回溯到 root；路线不完整则不泄露半条路径。
 - [x] **Step 3: Verify service and browser GREEN**：`tests/spatial-server.test.mjs`与图投影`13/13`；Playwright Shortcut`4/4`。
 - [x] **Step 4: Full regression, commit and push**：完整`npm test`为`1591/1591`，Playwright Shortcut 为`4/4`；提交、快进与远端提交号在本任务提交后回写。
-- [ ] **Step 5: Reproduce the reopened real activation failure**：以真实深层 Shortcut 的投影合同、当前 scoped state、激活事件、最终 breadcrumb 和 selected target 分层取证；测试不得预装完整目标路线。
-- [ ] **Step 6: Fix and reverify the complete user journey**：只修已证实根因；聚焦测试、真实渐进 Playwright、完整回归和现场 4784 激活均通过后才能再次标为完成。
+- [x] **Step 5: Reproduce the reopened real activation failure**：真实投影确认`ESG计划快捷入口/ESG计划总控Agent`具有有效`shortcutTargetPath`；A 模式 RED 证明`enterNode()`在解析 Shortcut 前先走本地`toggleClusterChildDomain()`，结果停留在入口域而非目标路径。
+- [x] **Step 6: Fix and reverify the complete user journey**：Shortcut 在球域分支前识别并退出球域，再复用既有 linked route；普通 Shortcut、未访问深层、A 模式、坏链保持和渐进远端路线 Playwright 5/5，全量回归 1596/1596。实现提交`2048887`。真实 4784 revision 7222 中，`ESG计划总控Agent`从入口路径跳至 linked target 的实际深层路径，前后 revision 不变。
 
 ### Task 2: ASDF 双击采用最深稳定命中
 
