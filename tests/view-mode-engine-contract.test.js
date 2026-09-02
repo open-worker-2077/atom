@@ -113,6 +113,7 @@ test('immersive entry commits the real owner route as one active-domain transiti
   const commit = functionSource('commitDomainRoute');
 
   assert.match(route, /resolveImmersiveOwnerContext/);
+  assert.match(route, /ownerSegmentForNode:\s*\(nodeId\)\s*=>\s*hashText\(nodeId\)\.toString\(36\)/);
   assert.match(enter, /buildImmersiveDomainRoute\(node, parentCamera\)/);
   assert.match(enter, /commitDomainRoute\(route, enteredNode/);
   assert.match(commit, /state\.domainStack\s*=/);

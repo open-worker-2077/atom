@@ -5396,7 +5396,8 @@
       currentStack: state.domainStack,
       ownerPath,
       ownerRoute: state.domainRoutes.get(ownerPath),
-      ownerCrumbs: pathLabelsForPath(ownerPath)
+      ownerCrumbs: pathLabelsForPath(ownerPath),
+      ownerSegmentForNode: (nodeId) => hashText(nodeId).toString(36)
     });
     if (!ownerContext) return null;
 

@@ -251,6 +251,7 @@
     const isCurrentOwner = ownerPath === currentPath;
     const sourceStack = isCurrentOwner ? input.currentStack : input.ownerRoute;
     const crumbs = isCurrentOwner ? input.currentCrumbs : input.ownerCrumbs;
+    const ownerSegmentForNode = input.ownerSegmentForNode;
     if (!Array.isArray(sourceStack) || !Array.isArray(crumbs)) return null;
     const pathParts = ownerPath.split("/");
     const ownerDepth = pathParts.length - 1;
@@ -259,6 +260,7 @@
       || sourceStack.length !== ownerDepth
       || crumbs.length !== ownerDepth + 1
     ) return null;
+    if (sourceStack.length && typeof ownerSegmentForNode !== "function") return null;
 
     for (let index = 0; index < sourceStack.length; index += 1) {
       const entry = sourceStack[index];
@@ -272,6 +274,8 @@
         || entry.crumbs.length !== expectedCrumbs.length
         || entry.crumbs.some((crumb, crumbIndex) => crumb !== expectedCrumbs[crumbIndex])
         || entry.nodeLabel !== crumbs[index + 1]
+        || typeof entry.nodeId !== "string"
+        || ownerSegmentForNode(entry.nodeId) !== pathParts[index + 1]
       ) return null;
     }
 

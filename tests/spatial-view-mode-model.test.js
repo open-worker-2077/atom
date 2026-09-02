@@ -218,7 +218,8 @@ test('immersive routing starts from the clicked node real owner domain instead o
     currentStack,
     ownerPath: 'root/manage/work/personal',
     ownerRoute,
-    ownerCrumbs: ['全域', 'manage', 'work', 'personal']
+    ownerCrumbs: ['全域', 'manage', 'work', 'personal'],
+    ownerSegmentForNode: (nodeId) => nodeId
   });
 
   assert.deepEqual(JSON.parse(JSON.stringify(context)), {
@@ -285,6 +286,26 @@ test('immersive routing refuses a foreign route with inconsistent depth and crum
       { path: 'root/work', depth: 7, crumbs: ['全域', '错误标签'], nodeId: 'personal', nodeLabel: '个务' }
     ],
     ownerCrumbs: ['全域', '办包', '个务']
+  }), null);
+});
+
+test('immersive routing refuses a foreign route whose node identity does not derive its path segment', () => {
+  const model = loadModel();
+  assert.equal(model.resolveImmersiveOwnerContext({
+    currentPath: 'root',
+    currentDepth: 0,
+    currentCrumbs: ['全域'],
+    currentStack: [],
+    ownerPath: 'root/work/personal',
+    ownerRoute: [
+      { path: 'root', depth: 0, crumbs: ['全域'], nodeId: 'work-id', nodeLabel: '办包' },
+      { path: 'root/work', depth: 1, crumbs: ['全域', '办包'], nodeId: 'forged-personal-id', nodeLabel: '个务' }
+    ],
+    ownerCrumbs: ['全域', '办包', '个务'],
+    ownerSegmentForNode: (nodeId) => ({
+      'work-id': 'work',
+      'forged-personal-id': 'different-personal'
+    })[nodeId]
   }), null);
 });
 
