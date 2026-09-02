@@ -1,6 +1,6 @@
 # Atom 当前开发恢复断点
 
-**更新时间：** 2026-09-03（Slot 相邻信号 Task 4 完成）
+**更新时间：** 2026-09-03（Slot 相邻信号 Task 4 评审修复完成）
 **权威分支：** `main`  
 **记录前 HEAD：** `9280289`  
 **当前实现分支：** `feat/slot-signal`；隔离 worktree 为 `D:\Project\〇\subprojects\atom\.worktrees\slot-signal`
@@ -46,12 +46,15 @@
 
 ## 4. 执行状态与下一步
 
-- **已完成提交**：`67be623`持久化规格恢复上下文；`5a3ce51`形成实施计划；`d0947a1`增加 Program ABI；`036b542`解析直接 Slot 亲属；`565e9ee`增加 receiver-owned 调度与 claim；`397ed9a`保证内部 routing nodes 不执行无匹配 trigger 的 Program，并让严格事件校验先于 prepared-index 快路。
-- **Task 4 实现**：当前待提交改动把 Slot/Transform 事件放入同一 FIFO 队列，沿不变世界修订继续调和，把接收方 effects 留在候选世界事务中；成功提交或 signal-only 成功才 confirm，所有失败路径 release。Program 注册表统一升到 v7，Work Order 注册表仍为 v1；Help 公开唯一 Slot ABI。
+- **已完成提交**：`67be623`持久化规格恢复上下文；`5a3ce51`形成实施计划；`d0947a1`增加 Program ABI；`036b542`解析直接 Slot 亲属；`565e9ee`增加 receiver-owned 调度与 claim；`397ed9a`保证内部 routing nodes 不执行无匹配 trigger 的 Program，并让严格事件校验先于 prepared-index 快路；`f9aad65`完成 Task 4 原子引擎接入与公开合同。
+- **Task 4 评审修复**：本文件所在提交把显式`.run.`的 sender Transform 与 Slot 事件一起送入完整候选事务队列，不再让 Transform 事件只刷新 lock projection；Slot claim 周期中的 jump authorization/jump 应用失败改为阻断并回滚，claim 保持可重试。队列只新增原始 sender Transform 节点，不把 jump authorization 等其他 effect 扩张成新的自动触发语义。
 - **Task 4 验证**：
-  - `node --test tests/atom-slot-signal-runtime.test.mjs tests/atom-slot-signal-scheduling.test.mjs tests/atom-slot-signal-e2e.test.mjs tests/atom-program-function-registry.test.mjs`：44/44 PASS；随后增强“同一 sender 同时发 Transform 与 Slot”断言，`node --test tests/atom-slot-signal-e2e.test.mjs`：4/4 PASS。
-  - `npm run test:system`：220/220 PASS，0 fail。
-  - `npm test`：1640/1640 PASS，0 fail；构建只机械刷新`index.html` build-id，已恢复且未纳入提交。
+  - 原 Task 4 的真实顺序为：首次聚焦`44/44 PASS`；随后增强“同一 sender 同时发 Transform 与 Slot”后 E2E `4/4 PASS`；最后重新运行完整聚焦集并得到`44/44 PASS`。此前把最终 44/44 写在增强之前，现已纠正。
+  - 评审修复 RED：E2E 共6项，`3 pass / 3 fail`；失败精确对应 Transform observer 未执行、Slot receiver jump authorization 错误被降级、Slot receiver jump 错误被降级。
+  - 评审修复 GREEN：E2E `6/6 PASS`；最终聚焦集`46/46 PASS`。共存用例同时验证 Transform observer、Transform 触发的 Strut subscriber、Slot receiver，并确认 Strut/Slot claims 都为`confirmed`。
+  - Program/Strut/jump 相关回归选择集共182项，修正受控 jump 事件边界后全部通过、exit 0；受控 jump 与 E2E 交叉集`15/15 PASS`。
+  - `npm run test:system`：220/220 PASS，0 fail，duration 50163.5484 ms。
+  - `npm test`：1642/1642 PASS，0 fail，duration 467236.6105 ms；构建只机械刷新`index.html` build-id，已恢复且未纳入提交。
   - `git diff --check`：0 error。
   - Task 1 延后 Minor 已由`one slot signal executes its receiver once across duplicate, sequential, and concurrent refreshes`覆盖：cycle 只聚合`cached === false`结果，确认后的同一 delivery 不重放，无需重复测试。
 - **真实命令验收**：临时世界位于`C:\Users\worker\AppData\Local\Temp\atom-slot-signal-task4-20260903-01`；实际 server 首次使用临时端口61952，重启后使用59632，所有 CLI 都显式传`--endpoint`，未访问4784世界。down/up分别只改变直接子/父接收目标，未匹配、孙级、祖父级和同级目标保持`before`；消息分别为`down-payload:from,labels:up:handoff`、`up-payload:from,labels:down:report`。signal-only前后世界 SHA256 同为`59FC64A44E4BDC08C4170957D10B04CD592B00E14B0127C853140979BD2ECFAA`，回执 revision before/after 同为`130260388d03469c79ca0b8cc4bdd00999ac6a9d9d7e0c919e8b8b91f56cf7b9`。权限失败连续两次返回`GRAPH_LOCK_DENIED`/exit 4且世界 SHA不变，证明失败可重试；重启后`down-ok`/`up-ok`仍在，两个 sender 再运行仍得到正确 payload。

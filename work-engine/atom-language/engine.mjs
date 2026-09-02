@@ -1161,6 +1161,7 @@ export async function executeAtomLanguage(options = {}) {
   const graphLocks = activeLocks.filter((lock) => lock.kind);
   let programChanged = false;
   const initialProgramTriggerNodes = [];
+  const initialProgramTransformTriggerNodes = [];
   const initialAgentPath = interaction.agent?.path ?? null;
   let accessController = createAccessController(atoms, {
     ...options, programLockIndex, agentPath: initialAgentPath,
@@ -1704,6 +1705,11 @@ export async function executeAtomLanguage(options = {}) {
         transformed.resultPath,
         transformed.resultName
       );
+      initialProgramTransformTriggerNodes.push(
+        transformed.sourcePath,
+        transformed.resultPath,
+        transformed.resultName
+      );
       programTransformLogs.push({
         id: crypto.randomUUID(),
         operation: 'program-transform',
@@ -1830,7 +1836,9 @@ export async function executeAtomLanguage(options = {}) {
     const pathChanges = [];
     let finalLockIndex = programLockIndex;
     let finalGraphLocks = graphLocks;
-    const pendingTriggerEvents = initialTriggerEvent ? [initialTriggerEvent] : [];
+    const pendingTriggerEvents = Array.isArray(initialTriggerEvent)
+      ? [...initialTriggerEvent]
+      : initialTriggerEvent ? [initialTriggerEvent] : [];
     const pendingAuthorizedTriggers = new Map();
     const maxPasses = 8;
 
@@ -2589,6 +2597,12 @@ export async function executeAtomLanguage(options = {}) {
         [...pathChanges, ...applicationRelocations]
       );
       if (authorization.error) {
+        if ((cycle.slotSignalClaims?.length ?? 0) > 0) {
+          throw Object.assign(new Error(authorization.error.message), {
+            code: authorization.error.code,
+            details: authorization.error.details ?? {}
+          });
+        }
         interactionWarnings.push(authorization.error);
       } else {
         application.atoms = authorization.atoms;
@@ -2598,6 +2612,12 @@ export async function executeAtomLanguage(options = {}) {
       }
       const jump = await applyTriggeredJump(application.atoms, cycle.jumps);
       if (jump.error) {
+        if ((cycle.slotSignalClaims?.length ?? 0) > 0) {
+          throw Object.assign(new Error(jump.error.message), {
+            code: jump.error.code,
+            details: jump.error.details ?? {}
+          });
+        }
         interactionWarnings.push(jump.error);
       } else {
         application.atoms = jump.atoms;
@@ -2712,47 +2732,6 @@ export async function executeAtomLanguage(options = {}) {
     error.code = 'ATOM_PROGRAM_RECONCILIATION_LIMIT';
     error.details = { passes: maxPasses };
     throw error;
-  }
-
-  async function refreshProgramProjectionForWorld(candidateAtoms, triggerNodes) {
-    if (!options.programScheduler || triggerNodes.length === 0) return programLockIndex;
-    if (!candidateProgramScheduler) {
-      throw Object.assign(new Error('Candidate Program evaluation requires an isolated runtime'), {
-        code: 'PROGRAM_CANDIDATE_RUNTIME_UNAVAILABLE'
-      });
-    }
-    await assertRequestCandidateAuthority(candidateAtoms);
-    const currentAgentPath = interaction.agent?.path ?? null;
-    const programAccess = createAccessController(candidateAtoms, {
-      ...options,
-      programLockIndex,
-      agentPath: currentAgentPath,
-      agentSecurity: currentAgentPath
-        ? structuredClone(candidateProgramScheduler.agentSecurity?.get(currentAgentPath)
-          ?? programCycle.agentSecurity ?? null)
-        : null,
-      graphLocks
-    });
-    const preparedWorld = prepareExploreWorld(candidateAtoms);
-    const cycle = await candidateProgramScheduler.refresh(candidateAtoms, {
-      agentOrigin: interaction.agent,
-      isolateFailures: true,
-      triggerEvent: { mode: 'transform', nodes: triggerNodes, affectedPaths: triggerNodes },
-      executeExplore: (request, executionContext = {}) => executeProgramExplore({
-        atoms: candidateAtoms,
-        request,
-        receiver,
-        accessController: programAccess,
-        agentOrigin: interaction.agent,
-        scopeRoot: executionContext.scopeRoot ?? null,
-        preparedWorld
-      })
-    });
-    return buildProgramLockIndex({
-      revision: revisionOf(candidateAtoms),
-      results: options.bypassProgramLocks ? [] : cycle.locks,
-      records: cycle.records
-    });
   }
 
   async function settleContextFreeProgramProjectionForWorld(candidateAtoms) {
@@ -3426,6 +3405,7 @@ export async function executeAtomLanguage(options = {}) {
     let changed = programChanged;
     let finalProgramLockIndex = programLockIndex;
     const finalProgramMessages = [];
+    const initialTriggerEvents = [];
     const initialDeliveries = resolveSlotSignalDeliveries(
       nextAtoms,
       programCycle.slotSignals ?? [],
@@ -3435,31 +3415,27 @@ export async function executeAtomLanguage(options = {}) {
       }
     );
     if (initialDeliveries.length) {
+      initialTriggerEvents.push({
+        mode: 'slot',
+        nodes: [...new Set(initialDeliveries.map(({ recipientPath }) => recipientPath))],
+        signals: initialDeliveries
+      });
+    }
+    if (changed && !strictSlotRecompute && initialProgramTransformTriggerNodes.length > 0) {
+      const triggerNodes = [...new Set(initialProgramTransformTriggerNodes.filter(Boolean))];
+      initialTriggerEvents.push({
+        mode: 'transform', nodes: triggerNodes, affectedPaths: triggerNodes
+      });
+    }
+    if (initialTriggerEvents.length > 0) {
       try {
-        const reconciled = await reconcileProgramsForWorld(nextAtoms, {
-          mode: 'slot',
-          nodes: [...new Set(initialDeliveries.map(({ recipientPath }) => recipientPath))],
-          signals: initialDeliveries
-        });
+        const reconciled = await reconcileProgramsForWorld(nextAtoms, initialTriggerEvents);
         nextAtoms = reconciled.atoms;
         finalProgramLockIndex = reconciled.lockIndex;
         finalProgramMessages.push(...reconciled.messages);
         programTransformLogs.push(...reconciled.transformLogs);
         revisionAfter = revisionOf(nextAtoms);
         changed ||= revisionAfter !== revisionBefore;
-      } catch (error) {
-        releaseStrutDeliveryClaims();
-        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
-          error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
-        )]);
-      }
-    }
-    if (changed && !strictSlotRecompute && initialProgramTriggerNodes.length > 0) {
-      try {
-        finalProgramLockIndex = await refreshProgramProjectionForWorld(
-          nextAtoms,
-          [...new Set(initialProgramTriggerNodes.filter(Boolean))]
-        );
       } catch (error) {
         releaseStrutDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(

@@ -57,6 +57,38 @@ async function executeFixture(files, source, scheduler = createProgramRuntimeSch
   return { result, bytes, world: JSON.parse(bytes), scheduler };
 }
 
+function injectSlotClaimedEffect(scheduler, field, effects) {
+  const createCandidateRuntime = scheduler.createCandidateRuntime.bind(scheduler);
+  scheduler.createCandidateRuntime = () => {
+    const candidate = createCandidateRuntime();
+    const refresh = candidate.refresh.bind(candidate);
+    candidate.refresh = async (...args) => {
+      const cycle = await refresh(...args);
+      if ((cycle.slotSignalClaims?.length ?? 0) > 0) {
+        cycle[field] = [...(cycle[field] ?? []), ...structuredClone(effects)];
+      }
+      return cycle;
+    };
+    return candidate;
+  };
+}
+
+function observeSlotClaimLifecycle(scheduler) {
+  const confirmed = [];
+  const released = [];
+  const confirmSlotSignals = scheduler.confirmSlotSignals.bind(scheduler);
+  const releaseSlotSignals = scheduler.releaseSlotSignals.bind(scheduler);
+  scheduler.confirmSlotSignals = (keys) => {
+    confirmed.push(...keys);
+    return confirmSlotSignals(keys);
+  };
+  scheduler.releaseSlotSignals = (keys) => {
+    released.push(...keys);
+    return releaseSlotSignals(keys);
+  };
+  return { confirmed, released };
+}
+
 test('down signal triggers only a matching direct child and atomically persists its effect', async (t) => {
   const world = [
     program('Parent', [
@@ -83,24 +115,50 @@ test('down signal triggers only a matching direct child and atomically persists 
         ].join('\n'))
       ])
     ]),
-    atom('SenderTarget', 'before'),
+    program('Observer', [
+      'def observe():',
+      '    transform({"thing":"ObservedTarget","situation.rep.observed":None})',
+      'trigger("transform", {"nodes":["SenderTarget"]}, observe)'
+    ].join('\n')),
+    program('StrutObserver', [
+      'def observe(delivery):',
+      '    transform({"thing":"StrutObserved","situation.rep.observed":None})',
+      'trigger("strut", {"nodes":["StrutResult"]}, observe)'
+    ].join('\n')),
+    {
+      ...atom('SenderTarget', 'before'),
+      strut: [{ 'if@current': true, then: [{ thing: 'StrutResult' }] }]
+    },
+    atom('ObservedTarget', 'before'),
+    atom('StrutResult', 'before'),
+    atom('StrutObserved', 'before'),
     atom('Target', 'before'),
     atom('UnmatchedTarget', 'before'),
     atom('GrandchildTarget', 'before')
   ];
   const files = await fixture(t, world);
 
-  const { result, world: stored } = await executeFixture(
+  const { result, world: stored, scheduler } = await executeFixture(
     files,
     'transform {"thing.run.":"Parent"}'
   );
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(readSituation(stored, 'SenderTarget'), 'sender');
+  assert.equal(readSituation(stored, 'ObservedTarget'), 'observed');
+  assert.equal(readSituation(stored, 'StrutObserved'), 'observed');
   assert.equal(readSituation(stored, 'Target'), '交棒');
   assert.equal(readSituation(stored, 'UnmatchedTarget'), 'before');
   assert.equal(readSituation(stored, 'GrandchildTarget'), 'before');
   assert.deepEqual(result.messages.map(({ text }) => text), ['up:交棒']);
+  assert.deepEqual(
+    [...scheduler.strutDeliveryExecutions.values()].map(({ status }) => status),
+    ['confirmed']
+  );
+  assert.deepEqual(
+    [...scheduler.slotSignalExecutions.values()].map(({ status }) => status),
+    ['confirmed']
+  );
 });
 
 test('up signal triggers only the matching direct parent and persists the receiver effect', async (t) => {
@@ -165,7 +223,7 @@ test('signal-only delivery returns the original world bytes and revision', async
   assert.deepEqual(result.messages.map(({ text }) => text), ['up:通知']);
 });
 
-test('a denied receiver Transform rolls back the interaction and releases its signal claim', async (t) => {
+test('a later denied receiver Transform rolls back an earlier sender effect and releases its signal claim', async (t) => {
   const receiver = [
     'def receive():',
     '    signal()',
@@ -173,9 +231,13 @@ test('a denied receiver Transform rolls back the interaction and releases its si
     'trigger("slot", {"from":"up","labels":["越权"]}, receive)'
   ].join('\n');
   const world = [
-    program('Parent', 'slot({"to":"down","labels":["越权"]})', [
+    program('Parent', [
+      'transform({"thing":"Earlier","situation.rep.changed":None})',
+      'slot({"to":"down","labels":["越权"]})'
+    ].join('\n'), [
       program('Receiver', receiver)
     ]),
+    atom('Earlier', 'before'),
     atom('Outside', 'before'),
     program('Guard', [
       'lock({"targets":{"paths":["Outside"],"scope":"exact"},',
@@ -225,4 +287,79 @@ test('a denied receiver Transform rolls back the interaction and releases its si
   assert.equal(second.result.ok, false, JSON.stringify(second.result));
   assert.equal(second.bytes, files.before);
   assert.equal(receiverCalls, 2);
+});
+
+test('a Slot receiver jump authorization failure rolls back and leaves its claim retryable', async (t) => {
+  const world = [program('Parent', 'slot({"to":"down","labels":["签发失败"]})', [
+    program('Receiver', [
+      'def receive():',
+      '    signal()',
+      'trigger("slot", {"from":"up","labels":["签发失败"]}, receive)'
+    ].join('\n'))
+  ])];
+  const files = await fixture(t, world);
+  const scheduler = createProgramRuntimeScheduler();
+  injectSlotClaimedEffect(scheduler, 'jumpAuthorizations', [
+    {
+      windowPath: 'MissingWindow',
+      sourcePath: 'Parent/Receiver',
+      destinationPath: 'MissingDestinationA',
+      issuerProgramPath: 'Parent/Receiver'
+    },
+    {
+      windowPath: 'MissingWindow',
+      sourcePath: 'Parent/Receiver',
+      destinationPath: 'MissingDestinationB',
+      issuerProgramPath: 'Parent/Receiver'
+    }
+  ]);
+  const lifecycle = observeSlotClaimLifecycle(scheduler);
+
+  const first = await executeFixture(files, 'transform {"thing.run.":"Parent"}', scheduler);
+  assert.equal(first.result.ok, false, JSON.stringify(first.result));
+  assert.ok(first.result.errors.some(({ code }) => (
+    code === 'WINDOW_JUMP_AUTHORIZATION_CONFLICT'
+  )));
+  assert.equal(first.result.revisionAfter, first.result.revisionBefore);
+  assert.equal(first.bytes, files.before);
+  assert.deepEqual(lifecycle.confirmed, []);
+  assert.equal(lifecycle.released.length, 1);
+  assert.equal(scheduler.slotSignalExecutions.size, 0);
+
+  const second = await executeFixture(files, 'transform {"thing.run.":"Parent"}', scheduler);
+  assert.equal(second.result.ok, false, JSON.stringify(second.result));
+  assert.equal(second.bytes, files.before);
+  assert.equal(lifecycle.released.length, 2);
+});
+
+test('a Slot receiver jump failure rolls back and leaves its claim retryable', async (t) => {
+  const world = [program('Parent', 'slot({"to":"down","labels":["迁窗失败"]})', [
+    program('Receiver', [
+      'def receive():',
+      '    signal()',
+      'trigger("slot", {"from":"up","labels":["迁窗失败"]}, receive)'
+    ].join('\n'))
+  ])];
+  const files = await fixture(t, world);
+  const scheduler = createProgramRuntimeScheduler();
+  injectSlotClaimedEffect(scheduler, 'jumps', [{
+    action: 'move',
+    destinationPath: 'MissingDestination',
+    sourceProgramPath: 'Parent/Receiver'
+  }]);
+  const lifecycle = observeSlotClaimLifecycle(scheduler);
+
+  const first = await executeFixture(files, 'transform {"thing.run.":"Parent"}', scheduler);
+  assert.equal(first.result.ok, false, JSON.stringify(first.result));
+  assert.ok(first.result.errors.some(({ code }) => code === 'WINDOW_JUMP_AGENT_REQUIRED'));
+  assert.equal(first.result.revisionAfter, first.result.revisionBefore);
+  assert.equal(first.bytes, files.before);
+  assert.deepEqual(lifecycle.confirmed, []);
+  assert.equal(lifecycle.released.length, 1);
+  assert.equal(scheduler.slotSignalExecutions.size, 0);
+
+  const second = await executeFixture(files, 'transform {"thing.run.":"Parent"}', scheduler);
+  assert.equal(second.result.ok, false, JSON.stringify(second.result));
+  assert.equal(second.bytes, files.before);
+  assert.equal(lifecycle.released.length, 2);
 });
