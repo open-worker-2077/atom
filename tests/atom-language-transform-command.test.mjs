@@ -121,7 +121,7 @@ test('transform batch normalizes each item and keeps item-local errors', () => {
   assert.equal(fieldByBase(result.items[0], 'situation').value, '新正文');
   assert.equal(
     result.items[1].errors.at(-1).code,
-    'TRANSFORM_DOLLAR_COMMAND_REJECTED'
+    'UNKNOWN_TRANSFORM_ACTION'
   );
 });
 

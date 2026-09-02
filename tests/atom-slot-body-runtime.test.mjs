@@ -35,7 +35,7 @@ function fixture() {
     ], [{ 'if@current': true, then: [{ thing: '金额' }] }], ['text'], '客户说明'),
     atom('金额', '金额槽契约', [], [{
       'if@current': true,
-      if: [{ 'thing@program': '共享计算' }],
+      if: [{ program: 'def main(context):\n    return True' }],
       then: [{ thing: '结果' }]
     }], ['number']),
     atom('结果', '结果槽契约'),
@@ -43,8 +43,7 @@ function fixture() {
     atom('审核枢纽', '审核契约', [], [{
       if: [{ and: [{ thing: '客户' }, { thing: '备选客户' }] }],
       'then@current': true
-    }]),
-    atom('共享计算', 'def main(arguments):\n    return True', [], [], ['program'], '共享源码')
+    }])
   ], [], ['dataflow'], '普通候选槽模')])];
 }
 function planOf(atoms) {
@@ -67,7 +66,7 @@ test('seal creates model, visible print plan and empty example container without
   assert.ok(typesOf(find(result.atoms, '订单槽体/print')).includes('program'));
   assert.deepEqual(field(find(result.atoms, '订单槽体/槽例'), 'slot'), []);
   assert.equal(find(result.atoms, '订单槽体/槽例/空槽例'), null);
-  assert.match(field(find(result.atoms, '订单槽体/槽模/共享计算'), 'situation'), /def main/u);
+  assert.equal(find(result.atoms, '订单槽体/槽模/共享计算'), null);
 });
 
 test('seal stores a deterministic complete owner-local strut AST and no default material', async () => {
@@ -82,7 +81,6 @@ test('seal stores a deterministic complete owner-local strut AST and no default 
   const alternate = plan.roles.find((role) => role.path === './备选客户');
   const hub = plan.roles.find((role) => role.path === './审核枢纽');
   const result = plan.roles.find((role) => role.path === './结果');
-  const decision = plan.roles.find((role) => role.path === './共享计算');
   assert.deepEqual(plan.strut.find((item) => item.owner_role_id === customer.role_id).rule, {
     'if@current': true, then: [{ thing: amount.role_id }]
   });
@@ -91,7 +89,7 @@ test('seal stores a deterministic complete owner-local strut AST and no default 
   });
   assert.deepEqual(plan.strut.find((item) => item.owner_role_id === amount.role_id).rule, {
     'if@current': true,
-    if: [{ 'thing@program': decision.role_id }],
+    if: [{ program: 'def main(context):\n    return True' }],
     then: [{ thing: result.role_id }]
   });
   const repeated = await seal(once.atoms);
@@ -99,7 +97,7 @@ test('seal stores a deterministic complete owner-local strut AST and no default 
   assert.equal(field(find(repeated.atoms, '订单槽体/print/修订'), 'slot').length, 1);
 });
 
-test('print rewrites complete strut AST to the current instance and shares model Program', async () => {
+test('print rewrites complete strut AST to the current instance and preserves inline Program', async () => {
   const sealed = await seal();
   const printed = await print(sealed.atoms, '订单001');
   assert.equal(printed.error, undefined);
@@ -116,7 +114,7 @@ test('print rewrites complete strut AST to the current instance and shares model
   }]);
   assert.deepEqual(field(find(printed.atoms, '订单槽体/槽例/订单001/金额'), 'strut'), [{
     'if@current': true,
-    if: [{ 'thing@program': '订单槽体/槽模/共享计算' }],
+    if: [{ program: 'def main(context):\n    return True' }],
     then: [{ thing: '订单槽体/槽例/订单001/结果' }]
   }]);
 });

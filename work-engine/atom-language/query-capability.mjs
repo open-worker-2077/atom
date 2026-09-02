@@ -385,7 +385,7 @@ function strutRuleEndpoints(owner, matches) {
   const selectorsInExpr = (expr) => {
     if (!expr || typeof expr !== 'object' || Array.isArray(expr)) return [];
     if (typeof expr.thing === 'string') return [expr.thing];
-    if (typeof expr['thing@program'] === 'string') return [expr['thing@program']];
+    if (typeof expr.program === 'string') return [];
     return ['and', 'or'].flatMap((operator) => (
       Array.isArray(expr[operator]) ? expr[operator].flatMap(selectorsInExpr) : []
     ));

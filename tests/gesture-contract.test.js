@@ -44,6 +44,9 @@ test('primary click series is settled by one arbiter without native dblclick dis
   assert.match(commit, /confirmationCount:\s*2/);
   assert.match(commit, /confirmationCount:\s*3/);
   assert.doesNotMatch(source, /canvas\.addEventListener\(["']dblclick["']/);
+  assert.match(source, /new CustomEvent\("atom-transform-action"/);
+  assert.match(source, /action:\s*"click"/);
+  assert.match(source, /parameter:\s*event\.count/);
 });
 
 test('primary taps use click-series arbitration and right taps commit immediately', () => {

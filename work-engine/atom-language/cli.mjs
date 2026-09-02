@@ -143,7 +143,7 @@ function verifiedHelpLines() {
     throw cliError('ATOM_HELP_CONTRACT_DRIFT', 'Transform 注册表与 help 契约不一致');
   }
   const activeActions = createActionRegistry().entries()
-    .filter(({ parameter }) => parameter !== 'retiredRoute');
+    .filter(({ parameter, context }) => context === 'explore' && parameter !== 'retiredRoute');
   if (activeActions.length !== Object.keys(EXPLORE_HELP).length
     || activeActions.some(({ baseKey, name }) => !Object.hasOwn(EXPLORE_HELP, `${baseKey}\u0000${name}`))) {
     throw cliError('ATOM_HELP_CONTRACT_DRIFT', 'Explore 动作注册表与 help 契约不一致');
@@ -217,8 +217,9 @@ function help() {
     '  strut 是 Thing 面向相邻 Thing 的支柱结构，保存前项、后项、判定条件与可审计关系身份；Thing 可接受 Strut 支撑，也可成为支撑其他 Thing 的 Strut。',
     '  Graph-JSON 只使用 thing、situation、slot、strut 四轴；slot 与 strut 均为数组。',
     '  1→N 写在起点：{"if@current":true,"then":[{"thing":"B"},{"thing":"C"}]}；N→1 写在终点：{"if":[{"and":[{"thing":"A"},{"thing":"B"}]}],"then@current":true}。',
-    '  每条 rule 必须且只能含一个 @current:true；if 永远是前项，then 永远是后项。禁止无 current、线载源码和 Program 自持 current 端点；禁止原生 N→M，事实前项与独立判定 Program 保持分层。',
-    '  if 内的独立判定 Program 写 {"thing@program":"selector"}：仅以 strict bool 决定本条支撑，且不得产生写入等副作用；then 只接受普通事实 Thing。后项自己的 Program 只按自身 trigger/use_program/显式运行计算自己。',
+    '  每条 rule 必须且只能含一个 @current:true；if 永远是前项，then 永远是后项。禁止无 current、外部 thing@program 判定引用和 Program 自持 current 端点；禁止原生 N→M。',
+    '  if 内嵌判定写 {"program":"def main(context):\\n    return ..."}：context 含全部事实前项、后项与本次规范化 Transform $动作信封；仅 strict bool 决定本条推支，且不得产生写入等副作用。then 只接受普通事实 Thing。',
+    '  Transform 注册动作写在 Key 区，例如 transform {"thing$click":"EXACT路径"}；$click 只是动作注册表中的一项，CLI/Web 共用同一动作信封，Explore 不触发动作。',
     '  N→1、1→N 各自保留 strut clause 身份；Web 在归一化 0.5 形成共享汇流／分流线干。多入多出必须建立显式枢纽 H，拆为 N→H 与 H→M 两条规则；H 保持可见可审计。Program 源码只放 exact thing@program 节点的 situation。',
     '  @type 写在 thing 键上（如 thing@program）；#简介必须在键末尾；~hint 仅为返回提示。Agent 是 Situation 中一个顶层字面量 agent({...}) 声明，不是 Key 类型。',
     '  Explore 接受对象或对象数组；Transform 对象数组把已有 Atom 改造作为一个原子批次执行，并逐项返回结果。所有结果只使用 Graph-JSON。',
@@ -270,7 +271,7 @@ function help() {
     '  固定窗口锁：agent() 登记时由内核强制启用且不可关闭或自定义；可读 current／后代／同父普通节点／唯一直接父上下文，可写 current 后代。直接父不能成为新锚点进入其同层；exact path 不绕过。',
     '  冷启动：内核从包含一个顶层字面量 agent({...}) 声明的 thing@program Situation 重建 labels 与符号职能 scope，并从 Program 中的 literal-path lock() 按当前 Graph 重编译锁；旧侧车 locks 返回 RETIRED_REQUEST_DRIVEN_LOCK_SNAPSHOT，agentRegistrations 返回 RETIRED_AGENT_REGISTRATION_SNAPSHOT，windowSelfLocks/windowSelfLockAgents 返回 RETIRED_WINDOW_SELF_LOCK_SNAPSHOT，均只能一次性审计清退且不作为鉴权输入。',
     '  Transform 触发器：先定义无参数 main，再声明 trigger("transform", {"nodes":["exact 节点路径"]}, main)。main 是函数引用，不能写 main()；运行时按反向索引只运行命中的 Program；相同值写入仍属于 Transform 事件。未声明 trigger 的 Program 冷启动时遇到无关 Transform 不会重放；显式 .run.、其自身被 Transform 或已知 explore 依赖变化时仍运行。',
-    '  推支触发器：普通前项／后项不保存布尔值；独立判定 Program strict true 后只形成 typed delivery，不直接执行后项。后项自己的 Program 可声明 trigger("strut", {"nodes":["exact 或槽例相对后项路径"]}, main)，其中 main(delivery) 接收 decision、clauseId、antecedentPaths、consequentPath 与 revision；未显式订阅、false、仅 slot／strut 关联均不执行。',
+    '  推支触发器：普通前项／后项不保存布尔值；推支线 if 内嵌 Program strict true 后只形成 typed delivery，不直接执行后项。后项自己的 Program 可声明 trigger("strut", {"nodes":["exact 或槽例相对后项路径"]}, main)，其中 main(delivery) 接收 decision、clauseId、antecedentPaths、consequentPath 与 revision；未显式订阅、false、仅 slot／strut 关联均不执行。',
     '  Program 停用：把 Program 本身或其普通 slot 上级通过 .dsc. 可逆移入唯一 thing@backup@default 子树；其中 @program 保留类型与 situation 源码，但不进入活跃运行、trigger、changed 或 explore 依赖索引，也不能由 thing.run/use_program 执行。.rst. 恢复原位后按当前事实重新激活并重建索引。停用只认显式 backup@default 类型，不根据容器显示名猜测。',
     '  统一鉴权顺序：当前 Agent 起点 → 实际 slot 路径上的锁 → 目标 node 锁；Explore、Transform 及注册函数内部读写共用此链，标签不足返回锁拒绝且不读取目标 situation。',
     '  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。',

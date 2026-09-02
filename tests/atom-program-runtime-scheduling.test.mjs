@@ -43,7 +43,7 @@ test('a Transform $ action is decided by the Strut inline Program and delivers s
       nodes: ['Source'],
       affectedPaths: ['Source'],
       action: {
-        targetPath: 'Source', action: 'click', parameter: null, payload: null, source: 'cli'
+        targetPath: 'Source', action: 'click', parameter: 1, payload: null, source: 'cli'
       }
     }
   });

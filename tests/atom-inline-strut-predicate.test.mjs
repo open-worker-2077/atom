@@ -77,7 +77,7 @@ test('inline predicate executes in the restricted worker with immutable clause c
     clauseId: 'strut:世界/前项:0',
     antecedents: [{ path: '世界/前项', thing: '前项', situation: '✅' }],
     consequents: [{ path: '世界/后项', thing: '后项', situation: '⌛️' }],
-    transform: { targetPath: '世界/前项', action: 'click', parameter: null, payload: null, source: 'cli' }
+    transform: { targetPath: '世界/前项', action: 'click', parameter: 1, payload: null, source: 'cli' }
   };
   const decisions = await evaluateStrutClausesWithPrograms(parsed, {
     evaluateProgram: (predicate) => scheduler.evaluateInlineStrutProgram(

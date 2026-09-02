@@ -131,41 +131,30 @@ test('nested A and (B or C) preserves explicit topology and order at a real hub'
   assert.deepEqual(rule.dependencyPaths, ['世界/A', '世界/B', '世界/C']);
 });
 
-test('thing@program is a typed endpoint selector and never line-carried source code', () => {
+test('Strut predicates are inline Program leaves and thing@program selectors are retired', () => {
   const parsed = parseGraphDocument(graphDocument([
     leaf('Source'),
-    { 'thing@program': 'Predicate', situation: 'def main(arguments):\n    return True', slot: [], strut: [] },
     leaf('H', '', [{
-      if: [{ and: [{ thing: 'Source' }, { 'thing@program': 'Predicate' }] }],
+      if: [{ and: [{ thing: 'Source' }, { program: 'def main(context):\n    return True' }] }],
       'then@current': true
     }])
   ]));
   assert.equal(parsed.strutClauses[0].root.kind, 'and');
+  assert.deepEqual(parsed.strutClauses[0].dependencyPaths, ['世界/Source']);
   assert.throws(() => parseGraphDocument(graphDocument([
     { 'thing@program': 'Predicate', situation: 'def main(arguments):\n    return True', slot: [], strut: [] },
     leaf('H', '', [{ if: [{ 'thing@program': 'Predicate' }], 'then@current': true }])
-  ])), { code: 'STRUT_FACT_ANTECEDENT_REQUIRED' });
-  assert.throws(() => parseGraphDocument(graphDocument([
-    leaf('Ordinary'), leaf('H', '', [{ if: [{ 'thing@program': 'Ordinary' }], 'then@current': true }])
-  ])), { code: 'STRUT_PROGRAM_ENDPOINT_TYPE_MISMATCH' });
-  assert.throws(() => parseGraphDocument(graphDocument([
-    { 'thing@program': 'Predicate', situation: '', slot: [], strut: [] },
-    leaf('H', '', [{
-      if: [{ 'thing@program': "satisfies({'thing':'Predicate'}, lambda node: True)" }],
-      'then@current': true
-    }])
-  ])), { code: 'STRUT_INLINE_PROGRAM_UNSUPPORTED' });
+  ])), { code: 'RETIRED_STRUT_PROGRAM_SELECTOR' });
 });
 
-test('native N-to-M is rejected even when its predicate Program is independent', () => {
+test('native N-to-M is rejected even when it has an inline predicate Program', () => {
   assert.throws(() => parseGraphDocument(graphDocument([
     leaf('A', '', [{
       'if@current': true,
-      if: [{ and: [{ thing: 'B' }, { 'thing@program': 'Gate' }] }],
+      if: [{ and: [{ thing: 'B' }, { program: 'def main(context):\n    return True' }] }],
       then: [{ thing: 'Y' }, { thing: 'Z' }]
     }]),
     leaf('B'),
-    { 'thing@program': 'Gate', situation: 'def main(arguments):\n    return True', slot: [], strut: [] },
     leaf('Y'), leaf('Z')
   ])), { code: 'NATIVE_MANY_TO_MANY_STRUT_UNSUPPORTED' });
 });

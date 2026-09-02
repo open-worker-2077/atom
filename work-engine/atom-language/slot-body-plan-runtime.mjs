@@ -138,7 +138,8 @@ function compileStrutEndpoint(source, endpoint, records, roleByRelative) {
 }
 
 function compileStrutExpr(source, expr, records, roleByRelative) {
-  if (Object.hasOwn(expr ?? {}, 'thing') || Object.hasOwn(expr ?? {}, 'thing@program')) {
+  if (Object.hasOwn(expr ?? {}, 'program')) return { program: expr.program };
+  if (Object.hasOwn(expr ?? {}, 'thing')) {
     return compileStrutEndpoint(source, expr, records, roleByRelative);
   }
   for (const key of ['and', 'or']) {
@@ -326,7 +327,8 @@ function materializeEndpoint(endpoint, plan, layout, instancePath) {
 }
 
 function materializeExpr(expr, plan, layout, instancePath) {
-  if (Object.hasOwn(expr, 'thing') || Object.hasOwn(expr, 'thing@program')) {
+  if (Object.hasOwn(expr, 'program')) return { program: expr.program };
+  if (Object.hasOwn(expr, 'thing')) {
     return materializeEndpoint(expr, plan, layout, instancePath);
   }
   for (const key of ['and', 'or']) {
@@ -350,7 +352,7 @@ function materializeRule(compiled, plan, layout, instancePath) {
 
 function roleIdsInExpr(expr) {
   if (Object.hasOwn(expr ?? {}, 'thing')) return [expr.thing];
-  if (Object.hasOwn(expr ?? {}, 'thing@program')) return [expr['thing@program']];
+  if (Object.hasOwn(expr ?? {}, 'program')) return [];
   for (const key of ['and', 'or']) {
     if (Array.isArray(expr?.[key])) return expr[key].flatMap(roleIdsInExpr);
   }

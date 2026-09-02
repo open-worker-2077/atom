@@ -126,7 +126,7 @@ test('situation rep preserves command-like Program source and rejects a real out
   assert.equal(await fs.readFile(files.contextFile, 'utf8'), beforeRejected);
 });
 
-test('transform parsing is isolated from unchanged explore $ parsing', async (t) => {
+test('Transform $ actions use their own registry while Explore keeps matcher semantics', async (t) => {
   const files = await fixture(t, [atom('根', '正文', [atom('子')])]);
   const explored = await execute(files, 'explore {"thing":"根","slot$latitude-1","situation$full"}');
   assert.equal(explored.ok, true, JSON.stringify(explored.errors));
@@ -137,7 +137,7 @@ test('transform parsing is isolated from unchanged explore $ parsing', async (t)
     'transform {"thing$exact":"根","situation":"不得写入"}'
   );
   assert.equal(rejected.ok, false);
-  assert.equal(rejected.errors.at(-1).code, 'TRANSFORM_DOLLAR_COMMAND_REJECTED');
+  assert.equal(rejected.errors.at(-1).code, 'UNKNOWN_TRANSFORM_ACTION');
 });
 
 test('situation rep performs local replacement with Value and full replacement without Value', async (t) => {
@@ -181,7 +181,7 @@ test('summary, field type, rename, and complete strut replacement strip commands
     'transform {"thing":"甲","situation.sum.新简介"}',
     'transform {"thing.typ.program":"甲"}',
     'transform {"thing.ren.甲新版":"甲"}',
-    'transform {"thing":"甲事实","strut.rep.":[{"if@current":true,"if":[{"thing@program":"甲新版"}],"then":[{"thing":"乙"}]}]}'
+    'transform {"thing":"甲事实","strut.rep.":[{"if@current":true,"if":[{"program":"def main(context):\\n    return True"}],"then":[{"thing":"乙"}]}]}'
   ]) {
     const result = await execute(files, source, { programScheduler });
     assert.equal(result.ok, true, `${source}\n${JSON.stringify(result.errors)}`);
@@ -194,7 +194,7 @@ test('summary, field type, rename, and complete strut replacement strip commands
   assert.deepEqual(updated.strut, []);
   assert.deepEqual(findAtom(await readAtoms(files.contextFile), '甲事实').strut, [{
     'if@current': true,
-    if: [{ 'thing@program': '甲新版' }],
+    if: [{ program: 'def main(context):\n    return True' }],
     then: [{ thing: '乙' }]
   }]);
   assert.equal(

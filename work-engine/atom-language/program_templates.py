@@ -73,8 +73,8 @@ def _legacy_form(name, purpose, fields, next_name=None):
     )
 
 
-COMPLETION_GATE_SOURCE = """def main(arguments):
-    form_path = current_atom().path.rsplit('/', 1)[0]
+COMPLETION_GATE_SOURCE = """def main(context):
+    form_path = context['antecedents'][0]['path']
     rows = explore({'thing': form_path + '/状态', 'situation$full': None})
     return bool(rows and rows[0].situation in ['已通过', '已冻结'])"""
 
@@ -82,12 +82,10 @@ COMPLETION_GATE_SOURCE = """def main(arguments):
 def _gated_form(name, purpose, fields, next_name=None):
     routes = ([{
         "if@current": True,
-        "if": [{"thing@program": f"{name}完成门"}],
+        "if": [{"program": COMPLETION_GATE_SOURCE}],
         "then": [{"thing": next_name}],
     }] if next_name else [])
     children = [_atom("状态", "未进入"), *[_atom(field) for field in fields]]
-    if next_name:
-        children.append(_atom(f"{name}完成门", COMPLETION_GATE_SOURCE, types=["program"]))
     return _atom(name, purpose, children, routes)
 
 

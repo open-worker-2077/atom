@@ -8,9 +8,20 @@ import { parseTransformKey } from '../work-engine/atom-language/transform-key-pa
 test('Transform parses thing$click through the action registry instead of the Explore matcher registry', () => {
   const parsed = parseTransformKey('thing$click', { actionRegistry: createActionRegistry() });
   assert.deepEqual(parsed.errors, []);
-  assert.deepEqual(parsed.transformActions, [{ name: 'click', parameter: null }]);
+  assert.deepEqual(parsed.transformActions, [{ name: 'click', parameter: 1 }]);
   assert.deepEqual(parsed.commands, []);
   assert.equal(parsed.matcher, null);
+});
+
+test('click count is an unbounded positive action parameter instead of a hardcoded triple-click branch', () => {
+  assert.deepEqual(
+    parseTransformKey('thing$click37', { actionRegistry: createActionRegistry() }).transformActions,
+    [{ name: 'click', parameter: 37 }]
+  );
+  assert.equal(
+    parseTransformKey('thing$click0', { actionRegistry: createActionRegistry() }).errors.at(-1)?.code,
+    'INVALID_TRANSFORM_ACTION_PARAMETER'
+  );
 });
 
 test('unknown Transform $ action is rejected by registry identity', () => {
@@ -19,7 +30,9 @@ test('unknown Transform $ action is rejected by registry identity', () => {
 });
 
 test('a second registered Transform action needs no parser or Strut runtime change', () => {
-  const registry = new ActionRegistry().register('thing', 'pulse', { parameter: 'none' });
+  const registry = new ActionRegistry().register('thing', 'pulse', {
+    parameter: 'none', context: 'transform'
+  });
   const receiver = createAtomLanguageReceiver({ actionRegistry: registry });
   const request = receiver.receive('transform {"thing$pulse":"世界/前项"}');
 

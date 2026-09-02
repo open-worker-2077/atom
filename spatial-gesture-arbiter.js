@@ -50,11 +50,13 @@
     const setTimer = options.setTimer || root.setTimeout.bind(root);
     const clearTimer = options.clearTimer || root.clearTimeout.bind(root);
     const commit = typeof options.commit === 'function' ? options.commit : function noop() {};
+    const observe = typeof options.observe === 'function' ? options.observe : function noop() {};
     let pendingTimer = null;
     let pendingToken = null;
     let pendingActions = null;
     let pendingSignature = null;
     let pendingCount = 0;
+    let tripleCommitted = false;
 
     function resetPending() {
       pendingTimer = null;
@@ -62,13 +64,14 @@
       pendingActions = null;
       pendingSignature = null;
       pendingCount = 0;
+      tripleCommitted = false;
     }
 
     function actionForCount() {
       if (!pendingActions) return null;
       if (pendingCount === 1) return pendingActions.single || null;
       if (pendingCount === 2) return pendingActions.double || null;
-      return pendingActions.triple || null;
+      return tripleCommitted ? null : pendingActions.triple || null;
     }
 
     function settlePending() {
@@ -116,6 +119,11 @@
         };
         pendingSignature = safeSignature;
         pendingCount = 1;
+        observe(Object.freeze({
+          signature: safeSignature,
+          count: pendingCount,
+          target: singleAction?.target ?? doubleAction?.target ?? tripleAction?.target ?? null
+        }));
         schedule();
         return 'pending:1';
       }
@@ -127,14 +135,20 @@
         triple: tripleAction || pendingActions.triple || null
       };
       pendingCount += 1;
-      if (pendingCount >= 3) {
+      observe(Object.freeze({
+        signature: safeSignature,
+        count: pendingCount,
+        target: singleAction?.target ?? doubleAction?.target ?? tripleAction?.target ?? null
+      }));
+      if (pendingCount === 3) {
         const action = pendingActions.triple;
-        resetPending();
+        tripleCommitted = true;
         if (action) commit(action);
+        schedule();
         return 'triple';
       }
       schedule();
-      return 'pending:2';
+      return `pending:${pendingCount}`;
     }
 
     return Object.freeze({

@@ -308,11 +308,11 @@ def _normalize_strut_expr(expr):
     kind, value = next(iter(expr.items()))
     if kind == "satisfies":
         raise ValueError("STRUT_INLINE_PROGRAM_UNSUPPORTED")
-    if kind in ("thing", "thing@program"):
+    if kind == "thing@program":
+        raise ValueError("RETIRED_STRUT_PROGRAM_SELECTOR")
+    if kind in ("thing", "program"):
         if not isinstance(value, str) or not value.strip():
-            raise ValueError("strut thing requires a non-empty selector")
-        if kind == "thing@program" and any(token in value for token in ("satisfies(", "lambda", "def main", "\n", "\r")):
-            raise ValueError("STRUT_INLINE_PROGRAM_UNSUPPORTED")
+            raise ValueError("strut thing/program requires non-empty text")
         return {kind: value}
     if kind not in ("and", "or") or not isinstance(value, list) or len(value) < 2:
         raise ValueError("strut Expr must be thing or ordered and/or with at least two children")
@@ -322,7 +322,7 @@ def _normalize_strut_expr(expr):
 def _strut_expr_endpoints(expr):
     if "thing" in expr:
         return {expr["thing"]}
-    if "thing@program" in expr:
+    if "program" in expr:
         return set()
     return set().union(*(_strut_expr_endpoints(child)
                          for child in expr[next(iter(expr))]))

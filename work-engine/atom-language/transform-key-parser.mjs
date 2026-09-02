@@ -64,7 +64,7 @@ export function parseTransformKey(rawKey, options = {}) {
   const matches = commandMatches(rawKey);
   if (!matches.length) {
     const ordinary = parseAtomKey(rawKey, options);
-    const transformActions = ordinary.actions.map(({ name, parameter }) => ({ name, parameter }));
+    const transformActions = [];
     const matcherOnlyCodes = new Set([
       'MULTIPLE_MATCHERS',
       'UNSUPPORTED_MATCHER',
@@ -76,7 +76,7 @@ export function parseTransformKey(rawKey, options = {}) {
     if (ordinary.actions.length) {
       for (const action of ordinary.actions) {
         const definition = options.actionRegistry?.resolve(ordinary.baseKey, action.name) ?? null;
-        if (!definition) {
+        if (!definition || definition.context !== 'transform') {
           errors.push(diagnostic(
             'UNKNOWN_TRANSFORM_ACTION',
             `未知 Transform $ 动作：${ordinary.baseKey}$${action.raw}`,
@@ -84,6 +84,7 @@ export function parseTransformKey(rawKey, options = {}) {
           ));
           continue;
         }
+        const parameter = action.parameter ?? definition.defaultParameter ?? null;
         if (definition.parameter === 'none' && action.parameter !== null) {
           errors.push(diagnostic(
             'INVALID_TRANSFORM_ACTION_PARAMETER',
@@ -91,6 +92,15 @@ export function parseTransformKey(rawKey, options = {}) {
             { baseKey: ordinary.baseKey, action: action.name, parameter: action.parameter }
           ));
         }
+        if (definition.parameter === 'positiveInteger'
+          && (!Number.isSafeInteger(parameter) || parameter < 1)) {
+          errors.push(diagnostic(
+            'INVALID_TRANSFORM_ACTION_PARAMETER',
+            `Transform 动作 ${ordinary.baseKey}$${action.name} 需要正整数参数`,
+            { baseKey: ordinary.baseKey, action: action.name, parameter }
+          ));
+        }
+        transformActions.push({ name: action.name, parameter });
       }
     }
     return {

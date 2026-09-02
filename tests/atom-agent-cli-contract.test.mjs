@@ -612,11 +612,11 @@ test('public help is a complete daily Agent operation contract', async () => {
   );
   assert.match(text, /situation\$full/u);
   assert.match(text, /strut 按原始 ordinal 回读 owner 声明/u);
-  assert.match(text, /if 内的独立判定 Program 写 \{"thing@program":"selector"\}.*then 只接受普通事实 Thing/u);
+  assert.match(text, /if 内嵌判定写 \{"program":"def main\(context\).*then 只接受普通事实 Thing/u);
   assert.match(text, /禁止原生 N→M/u);
   assert.match(text, /显式枢纽 H/u);
   assert.doesNotMatch(text, /前件 Program/u);
-  assert.match(text, /事实前项与独立判定 Program 保持分层/u);
+  assert.match(text, /外部 thing@program 判定引用/u);
   assert.match(text, /归一化 0\.5 形成共享汇流／分流线干/u);
   assert.doesNotMatch(text, /首版禁止.*原生 M→N/u);
   assert.doesNotMatch(text, /M→N 必须建立真实枢纽/u);

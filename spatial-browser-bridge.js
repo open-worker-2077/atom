@@ -57,6 +57,8 @@
   let lastKnowledge = null;
   let pendingRemoteRevision = -1;
   let workspaceOperationEpoch = 0;
+  let transformActionSequence = 0;
+  let transformActionDelivery = Promise.resolve();
   const loadedPaths = new Set();
   const workspaceModel = global.SpatialWorkspaceModel;
 
@@ -259,6 +261,46 @@
       throw error;
     }
     return payload;
+  }
+
+  async function postAtomTransformAction(detail) {
+    if (!atomWorkspace
+      || !detail
+      || typeof detail.targetPath !== "string"
+      || !detail.targetPath
+      || typeof detail.action !== "string"
+      || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(detail.action)
+      || !Number.isSafeInteger(detail.parameter)
+      || detail.parameter < 1) return false;
+    const suffix = detail.parameter === 1 ? "" : String(detail.parameter);
+    const source = `transform ${JSON.stringify({
+      [`thing$${detail.action}${suffix}`]: detail.targetPath
+    })}`;
+    const response = await global.fetch("/__atom/api/command", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        source,
+        interaction: { id: `web-action-${Date.now()}-${transformActionSequence += 1}` }
+      })
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false || payload.result?.ok === false) {
+      throw new Error(payload.error?.message || payload.result?.errors?.[0]?.message || "Atom Transform action failed");
+    }
+    return true;
+  }
+
+  function enqueueAtomTransformAction(event) {
+    const detail = event?.detail;
+    transformActionDelivery = transformActionDelivery
+      .then(() => postAtomTransformAction(detail))
+      .catch(() => {
+        document.body.dataset.spatialBridge = "degraded";
+        return false;
+      });
+    return transformActionDelivery;
   }
 
   function reportMainEntryUnavailable(stage) {
@@ -665,6 +707,7 @@
 
   global.addEventListener("spatial-workspace-committed", pushKnowledge);
   global.addEventListener("spatial-view-committed", pushView);
+  global.addEventListener("atom-transform-action", enqueueAtomTransformAction);
   if (typeof global.EventSource === "function") {
     const changes = new global.EventSource(`${API}/events`);
     changes.onopen = () => {

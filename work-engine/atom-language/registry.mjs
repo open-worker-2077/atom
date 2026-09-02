@@ -51,6 +51,7 @@ export class ActionRegistry {
     const action = requireName(name, 'action name');
     this.#actions.set(`${base}\u0000${action}`, Object.freeze({
       parameter: 'none',
+      context: 'explore',
       ...definition,
       name: action,
       baseKey: base
@@ -73,7 +74,9 @@ export class ActionRegistry {
 
 export function createActionRegistry() {
   const registry = new ActionRegistry();
-  registry.register('thing', 'click');
+  registry.register('thing', 'click', {
+    context: 'transform', parameter: 'positiveInteger', defaultParameter: 1
+  });
   registry.register('situation', 'full');
   registry.register('situation', 'lock');
   for (const name of ['latitude', 'longitude']) {

@@ -167,8 +167,40 @@ test('primary arbiter resolves one, two, and three clicks as one final action', 
   assert.deepEqual(committed, []);
   assert.equal(arbiter.submit(single, double, triple, 'node:series'), 'triple');
   assert.deepEqual(committed, [triple]);
-  assert.equal(timers.size, 0);
-  assert.equal(arbiter.pending, false);
+  assert.equal(timers.size, 1);
+  assert.equal(arbiter.pending, true);
+});
+
+test('primary arbiter observes every atomic click with an unbounded same-target count', () => {
+  const timers = new Map();
+  const observed = [];
+  let nextTimer = 1;
+  const arbiter = createPrimaryClickArbiter({
+    setTimer(callback) {
+      const id = nextTimer++;
+      timers.set(id, callback);
+      return id;
+    },
+    clearTimer(id) { timers.delete(id); },
+    commit() {},
+    observe(event) { observed.push(event); }
+  });
+  const target = { atomPath: 'Root/Target' };
+  const single = { intent: 'focus', target };
+  const triple = { intent: 'activate', target };
+
+  for (let count = 1; count <= 5; count += 1) {
+    arbiter.submit(single, null, triple, 'node:target');
+  }
+
+  assert.deepEqual(observed.map(({ count, target: node }) => ({ count, path: node.atomPath })), [
+    { count: 1, path: 'Root/Target' },
+    { count: 2, path: 'Root/Target' },
+    { count: 3, path: 'Root/Target' },
+    { count: 4, path: 'Root/Target' },
+    { count: 5, path: 'Root/Target' }
+  ]);
+  assert.equal(arbiter.pendingCount, 5);
 });
 
 test('primary arbiter commits the pending click count after its window', () => {

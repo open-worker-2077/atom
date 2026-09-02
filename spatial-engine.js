@@ -6844,6 +6844,17 @@
         startConfirmationRipples(action.target, action.visualMeta.confirmationCount);
       }
       dispatchIntent(action.intent, action.visualMeta, action.target);
+    },
+    observe(event) {
+      const targetPath = event?.target?.atomPath;
+      if (typeof targetPath !== "string" || !targetPath) return;
+      global.dispatchEvent(new CustomEvent("atom-transform-action", {
+        detail: {
+          targetPath,
+          action: "click",
+          parameter: event.count
+        }
+      }));
     }
   });
 

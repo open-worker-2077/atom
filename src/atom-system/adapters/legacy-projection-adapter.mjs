@@ -252,20 +252,20 @@ export function createLegacyProjectionProjectors(options = {}) {
           allowLegacyStrut: Boolean(options.compatibilityManifest)
         });
         const strutDecisions = await evaluateStrutClausesWithPrograms(graphDocument, {
-          evaluateProgram: (selector) => {
-            if (!programScheduler?.evaluateStrutProgram) {
-              throw Object.assign(new Error('Program strut endpoint requires Program runtime'), {
+          evaluateProgram: (predicate, { clause }) => {
+            if (!programScheduler?.evaluateInlineStrutProgram
+              || !programScheduler?.buildInlineStrutContext) {
+              throw Object.assign(new Error('Inline Strut predicate requires Program runtime'), {
                 code: 'STRUT_PROGRAM_EVALUATOR_REQUIRED'
               });
             }
-            const atomPath = graphDocument.atomPathByGraphPath?.get(selector);
-            if (!atomPath) {
-              throw Object.assign(new Error(`Program strut endpoint has no Atom identity: ${selector}`), {
-                code: 'STRUT_PROGRAM_IDENTITY_REQUIRED',
-                details: { selector }
-              });
-            }
-            return programScheduler.evaluateStrutProgram(facts, atomPath);
+            return programScheduler.evaluateInlineStrutProgram(facts, predicate, {
+              context: programScheduler.buildInlineStrutContext(
+                facts,
+                graphDocument,
+                clause
+              )
+            });
           }
         });
         const spatialOptions = {

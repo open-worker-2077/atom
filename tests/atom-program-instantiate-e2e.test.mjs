@@ -80,7 +80,7 @@ test('instantiate creates one complete advancement flow below the calling Progra
   assert.deepEqual(afterSecond, afterFirst);
 });
 
-test('advancement-flow transitions consume independent strict-bool Programs without writing the next form', async () => {
+test('advancement-flow transitions consume Strut-owned strict-bool Programs without writing the next form', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-instantiate-strut-gate-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
@@ -101,14 +101,15 @@ test('advancement-flow transitions consume independent strict-bool Programs with
   assert.ok(transition, '定向 ordinary Thing 应持有前往调研的推支关系');
   assert.equal(transition.root.kind, 'and');
   assert.deepEqual(
-    transition.root.children.map(({ kind, targetPath, implicit }) => ({
+    transition.root.children.map(({ kind, targetPath, implicit, source }) => ({
       kind,
-      target: targetPath.split('/').at(-1),
+      target: targetPath?.split('/').at(-1) ?? null,
+      inline: typeof source === 'string',
       implicit: implicit === true
     })),
     [
-      { kind: 'thing', target: '定向', implicit: true },
-      { kind: 'program', target: '定向完成门', implicit: false }
+      { kind: 'thing', target: '定向', inline: false, implicit: true },
+      { kind: 'program', target: null, inline: true, implicit: false }
     ]
   );
   assert.deepEqual(
@@ -116,21 +117,21 @@ test('advancement-flow transitions consume independent strict-bool Programs with
     [{ kind: 'thing', target: '调研' }]
   );
   assert.deepEqual(transition.antecedentPaths.map((entry) => entry.split('/').at(-1)), ['定向']);
-  assert.deepEqual(
-    transition.dependencyPaths.map((entry) => entry.split('/').at(-1)),
-    ['定向', '定向完成门']
-  );
-  assert.equal(initialGraph.strutClauses.some((clause) => clause.sourcePath.endsWith('/定向完成门')), false);
+  assert.deepEqual(transition.dependencyPaths.map((entry) => entry.split('/').at(-1)), ['定向']);
+  assert.equal(JSON.stringify(initialWorld).includes('定向完成门'), false);
 
   const evaluate = (world, graph) => evaluateStrutClausesWithPrograms(graph, {
-    evaluateProgram: (graphPath) => scheduler.evaluateStrutProgram(
-      world,
-      graph.atomPathByGraphPath.get(graphPath)
+    evaluateProgram: (predicate, { clause }) => scheduler.evaluateInlineStrutProgram(
+      world, predicate, { context: scheduler.buildInlineStrutContext(world, graph, clause) }
     )
   });
   const beforeFalseEvaluation = structuredClone(initialWorld);
   const falseDecisions = await evaluate(initialWorld, initialGraph);
-  assert.equal(falseDecisions.get(transition.id).decision, false);
+  assert.equal(
+    falseDecisions.get(transition.id).decision,
+    false,
+    JSON.stringify(falseDecisions.get(transition.id))
+  );
   assert.deepEqual(initialWorld, beforeFalseEvaluation);
 
   const completedWorld = structuredClone(initialWorld);

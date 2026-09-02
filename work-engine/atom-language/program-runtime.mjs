@@ -1260,39 +1260,6 @@ export class ProgramRuntimeScheduler {
     }
   }
 
-  async evaluateStrutProgram(atoms, selector, options = {}) {
-    const records = worldRecords(atoms);
-    const [program] = programRecords(records, selector);
-    const preparedWorld = options.executeExplore ? null : prepareExploreWorld(atoms);
-    const executeExplore = options.executeExplore ?? ((request, executionContext = {}) => executeProgramExplore({
-      atoms,
-      request,
-      preparedWorld,
-      scopeRoot: executionContext.scopeRoot ?? null
-    }));
-    const result = await this.runBounded(() => this.runProgram({
-      python: this.python,
-      records,
-      programs: programRecords(records),
-      program,
-      timeoutMs: options.timeoutMs ?? this.timeoutMs,
-      executeExplore: async (request) => {
-        const matches = await executeExplore(request, {
-          scopeRoot: options.scopeRoot ?? null,
-          programPath: selector
-        });
-        const byPath = new Map(records.map((record) => [record.path, record]));
-        return matches.map((match) => programExploreRecord(match, byPath)).filter(Boolean);
-      },
-      scopeRoot: options.scopeRoot ?? null,
-      programRoot: options.programRoot ?? null,
-      strutDecision: true,
-      triggered: true,
-      agentProgramPaths: [...this.agentSecurity.keys()]
-    }));
-    return result.strutDecision;
-  }
-
   async evaluateInlineStrutProgram(atoms, predicate, options = {}) {
     if (!predicate || predicate.kind !== 'program'
       || typeof predicate.source !== 'string' || !predicate.source.trim()) {
@@ -1328,10 +1295,14 @@ export class ProgramRuntimeScheduler {
       programs: [program],
       program,
       timeoutMs: options.timeoutMs ?? this.timeoutMs,
-      executeExplore: (request) => executeExplore(request, {
-        scopeRoot: options.scopeRoot ?? null,
-        programPath: program.path
-      }),
+      executeExplore: async (request) => {
+        const matches = await executeExplore(request, {
+          scopeRoot: options.scopeRoot ?? null,
+          programPath: program.path
+        });
+        const byPath = new Map(records.map((record) => [record.path, record]));
+        return matches.map((match) => programExploreRecord(match, byPath)).filter(Boolean);
+      },
       scopeRoot: options.scopeRoot ?? null,
       strutDecision: true,
       programArguments: structuredClone(options.context ?? {}),
@@ -1339,6 +1310,17 @@ export class ProgramRuntimeScheduler {
       agentProgramPaths: [...this.agentSecurity.keys()]
     }));
     return result.strutDecision;
+  }
+
+  buildInlineStrutContext(atoms, graphDocument, clause, transform = null) {
+    const records = worldRecords(atoms);
+    const recordsByPath = new Map(records.map((record) => [record.path, record]));
+    return inlineStrutContext(
+      graphDocument,
+      clause,
+      recordsByPath,
+      transform ? { action: transform } : null
+    );
   }
 
   async deriveAgentSecurity(atoms) {
