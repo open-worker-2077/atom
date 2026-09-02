@@ -17,6 +17,8 @@
   - 向上钻取得类别、归属、用途和语境；向下钻取得组成、属性、参数和内部结构。
 - **Strut**：Thing 面向相邻 Thing 的支撑结构。
   - Strut 保存支撑的前项、后项、判定条件与可审计关系身份。
+  - 判定 Program 内嵌于 Strut `if`，由 clause 取得全部上下游身份、上游 Situation 和规范化 Transform `$` 动作信封；不建立外部判定 Program Thing，也不为 `$click` 写专用分支。
+  - strict `true` 才向后项形成 typed delivery；`false` 只保留判定，不传递、不改造节点。
   - Thing 可接受 Strut 支撑，也可成为支撑其他 Thing 的 Strut。
   - Strut 强调承托、传力和稳定，不表达网络端口或交通通道。
 
@@ -26,8 +28,8 @@
 |---|---|---|
 | 持久化 | `slot` 数组保存直接下级槽料 | `strut` 数组保存 owner-local `if→then` clause |
 | Explore | `slot$latitude±N`、`slot$longitude±N` 钻取 | `strut` 回读相关支柱及 owner 声明 |
-| Transform | new、move、rename、discard、restore 维护整棵 Slot 子树 | replace、路径重写和事务提交维护 Strut 端点 |
-| Program | `transform()` 只接受新四轴；槽例相对路径沿 Slot 解析 | `trigger("strut", ...)` 接收 strict-true typed delivery |
+| Transform | new、move、rename、discard、restore 维护整棵 Slot 子树；`thing$click` 等注册 `$` 动作由 CLI/Web 共用 | replace、路径重写和事务提交维护 Strut 端点；相关动作进入 clause 判定上下文 |
+| Program | `transform()` 只接受新四轴与注册 `$` 动作；槽例相对路径沿 Slot 解析 | `if` 内嵌 pure Program 判定；后项 `trigger("strut", ...)` 接收 strict-true typed delivery |
 | 权限 | Agent 窗口、节点锁和子树锁沿实际 Slot 链裁定 | Strut 引用不携带权限，也不扩大窗口 |
 | 投影 | Slot 生成递归空间层级 | Strut 生成支柱线、汇流和分流投影 |
 
@@ -54,3 +56,4 @@
 - **旧轴拒绝**：正常解析、Explore、Transform 和 Program 对旧字段稳定拒绝，不静默迁移。
 - **真实迁移**：实际世界经官方事务迁移并通过守恒、冷启动、CLI 回读和 Web 投影验证。
 - **回归完整**：权限、Agent 迁窗、槽体、Shortcut、Program 调度、备份域与中央事务测试均在新轴上通过。
+- **推支真实**：值判定、Transform 与注册 `$` 动作均由 Strut 内嵌 `if` Program复核；CLI/Web 同构，删除 Strut 即不再触发，外部 Program 节点模式不得作为完成实现。新增隔离测试动作时不得修改 Strut/runtime 主干。

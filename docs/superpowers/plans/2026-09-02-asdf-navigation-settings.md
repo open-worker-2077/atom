@@ -50,10 +50,10 @@
 - Consumes: 节点、`ownerPath`、owner route、owner labels、节点 lineage。
 - Produces: `planImmersiveRoute(...) -> {entries,path,depth,crumbs}`；`commitDomainRoute(route,node)`同步替换活动域状态。
 
-- [ ] **Step 1: Write failing route tests**：以当前活动域`root/manage`和点击 owner`root/manage/work/personal`证明路线必须恢复 owner route 后再追加节点；错误 owner route 返回`null`。
-- [ ] **Step 2: Run model RED**：`node --test tests/spatial-view-mode-model.test.js`，预期缺少规划函数。
-- [ ] **Step 3: Implement pure route planner**：验证 owner route、复制不可变 entry、附加 lineage，并返回完整路线。
-- [ ] **Step 4: Write failing browser journey**：在多层 cluster 中切到 F、右键深层节点，断言 breadcrumb、活动路径、加载节点和上层返回均为真实路线。
+- [x] **Step 1: Write failing route tests**：以当前活动域`root/manage`和点击 owner`root/manage/work/personal`证明路线必须恢复 owner route 后再追加节点；错误 owner route 返回`null`。
+- [x] **Step 2: Run model RED**：定向测试 17/19 通过，两个新用例因缺少 `resolveImmersiveOwnerContext` 按预期失败。
+- [x] **Step 3: Implement pure route planner**：验证 owner route并复制不可变的 crumbs、camera 与 entryDirection；未知外域拒绝伪造路线。
+- [x] **Step 4: Write failing browser journey**：在 manage→办包 的多层 cluster 中切到 F、右键个务，断言活动路径、内部节点加载和上层返回均为真实路线。
 - [ ] **Step 5: Run browser RED**：运行该 Playwright 用例，预期当前代码得到顶层伪路径或空数据。
 - [ ] **Step 6: Integrate one commit boundary**：`enterNode()`以节点真实 ownerPath 规划路线并用同一函数提交所有状态；Shortcut保留相同完整路线合同。
 - [ ] **Step 7: Run GREEN**：运行模型、合同和浏览器旅程，预期零失败。
@@ -88,6 +88,8 @@
 - Modify: `docs/superpowers/README.md`
 - Modify: `docs/superpowers/plans/2026-09-02-asdf-navigation-settings.md`
 - Test: `tests/view-mode-engine-contract.test.js`
+
+**追加即时收件：** 完成既定深层游走与统一设置后，以 TDD 排查并修复普通名称层泄漏 `@slot-role-<内部ID>`；必须先区分权威数据标签、Web 投影拼接和详情模式渲染，内部稳定身份不得删除。
 - Test: `tests/browser/atom-web-critical-journeys.spec.mjs`
 
 **Interfaces:**

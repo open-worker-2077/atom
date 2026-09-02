@@ -1,5 +1,7 @@
 # Programmable Click Trigger Implementation Plan
 
+> **已被用户定论取代（2026-09-02）**：本计划的独立 `click` 事件、`trigger("click")`、`POST /__atom/api/click` 与浏览器桥方案不得执行。点击属于 Graph Transform 的注册 `$` 动作：CLI 使用 `transform {"thing$click":"EXACT路径"}`，Web 翻译为同一动作；Strut 的内嵌 `if` Program可据此判定并只在 strict true 时向后项投递。实施前必须依据 `specs/2026-08-31-atom-world-program-design.md` 重写新计划。本页仅保留为被否决方案的追溯证据。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让每次物理点击形成无上限累计次数，并由 Atom Program 通过精确点击次数声明安全触发运行。
