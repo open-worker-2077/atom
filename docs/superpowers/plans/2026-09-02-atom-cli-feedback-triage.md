@@ -35,7 +35,7 @@
 - **30 `695b8cb2`**：`2f4013c fix(atom): preserve split utf8 stdin commands`，CLI 使用`StringDecoder('utf8')`且已有分块边界测试；旧 1746 节点导入尚未整树重放，故只裁定代码根因已有回归，不宣称旧数据自动修复。
 - **32 `216cfcc5`**：`2f57021 feat(atom): add atomic batch transform`及现行 Help 已公开原子批量 Transform。
 - **35、36、38 `1de10c7d`、`7870bf52`、`bf1cd480`**：`3014382 fix(atom): keep unrelated failed programs dormant`及后续 trigger/changed 隔离合同覆盖“无关 Program 冷重放污染”。
-- **37 `f163b30f`、39 `dbc95b90`**：固定窗口、受控迁窗与跳窗隔离已有系列实现和验收；最新真实 ESG 初态也已部署。只等待真实业务完成事件，不伪造`✅`。
+- **37 `f163b30f`、39 `dbc95b90`**：固定窗口、受控迁窗与跳窗隔离已有系列实现和验收；隔离测试世界已跑通五阶段连续解锁与四次自动迁窗，真实 ESG 初态也已部署。真实业务`✅`只用于后续生产观察，不再作为软件功能验收阻塞。
 - **42 `46e7f1a8`**：`5c79dad fix(transform): copy frozen snapshots before discard`及同名归档补丁`fc5e09c`直接覆盖冻结数组崩溃。
 - **43 `b2824f62`**：Agent Program身份与子树移动已由`d5e1bb6`、`57230c0`等修复并经真实工务迁移/ESG部署使用；2026-09-02 现行 Agent 登记/固定窗口回归`35/35`通过，正文、Strut、丢弃三类后代 Transform 均不会再触发错误登记。
 - **44 `327e3858`**：`0fb665d fix(transform): keep situation replacement text opaque`及正文不透明规格直接覆盖嵌套`.ren.`误解析。
