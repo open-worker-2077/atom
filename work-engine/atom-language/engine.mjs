@@ -2628,7 +2628,19 @@ export async function executeAtomLanguage(options = {}) {
         ...applicationRelocations,
         ...(jump.relocations ?? [])
       ];
-      rewritePendingSlotTriggerEvents(pendingTriggerEvents, cycleRelocations);
+      const rewrittenSlotRecipients = rewritePendingSlotTriggerEvents(
+        pendingTriggerEvents, cycleRelocations
+      );
+      if (rewrittenSlotRecipients.length) {
+        if (typeof runtimeScheduler.refreshPreparedTriggerOwnership !== 'function') {
+          throw Object.assign(new Error('Candidate runtime cannot refresh trigger ownership'), {
+            code: 'PROGRAM_TRIGGER_OWNERSHIP_REFRESH_UNAVAILABLE'
+          });
+        }
+        await runtimeScheduler.refreshPreparedTriggerOwnership(
+          application.atoms, cycleRelocations
+        );
+      }
       const relocatedSlotSignals = (cycle.slotSignals ?? []).map((effect) => ({
         ...rewriteSlotSignalPaths(effect, [...pathChanges, ...cycleRelocations])
       }));
@@ -2974,7 +2986,8 @@ export async function executeAtomLanguage(options = {}) {
   }
 
   function rewritePendingSlotTriggerEvents(events, pathChanges) {
-    if (pathChanges.length === 0) return;
+    if (pathChanges.length === 0) return [];
+    const rewrittenRecipientPaths = new Set();
     for (let index = 0; index < events.length; index += 1) {
       const event = events[index];
       if (event.mode !== 'slot') continue;
@@ -2992,14 +3005,11 @@ export async function executeAtomLanguage(options = {}) {
         nodes: [...new Set(signals.map(({ recipientPath }) => recipientPath))],
         signals
       };
-      if (rewrittenRecipients.length === 0) continue;
-      events.splice(index, 0, {
-        mode: 'transform',
-        nodes: rewrittenRecipients,
-        affectedPaths: rewrittenRecipients
-      });
-      index += 1;
+      for (const recipientPath of rewrittenRecipients) {
+        rewrittenRecipientPaths.add(recipientPath);
+      }
     }
+    return [...rewrittenRecipientPaths];
   }
 
   if (programChanged && (

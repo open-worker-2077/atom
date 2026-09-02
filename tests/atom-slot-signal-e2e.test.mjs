@@ -563,6 +563,52 @@ test('queued Slot delivery keeps unrelated Transform observers behind its FIFO p
   assert.equal(scheduler.slotSignalExecutions.size, 1);
 });
 
+test('queued Slot delivery keeps receiver-index refresh out of Transform business scheduling', async (t) => {
+  const label = '内部索引刷新';
+  const receiver = [
+    'def receive():',
+    '    signal()',
+    '    message({"level":"info","text":"slot"})',
+    `trigger("slot", {"from":"up","labels":[${JSON.stringify(label)}]}, receive)`
+  ].join('\n');
+  const world = [
+    program('Parent', structuralSender(
+      'transform({"thing":"Relocate Receiver Once","situation.rep.changed":None})',
+      label,
+      true
+    ), [program('Receiver', receiver)]),
+    program('Relocator', [
+      'def relocate_receiver():',
+      '    transform({"thing.ren.Receiver Final":"Parent/Receiver"})',
+      'trigger("transform", {"nodes":["Relocate Receiver Once"]}, relocate_receiver)'
+    ].join('\n')),
+    program('Final Receiver Observer', [
+      'def observe():',
+      '    message({"level":"info","text":"observer"})',
+      'trigger("transform", {"nodes":["Parent/Receiver Final"]}, observe)'
+    ].join('\n')),
+    atom('Go', 'before'),
+    atom('Relocate Receiver Once', 'before')
+  ];
+  const files = await fixture(t, world);
+  const scheduler = createProgramRuntimeScheduler();
+  const lifecycle = observeSlotClaimLifecycle(scheduler);
+  const invocations = observeSlotInvocations(scheduler);
+
+  const { result } = await executeFixture(
+    files,
+    'transform {"thing":"Go","situation.rep.changed"}',
+    scheduler
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.messages.map(({ text }) => text), ['slot', 'observer']);
+  assert.deepEqual(invocations.map(({ programPath }) => programPath), ['Parent/Receiver Final']);
+  assert.equal(lifecycle.confirmed.length, 1);
+  assert.deepEqual(lifecycle.released, []);
+  assert.equal(scheduler.slotSignalExecutions.size, 1);
+});
+
 test('queued Slot delivery follows one receiver through chained relocation without capturing its new neighbor', async (t) => {
   const label = '排队迁移';
   const world = [

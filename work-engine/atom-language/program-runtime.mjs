@@ -1880,6 +1880,66 @@ export class ProgramRuntimeScheduler {
     }
   }
 
+  async refreshPreparedTriggerOwnership(atoms, relocations) {
+    const signatures = Array.isArray(relocations)
+      ? relocations.map((relocation) => JSON.stringify(relocation))
+      : [];
+    if (!Array.isArray(relocations) || relocations.length === 0
+      || new Set(signatures).size !== signatures.length
+      || relocations.some((relocation) => (
+        !relocation || typeof relocation !== 'object' || Array.isArray(relocation)
+        || Object.keys(relocation).length !== 2
+        || !['sourcePath', 'resultPath'].every((key) => Object.hasOwn(relocation, key))
+        || typeof relocation.sourcePath !== 'string' || !relocation.sourcePath.trim()
+        || typeof relocation.resultPath !== 'string' || !relocation.resultPath.trim()
+        || relocation.sourcePath === relocation.resultPath
+      ))) {
+      throw Object.assign(new Error('Prepared trigger ownership refresh requires relocations'), {
+        code: 'INVALID_PREPARED_TRIGGER_OWNERSHIP_REFRESH'
+      });
+    }
+    await this.rebuildAgentSecurity(atoms);
+    const records = worldRecords(atoms);
+    const programs = programRecords(records);
+    const affectedPrefixes = [...new Set(relocations.flatMap(({ sourcePath, resultPath }) => (
+      [sourcePath, resultPath]
+    )))];
+    const pathIsAffected = (programPath) => affectedPrefixes.some((prefix) => (
+      programPath === prefix || programPath.startsWith(`${prefix}/`)
+    ));
+    const affectedPrograms = programs.filter((program) => pathIsAffected(program.path));
+    const resolveExactPath = (selector) => resolveExactPathFromCurrentContext(atoms, selector);
+    const inspected = await Promise.all(affectedPrograms.map((program) => this.runBounded(() => (
+      this.runProgram({
+        python: this.python,
+        records,
+        programs,
+        program,
+        timeoutMs: this.timeoutMs,
+        resolveExactPath,
+        executeExplore: async () => {
+          throw Object.assign(
+            new Error('Prepared trigger ownership refresh cannot execute Graph functions'),
+            { code: 'INVALID_PREPARED_TRIGGER_OWNERSHIP_EFFECT' }
+          );
+        },
+        validateOnly: true,
+        agentProgramPaths: [...this.agentSecurity.keys()]
+      })
+    ))));
+    for (const programPath of [...this.triggerContracts.keys()].filter(pathIsAffected)) {
+      this.removeTriggerContract(programPath);
+    }
+    for (const [index, program] of affectedPrograms.entries()) {
+      if (/\bchanged\s*\(/u.test(program.detail)) {
+        this.triggerContractsInitialized = false;
+      } else {
+        this.setTriggerContract(program, inspected[index].trigger ?? null);
+      }
+    }
+    return Object.freeze({ refreshedProgramPaths: affectedPrograms.map(({ path }) => path) });
+  }
+
   removeTriggerContract(programPath) {
     this.deferredTriggerContracts.delete(programPath);
     const existing = this.triggerContracts.get(programPath);
