@@ -47,7 +47,7 @@ Expected: Store 在启动后仍重读损坏文件；生产规模首请求超过�
 
 `init()` 读取并规范化一次后保存快照。`read()` 返回快照的隔离副本而不访问磁盘。每个写命令从当前快照复制候选值，完成校验与原子写入后才替换快照；失败保持旧快照。
 
-- [ ] **Step 4: Verify focused and system regression**
+- [x] **Step 4: Verify focused and system regression**
 
 Run: `node --test --test-isolation=none tests/spatial-store.test.mjs tests/atom-language-graph-server.test.mjs tests/atom-system-performance.test.mjs`
 
