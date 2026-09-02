@@ -565,6 +565,51 @@ test('graph server remains available and reports degraded health when only a dis
   assert.deepEqual(health.atomProjection, projectionState);
 });
 
+test('ready graph server serves production-scale local state from its resident startup snapshot', async (t) => {
+  const directory = await temporaryDirectory();
+  removeTemporaryDirectoryAfter(t, directory);
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const deepPath = 'root/deep/domain';
+  const nodes = Array.from({ length: 10_000 }, (_, index) => ({
+    path: index < 9_900 ? `root/domain-${index % 100}` : deepPath,
+    id: `node-${index}`,
+    label: `节点 ${index}`,
+    detail: '生产规模局部读取验收'
+  }));
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
+  await fs.writeFile(graphFile, '{}\n', 'utf8');
+  await fs.writeFile(storeFile, `${JSON.stringify({
+    schemaVersion: 1, revision: 88, nodes, edges: [], view: { path: deepPath }
+  })}\n`, 'utf8');
+  const interactionRuntime = {
+    async initialize() { return { initialization: { ok: true, changed: false } }; },
+    async execute() { return { ok: true, changed: false }; },
+    async updateHumanStatus() { return { ok: true, changed: false }; },
+    async updateHumanWorkspace() { return { ok: true, changed: false }; },
+    async recover() { return { sourceRevision: 'revision' }; },
+    projectionStatus() { return { status: 'published' }; }
+  };
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, interactionRuntime
+  });
+  t.after(() => running.close());
+
+  await fs.writeFile(storeFile, '{broken after ready', 'utf8');
+  for (const pathname of [
+    '/__spatial/api/health',
+    '/__spatial/api/state?path=root',
+    `/__spatial/api/state?path=${encodeURIComponent(deepPath)}`
+  ]) {
+    const startedAt = performance.now();
+    const response = await fetch(`${running.url}${pathname}`);
+    const elapsedMs = performance.now() - startedAt;
+    assert.equal(response.status, 200, `${pathname} returned ${await response.text()}`);
+    assert.ok(elapsedMs < 1_000, `${pathname} took ${elapsedMs.toFixed(1)}ms`);
+  }
+});
+
 test('graph server persists compact read diagnostics through the shared interaction runtime', async (t) => {
   const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');

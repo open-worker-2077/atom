@@ -7,6 +7,8 @@ import { childDomainPath, probeKnowledge } from './probe.mjs';
 export const SCHEMA_VERSION = 1;
 
 const fileWriteQueues = new Map();
+const fileSnapshots = new Map();
+const fileSnapshotLoads = new Map();
 
 function enqueueFileWrite(file, handler) {
   const previous = fileWriteQueues.get(file) ?? Promise.resolve();
@@ -218,11 +220,15 @@ async function atomicWrite(file, value) {
 export function createStore(file) {
   const absoluteFile = path.resolve(file);
 
-  async function read() {
+  async function loadSnapshot() {
     try {
       return normalizeKnowledge(JSON.parse(await fs.readFile(absoluteFile, 'utf8')));
     } catch (error) {
-      if (error.code === 'ENOENT') return emptyKnowledge();
+      if (error.code === 'ENOENT') {
+        const initial = emptyKnowledge();
+        await atomicWrite(absoluteFile, initial);
+        return initial;
+      }
       if (error instanceof SyntaxError) {
         throw new SpatialStoreError('INVALID_STORE', '知识库 JSON 无法解析', { file: absoluteFile });
       }
@@ -230,15 +236,36 @@ export function createStore(file) {
     }
   }
 
+  async function currentSnapshot() {
+    if (fileSnapshots.has(absoluteFile)) return fileSnapshots.get(absoluteFile);
+    let loading = fileSnapshotLoads.get(absoluteFile);
+    if (!loading) {
+      loading = loadSnapshot().then((snapshot) => {
+        fileSnapshots.set(absoluteFile, snapshot);
+        return snapshot;
+      });
+      fileSnapshotLoads.set(absoluteFile, loading);
+      void loading.finally(() => {
+        if (fileSnapshotLoads.get(absoluteFile) === loading) fileSnapshotLoads.delete(absoluteFile);
+      }).catch(() => {});
+    }
+    return loading;
+  }
+
+  async function read() {
+    return structuredClone(await currentSnapshot());
+  }
+
   async function write(knowledge) {
     const normalized = normalizeKnowledge(knowledge);
     await atomicWrite(absoluteFile, normalized);
-    return normalized;
+    fileSnapshots.set(absoluteFile, normalized);
+    return structuredClone(normalized);
   }
 
   function mutate(handler) {
     return enqueueFileWrite(absoluteFile, async () => {
-      const knowledge = await read();
+      const knowledge = structuredClone(await currentSnapshot());
       const result = await handler(knowledge);
       knowledge.revision += 1;
       knowledge.updatedAt = new Date().toISOString();
@@ -412,7 +439,7 @@ export function createStore(file) {
     if (method === 'knowledge.replace') {
       const expectedRevision = params.expectedRevision;
       return enqueueFileWrite(absoluteFile, async () => {
-        const current = await read();
+        const current = await currentSnapshot();
         if (expectedRevision !== undefined && Number(expectedRevision) !== current.revision) {
           throw new SpatialStoreError('REVISION_CONFLICT', '知识库已被其他操作更新', {
             expectedRevision: Number(expectedRevision),
@@ -428,7 +455,7 @@ export function createStore(file) {
     }
     if (method === 'view.update') {
       return enqueueFileWrite(absoluteFile, async () => {
-        const knowledge = await read();
+        const knowledge = structuredClone(await currentSnapshot());
         knowledge.view = params.view && typeof params.view === 'object' ? params.view : null;
         await write(knowledge);
         return { view: knowledge.view, revision: knowledge.revision };
@@ -440,13 +467,7 @@ export function createStore(file) {
   return Object.freeze({
     file: absoluteFile,
     async init() {
-      try {
-        await fs.access(absoluteFile);
-        return read();
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error;
-        return write(emptyKnowledge());
-      }
+      return read();
     },
     read,
     execute

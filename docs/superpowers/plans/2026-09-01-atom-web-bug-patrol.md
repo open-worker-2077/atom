@@ -20,14 +20,14 @@
 ## 恢复断点
 
 - **当前分支**：`main`；以仓库当前 checkout 和远端提交为准，不再沿用历史隔离分支名称判断状态。
-- **已完成代码**：Shortcut、ASDF 双击与 Strut 边界修复均已推送；CLI 新 revision 现先拉齐当前路径和全部展开路径，再把同一 revision 原子导入场景。
+- **已完成代码**：ASDF 双击与 Strut 边界修复均已推送；CLI 新 revision 现先拉齐当前路径和全部展开路径，再把同一 revision 原子导入场景。Shortcut 历史路线补载代码仍在，但现场完整激活已重新判为未完成。
 - **当前证据**：Task 4 桥接合同`29/29`、CLI 相关真实浏览器旅程`3/3`、完整回归`1592/1592`均通过并已推送。2026-09-02 再次现场确认 4784/4785/4786 均监听，Tailscale Serve 仍把 HTTPS 域名代理到 4785；使用域名与指定 Tailnet IP 请求根路径返回 200，`pixel-10a`可被 Tailscale peer ping 通。电脑访问 4786 返回 403，符合仅允许手机 IP 的白名单合同。用户手机仍报告域名无法打开，剩余首个未证实边界仍是手机 DNS/浏览器入口。
 - **Task 1 实现提交**：`89a879a`（`fix(web): load remote shortcut routes`）。
 - **Task 2 实现提交**：`9a61ff2`（`fix(web): keep ASDF double-click on deepest target`）。
 - **Task 3 安全回退提交**：`83f63f1`（`fix(web): attach strut endpoints to visible boundaries`）。
 - **Task 4 实现提交**：`67a2fd0`（`fix(web): refresh expanded scopes atomically`）。
-- **下一动作**：只围绕正式入口`https://worker.tail33a2eb.ts.net/`取得手机侧 DNS、Tailscale 与浏览器错误证据并修复；不得要求用户改用 Tailnet IP。`100.116.206.105:4786`只允许作为开发侧分层诊断探针，用于区分身份网关与名称解析，不构成产品入口。
-- **仍未完成**：手机端最终读取验收；电脑不能代替手机观察其 DNS 选择与浏览器结果。
+- **下一动作**：先完成 4784 启动全局热态修复；随后复现并修复真实深层 Shortcut 的“激活→目标路线加载→进入→选中”完整链；手机正式入口继续保持未完成。
+- **仍未完成**：Shortcut 深层真实激活、手机端最终读取验收；电脑不能代替手机观察其 DNS 选择与浏览器结果。
 
 ---
 
@@ -47,6 +47,8 @@
 - [x] **Step 2: Implement minimal route closure**：用`atomPath→target`与`childDomainPath→carrier`索引回溯到 root；路线不完整则不泄露半条路径。
 - [x] **Step 3: Verify service and browser GREEN**：`tests/spatial-server.test.mjs`与图投影`13/13`；Playwright Shortcut`4/4`。
 - [x] **Step 4: Full regression, commit and push**：完整`npm test`为`1591/1591`，Playwright Shortcut 为`4/4`；提交、快进与远端提交号在本任务提交后回写。
+- [ ] **Step 5: Reproduce the reopened real activation failure**：以真实深层 Shortcut 的投影合同、当前 scoped state、激活事件、最终 breadcrumb 和 selected target 分层取证；测试不得预装完整目标路线。
+- [ ] **Step 6: Fix and reverify the complete user journey**：只修已证实根因；聚焦测试、真实渐进 Playwright、完整回归和现场 4784 激活均通过后才能再次标为完成。
 
 ### Task 2: ASDF 双击采用最深稳定命中
 

@@ -7,6 +7,43 @@ import path from 'node:path';
 import { createStore, edgeIdentity } from '../cli/lib/store.mjs';
 import { childDomainPath } from '../cli/lib/probe.mjs';
 
+test('initialized store serves one isolated resident snapshot without rereading its backing file', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-resident-snapshot-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'knowledge.json');
+  const store = createStore(file);
+  await store.init();
+  await store.execute('knowledge.replace', {
+    knowledge: { nodes: [{ path: 'root', id: 'resident', label: '驻留节点' }], edges: [] }
+  });
+
+  const exposed = await store.read();
+  exposed.nodes[0].label = '调用方污染';
+  await fs.writeFile(file, '{broken after ready', 'utf8');
+
+  const resident = await store.read();
+  assert.equal(resident.revision, 1);
+  assert.equal(resident.nodes[0].label, '驻留节点');
+});
+
+test('failed persistence never replaces the resident snapshot', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-resident-rollback-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'knowledge.json');
+  const store = createStore(file);
+  await store.init();
+  await store.execute('node.create', { path: 'root', id: 'kept', label: '保留节点' });
+  await fs.rm(file);
+  await fs.mkdir(file);
+
+  await assert.rejects(
+    store.execute('node.create', { path: 'root', id: 'rejected', label: '不得发布' })
+  );
+  const resident = await store.read();
+  assert.equal(resident.revision, 1);
+  assert.deepEqual(resident.nodes.map((node) => node.id), ['kept']);
+});
+
 test('store handles for one file serialize fact projection and view persistence', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-shared-writer-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
