@@ -226,8 +226,12 @@ export async function createSpatialServer(options = {}) {
     return receipt;
   }
 
-  async function readKnowledge() {
-    return bossStore ? (await bossStore.readAll()).knowledge : store.read();
+  async function readKnowledge(projector) {
+    if (!bossStore) return store.read(projector);
+    const knowledge = (await bossStore.readAll()).knowledge;
+    return typeof projector === 'function'
+      ? structuredClone(projector(knowledge))
+      : knowledge;
   }
 
   const server = http.createServer(async (request, response) => {
@@ -242,7 +246,7 @@ export async function createSpatialServer(options = {}) {
         return response.end();
       }
       if (url.pathname === '/__spatial/api/health') {
-        const knowledge = await readKnowledge();
+        const knowledge = await readKnowledge(({ revision }) => ({ revision }));
         const atomProjection = typeof options.atomProjectionStatus === 'function'
           ? await options.atomProjectionStatus()
           : null;
@@ -279,12 +283,15 @@ export async function createSpatialServer(options = {}) {
         return json(response, 200, JSON.parse(await fs.readFile(graphFile, 'utf8')));
       }
       if (url.pathname === '/__spatial/api/state' && request.method === 'GET') {
-        const knowledge = await readKnowledge();
-        if (!url.searchParams.has('path')) return json(response, 200, { ok: true, knowledge });
+        if (!url.searchParams.has('path')) {
+          const knowledge = await readKnowledge();
+          return json(response, 200, { ok: true, knowledge });
+        }
         const requestedPath = url.searchParams.get('path');
+        const knowledge = await readKnowledge((snapshot) => knowledgeAtPath(snapshot, requestedPath));
         return json(response, 200, {
           ok: true,
-          knowledge: knowledgeAtPath(knowledge, requestedPath),
+          knowledge,
           scope: { path: requestedPath.trim() }
         });
       }

@@ -26,6 +26,25 @@ test('initialized store serves one isolated resident snapshot without rereading 
   assert.equal(resident.nodes[0].label, '驻留节点');
 });
 
+test('resident store clones only the projection selected by a local reader', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-resident-selection-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const store = createStore(path.join(directory, 'knowledge.json'));
+  await store.init();
+  await store.execute('knowledge.replace', {
+    knowledge: { nodes: [{ path: 'root', id: 'resident', label: '驻留节点' }], edges: [] }
+  });
+
+  const selected = await store.read((snapshot) => ({
+    revision: snapshot.revision,
+    node: snapshot.nodes[0]
+  }));
+  selected.node.label = '调用方污染';
+
+  assert.deepEqual(Object.keys(selected), ['revision', 'node']);
+  assert.equal((await store.read()).nodes[0].label, '驻留节点');
+});
+
 test('failed persistence never replaces the resident snapshot', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-resident-rollback-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

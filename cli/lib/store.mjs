@@ -252,8 +252,10 @@ export function createStore(file) {
     return loading;
   }
 
-  async function read() {
-    return structuredClone(await currentSnapshot());
+  async function read(projector) {
+    const snapshot = await currentSnapshot();
+    const selected = typeof projector === 'function' ? projector(snapshot) : snapshot;
+    return structuredClone(selected);
   }
 
   async function write(knowledge) {

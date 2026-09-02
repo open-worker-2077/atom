@@ -576,7 +576,7 @@ test('ready graph server serves production-scale local state from its resident s
     path: index < 9_900 ? `root/domain-${index % 100}` : deepPath,
     id: `node-${index}`,
     label: `节点 ${index}`,
-    detail: '生产规模局部读取验收'
+    detail: `生产规模局部读取验收 ${'x'.repeat(1_800)}`
   }));
   await fs.writeFile(contextFile, '[]\n', 'utf8');
   await fs.writeFile(graphFile, '{}\n', 'utf8');
@@ -608,6 +608,18 @@ test('ready graph server serves production-scale local state from its resident s
     assert.equal(response.status, 200, `${pathname} returned ${await response.text()}`);
     assert.ok(elapsedMs < 1_000, `${pathname} took ${elapsedMs.toFixed(1)}ms`);
   }
+
+  const burst = await Promise.all(Array.from({ length: 16 }, async () => {
+    const startedAt = performance.now();
+    const response = await fetch(
+      `${running.url}/__spatial/api/state?path=${encodeURIComponent(deepPath)}`
+    );
+    await response.arrayBuffer();
+    return { status: response.status, elapsedMs: performance.now() - startedAt };
+  }));
+  assert.deepEqual([...new Set(burst.map((entry) => entry.status))], [200]);
+  const slowestMs = Math.max(...burst.map((entry) => entry.elapsedMs));
+  assert.ok(slowestMs < 1_000, `concurrent local state took ${slowestMs.toFixed(1)}ms`);
 });
 
 test('graph server persists compact read diagnostics through the shared interaction runtime', async (t) => {
