@@ -12,6 +12,9 @@
 
 ## 当前开发链
 
+- **当前恢复断点**：[`plans/2026-09-03-session-recovery-checkpoint.md`](plans/2026-09-03-session-recovery-checkpoint.md)；ChatGPT软件更新或 Session历史丢失后，先从该文件恢复，不依赖聊天记录或自动压缩摘要。
+- **当前最高优先级**：[`specs/2026-09-03-atom-slot-signal-design.md`](specs/2026-09-03-atom-slot-signal-design.md)；沿现有 Slot直接父子层级以`slot({"to":"up|down","labels":[...]})`传导瞬时信号，由接收节点自己的`trigger("slot",...)`与`signal()`处理。Slot完成后修复已复现的4784命令队列失活；Strut context的旧值/新值缺口另行设计。
+
 - **首要 Graph 纠偏**：Strut 判定 Program 必须内嵌在 clause `if`，取得复合前项事实与本次规范化 Transform `$` 动作信封；`$click`只是注册动作族的首个用例，CLI/Web 点击统一为 `transform {"thing$click":"EXACT路径"}`，新增动作不得修改 Strut/runtime 主干。旧外部 `thing@program` 判定与独立 click endpoint/trigger 方案均已退役。权威合同见[`specs/2026-08-31-atom-world-program-design.md`](specs/2026-08-31-atom-world-program-design.md) §3.2、§4.1；当前实施账本见[`plans/2026-09-02-inline-strut-transform-actions.md`](plans/2026-09-02-inline-strut-transform-actions.md)。
 
 - **首要热修**：[`plans/2026-09-02-atom-startup-hot-state.md`](plans/2026-09-02-atom-startup-hot-state.md)；恢复 OpenSpec 迁移时被弱化的启动全局热态合同，当前真实 4784 的 health 为 7—13 秒、局部 state 约 14 秒，修复前不得以 `ok:true` 代替 ready。
