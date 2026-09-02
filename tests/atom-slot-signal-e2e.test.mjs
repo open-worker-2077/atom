@@ -609,6 +609,79 @@ test('queued Slot delivery keeps receiver-index refresh out of Transform busines
   assert.equal(scheduler.slotSignalExecutions.size, 1);
 });
 
+test('queued ancestor relocation rebases a descendant Program read dependency without running it before Slot', async (t) => {
+  const label = '迁移读取依赖';
+  const receiver = [
+    'def receive():',
+    '    signal()',
+    '    message({"level":"info","text":"slot"})',
+    `trigger("slot", {"from":"up","labels":[${JSON.stringify(label)}]}, receive)`
+  ].join('\n');
+  const reader = [
+    "watched = explore({'thing':'Root/Parent/Watched','situation$full':None})[0]",
+    "if watched.situation == 'go':",
+    "    message({'level':'info','text':'reader'})"
+  ].join('\n');
+  const world = [
+    atom('Root', '', [
+      program('Parent', structuralSender(
+        'transform({"thing":"Relocate Parent Dependency","situation.rep.changed":None})',
+        label,
+        true
+      ), [
+        program('Receiver', receiver),
+        atom('Watched', 'wait'),
+        program('Reader', reader)
+      ])
+    ]),
+    program('Relocator', [
+      'def relocate_parent():',
+      '    transform({"thing.ren.Parent Final":"Root/Parent"})',
+      '    transform({"thing":"Root/Parent Final/Watched","situation.rep.go":None})',
+      'trigger("transform", {"nodes":["Relocate Parent Dependency"]}, relocate_parent)'
+    ].join('\n')),
+    atom('Go', 'before'),
+    atom('Relocate Parent Dependency', 'before')
+  ];
+  const files = await fixture(t, world);
+  const scheduler = createProgramRuntimeScheduler();
+  const lifecycle = observeSlotClaimLifecycle(scheduler);
+  const invocations = observeSlotInvocations(scheduler);
+  const readerExecutions = [];
+  const runProgram = scheduler.runProgram;
+  scheduler.runProgram = async (request) => {
+    if (request.program.path.endsWith('/Reader')) {
+      readerExecutions.push({
+        path: request.program.path,
+        validateOnly: request.validateOnly === true,
+        triggered: request.triggered === true
+      });
+    }
+    return runProgram(request);
+  };
+
+  const { result } = await executeFixture(
+    files,
+    'transform {"thing":"Go","situation.rep.changed"}',
+    scheduler
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.messages.map(({ text }) => text), ['slot', 'reader']);
+  assert.deepEqual(
+    readerExecutions.filter(({ triggered }) => triggered).map(({ path }) => path),
+    ['Root/Parent Final/Reader']
+  );
+  assert.deepEqual(
+    readerExecutions.filter(({ validateOnly }) => validateOnly).map(({ path }) => path),
+    ['Root/Parent Final/Reader']
+  );
+  assert.deepEqual(invocations.map(({ programPath }) => programPath), ['Root/Parent Final/Receiver']);
+  assert.equal(lifecycle.confirmed.length, 1);
+  assert.deepEqual(lifecycle.released, []);
+  assert.equal(scheduler.slotSignalExecutions.size, 1);
+});
+
 test('queued Slot delivery follows one receiver through chained relocation without capturing its new neighbor', async (t) => {
   const label = '排队迁移';
   const world = [

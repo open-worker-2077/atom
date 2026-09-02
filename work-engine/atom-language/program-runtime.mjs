@@ -17,6 +17,7 @@ import { normalizeTypePredicate } from './program-locks.mjs';
 import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
 import { buildStrutDeliveries, evaluateStrutClausesWithPrograms } from './strut-runtime.mjs';
 import { shortcutMetadata } from './shortcut-runtime.mjs';
+import { rewriteProgramSourcePathLiterals } from './transform-executor.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
@@ -551,6 +552,31 @@ function requestMayObserveEvent(request, eventNodes) {
     || target.startsWith(`${node}/`)
     || node.startsWith(`${target}/`)
   ));
+}
+
+function rewriteRelocatedPath(path, relocations) {
+  if (typeof path !== 'string') return path;
+  return relocations.reduce((currentPath, { sourcePath, resultPath }) => (
+    currentPath === sourcePath || currentPath.startsWith(`${sourcePath}/`)
+      ? `${resultPath}${currentPath.slice(sourcePath.length)}`
+      : currentPath
+  ), path);
+}
+
+function rewriteProgramSourceThroughRelocations(source, relocations) {
+  return relocations.reduce((currentSource, relocation) => (
+    rewriteProgramSourcePathLiterals(currentSource, [relocation])
+  ), source);
+}
+
+function rewriteProgramReadRequest(request, relocations) {
+  const rewritten = structuredClone(request);
+  if (typeof rewritten?.thing !== 'string') return rewritten;
+  const literal = rewriteProgramSourceThroughRelocations(
+    JSON.stringify(rewritten.thing), relocations
+  );
+  rewritten.thing = JSON.parse(literal);
+  return rewritten;
 }
 
 function worldKeyFromRevision(revision, atoms) {
@@ -1908,6 +1934,9 @@ export class ProgramRuntimeScheduler {
       programPath === prefix || programPath.startsWith(`${prefix}/`)
     ));
     const affectedPrograms = programs.filter((program) => pathIsAffected(program.path));
+    const affectedReadDependencies = [...this.programReadDependencies].filter(([programPath]) => (
+      pathIsAffected(programPath)
+    ));
     const resolveExactPath = (selector) => resolveExactPathFromCurrentContext(atoms, selector);
     const inspected = await Promise.all(affectedPrograms.map((program) => this.runBounded(() => (
       this.runProgram({
@@ -1936,6 +1965,38 @@ export class ProgramRuntimeScheduler {
       } else {
         this.setTriggerContract(program, inspected[index].trigger ?? null);
       }
+    }
+    const programsByPath = new Map(affectedPrograms.map((program) => [program.path, program]));
+    const reboundReadDependencies = new Map();
+    for (const [sourceProgramPath, dependency] of affectedReadDependencies) {
+      const resultProgramPath = rewriteRelocatedPath(sourceProgramPath, relocations);
+      const program = programsByPath.get(resultProgramPath);
+      if (!program || rewriteProgramSourceThroughRelocations(
+        dependency.detail, relocations
+      ) !== program.detail) continue;
+      const rebound = {
+        detail: program.detail,
+        requests: dependency.requests.map((request) => (
+          rewriteProgramReadRequest(request, relocations)
+        )),
+        contextDependent: dependency.contextDependent === true,
+        scopePath: dependency.contextDependent === true
+          ? rewriteRelocatedPath(dependency.scopePath, relocations)
+          : null
+      };
+      const existing = reboundReadDependencies.get(resultProgramPath);
+      if (existing && JSON.stringify(existing) !== JSON.stringify(rebound)) {
+        throw Object.assign(new Error('Prepared trigger ownership refresh is ambiguous'), {
+          code: 'INVALID_PREPARED_TRIGGER_OWNERSHIP_REFRESH'
+        });
+      }
+      reboundReadDependencies.set(resultProgramPath, rebound);
+    }
+    for (const programPath of [...this.programReadDependencies.keys()].filter(pathIsAffected)) {
+      this.programReadDependencies.delete(programPath);
+    }
+    for (const [programPath, dependency] of reboundReadDependencies) {
+      this.programReadDependencies.set(programPath, dependency);
     }
     return Object.freeze({ refreshedProgramPaths: affectedPrograms.map(({ path }) => path) });
   }
@@ -2731,6 +2792,7 @@ export class ProgramRuntimeScheduler {
       );
       const forcedByTrigger = triggerEvent
         && (triggeredProgramPaths.has(program.path) || Boolean(slotInvocation)
+          || (!previous && dependencyTriggeredProgramPaths.has(program.path))
           || Boolean(strutDelivery) || Boolean(slotSignal));
       if (dormantFailure
         && options.force !== true
@@ -2751,6 +2813,7 @@ export class ProgramRuntimeScheduler {
       }
       if (triggerEvent
         && !hasIndexedContract
+        && !forcedByTrigger
         && !eventNodes.has(program.path)
         && !slotInvocation
         && !previous) {

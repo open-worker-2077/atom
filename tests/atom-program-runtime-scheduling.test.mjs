@@ -784,6 +784,87 @@ test('TC-PERF-AFFECTED-CLOSURE: prepared indexes preserve explore-read dependenc
   assert.equal(cycle.messages[0]?.text, 'dependency fired');
 });
 
+test('private relocation ownership refresh rebases Program reads without executing business effects', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const readerSource = [
+    "watched = explore({'thing':'Root/Parent/Watched','situation$full':None})[0]",
+    "if watched.situation == 'go':",
+    "    message({'level':'info','text':'reader'})"
+  ].join('\n');
+  const unrelatedSource = [
+    "other = explore({'thing':'Other','situation$full':None})[0]",
+    "if other.situation == 'go':",
+    "    message({'level':'info','text':'unrelated'})"
+  ].join('\n');
+  const world = [
+    atom('Root', '', [
+      atom('Parent', '', [
+        atom('Watched', 'wait'),
+        atom('Reader', readerSource, [], 'program')
+      ])
+    ]),
+    atom('Other', 'wait'),
+    atom('Unrelated Reader', unrelatedSource, [], 'program')
+  ];
+  await scheduler.refresh(world);
+  const unrelatedBefore = structuredClone(
+    scheduler.programReadDependencies.get('Unrelated Reader')
+  );
+  const relocated = structuredClone(world);
+  relocated[0].slot[0].thing = 'Parent Final';
+  relocated[0].slot[0].slot[0].situation = 'go';
+  relocated[0].slot[0].slot[1].situation = readerSource.replaceAll(
+    'Root/Parent', 'Root/Parent Final'
+  );
+  const calls = [];
+  const runProgram = scheduler.runProgram;
+  scheduler.runProgram = async (request) => {
+    calls.push({ path: request.program.path, validateOnly: request.validateOnly === true });
+    return runProgram(request);
+  };
+
+  const refreshed = await scheduler.refreshPreparedTriggerOwnership(relocated, [{
+    sourcePath: 'Root/Parent', resultPath: 'Root/Parent Final'
+  }]);
+
+  assert.deepEqual(refreshed, {
+    refreshedProgramPaths: ['Root/Parent Final/Reader']
+  });
+  assert.equal(calls.every(({ validateOnly }) => validateOnly), true);
+  assert.equal(scheduler.programReadDependencies.has('Root/Parent/Reader'), false);
+  assert.deepEqual(scheduler.programReadDependencies.get('Root/Parent Final/Reader'), {
+    detail: relocated[0].slot[0].slot[1].situation,
+    requests: [{ thing: 'Root/Parent Final/Watched', 'situation$full': null }],
+    contextDependent: false,
+    scopePath: null
+  });
+  assert.deepEqual(
+    scheduler.programReadDependencies.get('Unrelated Reader'),
+    unrelatedBefore
+  );
+
+  calls.length = 0;
+  const cycle = await scheduler.refresh(relocated, {
+    triggerEvent: {
+      mode: 'transform',
+      nodes: ['Root/Parent/Watched', 'Root/Parent Final/Watched'],
+      preparedIndexesValid: true
+    }
+  });
+
+  assert.deepEqual(cycle.messages.map(({ text }) => text), ['reader'], JSON.stringify({
+    calls,
+    executedProgramPaths: cycle.executedProgramPaths,
+    reconcileSummary: cycle.reconcileSummary,
+    dependencies: [...scheduler.programReadDependencies]
+  }));
+  assert.deepEqual(cycle.executedProgramPaths, ['Root/Parent Final/Reader']);
+  assert.deepEqual(
+    calls.filter(({ validateOnly }) => !validateOnly).map(({ path }) => path),
+    ['Root/Parent Final/Reader']
+  );
+});
+
 test('TC-PERF-COLD-INDEX: startup prepares changed dependencies outside request Agent windows', async () => {
   let requestScopedReads = 0;
   const scheduler = createProgramRuntimeScheduler();
