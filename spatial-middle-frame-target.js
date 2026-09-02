@@ -21,7 +21,23 @@
     return candidates.length ? candidates[0].region : null;
   }
 
-  const api = Object.freeze({ chooseMostSpecificTarget });
+  function choosePointerTarget(candidatesInput, x, y, optionsInput) {
+    const candidates = Array.isArray(candidatesInput) ? candidatesInput : [];
+    const highest = candidates[0] || null;
+    if (!highest || optionsInput?.clusterFieldOpen !== true) return highest;
+    if (highest.region?.item?.kind !== "node") return highest;
+    const concreteRegions = candidates
+      .map((candidate) => candidate?.region)
+      .filter((region) => region?.item?.kind === "node" && region.item.clusterShellProxy !== true);
+    const mostSpecific = chooseMostSpecificTarget(
+      concreteRegions.length ? concreteRegions : candidates.map((candidate) => candidate?.region),
+      x,
+      y
+    );
+    return candidates.find((candidate) => candidate?.region === mostSpecific) || highest;
+  }
+
+  const api = Object.freeze({ chooseMostSpecificTarget, choosePointerTarget });
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.SpatialMiddleFrameTarget = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -31,11 +31,11 @@
 - Consumes: `{item,x,y,radius}`可见命中区域。
 - Produces: `chooseMostSpecificTarget(regions,x,y,{excludeShellProxy})`和稳定`ownerPath::id`指针候选。
 
-- [ ] **Step 1: Write failing tests**：加入外层普通大节点、团壳、相邻小节点重叠场景，逐点断言命中最小真实节点，球外返回`null`；断言普通右键也使用同一解析器。
-- [ ] **Step 2: Run RED**：`node --test tests/spatial-middle-frame-target.test.js tests/gesture-contract.test.js`，预期普通右键合同与重叠普通节点场景失败。
-- [ ] **Step 3: Implement minimal resolver use**：让 cluster 视野中的普通点击始终用最具体真实节点重排候选，保留命令和关系的既有分支。
-- [ ] **Step 4: Run GREEN**：重复焦点命令，预期零失败。
-- [ ] **Step 5: Commit**：`fix(web): preserve nested pointer identity`。
+- [x] **Step 1: Write failing tests**：加入外层普通大节点、团壳、相邻小节点重叠场景，逐点断言命中最小真实节点，球外返回`null`；断言普通右键也使用同一解析器。
+- [x] **Step 2: Run RED**：`node --test tests/spatial-middle-frame-target.test.js tests/gesture-contract.test.js`，真实 RED 为`choosePointerTarget is not a function`，既有 24 项通过、新增 2 项失败。
+- [x] **Step 3: Implement minimal resolver use**：让 cluster 视野中的普通点击始终用最具体真实节点重排候选，保留命令和关系的既有分支。
+- [x] **Step 4: Run GREEN**：焦点测试 26/26 通过、0 失败。
+- [x] **Step 5: Commit**：`fix(web): preserve nested pointer identity`。
 
 ### Task 2: 真实 owner 域径与原子游走提交
 
