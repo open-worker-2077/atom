@@ -12,6 +12,7 @@ import {
 } from '../work-engine/atom-language/program-function-registry.mjs';
 import { executeAtomLanguage as executeAtomLanguageWithoutWorldService }
   from '../work-engine/atom-language/engine.mjs';
+import { readTransformLog } from '../work-engine/atom-language/transform-executor.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
@@ -449,6 +450,7 @@ test('a matching retained authorization wakes the execution registration on retr
   });
   assert.equal(enabled.ok, true, JSON.stringify(enabled));
 
+  const logsBeforeRetry = await readTransformLog(contextFile);
   const retried = await executeAtomLanguage({
     contextFile,
     projectionFile,
@@ -460,6 +462,18 @@ test('a matching retained authorization wakes the execution registration on retr
   const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.deepEqual(names(stored[0].slot[1].slot[0]), []);
   assert.deepEqual(names(stored[0].slot[1].slot[1]), ['Window']);
+  const retryMoveLogs = (await readTransformLog(contextFile))
+    .slice(logsBeforeRetry.length)
+    .filter(({ operation }) => operation === 'window-jump-authorized-move');
+  assert.equal(
+    retryMoveLogs.length,
+    1,
+    JSON.stringify(retryMoveLogs)
+  );
+  assert.equal(
+    retryMoveLogs[0].source.sourcePath,
+    registrationPath
+  );
   assert.equal(findTyped(stored, 'jump-authorization'), null);
 });
 

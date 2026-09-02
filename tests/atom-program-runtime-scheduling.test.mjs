@@ -784,6 +784,32 @@ test('TC-PERF-AFFECTED-CLOSURE: prepared indexes preserve explore-read dependenc
   assert.equal(cycle.messages[0]?.text, 'dependency fired');
 });
 
+test('ordinary uncached read dependencies stay dormant without private relocation ownership', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const readerSource = [
+    "watched = explore({'thing':'Watched','situation$full':None})[0]",
+    "if watched.situation == 'go':",
+    "    message({'level':'info','text':'ordinary reader'})"
+  ].join('\n');
+  const world = [
+    atom('Watched', 'wait'),
+    atom('Reader', readerSource, [], 'program')
+  ];
+  await scheduler.refresh(world);
+  scheduler.programReusable.clear();
+  const changed = structuredClone(world);
+  changed[0].situation = 'go';
+
+  const cycle = await scheduler.refresh(changed, {
+    triggerEvent: {
+      mode: 'transform', nodes: ['Watched'], preparedIndexesValid: true
+    }
+  });
+
+  assert.deepEqual(cycle.executedProgramPaths, []);
+  assert.deepEqual(cycle.messages, []);
+});
+
 test('private relocation ownership refresh rebases Program reads without executing business effects', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const readerSource = [

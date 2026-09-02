@@ -1300,6 +1300,7 @@ export class ProgramRuntimeScheduler {
     this.triggerContracts = new Map();
     this.triggerIndex = new Map();
     this.programReadDependencies = new Map();
+    this.relocationPreparedReadPrograms = new Set();
     this.triggerContractsInitialized = false;
     this.deferredTriggerContracts = new Map();
     this.slotInvocationCycles = new Map();
@@ -1779,6 +1780,9 @@ export class ProgramRuntimeScheduler {
         [path, structuredClone(dependency)]
       ))
     );
+    candidate.relocationPreparedReadPrograms = new Set(
+      this.relocationPreparedReadPrograms
+    );
     candidate.triggerContractsInitialized = this.triggerContractsInitialized;
     candidate.deferredTriggerContracts = new Map(this.deferredTriggerContracts);
     candidate.agentSecurity = new Map([...this.agentSecurity].map(([path, security]) => (
@@ -1800,6 +1804,7 @@ export class ProgramRuntimeScheduler {
     this.triggerContracts.clear();
     this.triggerIndex.clear();
     this.programReadDependencies.clear();
+    this.relocationPreparedReadPrograms.clear();
     this.deferredTriggerContracts.clear();
     this.slotInvocationCycles.clear();
     this.preparedStrutGraphs.clear();
@@ -1820,6 +1825,9 @@ export class ProgramRuntimeScheduler {
     }
     for (const path of this.programReadDependencies.keys()) {
       if (!activePaths.has(path)) this.programReadDependencies.delete(path);
+    }
+    for (const path of this.relocationPreparedReadPrograms) {
+      if (!activePaths.has(path)) this.relocationPreparedReadPrograms.delete(path);
     }
   }
 
@@ -1903,6 +1911,9 @@ export class ProgramRuntimeScheduler {
     }
     for (const path of this.programReadDependencies.keys()) {
       if (!activePaths.has(path)) this.programReadDependencies.delete(path);
+    }
+    for (const path of this.relocationPreparedReadPrograms) {
+      if (!activePaths.has(path)) this.relocationPreparedReadPrograms.delete(path);
     }
   }
 
@@ -1995,8 +2006,12 @@ export class ProgramRuntimeScheduler {
     for (const programPath of [...this.programReadDependencies.keys()].filter(pathIsAffected)) {
       this.programReadDependencies.delete(programPath);
     }
+    for (const programPath of [...this.relocationPreparedReadPrograms].filter(pathIsAffected)) {
+      this.relocationPreparedReadPrograms.delete(programPath);
+    }
     for (const [programPath, dependency] of reboundReadDependencies) {
       this.programReadDependencies.set(programPath, dependency);
+      this.relocationPreparedReadPrograms.add(programPath);
     }
     return Object.freeze({ refreshedProgramPaths: affectedPrograms.map(({ path }) => path) });
   }
@@ -2792,7 +2807,9 @@ export class ProgramRuntimeScheduler {
       );
       const forcedByTrigger = triggerEvent
         && (triggeredProgramPaths.has(program.path) || Boolean(slotInvocation)
-          || (!previous && dependencyTriggeredProgramPaths.has(program.path))
+          || (!previous
+            && this.relocationPreparedReadPrograms.has(program.path)
+            && dependencyTriggeredProgramPaths.has(program.path))
           || Boolean(strutDelivery) || Boolean(slotSignal));
       if (dormantFailure
         && options.force !== true
@@ -3151,6 +3168,11 @@ export class ProgramRuntimeScheduler {
     for (const programPath of this.programReadDependencies.keys()) {
       if (!activeProgramPaths.has(programPath)) this.programReadDependencies.delete(programPath);
     }
+    for (const programPath of this.relocationPreparedReadPrograms) {
+      if (!activeProgramPaths.has(programPath)) {
+        this.relocationPreparedReadPrograms.delete(programPath);
+      }
+    }
     const programByPath = new Map(programs.map((program) => [program.path, program]));
     for (const entry of settled) {
       if (!Array.isArray(entry.requests)) continue;
@@ -3162,6 +3184,9 @@ export class ProgramRuntimeScheduler {
         contextDependent: entry.contextDependent === true,
         scopePath: entry.contextDependent === true ? scopePath : null
       });
+      if (entry.cached !== true && !entry.failure) {
+        this.relocationPreparedReadPrograms.delete(entry.programPath);
+      }
     }
     if (!triggerEvent && !options.programSelector && !options.slotScopeRoot) {
       const triggerSources = programs.filter((program) => /\b(?:trigger|changed)\s*\(/u.test(program.detail));
