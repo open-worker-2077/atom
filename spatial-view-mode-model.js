@@ -252,12 +252,32 @@
     const sourceStack = isCurrentOwner ? input.currentStack : input.ownerRoute;
     const crumbs = isCurrentOwner ? input.currentCrumbs : input.ownerCrumbs;
     if (!Array.isArray(sourceStack) || !Array.isArray(crumbs)) return null;
+    const pathParts = ownerPath.split("/");
+    const ownerDepth = pathParts.length - 1;
+    if (
+      pathParts[0] !== "root"
+      || sourceStack.length !== ownerDepth
+      || crumbs.length !== ownerDepth + 1
+    ) return null;
+
+    for (let index = 0; index < sourceStack.length; index += 1) {
+      const entry = sourceStack[index];
+      const expectedPath = pathParts.slice(0, index + 1).join("/");
+      const expectedCrumbs = crumbs.slice(0, index + 1);
+      if (
+        !entry
+        || entry.path !== expectedPath
+        || Number(entry.depth) !== index
+        || !Array.isArray(entry.crumbs)
+        || entry.crumbs.length !== expectedCrumbs.length
+        || entry.crumbs.some((crumb, crumbIndex) => crumb !== expectedCrumbs[crumbIndex])
+        || entry.nodeLabel !== crumbs[index + 1]
+      ) return null;
+    }
 
     return Object.freeze({
       path: ownerPath,
-      depth: isCurrentOwner
-        ? Math.max(0, Number(input.currentDepth) || 0)
-        : sourceStack.length,
+      depth: ownerDepth,
       crumbs: Object.freeze([...crumbs]),
       stack: Object.freeze(sourceStack.map(cloneRouteEntry))
     });

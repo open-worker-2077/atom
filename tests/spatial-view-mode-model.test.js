@@ -206,9 +206,9 @@ test('immersive routing starts from the clicked node real owner domain instead o
   const model = loadModel();
   const currentStack = [{ path: 'root', depth: 0, crumbs: ['全域'] }];
   const ownerRoute = [
-    { path: 'root', depth: 0, crumbs: ['全域'], nodeId: 'manage' },
-    { path: 'root/manage', depth: 1, crumbs: ['全域', 'manage'], nodeId: 'work' },
-    { path: 'root/manage/work', depth: 2, crumbs: ['全域', 'manage', 'work'], nodeId: 'personal' }
+    { path: 'root', depth: 0, crumbs: ['全域'], nodeId: 'manage', nodeLabel: 'manage' },
+    { path: 'root/manage', depth: 1, crumbs: ['全域', 'manage'], nodeId: 'work', nodeLabel: 'work' },
+    { path: 'root/manage/work', depth: 2, crumbs: ['全域', 'manage', 'work'], nodeId: 'personal', nodeLabel: 'personal' }
   ];
 
   const context = model.resolveImmersiveOwnerContext({
@@ -240,6 +240,51 @@ test('immersive routing refuses a foreign owner domain without a known route', (
     ownerPath: 'root/unknown',
     ownerRoute: null,
     ownerCrumbs: ['全域', 'unknown']
+  }), null);
+});
+
+test('immersive routing refuses an empty foreign owner route', () => {
+  const model = loadModel();
+  assert.equal(model.resolveImmersiveOwnerContext({
+    currentPath: 'root',
+    currentDepth: 0,
+    currentCrumbs: ['全域'],
+    currentStack: [],
+    ownerPath: 'root/work',
+    ownerRoute: [],
+    ownerCrumbs: ['全域', '办包']
+  }), null);
+});
+
+test('immersive routing refuses a route whose terminal domain is not the owner parent', () => {
+  const model = loadModel();
+  assert.equal(model.resolveImmersiveOwnerContext({
+    currentPath: 'root',
+    currentDepth: 0,
+    currentCrumbs: ['全域'],
+    currentStack: [],
+    ownerPath: 'root/work/personal',
+    ownerRoute: [
+      { path: 'root', depth: 0, crumbs: ['全域'], nodeId: 'work', nodeLabel: '办包' },
+      { path: 'root/other', depth: 1, crumbs: ['全域', '办包'], nodeId: 'personal', nodeLabel: '个务' }
+    ],
+    ownerCrumbs: ['全域', '办包', '个务']
+  }), null);
+});
+
+test('immersive routing refuses a foreign route with inconsistent depth and crumbs', () => {
+  const model = loadModel();
+  assert.equal(model.resolveImmersiveOwnerContext({
+    currentPath: 'root',
+    currentDepth: 0,
+    currentCrumbs: ['全域'],
+    currentStack: [],
+    ownerPath: 'root/work/personal',
+    ownerRoute: [
+      { path: 'root', depth: 0, crumbs: ['全域'], nodeId: 'work', nodeLabel: '办包' },
+      { path: 'root/work', depth: 7, crumbs: ['全域', '错误标签'], nodeId: 'personal', nodeLabel: '个务' }
+    ],
+    ownerCrumbs: ['全域', '办包', '个务']
   }), null);
 });
 
