@@ -10,7 +10,7 @@ const DOCUMENT_FIELDS = new Set(['config', 'graph']);
 const CONFIG_FIELDS = new Set(['schema_version']);
 const CLAUSE_FIELDS = new Set(['if@current', 'if', 'then@current', 'then']);
 const SELECTOR_FIELDS = new Set(['thing', 'thing@program']);
-const EXPR_FIELDS = new Set(['thing', 'thing@program', 'and', 'or']);
+const EXPR_FIELDS = new Set(['thing', 'thing@program', 'program', 'and', 'or']);
 const NODE_AXIS_FIELDS = new Set(['thing', 'situation', 'slot', 'strut']);
 
 function graphError(code, message, details = {}) {
@@ -230,14 +230,34 @@ export function parseGraphDocument(input) {
     const keys = Object.keys(expr);
     if (keys.length !== 1) throw graphError('INVALID_STRUT_EXPR', 'strut Expr 必须恰好包含一个根 key', details);
     const [kind] = keys;
-    if (kind === 'thing' || kind === 'thing@program') {
+    if (kind === 'thing@program') {
+      throw graphError(
+        'RETIRED_STRUT_PROGRAM_SELECTOR',
+        '推支判定 Program 必须直接写在 if 的 program 叶中，不再引用 thing@program 节点',
+        details
+      );
+    }
+    if (kind === 'program') {
+      const source = requiredText(
+        expr.program,
+        'INVALID_STRUT_INLINE_PROGRAM',
+        '推支线 if 内的 program 必须是非空源码',
+        details
+      );
+      return {
+        kind: 'program',
+        source,
+        predicateId: `strut:${sourceEntry.path.join('/')}:${clauseOrdinal}:predicate:${exprPath.join('.') || 'root'}`,
+        exprPath
+      };
+    }
+    if (kind === 'thing') {
       const leaf = parseSelector(expr, sourceEntry, details);
       if (leaf.targetPath === sourceEntry.path.join('/')) {
         throw graphError('CURRENT_ENDPOINT_REQUIRES_MODIFIER', 'current endpoint 必须使用对应 @current:true modifier', details);
       }
       return {
-        kind: kind === 'thing@program' ? 'program' : 'thing',
-        selector: leaf.raw[kind], targetPath: leaf.targetPath, exprPath
+        kind: 'thing', selector: leaf.raw[kind], targetPath: leaf.targetPath, exprPath
       };
     }
     if (!Array.isArray(expr[kind]) || expr[kind].length < 2) {
@@ -252,14 +272,16 @@ export function parseGraphDocument(input) {
   }
 
   function dependencies(expr) {
-    if (expr.kind === 'thing' || expr.kind === 'program') return [expr.targetPath];
+    if (expr.kind === 'thing') return [expr.targetPath];
+    if (expr.kind === 'program') return [];
     return expr.children.flatMap(dependencies);
   }
 
   function antecedents(expr) {
-    if (expr.kind === 'thing' || expr.kind === 'program') {
+    if (expr.kind === 'thing') {
       return [{ kind: expr.kind, targetPath: expr.targetPath }];
     }
+    if (expr.kind === 'program') return [];
     return expr.children.flatMap(antecedents);
   }
 
@@ -271,7 +293,7 @@ export function parseGraphDocument(input) {
 
   function expressionSignature(expr) {
     if (expr.kind === 'thing') return ['thing', expr.targetPath];
-    if (expr.kind === 'program') return ['program', expr.targetPath];
+    if (expr.kind === 'program') return ['program', expr.source];
     return [expr.kind, expr.children.map(expressionSignature)];
   }
 
