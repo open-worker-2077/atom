@@ -192,10 +192,12 @@ test('domain travel never injects a fixed yaw rotation', () => {
 
 test('immersive child entry frames the new direct children once while preserving later camera ownership', () => {
   const enter = functionSource('enterNode');
+  const commit = functionSource('commitDomainRoute');
   const frame = functionSource('currentDomainSceneFrame');
 
-  assert.match(enter, /state\.domainStack\.push\s*\(\s*\.\.\.route\.entries\s*\)/);
-  assert.match(enter, /state\.currentPath\s*=\s*nextPath/);
+  assert.match(enter, /commitDomainRoute\s*\(\s*route\s*,\s*enteredNode\s*,\s*prefetched\s*\)/);
+  assert.match(commit, /state\.domainStack\s*=\s*cloneDomainStack\s*\(\s*route\.entries\s*\)/);
+  assert.match(commit, /state\.currentPath\s*=\s*route\.path/);
   assert.match(enter, /currentDomainSceneFrame\s*\(\s*\)/);
   assert.match(frame, /viewModeModel\.immersiveDomainFrame/);
   assert.match(enter, /startCameraTween\s*\(/);
@@ -203,14 +205,18 @@ test('immersive child entry frames the new direct children once while preserving
 });
 
 test('direct satellite entry derives true semantic depth from its ancestor lineage', () => {
-  const route = functionSource('buildDirectDomainRoute');
+  const directRoute = functionSource('buildDirectDomainRoute');
+  const route = functionSource('buildImmersiveDomainRoute');
+  const commit = functionSource('commitDomainRoute');
   const enter = functionSource('enterNode');
 
+  assert.match(directRoute, /buildImmersiveDomainRoute\s*\(\s*node\s*,\s*parentCamera\s*\)/);
   assert.match(route, /visualModel\.nodeLineage\s*\(\s*node\s*\)/);
-  assert.match(route, /lineage\.length/);
-  assert.match(enter, /buildDirectDomainRoute\s*\(\s*node\s*,\s*parentCamera\s*\)/);
-  assert.match(enter, /state\.domainStack\.push\s*\(\s*\.\.\.route\.entries\s*\)/);
-  assert.match(enter, /state\.depth\s*=\s*route\.depth/);
+  assert.match(route, /lineage\.forEach\s*\(/);
+  assert.match(route, /depth\s*\+=\s*1/);
+  assert.match(enter, /buildImmersiveDomainRoute\s*\(\s*node\s*,\s*parentCamera\s*\)/);
+  assert.match(commit, /state\.domainStack\s*=\s*cloneDomainStack\s*\(\s*route\.entries\s*\)/);
+  assert.match(commit, /state\.depth\s*=\s*route\.depth/);
   assert.doesNotMatch(enter, /state\.depth\s*\+=\s*1/);
 });
 

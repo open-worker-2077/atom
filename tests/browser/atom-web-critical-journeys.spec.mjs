@@ -136,6 +136,7 @@ test('F-mode enters a visible nested node through its real owner route', async (
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors
     .map(({ label }) => label))).toContain('内部事项');
   await waitForViewToSettle(page);
+  await page.locator('#settingsAction').click();
   const parentAction = page.getByRole('button', { name: '上层' });
   await expect(parentAction).toBeEnabled();
   await parentAction.click({ force: true });

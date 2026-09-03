@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-02-asdf-navigation-settings-design.md`
 
-**2026-09-03恢复状态：** 分支`fix/asdf-navigation-settings`相对当前`main`为5个功能/账本提交待集成，同时落后当前主线35个提交。Task 2已在分支完成并通过聚焦Node `52/52`与浏览器旅程；Task 3实现提交为`6b4c7f1`，但评审未接受：P1为`defaultDetailMode`已持久化却未真正应用到普通启动/新域节点，P2为设置窗口声明模态却未阻断后台场景键盘交互。下一动作是先TDD修复这两项并复审，再基于最新`main`安全集成；不得把“已有提交”等同于完成。
+**2026-09-03恢复状态：** 分支`fix/asdf-navigation-settings`已变基到`main@2ae7201`。Task 2真实F域径旅程通过；Task 3重新取证证明已保存`defaultDetailMode=surface`会在启动场景实际应用，旧P1评审结论过期。P2已以红灯复现设置窗口打开时`S`仍改变后台视角，并由`4153cc7`修复为模态键盘隔离。聚焦Node `123/123`、默认详情/设置模态 Chromium `2/2`、F域径 Chromium `1/1`通过；下一动作是完整验证、账本收口和集成。
 
 ## Global Constraints
 
@@ -76,13 +76,13 @@
 - Consumes: 现有展示设置和工具入口。
 - Produces: `defaultDetailMode: 'name'|'surface'|'floating'`、居中`settingsPanel`及唯一星轨入口。
 
-- [ ] **Step 1: Write failing settings tests**：断言三种模式规范化与持久化、非法值回退`floating`、HTML只有一个星轨设置入口且窗口具备五个明确分区。
-- [ ] **Step 2: Run RED**：`node --test tests/spatial-demo-model.test.js tests/demo-engine-contract.test.js`，预期缺少默认模式与统一入口。
-- [ ] **Step 3: Implement settings model**：加入`defaultDetailMode`及更新函数，保持旧设置自动补默认值。
-- [ ] **Step 4: Implement centered settings UI**：收束右上角、居中模态窗口、迁入工具入口和映射/显示控制，保持键盘与移动端可用。
-- [ ] **Step 5: Apply default detail mode**：启动和新进入域采用默认模式；历史快照恢复继续优先使用快照。
-- [ ] **Step 6: Run GREEN and browser journey**：运行焦点测试和`npx playwright test tests/browser/mapping-layout-controls.spec.mjs`，验证重载持久化与窗口布局。
-- [ ] **Step 7: Commit**：`feat(web): add unified orbital settings`。
+- [x] **Step 1: Write failing settings tests**：断言三种模式规范化与持久化、非法值回退`floating`、HTML只有一个星轨设置入口且窗口具备五个明确分区；追加真实浏览器后台快捷键隔离与启动默认详情用例。
+- [x] **Step 2: Run RED**：设置模态打开后按`S`把后台从`nested`改成`peripheral`；默认详情真实启动用例直接通过，证明该项已有运行实现而非缺口。
+- [x] **Step 3: Implement settings model**：加入`defaultDetailMode`及更新函数，保持旧设置自动补默认值。
+- [x] **Step 4: Implement centered settings UI**：收束右上角、居中模态窗口、迁入工具入口和映射/显示控制；捕获模态键盘事件，Escape关闭，其余按键不进入后台场景。
+- [x] **Step 5: Apply default detail mode**：启动和新进入域采用默认模式；历史快照恢复继续优先使用快照。
+- [x] **Step 6: Run GREEN and browser journey**：聚焦Node `123/123`、默认详情/设置模态 Chromium `2/2`通过。
+- [x] **Step 7: Commit**：`aa23734 feat(web): add unified orbital settings`；`4153cc7 fix(web): isolate orbital settings keyboard input`。
 
 ### Task 4: 架构约束、账本与完整验收
 
@@ -98,8 +98,8 @@
 - Consumes: Tasks 1—3 完成结果。
 - Produces: 可跨 Session 恢复的真实状态与完成证据。
 
-- [ ] **Step 1: Add boundary assertions**：防止 F 重新从全局`currentPath`直接拼路，防止普通点击绕过最具体节点解析器。
-- [ ] **Step 2: Run focused verification**：运行命中、视图、设置模型、合同和两条浏览器旅程。
+- [x] **Step 1: Add boundary assertions**：防止 F 重新从全局`currentPath`直接拼路，防止普通点击绕过最具体节点解析器；断言域径状态只由`commitDomainRoute`一次提交。
+- [x] **Step 2: Run focused verification**：命中、视图、设置模型与合同共`123/123`；设置与默认详情 Chromium `2/2`；F真实owner域径 Chromium `1/1`。
 - [ ] **Step 3: Run full verification**：`npm test`，预期全部通过且零 warning/error。
 - [ ] **Step 4: Update recovery ledger**：校正启动热态、Shortcut和本轮状态，只保留可编程点击与手机验收等真实未完成项。
 - [ ] **Step 5: Inspect and commit**：确认无 backing JSON、构建产物或无关文件后提交`docs: record asdf navigation settings proof`。
