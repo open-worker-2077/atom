@@ -14,9 +14,15 @@
 - **✅ Strut触发单轨化**：Graph后项决定接收Program，接收方以`trigger("strut", {}, main)`自主响应；旧`nodes`合同已从运行时与生产ESG四条接棒链清除。
 - **✅ Web revision补账**：外部CLI/Program提交在SSE断线期间漏掉通知后，EventSource重连会立即核对当前路径与展开路径，并一次导入同一最新revision；不依赖轮询或全世界刷新。
 - **✅ Shortcut激活与语义编辑**：深层激活真实Chromium`5/5 PASS`；`thing.lnk.EXACT_TARGET`只改引用自身并保持内部identity，Web不再暴露合同JSON或要求ID。
-- **🟠 次序待办**：手机只剩设备上线后的终端验收；当前代码首项为ASDF设置分支评审修复及集成，其后处理用户语义名称泄漏内部`@slot-role-*`身份。
+- **🟠 次序待办**：手机只剩终端验收；ASDF设置与内部槽位标识隔离均已部署。后续先处理仍有当前复现证据的Web问题；A／S／D／F收束已记录为后续架构方向：只保留A的内嵌结构，右键单击普通向内剖开、右键双击沉浸向内剖开；不抢占当前缺陷。
 
-### 0.1 手机统一入口最新证据
+### 0.1 内部槽位标识隔离最新证据
+
+- **根因**：旧投影把`thing` Key上的全部类型直接映射为用户可见`atomTypes`，把供槽模稳定定位的`slot-role-*`与`slot-revision-*`误当成普通语义类型显示；权威名称本身未被改写。
+- **修复**：提交`93200d3`在投影边界只输出正式公开类型，内部角色与修订身份继续保留在权威Graph，不做名称字符串截断。
+- **验证部署**：`tests/atom-projection-pipeline.test.mjs`为`13/13 PASS`；通过计划任务`Atom Graph Runtime`正规重启4784，health为revision`7272`、投影`published`、世界revision仍为`sha256:d269cf...a27f`。用户可见`knowledge.json`中`slot-role-*`／`slot-revision-*`命中为0。
+
+### 0.2 手机统一入口最新证据
 
 - **根因**：tailnet的MagicDNS与Serve均正常，但本机Tailscale偏好`CorpDNS=false`，导致系统解析统一域名时返回NXDOMAIN；Tailscale内置查询一直可解析到`100.116.206.105`。
 - **修复**：执行`tailscale set --accept-dns=true`恢复系统使用Tailscale DNS；不改变Atom世界、网关身份白名单或正式入口。

@@ -19,7 +19,7 @@
 ## 当前开发链
 
 - **当前恢复断点**：[`plans/2026-09-03-session-recovery-checkpoint.md`](plans/2026-09-03-session-recovery-checkpoint.md)；ChatGPT软件更新或 Session历史丢失后，先从该文件恢复，不依赖聊天记录或自动压缩摘要。
-- **当前主干状态**：Strut触发单轨化、Web断线revision补账与Shortcut语义编辑均已部署关闭。手机正式域名的服务端DNS断点已修复并由统一HTTPS入口回读200，待手机重新上线做终端验收；当前代码首项回到ASDF设置分支，再处理内部名称泄漏。不得重新引入Strut`nodes`或Shortcut手填ID。
+- **当前主干状态**：Strut触发单轨化、Web断线revision补账、Shortcut语义编辑、ASDF设置集成与内部槽位标识隔离均已部署关闭。手机正式域名的服务端DNS断点已修复并由统一HTTPS入口回读200，待手机完成终端验收。不得重新引入Strut`nodes`、Shortcut手填ID或把内部槽位身份重新投影成普通名称。
 - **2026-09-03 已部署**：Slot相邻层级信号、Program relocation closure、交互原子隔离、独立截止、迟到提交防护与短权威提交临界区均已合入并推送`main@ead30e2`。系统测试`226/226 PASS`；真实4784重启后 health正常，`explore 🧊manage`最终约256ms。此前“health快但命令长期挂起”的P0已关闭。
 
 - **首要 Graph 纠偏**：Strut 判定 Program 必须内嵌在 clause `if`，取得复合前项事实与本次规范化 Transform `$` 动作信封；`$click`只是注册动作族的首个用例，CLI/Web 点击统一为 `transform {"thing$click":"EXACT路径"}`，新增动作不得修改 Strut/runtime 主干。旧外部 `thing@program` 判定与独立 click endpoint/trigger 方案均已退役。权威合同见[`specs/2026-08-31-atom-world-program-design.md`](specs/2026-08-31-atom-world-program-design.md) §3.2、§4.1；当前实施账本见[`plans/2026-09-02-inline-strut-transform-actions.md`](plans/2026-09-02-inline-strut-transform-actions.md)。
@@ -42,8 +42,8 @@
 - **已完成**：输入层识别同一 exact Thing 的无上限点击次数并提交统一 Transform `thing$click`动作；Strut 内嵌`if` Program按动作信封判定，三点击只是条件用例，没有独立 click 调度旁路。旧`feat/programmable-click-trigger`分支不合入。
 - **待手机终端验收**：唯一正式入口是`https://worker.tail33a2eb.ts.net/`。2026-09-03确认tailnet MagicDNS已启用但本机`accept-dns`被关闭；恢复后系统DNS解析到`100.116.206.105`，统一HTTPS health返回200、revision 7270。Pixel当前离线，待其重新上线完成真机只读Graph验收。`100.116.206.105:4786`只保留为内部诊断探针，不是用户入口、替代地址或完成方案。
 - **已完成**：Shortcut普通、未访问深层、A模式、坏链保持与渐进远端路线真实浏览器旅程`5/5 PASS`。
-- **待修—Web 即时一致性**：无论改动来自 Web 还是 CLI，Transform提交成功后当前局部视图仍可能保留旧节点名称、正文或结构，约两分钟后才一致。须修复权威 revision发布→最小受影响路径缓存失效→局部投影刷新→Web对账闭环；轮询最终收敛不算完成。
+- **已完成—Web 即时一致性**：持续SSE按revision即时刷新；断线漏过CLI／Program提交后，EventSource重连立即核对当前路径与展开路径并一次导入同一最新revision，不依赖轮询或全世界刷新。
 - **已完成—Shortcut语义编辑**：人工与Agent使用`thing.lnk.EXACT_TARGET`按语义路径改向；系统消歧、复用Graph鉴权并保持内部identity。Web只显示名称和目标路径，不要求手填ID，也不把合同JSON当正文编辑。
-- **即时收件**：普通名称视图偶发泄漏 `@slot-role-<内部ID>`；稳定身份继续保留，但必须与用户语义名称分层，不做表面截断。
+- **已完成—内部槽位标识隔离**：稳定身份继续保留在权威结构层，Web普通名称只投影公开语义类型。专项`13/13 PASS`；真实4784 revision 7272、投影`published`，用户可见投影中`slot-role-*`／`slot-revision-*`命中为0。
 - **已完成**：A 模式双击最深目标、ASDF Strut端点贴边和CLI更新后的场景连续性已有测试、真实浏览器证据和远端提交。
-- **待集成—ASDF与统一设置**：`fix/asdf-navigation-settings`已完成最具体节点命中和真实owner域径实现；星轨设置已有实现，但评审仍有“默认详情模式未实际应用”和“伪模态未阻断后台键盘交互”两个缺口。该分支尚未集成`main`。
+- **已完成—ASDF与统一设置**：最具体节点命中、真实owner域径、默认详情模式、星轨设置与模态键盘隔离已集成并部署。后续A／S／D／F收束是新的架构方向：只保留A的Slot内嵌结构，把F沉浸融为A的可见范围动作；当前只记录，不抢占缺陷处理。
