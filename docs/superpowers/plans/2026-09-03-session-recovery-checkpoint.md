@@ -10,6 +10,7 @@
 
 ## 0. 当前恢复结论（覆盖下文历史阶段描述）
 
+- **最新P0断点**：`main@5916883`声明检查复用修复已部署4784；隔离当前世界创建7414ms、回读239ms且回滚／重启／源文件不变验收通过，最终全量1704/1704、合入最小链8/8通过。受控重启后PID46140、health revision7289投影published，公开CLI回读test成功。生产创建待现场验证；普通批量写入已提交但超时回执仍未解决。跨任务回信被平台审查拒绝，需用户明确允许通知指定ESG任务，不绕过、不据此停止开发。
 - **🟠 当前P0——Program创建超时**：`🧊manage/包办/判重/ESG计划/test`连续创建最小`thing@program`均在15秒返回`ATOM_INTERACTION_TIMEOUT`且精确回读`ATOM_NOT_FOUND`；`work_order_catalog(...)`与仅`return True`两种Situation都失败，而同域普通14节点Graph约6秒成功。故障目前收束在Program创建链，按系统调试先查根因，再以RED／GREEN和真实CLI回读收口；不得只提高超时。
 - **✅ Slot相邻信号**：已完成、集成、部署；`slot({"to":"up|down","labels":[...]})`、接收方`trigger("slot",...)`和`signal()`已进入当前Help与系统测试。
 - **✅ 4784交互隔离P0**：已完成、集成、部署。真实4784重启后health正常，`explore 🧊manage`最终约256ms；系统测试`226/226 PASS`。下文“尚在隔离分支／未部署”只保留为历史过程，不代表当前状态。
