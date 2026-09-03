@@ -80,12 +80,29 @@ test('orbital settings centralize tools and persist the CapsLock default detail 
   await expect.poll(() => page.evaluate(() => JSON.parse(
     localStorage.getItem('graph-4d.presentation-settings.v2') || '{}'
   ).defaultDetailMode)).toBe('surface');
-  await page.reload();
-  await page.waitForFunction(() => window.spatialLab && document.body.dataset.spatialBridge === 'connected');
-  await page.locator('#settingsAction').click();
-  await expect(page.locator('#defaultDetailMode')).toHaveValue('surface');
+  const viewModeBeforeModalShortcut = await page.evaluate(() => window.spatialLab.state().viewMode);
+  await page.keyboard.press('s');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().viewMode))
+    .toBe(viewModeBeforeModalShortcut);
   await page.keyboard.press('Escape');
   await expect(page.locator('#settingsPanel')).toBeHidden();
+  await page.reload();
+  await page.waitForFunction(() => window.spatialLab && document.body.dataset.spatialBridge === 'connected');
+  await expect(page.locator('#defaultDetailMode')).toHaveValue('surface');
+});
+
+test('saved CapsLock default detail mode applies to the initial field', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('graph-4d.presentation-settings.v2', JSON.stringify({
+      defaultDetailMode: 'surface'
+    }));
+  });
+  await page.goto('/');
+  await page.waitForFunction(() => window.spatialLab && document.body.dataset.spatialBridge === 'connected');
+  await expect.poll(() => page.evaluate(() => {
+    const nodes = window.spatialLab.exportField().nodes;
+    return nodes.length > 0 && nodes.every((node) => node.surfaceVisible === true);
+  })).toBe(true);
 });
 
 test('S interval changes same-level screen edge gap without resizing those nodes', async ({ page }) => {

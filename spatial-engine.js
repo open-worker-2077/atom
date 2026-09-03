@@ -7424,6 +7424,18 @@
     return enter && shifted;
   }
 
+  function handleSettingsModalKey(event) {
+    if (ui.mappingPanel.hidden) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      ui.mappingPanel.hidden = true;
+      canvas.focus({ preventScroll: true });
+    }
+    event.stopImmediatePropagation();
+  }
+
+  document.addEventListener("keydown", handleSettingsModalKey, { capture: true });
+
   function handleEditTransactionKey(event) {
     if (!workspace.transaction() || event.isComposing) return;
     const intent = event.key === "Escape"
