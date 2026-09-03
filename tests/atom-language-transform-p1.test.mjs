@@ -67,6 +67,7 @@ test('Transform P1 freezes one short dot-command registry without aliases', () =
     'sum',
     'typ',
     'ren',
+    'lnk',
     'mov',
     'cpy',
     'dsc',

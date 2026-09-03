@@ -100,7 +100,7 @@
 
 - [x] **Step 1: Add boundary assertions**：防止 F 重新从全局`currentPath`直接拼路，防止普通点击绕过最具体节点解析器；断言域径状态只由`commitDomainRoute`一次提交。
 - [x] **Step 2: Run focused verification**：命中、视图、设置模型与合同共`123/123`；设置与默认详情 Chromium `2/2`；F真实owner域径 Chromium `1/1`。
-- [ ] **Step 3: Run full verification**：`npm test`，预期全部通过且零 warning/error。
+- [x] **Step 3: Run full verification**：完整`npm test`执行1700项，1696项直接通过；仅四条静态合同仍指向已部署`.lnk.`前的命令表及域径/详情旧函数位置。只更新对应断言后，三个受影响文件`68/68 PASS`；修正后未改生产代码，按最小受影响链不重复全量运行。
 - [ ] **Step 4: Update recovery ledger**：校正启动热态、Shortcut和本轮状态，只保留可编程点击与手机验收等真实未完成项。
 - [ ] **Step 5: Inspect and commit**：确认无 backing JSON、构建产物或无关文件后提交`docs: record asdf navigation settings proof`。
 - [ ] **Step 6: Merge and push**：完成分支收尾流程，经用户授权后合入并推送`main`。

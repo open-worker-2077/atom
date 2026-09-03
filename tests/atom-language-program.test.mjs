@@ -90,7 +90,7 @@ function baseWorld(program = replaceProgram()) {
 
 test('Program adds one exact thing.run. Transform command', () => {
   assert.deepEqual([...TRANSFORM_COMMANDS], [
-    'rep', 'sum', 'typ', 'ren', 'mov', 'cpy', 'dsc', 'rst', 'run'
+    'rep', 'sum', 'typ', 'ren', 'lnk', 'mov', 'cpy', 'dsc', 'rst', 'run'
   ]);
   const parsed = createAtomLanguageReceiver().receive(
     'transform {"thing.run.":"标记完成"}'

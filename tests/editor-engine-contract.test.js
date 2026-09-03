@@ -349,13 +349,13 @@ test('Atom confirmation reselects changed identities without navigating or refra
   assert.doesNotMatch(persisted, /locateKnowledgeNode|scheduleCommittedNodeFrame|startCameraTween/);
 });
 
-test('imported workspace-node preparation is guarded and derives surface visibility from detail mode', () => {
+test('imported workspace-node preparation is guarded and applies the configured default detail mode', () => {
   const current = functionSource('currentDomainNodes');
   const prepare = functionSource('prepareWorkspaceNode');
   assert.match(current, /node\.__spatialPreparing/);
   assert.match(current, /try\s*\{/);
   assert.match(current, /finally\s*\{/);
-  assert.match(prepare, /const detailMode\s*=\s*visualModel\.detailModeFor\(node\)/);
+  assert.match(prepare, /const detailMode\s*=\s*state\.demo\.settings\.defaultDetailMode/);
   assert.match(prepare, /surfaceVisible:\s*detailMode\s*===\s*["']surface["']/);
   assert.match(prepare, /detailMode,/);
   assert.doesNotMatch(prepare, /surfaceVisible:\s*true/);
@@ -420,11 +420,13 @@ test('empty tunnels enter cached empty domains that still project workspace node
   const childDomain = functionSource('createChildDomainNodes');
   const prefetch = functionSource('prefetchChildDomain');
   const enter = functionSource('enterNode');
+  const commit = functionSource('commitDomainRoute');
 
   assert.match(childDomain, /node\.hasChildren\s*===\s*true\s*\?\s*createDomain/);
   assert.match(childDomain, /domainCache\.set\s*\(\s*path\s*,\s*\[\s*\]\s*\)/);
   assert.match(prefetch, /createChildDomainNodes\s*\(\s*node\s*,\s*path/);
-  assert.match(enter, /createChildDomainNodes\s*\(\s*node\s*,\s*state\.currentPath/);
+  assert.match(enter, /commitDomainRoute\s*\(\s*route\s*,\s*enteredNode\s*,\s*prefetched\s*\)/);
+  assert.match(commit, /createChildDomainNodes\s*\(\s*enteredNode\s*,\s*state\.currentPath/);
   assert.doesNotMatch(enter, /node\.hasChildren\s*!==\s*true/);
 });
 
