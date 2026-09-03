@@ -27,7 +27,8 @@
 - **根因**：tailnet的MagicDNS与Serve均正常，但本机Tailscale偏好`CorpDNS=false`，导致系统解析统一域名时返回NXDOMAIN；Tailscale内置查询一直可解析到`100.116.206.105`。
 - **修复**：执行`tailscale set --accept-dns=true`恢复系统使用Tailscale DNS；不改变Atom世界、网关身份白名单或正式入口。
 - **回读**：`Resolve-DnsName worker.tail33a2eb.ts.net`返回`100.116.206.105`；`https://worker.tail33a2eb.ts.net/__spatial/api/health`返回200、revision 7270、投影published。
-- **剩余边界**：`pixel-10a`当前为offline，不能以电脑回读替代手机终端验收；设备上线后只需用同一正式域名完成一次只读Graph请求。
+- **最新链路**：`pixel-10a`已在线，电脑到手机`100.102.183.62`的Tailscale ping约1.03秒；统一HTTPS health为200、revision 7272、投影published。电脑端Proton VPN按目的地址分流时优先排除手机Tailscale IP`100.102.183.62`，必要时再排除MagicDNS`100.100.100.100`或整个`100.64.0.0/10`。
+- **剩余边界**：仍须从手机浏览器用同一正式域名完成一次只读Graph请求；电脑回读与对等ping不能替代终端浏览器验收。
 
 ## 1. 当前唯一首要功能
 

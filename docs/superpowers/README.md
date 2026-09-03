@@ -40,7 +40,7 @@
 以下场景的产品合同保存在[`specs/2026-08-31-atom-web-spatial-design.md`](specs/2026-08-31-atom-web-spatial-design.md)，实施前分别执行 Superpowers brainstorming；不得在当前迁窗任务中顺手修改：
 
 - **已完成**：输入层识别同一 exact Thing 的无上限点击次数并提交统一 Transform `thing$click`动作；Strut 内嵌`if` Program按动作信封判定，三点击只是条件用例，没有独立 click 调度旁路。旧`feat/programmable-click-trigger`分支不合入。
-- **待手机终端验收**：唯一正式入口是`https://worker.tail33a2eb.ts.net/`。2026-09-03确认tailnet MagicDNS已启用但本机`accept-dns`被关闭；恢复后系统DNS解析到`100.116.206.105`，统一HTTPS health返回200、revision 7270。Pixel当前离线，待其重新上线完成真机只读Graph验收。`100.116.206.105:4786`只保留为内部诊断探针，不是用户入口、替代地址或完成方案。
+- **待手机终端验收**：唯一正式入口是`https://worker.tail33a2eb.ts.net/`。服务端MagicDNS与`accept-dns`已恢复；统一HTTPS health返回200、revision 7272。`pixel-10a`当前在线且Tailscale ping约1.03秒，只剩手机浏览器实际打开并完成一次只读Graph请求。Proton分流优先排除手机Tailscale IP`100.102.183.62`；`100.116.206.105:4786`只保留为内部诊断探针。
 - **已完成**：Shortcut普通、未访问深层、A模式、坏链保持与渐进远端路线真实浏览器旅程`5/5 PASS`。
 - **已完成—Web 即时一致性**：持续SSE按revision即时刷新；断线漏过CLI／Program提交后，EventSource重连立即核对当前路径与展开路径并一次导入同一最新revision，不依赖轮询或全世界刷新。
 - **已完成—Shortcut语义编辑**：人工与Agent使用`thing.lnk.EXACT_TARGET`按语义路径改向；系统消歧、复用Graph鉴权并保持内部identity。Web只显示名称和目标路径，不要求手填ID，也不把合同JSON当正文编辑。
