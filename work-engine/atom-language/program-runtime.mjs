@@ -2590,7 +2590,7 @@ export class ProgramRuntimeScheduler {
         : []),
       ...activeStrutDeliveries.flatMap((strutDelivery) => (
         slotProgramInvocationsForEvent(atoms, {
-          mode: 'strut', nodes: [strutDelivery.consequentPath]
+          mode: 'strut', deliveries: [strutDelivery]
         }, this.triggerContracts).map((invocation) => ({ ...invocation, strutDelivery }))
       ))
     ];

@@ -57,7 +57,7 @@ function world() {
     '    transform({"thing":"./状态锁","situation.rep." + lock_source:None})',
     '    transform({"thing":"./结果/结果料","situation.rep.已批准":None})',
     '    return {"locked":True}',
-    'trigger("strut", {"nodes":["./执行"]}, run)'
+    'trigger("strut", {}, run)'
   ].join('\n');
   const printer = (name) => `use_program({"name":"${body}/print","arguments":{"name":"${name}"}})`;
   const agent = (labels) => `agent(${JSON.stringify({
@@ -73,7 +73,7 @@ function world() {
             atom('字段甲', '字段甲槽契约', [], [{
               'if@current': true,
               if: [{ and: [{ thing: '字段乙' }, { program: predicate }] }],
-              then: [{ thing: '执行' }]
+              then: [{ 'thing@program': '执行动作' }]
             }]),
             atom('字段乙', '字段乙槽契约'),
             atom('结果', '结果槽契约'),
@@ -169,7 +169,7 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
   assert.equal(find(stored, target).situation, '已复核');
   assert.equal(find(stored, `${body}/槽例/实例002/结果/结果料`).situation, '待计算');
 
-  const consequentPath = `${body}/槽例/实例001/执行`;
+  const consequentPath = `${body}/槽模/执行动作`;
   const deliveries = ['clause-a', 'clause-b'].map((clauseId, consequentOrdinal) => ({
     mode: 'strut',
     revision: 'sha256:direct-strut-acceptance',
@@ -180,7 +180,7 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
     consequentOrdinal
   }));
   assert.deepEqual(slotProgramInvocationsForEvent(stored, {
-    mode: 'strut', nodes: [consequentPath]
+    mode: 'strut', deliveries
   }, scheduler.triggerContracts).map((invocation) => invocation.scopeRoot), [
     `${body}/槽例/实例001`
   ]);
@@ -222,7 +222,7 @@ test('a failing strut subscriber rolls back the warm source Transform', async (t
   const source = atom('Source', 'before', [], [{
     'if@current': true,
     if: [{ program: 'def main(context):\n    return True' }],
-    then: [{ thing: 'Result' }]
+    then: [{ 'thing@program': 'FailingSubscriber' }]
   }]);
   const initial = [
     source,
@@ -230,7 +230,7 @@ test('a failing strut subscriber rolls back the warm source Transform', async (t
     atom('FailingSubscriber', [
       'def receive(delivery):',
       '    return delivery["missing"]',
-      'trigger("strut", {"nodes":["Result"]}, receive)'
+      'trigger("strut", {}, receive)'
     ].join('\n'), [], [], ['program'])
   ];
   await fs.writeFile(contextFile, JSON.stringify(initial, null, 2), 'utf8');
@@ -259,7 +259,10 @@ test('a rolled-back multi-subscriber delivery releases every claim for a complet
   const source = atom('Source', 'before', [], [{
     'if@current': true,
     if: [{ program: 'def main(context):\n    return True' }],
-    then: [{ thing: 'Result' }]
+    then: [
+      { 'thing@program': 'ApplySubscriber' },
+      { 'thing@program': 'TransientSubscriber' }
+    ]
   }]);
   const initial = [
     source,
@@ -267,12 +270,12 @@ test('a rolled-back multi-subscriber delivery releases every claim for a complet
     atom('ApplySubscriber', [
       'def receive(delivery):',
       '    transform({"thing":"Result","situation.rep.after":"before"})',
-      'trigger("strut", {"nodes":["Result"]}, receive)'
+      'trigger("strut", {}, receive)'
     ].join('\n'), [], [], ['program']),
     atom('TransientSubscriber', [
       'def receive(delivery):',
       '    return {"accepted": delivery["decision"]}',
-      'trigger("strut", {"nodes":["Result"]}, receive)'
+      'trigger("strut", {}, receive)'
     ].join('\n'), [], [], ['program'])
   ];
   await fs.writeFile(contextFile, JSON.stringify(initial, null, 2), 'utf8');
@@ -318,7 +321,7 @@ test('a strut subscriber effect rejected after worker success releases its claim
   const source = atom('Source', 'before', [], [{
     'if@current': true,
     if: [{ program: 'def main(context):\n    return True' }],
-    then: [{ thing: 'Result' }]
+    then: [{ 'thing@program': 'ApplySubscriber' }]
   }]);
   await fs.writeFile(contextFile, JSON.stringify([
     source,
@@ -326,7 +329,7 @@ test('a strut subscriber effect rejected after worker success releases its claim
     atom('ApplySubscriber', [
       'def receive(delivery):',
       '    transform({"thing":"Result","situation.rep.after":"before"})',
-      'trigger("strut", {"nodes":["Result"]}, receive)'
+      'trigger("strut", {}, receive)'
     ].join('\n'), [], [], ['program'])
   ], null, 2), 'utf8');
   const scheduler = createProgramRuntimeScheduler();
@@ -373,7 +376,7 @@ test('a successful no-op source Transform confirms message-only strut delivery w
   const source = atom('Source', 'before', [], [{
     'if@current': true,
     if: [{ program: 'def main(context):\n    return True' }],
-    then: [{ thing: 'Result' }]
+    then: [{ 'thing@program': 'MessageSubscriber' }]
   }]);
   await fs.writeFile(contextFile, JSON.stringify([
     source,
@@ -381,7 +384,7 @@ test('a successful no-op source Transform confirms message-only strut delivery w
     atom('MessageSubscriber', [
       'def receive(delivery):',
       '    message({"level":"info","text":"delivered"})',
-      'trigger("strut", {"nodes":["Result"]}, receive)'
+      'trigger("strut", {}, receive)'
     ].join('\n'), [], [], ['program'])
   ], null, 2), 'utf8');
   const scheduler = createProgramRuntimeScheduler();

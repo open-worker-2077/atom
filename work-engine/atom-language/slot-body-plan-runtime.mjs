@@ -195,17 +195,6 @@ function compilePlan(layout, structureLock = null) {
   const strut = [];
   for (const record of records) {
     for (const rule of directedStruts(record.atom)) {
-      if (Array.isArray(rule.then) && rule.then.some((endpoint) => (
-        Object.hasOwn(endpoint ?? {}, 'thing@program')
-      ))) {
-        return {
-          error: slotError('INVALID_SLOT_PRINT_PLAN', '槽模 strut 后项必须是普通事实 Thing', {
-            source: record.absolute,
-            rule,
-            causeCode: 'STRUT_FACT_CONSEQUENT_REQUIRED'
-          })
-        };
-      }
       const compiledRule = compileStrutRule(record, rule, records, roleByRelative);
       if (!compiledRule) {
         return {
@@ -753,7 +742,9 @@ function instanceContextForEvent(atoms, eventPath) {
 }
 
 export function slotProgramInvocationsForEvent(atoms, triggerEvent, triggerContracts = new Map()) {
-  if (!['transform', 'strut'].includes(triggerEvent?.mode) || !Array.isArray(triggerEvent.nodes)) return [];
+  if (!['transform', 'strut'].includes(triggerEvent?.mode)) return [];
+  if (triggerEvent.mode === 'transform' && !Array.isArray(triggerEvent.nodes)) return [];
+  if (triggerEvent.mode === 'strut' && !Array.isArray(triggerEvent.deliveries)) return [];
   const invocations = [];
   const invocationByKey = new Map();
   const addInvocation = (context, eventPath, source, role) => {
@@ -773,6 +764,28 @@ export function slotProgramInvocationsForEvent(atoms, triggerEvent, triggerContr
     invocationByKey.set(key, invocation);
     invocations.push(invocation);
   };
+  if (triggerEvent.mode === 'strut') {
+    for (const delivery of triggerEvent.deliveries) {
+      if (delivery?.mode !== 'strut' || delivery.decision !== true) continue;
+      const contexts = new Map();
+      for (const antecedentPath of delivery.antecedentPaths ?? []) {
+        const context = instanceContextForEvent(atoms, antecedentPath);
+        if (context) contexts.set(context.instancePath, context);
+      }
+      for (const context of contexts.values()) {
+        const role = context.plan.roles.find((candidate) => (
+          candidate.kind === 'program'
+          && roleTargetPath(context.layout, candidate, context.instancePath) === delivery.consequentPath
+        ));
+        if (!role) continue;
+        const programPath = roleTargetPath(context.layout, role, context.instancePath);
+        const contract = triggerContracts.get(programPath)?.contract;
+        if (contract?.mode !== 'strut') continue;
+        addInvocation(context, delivery.consequentPath, role, role);
+      }
+    }
+    return invocations;
+  }
   for (const eventPath of triggerEvent.nodes) {
     if (typeof eventPath !== 'string') continue;
     const context = instanceContextForEvent(atoms, eventPath);
@@ -804,7 +817,7 @@ export function slotProgramInvocationsForEvent(atoms, triggerEvent, triggerContr
         ? context.layout.modelPath
         : `${context.layout.modelPath}/${role.path.slice(2)}`;
       const contract = triggerContracts.get(programPath)?.contract;
-      if (contract?.mode !== triggerEvent.mode) continue;
+      if (contract?.mode !== 'transform') continue;
       if (!(contract.parameters?.nodes ?? []).includes(source.path)) continue;
       addInvocation(context, eventPath, source, role);
     }

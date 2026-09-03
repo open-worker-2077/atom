@@ -101,7 +101,7 @@ function conditionalWorld() {
     '        return {"computed":False}',
     '    transform({"thing":"./结果/结果料","situation.rep.已计算":None})',
     '    return {"computed":True}',
-    'trigger("strut", {"nodes":["./执行"]}, run)'
+    'trigger("strut", {}, run)'
   ].join('\n');
   const printer = (name) => (
     `use_program({"name":"Root/条件槽体/print","arguments":{"name":"${name}"}})`
@@ -116,7 +116,7 @@ function conditionalWorld() {
             { thing: '字段乙' },
             { program: INLINE_FIELD_PREDICATE }
           ] }],
-          then: [{ thing: '执行' }]
+          then: [{ 'thing@program': '计算' }]
         }]),
         atom('字段乙', '字段乙槽契约'),
         atom('结果', '结果槽契约'),
@@ -239,14 +239,18 @@ test('one atomic batch evaluates one owner-local condition and dispatches its co
         { thing: 'Root/条件槽体/槽例/实例001/字段乙' },
         { program: INLINE_FIELD_PREDICATE }
       ] }],
-      then: [{ thing: 'Root/条件槽体/槽例/实例001/执行' }]
+      then: [{ 'thing@program': 'Root/条件槽体/槽模/计算' }]
     }
   ]);
   assert.deepEqual(find(before, 'Root/条件槽体/槽例/实例001/执行').strut, []);
   assert.deepEqual(find(before, 'Root/条件槽体/槽模/计算').strut, []);
   const invocations = slotProgramInvocationsForEvent(before, {
     mode: 'strut',
-    nodes: ['Root/条件槽体/槽例/实例001/执行']
+    deliveries: [{
+      mode: 'strut', decision: true,
+      antecedentPaths: ['Root/条件槽体/槽例/实例001/字段甲'],
+      consequentPath: 'Root/条件槽体/槽模/计算'
+    }]
   }, scheduler.triggerContracts);
   assert.equal(invocations.length, 1);
   assert.equal(invocations[0].programPath, 'Root/条件槽体/槽模/计算');
@@ -294,7 +298,11 @@ test('a strict-false owner-local condition does not dispatch its consequent', as
 
   const before = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(slotProgramInvocationsForEvent(before, {
-    mode: 'strut', nodes: ['Root/条件槽体/槽例/实例001/执行']
+    mode: 'strut', deliveries: [{
+      mode: 'strut', decision: true,
+      antecedentPaths: ['Root/条件槽体/槽例/实例001/字段甲'],
+      consequentPath: 'Root/条件槽体/槽模/计算'
+    }]
   }, scheduler.triggerContracts).length, 1);
 
   const changed = await run(runtime, triggerFields('实例001', ['字段甲']), scheduler);
