@@ -66,6 +66,41 @@ test('concurrent commands with one expected revision serialize and cannot lose u
   assert.equal((await journalRepository.readState()).receipts.length, 1);
 });
 
+test('hung transition calculation does not block an independent candidate commit', async (t) => {
+  const { coordinator, worldRepository } = await fixture(t);
+  const initial = await worldRepository.read();
+  let releaseHung;
+  let notifyHungStarted;
+  const hungStarted = new Promise((resolve) => { notifyHungStarted = resolve; });
+  const hung = new Promise((resolve) => { releaseHung = resolve; });
+  const slow = coordinator.execute({
+    command: command('cmd-slow-candidate', initial.revision),
+    transition: async ({ facts }) => {
+      notifyHungStarted();
+      await hung;
+      return { facts: [...facts, { name: 'slow' }] };
+    }
+  });
+  await hungStarted;
+
+  const fast = coordinator.execute({
+    command: command('cmd-fast-candidate', initial.revision),
+    transition: ({ facts }) => ({ facts: [...facts, { name: 'fast' }] })
+  });
+  const fastReceipt = await Promise.race([
+    fast,
+    new Promise((_, reject) => setTimeout(
+      () => reject(new Error('candidate calculation was held behind another transition')),
+      150
+    ))
+  ]);
+
+  assert.equal(fastReceipt.status, 'committed');
+  assert.deepEqual((await worldRepository.read()).facts, [{ name: 'fast' }]);
+  releaseHung();
+  await assert.rejects(slow, (error) => error.code === 'WORLD_REVISION_CONFLICT');
+});
+
 test('a repeated command id is idempotent and returns the original receipt', async (t) => {
   const { coordinator, worldRepository, journalRepository } = await fixture(t);
   const initial = await worldRepository.read();
@@ -108,14 +143,13 @@ test('a prepared transition can skip cloning unused world and payload inputs', a
 
 test('a trusted read-only transition reuses the repository snapshot by reference', async (t) => {
   const files = await fixture(t);
-  let lastRead = null;
-  let reads = 0;
+  const reads = [];
   let compareSnapshot = null;
   const worldRepository = {
     read: async () => {
-      reads += 1;
-      lastRead = await files.worldRepository.read();
-      return lastRead;
+      const snapshot = await files.worldRepository.read();
+      reads.push(snapshot);
+      return snapshot;
     },
     compareAndSwap: (request) => {
       compareSnapshot = request.currentSnapshot;
@@ -138,9 +172,9 @@ test('a trusted read-only transition reuses the repository snapshot by reference
     }
   });
 
-  assert.equal(transitionSnapshot, lastRead);
-  assert.equal(compareSnapshot, lastRead);
-  assert.equal(reads, 1);
+  assert.equal(transitionSnapshot, reads[0]);
+  assert.equal(compareSnapshot, reads[1]);
+  assert.equal(reads.length, 2);
 });
 
 test('transaction history appends compact events and content-addressed snapshots without rewriting legacy history', async (t) => {

@@ -135,7 +135,7 @@ export function createCommitCoordinator({
     return serialize(recoverUnsafe);
   }
 
-  async function executeUnsafe({
+  async function prepareCandidate({
     command: rawCommand,
     transition,
     transitionReadsSnapshot = true,
@@ -143,10 +143,10 @@ export function createCommitCoordinator({
   }) {
       const command = validateWorldCommandEnvelope(rawCommand);
       const existingReceipt = await journalRepository.findReceipt(command.commandId);
-      if (existingReceipt) return existingReceipt;
+      if (existingReceipt) return { command, receipt: existingReceipt };
 
       const pending = await journalRepository.findPrepared(command.commandId);
-      if (pending) return recoverRecord(pending);
+      if (pending) return { command, pending };
       if (typeof transition !== 'function') {
         throw problem('INVALID_WORLD_TRANSITION', 'transition must be a function');
       }
@@ -222,19 +222,38 @@ export function createCommitCoordinator({
         receipt
       };
 
+      return { command, before, after, receipt, record };
+  }
+
+  async function commitCandidate(candidate) {
+      if (candidate.receipt && !candidate.record) return candidate.receipt;
+      const { command } = candidate;
+      const existingReceipt = await journalRepository.findReceipt(command.commandId);
+      if (existingReceipt) return existingReceipt;
+      const pending = candidate.pending ?? await journalRepository.findPrepared(command.commandId);
+      if (pending) return recoverRecord(pending);
+      const { before, after, receipt, record } = candidate;
+      const current = await worldRepository.read();
+      if (current.revision !== before.revision) {
+        throw problem('WORLD_REVISION_CONFLICT', 'Command was based on an obsolete world revision', {
+          expectedRevision: before.revision,
+          actualRevision: current.revision
+        });
+      }
+
       await journalRepository.prepare(record);
       await faultInjector('after-prepare', structuredClone(record));
       await worldRepository.compareAndSwap({
         expectedRevision: before.revision,
         nextSnapshot: after,
-        currentSnapshot: before
+        currentSnapshot: current
       });
       await faultInjector('after-world-write', structuredClone(record));
       return journalRepository.commit(command.commandId, receipt);
   }
 
   function execute(request) {
-    return serialize(() => executeUnsafe(request));
+    return prepareCandidate(request).then((candidate) => serialize(() => commitCandidate(candidate)));
   }
 
   function rollback({ targetCommandId, command }) {
@@ -257,7 +276,7 @@ export function createCommitCoordinator({
           actualRevision: current.revision
         });
       }
-      return executeUnsafe({
+      const candidate = await prepareCandidate({
         command,
         transitionReadsSnapshot: false,
         transition: () => target.historyMode === 'local-patch'
@@ -283,6 +302,7 @@ export function createCommitCoordinator({
               }
             })
       });
+      return commitCandidate(candidate);
     });
   }
 
