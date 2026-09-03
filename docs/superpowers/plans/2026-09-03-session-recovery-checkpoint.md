@@ -16,7 +16,7 @@
 - **✅ Strut触发单轨化**：Graph后项决定接收Program，接收方以`trigger("strut", {}, main)`自主响应；旧`nodes`合同已从运行时与生产ESG四条接棒链清除。
 - **✅ Web revision补账**：外部CLI/Program提交在SSE断线期间漏掉通知后，EventSource重连会立即核对当前路径与展开路径，并一次导入同一最新revision；不依赖轮询或全世界刷新。
 - **✅ Shortcut激活与语义编辑**：深层激活真实Chromium`5/5 PASS`；`thing.lnk.EXACT_TARGET`只改引用自身并保持内部identity，Web不再暴露合同JSON或要求ID。
-- **🟠／⏸ 当前次序**：Superpowers账本校准已完成；下一项是只读回查工务世界终态证据。手机正式域名仍会在手机卡住，但用户以ToDesk替代使用，暂不阻塞；A／S／D／F收束与零Agent创世均由用户明确延后。
+- **🟠／⏸ 当前次序**：Superpowers账本校准和通用连续性补充已完成，Atom独立门禁方案已撤回；下一项是只读回查工务世界终态证据。手机正式域名仍会在手机卡住，但用户以ToDesk替代使用，暂不阻塞；A／S／D／F收束与零Agent创世均由用户明确延后。
 
 ### 0.1 内部槽位标识隔离最新证据
 
