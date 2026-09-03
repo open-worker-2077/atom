@@ -109,7 +109,7 @@ test('4784 command endpoint retains compiled locks without replaying an untrigge
   assert.equal(denied.errors[0].code, 'PROGRAM_LOCK_DENIED');
 });
 
-test('4784 serializes concurrent writes as complete world interactions without losing context or projection updates', async (t) => {
+test('4784 isolates concurrent writes and a revision-conflicted command succeeds after explicit retry', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-service-serial-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -129,17 +129,24 @@ test('4784 serializes concurrent writes as complete world interactions without l
   const endpoint = `${running.url}/__atom/api/command`;
   const agent = await resolveAgentContext(contextFile, '工作Agent');
 
-  const [left, right] = await Promise.all([
-    executeAtomCommandEndpoint({
-      source: 'transform {"thing":"工作Agent/任务甲","situation.rep.新甲"}', interaction: { agent }
-    }, endpoint),
-    executeAtomCommandEndpoint({
-      source: 'transform {"thing":"工作Agent/任务乙","situation.rep.新乙"}', interaction: { agent }
-    }, endpoint)
-  ]);
+  const commands = [
+    'transform {"thing":"工作Agent/任务甲","situation.rep.新甲"}',
+    'transform {"thing":"工作Agent/任务乙","situation.rep.新乙"}'
+  ];
+  const outcomes = await Promise.allSettled(commands.map((source) => (
+    executeAtomCommandEndpoint({ source, interaction: { agent } }, endpoint)
+  )));
+  const committedIndex = outcomes.findIndex(({ status }) => status === 'fulfilled');
+  const conflictedIndex = outcomes.findIndex(({ status }) => status === 'rejected');
+  assert.notEqual(committedIndex, -1, JSON.stringify(outcomes));
+  assert.notEqual(conflictedIndex, -1, JSON.stringify(outcomes));
+  assert.equal(outcomes[committedIndex].value.ok, true);
+  assert.equal(outcomes[conflictedIndex].reason.code, 'WORLD_REVISION_CONFLICT');
 
-  assert.equal(left.ok, true);
-  assert.equal(right.ok, true);
+  const retried = await executeAtomCommandEndpoint({
+    source: commands[conflictedIndex], interaction: { agent }
+  }, endpoint);
+  assert.equal(retried.ok, true);
   const context = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(context[0].slot.find((entry) => entry.thing === '任务甲')?.situation, '新甲');
   assert.equal(context[0].slot.find((entry) => entry.thing === '任务乙')?.situation, '新乙');
