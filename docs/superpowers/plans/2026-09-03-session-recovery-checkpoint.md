@@ -24,14 +24,15 @@
 
 ## 3. 开发前现场裁定
 
-### P0：4784 命令端失活
+### P0：交互原子隔离
 
 - **已复现**：`http://127.0.0.1:4784/__spatial/api/health`快速返回；最简单的`explore 🧊manage`超过30秒无输出。
 - **2026-09-03再次核实**：真实4784 health在248ms返回`ok:true`、revision 7255、projection `published`；连续两次最小只读`explore {"thing":"🧊manage"}`均在5秒截止时取消。权威`atom.json`仍为`瞻权=1、判针=1、瞻判=0、排针=0`，最后写入时间为2026-09-02 23:31，证明本轮两次改名均未提交，不得盲目重放。
-- **已确认结构**：`cli/lib/server.mjs`以单一`atomInteractionTail`串行写交互，Explore等待该写尾；未收敛写入可阻塞全部后续命令，health因绕过队列仍可正常。
-- **预算缺口**：Program Scheduler每轮预算10秒，但 reconciliation最多8轮；尚无已证实的整个交互总截止、取消、队列释放和终态诊断。
-- **证据边界**：队列占用与总边界缺口已确认；具体是哪一个 Program/循环不收敛尚未定位。
-- **修复判据**：TDD复现后加入总预算、失败收口、原子回滚、队列释放和终态诊断。重启4784只恢复现场，不算修复。
+- **根因定性**：`cli/lib/server.mjs`以单一`atomInteractionTail`串行整个写交互，Explore也等待该尾链。不定性为“队列失活”，而定性为“原子交互被错误做成全局串行依赖”。
+- **用户定论**：每个交互自己计算、超时、回滚和回执；原子间不互相等待。只有最终权威提交的短临界区串行。
+- **已实现**：`3111dcb`移除全交互尾链；`d1b7b6c`加入独立截止、`AbortSignal`传导和超时后禁止迟到提交；`ece6293`将候选世界计算移出提交互斥，提交时重新复验修订。
+- **本地验证**：挂起 Transform 时独立 Explore/独立 Transform均通过；40ms截止返回`ATOM_INTERACTION_TIMEOUT`且随后 Explore通过；迟到计算不提交；World Transaction `21/21 PASS`。
+- **现场边界**：修复尚在`feat/slot-signal`隔离工作树，未部署到真实4784；不得把当前运行中4784宣称为已修复。
 - **当前优先级**：该故障已阻断既有Transform、推支与回读，先于Strut `nodes`退役和Web次要事项修复；恢复已有功能可靠性后再继续推支线单轨化。
 
 ### Strut context 边界纠偏
@@ -80,12 +81,12 @@
   - 停止`61222`并确认 health 不可达后，以同一`atom.json`重启到新端口`50443`，不重放 sender；三个正确 target、四个错误 target及五个 final/collision Program path 全部从磁盘回读一致。重启前后`atom.json` SHA256均为`A47DE87CA0718C27963367715D75807C0729E42CA251811B7F80A5EE5C6FD4E1`。`50443`也已停止并确认不可达；两个 fixture 均保留。
   - 所有 CLI 都显式传`--endpoint`和`--agent Verifier`；未访问、重启或修改 live 4784，没有生产世界、remote、push或merge操作。
 - **真实命令验收**：临时世界位于`C:\Users\worker\AppData\Local\Temp\atom-slot-signal-task4-20260903-01`；实际 server 首次使用临时端口61952，重启后使用59632，所有 CLI 都显式传`--endpoint`，未访问4784世界。down/up分别只改变直接子/父接收目标，未匹配、孙级、祖父级和同级目标保持`before`；消息分别为`down-payload:from,labels:up:handoff`、`up-payload:from,labels:down:report`。signal-only前后世界 SHA256 同为`59FC64A44E4BDC08C4170957D10B04CD592B00E14B0127C853140979BD2ECFAA`，回执 revision before/after 同为`130260388d03469c79ca0b8cc4bdd00999ac6a9d9d7e0c919e8b8b91f56cf7b9`。权限失败连续两次返回`GRAPH_LOCK_DENIED`/exit 4且世界 SHA不变，证明失败可重试；重启后`down-ok`/`up-ok`仍在，两个 sender 再运行仍得到正确 payload。
-- **仍未完成 P0**：4784命令端队列失活的总交互预算、取消、队列释放和终态诊断仍未实现；不得把临时重启当修复。
+- **P0 代码状态**：交互隔离、独立截止、迟到提交防护和短提交临界区已在隔离分支实现；待完成系统验收与集成部署后才能裁定真实4784恢复。
 - **恢复顺序**：
   1. 在`feat/slot-signal`回读 Slot Task 4、relocation closure 七个代码提交与本断点，确认工作区只剩刻意保留的任务报告。
   2. 按项目集成流程复核 Slot实现提交；不得在本 worktree自行 push、merge或改生产世界。
-  3. Slot集成完成后，以独立规格/TDD处理 P0队列失活：先稳定复现占队列交互，再实现总预算、取消、原子回滚、queue tail释放和终态诊断。
-  4. Strut后续只按已持久化的 Graph 定论推进：Graph决定后项，内嵌`if` Program判定 strict bool，后项自己的 Trigger决定响应；不得重新引入旧/新值内核判断。
+  3. 完成P0系统验收和集成评审；未集成前不触碰真实4784世界。
+  4. 立即继续 Strut 单轨化：Graph决定后项，内嵌`if` Program判定 strict bool，后项自己的 Trigger决定响应；退役`nodes`，不得重新引入旧/新值内核判断。
 
 ## 5. 其他暂停工作
 
