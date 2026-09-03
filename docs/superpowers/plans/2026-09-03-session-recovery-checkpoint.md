@@ -1,6 +1,6 @@
 # Atom 当前开发恢复断点
 
-**更新时间：** 2026-09-03（Slot 相邻信号 Task 4 最终评审修复完成）
+**更新时间：** 2026-09-03（Slot 相邻信号 relocation closure 已完成并留存重启证据）
 **权威分支：** `main`  
 **记录前 HEAD：** `9280289`  
 **当前实现分支：** `feat/slot-signal`；隔离 worktree 为 `D:\Project\〇\subprojects\atom\.worktrees\slot-signal`
@@ -46,7 +46,7 @@
 
 ## 4. 执行状态与下一步
 
-- **已完成提交**：`67be623`持久化规格恢复上下文；`5a3ce51`形成实施计划；`d0947a1`增加 Program ABI；`036b542`解析直接 Slot 亲属；`565e9ee`增加 receiver-owned 调度与 claim；`397ed9a`保证内部 routing nodes 不执行无匹配 trigger 的 Program，并让严格事件校验先于 prepared-index 快路；`f9aad65`完成 Task 4 原子引擎接入与公开合同；`3d24506`修复显式运行后果与 Slot receiver jump 失败原子性。
+- **已完成提交**：`67be623`持久化规格恢复上下文；`5a3ce51`形成实施计划；`d0947a1`增加 Program ABI；`036b542`解析直接 Slot 亲属；`565e9ee`增加 receiver-owned 调度与 claim；`397ed9a`保证内部 routing nodes 不执行无匹配 trigger 的 Program，并让严格事件校验先于 prepared-index 快路；`f9aad65`完成 Task 4 原子引擎接入与公开合同；`3d24506`修复显式运行后果与 Slot receiver jump 失败原子性。Relocation closure 的代码提交为`b01bf20`、`e4c54b6`、`1b63956`、`6c3e2f1`、`585ac72`、`fc7f7f8`、`fb2e1d4`。
 - **Task 4 评审修复 round 1**：`3d24506`把显式`.run.`的 sender Transform 与 Slot 事件一起送入完整候选事务队列，并让 Slot claim 周期中的 jump authorization/jump 失败阻断回滚。
 - **Task 4 最终评审修复**：本文件所在提交将 Slot effect 延后到 cycle 结构 effect 应用后的候选世界解析，并按 relocation 改写 sender path；结构 co-effect 时先排 Transform 刷新事件、后排 Slot 投递，使普通 Transform trigger 与显式`.run.`在 receiver 改名/移动后一致。`SLOT_SIGNAL_REQUIRED`现在会阻断并回滚显式运行与调和 cycle；`use_program()`的 Slot sender 身份保留为实际 referenced Program path；Slot callback 对 positional-only、普通位置、vararg、keyword-only 和 kwarg 都要求真正零参数。
 - **Task 4 验证**：
@@ -62,11 +62,26 @@
   - Program/Strut/jump 相关回归`182/182 PASS`，duration 113358.8231 ms；`npm run test:system`为`220/220 PASS`，duration 49762.7958 ms；`npm test`为`1653/1653 PASS`，duration 502129.4535 ms。
   - 全量构建只机械刷新`index.html` build-id，已恢复且未纳入提交；Node syntax、Python AST、`git diff --check`全部通过。
   - Task 1 延后 Minor 现有专用回归`cached producers never replay slot signals and mixed cycles include only uncached producers`：完全缓存 cycle 返回零 Slot effect，混合 cycle 只聚合未缓存 producer。
+- **Relocation closure 范围裁定与修复**：原 Task 2 计划只允许写恢复断点，但强制验收连续暴露三个可复现的生产合同缺陷；控制方逐项把范围最小扩展为 TDD 修复，未开放公共 API 或 schema。
+  - `585ac72`修复 retained jump authorization retry：只有`refreshPreparedTriggerOwnership`安装的私有 dependency-owner marker 可以触发无 previous result 的强制执行；marker 与 ownership 状态一起 clone、prune、consume，普通 uncached dependency 仍保持 dormant。修复前相关选择集`183 tests / 182 pass / 1 fail`，duration `131106.9192 ms`；隔离失败`0/1`，duration `5697.929 ms`；聚焦 RED `0/2`，duration `5619.6462 ms`；GREEN `3/3`，duration `6279.3173 ms`。
+  - `fc7f7f8`修复单 Transform 本地 patch 漏掉 Program 变更路径：`reconcileProgramsForWorld`在所有出口只返回 authoritative result 中`changed === true`的 Program Transform path，single-transform commit 与既有 changed paths 合并。修复前 system 为`222 tests / 221 pass / 1 fail`，duration `52139.7494 ms`；隔离 RED `0/1`，duration `445.7345 ms`；GREEN `1/1`，duration `540.1589 ms`。
+  - `fb2e1d4`修复 graph-server/persisted prepared-index 冷启动时显式 sender 或祖先改名丢 Slot：在首次 Slot delivery 入队/消费前，显式运行分支只用 candidate scheduler 的私有`refreshPreparedTriggerOwnership(application.atoms, initialProgramRelocations)`更新 trigger/read ownership，不调度业务 effect，也不重放 sender。忠实 prepared-projection RED 为`0/3`，duration `3635.543 ms`；GREEN 为`3/3`，duration `4767.5647 ms`。
+  - 三处均为高传播面内部路径：GitNexus 影响分析分别给出 CRITICAL；最终实现仍受现有 Agent 鉴权、中央事务、Slot claim 与 FIFO 回归约束。范围没有扩展到其他具体不变量。
+- **Relocation closure 最终自动验证**：
+  - Program/Strut/Slot/jump 既定选择集：`184/184 PASS`，0 fail，duration `127906.5899 ms`。
+  - `npm run test:system`：`222/222 PASS`，0 fail，duration `58734.8058 ms`。
+  - `npm test`：`1666/1666 PASS`，0 fail，duration `544539.9057 ms`。此前在`fc7f7f8`后的首轮全量仅有既存负载敏感 compactness 阈值在`1338.8 ms > 1300 ms`失败（`1665/1666`，duration `542507.1049 ms`）；隔离立即通过`1/1`，test duration `832.3033 ms`、run duration `928.6978 ms`，随后同一代码全量通过`1666/1666`，duration `511916.125 ms`，最终`fb2e1d4`后再得到上述全绿结果。
+  - 一次未授权 sandbox 重跑因所有 worker `spawn EPERM`形成广泛伪失败，改用允许测试 worker spawn 的同一命令后全绿；这不是产品失败。全量构建只机械刷新`index.html` build hash（`b2e38876e9d0a48b`→`dafc7ae149a147eb`），已核对并恢复；`git diff --check`为0 error。
+- **Relocation closure 真实命令验收**：
+  - 修复前证据保留在`C:\Users\worker\AppData\Local\Temp\atom-slot-relocation-task2-20260903-01`，临时端口`50765`。Cascade 已命中最终 receiver，但显式 sender 改名和祖先改名只提交 relocation、receiver target 仍为`before`，从而触发`fb2e1d4`修复；server 已停止，fixture 未删除。
+  - 最终证据保留在`C:\Users\worker\AppData\Local\Temp\atom-slot-relocation-task2-20260903-02`。首次 server 使用 OS 分配端口`61222`：显式 sender 改名、显式祖先改名、级联 receiver 改名/移动三条真实 CLI 命令各只输出一次最终路径消息；三个正确 target 均为`delivered`，四个 wrong/collision target 均为`before`，复制/中间/新邻居节点未截获。
+  - 停止`61222`并确认 health 不可达后，以同一`atom.json`重启到新端口`50443`，不重放 sender；三个正确 target、四个错误 target及五个 final/collision Program path 全部从磁盘回读一致。重启前后`atom.json` SHA256均为`A47DE87CA0718C27963367715D75807C0729E42CA251811B7F80A5EE5C6FD4E1`。`50443`也已停止并确认不可达；两个 fixture 均保留。
+  - 所有 CLI 都显式传`--endpoint`和`--agent Verifier`；未访问、重启或修改 live 4784，没有生产世界、remote、push或merge操作。
 - **真实命令验收**：临时世界位于`C:\Users\worker\AppData\Local\Temp\atom-slot-signal-task4-20260903-01`；实际 server 首次使用临时端口61952，重启后使用59632，所有 CLI 都显式传`--endpoint`，未访问4784世界。down/up分别只改变直接子/父接收目标，未匹配、孙级、祖父级和同级目标保持`before`；消息分别为`down-payload:from,labels:up:handoff`、`up-payload:from,labels:down:report`。signal-only前后世界 SHA256 同为`59FC64A44E4BDC08C4170957D10B04CD592B00E14B0127C853140979BD2ECFAA`，回执 revision before/after 同为`130260388d03469c79ca0b8cc4bdd00999ac6a9d9d7e0c919e8b8b91f56cf7b9`。权限失败连续两次返回`GRAPH_LOCK_DENIED`/exit 4且世界 SHA不变，证明失败可重试；重启后`down-ok`/`up-ok`仍在，两个 sender 再运行仍得到正确 payload。
 - **仍未完成 P0**：4784命令端队列失活的总交互预算、取消、队列释放和终态诊断仍未实现；不得把临时重启当修复。
 - **恢复顺序**：
-  1. 在`feat/slot-signal`回读 Task 4提交与本断点，确认工作区只剩刻意保留的任务报告。
-  2. 按项目集成流程复核 Slot四个实现提交；不得在本 worktree自行 push、merge或改生产世界。
+  1. 在`feat/slot-signal`回读 Slot Task 4、relocation closure 七个代码提交与本断点，确认工作区只剩刻意保留的任务报告。
+  2. 按项目集成流程复核 Slot实现提交；不得在本 worktree自行 push、merge或改生产世界。
   3. Slot集成完成后，以独立规格/TDD处理 P0队列失活：先稳定复现占队列交互，再实现总预算、取消、原子回滚、queue tail释放和终态诊断。
   4. Transform context另行 brainstorming，不把旧/新值等未设计字段混入 Slot。
 
