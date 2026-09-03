@@ -1,6 +1,6 @@
 # Atom 当前开发恢复断点
 
-**更新时间：** 2026-09-04（工务旧终态已校准；手机正式域名收束到终端Tailscale离线）
+**更新时间：** 2026-09-04（ESG测试域Program创建超时进入P0调试）
 **权威分支：** `main`
 **当前远程交付：** `main@f2d2fd0`；A模式改构前回退标签`pre-a-mode-consolidation-20260904`
 **历史实现分支：** `feat/slot-signal`已指向`ead30e2`，不再是待集成分支
@@ -10,13 +10,14 @@
 
 ## 0. 当前恢复结论（覆盖下文历史阶段描述）
 
+- **🟠 当前P0——Program创建超时**：`🧊manage/包办/判重/ESG计划/test`连续创建最小`thing@program`均在15秒返回`ATOM_INTERACTION_TIMEOUT`且精确回读`ATOM_NOT_FOUND`；`work_order_catalog(...)`与仅`return True`两种Situation都失败，而同域普通14节点Graph约6秒成功。故障目前收束在Program创建链，按系统调试先查根因，再以RED／GREEN和真实CLI回读收口；不得只提高超时。
 - **✅ Slot相邻信号**：已完成、集成、部署；`slot({"to":"up|down","labels":[...]})`、接收方`trigger("slot",...)`和`signal()`已进入当前Help与系统测试。
 - **✅ 4784交互隔离P0**：已完成、集成、部署。真实4784重启后health正常，`explore 🧊manage`最终约256ms；系统测试`226/226 PASS`。下文“尚在隔离分支／未部署”只保留为历史过程，不代表当前状态。
 - **✅ 推支内嵌判定与通用动作**：Strut `if.program`、统一Transform `$动作`、无上限点击次数已完成；不再开发独立click trigger。
 - **✅ Strut触发单轨化**：Graph后项决定接收Program，接收方以`trigger("strut", {}, main)`自主响应；旧`nodes`合同已从运行时与生产ESG四条接棒链清除。
 - **✅ Web revision补账**：外部CLI/Program提交在SSE断线期间漏掉通知后，EventSource重连会立即核对当前路径与展开路径，并一次导入同一最新revision；不依赖轮询或全世界刷新。
 - **✅ Shortcut激活与语义编辑**：深层激活真实Chromium`5/5 PASS`；`thing.lnk.EXACT_TARGET`只改引用自身并保持内部identity，Web不再暴露合同JSON或要求ID。
-- **🟠／⏸ 当前次序**：当前主线是已批准的A模式收束；交互定论已写入Web权威规格，下一步依次完成规格提交、Superpowers实施计划、TDD实现和真实浏览器验收。手机域名仅被`pixel-10a`离线局部阻塞，不阻塞A模式；零Agent创世继续排在其后。“🔥🔥🔥ESG计划_按逻辑_xlsx”如复现已批准功能的生产故障，则作为显式急用特例优先修复，但不授权改动Graph本体定论。
+- **🟠／⏸ 当前次序**：ESG现场已复现已批准功能的P0生产故障，当前先修Program创建超时；A模式规格、计划已提交，隔离分支`feat/a-mode-consolidation`Task 1停在`b1bff98`且聚焦测试`31/31 PASS`，P0关闭后继续，不是取消。手机域名仅被`pixel-10a`离线局部阻塞；零Agent创世继续排在A模式之后。现场反馈不授权改动Graph本体定论。
 
 ### 0.1 内部槽位标识隔离最新证据
 
