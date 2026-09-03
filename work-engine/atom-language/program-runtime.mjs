@@ -2021,8 +2021,8 @@ export class ProgramRuntimeScheduler {
     const existing = this.triggerContracts.get(programPath);
     if (existing) {
       const indexed = [
-        ...(existing.contract?.mode === 'slot'
-          ? [{ mode: 'slot', node: programPath }]
+        ...(['slot', 'strut'].includes(existing.contract?.mode)
+          ? [{ mode: existing.contract.mode, node: programPath }]
           : (existing.contract?.parameters?.nodes ?? []).map((node) => ({
               mode: existing.contract.mode, node
             }))),
@@ -2044,8 +2044,8 @@ export class ProgramRuntimeScheduler {
       detail: program.detail, contract, changedThings: [...new Set(changedThings)]
     });
     const indexed = [
-      ...(contract?.mode === 'slot'
-        ? [{ mode: 'slot', node: program.path }]
+      ...(['slot', 'strut'].includes(contract?.mode)
+        ? [{ mode: contract.mode, node: program.path }]
         : (contract?.parameters?.nodes ?? []).map((node) => ({ mode: contract.mode, node }))),
       ...[...new Set(changedThings)].map((node) => ({ mode: 'transform', node }))
     ];
@@ -2066,7 +2066,7 @@ export class ProgramRuntimeScheduler {
       const matches = new Set();
       for (const [programPath, entry] of this.triggerContracts) {
         const contractMatch = entry.contract?.mode === triggerEvent.mode
-          && (triggerEvent.mode === 'slot'
+          && (['slot', 'strut'].includes(triggerEvent.mode)
             ? programPath === node
             : entry.contract.parameters?.nodes?.includes(node));
         const changedMatch = triggerEvent.mode === 'transform'

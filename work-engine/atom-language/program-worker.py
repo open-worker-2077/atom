@@ -366,6 +366,16 @@ def extract_trigger_contract(tree):
             },
             "entrypoint": entrypoint,
         }
+    if mode == "strut":
+        if not isinstance(parameters, dict) or parameters:
+            raise ProgramSecurityError(
+                "trigger strut parameters must be an empty object; Graph consequents own delivery routing"
+            )
+        return {
+            "mode": "strut",
+            "parameters": {},
+            "entrypoint": entrypoint,
+        }
     if (not isinstance(parameters, dict)
             or set(parameters) != {"nodes"}
             or not isinstance(parameters.get("nodes"), list)

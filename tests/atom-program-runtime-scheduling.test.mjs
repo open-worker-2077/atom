@@ -26,14 +26,14 @@ test('a Transform $ action is decided by the Strut inline Program and delivers s
       "    return (context['antecedents'][0]['situation'] == 'plain number: 42'",
       "            and context['transform']['action'] == 'click')"
     ].join('\n') }],
-    then: [{ thing: 'Result' }]
+    then: [{ 'thing@program': 'Result' }]
   }];
-  const subscriber = atom('Subscriber', [
+  const subscriber = atom('Result', [
     'def receive(delivery):',
     '    message({"level":"info","text":delivery["consequentPath"]})',
-    'trigger("strut", {"nodes":["Result"]}, receive)'
+    'trigger("strut", {}, receive)'
   ].join('\n'), [], 'program');
-  const world = [source, atom('Result'), subscriber];
+  const world = [source, subscriber];
   const scheduler = createProgramRuntimeScheduler();
   await scheduler.refresh(world);
 
@@ -49,21 +49,62 @@ test('a Transform $ action is decided by the Strut inline Program and delivers s
   });
 
   assert.deepEqual(cycle.messages.map(({ text }) => text), ['Result']);
-  assert.deepEqual(cycle.executedProgramPaths, ['Subscriber']);
+  assert.deepEqual(cycle.executedProgramPaths, ['Result']);
 });
 
-test('an exact strut subscriber receives one typed true argument while unrelated Programs stay idle', async () => {
-  const subscriber = atom('Subscriber', [
+test('receiver-owned strut trigger runs only when the Program itself is the Graph consequent', async () => {
+  const receiver = atom('Receiver', [
     'def receive(delivery):',
-    '    message({"level":"info","text":delivery["clauseId"] + ":" + str(delivery["decision"])})',
-    'trigger("strut", {"nodes":["Result"]}, receive)'
+    '    message({"level":"info","text":delivery["consequentPath"]})',
+    'trigger("strut", {}, receive)'
   ].join('\n'), [], 'program');
   const unrelated = atom('Unrelated', [
     'def receive(delivery):',
     '    message({"level":"info","text":"must-not-run"})',
-    'trigger("strut", {"nodes":["Other"]}, receive)'
+    'trigger("strut", {}, receive)'
   ].join('\n'), [], 'program');
-  const world = [atom('Result'), atom('Other'), subscriber, unrelated];
+  const world = [receiver, unrelated];
+  const scheduler = createProgramRuntimeScheduler();
+  await scheduler.refresh(world);
+
+  const delivery = {
+    mode: 'strut', revision: 'sha256:r1', clauseId: 'strut:Source:0', decision: true,
+    antecedentPaths: ['Source'], consequentPath: 'Receiver', consequentOrdinal: 0
+  };
+  const cycle = await scheduler.refresh(world, {
+    triggerEvent: { mode: 'strut', nodes: ['Receiver'], deliveries: [delivery] }
+  });
+
+  assert.deepEqual(cycle.executedProgramPaths, ['Receiver']);
+  assert.deepEqual(cycle.messages.map(({ text }) => text), ['Receiver']);
+});
+
+test('receiver-owned strut trigger rejects the retired nodes parameter', async () => {
+  const legacy = atom('Legacy Receiver', [
+    'def receive(delivery):',
+    '    pass',
+    'trigger("strut", {"nodes":["Result"]}, receive)'
+  ].join('\n'), [], 'program');
+  const scheduler = createProgramRuntimeScheduler();
+
+  await assert.rejects(
+    scheduler.refresh([atom('Result'), legacy]),
+    (error) => error?.code === 'ATOM_PROGRAM_FAILED'
+  );
+});
+
+test('an exact strut subscriber receives one typed true argument while unrelated Programs stay idle', async () => {
+  const subscriber = atom('Result', [
+    'def receive(delivery):',
+    '    message({"level":"info","text":delivery["clauseId"] + ":" + str(delivery["decision"])})',
+    'trigger("strut", {}, receive)'
+  ].join('\n'), [], 'program');
+  const unrelated = atom('Other', [
+    'def receive(delivery):',
+    '    message({"level":"info","text":"must-not-run"})',
+    'trigger("strut", {}, receive)'
+  ].join('\n'), [], 'program');
+  const world = [subscriber, unrelated];
   const scheduler = createProgramRuntimeScheduler();
   await scheduler.refresh(world);
   const delivery = {
@@ -79,17 +120,17 @@ test('an exact strut subscriber receives one typed true argument while unrelated
     }
   });
 
-  assert.deepEqual(cycle.executedProgramPaths, ['Subscriber']);
+  assert.deepEqual(cycle.executedProgramPaths, ['Result']);
   assert.deepEqual(cycle.messages.map(({ text }) => text), ['strut:Source:0:True']);
 });
 
 test('one strut delivery executes its direct subscriber once across sequential and concurrent refreshes', async () => {
-  const subscriber = atom('Subscriber', [
+  const subscriber = atom('Result', [
     'def receive(delivery):',
     '    message({"level":"info","text":delivery["clauseId"]})',
-    'trigger("strut", {"nodes":["Result"]}, receive)'
+    'trigger("strut", {}, receive)'
   ].join('\n'), [], 'program');
-  const world = [atom('Result'), subscriber];
+  const world = [subscriber];
   const delivery = {
     mode: 'strut', revision: 'sha256:r1', clauseId: 'strut:Source:0', decision: true,
     antecedentPaths: ['Source'], consequentPath: 'Result', consequentOrdinal: 0
@@ -115,18 +156,18 @@ test('one strut delivery executes its direct subscriber once across sequential a
 });
 
 test('a context-dependent strut result filtered without Agent scope releases its delivery claim', { timeout: 3000 }, async () => {
-  const subscriber = atom('Subscriber', [
+  const subscriber = atom('Result', [
     'def receive(delivery):',
     '    explore({"thing":"./Result"})',
     '    message({"level":"info","text":"filtered"})',
-    'trigger("strut", {"nodes":["Result"]}, receive)'
+    'trigger("strut", {}, receive)'
   ].join('\n'), [], 'program');
-  const world = [atom('Result'), subscriber];
+  const world = [subscriber];
   const scheduler = createProgramRuntimeScheduler();
   const runProgram = scheduler.runProgram;
   let calls = 0;
   scheduler.runProgram = async (request) => {
-    if (request.program.path === 'Subscriber' && request.programArguments?.mode === 'strut') calls += 1;
+    if (request.program.path === 'Result' && request.programArguments?.mode === 'strut') calls += 1;
     return runProgram(request);
   };
   await scheduler.refresh(world);
@@ -150,18 +191,17 @@ test('localized strut evaluation reuses only the exact base-revision graph after
     value.strut = [{
       'if@current': true,
       if: [{ program: 'def main(context):\n    return True' }],
-      then: [{ thing: consequent }]
+      then: [{ 'thing@program': consequent }]
     }];
     return value;
   };
-  const subscriber = (name, result) => atom(name, [
+  const subscriber = (result) => atom(result, [
     'def receive(delivery):',
     `    message({"level":"info","text":"${result}"})`,
-    `trigger("strut", {"nodes":["${result}"]}, receive)`
+    'trigger("strut", {}, receive)'
   ].join('\n'), [], 'program');
   const initial = [
-    source('OldResult'), atom('OldResult'), atom('NewResult'),
-    subscriber('OldSubscriber', 'OldResult'), subscriber('NewSubscriber', 'NewResult')
+    source('OldResult'), subscriber('OldResult'), subscriber('NewResult')
   ];
   const scheduler = createProgramRuntimeScheduler();
   await scheduler.refresh(initial);
@@ -186,21 +226,21 @@ test('localized strut evaluation reuses only the exact base-revision graph after
   });
 
   assert.deepEqual(cycle.messages.map(({ text }) => text), ['NewResult']);
-  assert.deepEqual(cycle.executedProgramPaths, ['NewSubscriber']);
+  assert.deepEqual(cycle.executedProgramPaths, ['NewResult']);
 });
 
 test('an explicit run cannot manufacture a strut delivery', async () => {
-  const subscriber = atom('Subscriber', [
+  const subscriber = atom('Result', [
     'def receive(delivery):',
     '    message({"level":"info","text":"must-not-run"})',
-    'trigger("strut", {"nodes":["Result"]}, receive)'
+    'trigger("strut", {}, receive)'
   ].join('\n'), [], 'program');
-  const world = [atom('Result'), subscriber];
+  const world = [subscriber];
   const scheduler = createProgramRuntimeScheduler();
   await scheduler.refresh(world);
 
   const cycle = await scheduler.refresh(world, {
-    programSelector: 'Subscriber',
+    programSelector: 'Result',
     force: true,
     isolateFailures: true
   });
@@ -215,17 +255,16 @@ test('strut selection consumes exact affected paths instead of a legacy bare res
   topLevelSource.strut = [{
     'if@current': true,
     if: [{ program: 'def main(context):\n    return True' }],
-    then: [{ thing: 'Result' }]
+    then: [{ 'thing@program': 'Result' }]
   }];
   const world = [
     topLevelSource,
-    atom('Result'),
-    atom('Predicate', 'def main(arguments):\n    return True', [], 'program'),
-    atom('Subscriber', [
+    atom('Result', [
       'def receive(delivery):',
       '    message({"level":"info","text":"wrong-domain"})',
-      'trigger("strut", {"nodes":["Result"]}, receive)'
+      'trigger("strut", {}, receive)'
     ].join('\n'), [], 'program'),
+    atom('Predicate', 'def main(arguments):\n    return True', [], 'program'),
     atom('Root', '', [atom('Leaf', 'changed')])
   ];
   const scheduler = createProgramRuntimeScheduler();
