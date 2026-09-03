@@ -134,7 +134,7 @@ export async function createSpatialServer(options = {}) {
       })
     : null;
   backupTrigger?.start();
-  let atomInteractionTail = Promise.resolve();
+  const activeAtomInteractions = new Set();
   const atomCommandReceipts = new Map();
   let spatialProjectionFailure = null;
   const knowledgeSubscribers = new Set();
@@ -154,21 +154,17 @@ export async function createSpatialServer(options = {}) {
     }
   }
 
-  function enqueueAtomInteraction(operation) {
-    const current = atomInteractionTail.then(operation, operation);
-    atomInteractionTail = current.then(() => undefined, () => undefined);
+  function trackAtomInteraction(operation) {
+    const current = Promise.resolve().then(operation);
+    activeAtomInteractions.add(current);
+    current.finally(() => activeAtomInteractions.delete(current)).catch(() => undefined);
     return current;
   }
 
-  function readOnlyAtomCommand(payload) {
-    return typeof payload?.source === 'string'
-      && /^explore(?:\s|$)/u.test(payload.source.trim());
-  }
-
-  function executeAtomInteraction(payload, operation) {
-    if (!readOnlyAtomCommand(payload)) return enqueueAtomInteraction(operation);
-    const committedWrites = atomInteractionTail;
-    return committedWrites.then(operation, operation);
+  async function drainAtomInteractions() {
+    while (activeAtomInteractions.size) {
+      await Promise.allSettled([...activeAtomInteractions]);
+    }
   }
 
   function atomCommandRequest(payload, operation) {
@@ -213,7 +209,7 @@ export async function createSpatialServer(options = {}) {
       atomCommandReceipts.delete(atomCommandReceipts.keys().next().value);
     }
 
-    executeAtomInteraction(normalized, async () => {
+    trackAtomInteraction(async () => {
       try {
         const result = await operation(normalized, settle);
         settle(result);
@@ -396,7 +392,7 @@ export async function createSpatialServer(options = {}) {
           return json(response, 404, { ok: false, error: { code: 'ATOM_HUMAN_STATUS_UNAVAILABLE' } });
         }
         const payload = await body(request);
-        const result = await enqueueAtomInteraction(async () => {
+        const result = await trackAtomInteraction(async () => {
           const commandResult = await options.atomHumanStatus(payload);
           if (graphFile) {
             const document = JSON.parse(await fs.readFile(graphFile, 'utf8'));
@@ -417,7 +413,7 @@ export async function createSpatialServer(options = {}) {
           return json(response, 404, { ok: false, error: { code: 'ATOM_WORKSPACE_EDIT_UNAVAILABLE' } });
         }
         const payload = await body(request);
-        const result = await enqueueAtomInteraction(() => options.atomWorkspaceEdit(payload));
+        const result = await trackAtomInteraction(() => options.atomWorkspaceEdit(payload));
         const knowledge = await readKnowledge();
         publishKnowledgeChange(knowledge);
         return json(response, 200, { ok: true, result, knowledge });
@@ -431,7 +427,7 @@ export async function createSpatialServer(options = {}) {
           return json(response, 404, { ok: false, error: { code: 'ATOM_PROJECTION_RECOVERY_UNAVAILABLE' } });
         }
         const payload = await body(request);
-        const result = await enqueueAtomInteraction(() => options.atomProjectionRecover(payload));
+        const result = await trackAtomInteraction(() => options.atomProjectionRecover(payload));
         return json(response, 200, { ok: true, result });
       }
       if (bossStore && url.pathname === '/__spatial/api/boss/undo' && request.method === 'POST') {
@@ -478,7 +474,7 @@ export async function createSpatialServer(options = {}) {
     graphFile,
     mode: bossStore ? 'boss' : 'single',
     publishKnowledgeChange,
-    drainAtomInteractions: () => atomInteractionTail
+    drainAtomInteractions
   };
 }
 

@@ -739,6 +739,130 @@ test('independent explore requests execute concurrently against one initialized 
   assert.equal(maximumActive, 2);
 });
 
+test('hung Atom interaction does not block an independent explore', async (t) => {
+  const directory = await temporaryDirectory();
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
+  await fs.writeFile(graphFile, '{}\n', 'utf8');
+  let releaseHung;
+  let notifyHungStarted;
+  const hungStarted = new Promise((resolve) => { notifyHungStarted = resolve; });
+  const hung = new Promise((resolve) => { releaseHung = resolve; });
+  const interactionRuntime = {
+    async initialize() { return { initialization: { ok: true, changed: false } }; },
+    async execute(intent) {
+      if (intent.source.startsWith('transform')) {
+        notifyHungStarted();
+        await hung;
+        return { ok: true, command: 'transform', changed: false };
+      }
+      return { ok: true, command: 'explore', changed: false, items: [{ thing: 'Root' }] };
+    },
+    async updateHumanStatus() { return { ok: true, changed: false }; },
+    async updateHumanWorkspace() { return { ok: true, changed: false }; },
+    async recover() { return { sourceRevision: 'revision' }; },
+    projectionStatus() { return { status: 'published' }; }
+  };
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, interactionRuntime
+  });
+  t.after(async () => {
+    releaseHung();
+    await running.close();
+  });
+  removeTemporaryDirectoryAfter(t, directory);
+  const request = (source, id) => fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source,
+      interaction: { id, agent: { ref: 'transport-ref', path: 'Root' } },
+      history: []
+    })
+  });
+
+  const blockedWrite = request(
+    'transform {"thing":"Root","situation.rep.changed"}',
+    'hung-write-before-independent-read'
+  );
+  await hungStarted;
+  const explore = request('explore {"thing":"Root"}', 'read-beside-hung-write');
+  const response = await Promise.race([
+    explore,
+    new Promise((_, reject) => setTimeout(
+      () => reject(new Error('independent Explore waited for a different interaction')),
+      150
+    ))
+  ]);
+
+  const receipt = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(receipt));
+  assert.equal(receipt.result.command, 'explore');
+  releaseHung();
+  await blockedWrite;
+});
+
+test('hung Atom interaction does not block an independent transform', async (t) => {
+  const directory = await temporaryDirectory();
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
+  await fs.writeFile(graphFile, '{}\n', 'utf8');
+  let releaseHung;
+  let notifyHungStarted;
+  const hungStarted = new Promise((resolve) => { notifyHungStarted = resolve; });
+  const hung = new Promise((resolve) => { releaseHung = resolve; });
+  const interactionRuntime = {
+    async initialize() { return { initialization: { ok: true, changed: false } }; },
+    async execute(intent) {
+      if (intent.correlationId === 'hung-write-before-independent-write') {
+        notifyHungStarted();
+        await hung;
+      }
+      return { ok: true, command: 'transform', changed: false };
+    },
+    async updateHumanStatus() { return { ok: true, changed: false }; },
+    async updateHumanWorkspace() { return { ok: true, changed: false }; },
+    async recover() { return { sourceRevision: 'revision' }; },
+    projectionStatus() { return { status: 'published' }; }
+  };
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, interactionRuntime
+  });
+  t.after(async () => {
+    releaseHung();
+    await running.close();
+  });
+  removeTemporaryDirectoryAfter(t, directory);
+  const request = (id, thing) => fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source: `transform {"thing":"${thing}","situation.rep.changed"}`,
+      interaction: { id, agent: { ref: 'transport-ref', path: 'Root' } },
+      history: []
+    })
+  });
+
+  const blockedWrite = request('hung-write-before-independent-write', 'Root/A');
+  await hungStarted;
+  const independentWrite = request('write-beside-hung-write', 'Root/B');
+  const response = await Promise.race([
+    independentWrite,
+    new Promise((_, reject) => setTimeout(
+      () => reject(new Error('independent Transform waited for a different interaction')),
+      150
+    ))
+  ]);
+
+  assert.equal(response.status, 200, await response.text());
+  releaseHung();
+  await blockedWrite;
+});
+
 test('duplicate HTTP requests with one interaction id execute one authoritative command', async (t) => {
   const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');
