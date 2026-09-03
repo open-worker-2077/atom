@@ -91,14 +91,14 @@ notice = signal()
 - **证据边界**：已经确认“队列被未完成写入占住”和“缺少总交互边界”；尚未定位是哪一个具体 Program或循环使该次写入不收敛。
 - **修复要求**：先以测试复现“未收敛写入阻塞后续 Explore”，再增加总交互预算、取消/失败收口、原子回滚、队列释放和终态诊断；重启服务不构成修复。
 
-### 7.2 P1：Strut context 不只是文档缺口
+### 7.2 Strut context 边界纠偏
 
-- **已有结构**：运行时已经公开 `antecedents[].{path,thing,situation}`、`consequents[]`和可选 `transform`。
-- **实际缺口**：当前 Transform action envelope只有 `targetPath/action/parameter/payload/source`，没有被修改轴、旧值和新值；普通 Situation `.rep.`也不会自动形成足以判断状态跃迁的 `$`动作信封。
-- **裁定**：Help确实不完整，但不能只补文档。必须先设计并实现权威的 Transform diff/action envelope，再公开“目标、轴、旧值、新值与指定状态跃迁”的稳定合同。
+- **已有结构**：运行时已经公开 `antecedents[].{path,thing,situation}`、`consequents[]`和可选 `transform`；规范化动作信封提供 `targetPath/action/parameter/payload/source`。
+- **业务职责**：业务 Program依据复合前项当前事实与本次动作信封决定是否返回 strict true；调用方负责决定是否发起 Transform。内核不替业务比较旧值、新值，也不以“值是否变化”裁定该动作应否发生。
+- **当前结论**：撤回“补充旧值、新值与状态跃迁合同”的待开发项。后续只在具体业务确有无法由当前事实与动作信封表达的证据时，重新形成独立规格。
 
 ### 7.3 已撤回项
 
-- **原生幂等**：不新增 `once_per_revision`；推支条件应以真实状态跃迁约束，而不是把无关修改后的再次评价交给消费侧防重。
+- **原生幂等**：不新增 `once_per_revision`；是否发起 Transform及 Strut 条件是否为 true 均由业务侧按当前事实与动作语义裁定。
 - **本地节点清理**：接受软停用并保留槽体来源，不作为当前 Atom缺陷。
 - **纵向传导**：由本规格的 Slot信号直接进入开发，不再重复登记为独立 `climb`需求。

@@ -32,15 +32,15 @@
 - **证据边界**：队列占用与总边界缺口已确认；具体是哪一个 Program/循环不收敛尚未定位。
 - **修复判据**：TDD复现后加入总预算、失败收口、原子回滚、队列释放和终态诊断。重启4784只恢复现场，不算修复。
 
-### P1：Strut context 合同缺口
+### Strut context 边界纠偏
 
-- **已有**：`antecedents[].{path,thing,situation}`、`consequents[]`和可选`transform`。
-- **缺失**：当前 action envelope仅有`targetPath/action/parameter/payload/source`，没有修改轴、旧值、新值；普通 Situation `.rep.`不能据此严谨识别“未完成→已完成”。
-- **裁定**：这是运行时与 Help共同缺口，不能只写文档；后续需先定义并实现权威 Transform diff/action envelope，再公开目标、轴、旧值、新值和状态跃迁合同。
+- **已有**：`antecedents[].{path,thing,situation}`、`consequents[]`和规范化`transform`动作信封。
+- **业务职责**：业务使用方决定是否发起 Transform；Strut内嵌 Program依据当前前项事实和本次动作返回 strict bool。内核不判断新旧值是否相同，也不替业务决定是否操作。
+- **裁定**：撤回旧值、新值和状态跃迁合同开发项；除非出现当前事实与动作信封确实无法表达的具体业务证据，否则不扩张内核。
 
 ### 已撤回
 
-- **幂等**：不新增`once_per_revision`；推支应按真实状态跃迁限制重复评价。
+- **幂等**：不新增`once_per_revision`；是否 Transform及是否推支由业务侧按当前事实与动作语义决定。
 - **本地清理**：槽例本地节点采用软停用，不作为当前缺陷。
 - **纵向条目**：不再登记独立`climb`；由当前 Slot功能覆盖。
 
@@ -83,7 +83,7 @@
   1. 在`feat/slot-signal`回读 Slot Task 4、relocation closure 七个代码提交与本断点，确认工作区只剩刻意保留的任务报告。
   2. 按项目集成流程复核 Slot实现提交；不得在本 worktree自行 push、merge或改生产世界。
   3. Slot集成完成后，以独立规格/TDD处理 P0队列失活：先稳定复现占队列交互，再实现总预算、取消、原子回滚、queue tail释放和终态诊断。
-  4. Transform context另行 brainstorming，不把旧/新值等未设计字段混入 Slot。
+  4. Strut后续只按已持久化的 Graph 定论推进：Graph决定后项，内嵌`if` Program判定 strict bool，后项自己的 Trigger决定响应；不得重新引入旧/新值内核判断。
 
 ## 5. 其他暂停工作
 
