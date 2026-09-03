@@ -74,16 +74,16 @@ test('form rejects missing or unknown component activation instead of choosing f
   }
 });
 
-test('form compilation rejects a Program used as a strut consequent fact', async () => {
-  await assert.rejects(
-    runProgram([
-      'form({"thing":"非法推支","situation":"","slot":[],"strut":[',
-      '  {"if@current":True,"then":[{"thing@program":"判定"}]}',
-      ']})'
-    ].join('\n')),
-    (error) => error?.code === 'ATOM_PROGRAM_FAILED'
-      && /STRUT_FACT_CONSEQUENT_REQUIRED/u.test(error?.message ?? '')
-  );
+test('form compilation preserves a Program receiver at a strut consequent endpoint', async () => {
+  const cycle = await runProgram([
+    'compiled = form({"thing":"推支","situation":"","slot":[],"strut":[',
+    '  {"if@current":True,"then":[{"thing@program":"判定"}]}',
+    ']})',
+    'endpoint = compiled["strut"][0]["then"][0]',
+    'message({"level":"info","text":str(endpoint == {"thing@program":"判定"})})'
+  ].join('\n'));
+
+  assert.equal(cycle.messages[0].text, 'True');
 });
 
 test('form compilation does not count an inline decision Program as a fact antecedent in one-to-many strut', async () => {

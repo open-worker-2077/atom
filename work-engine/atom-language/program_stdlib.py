@@ -358,10 +358,8 @@ def _normalize_strut_rules(rules):
         normalized_then = []
         for target in consequents:
             endpoint_keys = set(target) if isinstance(target, dict) else set()
-            if endpoint_keys == {"thing@program"}:
-                raise ValueError("STRUT_FACT_CONSEQUENT_REQUIRED")
-            if endpoint_keys != {"thing"}:
-                raise ValueError("strut then items require exactly one ordinary thing endpoint")
+            if endpoint_keys not in ({"thing"}, {"thing@program"}):
+                raise ValueError("strut then items require exactly one thing or thing@program endpoint")
             endpoint_key = next(iter(endpoint_keys))
             endpoint_value = target[endpoint_key]
             if not isinstance(endpoint_value, str) or not endpoint_value.strip():

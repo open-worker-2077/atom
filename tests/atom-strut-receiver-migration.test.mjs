@@ -1,7 +1,18 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { promisify } from 'node:util';
 
 import { planStrutReceiverMigration } from '../work-engine/atom-language/strut-receiver-migration.mjs';
+import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
+import { projectAtomContext } from '../work-engine/atom-language/context-store.mjs';
+
+const execFileAsync = promisify(execFile);
+const projectRoot = path.resolve(import.meta.dirname, '..');
+const operator = path.join(projectRoot, 'scripts', 'deploy-strut-receiver-world.mjs');
 
 function atom(key, name, situation = '', slot = [], strut = []) {
   return { [key]: name, situation, slot, strut };
@@ -32,6 +43,7 @@ test('replaces one subscribed fact consequent with its receiver Program and rewr
   assert.match(plan.facts[2].situation, /trigger\(['"]strut['"], \{\}, receive\)/u);
   assert.equal(plan.summary.migratedPrograms, 1);
   assert.equal(plan.summary.rewrittenConsequents, 1);
+  assert.deepEqual(plan.changedPaths, ['Receiver', 'Source']);
 });
 
 test('expands one subscribed fact consequent to every explicit receiver Program', () => {
@@ -102,4 +114,119 @@ test('blocks dynamic strut trigger parameters instead of guessing', () => {
       'trigger("strut", {"nodes":nodes}, receive)'
     ].join('\n'))
   ]), { code: 'STRUT_RECEIVER_MIGRATION_DYNAMIC_TRIGGER' });
+});
+
+test('blocks every malformed or statically unknown top-level trigger before migration', () => {
+  for (const [source, code] of [
+    ['trigger("strut", {"nodes":["Result"]})', 'STRUT_RECEIVER_MIGRATION_DYNAMIC_TRIGGER'],
+    ['trigger(mode, {"nodes":["Result"]}, receive)', 'STRUT_RECEIVER_MIGRATION_DYNAMIC_TRIGGER'],
+    ['trigger("strut", {"nodes":["Result"]}, receive, extra=True)', 'STRUT_RECEIVER_MIGRATION_DYNAMIC_TRIGGER'],
+    [[
+      'trigger("transform", {"nodes":["Source"]}, receive)',
+      'trigger("strut", {"nodes":["Result"]}, receive)'
+    ].join('\n'), 'STRUT_RECEIVER_MIGRATION_TRIGGER_COUNT']
+  ]) {
+    assert.throws(() => planStrutReceiverMigration([
+      atom('thing@program', 'Receiver', source)
+    ]), { code });
+  }
+});
+
+test('operator apply and receipt-only rollback restore the exact source world', async (t) => {
+  const localAppData = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-strut-receiver-apply-'));
+  t.after(() => fs.rm(localAppData, { recursive: true, force: true }));
+  const worldDirectory = path.join(localAppData, 'AtomGraph', 'worlds', 'primary');
+  const contextFile = path.join(worldDirectory, 'atom.json');
+  const source = [
+    atom('thing', 'Source', '', [], [{ 'if@current': true, then: [{ thing: 'Result' }] }]),
+    atom('thing', 'Result'),
+    receiver('Receiver')
+  ];
+  await fs.mkdir(worldDirectory, { recursive: true });
+  await fs.writeFile(contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+
+  const applied = JSON.parse((await execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', 'apply-1'
+  ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } })).stdout);
+  assert.equal(applied.contract, 'atom.strut-receiver-deployment-receipt');
+  assert.deepEqual(applied.migrated[0], {
+    programPath: 'Receiver', nodePath: 'Result', entrypoint: 'receive'
+  });
+
+  await fs.rm(applied.receiptFile);
+  await fs.rm(path.join(worldDirectory, 'graph.json'));
+  const recovered = JSON.parse((await execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', 'apply-1'
+  ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } })).stdout);
+  assert.equal(recovered.recovered, true);
+  assert.equal(recovered.transaction.commandId, applied.transaction.commandId);
+  const migratedFacts = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const { config, graph } = projectAtomContext(migratedFacts);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(worldDirectory, 'graph.json'), 'utf8')), {
+    config, graph
+  });
+
+  const rolledBack = JSON.parse((await execFileAsync(process.execPath, [
+    operator, '--rollback', recovered.receiptFile
+  ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } })).stdout);
+  assert.equal(rolledBack.revision, revisionOfWorldFacts(source));
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), source);
+});
+
+test('operator refuses a linked backup root before any migration write', async (t) => {
+  const localAppData = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-strut-receiver-link-'));
+  t.after(() => fs.rm(localAppData, { recursive: true, force: true }));
+  const worldDirectory = path.join(localAppData, 'AtomGraph', 'worlds', 'primary');
+  const contextFile = path.join(worldDirectory, 'atom.json');
+  const outside = path.join(localAppData, 'outside');
+  const source = [
+    atom('thing', 'Source', '', [], [{ 'if@current': true, then: [{ thing: 'Result' }] }]),
+    atom('thing', 'Result'),
+    receiver('Receiver')
+  ];
+  await fs.mkdir(worldDirectory, { recursive: true });
+  await fs.mkdir(outside);
+  await fs.writeFile(contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  try {
+    await fs.symlink(outside, path.join(worldDirectory, 'migration-backups'),
+      process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'UNKNOWN'].includes(error.code)) {
+      t.skip(`linked directory creation unsupported: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+
+  await assert.rejects(execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', 'link-1'
+  ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } }), (error) => (
+    error.stderr.includes('STRUT_RECEIVER_MIGRATION_UNSAFE_PATH')
+  ));
+  assert.deepEqual(await fs.readdir(outside), []);
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), source);
+});
+
+test('a committed projection failure automatically restores the exact source revision', async (t) => {
+  const localAppData = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-strut-receiver-fault-'));
+  t.after(() => fs.rm(localAppData, { recursive: true, force: true }));
+  const worldDirectory = path.join(localAppData, 'AtomGraph', 'worlds', 'primary');
+  const contextFile = path.join(worldDirectory, 'atom.json');
+  const graphFile = path.join(worldDirectory, 'graph.json');
+  const source = [
+    atom('thing', 'Source', '', [], [{ 'if@current': true, then: [{ thing: 'Result' }] }]),
+    atom('thing', 'Result'),
+    receiver('Receiver')
+  ];
+  await fs.mkdir(worldDirectory, { recursive: true });
+  await fs.mkdir(graphFile);
+  await fs.writeFile(contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+
+  await assert.rejects(execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', 'fault-1'
+  ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } }));
+  assert.equal(
+    revisionOfWorldFacts(JSON.parse(await fs.readFile(contextFile, 'utf8'))),
+    revisionOfWorldFacts(source)
+  );
 });

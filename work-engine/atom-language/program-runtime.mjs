@@ -2754,7 +2754,7 @@ export class ProgramRuntimeScheduler {
       ? programs.filter((program) => (
           triggeredProgramPaths.has(program.path)
           || dependencyTriggeredProgramPaths.has(program.path)
-          || (triggerEvent.mode !== 'slot' && eventNodes.has(program.path))
+          || (triggerEvent.mode === 'transform' && eventNodes.has(program.path))
           || slotInvocationsByProgram.has(program.path)
           || strutInvocationsByProgram.has(program.path)
           || slotSignalInvocationsByProgram.has(program.path)
@@ -2805,6 +2805,8 @@ export class ProgramRuntimeScheduler {
       const hasIndexedContract = Boolean(
         triggerContract || (triggerEntry?.changedThings?.length ?? 0) > 0
       );
+      const directlyTargetedByTransform = triggerEvent?.mode === 'transform'
+        && eventNodes.has(program.path);
       const forcedByTrigger = triggerEvent
         && (triggeredProgramPaths.has(program.path) || Boolean(slotInvocation)
           || (!previous
@@ -2814,7 +2816,7 @@ export class ProgramRuntimeScheduler {
       if (dormantFailure
         && options.force !== true
         && !forcedByTrigger
-        && !eventNodes.has(program.path)
+        && !directlyTargetedByTransform
         && !(dormantFailure.contextDependent === true
           && scopePath
           && !reuseDormantContextFailure)) {
@@ -2831,7 +2833,7 @@ export class ProgramRuntimeScheduler {
       if (triggerEvent
         && !hasIndexedContract
         && !forcedByTrigger
-        && !eventNodes.has(program.path)
+        && !directlyTargetedByTransform
         && !slotInvocation
         && !previous) {
         return {

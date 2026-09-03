@@ -218,7 +218,7 @@ function help() {
     '  Graph-JSON 只使用 thing、situation、slot、strut 四轴；slot 与 strut 均为数组。',
     '  1→N 写在起点：{"if@current":true,"then":[{"thing":"B"},{"thing":"C"}]}；N→1 写在终点：{"if":[{"and":[{"thing":"A"},{"thing":"B"}]}],"then@current":true}。',
     '  每条 rule 必须且只能含一个 @current:true；if 永远是前项，then 永远是后项。禁止无 current、外部 thing@program 判定引用和 Program 自持 current 端点；禁止原生 N→M。',
-    '  if 内嵌判定写 {"program":"def main(context):\\n    return ..."}：context 含全部事实前项、后项与本次规范化 Transform $动作信封；仅 strict bool 决定本条推支，且不得产生写入等副作用。then 只接受普通事实 Thing。',
+    '  if 内嵌判定写 {"program":"def main(context):\\n    return ..."}：context 含全部事实前项、后项与本次规范化 Transform $动作信封；仅 strict bool 决定本条推支，且不得产生写入等副作用。then 接受普通事实 Thing 或显式 thing@program 接收 Program。',
     '  Transform 注册动作写在 Key 区，例如 transform {"thing$click":"EXACT路径"}；$click 只是动作注册表中的一项，CLI/Web 共用同一动作信封，Explore 不触发动作。',
     '  N→1、1→N 各自保留 strut clause 身份；Web 在归一化 0.5 形成共享汇流／分流线干。多入多出必须建立显式枢纽 H，拆为 N→H 与 H→M 两条规则；H 保持可见可审计。可复用／可调度 Program 源码放 exact thing@program 的 situation；仅 Strut 纯判定源码内嵌在本 clause 的 if.program。',
     '  @type 写在 thing 键上（如 thing@program）；#简介必须在键末尾；~hint 仅为返回提示。Agent 是 Situation 中一个顶层字面量 agent({...}) 声明，不是 Key 类型。',

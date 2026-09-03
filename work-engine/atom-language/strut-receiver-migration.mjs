@@ -95,6 +95,7 @@ function analyzePrograms(programs, python) {
 
 function rewriteFacts(sourceFacts, subscriptions, rewrittenPrograms) {
   const matched = new Set();
+  const rewrittenOwners = new Set();
   let rewrittenConsequents = 0;
   function receiversFor(targetPath) {
     return subscriptions.get(targetPath) ?? [];
@@ -134,6 +135,7 @@ function rewriteFacts(sourceFacts, subscriptions, rewrittenPrograms) {
             for (const receiver of receivers) {
               endpoints.push({ 'thing@program': receiver.path });
               matched.add(`${receiver.path}\0${resolved.path}`);
+              rewrittenOwners.add(owner.path);
               rewrittenConsequents += 1;
             }
           }
@@ -143,6 +145,7 @@ function rewriteFacts(sourceFacts, subscriptions, rewrittenPrograms) {
               for (const receiver of receivers) {
                 endpoints.push({ 'thing@program': receiver.path });
                 matched.add(`${receiver.path}\0${owner.path}`);
+                rewrittenOwners.add(owner.path);
                 rewrittenConsequents += 1;
               }
             }
@@ -159,7 +162,12 @@ function rewriteFacts(sourceFacts, subscriptions, rewrittenPrograms) {
       return target;
     });
   }
-  return { facts: visit(sourceFacts, recordsOf(sourceFacts)), matched, rewrittenConsequents };
+  return {
+    facts: visit(sourceFacts, recordsOf(sourceFacts)),
+    matched,
+    rewrittenConsequents,
+    rewrittenOwners
+  };
 }
 
 export function planStrutReceiverMigration(sourceFacts, options = {}) {
@@ -187,7 +195,7 @@ export function planStrutReceiverMigration(sourceFacts, options = {}) {
   for (const receivers of subscriptions.values()) {
     receivers.sort((left, right) => left.path.localeCompare(right.path));
   }
-  const { facts, matched, rewrittenConsequents } = rewriteFacts(
+  const { facts, matched, rewrittenConsequents, rewrittenOwners } = rewriteFacts(
     sourceFacts, subscriptions, rewrittenPrograms
   );
   for (const entry of legacy) {
@@ -209,6 +217,9 @@ export function planStrutReceiverMigration(sourceFacts, options = {}) {
       migratedSubscriptions: legacy.length,
       rewrittenConsequents
     }),
-    migrated: Object.freeze(legacy.map(Object.freeze))
+    migrated: Object.freeze(legacy.map(Object.freeze)),
+    changedPaths: Object.freeze([...new Set([
+      ...rewrittenPrograms.keys(), ...rewrittenOwners
+    ])].sort())
   });
 }

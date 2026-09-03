@@ -159,20 +159,38 @@ test('seal rejects the retired physical blank-example layout', async () => {
   assert.deepEqual(legacy, before);
 });
 
-test('seal rejects a Program used as a strut consequent fact', async () => {
-  const invalid = [atom('非法槽体', '', [atom('候选流', '', [
+test('seal and print preserve one shared Program as the strut receiver', async () => {
+  const candidate = [atom('接收槽体', '', [atom('候选流', '', [
     atom('事实', '', [], [{ 'if@current': true, then: [{ 'thing@program': '判定' }] }]),
-    atom('判定', 'def main(arguments):\n    return True', [], [], ['program'])
+    atom('判定', 'trigger("strut", {}, main)\ndef main(delivery):\n    pass', [], [], ['program'])
   ])])];
-  const before = structuredClone(invalid);
 
-  const result = await applySlotBodyEffect({
-    atoms: invalid,
-    effect: { action: 'seal', body: '非法槽体' },
+  const sealed = await applySlotBodyEffect({
+    atoms: candidate,
+    effect: { action: 'seal', body: '接收槽体' },
     sourceProgramPath: '注册'
   });
+  assert.equal(sealed.error, undefined, JSON.stringify(sealed.error));
+  const revisionRecords = field(find(sealed.atoms, '接收槽体/print/修订'), 'slot');
+  const plan = JSON.parse(field(revisionRecords.at(-1), 'situation'));
+  const receiver = plan.roles.find((role) => role.path === './判定');
+  const source = plan.roles.find((role) => role.path === './事实');
+  assert.equal(receiver.kind, 'program');
+  assert.deepEqual(plan.strut.find((entry) => entry.owner_role_id === source.role_id).rule, {
+    'if@current': true,
+    then: [{ 'thing@program': receiver.role_id }]
+  });
 
-  assert.equal(result.error?.code, 'INVALID_SLOT_PRINT_PLAN');
-  assert.equal(result.error?.details?.causeCode, 'STRUT_FACT_CONSEQUENT_REQUIRED');
-  assert.deepEqual(invalid, before);
+  const printed = await applySlotBodyEffect({
+    atoms: sealed.atoms,
+    effect: { action: 'print', body: '接收槽体', name: '实例001', revision: plan.revision },
+    sourceProgramPath: '接收槽体/print'
+  });
+  assert.equal(printed.error, undefined, JSON.stringify(printed.error));
+  assert.equal(find(printed.atoms, '接收槽体/槽例/实例001/判定'), null);
+  assert.ok(typesOf(find(printed.atoms, '接收槽体/槽模/判定')).includes('program'));
+  assert.deepEqual(field(find(printed.atoms, '接收槽体/槽例/实例001/事实'), 'strut'), [{
+    'if@current': true,
+    then: [{ 'thing@program': '接收槽体/槽模/判定' }]
+  }]);
 });

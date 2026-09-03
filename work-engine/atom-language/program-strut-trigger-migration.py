@@ -32,16 +32,29 @@ def analyze(program):
             "path": program["path"], "line": error.lineno, "offset": error.offset
         })
     calls = []
+    trigger_calls = []
     for statement in tree.body:
         if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
             continue
         call = statement.value
         if not isinstance(call.func, ast.Name) or call.func.id != "trigger":
             continue
+        trigger_calls.append(call)
         if len(call.args) != 3 or call.keywords:
-            continue
-        if literal_string(call.args[0]) == "strut":
+            fail("STRUT_RECEIVER_MIGRATION_DYNAMIC_TRIGGER", "Top-level trigger must use three positional arguments", {
+                "path": program["path"]
+            })
+        mode = literal_string(call.args[0])
+        if mode is None:
+            fail("STRUT_RECEIVER_MIGRATION_DYNAMIC_TRIGGER", "Top-level trigger mode must be a literal string", {
+                "path": program["path"]
+            })
+        if mode == "strut":
             calls.append(call)
+    if len(trigger_calls) > 1:
+        fail("STRUT_RECEIVER_MIGRATION_TRIGGER_COUNT", "Program must contain at most one top-level trigger", {
+            "path": program["path"], "count": len(trigger_calls)
+        })
     if not calls:
         return {"path": program["path"], "status": "none", "source": source}
     if len(calls) != 1:

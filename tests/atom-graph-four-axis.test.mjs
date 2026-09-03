@@ -172,14 +172,28 @@ test('a Program cannot own a current strut endpoint or become its own boolean fa
   ])), { code: 'STRUT_DECISION_PROGRAM_MUST_BE_INDEPENDENT' });
 });
 
-test('a Program cannot replace an ordinary consequent fact endpoint', () => {
-  assert.throws(() => parseGraphDocument(graphDocument([
+test('a Program may be the explicit receiver at a strut consequent endpoint', () => {
+  const parsed = parseGraphDocument(graphDocument([
     leaf('Fact', '', [{
       'if@current': true,
       then: [{ 'thing@program': 'Decision' }]
     }]),
-    { 'thing@program': 'Decision', situation: 'def main(arguments):\n    return True', slot: [], strut: [] }
-  ])), { code: 'STRUT_FACT_CONSEQUENT_REQUIRED' });
+    {
+      'thing@program': 'Decision',
+      situation: 'trigger("strut", {}, main)\ndef main(delivery):\n    pass',
+      slot: [],
+      strut: []
+    }
+  ]));
+
+  assert.deepEqual(parsed.strutClauses[0].then.map(({ kind, targetPath }) => ({ kind, targetPath })), [{
+    kind: 'thing@program',
+    targetPath: '世界/Decision'
+  }]);
+  assert.deepEqual(parsed.endpointIndex.get('世界/Decision'), [{
+    ruleId: 'strut:世界/Fact:0',
+    side: 'consequent'
+  }]);
 });
 
 test('explicit 3-to-hub-to-3 remains two independently auditable rules', () => {

@@ -79,6 +79,24 @@ test('receiver-owned strut trigger runs only when the Program itself is the Grap
   assert.deepEqual(cycle.messages.map(({ text }) => text), ['Receiver']);
 });
 
+test('a cold strut delivery cannot execute a consequent Program without its own trigger', async () => {
+  const receiver = atom('Receiver', [
+    'message({"level":"info","text":"must-not-run"})'
+  ].join('\n'), [], 'program');
+  const scheduler = createProgramRuntimeScheduler();
+  const delivery = {
+    mode: 'strut', revision: 'sha256:r1', clauseId: 'strut:Source:0', decision: true,
+    antecedentPaths: ['Source'], consequentPath: 'Receiver', consequentOrdinal: 0
+  };
+
+  const cycle = await scheduler.refresh([receiver], {
+    triggerEvent: { mode: 'strut', nodes: ['Receiver'], deliveries: [delivery] }
+  });
+
+  assert.deepEqual(cycle.executedProgramPaths, []);
+  assert.deepEqual(cycle.messages, []);
+});
+
 test('receiver-owned strut trigger rejects the retired nodes parameter', async () => {
   const legacy = atom('Legacy Receiver', [
     'def receive(delivery):',
