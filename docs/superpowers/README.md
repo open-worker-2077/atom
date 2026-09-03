@@ -21,6 +21,7 @@
 - **唯一需求总账**：[`plans/2026-09-03-atom-current-requirement-ledger.md`](plans/2026-09-03-atom-current-requirement-ledger.md)。所有用户需求、缺陷、延后项和撤回项先在该页裁定状态与优先级；专项计划的历史未勾选框不得越过总账重新制造待办。
 
 - **当前恢复断点**：[`plans/2026-09-03-session-recovery-checkpoint.md`](plans/2026-09-03-session-recovery-checkpoint.md)；ChatGPT软件更新或 Session历史丢失后，先从该文件恢复，不依赖聊天记录或自动压缩摘要。
+- **待审核治理规格**：[`specs/2026-09-04-atom-development-continuity-gates-design.md`](specs/2026-09-04-atom-development-continuity-gates-design.md)只在现有Superpowers阶段节点增加开发连续性门禁；用户审核规格前不实施脚本或修改开发入口。
 - **当前主干状态**：Strut触发单轨化、Web断线revision补账、Shortcut语义编辑、ASDF设置集成与内部槽位标识隔离均已部署。手机正式域名在手机仍会卡住，用户当前以ToDesk替代使用，故保留为未解决但非阻塞项；A模式收束与零Agent创世均由用户延后。不得重新引入Strut`nodes`、Shortcut手填ID或把内部槽位身份重新投影成普通名称。
 - **2026-09-03 已部署**：Slot相邻层级信号、Program relocation closure、交互原子隔离、独立截止、迟到提交防护与短权威提交临界区均已合入并推送`main@ead30e2`。系统测试`226/226 PASS`；真实4784重启后 health正常，`explore 🧊manage`最终约256ms。此前“health快但命令长期挂起”的P0已关闭。
 
