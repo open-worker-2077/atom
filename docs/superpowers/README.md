@@ -22,7 +22,7 @@
 
 - **当前恢复断点**：[`plans/2026-09-03-session-recovery-checkpoint.md`](plans/2026-09-03-session-recovery-checkpoint.md)；ChatGPT软件更新或 Session历史丢失后，先从该文件恢复，不依赖聊天记录或自动压缩摘要。
 - **已撤回独立门禁**：[`specs/2026-09-04-atom-development-continuity-gates-design.md`](specs/2026-09-04-atom-development-continuity-gates-design.md)记录为何不为Atom另建连续性门禁；通用补充位于工作区`D:\Project\〇\AGENTS.md`，原Superpowers技能步骤保持完整。
-- **当前主干状态**：Strut触发单轨化、Web断线revision补账、Shortcut语义编辑、ASDF设置集成与内部槽位标识隔离均已部署。手机正式域名在手机仍会卡住，用户当前以ToDesk替代使用，故保留为未解决但非阻塞项；A模式收束与零Agent创世均由用户延后。不得重新引入Strut`nodes`、Shortcut手填ID或把内部槽位身份重新投影成普通名称。
+- **当前主干状态**：Strut触发单轨化、Web断线revision补账、Shortcut语义编辑、ASDF设置集成与内部槽位标识隔离均已部署。手机正式域名的服务端链路当前正常，终端`pixel-10a`在Tailscale中离线，须先恢复手机tailnet连接再做浏览器验收；用户当前以ToDesk替代使用，故保留为未解决但非代码阻塞项。A模式收束与零Agent创世均由用户延后。不得重新引入Strut`nodes`、Shortcut手填ID或把内部槽位身份重新投影成普通名称。
 - **2026-09-03 已部署**：Slot相邻层级信号、Program relocation closure、交互原子隔离、独立截止、迟到提交防护与短权威提交临界区均已合入并推送`main@ead30e2`。系统测试`226/226 PASS`；真实4784重启后 health正常，`explore 🧊manage`最终约256ms。此前“health快但命令长期挂起”的P0已关闭。
 
 - **首要 Graph 纠偏**：Strut 判定 Program 必须内嵌在 clause `if`，取得复合前项事实与本次规范化 Transform `$` 动作信封；`$click`只是注册动作族的首个用例，CLI/Web 点击统一为 `transform {"thing$click":"EXACT路径"}`，新增动作不得修改 Strut/runtime 主干。旧外部 `thing@program` 判定与独立 click endpoint/trigger 方案均已退役。权威合同见[`specs/2026-08-31-atom-world-program-design.md`](specs/2026-08-31-atom-world-program-design.md) §3.2、§4.1；当前实施账本见[`plans/2026-09-02-inline-strut-transform-actions.md`](plans/2026-09-02-inline-strut-transform-actions.md)。
@@ -43,7 +43,7 @@
 以下场景的产品合同保存在[`specs/2026-08-31-atom-web-spatial-design.md`](specs/2026-08-31-atom-web-spatial-design.md)，实施前分别执行 Superpowers brainstorming；不得在当前迁窗任务中顺手修改：
 
 - **已完成**：输入层识别同一 exact Thing 的无上限点击次数并提交统一 Transform `thing$click`动作；Strut 内嵌`if` Program按动作信封判定，三点击只是条件用例，没有独立 click 调度旁路。旧`feat/programmable-click-trigger`分支不合入。
-- **手机正式域名未解决、当前不阻塞**：唯一正式入口是`https://worker.tail33a2eb.ts.net/`。服务端MagicDNS、Serve与电脑侧health已通，但用户在手机仍观察到卡住；Proton分流后仍未关闭。用户当前以ToDesk替代使用，故暂不抢占账本校准；`100.116.206.105:4786`只保留为内部诊断探针，不替代统一入口。
+- **手机正式域名未解决、当前不阻塞**：唯一正式入口是`https://worker.tail33a2eb.ts.net/`。2026-09-04回读确认电脑直连该域名为`200/约250ms`，MagicDNS、Serve、4785与4784均正常；同次Tailscale状态显示手机`pixel-10a`离线，因此当前请求在到达Atom前已中断。先恢复手机Tailscale在线，再从手机浏览器验收；若在线后仍失败，才继续追踪终端请求边界。`100.116.206.105:4786`只保留为内部诊断探针，不替代统一入口。
 - **已完成**：Shortcut普通、未访问深层、A模式、坏链保持与渐进远端路线真实浏览器旅程`5/5 PASS`。
 - **已完成—Web 即时一致性**：持续SSE按revision即时刷新；断线漏过CLI／Program提交后，EventSource重连立即核对当前路径与展开路径并一次导入同一最新revision，不依赖轮询或全世界刷新。
 - **已完成—Shortcut语义编辑**：人工与Agent使用`thing.lnk.EXACT_TARGET`按语义路径改向；系统消歧、复用Graph鉴权并保持内部identity。Web只显示名称和目标路径，不要求手填ID，也不把合同JSON当正文编辑。

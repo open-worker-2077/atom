@@ -1,6 +1,6 @@
 # Atom 当前开发恢复断点
 
-**更新时间：** 2026-09-03（手机统一域名服务端DNS断点已修复并在线回读）
+**更新时间：** 2026-09-04（工务旧终态已校准；手机正式域名收束到终端Tailscale离线）
 **权威分支：** `main`
 **当前产品代码交付：** `b36cde8`；本文档提交后以同一`main`最新账本提交为恢复入口
 **历史实现分支：** `feat/slot-signal`已指向`ead30e2`，不再是待集成分支
@@ -16,7 +16,7 @@
 - **✅ Strut触发单轨化**：Graph后项决定接收Program，接收方以`trigger("strut", {}, main)`自主响应；旧`nodes`合同已从运行时与生产ESG四条接棒链清除。
 - **✅ Web revision补账**：外部CLI/Program提交在SSE断线期间漏掉通知后，EventSource重连会立即核对当前路径与展开路径，并一次导入同一最新revision；不依赖轮询或全世界刷新。
 - **✅ Shortcut激活与语义编辑**：深层激活真实Chromium`5/5 PASS`；`thing.lnk.EXACT_TARGET`只改引用自身并保持内部identity，Web不再暴露合同JSON或要求ID。
-- **🟠／⏸ 当前次序**：Superpowers账本校准和通用连续性补充已完成，Atom独立门禁方案已撤回；工务2—4旧终态经CLI与Graph回执校准为已被`职务·FDE/设计/开发`替代，不执行世界回改。当前唯一未关闭且未撤回的问题是手机正式域名，但用户以ToDesk替代使用，暂不阻塞；A／S／D／F收束与零Agent创世均由用户明确延后。
+- **🟠／⏸ 当前次序**：Superpowers账本校准和通用连续性补充已完成，Atom独立门禁方案已撤回；工务2—4旧终态经CLI与Graph回执校准为已被`职务·FDE/设计/开发`替代，不执行世界回改。当前唯一未关闭且未撤回的问题是手机正式域名；服务端已验证正常，现断点为手机`pixel-10a`的Tailscale离线，恢复在线前不改Atom代码。用户以ToDesk替代使用，暂不阻塞；A／S／D／F收束与零Agent创世均由用户明确延后。
 
 ### 0.1 内部槽位标识隔离最新证据
 
@@ -29,8 +29,9 @@
 - **根因**：tailnet的MagicDNS与Serve均正常，但本机Tailscale偏好`CorpDNS=false`，导致系统解析统一域名时返回NXDOMAIN；Tailscale内置查询一直可解析到`100.116.206.105`。
 - **修复**：执行`tailscale set --accept-dns=true`恢复系统使用Tailscale DNS；不改变Atom世界、网关身份白名单或正式入口。
 - **回读**：`Resolve-DnsName worker.tail33a2eb.ts.net`返回`100.116.206.105`；`https://worker.tail33a2eb.ts.net/__spatial/api/health`返回200、revision 7270、投影published。
-- **最新链路**：`pixel-10a`已在线，电脑到手机`100.102.183.62`的Tailscale ping约1.03秒；统一HTTPS health为200、revision 7272、投影published。电脑端Proton VPN按目的地址分流时优先排除手机Tailscale IP`100.102.183.62`，必要时再排除MagicDNS`100.100.100.100`或整个`100.64.0.0/10`。
-- **剩余边界**：仍须从手机浏览器用同一正式域名完成一次只读Graph请求；电脑回读、对等ping和ToDesk替代使用均不能替代终端浏览器验收。当前优先级已由用户下调。
+- **历史在线链路**：`pixel-10a`曾在线，电脑到手机`100.102.183.62`的Tailscale ping约1.03秒；统一HTTPS health为200、revision 7272、投影published。电脑端Proton VPN按目的地址分流时优先排除手机Tailscale IP`100.102.183.62`，必要时再排除MagicDNS`100.100.100.100`或整个`100.64.0.0/10`。
+- **2026-09-04当前断点**：4784为`200/约193ms`，4785按身份门禁返回401，Serve仍正确代理到4785；电脑绕过命令测试代理直连正式域名为`200/约250ms`。同次`tailscale status`显示`pixel-10a`离线，故当前失败发生在手机进入tailnet之前，不支持修改Atom代码或启用公网Funnel。
+- **剩余边界**：先在手机恢复Tailscale在线，再从手机浏览器用同一正式域名完成只读Graph请求。若在线后仍失败，继续捕获手机请求是否抵达Serve；电脑回读和ToDesk替代使用均不能替代终端浏览器验收。当前优先级已由用户下调。
 
 ## 1. Slot相邻信号已关闭（历史首要功能）
 
