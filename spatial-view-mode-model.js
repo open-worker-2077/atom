@@ -1,23 +1,16 @@
 (function spatialViewModeModel(global) {
   "use strict";
 
-  const MODES = Object.freeze(["immersive", "peripheral", "nested", "hierarchy"]);
+  const MODES = Object.freeze(["nested"]);
   const MODE_LABELS = Object.freeze({
-    immersive: "沉浸",
-    peripheral: "外围",
-    nested: "内包",
-    hierarchy: "层级"
+    nested: "A · 向内剖开"
   });
   const KEY_MODES = Object.freeze({
-    KeyA: "nested",
-    KeyS: "peripheral",
-    KeyD: "hierarchy",
-    KeyF: "immersive"
+    KeyA: "nested"
   });
 
   function nextMode(mode) {
-    const index = MODES.indexOf(mode);
-    return MODES[(index < 0 ? 0 : index + 1) % MODES.length];
+    return "nested";
   }
 
   function modeForKey(code) {

@@ -14,22 +14,12 @@ function loadModel() {
   return sandbox.window.SpatialViewModeModel;
 }
 
-test('cycles through immersive peripheral nested and hierarchy without rewriting prior branches', () => {
+test('A nested projection is the only structural view mode', () => {
   const model = loadModel();
   assert.ok(model, 'SpatialViewModeModel must exist');
-  const branches = Object.freeze([
-    Object.freeze({ path: 'root/a', projectionMode: 'peripheral' }),
-    Object.freeze({ path: 'root/b', projectionMode: 'nested' })
-  ]);
-
-  assert.equal(model.nextMode('immersive'), 'peripheral');
-  assert.equal(model.nextMode('peripheral'), 'nested');
-  assert.equal(model.nextMode('nested'), 'hierarchy');
-  assert.equal(model.nextMode('hierarchy'), 'immersive');
-  assert.deepEqual(JSON.parse(JSON.stringify(branches)), [
-    { path: 'root/a', projectionMode: 'peripheral' },
-    { path: 'root/b', projectionMode: 'nested' }
-  ]);
+  assert.deepEqual(Array.from(model.modes), ['nested']);
+  assert.equal(model.nextMode('nested'), 'nested');
+  assert.equal(model.nextMode('immersive'), 'nested');
 });
 
 test('an open wand stroke selects only nodes touched by the visible trail', () => {
@@ -113,12 +103,12 @@ test('Shift gesture recognises physical and virtual keyboard events', () => {
   assert.equal(model.isShiftKeyEvent({ code: 'KeyA', key: 'a' }), false);
 });
 
-test('ASDF maps directly to the four future view modes', () => {
+test('only A maps to the structural view mode', () => {
   const model = loadModel();
   assert.equal(model.modeForKey('KeyA'), 'nested');
-  assert.equal(model.modeForKey('KeyS'), 'peripheral');
-  assert.equal(model.modeForKey('KeyD'), 'hierarchy');
-  assert.equal(model.modeForKey('KeyF'), 'immersive');
+  assert.equal(model.modeForKey('KeyS'), null);
+  assert.equal(model.modeForKey('KeyD'), null);
+  assert.equal(model.modeForKey('KeyF'), null);
   assert.equal(model.modeForKey('CapsLock'), null);
 });
 

@@ -33,8 +33,10 @@ test('pointer grammar assigns use and view while middle drag exclusively owns or
     fieldDoublePrimary: null,
     nodeTriplePrimary: 'activate',
     fieldTriplePrimary: null,
-    nodeSecondary: 'applyViewMode',
+    nodeSecondary: 'applyInwardView',
     fieldSecondary: 'applyParentView',
+    nodeDoubleSecondary: 'applyImmersiveInwardView',
+    fieldDoubleSecondary: 'applyParentView',
     nodeMiddle: null,
     fieldMiddle: null,
     nodeMiddleDrag: 'orbit',
@@ -50,9 +52,9 @@ test('pointer grammar assigns use and view while middle drag exclusively owns or
   }
 });
 
-test('CapsLock cycles the shared visible detail density in every ASDF view mode', () => {
+test('CapsLock cycles the shared visible detail density in the A view', () => {
   const { config } = loadInputConfig();
-  for (const viewMode of ['peripheral', 'nested', 'hierarchy', 'immersive']) {
+  for (const viewMode of ['nested']) {
     assert.equal(config.resolveKeyboard({
       type: 'keydown',
       code: 'CapsLock',
@@ -89,13 +91,10 @@ test('ctrl pointer editing remains independent from visual use gestures', () => 
   );
 });
 
-test('ASDF chooses future view mode and ZX navigates view history', () => {
+test('A is the only structural view key while ZX navigates view history', () => {
   const { config } = loadInputConfig();
   const expected = {
     KeyA: 'setNestedView',
-    KeyS: 'setPeripheralView',
-    KeyD: 'setHierarchyView',
-    KeyF: 'setImmersiveView',
     KeyZ: 'backView',
     KeyX: 'forwardView',
     Home: 'returnOverview',
@@ -108,6 +107,9 @@ test('ASDF chooses future view mode and ZX navigates view history', () => {
     config.setPreset(preset);
     for (const [code, intent] of Object.entries(expected)) {
       assert.equal(config.resolveKeyboard({ code }), intent, preset + ': ' + code);
+    }
+    for (const code of ['KeyS', 'KeyD', 'KeyF']) {
+      assert.equal(config.resolveKeyboard({ code }), null, preset + ': ' + code);
     }
     assert.equal(config.resolveKeyboard({ code: 'KeyK', ctrlKey: true }), 'search');
   }
@@ -139,12 +141,15 @@ test('mapping descriptors remain nested and expose only current muscle-memory co
   assert.equal(groups.every((group) => Array.isArray(group.items) && group.items.length), true);
   const flattened = groups.flatMap((group) => group.items);
   for (const intent of [
-    'setPeripheralView', 'setNestedView', 'setHierarchyView', 'setImmersiveView',
-    'applyViewMode', 'applyParentView', 'setSurfaceDetails', 'setFloatingDetails',
+    'setNestedView', 'applyInwardView', 'applyImmersiveInwardView',
+    'applyParentView', 'setSurfaceDetails', 'setFloatingDetails',
     'backView', 'forwardView',
     'toggleHelp'
   ]) {
     assert.equal(flattened.some((item) => item.intent === intent), true, intent);
+  }
+  for (const retired of ['setPeripheralView', 'setHierarchyView', 'setImmersiveView']) {
+    assert.equal(flattened.some((item) => item.intent === retired), false, retired);
   }
   for (const removed of ['summonMenu', 'cycleViewMode', 'cycleDetailMode', 'toggleFieldChildren', 'toggleFieldSurfaces']) {
     assert.equal(flattened.some((item) => item.intent === removed), false, removed);

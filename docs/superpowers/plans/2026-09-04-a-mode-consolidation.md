@@ -42,7 +42,7 @@
 - Consumes: 现有`resolvePointer(event, context)`、`resolveKeyboard(event, context)`和稳定 Thing 命中身份。
 - Produces: `VISUAL_INTENTS.applyInwardView`、`VISUAL_INTENTS.applyImmersiveInwardView`；节点右键 single/double 分别解析到两个意图，空白 single/double 均解析到`applyParentView`。
 
-- [ ] **Step 1: Write failing A-only input tests**
+- [x] **Step 1: Write failing A-only input tests**
 
 ```js
 assert.equal(input.resolvePointer({ button: 2 }, { onNode: true, gesture: 'tap' }), 'applyInwardView');
@@ -57,13 +57,13 @@ assert.equal(model.modeForKey('KeyA'), 'nested');
 assert.equal(model.modeForKey('KeyF'), null);
 ```
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `node --test tests/input-config.test.js tests/spatial-view-mode-model.test.js`
 
 Expected: FAIL because the old contract still exposes peripheral/hierarchy/immersive modes and right double-click has no intent.
 
-- [ ] **Step 3: Implement the minimal A-only contract**
+- [x] **Step 3: Implement the minimal A-only contract**
 
 ```js
 const MODES = Object.freeze(['nested']);
@@ -80,13 +80,13 @@ const VISUAL_INTENTS = Object.freeze({
 
 Update both input presets so `nodeSecondary`, `nodeDoubleSecondary`, `fieldSecondary`, and `fieldDoubleSecondary` use the produced intents. Remove S/D/F keyboard bindings, mode-cycle descriptions, and the corresponding setting/help items; preserve Ctrl/Shift secondary bindings unchanged.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run: `node --test tests/input-config.test.js tests/spatial-view-mode-model.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the A-only input contract**
+- [x] **Step 5: Commit the A-only input contract**
 
 ```bash
 git add input-config.js spatial-view-mode-model.js tests/input-config.test.js tests/spatial-view-mode-model.test.js
