@@ -204,6 +204,19 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
           throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Atom type requires one safe @type name');
         }
         const currentName = path.split('/').at(-1);
+        const shortcutEdit = operation.node?.atomTypes?.includes('shortcut')
+          || operation.draft?.atomTypes?.includes('shortcut');
+        if (shortcutEdit) {
+          const targetPath = operation.draft?.shortcutTargetPath?.trim();
+          if (!targetPath || targetPath.length > 4000) {
+            throw problem(
+              'INVALID_HUMAN_WORKSPACE_REQUEST',
+              'Shortcut edit requires one exact semantic target path'
+            );
+          }
+          const thingCommand = `thing${label === currentName ? '' : `.ren.${label}`}.lnk.${targetPath}`;
+          return `transform {${JSON.stringify(thingCommand)}:${JSON.stringify(path)}}`;
+        }
         const thingCommand = `thing${hasTypeDraft ? `.typ.${type}` : ''}${label === currentName ? '' : `.ren.${label}`}`;
         const thingField = `${JSON.stringify(thingCommand)}:${JSON.stringify(path)}`;
         return `transform {${thingField},${JSON.stringify(`situation.rep.${detail}`)}}`;

@@ -676,12 +676,19 @@ body[data-spatial-scope-state="failed"] .scope-load-state {
 }
 
 #nodeNameEditor,
+#shortcutTargetEditor,
 #edgeNameEditor {
   min-height: 2.25rem;
   border-block-end: var(--rule-hairline) solid currentColor;
   font-family: var(--font-body);
   font-size: var(--text-sm);
   outline: 0;
+}
+
+#shortcutTargetEditor {
+  min-width: 0;
+  width: 100%;
+  color: var(--color-ink);
 }
 
 .lens-editor {

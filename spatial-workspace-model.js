@@ -548,6 +548,8 @@
       if (active || !node) return null;
       const key = nodeKey(path, node.id);
       const projected = projectedNode(path, node) || node;
+      const atomTypes = sanitizeAtomTypes(projected.atomTypes);
+      const isShortcut = atomTypes.includes("shortcut");
       active = {
         kind: "node-edit",
         status: "update",
@@ -557,11 +559,16 @@
         node,
         draft: {
           label: safeText(projected.label, "未命名节点", MAX_LABEL_LENGTH),
-          description: sanitizeAtomTypes(projected.atomTypes).includes("program")
+          description: isShortcut
+            ? ""
+            : atomTypes.includes("program")
             && typeof projected.programSource === "string"
             ? safeText(projected.programSource)
             : safeText(projected.description),
-          atomTypes: sanitizeAtomTypes(projected.atomTypes),
+          ...(isShortcut
+            ? { shortcutTargetPath: safeText(projected.shortcutTargetPath, "", 4000) }
+            : {}),
+          atomTypes,
           attachment: sanitizeAttachment(projected.attachment)
         }
       };
@@ -576,6 +583,9 @@
       }
       if (Object.prototype.hasOwnProperty.call(source, "description")) {
         active.draft.description = safeText(source.description);
+      }
+      if (Object.prototype.hasOwnProperty.call(source, "shortcutTargetPath")) {
+        active.draft.shortcutTargetPath = safeText(source.shortcutTargetPath, "", 4000);
       }
       if (Object.prototype.hasOwnProperty.call(source, "atomTypes")) {
         active.draft.atomTypes = sanitizeAtomTypes(source.atomTypes).slice(0, 1);

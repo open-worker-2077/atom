@@ -109,3 +109,10 @@
 - [x] **Step 2: Locate the first broken hop**：服务端 TLS、Serve、4785、4784及手机对等链路均通；剩余首个未证实边界是手机是否把`*.ts.net`交给 Tailscale 内部 DNS，而非 Android Private DNS/浏览器安全 DNS。
 - [x] **Step 3: Keep the diagnostic probe isolated**：诊断网关任务 Running，监听`100.116.206.105:4786`且只批准手机`100.102.183.62`；电脑来源访问返回 403，证明未放宽白名单。该探针不是用户入口，正式合同始终是 HTTPS 域名。
 - [ ] **Step 4: Verify on phone**：以用户手机成功打开并完成一次只读 Graph 请求为最终验收；自动化回归仅作辅助证据。
+
+### Task 6: Shortcut 语义改向
+
+- [x] **Step 1: Core RED**：`thing.lnk`原实现返回`UNKNOWN_GRAPH_FIELD`；Web 草稿暴露合同 JSON，translator仍生成`situation.rep`。
+- [x] **Step 2: One semantic Transform**：新增`thing.lnk.EXACT_TARGET`，只改 Shortcut自身；新目标复用Graph精确消歧和读取鉴权，内部reference identity保持，普通Thing稳定拒绝。
+- [x] **Step 3: Structured Web editor**：Shortcut编辑草稿只带`shortcutTargetPath`；编辑器显示名称和目标路径，隐藏Markdown、附件和内核合同JSON；Web提交同一Transform，支持原子改名+改向。
+- [x] **Step 4: Minimal affected verification**：内核、Help、投影、translator、workspace、editor、bridge与静态合同`215/215 PASS`；Shortcut真实Chromium导航`5/5 PASS`；browser build与development-control通过。

@@ -1061,6 +1061,37 @@ test('human workspace translator treats the single synthetic root domain as the 
   );
 });
 
+test('human workspace translator edits a Shortcut by semantic target path without exposing identity', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-shortcut-edit-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const graphFile = path.join(directory, 'graph.json');
+  await fs.writeFile(graphFile, '{}\n', 'utf8');
+  const shortcut = {
+    id: 'shortcut', key: 'root::shortcut', path: 'root', atomPath: '引用域/入口',
+    label: '入口', atomTypes: ['shortcut'], shortcutTargetPath: '旧目标'
+  };
+  const translator = createLegacyHumanWorkspaceTranslator({
+    graphFile,
+    projectGraph: async () => ({
+      knowledge: { nodes: [shortcut], edges: [] },
+      atomPathByKey: new Map([[shortcut.key, shortcut.atomPath]])
+    })
+  });
+
+  assert.equal(
+    await translator.translate({
+      operation: {
+        kind: 'node-edit', path: 'root', nodeKey: shortcut.key, node: shortcut,
+        draft: {
+          label: '入口', atomTypes: ['shortcut'], description: '',
+          shortcutTargetPath: '新域/目标'
+        }
+      }
+    }),
+    'transform {"thing.lnk.新域/目标":"引用域/入口"}'
+  );
+});
+
 test('human workspace translator emits one atomic Transform for a batch landing', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-batch-landing-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

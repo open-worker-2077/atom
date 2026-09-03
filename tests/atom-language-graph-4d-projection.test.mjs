@@ -133,6 +133,8 @@ test('projection exposes only a validated linked shortcut target to the Web know
   const shortcut = knowledge.nodes.find((node) => node.label === '快捷入口');
 
   assert.equal(shortcut.shortcutTargetPath, '石器工坊');
+  assert.equal(shortcut.detail, '快捷目标：石器工坊');
+  assert.equal(shortcut.detail.includes('11111111-1111-4111-8111-111111111111'), false);
 });
 
 test('spatial projection hides every relation entering or leaving the default backup subtree', async () => {

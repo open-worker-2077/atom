@@ -47,6 +47,8 @@
     nodeNameEditorWrap: document.getElementById("nodeNameEditorWrap"),
     nodeNameEditor: document.getElementById("nodeNameEditor"),
     nodeTypeEditor: document.getElementById("nodeTypeEditor"),
+    shortcutTargetEditorWrap: document.getElementById("shortcutTargetEditorWrap"),
+    shortcutTargetEditor: document.getElementById("shortcutTargetEditor"),
     edgeNameEditorWrap: document.getElementById("edgeNameEditorWrap"),
     edgeNameEditor: document.getElementById("edgeNameEditor"),
     lensEditor: document.getElementById("lensEditor"),
@@ -55,12 +57,14 @@
     nodeDetailPreview: document.getElementById("nodeDetailPreview"),
     nodeDetailModeToggle: document.getElementById("nodeDetailModeToggle"),
     nodeDetailLineBreak: document.getElementById("nodeDetailLineBreak"),
+    nodeDetailToolbar: document.getElementById("nodeDetailToolbar"),
     surfaceMarkdownLayer: document.getElementById("surfaceMarkdownLayer"),
     detailMagnifier: document.getElementById("detailMagnifier"),
     detailMagnifierTitle: document.getElementById("detailMagnifierTitle"),
     detailMagnifierContent: document.getElementById("detailMagnifierContent"),
     detailMagnifierCursor: document.getElementById("detailMagnifierCursor"),
     attachmentInput: document.getElementById("attachmentInput"),
+    attachmentControl: document.getElementById("attachmentControl"),
     attachmentMeta: document.getElementById("attachmentMeta"),
     editStatus: document.getElementById("editStatus"),
     programChoicePanel: document.getElementById("programChoicePanel"),
@@ -4476,11 +4480,20 @@
     if (!transaction || !["node-create", "node-edit"].includes(transaction.kind)) return;
     closeProgramChoicePanel();
     const draft = transaction.draft;
+    const shortcutMode = Object.prototype.hasOwnProperty.call(draft, "shortcutTargetPath");
     state.selected = workspace.projectNode(path, node) || node;
     ui.nodeNameEditor.value = draft.label || "";
     ui.nodeTypeEditor.value = Array.isArray(draft.atomTypes) ? draft.atomTypes[0] || "" : "";
     ui.nodeDetailEditor.value = draft.description || "";
     if (markdownEditor) markdownEditor.setValue(draft.description || "");
+    ui.shortcutTargetEditor.value = draft.shortcutTargetPath || "";
+    ui.shortcutTargetEditorWrap.hidden = !shortcutMode;
+    ui.nodeDetailEditor.hidden = shortcutMode;
+    ui.nodeDetailEditorMount.hidden = shortcutMode;
+    ui.nodeDetailToolbar.hidden = shortcutMode;
+    ui.nodeDetailPreview.hidden = true;
+    ui.attachmentControl.hidden = shortcutMode;
+    ui.attachmentMeta.hidden = shortcutMode;
     ui.attachmentMeta.textContent = draft.attachment ? draft.attachment.name : "纯文本";
     ui.nodeNameEditorWrap.hidden = false;
     ui.lensEditor.hidden = false;
@@ -4488,8 +4501,9 @@
     setEditVisualState(transaction.status);
     updateSelectionUI();
     global.requestAnimationFrame(() => {
-      ui.nodeNameEditor.focus({ preventScroll: true });
-      ui.nodeNameEditor.select();
+      const primaryEditor = shortcutMode ? ui.shortcutTargetEditor : ui.nodeNameEditor;
+      primaryEditor.focus({ preventScroll: true });
+      primaryEditor.select();
     });
   }
 
@@ -4724,6 +4738,9 @@
       label: ui.nodeNameEditor.value,
       atomTypes: ui.nodeTypeEditor.value.trim() ? [ui.nodeTypeEditor.value.trim().replace(/^@+/u, "")] : [],
       description: markdownEditor ? markdownEditor.getValue() : ui.nodeDetailEditor.value,
+      ...(Object.prototype.hasOwnProperty.call(transaction.draft, "shortcutTargetPath")
+        ? { shortcutTargetPath: ui.shortcutTargetEditor.value }
+        : {}),
       attachment: transaction.draft.attachment
     });
     const nodeId = transaction.draft.id || (transaction.node && transaction.node.id);

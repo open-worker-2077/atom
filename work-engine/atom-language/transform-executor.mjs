@@ -11,6 +11,7 @@ import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import {
   breakShortcutTargets,
   isShortcutAtom,
+  retargetShortcutAtom,
   restoreShortcutTargets,
   rewriteShortcutTargetPaths
 } from './shortcut-runtime.mjs';
@@ -1157,10 +1158,10 @@ export async function applyTransform({
   if (isShortcutAtom(selected.match.atom)) {
     const allowed = item.fields.every((field) => {
       if (field.baseKey !== 'thing') return !field.valuePresent && field.commands.length === 0;
-      return field.commands.every((command) => ['ren', 'mov', 'dsc', 'rst'].includes(command.name));
+      return field.commands.every((command) => ['ren', 'lnk', 'mov', 'dsc', 'rst'].includes(command.name));
     });
     if (!allowed || nameCommands.some((command) => command.name === 'cpy')) {
-      return { error: diagnostic('SHORTCUT_TRANSFORM_REDIRECT_FORBIDDEN', '首版 Transform 不经虚拟引用重定向；仅允许改名、移动或删除引用本身') };
+      return { error: diagnostic('SHORTCUT_TRANSFORM_REDIRECT_FORBIDDEN', 'Transform 不经虚拟引用重定向；仅允许改名、改向、移动或删除引用本身') };
     }
   }
   if (nameCommands.some((command) => command.name === 'typ' && command.parameter === 'agent')) {
@@ -1181,7 +1182,8 @@ export async function applyTransform({
   const sourcePath = selected.match.path.join('/');
   const changedFields = new Set();
   for (const field of item.fields) {
-    if (field.baseKey === 'thing' && field.commands?.length) changedFields.add('thing');
+    if (field.baseKey === 'thing' && field.commands?.some(({ name }) => name !== 'lnk')) changedFields.add('thing');
+    if (field.baseKey === 'thing' && field.commands?.some(({ name }) => name === 'lnk')) changedFields.add('situation');
     if (field.baseKey === 'situation' && (field.commands?.length || field.valuePresent)) changedFields.add('situation');
     if (field.baseKey === 'strut' && (field.commands?.length || field.valuePresent)) changedFields.add('strut');
     if (field.baseKey === 'slot' && (field.commands?.length || field.valuePresent)) changedFields.add('slot');
@@ -1252,6 +1254,7 @@ export async function applyTransform({
   };
   if (!operation) {
     const rename = nameCommands.find((command) => command.name === 'ren');
+    const retarget = nameCommands.find((command) => command.name === 'lnk');
     if (
       rename
       && siblingNameCollision(nextAtoms, selected.match, rename.parameter)
@@ -1263,7 +1266,28 @@ export async function applyTransform({
         )
       };
     }
-    const error = applyFields(selected.match.atom, item.fields, nextAtoms);
+    let targetPath = null;
+    if (retarget) {
+      const invalid = validateParameter(retarget);
+      if (invalid) return invalid;
+      const target = resolveUnique(nextAtoms, retarget.parameter, null);
+      if (target.error) return target;
+      if ((await authorize(target.match, 'read', 'thing')).decision !== 'allow') {
+        return { error: diagnostic(
+          'WINDOW_ACCESS_DENIED',
+          '当前窗口无权读取虚拟引用的新目标；请反馈派发方'
+        ) };
+      }
+      targetPath = target.match.path.join('/');
+    }
+    let error = applyFields(selected.match.atom, item.fields, nextAtoms);
+    if (!error && targetPath) {
+      try {
+        retargetShortcutAtom(selected.match.atom, targetPath);
+      } catch (caught) {
+        error = diagnostic(caught.code ?? 'SHORTCUT_RETARGET_FAILED', caught.message);
+      }
+    }
     let relationPaths = [];
     const shortcutPaths = [];
     const postMatches = error ? null : walkAtoms(nextAtoms);

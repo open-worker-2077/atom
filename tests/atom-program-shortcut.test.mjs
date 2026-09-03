@@ -474,6 +474,62 @@ test('public Transform cannot forge shortcut persistence or redirect a write thr
   assert.equal(effect.error.code, 'SHORTCUT_PLACEMENT_PROGRAM_NOT_FOUND');
 });
 
+test('semantic Transform retargets one shortcut while preserving its internal identity', async (t) => {
+  const shortcut = createShortcutAtom({
+    thing: '入口', targetPath: '旧目标', referenceId: 'stable-reference-id'
+  });
+  const files = await fixture(t, [
+    atom('旧目标', '旧正文'),
+    atom('新目标', '新正文'),
+    atom('引用域', '', [shortcut])
+  ]);
+
+  const result = await executeAtomLanguage({
+    ...files,
+    source: 'transform {"thing.lnk.新目标":"引用域/入口"}'
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  const persisted = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const metadata = shortcutMetadata(findAtom(persisted, '引用域/入口'));
+  assert.equal(metadata.referenceId, 'stable-reference-id');
+  assert.deepEqual(metadata.target, { state: 'linked', path: '新目标' });
+});
+
+test('semantic Shortcut retarget and rename remain one atomic Transform', async (t) => {
+  const files = await fixture(t, [
+    atom('新目标'),
+    atom('引用域', '', [createShortcutAtom({
+      thing: '旧入口', targetPath: '旧目标', referenceId: 'stable-combined-reference'
+    })]),
+    atom('旧目标')
+  ]);
+
+  const result = await executeAtomLanguage({
+    ...files,
+    source: 'transform {"thing.ren.新入口.lnk.新目标":"引用域/旧入口"}'
+  });
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  const world = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.equal(findAtom(world, '引用域/旧入口'), null);
+  assert.deepEqual(shortcutMetadata(findAtom(world, '引用域/新入口')), {
+    contract: 'atom.shortcut', version: 1, referenceId: 'stable-combined-reference',
+    target: { state: 'linked', path: '新目标' }
+  });
+});
+
+test('semantic retarget rejects an ordinary Thing and leaves authoritative facts unchanged', async (t) => {
+  const files = await fixture(t, [atom('普通节点'), atom('目标')]);
+  const before = await fs.readFile(files.contextFile, 'utf8');
+  const result = await executeAtomLanguage({
+    ...files,
+    source: 'transform {"thing.lnk.目标":"普通节点"}'
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'SHORTCUT_RETARGET_REQUIRED');
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
+});
+
 test('shortcut persistence survives a cold read and rolls back with the authoritative world transaction', async (t) => {
   const before = [atom('目标', '权威正文'), atom('容器')];
   const after = [

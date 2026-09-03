@@ -599,6 +599,7 @@ test('public help is a complete daily Agent operation contract', async () => {
     '{"thing":"A","situation.rep.NEW"}',
     '{"thing.typ.TYPE":"A"}',
     '{"thing.ren.NEW_THING":"A"}',
+    '{"thing.lnk.EXACT_TARGET":"EXACT_SHORTCUT"}',
     '{"thing.mov.DESTINATION_PATH":"A"}',
     '{"thing.cpy.DESTINATION_PATH":"A"}',
     '{"thing.dsc.":"A"}',

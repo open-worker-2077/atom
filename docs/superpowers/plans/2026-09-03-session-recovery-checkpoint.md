@@ -1,6 +1,6 @@
 # Atom 当前开发恢复断点
 
-**更新时间：** 2026-09-03（Strut单轨化与Web断线revision补账均已合入、推送、部署并回读）
+**更新时间：** 2026-09-03（Shortcut语义改向已完成最小受影响链验证，待提交、集成、推送与部署）
 **权威分支：** `main`
 **当前代码交付：** `88d36c6`；本文档提交后以同一`main/origin/main`最新提交为恢复入口
 **历史实现分支：** `feat/slot-signal`已指向`ead30e2`，不再是待集成分支
@@ -13,7 +13,8 @@
 - **✅ 推支内嵌判定与通用动作**：Strut `if.program`、统一Transform `$动作`、无上限点击次数已完成；不再开发独立click trigger。
 - **✅ Strut触发单轨化**：Graph后项决定接收Program，接收方以`trigger("strut", {}, main)`自主响应；旧`nodes`合同已从运行时与生产ESG四条接棒链清除。
 - **✅ Web revision补账**：外部CLI/Program提交在SSE断线期间漏掉通知后，EventSource重连会立即核对当前路径与展开路径，并一次导入同一最新revision；不依赖轮询或全世界刷新。
-- **🟠 次序待办**：Shortcut深层激活与语义编辑；手机正式域名验收；ASDF设置分支评审修复及集成；用户语义名称泄漏内部`@slot-role-*`身份。
+- **✅ Shortcut激活与语义编辑**：深层激活真实Chromium`5/5 PASS`；`thing.lnk.EXACT_TARGET`只改引用自身并保持内部identity，Web不再暴露合同JSON或要求ID。
+- **🟠 次序待办**：手机正式域名验收；ASDF设置分支评审修复及集成；用户语义名称泄漏内部`@slot-role-*`身份。
 
 ## 1. 当前唯一首要功能
 
@@ -69,7 +70,7 @@
 - **生产预检**：attempt `strut-final-preflight-20260903-02`只读成功；migration `strut-receiver-2871846a8d22a2d58790`；源revision `sha256:ee3ced5db6bbad898e1f113b7a032080c8772f00c15024688e6c576a6bb3a5ed`，目标revision `sha256:d269cf00aeabdd88c612488da0956f67272af263b7f6a42454ea92a23855a27f`；精确命中ESG步骤02—05四个`接棒`Program、4个旧订阅和4个Graph后项；未写生产世界。
 - **生产迁移**：`strut-production-20260903-01`在4784停机窗口先生成私有备份，再把4个旧订阅及4个Graph后项原子迁移；世界从`sha256:ee3ced...a5ed`提交到`sha256:d269cf...a27f`，部署回执位于`C:\Users\worker\AppData\Local\AtomGraph\worlds\primary\migration-backups\strut-receiver\strut-receiver-2871846a8d22a2d58790\strut-production-20260903-01\deployment-receipt.json`。
 - **部署验收**：4784 revision `7269`、投影`published`；公开CLI回读步骤02—05四个`接棒`均为`trigger("strut", {}, main)`，对应批次Strut `then`均显式指向自身接棒Program。首次重启暴露“新代码先于旧世界迁移”的启动门槛，迁移后重新启动即健康；未发生迁移回滚。
-- **精确后续顺序**：继续处理Shortcut深层激活与语义编辑，其次手机正式域名验收、ASDF设置分支及内部名称泄漏。
+- **精确后续顺序**：Shortcut语义编辑完成集成部署后，处理手机正式域名验收、ASDF设置分支及内部名称泄漏。
 
 ### Web/CLI局部视图即时一致性（已部署）
 
@@ -114,7 +115,7 @@
 - **恢复顺序**：
   1. Strut单轨化已关闭：不得重新引入`nodes`或旧/新值内核判断。
   2. Web/CLI Transform断线revision补账已关闭：后续现场若仍复现，保留网络时序证据并继续追查其他根因，不回退到轮询或全量刷新。
-  3. 立即完成Shortcut深层激活与语义编辑，再处理手机正式域名验收。
+  3. Shortcut深层激活与语义编辑已完成代码与验证；完成提交、集成、推送、部署后处理手机正式域名验收。
   4. 回到`fix/asdf-navigation-settings`，修复Task 3两项评审缺口，基于最新`main`集成并验收。
 
 ## 5. 其他暂停工作

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'spatial-engine.js'), 'utf8');
+const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 
 function functionSource(name) {
   const marker = `function ${name}(`;
@@ -75,6 +76,17 @@ test('node editor starts from ctrl pointer position and updates name detail and 
   assert.match(sync, /item\.node\s*===\s*anchor\.node/);
   assert.match(sync, /nodeOwnerPath\s*\(\s*item\.node\s*\)\s*===\s*anchor\.path/);
   assert.match(source, /attachmentInput\.addEventListener\s*\(\s*["']change["']/);
+});
+
+test('Shortcut editor exposes one semantic target field and hides raw contract editing', () => {
+  const open = functionSource('openNodeEditor');
+  const sync = functionSource('syncEditorOverlays');
+
+  assert.match(html, /id=["']shortcutTargetEditor["']/);
+  assert.match(open, /shortcutTargetPath/);
+  assert.match(open, /shortcutTargetEditorWrap\.hidden/);
+  assert.match(open, /nodeDetailEditorMount\.hidden/);
+  assert.match(sync, /shortcutTargetPath:\s*ui\.shortcutTargetEditor\.value/);
 });
 
 test('node editing never moves the camera because data operations do not own the view', () => {

@@ -57,8 +57,8 @@
 - **权限重判**：目标访问按真实 slot 路径重新授权；Shortcut 不借出权限。
 - **失败保持**：目标缺失、越权或加载失败时留在当前有效场景并显示原因。
 - **返回一致**：从目标返回使用相同路径历史和加载合同，不把 Shortcut 自身伪装成目标副本。
-- **复开—Shortcut 深层激活**：2026-09-02 真实 4784 中，深层域“ESG计划快捷入口”已显示 `atom.shortcut` 合同与 linked target，但人工激活仍未可靠到达目标，直接降低深层域操作效率。历史修复只证明 scoped state 可携带远端目标路线，不能继续代表“激活→加载→进入→选中目标”完整旅程已完成；须以当前真实渐进数据、非预装路线和最终 breadcrumb/selected target 重新验收。
-- **待修—Shortcut 语义编辑**：人工与 Agent 均以“当前目标、唯一语义路径或查询”创建和修改 Shortcut；Atom 负责消歧并自动固化 stable id 与路径快照。stable id 是内部身份，不要求使用者记忆或手填；存在多个候选时返回可识别候选，不猜测。Web 以结构化编辑器呈现 Shortcut，不把合同 JSON 当普通正文暴露。
+- **已完成—Shortcut 深层激活**：普通、未访问深层、A 模式、坏链保持和渐进远端路线均通过真实 Chromium；激活先解析 linked target，再按权威路线进入并选中目标，不进入 Shortcut 自身的本地空域。
+- **已完成—Shortcut 语义编辑**：人工与 Agent 使用唯一语义路径修改 Shortcut；公开 Transform 为 `{"thing.lnk.EXACT_TARGET":"EXACT_SHORTCUT"}`，Atom 负责消歧并保持 stable identity，多个候选时拒绝猜测。Web 只呈现名称和目标路径，不把合同 JSON 或内部 ID 当正文暴露；改名与改向可在同一原子 Transform 中完成。
 
 ### 4.3 复合 Strut
 

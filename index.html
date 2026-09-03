@@ -90,9 +90,9 @@
     media="print"
     onload="this.media='all'"
   >
-  <link rel="stylesheet" href="spatial.css?v=sha256-06964fc1abf84f07">
+  <link rel="stylesheet" href="spatial.css?v=sha256-7ba5295f501e0740">
 </head>
-<body data-build="sha256-06964fc1abf84f07" data-spatial-bridge="connecting">
+<body data-build="sha256-7ba5295f501e0740" data-spatial-bridge="connecting">
   <div class="spatial-data-gate" role="status" aria-live="polite">
     <div class="spatial-data-gate__panel">
       <div class="spatial-data-gate__headline">
@@ -235,9 +235,13 @@
           <input id="nodeNameEditor" type="text" maxlength="80" autocomplete="off" spellcheck="false">
         </label>
       </div>
+      <label class="node-value-editor" id="shortcutTargetEditorWrap" for="shortcutTargetEditor" hidden>
+        <span>快捷目标路径</span>
+        <input id="shortcutTargetEditor" type="text" maxlength="4000" autocomplete="off" spellcheck="false" placeholder="例如：外务/工务/目标">
+      </label>
       <label class="sr-only" for="nodeDetailEditor">节点详情</label>
       <textarea id="nodeDetailEditor" maxlength="1000000" placeholder="在球镜表面写入详情"></textarea>
-      <header class="markdown-editor-toolbar">
+      <header class="markdown-editor-toolbar" id="nodeDetailToolbar">
         <span>Markdown</span>
         <span class="markdown-editor-toolbar__actions">
           <button id="nodeDetailLineBreak" type="button">换行</button>
@@ -246,7 +250,7 @@
       </header>
       <div class="markdown-editor-mount" id="nodeDetailEditorMount"></div>
       <article class="markdown-preview" id="nodeDetailPreview" aria-label="Markdown预览" hidden></article>
-      <label class="attachment-control" for="attachmentInput">
+      <label class="attachment-control" id="attachmentControl" for="attachmentInput">
         <input id="attachmentInput" type="file">
         <span>附加文件</span>
       </label>
@@ -596,29 +600,29 @@
   </main>
 
   <noscript>此实验场需要 JavaScript 才能响应空间交互。</noscript>
-  <script src="input-config.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-mobile-input-model.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-visual-model.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-detail-magnifier-model.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-gesture-arbiter.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-middle-frame-target.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-entity-registry.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-view-grammar.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-workspace-model.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-program-choice-model.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-mermaid-codec.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-json-codec.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-view-mode-model.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-help-page-model.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-work-order-registry-model.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-work-order-registry-panel.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-demo-model.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-demo-geometry.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-cluster-field.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="vendor/spatial-markdown-editor.bundle.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="vendor/atom-spatial-scene.bundle.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-engine.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-mermaid-panel.js?v=sha256-06964fc1abf84f07"></script>
-  <script src="spatial-browser-bridge.js?v=sha256-06964fc1abf84f07"></script>
+  <script src="input-config.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-mobile-input-model.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-visual-model.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-detail-magnifier-model.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-gesture-arbiter.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-middle-frame-target.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-entity-registry.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-view-grammar.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-workspace-model.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-program-choice-model.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-mermaid-codec.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-json-codec.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-view-mode-model.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-help-page-model.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-work-order-registry-model.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-work-order-registry-panel.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-demo-model.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-demo-geometry.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-cluster-field.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="vendor/spatial-markdown-editor.bundle.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="vendor/atom-spatial-scene.bundle.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-engine.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-mermaid-panel.js?v=sha256-7ba5295f501e0740"></script>
+  <script src="spatial-browser-bridge.js?v=sha256-7ba5295f501e0740"></script>
 </body>
 </html>

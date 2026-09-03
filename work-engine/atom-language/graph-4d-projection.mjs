@@ -186,6 +186,9 @@ export async function projectAtomGraphWithPaths(rawGraphDocument, options = {}) 
     const shortcut = shortcutMetadata(atom);
     if (shortcut?.target?.state === 'linked') {
       knowledgeNode.shortcutTargetPath = shortcut.target.path;
+      knowledgeNode.detail = `快捷目标：${shortcut.target.path}`;
+    } else if (shortcut) {
+      knowledgeNode.detail = '快捷目标：已失效';
     }
     if (atomPath) atomPathByKey.set(knowledgeNode.key, atomPath);
     slotOf(atom).forEach((child) => attachAtomPath(

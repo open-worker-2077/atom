@@ -101,6 +101,22 @@ export function shortcutMetadata(atom) {
   return isShortcutAtom(atom) ? structuredClone(parseMetadata(atom)) : null;
 }
 
+export function retargetShortcutAtom(atom, targetPath) {
+  if (!isShortcutAtom(atom)) {
+    throw shortcutFailure('SHORTCUT_RETARGET_REQUIRED', '.lnk. 只可改造虚拟引用自身');
+  }
+  if (typeof targetPath !== 'string' || !targetPath.trim()) {
+    throw shortcutFailure(
+      'INVALID_SHORTCUT_TARGET_COORDINATE',
+      '.lnk. 需要目标的精确语义路径'
+    );
+  }
+  const metadata = parseMetadata(atom);
+  metadata.target = { state: 'linked', path: targetPath.trim() };
+  replaceSituation(atom, metadata);
+  return atom;
+}
+
 export function resolveShortcutMatch(atoms, initialMatch, options = {}) {
   if (!isShortcutAtom(initialMatch?.atom)) return initialMatch;
   const maxDepth = options.maxDepth ?? SHORTCUT_MAX_DEPTH;

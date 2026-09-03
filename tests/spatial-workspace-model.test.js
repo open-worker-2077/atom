@@ -644,6 +644,26 @@ test('node edit draft carries one structured Atom type into the committed operat
   assert.equal(operation.atomTypesChanged, true);
 });
 
+test('shortcut edit draft exposes its semantic target instead of the internal contract JSON', () => {
+  const model = loadModel();
+  const workspace = model.createWorkspace();
+  workspace.importKnowledge({
+    nodes: [{
+      id: 'shortcut', path: 'root', label: '快捷入口', atomTypes: ['shortcut'],
+      description: '{"contract":"atom.shortcut","referenceId":"internal"}',
+      shortcutTargetPath: '旧域/目标'
+    }],
+    edges: []
+  });
+  const node = workspace.projectDomain('root', [])[0];
+  const draft = workspace.beginNodeEdit('root', node);
+
+  assert.equal(draft.shortcutTargetPath, '旧域/目标');
+  assert.equal(draft.description, '');
+  workspace.updateNodeDraft({ shortcutTargetPath: '新域/目标' });
+  assert.equal(workspace.commit().draft.shortcutTargetPath, '新域/目标');
+});
+
 test('node name edit does not imply an Atom registration type change', () => {
   const model = loadModel();
   const workspace = model.createWorkspace();
