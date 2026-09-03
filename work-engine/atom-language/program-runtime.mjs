@@ -1305,6 +1305,7 @@ export class ProgramRuntimeScheduler {
     this.deferredTriggerContracts = new Map();
     this.slotInvocationCycles = new Map();
     this.agentSecurity = new Map();
+    this.agentDeclarationInspections = new Map();
     this.agentSecurityWorldRevision = null;
     this.latestRecords = null;
     this.preparedStrutGraphs = new Map();
@@ -1447,8 +1448,14 @@ export class ProgramRuntimeScheduler {
   async deriveAgentSecurity(atoms) {
     const records = worldRecords(atoms);
     const programs = programRecords(records);
-    const inspected = await Promise.all(programs.map((program) => (
-      this.runBounded(() => this.inspectProgram({
+    const inspected = await Promise.all(programs.map((program) => {
+      // Declaration-only inspection is a pure AST operation: it cannot read Graph
+      // facts or execute code. Reuse only the exact path/source previously checked.
+      const cached = this.agentDeclarationInspections.get(program.path);
+      if (cached?.source === program.detail) {
+        return { agentRegistrations: structuredClone(cached.declarations) };
+      }
+      return this.runBounded(() => this.inspectProgram({
         python: this.python,
         records,
         programs: [program],
@@ -1463,24 +1470,32 @@ export class ProgramRuntimeScheduler {
         agentDeclarationOnly: true,
         validateOnly: true,
         agentProgramPaths: [...this.agentSecurity.keys()]
-      }))
-    )));
+      }));
+    }));
     const derived = new Map();
     for (const [index, program] of programs.entries()) {
       const declarations = inspected[index].agentRegistrations ?? [];
-      if (declarations.length === 0) continue;
-      if (declarations.length !== 1) {
+      if (declarations.length > 1) {
         throw Object.assign(
           new Error('Agent Program requires exactly one literal agent() declaration: ' + program.path),
           { code: 'AGENT_REGISTRATION_SOURCE_REQUIRED' }
         );
       }
+      this.agentDeclarationInspections.set(program.path, {
+        source: program.detail,
+        declarations: structuredClone(declarations)
+      });
+      if (declarations.length === 0) continue;
       const declaration = declarations[0];
       derived.set(program.path, {
         labels: [...declaration.labels],
         functionScopes: structuredClone(declaration.functionScopes),
         functions: [...declaration.functions]
       });
+    }
+    const activePaths = new Set(programs.map((program) => program.path));
+    for (const cachedPath of this.agentDeclarationInspections.keys()) {
+      if (!activePaths.has(cachedPath)) this.agentDeclarationInspections.delete(cachedPath);
     }
     return derived;
   }
@@ -1789,6 +1804,8 @@ export class ProgramRuntimeScheduler {
       [path, structuredClone(security)]
     )));
     candidate.agentSecurityWorldRevision = this.agentSecurityWorldRevision;
+    candidate.agentDeclarationInspections = new Map([...this.agentDeclarationInspections]
+      .map(([path, entry]) => [path, structuredClone(entry)]));
     candidate.requestDrivenLocks = structuredClone(this.requestDrivenLocks);
     candidate.requestDrivenLocksWorldRevision = this.requestDrivenLocksWorldRevision;
     candidate.requestDrivenLockRetirementChecked = this.requestDrivenLockRetirementChecked;
@@ -1809,6 +1826,7 @@ export class ProgramRuntimeScheduler {
     this.slotInvocationCycles.clear();
     this.preparedStrutGraphs.clear();
     this.agentSecurity = new Map();
+    this.agentDeclarationInspections.clear();
     this.agentSecurityWorldRevision = null;
     this.requestDrivenLocks = undefined;
     this.requestDrivenLocksWorldRevision = null;
