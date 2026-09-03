@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-02-asdf-navigation-settings-design.md`
 
+**2026-09-03恢复状态：** 分支`fix/asdf-navigation-settings`相对当前`main`为5个功能/账本提交待集成，同时落后当前主线35个提交。Task 2已在分支完成并通过聚焦Node `52/52`与浏览器旅程；Task 3实现提交为`6b4c7f1`，但评审未接受：P1为`defaultDetailMode`已持久化却未真正应用到普通启动/新域节点，P2为设置窗口声明模态却未阻断后台场景键盘交互。下一动作是先TDD修复这两项并复审，再基于最新`main`安全集成；不得把“已有提交”等同于完成。
+
 ## Global Constraints
 
 - 不修改 Atom backing JSON、Program、锁或 Graph 语义。
@@ -54,10 +56,10 @@
 - [x] **Step 2: Run model RED**：定向测试 17/19 通过，两个新用例因缺少 `resolveImmersiveOwnerContext` 按预期失败。
 - [x] **Step 3: Implement pure route planner**：验证 owner route并复制不可变的 crumbs、camera 与 entryDirection；未知外域拒绝伪造路线。
 - [x] **Step 4: Write failing browser journey**：在 manage→办包 的多层 cluster 中切到 F、右键个务，断言活动路径、内部节点加载和上层返回均为真实路线。
-- [ ] **Step 5: Run browser RED**：运行该 Playwright 用例，预期当前代码得到顶层伪路径或空数据。
-- [ ] **Step 6: Integrate one commit boundary**：`enterNode()`以节点真实 ownerPath 规划路线并用同一函数提交所有状态；Shortcut保留相同完整路线合同。
-- [ ] **Step 7: Run GREEN**：运行模型、合同和浏览器旅程，预期零失败。
-- [ ] **Step 8: Commit**：`fix(web): enter immersive domains from real owner routes`。
+- [x] **Step 5: Run browser RED**：运行该 Playwright 用例，当前代码得到顶层伪路径或空数据。
+- [x] **Step 6: Integrate one commit boundary**：`enterNode()`以节点真实 ownerPath规划路线并用同一函数提交所有状态；Shortcut保留相同完整路线合同。
+- [x] **Step 7: Run GREEN**：聚焦Node `52/52`及浏览器旅程通过。
+- [x] **Step 8: Commit**：`477db34`、`8b672e4`、`245efe0`完成实现与边界验证。
 
 ### Task 3: 星轨统一设置窗口与 CapsLock 默认模式
 

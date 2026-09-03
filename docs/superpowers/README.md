@@ -4,20 +4,21 @@
 
 ## 新 Session 读取顺序
 
-1. 运行`atom.cmd --help`，取得当前 Atom 入口与合同。
-2. 读取当前功能规格与实施计划的“恢复断点”。
-3. 检查`git status --short`、`git log -5 --oneline --decorate`和计划绑定的 revision。
+1. 先读取当前功能规格与实施计划的“恢复断点”；Superpowers 文件体系是唯一开发上下文。
+2. 检查`git status --short`、`git log -5 --oneline --decorate`、计划绑定 revision、测试与部署证据；这些只作为账本证据，不另立开发上下文。
+3. 只有需要操作 Atom Graph 或核对公开产品合同时才运行`atom.cmd --help`；不得把 Atom 世界当开发进度看板。
 4. 重新运行计划首个未完成任务要求的最小验证，不从聊天摘要猜状态。
-5. 从首个未取得当前证据的步骤继续；发现规格、计划、代码或真实 Graph 冲突时停止并先校正事实。
+5. 发现账本与当前证据不一致时，先回查并立即更新 Superpowers，再从首个未完成项继续；不得把“账本过期”当成停止理由。
 
 ## 当前开发链
 
 - **当前恢复断点**：[`plans/2026-09-03-session-recovery-checkpoint.md`](plans/2026-09-03-session-recovery-checkpoint.md)；ChatGPT软件更新或 Session历史丢失后，先从该文件恢复，不依赖聊天记录或自动压缩摘要。
-- **当前最高优先级**：[`specs/2026-09-03-atom-slot-signal-design.md`](specs/2026-09-03-atom-slot-signal-design.md)；沿现有 Slot直接父子层级以`slot({"to":"up|down","labels":[...]})`传导瞬时信号，由接收节点自己的`trigger("slot",...)`与`signal()`处理。Slot完成后修复已复现的4784命令队列失活；Strut继续消费复合前项当前事实与规范化 Transform动作信封，不要求内核替业务比较新旧值。
+- **当前最高优先级**：Strut 触发单轨化；Graph clause 已决定后项，后项自己的 Program 只声明是否响应，退役`trigger("strut", {"nodes":[...]}, ...)`中的冗余`nodes`，不得保留新旧双轨。定论与恢复入口见[`plans/2026-09-03-session-recovery-checkpoint.md`](plans/2026-09-03-session-recovery-checkpoint.md)。
+- **2026-09-03 已部署**：Slot相邻层级信号、Program relocation closure、交互原子隔离、独立截止、迟到提交防护与短权威提交临界区均已合入并推送`main@ead30e2`。系统测试`226/226 PASS`；真实4784重启后 health正常，`explore 🧊manage`最终约256ms。此前“health快但命令长期挂起”的P0已关闭。
 
 - **首要 Graph 纠偏**：Strut 判定 Program 必须内嵌在 clause `if`，取得复合前项事实与本次规范化 Transform `$` 动作信封；`$click`只是注册动作族的首个用例，CLI/Web 点击统一为 `transform {"thing$click":"EXACT路径"}`，新增动作不得修改 Strut/runtime 主干。旧外部 `thing@program` 判定与独立 click endpoint/trigger 方案均已退役。权威合同见[`specs/2026-08-31-atom-world-program-design.md`](specs/2026-08-31-atom-world-program-design.md) §3.2、§4.1；当前实施账本见[`plans/2026-09-02-inline-strut-transform-actions.md`](plans/2026-09-02-inline-strut-transform-actions.md)。
 
-- **首要热修**：[`plans/2026-09-02-atom-startup-hot-state.md`](plans/2026-09-02-atom-startup-hot-state.md)；恢复 OpenSpec 迁移时被弱化的启动全局热态合同，当前真实 4784 的 health 为 7—13 秒、局部 state 约 14 秒，修复前不得以 `ok:true` 代替 ready。
+- **已完成热态**：[`plans/2026-09-02-atom-startup-hot-state.md`](plans/2026-09-02-atom-startup-hot-state.md)已合入当前`main`；真实4784不再以旧的7—14秒数据作为现状。
 - **当前规格**：[`specs/2026-08-31-atom-web-spatial-design.md`](specs/2026-08-31-atom-web-spatial-design.md)
 - **当前计划**：[`plans/2026-09-01-atom-web-bug-patrol.md`](plans/2026-09-01-atom-web-bug-patrol.md)
 - **并行裁定账本**：[`plans/2026-09-02-atom-cli-feedback-triage.md`](plans/2026-09-02-atom-cli-feedback-triage.md)；45 条 CLI `submit` 已逐条登记，但只有重新取得当前复现证据的条目才进入修复链。
@@ -32,9 +33,11 @@
 
 以下场景的产品合同保存在[`specs/2026-08-31-atom-web-spatial-design.md`](specs/2026-08-31-atom-web-spatial-design.md)，实施前分别执行 Superpowers brainstorming；不得在当前迁窗任务中顺手修改：
 
-- **待设计实现**：输入层识别同一 exact Thing 的无上限点击次数并提交统一 Transform `thing$click`动作；Strut 内嵌 `if` Program按动作信封判定，三点击只是一个条件用例，不得硬编码用途或建立独立 click 调度旁路。
+- **已完成**：输入层识别同一 exact Thing 的无上限点击次数并提交统一 Transform `thing$click`动作；Strut 内嵌`if` Program按动作信封判定，三点击只是条件用例，没有独立 click 调度旁路。旧`feat/programmable-click-trigger`分支不合入。
 - **待手机验收**：唯一正式入口是`https://worker.tail33a2eb.ts.net/`，手机访问仍失败；服务端链已通，继续从手机 DNS/浏览器边界取证。`100.116.206.105:4786`只保留为内部诊断探针，不是用户入口、替代地址或完成方案。
 - **待复修**：Shortcut 深层激活在真实 4784 再现失败；历史测试只证明远端路线进入 scoped state，未证明人工激活最终到达并选中目标。
-- **即时收件**：Web 改名成功后域进出仍读旧快照、约两分钟才一致，须修复提交 revision→缓存失效→权威对账闭环；Shortcut 创建/修改应接受语义目标并由系统固化 stable id，不要求人工或 Agent 手填 ID，也不把合同 JSON 当正文编辑。
+- **待修—Web 即时一致性**：无论改动来自 Web 还是 CLI，Transform提交成功后当前局部视图仍可能保留旧节点名称、正文或结构，约两分钟后才一致。须修复权威 revision发布→最小受影响路径缓存失效→局部投影刷新→Web对账闭环；轮询最终收敛不算完成。
+- **待修—Shortcut语义编辑**：创建/修改接受当前目标、唯一语义路径或查询，由系统消歧并固化 stable id；不要求人工或 Agent手填ID，也不把合同JSON当正文编辑。
 - **即时收件**：普通名称视图偶发泄漏 `@slot-role-<内部ID>`；稳定身份继续保留，但必须与用户语义名称分层，不做表面截断。
-- **已完成**：A 模式双击最深目标、ASDF Strut 端点贴边和 CLI 更新后的场景连续性已有测试、真实浏览器证据和远端提交。
+- **已完成**：A 模式双击最深目标、ASDF Strut端点贴边和CLI更新后的场景连续性已有测试、真实浏览器证据和远端提交。
+- **待集成—ASDF与统一设置**：`fix/asdf-navigation-settings`已完成最具体节点命中和真实owner域径实现；星轨设置已有实现，但评审仍有“默认详情模式未实际应用”和“伪模态未阻断后台键盘交互”两个缺口。该分支尚未集成`main`。

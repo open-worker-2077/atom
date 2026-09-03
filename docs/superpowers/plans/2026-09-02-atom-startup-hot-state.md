@@ -63,7 +63,9 @@ Expected: all PASS；10,000 实体的三个首请求均低于 1 秒。
 
 2026-09-02 真实世界验收：以`6340fda`重启本机计划任务后，4784 在全局初始化完成并发布 revision 7220、projection published 后才就绪。连续请求中 health 最慢 35.3ms、root state 最慢 44.8ms、已知深层 state 最慢 16.4ms；8/16/24 路深层并发最慢分别 208.0/381.9/546.1ms，均低于 1 秒。Node 工作集约 627MB，未再出现逐 scope 完整投影复制造成的线性秒级排队。
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
+
+2026-09-03 回查：该功能分支已包含于`main@ead30e2`并推送`origin/main`，不再作为待办。
 
 ```bash
 git add cli/lib/store.mjs tests/spatial-store.test.mjs tests/atom-language-graph-server.test.mjs docs/superpowers/specs/2026-08-31-atom-runtime-projection-recovery-design.md docs/superpowers/plans/2026-09-02-atom-startup-hot-state.md docs/superpowers/README.md
