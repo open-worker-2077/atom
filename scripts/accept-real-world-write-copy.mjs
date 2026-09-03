@@ -12,6 +12,7 @@ import { createProgramRuntimeScheduler } from '../work-engine/atom-language/prog
 if (process.argv.includes('--trace')) process.env.ATOM_PERF_TRACE = '1';
 const cleanupCopy = process.argv.includes('--cleanup');
 const measureStructuralLatency = process.argv.includes('--structural-latency');
+const createProgram = process.argv.includes('--program-create');
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -72,7 +73,11 @@ try {
   }, 100);
   const startedAt = Date.now();
   const write = await executeAtomCommandEndpoint({
-    source: `transform new {"thing":"${testPath}","situation":"acceptance","slot":[],"strut":[]}`,
+    source: `transform new ${JSON.stringify({
+      [createProgram ? 'thing@program' : 'thing']: testPath,
+      situation: createProgram ? 'def main(arguments):\n    return True' : 'acceptance',
+      slot: [], strut: []
+    })}`,
     interaction
   }, endpoint);
   const writeMs = Date.now() - startedAt;
