@@ -710,8 +710,11 @@
   global.addEventListener("atom-transform-action", enqueueAtomTransformAction);
   if (typeof global.EventSource === "function") {
     const changes = new global.EventSource(`${API}/events`);
+    let eventStreamOpened = false;
     changes.onopen = () => {
-      if (document.body.dataset.spatialBridge === "offline") void pullKnowledge();
+      const reconnected = eventStreamOpened;
+      eventStreamOpened = true;
+      if (reconnected || document.body.dataset.spatialBridge === "offline") void pullKnowledge();
     };
     changes.onmessage = (event) => {
       try {

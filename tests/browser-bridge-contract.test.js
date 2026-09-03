@@ -1103,6 +1103,53 @@ test('Atom Web refreshes from a committed remote operation instead of polling', 
   assert.equal(requests.filter(([url]) => url.includes('/state')).length, 2);
 });
 
+test('an EventSource reconnect catches a CLI revision missed while the stream was disconnected', async () => {
+  const imports = [];
+  const requests = [];
+  let serverRevision = 1;
+  let eventSource = null;
+  class FakeEventSource {
+    constructor(url) { this.url = url; eventSource = this; }
+  }
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge: (knowledge) => { imports.push(structuredClone(knowledge)); return true; },
+      exportField: () => ({ path: 'root' })
+    },
+    EventSource: FakeEventSource,
+    fetch: async (url) => {
+      requests.push(url);
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) {
+        return response({
+          scope: { path: 'root' },
+          knowledge: { revision: serverRevision, nodes: [{ label: `r${serverRevision}` }], edges: [] }
+        });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: () => {},
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(imports.at(-1).nodes[0].label, 'r1');
+
+  eventSource.onopen();
+  serverRevision = 2;
+  eventSource.onopen();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(imports.at(-1).nodes[0].label, 'r2');
+  assert.equal(requests.filter((url) => url.includes('/state')).length, 2);
+});
+
 test('a remote CLI revision reloads every expanded scope before one atomic scene import', async () => {
   const listeners = new Map();
   const imports = [];
