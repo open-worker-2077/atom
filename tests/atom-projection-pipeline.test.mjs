@@ -301,6 +301,25 @@ test('spatial projection represents an Agent capability by its Program type only
   assert.deepEqual(program.atomTypes, ['program']);
 });
 
+test('spatial projection keeps internal Slot identities out of user-visible Atom types', async () => {
+  const facts = [{
+    'thing@rich@slot-role-7d7f946bf739@slot-revision-2': '事项类型',
+    situation: '', slot: [], strut: []
+  }];
+  const repository = createMemoryProjectionRepository();
+  const pipeline = createProjectionPipeline({
+    projectors: createLegacyProjectionProjectors(),
+    repository
+  });
+
+  await pipeline.rebuild(snapshot('rev-public-types', facts));
+  const spatial = (await repository.readCurrent('primary', 'rev-public-types')).projections.spatial.value;
+  const node = spatial.nodes.find((candidate) => candidate.label === '事项类型');
+
+  assert.deepEqual(node.atomTypes, ['rich']);
+  assert.doesNotMatch(JSON.stringify(node), /slot-(?:role|revision)-/u);
+});
+
 test('spatial strut resolves Program endpoints by Atom identity across the synthetic graph root', async () => {
   const program = (thing, strut = []) => ({
     [`thing@program`]: thing,

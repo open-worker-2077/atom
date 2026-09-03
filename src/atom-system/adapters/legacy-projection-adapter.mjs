@@ -1,6 +1,6 @@
 import { projectAtomContext } from '../../../work-engine/atom-language/context-store.mjs';
 import { projectAtomGraphToKnowledge } from '../../../work-engine/atom-language/graph-4d-projection.mjs';
-import { parseAtomKey } from '../../../work-engine/atom-language/key-parser.mjs';
+import { publicAtomTypes } from '../../../work-engine/atom-language/slot-graph-semantics.mjs';
 import { evaluateStrutClausesWithPrograms } from '../../../work-engine/atom-language/strut-runtime.mjs';
 
 const baseKeyOf = (rawKey) => String(rawKey).match(/^[^@#$~]+/u)?.[0] ?? '';
@@ -209,9 +209,9 @@ function atomTypesByPath(facts) {
   const visit = (atom, parentPath = '') => {
     const nameField = Object.entries(atom).find(([key]) => baseKeyOf(key) === 'thing');
     if (!nameField) return;
-    const [key, name] = nameField;
+    const [, name] = nameField;
     const path = parentPath ? `${parentPath}/${name}` : name;
-    const types = parseAtomKey(key).types.map((type) => type.name);
+    const types = publicAtomTypes(atom);
     if (types.length) result.set(path, types);
     const slotField = Object.entries(atom).find(([rawKey]) => baseKeyOf(rawKey) === 'slot');
     for (const child of slotField?.[1] ?? []) visit(child, path);
