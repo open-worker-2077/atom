@@ -19,7 +19,7 @@
 ## 当前开发链
 
 - **当前恢复断点**：[`plans/2026-09-03-session-recovery-checkpoint.md`](plans/2026-09-03-session-recovery-checkpoint.md)；ChatGPT软件更新或 Session历史丢失后，先从该文件恢复，不依赖聊天记录或自动压缩摘要。
-- **当前最高优先级**：Strut 触发单轨化；Graph clause 已决定后项，后项自己的 Program 只声明是否响应，退役`trigger("strut", {"nodes":[...]}, ...)`中的冗余`nodes`，不得保留新旧双轨。定论与恢复入口见[`plans/2026-09-03-session-recovery-checkpoint.md`](plans/2026-09-03-session-recovery-checkpoint.md)。
+- **当前主干状态**：Strut触发单轨化、Web断线revision补账与Shortcut语义编辑均已部署关闭。下一项按恢复断点处理手机正式域名验收，再回到ASDF设置分支与内部名称泄漏；不得重新引入Strut`nodes`或Shortcut手填ID。
 - **2026-09-03 已部署**：Slot相邻层级信号、Program relocation closure、交互原子隔离、独立截止、迟到提交防护与短权威提交临界区均已合入并推送`main@ead30e2`。系统测试`226/226 PASS`；真实4784重启后 health正常，`explore 🧊manage`最终约256ms。此前“health快但命令长期挂起”的P0已关闭。
 
 - **首要 Graph 纠偏**：Strut 判定 Program 必须内嵌在 clause `if`，取得复合前项事实与本次规范化 Transform `$` 动作信封；`$click`只是注册动作族的首个用例，CLI/Web 点击统一为 `transform {"thing$click":"EXACT路径"}`，新增动作不得修改 Strut/runtime 主干。旧外部 `thing@program` 判定与独立 click endpoint/trigger 方案均已退役。权威合同见[`specs/2026-08-31-atom-world-program-design.md`](specs/2026-08-31-atom-world-program-design.md) §3.2、§4.1；当前实施账本见[`plans/2026-09-02-inline-strut-transform-actions.md`](plans/2026-09-02-inline-strut-transform-actions.md)。

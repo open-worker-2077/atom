@@ -1,8 +1,8 @@
 # Atom 当前开发恢复断点
 
-**更新时间：** 2026-09-03（Shortcut语义改向已完成最小受影响链验证，待提交、集成、推送与部署）
+**更新时间：** 2026-09-03（Shortcut语义改向已提交、集成、推送、部署并在线回读）
 **权威分支：** `main`
-**当前代码交付：** `88d36c6`；本文档提交后以同一`main/origin/main`最新提交为恢复入口
+**当前代码交付：** `a48f33f`；本文档提交后以同一`main/origin/main`最新提交为恢复入口
 **历史实现分支：** `feat/slot-signal`已指向`ead30e2`，不再是待集成分支
 **用途：** 新 Session 不依赖聊天历史，按本文恢复当前用户定论、证据与执行顺序。
 
@@ -79,6 +79,13 @@
 - **TDD证据**：新增“断线期间遗漏CLI revision、重连后无消息补推也必须得到r2”用例，修复前精确失败为`r1 !== r2`，修复后转绿；提交通知与浏览器桥接链`55/55 PASS`，入口哈希、静态服务与桥接合同`48/48 PASS`。
 - **交付证据**：实现提交`88d36c6`已推送`origin/main`；真实4784回读`ok:true`、投影`published`、入口build `sha256-06964fc1abf84f07`，在线`spatial-browser-bridge.js`包含重连补账逻辑。
 
+### Shortcut语义改向（已部署）
+
+- **公开合同**：Agent用`transform {"thing.lnk.EXACT目标":"EXACT快捷入口"}`改向；Graph精确消歧新目标并复用读取鉴权，只改引用自身的内核metadata，stable reference identity保持。改名与改向可在一个Transform内原子完成；普通Thing稳定拒绝。
+- **Web合同**：Shortcut投影显示`快捷目标：语义路径`，不显示合同JSON或reference ID；编辑球镜只显示名称和目标路径，隐藏Markdown与附件入口，保存后进入同一Transform/事务/回读链。
+- **TDD证据**：新增核心RED为`UNKNOWN_GRAPH_FIELD`，Web模型RED为缺少`shortcutTargetPath`，translator RED错误生成`situation.rep`，投影RED精确暴露合同JSON。最终最小受影响链`215/215 PASS`，Shortcut Chromium`5/5 PASS`，浏览器构建与development-control通过。
+- **交付证据**：`a48f33f`已快进合入并推送`origin/main`；真实4784重启后health`ok:true`、revision`7270`、投影`published`、Web build`sha256-7ba5295f501e0740`，在线HTML与engine均含语义目标编辑路径；当前Help回读包含`.lnk.`。
+
 - **已完成提交**：`67be623`持久化规格恢复上下文；`5a3ce51`形成实施计划；`d0947a1`增加 Program ABI；`036b542`解析直接 Slot 亲属；`565e9ee`增加 receiver-owned 调度与 claim；`397ed9a`保证内部 routing nodes 不执行无匹配 trigger 的 Program，并让严格事件校验先于 prepared-index 快路；`f9aad65`完成 Task 4 原子引擎接入与公开合同；`3d24506`修复显式运行后果与 Slot receiver jump 失败原子性。Relocation closure 的代码提交为`b01bf20`、`e4c54b6`、`1b63956`、`6c3e2f1`、`585ac72`、`fc7f7f8`、`fb2e1d4`。
 - **Task 4 评审修复 round 1**：`3d24506`把显式`.run.`的 sender Transform 与 Slot 事件一起送入完整候选事务队列，并让 Slot claim 周期中的 jump authorization/jump 失败阻断回滚。
 - **Task 4 最终评审修复**：本文件所在提交将 Slot effect 延后到 cycle 结构 effect 应用后的候选世界解析，并按 relocation 改写 sender path；结构 co-effect 时先排 Transform 刷新事件、后排 Slot 投递，使普通 Transform trigger 与显式`.run.`在 receiver 改名/移动后一致。`SLOT_SIGNAL_REQUIRED`现在会阻断并回滚显式运行与调和 cycle；`use_program()`的 Slot sender 身份保留为实际 referenced Program path；Slot callback 对 positional-only、普通位置、vararg、keyword-only 和 kwarg 都要求真正零参数。
@@ -115,7 +122,7 @@
 - **恢复顺序**：
   1. Strut单轨化已关闭：不得重新引入`nodes`或旧/新值内核判断。
   2. Web/CLI Transform断线revision补账已关闭：后续现场若仍复现，保留网络时序证据并继续追查其他根因，不回退到轮询或全量刷新。
-  3. Shortcut深层激活与语义编辑已完成代码与验证；完成提交、集成、推送、部署后处理手机正式域名验收。
+  3. Shortcut深层激活与语义编辑已部署关闭；下一项处理手机正式域名验收。
   4. 回到`fix/asdf-navigation-settings`，修复Task 3两项评审缺口，基于最新`main`集成并验收。
 
 ## 5. 其他暂停工作
@@ -127,6 +134,6 @@
 
 ## 6. Git 保护
 
-- `main`在本次记录前与`origin/main`一致，代码交付HEAD为`88d36c6`。
+- `main`与`origin/main`均包含Shortcut代码交付`a48f33f`；本文档提交后以最新同轨提交为恢复入口。
 - 本轮仅新增/更新 Superpowers文档；不得把 ASDF worktree改动混入`main`。
 - 提交和推送前必须运行`git diff --check`并回读实际 diff；没有验证证据不得宣称完成。

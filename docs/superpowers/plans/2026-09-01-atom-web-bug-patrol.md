@@ -115,4 +115,4 @@
 - [x] **Step 1: Core RED**：`thing.lnk`原实现返回`UNKNOWN_GRAPH_FIELD`；Web 草稿暴露合同 JSON，translator仍生成`situation.rep`。
 - [x] **Step 2: One semantic Transform**：新增`thing.lnk.EXACT_TARGET`，只改 Shortcut自身；新目标复用Graph精确消歧和读取鉴权，内部reference identity保持，普通Thing稳定拒绝。
 - [x] **Step 3: Structured Web editor**：Shortcut编辑草稿只带`shortcutTargetPath`；编辑器显示名称和目标路径，隐藏Markdown、附件和内核合同JSON；Web提交同一Transform，支持原子改名+改向。
-- [x] **Step 4: Minimal affected verification**：内核、Help、投影、translator、workspace、editor、bridge与静态合同`215/215 PASS`；Shortcut真实Chromium导航`5/5 PASS`；browser build与development-control通过。
+- [x] **Step 4: Minimal affected verification and deploy**：内核、Help、投影、translator、workspace、editor、bridge与静态合同`215/215 PASS`；Shortcut真实Chromium导航`5/5 PASS`；browser build与development-control通过。实现`a48f33f`已推送`origin/main`；真实4784为revision`7270`、投影`published`、build`sha256-7ba5295f501e0740`。
