@@ -130,6 +130,52 @@ test('legacy engine writes are inverted through one transactional persistence po
   assert.deepEqual(commits[0].facts, [{ name: 'committed' }]);
 });
 
+test('expired legacy interaction cannot commit after its calculation returns late', async () => {
+  const { createLegacyWorldService } = await import(adapterUrl);
+  const commits = [];
+  const controller = new AbortController();
+  let releaseCalculation;
+  let notifyCalculationStarted;
+  const calculationStarted = new Promise((resolve) => { notifyCalculationStarted = resolve; });
+  const calculation = new Promise((resolve) => { releaseCalculation = resolve; });
+  const timeout = Object.assign(new Error('interaction expired'), {
+    code: 'ATOM_INTERACTION_TIMEOUT'
+  });
+  const service = createLegacyWorldService({
+    transactionProvider: () => ({
+      recover: async () => ({ recovered: 0 }),
+      commit: async (request) => {
+        commits.push(request);
+        return { afterRevision: request.nextRevision };
+      }
+    }),
+    execute: async (request) => {
+      notifyCalculationStarted();
+      await calculation;
+      await request.commitWorld({
+        expectedRevision: 'rev-1',
+        nextRevision: 'rev-2',
+        facts: [{ name: 'must-not-commit' }]
+      });
+      return { ok: true, changed: true, revisionAfter: 'rev-2' };
+    }
+  });
+
+  const execution = service.executeLegacy({
+    source: 'transform {}',
+    contextFile: 'atom.json',
+    projectionFile: 'graph.json',
+    interaction: { id: 'expired-before-commit' },
+    signal: controller.signal
+  });
+  await calculationStarted;
+  controller.abort(timeout);
+  releaseCalculation();
+
+  await assert.rejects(execution, (error) => error.code === 'ATOM_INTERACTION_TIMEOUT');
+  assert.equal(commits.length, 0);
+});
+
 test('legacy World Service single-flights recovery and compatibility validation by persistence revision', async () => {
   let recoverCalls = 0;
   let manifestCalls = 0;

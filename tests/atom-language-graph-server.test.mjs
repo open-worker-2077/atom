@@ -863,6 +863,65 @@ test('hung Atom interaction does not block an independent transform', async (t) 
   await blockedWrite;
 });
 
+test('hung Atom interaction reaches its own timeout without affecting later requests', async (t) => {
+  const directory = await temporaryDirectory();
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
+  await fs.writeFile(graphFile, '{}\n', 'utf8');
+  let observedSignal = null;
+  let releaseHung;
+  const never = new Promise((resolve) => { releaseHung = resolve; });
+  const interactionRuntime = {
+    async initialize() { return { initialization: { ok: true, changed: false } }; },
+    async execute(intent, lifecycle = {}) {
+      if (intent.source.startsWith('transform')) {
+        observedSignal = lifecycle.signal;
+        return never;
+      }
+      return { ok: true, command: 'explore', changed: false, items: [] };
+    },
+    async updateHumanStatus() { return { ok: true, changed: false }; },
+    async updateHumanWorkspace() { return { ok: true, changed: false }; },
+    async recover() { return { sourceRevision: 'revision' }; },
+    projectionStatus() { return { status: 'published' }; }
+  };
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile,
+    interactionRuntime, atomInteractionTimeoutMs: 40
+  });
+  t.after(async () => {
+    releaseHung();
+    await running.close();
+  });
+  removeTemporaryDirectoryAfter(t, directory);
+  const request = (source, id) => fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source,
+      interaction: { id, agent: { ref: 'transport-ref', path: 'Root' } },
+      history: []
+    })
+  });
+
+  const timedOutResponse = await Promise.race([
+    request('transform {"thing":"Root","situation.rep.changed"}', 'self-expiring-write'),
+    new Promise((_, reject) => setTimeout(
+      () => reject(new Error('interaction did not reach its own deadline')),
+      250
+    ))
+  ]);
+  const timedOutReceipt = await timedOutResponse.json();
+  assert.equal(timedOutResponse.status, 400);
+  assert.equal(timedOutReceipt.error.code, 'ATOM_INTERACTION_TIMEOUT');
+  assert.equal(observedSignal?.aborted, true);
+
+  const exploreResponse = await request('explore {"thing":"Root"}', 'read-after-expired-write');
+  assert.equal(exploreResponse.status, 200, await exploreResponse.text());
+});
+
 test('duplicate HTTP requests with one interaction id execute one authoritative command', async (t) => {
   const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');

@@ -75,9 +75,11 @@ export function createLegacyWorldService(options = {}) {
 
   const service = createWorldService({
     executeLegacyInteraction: async (request) => {
+      request.signal?.throwIfAborted?.();
       if (!request.contextFile || !request.projectionFile) return execute(request);
       const persistence = transactionFor(request);
       await recoverPersistence(persistence);
+      request.signal?.throwIfAborted?.();
       const compatibilityManifest = await manifestFor(persistence);
       const transactionTransformLog = typeof persistence.transformLogEntries === 'function'
         ? await timed('transform-log', () => persistence.transformLogEntries())
@@ -87,6 +89,7 @@ export function createLegacyWorldService(options = {}) {
         compatibilityManifest,
         transactionTransformLog,
         commitWorld: async (transition) => {
+          request.signal?.throwIfAborted?.();
           const receipt = await persistence.commit({
             ...transition,
             source: request.source,

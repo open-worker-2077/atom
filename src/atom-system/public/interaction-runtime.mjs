@@ -258,6 +258,7 @@ export function createInteractionRuntime({
       ...(currentOptions.trustedMaintenance ? { trustedMaintenance: true } : {}),
       ...(currentOptions.bypassProgramLocks ? { bypassProgramLocks: true } : {}),
       ...(currentOptions.programMode ? { programMode: currentOptions.programMode } : {}),
+      ...(currentOptions.signal ? { signal: currentOptions.signal } : {}),
       programRuntime
     });
     const worldStartedAt = performance.now();

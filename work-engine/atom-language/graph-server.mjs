@@ -341,6 +341,7 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
         agentPath: agent.path,
         history: Array.isArray(payload.history) ? payload.history : []
       }, {
+        ...(lifecycle.signal ? { signal: lifecycle.signal } : {}),
         ...(typeof lifecycle.onCommitted === 'function' ? {
           onCommitted: (committed) => lifecycle.onCommitted(decorate(committed))
         } : {})
@@ -517,7 +518,8 @@ export async function startAtomGraphServer(options = {}) {
       ? () => interactionRuntime.projectionStatus()
       : undefined,
     atomWorkOrderRegistry: handlers.workOrderRegistry,
-    atomProgramFunctionRegistry: handlers.programFunctionRegistry
+    atomProgramFunctionRegistry: handlers.programFunctionRegistry,
+    atomInteractionTimeoutMs: options.atomInteractionTimeoutMs
   });
   notifySpatialProjection = instance.publishKnowledgeChange;
   backupTrigger?.start({ initialBackup: false });

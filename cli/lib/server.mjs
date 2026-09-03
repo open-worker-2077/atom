@@ -135,6 +135,10 @@ export async function createSpatialServer(options = {}) {
     : null;
   backupTrigger?.start();
   const activeAtomInteractions = new Set();
+  const atomInteractionTimeoutMs = Math.max(
+    1,
+    Number(options.atomInteractionTimeoutMs ?? 15_000) || 15_000
+  );
   const atomCommandReceipts = new Map();
   let spatialProjectionFailure = null;
   const knowledgeSubscribers = new Set();
@@ -204,19 +208,43 @@ export async function createSpatialServer(options = {}) {
       settled = true;
       resolveReceipt(result);
     };
+    const reject = (error) => {
+      if (settled) return;
+      settled = true;
+      rejectReceipt(error);
+    };
     atomCommandReceipts.set(id, { fingerprint, receipt });
     while (atomCommandReceipts.size > 1_000) {
       atomCommandReceipts.delete(atomCommandReceipts.keys().next().value);
     }
 
+    const controller = new AbortController();
+    const timeoutError = new SpatialStoreError(
+      'ATOM_INTERACTION_TIMEOUT',
+      `Atom interaction exceeded its ${atomInteractionTimeoutMs}ms deadline`
+    );
+    let timeout;
+    const deadline = new Promise((_, rejectDeadline) => {
+      timeout = setTimeout(() => {
+        controller.abort(timeoutError);
+        rejectDeadline(timeoutError);
+      }, atomInteractionTimeoutMs);
+      timeout.unref?.();
+    });
     trackAtomInteraction(async () => {
       try {
-        const result = await operation(normalized, settle);
+        const operationResult = Promise.resolve().then(() => (
+          operation(normalized, settle, controller.signal)
+        ));
+        operationResult.catch(() => undefined);
+        const result = await Promise.race([operationResult, deadline]);
         settle(result);
         return result;
       } catch (error) {
-        if (!settled) rejectReceipt(error);
+        reject(error);
         throw error;
+      } finally {
+        clearTimeout(timeout);
       }
     }).catch(() => undefined);
     return receipt;
@@ -366,8 +394,8 @@ export async function createSpatialServer(options = {}) {
           return json(response, 404, { ok: false, error: { code: 'ATOM_COMMAND_UNAVAILABLE' } });
         }
         const payload = await body(request);
-        const result = await atomCommandRequest(payload, async (normalized, onCommitted) => {
-          const commandResult = await options.atomCommand(normalized, { onCommitted });
+        const result = await atomCommandRequest(payload, async (normalized, onCommitted, signal) => {
+          const commandResult = await options.atomCommand(normalized, { onCommitted, signal });
           if (commandResult?.changed !== false && graphFile && options.projectAtomKnowledge) {
             try {
               const document = JSON.parse(await fs.readFile(graphFile, 'utf8'));
