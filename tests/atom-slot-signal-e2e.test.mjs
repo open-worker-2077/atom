@@ -337,7 +337,7 @@ test('ordinary Transform and explicit run both deliver after moving a receiver b
   }
 });
 
-test('explicit run resolves Slot delivery after relocating the sender or its ancestor', async (t) => {
+test('cold prepared projection keeps explicit Slot delivery after relocating the sender or its ancestor', async (t) => {
   const cases = [
     {
       name: 'sender rename',
@@ -371,6 +371,15 @@ test('explicit run resolves Slot delivery after relocating the sender or its anc
       const scheduler = createProgramRuntimeScheduler();
       const lifecycle = observeSlotClaimLifecycle(scheduler);
       const invocations = observeSlotInvocations(scheduler);
+      const prepared = await executeAtomLanguage({
+        ...files,
+        source: 'atom',
+        programMode: 'project',
+        programScheduler: scheduler,
+        interaction: { id: `slot-signal-prepare-${crypto.randomUUID()}` }
+      });
+      assert.equal(prepared.ok, true, JSON.stringify(prepared));
+      assert.equal(scheduler.triggerContractsInitialized, true);
 
       const { result, world: stored } = await executeFixture(
         files,

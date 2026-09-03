@@ -3505,6 +3505,28 @@ export async function executeAtomLanguage(options = {}) {
     let finalProgramLockIndex = programLockIndex;
     const finalProgramMessages = [];
     const initialTriggerEvents = [];
+    if (initialProgramRelocations.length > 0
+      && (programCycle.slotSignals?.length ?? 0) > 0) {
+      if (typeof candidateProgramScheduler?.refreshPreparedTriggerOwnership !== 'function') {
+        releaseStrutDeliveryClaims();
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          'PROGRAM_TRIGGER_OWNERSHIP_REFRESH_UNAVAILABLE',
+          'Candidate runtime cannot refresh trigger ownership'
+        )]);
+      }
+      try {
+        await candidateProgramScheduler.refreshPreparedTriggerOwnership(
+          nextAtoms, initialProgramRelocations
+        );
+      } catch (error) {
+        releaseStrutDeliveryClaims();
+        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+          error.code ?? 'PROGRAM_TRIGGER_OWNERSHIP_REFRESH_FAILED',
+          error.message,
+          error.details ?? {}
+        )]);
+      }
+    }
     const relocatedInitialSlotSignals = (programCycle.slotSignals ?? []).map((effect) => (
       rewriteSlotSignalPaths(effect, initialProgramRelocations)
     ));
