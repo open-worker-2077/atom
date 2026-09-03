@@ -1,8 +1,8 @@
 # Atom 当前开发恢复断点
 
-**更新时间：** 2026-09-03（Strut接收端单轨化完成本地实现与最终验证，待集成部署）
-**权威开发分支：** `feat/strut-receiver-trigger`，隔离工作区`D:\Project\〇\subprojects\atom\.worktrees\strut-receiver-trigger`
-**集成基线／远端：** `main@e74bf4e`；`origin/main@ead30e2`，本地`main`领先远端1个Superpowers文档提交
+**更新时间：** 2026-09-03（Strut接收端单轨化已合入、推送、部署并完成生产迁移回读）
+**权威分支：** `main`
+**当前代码／远端：** `main@970bd0a`；`origin/main@970bd0a`
 **历史实现分支：** `feat/slot-signal`已指向`ead30e2`，不再是待集成分支
 **用途：** 新 Session 不依赖聊天历史，按本文恢复当前用户定论、证据与执行顺序。
 
@@ -11,7 +11,7 @@
 - **✅ Slot相邻信号**：已完成、集成、部署；`slot({"to":"up|down","labels":[...]})`、接收方`trigger("slot",...)`和`signal()`已进入当前Help与系统测试。
 - **✅ 4784交互隔离P0**：已完成、集成、部署。真实4784重启后health正常，`explore 🧊manage`最终约256ms；系统测试`226/226 PASS`。下文“尚在隔离分支／未部署”只保留为历史过程，不代表当前状态。
 - **✅ 推支内嵌判定与通用动作**：Strut `if.program`、统一Transform `$动作`、无上限点击次数已完成；不再开发独立click trigger。
-- **🟡 当前首要**：Strut触发单轨化的代码、测试和只读生产预检已完成；尚未合入`main`、部署4784或写入生产世界，因此不得标记生产完成。
+- **✅ Strut触发单轨化**：Graph后项决定接收Program，接收方以`trigger("strut", {}, main)`自主响应；旧`nodes`合同已从运行时与生产ESG四条接棒链清除。
 - **🟠 次序待办**：Web/CLI提交后局部视图即时一致性；Shortcut深层激活与语义编辑；手机正式域名验收；ASDF设置分支评审修复及集成；用户语义名称泄漏内部`@slot-role-*`身份。
 
 ## 1. 当前唯一首要功能
@@ -57,16 +57,18 @@
 
 ## 4. 执行状态与下一步
 
-### Strut接收端单轨化（当前断点）
+### Strut接收端单轨化（已部署）
 
 - **合同实现**：Graph `then`显式指向实际接收`thing@program`；接收Program只声明`trigger("strut", {}, main)`；运行时按`delivery.consequentPath === program.path`索引，不读取`nodes`。槽例从前项路径恢复实例域，只把实际Program角色映射到槽模共享Program，兄弟槽例隔离。
 - **迁移实现**：Python AST只改写唯一顶层Strut Trigger参数并对动态／多Trigger失败封闭；纯计划器按现有Graph关系把旧订阅改为显式Program后项；`changedPaths`覆盖改写Program和实际Strut owner。部署脚本支持`--dry-run|--apply|--rollback`，校验真实路径与containment，执行私有备份、中央提交、Graph投影回读及失败自动回滚；提交后回执丢失可由备份和事务日志恢复，不重放提交。
-- **提交链**：`2baea2e`、`0f6864d`、`166d9c8`、`d7dbc17`、`4884346`、`7245107`、`fbbfea6`；最后一笔Form/Graph/Slot合同一致性与本文件证据尚待提交。
+- **提交链**：`2baea2e`、`0f6864d`、`166d9c8`、`d7dbc17`、`4884346`、`7245107`、`fbbfea6`、`970bd0a`；已快进合入并推送`origin/main`。
 - **TDD证据**：旧合同清理后的RED为`33 tests / 32 pass / 1 fail`，唯一失败来自Form内核`STRUT_FACT_CONSEQUENT_REQUIRED`；最小修正后`33/33 PASS`。
 - **受影响链**：Form、Graph、Program、Slot body、投影与迁移共`170/170 PASS`，duration `48940.1532 ms`；迁移专项含apply、硬中断恢复、receipt-only rollback、投影故障自动回滚与链接逃逸，共`10/10 PASS`。
 - **最终验证**：`npm test`功能结果`1683 PASS`；唯一失败为未受本分支影响的空间布局耗时阈值，随后同一用例独立复跑通过；`npm run test:system`为`229/229 PASS`，duration `60967.7311 ms`；Node syntax、Python AST与`git diff --check`通过。终审两轮完成，最终结论“无阻断”。全量构建机械刷新build-id，已恢复且不纳入提交。
 - **生产预检**：attempt `strut-final-preflight-20260903-02`只读成功；migration `strut-receiver-2871846a8d22a2d58790`；源revision `sha256:ee3ced5db6bbad898e1f113b7a032080c8772f00c15024688e6c576a6bb3a5ed`，目标revision `sha256:d269cf00aeabdd88c612488da0956f67272af263b7f6a42454ea92a23855a27f`；精确命中ESG步骤02—05四个`接棒`Program、4个旧订阅和4个Graph后项；未写生产世界。
-- **精确后续顺序**：提交最终合同一致性与证据 → 终审无阻断 → 合入`main`并推送 → 部署并重启4784验证新Help/health → 以最新revision重新dry-run → `--apply`生成私有备份并原子迁移 → CLI与Web回读四条链 → 再处理Web即时刷新等次序待办。
+- **生产迁移**：`strut-production-20260903-01`在4784停机窗口先生成私有备份，再把4个旧订阅及4个Graph后项原子迁移；世界从`sha256:ee3ced...a5ed`提交到`sha256:d269cf...a27f`，部署回执位于`C:\Users\worker\AppData\Local\AtomGraph\worlds\primary\migration-backups\strut-receiver\strut-receiver-2871846a8d22a2d58790\strut-production-20260903-01\deployment-receipt.json`。
+- **部署验收**：4784 revision `7269`、投影`published`；公开CLI回读步骤02—05四个`接棒`均为`trigger("strut", {}, main)`，对应批次Strut `then`均显式指向自身接棒Program。首次重启暴露“新代码先于旧世界迁移”的启动门槛，迁移后重新启动即健康；未发生迁移回滚。
+- **精确后续顺序**：继续处理Web/CLI提交后局部视图即时一致性，其次Shortcut深层激活与语义编辑、手机正式域名验收、ASDF设置分支及内部名称泄漏。
 
 - **已完成提交**：`67be623`持久化规格恢复上下文；`5a3ce51`形成实施计划；`d0947a1`增加 Program ABI；`036b542`解析直接 Slot 亲属；`565e9ee`增加 receiver-owned 调度与 claim；`397ed9a`保证内部 routing nodes 不执行无匹配 trigger 的 Program，并让严格事件校验先于 prepared-index 快路；`f9aad65`完成 Task 4 原子引擎接入与公开合同；`3d24506`修复显式运行后果与 Slot receiver jump 失败原子性。Relocation closure 的代码提交为`b01bf20`、`e4c54b6`、`1b63956`、`6c3e2f1`、`585ac72`、`fc7f7f8`、`fb2e1d4`。
 - **Task 4 评审修复 round 1**：`3d24506`把显式`.run.`的 sender Transform 与 Slot 事件一起送入完整候选事务队列，并让 Slot claim 周期中的 jump authorization/jump 失败阻断回滚。
