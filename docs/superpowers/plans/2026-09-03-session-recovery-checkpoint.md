@@ -1,8 +1,8 @@
 # Atom 当前开发恢复断点
 
-**更新时间：** 2026-09-03（Strut接收端单轨化已合入、推送、部署并完成生产迁移回读）
+**更新时间：** 2026-09-03（Strut单轨化与Web断线revision补账均已合入、推送、部署并回读）
 **权威分支：** `main`
-**当前代码／远端：** `main@970bd0a`；`origin/main@970bd0a`
+**当前代码交付：** `88d36c6`；本文档提交后以同一`main/origin/main`最新提交为恢复入口
 **历史实现分支：** `feat/slot-signal`已指向`ead30e2`，不再是待集成分支
 **用途：** 新 Session 不依赖聊天历史，按本文恢复当前用户定论、证据与执行顺序。
 
@@ -12,7 +12,8 @@
 - **✅ 4784交互隔离P0**：已完成、集成、部署。真实4784重启后health正常，`explore 🧊manage`最终约256ms；系统测试`226/226 PASS`。下文“尚在隔离分支／未部署”只保留为历史过程，不代表当前状态。
 - **✅ 推支内嵌判定与通用动作**：Strut `if.program`、统一Transform `$动作`、无上限点击次数已完成；不再开发独立click trigger。
 - **✅ Strut触发单轨化**：Graph后项决定接收Program，接收方以`trigger("strut", {}, main)`自主响应；旧`nodes`合同已从运行时与生产ESG四条接棒链清除。
-- **🟠 次序待办**：Web/CLI提交后局部视图即时一致性；Shortcut深层激活与语义编辑；手机正式域名验收；ASDF设置分支评审修复及集成；用户语义名称泄漏内部`@slot-role-*`身份。
+- **✅ Web revision补账**：外部CLI/Program提交在SSE断线期间漏掉通知后，EventSource重连会立即核对当前路径与展开路径，并一次导入同一最新revision；不依赖轮询或全世界刷新。
+- **🟠 次序待办**：Shortcut深层激活与语义编辑；手机正式域名验收；ASDF设置分支评审修复及集成；用户语义名称泄漏内部`@slot-role-*`身份。
 
 ## 1. 当前唯一首要功能
 
@@ -68,7 +69,14 @@
 - **生产预检**：attempt `strut-final-preflight-20260903-02`只读成功；migration `strut-receiver-2871846a8d22a2d58790`；源revision `sha256:ee3ced5db6bbad898e1f113b7a032080c8772f00c15024688e6c576a6bb3a5ed`，目标revision `sha256:d269cf00aeabdd88c612488da0956f67272af263b7f6a42454ea92a23855a27f`；精确命中ESG步骤02—05四个`接棒`Program、4个旧订阅和4个Graph后项；未写生产世界。
 - **生产迁移**：`strut-production-20260903-01`在4784停机窗口先生成私有备份，再把4个旧订阅及4个Graph后项原子迁移；世界从`sha256:ee3ced...a5ed`提交到`sha256:d269cf...a27f`，部署回执位于`C:\Users\worker\AppData\Local\AtomGraph\worlds\primary\migration-backups\strut-receiver\strut-receiver-2871846a8d22a2d58790\strut-production-20260903-01\deployment-receipt.json`。
 - **部署验收**：4784 revision `7269`、投影`published`；公开CLI回读步骤02—05四个`接棒`均为`trigger("strut", {}, main)`，对应批次Strut `then`均显式指向自身接棒Program。首次重启暴露“新代码先于旧世界迁移”的启动门槛，迁移后重新启动即健康；未发生迁移回滚。
-- **精确后续顺序**：继续处理Web/CLI提交后局部视图即时一致性，其次Shortcut深层激活与语义编辑、手机正式域名验收、ASDF设置分支及内部名称泄漏。
+- **精确后续顺序**：继续处理Shortcut深层激活与语义编辑，其次手机正式域名验收、ASDF设置分支及内部名称泄漏。
+
+### Web/CLI局部视图即时一致性（已部署）
+
+- **根因**：持续SSE连接收到revision时原链可即时刷新，但EventSource断线期间的CLI/Program提交事件不可补发；连接恢复时旧逻辑只有页面已标记`offline`才重新拉取，普通自动重连因此继续展示旧局部事实。
+- **修复**：浏览器记录EventSource是否已经成功打开；第二次及后续`open`一律调用既有`pullKnowledge()`，只读取当前路径及已展开路径，并复用同revision齐备后单次导入合同。首次连接保持原启动拉取，不增加周期任务。
+- **TDD证据**：新增“断线期间遗漏CLI revision、重连后无消息补推也必须得到r2”用例，修复前精确失败为`r1 !== r2`，修复后转绿；提交通知与浏览器桥接链`55/55 PASS`，入口哈希、静态服务与桥接合同`48/48 PASS`。
+- **交付证据**：实现提交`88d36c6`已推送`origin/main`；真实4784回读`ok:true`、投影`published`、入口build `sha256-06964fc1abf84f07`，在线`spatial-browser-bridge.js`包含重连补账逻辑。
 
 - **已完成提交**：`67be623`持久化规格恢复上下文；`5a3ce51`形成实施计划；`d0947a1`增加 Program ABI；`036b542`解析直接 Slot 亲属；`565e9ee`增加 receiver-owned 调度与 claim；`397ed9a`保证内部 routing nodes 不执行无匹配 trigger 的 Program，并让严格事件校验先于 prepared-index 快路；`f9aad65`完成 Task 4 原子引擎接入与公开合同；`3d24506`修复显式运行后果与 Slot receiver jump 失败原子性。Relocation closure 的代码提交为`b01bf20`、`e4c54b6`、`1b63956`、`6c3e2f1`、`585ac72`、`fc7f7f8`、`fb2e1d4`。
 - **Task 4 评审修复 round 1**：`3d24506`把显式`.run.`的 sender Transform 与 Slot 事件一起送入完整候选事务队列，并让 Slot claim 周期中的 jump authorization/jump 失败阻断回滚。
@@ -104,9 +112,9 @@
 - **真实命令验收**：临时世界位于`C:\Users\worker\AppData\Local\Temp\atom-slot-signal-task4-20260903-01`；实际 server 首次使用临时端口61952，重启后使用59632，所有 CLI 都显式传`--endpoint`，未访问4784世界。down/up分别只改变直接子/父接收目标，未匹配、孙级、祖父级和同级目标保持`before`；消息分别为`down-payload:from,labels:up:handoff`、`up-payload:from,labels:down:report`。signal-only前后世界 SHA256 同为`59FC64A44E4BDC08C4170957D10B04CD592B00E14B0127C853140979BD2ECFAA`，回执 revision before/after 同为`130260388d03469c79ca0b8cc4bdd00999ac6a9d9d7e0c919e8b8b91f56cf7b9`。权限失败连续两次返回`GRAPH_LOCK_DENIED`/exit 4且世界 SHA不变，证明失败可重试；重启后`down-ok`/`up-ok`仍在，两个 sender 再运行仍得到正确 payload。
 - **P0 代码状态**：已完成系统验收、集成、部署和推送，关闭。
 - **恢复顺序**：
-  1. 立即继续Strut单轨化：Graph决定后项，内嵌`if` Program判定strict bool，后项自己的Trigger决定响应；退役`nodes`，不得重新引入旧/新值内核判断。
-  2. 修复Web/CLI Transform提交后的最小受影响路径即时刷新，不等待两分钟轮询收敛。
-  3. 完成Shortcut深层激活与语义编辑，再处理手机正式域名验收。
+  1. Strut单轨化已关闭：不得重新引入`nodes`或旧/新值内核判断。
+  2. Web/CLI Transform断线revision补账已关闭：后续现场若仍复现，保留网络时序证据并继续追查其他根因，不回退到轮询或全量刷新。
+  3. 立即完成Shortcut深层激活与语义编辑，再处理手机正式域名验收。
   4. 回到`fix/asdf-navigation-settings`，修复Task 3两项评审缺口，基于最新`main`集成并验收。
 
 ## 5. 其他暂停工作
@@ -118,6 +126,6 @@
 
 ## 6. Git 保护
 
-- `main`在本次记录前与`origin/main`一致，HEAD为`9280289`。
+- `main`在本次记录前与`origin/main`一致，代码交付HEAD为`88d36c6`。
 - 本轮仅新增/更新 Superpowers文档；不得把 ASDF worktree改动混入`main`。
 - 提交和推送前必须运行`git diff --check`并回读实际 diff；没有验证证据不得宣称完成。
