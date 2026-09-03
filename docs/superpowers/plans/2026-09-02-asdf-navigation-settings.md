@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-02-asdf-navigation-settings-design.md`
 
-**2026-09-03恢复状态：** 分支`fix/asdf-navigation-settings`已变基到`main@2ae7201`。Task 2真实F域径旅程通过；Task 3重新取证证明已保存`defaultDetailMode=surface`会在启动场景实际应用，旧P1评审结论过期。P2已以红灯复现设置窗口打开时`S`仍改变后台视角，并由`4153cc7`修复为模态键盘隔离。聚焦Node `123/123`、默认详情/设置模态 Chromium `2/2`、F域径 Chromium `1/1`通过；下一动作是完整验证、账本收口和集成。
+**2026-09-03完成状态：** Task 2真实owner域径、Task 3默认详情模式、统一星轨设置和模态键盘隔离均已集成`main`并部署；提交链`22aca26`、`282a17f`、`efd1439`、`3abba9b`、`942284c`、`53cc5dc`、`244eb66`、`910e108`。后续A／S／D／F收束属于新架构方向，不是本计划未完成项。
 
 ## Global Constraints
 
@@ -101,6 +101,6 @@
 - [x] **Step 1: Add boundary assertions**：防止 F 重新从全局`currentPath`直接拼路，防止普通点击绕过最具体节点解析器；断言域径状态只由`commitDomainRoute`一次提交。
 - [x] **Step 2: Run focused verification**：命中、视图、设置模型与合同共`123/123`；设置与默认详情 Chromium `2/2`；F真实owner域径 Chromium `1/1`。
 - [x] **Step 3: Run full verification**：完整`npm test`执行1700项，1696项直接通过；仅四条静态合同仍指向已部署`.lnk.`前的命令表及域径/详情旧函数位置。只更新对应断言后，三个受影响文件`68/68 PASS`；修正后未改生产代码，按最小受影响链不重复全量运行。
-- [ ] **Step 4: Update recovery ledger**：校正启动热态、Shortcut和本轮状态，只保留可编程点击与手机验收等真实未完成项。
-- [ ] **Step 5: Inspect and commit**：确认无 backing JSON、构建产物或无关文件后提交`docs: record asdf navigation settings proof`。
-- [ ] **Step 6: Merge and push**：完成分支收尾流程，经用户授权后合入并推送`main`。
+- [x] **Step 4: Update recovery ledger**：启动热态、Shortcut和本轮状态已写入恢复入口；后续由当前需求总账统一裁定。
+- [x] **Step 5: Inspect and commit**：产品提交与账本提交均未包含backing JSON或私密世界数据。
+- [x] **Step 6: Merge and push**：已集成并推送`main`，在线bundle为`910e108`对应构建。

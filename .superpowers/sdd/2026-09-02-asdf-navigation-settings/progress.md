@@ -1,5 +1,7 @@
 # SDD Progress: ASDF Navigation and Unified Settings
 
+> **当前状态：✅ 已集成部署。** 下方未接受评审是修复前历史记录；对应P1已由启动／新域默认详情证据关闭，P2已由`942284c`模态键盘隔离关闭。当前排队以`docs/superpowers/plans/2026-09-03-atom-current-requirement-ledger.md`为准。
+
 - Branch: `fix/asdf-navigation-settings`
 - Worktree: `D:\Project\〇\subprojects\atom\.worktrees\asdf-navigation-settings`
 - Starting revision: `dea0551`

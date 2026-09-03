@@ -2,9 +2,11 @@
 
 **更新时间：** 2026-09-03（手机统一域名服务端DNS断点已修复并在线回读）
 **权威分支：** `main`
-**当前代码交付：** `a48f33f`；本文档提交后以同一`main/origin/main`最新提交为恢复入口
+**当前产品代码交付：** `b36cde8`；本文档提交后以同一`main`最新账本提交为恢复入口
 **历史实现分支：** `feat/slot-signal`已指向`ead30e2`，不再是待集成分支
 **用途：** 新 Session 不依赖聊天历史，按本文恢复当前用户定论、证据与执行顺序。
+
+**当前排队权威：** [`2026-09-03-atom-current-requirement-ledger.md`](2026-09-03-atom-current-requirement-ledger.md)。本文下方保留大量实施证据，但凡状态或顺序与总账冲突，以总账和当前Git／验证证据为准并立即校准本文。
 
 ## 0. 当前恢复结论（覆盖下文历史阶段描述）
 
@@ -14,7 +16,7 @@
 - **✅ Strut触发单轨化**：Graph后项决定接收Program，接收方以`trigger("strut", {}, main)`自主响应；旧`nodes`合同已从运行时与生产ESG四条接棒链清除。
 - **✅ Web revision补账**：外部CLI/Program提交在SSE断线期间漏掉通知后，EventSource重连会立即核对当前路径与展开路径，并一次导入同一最新revision；不依赖轮询或全世界刷新。
 - **✅ Shortcut激活与语义编辑**：深层激活真实Chromium`5/5 PASS`；`thing.lnk.EXACT_TARGET`只改引用自身并保持内部identity，Web不再暴露合同JSON或要求ID。
-- **🟠 次序待办**：手机只剩终端验收；ASDF设置与内部槽位标识隔离均已部署。后续先处理仍有当前复现证据的Web问题；A／S／D／F收束已记录为后续架构方向：只保留A的内嵌结构，右键单击普通向内剖开、右键双击沉浸向内剖开；不抢占当前缺陷。
+- **🟠／⏸ 当前次序**：Superpowers账本校准已完成；下一项是只读回查工务世界终态证据。手机正式域名仍会在手机卡住，但用户以ToDesk替代使用，暂不阻塞；A／S／D／F收束与零Agent创世均由用户明确延后。
 
 ### 0.1 内部槽位标识隔离最新证据
 
@@ -28,9 +30,9 @@
 - **修复**：执行`tailscale set --accept-dns=true`恢复系统使用Tailscale DNS；不改变Atom世界、网关身份白名单或正式入口。
 - **回读**：`Resolve-DnsName worker.tail33a2eb.ts.net`返回`100.116.206.105`；`https://worker.tail33a2eb.ts.net/__spatial/api/health`返回200、revision 7270、投影published。
 - **最新链路**：`pixel-10a`已在线，电脑到手机`100.102.183.62`的Tailscale ping约1.03秒；统一HTTPS health为200、revision 7272、投影published。电脑端Proton VPN按目的地址分流时优先排除手机Tailscale IP`100.102.183.62`，必要时再排除MagicDNS`100.100.100.100`或整个`100.64.0.0/10`。
-- **剩余边界**：仍须从手机浏览器用同一正式域名完成一次只读Graph请求；电脑回读与对等ping不能替代终端浏览器验收。
+- **剩余边界**：仍须从手机浏览器用同一正式域名完成一次只读Graph请求；电脑回读、对等ping和ToDesk替代使用均不能替代终端浏览器验收。当前优先级已由用户下调。
 
-## 1. 当前唯一首要功能
+## 1. Slot相邻信号已关闭（历史首要功能）
 
 - **目标**：优先开发 Slot 相邻层级信号；权威规格为[`../specs/2026-09-03-atom-slot-signal-design.md`](../specs/2026-09-03-atom-slot-signal-design.md)。
 - **发送**：`slot({"to":"up|down","labels":[...]})`；`up`到唯一直接父节点，`down`广播给全部直接子节点。
@@ -85,7 +87,7 @@
 - **生产迁移**：`strut-production-20260903-01`在4784停机窗口先生成私有备份，再把4个旧订阅及4个Graph后项原子迁移；世界从`sha256:ee3ced...a5ed`提交到`sha256:d269cf...a27f`，部署回执位于`C:\Users\worker\AppData\Local\AtomGraph\worlds\primary\migration-backups\strut-receiver\strut-receiver-2871846a8d22a2d58790\strut-production-20260903-01\deployment-receipt.json`。
 - **部署验收**：4784 revision `7269`、投影`published`；公开CLI回读步骤02—05四个`接棒`均为`trigger("strut", {}, main)`，对应批次Strut `then`均显式指向自身接棒Program。首次重启暴露“新代码先于旧世界迁移”的启动门槛，迁移后重新启动即健康；未发生迁移回滚。
 - **重复预检**：部署后迁移工具曾把现行空参数Trigger误报为动态旧合同；现已按TDD修正为安全空操作。迁移专项`11/11 PASS`；生产只读预检`strut-completion-audit-20260903-02`退出码0，源／目标revision同为`sha256:d269cf...a27f`，迁移计数`0/0/0`且未写事实。
-- **精确后续顺序**：Shortcut语义编辑完成集成部署后，处理手机正式域名验收、ASDF设置分支及内部名称泄漏。
+- **精确后续顺序**：Shortcut、ASDF设置和内部槽位标识隔离均已部署；后续顺序只从当前需求总账读取，不再沿用本条历史顺序。
 
 ### Web/CLI局部视图即时一致性（已部署）
 
@@ -137,18 +139,23 @@
 - **恢复顺序**：
   1. Strut单轨化已关闭：不得重新引入`nodes`或旧/新值内核判断。
   2. Web/CLI Transform断线revision补账已关闭：后续现场若仍复现，保留网络时序证据并继续追查其他根因，不回退到轮询或全量刷新。
-  3. Shortcut深层激活与语义编辑已部署关闭；下一项处理手机正式域名验收。
-  4. 回到`fix/asdf-navigation-settings`，修复Task 3两项评审缺口，基于最新`main`集成并验收。
+  3. Shortcut深层激活与语义编辑已部署关闭。
+  4. ASDF Task 3评审缺口已修复、集成并部署；历史分支状态不得再作为下一动作。
 
-## 5. 其他暂停工作
+## 5. 用户延后工作
 
-- **ASDF worktree**：`D:\Project\〇\subprojects\atom\.worktrees\asdf-navigation-settings`
-- **ASDF branch**：`fix/asdf-navigation-settings`
-- **ASDF checkpoint**：`9277386 docs(superpowers): checkpoint asdf implementation state`
-- **状态**：Task 3评审仍有P1/P2，按用户优先级暂停；不得抢占 Slot首要开发。
+- **A模式收束**：当前A可用；S、D退役与F沉浸融入A暂不实施。
+- **零Agent创世**：当前已有合法Agent，保留未来独立规格，暂不实施。
+- **手机入口**：仍未根治，但ToDesk可替代使用，暂不抢占账本校准。
+
+## 5.1 会话恢复与证据缺口
+
+- **原始会话已找回**：本机rollout JSONL仍在，共31,010条记录；剔除注入项后回查168条实际用户消息。界面历史丢失不再作为状态缺口。
+- **工务世界终态待回读**：子树移动代码能力已关闭，但后续用户定义的最终层级没有当前Graph证据；仓库外早期迁移记录已被后续方案替代，不能作为终态验收。
+- **巡守已恢复**：`atom-2`已恢复为每小时`ACTIVE`；提示先读当前总账、只跑最小受影响链、无变化保持安静，不再沿用旧Slot／4784顺序。
 
 ## 6. Git 保护
 
-- `main`与`origin/main`均包含Shortcut代码交付`a48f33f`；本文档提交后以最新同轨提交为恢复入口。
-- 本轮仅新增/更新 Superpowers文档；不得把 ASDF worktree改动混入`main`。
+- `main`与`origin/main`当前均指向`b36cde8`；本文档提交后以最新同轨提交为恢复入口。
+- 本轮仅新增／更新Superpowers账本文档；不得混入产品代码或私密世界数据。
 - 提交和推送前必须运行`git diff --check`并回读实际 diff；没有验证证据不得宣称完成。
