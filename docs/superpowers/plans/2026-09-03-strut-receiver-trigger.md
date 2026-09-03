@@ -19,6 +19,7 @@
 - 槽体只有当实例后项角色本身是Program角色时，才映射到同一槽模共享Program。
 - 迁移零删除、零直接编辑backing JSON；迁移计划绑定源revision，预检、备份、中央原子提交、重启回读缺一不可。
 - 不改变Transform Trigger、Slot Trigger、delivery结构、claim、失败回滚或权限合同。
+- 按[`../minimality-checkpoints.md`](../minimality-checkpoints.md)执行从属最小化检查：复用现有迁移与事务组件，不引入常驻 Hook、第二套框架或兼容双轨；安全迁移链不得因压缩代码而删减。
 
 ---
 
@@ -97,4 +98,3 @@
 - [ ] **Step 5: Preflight real world**：只读运行部署脚本preflight，记录活跃旧订阅数量、将改写的Program和Graph clauses；不提交生产世界。
 - [ ] **Step 6: Update Superpowers**：记录提交、测试、preflight与精确部署顺序；未实际部署前不得标记生产完成。
 - [ ] **Step 7: Commit**：提交`docs(superpowers): record strut receiver migration proof`。
-

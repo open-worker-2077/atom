@@ -10,6 +10,12 @@
 4. 重新运行计划首个未完成任务要求的最小验证，不从聊天摘要猜状态。
 5. 发现账本与当前证据不一致时，先回查并立即更新 Superpowers，再从首个未完成项继续；不得把“账本过期”当成停止理由。
 
+## 最小化检查
+
+- **唯一框架**：Superpowers 继续独占规格、计划、TDD、调试、验证与完成裁定；Ponytail 不作为第二套框架安装或常态注入。
+- **固定入口**：设计获批后、计划定稿前执行一次方案最小化；提交前执行一次差异复杂度审查。规则与冲突顺序见[`minimality-checkpoints.md`](minimality-checkpoints.md)。
+- **硬边界**：不得以减少代码为由削弱用户定论、Atom 合同、安全、数据守恒、迁移回滚、持久化账本、测试或验证。
+
 ## 当前开发链
 
 - **当前恢复断点**：[`plans/2026-09-03-session-recovery-checkpoint.md`](plans/2026-09-03-session-recovery-checkpoint.md)；ChatGPT软件更新或 Session历史丢失后，先从该文件恢复，不依赖聊天记录或自动压缩摘要。
