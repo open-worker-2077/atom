@@ -202,6 +202,47 @@ test('immersive view always enters the explicitly clicked node while structural 
   assert.deepEqual(Array.from(model.planViewTargets('nested', 'g/explore', [])), ['g/explore']);
 });
 
+test('immersive routing starts from the clicked node real owner domain instead of the active overview', () => {
+  const model = loadModel();
+  const currentStack = [{ path: 'root', depth: 0, crumbs: ['全域'] }];
+  const ownerRoute = [
+    { path: 'root', depth: 0, crumbs: ['全域'], nodeId: 'manage' },
+    { path: 'root/manage', depth: 1, crumbs: ['全域', 'manage'], nodeId: 'work' },
+    { path: 'root/manage/work', depth: 2, crumbs: ['全域', 'manage', 'work'], nodeId: 'personal' }
+  ];
+
+  const context = model.resolveImmersiveOwnerContext({
+    currentPath: 'root/manage',
+    currentDepth: 1,
+    currentCrumbs: ['全域', 'manage'],
+    currentStack,
+    ownerPath: 'root/manage/work/personal',
+    ownerRoute,
+    ownerCrumbs: ['全域', 'manage', 'work', 'personal']
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context)), {
+    path: 'root/manage/work/personal',
+    depth: 3,
+    crumbs: ['全域', 'manage', 'work', 'personal'],
+    stack: ownerRoute
+  });
+  assert.notEqual(context.stack, ownerRoute, 'the planned route owns an independent stack');
+});
+
+test('immersive routing refuses a foreign owner domain without a known route', () => {
+  const model = loadModel();
+  assert.equal(model.resolveImmersiveOwnerContext({
+    currentPath: 'root/manage',
+    currentDepth: 1,
+    currentCrumbs: ['全域', 'manage'],
+    currentStack: [],
+    ownerPath: 'root/unknown',
+    ownerRoute: null,
+    ownerCrumbs: ['全域', 'unknown']
+  }), null);
+});
+
 test('cluster framing centres the opened domain and fits its radius into the safe viewport', () => {
   const model = loadModel();
   assert.deepEqual(

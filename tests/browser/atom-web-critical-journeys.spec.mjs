@@ -88,6 +88,60 @@ test('A-mode double-click activates the visible child instead of its selected ou
     .toBe('overlap-child-id');
 });
 
+test('F-mode enters a visible nested node through its real owner route', async ({ page }) => {
+  const workPath = `root/${hashText('work-id').toString(36)}`;
+  const personalPath = `${workPath}/${hashText('personal-id').toString(36)}`;
+  const knowledge = {
+    revision: 1,
+    nodes: [
+      {
+        id: 'work-id', key: 'root::work-id', path: 'root', atomPath: '办包',
+        label: '办包', detail: '', hasChildren: true
+      },
+      {
+        id: 'personal-id', key: `${workPath}::personal-id`, path: workPath,
+        atomPath: '办包/个务', label: '个务', detail: '', hasChildren: true
+      },
+      {
+        id: 'inside-id', key: `${personalPath}::inside-id`, path: personalPath,
+        atomPath: '办包/个务/内部事项', label: '内部事项', detail: '', hasChildren: false
+      }
+    ],
+    edges: []
+  };
+  await page.route('**/__spatial/api/state?*', (route) => {
+    const requestedPath = new URL(route.request().url()).searchParams.get('path') || 'root';
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, scope: { path: requestedPath }, knowledge })
+    });
+  });
+  await page.goto('/');
+  await page.waitForFunction(() => window.spatialLab?.state().visibleNodeDescriptors
+    .some(({ label }) => label === '办包'));
+  expect(await page.evaluate(() => window.spatialLab.selectByLabel('办包'))).toBe(true);
+  await page.keyboard.press('a');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().viewMode)).toBe('nested');
+  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().interactionTargets
+    .some(({ label }) => label === '个务'))).toBe(true);
+  const personal = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .find(({ label }) => label === '个务');
+
+  await page.keyboard.press('f');
+  await page.mouse.click(personal.clientX, personal.clientY, { button: 'right' });
+
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(personalPath);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors
+    .map(({ label }) => label))).toContain('内部事项');
+  await waitForViewToSettle(page);
+  const parentAction = page.getByRole('button', { name: '上层' });
+  await expect(parentAction).toBeEnabled();
+  await parentAction.click({ force: true });
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(workPath);
+});
+
 test('first domain entry renders its authoritative child nodes on the next visual frame', async ({ page }) => {
   await openIsolatedWorld(page);
   const selected = await page.evaluate(() => window.spatialLab.selectByLabel('atom.json'));

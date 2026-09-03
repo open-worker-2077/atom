@@ -5384,12 +5384,27 @@
   }
 
   function buildDirectDomainRoute(node, parentCamera) {
+    return buildImmersiveDomainRoute(node, parentCamera);
+  }
+
+  function buildImmersiveDomainRoute(node, parentCamera) {
+    const ownerPath = nodeOwnerPath(node, state.currentPath);
+    const ownerContext = viewModeModel.resolveImmersiveOwnerContext({
+      currentPath: state.currentPath,
+      currentDepth: state.depth,
+      currentCrumbs: state.crumbs,
+      currentStack: state.domainStack,
+      ownerPath,
+      ownerRoute: state.domainRoutes.get(ownerPath),
+      ownerCrumbs: pathLabelsForPath(ownerPath)
+    });
+    if (!ownerContext) return null;
+
     const lineage = visualModel.nodeLineage(node);
-    const targetDepth = state.depth + lineage.length;
-    const entries = [];
-    let path = state.currentPath;
-    let depth = state.depth;
-    let crumbs = [...state.crumbs];
+    const entries = cloneDomainStack(ownerContext.stack);
+    let path = ownerContext.path;
+    let depth = ownerContext.depth;
+    let crumbs = [...ownerContext.crumbs];
 
     lineage.forEach((lineageNode, index) => {
       const entryNearDistance = clamp(
@@ -5425,7 +5440,21 @@
       crumbs = [...crumbs, lineageNode.label];
     });
 
-    return { entries, path, depth: targetDepth, crumbs, lineage };
+    return { entries, path, depth, crumbs, lineage };
+  }
+
+  function commitDomainRoute(route, enteredNode, prefetched) {
+    state.menuFor = null;
+    state.domainStack = cloneDomainStack(route.entries);
+    state.currentPath = route.path;
+    state.depth = route.depth;
+    state.crumbs = [...route.crumbs];
+    state.nodes = prefetched && prefetched.path === route.path
+      ? prefetched.nodes
+      : createChildDomainNodes(enteredNode, state.currentPath, state.depth);
+    // Publish only after every active-domain field has been replaced together.
+    publishCurrentView();
+    rememberDomainRoute(state.currentPath, state.domainStack);
   }
 
   function buildShortcutTargetRoute(shortcutNode, parentCamera) {
@@ -5645,31 +5674,18 @@
     const parentCamera = cameraSnapshot();
     const route = isShortcut
       ? buildShortcutTargetRoute(node, parentCamera)
-      : buildDirectDomainRoute(node, parentCamera);
+      : buildImmersiveDomainRoute(node, parentCamera);
     if (!route) {
       announce("快捷目标不可用，已留在当前位置");
       return false;
     }
     const enteredNode = route.targetNode || node;
     const prefetched = !isShortcut && route.entries.length === 1 ? prefetchChildDomain(node) : null;
-    const nextPath = route.path;
-    state.menuFor = null;
     node.peekOpen = false;
-    if (isShortcut) state.domainStack = route.entries;
-    else state.domainStack.push(...route.entries);
-    state.depth = route.depth;
-    state.currentPath = nextPath;
-    state.crumbs = route.crumbs;
-    state.nodes = prefetched && prefetched.path === nextPath
-      ? prefetched.nodes
-      : isShortcut
-        ? createChildDomainNodes(enteredNode, state.currentPath, state.depth)
-        : createChildDomainNodes(node, state.currentPath, state.depth);
+    commitDomainRoute(route, enteredNode, prefetched);
     // Announce the new scope before the camera tween finishes so the bridge can
     // fetch its authoritative children during the transition. The history entry
     // still records the settled camera in the tween completion callback below.
-    publishCurrentView();
-    rememberDomainRoute(state.currentPath, state.domainStack);
     state.selected = null;
     state.focused = null;
     state.hovered = null;

@@ -228,6 +228,41 @@
     return Object.freeze(selected.length ? selected : [clickedKey]);
   }
 
+  function cloneRouteEntry(entryInput) {
+    const entry = entryInput || {};
+    return Object.freeze({
+      ...entry,
+      crumbs: Array.isArray(entry.crumbs) ? Object.freeze([...entry.crumbs]) : entry.crumbs,
+      camera: entry.camera ? Object.freeze({
+        ...entry.camera,
+        target: entry.camera.target ? Object.freeze({ ...entry.camera.target }) : entry.camera.target
+      }) : entry.camera,
+      entryDirection: entry.entryDirection
+        ? Object.freeze({ ...entry.entryDirection })
+        : entry.entryDirection
+    });
+  }
+
+  function resolveImmersiveOwnerContext(input = {}) {
+    const currentPath = typeof input.currentPath === "string" ? input.currentPath : "";
+    const ownerPath = typeof input.ownerPath === "string" ? input.ownerPath : "";
+    if (!ownerPath) return null;
+
+    const isCurrentOwner = ownerPath === currentPath;
+    const sourceStack = isCurrentOwner ? input.currentStack : input.ownerRoute;
+    const crumbs = isCurrentOwner ? input.currentCrumbs : input.ownerCrumbs;
+    if (!Array.isArray(sourceStack) || !Array.isArray(crumbs)) return null;
+
+    return Object.freeze({
+      path: ownerPath,
+      depth: isCurrentOwner
+        ? Math.max(0, Number(input.currentDepth) || 0)
+        : sourceStack.length,
+      crumbs: Object.freeze([...crumbs]),
+      stack: Object.freeze(sourceStack.map(cloneRouteEntry))
+    });
+  }
+
   function clusterDomainFrame(clusterInput, optionsInput) {
     var cluster = clusterInput || {};
     var options = optionsInput || {};
@@ -329,6 +364,7 @@
     planPeerBatch,
     toggleSelectionKey,
     planViewTargets,
+    resolveImmersiveOwnerContext,
     clusterDomainFrame,
     planContextLevelExpansion,
     planContextLevelCollapse,

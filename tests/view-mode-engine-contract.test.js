@@ -107,6 +107,22 @@ test('F uses the clicked node despite batch selection and Escape clears the batc
   assert.match(cancel, /batchSelectionKeys\.clear\(\)/);
 });
 
+test('immersive entry commits the real owner route as one active-domain transition', () => {
+  const enter = functionSource('enterNode');
+  const route = functionSource('buildImmersiveDomainRoute');
+  const commit = functionSource('commitDomainRoute');
+
+  assert.match(route, /resolveImmersiveOwnerContext/);
+  assert.match(enter, /buildImmersiveDomainRoute\(node, parentCamera\)/);
+  assert.match(enter, /commitDomainRoute\(route, enteredNode/);
+  assert.match(commit, /state\.domainStack\s*=/);
+  assert.match(commit, /state\.currentPath\s*=/);
+  assert.match(commit, /state\.depth\s*=/);
+  assert.match(commit, /state\.crumbs\s*=/);
+  assert.match(commit, /state\.nodes\s*=/);
+  assert.match(commit, /publishCurrentView\(\)/);
+});
+
 test('successful A S D expansion frames the resulting child domain', () => {
   const toggle = functionSource('toggleClusterChildDomain');
   assert.match(toggle, /frameClusterDomain\(childPath/);
