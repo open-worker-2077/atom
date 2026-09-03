@@ -140,7 +140,6 @@ function rewriteFacts(sourceFacts, subscriptions, rewrittenPrograms) {
           if (next['then@current'] === true) {
             const receivers = receiversFor(owner.path);
             if (receivers.length) {
-              delete next['then@current'];
               for (const receiver of receivers) {
                 endpoints.push({ 'thing@program': receiver.path });
                 matched.add(`${receiver.path}\0${owner.path}`);

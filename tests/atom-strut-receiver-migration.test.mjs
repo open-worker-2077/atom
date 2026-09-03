@@ -51,6 +51,22 @@ test('expands one subscribed fact consequent to every explicit receiver Program'
   assert.equal(plan.summary.migratedPrograms, 2);
 });
 
+test('preserves a current structural consequent while adding its explicit receiver Program', () => {
+  const source = [
+    atom('thing', 'Source'),
+    atom('thing', 'Result', '', [], [{
+      if: [{ thing: 'Source' }],
+      'then@current': true
+    }]),
+    receiver('Receiver')
+  ];
+
+  const plan = planStrutReceiverMigration(source);
+
+  assert.equal(plan.facts[1].strut[0]['then@current'], true);
+  assert.deepEqual(plan.facts[1].strut[0].then, [{ 'thing@program': 'Receiver' }]);
+});
+
 test('resolves a relative slot-model node and points the clause at the shared Program role', () => {
   const source = [atom('thing', 'Body', '', [
     atom('thing', 'Model', '', [
