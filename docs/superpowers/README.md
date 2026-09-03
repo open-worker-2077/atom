@@ -22,7 +22,7 @@
 
 - **当前恢复断点**：[`plans/2026-09-03-session-recovery-checkpoint.md`](plans/2026-09-03-session-recovery-checkpoint.md)；ChatGPT软件更新或 Session历史丢失后，先从该文件恢复，不依赖聊天记录或自动压缩摘要。
 - **已撤回独立门禁**：[`specs/2026-09-04-atom-development-continuity-gates-design.md`](specs/2026-09-04-atom-development-continuity-gates-design.md)记录为何不为Atom另建连续性门禁；通用补充位于工作区`D:\Project\〇\AGENTS.md`，原Superpowers技能步骤保持完整。
-- **当前主干状态**：Strut触发单轨化、Web断线revision补账、Shortcut语义编辑、ASDF设置集成与内部槽位标识隔离均已部署。手机正式域名的服务端链路当前正常，终端`pixel-10a`在Tailscale中离线，须先恢复手机tailnet连接再做浏览器验收；该局部外部阻塞不拦住后续排队开发。A模式收束现为下一可执行项，零Agent创世排在其后；“延后”只表示低优先级，不表示取消或永不实施。不得重新引入Strut`nodes`、Shortcut手填ID或把内部槽位身份重新投影成普通名称。
+- **当前主干状态**：Strut触发单轨化、Web断线revision补账、Shortcut语义编辑、ASDF设置集成与内部槽位标识隔离均已部署。当前主线是已批准的A模式收束：右键单击普通向内剖开、双击沉浸向内剖开、当前团空白右键单击返回一层并非沉浸；S、D退出运行路径，F融入A。改构前远程回退点为`pre-a-mode-consolidation-20260904`。“🔥🔥🔥ESG计划_按逻辑_xlsx”如复现已批准功能的生产故障则优先修复，但不得据此擅改Graph本体定论。手机终端验收仅被`pixel-10a`离线局部阻塞，零Agent创世继续排在A模式之后；“延后”只表示低优先级，不表示取消。不得重新引入Strut`nodes`、Shortcut手填ID或把内部槽位身份重新投影成普通名称。
 - **2026-09-03 已部署**：Slot相邻层级信号、Program relocation closure、交互原子隔离、独立截止、迟到提交防护与短权威提交临界区均已合入并推送`main@ead30e2`。系统测试`226/226 PASS`；真实4784重启后 health正常，`explore 🧊manage`最终约256ms。此前“health快但命令长期挂起”的P0已关闭。
 
 - **首要 Graph 纠偏**：Strut 判定 Program 必须内嵌在 clause `if`，取得复合前项事实与本次规范化 Transform `$` 动作信封；`$click`只是注册动作族的首个用例，CLI/Web 点击统一为 `transform {"thing$click":"EXACT路径"}`，新增动作不得修改 Strut/runtime 主干。旧外部 `thing@program` 判定与独立 click endpoint/trigger 方案均已退役。权威合同见[`specs/2026-08-31-atom-world-program-design.md`](specs/2026-08-31-atom-world-program-design.md) §3.2、§4.1；当前实施账本见[`plans/2026-09-02-inline-strut-transform-actions.md`](plans/2026-09-02-inline-strut-transform-actions.md)。
@@ -36,7 +36,7 @@
 - **相关世界合同**：[`specs/2026-08-31-atom-world-program-design.md`](specs/2026-08-31-atom-world-program-design.md)
 - **相关授权合同**：[`specs/2026-08-31-atom-agent-authorization-design.md`](specs/2026-08-31-atom-agent-authorization-design.md)
 
-当前任务绑定每小时`Atom 目标巡守`（automation id：`atom-2`），状态已恢复为`ACTIVE`；每轮先读当前需求总账，并遵守“无变化保持安静、最小受影响链、CLI submit只作线索”的边界，不再沿用已关闭的Slot／4784旧优先级。
+当前任务绑定每小时`Atom 目标巡守`（automation id：`atom-2`），状态`ACTIVE`；提示已更新为优先接收ESG生产急用功能反馈、先读唯一总账、即时入账、默认最小受影响链且禁止局部问题导致全局停工。
 
 ## Web 场景状态
 
