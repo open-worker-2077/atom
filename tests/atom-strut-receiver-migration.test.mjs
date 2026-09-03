@@ -24,6 +24,35 @@ const receiver = (name, node = 'Result') => atom('thing@program', name, [
   `trigger("strut", {"nodes":[${JSON.stringify(node)}]}, receive)`
 ].join('\n'));
 
+const migratedReceiver = (name) => atom('thing@program', name, [
+  'def receive(delivery):',
+  '    return delivery["decision"]',
+  'trigger("strut", {}, receive)'
+].join('\n'));
+
+test('a completed receiver-owned world produces an empty repeatable migration plan', () => {
+  const source = [
+    atom('thing', 'Source', '', [], [{
+      'if@current': true,
+      then: [{ 'thing@program': 'Receiver' }]
+    }]),
+    migratedReceiver('Receiver')
+  ];
+  const snapshot = structuredClone(source);
+
+  const plan = planStrutReceiverMigration(source);
+
+  assert.deepEqual(source, snapshot, 'repeatable preflight must not mutate authoritative facts');
+  assert.deepEqual(plan.facts, source);
+  assert.deepEqual(plan.summary, {
+    migratedPrograms: 0,
+    migratedSubscriptions: 0,
+    rewrittenConsequents: 0
+  });
+  assert.deepEqual(plan.changedPaths, []);
+  assert.equal(plan.expectedRevision, plan.nextRevision);
+});
+
 test('replaces one subscribed fact consequent with its receiver Program and rewrites only the trigger parameters', () => {
   const source = [
     atom('thing', 'Source', '', [], [{

@@ -98,3 +98,8 @@
 - [x] **Step 5: Preflight real world**：只读运行部署脚本preflight，记录活跃旧订阅数量、将改写的Program和Graph clauses；不提交生产世界。
 - [x] **Step 6: Update Superpowers**：记录提交、测试、preflight与精确部署顺序；未实际部署前不得标记生产完成。
 - [x] **Step 7: Commit**：提交`docs(superpowers): record strut receiver migration proof`。
+
+### 部署后重复预检
+
+- [x] **安全空操作**：迁移AST识别现行`trigger("strut", {}, main)`为已迁移合同，不把它误报为动态旧合同；仍对动态参数、非函数入口和多Trigger失败封闭。
+- [x] **验证**：迁移专项`11/11 PASS`。生产世界只读预检`strut-completion-audit-20260903-02`退出码0，源／目标revision均为`sha256:d269cf...a27f`，迁移Program、订阅与后项均为0，未写生产事实。

@@ -63,6 +63,18 @@ def analyze(program):
         })
     call = calls[0]
     parameters = call.args[1]
+    entrypoint = call.args[2].id if isinstance(call.args[2], ast.Name) else None
+    if not entrypoint:
+        fail("STRUT_RECEIVER_MIGRATION_DYNAMIC_TRIGGER", "Strut entrypoint must be a function name", {
+            "path": program["path"]
+        })
+    if isinstance(parameters, ast.Dict) and not parameters.keys:
+        return {
+            "path": program["path"],
+            "status": "current",
+            "entrypoint": entrypoint,
+            "source": source,
+        }
     if not isinstance(parameters, ast.Dict) or len(parameters.keys) != 1 \
             or literal_string(parameters.keys[0]) != "nodes" \
             or not isinstance(parameters.values[0], (ast.List, ast.Tuple)):
@@ -72,11 +84,6 @@ def analyze(program):
     nodes = [literal_string(node) for node in parameters.values[0].elts]
     if not nodes or any(node is None or not node for node in nodes) or len(set(nodes)) != len(nodes):
         fail("STRUT_RECEIVER_MIGRATION_DYNAMIC_TRIGGER", "Legacy Strut nodes must be non-empty unique strings", {
-            "path": program["path"]
-        })
-    entrypoint = call.args[2].id if isinstance(call.args[2], ast.Name) else None
-    if not entrypoint:
-        fail("STRUT_RECEIVER_MIGRATION_DYNAMIC_TRIGGER", "Legacy Strut entrypoint must be a function name", {
             "path": program["path"]
         })
     start = source_offset(source, parameters.lineno, parameters.col_offset)

@@ -84,6 +84,7 @@
 - **生产预检**：attempt `strut-final-preflight-20260903-02`只读成功；migration `strut-receiver-2871846a8d22a2d58790`；源revision `sha256:ee3ced5db6bbad898e1f113b7a032080c8772f00c15024688e6c576a6bb3a5ed`，目标revision `sha256:d269cf00aeabdd88c612488da0956f67272af263b7f6a42454ea92a23855a27f`；精确命中ESG步骤02—05四个`接棒`Program、4个旧订阅和4个Graph后项；未写生产世界。
 - **生产迁移**：`strut-production-20260903-01`在4784停机窗口先生成私有备份，再把4个旧订阅及4个Graph后项原子迁移；世界从`sha256:ee3ced...a5ed`提交到`sha256:d269cf...a27f`，部署回执位于`C:\Users\worker\AppData\Local\AtomGraph\worlds\primary\migration-backups\strut-receiver\strut-receiver-2871846a8d22a2d58790\strut-production-20260903-01\deployment-receipt.json`。
 - **部署验收**：4784 revision `7269`、投影`published`；公开CLI回读步骤02—05四个`接棒`均为`trigger("strut", {}, main)`，对应批次Strut `then`均显式指向自身接棒Program。首次重启暴露“新代码先于旧世界迁移”的启动门槛，迁移后重新启动即健康；未发生迁移回滚。
+- **重复预检**：部署后迁移工具曾把现行空参数Trigger误报为动态旧合同；现已按TDD修正为安全空操作。迁移专项`11/11 PASS`；生产只读预检`strut-completion-audit-20260903-02`退出码0，源／目标revision同为`sha256:d269cf...a27f`，迁移计数`0/0/0`且未写事实。
 - **精确后续顺序**：Shortcut语义编辑完成集成部署后，处理手机正式域名验收、ASDF设置分支及内部名称泄漏。
 
 ### Web/CLI局部视图即时一致性（已部署）
