@@ -1,6 +1,6 @@
 # Atom 当前开发恢复断点
 
-**更新时间：** 2026-09-03（Shortcut语义改向已提交、集成、推送、部署并在线回读）
+**更新时间：** 2026-09-03（手机统一域名服务端DNS断点已修复并在线回读）
 **权威分支：** `main`
 **当前代码交付：** `a48f33f`；本文档提交后以同一`main/origin/main`最新提交为恢复入口
 **历史实现分支：** `feat/slot-signal`已指向`ead30e2`，不再是待集成分支
@@ -14,7 +14,14 @@
 - **✅ Strut触发单轨化**：Graph后项决定接收Program，接收方以`trigger("strut", {}, main)`自主响应；旧`nodes`合同已从运行时与生产ESG四条接棒链清除。
 - **✅ Web revision补账**：外部CLI/Program提交在SSE断线期间漏掉通知后，EventSource重连会立即核对当前路径与展开路径，并一次导入同一最新revision；不依赖轮询或全世界刷新。
 - **✅ Shortcut激活与语义编辑**：深层激活真实Chromium`5/5 PASS`；`thing.lnk.EXACT_TARGET`只改引用自身并保持内部identity，Web不再暴露合同JSON或要求ID。
-- **🟠 次序待办**：手机正式域名验收；ASDF设置分支评审修复及集成；用户语义名称泄漏内部`@slot-role-*`身份。
+- **🟠 次序待办**：手机只剩设备上线后的终端验收；当前代码首项为ASDF设置分支评审修复及集成，其后处理用户语义名称泄漏内部`@slot-role-*`身份。
+
+### 0.1 手机统一入口最新证据
+
+- **根因**：tailnet的MagicDNS与Serve均正常，但本机Tailscale偏好`CorpDNS=false`，导致系统解析统一域名时返回NXDOMAIN；Tailscale内置查询一直可解析到`100.116.206.105`。
+- **修复**：执行`tailscale set --accept-dns=true`恢复系统使用Tailscale DNS；不改变Atom世界、网关身份白名单或正式入口。
+- **回读**：`Resolve-DnsName worker.tail33a2eb.ts.net`返回`100.116.206.105`；`https://worker.tail33a2eb.ts.net/__spatial/api/health`返回200、revision 7270、投影published。
+- **剩余边界**：`pixel-10a`当前为offline，不能以电脑回读替代手机终端验收；设备上线后只需用同一正式域名完成一次只读Graph请求。
 
 ## 1. 当前唯一首要功能
 

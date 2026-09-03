@@ -19,7 +19,7 @@
 ## 当前开发链
 
 - **当前恢复断点**：[`plans/2026-09-03-session-recovery-checkpoint.md`](plans/2026-09-03-session-recovery-checkpoint.md)；ChatGPT软件更新或 Session历史丢失后，先从该文件恢复，不依赖聊天记录或自动压缩摘要。
-- **当前主干状态**：Strut触发单轨化、Web断线revision补账与Shortcut语义编辑均已部署关闭。下一项按恢复断点处理手机正式域名验收，再回到ASDF设置分支与内部名称泄漏；不得重新引入Strut`nodes`或Shortcut手填ID。
+- **当前主干状态**：Strut触发单轨化、Web断线revision补账与Shortcut语义编辑均已部署关闭。手机正式域名的服务端DNS断点已修复并由统一HTTPS入口回读200，待手机重新上线做终端验收；当前代码首项回到ASDF设置分支，再处理内部名称泄漏。不得重新引入Strut`nodes`或Shortcut手填ID。
 - **2026-09-03 已部署**：Slot相邻层级信号、Program relocation closure、交互原子隔离、独立截止、迟到提交防护与短权威提交临界区均已合入并推送`main@ead30e2`。系统测试`226/226 PASS`；真实4784重启后 health正常，`explore 🧊manage`最终约256ms。此前“health快但命令长期挂起”的P0已关闭。
 
 - **首要 Graph 纠偏**：Strut 判定 Program 必须内嵌在 clause `if`，取得复合前项事实与本次规范化 Transform `$` 动作信封；`$click`只是注册动作族的首个用例，CLI/Web 点击统一为 `transform {"thing$click":"EXACT路径"}`，新增动作不得修改 Strut/runtime 主干。旧外部 `thing@program` 判定与独立 click endpoint/trigger 方案均已退役。权威合同见[`specs/2026-08-31-atom-world-program-design.md`](specs/2026-08-31-atom-world-program-design.md) §3.2、§4.1；当前实施账本见[`plans/2026-09-02-inline-strut-transform-actions.md`](plans/2026-09-02-inline-strut-transform-actions.md)。
@@ -40,7 +40,7 @@
 以下场景的产品合同保存在[`specs/2026-08-31-atom-web-spatial-design.md`](specs/2026-08-31-atom-web-spatial-design.md)，实施前分别执行 Superpowers brainstorming；不得在当前迁窗任务中顺手修改：
 
 - **已完成**：输入层识别同一 exact Thing 的无上限点击次数并提交统一 Transform `thing$click`动作；Strut 内嵌`if` Program按动作信封判定，三点击只是条件用例，没有独立 click 调度旁路。旧`feat/programmable-click-trigger`分支不合入。
-- **待手机验收**：唯一正式入口是`https://worker.tail33a2eb.ts.net/`，手机访问仍失败；服务端链已通，继续从手机 DNS/浏览器边界取证。`100.116.206.105:4786`只保留为内部诊断探针，不是用户入口、替代地址或完成方案。
+- **待手机终端验收**：唯一正式入口是`https://worker.tail33a2eb.ts.net/`。2026-09-03确认tailnet MagicDNS已启用但本机`accept-dns`被关闭；恢复后系统DNS解析到`100.116.206.105`，统一HTTPS health返回200、revision 7270。Pixel当前离线，待其重新上线完成真机只读Graph验收。`100.116.206.105:4786`只保留为内部诊断探针，不是用户入口、替代地址或完成方案。
 - **已完成**：Shortcut普通、未访问深层、A模式、坏链保持与渐进远端路线真实浏览器旅程`5/5 PASS`。
 - **待修—Web 即时一致性**：无论改动来自 Web 还是 CLI，Transform提交成功后当前局部视图仍可能保留旧节点名称、正文或结构，约两分钟后才一致。须修复权威 revision发布→最小受影响路径缓存失效→局部投影刷新→Web对账闭环；轮询最终收敛不算完成。
 - **已完成—Shortcut语义编辑**：人工与Agent使用`thing.lnk.EXACT_TARGET`按语义路径改向；系统消歧、复用Graph鉴权并保持内部identity。Web只显示名称和目标路径，不要求手填ID，也不把合同JSON当正文编辑。

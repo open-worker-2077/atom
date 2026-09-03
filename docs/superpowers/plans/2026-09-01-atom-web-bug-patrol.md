@@ -108,6 +108,7 @@
 - [x] **Step 1: Reproduce from the real boundary**：4784 health、4785 身份网关任务、Serve HTTPS 根路径/health、手机 peer 与对等 ping 均通过；公网/系统 DNS 对私有名称返回 NXDOMAIN，Tailscale 内部 DNS query 返回`100.116.206.105`。
 - [x] **Step 2: Locate the first broken hop**：服务端 TLS、Serve、4785、4784及手机对等链路均通；剩余首个未证实边界是手机是否把`*.ts.net`交给 Tailscale 内部 DNS，而非 Android Private DNS/浏览器安全 DNS。
 - [x] **Step 3: Keep the diagnostic probe isolated**：诊断网关任务 Running，监听`100.116.206.105:4786`且只批准手机`100.102.183.62`；电脑来源访问返回 403，证明未放宽白名单。该探针不是用户入口，正式合同始终是 HTTPS 域名。
+- [x] **Step 3.1: Repair host MagicDNS adoption**：2026-09-03确认tailnet MagicDNS开启、内部查询正确，但本机Tailscale DNS偏好关闭；启用`accept-dns`后系统解析正式域名成功，统一HTTPS health返回200、revision 7270。服务端统一入口已闭环。
 - [ ] **Step 4: Verify on phone**：以用户手机成功打开并完成一次只读 Graph 请求为最终验收；自动化回归仅作辅助证据。
 
 ### Task 6: Shortcut 语义改向
