@@ -26,12 +26,12 @@ test('CLI Transform $click executes the Strut-owned predicate and delivers true 
       "    return (context['antecedents'][0]['situation'] == '42'",
       "            and context['transform']['action'] == 'click')"
     ].join('\n') }],
-    then: [{ thing: 'Result' }]
+    then: [{ 'thing@program': 'Subscriber' }]
   }]);
   const subscriber = atom('Subscriber', [
     'def receive(delivery):',
     '    message({"level":"info","text":"true→" + delivery["consequentPath"]})',
-    'trigger("strut", {"nodes":["Result"]}, receive)'
+    'trigger("strut", {}, receive)'
   ].join('\n'), [], 'program');
   const world = [source, atom('Result', 'locked'), subscriber];
   await fs.writeFile(contextFile, JSON.stringify(world, null, 2), 'utf8');
@@ -46,7 +46,7 @@ test('CLI Transform $click executes the Strut-owned predicate and delivers true 
 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.changed, false);
-  assert.deepEqual(result.messages.map(({ text }) => text), ['true→Result']);
+  assert.deepEqual(result.messages.map(({ text }) => text), ['true→Subscriber']);
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), world);
 });
 
@@ -56,21 +56,22 @@ test('a compound Strut receives every upstream fact and false produces no downst
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   const hub = atom('Hub', 'pending', [{
+    'if@current': true,
     if: [{ and: [
       { thing: 'Price' },
       { thing: 'Stock' },
       { program: [
         'def main(context):',
-        "    values = [item['situation'] for item in context['antecedents']]",
-        "    return values == ['101', '0']"
+        "    values = {item['thing']: item['situation'] for item in context['antecedents']}",
+        "    return values['Price'] == '101' and values['Stock'] == '0'"
       ].join('\n') }
     ] }],
-    'then@current': true
+    then: [{ 'thing@program': 'Subscriber' }]
   }]);
   const subscriber = atom('Subscriber', [
     'def receive(delivery):',
     '    message({"level":"info","text":"unexpected"})',
-    'trigger("strut", {"nodes":["Hub"]}, receive)'
+    'trigger("strut", {}, receive)'
   ].join('\n'), [], 'program');
   await fs.writeFile(contextFile, JSON.stringify([
     atom('Price', '100'), atom('Stock', '0'), hub, subscriber
@@ -99,12 +100,12 @@ test('an ordinary upstream Transform can make the inline predicate true and adva
       'def main(context):',
       "    return context['antecedents'][0]['situation'] == '✅'"
     ].join('\n') }],
-    then: [{ thing: '阶段二' }]
+    then: [{ 'thing@program': '总控' }]
   }]);
   const subscriber = atom('总控', [
     'def receive(delivery):',
     "    transform({'thing':'阶段二','situation.rep.🏃‍♀️':None})",
-    'trigger("strut", {"nodes":["阶段二"]}, receive)'
+    'trigger("strut", {}, receive)'
   ].join('\n'), [], 'program');
   await fs.writeFile(contextFile, JSON.stringify([
     source, atom('阶段二', '⌛️🔒'), subscriber

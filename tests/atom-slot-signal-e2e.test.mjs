@@ -177,11 +177,11 @@ test('down signal triggers only a matching direct child and atomically persists 
     program('StrutObserver', [
       'def observe(delivery):',
       '    transform({"thing":"StrutObserved","situation.rep.observed":None})',
-      'trigger("strut", {"nodes":["StrutResult"]}, observe)'
+      'trigger("strut", {}, observe)'
     ].join('\n')),
     {
       ...atom('SenderTarget', 'before'),
-      strut: [{ 'if@current': true, then: [{ thing: 'StrutResult' }] }]
+      strut: [{ 'if@current': true, then: [{ 'thing@program': 'StrutObserver' }] }]
     },
     atom('ObservedTarget', 'before'),
     atom('StrutResult', 'before'),
