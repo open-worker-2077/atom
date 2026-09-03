@@ -27,6 +27,7 @@ const DEFAULT_MAX_WORKERS = 16;
 const workerFile = path.join(path.dirname(fileURLToPath(import.meta.url)), 'program-worker.py');
 const preparedRecordSnapshots = new WeakMap();
 const preparedProgramSnapshots = new WeakMap();
+const preparedProgramFingerprints = new WeakMap();
 const isolatedProgramPathsByRecords = new WeakMap();
 
 function withoutGraphRoot(graphDocument, graphPath) {
@@ -201,6 +202,9 @@ function worldRecords(atoms) {
     isolatedProgramPathsByRecords.set(records, new Set(legacy.isolatedProgramPaths ?? []));
   }
   const prepared = freezePrepared(records);
+  preparedProgramFingerprints.set(prepared, {
+    byRef: new Map(prepared.map(record => [record.ref, record])), values: new Map()
+  });
   if (legacy) isolatedProgramPathsByRecords.set(prepared, new Set(legacy.isolatedProgramPaths ?? []));
   preparedRecordSnapshots.set(atoms, { worldRevision, records: prepared });
   return prepared;
@@ -288,8 +292,14 @@ function fingerprint(records, programs, agentOrigin, isolateFailures) {
 }
 
 function programSetFingerprint(programs, isolateFailures, records, agentProgramPaths) {
-  const recordsByRef = new Map(records.map((record) => [record.ref, record]));
-  return crypto.createHash('sha256').update(JSON.stringify({
+  const prepared = preparedProgramFingerprints.get(records);
+  const cache = prepared && programs.every(program => prepared.byRef.get(program.ref) === program)
+    ? prepared.values : null;
+  const key = cache ? JSON.stringify([isolateFailures,
+    programs.map(program => [program.ref, agentProgramPaths.has(program.path)])]) : null;
+  if (cache?.has(key)) return cache.get(key);
+  const recordsByRef = prepared?.byRef ?? new Map(records.map((record) => [record.ref, record]));
+  const fingerprint = crypto.createHash('sha256').update(JSON.stringify({
     programs: programs.map((program) => {
       const definition = semanticRecord(program, recordsByRef);
       // A declared Agent Program is the security/window declaration carried by the
@@ -301,6 +311,11 @@ function programSetFingerprint(programs, isolateFailures, records, agentProgramP
     }),
     isolateFailures
   })).digest('hex');
+  if (cache) {
+    if (cache.size >= 128) cache.delete(cache.keys().next().value);
+    cache.set(key, fingerprint);
+  }
+  return fingerprint;
 }
 
 function sourceDefinitionFingerprint(programs) {
