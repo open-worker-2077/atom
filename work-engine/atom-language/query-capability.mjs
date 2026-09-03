@@ -122,6 +122,15 @@ export function createAccessController(atoms, options = {}) {
     : prepareExploreWorld(atoms);
   const slotStructure = prepareSlotStructureWorld(atoms);
   const graphLocks = [...(options.graphLocks ?? []), ...slotStructure.locks];
+  const graphLocksByAction = new Map();
+  const locksForAction = (action) => {
+    if (!graphLocksByAction.has(action)) {
+      graphLocksByAction.set(action, graphLocks.filter((lock) => (
+        Array.isArray(lock.actions) && lock.actions.includes(action)
+      )));
+    }
+    return graphLocksByAction.get(action);
+  };
   const slotStructureRestricted = slotStructure.locks.length > 0;
   if ((!legacyAccess || legacyAccess.global === true) && !programLockIndex
     && !fixedAgentWindow && !slotStructureRestricted && graphLocks.length === 0) {
@@ -193,7 +202,7 @@ export function createAccessController(atoms, options = {}) {
           agentPath: fixedAgentWindow ? agentPath : null,
           targetPath,
           operation: operation === 'read' ? 'explore' : 'transform',
-          locks: graphLocks,
+          locks: locksForAction(operation === 'read' ? 'explore' : 'transform'),
           labels: options.agentSecurity?.labels ?? [],
           capabilities,
           windowLifecycle: actor.windowLifecycle ?? null
