@@ -251,6 +251,12 @@ export function createInteractionRuntime({
         history: intent.history
       });
     }
+    let committedNotified = false;
+    const notifyCommitted = (result) => {
+      if (committedNotified || result?.ok !== true || result?.changed !== true) return;
+      committedNotified = true;
+      options.onCommitted?.(withInteractionId(structuredClone(result), intent.correlationId));
+    };
     const executeWorld = (source, currentInteraction, currentOptions = options) => world.execute({
       source,
       interaction: currentInteraction,
@@ -259,6 +265,7 @@ export function createInteractionRuntime({
       ...(currentOptions.bypassProgramLocks ? { bypassProgramLocks: true } : {}),
       ...(currentOptions.programMode ? { programMode: currentOptions.programMode } : {}),
       ...(currentOptions.signal ? { signal: currentOptions.signal } : {}),
+      ...(typeof options.onCommitted === 'function' ? { onCommitted: notifyCommitted } : {}),
       programRuntime
     });
     const worldStartedAt = performance.now();
@@ -309,7 +316,7 @@ export function createInteractionRuntime({
     }
     if (result?.ok === true && result?.changed === true
       && typeof options.onCommitted === 'function') {
-      options.onCommitted(structuredClone(result));
+      notifyCommitted(result);
     }
     if (options.publish !== false && result?.changed !== false) {
       result = withProjectionOutcome(result, scheduleProjection(result));

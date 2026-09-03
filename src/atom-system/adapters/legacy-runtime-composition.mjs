@@ -415,6 +415,12 @@ export function createLegacyRuntimeComposition(options) {
           contextFile,
           projectionFile: graphFile,
           programScheduler: programRuntime,
+          ...(typeof request.onCommitted === 'function' ? {
+            onCommitted: async (committed) => {
+              await refreshResolutionManifest();
+              return request.onCommitted(committed);
+            }
+          } : {}),
           ...(diagnostics ? { diagnosticRecorder: diagnostics } : {})
         });
         if (!resolutionManifestReady || result?.changed === true) await refreshResolutionManifest();

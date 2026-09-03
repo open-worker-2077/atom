@@ -8,6 +8,7 @@ import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-rev
 import { executeAtomCommandEndpoint } from '../work-engine/atom-language/cli.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
 
 if (process.argv.includes('--trace')) process.env.ATOM_PERF_TRACE = '1';
 const cleanupCopy = process.argv.includes('--cleanup');
@@ -50,7 +51,11 @@ let running;
 let monitor;
 try {
   const copiedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  const programScheduler = createProgramRuntimeScheduler();
+  const programScheduler = createProgramRuntimeScheduler({
+    projectionRepository: createJsonProgramProjectionRepository({
+      file: path.join(directory, 'program-projection.json')
+    })
+  });
   const agentSecurity = await programScheduler.rebuildAgentSecurity(copiedWorld);
   const requestedAgent = argument('--agent');
   const agentPath = requestedAgent ?? agentSecurity.keys().next().value;

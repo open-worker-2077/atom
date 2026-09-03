@@ -751,6 +751,19 @@ async function persistChangedGraph({
 }
 
 export async function executeAtomLanguage(options = {}) {
+  const postcommit = typeof options.onCommitted === 'function' ? [] : null;
+  const result = await executeAtomLanguageInteraction(options, postcommit);
+  if (postcommit?.length && result?.ok === true && result.changed === true) {
+    await options.onCommitted(structuredClone(result));
+  }
+  for (const finish of postcommit ?? []) {
+    const warnings = await finish();
+    result.warnings = mergeWarnings([...(result.warnings ?? []), ...warnings]);
+  }
+  return result;
+}
+
+async function executeAtomLanguageInteraction(options, postcommit) {
   const pendingStrutDeliveryClaims = new Set();
   const pendingSlotSignalClaims = new Set();
   function rememberStrutDeliveryClaims(keys = []) {
@@ -2901,61 +2914,66 @@ export async function executeAtomLanguage(options = {}) {
       });
       return receipt;
     }
-    try {
-      let rebased = null;
-      const projectionSettleStartedAt = performance.now();
-      if (projectionRebase && options.programScheduler?.rebaseContextFreeProjection) {
-        try {
-          rebased = await options.programScheduler.rebaseContextFreeProjection(
-            projectionRebase.previousAtoms,
-            candidateAtoms,
-            {
-              changedPaths: projectionRebase.changedPaths,
-              isolateFailures: true,
-              previousRevision: receipt?.beforeRevision ?? revisionBefore,
-              revision: receipt?.afterRevision ?? revisionOf(candidateAtoms)
-            }
-          );
-        } catch {
-          rebased = null;
+    async function finishProgramProjection() {
+      try {
+        let rebased = null;
+        const projectionSettleStartedAt = performance.now();
+        if (projectionRebase && options.programScheduler?.rebaseContextFreeProjection) {
+          try {
+            rebased = await options.programScheduler.rebaseContextFreeProjection(
+              projectionRebase.previousAtoms,
+              candidateAtoms,
+              {
+                changedPaths: projectionRebase.changedPaths,
+                isolateFailures: true,
+                previousRevision: receipt?.beforeRevision ?? revisionBefore,
+                revision: receipt?.afterRevision ?? revisionOf(candidateAtoms)
+              }
+            );
+          } catch {
+            rebased = null;
+          }
         }
-      }
-      const settleWarnings = rebased?.persisted === true
-        ? []
-        : await settleContextFreeProgramProjectionForWorld(candidateAtoms);
-      if (preparedRuntimeRecordsPromise) {
-        try {
-          const preparedRuntimeRecords = await preparedRuntimeRecordsPromise;
-          await options.programScheduler?.installPreparedRuntimeIndexes?.(
-            candidateAtoms,
-            preparedRuntimeRecords
-          );
-        } catch {
-          // A failed performance cache never changes an already committed business result.
+        const settleWarnings = rebased?.persisted === true
+          ? []
+          : await settleContextFreeProgramProjectionForWorld(candidateAtoms);
+        if (preparedRuntimeRecordsPromise) {
+          try {
+            const preparedRuntimeRecords = await preparedRuntimeRecordsPromise;
+            await options.programScheduler?.installPreparedRuntimeIndexes?.(
+              candidateAtoms,
+              preparedRuntimeRecords
+            );
+          } catch {
+            // A failed performance cache never changes an already committed business result.
+          }
         }
+        await recordTransformStage('program-projection', projectionSettleStartedAt, {
+          candidateProgramCount: 0,
+          executedProgramCount: 0
+        });
+        performanceTrace('program-projection-settle', {
+          elapsedMs: Math.round(performance.now() - projectionSettleStartedAt),
+          rebased: rebased?.persisted === true,
+          local: rebased?.local === true,
+          reason: rebased?.reason ?? null
+        });
+        interactionWarnings.push(...settleWarnings.map((warning) => diagnostic(
+          warning.code ?? 'PROGRAM_RUNTIME_WARNING',
+          warning.message ?? 'Program runtime reported a recoverable warning',
+          warning.details ?? {}
+        )));
+      } catch (error) {
+        interactionWarnings.push(diagnostic(
+          'PROGRAM_PROJECTION_RECOVERY_PENDING',
+          'World facts are committed, but the context-free Program projection requires recovery',
+          { cause: error.code ?? error.name ?? 'PROGRAM_PROJECTION_SETTLE_FAILED' }
+        ));
       }
-      await recordTransformStage('program-projection', projectionSettleStartedAt, {
-        candidateProgramCount: 0,
-        executedProgramCount: 0
-      });
-      performanceTrace('program-projection-settle', {
-        elapsedMs: Math.round(performance.now() - projectionSettleStartedAt),
-        rebased: rebased?.persisted === true,
-        local: rebased?.local === true,
-        reason: rebased?.reason ?? null
-      });
-      interactionWarnings.push(...settleWarnings.map((warning) => diagnostic(
-        warning.code ?? 'PROGRAM_RUNTIME_WARNING',
-        warning.message ?? 'Program runtime reported a recoverable warning',
-        warning.details ?? {}
-      )));
-    } catch (error) {
-      interactionWarnings.push(diagnostic(
-        'PROGRAM_PROJECTION_RECOVERY_PENDING',
-        'World facts are committed, but the context-free Program projection requires recovery',
-        { cause: error.code ?? error.name ?? 'PROGRAM_PROJECTION_SETTLE_FAILED' }
-      ));
+      return interactionWarnings;
     }
+    if (postcommit) postcommit.push(finishProgramProjection);
+    else await finishProgramProjection();
     return receipt;
   }
 
