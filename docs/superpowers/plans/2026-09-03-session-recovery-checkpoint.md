@@ -27,10 +27,12 @@
 ### P0：4784 命令端失活
 
 - **已复现**：`http://127.0.0.1:4784/__spatial/api/health`快速返回；最简单的`explore 🧊manage`超过30秒无输出。
+- **2026-09-03再次核实**：真实4784 health在248ms返回`ok:true`、revision 7255、projection `published`；连续两次最小只读`explore {"thing":"🧊manage"}`均在5秒截止时取消。权威`atom.json`仍为`瞻权=1、判针=1、瞻判=0、排针=0`，最后写入时间为2026-09-02 23:31，证明本轮两次改名均未提交，不得盲目重放。
 - **已确认结构**：`cli/lib/server.mjs`以单一`atomInteractionTail`串行写交互，Explore等待该写尾；未收敛写入可阻塞全部后续命令，health因绕过队列仍可正常。
 - **预算缺口**：Program Scheduler每轮预算10秒，但 reconciliation最多8轮；尚无已证实的整个交互总截止、取消、队列释放和终态诊断。
 - **证据边界**：队列占用与总边界缺口已确认；具体是哪一个 Program/循环不收敛尚未定位。
 - **修复判据**：TDD复现后加入总预算、失败收口、原子回滚、队列释放和终态诊断。重启4784只恢复现场，不算修复。
+- **当前优先级**：该故障已阻断既有Transform、推支与回读，先于Strut `nodes`退役和Web次要事项修复；恢复已有功能可靠性后再继续推支线单轨化。
 
 ### Strut context 边界纠偏
 
