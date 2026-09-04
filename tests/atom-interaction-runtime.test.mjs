@@ -466,6 +466,32 @@ test('an immediate authoritative read defers pending disposable publication unti
   assert.deepEqual(events, ['read:start', 'read:end', 'publish:rev-1']);
 });
 
+test('prepared Program context retries the command without waiting for disposable Web publication', async () => {
+  const context = ports();
+  let attempt = 0;
+  let release;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  context.world.execute = async (request) => {
+    attempt += 1;
+    if (attempt === 1) return { ok: false, errors: [{ code: 'ATOM_PROGRAM_PROJECTION_MISSING' }] };
+    return { ok: true, command: request.source === 'atom' ? 'atom' : 'transform', changed: false,
+      revisionAfter: 'ready', lockState: { revision: 'ready' } };
+  };
+  context.projections.publish = async () => { await blocked; return { sourceRevision: 'ready' }; };
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
+  const pending = runtime.execute({ source: 'transform {}', correlationId: 'no-web-wait' });
+  try {
+    const result = await Promise.race([pending, new Promise((resolve) => setTimeout(() => resolve(null), 100))]);
+    assert.ok(result?.ok, 'validated command must complete while Web publication is blocked');
+    assert.equal(attempt, 3);
+    assert.equal(result.projectionStatus, 'pending');
+  } finally {
+    release();
+    await pending;
+    await runtime.close();
+  }
+});
+
 test('the first use of an Agent prepares its scoped Program projection once and retries the intent', async () => {
   const calls = [];
   let attempts = 0;
@@ -521,9 +547,10 @@ test('the first use of an Agent prepares its scoped Program projection once and 
   assert.deepEqual(calls, [
     ['world', 'explore {"name":"Target"}', null, 'interaction-context'],
     ['world', 'atom', 'passive', 'interaction-context:program-context'],
-    ['projection', { expectedRevision: 'rev-1', lockState: { revision: 'rev-1' } }],
     ['world', 'explore {"name":"Target"}', null, 'interaction-context']
   ]);
+  assert.equal(result.projectionStatus, 'pending');
+  await runtime.close();
 });
 
 test('a trusted agentless read prepares its context-free Program projection once and retries', async () => {
@@ -568,9 +595,10 @@ test('a trusted agentless read prepares its context-free Program projection once
   assert.deepEqual(calls, [
     ['world', 'explore {"thing":"test"}', null, null],
     ['world', 'atom', 'passive', null],
-    ['projection', { expectedRevision: 'rev-1', lockState: { revision: 'rev-1' } }],
     ['world', 'explore {"thing":"test"}', null, null]
   ]);
+  assert.equal(result.projectionStatus, 'pending');
+  await runtime.close();
 });
 
 test('an ordinary exact Explore passively prepares projections without replaying an unrelated jump Program', async (t) => {
@@ -633,7 +661,7 @@ test('an ordinary exact Explore passively prepares projections without replaying
   assert.equal(result.errors.some((error) => error.code === 'WINDOW_JUMP_DESTINATION_INVALID'), false);
 });
 
-test('a failed projection after automatic Program preparation remains visible on the retried read', async () => {
+test('a failed deferred projection after Program preparation remains visible in projection status', async () => {
   let attempts = 0;
   const context = ports();
   context.world.execute = async (request) => {
@@ -664,7 +692,7 @@ test('a failed projection after automatic Program preparation remains visible on
       details: { projection: 'spatial', cause: 'EPERM' }
     });
   };
-  const runtime = createInteractionRuntime(context);
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
 
   const result = await runtime.execute({
     source: 'explore {"name":"Target"}',
@@ -674,8 +702,14 @@ test('a failed projection after automatic Program preparation remains visible on
 
   assert.equal(result.ok, true);
   assert.equal(result.projectionStatus, 'pending');
-  assert.deepEqual(result.projectionFailure, { projection: 'spatial', cause: 'EPERM' });
+  assert.equal(result.projectionFailure.cause, 'PROJECTION_PUBLICATION_SCHEDULED');
   assert.equal(result.warnings.some(({ code }) => code === 'PROJECTION_RECOVERY_PENDING'), true);
+  const deadline = Date.now() + 1000;
+  while (runtime.projectionStatus().failure?.cause !== 'EPERM' && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  assert.deepEqual(runtime.projectionStatus().failure, { projection: 'spatial', cause: 'EPERM' });
+  await runtime.close();
 });
 
 test('an ordinary read consumes current projections without rebuilding them', async () => {

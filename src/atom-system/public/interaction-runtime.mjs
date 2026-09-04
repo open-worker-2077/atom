@@ -288,7 +288,7 @@ export function createInteractionRuntime({
       );
       if (!preparation?.ok) return preparation;
       if (options.publish !== false) {
-        preparation = withProjectionOutcome(preparation, await publish(preparation));
+        preparation = withProjectionOutcome(preparation, scheduleProjection(preparation));
       }
       result = withInteractionId(
         await executeWorld(intent.source, interaction), intent.correlationId
