@@ -12,6 +12,8 @@
 
 ## 最小化检查
 
+- **代码图辅助**：用户授权的全局Code-Graph-RAG已安装，Atom全仓离线索引和局部调用检索已验证；仅作为调试／影响分析工具，不替代Superpowers。版本、入口、覆盖与误连限制见[`code-graph-rag-assistance.md`](code-graph-rag-assistance.md)。
+
 - **唯一框架**：Superpowers 继续独占规格、计划、TDD、调试、验证与完成裁定；Ponytail 不作为第二套框架安装或常态注入。
 - **固定入口**：设计获批后、计划定稿前执行一次方案最小化；提交前执行一次差异复杂度审查。规则与冲突顺序见[`minimality-checkpoints.md`](minimality-checkpoints.md)。
 - **硬边界**：不得以减少代码为由削弱用户定论、Atom 合同、安全、数据守恒、迁移回滚、持久化账本、测试或验证。
