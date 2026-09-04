@@ -280,6 +280,25 @@ function appendRevision(layout, plan) {
 }
 
 function initialSeal(atoms, layout) {
+  const candidatePath = `${layout.bodyPath}/${atomName(layout.candidate)}`;
+  const relocatedPaths = new Map(modelRecords({
+    model: layout.candidate, modelPath: candidatePath
+  }).map((record) => [record.absolute, record.relative === '.'
+    ? `${layout.bodyPath}/${MODEL_NAME}`
+    : `${layout.bodyPath}/${MODEL_NAME}/${record.relative.slice(2)}`]));
+  // Rename only Graph endpoint coordinates, never predicate source or arbitrary text.
+  function relocateEndpoint(expression) {
+    if (!expression || typeof expression !== 'object') return;
+    for (const key of ['thing', 'thing@program']) {
+      if (relocatedPaths.has(expression[key])) expression[key] = relocatedPaths.get(expression[key]);
+    }
+    for (const key of ['if', 'then', 'and', 'or']) {
+      if (Array.isArray(expression[key])) expression[key].forEach(relocateEndpoint);
+    }
+  }
+  for (const record of walkAtoms([layout.candidate])) {
+    directedStruts(record.atom).forEach(relocateEndpoint);
+  }
   replaceStoredField(layout.candidate, 'thing', MODEL_NAME, {
     types: atomTypes(layout.candidate),
     descriptionPresent: atomDescription(layout.candidate) != null,

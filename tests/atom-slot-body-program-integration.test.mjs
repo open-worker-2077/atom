@@ -41,7 +41,7 @@ function world() {
   return [atom('Root', '', [
     atom('研发窗口', '', [], [], ['研发']),
     atom('订单槽体', '', [atom('候选流', '', [
-      atom('客户', '客户槽契约', [], [{ 'if@current': true, then: [{ thing: '金额' }] }], ['text']),
+      atom('客户', '客户槽契约', [], [{ 'if@current': true, then: [{ thing: 'Root/订单槽体/候选流/金额' }] }], ['text']),
       atom('金额', '金额槽契约', [], [{
         'if@current': true,
         if: [{ program: 'def main(context):\n    return True' }],

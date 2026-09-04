@@ -13,6 +13,37 @@ function atom(thing, situation = '', slot = [], strut = [], types = [], descript
   };
 }
 
+test('first seal preserves exact candidate-local Program strut endpoints through model rename', async () => {
+  const atoms = [atom('表单槽体', '', [atom('候选', '', [
+    atom('提交', '', [], [{ 'if@current': true, then: [{ 'thing@program': '表单槽体/候选/推进' }] }]),
+    atom('推进', 'def main(delivery):\n    pass\ntrigger("strut", {}, main)', [], [], ['program'])
+  ])])];
+  const result = await seal(atoms);
+  assert.equal(result.error, undefined, JSON.stringify(result.error));
+  assert.deepEqual(field(find(result.atoms, '表单槽体/槽模/提交'), 'strut'), [
+    { 'if@current': true, then: [{ 'thing@program': '表单槽体/槽模/推进' }] }
+  ]);
+  const printed = await applySlotBodyEffect({
+    atoms: result.atoms, effect: { action: 'print', body: '表单槽体', name: '试单' },
+    sourceProgramPath: '表单槽体/print'
+  });
+  assert.equal(printed.error, undefined, JSON.stringify(printed.error));
+  assert.deepEqual(field(find(printed.atoms, '表单槽体/槽例/试单/提交'), 'strut'), [
+    { 'if@current': true, then: [{ 'thing@program': '表单槽体/槽模/推进' }] }
+  ]);
+});
+
+test('first seal does not turn an external same-prefix endpoint into a local role', async () => {
+  const atoms = [atom('表单槽体', '', [atom('候选', '', [
+    atom('提交', '', [], [{ 'if@current': true, then: [{ thing: '表单槽体/候选外/推进' }] }]),
+    atom('推进')
+  ])])];
+  const before = structuredClone(atoms);
+  const result = await seal(atoms, {}, { mutateInput: true });
+  assert.equal(result.error?.code, 'INVALID_SLOT_PRINT_PLAN');
+  assert.deepEqual(atoms, before);
+});
+
 function entry(value, baseKey) {
   return Object.entries(value).find(([key]) => (
     parseAtomKey(key, { descriptionSymbolWarnings: false }).baseKey === baseKey
