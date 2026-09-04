@@ -205,6 +205,7 @@ export function createAccessController(atoms, options = {}) {
           locks: locksForAction(operation === 'read' ? 'explore' : 'transform'),
           labels: options.agentSecurity?.labels ?? [],
           capabilities,
+          field,
           windowLifecycle: actor.windowLifecycle ?? null
         });
         if (fixed.decision !== 'allow') return fixed;

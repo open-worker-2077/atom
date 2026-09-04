@@ -34,6 +34,28 @@ function visibleExplorePaths(items) {
   )));
 }
 
+function relocationPatchPath(value) {
+  if (typeof value !== 'string') return value;
+  const separator = value.lastIndexOf('/');
+  return separator > 0 ? value.slice(0, separator) : value;
+}
+
+function programRefreshPatchPaths(refresh) {
+  const relocations = refresh?.pathChanges ?? [];
+  const relocatedRoots = relocations.flatMap((change) => [change.sourcePath, change.resultPath])
+    .filter((value) => typeof value === 'string' && value);
+  const stableChanges = (refresh?.changedPaths ?? []).filter((candidate) => (
+    !relocatedRoots.some((root) => candidate === root || candidate.startsWith(`${root}/`))
+  ));
+  return [
+    ...stableChanges,
+    ...relocations.flatMap((change) => [
+      relocationPatchPath(change.sourcePath),
+      relocationPatchPath(change.resultPath)
+    ])
+  ].filter(Boolean);
+}
+
 function relevantProgramWarnings(items, warnings) {
   const visiblePaths = visibleExplorePaths(items);
   return warnings.filter((warning) => visiblePaths.has(warning.program));
@@ -1197,7 +1219,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       ? { preparedAccessMatches: preparedTransformWorld.matches }
       : {})
   });
-  const accessControllerForProgramEffect = (sourceProgramPath) => {
+  const accessControllerForProgramEffect = (sourceProgramPath, sourceScopeRoot = null) => {
     const sourceAgentSecurity = candidateProgramScheduler?.agentSecurity?.get(sourceProgramPath)
       ?? options.programScheduler?.agentSecurity?.get(sourceProgramPath)
       ?? null;
@@ -1205,7 +1227,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     return createAccessController(atoms, {
       ...options,
       programLockIndex,
-      agentPath: sourceProgramPath,
+      agentPath: sourceScopeRoot ?? sourceProgramPath,
       agentSecurity: structuredClone(sourceAgentSecurity),
       graphLocks
     });
@@ -1247,6 +1269,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       })).decision !== 'allow'
       || (await accessController.authorize(destination, 'write', 'slot', {
         programPath: effect.issuerProgramPath,
+        slotMaterialMove: true,
         windowLifecycle: { action: 'move', destinationPath: effect.destinationPath }
       })).decision !== 'allow';
     if (denied) {
@@ -1466,6 +1489,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           }),
           issuerController.authorize(destination, 'write', 'slot', {
             programPath: payload.issuerProgramPath,
+            slotMaterialMove: true,
             windowLifecycle: { action: 'move', destinationPath }
           })
         ]);
@@ -1641,7 +1665,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       continue;
     }
     let transformed;
-    const effectAccessController = accessControllerForProgramEffect(sourceProgramPath);
+    const effectAccessController = accessControllerForProgramEffect(sourceProgramPath, sourceScopeRoot);
     const authorizeProgramEffect = (match, operation, field, actor = {}) => {
       const targetPath = match.path.join('/');
       return effectAccessController.authorize(match, operation, field, {
@@ -1935,29 +1959,34 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           agentSecurity: structuredClone(issuerSecurity),
           graphLocks: finalGraphLocks
         });
-        const decisions = await Promise.all([
-          issuerController.authorize(issuerProgram, 'read', 'thing', {
+        const authorizationChecks = [
+          ['issuer-program-read', issuerController.authorize(issuerProgram, 'read', 'thing', {
             programPath: effect.issuerProgramPath
-          }),
-          issuerController.authorize(window, 'write', 'thing', {
+          })],
+          ['window-move', issuerController.authorize(window, 'write', 'thing', {
             programPath: effect.issuerProgramPath,
             windowLifecycle: { action: 'move', destinationPath: effect.destinationPath }
-          }),
-          issuerController.authorize(source, 'write', 'slot', {
+          })],
+          ['authorization-source-write', issuerController.authorize(source, 'write', 'slot', {
             programPath: effect.issuerProgramPath
-          }),
-          issuerController.authorize(destination, 'read', 'thing', {
+          })],
+          ['destination-read', issuerController.authorize(destination, 'read', 'thing', {
             programPath: effect.issuerProgramPath
-          }),
-          issuerController.authorize(destination, 'write', 'slot', {
+          })],
+          ['destination-receive-window', issuerController.authorize(destination, 'write', 'slot', {
             programPath: effect.issuerProgramPath,
+            slotMaterialMove: true,
             windowLifecycle: { action: 'move', destinationPath: effect.destinationPath }
-          })
-        ]);
+          })]
+        ];
+        const decisions = await Promise.all(authorizationChecks.map(([, pending]) => pending));
         if (decisions.some((decision) => decision.decision !== 'allow')) {
           return { error: diagnostic(
             'WINDOW_JUMP_AUTHORIZATION_DENIED',
-            '触发签发方当前无权控制窗口或迁移目的地'
+            '触发签发方当前无权控制窗口或迁移目的地',
+            { deniedChecks: authorizationChecks
+              .map(([name], index) => ({ name, decision: decisions[index] }))
+              .filter((entry) => entry.decision.decision !== 'allow') }
           ) };
         }
         const recordsByPath = graphRecordsByPath(nextAtoms);
@@ -2121,6 +2150,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         }),
         issuerController.authorize(destination, 'write', 'slot', {
           programPath: payload.issuerProgramPath,
+          slotMaterialMove: true,
           windowLifecycle: { action: 'move', destinationPath: payload.destinationPath }
         })
       ]);
@@ -2390,6 +2420,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         }
         compiledRequests.push({
           sourceProgramPath,
+          sourceScopeRoot,
+          sourceProgramRoot,
           sourceStrutDeliveryClaim,
           sourceSlotSignalClaim,
           transformRequest,
@@ -2437,7 +2469,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
             ? createAccessController(candidateAtoms, {
                 ...options,
                 programLockIndex: finalLockIndex,
-                agentPath: entry.sourceProgramPath,
+                agentPath: entry.sourceScopeRoot ?? entry.sourceProgramPath,
                 agentSecurity: structuredClone(sourceAgentSecurity),
                 graphLocks: finalGraphLocks
               })
@@ -3480,7 +3512,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     const finalCreatePath = rewritePath(created.resultPath, postRefresh.pathChanges);
     const createChangedPaths = [
       created.resultPath,
-      ...postRefresh.pathChanges.flatMap((change) => [change.sourcePath, change.resultPath])
+      ...programRefreshPatchPaths(postRefresh)
     ].filter(Boolean);
     const canRebaseCreateProjection = programTransformLogs.length === 0
       && postRefresh.transformLogs.length === 0
@@ -3784,8 +3816,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         transformed.resultPath,
         ...(transformed.relationPaths ?? []),
         ...(transformed.shortcutPaths ?? []),
-        ...(postRefresh.changedPaths ?? []),
-        ...postRefresh.pathChanges.flatMap((change) => [change.sourcePath, change.resultPath])
+        ...programRefreshPatchPaths(postRefresh)
       ].filter(Boolean))],
       transformLogRecord
     });

@@ -257,13 +257,17 @@
       "contract": {
         "argument": {
           "type": "object",
-          "required": ["action", "body"],
+          "required": ["action"],
           "additionalProperties": false,
           "properties": {
             "action": { "enum": ["seal", "print"] },
-            "body": { "type": "string", "format": "exact-atom-path" },
             "name": { "type": "string", "format": "single-atom-name", "requiredWhen": { "action": "print" } }
           }
+        },
+        "selfDeclaration": {
+          "seal": "current Program is the body",
+          "print": "current print Program parent is the body",
+          "callerSelectedBody": "forbidden"
         },
         "internalPrintEffect": {
           "source": "current-body-print-program",
@@ -273,12 +277,13 @@
         "development": {
           "initialLayout": "one ordinary self-runnable candidate DataFlow child",
           "scopeBinding": "transform {\"thing.run.EXACT_SCOPE_ROOT\":\"EXACT_PROGRAM_PATH\"}",
-          "relativeSelectors": [".", "./direct/slot/path"]
+          "instanceDataSelectors": [".", "./direct/slot/path", "template-root/internal/path"],
+          "externalExactSelectors": "remain-external"
         },
         "layout": {
-          "sealedChildren": ["槽模", "print", "槽例"],
+          "sealedChildren": ["original-candidate-name", "print", "槽例"],
           "physicalBlankExample": "forbidden",
-          "sharedPrograms": "槽模-only",
+          "sharedPrograms": "original-candidate-only",
           "visiblePlan": "print@program plus immutable print/修订 records",
           "material": "unmapped-Thing-subtree-below-mapped-slot",
           "defaultMaterial": "forbidden"

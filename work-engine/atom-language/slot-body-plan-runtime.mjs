@@ -679,6 +679,9 @@ export function compileSlotStructureGraphLocks(atoms) {
           kind: 'node',
           path,
           actions: ['transform'],
+          fields: root === layout.modelPath
+            ? ['thing', 'situation', 'slot', 'strut']
+            : ['thing', 'slot', 'strut'],
           allowCapabilities: ['slot-material-create', 'slot-material-move', 'slot-reseal'],
           denialCode: 'SLOT_STRUCTURE_LOCK_DENIED',
           lockKind: 'slot-structure-lock',

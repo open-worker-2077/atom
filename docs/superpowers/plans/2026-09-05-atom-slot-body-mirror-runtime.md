@@ -87,7 +87,9 @@ node --test --test-isolation=none tests/atom-slot-body-runtime.test.mjs tests/at
 
 Expected: all tests pass; the sealed candidate keeps its original name, print succeeds, and reseal still preserves instance material.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
+
+Committed together with Task 2 as `d267a91` after the shared focused chain reached `59/59 PASS`.
 
 ```powershell
 git add work-engine/atom-language/program-worker.py work-engine/atom-language/program-runtime.mjs work-engine/atom-language/slot-body-plan-runtime.mjs work-engine/atom-language/engine.mjs tests/atom-slot-body-runtime.test.mjs tests/atom-slot-body-plan-integration.test.mjs tests/atom-slot-body-reseal.test.mjs
@@ -172,7 +174,9 @@ node --test --test-isolation=none tests/atom-slot-relative-domain.test.mjs tests
 
 Expected: all tests pass; internal reads/writes affect only the active instance, external paths remain external, and a mapped write failure leaves the candidate world unchanged.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
+
+Committed together with Task 1 as `d267a91`.
 
 ```powershell
 git add work-engine/atom-language/slot-relative-scope.mjs work-engine/atom-language/query-capability.mjs work-engine/atom-language/program-runtime.mjs work-engine/atom-language/engine.mjs tests/atom-slot-relative-scope.test.mjs tests/atom-slot-body-plan-integration.test.mjs
@@ -192,7 +196,7 @@ git commit -m "feat(slot-body): borrow template logic for instance data"
 - Consumes: self-declared seal/print contract from Task 1 and mirror selector contract from Task 2.
 - Produces: one tiny two-step fixture that proves seal, print, instance data entry, strict Strut true/false, receiver-owned Trigger, business lock transition, status write-back, controlled jump, sibling isolation, rollback, cold restart, and Help/registry discoverability.
 
-- [ ] **Step 1: Write the failing two-step journey**
+- [x] **Step 1: Write the failing two-step journey**
 
 ```js
 test('two-step slot instance unlocks and jumps without touching template or sibling', async (t) => {
@@ -215,7 +219,7 @@ test('two-step slot instance unlocks and jumps without touching template or sibl
 });
 ```
 
-- [ ] **Step 2: Run only the two-step test and verify RED**
+- [x] **Step 2: Run only the two-step test and verify RED**
 
 Run:
 
@@ -225,9 +229,13 @@ node --test --test-isolation=none tests/atom-slot-body-two-step-flow.test.mjs
 
 Expected: fail at the first unsupported contract or wrong instance effect; record that first failure in the ledger before changing production code.
 
-- [ ] **Step 3: Close the journey one failure at a time**
+Observed RED sequence: mapped instance Situation was incorrectly blocked by the structural lock; after that fix, shared Program effects lost `scopeRoot`/`programRoot` while entering the compiled request queue and therefore evaluated authorization from the template path. Both failures were reproduced in the same fixture before production changes.
+
+- [x] **Step 3: Close the journey one failure at a time**
 
 For each failure, keep the same tiny fixture, add one assertion that names the broken contract, rerun to RED, make the smallest production change, then rerun to GREEN. Do not add a second fixture unless the first cannot express false, rollback, restart, or concurrency without weakening the assertion.
+
+GREEN: self-declared seal, two prints, instance data write, Strut delivery, receiver-owned shared Trigger, current-instance status change, business-lock release, controlled authorized jump, template isolation and sibling isolation. The implementation retains Agent-window denial, gives slot-local window moves the existing `slot-material-move` capability, and records relocation parent paths for local patches.
 
 - [ ] **Step 4: Verify the complete affected chain**
 

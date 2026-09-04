@@ -114,7 +114,7 @@ function fixedWindowAllows(agentPath, targetPath, operation, windowLifecycle = n
 
 export function authorizeWindowGraphPath({
   agentPath, targetPath, operation, locks = [], labels = [], capabilities = [],
-  windowLifecycle = null
+  windowLifecycle = null, field = null
 }) {
   if (!['explore', 'transform'].includes(operation)) {
     throw problem('INVALID_GRAPH_LOCK_ACTION', 'Graph lock action must be explore or transform');
@@ -134,6 +134,7 @@ export function authorizeWindowGraphPath({
   });
   const applicable = locks.filter((lock) => (
     Array.isArray(lock.actions) && lock.actions.includes(operation)
+    && (!Array.isArray(lock.fields) || field == null || lock.fields.includes(field))
   ));
   const slotLocks = applicable.filter((lock) => lock.kind === 'slot'
     && (targetPath === lock.path || isBelow(lock.path, targetPath)));

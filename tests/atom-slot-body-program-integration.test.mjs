@@ -40,7 +40,7 @@ function find(atoms, selector) {
 function world() {
   return [atom('Root', '', [
     atom('研发窗口', '', [], [], ['研发']),
-    atom('订单槽体', '', [atom('候选流', '', [
+    atom('订单槽体', 'slot_body({"action":"seal"})', [atom('候选流', '', [
       atom('客户', '客户槽契约', [], [{ 'if@current': true, then: [{ thing: 'Root/订单槽体/候选流/金额' }] }], ['text']),
       atom('金额', '金额槽契约', [], [{
         'if@current': true,
@@ -49,8 +49,7 @@ function world() {
       }], ['number']),
       atom('结果', '结果槽契约'),
       atom('共享计算', 'def main(arguments):\n    return arguments', [], [], ['program'])
-    ])]),
-    atom('槽体封装程序', 'slot_body({"action":"seal","body":"Root/订单槽体"})', [], [], ['program']),
+    ])], [], ['program']),
     atom('槽体打印程序', 'use_program({"name":"Root/订单槽体/print","arguments":{"name":"订单001"}})', [], [], ['program'])
   ], [], ['agent'])];
 }
@@ -69,7 +68,7 @@ const run = (runtime, source) => executeAtomLanguage({ ...runtime, source });
 
 test('Program seals then prints one instance with shared Program and owner-local strut', async (t) => {
   const runtime = await setup(t);
-  const sealed = await run(runtime, 'transform {"thing.run.":"Root/槽体封装程序"}');
+  const sealed = await run(runtime, 'transform {"thing.run.":"Root/订单槽体"}');
   assert.equal(sealed.ok, true, JSON.stringify(sealed.errors));
   const printed = await run(runtime, 'transform {"thing.run.":"Root/槽体打印程序"}');
   assert.equal(printed.ok, true, JSON.stringify(printed.errors));
@@ -95,7 +94,7 @@ test('Program seals then prints one instance with shared Program and owner-local
 
 test('unrelated Program creation does not replay an existing print effect', async (t) => {
   const runtime = await setup(t);
-  assert.equal((await run(runtime, 'transform {"thing.run.":"Root/槽体封装程序"}')).ok, true);
+  assert.equal((await run(runtime, 'transform {"thing.run.":"Root/订单槽体"}')).ok, true);
   assert.equal((await run(runtime, 'transform {"thing.run.":"Root/槽体打印程序"}')).ok, true);
   const created = await run(runtime, 'transform new {"thing@program":"Root/无关共享程序","situation":"def main(arguments):\\n    return arguments","slot":[],"strut":[]}');
   assert.equal(created.ok, true, JSON.stringify(created.errors));
