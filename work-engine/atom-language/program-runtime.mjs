@@ -1698,8 +1698,12 @@ export class ProgramRuntimeScheduler {
     const resolveExactPath = (selector) => resolveExactPathFromCurrentContext(atoms, selector);
     const programs = programRecords(records);
     const lockPrograms = programs.filter((program) => /\block\s*\(/u.test(program.detail));
+    // Lock validation depends on derived Agent authority, not unrelated Program bodies.
+    const lockSecurityFingerprint = crypto.createHash('sha256')
+      .update(JSON.stringify([...this.agentSecurity.entries()].sort(([left], [right]) => left.localeCompare(right))))
+      .digest('hex');
     const fingerprint = requestDrivenLockFingerprint(
-      records, lockPrograms, this.agentSecurityWorldRevision, this.requestDrivenLocks
+      records, lockPrograms, lockSecurityFingerprint, this.requestDrivenLocks
     );
     if (this.requestDrivenLocksWorldRevision === fingerprint) return this.requestDrivenLocks ?? [];
     const inspected = await Promise.all(lockPrograms.map((program) => (
@@ -1740,7 +1744,7 @@ export class ProgramRuntimeScheduler {
     ));
     this.requestDrivenLocks = next;
     this.requestDrivenLocksWorldRevision = requestDrivenLockFingerprint(
-      records, lockPrograms, this.agentSecurityWorldRevision, next
+      records, lockPrograms, lockSecurityFingerprint, next
     );
     return this.requestDrivenLocks;
   }
