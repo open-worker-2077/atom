@@ -2285,7 +2285,16 @@ export class ProgramRuntimeScheduler {
     const key = fingerprint(records, programs, options.agentOrigin, isolateFailures);
     const completed = this.completed.get(key);
     if (completed) return this.overlayRequestDrivenLocks({
-      ...completed, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: []
+      ...completed,
+      cached: true,
+      messages: [],
+      transforms: [],
+      shortcuts: [],
+      slotBodies: [],
+      slotSignals: [],
+      jumps: [],
+      jumpAuthorizations: [],
+      agentRegistrations: []
     }, options.agentOrigin);
 
     const reusable = reusableCandidates(
@@ -2307,6 +2316,9 @@ export class ProgramRuntimeScheduler {
         shortcuts: [],
         slotBodies: [],
         slotSignals: [],
+        jumps: [],
+        jumpAuthorizations: [],
+        agentRegistrations: [],
         failures: structuredClone(reusable.value.failures ?? [])
       }, options.agentOrigin);
       this.completed.set(key, value);

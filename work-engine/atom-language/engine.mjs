@@ -1123,6 +1123,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           transforms: [],
           shortcuts: [],
           slotBodies: [],
+          slotSignals: [],
+          jumps: [],
+          jumpAuthorizations: [],
           agentRegistrations: []
         };
       }
