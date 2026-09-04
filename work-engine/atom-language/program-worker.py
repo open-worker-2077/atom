@@ -716,7 +716,7 @@ def main():
             )
         effects["slotBodies"].append({**specification, "__sourceProgramPath": current_atom().path})
         action = specification.get("action")
-        body = specification.get("body")
+        body = current_atom().path if action == "seal" else current_atom().path.rsplit("/", 1)[0]
         result = {"planned": True, "action": action, "body": body}
         if "name" in specification:
             result["target"] = body + "/槽例/" + str(specification["name"])

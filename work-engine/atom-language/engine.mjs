@@ -44,12 +44,13 @@ function relevantProgramMessages(items, messages) {
   return messages.filter((message) => visiblePaths.has(message.sourceProgramPath));
 }
 
-function programResealsModelPath(slotBodies, sourceProgramPath, targetPath) {
+function programResealsModelPath(atoms, slotBodies, sourceProgramPath, targetPath) {
   if (typeof sourceProgramPath !== 'string' || typeof targetPath !== 'string') return false;
   return (slotBodies ?? []).some((request) => {
     if (request?.action !== 'seal' || request.sourceProgramPath !== sourceProgramPath
       || typeof request.body !== 'string') return false;
-    const modelPath = `${request.body.replace(/\/+$/u, '')}/\u69fd\u6a21`;
+    const modelPath = slotBodyModelPath(atoms, request.body);
+    if (!modelPath) return false;
     return targetPath === modelPath || targetPath.startsWith(`${modelPath}/`);
   });
 }
@@ -83,7 +84,7 @@ import {
   programLockDeniedDiagnostic,
   programLockState
 } from './program-locks.mjs';
-import { applySlotBodyEffect } from './slot-body-runtime.mjs';
+import { applySlotBodyEffect, slotBodyModelPath } from './slot-body-runtime.mjs';
 import { resolveSlotSignalDeliveries } from './slot-signal-runtime.mjs';
 import { normalizeScopedTransformRequest } from './slot-relative-scope.mjs';
 import { applyShortcutEffect, breakShortcutTargets } from './shortcut-runtime.mjs';
@@ -1058,6 +1059,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           }),
           agentOrigin: interaction.agent,
           scopeRoot: executionContext.scopeRoot ?? null,
+          programRoot: executionContext.programRoot ?? null,
           preparedWorld: preparedWorld ??= prepareExploreWorld(atoms)
         })
       };
@@ -1598,6 +1600,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       sourceProgramRef: _sourceProgramRef,
       sourceProgramPath,
       sourceScopeRoot = null,
+      sourceProgramRoot = null,
       ...rawTransformRequest
     } = request;
     let transformRequest;
@@ -1605,7 +1608,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       transformRequest = normalizeScopedTransformRequest({
         atoms,
         request: rawTransformRequest,
-        scopeRoot: sourceScopeRoot
+        scopeRoot: sourceScopeRoot,
+        programRoot: sourceProgramRoot
       });
     } catch (error) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
@@ -1644,7 +1648,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         ...actor,
         programPath: sourceProgramPath,
         slotReseal: actor.slotReseal === true || programResealsModelPath(
-          programCycle.slotBodies, sourceProgramPath, targetPath
+          atoms, programCycle.slotBodies, sourceProgramPath, targetPath
         )
       });
     };
@@ -2222,6 +2226,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
             }),
             agentOrigin: cycleAgentOrigin,
             scopeRoot: executionContext.scopeRoot ?? null,
+            programRoot: executionContext.programRoot ?? null,
             preparedWorld: preparedWorld ??= prepareExploreWorld(reconciledAtoms)
           })
         });
@@ -2338,6 +2343,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           sourceProgramRef: _sourceProgramRef,
           sourceProgramPath,
           sourceScopeRoot = null,
+          sourceProgramRoot = null,
           sourceStrutDeliveryClaim = null,
           ...rawTransformRequest
         } = request;
@@ -2347,7 +2353,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           transformRequest = normalizeScopedTransformRequest({
             atoms: reconciledAtoms,
             request: rawTransformRequest,
-            scopeRoot: sourceScopeRoot
+            scopeRoot: sourceScopeRoot,
+            programRoot: sourceProgramRoot
           });
         } catch (error) {
           if (sourceStrutDeliveryClaim || sourceSlotSignalClaim
@@ -2442,7 +2449,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
                 ...actor,
                 programPath: entry.sourceProgramPath,
                 slotReseal: actor.slotReseal === true || programResealsModelPath(
-                  cycle.slotBodies, entry.sourceProgramPath, targetPath
+                  candidateAtoms, cycle.slotBodies, entry.sourceProgramPath, targetPath
                 )
               }
             );
@@ -2804,6 +2811,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         accessController: unrestricted,
         agentOrigin: null,
         scopeRoot: executionContext.scopeRoot ?? null,
+        programRoot: executionContext.programRoot ?? null,
         preparedWorld
       })
     };

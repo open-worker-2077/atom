@@ -1,4 +1,6 @@
-import { applyPlanSlotBodyEffect } from './slot-body-plan-runtime.mjs';
+import { applyPlanSlotBodyEffect, slotBodyModelPath } from './slot-body-plan-runtime.mjs';
+
+export { slotBodyModelPath };
 
 export async function applySlotBodyEffect({
   atoms,
@@ -19,7 +21,7 @@ export async function applySlotBodyEffect({
 export const SLOT_BODY_CONTRACT = Object.freeze({
   function: 'slot_body',
   actions: ['seal', 'print'],
-  layout: { model: '槽模', print: 'print', examples: '槽例' },
+  layout: { model: 'preserve-candidate-name', print: 'print', examples: '槽例' },
   roleVerb: '槽模角色',
   revisionVerb: '采用槽模修订'
 });

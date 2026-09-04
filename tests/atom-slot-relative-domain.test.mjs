@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { executeProgramExplore } from '../work-engine/atom-language/query-capability.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { normalizeScopedTransformRequest } from '../work-engine/atom-language/slot-relative-scope.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
 const AGENT_SOURCE = 'agent({"labels":["^^"],"functions":{"groups":[],"names":["agent","explore","transform","use_program"]}})';
@@ -58,6 +59,38 @@ test('relative Program Explore resolves only unique direct slot segments below t
   assert.deepEqual(nested.map(({ path: value, situation }) => ({ path: value, situation })), [
     { path: 'Root/候选/客户/地址/城市', situation: '上海' }
   ]);
+});
+
+test('slot mirror maps template-internal selectors to the active instance and leaves external selectors exact', async () => {
+  const atoms = [atom('Root', '', [
+    atom('槽体', '', [
+      atom('订单流程', '', [atom('客户', '槽模数据'), atom('结果', '槽模结果')]),
+      atom('print', '', [], [], ['program']),
+      atom('槽例', '', [atom('订单001', '', [atom('客户', '实例数据'), atom('结果', '实例结果')])])
+    ]),
+    atom('共享上下文', '外部数据')
+  ])];
+  const context = { scopeRoot: 'Root/槽体/槽例/订单001', programRoot: 'Root/槽体/订单流程' };
+
+  const internal = await executeProgramExplore({
+    atoms, request: { thing: 'Root/槽体/订单流程/客户', 'situation$full': true }, ...context
+  });
+  const external = await executeProgramExplore({
+    atoms, request: { thing: 'Root/共享上下文', 'situation$full': true }, ...context
+  });
+  const transform = normalizeScopedTransformRequest({
+    atoms,
+    request: { thing: 'Root/槽体/订单流程/结果', 'situation.rep.已计算': null },
+    ...context
+  });
+
+  assert.deepEqual(internal.map(({ path: value, situation }) => ({ path: value, situation })), [
+    { path: 'Root/槽体/槽例/订单001/客户', situation: '实例数据' }
+  ]);
+  assert.deepEqual(external.map(({ path: value, situation }) => ({ path: value, situation })), [
+    { path: 'Root/共享上下文', situation: '外部数据' }
+  ]);
+  assert.equal(transform.thing, 'Root/槽体/槽例/订单001/结果');
 });
 
 test('relative Program Explore fails closed for unbound, absolute, missing and ambiguous selectors', async () => {

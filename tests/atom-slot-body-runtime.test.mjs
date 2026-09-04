@@ -59,14 +59,33 @@ const print = (atoms, thing, revision = planOf(atoms).revision) => applySlotBody
   sourceProgramPath: '订单槽体/print'
 });
 
-test('seal creates model, visible print plan and empty example container without a physical blank', async () => {
+test('seal preserves the model name and creates a visible print plan plus empty example container', async () => {
   const result = await seal();
   assert.equal(result.error, undefined);
-  assert.deepEqual(field(find(result.atoms, '订单槽体'), 'slot').map(thingOf), ['槽模', 'print', '槽例']);
+  assert.deepEqual(field(find(result.atoms, '订单槽体'), 'slot').map(thingOf), ['订单候选流', 'print', '槽例']);
   assert.ok(typesOf(find(result.atoms, '订单槽体/print')).includes('program'));
   assert.deepEqual(field(find(result.atoms, '订单槽体/槽例'), 'slot'), []);
   assert.equal(find(result.atoms, '订单槽体/槽例/空槽例'), null);
-  assert.equal(find(result.atoms, '订单槽体/槽模/共享计算'), null);
+  assert.equal(find(result.atoms, '订单槽体/订单候选流/共享计算'), null);
+});
+
+test('self-declared seal keeps the candidate DataFlow name instead of renaming it to a program convention', async () => {
+  const body = atom('订单槽体', 'slot_body({"action":"seal"})', [
+    atom('订单流程', '订单槽模契约', [atom('输入'), atom('输出')], [], ['dataflow'])
+  ], [], ['program']);
+
+  const result = await applySlotBodyEffect({
+    atoms: [body],
+    effect: { action: 'seal', body: '订单槽体' },
+    sourceProgramPath: '订单槽体'
+  });
+
+  assert.equal(result.error, undefined, JSON.stringify(result.error));
+  assert.deepEqual(field(find(result.atoms, '订单槽体'), 'slot').map(thingOf), [
+    '订单流程', 'print', '槽例'
+  ]);
+  assert.ok(find(result.atoms, '订单槽体/订单流程'));
+  assert.equal(find(result.atoms, '订单槽体/槽模'), null);
 });
 
 test('seal stores a deterministic complete owner-local strut AST and no default material', async () => {
@@ -188,9 +207,9 @@ test('seal and print preserve one shared Program as the strut receiver', async (
   });
   assert.equal(printed.error, undefined, JSON.stringify(printed.error));
   assert.equal(find(printed.atoms, '接收槽体/槽例/实例001/判定'), null);
-  assert.ok(typesOf(find(printed.atoms, '接收槽体/槽模/判定')).includes('program'));
+  assert.ok(typesOf(find(printed.atoms, '接收槽体/候选流/判定')).includes('program'));
   assert.deepEqual(field(find(printed.atoms, '接收槽体/槽例/实例001/事实'), 'strut'), [{
     'if@current': true,
-    then: [{ 'thing@program': '接收槽体/槽模/判定' }]
+    then: [{ 'thing@program': '接收槽体/候选流/判定' }]
   }]);
 });

@@ -692,7 +692,7 @@ export function resolveExactPathFromCurrentContext(atoms, selector) {
 
 export function validateProgramResult(result, records, program, options = {}) {
   const {
-    scopeRoot = null, strutDecision = false, resolveExactPath = null, agentProgramPaths = []
+    scopeRoot = null, programRoot = null, strutDecision = false, resolveExactPath = null, agentProgramPaths = []
   } = options;
   if (!result?.ok) {
     const error = new Error(result?.error?.message || 'Python Program failed');
@@ -919,7 +919,8 @@ export function validateProgramResult(result, records, program, options = {}) {
       ...structuredClone(entry),
       sourceProgramRef: program.ref,
       sourceProgramPath: program.path,
-      ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {})
+      ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {}),
+      ...(programRoot ? { sourceProgramRoot: programRoot } : {})
     };
   });
   const shortcuts = (result.shortcuts ?? []).map((entry) => {
@@ -977,27 +978,25 @@ export function validateProgramResult(result, records, program, options = {}) {
     )));
     const keys = Object.keys(publicEntry).sort();
     const required = entry.action === 'print'
-      ? ['action', 'body', 'name']
-      : ['action', 'body'];
-    const allowed = entry.action === 'print'
-      ? [...required, 'revision']
-      : [...required];
-    const invalidLegacyRevision = entry.revision !== undefined
-      && (typeof entry.revision !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(entry.revision));
+      ? ['action', 'name']
+      : ['action'];
+    const allowed = [...required];
+    const body = entry.action === 'seal'
+      ? sourceProgramPath
+      : sourceProgramPath.split('/').slice(0, -1).join('/');
     if (!['seal', 'print'].includes(entry.action)
-      || typeof entry.body !== 'string' || !entry.body.trim()
+      || !body
       || keys.some((key) => !allowed.includes(key))
       || required.some((key) => !keys.includes(key))
       || (entry.action === 'print'
-        && (typeof entry.name !== 'string' || !entry.name.trim() || entry.name.includes('/')
-          || invalidLegacyRevision))) {
-      throw Object.assign(new Error('slot_body() requires seal {action,body} or a current-print Program effect {action,body,name} with an optional legacy revision'), {
+        && (typeof entry.name !== 'string' || !entry.name.trim() || entry.name.includes('/')))) {
+      throw Object.assign(new Error('slot_body() requires self-declared seal {action} or print {action,name} from the body print Program'), {
         code: 'INVALID_SLOT_BODY_EFFECT'
       });
     }
     return {
       ...structuredClone(publicEntry),
-      body: entry.body.trim(),
+      body,
       ...(entry.action === 'print' ? { name: entry.name.trim() } : {}),
       sourceProgramPath,
       ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {})
@@ -1252,7 +1251,7 @@ function runWorker({
       }
       try {
         resolve(validateProgramResult(child.__atomResult ?? JSON.parse(stdout), records, program, {
-          scopeRoot, strutDecision, resolveExactPath, agentProgramPaths
+          scopeRoot, programRoot, strutDecision, resolveExactPath, agentProgramPaths
         }));
       } catch (error) {
         reject(error);
@@ -1425,7 +1424,8 @@ export class ProgramRuntimeScheduler {
       atoms,
       request,
       preparedWorld,
-      scopeRoot: executionContext.scopeRoot ?? null
+      scopeRoot: executionContext.scopeRoot ?? null,
+      programRoot: executionContext.programRoot ?? null
     }));
     const result = await this.runBounded(() => this.runProgram({
       python: this.python,
@@ -1436,12 +1436,14 @@ export class ProgramRuntimeScheduler {
       executeExplore: async (request) => {
         const matches = await executeExplore(request, {
           scopeRoot: options.scopeRoot ?? null,
+          programRoot: options.programRoot ?? null,
           programPath: program.path
         });
         const byPath = new Map(records.map((record) => [record.path, record]));
         return matches.map((match) => programExploreRecord(match, byPath)).filter(Boolean);
       },
       scopeRoot: options.scopeRoot ?? null,
+      programRoot: options.programRoot ?? null,
       strutDecision: true,
       programArguments: structuredClone(options.context ?? {}),
       triggered: true,
@@ -2552,7 +2554,8 @@ export class ProgramRuntimeScheduler {
       atoms,
       request,
       preparedWorld,
-      scopeRoot: executionContext.scopeRoot ?? null
+      scopeRoot: executionContext.scopeRoot ?? null,
+      programRoot: executionContext.programRoot ?? null
     }));
     const triggerEvent = options.triggerEvent ?? null;
     if (triggerEvent && (!['transform', 'strut', 'slot'].includes(triggerEvent.mode)
@@ -3054,6 +3057,7 @@ export class ProgramRuntimeScheduler {
               requests.push(structuredClone(request));
               const matches = await executeExplore(request, {
                 scopeRoot: effectiveScopeRoot,
+                programRoot: slotInvocation?.programRoot ?? options.slotScopeRoot ?? null,
                 programPath: program.path
               });
               rememberDependencySnapshot(dependencyCache, request, matches);

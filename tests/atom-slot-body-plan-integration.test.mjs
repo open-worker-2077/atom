@@ -53,8 +53,8 @@ function find(atoms, selector) {
 function world() {
   const calculate = [
     'def run():',
-    '    rows = explore({"thing":"./输入/变量料","situation$full":True})',
-    '    transform({"thing":"./输出/结果料","situation.rep." + rows[0].situation:None})',
+    '    rows = explore({"thing":"Root/订单槽体/候选流/输入/变量料","situation$full":True})',
+    '    transform({"thing":"Root/订单槽体/候选流/输出/结果料","situation.rep." + rows[0].situation:None})',
     '    return {"computed":True}',
     'trigger("transform", {"nodes":["./输入"]}, run)'
   ].join('\n');
@@ -63,15 +63,14 @@ function world() {
   );
   return [atom('Root', '', [
     atom('研发窗口'),
-    atom('订单槽体', '', [
+    atom('订单槽体', 'slot_body({"action":"seal"})', [
       atom('候选流', '', [
         atom('输入', '输入槽契约', [], [{ 'if@current': true, then: [{ thing: '输出' }] }]),
         atom('输出', '输出槽契约'),
         atom('备注', '备注槽契约'),
         atom('计算', calculate, [], [], ['program'])
       ])
-    ]),
-    atom('封装', 'slot_body({"action":"seal","body":"Root/订单槽体"})', [], [], ['program']),
+    ], [], ['program']),
     atom('打印001', printer('订单001'), [], [], ['program']),
     atom('打印002', printer('订单002'), [], [], ['program'])
   ], [], ['agent'])];
@@ -108,7 +107,7 @@ function conditionalWorld() {
   );
   return [atom('Root', '', [
     atom('研发窗口'),
-    atom('条件槽体', '', [
+    atom('条件槽体', 'slot_body({"action":"seal"})', [
       atom('候选流', '', [
         atom('字段甲', '字段甲槽契约', [], [{
           'if@current': true,
@@ -123,8 +122,7 @@ function conditionalWorld() {
         atom('执行', '普通事实后项'),
         atom('计算', calculate, [], [], ['program'])
       ])
-    ]),
-    atom('封装条件槽体', 'slot_body({"action":"seal","body":"Root/条件槽体"})', [], [], ['program']),
+    ], [], ['program']),
     atom('打印条件001', printer('实例001'), [], [], ['program']),
     atom('打印条件002', printer('实例002'), [], [], ['program'])
   ], [], ['agent'])];
@@ -137,7 +135,7 @@ async function setupConditional(t) {
 }
 
 async function sealAndPrintConditional(runtime, scheduler, second = false) {
-  const sealed = await run(runtime, 'transform {"thing.run.":"Root/封装条件槽体"}', scheduler);
+  const sealed = await run(runtime, 'transform {"thing.run.":"Root/条件槽体"}', scheduler);
   assert.equal(sealed.ok, true, JSON.stringify(sealed.errors));
   const printed = await run(runtime, 'transform {"thing.run.":"Root/打印条件001"}', scheduler);
   assert.equal(printed.ok, true, JSON.stringify(printed.errors));
@@ -174,7 +172,7 @@ test('generated print Program seals and prints without a blank template in centr
   const runtime = await setup(t);
   const scheduler = createProgramRuntimeScheduler();
 
-  const sealed = await run(runtime, 'transform {"thing.run.":"Root/封装"}', scheduler);
+  const sealed = await run(runtime, 'transform {"thing.run.":"Root/订单槽体"}', scheduler);
   assert.equal(sealed.ok, true, JSON.stringify(sealed.errors));
   const printed = await run(runtime, 'transform {"thing.run.":"Root/打印001"}', scheduler);
   assert.equal(printed.ok, true, JSON.stringify(printed.errors));
@@ -185,7 +183,7 @@ test('generated print Program seals and prints without a blank template in centr
   }), [], 'strut edges alone must not schedule a Program');
   assert.deepEqual(slotProgramInvocationsForEvent(committed, {
     mode: 'transform', nodes: ['Root/订单槽体/槽例/订单001/输入']
-  }, scheduler.triggerContracts).map((item) => item.programPath), ['Root/订单槽体/槽模/计算']);
+  }, scheduler.triggerContracts).map((item) => item.programPath), ['Root/订单槽体/候选流/计算']);
   assert.ok(find(committed, 'Root/订单槽体/print'));
   assert.equal(find(committed, 'Root/订单槽体/槽例/空槽例'), null);
   assert.ok(find(committed, 'Root/订单槽体/槽例/订单001/输入'), JSON.stringify(printed));
@@ -195,7 +193,7 @@ test('generated print Program seals and prints without a blank template in centr
 test('outside orchestration materializes a local variable Thing before triggering only its owning instance', async (t) => {
   const runtime = await setup(t);
   const scheduler = createProgramRuntimeScheduler();
-  await run(runtime, 'transform {"thing.run.":"Root/封装"}', scheduler);
+  await run(runtime, 'transform {"thing.run.":"Root/订单槽体"}', scheduler);
   await run(runtime, 'transform {"thing.run.":"Root/打印001"}', scheduler);
   await run(runtime, 'transform {"thing.run.":"Root/打印002"}', scheduler);
 
@@ -239,21 +237,21 @@ test('one atomic batch evaluates one owner-local condition and dispatches its co
         { thing: 'Root/条件槽体/槽例/实例001/字段乙' },
         { program: INLINE_FIELD_PREDICATE }
       ] }],
-      then: [{ 'thing@program': 'Root/条件槽体/槽模/计算' }]
+      then: [{ 'thing@program': 'Root/条件槽体/候选流/计算' }]
     }
   ]);
   assert.deepEqual(find(before, 'Root/条件槽体/槽例/实例001/执行').strut, []);
-  assert.deepEqual(find(before, 'Root/条件槽体/槽模/计算').strut, []);
+  assert.deepEqual(find(before, 'Root/条件槽体/候选流/计算').strut, []);
   const invocations = slotProgramInvocationsForEvent(before, {
     mode: 'strut',
     deliveries: [{
       mode: 'strut', decision: true,
       antecedentPaths: ['Root/条件槽体/槽例/实例001/字段甲'],
-      consequentPath: 'Root/条件槽体/槽模/计算'
+      consequentPath: 'Root/条件槽体/候选流/计算'
     }]
   }, scheduler.triggerContracts);
   assert.equal(invocations.length, 1);
-  assert.equal(invocations[0].programPath, 'Root/条件槽体/槽模/计算');
+  assert.equal(invocations[0].programPath, 'Root/条件槽体/候选流/计算');
 
   const changed = await run(runtime, triggerFields('实例001'), scheduler);
 
@@ -261,7 +259,7 @@ test('one atomic batch evaluates one owner-local condition and dispatches its co
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果/结果料').situation, '已计算');
   assert.equal(
-    diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/槽模/计算').length,
+    diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/候选流/计算').length,
     1
   );
 });
@@ -282,7 +280,7 @@ test('a same-value local-material Transform still evaluates and dispatches owner
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果/结果料').situation, '已计算');
   assert.equal(
-    diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/槽模/计算').length,
+    diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/候选流/计算').length,
     1
   );
 });
@@ -301,7 +299,7 @@ test('a strict-false owner-local condition does not dispatch its consequent', as
     mode: 'strut', deliveries: [{
       mode: 'strut', decision: true,
       antecedentPaths: ['Root/条件槽体/槽例/实例001/字段甲'],
-      consequentPath: 'Root/条件槽体/槽模/计算'
+      consequentPath: 'Root/条件槽体/候选流/计算'
     }]
   }, scheduler.triggerContracts).length, 1);
 
@@ -311,7 +309,7 @@ test('a strict-false owner-local condition does not dispatch its consequent', as
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果/结果料').situation, '');
   assert.equal(
-    diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/槽模/计算').length,
+    diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/候选流/计算').length,
     0,
     'strict false must not dispatch the downstream subscriber'
   );
@@ -333,7 +331,7 @@ test('owner-local strut never dispatches the same revision in a sibling instance
 test('re-seal recomputes every synchronized instance with the new shared Program in the same commit', async (t) => {
   const runtime = await setup(t);
   const scheduler = createProgramRuntimeScheduler();
-  await run(runtime, 'transform {"thing.run.":"Root/封装"}', scheduler);
+  await run(runtime, 'transform {"thing.run.":"Root/订单槽体"}', scheduler);
   await run(runtime, 'transform {"thing.run.":"Root/打印001"}', scheduler);
   await run(runtime, 'transform {"thing.run.":"Root/打印002"}', scheduler);
   await run(runtime, 'transform new {"thing":"Root/订单槽体/槽例/订单001/输出/结果料","situation":"","slot":[],"strut":[]}', scheduler);
@@ -344,17 +342,17 @@ test('re-seal recomputes every synchronized instance with the new shared Program
   await run(runtime, 'transform {"thing":"Root/订单槽体/槽例/订单002/输出/结果料","situation.rep.陈旧二"}', scheduler);
 
   const changed = await run(runtime, `transform ${JSON.stringify({
-    thing: 'Root/订单槽体/槽模/计算',
+    thing: 'Root/订单槽体/候选流/计算',
     'situation.rep.return {"computed":False}': 'return {"computed":True}'
   })}`, scheduler);
   assert.equal(changed.ok, true, JSON.stringify(changed.errors));
-  const resealed = await run(runtime, 'transform {"thing.run.":"Root/封装"}', scheduler);
+  const resealed = await run(runtime, 'transform {"thing.run.":"Root/订单槽体"}', scheduler);
   assert.equal(resealed.ok, true, JSON.stringify(resealed.errors));
 
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.deepEqual(slotProgramInvocationsForEvent(committed, {
     mode: 'transform', nodes: ['Root/订单槽体/槽例/订单001/输入']
-  }, scheduler.triggerContracts).map((item) => item.programPath), ['Root/订单槽体/槽模/计算']);
+  }, scheduler.triggerContracts).map((item) => item.programPath), ['Root/订单槽体/候选流/计算']);
   assert.equal(
     find(committed, 'Root/订单槽体/槽例/订单001/输出/结果料').situation,
     '一',
@@ -370,16 +368,16 @@ test('re-seal recomputes every synchronized instance with the new shared Program
 test('one derived recomputation failure rolls back the entire re-seal candidate transaction', async (t) => {
   const runtime = await setup(t);
   const scheduler = createProgramRuntimeScheduler();
-  await run(runtime, 'transform {"thing.run.":"Root/封装"}', scheduler);
+  await run(runtime, 'transform {"thing.run.":"Root/订单槽体"}', scheduler);
   await run(runtime, 'transform {"thing.run.":"Root/打印001"}', scheduler);
   const changed = await run(runtime, `transform ${JSON.stringify({
-    thing: 'Root/订单槽体/槽模/计算',
+    thing: 'Root/订单槽体/候选流/计算',
     'situation.rep.raise ValueError("recompute")': 'return {"computed":True}'
   })}`, scheduler);
   assert.equal(changed.ok, true, JSON.stringify(changed.errors));
   const before = await fs.readFile(runtime.contextFile, 'utf8');
 
-  const resealed = await run(runtime, 'transform {"thing.run.":"Root/封装"}', scheduler);
+  const resealed = await run(runtime, 'transform {"thing.run.":"Root/订单槽体"}', scheduler);
 
   assert.equal(resealed.ok, false, JSON.stringify(resealed));
   assert.equal(await fs.readFile(runtime.contextFile, 'utf8'), before);
@@ -388,7 +386,7 @@ test('one derived recomputation failure rolls back the entire re-seal candidate 
 test('exact Explore, cold projection, and unrelated Program creation never replay a print effect', async (t) => {
   const runtime = await setup(t);
   const scheduler = createProgramRuntimeScheduler();
-  await run(runtime, 'transform {"thing.run.":"Root/封装"}', scheduler);
+  await run(runtime, 'transform {"thing.run.":"Root/订单槽体"}', scheduler);
   await run(runtime, 'transform {"thing.run.":"Root/打印001"}', scheduler);
   const committedText = await fs.readFile(runtime.contextFile, 'utf8');
 

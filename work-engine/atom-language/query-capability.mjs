@@ -724,6 +724,7 @@ export async function executeProgramExplore({
   accessController = { restricted: false, authorize: async () => ({ decision: 'allow' }) },
   agentOrigin = null,
   scopeRoot = null,
+  programRoot = null,
   preparedWorld = null
 }) {
   const requestedThing = request.thing === undefined
@@ -736,7 +737,8 @@ export async function executeProgramExplore({
   const resolved = resolveSlotRelativeSelector({
     atoms,
     selector: requestedThing,
-    scopeRoot: effectiveScopeRoot
+    scopeRoot: effectiveScopeRoot,
+    programRoot
   });
   const normalizedRequest = { ...request, thing: resolved.selector };
   const parsed = receiver.receive(programObjectSource('explore', normalizedRequest));

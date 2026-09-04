@@ -13,15 +13,15 @@ function atom(thing, situation = '', slot = [], strut = [], types = [], descript
   };
 }
 
-test('first seal preserves exact candidate-local Program strut endpoints through model rename', async () => {
+test('first seal preserves exact candidate-local Program strut endpoints without renaming', async () => {
   const atoms = [atom('表单槽体', '', [atom('候选', '', [
     atom('提交', '', [], [{ 'if@current': true, then: [{ 'thing@program': '表单槽体/候选/推进' }] }]),
     atom('推进', 'def main(delivery):\n    pass\ntrigger("strut", {}, main)', [], [], ['program'])
   ])])];
   const result = await seal(atoms);
   assert.equal(result.error, undefined, JSON.stringify(result.error));
-  assert.deepEqual(field(find(result.atoms, '表单槽体/槽模/提交'), 'strut'), [
-    { 'if@current': true, then: [{ 'thing@program': '表单槽体/槽模/推进' }] }
+  assert.deepEqual(field(find(result.atoms, '表单槽体/候选/提交'), 'strut'), [
+    { 'if@current': true, then: [{ 'thing@program': '表单槽体/候选/推进' }] }
   ]);
   const printed = await applySlotBodyEffect({
     atoms: result.atoms, effect: { action: 'print', body: '表单槽体', name: '试单' },
@@ -29,7 +29,7 @@ test('first seal preserves exact candidate-local Program strut endpoints through
   });
   assert.equal(printed.error, undefined, JSON.stringify(printed.error));
   assert.deepEqual(field(find(printed.atoms, '表单槽体/槽例/试单/提交'), 'strut'), [
-    { 'if@current': true, then: [{ 'thing@program': '表单槽体/槽模/推进' }] }
+    { 'if@current': true, then: [{ 'thing@program': '表单槽体/候选/推进' }] }
   ]);
 });
 
@@ -129,9 +129,9 @@ test('re-seal updates every mapped slot while preserving two nested material sub
   const beforeA = JSON.stringify(materialA);
   const beforeB = JSON.stringify(materialB);
 
-  const model = find(atoms, '表单槽体/槽模');
-  const name = find(atoms, '表单槽体/槽模/姓名');
-  const group = find(atoms, '表单槽体/槽模/分组');
+  const model = find(atoms, '表单槽体/候选表单');
+  const name = find(atoms, '表单槽体/候选表单/姓名');
+  const group = find(atoms, '表单槽体/候选表单/分组');
   field(model, 'slot').splice(field(model, 'slot').indexOf(name), 1);
   setField(name, 'thing', '联系人');
   const nameKey = entry(name, 'thing')[0];
@@ -172,7 +172,7 @@ test('re-seal updates every mapped slot while preserving two nested material sub
 
 test('re-seal deletes an empty mapped slot from every instance', async () => {
   const atoms = await twoInstances();
-  const modelChildren = field(find(atoms, '表单槽体/槽模'), 'slot');
+  const modelChildren = field(find(atoms, '表单槽体/候选表单'), 'slot');
   modelChildren.splice(modelChildren.findIndex((item) => nameOf(item) === '空备注'), 1);
 
   const result = await seal(atoms);
@@ -185,7 +185,7 @@ test('re-seal deletes an empty mapped slot from every instance', async () => {
 test('deleting a mapped slot containing local material reports exact paths and rolls back the whole seal', async () => {
   const atoms = await twoInstances();
   addNestedMaterial(atoms, '乙', '不得丢失');
-  const modelChildren = field(find(atoms, '表单槽体/槽模'), 'slot');
+  const modelChildren = field(find(atoms, '表单槽体/候选表单'), 'slot');
   modelChildren.splice(modelChildren.findIndex((item) => nameOf(item) === '姓名'), 1);
   const before = structuredClone(atoms);
 
@@ -218,7 +218,7 @@ test('seal rejects removed batch inputs and never returns continuation fields', 
 
 test('one failed automatic reseal rolls back plan replacement and all instance changes', async () => {
   const atoms = await twoInstances();
-  setField(find(atoms, '表单槽体/槽模/姓名'), 'situation', '不得落盘的新契约');
+  setField(find(atoms, '表单槽体/候选表单/姓名'), 'situation', '不得落盘的新契约');
   const before = structuredClone(atoms);
   let calls = 0;
 

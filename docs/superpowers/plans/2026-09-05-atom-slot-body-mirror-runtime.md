@@ -34,7 +34,7 @@
 - Consumes: `slot_body({"action":"seal"})` emitted by the current Program; generated print Program emits `slot_body({"action":"print","name":NAME})`.
 - Produces: a sealed layout whose model is the one non-reserved direct child, retaining its original Thing name; receipts still expose exact `body`, `revision`, and print target.
 
-- [ ] **Step 1: Write the failing self-declaration tests**
+- [x] **Step 1: Write the failing self-declaration tests**
 
 ```js
 test('slot body Program seals itself and preserves the candidate DataFlow name', async () => {
@@ -55,7 +55,7 @@ test('slot_body rejects the retired caller-selected body parameter', async () =>
 });
 ```
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run:
 
@@ -65,7 +65,7 @@ node --test --test-isolation=none tests/atom-slot-body-runtime.test.mjs tests/at
 
 Expected: the self-declared seal fails because `body` is required, and the preservation assertion fails because `initialSeal` renames the candidate to `槽模`.
 
-- [ ] **Step 3: Implement the minimal self-declared contract**
+- [x] **Step 3: Implement the minimal self-declared contract**
 
 ```js
 // Normalized public effect shape after Program validation.
@@ -77,7 +77,7 @@ return { action: entry.action, ...(entry.name ? { name: entry.name.trim() } : {}
 
 In `layoutOf`, recognize a sealed body as exactly `print`, `槽例`, and one other direct child; set `modelPath` from that child's actual name. In `initialSeal`, remove endpoint relocation and the Thing rename, then create only `print` and `槽例`. Export one read-only layout helper for `engine.mjs`; use it in `programResealsModelPath(atoms, slotBodies, sourceProgramPath, targetPath)` so reseal authorization compares against the actual candidate path instead of appending `/槽模`.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run:
 
@@ -108,7 +108,7 @@ git commit -m "refactor(slot-body): self-declare seals without renaming"
 - Consumes: `{scopeRoot, programRoot}` from `slotProgramInvocationsForEvent`; Program selectors may be `.`, `./内部角色`, `PROGRAM_ROOT/内部角色`, or an exact path outside `programRoot`.
 - Produces: template-local selectors normalized to the matching path below `scopeRoot`; external exact selectors unchanged; Transform effects carry enough invocation context for the same normalization after worker return.
 
-- [ ] **Step 1: Write failing selector and instance-isolation tests**
+- [x] **Step 1: Write failing selector and instance-isolation tests**
 
 ```js
 test('scoped selector maps internal absolute paths but leaves external facts exact', () => {
@@ -134,17 +134,17 @@ test('one instance event reads and writes only that instance with shared templat
 });
 ```
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run:
 
 ```powershell
-node --test --test-isolation=none tests/atom-slot-relative-scope.test.mjs tests/atom-slot-body-plan-integration.test.mjs
+node --test --test-isolation=none tests/atom-slot-relative-domain.test.mjs tests/atom-slot-body-plan-integration.test.mjs
 ```
 
 Expected: an internal absolute selector is rejected as `SLOT_RELATIVE_SELECTOR_REQUIRED`, demonstrating the missing mirror mapping.
 
-- [ ] **Step 3: Implement one shared selector normalizer**
+- [x] **Step 3: Implement one shared selector normalizer**
 
 ```js
 export function normalizeSlotMirrorSelector({ selector, scopeRoot, programRoot }) {
@@ -162,12 +162,12 @@ export function normalizeSlotMirrorSelector({ selector, scopeRoot, programRoot }
 
 Use this function for Program Explore and post-worker Transform normalization. Pass `programRoot` alongside `scopeRoot` in `executeExplore` execution context and in validated Transform effects. Do not map paths outside `programRoot`; let ordinary Graph resolution and authorization handle them.
 
-- [ ] **Step 4: Verify GREEN and failure atomicity**
+- [x] **Step 4: Verify GREEN and failure atomicity**
 
 Run:
 
 ```powershell
-node --test --test-isolation=none tests/atom-slot-relative-scope.test.mjs tests/atom-slot-body-plan-integration.test.mjs tests/atom-world-transaction.test.mjs
+node --test --test-isolation=none tests/atom-slot-relative-domain.test.mjs tests/atom-slot-body-plan-integration.test.mjs tests/atom-world-transaction.test.mjs
 ```
 
 Expected: all tests pass; internal reads/writes affect only the active instance, external paths remain external, and a mapped write failure leaves the candidate world unchanged.
