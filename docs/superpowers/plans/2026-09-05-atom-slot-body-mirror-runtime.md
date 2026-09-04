@@ -237,7 +237,7 @@ For each failure, keep the same tiny fixture, add one assertion that names the b
 
 GREEN: self-declared seal, two prints, instance data write, Strut delivery, receiver-owned shared Trigger, current-instance status change, business-lock release, controlled authorized jump, template isolation and sibling isolation. The implementation retains Agent-window denial, gives slot-local window moves the existing `slot-material-move` capability, and records relocation parent paths for local patches.
 
-- [ ] **Step 4: Verify the complete affected chain**
+- [x] **Step 4: Verify the complete affected chain**
 
 Run:
 
@@ -249,11 +249,15 @@ git diff --check
 
 Expected: zero failures and no diff-check errors. Do not run `npm test` until this chain and the actual isolated CLI journey are green.
 
-- [ ] **Step 5: Run an actual isolated CLI journey and cold restart**
+Focused implementation chain reached `36/36 PASS`; the public Help/function-registry contract separately reached `21/21 PASS`. The system gate remains intentionally deferred until the actual isolated CLI restart journey is green.
+
+- [x] **Step 5: Run an actual isolated CLI journey and cold restart**
 
 Start a server on an OS-assigned non-4784 port with a temporary two-step `atom.json`; use exact `--endpoint` and `--agent Verifier` for seal, print, input, false, true, lock readback, jump receipt, and sibling readback. Stop and restart that same temporary world, then repeat only the final exact reads. Assert its source template and sibling are unchanged and the restarted world retains the active instance result.
 
-- [ ] **Step 6: Update Help, registry, and Superpowers evidence**
+Implemented as a public CLI endpoint journey in `tests/atom-slot-body-two-step-flow.test.mjs`. It seals and prints two instances, adds the instance-local business lock and execution Agent, completes the first stage, verifies unlock/status/jump, restarts the same temporary world, and exact-reads the active instance, sibling, and template. Both the direct and cold-restart journeys pass (`2/2`).
+
+- [x] **Step 6: Update Help, registry, and Superpowers evidence**
 
 Document only the final public calls:
 
