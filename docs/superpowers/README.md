@@ -24,7 +24,7 @@
 
 - **当前恢复断点**：[`plans/2026-09-03-session-recovery-checkpoint.md`](plans/2026-09-03-session-recovery-checkpoint.md)；ChatGPT软件更新或 Session历史丢失后，先从该文件恢复，不依赖聊天记录或自动压缩摘要。
 - **已撤回独立门禁**：[`specs/2026-09-04-atom-development-continuity-gates-design.md`](specs/2026-09-04-atom-development-continuity-gates-design.md)记录为何不为Atom另建连续性门禁；通用补充位于工作区`D:\Project\〇\AGENTS.md`，原Superpowers技能步骤保持完整。
-- **当前主干状态**：ESG现场已把P0收束为`thing@program`创建链15秒超时：`work_order_catalog(...)`与仅`return True`均超时且未提交，普通14节点Graph约6秒成功；当前先按系统调试修复该链。A模式规格与实施计划已提交，隔离分支Task 1停在`b1bff98`并通过`31/31`聚焦测试，P0关闭后继续。改构前远程回退点为`pre-a-mode-consolidation-20260904`。现场反馈不得被当作擅改Graph本体定论的授权；手机与零Agent仍按总账排队。不得重新引入Strut`nodes`、Shortcut手填ID或把内部槽位身份重新投影成普通名称。
+- **当前主干状态**：P0为Flow槽体支撑。已批准“槽例数据找槽模逻辑、按事件局部借用、内部结果只写回当前槽例、槽例并行隔离”，当前先完成专项计划并以最小两步少数据关键旅程实现和验收。白板函数只进入后续规格，不在本轮实现。A模式、手机与零Agent继续按总账排队；不得重新引入Strut`nodes`、Shortcut手填ID或把内部槽位身份重新投影成普通名称。
 - **2026-09-03 已部署**：Slot相邻层级信号、Program relocation closure、交互原子隔离、独立截止、迟到提交防护与短权威提交临界区均已合入并推送`main@ead30e2`。系统测试`226/226 PASS`；真实4784重启后 health正常，`explore 🧊manage`最终约256ms。此前“health快但命令长期挂起”的P0已关闭。
 
 - **首要 Graph 纠偏**：Strut 判定 Program 必须内嵌在 clause `if`，取得复合前项事实与本次规范化 Transform `$` 动作信封；`$click`只是注册动作族的首个用例，CLI/Web 点击统一为 `transform {"thing$click":"EXACT路径"}`，新增动作不得修改 Strut/runtime 主干。旧外部 `thing@program` 判定与独立 click endpoint/trigger 方案均已退役。权威合同见[`specs/2026-08-31-atom-world-program-design.md`](specs/2026-08-31-atom-world-program-design.md) §3.2、§4.1；当前实施账本见[`plans/2026-09-02-inline-strut-transform-actions.md`](plans/2026-09-02-inline-strut-transform-actions.md)。
@@ -38,7 +38,7 @@
 - **相关世界合同**：[`specs/2026-08-31-atom-world-program-design.md`](specs/2026-08-31-atom-world-program-design.md)
 - **相关授权合同**：[`specs/2026-08-31-atom-agent-authorization-design.md`](specs/2026-08-31-atom-agent-authorization-design.md)
 
-当前任务绑定每小时`Atom 目标巡守`（automation id：`atom-2`），状态`ACTIVE`；提示已更新为优先接收ESG生产急用功能反馈、先读唯一总账、即时入账、默认最小受影响链且禁止局部问题导致全局停工。
+当前任务绑定每30分钟`Atom 目标巡守`（automation id：`atom-2`），状态`ACTIVE`；提示已更新为优先接收ESG生产急用槽体反馈、先读唯一总账、即时入账、执行最小两步完整链且禁止局部问题导致全局停工。
 
 ## Web 场景状态
 
