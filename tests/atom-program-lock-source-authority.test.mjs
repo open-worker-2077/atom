@@ -77,6 +77,21 @@ test('cached locks are revalidated when their enclosing Agent loses lock authori
     (error) => error.code === 'PROGRAM_FUNCTION_DENIED');
 });
 
+test('cached modern locks reject a removed Program target just like a cold scheduler', async () => {
+  const world = [atom('Root', '', [
+    atom('Target', 'def main(arguments):\n    return True', [], 'program'),
+    atom('Guard', lockSource({ targets: { paths: ['Root/Target'] }, actions: ['transform'], labels: ['reviewed'] }), [], 'program')
+  ])];
+  const scheduler = createProgramRuntimeScheduler();
+  assert.equal((await scheduler.rebuildRequestDrivenLocks(world)).length, 1);
+  const removed = structuredClone(world);
+  removed[0].slot.splice(0, 1);
+  await assert.rejects(scheduler.rebuildRequestDrivenLocks(removed),
+    (error) => error.code === 'INVALID_PROGRAM_LOCK_TARGET');
+  await assert.rejects(createProgramRuntimeScheduler().rebuildRequestDrivenLocks(removed),
+    (error) => error.code === 'INVALID_PROGRAM_LOCK_TARGET');
+});
+
 test('cold start compiles new literal Program lock declarations without sidecar authority', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const locks = await scheduler.rebuildRequestDrivenLocks(newLockWorld());

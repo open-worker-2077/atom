@@ -333,6 +333,7 @@ function agentSecurityFingerprint(programs) {
 function requestDrivenLockFingerprint(records, programs, securityFingerprint, locks = []) {
   const recordsByPath = new Map(records.map((record) => [record.path, record]));
   const dependencyPaths = [...new Set(locks.flatMap((lock) => ([
+    ...(typeof lock.path === 'string' ? [lock.path] : []),
     ...(lock.targets?.paths ?? []),
     ...(lock.allowed_windows?.paths ?? []),
     ...(lock.allowed_programs?.paths ?? [])
