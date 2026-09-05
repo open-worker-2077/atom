@@ -67,6 +67,9 @@ Run上述新具名链；按实际改动运行p1/receipt相关归档恢复具名�
 
 ## 状态
 
+- **91c14b9原现场来源GREEN**：完整真实历史私有副本GEyFZW，dsc3557ms来源成功且首回执已含原archive身份/恢复坐标，同id后续completed，中央来源重建/430迁移节点/12117总节点/Strut/引用/冷读均通过。rst5997ms来源成功，revision恢复原7910af81…；后续明确failed/INVALID_SLOT_BODY_EFFECT，目标为旧版本内旧slot_body调用Program，未否定来源提交。该既有旧ABI业务错误保留独立结果，不加入本次移动改造、不恢复旧ABI。
+- **Ruling: 分别裁定来源与后续** — root私有helper此前错误地把所有后续completed作为来源恢复通过前提，违反用户明确原子化定论；现保留completed/failed真实终态，failed必须有原错误与零未提交effects，来源归档/恢复仍须完整中央patch四轴回转及冷读。复用原GEyFZW只读核对，不再重放归档/恢复。风险在于把有效后续需求忽略，故保全明确错误和原迁移队列，未把整个后续运行称为正常。
+
 - **组合候选首回执RED**：6384fb3完整历史私有副本g9CVRE公开dsc仅3054ms即ok/pending、来源中央提交成功，首回执却缺archive恢复坐标，验收在此停止。随后仅同id冷回读取得completed及同一discardId3e70e6ef-39bb-49af-b735-e464fafef5b8/默认备份仓/旧版本，未新增业务请求。root与Task3独立定位engine单项notifySourceCommitted漏展开已有transformed.archive；中央event及最终回执字段完整。裁定沿原完整来源回执合同补该字段并验首回执/同id一致，归入Task3，不新增API。首次沙箱初始化仅spawn EPERM，获准启用子进程后才取得此有效RED；生产源hash始终4b1fef9d…不变。
 
 - **Task 1实现复核完成**：b1fbb11可信恢复32/32与6384fb3诊断回修1/1证据均核对。ancestor_discard_review对b1fbb11..6384fb3范围复审裁定Important1 ADDRESSED、规格符合/质量Approved，无新增阻塞；不重复既有32项。原现场组合完整历史验收及最终交付仍未完成，不能把实现复核当任务闭环。
