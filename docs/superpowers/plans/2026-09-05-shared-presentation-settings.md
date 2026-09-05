@@ -12,6 +12,10 @@
 
 **当前断点（2026-09-06）:** 隔离工作树`.worktrees/shared-presentation-settings`、分支`fix/shared-presentation-settings`、Task1基线783dd6e；派发shared_settings_task1实施共同存储/HTTP合同。基线生产代码与1801/1801候选一致，四处新测试删除钩子已移除并独立复核，后续保留产物。本次重新检查CUA仍仅空的内置浏览器，没有真实本机标签页；实际参数与真机显示缺口仍然存在，不写测试值到生产。
 
+**Task1 RED:** 新增真实随机端口隔离服务测试GET共同设置接口得到404而非200，`node --test --test-isolation=none tests/atom-presentation-settings.test.mjs`为0/1通过；保留fixture。接下来实现共同仓储/CAS及HTTP合同；只移除实际必要测试中的fixture递归清理，不扩展为全库清理。
+
+**Task1首轮GREEN（待控制方原始证据回读及独立复核）:** 实施方报告新增共同配置测试9/9、约2.38秒，覆盖真实服务接线、网关身份、CAS/过期拒绝、Origin初始化、SSE、冷重启、业务及投影/历史文件hash不变、EIO旧文件和失败临时文件留存；正在完成模型/view-state及既有server具名相邻验证，不宣称已部署或真机完成。
+
 ## Global Constraints
 
 - 手机端展示参数以本机已有有效配置为基准；不静默采用另一套默认配置。
