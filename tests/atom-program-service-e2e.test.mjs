@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -170,7 +171,7 @@ test('4784 isolates concurrent writes and a revision-conflicted command succeeds
   );
 });
 
-test('4784 applies one Program effect set without cloning the whole world per transform', async (t) => {
+test('4784 applies one valid 80-effect set quickly and rejects a later invalid batch atomically', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-service-effect-set-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -202,7 +203,8 @@ test('4784 applies one Program effect set without cloning the whole world per tr
     failures: [],
     runtimeWarnings: []
   });
-  let refreshCount = 0;
+  let emittedValid = false;
+  let emittedInvalid = false;
   const agentSecurity = new Map([['工作Agent', {
     labels: [], functionScopes: { groups: [], names: ['explore', 'transform'] },
     functions: ['explore', 'transform']
@@ -211,12 +213,19 @@ test('4784 applies one Program effect set without cloning the whole world per tr
     agentSecurity,
     rebuildAgentSecurity: async () => agentSecurity,
     current: async () => emptyCycle(),
-    refresh: async () => {
-      refreshCount += 1;
-      if (refreshCount !== 2) return emptyCycle();
+    refresh: async (world) => {
+      const switchSituation = world[0]?.slot.find(({ thing }) => thing === 'Switch')?.situation;
+      if (switchSituation === 'after' && !emittedValid) emittedValid = true;
+      else if (switchSituation === 'rejected' && !emittedInvalid) emittedInvalid = true;
+      else return emptyCycle();
       return {
         ...emptyCycle(),
-        transforms: [
+        transforms: switchSituation === 'after' ? targets.map((_, index) => ({
+          thing: `Target ${index}`,
+          'situation.rep.after': null,
+          sourceProgramRef: 'bulk-program-ref',
+          sourceProgramPath: 'Bulk Program'
+        })) : [
           {
             'thing.typ.program': 'Target 0',
             situation: 'invalid implicit replacement',
@@ -225,7 +234,7 @@ test('4784 applies one Program effect set without cloning the whole world per tr
           },
           ...targets.map((_, index) => ({
             thing: `Target ${index}`,
-            'situation.rep.after': null,
+            'situation.rep.rejected': 'after',
             sourceProgramRef: 'bulk-program-ref',
             sourceProgramPath: 'Bulk Program'
           }))
@@ -239,14 +248,22 @@ test('4784 applies one Program effect set without cloning the whole world per tr
   t.after(() => running.close());
   const agent = await resolveAgentContext(contextFile, '工作Agent');
 
+  const source = 'transform {"thing":"工作Agent/Switch","situation.rep.after"}';
+  const sourceId = `valid-effect-set-${crypto.randomUUID()}`;
   const startedAt = Date.now();
-  const result = await executeAtomCommandEndpoint({
-    source: 'transform {"thing":"工作Agent/Switch","situation.rep.after"}',
-    interaction: { agent }
+  let result = await executeAtomCommandEndpoint({
+    source, interaction: { id: sourceId, agent }
   }, `${running.url}/__atom/api/command`);
+  const sourceDeadline = Date.now() + 4_000;
+  while (result.subsequentExecution?.status === 'pending' && Date.now() < sourceDeadline) {
+    result = await executeAtomCommandEndpoint({
+      source, interaction: { id: sourceId, agent }
+    }, `${running.url}/__atom/api/command`);
+  }
   const elapsedMs = Date.now() - startedAt;
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.subsequentExecution.status, 'completed', JSON.stringify(result));
   assert.ok(elapsedMs < 4_000, `one effect set took ${elapsedMs}ms`);
   const projectionBarrier = await executeAtomCommandEndpoint({
     source: 'explore {"thing":"工作Agent/Target 0","situation$full":true}',
@@ -258,11 +275,30 @@ test('4784 applies one Program effect set without cloning the whole world per tr
     assert.equal(world.find((entry) => entry.thing === `Target ${index}`)?.situation, 'after');
   }
   assert.equal(Object.hasOwn(world.find((entry) => entry.thing === 'Target 0'), 'thing@program'), false);
+  const rejectedSource = 'transform {"thing":"工作Agent/Switch","situation.rep.rejected":"after"}';
+  const rejectedId = `invalid-effect-set-${crypto.randomUUID()}`;
+  let rejected = await executeAtomCommandEndpoint({
+    source: rejectedSource, interaction: { id: rejectedId, agent }
+  }, `${running.url}/__atom/api/command`);
+  const finalDeadline = Date.now() + 5_000;
+  while (rejected.subsequentExecution?.status === 'pending' && Date.now() < finalDeadline) {
+    rejected = await executeAtomCommandEndpoint({
+      source: rejectedSource, interaction: { id: rejectedId, agent }
+    }, `${running.url}/__atom/api/command`);
+  }
+  assert.equal(rejected.ok, true, JSON.stringify(rejected));
+  assert.equal(rejected.subsequentExecution.status, 'failed', JSON.stringify(rejected));
+  assert.ok(rejected.subsequentExecution.errors.length > 0, JSON.stringify(rejected));
+  const rejectedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot;
+  for (let index = 0; index < targets.length; index += 1) {
+    assert.equal(rejectedWorld.find((entry) => entry.thing === `Target ${index}`)?.situation, 'after');
+  }
+  assert.equal(Object.hasOwn(rejectedWorld.find((entry) => entry.thing === 'Target 0'), 'thing@program'), false);
   const health = await fetch(`${running.url}/__spatial/api/health`);
   assert.equal(health.status, 200);
 });
 
-test('4784 keeps one isolated Program effect set fast across structural and rejected effects', async (t) => {
+test('4784 applies one valid structural 80-effect set quickly and rejects a later mixed batch atomically', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-structural-effect-set-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -291,7 +327,8 @@ test('4784 keeps one isolated Program effect set fast across structural and reje
     failures: [],
     runtimeWarnings: []
   });
-  let refreshCount = 0;
+  let emittedValid = false;
+  let emittedInvalid = false;
   const agentSecurity = new Map([['工作Agent', {
     labels: [], functionScopes: { groups: [], names: ['explore', 'transform'] },
     functions: ['explore', 'transform']
@@ -300,29 +337,44 @@ test('4784 keeps one isolated Program effect set fast across structural and reje
     agentSecurity,
     rebuildAgentSecurity: async () => agentSecurity,
     current: async () => emptyCycle(),
-    refresh: async () => {
-      refreshCount += 1;
-      if (refreshCount !== 2) return emptyCycle();
+    refresh: async (world) => {
+      const switchSituation = world[0]?.slot.find(({ thing }) => thing === 'Switch')?.situation;
+      if (switchSituation === 'after' && !emittedValid) emittedValid = true;
+      else if (switchSituation === 'rejected' && !emittedInvalid) emittedInvalid = true;
+      else return emptyCycle();
       return {
         ...emptyCycle(),
-        transforms: [
+        transforms: switchSituation === 'after' ? [
           {
             thing: 'Target 0',
             'thing.mov.Destination': null,
             sourceProgramRef: 'structural-program-ref',
             sourceProgramPath: 'Structural Program'
           },
-          {
-            thing: 'Missing target',
-            'situation.rep.after': null,
-            sourceProgramRef: 'rejected-program-ref',
-            sourceProgramPath: 'Rejected Program'
-          },
           ...targets.slice(1).map((_, index) => ({
             thing: `Target ${index + 1}`,
             'situation.rep.after': null,
             sourceProgramRef: 'bulk-program-ref',
             sourceProgramPath: 'Bulk Program'
+          }))
+        ] : [
+          {
+            thing: 'Target 1',
+            'thing.mov.Destination': null,
+            sourceProgramRef: 'rejected-structural-program-ref',
+            sourceProgramPath: 'Rejected Structural Program'
+          },
+          {
+            thing: 'Missing target',
+            'situation.rep.rejected': null,
+            sourceProgramRef: 'rejected-program-ref',
+            sourceProgramPath: 'Rejected Program'
+          },
+          ...targets.slice(2).map((_, index) => ({
+            thing: `Target ${index + 2}`,
+            'situation.rep.rejected': 'after',
+            sourceProgramRef: 'rejected-bulk-program-ref',
+            sourceProgramPath: 'Rejected Bulk Program'
           }))
         ]
       };
@@ -334,20 +386,49 @@ test('4784 keeps one isolated Program effect set fast across structural and reje
   t.after(() => running.close());
   const agent = await resolveAgentContext(contextFile, '工作Agent');
 
+  const source = 'transform {"thing":"工作Agent/Switch","situation.rep.after"}';
+  const sourceId = `valid-structural-effect-set-${crypto.randomUUID()}`;
   const startedAt = Date.now();
-  const result = await executeAtomCommandEndpoint({
-    source: 'transform {"thing":"工作Agent/Switch","situation.rep.after"}',
-    interaction: { agent }
+  let result = await executeAtomCommandEndpoint({
+    source, interaction: { id: sourceId, agent }
   }, `${running.url}/__atom/api/command`);
+  const sourceDeadline = Date.now() + 5_000;
+  while (result.subsequentExecution?.status === 'pending' && Date.now() < sourceDeadline) {
+    result = await executeAtomCommandEndpoint({
+      source, interaction: { id: sourceId, agent }
+    }, `${running.url}/__atom/api/command`);
+  }
   const elapsedMs = Date.now() - startedAt;
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.subsequentExecution.status, 'completed', JSON.stringify(result));
   assert.ok(elapsedMs < 5_000, `structural effect set took ${elapsedMs}ms`);
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot;
   assert.equal(world.find((entry) => entry.thing === 'Target 0'), undefined);
   assert.equal(world.find((entry) => entry.thing === 'Destination').slot[0].thing, 'Target 0');
   for (let index = 1; index < targets.length; index += 1) {
     assert.equal(world.find((entry) => entry.thing === `Target ${index}`)?.situation, 'after');
+  }
+  const rejectedSource = 'transform {"thing":"工作Agent/Switch","situation.rep.rejected":"after"}';
+  const rejectedId = `invalid-structural-effect-set-${crypto.randomUUID()}`;
+  let rejected = await executeAtomCommandEndpoint({
+    source: rejectedSource, interaction: { id: rejectedId, agent }
+  }, `${running.url}/__atom/api/command`);
+  const finalDeadline = Date.now() + 5_000;
+  while (rejected.subsequentExecution?.status === 'pending' && Date.now() < finalDeadline) {
+    rejected = await executeAtomCommandEndpoint({
+      source: rejectedSource, interaction: { id: rejectedId, agent }
+    }, `${running.url}/__atom/api/command`);
+  }
+  assert.equal(rejected.ok, true, JSON.stringify(rejected));
+  assert.equal(rejected.subsequentExecution.status, 'failed', JSON.stringify(rejected));
+  assert.ok(rejected.subsequentExecution.errors.length > 0, JSON.stringify(rejected));
+  const rejectedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot;
+  assert.equal(rejectedWorld.find((entry) => entry.thing === 'Target 1')?.situation, 'after');
+  assert.equal(rejectedWorld.find((entry) => entry.thing === 'Destination').slot.length, 1);
+  assert.equal(rejectedWorld.find((entry) => entry.thing === 'Destination').slot[0].thing, 'Target 0');
+  for (let index = 2; index < targets.length; index += 1) {
+    assert.equal(rejectedWorld.find((entry) => entry.thing === `Target ${index}`)?.situation, 'after');
   }
 });
 

@@ -248,6 +248,7 @@ test('Program creation rejects a missing parent without persisting a partial Ato
   await fs.writeFile(contextFile, JSON.stringify([
     atom('Creator', "transform({'thing': 'missing/Created', 'situation': '', 'slot': [], 'strut': []})", [], 'program')
   ], null, 2));
+  const before = await fs.readFile(contextFile, 'utf8');
 
   const result = await executeAtomLanguage({
     source: 'transform {"thing.run.":"Creator"}',
@@ -256,11 +257,11 @@ test('Program creation rejects a missing parent without persisting a partial Ato
     programScheduler: createProgramRuntimeScheduler()
   });
 
-  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.ok, false, JSON.stringify(result.errors));
   assert.equal(result.changed, false);
-  assert.equal(result.warnings[0].code, 'PROGRAM_TRANSFORM_REJECTED');
-  assert.equal(result.warnings[0].cause, 'ATOM_NOT_FOUND');
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8')).length, 1);
+  assert.equal(result.errors[0].code, 'PROGRAM_TRANSFORM_REJECTED');
+  assert.equal(result.errors[0].cause, 'ATOM_NOT_FOUND');
+  assert.equal(await fs.readFile(contextFile, 'utf8'), before);
 });
 
 test('Program creation rejects a duplicate exact target without overwriting it', async (t) => {
@@ -272,6 +273,7 @@ test('Program creation rejects a duplicate exact target without overwriting it',
     atom('test', '', [atom('Created', 'original')]),
     atom('Creator', "transform({'thing': 'test/Created', 'situation': 'replacement', 'slot': [], 'strut': []})", [], 'program')
   ], null, 2));
+  const before = await fs.readFile(contextFile, 'utf8');
 
   const result = await executeAtomLanguage({
     source: 'transform {"thing.run.":"Creator"}',
@@ -280,11 +282,11 @@ test('Program creation rejects a duplicate exact target without overwriting it',
     programScheduler: createProgramRuntimeScheduler()
   });
 
-  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.ok, false, JSON.stringify(result.errors));
   assert.equal(result.changed, false);
-  assert.equal(result.warnings[0].code, 'PROGRAM_TRANSFORM_REJECTED');
-  assert.equal(result.warnings[0].cause, 'DUPLICATE_ATOM_NAME');
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot[0].situation, 'original');
+  assert.equal(result.errors[0].code, 'PROGRAM_TRANSFORM_REJECTED');
+  assert.equal(result.errors[0].cause, 'DUPLICATE_ATOM_NAME');
+  assert.equal(await fs.readFile(contextFile, 'utf8'), before);
 });
 
 test('Program creation cannot append a child through a parent children write lock', async (t) => {
@@ -309,11 +311,11 @@ test('Program creation cannot append a child through a parent children write loc
     programScheduler: createProgramRuntimeScheduler()
   });
 
-  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.ok, false, JSON.stringify(result.errors));
   assert.equal(result.changed, false, JSON.stringify(result));
-  assert.equal(result.warnings.some((warning) => (
-    warning.code === 'PROGRAM_TRANSFORM_REJECTED'
-      && warning.cause === 'PROGRAM_LOCK_DENIED'
+  assert.equal(result.errors.some((error) => (
+    error.code === 'PROGRAM_TRANSFORM_REJECTED'
+      && error.cause === 'PROGRAM_LOCK_DENIED'
   )), true, JSON.stringify(result.warnings));
   assert.equal(await fs.readFile(contextFile, 'utf8'), before);
 });
@@ -336,11 +338,11 @@ test('Program creation rejects an introduced Program that violates the sandbox g
     programScheduler: createProgramRuntimeScheduler()
   });
 
-  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.ok, false, JSON.stringify(result.errors));
   assert.equal(result.changed, false, JSON.stringify(result));
-  assert.equal(result.warnings.some((warning) => (
-    warning.code === 'PROGRAM_TRANSFORM_REJECTED'
-      && warning.cause === 'INVALID_PROGRAM_SOURCE'
+  assert.equal(result.errors.some((error) => (
+    error.code === 'PROGRAM_TRANSFORM_REJECTED'
+      && error.cause === 'INVALID_PROGRAM_SOURCE'
   )), true, JSON.stringify(result.warnings));
   assert.equal(await fs.readFile(contextFile, 'utf8'), before);
 });
@@ -369,9 +371,11 @@ test('a caught JSON codec failure discards effects registered earlier in the Pro
     programScheduler: createProgramRuntimeScheduler()
   });
 
-  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.ok, false, JSON.stringify(result.errors));
   assert.equal(result.changed, false, JSON.stringify(result));
-  assert.equal(result.warnings.some((warning) => warning.code === 'ATOM_PROGRAM_FAILED'), true);
+  assert.equal(result.errors.some((error) => (
+    error.code === 'ATOM_PROGRAM_FAILED' && error.type === 'ValueError'
+  )), true, JSON.stringify(result.errors));
   assert.equal(await fs.readFile(contextFile, 'utf8'), before);
 });
 
