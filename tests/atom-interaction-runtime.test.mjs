@@ -139,6 +139,39 @@ test('failed interactions retain their correlation id for bounded server-side di
   assert.equal(result.interactionId, 'failed-create-correlation');
 });
 
+test('a rejected result without changed never claims a commit or schedules a projection', async () => {
+  const context = ports();
+  context.world.execute = async () => ({
+    ok: false, command: 'transform',
+    errors: [{ code: 'WINDOW_ACCESS_DENIED', message: 'denied' }]
+  });
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
+  const result = await runtime.execute({ source: 'transform {}', correlationId: 'denied-no-change-flag' });
+  assert.equal(result.ok, false);
+  assert.equal(result.projectionStatus, undefined);
+  assert.equal(result.projectionRecovery, undefined);
+  assert.equal(result.warnings?.some(({ code }) => code === 'PROJECTION_RECOVERY_PENDING') ?? false, false);
+  assert.deepEqual(runtime.projectionStatus(), { status: 'uninitialized' });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(context.calls.some(([kind]) => kind === 'projection'), false);
+  await runtime.close();
+});
+
+test('a rejection cannot replace the pending projection of a prior committed write', async () => {
+  const context = ports();
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 10 });
+  await runtime.execute({ source: 'transform {}', correlationId: 'actual-commit' });
+  context.world.execute = async () => ({ ok: false, errors: [{ code: 'WINDOW_ACCESS_DENIED' }] });
+  await runtime.execute({ source: 'transform {}', correlationId: 'subsequent-rejection' });
+  assert.deepEqual(runtime.projectionStatus(), { status: 'pending', expectedRevision: 'rev-2' });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(context.calls.filter(([kind]) => kind === 'projection'), [
+    ['projection', { expectedRevision: 'rev-2', lockState: { revision: 'rev-2' } }]
+  ]);
+  assert.equal(runtime.projectionStatus().status, 'published');
+  await runtime.close();
+});
+
 test('a failed Transform persists one redacted diagnostic keyed by its interaction id', async () => {
   const context = ports();
   const diagnostics = [];
@@ -490,6 +523,23 @@ test('prepared Program context retries the command without waiting for disposabl
     await pending;
     await runtime.close();
   }
+});
+
+test('projection preparation followed by a rejection never claims that the command committed', async () => {
+  const context = ports();
+  let attempt = 0;
+  context.world.execute = async () => {
+    attempt++;
+    if (attempt === 1) return { ok: false, errors: [{ code: 'ATOM_PROGRAM_PROJECTION_MISSING' }] };
+    if (attempt === 2) return { ok: true, command: 'atom', changed: false, revisionAfter: 'existing' };
+    return { ok: false, command: 'transform', errors: [{ code: 'WINDOW_ACCESS_DENIED' }] };
+  };
+  const runtime = createInteractionRuntime(context);
+  const result = await runtime.execute({ source: 'transform {}', correlationId: 'prepare-then-deny' });
+  assert.equal(result.ok, false);
+  assert.equal(result.projectionRecovery.expectedRevision, 'existing');
+  assert.ok(result.warnings.every(({ message }) => !message.includes('facts are committed')));
+  await runtime.close();
 });
 
 test('the first use of an Agent prepares its scoped Program projection once and retries the intent', async () => {

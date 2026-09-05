@@ -3264,6 +3264,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         match.path.join('/'), match
       ]));
       for (const renamedItem of renamed.results) {
+        if (renamedItem.sourcePath !== renamedItem.resultPath) {
+          batchDeclarationRelocations.push({ sourcePath: renamedItem.sourcePath, resultPath: renamedItem.resultPath });
+        }
         const resultMatch = matchesByPath.get(renamedItem.resultPath);
         results.push({
           index: renamedItem.index,
@@ -3325,7 +3328,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       for (const path of [transformed.sourcePath, transformed.resultPath]) {
         if (path) transformEventNodes.add(path);
       }
-      if (transformed.structuralCommand === 'mov'
+      if ((transformed.structuralCommand === 'mov' || isBatchRenameItem(candidate))
         && transformed.sourcePath && transformed.resultPath
         && transformed.sourcePath !== transformed.resultPath) {
         batchDeclarationRelocations.push({
@@ -3692,7 +3695,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   let nextAtoms = transformed.atoms;
   let revisionAfter = revisionBefore;
   let changed = transformed.changed === true || programChanged;
-  const declarationRelocations = transformed.structuralCommand === 'mov'
+  const declarationRelocations = (transformed.structuralCommand === 'mov' || isBatchRenameItem(item))
     && transformed.sourcePath && transformed.resultPath
     && transformed.sourcePath !== transformed.resultPath
     ? [{ sourcePath: transformed.sourcePath, resultPath: transformed.resultPath }]
