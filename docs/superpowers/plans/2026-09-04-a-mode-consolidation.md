@@ -1,6 +1,6 @@
 # A Mode Consolidation Implementation Plan
 
-**当前续点（2026-09-06核对）**：隔离分支仍为f49ed32、工作区干净；旧双击实现Task1—4及原GREEN有效保存，Task5—7与用户长按修订尚未完成/部署。恢复实施时先吸收主分支现行规格及手机共同配置合同，按长按修订原相关步骤并取得新手势RED，不重复旧任务、不拿双击GREEN当长按验收。新增展示字段须兼顾已保存共同配置的迁移与读取，不能退回独立localStorage。
+**当前续点（2026-09-06）**：已在既有隔离工作树以d3395e8安全吸收已部署main@04270b4；旧Task1—4及其GREEN保留。合并仅四处文档冲突，采用最新状态且保全旧A接手记录；最小输入/模型基线62/62通过。当前Task5统一执行用户长按修订、共同设置缺字段保全和帮助同步，Task6—7随后；不重复旧任务、不拿双击GREEN当长按验收。
 
 **最新用户修订（2026-09-05，待移动部署后实施）**：右键双击沉浸改为右键长按；本条覆盖下方旧双击实施细节。当前只入账，已保存Task1—4与其验证保留为旧实现证据，不在移动修复中改交互代码。续接时按Web规格§4.1统一调整仲裁、设置、帮助及实际手势验收。
 
@@ -291,61 +291,43 @@ git add spatial-engine.js spatial-view-mode-model.js tests/cluster-engine-contra
 git commit -m "refactor(web): merge immersion into A navigation"
 ```
 
-### Task 5: 收束帮助、设置与移动端表达
+### Task 5: 右键长按、共同设置与帮助同步收束
 
 **Files:**
-- Modify: `index.html`
-- Modify: `input-config.js`
-- Modify: `spatial-engine.js`
-- Test: `tests/input-config.test.js`
-- Test: `tests/mobile-interaction-contract.test.js`
-- Test: `tests/browser/mobile-control-panel.spec.mjs`
+- Modify: `input-config.js`, `spatial-gesture-arbiter.js`, `spatial-engine.js`, `index.html`。
+- Modify as needed: `spatial-demo-model.js`, `src/atom-system/spatial-experience/presentation-settings-service.mjs`。
+- Test: `tests/input-config.test.js`, `tests/spatial-gesture-arbiter.test.js`, `tests/gesture-contract.test.js`, `tests/mobile-interaction-contract.test.js`, `tests/atom-presentation-settings.test.mjs`。
+- Test: `tests/browser/mobile-control-panel.spec.mjs`, `tests/browser/atom-web-critical-journeys.spec.mjs`及既有共同配置浏览器旅程。
 
 **Interfaces:**
-- Consumes: A-only intents and `secondaryNavigationDelayMs` control.
-- Produces: 只展示 A 普通／沉浸向内剖开的桌面与移动端说明；不再展示 S、D、F 模式按钮或键位。
+- Consumes: 已完成A普通/沉浸导航、稳定Thing命中、现有pointer生命周期及同一服务共同展示配置。
+- Produces: 普通右键短按向内剖开、右键持续长按沉浸；同一字段`secondaryNavigationDelayMs`改为长按阈值；帮助/控件与行为一致。
 
-- [ ] **Step 1: Write failing copy and control-surface tests**
+**Binding constraints（覆盖旧Task1—4示例中的双击要求，不重做已完成导航）:**
+- 以Web规格§4.1、§5.2、§5.5为准；不改Graph、权限、Transform、Program或生产数据。
+- 长按默认420ms，可调240–800ms，沿已有字段和DOM控件；文案为“右键沉浸长按时长”，单字段恢复默认和跨端共同配置均保留。
+- 同一次无修饰右键按下锚定稳定Thing及阈值；阈值前松开为普通剖开，持续到阈值仅沉浸一次，之后松开无第二导航。右键双击不得沉浸。
+- 拖拽、pointercancel、lost capture、失焦或修饰键改变取消待识别长按；不得留下迟到定时器导航。Ctrl关系编辑、Shift魔杖、左键可编程点击和中键拖拽保持。
+- 空白单击仅返回直接父层并解除沉浸，空白双击仍仅返回一次；按原仲裁方式保留这一有效需求，无空白长按沉浸。
+- 共同设置服务读取旧已保存完整字段集时，只允许缺此次新增的secondaryNavigationDelayMs并补默认；保留所有其他有效字段/合法0/原revision，不在GET写盘。未知字段、其他必需字段缺失、损坏值仍拒绝；下次显式更新按原CAS保存完整现行字段集。
+- S/D/独立F退出活跃帮助、设置、键位和手机控件；保留A子层缩小（旧peripheralDepthShrink变量实际被A消费）、历史Z/X、详情、编辑、魔杖等有效需求。
+- 实现复用现有手势模块和pointer生命周期，不新增通用手势框架或第二配置来源。代码行为退役由Git和Task6清单保全，不删除文件/产物。
 
-```js
-assert.match(html, /右键单击向内剖开/);
-assert.match(html, /右键双击沉浸/);
-assert.doesNotMatch(html, /S外围|D层级|F沉浸|data-mobile-key="KeyS"|data-mobile-key="KeyD"|data-mobile-key="KeyF"/);
-assert.doesNotMatch(input.describeGroups().flatMap((group) => group.items).map((item) => item.label).join('\n'), /外围|层级/);
-```
+- [ ] **Step 1: 获得新长按与旧共同设置读取RED**
 
-- [ ] **Step 2: Run focused UI tests and verify RED**
+真实定时器模型覆盖短按/长按/松开一次/取消及旧双击不沉浸；真实Chromium在旧双击实现上验证持续按住未沉浸得到RED。旧完整设置文档缺新字段的读取目前严格数量校验拒绝，补实际服务用例RED，验证其余字段守恒及坏文档拒绝。新行为RED不能用源码正则替代。
 
-Run: `node --test tests/input-config.test.js tests/mobile-interaction-contract.test.js`
+- [ ] **Step 2: 实现最小长按和配置接线**
 
-Expected: FAIL because old ASDF copy and controls remain.
+输入意图、现有右键仲裁、pointer生命周期、共同配置服务读取按上述合同一次收束。帮助、设置可访问标签、桌面及移动控件同步为长按；移动端已有虚拟右键复用同一意图/识别链，不造另一套业务语义。
 
-- [ ] **Step 3: Remove old mode surfaces and publish exact A wording**
+- [ ] **Step 3: 最小受影响链GREEN及真实浏览器证明**
 
-Replace the canvas aria-label, footer hint, Help mapping rows, mobile buttons and settings mapping entries with:
+先跑受改函数相关Node测试，再跑三个关键行为：短按保留团外、长按沉浸且松开不二次导航、空白快速双击单层返回。补拖拽/取消及修饰键隔离的定向行为证明；设置调值→重载→恢复默认→重载、服务共同基准继承与缺字段保全。证据保存到本计划SDD，浏览器输出使用唯一目录防覆盖删除。只跑必要具名旅程，不在此任务运行全量npm test。
 
-```text
-右键单击节点团：普通向内剖开
-右键双击同一节点团：沉浸向内剖开
-右键单击当前团空白：返回一层并恢复非沉浸
-```
+- [ ] **Step 4: 自审、提交和任务复核**
 
-Do not label A as a separate exit action. Preserve Z/X history, PageUp/PageDown A-level operations, CapsLock details, Ctrl edit and Shift wand.
-
-- [ ] **Step 4: Run focused Node and mobile Playwright tests**
-
-Run: `node --test tests/input-config.test.js tests/mobile-interaction-contract.test.js`
-
-Run: `npx playwright test tests/browser/mobile-control-panel.spec.mjs --config=playwright.config.mjs`
-
-Expected: both commands PASS.
-
-- [ ] **Step 5: Commit the A-only interface**
-
-```bash
-git add index.html input-config.js spatial-engine.js tests/input-config.test.js tests/mobile-interaction-contract.test.js tests/browser/mobile-control-panel.spec.mjs
-git commit -m "refactor(web): retire ASDF mode surfaces"
-```
+修改符号前GitNexus impact，提交前detect_changes与diff检查；只提交本任务文件，报告RED/GREEN实际命令、输出、源码范围与疑点。最终独立任务复核由控制方派发；Task6复用同revision有效浏览器证据并完成退役清单，Task7才执行最终全量、部署与正式入口回读。
 
 ### Task 6: 真实浏览器关键旅程与封存清单
 
@@ -581,3 +563,13 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **Task 4浏览器证据校准**：普通剖开保留团外已通过；两次独立CDP click在负载下跨过420ms导致单击提交，改原生mouse.dblclick保持产品间隔不变。后续page.goto／test 30s超时是未形成有效结果，须核查测试服务与加载等待；同一产品revision每条已有有效行为证据复用，不为整组全绿外观反复重跑。
 
 - **Task 4: complete**：d9df3bb..b132962，最终单元77/77、真实Chromium五条导航旅程5/5（34.2s）；a_task4_review规格符合且quality Approved，零分级问题。Task 5帮助／控件、Task 6退役清单、Task 7最终候选与部署仍开放。按用户来源提交要求，A先保存安全续点，接续提交分离及旧print迁移，不部署未完成A。
+
+- **Ruling: 长按续接与共享字段**：用户已明确右键双击改长按，沿现有420ms/240–800ms参数改含义，阈值在按下时固定；空白双击单层返回保留。Task5包含手势与帮助同步，Task6复用新旅程。服务当前严格完整字段数会拒绝旧保存文档，允许仅缺新字段的窄迁移为必要依赖，不改Atom内核。错误代价为可逆Web阈值/识别调整或配置读取返工，旧数据及Git历史保全。
+
+| 续接核查 | 实际生产/消费关系 | 裁定 |
+|---|---|---|
+| Task1—4 / Task5 | 已有A导航消费旧double意图；新入口为hold | 只替换识别和映射，不重做导航结构；保留旧验收历史 |
+| Task5自身 | 识别、设置、帮助共同定义长按 | 同任务完成；Node+真实按住验收，无仅文案假实现 |
+| 共同配置 / Task5 | 服务严格字段数消费新增设置 | 窄补新字段并保持原revision、其余值与CAS |
+| Task5 / Task6 | 同文件浏览器旅程与退役清单 | 长按RED/GREEN前移至Task5，Task6复用而不重跑 |
+| Task6 / Task7 | 稳定候选→最终全量/正式入口 | 不以隔离测试冒称部署；旧Task7 health示意按真实atomProjection和HTML build读取 |
