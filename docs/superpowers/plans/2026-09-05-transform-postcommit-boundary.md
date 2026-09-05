@@ -108,7 +108,8 @@ git commit -m "fix(runtime): commit source transforms before triggered effects"
 - Modify: `cli/lib/server.mjs` (existing atomCommandRequest cache only)
 - Modify if required: `src/atom-system/public/interaction-runtime.mjs` (既有onCommitted通知的异步错误传播/一次性通知，不改调度)
 - Test: `tests/atom-transform-postcommit-boundary.test.mjs`
-- Test: `tests/spatial-server.test.mjs` (existing HTTP receipt lifecycle)
+- Test: `tests/atom-language-graph-server.test.mjs` (existing Atom HTTP early receipt/id conflict/deadline lifecycle)
+- Test if needed: `tests/spatial-server.test.mjs` (lower-level cache boundary; no duplicate fixture required)
 
 **Interfaces:**
 - Consumes: Task 1的来源receipt及`subsequentExecution`；原中央journal的不可混淆commandId、before/afterRevision与重试查询。
@@ -130,7 +131,9 @@ recordProgramExecution({ sourceCommandId, outcome });
 
 来源`postCommitEvent`包含现有局部trigger envelope、原interaction身份与关联；后续事实receipt.result的`subsequentOf`绑定来源commandId。成功child receipt已存在而outcome未写时，由child receipt恢复完成结果，禁止再次跑effects。相同关联重试必须核对原source/Agent身份；不同请求复用关联应稳定冲突，不能泄露他人回执。
 
-当前中央commandId由correlationId与前后revision共同哈希，重试方只有原interaction id，不能从最新世界反推旧commandId。因此在同一journal加载时维护correlation→source receipt索引，并在提交入口校验已有绑定；不得每次请求全量扫描，也不能只依赖HTTP内存cache防并发同id重放。绑定只适用于本次带postCommitEvent的来源合同，不改写历史普通receipt。
+当前中央commandId由correlationId与前后revision共同哈希，重试方只有原interaction id，不能从最新世界反推旧commandId。因此在同一journal加载时维护correlation→source receipt索引，并在提交入口校验已有绑定；不得每次请求全量扫描，也不能只依赖HTTP内存cache防并发同id重放。绑定只适用于本次带postCommitEvent的来源合同，不改写历史普通receipt。请求身份使用包含语义输入的固定SHA-256指纹，history可纳入散列但不把正文复制为调度事件；恢复不回灌历史labels/scope/history/bypass，仅原局部事件和Agent路径在当前世界重判。
+
+**Ruling: 写入所有权范围**：本Task覆盖同进程多个service/HTTP并发及旧进程终止后的冷进程恢复；生产继续由单Atom Runtime中央入口写入，不扩为跨进程同时写入或新增OS/file锁。允许按规范化context/journal/world身份共享原中央提交所有权；各调用者备份钩子/投影选项仍各自保持，相关cache/索引必须观察同一日志进展。复用现有共享机制或弱引用句柄，禁止永久强Map留住每个测试世界、也不得驱逐活跃提交所有者。原因是现有coordinator/journal只在实例内串行，需要补足同进程真实入口并发；若范围判断错误，代价为后续单独设计跨进程互斥，不以本Task声称已支持。
 
 失败结果为该来源后续运行的已确定结果，同id重读只返回该结果；修复Program后由新的合法Transform事件触发，不将同id结果查询偷偷变成业务重试。只有无最终结果且无已提交child的中断尝试才可按当前世界与当前授权恢复。事件只保留原Agent路径/身份依据，不把历史labels或scope当现行授权。
 
@@ -144,9 +147,11 @@ assert.deepEqual(await oldReader.findReceipt(sourceCommandId), originalReceipt);
 
 此为需由测试确认的实现裁定。错误代价为局部journal附加结果编码返工，不改变来源事实合同；不得借该裁定略过旧日志、幂等、逆向patch和回退验收。
 
-**公开重读边界：** `cli/lib/server.mjs:atomCommandRequest`现有cache固定保存首个settle Promise；提前来源ack后，重复同一请求会永远读pending。Task2在原cache条目中记录最终结果，保留既有fingerprint冲突规则；同一POST/interaction id在运行中读pending、完成后读最终结果，禁止重跑operation。冷重启由中央持久关联恢复同一结果，不另建读取状态仓或新CLI语法。初始CLI回执通过既有warning明确后续pending及关联id；最终失败warning与原errors保持一致。取消/超时发生在来源提交后，也不得把来源记录变为未提交。
+**公开重读边界：** `cli/lib/server.mjs:atomCommandRequest`现有cache固定保存首个settle Promise；提前来源ack后，重复同一请求会永远读pending。Task2在原cache条目中记录最终结果，保留既有fingerprint冲突规则；同一POST/interaction id在运行中读pending、完成后读最终结果，禁止重跑operation。冷重启由中央持久关联恢复同一结果，不另建读取状态仓或新CLI语法。初始CLI回执通过既有warning明确后续pending及关联id；最终失败warning与原errors保持一致。取消/超时发生在来源提交后，也不得把来源记录变为未提交。实际operation完成必须独立于deadline竞速结果更新同一cache条目，以受控deferred/deadline用例证明截止先结束后仍可同id取得最终结果；保留原取消/截止，不新增无界等待。
 
-**通知失败边界：** onCommitted同步抛错或返回rejected Promise属于回执通知失败；保留一次性通知计数，记录可行动warning，已提交来源仍返回成功，合法后续业务继续。现行interaction-runtime的notifyCommitted不返回外层callback Promise，必要时在该现有函数与调用处贯通处理，避免未处理拒绝；须分别覆盖直接service与公开runtime，不以assert.rejects＋来源落盘当作完整通过。
+**通知失败边界：** onCommitted同步抛错或返回rejected Promise属于回执通知失败；保留一次性通知计数，记录可行动warning，已提交来源仍返回成功，合法后续业务继续。现行interaction-runtime的notifyCommitted不返回外层callback Promise，必要时在该现有函数与调用处贯通处理，避免未处理拒绝；须分别覆盖直接service与公开runtime，不以assert.rejects＋来源落盘当作完整通过。来源中央提交后onAuthoritativeWrite/adopt/镜像辅助收尾异常同样不得越过来源成功边界；仅据本次真实中央receipt确认，保留持久后续恢复依据。
+
+**Ruling: 自动恢复接线**：复用service首次启动请求持有context/scheduler的边界一次消费pending；现行graph-server:478调用interactionRuntime.initialize（source=atom、programMode=project），在538 listen之前，故无须新增公开API。恢复后当前世界/投影须取新事实，不能发布旧snapshot；原Agent当前授权、独立错误、原worker超时/取消继续成立。不借用首个请求的callback，也不递归等待自身guard；同进程共享恢复所有权。以子进程中断后只启动新server/普通读、不重提来源或同id验收自动续行。理由是来源ack后调用方无须重放来源；若接线判断错误，代价为启动阶段局部接线返工，不取消自动恢复。
 
 ```js
 assert.equal(first.result.subsequentExecution.status, 'pending');
@@ -155,6 +160,7 @@ assert.equal(sourceCommitCount, 1);
 assert.equal(workerCalls, 1);
 ```
 
+**既有service合同：** 无context/projection的adapter保持原参数转发形状；manifest readiness继续复用原single-flight缓存。跨facade以共享持久层实际提交/恢复的内部generation使派生cache失效，普通mock仍在本facade提交后失效；该token不作世界revision/第二状态权威、不按请求扫描历史，rollback/recover/adopt等实际改变清单的路径须一致失效。
 - [ ] **Step 1: 用故障注入取得恢复 RED**
 
 真实中央持久化在来源提交后、后续执行前中断；新建service/scheduler读取相同私有目录。来源必须保持after，触发依据可恢复。再在后续effects已提交但响应前中断，重试不能再提交或再执行已确认effect。
@@ -182,6 +188,8 @@ Run: `node --test --test-isolation=none tests/atom-transform-postcommit-boundary
 
 **Files:**
 - Test: `tests/atom-transform-postcommit-boundary.test.mjs`
+- Modify if required: `scripts/accept-rename-world-copy.mjs` (真实副本公开请求的最终回执及四轴守恒验收)
+- Modify: `scripts/accept-real-world-write-copy.mjs` (仅修最终ok被展开的preRollback.ok覆盖，禁止削减任一验收条件)
 - Modify: 本计划、唯一需求总账及既有恢复断点。
 
 **Interfaces:**
@@ -191,6 +199,10 @@ Run: `node --test --test-isolation=none tests/atom-transform-postcommit-boundary
 - [ ] **Step 1: 真实公共旅程**
 
 以生产同款service/公开CLI和普通Agent，在隔离世界验证合法来源→立即exact读为after→后续失败独立回执；修复该测试Program后再触发，Result成功。真实生产世界只读副本验证一次上级改名，保全后代结构/正文、外部引用、既有Trigger与阶段接棒，生产源hash不变。
+
+既有accept-rename-world-copy已提供随机端口、普通Agent、全节点身份/类型/正文/拓扑、立即/冷回读和源hash比较；按当前后续结果合同补同id最终回执及必要Strut引用守恒。不能仅因首个source ack为ok就跳过后续失败核对。副本在最终候选时生成，保留产物；若生产同期有合法写入使源hash变化，先区分外部变化，不能用旧备份覆盖生产。
+
+控制方代码回读发现accept-real-world-write-copy末尾先赋综合ok再展开含ok的preRollback，会把rollback/restart/sourceUnchanged的失败覆盖成true。Task3仅调整结果组装次序使综合ok最后裁定，并回看实际各布尔证据；历史证据已有逐项true的不据此无端撤销或重测，不为该修复新增一套验收框架。
 
 - [ ] **Step 2: 扩展受影响门禁**
 
@@ -256,3 +268,22 @@ Run: `npm run check:development-control`；`npm test`。真实失败先定向修
 - **Task1 round2候选**：76387cd，核心18/18、committed-receipt及world-service契约17/17，静态/diff检查通过。复合fixture已使用正常/catch同一最终锁索引，覆盖来源no-op、后续改名、实际scheduler锁、完整路径、原receipt与之后并发revision。四文件（含已授权persistence异常封装及其契约测试），impact HIGH（5符号/8流程）；精确9b0fa5e..76387cd复审进行中。
 
 - **Task 1: complete**：b4a74cc..76387cd；round2复核逐项ADDRESSED、无新增Critical/Important、Approved。两轮修复均有具名RED/GREEN与精确差异复审。持久事件/冷恢复/重复HTTP最终回执/通知异常收口明确由Task2承接，Task3再作最终公开验收；未部署本候选。
+
+- **Task2开始**：BASE=802d902，实施方transform_boundary_task2（gpt-6-astra，跨文件持久兼容/身份/中断并发判断所需）。按更新brief执行；仅代码/测试、root持有文档，无全量/生产/push/删除。Task1与后续print计划文档已单独保存main@0af6655，生产代码仍8b2df30，主干未提前纳入Task1运行代码。
+
+- **Task2测试位置校准**：既有Atom HTTP提前回执/同id冲突/独立截止场景实际在atom-language-graph-server:900—979，原brief把此生命周期写为spatial-server不准确；允许实施方复用该既有测试文件。spatial-server仅在需要直接cache验收时保留，不为位置统一机械搬迁已有效测试。
+
+- **Task2初始RED/GREEN**：获准命令node --test --test-isolation=none --test-name-pattern='cold retry|notification|creating a valid' tests/atom-transform-postcommit-boundary.test.mjs得到5/5失败：来源冷读端口undefined、child crash预期72实际0（无subsequentOf绑定）、同步/异步callback异常逃逸。实现后5/5真实worker/子进程恢复用例通过；HTTP同id最终重读由pending不能变failed取得RED后GREEN。当前仅同id恢复已证明，启动自动消费接线仍在实施。
+- **Task2 CAS验收校准**：旧Task1用例预期CAS为最终错误；Task2要求重新读取当前世界，原Result before→after替换前提已被另一提交改变，所以原CAS保留warning，当前重新判定错误进入最终errors。控制方回读fixture确认语义变化，要求具体错误code/关键细节和source/Result守恒，不接受仅errors.length>0取得GREEN。
+
+- **Task2截止后回执裁定**：atomCommandRequest把operationResult与deadline竞速；来源提前ack后若deadline先结束，真正operation完成也必须更新同一cache最终结果。保留现有取消/截止，不靠无界后台等待；增加受控deferred/deadline验收，同id重读反映已记录最终后续状态，不重做来源。此已送实施方，未取得最终GREEN。
+- **Task3公开锚点预读**：2026-09-05 18:02，北京时间；main公开CLI以🧊manage exact explore 🧊manage/包办/瞻重成功，直接子节点ESG计划、Python学习、当前结论；down boundary给出166节点，原if@current→🧊manage/包办/执成的Strut仍在。该预读只确定最新验收目标及关系，不代替候选真实副本改名验收。
+
+- **Task2新增定向证据**：startup来源子进程退出后自动消费先RED（Result仍before）后GREEN；HTTP真正operation完成独立更新cache，两种deadline场景2/2；当前source/Agent不存在或labels撤销3/3；同进程中央facade身份冲突、独立hook及no-change守恒通过；取消后未确认尝试保留pending并由fresh scheduler恢复通过。以上为实施方即时证据，等待最终候选报告和独立复核；当前另有source中央提交后辅助onAuthoritativeWrite异常裸抛的真实RED，尚在修复。
+
+- **Task2汇总门禁**：边界30＋HTTP6为36/36；加原事务/runtime最小链共106项，104通过、2失败。实际server initialize→listen→GET state已验证恢复Result=after且初始化修订一致。两项失败为无context/projection时参数应原样转发，以及manifest readiness需保留single-flight缓存；未升级全量。
+- **Ruling: 共享manifest失效**：无持久化保持原接口形状；原manifest Promise缓存继续复用，以共享持久层实际提交/恢复进展的内部generation失效，普通mock保留本facade提交失效。该token仅使派生cache失效，不成为新世界revision或第二权威；覆盖实际改变manifest的rollback/recover/adopt路径，不按请求扫描历史。原因是多facade既要观察新事实，也不能破坏既有缓存合同；错误代价为局部缓存失效接线返工。先定向重测两失败及跨facade缓存用例。
+
+- **Task2服务回归GREEN**：无持久化转发与manifest single-flight两项修复后，原service合同整文件16/16通过。事件binding改为固定请求散列，保留输入冲突比较而不将history正文放大为持久调度消息；startup/身份定向验证后进入报告与提交。
+
+- **Task2候选**：bbf4e32（BASE=802d902），8个代码/测试文件；最终代码后聚焦107/107、Graph重复HTTP/备份2/2、独立交互/截止3/3，共112项通过。包含实际server启动恢复、旧loader逆向rollback、当前授权、HTTP最终cache、源/child辅助异常及原service合同。GitNexus staged CRITICAL，45符号/25执行流；已告知用户，精确802d902..bbf4e32审查包交transform_boundary_task2_review（gpt-6-astra high）独立复核。无全量/生产变更，未标Task2完成。
