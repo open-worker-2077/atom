@@ -76,6 +76,8 @@
     demoIdleSeconds: document.getElementById("demoIdleSeconds"),
     helpStartupToggle: document.getElementById("helpStartupToggle"),
     defaultDetailMode: document.getElementById("defaultDetailMode"),
+    secondaryNavigationDelay: document.getElementById("secondaryNavigationDelay"),
+    secondaryNavigationDelayValue: document.getElementById("secondaryNavigationDelayValue"),
     zoomSpeed: document.getElementById("zoomSpeed"),
     zoomSpeedValue: document.getElementById("zoomSpeedValue"),
     relationshipLineWidth: document.getElementById("relationshipLineWidth"),
@@ -7680,6 +7682,9 @@
       : String(state.demo.settings.idleSeconds);
     ui.helpStartupToggle.checked = state.demo.settings.helpVisible;
     ui.defaultDetailMode.value = state.demo.settings.defaultDetailMode;
+    ui.secondaryNavigationDelay.value = String(state.demo.settings.secondaryNavigationDelayMs);
+    ui.secondaryNavigationDelayValue.textContent =
+      `${state.demo.settings.secondaryNavigationDelayMs}ms`;
     ui.zoomSpeed.value = String(state.demo.settings.zoomSpeedPercent);
     ui.zoomSpeedValue.textContent = `${state.demo.settings.zoomSpeedPercent}%`;
     ui.relationshipLineWidth.value = String(state.demo.settings.relationshipLineWidthPercent);
@@ -8501,6 +8506,13 @@
     updateDemoSettings(demoModel.withDefaultDetailModeInput(
       state.demo.settings,
       ui.defaultDetailMode.value
+    ));
+  });
+
+  ui.secondaryNavigationDelay.addEventListener("input", () => {
+    updateDemoSettings(demoModel.withSecondaryNavigationDelayInput(
+      state.demo.settings,
+      ui.secondaryNavigationDelay.value
     ));
   });
 

@@ -83,3 +83,14 @@ test('input mapping exposes a dedicated route to mobile Web operation help', () 
   assert.match(html, /中键[^<]*横向[^<]*转向[^<]*纵向[^<]*抬头[^<]*俯视/u);
   assert.match(html, /前后[^<]*远近[^<]*仅支持[^<]*鼠标滚轮/u);
 });
+
+test('input mapping exposes an accessible right-click navigation interval control', () => {
+  const mappingSection = html.slice(
+    html.indexOf('<section class="settings-window-section" aria-labelledby="mappingWindowTitle">'),
+    html.indexOf('</section>', html.indexOf('<section class="settings-window-section" aria-labelledby="mappingWindowTitle">'))
+  );
+  assert.match(
+    mappingSection,
+    /<label[^>]*>[\s\S]*?<span>右键沉浸连击间隔<\/span>[\s\S]*?<input\s+id="secondaryNavigationDelay"\s+type="range"\s+min="240"\s+max="800"\s+step="1"\s+value="420"[^>]*>[\s\S]*?<output\s+id="secondaryNavigationDelayValue"\s+for="secondaryNavigationDelay">420ms<\/output>/u
+  );
+});

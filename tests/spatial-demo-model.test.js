@@ -19,7 +19,7 @@ test('first visit keeps automatic presentation off until the user explicitly ena
   assert.ok(model, 'SpatialDemoModel must exist');
   assert.deepEqual(
     JSON.parse(JSON.stringify(model.normalizeSettings(null))),
-    { idleSeconds: null, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 
@@ -31,11 +31,11 @@ test('blank idle seconds disables presentation while retaining the last valid de
       lastIdleSeconds: 12,
       helpVisible: false
     }))),
-    { idleSeconds: null, lastIdleSeconds: 12, helpVisible: false, defaultDetailMode: 'floating', peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 12, helpVisible: false, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(model.withIdleInput({ idleSeconds: 8, lastIdleSeconds: 8, helpVisible: true }, ''))),
-    { idleSeconds: null, lastIdleSeconds: 8, helpVisible: true, defaultDetailMode: 'floating', peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 8, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 
@@ -56,6 +56,14 @@ test('CapsLock default detail mode accepts only name, surface, or floating and p
   assert.equal(model.normalizeSettings({}).defaultDetailMode, 'floating');
   assert.equal(model.withDefaultDetailModeInput(null, 'surface').defaultDetailMode, 'surface');
   assert.equal(model.withDefaultDetailModeInput({ defaultDetailMode: 'surface' }, 'invalid').defaultDetailMode, 'floating');
+});
+
+test('right-click navigation interval defaults, clamps, and preserves a valid user setting', () => {
+  const model = loadModel();
+  assert.equal(model.normalizeSettings({}).secondaryNavigationDelayMs, 420);
+  assert.equal(model.normalizeSettings({ secondaryNavigationDelayMs: 120 }).secondaryNavigationDelayMs, 240);
+  assert.equal(model.normalizeSettings({ secondaryNavigationDelayMs: 1200 }).secondaryNavigationDelayMs, 800);
+  assert.equal(model.withSecondaryNavigationDelayInput({}, '515').secondaryNavigationDelayMs, 515);
 });
 
 test('S tunnel strength is persisted and clamped from zero through one hundred percent', () => {
@@ -416,7 +424,7 @@ test('invalid persisted settings recover without leaking unknown fields', () => 
   });
   assert.deepEqual(
     JSON.parse(JSON.stringify(settings)),
-    { idleSeconds: 5, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: 5, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 
