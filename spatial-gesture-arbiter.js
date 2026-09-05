@@ -165,7 +165,9 @@
   }
 
   function createSecondaryClickArbiter(options = {}) {
-    const delay = Number.isFinite(options.delay) ? options.delay : 240;
+    const delayFor = typeof options.delayFor === 'function'
+      ? options.delayFor
+      : () => (Number.isFinite(options.delay) ? options.delay : 420);
     const setTimer = options.setTimer || root.setTimeout.bind(root);
     const clearTimer = options.clearTimer || root.clearTimeout.bind(root);
     const commitSingle = typeof options.commitSingle === 'function' ? options.commitSingle : function noop() {};
@@ -189,6 +191,16 @@
       resetPending();
     }
 
+    function schedule(token) {
+      const delay = Math.min(800, Math.max(240, Number(delayFor()) || 420));
+      pendingTimer = setTimer(() => {
+        if (pendingToken !== token) return;
+        const action = pendingAction;
+        resetPending();
+        commitSingle(action);
+      }, delay);
+    }
+
     function submit(singleAction, doubleAction, signature) {
       const safeSignature = typeof signature === 'string' && signature ? signature : 'field';
       if (pendingToken !== null && pendingSignature === safeSignature) {
@@ -209,12 +221,7 @@
       pendingToken = token;
       pendingAction = singleAction;
       pendingSignature = safeSignature;
-      pendingTimer = setTimer(() => {
-        if (pendingToken !== token) return;
-        const action = pendingAction;
-        resetPending();
-        commitSingle(action);
-      }, delay);
+      schedule(token);
       return 'pending';
     }
 

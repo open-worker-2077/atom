@@ -6898,7 +6898,7 @@
   });
 
   const secondaryClickArbiter = gestureArbiter.createSecondaryClickArbiter({
-    delay: 620,
+    delayFor: () => state.demo.settings.secondaryNavigationDelayMs,
     setTimer: global.setTimeout.bind(global),
     clearTimer: global.clearTimeout.bind(global),
     commitSingle(action) {
@@ -7063,8 +7063,21 @@
       secondaryClickArbiter.cancel();
       return;
     }
+    const mappingEvent = candidate && candidate.mappingEvent || {};
+    const unmodifiedSecondaryNavigation = Boolean(
+      candidate
+      && candidate.button === 2
+      && !mappingEvent.ctrlKey
+      && !mappingEvent.shiftKey
+      && !mappingEvent.altKey
+      && !mappingEvent.metaKey
+    );
+    if (!unmodifiedSecondaryNavigation) {
+      secondaryClickArbiter.cancel();
+    }
     const action = gestureArbiter.classifyTap(candidate);
     if (!action) {
+      secondaryClickArbiter.cancel();
       return;
     }
     if (candidate.button === 0) {
@@ -7108,6 +7121,24 @@
     }
     if (candidate.button === 2) {
       const contextualAction = contextualizeAction(action, candidate);
+      if (unmodifiedSecondaryNavigation) {
+        const doubleIntent = input.resolvePointer(
+          { ...mappingEvent, button: 2 },
+          { ...(candidate.mappingContext || {}), gesture: "double" }
+        );
+        if (doubleIntent) {
+          secondaryClickArbiter.submit(
+            contextualAction,
+            contextualizeAction(
+              { intent: doubleIntent, visualMeta: {}, target: candidate.node || null },
+              candidate
+            ),
+            candidateArbiterKey(candidate)
+          );
+          return;
+        }
+      }
+      secondaryClickArbiter.cancel();
       dispatchIntent(contextualAction.intent, contextualAction.visualMeta, contextualAction.target);
       return;
     }
@@ -7162,6 +7193,7 @@
     const point = canvasPoint(event);
     state.pointerPosition = point;
     if (pointerInput.button === 2 && pointerInput.shiftKey && !pointerInput.ctrlKey) {
+      secondaryClickArbiter.cancel();
       canvas.setPointerCapture(event.pointerId);
       canvas.focus({ preventScroll: true });
       beginWandStroke(event.pointerId, point);

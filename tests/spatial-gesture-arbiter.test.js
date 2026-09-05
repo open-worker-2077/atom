@@ -262,13 +262,16 @@ test('primary arbiter settles a different target before starting a new series', 
   assert.deepEqual(committed, [firstSingle, secondSingle]);
 });
 
-test('secondary arbiter turns two same-target taps into one double action', () => {
+test('secondary arbiter reads the current delay and turns two exact-signature taps into one double action', () => {
   const timers = new Map();
   const singles = [];
   const doubles = [];
   let nextTimer = 1;
+  let delayMs = 420;
   const arbiter = createSecondaryClickArbiter({
-    delay: 240,
+    delayFor() {
+      return delayMs;
+    },
     setTimer(callback, delay) {
       const id = nextTimer++;
       timers.set(id, { callback, delay });
@@ -285,15 +288,47 @@ test('secondary arbiter turns two same-target taps into one double action', () =
     }
   });
   const single = { intent: 'toggleChildren', target: { id: 'tunnel' } };
-  const double = { intent: 'enter', target: single.target };
+  const double = { intent: 'applyImmersiveInwardView', target: single.target };
 
   assert.equal(arbiter.submit(single, double, 'node:tunnel'), 'pending');
-  assert.equal(timers.get(1).delay, 240);
+  assert.equal(timers.get(1).delay, 420);
+  delayMs = 515;
   assert.equal(arbiter.submit(single, double, 'node:tunnel'), 'double');
   assert.deepEqual(singles, []);
   assert.deepEqual(doubles, [double]);
   assert.equal(timers.size, 0);
   assert.equal(arbiter.pending, false);
+
+  assert.equal(arbiter.submit(single, double, 'node:tunnel'), 'pending');
+  assert.equal(timers.get(2).delay, 515);
+});
+
+test('secondary arbiter commits exactly one parent action for two taps on the same field', () => {
+  const timers = new Map();
+  const commits = [];
+  let nextTimer = 1;
+  const arbiter = createSecondaryClickArbiter({
+    setTimer(callback) {
+      const id = nextTimer++;
+      timers.set(id, callback);
+      return id;
+    },
+    clearTimer(id) {
+      timers.delete(id);
+    },
+    commitSingle(action) {
+      commits.push(['single', action.intent]);
+    },
+    commitDouble(action) {
+      commits.push(['double', action.intent]);
+    }
+  });
+  const parent = { intent: 'applyParentView', target: null };
+
+  assert.equal(arbiter.submit(parent, parent, 'field:root/a'), 'pending');
+  assert.equal(arbiter.submit(parent, parent, 'field:root/a'), 'double');
+  assert.deepEqual(commits, [['double', 'applyParentView']]);
+  assert.equal(timers.size, 0);
 });
 
 test('secondary arbiter commits a different pending target before scheduling the next', () => {

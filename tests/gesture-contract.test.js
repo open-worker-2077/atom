@@ -49,18 +49,23 @@ test('primary click series is settled by one arbiter without native dblclick dis
   assert.match(source, /parameter:\s*event\.count/);
 });
 
-test('primary taps use click-series arbitration and right taps commit immediately', () => {
+test('primary taps and unmodified right navigation use their configured arbiters', () => {
   const commit = functionSource('commitPointerCandidate');
   const primaryGate = commit.indexOf('candidate.button === 0');
   const submitted = commit.indexOf('primaryClickArbiter.submit');
   const secondaryGate = commit.indexOf('candidate.button === 2');
-  const immediate = commit.indexOf('dispatchIntent(contextualAction.intent');
+  const secondarySubmit = commit.indexOf('secondaryClickArbiter.submit');
 
   assert.notEqual(primaryGate, -1, 'primary-button gate exists');
   assert.ok(primaryGate < submitted, 'primary-button gate controls series commit');
-  assert.ok(submitted < secondaryGate, 'secondary arbitration follows primary arbitration');
-  assert.ok(secondaryGate < immediate, 'secondary-button gate controls its immediate action');
-  assert.doesNotMatch(commit, /secondaryClickArbiter\.submit/);
+  assert.ok(secondaryGate < secondarySubmit, 'secondary-button gate controls its arbiter');
+  assert.ok(submitted < secondarySubmit, 'primary series returns before secondary submission');
+  assert.match(commit, /!mappingEvent\.ctrlKey/);
+  assert.match(commit, /!mappingEvent\.shiftKey/);
+  assert.match(commit, /!mappingEvent\.altKey/);
+  assert.match(commit, /!mappingEvent\.metaKey/);
+  assert.match(commit, /gesture:\s*["']double["']/);
+  assert.match(commit, /candidateArbiterKey\s*\(\s*candidate\s*\)/);
   assert.doesNotMatch(commit, /action\.intent\s*===\s*["']focus["']/);
 });
 
@@ -172,12 +177,12 @@ test('every node can enter or peek while same-layer expansion still requires see
   assert.match(functionSource('createSatellites'), /hasChildren\s*!==\s*true/);
 });
 
-test('secondary click arbitration leaves a reliable desktop double-click window', () => {
+test('secondary click arbitration reads the current persisted delay', () => {
   const start = source.indexOf('const secondaryClickArbiter');
   const end = source.indexOf('function canvasPoint', start);
   const configuration = source.slice(start, end);
 
-  assert.match(configuration, /delay:\s*620/);
+  assert.match(configuration, /delayFor:\s*\(\)\s*=>\s*state\.demo\.settings\.secondaryNavigationDelayMs/);
 });
 
 test('parent-domain return finds nested entry nodes recursively', () => {
