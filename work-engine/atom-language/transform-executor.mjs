@@ -1198,9 +1198,14 @@ export async function applyTransform({
   // the authorized root operation, just as for a subtree move.
   const pureRename = nameCommands.length === 1 && nameCommands[0].name === 'ren'
     && changedFields.size === 1 && changedFields.has('thing');
+  // Discard relocates an intact subtree into kernel backup. Only the pure
+  // operation owns descendant relocation; accompanying edits retain their checks.
+  const pureDiscard = nameCommands.length === 1 && nameCommands[0].name === 'dsc'
+    && item.fields.every((field) => field.baseKey === 'thing'
+      || (!field.valuePresent && field.commands.length === 0));
   if (!restoresFromKernelBackup && changesSubtree
     && structural.operation?.command.name !== 'mov'
-    && !pureRename
+    && !pureRename && !pureDiscard
     && (immediateChildren(selected.match.atom)?.length ?? 0) > 0) {
     for (const match of walkAtoms([selected.match.atom])) selectedAtoms.add(match.atom);
     for (const descendant of walkAtoms(nextAtoms)) {

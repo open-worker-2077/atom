@@ -34,6 +34,128 @@ async function transform(atoms, source, agentPath = 'Root', batch = false) {
   return batch ? applyBatchRenames({ ...request, items: parsed.items }) : applyTransform({ ...request, item: parsed.items[0] });
 }
 
+async function discardFixture() {
+  const atoms = await fixture();
+  atoms.push({ 'thing@backup@default': 'Backup', situation: '', slot: [], strut: [] });
+  return atoms;
+}
+
+test('ancestor discard preserves the sealed subtree without requiring internal slot authority', async () => {
+  const atoms = await discardFixture();
+  const before = structuredClone(atoms);
+  const { authorize } = createAccessController(atoms, {
+    agentPath: 'Root', agentSecurity: { labels: [], functions: ['transform'] }
+  });
+  const model = walkAtoms(atoms).find(({ path }) => path.join('/') === 'Root/Parent/Body/Model');
+  assert.equal((await authorize(model, 'write', 'slot')).code, 'SLOT_STRUCTURE_LOCK_DENIED');
+  const result = await transform(atoms, 'transform {"thing.dsc.":"Root/Parent"}');
+  assert.equal(result.error, undefined, JSON.stringify(result.error));
+  assert.deepEqual(atoms, before);
+  assert.equal(find(result.atoms, 'Root/Parent'), undefined);
+  assert.deepEqual(find(result.atoms, result.archive.path), find(before, 'Root/Parent'));
+  assert.equal(result.logRecord.originalPath, 'Root/Parent');
+  assert.equal(result.archive.restoreCoordinate, result.archive.path);
+});
+
+test('ancestor discard retains root, window, sealed-structure and compound-edit denials', async () => {
+  const atoms = await discardFixture();
+  const before = structuredClone(atoms);
+  for (const [request, agent, code] of [
+    [{ 'thing.dsc.': 'Root/Parent' }, 'Root/Sibling', 'WINDOW_ACCESS_DENIED'],
+    [{ 'thing.dsc.': 'Root' }, 'Root', 'GRAPH_LOCK_DENIED'],
+    [{ 'thing.dsc.': 'Root/Parent/Body/Model/Input' }, 'Root', 'SLOT_STRUCTURE_LOCK_DENIED'],
+    [{ 'thing.dsc.': 'Root/Parent', slot: [] }, 'Root', 'WINDOW_ACCESS_DENIED'],
+    [{ 'thing.dsc.': 'Root/Parent', 'situation.rep.changed': null }, 'Root', 'WINDOW_ACCESS_DENIED'],
+    [{ 'thing.dsc.': 'Root/Parent', 'strut.rep.': [] }, 'Root', 'WINDOW_ACCESS_DENIED']
+  ]) {
+    const result = await transform(atoms, `transform ${JSON.stringify(request)}`, agent);
+    assert.equal(result.error?.code, code, JSON.stringify({ request, error: result.error }));
+    assert.deepEqual(atoms, before);
+  }
+});
+
+for (const rootLabels of [['existing-business']]) {
+test(`public ancestor discard persists one reversible sealed archive and cold-restores its Programs with ${rootLabels.length ? 'matching declaration scope' : 'preexisting child-only label'}`, async (t) => {
+  const atoms = await discardFixture();
+  atoms[0]['thing@program'] = atoms[0].thing;
+  delete atoms[0].thing;
+  atoms[0].situation = `agent(${JSON.stringify({ labels: rootLabels, functions: { groups: ['graph', 'program'], names: [] } })})`;
+  const parent = find(atoms, 'Root/Parent');
+  parent.slot.push(atom('Event'), atom('Result', [], 'untouched'));
+  parent.slot.push({
+    'thing@program': 'Worker',
+    situation: 'agent({"labels":["existing-business"],"functions":{"groups":[],"names":["explore"]}})',
+    slot: [], strut: []
+  });
+  parent.slot.push({
+    'thing@program': 'Reactive',
+    situation: [
+      'def main():',
+      '    transform({"thing":"Root/Parent/Result","situation.rep.fired":"untouched"})',
+      'trigger("transform", {"nodes":["Root/Parent/Event"]}, main)'
+    ].join('\n'), slot: [], strut: []
+  });
+  find(atoms, 'Root/Parent/Event').strut = [{ 'if@current': true, then: [{ thing: 'Root/Parent/Result' }] }];
+  find(atoms, 'Root/Sibling').strut = [{ 'if@current': true, then: [{ thing: 'Root/Parent/Event' }] }];
+  const shortcut = {
+    'thing@shortcut': 'Link', situation: JSON.stringify({
+      contract: 'atom.shortcut', version: 1, referenceId: 'ancestor-discard-link',
+      target: { state: 'linked', path: 'Root/Parent/Result' }
+    }), slot: [], strut: []
+  };
+  atoms[0].slot.push(shortcut);
+  const oldArchive = atom('Parent', [], 'historical archive');
+  find(atoms, 'Backup').slot.push(oldArchive);
+  const initialParent = structuredClone(parent);
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-ancestor-discard-'));
+  t.diagnostic(`retained fixture: ${directory}`);
+  const contextFile = path.join(directory, 'atom.json');
+  const files = { contextFile, graphFile: path.join(directory, 'graph.json'), storeFile: path.join(directory, 'knowledge.json') };
+  await fs.writeFile(contextFile, JSON.stringify(atoms));
+  const execute = createRuntimeCliExecutor(files);
+  const discarded = await execute({ source: 'transform {"thing.dsc.":"Root/Parent"}', interaction: { id: 'ancestor-discard', agent: { path: 'Root' } } });
+  assert.equal(discarded.ok, true, JSON.stringify(discarded.errors));
+  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(find(stored, 'Root/Parent'), undefined);
+  assert.deepEqual(find(stored, 'Backup/Parent'), oldArchive);
+  const archived = find(stored, discarded.archive.path);
+  assert.ok(archived);
+  assert.notEqual(discarded.archive.path, 'Backup/Parent');
+  assert.equal(archived.situation, initialParent.situation);
+  assert.deepEqual(find(stored, `${discarded.archive.path}/Body`), initialParent.slot[0]);
+  assert.deepEqual(find(stored, `${discarded.archive.path}/Worker`), initialParent.slot[3]);
+  assert.equal(find(stored, `${discarded.archive.path}/Result`).situation, 'untouched');
+  assert.equal(find(stored, `${discarded.archive.path}/Event`).strut[0].then[0].thing, `${discarded.archive.path}/Result`);
+  assert.equal(find(stored, 'Root/Sibling').strut[0].then[0].thing, `${discarded.archive.path}/Event`);
+  assert.deepEqual(JSON.parse(find(stored, 'Root/Link').situation).target, { state: 'broken', path: null });
+  const journal = createJsonTransactionJournal({ file: path.join(directory, 'atom.transactions.json') });
+  const history = await journal.readState();
+  assert.equal(history.receipts.length, 1, JSON.stringify(history.receipts));
+  assert.equal(history.receipts[0].receipt.result.transformLogRecord.originalPath, 'Root/Parent');
+  for (const referencePath of ['Root/Sibling', 'Root/Link']) {
+    assert.ok(history.receipts[0].patch.changedPaths.includes(referencePath), `Missing reversible reference ${referencePath}`);
+  }
+  const coldExecute = createRuntimeCliExecutor(files);
+  const coldRead = await coldExecute({ source: 'explore {"thing":"Root/Sibling","situation$full":true}', interaction: { id: 'cold-read', agent: { path: 'Root' } } });
+  assert.equal(coldRead.ok, true, JSON.stringify(coldRead.errors));
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), stored);
+  const restored = await coldExecute({ source: `transform ${JSON.stringify({ 'thing.rst.': discarded.archive.restoreCoordinate })}`, interaction: { id: 'ancestor-restore', agent: { path: 'Root' } } });
+  assert.equal(restored.ok, true, JSON.stringify(restored.errors));
+  const afterRestore = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.deepEqual(find(afterRestore, 'Root/Parent'), initialParent);
+  assert.deepEqual(find(afterRestore, 'Backup/Parent'), oldArchive);
+  assert.deepEqual(find(afterRestore, 'Root/Sibling'), find(atoms, 'Root/Sibling'));
+  assert.deepEqual(find(afterRestore, 'Root/Link'), shortcut);
+  const denied = await coldExecute({ source: 'transform {"thing.ren.Broken":"Root/Parent/Body/Model/Input"}', interaction: { id: 'sealed-denied', agent: { path: 'Root' } } });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.errors[0].code, 'SLOT_STRUCTURE_LOCK_DENIED');
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), afterRestore);
+  const invoked = await coldExecute({ source: 'transform {"thing":"Root/Parent/Event","situation.rep.changed"}', interaction: { id: 'restored-trigger', agent: { path: 'Root' } } });
+  assert.equal(invoked.ok, true, JSON.stringify(invoked.errors));
+  assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Root/Parent/Result').situation, 'fired');
+});
+}
+
 for (const batch of [false, true]) {
   test(`${batch ? 'batch' : 'single'} ancestor rename preserves a sealed model and its lock`, async () => {
     const atoms = await fixture();
