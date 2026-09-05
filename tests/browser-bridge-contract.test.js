@@ -2326,3 +2326,100 @@ test('a latest failed presentation GET reports unsynced while retaining the conf
   assert.deepEqual(applied.at(-1), newer);
   assert.deepEqual(writes, [{ expectedRevision: 3, patch: { nestedTunnelPercent: 0 } }]);
 });
+
+for (const secondWriteSucceeds of [false, true]) {
+  test(`an earlier settings acknowledgement preserves newer displayed input when the next write ${secondWriteSucceeds ? 'succeeds' : 'fails'}`, async () => {
+    const listeners = new Map();
+    const writes = [];
+    const statusHistory = [];
+    const initial = { nestedTunnelPercent: 55, nestedTunnelInteriorPercent: 35 };
+    let displayed = { ...initial };
+    let cached = { ...initial };
+    let serverSettings = { ...initial };
+    let serverRevision = 3;
+    let readCount = 0;
+    let releaseFirstWrite;
+    let releaseSecondWrite;
+    const response = (payload, ok = true) => ({ ok, json: async () => payload });
+    const document = {
+      body: { dataset: {} }, hidden: false,
+      getElementById: () => null,
+      addEventListener: (name, listener) => listeners.set(name, listener)
+    };
+    Object.defineProperty(document.body.dataset, 'spatialPresentationSettings', {
+      get: () => statusHistory.at(-1),
+      set: (status) => statusHistory.push(status)
+    });
+    const window = {
+      location: { hostname: '127.0.0.1', protocol: 'http:' },
+      spatialLab: {
+        state: () => ({ transactionActive: false, path: 'root' }),
+        importKnowledge: () => true,
+        exportField: () => ({ path: 'root' }),
+        presentationSettings: () => ({ settings: { ...displayed }, stored: { exists: false, valid: false } }),
+        applyPresentationSettings: (settings) => { displayed = { ...settings }; cached = { ...settings }; }
+      },
+      fetch: async (url, options = {}) => {
+        if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+        if (url.includes('/state')) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+        if (url.endsWith('/presentation-settings') && options.method === 'PUT') {
+          const input = JSON.parse(options.body);
+          writes.push(input);
+          return new Promise((resolve) => {
+            const succeed = () => {
+              serverSettings = { ...serverSettings, ...input.patch };
+              serverRevision += 1;
+              resolve(response({ ok: true, revision: serverRevision, initialized: true, settings: serverSettings }));
+            };
+            if (writes.length === 1) releaseFirstWrite = succeed;
+            else releaseSecondWrite = secondWriteSucceeds ? succeed : () => resolve(response({ ok: false,
+              error: { code: 'PRESENTATION_SETTINGS_UNAVAILABLE', message: 'disk unavailable' } }, false));
+          });
+        }
+        if (url.endsWith('/presentation-settings')) {
+          readCount += 1;
+          return response({ ok: true, revision: serverRevision, initialized: true, settings: serverSettings });
+        }
+        return response({ result: {} });
+      },
+      addEventListener: (name, listener) => listeners.set(name, listener),
+      setInterval: () => { throw new Error('polling is forbidden'); }
+    };
+    const changeSettings = (patch) => {
+      displayed = { ...displayed, ...patch };
+      cached = { ...displayed };
+      listeners.get('spatial-presentation-settings-changed')({ detail: patch });
+    };
+    window.window = window;
+    vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+    await new Promise((resolve) => setImmediate(resolve));
+    statusHistory.length = 0;
+    changeSettings({ nestedTunnelPercent: 10 });
+    await new Promise((resolve) => setImmediate(resolve));
+    changeSettings({ nestedTunnelInteriorPercent: 15 });
+    listeners.get('visibilitychange')();
+    releaseFirstWrite();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(displayed, { nestedTunnelPercent: 10, nestedTunnelInteriorPercent: 15 });
+    assert.deepEqual(cached, { nestedTunnelPercent: 10, nestedTunnelInteriorPercent: 15 });
+    assert.equal(readCount, 2, 'the deferred same-revision recovery read also completed');
+    assert.equal(document.body.dataset.spatialPresentationSettingsRevision, '4');
+    assert.equal(statusHistory.includes('synced'), false, 'uncommitted input must never be reported fully synchronized');
+    assert.equal(statusHistory.at(-1), 'syncing');
+    assert.deepEqual(writes, [
+      { expectedRevision: 3, patch: { nestedTunnelPercent: 10 } },
+      { expectedRevision: 4, patch: { nestedTunnelInteriorPercent: 15 } }
+    ]);
+
+    releaseSecondWrite();
+    await new Promise((resolve) => setImmediate(resolve));
+    listeners.get('visibilitychange')();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(displayed, { nestedTunnelPercent: 10, nestedTunnelInteriorPercent: 15 });
+    assert.deepEqual(cached, { nestedTunnelPercent: 10, nestedTunnelInteriorPercent: 15 });
+    assert.equal(statusHistory.at(-1), secondWriteSucceeds ? 'synced' : 'unsynced');
+    assert.equal(document.body.dataset.spatialPresentationSettingsRevision, secondWriteSucceeds ? '5' : '4');
+    assert.equal(writes.length, 2, 'recovery must not replay either patch');
+  });
+}

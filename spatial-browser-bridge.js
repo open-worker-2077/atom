@@ -314,23 +314,27 @@
       return false;
     }
     const advancesAuthority = source === "remote" && incomingRevision > settingsRevision;
+    const preserveNewerLocalSettings = status === "synced" && queuedSettingsRevision > incomingRevision
+      && (source === "local" || incomingRevision === settingsRevision);
     if (source === "remote" && incomingRevision > settingsRevision) {
       settingsAuthorityEpoch += 1;
       queuedSettingsRevision = incomingRevision;
     }
     settingsRevision = incomingRevision;
     if (!pendingPresentationWrites) queuedSettingsRevision = settingsRevision;
-    applyingSharedPresentationSettings = true;
-    try {
-      lab.applyPresentationSettings(snapshot.settings);
-    } finally {
-      applyingSharedPresentationSettings = false;
+    if (!preserveNewerLocalSettings) {
+      applyingSharedPresentationSettings = true;
+      try {
+        lab.applyPresentationSettings(snapshot.settings);
+      } finally {
+        applyingSharedPresentationSettings = false;
+      }
     }
     if (source === "local" || advancesAuthority) retainedPresentationStatus = null;
     if (status === "conflict") {
       retainedPresentationStatus = { revision: settingsRevision, status };
     }
-    setPresentationSettingsStatus(status);
+    setPresentationSettingsStatus(preserveNewerLocalSettings ? "syncing" : status);
     return true;
   }
 
@@ -488,6 +492,7 @@
     };
     queuedSettingsRevision += 1;
     pendingPresentationWrites += 1;
+    setPresentationSettingsStatus("syncing");
     presentationSettingsDelivery = presentationSettingsDelivery
       .then(() => pushPresentationSettings(entry))
       .finally(() => {
