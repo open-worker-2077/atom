@@ -61,6 +61,12 @@
   let transformActionSequence = 0;
   let transformActionDelivery = Promise.resolve();
   let settingsRevision = 0;
+  let queuedSettingsRevision = 0;
+  let settingsAuthorityEpoch = 0;
+  let pendingPresentationWrites = 0;
+  let presentationReadSequence = 0;
+  let presentationWriteInFlight = false;
+  let pendingPresentationRevision = -1;
   let applyingSharedPresentationSettings = false;
   let presentationSettingsDelivery = Promise.resolve();
   const loadedPaths = new Set();
@@ -293,11 +299,13 @@
       || hostname === "127.0.0.1" || hostname.startsWith("127.");
   }
 
-  function applySharedPresentationSettings(snapshot, status = "synced") {
+  function applySharedPresentationSettings(snapshot, status = "synced", source = "remote") {
     const incomingRevision = Number(snapshot && snapshot.revision);
     if (!snapshot || snapshot.initialized !== true || !Number.isSafeInteger(incomingRevision)
       || incomingRevision < settingsRevision || !snapshot.settings) return false;
+    if (source === "remote" && incomingRevision > settingsRevision) settingsAuthorityEpoch += 1;
     settingsRevision = incomingRevision;
+    if (!pendingPresentationWrites) queuedSettingsRevision = settingsRevision;
     applyingSharedPresentationSettings = true;
     try {
       lab.applyPresentationSettings(snapshot.settings);
@@ -334,7 +342,7 @@
           patch: localSnapshot.settings
         })
       });
-      applySharedPresentationSettings(snapshot);
+      applySharedPresentationSettings(snapshot, "synced", "local");
       return true;
     } catch (error) {
       if (error.code === "PRESENTATION_SETTINGS_CONFLICT") {
@@ -349,14 +357,18 @@
   async function readPresentationSettings(statusAfterApply = "synced") {
     if (typeof lab.presentationSettings !== "function"
       || typeof lab.applyPresentationSettings !== "function") return false;
+    const requestSequence = presentationReadSequence += 1;
+    const requestRevision = settingsRevision;
     setPresentationSettingsStatus("syncing");
     try {
       const snapshot = await request("/presentation-settings");
       const incomingRevision = Number(snapshot && snapshot.revision);
       if (Number.isSafeInteger(incomingRevision) && incomingRevision < settingsRevision) return false;
+      if (incomingRevision === settingsRevision && requestSequence !== presentationReadSequence) return false;
       if (snapshot.initialized === true) {
         return applySharedPresentationSettings(snapshot, statusAfterApply);
       }
+      if (requestSequence !== presentationReadSequence || settingsRevision !== requestRevision) return false;
       if (Number(snapshot.revision) === 0) {
         const localSnapshot = lab.presentationSettings();
         if (loopbackPage() && localSnapshot && localSnapshot.stored && localSnapshot.stored.valid) {
@@ -366,21 +378,29 @@
       setPresentationSettingsStatus("uninitialized");
       return false;
     } catch (_error) {
-      setPresentationSettingsStatus("unsynced");
+      if (requestSequence === presentationReadSequence && settingsRevision === requestRevision) {
+        setPresentationSettingsStatus("unsynced");
+      }
       return false;
     }
   }
 
-  async function pushPresentationSettings(patch) {
+  async function pushPresentationSettings(entry) {
+    const { patch, expectedRevision, authorityEpoch } = entry || {};
     if (!patch || typeof patch !== "object" || Array.isArray(patch) || !Object.keys(patch).length) {
       return false;
     }
+    if (authorityEpoch !== settingsAuthorityEpoch || expectedRevision !== settingsRevision) {
+      setPresentationSettingsStatus(settingsRevision >= expectedRevision ? "conflict" : "unsynced");
+      return false;
+    }
+    presentationWriteInFlight = true;
     try {
       const snapshot = await request("/presentation-settings", {
         method: "PUT",
-        body: JSON.stringify({ expectedRevision: settingsRevision, patch })
+        body: JSON.stringify({ expectedRevision, patch })
       });
-      applySharedPresentationSettings(snapshot);
+      applySharedPresentationSettings(snapshot, "synced", "local");
       return true;
     } catch (error) {
       if (error.code === "PRESENTATION_SETTINGS_CONFLICT") {
@@ -389,6 +409,12 @@
       }
       setPresentationSettingsStatus("unsynced");
       return false;
+    } finally {
+      presentationWriteInFlight = false;
+      if (pendingPresentationRevision > settingsRevision) {
+        await readPresentationSettings();
+      }
+      if (pendingPresentationRevision <= settingsRevision) pendingPresentationRevision = -1;
     }
   }
 
@@ -397,8 +423,19 @@
     const patch = event && event.detail && typeof event.detail === "object"
       ? { ...event.detail }
       : null;
+    const entry = {
+      patch,
+      expectedRevision: queuedSettingsRevision,
+      authorityEpoch: settingsAuthorityEpoch
+    };
+    queuedSettingsRevision += 1;
+    pendingPresentationWrites += 1;
     presentationSettingsDelivery = presentationSettingsDelivery
-      .then(() => pushPresentationSettings(patch));
+      .then(() => pushPresentationSettings(entry))
+      .finally(() => {
+        pendingPresentationWrites -= 1;
+        if (!pendingPresentationWrites) queuedSettingsRevision = settingsRevision;
+      });
     return presentationSettingsDelivery;
   }
 
@@ -878,7 +915,11 @@
       changes.addEventListener("presentation-settings", (event) => {
         try {
           const notice = JSON.parse(event.data);
-          if (Number(notice.revision) > settingsRevision) void readPresentationSettings();
+          const noticeRevision = Number(notice.revision);
+          if (noticeRevision > settingsRevision) {
+            pendingPresentationRevision = Math.max(pendingPresentationRevision, noticeRevision);
+            if (!presentationWriteInFlight) void readPresentationSettings();
+          }
         } catch {
           setPresentationSettingsStatus("unsynced");
         }
