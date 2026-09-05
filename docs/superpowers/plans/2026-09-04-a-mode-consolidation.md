@@ -1,14 +1,14 @@
 # A Mode Consolidation Implementation Plan
 
-**当前续点（2026-09-06）**：已在既有隔离工作树以d3395e8安全吸收已部署main@04270b4；旧Task1—4及其GREEN保留。合并仅四处文档冲突，采用最新状态且保全旧A接手记录；最小输入/模型基线62/62通过。当前Task5统一执行用户长按修订、共同设置缺字段保全和帮助同步，Task6—7随后；不重复旧任务、不拿双击GREEN当长按验收。
+**当前续点（2026-09-06）**：Task1—5已独立复核；Task5长按最终d2c0234，单调按下时长及迟到timer一次性修复通过。e379b98仅吸收main最新文档并保留完成证据；Task6由a_task6_browser_retirement（Sol high）从该BASE完成互补浏览器验收和退役清单，Task7随后。A尚未部署，不重派已完成任务。
 
-**最新用户修订（2026-09-05，待移动部署后实施）**：右键双击沉浸改为右键长按；本条覆盖下方旧双击实施细节。当前只入账，已保存Task1—4与其验证保留为旧实现证据，不在移动修复中改交互代码。续接时按Web规格§4.1统一调整仲裁、设置、帮助及实际手势验收。
+**最新用户修订（2026-09-05）**：右键双击沉浸改为右键长按；已于Task5实施并复核，下方Task1—4旧双击步骤仅保留历史证据，当前合同以Web规格及Task5为准。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将 Atom Web 的结构游走收束为唯一 A 模式，以右键单击普通向内剖开、右键长按沉浸向内剖开，并以空白右键单击返回一层。下方双击任务细节为已保存旧实现，不能直接作为最新手势的验收。
 
-**Architecture（下述单/双击仲裁是已保存旧实现，长按修订尚未实施）:** 保留现有 A 的 nested Slot 投影为唯一结构投影，把旧 F 的真实 owner 路线进入能力改为 A 内部的沉浸动作，不再作为可选模式。已有 secondary click arbiter 负责右键单／双击仲裁，本地展示设置提供`240–800ms`可配间隔；Graph事实、Transform、左键`$click`和权限链不变。
+**Architecture:** A nested Slot为唯一结构投影；旧F真实owner路线能力由A右键长按调用。既有secondary仲裁统一begin/release，默认420ms、范围240–800ms，同一共同展示设置字段；Graph事实、Transform、左键$click与权限链保持。
 
 **Tech Stack:** Browser JavaScript (IIFE modules), Canvas spatial engine, Node.js 24 test runner, Playwright, localStorage presentation settings.
 
@@ -17,9 +17,9 @@
 ## Global Constraints
 
 - 术语只使用“向内剖开”，不得写成“向外展开”。
-- 右键沉浸连击间隔默认`420ms`，可调范围`240–800ms`，只影响无修饰键的右键导航。
+- 右键沉浸长按时长默认`420ms`，可调范围`240–800ms`，只影响无修饰键的右键导航。
 - `Ctrl+右键`关系编辑、`Shift+右键`魔杖与左键可编程点击计数不进入右键导航仲裁。
-- 团上右键单击保留团外上下文；同一团右键双击隐藏团外节点、边和上级背景。
+- 团上右键单击保留团外上下文；同一团右键长按隐藏团外节点、边和上级背景；双击不得沉浸。
 - 当前团空白处右键单击返回一个直接父层并转为非沉浸；空白双击不得连退两层。
 - S、D 与独立 F 不保留活跃键位、设置、帮助或双轨兼容路径；回退依据 Git 标签`pre-a-mode-consolidation-20260904`与退役清单。
 - 默认只运行最小受影响链；候选实现稳定后才运行一次完整`npm test`。
@@ -313,19 +313,19 @@ git commit -m "refactor(web): merge immersion into A navigation"
 - S/D/独立F退出活跃帮助、设置、键位和手机控件；保留A子层缩小（旧peripheralDepthShrink变量实际被A消费）、历史Z/X、详情、编辑、魔杖等有效需求。
 - 实现复用现有手势模块和pointer生命周期，不新增通用手势框架或第二配置来源。代码行为退役由Git和Task6清单保全，不删除文件/产物。
 
-- [ ] **Step 1: 获得新长按与旧共同设置读取RED**
+- [x] **Step 1: 获得新长按与旧共同设置读取RED**
 
 真实定时器模型覆盖短按/长按/松开一次/取消及旧双击不沉浸；真实Chromium在旧双击实现上验证持续按住未沉浸得到RED。旧完整设置文档缺新字段的读取目前严格数量校验拒绝，补实际服务用例RED，验证其余字段守恒及坏文档拒绝。新行为RED不能用源码正则替代。
 
-- [ ] **Step 2: 实现最小长按和配置接线**
+- [x] **Step 2: 实现最小长按和配置接线**
 
 输入意图、现有右键仲裁、pointer生命周期、共同配置服务读取按上述合同一次收束。帮助、设置可访问标签、桌面及移动控件同步为长按；移动端已有虚拟右键复用同一意图/识别链，不造另一套业务语义。
 
-- [ ] **Step 3: 最小受影响链GREEN及真实浏览器证明**
+- [x] **Step 3: 最小受影响链GREEN及真实浏览器证明**
 
 先跑受改函数相关Node测试，再跑三个关键行为：短按保留团外、长按沉浸且松开不二次导航、空白快速双击单层返回。补拖拽/取消及修饰键隔离的定向行为证明；设置调值→重载→恢复默认→重载、服务共同基准继承与缺字段保全。证据保存到本计划SDD，浏览器输出使用唯一目录防覆盖删除。只跑必要具名旅程，不在此任务运行全量npm test。
 
-- [ ] **Step 4: 自审、提交和任务复核**
+- [x] **Step 4: 自审、提交和任务复核**
 
 修改符号前GitNexus impact，提交前detect_changes与diff检查；只提交本任务文件，报告RED/GREEN实际命令、输出、源码范围与疑点。最终独立任务复核由控制方派发；Task6复用同revision有效浏览器证据并完成退役清单，Task7才执行最终全量、部署与正式入口回读。
 
@@ -491,3 +491,9 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **Task5取消GREEN**：实施方用Playwright page.clock控制浏览器时间、默认420ms及真实鼠标/键盘事件，12px拖移/pointercancel/修饰键变化后各推进421ms保持root，1/1通过（task-5-browser-green-20260906-09）。结合04 trace跨进程延迟，原失败不能作为阈值前取消失效证据；无额外产品取消补丁，临时engine探针与timer/pointer wrapper已移除。最终原始报告及独立任务复核待完成，生产A未部署。
 
 - **Task5候选审查**：a38d739为产品提交，2da5ab6仅解除新报告Git跟踪且磁盘保留。root已读完整报告、核对浏览器.last-run通过及无临时探针；Node63/63、核心4/4、受控取消1/1、设置重载恢复1/1、独立390px上下文共同字段继承更新1/1。旧presentation-settings综合旅程仍在F/applyViewMode准备断言失败，归Task6迁移准备动作并保全全部设置断言。a_task5_longpress_review（Sol high）正审d9f9877..2da5ab6，未裁定任务完成；只读Astra咨询结束，不重复派发。私有报告task-5-longpress-report.md与净差异review-d9f9877..2da5ab6.diff保留。
+
+- **Task5独立复核／fix round1/5**：a_task5_longpress_review判规格/质量待修，唯一Important为begin未锚定实际按下时间，release仅依holdCommitted，在持续到阈值而timer回调尚未执行时误判single。Root回到当前arbiter确认此顺序可达且违反持续时间合同；原实施方a_task5_longpress补单调时间锚定和release阈值判定。FIX_BASE=2da5ab6，当前fd2bf43仅追加计划记录；新增确定性now前进但不执行timer的RED，GREEN覆盖短按/长按/晚timer一次性/取消/空白及阈值固定。仅仲裁/gesture定向与必要具名长按浏览器，不重复设置链或全量。Task6/7缺口保留，不抢跑下一任务。
+
+- **Task5 fix round1/5完成**：d2c02345096a7bb5a6ac2d744d304d00978cc686，默认performance.now锚定按下时长，release补判到期且迟到timer不重复；RED38/40→GREEN40/40、必要真实长按1/1。a_task5_longpress_review限定复审原Important已ADDRESSED、无新增破坏。Root核对修复源码及.last-run，Task5: complete（BASE d9f9877..d2c0234）；原核心/设置/跨端有效证据复用。Task6接续旧F准备动作/互补旅程与退役清单；仍未部署A。
+
+- **Task6执行断点**：BASE=e379b98e0fa77732a9d22295331f52a8fbe0d0c5，实施方a_task6_browser_retirement（Sol high），requirements/report为原SDD目录task-6-longpress-*。仅迁移旧浏览器准备动作、补齐互补旅程并保全退役清单；产品回归交原Task5定向修复，最终全量及部署归Task7。

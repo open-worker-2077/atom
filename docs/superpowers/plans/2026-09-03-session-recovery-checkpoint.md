@@ -12,7 +12,7 @@
 - **持续执行**：atom-2已ACTIVE、每30分钟；用户定义与Atom框架优先，困难时允许临时Astra高级咨询，意见须独立判断。新内核改造须用户反馈。移动归档已交付并回告提出方，不重做。
 - **后续队列**：手机入口恢复即优先验收；当前独立推进A剩余Task5—7及右键长按，旧print迁移不重做。CLI52反馈已评估不等于已解决。保留全部有效需求，Superpowers本地化核查已完成，持续同步原规格/计划/总账。
 
-- **A精确续点**：既有feat/a-mode-consolidation以d3395e8吸收main@04270b4，四处纯文档冲突已保全历史并校准；最小输入/模型62/62通过。Task5长按及共同设置窄迁移由a_task5_longpress（Sol high）实施，BASE d9f98776667af82d16d8828aa42f10104d11ec11，requirements/report位于该A工作树原SDD目录task-5-longpress-*。Task1—4不重派；本机尚未部署A。新增字段必须继承同一服务配置，仅缺新字段的旧文档补默认且不GET写盘。CLI反馈仍52条无新增，原裁定页已按实际软件交付更新，复合业务未决保留。
+- **A精确续点**：Task1—5完成；Task5最终d2c0234已限定复审通过，e379b98合并最新main文档。Task6由a_task6_browser_retirement（Sol high）从BASE e379b98e0fa77732a9d22295331f52a8fbe0d0c5实施，原SDD task-6-longpress-brief.md/report.md；root持有总账/计划更新职责。复用Task5有效证据，只跑未覆盖的互补浏览器旅程；Task7才最终全量/正式部署。生产仍b329399，不重做旧print迁移、移动或Task1—5。
 
 ## 历史执行记录（以下“当前/尚未”均指记录当时）
 
