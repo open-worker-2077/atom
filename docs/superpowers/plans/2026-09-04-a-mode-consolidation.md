@@ -569,3 +569,9 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **Task 3 RED/GREEN**：默认沙箱spawn EPERM不计结果；获准执行仲裁/gesture链37项，RED为34通过/3失败（delayFor未用、engine固定620、尚未submit），实现后37/37 PASS。实现方自审及提交进行中，未替代独立任务复核。
 
 - **Task 3: complete**：3231d71..07b55b5，37/37 PASS，a_task3_review规格合规且quality Approved，无分级问题。跨任务最终画面项归Task 4，由已建立的三条浏览器旅程及沉浸解除验收，不据仲裁单测冒称导航完成。
+
+- **Task 4 RED与影响**：a_task4新增三项定向RED：旧immersive参数使batch仅clicked、recursive为空，dispatch缺A意图。returnClusterToDepth HIGH（1直接/15总）、returnToDepth HIGH（3/16）、dispatchIntent HIGH（9/11）、openClusterChildDomain HIGH（4/20），已向用户告知；风险覆盖共享Web导航，后续用真实进入/返回/普通解除沉浸旅程裁定。此前三条浏览器RED被重复一次，控制方已纠正为复用同revision证据，不再重跑旧失败。
+
+- **Task 4定向结果**：单元77/77通过；首轮五条浏览器旅程3/5，双击沉浸、空白单层返回、A键不退出通过。普通剖开自动frameClusterDomain把团外旁侧移出画面，须先定向修复；沉浸后普通剖开旅程首次进入不稳定仍在查，不冒称完成。toggleClusterChildDomain上游CRITICAL（2直接/18总）已告知用户，修复只作用于当前导航链。
+
+- **Task 4浏览器证据校准**：普通剖开保留团外已通过；两次独立CDP click在负载下跨过420ms导致单击提交，改原生mouse.dblclick保持产品间隔不变。后续page.goto／test 30s超时是未形成有效结果，须核查测试服务与加载等待；同一产品revision每条已有有效行为证据复用，不为整组全绿外观反复重跑。
