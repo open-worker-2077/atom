@@ -6,6 +6,8 @@
 
 **Architecture:** 复用现有中央事务、reconcileProgramsForWorld 和提交后收尾入口；将来源事实与随后产生的 effects 拆开提交。来源回执保存可追踪事件，后续运行采用自己的读取修订与结果；不新增业务队列、第二世界权威或永久双轨开关。
 
+**最终12项失败只读分类（归档修复期间，尚未回修）:** root已回读实际断言：receipt时序1项仍要求后续reconcile先于来源commit；interaction-e2e的5项显式.run失败仍要求ok=true/warnings，均与本计划已确认合同不符，后续应保全原facts/原子性断言并按真实错误收口。service-e2e两项性能fixture主动混入无效effects，原断言仍期待同批其它effects部分成功，与已确认后续批次原子性不符，须分别保留合法大批性能和拒绝批次零effects验收，不能只改等待时间。其余公共CLI先创建Program再立即读取效果、两步镜像链、保留授权重试及视觉性能仍须定向取证；当前仅识别疑点，不先把失败一律归为旧断言，不改实现/重跑全量，归档第一优先保持。
+
 **Tech Stack:** Node.js、现行 Python Program worker、中央 JSON 增量事务日志、Node test runner、公开 CLI/HTTP。
 
 **Spec:** `docs/superpowers/specs/2026-08-31-atom-runtime-projection-recovery-design.md` §2、§4、§5；`docs/superpowers/specs/2026-08-31-atom-world-program-design.md` §3。
