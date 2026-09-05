@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import { createJsonTransactionJournal, createJsonWorldRepository } from '../src/atom-system/adapters/json-world-repository.mjs';
@@ -12,6 +12,7 @@ import { createInteractionRuntime } from '../src/atom-system/public/interaction-
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { createCommitCoordinator } from '../src/atom-system/world-runtime/commit-coordinator.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
+import { executeAtomCommandEndpoint } from '../work-engine/atom-language/cli.mjs';
 
 import { executeAtomLanguage as executeAtomLanguageKernel } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
@@ -39,6 +40,25 @@ function find(atoms, selector) {
     children = current.slot;
   }
   return current;
+}
+
+async function waitForCopiedAcceptanceWorld(marker, child, existingDirectories) {
+  const prefix = 'atom-real-write-acceptance-';
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    for (const name of await fs.readdir(os.tmpdir())) {
+      if (!name.startsWith(prefix) || existingDirectories.has(name)) continue;
+      const contextFile = path.join(os.tmpdir(), name, 'atom.json');
+      try {
+        if ((await fs.readFile(contextFile, 'utf8')).includes(marker)) return contextFile;
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    }
+    if (child.exitCode !== null) throw new Error('acceptance process exited before its source copy was observed');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('timed out waiting for the isolated acceptance copy');
 }
 
 async function fixture(t, subscriberSource) {
@@ -962,3 +982,174 @@ for (const batch of [false, true]) {
     await assert.rejects(createLegacyWorldService().executeLegacy({ ...request, source: 'explore Source' }), { code: 'ATOM_INTERACTION_ID_CONFLICT' });
   });
 }
+
+test('deployment-copy acceptance fails when its source changes after the private snapshot', async (t) => {
+  const marker = `source-safety-${crypto.randomUUID()}`;
+  const sourceDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-source-safety-'));
+  const contextFile = path.join(sourceDirectory, 'atom.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Deployment Agent', [
+      `marker = ${JSON.stringify(marker)}`,
+      'agent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})'
+    ].join('\n'), [], [], ['program']),
+    atom('默认备份仓', '', [], [], ['backup', 'default'])
+  ], null, 2), 'utf8');
+  t.after(() => fs.rm(sourceDirectory, { recursive: true, force: true }));
+
+  const script = path.resolve(import.meta.dirname, '..', 'scripts', 'accept-real-world-write-copy.mjs');
+  const existingAcceptanceDirectories = new Set((await fs.readdir(os.tmpdir())).filter((name) => (
+    name.startsWith('atom-real-write-acceptance-')
+  )));
+  const child = spawn(process.execPath, [
+    script, '--context', contextFile, '--agent', 'Deployment Agent', '--structural-latency'
+  ], { cwd: path.resolve(import.meta.dirname, '..'), stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const exited = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code, signal) => resolve({ code, signal }));
+  });
+
+  await waitForCopiedAcceptanceWorld(marker, child, existingAcceptanceDirectories);
+  await fs.appendFile(contextFile, '\n', 'utf8');
+  const { code, signal } = await exited;
+  assert.equal(signal, null, stderr);
+  assert.equal(code, 1, stderr);
+  const result = JSON.parse(stdout);
+  assert.equal(result.sourceContextUnchanged, false);
+  assert.equal(result.ok, false, JSON.stringify(result));
+});
+
+test('rename-copy acceptance rereads one stable interaction and proves Strut and shortcut conservation', async (t) => {
+  const sourceDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-rename-source-'));
+  const contextFile = path.join(sourceDirectory, 'atom.json');
+  const target = 'Acceptance Agent/Parent/Old';
+  const renamed = 'Acceptance Agent/Parent/Renamed';
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Acceptance Agent', [
+      'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","transform"]}})'
+    ].join('\n'), [
+      atom('Parent', '', [
+        atom('Old', 'target body', [atom('Child', 'child body')], [{
+          'if@current': true,
+          then: [{ thing: 'Peer' }]
+        }]),
+        atom('Peer', 'peer body', [], [{
+          'if@current': true,
+          then: [{ thing: `${target}/Child` }]
+        }])
+      ]),
+      atom('Reference Host', '', [{
+        'thing@shortcut': 'Target Reference',
+        situation: JSON.stringify({
+          contract: 'atom.shortcut', version: 1, referenceId: 'acceptance-reference',
+          target: { state: 'linked', path: `${target}/Child` }
+        }),
+        slot: [], strut: []
+      }])
+    ], [], ['program'])
+  ], null, 2), 'utf8');
+  t.after(() => fs.rm(sourceDirectory, { recursive: true, force: true }));
+
+  const script = path.resolve(import.meta.dirname, '..', 'scripts', 'accept-rename-world-copy.mjs');
+  const run = spawnSync(process.execPath, [
+    script, '--context', contextFile, '--agent', 'Acceptance Agent', '--target', target, '--name', 'Renamed'
+  ], { cwd: path.resolve(import.meta.dirname, '..'), encoding: 'utf8', timeout: 60_000 });
+  assert.equal(run.error, undefined, run.error?.message);
+  assert.equal(run.status, 0, run.stderr || run.stdout);
+  const result = JSON.parse(run.stdout);
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.write.ok, true);
+  assert.equal(result.finalReceipt.ok, true);
+  assert.equal(result.finalReceipt.interactionId, result.interactionId);
+  assert.equal(result.finalReceipt.subsequentExecution.status, 'completed');
+  assert.equal(result.immediateReadback.ok, true);
+  assert.ok(JSON.stringify(result.immediateReadback).includes(renamed));
+  assert.equal(result.thingConserved, true);
+  assert.equal(result.situationConserved, true);
+  assert.equal(result.slotConserved, true);
+  assert.equal(result.strutConserved, true);
+  assert.equal(result.shortcutReferencesConserved, true);
+  assert.equal(result.fourAxesConserved, true);
+  assert.equal(result.sourceUnchanged, true);
+  assert.match(result.directory, /atom-rename-acceptance-/u);
+});
+
+test('public ordinary Agent keeps source success separate from failed and repaired subsequent events', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-public-journey-'));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const failingProgram = [
+    'def receive(delivery):',
+    '    transform({"thing":"Public Agent/Missing","situation.rep.after":"before"})',
+    'trigger("strut", {}, receive)'
+  ].join('\n');
+  const repairedProgram = [
+    'def receive(delivery):',
+    '    transform({"thing":"Public Agent/Result","situation.rep.after":"before"})',
+    'trigger("strut", {}, receive)'
+  ].join('\n');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Public Agent', 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","transform","trigger"]}})', [
+      atom('Source', 'before', [], [{
+        'if@current': true,
+        if: [{ program: 'def main(context):\n    return True' }],
+        then: [{ 'thing@program': 'Subscriber' }]
+      }]),
+      atom('Result', 'before'),
+      atom('Subscriber', failingProgram, [], [], ['program'])
+    ], [], ['program'])
+  ], null, 2), 'utf8');
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile });
+  t.after(() => running.close());
+  assert.notEqual(running.port, 4784);
+  const endpoint = `${running.url}/__atom/api/command`;
+  const command = (source, id = crypto.randomUUID()) => executeAtomCommandEndpoint({
+    source,
+    interaction: { id, agentSelector: 'Public Agent', agent: { path: 'Public Agent' } }
+  }, endpoint);
+  const finalReceipt = async (source, id) => {
+    const deadline = Date.now() + 10_000;
+    let receipt;
+    do {
+      receipt = await command(source, id);
+      if (receipt.subsequentExecution?.status !== 'pending') return receipt;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    } while (Date.now() < deadline);
+    return receipt;
+  };
+
+  const source = 'transform {"thing":"Public Agent/Source","situation.rep.after":"before"}';
+  const sourceInteraction = `public-source-${crypto.randomUUID()}`;
+  const first = await command(source, sourceInteraction);
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.ok(['pending', 'failed'].includes(first.subsequentExecution.status), JSON.stringify(first));
+  const immediate = await command('explore {"thing":"Public Agent/Source","situation$full":true}');
+  assert.equal(immediate.ok, true, JSON.stringify(immediate));
+  assert.equal(immediate.items[0].matches[0].situation, 'after', JSON.stringify(immediate));
+  const final = await finalReceipt(source, sourceInteraction);
+  assert.equal(final.ok, true, JSON.stringify(final));
+  assert.equal(final.subsequentExecution.status, 'failed', JSON.stringify(final));
+  assert.ok(final.subsequentExecution.errors.some(({ code }) => code === 'ATOM_NOT_FOUND'), JSON.stringify(final));
+
+  const repair = await command(`transform ${JSON.stringify({
+    thing: 'Public Agent/Subscriber',
+    [`situation.rep.${repairedProgram}`]: failingProgram
+  })}`);
+  assert.equal(repair.ok, true, JSON.stringify(repair));
+  const nextSource = 'transform {"thing":"Public Agent/Source","situation.rep.final":"after"}';
+  const nextInteraction = `public-next-${crypto.randomUUID()}`;
+  const next = await command(nextSource, nextInteraction);
+  assert.equal(next.ok, true, JSON.stringify(next));
+  const nextFinal = await finalReceipt(nextSource, nextInteraction);
+  assert.equal(nextFinal.subsequentExecution.status, 'completed', JSON.stringify(nextFinal));
+  const result = await command('explore {"thing":"Public Agent/Result","situation$full":true}');
+  assert.equal(result.items[0].matches[0].situation, 'after', JSON.stringify(result));
+});
