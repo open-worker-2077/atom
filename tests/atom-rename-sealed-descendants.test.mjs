@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRuntimeCliExecutor } from '../src/atom-system/adapters/runtime-cli-executor.mjs';
+import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
+import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
 import { createAccessController, walkAtoms } from '../work-engine/atom-language/query-capability.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
@@ -60,6 +62,29 @@ test('atomic sibling name swaps preserve existing descendant Agent declarations'
   const after = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.deepEqual(find(after, 'Root/B/Worker'), worker);
   assert.equal(find(after, 'Root/A/Worker'), undefined);
+});
+
+test('batch rename records external references in its reversible transaction', async () => {
+  const external = atom('External');
+  external.strut = [{ 'if@current': true, then: [{ thing: 'Root/A' }] }];
+  const program = { 'thing@program': 'ReferenceProgram', situation: "TARGET = 'Root/A'", slot: [], strut: [] };
+  const shortcut = { 'thing@shortcut': 'Shortcut', situation: JSON.stringify({ contract: 'atom.shortcut', version: 1, referenceId: 'rename-reference', target: { state: 'linked', path: 'Root/A' } }), slot: [], strut: [] };
+  const initial = [{ 'thing@program': 'Root', situation: 'agent({"labels":[],"functions":{"groups":["graph","program"],"names":[]}})', slot: [atom('A'), external, program, shortcut], strut: [] }];
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-rename-patch-'));
+  const contextFile = path.join(dir, 'atom.json');
+  const graphFile = path.join(dir, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify(initial));
+  const execute = createRuntimeCliExecutor({ contextFile, graphFile, storeFile: path.join(dir, 'knowledge.json') });
+  const result = await execute({ source: 'transform [{"thing.ren.B":"Root/A"}]', interaction: { id: 'reference-batch', agent: { path: 'Root' } } });
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  const journal = createJsonTransactionJournal({ file: path.join(dir, 'atom.transactions.json') });
+  const history = (await journal.readState()).receipts.at(-1);
+  for (const path of ['Root/External', 'Root/ReferenceProgram', 'Root/Shortcut']) {
+    assert.ok(history.patch.changedPaths.includes(path), `Missing reversible path ${path}`);
+  }
+  const persistence = createTransactionalWorldPersistence({ contextFile, projectionFile: graphFile });
+  await persistence.rollback({ targetCommandId: history.commandId, correlationId: 'undo-reference-batch', expectedRevision: history.receipt.afterRevision });
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), initial);
 });
 
 test('rename never grants sibling or locked-root authority and compound slot writes remain denied', async () => {

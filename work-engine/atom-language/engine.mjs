@@ -3255,6 +3255,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     const batchDeclarationRelocations = [];
     const transformLogs = [];
     const transformEventNodes = new Set();
+    const renameEventNodes = new Set();
     const renameBatch = parsed.items.every(isBatchRenameItem);
     if (renameBatch) {
       const renamed = await applyBatchRenames({
@@ -3284,10 +3285,21 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           result: resultMatch ? describeAtom(resultMatch, false) : null
         });
         for (const path of [renamedItem.sourcePath, renamedItem.resultPath]) {
-          if (path) transformEventNodes.add(path);
+          if (path) {
+            transformEventNodes.add(path);
+            renameEventNodes.add(path);
+          }
         }
       }
-      // Referential path rewrites are not additional business Transform events.
+      // All rewritten references belong in the reversible fact patch, while
+      // only the selected rename roots generate business Transform events.
+      for (const path of [
+        ...(renamed.relationPaths ?? []),
+        ...(renamed.programSourcePaths ?? []),
+        ...(renamed.shortcutPaths ?? [])
+      ]) {
+        if (path) transformEventNodes.add(path);
+      }
     }
     for (const candidate of renameBatch ? [] : parsed.items) {
       let transformed;
@@ -3370,7 +3382,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       try {
         reconciled = await reconcileProgramsForWorld(nextAtoms, {
           mode: 'transform',
-          nodes: [...transformEventNodes]
+          nodes: [...(renameBatch ? renameEventNodes : transformEventNodes)]
         });
       } catch (error) {
         releaseStrutDeliveryClaims();
