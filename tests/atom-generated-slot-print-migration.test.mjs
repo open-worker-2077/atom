@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import crypto from 'node:crypto';
+import { watch } from 'node:fs';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
+import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
+import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import { planGeneratedSlotPrintMigration } from '../work-engine/atom-language/generated-slot-print-migration.mjs';
 import { applyPlanSlotBodyEffect, readVisibleSlotPlans } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
 import {
@@ -10,6 +20,10 @@ import {
   replaceStoredField
 } from '../work-engine/atom-language/slot-graph-semantics.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
+
+const execFileAsync = promisify(execFile);
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const operator = path.join(projectRoot, 'scripts', 'deploy-generated-slot-print-world.mjs');
 
 function atom(thing, situation = '', slot = [], strut = [], types = []) {
   return {
@@ -66,6 +80,50 @@ function withoutSituationAt(facts, path) {
   const copy = structuredClone(facts);
   replaceStoredField(find(copy, path), 'situation', '<selected-situation>');
   return copy;
+}
+
+async function migratableWorld() {
+  const facts = await seal([
+    atom('Root', 'source situation stays private', [unsealedBody('订单槽体')])
+  ], 'Root/订单槽体');
+  const generated = visiblePrint(facts, 'Root/订单槽体');
+  replaceStoredField(generated.layout.print, 'situation', legacyGeneratedSource(
+    fieldValue(generated.layout.print, 'situation'),
+    generated.plan.body
+  ));
+  return facts;
+}
+
+async function isolatedRuntime(t, prefix) {
+  const localAppData = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  t.after(() => fs.rm(localAppData, { recursive: true, force: true }));
+  const worldDirectory = path.join(localAppData, 'AtomGraph', 'worlds', 'primary');
+  const contextFile = path.join(worldDirectory, 'atom.json');
+  const graphFile = path.join(worldDirectory, 'graph.json');
+  const journalFile = path.join(worldDirectory, 'atom.transactions.json');
+  await fs.mkdir(worldDirectory, { recursive: true });
+  return {
+    localAppData,
+    worldDirectory,
+    contextFile,
+    graphFile,
+    journalFile,
+    env: { ...process.env, LOCALAPPDATA: localAppData }
+  };
+}
+
+async function runOperator(args, runtime) {
+  return JSON.parse((await execFileAsync(process.execPath, [operator, ...args], {
+    cwd: projectRoot,
+    env: runtime.env
+  })).stdout);
+}
+
+function migrationIdForPlan(plan) {
+  const digest = crypto.createHash('sha256')
+    .update(`${plan.expectedRevision}\0${plan.nextRevision}`)
+    .digest('hex');
+  return `generated-slot-print-${digest}`;
 }
 
 test('migrates one exact historical generated print after an ancestor rename without changing source facts', async () => {
@@ -245,4 +303,252 @@ test('skips sealed print Programs inside an explicitly typed default backup doma
     fieldValue(find(plan.facts, 'Root/Archive/归档槽体/print'), 'situation'),
     archivedBefore
   );
+});
+
+test('maintenance dry-run reports the migration without writing world or backup files', async (t) => {
+  const runtime = await isolatedRuntime(t, 'atom-generated-print-dry-');
+  const source = await migratableWorld();
+  const sourceBytes = `${JSON.stringify(source, null, 2)}\n`;
+  await fs.writeFile(runtime.contextFile, sourceBytes, 'utf8');
+
+  const result = await runOperator(['--dry-run', '--attempt', 'dry-run-1'], runtime);
+
+  assert.equal(result.action, 'dry-run');
+  assert.equal(result.summary.migratedPrograms, 1);
+  assert.deepEqual(result.changedPaths, ['Root/订单槽体/print']);
+  assert.equal(JSON.stringify(result).includes('source situation stays private'), false);
+  assert.equal(await fs.readFile(runtime.contextFile, 'utf8'), sourceBytes);
+  assert.deepEqual((await fs.readdir(runtime.worldDirectory)).sort(), ['atom.json']);
+});
+
+test('maintenance apply backs up the complete incremental journal, is idempotent, and rolls back exactly', async (t) => {
+  const runtime = await isolatedRuntime(t, 'atom-generated-print-apply-');
+  const initial = [atom('Initial', 'journal history')];
+  const source = await migratableWorld();
+  await fs.writeFile(runtime.contextFile, `${JSON.stringify(initial, null, 2)}\n`, 'utf8');
+  await createTransactionalWorldPersistence({
+    contextFile: runtime.contextFile,
+    projectionFile: runtime.graphFile,
+    journalFile: runtime.journalFile
+  }).commit({
+    correlationId: 'fixture-history',
+    expectedRevision: revisionOfWorldFacts(initial),
+    nextRevision: revisionOfWorldFacts(source),
+    facts: source,
+    source: 'fixture-history'
+  });
+  await assert.rejects(fs.access(runtime.journalFile), { code: 'ENOENT' });
+
+  const first = await runOperator(['--apply', '--attempt', 'apply-1'], runtime);
+  const second = await runOperator(['--apply', '--attempt', 'apply-1'], runtime);
+  const manifest = JSON.parse(await fs.readFile(first.paths.backupManifest, 'utf8'));
+  const backedUpPaths = manifest.files.map(({ path: file }) => file).sort();
+  const sourceAfterApply = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+
+  assert.equal(first.action, 'apply');
+  assert.equal(second.recovered, true);
+  assert.equal(second.transaction.commandId, first.transaction.commandId);
+  assert.deepEqual(first.changedPaths, ['Root/订单槽体/print']);
+  assert.ok(backedUpPaths.includes('atom.json'));
+  assert.ok(backedUpPaths.includes('atom.transactions.json.d/events.jsonl'));
+  assert.ok(backedUpPaths.some((file) => file.startsWith('atom.transactions.json.d/objects/')));
+  assert.equal(backedUpPaths.includes('atom.transactions.json'), false);
+  assert.equal(manifest.hashes.sourceFile, first.hashes.sourceFile);
+  assert.equal((await createJsonTransactionJournal({ file: runtime.journalFile }).readState()).receipts.length, 2);
+  assert.equal(revisionOfWorldFacts(sourceAfterApply), first.revisions.target);
+
+  const rolledBack = await runOperator(['--rollback', first.receiptFile], runtime);
+  const worldAfterRollback = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  assert.equal(rolledBack.action, 'rollback');
+  assert.equal(rolledBack.revision, first.revisions.source);
+  assert.deepEqual(worldAfterRollback, source);
+});
+
+test('maintenance refuses an incomplete existing attempt without committing', async (t) => {
+  const runtime = await isolatedRuntime(t, 'atom-generated-print-incomplete-');
+  const source = await migratableWorld();
+  const plan = planGeneratedSlotPrintMigration(source);
+  const migrationId = migrationIdForPlan(plan);
+  const attemptDirectory = path.join(
+    runtime.worldDirectory,
+    'migration-backups',
+    'generated-slot-print',
+    migrationId,
+    'incomplete-1'
+  );
+  await fs.writeFile(runtime.contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  await fs.mkdir(attemptDirectory, { recursive: true });
+  await fs.writeFile(path.join(attemptDirectory, 'atom.json'), 'incomplete', 'utf8');
+
+  await assert.rejects(execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', 'incomplete-1'
+  ], { cwd: projectRoot, env: runtime.env }), (error) => (
+    error.stderr.includes('GENERATED_SLOT_PRINT_MIGRATION_ATTEMPT_CONFLICT')
+  ));
+  assert.deepEqual(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8')), source);
+  assert.equal((await createJsonTransactionJournal({ file: runtime.journalFile }).readState()).receipts.length, 0);
+});
+
+test('maintenance refuses a hash-invalid private backup without committing', async (t) => {
+  const runtime = await isolatedRuntime(t, 'atom-generated-print-invalid-backup-');
+  const source = await migratableWorld();
+  const sourceBytes = Buffer.from(`${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  const plan = planGeneratedSlotPrintMigration(source);
+  const migrationId = migrationIdForPlan(plan);
+  const attemptId = 'invalid-backup-1';
+  const directory = path.join(
+    runtime.worldDirectory,
+    'migration-backups',
+    'generated-slot-print',
+    migrationId,
+    attemptId
+  );
+  const manifestFile = path.join(directory, 'backup-manifest.json');
+  const sourceHash = `sha256:${crypto.createHash('sha256').update(sourceBytes).digest('hex')}`;
+  await fs.writeFile(runtime.contextFile, sourceBytes);
+  await fs.mkdir(directory, { recursive: true });
+  await fs.writeFile(path.join(directory, 'atom.json'), sourceBytes);
+  await fs.writeFile(manifestFile, `${JSON.stringify({
+    contract: 'atom.generated-slot-print-private-backup',
+    version: 1,
+    migrationId,
+    attemptId,
+    directory,
+    worldDirectory: runtime.worldDirectory,
+    contextFile: runtime.contextFile,
+    journalFile: runtime.journalFile,
+    revisions: { source: plan.expectedRevision, target: plan.nextRevision },
+    hashes: { sourceFile: 'sha256:invalid', targetFacts: plan.nextRevision },
+    changedPaths: plan.changedPaths,
+    summary: plan.summary,
+    files: [{ path: 'atom.json', hash: sourceHash, bytes: sourceBytes.length }],
+    manifestFile
+  }, null, 2)}\n`, 'utf8');
+
+  await assert.rejects(execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', attemptId
+  ], { cwd: projectRoot, env: runtime.env }), (error) => (
+    error.stderr.includes('GENERATED_SLOT_PRINT_MIGRATION_BACKUP_VERIFICATION_FAILED')
+  ));
+  assert.deepEqual(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8')), source);
+  assert.equal((await createJsonTransactionJournal({ file: runtime.journalFile }).readState()).receipts.length, 0);
+});
+
+test('maintenance rejects a source change after backup starts before central commit', async (t) => {
+  const runtime = await isolatedRuntime(t, 'atom-generated-print-cas-');
+  const source = await migratableWorld();
+  const changed = [...source, atom('Concurrent', 'outside writer')];
+  await fs.writeFile(runtime.contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  const objectDirectory = path.join(`${runtime.journalFile}.d`, 'objects');
+  await fs.mkdir(objectDirectory, { recursive: true });
+  const padding = Buffer.alloc(64 * 1024, 7);
+  await Promise.all(Array.from({ length: 128 }, (_, index) => fs.writeFile(
+    path.join(objectDirectory, `${String(index).padStart(3, '0')}.padding`),
+    padding
+  )));
+
+  let watcher;
+  let timeout;
+  const mutated = new Promise((resolve, reject) => {
+    timeout = setTimeout(() => reject(new Error('backup copy was not observed')), 5000);
+    watcher = watch(runtime.worldDirectory, { recursive: true }, (_event, filename) => {
+      const observed = String(filename ?? '').split(path.sep).join('/');
+      if (!observed.endsWith('/cas-1/atom.json')) return;
+      watcher.close();
+      clearTimeout(timeout);
+      fs.writeFile(runtime.contextFile, `${JSON.stringify(changed, null, 2)}\n`, 'utf8')
+        .then(resolve, reject);
+    });
+  });
+  t.after(() => {
+    watcher?.close();
+    clearTimeout(timeout);
+  });
+  const operation = execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', 'cas-1'
+  ], { cwd: projectRoot, env: runtime.env });
+
+  await mutated;
+  await assert.rejects(operation, (error) => (
+    error.stderr.includes('GENERATED_SLOT_PRINT_MIGRATION_SOURCE_DIVERGED')
+      || error.stderr.includes('WORLD_REVISION_CONFLICT')
+  ));
+  assert.deepEqual(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8')), changed);
+  assert.equal((await createJsonTransactionJournal({ file: runtime.journalFile }).readState()).receipts.length, 0);
+});
+
+test('maintenance automatically rolls back a committed migration when projection postcheck fails', async (t) => {
+  const runtime = await isolatedRuntime(t, 'atom-generated-print-postcheck-');
+  const source = await migratableWorld();
+  await fs.writeFile(runtime.contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  await fs.mkdir(runtime.graphFile);
+
+  await assert.rejects(execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', 'postcheck-1'
+  ], { cwd: projectRoot, env: runtime.env }), (error) => (
+    error.stderr.includes('WORLD_COMMITTED_PROJECTION_PENDING')
+  ));
+
+  assert.deepEqual(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8')), source);
+  const state = await createJsonTransactionJournal({ file: runtime.journalFile }).readState();
+  assert.equal(state.receipts.length, 2);
+  const backupRoot = path.join(runtime.worldDirectory, 'migration-backups', 'generated-slot-print');
+  const [migration] = await fs.readdir(backupRoot);
+  const failureFile = path.join(backupRoot, migration, 'postcheck-1', 'failure-receipt.json');
+  const failure = JSON.parse(await fs.readFile(failureFile, 'utf8'));
+  assert.equal(failure.error.code, 'WORLD_COMMITTED_PROJECTION_PENDING');
+  assert.equal(failure.rollback.status, 'committed');
+});
+
+test('maintenance rejects rollback after a later world revision', async (t) => {
+  const runtime = await isolatedRuntime(t, 'atom-generated-print-later-');
+  const source = await migratableWorld();
+  await fs.writeFile(runtime.contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  const applied = await runOperator(['--apply', '--attempt', 'later-1'], runtime);
+  const migrated = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  const later = [...migrated, atom('Later', 'business revision')];
+  await createTransactionalWorldPersistence({
+    contextFile: runtime.contextFile,
+    projectionFile: runtime.graphFile,
+    journalFile: runtime.journalFile
+  }).commit({
+    correlationId: 'later-business-change',
+    expectedRevision: revisionOfWorldFacts(migrated),
+    nextRevision: revisionOfWorldFacts(later),
+    facts: later,
+    source: 'ordinary-test'
+  });
+
+  await assert.rejects(execFileAsync(process.execPath, [
+    operator, '--rollback', applied.receiptFile
+  ], { cwd: projectRoot, env: runtime.env }), (error) => (
+    error.stderr.includes('INVALID_GENERATED_SLOT_PRINT_MIGRATION_RECEIPT')
+  ));
+  assert.deepEqual(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8')), later);
+});
+
+test('maintenance rejects a linked backup ancestor before writing through it', async (t) => {
+  const runtime = await isolatedRuntime(t, 'atom-generated-print-link-');
+  const source = await migratableWorld();
+  const outside = path.join(runtime.localAppData, 'outside');
+  await fs.writeFile(runtime.contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  await fs.mkdir(outside);
+  try {
+    await fs.symlink(outside, path.join(runtime.worldDirectory, 'migration-backups'),
+      process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'UNKNOWN'].includes(error.code)) {
+      t.skip(`reparse-point creation unsupported: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+
+  await assert.rejects(execFileAsync(process.execPath, [
+    operator, '--apply', '--attempt', 'link-1'
+  ], { cwd: projectRoot, env: runtime.env }), (error) => (
+    error.stderr.includes('GENERATED_SLOT_PRINT_MIGRATION_UNSAFE_PATH')
+  ));
+  assert.deepEqual(await fs.readdir(outside), []);
+  assert.deepEqual(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8')), source);
 });
