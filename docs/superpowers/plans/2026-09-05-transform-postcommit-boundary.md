@@ -161,7 +161,7 @@ assert.equal(workerCalls, 1);
 ```
 
 **既有service合同：** 无context/projection的adapter保持原参数转发形状；manifest readiness继续复用原single-flight缓存。跨facade以共享持久层实际提交/恢复的内部generation使派生cache失效，普通mock仍在本facade提交后失效；该token不作世界revision/第二状态权威、不按请求扫描历史，rollback/recover/adopt等实际改变清单的路径须一致失效。
-- [ ] **Step 1: 用故障注入取得恢复 RED**
+- [x] **Step 1: 用故障注入取得恢复 RED**
 
 真实中央持久化在来源提交后、后续执行前中断；新建service/scheduler读取相同私有目录。来源必须保持after，触发依据可恢复。再在后续effects已提交但响应前中断，重试不能再提交或再执行已确认effect。
 
@@ -172,15 +172,15 @@ assert.equal(effectCommitCount, 1);
 assert.equal(sourceCommitCount, 1);
 ```
 
-- [ ] **Step 2: 持久化来源事件与关联结果**
+- [x] **Step 2: 持久化来源事件与关联结果**
 
 只在原中央提交result中携带序列化的局部事件（mode、nodes、affectedPaths、action、source revision/command）；禁止全世界复制为调度消息。后续事实receipt绑定来源command，失败保留错误而不重写来源事实/修订。若需新增journal方法，仅用于同一来源的附加运行结果，不建立新文件状态仓，也不改变原来源command和提交证明；对旧日志/旧reader兼容必须给出实测。
 
-- [ ] **Step 3: 覆盖并发与非重放**
+- [x] **Step 3: 覆盖并发与非重放**
 
 来源后插入另一真实提交，使旧后续候选CAS失败；重新读取实际修订后重新判定，不能补写旧快照。重复关联必须先读已提交receipt；失败重试只执行未确认后续。旧来源路径已不存在时返回准确后续定位失败，不猜新路径、不扩大Agent权限。
 
-- [ ] **Step 4: 验证聚焦 GREEN 并提交**
+- [x] **Step 4: 验证聚焦 GREEN 并提交**
 
 Run: `node --test --test-isolation=none tests/atom-transform-postcommit-boundary.test.mjs`，包含来源/效果分别守恒、冷重启、重试、冲突与旧日志读取。GitNexus/diff检查后只提交此Task实际文件。
 
@@ -298,3 +298,5 @@ Run: `npm run check:development-control`；`npm test`。真实失败先定向修
 - **Task2 round1定向GREEN**：boundary38＋transaction21＋service16=75/75，HTTP pending/final/deadline2/2。七个新增用例覆盖连续revision不同身份拒绝、同身份复用且仅首次hook、final outcome/effects串行竞态、failed/completed两种outcome EIO、single/batch来源无变化而真实effects冷进程重读零worker。实施方尚在自查/报告/提交，候选未复审。
 
 - **Task2 round1提交复审**：0df824e，六代码/测试文件、77/77，staged CRITICAL（14符号/20流程）；完整fix report已追加，原评审按bbf4e32..0df824e精确包逐项复审。中间cab1e87仅控制方文档，评审范围可回溯。当前不勾Task2完成，不进入Task3、不部署。
+
+- **Task 2: complete**：802d902..0df824e；fix round1三项全部ADDRESSED、无新增Critical/Important、Approved。最终回修覆盖75＋2=77项，初稿未触及的112链证据按revision复用。Task1与未改调度代码的Trigger/Strut/接棒原子性以Task1既有独立复核及18/18支持；Task3仍需最小受影响链与最终全分支审查，不将跨任务验收提前报关闭。当前继续Task3，未部署。
