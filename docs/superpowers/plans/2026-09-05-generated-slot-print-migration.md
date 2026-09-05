@@ -55,7 +55,7 @@ Run: `node --test --test-isolation=none tests/atom-generated-slot-print-migratio
 
 - [ ] **Step 3: 实现精确生成物白名单**
 
-先由当前sealed layout取print与last revision；只接受header为单个字面量`PRINT_PLAN = json_parse({"text": JSON_STRING})`，解析出的plan与当前修订plan结构相等，main恰为 `def main(arguments)` 返回一个slot_body字典。旧字典仅允许action=print、body为已与当前修订逐项核对的PRINT_PLAN.body精确字符串、name=arguments["name"]；有额外语句/计算/成员时拒绝该疑似生成物，绝不求值或猜写。
+先由当前sealed layout取print与last revision；只接受header为单个字面量`PRINT_PLAN = json_parse({"text": JSON_STRING})`，解析出的plan与当前修订plan结构相等，main恰为 `def main(arguments)` 返回一个slot_body字典。旧字典仅允许action=print、body仅为当前layout.bodyPath或已与当前修订逐项核对的PRINT_PLAN.body之一的精确字符串、name=arguments["name"]；有额外语句/计算/成员时拒绝该疑似生成物，绝不求值或猜写。
 
 ```text
 PRINT_PLAN = json_parse(原字面量保持原字节)
@@ -110,3 +110,5 @@ focused测试及独立复核通过后集成维护工具；使用受控现有服�
 - **预检裁定（2026-09-06）**：旧生成器d267a91的父版本明确从plan.body生成main的body字面量；祖先改名/移动后源码和修订快照依法保留旧路径，因此白名单应与经当前layout修订核验的PRINT_PLAN.body匹配，不能强制等于现行layout路径。该修正保持用户“只去退役调用参数、不改历史快照”的要求；其他模板严格限制不变。若身份/修订/源码不能交叉证明，拒绝迁移。
 
 - **当前只读盘点（2026-09-06）**：生产raw facts经projectAtomContext通过，无须额外兼容入口；readVisibleSlotPlans仍为5个，旧main.body候选中2个活跃、3个位于显式backup/default子树。此为候选盘点，严格生成源码核验尚待Task1；后续只迁移通过核验的活跃项，不为凑旧数量改写停用历史。
+
+- **实际来源修正（2026-09-06）**：16d6f6c纯内存生产probe拒绝两活跃模板。逐行核对证实既有祖先路径维护已把main.body更新为当前layout.bodyPath，PRINT_PLAN.body仍保持原修订值；三行模板其他字节符合生成规则。前述只允许plan.body的裁定过窄，现限定允许这两个经过交叉核验的确切值，其余body/格式/语句仍整批拒绝。补测试覆盖两合法形态及第三方路径拒绝；不改生产或内核。

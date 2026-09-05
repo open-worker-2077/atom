@@ -367,3 +367,5 @@
 - **后续维护启动**：旧生成print迁移Task1已在.worktrees/generated-slot-print-migration、fix/generated-slot-print-migration@66cff49启动，实施Agent /root/generated_print_task1（Sol high）。槽体最小基线9/9通过；仅新增纯planner与测试，不改生产或内核。共同展示配置已部署c8c66f1，正式settings仍revision0/uninitialized，原本机参数和真机入口待取得，局部验收保持未关闭。
 
 - **旧打印盘点更新**：生产只读5个旧调用候选中2活跃、3已显式备份停用；Task1严格核验未完成，不能仍称5个都需生产迁移。停用历史不改。
+
+- **打印Task1来源裁定修正**：16d6f6c内存probe暴露根Agent白名单过窄；现有祖先路径维护更新了main.body，修订快照保留旧body。允许仅current layout.bodyPath或已核验plan.body两值，不放宽其他生成源码条件；Task1审查/回修中，生产零写入。
