@@ -3619,6 +3619,10 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           enabled: Boolean(options.programScheduler) && options.trustedMaintenance !== true
             && (requestDeclarationRelocations.length === 0 || renameBatch) });
     if (sourceChanged) {
+      const sourceProgramSurfaceChanged = [...transformEventNodes].some((targetPath) => (
+        subtreeSlotsTypedProgram(exactMatchAtPath(atoms, targetPath)?.atom)
+        || subtreeSlotsTypedProgram(exactMatchAtPath(nextAtoms, targetPath)?.atom)
+      ));
       const compiled = await validatePrograms(
         nextAtoms, contextFile, atoms, candidateProgramScheduler
       );
@@ -3634,6 +3638,12 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       }
       const sourceReceipt = await commitChangedGraph(nextAtoms, {
         changedPaths: [...transformEventNodes],
+        ...(!sourceProgramSurfaceChanged ? {
+          projectionRebase: {
+            previousAtoms: atoms,
+            changedPaths: [...transformEventNodes]
+          }
+        } : {}),
         postCommitEvent: unchangedSourceEvent
       });
       if (sourceReceipt?.authorizationFailure) return sourceReceipt.authorizationFailure;
@@ -3850,6 +3860,12 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     }
     const sourceReceipt = await commitChangedGraph(nextAtoms, {
       changedPaths: [created.resultPath],
+      ...(!subtreeSlotsTypedProgram(exactMatchAtPath(nextAtoms, created.resultPath)?.atom) ? {
+        projectionRebase: {
+          previousAtoms: atoms,
+          changedPaths: [created.resultPath]
+        }
+      } : {}),
       postCommitEvent: postCommitEvent({ mode: 'transform', nodes: [created.resultPath], affectedPaths: [created.resultPath] },
         [created.resultPath], { createNew: true })
     });
@@ -4228,6 +4244,12 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     }
     const sourceReceipt = await commitChangedGraph(nextAtoms, {
       changedPaths: transformAffectedPaths,
+      ...(!programSurfaceChanged ? {
+        projectionRebase: {
+          previousAtoms: atoms,
+          changedPaths: transformAffectedPaths
+        }
+      } : {}),
       localizedSituationValidation: !programSurfaceChanged
         && isLocalizedSituationTransform(item),
       structurePreservingValidation: !programSurfaceChanged

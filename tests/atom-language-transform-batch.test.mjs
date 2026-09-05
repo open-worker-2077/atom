@@ -367,12 +367,15 @@ test('batch receipts preserve the exact path when short names repeat', async (t)
   assert.equal(result.results[0].result.selector, 'P2/X');
 });
 
-test('post-batch Program transforms join the same authoritative commit', async (t) => {
+test('a batch source commit precedes its Program effects commit', async (t) => {
   const files = await fixture(t);
   const writes = [];
   let refreshes = 0;
   const world = createLegacyWorldService({
-    onAuthoritativeWrite: (write) => writes.push(write)
+    onAuthoritativeWrite: async (write) => writes.push({
+      ...write,
+      facts: JSON.parse(await fs.readFile(files.contextFile, 'utf8'))
+    })
   });
   const scheduler = {
     async refresh() {
@@ -395,7 +398,16 @@ test('post-batch Program transforms join the same authoritative commit', async (
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  assert.equal(writes.length, 1);
+  assert.equal(writes.length, 2);
+  assert.deepEqual(writes[0].facts[0].strut, struts('来源乙'));
+  assert.deepEqual(writes[0].facts[1].strut, []);
+  assert.deepEqual(writes[1].facts[0].strut, struts('来源乙'));
+  assert.deepEqual(writes[1].facts[1].strut, struts('来源甲'));
+  assert.equal(writes[1].receipt.beforeRevision, writes[0].receipt.afterRevision);
+  assert.equal(result.subsequentExecution.sourceRevision,
+    writes[0].receipt.afterRevision.replace(/^sha256:/u, ''));
+  assert.equal(result.revisionAfter,
+    writes[1].receipt.afterRevision.replace(/^sha256:/u, ''));
   const [sourceA, sourceB] = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
   assert.deepEqual(sourceA.strut, struts('来源乙'));
   assert.deepEqual(sourceB.strut, struts('来源甲'));
@@ -405,11 +417,14 @@ test('post-batch Program transforms join the same authoritative commit', async (
   );
 });
 
-test('a single Transform and its Program consequences share one authoritative commit', async (t) => {
+test('a single Transform source commit precedes its Program effects commit', async (t) => {
   const files = await fixture(t);
   const writes = [];
   const world = createLegacyWorldService({
-    onAuthoritativeWrite: (write) => writes.push(write)
+    onAuthoritativeWrite: async (write) => writes.push({
+      ...write,
+      facts: JSON.parse(await fs.readFile(files.contextFile, 'utf8'))
+    })
   });
   const scheduler = {
     async current() {
@@ -430,7 +445,16 @@ test('a single Transform and its Program consequences share one authoritative co
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  assert.equal(writes.length, 1, 'user change and Program consequences form one commit');
+  assert.equal(writes.length, 2);
+  assert.equal(writes[0].facts[0].situation, '新甲');
+  assert.equal(writes[0].facts[1].situation, '旧乙');
+  assert.equal(writes[1].facts[0].situation, '新甲');
+  assert.equal(writes[1].facts[1].situation, '自动乙');
+  assert.equal(writes[1].receipt.beforeRevision, writes[0].receipt.afterRevision);
+  assert.equal(result.subsequentExecution.sourceRevision,
+    writes[0].receipt.afterRevision.replace(/^sha256:/u, ''));
+  assert.equal(result.revisionAfter,
+    writes[1].receipt.afterRevision.replace(/^sha256:/u, ''));
   const [sourceA, sourceB] = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
   assert.equal(sourceA.situation, '新甲');
   assert.equal(sourceB.situation, '自动乙');
@@ -438,7 +462,7 @@ test('a single Transform and its Program consequences share one authoritative co
     .update(JSON.stringify([sourceA, sourceB])).digest('hex'));
 });
 
-test('a real Program creates then updates one new Atom inside the triggering central commit', async (t) => {
+test('a real Program creates then updates one Atom after the triggering source commit', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-create-update-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -460,7 +484,10 @@ test('a real Program creates then updates one new Atom inside the triggering cen
   ], null, 2));
   const writes = [];
   const world = createLegacyWorldService({
-    onAuthoritativeWrite: (write) => writes.push(write)
+    onAuthoritativeWrite: async (write) => writes.push({
+      ...write,
+      facts: JSON.parse(await fs.readFile(contextFile, 'utf8'))
+    })
   });
 
   const result = await world.executeLegacy({
@@ -472,7 +499,17 @@ test('a real Program creates then updates one new Atom inside the triggering cen
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  assert.equal(writes.length, 1);
+  assert.equal(writes.length, 2);
+  assert.equal(writes[0].facts[1].situation, 'go');
+  assert.equal(writes[0].facts[0].slot.length, 0);
+  assert.equal(writes[1].facts[1].situation, 'go');
+  assert.equal(writes[1].facts[0].slot.length, 1);
+  assert.equal(writes[1].facts[0].slot[0].situation, 'final');
+  assert.equal(writes[1].receipt.beforeRevision, writes[0].receipt.afterRevision);
+  assert.equal(result.subsequentExecution.sourceRevision,
+    writes[0].receipt.afterRevision.replace(/^sha256:/u, ''));
+  assert.equal(result.revisionAfter,
+    writes[1].receipt.afterRevision.replace(/^sha256:/u, ''));
   const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(persisted[0].slot.length, 1, JSON.stringify({ result, persisted }));
   assert.equal(persisted[0].slot[0].thing, 'Created In Reconcile');
