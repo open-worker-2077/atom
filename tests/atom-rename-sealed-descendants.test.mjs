@@ -48,6 +48,20 @@ for (const batch of [false, true]) {
   });
 }
 
+test('atomic sibling name swaps preserve existing descendant Agent declarations', async () => {
+  const worker = { 'thing@program': 'Worker', situation: 'agent({"labels":["existing-business"],"functions":{"groups":[],"names":["explore"]}})', slot: [], strut: [] };
+  const root = { 'thing@program': 'Root', situation: 'agent({"labels":[],"functions":{"groups":["graph","program"],"names":[]}})', slot: [atom('A', [worker]), atom('B')], strut: [] };
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-rename-swap-'));
+  const contextFile = path.join(dir, 'atom.json');
+  await fs.writeFile(contextFile, JSON.stringify([root]));
+  const execute = createRuntimeCliExecutor({ contextFile, graphFile: path.join(dir, 'graph.json'), storeFile: path.join(dir, 'knowledge.json') });
+  const result = await execute({ source: 'transform [{"thing.ren.B":"Root/A"},{"thing.ren.A":"Root/B"}]', interaction: { id: 'swap', agent: { path: 'Root' } } });
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  const after = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.deepEqual(find(after, 'Root/B/Worker'), worker);
+  assert.equal(find(after, 'Root/A/Worker'), undefined);
+});
+
 test('rename never grants sibling or locked-root authority and compound slot writes remain denied', async () => {
   const atoms = await fixture();
   const before = JSON.stringify(atoms);
@@ -70,10 +84,11 @@ for (const batch of [false, true]) {
     atoms[0].situation = 'agent({"labels":[],"functions":{"groups":["graph","program"],"names":[]}})';
     const parent = find(atoms, 'Root/Parent');
     parent.slot.push(atom('Result', [], 'untouched'));
+    parent.slot.push(atom('Event'));
     const reactive = atom('Reactive', [], [
       'def main():',
       '    transform({"thing":"Root/Parent/Result","situation.rep.fired":"untouched"})',
-      'trigger("transform", {"nodes":["Root/Parent"]}, main)'
+      'trigger("transform", {"nodes":["Root/Parent/Event"]}, main)'
     ].join('\n'));
     reactive['thing@program'] = reactive.thing;
     delete reactive.thing;
@@ -88,7 +103,7 @@ for (const batch of [false, true]) {
     const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
     assert.equal(find(stored, 'Root/Renamed/Result').situation, 'untouched');
     assert.match(find(stored, 'Root/Renamed/Reactive').situation, /Root\/Renamed\/Result/u);
-    const invoked = await execute({ source: 'transform {"thing":"Root/Renamed","situation.rep.changed"}', interaction: { id: 'after-rename', agent: { path: 'Root' } } });
+    const invoked = await execute({ source: 'transform {"thing":"Root/Renamed/Event","situation.rep.changed"}', interaction: { id: 'after-rename', agent: { path: 'Root' } } });
     assert.equal(invoked.ok, true, JSON.stringify(invoked.errors));
     assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Root/Renamed/Result').situation, 'fired');
   });
