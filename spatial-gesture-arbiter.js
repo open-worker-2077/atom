@@ -170,7 +170,10 @@
       : () => (Number.isFinite(options.delay) ? options.delay : 420);
     const setTimer = options.setTimer || root.setTimeout.bind(root);
     const clearTimer = options.clearTimer || root.clearTimeout.bind(root);
-    const now = typeof options.now === 'function' ? options.now : () => Date.now();
+    const defaultNow = root.performance && typeof root.performance.now === 'function'
+      ? root.performance.now.bind(root.performance)
+      : () => 0;
+    const now = typeof options.now === 'function' ? options.now : defaultNow;
     const commitSingle = typeof options.commitSingle === 'function' ? options.commitSingle : function noop() {};
     const commitHold = typeof options.commitHold === 'function' ? options.commitHold : function noop() {};
     let pendingTimer = null;
@@ -179,6 +182,7 @@
     let pendingHoldAction = null;
     let pendingSignature = null;
     let pendingDelay = 420;
+    let pendingStartedAt = 0;
     let holdCommitted = false;
     let recentSingle = null;
 
@@ -189,6 +193,7 @@
       pendingHoldAction = null;
       pendingSignature = null;
       pendingDelay = 420;
+      pendingStartedAt = 0;
       holdCommitted = false;
     }
 
@@ -218,6 +223,8 @@
       pendingHoldAction = holdAction || null;
       pendingSignature = safeSignature;
       pendingDelay = Math.min(800, Math.max(240, Number(delayFor()) || 420));
+      pendingStartedAt = Number(now());
+      if (!Number.isFinite(pendingStartedAt)) pendingStartedAt = 0;
       if (pendingHoldAction) schedule(token, pendingDelay);
       return 'pending';
     }
@@ -234,18 +241,28 @@
       const completedHold = holdCommitted;
       const releaseSignature = pendingSignature;
       const releaseDelay = pendingDelay;
+      const startedAt = pendingStartedAt;
+      const holdAction = pendingHoldAction;
+      const releasedAt = Number(now());
+      const elapsedHold = Boolean(holdAction)
+        && Number.isFinite(releasedAt)
+        && releasedAt - startedAt >= releaseDelay;
       resetPending();
       if (completedHold) return 'hold';
-      const releasedAt = Number(now()) || 0;
+      if (elapsedHold) {
+        commitHold(holdAction);
+        return 'hold';
+      }
+      const safeReleasedAt = Number.isFinite(releasedAt) ? releasedAt : 0;
       if (
         recentSingle
         && recentSingle.signature === releaseSignature
-        && releasedAt - recentSingle.at <= recentSingle.delay
+        && safeReleasedAt - recentSingle.at <= recentSingle.delay
       ) {
         recentSingle = null;
         return 'coalesced';
       }
-      recentSingle = { signature: releaseSignature, at: releasedAt, delay: releaseDelay };
+      recentSingle = { signature: releaseSignature, at: safeReleasedAt, delay: releaseDelay };
       commitSingle(singleAction);
       return 'single';
     }

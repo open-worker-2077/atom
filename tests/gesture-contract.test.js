@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'spatial-engine.js'), 'utf8');
+const arbiterSource = fs.readFileSync(path.join(__dirname, '..', 'spatial-gesture-arbiter.js'), 'utf8');
 
 function functionSource(name) {
   const start = source.indexOf(`function ${name}(`);
@@ -191,6 +192,12 @@ test('secondary click arbitration reads the current persisted delay', () => {
   const configuration = source.slice(start, end);
 
   assert.match(configuration, /delayFor:\s*\(\)\s*=>\s*state\.demo\.settings\.secondaryNavigationDelayMs/);
+});
+
+test('secondary hold arbitration compares release time with the press-anchored threshold', () => {
+  assert.match(arbiterSource, /performance\.now\.bind\s*\(\s*root\.performance\s*\)/);
+  assert.match(arbiterSource, /pendingStartedAt\s*=\s*Number\s*\(\s*now\s*\(\s*\)\s*\)/);
+  assert.match(arbiterSource, /releasedAt\s*-\s*startedAt\s*>=\s*releaseDelay/);
 });
 
 test('secondary hold lifecycle cancels on drag, pointer cancellation, lost capture, blur, or modifier change', () => {

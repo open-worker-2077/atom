@@ -306,6 +306,42 @@ test('secondary arbiter anchors the hold delay at press and commits long once be
   assert.equal(timers.get(2).delay, 515);
 });
 
+test('secondary arbiter resolves an elapsed hold on release before a delayed timer callback runs', () => {
+  const singles = [];
+  const holds = [];
+  let currentTime = 1000;
+  let delayMs = 420;
+  let delayedCallback;
+  const arbiter = createSecondaryClickArbiter({
+    delayFor: () => delayMs,
+    now: () => currentTime,
+    setTimer(callback) {
+      delayedCallback = callback;
+      return 1;
+    },
+    clearTimer() {},
+    commitSingle(action) {
+      singles.push(action);
+    },
+    commitHold(action) {
+      holds.push(action);
+    }
+  });
+  const single = { intent: 'toggleChildren', target: { id: 'tunnel' } };
+  const hold = { intent: 'applyImmersiveInwardView', target: single.target };
+
+  arbiter.begin(single, hold, 'node:tunnel');
+  delayMs = 800;
+  currentTime += 421;
+
+  assert.equal(arbiter.release('node:tunnel'), 'hold');
+  assert.deepEqual(singles, []);
+  assert.deepEqual(holds, [hold]);
+  delayedCallback();
+  assert.deepEqual(holds, [hold]);
+  assert.equal(arbiter.pending, false);
+});
+
 test('secondary arbiter releases a short press once and coalesces a fast exact-signature double press', () => {
   const commits = [];
   let currentTime = 1000;
@@ -321,6 +357,7 @@ test('secondary arbiter releases a short press once and coalesces a fast exact-s
   const parent = { intent: 'applyParentView', target: null };
 
   assert.equal(arbiter.begin(parent, null, 'field:root/a'), 'pending');
+  currentTime += 500;
   assert.equal(arbiter.release('field:root/a'), 'single');
   currentTime += 40;
   assert.equal(arbiter.begin(parent, null, 'field:root/a'), 'pending');
