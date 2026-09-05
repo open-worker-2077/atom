@@ -34,7 +34,7 @@
 - **显式调用**：`.run.` / `use_program` 本身以运行并提交其 effects 为用户意图，该次 effects 的合法性仍决定该调用成败；不能把显式调用错误一律改成来源成功。由该次效果产生的后续触发沿相同提交边界处理。
 - **无变化动作**：现行可编程 Transform 动作仍可触发；不引入旧值/新值判断、once_per_revision 或“没有事实变化就不触发”。没有来源世界变更时不伪造一次世界提交。
 - **恢复裁定**：现有 claims 是内存Map，单纯移动调用位置不能证明冷重启恢复。持久触发依据、结果关联及冲突后不写旧快照必须实测；若代码需要 journal 扩展，保持旧 prepared/committed 记录可读并提供回退证据。
-- **优先级**：I3/U3/D3/E3；手机连接恢复即优先真实验收。A Task 4 已保存，Task 5—7续点保留；本项后处理5个旧生成print迁移。
+- **优先级**：I3/U3/D3/E3；本项部署回告后先处理已恢复连接的手机共同配置及真实入口，再处理5个旧生成print迁移，随后A Task 5—7。A Task 4 安全点及全部有效规格继续保留。
 
 ---
 
@@ -312,3 +312,5 @@ Run: `npm run check:development-control`；`npm test`。真实失败先定向修
 
 - **Ruling: 终态通知与预算接线** — 同意engine在业务result形成且投影收尾前调用内部onSubsequentSettled，adapter沿既有recordOutcome持久确认，interaction-runtime/graph-server现有lifecycle透传至HTTP原cache；来源onCommitted仍只通知一次，不新增公开API。来源pending ack结束来源等待预算，后续活动阶段使用现有配置时长但独立起算的有限预算；后续终态确认结束该预算，投影不占用它。最终来源ack无后续时直接结束业务预算。真实中断继续pending，outcome EIO不能伪报durable completed；旧业务终态不因投影后迟到signal改变。增加来源接近截止而后续仍获自身预算、completed/failed在投影deferred期间先可读，以及真实取消和无迟到写验证。允许graph-server现有装饰接线，非新服务或队列。
 - **生命周期候选提交复审**：664ed94（7代码/测试文件，290增57删），实际报告/原brief已追加；本轮13项矩阵、49项service/runtime、6项Graph和15项关键旅程去重82通过。新增独立预算RED原2/2，worker超时分类RED原1/1已GREEN；自有worker超时failed、外部真实中断pending、持久EIO无终态通知、CAS一次重判与启动callback隔离均保留。staged GitNexus HIGH，diff检查通过。精确范围fe6fd83..664ed94已交原Task2独立评审方；Task3继续暂停待该范围复审，不部署。中间6020057为根侧规格/手机计划文档，代码分工不混同。
+
+- **生命周期回修候选**：b9802de，4代码/测试文件99增8删；3项RED、逐项5/5与2/2GREEN、最终15/15。root实际回读确认完整durable snapshot为基底、按修订合并现有投影字段、按交互关联保全真实通知失败、来源callback缺失时跳过通知。精确包664ed94..b9802de已交原评审方范围复审，原82项证据已完整保存并按未改部分复用。Task3暂不升级，生产仍8b2df30。

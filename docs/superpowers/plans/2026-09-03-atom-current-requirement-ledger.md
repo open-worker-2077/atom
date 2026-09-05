@@ -270,3 +270,18 @@
 - **生产事实持续演进**：生命周期修复期间只读4784 health仍ok=true、revision7372、projection=published、expectedRevision=d648c5511c933b680c9e801e02cd3d4813b596ca26d62c62f543c5066fdc5227。这里只确认现行服务可响应与投影状态，不构成新候选或手机验收；部署必须重新取当前停写窗口一致快照，不能恢复此前7367或副本源hash所对应的世界。
 
 - **生命周期候选提交复审**：664ed94（7代码/测试文件，290增57删），实际报告/原brief已追加；本轮13项矩阵、49项service/runtime、6项Graph和15项关键旅程去重82通过。新增独立预算RED原2/2，worker超时分类RED原1/1已GREEN；自有worker超时failed、外部真实中断pending、持久EIO无终态通知、CAS一次重判与启动callback隔离均保留。staged GitNexus HIGH，diff检查通过。精确范围fe6fd83..664ed94已交原Task2独立评审方；Task3继续暂停待该范围复审，不部署。中间6020057为根侧规格/手机计划文档，代码分工不混同。
+- **生命周期复审新RED**：真实createSpatialServer探针atom-lifecycle-review-late-oJeOhl证明，先通知completed/effects-revision后，投影gate释放时operation返回旧pending/source-revision，HTTP cache虽保留ok/errors/subsequentExecution，仍把revisionAfter、result、affectedPaths覆盖回旧业务证据；同一回执形成completed/effects-revision与source-revision的矛盾。候选664ed94暂停推进，等待本轮完整findings后统一回修。完整持久业务结果才是终态依据；迟到投影仅可合并明确归属其自身的状态/警告，不用字段逐个补丁维持脆弱终态。
+
+- **生命周期复审回修1/5**：664ed94完整审查Needs fixes：一项Important为HTTP晚到对象覆盖完整durable业务回执，一项Minor为仅注册终态callback时虚假来源通知失败。根侧回读实际spread和通知条件，确认均为新增接线遗漏；统一交原实施方按664ed94修复并补具名RED/GREEN，保全82项有效证据后做范围复审。原raw输出缺口已经从原工具返回补齐，评审方实际核对82个去重名称与最终exit0，无须重跑。Task3仍暂停，不部署。
+
+- **安全备份更新核对**：沿用户已授权同一origin原子推送成功，ls-remote确认main=10e2844dce052a3b2984d687f5795f130515f91e、fix/transform-postcommit-boundary=be2e19d8c3a997e04d3b416681e5971631fea180、feat/a-mode-consolidation=f49ed3231797771c348337ac14e63b1c6b8bc406。Transform安全分支包含待回修候选664ed94，是可回溯代码备份，不是生产部署或质量通过结论；私密世界未推送。生产代码仍8b2df30。
+- **生命周期回修RED**：原实施方以具名preserves complete durable/terminal-only engine callback运行两既有测试文件，3/3真实失败；late stale和failed对象回退修订、结果、影响对象与消息，终态callback单独使用返回虚假来源通知warning。正按完整durable结果基底及实际callback存在条件修复，未扩大功能或开始Task3。
+- **生命周期回修定向GREEN**：实施方报告当前15/15通过，raw首段4b05b5/完成段4cefbf已保留；完整durable业务结果作HTTP基底，晚到对象只接纳归属当前修订的投影字段/警告，以及相同交互的真实来源/终态通知失败。已覆盖joined listener在首个终态通知后reject，且仅注册终态callback不再制造虚假来源warning；实际callback同步/异步失败原合同保持。当前等待4文件提交和范围复审，不重跑82项或Task3全链。
+
+- **部署只读准备**：计划任务Atom Graph Runtime已获准只读核对，描述为Atom Graph runtime supervisor [atom.graph-runtime/1]，现行动作为C:/Program Files/nodejs/node.exe直接启动main工作区work-engine/atom-language/graph-server.mjs；4784只在127.0.0.1监听，PID4332。未重启/修改任务、生产世界或网络。main与候选真实共同基线b4a74cce2b07864dbacdd81af9d032c885ae09c4，最终分支复核据此取差异。
+- **生命周期回修候选**：b9802de，4代码/测试文件99增8删；3项RED、逐项5/5与2/2GREEN、最终15/15。root实际回读确认完整durable snapshot为基底、按修订合并现有投影字段、按交互关联保全真实通知失败、来源callback缺失时跳过通知。精确包664ed94..b9802de已交原评审方范围复审，原82项证据已完整保存并按未改部分复用。Task3暂不升级，生产仍8b2df30。
+- **用户新增反馈裁定边界**：顺带完整排查Atom CLI需求/bug；既不忽略也不把submit直接当成立。涉及内核改变先给用户事实、影响与具体方案并取得反馈意见，不凭Agent工单自行修改。已授权Transform生命周期修复继续；现存反馈裁定页2026-09-02-atom-cli-feedback-triage.md复用，禁止另建平行需求权威。
+- **当前最高优先调整**：提出方“调整manage判重为资源中心”提交归档工单922cf490-8f6d-45a7-b2e8-f2b8afd02ebf，关联b7fc5c3e-528e-422b-8578-8e8fd9e9b8eb；目标为🧊manage/办包/究谋/个务/外务/旧版本。用户明确优先解决移动Transform再次失败。生产只读exact显示根无编译锁、仍在原位、下辖429节点；未重放dsc或写生产。旧Transform候选_04真实副本已GREEN，现全量已启动，保留运行结果，不并发改其代码。
+- **归档根因证据**：archive-evaluation-probe.mjs对当前真实世界仅内存调用现行executor＋实际派生slot/window锁。dsc复现WINDOW_ACCESS_DENIED/当前窗口无权改造该子树；底层实际是后代槽体｜语义Flow工单/槽模的SLOT_STRUCTURE_LOCK_DENIED（slot字段），普通mov同树到个务则成功。未提供自定义Program锁投影，故该探针只证明此足以导致现场错误的结构锁分支，不冒充完整公开运行验收。源hash前后f92b5b85d4609345d55d10bdb8c006e82126f8efe623ca4c76a08aef274f395c相同。错误发生在备份仓操作前，非默认仓权限不足。
+- **用户已反馈准予修复**：已明确询问可逆归档按合法所选根裁定、内部结构保持不变、根权限/唯一默认备份仓/引用守恒/恢复保留；用户答“首先可以按这个修复”，并强调manage为顶级权限、上级整体操作无需遍历下级再取编辑权。本次不为manage名设特例，不把结构锁误报窗口权限不足；修复对象是整体迁移与内部编辑的错误混同，不据此推导无关全局锁退役。当前优先实现并验收该归档修复，再整合Transform候选交付回告，之后手机共同配置、旧print、A及既有总账；全部保留，不因新反馈取消需求。
+- **重要新需求：内容驱动自适应团**：用户明确“先记下来”：下一步改变圆形预设基本外形，团随内部槽料/要素自适应收缩，缩不了时再定形，借鉴细胞内部充实、少大量中空；不是禁止圆形。已写Web规格§4.4，保全原意，列入重要后续待设计事项。当前只完成需求登记，不实施、不猜收缩算法/停止阈值、不承诺难度，不替换当前归档/移动第一优先及既有手机/A计划；可行性与交付优先次序待专项评估。节点及Graph四轴信息不得为压缩空白而删除。
