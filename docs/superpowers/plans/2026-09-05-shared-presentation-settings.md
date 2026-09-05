@@ -4,13 +4,13 @@
 
 **Goal:** 手机继承本机已有有效展示配置，后续两端共用同一保存结果，解决浏览器默认0导致团边界消失。
 
-**Architecture:** 空间体验持有展示设置；复用既有 view-state 文档及 JSON repository 保存独立的 presentation-settings.json，不依赖可重建 knowledge 投影。现有展示模型继续唯一规范化参数，浏览器缓存仅承担迁移与离线回显；现有服务增加一个展示设置读写接口。
+**Architecture:** 空间体验持有展示设置；复用既有 view-state 文档及 JSON repository 保存独立的 presentation-settings.json，不依赖可重建 knowledge 投影。现有展示模型继续唯一规范化参数，由graph-server组合入口向空间体验服务注入normalizeSettings，服务不反向导入外部模型；浏览器缓存仅承担迁移与离线回显；现有服务增加一个展示设置读写接口。
 
 **Tech Stack:** Node.js标准库、既有Browser IIFE模型、HTTP、Node test runner、已安装Playwright。
 
 **Spec:** `docs/superpowers/specs/2026-08-31-atom-web-spatial-design.md` §5.5。I3/U3/D2/E3；Transform已完整交付、回告且核对远端备份，现在执行本项，早于旧print及A剩余任务。
 
-**当前执行（2026-09-06）:** 保存反馈已部署e82984d，手机Task2在c2f8510吸收该基线后续接；当前候选cd3335c，R1—R3既有问题均已复审关闭；R4最新失败提示已修正，43/43、52/52及build/control通过，R4范围复审全部关闭，无新问题。此前R3双浏览器1/1证据保留，未全量或部署。最终候选全量在稳定审查后一次执行；真机及实际本机值缺口保留。
+**当前执行（2026-09-06）:** 保存反馈已部署e82984d。手机62a194c任务和整分支复审已关闭；最终全量1826/1823通过/3失败，正在定向回修路径断言、旧迁移覆盖与模型依赖方向。三项定向3/3已通过，受影响链验证进行中；尚未部署，真实本机基准与真机缺口保留。
 
 **历史RED检查点（2026-09-06）:** 原Task2两个RED测试文件已原样提交为48c79fb安全检查点，未实现产品逻辑、未新增测试运行、未宣称GREEN；待保存反馈交付后安全合入main并续接。
 
@@ -71,7 +71,7 @@
 
 **Interfaces:**
 - Consumes: `createViewStateRepository({file,worldId})`、`normalizeSettings(input)`、createSpatialServer既有options和SSE连接。
-- Produces: `createPresentationSettingsService({repository})`返回`read()`和`update({expectedRevision,patch,bootstrap})`；read返回上述revision/initialized/settings，update保存成功后返回同形结果。HTTP边界负责实际Origin约束，服务负责类型/CAS/初始化状态。
+- Produces: `createPresentationSettingsService({repository,normalizeSettings})`返回`read()`和`update({expectedRevision,patch,bootstrap})`；read返回上述revision/initialized/settings，update保存成功后返回同形结果。HTTP边界负责实际Origin约束，服务负责类型/CAS/初始化状态。
 
 - [x] **Step 1: 写RED与运行**
 
@@ -153,6 +153,8 @@ Run: `node --test tests/browser-bridge-contract.test.js tests/atom-presentation-
 
 - 所有§5.5要求映射到两项任务：共同权威/迁移/CAS/恢复为Task1+2；实际屏幕和真机为Task2。已知生产种子缺口明确保留，没有虚构实际参数。
 - 只复用展示模型与空间体验仓储；新接口隐藏存储路径，不重写Graph/Program/授权。并行OS写入、账号多租户与全配置平台不在本轮范围。
-- Task1已完成并独立Approved；Task2 d760145实现，f773287经两轮时序修正，原始40/40、49/49、browser1/1及build/control已核对，范围复审进行中；最终候选全量、生产部署及真机结果尚未完成。
+- Task1已独立Approved；Task2实现及队列审查已关闭。最终全量揭示三处回归，当前状态及证据以上方当前执行与下方最终全量记录为准；不得将历史定向GREEN等同生产部署或真机完成。
 
 - **R2裁定（2026-09-06）**：根Agent核对现有PUT catch/finally与GET源码后采纳Astra咨询中的开始/完成双门控：写入期间仅合并deferred read，catch只记回读需求，finally清inFlight后统一回读并阻止旧队列插入；不能等待自身delivery。外部权威世代推进即重置新事件queue base，旧世代项保持失效。属于既有过期写拒绝/同设备连续操作合同的实现修正，不改内核或服务API。
+
+- **最终全量结果（2026-09-06）**：候选62a194c任务与整分支复审已关闭；npm test完整结束exit1，1826项/1823通过/3失败，426594ms。原始证据保存在settings工作树的.superpowers/sdd/2026-09-05-shared-presentation-settings/final-full-62a194c.txt。失败分别为默认路径精确断言未纳入新增settings文件、空间体验服务直接导入外部展示模型违反既有依赖边界、旧偏好迁移测试引用已替换函数。当前仅定向回修三项，保留架构门禁与旧迁移语义，不部署、不重跑已通过全量；settings_task2_r4实施，root独立裁定。
