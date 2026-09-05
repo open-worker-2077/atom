@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
+import { createReadStream, createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { pathToFileURL } from 'node:url';
 
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
@@ -71,24 +73,43 @@ async function assertRealDirectoryContained(root, directory) {
 }
 
 async function trustedRuntime(configured) {
-  await assertNoLinkedAncestor(configured.worldDirectory);
-  const worldDirectory = await fs.realpath(configured.worldDirectory);
-  const configuredPaths = [configured.contextFile, configured.graphFile, configured.storeFile];
-  if (!samePath(worldDirectory, configured.worldDirectory)
-    || configuredPaths.some((file) => !isContained(worldDirectory, path.resolve(file)))) {
+  const expected = resolveAtomRuntime({ root: configured.root });
+  const exactKeys = [
+    'root', 'worldDirectory', 'contextFile', 'graphFile', 'storeFile', 'sessionsDirectory'
+  ];
+  if (exactKeys.some((key) => !samePath(configured[key] ?? '', expected[key]))) {
     throw problem(
       'GENERATED_SLOT_PRINT_MIGRATION_UNSAFE_PATH',
-      'Configured Atom world paths are not canonical and contained'
+      'Configured Atom runtime paths do not match the canonical primary world layout'
+    );
+  }
+  const journalFile = path.join(expected.worldDirectory, 'atom.transactions.json');
+  const backupRoot = path.join(
+    expected.worldDirectory,
+    'migration-backups',
+    'generated-slot-print'
+  );
+  for (const candidate of [
+    expected.worldDirectory,
+    expected.contextFile,
+    expected.graphFile,
+    expected.storeFile,
+    journalFile,
+    `${journalFile}.d`,
+    backupRoot
+  ]) await assertNoLinkedAncestor(candidate);
+  const worldDirectory = await fs.realpath(expected.worldDirectory);
+  if (!samePath(worldDirectory, expected.worldDirectory)) {
+    throw problem(
+      'GENERATED_SLOT_PRINT_MIGRATION_UNSAFE_PATH',
+      'Configured Atom world directory is not canonical'
     );
   }
   return Object.freeze({
-    ...configured,
+    ...expected,
     worldDirectory,
-    contextFile: path.join(worldDirectory, path.basename(configured.contextFile)),
-    graphFile: path.join(worldDirectory, path.basename(configured.graphFile)),
-    storeFile: path.join(worldDirectory, path.basename(configured.storeFile)),
-    journalFile: path.join(worldDirectory, 'atom.transactions.json'),
-    backupRoot: path.join(worldDirectory, 'migration-backups', 'generated-slot-print')
+    journalFile,
+    backupRoot
   });
 }
 
@@ -128,6 +149,13 @@ function migrationIdFor(plan) {
   return `generated-slot-print-${digest}`;
 }
 
+function artifactsFor(plan) {
+  return {
+    changedPaths: [...plan.changedPaths],
+    migrated: structuredClone(plan.migrated)
+  };
+}
+
 function preflightFor({ plan, source, attemptId, action }) {
   return Object.freeze({
     contract: 'atom.generated-slot-print-migration-preflight',
@@ -138,15 +166,42 @@ function preflightFor({ plan, source, attemptId, action }) {
     revisions: { source: plan.expectedRevision, target: plan.nextRevision },
     hashes: { sourceFile: hash(source.bytes), targetFacts: plan.nextRevision },
     changedPaths: [...plan.changedPaths],
+    artifacts: artifactsFor(plan),
     summary: structuredClone(plan.summary)
   });
 }
 
-async function verifyJournal(journalFile, incrementalDirectory = `${journalFile}.d`) {
+async function verifyJournal(journalFile, incrementalDirectory = `${journalFile}.d`, match = null) {
   const journal = createJsonTransactionJournal({ file: journalFile, incrementalDirectory });
   const state = await journal.readState();
-  await Promise.all(state.receipts.map(({ commandId }) => journal.findCommitted(commandId)));
-  return state;
+  const matches = [];
+  for (const { commandId } of state.receipts) {
+    const record = await journal.findCommitted(commandId);
+    if (match?.(record)) matches.push(record);
+  }
+  return { preparedCount: state.prepared.length, receiptCount: state.receipts.length, matches };
+}
+
+async function fileMetadata(source, relative) {
+  const digest = crypto.createHash('sha256');
+  let bytes = 0;
+  for await (const chunk of createReadStream(source)) {
+    digest.update(chunk);
+    bytes += chunk.length;
+  }
+  return { source, path: relativeFile(relative), hash: `sha256:${digest.digest('hex')}`, bytes };
+}
+
+async function copyVerified(source, target, expected) {
+  await pipeline(createReadStream(source), createWriteStream(target, { flags: 'wx' }));
+  const copied = await fileMetadata(target, expected.path);
+  if (copied.hash !== expected.hash || copied.bytes !== expected.bytes) {
+    throw problem(
+      'GENERATED_SLOT_PRINT_MIGRATION_BACKUP_VERIFICATION_FAILED',
+      'Private backup file failed byte verification',
+      { path: expected.path }
+    );
+  }
 }
 
 async function collectTree(directory, prefix) {
@@ -172,8 +227,7 @@ async function collectTree(directory, prefix) {
     if (stat.isDirectory()) {
       files.push(...await collectTree(source, relative));
     } else if (stat.isFile()) {
-      const bytes = await fs.readFile(source);
-      files.push({ source, path: relativeFile(relative), bytes, hash: hash(bytes) });
+      files.push(await fileMetadata(source, relative));
     } else {
       throw problem(
         'GENERATED_SLOT_PRINT_MIGRATION_UNSAFE_PATH',
@@ -200,8 +254,7 @@ async function optionalFile(source, relative) {
       { path: source }
     );
   }
-  const bytes = await fs.readFile(source);
-  return [{ source, path: relative, bytes, hash: hash(bytes) }];
+  return [await fileMetadata(source, relative)];
 }
 
 async function collectBackupSources(runtime) {
@@ -220,7 +273,7 @@ function inventory(files) {
   return files.map(({ path: file, hash: digest, bytes }) => ({
     path: file,
     hash: digest,
-    bytes: bytes.length
+    bytes
   }));
 }
 
@@ -228,8 +281,7 @@ function sameInventory(left, right) {
   return JSON.stringify(inventory(left)) === JSON.stringify(inventory(right));
 }
 
-async function createBackup({ runtime, plan, attemptId, source }) {
-  await verifyJournal(runtime.journalFile);
+async function createBackup({ runtime, plan, attemptId, source, journalEvidence }) {
   const before = await collectBackupSources(runtime);
   const directory = path.join(runtime.backupRoot, migrationIdFor(plan), attemptId);
   await assertNoLinkedAncestor(directory);
@@ -249,27 +301,16 @@ async function createBackup({ runtime, plan, attemptId, source }) {
     const target = path.join(directory, entry.path);
     await fs.mkdir(path.dirname(target), { recursive: true });
     await assertRealDirectoryContained(runtime.worldDirectory, path.dirname(target));
-    await fs.writeFile(target, entry.bytes, { flag: 'wx' });
-    const copied = await fs.readFile(target);
-    if (hash(copied) !== entry.hash) {
-      throw problem(
-        'GENERATED_SLOT_PRINT_MIGRATION_BACKUP_VERIFICATION_FAILED',
-        'Private backup file failed byte verification',
-        { path: entry.path }
-      );
-    }
+    await copyVerified(entry.source, target, entry);
   }
   const after = await collectBackupSources(runtime);
-  if (!sameInventory(before, after) || hash(source.bytes) !== before[0].hash) {
+  const sourceEntry = before.find(({ path: file }) => file === 'atom.json');
+  if (!sameInventory(before, after) || hash(source.bytes) !== sourceEntry?.hash) {
     throw problem(
       'GENERATED_SLOT_PRINT_MIGRATION_SOURCE_DIVERGED',
       'Atom world or transaction journal changed while the private backup was created'
     );
   }
-  await verifyJournal(
-    path.join(directory, 'atom.transactions.json'),
-    path.join(directory, 'atom.transactions.json.d')
-  );
   const manifestFile = path.join(directory, 'backup-manifest.json');
   const manifest = Object.freeze({
     contract: 'atom.generated-slot-print-private-backup',
@@ -283,7 +324,12 @@ async function createBackup({ runtime, plan, attemptId, source }) {
     revisions: { source: plan.expectedRevision, target: plan.nextRevision },
     hashes: { sourceFile: hash(source.bytes), targetFacts: plan.nextRevision },
     changedPaths: [...plan.changedPaths],
+    artifacts: artifactsFor(plan),
     summary: structuredClone(plan.summary),
+    journal: {
+      receiptsVerified: journalEvidence.receiptCount,
+      preparedTransactions: journalEvidence.preparedCount
+    },
     files: inventory(before),
     manifestFile
   });
@@ -340,11 +386,8 @@ async function verifyBackup({ runtime, directory, attemptId }) {
       'Authoritative Atom backup is missing or damaged'
     );
   }
-  await verifyJournal(
-    path.join(directory, 'atom.transactions.json'),
-    path.join(directory, 'atom.transactions.json.d')
-  );
-  const sourceFacts = JSON.parse(sourceEntry.bytes.toString('utf8'));
+  const sourceBytes = await fs.readFile(path.join(directory, 'atom.json'));
+  const sourceFacts = JSON.parse(sourceBytes.toString('utf8'));
   const plan = planGeneratedSlotPrintMigration(sourceFacts);
   if (manifest.migrationId !== migrationIdFor(plan)
     || manifest.migrationId !== path.basename(path.dirname(directory))
@@ -352,13 +395,14 @@ async function verifyBackup({ runtime, directory, attemptId }) {
     || manifest.revisions?.target !== plan.nextRevision
     || manifest.hashes?.targetFacts !== plan.nextRevision
     || JSON.stringify(manifest.changedPaths) !== JSON.stringify(plan.changedPaths)
+    || JSON.stringify(manifest.artifacts) !== JSON.stringify(artifactsFor(plan))
     || JSON.stringify(manifest.summary) !== JSON.stringify(plan.summary)) {
     throw problem(
       'GENERATED_SLOT_PRINT_MIGRATION_ATTEMPT_CONFLICT',
       'Existing generated slot print migration backup does not match its migration plan'
     );
   }
-  return Object.freeze({ manifest, manifestFile, sourceFacts, sourceBytes: sourceEntry.bytes, plan });
+  return Object.freeze({ manifest, manifestFile, sourceFacts, sourceBytes, plan });
 }
 
 async function findAttemptBackup(runtime, attemptId) {
@@ -441,7 +485,7 @@ function validateCommittedRecord({ record, deployment, currentRevision }) {
     || record.historyMode !== 'local-patch'
     || record.patch?.contract !== 'atom.world-patch'
     || record.patch?.version !== 1
-    || JSON.stringify(record.patch?.changedPaths) !== JSON.stringify(deployment.changedPaths)
+    || JSON.stringify(record.patch?.changedPaths) !== JSON.stringify(deployment.artifacts.changedPaths)
     || revisions.before !== deployment.revisions.source
     || revisions.after !== deployment.revisions.target
     || record.receipt?.commandId !== transaction.commandId
@@ -478,6 +522,7 @@ function deploymentReceipt({ runtime, backup, transaction, recovered = false, wa
       deployed: plan.nextRevision
     },
     changedPaths: [...plan.changedPaths],
+    artifacts: structuredClone(manifest.artifacts),
     summary: structuredClone(plan.summary),
     transaction: redactedTransactionReceipt(transaction),
     rollback: {
@@ -510,6 +555,8 @@ function validateDeploymentShape({ deployment, runtime, backup }) {
     || deployment.revisions?.deployed !== backup.plan.nextRevision
     || JSON.stringify(deployment.hashes) !== JSON.stringify(backup.manifest.hashes)
     || JSON.stringify(deployment.changedPaths) !== JSON.stringify(backup.plan.changedPaths)
+    || JSON.stringify(deployment.artifacts) !== JSON.stringify(artifactsFor(backup.plan))
+    || JSON.stringify(deployment.artifacts?.changedPaths) !== JSON.stringify(deployment.changedPaths)
     || JSON.stringify(deployment.summary) !== JSON.stringify(backup.plan.summary)
     || deployment.transaction?.contract !== 'atom.world-receipt'
     || deployment.transaction?.version !== 1
@@ -531,20 +578,22 @@ async function recoverApplyAttempt({ runtime, attemptId }) {
   const directory = await findAttemptBackup(runtime, attemptId);
   if (!directory) return null;
   const backup = await verifyBackup({ runtime, directory, attemptId });
-  const persistence = createTransactionalWorldPersistence({
-    contextFile: runtime.contextFile,
-    projectionFile: runtime.graphFile,
-    journalFile: runtime.journalFile
-  });
-  await persistence.recover();
-  const current = await readWorld(runtime.contextFile);
-  const journal = createJsonTransactionJournal({ file: runtime.journalFile });
-  const state = await journal.readState();
   const correlationId = `${backup.manifest.migrationId}:attempt:${attemptId}`;
   const source = `generated-slot-print-migration:${backup.manifest.migrationId}`;
-  const matches = state.receipts.filter((record) => (
+  const match = (record) => (
     record.command?.correlationId === correlationId && record.command?.payload?.source === source
-  ));
+  );
+  let evidence = await verifyJournal(runtime.journalFile, `${runtime.journalFile}.d`, match);
+  if (evidence.preparedCount) {
+    await createTransactionalWorldPersistence({
+      contextFile: runtime.contextFile,
+      projectionFile: runtime.graphFile,
+      journalFile: runtime.journalFile
+    }).recover();
+    evidence = await verifyJournal(runtime.journalFile, `${runtime.journalFile}.d`, match);
+  }
+  const current = await readWorld(runtime.contextFile);
+  const { matches } = evidence;
   if (matches.length !== 1) {
     throw problem(
       'GENERATED_SLOT_PRINT_MIGRATION_ATTEMPT_CONFLICT',
@@ -618,12 +667,21 @@ async function automaticRollback({ runtime, backup, committed, originalError }) 
 async function applyMigration({ runtime, attemptId }) {
   const recovered = await recoverApplyAttempt({ runtime, attemptId });
   if (recovered) return recovered;
-  const persistence = createTransactionalWorldPersistence({
-    contextFile: runtime.contextFile,
-    projectionFile: runtime.graphFile,
-    journalFile: runtime.journalFile
-  });
-  await persistence.recover();
+  let journalEvidence = await verifyJournal(runtime.journalFile);
+  if (journalEvidence.preparedCount) {
+    await createTransactionalWorldPersistence({
+      contextFile: runtime.contextFile,
+      projectionFile: runtime.graphFile,
+      journalFile: runtime.journalFile
+    }).recover();
+    journalEvidence = await verifyJournal(runtime.journalFile);
+    if (journalEvidence.preparedCount) {
+      throw problem(
+        'GENERATED_SLOT_PRINT_MIGRATION_JOURNAL_UNSETTLED',
+        'Transaction journal still has prepared records after central recovery'
+      );
+    }
+  }
   const source = await readWorld(runtime.contextFile);
   const plan = planGeneratedSlotPrintMigration(source.facts);
   if (plan.summary.migratedPrograms < 1 || plan.expectedRevision !== source.revision) {
@@ -632,7 +690,7 @@ async function applyMigration({ runtime, attemptId }) {
       'Configured Atom world has no verified generated slot print migration candidates'
     );
   }
-  const backup = await createBackup({ runtime, plan, attemptId, source });
+  const backup = await createBackup({ runtime, plan, attemptId, source, journalEvidence });
   const currentSources = await collectBackupSources(runtime);
   if (hash((await readWorld(runtime.contextFile)).bytes) !== backup.manifest.hashes.sourceFile
     || JSON.stringify(inventory(currentSources)) !== JSON.stringify(backup.manifest.files)) {
@@ -643,6 +701,11 @@ async function applyMigration({ runtime, attemptId }) {
   }
   let committed;
   try {
+    const persistence = createTransactionalWorldPersistence({
+      contextFile: runtime.contextFile,
+      projectionFile: runtime.graphFile,
+      journalFile: runtime.journalFile
+    });
     committed = await persistence.commit({
       correlationId: `${backup.manifest.migrationId}:attempt:${attemptId}`,
       expectedRevision: plan.expectedRevision,
@@ -687,8 +750,9 @@ async function rollbackMigration({ runtime, receiptFile }) {
   });
   validateDeploymentShape({ deployment, runtime, backup });
   const current = await readWorld(runtime.contextFile);
-  const journal = createJsonTransactionJournal({ file: runtime.journalFile });
-  const record = await journal.findCommitted(deployment.transaction.commandId);
+  const record = await createJsonTransactionJournal({
+    file: runtime.journalFile
+  }).findCommitted(deployment.transaction.commandId);
   validateCommittedRecord({ record, deployment, currentRevision: current.revision });
   const persistence = createTransactionalWorldPersistence({
     contextFile: runtime.contextFile,

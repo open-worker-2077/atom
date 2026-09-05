@@ -11,7 +11,9 @@ import { promisify } from 'node:util';
 
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
+import { runGeneratedSlotPrintMaintenance } from '../scripts/deploy-generated-slot-print-world.mjs';
 import { planGeneratedSlotPrintMigration } from '../work-engine/atom-language/generated-slot-print-migration.mjs';
+import { resolveAtomRuntime } from '../work-engine/atom-language/runtime-config.mjs';
 import { applyPlanSlotBodyEffect, readVisibleSlotPlans } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
 import {
   atomName,
@@ -112,8 +114,8 @@ async function isolatedRuntime(t, prefix) {
   };
 }
 
-async function runOperator(args, runtime) {
-  return JSON.parse((await execFileAsync(process.execPath, [operator, ...args], {
+async function runOperator(args, runtime, nodeArgs = []) {
+  return JSON.parse((await execFileAsync(process.execPath, [...nodeArgs, operator, ...args], {
     cwd: projectRoot,
     env: runtime.env
   })).stdout);
@@ -316,6 +318,7 @@ test('maintenance dry-run reports the migration without writing world or backup 
   assert.equal(result.action, 'dry-run');
   assert.equal(result.summary.migratedPrograms, 1);
   assert.deepEqual(result.changedPaths, ['Root/订单槽体/print']);
+  assert.deepEqual(result.artifacts.migrated, planGeneratedSlotPrintMigration(source).migrated);
   assert.equal(JSON.stringify(result).includes('source situation stays private'), false);
   assert.equal(await fs.readFile(runtime.contextFile, 'utf8'), sourceBytes);
   assert.deepEqual((await fs.readdir(runtime.worldDirectory)).sort(), ['atom.json']);
@@ -349,6 +352,8 @@ test('maintenance apply backs up the complete incremental journal, is idempotent
   assert.equal(second.recovered, true);
   assert.equal(second.transaction.commandId, first.transaction.commandId);
   assert.deepEqual(first.changedPaths, ['Root/订单槽体/print']);
+  assert.deepEqual(first.artifacts.migrated, planGeneratedSlotPrintMigration(source).migrated);
+  assert.deepEqual(manifest.artifacts, first.artifacts);
   assert.ok(backedUpPaths.includes('atom.json'));
   assert.ok(backedUpPaths.includes('atom.transactions.json.d/events.jsonl'));
   assert.ok(backedUpPaths.some((file) => file.startsWith('atom.transactions.json.d/objects/')));
@@ -420,7 +425,9 @@ test('maintenance refuses a hash-invalid private backup without committing', asy
     revisions: { source: plan.expectedRevision, target: plan.nextRevision },
     hashes: { sourceFile: 'sha256:invalid', targetFacts: plan.nextRevision },
     changedPaths: plan.changedPaths,
+    artifacts: { changedPaths: plan.changedPaths, migrated: plan.migrated },
     summary: plan.summary,
+    journal: { receiptsVerified: 0, preparedTransactions: 0 },
     files: [{ path: 'atom.json', hash: sourceHash, bytes: sourceBytes.length }],
     manifestFile
   }, null, 2)}\n`, 'utf8');
@@ -527,6 +534,32 @@ test('maintenance rejects rollback after a later world revision', async (t) => {
   assert.deepEqual(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8')), later);
 });
 
+test('maintenance rejects a deployment receipt with a changed migrated-program mapping', async (t) => {
+  const runtime = await isolatedRuntime(t, 'atom-generated-print-mapping-');
+  const source = await migratableWorld();
+  await fs.writeFile(runtime.contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  const applied = await runOperator(['--apply', '--attempt', 'mapping-1'], runtime);
+  const tampered = JSON.parse(await fs.readFile(applied.receiptFile, 'utf8'));
+  tampered.artifacts = {
+    ...(tampered.artifacts ?? {}),
+    migrated: [{
+      ...planGeneratedSlotPrintMigration(source).migrated[0],
+      programPath: 'Root/其他槽体/print'
+    }]
+  };
+  await fs.writeFile(applied.receiptFile, `${JSON.stringify(tampered, null, 2)}\n`, 'utf8');
+
+  await assert.rejects(execFileAsync(process.execPath, [
+    operator, '--rollback', applied.receiptFile
+  ], { cwd: projectRoot, env: runtime.env }), (error) => (
+    error.stderr.includes('INVALID_GENERATED_SLOT_PRINT_MIGRATION_RECEIPT')
+  ));
+  assert.equal(
+    revisionOfWorldFacts(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'))),
+    applied.revisions.target
+  );
+});
+
 test('maintenance rejects a linked backup ancestor before writing through it', async (t) => {
   const runtime = await isolatedRuntime(t, 'atom-generated-print-link-');
   const source = await migratableWorld();
@@ -551,4 +584,79 @@ test('maintenance rejects a linked backup ancestor before writing through it', a
   ));
   assert.deepEqual(await fs.readdir(outside), []);
   assert.deepEqual(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8')), source);
+});
+
+test('maintenance rejects noncanonical configured file paths before reading them', async (t) => {
+  const runtime = await isolatedRuntime(t, 'atom-generated-print-canonical-');
+  const configured = resolveAtomRuntime({ localAppData: runtime.localAppData });
+  const noncanonical = {
+    ...configured,
+    contextFile: path.join(runtime.worldDirectory, 'nested', 'atom.json')
+  };
+
+  await assert.rejects(
+    runGeneratedSlotPrintMaintenance(['--dry-run', '--attempt', 'canonical-1'], noncanonical),
+    { code: 'GENERATED_SLOT_PRINT_MIGRATION_UNSAFE_PATH' }
+  );
+  await assert.rejects(fs.access(noncanonical.contextFile), { code: 'ENOENT' });
+});
+
+test('maintenance rejects a linked canonical context leaf before dry-run reads it', async (t) => {
+  const runtime = await isolatedRuntime(t, 'atom-generated-print-leaf-link-');
+  const configured = resolveAtomRuntime({ localAppData: runtime.localAppData });
+  const outside = path.join(runtime.localAppData, 'outside-atom.json');
+  await fs.writeFile(outside, `${JSON.stringify(await migratableWorld())}\n`, 'utf8');
+  try {
+    await fs.symlink(outside, runtime.contextFile, 'file');
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'UNKNOWN'].includes(error.code)) {
+      t.skip(`file symlink creation unsupported: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+
+  await assert.rejects(
+    runGeneratedSlotPrintMaintenance(['--dry-run', '--attempt', 'leaf-link-1'], configured),
+    { code: 'GENERATED_SLOT_PRINT_MIGRATION_UNSAFE_PATH' }
+  );
+});
+
+test('maintenance applies within a constrained heap with real historical snapshot objects', async (t) => {
+  const runtime = await isolatedRuntime(t, 'atom-generated-print-memory-');
+  let source = [...await migratableWorld(), atom('History', 'seed')];
+  await fs.writeFile(runtime.contextFile, `${JSON.stringify(source)}\n`, 'utf8');
+  const persistence = createTransactionalWorldPersistence({
+    contextFile: runtime.contextFile,
+    projectionFile: runtime.graphFile,
+    journalFile: runtime.journalFile,
+    publishLegacyProjection: false
+  });
+  for (let index = 0; index < 36; index += 1) {
+    const next = [...source.slice(0, -1), atom(
+      'History',
+      `${index}:${crypto.randomBytes(768 * 1024).toString('base64')}`
+    )];
+    await persistence.commit({
+      correlationId: `memory-history-${index}`,
+      expectedRevision: revisionOfWorldFacts(source),
+      nextRevision: revisionOfWorldFacts(next),
+      facts: next,
+      source: 'memory-history-fixture'
+    });
+    source = next;
+  }
+
+  const applied = await runOperator(
+    ['--apply', '--attempt', 'memory-1'],
+    runtime,
+    ['--max-old-space-size=64']
+  );
+  const manifest = JSON.parse(await fs.readFile(applied.paths.backupManifest, 'utf8'));
+
+  assert.equal(applied.summary.migratedPrograms, 1);
+  assert.equal(applied.revisions.source, revisionOfWorldFacts(source));
+  assert.ok(manifest.files.filter(({ path: file }) => (
+    file.startsWith('atom.transactions.json.d/objects/')
+  )).length >= 36);
 });
