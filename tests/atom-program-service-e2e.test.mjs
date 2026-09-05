@@ -816,7 +816,7 @@ test('4784 continues an ordinary command without replaying an unrelated startup 
 
 test('4784 exact Explore does not replay an unrelated slot effect after an explicit Program changes the world', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-service-post-run-projection-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  // Retain this isolated fixture for inspection; the server still closes below.
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
