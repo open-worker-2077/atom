@@ -361,3 +361,5 @@
 - **最终候选验证**：2026-09-06：三项全量回归已在2ed5448修复，定向3/3、完整受影响链81/81及control通过，限定独立复核全部ADDRESSED。主仓文档已吸收到1f73b5a，产品与2ed5448相同；最终npm test已启动，原始日志settings工作树.superpowers/sdd/2026-09-05-shared-presentation-settings/final-full-1f73b5a.txt。完成前不部署、不宣称全量通过。
 
 - **手机部署门禁裁定**：最终候选1f73b5a全量1826项/1825通过/1清理失败（ENOTEMPTY，428212ms）；c47094f仅移除该测试递归删除，保留全部业务断言与服务关闭，原用例1/1 exit0。独立范围复核通过，root裁定1825有效全量证据加1定向通过足以部署，产品仍同2ed5448，不声称单次1826全绿。汇总后残留测试PID12784已按创建时间、完整命令和父PID定界后释放，无子进程，wrapper退出-1属人为资源收尾。原始日志final-full-1f73b5a.txt及final-cleanup-targeted-1f73b5a.txt保留。接下来私密备份/部署/正式入口回读；真实本机参数与真机缺口保留。
+
+- **共享设置部署回读**：共同展示配置已部署c8c66f1（候选37b003d，产品2ed5448）；正式HTTPS build sha256-ec55209de0a900b3，三份前端资源逐字匹配，health true、revision7405、projection published。独立新listener37768创建晚于代码合入。私密完整备份%LOCALAPPDATA%/AtomGraph/backups/presentation-settings-20260906-050501已hash核对。正式settings revision0/initialized=false：代码部署完成，真实本机基准尚未迁入，真机边框未验收；不得宣称手机已继承或写入55/35探针值。下一项继续已批准旧生成print迁移，原本机/真机入口可用时优先返回验收。
