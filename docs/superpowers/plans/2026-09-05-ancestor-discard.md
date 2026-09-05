@@ -67,6 +67,10 @@ Run上述新具名链；按实际改动运行p1/receipt相关归档恢复具名�
 
 ## 状态
 
+- **组合候选首回执RED**：6384fb3完整历史私有副本g9CVRE公开dsc仅3054ms即ok/pending、来源中央提交成功，首回执却缺archive恢复坐标，验收在此停止。随后仅同id冷回读取得completed及同一discardId3e70e6ef-39bb-49af-b735-e464fafef5b8/默认备份仓/旧版本，未新增业务请求。root与Task3独立定位engine单项notifySourceCommitted漏展开已有transformed.archive；中央event及最终回执字段完整。裁定沿原完整来源回执合同补该字段并验首回执/同id一致，归入Task3，不新增API。首次沙箱初始化仅spawn EPERM，获准启用子进程后才取得此有效RED；生产源hash始终4b1fef9d…不变。
+
+- **Task 1实现复核完成**：b1fbb11可信恢复32/32与6384fb3诊断回修1/1证据均核对。ancestor_discard_review对b1fbb11..6384fb3范围复审裁定Important1 ADDRESSED、规格符合/质量Approved，无新增阻塞；不重复既有32项。原现场组合完整历史验收及最终交付仍未完成，不能把实现复核当任务闭环。
+
 - **完整历史现场验收**：独立main候选5fcb4c0（含可信恢复b1fbb11移植）使用生产世界和完整中央历史的一致私有副本atom-archive-acceptance-1scy48。归档6935ms成功，430/12117节点、语义Strut/稳定引用与冷读守恒；恢复HTTP在15000ms超时，但同一restore-acceptance-885f2c81-f8b9-4670-a1c5-1305d7041312诊断显示实际提交已完成，全部阶段23114ms：提交前累计约14638ms，后续投影6929ms。原位节点已恢复、归档节点消失；真实后续Program可合法改变事实，不能把最终世界无条件等于原始世界作为来源恢复判据。生产源hash4b1fef9d…前后相同，未重放超时请求。
 - **Ruling: 已证实的提交依赖** — 上述同款公共入口与完整历史实测证明，旧main把来源提交与后续运行/投影绑定仍妨碍可用恢复。因此当前回到已批准Transform分离候选，定向处理剩余12项、合入归档修复并统一验收交付；不提高15秒截止、不关闭Trigger，也不继续孤立旧main的性能补丁。若归因不成立将增加交付耦合，故保留原阶段时序与同id事实证明供复核。
 - **Ruling: 取证故障可观测** — b1fbb11独立复核仅余一项Important：reader异常被静默吞掉。允许现有transform-stage阶段增加可选evidenceFailure的code/cause错误标识白名单，沿现有诊断仓冷回读；不存正文/stack，不新建类型或权威，诊断异常不得改变普通委派fallback。若观测错误覆盖真实业务结果会误导追踪，故需最终结果及冷回读拒绝侧覆盖。
