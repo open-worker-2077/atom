@@ -2246,3 +2246,83 @@ test('a late same-winner SSE cannot immediately erase the conflict result', asyn
   assert.equal(document.body.dataset.spatialPresentationSettings, 'conflict');
   assert.equal(document.body.dataset.spatialPresentationSettingsRevision, '4');
 });
+
+test('a latest failed presentation GET reports unsynced while retaining the conflict for recovery', async () => {
+  const listeners = new Map();
+  const applied = [];
+  const writes = [];
+  const initial = { nestedTunnelPercent: 55, nestedTunnelInteriorPercent: 35 };
+  const winner = { nestedTunnelPercent: 20, nestedTunnelInteriorPercent: 25 };
+  const newer = { nestedTunnelPercent: 30, nestedTunnelInteriorPercent: 25 };
+  const statusOutput = { dataset: {}, textContent: '', hidden: true };
+  const response = (payload, ok = true) => ({ ok, json: async () => payload });
+  let readCount = 0;
+  let failRead = false;
+  let remoteRevision = 4;
+  const document = {
+    body: { dataset: {} }, hidden: false,
+    getElementById: (id) => id === 'presentationSettingsStatus' ? statusOutput : null,
+    addEventListener: (name, listener) => listeners.set(name, listener)
+  };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge: () => true,
+      exportField: () => ({ path: 'root' }),
+      presentationSettings: () => ({ settings: initial, stored: { exists: false, valid: false } }),
+      applyPresentationSettings: (settings) => applied.push(settings)
+    },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+      if (url.endsWith('/presentation-settings') && options.method === 'PUT') {
+        writes.push(JSON.parse(options.body));
+        return response({ ok: false,
+          error: { code: 'PRESENTATION_SETTINGS_CONFLICT', message: 'changed' } }, false);
+      }
+      if (url.endsWith('/presentation-settings')) {
+        readCount += 1;
+        if (failRead) throw new Error('network unavailable');
+        return response({ ok: true, revision: readCount === 1 ? 3 : remoteRevision,
+          initialized: true, settings: readCount === 1 ? initial : remoteRevision === 4 ? winner : newer });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  listeners.get('spatial-presentation-settings-changed')({ detail: { nestedTunnelPercent: 0 } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(readCount, 2);
+  assert.equal(statusOutput.dataset.state, 'conflict');
+
+  failRead = true;
+  listeners.get('visibilitychange')();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(readCount, 3);
+  assert.equal(document.body.dataset.spatialPresentationSettings, 'unsynced');
+  assert.equal(statusOutput.dataset.state, 'unsynced');
+  assert.match(statusOutput.textContent, /未同步/);
+  assert.equal(statusOutput.hidden, false);
+  assert.equal(document.body.dataset.spatialPresentationSettingsRevision, '4');
+  assert.equal(applied.length, 2, 'the failed read must preserve the current winner');
+  assert.deepEqual(applied.at(-1), winner);
+
+  failRead = false;
+  listeners.get('visibilitychange')();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(statusOutput.dataset.state, 'conflict');
+  assert.equal(applied.length, 2, 'same-revision recovery must retain the conflict without reapplying');
+
+  remoteRevision = 5;
+  listeners.get('visibilitychange')();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(statusOutput.dataset.state, 'synced');
+  assert.equal(document.body.dataset.spatialPresentationSettingsRevision, '5');
+  assert.deepEqual(applied.at(-1), newer);
+  assert.deepEqual(writes, [{ expectedRevision: 3, patch: { nestedTunnelPercent: 0 } }]);
+});

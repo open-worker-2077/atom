@@ -437,11 +437,7 @@
       return false;
     } catch (_error) {
       if (requestSequence === presentationReadSequence && settingsRevision === requestRevision) {
-        const retainedStatus = statusAfterApply === "synced" && retainedPresentationStatus
-          && retainedPresentationStatus.revision === settingsRevision
-          ? retainedPresentationStatus.status
-          : "unsynced";
-        setPresentationSettingsStatus(retainedStatus);
+        setPresentationSettingsStatus("unsynced");
       }
       return false;
     }
