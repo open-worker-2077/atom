@@ -4793,7 +4793,10 @@
     const persistenceId = operation && typeof operation === "object"
       ? ++workspacePersistenceSequence
       : null;
-    if (persistenceId !== null) {
+    const serviceBacked = Boolean(
+      global.location && ["http:", "https:"].includes(global.location.protocol)
+    );
+    if (persistenceId !== null && serviceBacked) {
       showWorkspacePersistenceStatus(persistenceId, "正在保存，等待 Atom 确认", "saving");
     }
     global.dispatchEvent(new CustomEvent("spatial-workspace-committed", {

@@ -475,6 +475,12 @@ test('semantic edits wait for persistence acknowledgement before claiming succes
   assert.match(source, /正在保存/);
 });
 
+test('save feedback waits for Atom only on an HTTP or HTTPS service entry', () => {
+  const persist = functionSource('persistWorkspaceSnapshot');
+  assert.match(persist, /\["http:",\s*"https:"\]\.includes\s*\(\s*global\.location\.protocol\s*\)/);
+  assert.match(persist, /serviceBacked[\s\S]*showWorkspacePersistenceStatus\s*\(/);
+});
+
 test('a persisted landing reselects the moved node at its authoritative projected id', () => {
   const listenerStart = source.indexOf('global.addEventListener("spatial-workspace-persisted"');
   const listenerEnd = source.indexOf('global.addEventListener("spatial-workspace-persist-failed"', listenerStart);
