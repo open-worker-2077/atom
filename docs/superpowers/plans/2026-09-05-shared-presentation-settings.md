@@ -10,7 +10,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-31-atom-web-spatial-design.md` §5.5。I3/U3/D2/E3；Transform已完整交付、回告且核对远端备份，现在执行本项，早于旧print及A剩余任务。
 
-**当前断点（2026-09-06）:** 隔离工作树`.worktrees/shared-presentation-settings`、分支`fix/shared-presentation-settings`，Task1在7b47728实现并经独立审查通过（41/41、2/2）。Task2实施方shared_settings_task2已取得浏览器桥RED：既有30条通过、新5条失败；另有1条新Playwright场景尚未运行。工作树只改测试，未改产品代码/提交。用户要求先核查Superpowers本地记录与实际执行，Task2安全暂停、无运行中测试；核查文档已合入7b2a93d，产品代码与7b47728一致；现按用户更新软件要求继续暂停，恢复后先完成Web保存反馈，再由原Agent从RED续接。真实本机参数及真机边框仍未取得，不写测试值到生产。
+**当前补充（2026-09-06）:** 原Task2两个RED测试文件已原样提交为48c79fb安全检查点，未实现产品逻辑、未新增测试运行、未宣称GREEN；待保存反馈交付后安全合入main并续接。
+
+**前一断点（2026-09-06）:** 隔离工作树`.worktrees/shared-presentation-settings`、分支`fix/shared-presentation-settings`，Task1在7b47728实现并经独立审查通过（41/41、2/2）。Task2实施方shared_settings_task2已取得浏览器桥RED：既有30条通过、新5条失败；另有1条新Playwright场景尚未运行。工作树只改测试，未改产品代码/提交。用户要求先核查Superpowers本地记录与实际执行，Task2安全暂停、无运行中测试；核查文档已合入7b2a93d，产品代码与7b47728一致；现按用户更新软件要求继续暂停，恢复后先完成Web保存反馈，再由原Agent从RED续接。真实本机参数及真机边框仍未取得，不写测试值到生产。
 
 **Task1 RED:** 新增真实随机端口隔离服务测试GET共同设置接口得到404而非200，`node --test --test-isolation=none tests/atom-presentation-settings.test.mjs`为0/1通过；保留fixture。接下来实现共同仓储/CAS及HTTP合同；只移除实际必要测试中的fixture递归清理，不扩展为全库清理。
 
