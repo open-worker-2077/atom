@@ -10,9 +10,11 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-31-atom-web-spatial-design.md` §5.5。I3/U3/D2/E3；Transform已完整交付、回告且核对远端备份，现在执行本项，早于旧print及A剩余任务。
 
-**当前补充（2026-09-06）:** 原Task2两个RED测试文件已原样提交为48c79fb安全检查点，未实现产品逻辑、未新增测试运行、未宣称GREEN；待保存反馈交付后安全合入main并续接。
+**当前执行（2026-09-06）:** 保存反馈已部署e82984d，手机Task2在c2f8510吸收该基线后续接；当前候选f773287，真实时序RED→GREEN后范围复审中。最终候选全量在稳定审查后一次执行；真机及实际本机值缺口保留。
 
-**前一断点（2026-09-06）:** 隔离工作树`.worktrees/shared-presentation-settings`、分支`fix/shared-presentation-settings`，Task1在7b47728实现并经独立审查通过（41/41、2/2）。Task2实施方shared_settings_task2已取得浏览器桥RED：既有30条通过、新5条失败；另有1条新Playwright场景尚未运行。工作树只改测试，未改产品代码/提交。用户要求先核查Superpowers本地记录与实际执行，Task2安全暂停、无运行中测试；核查文档已合入7b2a93d，产品代码与7b47728一致；现按用户更新软件要求继续暂停，恢复后先完成Web保存反馈，再由原Agent从RED续接。真实本机参数及真机边框仍未取得，不写测试值到生产。
+**历史RED检查点（2026-09-06）:** 原Task2两个RED测试文件已原样提交为48c79fb安全检查点，未实现产品逻辑、未新增测试运行、未宣称GREEN；待保存反馈交付后安全合入main并续接。
+
+**历史暂停断点（2026-09-06）:** 隔离工作树`.worktrees/shared-presentation-settings`、分支`fix/shared-presentation-settings`，Task1在7b47728实现并经独立审查通过（41/41、2/2）。Task2实施方shared_settings_task2已取得浏览器桥RED：既有30条通过、新5条失败；另有1条新Playwright场景尚未运行。工作树只改测试，未改产品代码/提交。用户要求先核查Superpowers本地记录与实际执行，Task2安全暂停、无运行中测试；核查文档已合入7b2a93d，产品代码与7b47728一致；现按用户更新软件要求继续暂停，恢复后先完成Web保存反馈，再由原Agent从RED续接。真实本机参数及真机边框仍未取得，不写测试值到生产。
 
 **Task1 RED:** 新增真实随机端口隔离服务测试GET共同设置接口得到404而非200，`node --test --test-isolation=none tests/atom-presentation-settings.test.mjs`为0/1通过；保留fixture。接下来实现共同仓储/CAS及HTTP合同；只移除实际必要测试中的fixture递归清理，不扩展为全库清理。
 
@@ -115,7 +117,7 @@ Run: `node --test --test-isolation=none tests/atom-presentation-settings.test.mj
 - Consumes: Task1唯一GET/PUT与presentation-settings SSE事件。
 - Produces: `spatialLab.presentationSettings()`读取当前设置与原缓存存在标记；`spatialLab.applyPresentationSettings(settings)`规范化并应用且不产生反向保存事件；用户updateDemoSettings发`spatial-presentation-settings-changed`，detail仅含改动字段patch。迁移原值单独保存为`graph-4d.presentation-settings.pre-shared.v1`，不覆写已有备份key。
 
-- [ ] **Step 1: 浏览器RED**
+- [x] **Step 1: 浏览器RED**
 
 两独立浏览器context：host使用实际回环入口且预置v2 fixture55/35，mobile用同一私有测试服务、独立browser context与存储；实际入口两端可以同origin，手机先开不初始化的设备来源分支由bridge VM fixture明确远程hostname验证，禁止把browser context隔离误称为真实手机，存储预置0/0。先由host迁移，mobile GET继承；不得共享Playwright storageState冒充同步。
 
@@ -151,4 +153,6 @@ Run: `node --test tests/browser-bridge-contract.test.js tests/atom-presentation-
 
 - 所有§5.5要求映射到两项任务：共同权威/迁移/CAS/恢复为Task1+2；实际屏幕和真机为Task2。已知生产种子缺口明确保留，没有虚构实际参数。
 - 只复用展示模型与空间体验仓储；新接口隐藏存储路径，不重写Graph/Program/授权。并行OS写入、账号多租户与全配置平台不在本轮范围。
-- Task1已完成并独立Approved；Task2已RED，因用户先行一致性核查暂停，待原Agent续接；生产部署及真机结果尚未完成。
+- Task1已完成并独立Approved；Task2 d760145实现，f773287经两轮时序修正，原始40/40、49/49、browser1/1及build/control已核对，范围复审进行中；最终候选全量、生产部署及真机结果尚未完成。
+
+- **R2裁定（2026-09-06）**：根Agent核对现有PUT catch/finally与GET源码后采纳Astra咨询中的开始/完成双门控：写入期间仅合并deferred read，catch只记回读需求，finally清inFlight后统一回读并阻止旧队列插入；不能等待自身delivery。外部权威世代推进即重置新事件queue base，旧世代项保持失效。属于既有过期写拒绝/同设备连续操作合同的实现修正，不改内核或服务API。
