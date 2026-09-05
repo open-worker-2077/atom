@@ -74,6 +74,21 @@ test('ancestor discard retains root, window, sealed-structure and compound-edit 
   }
 });
 
+test('ancestor discard never grants restore into a locked original destination', async () => {
+  const discarded = await transform(await discardFixture(), 'transform {"thing.dsc.":"Root/Parent"}');
+  assert.equal(discarded.error, undefined, JSON.stringify(discarded.error));
+  const before = structuredClone(discarded.atoms);
+  const { authorize } = createAccessController(discarded.atoms, {
+    agentPath: 'Root', agentSecurity: { labels: [], functions: ['transform'] },
+    graphLocks: [{ kind: 'node', path: 'Root', actions: ['transform'], labels: ['root-lock'] }]
+  });
+  const parsed = createAtomLanguageReceiver().receive(`transform ${JSON.stringify({ 'thing.rst.': discarded.archive.restoreCoordinate })}`);
+  const restored = await applyTransform({ atoms: discarded.atoms, item: parsed.items[0], contextFile: 'atom.json',
+    authorize, transactionTransformLog: [discarded.logRecord] });
+  assert.equal(restored.error?.code, 'WINDOW_ACCESS_DENIED');
+  assert.deepEqual(discarded.atoms, before);
+});
+
 for (const rootLabels of [['existing-business']]) {
 test(`public ancestor discard persists one reversible sealed archive and cold-restores its Programs with ${rootLabels.length ? 'matching declaration scope' : 'preexisting child-only label'}`, async (t) => {
   const atoms = await discardFixture();
@@ -106,6 +121,11 @@ test(`public ancestor discard persists one reversible sealed archive and cold-re
   atoms[0].slot.push(shortcut);
   const oldArchive = atom('Parent', [], 'historical archive');
   find(atoms, 'Backup').slot.push(oldArchive);
+  const historicalOwner = atom('Owner');
+  historicalOwner.strut = [{ 'if@current': true, then: [
+    { thing: 'Backup/History/Anchor' }, { thing: 'Root/Parent/Event' }
+  ] }];
+  find(atoms, 'Backup').slot.push(atom('History', [historicalOwner, atom('Anchor')]));
   const initialParent = structuredClone(parent);
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-ancestor-discard-'));
   t.diagnostic(`retained fixture: ${directory}`);
@@ -113,6 +133,10 @@ test(`public ancestor discard persists one reversible sealed archive and cold-re
   const files = { contextFile, graphFile: path.join(directory, 'graph.json'), storeFile: path.join(directory, 'knowledge.json') };
   await fs.writeFile(contextFile, JSON.stringify(atoms));
   const execute = createRuntimeCliExecutor(files);
+  const forbiddenOwnerEdit = await execute({ source: 'transform {"thing":"Backup/History/Owner","strut.rep.":[]}', interaction: { id: 'foreign-owner-denied', agent: { path: 'Root' } } });
+  assert.equal(forbiddenOwnerEdit.ok, false);
+  assert.equal(forbiddenOwnerEdit.errors[0].code, 'WINDOW_ACCESS_DENIED');
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), atoms);
   const discarded = await execute({ source: 'transform {"thing.dsc.":"Root/Parent"}', interaction: { id: 'ancestor-discard', agent: { path: 'Root' } } });
   assert.equal(discarded.ok, true, JSON.stringify(discarded.errors));
   const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
@@ -128,16 +152,23 @@ test(`public ancestor discard persists one reversible sealed archive and cold-re
   assert.equal(find(stored, `${discarded.archive.path}/Event`).strut[0].then[0].thing, `${discarded.archive.path}/Result`);
   assert.equal(find(stored, 'Root/Sibling').strut[0].then[0].thing, `${discarded.archive.path}/Event`);
   assert.deepEqual(JSON.parse(find(stored, 'Root/Link').situation).target, { state: 'broken', path: null });
+  assert.deepEqual(find(stored, 'Backup/History/Owner').strut, [{ 'if@current': true, then: [
+    { thing: 'Backup/History/Anchor' }, { thing: `${discarded.archive.path}/Event` }
+  ] }]);
   const journal = createJsonTransactionJournal({ file: path.join(directory, 'atom.transactions.json') });
   const history = await journal.readState();
   assert.equal(history.receipts.length, 1, JSON.stringify(history.receipts));
   assert.equal(history.receipts[0].receipt.result.transformLogRecord.originalPath, 'Root/Parent');
-  for (const referencePath of ['Root/Sibling', 'Root/Link']) {
+  for (const referencePath of ['Root/Sibling', 'Root/Link', 'Backup/History/Owner']) {
     assert.ok(history.receipts[0].patch.changedPaths.includes(referencePath), `Missing reversible reference ${referencePath}`);
   }
   const coldExecute = createRuntimeCliExecutor(files);
   const coldRead = await coldExecute({ source: 'explore {"thing":"Root/Sibling","situation$full":true}', interaction: { id: 'cold-read', agent: { path: 'Root' } } });
   assert.equal(coldRead.ok, true, JSON.stringify(coldRead.errors));
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), stored);
+  const mixedRestore = await coldExecute({ source: `transform ${JSON.stringify({ 'thing.rst.': discarded.archive.restoreCoordinate, 'strut.rep.': [] })}`, interaction: { id: 'mixed-restore-denied', agent: { path: 'Root' } } });
+  assert.equal(mixedRestore.ok, false);
+  assert.equal(mixedRestore.errors[0].code, 'WINDOW_ACCESS_DENIED');
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), stored);
   const restored = await coldExecute({ source: `transform ${JSON.stringify({ 'thing.rst.': discarded.archive.restoreCoordinate })}`, interaction: { id: 'ancestor-restore', agent: { path: 'Root' } } });
   assert.equal(restored.ok, true, JSON.stringify(restored.errors));
@@ -146,6 +177,9 @@ test(`public ancestor discard persists one reversible sealed archive and cold-re
   assert.deepEqual(find(afterRestore, 'Backup/Parent'), oldArchive);
   assert.deepEqual(find(afterRestore, 'Root/Sibling'), find(atoms, 'Root/Sibling'));
   assert.deepEqual(find(afterRestore, 'Root/Link'), shortcut);
+  assert.deepEqual(find(afterRestore, 'Backup/History/Owner'), historicalOwner);
+  const restoredHistory = await journal.readState();
+  assert.ok(restoredHistory.receipts.at(-1).patch.changedPaths.includes('Backup/History/Owner'));
   const denied = await coldExecute({ source: 'transform {"thing.ren.Broken":"Root/Parent/Body/Model/Input"}', interaction: { id: 'sealed-denied', agent: { path: 'Root' } } });
   assert.equal(denied.ok, false);
   assert.equal(denied.errors[0].code, 'SLOT_STRUCTURE_LOCK_DENIED');

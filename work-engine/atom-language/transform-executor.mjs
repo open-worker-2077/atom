@@ -1198,14 +1198,14 @@ export async function applyTransform({
   // the authorized root operation, just as for a subtree move.
   const pureRename = nameCommands.length === 1 && nameCommands[0].name === 'ren'
     && changedFields.size === 1 && changedFields.has('thing');
-  // Discard relocates an intact subtree into kernel backup. Only the pure
+  // Discard and restore relocate an intact subtree through kernel backup. Only the pure
   // operation owns descendant relocation; accompanying edits retain their checks.
-  const pureDiscard = nameCommands.length === 1 && nameCommands[0].name === 'dsc'
+  const pureBackupRelocation = nameCommands.length === 1 && ['dsc', 'rst'].includes(nameCommands[0].name)
     && item.fields.every((field) => field.baseKey === 'thing'
       || (!field.valuePresent && field.commands.length === 0));
   if (!restoresFromKernelBackup && changesSubtree
     && structural.operation?.command.name !== 'mov'
-    && !pureRename && !pureDiscard
+    && !pureRename && !pureBackupRelocation
     && (immediateChildren(selected.match.atom)?.length ?? 0) > 0) {
     for (const match of walkAtoms([selected.match.atom])) selectedAtoms.add(match.atom);
     for (const descendant of walkAtoms(nextAtoms)) {
@@ -1220,10 +1220,10 @@ export async function applyTransform({
       }
     }
   }
-  // A rename owns its referential-integrity rewrites once the renamed target is
-  // authorized. Other structural operations still require authority over an
-  // external relation owner before mutating that owner.
+  // Mechanical reference rewrites belong to an authorized rename, move or pure
+  // kernel backup relocation. This does not grant direct edits to their owners.
   if (structural.operation?.command.name !== 'mov'
+    && !pureBackupRelocation
     && !nameCommands.some(({ name }) => name === 'ren')) {
     for (const binding of partnerBindings) {
       if (selectedAtoms.has(binding.targetAtom) && !selectedAtoms.has(binding.sourceAtom)) {
