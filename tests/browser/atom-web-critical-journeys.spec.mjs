@@ -826,6 +826,17 @@ async function rightClickTarget(page, label, count) {
   await page.mouse.click(target.clientX, target.clientY, { button: 'right' });
 }
 
+async function holdRightTarget(page, label, holdMs = 440, release = true) {
+  const target = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .find((candidate) => candidate.label === label);
+  expect(target).toBeTruthy();
+  await page.mouse.move(target.clientX, target.clientY);
+  await page.mouse.down({ button: 'right' });
+  await page.waitForTimeout(holdMs);
+  if (release) await page.mouse.up({ button: 'right' });
+  return target;
+}
+
 test('A single right-click cuts inward without hiding outside context', async ({ page }) => {
   test.setTimeout(90_000);
   await openAModeFixture(page);
@@ -836,22 +847,86 @@ test('A single right-click cuts inward without hiding outside context', async ({
   expect(await page.evaluate(() => window.spatialLab.state().path)).toBe('root');
 });
 
-test('A double right-click immerses the exact group', async ({ page }) => {
+test('A sustained right press immerses once before release and release adds no ordinary navigation', async ({ page }) => {
   test.setTimeout(90_000);
   const { parentPath } = await openAModeFixture(page);
-  await rightClickTarget(page, '父团', 2);
+  await holdRightTarget(page, '父团', 440, false);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(parentPath);
   const labels = await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label));
   expect(labels).toContain('内层团');
   expect(labels).not.toContain('团外旁侧');
+  await page.mouse.up({ button: 'right' });
+  await page.waitForTimeout(450);
+  expect(await page.evaluate(() => window.spatialLab.state().path)).toBe(parentPath);
+  expect(await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label)))
+    .not.toContain('叶子');
+});
+
+test('A right double-click never promotes to immersion', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openAModeFixture(page);
+  await rightClickTarget(page, '父团', 2);
+  await page.waitForTimeout(450);
+  expect(await page.evaluate(() => window.spatialLab.state().path)).toBe('root');
+  const labels = await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label));
+  expect(labels).toEqual(expect.arrayContaining(['内层团', '团外旁侧']));
+});
+
+test('A pending right hold cancels on drag, pointer cancellation, and modifier change', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.clock.install({ time: new Date('2026-09-06T00:00:00Z') });
+  await openAModeFixture(page);
+  const currentTime = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(currentTime + 60_000);
+  const target = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .find((candidate) => candidate.label === '父团');
+  expect(target).toBeTruthy();
+
+  await page.mouse.move(target.clientX, target.clientY);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(target.clientX + 12, target.clientY);
+  await page.clock.runFor(421);
+  await page.mouse.up({ button: 'right' });
+  expect(await page.evaluate(() => window.spatialLab.state().path), 'drag cancellation').toBe('root');
+
+  await page.mouse.move(target.clientX, target.clientY);
+  await page.evaluate(() => {
+    const canvas = document.querySelector('#spaceCanvas');
+    canvas.addEventListener('pointerdown', (event) => { canvas.dataset.testPointerId = String(event.pointerId); }, { once: true });
+  });
+  await page.mouse.down({ button: 'right' });
+  await page.evaluate(() => {
+    const canvas = document.querySelector('#spaceCanvas');
+    canvas.dispatchEvent(new PointerEvent('pointercancel', {
+      bubbles: true,
+      pointerId: Number(canvas.dataset.testPointerId),
+      button: 2,
+      clientX: 0,
+      clientY: 0
+    }));
+  });
+  await page.clock.runFor(421);
+  await page.mouse.up({ button: 'right' });
+  expect(await page.evaluate(() => window.spatialLab.state().path), 'pointer cancellation').toBe('root');
+
+  await page.mouse.move(target.clientX, target.clientY);
+  await page.mouse.down({ button: 'right' });
+  await page.keyboard.down('Control');
+  await page.clock.runFor(421);
+  await page.keyboard.up('Control');
+  await page.mouse.up({ button: 'right' });
+
+  expect(await page.evaluate(() => window.spatialLab.state().path), 'modifier cancellation').toBe('root');
+  expect(await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label)))
+    .not.toContain('内层团');
 });
 
 test('blank right double-click returns only one level non-immersively', async ({ page }) => {
   test.setTimeout(90_000);
   const { parentPath, innerPath } = await openAModeFixture(page);
-  await rightClickTarget(page, '父团', 2);
+  await holdRightTarget(page, '父团');
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(parentPath);
-  await rightClickTarget(page, '内层团', 2);
+  await holdRightTarget(page, '内层团');
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(innerPath);
   await page.mouse.dblclick(48, 360, { button: 'right', delay: 40 });
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(parentPath);
@@ -862,7 +937,7 @@ test('blank right double-click returns only one level non-immersively', async ({
 test('ordinary inward click naturally leaves immersion and keeps the owner context', async ({ page }) => {
   test.setTimeout(90_000);
   const { parentPath } = await openAModeFixture(page);
-  await rightClickTarget(page, '父团', 2);
+  await holdRightTarget(page, '父团');
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(parentPath);
   await rightClickTarget(page, '内层团', 1);
   await page.waitForTimeout(430);
@@ -874,7 +949,7 @@ test('ordinary inward click naturally leaves immersion and keeps the owner conte
 test('A key does not become an immersion exit shortcut', async ({ page }) => {
   test.setTimeout(90_000);
   const { parentPath } = await openAModeFixture(page);
-  await rightClickTarget(page, '父团', 2);
+  await holdRightTarget(page, '父团');
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(parentPath);
   await page.keyboard.press('KeyA');
   expect(await page.evaluate(() => window.spatialLab.state().path)).toBe(parentPath);

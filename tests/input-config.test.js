@@ -35,8 +35,8 @@ test('pointer grammar assigns use and view while middle drag exclusively owns or
     fieldTriplePrimary: null,
     nodeSecondary: 'applyInwardView',
     fieldSecondary: 'applyParentView',
-    nodeDoubleSecondary: 'applyImmersiveInwardView',
-    fieldDoubleSecondary: 'applyParentView',
+    nodeHoldSecondary: 'applyImmersiveInwardView',
+    fieldHoldSecondary: null,
     nodeMiddle: null,
     fieldMiddle: null,
     nodeMiddleDrag: 'orbit',
@@ -49,6 +49,16 @@ test('pointer grammar assigns use and view while middle drag exclusively owns or
       Object.fromEntries(Object.keys(expected).map((key) => [key, preset.pointer[key]])),
       expected
     );
+  }
+});
+
+test('unmodified secondary hold is the only immersive pointer mapping', () => {
+  const { config } = loadInputConfig();
+  for (const preset of ['explorer', 'oneHand']) {
+    config.setPreset(preset);
+    assert.equal(config.resolvePointer({ button: 2 }, { onNode: true, gesture: 'hold' }), 'applyImmersiveInwardView');
+    assert.equal(config.resolvePointer({ button: 2 }, { onNode: false, gesture: 'hold' }), null);
+    assert.equal(config.resolvePointer({ button: 2 }, { onNode: true, gesture: 'double' }), null);
   }
 });
 
@@ -154,6 +164,7 @@ test('mapping descriptors remain nested and expose only current muscle-memory co
   for (const removed of ['summonMenu', 'cycleViewMode', 'cycleDetailMode', 'toggleFieldChildren', 'toggleFieldSurfaces']) {
     assert.equal(flattened.some((item) => item.intent === removed), false, removed);
   }
+  assert.equal(flattened.find((item) => item.intent === 'applyImmersiveInwardView').binding, '右键长按');
 });
 
 test('keyboard bindings remain configurable and announce changes', () => {

@@ -5104,10 +5104,10 @@
         ? `${state.clusterScene.clusters.length} 域 · ${viewLabel}视角`
         : state.depth ? `第 ${state.depth} 层球域` : "无中心多球系";
       ui.selectionCopy.textContent = state.clusterFieldOpen
-        ? "已展开的空间结果保持原投影；切换模式只改变下一次右键动作。"
+        ? "已展开的空间结果保持原投影；右键短按继续向内剖开，长按进入沉浸。"
         : "所有球体都是隧洞；有子内容可同层展收，空隧洞也可进入并在内部新增节点。";
       ui.selectionCaps.textContent = state.clusterFieldOpen
-        ? `A内包 · S外围 · D层级 · F沉浸 · 当前 ${viewLabel} · Shift 魔杖`
+        ? `A结构 · 当前 ${viewLabel} · 右键短按剖开／长按沉浸 · Shift 魔杖`
         : `当前 ${viewLabel} · 右键应用 · 中键单击聚焦／拖动旋转`;
       return;
     }
@@ -6915,7 +6915,7 @@
         dispatchIntent(action.intent, action.visualMeta, action.target);
       }
     },
-    commitDouble(action) {
+    commitHold(action) {
       if (action && action.intent) {
         dispatchIntent(action.intent, action.visualMeta, action.target);
       }
@@ -6968,6 +6968,47 @@
       return `field:${candidate.domainContext.path}`;
     }
     return "field";
+  }
+
+  function isUnmodifiedSecondaryNavigation(candidate) {
+    const mappingEvent = candidate && candidate.mappingEvent || {};
+    return Boolean(
+      candidate
+      && candidate.button === 2
+      && !mappingEvent.ctrlKey
+      && !mappingEvent.shiftKey
+      && !mappingEvent.altKey
+      && !mappingEvent.metaKey
+    );
+  }
+
+  function beginSecondaryNavigation(candidate) {
+    if (!isUnmodifiedSecondaryNavigation(candidate)) return false;
+    const singleAction = gestureArbiter.classifyTap(candidate);
+    if (!singleAction) return false;
+    const holdIntent = input.resolvePointer(
+      { ...candidate.mappingEvent, button: 2 },
+      { ...(candidate.mappingContext || {}), gesture: "hold" }
+    );
+    candidate.secondaryNavigation = true;
+    secondaryClickArbiter.begin(
+      contextualizeAction(singleAction, candidate),
+      holdIntent
+        ? contextualizeAction(
+          { intent: holdIntent, visualMeta: {}, target: candidate.node || null },
+          candidate
+        )
+        : null,
+      candidateArbiterKey(candidate)
+    );
+    return true;
+  }
+
+  function cancelPendingSecondaryNavigation() {
+    if (state.pointerCandidate && state.pointerCandidate.secondaryNavigation) {
+      state.pointerCandidate.cancelled = true;
+    }
+    secondaryClickArbiter.cancel();
   }
 
   function focusMinimumDistance() {
@@ -7048,6 +7089,10 @@
   }
 
   function commitPointerCandidate(candidate) {
+    if (candidate && candidate.cancelled) {
+      secondaryClickArbiter.cancel();
+      return;
+    }
     if (candidate && candidate.direct) {
       primaryClickArbiter.cancel();
       secondaryClickArbiter.cancel();
@@ -7072,16 +7117,11 @@
       secondaryClickArbiter.cancel();
       return;
     }
-    const mappingEvent = candidate && candidate.mappingEvent || {};
-    const unmodifiedSecondaryNavigation = Boolean(
-      candidate
-      && candidate.button === 2
-      && !mappingEvent.ctrlKey
-      && !mappingEvent.shiftKey
-      && !mappingEvent.altKey
-      && !mappingEvent.metaKey
-    );
-    if (!unmodifiedSecondaryNavigation) {
+    if (candidate && candidate.secondaryNavigation) {
+      secondaryClickArbiter.release(candidateArbiterKey(candidate));
+      return;
+    }
+    if (!isUnmodifiedSecondaryNavigation(candidate)) {
       secondaryClickArbiter.cancel();
     }
     const action = gestureArbiter.classifyTap(candidate);
@@ -7130,22 +7170,9 @@
     }
     if (candidate.button === 2) {
       const contextualAction = contextualizeAction(action, candidate);
-      if (unmodifiedSecondaryNavigation) {
-        const doubleIntent = input.resolvePointer(
-          { ...mappingEvent, button: 2 },
-          { ...(candidate.mappingContext || {}), gesture: "double" }
-        );
-        if (doubleIntent) {
-          secondaryClickArbiter.submit(
-            contextualAction,
-            contextualizeAction(
-              { intent: doubleIntent, visualMeta: {}, target: candidate.node || null },
-              candidate
-            ),
-            candidateArbiterKey(candidate)
-          );
-          return;
-        }
+      if (beginSecondaryNavigation(candidate)) {
+        secondaryClickArbiter.release(candidateArbiterKey(candidate));
+        return;
       }
       secondaryClickArbiter.cancel();
       dispatchIntent(contextualAction.intent, contextualAction.visualMeta, contextualAction.target);
@@ -7254,6 +7281,7 @@
       threshold: event.pointerType === "touch" ? 10 : 6,
       cancelled: false
     };
+    beginSecondaryNavigation(state.pointerCandidate);
   });
 
   canvas.addEventListener("pointermove", (event) => {
@@ -7269,7 +7297,7 @@
       candidate.movementPx = Math.max(candidate.movementPx || 0, distance);
       if (distance >= candidate.threshold) {
         primaryClickArbiter.cancel();
-        secondaryClickArbiter.cancel();
+        cancelPendingSecondaryNavigation();
         state.pointerCandidate = null;
         beginDragFromCandidate(candidate);
       } else {
@@ -7391,12 +7419,17 @@
   canvas.addEventListener("pointerup", releasePointer);
   canvas.addEventListener("pointercancel", (event) => {
     primaryClickArbiter.cancel();
-    secondaryClickArbiter.cancel();
+    cancelPendingSecondaryNavigation();
     releasePointer(event, true);
+  });
+  canvas.addEventListener("lostpointercapture", (event) => {
+    if (!state.pointerCandidate || state.pointerCandidate.pointerId !== event.pointerId) return;
+    cancelPendingSecondaryNavigation();
+    state.pointerCandidate = null;
   });
   global.addEventListener("blur", () => {
     primaryClickArbiter.cancel();
-    secondaryClickArbiter.cancel();
+    cancelPendingSecondaryNavigation();
     state.wand.shiftHeld = false;
     state.wand.active = false;
     state.wand.points = [];
@@ -7496,6 +7529,9 @@
   document.addEventListener("keydown", handleEditTransactionKey, { capture: true });
 
   document.addEventListener("keydown", (event) => {
+    if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) {
+      cancelPendingSecondaryNavigation();
+    }
     if (viewModeModel.isShiftKeyEvent(event) && !event.repeat) {
       if (workspace.transaction()) {
         state.editShiftLineBreakUntil = performance.now() + 900;
@@ -7614,6 +7650,9 @@
   });
 
   document.addEventListener("keyup", (event) => {
+    if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) {
+      cancelPendingSecondaryNavigation();
+    }
     if (
       event.code === "CapsLock"
       && !event.repeat

@@ -77,15 +77,15 @@ test('mobile control panel separates mouse and keyboard without regressing held 
   await expect(panel).toBeHidden();
 });
 
-test('right-click interval persists across reload and reset restores only that setting', async ({ page }) => {
+test('right-click hold duration persists across reload and reset restores only that setting', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openIsolatedWorld(page);
   await page.locator('#settingsAction').click();
 
-  const delay = page.getByRole('slider', { name: /^右键沉浸连击间隔/u });
+  const delay = page.getByRole('slider', { name: /^右键沉浸长按时长/u });
   const output = page.locator('#secondaryNavigationDelayValue');
   const detailMode = page.getByLabel('CapsLock 默认展示');
-  const reset = page.getByRole('button', { name: '恢复右键沉浸连击间隔默认值' });
+  const reset = page.getByRole('button', { name: '恢复右键沉浸长按时长默认值' });
   await expect(delay).toHaveValue('420');
   await expect(output).toHaveText('420ms');
 

@@ -125,7 +125,7 @@
       id="spaceCanvas"
       tabindex="0"
       role="application"
-      aria-label="多球域三维交互场。左键使用，右键按当前视角展收；A 内包、S 外围、D 层级、F 沉浸；双击 Shift 选择同层同团，按住 Shift 划过节点可反选；CapsLock 循环名称、镜面与透明页详情；中键单击聚焦、拖动旋转，滚轮缩放。"
+      aria-label="多球域三维交互场。左键使用；右键短按按 A 结构向内剖开，持续按住进入沉浸，空白返回直接母域；双击 Shift 选择同层同团，按住 Shift 划过节点可反选；CapsLock 循环名称、镜面与透明页详情；中键单击聚焦、拖动旋转，滚轮缩放。"
     ></canvas>
     <div class="surface-markdown-layer" id="surfaceMarkdownLayer" aria-hidden="true"></div>
     <aside class="detail-magnifier" id="detailMagnifier" aria-live="polite" hidden>
@@ -272,7 +272,7 @@
     </div>
 
     <p class="field-hint" id="fieldHint">
-      左键使用 · 右键展收 · A内包 S外围 D层级 F沉浸 · CapsLock详情 · 中键单击聚焦／拖动旋转 · Shift魔杖
+      左键使用 · 右键短按向内剖开／长按沉浸 · A结构视图 · CapsLock详情 · 中键单击聚焦／拖动旋转 · Shift魔杖
     </p>
 
     <nav class="mobile-control-panel" aria-label="手机控制面板">
@@ -290,12 +290,9 @@
         <div class="mobile-control-panel__scroll" aria-label="键盘按键">
           <div class="mobile-control-panel__key-groups">
             <div class="mobile-control-panel__key-group" data-mobile-key-group="wandering">
-              <h3 class="mobile-control-panel__key-title">游走模式</h3>
+              <h3 class="mobile-control-panel__key-title">结构视图</h3>
               <div class="mobile-control-panel__row">
                 <button type="button" data-mobile-key="KeyA" data-key-value="a">A</button>
-                <button type="button" data-mobile-key="KeyS" data-key-value="s">S</button>
-                <button type="button" data-mobile-key="KeyD" data-key-value="d">D</button>
-                <button type="button" data-mobile-key="KeyF" data-key-value="f">F</button>
               </div>
             </div>
             <div class="mobile-control-panel__key-group" data-mobile-key-group="navigation">
@@ -372,16 +369,16 @@
         <button type="button" data-preset="oneHand" aria-pressed="false">单手试验</button>
       </div>
       <label class="range-setting">
-        <span>右键沉浸连击间隔</span>
+        <span>右键沉浸长按时长</span>
         <span class="range-setting__control">
           <input id="secondaryNavigationDelay" type="range" min="240" max="800" step="1" value="420"
             aria-describedby="secondaryNavigationDelayHint">
           <output id="secondaryNavigationDelayValue" for="secondaryNavigationDelay">420ms</output>
         </span>
-        <small id="secondaryNavigationDelayHint">仅控制普通右键在同一目标上升格为沉浸的连击窗口。</small>
+        <small id="secondaryNavigationDelayHint">按住右键达到此时长后，在按下时命中的同一节点进入沉浸。</small>
       </label>
       <button class="edge-action" id="secondaryNavigationDelayReset" type="button"
-        aria-label="恢复右键沉浸连击间隔默认值">恢复默认</button>
+        aria-label="恢复右键沉浸长按时长默认值">恢复默认</button>
       <label class="setting-select" for="defaultDetailMode">
         <span>CapsLock 默认展示</span>
         <select id="defaultDetailMode">
@@ -557,17 +554,14 @@
         <section class="help-group" data-help-group="视角">
           <h3>视角</h3>
           <dl>
-            <div><dt><kbd>A</kbd></dt><dd>内包展开</dd></div>
-            <div><dt><kbd>S</kbd></dt><dd>外围展开</dd></div>
-            <div><dt><kbd>D</kbd></dt><dd>层级展开</dd></div>
-            <div><dt><kbd>F</kbd></dt><dd>沉浸进入</dd></div>
+            <div><dt><kbd>A</kbd></dt><dd>按 Slot 结构向内剖开</dd></div>
           </dl>
         </section>
         <section class="help-group" data-help-group="鼠标">
           <h3>鼠标</h3>
           <dl>
             <div><dt><kbd>左键</kbd></dt><dd>使用节点</dd></div>
-            <div><dt><kbd>右键</kbd></dt><dd>应用视角；空白返回母域</dd></div>
+            <div><dt><kbd>右键</kbd></dt><dd>短按普通向内剖开；持续按住达到设置时长后沉浸；空白返回母域</dd></div>
             <div><dt><kbd>CapsLock</kbd></dt><dd>循环名称、镜面与透明页详情；三击开关全文放大镜</dd></div>
             <div><dt><kbd>按住中键</kbd></dt><dd>围绕最近交互节点旋转</dd></div>
             <div><dt><kbd>滚轮</kbd></dt><dd>平滑远近</dd></div>
@@ -592,7 +586,7 @@
           <h3>批量</h3>
           <dl>
             <div><dt><kbd>Shift + 右拖</kbd></dt><dd>木杖轨迹命中</dd></div>
-            <div><dt><kbd>Shift 双击</kbd></dt><dd>按当前 A／S／D 作用光标所指节点的同层同团节点；F 不响应</dd></div>
+            <div><dt><kbd>Shift 双击</kbd></dt><dd>按当前 A 结构作用光标所指节点的同层同团节点</dd></div>
             <div><dt><kbd>Shift 三击</kbd></dt><dd>玉杖递归切换</dd></div>
           </dl>
         </section>
@@ -617,7 +611,7 @@
           <h3>手指替代鼠标</h3>
           <dl>
             <div><dt><kbd>单指点按</kbd></dt><dd>等同鼠标左键，选择并使用节点</dd></div>
-            <div><dt><kbd>单指按住后释放</kbd></dt><dd>等同鼠标右键，节点应用当前 A／S／D／F 视角，空白返回直接母域</dd></div>
+            <div><dt><kbd>单指按住后释放</kbd></dt><dd>等同鼠标右键短按，按 A 结构普通向内剖开；空白返回直接母域</dd></div>
             <div><dt><kbd>底部键盘</kbd></dt><dd>直接对应电脑键位，不另设业务动作按钮</dd></div>
             <div><dt><kbd>组合操作</kbd></dt><dd>一指按住 Ctrl／Shift／Alt，另一指点按或按住图区域</dd></div>
             <div><dt><kbd>中键</kbd></dt><dd>一指按住底部“中键”，另一指在图区域点按可聚焦；横向拖动转向，纵向拖动抬头／俯视</dd></div>

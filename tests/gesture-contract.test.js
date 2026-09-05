@@ -51,21 +51,29 @@ test('primary click series is settled by one arbiter without native dblclick dis
 
 test('primary taps and unmodified right navigation use their configured arbiters', () => {
   const commit = functionSource('commitPointerCandidate');
+  const pointerDownStart = source.indexOf('canvas.addEventListener("pointerdown"');
+  const pointerDownEnd = source.indexOf('canvas.addEventListener("pointermove"', pointerDownStart);
+  const pointerDown = source.slice(pointerDownStart, pointerDownEnd);
+  const release = functionSource('releasePointer');
   const primaryGate = commit.indexOf('candidate.button === 0');
   const submitted = commit.indexOf('primaryClickArbiter.submit');
-  const secondaryGate = commit.indexOf('candidate.button === 2');
-  const secondarySubmit = commit.indexOf('secondaryClickArbiter.submit');
 
   assert.notEqual(primaryGate, -1, 'primary-button gate exists');
   assert.ok(primaryGate < submitted, 'primary-button gate controls series commit');
-  assert.ok(secondaryGate < secondarySubmit, 'secondary-button gate controls its arbiter');
-  assert.ok(submitted < secondarySubmit, 'primary series returns before secondary submission');
-  assert.match(commit, /!mappingEvent\.ctrlKey/);
-  assert.match(commit, /!mappingEvent\.shiftKey/);
-  assert.match(commit, /!mappingEvent\.altKey/);
-  assert.match(commit, /!mappingEvent\.metaKey/);
-  assert.match(commit, /gesture:\s*["']double["']/);
-  assert.match(commit, /candidateArbiterKey\s*\(\s*candidate\s*\)/);
+  assert.match(pointerDown, /beginSecondaryNavigation\s*\(\s*state\.pointerCandidate\s*\)/);
+  const beginSecondary = functionSource('beginSecondaryNavigation');
+  assert.match(beginSecondary, /secondaryClickArbiter\.begin\s*\(/);
+  assert.match(beginSecondary, /gesture:\s*["']hold["']/);
+  const unmodified = functionSource('isUnmodifiedSecondaryNavigation');
+  assert.match(unmodified, /!mappingEvent\.ctrlKey/);
+  assert.match(unmodified, /!mappingEvent\.shiftKey/);
+  assert.match(unmodified, /!mappingEvent\.altKey/);
+  assert.match(unmodified, /!mappingEvent\.metaKey/);
+  assert.match(beginSecondary, /candidateArbiterKey\s*\(\s*candidate\s*\)/);
+  assert.match(release, /commitPointerCandidate\s*\(/);
+  assert.match(commit, /secondaryClickArbiter\.release\s*\(/);
+  const secondaryBranch = commit.slice(commit.indexOf('candidate.button === 2'));
+  assert.doesNotMatch(secondaryBranch, /gesture:\s*["']double["']/);
   assert.doesNotMatch(commit, /action\.intent\s*===\s*["']focus["']/);
 });
 
@@ -183,6 +191,20 @@ test('secondary click arbitration reads the current persisted delay', () => {
   const configuration = source.slice(start, end);
 
   assert.match(configuration, /delayFor:\s*\(\)\s*=>\s*state\.demo\.settings\.secondaryNavigationDelayMs/);
+});
+
+test('secondary hold lifecycle cancels on drag, pointer cancellation, lost capture, blur, or modifier change', () => {
+  const pointerMoveStart = source.indexOf('canvas.addEventListener("pointermove"');
+  const pointerMoveEnd = source.indexOf('function releasePointer', pointerMoveStart);
+  const pointerMove = source.slice(pointerMoveStart, pointerMoveEnd);
+  assert.match(pointerMove, /cancelPendingSecondaryNavigation\s*\(/);
+  assert.match(source, /canvas\.addEventListener\("pointercancel"[\s\S]*cancelPendingSecondaryNavigation\s*\(/);
+  assert.match(source, /canvas\.addEventListener\("lostpointercapture"[\s\S]*cancelPendingSecondaryNavigation\s*\(/);
+  assert.match(source, /global\.addEventListener\("blur"[\s\S]*cancelPendingSecondaryNavigation\s*\(/);
+  const cancelSecondary = functionSource('cancelPendingSecondaryNavigation');
+  assert.match(cancelSecondary, /secondaryClickArbiter\.cancel\s*\(/);
+  assert.match(cancelSecondary, /state\.pointerCandidate\.cancelled\s*=\s*true/);
+  assert.match(source, /document\.addEventListener\("keydown"[\s\S]*cancelPendingSecondaryNavigation\s*\(/);
 });
 
 test('parent-domain return finds nested entry nodes recursively', () => {

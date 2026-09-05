@@ -19,6 +19,7 @@ function validatePatch(patch, fields) {
 
 export function createPresentationSettingsService({ repository, normalizeSettings }) {
   const fields = new Set(Object.keys(normalizeSettings({})));
+  const legacyOmittedField = 'secondaryNavigationDelayMs';
   async function read() {
     let document;
     try { document = await repository.read(); }
@@ -27,11 +28,20 @@ export function createPresentationSettingsService({ repository, normalizeSetting
       throw error;
     }
     const settings = document.view?.presentationSettings;
+    const savedFields = own(settings) ? Object.keys(settings) : [];
+    const isCurrentFieldSet = savedFields.length === fields.size
+      && savedFields.every(field => fields.has(field));
+    const isPriorFieldSet = savedFields.length === fields.size - 1
+      && !Object.hasOwn(settings, legacyOmittedField)
+      && savedFields.every(field => fields.has(field));
     if (document.revision < 1 || !own(document.view) || Object.keys(document.view).length !== 1
-      || !own(settings) || Object.keys(settings).length !== fields.size) {
+      || !own(settings) || (!isCurrentFieldSet && !isPriorFieldSet)) {
       throw problem('INVALID_PRESENTATION_SETTINGS_DOCUMENT', 'Expected a saved presentation settings document');
     }
-    validatePatch(settings, fields);
+    try { validatePatch(settings, fields); }
+    catch {
+      throw problem('INVALID_PRESENTATION_SETTINGS_DOCUMENT', 'Expected a saved presentation settings document');
+    }
     return { revision: document.revision, initialized: true, settings: normalizeSettings(settings) };
   }
 

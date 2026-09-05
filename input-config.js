@@ -63,7 +63,7 @@
   const PRESETS = {
     explorer: {
       name: "标准探索",
-      hint: "左键使用 · 右键向内剖开 · 右键双击沉浸 · CapsLock 信息密度 · 中键旋转",
+      hint: "左键使用 · 右键短按向内剖开／长按沉浸 · CapsLock 信息密度 · 中键旋转",
       pointer: {
         nodePrimary: VISUAL_INTENTS.activate,
         fieldPrimary: null,
@@ -77,8 +77,8 @@
         fieldDoublePrimary: null,
         nodeTriplePrimary: VISUAL_INTENTS.activate,
         fieldTriplePrimary: null,
-        nodeDoubleSecondary: VISUAL_INTENTS.applyImmersiveInwardView,
-        fieldDoubleSecondary: VISUAL_INTENTS.applyParentView,
+        nodeHoldSecondary: VISUAL_INTENTS.applyImmersiveInwardView,
+        fieldHoldSecondary: null,
         fieldMiddle: null,
         fieldMiddleDrag: VISUAL_INTENTS.orbit,
         fieldPrimaryDrag: null,
@@ -113,7 +113,6 @@
         toggleFieldChildren: "右键单击空白全域展收",
         toggleSurface: "中击球面 / L",
         toggleFieldSurfaces: "空域中击全体 / Shift + L",
-        enter: "沉浸进入 / E",
         exit: "退出上层 / X",
         cancel: "Esc",
         grab: "Shift + 拖动节点",
@@ -126,7 +125,7 @@
         toggleDemo: "P · 演示",
         toggleClusterField: "兼容球团视野",
         applyInwardView: "普通向内剖开 / 右键单击",
-        applyImmersiveInwardView: "沉浸向内剖开 / 右键双击",
+        applyImmersiveInwardView: "沉浸向内剖开 / 右键长按",
         returnOverview: "Home",
         expandToLeaves: "End",
         focus: "键盘聚焦 / F",
@@ -140,7 +139,7 @@
     },
     oneHand: {
       name: "单手试验",
-      hint: "左键使用 · 右键向内剖开 · 右键双击沉浸 · CapsLock 信息密度 · 中键旋转",
+      hint: "左键使用 · 右键短按向内剖开／长按沉浸 · CapsLock 信息密度 · 中键旋转",
       pointer: {
         nodePrimary: VISUAL_INTENTS.activate,
         fieldPrimary: null,
@@ -154,8 +153,8 @@
         fieldDoublePrimary: null,
         nodeTriplePrimary: VISUAL_INTENTS.activate,
         fieldTriplePrimary: null,
-        nodeDoubleSecondary: VISUAL_INTENTS.applyImmersiveInwardView,
-        fieldDoubleSecondary: VISUAL_INTENTS.applyParentView,
+        nodeHoldSecondary: VISUAL_INTENTS.applyImmersiveInwardView,
+        fieldHoldSecondary: null,
         fieldMiddle: null,
         fieldMiddleDrag: VISUAL_INTENTS.orbit,
         fieldPrimaryDrag: null,
@@ -190,7 +189,6 @@
         toggleFieldChildren: "右键单击空白全域展收",
         toggleSurface: "中击球面 / L",
         toggleFieldSurfaces: "空域中击全体 / Shift + L",
-        enter: "沉浸进入 / E",
         exit: "退出上层 / X",
         cancel: "Esc",
         grab: "Alt + 拖动节点",
@@ -203,7 +201,7 @@
         toggleDemo: "P · 演示",
         toggleClusterField: "兼容球团视野",
         applyInwardView: "普通向内剖开 / 右键单击",
-        applyImmersiveInwardView: "沉浸向内剖开 / 右键双击",
+        applyImmersiveInwardView: "沉浸向内剖开 / 右键长按",
         returnOverview: "Home",
         expandToLeaves: "End",
         focus: "键盘聚焦 / F",
@@ -251,8 +249,11 @@
     if (context && context.gesture === "double" && event.button === 0) {
       return onNode ? bindings.nodeDoublePrimary || null : bindings.fieldDoublePrimary || null;
     }
+    if (context && context.gesture === "hold" && event.button === 2) {
+      return onNode ? bindings.nodeHoldSecondary || null : bindings.fieldHoldSecondary || null;
+    }
     if (context && context.gesture === "double" && event.button === 2) {
-      return onNode ? bindings.nodeDoubleSecondary || null : bindings.fieldDoubleSecondary || null;
+      return null;
     }
     if (
       context
@@ -422,7 +423,7 @@
         label: "节点使用",
         items: [
           pointerItem(VISUAL_INTENTS.applyInwardView, "普通向内剖开", "右键单击"),
-          pointerItem(VISUAL_INTENTS.applyImmersiveInwardView, "沉浸向内剖开", "右键双击"),
+          pointerItem(VISUAL_INTENTS.applyImmersiveInwardView, "沉浸向内剖开", "右键长按"),
           pointerItem(VISUAL_INTENTS.applyParentView, "返回直接母节点", "右键单击子域空白"),
           pointerItem(VISUAL_INTENTS.activate, "使用承载", "左键单击 / 双击 / 三击"),
           keyboardItem(VISUAL_INTENTS.setSurfaceDetails, "镜面详情（CapsLock 大写）"),

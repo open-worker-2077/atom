@@ -262,10 +262,10 @@ test('primary arbiter settles a different target before starting a new series', 
   assert.deepEqual(committed, [firstSingle, secondSingle]);
 });
 
-test('secondary arbiter reads the current delay and turns two exact-signature taps into one double action', () => {
+test('secondary arbiter anchors the hold delay at press and commits long once before release', () => {
   const timers = new Map();
   const singles = [];
-  const doubles = [];
+  const holds = [];
   let nextTimer = 1;
   let delayMs = 420;
   const arbiter = createSecondaryClickArbiter({
@@ -283,88 +283,79 @@ test('secondary arbiter reads the current delay and turns two exact-signature ta
     commitSingle(action) {
       singles.push(action);
     },
-    commitDouble(action) {
-      doubles.push(action);
+    commitHold(action) {
+      holds.push(action);
     }
   });
   const single = { intent: 'toggleChildren', target: { id: 'tunnel' } };
-  const double = { intent: 'applyImmersiveInwardView', target: single.target };
+  const hold = { intent: 'applyImmersiveInwardView', target: single.target };
 
-  assert.equal(arbiter.submit(single, double, 'node:tunnel'), 'pending');
+  assert.equal(arbiter.begin(single, hold, 'node:tunnel'), 'pending');
   assert.equal(timers.get(1).delay, 420);
   delayMs = 515;
-  assert.equal(arbiter.submit(single, double, 'node:tunnel'), 'double');
+  timers.get(1).callback();
   assert.deepEqual(singles, []);
-  assert.deepEqual(doubles, [double]);
-  assert.equal(timers.size, 0);
+  assert.deepEqual(holds, [hold]);
+  assert.equal(arbiter.pending, true);
+  assert.equal(arbiter.release('node:tunnel'), 'hold');
+  assert.deepEqual(singles, []);
+  assert.deepEqual(holds, [hold]);
   assert.equal(arbiter.pending, false);
 
-  assert.equal(arbiter.submit(single, double, 'node:tunnel'), 'pending');
+  assert.equal(arbiter.begin(single, hold, 'node:tunnel'), 'pending');
   assert.equal(timers.get(2).delay, 515);
 });
 
-test('secondary arbiter commits exactly one parent action for two taps on the same field', () => {
-  const timers = new Map();
+test('secondary arbiter releases a short press once and coalesces a fast exact-signature double press', () => {
   const commits = [];
-  let nextTimer = 1;
+  let currentTime = 1000;
   const arbiter = createSecondaryClickArbiter({
-    setTimer(callback) {
-      const id = nextTimer++;
-      timers.set(id, callback);
-      return id;
-    },
-    clearTimer(id) {
-      timers.delete(id);
-    },
+    now: () => currentTime,
+    setTimer: () => 1,
+    clearTimer() {},
     commitSingle(action) {
-      commits.push(['single', action.intent]);
+      commits.push(action.intent);
     },
-    commitDouble(action) {
-      commits.push(['double', action.intent]);
-    }
+    commitHold() {}
   });
   const parent = { intent: 'applyParentView', target: null };
 
-  assert.equal(arbiter.submit(parent, parent, 'field:root/a'), 'pending');
-  assert.equal(arbiter.submit(parent, parent, 'field:root/a'), 'double');
-  assert.deepEqual(commits, [['double', 'applyParentView']]);
-  assert.equal(timers.size, 0);
+  assert.equal(arbiter.begin(parent, null, 'field:root/a'), 'pending');
+  assert.equal(arbiter.release('field:root/a'), 'single');
+  currentTime += 40;
+  assert.equal(arbiter.begin(parent, null, 'field:root/a'), 'pending');
+  assert.equal(arbiter.release('field:root/a'), 'coalesced');
+  assert.deepEqual(commits, ['applyParentView']);
 });
 
-test('secondary arbiter commits a different pending target before scheduling the next', () => {
-  const timers = new Map();
+test('secondary arbiter keeps short presses on different stable targets independent', () => {
   const singles = [];
-  let nextTimer = 1;
+  let currentTime = 1000;
   const arbiter = createSecondaryClickArbiter({
-    setTimer(callback) {
-      const id = nextTimer++;
-      timers.set(id, callback);
-      return id;
-    },
-    clearTimer(id) {
-      timers.delete(id);
-    },
+    now: () => currentTime,
+    setTimer: () => 1,
+    clearTimer() {},
     commitSingle(action) {
       singles.push(action);
     },
-    commitDouble() {}
+    commitHold() {}
   });
   const first = { intent: 'toggleChildren', target: { id: 'first' } };
   const second = { intent: 'toggleChildren', target: { id: 'second' } };
 
-  arbiter.submit(first, { intent: 'enter', target: first.target }, 'node:first');
-  arbiter.submit(second, { intent: 'enter', target: second.target }, 'node:second');
-  assert.deepEqual(singles, [first]);
-  assert.equal(timers.size, 1);
-
-  timers.get(2)();
+  arbiter.begin(first, { intent: 'enter', target: first.target }, 'node:first');
+  arbiter.release('node:first');
+  currentTime += 40;
+  arbiter.begin(second, { intent: 'enter', target: second.target }, 'node:second');
+  arbiter.release('node:second');
   assert.deepEqual(singles, [first, second]);
   assert.equal(arbiter.pending, false);
 });
 
-test('secondary arbiter cancel prevents the pending single action', () => {
+test('secondary arbiter cancel prevents a late hold timer and release navigation', () => {
   const timers = new Map();
   const singles = [];
+  const holds = [];
   const arbiter = createSecondaryClickArbiter({
     setTimer(callback) {
       timers.set(1, callback);
@@ -376,14 +367,18 @@ test('secondary arbiter cancel prevents the pending single action', () => {
     commitSingle(action) {
       singles.push(action);
     },
-    commitDouble() {}
+    commitHold(action) {
+      holds.push(action);
+    }
   });
 
-  arbiter.submit({ intent: 'toggleFieldChildren' }, { intent: 'exit' }, 'field');
+  arbiter.begin({ intent: 'toggleChildren' }, { intent: 'applyImmersiveInwardView' }, 'node:tunnel');
   const callback = timers.get(1);
   arbiter.cancel();
   callback();
+  assert.equal(arbiter.release('node:tunnel'), 'idle');
   assert.deepEqual(singles, []);
+  assert.deepEqual(holds, []);
   assert.equal(arbiter.pending, false);
 });
 

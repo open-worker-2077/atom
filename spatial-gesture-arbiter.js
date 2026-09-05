@@ -170,18 +170,26 @@
       : () => (Number.isFinite(options.delay) ? options.delay : 420);
     const setTimer = options.setTimer || root.setTimeout.bind(root);
     const clearTimer = options.clearTimer || root.clearTimeout.bind(root);
+    const now = typeof options.now === 'function' ? options.now : () => Date.now();
     const commitSingle = typeof options.commitSingle === 'function' ? options.commitSingle : function noop() {};
-    const commitDouble = typeof options.commitDouble === 'function' ? options.commitDouble : function noop() {};
+    const commitHold = typeof options.commitHold === 'function' ? options.commitHold : function noop() {};
     let pendingTimer = null;
     let pendingToken = null;
-    let pendingAction = null;
+    let pendingSingleAction = null;
+    let pendingHoldAction = null;
     let pendingSignature = null;
+    let pendingDelay = 420;
+    let holdCommitted = false;
+    let recentSingle = null;
 
     function resetPending() {
       pendingTimer = null;
       pendingToken = null;
-      pendingAction = null;
+      pendingSingleAction = null;
+      pendingHoldAction = null;
       pendingSignature = null;
+      pendingDelay = 420;
+      holdCommitted = false;
     }
 
     function cancel() {
@@ -191,42 +199,60 @@
       resetPending();
     }
 
-    function schedule(token) {
-      const delay = Math.min(800, Math.max(240, Number(delayFor()) || 420));
+    function schedule(token, delay) {
       pendingTimer = setTimer(() => {
         if (pendingToken !== token) return;
-        const action = pendingAction;
-        resetPending();
-        commitSingle(action);
+        pendingTimer = null;
+        holdCommitted = true;
+        commitHold(pendingHoldAction);
       }, delay);
     }
 
-    function submit(singleAction, doubleAction, signature) {
+    function begin(singleAction, holdAction, signature) {
+      cancel();
+      if (!singleAction || typeof singleAction !== 'object') return 'idle';
       const safeSignature = typeof signature === 'string' && signature ? signature : 'field';
-      if (pendingToken !== null && pendingSignature === safeSignature) {
-        if (pendingTimer !== null) clearTimer(pendingTimer);
-        resetPending();
-        commitDouble(doubleAction);
-        return 'double';
-      }
-
-      if (pendingToken !== null) {
-        const previousAction = pendingAction;
-        if (pendingTimer !== null) clearTimer(pendingTimer);
-        resetPending();
-        commitSingle(previousAction);
-      }
-
       const token = {};
       pendingToken = token;
-      pendingAction = singleAction;
+      pendingSingleAction = singleAction;
+      pendingHoldAction = holdAction || null;
       pendingSignature = safeSignature;
-      schedule(token);
+      pendingDelay = Math.min(800, Math.max(240, Number(delayFor()) || 420));
+      if (pendingHoldAction) schedule(token, pendingDelay);
       return 'pending';
     }
 
+    function release(signature) {
+      if (pendingToken === null) return 'idle';
+      const safeSignature = typeof signature === 'string' && signature ? signature : 'field';
+      if (safeSignature !== pendingSignature) {
+        cancel();
+        return 'cancelled';
+      }
+      if (pendingTimer !== null) clearTimer(pendingTimer);
+      const singleAction = pendingSingleAction;
+      const completedHold = holdCommitted;
+      const releaseSignature = pendingSignature;
+      const releaseDelay = pendingDelay;
+      resetPending();
+      if (completedHold) return 'hold';
+      const releasedAt = Number(now()) || 0;
+      if (
+        recentSingle
+        && recentSingle.signature === releaseSignature
+        && releasedAt - recentSingle.at <= recentSingle.delay
+      ) {
+        recentSingle = null;
+        return 'coalesced';
+      }
+      recentSingle = { signature: releaseSignature, at: releasedAt, delay: releaseDelay };
+      commitSingle(singleAction);
+      return 'single';
+    }
+
     return Object.freeze({
-      submit,
+      begin,
+      release,
       cancel,
       get pending() {
         return pendingToken !== null;
