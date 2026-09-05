@@ -1046,6 +1046,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       ...(details.slowestProgramDurationMs !== undefined ? {
         slowestProgramDurationMs: details.slowestProgramDurationMs
       } : {}),
+      ...(details.evidenceFailure ? { evidenceFailure: details.evidenceFailure } : {}),
       commitEntered: details.commitEntered === true
     });
     const terminalStage = details.outcome === 'failure'
@@ -4178,7 +4179,16 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     const identity = { discardId: transformed.logRecord.discardId,
       archivePath: transformed.sourcePath, originalPath: transformed.resultPath };
     let evidence = null;
-    try { evidence = await options.readDiscardEvidence(identity); } catch {}
+    try { evidence = await options.readDiscardEvidence(identity); } catch (error) {
+      const cause = error?.details?.cause ?? error?.cause?.code ?? error?.cause;
+      await recordTransformStage('transform-apply', transformApplyStartedAt, {
+        outcome: 'failure',
+        evidenceFailure: {
+          code: typeof error?.code === 'string' ? error.code : (error?.name ?? 'DISCARD_EVIDENCE_READ_FAILED'),
+          ...(typeof cause === 'string' ? { cause } : {})
+        }
+      });
+    }
     const archived = exactMatchAtPath(requestStartAtoms, identity.archivePath)?.atom;
     const surface = (atom) => programDeclarationSurface([atom])
       .map((declaration) => ({ ...declaration, path: declaration.path.split('/').slice(1).join('/') }))

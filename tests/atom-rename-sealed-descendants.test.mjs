@@ -14,6 +14,8 @@ import { executeAtomLanguage as executeKernel } from '../work-engine/atom-langua
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
+import { createRuntimeDiagnosticStore } from '../src/atom-system/world-runtime/year-ring.mjs';
+import { createJsonRuntimeDiagnosticRepository } from '../src/atom-system/adapters/json-runtime-diagnostic-repository.mjs';
 
 const atom = (thing, slot = [], situation = '') => ({ thing, situation, slot, strut: [] });
 const find = (atoms, path) => walkAtoms(atoms).find((m) => m.path.join('/') === path)?.atom;
@@ -114,6 +116,53 @@ test('trusted restore cannot use an auxiliary log without central evidence', asy
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.equal(result.errors[0].code, 'AGENT_LABEL_DELEGATION_DENIED');
   assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
+});
+
+test('trusted restore reports reader failure by interaction without changing delegation refusal', async (t) => {
+  const { files, discarded, directory, run: editArchive, workerSource } = await authorityArchive(t);
+  const before = await fs.readFile(files.contextFile, 'utf8');
+  const repository = createJsonRuntimeDiagnosticRepository({ file: path.join(directory, 'reader-diagnostics.json') });
+  const diagnostics = createRuntimeDiagnosticStore({ repository });
+  const run = (diagnosticRecorder, id) => executeKernel({
+    contextFile: files.contextFile, projectionFile: files.graphFile,
+    source: `transform ${JSON.stringify({ 'thing.rst.': discarded.archive.restoreCoordinate })}`,
+    interaction: { id, agent: { path: 'Root' } }, diagnosticRecorder,
+    commitWorld: (transition) => createTransactionalWorldPersistence({
+      contextFile: files.contextFile, projectionFile: files.graphFile
+    }).commit({ ...transition, correlationId: id }),
+    readDiscardEvidence: async () => {
+      throw Object.assign(new Error('private historical body must not appear'), {
+        code: 'TEST_DISCARD_READER_FAILED', details: { cause: 'EIO', facts: 'private historical body' }
+      });
+    },
+    programScheduler: createProgramRuntimeScheduler({ projectionRepository: createJsonProgramProjectionRepository({
+      file: path.join(directory, 'program-projection.json')
+    }) })
+  });
+  const refused = await run(diagnostics, 'restore-reader-failure');
+  assert.equal(refused.ok, false, JSON.stringify(refused));
+  assert.equal(refused.errors[0].code, 'AGENT_LABEL_DELEGATION_DENIED');
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
+  const reread = await createRuntimeDiagnosticStore({ repository }).findByInteractionId('restore-reader-failure');
+  const failure = reread?.stages?.find((stage) => stage.evidenceFailure)?.evidenceFailure;
+  assert.deepEqual(failure, { code: 'TEST_DISCARD_READER_FAILED', cause: 'EIO' });
+  assert.equal(JSON.stringify(reread).includes('private historical body'), false);
+  const recorderFailed = await run({ async record() { throw new Error('diagnostic write unavailable'); } }, 'restore-recorder-failure');
+  assert.equal(recorderFailed.ok, false, JSON.stringify(recorderFailed));
+  assert.equal(recorderFailed.errors[0].code, 'AGENT_LABEL_DELEGATION_DENIED');
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
+  const allowed = 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})';
+  const edited = await editArchive('allow-normal-delegation', {
+    thing: `${discarded.archive.path}/Worker`, [`situation.rep.${allowed}`]: workerSource
+  });
+  assert.equal(edited.ok, true, JSON.stringify(edited));
+  const authorized = await run(diagnostics, 'restore-reader-failure-authorized');
+  assert.equal(authorized.ok, true, JSON.stringify(authorized));
+  const success = await createRuntimeDiagnosticStore({ repository }).findByInteractionId('restore-reader-failure-authorized');
+  assert.equal(success.outcome, 'success');
+  assert.deepEqual(success.stages.find((stage) => stage.evidenceFailure)?.evidenceFailure,
+    { code: 'TEST_DISCARD_READER_FAILED', cause: 'EIO' });
+  assert.equal(find(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Root/Parent/Worker').situation, allowed);
 });
 
 for (const history of ['ancestor-patch', 'snapshot', 'injected-at-discard']) {
