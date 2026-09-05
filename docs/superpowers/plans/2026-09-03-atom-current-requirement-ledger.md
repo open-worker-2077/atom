@@ -247,3 +247,10 @@
 - **Task2评审确认缺口**：真实两入口在世界写入、回执索引发布间隙可用同correlation产生两笔来源提交，违反中央身份绑定；112项原测试未覆盖此窗口。已停止候选推进，完整报告后统一回修；不把入口预检或现有测试通过当成中央原子保证。
 
 - **2026-09-05 18:42—18:46手机新证据**：Tailscale仍Online=false、LastSeen=08:00:00.1Z、无握手/流量；ADB重新发现adb-62271JEA306021-CJEaPI的无线端点192.168.224.1:33159。默认/获准connect均失败；获准只读路由与TCP检查确认源192.168.224.213经WLAN直连192.168.224.0/24、端口TCP=true。现行adb server-status给出的adb.log在18:42:27和18:43:25明确TLS握手后SSLV3_ALERT_CERTIFICATE_UNKNOWN。此前“端点不可达”不能覆盖这个新状态：当前ADB是手机不接受本机调试证书，需手机侧配对才能恢复该诊断通道；未删除/替换密钥、未更改认证、VPN或网络。Tailscale离线仍是正式手机访问的独立未闭环项，ADB证书错误不冒充网站根因。用户离开机位，继续当前Transform回修；可用终端入口形成后优先回手机。
+
+- **Task3已续接**：Task2三项回修全部复核通过，Task3以adb0a0b开始最新生产副本公开验收及最终候选门禁。手机缺失现行受信调试入口，已异步请求用户方便时提供无线调试配对地址/码，并说明这会授权本机调试；尚未收到或执行新配对。本机工作持续，不因等待手机输入停止。
+
+- **2026-09-05 安全备份完成**：用户明确要求立即推送作为安全备份，覆盖此前本轮不推送限制。首次自动审核因目的仓归属未核实拒绝，未执行；核实 GitHub 登录 open-worker-2077、同名仓 atom 的 admin/maintain/push 权限及精确 origin 后，同一 atomic push 获准成功。ls-remote 核对 main=16f47f822a0f2188baab382f761f26b2eb98c184、fix/transform-postcommit-boundary=adb0a0b5486771f9b148739c53acfb7eb952f69c、feat/a-mode-consolidation=f49ed3231797771c348337ac14e63b1c6b8bc406。仅代码/测试/文档，无生产世界或密钥；Task3 后续 7edd97e 尚不在本次备份内。后续必要代码安全提交推送由控制方管理，实施 Agent 不自行推送，不 force、不改变目的地、不公开私密世界。
+- **手机当前事实更新**：用户确认手机又连上；19:10 只读 Tailscale 显示 Pixel 10a Online=true、LastHandshake=2026-09-05T19:08:12.2321521+08:00、Rx=210060/Tx=3223620。旧离线诊断已过时；已告知用户无需提供 ADB 配对码，未配对或更改网络。手机访问具备实际用户证据，但显示配置需求未关闭。
+- **手机配置 RED / 新验收**：用户确认手机边框消失源于边界强度为 0%，要求手机配置以本机为准。实际 spatial-engine loadDemoSettings 只读各自浏览器 localStorage(v2/v1)，spatial-demo-model 默认 nestedTunnelPercent=0，绘制 alpha 和线宽均乘该值。对真实 reader 的隔离 VM 探针：控制桌面值55/35，空手机存储值0/0，继承断言 0!==55 RED；55/35是探针值，不是用户本机实际值。下一优先修复配置权威/继承及真实边框表现，不能仅让手机手动重设，不能声称本机真实参数已取得；保留有效本机配置和既有需求。Transform 部署回告后先处理本项，再旧print及A续点。
+- **Task3 受影响门禁裁定**：7edd97e helper候选，boundary41/41、真实副本四轴/引用守恒通过；受影响链120/126，停止升级全量。三条合并提交测试按新合同改为来源及后续两笔并保留全部事实/修订断言；普通 Transform 的非法 listener 改为来源保留、后续明确 SLOT_SIGNAL_REQUIRED 且 effects 不发布。projection FULL_REBUILD 不能直接视作旧断言：普通局部改造不应无事件全量刷新，保留原禁止断言并定位。显式 run 复制 Sender 的重复调度属于真实回归，保留原 Slot 路径/两次投递/claim 守恒并定向修复。
