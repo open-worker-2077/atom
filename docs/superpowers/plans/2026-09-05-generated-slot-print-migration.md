@@ -55,7 +55,7 @@ Run: `node --test --test-isolation=none tests/atom-generated-slot-print-migratio
 
 - [ ] **Step 3: 实现精确生成物白名单**
 
-先由当前sealed layout取print与last revision；只接受header为单个字面量`PRINT_PLAN = json_parse({"text": JSON_STRING})`，解析出的plan与当前修订plan结构相等，main恰为 `def main(arguments)` 返回一个slot_body字典。旧字典仅允许action=print、body为当前layout的精确字符串、name=arguments["name"]；有额外语句/计算/成员时拒绝该疑似生成物，绝不求值或猜写。
+先由当前sealed layout取print与last revision；只接受header为单个字面量`PRINT_PLAN = json_parse({"text": JSON_STRING})`，解析出的plan与当前修订plan结构相等，main恰为 `def main(arguments)` 返回一个slot_body字典。旧字典仅允许action=print、body为已与当前修订逐项核对的PRINT_PLAN.body精确字符串、name=arguments["name"]；有额外语句/计算/成员时拒绝该疑似生成物，绝不求值或猜写。
 
 ```text
 PRINT_PLAN = json_parse(原字面量保持原字节)
@@ -106,4 +106,5 @@ focused测试及独立复核通过后集成维护工具；使用受控现有服�
 
 - **覆盖**：Task1精确识别／守恒／拒绝；Task2备份／幂等／CAS／rollback／冷公开调用／生产回读。
 - **接口一致**：planner产出的facts/revisions/changedPaths被唯一中央维护提交消费。
-- **状态**：仅计划，未派发、未实现、未改变生产；不得把计划或5个盘点数当作迁移成功。
+- **状态**：共同设置代码已部署，实际基准/真机验收因原页面不可读局部待定；现按已批准顺序启动本计划Task1，未改变生产print。不得把计划或旧5个盘点数当作迁移成功。
+- **预检裁定（2026-09-06）**：旧生成器d267a91的父版本明确从plan.body生成main的body字面量；祖先改名/移动后源码和修订快照依法保留旧路径，因此白名单应与经当前layout修订核验的PRINT_PLAN.body匹配，不能强制等于现行layout路径。该修正保持用户“只去退役调用参数、不改历史快照”的要求；其他模板严格限制不变。若身份/修订/源码不能交叉证明，拒绝迁移。
