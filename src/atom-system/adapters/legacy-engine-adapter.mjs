@@ -93,7 +93,7 @@ export function createLegacyWorldService(options = {}) {
           const receipt = await persistence.commit({
             ...transition,
             source: request.source,
-            correlationId: request.interaction?.id ?? transition.correlationId
+            correlationId: transition.correlationId ?? request.interaction?.id
           });
           invalidateManifest(persistence);
           return receipt;
