@@ -217,3 +217,5 @@
 - **保存验证收口（2026-09-06）**：候选ea0960f；最终全量1802/1803，唯一清理ENOTEMPTY经仅删除测试递归清理hook修正，定向1/1退出0，保留资源关闭和全部业务断言。产品与已审定a133ae6一致；复用1802项有效证据，部署待执行。
 
 - **保存已部署（2026-09-06）**：main e82984d，正式HTTPS build sha256-37046dfdf392ef9e，三份前端资产逐字节匹配，health7404/published。正式页面实际Enter操作350ms出现正在保存，并在受控网络失败后显示保存失败；全部写请求拦截，零生产写入，此项不是物理手机验收。私有备份web-save-feedback-20260906-033356已保全。部署末端Get-Process.StartTime空值已以CIM创建时间03:34:12补证晚于合入03:34:11，Runtime Running、Watchdog Ready。当前继续手机共同配置Task2。
+
+- **手机审查回修1（2026-09-06）**：Task2 d760145确认两项Important：旧排队patch在执行时借用新settingsRevision可覆盖其他设备赢家；旧GET晚失败可覆盖较新synced状态。已派原实施Agent定向RED→GREEN，须保全同设备连续操作且不将旧外部冲突操作重绑定新基准。原始缓存与bootstrap基准经源代码核对符合边界；色彩环境warning仅Minor，记录不扩展产品。尚未部署。
