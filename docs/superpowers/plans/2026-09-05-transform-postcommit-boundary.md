@@ -214,7 +214,7 @@ Run: `npm run check:development-control`；`npm test`。真实失败先定向修
 
 - [ ] **Step 4: 受控部署与公共回读**
 
-基线、Git SHA、私有备份和构建id可追溯；集成本地main后受控重启 Atom Graph Runtime，公开health为ready且atomProjection.status=published，再公开CLI读取普通Agent及所需源节点。代码回退不回滚用户后来写入的业务世界；不push。
+基线、Git SHA、私有备份和构建id可追溯；集成本地main后受控重启 Atom Graph Runtime，公开health为ready且atomProjection.status=published，再公开CLI读取普通Agent及所需源节点。代码回退不回滚用户后来写入的业务世界；不push。部署前私有快照须包含权威atom.json及atom.transactions.json和其.d增量日志目录；生产停写窗口内核对一致性后留存，代码回退与事实恢复分开裁定。既有backup-atom-runtime.ps1只复制atom.json/submissions且会push，不适用于本项完整无推送部署快照。
 
 - [ ] **Step 5: 回告与继续**
 
@@ -287,3 +287,14 @@ Run: `npm run check:development-control`；`npm test`。真实失败先定向修
 - **Task2服务回归GREEN**：无持久化转发与manifest single-flight两项修复后，原service合同整文件16/16通过。事件binding改为固定请求散列，保留输入冲突比较而不将history正文放大为持久调度消息；startup/身份定向验证后进入报告与提交。
 
 - **Task2候选**：bbf4e32（BASE=802d902），8个代码/测试文件；最终代码后聚焦107/107、Graph重复HTTP/备份2/2、独立交互/截止3/3，共112项通过。包含实际server启动恢复、旧loader逆向rollback、当前授权、HTTP最终cache、源/child辅助异常及原service合同。GitNexus staged CRITICAL，45符号/25执行流；已告知用户，精确802d902..bbf4e32审查包交transform_boundary_task2_review（gpt-6-astra high）独立复核。无全量/生产变更，未标Task2完成。
+
+- **Task2独立复核RED**：评审方真实persistence两facade探针确认：暂停第一笔committed事件append（世界已写、索引尚未发布），第二入口以相同correlationId、不同binding、expectedRevision=第一笔after提交；两笔均fulfilled且sourceCommits=2、commandId不同。证据私有目录atom-task2-review-race-jH0cub保留。入口binding预检在共享coordinator串行裁定外，不能保证中央幂等/身份。候选bbf4e32尚不通过，待完整报告统一进入Task2回修；未部署。
+
+- **Task2 fix round1/5**：bbf4e32独立复核Needs fixes，三项Important：中央关联在串行裁定外（真实双提交RED）；最终outcome append EIO裸抛否定已提交来源（真实RED）；no-change来源产生真实effects却无持久原interaction绑定（代码确认）。复用原实施方统一修复，不进入Task3。
+- **Ruling: 中央裁定最小接线**：授权必要时修改现有world-runtime/commit-coordinator.mjs及atom-world-transaction.test.mjs，仅把绑定/最终状态校验放入已有中央串行裁定；不加第二提交队列/coordinator或跨进程锁。来源无变化但effects实际提交，原身份绑定到真实effects receipt，不造空来源revision、不关闭触发。outcome持久失败必须保全已提交来源、明确pending/恢复warning。原因是三项均直接违反已批准合同；错误代价为局部中央接线或回执关联返工。若需新非世界journal语义，先回控制方裁定。
+
+- **Task2 round1 RED**：具名consecutive-revision/outcome append EIO/unchanged source binds命令实际4/4失败，复现双提交、结果记录异常逃逸，以及single/batch来源无变化的effects冷重读重跑。实施方已核对原coordinator五个直接调用，impact MEDIUM；拟沿现有serialize内validateCommit和结果附加串行入口修复。late-dedup返回旧receipt时，禁止adopt未提交候选facts及重复触发备份hook，必须按真实已提交事实交付。
+
+- **Task2 round1定向GREEN**：boundary38＋transaction21＋service16=75/75，HTTP pending/final/deadline2/2。七个新增用例覆盖连续revision不同身份拒绝、同身份复用且仅首次hook、final outcome/effects串行竞态、failed/completed两种outcome EIO、single/batch来源无变化而真实effects冷进程重读零worker。实施方尚在自查/报告/提交，候选未复审。
+
+- **Task2 round1提交复审**：0df824e，六代码/测试文件、77/77，staged CRITICAL（14符号/20流程）；完整fix report已追加，原评审按bbf4e32..0df824e精确包逐项复审。中间cab1e87仅控制方文档，评审范围可回溯。当前不勾Task2完成，不进入Task3、不部署。
