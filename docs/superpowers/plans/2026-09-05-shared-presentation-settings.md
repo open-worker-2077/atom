@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-31-atom-web-spatial-design.md` §5.5。I3/U3/D2/E3；Transform已完整交付、回告且核对远端备份，现在执行本项，早于旧print及A剩余任务。
 
-**当前执行（2026-09-06）:** 保存反馈已部署e82984d。手机62a194c任务和整分支复审已关闭；最终全量1826/1823通过/3失败，正在定向回修路径断言、旧迁移覆盖与模型依赖方向。三项定向3/3已通过，受影响链验证进行中；尚未部署，真实本机基准与真机缺口保留。
+**当前执行（2026-09-06）:** 最终候选1f73b5a全量1826项/1825通过/1清理失败（ENOTEMPTY，428212ms）；c47094f仅移除该测试递归删除，保留全部业务断言与服务关闭，原用例1/1 exit0。独立范围复核通过，root裁定1825有效全量证据加1定向通过足以部署，产品仍同2ed5448，不声称单次1826全绿。汇总后残留测试PID12784已按创建时间、完整命令和父PID定界后释放，无子进程，wrapper退出-1属人为资源收尾。原始日志final-full-1f73b5a.txt及final-cleanup-targeted-1f73b5a.txt保留。接下来私密备份/部署/正式入口回读；真实本机参数与真机缺口保留。
 
 **历史RED检查点（2026-09-06）:** 原Task2两个RED测试文件已原样提交为48c79fb安全检查点，未实现产品逻辑、未新增测试运行、未宣称GREEN；待保存反馈交付后安全合入main并续接。
 
@@ -141,7 +141,7 @@ if (snapshot.initialized && snapshot.revision >= settingsRevision) {
 }
 ```
 
-- [ ] **Step 3: 受影响链与最终候选**
+- [x] **Step 3: 受影响链与最终候选**
 
 Run: `node --test tests/browser-bridge-contract.test.js tests/atom-presentation-settings.test.mjs`；随后`npx playwright test tests/browser/presentation-settings.spec.mjs --config=playwright.config.mjs --output="$env:TEMP/atom-shared-settings-$(Get-Date -Format yyyyMMdd-HHmmss)"`，复用既有4796隔离服务器（本身调用startAtomGraphServer），不把Playwright spec当Node test运行。当前层GREEN后development-control与最终候选npm test各一次，任务及全分支独立评审。若A未合入仍用当前生产模式验收；A后续集成须保留共同配置链和新增secondaryNavigationDelayMs字段，不撤回为纯localStorage。
 
