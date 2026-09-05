@@ -1446,3 +1446,263 @@ test('single landing is failed and rolled back when authority keeps the source w
   assert.match(failed[0].message, /单节点|目标|来源/);
   assert.equal(imports.at(-1).revision, 1, 'the optimistic preview rolls back to the last authoritative world');
 });
+
+test('a remote browser with cached defaults cannot initialize shared presentation settings', async () => {
+  const requests = [];
+  const applied = [];
+  const listeners = new Map();
+  const response = (payload, ok = true) => ({ ok, json: async () => payload });
+  const document = {
+    body: { dataset: {} }, hidden: false,
+    getElementById: () => null,
+    addEventListener: (name, listener) => listeners.set(name, listener)
+  };
+  const window = {
+    location: { hostname: 'phone.example.test', protocol: 'https:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge: () => true,
+      exportField: () => ({ path: 'root' }),
+      presentationSettings: () => ({
+        settings: { nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0 },
+        stored: {
+          exists: true, valid: true, key: 'graph-4d.presentation-settings.v2',
+          raw: '{"nestedTunnelPercent":0,"nestedTunnelInteriorPercent":0}'
+        }
+      }),
+      applyPresentationSettings: (settings) => applied.push(settings)
+    },
+    fetch: async (url, options = {}) => {
+      requests.push([url, options]);
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+      if (url.endsWith('/presentation-settings')) {
+        return response({ ok: true, revision: 0, initialized: false, settings: null });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(requests.some(([url, options]) => (
+    url.endsWith('/presentation-settings') && options.method === 'PUT'
+  )), false);
+  assert.equal(applied.length, 0);
+  assert.equal(document.body.dataset.spatialPresentationSettings, 'uninitialized');
+});
+
+test('a loopback browser backs up its valid raw cache once and bootstraps the shared settings', async () => {
+  const raw = '{"nestedTunnelPercent":55,"nestedTunnelInteriorPercent":35}';
+  const storage = new Map();
+  const writes = [];
+  const applied = [];
+  const listeners = new Map();
+  const hostSettings = { nestedTunnelPercent: 55, nestedTunnelInteriorPercent: 35 };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = {
+    body: { dataset: {} }, hidden: false,
+    getElementById: () => null,
+    addEventListener: (name, listener) => listeners.set(name, listener)
+  };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value)
+    },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge: () => true,
+      exportField: () => ({ path: 'root' }),
+      presentationSettings: () => ({
+        settings: hostSettings,
+        stored: { exists: true, valid: true, key: 'graph-4d.presentation-settings.v2', raw }
+      }),
+      applyPresentationSettings: (settings) => applied.push(settings)
+    },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+      if (url.endsWith('/presentation-settings') && options.method === 'PUT') {
+        writes.push(JSON.parse(options.body));
+        return response({ ok: true, revision: 1, initialized: true, settings: hostSettings });
+      }
+      if (url.endsWith('/presentation-settings')) {
+        return response({ ok: true, revision: 0, initialized: false, settings: null });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(writes, [{ expectedRevision: 0, bootstrap: true, patch: hostSettings }]);
+  assert.equal(storage.get('graph-4d.presentation-settings.pre-shared.v1'), raw);
+  assert.deepEqual(applied, [hostSettings]);
+  assert.equal(document.body.dataset.spatialPresentationSettings, 'synced');
+  assert.equal(document.body.dataset.spatialPresentationSettingsRevision, '1');
+});
+
+test('a failed presentation save keeps the local scene and marks it unsynchronized', async () => {
+  const listeners = new Map();
+  const applied = [];
+  const writes = [];
+  const shared = { nestedTunnelPercent: 55, nestedTunnelInteriorPercent: 35 };
+  const response = (payload, ok = true) => ({ ok, json: async () => payload });
+  const document = {
+    body: { dataset: {} }, hidden: false,
+    getElementById: () => null,
+    addEventListener: (name, listener) => listeners.set(name, listener)
+  };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge: () => true,
+      exportField: () => ({ path: 'root' }),
+      presentationSettings: () => ({ settings: shared, stored: { exists: false, valid: false } }),
+      applyPresentationSettings: (settings) => applied.push(settings)
+    },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+      if (url.endsWith('/presentation-settings') && options.method === 'PUT') {
+        writes.push(JSON.parse(options.body));
+        return response({ ok: false, error: { code: 'PRESENTATION_SETTINGS_UNAVAILABLE', message: 'disk unavailable' } }, false);
+      }
+      if (url.endsWith('/presentation-settings')) {
+        return response({ ok: true, revision: 3, initialized: true, settings: shared });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  listeners.get('spatial-presentation-settings-changed')({ detail: { nestedTunnelPercent: 0 } });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(writes, [{ expectedRevision: 3, patch: { nestedTunnelPercent: 0 } }]);
+  assert.equal(applied.length, 1, 'the failed save must not apply an older authority snapshot');
+  assert.equal(document.body.dataset.spatialPresentationSettings, 'unsynced');
+});
+
+test('a presentation conflict reads the winner once without retrying the stale patch', async () => {
+  const listeners = new Map();
+  const applied = [];
+  const writes = [];
+  const first = { nestedTunnelPercent: 55, nestedTunnelInteriorPercent: 35 };
+  const winner = { nestedTunnelPercent: 20, nestedTunnelInteriorPercent: 35 };
+  let readCount = 0;
+  const response = (payload, ok = true) => ({ ok, json: async () => payload });
+  const document = {
+    body: { dataset: {} }, hidden: false,
+    getElementById: () => null,
+    addEventListener: (name, listener) => listeners.set(name, listener)
+  };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge: () => true,
+      exportField: () => ({ path: 'root' }),
+      presentationSettings: () => ({ settings: first, stored: { exists: false, valid: false } }),
+      applyPresentationSettings: (settings) => applied.push(settings)
+    },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+      if (url.endsWith('/presentation-settings') && options.method === 'PUT') {
+        writes.push(JSON.parse(options.body));
+        return response({ ok: false, error: { code: 'PRESENTATION_SETTINGS_CONFLICT', message: 'changed' } }, false);
+      }
+      if (url.endsWith('/presentation-settings')) {
+        readCount += 1;
+        return response({ ok: true, revision: readCount === 1 ? 4 : 5, initialized: true,
+          settings: readCount === 1 ? first : winner });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  listeners.get('spatial-presentation-settings-changed')({ detail: { nestedTunnelPercent: 0 } });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(writes, [{ expectedRevision: 4, patch: { nestedTunnelPercent: 0 } }]);
+  assert.deepEqual(applied.at(-1), winner);
+  assert.equal(document.body.dataset.spatialPresentationSettings, 'conflict');
+});
+
+test('a late older presentation GET cannot overwrite a newer SSE snapshot', async () => {
+  const applied = [];
+  const listeners = new Map();
+  let eventSource;
+  let releaseOlder;
+  let settingsReadCount = 0;
+  class FakeEventSource {
+    constructor() { this.listeners = new Map(); eventSource = this; }
+    addEventListener(name, listener) { this.listeners.set(name, listener); }
+  }
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = {
+    body: { dataset: {} }, hidden: false,
+    getElementById: () => null,
+    addEventListener: (name, listener) => listeners.set(name, listener)
+  };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge: () => true,
+      exportField: () => ({ path: 'root' }),
+      presentationSettings: () => ({ settings: {}, stored: { exists: false, valid: false } }),
+      applyPresentationSettings: (settings) => applied.push(settings)
+    },
+    EventSource: FakeEventSource,
+    fetch: async (url) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+      if (url.endsWith('/presentation-settings')) {
+        settingsReadCount += 1;
+        if (settingsReadCount === 1) {
+          return new Promise((resolve) => {
+            releaseOlder = () => resolve(response({ ok: true, revision: 1, initialized: true,
+              settings: { nestedTunnelPercent: 10 } }));
+          });
+        }
+        return response({ ok: true, revision: 2, initialized: true,
+          settings: { nestedTunnelPercent: 20 } });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  eventSource.listeners.get('presentation-settings')({ data: '{"revision":2}' });
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseOlder();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(applied, [{ nestedTunnelPercent: 20 }]);
+  assert.equal(document.body.dataset.spatialPresentationSettingsRevision, '2');
+});
