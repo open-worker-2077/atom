@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-31-atom-web-spatial-design.md` §5.5。I3/U3/D2/E3；Transform已完整交付、回告且核对远端备份，现在执行本项，早于旧print及A剩余任务。
 
-**当前断点（2026-09-06）:** 隔离工作树`.worktrees/shared-presentation-settings`、分支`fix/shared-presentation-settings`、Task1基线783dd6e；派发shared_settings_task1实施共同存储/HTTP合同。基线生产代码与1801/1801候选一致，四处新测试删除钩子已移除并独立复核，后续保留产物。本次重新检查CUA仍仅空的内置浏览器，没有真实本机标签页；实际参数与真机显示缺口仍然存在，不写测试值到生产。
+**当前断点（2026-09-06）:** 隔离工作树`.worktrees/shared-presentation-settings`、分支`fix/shared-presentation-settings`，Task1在7b47728实现并经独立审查通过（41/41、2/2）。Task2实施方shared_settings_task2已取得浏览器桥RED：既有30条通过、新5条失败；另有1条新Playwright场景尚未运行。工作树只改测试，未改产品代码/提交。用户要求先核查Superpowers本地记录与实际执行，Task2安全暂停、无运行中测试；核查后原Agent从RED续接。真实本机参数及真机边框仍未取得，不写测试值到生产。
 
 **Task1 RED:** 新增真实随机端口隔离服务测试GET共同设置接口得到404而非200，`node --test --test-isolation=none tests/atom-presentation-settings.test.mjs`为0/1通过；保留fixture。接下来实现共同仓储/CAS及HTTP合同；只移除实际必要测试中的fixture递归清理，不扩展为全库清理。
 
@@ -149,4 +149,4 @@ Run: `node --test tests/browser-bridge-contract.test.js tests/atom-presentation-
 
 - 所有§5.5要求映射到两项任务：共同权威/迁移/CAS/恢复为Task1+2；实际屏幕和真机为Task2。已知生产种子缺口明确保留，没有虚构实际参数。
 - 只复用展示模型与空间体验仓储；新接口隐藏存储路径，不重写Graph/Program/授权。并行OS写入、账号多租户与全配置平台不在本轮范围。
-- Task1已派发、Task2待Task1独立审查通过；实现与真实手机完成分别记录，不以测试替代现场结果。
+- Task1已完成并独立Approved；Task2已RED，因用户先行一致性核查暂停，待原Agent续接；生产部署及真机结果尚未完成。

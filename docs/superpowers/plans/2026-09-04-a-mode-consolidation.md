@@ -1,12 +1,14 @@
 # A Mode Consolidation Implementation Plan
 
+**当前续点（2026-09-06核对）**：隔离分支仍为f49ed32、工作区干净；旧双击实现Task1—4及原GREEN有效保存，Task5—7与用户长按修订尚未完成/部署。恢复实施时先吸收主分支现行规格及手机共同配置合同，按长按修订原相关步骤并取得新手势RED，不重复旧任务、不拿双击GREEN当长按验收。新增展示字段须兼顾已保存共同配置的迁移与读取，不能退回独立localStorage。
+
 **最新用户修订（2026-09-05，待移动部署后实施）**：右键双击沉浸改为右键长按；本条覆盖下方旧双击实施细节。当前只入账，已保存Task1—4与其验证保留为旧实现证据，不在移动修复中改交互代码。续接时按Web规格§4.1统一调整仲裁、设置、帮助及实际手势验收。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将 Atom Web 的结构游走收束为唯一 A 模式，以右键单击普通向内剖开、右键双击沉浸向内剖开，并以空白右键单击返回一层。
+**Goal:** 将 Atom Web 的结构游走收束为唯一 A 模式，以右键单击普通向内剖开、右键长按沉浸向内剖开，并以空白右键单击返回一层。下方双击任务细节为已保存旧实现，不能直接作为最新手势的验收。
 
-**Architecture:** 保留现有 A 的 nested Slot 投影为唯一结构投影，把旧 F 的真实 owner 路线进入能力改为 A 内部的沉浸动作，不再作为可选模式。已有 secondary click arbiter 负责右键单／双击仲裁，本地展示设置提供`240–800ms`可配间隔；Graph事实、Transform、左键`$click`和权限链不变。
+**Architecture（下述单/双击仲裁是已保存旧实现，长按修订尚未实施）:** 保留现有 A 的 nested Slot 投影为唯一结构投影，把旧 F 的真实 owner 路线进入能力改为 A 内部的沉浸动作，不再作为可选模式。已有 secondary click arbiter 负责右键单／双击仲裁，本地展示设置提供`240–800ms`可配间隔；Graph事实、Transform、左键`$click`和权限链不变。
 
 **Tech Stack:** Browser JavaScript (IIFE modules), Canvas spatial engine, Node.js 24 test runner, Playwright, localStorage presentation settings.
 
@@ -509,7 +511,7 @@ git commit -m "chore(web): record A-mode deployment evidence"
 
 Do not push this post-baseline work without a new user authorization. Keep `pre-a-mode-consolidation-20260904` unchanged as the remote rollback point.
 
-## 2026-09-05 接手与当前执行证据
+## 2026-09-05 历史接手与执行证据（当前续点见页首）
 
 - **当前目标**：A模式收束，I3/U2/D2/E3；Task 1已完成，Task 2进行中，Task 3—7待执行。唯一状态仍由本计划、需求总账与恢复断点共同承担，不另建SDD状态账本；官方脚本工作区只放派发摘录、报告及差异包。
 - **安全吸收**：接手前main与origin/main精确为2ae8735691aa00cdae8ad3c90d29763b1964a1af，A工作树干净且HEAD为b1bff98。非破坏merge main成功，当前合并提交4c9cf2f；未reset、未覆盖用户改动。
