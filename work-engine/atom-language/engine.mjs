@@ -221,12 +221,20 @@ function programDeclarationSurface(atoms) {
   });
 }
 
-function relocatedProgramDeclarationSurface(atoms, pathChanges = []) {
-  const rewritePath = (value) => pathChanges.reduce((current, { sourcePath, resultPath }) => (
+function relocatedProgramDeclarationSurface(atoms, pathChanges = [], simultaneous = false) {
+  const finalChanges = simultaneous
+    ? [...pathChanges].sort((left, right) => right.sourcePath.length - left.sourcePath.length) : null;
+  const rewritePath = (value) => {
+    if (finalChanges) {
+      const change = finalChanges.find(({ sourcePath }) => value === sourcePath || value?.startsWith(`${sourcePath}/`));
+      return change ? `${change.resultPath}${value.slice(change.sourcePath.length)}` : value;
+    }
+    return pathChanges.reduce((current, { sourcePath, resultPath }) => (
     current === sourcePath || current?.startsWith(`${sourcePath}/`)
       ? `${resultPath}${current.slice(sourcePath.length)}`
       : current
-  ), value);
+    ), value);
+  };
   return programDeclarationSurface(atoms)
     .map((declaration) => ({
       ...declaration,
@@ -446,14 +454,15 @@ async function validateAgentProgramDelegation({
   afterAtoms,
   creatorSecurity,
   programScheduler,
-  declarationRelocations = []
+  declarationRelocations = [],
+  simultaneousRelocations = false
 }) {
   if (JSON.stringify(programDeclarationSurface(beforeAtoms))
     === JSON.stringify(programDeclarationSurface(afterAtoms))) {
     return { ok: true, errors: [] };
   }
   if (declarationRelocations.length > 0
-    && JSON.stringify(relocatedProgramDeclarationSurface(beforeAtoms, declarationRelocations))
+    && JSON.stringify(relocatedProgramDeclarationSurface(beforeAtoms, declarationRelocations, simultaneousRelocations))
       === JSON.stringify(relocatedProgramDeclarationSurface(afterAtoms))) {
     return { ok: true, errors: [] };
   }
@@ -1848,7 +1857,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       afterAtoms: candidateAtoms,
       creatorSecurity,
       programScheduler: candidateProgramScheduler,
-      declarationRelocations
+      declarationRelocations,
+      simultaneousRelocations: parsed.batch && parsed.items.every(isBatchRenameItem)
     });
   }
 
@@ -3245,6 +3255,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     const batchDeclarationRelocations = [];
     const transformLogs = [];
     const transformEventNodes = new Set();
+    const renameEventNodes = new Set();
     const renameBatch = parsed.items.every(isBatchRenameItem);
     if (renameBatch) {
       const renamed = await applyBatchRenames({
@@ -3264,6 +3275,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         match.path.join('/'), match
       ]));
       for (const renamedItem of renamed.results) {
+        if (renamedItem.sourcePath !== renamedItem.resultPath) {
+          batchDeclarationRelocations.push({ sourcePath: renamedItem.sourcePath, resultPath: renamedItem.resultPath });
+        }
         const resultMatch = matchesByPath.get(renamedItem.resultPath);
         results.push({
           index: renamedItem.index,
@@ -3271,9 +3285,14 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           result: resultMatch ? describeAtom(resultMatch, false) : null
         });
         for (const path of [renamedItem.sourcePath, renamedItem.resultPath]) {
-          if (path) transformEventNodes.add(path);
+          if (path) {
+            transformEventNodes.add(path);
+            renameEventNodes.add(path);
+          }
         }
       }
+      // All rewritten references belong in the reversible fact patch, while
+      // only the selected rename roots generate business Transform events.
       for (const path of [
         ...(renamed.relationPaths ?? []),
         ...(renamed.programSourcePaths ?? []),
@@ -3325,7 +3344,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       for (const path of [transformed.sourcePath, transformed.resultPath]) {
         if (path) transformEventNodes.add(path);
       }
-      if (transformed.structuralCommand === 'mov'
+      if ((transformed.structuralCommand === 'mov' || isBatchRenameItem(candidate))
         && transformed.sourcePath && transformed.resultPath
         && transformed.sourcePath !== transformed.resultPath) {
         batchDeclarationRelocations.push({
@@ -3349,7 +3368,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       }
     }
 
-    for (const programPath of newlyAddedProgramPaths(atoms, nextAtoms)) {
+    for (const programPath of renameBatch ? [] : newlyAddedProgramPaths(atoms, nextAtoms)) {
       transformEventNodes.add(programPath);
     }
     let revisionAfter = revisionOf(nextAtoms);
@@ -3358,12 +3377,12 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     let finalProgramLockIndex = programLockIndex;
     const finalProgramMessages = [];
     if (options.programScheduler && options.trustedMaintenance !== true
-      && requestDeclarationRelocations.length === 0) {
+      && (requestDeclarationRelocations.length === 0 || renameBatch)) {
       let reconciled;
       try {
         reconciled = await reconcileProgramsForWorld(nextAtoms, {
           mode: 'transform',
-          nodes: [...transformEventNodes]
+          nodes: [...(renameBatch ? renameEventNodes : transformEventNodes)]
         });
       } catch (error) {
         releaseStrutDeliveryClaims();
@@ -3692,7 +3711,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   let nextAtoms = transformed.atoms;
   let revisionAfter = revisionBefore;
   let changed = transformed.changed === true || programChanged;
-  const declarationRelocations = transformed.structuralCommand === 'mov'
+  const declarationRelocations = (transformed.structuralCommand === 'mov' || isBatchRenameItem(item))
     && transformed.sourcePath && transformed.resultPath
     && transformed.sourcePath !== transformed.resultPath
     ? [{ sourcePath: transformed.sourcePath, resultPath: transformed.resultPath }]
@@ -3752,7 +3771,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     })
     : null;
   if (options.programScheduler && options.trustedMaintenance !== true
-    && requestDeclarationRelocations.length === 0) {
+    && (requestDeclarationRelocations.length === 0 || isBatchRenameItem(item))) {
     try {
       postRefresh = await reconcileProgramsForWorld(nextAtoms, {
         mode: 'transform',
@@ -3760,12 +3779,14 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         preparedIndexesValid: !programSurfaceChanged,
         preparedStrutIndexValid: !programSurfaceChanged && isLocalizedSituationTransform(item),
         strutBaseRevision: revisionOfWorldFacts(atoms),
-        affectedPaths: transformAffectedPaths,
+        affectedPaths: isBatchRenameItem(item)
+          ? [transformed.sourcePath, transformed.resultPath].filter(Boolean)
+          : transformAffectedPaths,
         nodes: [...new Set([
           transformed.sourcePath,
           transformed.resultPath,
           transformed.resultName,
-          ...(programSurfaceChanged ? newlyAddedProgramPaths(atoms, nextAtoms) : [])
+          ...(programSurfaceChanged && !isBatchRenameItem(item) ? newlyAddedProgramPaths(atoms, nextAtoms) : [])
         ].filter(Boolean))]
       }, false, declarationRelocations);
       nextAtoms = postRefresh.atoms;

@@ -560,3 +560,5 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **Task 2修复GREEN**：Chromium唯一旅程1 passed（11.3s），初始420、调515同步、reload保留、按钮恢复420、defaultDetailMode=surface不变、再次reload持久且其他设置守恒。两次中间运行暴露测试getByLabel歧义与重载面板关闭，定向修正角色定位／重开面板后通过，不作为产品失败或静默忽略。下一步原34项及提交后范围复审。
 - **Task 2: complete**：4c9cf2f..4c27d4b；原设置链34/34，重载／单字段恢复Chromium1/1。a_task2_rereview已按精确差异包完成范围复审，全部问题解决且无新增破坏。首次相对路径漏读差异包已纠正，未重复测试。
 - **生产急件切换**：收到改名判重→瞻重回执同时出现PROJECTION_RECOVERY_PENDING与WINDOW_ACCESS_DENIED的新现场证据；按总账优先规则核查权威提交与权限目标。A模式Task3尚未开始，现有代码保存于4c27d4b，未部署；急件处理后从Task3继续，不重新执行Task2。
+
+- **2026-09-05续接**：改名修复1727/1727、复核和4784部署回告完成，main@abbc5ed。手机当前无握手且离线、无线ADB不可达，保持未解决；按用户局部阻塞不全局停工授权，安全吸收main并从Task 3继续。总账合并冲突只涉及旧优先级和A阶段描述，保留最新手机优先级及Task 2完整证据；不改产品定论。

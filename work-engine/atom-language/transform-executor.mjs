@@ -650,8 +650,6 @@ export async function applyBatchRenames({
     }
   }
 
-  const selectedAtoms = new Set();
-  const authoritativeMatches = walkAtoms(nextAtoms);
   for (const plan of plans) {
     const decision = await authorize(plan.match, 'write', 'thing');
     if (decision.decision !== 'allow') {
@@ -670,20 +668,6 @@ export async function applyBatchRenames({
         ),
         itemIndex: plan.item.index
       };
-    }
-    const subtreeAtoms = new Set(walkAtoms([plan.match.atom]).map((match) => match.atom));
-    subtreeAtoms.forEach((atom) => {
-      selectedAtoms.add(atom);
-    });
-    for (const descendant of authoritativeMatches.filter((match) => (
-      match.atom !== plan.match.atom && subtreeAtoms.has(match.atom)
-    ))) {
-      if ((await authorize(descendant, 'write', 'slot')).decision !== 'allow') {
-        return {
-          error: diagnostic('WINDOW_ACCESS_DENIED', '当前窗口无权改造该批量改名子树；请反馈派发方'),
-          itemIndex: plan.item.index
-        };
-      }
     }
   }
 
@@ -1210,8 +1194,13 @@ export async function applyTransform({
   }
   const selectedAtoms = relevantSubtree ?? new Set([selected.match.atom]);
   const changesSubtree = rewritesPaths || changedFields.has('slot');
+  // A pure rename preserves descendant topology. Its path rewrites belong to
+  // the authorized root operation, just as for a subtree move.
+  const pureRename = nameCommands.length === 1 && nameCommands[0].name === 'ren'
+    && changedFields.size === 1 && changedFields.has('thing');
   if (!restoresFromKernelBackup && changesSubtree
     && structural.operation?.command.name !== 'mov'
+    && !pureRename
     && (immediateChildren(selected.match.atom)?.length ?? 0) > 0) {
     for (const match of walkAtoms([selected.match.atom])) selectedAtoms.add(match.atom);
     for (const descendant of walkAtoms(nextAtoms)) {

@@ -445,7 +445,7 @@ test('a name-only Program lock permits detail edits but denies rename', async ()
   assert.equal(rename.errors[0].code, 'PROGRAM_LOCK_DENIED');
 });
 
-test('batch rename preflights descendant locks with authoritative full paths', async () => {
+test('batch ancestor rename preserves descendant slot locks without treating paths as slot edits', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-batch-rename-lock-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
@@ -459,8 +459,6 @@ test('batch rename preflights descendant locks with authoritative full paths', a
       "lock({'targets': {'refs': [target.ref]}, 'mode': 'write', 'fields': ['slot']})"
     ].join('\n'), [], 'program')
   ], null, 2));
-  const before = await fs.readFile(contextFile, 'utf8');
-
   const result = await executeAtomLanguage({
     source: `transform ${JSON.stringify([
       { 'thing.ren.新甲': '域/甲' },
@@ -471,9 +469,16 @@ test('batch rename preflights descendant locks with authoritative full paths', a
     programScheduler: createProgramRuntimeScheduler()
   });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.errors[0].code, 'WINDOW_ACCESS_DENIED');
-  assert.equal(await fs.readFile(contextFile, 'utf8'), before);
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  const after = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.deepEqual(after[0].slot.map((node) => node.thing), ['新甲', '新乙']);
+  assert.equal(after[0].slot[0].slot[0].thing, '受保护后代');
+  const denied = await executeAtomLanguage({
+    source: 'transform {"thing":"域/新甲/受保护后代","slot":[]}', contextFile, projectionFile,
+    programScheduler: createProgramRuntimeScheduler()
+  });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.errors[0].code, 'PROGRAM_LOCK_DENIED');
 });
 
 test('explore returns the applicable write-lock summary before an Agent attempts a change', async () => {

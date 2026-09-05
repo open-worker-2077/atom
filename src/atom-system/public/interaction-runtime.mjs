@@ -160,7 +160,9 @@ export function createInteractionRuntime({
         ...(result.warnings ?? []),
         {
           code: 'PROJECTION_RECOVERY_PENDING',
-          message: 'World facts are committed; a disposable projection is pending recovery',
+          message: result.changed === true
+            ? 'World facts are committed; a disposable projection is pending recovery'
+            : 'A disposable projection of the current world revision is pending recovery',
           details: {
             expectedRevision: outcome.expectedRevision,
             ...outcome.failure
@@ -223,7 +225,8 @@ export function createInteractionRuntime({
   }
 
   function scheduleProjection(result) {
-    if (closing) return null;
+    if (closing || result?.ok !== true
+      || typeof result.revisionAfter !== 'string' || !result.revisionAfter) return null;
     const generation = ++projectionGeneration;
     const expectedRevision = result.revisionAfter;
     if (projectionTimer) clearTimeout(projectionTimer);
