@@ -266,3 +266,7 @@
 
 - **Ruling: 终态通知与预算接线** — 同意engine在业务result形成且投影收尾前调用内部onSubsequentSettled，adapter沿既有recordOutcome持久确认，interaction-runtime/graph-server现有lifecycle透传至HTTP原cache；来源onCommitted仍只通知一次，不新增公开API。来源pending ack结束来源等待预算，后续活动阶段使用现有配置时长但独立起算的有限预算；后续终态确认结束该预算，投影不占用它。最终来源ack无后续时直接结束业务预算。真实中断继续pending，outcome EIO不能伪报durable completed；旧业务终态不因投影后迟到signal改变。增加来源接近截止而后续仍获自身预算、completed/failed在投影deferred期间先可读，以及真实取消和无迟到写验证。允许graph-server现有装饰接线，非新服务或队列。
 - **生命周期受控RED**：ASTRA执行 node --test --test-isolation=none --test-name-pattern='business outcome precedes deferred projection' tests/atom-transform-postcommit-boundary.test.mjs，2/2失败；真实无facts completed与具名业务failed在进入已defer投影时journal仍pending。证明缺口是终态记录依赖投影，而非仅验收等待短。正在按独立终态/预算裁定修复，未部署。
+- **生命周期定向进展**：实施方报告批准矩阵12/12 GREEN，覆盖业务终态先于投影、公开runtime透传、HTTP独立阶段预算、真实取消、结果持久化EIO、CAS和并发；精确最终候选仍待报告与独立复审。分类核对确认worker自身ATOM_PROGRAM_TIMEOUT属于既有合同的明确业务失败，不能仅凭错误名改为pending或自动重跑；仅外部signal实际中断未确认执行/提交才进入恢复，正在补该边界用例。当前不升级Task3全链或部署。
+- **生产事实持续演进**：生命周期修复期间只读4784 health仍ok=true、revision7372、projection=published、expectedRevision=d648c5511c933b680c9e801e02cd3d4813b596ca26d62c62f543c5066fdc5227。这里只确认现行服务可响应与投影状态，不构成新候选或手机验收；部署必须重新取当前停写窗口一致快照，不能恢复此前7367或副本源hash所对应的世界。
+
+- **生命周期候选提交复审**：664ed94（7代码/测试文件，290增57删），实际报告/原brief已追加；本轮13项矩阵、49项service/runtime、6项Graph和15项关键旅程去重82通过。新增独立预算RED原2/2，worker超时分类RED原1/1已GREEN；自有worker超时failed、外部真实中断pending、持久EIO无终态通知、CAS一次重判与启动callback隔离均保留。staged GitNexus HIGH，diff检查通过。精确范围fe6fd83..664ed94已交原Task2独立评审方；Task3继续暂停待该范围复审，不部署。中间6020057为根侧规格/手机计划文档，代码分工不混同。
