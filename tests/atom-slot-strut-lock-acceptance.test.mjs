@@ -213,7 +213,7 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
   ]);
   assert.equal(directStrut.transforms.length, 4);
 });
-test('a failing strut subscriber rolls back the warm source Transform', async (t) => {
+test('a failing strut subscriber preserves the committed source Transform', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-strut-rollback-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -242,12 +242,13 @@ test('a failing strut subscriber rolls back the warm source Transform', async (t
     interaction: { id: `strut-rollback-${crypto.randomUUID()}` }
   });
 
-  assert.equal(result.ok, false, JSON.stringify(result));
-  assert.ok(result.errors.some((error) => (
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.subsequentExecution.status, 'failed');
+  assert.ok(result.subsequentExecution.errors.some((error) => (
     error.code === 'ATOM_PROGRAM_FAILED' && error.type === 'KeyError'
   )), JSON.stringify(result));
   const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(find(stored, 'Source').situation, 'before');
+  assert.equal(find(stored, 'Source').situation, 'after');
 });
 
 test('a rolled-back multi-subscriber delivery releases every claim for a complete retry', async (t) => {
@@ -300,11 +301,14 @@ test('a rolled-back multi-subscriber delivery releases every claim for a complet
     contextFile, projectionFile, programScheduler: scheduler, source: command,
     interaction: { id: `strut-retry-fail-${crypto.randomUUID()}` }
   });
-  assert.equal(failed.ok, false, JSON.stringify(failed));
+  assert.equal(failed.ok, true, JSON.stringify(failed));
+  assert.equal(failed.subsequentExecution.status, 'failed');
+  assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Source').situation, 'after');
   assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Result').situation, 'before');
 
   const retried = await executeAtomLanguage({
-    contextFile, projectionFile, programScheduler: scheduler, source: command,
+    contextFile, projectionFile, programScheduler: scheduler,
+    source: 'transform {"thing":"Source","situation.rep.after":"after"}',
     interaction: { id: `strut-retry-pass-${crypto.randomUUID()}` }
   });
   assert.equal(retried.ok, true, JSON.stringify(retried));
@@ -355,11 +359,13 @@ test('a strut subscriber effect rejected after worker success releases its claim
     contextFile, projectionFile, programScheduler: scheduler, source: command,
     interaction: { id: `strut-effect-fail-${crypto.randomUUID()}` }
   });
-  assert.equal(failed.ok, false, JSON.stringify(failed));
-  assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Source').situation, 'before');
+  assert.equal(failed.ok, true, JSON.stringify(failed));
+  assert.equal(failed.subsequentExecution.status, 'failed');
+  assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Source').situation, 'after');
 
   const retried = await executeAtomLanguage({
-    contextFile, projectionFile, programScheduler: scheduler, source: command,
+    contextFile, projectionFile, programScheduler: scheduler,
+    source: 'transform {"thing":"Source","situation.rep.after":"after"}',
     interaction: { id: `strut-effect-pass-${crypto.randomUUID()}` }
   });
   assert.equal(retried.ok, true, JSON.stringify(retried));

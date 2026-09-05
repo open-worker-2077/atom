@@ -253,7 +253,12 @@ export function createCommitCoordinator({
   }
 
   function execute(request) {
-    return prepareCandidate(request).then((candidate) => serialize(() => commitCandidate(candidate)));
+    return prepareCandidate(request).then((candidate) => serialize(async () => {
+      // Binding/final-state checks must see all earlier journal decisions, even
+      // when a candidate was prepared after their world write but before append.
+      const existing = await request.validateCommit?.();
+      return existing ?? commitCandidate(candidate);
+    }));
   }
 
   function rollback({ targetCommandId, command }) {
@@ -306,5 +311,9 @@ export function createCommitCoordinator({
     });
   }
 
-  return Object.freeze({ execute, recover, rollback });
+  function recordProgramExecution(request) {
+    return serialize(() => journalRepository.recordProgramExecution(request));
+  }
+
+  return Object.freeze({ execute, recover, rollback, recordProgramExecution });
 }

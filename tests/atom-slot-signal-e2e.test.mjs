@@ -400,7 +400,7 @@ test('cold prepared projection keeps explicit Slot delivery after relocating the
   }
 });
 
-test('explicit run does not redirect its initial Slot delivery when copying the sender', async (t) => {
+test('explicit run rejects an unguarded copied sender that repeats its own invalid copy', async (t) => {
   const label = '显式复制不迁移';
   const world = [
     atom('Parent', '', [
@@ -412,6 +412,43 @@ test('explicit run does not redirect its initial Slot delivery when copying the 
       ])
     ]),
     atom('Destination'),
+    atom('Explicit Copy Target', 'before')
+  ];
+  const files = await fixture(t, world);
+  const scheduler = createProgramRuntimeScheduler();
+  const lifecycle = observeSlotClaimLifecycle(scheduler);
+
+  const { result, bytes } = await executeFixture(
+    files,
+    'transform {"thing.run.":"Parent/Sender"}',
+    scheduler
+  );
+
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.changed, false);
+  assert.ok(result.errors.some(({ code, cause }) => (
+    code === 'PROGRAM_TRANSFORM_REJECTED' && cause === 'DUPLICATE_DESTINATION_CHILD'
+  )), JSON.stringify(result.errors));
+  assert.equal(result.revisionAfter, result.revisionBefore);
+  assert.equal(bytes, files.before);
+  assert.deepEqual(lifecycle.confirmed, []);
+});
+
+test('explicit run keeps its actual Slot delivery on the original sender when copying it', async (t) => {
+  const label = '显式复制不迁移';
+  const world = [
+    atom('Parent', '', [
+      program('Sender', [
+        'def send():',
+        '    transform({"thing.cpy.Destination":"Parent/Sender"})',
+        `    slot({"to":"down","labels":[${JSON.stringify(label)}]})`,
+        'trigger("transform", {"nodes":["Explicit Copy Start"]}, send)'
+      ].join('\n'), [
+        program('Receiver', slotReceiver('Explicit Copy Target', label))
+      ])
+    ]),
+    atom('Destination'),
+    atom('Explicit Copy Start', 'before'),
     atom('Explicit Copy Target', 'before')
   ];
   const files = await fixture(t, world);
@@ -430,17 +467,14 @@ test('explicit run does not redirect its initial Slot delivery when copying the 
   assert.ok(findAtom(stored, 'Destination/Sender/Receiver'));
   assert.equal(readSituation(stored, 'Explicit Copy Target'), 'delivered');
   assert.deepEqual(invocations.map(({ programPath }) => programPath), [
-    'Parent/Sender/Receiver',
-    'Destination/Sender/Receiver'
+    'Parent/Sender/Receiver'
   ]);
   assert.equal(invocations[0].signal.sourcePath, 'Parent/Sender');
   assert.equal(invocations[0].signal.recipientPath, 'Parent/Sender/Receiver');
-  assert.equal(invocations[1].signal.sourcePath, 'Destination/Sender');
-  assert.equal(invocations[1].signal.recipientPath, 'Destination/Sender/Receiver');
-  assert.equal(new Set(invocations.map(({ signal }) => signal.id)).size, 2);
-  assert.equal(lifecycle.confirmed.length, 2);
+  assert.equal(new Set(invocations.map(({ signal }) => signal.id)).size, 1);
+  assert.equal(lifecycle.confirmed.length, 1);
   assert.deepEqual(lifecycle.released, []);
-  assert.equal(scheduler.slotSignalExecutions.size, 2);
+  assert.equal(scheduler.slotSignalExecutions.size, 1);
 });
 
 test('queued Slot delivery stays on the original receiver when an earlier Transform copies it', async (t) => {
@@ -822,7 +856,7 @@ test('signal outside Slot invocation blocks an explicit run and returns a nonzer
   assert.equal(cli.bytes, cliFiles.before);
 });
 
-test('signal outside Slot invocation blocks and rolls back a Transform-triggered cycle', async (t) => {
+test('signal outside Slot invocation fails only after its Transform source commit', async (t) => {
   const world = [
     program('Invalid Listener', [
       'def receive():',
@@ -832,15 +866,22 @@ test('signal outside Slot invocation blocks and rolls back a Transform-triggered
     atom('Go', 'before')
   ];
   const files = await fixture(t, world);
-  const { result, bytes } = await executeFixture(
+  const { result, bytes, world: stored } = await executeFixture(
     files,
     'transform {"thing":"Go","situation.rep.changed"}'
   );
 
-  assert.equal(result.ok, false, JSON.stringify(result));
-  assert.ok(result.errors.some(({ code }) => code === 'SLOT_SIGNAL_REQUIRED'));
-  assert.equal(result.revisionAfter, result.revisionBefore);
-  assert.equal(bytes, files.before);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.subsequentExecution.status, 'failed');
+  assert.ok(result.subsequentExecution.errors.some(({ code }) => (
+    code === 'SLOT_SIGNAL_REQUIRED'
+  )));
+  assert.equal(result.revisionAfter, result.subsequentExecution.sourceRevision);
+  assert.notEqual(result.revisionAfter, result.revisionBefore);
+  assert.notEqual(bytes, files.before);
+  assert.deepEqual(stored, [world[0], atom('Go', 'changed')]);
 });
 
 test('a referenced Program emits a Slot signal from its own adjacent position', async (t) => {
