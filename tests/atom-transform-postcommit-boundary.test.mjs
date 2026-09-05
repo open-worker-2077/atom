@@ -31,6 +31,35 @@ function nameOf(value) {
   return Object.entries(value).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
 }
 
+test('discard source notification preserves the archive receipt through final settlement', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-discard-receipt-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Root', '', [atom('Target', 'kept body'), atom('Backup', '', [], [], ['backup@default'])])
+  ], null, 2), 'utf8');
+  let sourceReceipt;
+  const persistence = createTransactionalWorldPersistence({ contextFile, projectionFile });
+  const result = await executeAtomLanguageKernel({
+    contextFile,
+    projectionFile,
+    source: 'transform {"thing.dsc.":"Root/Target"}',
+    interaction: { id: `discard-source-receipt-${crypto.randomUUID()}` },
+    programMode: 'reconcile',
+    programScheduler: createProgramRuntimeScheduler(),
+    commitWorld: transition => persistence.commit(transition),
+    onCommitted(receipt) { sourceReceipt = receipt; }
+  });
+
+  assert.ok(sourceReceipt, JSON.stringify(result));
+  assert.equal(sourceReceipt.subsequentExecution.status, 'pending', JSON.stringify(sourceReceipt));
+  assert.match(sourceReceipt?.archive?.discardId ?? '', /^[0-9a-f-]{36}$/u);
+  assert.equal(sourceReceipt?.archive?.restoreCoordinate, sourceReceipt?.archive?.path);
+  assert.deepEqual(result.archive, sourceReceipt.archive);
+  assert.equal(result.subsequentExecution.status, 'completed', JSON.stringify(result));
+});
+
 test('a terminal-only engine callback never reports a missing source notification callback as failure', async (t) => {
   const files = await fixture(t, 'def receive(delivery):\n    return True\ntrigger("strut", {}, receive)');
   const persistence = createTransactionalWorldPersistence(files);

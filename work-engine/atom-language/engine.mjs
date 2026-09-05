@@ -4336,6 +4336,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       revisionBefore,
       revisionAfter: sourceRevision,
       result: sourceMatch ? describeAtom(sourceMatch, false) : null,
+      ...(transformed.archive ? { archive: structuredClone(transformed.archive) } : {}),
       warnings: mergeWarnings(interactionWarnings, diagnostic(
         'ATOM_SUBSEQUENT_EXECUTION_PENDING',
         '来源事实已提交；后续 Program 运行待完成',
