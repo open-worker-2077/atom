@@ -116,19 +116,24 @@ export function createTransactionalWorldPersistence({
     compatibilityManifest: suppliedManifest = null
   }) {
     await recover();
-    if (postCommitEvent) {
-      const existing = await journalRepository.programExecutionForInteraction(correlationId);
-      assertSourceBinding(existing, postCommitEvent);
-      if (existing) return existing.sourceReceipt;
-    }
-    if (subsequentOf) {
-      const execution = await journalRepository.programExecution(subsequentOf);
-      if (!execution) throw problem('PROGRAM_SOURCE_NOT_FOUND', 'Subsequent effects require a committed source');
-      if (execution.childReceipt) return execution.childReceipt;
-      if (execution.outcome && execution.outcome.status !== 'pending') {
-        throw problem('PROGRAM_EXECUTION_FINAL', 'A final post-commit business outcome cannot be executed again');
+    async function existingExecutionReceipt() {
+      if (postCommitEvent) {
+        const existing = await journalRepository.programExecutionForInteraction(correlationId);
+        assertSourceBinding(existing, postCommitEvent);
+        if (existing) return existing.sourceReceipt;
       }
+      if (subsequentOf) {
+        const execution = await journalRepository.programExecution(subsequentOf);
+        if (!execution) throw problem('PROGRAM_SOURCE_NOT_FOUND', 'Subsequent effects require a committed source');
+        if (execution.childReceipt) return execution.childReceipt;
+        if (execution.outcome && execution.outcome.status !== 'pending') {
+          throw problem('PROGRAM_EXECUTION_FINAL', 'A final post-commit business outcome cannot be executed again');
+        }
+      }
+      return null;
     }
+    const existing = await existingExecutionReceipt();
+    if (existing) return existing;
     const previousManifest = await compatibilityManifest();
     const computedRevision = revisionOfWorldFacts(facts);
     const canonicalNextRevision = canonicalRevision(nextRevision);
@@ -148,8 +153,14 @@ export function createTransactionalWorldPersistence({
       ? (validateCompatibilityManifest(suppliedManifest, facts), structuredClone(suppliedManifest))
       : null;
     let receipt;
+    let reusedReceipt = false;
     try {
       receipt = await coordinator.execute({
+        validateCommit: async () => {
+          const existing = await existingExecutionReceipt();
+          reusedReceipt = Boolean(existing);
+          return existing;
+        },
         command: {
           contract: 'atom.world-command',
           version: 1,
@@ -171,7 +182,8 @@ export function createTransactionalWorldPersistence({
             result: {
               source,
               ...(postCommitEvent ? { postCommitEvent: structuredClone({ ...postCommitEvent,
-                sourceCommandId: commandId, sourceRevision: canonicalNextRevision }) } : {}),
+                sourceCommandId: commandId, sourceRevision: postCommitEvent.sourceChanged === false
+                  ? canonicalExpectedRevision : canonicalNextRevision }) } : {}),
               ...(subsequentOf ? { subsequentOf } : {}),
               ...(Array.isArray(affectedAtoms) ? {
                 affectedAtoms,
@@ -194,6 +206,7 @@ export function createTransactionalWorldPersistence({
       }
       throw error;
     }
+    if (reusedReceipt) return receipt;
     if (postCommitEvent) assertSourceBinding({ event: receipt.result.postCommitEvent }, postCommitEvent);
     owner.cachedManifest = structuredClone(receipt.result?.compatibilityManifest ?? previousManifest ?? null);
     owner.compatibilityGeneration = (owner.compatibilityGeneration ?? 0) + 1;
@@ -302,7 +315,7 @@ export function createTransactionalWorldPersistence({
     },
     async recordProgramExecution(request) {
       await recover();
-      return journalRepository.recordProgramExecution(request);
+      return coordinator.recordProgramExecution(request);
     }
   });
 }

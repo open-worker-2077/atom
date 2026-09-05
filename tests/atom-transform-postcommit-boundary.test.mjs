@@ -795,3 +795,170 @@ test('the durable trigger envelope fingerprints request history without copying 
   assert.match(execution.event.binding, /^[a-f0-9]{64}$/u);
   await assert.rejects(createLegacyWorldService().executeLegacy({ ...request, history: [] }), { code: 'ATOM_INTERACTION_ID_CONFLICT' });
 });
+
+for (const sameBinding of [false, true]) {
+test(`central binding settles consecutive-revision candidates while the first receipt append is paused (same binding ${sameBinding})`, async (t) => {
+  const files = await fixture(t, '');
+  const hooks = [];
+  const first = createTransactionalWorldPersistence({ ...files, publishLegacyProjection: false,
+    onAuthoritativeWrite: () => hooks.push('first') });
+  const second = createTransactionalWorldPersistence({ ...files, publishLegacyProjection: false,
+    onAuthoritativeWrite: () => hooks.push('second') });
+  const before = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const after = structuredClone(before); after[0].situation = 'after';
+  const later = structuredClone(after); later[1].situation = 'illegal';
+  let entered, release;
+  const paused = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const open = fs.open.bind(fs);
+  t.mock.method(fs, 'open', async (...args) => {
+    const handle = await open(...args);
+    if (String(args[0]).startsWith(path.dirname(files.contextFile)) && args[1] === 'a') {
+      const write = handle.writeFile.bind(handle);
+      handle.writeFile = async (data, ...rest) => {
+        const event = JSON.parse(data);
+        if (event.type === 'committed' && event.receipt?.result?.postCommitEvent?.binding === 'first') {
+          entered(); await gate;
+        }
+        return write(data, ...rest);
+      };
+    }
+    return handle;
+  });
+  const transition = (facts, prior, binding) => ({ correlationId: 'paused-collision', facts,
+    expectedRevision: revisionOfWorldFacts(prior), nextRevision: revisionOfWorldFacts(facts),
+    changedPaths: ['Source', 'Result'], postCommitEvent: { binding } });
+  const committed = first.commit(transition(after, before, 'first'));
+  await paused;
+  const competing = second.commit(transition(later, after, sameBinding ? 'first' : 'second'));
+  const settled = Promise.allSettled([committed, competing]);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  release();
+  const results = await settled;
+  assert.equal(results[0].status, 'fulfilled');
+  if (sameBinding) {
+    assert.equal(results[1].status, 'fulfilled');
+    assert.deepEqual(results[1].value, results[0].value);
+  } else {
+    assert.equal(results[1].status, 'rejected');
+    assert.equal(results[1].reason.code, 'ATOM_INTERACTION_ID_CONFLICT');
+  }
+  assert.deepEqual(hooks, ['first'], 'reused receipt cannot publish candidate facts or invoke its facade hook');
+  assert.deepEqual(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), after);
+  const journal = createJsonTransactionJournal({ file: path.join(path.dirname(files.contextFile), 'atom.transactions.json') });
+  assert.equal((await journal.readState()).receipts.length, 1);
+});
+}
+
+test('final outcome append and later effects share the central serialized decision', async (t) => {
+  const files = await fixture(t, '');
+  const persistence = createTransactionalWorldPersistence({ ...files, publishLegacyProjection: false });
+  const before = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const source = structuredClone(before); source[0].situation = 'after';
+  const receipt = await persistence.commit({ correlationId: 'final-race', facts: source,
+    expectedRevision: revisionOfWorldFacts(before), nextRevision: revisionOfWorldFacts(source),
+    changedPaths: ['Source'], postCommitEvent: { binding: 'final-owner' } });
+  let entered, release;
+  const paused = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const open = fs.open.bind(fs);
+  t.mock.method(fs, 'open', async (...args) => {
+    const handle = await open(...args);
+    if (String(args[0]).startsWith(path.dirname(files.contextFile)) && args[1] === 'a') {
+      const write = handle.writeFile.bind(handle);
+      handle.writeFile = async (data, ...rest) => {
+        if (JSON.parse(data).programOutcome?.status === 'failed') { entered(); await gate; }
+        return write(data, ...rest);
+      };
+    }
+    return handle;
+  });
+  const outcome = persistence.recordProgramExecution({ sourceCommandId: receipt.commandId,
+    outcome: { status: 'failed', attemptId: 'final-race-attempt', errors: [{ code: 'BUSINESS_FAILED' }] } });
+  await paused;
+  const effects = structuredClone(source); effects[1].situation = 'illegal';
+  const candidate = persistence.commit({ correlationId: 'final-race:subsequent', facts: effects,
+    expectedRevision: revisionOfWorldFacts(source), nextRevision: revisionOfWorldFacts(effects),
+    changedPaths: ['Result'], subsequentOf: receipt.commandId });
+  const settled = Promise.allSettled([outcome, candidate]);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  release();
+  const results = await settled;
+  assert.equal(results[0].status, 'fulfilled');
+  assert.equal(results[1].status, 'rejected');
+  assert.equal(results[1].reason.code, 'PROGRAM_EXECUTION_FINAL');
+  assert.deepEqual(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), source);
+  assert.equal((await persistence.programExecution(receipt.commandId)).childReceipt, null);
+});
+
+for (const outcomeStatus of ['failed', 'completed']) {
+test(`outcome append EIO preserves source success and exposes recoverable outcome persistence (${outcomeStatus})`, async (t) => {
+  const files = await fixture(t, outcomeStatus === 'failed'
+    ? 'def receive(delivery):\n    raise Exception("business failed")\ntrigger("strut", {}, receive)'
+    : 'def receive(delivery):\n    transform({"thing":"Result","situation.rep.after":"before"})\ntrigger("strut", {}, receive)');
+  const open = fs.open.bind(fs);
+  t.mock.method(fs, 'open', async (...args) => {
+    const handle = await open(...args);
+    if (String(args[0]).startsWith(path.dirname(files.contextFile)) && args[1] === 'a') {
+      const write = handle.writeFile.bind(handle);
+      handle.writeFile = async (data, ...rest) => {
+        if (JSON.parse(data).programOutcome?.status === outcomeStatus) throw Object.assign(new Error('outcome disk unavailable'), { code: 'EIO' });
+        return write(data, ...rest);
+      };
+    }
+    return handle;
+  });
+  let notified = 0;
+  const request = { ...files, source: 'transform {"thing":"Source","situation.rep.after":"before"}',
+    interaction: { id: 'outcome-eio' }, programMode: 'reconcile' };
+  const result = await createLegacyWorldService().executeLegacy({ ...request,
+    programScheduler: createProgramRuntimeScheduler(), onCommitted() { notified += 1; } });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(notified, 1);
+  assert.equal(result.subsequentExecution.status, 'pending');
+  assert.ok(result.warnings.some(({ code, cause }) => code === 'ATOM_PROGRAM_OUTCOME_PERSISTENCE_PENDING' && cause === 'EIO'));
+  assert.equal(find(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Source').situation, 'after');
+  assert.equal((await createTransactionalWorldPersistence(files).programExecutionForInteraction(request.interaction.id)).outcome.status,
+    outcomeStatus === 'completed' ? 'completed' : 'pending');
+  t.mock.restoreAll();
+  const scheduler = createProgramRuntimeScheduler();
+  if (outcomeStatus === 'completed') scheduler.runProgram = () => { throw new Error('confirmed effects were replayed'); };
+  const recovered = await createLegacyWorldService().executeLegacy({ ...request, programScheduler: scheduler });
+  assert.equal(recovered.ok, true);
+  assert.equal(recovered.subsequentExecution.status, outcomeStatus);
+});
+}
+
+for (const batch of [false, true]) {
+  test(`unchanged source binds actual effects for cold reread without rerunning Program (batch ${batch})`, async (t) => {
+    const files = await fixture(t, 'def receive(delivery):\n    transform({"thing":"Result","situation.rep.after":"before"})\ntrigger("strut", {}, receive)');
+    const transform = { thing: 'Source', 'situation.rep.before': 'before' };
+    const request = { ...files, source: `transform ${JSON.stringify(batch ? [transform] : transform)}`,
+      interaction: { id: `no-source-effects-${batch}` }, programMode: 'reconcile' };
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { createLegacyWorldService } from ${JSON.stringify(new URL('../src/atom-system/adapters/legacy-engine-adapter.mjs', import.meta.url).href)};
+      import { createProgramRuntimeScheduler } from ${JSON.stringify(new URL('../work-engine/atom-language/program-runtime.mjs', import.meta.url).href)};
+      await createLegacyWorldService({ onAuthoritativeWrite() { process.exit(73); } }).executeLegacy({
+        ...${JSON.stringify(request)}, programScheduler: createProgramRuntimeScheduler() });
+    `], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(child.status, 73, child.stderr);
+    const scheduler = createProgramRuntimeScheduler();
+    let workerCalls = 0;
+    const run = scheduler.runProgram.bind(scheduler);
+    scheduler.runProgram = async input => { workerCalls += 1; return run(input); };
+    const result = await createLegacyWorldService().executeLegacy({ ...request, programScheduler: scheduler });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.subsequentExecution.status, 'completed');
+    assert.equal(workerCalls, 0, 'a confirmed effects receipt must prevent cold Program replay');
+    const execution = await createTransactionalWorldPersistence(files).programExecutionForInteraction(request.interaction.id);
+    assert.ok(execution);
+    assert.equal(execution.childReceipt.commandId, execution.sourceReceipt.commandId);
+    assert.equal(execution.event.sourceChanged, false);
+    const journal = createJsonTransactionJournal({ file: path.join(path.dirname(files.contextFile), 'atom.transactions.json') });
+    assert.equal((await journal.readState()).receipts.length, 1, 'only the real effects world transition exists');
+    const facts = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+    assert.equal(find(facts, 'Source').situation, 'before');
+    assert.equal(find(facts, 'Result').situation, 'after');
+    await assert.rejects(createLegacyWorldService().executeLegacy({ ...request, source: 'explore Source' }), { code: 'ATOM_INTERACTION_ID_CONFLICT' });
+  });
+}

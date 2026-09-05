@@ -125,9 +125,19 @@ export function createLegacyWorldService(options = {}) {
       : [];
     let sourceReceipt = execution?.sourceReceipt ?? null;
     const attemptId = `${request.interaction.id}:subsequent:${crypto.randomUUID()}`;
+    const outcomeWarnings = [];
+    async function recordOutcome(outcome) {
+      try {
+        return await persistence.recordProgramExecution({ sourceCommandId: sourceReceipt.commandId, outcome });
+      } catch (error) {
+        outcomeWarnings.push({ code: 'ATOM_PROGRAM_OUTCOME_PERSISTENCE_PENDING',
+          message: '事实已提交，但后续结果未能持久保存；可用原交互标识恢复确认',
+          cause: error.code ?? error.message, correlationId: request.interaction.id });
+        return null;
+      }
+    }
     if (execution && (!execution.outcome || execution.outcome.status === 'pending')) {
-      await persistence.recordProgramExecution({ sourceCommandId: sourceReceipt.commandId,
-        outcome: { ...execution.outcome, status: 'pending', attemptId } });
+      await recordOutcome({ ...execution.outcome, status: 'pending', attemptId });
     }
     const run = (recovery = execution) => timed('engine.execute', () => execute({
       ...request,
@@ -139,10 +149,9 @@ export function createLegacyWorldService(options = {}) {
       onCommitted: async result => {
         entry.pending = structuredClone(result);
         if (sourceReceipt && result.subsequentExecution?.status === 'pending') {
-          await persistence.recordProgramExecution({ sourceCommandId: sourceReceipt.commandId,
-            outcome: { ...result.subsequentExecution, attemptId, result: structuredClone(result) } });
+          await recordOutcome({ ...result.subsequentExecution, attemptId, result: structuredClone(result) });
         }
-        await request.onCommitted?.(result);
+        await request.onCommitted?.({ ...result, warnings: [...(result.warnings ?? []), ...outcomeWarnings] });
       },
       commitWorld: async (transition) => {
         request.signal?.throwIfAborted?.();
@@ -195,8 +204,13 @@ export function createLegacyWorldService(options = {}) {
     result.subsequentExecution = { ...result.subsequentExecution, attemptId,
       sourceCommandId: sourceReceipt.commandId,
       ...(latest.childReceipt ? { childCommandId: latest.childReceipt.commandId } : {}) };
-    const outcome = await persistence.recordProgramExecution({ sourceCommandId: sourceReceipt.commandId,
-      outcome: { ...result.subsequentExecution, result: structuredClone(result) } });
+    const outcome = await recordOutcome({ ...result.subsequentExecution, result: structuredClone(result) });
+    if (!outcome) {
+      return { ...result,
+        warnings: [...(result.warnings ?? []).filter(({ code }) => code !== 'ATOM_SUBSEQUENT_EXECUTION_FAILED'), ...outcomeWarnings],
+        subsequentExecution: { ...result.subsequentExecution, status: 'pending',
+          observedStatus: result.subsequentExecution.status, outcomePersistence: 'pending' } };
+    }
     return outcome.result ?? result;
   }
 

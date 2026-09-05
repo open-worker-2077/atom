@@ -2993,6 +2993,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   }
 
   let sourceCommandId = options.programExecution?.sourceReceipt?.commandId ?? null;
+  let unchangedSourceEvent = null;
   function postCommitEvent(trigger, resultPaths, extra = {}) {
     return { ...structuredClone(trigger), resultPaths: resultPaths.filter(Boolean),
       interaction: { id: interaction.id, agent: interaction.agent?.path ? { path: interaction.agent.path } : null },
@@ -3039,6 +3040,10 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           parsed, contextFile, projectionFile, requestStartAtoms, delegated.errors
         )
       };
+    }
+    if (subsequent && !sourceCommandId && unchangedSourceEvent) {
+      sourceEvent = { ...unchangedSourceEvent, sourceChanged: false, effectsCommitted: true };
+      correlationId = interaction.id;
     }
     const commitStartedAt = performance.now();
     let receipt = null;
@@ -3608,6 +3613,11 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     const finalProgramMessages = [];
     let subsequentChanged = false;
     let subsequentChangedPaths = [];
+    unchangedSourceEvent = postCommitEvent({ mode: 'transform',
+          nodes: [...(renameBatch ? renameEventNodes : transformEventNodes)], affectedPaths: [...transformEventNodes] },
+        results.map(({ result }) => result?.path), { batch: true,
+          enabled: Boolean(options.programScheduler) && options.trustedMaintenance !== true
+            && (requestDeclarationRelocations.length === 0 || renameBatch) });
     if (sourceChanged) {
       const compiled = await validatePrograms(
         nextAtoms, contextFile, atoms, candidateProgramScheduler
@@ -3624,11 +3634,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       }
       const sourceReceipt = await commitChangedGraph(nextAtoms, {
         changedPaths: [...transformEventNodes],
-        postCommitEvent: postCommitEvent({ mode: 'transform',
-          nodes: [...(renameBatch ? renameEventNodes : transformEventNodes)], affectedPaths: [...transformEventNodes] },
-        results.map(({ result }) => result?.path), { batch: true,
-          enabled: Boolean(options.programScheduler) && options.trustedMaintenance !== true
-            && (requestDeclarationRelocations.length === 0 || renameBatch) })
+        postCommitEvent: unchangedSourceEvent
       });
       if (sourceReceipt?.authorizationFailure) return sourceReceipt.authorizationFailure;
       sourceRevision = sourceReceipt?.afterRevision?.replace(/^sha256:/u, '')
@@ -4205,6 +4211,17 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     revisionBefore,
     revisionAfter: sealWorldFactsRevision(nextAtoms).slice('sha256:'.length)
   } : null;
+  unchangedSourceEvent = postCommitEvent({ mode: 'transform',
+    ...(transformAction ? { action: transformAction } : {}),
+    affectedPaths: isBatchRenameItem(item)
+      ? [transformed.sourcePath, transformed.resultPath].filter(Boolean) : transformAffectedPaths,
+    nodes: [...new Set([transformed.sourcePath, transformed.resultPath, transformed.resultName,
+      ...(programSurfaceChanged && !isBatchRenameItem(item) ? newlyAddedProgramPaths(atoms, nextAtoms) : [])].filter(Boolean))]
+  }, [transformed.resultPath ?? transformed.resultName], {
+    enabled: Boolean(options.programScheduler) && options.trustedMaintenance !== true
+      && (declarationRelocations.length === 0 || isBatchRenameItem(item)),
+    ...(transformed.archive ? { archive: structuredClone(transformed.archive) } : {})
+  });
   if (sourceChanged) {
     if (!programSurfaceChanged && isLocalizedSituationTransform(item)) {
       inheritPreparedAccessWorld(atoms, nextAtoms);
@@ -4216,17 +4233,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       structurePreservingValidation: !programSurfaceChanged
         && isStructurePreservingTransform(item),
       transformLogRecord: sourceTransformLogRecord,
-      postCommitEvent: postCommitEvent({ mode: 'transform',
-        ...(transformAction ? { action: transformAction } : {}),
-        affectedPaths: isBatchRenameItem(item)
-          ? [transformed.sourcePath, transformed.resultPath].filter(Boolean) : transformAffectedPaths,
-        nodes: [...new Set([transformed.sourcePath, transformed.resultPath, transformed.resultName,
-          ...(programSurfaceChanged && !isBatchRenameItem(item) ? newlyAddedProgramPaths(atoms, nextAtoms) : [])].filter(Boolean))]
-      }, [transformed.resultPath ?? transformed.resultName], {
-        enabled: Boolean(options.programScheduler) && options.trustedMaintenance !== true
-          && (declarationRelocations.length === 0 || isBatchRenameItem(item)),
-        ...(transformed.archive ? { archive: structuredClone(transformed.archive) } : {})
-      })
+      postCommitEvent: unchangedSourceEvent
     });
     if (sourceReceipt?.authorizationFailure) return sourceReceipt.authorizationFailure;
     sourceRevision = sourceReceipt?.afterRevision?.replace(/^sha256:/u, '')

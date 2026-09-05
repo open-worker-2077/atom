@@ -316,6 +316,7 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
 
   function indexProgramReceipt(state, receipt) {
     if (receipt?.result?.postCommitEvent) state.sources.set(receipt.correlationId, receipt.commandId);
+    if (receipt?.result?.postCommitEvent?.effectsCommitted) state.children.set(receipt.commandId, receipt.commandId);
     if (receipt?.result?.subsequentOf) state.children.set(receipt.result.subsequentOf, receipt.commandId);
   }
 
@@ -326,7 +327,8 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     const childReceipt = state.receipts.get(state.children.get(sourceCommandId))?.receipt ?? null;
     let outcome = state.outcomes.get(sourceCommandId) ?? null;
     if (childReceipt && outcome?.status !== 'completed') {
-      outcome = { status: 'completed', sourceRevision: sourceReceipt.afterRevision.replace(/^sha256:/u, ''),
+      outcome = { status: 'completed', sourceRevision: (sourceReceipt.result.postCommitEvent.sourceRevision
+        ?? sourceReceipt.afterRevision).replace(/^sha256:/u, ''),
         revisionAfter: childReceipt.afterRevision.replace(/^sha256:/u, ''), errors: [],
         attemptId: outcome?.attemptId ?? childReceipt.correlationId, childCommandId: childReceipt.commandId };
     }
