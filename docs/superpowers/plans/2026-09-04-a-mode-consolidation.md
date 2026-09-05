@@ -1,5 +1,7 @@
 # A Mode Consolidation Implementation Plan
 
+**最新用户修订（2026-09-05，待移动部署后实施）**：右键双击沉浸改为右键长按；本条覆盖下方旧双击实施细节。当前只入账，已保存Task1—4与其验证保留为旧实现证据，不在移动修复中改交互代码。续接时按Web规格§4.1统一调整仲裁、设置、帮助及实际手势验收。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将 Atom Web 的结构游走收束为唯一 A 模式，以右键单击普通向内剖开、右键双击沉浸向内剖开，并以空白右键单击返回一层。
