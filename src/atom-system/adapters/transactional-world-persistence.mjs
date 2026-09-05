@@ -102,6 +102,59 @@ export function createTransactionalWorldPersistence({
     return structuredClone(owner.cachedTransformLog);
   }
 
+  async function readDiscardEvidence({ discardId, archivePath, originalPath }) {
+    if (![discardId, archivePath, originalPath].every((value) => typeof value === 'string' && value)) return null;
+    await recover();
+    // Only restore asks for historical facts. Ordinary interactions keep their
+    // existing metadata-only log path; auxiliary transform logs are never evidence.
+    const state = await journalRepository.readState();
+    const matches = state.receipts.filter((entry) => entry.receipt?.result?.transformLogRecord?.id === discardId);
+    if (matches.length !== 1 || state.receipts.some((entry) => {
+      const record = entry.receipt?.result?.transformLogRecord;
+      return record?.operation === 'restore' && record.discardId === discardId;
+    })) return null;
+    const entry = await journalRepository.findCommitted(matches[0].commandId);
+    const record = entry?.receipt?.result?.transformLogRecord;
+    if (entry?.receipt?.status !== 'committed' || entry.receipt.commandId !== entry.commandId
+      || record?.operation !== 'discard' || record.archivePath !== archivePath
+      || record.originalPath !== originalPath) return null;
+    const axis = (atom, name) => Object.entries(atom ?? {})
+      .find(([key]) => key.split('@', 1)[0].split('#', 1)[0] === name)?.[1];
+    const locate = (facts, parts) => {
+      let children = facts;
+      let atom = null;
+      for (const part of parts) {
+        const found = Array.isArray(children) ? children.filter((child) => axis(child, 'thing') === part) : [];
+        if (found.length !== 1) return null;
+        atom = found[0];
+        children = axis(atom, 'slot');
+      }
+      return atom;
+    };
+    let archivedAtom = null;
+    let originalAtom = null;
+    if (entry.historyMode === 'local-patch') {
+      const patch = entry.patch;
+      if (patch?.contract !== 'atom.world-patch' || patch.version !== 1 || patch.worldId !== worldId
+        || patch.beforeRevision !== entry.receipt.beforeRevision || patch.afterRevision !== entry.receipt.afterRevision) return null;
+      const extract = (targetPath, side) => {
+        const owners = patch.operations.filter((operation) => operation.path === targetPath || targetPath.startsWith(`${operation.path}/`));
+        if (owners.length !== 1) return null;
+        const operation = owners[0];
+        const relative = targetPath.slice(operation.path.length).split('/').filter(Boolean);
+        return locate([operation[side]], [operation.path.split('/').at(-1), ...relative]);
+      };
+      archivedAtom = extract(archivePath, 'after');
+      originalAtom = extract(originalPath, 'before');
+    } else if (entry.after?.worldId === worldId && entry.after.revision === entry.receipt.afterRevision
+      && entry.before?.worldId === worldId && entry.before.revision === entry.receipt.beforeRevision) {
+      archivedAtom = locate(entry.after.facts, archivePath.split('/'));
+      originalAtom = locate(entry.before.facts, originalPath.split('/'));
+    }
+    return archivedAtom && originalAtom ? { discardId, archivePath, originalPath,
+      archivedAtom: structuredClone(archivedAtom), originalAtom: structuredClone(originalAtom) } : null;
+  }
+
   async function commit({
     correlationId,
     expectedRevision,
@@ -301,6 +354,7 @@ export function createTransactionalWorldPersistence({
     recover,
     rollback,
     transformLogEntries,
+    readDiscardEvidence,
     async programExecution(sourceCommandId) {
       await recover();
       return journalRepository.programExecution(sourceCommandId);

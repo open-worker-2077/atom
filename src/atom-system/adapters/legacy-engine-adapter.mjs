@@ -150,6 +150,8 @@ export function createLegacyWorldService(options = {}) {
       interactionBinding: entry.binding,
       compatibilityManifest,
       transactionTransformLog,
+      readDiscardEvidence: typeof persistence.readDiscardEvidence === 'function'
+        ? (identity) => persistence.readDiscardEvidence(identity) : undefined,
       onSubsequentSettled: settleBusinessResult,
       onCommitted: async result => {
         entry.pending = structuredClone(result);

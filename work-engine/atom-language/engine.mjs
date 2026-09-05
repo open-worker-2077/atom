@@ -465,6 +465,7 @@ async function validateAgentProgramDelegation({
   creatorSecurity,
   programScheduler,
   declarationRelocations = [],
+  restoredDeclarationSurface = null,
   simultaneousRelocations = false
 }) {
   if (JSON.stringify(programDeclarationSurface(beforeAtoms))
@@ -476,6 +477,9 @@ async function validateAgentProgramDelegation({
       === JSON.stringify(relocatedProgramDeclarationSurface(afterAtoms))) {
     return { ok: true, errors: [] };
   }
+  if (restoredDeclarationSurface
+    && JSON.stringify(programDeclarationSurface(afterAtoms).sort((left, right) => left.path.localeCompare(right.path)))
+      === restoredDeclarationSurface) return { ok: true, errors: [] };
   if (typeof programScheduler?.deriveAgentSecurity !== 'function') {
     return {
       ok: false,
@@ -1913,6 +1917,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   }
 
   let requestDeclarationRelocations = [];
+  let requestRestoredDeclarationSurface = null;
 
   async function validateRequestCandidate(
     candidateAtoms, declarationRelocations = requestDeclarationRelocations
@@ -1923,6 +1928,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       creatorSecurity,
       programScheduler: candidateProgramScheduler,
       declarationRelocations,
+      restoredDeclarationSurface: requestRestoredDeclarationSurface,
       simultaneousRelocations: parsed.batch && parsed.items.every(isBatchRenameItem)
     });
   }
@@ -4165,6 +4171,31 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   }
 
   let nextAtoms = transformed.atoms;
+  const pureRestore = item.fields.length === 1 && item.fields[0].baseKey === 'thing'
+    && item.fields[0].commands.length === 1 && item.fields[0].commands[0].name === 'rst';
+  if (pureRestore && transformed.logRecord?.operation === 'restore'
+    && typeof options.readDiscardEvidence === 'function') {
+    const identity = { discardId: transformed.logRecord.discardId,
+      archivePath: transformed.sourcePath, originalPath: transformed.resultPath };
+    let evidence = null;
+    try { evidence = await options.readDiscardEvidence(identity); } catch {}
+    const archived = exactMatchAtPath(requestStartAtoms, identity.archivePath)?.atom;
+    const surface = (atom) => programDeclarationSurface([atom])
+      .map((declaration) => ({ ...declaration, path: declaration.path.split('/').slice(1).join('/') }))
+      .sort((left, right) => left.path.localeCompare(right.path));
+    if (archived && evidence?.archivedAtom && evidence.originalAtom
+      && Object.entries(identity).every(([key, value]) => evidence[key] === value)
+      && JSON.stringify(surface(evidence.originalAtom)) === JSON.stringify(surface(evidence.archivedAtom))
+      && JSON.stringify(surface(archived)) === JSON.stringify(surface(evidence.archivedAtom))) {
+      // Journal-backed existing declarations only change location. Keep source
+      // bytes and recheck the entire candidate at every validation/commit boundary.
+      requestRestoredDeclarationSurface = JSON.stringify(programDeclarationSurface(requestStartAtoms)
+        .map((declaration) => ({ ...declaration,
+          path: declaration.path === identity.archivePath || declaration.path.startsWith(`${identity.archivePath}/`)
+            ? `${identity.originalPath}${declaration.path.slice(identity.archivePath.length)}` : declaration.path
+        })).sort((left, right) => left.path.localeCompare(right.path)));
+    }
+  }
   let revisionAfter = revisionBefore;
   let changed = transformed.changed === true || programChanged;
   const declarationRelocations = (transformed.structuralCommand === 'mov' || isBatchRenameItem(item))
