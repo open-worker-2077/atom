@@ -484,6 +484,75 @@ test('maintenance rejects a source change after backup starts before central com
   assert.equal((await createJsonTransactionJournal({ file: runtime.journalFile }).readState()).receipts.length, 0);
 });
 
+test('maintenance rejects journal bytes changed after their semantic validation', async (t) => {
+  const runtime = await isolatedRuntime(t, 'atom-generated-print-journal-race-');
+  const initial = [atom('Initial', 'first historical snapshot')];
+  const middle = [atom('Middle', 'second historical snapshot')];
+  const source = await migratableWorld();
+  await fs.writeFile(runtime.contextFile, `${JSON.stringify(initial)}\n`, 'utf8');
+  const persistence = createTransactionalWorldPersistence({
+    contextFile: runtime.contextFile,
+    projectionFile: runtime.graphFile,
+    journalFile: runtime.journalFile,
+    publishLegacyProjection: false
+  });
+  await persistence.commit({
+    correlationId: 'journal-race-first',
+    expectedRevision: revisionOfWorldFacts(initial),
+    nextRevision: revisionOfWorldFacts(middle),
+    facts: middle,
+    source: 'journal-race-fixture'
+  });
+  await persistence.commit({
+    correlationId: 'journal-race-second',
+    expectedRevision: revisionOfWorldFacts(middle),
+    nextRevision: revisionOfWorldFacts(source),
+    facts: source,
+    source: 'journal-race-fixture'
+  });
+  const targetObject = path.join(
+    `${runtime.journalFile}.d`,
+    'objects',
+    `${revisionOfWorldFacts(initial).slice('sha256:'.length)}.json.gz`
+  );
+  const markerFile = path.join(runtime.localAppData, 'journal-object-mutated.txt');
+  const preloadFile = path.join(runtime.localAppData, 'mutate-after-semantic-read.cjs');
+  await fs.writeFile(preloadFile, [
+    "const fs = require('node:fs/promises');",
+    "const path = require('node:path');",
+    'const originalReadFile = fs.readFile.bind(fs);',
+    'const originalWriteFile = fs.writeFile.bind(fs);',
+    'const target = path.resolve(process.env.ATOM_TEST_TARGET_OBJECT);',
+    'let mutated = false;',
+    'fs.readFile = async function readFile(file, ...args) {',
+    '  const bytes = await originalReadFile(file, ...args);',
+    '  if (!mutated && typeof file === \'string\' && path.resolve(file) === target) {',
+    '    mutated = true;',
+    "    await originalWriteFile(target, Buffer.from('damaged after successful semantic read'));",
+    "    await originalWriteFile(process.env.ATOM_TEST_MUTATION_MARKER, 'mutated\\n', 'utf8');",
+    '  }',
+    '  return bytes;',
+    '};'
+  ].join('\n'), 'utf8');
+
+  const operation = execFileAsync(process.execPath, [
+    '--require', preloadFile, operator, '--apply', '--attempt', 'journal-race-1'
+  ], {
+    cwd: projectRoot,
+    env: {
+      ...runtime.env,
+      ATOM_TEST_TARGET_OBJECT: targetObject,
+      ATOM_TEST_MUTATION_MARKER: markerFile
+    }
+  });
+
+  await assert.rejects(operation, (error) => (
+    error.stderr.includes('GENERATED_SLOT_PRINT_MIGRATION_SOURCE_DIVERGED')
+  ));
+  assert.equal(await fs.readFile(markerFile, 'utf8'), 'mutated\n');
+  assert.deepEqual(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8')), source);
+});
+
 test('maintenance automatically rolls back a committed migration when projection postcheck fails', async (t) => {
   const runtime = await isolatedRuntime(t, 'atom-generated-print-postcheck-');
   const source = await migratableWorld();

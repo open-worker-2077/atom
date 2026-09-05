@@ -182,6 +182,19 @@ async function verifyJournal(journalFile, incrementalDirectory = `${journalFile}
   return { preparedCount: state.prepared.length, receiptCount: state.receipts.length, matches };
 }
 
+async function verifyStableJournalSources(runtime) {
+  const before = await collectBackupSources(runtime);
+  const journalEvidence = await verifyJournal(runtime.journalFile);
+  const after = await collectBackupSources(runtime);
+  if (!sameInventory(before, after)) {
+    throw problem(
+      'GENERATED_SLOT_PRINT_MIGRATION_SOURCE_DIVERGED',
+      'Atom world or transaction journal changed during semantic journal verification'
+    );
+  }
+  return { journalEvidence, sources: after };
+}
+
 async function fileMetadata(source, relative) {
   const digest = crypto.createHash('sha256');
   let bytes = 0;
@@ -281,8 +294,7 @@ function sameInventory(left, right) {
   return JSON.stringify(inventory(left)) === JSON.stringify(inventory(right));
 }
 
-async function createBackup({ runtime, plan, attemptId, source, journalEvidence }) {
-  const before = await collectBackupSources(runtime);
+async function createBackup({ runtime, plan, attemptId, source, journalEvidence, sources }) {
   const directory = path.join(runtime.backupRoot, migrationIdFor(plan), attemptId);
   await assertNoLinkedAncestor(directory);
   await fs.mkdir(path.dirname(directory), { recursive: true });
@@ -297,15 +309,15 @@ async function createBackup({ runtime, plan, attemptId, source, journalEvidence 
     );
   }
   await assertRealDirectoryContained(runtime.worldDirectory, directory);
-  for (const entry of before) {
+  for (const entry of sources) {
     const target = path.join(directory, entry.path);
     await fs.mkdir(path.dirname(target), { recursive: true });
     await assertRealDirectoryContained(runtime.worldDirectory, path.dirname(target));
     await copyVerified(entry.source, target, entry);
   }
   const after = await collectBackupSources(runtime);
-  const sourceEntry = before.find(({ path: file }) => file === 'atom.json');
-  if (!sameInventory(before, after) || hash(source.bytes) !== sourceEntry?.hash) {
+  const sourceEntry = sources.find(({ path: file }) => file === 'atom.json');
+  if (!sameInventory(sources, after) || hash(source.bytes) !== sourceEntry?.hash) {
     throw problem(
       'GENERATED_SLOT_PRINT_MIGRATION_SOURCE_DIVERGED',
       'Atom world or transaction journal changed while the private backup was created'
@@ -330,7 +342,7 @@ async function createBackup({ runtime, plan, attemptId, source, journalEvidence 
       receiptsVerified: journalEvidence.receiptCount,
       preparedTransactions: journalEvidence.preparedCount
     },
-    files: inventory(before),
+    files: inventory(sources),
     manifestFile
   });
   await fs.writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, {
@@ -667,14 +679,16 @@ async function automaticRollback({ runtime, backup, committed, originalError }) 
 async function applyMigration({ runtime, attemptId }) {
   const recovered = await recoverApplyAttempt({ runtime, attemptId });
   if (recovered) return recovered;
-  let journalEvidence = await verifyJournal(runtime.journalFile);
+  let verified = await verifyStableJournalSources(runtime);
+  let { journalEvidence } = verified;
   if (journalEvidence.preparedCount) {
     await createTransactionalWorldPersistence({
       contextFile: runtime.contextFile,
       projectionFile: runtime.graphFile,
       journalFile: runtime.journalFile
     }).recover();
-    journalEvidence = await verifyJournal(runtime.journalFile);
+    verified = await verifyStableJournalSources(runtime);
+    ({ journalEvidence } = verified);
     if (journalEvidence.preparedCount) {
       throw problem(
         'GENERATED_SLOT_PRINT_MIGRATION_JOURNAL_UNSETTLED',
@@ -690,7 +704,14 @@ async function applyMigration({ runtime, attemptId }) {
       'Configured Atom world has no verified generated slot print migration candidates'
     );
   }
-  const backup = await createBackup({ runtime, plan, attemptId, source, journalEvidence });
+  const backup = await createBackup({
+    runtime,
+    plan,
+    attemptId,
+    source,
+    journalEvidence,
+    sources: verified.sources
+  });
   const currentSources = await collectBackupSources(runtime);
   if (hash((await readWorld(runtime.contextFile)).bytes) !== backup.manifest.hashes.sourceFile
     || JSON.stringify(inventory(currentSources)) !== JSON.stringify(backup.manifest.files)) {
