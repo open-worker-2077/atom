@@ -13,7 +13,6 @@ import {
 
 async function fixture(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-view-state-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const knowledgeFile = path.join(directory, 'knowledge.json');
   const viewFile = path.join(directory, 'view-state.json');
   const backupRoot = path.join(directory, 'backups');

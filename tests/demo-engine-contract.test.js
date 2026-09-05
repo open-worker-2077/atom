@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
+const demoModel = require('../spatial-demo-model.js');
 
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
@@ -105,11 +107,36 @@ test('P and the settings field share one toggle path', () => {
 });
 
 test('legacy presentation preferences migrate with automatic playback disabled', () => {
-  const load = functionSource('loadDemoSettings');
-  assert.match(engine, /graph-4d\.presentation-settings\.v2/);
-  assert.match(engine, /LEGACY_DEMO_SETTINGS_KEY/);
-  assert.match(load, /legacyRaw/);
-  assert.match(load, /idleSeconds:\s*null/);
+  const currentKey = 'graph-4d.presentation-settings.v2';
+  const legacyKey = 'graph-4d.presentation-settings.v1';
+  const legacyRaw = JSON.stringify({ idleSeconds: 30, helpVisible: false,
+    nestedTunnelPercent: 55, nestedTunnelInteriorPercent: 35 });
+  const storage = new Map([[legacyKey, legacyRaw]]);
+  const read = () => vm.runInNewContext(`
+    ${functionSource('validStoredDemoSettings')}
+    ${functionSource('readStoredDemoSettings')}
+    readStoredDemoSettings();
+  `, {
+    demoModel,
+    DEMO_SETTINGS_KEY: currentKey,
+    LEGACY_DEMO_SETTINGS_KEY: legacyKey,
+    global: { localStorage: { getItem: (key) => storage.get(key) ?? null } }
+  });
+  const migrated = read();
+  assert.equal(migrated.settings.idleSeconds, null);
+  assert.equal(migrated.settings.helpVisible, false);
+  assert.equal(migrated.settings.nestedTunnelPercent, 55);
+  assert.equal(migrated.settings.nestedTunnelInteriorPercent, 35);
+  assert.equal(migrated.stored.valid, true);
+  assert.equal(migrated.stored.key, legacyKey);
+  assert.equal(migrated.stored.raw, legacyRaw, 'migration evidence retains the unmodified legacy record');
+  assert.equal(storage.get(legacyKey), legacyRaw);
+
+  storage.set(currentKey, JSON.stringify({ idleSeconds: 60, nestedTunnelPercent: 0 }));
+  const current = read();
+  assert.equal(current.settings.idleSeconds, 60, 'an explicit current preference remains enabled');
+  assert.equal(current.settings.nestedTunnelPercent, 0);
+  assert.equal(current.stored.key, currentKey);
 });
 
 test('idle presentation replans unfinished work from the current graph and cues before acting', () => {

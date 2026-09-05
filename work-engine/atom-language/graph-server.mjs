@@ -11,6 +11,9 @@ import {
   projectRoot
 } from '../../cli/lib/server.mjs';
 import { createStore } from '../../cli/lib/store.mjs';
+import { createViewStateRepository } from '../../src/atom-system/adapters/json-view-state-repository.mjs';
+import { createPresentationSettingsService } from '../../src/atom-system/spatial-experience/presentation-settings-service.mjs';
+import presentationModel from '../../spatial-demo-model.js';
 import { createLegacyWorldService } from '../../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createJsonProgramProjectionRepository } from '../../src/atom-system/adapters/json-program-projection-repository.mjs';
 import { createJsonRequestDrivenLockRepository } from '../../src/atom-system/adapters/json-request-driven-lock-repository.mjs';
@@ -116,7 +119,8 @@ function pathIdentity(file) {
 }
 
 function validateDistinctPaths({
-  contextFile, graphFile, storeFile, programProjectionFile, requestDrivenLockFile, diagnosticFile
+  contextFile, graphFile, storeFile, programProjectionFile, requestDrivenLockFile, diagnosticFile,
+  presentationSettingsFile
 }) {
   const entries = [
     ['contextFile', contextFile],
@@ -124,7 +128,9 @@ function validateDistinctPaths({
     ['storeFile', storeFile],
     ['programProjectionFile', programProjectionFile],
     ['requestDrivenLockFile', requestDrivenLockFile],
-    ['diagnosticFile', diagnosticFile]
+    ['diagnosticFile', diagnosticFile],
+    ['presentationSettingsFile', presentationSettingsFile],
+    ['journalFile', path.join(path.dirname(contextFile), 'atom.transactions.json')]
   ];
   const seen = new Map();
   for (const [label, file] of entries) {
@@ -153,6 +159,7 @@ function resolveConfiguration(options = {}) {
     host: validateHost(options.host ?? DEFAULT_ATOM_GRAPH_HOST),
     port: validatePort(options.port ?? DEFAULT_ATOM_GRAPH_PORT),
     contextFile,
+    presentationSettingsFile: path.join(path.dirname(contextFile), 'presentation-settings.json'),
     graphFile: resolveJsonPath(
       options.graphFile ?? defaultFiles.graphFile,
       'Graph 投影文件'
@@ -512,6 +519,10 @@ export async function startAtomGraphServer(options = {}) {
     root: options.root ?? projectRoot,
     storeFile: configuration.storeFile,
     graphFile: configuration.graphFile,
+    presentationSettingsService: createPresentationSettingsService({
+      repository: createViewStateRepository({ file: configuration.presentationSettingsFile, worldId: 'primary' }),
+      normalizeSettings: presentationModel.normalizeSettings
+    }),
     atomProjectionReadOnly: true,
     atomCommand: handlers.atomCommand,
     atomHumanStatus: handlers.atomHumanStatus,
@@ -557,6 +568,7 @@ export async function startAtomGraphServer(options = {}) {
     port,
     url: `http://${displayHost(host)}:${port}`,
     contextFile: configuration.contextFile,
+    presentationSettingsFile: configuration.presentationSettingsFile,
     graphFile: configuration.graphFile,
     storeFile: configuration.storeFile,
     programProjectionFile: configuration.programProjectionFile,
