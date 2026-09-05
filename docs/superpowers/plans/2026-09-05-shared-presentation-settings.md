@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-31-atom-web-spatial-design.md` §5.5。I3/U3/D2/E3；Transform已完整交付、回告且核对远端备份，现在执行本项，早于旧print及A剩余任务。
 
-**当前执行（2026-09-06）:** 保存反馈已部署e82984d，手机Task2在c2f8510吸收该基线后续接；当前候选cd3335c，R1—R3既有问题均已复审关闭；R4最新失败提示已修正，43/43、52/52及build/control通过，范围复审中。此前R3双浏览器1/1证据保留，未全量或部署。最终候选全量在稳定审查后一次执行；真机及实际本机值缺口保留。
+**当前执行（2026-09-06）:** 保存反馈已部署e82984d，手机Task2在c2f8510吸收该基线后续接；当前整分支候选b21097a；任务级发现已在cd3335c全部关闭，整分支仅发现自有旧成功回执覆盖较新未保存调节值，正在唯一final-fix。43/43、52/52及build/control和此前R3浏览器1/1证据保留，未全量或部署。最终候选全量在稳定审查后一次执行；真机及实际本机值缺口保留。
 
 **历史RED检查点（2026-09-06）:** 原Task2两个RED测试文件已原样提交为48c79fb安全检查点，未实现产品逻辑、未新增测试运行、未宣称GREEN；待保存反馈交付后安全合入main并续接。
 
@@ -129,7 +129,7 @@ assert.equal(await hostPage.locator('#nestedTunnelStrength').inputValue(), '55')
 
 再覆盖仅手机先开时不初始化、断线保存失败不反写、旧GET晚到不覆盖较高revision、真实合法0保存并重载保留。使用既有A展开fixture检查最终Canvas边界alpha/线宽或像素结果；模型值通过不替代可见边框。
 
-- [ ] **Step 2: 接通浏览器链**
+- [x] **Step 2: 接通浏览器链**
 
 首次GET优先共同配置；仅uninitialized且回环页面真实有效raw缓存时备份后bootstrap。applyingShared标记只阻止回声写入，不关闭用户操作。用户patch串行送往服务，冲突回读而不自动覆写；保存失败显示未同步。SSE同一连接监听新事件，恢复时独立读设置，应用后按实际布局字段更新可见场景。
 
@@ -156,3 +156,5 @@ Run: `node --test tests/browser-bridge-contract.test.js tests/atom-presentation-
 - Task1已完成并独立Approved；Task2 d760145实现，f773287经两轮时序修正，原始40/40、49/49、browser1/1及build/control已核对，范围复审进行中；最终候选全量、生产部署及真机结果尚未完成。
 
 - **R2裁定（2026-09-06）**：根Agent核对现有PUT catch/finally与GET源码后采纳Astra咨询中的开始/完成双门控：写入期间仅合并deferred read，catch只记回读需求，finally清inFlight后统一回读并阻止旧队列插入；不能等待自身delivery。外部权威世代推进即重置新事件queue base，旧世代项保持失效。属于既有过期写拒绝/同设备连续操作合同的实现修正，不改内核或服务API。
+
+- **最终全量结果（2026-09-06）**：候选62a194c任务与整分支复审已关闭；npm test完整结束exit1，1826项/1823通过/3失败，426594ms。原始证据保存在settings工作树的.superpowers/sdd/2026-09-05-shared-presentation-settings/final-full-62a194c.txt。失败分别为默认路径精确断言未纳入新增settings文件、空间体验服务直接导入外部展示模型违反既有依赖边界、旧偏好迁移测试引用已替换函数。当前仅定向回修三项，保留架构门禁与旧迁移语义，不部署、不重跑已通过全量；settings_task2_r4实施，root独立裁定。
