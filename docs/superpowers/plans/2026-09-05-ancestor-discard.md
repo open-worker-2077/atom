@@ -34,6 +34,7 @@
 **Files:**
 - Modify: `work-engine/atom-language/transform-executor.mjs`
 - Modify only for proven dependent defect: `work-engine/atom-language/engine.mjs`（先报告控制方具体根因，不能扩展新调度/授权）
+- Proven restore dependency only: `src/atom-system/adapters/transactional-world-persistence.mjs`、`src/atom-system/adapters/legacy-engine-adapter.mjs`（按需提供同一世界中央discard事务的原声明证据，复用既有journal，不新增公开入口或权限模型）
 - Test: `tests/atom-rename-sealed-descendants.test.mjs`（复用真实封装结构fixture与访问控制）
 - Reuse tests: `tests/atom-language-transform-p1.test.mjs`、`tests/atom-language-transform-receipt.test.mjs`、`tests/atom-program-runtime-scheduling.test.mjs`
 - Controller-owned: 本计划、当前唯一总账、既有反馈裁定页、规格与恢复断点。
@@ -71,3 +72,5 @@ Run上述新具名链；按实际改动运行p1/receipt相关归档恢复具名�
 - 其它CLI反馈仍须逐条评估，新的内核方案不得借本项授权自动实施。
 - **恢复证明裁定更新**：实际公开反例证明，默认backup处于Root窗口内时，Root可改动inactive子Agent声明而不经活跃委派校验；当前rst会安全拒绝升权。故否决仅以请求开始时备份源码不变证明“原有声明”的候选，不实施该engine接线。既有中央discard patch保有原子树和归档后树，但向engine提供可信按需证明需额外设计；该分支保留，不借归档授权放宽权限。
 - **原现场第二层RED**：独立main+executor3349cfb具名3/3通过；真实世界副本atom-archive-acceptance-ilhMWm仍在dsc返回WINDOW_ACCESS_DENIED/当前窗口无权改写指向该子树的关系。root只读内存探针定位到默认备份仓/旧链备份_20260830/验收闭环的agent-window拒绝，源hash4b1fef9d1b05dc7ec59be6d4a6b8c79fc05ae2c5f661601b0f6d122c4a95ad5e前后不变。同树mov通过。优先修复该真实阻塞：纯dsc及合法纯rst的机械引用维护归于已授权根操作；外域/备份关系owner不得因此可被直接编辑，混合写仍拒绝，引用owner必须进入原可逆patch。
+- **原现场第三层RED**：引用修复6fed2fd已移植为独立候选11573e1，私有世界atom-archive-acceptance-rwpKI2归档成功且errors/warnings为空；430个迁移节点、12117总节点名称/源码/拓扑保全，冷读事实完全不变。原位rst实际失败PROGRAM_FUNCTION_DELEGATION_DENIED，生产源hash4b1fef9d…前后不变。因此可信恢复证据现已证明是原目标可逆恢复的必要依赖，不能再假定仅影响其他fixture。
+- **Ruling: 原权限恢复取证** — 继续执行用户已确认的可逆恢复方案，不新授予权限。root独立核对persistence.transformLogEntries/adapter/engine及中央local-patch接口后，限定补齐按需读取同一世界、确切discardId对应已提交原事务证明的内部接线：从既有patch/snapshot定位当时归档子树，核验原Agent/Program声明的相对路径、类型和源码字节与当前待恢复子树完全一致；再核验整个请求候选只做既有声明路径迁移。必须保持根与恢复目的授权、档案身份匹配及提交前重验，不通过mov/ren列表关闭trigger。缺失/不匹配/辅助JSONL伪造的证明不能形成豁免，改过声明仍走原委派校验；合法数据变动不应被误当权限改变。新增/改标签、函数、Program源码与混合写不得借恢复升权。所有普通请求不得为此克隆完整历史；仅rst需要时按需查询。若证明提取失败或无法可靠绑定，保留原拒绝并报告。该接线只补原批准恢复所需证据，不授权其他CLI反馈内核改造。
