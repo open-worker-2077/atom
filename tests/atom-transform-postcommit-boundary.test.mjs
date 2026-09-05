@@ -33,7 +33,6 @@ function nameOf(value) {
 
 test('discard source notification preserves the archive receipt through final settlement', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-discard-receipt-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
@@ -1125,8 +1124,6 @@ test('deployment-copy acceptance fails when its source changes after the private
     ].join('\n'), [], [], ['program']),
     atom('默认备份仓', '', [], [], ['backup', 'default'])
   ], null, 2), 'utf8');
-  t.after(() => fs.rm(sourceDirectory, { recursive: true, force: true }));
-
   const script = path.resolve(import.meta.dirname, '..', 'scripts', 'accept-real-world-write-copy.mjs');
   const existingAcceptanceDirectories = new Set((await fs.readdir(os.tmpdir())).filter((name) => (
     name.startsWith('atom-real-write-acceptance-')
@@ -1184,8 +1181,6 @@ test('rename-copy acceptance rereads one stable interaction and proves Strut and
       }])
     ], [], ['program'])
   ], null, 2), 'utf8');
-  t.after(() => fs.rm(sourceDirectory, { recursive: true, force: true }));
-
   const script = path.resolve(import.meta.dirname, '..', 'scripts', 'accept-rename-world-copy.mjs');
   const run = spawnSync(process.execPath, [
     script, '--context', contextFile, '--agent', 'Acceptance Agent', '--target', target, '--name', 'Renamed'
@@ -1237,7 +1232,6 @@ test('public ordinary Agent keeps source success separate from failed and repair
       atom('Subscriber', failingProgram, [], [], ['program'])
     ], [], ['program'])
   ], null, 2), 'utf8');
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile });
   t.after(() => running.close());
   assert.notEqual(running.port, 4784);
