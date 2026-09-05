@@ -8,7 +8,9 @@
 
 **Tech Stack:** Node.js标准库、既有Browser IIFE模型、HTTP、Node test runner、已安装Playwright。
 
-**Spec:** `docs/superpowers/specs/2026-08-31-atom-web-spatial-design.md` §5.5。I3/U3/D2/E3；在Transform完整交付并回告提出方后立即执行，早于旧print及A剩余任务。当前仅准备计划，不并行实施。
+**Spec:** `docs/superpowers/specs/2026-08-31-atom-web-spatial-design.md` §5.5。I3/U3/D2/E3；Transform已完整交付、回告且核对远端备份，现在执行本项，早于旧print及A剩余任务。
+
+**当前断点（2026-09-06）:** 隔离工作树`.worktrees/shared-presentation-settings`、分支`fix/shared-presentation-settings`、Task1基线783dd6e；派发shared_settings_task1实施共同存储/HTTP合同。基线生产代码与1801/1801候选一致，四处新测试删除钩子已移除并独立复核，后续保留产物。本次重新检查CUA仍仅空的内置浏览器，没有真实本机标签页；实际参数与真机显示缺口仍然存在，不写测试值到生产。
 
 ## Global Constraints
 
@@ -141,4 +143,4 @@ Run: `node --test tests/browser-bridge-contract.test.js tests/atom-presentation-
 
 - 所有§5.5要求映射到两项任务：共同权威/迁移/CAS/恢复为Task1+2；实际屏幕和真机为Task2。已知生产种子缺口明确保留，没有虚构实际参数。
 - 只复用展示模型与空间体验仓储；新接口隐藏存储路径，不重写Graph/Program/授权。并行OS写入、账号多租户与全配置平台不在本轮范围。
-- 当前未派发、未实现；执行只由唯一总账当前顺序决定。
+- Task1已派发、Task2待Task1独立审查通过；实现与真实手机完成分别记录，不以测试替代现场结果。
