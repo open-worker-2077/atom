@@ -187,3 +187,10 @@
 
 - **当前安全点**：main与origin/main为2ae8735691aa00cdae8ad3c90d29763b1964a1af；旧eaa48bc保留为槽体交付历史。
 - **A模式续接**：既有干净b1bff98已非破坏吸收main，合并提交4c9cf2f；Task 1最小输入链31/31 PASS。Task 2进行中，详细RED/GREEN与裁定写回既有A模式计划；槽体不重测，白板不实现。
+
+### 2026-09-05 来源任务生产续验
+
+- **改名实际成功**：提出方确认普通🧊manage已完成判重→瞻重、融合及原节点移备忘区，167节点结构/非路径正文保全，执成保留；没有重放原失败事务。
+- **残留路径定界**：来源更正exact为瞻重/ESG计划/test/槽体MVP-20260904/槽体/print；PRINT_PLAN内嵌JSON保留旧body路径，main的body字面量已经迁移。45个普通正文含历史回执与来源，不全局替换。源码currentPlan读取修订记录，printExample用实际layout与相对roles；尚需隔离冷调用判断真实运行风险。
+
+- **残留对照结论**：冷副本GiLZ6Z原生成print报INVALID_SLOT_BODY_EFFECT，主因是仍传退役显式body；DxWdGF仅去除该main参数，保留PRINT_PLAN内判重旧body，普通Agent成功打印槽例。两份源hash未变。残留快照body不参与当前打印定位，不盲改修订与45条历史正文；旧生成print的自声明合同迁移需独立收尾，已回告提出方，无需重做业务。

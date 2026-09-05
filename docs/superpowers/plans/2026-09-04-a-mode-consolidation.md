@@ -562,3 +562,8 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **生产急件切换**：收到改名判重→瞻重回执同时出现PROJECTION_RECOVERY_PENDING与WINDOW_ACCESS_DENIED的新现场证据；按总账优先规则核查权威提交与权限目标。A模式Task3尚未开始，现有代码保存于4c27d4b，未部署；急件处理后从Task3继续，不重新执行Task2。
 
 - **2026-09-05续接**：改名修复1727/1727、复核和4784部署回告完成，main@abbc5ed。手机当前无握手且离线、无线ADB不可达，保持未解决；按用户局部阻塞不全局停工授权，安全吸收main并从Task 3继续。总账合并冲突只涉及旧优先级和A阶段描述，保留最新手机优先级及Task 2完整证据；不改产品定论。
+
+- **Task 3进行中**：a_task3实现方，BASE=3231d71；impact为LOW，createSecondaryClickArbiter直接测试调用1、commitPointerCandidate直接releasePointer，源码核对索引缺口，不把辅助图当最终结论。
+- **Task 6前置RED**：在Task 4实现前，真实Chromium三条命名旅程3/3 FAIL：普通单击仍只见父团/团外旁侧；双击path仍root；空白返回旅程在进入前提失败。后者尚未证明返回自身缺陷。产物保留在本计划工作区task-6-before-task4-red，后续复用测试验证导航实现，不重做旧行为RED。
+
+- **Task 3 RED/GREEN**：默认沙箱spawn EPERM不计结果；获准执行仲裁/gesture链37项，RED为34通过/3失败（delayFor未用、engine固定620、尚未submit），实现后37/37 PASS。实现方自审及提交进行中，未替代独立任务复核。

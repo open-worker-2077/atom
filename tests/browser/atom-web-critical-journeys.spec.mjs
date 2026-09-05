@@ -791,3 +791,68 @@ test('a steady domain reuses its rasterized backdrop instead of repainting blurr
   expect(drawCounts.backdropBlits).toBeGreaterThan(0);
   expect(drawCounts.ellipses / drawCounts.backdropBlits).toBeLessThan(70);
 });
+
+async function openAModeFixture(page) {
+  const parentPath = `root/${hashText('a-parent-id').toString(36)}`;
+  const innerPath = `${parentPath}/${hashText('a-inner-id').toString(36)}`;
+  const knowledge = {
+    revision: 1,
+    nodes: [
+      { id: 'a-parent-id', key: 'root::a-parent-id', path: 'root', atomPath: '父团', label: '父团', detail: '', hasChildren: true },
+      { id: 'a-outside-id', key: 'root::a-outside-id', path: 'root', atomPath: '团外旁侧', label: '团外旁侧', detail: '', hasChildren: false },
+      { id: 'a-inner-id', key: `${parentPath}::a-inner-id`, path: parentPath, atomPath: '父团/内层团', label: '内层团', detail: '', hasChildren: true },
+      { id: 'a-inner-peer-id', key: `${parentPath}::a-inner-peer-id`, path: parentPath, atomPath: '父团/内层旁侧', label: '内层旁侧', detail: '', hasChildren: false },
+      { id: 'a-leaf-id', key: `${innerPath}::a-leaf-id`, path: innerPath, atomPath: '父团/内层团/叶子', label: '叶子', detail: '', hasChildren: false }
+    ],
+    edges: []
+  };
+  await page.route('**/__spatial/api/state?*', (route) => {
+    const path = new URL(route.request().url()).searchParams.get('path') || 'root';
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, scope: { path }, knowledge }) });
+  });
+  await page.goto('/');
+  await page.waitForFunction(() => window.spatialLab?.state().interactionTargets.some(({ label }) => label === '父团'));
+  return { parentPath, innerPath };
+}
+
+async function rightClickTarget(page, label, count) {
+  const target = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .find((candidate) => candidate.label === label);
+  expect(target).toBeTruthy();
+  for (let index = 0; index < count; index += 1) {
+    await page.mouse.click(target.clientX, target.clientY, { button: 'right' });
+    if (index + 1 < count) await page.waitForTimeout(80);
+  }
+}
+
+test('A single right-click cuts inward without hiding outside context', async ({ page }) => {
+  await openAModeFixture(page);
+  await rightClickTarget(page, '父团', 1);
+  await page.waitForTimeout(430);
+  const labels = await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label));
+  expect(labels).toEqual(expect.arrayContaining(['内层团', '团外旁侧']));
+  expect(await page.evaluate(() => window.spatialLab.state().path)).toBe('root');
+});
+
+test('A double right-click immerses the exact group', async ({ page }) => {
+  const { parentPath } = await openAModeFixture(page);
+  await rightClickTarget(page, '父团', 2);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(parentPath);
+  const labels = await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label));
+  expect(labels).toContain('内层团');
+  expect(labels).not.toContain('团外旁侧');
+});
+
+test('blank right double-click returns only one level non-immersively', async ({ page }) => {
+  const { parentPath, innerPath } = await openAModeFixture(page);
+  await rightClickTarget(page, '父团', 2);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(parentPath);
+  await rightClickTarget(page, '内层团', 2);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(innerPath);
+  await page.mouse.click(48, 360, { button: 'right' });
+  await page.waitForTimeout(80);
+  await page.mouse.click(48, 360, { button: 'right' });
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(parentPath);
+  const labels = await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label));
+  expect(labels).toContain('内层旁侧');
+});
