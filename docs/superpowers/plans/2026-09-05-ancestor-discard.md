@@ -1,5 +1,7 @@
 # Ancestor Discard Implementation Plan
 
+**交付完成（2026-09-06）:** 与来源/后续分离组合候选00ff220全量1801/1801及独立审查通过；完整历史副本430节点归档/恢复四轴往返及冷读通过。main@cea05f2已部署并核对远端一致，生产日常CLI实际归档exit0/4735ms、公开父域回读正确、后续completed且投影published。原世界和历史私有备份保留，提出方已获回告。具体关联及备份位置见现有恢复断点，不重放归档。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 合法上级能把包含封装槽模的旧版本子树整体可逆归档，保持内部结构、真实权限、引用及恢复能力。
@@ -43,25 +45,25 @@
 - Consumes: `applyTransform({atoms,item,contextFile,authorize,...})`、`createAccessController`实际slot/window锁、已有`createRuntimeCliExecutor`与中央journal。
 - Produces: 同一公开`.dsc.`成功回执及原archive identity/restoreCoordinate；没有新API。纯整树迁移不逐后代申请内部结构编辑权，复合编辑保持真实拒绝。
 
-- [ ] **Step 1: 精确RED与影响核对**
+- [x] **Step 1: 精确RED与影响核对**
 
 沿现有sealed fixture加入唯一typed default backup，用实际控制器的合法上级dsc父节点，断言应成功、原输入不变、整棵封装结构保全；原代码应复现WINDOW_ACCESS_DENIED，记录实际被拒对象。另证明直接修改封装节点及外域/锁住的所选根仍拒绝。
 
 Run: `node --test --test-isolation=none --test-name-pattern='ancestor discard' tests/atom-rename-sealed-descendants.test.mjs`。修改前做GitNexus上游影响及具体调用核对，UNKNOWN不作无影响。避免为本项重跑原82/127/15项全链。
 
-- [ ] **Step 2: 最小边界修正**
+- [x] **Step 2: 最小边界修正**
 
 严格辨认纯归档与混入slot/situation/strut等编辑，沿现有根操作授权实现整树归档。所有内部结构保持不变，仍检查所选根真实权限/锁并限定唯一default backup。若自动引用维护还错误请求业务逐项编辑权，先给控制方具体证据与所需最小接线，不扩大直接业务写权限。
 
-- [ ] **Step 3: 真实持久回归**
+- [x] **Step 3: 真实持久回归**
 
 以公开runtime/CLI fixture验证包含封装槽模、后代Agent/Program的父子树归档，中央来源只提交一次、内部事实和关系守恒、备份Program不运行；冷读取及`.rst.`恢复原位置后封装锁仍有效。同名旧归档保留且新归档身份唯一，恢复冲突不覆盖。复用原有archive/restore/备份停用测试，不造新后台服务或并行账本。
 
-- [ ] **Step 4: 定向GREEN、提交、独立评审**
+- [x] **Step 4: 定向GREEN、提交、独立评审**
 
 Run上述新具名链；按实际改动运行p1/receipt相关归档恢复具名用例及备份Program停用用例。保留完整工具yield及completion输出，GitNexus/diff检查后只提交明确代码文件，报告基线、SHA、所有未决缺口。任务评审由控制方派独立评审方，实施方不自派评审。
 
-- [ ] **Step 5: 原始现场私有副本与交付**
+- [x] **Step 5: 原始现场私有副本与交付**
 
 任务复核后优先建立现行main加归档补丁的独立候选；对最新生产世界只读生成私有副本，使用生产同款公共入口及普通`🧊manage`完整归档原目标，核对源/目标、原子回执、四轴/引用/封装守恒及冷恢复；生产源hash核对，不--cleanup、不重放生产失败。若外部合法写入改变源hash，区分外部变化而非还原旧世界。若独立候选证明可用，就按本项必要门禁和最终审查交付，不等待无关Transform候选修复；只有发现具体运行依赖时才回到相应必要修复。完整原始问题GREEN后由控制方部署与公共回读，再协调来源任务完成用户的唯一生产归档并回告。
 

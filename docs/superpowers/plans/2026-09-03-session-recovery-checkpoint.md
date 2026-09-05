@@ -8,6 +8,8 @@
 
 ## 2026-09-05 当前执行断点
 
+- **2026-09-06部署及备份完成**：本地/远端main均为cea05f28940d757f172253e0e23bbe59439e08cc，已实际push并ls-remote核对。初次listener36036启动早于merge，CLI拒绝且零提交；明确停启为33664后，日常CLI归档exit0/4735ms，关联1d5ee824-1253-4bcc-a436-8421590d0a77，归档a7490f39-e421-4241-9c9e-c6237f322565。公开父域回读正确，同id后续completed，health7387/published对应515cc7e8dee85dc4de2befe38e3db5f46cb405403cb138f6d47d80315a2221ef。私有完整备份：%LOCALAPPDATA%/AtomGraph/backups/transform-source-20260906-002640；未恢复旧业务快照。已回告任务01a06acf-8df7-7882-9b74-63e74fcd4b5b继续节点改名，不重放归档。代码00ff220全量1801/1801、全部审查通过，不重复全量。下一步手机共同配置；任何新测试前移除新boundary测试四处递归清理。部署脚本复用前须确认新listener在代码合入后启动，不能仅凭health证明切换。
+
 - **2026-09-06覆盖断点**：移动候选00ff220最终全量1801/1801、exit0，构建和development-control通过；Task3及归档/可信恢复任务均已独立复核。430节点真实完整历史归档3557ms/恢复5997ms来源成功，中央patch四轴回转/冷读/生产源不变通过；旧slot_body业务Program后续failed单独保留，不作为移动来源失败。final reviewer正在审查b4a74cc..00ff220，随后root按已准备的deploy-reviewed-candidate.ps1私有完整备份/整合/部署/公开回读/来源回告。用户要求先移动部署，右键双击改长按只记录在Web§4.1及A计划，移动后再改；手机配置仍保留。生产尚未改动，不再重跑已通过全量。
 
 - **最新覆盖断点**：main文档到b20bc69，生产代码仍8b2df30，health7382/published。可信恢复b1fbb11已32/32通过，当前原实施方只修独立评审的reader故障诊断Important；之后范围复审。独立旧main候选5fcb4c0在完整真实历史副本归档430节点成功，冷恢复实际提交但HTTP15秒超时、总耗时23秒；证明来源/后续分离是本次交付必要依赖。先完成此小修→原Transform Task3剩余12项定向回修→组合真实验收/最终门禁/复核/部署/来源回告→手机共同配置。保留独立候选作为证据，不继续旧main旁路性能改造。最近GitHub push及ls-remote均网络失败，不能宣称最新提交已远端备份。

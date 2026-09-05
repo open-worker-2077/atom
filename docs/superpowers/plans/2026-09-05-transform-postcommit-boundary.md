@@ -4,6 +4,8 @@
 
 **Goal:** 合法来源 Transform 先原子提交，后续 Program 运行失败不撤销或否定该来源；既有触发、权限、局部性与恢复需求继续成立。
 
+**交付完成（2026-09-06）:** 00ff220全量1801/1801、构建及控制检查通过，Task3和整分支审查Approved；main@cea05f2已部署且远端精确一致。日常CLI归档4735ms/exit0，公开回读正确，同关联后续completed、health7387/published；已回告提出方。完整历史副本430节点来源四轴往返及冷读通过。四处新测试递归清理须在后续测试前移除并保留产物，两步helper提前诊断为非阻塞改进；下一步手机共同配置。
+
 **Architecture:** 复用现有中央事务、reconcileProgramsForWorld 和提交后收尾入口；将来源事实与随后产生的 effects 拆开提交。来源回执保存可追踪事件，后续运行采用自己的读取修订与结果；不新增业务队列、第二世界权威或永久双轨开关。
 
 **最终12项失败只读分类（归档修复期间，尚未回修）:** root已回读实际断言：receipt时序1项仍要求后续reconcile先于来源commit；interaction-e2e的5项显式.run失败仍要求ok=true/warnings，均与本计划已确认合同不符，后续应保全原facts/原子性断言并按真实错误收口。service-e2e两项性能fixture主动混入无效effects，原断言仍期待同批其它effects部分成功，与已确认后续批次原子性不符，须分别保留合法大批性能和拒绝批次零effects验收，不能只改等待时间。其余公共CLI先创建Program再立即读取效果、两步镜像链、保留授权重试及视觉性能仍须定向取证；当前仅识别疑点，不先把失败一律归为旧断言，不改实现/重跑全量，归档第一优先保持。
@@ -200,7 +202,7 @@ Run: `node --test --test-isolation=none tests/atom-transform-postcommit-boundary
 - Consumes: Task 1/2完成且经评审的候选。
 - Produces: 公开入口来源提交／后续独立失败与成功证据，最终部署回读。
 
-- [ ] **Step 1: 真实公共旅程**
+- [x] **Step 1: 真实公共旅程**
 
 以生产同款service/公开CLI和普通Agent，在隔离世界验证合法来源→立即exact读为after→后续失败独立回执；修复该测试Program后再触发，Result成功。真实生产世界只读副本验证一次上级改名，保全后代结构/正文、外部引用、既有Trigger与阶段接棒，生产源hash不变。
 
@@ -208,19 +210,19 @@ Run: `node --test --test-isolation=none tests/atom-transform-postcommit-boundary
 
 控制方代码回读发现accept-real-world-write-copy末尾先赋综合ok再展开含ok的preRollback，会把rollback/restart/sourceUnchanged的失败覆盖成true。Task3仅调整结果组装次序使综合ok最后裁定，并回看实际各布尔证据；历史证据已有逐项true的不据此无端撤销或重测，不为该修复新增一套验收框架。
 
-- [ ] **Step 2: 扩展受影响门禁**
+- [x] **Step 2: 扩展受影响门禁**
 
 根据最终detect_changes选择Trigger/Strut/slot signal、lock、Program显式调用、投影与事务恢复的最小受影响链。当前层失败先定向修复；A等无关界面不插入本候选测试。
 
-- [ ] **Step 3: 最终候选全量一次及独立评审**
+- [x] **Step 3: 最终候选全量一次及独立评审**
 
 Run: `npm run check:development-control`；`npm test`。真实失败先定向修复；重复相同revision有效全量无意义。独立whole-branch review后才集成。
 
-- [ ] **Step 4: 受控部署与公共回读**
+- [x] **Step 4: 受控部署与公共回读**
 
 基线、Git SHA、私有备份和构建id可追溯；集成本地main后受控重启 Atom Graph Runtime，公开health为ready且atomProjection.status=published，再公开CLI读取普通Agent及所需源节点。代码回退不回滚用户后来写入的业务世界；代码安全备份按用户最新授权由控制方处理。部署前私有快照须包含权威atom.json及atom.transactions.json和其.d增量日志目录；生产停写窗口内核对一致性后留存，代码回退与事实恢复分开裁定。既有backup-atom-runtime.ps1只复制atom.json/submissions且会push，不适用于本项完整无推送部署快照。
 
-- [ ] **Step 5: 回告与继续**
+- [x] **Step 5: 回告与继续**
 
 向已授权提出方任务回告具体结果，更新总账/断点；随后旧生成print维护迁移，再恢复A Task 5—7，手机实际连接恢复时优先手机入口。阶段汇报不结束整个Atom持续任务。
 
