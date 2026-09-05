@@ -475,10 +475,31 @@ test('semantic edits wait for persistence acknowledgement before claiming succes
   assert.match(source, /正在保存/);
 });
 
-test('save feedback waits for Atom only on an HTTP or HTTPS service entry', () => {
-  const persist = functionSource('persistWorkspaceSnapshot');
-  assert.match(persist, /\["http:",\s*"https:"\]\.includes\s*\(\s*global\.location\.protocol\s*\)/);
-  assert.match(persist, /serviceBacked[\s\S]*showWorkspacePersistenceStatus\s*\(/);
+test('save feedback waits for Atom only on service entries while every entry still dispatches the commit', () => {
+  for (const protocol of ['http:', 'https:', 'file:']) {
+    const persistenceDisplays = [];
+    const commits = [];
+    const knowledge = { revision: 7, nodes: [] };
+    const operation = { kind: 'node-edit', nodeKey: 'root::status' };
+    const persist = new Function(
+      'global', 'workspace', 'state', 'CustomEvent', 'showWorkspacePersistenceStatus',
+      `let workspacePersistenceSequence = 0; return ${functionSource('persistWorkspaceSnapshot')};`
+    )(
+      { location: { protocol }, dispatchEvent: (event) => commits.push(event) },
+      { exportKnowledge: () => knowledge },
+      { currentPath: 'root' },
+      class CustomEvent { constructor(type, init) { this.type = type; this.detail = init.detail; } },
+      (...args) => persistenceDisplays.push(args)
+    );
+
+    assert.equal(persist(operation), 1, protocol);
+    assert.equal(persistenceDisplays.length, protocol === 'file:' ? 0 : 1, protocol);
+    assert.equal(commits.length, 1, protocol);
+    assert.equal(commits[0].type, 'spatial-workspace-committed', protocol);
+    assert.equal(commits[0].detail.persistenceId, 1, protocol);
+    assert.equal(commits[0].detail.operation, operation, protocol);
+    assert.equal(commits[0].detail.knowledge, knowledge, protocol);
+  }
 });
 
 test('a persisted landing reselects the moved node at its authoritative projected id', () => {
