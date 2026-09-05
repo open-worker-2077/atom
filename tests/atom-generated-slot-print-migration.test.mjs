@@ -113,6 +113,36 @@ test('migrates one exact historical generated print after an ancestor rename wit
   );
 });
 
+test('migrates a generated print whose main body alone was maintained to the renamed layout path', async () => {
+  let facts = await seal([
+    atom('Root', '根正文保持', [unsealedBody('订单槽体')])
+  ], 'Root/订单槽体');
+  const original = visiblePrint(facts, 'Root/订单槽体');
+  const originalHeader = fieldValue(original.layout.print, 'situation').split('\n')[0];
+  replaceStoredField(find(facts, 'Root'), 'thing', 'RenamedRoot');
+  const renamed = visiblePrint(facts, 'RenamedRoot/订单槽体');
+  assert.equal(renamed.plan.body, 'Root/订单槽体');
+  replaceStoredField(renamed.layout.print, 'situation', legacyGeneratedSource(
+    fieldValue(renamed.layout.print, 'situation'),
+    renamed.layout.bodyPath
+  ));
+  const before = structuredClone(facts);
+
+  const plan = planGeneratedSlotPrintMigration(facts);
+
+  assert.deepEqual(facts, before);
+  assert.equal(plan.summary.migratedPrograms, 1);
+  assert.deepEqual(plan.changedPaths, ['RenamedRoot/订单槽体/print']);
+  const migratedSource = fieldValue(find(plan.facts, 'RenamedRoot/订单槽体/print'), 'situation');
+  assert.equal(migratedSource.split('\n')[0], originalHeader);
+  assert.equal(migratedSource.split('\n').at(-1),
+    '    return slot_body({"action":"print","name":arguments["name"]})');
+  assert.deepEqual(
+    withoutSituationAt(plan.facts, 'RenamedRoot/订单槽体/print'),
+    withoutSituationAt(before, 'RenamedRoot/订单槽体/print')
+  );
+});
+
 test('leaves the current generated ABI and handwritten print Programs unchanged', async () => {
   const currentFacts = await seal([atom('Root', '', [unsealedBody('当前槽体')])], 'Root/当前槽体');
   const currentBefore = structuredClone(currentFacts);
@@ -161,6 +191,23 @@ test('rejects an entire candidate when a generated-looking print has extra behav
     () => planGeneratedSlotPrintMigration(facts),
     (error) => error?.code === 'GENERATED_SLOT_PRINT_MIGRATION_SOURCE_AMBIGUOUS'
       && error.details?.path === 'Root/畸形槽体/print'
+  );
+  assert.deepEqual(facts, before);
+});
+
+test('rejects a generated print whose main body names a third-party path', async () => {
+  let facts = await seal([atom('Root', '', [unsealedBody('订单槽体')])], 'Root/订单槽体');
+  const entry = visiblePrint(facts, 'Root/订单槽体');
+  replaceStoredField(entry.layout.print, 'situation', legacyGeneratedSource(
+    fieldValue(entry.layout.print, 'situation'),
+    'External/Other'
+  ));
+  const before = structuredClone(facts);
+
+  assert.throws(
+    () => planGeneratedSlotPrintMigration(facts),
+    (error) => error?.code === 'GENERATED_SLOT_PRINT_MIGRATION_SOURCE_AMBIGUOUS'
+      && error.details?.path === 'Root/订单槽体/print'
   );
   assert.deepEqual(facts, before);
 });

@@ -49,7 +49,7 @@ function parsedHeader(line, path) {
   return plan;
 }
 
-function generatedSource(source, currentPlan, path) {
+function generatedSource(source, currentPlan, layoutBodyPath, path) {
   if (typeof source !== 'string' || !source.startsWith('PRINT_PLAN =')) return null;
   const lines = source.split('\n');
   if (lines.length !== 3 || lines[1] !== MAIN_LINE) throw problem(path, 'template');
@@ -62,9 +62,12 @@ function generatedSource(source, currentPlan, path) {
   }
   const current = [lines[0], MAIN_LINE, CURRENT_RETURN].join('\n');
   if (source === current) return { status: 'current' };
-  const historicalReturn = `    return slot_body({"action":"print","body":${JSON.stringify(embeddedPlan.body)},"name":arguments["name"]})`;
-  const historical = [lines[0], MAIN_LINE, historicalReturn].join('\n');
-  if (source !== historical) throw problem(path, 'template');
+  const historical = new Set([embeddedPlan.body, layoutBodyPath].map((body) => [
+    lines[0],
+    MAIN_LINE,
+    `    return slot_body({"action":"print","body":${JSON.stringify(body)},"name":arguments["name"]})`
+  ].join('\n')));
+  if (!historical.has(source)) throw problem(path, 'template');
   return { status: 'historical', source: current };
 }
 
@@ -95,7 +98,12 @@ export function planGeneratedSlotPrintMigration(sourceFacts) {
   for (const { layout, plan } of readVisibleSlotPlans(facts)) {
     if (insideDefaultBackup(layout.bodyPath, backupPaths)) continue;
     const programPath = layout.printPath;
-    const match = generatedSource(fieldValue(layout.print, 'situation'), plan, programPath);
+    const match = generatedSource(
+      fieldValue(layout.print, 'situation'),
+      plan,
+      layout.bodyPath,
+      programPath
+    );
     if (match?.status !== 'historical') continue;
     replaceStoredField(layout.print, 'situation', match.source);
     migrated.push(Object.freeze({
