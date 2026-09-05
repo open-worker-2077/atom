@@ -1,8 +1,8 @@
 # Atom 当前开发恢复断点
 
-**更新时间：** 2026-09-05 18:10（Transform提交分离Task2验证，持续执行中）
+**更新时间：** 2026-09-05 18:52（Transform提交分离Task2回修复审，持续执行中）
 **权威分支：** `main`
-**当前代码基线：** 本地`main@0af6655`（新增计划文档）；本地远程跟踪`origin/main@2ae8735`，其后未推送。生产运行代码为`8b2df30`；A模式改构前回退标签`pre-a-mode-consolidation-20260904`保留。
+**当前代码基线：** 本地`main@abfeacc`（新增计划文档）；本地远程跟踪`origin/main@2ae8735`，其后未推送。生产运行代码为`8b2df30`；A模式改构前回退标签`pre-a-mode-consolidation-20260904`保留。
 **历史实现分支：** `feat/slot-signal`已指向`ead30e2`，不再是待集成分支
 **用途：** 新 Session 不依赖聊天历史，按本文恢复当前用户定论、证据与执行顺序。
 
@@ -11,8 +11,8 @@
 ## 2026-09-05 当前执行断点
 
 - **改名已部署**：main@8b2df30，候选bae2957最终1727/1727、独立复核通过；4784 PID4332，health revision7362/published，公开CLI读取与生产源不变均已确认，已回告“调整manage判重为资源中心”继续业务改造。
-- **当前实施**：`.worktrees/transform-postcommit-boundary`、`fix/transform-postcommit-boundary`，Task1 b4a74cc..76387cd完成，两轮回修后独立复核Approved，核心18/18、持久契约17/17、未触及Agent16/16证据复用。Task2候选bbf4e32完成持久关联/实际server冷恢复/HTTP最终回执，112项受影响测试通过，当前独立评审；通过后Task3公开验收/最终全量一次/部署回告。Task1已完成不重派，候选尚未部署。
-- **手机局部阻塞**：18:10北京时间只读Tailscale为Pixel 10a离线、LastSeen=2026-09-05T08:00:00.1Z、无握手/流量；ADB无发现/设备。真实手机入口未通过，终端连接恢复即优先验收；桌面HTTPS或移动视口不替代。
+- **当前实施**：`.worktrees/transform-postcommit-boundary`、`fix/transform-postcommit-boundary`，Task1 b4a74cc..76387cd完成，两轮回修后独立复核Approved，核心18/18、持久契约17/17、未触及Agent16/16证据复用。Task2初稿bbf4e32的112项通过后，独立复核确认三项中央幂等/结果异常/no-change effects缺口；回修0df824e为77/77，当前按精确差异复审；通过后Task3公开验收/最终全量一次/部署回告。Task1已完成不重派，候选尚未部署。
+- **手机局部阻塞**：18:42—18:46北京时间Tailscale仍离线、LastSeen=2026-09-05T08:00:00.1Z、无握手/流量；ADB新广播192.168.224.1:33159，WLAN路由及TCP可达，但手机以SSLV3_ALERT_CERTIFICATE_UNKNOWN拒绝调试证书。未修改密钥/配对或网络；调试通道待手机侧恢复配对，正式网站仍待手机Tailscale及浏览器验收。两者不混作根因；桌面HTTPS不替代。
 - **后续安全点**：A Task1—4已获定向验证与独立复核，Task4 b132962为77/77及实际浏览器5/5；A分支文档安全点f49ed32、未部署。提交分离后处理5个旧生成print迁移，再续A Task5—7，随后按唯一总账完成其余有效需求。
 - **持续执行**：用户离开机位，阶段汇报不结束执行；持续到Atom既有规格、唯一账本与计划收口。既有Trigger/Strut/接棒需求保全，手机局部阻塞不扩大为全局停工；不推送、不删除产物、不重放来源任务业务改造。
 
