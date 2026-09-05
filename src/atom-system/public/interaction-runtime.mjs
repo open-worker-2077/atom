@@ -255,10 +255,17 @@ export function createInteractionRuntime({
       });
     }
     let committedNotified = false;
-    const notifyCommitted = (result) => {
+    const notificationWarnings = [];
+    const notifyCommitted = async (result) => {
       if (committedNotified || result?.ok !== true || result?.changed !== true) return;
       committedNotified = true;
-      options.onCommitted?.(withInteractionId(structuredClone(result), intent.correlationId));
+      try {
+        await options.onCommitted?.(withInteractionId(structuredClone(result), intent.correlationId));
+      } catch (error) {
+        notificationWarnings.push({ code: 'ATOM_COMMITTED_NOTIFICATION_FAILED',
+          message: '来源事实已提交，但回执通知失败；可用原交互标识重读结果',
+          cause: error.code ?? error.message, correlationId: intent.correlationId });
+      }
     };
     const executeWorld = (source, currentInteraction, currentOptions = options) => world.execute({
       source,
@@ -319,8 +326,9 @@ export function createInteractionRuntime({
     }
     if (result?.ok === true && result?.changed === true
       && typeof options.onCommitted === 'function') {
-      notifyCommitted(result);
+      await notifyCommitted(result);
     }
+    if (notificationWarnings.length) result = { ...result, warnings: [...(result.warnings ?? []), ...notificationWarnings] };
     if (options.publish !== false && result?.changed !== false) {
       result = withProjectionOutcome(result, scheduleProjection(result));
     }

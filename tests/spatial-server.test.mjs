@@ -8,6 +8,39 @@ import { createSpatialServer } from '../cli/lib/server.mjs';
 import { childDomainPath } from '../cli/lib/probe.mjs';
 import { VERSION } from '../cli/lib/version.mjs';
 
+for (const exceedDeadline of [false, true]) {
+test(`Atom HTTP receipt advances from committed pending to final failure without rerunning its operation (deadline ${exceedDeadline})`, async (context) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-atom-final-receipt-'));
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let calls = 0;
+  const instance = await createSpatialServer({
+    atomInteractionTimeoutMs: 40,
+    root: path.resolve(import.meta.dirname, '..'), storeFile: path.join(directory, 'knowledge.json'),
+    async atomCommand(payload, { onCommitted }) {
+      calls += 1;
+      const base = { ok: true, changed: true, interactionId: payload.interaction.id, errors: [] };
+      await onCommitted({ ...base, subsequentExecution: { status: 'pending', errors: [] } });
+      await gate;
+      return { ...base, subsequentExecution: { status: 'failed', errors: [{ code: 'SUBSCRIBER_FAILED' }] } };
+    }
+  });
+  await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
+  context.after(() => { release(); return new Promise(resolve => instance.server.close(resolve)); });
+  const url = `http://127.0.0.1:${instance.server.address().port}/__atom/api/command`;
+  const post = async (source = 'transform source') => (await fetch(url, { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source, interaction: { id: 'pending-final' } }) })).json();
+  assert.equal((await post()).result.subsequentExecution.status, 'pending');
+  assert.equal((await post()).result.subsequentExecution.status, 'pending');
+  if (exceedDeadline) await new Promise(resolve => setTimeout(resolve, 80));
+  release();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal((await post()).result.subsequentExecution.status, 'failed');
+  assert.equal(calls, 1);
+  assert.equal((await post('different source')).error.code, 'ATOM_INTERACTION_ID_CONFLICT');
+});
+}
+
 test('local server exposes one store to the page bridge and command API', async (context) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-server-'));
   const instance = await createSpatialServer({

@@ -38,6 +38,34 @@ function canonicalRevision(value) {
   return String(value).startsWith('sha256:') ? String(value) : `sha256:${value}`;
 }
 
+// All in-process writers for a world use its existing coordinator. Projection hooks
+// stay on each facade; weak ownership never evicts a live writer or retains a world.
+const worldOwners = new Map();
+const releaseWorldOwner = new FinalizationRegistry(({ key, reference }) => {
+  if (worldOwners.get(key) === reference) worldOwners.delete(key);
+});
+
+function ownerFor({ contextFile, journalFile, worldId }) {
+  const key = JSON.stringify([path.resolve(contextFile), path.resolve(journalFile), worldId]);
+  let owner = worldOwners.get(key)?.deref();
+  if (!owner) {
+    const worldRepository = createJsonWorldRepository({ file: contextFile, worldId, initialFacts: [] });
+    const journalRepository = createJsonTransactionJournal({ file: journalFile });
+    owner = { worldRepository, journalRepository,
+      coordinator: createCommitCoordinator({ worldRepository, journalRepository }), recovery: null };
+    const reference = new WeakRef(owner);
+    worldOwners.set(key, reference);
+    releaseWorldOwner.register(owner, { key, reference });
+  }
+  return owner;
+}
+
+function assertSourceBinding(execution, event) {
+  if (execution && execution.event.binding !== event.binding) {
+    throw problem('ATOM_INTERACTION_ID_CONFLICT', '同一 Atom 请求标识不能对应不同命令或 Agent');
+  }
+}
+
 export function createTransactionalWorldPersistence({
   contextFile,
   projectionFile,
@@ -46,37 +74,32 @@ export function createTransactionalWorldPersistence({
   publishLegacyProjection = true,
   onAuthoritativeWrite = async () => {}
 }) {
-  const worldRepository = createJsonWorldRepository({ file: contextFile, worldId, initialFacts: [] });
-  const journalRepository = createJsonTransactionJournal({ file: journalFile });
-  const coordinator = createCommitCoordinator({ worldRepository, journalRepository });
-  let recovery = null;
-  let cachedManifest = null;
-  let cachedTransformLog = null;
-  let manifestLoaded = false;
+  const owner = ownerFor({ contextFile, journalFile, worldId });
+  const { worldRepository, journalRepository, coordinator } = owner;
 
   function recover() {
-    recovery ??= coordinator.recover();
-    return recovery;
+    owner.recovery ??= coordinator.recover();
+    return owner.recovery;
   }
 
   async function compatibilityManifest() {
     await recover();
-    if (manifestLoaded) return structuredClone(cachedManifest);
+    if (owner.manifestLoaded) return structuredClone(owner.cachedManifest);
     const state = await journalRepository.readState();
-    cachedManifest = structuredClone(state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null);
-    manifestLoaded = true;
-    return structuredClone(cachedManifest);
+    owner.cachedManifest = structuredClone(state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null);
+    owner.manifestLoaded = true;
+    return structuredClone(owner.cachedManifest);
   }
 
   async function transformLogEntries() {
     await recover();
-    if (cachedTransformLog) return structuredClone(cachedTransformLog);
+    if (owner.cachedTransformLog) return structuredClone(owner.cachedTransformLog);
     const state = await journalRepository.readState();
-    cachedTransformLog = state.receipts.flatMap((entry) => {
+    owner.cachedTransformLog = state.receipts.flatMap((entry) => {
       const record = entry.receipt?.result?.transformLogRecord;
       return record ? [structuredClone(record)] : [];
     });
-    return structuredClone(cachedTransformLog);
+    return structuredClone(owner.cachedTransformLog);
   }
 
   async function commit({
@@ -88,9 +111,24 @@ export function createTransactionalWorldPersistence({
     changedPaths = null,
     affectedAtoms = null,
     transformLogRecord = null,
+    postCommitEvent = null,
+    subsequentOf = null,
     compatibilityManifest: suppliedManifest = null
   }) {
     await recover();
+    if (postCommitEvent) {
+      const existing = await journalRepository.programExecutionForInteraction(correlationId);
+      assertSourceBinding(existing, postCommitEvent);
+      if (existing) return existing.sourceReceipt;
+    }
+    if (subsequentOf) {
+      const execution = await journalRepository.programExecution(subsequentOf);
+      if (!execution) throw problem('PROGRAM_SOURCE_NOT_FOUND', 'Subsequent effects require a committed source');
+      if (execution.childReceipt) return execution.childReceipt;
+      if (execution.outcome && execution.outcome.status !== 'pending') {
+        throw problem('PROGRAM_EXECUTION_FINAL', 'A final post-commit business outcome cannot be executed again');
+      }
+    }
     const previousManifest = await compatibilityManifest();
     const computedRevision = revisionOfWorldFacts(facts);
     const canonicalNextRevision = canonicalRevision(nextRevision);
@@ -109,44 +147,59 @@ export function createTransactionalWorldPersistence({
     let nextManifest = suppliedManifest
       ? (validateCompatibilityManifest(suppliedManifest, facts), structuredClone(suppliedManifest))
       : null;
-    const receipt = await coordinator.execute({
-      command: {
-        contract: 'atom.world-command',
-        version: 1,
-        commandId,
-        correlationId,
-        expectedRevision: canonicalExpectedRevision,
-        name: 'legacy-transition',
-        payload: { source }
-      },
-      transitionInputMode: 'trusted-readonly',
-      transition: (current) => {
-        nextManifest ??= previousManifest
-          ? advanceCompatibilityManifest(previousManifest, current.facts, facts)
-          : null;
-        return {
-          facts,
-          revision: canonicalNextRevision,
-          ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
-          result: {
-            source,
-            ...(Array.isArray(affectedAtoms) ? {
-              affectedAtoms,
-              affectedAtomsComplete: true
-            } : {}),
-            ...(nextManifest ? { compatibilityManifest: nextManifest } : {}),
-            ...(previousManifest ? { previousCompatibilityManifest: previousManifest } : {}),
-            ...(transformLogRecord ? {
-              transformLogRecord: structuredClone(transformLogRecord)
-            } : {})
-          }
-        };
+    let receipt;
+    try {
+      receipt = await coordinator.execute({
+        command: {
+          contract: 'atom.world-command',
+          version: 1,
+          commandId,
+          correlationId,
+          expectedRevision: canonicalExpectedRevision,
+          name: 'legacy-transition',
+          payload: { source }
+        },
+        transitionInputMode: 'trusted-readonly',
+        transition: (current) => {
+          nextManifest ??= previousManifest
+            ? advanceCompatibilityManifest(previousManifest, current.facts, facts)
+            : null;
+          return {
+            facts,
+            revision: canonicalNextRevision,
+            ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
+            result: {
+              source,
+              ...(postCommitEvent ? { postCommitEvent: structuredClone({ ...postCommitEvent,
+                sourceCommandId: commandId, sourceRevision: canonicalNextRevision }) } : {}),
+              ...(subsequentOf ? { subsequentOf } : {}),
+              ...(Array.isArray(affectedAtoms) ? {
+                affectedAtoms,
+                affectedAtomsComplete: true
+              } : {}),
+              ...(nextManifest ? { compatibilityManifest: nextManifest } : {}),
+              ...(previousManifest ? { previousCompatibilityManifest: previousManifest } : {}),
+              ...(transformLogRecord ? {
+                transformLogRecord: structuredClone(transformLogRecord)
+              } : {})
+            }
+          };
+        }
+      });
+    } catch (error) {
+      if (postCommitEvent) {
+        const existing = await journalRepository.programExecutionForInteraction(correlationId);
+        assertSourceBinding(existing, postCommitEvent);
+        if (existing) return existing.sourceReceipt;
       }
-    });
-    cachedManifest = structuredClone(receipt.result?.compatibilityManifest ?? previousManifest ?? null);
-    manifestLoaded = true;
-    if (transformLogRecord && cachedTransformLog) {
-      cachedTransformLog.push(structuredClone(transformLogRecord));
+      throw error;
+    }
+    if (postCommitEvent) assertSourceBinding({ event: receipt.result.postCommitEvent }, postCommitEvent);
+    owner.cachedManifest = structuredClone(receipt.result?.compatibilityManifest ?? previousManifest ?? null);
+    owner.compatibilityGeneration = (owner.compatibilityGeneration ?? 0) + 1;
+    owner.manifestLoaded = true;
+    if (transformLogRecord && owner.cachedTransformLog) {
+      owner.cachedTransformLog.push(structuredClone(transformLogRecord));
     }
     try {
       await adoptAtomContextSnapshot(contextFile, facts, {
@@ -201,7 +254,8 @@ export function createTransactionalWorldPersistence({
         payload: { targetCommandId }
       }
     });
-    manifestLoaded = false;
+    owner.manifestLoaded = false;
+    owner.compatibilityGeneration = (owner.compatibilityGeneration ?? 0) + 1;
     await onAuthoritativeWrite({
       operation: 'rollback',
       contextFile,
@@ -227,10 +281,28 @@ export function createTransactionalWorldPersistence({
   }
 
   return Object.freeze({
+    // Cache invalidation only; authoritative identity remains the world receipt.
+    get compatibilityGeneration() { return owner.compatibilityGeneration ?? 0; },
     commit,
     compatibilityManifest,
     recover,
     rollback,
-    transformLogEntries
+    transformLogEntries,
+    async programExecution(sourceCommandId) {
+      await recover();
+      return journalRepository.programExecution(sourceCommandId);
+    },
+    async programExecutionForInteraction(correlationId) {
+      await recover();
+      return journalRepository.programExecutionForInteraction(correlationId);
+    },
+    async pendingProgramExecutions() {
+      await recover();
+      return journalRepository.pendingProgramExecutions();
+    },
+    async recordProgramExecution(request) {
+      await recover();
+      return journalRepository.recordProgramExecution(request);
+    }
   });
 }

@@ -213,7 +213,8 @@ export async function createSpatialServer(options = {}) {
       settled = true;
       rejectReceipt(error);
     };
-    atomCommandReceipts.set(id, { fingerprint, receipt });
+    const entry = { fingerprint, receipt };
+    atomCommandReceipts.set(id, entry);
     while (atomCommandReceipts.size > 1_000) {
       atomCommandReceipts.delete(atomCommandReceipts.keys().next().value);
     }
@@ -236,7 +237,12 @@ export async function createSpatialServer(options = {}) {
         const operationResult = Promise.resolve().then(() => (
           operation(normalized, settle, controller.signal)
         ));
-        operationResult.catch(() => undefined);
+        operationResult.then(result => {
+          // The first caller keeps its source acknowledgement. Later reads see
+          // the completed operation, including completion after the deadline.
+          entry.receipt = Promise.resolve(result);
+          settle(result);
+        }, () => undefined);
         const result = await Promise.race([operationResult, deadline]);
         settle(result);
         return result;

@@ -295,6 +295,8 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     const prepared = new Map(legacy.prepared.map((entry) => [entry.commandId, structuredClone(entry)]));
     const receipts = new Map(legacy.receipts.map((entry) => [entry.commandId, structuredClone(entry)]));
     const order = legacy.receipts.map((entry) => entry.commandId);
+    const records = new Map(legacy.receipts.map((entry) => [entry.commandId, structuredClone(entry)]));
+    const outcomes = new Map();
     for (const event of await loadEvents()) {
       if (event.type === 'prepared') {
         if (receipts.has(event.commandId)) continue;
@@ -304,8 +306,63 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
       prepared.delete(event.commandId);
       if (!receipts.has(event.commandId)) order.push(event.commandId);
       receipts.set(event.commandId, { ...event.record, receipt: event.receipt });
+      records.set(event.commandId, event.record);
+      if (event.programOutcome) outcomes.set(event.commandId, event.programOutcome);
     }
-    return { prepared, receipts, order };
+    const state = { prepared, receipts, records, order, outcomes, sources: new Map(), children: new Map() };
+    for (const entry of receipts.values()) indexProgramReceipt(state, entry.receipt);
+    return state;
+  }
+
+  function indexProgramReceipt(state, receipt) {
+    if (receipt?.result?.postCommitEvent) state.sources.set(receipt.correlationId, receipt.commandId);
+    if (receipt?.result?.subsequentOf) state.children.set(receipt.result.subsequentOf, receipt.commandId);
+  }
+
+  async function programExecution(sourceCommandId) {
+    const state = await load();
+    const sourceReceipt = state.receipts.get(sourceCommandId)?.receipt;
+    if (!sourceReceipt?.result?.postCommitEvent) return null;
+    const childReceipt = state.receipts.get(state.children.get(sourceCommandId))?.receipt ?? null;
+    let outcome = state.outcomes.get(sourceCommandId) ?? null;
+    if (childReceipt && outcome?.status !== 'completed') {
+      outcome = { status: 'completed', sourceRevision: sourceReceipt.afterRevision.replace(/^sha256:/u, ''),
+        revisionAfter: childReceipt.afterRevision.replace(/^sha256:/u, ''), errors: [],
+        attemptId: outcome?.attemptId ?? childReceipt.correlationId, childCommandId: childReceipt.commandId };
+    }
+    return structuredClone({ sourceReceipt, event: sourceReceipt.result.postCommitEvent, outcome, childReceipt });
+  }
+
+  async function programExecutionForInteraction(correlationId) {
+    return programExecution((await load()).sources.get(correlationId));
+  }
+
+  async function pendingProgramExecutions() {
+    const state = await load();
+    const executions = await Promise.all([...state.sources.values()].map(programExecution));
+    return executions.filter(({ outcome }) => !outcome || outcome.status === 'pending');
+  }
+
+  function recordProgramExecution({ sourceCommandId, outcome }) {
+    return serialize(async () => {
+      const state = await load();
+      const source = state.receipts.get(sourceCommandId);
+      if (!source?.receipt?.result?.postCommitEvent) {
+        throw problem('PROGRAM_SOURCE_NOT_FOUND', 'Post-commit execution requires a committed source');
+      }
+      if (!['pending', 'completed', 'failed'].includes(outcome?.status) || !outcome?.attemptId) {
+        throw problem('INVALID_PROGRAM_OUTCOME', 'Post-commit outcome requires a status and attempt id');
+      }
+      const existing = state.outcomes.get(sourceCommandId);
+      if (existing && existing.status !== 'pending') return structuredClone(existing);
+      const childId = state.children.get(sourceCommandId);
+      if (childId && outcome.status !== 'completed') return (await programExecution(sourceCommandId)).outcome;
+      const stored = structuredClone({ ...outcome, ...(childId ? { childCommandId: childId } : {}) });
+      await appendEvent({ type: 'committed', commandId: sourceCommandId,
+        record: state.records.get(sourceCommandId), receipt: source.receipt, programOutcome: stored });
+      state.outcomes.set(sourceCommandId, stored);
+      return structuredClone(stored);
+    });
   }
 
   function load() {
@@ -358,6 +415,8 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
       state.prepared.delete(commandId);
       if (!state.receipts.has(commandId)) state.order.push(commandId);
       state.receipts.set(commandId, { ...prepared, receipt: structuredClone(receipt) });
+      state.records.set(commandId, prepared);
+      indexProgramReceipt(state, receipt);
       return structuredClone(receipt);
     });
   }
@@ -377,6 +436,7 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
 
   return Object.freeze({
     file, incrementalDirectory, eventFile, objectDirectory,
-    findReceipt, findPrepared, findCommitted, prepare, commit, listPrepared, readState
+    findReceipt, findPrepared, findCommitted, prepare, commit, listPrepared, readState,
+    programExecution, programExecutionForInteraction, pendingProgramExecutions, recordProgramExecution
   });
 }
