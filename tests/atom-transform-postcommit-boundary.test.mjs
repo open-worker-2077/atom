@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { executeAtomLanguage as executeAtomLanguageKernel } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
@@ -33,7 +34,6 @@ function find(atoms, selector) {
 
 async function fixture(t, subscriberSource) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-boundary-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
@@ -74,7 +74,6 @@ test('a rejected multi-effect subscriber keeps its entire effects batch out of t
 
 test('an ordinary transform trigger commits none of a Program multi-effect batch when one effect is invalid', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-transform-trigger-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   const subscriber = [
@@ -152,6 +151,129 @@ test('onCommitted observes the source commit before a blocked subsequent worker 
   assert.equal(notificationCount, 1);
 });
 
+test('a subsequent effects CAS conflict preserves the source and reports the actual latest world', async (t) => {
+  const runtime = await fixture(t, [
+    'def receive(delivery):',
+    '    transform({"thing":"Result","situation.rep.after":"before"})',
+    'trigger("strut", {}, receive)'
+  ].join('\n'));
+  const initial = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  initial.push(atom('Other', 'before'));
+  await fs.writeFile(runtime.contextFile, JSON.stringify(initial, null, 2), 'utf8');
+
+  const result = await executeAtomLanguage({
+    ...runtime,
+    programScheduler: createProgramRuntimeScheduler(),
+    source: 'transform {"thing":"Source","situation.rep.after":"before"}',
+    interaction: { id: `effects-cas-${crypto.randomUUID()}` },
+    async onCommitted() {
+      const concurrent = await executeAtomLanguage({
+        ...runtime,
+        trustedMaintenance: true,
+        source: 'transform {"thing":"Other","situation.rep.after":"before"}',
+        interaction: { id: `concurrent-${crypto.randomUUID()}` }
+      });
+      assert.equal(concurrent.ok, true, JSON.stringify(concurrent));
+    }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.subsequentExecution.status, 'failed');
+  assert.ok(result.subsequentExecution.errors.some(({ code }) => code === 'WORLD_REVISION_CONFLICT'));
+  const stored = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  assert.equal(find(stored, 'Source').situation, 'after');
+  assert.equal(find(stored, 'Other').situation, 'after');
+  assert.equal(find(stored, 'Result').situation, 'before');
+  assert.equal(result.revisionAfter, result.subsequentExecution.revisionAfter);
+  assert.notEqual(result.revisionAfter, result.subsequentExecution.sourceRevision);
+});
+
+test('a changed source with a message-only subscriber confirms its delivery exactly once', async (t) => {
+  const runtime = await fixture(t, [
+    'def receive(delivery):',
+    '    message({"level":"info","text":"delivered"})',
+    'trigger("strut", {}, receive)'
+  ].join('\n'));
+  const scheduler = createProgramRuntimeScheduler();
+
+  const first = await executeAtomLanguage({
+    ...runtime, programScheduler: scheduler,
+    source: 'transform {"thing":"Source","situation.rep.after":"before"}',
+    interaction: { id: `message-source-${crypto.randomUUID()}` }
+  });
+  const second = await executeAtomLanguage({
+    ...runtime, programScheduler: scheduler,
+    source: 'transform {"thing":"Source","situation.rep.after":"after"}',
+    interaction: { id: `message-retry-${crypto.randomUUID()}` }
+  });
+
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.deepEqual(first.messages.map(({ text }) => text), ['delivered']);
+  assert.equal(first.subsequentExecution.status, 'completed');
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.deepEqual(second.messages, []);
+});
+
+test('a directly throwing ordinary transform subscriber fails only subsequent execution', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-worker-failure-'));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const subscriber = [
+    'def receive():',
+    '    return {"received": True}',
+    'trigger("transform", {"nodes":["Source"]}, receive)'
+  ].join('\n');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Source', 'before'), atom('Subscriber', subscriber, [], [], ['program'])
+  ], null, 2), 'utf8');
+  const scheduler = createProgramRuntimeScheduler();
+  const runProgram = scheduler.runProgram;
+  scheduler.runProgram = async (request) => {
+    if (request.program.path === 'Subscriber' && request.triggered === true) {
+      throw Object.assign(new Error('subscriber exploded'), { code: 'SUBSCRIBER_EXPLODED' });
+    }
+    return runProgram(request);
+  };
+
+  const result = await executeAtomLanguage({
+    contextFile, projectionFile, programScheduler: scheduler,
+    source: 'transform {"thing":"Source","situation.rep.after":"before"}',
+    interaction: { id: `worker-failure-${crypto.randomUUID()}` }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.subsequentExecution.status, 'failed');
+  assert.ok(result.subsequentExecution.errors.some(({ code }) => code === 'SUBSCRIBER_EXPLODED'));
+  assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Source').situation, 'after');
+});
+
+test('a shortcut-only subsequent effect outside the source subtree is committed', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-shortcut-'));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const subscriber = [
+    'def receive():',
+    '    target = explore({"thing":"Target"})[0]',
+    '    shortcut({"placement":"slot","thing":"Link","target":target})',
+    'trigger("transform", {"nodes":["Source"]}, receive)'
+  ].join('\n');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Source', 'before'), atom('Target'),
+    atom('Subscriber', subscriber, [], [], ['program'])
+  ], null, 2), 'utf8');
+
+  const result = await executeAtomLanguage({
+    contextFile, projectionFile, programScheduler: createProgramRuntimeScheduler(),
+    source: 'transform {"thing":"Source","situation.rep.after":"before"}',
+    interaction: { id: `shortcut-effect-${crypto.randomUUID()}` }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.subsequentExecution.status, 'completed');
+  assert.ok(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Subscriber/Link'));
+  assert.notEqual(result.revisionAfter, result.subsequentExecution.sourceRevision);
+});
+
 test('an invalid source Transform commits nothing and dispatches no subscriber', async (t) => {
   const runtime = await fixture(t, [
     'def receive(delivery):',
@@ -207,7 +329,6 @@ test('a batch source commits all requested facts before its failing subscriber',
 
 test('creating a valid Program remains committed when onCommitted fails', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-create-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([atom('Root')], null, 2), 'utf8');
@@ -225,6 +346,48 @@ test('creating a valid Program remains committed when onCommitted fails', async 
   }), { code: 'CALLBACK_FAILED' });
 
   assert.ok(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'CreatedProgram'));
+});
+
+test('an auxiliary mirror failure after subsequent facts commit preserves the committed revision', async (t) => {
+  const runtime = await fixture(t, [
+    'def receive(delivery):',
+    '    transform({"thing":"Result","situation.rep.after":"before"})',
+    'trigger("strut", {}, receive)'
+  ].join('\n'));
+  let writes = 0;
+  const result = await executeAtomLanguageKernel({
+    ...runtime,
+    programScheduler: createProgramRuntimeScheduler(),
+    source: 'transform {"thing":"Source","situation.rep.after":"before"}',
+    interaction: { id: `mirror-after-effects-${crypto.randomUUID()}` },
+    programMode: 'reconcile',
+    async commitWorld({ facts, expectedRevision, nextRevision }) {
+      writes += 1;
+      await fs.writeFile(runtime.contextFile, JSON.stringify(facts, null, 2), 'utf8');
+      const receipt = {
+        beforeRevision: expectedRevision,
+        afterRevision: nextRevision,
+        result: {}
+      };
+      if (writes === 2) {
+        throw Object.assign(new Error('mirror unavailable'), {
+          code: 'MIRROR_UNAVAILABLE', details: { receipt }
+        });
+      }
+      return receipt;
+    }
+  });
+
+  const stored = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.subsequentExecution.status, 'completed');
+  assert.deepEqual(result.subsequentExecution.errors, []);
+  assert.equal(find(stored, 'Source').situation, 'after');
+  assert.equal(find(stored, 'Result').situation, 'after');
+  assert.equal(result.revisionAfter, result.subsequentExecution.revisionAfter);
+  assert.equal(result.revisionAfter, result.warnings.find(({ code }) => (
+    code === 'MIRROR_UNAVAILABLE'
+  ))?.receipt?.afterRevision?.replace(/^sha256:/u, ''));
 });
 
 test('an explicitly requested Program run still fails when that Program fails', async (t) => {
