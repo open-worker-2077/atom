@@ -18,7 +18,7 @@
 - 同一操作重试复用中央回执；不得产生第二次业务提交或重复触发 Program。
 - 只调度精确命中的 Program/订阅，不扫描和执行无关世界 Program。
 - 不关闭Trigger、Strut、阶段接棒；不恢复旧ABI，不改业务世界正文来规避代码缺陷。
-- 不推送；生产验收使用私有副本，部署复用既有 Atom Graph Runtime，来源业务任务自行完成业务改造。
+- 用户2026-09-05明确授权代码安全备份，控制方已核对三分支推送；实施方不自行push。生产验收使用私有副本，部署复用既有 Atom Graph Runtime，来源业务任务自行完成业务改造。
 
 ## 已核对的边界与裁定
 
@@ -214,7 +214,7 @@ Run: `npm run check:development-control`；`npm test`。真实失败先定向修
 
 - [ ] **Step 4: 受控部署与公共回读**
 
-基线、Git SHA、私有备份和构建id可追溯；集成本地main后受控重启 Atom Graph Runtime，公开health为ready且atomProjection.status=published，再公开CLI读取普通Agent及所需源节点。代码回退不回滚用户后来写入的业务世界；不push。部署前私有快照须包含权威atom.json及atom.transactions.json和其.d增量日志目录；生产停写窗口内核对一致性后留存，代码回退与事实恢复分开裁定。既有backup-atom-runtime.ps1只复制atom.json/submissions且会push，不适用于本项完整无推送部署快照。
+基线、Git SHA、私有备份和构建id可追溯；集成本地main后受控重启 Atom Graph Runtime，公开health为ready且atomProjection.status=published，再公开CLI读取普通Agent及所需源节点。代码回退不回滚用户后来写入的业务世界；代码安全备份按用户最新授权由控制方处理。部署前私有快照须包含权威atom.json及atom.transactions.json和其.d增量日志目录；生产停写窗口内核对一致性后留存，代码回退与事实恢复分开裁定。既有backup-atom-runtime.ps1只复制atom.json/submissions且会push，不适用于本项完整无推送部署快照。
 
 - [ ] **Step 5: 回告与继续**
 
@@ -300,3 +300,7 @@ Run: `npm run check:development-control`；`npm test`。真实失败先定向修
 - **Task2 round1提交复审**：0df824e，六代码/测试文件、77/77，staged CRITICAL（14符号/20流程）；完整fix report已追加，原评审按bbf4e32..0df824e精确包逐项复审。中间cab1e87仅控制方文档，评审范围可回溯。当前不勾Task2完成，不进入Task3、不部署。
 
 - **Task 2: complete**：802d902..0df824e；fix round1三项全部ADDRESSED、无新增Critical/Important、Approved。最终回修覆盖75＋2=77项，初稿未触及的112链证据按revision复用。Task1与未改调度代码的Trigger/Strut/接棒原子性以Task1既有独立复核及18/18支持；Task3仍需最小受影响链与最终全分支审查，不将跨任务验收提前报关闭。当前继续Task3，未部署。
+- **Task3开始**：BASE=adb0a0b，实施方transform_boundary_task3（gpt-5.6-sol high，已明确接口的公开验收/脚本修复集成工作）。Task1/2完成不重做；实施方负责公开私有旅程、脚本最小修复、受影响门禁及最终npm一次，控制方负责独立评审/最终全分支复核/生产部署回告。主干已仅同步文档至16f47f8，生产代码仍8b2df30；所有生产业务改造由来源任务自持。
+
+- **Ruling: Task3受影响链收口** — BASE=7edd97e；授权原Task3实施方最小扩展 tests/atom-language-transform-batch.test.mjs、tests/atom-slot-signal-e2e.test.mjs；三条旧单提交断言与普通来源回滚断言按已批准新合同更新，保留 effects 原子性、具体错误和事实守恒。另保留 tests/atom-program-projection-lifecycle.test.mjs 的禁止FULL_REBUILD断言，先定位原因。必要修复仅现有 work-engine/atom-language/engine.mjs 与 program-runtime.mjs 调用上下文/调度接线，禁止关闭触发、无变化抑制、新队列或放宽显式run成功条件；若超出此范围再回控制方。理由是公开交付前不可损害既有显式复制/Slot局部运行；错误代价为局部调度接线返工。先六项定向GREEN再重跑受影响链，未通过不升级。
+- **最新执行顺序与备份**：用户已确认手机连接，要求本机配置作为手机基准；已取得当前各浏览器localStorage隔离导致边界0的RED，实际本机值尚未取得。Transform部署/回告后手机配置优先于旧print/A；三分支代码远端安全点详见唯一总账。既有生产数据快照仍只在私有目录保存，不随代码公开推送。
