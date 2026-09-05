@@ -830,12 +830,18 @@ function recoveredProgramResult(execution, atoms, { contextFile, projectionFile 
 }
 
 export async function executeAtomLanguage(options = {}) {
-  const postcommit = typeof options.onCommitted === 'function' ? [] : null;
-  const result = await executeAtomLanguageInteraction(options, postcommit);
+  const postcommit = typeof options.onCommitted === 'function'
+    || typeof options.onSubsequentSettled === 'function' ? [] : null;
+  let result = await executeAtomLanguageInteraction(options, postcommit);
   if (postcommit?.length && postcommit.sourceNotified !== true
     && result?.ok === true && result.changed === true) {
     postcommit.sourceNotified = true;
     result.warnings = mergeWarnings([...(result.warnings ?? []), ...await notifyCommittedSafely(options, result)]);
+  }
+  // Business execution ends before disposable projection work begins. Its owner
+  // can persist and publish the outcome without waiting for projection latency.
+  if (typeof options.onSubsequentSettled === 'function') {
+    result = await options.onSubsequentSettled(result) ?? result;
   }
   for (const finish of postcommit ?? []) {
     const warnings = await finish();

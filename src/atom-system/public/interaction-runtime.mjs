@@ -276,6 +276,9 @@ export function createInteractionRuntime({
       ...(currentOptions.programMode ? { programMode: currentOptions.programMode } : {}),
       ...(currentOptions.signal ? { signal: currentOptions.signal } : {}),
       ...(typeof options.onCommitted === 'function' ? { onCommitted: notifyCommitted } : {}),
+      ...(typeof options.onSubsequentSettled === 'function' ? {
+        onSubsequentSettled: result => options.onSubsequentSettled(withInteractionId(result, intent.correlationId))
+      } : {}),
       programRuntime
     });
     const worldStartedAt = performance.now();

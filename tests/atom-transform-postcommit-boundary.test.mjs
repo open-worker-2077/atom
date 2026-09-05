@@ -31,6 +31,84 @@ function nameOf(value) {
   return Object.entries(value).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
 }
 
+test('a worker runtime timeout is a final business failure and same-id reread never reruns it', async (t) => {
+  const files = await fixture(t, 'def receive(delivery):\n    while True:\n        pass\ntrigger("strut", {}, receive)');
+  const request = { ...files, source: 'transform {"thing":"Source","situation.rep.after":"before"}',
+    interaction: { id: 'determined-worker-timeout' }, programMode: 'reconcile' };
+  const first = await createLegacyWorldService().executeLegacy({ ...request,
+    programScheduler: createProgramRuntimeScheduler({ timeoutMs: 500 }) });
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.equal(first.subsequentExecution.status, 'failed');
+  assert.ok(first.subsequentExecution.errors.some(({ code }) => code === 'ATOM_PROGRAM_TIMEOUT'));
+  const scheduler = createProgramRuntimeScheduler();
+  scheduler.runProgram = () => { throw new Error('determined worker timeout must not replay'); };
+  const repeated = await createLegacyWorldService().executeLegacy({ ...request, programScheduler: scheduler });
+  assert.equal(repeated.subsequentExecution.status, 'failed');
+  assert.equal(repeated.subsequentExecution.attemptId, first.subsequentExecution.attemptId);
+});
+
+for (const businessStatus of ['completed', 'failed']) {
+  test(`durable ${businessStatus} business outcome precedes deferred projection and survives its late abort`, async (t) => {
+    const files = await fixture(t, businessStatus === 'completed'
+      ? 'def receive(delivery):\n    return True\ntrigger("strut", {}, receive)'
+      : 'def receive(delivery):\n    raise Exception("known business failure")\ntrigger("strut", {}, receive)');
+    const scheduler = createProgramRuntimeScheduler();
+    let entered, release;
+    const projectionStarted = new Promise(resolve => { entered = resolve; });
+    const projectionGate = new Promise(resolve => { release = resolve; });
+    scheduler.rebaseContextFreeProjection = async () => {
+      entered(); await projectionGate;
+      throw Object.assign(new Error('late projection failure'), { code: 'PROJECTION_UNAVAILABLE' });
+    };
+    const refresh = scheduler.refresh.bind(scheduler);
+    let projectionEntered = false;
+    scheduler.refresh = async (...args) => {
+      if (projectionEntered) throw Object.assign(new Error('projection aborted'), { code: 'PROJECTION_ABORTED' });
+      return refresh(...args);
+    };
+    const controller = new AbortController();
+    let notifications = 0, terminalNotifications = 0;
+    const request = { ...files, source: 'transform {"thing":"Source","situation.rep.after":"before"}',
+      interaction: { id: `projection-terminal-${businessStatus}` }, programMode: 'reconcile' };
+    const service = createLegacyWorldService();
+    const unused = async () => { throw new Error('unexpected capability'); };
+    const runtime = createInteractionRuntime({
+      world: { execute: value => service.executeLegacy({ ...request, programScheduler: scheduler, ...value }) },
+      projections: { publish: unused, recover: unused }, feedback: { submit: unused },
+      agents: { resolve: unused }, humanStatus: { translate: unused }
+    });
+    const operation = runtime.execute({ source: request.source, correlationId: request.interaction.id }, {
+      publish: false, signal: controller.signal, onCommitted() { notifications += 1; },
+      onSubsequentSettled(result) {
+        assert.equal(result.subsequentExecution.status, businessStatus);
+        terminalNotifications += 1;
+        if (businessStatus === 'failed') return Promise.reject(new Error('terminal notification unavailable'));
+      }
+    });
+    t.after(async () => { release(); await operation.catch(() => {}); });
+    await projectionStarted;
+    projectionEntered = true;
+    controller.abort(Object.assign(new Error('HTTP deadline during projection'), { code: 'ATOM_INTERACTION_TIMEOUT' }));
+    const durable = await createTransactionalWorldPersistence(files).programExecutionForInteraction(request.interaction.id);
+    assert.equal(durable.outcome.status, businessStatus, 'terminal business outcome must be durable before optional projection begins');
+    assert.equal(terminalNotifications, 1, 'public runtime must expose the independently settled business result');
+    assert.equal(durable.childReceipt, null, 'message-only completion and known failure do not invent effects');
+    const duplicate = await service.executeLegacy(request);
+    assert.equal(duplicate.subsequentExecution.status, businessStatus);
+    release();
+    const result = await operation;
+    assert.equal(result.ok, true);
+    assert.equal(result.subsequentExecution.status, businessStatus);
+    assert.equal(notifications, 1);
+    assert.ok(result.warnings.some(({ code }) => code === 'PROGRAM_PROJECTION_RECOVERY_PENDING'));
+    if (businessStatus === 'failed') assert.ok(result.warnings.some(({ code }) => code === 'ATOM_SUBSEQUENT_NOTIFICATION_FAILED'));
+    assert.equal(find(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Source').situation, 'after');
+    const final = await createTransactionalWorldPersistence(files).programExecutionForInteraction(request.interaction.id);
+    assert.equal(final.outcome.status, businessStatus);
+    assert.equal(final.sourceReceipt.commandId, durable.sourceReceipt.commandId);
+  });
+}
+
 function find(atoms, selector) {
   let children = atoms;
   let current = null;
@@ -681,15 +759,17 @@ test('two services join a committed pending interaction and keep one source and 
   await committed;
   const second = await createLegacyWorldService().executeLegacy({ ...request, programScheduler: createProgramRuntimeScheduler() });
   assert.equal(second.subsequentExecution.status, 'pending');
-  let joinedNotification;
+  let joinedNotification, joinedTerminal;
   const joined = createLegacyWorldService().executeLegacy({ ...request, programScheduler: createProgramRuntimeScheduler(),
-    onCommitted(result) { joinedNotification = result; } });
+    onCommitted(result) { joinedNotification = result; },
+    onSubsequentSettled(result) { joinedTerminal = result; } });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(joinedNotification?.subsequentExecution.status, 'pending');
   release();
   const final = await first;
   assert.equal(final.subsequentExecution.status, 'completed');
   assert.equal((await joined).subsequentExecution.status, 'completed', 'a joined HTTP lifecycle must not settle permanently on pending');
+  assert.equal(joinedTerminal?.subsequentExecution.status, 'completed');
   const journal = createJsonTransactionJournal({ file: path.join(path.dirname(files.contextFile), 'atom.transactions.json') });
   const state = await journal.readState();
   assert.equal(state.receipts.filter(({ receipt }) => receipt.correlationId === request.interaction.id).length, 1);
@@ -928,13 +1008,15 @@ test(`outcome append EIO preserves source success and exposes recoverable outcom
     }
     return handle;
   });
-  let notified = 0;
+  let notified = 0, terminalNotified = 0;
   const request = { ...files, source: 'transform {"thing":"Source","situation.rep.after":"before"}',
     interaction: { id: 'outcome-eio' }, programMode: 'reconcile' };
   const result = await createLegacyWorldService().executeLegacy({ ...request,
-    programScheduler: createProgramRuntimeScheduler(), onCommitted() { notified += 1; } });
+    programScheduler: createProgramRuntimeScheduler(), onCommitted() { notified += 1; },
+    onSubsequentSettled() { terminalNotified += 1; } });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(notified, 1);
+  assert.equal(terminalNotified, 0, 'failed durable recording must not publish a terminal lifecycle notification');
   assert.equal(result.subsequentExecution.status, 'pending');
   assert.ok(result.warnings.some(({ code, cause }) => code === 'ATOM_PROGRAM_OUTCOME_PERSISTENCE_PENDING' && cause === 'EIO'));
   assert.equal(find(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Source').situation, 'after');

@@ -344,6 +344,9 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
         ...(lifecycle.signal ? { signal: lifecycle.signal } : {}),
         ...(typeof lifecycle.onCommitted === 'function' ? {
           onCommitted: (committed) => lifecycle.onCommitted(decorate(committed))
+        } : {}),
+        ...(typeof lifecycle.onSubsequentSettled === 'function' ? {
+          onSubsequentSettled: (settled) => lifecycle.onSubsequentSettled(decorate(settled))
         } : {})
       });
       return decorate(result);

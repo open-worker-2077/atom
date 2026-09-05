@@ -97,7 +97,7 @@ export function createLegacyWorldService(options = {}) {
         if (id === request.interaction.id || activeInteractions.has(`${worldKey}\0${id}`)) continue;
         const recoveryRequest = { ...request, source: execution.sourceReceipt.source,
           interaction: structuredClone(execution.event.interaction), history: [],
-          trustedMaintenance: false, bypassProgramLocks: false, onCommitted: undefined };
+          trustedMaintenance: false, bypassProgramLocks: false, onCommitted: undefined, onSubsequentSettled: undefined };
         recoveryRequests.set(recoveryRequest, execution.event.binding);
         await service.executeLegacy(recoveryRequest);
       }
@@ -126,6 +126,10 @@ export function createLegacyWorldService(options = {}) {
     let sourceReceipt = execution?.sourceReceipt ?? null;
     const attemptId = `${request.interaction.id}:subsequent:${crypto.randomUUID()}`;
     const outcomeWarnings = [];
+    let businessSettled = false;
+    let revalidatingConflict = false;
+    let requestInterruptedCommit = false;
+    const businessWarnings = [];
     async function recordOutcome(outcome) {
       try {
         return await persistence.recordProgramExecution({ sourceCommandId: sourceReceipt.commandId, outcome });
@@ -146,6 +150,7 @@ export function createLegacyWorldService(options = {}) {
       interactionBinding: entry.binding,
       compatibilityManifest,
       transactionTransformLog,
+      onSubsequentSettled: settleBusinessResult,
       onCommitted: async result => {
         entry.pending = structuredClone(result);
         if (sourceReceipt && result.subsequentExecution?.status === 'pending') {
@@ -154,6 +159,7 @@ export function createLegacyWorldService(options = {}) {
         await request.onCommitted?.({ ...result, warnings: [...(result.warnings ?? []), ...outcomeWarnings] });
       },
       commitWorld: async (transition) => {
+        if (request.signal?.aborted) requestInterruptedCommit = true;
         request.signal?.throwIfAborted?.();
         let receipt;
         try {
@@ -173,45 +179,72 @@ export function createLegacyWorldService(options = {}) {
         return receipt;
       }
     }));
-    let result = await run();
-    if (!sourceReceipt) return result;
-    execution = await persistence.programExecution(sourceReceipt.commandId);
-    // A stale candidate has no committed effects. Re-evaluate the exact event
-    // against current facts once; a confirmed child is read, never run again.
-    if (result.subsequentExecution?.errors?.some(({ code }) => code === 'WORLD_REVISION_CONFLICT')) {
-      const conflict = result.subsequentExecution.errors.find(({ code }) => code === 'WORLD_REVISION_CONFLICT');
-      result = await run(execution);
-      result.warnings = [...(result.warnings ?? []), conflict];
+    async function settleBusinessResult(result) {
+      if (!sourceReceipt || businessSettled) return result;
+      execution = await persistence.programExecution(sourceReceipt.commandId);
+      // A stale candidate has no committed effects. Re-evaluate the exact event
+      // against current facts once; a confirmed child is read, never run again.
+      if (!revalidatingConflict && result.subsequentExecution?.errors?.some(({ code }) => code === 'WORLD_REVISION_CONFLICT')) {
+        revalidatingConflict = true;
+        const conflict = result.subsequentExecution.errors.find(({ code }) => code === 'WORLD_REVISION_CONFLICT');
+        businessWarnings.push(conflict);
+        result = await run(execution);
+        if (businessSettled) return result;
+      }
+      if (result.ok === false) {
+        const sourceResult = execution.outcome?.result ?? { ok: true, language: 'atom', command: 'transform',
+          changed: true, contextFile: request.contextFile, projectionFile: request.projectionFile,
+          interactionId: request.interaction.id, revisionBefore: sourceReceipt.beforeRevision.replace(/^sha256:/u, ''),
+          result: null, messages: [], warnings: [] };
+        result = { ...sourceResult, ok: true, errors: [], revisionAfter: result.revisionAfter,
+          warnings: [...(sourceResult.warnings ?? []).filter(({ code }) => code !== 'ATOM_SUBSEQUENT_EXECUTION_PENDING'),
+            { code: 'ATOM_SUBSEQUENT_EXECUTION_FAILED', message: '来源事实已提交，但后续 Program 执行失败', cause: result.errors?.[0]?.code }],
+          subsequentExecution: { status: 'failed', sourceRevision: sourceReceipt.afterRevision.replace(/^sha256:/u, ''),
+            revisionAfter: result.revisionAfter, errors: result.errors } };
+      }
+      const latest = await persistence.programExecution(sourceReceipt.commandId);
+      // A worker's own bounded timeout is a determined failure. Resume only an
+      // external cancellation that actually interrupted this execution/commit.
+      const cancellationCode = request.signal?.aborted ? request.signal.reason?.code : null;
+      const interrupted = requestInterruptedCommit || (cancellationCode != null
+        && result.subsequentExecution?.errors?.some(error => error.code === cancellationCode));
+      if (interrupted && !latest.childReceipt) {
+        result.subsequentExecution = { ...result.subsequentExecution, status: 'pending' };
+        result.warnings = [...(result.warnings ?? []).filter(({ code }) => code !== 'ATOM_SUBSEQUENT_EXECUTION_FAILED'),
+          { code: 'ATOM_SUBSEQUENT_EXECUTION_PENDING', message: '来源事实已提交；中断的后续运行待恢复',
+            correlationId: `${request.interaction.id}:subsequent` }];
+      }
+      result.subsequentExecution = { ...result.subsequentExecution, attemptId,
+        sourceCommandId: sourceReceipt.commandId,
+        ...(latest.childReceipt ? { childCommandId: latest.childReceipt.commandId } : {}) };
+      result.warnings = [...(result.warnings ?? []), ...businessWarnings];
+      const outcome = await recordOutcome({ ...result.subsequentExecution, result: structuredClone(result) });
+      businessSettled = true;
+      if (!outcome) {
+        return { ...result,
+          warnings: [...(result.warnings ?? []).filter(({ code }) => code !== 'ATOM_SUBSEQUENT_EXECUTION_FAILED'), ...outcomeWarnings],
+          subsequentExecution: { ...result.subsequentExecution, status: 'pending',
+            observedStatus: result.subsequentExecution.status, outcomePersistence: 'pending' } };
+      }
+      const durable = outcome.result ?? result;
+      entry.pending = structuredClone(durable);
+      if (outcome.status !== 'pending') {
+        for (const notify of entry.settledListeners) {
+          try { await notify(structuredClone(durable)); }
+          catch (error) {
+            durable.warnings = [...(durable.warnings ?? []), {
+              code: 'ATOM_SUBSEQUENT_NOTIFICATION_FAILED',
+              message: '后续结果已保存，但结果通知失败；可用原交互标识重读',
+              cause: error.code ?? error.message, correlationId: request.interaction.id
+            }];
+          }
+        }
+        entry.settledListeners.clear();
+      }
+      return durable;
     }
-    if (result.ok === false) {
-      const sourceResult = execution.outcome?.result ?? { ok: true, language: 'atom', command: 'transform',
-        changed: true, contextFile: request.contextFile, projectionFile: request.projectionFile,
-        interactionId: request.interaction.id, revisionBefore: sourceReceipt.beforeRevision.replace(/^sha256:/u, ''),
-        result: null, messages: [], warnings: [] };
-      result = { ...sourceResult, ok: true, errors: [], revisionAfter: result.revisionAfter,
-        warnings: [...(sourceResult.warnings ?? []).filter(({ code }) => code !== 'ATOM_SUBSEQUENT_EXECUTION_PENDING'),
-          { code: 'ATOM_SUBSEQUENT_EXECUTION_FAILED', message: '来源事实已提交，但后续 Program 执行失败', cause: result.errors?.[0]?.code }],
-        subsequentExecution: { status: 'failed', sourceRevision: sourceReceipt.afterRevision.replace(/^sha256:/u, ''),
-          revisionAfter: result.revisionAfter, errors: result.errors } };
-    }
-    const latest = await persistence.programExecution(sourceReceipt.commandId);
-    if (request.signal?.aborted && !latest.childReceipt) {
-      result.subsequentExecution = { ...result.subsequentExecution, status: 'pending' };
-      result.warnings = [...(result.warnings ?? []).filter(({ code }) => code !== 'ATOM_SUBSEQUENT_EXECUTION_FAILED'),
-        { code: 'ATOM_SUBSEQUENT_EXECUTION_PENDING', message: '来源事实已提交；中断的后续运行待恢复',
-          correlationId: `${request.interaction.id}:subsequent` }];
-    }
-    result.subsequentExecution = { ...result.subsequentExecution, attemptId,
-      sourceCommandId: sourceReceipt.commandId,
-      ...(latest.childReceipt ? { childCommandId: latest.childReceipt.commandId } : {}) };
-    const outcome = await recordOutcome({ ...result.subsequentExecution, result: structuredClone(result) });
-    if (!outcome) {
-      return { ...result,
-        warnings: [...(result.warnings ?? []).filter(({ code }) => code !== 'ATOM_SUBSEQUENT_EXECUTION_FAILED'), ...outcomeWarnings],
-        subsequentExecution: { ...result.subsequentExecution, status: 'pending',
-          observedStatus: result.subsequentExecution.status, outcomePersistence: 'pending' } };
-    }
-    return outcome.result ?? result;
+    const result = await run();
+    return businessSettled ? result : settleBusinessResult(result);
   }
 
   const service = createWorldService({
@@ -225,6 +258,10 @@ export function createLegacyWorldService(options = {}) {
       const active = activeInteractions.get(key);
       if (active) {
         assertBinding(active.binding, binding);
+        if (typeof request.onSubsequentSettled === 'function'
+          && !['completed', 'failed'].includes(active.pending?.subsequentExecution?.status)) {
+          active.settledListeners.add(request.onSubsequentSettled);
+        }
         if (active.pending && typeof request.onCommitted === 'function') {
           return (async () => {
             let warning;
@@ -240,7 +277,8 @@ export function createLegacyWorldService(options = {}) {
         }
         return active.pending ? Promise.resolve(structuredClone(active.pending)) : active.running;
       }
-      const entry = { binding, recovering: recoveredBinding !== undefined, pending: null, running: null };
+      const entry = { binding, recovering: recoveredBinding !== undefined, pending: null, running: null,
+        settledListeners: new Set(typeof request.onSubsequentSettled === 'function' ? [request.onSubsequentSettled] : []) };
       activeInteractions.set(key, entry);
       entry.running = executeInteraction(request, entry).finally(() => activeInteractions.delete(key));
       return entry.running;

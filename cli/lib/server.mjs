@@ -220,28 +220,58 @@ export async function createSpatialServer(options = {}) {
     }
 
     const controller = new AbortController();
-    const timeoutError = new SpatialStoreError(
-      'ATOM_INTERACTION_TIMEOUT',
-      `Atom interaction exceeded its ${atomInteractionTimeoutMs}ms deadline`
-    );
     let timeout;
+    let rejectActiveDeadline;
+    let businessPhase = 'source';
+    let durableBusinessResult = null;
     const deadline = new Promise((_, rejectDeadline) => {
+      rejectActiveDeadline = rejectDeadline;
+    });
+    function armBusinessDeadline(phase) {
+      clearTimeout(timeout);
+      if (controller.signal.aborted) return;
+      businessPhase = phase;
       timeout = setTimeout(() => {
+        const timeoutError = new SpatialStoreError(
+          phase === 'subsequent' ? 'ATOM_SUBSEQUENT_TIMEOUT' : 'ATOM_INTERACTION_TIMEOUT',
+          `Atom ${phase} phase exceeded its ${atomInteractionTimeoutMs}ms deadline`
+        );
+        timeoutError.details = { phase, interactionId: id, timeoutMs: atomInteractionTimeoutMs };
         controller.abort(timeoutError);
-        rejectDeadline(timeoutError);
+        rejectActiveDeadline(timeoutError);
       }, atomInteractionTimeoutMs);
       timeout.unref?.();
-    });
+    }
+    const sourceCommitted = result => {
+      if (businessPhase === 'source' && result?.ok === true && result?.changed === true) {
+        clearTimeout(timeout);
+        if (result.subsequentExecution?.status === 'pending') armBusinessDeadline('subsequent');
+        else businessPhase = 'settled';
+      }
+      settle(result);
+    };
+    const subsequentSettled = result => {
+      if (!['completed', 'failed'].includes(result?.subsequentExecution?.status)) return;
+      clearTimeout(timeout);
+      businessPhase = 'settled';
+      durableBusinessResult = result;
+      entry.receipt = Promise.resolve(result);
+      settle(result);
+    };
+    armBusinessDeadline('source');
     trackAtomInteraction(async () => {
       try {
         const operationResult = Promise.resolve().then(() => (
-          operation(normalized, settle, controller.signal)
+          operation(normalized, sourceCommitted, controller.signal, subsequentSettled)
         ));
         operationResult.then(result => {
           // The first caller keeps its source acknowledgement. Later reads see
           // the completed operation, including completion after the deadline.
-          entry.receipt = Promise.resolve(result);
-          settle(result);
+          const final = durableBusinessResult ? { ...result,
+            ok: durableBusinessResult.ok, errors: durableBusinessResult.errors,
+            subsequentExecution: durableBusinessResult.subsequentExecution } : result;
+          entry.receipt = Promise.resolve(final);
+          settle(final);
         }, () => undefined);
         const result = await Promise.race([operationResult, deadline]);
         settle(result);
@@ -400,8 +430,8 @@ export async function createSpatialServer(options = {}) {
           return json(response, 404, { ok: false, error: { code: 'ATOM_COMMAND_UNAVAILABLE' } });
         }
         const payload = await body(request);
-        const result = await atomCommandRequest(payload, async (normalized, onCommitted, signal) => {
-          const commandResult = await options.atomCommand(normalized, { onCommitted, signal });
+        const result = await atomCommandRequest(payload, async (normalized, onCommitted, signal, onSubsequentSettled) => {
+          const commandResult = await options.atomCommand(normalized, { onCommitted, signal, onSubsequentSettled });
           if (commandResult?.changed !== false && graphFile && options.projectAtomKnowledge) {
             try {
               const document = JSON.parse(await fs.readFile(graphFile, 'utf8'));
