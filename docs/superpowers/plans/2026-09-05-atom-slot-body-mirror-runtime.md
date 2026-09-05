@@ -283,7 +283,7 @@ Expected: zero failures. If a test fails, diagnose that exact failure; do not re
 
 Final candidate evidence: `npm test` completed with `1717/1717 PASS`, zero failures, duration `389891.3237 ms`; `git diff --check` returned no errors. The suite was run once after the targeted fixes, without another redundant full review.
 
-- [ ] **Step 8: Commit, integrate, deploy, and read back**
+- [x] **Step 8: Commit, integrate, deploy, and read back**
 
 ```powershell
 git add tests/atom-slot-body-two-step-flow.test.mjs work-engine/atom-language/cli.mjs work-engine/atom-language/program-function-registry.json docs/superpowers/plans/2026-09-03-atom-current-requirement-ledger.md docs/superpowers/plans/2026-09-03-session-recovery-checkpoint.md
@@ -291,3 +291,5 @@ git commit -m "test(slot-body): prove two-step mirrored flow"
 ```
 
 Fast-forward the verified implementation to `main`, deploy 4784 through the existing controlled restart path, confirm health/projection/build revision, then repeat the minimal public seal/print/read journey in an authorized disposable Graph domain. Push only under the user's existing explicit authorization and verify `origin/main` resolves to the local commit.
+
+Completion evidence: branch commits were fast-forwarded to `main`; the merged minimal public tests passed `23/23`. The existing `Atom Graph Runtime` task restarted 4784 from PID `9540` to `33604`; health returned `ok:true`, revision `7357`, projection `published`. The public Web registry returned the self-declared `slot_body` contract and the public CLI exact-read an existing production Agent successfully. The complete seal/print/fill/trigger/strut/lock/jump journey was already exercised through the same public CLI against an isolated disposable world (`2/2 PASS`), so production Graph facts were not polluted merely to duplicate that evidence.
