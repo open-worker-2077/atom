@@ -65,8 +65,12 @@
   let settingsAuthorityEpoch = 0;
   let pendingPresentationWrites = 0;
   let presentationReadSequence = 0;
+  let presentationWriteSequence = 0;
   let presentationWriteInFlight = false;
   let pendingPresentationRevision = -1;
+  let deferredPresentationRead = false;
+  let deferredPresentationReadStatus = "synced";
+  let drainingDeferredPresentationRead = false;
   let applyingSharedPresentationSettings = false;
   let presentationSettingsDelivery = Promise.resolve();
   const loadedPaths = new Set();
@@ -303,7 +307,10 @@
     const incomingRevision = Number(snapshot && snapshot.revision);
     if (!snapshot || snapshot.initialized !== true || !Number.isSafeInteger(incomingRevision)
       || incomingRevision < settingsRevision || !snapshot.settings) return false;
-    if (source === "remote" && incomingRevision > settingsRevision) settingsAuthorityEpoch += 1;
+    if (source === "remote" && incomingRevision > settingsRevision) {
+      settingsAuthorityEpoch += 1;
+      queuedSettingsRevision = incomingRevision;
+    }
     settingsRevision = incomingRevision;
     if (!pendingPresentationWrites) queuedSettingsRevision = settingsRevision;
     applyingSharedPresentationSettings = true;
@@ -354,14 +361,46 @@
     }
   }
 
+  function deferPresentationSettingsRead(status = "synced") {
+    deferredPresentationRead = true;
+    if (status === "conflict") deferredPresentationReadStatus = "conflict";
+  }
+
+  async function drainDeferredPresentationRead() {
+    if (presentationWriteInFlight || drainingDeferredPresentationRead || !deferredPresentationRead) {
+      return false;
+    }
+    drainingDeferredPresentationRead = true;
+    const status = deferredPresentationReadStatus;
+    deferredPresentationRead = false;
+    deferredPresentationReadStatus = "synced";
+    pendingPresentationRevision = -1;
+    try {
+      return await readPresentationSettings(status);
+    } finally {
+      drainingDeferredPresentationRead = false;
+      if (deferredPresentationRead && !presentationWriteInFlight) void drainDeferredPresentationRead();
+    }
+  }
+
   async function readPresentationSettings(statusAfterApply = "synced") {
     if (typeof lab.presentationSettings !== "function"
       || typeof lab.applyPresentationSettings !== "function") return false;
+    if (presentationWriteInFlight) {
+      deferPresentationSettingsRead(statusAfterApply);
+      return false;
+    }
     const requestSequence = presentationReadSequence += 1;
     const requestRevision = settingsRevision;
+    const requestWriteSequence = presentationWriteSequence;
     setPresentationSettingsStatus("syncing");
     try {
       const snapshot = await request("/presentation-settings");
+      if (presentationWriteInFlight || requestWriteSequence !== presentationWriteSequence) {
+        deferPresentationSettingsRead(statusAfterApply);
+        if (!presentationWriteInFlight) void drainDeferredPresentationRead();
+        return false;
+      }
       const incomingRevision = Number(snapshot && snapshot.revision);
       if (Number.isSafeInteger(incomingRevision) && incomingRevision < settingsRevision) return false;
       if (incomingRevision === settingsRevision && requestSequence !== presentationReadSequence) return false;
@@ -394,6 +433,7 @@
       setPresentationSettingsStatus(settingsRevision >= expectedRevision ? "conflict" : "unsynced");
       return false;
     }
+    presentationWriteSequence += 1;
     presentationWriteInFlight = true;
     try {
       const snapshot = await request("/presentation-settings", {
@@ -404,17 +444,15 @@
       return true;
     } catch (error) {
       if (error.code === "PRESENTATION_SETTINGS_CONFLICT") {
-        await readPresentationSettings("conflict");
+        deferPresentationSettingsRead("conflict");
         return false;
       }
       setPresentationSettingsStatus("unsynced");
       return false;
     } finally {
       presentationWriteInFlight = false;
-      if (pendingPresentationRevision > settingsRevision) {
-        await readPresentationSettings();
-      }
-      if (pendingPresentationRevision <= settingsRevision) pendingPresentationRevision = -1;
+      if (pendingPresentationRevision > settingsRevision) deferPresentationSettingsRead();
+      await drainDeferredPresentationRead();
     }
   }
 
@@ -918,7 +956,8 @@
           const noticeRevision = Number(notice.revision);
           if (noticeRevision > settingsRevision) {
             pendingPresentationRevision = Math.max(pendingPresentationRevision, noticeRevision);
-            if (!presentationWriteInFlight) void readPresentationSettings();
+            deferPresentationSettingsRead();
+            if (!presentationWriteInFlight) void drainDeferredPresentationRead();
           }
         } catch {
           setPresentationSettingsStatus("unsynced");

@@ -1942,3 +1942,160 @@ test('a late failed presentation GET cannot downgrade a newer synchronized snaps
   assert.equal(document.body.dataset.spatialPresentationSettings, 'synced');
   assert.equal(document.body.dataset.spatialPresentationSettingsRevision, '2');
 });
+
+test('a visibility read of the committed local revision preserves the next queued local change', async () => {
+  const listeners = new Map();
+  const writes = [];
+  let releaseFirst;
+  let releaseVisibilityRead;
+  let serverRevision = 3;
+  let settingsReadCount = 0;
+  let serverSettings = { nestedTunnelPercent: 55, nestedTunnelInteriorPercent: 35 };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = {
+    body: { dataset: {} }, hidden: false,
+    getElementById: () => null,
+    addEventListener: (name, listener) => listeners.set(name, listener)
+  };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge: () => true,
+      exportField: () => ({ path: 'root' }),
+      presentationSettings: () => ({ settings: serverSettings, stored: { exists: false, valid: false } }),
+      applyPresentationSettings: () => true
+    },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+      if (url.endsWith('/presentation-settings') && options.method === 'PUT') {
+        const input = JSON.parse(options.body);
+        writes.push(input);
+        serverRevision += 1;
+        serverSettings = { ...serverSettings, ...input.patch };
+        const payload = { ok: true, revision: serverRevision, initialized: true, settings: serverSettings };
+        if (writes.length === 1) {
+          return new Promise((resolve) => { releaseFirst = () => resolve(response(payload)); });
+        }
+        return response(payload);
+      }
+      if (url.endsWith('/presentation-settings')) {
+        settingsReadCount += 1;
+        if (settingsReadCount === 2) {
+          return new Promise((resolve) => {
+            releaseVisibilityRead = () => resolve(response({ ok: true, revision: serverRevision,
+              initialized: true, settings: serverSettings }));
+          });
+        }
+        return response({ ok: true, revision: serverRevision, initialized: true, settings: serverSettings });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  listeners.get('visibilitychange')();
+  await new Promise((resolve) => setImmediate(resolve));
+  listeners.get('spatial-presentation-settings-changed')({ detail: { nestedTunnelPercent: 10 } });
+  listeners.get('spatial-presentation-settings-changed')({ detail: { nestedTunnelInteriorPercent: 15 } });
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseVisibilityRead();
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseFirst();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(writes, [
+    { expectedRevision: 3, patch: { nestedTunnelPercent: 10 } },
+    { expectedRevision: 4, patch: { nestedTunnelInteriorPercent: 15 } }
+  ]);
+  assert.equal(document.body.dataset.spatialPresentationSettingsRevision, '5');
+});
+
+test('a new user change after an external winner starts from the winner revision before stale queues drain', async () => {
+  const listeners = new Map();
+  const writes = [];
+  let eventSource;
+  let releaseConflict;
+  let readCount = 0;
+  let queuedFreshChange = false;
+  class FakeEventSource {
+    constructor() { this.listeners = new Map(); eventSource = this; }
+    addEventListener(name, listener) { this.listeners.set(name, listener); }
+  }
+  const initial = { nestedTunnelPercent: 55, nestedTunnelInteriorPercent: 35 };
+  const winner = { nestedTunnelPercent: 20, nestedTunnelInteriorPercent: 25 };
+  const response = (payload, ok = true) => ({ ok, json: async () => payload });
+  const document = {
+    body: { dataset: {} }, hidden: false,
+    getElementById: () => null,
+    addEventListener: (name, listener) => listeners.set(name, listener)
+  };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      importKnowledge: () => true,
+      exportField: () => ({ path: 'root' }),
+      presentationSettings: () => ({ settings: initial, stored: { exists: false, valid: false } }),
+      applyPresentationSettings: (settings) => {
+        if (settings.nestedTunnelPercent === winner.nestedTunnelPercent && !queuedFreshChange) {
+          queuedFreshChange = true;
+          queueMicrotask(() => listeners.get('spatial-presentation-settings-changed')({
+            detail: { nestedTunnelPercent: 30 }
+          }));
+        }
+      }
+    },
+    EventSource: FakeEventSource,
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+      if (url.endsWith('/presentation-settings') && options.method === 'PUT') {
+        const input = JSON.parse(options.body);
+        writes.push(input);
+        if (writes.length === 1) {
+          return new Promise((resolve) => {
+            releaseConflict = () => resolve(response({ ok: false,
+              error: { code: 'PRESENTATION_SETTINGS_CONFLICT', message: 'changed' } }, false));
+          });
+        }
+        return response({ ok: true, revision: 5, initialized: true,
+          settings: { ...winner, ...input.patch } });
+      }
+      if (url.endsWith('/presentation-settings')) {
+        readCount += 1;
+        return response({ ok: true, revision: readCount === 1 ? 3 : 4, initialized: true,
+          settings: readCount === 1 ? initial : winner });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  listeners.get('spatial-presentation-settings-changed')({ detail: { nestedTunnelPercent: 10 } });
+  listeners.get('spatial-presentation-settings-changed')({ detail: { nestedTunnelInteriorPercent: 15 } });
+  await new Promise((resolve) => setImmediate(resolve));
+  eventSource.listeners.get('presentation-settings')({ data: '{"revision":4}' });
+  releaseConflict();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(writes, [
+    { expectedRevision: 3, patch: { nestedTunnelPercent: 10 } },
+    { expectedRevision: 4, patch: { nestedTunnelPercent: 30 } }
+  ]);
+  assert.equal(document.body.dataset.spatialPresentationSettingsRevision, '5');
+  assert.equal(document.body.dataset.spatialPresentationSettings, 'synced');
+});
