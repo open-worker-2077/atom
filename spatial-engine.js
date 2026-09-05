@@ -121,22 +121,54 @@
   const DEMO_SETTINGS_KEY = "graph-4d.presentation-settings.v2";
   const LEGACY_DEMO_SETTINGS_KEY = "graph-4d.presentation-settings.v1";
 
+  function validStoredDemoSettings(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const entries = Object.entries(value);
+    if (!entries.length) return false;
+    const fields = new Set(Object.keys(demoModel.normalizeSettings(null)));
+    return entries.every(([key, setting]) => (
+      fields.has(key)
+      && (key === "helpVisible"
+        ? typeof setting === "boolean"
+        : key === "defaultDetailMode"
+          ? ["name", "surface", "floating"].includes(setting)
+          : key === "idleSeconds" && setting === null
+            ? true
+            : typeof setting === "number" && Number.isFinite(setting))
+    ));
+  }
+
+  function readStoredDemoSettings() {
+    try {
+      for (const key of [DEMO_SETTINGS_KEY, LEGACY_DEMO_SETTINGS_KEY]) {
+        const raw = global.localStorage.getItem(key);
+        if (raw === null) continue;
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (_error) {
+          return { settings: demoModel.normalizeSettings(null), stored: { exists: true, valid: false, key, raw } };
+        }
+        const valid = validStoredDemoSettings(parsed);
+        const source = key === LEGACY_DEMO_SETTINGS_KEY ? { ...parsed, idleSeconds: null } : parsed;
+        return {
+          settings: demoModel.normalizeSettings(valid ? source : null),
+          stored: { exists: true, valid, key, raw }
+        };
+      }
+    } catch (_error) {
+      // Browser storage can be unavailable even when the page remains usable.
+    }
+    return {
+      settings: demoModel.normalizeSettings(null),
+      stored: { exists: false, valid: false, key: null, raw: null }
+    };
+  }
+
   function atomDisplayName(node, fallback = "") {
     const label = String(node && node.label || fallback || "");
     const types = Array.isArray(node && node.atomTypes) ? node.atomTypes : [];
     return types.length ? `${label} ${types.map((type) => `@${type}`).join(" ")}` : label;
-  }
-
-  function loadDemoSettings() {
-    try {
-      const raw = global.localStorage.getItem(DEMO_SETTINGS_KEY);
-      if (raw) return demoModel.normalizeSettings(JSON.parse(raw));
-      const legacyRaw = global.localStorage.getItem(LEGACY_DEMO_SETTINGS_KEY);
-      if (!legacyRaw) return demoModel.normalizeSettings(null);
-      return demoModel.normalizeSettings({ ...JSON.parse(legacyRaw), idleSeconds: null });
-    } catch (_error) {
-      return demoModel.normalizeSettings(null);
-    }
   }
 
   function saveDemoSettings(settings) {
@@ -147,7 +179,8 @@
     }
   }
 
-  const initialDemoSettings = loadDemoSettings();
+  const initialStoredDemoSettings = readStoredDemoSettings();
+  const initialDemoSettings = initialStoredDemoSettings.settings;
 
   const intentNames = {
     cycleViewMode: "视角模式",
@@ -7755,9 +7788,29 @@
   }
 
   function updateDemoSettings(nextSettings) {
+    const previous = state.demo.settings;
     state.demo.settings = demoModel.normalizeSettings(nextSettings);
     saveDemoSettings(state.demo.settings);
     syncPresentationControls();
+    const patch = Object.fromEntries(Object.entries(state.demo.settings)
+      .filter(([key, value]) => previous[key] !== value));
+    if (Object.keys(patch).length && typeof global.dispatchEvent === "function") {
+      global.dispatchEvent(new CustomEvent("spatial-presentation-settings-changed", {
+        detail: Object.freeze(patch)
+      }));
+    }
+  }
+
+  function applyPresentationSettings(settings) {
+    const previous = state.demo.settings;
+    state.demo.settings = demoModel.normalizeSettings(settings);
+    saveDemoSettings(state.demo.settings);
+    syncPresentationControls();
+    if (previous.nestedCompactnessPercent !== state.demo.settings.nestedCompactnessPercent
+      || previous.peripheralDepthShrinkPercent !== state.demo.settings.peripheralDepthShrinkPercent) {
+      refreshClusterSceneAfterLayoutSetting();
+    }
+    return state.demo.settings;
   }
 
   function refreshClusterSceneAfterLayoutSetting() {
@@ -9132,6 +9185,11 @@
     },
     exportField: exportFieldProjection,
     exportKnowledge: () => workspace.exportKnowledge(),
+    presentationSettings: () => ({
+      settings: state.demo.settings,
+      stored: Object.freeze({ ...initialStoredDemoSettings.stored })
+    }),
+    applyPresentationSettings,
     importKnowledge,
     setScopeLoadState,
     refitCurrentDomain,
