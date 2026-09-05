@@ -72,6 +72,7 @@
   let deferredPresentationReadStatus = "synced";
   let drainingDeferredPresentationRead = false;
   let applyingSharedPresentationSettings = false;
+  let retainedPresentationStatus = null;
   let presentationSettingsDelivery = Promise.resolve();
   const loadedPaths = new Set();
   const workspaceModel = global.SpatialWorkspaceModel;
@@ -307,6 +308,12 @@
     const incomingRevision = Number(snapshot && snapshot.revision);
     if (!snapshot || snapshot.initialized !== true || !Number.isSafeInteger(incomingRevision)
       || incomingRevision < settingsRevision || !snapshot.settings) return false;
+    if (source === "remote" && status === "synced" && retainedPresentationStatus
+      && incomingRevision === retainedPresentationStatus.revision) {
+      setPresentationSettingsStatus(retainedPresentationStatus.status);
+      return false;
+    }
+    const advancesAuthority = source === "remote" && incomingRevision > settingsRevision;
     if (source === "remote" && incomingRevision > settingsRevision) {
       settingsAuthorityEpoch += 1;
       queuedSettingsRevision = incomingRevision;
@@ -318,6 +325,10 @@
       lab.applyPresentationSettings(snapshot.settings);
     } finally {
       applyingSharedPresentationSettings = false;
+    }
+    if (source === "local" || advancesAuthority) retainedPresentationStatus = null;
+    if (status === "conflict") {
+      retainedPresentationStatus = { revision: settingsRevision, status };
     }
     setPresentationSettingsStatus(status);
     return true;
@@ -393,7 +404,10 @@
     const requestSequence = presentationReadSequence += 1;
     const requestRevision = settingsRevision;
     const requestWriteSequence = presentationWriteSequence;
-    setPresentationSettingsStatus("syncing");
+    if (statusAfterApply !== "synced" || !retainedPresentationStatus
+      || retainedPresentationStatus.revision !== settingsRevision) {
+      setPresentationSettingsStatus("syncing");
+    }
     try {
       const snapshot = await request("/presentation-settings");
       if (presentationWriteInFlight || requestWriteSequence !== presentationWriteSequence) {
@@ -414,11 +428,20 @@
           return bootstrapPresentationSettings(localSnapshot);
         }
       }
+      if (statusAfterApply === "synced" && retainedPresentationStatus
+        && Number(snapshot.revision) === retainedPresentationStatus.revision) {
+        setPresentationSettingsStatus(retainedPresentationStatus.status);
+        return false;
+      }
       setPresentationSettingsStatus("uninitialized");
       return false;
     } catch (_error) {
       if (requestSequence === presentationReadSequence && settingsRevision === requestRevision) {
-        setPresentationSettingsStatus("unsynced");
+        const retainedStatus = statusAfterApply === "synced" && retainedPresentationStatus
+          && retainedPresentationStatus.revision === settingsRevision
+          ? retainedPresentationStatus.status
+          : "unsynced";
+        setPresentationSettingsStatus(retainedStatus);
       }
       return false;
     }
@@ -447,7 +470,8 @@
         deferPresentationSettingsRead("conflict");
         return false;
       }
-      setPresentationSettingsStatus("unsynced");
+      retainedPresentationStatus = { revision: settingsRevision, status: "unsynced" };
+      setPresentationSettingsStatus(retainedPresentationStatus.status);
       return false;
     } finally {
       presentationWriteInFlight = false;
