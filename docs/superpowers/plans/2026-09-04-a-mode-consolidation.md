@@ -506,3 +506,46 @@ git commit -m "chore(web): record A-mode deployment evidence"
 ```
 
 Do not push this post-baseline work without a new user authorization. Keep `pre-a-mode-consolidation-20260904` unchanged as the remote rollback point.
+
+## 2026-09-05 接手与当前执行证据
+
+- **当前目标**：A模式收束，I3/U2/D2/E3；Task 1已完成，Task 2进行中，Task 3—7待执行。唯一状态仍由本计划、需求总账与恢复断点共同承担，不另建SDD状态账本；官方脚本工作区只放派发摘录、报告及差异包。
+- **安全吸收**：接手前main与origin/main精确为2ae8735691aa00cdae8ad3c90d29763b1964a1af，A工作树干净且HEAD为b1bff98。非破坏merge main成功，当前合并提交4c9cf2f；未reset、未覆盖用户改动。
+- **最小基线**：node --test --test-isolation=none tests/input-config.test.js tests/spatial-view-mode-model.test.js，31/31 PASS，0失败；槽体已交付链不重测。
+- **恢复指针**：总账与断点中的eaa48bc为之前槽体交付点，当前main安全点由上项取代；不覆盖历史验收证据。
+- **Ruling: 验收时序**：Task 6要求在Task 2—5已实现后取得旧行为RED，时间顺序矛盾；将三条A浏览器验收先在Task 4实现前取得RED，再复用于Task 6候选GREEN。依据TDD及Web规格，错误代价是需重新调整测试安排，不改变产品行为。
+- **Ruling: 沉浸解除**：Task 4示例只toggle子域不足以证明普通剖开解除沉浸；按Web规格§4.1处理实际可见范围并用浏览器最终画面验收。若判断有误，代价为局部导航实现返工。
+- **Ruling: 状态来源**：用户明确禁止第二账本，因此SDD进展和裁定写入本既有计划；不创建progress.md。报告为证据附件，任务状态以本页为准。若解释有误，代价是记录位置调整，不影响产品事实。
+
+### 计划预检
+
+| 任务或共享项 | 生产／消费关系 | 裁定 |
+|---|---|---|
+| Task 1自身 | 输入意图和单一nested模式 | 已交付31/31；其余运行时清退归Task 4 |
+| Task 2自身 | 归一化→同一localStorage→设置控件 | 数值缺省、范围、重载与默认恢复需同源 |
+| Task 3自身 | 动态间隔→同目标仲裁→单／双意图 | 修饰键绕过；空白双击只退一次 |
+| Task 4自身 | A意图→普通／沉浸→父层 | 示例不替代沉浸解除合同，见裁定 |
+| Task 5自身 | 帮助／桌面／手机共同表达 | 保留编辑、魔杖、历史与详情 |
+| Task 6自身 | 真实浏览器RED→最终GREEN | RED前移至Task 4前，见裁定 |
+| Task 7自身 | 稳定候选→最终全量一次→部署回读 | 必须先集成本地main才能由既有服务部署；不自动push |
+| Task 1/4 | mode model与输入意图 | Task 4消费新意图并清除旧mode分支 |
+| Task 1/5 | input-config与描述 | Task 5清退可见旧键位，避免重新引入 |
+| Task 2/3 | engine读取secondaryNavigationDelayMs | 同一归一化字段供delayFor读取 |
+| Task 2/4 | engine设置与导航 | 设置代码只控制仲裁，不改结构事实 |
+| Task 2/5 | index、engine、mobile合同 | Task 5保留新增间隔设置及可访问控件 |
+| Task 2/7 | index构建标识 | 由build:browser机械生成 |
+| Task 3/4 | gesture、engine与意图 | 仲裁结果进入唯一A导航 |
+| Task 3/5 | engine输入与帮助 | 描述必须与真实仲裁一致 |
+| Task 4/5 | engine运行路径与移动端 | 移动端复用相同A动作 |
+| Task 4/6 | 导航实现与浏览器验收 | 预先RED，实际画面覆盖三旅程及沉浸解除 |
+| Task 5/6 | mobile测试与完整关键旅程 | 已通过证据同revision复用 |
+| Task 5/7 | index与公开入口 | 部署回读控件和真实浏览器行为 |
+| Task 6/7 | 总账、断点、稳定候选 | 阶段成果不冒充部署，最终才全量 |
+- **官方版本核对**：已读取官方 obra/superpowers main 的 .claude-plugin/plugin.json，version为6.3.0，与本机安装一致；未修改官方技能。
+- **现场收件**：只读核对“🔥🔥🔥ESG计划_按逻辑_atom”最近两轮；最新内容是用户定论整理，未发现槽体交付后新的正确合同复现。原封装body参数和旧延迟报告已有总账记录，不据旧现场消息重开P0。
+- **辅助工具**：Git Bash默认沙箱signal pipe拒绝，批准后官方sdd-workspace/task-brief已运行；GitNexus刷新使用--index-only，首次默认沙箱spawn EPERM，已切换获准运行。此为基础设施问题，不是产品RED。
+- **Ruling: 测试合同**：Task 3—5示例中的源码正则不能独自作为新功能RED/GREEN；依官方6.3.0 writing-good-tests，优先执行真实仲裁、模型及浏览器行为，既存结构合同只补充清退检查。若判断有误，代价为测试组织调整，不减验收范围。
+- **Task 4回读线索**：当前returnClusterToDepth访问未声明options；普通A展开后返回可能触达此分支。尚未复现，不写为已证实根因；Task 4按真实返回旅程取证，若触发则纳入同一导航最小修复。
+- **Task 2 RED**：node --test tests/spatial-demo-model.test.js tests/mobile-interaction-contract.test.js；首次沙箱worker spawn EPERM无有效结果，获准同命令重跑34项／29通过／5失败。失败对应secondaryNavigationDelayMs与updater缺失、accessible range缺失及完整设置快照缺新字段；尚未实现GREEN。现有engine secondary delay为620，动态消费归Task 3。
+- **索引故障**：GitNexus增量刷新失败于file_fts节点offset 842 missing，当前以官方--repair-fts修复派生索引；辅助索引缺口不代替产品RED，也不阻塞源码可确认的最小开发链。
+- **Task 2初次GREEN**：实现方回报同一focused链34/34、0失败。自审发现额外加入计时包装器，提前承担Task 3的动态仲裁职责；控制方要求按Task 2范围移回既有计时行为，再定向验证后提交。此34/34仅属于该中间状态，尚不裁定Task 2完成。

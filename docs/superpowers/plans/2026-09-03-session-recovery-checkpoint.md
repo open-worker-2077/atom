@@ -188,3 +188,8 @@
 - `main`与`origin/main`已回读一致为`eaa48bcea1916454f3ad1547e06d09dd4eb51836`；远程标签`pre-a-mode-consolidation-20260904^{}`保留为A模式改构前历史回退点。
 - A模式实施中的阶段提交均必须通过对应最小受影响链；回退时可从上述标签新建恢复分支，不要用破坏性`reset --hard`覆盖用户工作。
 - 提交和推送前必须运行`git diff --check`并回读实际 diff；没有验证证据不得宣称完成。
+
+## 2026-09-05 新任务接手校准
+
+- **当前安全点**：main与origin/main为2ae8735691aa00cdae8ad3c90d29763b1964a1af；旧eaa48bc保留为槽体交付历史。
+- **A模式续接**：既有干净b1bff98已非破坏吸收main，合并提交4c9cf2f；Task 1最小输入链31/31 PASS。Task 2进行中，详细RED/GREEN与裁定写回既有A模式计划；槽体不重测，白板不实现。
