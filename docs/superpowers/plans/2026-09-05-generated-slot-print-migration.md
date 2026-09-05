@@ -80,7 +80,7 @@ def main(arguments):
 - Consumes: Task1 planner，现有`resolveAtomRuntime`和`createTransactionalWorldPersistence`。
 - Produces: `--dry-run --attempt ID`、`--apply --attempt ID`、`--rollback RECEIPT`；私密receipt绑定source/target revision、实际changedPaths、hash及中央command。
 
-- [ ] **Step 1: 取得维护失败路径 RED**
+- [x] **Step 1: 取得维护失败路径 RED**
 
 使用测试私有runtime配置；预检不写世界，apply前源变化则CAS拒绝，重复attempt不再提交。备份不完整／校验失败时不提交；提交后必要后验失败以中央inverse patch恢复原来源，保留错误与所有产物。
 
@@ -90,11 +90,11 @@ assert.equal(secondApply.transaction.commandId, firstApply.transaction.commandId
 assert.deepEqual(worldAfterRollback, sourceBefore);
 ```
 
-- [ ] **Step 2: 实现维护入口**
+- [x] **Step 2: 实现维护入口**
 
 只使用配置的canonical runtime路径，拒绝linked ancestor；备份位于该私密世界的migration-backups/generated-slot-print/迁移ID/attempt。所有新文件wx，源atom逐字节hash复验；复制恢复所需原事实及journal资料，写清单。不以硬编码生产路径或私密正文入源码。复用中央commit/CAS/rollback；attempt回收先查中央receipt和私密清单，未知状态不盲重放。`--rollback`只接受绑定当前世界、精确source/target和中央command的可信receipt；拒绝覆盖后续业务修订。
 
-- [ ] **Step 3: 真实副本与公开调用 GREEN**
+- [x] **Step 3: 真实副本与公开调用 GREEN**
 
 当前生产世界只读副本预检应报告已核实生成物；若不再是5个，依据当前事实报告变化，不能强制数量。迁移后在同一副本，以普通Agent调用实际print并回读槽例，随后冷重启再调用；迁移／打印／回滚的源文件hash不变。当前ABI对手写显式body仍拒绝。
 
@@ -116,3 +116,5 @@ focused测试及独立复核通过后集成维护工具；使用受控现有服�
 - **Task1完成／Task2启动**：46e7772限定复审Approved；当前真实来源纯内存probe恰2活跃项，输入、header、其余facts及生产文件bytes守恒。Task2由generated_print_task2（Sol high）实现维护入口及隔离测试；root持有真实完整私密副本的公开print/冷重启/回滚验收及生产切换，当前未部署迁移。
 
 - **Task2真实规模失败（2026-09-06）**：b29c273合成focused14/14后，root完整私密副本维护apply约56秒Node4GB heap OOM退出134，尚无backup目录；atom.json、旧journal与events字节hash全部未变。生产未参与。当前拒绝部署，独立审查与维护脚本内存读取定位中；不以增加内核分支或盲目调大heap替代修正。raw real-copy-apply-1.log及real-copy-after-failed-apply.json位于本计划SDD。
+
+- **当前候选与验收（2026-09-06）**：500e166维护实现两轮复核全部发现关闭；19项中18pass/0fail/1 Windows symlink夹具EPERM skip。040497d真实完整副本分离进程dry-run/apply/重复attempt/rollback/reapply全部exit0，2项映射、同command幂等、全部原facts恢复、源备份字节不变。R2仅补语义校验前后inventory绑定，精确竞态RED→GREEN，未改planner/ABI/commit内容。两个实际print在普通CLI warm PID16424及新进程cold PID38296均2/2回读成功；手写显式body负例返回INVALID_SLOT_BODY_EFFECT。root首次验收脚本误重放pending来源触发CAS，已改为等待原运行并回读，失败证据保留。待最终分支复核、必要最终门禁与生产维护，未宣称生产已迁移。
