@@ -42,7 +42,7 @@
 - Consumes: 现有`resolvePointer(event, context)`、`resolveKeyboard(event, context)`和稳定 Thing 命中身份。
 - Produces: `VISUAL_INTENTS.applyInwardView`、`VISUAL_INTENTS.applyImmersiveInwardView`；节点右键 single/double 分别解析到两个意图，空白 single/double 均解析到`applyParentView`。
 
-- [ ] **Step 1: Write failing A-only input tests**
+- [x] **Step 1: Write failing A-only input tests**
 
 ```js
 assert.equal(input.resolvePointer({ button: 2 }, { onNode: true, gesture: 'tap' }), 'applyInwardView');
@@ -57,13 +57,13 @@ assert.equal(model.modeForKey('KeyA'), 'nested');
 assert.equal(model.modeForKey('KeyF'), null);
 ```
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `node --test tests/input-config.test.js tests/spatial-view-mode-model.test.js`
 
 Expected: FAIL because the old contract still exposes peripheral/hierarchy/immersive modes and right double-click has no intent.
 
-- [ ] **Step 3: Implement the minimal A-only contract**
+- [x] **Step 3: Implement the minimal A-only contract**
 
 ```js
 const MODES = Object.freeze(['nested']);
@@ -80,13 +80,13 @@ const VISUAL_INTENTS = Object.freeze({
 
 Update both input presets so `nodeSecondary`, `nodeDoubleSecondary`, `fieldSecondary`, and `fieldDoubleSecondary` use the produced intents. Remove S/D/F keyboard bindings, mode-cycle descriptions, and the corresponding setting/help items; preserve Ctrl/Shift secondary bindings unchanged.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run: `node --test tests/input-config.test.js tests/spatial-view-mode-model.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the A-only input contract**
+- [x] **Step 5: Commit the A-only input contract**
 
 ```bash
 git add input-config.js spatial-view-mode-model.js tests/input-config.test.js tests/spatial-view-mode-model.test.js
@@ -106,7 +106,7 @@ git commit -m "refactor(web): make A the only structural view"
 - Consumes: `normalizeSettings(input)`、`updateDemoSettings(nextSettings)`与现有`graph-4d.presentation-settings.v2` localStorage 链。
 - Produces: `settings.secondaryNavigationDelayMs: number`；`withSecondaryNavigationDelayInput(settings, value)`；DOM `#secondaryNavigationDelay`与`#secondaryNavigationDelayValue`。
 
-- [ ] **Step 1: Write failing settings normalization tests**
+- [x] **Step 1: Write failing settings normalization tests**
 
 ```js
 assert.equal(model.normalizeSettings({}).secondaryNavigationDelayMs, 420);
@@ -117,13 +117,13 @@ assert.equal(model.withSecondaryNavigationDelayInput({}, '515').secondaryNavigat
 
 Also assert that `index.html` contains an accessible range input with `min="240"`, `max="800"`, `value="420"` in the mapping section.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `node --test tests/spatial-demo-model.test.js tests/mobile-interaction-contract.test.js`
 
 Expected: FAIL because the setting and controls do not exist.
 
-- [ ] **Step 3: Implement settings normalization and UI wiring**
+- [x] **Step 3: Implement settings normalization and UI wiring**
 
 ```js
 const DEFAULT_SECONDARY_NAVIGATION_DELAY_MS = 420;
@@ -144,13 +144,13 @@ function withSecondaryNavigationDelayInput(settingsInput, value) {
 
 Add the value to `normalizeSettings`, export the updater, bind the range input through `updateDemoSettings`, and display `${value}ms`. Do not create a second localStorage key.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run: `node --test tests/spatial-demo-model.test.js tests/mobile-interaction-contract.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the persisted interval setting**
+- [x] **Step 5: Commit the persisted interval setting**
 
 ```bash
 git add spatial-demo-model.js spatial-engine.js index.html tests/spatial-demo-model.test.js tests/mobile-interaction-contract.test.js
@@ -169,7 +169,7 @@ git commit -m "feat(web): configure immersive right-click interval"
 - Consumes: `settings.secondaryNavigationDelayMs`与`candidateArbiterKey(candidate)`。
 - Produces: `createSecondaryClickArbiter({ delayFor, setTimer, clearTimer, commitSingle, commitDouble })`；`submit(singleAction, doubleAction, signature)`在同一 signature 窗口内只提交 double，超时只提交 single。
 
-- [ ] **Step 1: Write failing dynamic-delay and exact-signature tests**
+- [x] **Step 1: Write failing dynamic-delay and exact-signature tests**
 
 ```js
 let delayMs = 420;
@@ -188,13 +188,13 @@ assert.deepEqual(commits, [['double', 'applyImmersiveInwardView']]);
 
 Add a field case proving two submissions of `field:root/a` commit exactly one `applyParentView`, plus a changed-signature case proving the first single settles before the second sequence begins.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `node --test tests/spatial-gesture-arbiter.test.js tests/gesture-contract.test.js`
 
 Expected: FAIL because the engine bypasses `secondaryClickArbiter.submit` and delay is fixed at construction.
 
-- [ ] **Step 3: Implement dynamic secondary arbitration**
+- [x] **Step 3: Implement dynamic secondary arbitration**
 
 ```js
 const delayFor = typeof options.delayFor === 'function'
@@ -209,13 +209,13 @@ function schedule() {
 
 In `commitPointerCandidate`, route only unmodified `button === 2` navigation candidates through `secondaryClickArbiter.submit(singleAction, doubleAction, candidateArbiterKey(candidate))`. Direct commands, Ctrl+right, Shift+right, edits, middle click, drag, and primary click keep cancelling/bypassing this arbiter exactly as before.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run: `node --test tests/spatial-gesture-arbiter.test.js tests/gesture-contract.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit right-click arbitration**
+- [x] **Step 5: Commit right-click arbitration**
 
 ```bash
 git add spatial-gesture-arbiter.js spatial-engine.js tests/spatial-gesture-arbiter.test.js tests/gesture-contract.test.js
@@ -506,3 +506,72 @@ git commit -m "chore(web): record A-mode deployment evidence"
 ```
 
 Do not push this post-baseline work without a new user authorization. Keep `pre-a-mode-consolidation-20260904` unchanged as the remote rollback point.
+
+## 2026-09-05 接手与当前执行证据
+
+- **当前目标**：A模式收束，I3/U2/D2/E3；Task 1已完成，Task 2进行中，Task 3—7待执行。唯一状态仍由本计划、需求总账与恢复断点共同承担，不另建SDD状态账本；官方脚本工作区只放派发摘录、报告及差异包。
+- **安全吸收**：接手前main与origin/main精确为2ae8735691aa00cdae8ad3c90d29763b1964a1af，A工作树干净且HEAD为b1bff98。非破坏merge main成功，当前合并提交4c9cf2f；未reset、未覆盖用户改动。
+- **最小基线**：node --test --test-isolation=none tests/input-config.test.js tests/spatial-view-mode-model.test.js，31/31 PASS，0失败；槽体已交付链不重测。
+- **恢复指针**：总账与断点中的eaa48bc为之前槽体交付点，当前main安全点由上项取代；不覆盖历史验收证据。
+- **Ruling: 验收时序**：Task 6要求在Task 2—5已实现后取得旧行为RED，时间顺序矛盾；将三条A浏览器验收先在Task 4实现前取得RED，再复用于Task 6候选GREEN。依据TDD及Web规格，错误代价是需重新调整测试安排，不改变产品行为。
+- **Ruling: 沉浸解除**：Task 4示例只toggle子域不足以证明普通剖开解除沉浸；按Web规格§4.1处理实际可见范围并用浏览器最终画面验收。若判断有误，代价为局部导航实现返工。
+- **Ruling: 状态来源**：用户明确禁止第二账本，因此SDD进展和裁定写入本既有计划；不创建progress.md。报告为证据附件，任务状态以本页为准。若解释有误，代价是记录位置调整，不影响产品事实。
+
+### 计划预检
+
+| 任务或共享项 | 生产／消费关系 | 裁定 |
+|---|---|---|
+| Task 1自身 | 输入意图和单一nested模式 | 已交付31/31；其余运行时清退归Task 4 |
+| Task 2自身 | 归一化→同一localStorage→设置控件 | 数值缺省、范围、重载与默认恢复需同源 |
+| Task 3自身 | 动态间隔→同目标仲裁→单／双意图 | 修饰键绕过；空白双击只退一次 |
+| Task 4自身 | A意图→普通／沉浸→父层 | 示例不替代沉浸解除合同，见裁定 |
+| Task 5自身 | 帮助／桌面／手机共同表达 | 保留编辑、魔杖、历史与详情 |
+| Task 6自身 | 真实浏览器RED→最终GREEN | RED前移至Task 4前，见裁定 |
+| Task 7自身 | 稳定候选→最终全量一次→部署回读 | 必须先集成本地main才能由既有服务部署；不自动push |
+| Task 1/4 | mode model与输入意图 | Task 4消费新意图并清除旧mode分支 |
+| Task 1/5 | input-config与描述 | Task 5清退可见旧键位，避免重新引入 |
+| Task 2/3 | engine读取secondaryNavigationDelayMs | 同一归一化字段供delayFor读取 |
+| Task 2/4 | engine设置与导航 | 设置代码只控制仲裁，不改结构事实 |
+| Task 2/5 | index、engine、mobile合同 | Task 5保留新增间隔设置及可访问控件 |
+| Task 2/7 | index构建标识 | 由build:browser机械生成 |
+| Task 3/4 | gesture、engine与意图 | 仲裁结果进入唯一A导航 |
+| Task 3/5 | engine输入与帮助 | 描述必须与真实仲裁一致 |
+| Task 4/5 | engine运行路径与移动端 | 移动端复用相同A动作 |
+| Task 4/6 | 导航实现与浏览器验收 | 预先RED，实际画面覆盖三旅程及沉浸解除 |
+| Task 5/6 | mobile测试与完整关键旅程 | 已通过证据同revision复用 |
+| Task 5/7 | index与公开入口 | 部署回读控件和真实浏览器行为 |
+| Task 6/7 | 总账、断点、稳定候选 | 阶段成果不冒充部署，最终才全量 |
+- **官方版本核对**：已读取官方 obra/superpowers main 的 .claude-plugin/plugin.json，version为6.3.0，与本机安装一致；未修改官方技能。
+- **现场收件**：只读核对“🔥🔥🔥ESG计划_按逻辑_atom”最近两轮；最新内容是用户定论整理，未发现槽体交付后新的正确合同复现。原封装body参数和旧延迟报告已有总账记录，不据旧现场消息重开P0。
+- **辅助工具**：Git Bash默认沙箱signal pipe拒绝，批准后官方sdd-workspace/task-brief已运行；GitNexus刷新使用--index-only，首次默认沙箱spawn EPERM，已切换获准运行。此为基础设施问题，不是产品RED。
+- **Ruling: 测试合同**：Task 3—5示例中的源码正则不能独自作为新功能RED/GREEN；依官方6.3.0 writing-good-tests，优先执行真实仲裁、模型及浏览器行为，既存结构合同只补充清退检查。若判断有误，代价为测试组织调整，不减验收范围。
+- **Task 4回读线索**：当前returnClusterToDepth访问未声明options；普通A展开后返回可能触达此分支。尚未复现，不写为已证实根因；Task 4按真实返回旅程取证，若触发则纳入同一导航最小修复。
+- **Task 2 RED**：node --test tests/spatial-demo-model.test.js tests/mobile-interaction-contract.test.js；首次沙箱worker spawn EPERM无有效结果，获准同命令重跑34项／29通过／5失败。失败对应secondaryNavigationDelayMs与updater缺失、accessible range缺失及完整设置快照缺新字段；尚未实现GREEN。现有engine secondary delay为620，动态消费归Task 3。
+- **索引故障**：GitNexus增量刷新失败于file_fts节点offset 842 missing，当前以官方--repair-fts修复派生索引；辅助索引缺口不代替产品RED，也不阻塞源码可确认的最小开发链。
+- **Task 2初次GREEN**：实现方回报同一focused链34/34、0失败。自审发现额外加入计时包装器，提前承担Task 3的动态仲裁职责；控制方要求按Task 2范围移回既有计时行为，再定向验证后提交。此34/34仅属于该中间状态，尚不裁定Task 2完成。
+- **Task 2提交／复核**：2faf49b，34/34 PASS、两项node --check通过；5文件6符号LOW，提交包含范围归位后的设置链。实现方a_task2，独立评审a_task2_review进行中。
+- **索引恢复**：官方FTS repair成功后，因前次未完成标记自动完整重建；43.5秒成功，6916节点、19072边、300flows，--index-only未改任何跟踪文件。Task 3影响：createSecondaryClickArbiter无索引调用者（源码有engine调用，需人工核对）；commitPointerCandidate上游4项、直接releasePointer，风险LOW，包含手机release入口。
+- **Task 2评审**：a_task2_review给出Spec可见范围合规、quality Approved；三项跨差异待核对为恢复默认、持久化重载、Task 3动态消费。控制方回读确认updateDemoSettings归一化→saveDemoSettings→syncPresentationControls且单一key；动态消费明确属于Task 3。
+- **Task 2 fix round 1/5**：控制方核实index/engine不存在通用设置恢复入口，故“恢复默认”是Web规格§5.2真实缺口，不接受Task 2完成。Ruling: 依规格补单字段恢复默认按钮及真实浏览器设置→重载→恢复→再次重载旅程；扩展tests/browser/mobile-control-panel.spec.mjs是最小验收链，错误代价为撤回局部UI和测试，不影响Graph。实现方沿用a_task2，FIX_BASE=2faf49b。
+- **A缩小字段回读**：index.html的peripheralDepthShrink实际已标为“A 子层节点缩小”，spatial-cluster-field.js:748在nested路径消费其缩放；它属于Web规格§5.1保留能力，不是仅凭旧变量名即可删的S死配置。Task 4/5清退按可达行为判定，保留该有效A控件。
+- **Task 2修复RED**：真实Chromium唯一具名设置旅程在调值515→output同步→reload仍515之后，点击“恢复右键沉浸连击间隔默认值”超时，1 failed；缺按钮得到直接行为证据。产物task-2-reset-red保留在本计划工作区；此前序同时补齐重载持久化证据。
+- **部署前只读边界**：4784 health当前ok:true、revision7361、atomProjection.status=published；它是现行主干状态，不冒充A候选部署。Get-ScheduledTask默认沙箱拒绝访问，仅限制任务管理读取，实际部署阶段按已有受控入口请求必要系统执行权限。
+- **Task 7接口校准**：当前公开health投影字段为atomProjection.status，浏览器build需从公开HTML资源标识回读；按实际字段核对，不以计划示意的projectionStatus顶层键构造假失败。
+- **Task 2修复GREEN**：Chromium唯一旅程1 passed（11.3s），初始420、调515同步、reload保留、按钮恢复420、defaultDetailMode=surface不变、再次reload持久且其他设置守恒。两次中间运行暴露测试getByLabel歧义与重载面板关闭，定向修正角色定位／重开面板后通过，不作为产品失败或静默忽略。下一步原34项及提交后范围复审。
+- **Task 2: complete**：4c9cf2f..4c27d4b；原设置链34/34，重载／单字段恢复Chromium1/1。a_task2_rereview已按精确差异包完成范围复审，全部问题解决且无新增破坏。首次相对路径漏读差异包已纠正，未重复测试。
+- **生产急件切换**：收到改名判重→瞻重回执同时出现PROJECTION_RECOVERY_PENDING与WINDOW_ACCESS_DENIED的新现场证据；按总账优先规则核查权威提交与权限目标。A模式Task3尚未开始，现有代码保存于4c27d4b，未部署；急件处理后从Task3继续，不重新执行Task2。
+
+- **2026-09-05续接**：改名修复1727/1727、复核和4784部署回告完成，main@abbc5ed。手机当前无握手且离线、无线ADB不可达，保持未解决；按用户局部阻塞不全局停工授权，安全吸收main并从Task 3继续。总账合并冲突只涉及旧优先级和A阶段描述，保留最新手机优先级及Task 2完整证据；不改产品定论。
+
+- **Task 3进行中**：a_task3实现方，BASE=3231d71；impact为LOW，createSecondaryClickArbiter直接测试调用1、commitPointerCandidate直接releasePointer，源码核对索引缺口，不把辅助图当最终结论。
+- **Task 6前置RED**：在Task 4实现前，真实Chromium三条命名旅程3/3 FAIL：普通单击仍只见父团/团外旁侧；双击path仍root；空白返回旅程在进入前提失败。后者尚未证明返回自身缺陷。产物保留在本计划工作区task-6-before-task4-red，后续复用测试验证导航实现，不重做旧行为RED。
+
+- **Task 3 RED/GREEN**：默认沙箱spawn EPERM不计结果；获准执行仲裁/gesture链37项，RED为34通过/3失败（delayFor未用、engine固定620、尚未submit），实现后37/37 PASS。实现方自审及提交进行中，未替代独立任务复核。
+
+- **Task 3: complete**：3231d71..07b55b5，37/37 PASS，a_task3_review规格合规且quality Approved，无分级问题。跨任务最终画面项归Task 4，由已建立的三条浏览器旅程及沉浸解除验收，不据仲裁单测冒称导航完成。
+
+- **Task 4 RED与影响**：a_task4新增三项定向RED：旧immersive参数使batch仅clicked、recursive为空，dispatch缺A意图。returnClusterToDepth HIGH（1直接/15总）、returnToDepth HIGH（3/16）、dispatchIntent HIGH（9/11）、openClusterChildDomain HIGH（4/20），已向用户告知；风险覆盖共享Web导航，后续用真实进入/返回/普通解除沉浸旅程裁定。此前三条浏览器RED被重复一次，控制方已纠正为复用同revision证据，不再重跑旧失败。
+
+- **Task 4定向结果**：单元77/77通过；首轮五条浏览器旅程3/5，双击沉浸、空白单层返回、A键不退出通过。普通剖开自动frameClusterDomain把团外旁侧移出画面，须先定向修复；沉浸后普通剖开旅程首次进入不稳定仍在查，不冒称完成。toggleClusterChildDomain上游CRITICAL（2直接/18总）已告知用户，修复只作用于当前导航链。
+
+- **Task 4浏览器证据校准**：普通剖开保留团外已通过；两次独立CDP click在负载下跨过420ms导致单击提交，改原生mouse.dblclick保持产品间隔不变。后续page.goto／test 30s超时是未形成有效结果，须核查测试服务与加载等待；同一产品revision每条已有有效行为证据复用，不为整组全绿外观反复重跑。
