@@ -8,11 +8,13 @@
 
 ## 2026-09-05 当前执行断点
 
-- **当前第一优先**：用户要求先解决旧版本子树移动/归档失败。工单922cf490-8f6d-45a7-b2e8-f2b8afd02ebf，关联b7fc5c3e-528e-422b-8578-8e8fd9e9b8eb；目标🧊manage/办包/究谋/个务/外务/旧版本。纯dsc逐后代slot鉴权碰到封装槽模SLOT_STRUCTURE_LOCK_DENIED，被包装WINDOW_ACCESS_DENIED；同树mov内存通过，生产未写。用户已对“整体归档按合法所选根裁定、保留结构/权限/唯一备份仓/引用/恢复”明确答“可以按这个修复”，强调合法上级无需逐个申请后代编辑权。专项计划2026-09-05-ancestor-discard.md已实施首补丁b575913，独立main候选3349cfb具名3/3通过；真实私有副本仍被历史备份关系owner的窗口写权限误挡，正在修复纯dsc/rst机械引用维护。更高权限子Agent恢复存在独立缺口；已证明备份声明可改，否决仅依据当前备份声明的权限豁免，尚未改engine。不得为manage名称加旁路或退役无关锁。
+- **最新覆盖断点**：main文档到b20bc69，生产代码仍8b2df30，health7382/published。可信恢复b1fbb11已32/32通过，当前原实施方只修独立评审的reader故障诊断Important；之后范围复审。独立旧main候选5fcb4c0在完整真实历史副本归档430节点成功，冷恢复实际提交但HTTP15秒超时、总耗时23秒；证明来源/后续分离是本次交付必要依赖。先完成此小修→原Transform Task3剩余12项定向回修→组合真实验收/最终门禁/复核/部署/来源回告→手机共同配置。保留独立候选作为证据，不继续旧main旁路性能改造。最近GitHub push及ls-remote均网络失败，不能宣称最新提交已远端备份。
+
+- **当前第一优先**：用户要求先解决旧版本子树移动/归档失败。工单922cf490-8f6d-45a7-b2e8-f2b8afd02ebf，关联b7fc5c3e-528e-422b-8578-8e8fd9e9b8eb；目标🧊manage/办包/究谋/个务/外务/旧版本。纯dsc逐后代slot鉴权碰到封装槽模SLOT_STRUCTURE_LOCK_DENIED，被包装WINDOW_ACCESS_DENIED；同树mov内存通过，生产未写。用户已对“整体归档按合法所选根裁定、保留结构/权限/唯一备份仓/引用/恢复”明确答“可以按这个修复”，强调合法上级无需逐个申请后代编辑权。专项计划2026-09-05-ancestor-discard.md的executor补丁b575913/6fed2fd已独立复核通过，16/16；独立main候选11573e1的真实私有副本归档430节点成功，冷读守恒，但原位恢复被PROGRAM_FUNCTION_DELEGATION_DENIED拒绝。已否决以可改写的当前备份声明作权限证明；原Task1正在沿同一已批准可逆恢复目标，以原中央discard patch/snapshot提供可信原声明证明，限定persistence/adapter/engine按需接线。不得为manage名称加旁路或退役无关锁。
 - **Transform候选**：隔离分支fix/transform-postcommit-boundary，代码b9802de。Task1、原Task2及新增生命周期664ed94/b9802de均复核通过；业务完整终态先持久记录，独立有限预算，投影及晚到对象不能降级，真实中断/worker失败/EIO分别处理。82项与回修15项证据完整。
   - **最终门禁**：Task3 _03仅Windows spawn EPERM，无来源写；获准提升后的_04真实副本全部GREEN（12117节点/760 Strut/4 refs，来源/立即exact/同idcompleted/四轴/冷回读，源hashf92b…相同）。development-control通过；最终npm已结束，1781总数/1769通过/12失败，902237.8739ms。完整原报告保留在Task3 SDD目录，尚未回修或部署。原Task3暂停，不重派已完成任务；优先归档修复后统一处理必要回归与最终交付。
 - **安全备份与生产**：远端核对main=10e2844、fix/transform-postcommit-boundary=be2e19d、feat/a-mode-consolidation=f49ed32；b9802de及之后尚未推送。仅代码/文档备份，私密世界未推送。现行Atom Graph Runtime为计划任务直接node启动main/graph-server，4784仅loopback、PID4332。最新health7372/published；部署前重新核对当前世界及完整journal一致快照。
-- **CLI反馈边界**：用户要求完整、严密评估CLI需求/bug，不能忽略，也不能把submit当新需求直接实施。涉及内核改造先提供具体事实/方案取得用户意见；本次归档已获明确许可，其他反馈不共享该许可。复用2026-09-02-atom-cli-feedback-triage.md，旧45条已有历史裁定，新增条目尚待本轮完整读取/评估；不复制history到公开仓。来源任务“调整manage判重为资源中心”已获只读接单说明，最终结果仍须回告。
+- **CLI反馈边界**：用户要求完整、严密评估CLI需求/bug，不能忽略，也不能把submit当新需求直接实施。涉及内核改造先提供具体事实/方案取得用户意见；本次归档已获明确许可，其他反馈不共享该许可。复用2026-09-02-atom-cli-feedback-triage.md，旧45条已有历史裁定，本轮全部52条detail已全文评估并更新原裁定页，7条新增逐项映射，复合旧反馈的业务/模板/文档需要保全，未将评估完成当全部缺陷已解决；不复制history到公开仓。来源任务“调整manage判重为资源中心”已获只读接单说明，最终结果仍须回告。
 - **继续顺序**：归档独立候选验证/交付/回告（仅合入实际必要依赖）→Transform剩余必要修复→手机共同配置及真实边框→5个旧生成print迁移→A Task5—7→唯一总账余项。用户已确认手机连上，边框0来自各浏览器localStorage隔离；55/35仅测试值，本机真实值尚未知，文本问题可选待答。手机两任务计划已准备未实施；A已完成1—4/f49ed32不重做。阶段汇报不停止持续执行；产物零删除、有效规格全保留。
 
 以下为历史恢复记录，当前优先级和状态以本节及唯一总账为准。
