@@ -369,3 +369,5 @@
 - **旧打印盘点更新**：生产只读5个旧调用候选中2活跃、3已显式备份停用；Task1严格核验未完成，不能仍称5个都需生产迁移。停用历史不改。
 
 - **打印Task1来源裁定修正**：16d6f6c内存probe暴露根Agent白名单过窄；现有祖先路径维护更新了main.body，修订快照保留旧body。允许仅current layout.bodyPath或已核验plan.body两值，不放宽其他生成源码条件；Task1审查/回修中，生产零写入。
+
+- **打印Task1完成**：46e7772独立复审Approved、6/6；真实事实内存probe严格选中2活跃项，其他facts/header/source bytes守恒。Task2由generated_print_task2实现维护入口，root准备完整私密副本验收；生产未迁移。

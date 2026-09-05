@@ -6,7 +6,7 @@
 
 ## 当前恢复断点（2026-09-06）
 
-- **当前实施**：旧生成print迁移Task1已在.worktrees/generated-slot-print-migration、fix/generated-slot-print-migration@66cff49启动，实施Agent /root/generated_print_task1（Sol high）。槽体最小基线9/9通过；仅新增纯planner与测试，不改生产或内核。共同展示配置已部署c8c66f1，正式settings仍revision0/uninitialized，原本机参数和真机入口待取得，局部验收保持未关闭。
+- **当前实施**：旧生成print迁移Task1@46e7772已6/6及限定复审通过，当前生产事实内存probe恰2活跃项、全事实与header守恒且零生产写入。Task2实施Agent /root/generated_print_task2（Sol high），工作树generated-slot-print-migration。root准备同当前事实/日志的完整私密副本作真实print/冷重启/回滚验收。共同设置已部署c8c66f1，真实基准与真机入口仍待取得。
 - **保存交付**：e82984d正式HTTPS三份前端资源逐字节匹配；实际Enter后350ms显示正在保存，受控失败后显示失败。全部写请求拦截，此验收零生产写入。独立审查通过，1802项有效全量结果加唯一清理hook修正后1/1定向通过；不声称单次1803全绿。详情见原Task7报告及本文末交付证据。
 - **真实缺口**：本次CUA仍仅有无标签页的内置浏览器，实际本机参数与手机屏幕不可读；不把55/35测试值写生产，不把桌面模拟视口称真机。只阻塞实际基准核对与真机闭环，隔离实现继续。
 - **持续执行**：atom-2已ACTIVE、每30分钟；用户定义与Atom框架优先，困难时允许临时Astra高级咨询，意见须独立判断。新内核改造须用户反馈。移动归档已交付并回告提出方，不重做。
