@@ -254,8 +254,8 @@ export async function createSpatialServer(options = {}) {
       if (!['completed', 'failed'].includes(result?.subsequentExecution?.status)) return;
       clearTimeout(timeout);
       businessPhase = 'settled';
-      durableBusinessResult = result;
-      entry.receipt = Promise.resolve(result);
+      durableBusinessResult = structuredClone(result);
+      entry.receipt = Promise.resolve(durableBusinessResult);
       settle(result);
     };
     armBusinessDeadline('source');
@@ -267,9 +267,29 @@ export async function createSpatialServer(options = {}) {
         operationResult.then(result => {
           // The first caller keeps its source acknowledgement. Later reads see
           // the completed operation, including completion after the deadline.
-          const final = durableBusinessResult ? { ...result,
-            ok: durableBusinessResult.ok, errors: durableBusinessResult.errors,
-            subsequentExecution: durableBusinessResult.subsequentExecution } : result;
+          let final = result;
+          if (durableBusinessResult) {
+            final = { ...durableBusinessResult };
+            const projectionRevision = result?.projectionRecovery?.expectedRevision ?? result?.revisionAfter;
+            if (projectionRevision && projectionRevision === durableBusinessResult.revisionAfter) {
+              for (const field of ['projectionStatus', 'projectionRecovery', 'projectionFailure']) {
+                if (Object.hasOwn(result, field)) final[field] = result[field];
+              }
+            }
+            const auxiliaryWarnings = (result?.warnings ?? []).filter(warning => {
+              if (['ATOM_COMMITTED_NOTIFICATION_FAILED', 'ATOM_SUBSEQUENT_NOTIFICATION_FAILED'].includes(warning.code)) {
+                const correlationId = warning.correlationId ?? warning.details?.correlationId;
+                return typeof correlationId === 'string' && correlationId === durableBusinessResult.interactionId;
+              }
+              const warningRevision = warning.details?.expectedRevision ?? projectionRevision;
+              return ['PROJECTION_RECOVERY_PENDING', 'PROGRAM_PROJECTION_RECOVERY_PENDING', 'PROGRAM_PROJECTION_PERSIST_FAILED'].includes(warning.code)
+                && typeof warningRevision === 'string' && warningRevision === durableBusinessResult.revisionAfter;
+            });
+            if (auxiliaryWarnings.length) {
+              final.warnings = [...new Map([...(durableBusinessResult.warnings ?? []), ...auxiliaryWarnings]
+                .map(warning => [JSON.stringify(warning), warning])).values()];
+            }
+          }
           entry.receipt = Promise.resolve(final);
           settle(final);
         }, () => undefined);

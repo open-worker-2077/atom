@@ -797,6 +797,7 @@ async function persistChangedGraph({
 }
 
 async function notifyCommittedSafely(options, result) {
+  if (typeof options.onCommitted !== 'function') return [];
   try {
     await options.onCommitted(structuredClone(result));
     return [];

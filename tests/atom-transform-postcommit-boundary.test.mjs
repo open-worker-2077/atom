@@ -31,6 +31,22 @@ function nameOf(value) {
   return Object.entries(value).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
 }
 
+test('a terminal-only engine callback never reports a missing source notification callback as failure', async (t) => {
+  const files = await fixture(t, 'def receive(delivery):\n    return True\ntrigger("strut", {}, receive)');
+  const persistence = createTransactionalWorldPersistence(files);
+  let notifications = 0;
+  const result = await executeAtomLanguageKernel({ ...files,
+    source: 'transform {"thing":"Source","situation.rep.after":"before"}',
+    interaction: { id: 'terminal-only-callback' }, programMode: 'reconcile',
+    programScheduler: createProgramRuntimeScheduler(), commitWorld: transition => persistence.commit(transition),
+    onSubsequentSettled(value) { notifications += 1; assert.equal(value.subsequentExecution.status, 'completed'); }
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(notifications, 1);
+  assert.equal(result.warnings.some(({ code }) => code === 'ATOM_COMMITTED_NOTIFICATION_FAILED'), false);
+  assert.equal(find(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Source').situation, 'after');
+});
+
 test('a worker runtime timeout is a final business failure and same-id reread never reruns it', async (t) => {
   const files = await fixture(t, 'def receive(delivery):\n    while True:\n        pass\ntrigger("strut", {}, receive)');
   const request = { ...files, source: 'transform {"thing":"Source","situation.rep.after":"before"}',
@@ -751,18 +767,19 @@ test('two services join a committed pending interaction and keep one source and 
   const files = await fixture(t, 'def receive(delivery):\n    transform({"thing":"Result","situation.rep.after":"before"})\ntrigger("strut", {}, receive)');
   const request = { ...files, source: 'transform {"thing":"Source","situation.rep.after":"before"}',
     interaction: { id: 'concurrent-service' }, programMode: 'reconcile' };
-  let release, notify;
+  let release, notify, firstTerminal;
   const blocked = new Promise(resolve => { release = resolve; });
   const committed = new Promise(resolve => { notify = resolve; });
   const first = createLegacyWorldService().executeLegacy({ ...request, programScheduler: createProgramRuntimeScheduler(),
-    async onCommitted(result) { notify(result); await blocked; } });
+    async onCommitted(result) { notify(result); await blocked; },
+    onSubsequentSettled(result) { firstTerminal = result; } });
   await committed;
   const second = await createLegacyWorldService().executeLegacy({ ...request, programScheduler: createProgramRuntimeScheduler() });
   assert.equal(second.subsequentExecution.status, 'pending');
   let joinedNotification, joinedTerminal;
   const joined = createLegacyWorldService().executeLegacy({ ...request, programScheduler: createProgramRuntimeScheduler(),
     onCommitted(result) { joinedNotification = result; },
-    onSubsequentSettled(result) { joinedTerminal = result; } });
+    onSubsequentSettled(result) { joinedTerminal = result; return Promise.reject(new Error('joined listener unavailable')); } });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(joinedNotification?.subsequentExecution.status, 'pending');
   release();
@@ -770,6 +787,9 @@ test('two services join a committed pending interaction and keep one source and 
   assert.equal(final.subsequentExecution.status, 'completed');
   assert.equal((await joined).subsequentExecution.status, 'completed', 'a joined HTTP lifecycle must not settle permanently on pending');
   assert.equal(joinedTerminal?.subsequentExecution.status, 'completed');
+  assert.equal(firstTerminal.warnings.some(({ code }) => code === 'ATOM_SUBSEQUENT_NOTIFICATION_FAILED'), false);
+  assert.ok(final.warnings.some(({ code, correlationId }) => code === 'ATOM_SUBSEQUENT_NOTIFICATION_FAILED'
+    && correlationId === request.interaction.id));
   const journal = createJsonTransactionJournal({ file: path.join(path.dirname(files.contextFile), 'atom.transactions.json') });
   const state = await journal.readState();
   assert.equal(state.receipts.filter(({ receipt }) => receipt.correlationId === request.interaction.id).length, 1);

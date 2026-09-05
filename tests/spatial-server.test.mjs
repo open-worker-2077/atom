@@ -9,6 +9,56 @@ import { childDomainPath } from '../cli/lib/probe.mjs';
 import { VERSION } from '../cli/lib/version.mjs';
 import { createAtomGraphHandlers } from '../work-engine/atom-language/graph-server.mjs';
 
+for (const lateKind of ['stale', 'failed']) {
+  test(`HTTP preserves complete durable business evidence after a different late ${lateKind} result`, async (context) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-durable-result-'));
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const durable = { ok: true, changed: true, command: 'transform', interactionId: `durable-${lateKind}`,
+      revisionBefore: 'before-revision', revisionAfter: 'effects-revision',
+      result: { path: 'Result', situation: 'after' }, results: [{ result: { path: 'Result' } }],
+      affectedPaths: ['Source', 'Result'], lockState: [{ path: 'Result', owner: 'Subscriber' }],
+      messages: ['business message'], archive: { originalPath: 'Source' },
+      warnings: [{ code: 'BUSINESS_WARNING', message: 'preserve business diagnostic' }], errors: [],
+      subsequentExecution: { status: 'completed', sourceRevision: 'source-revision', revisionAfter: 'effects-revision', errors: [] } };
+    const projectionWarning = { code: 'PROJECTION_RECOVERY_PENDING', message: 'current projection unavailable',
+      details: { expectedRevision: 'effects-revision' } };
+    const notificationWarning = { code: 'ATOM_SUBSEQUENT_NOTIFICATION_FAILED',
+      message: 'joined listener rejected after terminal publication', cause: 'listener unavailable', correlationId: durable.interactionId };
+    const projectionFields = { projectionStatus: 'pending', projectionRecovery: { expectedRevision: 'effects-revision' },
+      projectionFailure: { projection: 'publisher', cause: 'PROJECTION_UNAVAILABLE' } };
+    let calls = 0;
+    const instance = await createSpatialServer({ root: path.resolve(import.meta.dirname, '..'),
+      storeFile: path.join(directory, 'knowledge.json'), async atomCommand(payload, { onCommitted, onSubsequentSettled }) {
+        calls += 1;
+        await onCommitted({ ...durable, revisionAfter: 'source-revision', subsequentExecution: { status: 'pending' } });
+        await onSubsequentSettled(durable);
+        await gate;
+        return { ok: lateKind !== 'failed', changed: false, command: 'stale-command', interactionId: 'wrong-id',
+          revisionBefore: 'wrong-before', revisionAfter: 'source-revision', result: null, results: [],
+          affectedPaths: ['Source'], lockState: [], messages: [], archive: null,
+          subsequentExecution: { status: lateKind === 'failed' ? 'failed' : 'pending' },
+          errors: [{ code: 'LATE_FAILURE' }], ...projectionFields,
+          warnings: [{ code: 'ATOM_SUBSEQUENT_EXECUTION_PENDING' }, projectionWarning, notificationWarning,
+            { ...notificationWarning, correlationId: 'another-interaction' },
+            { code: 'PROJECTION_RECOVERY_PENDING', details: { expectedRevision: 'obsolete-revision' } }] };
+      } });
+    await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
+    context.after(() => { release(); return new Promise(resolve => instance.server.close(resolve)); });
+    const post = async () => (await fetch(`http://127.0.0.1:${instance.server.address().port}/__atom/api/command`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ source: 'transform source', interaction: { id: durable.interactionId } })
+    })).json();
+    await post();
+    assert.deepEqual((await post()).result, durable);
+    release();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual((await post()).result, { ...durable, ...projectionFields,
+      warnings: [...durable.warnings, projectionWarning, notificationWarning] });
+    assert.equal(calls, 1);
+  });
+}
+
 for (const terminalStatus of ['completed', 'failed']) {
   test(`HTTP ${terminalStatus} successor owns a fresh bounded phase and settles before projection`, async (context) => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-atom-phase-'));
