@@ -270,7 +270,7 @@ The first call lives in the slot-body Program itself. The second call is used by
 
 Record RED, GREEN, focused counts, CLI paths, restart evidence, commit, deployment revision, and remaining defects immediately in the existing ledger/checkpoint. Do not document whiteboard as implemented.
 
-- [ ] **Step 7: Run the final candidate gate once**
+- [x] **Step 7: Run the final candidate gate once**
 
 Run:
 
@@ -280,6 +280,8 @@ git diff --check
 ```
 
 Expected: zero failures. If a test fails, diagnose that exact failure; do not repeat the whole suite until the candidate changes.
+
+Final candidate evidence: `npm test` completed with `1717/1717 PASS`, zero failures, duration `389891.3237 ms`; `git diff --check` returned no errors. The suite was run once after the targeted fixes, without another redundant full review.
 
 - [ ] **Step 8: Commit, integrate, deploy, and read back**
 
