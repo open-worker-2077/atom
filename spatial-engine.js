@@ -78,6 +78,7 @@
     defaultDetailMode: document.getElementById("defaultDetailMode"),
     secondaryNavigationDelay: document.getElementById("secondaryNavigationDelay"),
     secondaryNavigationDelayValue: document.getElementById("secondaryNavigationDelayValue"),
+    secondaryNavigationDelayReset: document.getElementById("secondaryNavigationDelayReset"),
     zoomSpeed: document.getElementById("zoomSpeed"),
     zoomSpeedValue: document.getElementById("zoomSpeedValue"),
     relationshipLineWidth: document.getElementById("relationshipLineWidth"),
@@ -8513,6 +8514,13 @@
     updateDemoSettings(demoModel.withSecondaryNavigationDelayInput(
       state.demo.settings,
       ui.secondaryNavigationDelay.value
+    ));
+  });
+
+  ui.secondaryNavigationDelayReset.addEventListener("click", () => {
+    updateDemoSettings(demoModel.withSecondaryNavigationDelayInput(
+      state.demo.settings,
+      ui.secondaryNavigationDelay.defaultValue
     ));
   });
 
