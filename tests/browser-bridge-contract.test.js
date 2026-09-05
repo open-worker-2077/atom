@@ -172,6 +172,89 @@ test('Atom Web reports semantic persistence confirmation and failure instead of 
   }
 });
 
+test('human status persistence reports the matching terminal receipt without turning failure or pending into success', async () => {
+  const cases = [
+    {
+      name: 'persisted',
+      payload: { result: { ok: true }, knowledge: { revision: 2, nodes: [] } },
+      responseOk: true,
+      expectedResult: true,
+      expectedType: 'spatial-workspace-persisted'
+    },
+    {
+      name: 'projection-pending',
+      payload: { result: { ok: true, projectionStatus: 'pending' } },
+      responseOk: true,
+      expectedResult: true,
+      expectedType: 'spatial-workspace-projection-pending'
+    },
+    {
+      name: 'persist-failed',
+      payload: { ok: false, error: { message: 'status rejected' } },
+      responseOk: false,
+      expectedResult: false,
+      expectedType: 'spatial-workspace-persist-failed'
+    }
+  ];
+
+  for (const scenario of cases) {
+    const listeners = new Map();
+    const lifecycle = [];
+    const previousKnowledge = {
+      revision: 1,
+      nodes: [{ key: 'root::status', atomPath: 'Root/状态', label: '状态', detail: '待处理' }]
+    };
+    const operation = {
+      kind: 'node-edit',
+      nodeKey: 'root::status',
+      node: { atomPath: 'Root/状态' },
+      draft: { label: '状态', description: '进行中' }
+    };
+    const response = (payload, ok = true) => ({ ok, json: async () => payload });
+    const document = { body: { dataset: {} }, hidden: false };
+    const window = {
+      location: { hostname: '127.0.0.1', protocol: 'http:' },
+      spatialLab: {
+        state: () => ({ transactionActive: false }),
+        importKnowledge: () => true,
+        exportField: () => ({ path: 'root' })
+      },
+      CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init.detail; } },
+      dispatchEvent: (event) => { lifecycle.push(event); return true; },
+      fetch: async (url, options = {}) => {
+        if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+        if (url.includes('/state') && !options.method) return response({ knowledge: previousKnowledge });
+        if (url.endsWith('/human-status')) return response(scenario.payload, scenario.responseOk);
+        return response({ result: {} });
+      },
+      addEventListener: (name, listener) => listeners.set(name, listener),
+      setInterval: () => 0
+    };
+    window.window = window;
+    vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+    await new Promise((resolve) => setImmediate(resolve));
+    lifecycle.length = 0;
+
+    const result = await listeners.get('spatial-workspace-committed')({ detail: {
+      persistenceId: 23,
+      operation,
+      knowledge: {
+        revision: 1,
+        nodes: [{ ...previousKnowledge.nodes[0], detail: '进行中' }]
+      }
+    } });
+
+    assert.equal(result, scenario.expectedResult, scenario.name);
+    assert.equal(lifecycle.length, 1, scenario.name);
+    assert.equal(lifecycle[0].type, scenario.expectedType, scenario.name);
+    assert.equal(lifecycle[0].detail.persistenceId, 23, scenario.name);
+    assert.deepEqual(JSON.parse(JSON.stringify(lifecycle[0].detail.operation)), operation, scenario.name);
+    if (scenario.name === 'persisted') {
+      assert.equal(lifecycle[0].detail.knowledge.revision, 2);
+    }
+  }
+});
+
 test('initial Atom load exposes separate service, data, and scene progress checkpoints', async () => {
   const progressElements = Object.fromEntries([
     'spatialProgressOverall',

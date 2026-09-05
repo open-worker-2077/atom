@@ -126,13 +126,26 @@ Task7保存可见反馈优先实施，I0/U0/D1/E3；移动已交付，手机共�
 
 **Spec:** Web §3.1；用户纠正此项是既有缺陷，不是新需求。点击保存后显示非阻塞提示框，目标5秒内至少有反应；不要求提交5秒内完成。
 
-**Files:** spatial-engine.js、index.html、spatial.css；聚焦 tests/browser/save-feedback.spec.mjs；必要时既有 editor/bridge 合同测试。
+**Files:** spatial-engine.js、index.html、spatial.css；聚焦 tests/browser/save-feedback.spec.mjs；必要时 spatial-browser-bridge.js 与既有 editor/bridge 合同测试。
+
 
 **Interfaces:** 复用 spatial-workspace-committed、persisted、projection-pending、persist-failed 与 persistenceId。现有 announce 仅写入 sr-only ariaLive，普通画面不可见。保存开始立即显示“正在保存”，随后真实回执驱动成功/失败/事实已保存但投影待恢复；旧回执不得覆盖更新的保存状态。维持读屏反馈，不把全部导航公告都变成屏幕弹窗。
 
 - [x] **Step 1: RED**：真实浏览器点保存，受控延迟持久化响应，断言可见进行中提示（5秒目标），再验证成功/失败/投影待恢复状态；旧版本应因不可见失败。真实 Chromium RED `3/3 failed`，均为`#saveStatus`在4.5秒内不存在；截图、error-context与trace保存于Task7专属artifacts。
 - [x] **Step 2: Minimal GREEN**：增加可见非阻塞状态框，复用原持久化事件和编号；不改服务器、Graph、权限、提交或后续运行语义。移动成功、桌面失败、投影待恢复/旧回执隔离已分别`1/1 PASS`；首轮GREEN暴露的成功响应和过期回执测试夹具错位已限于测试修正，未扩改产品语义。
-- [ ] **Step 3: Verify**：聚焦浏览器及编辑/桥接受影响链；build与既有开发控制门禁；最终候选全量一次，原revision证据不重复运行。独立任务与整分支审查。
+- [x] **Step 3: Verify**：聚焦浏览器及编辑/桥接受影响链；build与既有开发控制门禁；最终候选全量一次，原revision证据不重复运行。独立任务与整分支审查。
 - [ ] **Step 4: Deliver**：仅已审查候选受控部署，公共入口回读实际静态资源，浏览器确认可见提示；保全生产快照、私有证据、既有功能与测试产物。随后原手机Task2从RED继续。
 
-- **软件更新前暂停断点（2026-09-05）**：按用户要求已停止后续测试、提交、审查与产品改动；当前无4796浏览器验收服务监听。工作树保留未提交`index.html`、`spatial-engine.js`、`spatial.css`、`tests/browser/save-feedback.spec.mjs`与本计划更新；Task7私有报告与浏览器artifacts在`.superpowers/sdd/2026-09-01-atom-web-bug-patrol/`保留。恢复后第一步是同一次运行三条聚焦Playwright；通过后再跑编辑/桥接、build、development-control、`detect_changes`与最终全量一次。
+- **历史软件更新前暂停断点（2026-09-06）**：按用户要求已停止后续测试、提交、审查与产品改动；当前无4796浏览器验收服务监听。工作树保留未提交`index.html`、`spatial-engine.js`、`spatial.css`、`tests/browser/save-feedback.spec.mjs`与本计划更新；Task7私有报告与浏览器artifacts在`.superpowers/sdd/2026-09-01-atom-web-bug-patrol/`保留。恢复后第一步是同一次运行三条聚焦Playwright；通过后再跑编辑/桥接、build、development-control、`detect_changes`与最终全量一次。
+
+- **已恢复断点（2026-09-06）**：用户完成软件更新后明确“继续”；已核对保留的Task7报告、RED/GREEN产物和未提交产品diff，不重跑RED或三条已有效定向测试。当前从同一次聚焦Playwright合并运行继续；通过后依次执行编辑/桥接、build、development-control、`detect_changes`与最终全量一次。
+- **恢复后聚焦进度**：首次合并运行`2 passed / 1 timed out`；投影用例已看到正确可见正文，之后在同元素`data-state="pending"`断言前撞到30秒用例总时限。该用例单跑26.0秒已通过；只将受控慢回执用例预算提高至60秒，产品diff不变。
+- **聚焦候选证据**：同revision合并运行中移动成功与桌面失败`2/2 PASS`，60秒预算修订后投影待恢复/旧回执隔离定向`1/1 PASS`（31.9秒）；5秒内可见反馈断言未放宽。根据验证复用规则不再重跑已通过的前两条，现进入编辑/桥接受影响链。
+- **受影响链证据**：`editor-ui`、`editor-engine`、`spatial-workspace-model`与`browser-bridge`合同`120/120 PASS`；`npm run build:browser`与`npm run check:development-control`均退出0。当前准备`detect_changes`与阶段提交固定候选，随后仅运行一次最终全量。
+- **变更影响回读**：GitNexus `detect_changes(scope: staged)`在显式worktree上返回medium：5个文件、6个已索引符号、1条`ExecuteDemoEditing → ExportKnowledge`流程。索引仍存在63 commits陈旧限制；结合缓存diff与120条受影响合同审核，未把空流程当作无风险证据。
+- **审查回修**：任务级审查发现`human-status`成功分支缺少`spatial-workspace-persisted`回执，会使可见状态停留在“正在保存”。旧候选全量在连续通过输出中主动终止，不计产品失败；bridge VM合同先以事件数`0 !== 1`取得RED，再补同一`persistenceId`、`operation`和最新`knowledge`回执，定向`1/1 PASS`，失败与投影待恢复仍只发各自原回执。
+
+
+- **当前候选**：e430f11（含14f9dff），状态回执遗漏已复审通过，31/31桥接合同及build/control通过；新候选全量和整分支审查进行中。吸收main仅整合软件暂停/恢复与用户模型咨询文档，产品与测试字节不变。
+
+- **最终验证（2026-09-06）**：a133ae6范围复审通过；文档整合4dddacf全量1802/1803，唯一ENOTEMPTY为测试fixture递归清理竞态。ea0960f仅删除该清理hook，资源关闭与业务断言保留，定向1/1通过、退出0；产品与审定候选一致。原始日志及哈希在Task7报告保留，根Agent独立裁定组合证据闭环，不宣称单次全绿。部署和正式入口回读待执行。
