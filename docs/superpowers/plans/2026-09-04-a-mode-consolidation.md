@@ -169,7 +169,7 @@ git commit -m "feat(web): configure immersive right-click interval"
 - Consumes: `settings.secondaryNavigationDelayMs`与`candidateArbiterKey(candidate)`。
 - Produces: `createSecondaryClickArbiter({ delayFor, setTimer, clearTimer, commitSingle, commitDouble })`；`submit(singleAction, doubleAction, signature)`在同一 signature 窗口内只提交 double，超时只提交 single。
 
-- [ ] **Step 1: Write failing dynamic-delay and exact-signature tests**
+- [x] **Step 1: Write failing dynamic-delay and exact-signature tests**
 
 ```js
 let delayMs = 420;
@@ -188,13 +188,13 @@ assert.deepEqual(commits, [['double', 'applyImmersiveInwardView']]);
 
 Add a field case proving two submissions of `field:root/a` commit exactly one `applyParentView`, plus a changed-signature case proving the first single settles before the second sequence begins.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `node --test tests/spatial-gesture-arbiter.test.js tests/gesture-contract.test.js`
 
 Expected: FAIL because the engine bypasses `secondaryClickArbiter.submit` and delay is fixed at construction.
 
-- [ ] **Step 3: Implement dynamic secondary arbitration**
+- [x] **Step 3: Implement dynamic secondary arbitration**
 
 ```js
 const delayFor = typeof options.delayFor === 'function'
@@ -209,13 +209,13 @@ function schedule() {
 
 In `commitPointerCandidate`, route only unmodified `button === 2` navigation candidates through `secondaryClickArbiter.submit(singleAction, doubleAction, candidateArbiterKey(candidate))`. Direct commands, Ctrl+right, Shift+right, edits, middle click, drag, and primary click keep cancelling/bypassing this arbiter exactly as before.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run: `node --test tests/spatial-gesture-arbiter.test.js tests/gesture-contract.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit right-click arbitration**
+- [x] **Step 5: Commit right-click arbitration**
 
 ```bash
 git add spatial-gesture-arbiter.js spatial-engine.js tests/spatial-gesture-arbiter.test.js tests/gesture-contract.test.js
@@ -567,3 +567,5 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **Task 6前置RED**：在Task 4实现前，真实Chromium三条命名旅程3/3 FAIL：普通单击仍只见父团/团外旁侧；双击path仍root；空白返回旅程在进入前提失败。后者尚未证明返回自身缺陷。产物保留在本计划工作区task-6-before-task4-red，后续复用测试验证导航实现，不重做旧行为RED。
 
 - **Task 3 RED/GREEN**：默认沙箱spawn EPERM不计结果；获准执行仲裁/gesture链37项，RED为34通过/3失败（delayFor未用、engine固定620、尚未submit），实现后37/37 PASS。实现方自审及提交进行中，未替代独立任务复核。
+
+- **Task 3: complete**：3231d71..07b55b5，37/37 PASS，a_task3_review规格合规且quality Approved，无分级问题。跨任务最终画面项归Task 4，由已建立的三条浏览器旅程及沉浸解除验收，不据仲裁单测冒称导航完成。
