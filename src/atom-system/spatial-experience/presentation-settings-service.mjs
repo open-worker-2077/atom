@@ -1,13 +1,10 @@
-import model from '../../../spatial-demo-model.js';
-
-const fields = new Set(Object.keys(model.normalizeSettings({})));
 const own = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 function problem(code, message, statusCode = 400) {
   return Object.assign(new Error(message), { code, statusCode });
 }
 
-function validatePatch(patch) {
+function validatePatch(patch, fields) {
   if (!own(patch) || !Object.keys(patch).length) {
     throw problem('INVALID_PRESENTATION_SETTINGS', 'Settings patch must be a nonempty object');
   }
@@ -20,7 +17,8 @@ function validatePatch(patch) {
   }
 }
 
-export function createPresentationSettingsService({ repository }) {
+export function createPresentationSettingsService({ repository, normalizeSettings }) {
+  const fields = new Set(Object.keys(normalizeSettings({})));
   async function read() {
     let document;
     try { document = await repository.read(); }
@@ -33,8 +31,8 @@ export function createPresentationSettingsService({ repository }) {
       || !own(settings) || Object.keys(settings).length !== fields.size) {
       throw problem('INVALID_PRESENTATION_SETTINGS_DOCUMENT', 'Expected a saved presentation settings document');
     }
-    validatePatch(settings);
-    return { revision: document.revision, initialized: true, settings: model.normalizeSettings(settings) };
+    validatePatch(settings, fields);
+    return { revision: document.revision, initialized: true, settings: normalizeSettings(settings) };
   }
 
   async function update(input) {
@@ -43,7 +41,7 @@ export function createPresentationSettingsService({ repository }) {
       || (Object.hasOwn(input, 'bootstrap') && typeof input.bootstrap !== 'boolean')) {
       throw problem('INVALID_PRESENTATION_SETTINGS', 'Expected revision, patch and optional bootstrap boolean');
     }
-    validatePatch(input.patch);
+    validatePatch(input.patch, fields);
     const { expectedRevision, bootstrap } = input;
     const patch = { ...input.patch };
     const current = await read();
@@ -53,7 +51,7 @@ export function createPresentationSettingsService({ repository }) {
     if (!current.initialized && bootstrap !== true) {
       throw problem('PRESENTATION_SETTINGS_BOOTSTRAP_REQUIRED', 'The existing local configuration must initialize shared settings');
     }
-    const settings = model.normalizeSettings({ ...current.settings, ...patch });
+    const settings = normalizeSettings({ ...current.settings, ...patch });
     try {
       const document = await repository.write({ presentationSettings: settings }, { expectedRevision });
       return { revision: document.revision, initialized: true, settings: document.view.presentationSettings };

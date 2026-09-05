@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import presentationModel from '../spatial-demo-model.js';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 import { createViewStateRepository } from '../src/atom-system/adapters/json-view-state-repository.mjs';
 import { startPrivateMobileGateway } from '../src/atom-system/adapters/private-mobile-gateway.mjs';
@@ -35,7 +36,8 @@ async function serviceFixture() {
   const file = path.join(directory, 'presentation-settings.json');
   const { createPresentationSettingsService } = await import('../src/atom-system/spatial-experience/presentation-settings-service.mjs');
   const create = (target = file, worldId = 'primary') => createPresentationSettingsService({
-    repository: createViewStateRepository({ file: target, worldId })
+    repository: createViewStateRepository({ file: target, worldId }),
+    normalizeSettings: presentationModel.normalizeSettings
   });
   return { directory, file, create, service: create() };
 }

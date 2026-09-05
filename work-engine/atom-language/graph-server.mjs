@@ -13,6 +13,7 @@ import {
 import { createStore } from '../../cli/lib/store.mjs';
 import { createViewStateRepository } from '../../src/atom-system/adapters/json-view-state-repository.mjs';
 import { createPresentationSettingsService } from '../../src/atom-system/spatial-experience/presentation-settings-service.mjs';
+import presentationModel from '../../spatial-demo-model.js';
 import { createLegacyWorldService } from '../../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createJsonProgramProjectionRepository } from '../../src/atom-system/adapters/json-program-projection-repository.mjs';
 import { createJsonRequestDrivenLockRepository } from '../../src/atom-system/adapters/json-request-driven-lock-repository.mjs';
@@ -518,9 +519,10 @@ export async function startAtomGraphServer(options = {}) {
     root: options.root ?? projectRoot,
     storeFile: configuration.storeFile,
     graphFile: configuration.graphFile,
-    presentationSettingsService: createPresentationSettingsService({ repository: createViewStateRepository({
-      file: configuration.presentationSettingsFile, worldId: 'primary'
-    }) }),
+    presentationSettingsService: createPresentationSettingsService({
+      repository: createViewStateRepository({ file: configuration.presentationSettingsFile, worldId: 'primary' }),
+      normalizeSettings: presentationModel.normalizeSettings
+    }),
     atomProjectionReadOnly: true,
     atomCommand: handlers.atomCommand,
     atomHumanStatus: handlers.atomHumanStatus,
