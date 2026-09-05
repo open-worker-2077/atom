@@ -38,6 +38,34 @@ function canonicalRevision(value) {
   return String(value).startsWith('sha256:') ? String(value) : `sha256:${value}`;
 }
 
+// All in-process writers for a world use its existing coordinator. Projection hooks
+// stay on each facade; weak ownership never evicts a live writer or retains a world.
+const worldOwners = new Map();
+const releaseWorldOwner = new FinalizationRegistry(({ key, reference }) => {
+  if (worldOwners.get(key) === reference) worldOwners.delete(key);
+});
+
+function ownerFor({ contextFile, journalFile, worldId }) {
+  const key = JSON.stringify([path.resolve(contextFile), path.resolve(journalFile), worldId]);
+  let owner = worldOwners.get(key)?.deref();
+  if (!owner) {
+    const worldRepository = createJsonWorldRepository({ file: contextFile, worldId, initialFacts: [] });
+    const journalRepository = createJsonTransactionJournal({ file: journalFile });
+    owner = { worldRepository, journalRepository,
+      coordinator: createCommitCoordinator({ worldRepository, journalRepository }), recovery: null };
+    const reference = new WeakRef(owner);
+    worldOwners.set(key, reference);
+    releaseWorldOwner.register(owner, { key, reference });
+  }
+  return owner;
+}
+
+function assertSourceBinding(execution, event) {
+  if (execution && execution.event.binding !== event.binding) {
+    throw problem('ATOM_INTERACTION_ID_CONFLICT', '同一 Atom 请求标识不能对应不同命令或 Agent');
+  }
+}
+
 export function createTransactionalWorldPersistence({
   contextFile,
   projectionFile,
@@ -46,37 +74,85 @@ export function createTransactionalWorldPersistence({
   publishLegacyProjection = true,
   onAuthoritativeWrite = async () => {}
 }) {
-  const worldRepository = createJsonWorldRepository({ file: contextFile, worldId, initialFacts: [] });
-  const journalRepository = createJsonTransactionJournal({ file: journalFile });
-  const coordinator = createCommitCoordinator({ worldRepository, journalRepository });
-  let recovery = null;
-  let cachedManifest = null;
-  let cachedTransformLog = null;
-  let manifestLoaded = false;
+  const owner = ownerFor({ contextFile, journalFile, worldId });
+  const { worldRepository, journalRepository, coordinator } = owner;
 
   function recover() {
-    recovery ??= coordinator.recover();
-    return recovery;
+    owner.recovery ??= coordinator.recover();
+    return owner.recovery;
   }
 
   async function compatibilityManifest() {
     await recover();
-    if (manifestLoaded) return structuredClone(cachedManifest);
+    if (owner.manifestLoaded) return structuredClone(owner.cachedManifest);
     const state = await journalRepository.readState();
-    cachedManifest = structuredClone(state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null);
-    manifestLoaded = true;
-    return structuredClone(cachedManifest);
+    owner.cachedManifest = structuredClone(state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null);
+    owner.manifestLoaded = true;
+    return structuredClone(owner.cachedManifest);
   }
 
   async function transformLogEntries() {
     await recover();
-    if (cachedTransformLog) return structuredClone(cachedTransformLog);
+    if (owner.cachedTransformLog) return structuredClone(owner.cachedTransformLog);
     const state = await journalRepository.readState();
-    cachedTransformLog = state.receipts.flatMap((entry) => {
+    owner.cachedTransformLog = state.receipts.flatMap((entry) => {
       const record = entry.receipt?.result?.transformLogRecord;
       return record ? [structuredClone(record)] : [];
     });
-    return structuredClone(cachedTransformLog);
+    return structuredClone(owner.cachedTransformLog);
+  }
+
+  async function readDiscardEvidence({ discardId, archivePath, originalPath }) {
+    if (![discardId, archivePath, originalPath].every((value) => typeof value === 'string' && value)) return null;
+    await recover();
+    // Only restore asks for historical facts. Ordinary interactions keep their
+    // existing metadata-only log path; auxiliary transform logs are never evidence.
+    const state = await journalRepository.readState();
+    const matches = state.receipts.filter((entry) => entry.receipt?.result?.transformLogRecord?.id === discardId);
+    if (matches.length !== 1 || state.receipts.some((entry) => {
+      const record = entry.receipt?.result?.transformLogRecord;
+      return record?.operation === 'restore' && record.discardId === discardId;
+    })) return null;
+    const entry = await journalRepository.findCommitted(matches[0].commandId);
+    const record = entry?.receipt?.result?.transformLogRecord;
+    if (entry?.receipt?.status !== 'committed' || entry.receipt.commandId !== entry.commandId
+      || record?.operation !== 'discard' || record.archivePath !== archivePath
+      || record.originalPath !== originalPath) return null;
+    const axis = (atom, name) => Object.entries(atom ?? {})
+      .find(([key]) => key.split('@', 1)[0].split('#', 1)[0] === name)?.[1];
+    const locate = (facts, parts) => {
+      let children = facts;
+      let atom = null;
+      for (const part of parts) {
+        const found = Array.isArray(children) ? children.filter((child) => axis(child, 'thing') === part) : [];
+        if (found.length !== 1) return null;
+        atom = found[0];
+        children = axis(atom, 'slot');
+      }
+      return atom;
+    };
+    let archivedAtom = null;
+    let originalAtom = null;
+    if (entry.historyMode === 'local-patch') {
+      const patch = entry.patch;
+      if (patch?.contract !== 'atom.world-patch' || patch.version !== 1 || patch.worldId !== worldId
+        || patch.beforeRevision !== entry.receipt.beforeRevision || patch.afterRevision !== entry.receipt.afterRevision) return null;
+      const extract = (targetPath, side) => {
+        const owners = patch.operations.filter((operation) => operation.path === targetPath || targetPath.startsWith(`${operation.path}/`));
+        if (owners.length !== 1) return null;
+        const operation = owners[0];
+        const relative = targetPath.slice(operation.path.length).split('/').filter(Boolean);
+        return locate([operation[side]], [operation.path.split('/').at(-1), ...relative]);
+      };
+      archivedAtom = extract(archivePath, 'after');
+      originalAtom = extract(originalPath, 'before');
+    } else if (entry.after?.worldId === worldId && entry.after.revision === entry.receipt.afterRevision
+      && entry.before?.worldId === worldId && entry.before.revision === entry.receipt.beforeRevision) {
+      archivedAtom = locate(entry.after.facts, archivePath.split('/'));
+      originalAtom = locate(entry.before.facts, originalPath.split('/'));
+    }
+    return archivedAtom && originalAtom ? { discardId, archivePath, originalPath,
+      archivedAtom: structuredClone(archivedAtom), originalAtom: structuredClone(originalAtom) } : null;
   }
 
   async function commit({
@@ -88,9 +164,29 @@ export function createTransactionalWorldPersistence({
     changedPaths = null,
     affectedAtoms = null,
     transformLogRecord = null,
+    postCommitEvent = null,
+    subsequentOf = null,
     compatibilityManifest: suppliedManifest = null
   }) {
     await recover();
+    async function existingExecutionReceipt() {
+      if (postCommitEvent) {
+        const existing = await journalRepository.programExecutionForInteraction(correlationId);
+        assertSourceBinding(existing, postCommitEvent);
+        if (existing) return existing.sourceReceipt;
+      }
+      if (subsequentOf) {
+        const execution = await journalRepository.programExecution(subsequentOf);
+        if (!execution) throw problem('PROGRAM_SOURCE_NOT_FOUND', 'Subsequent effects require a committed source');
+        if (execution.childReceipt) return execution.childReceipt;
+        if (execution.outcome && execution.outcome.status !== 'pending') {
+          throw problem('PROGRAM_EXECUTION_FINAL', 'A final post-commit business outcome cannot be executed again');
+        }
+      }
+      return null;
+    }
+    const existing = await existingExecutionReceipt();
+    if (existing) return existing;
     const previousManifest = await compatibilityManifest();
     const computedRevision = revisionOfWorldFacts(facts);
     const canonicalNextRevision = canonicalRevision(nextRevision);
@@ -109,54 +205,85 @@ export function createTransactionalWorldPersistence({
     let nextManifest = suppliedManifest
       ? (validateCompatibilityManifest(suppliedManifest, facts), structuredClone(suppliedManifest))
       : null;
-    const receipt = await coordinator.execute({
-      command: {
-        contract: 'atom.world-command',
-        version: 1,
-        commandId,
-        correlationId,
-        expectedRevision: canonicalExpectedRevision,
-        name: 'legacy-transition',
-        payload: { source }
-      },
-      transitionInputMode: 'trusted-readonly',
-      transition: (current) => {
-        nextManifest ??= previousManifest
-          ? advanceCompatibilityManifest(previousManifest, current.facts, facts)
-          : null;
-        return {
-          facts,
-          revision: canonicalNextRevision,
-          ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
-          result: {
-            source,
-            ...(Array.isArray(affectedAtoms) ? {
-              affectedAtoms,
-              affectedAtomsComplete: true
-            } : {}),
-            ...(nextManifest ? { compatibilityManifest: nextManifest } : {}),
-            ...(previousManifest ? { previousCompatibilityManifest: previousManifest } : {}),
-            ...(transformLogRecord ? {
-              transformLogRecord: structuredClone(transformLogRecord)
-            } : {})
-          }
-        };
+    let receipt;
+    let reusedReceipt = false;
+    try {
+      receipt = await coordinator.execute({
+        validateCommit: async () => {
+          const existing = await existingExecutionReceipt();
+          reusedReceipt = Boolean(existing);
+          return existing;
+        },
+        command: {
+          contract: 'atom.world-command',
+          version: 1,
+          commandId,
+          correlationId,
+          expectedRevision: canonicalExpectedRevision,
+          name: 'legacy-transition',
+          payload: { source }
+        },
+        transitionInputMode: 'trusted-readonly',
+        transition: (current) => {
+          nextManifest ??= previousManifest
+            ? advanceCompatibilityManifest(previousManifest, current.facts, facts)
+            : null;
+          return {
+            facts,
+            revision: canonicalNextRevision,
+            ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
+            result: {
+              source,
+              ...(postCommitEvent ? { postCommitEvent: structuredClone({ ...postCommitEvent,
+                sourceCommandId: commandId, sourceRevision: postCommitEvent.sourceChanged === false
+                  ? canonicalExpectedRevision : canonicalNextRevision }) } : {}),
+              ...(subsequentOf ? { subsequentOf } : {}),
+              ...(Array.isArray(affectedAtoms) ? {
+                affectedAtoms,
+                affectedAtomsComplete: true
+              } : {}),
+              ...(nextManifest ? { compatibilityManifest: nextManifest } : {}),
+              ...(previousManifest ? { previousCompatibilityManifest: previousManifest } : {}),
+              ...(transformLogRecord ? {
+                transformLogRecord: structuredClone(transformLogRecord)
+              } : {})
+            }
+          };
+        }
+      });
+    } catch (error) {
+      if (postCommitEvent) {
+        const existing = await journalRepository.programExecutionForInteraction(correlationId);
+        assertSourceBinding(existing, postCommitEvent);
+        if (existing) return existing.sourceReceipt;
       }
-    });
-    cachedManifest = structuredClone(receipt.result?.compatibilityManifest ?? previousManifest ?? null);
-    manifestLoaded = true;
-    if (transformLogRecord && cachedTransformLog) {
-      cachedTransformLog.push(structuredClone(transformLogRecord));
+      throw error;
     }
-    await adoptAtomContextSnapshot(contextFile, facts, {
-      ...(nextManifest ? { compatibilityManifest: nextManifest } : {})
-    });
-    await onAuthoritativeWrite({
-      operation: 'commit',
-      contextFile,
-      revision: receipt.afterRevision,
-      receipt
-    });
+    if (reusedReceipt) return receipt;
+    if (postCommitEvent) assertSourceBinding({ event: receipt.result.postCommitEvent }, postCommitEvent);
+    owner.cachedManifest = structuredClone(receipt.result?.compatibilityManifest ?? previousManifest ?? null);
+    owner.compatibilityGeneration = (owner.compatibilityGeneration ?? 0) + 1;
+    owner.manifestLoaded = true;
+    if (transformLogRecord && owner.cachedTransformLog) {
+      owner.cachedTransformLog.push(structuredClone(transformLogRecord));
+    }
+    try {
+      await adoptAtomContextSnapshot(contextFile, facts, {
+        ...(nextManifest ? { compatibilityManifest: nextManifest } : {})
+      });
+      await onAuthoritativeWrite({
+        operation: 'commit',
+        contextFile,
+        revision: receipt.afterRevision,
+        receipt
+      });
+    } catch (error) {
+      throw problem(
+        error.code ?? 'WORLD_COMMITTED_AUXILIARY_PENDING',
+        error.message ?? 'World transition committed, but an auxiliary projection requires recovery',
+        { ...(error.details ?? {}), receipt, cause: error.code ?? error.name }
+      );
+    }
     if (publishLegacyProjection) {
       try {
         await writeAtomGraphProjection(projectionFile, facts, {
@@ -193,7 +320,8 @@ export function createTransactionalWorldPersistence({
         payload: { targetCommandId }
       }
     });
-    manifestLoaded = false;
+    owner.manifestLoaded = false;
+    owner.compatibilityGeneration = (owner.compatibilityGeneration ?? 0) + 1;
     await onAuthoritativeWrite({
       operation: 'rollback',
       contextFile,
@@ -219,10 +347,29 @@ export function createTransactionalWorldPersistence({
   }
 
   return Object.freeze({
+    // Cache invalidation only; authoritative identity remains the world receipt.
+    get compatibilityGeneration() { return owner.compatibilityGeneration ?? 0; },
     commit,
     compatibilityManifest,
     recover,
     rollback,
-    transformLogEntries
+    transformLogEntries,
+    readDiscardEvidence,
+    async programExecution(sourceCommandId) {
+      await recover();
+      return journalRepository.programExecution(sourceCommandId);
+    },
+    async programExecutionForInteraction(correlationId) {
+      await recover();
+      return journalRepository.programExecutionForInteraction(correlationId);
+    },
+    async pendingProgramExecutions() {
+      await recover();
+      return journalRepository.pendingProgramExecutions();
+    },
+    async recordProgramExecution(request) {
+      await recover();
+      return coordinator.recordProgramExecution(request);
+    }
   });
 }

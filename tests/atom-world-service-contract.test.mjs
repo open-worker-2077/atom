@@ -437,3 +437,33 @@ test('world persistence remains semantic-neutral for Agent Program facts', async
   assert.equal(committed.afterRevision, nextRevision);
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), withoutAgent);
 });
+
+test('a postcommit auxiliary failure carries the authoritative receipt that proves ownership', async () => {
+  const { createTransactionalWorldPersistence } = await import(
+    new URL('../src/atom-system/adapters/transactional-world-persistence.mjs', import.meta.url)
+  );
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-committed-auxiliary-'));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
+  const facts = [{ thing: 'Committed', situation: '', slot: [], strut: [] }];
+  const expectedRevision = `sha256:${crypto.createHash('sha256').update('[]').digest('hex')}`;
+  const nextRevision = `sha256:${crypto.createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`;
+  const persistence = createTransactionalWorldPersistence({
+    contextFile,
+    projectionFile,
+    publishLegacyProjection: false,
+    onAuthoritativeWrite() {
+      throw Object.assign(new Error('mirror unavailable'), { code: 'MIRROR_UNAVAILABLE' });
+    }
+  });
+
+  await assert.rejects(persistence.commit({
+    correlationId: 'committed-auxiliary-receipt', expectedRevision, nextRevision, facts
+  }), (error) => {
+    assert.equal(error.code, 'MIRROR_UNAVAILABLE');
+    assert.equal(error.details.receipt.afterRevision, nextRevision);
+    return true;
+  });
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), facts);
+});

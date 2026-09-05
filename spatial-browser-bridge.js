@@ -46,6 +46,7 @@
   if (!supported) return;
 
   const API = "/__spatial/api";
+  const PRESENTATION_SETTINGS_BACKUP_KEY = "graph-4d.presentation-settings.pre-shared.v1";
   const initialLoadProgress = { service: 0, data: 0, scene: 0 };
   let revision = -1;
   let pulling = false;
@@ -59,6 +60,20 @@
   let workspaceOperationEpoch = 0;
   let transformActionSequence = 0;
   let transformActionDelivery = Promise.resolve();
+  let settingsRevision = 0;
+  let queuedSettingsRevision = 0;
+  let settingsAuthorityEpoch = 0;
+  let pendingPresentationWrites = 0;
+  let presentationReadSequence = 0;
+  let presentationWriteSequence = 0;
+  let presentationWriteInFlight = false;
+  let pendingPresentationRevision = -1;
+  let deferredPresentationRead = false;
+  let deferredPresentationReadStatus = "synced";
+  let drainingDeferredPresentationRead = false;
+  let applyingSharedPresentationSettings = false;
+  let retainedPresentationStatus = null;
+  let presentationSettingsDelivery = Promise.resolve();
   const loadedPaths = new Set();
   const workspaceModel = global.SpatialWorkspaceModel;
 
@@ -261,6 +276,230 @@
       throw error;
     }
     return payload;
+  }
+
+  function setPresentationSettingsStatus(status) {
+    const messages = {
+      syncing: "展示设置正在同步",
+      synced: "展示设置已同步",
+      uninitialized: "展示设置等待本机初始化",
+      unsynced: "展示设置未同步，当前显示已保留",
+      conflict: "展示设置已在其他设备更新，已采用最新设置"
+    };
+    document.body.dataset.spatialPresentationSettings = status;
+    document.body.dataset.spatialPresentationSettingsRevision = String(settingsRevision);
+    const output = typeof document.getElementById === "function"
+      ? document.getElementById("presentationSettingsStatus")
+      : null;
+    if (output) {
+      output.textContent = messages[status] || "";
+      output.dataset.state = status;
+      output.hidden = false;
+    }
+  }
+
+  function loopbackPage() {
+    const hostname = String(global.location && global.location.hostname || "").toLowerCase();
+    return hostname === "localhost" || hostname === "::1" || hostname === "[::1]"
+      || hostname === "127.0.0.1" || hostname.startsWith("127.");
+  }
+
+  function applySharedPresentationSettings(snapshot, status = "synced", source = "remote") {
+    const incomingRevision = Number(snapshot && snapshot.revision);
+    if (!snapshot || snapshot.initialized !== true || !Number.isSafeInteger(incomingRevision)
+      || incomingRevision < settingsRevision || !snapshot.settings) return false;
+    if (source === "remote" && status === "synced" && retainedPresentationStatus
+      && incomingRevision === retainedPresentationStatus.revision) {
+      setPresentationSettingsStatus(retainedPresentationStatus.status);
+      return false;
+    }
+    const advancesAuthority = source === "remote" && incomingRevision > settingsRevision;
+    const preserveNewerLocalSettings = status === "synced" && queuedSettingsRevision > incomingRevision
+      && (source === "local" || incomingRevision === settingsRevision);
+    if (source === "remote" && incomingRevision > settingsRevision) {
+      settingsAuthorityEpoch += 1;
+      queuedSettingsRevision = incomingRevision;
+    }
+    settingsRevision = incomingRevision;
+    if (!pendingPresentationWrites) queuedSettingsRevision = settingsRevision;
+    if (!preserveNewerLocalSettings) {
+      applyingSharedPresentationSettings = true;
+      try {
+        lab.applyPresentationSettings(snapshot.settings);
+      } finally {
+        applyingSharedPresentationSettings = false;
+      }
+    }
+    if (source === "local" || advancesAuthority) retainedPresentationStatus = null;
+    if (status === "conflict") {
+      retainedPresentationStatus = { revision: settingsRevision, status };
+    }
+    setPresentationSettingsStatus(preserveNewerLocalSettings ? "syncing" : status);
+    return true;
+  }
+
+  function backupPreSharedSettings(stored) {
+    if (!stored || !stored.valid || typeof stored.raw !== "string") return false;
+    try {
+      if (global.localStorage.getItem(PRESENTATION_SETTINGS_BACKUP_KEY) === null) {
+        global.localStorage.setItem(PRESENTATION_SETTINGS_BACKUP_KEY, stored.raw);
+      }
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  async function bootstrapPresentationSettings(localSnapshot) {
+    if (!backupPreSharedSettings(localSnapshot.stored)) {
+      setPresentationSettingsStatus("unsynced");
+      return false;
+    }
+    try {
+      const snapshot = await request("/presentation-settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          expectedRevision: 0,
+          bootstrap: true,
+          patch: localSnapshot.settings
+        })
+      });
+      applySharedPresentationSettings(snapshot, "synced", "local");
+      return true;
+    } catch (error) {
+      if (error.code === "PRESENTATION_SETTINGS_CONFLICT") {
+        await readPresentationSettings("conflict");
+        return false;
+      }
+      setPresentationSettingsStatus("unsynced");
+      return false;
+    }
+  }
+
+  function deferPresentationSettingsRead(status = "synced") {
+    deferredPresentationRead = true;
+    if (status === "conflict") deferredPresentationReadStatus = "conflict";
+  }
+
+  async function drainDeferredPresentationRead() {
+    if (presentationWriteInFlight || drainingDeferredPresentationRead || !deferredPresentationRead) {
+      return false;
+    }
+    drainingDeferredPresentationRead = true;
+    const status = deferredPresentationReadStatus;
+    deferredPresentationRead = false;
+    deferredPresentationReadStatus = "synced";
+    pendingPresentationRevision = -1;
+    try {
+      return await readPresentationSettings(status);
+    } finally {
+      drainingDeferredPresentationRead = false;
+      if (deferredPresentationRead && !presentationWriteInFlight) void drainDeferredPresentationRead();
+    }
+  }
+
+  async function readPresentationSettings(statusAfterApply = "synced") {
+    if (typeof lab.presentationSettings !== "function"
+      || typeof lab.applyPresentationSettings !== "function") return false;
+    if (presentationWriteInFlight) {
+      deferPresentationSettingsRead(statusAfterApply);
+      return false;
+    }
+    const requestSequence = presentationReadSequence += 1;
+    const requestRevision = settingsRevision;
+    const requestWriteSequence = presentationWriteSequence;
+    if (statusAfterApply !== "synced" || !retainedPresentationStatus
+      || retainedPresentationStatus.revision !== settingsRevision) {
+      setPresentationSettingsStatus("syncing");
+    }
+    try {
+      const snapshot = await request("/presentation-settings");
+      if (presentationWriteInFlight || requestWriteSequence !== presentationWriteSequence) {
+        deferPresentationSettingsRead(statusAfterApply);
+        if (!presentationWriteInFlight) void drainDeferredPresentationRead();
+        return false;
+      }
+      const incomingRevision = Number(snapshot && snapshot.revision);
+      if (Number.isSafeInteger(incomingRevision) && incomingRevision < settingsRevision) return false;
+      if (incomingRevision === settingsRevision && requestSequence !== presentationReadSequence) return false;
+      if (snapshot.initialized === true) {
+        return applySharedPresentationSettings(snapshot, statusAfterApply);
+      }
+      if (requestSequence !== presentationReadSequence || settingsRevision !== requestRevision) return false;
+      if (Number(snapshot.revision) === 0) {
+        const localSnapshot = lab.presentationSettings();
+        if (loopbackPage() && localSnapshot && localSnapshot.stored && localSnapshot.stored.valid) {
+          return bootstrapPresentationSettings(localSnapshot);
+        }
+      }
+      if (statusAfterApply === "synced" && retainedPresentationStatus
+        && Number(snapshot.revision) === retainedPresentationStatus.revision) {
+        setPresentationSettingsStatus(retainedPresentationStatus.status);
+        return false;
+      }
+      setPresentationSettingsStatus("uninitialized");
+      return false;
+    } catch (_error) {
+      if (requestSequence === presentationReadSequence && settingsRevision === requestRevision) {
+        setPresentationSettingsStatus("unsynced");
+      }
+      return false;
+    }
+  }
+
+  async function pushPresentationSettings(entry) {
+    const { patch, expectedRevision, authorityEpoch } = entry || {};
+    if (!patch || typeof patch !== "object" || Array.isArray(patch) || !Object.keys(patch).length) {
+      return false;
+    }
+    if (authorityEpoch !== settingsAuthorityEpoch || expectedRevision !== settingsRevision) {
+      setPresentationSettingsStatus(settingsRevision >= expectedRevision ? "conflict" : "unsynced");
+      return false;
+    }
+    presentationWriteSequence += 1;
+    presentationWriteInFlight = true;
+    try {
+      const snapshot = await request("/presentation-settings", {
+        method: "PUT",
+        body: JSON.stringify({ expectedRevision, patch })
+      });
+      applySharedPresentationSettings(snapshot, "synced", "local");
+      return true;
+    } catch (error) {
+      if (error.code === "PRESENTATION_SETTINGS_CONFLICT") {
+        deferPresentationSettingsRead("conflict");
+        return false;
+      }
+      retainedPresentationStatus = { revision: settingsRevision, status: "unsynced" };
+      setPresentationSettingsStatus(retainedPresentationStatus.status);
+      return false;
+    } finally {
+      presentationWriteInFlight = false;
+      if (pendingPresentationRevision > settingsRevision) deferPresentationSettingsRead();
+      await drainDeferredPresentationRead();
+    }
+  }
+
+  function enqueuePresentationSettings(event) {
+    if (applyingSharedPresentationSettings) return presentationSettingsDelivery;
+    const patch = event && event.detail && typeof event.detail === "object"
+      ? { ...event.detail }
+      : null;
+    const entry = {
+      patch,
+      expectedRevision: queuedSettingsRevision,
+      authorityEpoch: settingsAuthorityEpoch
+    };
+    queuedSettingsRevision += 1;
+    pendingPresentationWrites += 1;
+    setPresentationSettingsStatus("syncing");
+    presentationSettingsDelivery = presentationSettingsDelivery
+      .then(() => pushPresentationSettings(entry))
+      .finally(() => {
+        pendingPresentationWrites -= 1;
+        if (!pendingPresentationWrites) queuedSettingsRevision = settingsRevision;
+      });
+    return presentationSettingsDelivery;
   }
 
   async function postAtomTransformAction(detail) {
@@ -529,6 +768,9 @@
           if (!hasQueuedWorkspaceCommit()) lab.importKnowledge(latest.knowledge);
         }
         document.body.dataset.spatialBridge = "connected";
+        reportPersistence("spatial-workspace-persisted", {
+          persistenceId, operation, knowledge: latest && latest.knowledge
+        });
         return true;
       }
       if (operation) {
@@ -708,6 +950,12 @@
   global.addEventListener("spatial-workspace-committed", pushKnowledge);
   global.addEventListener("spatial-view-committed", pushView);
   global.addEventListener("atom-transform-action", enqueueAtomTransformAction);
+  global.addEventListener("spatial-presentation-settings-changed", enqueuePresentationSettings);
+  if (typeof document.addEventListener === "function") {
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) void readPresentationSettings();
+    });
+  }
   if (typeof global.EventSource === "function") {
     const changes = new global.EventSource(`${API}/events`);
     let eventStreamOpened = false;
@@ -715,6 +963,7 @@
       const reconnected = eventStreamOpened;
       eventStreamOpened = true;
       if (reconnected || document.body.dataset.spatialBridge === "offline") void pullKnowledge();
+      if (reconnected) void readPresentationSettings();
     };
     changes.onmessage = (event) => {
       try {
@@ -725,7 +974,23 @@
         document.body.dataset.spatialBridge = "offline";
       }
     };
+    if (typeof changes.addEventListener === "function") {
+      changes.addEventListener("presentation-settings", (event) => {
+        try {
+          const notice = JSON.parse(event.data);
+          const noticeRevision = Number(notice.revision);
+          if (noticeRevision > settingsRevision) {
+            pendingPresentationRevision = Math.max(pendingPresentationRevision, noticeRevision);
+            deferPresentationSettingsRead();
+            if (!presentationWriteInFlight) void drainDeferredPresentationRead();
+          }
+        } catch {
+          setPresentationSettingsStatus("unsynced");
+        }
+      });
+    }
   }
+  void readPresentationSettings();
   request("/health")
     .then((payload) => {
       setInitialLoadProgress("service", 100);

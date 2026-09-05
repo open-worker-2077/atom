@@ -68,6 +68,19 @@ function interaction(id) {
   return { id, agent: { path: CREATOR_PATH } };
 }
 
+function find(atoms, targetPath) {
+  let children = atoms;
+  let current = null;
+  for (const segment of targetPath.split('/')) {
+    current = children.find((candidate) => Object.entries(candidate).some(([key, value]) => (
+      key.split(/[@#]/u)[0] === 'thing' && value === segment
+    )));
+    if (!current) return null;
+    children = current.slot;
+  }
+  return current;
+}
+
 async function assertRejectedWithoutCommit(result, files, before) {
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.ok(result.errors.some(({ code }) => code === 'AGENT_JURISDICTION_ESCALATION'), JSON.stringify(result));
@@ -461,12 +474,11 @@ for (const [name, source] of [
   });
 }
 
-test('create rejects an unauthorized declaration produced by post-create reconcile', async (t) => {
+test('create commits its source and rejects an unauthorized declaration from subsequent reconcile', async (t) => {
   const createdPath = `${CREATOR_PATH}/CreatedTrigger`;
   const files = await fixture(t, [
     atom('Escalation Trigger', triggerProgramSource(createdPath), [], 'program')
   ]);
-  const before = await fs.readFile(files.contextFile, 'utf8');
   const result = await executeAtomLanguage({
     ...files,
     source: `transform new ${JSON.stringify({
@@ -475,21 +487,34 @@ test('create rejects an unauthorized declaration produced by post-create reconci
     programScheduler: createProgramRuntimeScheduler(),
     interaction: interaction('reject-create-reconcile-effect')
   });
-  await assertRejectedWithoutCommit(result, files, before);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.subsequentExecution.status, 'failed');
+  assert.ok(result.subsequentExecution.errors.some(({ code }) => (
+    code === 'AGENT_JURISDICTION_ESCALATION'
+  )), JSON.stringify(result));
+  const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.ok(find(stored, createdPath));
+  assert.equal(find(stored, CHILD_PATH).situation, CHILD_SOURCE);
 });
 
-test('single Transform rejects an unauthorized declaration produced by reconcile', async (t) => {
+test('single Transform commits its source and rejects an unauthorized declaration from subsequent reconcile', async (t) => {
   const files = await fixture(t, [
     atom('Escalation Trigger', triggerProgramSource(TARGET_PATH), [], 'program')
   ]);
-  const before = await fs.readFile(files.contextFile, 'utf8');
   const result = await executeAtomLanguage({
     ...files,
     source: `transform {"thing":${JSON.stringify(TARGET_PATH)},"situation.rep.after"}`,
     programScheduler: createProgramRuntimeScheduler(),
     interaction: interaction('reject-single-reconcile-effect')
   });
-  await assertRejectedWithoutCommit(result, files, before);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.subsequentExecution.status, 'failed');
+  assert.ok(result.subsequentExecution.errors.some(({ code }) => (
+    code === 'AGENT_JURISDICTION_ESCALATION'
+  )), JSON.stringify(result));
+  const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.equal(find(stored, TARGET_PATH).situation, 'after');
+  assert.equal(find(stored, CHILD_PATH).situation, CHILD_SOURCE);
 });
 
 for (const scenario of [
@@ -535,7 +560,7 @@ for (const scenario of [
   });
 }
 
-test('rejected batch isolates candidate authority and blocks it before the next reconcile pass', async (t) => {
+test('batch commits its source while isolating rejected candidate authority before the next reconcile pass', async (t) => {
   const maliciousSource = 'agent({"labels":["^^"],"functions":{"groups":[],"names":["message","transform","trigger"]}})';
   const unauthorizedWorkerSource = [
     'def main():',
@@ -555,7 +580,6 @@ test('rejected batch isolates candidate authority and blocks it before the next 
   };
   await scheduler.rebuildAgentSecurity(files.initial);
   const committedSecurity = structuredClone([...scheduler.agentSecurity]);
-  const before = await fs.readFile(files.contextFile, 'utf8');
   const result = await executeAtomLanguage({
     ...files,
     source: `transform ${JSON.stringify([
@@ -565,7 +589,15 @@ test('rejected batch isolates candidate authority and blocks it before the next 
     programScheduler: scheduler,
     interaction: interaction('reject-batch-reconcile-effect')
   });
-  await assertRejectedWithoutCommit(result, files, before);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.subsequentExecution.status, 'failed');
+  assert.ok(result.subsequentExecution.errors.some(({ code }) => (
+    code === 'AGENT_JURISDICTION_ESCALATION'
+  )), JSON.stringify(result));
+  const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.equal(find(stored, TARGET_PATH).situation, 'after');
+  assert.equal(find(stored, `${CREATOR_PATH}/Leak`).situation, 'still-stable');
+  assert.equal(find(stored, CHILD_PATH).situation, CHILD_SOURCE);
   assert.equal(unauthorizedRuns, 0, 'an unauthorized candidate Agent must not execute in a later pass');
   assert.deepEqual([...scheduler.agentSecurity], committedSecurity);
 });

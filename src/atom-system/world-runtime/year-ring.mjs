@@ -155,6 +155,11 @@ function sanitizeTransformStage(stage) {
     }
     output.slowestProgramDurationMs = Math.round(stage.slowestProgramDurationMs * 1000) / 1000;
   }
+  if (stage.evidenceFailure && typeof stage.evidenceFailure === 'object') {
+    output.evidenceFailure = Object.fromEntries(['code', 'cause']
+      .filter((key) => typeof stage.evidenceFailure[key] === 'string')
+      .map((key) => [key, stage.evidenceFailure[key]]));
+  }
   return output;
 }
 

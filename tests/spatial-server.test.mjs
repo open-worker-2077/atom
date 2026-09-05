@@ -7,6 +7,160 @@ import path from 'node:path';
 import { createSpatialServer } from '../cli/lib/server.mjs';
 import { childDomainPath } from '../cli/lib/probe.mjs';
 import { VERSION } from '../cli/lib/version.mjs';
+import { createAtomGraphHandlers } from '../work-engine/atom-language/graph-server.mjs';
+
+for (const lateKind of ['stale', 'failed']) {
+  test(`HTTP preserves complete durable business evidence after a different late ${lateKind} result`, async (context) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-durable-result-'));
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const durable = { ok: true, changed: true, command: 'transform', interactionId: `durable-${lateKind}`,
+      revisionBefore: 'before-revision', revisionAfter: 'effects-revision',
+      result: { path: 'Result', situation: 'after' }, results: [{ result: { path: 'Result' } }],
+      affectedPaths: ['Source', 'Result'], lockState: [{ path: 'Result', owner: 'Subscriber' }],
+      messages: ['business message'], archive: { originalPath: 'Source' },
+      warnings: [{ code: 'BUSINESS_WARNING', message: 'preserve business diagnostic' }], errors: [],
+      subsequentExecution: { status: 'completed', sourceRevision: 'source-revision', revisionAfter: 'effects-revision', errors: [] } };
+    const projectionWarning = { code: 'PROJECTION_RECOVERY_PENDING', message: 'current projection unavailable',
+      details: { expectedRevision: 'effects-revision' } };
+    const notificationWarning = { code: 'ATOM_SUBSEQUENT_NOTIFICATION_FAILED',
+      message: 'joined listener rejected after terminal publication', cause: 'listener unavailable', correlationId: durable.interactionId };
+    const projectionFields = { projectionStatus: 'pending', projectionRecovery: { expectedRevision: 'effects-revision' },
+      projectionFailure: { projection: 'publisher', cause: 'PROJECTION_UNAVAILABLE' } };
+    let calls = 0;
+    const instance = await createSpatialServer({ root: path.resolve(import.meta.dirname, '..'),
+      storeFile: path.join(directory, 'knowledge.json'), async atomCommand(payload, { onCommitted, onSubsequentSettled }) {
+        calls += 1;
+        await onCommitted({ ...durable, revisionAfter: 'source-revision', subsequentExecution: { status: 'pending' } });
+        await onSubsequentSettled(durable);
+        await gate;
+        return { ok: lateKind !== 'failed', changed: false, command: 'stale-command', interactionId: 'wrong-id',
+          revisionBefore: 'wrong-before', revisionAfter: 'source-revision', result: null, results: [],
+          affectedPaths: ['Source'], lockState: [], messages: [], archive: null,
+          subsequentExecution: { status: lateKind === 'failed' ? 'failed' : 'pending' },
+          errors: [{ code: 'LATE_FAILURE' }], ...projectionFields,
+          warnings: [{ code: 'ATOM_SUBSEQUENT_EXECUTION_PENDING' }, projectionWarning, notificationWarning,
+            { ...notificationWarning, correlationId: 'another-interaction' },
+            { code: 'PROJECTION_RECOVERY_PENDING', details: { expectedRevision: 'obsolete-revision' } }] };
+      } });
+    await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
+    context.after(() => { release(); return new Promise(resolve => instance.server.close(resolve)); });
+    const post = async () => (await fetch(`http://127.0.0.1:${instance.server.address().port}/__atom/api/command`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ source: 'transform source', interaction: { id: durable.interactionId } })
+    })).json();
+    await post();
+    assert.deepEqual((await post()).result, durable);
+    release();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual((await post()).result, { ...durable, ...projectionFields,
+      warnings: [...durable.warnings, projectionWarning, notificationWarning] });
+    assert.equal(calls, 1);
+  });
+}
+
+for (const terminalStatus of ['completed', 'failed']) {
+  test(`HTTP ${terminalStatus} successor owns a fresh bounded phase and settles before projection`, async (context) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-atom-phase-'));
+    let release, entered;
+    const projection = new Promise(resolve => { release = resolve; });
+    const projectionStarted = new Promise(resolve => { entered = resolve; });
+    let calls = 0, activeSignal;
+    const handlers = createAtomGraphHandlers({
+      updateHumanStatus() { throw new Error('unexpected status update'); },
+      updateHumanWorkspace() { throw new Error('unexpected workspace update'); },
+      recover() { throw new Error('unexpected recovery'); },
+      async execute(intent, { onCommitted, onSubsequentSettled, signal }) {
+        calls += 1; activeSignal = signal;
+        const base = { ok: true, changed: true, interactionId: intent.correlationId, errors: [] };
+        await new Promise(resolve => setTimeout(resolve, 220));
+        await onCommitted({ ...base, subsequentExecution: { status: 'pending', errors: [] } });
+        await new Promise(resolve => setTimeout(resolve, 160));
+        const terminal = { ...base, subsequentExecution: { status: terminalStatus,
+          errors: terminalStatus === 'failed' ? [{ code: 'KNOWN_BUSINESS_FAILURE' }] : [] } };
+        await onSubsequentSettled?.(terminal);
+        entered(); await projection;
+        return terminal;
+      }
+    });
+    const instance = await createSpatialServer({ atomInteractionTimeoutMs: 300,
+      root: path.resolve(import.meta.dirname, '..'), storeFile: path.join(directory, 'knowledge.json'),
+      atomCommand: handlers.atomCommand });
+    await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
+    context.after(() => { release(); return new Promise(resolve => instance.server.close(resolve)); });
+    const url = `http://127.0.0.1:${instance.server.address().port}/__atom/api/command`;
+    const post = async () => (await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ source: 'transform phased source', interaction: { id: `phase-${terminalStatus}`,
+        agent: { ref: 'private-agent', path: 'Agent' } } }) })).json();
+    assert.equal((await post()).result.subsequentExecution.status, 'pending');
+    await projectionStarted;
+    assert.equal(activeSignal.aborted, false, 'source elapsed time must not consume the successor time allowance');
+    assert.equal((await post()).result.subsequentExecution.status, terminalStatus, 'durable business receipt must not wait for projection');
+    await new Promise(resolve => setTimeout(resolve, 330));
+    assert.equal(activeSignal.aborted, false, 'business deadline ownership ends at durable terminal settlement');
+    assert.equal(calls, 1);
+  });
+}
+
+for (const exceedDeadline of [false, true]) {
+test(`Atom HTTP receipt advances from committed pending to final failure without rerunning its operation (deadline ${exceedDeadline})`, async (context) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-atom-final-receipt-'));
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let calls = 0;
+  const instance = await createSpatialServer({
+    atomInteractionTimeoutMs: 40,
+    root: path.resolve(import.meta.dirname, '..'), storeFile: path.join(directory, 'knowledge.json'),
+    async atomCommand(payload, { onCommitted }) {
+      calls += 1;
+      const base = { ok: true, changed: true, interactionId: payload.interaction.id, errors: [] };
+      await onCommitted({ ...base, subsequentExecution: { status: 'pending', errors: [] } });
+      await gate;
+      return { ...base, subsequentExecution: { status: 'failed', errors: [{ code: 'SUBSCRIBER_FAILED' }] } };
+    }
+  });
+  await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
+  context.after(() => { release(); return new Promise(resolve => instance.server.close(resolve)); });
+  const url = `http://127.0.0.1:${instance.server.address().port}/__atom/api/command`;
+  const post = async (source = 'transform source') => (await fetch(url, { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source, interaction: { id: 'pending-final' } }) })).json();
+  assert.equal((await post()).result.subsequentExecution.status, 'pending');
+  assert.equal((await post()).result.subsequentExecution.status, 'pending');
+  if (exceedDeadline) await new Promise(resolve => setTimeout(resolve, 80));
+  release();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal((await post()).result.subsequentExecution.status, 'failed');
+  assert.equal(calls, 1);
+  assert.equal((await post('different source')).error.code, 'ATOM_INTERACTION_ID_CONFLICT');
+});
+}
+
+test('a still-running HTTP successor has its own observable timeout phase', async (context) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-successor-timeout-'));
+  let cancellation;
+  const instance = await createSpatialServer({ atomInteractionTimeoutMs: 40,
+    root: path.resolve(import.meta.dirname, '..'), storeFile: path.join(directory, 'knowledge.json'),
+    async atomCommand(payload, { onCommitted, signal }) {
+      const pending = { ok: true, changed: true, interactionId: payload.interaction.id,
+        subsequentExecution: { status: 'pending' } };
+      await onCommitted(pending);
+      await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+      cancellation = signal.reason;
+      return pending;
+    }
+  });
+  await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
+  context.after(() => new Promise(resolve => instance.server.close(resolve)));
+  const response = await (await fetch(`http://127.0.0.1:${instance.server.address().port}/__atom/api/command`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ source: 'transform timeout', interaction: { id: 'subsequent-timeout' } })
+  })).json();
+  assert.equal(response.result.ok, true);
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(cancellation.code, 'ATOM_SUBSEQUENT_TIMEOUT');
+  assert.equal(cancellation.details.phase, 'subsequent');
+  assert.equal(cancellation.details.timeoutMs, 40);
+});
 
 test('local server exposes one store to the page bridge and command API', async (context) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-server-'));

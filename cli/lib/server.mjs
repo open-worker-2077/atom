@@ -117,6 +117,34 @@ async function body(request) {
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
 }
 
+function presentationWriteOrigin(request, bootstrap) {
+  const originHeader = request.headers.origin;
+  const site = request.headers['sec-fetch-site'];
+  let origin = null;
+  if (originHeader !== undefined) {
+    try {
+      origin = new URL(originHeader);
+      if (!['http:', 'https:'].includes(origin.protocol) || origin.origin !== originHeader) origin = null;
+    } catch { /* Invalid or opaque origins cannot write. */ }
+    if (!origin || site !== 'same-origin') {
+      throw Object.assign(new Error('Presentation settings require a same-origin browser request'), {
+        code: 'PRESENTATION_SETTINGS_ORIGIN_DENIED', statusCode: 403
+      });
+    }
+  } else if (site && site !== 'same-origin' && site !== 'none') {
+    throw Object.assign(new Error('Cross-site presentation settings write denied'), {
+      code: 'PRESENTATION_SETTINGS_ORIGIN_DENIED', statusCode: 403
+    });
+  }
+  // The gateway rewrites Host but preserves Origin and browser Fetch Metadata.
+  // Its loopback upstream connection never grants a remote page bootstrap rights.
+  if (bootstrap && (!origin || !['127.0.0.1', 'localhost', '[::1]'].includes(origin.hostname))) {
+    throw Object.assign(new Error('Bootstrap requires an existing local browser configuration'), {
+      code: 'PRESENTATION_SETTINGS_BOOTSTRAP_DENIED', statusCode: 403
+    });
+  }
+}
+
 export async function createSpatialServer(options = {}) {
   const root = path.resolve(options.root || projectRoot);
   const storeFile = path.resolve(options.storeFile || path.join(root, 'data', 'knowledge.json'));
@@ -213,30 +241,86 @@ export async function createSpatialServer(options = {}) {
       settled = true;
       rejectReceipt(error);
     };
-    atomCommandReceipts.set(id, { fingerprint, receipt });
+    const entry = { fingerprint, receipt };
+    atomCommandReceipts.set(id, entry);
     while (atomCommandReceipts.size > 1_000) {
       atomCommandReceipts.delete(atomCommandReceipts.keys().next().value);
     }
 
     const controller = new AbortController();
-    const timeoutError = new SpatialStoreError(
-      'ATOM_INTERACTION_TIMEOUT',
-      `Atom interaction exceeded its ${atomInteractionTimeoutMs}ms deadline`
-    );
     let timeout;
+    let rejectActiveDeadline;
+    let businessPhase = 'source';
+    let durableBusinessResult = null;
     const deadline = new Promise((_, rejectDeadline) => {
+      rejectActiveDeadline = rejectDeadline;
+    });
+    function armBusinessDeadline(phase) {
+      clearTimeout(timeout);
+      if (controller.signal.aborted) return;
+      businessPhase = phase;
       timeout = setTimeout(() => {
+        const timeoutError = new SpatialStoreError(
+          phase === 'subsequent' ? 'ATOM_SUBSEQUENT_TIMEOUT' : 'ATOM_INTERACTION_TIMEOUT',
+          `Atom ${phase} phase exceeded its ${atomInteractionTimeoutMs}ms deadline`
+        );
+        timeoutError.details = { phase, interactionId: id, timeoutMs: atomInteractionTimeoutMs };
         controller.abort(timeoutError);
-        rejectDeadline(timeoutError);
+        rejectActiveDeadline(timeoutError);
       }, atomInteractionTimeoutMs);
       timeout.unref?.();
-    });
+    }
+    const sourceCommitted = result => {
+      if (businessPhase === 'source' && result?.ok === true && result?.changed === true) {
+        clearTimeout(timeout);
+        if (result.subsequentExecution?.status === 'pending') armBusinessDeadline('subsequent');
+        else businessPhase = 'settled';
+      }
+      settle(result);
+    };
+    const subsequentSettled = result => {
+      if (!['completed', 'failed'].includes(result?.subsequentExecution?.status)) return;
+      clearTimeout(timeout);
+      businessPhase = 'settled';
+      durableBusinessResult = structuredClone(result);
+      entry.receipt = Promise.resolve(durableBusinessResult);
+      settle(result);
+    };
+    armBusinessDeadline('source');
     trackAtomInteraction(async () => {
       try {
         const operationResult = Promise.resolve().then(() => (
-          operation(normalized, settle, controller.signal)
+          operation(normalized, sourceCommitted, controller.signal, subsequentSettled)
         ));
-        operationResult.catch(() => undefined);
+        operationResult.then(result => {
+          // The first caller keeps its source acknowledgement. Later reads see
+          // the completed operation, including completion after the deadline.
+          let final = result;
+          if (durableBusinessResult) {
+            final = { ...durableBusinessResult };
+            const projectionRevision = result?.projectionRecovery?.expectedRevision ?? result?.revisionAfter;
+            if (projectionRevision && projectionRevision === durableBusinessResult.revisionAfter) {
+              for (const field of ['projectionStatus', 'projectionRecovery', 'projectionFailure']) {
+                if (Object.hasOwn(result, field)) final[field] = result[field];
+              }
+            }
+            const auxiliaryWarnings = (result?.warnings ?? []).filter(warning => {
+              if (['ATOM_COMMITTED_NOTIFICATION_FAILED', 'ATOM_SUBSEQUENT_NOTIFICATION_FAILED'].includes(warning.code)) {
+                const correlationId = warning.correlationId ?? warning.details?.correlationId;
+                return typeof correlationId === 'string' && correlationId === durableBusinessResult.interactionId;
+              }
+              const warningRevision = warning.details?.expectedRevision ?? projectionRevision;
+              return ['PROJECTION_RECOVERY_PENDING', 'PROGRAM_PROJECTION_RECOVERY_PENDING', 'PROGRAM_PROJECTION_PERSIST_FAILED'].includes(warning.code)
+                && typeof warningRevision === 'string' && warningRevision === durableBusinessResult.revisionAfter;
+            });
+            if (auxiliaryWarnings.length) {
+              final.warnings = [...new Map([...(durableBusinessResult.warnings ?? []), ...auxiliaryWarnings]
+                .map(warning => [JSON.stringify(warning), warning])).values()];
+            }
+          }
+          entry.receipt = Promise.resolve(final);
+          settle(final);
+        }, () => undefined);
         const result = await Promise.race([operationResult, deadline]);
         settle(result);
         return result;
@@ -261,6 +345,32 @@ export async function createSpatialServer(options = {}) {
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://127.0.0.1');
+      if (url.pathname === '/__spatial/api/presentation-settings') {
+        const service = options.presentationSettingsService;
+        if (!service) return json(response, 404, { ok: false, error: { code: 'PRESENTATION_SETTINGS_UNAVAILABLE' } });
+        if (!['GET', 'PUT'].includes(request.method)) {
+          return json(response, 405, { ok: false, error: { code: 'METHOD_NOT_ALLOWED' } });
+        }
+        try {
+          if (request.method === 'GET') return json(response, 200, { ok: true, ...await service.read() });
+          const payload = await body(request);
+          presentationWriteOrigin(request, payload?.bootstrap === true);
+          const saved = await service.update(payload);
+          const message = `event: presentation-settings\ndata: ${JSON.stringify({ revision: saved.revision })}\n\n`;
+          for (const subscriber of [...knowledgeSubscribers]) {
+            try { subscriber.write(message); } catch { knowledgeSubscribers.delete(subscriber); }
+          }
+          return json(response, 200, { ok: true, ...saved });
+        } catch (error) {
+          const status = error.statusCode ?? (error instanceof SyntaxError || error.code === 'REQUEST_TOO_LARGE' ? 400 : 500);
+          const message = error.statusCode ? error.message
+            : status === 400 ? 'Invalid presentation settings request'
+              : 'Presentation settings could not be read or saved';
+          return json(response, status, { ok: false, error: {
+            code: error.code ?? (status === 400 ? 'INVALID_JSON' : 'PRESENTATION_SETTINGS_UNAVAILABLE'), message
+          } });
+        }
+      }
       if (request.method === 'OPTIONS') {
         response.writeHead(204, {
           'access-control-allow-origin': '*',
@@ -394,8 +504,8 @@ export async function createSpatialServer(options = {}) {
           return json(response, 404, { ok: false, error: { code: 'ATOM_COMMAND_UNAVAILABLE' } });
         }
         const payload = await body(request);
-        const result = await atomCommandRequest(payload, async (normalized, onCommitted, signal) => {
-          const commandResult = await options.atomCommand(normalized, { onCommitted, signal });
+        const result = await atomCommandRequest(payload, async (normalized, onCommitted, signal, onSubsequentSettled) => {
+          const commandResult = await options.atomCommand(normalized, { onCommitted, signal, onSubsequentSettled });
           if (commandResult?.changed !== false && graphFile && options.projectAtomKnowledge) {
             try {
               const document = JSON.parse(await fs.readFile(graphFile, 'utf8'));

@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
+import { executeAtomCommandEndpoint } from '../work-engine/atom-language/cli.mjs';
 import { createNightWatchCliFixture } from './night-watch-isolated-cli-fixture.mjs';
 
 function sha256(value) {
@@ -94,6 +95,10 @@ function diagnosticCodes(stderr) {
   return [...new Set([...stderr.matchAll(/(?:提示|错误)\s+([A-Z][A-Z0-9_]+)/gu)].map((match) => match[1]))];
 }
 
+function interactionId(stderr) {
+  return stderr.match(/^关联\s+(\S+)\s*$/mu)?.[1] ?? null;
+}
+
 function requireSuccess(result, label) {
   const blocking = diagnosticCodes(result.stderr).filter((code) => (
     code === 'PROGRAM_FUNCTION_DENIED' || code === 'ATOM_PROGRAM_FAILED'
@@ -124,11 +129,38 @@ async function main() {
   const endpoint = `${server.url}/__atom/api/command`;
   const agents = Object.freeze({ bootstrap: 'Bootstrap', synthetic: '🧊', journey: '旅程', noLabel: '无标签' });
   const evidence = [];
+  const finalReceipt = async (step, agent, source, first) => {
+    if (!diagnosticCodes(first.stderr).includes('ATOM_SUBSEQUENT_EXECUTION_PENDING')) return null;
+    const id = interactionId(first.stderr);
+    if (!id) throw cliError(`${step} pending receipt omitted its interaction id`, { step });
+    const deadline = Date.now() + 10_000;
+    let receipt;
+    do {
+      receipt = await executeAtomCommandEndpoint({
+        source,
+        interaction: { id, agentSelector: agent, agent: { path: agent } }
+      }, endpoint);
+      if (receipt.subsequentExecution?.status !== 'pending') break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    } while (Date.now() < deadline);
+    if (receipt?.subsequentExecution?.status !== 'completed') {
+      throw cliError(`${step} subsequent execution did not complete`, {
+        step,
+        interactionId: id,
+        status: receipt?.subsequentExecution?.status ?? null,
+        errors: receipt?.subsequentExecution?.errors ?? []
+      });
+    }
+    return receipt;
+  };
   const run = async (step, agent, source, expected = 'success') => {
     const args = ['--endpoint', endpoint, '--agent', agent, '--stdin'];
     const result = cliEntry
       ? await childProcess(process.execPath, [cliEntry, ...args], source)
       : await childProcess('atom.cmd', args, source);
+    if (expected === 'success') requireSuccess(result, step);
+    else requireFailure(result, step, expected);
+    const settled = expected === 'success' ? await finalReceipt(step, agent, source, result) : null;
     const entry = {
       step,
       outcome: expected === 'success' ? 'passed' : 'expected-fail-closed',
@@ -138,12 +170,14 @@ async function main() {
       stderrSha256: sha256(result.stderr),
       diagnosticCodes: diagnosticCodes(result.stderr),
       payload: safePayload(result.stdout),
+      ...(settled ? {
+        interactionId: settled.interactionId,
+        subsequentStatus: settled.subsequentExecution.status
+      } : {}),
       ...(expected === 'success' ? {} : { expectedError: expected })
     };
     evidence.push(entry);
     await fs.appendFile(path.join(evidenceDir, 'isolated-cli-live-attempts.jsonl'), `${JSON.stringify(entry)}\n`, 'utf8');
-    if (expected === 'success') requireSuccess(result, step);
-    else requireFailure(result, step, expected);
     return result;
   };
   const read = (step, agent, thing) => run(step, agent, `explore ${JSON.stringify({ thing, 'situation$full': true })}`);
@@ -200,16 +234,15 @@ async function main() {
     await run('lock.caret.transform', agents.journey, sourceReplace(lockedTargetPath, 'caret-authorized'));
     await read('lock.caret.read-back', agents.journey, lockedTargetPath);
     const shortcutProgramPath = `${activePath}/快捷Program`;
-    const shortcutTargetPath = `${shortcutProgramPath}/权威目标`;
+    const shortcutTargetPath = `${activePath}/权威目标`;
     const shortcutPath = `${shortcutProgramPath}/快捷入口`;
+    await create('shortcut.target.write', agents.journey, {
+      thing: shortcutTargetPath, situation: 'authoritative-shortcut-target', slot: [], strut: []
+    });
     await create('shortcut.program.write', agents.journey, programAtom(shortcutProgramPath, [
         `target = explore({"thing":${JSON.stringify(shortcutTargetPath)}})[0]`,
         'shortcut({"placement":"slot","thing":"快捷入口","target":target})'
     ].join('\n')));
-    await create('shortcut.target.write', agents.journey, {
-      thing: shortcutTargetPath, situation: 'authoritative-shortcut-target', slot: [], strut: []
-    });
-    await run('shortcut.program.run', agents.journey, sourceRun(shortcutProgramPath));
     await read('shortcut.read-back', agents.journey, shortcutPath);
 
     const bodyPath = `${activePath}/槽体`;

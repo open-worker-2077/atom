@@ -257,13 +257,6 @@ try {
   const restoredHealth = await restoredHealthResponse.json();
   const sourceContextUnchanged = await fs.readFile(sourceContext, 'utf8') === sourceContents;
   const result = {
-    ok: preRollback.ok
-      && sourceRevision === restoredRevision
-      && rollbackRevision === sourceRevision
-      && restoredHealthResponse.status === 200
-      && restoredHealth.ok === true
-      && restartPort !== 4784
-      && sourceContextUnchanged,
     ...preRollback,
     restartPort,
     rollbackOk: rollbackRevision === sourceRevision,
@@ -271,7 +264,14 @@ try {
     sourceRevisionRestored: sourceRevision === restoredRevision,
     sourceContextUnchanged,
     restartHealthOk: restoredHealthResponse.status === 200 && restoredHealth.ok === true,
-    ...(!cleanupCopy ? { tempDirectory: directory } : {})
+    ...(!cleanupCopy ? { tempDirectory: directory } : {}),
+    ok: preRollback.ok
+      && sourceRevision === restoredRevision
+      && rollbackRevision === sourceRevision
+      && restoredHealthResponse.status === 200
+      && restoredHealth.ok === true
+      && restartPort !== 4784
+      && sourceContextUnchanged
   };
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (!result.ok) process.exitCode = 1;

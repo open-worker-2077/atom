@@ -1,5 +1,6 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { diagnostic } from './errors.mjs';
 import {
   revisionOfWorldFacts,
@@ -135,6 +136,15 @@ export { executeProgramExplore } from './query-capability.mjs';
 
 function revisionOf(atoms) {
   return revisionOfWorldFacts(atoms).slice('sha256:'.length);
+}
+
+function worldChangedAtPaths(beforeAtoms, afterAtoms, paths) {
+  return [...new Set(paths.filter(Boolean))].some((targetPath) => (
+    !isDeepStrictEqual(
+      exactMatchAtPath(beforeAtoms, targetPath)?.atom,
+      exactMatchAtPath(afterAtoms, targetPath)?.atom
+    )
+  ));
 }
 
 function graphTypesAtPath(atoms, targetPath) {
@@ -455,6 +465,7 @@ async function validateAgentProgramDelegation({
   creatorSecurity,
   programScheduler,
   declarationRelocations = [],
+  restoredDeclarationSurface = null,
   simultaneousRelocations = false
 }) {
   if (JSON.stringify(programDeclarationSurface(beforeAtoms))
@@ -466,6 +477,9 @@ async function validateAgentProgramDelegation({
       === JSON.stringify(relocatedProgramDeclarationSurface(afterAtoms))) {
     return { ok: true, errors: [] };
   }
+  if (restoredDeclarationSurface
+    && JSON.stringify(programDeclarationSurface(afterAtoms).sort((left, right) => left.path.localeCompare(right.path)))
+      === restoredDeclarationSurface) return { ok: true, errors: [] };
   if (typeof programScheduler?.deriveAgentSecurity !== 'function') {
     return {
       ok: false,
@@ -748,6 +762,8 @@ async function persistChangedGraph({
   changedPaths = null,
   affectedAtoms = null,
   transformLogRecord = null,
+  postCommitEvent = null,
+  subsequentOf = null,
   compatibilityManifest,
   localizedSituationValidation = false,
   structurePreservingValidation = false
@@ -772,6 +788,8 @@ async function persistChangedGraph({
     facts: atoms,
     correlationId,
     source,
+    ...(postCommitEvent ? { postCommitEvent } : {}),
+    ...(subsequentOf ? { subsequentOf } : {}),
     ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
     ...(Array.isArray(affectedAtoms) ? { affectedAtoms } : {}),
     ...(transformLogRecord ? { transformLogRecord } : {})
@@ -782,11 +800,53 @@ async function persistChangedGraph({
   return receipt;
 }
 
-export async function executeAtomLanguage(options = {}) {
-  const postcommit = typeof options.onCommitted === 'function' ? [] : null;
-  const result = await executeAtomLanguageInteraction(options, postcommit);
-  if (postcommit?.length && result?.ok === true && result.changed === true) {
+async function notifyCommittedSafely(options, result) {
+  if (typeof options.onCommitted !== 'function') return [];
+  try {
     await options.onCommitted(structuredClone(result));
+    return [];
+  } catch (error) {
+    return [diagnostic('ATOM_COMMITTED_NOTIFICATION_FAILED',
+      '来源事实已提交，但回执通知失败；可用原交互标识重读结果',
+      { cause: error.code ?? error.message, correlationId: result.interactionId })];
+  }
+}
+
+function recoveredProgramResult(execution, atoms, { contextFile, projectionFile }, outcome, extras = {}) {
+  const { event, sourceReceipt } = execution;
+  const resultAt = selector => {
+    const match = exactMatchAtPath(atoms, selector);
+    return match ? describeAtom(match, false) : null;
+  };
+  return { ok: true, language: 'atom', command: 'transform', changed: true,
+    createNew: event.createNew === true, ...(event.batch ? { batch: true } : {}), contextFile, projectionFile,
+    revisionBefore: sourceReceipt.beforeRevision.replace(/^sha256:/u, ''),
+    revisionAfter: outcome.revisionAfter,
+    ...(event.batch ? { results: event.resultPaths.map((selector, index) => ({ index, changed: true, result: resultAt(selector) })) }
+      : { result: resultAt(event.resultPaths[0]) }),
+    ...(event.archive ? { archive: event.archive } : {}),
+    warnings: outcome.status === 'failed' ? [diagnostic('ATOM_SUBSEQUENT_EXECUTION_FAILED',
+      '来源事实已提交，但后续 Program 执行失败', { cause: outcome.errors?.[0]?.code })]
+      : outcome.status === 'pending' ? [diagnostic('ATOM_SUBSEQUENT_EXECUTION_PENDING',
+        '来源事实已提交；后续 Program 运行待恢复', { correlationId: `${sourceReceipt.correlationId}:subsequent` })] : [],
+    errors: [], messages: [], interactionId: sourceReceipt.correlationId,
+    affectedPaths: [...new Set([...(sourceReceipt.affectedAtoms ?? []), ...(execution.childReceipt?.affectedAtoms ?? [])]
+      .map(({ path }) => path))], lockState: [], ...extras, subsequentExecution: outcome };
+}
+
+export async function executeAtomLanguage(options = {}) {
+  const postcommit = typeof options.onCommitted === 'function'
+    || typeof options.onSubsequentSettled === 'function' ? [] : null;
+  let result = await executeAtomLanguageInteraction(options, postcommit);
+  if (postcommit?.length && postcommit.sourceNotified !== true
+    && result?.ok === true && result.changed === true) {
+    postcommit.sourceNotified = true;
+    result.warnings = mergeWarnings([...(result.warnings ?? []), ...await notifyCommittedSafely(options, result)]);
+  }
+  // Business execution ends before disposable projection work begins. Its owner
+  // can persist and publish the outcome without waiting for projection latency.
+  if (typeof options.onSubsequentSettled === 'function') {
+    result = await options.onSubsequentSettled(result) ?? result;
   }
   for (const finish of postcommit ?? []) {
     const warnings = await finish();
@@ -892,6 +952,15 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   const preparedTransformAtoms = atoms;
   const revisionBefore = revisionOf(atoms);
   let committedAffectedPaths = [];
+  if (options.programExecution?.outcome && options.programExecution.outcome.status !== 'pending') {
+    return recoveredProgramResult(options.programExecution, atoms, { contextFile, projectionFile }, options.programExecution.outcome);
+  }
+  if (options.programExecution?.event.enabled && !options.programScheduler) {
+    return recoveredProgramResult(options.programExecution, atoms, { contextFile, projectionFile }, {
+      status: 'pending', sourceRevision: options.programExecution.sourceReceipt.afterRevision.replace(/^sha256:/u, ''),
+      revisionAfter: revisionBefore, errors: []
+    });
+  }
   const legacyMetadata = legacyAtomContextMetadata(atoms);
   if (parsed.command === 'transform' && legacyMetadata?.mode === 'legacy-read-only') {
     return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
@@ -977,6 +1046,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       ...(details.slowestProgramDurationMs !== undefined ? {
         slowestProgramDurationMs: details.slowestProgramDurationMs
       } : {}),
+      ...(details.evidenceFailure ? { evidenceFailure: details.evidenceFailure } : {}),
       commitEntered: details.commitEntered === true
     });
     const terminalStage = details.outcome === 'failure'
@@ -1040,7 +1110,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       const reconcilePrograms = options.programMode === 'reconcile'
         || Boolean(requestedProgramRun?.selector);
       const projectPrograms = options.programMode === 'project';
-      const passivePrograms = options.programMode === 'passive';
+      const passivePrograms = options.programMode === 'passive' || Boolean(options.programExecution);
       const agentOwnsLocalPrograms = passivePrograms && initialAgentPath
         ? walkAtoms(atoms).some((match) => {
             const candidatePath = match.path.join('/');
@@ -1848,6 +1918,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   }
 
   let requestDeclarationRelocations = [];
+  let requestRestoredDeclarationSurface = null;
 
   async function validateRequestCandidate(
     candidateAtoms, declarationRelocations = requestDeclarationRelocations
@@ -1858,6 +1929,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       creatorSecurity,
       programScheduler: candidateProgramScheduler,
       declarationRelocations,
+      restoredDeclarationSurface: requestRestoredDeclarationSurface,
       simultaneousRelocations: parsed.batch && parsed.items.every(isBatchRenameItem)
     });
   }
@@ -1945,6 +2017,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       let nextAtoms = baseAtoms;
       const triggerPaths = [];
       const triggerContexts = [];
+      const changedPaths = [];
       const logs = [];
       for (const effect of normalized.filter((entry, index, entries) => (
         entries.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(entry)) === index
@@ -2061,6 +2134,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         }
         const before = revisionOf(nextAtoms);
         nextAtoms = appendNestedAtom(nextAtoms, source, authorization.atom);
+        changedPaths.push(`${effect.sourcePath}/${oneStoredField(authorization.atom, 'thing').value}`);
         triggerPaths.push(effect.sourcePath);
         triggerContexts.push({
           sourcePath: effect.sourcePath,
@@ -2079,6 +2153,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         changed: revisionOf(nextAtoms) !== revisionOf(baseAtoms),
         triggerPaths,
         triggerContexts,
+        changedPaths,
         logs
       };
     }
@@ -2285,7 +2360,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       const blockingFailure = (cycle.failures ?? []).find((failure) => (
         failure.blocking === true || failure.code === 'SLOT_SIGNAL_REQUIRED'
       ));
-      if ((failOnProgramFailure && (cycle.failures?.length ?? 0) > 0) || blockingFailure) {
+      if (((failOnProgramFailure || pendingTriggerEvent)
+        && (cycle.failures?.length ?? 0) > 0) || blockingFailure) {
         const failure = blockingFailure ?? cycle.failures[0];
         throw Object.assign(new Error(failure.message ?? '槽例派生重算失败'), {
           code: failure.code ?? 'ATOM_PROGRAM_FAILED',
@@ -2530,6 +2606,22 @@ async function executeAtomLanguageInteraction(options, postcommit) {
               };
             }
             if (reportFailure) {
+              if (pendingTriggerEvent) {
+                interactionWarnings.push(diagnostic(
+                  error.code ?? 'PROGRAM_TRANSFORM_FAILED',
+                  error.message,
+                  { program: entry.sourceProgramPath, ...(error.details ?? {}) }
+                ));
+                return {
+                  failed: true,
+                  fatal: {
+                    code: error.code ?? 'PROGRAM_TRANSFORM_FAILED',
+                    message: error.message,
+                    program: entry.sourceProgramPath,
+                    details: error.details ?? {}
+                  }
+                };
+              }
               rejected += 1;
               interactionWarnings.push(diagnostic(
                 error.code ?? 'PROGRAM_TRANSFORM_FAILED',
@@ -2556,6 +2648,24 @@ async function executeAtomLanguageInteraction(options, postcommit) {
               };
             }
             if (reportFailure) {
+              if (pendingTriggerEvent) {
+                interactionWarnings.push(diagnostic(
+                  'PROGRAM_TRANSFORM_REJECTED', transformed.error.message,
+                  { program: entry.sourceProgramPath, cause: transformed.error.code }
+                ));
+                return {
+                  failed: true,
+                  fatal: {
+                    code: 'PROGRAM_TRANSFORM_REJECTED',
+                    message: transformed.error.message,
+                    program: entry.sourceProgramPath,
+                    details: {
+                      cause: transformed.error.code,
+                      ...(transformed.error.details ?? {})
+                    }
+                  }
+                };
+              }
               rejected += 1;
               interactionWarnings.push(diagnostic(
                 'PROGRAM_TRANSFORM_REJECTED', transformed.error.message,
@@ -2607,7 +2717,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       if (application.fatal) {
         throw Object.assign(new Error(application.fatal.message), {
           code: application.fatal.code,
-          details: { program: application.fatal.program }
+          details: { program: application.fatal.program, ...(application.fatal.details ?? {}) }
         });
       }
       if (!application.failed) {
@@ -2626,7 +2736,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       if (application.fatal) {
         throw Object.assign(new Error(application.fatal.message), {
           code: application.fatal.code,
-          details: { program: application.fatal.program }
+          details: { program: application.fatal.program, ...(application.fatal.details ?? {}) }
         });
       }
       const appliedSlotBodies = [];
@@ -2744,6 +2854,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         reconciledAtoms = application.atoms;
         passChanged = true;
         for (const entry of appliedShortcuts) {
+          if (entry.shortcut.resultPath) programChangedPaths.add(entry.shortcut.resultPath);
           transformLogs.push({
             id: crypto.randomUUID(), operation: 'program-shortcut',
             source: entry.effect.action === 'delete'
@@ -2778,10 +2889,20 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           ...(authorization.logs ?? []),
           ...(jump.logs ?? [])
         );
+        for (const changedPath of authorization.changedPaths ?? []) {
+          programChangedPaths.add(changedPath);
+        }
         for (const relocation of jump.relocations ?? []) {
           pathChanges.push(relocation);
         }
         for (const entry of appliedSlotBodies) {
+          for (const changedPath of [
+            entry.receipt?.body,
+            entry.receipt?.target,
+            ...(entry.receipt?.recompute_targets ?? [])
+          ]) {
+            if (changedPath) programChangedPaths.add(changedPath);
+          }
           transformLogs.push({
             id: crypto.randomUUID(),
             operation: `slot-body-${entry.effect.action}`,
@@ -2891,6 +3012,16 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     return runtimeWarnings;
   }
 
+  let sourceCommandId = options.programExecution?.sourceReceipt?.commandId ?? null;
+  let unchangedSourceEvent = null;
+  function postCommitEvent(trigger, resultPaths, extra = {}) {
+    return { ...structuredClone(trigger), resultPaths: resultPaths.filter(Boolean),
+      interaction: { id: interaction.id, agent: interaction.agent?.path ? { path: interaction.agent.path } : null },
+      binding: options.interactionBinding ?? JSON.stringify({ source, agent: interaction.agent?.path ?? null }),
+      enabled: Boolean(options.programScheduler) && options.trustedMaintenance !== true,
+      ...extra };
+  }
+
   async function commitChangedGraph(candidateAtoms, {
     projectionRebase = null,
     changedPaths = projectionRebase?.changedPaths ?? null,
@@ -2898,15 +3029,41 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     transformLogRecord = null,
     localizedSituationValidation = false,
     structurePreservingValidation = false,
-    preparedRuntimeRecordsPromise = null
+    preparedRuntimeRecordsPromise = null,
+    expectedRevision = revisionBefore,
+    correlationId = interaction.id,
+    allowEmpty = false,
+    subsequent = false,
+    postCommitEvent: sourceEvent = null
   } = {}) {
+    function rememberCommittedAffectedPaths(commitReceipt) {
+      const affected = commitReceipt?.affectedAtoms ?? commitReceipt?.result?.affectedAtoms ?? [];
+      committedAffectedPaths = [...new Set([
+        ...committedAffectedPaths,
+        ...affected.map(({ path }) => path).filter(Boolean)
+      ])].sort();
+    }
     const delegated = await validateRequestCandidate(candidateAtoms);
     if (!delegated.ok) {
+      if (subsequent) {
+        const first = delegated.errors[0] ?? diagnostic(
+          'INVALID_AGENT_DELEGATION', 'Agent Program declaration change was rejected'
+        );
+        throw Object.assign(new Error(first.message), {
+          code: first.code,
+          details: first.details ?? {},
+          diagnostics: delegated.errors
+        });
+      }
       return {
         authorizationFailure: failureBase(
           parsed, contextFile, projectionFile, requestStartAtoms, delegated.errors
         )
       };
+    }
+    if (subsequent && !sourceCommandId && unchangedSourceEvent) {
+      sourceEvent = { ...unchangedSourceEvent, sourceChanged: false, effectsCommitted: true };
+      correlationId = interaction.id;
     }
     const commitStartedAt = performance.now();
     let receipt = null;
@@ -2917,8 +3074,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         projectionFile,
         rootName: path.basename(contextFile),
         commitWorld: options.commitWorld,
-        expectedRevision: revisionBefore,
-        correlationId: interaction.id,
+        expectedRevision,
+        correlationId,
         source,
         changedPaths,
         affectedAtoms: affectedAtoms ?? (Array.isArray(changedPaths) ? changedPaths.map((path) => ({
@@ -2926,20 +3083,39 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           axes: ['slot', 'situation', 'strut', 'thing']
         })) : null),
         transformLogRecord,
+        postCommitEvent: sourceEvent,
+        subsequentOf: subsequent ? sourceCommandId : null,
         compatibilityManifest: options.compatibilityManifest,
         localizedSituationValidation,
         structurePreservingValidation
       });
-      committedAffectedPaths = [...new Set((receipt?.affectedAtoms ?? [])
-        .map(({ path }) => path)
-        .filter(Boolean))].sort();
+      rememberCommittedAffectedPaths(receipt);
+      if (sourceEvent) sourceCommandId = receipt?.commandId ?? null;
     } catch (error) {
-      releaseStrutDeliveryClaims();
-      await recordTransformStage('commit', commitStartedAt, {
-        commitEntered: true,
-        outcome: 'failure'
-      });
-      throw error;
+      if (allowEmpty && error?.code === 'EMPTY_WORLD_PATCH') {
+        confirmStrutDeliveryClaims();
+        return null;
+      }
+      if (subsequent && error?.details?.receipt?.afterRevision) {
+        rememberCommittedAffectedPaths(error.details.receipt);
+        confirmStrutDeliveryClaims();
+        error.committedReceipt = error.details.receipt;
+        throw error;
+      }
+      if (sourceEvent && error?.details?.receipt?.afterRevision) {
+        receipt = error.details.receipt;
+        sourceCommandId = receipt.commandId;
+        rememberCommittedAffectedPaths(receipt);
+        interactionWarnings.push(diagnostic(error.code ?? 'WORLD_COMMITTED_AUXILIARY_PENDING',
+          error.message, { cause: error.details.cause, sourceCommandId }));
+      } else {
+        releaseStrutDeliveryClaims();
+        await recordTransformStage('commit', commitStartedAt, {
+          commitEntered: true,
+          outcome: 'failure'
+        });
+        throw error;
+      }
     }
     confirmStrutDeliveryClaims();
     await recordTransformStage('commit', commitStartedAt, { commitEntered: true });
@@ -2957,8 +3133,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     }
     if (!committedAffectedPaths.length) {
       committedAffectedPaths = Array.isArray(changedPaths)
-        ? [...new Set(changedPaths.filter(Boolean))].sort()
-        : [];
+        ? [...new Set([...committedAffectedPaths, ...changedPaths.filter(Boolean)])].sort()
+        : committedAffectedPaths;
     }
     if (derivedRecoveryPending) {
       await recordTransformStage('program-projection', performance.now(), {
@@ -3030,6 +3206,39 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     return receipt;
   }
 
+  async function notifySourceCommitted(result) {
+    if (!postcommit || postcommit.sourceNotified === true) return;
+    postcommit.sourceNotified = true;
+    interactionWarnings.push(...await notifyCommittedSafely(options, result));
+  }
+
+  async function subsequentFailureDetails(error) {
+    releaseStrutDeliveryClaims();
+    const latestAtoms = await readAtomContext(contextFile, {
+      compatibilityManifest: options.compatibilityManifest
+    });
+    const errors = Array.isArray(error?.diagnostics) && error.diagnostics.length > 0
+      ? structuredClone(error.diagnostics)
+      : [diagnostic(error?.code ?? 'ATOM_PROGRAM_FAILED', error?.message ?? String(error), {
+          ...(error?.details ?? {})
+        })];
+    const revisionAfter = revisionOf(latestAtoms);
+    const committed = Boolean(error?.committedReceipt?.afterRevision);
+    return {
+      latestAtoms,
+      revisionAfter,
+      status: committed ? 'completed' : 'failed',
+      errors: committed ? [] : errors,
+      warning: committed
+        ? errors[0]
+        : diagnostic(
+            'ATOM_SUBSEQUENT_EXECUTION_FAILED',
+            '来源事实已提交，但后续 Program 执行失败',
+            { cause: errors[0].code }
+          )
+    };
+  }
+
   function rewritePath(initialPath, pathChanges) {
     return pathChanges.reduce((currentPath, change) => {
       if (currentPath === change.sourcePath
@@ -3094,6 +3303,49 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       }
     }
     return [...rewrittenRecipientPaths];
+  }
+
+  if (options.programExecution) {
+    const execution = options.programExecution;
+    const { event } = execution;
+    const sourceRevision = execution.sourceReceipt.afterRevision.replace(/^sha256:/u, '');
+    let refreshed = { atoms, lockIndex: programLockIndex, messages: [], transformLogs: [], pathChanges: [], changedPaths: [] };
+    try {
+      if (event.interaction.agent?.path && !exactMatchAtPath(atoms, event.interaction.agent.path)) {
+        throw Object.assign(new Error('原交互 Agent 在当前世界中已不存在'), { code: 'PROGRAM_SOURCE_AGENT_NOT_FOUND' });
+      }
+      for (const selector of event.resultPaths) {
+        const match = exactMatchAtPath(atoms, selector);
+        if (!match) throw Object.assign(new Error(`后续执行来源已不存在：${selector}`), { code: 'PROGRAM_SOURCE_PATH_NOT_FOUND' });
+        const decision = await accessController.authorize(match, 'write');
+        if (decision.decision !== 'allow') throw Object.assign(new Error('当前 Agent 无权恢复来源后续执行'), {
+          code: decision.code ?? 'WINDOW_ACCESS_DENIED'
+        });
+      }
+      if (event.enabled) {
+        const { mode, nodes, affectedPaths, action } = event;
+        refreshed = await reconcileProgramsForWorld(atoms, { mode, nodes, affectedPaths, ...(action ? { action } : {}) });
+      }
+      const changedPaths = programRefreshPatchPaths(refreshed);
+      if (worldChangedAtPaths(atoms, refreshed.atoms, changedPaths)) {
+        const receipt = await commitChangedGraph(refreshed.atoms, { changedPaths,
+          expectedRevision: revisionBefore, correlationId: `${interaction.id}:subsequent`, subsequent: true, allowEmpty: true });
+        execution.childReceipt = receipt;
+      } else confirmStrutDeliveryClaims();
+      for (const record of refreshed.transformLogs) {
+        await appendTransformLog(contextFile, record).catch(error => interactionWarnings.push(diagnostic(
+          'TRANSFORM_LOG_APPEND_FAILED', '后续事实已提交，但辅助日志写入失败', { cause: error.code ?? error.message })));
+      }
+      execution.event = { ...event, resultPaths: event.resultPaths.map(selector => rewritePath(selector, refreshed.pathChanges)) };
+      return recoveredProgramResult(execution, refreshed.atoms, { contextFile, projectionFile }, {
+        status: 'completed', sourceRevision, revisionAfter: revisionOf(refreshed.atoms), errors: []
+      }, { messages: refreshed.messages, warnings: interactionWarnings, lockState: programLockState(refreshed.lockIndex) });
+    } catch (error) {
+      const failure = await subsequentFailureDetails(error);
+      return recoveredProgramResult(execution, failure.latestAtoms, { contextFile, projectionFile }, {
+        status: failure.status, sourceRevision, revisionAfter: failure.revisionAfter, errors: failure.errors
+      }, { warnings: mergeWarnings(interactionWarnings, failure.warning) });
+    }
   }
 
   if (programChanged && (
@@ -3373,9 +3625,78 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     }
     let revisionAfter = revisionOf(nextAtoms);
     let changed = revisionAfter !== revisionBefore;
+    const sourceChanged = changed;
+    let sourceRevision = revisionBefore;
+    let sourceAtoms = structuredClone(nextAtoms);
     requestDeclarationRelocations = batchDeclarationRelocations;
     let finalProgramLockIndex = programLockIndex;
     const finalProgramMessages = [];
+    let subsequentChanged = false;
+    let subsequentChangedPaths = [];
+    unchangedSourceEvent = postCommitEvent({ mode: 'transform',
+          nodes: [...(renameBatch ? renameEventNodes : transformEventNodes)], affectedPaths: [...transformEventNodes] },
+        results.map(({ result }) => result?.path), { batch: true,
+          enabled: Boolean(options.programScheduler) && options.trustedMaintenance !== true
+            && (requestDeclarationRelocations.length === 0 || renameBatch) });
+    if (sourceChanged) {
+      const sourceProgramSurfaceChanged = [...transformEventNodes].some((targetPath) => (
+        subtreeSlotsTypedProgram(exactMatchAtPath(atoms, targetPath)?.atom)
+        || subtreeSlotsTypedProgram(exactMatchAtPath(nextAtoms, targetPath)?.atom)
+      ));
+      const compiled = await validatePrograms(
+        nextAtoms, contextFile, atoms, candidateProgramScheduler
+      );
+      interactionWarnings.push(...compiled.warnings);
+      if (!compiled.ok) {
+        releaseStrutDeliveryClaims();
+        return failureBase(parsed, contextFile, projectionFile, atoms, compiled.errors);
+      }
+      const delegated = await validateRequestCandidate(nextAtoms, batchDeclarationRelocations);
+      if (!delegated.ok) {
+        releaseStrutDeliveryClaims();
+        return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
+      }
+      const sourceReceipt = await commitChangedGraph(nextAtoms, {
+        changedPaths: [...transformEventNodes],
+        ...(!sourceProgramSurfaceChanged ? {
+          projectionRebase: {
+            previousAtoms: atoms,
+            changedPaths: [...transformEventNodes]
+          }
+        } : {}),
+        postCommitEvent: unchangedSourceEvent
+      });
+      if (sourceReceipt?.authorizationFailure) return sourceReceipt.authorizationFailure;
+      sourceRevision = sourceReceipt?.afterRevision?.replace(/^sha256:/u, '')
+        ?? revisionOf(nextAtoms);
+      revisionAfter = sourceRevision;
+      sourceAtoms = structuredClone(nextAtoms);
+      for (const record of transformLogs) {
+        try {
+          await appendTransformLog(contextFile, { ...record, revisionAfter: sourceRevision });
+        } catch (error) {
+          interactionWarnings.push(diagnostic('TRANSFORM_LOG_APPEND_FAILED',
+            '来源事实已提交，但辅助变更日志未能写入',
+            { cause: error.code ?? error.message }));
+        }
+      }
+      await notifySourceCommitted({
+        ok: true, language: 'atom', command: 'transform', batch: true,
+        createNew: false, changed: true, contextFile, projectionFile,
+        revisionBefore, revisionAfter: sourceRevision, results,
+        warnings: mergeWarnings(interactionWarnings, diagnostic(
+          'ATOM_SUBSEQUENT_EXECUTION_PENDING',
+          '来源事实已提交；后续 Program 运行待完成',
+          { correlationId: `${interaction.id}:subsequent` }
+        )), errors: [],
+        messages: [...interactionMessages], interactionId: interaction.id,
+        affectedPaths: committedAffectedPaths,
+        lockState: programLockState(programLockIndex),
+        subsequentExecution: {
+          status: 'pending', sourceRevision, revisionAfter: sourceRevision, errors: []
+        }
+      });
+    }
     if (options.programScheduler && options.trustedMaintenance !== true
       && (requestDeclarationRelocations.length === 0 || renameBatch)) {
       let reconciled;
@@ -3386,9 +3707,25 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         });
       } catch (error) {
         releaseStrutDeliveryClaims();
-        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+        const failure = diagnostic(
           error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
-        )]);
+        );
+        return {
+          ok: true, language: 'atom', command: 'transform', batch: true,
+          createNew: false, changed: sourceChanged, contextFile, projectionFile,
+          revisionBefore, revisionAfter: sourceRevision, results,
+          warnings: mergeWarnings(interactionWarnings, diagnostic(
+            'ATOM_SUBSEQUENT_EXECUTION_FAILED',
+            '来源事实已提交，但后续 Program 执行失败',
+            { cause: failure.code }
+          )), errors: [],
+          messages: [...interactionMessages], interactionId: interaction.id,
+          affectedPaths: committedAffectedPaths,
+          lockState: programLockState(programLockIndex),
+          subsequentExecution: {
+            status: 'failed', sourceRevision, revisionAfter: sourceRevision, errors: [failure]
+          }
+        };
       }
       nextAtoms = reconciled.atoms;
       finalProgramLockIndex = reconciled.lockIndex;
@@ -3406,8 +3743,14 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           receipt.result.selector = rewritten;
         }
       }
-      revisionAfter = revisionOf(nextAtoms);
-      changed = revisionAfter !== revisionBefore;
+      changed = sourceChanged
+        || reconciled.transformLogs.length > 0
+        || reconciled.pathChanges.length > 0;
+      subsequentChanged = worldChangedAtPaths(sourceAtoms, nextAtoms, [
+        ...transformEventNodes,
+        ...programRefreshPatchPaths(reconciled)
+      ]);
+      subsequentChangedPaths = programRefreshPatchPaths(reconciled);
     }
     const finalMatchesByPath = new Map(walkAtoms(nextAtoms).map((match) => [
       match.path.join('/'), match
@@ -3416,31 +3759,50 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       const finalMatch = finalMatchesByPath.get(receipt.result?.path);
       if (finalMatch) receipt.result = describeAtom(finalMatch, false);
     }
-    if (changed) {
-      const compiled = await validatePrograms(
-        nextAtoms, contextFile, atoms, candidateProgramScheduler
-      );
-      interactionWarnings.push(...compiled.warnings);
-      if (!compiled.ok) {
-        releaseStrutDeliveryClaims();
-        return failureBase(parsed, contextFile, projectionFile, atoms, compiled.errors);
-      }
-      const programSurfaceChanged = [...transformEventNodes].some((targetPath) => (
-        subtreeSlotsTypedProgram(exactMatchAtPath(atoms, targetPath)?.atom)
-        || subtreeSlotsTypedProgram(exactMatchAtPath(nextAtoms, targetPath)?.atom)
-      ));
-      if (programSurfaceChanged) {
-        const delegated = await validateRequestCandidate(nextAtoms, batchDeclarationRelocations);
-        if (!delegated.ok) {
-          releaseStrutDeliveryClaims();
-          return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
+    const effectsChanged = subsequentChanged;
+    if (effectsChanged) {
+      try {
+        const commitReceipt = await commitChangedGraph(nextAtoms, {
+          changedPaths: [...new Set([
+            ...transformEventNodes,
+            ...subsequentChangedPaths
+          ])],
+          expectedRevision: sourceRevision,
+          correlationId: `${interaction.id}:subsequent`,
+          allowEmpty: true,
+          subsequent: true
+        });
+        revisionAfter = commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
+          ?? revisionOf(nextAtoms);
+      } catch (error) {
+        const failed = await subsequentFailureDetails(error);
+        const latestMatches = new Map(walkAtoms(failed.latestAtoms).map((match) => [
+          match.path.join('/'), match
+        ]));
+        for (const receipt of results) {
+          const latest = latestMatches.get(receipt.result?.path);
+          if (latest) receipt.result = describeAtom(latest, false);
         }
+        return {
+          ok: true, language: 'atom', command: 'transform', batch: true,
+          createNew: false, changed: sourceChanged || failed.status === 'completed', contextFile, projectionFile,
+          revisionBefore, revisionAfter: failed.revisionAfter, results,
+          warnings: mergeWarnings(interactionWarnings, failed.warning), errors: [],
+          messages: [
+            ...interactionMessages,
+            ...(failed.status === 'completed' ? finalProgramMessages : [])
+          ], interactionId: interaction.id,
+          affectedPaths: committedAffectedPaths,
+          lockState: programLockState(
+            failed.status === 'completed' ? finalProgramLockIndex : programLockIndex
+          ),
+          subsequentExecution: {
+            status: failed.status, sourceRevision, revisionAfter: failed.revisionAfter,
+            errors: failed.errors
+          }
+        };
       }
-      const commitReceipt = await commitChangedGraph(nextAtoms, {
-        changedPaths: [...transformEventNodes]
-      });
-      if (commitReceipt?.authorizationFailure) return commitReceipt.authorizationFailure;
-      for (const record of [...programTransformLogs, ...transformLogs]) {
+      for (const record of programTransformLogs) {
         try {
           await appendTransformLog(contextFile, {
             ...record,
@@ -3454,8 +3816,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           ));
         }
       }
+    } else {
+      confirmStrutDeliveryClaims();
     }
-    if (!changed) confirmStrutDeliveryClaims();
     return {
       ok: true,
       language: 'atom',
@@ -3473,7 +3836,10 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       messages: [...interactionMessages, ...finalProgramMessages],
       interactionId: interaction.id,
       affectedPaths: committedAffectedPaths,
-      lockState: programLockState(finalProgramLockIndex)
+      lockState: programLockState(finalProgramLockIndex),
+      subsequentExecution: {
+        status: 'completed', sourceRevision, revisionAfter, errors: []
+      }
     };
   }
   const [item] = parsed.items;
@@ -3509,7 +3875,41 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         releaseStrutDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, delegated.errors);
       }
+    } else {
+      confirmStrutDeliveryClaims();
     }
+    const sourceReceipt = await commitChangedGraph(nextAtoms, {
+      changedPaths: [created.resultPath],
+      ...(!subtreeSlotsTypedProgram(exactMatchAtPath(nextAtoms, created.resultPath)?.atom) ? {
+        projectionRebase: {
+          previousAtoms: atoms,
+          changedPaths: [created.resultPath]
+        }
+      } : {}),
+      postCommitEvent: postCommitEvent({ mode: 'transform', nodes: [created.resultPath], affectedPaths: [created.resultPath] },
+        [created.resultPath], { createNew: true })
+    });
+    if (sourceReceipt?.authorizationFailure) return sourceReceipt.authorizationFailure;
+    const sourceRevision = sourceReceipt?.afterRevision?.replace(/^sha256:/u, '')
+      ?? revisionOf(nextAtoms);
+    const sourceAtoms = structuredClone(nextAtoms);
+    await notifySourceCommitted({
+      ok: true, language: 'atom', command: 'transform', createNew: true,
+      changed: true, contextFile, projectionFile, revisionBefore,
+      revisionAfter: sourceRevision,
+      result: describeAtom(exactMatchAtPath(nextAtoms, created.resultPath), false),
+      warnings: mergeWarnings(interactionWarnings, diagnostic(
+        'ATOM_SUBSEQUENT_EXECUTION_PENDING',
+        '来源事实已提交；后续 Program 运行待完成',
+        { correlationId: `${interaction.id}:subsequent` }
+      )), errors: [],
+      messages: [...interactionMessages], interactionId: interaction.id,
+      affectedPaths: committedAffectedPaths,
+      lockState: programLockState(programLockIndex),
+      subsequentExecution: {
+        status: 'pending', sourceRevision, revisionAfter: sourceRevision, errors: []
+      }
+    });
     let postRefresh = {
       atoms: nextAtoms,
       lockIndex: programLockIndex,
@@ -3526,9 +3926,26 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         nextAtoms = postRefresh.atoms;
       } catch (error) {
         releaseStrutDeliveryClaims();
-        return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+        const failure = diagnostic(
           error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
-        )]);
+        );
+        return {
+          ok: true, language: 'atom', command: 'transform', createNew: true,
+          changed: true, contextFile, projectionFile, revisionBefore,
+          revisionAfter: sourceRevision,
+          result: describeAtom(exactMatchAtPath(nextAtoms, created.resultPath), false),
+          warnings: mergeWarnings(interactionWarnings, diagnostic(
+            'ATOM_SUBSEQUENT_EXECUTION_FAILED',
+            '来源事实已提交，但后续 Program 执行失败',
+            { cause: failure.code }
+          )), errors: [],
+          messages: [...interactionMessages], interactionId: interaction.id,
+          affectedPaths: committedAffectedPaths,
+          lockState: programLockState(programLockIndex),
+          subsequentExecution: {
+            status: 'failed', sourceRevision, revisionAfter: sourceRevision, errors: [failure]
+          }
+        };
       }
     }
     const finalCreatePath = rewritePath(created.resultPath, postRefresh.pathChanges);
@@ -3536,18 +3953,60 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       created.resultPath,
       ...programRefreshPatchPaths(postRefresh)
     ].filter(Boolean);
-    const canRebaseCreateProjection = programTransformLogs.length === 0
-      && postRefresh.transformLogs.length === 0
-      && postRefresh.pathChanges.length === 0;
-    const commitReceipt = await commitChangedGraph(nextAtoms, canRebaseCreateProjection ? {
-      projectionRebase: {
-        previousAtoms: atoms,
-        changedPaths: createChangedPaths
+    const effectsChanged = worldChangedAtPaths(
+      sourceAtoms, nextAtoms, programRefreshPatchPaths(postRefresh)
+    );
+    let revisionAfter = sourceRevision;
+    if (effectsChanged) {
+      try {
+        const commitReceipt = await commitChangedGraph(nextAtoms, {
+          changedPaths: createChangedPaths,
+          expectedRevision: sourceRevision,
+          correlationId: `${interaction.id}:subsequent`,
+          allowEmpty: true,
+          subsequent: true
+        });
+        revisionAfter = commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
+          ?? revisionOf(nextAtoms);
+      } catch (error) {
+        const failed = await subsequentFailureDetails(error);
+        const latest = exactMatchAtPath(
+          failed.latestAtoms,
+          failed.status === 'completed' ? finalCreatePath : created.resultPath
+        );
+        return {
+          ok: true, language: 'atom', command: 'transform', createNew: true,
+          changed: true, contextFile, projectionFile, revisionBefore,
+          revisionAfter: failed.revisionAfter,
+          result: latest ? describeAtom(latest, false) : null,
+          warnings: mergeWarnings(interactionWarnings, failed.warning), errors: [],
+          messages: [
+            ...interactionMessages,
+            ...(failed.status === 'completed' ? postRefresh.messages : [])
+          ], interactionId: interaction.id,
+          affectedPaths: committedAffectedPaths,
+          lockState: programLockState(
+            failed.status === 'completed' ? postRefresh.lockIndex : programLockIndex
+          ),
+          subsequentExecution: {
+            status: failed.status, sourceRevision, revisionAfter: failed.revisionAfter,
+            errors: failed.errors
+          }
+        };
       }
-    } : { changedPaths: createChangedPaths });
-    if (commitReceipt?.authorizationFailure) return commitReceipt.authorizationFailure;
+    } else {
+      confirmStrutDeliveryClaims();
+    }
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
-      await appendTransformLog(contextFile, record);
+      try {
+        await appendTransformLog(contextFile, record);
+      } catch (error) {
+        interactionWarnings.push(diagnostic(
+          'TRANSFORM_LOG_APPEND_FAILED',
+          '后续 effects 已提交，但辅助变更日志未能写入',
+          { cause: error.code ?? error.name }
+        ));
+      }
     }
     return {
       ok: true,
@@ -3558,8 +4017,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       contextFile,
       projectionFile,
       revisionBefore,
-      revisionAfter: commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
-        ?? revisionOf(nextAtoms),
+      revisionAfter,
       result: describeAtom(
         exactMatchAtPath(nextAtoms, finalCreatePath) ?? walkAtoms(nextAtoms).at(-1),
         false
@@ -3569,7 +4027,10 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       messages: [...interactionMessages, ...postRefresh.messages],
       interactionId: interaction.id,
       affectedPaths: committedAffectedPaths,
-      lockState: programLockState(postRefresh.lockIndex)
+      lockState: programLockState(postRefresh.lockIndex),
+      subsequentExecution: {
+        status: 'completed', sourceRevision, revisionAfter, errors: []
+      }
     };
   }
 
@@ -3579,6 +4040,14 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     return failureBase(parsed, contextFile, projectionFile, atoms, [run.error]);
   }
   if (run) {
+    const explicitRunErrors = interactionWarnings.filter((error) => (
+      error.code === 'ATOM_PROGRAM_FAILED'
+      || error.code === 'PROGRAM_TRANSFORM_REJECTED'
+      || error.code === 'PROGRAM_EFFECT_REJECTED'
+    ));
+    if (explicitRunErrors.length > 0) {
+      return failureBase(parsed, contextFile, projectionFile, atoms, explicitRunErrors);
+    }
     let nextAtoms = atoms;
     let revisionAfter = revisionOf(nextAtoms);
     let changed = programChanged;
@@ -3709,6 +4178,40 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   }
 
   let nextAtoms = transformed.atoms;
+  const pureRestore = item.fields.length === 1 && item.fields[0].baseKey === 'thing'
+    && item.fields[0].commands.length === 1 && item.fields[0].commands[0].name === 'rst';
+  if (pureRestore && transformed.logRecord?.operation === 'restore'
+    && typeof options.readDiscardEvidence === 'function') {
+    const identity = { discardId: transformed.logRecord.discardId,
+      archivePath: transformed.sourcePath, originalPath: transformed.resultPath };
+    let evidence = null;
+    try { evidence = await options.readDiscardEvidence(identity); } catch (error) {
+      const cause = error?.details?.cause ?? error?.cause?.code ?? error?.cause;
+      await recordTransformStage('transform-apply', transformApplyStartedAt, {
+        outcome: 'failure',
+        evidenceFailure: {
+          code: typeof error?.code === 'string' ? error.code : (error?.name ?? 'DISCARD_EVIDENCE_READ_FAILED'),
+          ...(typeof cause === 'string' ? { cause } : {})
+        }
+      });
+    }
+    const archived = exactMatchAtPath(requestStartAtoms, identity.archivePath)?.atom;
+    const surface = (atom) => programDeclarationSurface([atom])
+      .map((declaration) => ({ ...declaration, path: declaration.path.split('/').slice(1).join('/') }))
+      .sort((left, right) => left.path.localeCompare(right.path));
+    if (archived && evidence?.archivedAtom && evidence.originalAtom
+      && Object.entries(identity).every(([key, value]) => evidence[key] === value)
+      && JSON.stringify(surface(evidence.originalAtom)) === JSON.stringify(surface(evidence.archivedAtom))
+      && JSON.stringify(surface(archived)) === JSON.stringify(surface(evidence.archivedAtom))) {
+      // Journal-backed existing declarations only change location. Keep source
+      // bytes and recheck the entire candidate at every validation/commit boundary.
+      requestRestoredDeclarationSurface = JSON.stringify(programDeclarationSurface(requestStartAtoms)
+        .map((declaration) => ({ ...declaration,
+          path: declaration.path === identity.archivePath || declaration.path.startsWith(`${identity.archivePath}/`)
+            ? `${identity.originalPath}${declaration.path.slice(identity.archivePath.length)}` : declaration.path
+        })).sort((left, right) => left.path.localeCompare(right.path)));
+    }
+  }
   let revisionAfter = revisionBefore;
   let changed = transformed.changed === true || programChanged;
   const declarationRelocations = (transformed.structuralCommand === 'mov' || isBatchRenameItem(item))
@@ -3770,6 +4273,91 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       source: options.interactionSource ?? 'cli'
     })
     : null;
+  const sourceChanged = changed;
+  let sourceAtoms = structuredClone(nextAtoms);
+  let sourceRevision = revisionBefore;
+  const sourceTransformLogRecord = transformed.logRecord && sourceChanged ? {
+    ...transformed.logRecord,
+    revisionBefore,
+    revisionAfter: sealWorldFactsRevision(nextAtoms).slice('sha256:'.length)
+  } : null;
+  unchangedSourceEvent = postCommitEvent({ mode: 'transform',
+    ...(transformAction ? { action: transformAction } : {}),
+    affectedPaths: isBatchRenameItem(item)
+      ? [transformed.sourcePath, transformed.resultPath].filter(Boolean) : transformAffectedPaths,
+    nodes: [...new Set([transformed.sourcePath, transformed.resultPath, transformed.resultName,
+      ...(programSurfaceChanged && !isBatchRenameItem(item) ? newlyAddedProgramPaths(atoms, nextAtoms) : [])].filter(Boolean))]
+  }, [transformed.resultPath ?? transformed.resultName], {
+    enabled: Boolean(options.programScheduler) && options.trustedMaintenance !== true
+      && (declarationRelocations.length === 0 || isBatchRenameItem(item)),
+    ...(transformed.archive ? { archive: structuredClone(transformed.archive) } : {})
+  });
+  if (sourceChanged) {
+    if (!programSurfaceChanged && isLocalizedSituationTransform(item)) {
+      inheritPreparedAccessWorld(atoms, nextAtoms);
+    }
+    const sourceReceipt = await commitChangedGraph(nextAtoms, {
+      changedPaths: transformAffectedPaths,
+      ...(!programSurfaceChanged ? {
+        projectionRebase: {
+          previousAtoms: atoms,
+          changedPaths: transformAffectedPaths
+        }
+      } : {}),
+      localizedSituationValidation: !programSurfaceChanged
+        && isLocalizedSituationTransform(item),
+      structurePreservingValidation: !programSurfaceChanged
+        && isStructurePreservingTransform(item),
+      transformLogRecord: sourceTransformLogRecord,
+      postCommitEvent: unchangedSourceEvent
+    });
+    if (sourceReceipt?.authorizationFailure) return sourceReceipt.authorizationFailure;
+    sourceRevision = sourceReceipt?.afterRevision?.replace(/^sha256:/u, '')
+      ?? revisionOf(nextAtoms);
+    revisionAfter = sourceRevision;
+    sourceAtoms = structuredClone(nextAtoms);
+    if (sourceTransformLogRecord) {
+      try {
+        await appendTransformLog(contextFile, sourceTransformLogRecord);
+      } catch (error) {
+        if (sourceReceipt?.result?.transformLogRecord?.id !== sourceTransformLogRecord.id) throw error;
+        interactionWarnings.push(diagnostic(
+          'TRANSFORM_LOG_MIRROR_FAILED',
+          '事实与可逆记录已由中央事务提交，但辅助 Transform 日志镜像写入失败',
+          { cause: error.code ?? error.name }
+        ));
+      }
+    }
+    const sourceMatch = walkAtoms(nextAtoms).find((match) => (
+      match.path.join('/') === (transformed.resultPath ?? transformed.resultName)
+    ));
+    await notifySourceCommitted({
+      ok: true,
+      language: 'atom',
+      command: 'transform',
+      createNew: false,
+      changed: true,
+      contextFile,
+      projectionFile,
+      revisionBefore,
+      revisionAfter: sourceRevision,
+      result: sourceMatch ? describeAtom(sourceMatch, false) : null,
+      ...(transformed.archive ? { archive: structuredClone(transformed.archive) } : {}),
+      warnings: mergeWarnings(interactionWarnings, diagnostic(
+        'ATOM_SUBSEQUENT_EXECUTION_PENDING',
+        '来源事实已提交；后续 Program 运行待完成',
+        { correlationId: `${interaction.id}:subsequent` }
+      )),
+      errors: [],
+      messages: [...interactionMessages],
+      interactionId: interaction.id,
+      affectedPaths: committedAffectedPaths,
+      lockState: programLockState(programLockIndex),
+      subsequentExecution: {
+        status: 'pending', sourceRevision, revisionAfter: sourceRevision, errors: []
+      }
+    });
+  }
   if (options.programScheduler && options.trustedMaintenance !== true
     && (requestDeclarationRelocations.length === 0 || isBatchRenameItem(item))) {
     try {
@@ -3795,86 +4383,96 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         || postRefresh.pathChanges.length > 0;
     } catch (error) {
       releaseStrutDeliveryClaims();
-      return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
+      const failure = diagnostic(
         error.code ?? 'ATOM_PROGRAM_FAILED', error.message, error.details ?? {}
-      )]);
+      );
+      return {
+        ok: true,
+        language: 'atom',
+        command: 'transform',
+        createNew: false,
+        changed: sourceChanged,
+        contextFile,
+        projectionFile,
+        revisionBefore,
+        revisionAfter: sourceRevision,
+        result: describeAtom(
+          exactMatchAtPath(nextAtoms, transformed.resultPath ?? transformed.resultName), false
+        ),
+        ...(transformed.archive ? { archive: structuredClone(transformed.archive) } : {}),
+        warnings: mergeWarnings(interactionWarnings, diagnostic(
+          'ATOM_SUBSEQUENT_EXECUTION_FAILED',
+          '来源事实已提交，但后续 Program 执行失败',
+          { cause: failure.code }
+        )),
+        errors: [],
+        messages: [...interactionMessages],
+        interactionId: interaction.id,
+        affectedPaths: committedAffectedPaths,
+        lockState: programLockState(programLockIndex),
+        subsequentExecution: {
+          status: 'failed', sourceRevision, revisionAfter: sourceRevision, errors: [failure]
+        }
+      };
     }
   }
-  if (changed) {
-    revisionAfter = sealWorldFactsRevision(nextAtoms).slice('sha256:'.length);
-    const transformLogRecord = transformed.logRecord ? {
-      ...transformed.logRecord,
-      revisionBefore,
-      revisionAfter
-    } : null;
-    if (!programSurfaceChanged && isLocalizedSituationTransform(item)) {
-      inheritPreparedAccessWorld(atoms, nextAtoms);
+  const effectsChanged = worldChangedAtPaths(
+    sourceAtoms, nextAtoms, programRefreshPatchPaths(postRefresh)
+  );
+  if (effectsChanged) {
+    try {
+      const commitReceipt = await commitChangedGraph(nextAtoms, {
+        changedPaths: [...new Set([
+          ...programRefreshPatchPaths(postRefresh)
+        ].filter(Boolean))],
+        expectedRevision: sourceRevision,
+        correlationId: `${interaction.id}:subsequent`,
+        allowEmpty: true,
+        subsequent: true
+      });
+      revisionAfter = commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
+        ?? revisionOf(nextAtoms);
+    } catch (error) {
+      const failed = await subsequentFailureDetails(error);
+      const latestResultPath = failed.status === 'completed'
+        ? rewritePath(
+            transformed.resultPath ?? transformed.resultName,
+            postRefresh.pathChanges
+          )
+        : transformed.resultPath ?? transformed.resultName;
+      const latestResult = exactMatchAtPath(failed.latestAtoms, latestResultPath);
+      return {
+        ok: true, language: 'atom', command: 'transform', createNew: false,
+        changed: sourceChanged || failed.status === 'completed', contextFile, projectionFile, revisionBefore,
+        revisionAfter: failed.revisionAfter,
+        result: latestResult ? describeAtom(latestResult, false) : null,
+        ...(transformed.archive ? { archive: structuredClone(transformed.archive) } : {}),
+        warnings: mergeWarnings(interactionWarnings, failed.warning), errors: [],
+        messages: [
+          ...interactionMessages,
+          ...(failed.status === 'completed' ? postRefresh.messages : [])
+        ], interactionId: interaction.id,
+        affectedPaths: committedAffectedPaths,
+        lockState: programLockState(
+          failed.status === 'completed' ? postRefresh.lockIndex : programLockIndex
+        ),
+        subsequentExecution: {
+          status: failed.status, sourceRevision, revisionAfter: failed.revisionAfter,
+          errors: failed.errors
+        }
+      };
     }
-    const canRebaseProjection = programTransformLogs.length === 0
-      && postRefresh.transformLogs.length === 0
-      && postRefresh.pathChanges.length === 0;
-    const transformedPaths = transformAffectedPaths;
-    const inheritedSlotStructure = isStructurePreservingTransform(item)
-      && inheritPreparedSlotStructureWorld(atoms, nextAtoms, transformedPaths);
-    const preparedRuntimeRecordsPromise = canRebaseProjection
-      ? Promise.resolve().then(() => {
-          prepareTransformRelationIndex(nextAtoms, path.basename(contextFile));
-          if (!inheritedSlotStructure) prepareSlotStructureWorld(nextAtoms);
-          return options.programScheduler?.prepareRuntimeRecords?.(nextAtoms) ?? null;
-        })
-      : null;
-    const commitReceipt = await commitChangedGraph(nextAtoms, canRebaseProjection ? {
-      projectionRebase: {
-        previousAtoms: atoms,
-        changedPaths: transformedPaths
-      },
-      localizedSituationValidation: !programSurfaceChanged
-        && isLocalizedSituationTransform(item),
-      structurePreservingValidation: !programSurfaceChanged
-        && isStructurePreservingTransform(item),
-      preparedRuntimeRecordsPromise,
-      transformLogRecord
-    } : {
-      changedPaths: [...new Set([
-        transformed.sourcePath,
-        transformed.resultPath,
-        ...(transformed.relationPaths ?? []),
-        ...(transformed.shortcutPaths ?? []),
-        ...programRefreshPatchPaths(postRefresh)
-      ].filter(Boolean))],
-      transformLogRecord
-    });
-    if (commitReceipt?.authorizationFailure) return commitReceipt.authorizationFailure;
-    const reversibleRecordCommitted = transformLogRecord
-      && commitReceipt?.result?.transformLogRecord?.id === transformLogRecord.id;
-    const auditStartedAt = performance.now();
     for (const record of [...programTransformLogs, ...postRefresh.transformLogs]) {
       try {
         await appendTransformLog(contextFile, record);
       } catch (error) {
-        if (!reversibleRecordCommitted) throw error;
-        interactionWarnings.push(diagnostic(
-          'TRANSFORM_LOG_MIRROR_FAILED',
-          '事实已由中央事务提交，但辅助 Transform 日志镜像写入失败',
-          { cause: error.code ?? error.name }
-        ));
+        interactionWarnings.push(diagnostic('TRANSFORM_LOG_APPEND_FAILED',
+          '后续 effects 已提交，但辅助变更日志未能写入',
+          { cause: error.code ?? error.name }));
       }
     }
-    if (transformLogRecord) {
-      try {
-        await appendTransformLog(contextFile, transformLogRecord);
-      } catch (error) {
-        if (!reversibleRecordCommitted) throw error;
-        interactionWarnings.push(diagnostic(
-          'TRANSFORM_LOG_MIRROR_FAILED',
-          '事实与可逆记录已由中央事务提交，但辅助 Transform 日志镜像写入失败',
-          { cause: error.code ?? error.name }
-        ));
-      }
-    }
-    performanceTrace('transform-audit-append', {
-      elapsedMs: Math.round(performance.now() - auditStartedAt)
-    });
+  } else {
+    confirmStrutDeliveryClaims();
   }
   const resultLookupStartedAt = performance.now();
   const finalResultPath = rewritePath(
@@ -3907,7 +4505,10 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     messages: [...interactionMessages, ...postRefresh.messages],
     interactionId: interaction.id,
     affectedPaths: committedAffectedPaths,
-    lockState: programLockState(postRefresh.lockIndex)
+    lockState: programLockState(postRefresh.lockIndex),
+    subsequentExecution: {
+      status: 'completed', sourceRevision, revisionAfter, errors: []
+    }
   };
 
 }
