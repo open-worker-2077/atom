@@ -332,122 +332,29 @@ git commit -m "refactor(web): merge immersion into A navigation"
 ### Task 6: 真实浏览器关键旅程与封存清单
 
 **Files:**
-- Modify: `tests/browser/atom-web-critical-journeys.spec.mjs`
-- Create: `docs/superpowers/archive/2026-09-04-asdf-mode-retirement.md`
-- Modify: `docs/superpowers/plans/2026-09-03-atom-current-requirement-ledger.md`
-- Modify: `docs/superpowers/plans/2026-09-03-session-recovery-checkpoint.md`
+- Modify: `tests/browser/atom-web-critical-journeys.spec.mjs`，必要时相关已有浏览器合同。
+- Create: `docs/superpowers/archive/2026-09-04-asdf-mode-retirement.md`。
+- Modify: 本计划、唯一需求总账和既有恢复断点。
 
 **Interfaces:**
-- Consumes: Tasks 1–5的完整 A 输入、导航、设置与UI。
-- Produces: 可重放的 Chromium 验收证据；退役功能→最后旧提交→新替代路径的封存清单。
+- Consumes: Task5已独立复核的长按输入、导航、共同设置及帮助；同revision原始RED/GREEN。
+- Produces: 保全原功能验收含义的A唯一模式浏览器链；退役功能→原提交→当前替代路径清单。
 
-- [ ] **Step 1: Write the failing browser journeys**
+- [ ] **Step 1: 核对并复用新手势证据，校准旧测试准备动作**
 
-```js
-async function openAModeFixture(page) {
-  const parentPath = `root/${hashText('a-parent-id').toString(36)}`;
-  const innerPath = `${parentPath}/${hashText('a-inner-id').toString(36)}`;
-  const knowledge = {
-    revision: 1,
-    nodes: [
-      { id: 'a-parent-id', key: 'root::a-parent-id', path: 'root', atomPath: '父团', label: '父团', detail: '', hasChildren: true },
-      { id: 'a-outside-id', key: 'root::a-outside-id', path: 'root', atomPath: '团外旁侧', label: '团外旁侧', detail: '', hasChildren: false },
-      { id: 'a-inner-id', key: `${parentPath}::a-inner-id`, path: parentPath, atomPath: '父团/内层团', label: '内层团', detail: '', hasChildren: true },
-      { id: 'a-inner-peer-id', key: `${parentPath}::a-inner-peer-id`, path: parentPath, atomPath: '父团/内层旁侧', label: '内层旁侧', detail: '', hasChildren: false },
-      { id: 'a-leaf-id', key: `${innerPath}::a-leaf-id`, path: innerPath, atomPath: '父团/内层团/叶子', label: '叶子', detail: '', hasChildren: false }
-    ],
-    edges: []
-  };
-  await page.route('**/__spatial/api/state?*', (route) => {
-    const path = new URL(route.request().url()).searchParams.get('path') || 'root';
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, scope: { path }, knowledge }) });
-  });
-  await page.goto('/');
-  await page.waitForFunction(() => window.spatialLab?.state().interactionTargets.some(({ label }) => label === '父团'));
-  return { parentPath, innerPath };
-}
+Task5已经负责长按RED/GREEN，Task1—4原双击RED保留为历史，不重新制造旧行为RED。先读Task5报告与原始输出。现有浏览器关键旅程中“F entry keeps every intended child node inside the rendered viewport”及批量移动目标准备仍按旧独立F模式操作；只将进入动作改为真实右键长按，保持“每个子节点在可见视口”“批量移动保存回执/节点完整”等原业务断言。不得删除有效旅程、放宽其结果或通过测试专用模式绕过真实输入。
 
-async function rightClickTarget(page, label, count) {
-  const target = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
-    .find((candidate) => candidate.label === label);
-  expect(target).toBeTruthy();
-  for (let index = 0; index < count; index += 1) {
-    await page.mouse.click(target.clientX, target.clientY, { button: 'right' });
-    if (index + 1 < count) await page.waitForTimeout(80);
-  }
-}
+- [ ] **Step 2: 完成必要浏览器修正并运行受影响旅程**
 
-test('A single right-click cuts inward without hiding outside context', async ({ page }) => {
-  await openAModeFixture(page);
-  await rightClickTarget(page, '父团', 1);
-  await page.waitForTimeout(430);
-  const labels = await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label));
-  expect(labels).toEqual(expect.arrayContaining(['内层团', '团外旁侧']));
-  expect(await page.evaluate(() => window.spatialLab.state().path)).toBe('root');
-});
+在独立、零生产写入的现有测试世界运行修订旅程。首次改测试后如失败，区分旧准备动作未迁移、夹具问题与产品实际回归，后者交原Task5实施方定向修正和复核。不新增导航框架或改变已批准行为。包含Task5具名A短按/长按/松开/单层返回、共同配置及mobile-control-panel在内的现有关键旅程全体须具备当前候选有效证据；同revision已通过的具名测试可复用，只运行尚无证据的互补集合。唯一浏览器输出目录保全所有产物，不删除目录或测试清理世界。
 
-test('A double right-click immerses the exact group', async ({ page }) => {
-  const { parentPath } = await openAModeFixture(page);
-  await rightClickTarget(page, '父团', 2);
-  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(parentPath);
-  const labels = await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label));
-  expect(labels).toContain('内层团');
-  expect(labels).not.toContain('团外旁侧');
-});
+- [ ] **Step 3: 写入可恢复退役清单**
 
-test('blank right double-click returns only one level non-immersively', async ({ page }) => {
-  const { parentPath, innerPath } = await openAModeFixture(page);
-  await rightClickTarget(page, '父团', 2);
-  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(parentPath);
-  await rightClickTarget(page, '内层团', 2);
-  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(innerPath);
-  await page.mouse.click(48, 360, { button: 'right' });
-  await page.waitForTimeout(80);
-  await page.mouse.click(48, 360, { button: 'right' });
-  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(parentPath);
-  const labels = await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label));
-  expect(labels).toContain('内层旁侧');
-});
-```
+清单按实际行为和源码引用，列出S外围、D层级、独立F的原入口、旧提交及A当前替代；沉浸能力仍由A右键长按提供。保留仍被A使用的owner-route、domain-frame、A子层缩小及其他有效需求，不仅按旧变量名删除代码。引用既有标签`pre-a-mode-consolidation-20260904`，核验可解析；安全查看用git show，恢复从标签建新分支，不reset覆盖工作树。历史旧双击代码与长按替代也注明，不把封存当成删除文件。
 
-- [ ] **Step 2: Run the three named journeys and verify RED**
+- [ ] **Step 4: 受影响链验收、证据入账与提交**
 
-Run: `npx playwright test tests/browser/atom-web-critical-journeys.spec.mjs --config=playwright.config.mjs --grep "A single right-click|A double right-click|blank right double-click"`
-
-Expected: at least one FAIL against the pre-change navigation behavior.
-
-- [ ] **Step 3: Complete only browser-evidence corrections**
-
-If the journeys expose timing or final-screen defects, correct the owning function from Tasks 2–5; do not add test-only modes, sleeps longer than the configured interval plus Playwright auto-wait, or Graph writes.
-
-- [ ] **Step 4: Run the A-mode affected chain**
-
-Run: `node --test tests/input-config.test.js tests/spatial-view-mode-model.test.js tests/spatial-demo-model.test.js tests/spatial-gesture-arbiter.test.js tests/gesture-contract.test.js tests/cluster-engine-contract.test.js tests/mobile-interaction-contract.test.js`
-
-Run: `npx playwright test tests/browser/atom-web-critical-journeys.spec.mjs tests/browser/mobile-control-panel.spec.mjs --config=playwright.config.mjs`
-
-Expected: all PASS.
-
-- [ ] **Step 5: Write the retirement manifest and checkpoint evidence**
-
-Record these exact categories in `docs/superpowers/archive/2026-09-04-asdf-mode-retirement.md`:
-
-```markdown
-- **Peripheral / S**: last recoverable baseline `pre-a-mode-consolidation-20260904`; replaced by A ordinary inward cut.
-- **Hierarchy / D**: last recoverable baseline `pre-a-mode-consolidation-20260904`; no active replacement because external hierarchy layout is outside the Slot ontology.
-- **Immersive / F**: last recoverable baseline `pre-a-mode-consolidation-20260904`; retained capability is A double-right inward immersion.
-- **Safe inspection**: `git show pre-a-mode-consolidation-20260904:<path>`.
-- **Safe recovery**: create a new branch from the tag; never overwrite a dirty working tree with `reset --hard`.
-```
-
-Update the ledger/checkpoint with actual commit ids and test counts only after commands finish.
-
-- [ ] **Step 6: Commit browser proof and archive manifest**
-
-```bash
-git add tests/browser/atom-web-critical-journeys.spec.mjs docs/superpowers/archive/2026-09-04-asdf-mode-retirement.md docs/superpowers/plans/2026-09-03-atom-current-requirement-ledger.md docs/superpowers/plans/2026-09-03-session-recovery-checkpoint.md
-git commit -m "test(web): prove A-mode navigation journeys"
-```
+复用Task5同revision的输入、模型、手势、UI及共同配置有效证据；如实际修改产品则定向重验最小受影响链再升级真实旅程。更新原总账/恢复断点，精确标明仅候选完成、尚未部署，记录commit和实际测试统计。GitNexus detect_changes及diff检查后提交；独立Task6复核由控制方派发。最终全量只在Task7执行。
 
 ### Task 7: 候选版本验证、部署与回读
 
@@ -476,9 +383,9 @@ Expected: build succeeds and all Node tests PASS. A real failure returns to focu
 
 - [ ] **Step 3: Deploy through the existing Atom Graph Runtime entry**
 
-Run: `schtasks /Run /TN "Atom Graph Runtime"`
+先集成并正常构建，按既有受控入口停止旧Atom Graph Runtime后重新启动，临时抑制watchdog并在finally恢复；核验listener对应的新进程创建时间晚于部署，不重复启动临时4784进程。
 
-Then poll `http://127.0.0.1:4784/__spatial/api/health` until it returns the new browser build and `projectionStatus: "published"`; do not start a duplicate ad-hoc 4784 process.
+从现行health读取`atomProjection.status: published`；浏览器build从正式HTTPS HTML标识及实际资产hash回读，health不提供浏览器build。部署前保全当前世界和展示配置，不能恢复旧业务快照。
 
 - [ ] **Step 4: Re-read the deployed public entry**
 
@@ -573,3 +480,14 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 | 共同配置 / Task5 | 服务严格字段数消费新增设置 | 窄补新字段并保持原revision、其余值与CAS |
 | Task5 / Task6 | 同文件浏览器旅程与退役清单 | 长按RED/GREEN前移至Task5，Task6复用而不重跑 |
 | Task6 / Task7 | 稳定候选→最终全量/正式入口 | 不以隔离测试冒称部署；旧Task7 health示意按真实atomProjection和HTML build读取 |
+- **Task5执行断点**：BASE=d9f98776667af82d16d8828aa42f10104d11ec11，实施方a_task5_longpress（Sol high），既有SDD task-5-longpress-brief.md/report.md。GitNexus已刷新，右键仲裁/输入/释放及服务read影响LOW；尚未取得新长按GREEN，未部署。
+- **Ruling: Task6证据复用**：原Task6再次索取Task4前RED与当前长按方案矛盾，改为复用Task5有效证据并迁移现存F准备动作，保全原业务与屏幕断言。只运行尚无当前证据的互补旅程，失败才定向调试；错误代价为测试组织返工，不削减功能。Task7旧health键与仅Run示意按真实服务字段/新进程核验修正。
+- **Task5首轮RED（实施方已回传，待root最终核验原始报告）**：Node focused63项/50pass/13fail，覆盖arbiter缺begin/release、旧完整共同配置缺新字段被拒绝及输入/UI旧双击文案。Chromium具名3项/0pass/3fail：持续按住440ms仍root、双击反而进入团、空白旅程的长按进入前提失败。后者尚不证明返回本身故障。产物本计划SDD task-5-browser-red-20260906-01，保留截图/上下文/trace；当前实施最小修正，未部署。
+
+- **Task5中间GREEN与局部取消失败**：实施方回传Node63/63；Chromium短按、长按松开不二次、双击不沉浸、空白双击单退4/4（task-5-browser-green-20260906-01）。新取消旅程右键100ms后移动12px仍沉浸，已见buttons=2 pointermove；只阻塞取消链，不重复4项有效证据。root按用户许可派a_hold_cancel_consult（Astra high）只读咨询timer取消边界，Sol保留实施所有权，建议须回到源码独立裁定；尚未完成Task5或部署。
+
+- **Astra取消咨询／root裁定**：07:05—07:06只读04 trace，down调用3817.722→4113.510ms，标称wait100实际4114.521→4415.184ms，move从4416.435ms开始，已距down调用开始598.713ms。静态pointermove≥6px→取消→清candidate与arbiter clearTimeout/token失效链一致，不能由12px/buttons2推定阈值前取消；先用浏览器统一performance.now证据区分夹具迟到与产品缺陷，不据咨询盲改。Astra附带right-drag疑点由root核对input-config drag分支裁定：无修饰右拖原本无动作，取消标记只作用此类secondaryNavigation，不构成已确认需求损失。若时序判断错误，代价为继续定向修复取消链，既有规则和生产保持。
+
+- **Task5取消GREEN**：实施方用Playwright page.clock控制浏览器时间、默认420ms及真实鼠标/键盘事件，12px拖移/pointercancel/修饰键变化后各推进421ms保持root，1/1通过（task-5-browser-green-20260906-09）。结合04 trace跨进程延迟，原失败不能作为阈值前取消失效证据；无额外产品取消补丁，临时engine探针与timer/pointer wrapper已移除。最终原始报告及独立任务复核待完成，生产A未部署。
+
+- **Task5候选审查**：a38d739为产品提交，2da5ab6仅解除新报告Git跟踪且磁盘保留。root已读完整报告、核对浏览器.last-run通过及无临时探针；Node63/63、核心4/4、受控取消1/1、设置重载恢复1/1、独立390px上下文共同字段继承更新1/1。旧presentation-settings综合旅程仍在F/applyViewMode准备断言失败，归Task6迁移准备动作并保全全部设置断言。a_task5_longpress_review（Sol high）正审d9f9877..2da5ab6，未裁定任务完成；只读Astra咨询结束，不重复派发。私有报告task-5-longpress-report.md与净差异review-d9f9877..2da5ab6.diff保留。
