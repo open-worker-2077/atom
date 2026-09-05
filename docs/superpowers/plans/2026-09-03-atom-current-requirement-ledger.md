@@ -205,3 +205,7 @@
 
 - **后续运行恢复依据**：ProgramRuntimeScheduler的Strut/slot signal claim当前是内存Map，提交后confirm、失败release；中央journal已有command/receipt、修订CAS和局部逆向patch。提交分离应优先复用该事务与既有调度入口，在同一来源回执中保留触发依据；不能只把reconcile挪到提交后便宣称冷重启／重试完成，也不引入未经需求证明的第二队列或状态权威。
 - **续执行次序校准**：当前A Task 4先保存经定向验收与任务评审的安全提交，随后优先处理用户已明确的来源提交／后续运行分离及已复现旧print迁移；A Task 5—7保留原计划续点。手机仍为外部终端局部阻塞，恢复连接即先做真实手机入口验收，不以桌面或移动视口测试代替。
+
+- **A导航安全续点**：Task 4 b132962已获独立评审Approved；77/77单元和5/5实际浏览器旅程通过，A后续从Task 5继续，尚未部署。主干规格/总账证据已保存main@426e8d1；来源提交分离工作区transform-postcommit-boundary已在默认沙箱创建，基于同一生产代码＋最新规格，无需新授权。
+
+- **提交分离进入实施**：独立工作区fix/transform-postcommit-boundary，生产代码基线abbc5ed、规格基线426e8d1。专项计划2026-09-05-transform-postcommit-boundary已形成；先验证来源提交/后续失败和成功，再补中央关联/冷恢复，最后公开旅程与最终候选一次全量。既有后续批次effects原子性保留，不另创逐订阅独立提交的产品规则。当前仅计划完成，Task 1尚无RED/GREEN。

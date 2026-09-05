@@ -235,7 +235,7 @@ git commit -m "feat(web): arbitrate A-mode right clicks"
 - Consumes: Task 1的`applyInwardView`/`applyImmersiveInwardView`意图与 Task 3的仲裁结果。
 - Produces: `applyInwardView(node, options)`只打开 nested child domain；`applyImmersiveInwardView(node)`通过现有真实 owner route进入该团；`applyParentView(domainContext)`一次只退一层。
 
-- [ ] **Step 1: Write failing engine contract tests**
+- [x] **Step 1: Write failing engine contract tests**
 
 ```js
 assert.match(engineSource, /case "applyInwardView"/);
@@ -247,13 +247,13 @@ assert.doesNotMatch(engineSource, /mode === "peripheral"|state\.viewMode === "im
 
 Add model tests proving batch/recursive A actions always use nested projection and cannot select a second structural mode.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `node --test tests/cluster-engine-contract.test.js tests/gesture-contract.test.js tests/spatial-view-mode-model.test.js`
 
 Expected: FAIL on old mode branches and missing A action functions.
 
-- [ ] **Step 3: Implement the single A runtime path**
+- [x] **Step 3: Implement the single A runtime path**
 
 ```js
 function applyInwardView(node, optionsInput = {}) {
@@ -274,13 +274,13 @@ function applyImmersiveInwardView(node) {
 
 Remove S/D/F mode dispatch, peripheral reveal branches, hierarchy projection choices, immersive-as-mode guards, and mode cycling. Normalize restored legacy snapshots to `viewMode: 'nested'` without preserving a selectable legacy mode. Keep owner-route and domain-frame helpers needed by immersive entry, because they implement the retained A action rather than compatibility.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run: `node --test tests/cluster-engine-contract.test.js tests/gesture-contract.test.js tests/spatial-view-mode-model.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the A navigation runtime**
+- [x] **Step 5: Commit the A navigation runtime**
 
 ```bash
 git add spatial-engine.js spatial-view-mode-model.js tests/cluster-engine-contract.test.js tests/gesture-contract.test.js tests/spatial-view-mode-model.test.js
@@ -575,3 +575,5 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **Task 4定向结果**：单元77/77通过；首轮五条浏览器旅程3/5，双击沉浸、空白单层返回、A键不退出通过。普通剖开自动frameClusterDomain把团外旁侧移出画面，须先定向修复；沉浸后普通剖开旅程首次进入不稳定仍在查，不冒称完成。toggleClusterChildDomain上游CRITICAL（2直接/18总）已告知用户，修复只作用于当前导航链。
 
 - **Task 4浏览器证据校准**：普通剖开保留团外已通过；两次独立CDP click在负载下跨过420ms导致单击提交，改原生mouse.dblclick保持产品间隔不变。后续page.goto／test 30s超时是未形成有效结果，须核查测试服务与加载等待；同一产品revision每条已有有效行为证据复用，不为整组全绿外观反复重跑。
+
+- **Task 4: complete**：d9df3bb..b132962，最终单元77/77、真实Chromium五条导航旅程5/5（34.2s）；a_task4_review规格符合且quality Approved，零分级问题。Task 5帮助／控件、Task 6退役清单、Task 7最终候选与部署仍开放。按用户来源提交要求，A先保存安全续点，接续提交分离及旧print迁移，不部署未完成A。
