@@ -126,7 +126,7 @@ Task7保存可见反馈优先实施，I0/U0/D1/E3；移动已交付，手机共�
 
 **Spec:** Web §3.1；用户纠正此项是既有缺陷，不是新需求。点击保存后显示非阻塞提示框，目标5秒内至少有反应；不要求提交5秒内完成。
 
-**Files:** spatial-engine.js、index.html、spatial.css；聚焦 tests/browser/save-feedback.spec.mjs；必要时既有 editor/bridge 合同测试。
+**Files:** spatial-engine.js、index.html、spatial.css；聚焦 tests/browser/save-feedback.spec.mjs；必要时 spatial-browser-bridge.js 与既有 editor/bridge 合同测试。
 
 **Interfaces:** 复用 spatial-workspace-committed、persisted、projection-pending、persist-failed 与 persistenceId。现有 announce 仅写入 sr-only ariaLive，普通画面不可见。保存开始立即显示“正在保存”，随后真实回执驱动成功/失败/事实已保存但投影待恢复；旧回执不得覆盖更新的保存状态。维持读屏反馈，不把全部导航公告都变成屏幕弹窗。
 
@@ -140,3 +140,4 @@ Task7保存可见反馈优先实施，I0/U0/D1/E3；移动已交付，手机共�
 - **聚焦候选证据**：同revision合并运行中移动成功与桌面失败`2/2 PASS`，60秒预算修订后投影待恢复/旧回执隔离定向`1/1 PASS`（31.9秒）；5秒内可见反馈断言未放宽。根据验证复用规则不再重跑已通过的前两条，现进入编辑/桥接受影响链。
 - **受影响链证据**：`editor-ui`、`editor-engine`、`spatial-workspace-model`与`browser-bridge`合同`120/120 PASS`；`npm run build:browser`与`npm run check:development-control`均退出0。当前准备`detect_changes`与阶段提交固定候选，随后仅运行一次最终全量。
 - **变更影响回读**：GitNexus `detect_changes(scope: staged)`在显式worktree上返回medium：5个文件、6个已索引符号、1条`ExecuteDemoEditing → ExportKnowledge`流程。索引仍存在63 commits陈旧限制；结合缓存diff与120条受影响合同审核，未把空流程当作无风险证据。
+- **审查回修**：任务级审查发现`human-status`成功分支缺少`spatial-workspace-persisted`回执，会使可见状态停留在“正在保存”。旧候选全量在连续通过输出中主动终止，不计产品失败；bridge VM合同先以事件数`0 !== 1`取得RED，再补同一`persistenceId`、`operation`和最新`knowledge`回执，定向`1/1 PASS`，失败与投影待恢复仍只发各自原回执。

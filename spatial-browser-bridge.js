@@ -529,6 +529,9 @@
           if (!hasQueuedWorkspaceCommit()) lab.importKnowledge(latest.knowledge);
         }
         document.body.dataset.spatialBridge = "connected";
+        reportPersistence("spatial-workspace-persisted", {
+          persistenceId, operation, knowledge: latest && latest.knowledge
+        });
         return true;
       }
       if (operation) {
