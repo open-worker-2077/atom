@@ -504,7 +504,8 @@ function isCompleteGraphJson(source) {
 }
 
 function writeDiagnostics(result, stderr) {
-  if (result?.ok === false && typeof result.interactionId === 'string' && result.interactionId) {
+  if ((result?.ok === false || result?.subsequentExecution?.status === 'pending')
+    && typeof result.interactionId === 'string' && result.interactionId) {
     stderr.write(`关联 ${result.interactionId}\n`);
   }
   for (const message of result.messages ?? []) {

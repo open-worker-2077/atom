@@ -2017,6 +2017,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       let nextAtoms = baseAtoms;
       const triggerPaths = [];
       const triggerContexts = [];
+      const changedPaths = [];
       const logs = [];
       for (const effect of normalized.filter((entry, index, entries) => (
         entries.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(entry)) === index
@@ -2133,6 +2134,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         }
         const before = revisionOf(nextAtoms);
         nextAtoms = appendNestedAtom(nextAtoms, source, authorization.atom);
+        changedPaths.push(`${effect.sourcePath}/${oneStoredField(authorization.atom, 'thing').value}`);
         triggerPaths.push(effect.sourcePath);
         triggerContexts.push({
           sourcePath: effect.sourcePath,
@@ -2151,6 +2153,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         changed: revisionOf(nextAtoms) !== revisionOf(baseAtoms),
         triggerPaths,
         triggerContexts,
+        changedPaths,
         logs
       };
     }
@@ -2886,6 +2889,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           ...(authorization.logs ?? []),
           ...(jump.logs ?? [])
         );
+        for (const changedPath of authorization.changedPaths ?? []) {
+          programChangedPaths.add(changedPath);
+        }
         for (const relocation of jump.relocations ?? []) {
           pathChanges.push(relocation);
         }

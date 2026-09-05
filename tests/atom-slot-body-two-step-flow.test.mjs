@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -89,19 +90,25 @@ function fixture() {
   ], [], ['agent'])], executionSource, whenSource, whereSource, registrationSource };
 }
 
-async function runPublicCli(endpoint, agent, source) {
+async function runPublicCli(endpoint, agent, source, interactionId = null) {
   let stdout = '';
   let stderr = '';
+  let receipt = null;
   const code = await runAtomCli([
     '--json', '--endpoint', endpoint, '--agent', agent, ...source
   ], {
-    execute: executeAtomCommandEndpoint,
+    execute: async (...args) => {
+      receipt = await executeAtomCommandEndpoint(...args);
+      return receipt;
+    },
+    remoteAgentResolution: true,
+    ...(interactionId ? { interaction: { id: interactionId } } : {}),
     requireAgent: true,
     stdin: { isTTY: false },
     stdout: { isTTY: false, write(value) { stdout += value; } },
     stderr: { write(value) { stderr += value; } }
   });
-  return { code, stdout, stderr };
+  return { code, stdout, stderr, receipt };
 }
 
 test('two-step slot instance unlocks without touching template or sibling', async (t) => {
@@ -200,8 +207,14 @@ test('public CLI preserves one completed mirrored instance across a cold restart
   t.after(stop);
   let endpoint = `${running.url}/__atom/api/command`;
   const command = async (agent, ...source) => {
-    const result = await runPublicCli(endpoint, agent, source);
-    assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+    const interactionId = `two-step-cli-${crypto.randomUUID()}`;
+    const deadline = Date.now() + 10_000;
+    let result;
+    do {
+      result = await runPublicCli(endpoint, agent, source, interactionId);
+      assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+      if (result.receipt?.subsequentExecution?.status !== 'pending') return result;
+    } while (Date.now() < deadline);
     return result;
   };
   const body = 'Root/两步槽体';
@@ -225,8 +238,9 @@ test('public CLI preserves one completed mirrored instance across a cold restart
     ],
     strut: []
   }));
-  await command(body, 'transform',
+  const completed = await command(body, 'transform',
     `{"thing":${JSON.stringify(`${body}/槽例/甲/步骤一`)},"situation.rep.✅ 完成"}`);
+  assert.equal(completed.receipt.subsequentExecution.status, 'completed', JSON.stringify(completed.receipt));
 
   const beforeRestart = await command(body, 'explore', JSON.stringify({
     thing: next, 'situation$full': true, 'slot$latitude-1': true
