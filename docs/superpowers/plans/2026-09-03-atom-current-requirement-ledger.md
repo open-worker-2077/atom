@@ -337,3 +337,13 @@
 - **手机回修2边界**：dfcb4b1两项原Important已复审关闭，新增一项队列世代边界缺陷：GET先读到本机在途提交会误判外部赢家；真实赢家已应用但旧队列未排空时，新操作仍继承旧预测revision。原实施方先补两个确定性RED；按用户授权临时Astra高级只读咨询最小修正，根Agent独立裁定，内核/服务合同不扩大。
 
 - **手机R2聚焦报告**：实施方报告GET先发/PUT后发、外部winner后新事件等40/40，桥接与服务49/49、双浏览器1/1、build/control通过，原始证据已保存；尚待提交与范围复审，未启动全量或部署。
+
+- **手机R3失败保持**：f773287的authority双时序已复审ADDRESSED；新增直接Important是PUT非冲突失败后普通deferred GET读取同revision会覆盖本地未保存设置并误报synced。根Agent按§5.5失败保持合同裁定修复：同revision普通读取保留失败本地状态，更高外部/明确冲突及新的成功写入仍按权威处理，不禁止SSE或重放失败patch。原实施Agent继续最小R3 RED/GREEN。
+
+- **R3范围校准**：复审最终明确R2直接新增问题为409后同winner迟到SSE的重复回读抹掉conflict提示；失败PUT后同revision回读覆盖本地值是Task2原潜伏缺口被R2放大。根Agent按明确失败保持合同独立纳入同一R3，不混称新增问题、不扩大内核。
+
+- **手机R3 RED**：42项中40通过、2失败，原始task-2-fix-r3-red-combined-20260906-041621.txt已保存；分别复现同revision回读覆盖失败本地值和同winner SSE重复应用，现定向修复。
+
+- **手机R4单点回修**：cca0b7a两项R3输入已复审关闭；仅新catch把当前真实GET失败隐藏成历史conflict，违反明确未同步合同。按官方SDD第4轮换新高级实施Agent settings_task2_r4，限定catch判断及确定性回归，不重新设计队列，不改Atom框架；Root独立审定。42/42、51/51及browser1/1原始证据已核对。
+
+- **手机R4定向证据**：最新GET失败回归43项中42通过/1失败；仅将catch状态选择改为unsynced后43/43通过，保留原时序守卫与内部冲突记忆。新测试同时覆盖文案、winner/revision不变、同revision成功恢复冲突提示、更高revision解除及零重试PUT。原始task-2-fix-r4-red/green输出已保存；相邻检查/提交与复审待完成。
