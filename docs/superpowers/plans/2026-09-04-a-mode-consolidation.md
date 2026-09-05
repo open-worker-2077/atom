@@ -106,7 +106,7 @@ git commit -m "refactor(web): make A the only structural view"
 - Consumes: `normalizeSettings(input)`、`updateDemoSettings(nextSettings)`与现有`graph-4d.presentation-settings.v2` localStorage 链。
 - Produces: `settings.secondaryNavigationDelayMs: number`；`withSecondaryNavigationDelayInput(settings, value)`；DOM `#secondaryNavigationDelay`与`#secondaryNavigationDelayValue`。
 
-- [ ] **Step 1: Write failing settings normalization tests**
+- [x] **Step 1: Write failing settings normalization tests**
 
 ```js
 assert.equal(model.normalizeSettings({}).secondaryNavigationDelayMs, 420);
@@ -117,13 +117,13 @@ assert.equal(model.withSecondaryNavigationDelayInput({}, '515').secondaryNavigat
 
 Also assert that `index.html` contains an accessible range input with `min="240"`, `max="800"`, `value="420"` in the mapping section.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `node --test tests/spatial-demo-model.test.js tests/mobile-interaction-contract.test.js`
 
 Expected: FAIL because the setting and controls do not exist.
 
-- [ ] **Step 3: Implement settings normalization and UI wiring**
+- [x] **Step 3: Implement settings normalization and UI wiring**
 
 ```js
 const DEFAULT_SECONDARY_NAVIGATION_DELAY_MS = 420;
@@ -144,13 +144,13 @@ function withSecondaryNavigationDelayInput(settingsInput, value) {
 
 Add the value to `normalizeSettings`, export the updater, bind the range input through `updateDemoSettings`, and display `${value}ms`. Do not create a second localStorage key.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run: `node --test tests/spatial-demo-model.test.js tests/mobile-interaction-contract.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the persisted interval setting**
+- [x] **Step 5: Commit the persisted interval setting**
 
 ```bash
 git add spatial-demo-model.js spatial-engine.js index.html tests/spatial-demo-model.test.js tests/mobile-interaction-contract.test.js
@@ -549,3 +549,14 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **Task 2 RED**：node --test tests/spatial-demo-model.test.js tests/mobile-interaction-contract.test.js；首次沙箱worker spawn EPERM无有效结果，获准同命令重跑34项／29通过／5失败。失败对应secondaryNavigationDelayMs与updater缺失、accessible range缺失及完整设置快照缺新字段；尚未实现GREEN。现有engine secondary delay为620，动态消费归Task 3。
 - **索引故障**：GitNexus增量刷新失败于file_fts节点offset 842 missing，当前以官方--repair-fts修复派生索引；辅助索引缺口不代替产品RED，也不阻塞源码可确认的最小开发链。
 - **Task 2初次GREEN**：实现方回报同一focused链34/34、0失败。自审发现额外加入计时包装器，提前承担Task 3的动态仲裁职责；控制方要求按Task 2范围移回既有计时行为，再定向验证后提交。此34/34仅属于该中间状态，尚不裁定Task 2完成。
+- **Task 2提交／复核**：2faf49b，34/34 PASS、两项node --check通过；5文件6符号LOW，提交包含范围归位后的设置链。实现方a_task2，独立评审a_task2_review进行中。
+- **索引恢复**：官方FTS repair成功后，因前次未完成标记自动完整重建；43.5秒成功，6916节点、19072边、300flows，--index-only未改任何跟踪文件。Task 3影响：createSecondaryClickArbiter无索引调用者（源码有engine调用，需人工核对）；commitPointerCandidate上游4项、直接releasePointer，风险LOW，包含手机release入口。
+- **Task 2评审**：a_task2_review给出Spec可见范围合规、quality Approved；三项跨差异待核对为恢复默认、持久化重载、Task 3动态消费。控制方回读确认updateDemoSettings归一化→saveDemoSettings→syncPresentationControls且单一key；动态消费明确属于Task 3。
+- **Task 2 fix round 1/5**：控制方核实index/engine不存在通用设置恢复入口，故“恢复默认”是Web规格§5.2真实缺口，不接受Task 2完成。Ruling: 依规格补单字段恢复默认按钮及真实浏览器设置→重载→恢复→再次重载旅程；扩展tests/browser/mobile-control-panel.spec.mjs是最小验收链，错误代价为撤回局部UI和测试，不影响Graph。实现方沿用a_task2，FIX_BASE=2faf49b。
+- **A缩小字段回读**：index.html的peripheralDepthShrink实际已标为“A 子层节点缩小”，spatial-cluster-field.js:748在nested路径消费其缩放；它属于Web规格§5.1保留能力，不是仅凭旧变量名即可删的S死配置。Task 4/5清退按可达行为判定，保留该有效A控件。
+- **Task 2修复RED**：真实Chromium唯一具名设置旅程在调值515→output同步→reload仍515之后，点击“恢复右键沉浸连击间隔默认值”超时，1 failed；缺按钮得到直接行为证据。产物task-2-reset-red保留在本计划工作区；此前序同时补齐重载持久化证据。
+- **部署前只读边界**：4784 health当前ok:true、revision7361、atomProjection.status=published；它是现行主干状态，不冒充A候选部署。Get-ScheduledTask默认沙箱拒绝访问，仅限制任务管理读取，实际部署阶段按已有受控入口请求必要系统执行权限。
+- **Task 7接口校准**：当前公开health投影字段为atomProjection.status，浏览器build需从公开HTML资源标识回读；按实际字段核对，不以计划示意的projectionStatus顶层键构造假失败。
+- **Task 2修复GREEN**：Chromium唯一旅程1 passed（11.3s），初始420、调515同步、reload保留、按钮恢复420、defaultDetailMode=surface不变、再次reload持久且其他设置守恒。两次中间运行暴露测试getByLabel歧义与重载面板关闭，定向修正角色定位／重开面板后通过，不作为产品失败或静默忽略。下一步原34项及提交后范围复审。
+- **Task 2: complete**：4c9cf2f..4c27d4b；原设置链34/34，重载／单字段恢复Chromium1/1。a_task2_rereview已按精确差异包完成范围复审，全部问题解决且无新增破坏。首次相对路径漏读差异包已纠正，未重复测试。
+- **生产急件切换**：收到改名判重→瞻重回执同时出现PROJECTION_RECOVERY_PENDING与WINDOW_ACCESS_DENIED的新现场证据；按总账优先规则核查权威提交与权限目标。A模式Task3尚未开始，现有代码保存于4c27d4b，未部署；急件处理后从Task3继续，不重新执行Task2。
