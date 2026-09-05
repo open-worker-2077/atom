@@ -35,7 +35,7 @@
 - Consumes: `readVisibleSlotPlans(atoms)`、`fieldValue/replaceStoredField`及原immutable世界。
 - Produces: `planGeneratedSlotPrintMigration(facts)`返回 `{facts, expectedRevision, nextRevision, changedPaths, migrated, summary}`；不写磁盘、不执行Program。
 
-- [ ] **Step 1: 来源守恒 RED**
+- [x] **Step 1: 来源守恒 RED**
 
 合成sealed槽体使用真实当前seal生成结构，再把唯一生成main转换为旧`body`调用；header与修订保留。测试覆盖祖先已改名但header保留旧body、已是当前ABI、手写print、畸形生成源和显式默认备份域。
 
@@ -49,13 +49,13 @@ assert.equal(currentPrintSource(plan.facts).split('\n').at(-1).includes('"body"'
 assert.deepEqual(withoutSelectedProgramSituation(plan.facts), withoutSelectedProgramSituation(before));
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `node --test --test-isolation=none tests/atom-generated-slot-print-migration.test.mjs`。
 
-- [ ] **Step 3: 实现精确生成物白名单**
+- [x] **Step 3: 实现精确生成物白名单**
 
-先由当前sealed layout取print与last revision；只接受header为单个字面量`PRINT_PLAN = json_parse({"text": JSON_STRING})`，解析出的plan与当前修订plan结构相等，main恰为 `def main(arguments)` 返回一个slot_body字典。旧字典仅允许action=print、body为已与当前修订逐项核对的PRINT_PLAN.body精确字符串、name=arguments["name"]；有额外语句/计算/成员时拒绝该疑似生成物，绝不求值或猜写。
+先由当前sealed layout取print与last revision；只接受header为单个字面量`PRINT_PLAN = json_parse({"text": JSON_STRING})`，解析出的plan与当前修订plan结构相等，main恰为 `def main(arguments)` 返回一个slot_body字典。旧字典仅允许action=print、body仅为当前layout.bodyPath或已与当前修订逐项核对的PRINT_PLAN.body之一的精确字符串、name=arguments["name"]；有额外语句/计算/成员时拒绝该疑似生成物，绝不求值或猜写。
 
 ```text
 PRINT_PLAN = json_parse(原字面量保持原字节)
@@ -65,7 +65,7 @@ def main(arguments):
 
 可用严格三行生成模板与JSON字符串解析，无需通用Python解析器；手写非生成物不动，疑似生成但不满足模板时整个候选失败。只修改匹配节点Situation；layout/roles/revisions及其余Graph深比较必须相同。再调用现有Graph投影/校验，计算当前revision与候选revision。
 
-- [ ] **Step 4: Run GREEN并提交**
+- [x] **Step 4: Run GREEN并提交**
 
 同一focused命令通过；GitNexus impact/detect与diff检查后只提交planner和对应测试。
 
@@ -80,7 +80,7 @@ def main(arguments):
 - Consumes: Task1 planner，现有`resolveAtomRuntime`和`createTransactionalWorldPersistence`。
 - Produces: `--dry-run --attempt ID`、`--apply --attempt ID`、`--rollback RECEIPT`；私密receipt绑定source/target revision、实际changedPaths、hash及中央command。
 
-- [ ] **Step 1: 取得维护失败路径 RED**
+- [x] **Step 1: 取得维护失败路径 RED**
 
 使用测试私有runtime配置；预检不写世界，apply前源变化则CAS拒绝，重复attempt不再提交。备份不完整／校验失败时不提交；提交后必要后验失败以中央inverse patch恢复原来源，保留错误与所有产物。
 
@@ -90,11 +90,11 @@ assert.equal(secondApply.transaction.commandId, firstApply.transaction.commandId
 assert.deepEqual(worldAfterRollback, sourceBefore);
 ```
 
-- [ ] **Step 2: 实现维护入口**
+- [x] **Step 2: 实现维护入口**
 
 只使用配置的canonical runtime路径，拒绝linked ancestor；备份位于该私密世界的migration-backups/generated-slot-print/迁移ID/attempt。所有新文件wx，源atom逐字节hash复验；复制恢复所需原事实及journal资料，写清单。不以硬编码生产路径或私密正文入源码。复用中央commit/CAS/rollback；attempt回收先查中央receipt和私密清单，未知状态不盲重放。`--rollback`只接受绑定当前世界、精确source/target和中央command的可信receipt；拒绝覆盖后续业务修订。
 
-- [ ] **Step 3: 真实副本与公开调用 GREEN**
+- [x] **Step 3: 真实副本与公开调用 GREEN**
 
 当前生产世界只读副本预检应报告已核实生成物；若不再是5个，依据当前事实报告变化，不能强制数量。迁移后在同一副本，以普通Agent调用实际print并回读槽例，随后冷重启再调用；迁移／打印／回滚的源文件hash不变。当前ABI对手写显式body仍拒绝。
 
@@ -106,5 +106,15 @@ focused测试及独立复核通过后集成维护工具；使用受控现有服�
 
 - **覆盖**：Task1精确识别／守恒／拒绝；Task2备份／幂等／CAS／rollback／冷公开调用／生产回读。
 - **接口一致**：planner产出的facts/revisions/changedPaths被唯一中央维护提交消费。
-- **状态**：共同设置代码已部署，实际基准/真机验收因原页面不可读局部待定；现按已批准顺序启动本计划Task1，未改变生产print。不得把计划或旧5个盘点数当作迁移成功。
+- **状态**：共同设置代码已部署，实际基准/真机验收因原页面不可读局部待定；Task1已在46e7772审查通过（6/6及真实事实内存守恒），现实施Task2维护入口，未改变生产print。不得把计划或旧5个盘点数当作迁移成功。
 - **预检裁定（2026-09-06）**：旧生成器d267a91的父版本明确从plan.body生成main的body字面量；祖先改名/移动后源码和修订快照依法保留旧路径，因此白名单应与经当前layout修订核验的PRINT_PLAN.body匹配，不能强制等于现行layout路径。该修正保持用户“只去退役调用参数、不改历史快照”的要求；其他模板严格限制不变。若身份/修订/源码不能交叉证明，拒绝迁移。
+
+- **当前只读盘点（2026-09-06）**：生产raw facts经projectAtomContext通过，无须额外兼容入口；readVisibleSlotPlans仍为5个，旧main.body候选中2个活跃、3个位于显式backup/default子树。此为候选盘点，严格生成源码核验尚待Task1；后续只迁移通过核验的活跃项，不为凑旧数量改写停用历史。
+
+- **实际来源修正（2026-09-06）**：16d6f6c纯内存生产probe拒绝两活跃模板。逐行核对证实既有祖先路径维护已把main.body更新为当前layout.bodyPath，PRINT_PLAN.body仍保持原修订值；三行模板其他字节符合生成规则。前述只允许plan.body的裁定过窄，现限定允许这两个经过交叉核验的确切值，其余body/格式/语句仍整批拒绝。补测试覆盖两合法形态及第三方路径拒绝；不改生产或内核。
+
+- **Task1完成／Task2启动**：46e7772限定复审Approved；当前真实来源纯内存probe恰2活跃项，输入、header、其余facts及生产文件bytes守恒。Task2由generated_print_task2（Sol high）实现维护入口及隔离测试；root持有真实完整私密副本的公开print/冷重启/回滚验收及生产切换，当前未部署迁移。
+
+- **Task2真实规模失败（2026-09-06）**：b29c273合成focused14/14后，root完整私密副本维护apply约56秒Node4GB heap OOM退出134，尚无backup目录；atom.json、旧journal与events字节hash全部未变。生产未参与。当前拒绝部署，独立审查与维护脚本内存读取定位中；不以增加内核分支或盲目调大heap替代修正。raw real-copy-apply-1.log及real-copy-after-failed-apply.json位于本计划SDD。
+
+- **当前候选与验收（2026-09-06）**：500e166维护实现两轮复核全部发现关闭；19项中18pass/0fail/1 Windows symlink夹具EPERM skip。040497d真实完整副本分离进程dry-run/apply/重复attempt/rollback/reapply全部exit0，2项映射、同command幂等、全部原facts恢复、源备份字节不变。R2仅补语义校验前后inventory绑定，精确竞态RED→GREEN，未改planner/ABI/commit内容。两个实际print在普通CLI warm PID16424及新进程cold PID38296均2/2回读成功；手写显式body负例返回INVALID_SLOT_BODY_EFFECT。root首次验收脚本误重放pending来源触发CAS，已改为等待原运行并回读，失败证据保留。待最终分支复核、必要最终门禁与生产维护，未宣称生产已迁移。
