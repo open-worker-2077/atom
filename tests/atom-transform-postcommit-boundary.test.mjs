@@ -146,21 +146,17 @@ test('onCommitted observes the source commit before a blocked subsequent worker 
   assert.equal(find(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8')), 'Source').situation, 'after');
   unblock();
   const result = await execution;
-  assert.equal(result.subsequentExecution.status, 'completed');
+  assert.equal(result.subsequentExecution.status, 'completed', JSON.stringify(result));
   assert.equal(result.warnings.some(({ code }) => code === 'ATOM_SUBSEQUENT_EXECUTION_PENDING'), false);
   assert.equal(notificationCount, 1);
 });
 
-test('a subsequent effects CAS conflict preserves the source and reports the actual latest world', async (t) => {
+test('a subsequent effects CAS conflict is not mistaken for this request committing identical facts', async (t) => {
   const runtime = await fixture(t, [
     'def receive(delivery):',
     '    transform({"thing":"Result","situation.rep.after":"before"})',
     'trigger("strut", {}, receive)'
   ].join('\n'));
-  const initial = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
-  initial.push(atom('Other', 'before'));
-  await fs.writeFile(runtime.contextFile, JSON.stringify(initial, null, 2), 'utf8');
-
   const result = await executeAtomLanguage({
     ...runtime,
     programScheduler: createProgramRuntimeScheduler(),
@@ -170,7 +166,7 @@ test('a subsequent effects CAS conflict preserves the source and reports the act
       const concurrent = await executeAtomLanguage({
         ...runtime,
         trustedMaintenance: true,
-        source: 'transform {"thing":"Other","situation.rep.after":"before"}',
+        source: 'transform {"thing":"Result","situation.rep.after":"before"}',
         interaction: { id: `concurrent-${crypto.randomUUID()}` }
       });
       assert.equal(concurrent.ok, true, JSON.stringify(concurrent));
@@ -182,10 +178,40 @@ test('a subsequent effects CAS conflict preserves the source and reports the act
   assert.ok(result.subsequentExecution.errors.some(({ code }) => code === 'WORLD_REVISION_CONFLICT'));
   const stored = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(find(stored, 'Source').situation, 'after');
-  assert.equal(find(stored, 'Other').situation, 'after');
-  assert.equal(find(stored, 'Result').situation, 'before');
+  assert.equal(find(stored, 'Result').situation, 'after');
   assert.equal(result.revisionAfter, result.subsequentExecution.revisionAfter);
   assert.notEqual(result.revisionAfter, result.subsequentExecution.sourceRevision);
+});
+
+test('a changed batch source with a message-only subscriber confirms its delivery exactly once', async (t) => {
+  const runtime = await fixture(t, [
+    'def receive(delivery):',
+    '    message({"level":"info","text":"batch delivered"})',
+    'trigger("strut", {}, receive)'
+  ].join('\n'));
+  const initial = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  initial.push(atom('Second', 'before'));
+  await fs.writeFile(runtime.contextFile, JSON.stringify(initial, null, 2), 'utf8');
+  const scheduler = createProgramRuntimeScheduler();
+
+  const first = await executeAtomLanguage({
+    ...runtime, programScheduler: scheduler,
+    source: `transform ${JSON.stringify([
+      { thing: 'Source', 'situation.rep.after': 'before' },
+      { thing: 'Second', 'situation.rep.after': 'before' }
+    ])}`,
+    interaction: { id: `batch-message-source-${crypto.randomUUID()}` }
+  });
+  const second = await executeAtomLanguage({
+    ...runtime, programScheduler: scheduler,
+    source: 'transform {"thing":"Source","situation.rep.after":"after"}',
+    interaction: { id: `batch-message-retry-${crypto.randomUUID()}` }
+  });
+
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.deepEqual(first.messages.map(({ text }) => text), ['batch delivered']);
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.deepEqual(second.messages, []);
 });
 
 test('a changed source with a message-only subscriber confirms its delivery exactly once', async (t) => {
@@ -349,27 +375,49 @@ test('creating a valid Program remains committed when onCommitted fails', async 
 });
 
 test('an auxiliary mirror failure after subsequent facts commit preserves the committed revision', async (t) => {
+  const inertSubscriber = 'def receive():\n    return True';
   const runtime = await fixture(t, [
-    'def receive(delivery):',
-    '    transform({"thing":"Result","situation.rep.after":"before"})',
-    'trigger("strut", {}, receive)'
+    'def receive():',
+    `    transform({"thing":"Subscriber",${JSON.stringify(`situation.rep.${inertSubscriber}`)}:None})`,
+    '    transform({"thing.ren.Renamed Source":"Source"})',
+    'trigger("transform", {"nodes":["Source"]}, receive)'
   ].join('\n'));
+  const scheduler = createProgramRuntimeScheduler();
+  const createCandidateRuntime = scheduler.createCandidateRuntime.bind(scheduler);
+  scheduler.createCandidateRuntime = () => {
+    const candidate = createCandidateRuntime();
+    const refresh = candidate.refresh.bind(candidate);
+    candidate.refresh = async (atoms, request) => {
+      const refreshed = await refresh(atoms, request);
+      if (find(atoms, 'Renamed Source')) {
+        refreshed.locks.push({
+          sourceProgramPath: 'Subscriber',
+          targets: { paths: ['Renamed Source'], scope: 'exact' },
+          actions: ['explore'], labels: ['postcommit'], fields: []
+        });
+      }
+      return refreshed;
+    };
+    return candidate;
+  };
   let writes = 0;
   const result = await executeAtomLanguageKernel({
     ...runtime,
-    programScheduler: createProgramRuntimeScheduler(),
-    source: 'transform {"thing":"Source","situation.rep.after":"before"}',
+    programScheduler: scheduler,
+    source: 'transform {"thing":"Source","situation.rep.before":"before"}',
     interaction: { id: `mirror-after-effects-${crypto.randomUUID()}` },
     programMode: 'reconcile',
-    async commitWorld({ facts, expectedRevision, nextRevision }) {
+    async commitWorld({ facts, expectedRevision, nextRevision, affectedAtoms }) {
       writes += 1;
       await fs.writeFile(runtime.contextFile, JSON.stringify(facts, null, 2), 'utf8');
       const receipt = {
         beforeRevision: expectedRevision,
         afterRevision: nextRevision,
-        result: {}
+        result: { affectedAtoms }
       };
-      if (writes === 2) {
+      if (writes === 1) {
+        const concurrent = [...facts, atom('Concurrent', 'after')];
+        await fs.writeFile(runtime.contextFile, JSON.stringify(concurrent, null, 2), 'utf8');
         throw Object.assign(new Error('mirror unavailable'), {
           code: 'MIRROR_UNAVAILABLE', details: { receipt }
         });
@@ -380,14 +428,24 @@ test('an auxiliary mirror failure after subsequent facts commit preserves the co
 
   const stored = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.subsequentExecution.status, 'completed');
+  assert.equal(result.subsequentExecution.status, 'completed', JSON.stringify(result));
   assert.deepEqual(result.subsequentExecution.errors, []);
-  assert.equal(find(stored, 'Source').situation, 'after');
-  assert.equal(find(stored, 'Result').situation, 'after');
+  assert.equal(result.changed, true);
+  assert.equal(result.result.thing, 'Renamed Source');
+  assert.equal(find(stored, 'Renamed Source').situation, 'before');
+  assert.equal(find(stored, 'Concurrent').situation, 'after');
+  assert.ok(result.affectedPaths.includes('Source'));
+  assert.ok(result.affectedPaths.includes('Renamed Source'));
+  assert.ok(
+    result.lockState.some(({ path }) => path === 'Renamed Source'),
+    JSON.stringify(result.lockState)
+  );
   assert.equal(result.revisionAfter, result.subsequentExecution.revisionAfter);
-  assert.equal(result.revisionAfter, result.warnings.find(({ code }) => (
+  const committedRevision = result.warnings.find(({ code }) => (
     code === 'MIRROR_UNAVAILABLE'
-  ))?.receipt?.afterRevision?.replace(/^sha256:/u, ''));
+  ))?.receipt?.afterRevision?.replace(/^sha256:/u, '');
+  assert.ok(committedRevision);
+  assert.notEqual(result.revisionAfter, committedRevision);
 });
 
 test('an explicitly requested Program run still fails when that Program fails', async (t) => {

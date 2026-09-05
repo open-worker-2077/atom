@@ -148,15 +148,23 @@ export function createTransactionalWorldPersistence({
     if (transformLogRecord && cachedTransformLog) {
       cachedTransformLog.push(structuredClone(transformLogRecord));
     }
-    await adoptAtomContextSnapshot(contextFile, facts, {
-      ...(nextManifest ? { compatibilityManifest: nextManifest } : {})
-    });
-    await onAuthoritativeWrite({
-      operation: 'commit',
-      contextFile,
-      revision: receipt.afterRevision,
-      receipt
-    });
+    try {
+      await adoptAtomContextSnapshot(contextFile, facts, {
+        ...(nextManifest ? { compatibilityManifest: nextManifest } : {})
+      });
+      await onAuthoritativeWrite({
+        operation: 'commit',
+        contextFile,
+        revision: receipt.afterRevision,
+        receipt
+      });
+    } catch (error) {
+      throw problem(
+        error.code ?? 'WORLD_COMMITTED_AUXILIARY_PENDING',
+        error.message ?? 'World transition committed, but an auxiliary projection requires recovery',
+        { ...(error.details ?? {}), receipt, cause: error.code ?? error.name }
+      );
+    }
     if (publishLegacyProjection) {
       try {
         await writeAtomGraphProjection(projectionFile, facts, {

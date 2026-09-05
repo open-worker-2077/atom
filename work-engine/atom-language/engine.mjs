@@ -2958,6 +2958,13 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     allowEmpty = false,
     subsequent = false
   } = {}) {
+    function rememberCommittedAffectedPaths(commitReceipt) {
+      const affected = commitReceipt?.affectedAtoms ?? commitReceipt?.result?.affectedAtoms ?? [];
+      committedAffectedPaths = [...new Set([
+        ...committedAffectedPaths,
+        ...affected.map(({ path }) => path).filter(Boolean)
+      ])].sort();
+    }
     const delegated = await validateRequestCandidate(candidateAtoms);
     if (!delegated.ok) {
       if (subsequent) {
@@ -2998,18 +3005,14 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         localizedSituationValidation,
         structurePreservingValidation
       });
-      committedAffectedPaths = [...new Set([
-        ...committedAffectedPaths,
-        ...(receipt?.affectedAtoms ?? [])
-        .map(({ path }) => path)
-        .filter(Boolean)
-      ])].sort();
+      rememberCommittedAffectedPaths(receipt);
     } catch (error) {
       if (allowEmpty && error?.code === 'EMPTY_WORLD_PATCH') {
         confirmStrutDeliveryClaims();
         return null;
       }
       if (subsequent && error?.details?.receipt?.afterRevision) {
+        rememberCommittedAffectedPaths(error.details.receipt);
         confirmStrutDeliveryClaims();
         error.committedReceipt = error.details.receipt;
         throw error;
@@ -3116,7 +3119,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     await options.onCommitted(structuredClone(result));
   }
 
-  async function subsequentFailureDetails(error, candidateAtoms = null) {
+  async function subsequentFailureDetails(error) {
     releaseStrutDeliveryClaims();
     const latestAtoms = await readAtomContext(contextFile, {
       compatibilityManifest: options.compatibilityManifest
@@ -3127,11 +3130,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           ...(error?.details ?? {})
         })];
     const revisionAfter = revisionOf(latestAtoms);
-    const committedRevision = error?.committedReceipt?.afterRevision?.replace(/^sha256:/u, '');
-    const committed = Boolean(
-      (committedRevision && committedRevision === revisionAfter)
-      || (candidateAtoms && revisionOf(candidateAtoms) === revisionAfter)
-    );
+    const committed = Boolean(error?.committedReceipt?.afterRevision);
     return {
       latestAtoms,
       revisionAfter,
@@ -3624,7 +3623,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         revisionAfter = commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
           ?? revisionOf(nextAtoms);
       } catch (error) {
-        const failed = await subsequentFailureDetails(error, nextAtoms);
+        const failed = await subsequentFailureDetails(error);
         const latestMatches = new Map(walkAtoms(failed.latestAtoms).map((match) => [
           match.path.join('/'), match
         ]));
@@ -3634,7 +3633,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         }
         return {
           ok: true, language: 'atom', command: 'transform', batch: true,
-          createNew: false, changed: sourceChanged, contextFile, projectionFile,
+          createNew: false, changed: sourceChanged || failed.status === 'completed', contextFile, projectionFile,
           revisionBefore, revisionAfter: failed.revisionAfter, results,
           warnings: mergeWarnings(interactionWarnings, failed.warning), errors: [],
           messages: [
@@ -3642,7 +3641,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
             ...(failed.status === 'completed' ? finalProgramMessages : [])
           ], interactionId: interaction.id,
           affectedPaths: committedAffectedPaths,
-          lockState: programLockState(programLockIndex),
+          lockState: programLockState(
+            failed.status === 'completed' ? finalProgramLockIndex : programLockIndex
+          ),
           subsequentExecution: {
             status: failed.status, sourceRevision, revisionAfter: failed.revisionAfter,
             errors: failed.errors
@@ -3663,8 +3664,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           ));
         }
       }
+    } else {
+      confirmStrutDeliveryClaims();
     }
-    if (!changed) confirmStrutDeliveryClaims();
     return {
       ok: true,
       language: 'atom',
@@ -3807,8 +3809,11 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         revisionAfter = commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
           ?? revisionOf(nextAtoms);
       } catch (error) {
-        const failed = await subsequentFailureDetails(error, nextAtoms);
-        const latest = exactMatchAtPath(failed.latestAtoms, created.resultPath);
+        const failed = await subsequentFailureDetails(error);
+        const latest = exactMatchAtPath(
+          failed.latestAtoms,
+          failed.status === 'completed' ? finalCreatePath : created.resultPath
+        );
         return {
           ok: true, language: 'atom', command: 'transform', createNew: true,
           changed: true, contextFile, projectionFile, revisionBefore,
@@ -3820,7 +3825,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
             ...(failed.status === 'completed' ? postRefresh.messages : [])
           ], interactionId: interaction.id,
           affectedPaths: committedAffectedPaths,
-          lockState: programLockState(programLockIndex),
+          lockState: programLockState(
+            failed.status === 'completed' ? postRefresh.lockIndex : programLockIndex
+          ),
           subsequentExecution: {
             status: failed.status, sourceRevision, revisionAfter: failed.revisionAfter,
             errors: failed.errors
@@ -4213,13 +4220,17 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       revisionAfter = commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
         ?? revisionOf(nextAtoms);
     } catch (error) {
-      const failed = await subsequentFailureDetails(error, nextAtoms);
-      const latestResult = exactMatchAtPath(
-        failed.latestAtoms, transformed.resultPath ?? transformed.resultName
-      );
+      const failed = await subsequentFailureDetails(error);
+      const latestResultPath = failed.status === 'completed'
+        ? rewritePath(
+            transformed.resultPath ?? transformed.resultName,
+            postRefresh.pathChanges
+          )
+        : transformed.resultPath ?? transformed.resultName;
+      const latestResult = exactMatchAtPath(failed.latestAtoms, latestResultPath);
       return {
         ok: true, language: 'atom', command: 'transform', createNew: false,
-        changed: sourceChanged, contextFile, projectionFile, revisionBefore,
+        changed: sourceChanged || failed.status === 'completed', contextFile, projectionFile, revisionBefore,
         revisionAfter: failed.revisionAfter,
         result: latestResult ? describeAtom(latestResult, false) : null,
         ...(transformed.archive ? { archive: structuredClone(transformed.archive) } : {}),
@@ -4229,7 +4240,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           ...(failed.status === 'completed' ? postRefresh.messages : [])
         ], interactionId: interaction.id,
         affectedPaths: committedAffectedPaths,
-        lockState: programLockState(programLockIndex),
+        lockState: programLockState(
+          failed.status === 'completed' ? postRefresh.lockIndex : programLockIndex
+        ),
         subsequentExecution: {
           status: failed.status, sourceRevision, revisionAfter: failed.revisionAfter,
           errors: failed.errors
