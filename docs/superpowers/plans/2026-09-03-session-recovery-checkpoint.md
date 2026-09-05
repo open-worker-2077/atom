@@ -8,6 +8,8 @@
 
 ## 2026-09-05 当前执行断点
 
+- **2026-09-06覆盖断点**：移动候选00ff220最终全量1801/1801、exit0，构建和development-control通过；Task3及归档/可信恢复任务均已独立复核。430节点真实完整历史归档3557ms/恢复5997ms来源成功，中央patch四轴回转/冷读/生产源不变通过；旧slot_body业务Program后续failed单独保留，不作为移动来源失败。final reviewer正在审查b4a74cc..00ff220，随后root按已准备的deploy-reviewed-candidate.ps1私有完整备份/整合/部署/公开回读/来源回告。用户要求先移动部署，右键双击改长按只记录在Web§4.1及A计划，移动后再改；手机配置仍保留。生产尚未改动，不再重跑已通过全量。
+
 - **最新覆盖断点**：main文档到b20bc69，生产代码仍8b2df30，health7382/published。可信恢复b1fbb11已32/32通过，当前原实施方只修独立评审的reader故障诊断Important；之后范围复审。独立旧main候选5fcb4c0在完整真实历史副本归档430节点成功，冷恢复实际提交但HTTP15秒超时、总耗时23秒；证明来源/后续分离是本次交付必要依赖。先完成此小修→原Transform Task3剩余12项定向回修→组合真实验收/最终门禁/复核/部署/来源回告→手机共同配置。保留独立候选作为证据，不继续旧main旁路性能改造。最近GitHub push及ls-remote均网络失败，不能宣称最新提交已远端备份。
 
 - **当前第一优先**：用户要求先解决旧版本子树移动/归档失败。工单922cf490-8f6d-45a7-b2e8-f2b8afd02ebf，关联b7fc5c3e-528e-422b-8578-8e8fd9e9b8eb；目标🧊manage/办包/究谋/个务/外务/旧版本。纯dsc逐后代slot鉴权碰到封装槽模SLOT_STRUCTURE_LOCK_DENIED，被包装WINDOW_ACCESS_DENIED；同树mov内存通过，生产未写。用户已对“整体归档按合法所选根裁定、保留结构/权限/唯一备份仓/引用/恢复”明确答“可以按这个修复”，强调合法上级无需逐个申请后代编辑权。专项计划2026-09-05-ancestor-discard.md的executor补丁b575913/6fed2fd已独立复核通过，16/16；独立main候选11573e1的真实私有副本归档430节点成功，冷读守恒，但原位恢复被PROGRAM_FUNCTION_DELEGATION_DENIED拒绝。已否决以可改写的当前备份声明作权限证明；原Task1正在沿同一已批准可逆恢复目标，以原中央discard patch/snapshot提供可信原声明证明，限定persistence/adapter/engine按需接线。不得为manage名称加旁路或退役无关锁。
