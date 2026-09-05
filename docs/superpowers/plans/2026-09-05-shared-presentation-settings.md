@@ -14,9 +14,11 @@
 
 **Task1 RED:** 新增真实随机端口隔离服务测试GET共同设置接口得到404而非200，`node --test --test-isolation=none tests/atom-presentation-settings.test.mjs`为0/1通过；保留fixture。接下来实现共同仓储/CAS及HTTP合同；只移除实际必要测试中的fixture递归清理，不扩展为全库清理。
 
-**Task1首轮GREEN（待控制方原始证据回读及独立复核）:** 实施方报告新增共同配置测试9/9、约2.38秒，覆盖真实服务接线、网关身份、CAS/过期拒绝、Origin初始化、SSE、冷重启、业务及投影/历史文件hash不变、EIO旧文件和失败临时文件留存；正在完成模型/view-state及既有server具名相邻验证，不宣称已部署或真机完成。
+**Task1首轮GREEN（历史阶段）:** 实施方报告新增共同配置测试9/9、约2.38秒，覆盖真实服务接线、网关身份、CAS/过期拒绝、Origin初始化、SSE、冷重启、业务及投影/历史文件hash不变、EIO旧文件和失败临时文件留存；正在完成模型/view-state及既有server具名相邻验证，不宣称已部署或真机完成。
 
 ## Global Constraints
+
+- **执行状态**：Task1在7b47728完成，控制方已回读原始41/41及2/2，独立审查Spec符合/质量Approved且无问题；Task2从该提交续接浏览器继承与可见效果验收，服务尚未部署。
 
 - 手机端展示参数以本机已有有效配置为基准；不静默采用另一套默认配置。
 - 展示配置属于空间体验，不写入atom.json、不制造Graph修订，不以knowledge投影作为权威。
@@ -67,7 +69,7 @@
 - Consumes: `createViewStateRepository({file,worldId})`、`normalizeSettings(input)`、createSpatialServer既有options和SSE连接。
 - Produces: `createPresentationSettingsService({repository})`返回`read()`和`update({expectedRevision,patch,bootstrap})`；read返回上述revision/initialized/settings，update保存成功后返回同形结果。HTTP边界负责实际Origin约束，服务负责类型/CAS/初始化状态。
 
-- [ ] **Step 1: 写RED与运行**
+- [x] **Step 1: 写RED与运行**
 
 ```js
 assert.deepEqual(await service.read(), {revision:0,initialized:false,settings:null});
@@ -80,7 +82,7 @@ await assert.rejects(service.update({expectedRevision:0,patch:{nestedTunnelPerce
 
 Run: `node --test --test-isolation=none tests/atom-presentation-settings.test.mjs`。真实fixture先证明公共GET缺路由或共同保存尚不存在；两facade同expectedRevision竞争只一笔成功，EIO/格式冲突不改原文件，合法0可保存。
 
-- [ ] **Step 2: 最小实现**
+- [x] **Step 2: 最小实现**
 
 把现有demo model包成浏览器全局/Node CommonJS均可使用的同一个factory，禁止复制两份默认值。repository仅在调用者传expectedRevision时开启CAS及自动+1，未传时维持旧write(view,{revision})合同。settings service合并当前settings与patch后规范化；首次只接受bootstrap及0修订；服务文件名固定，HTTP不能选路径。
 
@@ -93,7 +95,7 @@ const updated = await service.update({expectedRevision:current.revision,
 
 绑定API/网关后用真实随机端口验证空读取、初始化、手机读取、更新、过期拒绝、跨站拒绝、服务重启；同时hash核对atom/graph不变。拒绝Bootstrap来源时必须零文件写入。
 
-- [ ] **Step 3: 定向GREEN并提交**
+- [x] **Step 3: 定向GREEN并提交**
 
 Run: `node --test --test-isolation=none tests/atom-presentation-settings.test.mjs tests/spatial-demo-model.test.js tests/atom-view-state-migration.test.mjs`。随后仅运行新增路由影响的server具名测试。GitNexus/diff检查后明确文件git add及commit，报告命令、输出、私有证据路径；独立任务复核。
 
