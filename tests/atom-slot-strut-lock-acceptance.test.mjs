@@ -68,7 +68,7 @@ function world() {
   return [atom('Root', '', [
     atom('Holder', agent(['approved']), [
       atom('Unlabelled', agent([]), [
-        atom('条件槽体', '', [
+        atom('条件槽体', 'slot_body({"action":"seal"})', [
           atom('候选流', '', [
             atom('字段甲', '字段甲槽契约', [], [{
               'if@current': true,
@@ -80,8 +80,7 @@ function world() {
             atom('执行', '普通事实后项'),
             atom('执行动作', action, [], [], ['program'])
           ])
-        ]),
-        atom('封装', `slot_body({"action":"seal","body":"${body}"})`, [], [], ['program']),
+        ], [], ['program']),
         atom('打印001', printer('实例001'), [], [], ['program']),
         atom('打印002', printer('实例002'), [], [], ['program'])
       ], [], ['program', 'agent'])
@@ -110,7 +109,7 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
   const body = `${unlabelled}/条件槽体`;
 
   for (const source of [
-    'transform {"thing.run.":"Root/Holder/Unlabelled/封装"}',
+    'transform {"thing.run.":"Root/Holder/Unlabelled/条件槽体"}',
     'transform {"thing.run.":"Root/Holder/Unlabelled/打印001"}',
     'transform {"thing.run.":"Root/Holder/Unlabelled/打印002"}'
   ]) {
@@ -138,7 +137,7 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
   }
 
   let stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(find(stored, `${body}/槽模/判定`), null);
+  assert.equal(find(stored, `${body}/候选流/判定`), null);
   assert.ok(find(stored, `${body}/槽例/实例001`));
   assert.ok(find(stored, `${body}/槽例/实例002`));
 
@@ -169,7 +168,7 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
   assert.equal(find(stored, target).situation, '已复核');
   assert.equal(find(stored, `${body}/槽例/实例002/结果/结果料`).situation, '待计算');
 
-  const consequentPath = `${body}/槽模/执行动作`;
+  const consequentPath = `${body}/候选流/执行动作`;
   const deliveries = ['clause-a', 'clause-b'].map((clauseId, consequentOrdinal) => ({
     mode: 'strut',
     revision: 'sha256:direct-strut-acceptance',
@@ -187,7 +186,7 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
   const subscriberCalls = [];
   const runProgram = scheduler.runProgram;
   scheduler.runProgram = async (request) => {
-    if (request.program.path === `${body}/槽模/执行动作`) {
+    if (request.program.path === `${body}/候选流/执行动作`) {
       subscriberCalls.push({
         scopeRoot: request.scopeRoot,
         delivery: request.programArguments
@@ -209,8 +208,8 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
   ]);
   assert.deepEqual(directStrut.failures, [], JSON.stringify(directStrut.failures));
   assert.deepEqual(directStrut.executedProgramPaths, [
-    `${body}/槽模/执行动作`,
-    `${body}/槽模/执行动作`
+    `${body}/候选流/执行动作`,
+    `${body}/候选流/执行动作`
   ]);
   assert.equal(directStrut.transforms.length, 4);
 });

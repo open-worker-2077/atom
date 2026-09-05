@@ -241,7 +241,13 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   ]);
   assert.equal(slotBody.layer, 'kernel');
   assert.equal(slotBody.family, 'graph');
-  assert.deepEqual(slotBody.contract.argument.required, ['action', 'body']);
+  assert.deepEqual(slotBody.contract.argument.required, ['action']);
+  assert.equal(Object.hasOwn(slotBody.contract.argument.properties, 'body'), false);
+  assert.deepEqual(slotBody.contract.selfDeclaration, {
+    seal: 'current Program is the body',
+    print: 'current print Program parent is the body',
+    callerSelectedBody: 'forbidden'
+  });
   assert.deepEqual(slotBody.contract.argument.properties.action.enum, ['seal', 'print']);
   assert.deepEqual(slotBody.contract.argument.properties.name.requiredWhen, { action: 'print' });
   assert.equal(Object.hasOwn(slotBody.contract.argument.properties, 'revision'), false);
@@ -259,9 +265,9 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
     revisionArgument: 'forbidden',
     revisionBinding: 'current-visible-print-plan'
   });
-  assert.deepEqual(slotBody.contract.layout.sealedChildren, ['槽模', 'print', '槽例']);
+  assert.deepEqual(slotBody.contract.layout.sealedChildren, ['original-candidate-name', 'print', '槽例']);
   assert.equal(slotBody.contract.layout.physicalBlankExample, 'forbidden');
-  assert.equal(slotBody.contract.layout.sharedPrograms, '槽模-only');
+  assert.equal(slotBody.contract.layout.sharedPrograms, 'original-candidate-only');
   assert.equal(slotBody.contract.layout.material, 'unmapped-Thing-subtree-below-mapped-slot');
   assert.equal(slotBody.contract.layout.defaultMaterial, 'forbidden');
   assert.equal(slotBody.contract.revisionSync.mode, 'all-instances-one-seal');
@@ -282,7 +288,7 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   const code = await runAtomCli(['--help'], { stdout: stdout.stream, stderr: stderr.stream });
   assert.equal(code, 0, stderr.value());
   assert.match(stdout.value(), /普通可自运行候选 DataFlow/u);
-  assert.match(stdout.value(), /槽模／print@program／槽例/u);
+  assert.match(stdout.value(), /原名保留候选，并新增 print@program 与槽例/u);
   assert.match(stdout.value(), /explore \{"thing":"EXACT槽体\/print\/修订","slot\$latitude-1":true\}/u);
   assert.doesNotMatch(stdout.value(), /explore \{"name":"EXACT槽体\/print\/修订"|复制[^\n]*默认料/u);
   assert.match(stdout.value(), /use_program[\s\S]*arguments[\s\S]*name[\s\S]*修订由当前 print@program 内部绑定/u);
@@ -290,10 +296,10 @@ test('public registry and CLI Help expose the complete槽体 kernel contract', a
   assert.match(stdout.value(), /坐标会按当前窗口与 Program 边界重新授权/u);
   assert.match(stdout.value(), /精确字符串名称或路径继续兼容/u);
   assert.match(stdout.value(), /调用方不得传 revision/u);
-  assert.match(stdout.value(), /thing\.run\.EXACT候选根路径[\s\S]*\.\/相对 slot 路径[\s\S]*当前槽例域/u);
+  assert.match(stdout.value(), /thing\.run\.EXACT候选根路径[\s\S]*\.\/相对 slot 路径[\s\S]*结果写回当前槽例/u);
   assert.match(stdout.value(), /"thing":"EXACT槽体\/槽例\/实例\/槽"[\s\S]*situation\.rep\.填写值/u);
   assert.doesNotMatch(stdout.value(), /name\.run\.EXACT候选根路径|detail\.rep\.填写值/u);
-  assert.match(stdout.value(), /本地料 Thing[\s\S]*逐字节/u);
+  assert.match(stdout.value(), /本地料[\s\S]*逐字节/u);
   assert.match(stdout.value(), /SLOT_MATERIAL_SLOTMENT_CONFLICT[\s\S]*不产生半份槽例/u);
   assert.doesNotMatch(stdout.value(), /next_cursor|SLOT_SYNC_CURSOR|三方比较/u);
 });

@@ -12,6 +12,8 @@
 
 ## 最小化检查
 
+- **代码图辅助**：用户授权的全局Code-Graph-RAG已安装，Atom全仓离线索引和局部调用检索已验证；仅作为调试／影响分析工具，不替代Superpowers。版本、入口、覆盖与误连限制见[`code-graph-rag-assistance.md`](code-graph-rag-assistance.md)。
+
 - **唯一框架**：Superpowers 继续独占规格、计划、TDD、调试、验证与完成裁定；Ponytail 不作为第二套框架安装或常态注入。
 - **固定入口**：设计获批后、计划定稿前执行一次方案最小化；提交前执行一次差异复杂度审查。规则与冲突顺序见[`minimality-checkpoints.md`](minimality-checkpoints.md)。
 - **硬边界**：不得以减少代码为由削弱用户定论、Atom 合同、安全、数据守恒、迁移回滚、持久化账本、测试或验证。
@@ -22,7 +24,7 @@
 
 - **当前恢复断点**：[`plans/2026-09-03-session-recovery-checkpoint.md`](plans/2026-09-03-session-recovery-checkpoint.md)；ChatGPT软件更新或 Session历史丢失后，先从该文件恢复，不依赖聊天记录或自动压缩摘要。
 - **已撤回独立门禁**：[`specs/2026-09-04-atom-development-continuity-gates-design.md`](specs/2026-09-04-atom-development-continuity-gates-design.md)记录为何不为Atom另建连续性门禁；通用补充位于工作区`D:\Project\〇\AGENTS.md`，原Superpowers技能步骤保持完整。
-- **当前主干状态**：Strut触发单轨化、Web断线revision补账、Shortcut语义编辑、ASDF设置集成与内部槽位标识隔离均已部署。当前主线是已批准的A模式收束：右键单击普通向内剖开、双击沉浸向内剖开、当前团空白右键单击返回一层并非沉浸；S、D退出运行路径，F融入A。改构前远程回退点为`pre-a-mode-consolidation-20260904`。“🔥🔥🔥ESG计划_按逻辑_xlsx”如复现已批准功能的生产故障则优先修复，但不得据此擅改Graph本体定论。手机终端验收仅被`pixel-10a`离线局部阻塞，零Agent创世继续排在A模式之后；“延后”只表示低优先级，不表示取消。不得重新引入Strut`nodes`、Shortcut手填ID或把内部槽位身份重新投影成普通名称。
+- **当前主干状态**：Flow槽体支撑已实现、全量验证、部署并推送`main@eaa48bc`，状态为已交付待观察；旧热态15秒Program创建故障也已由当前世界副本重新验收为待观察。当前开发项为A模式收束，复用`.worktrees/a-mode-consolidation@b1bff98`并先安全吸收当前main。白板函数只进入后续规格，不在本轮实现；手机与零Agent继续按总账排队。不得重新引入Strut`nodes`、Shortcut手填ID或把内部槽位身份重新投影成普通名称。
 - **2026-09-03 已部署**：Slot相邻层级信号、Program relocation closure、交互原子隔离、独立截止、迟到提交防护与短权威提交临界区均已合入并推送`main@ead30e2`。系统测试`226/226 PASS`；真实4784重启后 health正常，`explore 🧊manage`最终约256ms。此前“health快但命令长期挂起”的P0已关闭。
 
 - **首要 Graph 纠偏**：Strut 判定 Program 必须内嵌在 clause `if`，取得复合前项事实与本次规范化 Transform `$` 动作信封；`$click`只是注册动作族的首个用例，CLI/Web 点击统一为 `transform {"thing$click":"EXACT路径"}`，新增动作不得修改 Strut/runtime 主干。旧外部 `thing@program` 判定与独立 click endpoint/trigger 方案均已退役。权威合同见[`specs/2026-08-31-atom-world-program-design.md`](specs/2026-08-31-atom-world-program-design.md) §3.2、§4.1；当前实施账本见[`plans/2026-09-02-inline-strut-transform-actions.md`](plans/2026-09-02-inline-strut-transform-actions.md)。
@@ -36,7 +38,7 @@
 - **相关世界合同**：[`specs/2026-08-31-atom-world-program-design.md`](specs/2026-08-31-atom-world-program-design.md)
 - **相关授权合同**：[`specs/2026-08-31-atom-agent-authorization-design.md`](specs/2026-08-31-atom-agent-authorization-design.md)
 
-当前任务绑定每小时`Atom 目标巡守`（automation id：`atom-2`），状态`ACTIVE`；提示已更新为优先接收ESG生产急用功能反馈、先读唯一总账、即时入账、默认最小受影响链且禁止局部问题导致全局停工。
+当前故障Session的巡守将在交接完成后停用；新任务须重新绑定每30分钟`Atom 目标巡守`，每次先读唯一总账、即时入账、只执行当前优先项的最小受影响链，并禁止局部问题导致全局停工。
 
 ## Web 场景状态
 

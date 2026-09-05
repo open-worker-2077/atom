@@ -27,6 +27,7 @@ const DEFAULT_MAX_WORKERS = 16;
 const workerFile = path.join(path.dirname(fileURLToPath(import.meta.url)), 'program-worker.py');
 const preparedRecordSnapshots = new WeakMap();
 const preparedProgramSnapshots = new WeakMap();
+const preparedProgramFingerprints = new WeakMap();
 const isolatedProgramPathsByRecords = new WeakMap();
 
 function withoutGraphRoot(graphDocument, graphPath) {
@@ -201,6 +202,9 @@ function worldRecords(atoms) {
     isolatedProgramPathsByRecords.set(records, new Set(legacy.isolatedProgramPaths ?? []));
   }
   const prepared = freezePrepared(records);
+  preparedProgramFingerprints.set(prepared, {
+    byRef: new Map(prepared.map(record => [record.ref, record])), values: new Map()
+  });
   if (legacy) isolatedProgramPathsByRecords.set(prepared, new Set(legacy.isolatedProgramPaths ?? []));
   preparedRecordSnapshots.set(atoms, { worldRevision, records: prepared });
   return prepared;
@@ -288,8 +292,14 @@ function fingerprint(records, programs, agentOrigin, isolateFailures) {
 }
 
 function programSetFingerprint(programs, isolateFailures, records, agentProgramPaths) {
-  const recordsByRef = new Map(records.map((record) => [record.ref, record]));
-  return crypto.createHash('sha256').update(JSON.stringify({
+  const prepared = preparedProgramFingerprints.get(records);
+  const cache = prepared && programs.every(program => prepared.byRef.get(program.ref) === program)
+    ? prepared.values : null;
+  const key = cache ? JSON.stringify([isolateFailures,
+    programs.map(program => [program.ref, agentProgramPaths.has(program.path)])]) : null;
+  if (cache?.has(key)) return cache.get(key);
+  const recordsByRef = prepared?.byRef ?? new Map(records.map((record) => [record.ref, record]));
+  const fingerprint = crypto.createHash('sha256').update(JSON.stringify({
     programs: programs.map((program) => {
       const definition = semanticRecord(program, recordsByRef);
       // A declared Agent Program is the security/window declaration carried by the
@@ -301,6 +311,11 @@ function programSetFingerprint(programs, isolateFailures, records, agentProgramP
     }),
     isolateFailures
   })).digest('hex');
+  if (cache) {
+    if (cache.size >= 128) cache.delete(cache.keys().next().value);
+    cache.set(key, fingerprint);
+  }
+  return fingerprint;
 }
 
 function sourceDefinitionFingerprint(programs) {
@@ -318,6 +333,7 @@ function agentSecurityFingerprint(programs) {
 function requestDrivenLockFingerprint(records, programs, securityFingerprint, locks = []) {
   const recordsByPath = new Map(records.map((record) => [record.path, record]));
   const dependencyPaths = [...new Set(locks.flatMap((lock) => ([
+    ...(typeof lock.path === 'string' ? [lock.path] : []),
     ...(lock.targets?.paths ?? []),
     ...(lock.allowed_windows?.paths ?? []),
     ...(lock.allowed_programs?.paths ?? [])
@@ -676,7 +692,7 @@ export function resolveExactPathFromCurrentContext(atoms, selector) {
 
 export function validateProgramResult(result, records, program, options = {}) {
   const {
-    scopeRoot = null, strutDecision = false, resolveExactPath = null, agentProgramPaths = []
+    scopeRoot = null, programRoot = null, strutDecision = false, resolveExactPath = null, agentProgramPaths = []
   } = options;
   if (!result?.ok) {
     const error = new Error(result?.error?.message || 'Python Program failed');
@@ -903,7 +919,8 @@ export function validateProgramResult(result, records, program, options = {}) {
       ...structuredClone(entry),
       sourceProgramRef: program.ref,
       sourceProgramPath: program.path,
-      ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {})
+      ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {}),
+      ...(programRoot ? { sourceProgramRoot: programRoot } : {})
     };
   });
   const shortcuts = (result.shortcuts ?? []).map((entry) => {
@@ -961,27 +978,25 @@ export function validateProgramResult(result, records, program, options = {}) {
     )));
     const keys = Object.keys(publicEntry).sort();
     const required = entry.action === 'print'
-      ? ['action', 'body', 'name']
-      : ['action', 'body'];
-    const allowed = entry.action === 'print'
-      ? [...required, 'revision']
-      : [...required];
-    const invalidLegacyRevision = entry.revision !== undefined
-      && (typeof entry.revision !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(entry.revision));
+      ? ['action', 'name']
+      : ['action'];
+    const allowed = [...required];
+    const body = entry.action === 'seal'
+      ? sourceProgramPath
+      : sourceProgramPath.split('/').slice(0, -1).join('/');
     if (!['seal', 'print'].includes(entry.action)
-      || typeof entry.body !== 'string' || !entry.body.trim()
+      || !body
       || keys.some((key) => !allowed.includes(key))
       || required.some((key) => !keys.includes(key))
       || (entry.action === 'print'
-        && (typeof entry.name !== 'string' || !entry.name.trim() || entry.name.includes('/')
-          || invalidLegacyRevision))) {
-      throw Object.assign(new Error('slot_body() requires seal {action,body} or a current-print Program effect {action,body,name} with an optional legacy revision'), {
+        && (typeof entry.name !== 'string' || !entry.name.trim() || entry.name.includes('/')))) {
+      throw Object.assign(new Error('slot_body() requires self-declared seal {action} or print {action,name} from the body print Program'), {
         code: 'INVALID_SLOT_BODY_EFFECT'
       });
     }
     return {
       ...structuredClone(publicEntry),
-      body: entry.body.trim(),
+      body,
       ...(entry.action === 'print' ? { name: entry.name.trim() } : {}),
       sourceProgramPath,
       ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {})
@@ -1236,7 +1251,7 @@ function runWorker({
       }
       try {
         resolve(validateProgramResult(child.__atomResult ?? JSON.parse(stdout), records, program, {
-          scopeRoot, strutDecision, resolveExactPath, agentProgramPaths
+          scopeRoot, programRoot, strutDecision, resolveExactPath, agentProgramPaths
         }));
       } catch (error) {
         reject(error);
@@ -1305,6 +1320,7 @@ export class ProgramRuntimeScheduler {
     this.deferredTriggerContracts = new Map();
     this.slotInvocationCycles = new Map();
     this.agentSecurity = new Map();
+    this.agentDeclarationInspections = new Map();
     this.agentSecurityWorldRevision = null;
     this.latestRecords = null;
     this.preparedStrutGraphs = new Map();
@@ -1408,7 +1424,8 @@ export class ProgramRuntimeScheduler {
       atoms,
       request,
       preparedWorld,
-      scopeRoot: executionContext.scopeRoot ?? null
+      scopeRoot: executionContext.scopeRoot ?? null,
+      programRoot: executionContext.programRoot ?? null
     }));
     const result = await this.runBounded(() => this.runProgram({
       python: this.python,
@@ -1419,12 +1436,14 @@ export class ProgramRuntimeScheduler {
       executeExplore: async (request) => {
         const matches = await executeExplore(request, {
           scopeRoot: options.scopeRoot ?? null,
+          programRoot: options.programRoot ?? null,
           programPath: program.path
         });
         const byPath = new Map(records.map((record) => [record.path, record]));
         return matches.map((match) => programExploreRecord(match, byPath)).filter(Boolean);
       },
       scopeRoot: options.scopeRoot ?? null,
+      programRoot: options.programRoot ?? null,
       strutDecision: true,
       programArguments: structuredClone(options.context ?? {}),
       triggered: true,
@@ -1447,8 +1466,14 @@ export class ProgramRuntimeScheduler {
   async deriveAgentSecurity(atoms) {
     const records = worldRecords(atoms);
     const programs = programRecords(records);
-    const inspected = await Promise.all(programs.map((program) => (
-      this.runBounded(() => this.inspectProgram({
+    const inspected = await Promise.all(programs.map((program) => {
+      // Declaration-only inspection is a pure AST operation: it cannot read Graph
+      // facts or execute code. Reuse only the exact path/source previously checked.
+      const cached = this.agentDeclarationInspections.get(program.path);
+      if (cached?.source === program.detail) {
+        return { agentRegistrations: structuredClone(cached.declarations) };
+      }
+      return this.runBounded(() => this.inspectProgram({
         python: this.python,
         records,
         programs: [program],
@@ -1463,24 +1488,32 @@ export class ProgramRuntimeScheduler {
         agentDeclarationOnly: true,
         validateOnly: true,
         agentProgramPaths: [...this.agentSecurity.keys()]
-      }))
-    )));
+      }));
+    }));
     const derived = new Map();
     for (const [index, program] of programs.entries()) {
       const declarations = inspected[index].agentRegistrations ?? [];
-      if (declarations.length === 0) continue;
-      if (declarations.length !== 1) {
+      if (declarations.length > 1) {
         throw Object.assign(
           new Error('Agent Program requires exactly one literal agent() declaration: ' + program.path),
           { code: 'AGENT_REGISTRATION_SOURCE_REQUIRED' }
         );
       }
+      this.agentDeclarationInspections.set(program.path, {
+        source: program.detail,
+        declarations: structuredClone(declarations)
+      });
+      if (declarations.length === 0) continue;
       const declaration = declarations[0];
       derived.set(program.path, {
         labels: [...declaration.labels],
         functionScopes: structuredClone(declaration.functionScopes),
         functions: [...declaration.functions]
       });
+    }
+    const activePaths = new Set(programs.map((program) => program.path));
+    for (const cachedPath of this.agentDeclarationInspections.keys()) {
+      if (!activePaths.has(cachedPath)) this.agentDeclarationInspections.delete(cachedPath);
     }
     return derived;
   }
@@ -1668,8 +1701,12 @@ export class ProgramRuntimeScheduler {
     const resolveExactPath = (selector) => resolveExactPathFromCurrentContext(atoms, selector);
     const programs = programRecords(records);
     const lockPrograms = programs.filter((program) => /\block\s*\(/u.test(program.detail));
+    // Lock validation depends on derived Agent authority, not unrelated Program bodies.
+    const lockSecurityFingerprint = crypto.createHash('sha256')
+      .update(JSON.stringify([...this.agentSecurity.entries()].sort(([left], [right]) => left.localeCompare(right))))
+      .digest('hex');
     const fingerprint = requestDrivenLockFingerprint(
-      records, lockPrograms, this.agentSecurityWorldRevision, this.requestDrivenLocks
+      records, lockPrograms, lockSecurityFingerprint, this.requestDrivenLocks
     );
     if (this.requestDrivenLocksWorldRevision === fingerprint) return this.requestDrivenLocks ?? [];
     const inspected = await Promise.all(lockPrograms.map((program) => (
@@ -1710,7 +1747,7 @@ export class ProgramRuntimeScheduler {
     ));
     this.requestDrivenLocks = next;
     this.requestDrivenLocksWorldRevision = requestDrivenLockFingerprint(
-      records, lockPrograms, this.agentSecurityWorldRevision, next
+      records, lockPrograms, lockSecurityFingerprint, next
     );
     return this.requestDrivenLocks;
   }
@@ -1789,6 +1826,8 @@ export class ProgramRuntimeScheduler {
       [path, structuredClone(security)]
     )));
     candidate.agentSecurityWorldRevision = this.agentSecurityWorldRevision;
+    candidate.agentDeclarationInspections = new Map([...this.agentDeclarationInspections]
+      .map(([path, entry]) => [path, structuredClone(entry)]));
     candidate.requestDrivenLocks = structuredClone(this.requestDrivenLocks);
     candidate.requestDrivenLocksWorldRevision = this.requestDrivenLocksWorldRevision;
     candidate.requestDrivenLockRetirementChecked = this.requestDrivenLockRetirementChecked;
@@ -1809,6 +1848,7 @@ export class ProgramRuntimeScheduler {
     this.slotInvocationCycles.clear();
     this.preparedStrutGraphs.clear();
     this.agentSecurity = new Map();
+    this.agentDeclarationInspections.clear();
     this.agentSecurityWorldRevision = null;
     this.requestDrivenLocks = undefined;
     this.requestDrivenLocksWorldRevision = null;
@@ -2245,7 +2285,16 @@ export class ProgramRuntimeScheduler {
     const key = fingerprint(records, programs, options.agentOrigin, isolateFailures);
     const completed = this.completed.get(key);
     if (completed) return this.overlayRequestDrivenLocks({
-      ...completed, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: []
+      ...completed,
+      cached: true,
+      messages: [],
+      transforms: [],
+      shortcuts: [],
+      slotBodies: [],
+      slotSignals: [],
+      jumps: [],
+      jumpAuthorizations: [],
+      agentRegistrations: []
     }, options.agentOrigin);
 
     const reusable = reusableCandidates(
@@ -2267,6 +2316,9 @@ export class ProgramRuntimeScheduler {
         shortcuts: [],
         slotBodies: [],
         slotSignals: [],
+        jumps: [],
+        jumpAuthorizations: [],
+        agentRegistrations: [],
         failures: structuredClone(reusable.value.failures ?? [])
       }, options.agentOrigin);
       this.completed.set(key, value);
@@ -2514,7 +2566,8 @@ export class ProgramRuntimeScheduler {
       atoms,
       request,
       preparedWorld,
-      scopeRoot: executionContext.scopeRoot ?? null
+      scopeRoot: executionContext.scopeRoot ?? null,
+      programRoot: executionContext.programRoot ?? null
     }));
     const triggerEvent = options.triggerEvent ?? null;
     if (triggerEvent && (!['transform', 'strut', 'slot'].includes(triggerEvent.mode)
@@ -3016,6 +3069,7 @@ export class ProgramRuntimeScheduler {
               requests.push(structuredClone(request));
               const matches = await executeExplore(request, {
                 scopeRoot: effectiveScopeRoot,
+                programRoot: slotInvocation?.programRoot ?? options.slotScopeRoot ?? null,
                 programPath: program.path
               });
               rememberDependencySnapshot(dependencyCache, request, matches);

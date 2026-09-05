@@ -34,6 +34,28 @@ function visibleExplorePaths(items) {
   )));
 }
 
+function relocationPatchPath(value) {
+  if (typeof value !== 'string') return value;
+  const separator = value.lastIndexOf('/');
+  return separator > 0 ? value.slice(0, separator) : value;
+}
+
+function programRefreshPatchPaths(refresh) {
+  const relocations = refresh?.pathChanges ?? [];
+  const relocatedRoots = relocations.flatMap((change) => [change.sourcePath, change.resultPath])
+    .filter((value) => typeof value === 'string' && value);
+  const stableChanges = (refresh?.changedPaths ?? []).filter((candidate) => (
+    !relocatedRoots.some((root) => candidate === root || candidate.startsWith(`${root}/`))
+  ));
+  return [
+    ...stableChanges,
+    ...relocations.flatMap((change) => [
+      relocationPatchPath(change.sourcePath),
+      relocationPatchPath(change.resultPath)
+    ])
+  ].filter(Boolean);
+}
+
 function relevantProgramWarnings(items, warnings) {
   const visiblePaths = visibleExplorePaths(items);
   return warnings.filter((warning) => visiblePaths.has(warning.program));
@@ -44,12 +66,13 @@ function relevantProgramMessages(items, messages) {
   return messages.filter((message) => visiblePaths.has(message.sourceProgramPath));
 }
 
-function programResealsModelPath(slotBodies, sourceProgramPath, targetPath) {
+function programResealsModelPath(atoms, slotBodies, sourceProgramPath, targetPath) {
   if (typeof sourceProgramPath !== 'string' || typeof targetPath !== 'string') return false;
   return (slotBodies ?? []).some((request) => {
     if (request?.action !== 'seal' || request.sourceProgramPath !== sourceProgramPath
       || typeof request.body !== 'string') return false;
-    const modelPath = `${request.body.replace(/\/+$/u, '')}/\u69fd\u6a21`;
+    const modelPath = slotBodyModelPath(atoms, request.body);
+    if (!modelPath) return false;
     return targetPath === modelPath || targetPath.startsWith(`${modelPath}/`);
   });
 }
@@ -83,7 +106,7 @@ import {
   programLockDeniedDiagnostic,
   programLockState
 } from './program-locks.mjs';
-import { applySlotBodyEffect } from './slot-body-runtime.mjs';
+import { applySlotBodyEffect, slotBodyModelPath } from './slot-body-runtime.mjs';
 import { resolveSlotSignalDeliveries } from './slot-signal-runtime.mjs';
 import { normalizeScopedTransformRequest } from './slot-relative-scope.mjs';
 import { applyShortcutEffect, breakShortcutTargets } from './shortcut-runtime.mjs';
@@ -751,6 +774,19 @@ async function persistChangedGraph({
 }
 
 export async function executeAtomLanguage(options = {}) {
+  const postcommit = typeof options.onCommitted === 'function' ? [] : null;
+  const result = await executeAtomLanguageInteraction(options, postcommit);
+  if (postcommit?.length && result?.ok === true && result.changed === true) {
+    await options.onCommitted(structuredClone(result));
+  }
+  for (const finish of postcommit ?? []) {
+    const warnings = await finish();
+    result.warnings = mergeWarnings([...(result.warnings ?? []), ...warnings]);
+  }
+  return result;
+}
+
+async function executeAtomLanguageInteraction(options, postcommit) {
   const pendingStrutDeliveryClaims = new Set();
   const pendingSlotSignalClaims = new Set();
   function rememberStrutDeliveryClaims(keys = []) {
@@ -1045,6 +1081,7 @@ export async function executeAtomLanguage(options = {}) {
           }),
           agentOrigin: interaction.agent,
           scopeRoot: executionContext.scopeRoot ?? null,
+          programRoot: executionContext.programRoot ?? null,
           preparedWorld: preparedWorld ??= prepareExploreWorld(atoms)
         })
       };
@@ -1086,6 +1123,9 @@ export async function executeAtomLanguage(options = {}) {
           transforms: [],
           shortcuts: [],
           slotBodies: [],
+          slotSignals: [],
+          jumps: [],
+          jumpAuthorizations: [],
           agentRegistrations: []
         };
       }
@@ -1182,7 +1222,7 @@ export async function executeAtomLanguage(options = {}) {
       ? { preparedAccessMatches: preparedTransformWorld.matches }
       : {})
   });
-  const accessControllerForProgramEffect = (sourceProgramPath) => {
+  const accessControllerForProgramEffect = (sourceProgramPath, sourceScopeRoot = null) => {
     const sourceAgentSecurity = candidateProgramScheduler?.agentSecurity?.get(sourceProgramPath)
       ?? options.programScheduler?.agentSecurity?.get(sourceProgramPath)
       ?? null;
@@ -1190,7 +1230,7 @@ export async function executeAtomLanguage(options = {}) {
     return createAccessController(atoms, {
       ...options,
       programLockIndex,
-      agentPath: sourceProgramPath,
+      agentPath: sourceScopeRoot ?? sourceProgramPath,
       agentSecurity: structuredClone(sourceAgentSecurity),
       graphLocks
     });
@@ -1232,6 +1272,7 @@ export async function executeAtomLanguage(options = {}) {
       })).decision !== 'allow'
       || (await accessController.authorize(destination, 'write', 'slot', {
         programPath: effect.issuerProgramPath,
+        slotMaterialMove: true,
         windowLifecycle: { action: 'move', destinationPath: effect.destinationPath }
       })).decision !== 'allow';
     if (denied) {
@@ -1451,6 +1492,7 @@ export async function executeAtomLanguage(options = {}) {
           }),
           issuerController.authorize(destination, 'write', 'slot', {
             programPath: payload.issuerProgramPath,
+            slotMaterialMove: true,
             windowLifecycle: { action: 'move', destinationPath }
           })
         ]);
@@ -1585,6 +1627,7 @@ export async function executeAtomLanguage(options = {}) {
       sourceProgramRef: _sourceProgramRef,
       sourceProgramPath,
       sourceScopeRoot = null,
+      sourceProgramRoot = null,
       ...rawTransformRequest
     } = request;
     let transformRequest;
@@ -1592,7 +1635,8 @@ export async function executeAtomLanguage(options = {}) {
       transformRequest = normalizeScopedTransformRequest({
         atoms,
         request: rawTransformRequest,
-        scopeRoot: sourceScopeRoot
+        scopeRoot: sourceScopeRoot,
+        programRoot: sourceProgramRoot
       });
     } catch (error) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
@@ -1624,14 +1668,14 @@ export async function executeAtomLanguage(options = {}) {
       continue;
     }
     let transformed;
-    const effectAccessController = accessControllerForProgramEffect(sourceProgramPath);
+    const effectAccessController = accessControllerForProgramEffect(sourceProgramPath, sourceScopeRoot);
     const authorizeProgramEffect = (match, operation, field, actor = {}) => {
       const targetPath = match.path.join('/');
       return effectAccessController.authorize(match, operation, field, {
         ...actor,
         programPath: sourceProgramPath,
         slotReseal: actor.slotReseal === true || programResealsModelPath(
-          programCycle.slotBodies, sourceProgramPath, targetPath
+          atoms, programCycle.slotBodies, sourceProgramPath, targetPath
         )
       });
     };
@@ -1918,29 +1962,34 @@ export async function executeAtomLanguage(options = {}) {
           agentSecurity: structuredClone(issuerSecurity),
           graphLocks: finalGraphLocks
         });
-        const decisions = await Promise.all([
-          issuerController.authorize(issuerProgram, 'read', 'thing', {
+        const authorizationChecks = [
+          ['issuer-program-read', issuerController.authorize(issuerProgram, 'read', 'thing', {
             programPath: effect.issuerProgramPath
-          }),
-          issuerController.authorize(window, 'write', 'thing', {
+          })],
+          ['window-move', issuerController.authorize(window, 'write', 'thing', {
             programPath: effect.issuerProgramPath,
             windowLifecycle: { action: 'move', destinationPath: effect.destinationPath }
-          }),
-          issuerController.authorize(source, 'write', 'slot', {
+          })],
+          ['authorization-source-write', issuerController.authorize(source, 'write', 'slot', {
             programPath: effect.issuerProgramPath
-          }),
-          issuerController.authorize(destination, 'read', 'thing', {
+          })],
+          ['destination-read', issuerController.authorize(destination, 'read', 'thing', {
             programPath: effect.issuerProgramPath
-          }),
-          issuerController.authorize(destination, 'write', 'slot', {
+          })],
+          ['destination-receive-window', issuerController.authorize(destination, 'write', 'slot', {
             programPath: effect.issuerProgramPath,
+            slotMaterialMove: true,
             windowLifecycle: { action: 'move', destinationPath: effect.destinationPath }
-          })
-        ]);
+          })]
+        ];
+        const decisions = await Promise.all(authorizationChecks.map(([, pending]) => pending));
         if (decisions.some((decision) => decision.decision !== 'allow')) {
           return { error: diagnostic(
             'WINDOW_JUMP_AUTHORIZATION_DENIED',
-            '触发签发方当前无权控制窗口或迁移目的地'
+            '触发签发方当前无权控制窗口或迁移目的地',
+            { deniedChecks: authorizationChecks
+              .map(([name], index) => ({ name, decision: decisions[index] }))
+              .filter((entry) => entry.decision.decision !== 'allow') }
           ) };
         }
         const recordsByPath = graphRecordsByPath(nextAtoms);
@@ -2104,6 +2153,7 @@ export async function executeAtomLanguage(options = {}) {
         }),
         issuerController.authorize(destination, 'write', 'slot', {
           programPath: payload.issuerProgramPath,
+          slotMaterialMove: true,
           windowLifecycle: { action: 'move', destinationPath: payload.destinationPath }
         })
       ]);
@@ -2209,6 +2259,7 @@ export async function executeAtomLanguage(options = {}) {
             }),
             agentOrigin: cycleAgentOrigin,
             scopeRoot: executionContext.scopeRoot ?? null,
+            programRoot: executionContext.programRoot ?? null,
             preparedWorld: preparedWorld ??= prepareExploreWorld(reconciledAtoms)
           })
         });
@@ -2325,6 +2376,7 @@ export async function executeAtomLanguage(options = {}) {
           sourceProgramRef: _sourceProgramRef,
           sourceProgramPath,
           sourceScopeRoot = null,
+          sourceProgramRoot = null,
           sourceStrutDeliveryClaim = null,
           ...rawTransformRequest
         } = request;
@@ -2334,7 +2386,8 @@ export async function executeAtomLanguage(options = {}) {
           transformRequest = normalizeScopedTransformRequest({
             atoms: reconciledAtoms,
             request: rawTransformRequest,
-            scopeRoot: sourceScopeRoot
+            scopeRoot: sourceScopeRoot,
+            programRoot: sourceProgramRoot
           });
         } catch (error) {
           if (sourceStrutDeliveryClaim || sourceSlotSignalClaim
@@ -2370,6 +2423,8 @@ export async function executeAtomLanguage(options = {}) {
         }
         compiledRequests.push({
           sourceProgramPath,
+          sourceScopeRoot,
+          sourceProgramRoot,
           sourceStrutDeliveryClaim,
           sourceSlotSignalClaim,
           transformRequest,
@@ -2417,7 +2472,7 @@ export async function executeAtomLanguage(options = {}) {
             ? createAccessController(candidateAtoms, {
                 ...options,
                 programLockIndex: finalLockIndex,
-                agentPath: entry.sourceProgramPath,
+                agentPath: entry.sourceScopeRoot ?? entry.sourceProgramPath,
                 agentSecurity: structuredClone(sourceAgentSecurity),
                 graphLocks: finalGraphLocks
               })
@@ -2429,7 +2484,7 @@ export async function executeAtomLanguage(options = {}) {
                 ...actor,
                 programPath: entry.sourceProgramPath,
                 slotReseal: actor.slotReseal === true || programResealsModelPath(
-                  cycle.slotBodies, entry.sourceProgramPath, targetPath
+                  candidateAtoms, cycle.slotBodies, entry.sourceProgramPath, targetPath
                 )
               }
             );
@@ -2791,6 +2846,7 @@ export async function executeAtomLanguage(options = {}) {
         accessController: unrestricted,
         agentOrigin: null,
         scopeRoot: executionContext.scopeRoot ?? null,
+        programRoot: executionContext.programRoot ?? null,
         preparedWorld
       })
     };
@@ -2901,61 +2957,66 @@ export async function executeAtomLanguage(options = {}) {
       });
       return receipt;
     }
-    try {
-      let rebased = null;
-      const projectionSettleStartedAt = performance.now();
-      if (projectionRebase && options.programScheduler?.rebaseContextFreeProjection) {
-        try {
-          rebased = await options.programScheduler.rebaseContextFreeProjection(
-            projectionRebase.previousAtoms,
-            candidateAtoms,
-            {
-              changedPaths: projectionRebase.changedPaths,
-              isolateFailures: true,
-              previousRevision: receipt?.beforeRevision ?? revisionBefore,
-              revision: receipt?.afterRevision ?? revisionOf(candidateAtoms)
-            }
-          );
-        } catch {
-          rebased = null;
+    async function finishProgramProjection() {
+      try {
+        let rebased = null;
+        const projectionSettleStartedAt = performance.now();
+        if (projectionRebase && options.programScheduler?.rebaseContextFreeProjection) {
+          try {
+            rebased = await options.programScheduler.rebaseContextFreeProjection(
+              projectionRebase.previousAtoms,
+              candidateAtoms,
+              {
+                changedPaths: projectionRebase.changedPaths,
+                isolateFailures: true,
+                previousRevision: receipt?.beforeRevision ?? revisionBefore,
+                revision: receipt?.afterRevision ?? revisionOf(candidateAtoms)
+              }
+            );
+          } catch {
+            rebased = null;
+          }
         }
-      }
-      const settleWarnings = rebased?.persisted === true
-        ? []
-        : await settleContextFreeProgramProjectionForWorld(candidateAtoms);
-      if (preparedRuntimeRecordsPromise) {
-        try {
-          const preparedRuntimeRecords = await preparedRuntimeRecordsPromise;
-          await options.programScheduler?.installPreparedRuntimeIndexes?.(
-            candidateAtoms,
-            preparedRuntimeRecords
-          );
-        } catch {
-          // A failed performance cache never changes an already committed business result.
+        const settleWarnings = rebased?.persisted === true
+          ? []
+          : await settleContextFreeProgramProjectionForWorld(candidateAtoms);
+        if (preparedRuntimeRecordsPromise) {
+          try {
+            const preparedRuntimeRecords = await preparedRuntimeRecordsPromise;
+            await options.programScheduler?.installPreparedRuntimeIndexes?.(
+              candidateAtoms,
+              preparedRuntimeRecords
+            );
+          } catch {
+            // A failed performance cache never changes an already committed business result.
+          }
         }
+        await recordTransformStage('program-projection', projectionSettleStartedAt, {
+          candidateProgramCount: 0,
+          executedProgramCount: 0
+        });
+        performanceTrace('program-projection-settle', {
+          elapsedMs: Math.round(performance.now() - projectionSettleStartedAt),
+          rebased: rebased?.persisted === true,
+          local: rebased?.local === true,
+          reason: rebased?.reason ?? null
+        });
+        interactionWarnings.push(...settleWarnings.map((warning) => diagnostic(
+          warning.code ?? 'PROGRAM_RUNTIME_WARNING',
+          warning.message ?? 'Program runtime reported a recoverable warning',
+          warning.details ?? {}
+        )));
+      } catch (error) {
+        interactionWarnings.push(diagnostic(
+          'PROGRAM_PROJECTION_RECOVERY_PENDING',
+          'World facts are committed, but the context-free Program projection requires recovery',
+          { cause: error.code ?? error.name ?? 'PROGRAM_PROJECTION_SETTLE_FAILED' }
+        ));
       }
-      await recordTransformStage('program-projection', projectionSettleStartedAt, {
-        candidateProgramCount: 0,
-        executedProgramCount: 0
-      });
-      performanceTrace('program-projection-settle', {
-        elapsedMs: Math.round(performance.now() - projectionSettleStartedAt),
-        rebased: rebased?.persisted === true,
-        local: rebased?.local === true,
-        reason: rebased?.reason ?? null
-      });
-      interactionWarnings.push(...settleWarnings.map((warning) => diagnostic(
-        warning.code ?? 'PROGRAM_RUNTIME_WARNING',
-        warning.message ?? 'Program runtime reported a recoverable warning',
-        warning.details ?? {}
-      )));
-    } catch (error) {
-      interactionWarnings.push(diagnostic(
-        'PROGRAM_PROJECTION_RECOVERY_PENDING',
-        'World facts are committed, but the context-free Program projection requires recovery',
-        { cause: error.code ?? error.name ?? 'PROGRAM_PROJECTION_SETTLE_FAILED' }
-      ));
+      return interactionWarnings;
     }
+    if (postcommit) postcommit.push(finishProgramProjection);
+    else await finishProgramProjection();
     return receipt;
   }
 
@@ -3454,7 +3515,7 @@ export async function executeAtomLanguage(options = {}) {
     const finalCreatePath = rewritePath(created.resultPath, postRefresh.pathChanges);
     const createChangedPaths = [
       created.resultPath,
-      ...postRefresh.pathChanges.flatMap((change) => [change.sourcePath, change.resultPath])
+      ...programRefreshPatchPaths(postRefresh)
     ].filter(Boolean);
     const canRebaseCreateProjection = programTransformLogs.length === 0
       && postRefresh.transformLogs.length === 0
@@ -3758,8 +3819,7 @@ export async function executeAtomLanguage(options = {}) {
         transformed.resultPath,
         ...(transformed.relationPaths ?? []),
         ...(transformed.shortcutPaths ?? []),
-        ...(postRefresh.changedPaths ?? []),
-        ...postRefresh.pathChanges.flatMap((change) => [change.sourcePath, change.resultPath])
+        ...programRefreshPatchPaths(postRefresh)
       ].filter(Boolean))],
       transformLogRecord
     });

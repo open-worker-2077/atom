@@ -46,6 +46,52 @@ function semanticLocks(locks) {
   })).sort((left, right) => left.path.localeCompare(right.path));
 }
 
+test('adding an unrelated ordinary Program does not recompile unchanged business locks', async () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const inspect = scheduler.inspectProgram;
+  let lockInspections = 0;
+  scheduler.inspectProgram = async (request) => {
+    if (!request.agentDeclarationOnly && request.program.path.includes('Lock Program')) lockInspections += 1;
+    return inspect(request);
+  };
+  const world = newLockWorld();
+  const before = await scheduler.rebuildRequestDrivenLocks(world);
+  lockInspections = 0;
+  const next = structuredClone(world);
+  next[0].slot.push(atom('New Program', 'def main(arguments):\n    return True', [], 'program'));
+  const after = await scheduler.rebuildRequestDrivenLocks(next);
+  assert.deepEqual(semanticLocks(after), semanticLocks(before));
+  assert.equal(lockInspections, 0, 'unchanged locks must not relaunch their Python validators');
+});
+
+test('cached locks are revalidated when their enclosing Agent loses lock authority', async () => {
+  const world = [atom('Owner', 'agent({"labels":[],"functions":{"groups":[],"names":["lock"]}})', [
+    atom('Target'),
+    atom('Guard', lockSource({ targets: { paths: ['Owner/Target'] }, actions: ['transform'], labels: ['reviewed'] }), [], 'program')
+  ], 'program')];
+  const scheduler = createProgramRuntimeScheduler();
+  assert.equal((await scheduler.rebuildRequestDrivenLocks(world)).length, 1);
+  const revoked = structuredClone(world);
+  revoked[0].situation = 'agent({"labels":[],"functions":{"groups":[],"names":["message"]}})';
+  await assert.rejects(scheduler.rebuildRequestDrivenLocks(revoked),
+    (error) => error.code === 'PROGRAM_FUNCTION_DENIED');
+});
+
+test('cached modern locks reject a removed Program target just like a cold scheduler', async () => {
+  const world = [atom('Root', '', [
+    atom('Target', 'def main(arguments):\n    return True', [], 'program'),
+    atom('Guard', lockSource({ targets: { paths: ['Root/Target'] }, actions: ['transform'], labels: ['reviewed'] }), [], 'program')
+  ])];
+  const scheduler = createProgramRuntimeScheduler();
+  assert.equal((await scheduler.rebuildRequestDrivenLocks(world)).length, 1);
+  const removed = structuredClone(world);
+  removed[0].slot.splice(0, 1);
+  await assert.rejects(scheduler.rebuildRequestDrivenLocks(removed),
+    (error) => error.code === 'INVALID_PROGRAM_LOCK_TARGET');
+  await assert.rejects(createProgramRuntimeScheduler().rebuildRequestDrivenLocks(removed),
+    (error) => error.code === 'INVALID_PROGRAM_LOCK_TARGET');
+});
+
 test('cold start compiles new literal Program lock declarations without sidecar authority', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const locks = await scheduler.rebuildRequestDrivenLocks(newLockWorld());

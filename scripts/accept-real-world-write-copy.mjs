@@ -8,10 +8,12 @@ import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-rev
 import { executeAtomCommandEndpoint } from '../work-engine/atom-language/cli.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
 
 if (process.argv.includes('--trace')) process.env.ATOM_PERF_TRACE = '1';
 const cleanupCopy = process.argv.includes('--cleanup');
 const measureStructuralLatency = process.argv.includes('--structural-latency');
+const createProgram = process.argv.includes('--program-create');
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -49,7 +51,11 @@ let running;
 let monitor;
 try {
   const copiedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  const programScheduler = createProgramRuntimeScheduler();
+  const programScheduler = createProgramRuntimeScheduler({
+    projectionRepository: createJsonProgramProjectionRepository({
+      file: path.join(directory, 'program-projection.json')
+    })
+  });
   const agentSecurity = await programScheduler.rebuildAgentSecurity(copiedWorld);
   const requestedAgent = argument('--agent');
   const agentPath = requestedAgent ?? agentSecurity.keys().next().value;
@@ -72,7 +78,11 @@ try {
   }, 100);
   const startedAt = Date.now();
   const write = await executeAtomCommandEndpoint({
-    source: `transform new {"thing":"${testPath}","situation":"acceptance","slot":[],"strut":[]}`,
+    source: `transform new ${JSON.stringify({
+      [createProgram ? 'thing@program' : 'thing']: testPath,
+      situation: createProgram ? 'def main(arguments):\n    return True' : 'acceptance',
+      slot: [], strut: []
+    })}`,
     interaction
   }, endpoint);
   const writeMs = Date.now() - startedAt;

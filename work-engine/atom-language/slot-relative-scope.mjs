@@ -23,9 +23,22 @@ export function parseSlotRelativeSelector(selector) {
   return parts;
 }
 
-export function resolveSlotRelativeSelector({ atoms, selector, scopeRoot }) {
+export function resolveSlotRelativeSelector({ atoms, selector, scopeRoot, programRoot = null }) {
   const parts = parseSlotRelativeSelector(selector);
   if (parts == null) {
+    if (scopeRoot && programRoot && typeof selector === 'string') {
+      const normalizedProgramRoot = programRoot.replace(/\/+$/u, '');
+      if (selector === normalizedProgramRoot || selector.startsWith(`${normalizedProgramRoot}/`)) {
+        const suffix = selector.slice(normalizedProgramRoot.length).replace(/^\/+/, '');
+        const mapped = resolveSlotRelativeSelector({
+          atoms,
+          selector: suffix ? `./${suffix}` : '.',
+          scopeRoot
+        });
+        return { ...mapped, templateSelector: selector };
+      }
+      return { selector, scopeRoot, relative: false, external: true };
+    }
     if (scopeRoot) {
       throw scopeError(
         'SLOT_RELATIVE_SELECTOR_REQUIRED',
@@ -78,7 +91,7 @@ export function resolveSlotRelativeSelector({ atoms, selector, scopeRoot }) {
   return { selector: path.join('/'), scopeRoot, relative: true, relativeSelector: selector };
 }
 
-export function normalizeScopedTransformRequest({ atoms, request, scopeRoot }) {
+export function normalizeScopedTransformRequest({ atoms, request, scopeRoot, programRoot = null }) {
   if (!scopeRoot) return structuredClone(request);
   if (!request || typeof request !== 'object' || Array.isArray(request)) {
     throw scopeError('INVALID_PROGRAM_TRANSFORM', 'transform() requires one JSON object');
@@ -89,7 +102,9 @@ export function normalizeScopedTransformRequest({ atoms, request, scopeRoot }) {
       scope_root: scopeRoot
     });
   }
-  const resolved = resolveSlotRelativeSelector({ atoms, selector: normalized.thing, scopeRoot });
+  const resolved = resolveSlotRelativeSelector({
+    atoms, selector: normalized.thing, scopeRoot, programRoot
+  });
   normalized.thing = resolved.selector;
   return normalized;
 }

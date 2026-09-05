@@ -65,6 +65,44 @@ test('Agent registry recognizes a literal declaration using Python explicit line
   });
 });
 
+test('adding an ordinary Program inspects only its new source after startup, including candidate validation', async () => {
+  const scheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
+  const inspect = scheduler.inspectProgram;
+  const inspected = [];
+  scheduler.inspectProgram = async (request) => {
+    inspected.push(request.program.path);
+    return inspect(request);
+  };
+  const world = [
+    atom('thing@program', 'Owner', agentSource),
+    atom('thing@program', 'Existing', 'def main(arguments):\n    return True')
+  ];
+  await scheduler.rebuildAgentSecurity(world);
+  inspected.length = 0;
+  const candidate = scheduler.createCandidateRuntime();
+  const next = [...world, atom('thing@program', 'New', 'def main(arguments):\n    return True')];
+  await candidate.deriveAgentSecurity(world);
+  const security = await candidate.deriveAgentSecurity(next);
+  await candidate.rebuildAgentSecurity(next);
+  assert.deepEqual([...security.keys()], ['Owner']);
+  assert.deepEqual(inspected, ['New'], 'unchanged declarations must not relaunch Python workers');
+  assert.equal(scheduler.agentSecurity.has('New'), false);
+});
+
+test('changed Agent source is revalidated and rejected candidates cannot replace committed declarations', async () => {
+  const scheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
+  const world = [atom('thing@program', 'Owner', agentSource)];
+  await scheduler.rebuildAgentSecurity(world);
+  const candidate = scheduler.createCandidateRuntime();
+  const changed = [atom('thing@program', 'Owner', lineContinuedAgentSource)];
+  assert.deepEqual((await candidate.deriveAgentSecurity(changed)).get('Owner').functions, ['explore']);
+  const invalid = [atom('thing@program', 'Owner', 'spec = {}\nagent(spec)')];
+  await assert.rejects(candidate.deriveAgentSecurity(invalid), { code: 'AGENT_REGISTRATION_LITERAL_REQUIRED' });
+  assert.deepEqual((await scheduler.deriveAgentSecurity(world)).get('Owner').functions, ['explore', 'use_program']);
+  scheduler.invalidateDerivedWorldState();
+  assert.deepEqual((await scheduler.deriveAgentSecurity(changed)).get('Owner').functions, ['explore']);
+});
+
 test('executing an Agent Program does not emit a registration mutation', async () => {
   const scheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
   const result = await scheduler.refresh([

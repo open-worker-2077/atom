@@ -46,16 +46,17 @@ test('slot structure locks reuse one compiled result per mutable world revision'
   assert.notEqual(changed, first);
 });
 
-test('slot_body seal lock protects mapped self but permits ordinary material below it', async () => {
+test('slot_body seal lock protects mapped structure but permits instance data and material', async () => {
   const atoms = await sealed();
   const input = find(atoms, '槽体/槽例/实例/输入');
   input.atom.slot.push(atom('料', '可写'));
   const material = find(atoms, '槽体/槽例/实例/输入/料');
   const controller = createAccessController(atoms, {});
 
-  const mapped = await controller.authorize(input, 'write', 'situation');
-  assert.equal(mapped.decision, 'deny');
-  assert.equal(mapped.code, 'SLOT_STRUCTURE_LOCK_DENIED');
+  assert.equal((await controller.authorize(input, 'write', 'situation')).decision, 'allow');
+  const mappedStructure = await controller.authorize(input, 'write', 'thing');
+  assert.equal(mappedStructure.decision, 'deny');
+  assert.equal(mappedStructure.code, 'SLOT_STRUCTURE_LOCK_DENIED');
   assert.equal((await controller.authorize(material, 'write', 'situation')).decision, 'allow');
   assert.equal((await controller.authorize(
     input, 'write', 'slot', { slotMaterialCreate: true }
@@ -71,12 +72,15 @@ test('slot_body seal lock protects mapped self but permits ordinary material bel
   assert.equal(forged.code, 'SLOT_ROLE_FORGERY_DENIED');
 });
 
-test('slot_body seal always applies the fixed structure lock', async () => {
+test('slot_body seal always locks structure without freezing instance situation', async () => {
   const atoms = await sealed();
   const input = find(atoms, '槽体/槽例/实例/输入');
   assert.equal((await createAccessController(atoms, {}).authorize(
-    input, 'write', 'situation'
+    input, 'write', 'thing'
   )).code, 'SLOT_STRUCTURE_LOCK_DENIED');
+  assert.equal((await createAccessController(atoms, {}).authorize(
+    input, 'write', 'situation'
+  )).decision, 'allow');
 });
 
 test('slot structure plans compile their adopted revision into the shared Graph authorizer', async () => {

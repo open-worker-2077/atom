@@ -213,10 +213,9 @@ async function main() {
     await read('shortcut.read-back', agents.journey, shortcutPath);
 
     const bodyPath = `${activePath}/槽体`;
-    const sealPath = `${activePath}/封装槽体`;
     const printPath = `${activePath}/打印槽例`;
     await create('slot-body.candidate.write', agents.journey, {
-      thing: bodyPath, situation: 'synthetic slot body', slot: [{
+      'thing@program': bodyPath, situation: 'slot_body({"action":"seal"})', slot: [{
         thing: '候选流', situation: 'candidate data flow', slot: [
           {
             'thing@text': '客户', situation: 'input slot contract', slot: [],
@@ -238,8 +237,7 @@ async function main() {
         ], strut: []
       }], strut: []
     });
-    await create('slot-body.seal-program.write', agents.journey, programAtom(sealPath, `slot_body({"action":"seal","body":${JSON.stringify(bodyPath)}})`));
-    await run('slot-body.seal-program.run', agents.journey, sourceRun(sealPath));
+    await run('slot-body.seal-program.run', agents.journey, sourceRun(bodyPath));
     await create('slot-body.print-program.write-and-print', agents.journey, programAtom(
       printPath,
       `use_program({"name":${JSON.stringify(`${bodyPath}/print`)},"arguments":{"name":"实例"}})`

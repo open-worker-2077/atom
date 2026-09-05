@@ -22,7 +22,6 @@ import {
   walkAtoms
 } from './slot-graph-semantics.mjs';
 
-const MODEL_NAME = '槽模';
 const PRINT_NAME = 'print';
 const EXAMPLES_NAME = '槽例';
 const ROLES_NAME = '角色';
@@ -57,16 +56,18 @@ function layoutOf(atoms, bodySelector) {
   if (!children) {
     return { error: slotError('INVALID_SLOT_BODY_LAYOUT', '槽体必须具有完整 slot Graph', { body: bodyPath }) };
   }
-  const model = directChild(body, MODEL_NAME);
   const print = directChild(body, PRINT_NAME);
   const examples = directChild(body, EXAMPLES_NAME);
+  const modelCandidates = children.filter((child) => child !== print && child !== examples);
+  const model = modelCandidates.length === 1 ? modelCandidates[0] : null;
   if (children.length === 3 && model && print && examples && atomTypes(print).includes('program')) {
+    const modelName = atomName(model);
     return {
       sealed: true,
       body,
       bodyPath,
       model,
-      modelPath: `${bodyPath}/${MODEL_NAME}`,
+      modelPath: `${bodyPath}/${modelName}`,
       print,
       printPath: `${bodyPath}/${PRINT_NAME}`,
       examples,
@@ -84,6 +85,11 @@ function layoutOf(atoms, bodySelector) {
     };
   }
   return { sealed: false, body, bodyPath, candidate: children[0] };
+}
+
+export function slotBodyModelPath(atoms, bodySelector) {
+  const layout = layoutOf(atoms, bodySelector);
+  return layout.error || !layout.sealed ? null : layout.modelPath;
 }
 
 function modelRecords(layout) {
@@ -227,7 +233,7 @@ function planSource(plan) {
   return [
     `PRINT_PLAN = json_parse(${JSON.stringify({ text: planText })})`,
     'def main(arguments):',
-    `    return slot_body({"action":"print","body":${JSON.stringify(plan.body)},"name":arguments["name"]})`
+    '    return slot_body({"action":"print","name":arguments["name"]})'
   ].join('\n');
 }
 
@@ -280,11 +286,6 @@ function appendRevision(layout, plan) {
 }
 
 function initialSeal(atoms, layout) {
-  replaceStoredField(layout.candidate, 'thing', MODEL_NAME, {
-    types: atomTypes(layout.candidate),
-    descriptionPresent: atomDescription(layout.candidate) != null,
-    description: atomDescription(layout.candidate)
-  });
   childrenOf(layout.body).push(
     createAtom({
       thing: PRINT_NAME,
@@ -646,7 +647,7 @@ export function readVisibleSlotPlans(atoms) {
   for (const match of walkAtoms(atoms)) {
     if (atomName(match.atom) !== PRINT_NAME || !atomTypes(match.atom).includes('program')) continue;
     const parent = match.parent?.atom;
-    if (!parent || !directChild(parent, MODEL_NAME) || !directChild(parent, EXAMPLES_NAME)) continue;
+    if (!parent || !directChild(parent, EXAMPLES_NAME)) continue;
     const layout = layoutOf(atoms, match.parent.path.join('/'));
     const plan = layout.error ? null : currentPlan(layout);
     if (plan) plans.push({ layout, plan });
@@ -678,6 +679,9 @@ export function compileSlotStructureGraphLocks(atoms) {
           kind: 'node',
           path,
           actions: ['transform'],
+          fields: root === layout.modelPath
+            ? ['thing', 'situation', 'slot', 'strut']
+            : ['thing', 'slot', 'strut'],
           allowCapabilities: ['slot-material-create', 'slot-material-move', 'slot-reseal'],
           denialCode: 'SLOT_STRUCTURE_LOCK_DENIED',
           lockKind: 'slot-structure-lock',

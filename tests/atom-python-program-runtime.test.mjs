@@ -42,37 +42,37 @@ test('same world fingerprint reuses one completed Program cycle', async () => {
   assert.equal(second.fingerprint, first.fingerprint);
 });
 
-test('slot_body emits a revision-bound deferred print effect once and cached cycles do not replay it', async () => {
-  const revision = `sha256:${'0'.repeat(64)}`;
-  const world = [atom('程序', `slot_body({'action':'print','body':'订单槽体','name':'订单001','revision':'${revision}'})`, [], 'program')];
+test('slot_body print derives its body from the current print Program parent and cached cycles do not replay it', async () => {
+  const world = [atom('订单槽体', '', [
+    atom('print', "slot_body({'action':'print','name':'订单001'})", [], 'program')
+  ])];
   const scheduler = createProgramRuntimeScheduler();
   const first = await scheduler.refresh(world);
   const second = await scheduler.refresh(world);
 
   assert.deepEqual(first.slotBodies, [{
-    action: 'print', body: '订单槽体', name: '订单001', revision,
-    sourceProgramPath: '程序'
+    action: 'print', body: '订单槽体', name: '订单001',
+    sourceProgramPath: '订单槽体/print'
   }]);
   assert.deepEqual(second.slotBodies, []);
 });
 
-test('slot_body accepts the current print Program internal effect without a caller-supplied revision', async () => {
-  const world = [atom('程序', "slot_body({'action':'print','body':'订单槽体','name':'订单001'})", [], 'program')];
+test('slot_body seal self-declares the current Program as the slot body', async () => {
+  const world = [atom('订单槽体', "slot_body({'action':'seal'})", [], 'program')];
   const scheduler = createProgramRuntimeScheduler();
   const cycle = await scheduler.refresh(world);
 
   assert.deepEqual(cycle.failures, []);
   assert.deepEqual(cycle.slotBodies, [{
-    action: 'print',
+    action: 'seal',
     body: '订单槽体',
-    name: '订单001',
-    sourceProgramPath: '程序'
+    sourceProgramPath: '订单槽体'
   }]);
 });
 
-test('slot_body seal rejects retired limit and cursor arguments inside Program evaluation', async () => {
-  for (const extra of ["'limit':1", "'cursor':'retired'"]) {
-    const world = [atom('程序', `slot_body({'action':'seal','body':'订单槽体',${extra}})`, [], 'program')];
+test('slot_body rejects caller-supplied body and retired seal arguments', async () => {
+  for (const extra of ["'body':'订单槽体'", "'limit':1", "'cursor':'retired'"]) {
+    const world = [atom('程序', `slot_body({'action':'seal',${extra}})`, [], 'program')];
     await assert.rejects(
       createProgramRuntimeScheduler().refresh(world),
       { code: 'INVALID_SLOT_BODY_EFFECT' }
