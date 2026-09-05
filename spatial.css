@@ -172,6 +172,47 @@ textarea:focus-visible {
   pointer-events: none;
 }
 
+.save-status {
+  position: absolute;
+  z-index: var(--z-toast);
+  inset: auto 50% max(2.4rem, calc(env(safe-area-inset-bottom) + 2rem)) auto;
+  transform: translateX(50%);
+  max-width: min(34rem, calc(100% - 2rem));
+  padding: 0.65rem 0.9rem;
+  border: 1px solid color-mix(in oklch, var(--color-update) 52%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--color-space-0) 90%, transparent);
+  box-shadow: 0 0.75rem 2.5rem rgb(0 0 0 / 36%);
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  text-align: center;
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+}
+
+@media (max-width: 48rem), (hover: none) and (pointer: coarse) {
+  .save-status {
+    inset-block-end: calc(10.75rem + env(safe-area-inset-bottom));
+  }
+}
+
+.save-status[data-state="success"] {
+  border-color: color-mix(in oklch, var(--color-accent) 56%, transparent);
+  color: var(--color-accent);
+}
+
+.save-status[data-state="pending"] {
+  border-color: color-mix(in oklch, var(--color-update) 68%, transparent);
+  color: var(--color-update);
+}
+
+.save-status[data-state="error"] {
+  border-color: color-mix(in oklch, var(--color-delete) 64%, transparent);
+  color: var(--color-delete);
+}
+
 body[data-spatial-scope-state="failed"] .scope-load-state {
   border-color: color-mix(in oklch, var(--color-delete) 58%, transparent);
   color: var(--color-delete);

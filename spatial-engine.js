@@ -33,6 +33,7 @@
     selectionCopy: document.getElementById("selectionCopy"),
     selectionCaps: document.getElementById("selectionCaps"),
     scopeLoadState: document.getElementById("scopeLoadState"),
+    saveStatus: document.getElementById("saveStatus"),
     metricDepth: document.getElementById("metricDepth"),
     metricVisible: document.getElementById("metricVisible"),
     metricScale: document.getElementById("metricScale"),
@@ -4774,11 +4775,27 @@
   }
 
   let workspacePersistenceSequence = 0;
+  let visibleWorkspacePersistenceId = 0;
+
+  function showWorkspacePersistenceStatus(persistenceId, message, status) {
+    const normalizedId = Number(persistenceId);
+    if (!ui.saveStatus || !Number.isFinite(normalizedId) || normalizedId < visibleWorkspacePersistenceId) {
+      return false;
+    }
+    visibleWorkspacePersistenceId = normalizedId;
+    ui.saveStatus.textContent = message;
+    ui.saveStatus.dataset.state = status;
+    ui.saveStatus.hidden = false;
+    return true;
+  }
 
   function persistWorkspaceSnapshot(operation) {
     const persistenceId = operation && typeof operation === "object"
       ? ++workspacePersistenceSequence
       : null;
+    if (persistenceId !== null) {
+      showWorkspacePersistenceStatus(persistenceId, "正在保存，等待 Atom 确认", "saving");
+    }
     global.dispatchEvent(new CustomEvent("spatial-workspace-committed", {
       detail: Object.freeze({
         knowledge: workspace.exportKnowledge(),
@@ -4794,6 +4811,11 @@
     if (!event.detail || !Number.isFinite(Number(event.detail.persistenceId))) return;
     const operation = event.detail.operation;
     const kind = operation && operation.kind || "";
+    showWorkspacePersistenceStatus(
+      event.detail.persistenceId,
+      kind.startsWith("edge-") ? "关系已保存" : "节点已保存",
+      "success"
+    );
     if (
       kind === "node-edit"
       && activeProgramChoice
@@ -4837,6 +4859,11 @@
 
   global.addEventListener("spatial-workspace-projection-pending", (event) => {
     if (!event.detail || !Number.isFinite(Number(event.detail.persistenceId))) return;
+    showWorkspacePersistenceStatus(
+      event.detail.persistenceId,
+      "事实已保存，派生投影待恢复；请勿重复操作",
+      "pending"
+    );
     closeProgramChoicePanel();
     announce("事实已保存，派生投影待恢复；请勿重复操作");
   });
@@ -4844,6 +4871,11 @@
   global.addEventListener("spatial-workspace-persist-failed", (event) => {
     if (!event.detail || !Number.isFinite(Number(event.detail.persistenceId))) return;
     const message = String(event.detail.message || "服务未确认本次编辑");
+    showWorkspacePersistenceStatus(
+      event.detail.persistenceId,
+      `保存失败，已恢复保存前内容：${message}`,
+      "error"
+    );
     closeProgramChoicePanel();
     announce(`保存失败，已恢复保存前内容：${message}`);
   });

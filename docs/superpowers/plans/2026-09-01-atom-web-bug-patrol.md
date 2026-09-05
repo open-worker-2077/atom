@@ -15,9 +15,13 @@
 - 不直接编辑 Atom backing JSON，不把测试完成事实写进真实 4784 世界。
 - 保留用户当前相机、焦点、展开与布局覆盖；视图修复不得成为事实写入。
 - 每项生产改动必须先有对应 RED，并在隔离工作区完成。
-- 单项通过后提交并推送 `main`；远端提交与测试证据写回本计划。
+- 单项验证后按已授权范围集成部署并回写证据。当前本地交付文档包含不适合公开的运行记录，公开推送已被自动审批拒绝；不得无审查推送其后续 ancestry，代码备份与私有运行证据分开处理。
 
-## 恢复断点
+## 当前断点（2026-09-06）
+
+Task7保存可见反馈优先实施，I0/U0/D1/E3；移动已交付，手机共同配置Task2暂停于RED，待本项交付后续接。旧Task1—4/6已交付，不重做。Task5仍须区分历史连通证据、用户后来已连上与当前真机验收缺口。
+
+## 历史恢复断点（不覆盖当前总账）
 
 - **当前分支**：`main`；以仓库当前 checkout 和远端提交为准，不再沿用历史隔离分支名称判断状态。
 - **已完成代码**：ASDF 双击与 Strut 边界修复均已推送；CLI 新 revision 现先拉齐当前路径和全部展开路径，再把同一 revision 原子导入场景。Shortcut 历史路线补载代码仍在，但现场完整激活已重新判为未完成。
@@ -117,3 +121,22 @@
 - [x] **Step 2: One semantic Transform**：新增`thing.lnk.EXACT_TARGET`，只改 Shortcut自身；新目标复用Graph精确消歧和读取鉴权，内部reference identity保持，普通Thing稳定拒绝。
 - [x] **Step 3: Structured Web editor**：Shortcut编辑草稿只带`shortcutTargetPath`；编辑器显示名称和目标路径，隐藏Markdown、附件和内核合同JSON；Web提交同一Transform，支持原子改名+改向。
 - [x] **Step 4: Minimal affected verification and deploy**：内核、Help、投影、translator、workspace、editor、bridge与静态合同`215/215 PASS`；Shortcut真实Chromium导航`5/5 PASS`；browser build与development-control通过。实现`a48f33f`已推送`origin/main`；真实4784为revision`7270`、投影`published`、build`sha256-7ba5295f501e0740`。
+
+### Task 7: 保存可见反馈
+
+**Spec:** Web §3.1；用户纠正此项是既有缺陷，不是新需求。点击保存后显示非阻塞提示框，目标5秒内至少有反应；不要求提交5秒内完成。
+
+**Files:** spatial-engine.js、index.html、spatial.css；聚焦 tests/browser/save-feedback.spec.mjs；必要时既有 editor/bridge 合同测试。
+
+**Interfaces:** 复用 spatial-workspace-committed、persisted、projection-pending、persist-failed 与 persistenceId。现有 announce 仅写入 sr-only ariaLive，普通画面不可见。保存开始立即显示“正在保存”，随后真实回执驱动成功/失败/事实已保存但投影待恢复；旧回执不得覆盖更新的保存状态。维持读屏反馈，不把全部导航公告都变成屏幕弹窗。
+
+- [x] **Step 1: RED**：真实浏览器点保存，受控延迟持久化响应，断言可见进行中提示（5秒目标），再验证成功/失败/投影待恢复状态；旧版本应因不可见失败。真实 Chromium RED `3/3 failed`，均为`#saveStatus`在4.5秒内不存在；截图、error-context与trace保存于Task7专属artifacts。
+- [x] **Step 2: Minimal GREEN**：增加可见非阻塞状态框，复用原持久化事件和编号；不改服务器、Graph、权限、提交或后续运行语义。移动成功、桌面失败、投影待恢复/旧回执隔离已分别`1/1 PASS`；首轮GREEN暴露的成功响应和过期回执测试夹具错位已限于测试修正，未扩改产品语义。
+- [ ] **Step 3: Verify**：聚焦浏览器及编辑/桥接受影响链；build与既有开发控制门禁；最终候选全量一次，原revision证据不重复运行。独立任务与整分支审查。
+- [ ] **Step 4: Deliver**：仅已审查候选受控部署，公共入口回读实际静态资源，浏览器确认可见提示；保全生产快照、私有证据、既有功能与测试产物。随后原手机Task2从RED继续。
+
+- **已恢复断点（2026-09-05）**：用户完成软件更新后明确“继续”；已核对保留的Task7报告、RED/GREEN产物和未提交产品diff，不重跑RED或三条已有效定向测试。当前从同一次聚焦Playwright合并运行继续；通过后依次执行编辑/桥接、build、development-control、`detect_changes`与最终全量一次。
+- **恢复后聚焦进度**：首次合并运行`2 passed / 1 timed out`；投影用例已看到正确可见正文，之后在同元素`data-state="pending"`断言前撞到30秒用例总时限。该用例单跑26.0秒已通过；只将受控慢回执用例预算提高至60秒，产品diff不变。
+- **聚焦候选证据**：同revision合并运行中移动成功与桌面失败`2/2 PASS`，60秒预算修订后投影待恢复/旧回执隔离定向`1/1 PASS`（31.9秒）；5秒内可见反馈断言未放宽。根据验证复用规则不再重跑已通过的前两条，现进入编辑/桥接受影响链。
+- **受影响链证据**：`editor-ui`、`editor-engine`、`spatial-workspace-model`与`browser-bridge`合同`120/120 PASS`；`npm run build:browser`与`npm run check:development-control`均退出0。当前准备`detect_changes`与阶段提交固定候选，随后仅运行一次最终全量。
+- **变更影响回读**：GitNexus `detect_changes(scope: staged)`在显式worktree上返回medium：5个文件、6个已索引符号、1条`ExecuteDemoEditing → ExportKnowledge`流程。索引仍存在63 commits陈旧限制；结合缓存diff与120条受影响合同审核，未把空流程当作无风险证据。
