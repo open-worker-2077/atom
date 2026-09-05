@@ -8,9 +8,17 @@
 
 **Tech Stack:** Node.js标准库、既有Browser IIFE模型、HTTP、Node test runner、已安装Playwright。
 
-**Spec:** `docs/superpowers/specs/2026-08-31-atom-web-spatial-design.md` §5.5。I3/U3/D2/E3；在Transform完整交付并回告提出方后立即执行，早于旧print及A剩余任务。当前仅准备计划，不并行实施。
+**Spec:** `docs/superpowers/specs/2026-08-31-atom-web-spatial-design.md` §5.5。I3/U3/D2/E3；Transform已完整交付、回告且核对远端备份，现在执行本项，早于旧print及A剩余任务。
+
+**当前断点（2026-09-06）:** 隔离工作树`.worktrees/shared-presentation-settings`、分支`fix/shared-presentation-settings`，Task1在7b47728实现并经独立审查通过（41/41、2/2）。Task2实施方shared_settings_task2已取得浏览器桥RED：既有30条通过、新5条失败；另有1条新Playwright场景尚未运行。工作树只改测试，未改产品代码/提交。用户要求先核查Superpowers本地记录与实际执行，Task2安全暂停、无运行中测试；核查后原Agent从RED续接。真实本机参数及真机边框仍未取得，不写测试值到生产。
+
+**Task1 RED:** 新增真实随机端口隔离服务测试GET共同设置接口得到404而非200，`node --test --test-isolation=none tests/atom-presentation-settings.test.mjs`为0/1通过；保留fixture。接下来实现共同仓储/CAS及HTTP合同；只移除实际必要测试中的fixture递归清理，不扩展为全库清理。
+
+**Task1首轮GREEN（历史阶段）:** 实施方报告新增共同配置测试9/9、约2.38秒，覆盖真实服务接线、网关身份、CAS/过期拒绝、Origin初始化、SSE、冷重启、业务及投影/历史文件hash不变、EIO旧文件和失败临时文件留存；正在完成模型/view-state及既有server具名相邻验证，不宣称已部署或真机完成。
 
 ## Global Constraints
+
+- **执行状态**：Task1在7b47728完成，控制方已回读原始41/41及2/2，独立审查Spec符合/质量Approved且无问题；Task2从该提交续接浏览器继承与可见效果验收，服务尚未部署。
 
 - 手机端展示参数以本机已有有效配置为基准；不静默采用另一套默认配置。
 - 展示配置属于空间体验，不写入atom.json、不制造Graph修订，不以knowledge投影作为权威。
@@ -61,7 +69,7 @@
 - Consumes: `createViewStateRepository({file,worldId})`、`normalizeSettings(input)`、createSpatialServer既有options和SSE连接。
 - Produces: `createPresentationSettingsService({repository})`返回`read()`和`update({expectedRevision,patch,bootstrap})`；read返回上述revision/initialized/settings，update保存成功后返回同形结果。HTTP边界负责实际Origin约束，服务负责类型/CAS/初始化状态。
 
-- [ ] **Step 1: 写RED与运行**
+- [x] **Step 1: 写RED与运行**
 
 ```js
 assert.deepEqual(await service.read(), {revision:0,initialized:false,settings:null});
@@ -74,7 +82,7 @@ await assert.rejects(service.update({expectedRevision:0,patch:{nestedTunnelPerce
 
 Run: `node --test --test-isolation=none tests/atom-presentation-settings.test.mjs`。真实fixture先证明公共GET缺路由或共同保存尚不存在；两facade同expectedRevision竞争只一笔成功，EIO/格式冲突不改原文件，合法0可保存。
 
-- [ ] **Step 2: 最小实现**
+- [x] **Step 2: 最小实现**
 
 把现有demo model包成浏览器全局/Node CommonJS均可使用的同一个factory，禁止复制两份默认值。repository仅在调用者传expectedRevision时开启CAS及自动+1，未传时维持旧write(view,{revision})合同。settings service合并当前settings与patch后规范化；首次只接受bootstrap及0修订；服务文件名固定，HTTP不能选路径。
 
@@ -87,7 +95,7 @@ const updated = await service.update({expectedRevision:current.revision,
 
 绑定API/网关后用真实随机端口验证空读取、初始化、手机读取、更新、过期拒绝、跨站拒绝、服务重启；同时hash核对atom/graph不变。拒绝Bootstrap来源时必须零文件写入。
 
-- [ ] **Step 3: 定向GREEN并提交**
+- [x] **Step 3: 定向GREEN并提交**
 
 Run: `node --test --test-isolation=none tests/atom-presentation-settings.test.mjs tests/spatial-demo-model.test.js tests/atom-view-state-migration.test.mjs`。随后仅运行新增路由影响的server具名测试。GitNexus/diff检查后明确文件git add及commit，报告命令、输出、私有证据路径；独立任务复核。
 
@@ -141,4 +149,4 @@ Run: `node --test tests/browser-bridge-contract.test.js tests/atom-presentation-
 
 - 所有§5.5要求映射到两项任务：共同权威/迁移/CAS/恢复为Task1+2；实际屏幕和真机为Task2。已知生产种子缺口明确保留，没有虚构实际参数。
 - 只复用展示模型与空间体验仓储；新接口隐藏存储路径，不重写Graph/Program/授权。并行OS写入、账号多租户与全配置平台不在本轮范围。
-- 当前未派发、未实现；执行只由唯一总账当前顺序决定。
+- Task1已完成并独立Approved；Task2已RED，因用户先行一致性核查暂停，待原Agent续接；生产部署及真机结果尚未完成。
