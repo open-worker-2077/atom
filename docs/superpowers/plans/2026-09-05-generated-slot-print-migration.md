@@ -98,7 +98,7 @@ assert.deepEqual(worldAfterRollback, sourceBefore);
 
 当前生产世界只读副本预检应报告已核实生成物；若不再是5个，依据当前事实报告变化，不能强制数量。迁移后在同一副本，以普通Agent调用实际print并回读槽例，随后冷重启再调用；迁移／打印／回滚的源文件hash不变。当前ABI对手写显式body仍拒绝。
 
-- [ ] **Step 4: 部署维护与回告**
+- [x] **Step 4: 部署维护与回告**
 
 focused测试及独立复核通过后集成维护工具；使用受控现有服务入口执行维护切换，私密dry-run结果具体可核对后apply。生产不新建验收槽例；重启公开读取所有被迁移print及其角色/修订一致性，真实打印行为由同世界副本公开链证明。回告提出方无需重做业务改名，继续既有A Task5—7。手机连接恢复优先验收；不push、不删除备份。
 
@@ -106,7 +106,7 @@ focused测试及独立复核通过后集成维护工具；使用受控现有服�
 
 - **覆盖**：Task1精确识别／守恒／拒绝；Task2备份／幂等／CAS／rollback／冷公开调用／生产回读。
 - **接口一致**：planner产出的facts/revisions/changedPaths被唯一中央维护提交消费。
-- **状态**：共同设置代码已部署，实际基准/真机验收因原页面不可读局部待定；Task1已在46e7772审查通过（6/6及真实事实内存守恒），现实施Task2维护入口，未改变生产print。不得把计划或旧5个盘点数当作迁移成功。
+- **状态（2026-09-06 06:35后）**：Task1、Task2均完成，生产b329399已迁移2个活跃生成print；正式HTTPS普通CLI逐项回读及完整facts与候选深比较通过，剩余活跃迁移0。3个显式备份域项、header、角色、修订与其余事实保全。已核验原提出方任务身份并回告；继续A剩余任务与长按。共同设置原基准/真机验收仍局部待定。
 - **预检裁定（2026-09-06）**：旧生成器d267a91的父版本明确从plan.body生成main的body字面量；祖先改名/移动后源码和修订快照依法保留旧路径，因此白名单应与经当前layout修订核验的PRINT_PLAN.body匹配，不能强制等于现行layout路径。该修正保持用户“只去退役调用参数、不改历史快照”的要求；其他模板严格限制不变。若身份/修订/源码不能交叉证明，拒绝迁移。
 
 - **当前只读盘点（2026-09-06）**：生产raw facts经projectAtomContext通过，无须额外兼容入口；readVisibleSlotPlans仍为5个，旧main.body候选中2个活跃、3个位于显式backup/default子树。此为候选盘点，严格生成源码核验尚待Task1；后续只迁移通过核验的活跃项，不为凑旧数量改写停用历史。
@@ -118,3 +118,5 @@ focused测试及独立复核通过后集成维护工具；使用受控现有服�
 - **Task2真实规模失败（2026-09-06）**：b29c273合成focused14/14后，root完整私密副本维护apply约56秒Node4GB heap OOM退出134，尚无backup目录；atom.json、旧journal与events字节hash全部未变。生产未参与。当前拒绝部署，独立审查与维护脚本内存读取定位中；不以增加内核分支或盲目调大heap替代修正。raw real-copy-apply-1.log及real-copy-after-failed-apply.json位于本计划SDD。
 
 - **当前候选与验收（2026-09-06）**：500e166维护实现两轮复核全部发现关闭；19项中18pass/0fail/1 Windows symlink夹具EPERM skip。040497d真实完整副本分离进程dry-run/apply/重复attempt/rollback/reapply全部exit0，2项映射、同command幂等、全部原facts恢复、源备份字节不变。R2仅补语义校验前后inventory绑定，精确竞态RED→GREEN，未改planner/ABI/commit内容。两个实际print在普通CLI warm PID16424及新进程cold PID38296均2/2回读成功；手写显式body负例返回INVALID_SLOT_BODY_EFFECT。root首次验收脚本误重放pending来源触发CAS，已改为等待原运行并回读，失败证据保留。待最终分支复核、必要最终门禁与生产维护，未宣称生产已迁移。
+
+- **生产交付（2026-09-06）**：最终分支b7c9185全量1845项/1844pass/0fail/1 Windows symlink EPERM skip，exit0；Astra最终复核Ready to merge YES，两个Minor仅为未来维护拆分与一次性历史读取成本，均不阻塞。main正常构建后b329399，正式build sha256-48e7d3399646ac16匹配。受控停启维护production-20260906-063256提交2项，完整私密备份与原hash核验通过；新PID33212、health7406/published、watchdog恢复。正式CLI两项header保全及当前调用逐项核验，生产完整facts与精确planner结果深比较一致，剩余活跃迁移0。原提出方身份read_thread核实后回告成功；初次自动审批拒绝及核验过程保留。Task 2: complete；证据在本计划私有SDD production-*、formal-after-readback.log及production-readback-verified.json；不删除、不公开push。后续A余项与长按，手机原基准和真机验收仍待真实入口。
