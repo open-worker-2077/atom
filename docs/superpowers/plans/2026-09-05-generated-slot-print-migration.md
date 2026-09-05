@@ -114,3 +114,5 @@ focused测试及独立复核通过后集成维护工具；使用受控现有服�
 - **实际来源修正（2026-09-06）**：16d6f6c纯内存生产probe拒绝两活跃模板。逐行核对证实既有祖先路径维护已把main.body更新为当前layout.bodyPath，PRINT_PLAN.body仍保持原修订值；三行模板其他字节符合生成规则。前述只允许plan.body的裁定过窄，现限定允许这两个经过交叉核验的确切值，其余body/格式/语句仍整批拒绝。补测试覆盖两合法形态及第三方路径拒绝；不改生产或内核。
 
 - **Task1完成／Task2启动**：46e7772限定复审Approved；当前真实来源纯内存probe恰2活跃项，输入、header、其余facts及生产文件bytes守恒。Task2由generated_print_task2（Sol high）实现维护入口及隔离测试；root持有真实完整私密副本的公开print/冷重启/回滚验收及生产切换，当前未部署迁移。
+
+- **Task2真实规模失败（2026-09-06）**：b29c273合成focused14/14后，root完整私密副本维护apply约56秒Node4GB heap OOM退出134，尚无backup目录；atom.json、旧journal与events字节hash全部未变。生产未参与。当前拒绝部署，独立审查与维护脚本内存读取定位中；不以增加内核分支或盲目调大heap替代修正。raw real-copy-apply-1.log及real-copy-after-failed-apply.json位于本计划SDD。

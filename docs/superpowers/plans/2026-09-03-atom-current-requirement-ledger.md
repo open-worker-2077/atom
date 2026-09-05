@@ -371,3 +371,5 @@
 - **打印Task1来源裁定修正**：16d6f6c内存probe暴露根Agent白名单过窄；现有祖先路径维护更新了main.body，修订快照保留旧body。允许仅current layout.bodyPath或已核验plan.body两值，不放宽其他生成源码条件；Task1审查/回修中，生产零写入。
 
 - **打印Task1完成**：46e7772独立复审Approved、6/6；真实事实内存probe严格选中2活跃项，其他facts/header/source bytes守恒。Task2由generated_print_task2实现维护入口，root准备完整私密副本验收；生产未迁移。
+
+- **Task2真实规模失败（2026-09-06）**：b29c273合成focused14/14后，root完整私密副本维护apply约56秒Node4GB heap OOM退出134，尚无backup目录；atom.json、旧journal与events字节hash全部未变。生产未参与。当前拒绝部署，独立审查与维护脚本内存读取定位中；不以增加内核分支或盲目调大heap替代修正。raw real-copy-apply-1.log及real-copy-after-failed-apply.json位于本计划SDD。
