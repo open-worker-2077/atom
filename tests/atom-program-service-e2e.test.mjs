@@ -75,7 +75,6 @@ test('CLI rejects a stale 4784 runtime instead of trusting a newer local help co
 
 test('4784 command endpoint retains compiled locks without replaying an untriggered Program', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-service-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
