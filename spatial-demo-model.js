@@ -1,4 +1,8 @@
-(function spatialDemoModel(global) {
+(function spatialDemoModel(global, factory) {
+  const model = factory();
+  if (typeof module === "object" && module.exports) module.exports = model;
+  else global.SpatialDemoModel = model;
+})(typeof window === "object" ? window : globalThis, function createSpatialDemoModel() {
   "use strict";
 
   const DEFAULT_IDLE_SECONDS = 5;
@@ -458,7 +462,7 @@
     return buildTourAgenda(summaryInput, completedInput)[0] || null;
   }
 
-  global.SpatialDemoModel = Object.freeze({
+  return Object.freeze({
     defaultIdleSeconds: DEFAULT_IDLE_SECONDS,
     normalizeSettings,
     withIdleInput,
@@ -492,4 +496,4 @@
     buildTourAgenda,
     nextTourTask
   });
-})(window);
+});
