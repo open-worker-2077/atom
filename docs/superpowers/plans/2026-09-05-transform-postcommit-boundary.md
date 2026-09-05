@@ -10,6 +10,8 @@
 
 **Tech Stack:** Node.js、现行 Python Program worker、中央 JSON 增量事务日志、Node test runner、公开 CLI/HTTP。
 
+**最终回归最小裁定（2026-09-05）:** 原Task2只读确认jump授权候选真实append后未加入programChangedPaths；When=false无relocation，effects空路径判断漏掉中央child提交却completed。允许原Task3仅把真正新增授权的节点/Registration路径汇入现有变更集合，复用授权不伪造变更，保持When=false留授权不移动和重试仅一次。公共CLI pending成功回执漏打印真实interactionId，致原night-watch无法取得同id终态；允许cli.mjs按既有关联格式输出此id，helper沿现有HTTP同source/id回读后验效果，不新增CLI语法或重放请求。二者均是本次拆分的必要回归修复，非新增权限/调度模型。
+
 **Spec:** `docs/superpowers/specs/2026-08-31-atom-runtime-projection-recovery-design.md` §2、§4、§5；`docs/superpowers/specs/2026-08-31-atom-world-program-design.md` §3。
 
 ## Global Constraints
