@@ -50,15 +50,15 @@ test('multi-domain rendering draws soft shells and visual corridors before owned
   assert.ok(shellDraw > -1 && sphereDraw > shellDraw);
 });
 
-test('hierarchy and nested view modes toggle independent child branches without changing the active domain', () => {
+test('A inward view toggles nested child branches without changing the active domain', () => {
   assert.match(engine, /expandedClusterDomains:\s*new Map\(\)/);
   assert.match(engine, /function visibleClusterDomains\(/);
   assert.match(engine, /function toggleClusterChildDomain\(node, ownerPath/);
   assert.match(engine, /parentPath:\s*ownerPath/);
   assert.match(engine, /parentNodeId:\s*node\.id/);
 
-  const clusterBranch = functionSource('applyViewMode');
-  assert.match(clusterBranch, /toggleClusterChildDomain\(node, ownerPath, mode\)/);
+  const clusterBranch = functionSource('applyInwardView');
+  assert.match(clusterBranch, /toggleClusterChildDomain\(node, ownerPath, ["']nested["']\)/);
   assert.doesNotMatch(clusterBranch, /state\.currentPath\s*=/);
   assert.doesNotMatch(clusterBranch, /state\.domainStack\.push/);
 });
@@ -82,14 +82,14 @@ test('selecting a future ASDF mode cannot restyle an already rendered cluster sc
   assert.match(layout, /clusterScene\.clusters[\s\S]*projectionMode/);
 });
 
-test('PageDown applies the selected A mode to the current field before expanding its next layer', () => {
+test('PageDown applies nested A projection to the current field before expanding its next layer', () => {
   const visible = functionSource('visibleClusterDomains');
   const expand = functionSource('expandHoveredClusterLevel');
   const setMode = functionSource('setViewMode');
 
-  assert.match(engine, /appliedViewMode:\s*["']hierarchy["']/);
+  assert.match(engine, /appliedViewMode:\s*["']nested["']/);
   assert.match(visible, /projectionMode:\s*state\.appliedViewMode/);
-  assert.match(expand, /state\.appliedViewMode\s*=\s*state\.viewMode/);
+  assert.match(expand, /state\.appliedViewMode\s*=\s*["']nested["']/);
   assert.doesNotMatch(setMode, /appliedViewMode/);
   assert.match(expand, /recenterLatestInteraction/);
   assert.match(functionSource('collapseHoveredClusterLevel'), /recenterLatestInteraction/);
@@ -97,11 +97,11 @@ test('PageDown applies the selected A mode to the current field before expanding
 
 test('double Shift owns a persistent peer selection instead of arming the next right click', () => {
   const tap = functionSource('handleShiftTap');
-  const apply = functionSource('applyViewMode');
+  const apply = functionSource('applyInwardView');
   assert.match(engine, /batchSelectionKeys:\s*new Set\(\)/);
   assert.match(tap, /establishPeerSelection/);
   assert.doesNotMatch(tap, /armPeerViewBatch/);
-  assert.match(apply, /applyBatchViewMode/);
+  assert.match(apply, /applyBatchViewMode\(targetKeys\)/);
 });
 
 test('immersive blank right click remains blank-sensitive and exits to the parent domain', () => {
@@ -110,6 +110,14 @@ test('immersive blank right click remains blank-sensitive and exits to the paren
   const pointer = engine.slice(start, end);
   assert.match(pointer, /pointerInput\.button\s*===\s*2[\s\S]{0,220}blankSensitive/);
   assert.match(functionSource('applyParentView'), /exitDomain/);
+});
+
+test('A navigation dispatch has one inward path plus immersive scope and parent return', () => {
+  assert.match(engine, /case ["']applyInwardView["']/);
+  assert.match(engine, /case ["']applyImmersiveInwardView["']/);
+  assert.match(engine, /case ["']applyParentView["']/);
+  assert.match(functionSource('applyImmersiveInwardView'), /enterNode\(node, true\)/);
+  assert.doesNotMatch(engine, /case ["']setPeripheralView["']|case ["']setHierarchyView["']|case ["']setImmersiveView["']/);
 });
 
 test('immersive navigation history is not rendered as hierarchy when a local view is appended', () => {
@@ -144,6 +152,7 @@ test('middle framing uses the actual compressed group radius instead of a fixed 
 });
 
 test('blank field gestures operate on the cluster under the pointer instead of the active domain', () => {
+  const commit = functionSource('commitPointerCandidate');
   assert.match(engine, /function domainNodesForPath\(path\)/);
   assert.match(engine, /function topLevelDomainNodesForPath\(path\)/);
   assert.match(engine, /case "toggleFieldChildren":[\s\S]{0,420}visualMeta\.domainContext/);
@@ -153,7 +162,7 @@ test('blank field gestures operate on the cluster under the pointer instead of t
   assert.match(engine, /function contextualizeAction\(action, candidate/);
   assert.match(engine, /function candidateArbiterKey\(candidate\)/);
   assert.match(engine, /field:\$\{candidate\.domainContext\.path\}/);
-  assert.match(engine, /candidate\.button === 2[\s\S]{0,240}contextualizeAction\(action, candidate\)[\s\S]{0,180}dispatchIntent\(contextualAction\.intent/);
+  assert.match(commit, /candidate\.button === 2[\s\S]*contextualizeAction\(action, candidate\)[\s\S]*dispatchIntent\(contextualAction\.intent/);
 });
 
 test('secondary cluster tools derive paths from their visible node owner', () => {

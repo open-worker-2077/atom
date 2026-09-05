@@ -152,9 +152,10 @@
   const initialDemoSettings = loadDemoSettings();
 
   const intentNames = {
-    cycleViewMode: "视角模式",
     cycleVisibleDetails: "信息密度",
-    applyViewMode: "应用视角",
+    applyInwardView: "向内剖开",
+    applyImmersiveInwardView: "沉浸剖开",
+    applyParentView: "返回父层",
     expandToLeaves: "展开至最细级",
     activate: "使用",
     summonMenu: "命令星环",
@@ -254,10 +255,10 @@
     input.intents.backView,
     input.intents.forwardView,
     input.intents.returnOverview,
-    input.intents.setPeripheralView,
     input.intents.setNestedView,
-    input.intents.setHierarchyView,
-    input.intents.setImmersiveView
+    input.intents.applyInwardView,
+    input.intents.applyImmersiveInwardView,
+    input.intents.applyParentView
   ]);
   const transactionGuardedIntents = new Set([
     "focus",
@@ -268,8 +269,8 @@
     "backView",
     "forwardView",
     "toggleClusterField",
-    "cycleViewMode",
-    "applyViewMode",
+    "applyInwardView",
+    "applyImmersiveInwardView",
     "applyParentView",
     "collapseHoveredCluster",
     "expandHoveredCluster",
@@ -643,7 +644,7 @@
     },
     clusterFieldOpen: false,
     viewMode: "nested",
-    appliedViewMode: "hierarchy",
+    appliedViewMode: "nested",
     expandedClusterDomains: new Map(),
     clusterScene: { clusters: [], corridors: [], bounds: { center: { x: 0, y: 0, z: 0 }, radius: 0 } },
     clusterConnectionEdges: [],
@@ -903,7 +904,7 @@
       pathLabels: [...(descriptor.pathLabels || [])],
       parentPath: descriptor.parentPath,
       parentNodeId: descriptor.parentNodeId,
-      projectionMode: descriptor.projectionMode || "hierarchy"
+      projectionMode: "nested"
     }));
   }
 
@@ -921,7 +922,7 @@
           pathLabels: [...(descriptor.pathLabels || [])],
           parentPath: descriptor.parentPath,
           parentNodeId: descriptor.parentNodeId,
-          projectionMode: descriptor.projectionMode || "hierarchy",
+          projectionMode: "nested",
           nodes: createChildDomainNodes(parentNode, descriptor.path, descriptor.depth)
         };
         sceneAdapter.commitViewIntent(state, {
@@ -1039,8 +1040,8 @@
     state.prefetchedDomain = null;
     state.worldLens = { ...snapshot.worldLens };
     state.clusterFieldOpen = snapshot.clusterFieldOpen === true;
-    state.viewMode = snapshot.viewMode || "nested";
-    state.appliedViewMode = snapshot.appliedViewMode || "hierarchy";
+    state.viewMode = "nested";
+    state.appliedViewMode = "nested";
     restoreClusterBranches(snapshot.expandedClusters || []);
     if (state.clusterFieldOpen) buildClusterScene();
     updateSelectionUI();
@@ -5561,7 +5562,7 @@
     return true;
   }
 
-  function toggleClusterChildDomain(node, ownerPath = state.currentPath, projectionMode = "hierarchy") {
+  function toggleClusterChildDomain(node, ownerPath = state.currentPath, projectionMode = "nested") {
     const childPath = childPathFor(node, ownerPath);
     if (transactionBlocksViewChange()) {
       announce("请先用 Enter 或 Esc 结束当前编辑");
@@ -5575,13 +5576,12 @@
     const changed = openClusterChildDomain(node, ownerPath, projectionMode);
     if (!changed) return false;
     buildClusterScene();
-    frameClusterDomain(childPath);
     updateSelectionUI();
     announce(`已展开 ${node.label} 的下一层子域团`);
     return true;
   }
 
-  function openClusterChildDomain(node, ownerPath = state.currentPath, projectionMode = "hierarchy") {
+  function openClusterChildDomain(node, ownerPath = state.currentPath, projectionMode = "nested") {
     const childPath = childPathFor(node, ownerPath);
     if (state.expandedClusterDomains.has(childPath)) return false;
     const parentDepth = clusterDepthForPath(ownerPath);
@@ -5595,9 +5595,7 @@
       pathLabels: [...parentLabels, node.label],
       parentPath: ownerPath,
       parentNodeId: node.id,
-      projectionMode: ["peripheral", "nested"].includes(projectionMode)
-        ? projectionMode
-        : "hierarchy",
+      projectionMode: "nested",
       nodes
     };
     sceneAdapter.commitViewIntent(state, {
@@ -5705,7 +5703,7 @@
   }
 
   function returnClusterToDepth(targetDepth, previous) {
-    if (options.record !== false) recordCurrentView();
+    recordCurrentView();
     state.domainStack = state.domainStack.slice(0, targetDepth);
     state.currentPath = previous.path;
     state.depth = previous.depth;
@@ -5807,7 +5805,6 @@
       announce("请先用 Enter 或 Esc 结束当前编辑");
       return false;
     }
-    if (state.viewMode === "immersive") return false;
     prepareViewHistoryNavigation();
     primaryClickArbiter.cancel();
     secondaryClickArbiter.cancel();
@@ -5832,10 +5829,9 @@
       node
     }));
     const entries = recursiveVisualEntries(roots, { forceDomainTraversal: true });
-    const options = { projectionMode: state.viewMode };
     for (const entry of entries) {
       if (entry.node.hasChildren !== true) continue;
-      openClusterChildDomain(entry.node, entry.ownerPath, options.projectionMode);
+      openClusterChildDomain(entry.node, entry.ownerPath, "nested");
     }
     state.clusterFieldOpen = state.expandedClusterDomains.size > 0;
     if (state.clusterFieldOpen) buildClusterScene();
@@ -5910,9 +5906,8 @@
     return state.clusterFieldOpen;
   }
 
-  function setViewMode(mode) {
-    if (!viewModeModel.modes.includes(mode)) return false;
-    sceneAdapter.commitViewIntent(state, { type: "set-view-mode", mode });
+  function setViewMode() {
+    sceneAdapter.commitViewIntent(state, { type: "set-view-mode", mode: "nested" });
     const label = viewModeModel.modeLabels[state.viewMode] || state.viewMode;
     updateSelectionUI();
     announce(`视角模式：${label}；只影响之后的右键动作`);
@@ -5934,18 +5929,13 @@
     return false;
   }
 
-  function applyViewMode(node, optionsInput) {
+  function applyInwardView(node, optionsInput) {
     const options = optionsInput || {};
-    const mode = viewModeModel.modes.includes(options.mode) ? options.mode : state.viewMode;
     if (!node || !node.capabilities || !node.capabilities.portal) return false;
     const clickedKey = visualNodeKey(node, nodeOwnerPath(node));
-    const targetKeys = viewModeModel.planViewTargets(mode, clickedKey, state.batchSelectionKeys);
-    if (mode === "immersive") {
-      enterNode(node, true);
-      return true;
-    }
+    const targetKeys = viewModeModel.planViewTargets("nested", clickedKey, state.batchSelectionKeys);
     if (options.skipBatch !== true && targetKeys.length > 1) {
-      const batch = applyBatchViewMode(mode, targetKeys);
+      const batch = applyBatchViewMode(targetKeys);
       if (batch) return batch.changed;
     }
     const ownerPath = nodeOwnerPath(node);
@@ -5956,15 +5946,16 @@
       if (changed && shouldRecord) recordCurrentView();
       return changed;
     }
-    state.appliedViewMode = mode;
-    if (mode === "peripheral") {
-      revealNode(node, { record: shouldRecord });
-      return true;
-    }
+    state.appliedViewMode = "nested";
     state.clusterFieldOpen = true;
-    const changed = toggleClusterChildDomain(node, ownerPath, mode);
+    const changed = toggleClusterChildDomain(node, ownerPath, "nested");
     if (changed && shouldRecord) recordCurrentView();
     return changed;
+  }
+
+  function applyImmersiveInwardView(node) {
+    if (!node || !node.capabilities || !node.capabilities.portal) return false;
+    return enterNode(node, true) === true;
   }
 
   function nearestClusterDomainNode(path, x, y) {
@@ -5983,8 +5974,8 @@
   }
 
   function expandHoveredClusterLevel() {
-    if (state.viewMode === "immersive" || transactionBlocksViewChange()) return false;
-    state.appliedViewMode = state.viewMode;
+    if (transactionBlocksViewChange()) return false;
+    state.appliedViewMode = "nested";
     const entries = visibleClusterDomains().flatMap((domain) => domain.nodes.map((projected) => {
       const node = projected.sourceNode || projected;
       return {
@@ -5998,7 +5989,7 @@
     const keys = viewModeModel.planContextLevelExpansion(
       entries,
       [...state.expandedClusterDomains.keys()],
-      state.viewMode
+      "nested"
     );
     if (!keys.length) return false;
     const byKey = new Map(entries.map((entry) => [entry.key, entry]));
@@ -6006,7 +5997,7 @@
     let changed = false;
     for (const key of keys) {
       const entry = byKey.get(key);
-      if (entry && openClusterChildDomain(entry.node, entry.ownerPath, state.viewMode)) changed = true;
+      if (entry && openClusterChildDomain(entry.node, entry.ownerPath, "nested")) changed = true;
     }
     if (!changed) return false;
     buildClusterScene();
@@ -6046,11 +6037,11 @@
   }
 
   function collapseHoveredClusterLevel() {
-    if (state.viewMode === "immersive" || transactionBlocksViewChange()) return false;
+    if (transactionBlocksViewChange()) return false;
     const paths = viewModeModel.planContextLevelCollapse(
       [...state.expandedClusterDomains.keys()],
       state.currentPath,
-      state.viewMode
+      "nested"
     );
     if (!paths.length) return false;
     let changed = false;
@@ -6184,18 +6175,17 @@
     return true;
   }
 
-  function applyBatchViewMode(mode, keysInput) {
+  function applyBatchViewMode(keysInput) {
     const keys = Array.isArray(keysInput) ? keysInput : [...state.batchSelectionKeys];
     if (!keys.length) return null;
     return {
       handled: true,
-      changed: executeWandTargets(keys, { recursive: false, viewMode: mode, skipBatch: true })
+      changed: executeWandTargets(keys, { recursive: false, skipBatch: true })
     };
   }
 
   function armPeerViewBatch() {
     state.wand.peerBatchArmed = true;
-    state.wand.peerBatchMode = state.viewMode;
     canvas.style.cursor = "none";
     return true;
   }
@@ -6228,13 +6218,11 @@
 
   function consumePeerViewBatch(node) {
     if (!state.wand.peerBatchArmed) return null;
-    const batchMode = state.wand.peerBatchMode;
     state.wand.peerBatchArmed = false;
     state.wand.peerBatchMode = null;
     state.wand.lastTapAt = 0;
     state.wand.tapCount = 0;
     syncCanvasCursor(node);
-    if (batchMode === "immersive") return { handled: true, changed: false };
     const regions = peerViewBatchRegions();
     const targetKey = visualNodeKey(node, nodeOwnerPath(node));
     const target = regions.find((region) => region.key === targetKey);
@@ -6242,7 +6230,7 @@
     const keys = viewModeModel.planPeerBatch(regions, target);
     return {
       handled: true,
-      changed: executeWandTargets(keys, { recursive: false, viewMode: batchMode })
+      changed: executeWandTargets(keys, { recursive: false })
     };
   }
 
@@ -6307,28 +6295,11 @@
     return result;
   }
 
-  function recursiveVisualEntries(entries, optionsInput) {
-    const options = optionsInput || {};
+  function recursiveVisualEntries(entries) {
     const byKey = new Map(entries.map((entry) => [entry.key, entry]));
     const childrenFor = (key) => {
       const entry = byKey.get(key);
       if (!entry || entry.node.hasChildren !== true) return [];
-      if (
-        !options.forceDomainTraversal
-        && state.viewMode === "peripheral"
-        && entry.node.isWorkspaceNode !== true
-      ) {
-        createSatellites(entry.node);
-        return (entry.node.satellites || []).map((node) => {
-          const child = {
-            key: visualNodeKey(node, entry.ownerPath),
-            ownerPath: entry.ownerPath,
-            node
-          };
-          byKey.set(child.key, child);
-          return child.key;
-        });
-      }
       const childPath = childPathFor(entry.node, entry.ownerPath);
       const childDepth = clusterDepthForPath(entry.ownerPath) + 1;
       createChildDomainNodes(entry.node, childPath, childDepth);
@@ -6345,18 +6316,10 @@
 
   function expandRecursively(entriesInput) {
     const entries = recursiveVisualEntries(entriesInput);
-    const projectionMode = state.viewMode === "nested" ? "nested" : "hierarchy";
     let openedChildDomain = false;
     for (const entry of entries) {
       if (entry.node.hasChildren !== true) continue;
-      if (state.viewMode === "peripheral" && entry.node.isWorkspaceNode !== true) {
-        if (!entry.node.revealed) {
-          entry.node.revealed = true;
-          createSatellites(entry.node);
-        }
-        continue;
-      }
-      if (openClusterChildDomain(entry.node, entry.ownerPath, projectionMode)) {
+      if (openClusterChildDomain(entry.node, entry.ownerPath, "nested")) {
         openedChildDomain = true;
       }
     }
@@ -6373,14 +6336,11 @@
     const entries = keys.map(visualEntryForKey).filter(Boolean);
     if (!entries.length) return false;
     const glowDurationMs = Math.max(0, Number(options.glowDurationMs) || 0);
-    const viewMode = viewModeModel.modes.includes(options.viewMode) ? options.viewMode : state.viewMode;
     const perform = () => {
       if (state.wand.highEnergy && options.recursive !== false) {
         expandRecursively(entries);
-      } else if (viewMode === "immersive") {
-        applyViewMode(entries[0].node, { record: false, mode: viewMode });
       } else {
-        for (const entry of entries) applyViewMode(entry.node, { record: false, mode: viewMode, skipBatch: true });
+        for (const entry of entries) applyInwardView(entry.node, { record: false, skipBatch: true });
       }
       recordCurrentView();
       updateSelectionUI();
@@ -6496,24 +6456,15 @@
     context.strokeStyle = theme.accent;
     context.globalAlpha = 0.38;
     context.lineWidth = 1.1;
-    if (state.viewMode === "immersive") {
-      context.beginPath();
-      context.arc(0, 0, 7, 0, Math.PI * 2);
-      context.stroke();
-    } else {
-      const inward = state.viewMode === "nested";
-      const hierarchy = state.viewMode === "hierarchy";
-      const directions = hierarchy
-        ? [[-0.72, 0.7], [0, 1], [0.72, 0.7]]
-        : [[-1, 0], [1, 0], [0, -1], [0, 1]];
+    const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
       for (const [dx, dy] of directions) {
-        const start = inward ? size * 0.9 : size * 0.3;
-        const end = inward ? size * 0.3 : size * 0.9;
+        const start = size * 0.9;
+        const end = size * 0.3;
         context.beginPath();
         context.moveTo(dx * start, dy * start);
         context.lineTo(dx * end, dy * end);
         context.stroke();
-        const angle = Math.atan2(dy, dx) + (inward ? Math.PI : 0);
+        const angle = Math.atan2(dy, dx) + Math.PI;
         context.beginPath();
         context.moveTo(dx * end, dy * end);
         context.lineTo(dx * end - Math.cos(angle - 0.55) * 3, dy * end - Math.sin(angle - 0.55) * 3);
@@ -6521,7 +6472,6 @@
         context.lineTo(dx * end - Math.cos(angle + 0.55) * 3, dy * end - Math.sin(angle + 0.55) * 3);
         context.stroke();
       }
-    }
     context.restore();
   }
 
@@ -6799,23 +6749,14 @@
       case "toggleClusterField":
         toggleClusterField();
         break;
-      case "setPeripheralView":
-        setViewMode("peripheral");
-        break;
       case "setNestedView":
-        setViewMode("nested");
+        setViewMode();
         break;
-      case "setHierarchyView":
-        setViewMode("hierarchy");
+      case "applyInwardView":
+        applyInwardView(target);
         break;
-      case "setImmersiveView":
-        setViewMode("immersive");
-        break;
-      case "cycleViewMode":
-        setViewMode(viewModeModel.nextMode(state.viewMode));
-        break;
-      case "applyViewMode":
-        applyViewMode(target);
+      case "applyImmersiveInwardView":
+        applyImmersiveInwardView(target);
         break;
       case "applyParentView":
         applyParentView(visualMeta.domainContext || null);
@@ -8314,8 +8255,8 @@
       if (childPath && state.expandedClusterDomains.has(childPath)) {
         collapseClusterDomain(childPath);
       }
-      setViewMode(step.mode);
-      return node ? applyViewMode(node) : false;
+      setViewMode();
+      return node ? applyInwardView(node) : false;
     }
     if (step.kind === "detail") {
       return setDemoDetailMode(node, step.detailMode || "surface");
@@ -8327,9 +8268,7 @@
     }
     if (step.kind === "descend") {
       if (!node || node.hasChildren !== true) return false;
-      setViewMode("immersive");
-      enterNode(node, true);
-      return true;
+      return applyImmersiveInwardView(node);
     }
     if (step.kind === "retreat") {
       if (state.depth <= 0) return false;
