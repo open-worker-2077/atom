@@ -313,19 +313,19 @@ git commit -m "refactor(web): merge immersion into A navigation"
 - S/D/独立F退出活跃帮助、设置、键位和手机控件；保留A子层缩小（旧peripheralDepthShrink变量实际被A消费）、历史Z/X、详情、编辑、魔杖等有效需求。
 - 实现复用现有手势模块和pointer生命周期，不新增通用手势框架或第二配置来源。代码行为退役由Git和Task6清单保全，不删除文件/产物。
 
-- [ ] **Step 1: 获得新长按与旧共同设置读取RED**
+- [x] **Step 1: 获得新长按与旧共同设置读取RED**
 
 真实定时器模型覆盖短按/长按/松开一次/取消及旧双击不沉浸；真实Chromium在旧双击实现上验证持续按住未沉浸得到RED。旧完整设置文档缺新字段的读取目前严格数量校验拒绝，补实际服务用例RED，验证其余字段守恒及坏文档拒绝。新行为RED不能用源码正则替代。
 
-- [ ] **Step 2: 实现最小长按和配置接线**
+- [x] **Step 2: 实现最小长按和配置接线**
 
 输入意图、现有右键仲裁、pointer生命周期、共同配置服务读取按上述合同一次收束。帮助、设置可访问标签、桌面及移动控件同步为长按；移动端已有虚拟右键复用同一意图/识别链，不造另一套业务语义。
 
-- [ ] **Step 3: 最小受影响链GREEN及真实浏览器证明**
+- [x] **Step 3: 最小受影响链GREEN及真实浏览器证明**
 
 先跑受改函数相关Node测试，再跑三个关键行为：短按保留团外、长按沉浸且松开不二次导航、空白快速双击单层返回。补拖拽/取消及修饰键隔离的定向行为证明；设置调值→重载→恢复默认→重载、服务共同基准继承与缺字段保全。证据保存到本计划SDD，浏览器输出使用唯一目录防覆盖删除。只跑必要具名旅程，不在此任务运行全量npm test。
 
-- [ ] **Step 4: 自审、提交和任务复核**
+- [x] **Step 4: 自审、提交和任务复核**
 
 修改符号前GitNexus impact，提交前detect_changes与diff检查；只提交本任务文件，报告RED/GREEN实际命令、输出、源码范围与疑点。最终独立任务复核由控制方派发；Task6复用同revision有效浏览器证据并完成退役清单，Task7才执行最终全量、部署与正式入口回读。
 
@@ -491,3 +491,7 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **Task5取消GREEN**：实施方用Playwright page.clock控制浏览器时间、默认420ms及真实鼠标/键盘事件，12px拖移/pointercancel/修饰键变化后各推进421ms保持root，1/1通过（task-5-browser-green-20260906-09）。结合04 trace跨进程延迟，原失败不能作为阈值前取消失效证据；无额外产品取消补丁，临时engine探针与timer/pointer wrapper已移除。最终原始报告及独立任务复核待完成，生产A未部署。
 
 - **Task5候选审查**：a38d739为产品提交，2da5ab6仅解除新报告Git跟踪且磁盘保留。root已读完整报告、核对浏览器.last-run通过及无临时探针；Node63/63、核心4/4、受控取消1/1、设置重载恢复1/1、独立390px上下文共同字段继承更新1/1。旧presentation-settings综合旅程仍在F/applyViewMode准备断言失败，归Task6迁移准备动作并保全全部设置断言。a_task5_longpress_review（Sol high）正审d9f9877..2da5ab6，未裁定任务完成；只读Astra咨询结束，不重复派发。私有报告task-5-longpress-report.md与净差异review-d9f9877..2da5ab6.diff保留。
+
+- **Task5独立复核／fix round1/5**：a_task5_longpress_review判规格/质量待修，唯一Important为begin未锚定实际按下时间，release仅依holdCommitted，在持续到阈值而timer回调尚未执行时误判single。Root回到当前arbiter确认此顺序可达且违反持续时间合同；原实施方a_task5_longpress补单调时间锚定和release阈值判定。FIX_BASE=2da5ab6，当前fd2bf43仅追加计划记录；新增确定性now前进但不执行timer的RED，GREEN覆盖短按/长按/晚timer一次性/取消/空白及阈值固定。仅仲裁/gesture定向与必要具名长按浏览器，不重复设置链或全量。Task6/7缺口保留，不抢跑下一任务。
+
+- **Task5 fix round1/5完成**：d2c02345096a7bb5a6ac2d744d304d00978cc686，默认performance.now锚定按下时长，release补判到期且迟到timer不重复；RED38/40→GREEN40/40、必要真实长按1/1。a_task5_longpress_review限定复审原Important已ADDRESSED、无新增破坏。Root核对修复源码及.last-run，Task5: complete（BASE d9f9877..d2c0234）；原核心/设置/跨端有效证据复用。Task6接续旧F准备动作/互补旅程与退役清单；仍未部署A。
