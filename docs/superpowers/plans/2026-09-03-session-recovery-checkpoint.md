@@ -1,18 +1,18 @@
 # Atom 当前开发恢复断点
 
-**更新时间：** 2026-09-06（旧生成print迁移已部署并回告，续接A余项及长按；真实基准已迁入，真机验收待上线）
-**权威分支：** main；生产b329399，正式入口build sha256-48e7d3399646ac16；远端仍为此前已核对cea05f2，本地后续私有运作记录未公开推送。
+**更新时间：** 2026-09-06（A长按已部署，真实共同基准已迁入；真机待上线，后续内核方案先用户反馈）
+**权威分支：** main；A产品ebaf619、集成2483fbb，正式build sha256-9248d071384f74c7；远端仍为已核对cea05f2，本地后续私有运作记录未公开推送。
 **排队权威：** [2026-09-03-atom-current-requirement-ledger.md](2026-09-03-atom-current-requirement-ledger.md)。本节覆盖后文历史断点；不得恢复旧业务快照。
 
 ## 当前恢复断点（2026-09-06）
 
-- **当前实施**：旧生成print迁移已完成生产交付并回告。候选b7c9185最终1845项/1844pass/0fail/1 Windows symlink skip，Astra最终复核通过；b329399仅正常构建stamp同步。生产2项迁移、完整私密备份、正式HTTPS程序回读及完整facts深比较通过，health7406/published、新PID33212、watchdog恢复。完整副本幂等/回滚/再迁移及warm/cold打印证据复用，不重复全量。A Task1—6已完成，当前Task7整支评审的两项输入边界定向修复；共同设置真实基准已迁入revision1，物理手机验收仍待上线。
+- **当前交付**：A Task1—7完成部署和正式入口回读；移动归档、保存反馈、共同配置代码与真实本机基准、旧生成print迁移均已交付，不重做。下一项零Agent创世仅先形成独立方案，涉及信任根和内核须用户反馈后实施；物理手机上线即优先验收。
 - **保存交付**：e82984d正式HTTPS三份前端资源逐字节匹配；实际Enter后350ms显示正在保存，受控失败后显示失败。全部写请求拦截，此验收零生产写入。独立审查通过，1802项有效全量结果加唯一清理hook修正后1/1定向通过；不声称单次1803全绿。详情见原Task7报告及本文末交付证据。
-- **手机当前断点**：本机基准缺口已关闭：Edge Default/4784 v2经只读隔离解析、原库hash不变，现有bootstrap/CAS0唯一写入共同revision1；正式HTTPS与全新390px上下文完整18字段一致，边界100/内部24，合法0保留。仅物理Pixel 10a仍离线、屏幕验收开放。settings私有SDD host-atom-settings-1788656360648、host-bootstrap-1788656489736、formal-host-baseline-1788656536379为原始证据；后续A窄迁移应补420且保持revision1及所有原值。
+- **手机当前断点**：本机基准缺口已关闭：Edge Default/4784 v2经只读隔离解析、原库hash不变，现有bootstrap/CAS0唯一写入共同revision1；正式HTTPS与全新390px上下文完整18字段一致，边界100/内部24，合法0保留。仅物理Pixel 10a仍离线、屏幕验收开放。settings私有SDD host-atom-settings-1788656360648、host-bootstrap-1788656489736、formal-host-baseline-1788656536379为原始证据；A部署已GET补420且保持revision1及所有原值，原设置文件hash未变。
 - **持续执行**：atom-2已ACTIVE、每30分钟；用户定义与Atom框架优先，困难时允许临时Astra高级咨询，意见须独立判断。新内核改造须用户反馈。移动归档已交付并回告提出方，不重做。
-- **后续队列**：手机入口恢复即优先验收；当前独立推进A最终输入修复及部署，旧print迁移不重做。CLI52反馈已评估不等于已解决。保留全部有效需求，Superpowers本地化核查已完成，持续同步原规格/计划/总账。
+- **后续队列**：手机入口恢复即优先验收；A已部署，当前接零Agent独立方案，旧print迁移不重做。CLI52反馈已评估不等于已解决。保留全部有效需求，Superpowers本地化核查已完成，持续同步原规格/计划/总账。
 
-- **A精确续点**：最终候选ebaf619，Task1—6完成，整支I2复审关闭、I1微移残留由root回读源码和原始44/44+浏览器2/2裁定关闭；原全量/浏览器组合证据见原计划，不再全量或整支评审。下一步原SDD deploy-reviewed-a-candidate.ps1对最终文档提交SHA完整备份/集成/正常build/新进程，再verify-deployed-assets.mjs及verify-deployed-a.mjs正式回读。须保留共同settings revision1及18原值、仅补hold420。当前生产仍旧A，不称部署完成。
+- **A交付证据**：产品ebaf619→候选da0998e→main2483fbb，正常build sha256-9248d071384f74c7。私有A SDD deployment-da0998e-20260906-01.log、formal-assets输出、formal-a-1788658113378完整保留。正式HTML/25资产、短按/父子长按松开一次/空白单退/控件、真实settings守恒全部通过。新PID32200创建01:27:35Z，health7407/published，watchdog Ready；完整备份a-mode-longpress-20260906-092706。Node/浏览器组合证据与残留裁定见原计划，不重新全量或派Task1—7。
 
 ## 历史执行记录（以下“当前/尚未”均指记录当时）
 

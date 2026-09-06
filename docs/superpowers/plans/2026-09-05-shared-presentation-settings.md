@@ -166,4 +166,4 @@ Run: `node --test tests/browser-bridge-contract.test.js tests/atom-presentation-
 - **来源验证**：仅在Chrome/Edge的Local Storage定位Atom键，匹配Edge Default；将原LevelDB的CURRENT/manifest/data/log复制到唯一私有隔离profile，copy前后和读取后哈希一致。由Edge自身解析数据库，不凭二进制片段猜值；所有导航本地空文档拦截，仅输出Atom三项presentation keys。4784具有v2及旧v1，v2为正式优先来源，正式HTTPS旧缓存为空。
 - **迁移事实**：私有settings SDD host-atom-settings-1788656360648保存原始v2、source-hashes及隔离副本；host-bootstrap-1788656489736保存before revision0/uninitialized、原raw及规范化结果。原17字段与normalize逐项全等，既有模型仅补缺省detailMode；实际应用loopback初始化仅放行一笔PUT expectedRevision0/bootstraptrue/确切patch，返回revision1。原值备份key与raw逐字相同；未写Atom业务事实。
 - **正式回读**：formal-host-baseline-1788656536379中正式GET revision1、initializedtrue；全新390px桌面Chromium经正式HTTPS读取全部18字段与本机基准深比较一致，设置控件边界100、内部24。全部非读请求拦截且实际0；这是真实共同基准的客户端继承证据，不是物理手机验收。
-- **当前剩余**：真机离线，待上线后核对同revision与实际边框画面；不再把已取得的本机值写成未知，不再重复实现或使用55/35测试值。后续A部署新增长按字段应由已审窄读迁移补420并保留revision1/全部原值。
+- **当前剩余**：真机离线，待上线后核对同revision与实际边框画面；不再把已取得的本机值写成未知，不再重复实现或使用55/35测试值。A现已部署，正式GET新增长按字段420且revision1/18项原值守恒；备份与回读后原settings文件hash相同，GET没有写盘。

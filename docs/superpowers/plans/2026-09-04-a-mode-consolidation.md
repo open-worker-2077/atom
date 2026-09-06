@@ -1,6 +1,6 @@
 # A Mode Consolidation Implementation Plan
 
-**当前续点（2026-09-06）**：Task1—6完成；Task7整支评审I2已复审关闭，I1微移残留ebaf619由root按明确裁定独立核对收口，Node44/44、普通/沉浸微移浏览器2/2。全部原有效组合证据保留；现在完整私密备份、部署及正式入口回读，尚未冒称部署完成。共同真实本机基准已迁入revision1，手机离线待验。
+**当前续点（2026-09-06）**：Task1—7完成。最终产品ebaf619经da0998e集成主分支2483fbb，正常build sha256-9248d071384f74c7；正式HTTPS25项资产字节一致及真实短按/长按松开一次/空白单层返回通过，新PID32200、health7407/published、watchdog Ready。完整世界与真实共同配置已私密备份；共同revision1/全部原值守恒，GET仅补420且原设置文件hash未变。物理手机验收独立待上线，不重做A。
 
 **最新用户修订（2026-09-05）**：右键双击沉浸改为右键长按；已于Task5实施并复核，下方Task1—4旧双击步骤仅保留历史证据，当前合同以Web规格及Task5为准。
 
@@ -381,17 +381,17 @@ Run: `npm test`
 
 Expected: build succeeds and all Node tests PASS. A real failure returns to focused debugging; infrastructure-only failure is recorded and retried without calling the candidate green.
 
-- [ ] **Step 3: Deploy through the existing Atom Graph Runtime entry**
+- [x] **Step 3: Deploy through the existing Atom Graph Runtime entry**
 
 先集成并正常构建，按既有受控入口停止旧Atom Graph Runtime后重新启动，临时抑制watchdog并在finally恢复；核验listener对应的新进程创建时间晚于部署，不重复启动临时4784进程。
 
 从现行health读取`atomProjection.status: published`；浏览器build从正式HTTPS HTML标识及实际资产hash回读，health不提供浏览器build。部署前保全当前世界和展示配置，不能恢复旧业务快照。
 
-- [ ] **Step 4: Re-read the deployed public entry**
+- [x] **Step 4: Re-read the deployed public entry**
 
 Verify through real Chromium that the three Task 6 journeys pass against 4784 and that Help/settings expose only A ordinary/immersive inward navigation plus the persisted interval. Confirm Ctrl+right, Shift+right and left programmable click remain operational with their focused journeys.
 
-- [ ] **Step 5: Update evidence and commit the deployed candidate**
+- [x] **Step 5: Update evidence and commit the deployed candidate**
 
 ```bash
 git add index.html docs/superpowers/plans/2026-09-03-atom-current-requirement-ledger.md docs/superpowers/plans/2026-09-03-session-recovery-checkpoint.md
@@ -538,3 +538,7 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 
 - **最终残留收口／root独立裁定**：ebaf61978149d4e9746aa66bdea4c5d2b380ff98，root完整阅读残留报告、产品/测试diff与原始GREEN日志：Node44/44、两条微移Chromium2/2（25.0s）；candidate首按原始坐标和既有threshold进入仲裁，距离严格小于首按容差才合并含blank序列，超容差及不同stable node独立，exact release/时间窗/direct隔离保持。无临时microTrace；最终clock先于页面/模块安装，因此绑定now与操作时钟一致。接受I1关闭，I2沿原范围复审已关闭；不再整支复审或全量。
 - **证据精度更正**：早期micro browser08/09在页面加载后装clock，其“受控40ms”只代表外部时钟，不能独自证明仲裁内部40ms；保存为观察失败，残留RED由确定性Node42/44成立，最终前置clock的2/2证明正确输入时序。报告所称at-threshold用例实际点差7px、阈值6，准确说是超阈值独立；等于阈值不合并由源码严格小于可读验证，不冒称已单独执行该用例。
+- **Task7: complete／正式交付**：候选da0998ef2ecd7698b3f669dce4fed6fc6a5e702f（产品ebaf619）经既有任务受控停启集成main2483fbb77d6188aa84032e4bdb5d63c71e4ce83d；完整私密备份%LOCALAPPDATA%/AtomGraph/backups/a-mode-longpress-20260906-092706。新PID32200创建2026-09-06T01:27:35.9333510Z晚于合入/构建，health7407、projection published、watchdog Ready。正常main构建标识sha256-9248d071384f74c7，正式HTTPS完整HTML及25项执行资产逐字节匹配，构建标识按main实际换行字节生成，不复制工作树stamp。
+- **正式浏览器**：私有SDD formal-a-1788658113378，当前生产只读世界实际短右键保留root上下文、父/子两次长按在松开前进入且松开无第二导航、空白右双击精确单层返回、长按控件范围/标签均通过。所有非GET/HEAD阻断，8个视图写请求被拦截，零业务写入。此为正式HTTPS桌面Chromium，不是物理手机。
+- **真实配置守恒**：正式settings保持revision1，18项原本机值与初始化证据完全一致，新字段只在GET补secondaryNavigationDelayMs=420。部署前备份和回读后presentation-settings.json SHA256均为8C25EDD1CA46E94E4BF6BC6807C7F56A0390158A9FEB265CA882416A4783C459，证明GET未覆盖旧文档；后续显式用户修改才沿原CAS写完整字段。原浏览器缓存/世界/所有测试产物与worktree保留，不删除。
+- **交付边界**：原完整Node1857/1845pass/11旧合同fail/1skip加两文件75/75、最终受影响44/44及对应真实浏览器组合证据，未写成单次全量全绿。整支原两Important中I2独立范围复审关闭，I1最终微移按上文root明确裁定与原始证据关闭。当前含私有运行记录的Git ancestry不公开推送；已有远端安全CEA点保持，最新代码本地提交和完整私密备份保全。
