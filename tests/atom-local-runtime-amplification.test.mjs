@@ -5,7 +5,11 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createRuntimeCliExecutor } from '../src/atom-system/adapters/runtime-cli-executor.mjs';
-import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
+import {
+  createJsonTransactionJournal,
+  createJsonWorldRepository
+} from '../src/atom-system/adapters/json-world-repository.mjs';
+import { createCommitCoordinator } from '../src/atom-system/world-runtime/commit-coordinator.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
@@ -57,7 +61,7 @@ test('TC-PERF-LOCAL-EXPLORE / TC-PERF-LOCAL-TRANSFORM: a 20 MB unrelated sibling
   await assert.rejects(fs.access(path.join(`${journalFile}.d`, 'objects')), { code: 'ENOENT' });
 });
 
-test('TC-PERF-LOCAL-TRANSFORM: structural operations stay local and reversible', async (t) => {
+test('TC-PERF-CONSERVATIVE-TRANSFORM: structural operations stay whole-world and reversible', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-structural-amplification-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -98,9 +102,82 @@ test('TC-PERF-LOCAL-TRANSFORM: structural operations stay local and reversible',
   assert.equal(destination.slot[0].slot[0].thing, 'Child');
   const history = await createJsonTransactionJournal({ file: journalFile }).readState();
   assert.equal(history.receipts.length, 4);
-  assert.equal(history.receipts.every((entry) => entry.historyMode === 'local-patch'), true);
-  await assert.rejects(fs.access(path.join(`${journalFile}.d`, 'objects')), { code: 'ENOENT' });
+  assert.equal(history.receipts.every((entry) => entry.historyMode !== 'local-patch'), true);
+  await fs.access(path.join(`${journalFile}.d`, 'objects'));
   t.diagnostic(Object.entries(timings).map(([id, milliseconds]) => (
     `${id}=${milliseconds.toFixed(1)}ms`
   )).join(' '));
+});
+
+test('TC-PERF-LOCAL-COMMIT: acknowledgment appends one bounded record without writing the baseline', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-commit-amplification-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  const localCommitFile = path.join(directory, 'world-commits.jsonl');
+  const journalFile = path.join(directory, 'transactions.json');
+  const unrelated = 'x'.repeat(20_000);
+  const beforeFacts = [atom('Root', '', [
+    atom('Target', 'before'),
+    ...Array.from({ length: 1_000 }, (_, index) => atom(`Unrelated ${index}`, unrelated))
+  ])];
+  const afterFacts = structuredClone(beforeFacts);
+  afterFacts[0].slot[0].situation = 'after';
+  const baselineText = `${JSON.stringify(beforeFacts)}\n`;
+  await fs.writeFile(worldFile, baselineText, 'utf8');
+  const writes = [];
+  const instrumentedFileSystem = {
+    ...fs,
+    async open(target, flags, ...rest) {
+      const handle = await fs.open(target, flags, ...rest);
+      return {
+        async writeFile(value, ...args) {
+          writes.push({ target: path.resolve(target), bytes: Buffer.byteLength(value) });
+          return handle.writeFile(value, ...args);
+        },
+        sync: (...args) => handle.sync(...args),
+        close: (...args) => handle.close(...args)
+      };
+    }
+  };
+  const repository = createJsonWorldRepository({
+    file: worldFile,
+    worldId: 'primary',
+    localCommitFile,
+    fileSystem: instrumentedFileSystem
+  });
+  const coordinator = createCommitCoordinator({
+    worldRepository: repository,
+    journalRepository: createJsonTransactionJournal({ file: journalFile })
+  });
+  const initial = await repository.read();
+  const receipt = await coordinator.execute({
+    command: {
+      contract: 'atom.world-command',
+      version: 1,
+      commandId: 'bounded-one-axis',
+      correlationId: 'bounded-one-axis',
+      expectedRevision: initial.revision,
+      name: 'bounded-one-axis',
+      payload: {}
+    },
+    transition: () => ({
+      facts: afterFacts,
+      changedPaths: ['Root/Target'],
+      result: {
+        affectedPathClosureComplete: true,
+        relationEndpoints: [],
+        lockPaths: [],
+        shortcutPaths: [],
+        referencePaths: []
+      }
+    })
+  });
+
+  assert.equal(receipt.status, 'committed');
+  assert.equal(await fs.readFile(worldFile, 'utf8'), baselineText);
+  assert.equal(writes.some(({ target }) => target === path.resolve(worldFile)), false);
+  const recordWrites = writes.filter(({ target }) => target === path.resolve(localCommitFile));
+  assert.equal(recordWrites.length, 1);
+  assert.ok(recordWrites[0].bytes < Buffer.byteLength(baselineText) / 100,
+    `local record ${recordWrites[0].bytes} bytes must stay bounded against ${Buffer.byteLength(baselineText)}`);
 });

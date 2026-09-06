@@ -31,6 +31,10 @@ function nameOf(value) {
   return Object.entries(value).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
 }
 
+async function committedFacts(files) {
+  return (await createTransactionalWorldPersistence(files).readCommittedSnapshot()).facts;
+}
+
 test('discard source notification preserves the archive receipt through final settlement', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-discard-receipt-'));
   const contextFile = path.join(directory, 'atom.json');
@@ -72,7 +76,7 @@ test('a terminal-only engine callback never reports a missing source notificatio
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(notifications, 1);
   assert.equal(result.warnings.some(({ code }) => code === 'ATOM_COMMITTED_NOTIFICATION_FAILED'), false);
-  assert.equal(find(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Source').situation, 'after');
+  assert.equal(find(await committedFacts(files), 'Source').situation, 'after');
 });
 
 test('a worker runtime timeout is a final business failure and same-id reread never reruns it', async (t) => {
@@ -146,7 +150,7 @@ for (const businessStatus of ['completed', 'failed']) {
     assert.equal(notifications, 1);
     assert.ok(result.warnings.some(({ code }) => code === 'PROGRAM_PROJECTION_RECOVERY_PENDING'));
     if (businessStatus === 'failed') assert.ok(result.warnings.some(({ code }) => code === 'ATOM_SUBSEQUENT_NOTIFICATION_FAILED'));
-    assert.equal(find(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Source').situation, 'after');
+    assert.equal(find(await committedFacts(files), 'Source').situation, 'after');
     const final = await createTransactionalWorldPersistence(files).programExecutionForInteraction(request.interaction.id);
     assert.equal(final.outcome.status, businessStatus);
     assert.equal(final.sourceReceipt.commandId, durable.sourceReceipt.commandId);
@@ -218,7 +222,7 @@ test('a rejected multi-effect subscriber keeps its entire effects batch out of t
   assert.equal(result.subsequentExecution.status, 'failed');
   assert.ok(result.subsequentExecution.errors.some(({ code }) => code === 'ATOM_NOT_FOUND'));
   assert.ok(result.warnings.some(({ code }) => code === 'ATOM_SUBSEQUENT_EXECUTION_FAILED'));
-  const stored = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  const stored = await committedFacts(runtime);
   assert.equal(find(stored, 'Source').situation, 'after');
   assert.equal(find(stored, 'Result').situation, 'before');
 });
@@ -252,7 +256,7 @@ test('an ordinary transform trigger commits none of a Program multi-effect batch
   assert.ok(result.subsequentExecution.errors.some(({ code }) => (
     code === 'PROGRAM_TRANSFORM_REJECTED' || code === 'ATOM_NOT_FOUND'
   )), JSON.stringify(result));
-  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const stored = await committedFacts({ contextFile, projectionFile });
   assert.equal(find(stored, 'Source').situation, 'after');
   assert.equal(find(stored, 'Result').situation, 'before');
 });
@@ -294,7 +298,7 @@ test('onCommitted observes the source commit before a blocked subsequent worker 
     code === 'ATOM_SUBSEQUENT_EXECUTION_PENDING'
       && correlationId === `${sourceResult.interactionId}:subsequent`
   )));
-  assert.equal(find(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8')), 'Source').situation, 'after');
+  assert.equal(find(await committedFacts(runtime), 'Source').situation, 'after');
   unblock();
   const result = await execution;
   assert.equal(result.subsequentExecution.status, 'completed', JSON.stringify(result));
@@ -329,7 +333,7 @@ test('a subsequent effects CAS conflict is not mistaken for this request committ
   assert.ok(result.warnings.some(({ code }) => code === 'WORLD_REVISION_CONFLICT'));
   assert.equal(result.subsequentExecution.errors[0]?.code, 'DETAIL_FRAGMENT_NOT_FOUND', JSON.stringify(result));
   assert.equal(result.subsequentExecution.errors[0]?.program, 'Subscriber');
-  const stored = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  const stored = await committedFacts(runtime);
   assert.equal(find(stored, 'Source').situation, 'after');
   assert.equal(find(stored, 'Result').situation, 'after');
   assert.equal(result.revisionAfter, result.subsequentExecution.revisionAfter);
@@ -423,7 +427,7 @@ test('a directly throwing ordinary transform subscriber fails only subsequent ex
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.subsequentExecution.status, 'failed');
   assert.ok(result.subsequentExecution.errors.some(({ code }) => code === 'SUBSCRIBER_EXPLODED'));
-  assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Source').situation, 'after');
+  assert.equal(find(await committedFacts({ contextFile, projectionFile }), 'Source').situation, 'after');
 });
 
 test('a shortcut-only subsequent effect outside the source subtree is committed', async (t) => {
@@ -501,7 +505,7 @@ test('a batch source commits all requested facts before its failing subscriber',
 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.subsequentExecution.status, 'failed');
-  const stored = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  const stored = await committedFacts(runtime);
   assert.equal(find(stored, 'Source').situation, 'after');
   assert.equal(find(stored, 'Second').situation, 'after');
 });
@@ -584,7 +588,7 @@ for (const crashAt of ['source', 'child', 'startup']) {
     const execution = await persistence.programExecutionForInteraction(request.interaction.id);
     assert.equal(execution.event.mode, 'transform');
     assert.ok(execution.event.nodes.includes('Source'));
-    assert.equal(find(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Source').situation, 'after');
+    assert.equal(find(await committedFacts(files), 'Source').situation, 'after');
     const service = createLegacyWorldService();
     const scheduler = createProgramRuntimeScheduler();
     const run = scheduler.runProgram.bind(scheduler);
@@ -910,8 +914,9 @@ test('cancellation after source acknowledgement leaves an unconfirmed attempt pe
     onCommitted() { controller.abort(Object.assign(new Error('deadline'), { code: 'ABORT_ERR' })); } });
   assert.equal(first.ok, true, JSON.stringify(first));
   assert.equal(first.subsequentExecution.status, 'pending');
-  assert.equal(find(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Source').situation, 'after');
-  assert.equal(find(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Result').situation, 'before');
+  const afterSource = await committedFacts(files);
+  assert.equal(find(afterSource, 'Source').situation, 'after');
+  assert.equal(find(afterSource, 'Result').situation, 'before');
   const withoutRuntime = await createLegacyWorldService().executeLegacy(request);
   assert.equal(withoutRuntime.subsequentExecution.status, 'pending', JSON.stringify(withoutRuntime));
   const recovered = await createLegacyWorldService().executeLegacy({ ...request, programScheduler: createProgramRuntimeScheduler() });
@@ -1067,7 +1072,7 @@ test(`outcome append EIO preserves source success and exposes recoverable outcom
   assert.equal(terminalNotified, 0, 'failed durable recording must not publish a terminal lifecycle notification');
   assert.equal(result.subsequentExecution.status, 'pending');
   assert.ok(result.warnings.some(({ code, cause }) => code === 'ATOM_PROGRAM_OUTCOME_PERSISTENCE_PENDING' && cause === 'EIO'));
-  assert.equal(find(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Source').situation, 'after');
+  assert.equal(find(await committedFacts(files), 'Source').situation, 'after');
   assert.equal((await createTransactionalWorldPersistence(files).programExecutionForInteraction(request.interaction.id)).outcome.status,
     outcomeStatus === 'completed' ? 'completed' : 'pending');
   t.mock.restoreAll();

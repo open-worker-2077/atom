@@ -166,11 +166,20 @@ export function createCommitCoordinator({
       if (nextSnapshot.revision !== afterRevision) {
         throw problem('TRANSACTION_RECOVERY_CONFLICT', 'Prepared patch does not produce its committed revision');
       }
-      await worldRepository.compareAndSwap({
-        expectedRevision: beforeRevision,
-        nextSnapshot,
-        currentSnapshot: current
-      });
+      if (record.historyMode === 'local-patch' && typeof worldRepository.appendLocalCommit === 'function') {
+        await worldRepository.appendLocalCommit({
+          commandId: record.commandId,
+          expectedRevision: beforeRevision,
+          nextSnapshot,
+          patch: record.patch
+        });
+      } else {
+        await worldRepository.compareAndSwap({
+          expectedRevision: beforeRevision,
+          nextSnapshot,
+          currentSnapshot: current
+        });
+      }
     } else if (current.revision !== afterRevision) {
       throw problem('TRANSACTION_RECOVERY_CONFLICT', 'World diverged from a prepared transaction', {
         commandId: record.commandId,
@@ -179,7 +188,9 @@ export function createCommitCoordinator({
         afterRevision
       });
     }
-    return journalRepository.commit(record.commandId, record.receipt);
+    const receipt = await journalRepository.commit(record.commandId, record.receipt);
+    worldRepository.scheduleCompaction?.();
+    return receipt;
   }
 
   async function recoverUnsafe() {
@@ -380,13 +391,24 @@ export function createCommitCoordinator({
 
       await journalRepository.prepare(record);
       await faultInjector('after-prepare', structuredClone(record));
-      await worldRepository.compareAndSwap({
-        expectedRevision: before.revision,
-        nextSnapshot: after,
-        currentSnapshot: current
-      });
+      if (record.historyMode === 'local-patch' && typeof worldRepository.appendLocalCommit === 'function') {
+        await worldRepository.appendLocalCommit({
+          commandId: record.commandId,
+          expectedRevision: before.revision,
+          nextSnapshot: after,
+          patch: record.patch
+        });
+      } else {
+        await worldRepository.compareAndSwap({
+          expectedRevision: before.revision,
+          nextSnapshot: after,
+          currentSnapshot: current
+        });
+      }
       await faultInjector('after-world-write', structuredClone(record));
-      return journalRepository.commit(command.commandId, receipt);
+      const committed = await journalRepository.commit(command.commandId, receipt);
+      worldRepository.scheduleCompaction?.();
+      return committed;
   }
 
   function execute(request) {

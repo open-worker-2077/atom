@@ -19,6 +19,7 @@ import {
 } from '../src/atom-system/world-runtime/legacy-graph-compat.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
+import { createJsonWorldRepository } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 
@@ -210,7 +211,14 @@ test('transactional persistence publishes rebased disjoint facts with the matchi
   assert.equal(committed.facts[1].situation, 'new-b');
   assert.equal(committed.compatibilityManifest.currentWorldRevision, committed.revision);
   assert.doesNotThrow(() => validateCompatibilityManifest(committed.compatibilityManifest, committed.facts));
-  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), committed.facts);
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), seeded,
+    'local acknowledgment leaves the compacted baseline unchanged');
+  const restarted = createJsonWorldRepository({
+    file: contextFile,
+    worldId: 'primary',
+    localCommitFile: path.join(`${path.join(directory, 'atom.transactions.json')}.d`, 'world-commits.jsonl')
+  });
+  assert.deepEqual((await restarted.read()).facts, committed.facts);
 });
 
 test('Explore uses its committed snapshot when the world file advances after request capture', async (t) => {

@@ -121,35 +121,37 @@ Run: `git add src/atom-system/world-runtime/local-world-patch.mjs src/atom-syste
 - Produces: repository methods `appendLocalCommit(record)` and `compactCommittedState()`; `read()` materializes baseline plus committed records after its compaction watermark.
 - Consumes: rebased local patch records from Task 2 and the existing incremental transaction directory.
 
-- [ ] **Step 1: Write durability and visibility RED tests**
+- [x] **Step 1: Write durability and visibility RED tests**
 
 Pause ten independent appends at controlled points. Complete seven and assert a read returns seven new values plus three old values. Inject failure before append, after append/fsync, before memory publication, during compaction write and after compaction replacement; restart each fixture and assert only committed records appear once.
 
-- [ ] **Step 2: Run the RED tests**
+- [x] **Step 2: Run the RED tests**
 
 Run: `node --test tests/atom-world-transaction.test.mjs tests/atom-local-runtime-amplification.test.mjs`
 
 Expected: the current repository rewrites the complete world file and lacks a committed-record watermark.
 
-- [ ] **Step 3: Add local committed-record storage**
+- [x] **Step 3: Add local committed-record storage**
 
 Append the validated local record to the existing incremental transaction directory, sync it, advance the in-memory committed state once, and return the receipt. Reads load the compacted baseline and replay only complete committed records after its watermark. Partial trailing records remain invisible.
 
-- [ ] **Step 4: Move compaction off the acknowledgment path**
+- [x] **Step 4: Move compaction off the acknowledgment path**
 
 Create the next baseline in a temporary file, verify its world fingerprint and watermark, then atomically replace the baseline. A failed compaction leaves the prior baseline and committed records usable. Bound retained records by scheduling another compaction rather than blocking a local commit.
 
-- [ ] **Step 5: Prove the hot path is local**
+- [x] **Step 5: Prove the hot path is local**
 
 Instrument the test filesystem and assert a one-axis Transform appends one bounded local record and does not write the complete world JSON before returning its committed receipt.
 
-- [ ] **Step 6: Run focused GREEN tests**
+- [x] **Step 6: Run focused GREEN tests**
 
 Run: `node --test tests/atom-world-transaction.test.mjs tests/atom-local-runtime-amplification.test.mjs tests/atom-system-failure-recovery.test.mjs`
 
 Expected: all durability, visibility, recovery and bounded-write assertions pass.
 
-- [ ] **Step 7: Commit Task 3**
+Evidence: the recovered baseline first exposed missing closure premises and an eager-compaction cleanup race. Added RED cases covered every planned crash boundary, bounded filesystem writes, a compaction/read interleaving, explicit watermark recovery, invalid snapshot rejection, and threshold scheduling. Final Task 3 focused gate passed `61/61`; Task 1/2 preservation and affected public/structural gates passed `144/144`, all with zero skipped.
+
+- [x] **Step 7: Commit Task 3**
 
 Run: `git add src/atom-system/adapters/json-world-repository.mjs src/atom-system/world-runtime/commit-coordinator.mjs src/atom-system/adapters/transactional-world-persistence.mjs tests/atom-world-transaction.test.mjs tests/atom-local-runtime-amplification.test.mjs && git commit -m "feat(atom): persist local commits before async compaction"`
 

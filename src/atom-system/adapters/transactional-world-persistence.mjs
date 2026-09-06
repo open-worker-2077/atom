@@ -49,7 +49,13 @@ function ownerFor({ contextFile, journalFile, worldId }) {
   const key = JSON.stringify([path.resolve(contextFile), path.resolve(journalFile), worldId]);
   let owner = worldOwners.get(key)?.deref();
   if (!owner) {
-    const worldRepository = createJsonWorldRepository({ file: contextFile, worldId, initialFacts: [] });
+    const worldRepository = createJsonWorldRepository({
+      file: contextFile,
+      worldId,
+      initialFacts: [],
+      localCommitFile: path.join(`${journalFile}.d`, 'world-commits.jsonl'),
+      autoCompact: true
+    });
     const journalRepository = createJsonTransactionJournal({ file: journalFile });
     owner = { worldRepository, journalRepository,
       coordinator: createCommitCoordinator({ worldRepository, journalRepository }), recovery: null };

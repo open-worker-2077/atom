@@ -8,6 +8,7 @@ import {
   prepareWorldFactsRevision,
   sealWorldFactsRevision
 } from '../world-runtime/world-revision.mjs';
+import { applyLocalWorldPatch } from '../world-runtime/local-world-patch.mjs';
 
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
@@ -30,10 +31,19 @@ export async function writeJsonAtomically(file, value, options = {}) {
   await fileSystem.mkdir(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
-    await fileSystem.writeFile(temporary, options.serialized ?? `${JSON.stringify(value, null, 2)}\n`, {
-      encoding: 'utf8',
-      flag: 'wx'
-    });
+    const serialized = options.serialized ?? `${JSON.stringify(value, null, 2)}\n`;
+    if (options.syncTemporary) {
+      const handle = await fileSystem.open(temporary, 'wx');
+      try {
+        await handle.writeFile(serialized, 'utf8');
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+    } else {
+      await fileSystem.writeFile(temporary, serialized, { encoding: 'utf8', flag: 'wx' });
+    }
+    await options.beforeRename?.(temporary);
     for (let attempt = 0; ; attempt += 1) {
       try {
         await fileSystem.rename(temporary, file);
@@ -62,14 +72,99 @@ function snapshot(worldId, facts, { ownsFacts = false } = {}) {
   });
 }
 
-export function createJsonWorldRepository({ file, worldId, initialFacts }) {
+export function createJsonWorldRepository({
+  file,
+  worldId,
+  initialFacts,
+  localCommitFile = `${file}.local-commits.jsonl`,
+  autoCompact = false,
+  fileSystem = fs,
+  faultInjector = async () => {}
+}) {
   if (!file || !worldId) throw problem('INVALID_WORLD_REPOSITORY', 'file and worldId are required');
   let cached = null;
   let cachedSignature = null;
+  let tail = Promise.resolve();
+  let localRecordCount = 0;
+  let compactionPromise = null;
+  const compactionThreshold = autoCompact === true
+    ? 128
+    : Number.isSafeInteger(autoCompact) && autoCompact > 0 ? autoCompact : 0;
+
+  function serialize(work) {
+    const running = tail.then(work, work);
+    tail = running.catch(() => {});
+    return running;
+  }
+
+  async function fileSignature(target, optional = false) {
+    try {
+      const stat = await fileSystem.stat(target, { bigint: true });
+      return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    } catch (error) {
+      if (optional && error.code === 'ENOENT') return 'missing';
+      throw error;
+    }
+  }
 
   async function signature() {
-    const stat = await fs.stat(file, { bigint: true });
-    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    return `${await fileSignature(file)}|${await fileSignature(localCommitFile, true)}`;
+  }
+
+  async function localRecords() {
+    let raw;
+    try {
+      raw = await fileSystem.readFile(localCommitFile, 'utf8');
+    } catch (error) {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    }
+    const lines = raw.split('\n');
+    if (lines.at(-1) !== '') lines.pop();
+    else lines.pop();
+    return lines.filter(Boolean).map((line, index) => {
+      try {
+        const record = JSON.parse(line);
+        const localCommit = record?.contract === 'atom.local-commit'
+          && record.version === 1
+          && record.worldId === worldId
+          && ['patch', 'full'].includes(record.mode);
+        const watermark = record?.contract === 'atom.local-commit-watermark'
+          && record.version === 1
+          && record.worldId === worldId
+          && /^sha256:[a-f0-9]{64}$/u.test(record.revision ?? '')
+          && (record.throughCommandId === null || typeof record.throughCommandId === 'string');
+        if (!localCommit && !watermark) {
+          throw new Error('invalid local commit');
+        }
+        return record;
+      } catch (error) {
+        throw problem('INVALID_LOCAL_WORLD_COMMIT', 'Local world commit record is invalid', {
+          line: index + 1,
+          cause: error.message
+        });
+      }
+    });
+  }
+
+  function applyRecord(current, record) {
+    if (current.revision !== record.beforeRevision) {
+      throw problem('LOCAL_WORLD_COMMIT_CHAIN_BROKEN', 'Local world commit does not continue the baseline', {
+        expectedRevision: current.revision,
+        recordRevision: record.beforeRevision,
+        commandId: record.commandId
+      });
+    }
+    const facts = record.mode === 'patch'
+      ? applyLocalWorldPatch(current.facts, record.patch)
+      : structuredClone(record.facts);
+    const next = snapshot(worldId, facts, { ownsFacts: true });
+    if (next.revision !== record.afterRevision) {
+      throw problem('INVALID_LOCAL_WORLD_COMMIT', 'Local world commit result has the wrong revision', {
+        commandId: record.commandId
+      });
+    }
+    return next;
   }
 
   async function read() {
@@ -78,11 +173,10 @@ export function createJsonWorldRepository({ file, worldId, initialFacts }) {
     try {
       beforeSignature = await signature();
       if (cached && cachedSignature === beforeSignature) return cached;
-      const raw = await fs.readFile(file, 'utf8');
+      const raw = await fileSystem.readFile(file, 'utf8');
       const afterSignature = await signature();
       if (afterSignature !== beforeSignature) return read();
       value = JSON.parse(raw);
-      cachedSignature = afterSignature;
     } catch (error) {
       if (error.code === 'ENOENT' && Array.isArray(initialFacts)) {
         cached = snapshot(worldId, initialFacts);
@@ -91,39 +185,188 @@ export function createJsonWorldRepository({ file, worldId, initialFacts }) {
       }
       throw problem('WORLD_READ_FAILED', `Cannot read Atom world ${worldId}`, { cause: error.code });
     }
-    cached = snapshot(worldId, value, { ownsFacts: true });
+    let materialized = snapshot(worldId, value, { ownsFacts: true });
+    const records = await localRecords();
+    let start = 0;
+    for (let index = records.length - 1; index >= 0; index -= 1) {
+      if (records[index].contract === 'atom.local-commit-watermark'
+        && records[index].revision === materialized.revision) {
+        start = index + 1;
+        break;
+      }
+    }
+    if (start === 0) {
+      for (let index = records.length - 1; index >= 0; index -= 1) {
+        if (records[index].contract === 'atom.local-commit'
+          && records[index].afterRevision === materialized.revision) {
+          start = index + 1;
+          break;
+        }
+      }
+    }
+    const pendingRecords = records.slice(start)
+      .filter((record) => record.contract === 'atom.local-commit');
+    localRecordCount = pendingRecords.length;
+    for (const record of pendingRecords) materialized = applyRecord(materialized, record);
+    const finalSignature = await signature();
+    if (finalSignature !== beforeSignature) return read();
+    cached = materialized;
+    cachedSignature = finalSignature;
     return cached;
   }
 
-  async function compareAndSwap({ expectedRevision, nextSnapshot, currentSnapshot = null }) {
-    const current = currentSnapshot ?? await read();
-    if (current.worldId !== worldId || !Array.isArray(current.facts)) {
-      throw problem('INVALID_WORLD_SNAPSHOT', 'The current world snapshot is invalid');
+  async function appendRecord(record) {
+    await fileSystem.mkdir(path.dirname(localCommitFile), { recursive: true });
+    const handle = await fileSystem.open(localCommitFile, 'a');
+    try {
+      await handle.writeFile(`${JSON.stringify(record)}\n`, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
     }
-    if (current.revision !== expectedRevision) {
-      throw problem('WORLD_REVISION_CONFLICT', 'Atom world changed before commit', {
-        expectedRevision,
-        actualRevision: current.revision
-      });
-    }
-    if (nextSnapshot.worldId !== worldId || !Array.isArray(nextSnapshot.facts)) {
-      throw problem('INVALID_WORLD_SNAPSHOT', 'The next world snapshot is invalid');
-    }
-    const prepared = prepareWorldFactsRevision(nextSnapshot.facts);
-    if (prepared.revision !== nextSnapshot.revision) {
-      throw problem('INVALID_WORLD_REVISION', 'The next snapshot revision does not match its facts');
-    }
-    await writeJsonAtomically(file, nextSnapshot.facts, {
-      serialized: `${prepared.json}\n`
-    });
-    cached = snapshot(worldId, nextSnapshot.facts, {
-      ownsFacts: Object.isFrozen(nextSnapshot.facts)
-    });
-    cachedSignature = await signature();
-    return nextSnapshot;
+    localRecordCount += 1;
   }
 
-  return Object.freeze({ file, worldId, read, compareAndSwap });
+  function appendLocalCommit({ commandId, expectedRevision, nextSnapshot, patch }) {
+    return serialize(async () => {
+      if (nextSnapshot?.worldId !== worldId || !Array.isArray(nextSnapshot?.facts)) {
+        throw problem('INVALID_WORLD_SNAPSHOT', 'The next world snapshot is invalid');
+      }
+      if (revisionOfWorldFacts(nextSnapshot.facts) !== nextSnapshot.revision) {
+        throw problem('INVALID_WORLD_REVISION', 'The next snapshot revision does not match its facts');
+      }
+      const current = await read();
+      if (current.revision !== expectedRevision) {
+        throw problem('WORLD_REVISION_CONFLICT', 'Atom world changed before local commit', {
+          expectedRevision,
+          actualRevision: current.revision
+        });
+      }
+      const facts = applyLocalWorldPatch(current.facts, patch);
+      const prepared = snapshot(worldId, facts, { ownsFacts: true });
+      if (prepared.revision !== nextSnapshot.revision) {
+        throw problem('INVALID_WORLD_REVISION', 'Local patch does not produce the next snapshot revision');
+      }
+      const record = {
+        contract: 'atom.local-commit', version: 1, mode: 'patch', worldId,
+        commandId, beforeRevision: current.revision, afterRevision: prepared.revision,
+        patch
+      };
+      await faultInjector('before-local-append', structuredClone(record));
+      await appendRecord(record);
+      await faultInjector('after-local-append-sync', structuredClone(record));
+      await faultInjector('before-memory-publication', structuredClone(record));
+      cached = prepared;
+      cachedSignature = await signature();
+      return prepared;
+    });
+  }
+
+  function compactCommittedState() {
+    return serialize(async () => {
+      const current = await read();
+      const committedRecords = (await localRecords())
+        .filter((record) => record.contract === 'atom.local-commit');
+      const prepared = prepareWorldFactsRevision(current.facts);
+      await writeJsonAtomically(file, current.facts, {
+        fileSystem,
+        serialized: `${prepared.json}\n`,
+        syncTemporary: true,
+        beforeRename: async (temporary) => {
+          const verifiedFacts = JSON.parse(await fileSystem.readFile(temporary, 'utf8'));
+          if (revisionOfWorldFacts(verifiedFacts) !== current.revision) {
+            throw problem('INVALID_WORLD_REVISION', 'Compacted baseline failed revision verification');
+          }
+          await faultInjector('during-compaction-write', structuredClone(current));
+        }
+      });
+      await faultInjector('after-compaction-replace', structuredClone(current));
+      const watermark = {
+        contract: 'atom.local-commit-watermark',
+        version: 1,
+        worldId,
+        revision: current.revision,
+        throughCommandId: committedRecords.at(-1)?.commandId ?? null
+      };
+      await writeJsonAtomically(localCommitFile, null, {
+        fileSystem,
+        serialized: `${JSON.stringify(watermark)}\n`,
+        syncTemporary: true
+      });
+      localRecordCount = 0;
+      cached = current;
+      cachedSignature = await signature();
+      return current;
+    });
+  }
+
+  function scheduleCompaction() {
+    if (!compactionThreshold || localRecordCount < compactionThreshold) return null;
+    if (compactionPromise) return compactionPromise;
+    compactionPromise = new Promise((resolve) => {
+      const timer = setTimeout(resolve, 0);
+      timer.unref?.();
+    }).then(compactCommittedState).catch(() => null).finally(() => {
+      compactionPromise = null;
+    });
+    return compactionPromise;
+  }
+
+  function compareAndSwap({ expectedRevision, nextSnapshot, currentSnapshot = null }) {
+    return serialize(async () => {
+      const current = currentSnapshot ?? await read();
+      if (current.worldId !== worldId || !Array.isArray(current.facts)) {
+        throw problem('INVALID_WORLD_SNAPSHOT', 'The current world snapshot is invalid');
+      }
+      if (current.revision !== expectedRevision) {
+        throw problem('WORLD_REVISION_CONFLICT', 'Atom world changed before commit', {
+          expectedRevision,
+          actualRevision: current.revision
+        });
+      }
+      if (nextSnapshot.worldId !== worldId || !Array.isArray(nextSnapshot.facts)) {
+        throw problem('INVALID_WORLD_SNAPSHOT', 'The next world snapshot is invalid');
+      }
+      const prepared = prepareWorldFactsRevision(nextSnapshot.facts);
+      if (prepared.revision !== nextSnapshot.revision) {
+        throw problem('INVALID_WORLD_REVISION', 'The next snapshot revision does not match its facts');
+      }
+      const fullCommandId = `full-${crypto.randomUUID()}`;
+      await appendRecord({
+        contract: 'atom.local-commit', version: 1, mode: 'full', worldId,
+        commandId: fullCommandId,
+        beforeRevision: current.revision,
+        afterRevision: nextSnapshot.revision,
+        facts: nextSnapshot.facts
+      });
+      await writeJsonAtomically(file, nextSnapshot.facts, {
+        fileSystem,
+        serialized: `${prepared.json}\n`
+      });
+      await writeJsonAtomically(localCommitFile, null, {
+        fileSystem,
+        serialized: `${JSON.stringify({
+          contract: 'atom.local-commit-watermark',
+          version: 1,
+          worldId,
+          revision: nextSnapshot.revision,
+          throughCommandId: fullCommandId
+        })}\n`,
+        syncTemporary: true
+      });
+      localRecordCount = 0;
+      cached = snapshot(worldId, nextSnapshot.facts, {
+        ownsFacts: Object.isFrozen(nextSnapshot.facts)
+      });
+      cachedSignature = await signature();
+      return nextSnapshot;
+    });
+  }
+
+  return Object.freeze({
+    file, worldId, localCommitFile, read, compareAndSwap,
+    appendLocalCommit, compactCommittedState, scheduleCompaction
+  });
 }
 
 const JOURNAL_HISTORY_MODE = 'latest-rollback-snapshot';

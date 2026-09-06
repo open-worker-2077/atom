@@ -145,9 +145,12 @@ test('4784 commits disjoint concurrent writes without an explicit retry', async 
   )));
   assert.equal(outcomes.every(({ status, value }) => status === 'fulfilled' && value.ok), true,
     JSON.stringify(outcomes));
-  const context = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(context[0].slot.find((entry) => entry.thing === '任务甲')?.situation, '新甲');
-  assert.equal(context[0].slot.find((entry) => entry.thing === '任务乙')?.situation, '新乙');
+  const visible = await Promise.all(['任务甲', '任务乙'].map((thing) => executeAtomCommandEndpoint({
+    source: `explore ${JSON.stringify({ thing: `工作Agent/${thing}`, 'situation$full': true })}`,
+    interaction: { agent }
+  }, endpoint)));
+  assert.equal(visible.every(({ ok }) => ok), true, JSON.stringify(visible));
+  assert.deepEqual(visible.map(({ items }) => items[0].matches[0].situation), ['新甲', '新乙']);
   const history = await createJsonTransactionJournal({
     file: path.join(directory, 'atom.transactions.json')
   }).readState();
@@ -871,7 +874,12 @@ test('4784 continues an ordinary command without replaying an unrelated startup 
   }, `${running.url}/__atom/api/command`);
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot[0].situation, '新值');
+  const targetReadBack = await executeAtomCommandEndpoint({
+    source: 'explore {"thing":"工作Agent/目标","situation$full":true}',
+    interaction: { agent }
+  }, `${running.url}/__atom/api/command`);
+  assert.equal(targetReadBack.ok, true, JSON.stringify(targetReadBack.errors));
+  assert.equal(targetReadBack.items[0].matches[0].situation, '新值');
   assert.equal(result.warnings.some((warning) => (
     warning.code === 'ATOM_PROGRAM_FAILED'
     && warning.program === '故障Program'
