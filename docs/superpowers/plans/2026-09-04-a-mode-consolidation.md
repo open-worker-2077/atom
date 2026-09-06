@@ -497,3 +497,21 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **Task5 fix round1/5完成**：d2c02345096a7bb5a6ac2d744d304d00978cc686，默认performance.now锚定按下时长，release补判到期且迟到timer不重复；RED38/40→GREEN40/40、必要真实长按1/1。a_task5_longpress_review限定复审原Important已ADDRESSED、无新增破坏。Root核对修复源码及.last-run，Task5: complete（BASE d9f9877..d2c0234）；原核心/设置/跨端有效证据复用。Task6接续旧F准备动作/互补旅程与退役清单；仍未部署A。
 
 - **Task6执行断点**：BASE=e379b98e0fa77732a9d22295331f52a8fbe0d0c5，实施方a_task6_browser_retirement（Sol high），requirements/report为原SDD目录task-6-longpress-*。仅迁移旧浏览器准备动作、补齐互补旅程并保全退役清单；产品回归交原Task5定向修复，最终全量及部署归Task7。
+
+- **Task6首轮互补验收**：task-6-browser-complementary-20260906-01已保全；实施方回传5项通过（首入、连续进入、8节点视口、Help、创建持久），4项失败后停止依赖组。root核对当前engine已无applyViewMode分派，三项失败发生于旧准备而非新hold；修为真实短右击并保留clusterFieldOpen/完整展开/owner-route原断言。搜索仍有index.html355入口，核对设置面板可见性；尚未裁定产品回归。已过5项同产品证据复用。
+
+- **Task6定向准备修订GREEN**：task-6-browser-targeted-20260906-02，4/4通过（1.5m）；三项applyViewMode准备改真实右键，搜索用现行Ctrl+K入口，原业务断言保全。连同首轮5项已有9项互补有效证据；尚余批量/移动/回滚及共同配置综合旅程。main文档f124245已同步Task5完成/Task6当前断点，未改变生产产品。
+
+- **Task6首帧证据校准**：root回读发现两项首帧测试在hold helper完整等待/松开后才取rAF，可能已越过切换首帧；既有PASS只证明最终可见，暂不满足原时间语义。要求原实施方在真实输入前安装只读观察，保存path首次变化视觉帧再断言，定向重验2项；其余7项有效证据不重跑。不是产品回归，不弱化或移除原首帧需求。
+
+- **部署准备／局部外部状态**：当前产品development-control已exit0；原SDD保留deploy-reviewed-a-candidate.ps1（复用既有受控停启/完整世界及配置备份）、verify-deployed-a.mjs与verify-deployed-assets.mjs，静态语法通过，尚未执行部署。07:50巡守Pixel 10a仍离线，CUA仅无标签IAB；不写入猜测配置、不冒称真机。最终npm test仍未运行，待Task6产品候选稳定。
+
+- **Task6批量回执诊断**：batch05已到Enter并显示projection pending，但workspace-persisted为空；root回读bridge reportPendingProjection及pushKnowledge提前return，否决未经证实的监听跨导航丢失推断。要求先提取workspace-edit原始response/投影失败原因和只读事实，不能由提示直接推定批量完整成功，也不能重复提交掩盖未知结果。尚未改产品。
+- **Ruling: Task6异步回执验收**：batch05 workspace-edit HTTP200、changed=true、8项成功；PROJECTION_PUBLICATION_SCHEDULED为来源提交后的正常异步发布窗口。原测试只等即时persisted，把来源提交与投影发布强绑定，按已部署提交分离合同校准：同时捕获真实HTTP与pending/persisted，保持operation kind/landings原断言；pending时等待公开只读state的目标8/来源0与关系守恒，并验证同一浏览器实际knowledge/目标恢复。不得伪造事件、手动恢复或重提移动；公开state不替代浏览器结果。临时世界facts、graph、knowledge只读证据一致；仍须同页GREEN，不能仅由最终文件推定UI通过。无内核改动。错误代价为测试时序返工，不删业务验收。
+- **Task6首入加载待裁定**：真实被动首帧07中首次进入只有测试入口，连续第二次进入通过。root复读Web§2.1—2.2允许新路径loading并等待权威state，§4.1要求复用此合同；不能把未加载节点瞬时全齐当新增要求。已派a_first_frame_consult（Astra high）只读核对observer/权威scope/绘制顺序，root同时核对enterNode→commitDomainRoute→pushView/pullKnowledge；咨询不授权改产品。首帧有效性待裁定，Task6独立批量验收继续。
+- **Task6共同配置准备定界**：原综合设置旅程的边界stroke属于nested团普通剖开；直接长按沉浸后已隐藏该团外边界，不能要求其仍绘制。恢复真实短右击→边界stroke断言，再长按→路径断言及原合法0持久/跨端全部断言；不改边框产品或猜测生产参数。
+
+- **Task6批量投影证据**：batch09真实HTTP成功/changed、目标与来源数量、公开state恢复已通过；剩余比较因路径移动后的投影ID不同误报。按各自knowledge的id→精确atomPath及本次来源/目的前缀映射对齐11条关系的端点和关系字段，不能仅比ID、边数或不唯一label；同页知识/显示及关系证据必须全部成立。产品仍未修改。
+- **Astra首帧咨询／root复核**：咨询未改文件/运行测试；原root/目标scope响应均含目标域5节点，四项预期已在。root已读enterNode/commitDomainRoute及bridge加载链；rendered descriptors由投影裁剪后列表生成，首路径帧不等同权威就绪或镜头稳定帧。07 trace在6969.685ms明确loading，但observer未同帧记录scope，现阶段不裁定产品回归。已要求Task6被动采集首次路径/首次目标scope loaded的节点集合、ownerPath、camera/phase并核对实际响应；按规格分清加载/完整数据/最终入镜，不增加预取、不取消过渡或改内核。错误判断将导致测试时点返工，原失败完整保留。
+- **Ruling: Task6批量可见性边界校准**：batch13真实HTTP8/8、pending operation、公开state目标8/来源0及11条精确atomPath/关系、同页exportKnowledge目标8/来源0及11关系均通过；30秒内rendered为2/8。原batch测试仅要求回执与完整知识/目标路径，Web§3.2要求保留相机及显式布局，并无批量后自动八节点同屏合同。root此前追加全体visible过度扩展，撤回仅该新断言，原断言及本轮同页权威对账全保留；不据此改相机/产品，不混同独立域进入viewport合同。2/8作为尚未裁定的展示观察保留，不能写成已证回归。复用13该末尾断言之前有效证据，不重复提交或整段重跑；代价由root承担为本轮额外验证耗时，无需求删减。
+- **Ruling: 首帧数据与相机验收分离**：诊断15同一path-change帧scope=loaded、knowledge=authoritative，exportField含目标域全部5节点，rendered为目标域测试入口且phase=aim、camera.distance=1.84。因此不是加载缺失；旧四标签瞬时rendered断言混同完整数据与既有420ms相机过渡。保留首路径帧完整目标域/非空正确ownerPath，再在同次导航相机稳定后验证原四标签全部visible，标题按真实时点改写；不取消过渡、预载或修改产品。连续第二域首帧PASS复用，仅修订首入1项重验。若裁定错误，代价为重新定义过渡视觉验收；节点/关系/原四标签要求完整保留，不把诊断失败掩盖成原测试全绿。
