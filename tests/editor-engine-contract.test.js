@@ -525,7 +525,7 @@ test('CapsLock settles detail mode on keyup without escaping form or edit bounda
   assert.match(keyup, /dispatchIntent\s*\(\s*intent\s*\)/);
 });
 
-test('CapsLock still settles floating details while an ASDF mode button retains focus', () => {
+test('CapsLock still settles floating details while the A mode button retains focus', () => {
   const keyupStart = source.indexOf('document.addEventListener("keyup"');
   const keyup = source.slice(keyupStart, source.indexOf('document.querySelectorAll("[data-intent]"', keyupStart));
 
@@ -546,7 +546,7 @@ test('navigation does not discard an unfinished cross-domain edge draft', () => 
   }
 });
 
-test('edge drafting keeps normal view-navigation keys available away from form fields', () => {
+test('edge drafting keeps A, history, and overview navigation keys available away from form fields', () => {
   const keyboardStart = source.indexOf('document.addEventListener("keydown"');
   const keyboard = source.slice(keyboardStart, source.indexOf('document.querySelectorAll("[data-intent]"', keyboardStart));
 
@@ -557,8 +557,11 @@ test('edge drafting keeps normal view-navigation keys available away from form f
     source.indexOf('const EDGE_DRAFT_NAVIGATION_INTENTS'),
     source.indexOf('const transactionGuardedIntents')
   );
-  for (const intent of ['setPeripheralView', 'setNestedView', 'setHierarchyView', 'setImmersiveView']) {
+  for (const intent of ['setNestedView', 'backView', 'forwardView', 'returnOverview']) {
     assert.match(navigationIntents, new RegExp(`input\\.intents\\.${intent}`));
+  }
+  for (const retired of ['setPeripheralView', 'setHierarchyView', 'setImmersiveView']) {
+    assert.doesNotMatch(navigationIntents, new RegExp(`input\\.intents\\.${retired}`));
   }
   assert.doesNotMatch(keyboard, /targetIsFormControl\s*=\s*\([\s\S]*HTMLButtonElement/);
 });
@@ -574,7 +577,7 @@ test('pointer mapping distinguishes nodes, edges, and empty field under ctrl', (
   assert.match(pointer, /item\s*&&\s*item\.kind\s*===\s*["']relationship["']/);
 });
 
-test('all ASDF modes resolve structural editing through facts instead of visual shell proxies', () => {
+test('the A structural view resolves editing through facts instead of visual shell proxies', () => {
   const findHit = functionSource('findHit');
   const pointerDownStart = source.indexOf('canvas.addEventListener("pointerdown"');
   const pointerDownEnd = source.indexOf('canvas.addEventListener("pointermove"', pointerDownStart);

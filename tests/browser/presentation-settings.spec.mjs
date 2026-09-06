@@ -52,6 +52,16 @@ async function waitForSharedSettings(page, revision) {
   ), revision);
 }
 
+async function holdRightTarget(page, label, holdMs = 440) {
+  const target = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .find((candidate) => candidate.label === label);
+  expect(target).toBeTruthy();
+  await page.mouse.move(target.clientX, target.clientY);
+  await page.mouse.down({ button: 'right' });
+  await page.waitForTimeout(holdMs);
+  await page.mouse.up({ button: 'right' });
+}
+
 test('independent mobile context inherits host settings, paints its boundary, and preserves an explicit zero', async ({ browser }) => {
   test.setTimeout(60_000);
   const hostContext = await browser.newContext({ viewport: { width: 1440, height: 960 } });
@@ -97,15 +107,23 @@ test('independent mobile context inherits host settings, paints its boundary, an
     await expect.poll(() => mobilePage.evaluate(() => window.spatialLab.state().visibleNodeDescriptors
       .some(({ id }) => id === 'parent-id'))).toBe(true);
     await expect.poll(() => mobilePage.evaluate(() => window.spatialLab.dispatch('setNestedView'))).toBe(true);
-    await expect.poll(() => mobilePage.evaluate(() => {
-      if (!window.spatialLab.selectByLabel('母节点')) return false;
-      window.spatialLab.dispatch('applyViewMode');
-      return window.spatialLab.state().clusterFieldOpen;
-    })).toBe(true);
+    expect(await mobilePage.evaluate(() => window.spatialLab.selectByLabel('母节点'))).toBe(true);
+    const parentTarget = (await mobilePage.evaluate(() => window.spatialLab.state().interactionTargets))
+      .find(({ label }) => label === '母节点');
+    expect(parentTarget).toBeTruthy();
+    await mobilePage.mouse.click(parentTarget.clientX, parentTarget.clientY, { button: 'right' });
+    await expect.poll(() => mobilePage.evaluate(() => window.spatialLab.state().clusterFieldOpen)).toBe(true);
     await expect.poll(() => mobilePage.evaluate(() => window.__nestedBoundaryStrokes.some((entry) => {
       const alpha = Number(entry.style.match(/[\d.]+\)$/)?.[0]?.slice(0, -1));
       return entry.lineWidth === 1 && alpha > 0.2;
     }))).toBe(true);
+    await mobilePage.reload();
+    await waitForSharedSettings(mobilePage, 1);
+    await expect.poll(() => mobilePage.evaluate(() => window.spatialLab.state().visibleNodeDescriptors
+      .some(({ id }) => id === 'parent-id'))).toBe(true);
+    expect(await mobilePage.evaluate(() => window.spatialLab.selectByLabel('母节点'))).toBe(true);
+    await holdRightTarget(mobilePage, '母节点');
+    await expect.poll(() => mobilePage.evaluate(() => window.spatialLab.state().path)).not.toBe('root');
 
     await mobilePage.locator('#nestedTunnelStrength').evaluate((element) => {
       element.value = '0';
@@ -122,6 +140,43 @@ test('independent mobile context inherits host settings, paints its boundary, an
     await waitForSharedSettings(mobilePage, 2);
     await expect(mobilePage.locator('#nestedTunnelStrength')).toHaveValue('0');
     await expect(mobilePage.locator('#nestedTunnelInteriorStrength')).toHaveValue('35');
+  } finally {
+    await Promise.all([hostContext.close(), mobileContext.close()]);
+  }
+});
+
+test('independent mobile context inherits and updates the shared right-hold threshold', async ({ browser }) => {
+  test.setTimeout(60_000);
+  const hostContext = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const hostPage = await hostContext.newPage();
+    await hostPage.addInitScript(({ key }) => localStorage.setItem(key, JSON.stringify({
+      nestedTunnelPercent: 0,
+      secondaryNavigationDelayMs: 612
+    })), { key: SETTINGS_KEY });
+    await routeTwoLevelField(hostPage);
+    await hostPage.goto('/');
+    await waitForSharedSettings(hostPage, 1);
+    await expect(hostPage.locator('#secondaryNavigationDelay')).toHaveValue('612');
+    await expect(hostPage.locator('#nestedTunnelStrength')).toHaveValue('0');
+
+    const mobilePage = await mobileContext.newPage();
+    await routeTwoLevelField(mobilePage);
+    await mobilePage.goto('/');
+    await waitForSharedSettings(mobilePage, 1);
+    await expect(mobilePage.locator('#secondaryNavigationDelay')).toHaveValue('612');
+    await expect(mobilePage.locator('#nestedTunnelStrength')).toHaveValue('0');
+
+    await mobilePage.locator('#secondaryNavigationDelay').evaluate((input) => {
+      input.value = '640';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await waitForSharedSettings(mobilePage, 2);
+    await expect(hostPage.locator('#secondaryNavigationDelay')).toHaveValue('640');
+    const saved = await (await mobilePage.request.get('/__spatial/api/presentation-settings')).json();
+    expect(saved.settings.secondaryNavigationDelayMs).toBe(640);
+    expect(saved.settings.nestedTunnelPercent).toBe(0);
   } finally {
     await Promise.all([hostContext.close(), mobileContext.close()]);
   }

@@ -14,22 +14,12 @@ function loadModel() {
   return sandbox.window.SpatialViewModeModel;
 }
 
-test('cycles through immersive peripheral nested and hierarchy without rewriting prior branches', () => {
+test('A nested projection is the only structural view mode', () => {
   const model = loadModel();
   assert.ok(model, 'SpatialViewModeModel must exist');
-  const branches = Object.freeze([
-    Object.freeze({ path: 'root/a', projectionMode: 'peripheral' }),
-    Object.freeze({ path: 'root/b', projectionMode: 'nested' })
-  ]);
-
-  assert.equal(model.nextMode('immersive'), 'peripheral');
-  assert.equal(model.nextMode('peripheral'), 'nested');
-  assert.equal(model.nextMode('nested'), 'hierarchy');
-  assert.equal(model.nextMode('hierarchy'), 'immersive');
-  assert.deepEqual(JSON.parse(JSON.stringify(branches)), [
-    { path: 'root/a', projectionMode: 'peripheral' },
-    { path: 'root/b', projectionMode: 'nested' }
-  ]);
+  assert.deepEqual(Array.from(model.modes), ['nested']);
+  assert.equal(model.nextMode('nested'), 'nested');
+  assert.equal(model.nextMode('immersive'), 'nested');
 });
 
 test('an open wand stroke selects only nodes touched by the visible trail', () => {
@@ -113,12 +103,12 @@ test('Shift gesture recognises physical and virtual keyboard events', () => {
   assert.equal(model.isShiftKeyEvent({ code: 'KeyA', key: 'a' }), false);
 });
 
-test('ASDF maps directly to the four future view modes', () => {
+test('only A maps to the structural view mode', () => {
   const model = loadModel();
   assert.equal(model.modeForKey('KeyA'), 'nested');
-  assert.equal(model.modeForKey('KeyS'), 'peripheral');
-  assert.equal(model.modeForKey('KeyD'), 'hierarchy');
-  assert.equal(model.modeForKey('KeyF'), 'immersive');
+  assert.equal(model.modeForKey('KeyS'), null);
+  assert.equal(model.modeForKey('KeyD'), null);
+  assert.equal(model.modeForKey('KeyF'), null);
   assert.equal(model.modeForKey('CapsLock'), null);
 });
 
@@ -189,17 +179,29 @@ test('Shift brushing toggles each crossed peer repeatedly', () => {
   assert.deepEqual(Array.from(model.toggleSelectionKey(['a'], 'b')), ['a', 'b']);
 });
 
-test('immersive view always enters the explicitly clicked node while structural modes may use the batch', () => {
+test('A target planning always preserves the selected batch regardless of legacy mode input', () => {
   const model = loadModel();
   assert.deepEqual(
     Array.from(model.planViewTargets('immersive', 'g/explore', ['g/other', 'g/explore'])),
-    ['g/explore']
+    ['g/other', 'g/explore']
   );
   assert.deepEqual(
     Array.from(model.planViewTargets('nested', 'g/explore', ['g/other', 'g/explore'])),
     ['g/other', 'g/explore']
   );
   assert.deepEqual(Array.from(model.planViewTargets('nested', 'g/explore', [])), ['g/explore']);
+});
+
+test('every batch A action keeps the selected targets on nested projection', () => {
+  const model = loadModel();
+  assert.deepEqual(
+    Array.from(model.planViewTargets('immersive', 'g/explore', ['g/other', 'g/explore'])),
+    ['g/other', 'g/explore']
+  );
+  assert.deepEqual(
+    Array.from(model.planViewTargets('peripheral', 'g/explore', ['g/other', 'g/explore'])),
+    ['g/other', 'g/explore']
+  );
 });
 
 test('immersive routing starts from the clicked node real owner domain instead of the active overview', () => {
@@ -320,7 +322,7 @@ test('cluster framing centres the opened domain and fits its radius into the saf
   );
 });
 
-test('PageDown plans every currently visible unopened portal once in A S or D mode', () => {
+test('PageDown plans every currently visible unopened portal once through nested A projection', () => {
   const model = loadModel();
   const entries = [
     { key: 'root::a', childPath: 'root/a', portal: true },
@@ -334,7 +336,24 @@ test('PageDown plans every currently visible unopened portal once in A S or D mo
       ['root::b']
     );
   }
-  assert.deepEqual(Array.from(model.planContextLevelExpansion(entries, [], 'immersive')), []);
+  assert.deepEqual(Array.from(model.planContextLevelExpansion(entries, [], 'immersive')), ['root::a', 'root::b']);
+});
+
+test('recursive A planning cannot be disabled by a legacy structural mode', () => {
+  const model = loadModel();
+  const entries = [
+    { key: 'root::a', childPath: 'root/a', portal: true },
+    { key: 'root::b', childPath: 'root/b', portal: true }
+  ];
+
+  assert.deepEqual(
+    Array.from(model.planContextLevelExpansion(entries, [], 'immersive')),
+    ['root::a', 'root::b']
+  );
+  assert.deepEqual(
+    Array.from(model.planContextLevelCollapse(['root/a', 'root/a/a1'], 'root', 'immersive')),
+    ['root/a/a1']
+  );
 });
 
 test('PageUp closes only the deepest open layer inside the current context', () => {
@@ -345,7 +364,10 @@ test('PageUp closes only the deepest open layer inside the current context', () 
     Array.from(model.planContextLevelCollapse(paths, 'root', 'nested')),
     ['root/b', 'root/a/a1']
   );
-  assert.deepEqual(Array.from(model.planContextLevelCollapse(paths, 'root', 'immersive')), []);
+  assert.deepEqual(
+    Array.from(model.planContextLevelCollapse(paths, 'root', 'immersive')),
+    ['root/b', 'root/a/a1']
+  );
 });
 
 test('immersive entry frames every direct child inside the viewport with breathing room', () => {

@@ -25,7 +25,7 @@ test('coarse-pointer panel separates mouse controls from real keyboard keys', ()
   assert.match(mouseGroup, />鼠标</u);
   assert.match(keyboardGroup, />键盘</u);
   for (const [group, label] of [
-    ['wandering', '游走模式'],
+    ['wandering', '结构视图'],
     ['navigation', '导航'],
     ['view', '视图工具'],
     ['operation', '操作与编辑']
@@ -36,14 +36,17 @@ test('coarse-pointer panel separates mouse controls from real keyboard keys', ()
     keyboardGroup.indexOf('data-mobile-key-group="wandering"'),
     keyboardGroup.indexOf('data-mobile-key-group="navigation"')
   );
-  for (const code of ['KeyA', 'KeyS', 'KeyD', 'KeyF']) {
+  for (const code of ['KeyA']) {
     assert.match(wanderingGroup, new RegExp(`data-mobile-key="${code}"`, 'u'), code);
+  }
+  for (const code of ['KeyS', 'KeyD', 'KeyF']) {
+    assert.doesNotMatch(wanderingGroup, new RegExp(`data-mobile-key="${code}"`, 'u'), code);
   }
   assert.match(mouseGroup, /data-mobile-mouse-button="1"[^>]*>中键</u);
   assert.doesNotMatch(keyboardGroup, /data-mobile-mouse-button=/u);
   assert.doesNotMatch(mouseGroup, /data-mobile-key=/u);
   for (const code of [
-    'ControlLeft', 'ShiftLeft', 'AltLeft', 'KeyA', 'KeyS', 'KeyD', 'KeyF',
+    'ControlLeft', 'ShiftLeft', 'AltLeft', 'KeyA',
     'KeyZ', 'KeyX', 'Home', 'End', 'PageUp', 'PageDown', 'CapsLock',
     'KeyO', 'KeyK', 'KeyH', 'KeyP', 'Enter', 'Escape', 'Delete'
   ]) {
@@ -82,4 +85,16 @@ test('input mapping exposes a dedicated route to mobile Web operation help', () 
   assert.match(html, /按住.*中键.*图区域.*点按.*拖动/u);
   assert.match(html, /中键[^<]*横向[^<]*转向[^<]*纵向[^<]*抬头[^<]*俯视/u);
   assert.match(html, /前后[^<]*远近[^<]*仅支持[^<]*鼠标滚轮/u);
+});
+
+test('input mapping exposes an accessible right-click hold duration control', () => {
+  const mappingSection = html.slice(
+    html.indexOf('<section class="settings-window-section" aria-labelledby="mappingWindowTitle">'),
+    html.indexOf('</section>', html.indexOf('<section class="settings-window-section" aria-labelledby="mappingWindowTitle">'))
+  );
+  assert.match(
+    mappingSection,
+    /<label[^>]*>[\s\S]*?<span>右键沉浸长按时长<\/span>[\s\S]*?<input\s+id="secondaryNavigationDelay"\s+type="range"\s+min="240"\s+max="800"\s+step="1"\s+value="420"[^>]*>[\s\S]*?<output\s+id="secondaryNavigationDelayValue"\s+for="secondaryNavigationDelay">420ms<\/output>/u
+  );
+  assert.match(mappingSection, /aria-label="恢复右键沉浸长按时长默认值"/u);
 });

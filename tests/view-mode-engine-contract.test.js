@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const engine = fs.readFileSync(path.join(root, 'spatial-engine.js'), 'utf8');
+const inputConfig = fs.readFileSync(path.join(root, 'input-config.js'), 'utf8');
 
 function functionSource(name) {
   const marker = `function ${name}(`;
@@ -40,41 +41,52 @@ test('view mode geometry loads before the engine and is a required visual depend
   assert.match(engine, /const viewModeModel = global\.SpatialViewModeModel/);
 });
 
-test('visual snapshots retain the active mode and each existing branch projection', () => {
+test('visual snapshots retain A branch structure and restore the single A projection', () => {
   const branch = functionSource('clusterBranchSnapshot');
   const snapshot = functionSource('visualSnapshot');
   const restore = functionSource('restoreVisualSnapshot');
 
-  assert.match(branch, /projectionMode:\s*descriptor\.projectionMode/);
-  assert.match(snapshot, /viewMode:\s*state\.viewMode/);
-  assert.match(restore, /state\.viewMode\s*=\s*snapshot\.viewMode/);
+  assert.match(branch, /projectionMode:\s*["']nested["']/);
+  assert.match(snapshot, /expandedClusters:\s*clusterBranchSnapshot\(\)/);
+  assert.match(restore, /state\.viewMode\s*=\s*["']nested["']/);
+  assert.match(restore, /state\.appliedViewMode\s*=\s*["']nested["']/);
+  assert.match(restore, /restoreClusterBranches\(snapshot\.expandedClusters\s*\|\|\s*\[\]\)/);
 });
 
-test('the initial and missing-history view defaults to A nested mode with floating details', () => {
+test('the initial and restored view uses A nested mode with floating details', () => {
+  const restore = functionSource('restoreVisualSnapshot');
   assert.match(engine, /viewMode:\s*["']nested["']/);
-  assert.match(engine, /snapshot\.viewMode\s*\|\|\s*["']nested["']/);
+  assert.match(engine, /appliedViewMode:\s*["']nested["']/);
+  assert.match(restore, /state\.viewMode\s*=\s*["']nested["']/);
   assert.match(engine, /detailMode:\s*["']floating["']/);
 });
 
-test('ASDF sets only the future view mode without moving the camera', () => {
+test('A selects the single nested projection without moving the camera', () => {
   const setMode = functionSource('setViewMode');
-  assert.match(setMode, /sceneAdapter\.commitViewIntent/);
+  assert.match(setMode, /sceneAdapter\.commitViewIntent\(state,\s*\{\s*type:\s*["']set-view-mode["'],\s*mode:\s*["']nested["']\s*\}\)/);
   assert.doesNotMatch(setMode, /state\.viewMode\s*=/);
   assert.doesNotMatch(setMode, /camera\.|startCameraTween|expandedClusterDomains\.clear/);
-  for (const intent of ['setPeripheralView', 'setNestedView', 'setHierarchyView', 'setImmersiveView']) {
-    assert.match(engine, new RegExp('case ["\\x27]' + intent + '["\\x27]'));
+  assert.match(engine, /case ["']setNestedView["']/);
+  for (const retired of ['setPeripheralView', 'setHierarchyView', 'setImmersiveView']) {
+    assert.doesNotMatch(engine, new RegExp('case ["\\x27]' + retired + '["\\x27]'));
   }
 });
 
-test('right single click applies the selected projection and right double click has no action path', () => {
-  const apply = functionSource('applyViewMode');
+test('right short press applies A, right hold immerses, and right double click has no action path', () => {
+  const ordinary = functionSource('applyInwardView');
+  const immersive = functionSource('applyImmersiveInwardView');
+  const begin = functionSource('beginSecondaryNavigation');
   const commit = functionSource('commitPointerCandidate');
 
-  assert.match(engine, /case ["']applyViewMode["']/);
-  assert.match(apply, /state\.viewMode/);
-  assert.match(apply, /toggleClusterChildDomain/);
-  assert.match(apply, /enterNode/);
-  assert.doesNotMatch(commit, /nodeDoubleSecondary|fieldDoubleSecondary/);
+  assert.match(inputConfig, /nodeSecondary:\s*VISUAL_INTENTS\.applyInwardView/);
+  assert.match(inputConfig, /nodeHoldSecondary:\s*VISUAL_INTENTS\.applyImmersiveInwardView/);
+  assert.match(ordinary, /planViewTargets\(["']nested["']/);
+  assert.match(ordinary, /toggleClusterChildDomain\(node, ownerPath, ["']nested["']\)/);
+  assert.match(immersive, /enterNode\(node, true\)/);
+  assert.match(begin, /gesture:\s*["']hold["'][\s\S]*secondaryClickArbiter\.begin/);
+  assert.match(commit, /secondaryClickArbiter\.release/);
+  assert.doesNotMatch(inputConfig, /nodeDoubleSecondary|fieldDoubleSecondary/);
+  assert.match(inputConfig, /gesture\s*===\s*["']double["']\s*&&\s*event\.button\s*===\s*2[\s\S]{0,80}return null/);
 });
 
 test('a right click appends its projection without rewriting the previously formed route', () => {
@@ -87,7 +99,7 @@ test('a right click appends its projection without rewriting the previously form
 
 test('double Shift immediately selects peers and view actions apply to the persistent selection', () => {
   const shift = functionSource('handleShiftTap');
-  const apply = functionSource('applyViewMode');
+  const apply = functionSource('applyInwardView');
   const establish = functionSource('establishPeerSelection');
   const batch = functionSource('applyBatchViewMode');
 
@@ -99,11 +111,11 @@ test('double Shift immediately selects peers and view actions apply to the persi
   assert.match(batch, /executeWandTargets/);
 });
 
-test('F uses the clicked node despite batch selection and Escape clears the batch', () => {
-  const apply = functionSource('applyViewMode');
+test('right hold immerses only the clicked node while Escape clears the ordinary A batch', () => {
+  const apply = functionSource('applyImmersiveInwardView');
   const cancel = functionSource('cancelTemporaryState');
-  assert.match(apply, /planViewTargets/);
-  assert.match(apply, /mode\s*===\s*["']immersive["'][\s\S]*enterNode\(node/);
+  assert.match(apply, /enterNode\(node, true\)/);
+  assert.doesNotMatch(apply, /planViewTargets|applyBatchViewMode/);
   assert.match(cancel, /batchSelectionKeys\.clear\(\)/);
 });
 
@@ -124,9 +136,14 @@ test('immersive entry commits the real owner route as one active-domain transiti
   assert.match(commit, /publishCurrentView\(\)/);
 });
 
-test('successful A S D expansion frames the resulting child domain', () => {
+test('successful A expansion appends the child domain without immersive framing', () => {
   const toggle = functionSource('toggleClusterChildDomain');
-  assert.match(toggle, /frameClusterDomain\(childPath/);
+  const open = functionSource('openClusterChildDomain');
+  assert.match(toggle, /openClusterChildDomain\(node, ownerPath, projectionMode\)/);
+  assert.match(toggle, /buildClusterScene\(\)/);
+  assert.match(open, /projectionMode:\s*["']nested["']/);
+  assert.match(open, /type:\s*["']append-view["']/);
+  assert.doesNotMatch(toggle, /frameClusterDomain|startCameraTween/);
 });
 
 test('newly loaded active Atom scope can refit every current node into the viewport', () => {
@@ -156,10 +173,9 @@ test('immersive blank right click returns through the active domain when no clus
   assert.match(applyParent, /exitDomain/);
 });
 
-test('PageUp/PageDown collapse or expand the entire current context by one level in A S or D mode', () => {
+test('PageUp/PageDown collapse or expand the entire current A context by one level', () => {
   const expand = functionSource('expandHoveredClusterLevel');
   const collapse = functionSource('collapseHoveredClusterLevel');
-  const inputConfig = fs.readFileSync(path.join(root, 'input-config.js'), 'utf8');
 
   assert.match(expand, /planContextLevelExpansion/);
   assert.match(expand, /visibleClusterDomains/);
@@ -173,8 +189,10 @@ test('PageUp/PageDown collapse or expand the entire current context by one level
   assert.match(engine, /case ["']expandHoveredCluster["']/);
   assert.match(inputConfig, /PageUp:\s*VISUAL_INTENTS\.collapseHoveredCluster/);
   assert.match(inputConfig, /PageDown:\s*VISUAL_INTENTS\.expandHoveredCluster/);
-  assert.match(inputConfig, /PageUp · 当前视图全部收缩一层（A\/S\/D）/);
-  assert.match(inputConfig, /PageDown · 当前视图全部展开一层（A\/S\/D）/);
+  assert.match(expand, /planContextLevelExpansion\([\s\S]*["']nested["']/);
+  assert.match(collapse, /planContextLevelCollapse\([\s\S]*["']nested["']/);
+  assert.match(inputConfig, /PageUp · 当前视图全部收缩一层（A）/);
+  assert.match(inputConfig, /PageDown · 当前视图全部剖开一层（A）/);
 });
 
 test('Shift right-drag records a visible wand stroke and resolves hit regions at release', () => {
@@ -248,27 +266,29 @@ test('triple Shift is reserved while the preserved recursive atom remains data-r
   assert.doesNotMatch(shift, /next\.triple[\s\S]*expandRecursively/);
 });
 
-test('jade recursion follows imported workspace child domains in every ASDF mode and commits atomically', () => {
+test('jade recursion follows A child domains and commits the visual result atomically', () => {
   const collect = functionSource('recursiveVisualEntries');
   const expand = functionSource('expandRecursively');
 
-  assert.match(collect, /entry\.node\.isWorkspaceNode/);
+  assert.match(collect, /entry\.node\.hasChildren\s*!==\s*true/);
+  assert.match(collect, /createChildDomainNodes\(entry\.node, childPath, childDepth\)/);
   assert.match(collect, /topLevelDomainNodesForPath\(childPath\)/);
+  assert.match(collect, /viewModeModel\.planRecursiveTargets/);
   assert.match(expand, /openClusterChildDomain/);
   assert.doesNotMatch(expand, /toggleClusterChildDomain/);
   assert.equal((expand.match(/buildClusterScene\(/g) || []).length, 1);
 });
 
-test('End expands from the top-level Boss without wand state and stays inert in F mode', () => {
+test('End expands A recursively from the top-level Boss without wand state', () => {
   const expand = functionSource('expandToLeaves');
 
-  assert.match(expand, /state\.viewMode\s*===\s*["']immersive["'][\s\S]*return false/);
-  assert.match(expand, /projectionMode:\s*state\.viewMode/);
+  assert.match(expand, /transactionBlocksViewChange\(\)/);
   assert.match(expand, /state\.currentPath\s*=\s*["']root["']/);
   assert.match(expand, /commitViewIntent\(state, \{ type: "clear-views" \}\)/);
-  assert.match(expand, /recursiveVisualEntries/);
-  assert.match(expand, /openClusterChildDomain/);
-  assert.doesNotMatch(expand, /projectionMode:\s*["']hierarchy["']/);
+  assert.match(expand, /recursiveVisualEntries\(roots,\s*\{\s*forceDomainTraversal:\s*true\s*\}\)/);
+  assert.match(expand, /openClusterChildDomain\(entry\.node, entry\.ownerPath, ["']nested["']\)/);
+  assert.match(expand, /recordCurrentView\(\)[\s\S]*recordCurrentView\(\)/);
+  assert.doesNotMatch(expand, /state\.viewMode|immersive|hierarchy/);
   assert.doesNotMatch(expand, /state\.wand|highEnergy/);
 });
 

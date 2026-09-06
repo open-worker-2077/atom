@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-31-atom-web-spatial-design.md` §5.5。I3/U3/D2/E3；Transform已完整交付、回告且核对远端备份，现在执行本项，早于旧print及A剩余任务。
 
-**当前执行（2026-09-06）:** 共同展示配置已部署c8c66f1（候选37b003d，产品2ed5448）；正式HTTPS build sha256-ec55209de0a900b3，三份前端资源逐字匹配，health true、revision7405、projection published。独立新listener37768创建晚于代码合入。私密完整备份%LOCALAPPDATA%/AtomGraph/backups/presentation-settings-20260906-050501已hash核对。正式settings revision0/initialized=false：代码部署完成，真实本机基准尚未迁入，真机边框未验收；不得宣称手机已继承或写入55/35探针值。下一项继续已批准旧生成print迁移，原本机/真机入口可用时优先返回验收。
+**当前执行（2026-09-06）:** 共同配置c8c66f1已部署；本次已从Edge默认配置库隔离副本读出4784真实v2基准，原库逐文件hash不变。通过现有loopback bootstrap、expectedRevision=0完成唯一一次初始化，revision1；17个原字段逐项守恒，缺省defaultDetailMode沿模型补floating。正式HTTPS及全新390px桌面Chromium读取完整18字段一致、边界100/内部24、零业务写入。原浏览器备份及源hash留私有SDD。真实基准缺口已关闭，Pixel 10a离线，物理手机屏幕验收仍开放。
 
 **历史RED检查点（2026-09-06）:** 原Task2两个RED测试文件已原样提交为48c79fb安全检查点，未实现产品逻辑、未新增测试运行、未宣称GREEN；待保存反馈交付后安全合入main并续接。
 
@@ -28,7 +28,7 @@
 - 展示配置属于空间体验，不写入atom.json、不制造Graph修订，不以knowledge投影作为权威。
 - 手机空存储或旧默认0不能反向覆盖本机设置；用户明确设置0仍是合法选择。
 - 过期响应/并发旧快照不能覆盖较新设置；失败时保留可用场景并明确配置未同步。
-- 实际本机数值尚未取得，55/35仅为控制探针，禁止作为生产参数。
+- 实际本机v2已核对并迁入revision1（边界100/内部24）；55/35始终仅为控制探针，禁止作为生产参数。
 - 保留既有Trigger/Strut/权限/视图语义；不新增依赖，不改网络/VPN/Tailscale策略。
 - 实施Agent不生产写入、不部署、不push、不删除产物。控制方按既有授权集成部署、私密备份与代码推送。
 
@@ -37,7 +37,7 @@
 - **来源证据**：spatial-engine loadDemoSettings只读各浏览器v2/v1 localStorage；normalizeSettings默认nestedTunnelPercent=0，绘制alpha与线宽乘此值。原/__spatial/api/view只携带导航/相机/节点，不含展示设置。已有createViewStateRepository尚未与此浏览器链接通。
 - **方案比较**：仅修改默认值不能同步用户配置；把设置塞进knowledge.view会使可重建投影成为配置权威。采用现有空间体验仓储保存独立设置，浏览器通过同一公开接口取用，保全业务世界边界。
 - **首次迁移**：共同配置不存在时返回明确uninitialized；只允许本机回环页面已有的有效v2/v1记录自动提出一次初始化，expectedRevision=0原子竞争。空记录和远程页面不自动初始化；已有共同配置始终优先。自动迁移前保存原浏览器值的独立备份key，迁移失败保持原值，禁止以规范化默认值冒充本机已有记录。
-- **生产缺口**：当前CUA无本机浏览器标签页，agent-browser也未发现可调试Chrome；实际参数仍待本机原页面可读或用户提供。此缺口只阻塞生产种子核对/真机闭环，代码与私有跨端验证可先完成；不能因缺口让手机旧0抢先成为基准。
+- **生产验收边界**：本机原参数已由Edge默认配置库隔离读取并通过现有loopback迁移，见最新证据段；当前只剩物理手机离线及屏幕验收。远程页面仍不得抢先初始化或覆盖既有基准。
 - **后续写入**：UI每次操作只提交改动字段patch及最后读取的revision；服务在同一文件的短串行区重读、CAS、原子保存。409先回读最新值，显示冲突，禁止自动用整个旧快照重试覆盖。最新共同设置应用到现有模型后同步控件和当前场景。
 - **更新通知**：复用既有SSE连接增加具名presentation-settings事件，仅通知设置revision；浏览器首次连接、该事件、断线恢复及页面重新可见时读取设置。不得因此拉全世界或新增永久轮询。
 
@@ -159,4 +159,11 @@ Run: `node --test tests/browser-bridge-contract.test.js tests/atom-presentation-
 
 - **最终全量结果（2026-09-06）**：候选62a194c任务与整分支复审已关闭；npm test完整结束exit1，1826项/1823通过/3失败，426594ms。原始证据保存在settings工作树的.superpowers/sdd/2026-09-05-shared-presentation-settings/final-full-62a194c.txt。失败分别为默认路径精确断言未纳入新增settings文件、空间体验服务直接导入外部展示模型违反既有依赖边界、旧偏好迁移测试引用已替换函数。当前仅定向回修三项，保留架构门禁与旧迁移语义，不部署、不重跑已通过全量；settings_task2_r4实施，root独立裁定。
 
-- **部署门禁证据**：最终全量1825有效通过＋唯一清理修正定向1/1，限定独立复核通过；产品无后续变化，证据见原SDD final-full-1f73b5a.txt / final-cleanup-targeted-1f73b5a.txt。Step4保持未完成，原因仅为真实基准与真机验收缺口，不将部署完成混称为整个需求完成。
+- **部署门禁证据**：最终全量1825有效通过＋唯一清理修正定向1/1，限定独立复核通过；产品无后续变化，证据见原SDD final-full-1f73b5a.txt / final-cleanup-targeted-1f73b5a.txt。Step4保持未完成，当前原因仅为物理手机屏幕验收缺口，不将部署完成混称为整个需求完成。
+
+## 2026-09-06 真实本机基准迁移
+
+- **来源验证**：仅在Chrome/Edge的Local Storage定位Atom键，匹配Edge Default；将原LevelDB的CURRENT/manifest/data/log复制到唯一私有隔离profile，copy前后和读取后哈希一致。由Edge自身解析数据库，不凭二进制片段猜值；所有导航本地空文档拦截，仅输出Atom三项presentation keys。4784具有v2及旧v1，v2为正式优先来源，正式HTTPS旧缓存为空。
+- **迁移事实**：私有settings SDD host-atom-settings-1788656360648保存原始v2、source-hashes及隔离副本；host-bootstrap-1788656489736保存before revision0/uninitialized、原raw及规范化结果。原17字段与normalize逐项全等，既有模型仅补缺省detailMode；实际应用loopback初始化仅放行一笔PUT expectedRevision0/bootstraptrue/确切patch，返回revision1。原值备份key与raw逐字相同；未写Atom业务事实。
+- **正式回读**：formal-host-baseline-1788656536379中正式GET revision1、initializedtrue；全新390px桌面Chromium经正式HTTPS读取全部18字段与本机基准深比较一致，设置控件边界100、内部24。全部非读请求拦截且实际0；这是真实共同基准的客户端继承证据，不是物理手机验收。
+- **当前剩余**：真机离线，待上线后核对同revision与实际边框画面；不再把已取得的本机值写成未知，不再重复实现或使用55/35测试值。后续A部署新增长按字段应由已审窄读迁移补420并保留revision1/全部原值。

@@ -1,6 +1,6 @@
 # A Mode Consolidation Implementation Plan
 
-**当前续点（2026-09-06）**：Task1—5已独立复核；Task5长按最终d2c0234，单调按下时长及迟到timer一次性修复通过。e379b98仅吸收main最新文档并保留完成证据；Task6由a_task6_browser_retirement（Sol high）从该BASE完成互补浏览器验收和退役清单，Task7随后。A尚未部署，不重派已完成任务。
+**当前续点（2026-09-06）**：Task1—6完成；Task7整支评审I2已复审关闭，I1微移残留ebaf619由root按明确裁定独立核对收口，Node44/44、普通/沉浸微移浏览器2/2。全部原有效组合证据保留；现在完整私密备份、部署及正式入口回读，尚未冒称部署完成。共同真实本机基准已迁入revision1，手机离线待验。
 
 **最新用户修订（2026-09-05）**：右键双击沉浸改为右键长按；已于Task5实施并复核，下方Task1—4旧双击步骤仅保留历史证据，当前合同以Web规格及Task5为准。
 
@@ -340,19 +340,19 @@ git commit -m "refactor(web): merge immersion into A navigation"
 - Consumes: Task5已独立复核的长按输入、导航、共同设置及帮助；同revision原始RED/GREEN。
 - Produces: 保全原功能验收含义的A唯一模式浏览器链；退役功能→原提交→当前替代路径清单。
 
-- [ ] **Step 1: 核对并复用新手势证据，校准旧测试准备动作**
+- [x] **Step 1: 核对并复用新手势证据，校准旧测试准备动作**
 
 Task5已经负责长按RED/GREEN，Task1—4原双击RED保留为历史，不重新制造旧行为RED。先读Task5报告与原始输出。现有浏览器关键旅程中“F entry keeps every intended child node inside the rendered viewport”及批量移动目标准备仍按旧独立F模式操作；只将进入动作改为真实右键长按，保持“每个子节点在可见视口”“批量移动保存回执/节点完整”等原业务断言。不得删除有效旅程、放宽其结果或通过测试专用模式绕过真实输入。
 
-- [ ] **Step 2: 完成必要浏览器修正并运行受影响旅程**
+- [x] **Step 2: 完成必要浏览器修正并运行受影响旅程**
 
 在独立、零生产写入的现有测试世界运行修订旅程。首次改测试后如失败，区分旧准备动作未迁移、夹具问题与产品实际回归，后者交原Task5实施方定向修正和复核。不新增导航框架或改变已批准行为。包含Task5具名A短按/长按/松开/单层返回、共同配置及mobile-control-panel在内的现有关键旅程全体须具备当前候选有效证据；同revision已通过的具名测试可复用，只运行尚无证据的互补集合。唯一浏览器输出目录保全所有产物，不删除目录或测试清理世界。
 
-- [ ] **Step 3: 写入可恢复退役清单**
+- [x] **Step 3: 写入可恢复退役清单**
 
 清单按实际行为和源码引用，列出S外围、D层级、独立F的原入口、旧提交及A当前替代；沉浸能力仍由A右键长按提供。保留仍被A使用的owner-route、domain-frame、A子层缩小及其他有效需求，不仅按旧变量名删除代码。引用既有标签`pre-a-mode-consolidation-20260904`，核验可解析；安全查看用git show，恢复从标签建新分支，不reset覆盖工作树。历史旧双击代码与长按替代也注明，不把封存当成删除文件。
 
-- [ ] **Step 4: 受影响链验收、证据入账与提交**
+- [x] **Step 4: 受影响链验收、证据入账与提交**
 
 复用Task5同revision的输入、模型、手势、UI及共同配置有效证据；如实际修改产品则定向重验最小受影响链再升级真实旅程。更新原总账/恢复断点，精确标明仅候选完成、尚未部署，记录commit和实际测试统计。GitNexus detect_changes及diff检查后提交；独立Task6复核由控制方派发。最终全量只在Task7执行。
 
@@ -367,7 +367,7 @@ Task5已经负责长按RED/GREEN，Task1—4原双击RED保留为历史，不重
 - Consumes: Task 6已稳定候选 revision。
 - Produces: 唯一一次全量 Node 门禁、开发控制门禁、4784部署与公开入口回读证据。
 
-- [ ] **Step 1: Run pre-commit complexity and source checks**
+- [x] **Step 1: Run pre-commit complexity and source checks**
 
 Run: `git diff --check`
 
@@ -375,7 +375,7 @@ Run: `npm run check:development-control`
 
 Expected: both exit 0; no duplicate mode abstraction, dead configuration, second settings store or compatibility branch remains.
 
-- [ ] **Step 2: Run the final full Node suite exactly once for this candidate**
+- [x] **Step 2: Run the final full Node suite exactly once for this candidate**
 
 Run: `npm test`
 
@@ -497,3 +497,44 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **Task5 fix round1/5完成**：d2c02345096a7bb5a6ac2d744d304d00978cc686，默认performance.now锚定按下时长，release补判到期且迟到timer不重复；RED38/40→GREEN40/40、必要真实长按1/1。a_task5_longpress_review限定复审原Important已ADDRESSED、无新增破坏。Root核对修复源码及.last-run，Task5: complete（BASE d9f9877..d2c0234）；原核心/设置/跨端有效证据复用。Task6接续旧F准备动作/互补旅程与退役清单；仍未部署A。
 
 - **Task6执行断点**：BASE=e379b98e0fa77732a9d22295331f52a8fbe0d0c5，实施方a_task6_browser_retirement（Sol high），requirements/report为原SDD目录task-6-longpress-*。仅迁移旧浏览器准备动作、补齐互补旅程并保全退役清单；产品回归交原Task5定向修复，最终全量及部署归Task7。
+
+- **Task6首轮互补验收**：task-6-browser-complementary-20260906-01已保全；实施方回传5项通过（首入、连续进入、8节点视口、Help、创建持久），4项失败后停止依赖组。root核对当前engine已无applyViewMode分派，三项失败发生于旧准备而非新hold；修为真实短右击并保留clusterFieldOpen/完整展开/owner-route原断言。搜索仍有index.html355入口，核对设置面板可见性；尚未裁定产品回归。已过5项同产品证据复用。
+
+- **Task6定向准备修订GREEN**：task-6-browser-targeted-20260906-02，4/4通过（1.5m）；三项applyViewMode准备改真实右键，搜索用现行Ctrl+K入口，原业务断言保全。连同首轮5项已有9项互补有效证据；尚余批量/移动/回滚及共同配置综合旅程。main文档f124245已同步Task5完成/Task6当前断点，未改变生产产品。
+
+- **Task6首帧证据校准**：root回读发现两项首帧测试在hold helper完整等待/松开后才取rAF，可能已越过切换首帧；既有PASS只证明最终可见，暂不满足原时间语义。要求原实施方在真实输入前安装只读观察，保存path首次变化视觉帧再断言，定向重验2项；其余7项有效证据不重跑。不是产品回归，不弱化或移除原首帧需求。
+
+- **部署准备／局部外部状态**：当前产品development-control已exit0；原SDD保留deploy-reviewed-a-candidate.ps1（复用既有受控停启/完整世界及配置备份）、verify-deployed-a.mjs与verify-deployed-assets.mjs，静态语法通过，尚未执行部署。07:50巡守Pixel 10a仍离线，CUA仅无标签IAB；不写入猜测配置、不冒称真机。最终npm test仍未运行，待Task6产品候选稳定。
+
+- **Task6批量回执诊断**：batch05已到Enter并显示projection pending，但workspace-persisted为空；root回读bridge reportPendingProjection及pushKnowledge提前return，否决未经证实的监听跨导航丢失推断。要求先提取workspace-edit原始response/投影失败原因和只读事实，不能由提示直接推定批量完整成功，也不能重复提交掩盖未知结果。尚未改产品。
+- **Ruling: Task6异步回执验收**：batch05 workspace-edit HTTP200、changed=true、8项成功；PROJECTION_PUBLICATION_SCHEDULED为来源提交后的正常异步发布窗口。原测试只等即时persisted，把来源提交与投影发布强绑定，按已部署提交分离合同校准：同时捕获真实HTTP与pending/persisted，保持operation kind/landings原断言；pending时等待公开只读state的目标8/来源0与关系守恒，并验证同一浏览器实际knowledge/目标恢复。不得伪造事件、手动恢复或重提移动；公开state不替代浏览器结果。临时世界facts、graph、knowledge只读证据一致；仍须同页GREEN，不能仅由最终文件推定UI通过。无内核改动。错误代价为测试时序返工，不删业务验收。
+- **Task6首入加载待裁定**：真实被动首帧07中首次进入只有测试入口，连续第二次进入通过。root复读Web§2.1—2.2允许新路径loading并等待权威state，§4.1要求复用此合同；不能把未加载节点瞬时全齐当新增要求。已派a_first_frame_consult（Astra high）只读核对observer/权威scope/绘制顺序，root同时核对enterNode→commitDomainRoute→pushView/pullKnowledge；咨询不授权改产品。首帧有效性待裁定，Task6独立批量验收继续。
+- **Task6共同配置准备定界**：原综合设置旅程的边界stroke属于nested团普通剖开；直接长按沉浸后已隐藏该团外边界，不能要求其仍绘制。恢复真实短右击→边界stroke断言，再长按→路径断言及原合法0持久/跨端全部断言；不改边框产品或猜测生产参数。
+
+- **Task6批量投影证据**：batch09真实HTTP成功/changed、目标与来源数量、公开state恢复已通过；剩余比较因路径移动后的投影ID不同误报。按各自knowledge的id→精确atomPath及本次来源/目的前缀映射对齐11条关系的端点和关系字段，不能仅比ID、边数或不唯一label；同页知识/显示及关系证据必须全部成立。产品仍未修改。
+- **Astra首帧咨询／root复核**：咨询未改文件/运行测试；原root/目标scope响应均含目标域5节点，四项预期已在。root已读enterNode/commitDomainRoute及bridge加载链；rendered descriptors由投影裁剪后列表生成，首路径帧不等同权威就绪或镜头稳定帧。07 trace在6969.685ms明确loading，但observer未同帧记录scope，现阶段不裁定产品回归。已要求Task6被动采集首次路径/首次目标scope loaded的节点集合、ownerPath、camera/phase并核对实际响应；按规格分清加载/完整数据/最终入镜，不增加预取、不取消过渡或改内核。错误判断将导致测试时点返工，原失败完整保留。
+- **Ruling: Task6批量可见性边界校准**：batch13真实HTTP8/8、pending operation、公开state目标8/来源0及11条精确atomPath/关系、同页exportKnowledge目标8/来源0及11关系均通过；30秒内rendered为2/8。原batch测试仅要求回执与完整知识/目标路径，Web§3.2要求保留相机及显式布局，并无批量后自动八节点同屏合同。root此前追加全体visible过度扩展，撤回仅该新断言，原断言及本轮同页权威对账全保留；不据此改相机/产品，不混同独立域进入viewport合同。2/8作为尚未裁定的展示观察保留，不能写成已证回归。复用13该末尾断言之前有效证据，不重复提交或整段重跑；代价由root承担为本轮额外验证耗时，无需求删减。
+- **Ruling: 首帧数据与相机验收分离**：诊断15同一path-change帧scope=loaded、knowledge=authoritative，exportField含目标域全部5节点，rendered为目标域测试入口且phase=aim、camera.distance=1.84。因此不是加载缺失；旧四标签瞬时rendered断言混同完整数据与既有420ms相机过渡。保留首路径帧完整目标域/非空正确ownerPath，再在同次导航相机稳定后验证原四标签全部visible，标题按真实时点改写；不取消过渡、预载或修改产品。连续第二域首帧PASS复用，仅修订首入1项重验。若裁定错误，代价为重新定义过渡视觉验收；节点/关系/原四标签要求完整保留，不把诊断失败掩盖成原测试全绿。
+- **Ruling: 背景缓存验收对象**：steady测试全局Canvas ellipse/blit=72超过70，但该计数混入主画布所有节点；root读drawStaticBackdrop1722—1748，背景独立layer仅cache key变时绘制。改为被动识别主spaceCanvas全幅blit的已预热背景源，验证稳定窗口复用同一layer并无背景ellipse重绘，不提高70阈值或修改产品。以直接缓存行为替换不准确混合代理，保留性能目的；若识别源错误会导致该项验收返工，须静态核对并保留诊断。
+
+- **Task7 Node门禁已启动**：产品自d2c0234未变，最小Node与核心浏览器行为已验证；剩余Task6只修旧浏览器准备/观察合同及文档，因此最终Node全量与其收尾并行，不等待文档串行完成。日志final-full-d2c0234-20260906-01.log、root session3166；npm build机械stamp由root收口，未部署。若出现产品变更先界定证据失效，不据本次启动声称已通过。
+- **Task6完整覆盖回传待独立复核**：critical24/24、mobile3/3、presentation2/2以原有效证据和本轮互补组合覆盖；首入18、single21、subtree19、rollback20、背景直接缓存20、mobile22/23等已通过，无已裁定产品失败。实现方正提交4个测试/退役文件和完整报告；root须核对报告并独立任务复核，不以自报提前标complete。
+
+- **Task7最终Node结果**：final-full-d2c0234-20260906-01.log，exit1，1857total/1845pass/11fail/1 Windows symlink skip，497112.6794ms。失败位于editor-engine-contract.test.js549及view-mode-engine-contract.test.js43/53/59/69/88/102/127/159/251/262，均指向退役ASDF/applyViewMode/旧mode guard等合同。先按真实源码/规格定向核查校准两文件，不以旧入口测试强迫恢复已撤回功能；产品未改变，已通过1845证据保留，不重跑全量求外观。门禁尚未关闭，部署未执行。
+- **Task6候选复核中**：a2c838e711a2f8efbfbd1520736e10b910762c1b，三份浏览器测试+退役清单4文件；root已完整读task-6-longpress-report.md，coverage29项按Task4复用2、Task5复用7、本轮20组合。a_task6_review（Sol high）只读评审e379b98..a2c838e，差异包review-e379b98..a2c838e.diff。Task7两Node合同校准由原a_task5_longpress续接，BASE a2c838e，新报告task-7-node-contract-report.md；只两文件定向，不改产品/重跑浏览器或全量。正式入口只读预检HTML与当前main原样相同HTTP200，仍是旧生产而非A部署。
+- **Task6: complete**：e379b98..a2c838e，a_task6_review规格合规、quality Approved，无Critical/Important/Minor。Root复核跨差异项：Task5 d2c0234已限定复审的稳定锚定/阈值/松开一次/双击隔离证据继续有效；本轮git rev-parse标签对象实际解析f2d2fd083329e0c145248988f16fb722a1b4c085，与退役清单一致。关键浏览器29项采用组合证据，未重跑求整组外观；不是单次29项全量结果。
+- **Task7合同定向GREEN待复核**：19519a1仅改editor-engine-contract与view-mode-engine-contract两测试；保留11项对应验收与A历史/批量/递归/PageUpDown/End/边编辑，定向75/75 PASS，产品未变。原a_task5_longpress_review只读评审a2c838e..19519a1；最终Node使用全量1845项通过加定向75项的组合证据，保留原11失败记录，不写成单次1857全绿。部署尚未执行。
+- **Task7 Node门禁关闭（组合证据）**：a_task5_longpress_review已复核a2c838e..19519a1，规格符合、质量Approved、零分级问题；root读完整报告并对照11处差异，接受全量1845通过+两文件75/75定向修正。产品未变，development-control既有exit0复用，当前diff-check通过；只关闭候选测试门禁，部署/正式入口仍开放。
+
+- **最终整支评审进行中**：a_final_review（Astra high）按8643a3e..473bc0e包只读核查；root负责独立裁定。b6dca76仅吸收main重复文档历史并保留已核对当前A记录，git diff 473bc0e HEAD为空，正式合并预检无冲突，产品未变。08:50只读核对原运行任务/Watchdog符合既有部署入口，Pixel 10a仍离线，共同设置revision0/initialized=false；不填猜值。
+- **最终复核待验证边界**：评审初步发现普通nested空白首次收缩后domainContext.path变化可能绕过双击合并，以及candidate.direct未在beginSecondaryNavigation入口排除导致直接工具长按误入导航。root已回读classifyTap、begin/commit、candidateArbiterKey及applyParentView，确认须定向验证既有合同；暂不部署，等待完整最终清单后合并派一次最小修复，不逐项开支线，不改内核。
+- **最终评审裁定／单次修复**：a_final_review完整报告With fixes，I1普通nested空白跨路径双击、I2 direct工具串入hold两Important，无Critical/Minor。Root根据Web§4.1/原direct隔离合同及实际控制流采纳为待行为RED验证的缺口；原a_task5_longpress统一处理，BASE b6dca76，brief/report为a-final-fix-*。仅受影响Node与具名真实输入复验，不重跑全量或改内核；之后一次范围复审，部署仍未执行。
+
+- **最终修复GREEN待提交复核**：原实施方回传Node43/43、具名Chromium5/5（新普通nested空白、原沉浸空白、短按、长按一次、取消）。真实trace第二次命中从field:inner变为外层node；采用同物理位置/时间并含空白一侧的连续序列判定，仍保留不同稳定node独立操作。direct以真实engine函数执行验证不启动timer、release各一次。Root待完整报告/差异裁定；尚未部署，不把5项扩大为全量。
+
+- **最终范围复审残留裁定**：I2已ADDRESSED；I1精确同一点已修，但Math.round完全相等使1px微移或跨舍入边界仍第二次返回。root读实现及报告，确认1px小于既有6px鼠标/10px触摸拖移阈值，仍是原空白双击合同，不能标完成或交用户决定技术阈值。Ruling: 按用户持续闭环及已定Web§4.1要求，原实施方仅将物理连续性改为既有点距容差，保留blank条件、不同稳定node独立及exact release；这是原I1残留最小收口，不再整支评审或全量测试。偏离技能单次fix波数量限制由root明确承担，避免该流程限制导致明知未满足原需求却部署；错误代价为局部输入返工，无内核/权限扩大。
+
+- **微移验证时钟定界**：点距最小实现后Node44/44，浏览器10沉浸PASS/普通nestedFAIL。root读diagnostic11：field→node两按点差1px、容差6，空间与blank条件全部满足；helper在模块加载后才install clock，而arbiter创建时已bind原performance.now，外部trace60000/60040不证明内部实际40ms。要求把同一clock安装前置至goto前，移除临时探针后只重验必要普通/沉浸空白；不据夹具时钟差异再扩产品修复。已通过Node及原短按/长按/direct/取消证据保留。
+
+- **最终残留收口／root独立裁定**：ebaf61978149d4e9746aa66bdea4c5d2b380ff98，root完整阅读残留报告、产品/测试diff与原始GREEN日志：Node44/44、两条微移Chromium2/2（25.0s）；candidate首按原始坐标和既有threshold进入仲裁，距离严格小于首按容差才合并含blank序列，超容差及不同stable node独立，exact release/时间窗/direct隔离保持。无临时microTrace；最终clock先于页面/模块安装，因此绑定now与操作时钟一致。接受I1关闭，I2沿原范围复审已关闭；不再整支复审或全量。
+- **证据精度更正**：早期micro browser08/09在页面加载后装clock，其“受控40ms”只代表外部时钟，不能独自证明仲裁内部40ms；保存为观察失败，残留RED由确定性Node42/44成立，最终前置clock的2/2证明正确输入时序。报告所称at-threshold用例实际点差7px、阈值6，准确说是超阈值独立；等于阈值不合并由源码严格小于可读验证，不冒称已单独执行该用例。

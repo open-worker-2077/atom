@@ -4,12 +4,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'spatial-engine.js'), 'utf8');
+const arbiterSource = fs.readFileSync(path.join(__dirname, '..', 'spatial-gesture-arbiter.js'), 'utf8');
+const gestureArbiter = require('../spatial-gesture-arbiter.js');
 
 function functionSource(name) {
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} exists`);
   const next = source.indexOf('\n  function ', start + 1);
   return source.slice(start, next === -1 ? source.length : next);
+}
+
+function executableFunction(name, dependencies = {}) {
+  const names = Object.keys(dependencies);
+  const values = names.map((dependency) => dependencies[dependency]);
+  return Function(...names, `"use strict"; return (${functionSource(name)});`)(...values);
 }
 
 function numericConstant(name) {
@@ -49,19 +57,130 @@ test('primary click series is settled by one arbiter without native dblclick dis
   assert.match(source, /parameter:\s*event\.count/);
 });
 
-test('primary taps use click-series arbitration and right taps commit immediately', () => {
+test('primary taps and unmodified right navigation use their configured arbiters', () => {
   const commit = functionSource('commitPointerCandidate');
+  const pointerDownStart = source.indexOf('canvas.addEventListener("pointerdown"');
+  const pointerDownEnd = source.indexOf('canvas.addEventListener("pointermove"', pointerDownStart);
+  const pointerDown = source.slice(pointerDownStart, pointerDownEnd);
+  const release = functionSource('releasePointer');
   const primaryGate = commit.indexOf('candidate.button === 0');
   const submitted = commit.indexOf('primaryClickArbiter.submit');
-  const secondaryGate = commit.indexOf('candidate.button === 2');
-  const immediate = commit.indexOf('dispatchIntent(contextualAction.intent');
 
   assert.notEqual(primaryGate, -1, 'primary-button gate exists');
   assert.ok(primaryGate < submitted, 'primary-button gate controls series commit');
-  assert.ok(submitted < secondaryGate, 'secondary arbitration follows primary arbitration');
-  assert.ok(secondaryGate < immediate, 'secondary-button gate controls its immediate action');
-  assert.doesNotMatch(commit, /secondaryClickArbiter\.submit/);
+  assert.match(pointerDown, /beginSecondaryNavigation\s*\(\s*state\.pointerCandidate\s*\)/);
+  const beginSecondary = functionSource('beginSecondaryNavigation');
+  assert.match(beginSecondary, /secondaryClickArbiter\.begin\s*\(/);
+  assert.match(beginSecondary, /gesture:\s*["']hold["']/);
+  const unmodified = functionSource('isUnmodifiedSecondaryNavigation');
+  assert.match(unmodified, /!mappingEvent\.ctrlKey/);
+  assert.match(unmodified, /!mappingEvent\.shiftKey/);
+  assert.match(unmodified, /!mappingEvent\.altKey/);
+  assert.match(unmodified, /!mappingEvent\.metaKey/);
+  assert.match(beginSecondary, /candidateArbiterKey\s*\(\s*candidate\s*\)/);
+  assert.match(release, /commitPointerCandidate\s*\(/);
+  assert.match(commit, /secondaryClickArbiter\.release\s*\(/);
+  const secondaryBranch = commit.slice(commit.indexOf('candidate.button === 2'));
+  assert.doesNotMatch(secondaryBranch, /gesture:\s*["']double["']/);
   assert.doesNotMatch(commit, /action\.intent\s*===\s*["']focus["']/);
+});
+
+test('direct lens and command candidates bypass secondary hold and release their original action once', () => {
+  const secondaryBegins = [];
+  const dispatched = [];
+  const secondaryClickArbiter = {
+    begin(...args) {
+      secondaryBegins.push(args);
+    },
+    cancel() {},
+    release() {}
+  };
+  const primaryClickArbiter = { cancel() {} };
+  const beginSecondaryNavigation = executableFunction('beginSecondaryNavigation', {
+    isUnmodifiedSecondaryNavigation: () => true,
+    gestureArbiter,
+    input: { resolvePointer: () => 'applyImmersiveInwardView' },
+    contextualizeAction: (action) => action,
+    secondaryClickArbiter,
+    candidateArbiterKey: () => 'node:root:portal',
+    candidateSecondarySequenceKey: () => 'node:root:portal',
+    candidateSecondaryPhysicalPoint: () => ({ x: 640, y: 360, tolerance: 6 })
+  });
+  const commitPointerCandidate = executableFunction('commitPointerCandidate', {
+    primaryClickArbiter,
+    secondaryClickArbiter,
+    gestureArbiter,
+    dispatchIntent(intent, visualMeta, target) {
+      dispatched.push({ intent, visualMeta, target });
+    }
+  });
+  const portal = { id: 'portal' };
+
+  for (const direct of [
+    { intent: 'inspect', visualMeta: {}, target: portal },
+    { intent: 'runPortalCommand', visualMeta: { source: 'command' }, target: portal }
+  ]) {
+    const candidate = {
+      button: 2,
+      intent: 'applyInwardView',
+      node: portal,
+      direct,
+      mappingEvent: { button: 2 },
+      mappingContext: { onNode: true }
+    };
+    assert.equal(beginSecondaryNavigation(candidate), false);
+    commitPointerCandidate(candidate);
+  }
+
+  assert.equal(secondaryBegins.length, 0);
+  assert.deepEqual(dispatched, [
+    { intent: 'inspect', visualMeta: {}, target: portal },
+    { intent: 'runPortalCommand', visualMeta: { source: 'command' }, target: portal }
+  ]);
+});
+
+test('only real unmodified inward or parent navigation starts secondary hold arbitration', () => {
+  const secondaryBegins = [];
+  const beginSecondaryNavigation = executableFunction('beginSecondaryNavigation', {
+    isUnmodifiedSecondaryNavigation: () => true,
+    gestureArbiter,
+    input: { resolvePointer: () => 'applyImmersiveInwardView' },
+    contextualizeAction: (action) => action,
+    secondaryClickArbiter: { begin: (...args) => secondaryBegins.push(args) },
+    candidateArbiterKey: () => 'node:root:portal',
+    candidateSecondarySequenceKey: () => 'node:root:portal',
+    candidateSecondaryPhysicalPoint: () => ({ x: 640, y: 360, tolerance: 6 })
+  });
+  const node = { id: 'portal' };
+  const candidate = {
+    button: 2,
+    intent: 'applyInwardView',
+    node,
+    direct: null,
+    mappingEvent: { button: 2 },
+    mappingContext: { onNode: true }
+  };
+
+  assert.equal(beginSecondaryNavigation(candidate), true);
+  assert.equal(secondaryBegins.length, 1);
+  assert.equal(secondaryBegins[0][0].intent, 'applyInwardView');
+  assert.equal(secondaryBegins[0][1].intent, 'applyImmersiveInwardView');
+
+  assert.equal(beginSecondaryNavigation({ ...candidate, intent: 'inspect' }), false);
+  assert.equal(secondaryBegins.length, 1);
+});
+
+test('secondary physical continuity uses the candidate drag tolerance without rounding its press point', () => {
+  const candidateSecondaryPhysicalPoint = executableFunction('candidateSecondaryPhysicalPoint');
+
+  assert.deepEqual(
+    candidateSecondaryPhysicalPoint({ start: { x: 640.49, y: 360.51 }, threshold: 6 }),
+    { x: 640.49, y: 360.51, tolerance: 6 }
+  );
+  assert.deepEqual(
+    candidateSecondaryPhysicalPoint({ start: { x: 120.25, y: 81.75 }, threshold: 10 }),
+    { x: 120.25, y: 81.75, tolerance: 10 }
+  );
 });
 
 test('engine dispatches direct node and field visual intent cases', () => {
@@ -172,12 +291,32 @@ test('every node can enter or peek while same-layer expansion still requires see
   assert.match(functionSource('createSatellites'), /hasChildren\s*!==\s*true/);
 });
 
-test('secondary click arbitration leaves a reliable desktop double-click window', () => {
+test('secondary click arbitration reads the current persisted delay', () => {
   const start = source.indexOf('const secondaryClickArbiter');
   const end = source.indexOf('function canvasPoint', start);
   const configuration = source.slice(start, end);
 
-  assert.match(configuration, /delay:\s*620/);
+  assert.match(configuration, /delayFor:\s*\(\)\s*=>\s*state\.demo\.settings\.secondaryNavigationDelayMs/);
+});
+
+test('secondary hold arbitration compares release time with the press-anchored threshold', () => {
+  assert.match(arbiterSource, /performance\.now\.bind\s*\(\s*root\.performance\s*\)/);
+  assert.match(arbiterSource, /pendingStartedAt\s*=\s*Number\s*\(\s*now\s*\(\s*\)\s*\)/);
+  assert.match(arbiterSource, /releasedAt\s*-\s*startedAt\s*>=\s*releaseDelay/);
+});
+
+test('secondary hold lifecycle cancels on drag, pointer cancellation, lost capture, blur, or modifier change', () => {
+  const pointerMoveStart = source.indexOf('canvas.addEventListener("pointermove"');
+  const pointerMoveEnd = source.indexOf('function releasePointer', pointerMoveStart);
+  const pointerMove = source.slice(pointerMoveStart, pointerMoveEnd);
+  assert.match(pointerMove, /cancelPendingSecondaryNavigation\s*\(/);
+  assert.match(source, /canvas\.addEventListener\("pointercancel"[\s\S]*cancelPendingSecondaryNavigation\s*\(/);
+  assert.match(source, /canvas\.addEventListener\("lostpointercapture"[\s\S]*cancelPendingSecondaryNavigation\s*\(/);
+  assert.match(source, /global\.addEventListener\("blur"[\s\S]*cancelPendingSecondaryNavigation\s*\(/);
+  const cancelSecondary = functionSource('cancelPendingSecondaryNavigation');
+  assert.match(cancelSecondary, /secondaryClickArbiter\.cancel\s*\(/);
+  assert.match(cancelSecondary, /state\.pointerCandidate\.cancelled\s*=\s*true/);
+  assert.match(source, /document\.addEventListener\("keydown"[\s\S]*cancelPendingSecondaryNavigation\s*\(/);
 });
 
 test('parent-domain return finds nested entry nodes recursively', () => {

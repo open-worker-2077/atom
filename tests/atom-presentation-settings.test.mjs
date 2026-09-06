@@ -63,6 +63,52 @@ test('presentation service preserves host settings across restart, rejects stale
   assert.deepEqual(Object.keys(document.view), ['presentationSettings']);
 });
 
+test('presentation service reads the prior complete field set by filling only the new hold threshold without writing', async () => {
+  const { service, file } = await serviceFixture();
+  const legacySettings = { ...presentationModel.normalizeSettings({
+    nestedTunnelPercent: 0,
+    otherDetailBrightnessPercent: 0,
+    defaultDetailMode: 'surface'
+  }) };
+  delete legacySettings.secondaryNavigationDelayMs;
+  const repository = createViewStateRepository({ file, worldId: 'primary' });
+  await repository.write({ presentationSettings: legacySettings }, { revision: 7 });
+  const before = await fs.readFile(file, 'utf8');
+
+  const result = await service.read();
+
+  assert.equal(result.revision, 7);
+  assert.equal(result.settings.secondaryNavigationDelayMs, 420);
+  assert.equal(result.settings.nestedTunnelPercent, 0);
+  assert.equal(result.settings.otherDetailBrightnessPercent, 0);
+  assert.equal(result.settings.defaultDetailMode, 'surface');
+  assert.equal(await fs.readFile(file, 'utf8'), before);
+
+  const updated = await service.update({ expectedRevision: 7, patch: { nestedTunnelPercent: 44 } });
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+  assert.equal(updated.revision, 8);
+  assert.equal(updated.settings.secondaryNavigationDelayMs, 420);
+  assert.equal(updated.settings.otherDetailBrightnessPercent, 0);
+  assert.equal(saved.view.presentationSettings.secondaryNavigationDelayMs, 420);
+  assert.deepEqual(Object.keys(saved.view.presentationSettings).sort(),
+    Object.keys(presentationModel.normalizeSettings({})).sort());
+});
+
+test('presentation service still rejects unknown, otherwise missing, and damaged saved fields', async () => {
+  const { service, file } = await serviceFixture();
+  const complete = { ...presentationModel.normalizeSettings({}) };
+  const cases = [
+    { ...complete, unknownField: 1 },
+    Object.fromEntries(Object.entries(complete).filter(([key]) => key !== 'nestedTunnelPercent')),
+    { ...complete, secondaryNavigationDelayMs: '420' }
+  ];
+  for (const settings of cases) {
+    await createViewStateRepository({ file, worldId: 'primary' })
+      .write({ presentationSettings: settings }, { revision: 3 });
+    await assert.rejects(service.read(), { code: 'INVALID_PRESENTATION_SETTINGS_DOCUMENT' });
+  }
+});
+
 test('presentation service two facades on normalized path allow only one CAS winner', async () => {
   const { service, create, file, directory } = await serviceFixture();
   const second = create(path.join(directory, '..', path.basename(directory), path.basename(file)));

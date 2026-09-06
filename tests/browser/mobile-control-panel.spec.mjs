@@ -36,7 +36,9 @@ test('mobile control panel separates mouse and keyboard without regressing held 
   await expect(mouse.getByRole('heading', { name: '鼠标' })).toBeVisible();
   await expect(keyboard.getByRole('heading', { name: '键盘' })).toBeVisible();
   await expect(keyboard.locator('[data-mobile-key-group]')).toHaveCount(4);
-  await expect(keyboard.getByRole('heading', { name: '游走模式' })).toBeVisible();
+  const structuralView = keyboard.locator('[data-mobile-key-group="wandering"]');
+  await expect(structuralView.getByRole('heading', { name: '结构视图' })).toBeVisible();
+  await expect(structuralView.locator('[data-mobile-key]')).toHaveAttribute('data-mobile-key', 'KeyA');
   await expect(mouse.locator('[data-mobile-mouse-button="1"]')).toHaveCount(1);
   await expect(keyboard.locator('[data-mobile-mouse-button]')).toHaveCount(0);
   expect(await keyboard.locator('.mobile-control-panel__scroll').evaluate((element) => (
@@ -75,6 +77,51 @@ test('mobile control panel separates mouse and keyboard without regressing held 
 
   await page.setViewportSize({ width: 1440, height: 960 });
   await expect(panel).toBeHidden();
+});
+
+test('right-click hold duration persists across reload and reset restores only that setting', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openIsolatedWorld(page);
+  await page.locator('#settingsAction').click();
+
+  const delay = page.getByRole('slider', { name: /^右键沉浸长按时长/u });
+  const output = page.locator('#secondaryNavigationDelayValue');
+  const detailMode = page.getByLabel('CapsLock 默认展示');
+  const reset = page.getByRole('button', { name: '恢复右键沉浸长按时长默认值' });
+  await expect(delay).toHaveValue('420');
+  await expect(output).toHaveText('420ms');
+
+  await delay.evaluate((element) => {
+    element.value = '515';
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await detailMode.selectOption('surface');
+  await expect(output).toHaveText('515ms');
+  await expect.poll(() => page.evaluate(() => JSON.parse(
+    localStorage.getItem('graph-4d.presentation-settings.v2') || '{}'
+  ))).toMatchObject({ secondaryNavigationDelayMs: 515, defaultDetailMode: 'surface' });
+
+  await page.reload();
+  await page.waitForFunction(() => window.spatialLab && document.body.dataset.spatialBridge === 'connected');
+  await page.locator('#settingsAction').click();
+  await expect(delay).toHaveValue('515');
+  await expect(output).toHaveText('515ms');
+  await expect(detailMode).toHaveValue('surface');
+
+  await reset.click();
+  await expect(delay).toHaveValue('420');
+  await expect(output).toHaveText('420ms');
+  await expect(detailMode).toHaveValue('surface');
+  await expect.poll(() => page.evaluate(() => JSON.parse(
+    localStorage.getItem('graph-4d.presentation-settings.v2') || '{}'
+  ))).toMatchObject({ secondaryNavigationDelayMs: 420, defaultDetailMode: 'surface' });
+
+  await page.reload();
+  await page.waitForFunction(() => window.spatialLab && document.body.dataset.spatialBridge === 'connected');
+  await page.locator('#settingsAction').click();
+  await expect(delay).toHaveValue('420');
+  await expect(output).toHaveText('420ms');
+  await expect(detailMode).toHaveValue('surface');
 });
 
 test('A mode keeps a visible nested sphere above the mobile controls', async ({ page }) => {

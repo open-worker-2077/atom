@@ -27,13 +27,10 @@
     toggleHelp: "toggleHelp",
     toggleDemo: "toggleDemo",
     toggleClusterField: "toggleClusterField",
-    cycleViewMode: "cycleViewMode",
-    applyViewMode: "applyViewMode",
+    applyInwardView: "applyInwardView",
+    applyImmersiveInwardView: "applyImmersiveInwardView",
     applyParentView: "applyParentView",
-    setPeripheralView: "setPeripheralView",
     setNestedView: "setNestedView",
-    setHierarchyView: "setHierarchyView",
-    setImmersiveView: "setImmersiveView",
     collapseHoveredCluster: "collapseHoveredCluster",
     expandHoveredCluster: "expandHoveredCluster",
     resetView: "resetView",
@@ -66,11 +63,11 @@
   const PRESETS = {
     explorer: {
       name: "标准探索",
-      hint: "左键使用 · 右键按 ASDF 视角展收 · CapsLock 信息密度 · 中键旋转 · 双击 Shift 同层选择",
+      hint: "左键使用 · 右键短按向内剖开／长按沉浸 · CapsLock 信息密度 · 中键旋转",
       pointer: {
         nodePrimary: VISUAL_INTENTS.activate,
         fieldPrimary: null,
-        nodeSecondary: VISUAL_INTENTS.applyViewMode,
+        nodeSecondary: VISUAL_INTENTS.applyInwardView,
         fieldSecondary: VISUAL_INTENTS.applyParentView,
         nodeMiddle: null,
         nodeMiddleDrag: VISUAL_INTENTS.orbit,
@@ -80,8 +77,8 @@
         fieldDoublePrimary: null,
         nodeTriplePrimary: VISUAL_INTENTS.activate,
         fieldTriplePrimary: null,
-        nodeDoubleSecondary: null,
-        fieldDoubleSecondary: null,
+        nodeHoldSecondary: VISUAL_INTENTS.applyImmersiveInwardView,
+        fieldHoldSecondary: null,
         fieldMiddle: null,
         fieldMiddleDrag: VISUAL_INTENTS.orbit,
         fieldPrimaryDrag: null,
@@ -93,9 +90,6 @@
       },
       keyboard: {
         KeyA: VISUAL_INTENTS.setNestedView,
-        KeyS: VISUAL_INTENTS.setPeripheralView,
-        KeyD: VISUAL_INTENTS.setHierarchyView,
-        KeyF: VISUAL_INTENTS.setImmersiveView,
         KeyZ: VISUAL_INTENTS.backView,
         KeyX: VISUAL_INTENTS.forwardView,
         KeyO: VISUAL_INTENTS.toggleWorldLens,
@@ -119,7 +113,6 @@
         toggleFieldChildren: "右键单击空白全域展收",
         toggleSurface: "中击球面 / L",
         toggleFieldSurfaces: "空域中击全体 / Shift + L",
-        enter: "沉浸进入 / E",
         exit: "退出上层 / X",
         cancel: "Esc",
         grab: "Shift + 拖动节点",
@@ -131,29 +124,26 @@
         toggleHelp: "H · 帮助",
         toggleDemo: "P · 演示",
         toggleClusterField: "兼容球团视野",
-        cycleViewMode: "切换视角 / CapsLock",
-        applyViewMode: "应用当前视角 / 右键单击",
+        applyInwardView: "普通向内剖开 / 右键单击",
+        applyImmersiveInwardView: "沉浸向内剖开 / 右键长按",
         returnOverview: "Home",
         expandToLeaves: "End",
         focus: "键盘聚焦 / F",
         activate: "左键单击 / 双击 / 三击使用",
         applyParentView: "右键空白返回直接母节点",
         cycleDetailMode: "中键切换详情模式",
-        setPeripheralView: "S · 外围",
-        setNestedView: "A · 内包",
-        setHierarchyView: "D · 层级",
-        setImmersiveView: "F · 沉浸",
-        collapseHoveredCluster: "PageUp · 当前视图全部收缩一层（A/S/D）",
-        expandHoveredCluster: "PageDown · 当前视图全部展开一层（A/S/D）"
+        setNestedView: "A · 向内剖开",
+        collapseHoveredCluster: "PageUp · 当前视图全部收缩一层（A）",
+        expandHoveredCluster: "PageDown · 当前视图全部剖开一层（A）"
       }
     },
     oneHand: {
       name: "单手试验",
-      hint: "左键使用 · 右键按 ASDF 视角展收 · CapsLock 信息密度 · 中键旋转 · 双击 Shift 同层选择",
+      hint: "左键使用 · 右键短按向内剖开／长按沉浸 · CapsLock 信息密度 · 中键旋转",
       pointer: {
         nodePrimary: VISUAL_INTENTS.activate,
         fieldPrimary: null,
-        nodeSecondary: VISUAL_INTENTS.applyViewMode,
+        nodeSecondary: VISUAL_INTENTS.applyInwardView,
         fieldSecondary: VISUAL_INTENTS.applyParentView,
         nodeMiddle: null,
         nodeMiddleDrag: VISUAL_INTENTS.orbit,
@@ -163,8 +153,8 @@
         fieldDoublePrimary: null,
         nodeTriplePrimary: VISUAL_INTENTS.activate,
         fieldTriplePrimary: null,
-        nodeDoubleSecondary: null,
-        fieldDoubleSecondary: null,
+        nodeHoldSecondary: VISUAL_INTENTS.applyImmersiveInwardView,
+        fieldHoldSecondary: null,
         fieldMiddle: null,
         fieldMiddleDrag: VISUAL_INTENTS.orbit,
         fieldPrimaryDrag: null,
@@ -176,9 +166,6 @@
       },
       keyboard: {
         KeyA: VISUAL_INTENTS.setNestedView,
-        KeyS: VISUAL_INTENTS.setPeripheralView,
-        KeyD: VISUAL_INTENTS.setHierarchyView,
-        KeyF: VISUAL_INTENTS.setImmersiveView,
         KeyZ: VISUAL_INTENTS.backView,
         KeyX: VISUAL_INTENTS.forwardView,
         KeyO: VISUAL_INTENTS.toggleWorldLens,
@@ -202,7 +189,6 @@
         toggleFieldChildren: "右键单击空白全域展收",
         toggleSurface: "中击球面 / L",
         toggleFieldSurfaces: "空域中击全体 / Shift + L",
-        enter: "沉浸进入 / E",
         exit: "退出上层 / X",
         cancel: "Esc",
         grab: "Alt + 拖动节点",
@@ -214,20 +200,17 @@
         toggleHelp: "H · 帮助",
         toggleDemo: "P · 演示",
         toggleClusterField: "兼容球团视野",
-        cycleViewMode: "切换视角 / CapsLock",
-        applyViewMode: "应用当前视角 / 右键单击",
+        applyInwardView: "普通向内剖开 / 右键单击",
+        applyImmersiveInwardView: "沉浸向内剖开 / 右键长按",
         returnOverview: "Home",
         expandToLeaves: "End",
         focus: "键盘聚焦 / F",
         activate: "左键单击 / 双击 / 三击使用",
         applyParentView: "右键空白返回直接母节点",
         cycleDetailMode: "中键切换详情模式",
-        setPeripheralView: "S · 外围",
-        setNestedView: "A · 内包",
-        setHierarchyView: "D · 层级",
-        setImmersiveView: "F · 沉浸",
-        collapseHoveredCluster: "PageUp · 当前视图全部收缩一层（A/S/D）",
-        expandHoveredCluster: "PageDown · 当前视图全部展开一层（A/S/D）"
+        setNestedView: "A · 向内剖开",
+        collapseHoveredCluster: "PageUp · 当前视图全部收缩一层（A）",
+        expandHoveredCluster: "PageDown · 当前视图全部剖开一层（A）"
       }
     }
   };
@@ -266,8 +249,11 @@
     if (context && context.gesture === "double" && event.button === 0) {
       return onNode ? bindings.nodeDoublePrimary || null : bindings.fieldDoublePrimary || null;
     }
+    if (context && context.gesture === "hold" && event.button === 2) {
+      return onNode ? bindings.nodeHoldSecondary || null : bindings.fieldHoldSecondary || null;
+    }
     if (context && context.gesture === "double" && event.button === 2) {
-      return onNode ? bindings.nodeDoubleSecondary || null : bindings.fieldDoubleSecondary || null;
+      return null;
     }
     if (
       context
@@ -423,10 +409,7 @@
         id: "view",
         label: "视角",
         items: [
-          keyboardItem(VISUAL_INTENTS.setPeripheralView, "外围"),
-          keyboardItem(VISUAL_INTENTS.setNestedView, "内包"),
-          keyboardItem(VISUAL_INTENTS.setHierarchyView, "层级"),
-          keyboardItem(VISUAL_INTENTS.setImmersiveView, "沉浸"),
+          keyboardItem(VISUAL_INTENTS.setNestedView, "A · 向内剖开"),
           keyboardItem(VISUAL_INTENTS.collapseHoveredCluster, "光标所指团单层收缩（内包模式）"),
           keyboardItem(VISUAL_INTENTS.expandHoveredCluster, "光标所指团单层展开（内包模式）"),
           pointerItem(VISUAL_INTENTS.orbit, "旋转视角", "按住鼠标中键移动"),
@@ -439,7 +422,8 @@
         id: "use",
         label: "节点使用",
         items: [
-          pointerItem(VISUAL_INTENTS.applyViewMode, "当前视角动作", "右键单击"),
+          pointerItem(VISUAL_INTENTS.applyInwardView, "普通向内剖开", "右键单击"),
+          pointerItem(VISUAL_INTENTS.applyImmersiveInwardView, "沉浸向内剖开", "右键长按"),
           pointerItem(VISUAL_INTENTS.applyParentView, "返回直接母节点", "右键单击子域空白"),
           pointerItem(VISUAL_INTENTS.activate, "使用承载", "左键单击 / 双击 / 三击"),
           keyboardItem(VISUAL_INTENTS.setSurfaceDetails, "镜面详情（CapsLock 大写）"),
@@ -471,9 +455,9 @@
         id: "batch",
         label: "批量视角",
         items: [
-          pointerItem(VISUAL_INTENTS.applyViewMode, "木杖轨迹", "Shift + 右键绘制"),
-          pointerItem(VISUAL_INTENTS.applyViewMode, "五角星全域", "Shift + 右键绘制五角星"),
-          pointerItem(VISUAL_INTENTS.applyViewMode, "玉杖递归切换", "三击 Shift")
+          pointerItem(VISUAL_INTENTS.applyInwardView, "木杖轨迹", "Shift + 右键绘制"),
+          pointerItem(VISUAL_INTENTS.applyInwardView, "五角星全域", "Shift + 右键绘制五角星"),
+          pointerItem(VISUAL_INTENTS.applyInwardView, "玉杖递归切换", "三击 Shift")
         ]
       }
     ].map((group) => ({ ...group, items: group.items.map((item) => ({ ...item })) }));

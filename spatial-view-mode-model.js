@@ -1,23 +1,16 @@
 (function spatialViewModeModel(global) {
   "use strict";
 
-  const MODES = Object.freeze(["immersive", "peripheral", "nested", "hierarchy"]);
+  const MODES = Object.freeze(["nested"]);
   const MODE_LABELS = Object.freeze({
-    immersive: "沉浸",
-    peripheral: "外围",
-    nested: "内包",
-    hierarchy: "层级"
+    nested: "A · 向内剖开"
   });
   const KEY_MODES = Object.freeze({
-    KeyA: "nested",
-    KeyS: "peripheral",
-    KeyD: "hierarchy",
-    KeyF: "immersive"
+    KeyA: "nested"
   });
 
-  function nextMode(mode) {
-    const index = MODES.indexOf(mode);
-    return MODES[(index < 0 ? 0 : index + 1) % MODES.length];
+  function nextMode() {
+    return "nested";
   }
 
   function modeForKey(code) {
@@ -223,7 +216,6 @@
 
   function planViewTargets(mode, clickedKey, selectionInput) {
     if (clickedKey === undefined || clickedKey === null) return Object.freeze([]);
-    if (mode === 'immersive') return Object.freeze([clickedKey]);
     var selected = Array.from(new Set(Array.isArray(selectionInput) ? selectionInput : selectionInput || []));
     return Object.freeze(selected.length ? selected : [clickedKey]);
   }
@@ -304,8 +296,7 @@
     });
   }
 
-  function planContextLevelExpansion(entriesInput, expandedPathsInput, mode) {
-    if (mode === "immersive") return Object.freeze([]);
+  function planContextLevelExpansion(entriesInput, expandedPathsInput) {
     const expanded = new Set(Array.isArray(expandedPathsInput) ? expandedPathsInput : []);
     const plannedPaths = new Set();
     const keys = [];
@@ -318,8 +309,8 @@
     return Object.freeze(keys);
   }
 
-  function planContextLevelCollapse(pathsInput, currentPath, mode) {
-    if (mode === "immersive" || !currentPath) return Object.freeze([]);
+  function planContextLevelCollapse(pathsInput, currentPath) {
+    if (!currentPath) return Object.freeze([]);
     const paths = (Array.isArray(pathsInput) ? pathsInput : [])
       .filter((path) => path && path !== currentPath && path.startsWith(`${currentPath}/`));
     return Object.freeze(paths.filter((path) => (

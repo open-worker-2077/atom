@@ -14,6 +14,7 @@
   const DEFAULT_ZOOM_SPEED_PERCENT = 160;
   const DEFAULT_RELATIONSHIP_LINE_WIDTH_PERCENT = 180;
   const DEFAULT_RELATIONSHIP_BRIGHTNESS_PERCENT = 160;
+  const DEFAULT_SECONDARY_NAVIGATION_DELAY_MS = 420;
   const DEFAULT_MIDDLE_LABEL_DEPTH = 3;
   const DEFAULT_HIGHLIGHTED_LABEL_BRIGHTNESS_PERCENT = 100;
   const DEFAULT_OTHER_LABEL_BRIGHTNESS_PERCENT = 35;
@@ -55,6 +56,13 @@
     return Number.isFinite(number)
       ? Math.min(250, Math.max(25, Math.round(number)))
       : DEFAULT_RELATIONSHIP_BRIGHTNESS_PERCENT;
+  }
+
+  function validSecondaryNavigationDelay(value) {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? Math.min(800, Math.max(240, Math.round(number)))
+      : DEFAULT_SECONDARY_NAVIGATION_DELAY_MS;
   }
 
   function validMiddleLabelDepth(value) {
@@ -104,6 +112,9 @@
       lastIdleSeconds,
       helpVisible: typeof source.helpVisible === "boolean" ? source.helpVisible : true,
       defaultDetailMode: validDetailMode(source.defaultDetailMode),
+      secondaryNavigationDelayMs: validSecondaryNavigationDelay(
+        source.secondaryNavigationDelayMs
+      ),
       peripheralDepthShrinkPercent: validPeripheralDepthShrink(source.peripheralDepthShrinkPercent),
       nestedCompactnessPercent: validNestedCompactness(source.nestedCompactnessPercent),
       nestedTunnelPercent: validPercent(source.nestedTunnelPercent),
@@ -161,6 +172,14 @@
   function withDefaultDetailModeInput(settingsInput, value) {
     const settings = normalizeSettings(settingsInput);
     return normalizeSettings({ ...settings, defaultDetailMode: validDetailMode(value) });
+  }
+
+  function withSecondaryNavigationDelayInput(settingsInput, value) {
+    const settings = normalizeSettings(settingsInput);
+    return normalizeSettings({
+      ...settings,
+      secondaryNavigationDelayMs: validSecondaryNavigationDelay(value)
+    });
   }
 
   function withNestedTunnelInput(settingsInput, value) {
@@ -467,6 +486,7 @@
     normalizeSettings,
     withIdleInput,
     withDefaultDetailModeInput,
+    withSecondaryNavigationDelayInput,
     withPeripheralDepthShrinkInput,
     withNestedCompactnessInput,
     withNestedTunnelInput,
