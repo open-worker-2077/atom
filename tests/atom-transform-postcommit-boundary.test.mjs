@@ -35,6 +35,25 @@ async function committedFacts(files) {
   return (await createTransactionalWorldPersistence(files).readCommittedSnapshot()).facts;
 }
 
+function mockJournalEventWrite(t, directory, intercept) {
+  const open = fs.open.bind(fs);
+  t.mock.method(fs, 'open', async (target, flags, ...args) => {
+    const handle = await open(target, flags, ...args);
+    if (!String(target).startsWith(directory)
+      || !String(target).endsWith('events.jsonl') || !['r+', 'w+'].includes(flags)) return handle;
+    const write = handle.write.bind(handle);
+    handle.write = async (buffer, offset, length, position) => {
+      const encoded = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer, 'utf8');
+      const sourceOffset = Buffer.isBuffer(buffer) ? offset : 0;
+      const requestedLength = Buffer.isBuffer(buffer) ? length : encoded.length;
+      const event = JSON.parse(encoded.subarray(sourceOffset, sourceOffset + requestedLength).toString('utf8').trim());
+      await intercept(event);
+      return write(buffer, offset, length, position);
+    };
+    return handle;
+  });
+}
+
 test('discard source notification preserves the archive receipt through final settlement', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-discard-receipt-'));
   const contextFile = path.join(directory, 'atom.json');
@@ -963,20 +982,10 @@ test(`central binding settles consecutive-revision candidates while the first re
   let entered, release;
   const paused = new Promise(resolve => { entered = resolve; });
   const gate = new Promise(resolve => { release = resolve; });
-  const open = fs.open.bind(fs);
-  t.mock.method(fs, 'open', async (...args) => {
-    const handle = await open(...args);
-    if (String(args[0]).startsWith(path.dirname(files.contextFile)) && args[1] === 'a') {
-      const write = handle.writeFile.bind(handle);
-      handle.writeFile = async (data, ...rest) => {
-        const event = JSON.parse(data);
-        if (event.type === 'committed' && event.receipt?.result?.postCommitEvent?.binding === 'first') {
-          entered(); await gate;
-        }
-        return write(data, ...rest);
-      };
+  mockJournalEventWrite(t, path.dirname(files.contextFile), async (event) => {
+    if (event.type === 'committed' && event.receipt?.result?.postCommitEvent?.binding === 'first') {
+      entered(); await gate;
     }
-    return handle;
   });
   const transition = (facts, prior, binding) => ({ correlationId: 'paused-collision', facts,
     expectedRevision: revisionOfWorldFacts(prior), nextRevision: revisionOfWorldFacts(facts),
@@ -1014,17 +1023,8 @@ test('final outcome append and later effects share the central serialized decisi
   let entered, release;
   const paused = new Promise(resolve => { entered = resolve; });
   const gate = new Promise(resolve => { release = resolve; });
-  const open = fs.open.bind(fs);
-  t.mock.method(fs, 'open', async (...args) => {
-    const handle = await open(...args);
-    if (String(args[0]).startsWith(path.dirname(files.contextFile)) && args[1] === 'a') {
-      const write = handle.writeFile.bind(handle);
-      handle.writeFile = async (data, ...rest) => {
-        if (JSON.parse(data).programOutcome?.status === 'failed') { entered(); await gate; }
-        return write(data, ...rest);
-      };
-    }
-    return handle;
+  mockJournalEventWrite(t, path.dirname(files.contextFile), async (event) => {
+    if (event.programOutcome?.status === 'failed') { entered(); await gate; }
   });
   const outcome = persistence.recordProgramExecution({ sourceCommandId: receipt.commandId,
     outcome: { status: 'failed', attemptId: 'final-race-attempt', errors: [{ code: 'BUSINESS_FAILED' }] } });
@@ -1049,17 +1049,10 @@ test(`outcome append EIO preserves source success and exposes recoverable outcom
   const files = await fixture(t, outcomeStatus === 'failed'
     ? 'def receive(delivery):\n    raise Exception("business failed")\ntrigger("strut", {}, receive)'
     : 'def receive(delivery):\n    transform({"thing":"Result","situation.rep.after":"before"})\ntrigger("strut", {}, receive)');
-  const open = fs.open.bind(fs);
-  t.mock.method(fs, 'open', async (...args) => {
-    const handle = await open(...args);
-    if (String(args[0]).startsWith(path.dirname(files.contextFile)) && args[1] === 'a') {
-      const write = handle.writeFile.bind(handle);
-      handle.writeFile = async (data, ...rest) => {
-        if (JSON.parse(data).programOutcome?.status === outcomeStatus) throw Object.assign(new Error('outcome disk unavailable'), { code: 'EIO' });
-        return write(data, ...rest);
-      };
+  mockJournalEventWrite(t, path.dirname(files.contextFile), async (event) => {
+    if (event.programOutcome?.status === outcomeStatus) {
+      throw Object.assign(new Error('outcome disk unavailable'), { code: 'EIO' });
     }
-    return handle;
   });
   let notified = 0, terminalNotified = 0;
   const request = { ...files, source: 'transform {"thing":"Source","situation.rep.after":"before"}',

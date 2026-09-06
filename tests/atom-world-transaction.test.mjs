@@ -893,7 +893,8 @@ test('local commit visibility waits for log fsync and a failed sync cannot seed 
   });
   const restarted = createJsonWorldRepository({ file: worldFile, worldId: 'primary', localCommitFile });
   assert.deepEqual((await restarted.read()).facts, committedFacts);
-  const records = (await fs.readFile(localCommitFile, 'utf8')).trim().split('\n').map(JSON.parse);
+  const records = (await fs.readFile(localCommitFile, 'utf8')).trim().split('\n').map(JSON.parse)
+    .filter(({ contract }) => contract === 'atom.local-commit');
   assert.deepEqual(records.map(({ commandId }) => commandId), ['commit-after-failed-sync']);
 });
 
@@ -969,6 +970,87 @@ for (const writeFault of ['short-write', 'continuation-failure', 'sync-and-repai
   });
 }
 
+test('a stale publication head cannot hide a later acknowledged local commit', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-stale-head-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  const localCommitFile = path.join(directory, 'world-commits.jsonl');
+  let facts = [{ thing: 'Root', situation: 'v0', slot: [], strut: [] }];
+  await fs.writeFile(worldFile, `${JSON.stringify(facts)}\n`, 'utf8');
+  const repository = createJsonWorldRepository({ file: worldFile, worldId: 'primary', localCommitFile });
+  const append = async (commandId, situation) => {
+    const next = structuredClone(facts);
+    next[0].situation = situation;
+    await repository.appendLocalCommit({
+      commandId, expectedRevision: revisionOf(facts),
+      nextSnapshot: { worldId: 'primary', revision: revisionOf(next), facts: next },
+      patch: createLocalWorldPatch({
+        worldId: 'primary', beforeRevision: revisionOf(facts), afterRevision: revisionOf(next),
+        beforeFacts: facts, afterFacts: next, changedPaths: ['Root']
+      })
+    });
+    facts = next;
+  };
+  await append('stale-head-1', 'v1');
+  const oldHead = await fs.readFile(`${localCommitFile}.head.json`);
+  await append('stale-head-2', 'v2');
+  await fs.writeFile(`${localCommitFile}.head.json`, oldHead);
+
+  const coldModule = await import(`../src/atom-system/adapters/json-world-repository.mjs?stale-head=${crypto.randomUUID()}`);
+  const cold = coldModule.createJsonWorldRepository({ file: worldFile, worldId: 'primary', localCommitFile });
+  assert.deepEqual((await cold.read()).facts, facts);
+});
+
+test('a missing initial publication head cannot expose a fully written failed append', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-missing-head-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  const localCommitFile = path.join(directory, 'world-commits.jsonl');
+  const beforeFacts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+  const afterFacts = [{ thing: 'Root', situation: 'new', slot: [], strut: [] }];
+  await fs.writeFile(worldFile, `${JSON.stringify(beforeFacts)}\n`, 'utf8');
+  let syncFailed = false;
+  const fileSystem = {
+    ...fs,
+    async open(target, flags, ...args) {
+      const handle = await fs.open(target, flags, ...args);
+      if (path.resolve(target) !== path.resolve(localCommitFile)) return handle;
+      return {
+        async truncate(length) {
+          if (syncFailed) throw Object.assign(new Error('repair failed'), { code: 'EIO' });
+          return handle.truncate(length);
+        },
+        write: (...writeArgs) => handle.write(...writeArgs),
+        async sync() {
+          if (!syncFailed) {
+            syncFailed = true;
+            throw Object.assign(new Error('sync failed'), { code: 'EIO' });
+          }
+          return handle.sync();
+        },
+        close: (...closeArgs) => handle.close(...closeArgs)
+      };
+    }
+  };
+  const repository = createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile, fileSystem
+  });
+  await assert.rejects(repository.appendLocalCommit({
+    commandId: 'missing-head-failed', expectedRevision: revisionOf(beforeFacts),
+    nextSnapshot: { worldId: 'primary', revision: revisionOf(afterFacts), facts: afterFacts },
+    patch: createLocalWorldPatch({
+      worldId: 'primary', beforeRevision: revisionOf(beforeFacts), afterRevision: revisionOf(afterFacts),
+      beforeFacts, afterFacts, changedPaths: ['Root']
+    })
+  }), { code: 'EIO' });
+  await fs.rm(`${localCommitFile}.head.json`, { force: true });
+  assert.equal((await fs.readFile(localCommitFile, 'utf8')).endsWith('\n'), true);
+
+  const coldModule = await import(`../src/atom-system/adapters/json-world-repository.mjs?missing-head=${crypto.randomUUID()}`);
+  const cold = coldModule.createJsonWorldRepository({ file: worldFile, worldId: 'primary', localCommitFile });
+  assert.deepEqual((await cold.read()).facts, beforeFacts);
+});
+
 test('a torn local-log tail is truncated before the next acknowledged append', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-torn-continuation-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
@@ -996,7 +1078,8 @@ test('a torn local-log tail is truncated before the next acknowledged append', a
 
   const restarted = createJsonWorldRepository({ file: worldFile, worldId: 'primary', localCommitFile });
   assert.deepEqual((await restarted.read()).facts, secondFacts);
-  const records = (await fs.readFile(localCommitFile, 'utf8')).trim().split('\n').map(JSON.parse);
+  const records = (await fs.readFile(localCommitFile, 'utf8')).trim().split('\n').map(JSON.parse)
+    .filter(({ contract }) => contract === 'atom.local-commit');
   assert.deepEqual(records.map(({ commandId }) => commandId), ['torn-first', 'torn-second']);
 });
 
@@ -1047,7 +1130,8 @@ test('two repositories sharing one log validate the revision inside their shared
   ]);
   assert.equal(outcomes.filter(({ status }) => status === 'fulfilled').length, 1);
   assert.equal(outcomes.find(({ status }) => status === 'rejected')?.reason?.code, 'WORLD_REVISION_CONFLICT');
-  const records = (await fs.readFile(localCommitFile, 'utf8')).trim().split('\n').map(JSON.parse);
+  const records = (await fs.readFile(localCommitFile, 'utf8')).trim().split('\n').map(JSON.parse)
+    .filter(({ contract }) => contract === 'atom.local-commit');
   assert.equal(records.length, 1);
   const cold = createJsonWorldRepository({ file: worldFile, worldId: 'primary', localCommitFile });
   await assert.doesNotReject(() => cold.read());
@@ -1207,7 +1291,9 @@ for (const crashPoint of [
       if (error.code === 'ENOENT') return '';
       throw error;
     });
-    assert.equal(completeRecords.split('\n').filter(Boolean).length, crashPoint.committed ? 1 : 0);
+    const committedRecords = completeRecords.split('\n').filter(Boolean).map(JSON.parse)
+      .filter(({ contract }) => contract === 'atom.local-commit');
+    assert.equal(committedRecords.length, crashPoint.committed ? 1 : 0);
   });
 }
 
@@ -1305,8 +1391,10 @@ for (const mode of ['local-compaction', 'full-world-fallback']) {
 
     assert.ok(events.indexOf('baseline-temporary-sync') >= 0, events.join(', '));
     assert.ok(events.indexOf('baseline-temporary-sync') < events.indexOf('baseline-rename'), events.join(', '));
-    assert.ok(events.indexOf('baseline-rename') < events.indexOf('baseline-directory-sync'), events.join(', '));
-    assert.ok(events.indexOf('baseline-directory-sync') < events.indexOf('log-rename'), events.join(', '));
+    const baselineRename = events.indexOf('baseline-rename');
+    const baselineDirectorySync = events.indexOf('baseline-directory-sync', baselineRename);
+    assert.ok(baselineRename < baselineDirectorySync, events.join(', '));
+    assert.ok(baselineDirectorySync < events.indexOf('log-rename'), events.join(', '));
     assert.equal(await repository.hasDurableCommit({
       commandId: mode === 'local-compaction' ? 'durable-order-local' : 'durable-order-full',
       beforeRevision: revisionOf(beforeFacts),
@@ -1355,7 +1443,8 @@ for (const mode of ['local-compaction', 'full-world-fallback']) {
         nextSnapshot: { worldId: 'primary', revision: revisionOf(afterFacts), facts: afterFacts }
       });
     }
-    const records = (await fs.readFile(localCommitFile, 'utf8')).trim().split('\n').map(JSON.parse);
+    const records = (await fs.readFile(localCommitFile, 'utf8')).trim().split('\n').map(JSON.parse)
+      .filter(({ contract }) => contract === 'atom.local-commit');
     assert.equal(records.at(-1).contract, 'atom.local-commit');
     assert.equal(records.at(-1).commandId, mode === 'local-compaction' ? 'fallback-local' : 'fallback-full');
     const restarted = createJsonWorldRepository({ file: worldFile, worldId: 'primary', localCommitFile });
@@ -1451,6 +1540,74 @@ test('Windows fallback prunes a proven prior replay generation across repeated t
     repositoryModule = coldModule;
     repository = cold;
   }
+});
+
+test('one Windows startup proof bounds repeated fallback compactions in the same runtime', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-windows-fallback-long-runtime-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  const localCommitFile = path.join(directory, 'world-commits.jsonl');
+  const fileSystem = {
+    ...fs,
+    async open(target, flags, ...args) {
+      if (path.resolve(target) === path.resolve(directory)) {
+        return {
+          async sync() { throw Object.assign(new Error('Windows directory fsync'), { code: 'EPERM' }); },
+          async close() {}
+        };
+      }
+      return fs.open(target, flags, ...args);
+    }
+  };
+  let facts = [{ thing: 'Root', situation: 'v0', slot: [], strut: [] }];
+  await fs.writeFile(worldFile, `${JSON.stringify(facts)}\n`, 'utf8');
+  let repository = createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile, autoCompact: 2, fileSystem
+  });
+  const append = async (generation, step) => {
+    const before = facts;
+    const next = structuredClone(before);
+    next[0].situation = `v${generation}-${step}`;
+    await repository.appendLocalCommit({
+      commandId: `long-${generation}-${step}`, expectedRevision: revisionOf(before),
+      nextSnapshot: { worldId: 'primary', revision: revisionOf(next), facts: next },
+      patch: createLocalWorldPatch({
+        worldId: 'primary', beforeRevision: revisionOf(before), afterRevision: revisionOf(next),
+        beforeFacts: before, afterFacts: next, changedPaths: ['Root']
+      })
+    });
+    facts = next;
+  };
+
+  await append(0, 1);
+  await append(0, 2);
+  await repository.scheduleCompaction();
+  const provenBaseline = structuredClone(facts);
+  const coldModule = await import(`../src/atom-system/adapters/json-world-repository.mjs?long-runtime=${crypto.randomUUID()}`);
+  repository = coldModule.createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile, autoCompact: 2, fileSystem
+  });
+  assert.deepEqual((await repository.read()).facts, facts);
+
+  const retainedCounts = [];
+  for (let generation = 1; generation <= 3; generation += 1) {
+    await append(generation, 1);
+    await append(generation, 2);
+    await repository.scheduleCompaction();
+    retainedCounts.push((await fs.readFile(localCommitFile, 'utf8')).trim().split('\n').filter(Boolean).length);
+    assert.deepEqual((await repository.read()).facts, facts);
+  }
+  assert.ok(retainedCounts.every((count) => count <= 2), `retained counts were ${retainedCounts.join('/')}`);
+  const recoveryWorld = path.join(directory, 'proven-baseline.json');
+  const recoveryLog = path.join(directory, 'proven-generation.jsonl');
+  await fs.writeFile(recoveryWorld, `${JSON.stringify(provenBaseline)}\n`, 'utf8');
+  await fs.copyFile(localCommitFile, recoveryLog);
+  await fs.copyFile(`${localCommitFile}.head.json`, `${recoveryLog}.head.json`);
+  const recovery = coldModule.createJsonWorldRepository({
+    file: recoveryWorld, worldId: 'primary', localCommitFile: recoveryLog
+  });
+  assert.deepEqual((await recovery.read()).facts, facts,
+    'the bounded generation still recovers from the independently proven baseline');
 });
 
 test('hung transition calculation does not block an independent candidate commit', async (t) => {
@@ -2043,7 +2200,8 @@ for (const afterState of ['same-after-revision', 'different-after-revision']) {
     assert.deepEqual((await createJsonTransactionJournal({ file: journalFile }).readState()).prepared, [],
       'the durable abort event prevents a cold recovery conflict');
     assert.deepEqual((await worldRepository.read()).facts, ownerFacts);
-    const records = (await fs.readFile(localCommitFile, 'utf8')).trim().split('\n').map(JSON.parse);
+    const records = (await fs.readFile(localCommitFile, 'utf8')).trim().split('\n').map(JSON.parse)
+      .filter(({ contract }) => contract === 'atom.local-commit');
     assert.deepEqual(records.map(({ commandId }) => commandId), ['durable-owner']);
   });
 }

@@ -182,7 +182,8 @@ test('TC-PERF-LOCAL-COMMIT: acknowledgment appends one bounded record without wr
   assert.equal(await fs.readFile(worldFile, 'utf8'), baselineText);
   assert.equal(writes.some(({ target }) => target === path.resolve(worldFile)), false);
   const recordWrites = writes.filter(({ target }) => target === path.resolve(localCommitFile));
-  assert.equal(recordWrites.length, 1);
-  assert.ok(recordWrites[0].bytes < Buffer.byteLength(baselineText) / 100,
-    `local record ${recordWrites[0].bytes} bytes must stay bounded against ${Buffer.byteLength(baselineText)}`);
+  assert.equal(recordWrites.length, 2, 'one local record and its publication proof are appended');
+  const appendedBytes = recordWrites.reduce((sum, { bytes }) => sum + bytes, 0);
+  assert.ok(appendedBytes < Buffer.byteLength(baselineText) / 100,
+    `local record frame ${appendedBytes} bytes must stay bounded against ${Buffer.byteLength(baselineText)}`);
 });
