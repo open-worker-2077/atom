@@ -130,6 +130,11 @@ test('TC-PERF-LOCAL-COMMIT: acknowledgment appends one bounded record without wr
     async open(target, flags, ...rest) {
       const handle = await fs.open(target, flags, ...rest);
       return {
+        truncate: (...args) => handle.truncate(...args),
+        async write(value, ...args) {
+          writes.push({ target: path.resolve(target), bytes: Buffer.byteLength(value) });
+          return handle.write(value, ...args);
+        },
         async writeFile(value, ...args) {
           writes.push({ target: path.resolve(target), bytes: Buffer.byteLength(value) });
           return handle.writeFile(value, ...args);

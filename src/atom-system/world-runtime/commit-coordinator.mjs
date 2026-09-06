@@ -159,7 +159,11 @@ export function createCommitCoordinator({
     if (current.worldId !== recordWorldId) {
       throw problem('TRANSACTION_RECOVERY_CONFLICT', 'Prepared transaction belongs to another world');
     }
-    if (current.revision === beforeRevision) {
+    const identity = { commandId: record.commandId, beforeRevision, afterRevision };
+    const durableEvidence = typeof worldRepository.durableCommitEvidence === 'function'
+      ? await worldRepository.durableCommitEvidence(identity)
+      : current.revision === afterRevision ? { source: 'legacy-revision' } : null;
+    if (!durableEvidence && current.revision === beforeRevision) {
       const nextSnapshot = record.historyMode === 'local-patch'
         ? nextWorldSnapshot(current, applyLocalWorldPatch(current.facts, record.patch))
         : record.after;
@@ -175,12 +179,26 @@ export function createCommitCoordinator({
         });
       } else {
         await worldRepository.compareAndSwap({
+          commandId: record.commandId,
           expectedRevision: beforeRevision,
           nextSnapshot,
           currentSnapshot: current
         });
       }
-    } else if (current.revision !== afterRevision) {
+      if (typeof worldRepository.hasDurableCommit === 'function'
+        && !await worldRepository.hasDurableCommit(identity)) {
+        throw problem('TRANSACTION_RECOVERY_CONFLICT', 'Recovered world write lacks exact durable command evidence', identity);
+      }
+    } else if (!durableEvidence) {
+      const successor = await worldRepository.durableSuccessor?.(beforeRevision);
+      if (successor && successor.commandId !== record.commandId
+        && typeof journalRepository.abort === 'function') {
+        await journalRepository.abort(record.commandId, {
+          reason: 'superseded-durable-command',
+          successor
+        });
+        return null;
+      }
       throw problem('TRANSACTION_RECOVERY_CONFLICT', 'World diverged from a prepared transaction', {
         commandId: record.commandId,
         actualRevision: current.revision,
@@ -400,6 +418,7 @@ export function createCommitCoordinator({
         });
       } else {
         await worldRepository.compareAndSwap({
+          commandId: record.commandId,
           expectedRevision: before.revision,
           nextSnapshot: after,
           currentSnapshot: current
@@ -415,6 +434,7 @@ export function createCommitCoordinator({
     return prepareCandidate(request).then((candidate) => serialize(async () => {
       // Binding/final-state checks must see all earlier journal decisions, even
       // when a candidate was prepared after their world write but before append.
+      await recoverUnsafe();
       const existing = await request.validateCommit?.();
       return existing ?? commitCandidate(candidate);
     }));
@@ -422,6 +442,7 @@ export function createCommitCoordinator({
 
   function rollback({ targetCommandId, command }) {
     return serialize(async () => {
+      await recoverUnsafe();
       if (typeof targetCommandId !== 'string' || !targetCommandId.trim()) {
         throw problem('INVALID_ROLLBACK_TARGET', 'Rollback requires a target command id');
       }

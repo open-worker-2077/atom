@@ -84,7 +84,9 @@ export function createTransactionalWorldPersistence({
   const { worldRepository, journalRepository, coordinator } = owner;
 
   function recover() {
-    owner.recovery ??= coordinator.recover();
+    owner.recovery ??= coordinator.recover().finally(() => {
+      owner.recovery = null;
+    });
     return owner.recovery;
   }
 
