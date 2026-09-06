@@ -3045,6 +3045,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     relationEndpoints = null,
     shortcutPaths = null,
     referencePaths = null,
+    affectedPathClosureComplete = false,
     transformLogRecord = null,
     localizedSituationValidation = false,
     structurePreservingValidation = false,
@@ -3126,9 +3127,15 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     const commitStartedAt = performance.now();
     let receipt = null;
     try {
-      const semanticInputsComplete = [relationEndpoints, shortcutPaths, referencePaths].every(Array.isArray);
+      const semanticInputsComplete = affectedPathClosureComplete === true
+        && [relationEndpoints, shortcutPaths, referencePaths].every(Array.isArray);
       const lockClosure = semanticInputsComplete
-        ? lockDependencies(changedPaths ?? [])
+        ? lockDependencies([...new Set([
+            ...(changedPaths ?? []),
+            ...relationEndpoints,
+            ...shortcutPaths,
+            ...referencePaths
+          ])])
         : { lockPaths: null, referencePaths: [] };
       receipt = await persistChangedGraph({
         atoms: candidateAtoms,
@@ -3584,6 +3591,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     const relationEndpoints = new Set();
     const shortcutPaths = new Set();
     const referencePaths = new Set();
+    let affectedPathClosureComplete = true;
     const renameEventNodes = new Set();
     const renameBatch = parsed.items.every(isBatchRenameItem);
     if (renameBatch) {
@@ -3600,6 +3608,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         }], { messages: interactionMessages });
       }
       nextAtoms = renamed.atoms;
+      affectedPathClosureComplete = renamed.affectedPathClosureComplete === true;
       const matchesByPath = new Map(walkAtoms(nextAtoms).map((match) => [
         match.path.join('/'), match
       ]));
@@ -3694,6 +3703,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       for (const path of transformed.relationPaths ?? []) relationEndpoints.add(path);
       for (const path of transformed.shortcutPaths ?? []) shortcutPaths.add(path);
       for (const path of transformed.programSourcePaths ?? []) referencePaths.add(path);
+      for (const path of transformed.referencePaths ?? []) referencePaths.add(path);
+      affectedPathClosureComplete = affectedPathClosureComplete
+        && transformed.affectedPathClosureComplete === true;
       if (transformed.logRecord) {
         transformLogs.push({
           ...transformed.logRecord,
@@ -3744,6 +3756,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         relationEndpoints: [...relationEndpoints],
         shortcutPaths: [...shortcutPaths],
         referencePaths: [...referencePaths],
+        affectedPathClosureComplete: affectedPathClosureComplete
+          && !sourceProgramSurfaceChanged,
         ...(!sourceProgramSurfaceChanged ? {
           projectionRebase: {
             previousAtoms: atoms,
@@ -3967,9 +3981,6 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     }
     const sourceReceipt = await commitChangedGraph(nextAtoms, {
       changedPaths: [created.resultPath],
-      relationEndpoints: [],
-      shortcutPaths: [],
-      referencePaths: [],
       ...(!subtreeSlotsTypedProgram(exactMatchAtPath(nextAtoms, created.resultPath)?.atom) ? {
         projectionRebase: {
           previousAtoms: atoms,
@@ -4391,7 +4402,12 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       changedPaths: transformAffectedPaths,
       relationEndpoints: transformed.relationPaths ?? [],
       shortcutPaths: transformed.shortcutPaths ?? [],
-      referencePaths: transformed.programSourcePaths ?? [],
+      referencePaths: [
+        ...(transformed.programSourcePaths ?? []),
+        ...(transformed.referencePaths ?? [])
+      ],
+      affectedPathClosureComplete: transformed.affectedPathClosureComplete === true
+        && !programSurfaceChanged,
       ...(!programSurfaceChanged ? {
         projectionRebase: {
           previousAtoms: atoms,

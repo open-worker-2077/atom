@@ -17,6 +17,12 @@ import {
   createCompatibilityManifest,
   validateCompatibilityManifest
 } from '../src/atom-system/world-runtime/legacy-graph-compat.mjs';
+import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
+import { applyTransform } from '../work-engine/atom-language/transform-executor.mjs';
+import {
+  createShortcutAtom,
+  resolveShortcutMatch
+} from '../work-engine/atom-language/shortcut-runtime.mjs';
 
 function revisionOf(facts) {
   return `sha256:${crypto.createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`;
@@ -59,6 +65,28 @@ function completeLocalEffects(result = {}) {
     affectedPathClosureComplete: true,
     ...result
   };
+}
+
+function transformLocalEffects(transformed) {
+  return {
+    relationEndpoints: transformed.relationPaths ?? [],
+    shortcutPaths: transformed.shortcutPaths ?? [],
+    referencePaths: [
+      ...(transformed.programSourcePaths ?? []),
+      ...(transformed.referencePaths ?? [])
+    ],
+    affectedPathClosureComplete: transformed.affectedPathClosureComplete === true
+  };
+}
+
+function transformChangedPaths(transformed) {
+  return [...new Set([
+    transformed.sourcePath,
+    transformed.resultPath,
+    ...(transformed.relationPaths ?? []),
+    ...(transformed.programSourcePaths ?? []),
+    ...(transformed.shortcutPaths ?? [])
+  ].filter(Boolean))];
 }
 
 function journalFailingCommits(journalRepository, count) {
@@ -170,6 +198,66 @@ test('concurrent edits of the same Atom remain one explicit local conflict', asy
   assert.equal(outcomes.filter(({ status }) => status === 'fulfilled').length, 1);
   assert.equal(rejected?.code, 'WORLD_REVISION_CONFLICT');
   assert.deepEqual(rejected?.details?.conflictingPaths, ['Root']);
+});
+
+test('real shortcut retarget guards its validated target against a concurrent rename', async (t) => {
+  const files = await fixture(t);
+  const initialFacts = [
+    { thing: 'Old', situation: '', slot: [], strut: [] },
+    { thing: 'New', situation: '', slot: [], strut: [] },
+    createShortcutAtom({ thing: 'Entry', targetPath: 'Old', referenceId: 'entry-ref' })
+  ];
+  await writeJsonAtomically(files.worldFile, initialFacts);
+  const initial = await files.worldRepository.read();
+  const receiver = createAtomLanguageReceiver();
+  const retargetItem = receiver.receive('transform {"thing.lnk.New":"Entry"}').items[0];
+  const renameItem = receiver.receive('transform {"thing.ren.Moved":"New"}').items[0];
+
+  const [retargeted, renamed] = await Promise.all([
+    applyTransform({
+      atoms: initialFacts,
+      item: retargetItem,
+      contextFile: files.worldFile
+    }),
+    applyTransform({
+      atoms: initialFacts,
+      item: renameItem,
+      contextFile: files.worldFile
+    })
+  ]);
+  assert.equal(retargeted.error, undefined, JSON.stringify(retargeted.error));
+  assert.equal(renamed.error, undefined, JSON.stringify(renamed.error));
+  assert.equal(retargeted.affectedPathClosureComplete, true);
+  assert.deepEqual(retargeted.referencePaths, ['New']);
+  assert.equal(renamed.affectedPathClosureComplete, false,
+    'global rename scans are conservatively ineligible for local rebase');
+
+  await files.coordinator.execute({
+    command: command('shortcut-target-rename', initial.revision),
+    transition: () => ({
+      facts: renamed.atoms,
+      changedPaths: transformChangedPaths(renamed),
+      result: transformLocalEffects(renamed)
+    })
+  });
+  await assert.rejects(files.coordinator.execute({
+    command: command('stale-shortcut-retarget', initial.revision),
+    baseFacts: initialFacts,
+    transitionReadsSnapshot: false,
+    transition: () => ({
+      facts: retargeted.atoms,
+      changedPaths: transformChangedPaths(retargeted),
+      result: transformLocalEffects(retargeted)
+    })
+  }), (error) => error.code === 'WORLD_REVISION_CONFLICT');
+
+  const committed = (await files.worldRepository.read()).facts;
+  assert.deepEqual(committed.map((atom) => atom.thing ?? atom['thing@shortcut']), [
+    'Old', 'Moved', 'Entry'
+  ]);
+  const entry = committed.find((atom) => atom['thing@shortcut'] === 'Entry');
+  const resolved = resolveShortcutMatch(committed, { atom: entry, path: ['Entry'] });
+  assert.equal(resolved.path.join('/'), 'Old');
 });
 
 test('a disjoint local command may enter after another commit using its exact base facts', async (t) => {

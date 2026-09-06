@@ -355,9 +355,9 @@ test(`public ancestor discard persists one reversible sealed archive and cold-re
   const history = await journal.readState();
   assert.equal(history.receipts.length, 1, JSON.stringify(history.receipts));
   assert.equal(history.receipts[0].receipt.result.transformLogRecord.originalPath, 'Root/Parent');
-  for (const referencePath of ['Root/Sibling', 'Root/Link', 'Backup/History/Owner']) {
-    assert.ok(history.receipts[0].patch.changedPaths.includes(referencePath), `Missing reversible reference ${referencePath}`);
-  }
+  assert.equal(history.receipts[0].historyMode, undefined);
+  assert.equal(history.receipts[0].receipt.result.affectedPathClosureComplete, false);
+  assert.deepEqual((await journal.findCommitted(history.receipts[0].commandId)).after.facts, stored);
   const coldExecute = createRuntimeCliExecutor(files);
   const coldRead = await coldExecute({ source: 'explore {"thing":"Root/Sibling","situation$full":true}', interaction: { id: 'cold-read', agent: { path: 'Root' } } });
   assert.equal(coldRead.ok, true, JSON.stringify(coldRead.errors));
@@ -375,7 +375,8 @@ test(`public ancestor discard persists one reversible sealed archive and cold-re
   assert.deepEqual(find(afterRestore, 'Root/Link'), shortcut);
   assert.deepEqual(find(afterRestore, 'Backup/History/Owner'), historicalOwner);
   const restoredHistory = await journal.readState();
-  assert.ok(restoredHistory.receipts.at(-1).patch.changedPaths.includes('Backup/History/Owner'));
+  assert.equal(restoredHistory.receipts.at(-1).historyMode, undefined);
+  assert.equal(restoredHistory.receipts.at(-1).receipt.result.affectedPathClosureComplete, false);
   const denied = await coldExecute({ source: 'transform {"thing.ren.Broken":"Root/Parent/Body/Model/Input"}', interaction: { id: 'sealed-denied', agent: { path: 'Root' } } });
   assert.equal(denied.ok, false);
   assert.equal(denied.errors[0].code, 'SLOT_STRUCTURE_LOCK_DENIED');
@@ -431,9 +432,10 @@ test('batch rename records external references in its reversible transaction', a
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const journal = createJsonTransactionJournal({ file: path.join(dir, 'atom.transactions.json') });
   const history = (await journal.readState()).receipts.at(-1);
-  for (const path of ['Root/External', 'Root/ReferenceProgram', 'Root/Shortcut']) {
-    assert.ok(history.patch.changedPaths.includes(path), `Missing reversible path ${path}`);
-  }
+  assert.equal(history.historyMode, undefined);
+  assert.equal(history.receipt.result.affectedPathClosureComplete, false);
+  assert.deepEqual((await journal.findCommitted(history.commandId)).after.facts,
+    JSON.parse(await fs.readFile(contextFile, 'utf8')));
   const persistence = createTransactionalWorldPersistence({ contextFile, projectionFile: graphFile });
   await persistence.rollback({ targetCommandId: history.commandId, correlationId: 'undo-reference-batch', expectedRevision: history.receipt.afterRevision });
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), initial);

@@ -686,6 +686,7 @@ export async function applyBatchRenames({
     relationPaths,
     programSourcePaths,
     shortcutPaths,
+    affectedPathClosureComplete: false,
     results: plans.map((plan) => ({
       index: plan.item.index,
       sourcePath: plan.sourcePath,
@@ -711,6 +712,29 @@ function siblingNameCollision(atoms, match, name) {
   return containerOf(atoms, match).some((candidate) => (
     candidate !== match.atom && storedField(candidate, 'thing')?.value === name
   ));
+}
+
+function hasCompleteLocalDependencyClosure(item, selectedAtom, retarget) {
+  if (storedField(selectedAtom, 'thing')?.parsed.types.some((type) => type.raw === 'program')) {
+    return false;
+  }
+  if (retarget) {
+    return isShortcutAtom(selectedAtom)
+      && item.fields.every((field) => field.baseKey === 'thing'
+        && field.valuePresent
+        && field.commands.length === 1
+        && field.commands[0].name === 'lnk');
+  }
+  let situationChanged = false;
+  for (const field of item.fields) {
+    if (field.baseKey === 'thing') {
+      if (field.commands.length > 0) return false;
+      continue;
+    }
+    if (field.baseKey !== 'situation') return false;
+    if (field.valuePresent || field.commands.length > 0) situationChanged = true;
+  }
+  return situationChanged;
 }
 
 function applyPartners(target, field) {
@@ -1333,18 +1357,22 @@ export async function applyTransform({
     if (error) return rejectAfterMutation(error);
     preservePreparedRelations(postMatches);
     return {
-          atoms: nextAtoms,
-          resultName: storedField(selected.match.atom, 'thing').value,
-          sourcePath,
-          resultPath,
-          relationPaths,
-          programSourcePaths,
-          shortcutPaths,
-          matches: postMatches,
-          changed: copiesOnlyAncestry
-            ? !isDeepStrictEqual(copyNonSlotState(selected.match.atom), selectedBefore)
-            : JSON.stringify(selected.match.atom) !== selectedBefore
-        };
+      atoms: nextAtoms,
+      resultName: storedField(selected.match.atom, 'thing').value,
+      sourcePath,
+      resultPath,
+      relationPaths,
+      programSourcePaths,
+      shortcutPaths,
+      referencePaths: targetPath ? [targetPath] : [],
+      affectedPathClosureComplete: hasCompleteLocalDependencyClosure(
+        item, selected.match.atom, retarget
+      ),
+      matches: postMatches,
+      changed: copiesOnlyAncestry
+        ? !isDeepStrictEqual(copyNonSlotState(selected.match.atom), selectedBefore)
+        : JSON.stringify(selected.match.atom) !== selectedBefore
+    };
   }
 
   const { command } = operation;
@@ -1438,6 +1466,7 @@ export async function applyTransform({
       relationPaths,
       programSourcePaths,
       shortcutPaths,
+      affectedPathClosureComplete: false,
       matches: postMatches,
       changed: true
     };
@@ -1479,6 +1508,7 @@ export async function applyTransform({
       resultPath: archivePath,
       relationPaths,
       shortcutPaths,
+      affectedPathClosureComplete: false,
       matches: postMatches,
       changed: true,
       archive: {
@@ -1564,6 +1594,7 @@ export async function applyTransform({
       resultPath,
       relationPaths,
       shortcutPaths,
+      affectedPathClosureComplete: false,
       matches: postMatches,
       changed: true,
       logRecord: {

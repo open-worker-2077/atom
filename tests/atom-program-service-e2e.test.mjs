@@ -9,6 +9,10 @@ import test from 'node:test';
 import { executeAtomCommandEndpoint, resolveAgentContext } from '../work-engine/atom-language/cli.mjs';
 import { projectAtomGraphToKnowledge } from '../work-engine/atom-language/graph-4d-projection.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
+import {
+  createShortcutAtom,
+  resolveShortcutMatch
+} from '../work-engine/atom-language/shortcut-runtime.mjs';
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
@@ -174,6 +178,74 @@ test('4784 commits disjoint concurrent writes without an explicit retry', async 
     JSON.stringify(visibleContent(state.knowledge)),
     JSON.stringify(visibleContent(expectedKnowledge))
   );
+});
+
+test('4784 keeps create and Program changes on whole-world history', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-service-conservative-'));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('工作Agent', '', [
+      atom('规则Program', 'def main(arguments):\n    return None', [], 'program'),
+      atom('旧目标'),
+      atom('新目标'),
+      createShortcutAtom({ thing: '入口', targetPath: '工作Agent/旧目标', referenceId: 'entry-ref' })
+    ], 'agent')
+  ], null, 2));
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
+  });
+  t.after(async () => {
+    await running.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  const endpoint = `${running.url}/__atom/api/command`;
+  const agent = await resolveAgentContext(contextFile, '工作Agent');
+
+  const retargeted = await executeAtomCommandEndpoint({
+    source: 'transform {"thing.lnk.工作Agent/新目标":"工作Agent/入口"}',
+    interaction: { agent }
+  }, endpoint);
+  assert.equal(retargeted.ok, true, JSON.stringify(retargeted.errors));
+  let history = await createJsonTransactionJournal({
+    file: path.join(directory, 'atom.transactions.json')
+  }).readState();
+  const retargetRecord = history.receipts.at(-1);
+  assert.equal(retargetRecord.historyMode, 'local-patch');
+  assert.equal(retargetRecord.receipt.result.affectedPathClosureComplete, true);
+  assert.deepEqual(retargetRecord.receipt.result.referencePaths, ['工作Agent/新目标']);
+
+  const created = await executeAtomCommandEndpoint({
+    source: 'transform new {"thing":"工作Agent/新增","situation":"值","slot":[],"strut":[]}',
+    interaction: { agent }
+  }, endpoint);
+  assert.equal(created.ok, true, JSON.stringify(created.errors));
+  const previousProgram = 'def main(arguments):\n    return None';
+  const nextProgram = 'def main(arguments):\n    return 1';
+  const programChanged = await executeAtomCommandEndpoint({
+    source: `transform ${JSON.stringify({
+      thing: '工作Agent/规则Program',
+      [`situation.rep.${nextProgram}`]: previousProgram
+    })}`,
+    interaction: { agent }
+  }, endpoint);
+  assert.equal(programChanged.ok, true, JSON.stringify(programChanged.errors));
+
+  history = await createJsonTransactionJournal({
+    file: path.join(directory, 'atom.transactions.json')
+  }).readState();
+  const [createRecord, programRecord] = history.receipts.slice(-2);
+  for (const record of [createRecord, programRecord]) {
+    assert.equal(record.historyMode, undefined);
+    assert.equal(record.receipt.result.affectedPathClosureComplete, false);
+  }
+  const committed = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const entry = committed[0].slot.find((candidate) => candidate['thing@shortcut'] === '入口');
+  assert.equal(resolveShortcutMatch(committed, {
+    atom: entry,
+    path: ['工作Agent', '入口']
+  }).path.join('/'), '工作Agent/新目标');
 });
 
 test('4784 applies one valid 80-effect set quickly and rejects a later invalid batch atomically', async (t) => {
