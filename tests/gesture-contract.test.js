@@ -5,12 +5,19 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'spatial-engine.js'), 'utf8');
 const arbiterSource = fs.readFileSync(path.join(__dirname, '..', 'spatial-gesture-arbiter.js'), 'utf8');
+const gestureArbiter = require('../spatial-gesture-arbiter.js');
 
 function functionSource(name) {
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} exists`);
   const next = source.indexOf('\n  function ', start + 1);
   return source.slice(start, next === -1 ? source.length : next);
+}
+
+function executableFunction(name, dependencies = {}) {
+  const names = Object.keys(dependencies);
+  const values = names.map((dependency) => dependencies[dependency]);
+  return Function(...names, `"use strict"; return (${functionSource(name)});`)(...values);
 }
 
 function numericConstant(name) {
@@ -76,6 +83,91 @@ test('primary taps and unmodified right navigation use their configured arbiters
   const secondaryBranch = commit.slice(commit.indexOf('candidate.button === 2'));
   assert.doesNotMatch(secondaryBranch, /gesture:\s*["']double["']/);
   assert.doesNotMatch(commit, /action\.intent\s*===\s*["']focus["']/);
+});
+
+test('direct lens and command candidates bypass secondary hold and release their original action once', () => {
+  const secondaryBegins = [];
+  const dispatched = [];
+  const secondaryClickArbiter = {
+    begin(...args) {
+      secondaryBegins.push(args);
+    },
+    cancel() {},
+    release() {}
+  };
+  const primaryClickArbiter = { cancel() {} };
+  const beginSecondaryNavigation = executableFunction('beginSecondaryNavigation', {
+    isUnmodifiedSecondaryNavigation: () => true,
+    gestureArbiter,
+    input: { resolvePointer: () => 'applyImmersiveInwardView' },
+    contextualizeAction: (action) => action,
+    secondaryClickArbiter,
+    candidateArbiterKey: () => 'node:root:portal',
+    candidateSecondarySequenceKey: () => 'node:root:portal',
+    candidateSecondaryPhysicalKey: () => 'secondary:640:360'
+  });
+  const commitPointerCandidate = executableFunction('commitPointerCandidate', {
+    primaryClickArbiter,
+    secondaryClickArbiter,
+    gestureArbiter,
+    dispatchIntent(intent, visualMeta, target) {
+      dispatched.push({ intent, visualMeta, target });
+    }
+  });
+  const portal = { id: 'portal' };
+
+  for (const direct of [
+    { intent: 'inspect', visualMeta: {}, target: portal },
+    { intent: 'runPortalCommand', visualMeta: { source: 'command' }, target: portal }
+  ]) {
+    const candidate = {
+      button: 2,
+      intent: 'applyInwardView',
+      node: portal,
+      direct,
+      mappingEvent: { button: 2 },
+      mappingContext: { onNode: true }
+    };
+    assert.equal(beginSecondaryNavigation(candidate), false);
+    commitPointerCandidate(candidate);
+  }
+
+  assert.equal(secondaryBegins.length, 0);
+  assert.deepEqual(dispatched, [
+    { intent: 'inspect', visualMeta: {}, target: portal },
+    { intent: 'runPortalCommand', visualMeta: { source: 'command' }, target: portal }
+  ]);
+});
+
+test('only real unmodified inward or parent navigation starts secondary hold arbitration', () => {
+  const secondaryBegins = [];
+  const beginSecondaryNavigation = executableFunction('beginSecondaryNavigation', {
+    isUnmodifiedSecondaryNavigation: () => true,
+    gestureArbiter,
+    input: { resolvePointer: () => 'applyImmersiveInwardView' },
+    contextualizeAction: (action) => action,
+    secondaryClickArbiter: { begin: (...args) => secondaryBegins.push(args) },
+    candidateArbiterKey: () => 'node:root:portal',
+    candidateSecondarySequenceKey: () => 'node:root:portal',
+    candidateSecondaryPhysicalKey: () => 'secondary:640:360'
+  });
+  const node = { id: 'portal' };
+  const candidate = {
+    button: 2,
+    intent: 'applyInwardView',
+    node,
+    direct: null,
+    mappingEvent: { button: 2 },
+    mappingContext: { onNode: true }
+  };
+
+  assert.equal(beginSecondaryNavigation(candidate), true);
+  assert.equal(secondaryBegins.length, 1);
+  assert.equal(secondaryBegins[0][0].intent, 'applyInwardView');
+  assert.equal(secondaryBegins[0][1].intent, 'applyImmersiveInwardView');
+
+  assert.equal(beginSecondaryNavigation({ ...candidate, intent: 'inspect' }), false);
+  assert.equal(secondaryBegins.length, 1);
 });
 
 test('engine dispatches direct node and field visual intent cases', () => {

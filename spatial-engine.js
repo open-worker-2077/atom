@@ -6970,6 +6970,25 @@
     return "field";
   }
 
+  function candidateSecondarySequenceKey(candidate) {
+    if (candidate.node) return candidateArbiterKey(candidate);
+    const point = candidate.start || {};
+    const x = Number(point.x);
+    const y = Number(point.y);
+    return Number.isFinite(x) && Number.isFinite(y)
+      ? `field:${Math.round(x)}:${Math.round(y)}`
+      : candidateArbiterKey(candidate);
+  }
+
+  function candidateSecondaryPhysicalKey(candidate) {
+    const point = candidate.start || {};
+    const x = Number(point.x);
+    const y = Number(point.y);
+    return Number.isFinite(x) && Number.isFinite(y)
+      ? `secondary:${Math.round(x)}:${Math.round(y)}`
+      : null;
+  }
+
   function isUnmodifiedSecondaryNavigation(candidate) {
     const mappingEvent = candidate && candidate.mappingEvent || {};
     return Boolean(
@@ -6983,9 +7002,9 @@
   }
 
   function beginSecondaryNavigation(candidate) {
-    if (!isUnmodifiedSecondaryNavigation(candidate)) return false;
+    if (!isUnmodifiedSecondaryNavigation(candidate) || candidate.direct) return false;
     const singleAction = gestureArbiter.classifyTap(candidate);
-    if (!singleAction) return false;
+    if (!singleAction || !["applyInwardView", "applyParentView"].includes(singleAction.intent)) return false;
     const holdIntent = input.resolvePointer(
       { ...candidate.mappingEvent, button: 2 },
       { ...(candidate.mappingContext || {}), gesture: "hold" }
@@ -6999,7 +7018,9 @@
           candidate
         )
         : null,
-      candidateArbiterKey(candidate)
+      candidateArbiterKey(candidate),
+      candidateSecondarySequenceKey(candidate),
+      candidateSecondaryPhysicalKey(candidate)
     );
     return true;
   }

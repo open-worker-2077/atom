@@ -365,6 +365,34 @@ test('secondary arbiter releases a short press once and coalesces a fast exact-s
   assert.deepEqual(commits, ['applyParentView']);
 });
 
+test('secondary arbiter coalesces one physical blank double press across a collapsed domain', () => {
+  const commits = [];
+  let currentTime = 1000;
+  const arbiter = createSecondaryClickArbiter({
+    now: () => currentTime,
+    setTimer: () => 1,
+    clearTimer() {},
+    commitSingle(action) {
+      commits.push(action.target);
+    },
+    commitHold() {}
+  });
+  const innerParent = { intent: 'applyParentView', target: 'inner' };
+  const outerParent = { intent: 'applyParentView', target: 'outer' };
+
+  arbiter.begin(innerParent, null, 'field:root/outer/inner', 'field:640:360', 'secondary:640:360');
+  assert.equal(arbiter.release('field:root/outer/inner'), 'single');
+  currentTime += 40;
+  arbiter.begin(outerParent, null, 'node:root:outer', 'node:root:outer', 'secondary:640:360');
+  assert.equal(arbiter.release('node:root:outer'), 'coalesced');
+  assert.deepEqual(commits, ['inner']);
+
+  currentTime += 40;
+  arbiter.begin(outerParent, null, 'node:root:outer', 'node:root:outer', 'secondary:700:360');
+  assert.equal(arbiter.release('node:root:outer'), 'single');
+  assert.deepEqual(commits, ['inner', 'outer']);
+});
+
 test('secondary arbiter keeps short presses on different stable targets independent', () => {
   const singles = [];
   let currentTime = 1000;
@@ -380,10 +408,10 @@ test('secondary arbiter keeps short presses on different stable targets independ
   const first = { intent: 'toggleChildren', target: { id: 'first' } };
   const second = { intent: 'toggleChildren', target: { id: 'second' } };
 
-  arbiter.begin(first, { intent: 'enter', target: first.target }, 'node:first');
+  arbiter.begin(first, { intent: 'enter', target: first.target }, 'node:first', 'node:first', 'secondary:640:360');
   arbiter.release('node:first');
   currentTime += 40;
-  arbiter.begin(second, { intent: 'enter', target: second.target }, 'node:second');
+  arbiter.begin(second, { intent: 'enter', target: second.target }, 'node:second', 'node:second', 'secondary:640:360');
   arbiter.release('node:second');
   assert.deepEqual(singles, [first, second]);
   assert.equal(arbiter.pending, false);

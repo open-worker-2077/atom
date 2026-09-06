@@ -181,6 +181,8 @@
     let pendingSingleAction = null;
     let pendingHoldAction = null;
     let pendingSignature = null;
+    let pendingSequenceSignature = null;
+    let pendingPhysicalSignature = null;
     let pendingDelay = 420;
     let pendingStartedAt = 0;
     let holdCommitted = false;
@@ -192,6 +194,8 @@
       pendingSingleAction = null;
       pendingHoldAction = null;
       pendingSignature = null;
+      pendingSequenceSignature = null;
+      pendingPhysicalSignature = null;
       pendingDelay = 420;
       pendingStartedAt = 0;
       holdCommitted = false;
@@ -213,15 +217,22 @@
       }, delay);
     }
 
-    function begin(singleAction, holdAction, signature) {
+    function begin(singleAction, holdAction, signature, sequenceSignature, physicalSignature) {
       cancel();
       if (!singleAction || typeof singleAction !== 'object') return 'idle';
       const safeSignature = typeof signature === 'string' && signature ? signature : 'field';
+      const safeSequenceSignature = typeof sequenceSignature === 'string' && sequenceSignature
+        ? sequenceSignature
+        : safeSignature;
       const token = {};
       pendingToken = token;
       pendingSingleAction = singleAction;
       pendingHoldAction = holdAction || null;
       pendingSignature = safeSignature;
+      pendingSequenceSignature = safeSequenceSignature;
+      pendingPhysicalSignature = typeof physicalSignature === 'string' && physicalSignature
+        ? physicalSignature
+        : null;
       pendingDelay = Math.min(800, Math.max(240, Number(delayFor()) || 420));
       pendingStartedAt = Number(now());
       if (!Number.isFinite(pendingStartedAt)) pendingStartedAt = 0;
@@ -240,6 +251,8 @@
       const singleAction = pendingSingleAction;
       const completedHold = holdCommitted;
       const releaseSignature = pendingSignature;
+      const releaseSequenceSignature = pendingSequenceSignature;
+      const releasePhysicalSignature = pendingPhysicalSignature;
       const releaseDelay = pendingDelay;
       const startedAt = pendingStartedAt;
       const holdAction = pendingHoldAction;
@@ -254,15 +267,27 @@
         return 'hold';
       }
       const safeReleasedAt = Number.isFinite(releasedAt) ? releasedAt : 0;
-      if (
+      const sameSequence = recentSingle && recentSingle.signature === releaseSequenceSignature;
+      const continuesBlankSequence = Boolean(
         recentSingle
-        && recentSingle.signature === releaseSignature
-        && safeReleasedAt - recentSingle.at <= recentSingle.delay
-      ) {
+        && releasePhysicalSignature
+        && recentSingle.physicalSignature === releasePhysicalSignature
+        && (
+          recentSingle.exactSignature.startsWith('field')
+          || releaseSignature.startsWith('field')
+        )
+      );
+      if (recentSingle && (sameSequence || continuesBlankSequence) && safeReleasedAt - recentSingle.at <= recentSingle.delay) {
         recentSingle = null;
         return 'coalesced';
       }
-      recentSingle = { signature: releaseSignature, at: safeReleasedAt, delay: releaseDelay };
+      recentSingle = {
+        signature: releaseSequenceSignature,
+        exactSignature: releaseSignature,
+        physicalSignature: releasePhysicalSignature,
+        at: safeReleasedAt,
+        delay: releaseDelay
+      };
       commitSingle(singleAction);
       return 'single';
     }

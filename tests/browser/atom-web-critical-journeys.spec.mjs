@@ -1045,6 +1045,29 @@ test('A sustained right press immerses once before release and release adds no o
     .not.toContain('叶子');
 });
 
+test('ordinary nested blank right double-click collapses only its direct inner group', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { parentPath, innerPath } = await openAModeFixture(page);
+  await rightClickTarget(page, '父团', 1);
+  await page.waitForTimeout(430);
+  await rightClickTarget(page, '内层团', 1);
+  await page.waitForTimeout(430);
+  const innerCarrier = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .find(({ label }) => label === '内层团');
+  expect(innerCarrier).toBeTruthy();
+  const blankPoint = {
+    x: innerCarrier.clientX + innerCarrier.radius * 0.9,
+    y: innerCarrier.clientY
+  };
+
+  await page.mouse.dblclick(blankPoint.x, blankPoint.y, { button: 'right', delay: 40 });
+  await page.waitForTimeout(450);
+
+  const clusterPaths = await page.evaluate(() => window.spatialLab.state().clusterPaths);
+  expect(clusterPaths).toContain(parentPath);
+  expect(clusterPaths).not.toContain(innerPath);
+});
+
 test('A right double-click never promotes to immersion', async ({ page }) => {
   test.setTimeout(90_000);
   await openAModeFixture(page);
