@@ -182,7 +182,7 @@
     let pendingHoldAction = null;
     let pendingSignature = null;
     let pendingSequenceSignature = null;
-    let pendingPhysicalSignature = null;
+    let pendingPhysicalPoint = null;
     let pendingDelay = 420;
     let pendingStartedAt = 0;
     let holdCommitted = false;
@@ -195,7 +195,7 @@
       pendingHoldAction = null;
       pendingSignature = null;
       pendingSequenceSignature = null;
-      pendingPhysicalSignature = null;
+      pendingPhysicalPoint = null;
       pendingDelay = 420;
       pendingStartedAt = 0;
       holdCommitted = false;
@@ -217,7 +217,7 @@
       }, delay);
     }
 
-    function begin(singleAction, holdAction, signature, sequenceSignature, physicalSignature) {
+    function begin(singleAction, holdAction, signature, sequenceSignature, physicalPoint) {
       cancel();
       if (!singleAction || typeof singleAction !== 'object') return 'idle';
       const safeSignature = typeof signature === 'string' && signature ? signature : 'field';
@@ -230,9 +230,15 @@
       pendingHoldAction = holdAction || null;
       pendingSignature = safeSignature;
       pendingSequenceSignature = safeSequenceSignature;
-      pendingPhysicalSignature = typeof physicalSignature === 'string' && physicalSignature
-        ? physicalSignature
-        : null;
+      const pointX = Number(physicalPoint && physicalPoint.x);
+      const pointY = Number(physicalPoint && physicalPoint.y);
+      const pointTolerance = Number(physicalPoint && physicalPoint.tolerance);
+      pendingPhysicalPoint = (
+        Number.isFinite(pointX)
+        && Number.isFinite(pointY)
+        && Number.isFinite(pointTolerance)
+        && pointTolerance > 0
+      ) ? { x: pointX, y: pointY, tolerance: pointTolerance } : null;
       pendingDelay = Math.min(800, Math.max(240, Number(delayFor()) || 420));
       pendingStartedAt = Number(now());
       if (!Number.isFinite(pendingStartedAt)) pendingStartedAt = 0;
@@ -252,7 +258,7 @@
       const completedHold = holdCommitted;
       const releaseSignature = pendingSignature;
       const releaseSequenceSignature = pendingSequenceSignature;
-      const releasePhysicalSignature = pendingPhysicalSignature;
+      const releasePhysicalPoint = pendingPhysicalPoint;
       const releaseDelay = pendingDelay;
       const startedAt = pendingStartedAt;
       const holdAction = pendingHoldAction;
@@ -270,8 +276,12 @@
       const sameSequence = recentSingle && recentSingle.signature === releaseSequenceSignature;
       const continuesBlankSequence = Boolean(
         recentSingle
-        && releasePhysicalSignature
-        && recentSingle.physicalSignature === releasePhysicalSignature
+        && releasePhysicalPoint
+        && recentSingle.physicalPoint
+        && Math.hypot(
+          releasePhysicalPoint.x - recentSingle.physicalPoint.x,
+          releasePhysicalPoint.y - recentSingle.physicalPoint.y
+        ) < recentSingle.physicalPoint.tolerance
         && (
           recentSingle.exactSignature.startsWith('field')
           || releaseSignature.startsWith('field')
@@ -284,7 +294,7 @@
       recentSingle = {
         signature: releaseSequenceSignature,
         exactSignature: releaseSignature,
-        physicalSignature: releasePhysicalSignature,
+        physicalPoint: releasePhysicalPoint,
         at: safeReleasedAt,
         delay: releaseDelay
       };

@@ -104,7 +104,7 @@ test('direct lens and command candidates bypass secondary hold and release their
     secondaryClickArbiter,
     candidateArbiterKey: () => 'node:root:portal',
     candidateSecondarySequenceKey: () => 'node:root:portal',
-    candidateSecondaryPhysicalKey: () => 'secondary:640:360'
+    candidateSecondaryPhysicalPoint: () => ({ x: 640, y: 360, tolerance: 6 })
   });
   const commitPointerCandidate = executableFunction('commitPointerCandidate', {
     primaryClickArbiter,
@@ -149,7 +149,7 @@ test('only real unmodified inward or parent navigation starts secondary hold arb
     secondaryClickArbiter: { begin: (...args) => secondaryBegins.push(args) },
     candidateArbiterKey: () => 'node:root:portal',
     candidateSecondarySequenceKey: () => 'node:root:portal',
-    candidateSecondaryPhysicalKey: () => 'secondary:640:360'
+    candidateSecondaryPhysicalPoint: () => ({ x: 640, y: 360, tolerance: 6 })
   });
   const node = { id: 'portal' };
   const candidate = {
@@ -168,6 +168,19 @@ test('only real unmodified inward or parent navigation starts secondary hold arb
 
   assert.equal(beginSecondaryNavigation({ ...candidate, intent: 'inspect' }), false);
   assert.equal(secondaryBegins.length, 1);
+});
+
+test('secondary physical continuity uses the candidate drag tolerance without rounding its press point', () => {
+  const candidateSecondaryPhysicalPoint = executableFunction('candidateSecondaryPhysicalPoint');
+
+  assert.deepEqual(
+    candidateSecondaryPhysicalPoint({ start: { x: 640.49, y: 360.51 }, threshold: 6 }),
+    { x: 640.49, y: 360.51, tolerance: 6 }
+  );
+  assert.deepEqual(
+    candidateSecondaryPhysicalPoint({ start: { x: 120.25, y: 81.75 }, threshold: 10 }),
+    { x: 120.25, y: 81.75, tolerance: 10 }
+  );
 });
 
 test('engine dispatches direct node and field visual intent cases', () => {

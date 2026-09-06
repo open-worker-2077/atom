@@ -1020,6 +1020,18 @@ async function holdRightTarget(page, label, holdMs = 440, release = true) {
   return target;
 }
 
+async function rightDoubleClickWithMicroMove(page, x, y) {
+  const currentTime = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(currentTime + 60_000);
+  await page.mouse.move(x, y);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.up({ button: 'right' });
+  await page.clock.runFor(40);
+  await page.mouse.move(x + 1, y);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.up({ button: 'right' });
+}
+
 test('A single right-click cuts inward without hiding outside context', async ({ page }) => {
   test.setTimeout(90_000);
   await openAModeFixture(page);
@@ -1047,6 +1059,7 @@ test('A sustained right press immerses once before release and release adds no o
 
 test('ordinary nested blank right double-click collapses only its direct inner group', async ({ page }) => {
   test.setTimeout(90_000);
+  await page.clock.install({ time: new Date('2026-09-06T00:00:00Z') });
   const { parentPath, innerPath } = await openAModeFixture(page);
   await rightClickTarget(page, '父团', 1);
   await page.waitForTimeout(430);
@@ -1060,7 +1073,7 @@ test('ordinary nested blank right double-click collapses only its direct inner g
     y: innerCarrier.clientY
   };
 
-  await page.mouse.dblclick(blankPoint.x, blankPoint.y, { button: 'right', delay: 40 });
+  await rightDoubleClickWithMicroMove(page, blankPoint.x, blankPoint.y);
   await page.waitForTimeout(450);
 
   const clusterPaths = await page.evaluate(() => window.spatialLab.state().clusterPaths);
@@ -1129,12 +1142,13 @@ test('A pending right hold cancels on drag, pointer cancellation, and modifier c
 
 test('blank right double-click returns only one level non-immersively', async ({ page }) => {
   test.setTimeout(90_000);
+  await page.clock.install({ time: new Date('2026-09-06T00:00:00Z') });
   const { parentPath, innerPath } = await openAModeFixture(page);
   await holdRightTarget(page, '父团');
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(parentPath);
   await holdRightTarget(page, '内层团');
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(innerPath);
-  await page.mouse.dblclick(48, 360, { button: 'right', delay: 40 });
+  await rightDoubleClickWithMicroMove(page, 48, 360);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(parentPath);
   const labels = await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label));
   expect(labels).toContain('内层旁侧');

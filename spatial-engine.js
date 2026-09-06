@@ -6980,12 +6980,13 @@
       : candidateArbiterKey(candidate);
   }
 
-  function candidateSecondaryPhysicalKey(candidate) {
+  function candidateSecondaryPhysicalPoint(candidate) {
     const point = candidate.start || {};
     const x = Number(point.x);
     const y = Number(point.y);
-    return Number.isFinite(x) && Number.isFinite(y)
-      ? `secondary:${Math.round(x)}:${Math.round(y)}`
+    const tolerance = Number(candidate.threshold);
+    return Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(tolerance) && tolerance > 0
+      ? { x, y, tolerance }
       : null;
   }
 
@@ -7020,7 +7021,7 @@
         : null,
       candidateArbiterKey(candidate),
       candidateSecondarySequenceKey(candidate),
-      candidateSecondaryPhysicalKey(candidate)
+      candidateSecondaryPhysicalPoint(candidate)
     );
     return true;
   }
