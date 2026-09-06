@@ -444,6 +444,33 @@ export async function startAtomGraphServer(options = {}) {
     publishLegacyProjection: false,
     onAuthoritativeWrite: () => backupTrigger?.schedule()
   });
+  const currentAgentAuthorityOptions = async () => {
+    if (typeof worldService.readCommittedSnapshot === 'function') {
+      const committedSnapshot = await worldService.readCommittedSnapshot({
+        contextFile: configuration.contextFile,
+        projectionFile: configuration.graphFile
+      });
+      return {
+        committedSnapshot,
+        ...(committedSnapshot?.compatibilityManifest ? {
+          compatibilityManifest: committedSnapshot.compatibilityManifest
+        } : {}),
+        ...(committedSnapshot?.revision ? { worldRevision: committedSnapshot.revision } : {})
+      };
+    }
+    const compatibilityManifest = typeof worldService.compatibilityManifest === 'function'
+      ? await worldService.compatibilityManifest({
+          contextFile: configuration.contextFile,
+          projectionFile: configuration.graphFile
+        })
+      : null;
+    return {
+      ...(compatibilityManifest ? { compatibilityManifest } : {}),
+      ...(compatibilityManifest?.currentWorldRevision ? {
+        worldRevision: compatibilityManifest.currentWorldRevision
+      } : {})
+    };
+  };
   let notifySpatialProjection = null;
   const spatialProjectionStore = createStore(configuration.storeFile);
   const baseSpatialPublisher = options.spatialPublisher ?? Object.freeze({
@@ -476,12 +503,7 @@ export async function startAtomGraphServer(options = {}) {
   const handlers = createAtomGraphHandlers(interactionRuntime, {
     diagnostics,
     resolveAgent: async (selector) => resolveServerAgentContext(configuration.contextFile, selector, {
-      compatibilityManifest: typeof worldService.compatibilityManifest === 'function'
-        ? await worldService.compatibilityManifest({
-          contextFile: configuration.contextFile,
-          projectionFile: configuration.graphFile
-        })
-        : null
+      ...await currentAgentAuthorityOptions()
     })
   });
 
@@ -496,18 +518,10 @@ export async function startAtomGraphServer(options = {}) {
       { errors: initialization.errors ?? [] }
     );
   }
-  const startupManifest = typeof worldService.compatibilityManifest === 'function'
-    ? await worldService.compatibilityManifest({
-      contextFile: configuration.contextFile,
-      projectionFile: configuration.graphFile
-    })
-    : null;
+  const startupAuthority = await currentAgentAuthorityOptions();
   await primeAgentDirectory(configuration.contextFile, {
     programScheduler,
-    ...(startupManifest ? { compatibilityManifest: startupManifest } : {}),
-    ...(startupManifest?.currentWorldRevision
-      ? { worldRevision: startupManifest.currentWorldRevision }
-      : {})
+    ...startupAuthority
   });
 
   // Complete the startup recovery backup before exposing 4784. Running the

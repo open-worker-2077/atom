@@ -824,12 +824,7 @@ export async function resolveAgentContext(contextFile, selector, options = {}) {
     throw cliError('AGENT_REQUIRED', '公开 Atom CLI 需要 --agent 上下文起点');
   }
   const requested = selector.trim();
-  const atoms = await readAtomContext(contextFile, {
-    create: false,
-    ...(options.compatibilityManifest
-      ? { compatibilityManifest: options.compatibilityManifest }
-      : {})
-  });
+  const atoms = await readAgentFacts(contextFile, options);
   const scheduler = options.programScheduler ?? createProgramRuntimeScheduler({});
   const security = await scheduler.rebuildAgentSecurity(atoms);
   const directory = agentDirectoryFor(atoms, new Set(security.keys()), options);
@@ -855,6 +850,30 @@ export async function resolveAgentContext(contextFile, selector, options = {}) {
   throw cliError('AGENT_NOT_FOUND', '未找到 exact 匹配的已声明 Agent Program');
 }
 
+async function readAgentFacts(contextFile, options) {
+  if (!options.committedSnapshot) {
+    return readAtomContext(contextFile, {
+      create: false,
+      ...(options.compatibilityManifest
+        ? { compatibilityManifest: options.compatibilityManifest }
+        : {})
+    });
+  }
+  const { facts, revision, compatibilityManifest = null } = options.committedSnapshot;
+  if (!Array.isArray(facts) || typeof revision !== 'string') {
+    throw cliError('INVALID_COMMITTED_SNAPSHOT', 'Agent directory requires committed facts and revision from one boundary');
+  }
+  const actualRevision = revisionOfWorldFacts(facts);
+  if (revision !== actualRevision && revision !== actualRevision.slice('sha256:'.length)) {
+    throw cliError('INVALID_COMMITTED_SNAPSHOT', 'Agent directory revision does not match its committed facts');
+  }
+  return readAtomContext(contextFile, {
+    create: false,
+    committedSnapshot: options.committedSnapshot,
+    ...(compatibilityManifest ? { compatibilityManifest } : {})
+  });
+}
+
 function agentDirectoryFor(atoms, agentProgramPaths, options = {}) {
   let directory = agentDirectories.get(atoms);
   if (directory) return directory;
@@ -876,10 +895,7 @@ function agentDirectoryFor(atoms, agentProgramPaths, options = {}) {
 }
 
 export async function primeAgentDirectory(contextFile, options = {}) {
-  const atoms = await readAtomContext(contextFile, {
-    create: false,
-    ...(options.compatibilityManifest ? { compatibilityManifest: options.compatibilityManifest } : {})
-  });
+  const atoms = await readAgentFacts(contextFile, options);
   const scheduler = options.programScheduler ?? createProgramRuntimeScheduler({});
   const security = await scheduler.rebuildAgentSecurity(atoms);
   agentDirectoryFor(atoms, new Set(security.keys()), options);

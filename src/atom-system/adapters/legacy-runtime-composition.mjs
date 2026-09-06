@@ -317,6 +317,9 @@ export function createLegacyRuntimeComposition(options) {
     ?? createLegacyProjectionOrchestrator({
       contextFile,
       programScheduler,
+      committedSnapshotProvider: typeof worldService.readCommittedSnapshot === 'function'
+        ? () => worldService.readCommittedSnapshot({ contextFile, projectionFile: graphFile })
+        : null,
       compatibilityManifestProvider: typeof worldService.compatibilityManifest === 'function'
         ? () => worldService.compatibilityManifest({ contextFile, projectionFile: graphFile })
         : null
@@ -367,41 +370,55 @@ export function createLegacyRuntimeComposition(options) {
     recover: projectAndPublish
   });
 
-  let resolutionManifest = null;
-  let resolutionManifestReady = false;
+  let resolutionAuthority = null;
+  let resolutionAuthorityReady = false;
   const resolvedAgents = new Map();
 
-  async function refreshResolutionManifest() {
-    const manifest = typeof worldService.compatibilityManifest === 'function'
-      ? await worldService.compatibilityManifest({ contextFile, projectionFile: graphFile })
-      : null;
-    resolutionManifest = manifest ? structuredClone(manifest) : null;
-    resolutionManifestReady = true;
+  async function refreshResolutionAuthority() {
+    if (typeof worldService.readCommittedSnapshot === 'function') {
+      const snapshot = await worldService.readCommittedSnapshot({
+        contextFile,
+        projectionFile: graphFile
+      });
+      resolutionAuthority = snapshot ? structuredClone(snapshot) : null;
+    } else {
+      const compatibilityManifest = typeof worldService.compatibilityManifest === 'function'
+        ? await worldService.compatibilityManifest({ contextFile, projectionFile: graphFile })
+        : null;
+      resolutionAuthority = compatibilityManifest
+        ? { compatibilityManifest: structuredClone(compatibilityManifest) }
+        : null;
+    }
+    resolutionAuthorityReady = true;
     resolvedAgents.clear();
-    return resolutionManifest;
+    return resolutionAuthority;
   }
 
-  async function currentResolutionManifest() {
-    if (!resolutionManifestReady) await refreshResolutionManifest();
-    return resolutionManifest;
+  async function currentResolutionAuthority() {
+    if (!resolutionAuthorityReady) await refreshResolutionAuthority();
+    return resolutionAuthority;
   }
 
-  function resolutionKey(agentPath, manifest) {
+  function resolutionKey(agentPath, authority) {
     const manifestHash = crypto.createHash('sha256')
-      .update(JSON.stringify(manifest ?? null))
+      .update(JSON.stringify(authority?.compatibilityManifest ?? null))
       .digest('hex');
     const securityRevision = programScheduler?.agentSecurityWorldRevision ?? '';
-    return `${agentPath}\0${manifestHash}\0${securityRevision}`;
+    return `${agentPath}\0${authority?.revision ?? ''}\0${manifestHash}\0${securityRevision}`;
   }
 
   async function resolveAgent(agentPath) {
-    const manifest = await currentResolutionManifest();
-    const key = resolutionKey(agentPath, manifest);
+    const authority = await currentResolutionAuthority();
+    const manifest = authority?.compatibilityManifest ?? null;
+    const key = resolutionKey(agentPath, authority);
     const cached = resolvedAgents.get(key);
     if (cached) return structuredClone(cached);
     const resolved = await agentResolver(contextFile, agentPath, {
+      ...(Array.isArray(authority?.facts) ? { committedSnapshot: structuredClone(authority) } : {}),
       ...(manifest ? { compatibilityManifest: structuredClone(manifest) } : {}),
-      ...(manifest?.currentWorldRevision ? { worldRevision: manifest.currentWorldRevision } : {})
+      ...(authority?.revision ? { worldRevision: authority.revision } : (
+        manifest?.currentWorldRevision ? { worldRevision: manifest.currentWorldRevision } : {}
+      ))
     });
     resolvedAgents.set(key, structuredClone(resolved));
     return resolved;
@@ -417,13 +434,13 @@ export function createLegacyRuntimeComposition(options) {
           programScheduler: programRuntime,
           ...(typeof request.onCommitted === 'function' ? {
             onCommitted: async (committed) => {
-              await refreshResolutionManifest();
+              await refreshResolutionAuthority();
               return request.onCommitted(committed);
             }
           } : {}),
           ...(diagnostics ? { diagnosticRecorder: diagnostics } : {})
         });
-        if (!resolutionManifestReady || result?.changed === true) await refreshResolutionManifest();
+        if (!resolutionAuthorityReady || result?.changed === true) await refreshResolutionAuthority();
         return result;
       }
     },

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,10 +10,15 @@ import {
   createLegacyHumanStatusTranslator,
   createLegacyHumanWorkspaceTranslator
 } from '../src/atom-system/adapters/legacy-runtime-composition.mjs';
+import { createLegacyProjectionOrchestrator } from '../src/atom-system/adapters/legacy-projection-orchestrator.mjs';
 import { createRuntimeCliExecutor } from '../src/atom-system/adapters/runtime-cli-executor.mjs';
 import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
-import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
+import {
+  createJsonTransactionJournal,
+  createJsonWorldRepository
+} from '../src/atom-system/adapters/json-world-repository.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
+import { createLocalWorldPatch } from '../src/atom-system/world-runtime/local-world-patch.mjs';
 import {
   advanceCompatibilityManifest,
   createCompatibilityManifest
@@ -30,6 +36,294 @@ import { authorizeWindowGraphPath } from '../work-engine/atom-language/window-lo
 function atom(thing, situation = '', slot = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
+
+async function runColdRuntimeProbe(contextFile, graphFile, storeFile, agentPath = '') {
+  const script = path.join(import.meta.dirname, 'fixtures', 'cold-local-runtime-probe.mjs');
+  const child = spawn(process.execPath, [script, contextFile, graphFile, storeFile, agentPath], {
+    cwd: path.resolve(import.meta.dirname, '..'),
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const exited = await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code, signal) => resolve({ code, signal }));
+  });
+  assert.equal(exited.signal, null, stderr);
+  assert.equal(exited.code, 0, stderr);
+  return JSON.parse(stdout);
+}
+
+test('a cold runtime projects and resolves an Agent from an un-compacted committed local log', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-cold-local-runtime-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const journalFile = path.join(directory, 'atom.transactions.json');
+  const localCommitFile = path.join(`${journalFile}.d`, 'world-commits.jsonl');
+  const before = [atom('Root', 'old', [
+    atom('Worker', '# inactive until the committed local record', [], 'program')
+  ])];
+  const after = [atom('Root', 'new', [
+    atom('Worker', 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})', [], 'program')
+  ])];
+  await fs.writeFile(contextFile, `${JSON.stringify(before)}\n`, 'utf8');
+  const repository = createJsonWorldRepository({
+    file: contextFile,
+    worldId: 'primary',
+    localCommitFile
+  });
+  await repository.appendLocalCommit({
+    commandId: 'cold-local-runtime',
+    expectedRevision: revisionOfWorldFacts(before),
+    nextSnapshot: {
+      worldId: 'primary',
+      revision: revisionOfWorldFacts(after),
+      facts: after
+    },
+    patch: createLocalWorldPatch({
+      worldId: 'primary',
+      beforeRevision: revisionOfWorldFacts(before),
+      afterRevision: revisionOfWorldFacts(after),
+      beforeFacts: before,
+      afterFacts: after,
+      changedPaths: ['Root', 'Root/Worker']
+    })
+  });
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), before,
+    'fixture must keep the baseline stale so only the committed log owns the new facts');
+
+  const result = await runColdRuntimeProbe(contextFile, graphFile, storeFile, 'Root/Worker');
+  assert.equal(result.error, undefined, JSON.stringify(result));
+  assert.equal(result.projectionStatus, 'published', JSON.stringify(result));
+  assert.equal(result.initializationRevision, revisionOfWorldFacts(after).replace(/^sha256:/u, ''));
+  assert.equal(result.projectionRevision, revisionOfWorldFacts(after));
+  assert.equal(result.graphSituation, 'new');
+  assert.equal(result.spatialSituation, 'new');
+  assert.equal(result.agentError, null, JSON.stringify(result));
+  assert.equal(result.agentPath, 'Root/Worker');
+  assert.equal(result.exploreSituation, 'new');
+});
+
+test('a cold runtime preserves a versioned compatibility manifest with its local facts', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-cold-versioned-runtime-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const before = [{
+    ...atom('Root', 'old', [
+      atom('Worker', 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})', [], 'program')
+    ]),
+    strut: [{ verb: 'legacy', object: 'Target' }]
+  }, atom('Target')];
+  const after = structuredClone(before);
+  after[0].situation = 'new';
+  await fs.writeFile(contextFile, `${JSON.stringify(before)}\n`, 'utf8');
+  const baseCompatibilityManifest = createCompatibilityManifest({
+    sourceRevision: 'sha256:legacy-source',
+    targetFacts: before
+  });
+  const persistence = createTransactionalWorldPersistence({
+    contextFile,
+    projectionFile: graphFile,
+    publishLegacyProjection: false
+  });
+  await persistence.commit({
+    correlationId: 'cold-versioned-local-runtime',
+    expectedRevision: revisionOfWorldFacts(before),
+    nextRevision: revisionOfWorldFacts(after),
+    facts: after,
+    beforeFacts: before,
+    changedPaths: ['Root'],
+    affectedAtoms: [{ path: 'Root', axes: ['situation'] }],
+    affectedPathClosureComplete: true,
+    relationEndpoints: [],
+    lockPaths: [],
+    shortcutPaths: [],
+    referencePaths: [],
+    baseCompatibilityManifest,
+    compatibilityManifest: advanceCompatibilityManifest(baseCompatibilityManifest, before, after)
+  });
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), before);
+
+  const result = await runColdRuntimeProbe(contextFile, graphFile, storeFile, 'Root/Worker');
+  assert.equal(result.error, undefined, JSON.stringify(result));
+  assert.equal(result.projectionStatus, 'published', JSON.stringify(result));
+  assert.equal(result.projectionRevision, revisionOfWorldFacts(after));
+  assert.equal(result.graphSituation, 'new');
+  assert.equal(result.spatialSituation, 'new');
+  assert.deepEqual(result.legacyRelations, [{
+    source: 'Root', ordinal: 0, verb: 'legacy', object: 'Target'
+  }]);
+  assert.equal(result.agentError, null, JSON.stringify(result));
+  assert.equal(result.exploreSituation, 'new');
+});
+
+for (const manifestMode of ['null', 'versioned']) {
+  test(`projection derives facts, revision and ${manifestMode} manifest from one committed tuple`, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), `atom-projection-committed-${manifestMode}-`));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const contextFile = path.join(directory, 'atom.json');
+    const before = manifestMode === 'versioned'
+      ? [{ ...atom('Root', 'old'), strut: [{ verb: 'legacy', object: 'Target' }] }, atom('Target')]
+      : [atom('Root', 'old')];
+    const after = manifestMode === 'versioned'
+      ? [{ ...atom('Root', 'new'), strut: [{ verb: 'legacy', object: 'Target' }] }, atom('Target')]
+      : [atom('Root', 'new')];
+    await fs.writeFile(contextFile, `${JSON.stringify(before)}\n`, 'utf8');
+    const compatibilityManifest = manifestMode === 'versioned'
+      ? createCompatibilityManifest({ sourceRevision: 'sha256:legacy-source', targetFacts: after })
+      : null;
+    let snapshotReads = 0;
+    const orchestrator = createLegacyProjectionOrchestrator({
+      contextFile,
+      committedSnapshotProvider: async () => {
+        snapshotReads += 1;
+        return {
+          facts: after,
+          revision: revisionOfWorldFacts(after),
+          compatibilityManifest
+        };
+      }
+    });
+
+    const projected = await orchestrator.projectCurrent({
+      expectedRevision: revisionOfWorldFacts(after)
+    });
+
+    assert.equal(snapshotReads, 1);
+    assert.equal(projected.sourceRevision, revisionOfWorldFacts(after));
+    assert.equal(findAtom(projected.graph.graph.slot, 'Root').situation, 'new');
+    if (manifestMode === 'versioned') {
+      assert.deepEqual(projected.spatial.legacyRelations, [{
+        source: 'Root', ordinal: 0, verb: 'legacy', object: 'Target'
+      }]);
+    }
+  });
+}
+
+test('projection reads an un-compacted rollback instead of the newer compacted baseline', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-projection-local-rollback-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const journalFile = path.join(directory, 'atom.transactions.json');
+  const localCommitFile = path.join(`${journalFile}.d`, 'world-commits.jsonl');
+  const before = [atom('Root', 'before')];
+  const after = [atom('Root', 'after')];
+  await fs.writeFile(contextFile, `${JSON.stringify(before)}\n`, 'utf8');
+  const persistence = createTransactionalWorldPersistence({
+    contextFile,
+    projectionFile: graphFile,
+    publishLegacyProjection: false
+  });
+  const committed = await persistence.commit({
+    correlationId: 'projection-forward',
+    expectedRevision: revisionOfWorldFacts(before),
+    nextRevision: revisionOfWorldFacts(after),
+    facts: after,
+    beforeFacts: before,
+    changedPaths: ['Root'],
+    affectedAtoms: [{ path: 'Root', axes: ['situation'] }],
+    affectedPathClosureComplete: true,
+    relationEndpoints: [],
+    lockPaths: [],
+    shortcutPaths: [],
+    referencePaths: []
+  });
+  await createJsonWorldRepository({
+    file: contextFile,
+    worldId: 'primary',
+    localCommitFile
+  }).compactCommittedState();
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), after);
+  const rolledBack = await persistence.rollback({
+    targetCommandId: committed.commandId,
+    correlationId: 'projection-rollback',
+    expectedRevision: committed.afterRevision
+  });
+  const authority = await persistence.readCommittedSnapshot();
+  assert.equal(authority.revision, rolledBack.afterRevision);
+  assert.deepEqual(authority.facts, before);
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), after,
+    'rollback must remain in the local log for this regression to exercise the stale baseline');
+  const orchestrator = createLegacyProjectionOrchestrator({
+    contextFile,
+    committedSnapshotProvider: () => persistence.readCommittedSnapshot()
+  });
+
+  const projected = await orchestrator.projectCurrent({ expectedRevision: rolledBack.afterRevision });
+  assert.equal(findAtom(projected.graph.graph.slot, 'Root').situation, 'before');
+});
+
+test('projection consumes commits after a Windows-frozen baseline generation', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-projection-windows-frozen-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const localCommitFile = path.join(directory, 'atom.transactions.json.d', 'world-commits.jsonl');
+  const before = [atom('Root', 'before')];
+  const middle = [atom('Root', 'middle')];
+  const after = [atom('Root', 'after')];
+  await fs.writeFile(contextFile, `${JSON.stringify(before)}\n`, 'utf8');
+  const fileSystem = {
+    ...fs,
+    async open(target, flags, ...args) {
+      if (path.resolve(target) === path.resolve(directory)) {
+        return {
+          async sync() {
+            throw Object.assign(new Error('Windows directory sync unavailable'), { code: 'EPERM' });
+          },
+          async close() {}
+        };
+      }
+      return fs.open(target, flags, ...args);
+    }
+  };
+  const writer = createJsonWorldRepository({
+    file: contextFile,
+    worldId: 'primary',
+    localCommitFile,
+    fileSystem
+  });
+  const append = (commandId, previous, next) => writer.appendLocalCommit({
+    commandId,
+    expectedRevision: revisionOfWorldFacts(previous),
+    nextSnapshot: {
+      worldId: 'primary',
+      revision: revisionOfWorldFacts(next),
+      facts: next
+    },
+    patch: createLocalWorldPatch({
+      worldId: 'primary',
+      beforeRevision: revisionOfWorldFacts(previous),
+      afterRevision: revisionOfWorldFacts(next),
+      beforeFacts: previous,
+      afterFacts: next,
+      changedPaths: ['Root']
+    })
+  });
+  await append('windows-middle', before, middle);
+  await writer.compactCommittedState();
+  await append('windows-after', middle, after);
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), middle,
+    'the post-generation commit must remain newer than the frozen baseline');
+  const restarted = createJsonWorldRepository({ file: contextFile, worldId: 'primary', localCommitFile });
+  const authority = await restarted.read();
+  assert.deepEqual(authority.facts, after);
+  const orchestrator = createLegacyProjectionOrchestrator({
+    contextFile,
+    committedSnapshotProvider: async () => ({ ...authority, compatibilityManifest: null })
+  });
+
+  const projected = await orchestrator.projectCurrent({ expectedRevision: authority.revision });
+  assert.equal(findAtom(projected.graph.graph.slot, 'Root').situation, 'after');
+});
 
 test('Program relocation rewrites an exact ancestor-qualified suffix but leaves prose intact', () => {
   const source = [

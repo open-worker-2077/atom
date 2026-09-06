@@ -28,6 +28,7 @@ export function createLegacyProjectionOrchestrator({
   worldId = 'primary',
   repository = createMemoryProjectionRepository({ immutableReferences: true }),
   programScheduler = null,
+  committedSnapshotProvider = null,
   compatibilityManifestProvider = null,
   journalFile = path.join(path.dirname(contextFile), 'atom.transactions.json')
 }) {
@@ -44,17 +45,54 @@ export function createLegacyProjectionOrchestrator({
     return journalState.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null;
   }
 
-  async function projectCurrent({ expectedRevision, lockState = [], affectedPaths = null } = {}) {
-    const readStartedAt = performance.now();
+  async function currentCommittedSnapshot() {
+    if (typeof committedSnapshotProvider === 'function') {
+      const supplied = await committedSnapshotProvider();
+      if (!supplied || !Array.isArray(supplied.facts) || typeof supplied.revision !== 'string') {
+        throw problem('INVALID_COMMITTED_SNAPSHOT', 'Projection requires committed facts and revision from one boundary');
+      }
+      const suppliedRevision = revisionOfWorldFacts(supplied.facts);
+      if (!sameRevision(supplied.revision, suppliedRevision)) {
+        throw problem('INVALID_COMMITTED_SNAPSHOT', 'Committed projection revision does not match its facts', {
+          expectedRevision: supplied.revision,
+          actualRevision: suppliedRevision
+        });
+      }
+      const compatibilityManifest = supplied.compatibilityManifest
+        ? structuredClone(supplied.compatibilityManifest)
+        : null;
+      const facts = await readAtomContext(contextFile, {
+        create: false,
+        committedSnapshot: supplied,
+        ...(compatibilityManifest ? { compatibilityManifest } : {})
+      });
+      const revision = revisionOfWorldFacts(facts);
+      if (!sameRevision(supplied.revision, revision)) {
+        throw problem('INVALID_COMMITTED_SNAPSHOT', 'Normalized projection facts do not match their committed revision', {
+          expectedRevision: supplied.revision,
+          actualRevision: revision
+        });
+      }
+      return { facts, revision, compatibilityManifest };
+    }
     const compatibilityManifest = await currentCompatibilityManifest();
     const facts = await readAtomContext(contextFile, {
       create: false,
       compatibilityManifest
     });
+    return {
+      facts,
+      revision: revisionOfWorldFacts(facts),
+      compatibilityManifest
+    };
+  }
+
+  async function projectCurrent({ expectedRevision, lockState = [], affectedPaths = null } = {}) {
+    const readStartedAt = performance.now();
+    const { facts, revision: sourceRevision, compatibilityManifest } = await currentCommittedSnapshot();
     performanceTrace('projection-read-world', {
       elapsedMs: Math.round(performance.now() - readStartedAt)
     });
-    const sourceRevision = revisionOfWorldFacts(facts);
     if (expectedRevision && !sameRevision(expectedRevision, sourceRevision)) {
       throw problem('STALE_WORLD_PROJECTION', 'Projection request does not match the current Atom world', {
         expectedRevision,
