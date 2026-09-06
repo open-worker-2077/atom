@@ -197,6 +197,8 @@ Update the existing current requirement ledger with exact revision, counts, timi
 
 ### Task 5: Migration, full verification and controlled deployment
 
+**Current checkpoint (2026-09-07):** Exact whole-branch review of `2701e61..854f023` returned Changes Required (Critical 0 / Important 3). Deployment is blocked only on these verified candidate defects: recovered commits do not invalidate the cross-request committed-snapshot cache; cold projection and direct authority consumers can read the frozen baseline without the un-compacted local log; and a valid schema-version-1 prepared transaction interrupted after the old world write cannot cross the new exact-proof cutover. Each issue has an independent reproducer in `.superpowers/sdd/2026-09-06-local-atomic-world-commit/final-review-evidence/`. Fixes are proceeding as three bounded TDD chains; production, remote and the A immersive-domain defect remain untouched. The first attempted full suite also exposed broad stale-baseline symptoms, so its partial output is failure evidence rather than a release gate; run the final full suite once only after the three authority gaps close.
+
 **Files:**
 - Modify: `docs/superpowers/plans/2026-09-06-local-atomic-world-commit.md`
 - Modify: `docs/superpowers/plans/2026-09-03-atom-current-requirement-ledger.md`
@@ -208,6 +210,8 @@ Update the existing current requirement ledger with exact revision, counts, timi
 - [ ] **Step 1: Review the exact candidate range**
 
 Run GitNexus change detection for the staged code and inspect direct callers of the repository and coordinator. Resolve every Critical or Important finding before broader tests.
+
+Review evidence: `.superpowers/sdd/2026-09-06-local-atomic-world-commit/final-review.md`. Current findings I1-I3 are all reproduced and unresolved; this step remains open until the repaired exact range is independently approved.
 
 - [ ] **Step 2: Run one final full suite**
 
