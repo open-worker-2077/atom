@@ -525,3 +525,7 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **Task6: complete**：e379b98..a2c838e，a_task6_review规格合规、quality Approved，无Critical/Important/Minor。Root复核跨差异项：Task5 d2c0234已限定复审的稳定锚定/阈值/松开一次/双击隔离证据继续有效；本轮git rev-parse标签对象实际解析f2d2fd083329e0c145248988f16fb722a1b4c085，与退役清单一致。关键浏览器29项采用组合证据，未重跑求整组外观；不是单次29项全量结果。
 - **Task7合同定向GREEN待复核**：19519a1仅改editor-engine-contract与view-mode-engine-contract两测试；保留11项对应验收与A历史/批量/递归/PageUpDown/End/边编辑，定向75/75 PASS，产品未变。原a_task5_longpress_review只读评审a2c838e..19519a1；最终Node使用全量1845项通过加定向75项的组合证据，保留原11失败记录，不写成单次1857全绿。部署尚未执行。
 - **Task7 Node门禁关闭（组合证据）**：a_task5_longpress_review已复核a2c838e..19519a1，规格符合、质量Approved、零分级问题；root读完整报告并对照11处差异，接受全量1845通过+两文件75/75定向修正。产品未变，development-control既有exit0复用，当前diff-check通过；只关闭候选测试门禁，部署/正式入口仍开放。
+
+- **最终整支评审进行中**：a_final_review（Astra high）按8643a3e..473bc0e包只读核查；root负责独立裁定。b6dca76仅吸收main重复文档历史并保留已核对当前A记录，git diff 473bc0e HEAD为空，正式合并预检无冲突，产品未变。08:50只读核对原运行任务/Watchdog符合既有部署入口，Pixel 10a仍离线，共同设置revision0/initialized=false；不填猜值。
+- **最终复核待验证边界**：评审初步发现普通nested空白首次收缩后domainContext.path变化可能绕过双击合并，以及candidate.direct未在beginSecondaryNavigation入口排除导致直接工具长按误入导航。root已回读classifyTap、begin/commit、candidateArbiterKey及applyParentView，确认须定向验证既有合同；暂不部署，等待完整最终清单后合并派一次最小修复，不逐项开支线，不改内核。
+- **最终评审裁定／单次修复**：a_final_review完整报告With fixes，I1普通nested空白跨路径双击、I2 direct工具串入hold两Important，无Critical/Minor。Root根据Web§4.1/原direct隔离合同及实际控制流采纳为待行为RED验证的缺口；原a_task5_longpress统一处理，BASE b6dca76，brief/report为a-final-fix-*。仅受影响Node与具名真实输入复验，不重跑全量或改内核；之后一次范围复审，部署仍未执行。

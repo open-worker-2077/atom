@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-31-atom-web-spatial-design.md` §5.5。I3/U3/D2/E3；Transform已完整交付、回告且核对远端备份，现在执行本项，早于旧print及A剩余任务。
 
-**当前执行（2026-09-06）:** 共同展示配置已部署c8c66f1（候选37b003d，产品2ed5448）；正式HTTPS build sha256-ec55209de0a900b3，三份前端资源逐字匹配，health true、revision7405、projection published。独立新listener37768创建晚于代码合入。私密完整备份%LOCALAPPDATA%/AtomGraph/backups/presentation-settings-20260906-050501已hash核对。正式settings revision0/initialized=false：代码部署完成，真实本机基准尚未迁入，真机边框未验收；不得宣称手机已继承或写入55/35探针值。下一项继续已批准旧生成print迁移，原本机/真机入口可用时优先返回验收。
+**当前执行（2026-09-06）:** 共同配置c8c66f1已部署；本次已从Edge默认配置库隔离副本读出4784真实v2基准，原库逐文件hash不变。通过现有loopback bootstrap、expectedRevision=0完成唯一一次初始化，revision1；17个原字段逐项守恒，缺省defaultDetailMode沿模型补floating。正式HTTPS及全新390px桌面Chromium读取完整18字段一致、边界100/内部24、零业务写入。原浏览器备份及源hash留私有SDD。真实基准缺口已关闭，Pixel 10a离线，物理手机屏幕验收仍开放。
 
 **历史RED检查点（2026-09-06）:** 原Task2两个RED测试文件已原样提交为48c79fb安全检查点，未实现产品逻辑、未新增测试运行、未宣称GREEN；待保存反馈交付后安全合入main并续接。
 
@@ -160,3 +160,10 @@ Run: `node --test tests/browser-bridge-contract.test.js tests/atom-presentation-
 - **最终全量结果（2026-09-06）**：候选62a194c任务与整分支复审已关闭；npm test完整结束exit1，1826项/1823通过/3失败，426594ms。原始证据保存在settings工作树的.superpowers/sdd/2026-09-05-shared-presentation-settings/final-full-62a194c.txt。失败分别为默认路径精确断言未纳入新增settings文件、空间体验服务直接导入外部展示模型违反既有依赖边界、旧偏好迁移测试引用已替换函数。当前仅定向回修三项，保留架构门禁与旧迁移语义，不部署、不重跑已通过全量；settings_task2_r4实施，root独立裁定。
 
 - **部署门禁证据**：最终全量1825有效通过＋唯一清理修正定向1/1，限定独立复核通过；产品无后续变化，证据见原SDD final-full-1f73b5a.txt / final-cleanup-targeted-1f73b5a.txt。Step4保持未完成，原因仅为真实基准与真机验收缺口，不将部署完成混称为整个需求完成。
+
+## 2026-09-06 真实本机基准迁移
+
+- **来源验证**：仅在Chrome/Edge的Local Storage定位Atom键，匹配Edge Default；将原LevelDB的CURRENT/manifest/data/log复制到唯一私有隔离profile，copy前后和读取后哈希一致。由Edge自身解析数据库，不凭二进制片段猜值；所有导航本地空文档拦截，仅输出Atom三项presentation keys。4784具有v2及旧v1，v2为正式优先来源，正式HTTPS旧缓存为空。
+- **迁移事实**：私有settings SDD host-atom-settings-1788656360648保存原始v2、source-hashes及隔离副本；host-bootstrap-1788656489736保存before revision0/uninitialized、原raw及规范化结果。原17字段与normalize逐项全等，既有模型仅补缺省detailMode；实际应用loopback初始化仅放行一笔PUT expectedRevision0/bootstraptrue/确切patch，返回revision1。原值备份key与raw逐字相同；未写Atom业务事实。
+- **正式回读**：formal-host-baseline-1788656536379中正式GET revision1、initializedtrue；全新390px桌面Chromium经正式HTTPS读取全部18字段与本机基准深比较一致，设置控件边界100、内部24。全部非读请求拦截且实际0；这是真实共同基准的客户端继承证据，不是物理手机验收。
+- **当前剩余**：真机离线，待上线后核对同revision与实际边框画面；不再把已取得的本机值写成未知，不再重复实现或使用55/35测试值。后续A部署新增长按字段应由已审窄读迁移补420并保留revision1/全部原值。
