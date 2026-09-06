@@ -308,6 +308,11 @@ export function createLegacyWorldService(options = {}) {
   });
   return Object.freeze({
     ...service,
+    async readCommittedSnapshot(request) {
+      if (!request?.contextFile || !request?.projectionFile) return null;
+      const persistence = transactionFor(request);
+      return structuredClone(await committedSnapshotFor(persistence));
+    },
     async compatibilityManifest(request) {
       if (!request?.contextFile || !request?.projectionFile) return null;
       const persistence = transactionFor(request);

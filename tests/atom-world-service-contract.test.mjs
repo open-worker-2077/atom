@@ -13,6 +13,29 @@ const adapterUrl = new URL('../src/atom-system/adapters/legacy-engine-adapter.mj
 const engineUrl = new URL('../work-engine/atom-language/engine.mjs', import.meta.url);
 const cliUrl = new URL('../work-engine/atom-language/cli.mjs', import.meta.url);
 
+function failNextCommittedJournalEvent(t, directory) {
+  const open = fs.open.bind(fs);
+  let failed = false;
+  t.mock.method(fs, 'open', async (target, flags, ...args) => {
+    const handle = await open(target, flags, ...args);
+    if (!String(target).startsWith(directory)
+      || !String(target).endsWith('events.jsonl') || !['r+', 'w+'].includes(flags)) return handle;
+    const write = handle.write.bind(handle);
+    handle.write = async (buffer, offset, length, position) => {
+      const encoded = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer, 'utf8');
+      const sourceOffset = Buffer.isBuffer(buffer) ? offset : 0;
+      const requestedLength = Buffer.isBuffer(buffer) ? length : encoded.length;
+      const event = JSON.parse(encoded.subarray(sourceOffset, sourceOffset + requestedLength).toString('utf8').trim());
+      if (!failed && event.type === 'committed') {
+        failed = true;
+        throw Object.assign(new Error('committed event unavailable'), { code: 'EIO' });
+      }
+      return write(buffer, offset, length, position);
+    };
+    return handle;
+  });
+}
+
 test('World Service owns the temporary legacy interaction seam without changing receipts', async () => {
   const { createWorldService } = await import(serviceUrl);
   const calls = [];
@@ -254,6 +277,139 @@ test('legacy World Service gives the engine one committed facts and manifest sna
   });
 
   assert.equal(result.ok, true);
+  assert.equal(snapshotCalls, 1);
+});
+
+test('recovered committed-event EIO invalidates a prewarmed adapter tuple without changing an active request', async (t) => {
+  const { createLegacyWorldService } = await import(adapterUrl);
+  const { createTransactionalWorldPersistence } = await import(
+    new URL('../src/atom-system/adapters/transactional-world-persistence.mjs', import.meta.url)
+  );
+  const revisionOf = (facts) => `sha256:${crypto.createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`;
+
+  for (const withManifest of [false, true]) {
+    await t.test(`manifest ${withManifest ? 'present' : 'absent'}`, async (t) => {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-recovered-adapter-snapshot-'));
+      t.after(() => fs.rm(directory, { recursive: true, force: true }));
+      const contextFile = path.join(directory, 'atom.json');
+      const projectionFile = path.join(directory, 'graph.json');
+      const initialFacts = [{ thing: 'Target', situation: 'old', slot: [], strut: [] }];
+      await fs.writeFile(contextFile, `${JSON.stringify(initialFacts)}\n`, 'utf8');
+      const persistence = createTransactionalWorldPersistence({
+        contextFile,
+        projectionFile,
+        publishLegacyProjection: false
+      });
+
+      if (withManifest) {
+        const seededFacts = [...initialFacts, { thing: 'Seed', situation: '', slot: [], strut: [] }];
+        await persistence.commit({
+          correlationId: 'seed-manifest',
+          expectedRevision: revisionOf(initialFacts),
+          nextRevision: revisionOf(seededFacts),
+          facts: seededFacts,
+          compatibilityManifest: {
+            contract: 'atom.graph-four-axis-compatibility-manifest',
+            version: 2,
+            sourceRevision: revisionOf(initialFacts),
+            currentWorldRevision: revisionOf(seededFacts),
+            legacyStrut: []
+          }
+        });
+      }
+
+      let enteredHeldRead;
+      let releaseHeldRead;
+      const heldReadEntered = new Promise((resolve) => { enteredHeldRead = resolve; });
+      const heldReadGate = new Promise((resolve) => { releaseHeldRead = resolve; });
+      const observedTuples = [];
+      const service = createLegacyWorldService({
+        transactionProvider: () => persistence,
+        execute: async (request) => {
+          const snapshot = request.committedSnapshot;
+          assert.equal(snapshot.revision, revisionOf(snapshot.facts));
+          assert.equal(snapshot.compatibilityManifest?.currentWorldRevision ?? null,
+            snapshot.compatibilityManifest ? snapshot.revision : null);
+          observedTuples.push(structuredClone(snapshot));
+          if (request.source === 'held-read') {
+            const before = snapshot.facts.find(({ thing }) => thing === 'Target').situation;
+            enteredHeldRead();
+            await heldReadGate;
+            return { before, after: snapshot.facts.find(({ thing }) => thing === 'Target').situation };
+          }
+          if (request.source === 'write') {
+            const facts = structuredClone(snapshot.facts);
+            facts.find(({ thing }) => thing === 'Target').situation = 'new';
+            await request.commitWorld({
+              expectedRevision: snapshot.revision,
+              nextRevision: revisionOf(facts),
+              beforeFacts: snapshot.facts,
+              facts,
+              changedPaths: ['Target'],
+              affectedAtoms: [{ path: 'Target', axes: ['situation'] }],
+              affectedPathClosureComplete: true,
+              relationEndpoints: [],
+              lockPaths: [],
+              shortcutPaths: [],
+              referencePaths: []
+            });
+          }
+          return { situation: snapshot.facts.find(({ thing }) => thing === 'Target').situation,
+            revision: snapshot.revision,
+            compatibilityManifest: snapshot.compatibilityManifest };
+        }
+      });
+      const request = { contextFile, projectionFile };
+      const old = await service.executeLegacy({ ...request, source: 'read', interaction: { id: 'prewarm' } });
+      assert.equal(old.situation, 'old');
+      const generationBefore = persistence.compatibilityGeneration;
+
+      const heldRead = service.executeLegacy({ ...request, source: 'held-read', interaction: { id: 'held' } });
+      await heldReadEntered;
+      failNextCommittedJournalEvent(t, directory);
+      await assert.rejects(
+        service.executeLegacy({ ...request, source: 'write', interaction: { id: 'failed-write' } }),
+        (error) => error.code === 'EIO'
+      );
+
+      const recovered = await persistence.readCommittedSnapshot();
+      releaseHeldRead();
+      const held = await heldRead;
+      const next = await service.executeLegacy({ ...request, source: 'read', interaction: { id: 'after-recovery' } });
+
+      assert.deepEqual(held, { before: 'old', after: 'old' }, 'an active request keeps its captured tuple');
+      assert.equal(recovered.facts.find(({ thing }) => thing === 'Target').situation, 'new');
+      assert.equal(recovered.revision, revisionOf(recovered.facts));
+      assert.equal(recovered.compatibilityManifest?.currentWorldRevision ?? null,
+        recovered.compatibilityManifest ? recovered.revision : null);
+      assert.ok(persistence.compatibilityGeneration > generationBefore,
+        'recovery of a committed local write advances the adapter cache generation');
+      assert.equal(next.situation, 'new', 'the next request must not reuse the pre-recovery tuple');
+      assert.equal(next.revision, recovered.revision);
+      assert.deepEqual(next.compatibilityManifest, recovered.compatibilityManifest);
+      assert.equal(observedTuples.at(-1).revision, recovered.revision);
+    });
+  }
+});
+
+test('legacy World Service exposes the cached committed tuple through one read-only seam', async () => {
+  const snapshot = Object.freeze({
+    facts: [{ thing: 'Root', situation: 'committed', slot: [], strut: [] }],
+    revision: 'sha256:committed',
+    compatibilityManifest: { currentWorldRevision: 'sha256:committed' }
+  });
+  let snapshotCalls = 0;
+  const service = (await import(adapterUrl)).createLegacyWorldService({
+    transactionProvider: () => ({
+      compatibilityGeneration: 0,
+      async recover() {},
+      async readCommittedSnapshot() { snapshotCalls += 1; return snapshot; }
+    })
+  });
+  const request = { contextFile: 'atom.json', projectionFile: 'graph.json' };
+
+  assert.deepEqual(await service.readCommittedSnapshot(request), snapshot);
+  assert.deepEqual(await service.readCommittedSnapshot(request), snapshot);
   assert.equal(snapshotCalls, 1);
 });
 

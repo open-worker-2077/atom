@@ -84,9 +84,18 @@ export function createTransactionalWorldPersistence({
   const { worldRepository, journalRepository, coordinator } = owner;
 
   function recover() {
-    owner.recovery ??= coordinator.recover().finally(() => {
-      owner.recovery = null;
-    });
+    owner.recovery ??= coordinator.recover()
+      .then((result) => {
+        if (result.recovered > 0) {
+          owner.cachedManifest = null;
+          owner.manifestLoaded = false;
+          owner.compatibilityGeneration = (owner.compatibilityGeneration ?? 0) + 1;
+        }
+        return result;
+      })
+      .finally(() => {
+        owner.recovery = null;
+      });
     return owner.recovery;
   }
 
