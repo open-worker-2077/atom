@@ -529,6 +529,7 @@ export function createCommitCoordinator({
       }
       const candidate = await prepareCandidate({
         command,
+        rebaseResult,
         transitionReadsSnapshot: false,
         transition: () => target.historyMode === 'local-patch'
           ? ({

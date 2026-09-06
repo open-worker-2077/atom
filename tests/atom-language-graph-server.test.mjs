@@ -1208,10 +1208,24 @@ test('public concurrent slot instances keep source history and Program failure i
   const committedSources = histories.receipts.filter(({ correlationId }) => interactions.includes(correlationId));
   assert.equal(committedSources.length, 2, JSON.stringify(histories.receipts));
   assert.equal(committedSources.every(({ receipt }) => receipt.status === 'committed'), true);
-  assert.deepEqual(
-    committedSources.map(({ patch }) => patch.changedPaths[0]).sort(),
-    ['Public Agent/槽体/槽例/实例甲/输入', 'Public Agent/槽体/槽例/实例乙/输入'].sort()
+  assert.equal(new Set(committedSources.map(({ commandId }) => commandId)).size, 2);
+  const historiesByInteraction = new Map(
+    committedSources.map((entry) => [entry.correlationId, entry])
   );
+  const expectedPaths = [
+    'Public Agent/槽体/槽例/实例甲/输入',
+    'Public Agent/槽体/槽例/实例乙/输入'
+  ];
+  for (const [index, interaction] of interactions.entries()) {
+    const ownPath = expectedPaths[index];
+    const peerPath = expectedPaths[1 - index];
+    const entry = historiesByInteraction.get(interaction);
+    assert.equal(entry.historyMode, 'local-patch');
+    assert.deepEqual(entry.patch.changedPaths, [ownPath]);
+    assert.deepEqual(entry.patch.operations.map(({ path }) => path), [ownPath]);
+    assert.equal(entry.patch.changedPaths.includes(peerPath), false);
+    assert.equal(entry.patch.operations.some(({ path }) => path === peerPath), false);
+  }
 
   const finals = await Promise.all(sourceText.map((source, index) => command(source, interactions[index])));
   assert.equal(finals[0].result.subsequentExecution.status, 'failed', JSON.stringify(finals[0]));

@@ -672,6 +672,135 @@ test('late persistence commit pairs its old base facts with the old manifest bef
   assert.doesNotThrow(() => validateCompatibilityManifest(committed.compatibilityManifest, committed.facts));
 });
 
+test('rollback recomputes its manifest when a disjoint owner commits after initial rebase', async (t) => {
+  const files = await fixture(t);
+  const secondWorldRepository = createJsonWorldRepository({
+    file: files.worldFile,
+    worldId: 'primary'
+  });
+  const secondCoordinator = createCommitCoordinator({
+    worldRepository: secondWorldRepository,
+    journalRepository: files.journalRepository
+  });
+  const initialFacts = [
+    { thing: 'Legacy', situation: '', slot: [], strut: [{ verb: 'v', object: 'O' }] },
+    ...['A', 'B', 'C'].map((thing) => ({ thing, situation: 'old', slot: [], strut: [] }))
+  ];
+  await writeJsonAtomically(files.worldFile, initialFacts);
+  const initial = await files.worldRepository.read();
+  const initialManifest = createCompatibilityManifest({
+    sourceRevision: 'sha256:legacy-source',
+    targetFacts: initialFacts
+  });
+  const changed = (facts, thing, situation) => {
+    const next = structuredClone(facts);
+    next.find((entry) => entry.thing === thing).situation = situation;
+    return next;
+  };
+  const commitLocal = async (coordinator, id, beforeFacts, nextFacts, changedPath, manifest) => (
+    coordinator.execute({
+      command: command(id, revisionOf(beforeFacts)),
+      transition: () => ({
+        facts: nextFacts,
+        changedPaths: [changedPath],
+        result: completeLocalEffects({
+          affectedAtoms: [{ path: changedPath, axes: ['situation'] }],
+          compatibilityManifest: advanceCompatibilityManifest(manifest, beforeFacts, nextFacts),
+          previousCompatibilityManifest: manifest
+        })
+      })
+    })
+  );
+  const targetFacts = changed(initialFacts, 'A', 'new-a');
+  const target = await commitLocal(
+    files.coordinator, 'rollback-manifest-target', initialFacts, targetFacts, 'A', initialManifest
+  );
+  const targetManifest = advanceCompatibilityManifest(initialManifest, initialFacts, targetFacts);
+  const firstDisjointFacts = changed(targetFacts, 'B', 'new-b');
+  await commitLocal(
+    secondCoordinator, 'rollback-manifest-first-disjoint', targetFacts, firstDisjointFacts, 'B', targetManifest
+  );
+  const firstDisjointManifest = advanceCompatibilityManifest(
+    targetManifest, targetFacts, firstDisjointFacts
+  );
+
+  let enterPreparedGap;
+  let releasePreparedGap;
+  const preparedGapEntered = new Promise((resolve) => { enterPreparedGap = resolve; });
+  const preparedGapGate = new Promise((resolve) => { releasePreparedGap = resolve; });
+  let rollbackReceiptLookups = 0;
+  const rollbackJournal = Object.freeze({
+    async findReceipt(commandId) {
+      if (commandId === 'rollback-manifest-after-owner') {
+        rollbackReceiptLookups += 1;
+        if (rollbackReceiptLookups === 2) {
+          enterPreparedGap();
+          await preparedGapGate;
+        }
+      }
+      return files.journalRepository.findReceipt(commandId);
+    },
+    findPrepared: (...args) => files.journalRepository.findPrepared(...args),
+    findCommitted: (...args) => files.journalRepository.findCommitted(...args),
+    prepare: (...args) => files.journalRepository.prepare(...args),
+    commit: (...args) => files.journalRepository.commit(...args),
+    listPrepared: (...args) => files.journalRepository.listPrepared(...args),
+    readState: (...args) => files.journalRepository.readState(...args)
+  });
+  const rollbackCoordinator = createCommitCoordinator({
+    worldRepository: files.worldRepository,
+    journalRepository: rollbackJournal
+  });
+  let rebaseCalls = 0;
+  const rollingBack = rollbackCoordinator.rollback({
+    targetCommandId: target.commandId,
+    command: command('rollback-manifest-after-owner', revisionOf(firstDisjointFacts)),
+    rebaseResult: async ({ current, facts, result }) => {
+      const state = await files.journalRepository.readState();
+      const currentManifest = structuredClone(
+        state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null
+      );
+      validateCompatibilityManifest(currentManifest, current.facts);
+      const compatibilityManifest = advanceCompatibilityManifest(currentManifest, current.facts, facts);
+      const {
+        compatibilityManifest: _staleManifest,
+        previousCompatibilityManifest: _stalePreviousManifest,
+        ...stableResult
+      } = result;
+      rebaseCalls += 1;
+      return {
+        ...stableResult,
+        compatibilityManifest,
+        previousCompatibilityManifest: currentManifest
+      };
+    }
+  });
+  await preparedGapEntered;
+  const secondDisjointFacts = changed(firstDisjointFacts, 'C', 'new-c');
+  await commitLocal(
+    secondCoordinator,
+    'rollback-manifest-second-disjoint',
+    firstDisjointFacts,
+    secondDisjointFacts,
+    'C',
+    firstDisjointManifest
+  );
+  releasePreparedGap();
+  const rolledBack = await rollingBack;
+
+  const committed = await files.worldRepository.read();
+  assert.deepEqual(
+    committed.facts.slice(1).map(({ situation }) => situation),
+    ['old', 'new-b', 'new-c']
+  );
+  assert.equal(rebaseCalls, 2, 'the second owner must force result metadata through rebase again');
+  assert.equal(rolledBack.result.compatibilityManifest.currentWorldRevision, committed.revision);
+  assert.doesNotThrow(() => validateCompatibilityManifest(
+    rolledBack.result.compatibilityManifest,
+    committed.facts
+  ));
+});
+
 for (const manifestKind of ['null', 'non-null']) {
   test(`committed inspection resolves a failed journal decision before exposing a ${manifestKind} manifest`, async (t) => {
     const files = await fixture(t);
