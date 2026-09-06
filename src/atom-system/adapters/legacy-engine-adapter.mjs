@@ -131,7 +131,6 @@ export function createLegacyWorldService(options = {}) {
     }
     request.signal?.throwIfAborted?.();
     const committedSnapshot = await committedSnapshotFor(persistence);
-    const compatibilityManifest = committedSnapshot?.compatibilityManifest ?? null;
     const transactionTransformLog = typeof persistence.transformLogEntries === 'function'
       ? await timed('transform-log', () => persistence.transformLogEntries())
       : [];
@@ -155,14 +154,14 @@ export function createLegacyWorldService(options = {}) {
     if (execution && (!execution.outcome || execution.outcome.status === 'pending')) {
       await recordOutcome({ ...execution.outcome, status: 'pending', attemptId });
     }
-    const run = (recovery = execution) => timed('engine.execute', () => execute({
+    const run = (recovery = execution, snapshot = committedSnapshot) => timed('engine.execute', () => execute({
       ...request,
       ...(recovery ? { programExecution: recovery,
         interaction: structuredClone(recovery.event.interaction) } : {}),
       interactionBinding: entry.binding,
-      compatibilityManifest,
-      ...(Array.isArray(committedSnapshot?.facts) ? {
-        committedSnapshot: structuredClone(committedSnapshot)
+      compatibilityManifest: snapshot?.compatibilityManifest ?? null,
+      ...(Array.isArray(snapshot?.facts) ? {
+        committedSnapshot: structuredClone(snapshot)
       } : {}),
       acquireCommittedSnapshot: async () => {
         const latest = await committedSnapshotFor(persistence);
@@ -210,7 +209,8 @@ export function createLegacyWorldService(options = {}) {
         revalidatingConflict = true;
         const conflict = result.subsequentExecution.errors.find(({ code }) => code === 'WORLD_REVISION_CONFLICT');
         businessWarnings.push(conflict);
-        result = await run(execution);
+        const recoverySnapshot = await committedSnapshotFor(persistence);
+        result = await run(execution, recoverySnapshot);
         if (businessSettled) return result;
       }
       if (result.ok === false) {

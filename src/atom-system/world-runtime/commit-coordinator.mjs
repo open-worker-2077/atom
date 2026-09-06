@@ -412,7 +412,10 @@ export function createCommitCoordinator({
     if (typeof project !== 'function') {
       throw problem('INVALID_COMMITTED_INSPECTION', 'Committed inspection requires a projection function');
     }
-    return serialize(async () => project(await worldRepository.read()));
+    return serialize(async () => {
+      await recoverUnsafe();
+      return project(await worldRepository.read());
+    });
   }
 
   return Object.freeze({ execute, recover, rollback, recordProgramExecution, inspectCommitted });

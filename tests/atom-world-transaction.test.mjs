@@ -11,6 +11,10 @@ import {
   createJsonWorldRepository,
   writeJsonAtomically
 } from '../src/atom-system/adapters/json-world-repository.mjs';
+import {
+  createCompatibilityManifest,
+  validateCompatibilityManifest
+} from '../src/atom-system/world-runtime/legacy-graph-compat.mjs';
 
 function revisionOf(facts) {
   return `sha256:${crypto.createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`;
@@ -42,6 +46,25 @@ async function fixture(t, options = {}) {
     faultInjector: options.faultInjector
   });
   return { coordinator, worldRepository, journalRepository, worldFile, journalFile };
+}
+
+function journalFailingCommits(journalRepository, count) {
+  let remaining = count;
+  return Object.freeze({
+    findReceipt: (...args) => journalRepository.findReceipt(...args),
+    findPrepared: (...args) => journalRepository.findPrepared(...args),
+    findCommitted: (...args) => journalRepository.findCommitted(...args),
+    prepare: (...args) => journalRepository.prepare(...args),
+    async commit(...args) {
+      if (remaining > 0) {
+        remaining -= 1;
+        throw Object.assign(new Error('simulated journal commit failure'), { code: 'EIO' });
+      }
+      return journalRepository.commit(...args);
+    },
+    listPrepared: (...args) => journalRepository.listPrepared(...args),
+    readState: (...args) => journalRepository.readState(...args)
+  });
 }
 
 test('concurrent commands with one expected revision serialize and cannot lose updates', async (t) => {
@@ -240,6 +263,71 @@ test('committed inspection cannot observe the world-write and journal-commit gap
   const [receipt, observed] = await Promise.all([committing, inspection]);
   assert.equal(observed.snapshot.revision, receipt.afterRevision);
   assert.equal(observed.receipt.afterRevision, receipt.afterRevision);
+});
+
+for (const manifestKind of ['null', 'non-null']) {
+  test(`committed inspection resolves a failed journal decision before exposing a ${manifestKind} manifest`, async (t) => {
+    const files = await fixture(t);
+    const initial = await files.worldRepository.read();
+    const nextFacts = [{ thing: 'Root', situation: 'committed', slot: [], strut: [] }];
+    const compatibilityManifest = manifestKind === 'non-null'
+      ? createCompatibilityManifest({ sourceRevision: initial.revision, targetFacts: nextFacts })
+      : null;
+    const coordinator = createCommitCoordinator({
+      worldRepository: files.worldRepository,
+      journalRepository: journalFailingCommits(files.journalRepository, 1)
+    });
+
+    await assert.rejects(
+      coordinator.execute({
+        command: command(`inspection-recovery-${manifestKind}`, initial.revision),
+        transition: () => ({
+          facts: nextFacts,
+          result: compatibilityManifest ? { compatibilityManifest } : {}
+        })
+      }),
+      (error) => error.code === 'EIO'
+    );
+    assert.deepEqual((await files.journalRepository.readState()).receipts, []);
+
+    const observed = await coordinator.inspectCommitted(async (snapshot) => {
+      const state = await files.journalRepository.readState();
+      const manifest = state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null;
+      if (manifest) validateCompatibilityManifest(manifest, snapshot.facts);
+      return { snapshot, manifest, preparedCount: state.prepared.length, receipt: state.receipts.at(-1)?.receipt };
+    });
+
+    assert.deepEqual(observed.snapshot.facts, nextFacts);
+    assert.equal(observed.snapshot.revision, observed.receipt.afterRevision);
+    assert.deepEqual(observed.manifest, compatibilityManifest);
+    assert.equal(observed.preparedCount, 0);
+  });
+}
+
+test('committed inspection rejects when a pending journal decision cannot be recovered', async (t) => {
+  const files = await fixture(t);
+  const initial = await files.worldRepository.read();
+  const coordinator = createCommitCoordinator({
+    worldRepository: files.worldRepository,
+    journalRepository: journalFailingCommits(files.journalRepository, 2)
+  });
+
+  await assert.rejects(
+    coordinator.execute({
+      command: command('inspection-recovery-rejected', initial.revision),
+      transition: ({ facts }) => ({ facts: [...facts, { name: 'uncommitted' }] })
+    }),
+    (error) => error.code === 'EIO'
+  );
+  await assert.rejects(
+    coordinator.inspectCommitted(() => {
+      assert.fail('inspection must not project an unresolved prepared transaction');
+    }),
+    (error) => error.code === 'EIO'
+  );
+  const state = await files.journalRepository.readState();
+  assert.equal(state.prepared.length, 1);
+  assert.equal(state.receipts.length, 0);
 });
 
 test('hung transition calculation does not block an independent candidate commit', async (t) => {
