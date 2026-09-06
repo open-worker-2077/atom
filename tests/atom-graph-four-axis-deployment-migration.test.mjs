@@ -195,9 +195,13 @@ test('transactional persistence publishes rebased disjoint facts with the matchi
 
   const outcomes = await Promise.allSettled([
     persistence.commit({ correlationId: 'local-rebase-a', expectedRevision: revisionOfWorldFacts(seeded),
-      nextRevision: revisionOfWorldFacts(left), facts: left, changedPaths: ['A'] }),
+      nextRevision: revisionOfWorldFacts(left), facts: left, changedPaths: ['A'],
+      affectedPathClosureComplete: true,
+      relationEndpoints: [], lockPaths: [], shortcutPaths: [], referencePaths: [] }),
     persistence.commit({ correlationId: 'local-rebase-b', expectedRevision: revisionOfWorldFacts(seeded),
-      nextRevision: revisionOfWorldFacts(right), facts: right, changedPaths: ['B'] })
+      nextRevision: revisionOfWorldFacts(right), facts: right, changedPaths: ['B'],
+      affectedPathClosureComplete: true,
+      relationEndpoints: [], lockPaths: [], shortcutPaths: [], referencePaths: [] })
   ]);
 
   assert.equal(outcomes.every(({ status }) => status === 'fulfilled'), true, JSON.stringify(outcomes));

@@ -5,10 +5,13 @@ import {
 } from '../public/contracts.mjs';
 import { affectedAtomsBetween, normalizeAffectedAtoms } from './year-ring.mjs';
 import { revisionOfWorldFacts } from './world-revision.mjs';
+import { isDeepStrictEqual } from 'node:util';
+
 import {
   applyLocalWorldPatch,
   createLocalWorldPatch,
   invertLocalWorldPatch,
+  localWorldPatchReproducesFacts,
   rebaseLocalWorldPatch
 } from './local-world-patch.mjs';
 import { createAffectedPathClosure } from './affected-path-closure.mjs';
@@ -69,7 +72,9 @@ function committedReceipt(command, before, after, result, changedPaths = null) {
   });
 }
 
-const semanticGuardReasons = new Set(['relation-endpoint', 'lock', 'shortcut']);
+const semanticGuardReasons = new Set([
+  'relation-endpoint', 'lock-exact', 'lock-subtree', 'shortcut', 'reference'
+]);
 
 function revisionConflict(message, beforeRevision, currentRevision, conflictingPaths = []) {
   return problem('WORLD_REVISION_CONFLICT', message, {
@@ -80,17 +85,44 @@ function revisionConflict(message, beforeRevision, currentRevision, conflictingP
 }
 
 function semanticConflictPaths(leftEntries = [], rightEntries = []) {
-  const right = new Map(rightEntries.map((entry) => [entry.path, entry.reasons ?? []]));
-  return leftEntries.flatMap((entry) => {
-    const otherReasons = right.get(entry.path);
-    if (!otherReasons) return [];
-    const reasons = entry.reasons ?? [];
-    const guarded = reasons.some((reason) => semanticGuardReasons.has(reason))
-      || otherReasons.some((reason) => semanticGuardReasons.has(reason));
-    const substantive = reasons.some((reason) => reason !== 'authorization-ancestor')
-      && otherReasons.some((reason) => reason !== 'authorization-ancestor');
-    return guarded && substantive ? [entry.path] : [];
+  const intersects = (left, right) => left === right
+    || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+  const conflicts = [];
+  for (const left of leftEntries) {
+    const leftReasons = left.reasons ?? [];
+    const leftSubstantive = leftReasons.some((reason) => reason !== 'authorization-ancestor');
+    for (const right of rightEntries) {
+      const rightReasons = right.reasons ?? [];
+      const rightSubstantive = rightReasons.some((reason) => reason !== 'authorization-ancestor');
+      if (!leftSubstantive || !rightSubstantive) continue;
+      const leftSubtreeLock = leftReasons.includes('lock-subtree');
+      const rightSubtreeLock = rightReasons.includes('lock-subtree');
+      if ((leftSubtreeLock || rightSubtreeLock) && intersects(left.path, right.path)) {
+        conflicts.push(leftSubtreeLock ? left.path : right.path);
+        continue;
+      }
+      const exactGuard = leftReasons.some((reason) => semanticGuardReasons.has(reason))
+        || rightReasons.some((reason) => semanticGuardReasons.has(reason));
+      if (exactGuard && left.path === right.path) conflicts.push(left.path);
+    }
+  }
+  return conflicts;
+}
+
+function completeClosureFor(record) {
+  if (record?.historyMode !== 'local-patch') return null;
+  const result = record.receipt?.result;
+  const closure = createAffectedPathClosure({
+    changedPaths: record.patch?.changedPaths,
+    patch: record.patch,
+    relationEndpoints: result?.relationEndpoints,
+    lockPaths: result?.lockPaths,
+    shortcutPaths: result?.shortcutPaths,
+    referencePaths: result?.referencePaths,
+    complete: result?.affectedPathClosureComplete
   });
+  if (!closure.complete || !isDeepStrictEqual(closure.entries, result?.affectedPathClosure)) return null;
+  return closure.entries;
 }
 
 export function createCommitCoordinator({
@@ -212,7 +244,7 @@ export function createCommitCoordinator({
       if (after.revision === before.revision) {
         throw problem('WORLD_TRANSITION_NO_CHANGE', 'A world commit must change the authoritative facts');
       }
-      const patch = Array.isArray(output.changedPaths) && output.changedPaths.length
+      const declaredPatch = Array.isArray(output.changedPaths) && output.changedPaths.length
         ? createLocalWorldPatch({
             worldId: before.worldId,
             beforeRevision: before.revision,
@@ -222,25 +254,36 @@ export function createCommitCoordinator({
             changedPaths: output.changedPaths
           })
         : null;
+      const patch = declaredPatch && localWorldPatchReproducesFacts(
+        before.facts, after.facts, declaredPatch
+      ) ? declaredPatch : null;
       const affectedClosure = patch ? createAffectedPathClosure({
-        changedPaths: output.changedPaths,
+        changedPaths: patch.changedPaths,
         patch,
         relationEndpoints: output.result?.relationEndpoints,
         lockPaths: output.result?.lockPaths,
-        shortcutPaths: output.result?.shortcutPaths
+        shortcutPaths: output.result?.shortcutPaths,
+        referencePaths: output.result?.referencePaths,
+        complete: output.result?.affectedPathClosureComplete
       }) : null;
-      const preciseAffectedAtoms = affectedClosure ? [
+      const preciseLocal = affectedClosure?.complete === true;
+      const preciseAffectedAtoms = preciseLocal ? [
         ...(output.result?.affectedAtoms ?? []),
         ...affectedClosure.paths.map((path) => ({ path, axes: [] }))
       ] : output.result?.affectedAtoms;
-      const receiptResult = affectedClosure ? {
+      const receiptResult = preciseLocal ? {
         ...(output.result ?? {}),
         affectedAtoms: preciseAffectedAtoms,
         affectedAtomsComplete: true,
+        affectedPathClosureComplete: true,
         affectedPathClosure: affectedClosure.entries
-      } : output.result;
-      const receipt = committedReceipt(command, before, after, receiptResult, output.changedPaths);
-      const record = patch ? {
+      } : {
+        ...(output.result ?? {}),
+        affectedPathClosureComplete: false
+      };
+      const receipt = committedReceipt(command, before, after, receiptResult,
+        preciseLocal ? output.changedPaths : null);
+      const record = preciseLocal ? {
         historyMode: 'local-patch',
         commandId: command.commandId,
         correlationId: command.correlationId,
@@ -275,17 +318,18 @@ export function createCommitCoordinator({
 
   async function rebaseCandidate(candidate, current) {
     const { command, before, receipt, record } = candidate;
-    if (candidate.allowRevisionRebase === false || record?.historyMode !== 'local-patch') {
+    const candidateClosure = completeClosureFor(record);
+    if (candidate.allowRevisionRebase === false || !candidateClosure) {
       throw revisionConflict('Command was based on an obsolete world revision', before.revision, current.revision);
     }
     const chain = await committedChain(before.revision, current.revision);
-    if (!chain || chain.some((entry) => entry.historyMode !== 'local-patch')) {
+    const chainClosures = chain?.map(completeClosureFor);
+    if (!chain || chainClosures.some((closure) => !closure)) {
       throw revisionConflict('Local command cannot prove an unbroken precise history', before.revision, current.revision);
     }
-    const candidateClosure = receipt.result?.affectedPathClosure ?? [];
-    const semanticConflicts = chain.flatMap((entry) => semanticConflictPaths(
+    const semanticConflicts = chain.flatMap((entry, index) => semanticConflictPaths(
       candidateClosure,
-      entry.receipt?.result?.affectedPathClosure ?? []
+      chainClosures[index]
     ));
     if (semanticConflicts.length) {
       throw revisionConflict('Local command overlaps a guarded path changed since preparation',
@@ -385,6 +429,12 @@ export function createCommitCoordinator({
                 restoredCommandId: targetCommandId,
                 affectedAtoms: target.receipt.affectedAtoms,
                 affectedAtomsComplete: true,
+                relationEndpoints: target.receipt.result?.relationEndpoints ?? [],
+                lockPaths: target.receipt.result?.lockPaths ?? [],
+                shortcutPaths: target.receipt.result?.shortcutPaths ?? [],
+                referencePaths: target.receipt.result?.referencePaths ?? [],
+                affectedPathClosureComplete:
+                  target.receipt.result?.affectedPathClosureComplete === true,
                 ...(target.receipt.result?.previousCompatibilityManifest
                   ? { compatibilityManifest: target.receipt.result.previousCompatibilityManifest }
                   : {})

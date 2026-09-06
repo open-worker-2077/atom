@@ -91,6 +91,21 @@ export function createTransactionalWorldPersistence({
     return structuredClone(owner.cachedManifest);
   }
 
+  async function compatibilityManifestForRevision(revision) {
+    const state = await journalRepository.readState();
+    for (const entry of [...state.receipts].reverse()) {
+      if (entry.receipt?.afterRevision === revision
+        && entry.receipt?.result?.compatibilityManifest) {
+        return structuredClone(entry.receipt.result.compatibilityManifest);
+      }
+      if (entry.receipt?.beforeRevision === revision
+        && entry.receipt?.result?.previousCompatibilityManifest) {
+        return structuredClone(entry.receipt.result.previousCompatibilityManifest);
+      }
+    }
+    return null;
+  }
+
   async function readCommittedSnapshot() {
     await recover();
     return coordinator.inspectCommitted(async (snapshot) => {
@@ -182,10 +197,16 @@ export function createTransactionalWorldPersistence({
     source = 'legacy-interaction',
     changedPaths = null,
     affectedAtoms = null,
+    affectedPathClosureComplete = false,
+    relationEndpoints = null,
+    lockPaths = null,
+    shortcutPaths = null,
+    referencePaths = null,
     transformLogRecord = null,
     postCommitEvent = null,
     subsequentOf = null,
-    compatibilityManifest: suppliedManifest = null
+    compatibilityManifest: suppliedManifest = null,
+    baseCompatibilityManifest: suppliedBaseManifest = null
   }) {
     await recover();
     async function existingExecutionReceipt() {
@@ -206,7 +227,6 @@ export function createTransactionalWorldPersistence({
     }
     const existing = await existingExecutionReceipt();
     if (existing) return existing;
-    const previousManifest = await compatibilityManifest();
     const computedRevision = revisionOfWorldFacts(facts);
     const canonicalNextRevision = canonicalRevision(nextRevision);
     const canonicalExpectedRevision = canonicalRevision(expectedRevision);
@@ -215,6 +235,22 @@ export function createTransactionalWorldPersistence({
         nextRevision,
         computedRevision
       });
+    }
+    const latestManifest = await compatibilityManifest();
+    const previousManifest = suppliedBaseManifest
+      ? structuredClone(suppliedBaseManifest)
+      : latestManifest?.currentWorldRevision === canonicalExpectedRevision
+        ? structuredClone(latestManifest)
+        : await compatibilityManifestForRevision(canonicalExpectedRevision);
+    if (latestManifest && latestManifest.currentWorldRevision !== canonicalExpectedRevision
+      && !previousManifest) {
+      throw problem('WORLD_REVISION_CONFLICT', 'Compatibility manifest for the command base is unavailable', {
+        expectedRevision: canonicalExpectedRevision,
+        actualRevision: latestManifest.currentWorldRevision
+      });
+    }
+    if (suppliedBaseManifest && Array.isArray(beforeFacts)) {
+      validateCompatibilityManifest(previousManifest, beforeFacts);
     }
     const commandId = commandIdFor({
       correlationId,
@@ -229,7 +265,6 @@ export function createTransactionalWorldPersistence({
     try {
       receipt = await coordinator.execute({
         ...(Array.isArray(beforeFacts) ? { baseFacts: beforeFacts } : {}),
-        allowRevisionRebase: suppliedManifest == null,
         rebaseResult: async ({ current, after, facts: rebasedFacts, result }) => {
           const state = await journalRepository.readState();
           const currentManifest = structuredClone(
@@ -274,7 +309,8 @@ export function createTransactionalWorldPersistence({
         transitionInputMode: 'trusted-readonly',
         transition: (current) => {
           nextManifest ??= previousManifest
-            ? advanceCompatibilityManifest(previousManifest, current.facts, facts)
+            ? (validateCompatibilityManifest(previousManifest, current.facts),
+              advanceCompatibilityManifest(previousManifest, current.facts, facts))
             : null;
           return {
             facts,
@@ -289,6 +325,13 @@ export function createTransactionalWorldPersistence({
               ...(Array.isArray(affectedAtoms) ? {
                 affectedAtoms,
                 affectedAtomsComplete: true
+              } : {}),
+              ...(affectedPathClosureComplete === true ? {
+                affectedPathClosureComplete: true,
+                relationEndpoints,
+                lockPaths,
+                shortcutPaths,
+                referencePaths
               } : {}),
               ...(nextManifest ? { compatibilityManifest: nextManifest } : {}),
               ...(previousManifest ? { previousCompatibilityManifest: previousManifest } : {}),

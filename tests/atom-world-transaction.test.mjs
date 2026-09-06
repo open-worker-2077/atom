@@ -6,12 +6,14 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createCommitCoordinator } from '../src/atom-system/world-runtime/commit-coordinator.mjs';
+import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import {
   createJsonTransactionJournal,
   createJsonWorldRepository,
   writeJsonAtomically
 } from '../src/atom-system/adapters/json-world-repository.mjs';
 import {
+  advanceCompatibilityManifest,
   createCompatibilityManifest,
   validateCompatibilityManifest
 } from '../src/atom-system/world-runtime/legacy-graph-compat.mjs';
@@ -46,6 +48,17 @@ async function fixture(t, options = {}) {
     faultInjector: options.faultInjector
   });
   return { coordinator, worldRepository, journalRepository, worldFile, journalFile };
+}
+
+function completeLocalEffects(result = {}) {
+  return {
+    relationEndpoints: [],
+    lockPaths: [],
+    shortcutPaths: [],
+    referencePaths: [],
+    affectedPathClosureComplete: true,
+    ...result
+  };
 }
 
 function journalFailingCommits(journalRepository, count) {
@@ -129,11 +142,11 @@ for (const scenario of ['different top-level Atoms', 'different slot instances']
     const outcomes = await concurrentLocalPair({ coordinator: files.coordinator, initial,
       left(facts) {
         (scenario === 'different top-level Atoms' ? facts[0] : facts[0].slot[0]).situation = 'new-a';
-        return { facts, changedPaths: [pathA] };
+        return { facts, changedPaths: [pathA], result: completeLocalEffects() };
       },
       right(facts) {
         (scenario === 'different top-level Atoms' ? facts[1] : facts[0].slot[1]).situation = 'new-b';
-        return { facts, changedPaths: [pathB] };
+        return { facts, changedPaths: [pathB], result: completeLocalEffects() };
       }
     });
 
@@ -150,8 +163,8 @@ test('concurrent edits of the same Atom remain one explicit local conflict', asy
   await writeJsonAtomically(files.worldRepository.file, initialFacts);
   const initial = await files.worldRepository.read();
   const outcomes = await concurrentLocalPair({ coordinator: files.coordinator, initial,
-    left(facts) { facts[0].situation = 'left'; return { facts, changedPaths: ['Root'] }; },
-    right(facts) { facts[0].situation = 'right'; return { facts, changedPaths: ['Root'] }; }
+    left(facts) { facts[0].situation = 'left'; return { facts, changedPaths: ['Root'], result: completeLocalEffects() }; },
+    right(facts) { facts[0].situation = 'right'; return { facts, changedPaths: ['Root'], result: completeLocalEffects() }; }
   });
   const rejected = outcomes.find(({ status }) => status === 'rejected')?.reason;
   assert.equal(outcomes.filter(({ status }) => status === 'fulfilled').length, 1);
@@ -171,7 +184,7 @@ test('a disjoint local command may enter after another commit using its exact ba
   left[0].situation = 'new-a';
   await files.coordinator.execute({
     command: command('entered-first', initial.revision),
-    transition: () => ({ facts: left, changedPaths: ['A'] })
+    transition: () => ({ facts: left, changedPaths: ['A'], result: completeLocalEffects() })
   });
   const right = structuredClone(initialFacts);
   right[1].situation = 'new-b';
@@ -179,7 +192,7 @@ test('a disjoint local command may enter after another commit using its exact ba
     command: command('entered-late', initial.revision),
     baseFacts: initialFacts,
     transitionReadsSnapshot: false,
-    transition: () => ({ facts: right, changedPaths: ['B'] })
+    transition: () => ({ facts: right, changedPaths: ['B'], result: completeLocalEffects() })
   });
 
   const committed = (await files.worldRepository.read()).facts;
@@ -198,8 +211,8 @@ for (const guard of ['relationEndpoints', 'lockPaths', 'shortcutPaths']) {
     await writeJsonAtomically(files.worldRepository.file, initialFacts);
     const initial = await files.worldRepository.read();
     const outcomes = await concurrentLocalPair({ coordinator: files.coordinator, initial,
-      left(facts) { facts[0].situation = 'left'; return { facts, changedPaths: ['A'], result: { [guard]: ['Guard'] } }; },
-      right(facts) { facts[1].situation = 'right'; return { facts, changedPaths: ['B'], result: { [guard]: ['Guard'] } }; }
+      left(facts) { facts[0].situation = 'left'; return { facts, changedPaths: ['A'], result: completeLocalEffects({ [guard]: ['Guard'] }) }; },
+      right(facts) { facts[1].situation = 'right'; return { facts, changedPaths: ['B'], result: completeLocalEffects({ [guard]: ['Guard'] }) }; }
     });
     const rejected = outcomes.find(({ status }) => status === 'rejected')?.reason;
     assert.equal(outcomes.filter(({ status }) => status === 'fulfilled').length, 1);
@@ -218,11 +231,11 @@ test('an ancestor move and descendant edit cannot split one subtree across local
   const outcomes = await concurrentLocalPair({ coordinator: files.coordinator, initial,
     left(facts) {
       facts[0].thing = 'Moved';
-      return { facts, changedPaths: ['Root', 'Moved'] };
+      return { facts, changedPaths: ['Root', 'Moved'], result: completeLocalEffects() };
     },
     right(facts) {
       facts[0].slot[0].situation = 'new';
-      return { facts, changedPaths: ['Root/Child'] };
+      return { facts, changedPaths: ['Root/Child'], result: completeLocalEffects() };
     }
   });
   const rejected = outcomes.find(({ status }) => status === 'rejected')?.reason;
@@ -263,6 +276,299 @@ test('committed inspection cannot observe the world-write and journal-commit gap
   const [receipt, observed] = await Promise.all([committing, inspection]);
   assert.equal(observed.snapshot.revision, receipt.afterRevision);
   assert.equal(observed.receipt.afterRevision, receipt.afterRevision);
+});
+
+test('an incomplete declared patch cannot rebase and commit only part of one Transform', async (t) => {
+  const files = await fixture(t);
+  const initialFacts = ['A', 'B', 'C'].map((thing) => ({ thing, situation: 'old', slot: [], strut: [] }));
+  await writeJsonAtomically(files.worldFile, initialFacts);
+  const initial = await files.worldRepository.read();
+  const firstFacts = structuredClone(initialFacts);
+  firstFacts[2].situation = 'new-c';
+  await files.coordinator.execute({
+    command: command('complete-c', initial.revision),
+    transition: () => ({ facts: firstFacts, changedPaths: ['C'], result: completeLocalEffects() })
+  });
+  const incompleteFacts = structuredClone(initialFacts);
+  incompleteFacts[0].situation = 'new-a';
+  incompleteFacts[1].situation = 'new-b';
+
+  await assert.rejects(files.coordinator.execute({
+    command: command('incomplete-a-b', initial.revision),
+    baseFacts: initialFacts,
+    transitionReadsSnapshot: false,
+    transition: () => ({
+      facts: incompleteFacts,
+      changedPaths: ['A'],
+      result: completeLocalEffects()
+    })
+  }), (error) => error.code === 'WORLD_REVISION_CONFLICT');
+
+  const committed = (await files.worldRepository.read()).facts;
+  assert.deepEqual(committed.map(({ situation }) => situation), ['old', 'old', 'new-c']);
+  assert.equal((await files.journalRepository.readState()).receipts.length, 1);
+});
+
+test('an incomplete declared patch retains whole-world rollback atomicity', async (t) => {
+  const files = await fixture(t);
+  const initialFacts = ['A', 'B'].map((thing) => ({ thing, situation: 'old', slot: [], strut: [] }));
+  await writeJsonAtomically(files.worldFile, initialFacts);
+  const initial = await files.worldRepository.read();
+  const changed = structuredClone(initialFacts);
+  changed[0].situation = 'new-a';
+  changed[1].situation = 'new-b';
+  const receipt = await files.coordinator.execute({
+    command: command('incomplete-current', initial.revision),
+    transition: () => ({ facts: changed, changedPaths: ['A'], result: completeLocalEffects() })
+  });
+
+  const history = await files.journalRepository.findCommitted(receipt.commandId);
+  assert.equal(history.historyMode, undefined);
+  await files.coordinator.rollback({
+    targetCommandId: receipt.commandId,
+    command: command('rollback-incomplete-current', receipt.afterRevision)
+  });
+  assert.deepEqual((await files.worldRepository.read()).facts, initialFacts);
+});
+
+test('a late candidate without complete closure evidence remains a whole-world conflict', async (t) => {
+  const files = await fixture(t);
+  const initialFacts = ['A', 'C'].map((thing) => ({ thing, situation: 'old', slot: [], strut: [] }));
+  await writeJsonAtomically(files.worldFile, initialFacts);
+  const initial = await files.worldRepository.read();
+  const firstFacts = structuredClone(initialFacts);
+  firstFacts[1].situation = 'new-c';
+  await files.coordinator.execute({
+    command: command('closure-complete-c', initial.revision),
+    transition: () => ({ facts: firstFacts, changedPaths: ['C'], result: completeLocalEffects() })
+  });
+  const lateFacts = structuredClone(initialFacts);
+  lateFacts[0].situation = 'new-a';
+
+  await assert.rejects(files.coordinator.execute({
+    command: command('closure-missing-a', initial.revision),
+    baseFacts: initialFacts,
+    transitionReadsSnapshot: false,
+    transition: () => ({ facts: lateFacts, changedPaths: ['A'] })
+  }), (error) => error.code === 'WORLD_REVISION_CONFLICT');
+  assert.deepEqual((await files.worldRepository.read()).facts, firstFacts);
+});
+
+test('a missing closure proof in intervening local history blocks rebase', async (t) => {
+  const files = await fixture(t);
+  let hideClosureProof = false;
+  const journalRepository = Object.freeze({
+    findReceipt: (...args) => files.journalRepository.findReceipt(...args),
+    findPrepared: (...args) => files.journalRepository.findPrepared(...args),
+    findCommitted: (...args) => files.journalRepository.findCommitted(...args),
+    prepare: (...args) => files.journalRepository.prepare(...args),
+    commit: (...args) => files.journalRepository.commit(...args),
+    listPrepared: (...args) => files.journalRepository.listPrepared(...args),
+    async readState() {
+      const state = await files.journalRepository.readState();
+      if (!hideClosureProof) return state;
+      for (const entry of state.receipts) {
+        if (entry.receipt?.result) delete entry.receipt.result.affectedPathClosureComplete;
+      }
+      return state;
+    }
+  });
+  const coordinator = createCommitCoordinator({ worldRepository: files.worldRepository, journalRepository });
+  const initialFacts = ['A', 'C'].map((thing) => ({ thing, situation: 'old', slot: [], strut: [] }));
+  await writeJsonAtomically(files.worldFile, initialFacts);
+  const initial = await files.worldRepository.read();
+  const firstFacts = structuredClone(initialFacts);
+  firstFacts[1].situation = 'new-c';
+  await coordinator.execute({
+    command: command('history-complete-c', initial.revision),
+    transition: () => ({ facts: firstFacts, changedPaths: ['C'], result: completeLocalEffects() })
+  });
+  hideClosureProof = true;
+  const lateFacts = structuredClone(initialFacts);
+  lateFacts[0].situation = 'new-a';
+
+  await assert.rejects(coordinator.execute({
+    command: command('history-after-missing-a', initial.revision),
+    baseFacts: initialFacts,
+    transitionReadsSnapshot: false,
+    transition: () => ({ facts: lateFacts, changedPaths: ['A'], result: completeLocalEffects() })
+  }), (error) => error.code === 'WORLD_REVISION_CONFLICT');
+  assert.deepEqual((await files.worldRepository.read()).facts, firstFacts);
+});
+
+for (const direction of ['parent lock then child edit', 'child lock then parent edit']) {
+  test(`subtree lock overlap rejects ${direction}`, async (t) => {
+    const files = await fixture(t);
+    const initialFacts = [
+      { thing: 'A', situation: 'old', slot: [], strut: [] },
+      { thing: 'Guard', situation: 'old', slot: [
+        { thing: 'Child', situation: 'old', slot: [], strut: [] }
+      ], strut: [] }
+    ];
+    await writeJsonAtomically(files.worldFile, initialFacts);
+    const initial = await files.worldRepository.read();
+    const outcomes = await concurrentLocalPair({ coordinator: files.coordinator, initial,
+      left(facts) {
+        facts[0].situation = 'new-a';
+        return {
+          facts,
+          changedPaths: ['A'],
+          result: completeLocalEffects({
+            lockPaths: [direction.startsWith('parent') ? 'Guard' : 'Guard/Child']
+          })
+        };
+      },
+      right(facts) {
+        if (direction.startsWith('parent')) facts[1].slot[0].situation = 'new-child';
+        else facts[1].situation = 'new-parent';
+        return {
+          facts,
+          changedPaths: [direction.startsWith('parent') ? 'Guard/Child' : 'Guard'],
+          result: completeLocalEffects()
+        };
+      }
+    });
+    const rejection = outcomes.find(({ status }) => status === 'rejected')?.reason;
+    assert.equal(outcomes.filter(({ status }) => status === 'fulfilled').length, 1);
+    assert.equal(rejection?.code, 'WORLD_REVISION_CONFLICT');
+    assert.ok(rejection?.details?.conflictingPaths?.some((entry) => entry.startsWith('Guard')));
+  });
+}
+
+for (const guard of ['relationEndpoints', 'shortcutPaths', 'referencePaths']) {
+  test(`${guard} retain exact-path granularity across an unrelated descendant edit`, async (t) => {
+    const files = await fixture(t);
+    const initialFacts = [
+      { thing: 'A', situation: 'old', slot: [], strut: [] },
+      { thing: 'Guard', situation: 'old', slot: [
+        { thing: 'Child', situation: 'old', slot: [], strut: [] }
+      ], strut: [] }
+    ];
+    await writeJsonAtomically(files.worldFile, initialFacts);
+    const initial = await files.worldRepository.read();
+    const outcomes = await concurrentLocalPair({ coordinator: files.coordinator, initial,
+      left(facts) {
+        facts[0].situation = 'new-a';
+        return {
+          facts,
+          changedPaths: ['A'],
+          result: completeLocalEffects({ [guard]: ['Guard'] })
+        };
+      },
+      right(facts) {
+        facts[1].slot[0].situation = 'new-child';
+        return {
+          facts,
+          changedPaths: ['Guard/Child'],
+          result: completeLocalEffects()
+        };
+      }
+    });
+    assert.equal(outcomes.every(({ status }) => status === 'fulfilled'), true, JSON.stringify(outcomes));
+    const committed = (await files.worldRepository.read()).facts;
+    assert.equal(committed[0].situation, 'new-a');
+    assert.equal(committed[1].slot[0].situation, 'new-child');
+  });
+}
+
+test('an exact node lock keeps exact-path granularity for a descendant edit', async (t) => {
+  const files = await fixture(t);
+  const initialFacts = [
+    { thing: 'A', situation: 'old', slot: [], strut: [] },
+    { thing: 'Guard', situation: 'old', slot: [
+      { thing: 'Child', situation: 'old', slot: [], strut: [] }
+    ], strut: [] }
+  ];
+  await writeJsonAtomically(files.worldFile, initialFacts);
+  const initial = await files.worldRepository.read();
+  const outcomes = await concurrentLocalPair({ coordinator: files.coordinator, initial,
+    left(facts) {
+      facts[0].situation = 'new-a';
+      return {
+        facts,
+        changedPaths: ['A'],
+        result: completeLocalEffects({ lockPaths: [{ path: 'Guard', scope: 'exact' }] })
+      };
+    },
+    right(facts) {
+      facts[1].slot[0].situation = 'new-child';
+      return {
+        facts,
+        changedPaths: ['Guard/Child'],
+        result: completeLocalEffects()
+      };
+    }
+  });
+  assert.equal(outcomes.every(({ status }) => status === 'fulfilled'), true, JSON.stringify(outcomes));
+});
+
+test('late persistence commit pairs its old base facts with the old manifest before rebasing', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-late-manifest-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const source = [{ thing: 'Legacy', situation: '', slot: [], strut: [{ verb: 'v', object: 'O' }] }];
+  await fs.writeFile(contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  const persistence = createTransactionalWorldPersistence({
+    contextFile,
+    projectionFile,
+    publishLegacyProjection: false
+  });
+  const seeded = [...structuredClone(source),
+    { thing: 'A', situation: 'old', slot: [], strut: [] },
+    { thing: 'C', situation: 'old', slot: [], strut: [] }];
+  const sourceManifest = createCompatibilityManifest({
+    sourceRevision: 'sha256:legacy',
+    targetFacts: source
+  });
+  await persistence.commit({
+    correlationId: 'manifest-seed',
+    expectedRevision: revisionOf(source),
+    nextRevision: revisionOf(seeded),
+    facts: seeded,
+    changedPaths: ['A', 'C'],
+    affectedPathClosureComplete: true,
+    relationEndpoints: [], lockPaths: [], shortcutPaths: [], referencePaths: [],
+    compatibilityManifest: advanceCompatibilityManifest(sourceManifest, source, seeded)
+  });
+  const firstFacts = structuredClone(seeded);
+  firstFacts[2].situation = 'new-c';
+  await persistence.commit({
+    correlationId: 'manifest-first',
+    expectedRevision: revisionOf(seeded),
+    nextRevision: revisionOf(firstFacts),
+    facts: firstFacts,
+    beforeFacts: seeded,
+    changedPaths: ['C'],
+    affectedPathClosureComplete: true,
+    relationEndpoints: [], lockPaths: [], shortcutPaths: [], referencePaths: []
+  });
+  const lateFacts = structuredClone(seeded);
+  lateFacts[1].situation = 'new-a';
+  const late = await persistence.commit({
+    correlationId: 'manifest-late',
+    expectedRevision: revisionOf(seeded),
+    nextRevision: revisionOf(lateFacts),
+    facts: lateFacts,
+    beforeFacts: seeded,
+    changedPaths: ['A'],
+    affectedPathClosureComplete: true,
+    relationEndpoints: [], lockPaths: [], shortcutPaths: [], referencePaths: []
+  });
+
+  let committed = await persistence.readCommittedSnapshot();
+  assert.deepEqual(committed.facts.slice(1).map(({ situation }) => situation), ['new-a', 'new-c']);
+  assert.equal(committed.compatibilityManifest.currentWorldRevision, committed.revision);
+  assert.doesNotThrow(() => validateCompatibilityManifest(committed.compatibilityManifest, committed.facts));
+  await persistence.rollback({
+    targetCommandId: late.commandId,
+    correlationId: 'manifest-late-rollback',
+    expectedRevision: committed.revision
+  });
+  committed = await persistence.readCommittedSnapshot();
+  assert.deepEqual(committed.facts.slice(1).map(({ situation }) => situation), ['old', 'new-c']);
+  assert.equal(committed.compatibilityManifest.currentWorldRevision, committed.revision);
+  assert.doesNotThrow(() => validateCompatibilityManifest(committed.compatibilityManifest, committed.facts));
 });
 
 for (const manifestKind of ['null', 'non-null']) {
@@ -482,7 +788,9 @@ test('local transaction records exact patch history without complete-world snaps
     transition: () => ({
       facts: nextFacts,
       changedPaths: ['Root/Target'],
-      result: { affectedAtoms: [{ path: 'Root/Target', axes: ['situation'] }] }
+      result: completeLocalEffects({
+        affectedAtoms: [{ path: 'Root/Target', axes: ['situation'] }]
+      })
     })
   });
 
@@ -517,7 +825,8 @@ test('rollback applies the inverse local patch without restoring an unrelated wo
       result: {
         affectedAtoms: [{ path: 'Root/Target', axes: ['situation'] }],
         compatibilityManifest: { currentWorldRevision: 'after' },
-        previousCompatibilityManifest: { currentWorldRevision: 'before' }
+        previousCompatibilityManifest: { currentWorldRevision: 'before' },
+        ...completeLocalEffects()
       }
     })
   });
@@ -573,7 +882,11 @@ test('relation and shortcut side effects share the structural patch and inverse 
     command: command('cmd-local-relation-shortcut', initial.revision),
     transition: () => ({
       facts: nextFacts,
-      changedPaths: ['Tree/Target', 'Tree/Renamed', 'Source', 'Entry']
+      changedPaths: ['Tree/Target', 'Tree/Renamed', 'Source', 'Entry'],
+      result: completeLocalEffects({
+        relationEndpoints: ['Tree/Target', 'Tree/Renamed'],
+        shortcutPaths: ['Entry']
+      })
     })
   });
   const history = await journalRepository.findCommitted('cmd-local-relation-shortcut');
@@ -754,7 +1067,8 @@ test('local patch recovery completes an interrupted prepare without snapshot obj
       changedPaths: ['Root/Target'],
       result: {
         affectedAtoms: [{ path: 'Root/Target', axes: ['situation'] }],
-        affectedAtomsComplete: true
+        affectedAtomsComplete: true,
+        ...completeLocalEffects()
       }
     })
   }), (error) => error.code === 'SIMULATED_INTERRUPTION');
@@ -825,7 +1139,8 @@ test('local patch recovery finalizes an interrupted committed world without appl
       changedPaths: ['Root/Target'],
       result: {
         affectedAtoms: [{ path: 'Root/Target', axes: ['situation'] }],
-        affectedAtomsComplete: true
+        affectedAtomsComplete: true,
+        ...completeLocalEffects()
       }
     })
   }), (error) => error.code === 'SIMULATED_INTERRUPTION');

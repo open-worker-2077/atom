@@ -762,6 +762,11 @@ async function persistChangedGraph({
   source,
   changedPaths = null,
   affectedAtoms = null,
+  affectedPathClosureComplete = false,
+  relationEndpoints = null,
+  lockPaths = null,
+  shortcutPaths = null,
+  referencePaths = null,
   transformLogRecord = null,
   postCommitEvent = null,
   subsequentOf = null,
@@ -794,6 +799,14 @@ async function persistChangedGraph({
     ...(subsequentOf ? { subsequentOf } : {}),
     ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
     ...(Array.isArray(affectedAtoms) ? { affectedAtoms } : {}),
+    ...(affectedPathClosureComplete === true ? {
+      affectedPathClosureComplete,
+      relationEndpoints,
+      lockPaths,
+      shortcutPaths,
+      referencePaths,
+      ...(compatibilityManifest ? { baseCompatibilityManifest: compatibilityManifest } : {})
+    } : {}),
     ...(transformLogRecord ? { transformLogRecord } : {})
   });
   performanceTrace('world-commit', {
@@ -3029,6 +3042,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     projectionRebase = null,
     changedPaths = projectionRebase?.changedPaths ?? null,
     affectedAtoms = null,
+    relationEndpoints = null,
+    shortcutPaths = null,
+    referencePaths = null,
     transformLogRecord = null,
     localizedSituationValidation = false,
     structurePreservingValidation = false,
@@ -3040,6 +3056,44 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     postCommitEvent: sourceEvent = null,
     baseAtoms = atoms
   } = {}) {
+    const pathIntersects = (left, right) => left === right
+      || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+    function lockDependencies(paths) {
+      const locks = new Map();
+      const references = new Set();
+      const addLock = (path, scope) => {
+        if (!path) return;
+        const previous = locks.get(path);
+        locks.set(path, previous === 'subtree' || scope === 'subtree' ? 'subtree' : 'exact');
+      };
+      for (const lock of graphLocks ?? []) {
+        const applies = paths.some((changedPath) => lock.kind === 'slot'
+          ? pathIntersects(changedPath, lock.path)
+          : changedPath === lock.path);
+        if (!applies) continue;
+        addLock(lock.path, lock.kind === 'slot' ? 'subtree' : 'exact');
+        if (lock.sourceProgramPath) references.add(lock.sourceProgramPath);
+      }
+      for (const [lockPath, entry] of programLockIndex?.byPath?.entries?.() ?? []) {
+        const applies = paths.some((changedPath) => entry.sources.some((sourceEntry) => (
+          sourceEntry.targetScope === 'subtree'
+            ? pathIntersects(changedPath, lockPath)
+            : changedPath === lockPath
+        )));
+        if (!applies) continue;
+        for (const sourceEntry of entry.sources) {
+          addLock(lockPath, sourceEntry.targetScope === 'subtree' ? 'subtree' : 'exact');
+        }
+        for (const sourceEntry of entry.sources) {
+          if (sourceEntry.sourceProgramPath) references.add(sourceEntry.sourceProgramPath);
+        }
+      }
+      return {
+        lockPaths: [...locks].sort(([left], [right]) => left.localeCompare(right))
+          .map(([path, scope]) => ({ path, scope })),
+        referencePaths: [...references].sort()
+      };
+    }
     function rememberCommittedAffectedPaths(commitReceipt) {
       const affected = commitReceipt?.affectedAtoms ?? commitReceipt?.result?.affectedAtoms ?? [];
       committedAffectedPaths = [...new Set([
@@ -3072,6 +3126,10 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     const commitStartedAt = performance.now();
     let receipt = null;
     try {
+      const semanticInputsComplete = [relationEndpoints, shortcutPaths, referencePaths].every(Array.isArray);
+      const lockClosure = semanticInputsComplete
+        ? lockDependencies(changedPaths ?? [])
+        : { lockPaths: null, referencePaths: [] };
       receipt = await persistChangedGraph({
         atoms: candidateAtoms,
         beforeAtoms: baseAtoms,
@@ -3083,6 +3141,13 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         correlationId,
         source,
         changedPaths,
+        affectedPathClosureComplete: semanticInputsComplete,
+        relationEndpoints,
+        lockPaths: lockClosure.lockPaths,
+        shortcutPaths,
+        referencePaths: semanticInputsComplete
+          ? [...new Set([...referencePaths, ...lockClosure.referencePaths])].sort()
+          : null,
         affectedAtoms: affectedAtoms ?? (Array.isArray(changedPaths) ? changedPaths.map((path) => ({
           path,
           axes: ['slot', 'situation', 'strut', 'thing']
@@ -3516,6 +3581,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     const batchDeclarationRelocations = [];
     const transformLogs = [];
     const transformEventNodes = new Set();
+    const relationEndpoints = new Set();
+    const shortcutPaths = new Set();
+    const referencePaths = new Set();
     const renameEventNodes = new Set();
     const renameBatch = parsed.items.every(isBatchRenameItem);
     if (renameBatch) {
@@ -3561,6 +3629,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       ]) {
         if (path) transformEventNodes.add(path);
       }
+      for (const path of renamed.relationPaths ?? []) relationEndpoints.add(path);
+      for (const path of renamed.shortcutPaths ?? []) shortcutPaths.add(path);
+      for (const path of renamed.programSourcePaths ?? []) referencePaths.add(path);
     }
     for (const candidate of renameBatch ? [] : parsed.items) {
       let transformed;
@@ -3620,6 +3691,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       ]) {
         if (path) transformEventNodes.add(path);
       }
+      for (const path of transformed.relationPaths ?? []) relationEndpoints.add(path);
+      for (const path of transformed.shortcutPaths ?? []) shortcutPaths.add(path);
+      for (const path of transformed.programSourcePaths ?? []) referencePaths.add(path);
       if (transformed.logRecord) {
         transformLogs.push({
           ...transformed.logRecord,
@@ -3667,6 +3741,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       }
       const sourceReceipt = await commitChangedGraph(nextAtoms, {
         changedPaths: [...transformEventNodes],
+        relationEndpoints: [...relationEndpoints],
+        shortcutPaths: [...shortcutPaths],
+        referencePaths: [...referencePaths],
         ...(!sourceProgramSurfaceChanged ? {
           projectionRebase: {
             previousAtoms: atoms,
@@ -3890,6 +3967,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     }
     const sourceReceipt = await commitChangedGraph(nextAtoms, {
       changedPaths: [created.resultPath],
+      relationEndpoints: [],
+      shortcutPaths: [],
+      referencePaths: [],
       ...(!subtreeSlotsTypedProgram(exactMatchAtPath(nextAtoms, created.resultPath)?.atom) ? {
         projectionRebase: {
           previousAtoms: atoms,
@@ -4309,6 +4389,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     }
     const sourceReceipt = await commitChangedGraph(nextAtoms, {
       changedPaths: transformAffectedPaths,
+      relationEndpoints: transformed.relationPaths ?? [],
+      shortcutPaths: transformed.shortcutPaths ?? [],
+      referencePaths: transformed.programSourcePaths ?? [],
       ...(!programSurfaceChanged ? {
         projectionRebase: {
           previousAtoms: atoms,

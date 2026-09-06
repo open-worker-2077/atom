@@ -9,6 +9,7 @@ import test from 'node:test';
 import { executeAtomCommandEndpoint, resolveAgentContext } from '../work-engine/atom-language/cli.mjs';
 import { projectAtomGraphToKnowledge } from '../work-engine/atom-language/graph-4d-projection.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
+import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   const agentProgram = type === 'agent';
@@ -143,6 +144,18 @@ test('4784 commits disjoint concurrent writes without an explicit retry', async 
   const context = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(context[0].slot.find((entry) => entry.thing === '任务甲')?.situation, '新甲');
   assert.equal(context[0].slot.find((entry) => entry.thing === '任务乙')?.situation, '新乙');
+  const history = await createJsonTransactionJournal({
+    file: path.join(directory, 'atom.transactions.json')
+  }).readState();
+  const localReceipts = history.receipts.filter((entry) => entry.historyMode === 'local-patch');
+  assert.equal(localReceipts.length, 2, JSON.stringify(history.receipts));
+  for (const entry of localReceipts) {
+    assert.equal(entry.receipt.result.affectedPathClosureComplete, true);
+    assert.equal(Array.isArray(entry.receipt.result.relationEndpoints), true);
+    assert.equal(Array.isArray(entry.receipt.result.lockPaths), true);
+    assert.equal(Array.isArray(entry.receipt.result.shortcutPaths), true);
+    assert.equal(Array.isArray(entry.receipt.result.referencePaths), true);
+  }
 
   const projectionBarrier = await executeAtomCommandEndpoint({
     source: 'explore {"thing":"工作Agent/任务乙","situation$full":true}', interaction: { agent }

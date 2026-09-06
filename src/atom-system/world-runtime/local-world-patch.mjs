@@ -183,6 +183,19 @@ export function applyLocalWorldPatch(facts, patch) {
   return next;
 }
 
+export function localWorldPatchReproducesFacts(beforeFacts, afterFacts, patch) {
+  if (!Array.isArray(beforeFacts) || !Array.isArray(afterFacts)) return false;
+  if (patch?.beforeRevision !== revisionOfWorldFacts(beforeFacts)
+    || patch?.afterRevision !== revisionOfWorldFacts(afterFacts)) return false;
+  try {
+    return isDeepStrictEqual(applyLocalWorldPatch(beforeFacts, patch), afterFacts);
+  } catch (error) {
+    if (String(error?.code ?? '').startsWith('WORLD_PATCH_')
+      || error?.code === 'INVALID_WORLD_PATCH') return false;
+    throw error;
+  }
+}
+
 export function rebaseLocalWorldPatch(currentFacts, patch) {
   if (!Array.isArray(currentFacts)) {
     throw problem('INVALID_WORLD_PATCH', 'Rebasing a local patch requires current facts');
