@@ -160,7 +160,8 @@ function verifiedLegacyPreparedIdentity(record) {
 function matchesLegacyPreparedEvidence(evidence, identity) {
   return evidence?.contract === 'atom.legacy-prepared-evidence'
     && evidence.version === 1
-    && evidence.sourceSchemaVersion === 1
+    && [1, 2].includes(evidence.sourceSchemaVersion)
+    && evidence.cutoverIdentity === 'pre-local-commit-cutover'
     && evidence.commandId === identity?.commandId
     && evidence.worldId === identity?.worldId
     && evidence.beforeRevision === identity?.beforeRevision

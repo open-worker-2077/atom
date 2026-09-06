@@ -1030,6 +1030,10 @@ const EMPTY_JOURNAL = Object.freeze({
   prepared: [],
   receipts: []
 });
+const LOCAL_COMMIT_PROTOCOL = Object.freeze({
+  contract: 'atom.local-world-commit-protocol',
+  version: 1
+});
 
 function compactSnapshot(value) {
   if (!value || typeof value !== 'object') return value;
@@ -1189,7 +1193,12 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     return lines.filter(Boolean).map((line, index) => {
       try {
         const event = JSON.parse(line);
-        if (event?.schemaVersion !== 2 || !['prepared', 'committed', 'aborted'].includes(event.type)) {
+        const ordinary = ['prepared', 'committed', 'aborted'].includes(event?.type);
+        const protocol = event?.localCommitProtocol;
+        const validProtocol = protocol === undefined || (event.type === 'prepared'
+          && protocol?.contract === LOCAL_COMMIT_PROTOCOL.contract
+          && protocol.version === LOCAL_COMMIT_PROTOCOL.version);
+        if (event?.schemaVersion !== 2 || !ordinary || !validProtocol) {
           throw new Error('invalid event');
         }
         return event;
@@ -1205,7 +1214,7 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
   async function loadState() {
     const legacy = await loadLegacy();
     const prepared = new Map(legacy.prepared.map((entry) => [entry.commandId, structuredClone(entry)]));
-    const legacyPrepared = new Set(legacy.prepared.map((entry) => entry.commandId));
+    const legacyPrepared = new Map(legacy.prepared.map((entry) => [entry.commandId, 1]));
     const receipts = new Map(legacy.receipts.map((entry) => [entry.commandId, structuredClone(entry)]));
     const order = legacy.receipts.map((entry) => entry.commandId);
     const records = new Map(legacy.receipts.map((entry) => [entry.commandId, structuredClone(entry)]));
@@ -1214,7 +1223,8 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
       if (event.type === 'prepared') {
         if (receipts.has(event.commandId)) continue;
         prepared.set(event.commandId, event.record);
-        legacyPrepared.delete(event.commandId);
+        if (event.localCommitProtocol) legacyPrepared.delete(event.commandId);
+        else legacyPrepared.set(event.commandId, 2);
         continue;
       }
       if (event.type === 'aborted') {
@@ -1315,7 +1325,8 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
 
   async function legacyPreparedEvidence(identity) {
     const state = await load();
-    if (!state.legacyPrepared.has(identity?.commandId)) return null;
+    const sourceSchemaVersion = state.legacyPrepared.get(identity?.commandId);
+    if (!sourceSchemaVersion) return null;
     const record = state.prepared.get(identity.commandId);
     if (!record || record.historyMode === 'local-patch'
       || record.commandId !== identity.commandId
@@ -1326,7 +1337,8 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     return Object.freeze({
       contract: 'atom.legacy-prepared-evidence',
       version: 1,
-      sourceSchemaVersion: 1,
+      sourceSchemaVersion,
+      cutoverIdentity: 'pre-local-commit-cutover',
       commandId: identity.commandId,
       worldId: identity.worldId,
       beforeRevision: identity.beforeRevision,
@@ -1341,7 +1353,10 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
         throw problem('DUPLICATE_COMMAND_ID', `Command ${record.commandId} already exists`);
       }
       const compact = await compactRecord(record);
-      await appendEvent({ type: 'prepared', commandId: record.commandId, record: compact });
+      await appendEvent({
+        type: 'prepared', commandId: record.commandId, record: compact,
+        localCommitProtocol: LOCAL_COMMIT_PROTOCOL
+      });
       state.prepared.set(record.commandId, compact);
     });
   }

@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { gzipSync } from 'node:zlib';
 
 import { createCommitCoordinator } from '../src/atom-system/world-runtime/commit-coordinator.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
@@ -2629,6 +2630,31 @@ function legacyPreparedRecord(commandId, beforeFacts, afterFacts) {
   };
 }
 
+async function writePreCutoverV2Prepared(journalFile, record) {
+  const incrementalDirectory = `${journalFile}.d`;
+  const objectDirectory = path.join(incrementalDirectory, 'objects');
+  await fs.mkdir(objectDirectory, { recursive: true });
+  const compact = structuredClone(record);
+  for (const key of ['before', 'after']) {
+    const value = compact[key];
+    const objectFile = path.join(objectDirectory, `${value.revision.slice('sha256:'.length)}.json.gz`);
+    await fs.writeFile(objectFile, gzipSync(Buffer.from(JSON.stringify(value)), { level: 1 }));
+    compact[key] = {
+      contract: value.contract,
+      version: value.version,
+      worldId: value.worldId,
+      revision: value.revision,
+      snapshotRef: value.revision
+    };
+  }
+  await fs.writeFile(path.join(incrementalDirectory, 'events.jsonl'), `${JSON.stringify({
+    schemaVersion: 2,
+    type: 'prepared',
+    commandId: record.commandId,
+    record: compact
+  })}\n`, 'utf8');
+}
+
 for (const interruptionPoint of ['before-world-write', 'after-world-write']) {
   test(`schemaVersion 1 prepared transaction recovers exactly once after ${interruptionPoint}`, async (t) => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), `atom-legacy-${interruptionPoint}-`));
@@ -2668,7 +2694,43 @@ for (const interruptionPoint of ['before-world-write', 'after-world-write']) {
   });
 }
 
-test('schemaVersion 2 prepared transaction cannot claim an unproven matching afterRevision', async (t) => {
+for (const interruptionPoint of ['before-world-write', 'after-world-write']) {
+  test(`pre-cutover schemaVersion 2 prepared transaction recovers exactly once after ${interruptionPoint}`, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), `atom-pre-cutover-v2-${interruptionPoint}-`));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const worldFile = path.join(directory, 'atom.json');
+    const journalFile = path.join(directory, 'transactions.json');
+    const localCommitFile = path.join(directory, 'world-commits.jsonl');
+    const beforeFacts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+    const afterFacts = [{ thing: 'Root', situation: 'new', slot: [], strut: [] }];
+    const record = legacyPreparedRecord(`pre-cutover-v2-${interruptionPoint}`, beforeFacts, afterFacts);
+    await fs.writeFile(worldFile, `${JSON.stringify(
+      interruptionPoint === 'after-world-write' ? afterFacts : beforeFacts
+    )}\n`, 'utf8');
+    await writePreCutoverV2Prepared(journalFile, record);
+    const worldRepository = createJsonWorldRepository({
+      file: worldFile, worldId: 'primary', localCommitFile
+    });
+    const journalRepository = createJsonTransactionJournal({ file: journalFile });
+    const coordinator = createCommitCoordinator({ worldRepository, journalRepository });
+
+    assert.deepEqual(await coordinator.recover(), { recovered: 1 });
+    assert.deepEqual((await worldRepository.read()).facts, afterFacts);
+    assert.deepEqual(await coordinator.recover(), { recovered: 0 });
+    const state = await journalRepository.readState();
+    assert.deepEqual(state.prepared, []);
+    assert.deepEqual(state.receipts.map(({ commandId }) => commandId), [record.commandId]);
+    const events = (await fs.readFile(journalRepository.eventFile, 'utf8'))
+      .trim().split('\n').map(JSON.parse);
+    assert.deepEqual(events.map(({ type, commandId }) => ({ type, commandId })), [{
+      type: 'prepared', commandId: record.commandId
+    }, {
+      type: 'committed', commandId: record.commandId
+    }]);
+  });
+}
+
+test('post-cutover schemaVersion 2 prepared transaction cannot claim an unproven matching afterRevision', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-current-prepared-impostor-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const worldFile = path.join(directory, 'atom.json');
@@ -2680,6 +2742,12 @@ test('schemaVersion 2 prepared transaction cannot claim an unproven matching aft
   await fs.writeFile(worldFile, `${JSON.stringify(afterFacts)}\n`, 'utf8');
   const journalRepository = createJsonTransactionJournal({ file: journalFile });
   await journalRepository.prepare(record);
+  const events = (await fs.readFile(journalRepository.eventFile, 'utf8'))
+    .trim().split('\n').map(JSON.parse);
+  assert.deepEqual(events.map(({ type }) => type), ['prepared']);
+  assert.deepEqual(events[0].localCommitProtocol, {
+    contract: 'atom.local-world-commit-protocol', version: 1
+  });
   const storedWorldRepository = createJsonWorldRepository({
     file: worldFile, worldId: 'primary', localCommitFile
   });

@@ -646,7 +646,7 @@ test('same apply attempt reconstructs a missing deployment receipt from verified
   assert.equal(JSON.parse(await fs.readFile(recovered.receiptFile, 'utf8')).rollback.targetCommandId, committed.commandId);
 });
 
-test('same apply attempt finalizes a schemaVersion 1 after-world-write migration before reconstructing its receipt', async (t) => {
+test('same apply attempt finalizes a pre-cutover schemaVersion 2 after-world-write migration before reconstructing its receipt', async (t) => {
   const localAppData = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-migration-prepared-'));
   t.after(() => fs.rm(localAppData, { recursive: true, force: true }));
   const worldDirectory = path.join(localAppData, 'AtomGraph', 'worlds', 'primary');
@@ -724,15 +724,19 @@ test('same apply attempt finalizes a schemaVersion 1 after-world-write migration
   assert.equal(interrupted.receipts.length, 0);
   assert.equal(revisionOfWorldFacts(JSON.parse(await fs.readFile(contextFile, 'utf8'))), plan.nextRevision);
 
-  // Model the on-disk handoff from the old runtime: its complete prepared record
-  // lived in the schemaVersion 1 base journal and it had no local commit proof.
-  await fs.writeFile(journalFile, `${JSON.stringify({
-    schemaVersion: 1,
-    historyMode: 'latest-rollback-snapshot',
-    prepared: interrupted.prepared,
-    receipts: []
-  }, null, 2)}\n`, 'utf8');
-  await fs.rm(`${journalFile}.d`, { recursive: true, force: true });
+  // Model the exact BASE 2701e61 handoff: a schemaVersion 2 prepared event
+  // precedes the local-commit cutover and no local world proof exists.
+  const preparedEvents = (await fs.readFile(journal.eventFile, 'utf8'))
+    .trim().split('\n').map(JSON.parse).filter(({ type }) => type === 'prepared');
+  assert.equal(preparedEvents.length, 1);
+  const { localCommitProtocol: _currentProtocol, ...preCutoverEvent } = preparedEvents[0];
+  await fs.writeFile(journal.eventFile, `${JSON.stringify(preCutoverEvent)}\n`, 'utf8');
+  const localCommitFile = path.join(`${journalFile}.d`, 'world-commits.jsonl');
+  await Promise.all([
+    fs.rm(localCommitFile, { force: true }),
+    fs.rm(`${localCommitFile}.head.json`, { force: true }),
+    fs.rm(`${localCommitFile}.fallback.json`, { force: true })
+  ]);
   const legacyInterrupted = await createJsonTransactionJournal({ file: journalFile }).readState();
   assert.equal(legacyInterrupted.prepared.length, 1);
   assert.equal(legacyInterrupted.receipts.length, 0);
