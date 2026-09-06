@@ -23,6 +23,8 @@
     forwardView: "forwardView",
     returnOverview: "returnOverview",
     expandToLeaves: "expandToLeaves",
+    collapseVerticalScope: "collapseVerticalScope",
+    expandVerticalScopeToLeaves: "expandVerticalScopeToLeaves",
     toggleWorldLens: "toggleWorldLens",
     toggleHelp: "toggleHelp",
     toggleDemo: "toggleDemo",
@@ -96,8 +98,8 @@
         KeyH: VISUAL_INTENTS.toggleHelp,
         KeyP: VISUAL_INTENTS.toggleDemo,
         Escape: VISUAL_INTENTS.cancel,
-        Home: VISUAL_INTENTS.returnOverview,
-        End: VISUAL_INTENTS.expandToLeaves,
+        Home: VISUAL_INTENTS.collapseVerticalScope,
+        End: VISUAL_INTENTS.expandVerticalScopeToLeaves,
         PageUp: VISUAL_INTENTS.collapseHoveredCluster,
         PageDown: VISUAL_INTENTS.expandHoveredCluster,
         "Ctrl+KeyK": VISUAL_INTENTS.search
@@ -126,15 +128,15 @@
         toggleClusterField: "兼容球团视野",
         applyInwardView: "普通向内剖开 / 右键单击",
         applyImmersiveInwardView: "沉浸向内剖开 / 右键长按",
-        returnOverview: "Home",
-        expandToLeaves: "End",
+        collapseVerticalScope: "Home · 十字所在团收束至顶层（A）",
+        expandVerticalScopeToLeaves: "End · 十字所在团展开至最细级（A）",
         focus: "键盘聚焦 / F",
         activate: "左键单击 / 双击 / 三击使用",
         applyParentView: "右键空白返回直接母节点",
         cycleDetailMode: "中键切换详情模式",
         setNestedView: "A · 向内剖开",
-        collapseHoveredCluster: "PageUp · 当前视图全部收缩一层（A）",
-        expandHoveredCluster: "PageDown · 当前视图全部剖开一层（A）"
+        collapseHoveredCluster: "PageUp · 十字所在团收缩一层（A）",
+        expandHoveredCluster: "PageDown · 十字所在团剖开一层（A）"
       }
     },
     oneHand: {
@@ -172,8 +174,8 @@
         KeyH: VISUAL_INTENTS.toggleHelp,
         KeyP: VISUAL_INTENTS.toggleDemo,
         Escape: VISUAL_INTENTS.cancel,
-        Home: VISUAL_INTENTS.returnOverview,
-        End: VISUAL_INTENTS.expandToLeaves,
+        Home: VISUAL_INTENTS.collapseVerticalScope,
+        End: VISUAL_INTENTS.expandVerticalScopeToLeaves,
         PageUp: VISUAL_INTENTS.collapseHoveredCluster,
         PageDown: VISUAL_INTENTS.expandHoveredCluster,
         "Ctrl+KeyK": VISUAL_INTENTS.search
@@ -202,15 +204,15 @@
         toggleClusterField: "兼容球团视野",
         applyInwardView: "普通向内剖开 / 右键单击",
         applyImmersiveInwardView: "沉浸向内剖开 / 右键长按",
-        returnOverview: "Home",
-        expandToLeaves: "End",
+        collapseVerticalScope: "Home · 十字所在团收束至顶层（A）",
+        expandVerticalScopeToLeaves: "End · 十字所在团展开至最细级（A）",
         focus: "键盘聚焦 / F",
         activate: "左键单击 / 双击 / 三击使用",
         applyParentView: "右键空白返回直接母节点",
         cycleDetailMode: "中键切换详情模式",
         setNestedView: "A · 向内剖开",
-        collapseHoveredCluster: "PageUp · 当前视图全部收缩一层（A）",
-        expandHoveredCluster: "PageDown · 当前视图全部剖开一层（A）"
+        collapseHoveredCluster: "PageUp · 十字所在团收缩一层（A）",
+        expandHoveredCluster: "PageDown · 十字所在团剖开一层（A）"
       }
     }
   };
@@ -400,7 +402,8 @@
         items: [
           keyboardItem(VISUAL_INTENTS.search, "空间搜索"),
           keyboardItem(VISUAL_INTENTS.toggleWorldLens, "域径图"),
-          keyboardItem(VISUAL_INTENTS.returnOverview, "返回全域"),
+          keyboardItem(VISUAL_INTENTS.collapseVerticalScope, "Home · 十字所在团收束至顶层"),
+          keyboardItem(VISUAL_INTENTS.expandVerticalScopeToLeaves, "End · 十字所在团展开至最细级"),
           keyboardItem(VISUAL_INTENTS.toggleHelp, "操作帮助"),
           keyboardItem(VISUAL_INTENTS.toggleDemo, "自动演示")
         ]

@@ -112,6 +112,13 @@ test('immersive blank right click remains blank-sensitive and exits to the paren
   assert.match(functionSource('applyParentView'), /exitDomain/);
 });
 
+test('immersive A keeps the entered domain shell as the visible local boundary', () => {
+  const enter = functionSource('enterNode');
+
+  assert.match(enter, /if \(forceImmersive\) \{[\s\S]*state\.clusterFieldOpen = true;[\s\S]*buildClusterScene\(\)/);
+  assert.doesNotMatch(enter, /if \(forceImmersive \|\| isShortcut\) state\.clusterFieldOpen = false/);
+});
+
 test('A navigation dispatch has one inward path plus immersive scope and parent return', () => {
   assert.match(engine, /case ["']applyInwardView["']/);
   assert.match(engine, /case ["']applyImmersiveInwardView["']/);

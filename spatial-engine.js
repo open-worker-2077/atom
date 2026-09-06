@@ -191,6 +191,8 @@
     applyImmersiveInwardView: "沉浸剖开",
     applyParentView: "返回父层",
     expandToLeaves: "展开至最细级",
+    collapseVerticalScope: "十字所在团收束至顶层",
+    expandVerticalScopeToLeaves: "十字所在团展开至最细级",
     activate: "使用",
     summonMenu: "命令星环",
     enter: "进入球域",
@@ -311,6 +313,8 @@
     "toggleFieldChildren",
     "returnOverview",
     "expandToLeaves",
+    "collapseVerticalScope",
+    "expandVerticalScopeToLeaves",
     "resetView",
     "nextFocus",
     "previousFocus"
@@ -681,6 +685,7 @@
     appliedViewMode: "nested",
     expandedClusterDomains: new Map(),
     clusterScene: { clusters: [], corridors: [], bounds: { center: { x: 0, y: 0, z: 0 }, radius: 0 } },
+    clusterSceneRevision: 0,
     clusterConnectionEdges: [],
     interactionPhase: grammar.interactionPhases.idle,
     commitPulseUntil: 0,
@@ -1416,6 +1421,7 @@
       peripheralDepthShrinkPercent: state.demo.settings.peripheralDepthShrinkPercent
     });
     state.clusterScene = scene;
+    state.clusterSceneRevision += 1;
     state.clusterConnectionEdges = (workspace.exportKnowledge().edges || []).map((edge) => ({
       edge,
       fromEndpoint: workspace.resolveEndpoint(edge.from),
@@ -4133,7 +4139,7 @@
     state.detailMagnifier.enabled = enabled === true;
     ui.detailMagnifierCursor.hidden = true;
     canvas.dataset.detailMagnifier = state.detailMagnifier.enabled ? "on" : "off";
-    canvas.style.cursor = state.detailMagnifier.enabled ? "" : "default";
+    canvas.style.cursor = "none";
     if (state.detailMagnifier.enabled) {
       updateDetailMagnifier(state.pointerPosition, state.hovered);
     } else {
@@ -5741,7 +5747,7 @@
       toggleClusterChildDomain(node, ownerPath);
       return;
     }
-    if (forceImmersive || isShortcut) state.clusterFieldOpen = false;
+    if (isShortcut) state.clusterFieldOpen = false;
     recordCurrentView();
     const parentCamera = cameraSnapshot();
     const route = isShortcut
@@ -5755,6 +5761,10 @@
     const prefetched = !isShortcut && route.entries.length === 1 ? prefetchChildDomain(node) : null;
     node.peekOpen = false;
     commitDomainRoute(route, enteredNode, prefetched);
+    if (forceImmersive) {
+      state.clusterFieldOpen = true;
+      buildClusterScene();
+    }
     // Announce the new scope before the camera tween finishes so the bridge can
     // fetch its authoritative children during the transition. The history entry
     // still records the settled camera in the tween completion callback below.
@@ -5909,6 +5919,86 @@
     return true;
   }
 
+  function verticalScopeAnchor() {
+    if (!state.clusterFieldOpen) {
+      announce("十字当前没有进入可操作的外围团");
+      return null;
+    }
+    const resolved = viewModeModel.resolveVerticalScopeAnchor(
+      state.clusterHitRegions,
+      state.pointerPosition
+    );
+    if (!resolved) {
+      announce("十字当前没有进入可操作的外围团");
+      return null;
+    }
+    const anchor = Object.freeze({
+      ...resolved,
+      sceneRevision: state.clusterSceneRevision
+    });
+    if (
+      anchor.sceneRevision !== state.clusterSceneRevision
+      || !state.clusterHitRegions.some((region) => region.path === anchor.path)
+    ) {
+      announce("外围团场景已变化，请重新定位十字");
+      return null;
+    }
+    return anchor;
+  }
+
+  function collapseVerticalScope() {
+    if (transactionBlocksViewChange()) return false;
+    const anchor = verticalScopeAnchor();
+    if (!anchor) return false;
+    const paths = [...state.expandedClusterDomains.keys()]
+      .filter((path) => path !== anchor.path && pathSlots(anchor.path, path))
+      .sort((left, right) => clusterDepthForPath(right) - clusterDepthForPath(left));
+    let changed = false;
+    for (const path of paths) {
+      if (collapseClusterDomainWithOptions(path, {
+        render: false,
+        updateSelection: false,
+        announce: false
+      })) changed = true;
+    }
+    if (!changed) {
+      announce(`${pathLabelsForPath(anchor.path).at(-1) || "当前团"} 已收束至顶层`);
+      return false;
+    }
+    buildClusterScene();
+    updateSelectionUI();
+    recordCurrentView();
+    announce(`${pathLabelsForPath(anchor.path).at(-1) || "当前团"} 已收束至顶层`);
+    return true;
+  }
+
+  function expandVerticalScopeToLeaves() {
+    if (transactionBlocksViewChange()) return false;
+    const anchor = verticalScopeAnchor();
+    if (!anchor) return false;
+    state.appliedViewMode = "nested";
+    const roots = topLevelDomainNodesForPath(anchor.path).map((node) => ({
+      key: visualNodeKey(node, anchor.path),
+      ownerPath: anchor.path,
+      node
+    }));
+    const entries = recursiveVisualEntries(roots, { forceDomainTraversal: true });
+    let changed = false;
+    for (const entry of entries) {
+      if (entry.node.hasChildren !== true) continue;
+      if (openClusterChildDomain(entry.node, entry.ownerPath, "nested")) changed = true;
+    }
+    if (!changed) {
+      announce(`${pathLabelsForPath(anchor.path).at(-1) || "当前团"} 已展开至最细级`);
+      return false;
+    }
+    buildClusterScene();
+    updateSelectionUI();
+    recordCurrentView();
+    announce(`${pathLabelsForPath(anchor.path).at(-1) || "当前团"} 已展开至最细级`);
+    return true;
+  }
+
   function prepareViewHistoryNavigation() {
     if (!state.transitionLocked) return null;
     const transitionOrigin = state.transitionOrigin;
@@ -6043,17 +6133,19 @@
 
   function expandHoveredClusterLevel() {
     if (transactionBlocksViewChange()) return false;
+    const anchor = verticalScopeAnchor();
+    if (!anchor) return false;
     state.appliedViewMode = "nested";
-    const entries = visibleClusterDomains().flatMap((domain) => domain.nodes.map((projected) => {
+    const entries = topLevelDomainNodesForPath(anchor.path).map((projected) => {
       const node = projected.sourceNode || projected;
       return {
-        key: visualNodeKey(node, domain.path),
-        childPath: childPathFor(node, domain.path),
-        ownerPath: domain.path,
+        key: visualNodeKey(node, anchor.path),
+        childPath: childPathFor(node, anchor.path),
+        ownerPath: anchor.path,
         node,
         portal: Boolean(node.capabilities && node.capabilities.portal)
       };
-    }));
+    });
     const keys = viewModeModel.planContextLevelExpansion(
       entries,
       [...state.expandedClusterDomains.keys()],
@@ -6072,7 +6164,7 @@
     recenterLatestInteraction();
     updateSelectionUI();
     recordCurrentView();
-    announce("当前视图已全部展开一层");
+    announce(`${pathLabelsForPath(anchor.path).at(-1) || "当前团"} 已展开一层`);
     return true;
   }
 
@@ -6106,9 +6198,11 @@
 
   function collapseHoveredClusterLevel() {
     if (transactionBlocksViewChange()) return false;
+    const anchor = verticalScopeAnchor();
+    if (!anchor) return false;
     const paths = viewModeModel.planContextLevelCollapse(
       [...state.expandedClusterDomains.keys()],
-      state.currentPath,
+      anchor.path,
       "nested"
     );
     if (!paths.length) return false;
@@ -6125,7 +6219,7 @@
     recenterLatestInteraction();
     updateSelectionUI();
     recordCurrentView();
-    announce("当前视图已全部收缩一层");
+    announce(`${pathLabelsForPath(anchor.path).at(-1) || "当前团"} 已收缩一层`);
     return true;
   }
 
@@ -6188,7 +6282,7 @@
     if (next.toggled) {
       state.wand.peerBatchArmed = false;
       state.wand.peerBatchMode = null;
-      canvas.style.cursor = next.highEnergy ? "none" : "default";
+      canvas.style.cursor = "none";
       updateSelectionUI();
       announce(next.highEnergy ? "玉杖递归已开启" : "已恢复木杖普通模式");
     }
@@ -6259,13 +6353,7 @@
   }
 
   function syncCanvasCursor(hit = null) {
-    canvas.style.cursor = state.detailMagnifier.enabled
-      ? ""
-      : state.wand.highEnergy || state.wand.peerBatchArmed
-      ? "none"
-      : hit
-      ? "pointer"
-      : "default";
+    canvas.style.cursor = "none";
   }
 
   function peerViewBatchRegions() {
@@ -6520,7 +6608,7 @@
     const point = state.pointerPosition;
     const size = 10;
     context.save();
-    context.translate(point.x + 18, point.y + 18);
+    context.translate(point.x, point.y);
     context.strokeStyle = theme.accent;
     context.globalAlpha = 0.38;
     context.lineWidth = 1.1;
@@ -6834,6 +6922,12 @@
         break;
       case "expandHoveredCluster":
         expandHoveredClusterLevel();
+        break;
+      case "collapseVerticalScope":
+        collapseVerticalScope();
+        break;
+      case "expandVerticalScopeToLeaves":
+        expandVerticalScopeToLeaves();
         break;
       case "expandToLeaves":
         expandToLeaves();
@@ -7900,7 +7994,7 @@
     state.wand.closed = false;
     state.wand.shiftHeld = false;
     state.wand.highEnergy = state.demo.wandPreviousEnergy === true;
-    canvas.style.cursor = state.wand.highEnergy ? "none" : "default";
+    canvas.style.cursor = "none";
   }
 
   function hideDemoOverlays() {
@@ -9195,6 +9289,17 @@
       clusterCount: state.clusterFieldOpen ? state.clusterScene.clusters.length : 1,
       activeClusterPath: state.currentPath,
       clusterPaths: state.clusterFieldOpen ? state.clusterScene.clusters.map((cluster) => cluster.path) : [state.currentPath],
+      clusterRegions: state.clusterFieldOpen
+        ? state.clusterHitRegions.map((region) => ({
+          path: region.path,
+          depth: region.depth,
+          x: region.x,
+          y: region.y,
+          clientX: canvas.getBoundingClientRect().left + region.x,
+          clientY: canvas.getBoundingClientRect().top + region.y,
+          radius: region.radius
+        }))
+        : [],
       clusterTargets: state.clusterFieldOpen
         ? state.rendered.filter((item) => item.kind === "node" && item.ownerPath).slice(0, 96).map((item) => ({
           path: item.ownerPath,

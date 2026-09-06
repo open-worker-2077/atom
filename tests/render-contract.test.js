@@ -479,8 +479,9 @@ test('triple CapsLock magnifier exposes a scrollable full Markdown reader', () =
   assert.match(cssSource, /\.detail-magnifier-cursor/);
 });
 
-test('magnifier uses an unrestricted native cursor while panel work stays frame-coalesced', () => {
-  assert.match(cssSource, /#spaceCanvas\[data-detail-magnifier=["']on["']\][\s\S]*cursor:\s*url\(/);
+test('magnifier keeps the single centred crosshair while panel work stays frame-coalesced', () => {
+  assert.match(cssSource, /#spaceCanvas\[data-detail-magnifier=["']on["']\][\s\S]*cursor:\s*none/);
+  assert.doesNotMatch(cssSource, /#spaceCanvas\[data-detail-magnifier=["']on["']\][\s\S]*cursor:\s*url\(/);
   assert.doesNotMatch(source, /detailMagnifierCursor\.style\.(?:left|top|transform)\s*=/);
   assert.match(source, /canvas\.dataset\.detailMagnifier/);
   const frame = functionSource('frame');

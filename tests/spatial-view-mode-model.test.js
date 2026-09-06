@@ -322,6 +322,29 @@ test('cluster framing centres the opened domain and fits its radius into the saf
   );
 });
 
+test('vertical shortcuts anchor to the deepest containing Graph domain shell', () => {
+  const model = loadModel();
+  const regions = [
+    { path: 'root/manage', depth: 1, x: 500, y: 400, radius: 420 },
+    { path: 'root/manage/work', depth: 2, x: 510, y: 390, radius: 300 },
+    { path: 'root/manage/work/personal', depth: 3, x: 520, y: 360, radius: 180 },
+    { path: 'root/manage/work/personal/external', depth: 4, x: 520, y: 120, radius: 48 },
+    { key: 'ordinary-node-circle', depth: 99, x: 540, y: 330, radius: 80 }
+  ];
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(model.resolveVerticalScopeAnchor(regions, { x: 540, y: 330 }))),
+    { path: 'root/manage/work/personal', depth: 3 }
+  );
+});
+
+test('vertical scope resolution fails closed outside every visible domain shell', () => {
+  const model = loadModel();
+  assert.equal(model.resolveVerticalScopeAnchor([
+    { path: 'root/a', depth: 1, x: 100, y: 100, radius: 30 }
+  ], { x: 300, y: 300 }), null);
+});
+
 test('PageDown plans every currently visible unopened portal once through nested A projection', () => {
   const model = loadModel();
   const entries = [

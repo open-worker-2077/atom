@@ -173,26 +173,51 @@ test('immersive blank right click returns through the active domain when no clus
   assert.match(applyParent, /exitDomain/);
 });
 
-test('PageUp/PageDown collapse or expand the entire current A context by one level', () => {
+test('all vertical shortcuts share the crosshair domain anchor and preserve outside branches', () => {
+  const anchor = functionSource('verticalScopeAnchor');
   const expand = functionSource('expandHoveredClusterLevel');
   const collapse = functionSource('collapseHoveredClusterLevel');
+  const overview = functionSource('collapseVerticalScope');
+  const leaves = functionSource('expandVerticalScopeToLeaves');
 
+  assert.match(anchor, /viewModeModel\.resolveVerticalScopeAnchor\(\s*state\.clusterHitRegions,\s*state\.pointerPosition\s*\)/);
+  assert.match(anchor, /clusterSceneRevision/);
   assert.match(expand, /planContextLevelExpansion/);
-  assert.match(expand, /visibleClusterDomains/);
+  assert.match(expand, /verticalScopeAnchor\(\)/);
+  assert.match(expand, /topLevelDomainNodesForPath\(anchor\.path\)/);
   assert.match(expand, /openClusterChildDomain/);
-  assert.doesNotMatch(expand, /state\.hovered|pointerPosition/);
+  assert.doesNotMatch(expand, /visibleClusterDomains\(\)/);
   assert.match(collapse, /planContextLevelCollapse/);
+  assert.match(collapse, /verticalScopeAnchor\(\)/);
   assert.match(collapse, /expandedClusterDomains/);
-  assert.doesNotMatch(collapse, /pointerPosition/);
+  assert.match(collapse, /anchor\.path/);
+  assert.match(overview, /verticalScopeAnchor\(\)/);
+  assert.match(overview, /pathSlots\(anchor\.path/);
+  assert.doesNotMatch(overview, /state\.currentPath\s*=\s*["']root["']/);
+  assert.match(leaves, /verticalScopeAnchor\(\)/);
+  assert.match(leaves, /topLevelDomainNodesForPath\(anchor\.path\)/);
+  assert.doesNotMatch(leaves, /state\.currentPath\s*=\s*["']root["']/);
 
   assert.match(engine, /case ["']collapseHoveredCluster["']/);
   assert.match(engine, /case ["']expandHoveredCluster["']/);
   assert.match(inputConfig, /PageUp:\s*VISUAL_INTENTS\.collapseHoveredCluster/);
   assert.match(inputConfig, /PageDown:\s*VISUAL_INTENTS\.expandHoveredCluster/);
+  assert.match(inputConfig, /Home:\s*VISUAL_INTENTS\.collapseVerticalScope/);
+  assert.match(inputConfig, /End:\s*VISUAL_INTENTS\.expandVerticalScopeToLeaves/);
   assert.match(expand, /planContextLevelExpansion\([\s\S]*["']nested["']/);
   assert.match(collapse, /planContextLevelCollapse\([\s\S]*["']nested["']/);
-  assert.match(inputConfig, /PageUp · 当前视图全部收缩一层（A）/);
-  assert.match(inputConfig, /PageDown · 当前视图全部剖开一层（A）/);
+  assert.match(inputConfig, /PageUp · 十字所在团收缩一层（A）/);
+  assert.match(inputConfig, /PageDown · 十字所在团剖开一层（A）/);
+});
+
+test('the canvas shows only a crosshair whose centre is the pointer hit point', () => {
+  const cursor = functionSource('drawViewModeCursor');
+  const sync = functionSource('syncCanvasCursor');
+
+  assert.match(cursor, /context\.translate\(point\.x, point\.y\)/);
+  assert.doesNotMatch(cursor, /point\.[xy]\s*\+\s*18/);
+  assert.match(sync, /canvas\.style\.cursor\s*=\s*["']none["']/);
+  assert.doesNotMatch(sync, /["']pointer["']|["']default["']/);
 });
 
 test('Shift right-drag records a visible wand stroke and resolves hit regions at release', () => {

@@ -107,8 +107,8 @@ test('A is the only structural view key while ZX navigates view history', () => 
     KeyA: 'setNestedView',
     KeyZ: 'backView',
     KeyX: 'forwardView',
-    Home: 'returnOverview',
-    End: 'expandToLeaves',
+    Home: 'collapseVerticalScope',
+    End: 'expandVerticalScopeToLeaves',
     KeyO: 'toggleWorldLens',
     KeyH: 'toggleHelp',
     KeyP: 'toggleDemo'

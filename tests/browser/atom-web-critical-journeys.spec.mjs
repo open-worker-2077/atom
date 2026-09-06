@@ -1004,9 +1004,10 @@ async function rightClickTarget(page, label, count) {
   expect(target).toBeTruthy();
   if (count === 2) {
     await page.mouse.dblclick(target.clientX, target.clientY, { button: 'right', delay: 40 });
-    return;
+    return target;
   }
   await page.mouse.click(target.clientX, target.clientY, { button: 'right' });
+  return target;
 }
 
 async function holdRightTarget(page, label, holdMs = 440, release = true) {
@@ -1047,6 +1048,8 @@ test('A sustained right press immerses once before release and release adds no o
   const { parentPath } = await openAModeFixture(page);
   await holdRightTarget(page, '父团', 440, false);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(parentPath);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterFieldOpen)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths)).toContain(parentPath);
   const labels = await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label));
   expect(labels).toContain('内层团');
   expect(labels).not.toContain('团外旁侧');
@@ -1055,6 +1058,33 @@ test('A sustained right press immerses once before release and release adds no o
   expect(await page.evaluate(() => window.spatialLab.state().path)).toBe(parentPath);
   expect(await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label)))
     .not.toContain('叶子');
+});
+
+test('vertical shortcuts stay inside the deepest Graph shell under the crosshair', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { parentPath, innerPath } = await openAModeFixture(page);
+  await rightClickTarget(page, '父团', 1);
+  await page.waitForTimeout(430);
+  const parentShell = (await page.evaluate(() => window.spatialLab.state().clusterRegions))
+    .find(({ path }) => path === parentPath);
+  expect(parentShell).toBeTruthy();
+  await page.mouse.move(parentShell.clientX, parentShell.clientY);
+
+  await page.keyboard.press('PageDown');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths)).toContain(innerPath);
+  expect(await page.evaluate(() => window.spatialLab.state().clusterPaths)).toEqual(
+    expect.arrayContaining(['root', parentPath, innerPath])
+  );
+
+  await page.keyboard.press('Home');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths)).not.toContain(innerPath);
+  expect(await page.evaluate(() => window.spatialLab.state().clusterPaths)).toEqual(
+    expect.arrayContaining(['root', parentPath])
+  );
+
+  await page.keyboard.press('End');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths)).toContain(innerPath);
+  expect(await page.locator('#spaceCanvas').evaluate((canvas) => getComputedStyle(canvas).cursor)).toBe('none');
 });
 
 test('ordinary nested blank right double-click collapses only its direct inner group', async ({ page }) => {

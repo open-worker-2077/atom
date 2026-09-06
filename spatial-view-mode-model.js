@@ -296,6 +296,36 @@
     });
   }
 
+  function resolveVerticalScopeAnchor(regionsInput, pointInput) {
+    const point = pointInput || {};
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+    const match = (Array.isArray(regionsInput) ? regionsInput : [])
+      .filter((region) => (
+        region
+        && typeof region.path === "string"
+        && region.path
+        && Number.isFinite(Number(region.depth))
+        && Number.isFinite(Number(region.x))
+        && Number.isFinite(Number(region.y))
+        && Number(region.radius) > 0
+      ))
+      .map((region) => ({
+        region,
+        normalizedDistance: Math.hypot(point.x - region.x, point.y - region.y) / region.radius
+      }))
+      .filter((candidate) => candidate.normalizedDistance <= 0.96)
+      .sort((left, right) => (
+        Number(right.region.depth) - Number(left.region.depth)
+        || left.normalizedDistance - right.normalizedDistance
+        || Number(left.region.radius) - Number(right.region.radius)
+        || left.region.path.localeCompare(right.region.path)
+      ))[0];
+    return match ? Object.freeze({
+      path: match.region.path,
+      depth: Number(match.region.depth)
+    }) : null;
+  }
+
   function planContextLevelExpansion(entriesInput, expandedPathsInput) {
     const expanded = new Set(Array.isArray(expandedPathsInput) ? expandedPathsInput : []);
     const plannedPaths = new Set();
@@ -381,6 +411,7 @@
     planViewTargets,
     resolveImmersiveOwnerContext,
     clusterDomainFrame,
+    resolveVerticalScopeAnchor,
     planContextLevelExpansion,
     planContextLevelCollapse,
     immersiveDomainFrame
