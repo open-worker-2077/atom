@@ -1,6 +1,6 @@
 # A Mode Consolidation Implementation Plan
 
-**当前续点（2026-09-06）**：Task1—5已独立复核；Task5长按最终d2c0234，单调按下时长及迟到timer一次性修复通过。e379b98仅吸收main最新文档并保留完成证据；Task6由a_task6_browser_retirement（Sol high）从该BASE完成互补浏览器验收和退役清单，Task7随后。A尚未部署，不重派已完成任务。
+**当前续点（2026-09-06）**：Task1—6已独立复核；产品d2c0234、浏览器合同及退役清单a2c838e。Task7最终Node已执行一次，1857/1845pass/11旧合同失败/1skip；19519a1仅修两份Node合同且75/75，范围复核通过，随后整支评审和部署。A尚未部署，不重派已完成任务或重复全量。
 
 **最新用户修订（2026-09-05）**：右键双击沉浸改为右键长按；已于Task5实施并复核，下方Task1—4旧双击步骤仅保留历史证据，当前合同以Web规格及Task5为准。
 
@@ -340,19 +340,19 @@ git commit -m "refactor(web): merge immersion into A navigation"
 - Consumes: Task5已独立复核的长按输入、导航、共同设置及帮助；同revision原始RED/GREEN。
 - Produces: 保全原功能验收含义的A唯一模式浏览器链；退役功能→原提交→当前替代路径清单。
 
-- [ ] **Step 1: 核对并复用新手势证据，校准旧测试准备动作**
+- [x] **Step 1: 核对并复用新手势证据，校准旧测试准备动作**
 
 Task5已经负责长按RED/GREEN，Task1—4原双击RED保留为历史，不重新制造旧行为RED。先读Task5报告与原始输出。现有浏览器关键旅程中“F entry keeps every intended child node inside the rendered viewport”及批量移动目标准备仍按旧独立F模式操作；只将进入动作改为真实右键长按，保持“每个子节点在可见视口”“批量移动保存回执/节点完整”等原业务断言。不得删除有效旅程、放宽其结果或通过测试专用模式绕过真实输入。
 
-- [ ] **Step 2: 完成必要浏览器修正并运行受影响旅程**
+- [x] **Step 2: 完成必要浏览器修正并运行受影响旅程**
 
 在独立、零生产写入的现有测试世界运行修订旅程。首次改测试后如失败，区分旧准备动作未迁移、夹具问题与产品实际回归，后者交原Task5实施方定向修正和复核。不新增导航框架或改变已批准行为。包含Task5具名A短按/长按/松开/单层返回、共同配置及mobile-control-panel在内的现有关键旅程全体须具备当前候选有效证据；同revision已通过的具名测试可复用，只运行尚无证据的互补集合。唯一浏览器输出目录保全所有产物，不删除目录或测试清理世界。
 
-- [ ] **Step 3: 写入可恢复退役清单**
+- [x] **Step 3: 写入可恢复退役清单**
 
 清单按实际行为和源码引用，列出S外围、D层级、独立F的原入口、旧提交及A当前替代；沉浸能力仍由A右键长按提供。保留仍被A使用的owner-route、domain-frame、A子层缩小及其他有效需求，不仅按旧变量名删除代码。引用既有标签`pre-a-mode-consolidation-20260904`，核验可解析；安全查看用git show，恢复从标签建新分支，不reset覆盖工作树。历史旧双击代码与长按替代也注明，不把封存当成删除文件。
 
-- [ ] **Step 4: 受影响链验收、证据入账与提交**
+- [x] **Step 4: 受影响链验收、证据入账与提交**
 
 复用Task5同revision的输入、模型、手势、UI及共同配置有效证据；如实际修改产品则定向重验最小受影响链再升级真实旅程。更新原总账/恢复断点，精确标明仅候选完成、尚未部署，记录commit和实际测试统计。GitNexus detect_changes及diff检查后提交；独立Task6复核由控制方派发。最终全量只在Task7执行。
 
@@ -367,7 +367,7 @@ Task5已经负责长按RED/GREEN，Task1—4原双击RED保留为历史，不重
 - Consumes: Task 6已稳定候选 revision。
 - Produces: 唯一一次全量 Node 门禁、开发控制门禁、4784部署与公开入口回读证据。
 
-- [ ] **Step 1: Run pre-commit complexity and source checks**
+- [x] **Step 1: Run pre-commit complexity and source checks**
 
 Run: `git diff --check`
 
@@ -375,7 +375,7 @@ Run: `npm run check:development-control`
 
 Expected: both exit 0; no duplicate mode abstraction, dead configuration, second settings store or compatibility branch remains.
 
-- [ ] **Step 2: Run the final full Node suite exactly once for this candidate**
+- [x] **Step 2: Run the final full Node suite exactly once for this candidate**
 
 Run: `npm test`
 
@@ -515,3 +515,13 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **Astra首帧咨询／root复核**：咨询未改文件/运行测试；原root/目标scope响应均含目标域5节点，四项预期已在。root已读enterNode/commitDomainRoute及bridge加载链；rendered descriptors由投影裁剪后列表生成，首路径帧不等同权威就绪或镜头稳定帧。07 trace在6969.685ms明确loading，但observer未同帧记录scope，现阶段不裁定产品回归。已要求Task6被动采集首次路径/首次目标scope loaded的节点集合、ownerPath、camera/phase并核对实际响应；按规格分清加载/完整数据/最终入镜，不增加预取、不取消过渡或改内核。错误判断将导致测试时点返工，原失败完整保留。
 - **Ruling: Task6批量可见性边界校准**：batch13真实HTTP8/8、pending operation、公开state目标8/来源0及11条精确atomPath/关系、同页exportKnowledge目标8/来源0及11关系均通过；30秒内rendered为2/8。原batch测试仅要求回执与完整知识/目标路径，Web§3.2要求保留相机及显式布局，并无批量后自动八节点同屏合同。root此前追加全体visible过度扩展，撤回仅该新断言，原断言及本轮同页权威对账全保留；不据此改相机/产品，不混同独立域进入viewport合同。2/8作为尚未裁定的展示观察保留，不能写成已证回归。复用13该末尾断言之前有效证据，不重复提交或整段重跑；代价由root承担为本轮额外验证耗时，无需求删减。
 - **Ruling: 首帧数据与相机验收分离**：诊断15同一path-change帧scope=loaded、knowledge=authoritative，exportField含目标域全部5节点，rendered为目标域测试入口且phase=aim、camera.distance=1.84。因此不是加载缺失；旧四标签瞬时rendered断言混同完整数据与既有420ms相机过渡。保留首路径帧完整目标域/非空正确ownerPath，再在同次导航相机稳定后验证原四标签全部visible，标题按真实时点改写；不取消过渡、预载或修改产品。连续第二域首帧PASS复用，仅修订首入1项重验。若裁定错误，代价为重新定义过渡视觉验收；节点/关系/原四标签要求完整保留，不把诊断失败掩盖成原测试全绿。
+- **Ruling: 背景缓存验收对象**：steady测试全局Canvas ellipse/blit=72超过70，但该计数混入主画布所有节点；root读drawStaticBackdrop1722—1748，背景独立layer仅cache key变时绘制。改为被动识别主spaceCanvas全幅blit的已预热背景源，验证稳定窗口复用同一layer并无背景ellipse重绘，不提高70阈值或修改产品。以直接缓存行为替换不准确混合代理，保留性能目的；若识别源错误会导致该项验收返工，须静态核对并保留诊断。
+
+- **Task7 Node门禁已启动**：产品自d2c0234未变，最小Node与核心浏览器行为已验证；剩余Task6只修旧浏览器准备/观察合同及文档，因此最终Node全量与其收尾并行，不等待文档串行完成。日志final-full-d2c0234-20260906-01.log、root session3166；npm build机械stamp由root收口，未部署。若出现产品变更先界定证据失效，不据本次启动声称已通过。
+- **Task6完整覆盖回传待独立复核**：critical24/24、mobile3/3、presentation2/2以原有效证据和本轮互补组合覆盖；首入18、single21、subtree19、rollback20、背景直接缓存20、mobile22/23等已通过，无已裁定产品失败。实现方正提交4个测试/退役文件和完整报告；root须核对报告并独立任务复核，不以自报提前标complete。
+
+- **Task7最终Node结果**：final-full-d2c0234-20260906-01.log，exit1，1857total/1845pass/11fail/1 Windows symlink skip，497112.6794ms。失败位于editor-engine-contract.test.js549及view-mode-engine-contract.test.js43/53/59/69/88/102/127/159/251/262，均指向退役ASDF/applyViewMode/旧mode guard等合同。先按真实源码/规格定向核查校准两文件，不以旧入口测试强迫恢复已撤回功能；产品未改变，已通过1845证据保留，不重跑全量求外观。门禁尚未关闭，部署未执行。
+- **Task6候选复核中**：a2c838e711a2f8efbfbd1520736e10b910762c1b，三份浏览器测试+退役清单4文件；root已完整读task-6-longpress-report.md，coverage29项按Task4复用2、Task5复用7、本轮20组合。a_task6_review（Sol high）只读评审e379b98..a2c838e，差异包review-e379b98..a2c838e.diff。Task7两Node合同校准由原a_task5_longpress续接，BASE a2c838e，新报告task-7-node-contract-report.md；只两文件定向，不改产品/重跑浏览器或全量。正式入口只读预检HTML与当前main原样相同HTTP200，仍是旧生产而非A部署。
+- **Task6: complete**：e379b98..a2c838e，a_task6_review规格合规、quality Approved，无Critical/Important/Minor。Root复核跨差异项：Task5 d2c0234已限定复审的稳定锚定/阈值/松开一次/双击隔离证据继续有效；本轮git rev-parse标签对象实际解析f2d2fd083329e0c145248988f16fb722a1b4c085，与退役清单一致。关键浏览器29项采用组合证据，未重跑求整组外观；不是单次29项全量结果。
+- **Task7合同定向GREEN待复核**：19519a1仅改editor-engine-contract与view-mode-engine-contract两测试；保留11项对应验收与A历史/批量/递归/PageUpDown/End/边编辑，定向75/75 PASS，产品未变。原a_task5_longpress_review只读评审a2c838e..19519a1；最终Node使用全量1845项通过加定向75项的组合证据，保留原11失败记录，不写成单次1857全绿。部署尚未执行。
+- **Task7 Node门禁关闭（组合证据）**：a_task5_longpress_review已复核a2c838e..19519a1，规格符合、质量Approved、零分级问题；root读完整报告并对照11处差异，接受全量1845通过+两文件75/75定向修正。产品未变，development-control既有exit0复用，当前diff-check通过；只关闭候选测试门禁，部署/正式入口仍开放。

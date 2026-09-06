@@ -12,7 +12,7 @@
 - **持续执行**：atom-2已ACTIVE、每30分钟；用户定义与Atom框架优先，困难时允许临时Astra高级咨询，意见须独立判断。新内核改造须用户反馈。移动归档已交付并回告提出方，不重做。
 - **后续队列**：手机入口恢复即优先验收；当前独立推进A剩余Task5—7及右键长按，旧print迁移不重做。CLI52反馈已评估不等于已解决。保留全部有效需求，Superpowers本地化核查已完成，持续同步原规格/计划/总账。
 
-- **A精确续点**：Task1—5完成；Task5最终d2c0234已限定复审通过，e379b98合并最新main文档。Task6由a_task6_browser_retirement（Sol high）从BASE e379b98e0fa77732a9d22295331f52a8fbe0d0c5实施，原SDD task-6-longpress-brief.md/report.md；root持有总账/计划更新职责。复用Task5有效证据，只跑未覆盖的互补浏览器旅程；Task7才最终全量/正式部署。生产仍b329399，不重做旧print迁移、移动或Task1—5。
+- **A精确续点**：Task1—6完成；Task5 d2c0234、Task6 a2c838e均独立Approved。Task7最终Node已跑一次，1857/1845pass/11旧合同失败/1skip；19519a1两测试修正75/75，a_task5_longpress_review范围复核通过，不重跑全量。下一步整支评审→原SDD受控部署helper→正式HTTPS资产和真实只读手势回读。计划为恢复权威，私有报告保留；生产仍b329399，不重做已交付移动、print或Task1—6。
 
 ## 历史执行记录（以下“当前/尚未”均指记录当时）
 
