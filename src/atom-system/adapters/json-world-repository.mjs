@@ -1205,6 +1205,7 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
   async function loadState() {
     const legacy = await loadLegacy();
     const prepared = new Map(legacy.prepared.map((entry) => [entry.commandId, structuredClone(entry)]));
+    const legacyPrepared = new Set(legacy.prepared.map((entry) => entry.commandId));
     const receipts = new Map(legacy.receipts.map((entry) => [entry.commandId, structuredClone(entry)]));
     const order = legacy.receipts.map((entry) => entry.commandId);
     const records = new Map(legacy.receipts.map((entry) => [entry.commandId, structuredClone(entry)]));
@@ -1213,19 +1214,25 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
       if (event.type === 'prepared') {
         if (receipts.has(event.commandId)) continue;
         prepared.set(event.commandId, event.record);
+        legacyPrepared.delete(event.commandId);
         continue;
       }
       if (event.type === 'aborted') {
         prepared.delete(event.commandId);
+        legacyPrepared.delete(event.commandId);
         continue;
       }
       prepared.delete(event.commandId);
+      legacyPrepared.delete(event.commandId);
       if (!receipts.has(event.commandId)) order.push(event.commandId);
       receipts.set(event.commandId, { ...event.record, receipt: event.receipt });
       records.set(event.commandId, event.record);
       if (event.programOutcome) outcomes.set(event.commandId, event.programOutcome);
     }
-    const state = { prepared, receipts, records, order, outcomes, sources: new Map(), children: new Map() };
+    const state = {
+      prepared, legacyPrepared, receipts, records, order, outcomes,
+      sources: new Map(), children: new Map()
+    };
     for (const entry of receipts.values()) indexProgramReceipt(state, entry.receipt);
     return state;
   }
@@ -1306,6 +1313,27 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     return hydrateRecord((await load()).receipts.get(commandId));
   }
 
+  async function legacyPreparedEvidence(identity) {
+    const state = await load();
+    if (!state.legacyPrepared.has(identity?.commandId)) return null;
+    const record = state.prepared.get(identity.commandId);
+    if (!record || record.historyMode === 'local-patch'
+      || record.commandId !== identity.commandId
+      || record.before?.worldId !== identity.worldId
+      || record.after?.worldId !== identity.worldId
+      || record.before?.revision !== identity.beforeRevision
+      || record.after?.revision !== identity.afterRevision) return null;
+    return Object.freeze({
+      contract: 'atom.legacy-prepared-evidence',
+      version: 1,
+      sourceSchemaVersion: 1,
+      commandId: identity.commandId,
+      worldId: identity.worldId,
+      beforeRevision: identity.beforeRevision,
+      afterRevision: identity.afterRevision
+    });
+  }
+
   function prepare(record) {
     return serialize(async () => {
       const state = await load();
@@ -1366,7 +1394,8 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
 
   return Object.freeze({
     file, incrementalDirectory, eventFile, objectDirectory,
-    findReceipt, findPrepared, findCommitted, prepare, commit, abort, listPrepared, readState,
+    findReceipt, findPrepared, findCommitted, legacyPreparedEvidence,
+    prepare, commit, abort, listPrepared, readState,
     programExecution, programExecutionForInteraction, pendingProgramExecutions, recordProgramExecution
   });
 }

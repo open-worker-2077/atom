@@ -2603,6 +2603,132 @@ test('repository reuses one unchanged disk snapshot and invalidates it on extern
   assert.equal(replaced.facts[0].marker, 'second-value');
 });
 
+function legacyPreparedRecord(commandId, beforeFacts, afterFacts) {
+  const beforeRevision = revisionOf(beforeFacts);
+  const afterRevision = revisionOf(afterFacts);
+  const commandEnvelope = command(commandId, beforeRevision);
+  return {
+    commandId,
+    correlationId: commandEnvelope.correlationId,
+    command: commandEnvelope,
+    before: {
+      contract: 'atom.world-snapshot', version: 1, worldId: 'primary',
+      revision: beforeRevision, facts: beforeFacts
+    },
+    after: {
+      contract: 'atom.world-snapshot', version: 1, worldId: 'primary',
+      revision: afterRevision, facts: afterFacts
+    },
+    receipt: {
+      contract: 'atom.world-receipt', version: 1,
+      commandId, correlationId: commandEnvelope.correlationId,
+      beforeRevision, afterRevision,
+      status: 'committed', committedAt: new Date(0).toISOString(),
+      source: commandEnvelope.name, affectedAtoms: [], result: null
+    }
+  };
+}
+
+for (const interruptionPoint of ['before-world-write', 'after-world-write']) {
+  test(`schemaVersion 1 prepared transaction recovers exactly once after ${interruptionPoint}`, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), `atom-legacy-${interruptionPoint}-`));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const worldFile = path.join(directory, 'atom.json');
+    const journalFile = path.join(directory, 'transactions.json');
+    const localCommitFile = path.join(directory, 'world-commits.jsonl');
+    const beforeFacts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+    const afterFacts = [{ thing: 'Root', situation: 'new', slot: [], strut: [] }];
+    const record = legacyPreparedRecord(`legacy-${interruptionPoint}`, beforeFacts, afterFacts);
+    await fs.writeFile(worldFile, `${JSON.stringify(
+      interruptionPoint === 'after-world-write' ? afterFacts : beforeFacts
+    )}\n`, 'utf8');
+    await fs.writeFile(journalFile, `${JSON.stringify({
+      schemaVersion: 1,
+      historyMode: 'latest-rollback-snapshot',
+      prepared: [record],
+      receipts: []
+    })}\n`, 'utf8');
+    const worldRepository = createJsonWorldRepository({
+      file: worldFile, worldId: 'primary', localCommitFile
+    });
+    const journalRepository = createJsonTransactionJournal({ file: journalFile });
+    const coordinator = createCommitCoordinator({ worldRepository, journalRepository });
+
+    assert.deepEqual(await coordinator.recover(), { recovered: 1 });
+    assert.deepEqual((await worldRepository.read()).facts, afterFacts);
+    assert.deepEqual(await coordinator.recover(), { recovered: 0 });
+    const state = await journalRepository.readState();
+    assert.deepEqual(state.prepared, []);
+    assert.deepEqual(state.receipts.map(({ commandId }) => commandId), [record.commandId]);
+    const events = (await fs.readFile(journalRepository.eventFile, 'utf8'))
+      .trim().split('\n').map(JSON.parse);
+    assert.deepEqual(events.map(({ type, commandId }) => ({ type, commandId })), [{
+      type: 'committed', commandId: record.commandId
+    }]);
+  });
+}
+
+test('schemaVersion 2 prepared transaction cannot claim an unproven matching afterRevision', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-current-prepared-impostor-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  const journalFile = path.join(directory, 'transactions.json');
+  const localCommitFile = path.join(directory, 'world-commits.jsonl');
+  const beforeFacts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+  const afterFacts = [{ thing: 'Root', situation: 'matching-after', slot: [], strut: [] }];
+  const record = legacyPreparedRecord('current-format-impostor', beforeFacts, afterFacts);
+  await fs.writeFile(worldFile, `${JSON.stringify(afterFacts)}\n`, 'utf8');
+  const journalRepository = createJsonTransactionJournal({ file: journalFile });
+  await journalRepository.prepare(record);
+  const storedWorldRepository = createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile
+  });
+  const worldRepository = Object.freeze({
+    read: (...args) => storedWorldRepository.read(...args),
+    compareAndSwap: (...args) => storedWorldRepository.compareAndSwap(...args)
+  });
+  const coordinator = createCommitCoordinator({ worldRepository, journalRepository });
+
+  await assert.rejects(coordinator.recover(), (error) => {
+    assert.equal(error.code, 'TRANSACTION_RECOVERY_CONFLICT');
+    assert.equal(error.details.commandId, record.commandId);
+    assert.equal(error.details.actualRevision, record.after.revision);
+    assert.equal(error.details.afterRevision, record.after.revision);
+    return true;
+  });
+  const state = await journalRepository.readState();
+  assert.deepEqual(state.prepared.map(({ commandId }) => commandId), [record.commandId]);
+  assert.deepEqual(state.receipts, []);
+});
+
+test('schemaVersion 1 prepared transaction cannot claim a matching revision with unverified snapshot facts', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-legacy-prepared-invalid-snapshot-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  const journalFile = path.join(directory, 'transactions.json');
+  const beforeFacts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+  const afterFacts = [{ thing: 'Root', situation: 'actual', slot: [], strut: [] }];
+  const record = legacyPreparedRecord('legacy-invalid-snapshot', beforeFacts, afterFacts);
+  record.after.facts = [{ thing: 'Root', situation: 'forged', slot: [], strut: [] }];
+  await fs.writeFile(worldFile, `${JSON.stringify(afterFacts)}\n`, 'utf8');
+  await fs.writeFile(journalFile, `${JSON.stringify({
+    schemaVersion: 1,
+    historyMode: 'latest-rollback-snapshot',
+    prepared: [record],
+    receipts: []
+  })}\n`, 'utf8');
+  const journalRepository = createJsonTransactionJournal({ file: journalFile });
+  const worldRepository = createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile: path.join(directory, 'world-commits.jsonl')
+  });
+  const coordinator = createCommitCoordinator({ worldRepository, journalRepository });
+
+  await assert.rejects(coordinator.recover(), { code: 'TRANSACTION_RECOVERY_CONFLICT' });
+  const state = await journalRepository.readState();
+  assert.deepEqual(state.prepared.map(({ commandId }) => commandId), [record.commandId]);
+  assert.deepEqual(state.receipts, []);
+});
+
 test('recovery completes a prepared transaction interrupted before the world write', async (t) => {
   let interrupted = true;
   const files = await fixture(t, {

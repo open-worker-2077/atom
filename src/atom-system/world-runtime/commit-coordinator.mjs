@@ -125,6 +125,48 @@ function completeClosureFor(record) {
   return closure.entries;
 }
 
+function verifiedLegacyPreparedIdentity(record) {
+  if (record?.historyMode === 'local-patch') return null;
+  let command;
+  let before;
+  let after;
+  let receipt;
+  try {
+    command = validateWorldCommandEnvelope(record?.command);
+    before = validateWorldSnapshot(record?.before);
+    after = validateWorldSnapshot(record?.after);
+    receipt = validateWorldReceipt(record?.receipt);
+  } catch {
+    return null;
+  }
+  if (record.commandId !== command.commandId
+    || record.correlationId !== command.correlationId
+    || receipt.commandId !== command.commandId
+    || receipt.correlationId !== command.correlationId
+    || command.expectedRevision !== before.revision
+    || revisionOfWorldFacts(before.facts) !== before.revision
+    || revisionOfWorldFacts(after.facts) !== after.revision
+    || receipt.beforeRevision !== before.revision
+    || receipt.afterRevision !== after.revision
+    || before.worldId !== after.worldId) return null;
+  return Object.freeze({
+    commandId: command.commandId,
+    worldId: before.worldId,
+    beforeRevision: before.revision,
+    afterRevision: after.revision
+  });
+}
+
+function matchesLegacyPreparedEvidence(evidence, identity) {
+  return evidence?.contract === 'atom.legacy-prepared-evidence'
+    && evidence.version === 1
+    && evidence.sourceSchemaVersion === 1
+    && evidence.commandId === identity?.commandId
+    && evidence.worldId === identity?.worldId
+    && evidence.beforeRevision === identity?.beforeRevision
+    && evidence.afterRevision === identity?.afterRevision;
+}
+
 export function createCommitCoordinator({
   worldRepository,
   journalRepository,
@@ -163,7 +205,14 @@ export function createCommitCoordinator({
     }
     const durableEvidence = typeof worldRepository.durableCommitEvidence === 'function'
       ? await worldRepository.durableCommitEvidence(identity)
-      : current.revision === afterRevision ? { source: 'legacy-revision' } : null;
+      : null;
+    const legacyIdentity = current.revision === afterRevision
+      ? verifiedLegacyPreparedIdentity(record)
+      : null;
+    const legacyEvidence = !durableEvidence && legacyIdentity
+      ? await journalRepository.legacyPreparedEvidence?.(legacyIdentity)
+      : null;
+    const verifiedLegacyAfterWrite = matchesLegacyPreparedEvidence(legacyEvidence, legacyIdentity);
     if (!durableEvidence && current.revision === beforeRevision) {
       const nextSnapshot = record.historyMode === 'local-patch'
         ? nextWorldSnapshot(current, applyLocalWorldPatch(current.facts, record.patch))
@@ -190,7 +239,7 @@ export function createCommitCoordinator({
         && !await worldRepository.hasDurableCommit(identity)) {
         throw problem('TRANSACTION_RECOVERY_CONFLICT', 'Recovered world write lacks exact durable command evidence', identity);
       }
-    } else if (!durableEvidence) {
+    } else if (!durableEvidence && !verifiedLegacyAfterWrite) {
       const successor = await worldRepository.durableSuccessor?.(beforeRevision);
       if (successor && successor.commandId !== record.commandId
         && typeof journalRepository.abort === 'function') {

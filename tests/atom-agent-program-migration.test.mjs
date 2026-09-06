@@ -634,7 +634,7 @@ test('same apply attempt reconstructs a missing deployment receipt from verified
   assert.equal(JSON.parse(await fs.readFile(recovered.receiptFile, 'utf8')).rollback.targetCommandId, committed.commandId);
 });
 
-test('same apply attempt finalizes an after-world-write prepared migration before reconstructing its receipt', async (t) => {
+test('same apply attempt finalizes a schemaVersion 1 after-world-write migration before reconstructing its receipt', async (t) => {
   const localAppData = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-migration-prepared-'));
   t.after(() => fs.rm(localAppData, { recursive: true, force: true }));
   const worldDirectory = path.join(localAppData, 'AtomGraph', 'worlds', 'primary');
@@ -710,6 +710,19 @@ test('same apply attempt finalizes an after-world-write prepared migration befor
   assert.equal(interrupted.prepared.length, 1);
   assert.equal(interrupted.receipts.length, 0);
   assert.equal(revisionOfWorldFacts(JSON.parse(await fs.readFile(contextFile, 'utf8'))), plan.nextRevision);
+
+  // Model the on-disk handoff from the old runtime: its complete prepared record
+  // lived in the schemaVersion 1 base journal and it had no local commit proof.
+  await fs.writeFile(journalFile, `${JSON.stringify({
+    schemaVersion: 1,
+    historyMode: 'latest-rollback-snapshot',
+    prepared: interrupted.prepared,
+    receipts: []
+  }, null, 2)}\n`, 'utf8');
+  await fs.rm(`${journalFile}.d`, { recursive: true, force: true });
+  const legacyInterrupted = await createJsonTransactionJournal({ file: journalFile }).readState();
+  assert.equal(legacyInterrupted.prepared.length, 1);
+  assert.equal(legacyInterrupted.receipts.length, 0);
 
   const recovered = JSON.parse((await execFileAsync(process.execPath, [
     operator, '--apply', '--attempt', attemptId
