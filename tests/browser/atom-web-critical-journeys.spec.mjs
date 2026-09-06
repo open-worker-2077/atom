@@ -26,11 +26,56 @@ async function waitForViewToSettle(page, { allowTransaction = false } = {}) {
   await page.waitForTimeout(550);
 }
 
+async function observeFirstPathChangeFrame(page, initialPath) {
+  await page.evaluate((path) => {
+    window.__firstPathChangeFrame = null;
+    const observe = () => {
+      const state = window.spatialLab.state();
+      if (state.path !== path) {
+        window.__firstPathChangeFrame = {
+          path: state.path,
+          scopeState: document.body.dataset.spatialScopeState,
+          knowledgeState: document.body.dataset.spatialKnowledge,
+          phase: state.phase,
+          camera: state.camera,
+          field: window.spatialLab.exportField(),
+          visibleNodeDescriptors: state.visibleNodeDescriptors
+        };
+        return;
+      }
+      requestAnimationFrame(observe);
+    };
+    requestAnimationFrame(observe);
+  }, initialPath);
+}
+
+async function readFirstPathChangeFrame(page) {
+  await expect.poll(() => page.evaluate(() => window.__firstPathChangeFrame)).toBeTruthy();
+  return page.evaluate(() => window.__firstPathChangeFrame);
+}
+
+function observeWorkspaceCommit(page) {
+  const projectionSignal = page.evaluate(() => new Promise((resolve) => {
+    const finish = (type, event) => {
+      window.removeEventListener('spatial-workspace-persisted', onPersisted);
+      window.removeEventListener('spatial-workspace-projection-pending', onPending);
+      resolve({ type, detail: event.detail });
+    };
+    const onPersisted = (event) => finish('persisted', event);
+    const onPending = (event) => finish('pending', event);
+    window.addEventListener('spatial-workspace-persisted', onPersisted);
+    window.addEventListener('spatial-workspace-projection-pending', onPending);
+  }));
+  const workspaceResponsePromise = page.waitForResponse((response) => (
+    response.url().endsWith('/__atom/api/workspace-edit')
+  ));
+  return { projectionSignal, workspaceResponsePromise };
+}
+
 async function enterAtomFile(page, options) {
   const selected = await page.evaluate(() => window.spatialLab.selectByLabel('atom.json'));
   expect(selected).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, 'atom.json');
   await waitForViewToSettle(page, options);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).not.toBe('root');
 }
@@ -64,9 +109,8 @@ test('A-mode double-click activates the visible child instead of its selected ou
   ));
 
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('外层'))).toBe(true);
-  await page.keyboard.press('a');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
-  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterFieldOpen)).toBe(true);
+  await rightClickTarget(page, '外层', 1);
+  await page.waitForTimeout(430);
   const readChild = () => page.evaluate(() => (
     window.spatialLab.state().interactionTargets.find(({ label }) => label === '内层目标')
   ));
@@ -88,7 +132,7 @@ test('A-mode double-click activates the visible child instead of its selected ou
     .toBe('overlap-child-id');
 });
 
-test('F-mode enters a visible nested node through its real owner route', async ({ page }) => {
+test('A right hold enters a visible nested node through its real owner route', async ({ page }) => {
   const workPath = `root/${hashText('work-id').toString(36)}`;
   const personalPath = `${workPath}/${hashText('personal-id').toString(36)}`;
   const knowledge = {
@@ -121,16 +165,11 @@ test('F-mode enters a visible nested node through its real owner route', async (
   await page.waitForFunction(() => window.spatialLab?.state().visibleNodeDescriptors
     .some(({ label }) => label === '办包'));
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('办包'))).toBe(true);
-  await page.keyboard.press('a');
-  await expect.poll(() => page.evaluate(() => window.spatialLab.state().viewMode)).toBe('nested');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await rightClickTarget(page, '办包', 1);
+  await page.waitForTimeout(430);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().interactionTargets
     .some(({ label }) => label === '个务'))).toBe(true);
-  const personal = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
-    .find(({ label }) => label === '个务');
-
-  await page.keyboard.press('f');
-  await page.mouse.click(personal.clientX, personal.clientY, { button: 'right' });
+  await holdRightTarget(page, '个务');
 
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(personalPath);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors
@@ -143,18 +182,32 @@ test('F-mode enters a visible nested node through its real owner route', async (
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(workPath);
 });
 
-test('first domain entry renders its authoritative child nodes on the next visual frame', async ({ page }) => {
+test('first domain entry exposes its target field immediately and authoritative children after settling', async ({ page }) => {
   await openIsolatedWorld(page);
   const selected = await page.evaluate(() => window.spatialLab.selectByLabel('atom.json'));
   expect(selected).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await observeFirstPathChangeFrame(page, 'root');
+  await holdRightTarget(page, 'atom.json');
 
-  const firstFrame = await page.evaluate(() => new Promise((resolve) => {
-    requestAnimationFrame(() => resolve(window.spatialLab.state()));
-  }));
+  const firstFrame = await readFirstPathChangeFrame(page);
   expect(firstFrame.path).not.toBe('root');
-  expect(firstFrame.visibleNodeDescriptors.map(({ label }) => label)).toEqual(expect.arrayContaining([
+  expect(firstFrame.scopeState).toBe('loaded');
+  expect(firstFrame.knowledgeState).toBe('authoritative');
+  expect(firstFrame.field.path).toBe(firstFrame.path);
+  expect(firstFrame.field.nodes).toHaveLength(5);
+  expect(firstFrame.field.nodes.map(({ label }) => label)).toEqual(expect.arrayContaining([
+    '测试入口',
+    '批量目标',
+    '深层导航入口',
+    '顶层参照'
+  ]));
+  expect(firstFrame.visibleNodeDescriptors.length).toBeGreaterThan(0);
+  expect(firstFrame.visibleNodeDescriptors.every(({ ownerPath }) => ownerPath === firstFrame.path)).toBe(true);
+  await waitForViewToSettle(page);
+  const settledLabels = await page.evaluate(() => (
+    window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label)
+  ));
+  expect(settledLabels).toEqual(expect.arrayContaining([
     '测试入口',
     '批量目标',
     '深层导航入口',
@@ -165,16 +218,14 @@ test('first domain entry renders its authoritative child nodes on the next visua
 test('rapid consecutive domain entry renders the second domain on its first visual frame', async ({ page }) => {
   await openIsolatedWorld(page);
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('atom.json'))).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, 'atom.json');
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).not.toBe('root');
 
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('测试入口'))).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
-  const firstFrame = await page.evaluate(() => new Promise((resolve) => {
-    requestAnimationFrame(() => resolve(window.spatialLab.state()));
-  }));
+  const parentPath = await page.evaluate(() => window.spatialLab.state().path);
+  await observeFirstPathChangeFrame(page, parentPath);
+  await holdRightTarget(page, '测试入口');
+  const firstFrame = await readFirstPathChangeFrame(page);
 
   expect(firstFrame.visibleNodeDescriptors.length).toBeGreaterThan(0);
 });
@@ -205,21 +256,20 @@ test('Web help renders work-order actions, errors, and receipt fields from the s
   expect(comparison.renderedReceipt).toEqual(comparison.endpointReceipt);
 });
 
-test('F entry keeps every intended child node inside the rendered viewport', async ({ page }) => {
+test('A right hold keeps every intended child node inside the rendered viewport', async ({ page }) => {
   await openIsolatedWorld(page);
   await enterAtomFile(page);
 
   const selected = await page.evaluate(() => window.spatialLab.selectByLabel('测试入口'));
   expect(selected).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, '测试入口');
   await waitForViewToSettle(page);
 
   const result = await page.evaluate(() => ({
     state: window.spatialLab.state(),
     field: window.spatialLab.exportField()
   }));
-  expect(result.state.viewMode).toBe('immersive');
+  expect(result.state.viewMode).toBe('nested');
   expect(result.field.nodes).toHaveLength(8);
   expect(result.state.visibleNodeDescriptors.map(({ label }) => label).sort())
     .toEqual(result.field.nodes.map(({ label }) => label).sort());
@@ -230,7 +280,8 @@ test('searching a deep portal enters its child domain so the target is actionabl
   await enterAtomFile(page);
   const parentPath = await page.evaluate(() => window.spatialLab.state().path);
 
-  await page.locator('[data-ui="search"]').click();
+  await page.keyboard.press('Control+K');
+  await expect(page.locator('#spatialSearch')).toBeVisible();
   await page.locator('#spatialSearch').fill('深层导航入口');
   await page.locator('.search-result').first().click();
 
@@ -319,8 +370,8 @@ test('a CLI revision preserves the complete expanded scene instead of mixing old
   await openIsolatedWorld(page);
   await enterAtomFile(page);
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('测试入口'))).toBe(true);
-  await page.keyboard.press('a');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await rightClickTarget(page, '测试入口', 1);
+  await page.waitForTimeout(430);
   await expect.poll(() => page.evaluate(() => window.spatialLab.exportField().expandedPaths.length))
     .toBeGreaterThan(0);
   await page.waitForTimeout(700);
@@ -368,20 +419,47 @@ test('a CLI revision preserves the complete expanded scene instead of mixing old
 });
 
 test('double-Shift selection survives the real ctrl-right landing gesture as one batch', async ({ page }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   await openIsolatedWorld(page);
   await enterAtomFile(page);
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('测试入口'))).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, '测试入口');
   await waitForViewToSettle(page);
-  await page.keyboard.press('a');
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().viewMode)).toBe('nested');
 
   const targets = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
     .filter(({ label }) => label !== '批量目标');
   expect(targets.length).toBeGreaterThan(1);
   const source = targets[0];
+  const targetLabels = targets.map(({ label }) => label);
+  expect(new Set(targetLabels).size).toBe(targets.length);
+  const relationEvidenceBefore = await page.evaluate(({ labels, destination }) => {
+    const knowledge = window.spatialLab.exportKnowledge();
+    const nodesById = new Map(knowledge.nodes.map((node) => [node.id, node]));
+    const matchedNodes = knowledge.nodes.filter((node) => labels.includes(node.label));
+    const ids = new Set(matchedNodes.map((node) => node.id));
+    const relations = knowledge.edges
+      .filter((edge) => ids.has(edge.from.nodeId) && ids.has(edge.to.nodeId));
+    return {
+      matchedNodeCount: matchedNodes.length,
+      sourcePairs: relations.map((edge) => JSON.stringify([
+        nodesById.get(edge.from.nodeId).atomPath,
+        nodesById.get(edge.to.nodeId).atomPath,
+        edge.label
+      ])).sort(),
+      expectedDestinationPairs: relations.map((edge) => JSON.stringify([
+        `${destination}/${nodesById.get(edge.from.nodeId).label}`,
+        `${destination}/${nodesById.get(edge.to.nodeId).label}`,
+        edge.label
+      ])).sort()
+    };
+  }, {
+    labels: targetLabels,
+    destination: '批量目标'
+  });
+  expect(relationEvidenceBefore.matchedNodeCount).toBe(targets.length);
+  expect(relationEvidenceBefore.sourcePairs).toHaveLength(11);
+  expect(relationEvidenceBefore.expectedDestinationPairs).toHaveLength(11);
 
   await page.mouse.click(source.clientX, source.clientY);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().latestInteractionKey))
@@ -402,42 +480,116 @@ test('double-Shift selection survives the real ctrl-right landing gesture as one
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().transactionBatchCount))
     .toBeGreaterThan(1);
 
-  const persisted = page.evaluate(() => new Promise((resolve) => {
-    window.addEventListener('spatial-workspace-persisted', (event) => resolve(event.detail), { once: true });
-  }));
   const sourcePath = await page.evaluate(() => window.spatialLab.state().path);
-  await page.getByRole('button', { name: '上层' }).click();
+  await page.mouse.click(48, 360, { button: 'right' });
+  await page.waitForTimeout(430);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).not.toBe(sourcePath);
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('批量目标'))).toBe(true);
-  await page.keyboard.press('f');
-  await expect.poll(() => page.evaluate(() => window.spatialLab.state().viewMode)).toBe('immersive');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, '批量目标');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().viewMode)).toBe('nested');
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label)))
     .toContain('目标占位');
+  const { projectionSignal, workspaceResponsePromise } = observeWorkspaceCommit(page);
   await page.keyboard.down('Control');
   await page.mouse.click(48, 360, { button: 'right' });
   await page.keyboard.up('Control');
   await page.keyboard.press('Enter');
 
-  const detail = await persisted;
-  const operation = detail.operation;
+  const [workspaceResponse, signal] = await Promise.all([workspaceResponsePromise, projectionSignal]);
+  const payload = await workspaceResponse.json();
+  expect({ status: workspaceResponse.status(), ok: payload.ok, resultOk: payload.result?.ok })
+    .toEqual({ status: 200, ok: true, resultOk: true });
+  expect(payload.result.changed).toBe(true);
+  expect(payload.result.results).toHaveLength(targets.length);
+  expect(payload.result.results.every((entry) => (
+    entry.changed === true && entry.result?.path?.startsWith('批量目标/')
+  ))).toBe(true);
+
+  expect(['persisted', 'pending']).toContain(signal.type);
+  const operation = signal.detail.operation;
   expect(operation.kind).toBe('node-land-batch');
   expect(operation.landings).toHaveLength(targets.length);
-  const movedPaths = detail.knowledge.nodes
-    .filter(({ label }) => targets.some((target) => target.label === label))
-    .map(({ atomPath }) => atomPath);
-  expect(movedPaths).toHaveLength(targets.length);
-  expect(movedPaths.every((atomPath) => atomPath.startsWith('批量目标/'))).toBe(true);
+
+  const readPublishedState = () => page.evaluate(async (labels) => {
+    const response = await fetch('/__spatial/api/state');
+    const statePayload = await response.json();
+    const knowledge = statePayload.knowledge;
+    const nodesById = new Map(knowledge.nodes.map((node) => [node.id, node]));
+    const ids = new Set(knowledge.nodes
+      .filter((node) => labels.includes(node.label))
+      .map((node) => node.id));
+    return {
+      targetCount: knowledge.nodes.filter((node) => (
+        labels.includes(node.label) && node.atomPath.startsWith('批量目标/')
+      )).length,
+      sourceCount: knowledge.nodes.filter((node) => (
+        labels.includes(node.label) && !node.atomPath.startsWith('批量目标/')
+      )).length,
+      movedPaths: knowledge.nodes
+        .filter((node) => labels.includes(node.label))
+        .map(({ atomPath }) => atomPath)
+        .sort(),
+      relationPairs: knowledge.edges
+        .filter((edge) => ids.has(edge.from.nodeId) && ids.has(edge.to.nodeId))
+        .map((edge) => JSON.stringify([
+          nodesById.get(edge.from.nodeId).atomPath,
+          nodesById.get(edge.to.nodeId).atomPath,
+          edge.label
+        ]))
+        .sort()
+    };
+  }, targets.map(({ label }) => label));
+  await expect.poll(readPublishedState, { timeout: 30_000 }).toMatchObject({
+    targetCount: targets.length,
+    sourceCount: 0,
+    movedPaths: targets.map(({ label }) => `批量目标/${label}`).sort()
+  });
+  const published = await readPublishedState();
+  expect(published.relationPairs).toEqual(relationEvidenceBefore.expectedDestinationPairs);
+
+  const readBrowserRecovery = () => page.evaluate((labels) => {
+    const knowledge = window.spatialLab.exportKnowledge();
+    const nodesById = new Map(knowledge.nodes.map((node) => [node.id, node]));
+    const ids = new Set(knowledge.nodes
+      .filter((node) => labels.includes(node.label))
+      .map((node) => node.id));
+    return {
+      targetCount: knowledge.nodes.filter((node) => (
+        labels.includes(node.label) && node.atomPath.startsWith('批量目标/')
+      )).length,
+      sourceCount: knowledge.nodes.filter((node) => (
+        labels.includes(node.label) && !node.atomPath.startsWith('批量目标/')
+      )).length,
+      movedPaths: knowledge.nodes
+        .filter((node) => labels.includes(node.label))
+        .map(({ atomPath }) => atomPath)
+        .sort(),
+      relationPairs: knowledge.edges
+        .filter((edge) => ids.has(edge.from.nodeId) && ids.has(edge.to.nodeId))
+        .map((edge) => JSON.stringify([
+          nodesById.get(edge.from.nodeId).atomPath,
+          nodesById.get(edge.to.nodeId).atomPath,
+          edge.label
+        ]))
+        .sort()
+    };
+  }, targets.map(({ label }) => label));
+  await expect.poll(readBrowserRecovery, { timeout: 30_000 }).toMatchObject({
+    targetCount: targets.length,
+    sourceCount: 0,
+    movedPaths: targets.map(({ label }) => `批量目标/${label}`).sort()
+  });
+  expect((await readBrowserRecovery()).relationPairs)
+    .toEqual(relationEvidenceBefore.expectedDestinationPairs);
 });
 
 test('single Web landing is authoritative, survives F5, and leaves no source copy', async ({ page }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   const label = '单节点搬移验收';
   await openIsolatedWorld(page);
   await enterAtomFile(page);
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('测试入口'))).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, '测试入口');
   await waitForViewToSettle(page);
 
   await page.evaluate(() => window.spatialLab.dispatch('createNode', {
@@ -452,33 +604,47 @@ test('single Web landing is authoritative, survives F5, and leaves no source cop
   ), label)).toBe(true);
 
   const sourcePath = await page.evaluate(() => window.spatialLab.state().path);
+  await expect.poll(() => page.evaluate(async ({ expectedLabel, expectedPath }) => {
+    const payload = await fetch('/__spatial/api/state').then((response) => response.json());
+    return payload.knowledge.nodes.some((node) => (
+      node.label === expectedLabel && node.path === expectedPath
+    ));
+  }, { expectedLabel: label, expectedPath: sourcePath }), { timeout: 30_000 }).toBe(true);
+  await expect.poll(() => page.evaluate(({ expectedLabel, expectedPath }) => (
+    window.spatialLab.exportKnowledge().nodes.some((node) => (
+      node.label === expectedLabel && node.path === expectedPath
+    ))
+  ), { expectedLabel: label, expectedPath: sourcePath }), { timeout: 30_000 }).toBe(true);
   const source = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
     .find((entry) => entry.label === label);
   expect(source).toBeTruthy();
   await page.keyboard.down('Control');
   await page.mouse.click(source.clientX, source.clientY, { button: 'right' });
   await page.keyboard.up('Control');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().transactionActive)).toBe(true);
 
-  await page.getByRole('button', { name: '上层' }).click();
+  await page.mouse.click(48, 360, { button: 'right' });
+  await page.waitForTimeout(430);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).not.toBe(sourcePath);
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('批量目标'))).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, '批量目标');
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().phase)).toBe('idle');
   await page.waitForTimeout(550);
   const targetPath = await page.evaluate(() => window.spatialLab.state().path);
 
-  const persisted = page.evaluate(() => new Promise((resolve) => {
-    window.addEventListener('spatial-workspace-persisted', (event) => resolve(event.detail), { once: true });
-  }));
+  const { projectionSignal, workspaceResponsePromise } = observeWorkspaceCommit(page);
   await page.keyboard.down('Control');
   await page.mouse.click(48, 360, { button: 'right' });
   await page.keyboard.up('Control');
   await page.keyboard.press('Enter');
-  const receipt = await persisted;
-  expect(receipt.operation.kind).toBe('node-land');
+  const [workspaceResponse, signal] = await Promise.all([workspaceResponsePromise, projectionSignal]);
+  const workspacePayload = await workspaceResponse.json();
+  expect({ status: workspaceResponse.status(), ok: workspacePayload.ok, changed: workspacePayload.result?.changed })
+    .toEqual({ status: 200, ok: true, changed: true });
+  expect(['persisted', 'pending']).toContain(signal.type);
+  expect(signal.detail.operation.kind).toBe('node-land');
 
-  const authoritative = await page.evaluate(async ({ expectedLabel, expectedSource, expectedTarget }) => {
+  const readAuthoritative = () => page.evaluate(async ({ expectedLabel, expectedSource, expectedTarget }) => {
     const payload = await fetch('/__spatial/api/state').then((response) => response.json());
     const matching = payload.knowledge.nodes.filter(({ label }) => label === expectedLabel);
     return {
@@ -487,23 +653,23 @@ test('single Web landing is authoritative, survives F5, and leaves no source cop
       target: matching.filter(({ path }) => path === expectedTarget).length
     };
   }, { expectedLabel: label, expectedSource: sourcePath, expectedTarget: targetPath });
-  expect(authoritative).toEqual({ total: 1, source: 0, target: 1 });
+  await expect.poll(readAuthoritative, { timeout: 30_000 })
+    .toEqual({ total: 1, source: 0, target: 1 });
 
   await page.reload();
   await openIsolatedWorld(page);
   await enterAtomFile(page);
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('批量目标'))).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, '批量目标');
   await waitForViewToSettle(page);
   await expect.poll(() => page.evaluate((expected) => (
     window.spatialLab.state().visibleNodeDescriptors.filter(({ label: actual }) => actual === expected).length
   ), label)).toBe(1);
 
-  await page.getByRole('button', { name: '上层' }).click();
+  await page.mouse.click(48, 360, { button: 'right' });
+  await page.waitForTimeout(430);
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('测试入口'))).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, '测试入口');
   await waitForViewToSettle(page);
   expect(await page.evaluate((expected) => (
     window.spatialLab.state().visibleNodeDescriptors.some(({ label: actual }) => actual === expected)
@@ -524,8 +690,7 @@ test('TC-I24-WEB-MOVE-PERSISTENCE moves the whole work subtree to the exact nest
   await enterAtomFile(page);
   for (const portal of ['🧊manage', '工务']) {
     expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
-    await page.keyboard.press('f');
-    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await holdRightTarget(page, portal);
     await waitForViewToSettle(page);
   }
 
@@ -543,23 +708,25 @@ test('TC-I24-WEB-MOVE-PERSISTENCE moves the whole work subtree to the exact nest
   await enterAtomFile(page, { allowTransaction: true });
   for (const portal of ['🧊manage', '办包', '究谋', '个务', '外务', '推进']) {
     expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
-    await page.keyboard.press('f');
-    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await holdRightTarget(page, portal);
     await waitForViewToSettle(page, { allowTransaction: true });
   }
   const targetPath = await page.evaluate(() => window.spatialLab.state().path);
 
-  const persisted = page.evaluate(() => new Promise((resolve) => {
-    window.addEventListener('spatial-workspace-persisted', (event) => resolve(event.detail), { once: true });
-  }));
+  const { projectionSignal, workspaceResponsePromise } = observeWorkspaceCommit(page);
   await page.keyboard.down('Control');
   await page.mouse.click(48, 360, { button: 'right' });
   await page.keyboard.up('Control');
   await page.keyboard.press('Enter');
-  await persisted;
+  const [workspaceResponse, signal] = await Promise.all([workspaceResponsePromise, projectionSignal]);
+  const workspacePayload = await workspaceResponse.json();
+  expect({ status: workspaceResponse.status(), ok: workspacePayload.ok, changed: workspacePayload.result?.changed })
+    .toEqual({ status: 200, ok: true, changed: true });
+  expect(['persisted', 'pending']).toContain(signal.type);
+  expect(signal.detail.operation.kind).toBe('node-land');
 
   expect(workspaceRequests.filter(({ operation }) => operation?.kind === 'node-land')).toHaveLength(1);
-  const authoritative = await page.evaluate(async ({ expectedLabel, expectedSource, expectedTarget }) => {
+  const readAuthoritative = () => page.evaluate(async ({ expectedLabel, expectedSource, expectedTarget }) => {
     const payload = await fetch('/__spatial/api/state').then((response) => response.json());
     const matching = payload.knowledge.nodes.filter(({ label }) => label === expectedLabel);
     const child = payload.knowledge.nodes.filter(({ label }) => label === 'test');
@@ -571,7 +738,7 @@ test('TC-I24-WEB-MOVE-PERSISTENCE moves the whole work subtree to the exact nest
       childAtomPath: child[0]?.atomPath
     };
   }, { expectedLabel: label, expectedSource: sourcePath, expectedTarget: targetPath });
-  expect(authoritative).toMatchObject({
+  await expect.poll(readAuthoritative, { timeout: 30_000 }).toMatchObject({
     total: 1,
     source: 0,
     target: 1,
@@ -584,8 +751,7 @@ test('TC-I24-WEB-MOVE-PERSISTENCE moves the whole work subtree to the exact nest
   await enterAtomFile(page);
   for (const portal of ['🧊manage', '办包', '究谋', '个务', '外务', '推进']) {
     expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
-    await page.keyboard.press('f');
-    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await holdRightTarget(page, portal);
     await waitForViewToSettle(page);
   }
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('work'))).toBe(true);
@@ -593,8 +759,7 @@ test('TC-I24-WEB-MOVE-PERSISTENCE moves the whole work subtree to the exact nest
   await enterAtomFile(page);
   for (const portal of ['🧊manage', '工务']) {
     expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
-    await page.keyboard.press('f');
-    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await holdRightTarget(page, portal);
     await waitForViewToSettle(page);
   }
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('work'))).toBe(false);
@@ -618,8 +783,7 @@ test('TC-I24-WEB-MOVE-ATOMIC-ROLLBACK restores the source atom and view without 
   await enterAtomFile(page);
   for (const portal of ['🧊manage', '工务']) {
     expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
-    await page.keyboard.press('f');
-    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await holdRightTarget(page, portal);
     await waitForViewToSettle(page);
   }
 
@@ -633,12 +797,10 @@ test('TC-I24-WEB-MOVE-ATOMIC-ROLLBACK restores the source atom and view without 
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().transactionActive)).toBe(true);
 
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('回滚work'))).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, '回滚work');
   await waitForViewToSettle(page, { allowTransaction: true });
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('回滚test'))).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, '回滚test');
   await waitForViewToSettle(page, { allowTransaction: true });
   const targetPath = await page.evaluate(() => window.spatialLab.state().path);
 
@@ -688,8 +850,7 @@ test('TC-I24-WEB-MOVE-ATOMIC-ROLLBACK restores the source atom and view without 
   await enterAtomFile(page);
   for (const portal of ['🧊manage', '工务']) {
     expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
-    await page.keyboard.press('f');
-    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await holdRightTarget(page, portal);
     await waitForViewToSettle(page);
   }
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('回滚work'))).toBe(true);
@@ -699,17 +860,14 @@ test('TC-I24-WEB-MOVE-ATOMIC-ROLLBACK restores the source atom and view without 
   await enterAtomFile(page);
   for (const portal of ['🧊manage', '工务']) {
     expect(await page.evaluate((expected) => window.spatialLab.selectByLabel(expected), portal)).toBe(true);
-    await page.keyboard.press('f');
-    await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+    await holdRightTarget(page, portal);
     await waitForViewToSettle(page);
   }
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('回滚work'))).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, '回滚work');
   await waitForViewToSettle(page);
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('回滚test'))).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, '回滚test');
   await waitForViewToSettle(page);
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('回滚work'))).toBe(false);
 });
@@ -762,34 +920,59 @@ test('Shift brushing remains available after Home returns from another context',
 
 test('a steady domain reuses its rasterized backdrop instead of repainting blurred tunnels', async ({ page }) => {
   await page.addInitScript(() => {
-    window.__domainEllipseCalls = 0;
-    window.__backdropBlits = 0;
+    window.__mainCanvasEllipseCalls = 0;
+    window.__backdropBlits = [];
+    const ellipseCallsByCanvas = new WeakMap();
+    const sourceIds = new WeakMap();
+    let nextSourceId = 1;
     const ellipse = CanvasRenderingContext2D.prototype.ellipse;
     const drawImage = CanvasRenderingContext2D.prototype.drawImage;
     CanvasRenderingContext2D.prototype.ellipse = function countedEllipse(...args) {
-      window.__domainEllipseCalls += 1;
+      const targetCanvas = this.canvas;
+      if (targetCanvas?.id === 'spaceCanvas') {
+        window.__mainCanvasEllipseCalls += 1;
+      } else if (targetCanvas instanceof HTMLCanvasElement) {
+        ellipseCallsByCanvas.set(targetCanvas, (ellipseCallsByCanvas.get(targetCanvas) || 0) + 1);
+      }
       return ellipse.apply(this, args);
     };
     CanvasRenderingContext2D.prototype.drawImage = function countedDrawImage(...args) {
-      window.__backdropBlits += 1;
+      const [source, x, y, width, height] = args;
+      if (
+        this.canvas?.id === 'spaceCanvas'
+        && source instanceof HTMLCanvasElement
+        && x === 0
+        && y === 0
+        && width === this.canvas.clientWidth
+        && height === this.canvas.clientHeight
+        && source.width === this.canvas.width
+        && source.height === this.canvas.height
+      ) {
+        if (!sourceIds.has(source)) sourceIds.set(source, nextSourceId++);
+        window.__backdropBlits.push({
+          sourceId: sourceIds.get(source),
+          sourceEllipseCalls: ellipseCallsByCanvas.get(source) || 0
+        });
+      }
       return drawImage.apply(this, args);
     };
   });
   await openIsolatedWorld(page);
   await enterAtomFile(page);
   await page.evaluate(() => {
-    window.__domainEllipseCalls = 0;
-    window.__backdropBlits = 0;
+    window.__mainCanvasEllipseCalls = 0;
+    window.__backdropBlits = [];
   });
 
   await page.waitForTimeout(2000);
 
   const drawCounts = await page.evaluate(() => ({
-    ellipses: window.__domainEllipseCalls,
+    mainCanvasEllipses: window.__mainCanvasEllipseCalls,
     backdropBlits: window.__backdropBlits
   }));
-  expect(drawCounts.backdropBlits).toBeGreaterThan(0);
-  expect(drawCounts.ellipses / drawCounts.backdropBlits).toBeLessThan(70);
+  expect(drawCounts.backdropBlits.length).toBeGreaterThan(1);
+  expect(new Set(drawCounts.backdropBlits.map(({ sourceId }) => sourceId)).size).toBe(1);
+  expect(new Set(drawCounts.backdropBlits.map(({ sourceEllipseCalls }) => sourceEllipseCalls)).size).toBe(1);
 });
 
 async function openAModeFixture(page) {

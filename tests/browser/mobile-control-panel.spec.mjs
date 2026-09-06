@@ -36,7 +36,9 @@ test('mobile control panel separates mouse and keyboard without regressing held 
   await expect(mouse.getByRole('heading', { name: '鼠标' })).toBeVisible();
   await expect(keyboard.getByRole('heading', { name: '键盘' })).toBeVisible();
   await expect(keyboard.locator('[data-mobile-key-group]')).toHaveCount(4);
-  await expect(keyboard.getByRole('heading', { name: '游走模式' })).toBeVisible();
+  const structuralView = keyboard.locator('[data-mobile-key-group="wandering"]');
+  await expect(structuralView.getByRole('heading', { name: '结构视图' })).toBeVisible();
+  await expect(structuralView.locator('[data-mobile-key]')).toHaveAttribute('data-mobile-key', 'KeyA');
   await expect(mouse.locator('[data-mobile-mouse-button="1"]')).toHaveCount(1);
   await expect(keyboard.locator('[data-mobile-mouse-button]')).toHaveCount(0);
   expect(await keyboard.locator('.mobile-control-panel__scroll').evaluate((element) => (
