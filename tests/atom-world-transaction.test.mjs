@@ -981,6 +981,232 @@ for (const writeFault of [
   });
 }
 
+for (const failureMode of [
+  'repair-sync-failure', 'abort-write-failure', 'abort-sync-failure'
+]) {
+  test(`failed proof remains unpublished after ${failureMode} crash image`, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), `atom-proof-${failureMode}-`));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const worldFile = path.join(directory, 'atom.json');
+    const localCommitFile = path.join(directory, 'world-commits.jsonl');
+    const recoveryWorld = path.join(directory, 'recovery.json');
+    const recoveryLog = path.join(directory, 'recovery.jsonl');
+    const beforeFacts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+    const afterFacts = [{ thing: 'Root', situation: 'new', slot: [], strut: [] }];
+    await fs.writeFile(worldFile, `${JSON.stringify(beforeFacts)}\n`, 'utf8');
+    let writes = 0;
+    let syncs = 0;
+    let proofSyncFailed = false;
+    let repairTruncateFailed = false;
+    let recoveryBarrierFailure = false;
+    let crashImage = null;
+    const fileSystem = {
+      ...fs,
+      async open(target, flags, ...args) {
+        const handle = await fs.open(target, flags, ...args);
+        if (path.resolve(target) !== path.resolve(localCommitFile)) return handle;
+        return {
+          async truncate(length) {
+            if (!proofSyncFailed) return handle.truncate(length);
+            crashImage ??= await fs.readFile(target);
+            if (failureMode !== 'repair-sync-failure' && !repairTruncateFailed) {
+              repairTruncateFailed = true;
+              throw Object.assign(new Error('repair truncate failed'), { code: 'EIO' });
+            }
+            return handle.truncate(length);
+          },
+          async write(buffer, offset, length, position) {
+            writes += 1;
+            if (proofSyncFailed && writes === 3) {
+              crashImage ??= await fs.readFile(target);
+              if (failureMode === 'abort-write-failure') {
+                throw Object.assign(new Error('abort write failed'), { code: 'EIO' });
+              }
+            }
+            return handle.write(buffer, offset, length, position);
+          },
+          async sync() {
+            if (recoveryBarrierFailure) {
+              throw Object.assign(new Error('recovery barrier failed'), { code: 'EIO' });
+            }
+            syncs += 1;
+            if (syncs === 2) {
+              proofSyncFailed = true;
+              throw Object.assign(new Error('proof sync failed'), { code: 'EIO' });
+            }
+            if (proofSyncFailed && syncs === 3
+              && ['repair-sync-failure', 'abort-sync-failure'].includes(failureMode)) {
+              throw Object.assign(new Error(`${failureMode} sync failed`), { code: 'EIO' });
+            }
+            return handle.sync();
+          },
+          close: (...args) => handle.close(...args)
+        };
+      }
+    };
+    const repository = createJsonWorldRepository({
+      file: worldFile, worldId: 'primary', localCommitFile, fileSystem
+    });
+    const sibling = createJsonWorldRepository({
+      file: worldFile, worldId: 'primary', localCommitFile, fileSystem
+    });
+    const identity = {
+      commandId: `proof-${failureMode}`,
+      beforeRevision: revisionOf(beforeFacts),
+      afterRevision: revisionOf(afterFacts)
+    };
+    const request = {
+      commandId: identity.commandId, expectedRevision: identity.beforeRevision,
+      nextSnapshot: { worldId: 'primary', revision: identity.afterRevision, facts: afterFacts },
+      patch: createLocalWorldPatch({
+        worldId: 'primary', beforeRevision: identity.beforeRevision, afterRevision: identity.afterRevision,
+        beforeFacts, afterFacts, changedPaths: ['Root']
+      })
+    };
+    await assert.rejects(repository.appendLocalCommit(request), { code: 'EIO' });
+    const lateSibling = createJsonWorldRepository({
+      file: worldFile, worldId: 'primary', localCommitFile, fileSystem
+    });
+    for (const blocked of [
+      () => repository.read(),
+      () => sibling.read(),
+      () => lateSibling.read(),
+      () => repository.durableCommitEvidence(identity),
+      () => sibling.durableCommitEvidence(identity),
+      () => repository.appendLocalCommit(request),
+      () => repository.compareAndSwap({
+        commandId: identity.commandId, expectedRevision: identity.beforeRevision,
+        nextSnapshot: request.nextSnapshot
+      }),
+      () => repository.compactCommittedState()
+    ]) {
+      await assert.rejects(blocked(), { code: 'LOCAL_WORLD_COMMIT_RECOVERY_PENDING' });
+    }
+    assert.ok(Buffer.isBuffer(crashImage) && crashImage.length > 0,
+      'the injected failure must expose a possible pre-repair crash image');
+    await assert.rejects(repository.recoverIndeterminateCommit({
+      ...identity, commandId: `${identity.commandId}-different`
+    }), { code: 'LOCAL_WORLD_COMMIT_RECOVERY_PENDING' });
+
+    recoveryBarrierFailure = true;
+    await assert.rejects(repository.recoverIndeterminateCommit(identity), { code: 'EIO' });
+    await assert.rejects(repository.read(), { code: 'LOCAL_WORLD_COMMIT_RECOVERY_PENDING' });
+    recoveryBarrierFailure = false;
+    const liveResolution = await repository.recoverIndeterminateCommit(identity);
+    const liveCommitted = failureMode === 'abort-write-failure';
+    assert.equal(liveResolution.status, liveCommitted ? 'committed' : 'prepared');
+    assert.deepEqual((await repository.read()).facts, liveCommitted ? afterFacts : beforeFacts);
+    assert.equal(await repository.hasDurableCommit(identity), liveCommitted);
+
+    await fs.writeFile(recoveryWorld, `${JSON.stringify(beforeFacts)}\n`, 'utf8');
+    await fs.writeFile(recoveryLog, crashImage);
+    const coldModule = await import(`../src/atom-system/adapters/json-world-repository.mjs?proof-crash=${crypto.randomUUID()}`);
+    const recovered = coldModule.createJsonWorldRepository({
+      file: recoveryWorld, worldId: 'primary', localCommitFile: recoveryLog
+    });
+    assert.equal((await recovered.recoverIndeterminateCommit(identity)).status, 'committed');
+    assert.deepEqual((await recovered.read()).facts, afterFacts,
+      'cold owner recovery publishes the exact validated frame after a successful barrier');
+    assert.equal(await recovered.hasDurableCommit(identity), true);
+  });
+}
+
+test('coordinator keeps an indeterminate world write prepared until owner recovery resolves it once', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-proof-owner-recovery-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  const localCommitFile = path.join(directory, 'world-commits.jsonl');
+  const journalFile = path.join(directory, 'transactions.json');
+  const beforeFacts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+  const afterFacts = [{ thing: 'Root', situation: 'new', slot: [], strut: [] }];
+  await fs.writeFile(worldFile, `${JSON.stringify(beforeFacts)}\n`, 'utf8');
+  let writes = 0;
+  let syncs = 0;
+  let proofSyncFailed = false;
+  let repairFailed = false;
+  let abortWriteFailed = false;
+  let recoveryBarrierFailure = false;
+  const fileSystem = {
+    ...fs,
+    async open(target, flags, ...args) {
+      const handle = await fs.open(target, flags, ...args);
+      if (path.resolve(target) !== path.resolve(localCommitFile)) return handle;
+      return {
+        async truncate(length) {
+          if (proofSyncFailed && !repairFailed) {
+            repairFailed = true;
+            throw Object.assign(new Error('repair failed'), { code: 'EIO' });
+          }
+          return handle.truncate(length);
+        },
+        async write(buffer, offset, length, position) {
+          writes += 1;
+          if (proofSyncFailed && writes === 3 && !abortWriteFailed) {
+            abortWriteFailed = true;
+            throw Object.assign(new Error('abort write failed'), { code: 'EIO' });
+          }
+          return handle.write(buffer, offset, length, position);
+        },
+        async sync() {
+          if (recoveryBarrierFailure) {
+            throw Object.assign(new Error('recovery barrier failed'), { code: 'EIO' });
+          }
+          syncs += 1;
+          if (syncs === 2) {
+            proofSyncFailed = true;
+            throw Object.assign(new Error('proof sync failed'), { code: 'EIO' });
+          }
+          return handle.sync();
+        },
+        close: (...args) => handle.close(...args)
+      };
+    }
+  };
+  const worldRepository = createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile, fileSystem
+  });
+  const journalRepository = createJsonTransactionJournal({ file: journalFile });
+  const coordinator = createCommitCoordinator({ worldRepository, journalRepository });
+  let transitions = 0;
+  await assert.rejects(coordinator.execute({
+    command: command('indeterminate-owner', revisionOf(beforeFacts)),
+    transition: ({ facts }) => {
+      transitions += 1;
+      const next = structuredClone(facts);
+      next[0].situation = 'new';
+      return {
+        facts: next,
+        changedPaths: ['Root'],
+        result: completeLocalEffects()
+      };
+    }
+  }), { code: 'EIO' });
+  let state = await journalRepository.readState();
+  assert.equal(state.prepared.length, 1);
+  assert.equal(state.receipts.length, 0);
+
+  recoveryBarrierFailure = true;
+  await assert.rejects(coordinator.recover(), { code: 'EIO' });
+  state = await journalRepository.readState();
+  assert.equal(state.prepared.length, 1);
+  assert.equal(state.receipts.length, 0);
+
+  recoveryBarrierFailure = false;
+  const coldModule = await import(`../src/atom-system/adapters/json-world-repository.mjs?owner-recovery=${crypto.randomUUID()}`);
+  const coldWorldRepository = coldModule.createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile, fileSystem
+  });
+  const coldCoordinator = createCommitCoordinator({ worldRepository: coldWorldRepository, journalRepository });
+  assert.deepEqual(await coldCoordinator.recover(), { recovered: 1 });
+  assert.deepEqual((await coldWorldRepository.read()).facts, afterFacts);
+  assert.equal(transitions, 1, 'owner recovery never recalculates or reschedules the prepared command');
+  state = await journalRepository.readState();
+  assert.equal(state.prepared.length, 0);
+  assert.equal(state.receipts.length, 1);
+  assert.deepEqual(await coldCoordinator.recover(), { recovered: 0 });
+  assert.equal((await journalRepository.readState()).receipts.length, 1);
+});
+
 test('a stale publication head cannot hide a later acknowledged local commit', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-stale-head-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
@@ -1680,6 +1906,166 @@ test('one Windows startup proof bounds repeated fallback compactions in the same
         `generation ${generation + 1} ${side} log recovers all and only acknowledged facts`);
       assert.equal(await paired.hasDurableCommit(crashLog.expectedIdentity), true,
         `generation ${generation + 1} ${side} log retains exact latest command evidence`);
+    }
+  }
+});
+
+test('same-module sibling repositories share the proven Windows baseline across compactions', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-windows-fallback-siblings-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  const localCommitFile = path.join(directory, 'world-commits.jsonl');
+  let captureLogReplacements = false;
+  let renameExpectedFacts = null;
+  const crashPairs = [];
+  let pauseProofRename = false;
+  let notifyProofRename;
+  let releaseProofRename;
+  const proofRenameReached = new Promise((resolve) => { notifyProofRename = resolve; });
+  const proofRenameGate = new Promise((resolve) => { releaseProofRename = resolve; });
+  const fileSystem = {
+    ...fs,
+    async open(target, flags, ...args) {
+      if (path.resolve(target) === path.resolve(directory)) {
+        return {
+          async sync() { throw Object.assign(new Error('Windows directory fsync'), { code: 'EPERM' }); },
+          async close() {}
+        };
+      }
+      return fs.open(target, flags, ...args);
+    },
+    async rename(source, target) {
+      if (captureLogReplacements && path.resolve(target) === path.resolve(localCommitFile)) {
+        crashPairs.push({
+          oldLog: await fs.readFile(target),
+          newLog: await fs.readFile(source),
+          expectedFacts: structuredClone(renameExpectedFacts ?? facts),
+          expectedIdentity: structuredClone(latestIdentity)
+        });
+      }
+      if (pauseProofRename && path.resolve(target) === path.resolve(localCommitFile)) {
+        pauseProofRename = false;
+        notifyProofRename();
+        await proofRenameGate;
+      }
+      return fs.rename(source, target);
+    }
+  };
+  let facts = [{ thing: 'Root', situation: 'v0', slot: [], strut: [] }];
+  let latestIdentity = null;
+  await fs.writeFile(worldFile, `${JSON.stringify(facts)}\n`, 'utf8');
+  const advance = async (repository, label) => {
+    for (let step = 1; step <= 2; step += 1) {
+      const before = facts;
+      const next = structuredClone(before);
+      next[0].situation = `${label}-${step}`;
+      latestIdentity = {
+        commandId: `${label}-${step}`,
+        beforeRevision: revisionOf(before),
+        afterRevision: revisionOf(next)
+      };
+      await repository.appendLocalCommit({
+        commandId: latestIdentity.commandId, expectedRevision: latestIdentity.beforeRevision,
+        nextSnapshot: { worldId: 'primary', revision: latestIdentity.afterRevision, facts: next },
+        patch: createLocalWorldPatch({
+          worldId: 'primary', beforeRevision: latestIdentity.beforeRevision,
+          afterRevision: latestIdentity.afterRevision,
+          beforeFacts: before, afterFacts: next, changedPaths: ['Root']
+        })
+      });
+      facts = next;
+    }
+    await repository.scheduleCompaction();
+  };
+  const advanceCas = async (repository, label) => {
+    const before = facts;
+    const next = structuredClone(before);
+    next[0].situation = label;
+    latestIdentity = {
+      commandId: label,
+      beforeRevision: revisionOf(before),
+      afterRevision: revisionOf(next)
+    };
+    renameExpectedFacts = next;
+    await repository.compareAndSwap({
+      commandId: latestIdentity.commandId,
+      expectedRevision: latestIdentity.beforeRevision,
+      nextSnapshot: { worldId: 'primary', revision: latestIdentity.afterRevision, facts: next }
+    });
+    renameExpectedFacts = null;
+    facts = next;
+  };
+
+  const bootstrap = createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile, autoCompact: 2, fileSystem
+  });
+  await advance(bootstrap, 'bootstrap');
+  const ownerModule = await import(`../src/atom-system/adapters/json-world-repository.mjs?sibling-owner=${crypto.randomUUID()}`);
+  const owner = ownerModule.createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile, autoCompact: 2, fileSystem
+  });
+  const earlySibling = ownerModule.createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile, autoCompact: 2, fileSystem
+  });
+  const provenBaseline = JSON.parse(await fs.readFile(worldFile, 'utf8'));
+  captureLogReplacements = true;
+  pauseProofRename = true;
+  const proving = owner.read();
+  await proofRenameReached;
+  const queuedDuringProof = advance(earlySibling, 'during-proof');
+  releaseProofRename();
+  let deadlockTimer;
+  try {
+    await Promise.race([
+      Promise.all([proving, queuedDuringProof]),
+      new Promise((_, reject) => {
+        deadlockTimer = setTimeout(
+          () => reject(new Error('sibling operation deadlocked behind startup proof')), 1000
+        );
+      })
+    ]);
+  } finally {
+    clearTimeout(deadlockTimer);
+  }
+  const survivingBaselines = [];
+  survivingBaselines.push(JSON.parse(await fs.readFile(worldFile, 'utf8')));
+  await advance(owner, 'owner-one');
+  survivingBaselines.push(JSON.parse(await fs.readFile(worldFile, 'utf8')));
+
+  assert.deepEqual((await earlySibling.read()).facts, facts);
+  await advanceCas(earlySibling, 'early-sibling-cas');
+  survivingBaselines.push(JSON.parse(await fs.readFile(worldFile, 'utf8')));
+
+  const lateSibling = ownerModule.createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile, autoCompact: 2, fileSystem
+  });
+  assert.deepEqual((await lateSibling.read()).facts, facts);
+  await advance(lateSibling, 'late-sibling');
+  survivingBaselines.push(JSON.parse(await fs.readFile(worldFile, 'utf8')));
+
+  await advance(owner, 'owner-two');
+  survivingBaselines.push(JSON.parse(await fs.readFile(worldFile, 'utf8')));
+  captureLogReplacements = false;
+  assert.ok(crashPairs.length >= 4,
+    'alternating append, CAS, and compaction must expose every replay-generation replacement');
+  assert.ok(survivingBaselines.every((baseline) => revisionOf(baseline) === revisionOf(provenBaseline)),
+    'repositories created before and after proof share the frozen baseline');
+  const coldModule = await import(`../src/atom-system/adapters/json-world-repository.mjs?sibling-crash=${crypto.randomUUID()}`);
+  for (const [baselineIndex, baseline] of survivingBaselines.entries()) {
+    for (const [generation, crashPair] of crashPairs.entries()) {
+      for (const [side, log] of [['old', crashPair.oldLog], ['new', crashPair.newLog]]) {
+        const pairedWorld = path.join(directory, `sibling-${baselineIndex}-${generation}-${side}.json`);
+        const pairedLog = path.join(directory, `sibling-${baselineIndex}-${generation}-${side}.jsonl`);
+        await fs.writeFile(pairedWorld, `${JSON.stringify(baseline)}\n`, 'utf8');
+        await fs.writeFile(pairedLog, log);
+        const recovered = coldModule.createJsonWorldRepository({
+          file: pairedWorld, worldId: 'primary', localCommitFile: pairedLog
+        });
+        assert.deepEqual((await recovered.read()).facts, crashPair.expectedFacts,
+          `baseline ${baselineIndex + 1}, generation ${generation + 1} ${side} recovers acknowledged facts`);
+        assert.equal(await recovered.hasDurableCommit(crashPair.expectedIdentity), true,
+          `baseline ${baselineIndex + 1}, generation ${generation + 1} ${side} retains exact identity`);
+      }
     }
   }
 });

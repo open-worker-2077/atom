@@ -146,7 +146,6 @@ export function createCommitCoordinator({
   }
 
   async function recoverRecord(record) {
-    const current = await worldRepository.read();
     const recordWorldId = record.historyMode === 'local-patch'
       ? record.patch.worldId
       : record.after.worldId;
@@ -156,10 +155,12 @@ export function createCommitCoordinator({
     const afterRevision = record.historyMode === 'local-patch'
       ? record.patch.afterRevision
       : record.after.revision;
+    const identity = { commandId: record.commandId, beforeRevision, afterRevision };
+    await worldRepository.recoverIndeterminateCommit?.(identity);
+    const current = await worldRepository.read();
     if (current.worldId !== recordWorldId) {
       throw problem('TRANSACTION_RECOVERY_CONFLICT', 'Prepared transaction belongs to another world');
     }
-    const identity = { commandId: record.commandId, beforeRevision, afterRevision };
     const durableEvidence = typeof worldRepository.durableCommitEvidence === 'function'
       ? await worldRepository.durableCommitEvidence(identity)
       : current.revision === afterRevision ? { source: 'legacy-revision' } : null;
