@@ -19,6 +19,7 @@ import {
 } from '../src/atom-system/world-runtime/legacy-graph-compat.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
+import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 function legacyNode(name, detail = '', children = [], partners = [], suffix = '') {
@@ -158,6 +159,51 @@ test('central transaction advances compatibility manifest with the same authoriz
   const currentManifest = await persistence.compatibilityManifest();
   assert.equal(currentManifest.currentWorldRevision, revisionOfWorldFacts(later));
   assert.doesNotThrow(() => validateCompatibilityManifest(currentManifest, later));
+  const committed = await persistence.readCommittedSnapshot();
+  assert.equal(committed.revision, revisionOfWorldFacts(later));
+  assert.deepEqual(committed.facts, later);
+  assert.deepEqual(committed.compatibilityManifest, currentManifest);
+  assert.doesNotThrow(() => validateCompatibilityManifest(
+    committed.compatibilityManifest,
+    committed.facts
+  ));
+});
+
+test('Explore uses its committed snapshot when the world file advances after request capture', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-compat-stable-read-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'knowledge.json');
+  const before = [atom('Root', 'old')];
+  const after = [atom('Root', 'new')];
+  const manifest = createCompatibilityManifest({
+    sourceRevision: 'sha256:legacy',
+    targetFacts: before
+  });
+  await fs.writeFile(contextFile, `${JSON.stringify(after, null, 2)}\n`, 'utf8');
+  const service = createLegacyWorldService({
+    transactionProvider: () => ({
+      compatibilityGeneration: 0,
+      async recover() {},
+      async readCommittedSnapshot() {
+        return {
+          facts: before,
+          revision: revisionOfWorldFacts(before),
+          compatibilityManifest: manifest
+        };
+      }
+    })
+  });
+
+  const result = await service.executeLegacy({
+    source: 'explore {"thing":"Root","situation$full":true}',
+    contextFile,
+    projectionFile,
+    interaction: { id: 'stable-committed-explore' }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.items[0].matches[0].situation, 'old');
 });
 
 test('compatibility manifest never authorizes a legacy Program ABI', async (t) => {

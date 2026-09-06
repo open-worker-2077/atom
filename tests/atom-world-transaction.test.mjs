@@ -66,6 +66,40 @@ test('concurrent commands with one expected revision serialize and cannot lose u
   assert.equal((await journalRepository.readState()).receipts.length, 1);
 });
 
+test('committed inspection cannot observe the world-write and journal-commit gap', async (t) => {
+  let releaseWorldWrite;
+  let signalWorldWritten;
+  const worldWritten = new Promise((resolve) => { signalWorldWritten = resolve; });
+  const holdWorldWrite = new Promise((resolve) => { releaseWorldWrite = resolve; });
+  const files = await fixture(t, {
+    faultInjector: async (stage) => {
+      if (stage !== 'after-world-write') return;
+      signalWorldWritten();
+      await holdWorldWrite;
+    }
+  });
+  const initial = await files.worldRepository.read();
+  const committing = files.coordinator.execute({
+    command: command('committed-inspection-gap', initial.revision),
+    transition: ({ facts }) => ({ facts: [...facts, { name: 'committed' }] })
+  });
+  await worldWritten;
+
+  let inspected = false;
+  const inspection = files.coordinator.inspectCommitted(async (snapshot) => {
+    inspected = true;
+    const state = await files.journalRepository.readState();
+    return { snapshot, receipt: state.receipts.at(-1)?.receipt ?? null };
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(inspected, false, 'inspection must wait until the journal commit completes');
+
+  releaseWorldWrite();
+  const [receipt, observed] = await Promise.all([committing, inspection]);
+  assert.equal(observed.snapshot.revision, receipt.afterRevision);
+  assert.equal(observed.receipt.afterRevision, receipt.afterRevision);
+});
+
 test('hung transition calculation does not block an independent candidate commit', async (t) => {
   const { coordinator, worldRepository } = await fixture(t);
   const initial = await worldRepository.read();

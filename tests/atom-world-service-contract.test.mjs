@@ -219,6 +219,78 @@ test('legacy World Service single-flights recovery and compatibility validation 
   assert.equal(stages.every(({ durationMs }) => Number.isFinite(durationMs) && durationMs >= 0), true);
 });
 
+test('legacy World Service gives the engine one committed facts and manifest snapshot', async () => {
+  const facts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+  const committedSnapshot = Object.freeze({
+    facts,
+    revision: 'sha256:committed',
+    compatibilityManifest: { currentWorldRevision: 'sha256:committed' }
+  });
+  let snapshotCalls = 0;
+  const service = (await import(adapterUrl)).createLegacyWorldService({
+    transactionProvider: () => ({
+      compatibilityGeneration: 0,
+      async recover() {},
+      async readCommittedSnapshot() {
+        snapshotCalls += 1;
+        return committedSnapshot;
+      },
+      async compatibilityManifest() {
+        throw new Error('manifest must not be read separately from committed facts');
+      }
+    }),
+    execute: async (request) => {
+      assert.deepEqual(request.committedSnapshot, committedSnapshot);
+      assert.deepEqual(request.compatibilityManifest, committedSnapshot.compatibilityManifest);
+      return { ok: true, changed: false, revisionAfter: committedSnapshot.revision };
+    }
+  });
+
+  const result = await service.executeLegacy({
+    source: 'explore Root',
+    contextFile: 'atom.json',
+    projectionFile: 'graph.json',
+    interaction: { id: 'committed-snapshot-read' }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(snapshotCalls, 1);
+});
+
+test('legacy World Service can reacquire one fresh committed snapshot after a commit', async () => {
+  const snapshots = [
+    Object.freeze({ facts: [{ thing: 'Root', situation: 'old', slot: [], strut: [] }],
+      revision: 'sha256:old', compatibilityManifest: { currentWorldRevision: 'sha256:old' } }),
+    Object.freeze({ facts: [{ thing: 'Root', situation: 'new', slot: [], strut: [] }],
+      revision: 'sha256:new', compatibilityManifest: { currentWorldRevision: 'sha256:new' } })
+  ];
+  let snapshotCalls = 0;
+  const service = (await import(adapterUrl)).createLegacyWorldService({
+    transactionProvider: () => ({
+      compatibilityGeneration: 0,
+      async recover() {},
+      async readCommittedSnapshot() { return snapshots[Math.min(snapshotCalls++, 1)]; },
+      async commit() { return { afterRevision: 'sha256:new' }; }
+    }),
+    execute: async (request) => {
+      assert.equal(request.committedSnapshot.revision, 'sha256:old');
+      await request.commitWorld({ facts: snapshots[1].facts });
+      const latest = await request.acquireCommittedSnapshot();
+      assert.equal(latest.revision, 'sha256:new');
+      assert.equal(latest.compatibilityManifest.currentWorldRevision, 'sha256:new');
+      return { ok: true, changed: true, revisionAfter: latest.revision };
+    }
+  });
+
+  const result = await service.executeLegacy({
+    source: 'transform {}', contextFile: 'atom.json', projectionFile: 'graph.json',
+    interaction: { id: 'fresh-committed-snapshot-read' }
+  });
+
+  assert.equal(result.revisionAfter, 'sha256:new');
+  assert.equal(snapshotCalls, 2);
+});
+
 test('legacy World Service reports recovery, manifest, and engine timing without request facts', async () => {
   const stages = [];
   const service = (await import(adapterUrl)).createLegacyWorldService({

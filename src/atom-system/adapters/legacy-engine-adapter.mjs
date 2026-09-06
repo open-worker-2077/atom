@@ -74,16 +74,27 @@ export function createLegacyWorldService(options = {}) {
     return state.recovery;
   }
 
-  async function manifestFor(persistence) {
+  async function committedSnapshotFor(persistence) {
     const state = readinessFor(persistence);
-    if (!state.manifest || state.compatibilityGeneration !== persistence.compatibilityGeneration) {
+    if (!state.committedSnapshot || state.compatibilityGeneration !== persistence.compatibilityGeneration) {
       state.compatibilityGeneration = persistence.compatibilityGeneration;
-      state.manifest = recoverPersistence(persistence)
-        .then(() => typeof persistence.compatibilityManifest === 'function'
-          ? timed('manifest', () => persistence.compatibilityManifest()) : null)
-        .catch(error => { state.manifest = null; throw error; });
+      state.committedSnapshot = recoverPersistence(persistence)
+        .then(async () => {
+          if (typeof persistence.readCommittedSnapshot === 'function') {
+            return timed('committed-snapshot', () => persistence.readCommittedSnapshot());
+          }
+          const compatibilityManifest = typeof persistence.compatibilityManifest === 'function'
+            ? await timed('manifest', () => persistence.compatibilityManifest())
+            : null;
+          return compatibilityManifest ? { compatibilityManifest } : null;
+        })
+        .catch(error => { state.committedSnapshot = null; throw error; });
     }
-    return state.manifest;
+    return state.committedSnapshot;
+  }
+
+  async function manifestFor(persistence) {
+    return (await committedSnapshotFor(persistence))?.compatibilityManifest ?? null;
   }
 
   async function resumePendingExecutions(request, persistence, entry) {
@@ -119,7 +130,8 @@ export function createLegacyWorldService(options = {}) {
       if (execution.outcome?.result && execution.outcome.status !== 'pending') return execution.outcome.result;
     }
     request.signal?.throwIfAborted?.();
-    const compatibilityManifest = await manifestFor(persistence);
+    const committedSnapshot = await committedSnapshotFor(persistence);
+    const compatibilityManifest = committedSnapshot?.compatibilityManifest ?? null;
     const transactionTransformLog = typeof persistence.transformLogEntries === 'function'
       ? await timed('transform-log', () => persistence.transformLogEntries())
       : [];
@@ -149,6 +161,13 @@ export function createLegacyWorldService(options = {}) {
         interaction: structuredClone(recovery.event.interaction) } : {}),
       interactionBinding: entry.binding,
       compatibilityManifest,
+      ...(Array.isArray(committedSnapshot?.facts) ? {
+        committedSnapshot: structuredClone(committedSnapshot)
+      } : {}),
+      acquireCommittedSnapshot: async () => {
+        const latest = await committedSnapshotFor(persistence);
+        return latest ? structuredClone(latest) : null;
+      },
       transactionTransformLog,
       readDiscardEvidence: typeof persistence.readDiscardEvidence === 'function'
         ? (identity) => persistence.readDiscardEvidence(identity) : undefined,
@@ -177,6 +196,7 @@ export function createLegacyWorldService(options = {}) {
           throw error;
         }
         readinessFor(persistence).manifest = null;
+        readinessFor(persistence).committedSnapshot = null;
         if (transition.postCommitEvent) sourceReceipt = receipt;
         return receipt;
       }

@@ -315,5 +315,12 @@ export function createCommitCoordinator({
     return serialize(() => journalRepository.recordProgramExecution(request));
   }
 
-  return Object.freeze({ execute, recover, rollback, recordProgramExecution });
+  function inspectCommitted(project = (snapshot) => snapshot) {
+    if (typeof project !== 'function') {
+      throw problem('INVALID_COMMITTED_INSPECTION', 'Committed inspection requires a projection function');
+    }
+    return serialize(async () => project(await worldRepository.read()));
+  }
+
+  return Object.freeze({ execute, recover, rollback, recordProgramExecution, inspectCommitted });
 }

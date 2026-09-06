@@ -91,6 +91,24 @@ export function createTransactionalWorldPersistence({
     return structuredClone(owner.cachedManifest);
   }
 
+  async function readCommittedSnapshot() {
+    await recover();
+    return coordinator.inspectCommitted(async (snapshot) => {
+      const state = await journalRepository.readState();
+      const compatibilityManifest = structuredClone(
+        state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null
+      );
+      if (compatibilityManifest) validateCompatibilityManifest(compatibilityManifest, snapshot.facts);
+      owner.cachedManifest = structuredClone(compatibilityManifest);
+      owner.manifestLoaded = true;
+      return Object.freeze({
+        facts: structuredClone(snapshot.facts),
+        revision: snapshot.revision,
+        compatibilityManifest
+      });
+    });
+  }
+
   async function transformLogEntries() {
     await recover();
     if (owner.cachedTransformLog) return structuredClone(owner.cachedTransformLog);
@@ -351,6 +369,7 @@ export function createTransactionalWorldPersistence({
     get compatibilityGeneration() { return owner.compatibilityGeneration ?? 0; },
     commit,
     compatibilityManifest,
+    readCommittedSnapshot,
     recover,
     rollback,
     transformLogEntries,

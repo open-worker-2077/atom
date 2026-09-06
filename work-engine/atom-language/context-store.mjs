@@ -416,6 +416,22 @@ async function atomicWriteJson(file, value) {
  */
 export async function readAtomContext(file, options = {}) {
   const contextFile = resolveAtomContextFile(file);
+  if (options.committedSnapshot) {
+    if (!Array.isArray(options.committedSnapshot.facts)) {
+      throw atomLanguageError(
+        'INVALID_WORLD_SNAPSHOT',
+        'Committed Atom snapshot must contain a facts array'
+      );
+    }
+    const normalized = normalizePersistedContext(structuredClone(options.committedSnapshot.facts));
+    const metadata = options.compatibilityManifest
+      ? compatibilityMetadata(options.compatibilityManifest, normalized.atoms)
+      : normalized.metadata;
+    projectAtomContext(normalized.atoms, { allowLegacyStrut: Boolean(metadata) });
+    const committed = freezeSnapshot(normalized.atoms);
+    if (metadata) legacySnapshotMetadata.set(committed, metadata);
+    return committed;
+  }
   let signature;
   try {
     signature = await contextSignature(contextFile);

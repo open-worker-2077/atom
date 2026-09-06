@@ -25,7 +25,11 @@
 **Files:**
 - Modify: `src/atom-system/adapters/transactional-world-persistence.mjs`
 - Modify: `src/atom-system/adapters/legacy-engine-adapter.mjs`
+- Modify: `src/atom-system/world-runtime/commit-coordinator.mjs`
+- Modify: `work-engine/atom-language/context-store.mjs`
 - Modify: `work-engine/atom-language/engine.mjs`
+- Test: `tests/atom-world-transaction.test.mjs`
+- Test: `tests/atom-graph-four-axis-deployment-migration.test.mjs`
 - Test: `tests/atom-world-service-contract.test.mjs`
 - Test: `tests/atom-transform-postcommit-boundary.test.mjs`
 
@@ -33,25 +37,27 @@
 - Produces: `persistence.readCommittedSnapshot()` returning `{ facts, revision, compatibilityManifest }` from one committed boundary.
 - Consumes: the existing world repository and compatibility manifest cache.
 
-- [ ] **Step 1: Write failing interleaving tests**
+- [x] **Step 1: Write failing interleaving tests**
 
 Add a controlled test that pauses an Explore after it receives a committed snapshot, commits a different local change, then resumes the Explore. Assert that the first request returns the old self-consistent value and the next request returns the new value without `GRAPH_COMPATIBILITY_MANIFEST_REVISION_MISMATCH`.
 
-- [ ] **Step 2: Run the RED tests**
+- [x] **Step 2: Run the RED tests**
 
 Run: `node --test tests/atom-world-service-contract.test.mjs tests/atom-transform-postcommit-boundary.test.mjs`
 
 Expected: the paused request currently reads facts independently and fails with the manifest revision mismatch.
 
-- [ ] **Step 3: Add the committed snapshot port**
+- [x] **Step 3: Add the committed snapshot port**
 
 Return one frozen snapshot from the persistence owner and pass it through World Service to Engine/Explore. Reacquire it after a successful source commit instead of retaining the request's pre-commit manifest.
 
-- [ ] **Step 4: Run focused GREEN tests**
+- [x] **Step 4: Run focused GREEN tests**
 
 Run: `node --test tests/atom-world-service-contract.test.mjs tests/atom-transform-postcommit-boundary.test.mjs tests/atom-language-graph-server.test.mjs`
 
 Expected: all tests pass and the deterministic interleaving returns old/new self-consistent snapshots.
+
+Evidence: RED reproduced `GRAPH_COMPATIBILITY_MANIFEST_REVISION_MISMATCH` when the file advanced after capture, and a second RED proved committed inspection could observe the world-write/journal-commit gap. GREEN binds facts, revision and manifest inside the coordinator boundary and reacquires the tuple after source commit. Transaction/World Service `40/40` and Graph four-axis migration `11/11` pass; the latter was rerun outside the restricted sandbox because its Program AST subprocesses receive `EPERM` inside it.
 
 - [ ] **Step 5: Commit Task 1**
 
