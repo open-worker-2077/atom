@@ -680,7 +680,8 @@ test('same apply attempt finalizes a schemaVersion 1 after-world-write migration
     worldRepository: createJsonWorldRepository({
       file: contextFile,
       worldId: 'primary',
-      initialFacts: []
+      initialFacts: [],
+      localCommitFile: path.join(`${journalFile}.d`, 'world-commits.jsonl')
     }),
     journalRepository: journal,
     faultInjector: async (point) => {
