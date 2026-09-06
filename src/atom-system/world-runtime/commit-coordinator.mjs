@@ -3,6 +3,7 @@ import {
   validateWorldReceipt,
   validateWorldSnapshot
 } from '../public/contracts.mjs';
+import crypto from 'node:crypto';
 import { affectedAtomsBetween, normalizeAffectedAtoms } from './year-ring.mjs';
 import { revisionOfWorldFacts } from './world-revision.mjs';
 import { isDeepStrictEqual } from 'node:util';
@@ -125,8 +126,82 @@ function completeClosureFor(record) {
   return closure.entries;
 }
 
-function verifiedLegacyPreparedIdentity(record) {
-  if (record?.historyMode === 'local-patch') return null;
+function legacyPreparedRecordDigest(record) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(record)).digest('hex')}`;
+}
+
+function verifiedLegacyLocalPatchIdentity(record, current) {
+  let command;
+  let receipt;
+  try {
+    command = validateWorldCommandEnvelope(record?.command);
+    receipt = validateWorldReceipt(record?.receipt);
+  } catch {
+    return null;
+  }
+  const patch = record?.patch;
+  const inversePatch = record?.inversePatch;
+  if (record?.historyMode !== 'local-patch'
+    || record.commandId !== command.commandId
+    || record.correlationId !== command.correlationId
+    || receipt.commandId !== command.commandId
+    || receipt.correlationId !== command.correlationId
+    || command.expectedRevision !== patch?.beforeRevision
+    || receipt.beforeRevision !== patch?.beforeRevision
+    || receipt.afterRevision !== patch?.afterRevision
+    || current?.worldId !== patch?.worldId
+    || current?.revision !== patch?.afterRevision
+    || inversePatch?.worldId !== patch.worldId
+    || inversePatch.beforeRevision !== patch.afterRevision
+    || inversePatch.afterRevision !== patch.beforeRevision
+    || !Array.isArray(patch.changedPaths)
+    || !patch.changedPaths.length) return null;
+  try {
+    const beforeFacts = applyLocalWorldPatch(current.facts, inversePatch);
+    const afterFacts = applyLocalWorldPatch(beforeFacts, patch);
+    const expectedPatch = createLocalWorldPatch({
+      worldId: patch.worldId,
+      beforeRevision: patch.beforeRevision,
+      afterRevision: patch.afterRevision,
+      beforeFacts,
+      afterFacts: current.facts,
+      changedPaths: patch.changedPaths
+    });
+    const expectedClosure = createAffectedPathClosure({
+      changedPaths: patch.changedPaths,
+      patch,
+      relationEndpoints: receipt.result?.relationEndpoints,
+      lockPaths: receipt.result?.lockPaths,
+      shortcutPaths: receipt.result?.shortcutPaths
+    });
+    const receiptAffected = normalizeAffectedAtoms(receipt.result?.affectedAtoms ?? []);
+    const receiptPaths = new Set(receiptAffected.map(({ path }) => path).filter(Boolean));
+    if (revisionOfWorldFacts(beforeFacts) !== patch.beforeRevision
+      || revisionOfWorldFacts(afterFacts) !== patch.afterRevision
+      || !isDeepStrictEqual(afterFacts, current.facts)
+      || !isDeepStrictEqual(expectedPatch, patch)
+      || !isDeepStrictEqual(invertLocalWorldPatch(expectedPatch), inversePatch)
+      || receipt.result?.affectedAtomsComplete !== true
+      || !isDeepStrictEqual(expectedClosure.entries, receipt.result?.affectedPathClosure)
+      || !expectedClosure.paths.every((path) => receiptPaths.has(path))
+      || !isDeepStrictEqual(receiptAffected, receipt.affectedAtoms)) return null;
+  } catch {
+    return null;
+  }
+  return Object.freeze({
+    historyMode: 'local-patch',
+    recordDigest: legacyPreparedRecordDigest(record),
+    commandId: command.commandId,
+    worldId: patch.worldId,
+    beforeRevision: patch.beforeRevision,
+    afterRevision: patch.afterRevision
+  });
+}
+
+function verifiedLegacyPreparedIdentity(record, current) {
+  if (record?.historyMode === 'local-patch') {
+    return verifiedLegacyLocalPatchIdentity(record, current);
+  }
   let command;
   let before;
   let after;
@@ -150,6 +225,7 @@ function verifiedLegacyPreparedIdentity(record) {
     || receipt.afterRevision !== after.revision
     || before.worldId !== after.worldId) return null;
   return Object.freeze({
+    historyMode: 'whole-world',
     commandId: command.commandId,
     worldId: before.worldId,
     beforeRevision: before.revision,
@@ -162,6 +238,8 @@ function matchesLegacyPreparedEvidence(evidence, identity) {
     && evidence.version === 1
     && [1, 2].includes(evidence.sourceSchemaVersion)
     && evidence.cutoverIdentity === 'pre-local-commit-cutover'
+    && evidence.historyMode === identity?.historyMode
+    && evidence.recordDigest === identity?.recordDigest
     && evidence.commandId === identity?.commandId
     && evidence.worldId === identity?.worldId
     && evidence.beforeRevision === identity?.beforeRevision
@@ -208,7 +286,7 @@ export function createCommitCoordinator({
       ? await worldRepository.durableCommitEvidence(identity)
       : null;
     const legacyIdentity = current.revision === afterRevision
-      ? verifiedLegacyPreparedIdentity(record)
+      ? verifiedLegacyPreparedIdentity(record, current)
       : null;
     const legacyEvidence = !durableEvidence && legacyIdentity
       ? await journalRepository.legacyPreparedEvidence?.(legacyIdentity)

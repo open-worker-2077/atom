@@ -646,7 +646,7 @@ test('same apply attempt reconstructs a missing deployment receipt from verified
   assert.equal(JSON.parse(await fs.readFile(recovered.receiptFile, 'utf8')).rollback.targetCommandId, committed.commandId);
 });
 
-test('same apply attempt finalizes a pre-cutover schemaVersion 2 after-world-write migration before reconstructing its receipt', async (t) => {
+test('same apply attempt finalizes a pre-cutover schemaVersion 2 local-patch migration before reconstructing its receipt', async (t) => {
   const localAppData = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-migration-prepared-'));
   t.after(() => fs.rm(localAppData, { recursive: true, force: true }));
   const worldDirectory = path.join(localAppData, 'AtomGraph', 'worlds', 'primary');
@@ -688,13 +688,14 @@ test('same apply attempt finalizes a pre-cutover schemaVersion 2 after-world-wri
   }, null, 2)}\n`, 'utf8');
 
   const journal = createJsonTransactionJournal({ file: journalFile });
+  const worldRepository = createJsonWorldRepository({
+    file: contextFile,
+    worldId: 'primary',
+    initialFacts: [],
+    localCommitFile: path.join(`${journalFile}.d`, 'world-commits.jsonl')
+  });
   const coordinator = createCommitCoordinator({
-    worldRepository: createJsonWorldRepository({
-      file: contextFile,
-      worldId: 'primary',
-      initialFacts: [],
-      localCommitFile: path.join(`${journalFile}.d`, 'world-commits.jsonl')
-    }),
+    worldRepository,
     journalRepository: journal,
     faultInjector: async (point) => {
       if (point === 'after-world-write') throw Object.assign(new Error('prepared fault'), {
@@ -704,6 +705,7 @@ test('same apply attempt finalizes a pre-cutover schemaVersion 2 after-world-wri
   });
   const correlationId = `${plan.migrationId}:attempt:${attemptId}`;
   const commandId = 'legacy-prepared-agent-migration';
+  const changedPaths = ['Legacy'];
   await assert.rejects(coordinator.execute({
     command: {
       contract: 'atom.world-command',
@@ -716,13 +718,21 @@ test('same apply attempt finalizes a pre-cutover schemaVersion 2 after-world-wri
     },
     transition: async () => ({
       facts: plan.facts,
-      result: { source: `agent-program-migration:${plan.migrationId}` }
+      changedPaths,
+      result: {
+        source: `agent-program-migration:${plan.migrationId}`,
+        relationEndpoints: [],
+        lockPaths: [],
+        shortcutPaths: [],
+        referencePaths: [],
+        affectedPathClosureComplete: true
+      }
     })
   }), { code: 'TEST_AFTER_WORLD_WRITE' });
   const interrupted = await journal.readState();
   assert.equal(interrupted.prepared.length, 1);
   assert.equal(interrupted.receipts.length, 0);
-  assert.equal(revisionOfWorldFacts(JSON.parse(await fs.readFile(contextFile, 'utf8'))), plan.nextRevision);
+  assert.equal((await worldRepository.read()).revision, plan.nextRevision);
 
   // Model the exact BASE 2701e61 handoff: a schemaVersion 2 prepared event
   // precedes the local-commit cutover and no local world proof exists.
@@ -730,7 +740,11 @@ test('same apply attempt finalizes a pre-cutover schemaVersion 2 after-world-wri
     .trim().split('\n').map(JSON.parse).filter(({ type }) => type === 'prepared');
   assert.equal(preparedEvents.length, 1);
   const { localCommitProtocol: _currentProtocol, ...preCutoverEvent } = preparedEvents[0];
+  assert.equal(preCutoverEvent.record.historyMode, 'local-patch');
+  assert.deepEqual(preCutoverEvent.record.patch.changedPaths, changedPaths);
+  delete preCutoverEvent.record.receipt.result.affectedPathClosureComplete;
   await fs.writeFile(journal.eventFile, `${JSON.stringify(preCutoverEvent)}\n`, 'utf8');
+  await fs.writeFile(contextFile, `${JSON.stringify(plan.facts, null, 2)}\n`, 'utf8');
   const localCommitFile = path.join(`${journalFile}.d`, 'world-commits.jsonl');
   await Promise.all([
     fs.rm(localCommitFile, { force: true }),

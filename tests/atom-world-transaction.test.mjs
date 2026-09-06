@@ -8,7 +8,10 @@ import { gzipSync } from 'node:zlib';
 
 import { createCommitCoordinator } from '../src/atom-system/world-runtime/commit-coordinator.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
-import { createLocalWorldPatch } from '../src/atom-system/world-runtime/local-world-patch.mjs';
+import {
+  createLocalWorldPatch,
+  invertLocalWorldPatch
+} from '../src/atom-system/world-runtime/local-world-patch.mjs';
 import {
   createJsonTransactionJournal,
   createJsonWorldRepository,
@@ -2630,22 +2633,58 @@ function legacyPreparedRecord(commandId, beforeFacts, afterFacts) {
   };
 }
 
+function legacyLocalPatchPreparedRecord(commandId, beforeFacts, afterFacts) {
+  const beforeRevision = revisionOf(beforeFacts);
+  const afterRevision = revisionOf(afterFacts);
+  const commandEnvelope = command(commandId, beforeRevision);
+  const patch = createLocalWorldPatch({
+    worldId: 'primary', beforeRevision, afterRevision,
+    beforeFacts, afterFacts, changedPaths: ['Root']
+  });
+  const affectedAtoms = [{ path: 'Root', axes: [] }];
+  const affectedPathClosure = [{ path: 'Root', reasons: ['changed', 'changed-subtree'] }];
+  return {
+    historyMode: 'local-patch',
+    commandId,
+    correlationId: commandEnvelope.correlationId,
+    command: commandEnvelope,
+    patch,
+    inversePatch: invertLocalWorldPatch(patch),
+    receipt: {
+      contract: 'atom.world-receipt', version: 1,
+      commandId, correlationId: commandEnvelope.correlationId,
+      beforeRevision, afterRevision,
+      status: 'committed', committedAt: new Date(0).toISOString(),
+      source: commandEnvelope.name,
+      affectedAtoms,
+      result: {
+        source: commandEnvelope.name,
+        affectedAtoms,
+        affectedAtomsComplete: true,
+        affectedPathClosure
+      }
+    }
+  };
+}
+
 async function writePreCutoverV2Prepared(journalFile, record) {
   const incrementalDirectory = `${journalFile}.d`;
   const objectDirectory = path.join(incrementalDirectory, 'objects');
   await fs.mkdir(objectDirectory, { recursive: true });
   const compact = structuredClone(record);
-  for (const key of ['before', 'after']) {
-    const value = compact[key];
-    const objectFile = path.join(objectDirectory, `${value.revision.slice('sha256:'.length)}.json.gz`);
-    await fs.writeFile(objectFile, gzipSync(Buffer.from(JSON.stringify(value)), { level: 1 }));
-    compact[key] = {
-      contract: value.contract,
-      version: value.version,
-      worldId: value.worldId,
-      revision: value.revision,
-      snapshotRef: value.revision
-    };
+  if (record.historyMode !== 'local-patch') {
+    for (const key of ['before', 'after']) {
+      const value = compact[key];
+      const objectFile = path.join(objectDirectory, `${value.revision.slice('sha256:'.length)}.json.gz`);
+      await fs.writeFile(objectFile, gzipSync(Buffer.from(JSON.stringify(value)), { level: 1 }));
+      compact[key] = {
+        contract: value.contract,
+        version: value.version,
+        worldId: value.worldId,
+        revision: value.revision,
+        snapshotRef: value.revision
+      };
+    }
   }
   await fs.writeFile(path.join(incrementalDirectory, 'events.jsonl'), `${JSON.stringify({
     schemaVersion: 2,
@@ -2654,6 +2693,105 @@ async function writePreCutoverV2Prepared(journalFile, record) {
     record: compact
   })}\n`, 'utf8');
 }
+
+for (const interruptionPoint of ['before-world-write', 'after-world-write']) {
+  test(`pre-cutover schemaVersion 2 local-patch transaction recovers exactly once after ${interruptionPoint}`, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), `atom-pre-cutover-v2-patch-${interruptionPoint}-`));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const worldFile = path.join(directory, 'atom.json');
+    const journalFile = path.join(directory, 'transactions.json');
+    const localCommitFile = path.join(directory, 'world-commits.jsonl');
+    const beforeFacts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+    const afterFacts = [{ thing: 'Root', situation: 'new', slot: [], strut: [] }];
+    const record = legacyLocalPatchPreparedRecord(
+      `pre-cutover-v2-patch-${interruptionPoint}`, beforeFacts, afterFacts
+    );
+    await fs.writeFile(worldFile, `${JSON.stringify(
+      interruptionPoint === 'after-world-write' ? afterFacts : beforeFacts
+    )}\n`, 'utf8');
+    await writePreCutoverV2Prepared(journalFile, record);
+    const worldRepository = createJsonWorldRepository({
+      file: worldFile, worldId: 'primary', localCommitFile
+    });
+    const journalRepository = createJsonTransactionJournal({ file: journalFile });
+    const coordinator = createCommitCoordinator({ worldRepository, journalRepository });
+
+    assert.deepEqual(await coordinator.recover(), { recovered: 1 });
+    assert.deepEqual((await worldRepository.read()).facts, afterFacts);
+    assert.deepEqual(await coordinator.recover(), { recovered: 0 });
+    const state = await journalRepository.readState();
+    assert.deepEqual(state.prepared, []);
+    assert.deepEqual(state.receipts.map(({ commandId }) => commandId), [record.commandId]);
+    assert.equal(state.receipts[0].historyMode, 'local-patch');
+    assert.deepEqual(state.receipts[0].patch, record.patch);
+  });
+}
+
+test('post-cutover schemaVersion 2 local-patch cannot claim an unproven matching afterRevision', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-current-patch-impostor-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  const journalFile = path.join(directory, 'transactions.json');
+  const beforeFacts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+  const afterFacts = [{ thing: 'Root', situation: 'matching-after', slot: [], strut: [] }];
+  const record = legacyLocalPatchPreparedRecord('current-patch-impostor', beforeFacts, afterFacts);
+  await fs.writeFile(worldFile, `${JSON.stringify(afterFacts)}\n`, 'utf8');
+  const journalRepository = createJsonTransactionJournal({ file: journalFile });
+  await journalRepository.prepare(record);
+  const events = (await fs.readFile(journalRepository.eventFile, 'utf8'))
+    .trim().split('\n').map(JSON.parse);
+  assert.deepEqual(events[0].localCommitProtocol, {
+    contract: 'atom.local-world-commit-protocol', version: 1
+  });
+  const storedWorldRepository = createJsonWorldRepository({ file: worldFile, worldId: 'primary' });
+  const coordinator = createCommitCoordinator({
+    worldRepository: Object.freeze({
+      read: (...args) => storedWorldRepository.read(...args),
+      compareAndSwap: (...args) => storedWorldRepository.compareAndSwap(...args)
+    }),
+    journalRepository
+  });
+
+  await assert.rejects(coordinator.recover(), { code: 'TRANSACTION_RECOVERY_CONFLICT' });
+  const state = await journalRepository.readState();
+  assert.deepEqual(state.prepared.map(({ commandId }) => commandId), [record.commandId]);
+  assert.deepEqual(state.receipts, []);
+});
+
+test('pre-cutover schemaVersion 2 local-patch requires intact patch paths, inverse and receipt', async (t) => {
+  const beforeFacts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+  const afterFacts = [{ thing: 'Root', situation: 'new', slot: [], strut: [] }];
+  const mutations = [
+    ['changed paths', (record) => { record.patch.changedPaths = ['Root/Missing']; }],
+    ['patch operation', (record) => { record.patch.operations[0].after.situation = 'forged'; }],
+    ['inverse operation', (record) => { record.inversePatch.operations[0].after.situation = 'forged'; }],
+    ['receipt identity', (record) => { record.receipt.correlationId = 'forged-correlation'; }]
+  ];
+  for (const [label, mutate] of mutations) {
+    await t.test(label, async (t) => {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-old-patch-invalid-'));
+      t.after(() => fs.rm(directory, { recursive: true, force: true }));
+      const worldFile = path.join(directory, 'atom.json');
+      const journalFile = path.join(directory, 'transactions.json');
+      const record = structuredClone(legacyLocalPatchPreparedRecord(
+        `invalid-old-patch-${label.replace(' ', '-')}`, beforeFacts, afterFacts
+      ));
+      mutate(record);
+      await fs.writeFile(worldFile, `${JSON.stringify(afterFacts)}\n`, 'utf8');
+      await writePreCutoverV2Prepared(journalFile, record);
+      const journalRepository = createJsonTransactionJournal({ file: journalFile });
+      const coordinator = createCommitCoordinator({
+        worldRepository: createJsonWorldRepository({ file: worldFile, worldId: 'primary' }),
+        journalRepository
+      });
+
+      await assert.rejects(coordinator.recover(), { code: 'TRANSACTION_RECOVERY_CONFLICT' });
+      const state = await journalRepository.readState();
+      assert.deepEqual(state.prepared.map(({ commandId }) => commandId), [record.commandId]);
+      assert.deepEqual(state.receipts, []);
+    });
+  }
+});
 
 for (const interruptionPoint of ['before-world-write', 'after-world-write']) {
   test(`schemaVersion 1 prepared transaction recovers exactly once after ${interruptionPoint}`, async (t) => {

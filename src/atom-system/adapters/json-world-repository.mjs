@@ -1328,17 +1328,30 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     const sourceSchemaVersion = state.legacyPrepared.get(identity?.commandId);
     if (!sourceSchemaVersion) return null;
     const record = state.prepared.get(identity.commandId);
-    if (!record || record.historyMode === 'local-patch'
+    const localPatch = record?.historyMode === 'local-patch';
+    const recordWorldId = localPatch ? record?.patch?.worldId : record?.before?.worldId;
+    const afterWorldId = localPatch ? record?.inversePatch?.worldId : record?.after?.worldId;
+    const beforeRevision = localPatch ? record?.patch?.beforeRevision : record?.before?.revision;
+    const afterRevision = localPatch ? record?.patch?.afterRevision : record?.after?.revision;
+    const recordDigest = localPatch
+      ? `sha256:${crypto.createHash('sha256').update(JSON.stringify(record)).digest('hex')}`
+      : undefined;
+    if (!record
+      || identity.historyMode !== (localPatch ? 'local-patch' : 'whole-world')
       || record.commandId !== identity.commandId
-      || record.before?.worldId !== identity.worldId
-      || record.after?.worldId !== identity.worldId
-      || record.before?.revision !== identity.beforeRevision
-      || record.after?.revision !== identity.afterRevision) return null;
+      || record.correlationId !== record.command?.correlationId
+      || recordWorldId !== identity.worldId
+      || afterWorldId !== identity.worldId
+      || beforeRevision !== identity.beforeRevision
+      || afterRevision !== identity.afterRevision
+      || recordDigest !== identity.recordDigest) return null;
     return Object.freeze({
       contract: 'atom.legacy-prepared-evidence',
       version: 1,
       sourceSchemaVersion,
       cutoverIdentity: 'pre-local-commit-cutover',
+      historyMode: identity.historyMode,
+      recordDigest,
       commandId: identity.commandId,
       worldId: identity.worldId,
       beforeRevision: identity.beforeRevision,
