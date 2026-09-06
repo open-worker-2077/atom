@@ -22,6 +22,7 @@ const UNSUPPORTED_DIRECTORY_SYNC_ERRORS = new Set([
   'EACCES', 'EBADF', 'EINVAL', 'EISDIR', 'ENOSYS', 'ENOTSUP', 'EPERM'
 ]);
 const localCommitPublications = new Map();
+const repositoryRuntimeId = crypto.randomUUID();
 
 function wait(milliseconds) {
   return milliseconds > 0
@@ -93,6 +94,24 @@ function completePrefixBytes(raw) {
   return newline < 0 ? 0 : newline + 1;
 }
 
+async function writeFully(handle, value, position = 0) {
+  const buffer = Buffer.isBuffer(value) ? value : Buffer.from(value, 'utf8');
+  let offset = 0;
+  while (offset < buffer.length) {
+    const remaining = buffer.length - offset;
+    const result = await handle.write(buffer, offset, remaining, position + offset);
+    const bytesWritten = typeof result === 'number' ? result : result?.bytesWritten;
+    if (!Number.isSafeInteger(bytesWritten) || bytesWritten <= 0 || bytesWritten > remaining) {
+      throw problem('INCOMPLETE_FILE_WRITE', 'File write made no forward progress', {
+        expectedBytes: buffer.length,
+        writtenBytes: offset
+      });
+    }
+    offset += bytesWritten;
+  }
+  return buffer.length;
+}
+
 function snapshot(worldId, facts, { ownsFacts = false } = {}) {
   if (!Array.isArray(facts)) {
     throw problem('INVALID_WORLD_FILE', 'Atom world facts must be a JSON array');
@@ -122,7 +141,10 @@ export function createJsonWorldRepository({
   let tail = Promise.resolve();
   let localRecordCount = 0;
   let compactionPromise = null;
+  let startupProofPending = true;
   const publication = publicationFor(localCommitFile);
+  const localCommitHeadFile = `${localCommitFile}.head.json`;
+  const fallbackGenerationFile = `${localCommitFile}.fallback.json`;
   const compactionThreshold = autoCompact === true
     ? 128
     : Number.isSafeInteger(autoCompact) && autoCompact > 0 ? autoCompact : 0;
@@ -144,7 +166,35 @@ export function createJsonWorldRepository({
   }
 
   async function signature() {
-    return `${await fileSignature(file)}|${await fileSignature(localCommitFile, true)}|${publication.version}`;
+    return `${await fileSignature(file)}|${await fileSignature(localCommitFile, true)}|${await fileSignature(localCommitHeadFile, true)}|${publication.version}`;
+  }
+
+  async function publicationHead(buffer) {
+    let parsed;
+    try {
+      parsed = JSON.parse(await fileSystem.readFile(localCommitHeadFile, 'utf8'));
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      throw problem('INVALID_LOCAL_WORLD_COMMIT_HEAD', 'Local commit publication head is invalid', {
+        cause: error.code ?? error.message
+      });
+    }
+    if (parsed?.contract !== 'atom.local-commit-head' || parsed.version !== 1
+      || parsed.worldId !== worldId || !Number.isSafeInteger(parsed.bytes) || parsed.bytes < 0) {
+      throw problem('INVALID_LOCAL_WORLD_COMMIT_HEAD', 'Local commit publication head has an invalid shape');
+    }
+    const completeBytes = completePrefixBytes(buffer);
+    return { ...parsed, bytes: Math.min(parsed.bytes, completeBytes) };
+  }
+
+  async function persistPublicationHead(bytes, throughCommandId = null) {
+    await writeJsonAtomically(localCommitHeadFile, null, {
+      fileSystem,
+      serialized: `${JSON.stringify({
+        contract: 'atom.local-commit-head', version: 1, worldId, bytes, throughCommandId
+      })}\n`,
+      syncTemporary: true
+    });
   }
 
   async function localRecords() {
@@ -156,9 +206,11 @@ export function createJsonWorldRepository({
       throw error;
     }
     const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, 'utf8');
+    const head = await publicationHead(buffer);
+    const durableBytes = head?.bytes ?? completePrefixBytes(buffer);
     const visibleBytes = publication.pending || publication.repairRequired
-      ? Math.min(publication.visibleBytes, buffer.length)
-      : completePrefixBytes(buffer);
+      ? Math.min(publication.visibleBytes, durableBytes)
+      : durableBytes;
     const lines = buffer.subarray(0, visibleBytes).toString('utf8').split('\n');
     lines.pop();
     return lines.filter(Boolean).map((line, index) => {
@@ -259,6 +311,11 @@ export function createJsonWorldRepository({
     for (const record of pendingRecords) materialized = applyRecord(materialized, record);
     const finalSignature = await signature();
     if (finalSignature !== beforeSignature) return read();
+    if (startupProofPending && !publication.pending) {
+      startupProofPending = false;
+      await pruneFallbackGeneration().catch(() => false);
+      if (await signature() !== finalSignature) return read();
+    }
     cached = materialized;
     cachedSignature = finalSignature;
     return cached;
@@ -268,6 +325,74 @@ export function createJsonWorldRepository({
     const running = publication.tail.then(work, work);
     publication.tail = running.catch(() => {});
     return running;
+  }
+
+  async function fallbackGeneration() {
+    try {
+      const marker = JSON.parse(await fileSystem.readFile(fallbackGenerationFile, 'utf8'));
+      if (marker?.contract !== 'atom.local-commit-fallback' || marker.version !== 1
+        || marker.worldId !== worldId || !/^sha256:[a-f0-9]{64}$/u.test(marker.revision ?? '')
+        || typeof marker.throughCommandId !== 'string'
+        || !/^sha256:[a-f0-9]{64}$/u.test(marker.throughBeforeRevision ?? '')
+        || typeof marker.writerRuntimeId !== 'string') return null;
+      return marker;
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      return null;
+    }
+  }
+
+  async function persistFallbackGeneration(record, revision) {
+    if (!record) return;
+    await writeJsonAtomically(fallbackGenerationFile, null, {
+      fileSystem,
+      serialized: `${JSON.stringify({
+        contract: 'atom.local-commit-fallback', version: 1, worldId, revision,
+        throughCommandId: record.commandId,
+        throughBeforeRevision: record.beforeRevision,
+        writerRuntimeId: repositoryRuntimeId
+      })}\n`,
+      syncTemporary: true
+    });
+  }
+
+  async function replaceLogWithWatermark(watermark) {
+    const serialized = `${JSON.stringify(watermark)}\n`;
+    await writeJsonAtomically(localCommitFile, null, {
+      fileSystem,
+      serialized,
+      syncTemporary: true
+    });
+    const bytes = Buffer.byteLength(serialized, 'utf8');
+    await persistPublicationHead(bytes, watermark.throughCommandId);
+    publication.visibleBytes = bytes;
+    publication.pending = false;
+    publication.repairRequired = false;
+    publication.version += 1;
+  }
+
+  async function pruneFallbackGeneration() {
+    const marker = await fallbackGeneration();
+    if (!marker || marker.writerRuntimeId === repositoryRuntimeId) return false;
+    return withPublicationLock(async () => {
+      const baseline = snapshot(worldId, JSON.parse(await fileSystem.readFile(file, 'utf8')), { ownsFacts: true });
+      if (baseline.revision !== marker.revision) return false;
+      const records = await localRecords();
+      const ownerIndex = records.findIndex((record) => record.contract === 'atom.local-commit'
+        && record.commandId === marker.throughCommandId
+        && record.beforeRevision === marker.throughBeforeRevision
+        && record.afterRevision === marker.revision);
+      if (ownerIndex < 0 || records.slice(ownerIndex + 1)
+        .some((record) => record.contract === 'atom.local-commit')) return false;
+      await replaceLogWithWatermark({
+        contract: 'atom.local-commit-watermark', version: 1, worldId,
+        revision: marker.revision,
+        throughCommandId: marker.throughCommandId,
+        throughBeforeRevision: marker.throughBeforeRevision
+      });
+      localRecordCount = 0;
+      return true;
+    });
   }
 
   async function appendRecordUnsafe(record) {
@@ -280,9 +405,12 @@ export function createJsonWorldRepository({
       raw = Buffer.alloc(0);
     }
     const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, 'utf8');
+    const head = await publicationHead(buffer);
+    const durableBytes = head?.bytes ?? completePrefixBytes(buffer);
     const publishedBytes = publication.repairRequired
-      ? Math.min(publication.visibleBytes, completePrefixBytes(buffer))
-      : completePrefixBytes(buffer);
+      ? Math.min(publication.visibleBytes, durableBytes)
+      : durableBytes;
+    if (!head) await persistPublicationHead(publishedBytes);
     const serialized = `${JSON.stringify(record)}\n`;
     publication.pending = true;
     publication.visibleBytes = publishedBytes;
@@ -291,9 +419,11 @@ export function createJsonWorldRepository({
     try {
       handle = await fileSystem.open(localCommitFile, buffer.length ? 'r+' : 'w+');
       await handle.truncate(publishedBytes);
-      await handle.write(serialized, publishedBytes, 'utf8');
+      const writtenBytes = await writeFully(handle, serialized, publishedBytes);
       await handle.sync();
-      publication.visibleBytes = publishedBytes + Buffer.byteLength(serialized, 'utf8');
+      const nextBytes = publishedBytes + writtenBytes;
+      await persistPublicationHead(nextBytes, record.commandId);
+      publication.visibleBytes = nextBytes;
       publication.pending = false;
       publication.repairRequired = false;
       publication.version += 1;
@@ -318,10 +448,6 @@ export function createJsonWorldRepository({
     }
   }
 
-  function appendRecord(record) {
-    return withPublicationLock(() => appendRecordUnsafe(record));
-  }
-
   async function repairLocalTail() {
     let raw;
     try {
@@ -331,9 +457,11 @@ export function createJsonWorldRepository({
       throw error;
     }
     const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, 'utf8');
+    const head = await publicationHead(buffer);
+    const durableBytes = head?.bytes ?? completePrefixBytes(buffer);
     const completeBytes = publication.repairRequired
-      ? Math.min(publication.visibleBytes, completePrefixBytes(buffer))
-      : completePrefixBytes(buffer);
+      ? Math.min(publication.visibleBytes, durableBytes)
+      : durableBytes;
     if (buffer.length === completeBytes) return;
     const handle = await fileSystem.open(localCommitFile, 'r+');
     try {
@@ -349,7 +477,8 @@ export function createJsonWorldRepository({
   }
 
   function appendLocalCommit({ commandId, expectedRevision, nextSnapshot, patch }) {
-    return serialize(async () => {
+    startupProofPending = false;
+    return serialize(() => withPublicationLock(async () => {
       if (nextSnapshot?.worldId !== worldId || !Array.isArray(nextSnapshot?.facts)) {
         throw problem('INVALID_WORLD_SNAPSHOT', 'The next world snapshot is invalid');
       }
@@ -374,16 +503,17 @@ export function createJsonWorldRepository({
         patch
       };
       await faultInjector('before-local-append', structuredClone(record));
-      await appendRecord(record);
+      await appendRecordUnsafe(record);
       await faultInjector('after-local-append-sync', structuredClone(record));
       await faultInjector('before-memory-publication', structuredClone(record));
       cached = prepared;
       cachedSignature = await signature();
       return prepared;
-    });
+    }));
   }
 
   function compactCommittedState() {
+    startupProofPending = false;
     return serialize(() => withPublicationLock(async () => {
       const current = await read();
       const committedRecords = (await localRecords())
@@ -404,8 +534,8 @@ export function createJsonWorldRepository({
         }
       });
       await faultInjector('after-compaction-replace', structuredClone(current));
+      const latest = committedRecords.at(-1);
       if (baselineWrite.directorySynced) {
-        const latest = committedRecords.at(-1);
         const watermark = {
           contract: 'atom.local-commit-watermark',
           version: 1,
@@ -414,16 +544,9 @@ export function createJsonWorldRepository({
           throughCommandId: latest?.commandId ?? null,
           ...(latest ? { throughBeforeRevision: latest.beforeRevision } : {})
         };
-        const serializedWatermark = `${JSON.stringify(watermark)}\n`;
-        await writeJsonAtomically(localCommitFile, null, {
-          fileSystem,
-          serialized: serializedWatermark,
-          syncTemporary: true
-        });
-        publication.visibleBytes = Buffer.byteLength(serializedWatermark, 'utf8');
-        publication.pending = false;
-        publication.repairRequired = false;
-        publication.version += 1;
+        await replaceLogWithWatermark(watermark);
+      } else {
+        await persistFallbackGeneration(latest, current.revision).catch(() => {});
       }
       localRecordCount = 0;
       cached = current;
@@ -445,9 +568,10 @@ export function createJsonWorldRepository({
   }
 
   function compareAndSwap({ commandId = `full-${crypto.randomUUID()}`, expectedRevision,
-    nextSnapshot, currentSnapshot = null }) {
+    nextSnapshot, currentSnapshot: _currentSnapshot = null }) {
+    startupProofPending = false;
     return serialize(() => withPublicationLock(async () => {
-      const current = currentSnapshot ?? await read();
+      const current = await read();
       if (current.worldId !== worldId || !Array.isArray(current.facts)) {
         throw problem('INVALID_WORLD_SNAPSHOT', 'The current world snapshot is invalid');
       }
@@ -484,23 +608,19 @@ export function createJsonWorldRepository({
         }
       });
       if (baselineWrite.directorySynced) {
-        const serializedWatermark = `${JSON.stringify({
+        await replaceLogWithWatermark({
           contract: 'atom.local-commit-watermark',
           version: 1,
           worldId,
           revision: nextSnapshot.revision,
           throughCommandId: commandId,
           throughBeforeRevision: current.revision
-        })}\n`;
-        await writeJsonAtomically(localCommitFile, null, {
-          fileSystem,
-          serialized: serializedWatermark,
-          syncTemporary: true
         });
-        publication.visibleBytes = Buffer.byteLength(serializedWatermark, 'utf8');
-        publication.pending = false;
-        publication.repairRequired = false;
-        publication.version += 1;
+      } else {
+        await persistFallbackGeneration({
+          commandId,
+          beforeRevision: current.revision
+        }, nextSnapshot.revision).catch(() => {});
       }
       localRecordCount = 0;
       cached = snapshot(worldId, nextSnapshot.facts, {
@@ -587,6 +707,7 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
   if (!file) throw problem('INVALID_TRANSACTION_JOURNAL', 'file is required');
   const eventFile = path.join(incrementalDirectory, 'events.jsonl');
   const objectDirectory = path.join(incrementalDirectory, 'objects');
+  const eventPublication = publicationFor(eventFile);
   let statePromise = null;
   let tail = Promise.resolve();
 
@@ -682,15 +803,29 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     return { ...structuredClone(record), before, after };
   }
 
-  async function appendEvent(event) {
-    await fs.mkdir(incrementalDirectory, { recursive: true });
-    const handle = await fs.open(eventFile, 'a');
-    try {
-      await handle.writeFile(`${JSON.stringify({ schemaVersion: 2, ...event })}\n`, 'utf8');
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
+  function appendEvent(event) {
+    const work = async () => {
+      await fs.mkdir(incrementalDirectory, { recursive: true });
+      let raw;
+      try {
+        raw = await fs.readFile(eventFile);
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        raw = Buffer.alloc(0);
+      }
+      const completeBytes = completePrefixBytes(raw);
+      const handle = await fs.open(eventFile, raw.length ? 'r+' : 'w+');
+      try {
+        await handle.truncate(completeBytes);
+        await writeFully(handle, `${JSON.stringify({ schemaVersion: 2, ...event })}\n`, completeBytes);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+    };
+    const running = eventPublication.tail.then(work, work);
+    eventPublication.tail = running.catch(() => {});
+    return running;
   }
 
   async function loadEvents() {
