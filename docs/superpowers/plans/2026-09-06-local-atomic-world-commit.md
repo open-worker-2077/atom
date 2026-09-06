@@ -59,9 +59,11 @@ Expected: all tests pass and the deterministic interleaving returns old/new self
 
 Evidence: RED reproduced `GRAPH_COMPATIBILITY_MANIFEST_REVISION_MISMATCH` when the file advanced after capture, and a second RED proved committed inspection could observe the world-write/journal-commit gap. GREEN binds facts, revision and manifest inside the coordinator boundary and reacquires the tuple after source commit. Transaction/World Service `40/40` and Graph four-axis migration `11/11` pass; the latter was rerun outside the restricted sandbox because its Program AST subprocesses receive `EPERM` inside it.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 Run: `git add src/atom-system/adapters/transactional-world-persistence.mjs src/atom-system/adapters/legacy-engine-adapter.mjs work-engine/atom-language/engine.mjs tests/atom-world-service-contract.test.mjs tests/atom-transform-postcommit-boundary.test.mjs && git commit -m "fix(atom): bind reads to committed world snapshots"`
+
+Committed as `9f5c8b1` together with the coordinator/context-store seams and exact evidence named above.
 
 ### Task 2: Disjoint local patch rebase
 
@@ -76,31 +78,33 @@ Run: `git add src/atom-system/adapters/transactional-world-persistence.mjs src/a
 - Produces: `rebaseLocalWorldPatch(currentFacts, patch)` returning rebased facts and a patch with current before/after world fingerprints.
 - Consumes: v1 local patches and affected path closure entries.
 
-- [ ] **Step 1: Write conflict-matrix RED tests**
+- [x] **Step 1: Write conflict-matrix RED tests**
 
 Add tests for two different top-level paths, two different slot-instance paths, the same Atom axis, ancestor move versus descendant edit, relation endpoint overlap and lock-path overlap. Assert disjoint pairs both commit and overlapping pairs return `WORLD_REVISION_CONFLICT` with only the conflicting paths.
 
-- [ ] **Step 2: Run the RED matrix**
+- [x] **Step 2: Run the RED matrix**
 
 Run: `node --test tests/atom-world-transaction.test.mjs tests/atom-program-service-e2e.test.mjs`
 
 Expected: disjoint candidates currently fail because `commitCandidate` compares the complete before revision.
 
-- [ ] **Step 3: Rebase verified local patches**
+- [x] **Step 3: Rebase verified local patches**
 
 When the complete world fingerprint advanced, apply the candidate patch to current facts using its recorded preimages. If every local preimage still matches and the affected closures do not overlap, rebuild the after snapshot, receipt, local patch and inverse patch against the current fingerprint. Preserve the original command and correlation identities.
 
-- [ ] **Step 4: Keep incomplete effects conservative**
+- [x] **Step 4: Keep incomplete effects conservative**
 
 Commands without precise `changedPaths`, or with an incomplete affected closure, retain the existing complete-world conflict behavior. Do not infer independence from names or sibling position.
 
-- [ ] **Step 5: Run focused GREEN tests**
+- [x] **Step 5: Run focused GREEN tests**
 
 Run: `node --test tests/atom-world-transaction.test.mjs tests/atom-program-service-e2e.test.mjs tests/atom-program-work-order-e2e.test.mjs tests/atom-system-failure-recovery.test.mjs`
 
 Expected: disjoint cases commit, overlap cases reject, rollback and recovery remain green.
 
-- [ ] **Step 6: Commit Task 2**
+Evidence: initial matrix RED showed both disjoint cases rejected by the complete-world revision and overlap errors lacked path evidence. GREEN covers different top-level Atoms, different slot instances, same Atom, ancestor move versus descendant edit, and shared relation/lock/Shortcut guards. A second RED proved a disjoint request arriving after the first commit still failed before candidate preparation; verified base facts now let it enter the same conservative rebase path. Public 4784 now commits both sibling edits without retry. The affected transaction, manifest, Program service/work-order and recovery chain passes `78/78` outside the restricted subprocess sandbox.
+
+- [x] **Step 6: Commit Task 2**
 
 Run: `git add src/atom-system/world-runtime/local-world-patch.mjs src/atom-system/world-runtime/commit-coordinator.mjs src/atom-system/world-runtime/affected-path-closure.mjs tests/atom-world-transaction.test.mjs tests/atom-program-service-e2e.test.mjs && git commit -m "feat(atom): commit disjoint local patches independently"`
 

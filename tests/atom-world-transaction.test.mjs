@@ -66,6 +66,148 @@ test('concurrent commands with one expected revision serialize and cannot lose u
   assert.equal((await journalRepository.readState()).receipts.length, 1);
 });
 
+async function concurrentLocalPair({ coordinator, initial, left, right }) {
+  let entered = 0;
+  let release;
+  let bothEntered;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const ready = new Promise((resolve) => { bothEntered = resolve; });
+  const run = (id, change) => coordinator.execute({
+    command: command(id, initial.revision),
+    transition: async ({ facts }) => {
+      entered += 1;
+      if (entered === 2) bothEntered();
+      await gate;
+      return change(structuredClone(facts));
+    }
+  });
+  const outcomes = Promise.allSettled([run('local-left', left), run('local-right', right)]);
+  await ready;
+  release();
+  return outcomes;
+}
+
+for (const scenario of ['different top-level Atoms', 'different slot instances']) {
+  test(`concurrent local commits merge ${scenario}`, async (t) => {
+    const files = await fixture(t);
+    const initialFacts = scenario === 'different top-level Atoms'
+      ? [
+          { thing: 'A', situation: 'old', slot: [], strut: [] },
+          { thing: 'B', situation: 'old', slot: [], strut: [] }
+        ]
+      : [{ thing: 'Root', situation: '', slot: [
+          { thing: 'A', situation: 'old', slot: [], strut: [] },
+          { thing: 'B', situation: 'old', slot: [], strut: [] }
+        ], strut: [] }];
+    await writeJsonAtomically(files.worldRepository.file, initialFacts);
+    const initial = await files.worldRepository.read();
+    const pathA = scenario === 'different top-level Atoms' ? 'A' : 'Root/A';
+    const pathB = scenario === 'different top-level Atoms' ? 'B' : 'Root/B';
+    const outcomes = await concurrentLocalPair({ coordinator: files.coordinator, initial,
+      left(facts) {
+        (scenario === 'different top-level Atoms' ? facts[0] : facts[0].slot[0]).situation = 'new-a';
+        return { facts, changedPaths: [pathA] };
+      },
+      right(facts) {
+        (scenario === 'different top-level Atoms' ? facts[1] : facts[0].slot[1]).situation = 'new-b';
+        return { facts, changedPaths: [pathB] };
+      }
+    });
+
+    assert.equal(outcomes.every(({ status }) => status === 'fulfilled'), true, JSON.stringify(outcomes));
+    const committed = (await files.worldRepository.read()).facts;
+    assert.equal((scenario === 'different top-level Atoms' ? committed[0] : committed[0].slot[0]).situation, 'new-a');
+    assert.equal((scenario === 'different top-level Atoms' ? committed[1] : committed[0].slot[1]).situation, 'new-b');
+  });
+}
+
+test('concurrent edits of the same Atom remain one explicit local conflict', async (t) => {
+  const files = await fixture(t);
+  const initialFacts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+  await writeJsonAtomically(files.worldRepository.file, initialFacts);
+  const initial = await files.worldRepository.read();
+  const outcomes = await concurrentLocalPair({ coordinator: files.coordinator, initial,
+    left(facts) { facts[0].situation = 'left'; return { facts, changedPaths: ['Root'] }; },
+    right(facts) { facts[0].situation = 'right'; return { facts, changedPaths: ['Root'] }; }
+  });
+  const rejected = outcomes.find(({ status }) => status === 'rejected')?.reason;
+  assert.equal(outcomes.filter(({ status }) => status === 'fulfilled').length, 1);
+  assert.equal(rejected?.code, 'WORLD_REVISION_CONFLICT');
+  assert.deepEqual(rejected?.details?.conflictingPaths, ['Root']);
+});
+
+test('a disjoint local command may enter after another commit using its exact base facts', async (t) => {
+  const files = await fixture(t);
+  const initialFacts = [
+    { thing: 'A', situation: 'old', slot: [], strut: [] },
+    { thing: 'B', situation: 'old', slot: [], strut: [] }
+  ];
+  await writeJsonAtomically(files.worldRepository.file, initialFacts);
+  const initial = await files.worldRepository.read();
+  const left = structuredClone(initialFacts);
+  left[0].situation = 'new-a';
+  await files.coordinator.execute({
+    command: command('entered-first', initial.revision),
+    transition: () => ({ facts: left, changedPaths: ['A'] })
+  });
+  const right = structuredClone(initialFacts);
+  right[1].situation = 'new-b';
+  await files.coordinator.execute({
+    command: command('entered-late', initial.revision),
+    baseFacts: initialFacts,
+    transitionReadsSnapshot: false,
+    transition: () => ({ facts: right, changedPaths: ['B'] })
+  });
+
+  const committed = (await files.worldRepository.read()).facts;
+  assert.equal(committed[0].situation, 'new-a');
+  assert.equal(committed[1].situation, 'new-b');
+});
+
+for (const guard of ['relationEndpoints', 'lockPaths', 'shortcutPaths']) {
+  test(`concurrent local commits reject shared ${guard}`, async (t) => {
+    const files = await fixture(t);
+    const initialFacts = [
+      { thing: 'A', situation: 'old', slot: [], strut: [] },
+      { thing: 'B', situation: 'old', slot: [], strut: [] },
+      { thing: 'Guard', situation: 'kept', slot: [], strut: [] }
+    ];
+    await writeJsonAtomically(files.worldRepository.file, initialFacts);
+    const initial = await files.worldRepository.read();
+    const outcomes = await concurrentLocalPair({ coordinator: files.coordinator, initial,
+      left(facts) { facts[0].situation = 'left'; return { facts, changedPaths: ['A'], result: { [guard]: ['Guard'] } }; },
+      right(facts) { facts[1].situation = 'right'; return { facts, changedPaths: ['B'], result: { [guard]: ['Guard'] } }; }
+    });
+    const rejected = outcomes.find(({ status }) => status === 'rejected')?.reason;
+    assert.equal(outcomes.filter(({ status }) => status === 'fulfilled').length, 1);
+    assert.equal(rejected?.code, 'WORLD_REVISION_CONFLICT');
+    assert.deepEqual(rejected?.details?.conflictingPaths, ['Guard']);
+  });
+}
+
+test('an ancestor move and descendant edit cannot split one subtree across local commits', async (t) => {
+  const files = await fixture(t);
+  const initialFacts = [{ thing: 'Root', situation: '', slot: [
+    { thing: 'Child', situation: 'old', slot: [], strut: [] }
+  ], strut: [] }];
+  await writeJsonAtomically(files.worldRepository.file, initialFacts);
+  const initial = await files.worldRepository.read();
+  const outcomes = await concurrentLocalPair({ coordinator: files.coordinator, initial,
+    left(facts) {
+      facts[0].thing = 'Moved';
+      return { facts, changedPaths: ['Root', 'Moved'] };
+    },
+    right(facts) {
+      facts[0].slot[0].situation = 'new';
+      return { facts, changedPaths: ['Root/Child'] };
+    }
+  });
+  const rejected = outcomes.find(({ status }) => status === 'rejected')?.reason;
+  assert.equal(outcomes.filter(({ status }) => status === 'fulfilled').length, 1);
+  assert.equal(rejected?.code, 'WORLD_REVISION_CONFLICT');
+  assert.ok(rejected?.details?.conflictingPaths?.some((path) => path === 'Root' || path === 'Root/Child'));
+});
+
 test('committed inspection cannot observe the world-write and journal-commit gap', async (t) => {
   let releaseWorldWrite;
   let signalWorldWritten;

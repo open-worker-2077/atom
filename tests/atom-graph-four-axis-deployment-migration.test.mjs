@@ -169,6 +169,46 @@ test('central transaction advances compatibility manifest with the same authoriz
   ));
 });
 
+test('transactional persistence publishes rebased disjoint facts with the matching manifest', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-compat-local-rebase-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'knowledge.json');
+  const source = [
+    { thing: 'A', situation: 'old', slot: [], strut: [{ verb: 'legacy', object: 'O' }] },
+    atom('B', 'old')
+  ];
+  await fs.writeFile(contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+  const persistence = createTransactionalWorldPersistence({ contextFile, projectionFile });
+  const seeded = structuredClone(source);
+  seeded.push(atom('Seed'));
+  const sourceManifest = createCompatibilityManifest({ sourceRevision: 'sha256:legacy', targetFacts: source });
+  await persistence.commit({
+    correlationId: 'local-rebase-seed', expectedRevision: revisionOfWorldFacts(source),
+    nextRevision: revisionOfWorldFacts(seeded), facts: seeded, changedPaths: ['Seed'],
+    compatibilityManifest: advanceCompatibilityManifest(sourceManifest, source, seeded)
+  });
+  const left = structuredClone(seeded);
+  left[0].situation = 'new-a';
+  const right = structuredClone(seeded);
+  right[1].situation = 'new-b';
+
+  const outcomes = await Promise.allSettled([
+    persistence.commit({ correlationId: 'local-rebase-a', expectedRevision: revisionOfWorldFacts(seeded),
+      nextRevision: revisionOfWorldFacts(left), facts: left, changedPaths: ['A'] }),
+    persistence.commit({ correlationId: 'local-rebase-b', expectedRevision: revisionOfWorldFacts(seeded),
+      nextRevision: revisionOfWorldFacts(right), facts: right, changedPaths: ['B'] })
+  ]);
+
+  assert.equal(outcomes.every(({ status }) => status === 'fulfilled'), true, JSON.stringify(outcomes));
+  const committed = await persistence.readCommittedSnapshot();
+  assert.equal(committed.facts[0].situation, 'new-a');
+  assert.equal(committed.facts[1].situation, 'new-b');
+  assert.equal(committed.compatibilityManifest.currentWorldRevision, committed.revision);
+  assert.doesNotThrow(() => validateCompatibilityManifest(committed.compatibilityManifest, committed.facts));
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), committed.facts);
+});
+
 test('Explore uses its committed snapshot when the world file advances after request capture', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-compat-stable-read-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { revisionOfWorldFacts } from './world-revision.mjs';
 
 function problem(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -180,4 +181,24 @@ export function applyLocalWorldPatch(facts, patch) {
     container.splice(index, 0, structuredClone(operation.after));
   }
   return next;
+}
+
+export function rebaseLocalWorldPatch(currentFacts, patch) {
+  if (!Array.isArray(currentFacts)) {
+    throw problem('INVALID_WORLD_PATCH', 'Rebasing a local patch requires current facts');
+  }
+  const facts = applyLocalWorldPatch(currentFacts, patch);
+  const beforeRevision = revisionOfWorldFacts(currentFacts);
+  const afterRevision = revisionOfWorldFacts(facts);
+  return Object.freeze({
+    facts,
+    patch: createLocalWorldPatch({
+      worldId: patch.worldId,
+      beforeRevision,
+      afterRevision,
+      beforeFacts: currentFacts,
+      afterFacts: facts,
+      changedPaths: patch.changedPaths
+    })
+  });
 }

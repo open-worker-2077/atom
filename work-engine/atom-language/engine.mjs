@@ -752,6 +752,7 @@ export function compileProgramTransform({ request, receiver = createAtomLanguage
 
 async function persistChangedGraph({
   atoms,
+  beforeAtoms,
   contextFile,
   projectionFile,
   rootName,
@@ -786,6 +787,7 @@ async function persistChangedGraph({
     expectedRevision,
     nextRevision: revisionOf(atoms),
     facts: atoms,
+    ...(Array.isArray(beforeAtoms) ? { beforeFacts: beforeAtoms } : {}),
     correlationId,
     source,
     ...(postCommitEvent ? { postCommitEvent } : {}),
@@ -3035,7 +3037,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     correlationId = interaction.id,
     allowEmpty = false,
     subsequent = false,
-    postCommitEvent: sourceEvent = null
+    postCommitEvent: sourceEvent = null,
+    baseAtoms = atoms
   } = {}) {
     function rememberCommittedAffectedPaths(commitReceipt) {
       const affected = commitReceipt?.affectedAtoms ?? commitReceipt?.result?.affectedAtoms ?? [];
@@ -3071,6 +3074,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     try {
       receipt = await persistChangedGraph({
         atoms: candidateAtoms,
+        beforeAtoms: baseAtoms,
         contextFile,
         projectionFile,
         rootName: path.basename(contextFile),
@@ -3775,7 +3779,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           expectedRevision: sourceRevision,
           correlationId: `${interaction.id}:subsequent`,
           allowEmpty: true,
-          subsequent: true
+          subsequent: true,
+          baseAtoms: sourceAtoms
         });
         revisionAfter = commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
           ?? revisionOf(nextAtoms);
@@ -3969,7 +3974,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           expectedRevision: sourceRevision,
           correlationId: `${interaction.id}:subsequent`,
           allowEmpty: true,
-          subsequent: true
+          subsequent: true,
+          baseAtoms: sourceAtoms
         });
         revisionAfter = commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
           ?? revisionOf(nextAtoms);
@@ -4433,7 +4439,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         expectedRevision: sourceRevision,
         correlationId: `${interaction.id}:subsequent`,
         allowEmpty: true,
-        subsequent: true
+        subsequent: true,
+        baseAtoms: sourceAtoms
       });
       revisionAfter = commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
         ?? revisionOf(nextAtoms);

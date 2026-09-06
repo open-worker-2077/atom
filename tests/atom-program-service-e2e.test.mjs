@@ -109,9 +109,8 @@ test('4784 command endpoint retains compiled locks without replaying an untrigge
   assert.equal(denied.errors[0].code, 'PROGRAM_LOCK_DENIED');
 });
 
-test('4784 isolates concurrent writes and a revision-conflicted command succeeds after explicit retry', async (t) => {
+test('4784 commits disjoint concurrent writes without an explicit retry', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-service-serial-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -125,7 +124,10 @@ test('4784 isolates concurrent writes and a revision-conflicted command succeeds
   const running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
   });
-  t.after(() => running.close());
+  t.after(async () => {
+    await running.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
   const endpoint = `${running.url}/__atom/api/command`;
   const agent = await resolveAgentContext(contextFile, '工作Agent');
 
@@ -136,17 +138,8 @@ test('4784 isolates concurrent writes and a revision-conflicted command succeeds
   const outcomes = await Promise.allSettled(commands.map((source) => (
     executeAtomCommandEndpoint({ source, interaction: { agent } }, endpoint)
   )));
-  const committedIndex = outcomes.findIndex(({ status }) => status === 'fulfilled');
-  const conflictedIndex = outcomes.findIndex(({ status }) => status === 'rejected');
-  assert.notEqual(committedIndex, -1, JSON.stringify(outcomes));
-  assert.notEqual(conflictedIndex, -1, JSON.stringify(outcomes));
-  assert.equal(outcomes[committedIndex].value.ok, true);
-  assert.equal(outcomes[conflictedIndex].reason.code, 'WORLD_REVISION_CONFLICT');
-
-  const retried = await executeAtomCommandEndpoint({
-    source: commands[conflictedIndex], interaction: { agent }
-  }, endpoint);
-  assert.equal(retried.ok, true);
+  assert.equal(outcomes.every(({ status, value }) => status === 'fulfilled' && value.ok), true,
+    JSON.stringify(outcomes));
   const context = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(context[0].slot.find((entry) => entry.thing === '任务甲')?.situation, '新甲');
   assert.equal(context[0].slot.find((entry) => entry.thing === '任务乙')?.situation, '新乙');

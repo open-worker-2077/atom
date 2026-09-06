@@ -8,7 +8,8 @@ import { revisionOfWorldFacts } from './world-revision.mjs';
 import {
   applyLocalWorldPatch,
   createLocalWorldPatch,
-  invertLocalWorldPatch
+  invertLocalWorldPatch,
+  rebaseLocalWorldPatch
 } from './local-world-patch.mjs';
 import { createAffectedPathClosure } from './affected-path-closure.mjs';
 
@@ -65,6 +66,30 @@ function committedReceipt(command, before, after, result, changedPaths = null) {
     affectedAtoms,
     ...(rollbackOf ? { rollbackOf } : {}),
     result: structuredClone(result ?? null)
+  });
+}
+
+const semanticGuardReasons = new Set(['relation-endpoint', 'lock', 'shortcut']);
+
+function revisionConflict(message, beforeRevision, currentRevision, conflictingPaths = []) {
+  return problem('WORLD_REVISION_CONFLICT', message, {
+    expectedRevision: beforeRevision,
+    actualRevision: currentRevision,
+    ...(conflictingPaths.length ? { conflictingPaths: [...new Set(conflictingPaths)].sort() } : {})
+  });
+}
+
+function semanticConflictPaths(leftEntries = [], rightEntries = []) {
+  const right = new Map(rightEntries.map((entry) => [entry.path, entry.reasons ?? []]));
+  return leftEntries.flatMap((entry) => {
+    const otherReasons = right.get(entry.path);
+    if (!otherReasons) return [];
+    const reasons = entry.reasons ?? [];
+    const guarded = reasons.some((reason) => semanticGuardReasons.has(reason))
+      || otherReasons.some((reason) => semanticGuardReasons.has(reason));
+    const substantive = reasons.some((reason) => reason !== 'authorization-ancestor')
+      && otherReasons.some((reason) => reason !== 'authorization-ancestor');
+    return guarded && substantive ? [entry.path] : [];
   });
 }
 
@@ -138,6 +163,9 @@ export function createCommitCoordinator({
   async function prepareCandidate({
     command: rawCommand,
     transition,
+    baseFacts,
+    rebaseResult,
+    allowRevisionRebase = true,
     transitionReadsSnapshot = true,
     transitionInputMode = transitionReadsSnapshot ? 'isolated-copy' : 'none'
   }) {
@@ -154,12 +182,19 @@ export function createCommitCoordinator({
         throw problem('INVALID_WORLD_TRANSITION', 'transitionInputMode is invalid');
       }
 
-      const before = await worldRepository.read();
+      const authoritativeBefore = await worldRepository.read();
+      let before = authoritativeBefore;
       if (before.revision !== command.expectedRevision) {
-        throw problem('WORLD_REVISION_CONFLICT', 'Command was based on an obsolete world revision', {
-          expectedRevision: command.expectedRevision,
-          actualRevision: before.revision
-        });
+        if (allowRevisionRebase && Array.isArray(baseFacts)
+          && revisionOfWorldFacts(baseFacts) === command.expectedRevision) {
+          before = nextWorldSnapshot(authoritativeBefore, structuredClone(baseFacts), {
+            trusted: true,
+            revision: command.expectedRevision
+          });
+        } else {
+          throw revisionConflict('Command was based on an obsolete world revision',
+            command.expectedRevision, before.revision);
+        }
       }
 
       const output = transitionInputMode === 'none'
@@ -222,7 +257,68 @@ export function createCommitCoordinator({
         receipt
       };
 
-      return { command, before, after, receipt, record };
+      return { command, before, after, receipt, record, rebaseResult, allowRevisionRebase };
+  }
+
+  async function committedChain(beforeRevision, currentRevision) {
+    const { receipts } = await journalRepository.readState();
+    const chain = [];
+    let cursor = beforeRevision;
+    for (const entry of receipts) {
+      if (cursor === currentRevision) break;
+      if (entry.receipt?.beforeRevision !== cursor) continue;
+      chain.push(entry);
+      cursor = entry.receipt.afterRevision;
+    }
+    return cursor === currentRevision ? chain : null;
+  }
+
+  async function rebaseCandidate(candidate, current) {
+    const { command, before, receipt, record } = candidate;
+    if (candidate.allowRevisionRebase === false || record?.historyMode !== 'local-patch') {
+      throw revisionConflict('Command was based on an obsolete world revision', before.revision, current.revision);
+    }
+    const chain = await committedChain(before.revision, current.revision);
+    if (!chain || chain.some((entry) => entry.historyMode !== 'local-patch')) {
+      throw revisionConflict('Local command cannot prove an unbroken precise history', before.revision, current.revision);
+    }
+    const candidateClosure = receipt.result?.affectedPathClosure ?? [];
+    const semanticConflicts = chain.flatMap((entry) => semanticConflictPaths(
+      candidateClosure,
+      entry.receipt?.result?.affectedPathClosure ?? []
+    ));
+    if (semanticConflicts.length) {
+      throw revisionConflict('Local command overlaps a guarded path changed since preparation',
+        before.revision, current.revision, semanticConflicts);
+    }
+    let rebased;
+    try {
+      rebased = rebaseLocalWorldPatch(current.facts, record.patch);
+    } catch (error) {
+      if (!String(error?.code ?? '').startsWith('WORLD_PATCH_')) throw error;
+      throw revisionConflict('Local command preimage changed since preparation', before.revision, current.revision,
+        error.details?.path ? [error.details.path] : record.patch.changedPaths);
+    }
+    const after = nextWorldSnapshot(current, rebased.facts);
+    const result = typeof candidate.rebaseResult === 'function'
+      ? await candidate.rebaseResult({
+          command, before, current, after, facts: rebased.facts,
+          result: structuredClone(receipt.result)
+        })
+      : receipt.result;
+    const nextReceipt = committedReceipt(command, current, after, result, rebased.patch.changedPaths);
+    return {
+      ...candidate,
+      before: current,
+      after,
+      receipt: nextReceipt,
+      record: {
+        ...record,
+        patch: rebased.patch,
+        inversePatch: invertLocalWorldPatch(rebased.patch),
+        receipt: nextReceipt
+      }
+    };
   }
 
   async function commitCandidate(candidate) {
@@ -232,13 +328,10 @@ export function createCommitCoordinator({
       if (existingReceipt) return existingReceipt;
       const pending = candidate.pending ?? await journalRepository.findPrepared(command.commandId);
       if (pending) return recoverRecord(pending);
-      const { before, after, receipt, record } = candidate;
+      let { before, after, receipt, record } = candidate;
       const current = await worldRepository.read();
       if (current.revision !== before.revision) {
-        throw problem('WORLD_REVISION_CONFLICT', 'Command was based on an obsolete world revision', {
-          expectedRevision: before.revision,
-          actualRevision: current.revision
-        });
+        ({ before, after, receipt, record } = await rebaseCandidate(candidate, current));
       }
 
       await journalRepository.prepare(record);

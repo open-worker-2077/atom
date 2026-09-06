@@ -178,6 +178,7 @@ export function createTransactionalWorldPersistence({
     expectedRevision,
     nextRevision,
     facts,
+    beforeFacts = null,
     source = 'legacy-interaction',
     changedPaths = null,
     affectedAtoms = null,
@@ -227,6 +228,35 @@ export function createTransactionalWorldPersistence({
     let reusedReceipt = false;
     try {
       receipt = await coordinator.execute({
+        ...(Array.isArray(beforeFacts) ? { baseFacts: beforeFacts } : {}),
+        allowRevisionRebase: suppliedManifest == null,
+        rebaseResult: async ({ current, after, facts: rebasedFacts, result }) => {
+          const state = await journalRepository.readState();
+          const currentManifest = structuredClone(
+            state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null
+          );
+          if (currentManifest) validateCompatibilityManifest(currentManifest, current.facts);
+          const rebasedManifest = currentManifest
+            ? advanceCompatibilityManifest(currentManifest, current.facts, rebasedFacts)
+            : null;
+          const {
+            compatibilityManifest: _staleManifest,
+            previousCompatibilityManifest: _stalePreviousManifest,
+            postCommitEvent: stalePostCommitEvent,
+            ...stableResult
+          } = result ?? {};
+          return {
+            ...stableResult,
+            ...(stalePostCommitEvent ? { postCommitEvent: {
+              ...stalePostCommitEvent,
+              sourceRevision: stalePostCommitEvent.sourceChanged === false
+                ? current.revision
+                : after.revision
+            } } : {}),
+            ...(rebasedManifest ? { compatibilityManifest: rebasedManifest } : {}),
+            ...(currentManifest ? { previousCompatibilityManifest: currentManifest } : {})
+          };
+        },
         validateCommit: async () => {
           const existing = await existingExecutionReceipt();
           reusedReceipt = Boolean(existing);
@@ -279,14 +309,19 @@ export function createTransactionalWorldPersistence({
     }
     if (reusedReceipt) return receipt;
     if (postCommitEvent) assertSourceBinding({ event: receipt.result.postCommitEvent }, postCommitEvent);
-    owner.cachedManifest = structuredClone(receipt.result?.compatibilityManifest ?? previousManifest ?? null);
-    owner.compatibilityGeneration = (owner.compatibilityGeneration ?? 0) + 1;
+    const committedSnapshot = await readCommittedSnapshot();
+    const committedFacts = committedSnapshot.revision === canonicalNextRevision
+      ? facts
+      : committedSnapshot.facts;
+    nextManifest = committedSnapshot.compatibilityManifest;
+    owner.cachedManifest = structuredClone(nextManifest);
     owner.manifestLoaded = true;
+    owner.compatibilityGeneration = (owner.compatibilityGeneration ?? 0) + 1;
     if (transformLogRecord && owner.cachedTransformLog) {
       owner.cachedTransformLog.push(structuredClone(transformLogRecord));
     }
     try {
-      await adoptAtomContextSnapshot(contextFile, facts, {
+      await adoptAtomContextSnapshot(contextFile, committedFacts, {
         ...(nextManifest ? { compatibilityManifest: nextManifest } : {})
       });
       await onAuthoritativeWrite({
@@ -304,7 +339,7 @@ export function createTransactionalWorldPersistence({
     }
     if (publishLegacyProjection) {
       try {
-        await writeAtomGraphProjection(projectionFile, facts, {
+        await writeAtomGraphProjection(projectionFile, committedFacts, {
           rootName: path.basename(contextFile),
           allowLegacyStrut: Boolean(nextManifest)
         });
