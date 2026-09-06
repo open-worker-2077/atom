@@ -157,7 +157,7 @@ Run: `git add src/atom-system/adapters/json-world-repository.mjs src/atom-system
 
 ### Task 4: Public journeys and performance
 
-Status: IMPLEMENTED and verified from base `efd7fe44053aafb20f2288d3c8c07477109f68b7` (`I3/U3/D3/E2`; implementation SHA is recorded after the commit). The four-axis/slot-body RED was `ROLLBACK_WORLD_DIVERGED` when an earlier precise local receipt applied its inverse after a later disjoint local receipt. GREEN rebases that inverse only across a complete, precise and non-overlapping committed chain; raw, incomplete, overlapping and full-world divergence remain conservative. Public HTTP evidence commits two generated slot instances with exact independent paths, confines the injected Program failure to instance A, completes instance B, and reads `新甲`/`新乙` once each through exact Explore. Focused evidence is rollback journey `1/1`, existing rollback matrix `5/5`, public journey `1/1` and work-order history `1/1`.
+Status: IMPLEMENTED and verified at `bfb18c89ac0ba43a9b8c8fa9234828849333e29d` from base `efd7fe44053aafb20f2288d3c8c07477109f68b7` (`I3/U3/D3/E2`). The four-axis/slot-body RED was `ROLLBACK_WORLD_DIVERGED` when an earlier precise local receipt applied its inverse after a later disjoint local receipt. GREEN rebases that inverse only across a complete, precise and non-overlapping committed chain; raw, incomplete, overlapping and full-world divergence remain conservative. Public HTTP evidence commits two generated slot instances with exact independent paths, confines the injected Program failure to instance A, completes instance B, and reads `新甲`/`新乙` once each through exact Explore. Focused evidence is rollback journey `1/1`, existing rollback matrix `5/5`, public journey `1/1` and work-order history `1/1`.
 
 Real-scale evidence used a private copy of the current 14,293,038-byte production source containing 12,243 Atoms. A 519-byte non-Program leaf received five warmups followed by 35 measured one-axis commits: acknowledgment p50 `401.021ms`, p95 `438.612ms`, min `366.453ms`, max `449.019ms`; appended local frames p50 `3,458B`, p95 `4,354B`, range `2,515–4,410B`. The copied baseline had zero writes before acknowledgment and stayed byte-identical; production SHA-256 was `3a9e51cb00c0ed6a8bb77ed495adf1c99d48d7c058cb14d6dbd6b55e9f9afcbb` before and after. The exact affected gate passed `197/197`, zero failures/skips, in `33,786.271ms`. No production write, push or deployment occurred; Task 5 owns migration and deployment, and the separate A immersive domain-frame defect remains red.
 
@@ -189,7 +189,7 @@ Run: `node --test tests/atom-world-transaction.test.mjs tests/atom-world-service
 
 Expected: all tests pass with zero unexpected skip.
 
-- [ ] **Step 5: Record evidence and commit Task 4**
+- [x] **Step 5: Record evidence and commit Task 4**
 
 Update the existing current requirement ledger with exact revision, counts, timings and open boundaries, then commit tests and documentation with message `test(atom): prove local atomic commit journeys`.
 
