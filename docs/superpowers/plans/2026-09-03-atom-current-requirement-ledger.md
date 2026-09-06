@@ -181,7 +181,8 @@
 ## Program、点击与业务推进
 
 - **✅ Strut内嵌判定**：条件Program属于该条Strut的`if.program`，读取复合前项事实与规范化Transform动作信封并返回strict bool；不是节点全局触发器。
-- **🟡 通用Transform动作（现行生产、待迁移）**：CLI/Web当前仍用Transform登记`$click`并累计同一exact Thing点击次数；新定方向保留唯一`transform`顶层命令，以结构化`thing$act`动作直接提供Slot标签，旧点击次数触发链待后续一次性退役，不带入新主干。
+- **🟡 通用Transform动作（现行生产、待迁移）**：CLI/Web当前仍用Transform登记`$click`并累计同一exact Thing点击次数；新定方向保留唯一`transform`顶层命令和`thing$act`轻量动作，Thing值继续承载exact目标，Slot标签归属Key侧动作语义，具体无歧义语法待定。旧点击次数触发链后续一次性退役，不带入新主干。
+- **🔴 多Transform动作信封缺失**：普通Key词法与Transform解析均可收集多个`$`动作，但执行器仅在恰好一个动作时生成action envelope；同一请求高效提交多个动作时会丢失动作上下文。按“解析、校验、执行数量一致”作为后续缺陷修复，当前仅登记，尚未改内核。
 - **✅ ESG测试链**：隔离世界已跑通五阶段连续解锁和四次迁窗；真实世界初态与四条接棒Program已部署。软件验收不等待真实业务节点完成。
 - **🚫 新旧值内核判断**：用户已裁定是否发起Transform属于业务使用方；内核不新增旧值、新值或`once_per_revision`判断。
 - **🚫 外部节点判定Program**：旧“独立thing@program负责Strut条件”方案已由`if.program`替代，不得恢复。
