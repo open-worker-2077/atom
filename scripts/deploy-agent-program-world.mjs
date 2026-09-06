@@ -426,7 +426,7 @@ async function recoverApplyAttempt({ runtime, attemptId, programScheduler }) {
     journalFile
   });
   await persistence.recover();
-  const current = await readWorld(runtime.contextFile);
+  const current = await persistence.readCommittedSnapshot();
   const state = await createJsonTransactionJournal({ file: journalFile }).readState();
   const correlationId = `${plan.migrationId}:attempt:${attemptId}`;
   const matches = state.receipts.filter((record) => (
@@ -545,7 +545,7 @@ async function apply(mode, runtime) {
     persistence,
     attemptId: mode.attemptId
   });
-  const deployed = await readWorld(runtime.contextFile);
+  const deployed = await persistence.readCommittedSnapshot();
   if (deployed.revision !== plan.nextRevision) {
     throw problem(
       'AGENT_MIGRATION_POSTCHECK_FAILED',
@@ -604,8 +604,13 @@ async function rollback(mode, runtime) {
     throw invalidReceipt('Deployment receipt does not match the configured Atom world');
   }
   await assertRealDirectoryContained(runtime.worldDirectory, deployment.paths.backupDirectory);
-  const current = await readWorld(runtime.contextFile);
   const journal = createJsonTransactionJournal({ file: configuredJournalFile });
+  const persistence = createTransactionalWorldPersistence({
+    contextFile: runtime.contextFile,
+    projectionFile: runtime.graphFile,
+    journalFile: configuredJournalFile
+  });
+  const current = await persistence.readCommittedSnapshot();
   const record = await journal.findCommitted(deployment.transaction.commandId);
   validateCommittedMigrationRecord({
     record,
@@ -615,11 +620,6 @@ async function rollback(mode, runtime) {
     sourceRevision: deployment.revisions.source,
     targetRevision: deployment.revisions.target,
     currentRevision: current.revision
-  });
-  const persistence = createTransactionalWorldPersistence({
-    contextFile: runtime.contextFile,
-    projectionFile: runtime.graphFile,
-    journalFile: configuredJournalFile
   });
   const receipt = await rollbackAgentProgramMigration({
     migration: {
@@ -632,7 +632,7 @@ async function rollback(mode, runtime) {
     persistence,
     correlationId: `${deployment.migrationId}:attempt:${deployment.attemptId}:operator-rollback`
   });
-  const restored = await readWorld(runtime.contextFile);
+  const restored = await persistence.readCommittedSnapshot();
   const ok = restored.revision === deployment.revisions.source
     && receipt.afterRevision === deployment.revisions.source;
   process.stdout.write(`${JSON.stringify({

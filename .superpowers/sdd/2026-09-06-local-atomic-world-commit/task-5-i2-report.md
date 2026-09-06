@@ -33,3 +33,11 @@
 - The versioned cold-process test additionally proves the legacy Strut compatibility relation survives with the committed manifest.
 - The rollback test leaves a newer compacted baseline on disk and places the inverse in the local log, proving projection follows committed authority rather than whichever complete JSON file is newest.
 - The Windows test creates an `EPERM` directory-sync generation, appends a later local commit and proves projection reads the later committed fact after repository restart.
+
+## Migration operator regression closure
+
+- **Observed RED:** the full Agent Program migration suite was `19/22`. Two exact rollbacks had durable committed receipts but the operator exited `1` after reading the newer frozen `atom.json` baseline; the forged-receipt guard likewise checked the raw baseline after an unrelated local commit.
+- **Root cause:** migration postchecks and receipt validation bypassed the persistence authority boundary. A projection failure over the restored legacy Agent facts was correctly normalized to `AGENT_MIGRATION_PROJECTION_RECOVERY_PENDING`, but the following raw-file read incorrectly changed the successful transaction result to `ok:false`.
+- **Fix:** apply recovery, apply postcheck, rollback precheck and rollback postcheck now use `persistence.readCommittedSnapshot()`. Projection errors remain explicit revision-bound warnings; no projection exception is suppressed and no rollback facts are rewritten.
+- **Contract evidence:** the rollback tests now verify exact source `facts` and `revision` through the committed snapshot. The forged receipt test verifies rejection leaves the unrelated latest committed tuple unchanged.
+- **Verification:** the migration suite is `22/22 PASS`; transaction, recovery, receipt and cold-composition affected tests are `123/123 PASS`; Node syntax and diff checks pass.

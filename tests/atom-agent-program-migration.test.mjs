@@ -535,7 +535,13 @@ test('operator apply writes a redacted receipt and receipt-only rollback restore
 
   assert.equal(rolledBack.action, 'rollback');
   assert.equal(rolledBack.revision, sourceRevision);
-  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), source);
+  const restored = await createTransactionalWorldPersistence({
+    contextFile,
+    projectionFile: path.join(worldDirectory, 'graph.json'),
+    journalFile: path.join(worldDirectory, 'atom.transactions.json')
+  }).readCommittedSnapshot();
+  assert.equal(restored.revision, sourceRevision);
+  assert.deepEqual(restored.facts, source);
 });
 
 test('operator persists projection-recovery warnings after durable apply and rollback commits', async (t) => {
@@ -560,7 +566,13 @@ test('operator persists projection-recovery warnings after durable apply and rol
     operator, '--rollback', applied.receiptFile
   ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } })).stdout);
   assert.equal(restored.warnings[0].code, 'AGENT_MIGRATION_PROJECTION_RECOVERY_PENDING');
-  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), source);
+  const committed = await createTransactionalWorldPersistence({
+    contextFile,
+    projectionFile: graphFile,
+    journalFile: path.join(worldDirectory, 'atom.transactions.json')
+  }).readCommittedSnapshot();
+  assert.equal(committed.revision, revisionOfWorldFacts(source));
+  assert.deepEqual(committed.facts, source);
 });
 
 test('same apply attempt reconstructs a missing deployment receipt from verified backup and journal without a second commit', async (t) => {
@@ -812,7 +824,9 @@ test('operator rejects a forged receipt for an unrelated latest command before r
   ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } }), (error) => (
     error.stderr.includes('INVALID_AGENT_MIGRATION_RECEIPT')
   ));
-  assert.equal(revisionOfWorldFacts(JSON.parse(await fs.readFile(contextFile, 'utf8'))), unrelated.afterRevision);
+  const current = await persistence.readCommittedSnapshot();
+  assert.equal(current.revision, unrelated.afterRevision);
+  assert.deepEqual(current.facts, later);
 });
 
 test('operator rejects a reparse-point backup ancestor before writing outside the configured world', async (t) => {
