@@ -50,6 +50,42 @@ test('CLI Transform $click executes the Strut-owned predicate and delivers true 
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), world);
 });
 
+test('CLI Transform $act delivers its label packet through the ordinary action context without mutating facts', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-inline-strut-act-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const source = atom('木头', '现成', [{
+    'if@current': true,
+    if: [{ program: [
+      'def main(context):',
+      "    return (context['transform']['action'] == 'act'",
+      "            and context['transform']['payload']['labels'] == ['钻木取火', '人工介入'])"
+    ].join('\n') }],
+    then: [{ 'thing@program': '取火响应' }]
+  }]);
+  const subscriber = atom('取火响应', [
+    'def receive(delivery):',
+    '    message({"level":"info","text":"标签已接收"})',
+    'trigger("strut", {}, receive)'
+  ].join('\n'), [], 'program');
+  const world = [source, subscriber];
+  await fs.writeFile(contextFile, JSON.stringify(world, null, 2), 'utf8');
+
+  const result = await executeAtomLanguage({
+    contextFile,
+    projectionFile,
+    programScheduler: createProgramRuntimeScheduler(),
+    source: 'transform {"thing$act=钻木取火|人工介入":"木头"}',
+    interaction: { id: `inline-strut-act-${crypto.randomUUID()}` }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.messages.map(({ text }) => text), ['标签已接收']);
+  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), world);
+});
+
 test('a compound Strut receives every upstream fact and false produces no downstream delivery', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-compound-inline-strut-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
