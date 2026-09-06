@@ -1,6 +1,6 @@
 # A Mode Consolidation Implementation Plan
 
-**当前续点（2026-09-06）**：Task1—6已独立复核；产品d2c0234、浏览器合同及退役清单a2c838e。Task7最终Node已执行一次，1857/1845pass/11旧合同失败/1skip；19519a1仅修两份Node合同且75/75，范围复核通过，随后整支评审和部署。A尚未部署，不重派已完成任务或重复全量。
+**当前续点（2026-09-06）**：Task1—6完成；Task7整支评审I2已复审关闭，I1微移残留ebaf619由root按明确裁定独立核对收口，Node44/44、普通/沉浸微移浏览器2/2。全部原有效组合证据保留；现在完整私密备份、部署及正式入口回读，尚未冒称部署完成。共同真实本机基准已迁入revision1，手机离线待验。
 
 **最新用户修订（2026-09-05）**：右键双击沉浸改为右键长按；已于Task5实施并复核，下方Task1—4旧双击步骤仅保留历史证据，当前合同以Web规格及Task5为准。
 
@@ -529,3 +529,12 @@ Do not push this post-baseline work without a new user authorization. Keep `pre-
 - **最终整支评审进行中**：a_final_review（Astra high）按8643a3e..473bc0e包只读核查；root负责独立裁定。b6dca76仅吸收main重复文档历史并保留已核对当前A记录，git diff 473bc0e HEAD为空，正式合并预检无冲突，产品未变。08:50只读核对原运行任务/Watchdog符合既有部署入口，Pixel 10a仍离线，共同设置revision0/initialized=false；不填猜值。
 - **最终复核待验证边界**：评审初步发现普通nested空白首次收缩后domainContext.path变化可能绕过双击合并，以及candidate.direct未在beginSecondaryNavigation入口排除导致直接工具长按误入导航。root已回读classifyTap、begin/commit、candidateArbiterKey及applyParentView，确认须定向验证既有合同；暂不部署，等待完整最终清单后合并派一次最小修复，不逐项开支线，不改内核。
 - **最终评审裁定／单次修复**：a_final_review完整报告With fixes，I1普通nested空白跨路径双击、I2 direct工具串入hold两Important，无Critical/Minor。Root根据Web§4.1/原direct隔离合同及实际控制流采纳为待行为RED验证的缺口；原a_task5_longpress统一处理，BASE b6dca76，brief/report为a-final-fix-*。仅受影响Node与具名真实输入复验，不重跑全量或改内核；之后一次范围复审，部署仍未执行。
+
+- **最终修复GREEN待提交复核**：原实施方回传Node43/43、具名Chromium5/5（新普通nested空白、原沉浸空白、短按、长按一次、取消）。真实trace第二次命中从field:inner变为外层node；采用同物理位置/时间并含空白一侧的连续序列判定，仍保留不同稳定node独立操作。direct以真实engine函数执行验证不启动timer、release各一次。Root待完整报告/差异裁定；尚未部署，不把5项扩大为全量。
+
+- **最终范围复审残留裁定**：I2已ADDRESSED；I1精确同一点已修，但Math.round完全相等使1px微移或跨舍入边界仍第二次返回。root读实现及报告，确认1px小于既有6px鼠标/10px触摸拖移阈值，仍是原空白双击合同，不能标完成或交用户决定技术阈值。Ruling: 按用户持续闭环及已定Web§4.1要求，原实施方仅将物理连续性改为既有点距容差，保留blank条件、不同稳定node独立及exact release；这是原I1残留最小收口，不再整支评审或全量测试。偏离技能单次fix波数量限制由root明确承担，避免该流程限制导致明知未满足原需求却部署；错误代价为局部输入返工，无内核/权限扩大。
+
+- **微移验证时钟定界**：点距最小实现后Node44/44，浏览器10沉浸PASS/普通nestedFAIL。root读diagnostic11：field→node两按点差1px、容差6，空间与blank条件全部满足；helper在模块加载后才install clock，而arbiter创建时已bind原performance.now，外部trace60000/60040不证明内部实际40ms。要求把同一clock安装前置至goto前，移除临时探针后只重验必要普通/沉浸空白；不据夹具时钟差异再扩产品修复。已通过Node及原短按/长按/direct/取消证据保留。
+
+- **最终残留收口／root独立裁定**：ebaf61978149d4e9746aa66bdea4c5d2b380ff98，root完整阅读残留报告、产品/测试diff与原始GREEN日志：Node44/44、两条微移Chromium2/2（25.0s）；candidate首按原始坐标和既有threshold进入仲裁，距离严格小于首按容差才合并含blank序列，超容差及不同stable node独立，exact release/时间窗/direct隔离保持。无临时microTrace；最终clock先于页面/模块安装，因此绑定now与操作时钟一致。接受I1关闭，I2沿原范围复审已关闭；不再整支复审或全量。
+- **证据精度更正**：早期micro browser08/09在页面加载后装clock，其“受控40ms”只代表外部时钟，不能独自证明仲裁内部40ms；保存为观察失败，残留RED由确定性Node42/44成立，最终前置clock的2/2证明正确输入时序。报告所称at-threshold用例实际点差7px、阈值6，准确说是超阈值独立；等于阈值不合并由源码严格小于可读验证，不冒称已单独执行该用例。
