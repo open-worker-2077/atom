@@ -1,0 +1,22 @@
+# Task 5 I3 legacy v2 cutover repair report
+
+- **状态**：IMPLEMENTED，等待独立复审。
+  - **范围**：只处理 final rereview I3：BASE `2701e61` 写出的合法 schemaVersion 2 prepared 切换恢复，以及当前格式冒名 command 的拒绝；I1/I2、生产、main、stash、remote、`AGENTS.md` 与生成 bundle 均未修改。
+  - **实现提交**：`cb09b4e` (`fix(atom): identify post-cutover prepared records`)。
+- **根因**：上一轮把 schemaVersion 当作运行时代际，只有 schemaVersion 1 prepared 被识别为旧切换记录；但 BASE `2701e61` 的 repository 已写 schemaVersion 2 event，因此旧 coordinator 在 after-world-write 中断留下的真实 prepared 被误判为当前格式并返回 `TRANSACTION_RECOVERY_CONFLICT`。
+- **RED**：用 BASE 事件合同重建 pre-cutover v2 prepared，并保留新格式反例。
+  - schemaVersion 1 before/after 两例及反例通过；真实 pre-cutover v2 before-world-write 可由既有 CAS 路径恢复，after-world-write 返回 `TRANSACTION_RECOVERY_CONFLICT`；当前 prepare 也没有可验证的切换身份。定向矩阵结果为 4 pass、2 fail。
+  - `.superpowers/sdd/2026-09-06-local-atomic-world-commit/final-rereview-evidence/probe-legacy-v2.mjs` 在候选修复前复现：prepared 1、receipts 0。
+- **设计校正**：首次尝试用独立 cutover event 建立身份，定向测试转绿，但旧 BASE loader 不认识新 event type；postcommit old-loader compatibility 为 45/46，因此放弃该设计，没有弱化兼容测试。
+- **最小实现**：prepared 记录本身携带可验证且向旧 loader 兼容的协议身份。
+  - 当前 repository 写 schemaVersion 2 prepared 时增加 `localCommitProtocol: { contract: 'atom.local-world-commit-protocol', version: 1 }`；BASE loader 会忽略附加字段，当前 loader 则严格校验字段只能出现在 prepared 且值完全匹配。
+  - journal 把 schemaVersion 1 prepared，以及缺少该协议身份的 schemaVersion 2 prepared，标记为 `pre-local-commit-cutover`；committed/aborted 仍清除对应旧身份。
+  - coordinator 只在 command、correlation、world、before/after revision、receipt、before/after facts hash 与该切换身份全部匹配时收口旧记录。当前格式 prepared 即使 afterRevision 相同也不能借 revision 冒名；不存在无条件 revision-only fallback。
+- **GREEN**：最终实现及提交后证据全部通过。
+  - 定向切换矩阵：schemaVersion 1 before/after、pre-cutover v2 before/after、post-cutover v2 冒名、旧 snapshot 哈希伪造，共 6 pass、0 fail、0 skipped；提交后 `231.7946ms`。
+  - BASE `2701e61` 真实旧 repository/coordinator 探针：world 保持 new facts，`recovered: 1`、prepared 0、receipts 1。
+  - 完整 transaction + failure recovery：92 pass、0 fail、0 skipped，`3,910.0737ms`。
+  - postcommit boundary（含旧 loader receipt/order/rollback）：46 pass、0 fail、0 skipped，`27,458.1365ms`。
+  - 完整 Agent migration：22 pass、0 fail、0 skipped；提交后允许测试创建隔离子进程的复跑为 `4,297.394ms`。World Service + Graph migration preservation：35 pass、0 fail、0 skipped，`1,421.5036ms`。
+  - 最终必要受影响链合计 195 pass、0 fail、0 skipped。普通沙箱中的提交后 migration 首跑因系统拒绝 Node 子进程而产生 `spawn EPERM`；同一 revision 在允许测试子进程后全绿，失败未进入事务恢复路径。
+- **边界守恒**：pre-cutover v2 before/after 两夹具均验证事实守恒与 exactly-once receipt；after-world-write 不重写已持久化事实。新协议 prepared 和伪造旧 snapshot 均保持 prepared、零 receipt。GitNexus staged change detection 为 MEDIUM，影响主提交及 rollback 路径，已由上述 transaction、failure、postcommit 与 migration 门禁覆盖。
