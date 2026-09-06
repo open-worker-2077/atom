@@ -197,7 +197,7 @@ Update the existing current requirement ledger with exact revision, counts, timi
 
 ### Task 5: Migration, full verification and controlled deployment
 
-**Current checkpoint (2026-09-07):** Exact whole-branch review of `2701e61..854f023` returned Changes Required (Critical 0 / Important 3). Deployment is blocked only on these verified candidate defects: recovered commits do not invalidate the cross-request committed-snapshot cache; cold projection and direct authority consumers can read the frozen baseline without the un-compacted local log; and a valid schema-version-1 prepared transaction interrupted after the old world write cannot cross the new exact-proof cutover. Each issue has an independent reproducer in `.superpowers/sdd/2026-09-06-local-atomic-world-commit/final-review-evidence/`. Fixes are proceeding as three bounded TDD chains; production, remote and the A immersive-domain defect remain untouched. The first attempted full suite also exposed broad stale-baseline symptoms, so its partial output is failure evidence rather than a release gate; run the final full suite once only after the three authority gaps close.
+**Current checkpoint (2026-09-07):** Exact whole-branch review of `2701e61..854f023` returned Changes Required (Critical 0 / Important 3). I1 is implemented and affected-chain verified at `224ebb0e8eedf27f5d5311d0bca4a21728884d5f`: a real local append followed by committed-event `EIO` now advances the shared persistence-owner generation when recovery finalizes the prepared decision, invalidates the owner manifest cache, and forces the next adapter request to reacquire one facts/revision/manifest tuple while an already active request remains fixed. The same adapter also exposes a thin read-only `readCommittedSnapshot({ contextFile, projectionFile })` seam over `transactionFor()` and `committedSnapshotFor()` for the separate cold-read repair; it contains no projection logic. I2 and I3 remain open: cold projection/direct authority consumers can still read the frozen baseline without the un-compacted local log, and a valid schema-version-1 prepared transaction interrupted after the old world write cannot yet cross the new exact-proof cutover. Production, remote, generated bundles and the A immersive-domain defect remain untouched. The first attempted full suite remains failure evidence rather than a release gate; run the final full suite once only after I2 and I3 close and the repaired range is independently approved.
 
 **Files:**
 - Modify: `docs/superpowers/plans/2026-09-06-local-atomic-world-commit.md`
@@ -211,7 +211,7 @@ Update the existing current requirement ledger with exact revision, counts, timi
 
 Run GitNexus change detection for the staged code and inspect direct callers of the repository and coordinator. Resolve every Critical or Important finding before broader tests.
 
-Review evidence: `.superpowers/sdd/2026-09-06-local-atomic-world-commit/final-review.md`. Current findings I1-I3 are all reproduced and unresolved; this step remains open until the repaired exact range is independently approved.
+Review evidence: `.superpowers/sdd/2026-09-06-local-atomic-world-commit/final-review.md`. I1 is repaired with a two-mode real-persistence regression; I2 and I3 remain reproduced and unresolved. This step remains open until all three repairs receive independent exact-range approval.
 
 - [ ] **Step 2: Run one final full suite**
 
