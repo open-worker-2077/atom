@@ -1,0 +1,21 @@
+# Task 5 I3 legacy local-patch repair report
+
+- **状态**：IMPLEMENTED，等待独立复审。
+  - **范围**：只处理 final rereview 的 I3 旧格式子类：BASE `2701e61` 生成的 schemaVersion 2 `local-patch` prepared 在 after-world-write 切换恢复；I1/I2、生产、main、stash、remote、`AGENTS.md` 与生成 bundle 均未修改。
+  - **实现提交**：`6e992d4` (`fix(atom): verify legacy local patch recovery`)。
+- **根因**：`legacyPreparedEvidence()` 与 `verifiedLegacyPreparedIdentity()` 显式拒绝所有 `historyMode: 'local-patch'`。BASE 已对带 `changedPaths` 的事务写 v2 patch record，因此旧 CAS 写入新世界后中断时，即使 patch、inverse、receipt 和 afterRevision 都合法，候选仍返回 `TRANSACTION_RECOVERY_CONFLICT`。
+- **RED**：按 BASE `local-patch` event 形状新增 before/after 两夹具、当前协议冒名反例和四类破坏性反例。
+  - 定向运行中，before-world-write、当前协议冒名、changedPaths 篡改、patch operation 篡改、inverse 篡改和 receipt 身份篡改均符合既有预期；唯一失败为合法 after-world-write，结果 7 pass、1 fail，`131.8473ms`。
+  - 复审真实探针 `probe-legacy-v2-local.mjs` 同步复现：world 已为 new，recover 返回 `TRANSACTION_RECOVERY_CONFLICT`，prepared 1、receipts 0。
+- **最小实现**：旧 patch 只有在内容可逆、可重放且与旧 journal 记录精确绑定时才能收口。
+  - coordinator 用 inverse patch 从当前 after facts 重建 before facts，再正向应用 patch；两侧事实必须分别重算为 before/after revision，正向结果必须与当前完整 facts 深度相等。
+  - 使用重建事实与 `changedPaths` 重新生成标准 patch，并要求其与原 patch 完全相等；标准 inverse 也必须与原 inverse 完全相等，因而 changedPaths、operations、索引和 before/after payload 同时受校验。
+  - BASE receipt 必须通过公开合同，并要求 command/correlation/revisions 一致、`affectedAtomsComplete` 为真、affected-path closure 可由 patch 与语义 guard 重新生成、closure 每一路径存在于 affectedAtoms，且顶层与 result affectedAtoms 规范化后完全一致。
+  - 通过整个 prepared record 的 SHA-256 摘要，把 coordinator 验证的 patch/command/receipt 与 journal 中未带 `localCommitProtocol` 的 pre-cutover v2 record 精确绑定。当前协议 local-patch 即使 afterRevision 相同仍不产生旧证据；没有 revision-only fallback。
+- **GREEN**：实现候选及实现提交均完成必要验证。
+  - 定向 schemaVersion 1、旧 v2 snapshot、旧 v2 local-patch、当前协议 snapshot/patch 冒名及篡改矩阵：14 pass、0 fail、0 skipped；提交后 `273.426ms`。
+  - BASE `2701e61` 真实 local-patch 探针：world 保持 new facts，`recovered: 1`、prepared 0、receipts 1。
+  - Agent migration 真实切换子例：1 pass；完整 migration：22 pass、0 fail、0 skipped，`5,386.4146ms`。
+  - transaction + local amplification + failure recovery：103 pass、0 fail、0 skipped，`18,899.0384ms`；postcommit old-loader boundary：46 pass、0 fail、0 skipped，`28,149.023ms`；World Service + Graph migration：35 pass、0 fail、0 skipped，`1,136.396ms`。
+  - 四条必要受影响链合计 206 pass、0 fail、0 skipped。World Service/Graph 在受限沙箱首跑有三项 AST 子进程 `EPERM`，相同 revision 在允许测试子进程后 35/35 全绿。
+- **边界守恒**：合法旧 patch 的 before-world-write 仍走既有耐久写入，after-world-write 只补 journal 决定且 exactly-once；两者最终事实、patch receipt 与 command 身份相同。当前协议冒名及任一旧 patch/changedPaths/inverse/receipt 破坏均保留 prepared、零 receipt。GitNexus staged change detection 为 MEDIUM，列出的恢复、提交和回滚路径已由上述门禁覆盖。
