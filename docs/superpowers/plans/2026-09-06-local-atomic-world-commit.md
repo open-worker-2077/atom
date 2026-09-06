@@ -197,7 +197,7 @@ Update the existing current requirement ledger with exact revision, counts, timi
 
 ### Task 5: Migration, full verification and controlled deployment
 
-**Current checkpoint (2026-09-07):** Exact whole-branch review of `2701e61..854f023` returned Changes Required (Critical 0 / Important 3). All three reported chains now have implementation and focused GREEN evidence: I1 `224ebb0` invalidates the cross-request committed snapshot after recovery while preserving the active request tuple; I2 `805ce2b` routes cold projection, Agent resolution and direct authority consumers through the same committed facts/revision/manifest tuple; I3 `bd2f656` admits only fully verified schema-version-1 prepared records across the cutover while current-format impostors remain rejected. Follow-up `29ee723` closes three migration regressions by checking apply/rollback against the committed tuple rather than the frozen baseline; Agent migration is `22/22` and the affected transaction/recovery/cold-composition chain is `123/123`. The repaired exact range `2701e61..29ee723` is under independent rereview. Production, remote and the separate A immersive-domain defect remain untouched. Run the final full suite once only after rereview approval.
+**Current checkpoint (2026-09-07):** Rereview of `2701e61..6ef89e6` closed I1 and I2 but returned Changes Required (Critical 0 / Important 1 / Minor 1). I1 `224ebb0` correctly invalidates the cross-request committed snapshot after recovery, and I2 `805ce2b` plus `29ee723` correctly routes cold projection, Agent resolution and migration checks through one committed facts/revision/manifest tuple. I3 `bd2f656` is incomplete: the pre-cutover repository at base `2701e61` already wrote schemaVersion-2 incremental prepared events, so restricting legacy evidence to schemaVersion 1 rejects a legitimate old after-world-write interruption with `TRANSACTION_RECOVERY_CONFLICT`. The remaining fix must prove an explicit cutover identity or drain path that distinguishes this legitimate old v2 prepared record from a new v2 impostor; unconditional revision trust remains forbidden. The review diff artifact has been regenerated with preserved line boundaries and passes reverse `git apply --check`. Production, remote and the separate A immersive-domain defect remain untouched. Final full suite and deployment remain blocked until I3 is repaired and rereviewed.
 
 **Files:**
 - Modify: `docs/superpowers/plans/2026-09-06-local-atomic-world-commit.md`
@@ -211,7 +211,7 @@ Update the existing current requirement ledger with exact revision, counts, timi
 
 Run GitNexus change detection for the staged code and inspect direct callers of the repository and coordinator. Resolve every Critical or Important finding before broader tests.
 
-Review evidence: `.superpowers/sdd/2026-09-06-local-atomic-world-commit/final-review.md`; repair reports are `task-5-i1-report.md`, `task-5-i2-report.md` and `task-5-i3-report.md`. I1-I3 are implemented and focused GREEN; this step remains open until `2701e61..29ee723` receives independent exact-range approval.
+Review evidence: `.superpowers/sdd/2026-09-06-local-atomic-world-commit/final-review.md` and `final-rereview.md`; repair reports are `task-5-i1-report.md`, `task-5-i2-report.md` and `task-5-i3-report.md`. I1 and I2 are independently closed. I3 remains open on the real pre-cutover schemaVersion-2 prepared format, so this step remains incomplete.
 
 - [ ] **Step 2: Run one final full suite**
 
