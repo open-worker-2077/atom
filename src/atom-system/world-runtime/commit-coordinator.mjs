@@ -441,7 +441,7 @@ export function createCommitCoordinator({
     }));
   }
 
-  function rollback({ targetCommandId, command }) {
+  function rollback({ targetCommandId, command, rebaseResult }) {
     return serialize(async () => {
       await recoverUnsafe();
       if (typeof targetCommandId !== 'string' || !targetCommandId.trim()) {
@@ -455,11 +455,76 @@ export function createCommitCoordinator({
       const targetAfterRevision = target.historyMode === 'local-patch'
         ? target.patch.afterRevision
         : target.after.revision;
-      if (current.revision !== targetAfterRevision) {
+      if (current.revision !== targetAfterRevision && target.historyMode !== 'local-patch') {
         throw problem('ROLLBACK_WORLD_DIVERGED', 'Rollback target is not the latest world transition', {
           targetCommandId,
           targetAfterRevision,
           actualRevision: current.revision
+        });
+      }
+      let rebasedInverse = null;
+      if (target.historyMode === 'local-patch') {
+        if (current.revision !== targetAfterRevision) {
+          const targetClosure = completeClosureFor(target);
+          const chain = targetClosure
+            ? await committedChain(targetAfterRevision, current.revision)
+            : null;
+          const chainClosures = chain?.map(completeClosureFor);
+          const conflictingPaths = chain && chainClosures?.every(Boolean)
+            ? chain.flatMap((entry, index) => semanticConflictPaths(
+                targetClosure,
+                chainClosures[index]
+              ))
+            : [];
+          if (!chain || chainClosures.some((closure) => !closure) || conflictingPaths.length) {
+            throw problem('ROLLBACK_WORLD_DIVERGED',
+              'Rollback target is followed by an overlapping or unproven world transition', {
+                targetCommandId,
+                targetAfterRevision,
+                actualRevision: current.revision,
+                ...(conflictingPaths.length ? {
+                  conflictingPaths: [...new Set(conflictingPaths)].sort()
+                } : {})
+              });
+          }
+        }
+        try {
+          rebasedInverse = rebaseLocalWorldPatch(current.facts, target.inversePatch);
+        } catch (error) {
+          if (!String(error?.code ?? '').startsWith('WORLD_PATCH_')) throw error;
+          throw problem('ROLLBACK_WORLD_DIVERGED', 'Rollback target preimage changed', {
+            targetCommandId,
+            targetAfterRevision,
+            actualRevision: current.revision,
+            conflictingPaths: error.details?.path
+              ? [error.details.path]
+              : target.inversePatch.changedPaths
+          });
+        }
+      }
+      let rollbackResult = {
+        restoredCommandId: targetCommandId,
+        ...(target.historyMode === 'local-patch' ? {
+          affectedAtoms: target.receipt.affectedAtoms,
+          affectedAtomsComplete: true,
+          relationEndpoints: target.receipt.result?.relationEndpoints ?? [],
+          lockPaths: target.receipt.result?.lockPaths ?? [],
+          shortcutPaths: target.receipt.result?.shortcutPaths ?? [],
+          referencePaths: target.receipt.result?.referencePaths ?? [],
+          affectedPathClosureComplete:
+            target.receipt.result?.affectedPathClosureComplete === true
+        } : {}),
+        ...(target.receipt.result?.previousCompatibilityManifest
+          ? { compatibilityManifest: target.receipt.result.previousCompatibilityManifest }
+          : {})
+      };
+      if (current.revision !== targetAfterRevision && typeof rebaseResult === 'function') {
+        rollbackResult = await rebaseResult({
+          command,
+          current,
+          after: nextWorldSnapshot(current, rebasedInverse.facts),
+          facts: rebasedInverse.facts,
+          result: rollbackResult
         });
       }
       const candidate = await prepareCandidate({
@@ -467,31 +532,13 @@ export function createCommitCoordinator({
         transitionReadsSnapshot: false,
         transition: () => target.historyMode === 'local-patch'
           ? ({
-              facts: applyLocalWorldPatch(current.facts, target.inversePatch),
-              changedPaths: target.inversePatch.changedPaths,
-              result: {
-                restoredCommandId: targetCommandId,
-                affectedAtoms: target.receipt.affectedAtoms,
-                affectedAtomsComplete: true,
-                relationEndpoints: target.receipt.result?.relationEndpoints ?? [],
-                lockPaths: target.receipt.result?.lockPaths ?? [],
-                shortcutPaths: target.receipt.result?.shortcutPaths ?? [],
-                referencePaths: target.receipt.result?.referencePaths ?? [],
-                affectedPathClosureComplete:
-                  target.receipt.result?.affectedPathClosureComplete === true,
-                ...(target.receipt.result?.previousCompatibilityManifest
-                  ? { compatibilityManifest: target.receipt.result.previousCompatibilityManifest }
-                  : {})
-              }
+              facts: rebasedInverse.facts,
+              changedPaths: rebasedInverse.patch.changedPaths,
+              result: rollbackResult
             })
           : ({
               facts: structuredClone(target.before.facts),
-              result: {
-                restoredCommandId: targetCommandId,
-                ...(target.receipt.result?.previousCompatibilityManifest
-                  ? { compatibilityManifest: target.receipt.result.previousCompatibilityManifest }
-                  : {})
-              }
+              result: rollbackResult
             })
       });
       return commitCandidate(candidate);

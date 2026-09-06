@@ -170,3 +170,57 @@ test('two work-order writes from one old revision allow at most one central comm
   assert.equal(journal.prepared.length, 0);
   assert.equal(journal.receipts.length, 1);
 });
+
+test('different work-order slots retain independent precise local histories', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-work-order-local-history-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  const journalFile = path.join(directory, 'atom.transactions.json');
+  const initialFacts = [workOrderFact('工单甲'), workOrderFact('工单乙')];
+  await fs.writeFile(contextFile, `${JSON.stringify(initialFacts, null, 2)}\n`, 'utf8');
+  const persistence = createTransactionalWorldPersistence({
+    contextFile, projectionFile, journalFile, worldId: 'work-order-local-history',
+    publishLegacyProjection: false
+  });
+  const expectedRevision = revisionOfWorldFacts(initialFacts);
+  const candidate = (name, reference) => {
+    const facts = structuredClone(initialFacts);
+    const order = facts.find((entry) => entry.thing === name);
+    const output = JSON.parse(order.slot[0].situation);
+    output.交付物.成果引用 = reference;
+    output.交付物.版本 = 'v1';
+    order.slot[0].situation = JSON.stringify(output);
+    return facts;
+  };
+  const paths = ['工单甲/Output', '工单乙/Output'];
+  const results = await Promise.all(paths.map((changedPath, index) => {
+    const facts = candidate(index === 0 ? '工单甲' : '工单乙', `doc://${index === 0 ? 'A' : 'B'}`);
+    return persistence.commit({
+      correlationId: `work-order-local-${index}`,
+      expectedRevision,
+      nextRevision: revisionOfWorldFacts(facts),
+      facts,
+      beforeFacts: initialFacts,
+      source: `work_order.fill:${changedPath}`,
+      changedPaths: [changedPath],
+      affectedAtoms: [{ path: changedPath, axes: ['situation'] }],
+      affectedPathClosureComplete: true,
+      relationEndpoints: [],
+      lockPaths: [],
+      shortcutPaths: [],
+      referencePaths: []
+    });
+  }));
+
+  assert.equal(results.every((receipt) => receipt.status === 'committed'), true, JSON.stringify(results));
+  const snapshot = await persistence.readCommittedSnapshot();
+  assert.equal(JSON.parse(snapshot.facts[0].slot[0].situation).交付物.成果引用, 'doc://A');
+  assert.equal(JSON.parse(snapshot.facts[1].slot[0].situation).交付物.成果引用, 'doc://B');
+  const journal = await createJsonTransactionJournal({ file: journalFile }).readState();
+  assert.deepEqual(
+    journal.receipts.map(({ patch }) => patch.changedPaths[0]).sort(),
+    [...paths].sort()
+  );
+  assert.equal(journal.receipts.every(({ historyMode }) => historyMode === 'local-patch'), true);
+});

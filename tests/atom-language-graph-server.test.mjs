@@ -18,6 +18,9 @@ import * as graphSchema from '../work-engine/atom-language/graph-schema.mjs';
 import { resolveAgentContext } from '../work-engine/atom-language/cli.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { resolveAtomRuntime } from '../work-engine/atom-language/runtime-config.mjs';
+import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
+import { readVisibleSlotPlans } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
+import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import {
   applyGraphFourAxisWorldMigration,
@@ -1096,4 +1099,136 @@ test('CLI commit notifies Web only after the affected Spatial projection is curr
   assert.equal(updated.detail, '局部刷新后的正文');
   abort.abort();
   await reader.cancel().catch(() => {});
+});
+
+test('public concurrent slot instances keep source history and Program failure isolated', async (t) => {
+  const directory = await temporaryDirectory();
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const journalFile = path.join(directory, 'atom.transactions.json');
+  const fact = (thing, situation = '', slot = [], strut = [], types = []) => ({
+    [`thing${types.map((type) => `@${type}`).join('')}`]: thing,
+    situation,
+    slot,
+    strut
+  });
+  const subscriber = [
+    'def receive(delivery):',
+    '    return {"received": True}',
+    'trigger("strut", {}, receive)'
+  ].join('\n');
+  let facts = [fact(
+    'Public Agent',
+    'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","transform","trigger"]}})',
+    [
+      fact('槽体', '', [fact('候选', '', [fact('输入')])]),
+      fact('失败订阅', subscriber, [], [], ['program']),
+      fact('成功订阅', subscriber, [], [], ['program'])
+    ],
+    [],
+    ['program']
+  )];
+  const sealed = await applySlotBodyEffect({
+    atoms: facts,
+    effect: { action: 'seal', body: 'Public Agent/槽体' },
+    sourceProgramPath: 'Public Agent'
+  });
+  assert.equal(sealed.error, undefined, JSON.stringify(sealed.error));
+  facts = sealed.atoms;
+  const [visible] = readVisibleSlotPlans(facts);
+  for (const name of ['实例甲', '实例乙']) {
+    const printed = await applySlotBodyEffect({
+      atoms: facts,
+      effect: { action: 'print', body: 'Public Agent/槽体', name, revision: visible.plan.revision },
+      sourceProgramPath: 'Public Agent/槽体/print'
+    });
+    assert.equal(printed.error, undefined, JSON.stringify(printed.error));
+    facts = printed.atoms;
+  }
+  const nameOf = (value) => Object.entries(value)
+    .find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
+  const find = (selector) => selector.split('/').reduce(
+    (parent, segment) => parent?.slot?.find((candidate) => nameOf(candidate) === segment),
+    { slot: facts }
+  );
+  const sources = [
+    { name: '实例甲', value: '新甲', program: 'Public Agent/失败订阅' },
+    { name: '实例乙', value: '新乙', program: 'Public Agent/成功订阅' }
+  ];
+  for (const source of sources) {
+    const input = find(`Public Agent/槽体/槽例/${source.name}/输入`);
+    input.situation = `旧${source.name.at(-1)}`;
+    input.strut = [{ 'if@current': true, then: [{ 'thing@program': source.program }] }];
+  }
+  await fs.writeFile(contextFile, `${JSON.stringify(facts, null, 2)}\n`, 'utf8');
+
+  const programScheduler = createProgramRuntimeScheduler();
+  const runProgram = programScheduler.runProgram;
+  programScheduler.runProgram = async (request) => {
+    if (request.triggered === true && request.program.path === 'Public Agent/失败订阅') {
+      throw Object.assign(new Error('isolated subscriber failure'), { code: 'ISOLATED_SUBSCRIBER_FAILURE' });
+    }
+    return runProgram(request);
+  };
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, programScheduler
+  });
+  t.after(async () => {
+    await running.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  const command = (source, id) => fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source,
+      interaction: { id, agentSelector: 'Public Agent', agent: { path: 'Public Agent' } },
+      history: [{ source: 'task-4-public-slot-instance' }]
+    })
+  }).then((response) => response.json());
+  const interactions = ['task-4-public-instance-a', 'task-4-public-instance-b'];
+  const sourceText = sources.map(({ name, value }) => `transform ${JSON.stringify({
+    thing: `Public Agent/槽体/槽例/${name}/输入`,
+    [`situation.rep.${value}`]: `旧${name.at(-1)}`
+  })}`);
+  const sourceReceipts = await Promise.all(sourceText.map((source, index) => (
+    command(source, interactions[index])
+  )));
+  assert.equal(sourceReceipts.every(({ result }) => result?.ok === true), true, JSON.stringify(sourceReceipts));
+
+  const journal = createJsonTransactionJournal({ file: journalFile });
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const executions = await Promise.all(interactions.map((id) => journal.programExecutionForInteraction(id)));
+    if (executions.every((execution) => execution?.outcome?.status !== 'pending')) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const histories = await journal.readState();
+  const committedSources = histories.receipts.filter(({ correlationId }) => interactions.includes(correlationId));
+  assert.equal(committedSources.length, 2, JSON.stringify(histories.receipts));
+  assert.equal(committedSources.every(({ receipt }) => receipt.status === 'committed'), true);
+  assert.deepEqual(
+    committedSources.map(({ patch }) => patch.changedPaths[0]).sort(),
+    ['Public Agent/槽体/槽例/实例甲/输入', 'Public Agent/槽体/槽例/实例乙/输入'].sort()
+  );
+
+  const finals = await Promise.all(sourceText.map((source, index) => command(source, interactions[index])));
+  assert.equal(finals[0].result.subsequentExecution.status, 'failed', JSON.stringify(finals[0]));
+  assert.equal(finals[0].result.subsequentExecution.errors.some(
+    ({ code }) => code === 'ISOLATED_SUBSCRIBER_FAILURE'
+  ), true, JSON.stringify(finals[0]));
+  assert.equal(finals[1].result.subsequentExecution.status, 'completed', JSON.stringify(finals[1]));
+  assert.deepEqual(finals[1].result.subsequentExecution.errors, []);
+
+  const explored = await Promise.all(sources.map(({ name }, index) => command(
+    `explore ${JSON.stringify({
+      thing: `Public Agent/槽体/槽例/${name}/输入`, 'situation$full': true
+    })}`,
+    `task-4-exact-explore-${index}`
+  )));
+  assert.deepEqual(
+    explored.map(({ result }) => result.items[0].matches[0].situation),
+    ['新甲', '新乙']
+  );
 });

@@ -410,6 +410,26 @@ export function createTransactionalWorldPersistence({
     const canonicalExpectedRevision = canonicalRevision(expectedRevision);
     const receipt = await coordinator.rollback({
       targetCommandId,
+      rebaseResult: async ({ current, facts: rebasedFacts, result }) => {
+        const state = await journalRepository.readState();
+        const currentManifest = structuredClone(
+          state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null
+        );
+        if (currentManifest) validateCompatibilityManifest(currentManifest, current.facts);
+        const rebasedManifest = currentManifest
+          ? advanceCompatibilityManifest(currentManifest, current.facts, rebasedFacts)
+          : null;
+        const {
+          compatibilityManifest: _staleManifest,
+          previousCompatibilityManifest: _stalePreviousManifest,
+          ...stableResult
+        } = result ?? {};
+        return {
+          ...stableResult,
+          ...(rebasedManifest ? { compatibilityManifest: rebasedManifest } : {}),
+          ...(currentManifest ? { previousCompatibilityManifest: currentManifest } : {})
+        };
+      },
       command: {
         contract: 'atom.world-command',
         version: 1,

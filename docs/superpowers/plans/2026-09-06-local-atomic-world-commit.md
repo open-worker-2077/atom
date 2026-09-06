@@ -157,6 +157,10 @@ Run: `git add src/atom-system/adapters/json-world-repository.mjs src/atom-system
 
 ### Task 4: Public journeys and performance
 
+Status: IMPLEMENTED and verified from base `efd7fe44053aafb20f2288d3c8c07477109f68b7` (`I3/U3/D3/E2`; implementation SHA is recorded after the commit). The four-axis/slot-body RED was `ROLLBACK_WORLD_DIVERGED` when an earlier precise local receipt applied its inverse after a later disjoint local receipt. GREEN rebases that inverse only across a complete, precise and non-overlapping committed chain; raw, incomplete, overlapping and full-world divergence remain conservative. Public HTTP evidence commits two generated slot instances with exact independent paths, confines the injected Program failure to instance A, completes instance B, and reads `新甲`/`新乙` once each through exact Explore. Focused evidence is rollback journey `1/1`, existing rollback matrix `5/5`, public journey `1/1` and work-order history `1/1`.
+
+Real-scale evidence used a private copy of the current 14,293,038-byte production source containing 12,243 Atoms. A 519-byte non-Program leaf received five warmups followed by 35 measured one-axis commits: acknowledgment p50 `401.021ms`, p95 `438.612ms`, min `366.453ms`, max `449.019ms`; appended local frames p50 `3,458B`, p95 `4,354B`, range `2,515–4,410B`. The copied baseline had zero writes before acknowledgment and stayed byte-identical; production SHA-256 was `3a9e51cb00c0ed6a8bb77ed495adf1c99d48d7c058cb14d6dbd6b55e9f9afcbb` before and after. The exact affected gate passed `197/197`, zero failures/skips, in `33,786.271ms`. No production write, push or deployment occurred; Task 5 owns migration and deployment, and the separate A immersive domain-frame defect remains red.
+
 **Files:**
 - Modify: `tests/atom-language-graph-server.test.mjs`
 - Modify: `tests/atom-program-work-order-e2e.test.mjs`
@@ -167,19 +171,19 @@ Run: `git add src/atom-system/adapters/json-world-repository.mjs src/atom-system
 - Consumes: committed snapshots, disjoint rebase and local durable storage from Tasks 1–3.
 - Produces: CLI/Web/Program evidence and real-scale timing evidence.
 
-- [ ] **Step 1: Add public concurrency journeys**
+- [x] **Step 1: Add public concurrency journeys**
 
 Run two different slot instances concurrently through public requests. Assert both source receipts commit, histories remain isolated, a Program failure is reported only on its source, and exact Explore observes each completed local state without retry.
 
-- [ ] **Step 2: Add four-axis conservation journeys**
+- [x] **Step 2: Add four-axis conservation journeys**
 
 Exercise rename, move, discard/restore, Strut endpoints, Shortcut targets, locks and a slot-body instance. Assert references and inverse rollback remain exact after an unrelated local commit lands between prepare and commit.
 
-- [ ] **Step 3: Measure a real-scale private copy**
+- [x] **Step 3: Measure a real-scale private copy**
 
 On a private copy of the current production world, run at least 30 warm single-axis commits and record p50, p95, local record bytes and whether any complete-world write occurred before acknowledgment. The engineering target is p95 no greater than 1000ms.
 
-- [ ] **Step 4: Run the affected system gate**
+- [x] **Step 4: Run the affected system gate**
 
 Run: `node --test tests/atom-world-transaction.test.mjs tests/atom-world-service-contract.test.mjs tests/atom-transform-postcommit-boundary.test.mjs tests/atom-language-graph-server.test.mjs tests/atom-program-service-e2e.test.mjs tests/atom-program-work-order-e2e.test.mjs tests/atom-slot-body-mirror-runtime.test.mjs tests/atom-system-failure-recovery.test.mjs tests/atom-local-runtime-amplification.test.mjs`
 
