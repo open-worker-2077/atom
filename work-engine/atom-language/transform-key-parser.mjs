@@ -73,13 +73,15 @@ function parseActionPayload(action, definition) {
 
 function labelPacketBoundaryErrors(rawKey, baseKey, actionRegistry) {
   if (typeof actionRegistry?.entries !== 'function') return [];
+  const descriptionIndex = rawKey.indexOf('#');
+  const executableKey = descriptionIndex < 0 ? rawKey : rawKey.slice(0, descriptionIndex);
   const errors = [];
   for (const definition of actionRegistry.entries()) {
     if (definition.baseKey !== baseKey || definition.payload !== 'labelPacket') continue;
     const marker = `$${definition.name}=`;
-    const markerIndex = rawKey.indexOf(marker);
+    const markerIndex = executableKey.indexOf(marker);
     if (markerIndex < 0) continue;
-    const payloadText = rawKey.slice(markerIndex + marker.length);
+    const payloadText = executableKey.slice(markerIndex + marker.length);
     if (/[@$~#]/u.test(payloadText)) {
       errors.push(diagnostic(
         'INVALID_TRANSFORM_ACTION_PAYLOAD',

@@ -71,8 +71,7 @@ test('Transform rejects malformed act label packets without silently cleaning th
     ['thing$act=人工$介入', 'INVALID_TRANSFORM_ACTION_PAYLOAD'],
     ['thing$act=人工$click', 'INVALID_TRANSFORM_ACTION_PAYLOAD'],
     ['thing$act=人工@program', 'INVALID_TRANSFORM_ACTION_PAYLOAD'],
-    ['thing$act=人工~hidden', 'INVALID_TRANSFORM_ACTION_PAYLOAD'],
-    ['thing$act=人工#说明', 'INVALID_TRANSFORM_ACTION_PAYLOAD']
+    ['thing$act=人工~hidden', 'INVALID_TRANSFORM_ACTION_PAYLOAD']
   ];
 
   for (const [key, errorCode] of invalidKeys) {
@@ -107,4 +106,49 @@ test('Transform act requires write permission on the exact target even when it c
   assert.deepEqual(authorizations, [{
     path: '世界/木头', operation: 'write', field: 'thing'
   }]);
+});
+
+test('Transform act rejects a second Thing field instead of authorizing a different target', async () => {
+  const request = createAtomLanguageReceiver().receive(
+    'transform {"thing":"允许目标","thing$act=人工介入":"拒绝目标"}'
+  );
+  const authorizations = [];
+  const result = await applyTransform({
+    atoms: [
+      { thing: '允许目标', situation: '', slot: [], strut: [] },
+      { thing: '拒绝目标', situation: '', slot: [], strut: [] }
+    ],
+    item: request.items[0],
+    contextFile: 'atom.json',
+    authorize: async (match, operation, field) => {
+      authorizations.push({ path: match.path.join('/'), operation, field });
+      return { decision: 'allow' };
+    }
+  });
+
+  assert.equal(result.error?.code, 'INVALID_TRANSFORM_ACTION_TARGET');
+  assert.deepEqual(authorizations, []);
+});
+
+test('Transform ignores action-like text after the first description marker', () => {
+  const parsed = parseTransformKey(
+    'thing$click#memo$act=A@B',
+    { actionRegistry: createActionRegistry() }
+  );
+
+  assert.deepEqual(parsed.errors, []);
+  assert.deepEqual(parsed.transformActions, [{ name: 'click', parameter: 1 }]);
+  assert.equal(parsed.description, 'memo$act=A@B');
+
+  const act = parseTransformKey(
+    'thing$act=人工#说明@program',
+    { actionRegistry: createActionRegistry() }
+  );
+  assert.deepEqual(act.errors, []);
+  assert.deepEqual(act.transformActions, [{
+    name: 'act',
+    parameter: null,
+    payload: { labels: ['人工'] }
+  }]);
+  assert.equal(act.description, '说明@program');
 });

@@ -1022,7 +1022,19 @@ export async function applyTransform({
 }) {
   const canMutateInput = mutateInput && !Object.isFrozen(atoms);
   const rootName = path.basename(contextFile);
-  const nameField = item.fields.find((field) => field.baseKey === 'thing');
+  const thingFields = item.fields.filter((field) => field.baseKey === 'thing');
+  const actFields = thingFields.filter((field) => (
+    field.transformActions?.some(({ name }) => name === 'act')
+  ));
+  if (actFields.length > 0 && (actFields.length !== 1 || thingFields.length !== 1)) {
+    return {
+      error: diagnostic(
+        'INVALID_TRANSFORM_ACTION_TARGET',
+        'Transform act 必须由唯一 thing 字段同时声明动作与精确目标'
+      )
+    };
+  }
+  const nameField = actFields[0] ?? thingFields[0];
   if (!nameField?.valuePresent || typeof nameField.value !== 'string' || !nameField.value) {
     return { error: diagnostic('ATOM_NAME_REQUIRED', 'transform 需要 name 精确锚点') };
   }
