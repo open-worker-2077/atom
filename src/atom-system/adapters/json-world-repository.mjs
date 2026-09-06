@@ -79,7 +79,8 @@ export async function writeJsonAtomically(file, value, options = {}) {
 }
 
 function publicationFor(file) {
-  const key = path.resolve(file);
+  const resolved = path.resolve(file);
+  const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
   let publication = localCommitPublications.get(key);
   if (!publication) {
     publication = {
@@ -160,10 +161,12 @@ export function createJsonWorldRepository({
     ? 128
     : Number.isSafeInteger(autoCompact) && autoCompact > 0 ? autoCompact : 0;
 
-  function indeterminateProblem() {
+  function indeterminateProblem(cause) {
+    const details = { ...(publication.indeterminate?.identity ?? {}) };
+    if (cause) details.cause = cause.code ?? cause.name ?? 'UNKNOWN';
     return problem('LOCAL_WORLD_COMMIT_RECOVERY_PENDING',
       'A local world commit has an indeterminate durability result and requires owner recovery',
-      publication.indeterminate?.identity ?? {});
+      details);
   }
 
   function assertPublicationAvailable() {
@@ -652,6 +655,7 @@ export function createJsonWorldRepository({
         publication.repairRequired = true;
         publication.visibleBytes = publishedBytes;
         publication.version += 1;
+        throw indeterminateProblem(error);
       }
       throw error;
     } finally {

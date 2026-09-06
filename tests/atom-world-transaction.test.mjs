@@ -1063,7 +1063,14 @@ for (const failureMode of [
         beforeFacts, afterFacts, changedPaths: ['Root']
       })
     };
-    await assert.rejects(repository.appendLocalCommit(request), { code: 'EIO' });
+    await assert.rejects(repository.appendLocalCommit(request), (error) => {
+      assert.equal(error.code, 'LOCAL_WORLD_COMMIT_RECOVERY_PENDING');
+      assert.equal(error.details.commandId, identity.commandId);
+      assert.equal(error.details.beforeRevision, identity.beforeRevision);
+      assert.equal(error.details.afterRevision, identity.afterRevision);
+      assert.equal(error.details.cause, 'EIO');
+      return true;
+    });
     const lateSibling = createJsonWorldRepository({
       file: worldFile, worldId: 'primary', localCommitFile, fileSystem
     });
@@ -1180,7 +1187,14 @@ test('coordinator keeps an indeterminate world write prepared until owner recove
         result: completeLocalEffects()
       };
     }
-  }), { code: 'EIO' });
+  }), (error) => {
+    assert.equal(error.code, 'LOCAL_WORLD_COMMIT_RECOVERY_PENDING');
+    assert.equal(error.details.commandId, 'indeterminate-owner');
+    assert.equal(error.details.beforeRevision, revisionOf(beforeFacts));
+    assert.equal(error.details.afterRevision, revisionOf(afterFacts));
+    assert.equal(error.details.cause, 'EIO');
+    return true;
+  });
   let state = await journalRepository.readState();
   assert.equal(state.prepared.length, 1);
   assert.equal(state.receipts.length, 0);
@@ -1910,11 +1924,22 @@ test('one Windows startup proof bounds repeated fallback compactions in the same
   }
 });
 
-test('same-module sibling repositories share the proven Windows baseline across compactions', async (t) => {
+for (const siblingPathMode of ['exact-path', 'uppercase-alias']) {
+test(`same-module sibling repositories share the proven Windows baseline across compactions with ${siblingPathMode}`, async (t) => {
+  if (siblingPathMode === 'uppercase-alias' && process.platform !== 'win32') {
+    t.skip('Windows case-alias contract');
+    return;
+  }
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-windows-fallback-siblings-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const worldFile = path.join(directory, 'atom.json');
   const localCommitFile = path.join(directory, 'world-commits.jsonl');
+  const siblingLocalCommitFile = siblingPathMode === 'uppercase-alias'
+    ? localCommitFile.toUpperCase()
+    : localCommitFile;
+  const samePhysicalPath = (left, right) => process.platform === 'win32'
+    ? path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase()
+    : path.resolve(left) === path.resolve(right);
   let captureLogReplacements = false;
   let renameExpectedFacts = null;
   const crashPairs = [];
@@ -1935,7 +1960,7 @@ test('same-module sibling repositories share the proven Windows baseline across 
       return fs.open(target, flags, ...args);
     },
     async rename(source, target) {
-      if (captureLogReplacements && path.resolve(target) === path.resolve(localCommitFile)) {
+      if (captureLogReplacements && samePhysicalPath(target, localCommitFile)) {
         crashPairs.push({
           oldLog: await fs.readFile(target),
           newLog: await fs.readFile(source),
@@ -1943,7 +1968,7 @@ test('same-module sibling repositories share the proven Windows baseline across 
           expectedIdentity: structuredClone(latestIdentity)
         });
       }
-      if (pauseProofRename && path.resolve(target) === path.resolve(localCommitFile)) {
+      if (pauseProofRename && samePhysicalPath(target, localCommitFile)) {
         pauseProofRename = false;
         notifyProofRename();
         await proofRenameGate;
@@ -2005,7 +2030,8 @@ test('same-module sibling repositories share the proven Windows baseline across 
     file: worldFile, worldId: 'primary', localCommitFile, autoCompact: 2, fileSystem
   });
   const earlySibling = ownerModule.createJsonWorldRepository({
-    file: worldFile, worldId: 'primary', localCommitFile, autoCompact: 2, fileSystem
+    file: worldFile, worldId: 'primary', localCommitFile: siblingLocalCommitFile,
+    autoCompact: 2, fileSystem
   });
   const provenBaseline = JSON.parse(await fs.readFile(worldFile, 'utf8'));
   captureLogReplacements = true;
@@ -2037,7 +2063,8 @@ test('same-module sibling repositories share the proven Windows baseline across 
   survivingBaselines.push(JSON.parse(await fs.readFile(worldFile, 'utf8')));
 
   const lateSibling = ownerModule.createJsonWorldRepository({
-    file: worldFile, worldId: 'primary', localCommitFile, autoCompact: 2, fileSystem
+    file: worldFile, worldId: 'primary', localCommitFile: siblingLocalCommitFile,
+    autoCompact: 2, fileSystem
   });
   assert.deepEqual((await lateSibling.read()).facts, facts);
   await advance(lateSibling, 'late-sibling');
@@ -2069,6 +2096,7 @@ test('same-module sibling repositories share the proven Windows baseline across 
     }
   }
 });
+}
 
 test('hung transition calculation does not block an independent candidate commit', async (t) => {
   const { coordinator, worldRepository } = await fixture(t);
