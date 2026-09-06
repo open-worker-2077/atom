@@ -4269,7 +4269,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       targetPath: transformed.sourcePath,
       action: requestedTransformActions[0].name,
       parameter: requestedTransformActions[0].parameter,
-      payload: null,
+      payload: requestedTransformActions[0].payload ?? null,
       source: options.interactionSource ?? 'cli'
     })
     : null;

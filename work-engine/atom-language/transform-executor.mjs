@@ -1166,6 +1166,8 @@ export async function applyTransform({
   const sourcePath = selected.match.path.join('/');
   const changedFields = new Set();
   for (const field of item.fields) {
+    if (field.baseKey === 'thing'
+      && field.transformActions?.some(({ name }) => name === 'act')) changedFields.add('thing');
     if (field.baseKey === 'thing' && field.commands?.some(({ name }) => name !== 'lnk')) changedFields.add('thing');
     if (field.baseKey === 'thing' && field.commands?.some(({ name }) => name === 'lnk')) changedFields.add('situation');
     if (field.baseKey === 'situation' && (field.commands?.length || field.valuePresent)) changedFields.add('situation');

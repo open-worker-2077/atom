@@ -51,6 +51,7 @@ export class ActionRegistry {
     const action = requireName(name, 'action name');
     this.#actions.set(`${base}\u0000${action}`, Object.freeze({
       parameter: 'none',
+      payload: 'none',
       context: 'explore',
       ...definition,
       name: action,
@@ -76,6 +77,9 @@ export function createActionRegistry() {
   const registry = new ActionRegistry();
   registry.register('thing', 'click', {
     context: 'transform', parameter: 'positiveInteger', defaultParameter: 1
+  });
+  registry.register('thing', 'act', {
+    context: 'transform', payload: 'labelPacket'
   });
   registry.register('situation', 'full');
   registry.register('situation', 'lock');

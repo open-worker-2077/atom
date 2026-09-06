@@ -612,6 +612,11 @@ test('public help is a complete daily Agent operation contract', async () => {
     'Help must prevent agents from confusing Graph-JSON absent Value with JSON null'
   );
   assert.match(text, /situation\$full/u);
+  assert.match(
+    text,
+    /transform \{"thing\$act=钻木取火\|人工介入":"世界\/木头"\}/u
+  );
+  assert.match(text, /标签只允许Unicode文字或数字/u);
   assert.match(text, /strut 按原始 ordinal 回读 owner 声明/u);
   assert.match(text, /if 内嵌判定写 \{"program":"def main\(context\).*then 接受普通事实 Thing 或显式 thing@program 接收 Program/u);
   assert.match(text, /禁止原生 N→M/u);

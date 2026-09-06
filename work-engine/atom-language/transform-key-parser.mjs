@@ -32,6 +32,65 @@ const MARKER_PATTERN = new RegExp(
   'gu'
 );
 
+const ACT_LABEL_PATTERN = /^[\p{L}\p{N}]+$/u;
+
+function parseActionPayload(action, definition) {
+  const separatorIndex = action.raw.indexOf('=');
+  if (definition.payload !== 'labelPacket') {
+    if (separatorIndex >= 0) {
+      return {
+        error: diagnostic(
+          'INVALID_TRANSFORM_ACTION_PAYLOAD',
+          `Transform 动作 ${definition.baseKey}$${definition.name} 不接受标签包`,
+          { baseKey: definition.baseKey, action: definition.name }
+        )
+      };
+    }
+    return { payload: null };
+  }
+  if (separatorIndex < 0) {
+    return {
+      error: diagnostic(
+        'INVALID_TRANSFORM_ACTION_PAYLOAD',
+        `Transform 动作 ${definition.baseKey}$${definition.name}= 需要至少一个标签`,
+        { baseKey: definition.baseKey, action: definition.name }
+      )
+    };
+  }
+  const labels = action.raw.slice(separatorIndex + 1).split('|');
+  const invalid = labels.find((label) => !ACT_LABEL_PATTERN.test(label));
+  if (invalid !== undefined || new Set(labels).size !== labels.length) {
+    return {
+      error: diagnostic(
+        'INVALID_TRANSFORM_ACTION_PAYLOAD',
+        'act 标签必须是唯一的非空文字或数字，且只能用 | 分隔',
+        { baseKey: definition.baseKey, action: definition.name, labels }
+      )
+    };
+  }
+  return { payload: Object.freeze({ labels: Object.freeze(labels) }) };
+}
+
+function labelPacketBoundaryErrors(rawKey, baseKey, actionRegistry) {
+  if (typeof actionRegistry?.entries !== 'function') return [];
+  const errors = [];
+  for (const definition of actionRegistry.entries()) {
+    if (definition.baseKey !== baseKey || definition.payload !== 'labelPacket') continue;
+    const marker = `$${definition.name}=`;
+    const markerIndex = rawKey.indexOf(marker);
+    if (markerIndex < 0) continue;
+    const payloadText = rawKey.slice(markerIndex + marker.length);
+    if (/[@$~#]/u.test(payloadText)) {
+      errors.push(diagnostic(
+        'INVALID_TRANSFORM_ACTION_PAYLOAD',
+        'act 标签只能包含文字或数字，工程符号不能出现在标签包中',
+        { baseKey, action: definition.name }
+      ));
+    }
+  }
+  return errors;
+}
+
 function commandMatches(left) {
   const matches = [];
   for (const match of left.matchAll(MARKER_PATTERN)) {
@@ -75,26 +134,40 @@ export function parseTransformKey(rawKey, options = {}) {
     const errors = ordinary.actions.length
       ? ordinary.errors.filter((error) => !matcherOnlyCodes.has(error.code))
       : [...ordinary.errors];
+    errors.push(...labelPacketBoundaryErrors(
+      rawKey,
+      ordinary.baseKey,
+      options.actionRegistry
+    ));
     if (ordinary.actions.length) {
       for (const action of ordinary.actions) {
-        const definition = options.actionRegistry?.resolve(ordinary.baseKey, action.name) ?? null;
+        const separatorIndex = action.raw.indexOf('=');
+        const actionName = separatorIndex < 0 ? action.name : action.raw.slice(0, separatorIndex);
+        const definition = options.actionRegistry?.resolve(ordinary.baseKey, actionName) ?? null;
         if (!definition || definition.context !== 'transform') {
           errors.push(diagnostic(
             'UNKNOWN_TRANSFORM_ACTION',
             `未知 Transform $ 动作：${ordinary.baseKey}$${action.raw}`,
-            { baseKey: ordinary.baseKey, action: action.name }
+            { baseKey: ordinary.baseKey, action: actionName }
           ));
           continue;
         }
-        const parameter = action.parameter ?? definition.defaultParameter ?? null;
-        if (definition.parameter === 'none' && action.parameter !== null) {
+        const payloadResult = parseActionPayload(action, definition);
+        if (payloadResult.error) {
+          errors.push(payloadResult.error);
+          continue;
+        }
+        const parameter = separatorIndex < 0
+          ? (action.parameter ?? definition.defaultParameter ?? null)
+          : null;
+        if (separatorIndex < 0 && definition.parameter === 'none' && action.parameter !== null) {
           errors.push(diagnostic(
             'INVALID_TRANSFORM_ACTION_PARAMETER',
             `Transform 动作 ${ordinary.baseKey}$${action.name} 不接受数字参数`,
             { baseKey: ordinary.baseKey, action: action.name, parameter: action.parameter }
           ));
         }
-        if (definition.parameter === 'positiveInteger'
+        if (separatorIndex < 0 && definition.parameter === 'positiveInteger'
           && (!Number.isSafeInteger(parameter) || parameter < 1)) {
           errors.push(diagnostic(
             'INVALID_TRANSFORM_ACTION_PARAMETER',
@@ -102,7 +175,11 @@ export function parseTransformKey(rawKey, options = {}) {
             { baseKey: ordinary.baseKey, action: action.name, parameter }
           ));
         }
-        transformActions.push({ name: action.name, parameter });
+        transformActions.push({
+          name: actionName,
+          parameter,
+          ...(payloadResult.payload ? { payload: payloadResult.payload } : {})
+        });
       }
     }
     return {
