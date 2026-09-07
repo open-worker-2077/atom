@@ -48,7 +48,8 @@ async function waitForKnowledge(url, predicate, message, timeoutMs = 2_000) {
 }
 
 async function settleWorkspaceProjection(running, payload, timeoutMs = 2_000) {
-  const expectedRevision = payload.result?.projectionRecovery?.expectedRevision;
+  const expectedRevision = payload.result?.projectionRecovery?.expectedRevision
+    ?? (payload.knowledge === null ? payload.result?.revisionAfter : null);
   if (!expectedRevision) return payload;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

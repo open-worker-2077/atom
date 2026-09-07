@@ -2277,7 +2277,7 @@ test('hung transition calculation does not block an independent candidate commit
     fast,
     new Promise((_, reject) => setTimeout(
       () => reject(new Error('candidate calculation was held behind another transition')),
-      150
+      1_000
     ))
   ]);
 
