@@ -272,6 +272,7 @@ export function createInteractionRuntime({
       interaction: currentInteraction,
       history: intent.history,
       ...(currentOptions.trustedMaintenance ? { trustedMaintenance: true } : {}),
+      ...(currentOptions.humanAuthority ? { humanAuthority: true } : {}),
       ...(currentOptions.bypassProgramLocks ? { bypassProgramLocks: true } : {}),
       ...(currentOptions.programMode ? { programMode: currentOptions.programMode } : {}),
       ...(currentOptions.signal ? { signal: currentOptions.signal } : {}),
@@ -456,6 +457,7 @@ export function createInteractionRuntime({
       detail: detail.trim()
     });
     return executeValidated(validateIntent({ source, correlationId, history: [] }), {
+      humanAuthority: true,
       bypassProgramLocks: true,
       programMode: 'reconcile'
     });
@@ -465,6 +467,7 @@ export function createInteractionRuntime({
     requireMethod(humanWorkspace, 'translate', 'INVALID_HUMAN_WORKSPACE_PORT', 'Interaction runtime human-workspace port');
     const source = await humanWorkspace.translate({ operation });
     return executeValidated(validateIntent({ source, correlationId, history: [] }), {
+      humanAuthority: true,
       programMode: 'reconcile',
       ...(lifecycle.signal ? { signal: lifecycle.signal } : {}),
       ...(typeof lifecycle.onCommitted === 'function' ? { onCommitted: lifecycle.onCommitted } : {}),

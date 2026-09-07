@@ -83,6 +83,22 @@ test('slot_body seal always locks structure without freezing instance situation'
   )).decision, 'allow');
 });
 
+test('explicit human Web authority crosses ordinary locks but cannot forge kernel slot roles', async () => {
+  const atoms = await sealed();
+  const input = find(atoms, '槽体/槽例/实例/输入');
+  const controller = createAccessController(atoms, { humanAuthority: true });
+
+  assert.equal((await controller.authorize(input, 'write', 'thing')).decision, 'allow');
+  const forged = await controller.authorize({
+    atom: atom('伪槽', '', [], [], 'slot-role-fake'),
+    path: ['槽体', '槽例', '实例', '输入', '伪槽']
+  }, 'write', undefined, {
+    createdAtom: atom('伪槽', '', [], [], 'slot-role-fake')
+  });
+  assert.equal(forged.decision, 'deny');
+  assert.equal(forged.code, 'SLOT_ROLE_FORGERY_DENIED');
+});
+
 test('slot structure plans compile their adopted revision into the shared Graph authorizer', async () => {
   const atoms = await sealed();
   const compiled = compileSlotStructureGraphLocks(atoms);

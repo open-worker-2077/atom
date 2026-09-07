@@ -464,8 +464,10 @@ async function validateAgentProgramDelegation({
   beforeAtoms,
   afterAtoms,
   creatorSecurity,
+  humanAuthority = false,
   programScheduler,
   declarationRelocations = [],
+  declarationRemovalRoots = [],
   restoredDeclarationSurface = null,
   simultaneousRelocations = false
 }) {
@@ -498,7 +500,13 @@ async function validateAgentProgramDelegation({
         JSON.stringify(before.get(programPath) ?? null)
           !== JSON.stringify(after.get(programPath) ?? null)
       ));
-    if (changed.length > 0 && !creatorSecurity) {
+    const changesRequiringCreator = changed.filter((programPath) => (
+      after.has(programPath)
+      || !declarationRemovalRoots.some((root) => (
+        programPath === root || programPath.startsWith(`${root}/`)
+      ))
+    ));
+    if (changesRequiringCreator.length > 0 && !creatorSecurity && !humanAuthority) {
       throw Object.assign(
         new Error('Agent Program changes require a current creator Agent'),
         { code: 'AGENT_RECONFIGURATION_CREATOR_REQUIRED' }
@@ -506,7 +514,7 @@ async function validateAgentProgramDelegation({
     }
     for (const programPath of changed) {
       const child = after.get(programPath);
-      if (child) validateAgentDelegation({ creator: creatorSecurity, child });
+      if (child && !humanAuthority) validateAgentDelegation({ creator: creatorSecurity, child });
     }
     return { ok: true, errors: [] };
   } catch (error) {
@@ -1945,6 +1953,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   }
 
   let requestDeclarationRelocations = [];
+  let requestDeclarationRemovalRoots = [];
   let requestRestoredDeclarationSurface = null;
 
   async function validateRequestCandidate(
@@ -1954,8 +1963,10 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       beforeAtoms: requestStartAtoms,
       afterAtoms: candidateAtoms,
       creatorSecurity,
+      humanAuthority: options.humanAuthority === true,
       programScheduler: candidateProgramScheduler,
       declarationRelocations,
+      declarationRemovalRoots: requestDeclarationRemovalRoots,
       restoredDeclarationSurface: requestRestoredDeclarationSurface,
       simultaneousRelocations: parsed.batch && parsed.items.every(isBatchRenameItem)
     });
@@ -4424,6 +4435,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     ? [{ sourcePath: transformed.sourcePath, resultPath: transformed.resultPath }]
     : [];
   requestDeclarationRelocations = declarationRelocations;
+  requestDeclarationRemovalRoots = transformed.logRecord?.operation === 'discard' && transformed.sourcePath
+    ? [transformed.sourcePath]
+    : [];
   const programSurfaceChanged = changed
     && transformChangesProgramSurface(atoms, nextAtoms, transformed);
   let postRefresh = {

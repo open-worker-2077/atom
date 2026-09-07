@@ -204,6 +204,54 @@ test('creator-less declaration changes fail without changing world bytes', async
   assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
 });
 
+test('explicit human Web authority may reconfigure an Agent without posing as an Agent window', async (t) => {
+  const files = await fixture(t);
+  const scheduler = createProgramRuntimeScheduler();
+  const replacement = 'agent({"labels":["^^^"],"functions":{"groups":[],"names":["message"]}})';
+
+  const result = await executeAtomLanguage({
+    source: 'transform {' + JSON.stringify('thing') + ':' + JSON.stringify('Root/Task/Creator')
+      + ',' + JSON.stringify(`situation.rep.${replacement}`) + '}',
+    ...files,
+    programScheduler: scheduler,
+    humanAuthority: true,
+    interaction: { id: 'human-web-reconfigure-agent', agent: null }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(findAtom(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Creator').atom.situation, replacement);
+});
+
+test('human Web discard may deactivate an Agent subtree without granting delegation', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-agent-web-discard-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Workspace', '', [
+      atom('Reference Plan', '', [
+        atom('Nested Agent', CHILD_SOURCE, [], 'program')
+      ])
+    ]),
+    atom('Default Backup', '', [], 'backup@default')
+  ], null, 2));
+  const scheduler = createProgramRuntimeScheduler();
+
+  const result = await executeAtomLanguage({
+    source: 'transform {"thing.dsc.":"Workspace/Reference Plan"}',
+    contextFile,
+    projectionFile,
+    programScheduler: scheduler,
+    interaction: { id: 'human-web-discard-agent-subtree', agent: null }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(findAtom(stored, 'Workspace').atom.slot.length, 0);
+  assert.equal(findAtom(stored, 'Default Backup').atom.slot[0].thing, 'Reference Plan');
+  assert.equal(scheduler.agentSecurity.has('Workspace/Reference Plan/Nested Agent'), false);
+});
+
 for (const [index, scenario] of DELEGATION_CASES.entries()) {
   test(`public Program registration ${scenario.name}`, async (t) => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), `atom-agent-delegation-${index}-`));

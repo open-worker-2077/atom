@@ -12,6 +12,7 @@ const recoveringWorlds = new Map();
 function interactionBinding(request) {
   return crypto.createHash('sha256').update(JSON.stringify({ source: request.source, agentPath: request.interaction?.agent?.path ?? null,
     history: request.history ?? [], trustedMaintenance: request.trustedMaintenance === true,
+    ...(request.humanAuthority === true ? { humanAuthority: true } : {}),
     bypassProgramLocks: request.bypassProgramLocks === true })).digest('hex');
 }
 
@@ -108,7 +109,8 @@ export function createLegacyWorldService(options = {}) {
         if (id === request.interaction.id || activeInteractions.has(`${worldKey}\0${id}`)) continue;
         const recoveryRequest = { ...request, source: execution.sourceReceipt.source,
           interaction: structuredClone(execution.event.interaction), history: [],
-          trustedMaintenance: false, bypassProgramLocks: false, onCommitted: undefined, onSubsequentSettled: undefined };
+          trustedMaintenance: false, humanAuthority: false, bypassProgramLocks: false,
+          onCommitted: undefined, onSubsequentSettled: undefined };
         recoveryRequests.set(recoveryRequest, execution.event.binding);
         await service.executeLegacy(recoveryRequest);
       }

@@ -725,6 +725,46 @@ test('4784 Web workspace edits commit atom.json before asynchronously publishing
   assert.equal(finalWorld[0].slot.some((child) => child.thing === 'Nested in Web'), false);
 });
 
+test('4784 Web may reversibly discard a container with a nested Agent Program', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-web-agent-discard-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    atom('Workspace', '', [
+      atom('ESG Plan', 'reference facts', [
+        atom('Nested Agent', 'worker', [], 'agent')
+      ])
+    ]),
+    atom('Default Backup', '', [], 'backup@default')
+  ], null, 2));
+  const running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, projectionDelayMs: 0
+  });
+  t.after(() => running.close());
+  const state = await fetch(`${running.url}/__spatial/api/state`).then((response) => response.json());
+  const plan = state.knowledge.nodes.find((node) => node.label === 'ESG Plan');
+
+  const response = await fetch(`${running.url}/__atom/api/workspace-edit`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      operation: {
+        kind: 'node-edit', status: 'delete', path: plan.path,
+        nodeKey: plan.key, node: plan, draft: {}
+      }
+    })
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200, JSON.stringify(payload));
+  assert.equal(payload.result.ok, true, JSON.stringify(payload.result));
+  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.equal(stored[0].slot.length, 0);
+  assert.equal(thingOf(stored[1].slot[0]).startsWith('ESG Plan'), true);
+  assert.equal(stored[1].slot[0].slot[0]['thing@program'], 'Nested Agent');
+});
+
 test('cold-start state includes deep Graph facts on first entry and refreshes an authoritative Web rename', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-deep-cold-start-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

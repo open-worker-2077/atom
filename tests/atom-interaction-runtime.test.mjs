@@ -906,6 +906,7 @@ test('human status translation re-enters the same world lifecycle as an explicit
       source: 'transform {"name":"Root/状态","situation.rep.":"进行中"}',
       interaction: { id: 'interaction-3', agent: null },
       history: [],
+      humanAuthority: true,
       bypassProgramLocks: true,
       programMode: 'reconcile',
       programRuntime: 'program-runtime'
@@ -932,6 +933,7 @@ test('human workspace changes rebuild the context-free Program projection in the
       source: 'transform {"name":"Root/Workspace","situation.rep.":"updated"}',
       interaction: { id: 'interaction-workspace', agent: null },
       history: [],
+      humanAuthority: true,
       programMode: 'reconcile',
       programRuntime: 'program-runtime'
     }],

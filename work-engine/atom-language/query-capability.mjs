@@ -113,6 +113,7 @@ export function createAccessController(atoms, options = {}) {
     return { restricted: false, authorize: async () => ({ decision: 'allow', matchedLocks: [] }) };
   }
   const programLockIndex = options.programLockIndex?.byPath?.size ? options.programLockIndex : null;
+  const humanAuthority = options.humanAuthority === true;
   const legacyAccess = options.legacyAccess;
   const agentPath = options.agentPath ?? options.interaction?.agent?.path ?? null;
   const agentIdentity = Boolean(agentPath && options.agentSecurity);
@@ -132,7 +133,7 @@ export function createAccessController(atoms, options = {}) {
     return graphLocksByAction.get(action);
   };
   const slotStructureRestricted = slotStructure.locks.length > 0;
-  if ((!legacyAccess || legacyAccess.global === true) && !programLockIndex
+  if (!humanAuthority && (!legacyAccess || legacyAccess.global === true) && !programLockIndex
     && !fixedAgentWindow && !slotStructureRestricted && graphLocks.length === 0) {
     return { restricted: false, authorize: async () => ({ decision: 'allow', matchedLocks: [] }) };
   }
@@ -170,6 +171,9 @@ export function createAccessController(atoms, options = {}) {
           lockKind: 'slot-structure-lock', matchedLocks: []
         };
       }
+      // Web is the explicit human control surface. Its authority is not an
+      // Agent label, while kernel-owned identities and structural roles remain immutable.
+      if (humanAuthority) return { decision: 'allow', matchedLocks: [] };
       if (programLockIndex) {
         const decision = authorizeProgramLock({
           lockIndex: programLockIndex, targetPath, operation, field,
