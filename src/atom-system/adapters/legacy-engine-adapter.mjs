@@ -175,10 +175,13 @@ export function createLegacyWorldService(options = {}) {
       onSubsequentSettled: settleBusinessResult,
       onCommitted: async result => {
         entry.pending = structuredClone(result);
-        if (sourceReceipt && result.subsequentExecution?.status === 'pending') {
-          await recordOutcome({ ...result.subsequentExecution, attemptId, result: structuredClone(result) });
+        try {
+          await request.onCommitted?.({ ...result, warnings: [...(result.warnings ?? []), ...outcomeWarnings] });
+        } finally {
+          if (sourceReceipt && result.subsequentExecution?.status === 'pending') {
+            await recordOutcome({ ...result.subsequentExecution, attemptId, result: structuredClone(result) });
+          }
         }
-        await request.onCommitted?.({ ...result, warnings: [...(result.warnings ?? []), ...outcomeWarnings] });
       },
       commitWorld: async (transition) => {
         if (request.signal?.aborted) requestInterruptedCommit = true;

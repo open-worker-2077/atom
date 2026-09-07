@@ -413,6 +413,91 @@ test('legacy World Service exposes the cached committed tuple through one read-o
   assert.equal(snapshotCalls, 1);
 });
 
+test('legacy World Service acknowledges a committed source before pending outcome bookkeeping finishes', async () => {
+  let releaseOutcomeBookkeeping;
+  const outcomeBookkeeping = new Promise((resolve) => { releaseOutcomeBookkeeping = resolve; });
+  const sourceReceipt = {
+    commandId: 'source-command',
+    correlationId: 'source-before-outcome-bookkeeping',
+    beforeRevision: 'sha256:old',
+    afterRevision: 'sha256:new',
+    source: 'transform new {}',
+    affectedAtoms: []
+  };
+  const executionRecord = {
+    event: { interaction: { id: sourceReceipt.correlationId } },
+    sourceReceipt,
+    childReceipt: null,
+    outcome: null
+  };
+  const pending = {
+    ok: true,
+    changed: true,
+    command: 'transform',
+    revisionBefore: 'old',
+    revisionAfter: 'new',
+    warnings: [],
+    errors: [],
+    messages: [],
+    subsequentExecution: { status: 'pending', sourceRevision: 'new', revisionAfter: 'new', errors: [] }
+  };
+  const service = (await import(adapterUrl)).createLegacyWorldService({
+    transactionProvider: () => ({
+      compatibilityGeneration: 0,
+      async recover() {},
+      async readCommittedSnapshot() {
+        return { facts: [], revision: 'sha256:old', compatibilityManifest: null };
+      },
+      async pendingProgramExecutions() { return []; },
+      async programExecutionForInteraction() { return null; },
+      async transformLogEntries() { return []; },
+      async commit() { return sourceReceipt; },
+      async programExecution() { return executionRecord; },
+      async recordProgramExecution({ outcome }) {
+        await outcomeBookkeeping;
+        executionRecord.outcome = outcome;
+        return outcome;
+      }
+    }),
+    execute: async (request) => {
+      await request.commitWorld({
+        expectedRevision: 'sha256:old',
+        nextRevision: 'sha256:new',
+        facts: [],
+        postCommitEvent: {}
+      });
+      await request.onCommitted(pending);
+      return {
+        ...pending,
+        subsequentExecution: { status: 'completed', sourceRevision: 'new', revisionAfter: 'new', errors: [] }
+      };
+    }
+  });
+  let acknowledgeSource;
+  const sourceAcknowledged = new Promise((resolve) => { acknowledgeSource = resolve; });
+  const execution = service.executeLegacy({
+    source: sourceReceipt.source,
+    contextFile: 'atom.json',
+    projectionFile: 'graph.json',
+    interaction: { id: sourceReceipt.correlationId },
+    programScheduler: {},
+    onCommitted: acknowledgeSource
+  });
+
+  let first;
+  try {
+    first = await Promise.race([
+      sourceAcknowledged.then(() => 'source-acknowledged'),
+      new Promise((resolve) => setTimeout(() => resolve('outcome-bookkeeping-blocked-source'), 50))
+    ]);
+  } finally {
+    releaseOutcomeBookkeeping();
+    await execution;
+  }
+
+  assert.equal(first, 'source-acknowledged');
+});
+
 test('legacy World Service can reacquire one fresh committed snapshot after a commit', async () => {
   const snapshots = [
     Object.freeze({ facts: [{ thing: 'Root', situation: 'old', slot: [], strut: [] }],

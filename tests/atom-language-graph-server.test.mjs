@@ -1202,7 +1202,9 @@ test('public concurrent slot instances keep source history and Program failure i
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     const executions = await Promise.all(interactions.map((id) => journal.programExecutionForInteraction(id)));
-    if (executions.every((execution) => execution?.outcome?.status !== 'pending')) break;
+    if (executions.every((execution) => (
+      execution && ['completed', 'failed'].includes(execution.outcome?.status)
+    ))) break;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   const histories = await journal.readState();
