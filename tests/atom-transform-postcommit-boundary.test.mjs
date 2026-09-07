@@ -17,6 +17,7 @@ import { executeAtomCommandEndpoint } from '../work-engine/atom-language/cli.mjs
 import { executeAtomLanguage as executeAtomLanguageKernel } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { createJsonTransactionJournal as createLegacyJsonTransactionJournal } from './fixtures/legacy-json-world-repository-pre-outcome.mjs';
 
 function atom(thing, situation = '', slot = [], strut = [], types = []) {
   return {
@@ -772,14 +773,7 @@ test('outcome journal events preserve old-loader receipts, order and rollback wh
   assert.equal((await cold.programExecutionForInteraction('compat-source')).outcome.status, 'failed');
   assert.equal((await cold.programExecutionForInteraction('compat-other')), null);
   assert.deepEqual(await cold.pendingProgramExecutions(), []);
-  const oldCode = spawnSync('git', ['show', '802d902:src/atom-system/adapters/json-world-repository.mjs'], {
-    cwd: path.resolve(import.meta.dirname, '..'), encoding: 'utf8'
-  });
-  assert.equal(oldCode.status, 0, oldCode.stderr);
-  const compatibleCode = oldCode.stdout.replace("'../world-runtime/world-revision.mjs'",
-    JSON.stringify(new URL('../src/atom-system/world-runtime/world-revision.mjs', import.meta.url).href));
-  const { createJsonTransactionJournal: oldReader } = await import(`data:text/javascript;base64,${Buffer.from(compatibleCode).toString('base64')}`);
-  const legacyJournal = oldReader({ file: journalFile });
+  const legacyJournal = createLegacyJsonTransactionJournal({ file: journalFile });
   assert.deepEqual(await legacyJournal.findReceipt(source.commandId), source);
   assert.deepEqual((await legacyJournal.readState()).receipts.map(({ commandId }) => commandId), [source.commandId, other.commandId]);
   assert.deepEqual((await legacyJournal.findCommitted(source.commandId)).inversePatch, originalSource.record.inversePatch);
