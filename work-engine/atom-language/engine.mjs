@@ -3131,6 +3131,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
 
   let sourceCommandId = options.programExecution?.sourceReceipt?.commandId ?? null;
   let unchangedSourceEvent = null;
+  const deferredSourceSecurityRebuilds = [];
   function postCommitEvent(trigger, resultPaths, extra = {}) {
     return { ...structuredClone(trigger), resultPaths: resultPaths.filter(Boolean),
       interaction: { id: interaction.id, agent: interaction.agent?.path ? { path: interaction.agent.path } : null },
@@ -3310,17 +3311,21 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     confirmStrutDeliveryClaims();
     await recordTransformStage('commit', commitStartedAt, { commitEntered: true });
     let derivedRecoveryPending = false;
-    try {
-      await options.programScheduler?.rebuildAgentSecurity?.(candidateAtoms);
-    } catch (error) {
-      derivedRecoveryPending = true;
-      options.programScheduler?.invalidateDerivedWorldState?.();
-      interactionWarnings.push(diagnostic(
-        'AGENT_SECURITY_REBUILD_RECOVERY_PENDING',
-        'World facts are committed, but Agent security requires reconstruction on next use',
-        { cause: error.code ?? error.name ?? 'AGENT_SECURITY_REBUILD_FAILED' }
-      ));
-    }
+    const rebuildCommittedAgentSecurity = async () => {
+      try {
+        await options.programScheduler?.rebuildAgentSecurity?.(candidateAtoms);
+      } catch (error) {
+        derivedRecoveryPending = true;
+        options.programScheduler?.invalidateDerivedWorldState?.();
+        interactionWarnings.push(diagnostic(
+          'AGENT_SECURITY_REBUILD_RECOVERY_PENDING',
+          'World facts are committed, but Agent security requires reconstruction on next use',
+          { cause: error.code ?? error.name ?? 'AGENT_SECURITY_REBUILD_FAILED' }
+        ));
+      }
+    };
+    if (sourceEvent && postcommit) deferredSourceSecurityRebuilds.push(rebuildCommittedAgentSecurity);
+    else await rebuildCommittedAgentSecurity();
     if (!committedAffectedPaths.length) {
       committedAffectedPaths = Array.isArray(changedPaths)
         ? [...new Set([...committedAffectedPaths, ...changedPaths.filter(Boolean)])].sort()
@@ -3400,6 +3405,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     if (!postcommit || postcommit.sourceNotified === true) return;
     postcommit.sourceNotified = true;
     interactionWarnings.push(...await notifyCommittedSafely(options, result));
+    for (const rebuild of deferredSourceSecurityRebuilds.splice(0)) await rebuild();
   }
 
   async function subsequentFailureDetails(error) {

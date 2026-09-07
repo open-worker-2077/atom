@@ -326,6 +326,61 @@ test('onCommitted observes the source commit before a blocked subsequent worker 
   assert.equal(notificationCount, 1);
 });
 
+test('onCommitted exposes the durable source before rebuilding derived Agent security', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-source-before-security-rebuild-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const runtime = {
+    contextFile: path.join(directory, 'atom.json'),
+    projectionFile: path.join(directory, 'graph.json')
+  };
+  await fs.writeFile(runtime.contextFile, JSON.stringify([atom('Source', 'before')], null, 2), 'utf8');
+  const scheduler = createProgramRuntimeScheduler();
+  const rebuildAgentSecurity = scheduler.rebuildAgentSecurity.bind(scheduler);
+  const persistence = createTransactionalWorldPersistence(runtime);
+  let sourceDurable = false;
+  let markRebuildStarted;
+  const rebuildStarted = new Promise((resolve) => { markRebuildStarted = resolve; });
+  let releaseRebuild;
+  const rebuildBlocked = new Promise((resolve) => { releaseRebuild = resolve; });
+  scheduler.rebuildAgentSecurity = async (...args) => {
+    if (sourceDurable) {
+      markRebuildStarted();
+      await rebuildBlocked;
+    }
+    return rebuildAgentSecurity(...args);
+  };
+  let acknowledge;
+  const acknowledged = new Promise((resolve) => { acknowledge = resolve; });
+  const execution = executeAtomLanguageKernel({
+    ...runtime,
+    programScheduler: scheduler,
+    programMode: 'reconcile',
+    commitWorld: async (transition) => {
+      const receipt = await persistence.commit(transition);
+      sourceDurable = true;
+      return receipt;
+    },
+    source: 'transform {"thing":"Source","situation.rep.after":"before"}',
+    interaction: { id: `source-before-security-rebuild-${crypto.randomUUID()}` },
+    onCommitted(result) { acknowledge(result); }
+  });
+
+  let first;
+  try {
+    await rebuildStarted;
+    first = await Promise.race([
+      acknowledged.then(() => 'source-acknowledged'),
+      new Promise((resolve) => setTimeout(() => resolve('security-rebuild-blocked-source'), 20))
+    ]);
+  } finally {
+    releaseRebuild();
+    await execution;
+  }
+
+  assert.equal(first, 'source-acknowledged');
+  assert.equal(find(await committedFacts(runtime), 'Source').situation, 'after');
+});
+
 test('a subsequent effects CAS conflict is not mistaken for this request committing identical facts', async (t) => {
   const runtime = await fixture(t, [
     'def receive(delivery):',
