@@ -1388,6 +1388,36 @@ test('human workspace translator edits a Shortcut by semantic target path withou
   );
 });
 
+test('human workspace translator resolves an edited node locally without rebuilding the whole Graph projection', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-local-edit-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const graphFile = path.join(directory, 'graph.json');
+  await fs.writeFile(graphFile, JSON.stringify({
+    graph: atom('atom.json', '', [atom('项目', '', [atom('待编辑', '旧正文')])])
+  }), 'utf8');
+  const node = {
+    id: 'local-edit', key: 'root/domain::local-edit', path: 'root/domain',
+    atomPath: '项目/待编辑', label: '待编辑', detail: '旧正文'
+  };
+  let wholeGraphProjectionCalls = 0;
+  const translator = createLegacyHumanWorkspaceTranslator({
+    graphFile,
+    projectGraph: async () => {
+      wholeGraphProjectionCalls += 1;
+      throw new Error('whole Graph projection must not gate one local edit');
+    }
+  });
+
+  assert.equal(
+    await translator.translate({ operation: {
+      kind: 'node-edit', path: node.path, nodeKey: node.key, node,
+      draft: { label: '已编辑', description: '新正文', atomTypes: [] }
+    } }),
+    'transform {"thing.ren.已编辑":"项目/待编辑","situation.rep.新正文"}'
+  );
+  assert.equal(wholeGraphProjectionCalls, 0);
+});
+
 test('human workspace translator emits one atomic Transform for a batch landing', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-batch-landing-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

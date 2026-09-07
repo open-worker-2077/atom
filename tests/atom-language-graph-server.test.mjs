@@ -56,6 +56,7 @@ test('Atom runtime keeps an already normal or higher own-process priority', () =
 
 test('Atom HTTP handlers translate transport payloads into one interaction runtime', async () => {
   const calls = [];
+  const workspaceCommitted = () => {};
   const handlers = createAtomGraphHandlers({
     execute: async (intent) => {
       calls.push(['execute', intent]);
@@ -65,8 +66,8 @@ test('Atom HTTP handlers translate transport payloads into one interaction runti
       calls.push(['human-status', intent]);
       return { ok: true, command: 'transform' };
     },
-    updateHumanWorkspace: async (intent) => {
-      calls.push(['human-workspace', intent]);
+    updateHumanWorkspace: async (intent, lifecycle) => {
+      calls.push(['human-workspace', intent, lifecycle]);
       return { ok: true, command: 'transform' };
     },
     recover: async (intent) => {
@@ -88,7 +89,7 @@ test('Atom HTTP handlers translate transport payloads into one interaction runti
   await handlers.atomWorkspaceEdit({
     operation: { kind: 'node-create', path: 'root', draft: { label: 'New' } },
     interactionId: 'interaction-3'
-  });
+  }, { onCommitted: workspaceCommitted, signal: 'workspace-signal' });
   await handlers.atomProjectionRecover({ expectedRevision: 'rev-2' });
 
   assert.deepEqual(calls, [
@@ -106,7 +107,7 @@ test('Atom HTTP handlers translate transport payloads into one interaction runti
     ['human-workspace', {
       operation: { kind: 'node-create', path: 'root', draft: { label: 'New' } },
       correlationId: 'interaction-3'
-    }],
+    }, { onCommitted: workspaceCommitted, signal: 'workspace-signal' }],
     ['recover-projection', { expectedRevision: 'rev-2' }]
   ]);
 });

@@ -939,6 +939,41 @@ test('human workspace changes rebuild the context-free Program projection in the
   ]);
 });
 
+test('human workspace lifecycle exposes the committed source before its subsequent result settles', async () => {
+  const context = ports();
+  let releaseSubsequent;
+  const subsequentGate = new Promise(resolve => { releaseSubsequent = resolve; });
+  const source = {
+    ok: true, changed: true, revisionAfter: 'source-revision',
+    subsequentExecution: { status: 'pending' }
+  };
+  context.world.execute = async (request) => {
+    await request.onCommitted(source);
+    await subsequentGate;
+    return {
+      ...source,
+      revisionAfter: 'final-revision',
+      subsequentExecution: { status: 'completed' }
+    };
+  };
+  const runtime = createInteractionRuntime(context);
+  let committed;
+  const operation = runtime.updateHumanWorkspace({
+    operation: { kind: 'node-edit' },
+    correlationId: 'human-workspace-local-source'
+  }, {
+    onCommitted(result) { committed = result; }
+  });
+
+  for (let attempt = 0; attempt < 20 && !committed; attempt += 1) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.equal(committed.revisionAfter, 'source-revision');
+  assert.equal(committed.subsequentExecution.status, 'pending');
+  releaseSubsequent();
+  assert.equal((await operation).revisionAfter, 'final-revision');
+});
+
 test('runtime rejects malformed intents before any capability is called', async () => {
   const context = ports();
   const runtime = createInteractionRuntime(context);

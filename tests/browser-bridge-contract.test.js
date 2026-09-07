@@ -1067,6 +1067,66 @@ test('Atom node rename keeps the prior visual placement and reports the new proj
   });
 });
 
+test('Atom Web keeps the locally edited node visible when the source receipt precedes whole-Graph projection', async () => {
+  const listeners = new Map();
+  const imports = [];
+  const persisted = [];
+  const oldNode = {
+    id: 'stable-id', key: 'root::stable-id', path: 'root', atomPath: '节点',
+    label: '节点', detail: '旧正文'
+  };
+  const editedNode = { ...oldNode, label: '节点', detail: '新正文' };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge: (knowledge) => { imports.push(knowledge); return true; },
+      exportField: () => ({ path: 'root' })
+    },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state') && !options.method) {
+        return response({ knowledge: { revision: 1, nodes: [oldNode], edges: [] } });
+      }
+      if (url.endsWith('/workspace-edit')) return response({
+        ok: true,
+        result: {
+          ok: true, changed: true, revisionAfter: 'source-revision',
+          subsequentExecution: { status: 'pending' }
+        },
+        knowledge: null
+      });
+      return response({ result: {} });
+    },
+    CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    dispatchEvent: (event) => {
+      if (event.type === 'spatial-workspace-persisted') persisted.push(event.detail);
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => 0
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  imports.length = 0;
+
+  await listeners.get('spatial-workspace-committed')({ detail: {
+    persistenceId: 10,
+    operation: {
+      kind: 'node-edit', path: 'root', nodeKey: oldNode.key, node: oldNode,
+      draft: { label: '节点', description: '新正文' }
+    },
+    knowledge: { revision: 1, nodes: [editedNode], edges: [] }
+  } });
+
+  assert.equal(imports.length, 0, 'the source receipt must not replace the local edit with an older whole-Graph snapshot');
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0].knowledge, null);
+  assert.equal(document.body.dataset.spatialBridge, 'connected');
+});
+
 test('every Atom Web structural edit uses the semantic workspace boundary instead of the projection store', async () => {
   for (const operation of [
     { kind: 'node-edit', path: 'root', nodeKey: 'root::a', node: { id: 'a' }, draft: { label: 'Renamed', description: 'Edited' } },

@@ -461,11 +461,16 @@ export function createInteractionRuntime({
     });
   }
 
-  async function updateHumanWorkspace({ operation, correlationId }) {
+  async function updateHumanWorkspace({ operation, correlationId }, lifecycle = {}) {
     requireMethod(humanWorkspace, 'translate', 'INVALID_HUMAN_WORKSPACE_PORT', 'Interaction runtime human-workspace port');
     const source = await humanWorkspace.translate({ operation });
     return executeValidated(validateIntent({ source, correlationId, history: [] }), {
-      programMode: 'reconcile'
+      programMode: 'reconcile',
+      ...(lifecycle.signal ? { signal: lifecycle.signal } : {}),
+      ...(typeof lifecycle.onCommitted === 'function' ? { onCommitted: lifecycle.onCommitted } : {}),
+      ...(typeof lifecycle.onSubsequentSettled === 'function'
+        ? { onSubsequentSettled: lifecycle.onSubsequentSettled }
+        : {})
     });
   }
 

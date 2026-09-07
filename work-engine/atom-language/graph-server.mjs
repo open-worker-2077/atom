@@ -368,14 +368,14 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
         correlationId: payload.interactionId ?? crypto.randomUUID()
       });
     },
-    async atomWorkspaceEdit(payload) {
+    async atomWorkspaceEdit(payload, lifecycle = {}) {
       if (!payload?.operation || typeof payload.operation !== 'object') {
         throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Human workspace edit requires an operation');
       }
       return interactionRuntime.updateHumanWorkspace({
         operation: payload.operation,
         correlationId: payload.interactionId ?? crypto.randomUUID()
-      });
+      }, lifecycle);
     },
     async atomProjectionRecover(payload) {
       if (!payload || typeof payload.expectedRevision !== 'string' || !payload.expectedRevision.trim()) {

@@ -199,7 +199,7 @@ export async function createSpatialServer(options = {}) {
     }
   }
 
-  function atomCommandRequest(payload, operation) {
+  function atomCommandRequest(payload, operation, requestFingerprint = null) {
     const interaction = payload?.interaction && typeof payload.interaction === 'object'
       ? payload.interaction
       : {};
@@ -207,7 +207,7 @@ export async function createSpatialServer(options = {}) {
       ? interaction.id.trim()
       : crypto.randomUUID();
     const normalized = { ...payload, interaction: { ...interaction, id } };
-    const fingerprint = JSON.stringify({
+    const fingerprint = JSON.stringify(requestFingerprint ?? {
       source: normalized.source,
       agent: normalized.interaction.agent ?? null,
       agentSelector: normalized.interaction.agentSelector ?? null,
@@ -551,6 +551,19 @@ export async function createSpatialServer(options = {}) {
           return json(response, 404, { ok: false, error: { code: 'ATOM_WORKSPACE_EDIT_UNAVAILABLE' } });
         }
         const payload = await body(request);
+        if (payload?.operation?.kind === 'node-edit' && payload.operation.status !== 'delete') {
+          const result = await atomCommandRequest({
+            ...payload,
+            interaction: { id: payload.interactionId }
+          }, (normalized, onCommitted, signal, onSubsequentSettled) => options.atomWorkspaceEdit({
+            operation: normalized.operation,
+            interactionId: normalized.interaction.id
+          }, { onCommitted, signal, onSubsequentSettled }), {
+            kind: 'workspace-edit',
+            operation: payload.operation
+          });
+          return json(response, 200, { ok: true, result, knowledge: null });
+        }
         const result = await trackAtomInteraction(() => options.atomWorkspaceEdit(payload));
         const knowledge = await readKnowledge();
         publishKnowledgeChange(knowledge);

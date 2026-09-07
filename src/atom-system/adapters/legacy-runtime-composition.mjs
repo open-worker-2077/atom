@@ -108,6 +108,58 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
   return Object.freeze({
     async translate({ operation }) {
       const rawGraphDocument = JSON.parse(await fs.readFile(graphFile, 'utf8'));
+      const graphByPath = new Map();
+      const axisEntry = (node, axis) => Object.entries(node ?? {}).find(([rawKey]) => (
+        parseAtomKey(rawKey, { descriptionSymbolWarnings: false }).baseKey === axis
+      ));
+      const visit = (node, parentPath = '') => {
+        const thing = axisEntry(node, 'thing')?.[1];
+        if (typeof thing !== 'string' || !thing) return;
+        const path = parentPath ? `${parentPath}/${thing}` : thing;
+        graphByPath.set(path, node);
+        for (const child of axisEntry(node, 'slot')?.[1] ?? []) visit(child, path);
+      };
+      for (const child of axisEntry(rawGraphDocument.graph, 'slot')?.[1] ?? []) visit(child);
+      const nodeEditTransform = (path) => {
+        if (operation.status === 'delete') {
+          return `transform {${JSON.stringify('thing.dsc.')}:${JSON.stringify(path)}}`;
+        }
+        const label = operation.draft?.label?.trim();
+        const detail = operation.draft?.description?.trim() ?? '';
+        const hasTypeDraft = operation.atomTypesChanged === true;
+        const type = operation.draft?.atomTypes?.[0]?.trim() ?? '';
+        if (!label || label.includes('/') || label.length > 200) {
+          throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Edited Atom requires a non-empty name without slash');
+        }
+        if (type && (!/^[\p{L}\p{N}_-]+$/u.test(type) || type.length > 80)) {
+          throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Atom type requires one safe @type name');
+        }
+        const currentName = path.split('/').at(-1);
+        const shortcutEdit = operation.node?.atomTypes?.includes('shortcut')
+          || operation.draft?.atomTypes?.includes('shortcut');
+        if (shortcutEdit) {
+          const targetPath = operation.draft?.shortcutTargetPath?.trim();
+          if (!targetPath || targetPath.length > 4000) {
+            throw problem(
+              'INVALID_HUMAN_WORKSPACE_REQUEST',
+              'Shortcut edit requires one exact semantic target path'
+            );
+          }
+          const thingCommand = `thing${label === currentName ? '' : `.ren.${label}`}.lnk.${targetPath}`;
+          return `transform {${JSON.stringify(thingCommand)}:${JSON.stringify(path)}}`;
+        }
+        const thingCommand = `thing${hasTypeDraft ? `.typ.${type}` : ''}${label === currentName ? '' : `.ren.${label}`}`;
+        const thingField = `${JSON.stringify(thingCommand)}:${JSON.stringify(path)}`;
+        return `transform {${thingField},${JSON.stringify(`situation.rep.${detail}`)}}`;
+      };
+      const localNode = operation?.node;
+      const localAtomPath = typeof localNode?.atomPath === 'string' ? localNode.atomPath.trim() : '';
+      if (operation?.kind === 'node-edit'
+        && operation.nodeKey === localNode?.key
+        && localNode?.key === `${localNode?.path}::${localNode?.id}`
+        && graphByPath.has(localAtomPath)) {
+        return nodeEditTransform(localAtomPath);
+      }
       const { knowledge, atomPathByKey } = await projectGraph(rawGraphDocument);
       const atomPathForKey = (key) => atomPathByKey.get(String(key || '').trim()) ?? '';
       const containerPath = (spatialPath) => {
@@ -124,18 +176,6 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
         }
         return path;
       };
-      const graphByPath = new Map();
-      const axisEntry = (node, axis) => Object.entries(node ?? {}).find(([rawKey]) => (
-        parseAtomKey(rawKey, { descriptionSymbolWarnings: false }).baseKey === axis
-      ));
-      const visit = (node, parentPath = '') => {
-        const thing = axisEntry(node, 'thing')?.[1];
-        if (typeof thing !== 'string' || !thing) return;
-        const path = parentPath ? `${parentPath}/${thing}` : thing;
-        graphByPath.set(path, node);
-        for (const child of axisEntry(node, 'slot')?.[1] ?? []) visit(child, path);
-      };
-      for (const child of axisEntry(rawGraphDocument.graph, 'slot')?.[1] ?? []) visit(child);
       const resolveStrutPath = (sourcePath, selector) => {
         const worldRoot = axisEntry(rawGraphDocument.graph, 'thing')?.[1];
         const normalized = typeof selector === 'string' && typeof worldRoot === 'string'
@@ -195,36 +235,7 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
 
       if (operation?.kind === 'node-edit') {
         const path = requireAtomPath(operation.nodeKey, operation.node);
-        if (operation.status === 'delete') {
-          return `transform {${JSON.stringify('thing.dsc.')}:${JSON.stringify(path)}}`;
-        }
-        const label = operation.draft?.label?.trim();
-        const detail = operation.draft?.description?.trim() ?? '';
-        const hasTypeDraft = operation.atomTypesChanged === true;
-        const type = operation.draft?.atomTypes?.[0]?.trim() ?? '';
-        if (!label || label.includes('/') || label.length > 200) {
-          throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Edited Atom requires a non-empty name without slash');
-        }
-        if (type && (!/^[\p{L}\p{N}_-]+$/u.test(type) || type.length > 80)) {
-          throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Atom type requires one safe @type name');
-        }
-        const currentName = path.split('/').at(-1);
-        const shortcutEdit = operation.node?.atomTypes?.includes('shortcut')
-          || operation.draft?.atomTypes?.includes('shortcut');
-        if (shortcutEdit) {
-          const targetPath = operation.draft?.shortcutTargetPath?.trim();
-          if (!targetPath || targetPath.length > 4000) {
-            throw problem(
-              'INVALID_HUMAN_WORKSPACE_REQUEST',
-              'Shortcut edit requires one exact semantic target path'
-            );
-          }
-          const thingCommand = `thing${label === currentName ? '' : `.ren.${label}`}.lnk.${targetPath}`;
-          return `transform {${JSON.stringify(thingCommand)}:${JSON.stringify(path)}}`;
-        }
-        const thingCommand = `thing${hasTypeDraft ? `.typ.${type}` : ''}${label === currentName ? '' : `.ren.${label}`}`;
-        const thingField = `${JSON.stringify(thingCommand)}:${JSON.stringify(path)}`;
-        return `transform {${thingField},${JSON.stringify(`situation.rep.${detail}`)}}`;
+        return nodeEditTransform(path);
       }
 
       if (operation?.kind === 'node-land') {
