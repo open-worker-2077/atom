@@ -979,15 +979,18 @@ async function openAModeFixture(page) {
   const parentPath = `root/${hashText('a-parent-id').toString(36)}`;
   const innerPath = `${parentPath}/${hashText('a-inner-id').toString(36)}`;
   const leafPath = `${innerPath}/${hashText('a-leaf-id').toString(36)}`;
+  const peerPath = `${parentPath}/${hashText('a-inner-peer-id').toString(36)}`;
+  const peerLeafPath = `${peerPath}/${hashText('a-peer-leaf-id').toString(36)}`;
   const knowledge = {
     revision: 1,
     nodes: [
       { id: 'a-parent-id', key: 'root::a-parent-id', path: 'root', atomPath: '父团', label: '父团', detail: '', hasChildren: true },
       { id: 'a-outside-id', key: 'root::a-outside-id', path: 'root', atomPath: '团外旁侧', label: '团外旁侧', detail: '', hasChildren: false },
       { id: 'a-inner-id', key: `${parentPath}::a-inner-id`, path: parentPath, atomPath: '父团/内层团', label: '内层团', detail: '', hasChildren: true },
-      { id: 'a-inner-peer-id', key: `${parentPath}::a-inner-peer-id`, path: parentPath, atomPath: '父团/内层旁侧', label: '内层旁侧', detail: '', hasChildren: false },
+      { id: 'a-inner-peer-id', key: `${parentPath}::a-inner-peer-id`, path: parentPath, atomPath: '父团/内层旁侧', label: '内层旁侧', detail: '', hasChildren: true },
       { id: 'a-leaf-id', key: `${innerPath}::a-leaf-id`, path: innerPath, atomPath: '父团/内层团/叶子', label: '叶子', detail: '', hasChildren: true },
-      { id: 'a-seed-id', key: `${leafPath}::a-seed-id`, path: leafPath, atomPath: '父团/内层团/叶子/种子', label: '种子', detail: '', hasChildren: false }
+      { id: 'a-seed-id', key: `${leafPath}::a-seed-id`, path: leafPath, atomPath: '父团/内层团/叶子/种子', label: '种子', detail: '', hasChildren: false },
+      { id: 'a-peer-leaf-id', key: `${peerPath}::a-peer-leaf-id`, path: peerPath, atomPath: '父团/内层旁侧/旁侧叶子', label: '旁侧叶子', detail: '', hasChildren: false }
     ],
     edges: []
   };
@@ -997,7 +1000,7 @@ async function openAModeFixture(page) {
   });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.spatialLab?.state().interactionTargets.some(({ label }) => label === '父团'));
-  return { parentPath, innerPath, leafPath };
+  return { parentPath, innerPath, leafPath, peerPath, peerLeafPath };
 }
 
 async function rightClickTarget(page, label, count) {
@@ -1140,6 +1143,21 @@ test('vertical shortcuts stay inside the deepest Graph shell under the crosshair
   await page.keyboard.press('End');
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths)).toContain(innerPath);
   expect(await page.locator('#spaceCanvas').evaluate((canvas) => getComputedStyle(canvas).cursor)).toBe('none');
+});
+
+test('PageDown from parent-shell blank expands both sibling child shells together', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { parentPath, innerPath, peerPath } = await openAModeFixture(page);
+  await rightClickTarget(page, '父团', 1);
+  await page.waitForTimeout(430);
+  const parentShell = (await page.evaluate(() => window.spatialLab.state().clusterRegions))
+    .find(({ path }) => path === parentPath);
+  expect(parentShell).toBeTruthy();
+  await page.mouse.move(parentShell.clientX + parentShell.radius * 0.72, parentShell.clientY);
+
+  await page.keyboard.press('PageDown');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths))
+    .toEqual(expect.arrayContaining([innerPath, peerPath]));
 });
 
 test('ordinary nested blank right double-click collapses only its direct inner group', async ({ page }) => {
