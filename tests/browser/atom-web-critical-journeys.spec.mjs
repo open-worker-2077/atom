@@ -1060,6 +1060,29 @@ test('A sustained right press immerses once before release and release adds no o
     .not.toContain('叶子');
 });
 
+test('A sustained right press keeps the entered domain shell visibly inside the viewport', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 2514, height: 1316 });
+  const { parentPath } = await openAModeFixture(page);
+  await holdRightTarget(page, '父团', 440);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(parentPath);
+  await page.waitForTimeout(500);
+
+  const shell = (await page.evaluate(() => window.spatialLab.state().clusterRegions))
+    .find(({ path }) => path === parentPath);
+  expect(shell).toBeTruthy();
+  const viewport = page.viewportSize();
+  const safeMargin = 24;
+  const minimumRecognizableRadius = Math.min(viewport.width, viewport.height) * 0.3;
+  expect(shell.x - shell.radius).toBeGreaterThanOrEqual(safeMargin);
+  expect(shell.y - shell.radius).toBeGreaterThanOrEqual(safeMargin);
+  expect(shell.x + shell.radius).toBeLessThanOrEqual(viewport.width - safeMargin);
+  expect(shell.y + shell.radius).toBeLessThanOrEqual(viewport.height - safeMargin);
+  expect(shell.radius).toBeGreaterThanOrEqual(minimumRecognizableRadius);
+  expect(Math.abs(shell.x - viewport.width / 2)).toBeLessThanOrEqual(viewport.width * 0.08);
+  expect(Math.abs(shell.y - viewport.height / 2)).toBeLessThanOrEqual(viewport.height * 0.08);
+});
+
 test('vertical shortcuts stay inside the deepest Graph shell under the crosshair', async ({ page }) => {
   test.setTimeout(90_000);
   const { parentPath, innerPath } = await openAModeFixture(page);

@@ -146,6 +146,19 @@ test('successful A expansion appends the child domain without immersive framing'
   assert.doesNotMatch(toggle, /frameClusterDomain|startCameraTween/);
 });
 
+test('immersive A frames the entered domain shell instead of only its inner nodes', () => {
+  const enter = functionSource('enterNode');
+  const refit = functionSource('refitCurrentDomain');
+  const shellFrame = functionSource('currentDomainClusterFrame');
+
+  assert.match(shellFrame, /state\.clusterScene\.clusters\.find/);
+  assert.match(shellFrame, /candidate\.path\s*===\s*state\.currentPath/);
+  assert.match(shellFrame, /viewModeModel\.clusterDomainFrame/);
+  assert.match(enter, /forceImmersive\s*\?\s*currentDomainClusterFrame\(\)\s*:\s*currentDomainSceneFrame\(\)/);
+  assert.match(refit, /state\.clusterFieldOpen\s*&&\s*state\.depth\s*>\s*0/);
+  assert.match(refit, /currentDomainClusterFrame\(\)/);
+});
+
 test('newly loaded active Atom scope can refit every current node into the viewport', () => {
   const refit = functionSource('refitCurrentDomain');
 

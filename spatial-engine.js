@@ -5714,11 +5714,25 @@
     });
   }
 
+  function currentDomainClusterFrame() {
+    const cluster = state.clusterScene.clusters.find((candidate) => candidate.path === state.currentPath);
+    if (!cluster) return currentDomainSceneFrame();
+    return viewModeModel.clusterDomainFrame(cluster, {
+      fov: camera.fov,
+      aspect: state.width / Math.max(1, state.height),
+      minimumDistance: MIN_CAMERA_DISTANCE,
+      maximumDistance: MAX_CAMERA_DISTANCE
+    });
+  }
+
   function refitCurrentDomain(optionsInput) {
     optionsInput = optionsInput || {};
     const path = typeof optionsInput.path === "string" ? optionsInput.path : state.currentPath;
     if (path !== state.currentPath) return false;
-    startCameraTween(currentDomainSceneFrame(), 420);
+    const frame = state.clusterFieldOpen && state.depth > 0
+      ? currentDomainClusterFrame()
+      : currentDomainSceneFrame();
+    startCameraTween(frame, 420);
     return true;
   }
 
@@ -5773,7 +5787,7 @@
     state.hovered = null;
     state.middleLabelFocus = null;
     state.prefetchedDomain = null;
-    const immersiveFrame = currentDomainSceneFrame();
+    const immersiveFrame = forceImmersive ? currentDomainClusterFrame() : currentDomainSceneFrame();
     updateSelectionUI();
     startCameraTween(immersiveFrame, 420, recordCurrentView);
     announce(`已进入 ${enteredNode.label}，当前深度 ${state.depth}`);
