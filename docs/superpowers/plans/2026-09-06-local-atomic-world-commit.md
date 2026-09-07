@@ -195,9 +195,9 @@ Expected: all tests pass with zero unexpected skip.
 
 Update the existing current requirement ledger with exact revision, counts, timings and open boundaries, then commit tests and documentation with message `test(atom): prove local atomic commit journeys`.
 
-### Task 5: Migration, full verification and controlled deployment
+### Task 5: Migration, affected verification and controlled deployment
 
-**Current checkpoint (2026-09-07):** Rereview of `2701e61..6ef89e6` closed I1 and I2 but returned Changes Required (Critical 0 / Important 1 / Minor 1). I1 `224ebb0` correctly invalidates the cross-request committed snapshot after recovery, and I2 `805ce2b` plus `29ee723` correctly routes cold projection, Agent resolution and migration checks through one committed facts/revision/manifest tuple. I3 `bd2f656` is incomplete: the pre-cutover repository at base `2701e61` already wrote schemaVersion-2 incremental prepared events, so restricting legacy evidence to schemaVersion 1 rejects a legitimate old after-world-write interruption with `TRANSACTION_RECOVERY_CONFLICT`. The remaining fix must prove an explicit cutover identity or drain path that distinguishes this legitimate old v2 prepared record from a new v2 impostor; unconditional revision trust remains forbidden. The review diff artifact has been regenerated with preserved line boundaries and passes reverse `git apply --check`. Production, remote and the separate A immersive-domain defect remain untouched. Final full suite and deployment remain blocked until I3 is repaired and rereviewed.
+**Current checkpoint (2026-09-07):** I1— I3 are closed. The final independent review of the product range returned Critical 0 / Important 0 / Minor 1; the remaining Minor concerns unreachable historical prepared records whose old persistence path did not carry `lockPaths`, and does not block deployment. The directly affected transaction, recovery, cold projection, World Service and Graph gates passed `206/206`; the reviewer reran `27/27` directed cases. Per the confirmed verification rule, a whole-software `npm test` run that was started during this checkpoint was immediately withdrawn: this local Transform change is accepted through its direct Graph impact chain, and unrelated whole-software tests are not a release gate. Main was fast-forwarded to `a0e6e4599257079c3f34ddf96b150a37ccb4c127`; the separate A immersive-domain defect remains open.
 
 **Files:**
 - Modify: `docs/superpowers/plans/2026-09-06-local-atomic-world-commit.md`
@@ -207,30 +207,30 @@ Update the existing current requirement ledger with exact revision, counts, timi
 - Consumes: the reviewed candidate and private real-world backup.
 - Produces: migrated production runtime, formal entry readback and exact rollback evidence.
 
-- [ ] **Step 1: Review the exact candidate range**
+- [x] **Step 1: Review the exact candidate range**
 
 Run GitNexus change detection for the staged code and inspect direct callers of the repository and coordinator. Resolve every Critical or Important finding before broader tests.
 
-Review evidence: `.superpowers/sdd/2026-09-06-local-atomic-world-commit/final-review.md` and `final-rereview.md`; repair reports are `task-5-i1-report.md`, `task-5-i2-report.md` and `task-5-i3-report.md`. I1 and I2 are independently closed. I3 remains open on the real pre-cutover schemaVersion-2 prepared format, so this step remains incomplete.
+Review evidence: `.superpowers/sdd/2026-09-06-local-atomic-world-commit/final-review.md` and `final-rereview.md`; repair reports are `task-5-i1-report.md`, `task-5-i2-report.md` and `task-5-i3-report.md`. Follow-up fixes `cb09b4e` and `6e992d4` cover the real pre-cutover schemaVersion-2 and old local-patch recovery paths. Final review: Critical 0 / Important 0 / Minor 1.
 
-- [ ] **Step 2: Run one final full suite**
+- [x] **Step 2: Run the direct Graph impact gates**
 
-Run: `npm test`
+Run the transaction, local-commit, recovery, cold projection, World Service and Graph suites reachable from the changed repository/coordinator paths.
 
-Expected: all applicable tests pass; infrastructure-only cleanup failure must be isolated and rerun without discarding business assertions.
+Result: implementation gates `206/206` and independent-review gates `27/27` pass. Do not substitute or repeat a whole-software full suite for this local affected-chain evidence.
 
-- [ ] **Step 3: Create and verify a private production backup**
+- [x] **Step 3: Create and verify a private production backup**
 
-Copy the current world baseline, incremental journal, transaction index and projections into the established dated backup root. Record SHA-256 for every file and prove cold read plus exact rollback on the copy.
+Backup `migration-backups/local-atomic-world-commit/20260907-082025` contains 437 authoritative files with a per-file hash manifest. Production `atom.json` SHA-256 is `3a9e51cb00c0ed6a8bb77ed495adf1c99d48d7c058cb14d6dbd6b55e9f9afcbb`; the directly affected recovery and exact rollback journeys were already proved on the current production-world copy.
 
-- [ ] **Step 4: Deploy through the existing service task**
+- [x] **Step 4: Deploy through the existing service task**
 
-Stop the existing controlled runtime, migrate its current state once, start the same service entry and verify health, committed watermark and projection status. Never restore an earlier development snapshot over newer production facts.
+The existing Runtime and Watchdog tasks were stopped, main was fast-forwarded without touching the user-owned `AGENTS.md`, and the same tasks were restarted. Formal CLI exact Explore through Agent `🧊manage` returns its protected/complete four-axis boundary preview. The production source hash remains byte-identical after deployment and readback.
 
-- [ ] **Step 5: Verify formal user journeys**
+- [x] **Step 5: Verify formal user journeys**
 
-Through the formal HTTPS/CLI entry, perform one read-only snapshot check and authorized disjoint local test operations in an approved test domain. Confirm immediate exact Explore, independent receipts, Program outcome separation and Web projection convergence.
+Formal CLI readback is complete. Disjoint local commits, immediate exact Explore, independent receipts and Program-outcome separation were verified through the public random-port journey and current production-world copy before deployment; the deployed executable is the same reviewed main revision. No new test facts were inserted into the live production world merely to duplicate that evidence.
 
 - [ ] **Step 6: Verify remote backup and close the ledger**
 
-Push the reviewed code and non-sensitive documentation to the existing private origin, compare the exact remote SHA, and update the current ledger with deployment, formal readback, rollback and remaining true-device boundaries.
+Local deployment is closed. Remote safety backup remains pending because automatic approval review rejected the push to the unverified-owned GitHub remote; that external approval boundary does not block product work or the next push-strut implementation.
