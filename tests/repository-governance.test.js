@@ -84,15 +84,13 @@ test('GitHub templates, CI and runtime-data exclusions are present', () => {
   assert.match(read('.gitignore'), /\*\.baiduyun\.uploading\.cfg/);
 });
 
-test('project routing uses official Superpowers without shadowing it', () => {
+test('project routing has one Superpowers entry without tool-owned instructions', () => {
   assert.equal(fs.existsSync(path.join(root, 'AGENTS.md')), true, 'AGENTS.md routes official Superpowers work');
   const instructions = read('AGENTS.md');
   assert.match(instructions, /superpowers:using-superpowers/);
-  assert.match(instructions, /docs\/superpowers\/specs/);
-  assert.match(instructions, /docs\/superpowers\/plans/);
-  assert.match(instructions, /docs\/history\/development-control/);
-  assert.match(instructions, /read-only historical evidence/);
-  assert.match(instructions, /must not edit, copy, wrap, override, or shadow/);
+  assert.match(instructions, /docs\/superpowers\/README\.md/);
+  assert.doesNotMatch(instructions, /<!-- gitnexus:start -->/);
+  assert.doesNotMatch(instructions, /GitNexus — Code Intelligence/);
 });
 
 test('contributor prerequisites require the supported Node.js runtime', () => {

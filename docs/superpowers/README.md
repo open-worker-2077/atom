@@ -10,6 +10,14 @@
 4. 使用已安装的官方 Superpowers 技能；需要实际操作 Atom 时先读 `atom.cmd --help`。官方 SDD 工作区仅保存派发、报告和恢复索引，不另立产品状态。
 5. 新发现立即写回所属规格/原计划/总账，再从原任务断点继续；不因换任务或巡守重做已完成步骤。
 
+## 统一开发边界
+
+- `AGENTS.md`只负责把开发者和Agent引入本页，不承载产品状态、工具规则或动态统计。
+- Atom规格、计划、状态和验收只进入本目录现有权威文件；Git提交与当前diff记录实现，绑定revision的新鲜证据证明完成。
+- GitNexus、Code-Graph-RAG及后续同类工具都只是按需代码关系检查器，由本入口统一分派；工具输出提供候选关系，不替代源码裁定、受影响测试或真实旅程。
+- GitHub Issues和Projects仅为可选协作入口；历史开发控制文件只读追溯，不提供当前指令。
+- 官方Superpowers技能定义保持原位且不在仓库内复制、包裹或改写；真实Atom世界、业务事实、凭据和私密备份位置不进入版本控制。
+
 ## 产品规格
 
 - [Web、编辑反馈与跨端配置](specs/2026-08-31-atom-web-spatial-design.md)
@@ -24,7 +32,7 @@
 - [手机共同配置](plans/2026-09-05-shared-presentation-settings.md)、[Web 缺陷原计划](plans/2026-09-01-atom-web-bug-patrol.md)
 - [旧生成 print 迁移](plans/2026-09-05-generated-slot-print-migration.md)、[A 模式及长按修订](plans/2026-09-04-a-mode-consolidation.md)
 - [CLI 反馈裁定](plans/2026-09-02-atom-cli-feedback-triage.md)、[ESG 阶段推进](plans/2026-09-01-atom-esg-stage-progression.md)、[Strut 动作](plans/2026-09-02-inline-strut-transform-actions.md)
-- [最小化检查](minimality-checkpoints.md)、[代码图辅助](code-graph-rag-assistance.md)、[独立连续性门禁撤回记录](specs/2026-09-04-atom-development-continuity-gates-design.md)
+- [最小化检查](minimality-checkpoints.md)、[代码关系检查](code-graph-rag-assistance.md)、[独立连续性门禁撤回记录](specs/2026-09-04-atom-development-continuity-gates-design.md)
 
 这些链接提供位置，不表示任务完成或当前优先级；实际结论回到总账和专项计划。
 
