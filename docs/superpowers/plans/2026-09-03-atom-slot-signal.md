@@ -1,5 +1,7 @@
 # Atom Slot Adjacent Signal Implementation Plan
 
+> **Superseded:** This adjacent parent/child signal design is historical. Do not execute it. The current approved Graph-strut label contract is in `../specs/2026-08-31-atom-world-program-design.md` §4.2.1 and its implementation plan is `2026-09-07-atom-slot-tag-strut-runtime.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement ephemeral `slot({"to":"up|down","labels":[...]})` delivery between direct Slot relatives, with receiver-owned `trigger("slot",...)` matching and invocation-local `signal()` access.

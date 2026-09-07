@@ -1,5 +1,7 @@
 # Atom Slot Signal Relocation Closure Plan
 
+> **Superseded:** This document only closes relocation behavior of the historical adjacent Slot signal. It is not the target causal runtime. Continue from `2026-09-07-atom-slot-tag-strut-runtime.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` to execute this follow-up plan task-by-task.
 
 **Goal:** Close the two load-bearing relocation gaps found by the final Slot-signal review so no pending or initial Slot signal loses its real sender/receiver identity when the same atomic interaction renames or moves Graph nodes.
