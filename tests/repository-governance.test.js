@@ -87,10 +87,22 @@ test('GitHub templates, CI and runtime-data exclusions are present', () => {
 test('project routing has one Superpowers entry without tool-owned instructions', () => {
   assert.equal(fs.existsSync(path.join(root, 'AGENTS.md')), true, 'AGENTS.md routes official Superpowers work');
   const instructions = read('AGENTS.md');
+  const superpowersEntry = read('docs/superpowers/README.md');
+  const upstreamCompatibility = read('docs/superpowers/upstream-compatibility.md');
   assert.match(instructions, /superpowers:using-superpowers/);
   assert.match(instructions, /docs\/superpowers\/README\.md/);
   assert.doesNotMatch(instructions, /<!-- gitnexus:start -->/);
   assert.doesNotMatch(instructions, /GitNexus — Code Intelligence/);
+  assert.match(superpowersEntry, /upstream-compatibility\.md/);
+  assert.match(upstreamCompatibility, /Superpowers 6\.3\.0/);
+  assert.match(upstreamCompatibility, /每个新 Session 首次开展实质开发/);
+  assert.match(upstreamCompatibility, /Manifest SHA-256/);
+  for (const id of ['SP-L01', 'SP-L02', 'SP-L03', 'SP-L04', 'SP-L05', 'SP-U01']) {
+    assert.match(upstreamCompatibility, new RegExp(`\\b${id}\\b`));
+  }
+  assert.match(upstreamCompatibility, /上游已覆盖/);
+  assert.match(upstreamCompatibility, /继续补充/);
+  assert.match(upstreamCompatibility, /冲突待裁定/);
 });
 
 test('contributor prerequisites require the supported Node.js runtime', () => {
