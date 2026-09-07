@@ -342,6 +342,32 @@ test('secondary arbiter resolves an elapsed hold on release before a delayed tim
   assert.equal(arbiter.pending, false);
 });
 
+test('secondary arbiter consumes a boundary hold without dispatching the short-press action', () => {
+  const singles = [];
+  const holds = [];
+  let callback;
+  const arbiter = createSecondaryClickArbiter({
+    setTimer(next) {
+      callback = next;
+      return 1;
+    },
+    clearTimer() {},
+    commitSingle(action) {
+      singles.push(action);
+    },
+    commitHold(action) {
+      holds.push(action);
+    }
+  });
+  const parent = { intent: 'applyParentView', target: null };
+
+  assert.equal(arbiter.begin(parent, null, 'field:root/a', 'field:640:360', null, true), 'pending');
+  callback();
+  assert.equal(arbiter.release('field:root/a'), 'hold');
+  assert.deepEqual(singles, []);
+  assert.deepEqual(holds, []);
+});
+
 test('secondary arbiter releases a short press once and coalesces a fast exact-signature double press', () => {
   const commits = [];
   let currentTime = 1000;

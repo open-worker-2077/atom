@@ -185,6 +185,7 @@
     let pendingPhysicalPoint = null;
     let pendingDelay = 420;
     let pendingStartedAt = 0;
+    let pendingConsumesHold = false;
     let holdCommitted = false;
     let recentSingle = null;
 
@@ -198,6 +199,7 @@
       pendingPhysicalPoint = null;
       pendingDelay = 420;
       pendingStartedAt = 0;
+      pendingConsumesHold = false;
       holdCommitted = false;
     }
 
@@ -213,11 +215,11 @@
         if (pendingToken !== token) return;
         pendingTimer = null;
         holdCommitted = true;
-        commitHold(pendingHoldAction);
+        if (pendingHoldAction) commitHold(pendingHoldAction);
       }, delay);
     }
 
-    function begin(singleAction, holdAction, signature, sequenceSignature, physicalPoint) {
+    function begin(singleAction, holdAction, signature, sequenceSignature, physicalPoint, consumesHold = false) {
       cancel();
       if (!singleAction || typeof singleAction !== 'object') return 'idle';
       const safeSignature = typeof signature === 'string' && signature ? signature : 'field';
@@ -241,8 +243,9 @@
       ) ? { x: pointX, y: pointY, tolerance: pointTolerance } : null;
       pendingDelay = Math.min(800, Math.max(240, Number(delayFor()) || 420));
       pendingStartedAt = Number(now());
+      pendingConsumesHold = consumesHold === true;
       if (!Number.isFinite(pendingStartedAt)) pendingStartedAt = 0;
-      if (pendingHoldAction) schedule(token, pendingDelay);
+      if (pendingHoldAction || pendingConsumesHold) schedule(token, pendingDelay);
       return 'pending';
     }
 
@@ -262,14 +265,15 @@
       const releaseDelay = pendingDelay;
       const startedAt = pendingStartedAt;
       const holdAction = pendingHoldAction;
+      const consumesHold = pendingConsumesHold;
       const releasedAt = Number(now());
-      const elapsedHold = Boolean(holdAction)
+      const elapsedHold = Boolean(holdAction || consumesHold)
         && Number.isFinite(releasedAt)
         && releasedAt - startedAt >= releaseDelay;
       resetPending();
       if (completedHold) return 'hold';
       if (elapsedHold) {
-        commitHold(holdAction);
+        if (holdAction) commitHold(holdAction);
         return 'hold';
       }
       const safeReleasedAt = Number.isFinite(releasedAt) ? releasedAt : 0;

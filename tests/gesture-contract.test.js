@@ -98,6 +98,7 @@ test('direct lens and command candidates bypass secondary hold and release their
   const primaryClickArbiter = { cancel() {} };
   const beginSecondaryNavigation = executableFunction('beginSecondaryNavigation', {
     isUnmodifiedSecondaryNavigation: () => true,
+    holdsCurrentImmersiveBoundary: () => false,
     gestureArbiter,
     input: { resolvePointer: () => 'applyImmersiveInwardView' },
     contextualizeAction: (action) => action,
@@ -143,6 +144,7 @@ test('only real unmodified inward or parent navigation starts secondary hold arb
   const secondaryBegins = [];
   const beginSecondaryNavigation = executableFunction('beginSecondaryNavigation', {
     isUnmodifiedSecondaryNavigation: () => true,
+    holdsCurrentImmersiveBoundary: () => false,
     gestureArbiter,
     input: { resolvePointer: () => 'applyImmersiveInwardView' },
     contextualizeAction: (action) => action,
@@ -168,6 +170,38 @@ test('only real unmodified inward or parent navigation starts secondary hold arb
 
   assert.equal(beginSecondaryNavigation({ ...candidate, intent: 'inspect' }), false);
   assert.equal(secondaryBegins.length, 1);
+});
+
+test('current immersive shell blank consumes a hold while child shells and true outside remain navigable', () => {
+  const state = {
+    clusterFieldOpen: true,
+    currentPath: 'root/parent',
+    clusterHitRegions: [
+      { path: 'root/parent', x: 500, y: 360, radius: 200 }
+    ]
+  };
+  const holdsCurrentImmersiveBoundary = executableFunction('holdsCurrentImmersiveBoundary', { state });
+
+  assert.equal(holdsCurrentImmersiveBoundary({
+    node: null,
+    domainContext: { path: 'root/parent' },
+    start: { x: 620, y: 360 }
+  }), true);
+  assert.equal(holdsCurrentImmersiveBoundary({
+    node: null,
+    domainContext: { path: 'root/parent/child' },
+    start: { x: 520, y: 360 }
+  }), false);
+  assert.equal(holdsCurrentImmersiveBoundary({
+    node: null,
+    domainContext: null,
+    start: { x: 699, y: 360 }
+  }), true);
+  assert.equal(holdsCurrentImmersiveBoundary({
+    node: null,
+    domainContext: null,
+    start: { x: 701, y: 360 }
+  }), false);
 });
 
 test('secondary physical continuity uses the candidate drag tolerance without rounding its press point', () => {

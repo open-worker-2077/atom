@@ -7136,14 +7136,32 @@
     );
   }
 
+  function holdsCurrentImmersiveBoundary(candidate) {
+    if (!candidate || candidate.node || !state.clusterFieldOpen) return false;
+    if (candidate.domainContext) {
+      return candidate.domainContext.path === state.currentPath;
+    }
+    const point = candidate.start || {};
+    const region = state.clusterHitRegions.find(({ path }) => path === state.currentPath);
+    return Boolean(
+      region
+      && Number.isFinite(point.x)
+      && Number.isFinite(point.y)
+      && Math.hypot(point.x - region.x, point.y - region.y) <= region.radius
+    );
+  }
+
   function beginSecondaryNavigation(candidate) {
     if (!isUnmodifiedSecondaryNavigation(candidate) || candidate.direct) return false;
     const singleAction = gestureArbiter.classifyTap(candidate);
     if (!singleAction || !["applyInwardView", "applyParentView"].includes(singleAction.intent)) return false;
-    const holdIntent = input.resolvePointer(
-      { ...candidate.mappingEvent, button: 2 },
-      { ...(candidate.mappingContext || {}), gesture: "hold" }
-    );
+    const consumesCurrentBoundaryHold = holdsCurrentImmersiveBoundary(candidate);
+    const holdIntent = consumesCurrentBoundaryHold
+      ? null
+      : input.resolvePointer(
+        { ...candidate.mappingEvent, button: 2 },
+        { ...(candidate.mappingContext || {}), gesture: "hold" }
+      );
     candidate.secondaryNavigation = true;
     secondaryClickArbiter.begin(
       contextualizeAction(singleAction, candidate),
@@ -7155,7 +7173,8 @@
         : null,
       candidateArbiterKey(candidate),
       candidateSecondarySequenceKey(candidate),
-      candidateSecondaryPhysicalPoint(candidate)
+      candidateSecondaryPhysicalPoint(candidate),
+      consumesCurrentBoundaryHold
     );
     return true;
   }

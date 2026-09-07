@@ -1149,6 +1149,41 @@ test('vertical shortcuts stay inside the deepest Graph shell under the crosshair
   expect(pointerPosition.y).toBeCloseTo(parentShell.clientY - canvasBox.y, 4);
 });
 
+test('a sustained right press on blank inside the current immersive shell keeps that shell', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { parentPath } = await openAModeFixture(page);
+  await holdRightTarget(page, '父团');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(parentPath);
+  const shell = (await page.evaluate(() => window.spatialLab.state().clusterRegions))
+    .find(({ path }) => path === parentPath);
+  expect(shell).toBeTruthy();
+
+  await page.mouse.move(shell.clientX + shell.radius * 0.72, shell.clientY);
+  await page.mouse.down({ button: 'right' });
+  await page.waitForTimeout(440);
+  expect(await page.evaluate(() => window.spatialLab.state().path)).toBe(parentPath);
+  await page.mouse.up({ button: 'right' });
+  await page.waitForTimeout(450);
+  expect(await page.evaluate(() => window.spatialLab.state().path)).toBe(parentPath);
+});
+
+test('a sustained right press outside the current immersive shell returns before release exactly once', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { parentPath } = await openAModeFixture(page);
+  await holdRightTarget(page, '父团');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(parentPath);
+
+  await page.mouse.move(48, 360);
+  await page.mouse.down({ button: 'right' });
+  await page.waitForTimeout(440);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe('root');
+  await page.mouse.up({ button: 'right' });
+  await page.waitForTimeout(450);
+  expect(await page.evaluate(() => window.spatialLab.state().path)).toBe('root');
+  expect(await page.evaluate(() => window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label)))
+    .toEqual(expect.arrayContaining(['父团', '团外旁侧']));
+});
+
 test('PageDown from parent-shell blank expands both sibling child shells together', async ({ page }) => {
   test.setTimeout(90_000);
   const { parentPath, innerPath, peerPath } = await openAModeFixture(page);

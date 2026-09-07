@@ -36,7 +36,7 @@ test('pointer grammar assigns use and view while middle drag exclusively owns or
     nodeSecondary: 'applyInwardView',
     fieldSecondary: 'applyParentView',
     nodeHoldSecondary: 'applyImmersiveInwardView',
-    fieldHoldSecondary: null,
+    fieldHoldSecondary: 'applyParentView',
     nodeMiddle: null,
     fieldMiddle: null,
     nodeMiddleDrag: 'orbit',
@@ -52,12 +52,12 @@ test('pointer grammar assigns use and view while middle drag exclusively owns or
   }
 });
 
-test('unmodified secondary hold is the only immersive pointer mapping', () => {
+test('unmodified secondary hold immerses on nodes and returns through blank field', () => {
   const { config } = loadInputConfig();
   for (const preset of ['explorer', 'oneHand']) {
     config.setPreset(preset);
     assert.equal(config.resolvePointer({ button: 2 }, { onNode: true, gesture: 'hold' }), 'applyImmersiveInwardView');
-    assert.equal(config.resolvePointer({ button: 2 }, { onNode: false, gesture: 'hold' }), null);
+    assert.equal(config.resolvePointer({ button: 2 }, { onNode: false, gesture: 'hold' }), 'applyParentView');
     assert.equal(config.resolvePointer({ button: 2 }, { onNode: true, gesture: 'double' }), null);
   }
 });
