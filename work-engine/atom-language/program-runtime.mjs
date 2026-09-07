@@ -15,6 +15,7 @@ import {
 import { matchesExactSelector } from './exact-selector.mjs';
 import { normalizeTypePredicate } from './program-locks.mjs';
 import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
+import { routeSlotTagPackets } from './slot-signal-runtime.mjs';
 import { buildStrutDeliveries, evaluateStrutClausesWithPrograms } from './strut-runtime.mjs';
 import { shortcutMetadata } from './shortcut-runtime.mjs';
 import { rewriteProgramSourcePathLiterals } from './transform-executor.mjs';
@@ -64,8 +65,21 @@ function slotSignalMatches(parameters, signal) {
     : [...required].every((label) => actual.has(label));
 }
 
+function slotTagMatches(parameters, packet) {
+  if (!parameters || !Array.isArray(parameters.labels)) return false;
+  const required = new Set(parameters.labels);
+  const actual = new Set(packet.labels);
+  return parameters.match === 'exact'
+    ? required.size === actual.size && [...required].every((label) => actual.has(label))
+    : [...required].every((label) => actual.has(label));
+}
+
 function slotSignalClaimKey(programPath, signal) {
   return [programPath, signal.revision, signal.id, signal.recipientPath].join('\0');
+}
+
+function slotTagClaimKey(programPath, packet) {
+  return [programPath, packet.scene, packet.id, packet.targetPath].join('\0');
 }
 
 function validSlotTriggerEvent(triggerEvent) {
@@ -94,6 +108,31 @@ function validSlotTriggerEvent(triggerEvent) {
   return new Set(triggerEvent.nodes).size === triggerEvent.nodes.length
     && recipients.size === triggerEvent.nodes.length
     && triggerEvent.nodes.every((node) => recipients.has(node));
+}
+
+function validSlotTagTriggerEvent(triggerEvent) {
+  if (Object.keys(triggerEvent).length !== 3
+    || !['mode', 'nodes', 'packets'].every((key) => Object.hasOwn(triggerEvent, key))
+    || triggerEvent.mode !== 'slot-tag'
+    || !Array.isArray(triggerEvent.nodes) || triggerEvent.nodes.length === 0
+    || triggerEvent.nodes.some((node) => typeof node !== 'string' || !node.trim())
+    || new Set(triggerEvent.nodes).size !== triggerEvent.nodes.length
+    || !Array.isArray(triggerEvent.packets) || triggerEvent.packets.length === 0
+    || triggerEvent.packets.some((packet) => !packet || typeof packet !== 'object'
+      || Array.isArray(packet)
+      || Object.keys(packet).length !== 7
+      || !['mode', 'id', 'scene', 'revision', 'source', 'targetPath', 'labels']
+        .every((key) => Object.hasOwn(packet, key))
+      || packet.mode !== 'slot-tag'
+      || ['id', 'scene', 'revision', 'source', 'targetPath']
+        .some((key) => typeof packet[key] !== 'string' || !packet[key].trim())
+      || !Array.isArray(packet.labels) || packet.labels.length === 0
+      || packet.labels.some((label) => typeof label !== 'string'
+        || !/^[\p{L}\p{N}]+$/u.test(label))
+      || new Set(packet.labels).size !== packet.labels.length)) return false;
+  const targets = new Set(triggerEvent.packets.map(({ targetPath }) => targetPath));
+  return targets.size === triggerEvent.nodes.length
+    && triggerEvent.nodes.every((node) => targets.has(node));
 }
 
 function strutAffectedGraphPaths(graphDocument, triggerEvent) {
@@ -1355,6 +1394,7 @@ export class ProgramRuntimeScheduler {
     this.preparedStrutGraphs = new Map();
     this.strutDeliveryExecutions = options.strutDeliveryExecutions ?? new Map();
     this.slotSignalExecutions = options.slotSignalExecutions ?? new Map();
+    this.slotTagExecutions = options.slotTagExecutions ?? new Map();
     if (this.projectionRepository
       && (typeof this.projectionRepository.load !== 'function'
         || typeof this.projectionRepository.save !== 'function')) {
@@ -1479,6 +1519,122 @@ export class ProgramRuntimeScheduler {
       agentProgramPaths: [...this.agentSecurity.keys()]
     }));
     return result.strutDecision;
+  }
+
+  confirmSlotTags(keys = []) {
+    for (const key of new Set(keys.filter(Boolean))) {
+      const entry = this.slotTagExecutions.get(key);
+      if (!entry || entry.status === 'confirmed') continue;
+      entry.status = 'confirmed';
+      entry.resolve('confirmed');
+    }
+    const limit = this.maxCompleted * Math.max(1, this.maxWorkers);
+    for (const [key, entry] of this.slotTagExecutions) {
+      if (this.slotTagExecutions.size <= limit) break;
+      if (entry.status === 'confirmed') this.slotTagExecutions.delete(key);
+    }
+  }
+
+  releaseSlotTags(keys = []) {
+    for (const key of new Set(keys.filter(Boolean))) {
+      const entry = this.slotTagExecutions.get(key);
+      if (!entry || entry.status === 'confirmed') continue;
+      this.slotTagExecutions.delete(key);
+      entry.status = 'released';
+      entry.resolve('released');
+    }
+  }
+
+  async evaluateSlotTagStrutProgram(atoms, invocation, options = {}) {
+    const source = invocation?.lineProgram?.source;
+    const predicateId = invocation?.lineProgram?.predicateId;
+    if (invocation?.mode !== 'slot-tag-strut'
+      || typeof source !== 'string' || !source.trim()
+      || typeof predicateId !== 'string' || !predicateId
+      || !Array.isArray(invocation.labels) || invocation.labels.length === 0) {
+      throw Object.assign(new Error('Slot tag strut requires one explicit line Program invocation'), {
+        code: 'INVALID_SLOT_TAG_STRUT_INVOCATION'
+      });
+    }
+    const records = worldRecords(atoms);
+    const preparedWorld = options.executeExplore ? null : prepareExploreWorld(atoms);
+    const executeExplore = options.executeExplore ?? ((request, executionContext = {}) => executeProgramExplore({
+      atoms,
+      request,
+      preparedWorld,
+      scopeRoot: executionContext.scopeRoot ?? null,
+      programRoot: executionContext.programRoot ?? null
+    }));
+    const sourceScopeRoot = slotScopeRoot(invocation.sourcePackets?.[0]?.sourceNodePath);
+    const digest = crypto.createHash('sha256')
+      .update(`${predicateId}\0${source}`)
+      .digest('base64url')
+      .slice(0, 24);
+    const program = Object.freeze({
+      ref: `slot-tag-strut-${digest}`,
+      name: predicateId,
+      detail: source,
+      path: `@slot-tag-strut/${predicateId}`,
+      types: Object.freeze(['program']),
+      parentRef: null,
+      childrenRefs: Object.freeze([]),
+      partners: Object.freeze([])
+    });
+    const result = await this.runBounded(() => this.runProgram({
+      python: this.python,
+      records,
+      programs: [program],
+      program,
+      timeoutMs: options.timeoutMs ?? this.timeoutMs,
+      executeExplore: async (request) => {
+        const matches = await executeExplore(request, {
+          scopeRoot: sourceScopeRoot,
+          programRoot: sourceScopeRoot,
+          programPath: program.path
+        });
+        const recordsByPath = new Map(records.map((record) => [record.path, record]));
+        return matches.map((match) => programExploreRecord(match, recordsByPath)).filter(Boolean);
+      },
+      scopeRoot: sourceScopeRoot,
+      programRoot: sourceScopeRoot,
+      triggered: true,
+      invokeMain: true,
+      programArguments: structuredClone(invocation),
+      agentProgramPaths: [...this.agentSecurity.keys()]
+    }));
+    return result.slotProvides?.[0]?.labels ?? null;
+  }
+
+  async evaluateSlotTagWave(atoms, packets, options = {}) {
+    const scene = options.scene ?? crypto.randomUUID();
+    const revision = options.revision ?? revisionOfWorldFacts(atoms);
+    const visitedClauseIds = options.visitedClauseIds ?? new Set();
+    const invocations = routeSlotTagPackets(projectAtomContext(atoms), packets, {
+      scene, revision
+    }).filter(({ clauseId }) => !visitedClauseIds.has(clauseId));
+    for (const { clauseId } of invocations) visitedClauseIds.add(clauseId);
+    const outputs = await Promise.all(invocations.map(async (invocation) => ({
+      invocation,
+      labels: await this.evaluateSlotTagStrutProgram(atoms, invocation, options)
+    })));
+    const deliveries = outputs.flatMap(({ invocation, labels }) => (
+      labels == null ? [] : invocation.consequentPaths.map((targetPath) => Object.freeze({
+        mode: 'slot-tag',
+        id: crypto.randomUUID(),
+        scene,
+        revision,
+        source: invocation.clauseId,
+        targetPath,
+        labels: Object.freeze([...labels])
+      }))
+    ));
+    return Object.freeze({
+      scene,
+      revision,
+      visitedClauseIds,
+      invocations: Object.freeze(invocations),
+      deliveries: Object.freeze(deliveries)
+    });
   }
 
   buildInlineStrutContext(atoms, graphDocument, clause, transform = null) {
@@ -1830,7 +1986,8 @@ export class ProgramRuntimeScheduler {
       diagnosticRecorder: this.diagnosticRecorder,
       runBounded: (operation) => this.runBounded(operation),
       strutDeliveryExecutions: this.strutDeliveryExecutions,
-      slotSignalExecutions: this.slotSignalExecutions
+      slotSignalExecutions: this.slotSignalExecutions,
+      slotTagExecutions: this.slotTagExecutions
     });
     candidate.reusable = new Map(this.reusable);
     candidate.programReusable = new Map(this.programReusable);
@@ -2090,8 +2247,8 @@ export class ProgramRuntimeScheduler {
     const existing = this.triggerContracts.get(programPath);
     if (existing) {
       const indexed = [
-        ...(['slot', 'strut'].includes(existing.contract?.mode)
-          ? [{ mode: existing.contract.mode, node: programPath }]
+        ...(['slot', 'strut', 'slot-tag'].includes(existing.contract?.mode)
+          ? [{ mode: existing.contract.mode, node: existing.nodePath ?? programPath }]
           : (existing.contract?.parameters?.nodes ?? []).map((node) => ({
               mode: existing.contract.mode, node
             }))),
@@ -2109,12 +2266,16 @@ export class ProgramRuntimeScheduler {
 
   setTriggerContract(program, contract, changedThings = []) {
     this.removeTriggerContract(program.path);
+    const recordsByRef = new Map((this.latestRecords ?? []).map((record) => [record.ref, record]));
+    const nodePath = contract?.mode === 'slot-tag'
+      ? recordsByRef.get(program.parentRef)?.path ?? program.path
+      : program.path;
     this.triggerContracts.set(program.path, {
-      detail: program.detail, contract, changedThings: [...new Set(changedThings)]
+      detail: program.detail, contract, nodePath, changedThings: [...new Set(changedThings)]
     });
     const indexed = [
-      ...(['slot', 'strut'].includes(contract?.mode)
-        ? [{ mode: contract.mode, node: program.path }]
+      ...(['slot', 'strut', 'slot-tag'].includes(contract?.mode)
+        ? [{ mode: contract.mode, node: nodePath }]
         : (contract?.parameters?.nodes ?? []).map((node) => ({ mode: contract.mode, node }))),
       ...[...new Set(changedThings)].map((node) => ({ mode: 'transform', node }))
     ];
@@ -2135,8 +2296,8 @@ export class ProgramRuntimeScheduler {
       const matches = new Set();
       for (const [programPath, entry] of this.triggerContracts) {
         const contractMatch = entry.contract?.mode === triggerEvent.mode
-          && (['slot', 'strut'].includes(triggerEvent.mode)
-            ? programPath === node
+          && (['slot', 'strut', 'slot-tag'].includes(triggerEvent.mode)
+            ? (entry.nodePath ?? programPath) === node
             : entry.contract.parameters?.nodes?.includes(node));
         const changedMatch = triggerEvent.mode === 'transform'
           && entry.changedThings?.includes(node);
@@ -2395,8 +2556,10 @@ export class ProgramRuntimeScheduler {
 
   async refresh(atoms, options = {}) {
     const preparedTriggerEvent = options.triggerEvent ?? null;
-    if (preparedTriggerEvent?.mode === 'slot'
-      && !validSlotTriggerEvent(preparedTriggerEvent)) {
+    if ((preparedTriggerEvent?.mode === 'slot'
+        && !validSlotTriggerEvent(preparedTriggerEvent))
+      || (preparedTriggerEvent?.mode === 'slot-tag'
+        && !validSlotTagTriggerEvent(preparedTriggerEvent))) {
       throw Object.assign(
         new Error('trigger event requires one valid transform, strut, or slot payload'),
         { code: 'INVALID_PROGRAM_TRIGGER_EVENT' }
@@ -2439,7 +2602,7 @@ export class ProgramRuntimeScheduler {
       }
       const eventNodes = new Set((preparedTriggerEvent.nodes ?? []).map((node) => node.trim()));
       const activeScopePath = agentScopePath(options.agentOrigin);
-      if (preparedTriggerEvent.mode !== 'slot') {
+      if (!['slot', 'slot-tag'].includes(preparedTriggerEvent.mode)) {
         for (const [programPath, dependency] of this.programReadDependencies) {
           if (dependency.contextDependent === true && dependency.scopePath !== activeScopePath) continue;
           if (dependency.requests.some((request) => requestMayObserveEvent(request, eventNodes))) {
@@ -2520,17 +2683,18 @@ export class ProgramRuntimeScheduler {
     if (completed && completed.failures.length === 0) {
       const cached = completed;
       return this.overlayRequestDrivenLocks({
-        ...cached, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: []
+        ...cached, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: [], slotProvides: []
       }, options.agentOrigin);
     }
     if (this.inflight.has(key)) {
       return this.inflight.get(key).then((value) => ({
-        ...value, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: []
+        ...value, cached: true, messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: [], slotProvides: []
       }));
     }
 
     const attemptStrutDeliveryClaims = new Set();
     const attemptSlotSignalClaims = new Set();
+    const attemptSlotTagClaims = new Set();
     const pending = this.computeRefresh(atoms, options, {
       records,
       programs,
@@ -2540,10 +2704,12 @@ export class ProgramRuntimeScheduler {
       strutGraphDocument,
       changedStrutGraphPaths,
       attemptStrutDeliveryClaims,
-      attemptSlotSignalClaims
+      attemptSlotSignalClaims,
+      attemptSlotTagClaims
     }).catch((error) => {
       this.releaseStrutDeliveries([...attemptStrutDeliveryClaims]);
       this.releaseSlotSignals([...attemptSlotSignalClaims]);
+      this.releaseSlotTags([...attemptSlotTagClaims]);
       throw error;
     }).finally(() => this.inflight.delete(key));
     this.inflight.set(key, pending);
@@ -2559,7 +2725,8 @@ export class ProgramRuntimeScheduler {
     strutGraphDocument,
     changedStrutGraphPaths,
     attemptStrutDeliveryClaims,
-    attemptSlotSignalClaims
+    attemptSlotSignalClaims,
+    attemptSlotTagClaims
   }) {
     const cycleDeadline = Date.now() + this.timeoutMs;
     const agentProgramPaths = new Set(this.agentSecurity.keys());
@@ -2599,7 +2766,7 @@ export class ProgramRuntimeScheduler {
       programRoot: executionContext.programRoot ?? null
     }));
     const triggerEvent = options.triggerEvent ?? null;
-    if (triggerEvent && (!['transform', 'strut', 'slot'].includes(triggerEvent.mode)
+    if (triggerEvent && (!['transform', 'strut', 'slot', 'slot-tag'].includes(triggerEvent.mode)
       || !Array.isArray(triggerEvent.nodes)
       || triggerEvent.nodes.length === 0
       || triggerEvent.nodes.some((node) => typeof node !== 'string' || !node.trim())
@@ -2611,7 +2778,8 @@ export class ProgramRuntimeScheduler {
         || triggerEvent.deliveries.some((delivery) => delivery?.mode !== 'strut'
           || delivery.decision !== true
           || !triggerEvent.nodes.includes(delivery.consequentPath))))
-      || (triggerEvent.mode === 'slot' && !validSlotTriggerEvent(triggerEvent)))) {
+      || (triggerEvent.mode === 'slot' && !validSlotTriggerEvent(triggerEvent))
+      || (triggerEvent.mode === 'slot-tag' && !validSlotTagTriggerEvent(triggerEvent)))) {
       throw Object.assign(new Error('trigger event requires one valid transform, strut, or slot payload'), {
         code: 'INVALID_PROGRAM_TRIGGER_EVENT'
       });
@@ -2651,7 +2819,7 @@ export class ProgramRuntimeScheduler {
     const triggerIndexBackfilled = this.backfillTriggerIndexForEvent(triggerEvent);
     const eventNodes = new Set((triggerEvent?.nodes ?? []).map((node) => node.trim()));
     const triggeredProgramPaths = new Set();
-    if (triggerEvent && triggerEvent.mode !== 'slot') {
+    if (triggerEvent && !['slot', 'slot-tag'].includes(triggerEvent.mode)) {
       for (const node of eventNodes) {
         for (const programPath of this.triggerIndex.get(`${triggerEvent.mode}\0${node}`) ?? []) {
           triggeredProgramPaths.add(programPath);
@@ -2731,6 +2899,24 @@ export class ProgramRuntimeScheduler {
         }
       }
     }
+    const slotTagInvocationsByProgram = new Map();
+    if (triggerEvent?.mode === 'slot-tag') {
+      const seenSlotTags = new Set();
+      for (const packet of triggerEvent.packets) {
+        for (const programPath of this.triggerIndex.get(`slot-tag\0${packet.targetPath}`) ?? []) {
+          const entry = this.triggerContracts.get(programPath);
+          if ((entry?.nodePath ?? programPath) !== packet.targetPath
+            || !slotTagMatches(entry?.contract?.parameters, packet)) continue;
+          const claimKey = slotTagClaimKey(programPath, packet);
+          if (seenSlotTags.has(claimKey)) continue;
+          seenSlotTags.add(claimKey);
+          if (!slotTagInvocationsByProgram.has(programPath)) {
+            slotTagInvocationsByProgram.set(programPath, []);
+          }
+          slotTagInvocationsByProgram.get(programPath).push(packet);
+        }
+      }
+    }
     const fingerprintDependencies = (requests) => dependencyFingerprint(
       requests, executeExplore, records, dependencyCache
     );
@@ -2760,6 +2946,7 @@ export class ProgramRuntimeScheduler {
           shortcuts: [],
           slotBodies: [],
           slotSignals: [],
+          slotProvides: [],
           failures: structuredClone(reusable.value.failures ?? [])
         }, options.agentOrigin);
         this.completed.set(key, value);
@@ -2840,6 +3027,7 @@ export class ProgramRuntimeScheduler {
           || slotInvocationsByProgram.has(program.path)
           || strutInvocationsByProgram.has(program.path)
           || slotSignalInvocationsByProgram.has(program.path)
+          || slotTagInvocationsByProgram.has(program.path)
         ))
       : programs;
     const operationEntries = indexedPrograms.flatMap((program) => {
@@ -2863,10 +3051,16 @@ export class ProgramRuntimeScheduler {
           program, slotInvocation: null, strutDelivery: null, slotSignal
         }));
       }
-      return [{ program, slotInvocation: null, strutDelivery: null, slotSignal: null }];
+      const slotTagPackets = slotTagInvocationsByProgram.get(program.path) ?? [];
+      if (slotTagPackets.length) {
+        return slotTagPackets.map((slotTagPacket) => ({
+          program, slotInvocation: null, strutDelivery: null, slotSignal: null, slotTagPacket
+        }));
+      }
+      return [{ program, slotInvocation: null, strutDelivery: null, slotSignal: null, slotTagPacket: null }];
     });
     const operations = operationEntries.map(async ({
-      program, slotInvocation, strutDelivery, slotSignal
+      program, slotInvocation, strutDelivery, slotSignal, slotTagPacket = null
     }) => {
       const dormantKey = programSetFingerprint(
         [program], isolateFailures, records, agentProgramPaths
@@ -2894,7 +3088,7 @@ export class ProgramRuntimeScheduler {
           || (!previous
             && this.relocationPreparedReadPrograms.has(program.path)
             && dependencyTriggeredProgramPaths.has(program.path))
-          || Boolean(strutDelivery) || Boolean(slotSignal));
+          || Boolean(strutDelivery) || Boolean(slotSignal) || Boolean(slotTagPacket));
       if (dormantFailure
         && options.force !== true
         && !forcedByTrigger
@@ -2927,8 +3121,9 @@ export class ProgramRuntimeScheduler {
             transforms: [],
             shortcuts: [],
             slotBodies: [],
-            slotSignals: []
-          } : { locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: [], choices: [], trigger: null },
+            slotSignals: [],
+            slotProvides: []
+          } : { locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: [], slotProvides: [], choices: [], trigger: null },
           cached: true,
           requests: previous?.requests ?? [],
           contextDependent: previous?.contextDependent === true
@@ -2944,8 +3139,9 @@ export class ProgramRuntimeScheduler {
             transforms: [],
             shortcuts: [],
             slotBodies: [],
-            slotSignals: []
-          } : { locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: [], choices: [], trigger: null },
+            slotSignals: [],
+            slotProvides: []
+          } : { locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: [], slotProvides: [], choices: [], trigger: null },
           cached: true,
           requests: previous?.requests ?? [],
           contextDependent: previous?.contextDependent === true
@@ -2965,7 +3161,8 @@ export class ProgramRuntimeScheduler {
               transforms: [],
               shortcuts: [],
               slotBodies: [],
-              slotSignals: []
+              slotSignals: [],
+              slotProvides: []
             },
             cached: true,
             requests: previous.requests,
@@ -2981,6 +3178,9 @@ export class ProgramRuntimeScheduler {
       ].join('\0') : null;
       const slotSignalExecutionKey = slotSignal
         ? slotSignalClaimKey(program.path, slotSignal)
+        : null;
+      const slotTagExecutionKey = slotTagPacket
+        ? slotTagClaimKey(program.path, slotTagPacket)
         : null;
       let claimedDelivery = false;
       if (deliveryExecutionKey) {
@@ -3048,6 +3248,39 @@ export class ProgramRuntimeScheduler {
           claimedSlotSignal = true;
         }
       }
+      let claimedSlotTag = false;
+      if (slotTagExecutionKey) {
+        while (!claimedSlotTag) {
+          const existing = this.slotTagExecutions.get(slotTagExecutionKey);
+          if (existing) {
+            const status = existing.status === 'confirmed'
+              ? 'confirmed'
+              : await existing.finalized;
+            if (status === 'confirmed') {
+              return {
+                programPath: program.path,
+                result: {
+                  locks: [], messages: [], transforms: [], shortcuts: [], slotBodies: [], slotSignals: [], slotProvides: [], choices: [],
+                  trigger: null
+                },
+                cached: true,
+                requests: [],
+                contextDependent: false
+              };
+            }
+            continue;
+          }
+          let resolveFinalization;
+          const finalized = new Promise((resolve) => { resolveFinalization = resolve; });
+          this.slotTagExecutions.set(slotTagExecutionKey, {
+            status: 'claimed',
+            finalized,
+            resolve: resolveFinalization
+          });
+          attemptSlotTagClaims.add(slotTagExecutionKey);
+          claimedSlotTag = true;
+        }
+      }
 
       const requests = [];
       const executionStartedAt = performance.now();
@@ -3072,7 +3305,7 @@ export class ProgramRuntimeScheduler {
             scopeRoot: effectiveScopeRoot,
             programRoot: slotInvocation?.programRoot ?? options.slotScopeRoot ?? null,
             invokeMain: false,
-            programArguments: slotSignal ?? strutDelivery ?? (slotInvocation ? {
+            programArguments: slotTagPacket ?? slotSignal ?? strutDelivery ?? (slotInvocation ? {
               event: {
                 mode: triggerEvent.mode,
                 path: slotInvocation.eventPath,
@@ -3163,6 +3396,7 @@ export class ProgramRuntimeScheduler {
           result,
           ...(deliveryExecutionKey ? { strutDeliveryClaim: deliveryExecutionKey } : {}),
           ...(slotSignalExecutionKey ? { slotSignalClaim: slotSignalExecutionKey } : {}),
+          ...(slotTagExecutionKey ? { slotTagClaim: slotTagExecutionKey } : {}),
           cached: false,
           requests: uniqueRequests,
           contextDependent,
@@ -3174,14 +3408,15 @@ export class ProgramRuntimeScheduler {
         return operation;
       } catch (error) {
         const describedFailure = describeProgramFailure(error, program);
-        const failure = strutDelivery || slotSignal
+        const failure = strutDelivery || slotSignal || slotTagPacket
           ? {
               ...describedFailure,
               blocking: true,
               details: {
                 ...(describedFailure.details ?? {}),
                 ...(strutDelivery ? { strutDelivery: strutDeliveryKey(strutDelivery) } : {}),
-                ...(slotSignal ? { slotSignal: slotSignal.id } : {})
+                ...(slotSignal ? { slotSignal: slotSignal.id } : {}),
+                ...(slotTagPacket ? { slotTagPacket: slotTagPacket.id } : {})
               }
             }
           : describedFailure;
@@ -3218,6 +3453,7 @@ export class ProgramRuntimeScheduler {
           };
           if (claimedDelivery) this.releaseStrutDeliveries([deliveryExecutionKey]);
           if (claimedSlotSignal) this.releaseSlotSignals([slotSignalExecutionKey]);
+          if (claimedSlotTag) this.releaseSlotTags([slotTagExecutionKey]);
           return operation;
         }
         if (isolateFailures) {
@@ -3243,6 +3479,7 @@ export class ProgramRuntimeScheduler {
         };
         if (claimedDelivery) this.releaseStrutDeliveries([deliveryExecutionKey]);
         if (claimedSlotSignal) this.releaseSlotSignals([slotSignalExecutionKey]);
+        if (claimedSlotTag) this.releaseSlotTags([slotTagExecutionKey]);
         return operation;
       }
         throw error;
@@ -3290,6 +3527,11 @@ export class ProgramRuntimeScheduler {
       .map((entry) => entry.slotSignalClaim)
       .filter(Boolean);
     this.releaseSlotSignals(ignoredSlotSignalClaims);
+    const ignoredSlotTagClaims = settled
+      .filter((entry) => entry.contextDependent === true && !scopePath)
+      .map((entry) => entry.slotTagClaim)
+      .filter(Boolean);
+    this.releaseSlotTags(ignoredSlotTagClaims);
     const contextIncomplete = settled.some((entry) => (
       entry.contextDependent === true && !scopePath
     ));
@@ -3342,6 +3584,9 @@ export class ProgramRuntimeScheduler {
       slotSignalClaims: applicable
         .filter((entry) => entry.cached === false && entry.result && entry.slotSignalClaim)
         .map((entry) => entry.slotSignalClaim),
+      slotTagClaims: applicable
+        .filter((entry) => entry.cached === false && entry.result && entry.slotTagClaim)
+        .map((entry) => entry.slotTagClaim),
       executedProgramPaths: applicable
         .filter((entry) => entry.cached === false && entry.result)
         .map((entry) => entry.programPath),

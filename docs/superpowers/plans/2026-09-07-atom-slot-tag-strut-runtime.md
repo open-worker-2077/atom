@@ -46,11 +46,11 @@
 - Modify: `work-engine/atom-language/strut-runtime.mjs`
 - Create: `tests/atom-slot-tag-scheduling.test.mjs`
 
-- [ ] RED: the line Program receives the current wave's packet and same-revision fact context, then zero `slot_provide()` calls means no output and one call means one multi-label output; strict boolean return does not drive target propagation.
-- [ ] RED: downstream `all` and `exact` receivers execute only on their declared node; plain text nodes, Programs without `slot_receive`, and unrelated labels remain still.
-- [ ] RED: a causal scene is ephemeral. Each strut runs at most once in that scene and emits at most one packet; a later external ingress is a new scene. The kernel adds no hidden Program, default pass-through, historical accumulation, global broadcast or application-specific cycle policy.
-- [ ] GREEN: add a scene-local wave queue to the existing scheduler, retain packet identity only until the scene settles, and route receiver/line Program effects through current bounded execution and claim lifecycle.
-- [ ] Verify: scheduling, concurrency/isolation, Program failure and projection-lifecycle gates; commit `feat(slot): execute tag causal scenes`.
+- [x] RED: the line Program receives the current wave's packet and same-revision fact context, then zero `slot_provide()` calls means no output and one call means one multi-label output; strict boolean return does not drive target propagation.
+- [x] RED: downstream `all` and `exact` receivers execute only on their declared node; plain text nodes, Programs without `slot_receive`, and unrelated labels remain still.
+- [x] RED: a causal scene is ephemeral. Each strut runs at most once in that scene and emits at most one packet; a later external ingress is a new scene. The kernel adds no hidden Program, default pass-through, historical accumulation, global broadcast or application-specific cycle policy.
+- [x] GREEN: add a scene-local wave queue to the existing scheduler, retain packet identity only until the scene settles, and route receiver/line Program effects through current bounded execution and claim lifecycle.
+- [x] Verify: scheduling, concurrency/isolation, Program failure and projection-lifecycle gates pass `134/134`; commit `feat(slot): execute tag causal scenes`.
 
 ## Task 4: Join `$act`, fact commits and Program effects without coupling them
 
