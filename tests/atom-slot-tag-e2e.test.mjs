@@ -4,6 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import {
+  executeAtomCommandEndpoint,
+  runAtomCli
+} from '../work-engine/atom-language/cli.mjs';
+import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
@@ -54,6 +59,25 @@ function causalWorld(receiverSource, sourceSlot = []) {
   ];
 }
 
+async function runPublicCli(endpoint, agent, source) {
+  let stdout = '';
+  let stderr = '';
+  let result = null;
+  const code = await runAtomCli([
+    '--endpoint', endpoint, '--agent', agent, ...source
+  ], {
+    execute: async (options, actualEndpoint) => {
+      result = await executeAtomCommandEndpoint(options, actualEndpoint);
+      return result;
+    },
+    requireAgent: true,
+    remoteAgentResolution: true,
+    stdout: { isTTY: false, write(value) { stdout += value; } },
+    stderr: { write(value) { stderr += value; } }
+  });
+  return { code, stdout, stderr, result };
+}
+
 test('$act starts one Graph-strut tag scene and persists the matching receiver effect', async (t) => {
   const files = await fixture(t, causalWorld([
     'def receive(packet):',
@@ -69,6 +93,54 @@ test('$act starts one Graph-strut tag scene and persists the matching receiver e
   assert.equal(result.subsequentExecution.status, 'completed', JSON.stringify(result));
   assert.equal(situationAt(world, '木头'), '现成');
   assert.equal(situationAt(world, '火'), '已点燃');
+});
+
+test('public CLI completes a tag strut scene and cold-starts from the persisted result', async (t) => {
+  const files = await fixture(t, [atom('操作Agent', [
+    'agent({"labels":[],"functions":{"groups":[],"names":["explore","slot_provide","slot_receive","transform"]}})'
+  ].join('\n'), [
+    atom('木头', '现成', [], [{
+      'if@current': true,
+      if: [{ program: [
+        'def main(packet):',
+        '    slot_provide(["点燃","人工介入"])'
+      ].join('\n') }],
+      then: [{ thing: '操作Agent/火' }]
+    }]),
+    atom('火', '未点燃', [program('接收点燃', [
+      'def receive(packet):',
+      '    transform({"thing":"操作Agent/火","situation.rep.已点燃":None})',
+      'slot_receive({"labels":["点燃"],"match":"all"}, receive)'
+    ].join('\n'))])
+  ], [], 'program')]);
+  const storeFile = path.join(path.dirname(files.contextFile), 'knowledge.json');
+  let running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0,
+    contextFile: files.contextFile, graphFile: files.projectionFile, storeFile
+  });
+  t.after(async () => running?.close());
+
+  const acted = await runPublicCli(
+    `${running.url}/__atom/api/command`,
+    '操作Agent',
+    ['transform', '{"thing$act=钻木取火|人工介入":"操作Agent/木头"}']
+  );
+  assert.equal(acted.code, 0, acted.stderr);
+  assert.match(acted.stdout, /"thing~updated"\s*:\s*"木头"/u);
+  assert.equal(acted.result.subsequentExecution.status, 'completed', JSON.stringify(acted.result));
+
+  await running.close();
+  running = await startAtomGraphServer({
+    host: '127.0.0.1', port: 0,
+    contextFile: files.contextFile, graphFile: files.projectionFile, storeFile
+  });
+  const readBack = await runPublicCli(
+    `${running.url}/__atom/api/command`,
+    '操作Agent',
+    ['explore', '{"thing":"操作Agent/火","situation$full":true}']
+  );
+  assert.equal(readBack.code, 0, readBack.stderr);
+  assert.match(readBack.stdout, /已点燃/u);
 });
 
 test('an ordinary fact Transform does not manufacture a canonical tag packet', async (t) => {

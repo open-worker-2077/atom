@@ -50,7 +50,7 @@ test('CLI Transform $click executes the Strut-owned predicate and delivers true 
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), world);
 });
 
-test('CLI Transform $act delivers its label packet through the ordinary action context without mutating facts', async (t) => {
+test('CLI Transform $act does not re-enter the retired strict-bool Strut action path', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-inline-strut-act-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -82,7 +82,7 @@ test('CLI Transform $act delivers its label packet through the ordinary action c
 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.changed, false);
-  assert.deepEqual(result.messages.map(({ text }) => text), ['标签已接收']);
+  assert.deepEqual(result.messages, []);
   assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), world);
 });
 

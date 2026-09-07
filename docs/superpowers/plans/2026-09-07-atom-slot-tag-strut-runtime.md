@@ -78,12 +78,12 @@
 - [x] Inventory active non-backup strict-bool Strut and adjacent Slot declarations with the read-only `inventory-slot-tag-runtime.mjs`; immutable logs and the typed default-backup subtree are separated. Production result: zero adjacent `slot()/signal()`, zero canonical declarations, twelve literal strict-bool line Programs and five unclassified line Programs.
 - [x] Convert behavior-preserving active declarations only when the mapping is exact. Current exact conversion count is zero: the seventeen active line Programs contain business predicates but no user-owned output label contract, so inventing labels would change meaning. They remain listed on the compatibility path and production facts remain byte-untouched.
 - [x] Keep public compatibility functions while the exact remaining adapter count is seventeen. Do not claim the old runtime removed; public removal is conditional on a later application-owned label migration reducing that count to zero.
-- [ ] Run only the Graph impact gates identified above, one private-world migration/readback journey, and one formal CLI/API journey. Record exact remaining adapter count; zero is required before declaring the old runtime removed.
-- [ ] Commit `feat(slot): inventory legacy strut signals`.
+- [x] Run only the Graph impact gates identified above, one private-world migration/readback journey, and one formal CLI/API journey. The public CLI used an isolated random-port Graph service and proved `$act → line Program → slot_receive → Transform`, followed by cold-start exact readback. The direct set passes `48/48`; the remaining compatibility count is seventeen, so the old runtime is explicitly not declared removed.
+- [x] Commit `feat(slot): inventory legacy strut signals` (`f2622d3`).
 
 ## Task 6: Review, backup and controlled deployment
 
-- [ ] Run GitNexus change detection and direct impact review. Resolve every Critical/Important finding.
-- [ ] Reuse the affected evidence for unchanged revisions; do not run whole-software full tests.
+- [x] Run GitNexus change detection and direct impact review. Exact symbol impact is LOW: `reconcileProgramsForWorld` has one direct production caller and `routeSlotTagPackets` has one direct scheduler caller. Change-count classification is broad because the feature necessarily crosses registry, worker, scheduler and engine; the identified execution paths are covered by the `48/48` direct set and the earlier `218/219` run whose sole failure was reproduced on the baseline.
+- [x] Reuse the affected evidence for unchanged revisions; do not run whole-software full tests.
 - [ ] Create a private hashed production backup, deploy through the existing Runtime/Watchdog tasks, and verify health, projection status, source hash conservation, `$act` ingress, one plant provider, one line Program and one matching receiver through formal entry points.
 - [ ] Update the unique ledger by user-visible capability/bug axes, commit, and attempt the already-authorized remote safety push. A remote approval failure remains local to that push and cannot suspend product work.
