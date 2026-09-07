@@ -1270,6 +1270,8 @@ test('committed Human Web facts are acknowledged before Agent resolution authori
   let releaseAuthorityRefresh;
   const authorityRefresh = new Promise((resolve) => { releaseAuthorityRefresh = resolve; });
   let authorityRefreshStarted = false;
+  let sourceDeliveryTurnReached = false;
+  let authorityRefreshStartedBeforeSourceDelivery = false;
   const committed = {
     ok: true,
     changed: true,
@@ -1292,6 +1294,7 @@ test('committed Human Web facts are acknowledged before Agent resolution authori
       },
       async readCommittedSnapshot() {
         authorityRefreshStarted = true;
+        authorityRefreshStartedBeforeSourceDelivery = !sourceDeliveryTurnReached;
         await authorityRefresh;
         return { facts: [], revision: 'sha256:rev-2', compatibilityManifest: null };
       }
@@ -1311,7 +1314,10 @@ test('committed Human Web facts are acknowledged before Agent resolution authori
   const execution = runtime.updateHumanWorkspace({
     operation: { kind: 'node-create' },
     correlationId: 'web-source-before-authority-refresh'
-  }, { onCommitted: notifyCommitted });
+  }, { onCommitted: (result) => {
+    notifyCommitted(result);
+    setImmediate(() => { sourceDeliveryTurnReached = true; });
+  } });
 
   let first;
   try {
@@ -1326,6 +1332,8 @@ test('committed Human Web facts are acknowledged before Agent resolution authori
 
   assert.equal(authorityRefreshStarted, true);
   assert.equal(first, 'source-acknowledged');
+  assert.equal(authorityRefreshStartedBeforeSourceDelivery, false,
+    'the HTTP delivery turn must run before post-commit authority rebuilding starts');
 });
 
 test('legacy composition routes feedback through the configured recorder with world paths', async () => {

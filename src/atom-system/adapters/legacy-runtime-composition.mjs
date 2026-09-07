@@ -460,6 +460,10 @@ export function createLegacyRuntimeComposition(options) {
             onCommitted: async (committed) => {
               resolutionAuthorityReady = false;
               const notification = await request.onCommitted(committed);
+              // The source callback resolves the HTTP receipt, but the socket can
+              // only flush on an event-loop turn. Yield before rebuilding the
+              // large post-commit Agent authority snapshot.
+              await new Promise((resolve) => setImmediate(resolve));
               await refreshResolutionAuthority();
               return notification;
             }
