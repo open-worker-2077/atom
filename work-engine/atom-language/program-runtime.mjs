@@ -2796,6 +2796,7 @@ export class ProgramRuntimeScheduler {
       const decisions = await evaluateStrutClausesWithPrograms(graphDocument, {
         changedPaths: graphChangedPaths,
         evaluateProgram: (predicate, { clause }) => {
+          if (/\bslot_provide\s*\(/u.test(predicate.source)) return false;
           const antecedentPath = graphDocument.atomPathByGraphPath?.get(clause.antecedentPaths?.[0]);
           const scopeRoot = slotScopeRoot(antecedentPath);
           return this.evaluateInlineStrutProgram(atoms, predicate, {

@@ -873,23 +873,31 @@ export async function executeAtomLanguage(options = {}) {
 async function executeAtomLanguageInteraction(options, postcommit) {
   const pendingStrutDeliveryClaims = new Set();
   const pendingSlotSignalClaims = new Set();
+  const pendingSlotTagClaims = new Set();
   function rememberStrutDeliveryClaims(keys = []) {
     for (const key of keys) if (key) pendingStrutDeliveryClaims.add(key);
   }
   function rememberSlotSignalClaims(keys = []) {
     for (const key of keys) if (key) pendingSlotSignalClaims.add(key);
   }
+  function rememberSlotTagClaims(keys = []) {
+    for (const key of keys) if (key) pendingSlotTagClaims.add(key);
+  }
   function confirmStrutDeliveryClaims() {
     options.programScheduler?.confirmStrutDeliveries?.([...pendingStrutDeliveryClaims]);
     options.programScheduler?.confirmSlotSignals?.([...pendingSlotSignalClaims]);
+    options.programScheduler?.confirmSlotTags?.([...pendingSlotTagClaims]);
     pendingStrutDeliveryClaims.clear();
     pendingSlotSignalClaims.clear();
+    pendingSlotTagClaims.clear();
   }
   function releaseStrutDeliveryClaims() {
     options.programScheduler?.releaseStrutDeliveries?.([...pendingStrutDeliveryClaims]);
     options.programScheduler?.releaseSlotSignals?.([...pendingSlotSignalClaims]);
+    options.programScheduler?.releaseSlotTags?.([...pendingSlotTagClaims]);
     pendingStrutDeliveryClaims.clear();
     pendingSlotSignalClaims.clear();
+    pendingSlotTagClaims.clear();
   }
   function failureBase(...args) {
     releaseStrutDeliveryClaims();
@@ -1219,6 +1227,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           shortcuts: [],
           slotBodies: [],
           slotSignals: [],
+          slotProvides: [],
           jumps: [],
           jumpAuthorizations: [],
           agentRegistrations: []
@@ -1996,11 +2005,64 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     const programChangedPaths = new Set();
     let finalLockIndex = programLockIndex;
     let finalGraphLocks = graphLocks;
-    const pendingTriggerEvents = Array.isArray(initialTriggerEvent)
+    const initialTriggerEvents = Array.isArray(initialTriggerEvent)
       ? [...initialTriggerEvent]
       : initialTriggerEvent ? [initialTriggerEvent] : [];
+    const actIngress = initialTriggerEvents.find((event) => (
+      event?.mode === 'transform'
+      && event.action?.action === 'act'
+      && typeof event.action?.targetPath === 'string'
+      && Array.isArray(event.action?.payload?.labels)
+    )) ?? null;
+    const pendingTriggerEvents = initialTriggerEvents.filter((event) => event !== actIngress);
+    let slotTagScene = actIngress ? {
+      id: `${interaction.id}:slot-tag`,
+      visitedClauseIds: new Set()
+    } : null;
     const pendingAuthorizedTriggers = new Map();
-    const maxPasses = 8;
+    const maxPasses = Math.max(8, projectAtomContext(candidateAtoms, {
+      rootName: path.basename(contextFile),
+      allowLegacyStrut: Boolean(options.compatibilityManifest)
+    }).strutClauses.length + 8);
+
+    async function enqueueSlotTagWave(baseAtoms, providers) {
+      if ((providers?.length ?? 0) === 0) return 0;
+      slotTagScene ??= {
+        id: `${interaction.id}:slot-tag`,
+        visitedClauseIds: new Set()
+      };
+      const wave = await runtimeScheduler.evaluateSlotTagWave(baseAtoms, providers, {
+        scene: slotTagScene.id,
+        revision: revisionOfWorldFacts(baseAtoms),
+        visitedClauseIds: slotTagScene.visitedClauseIds
+      });
+      if (wave.deliveries.length > 0) {
+        pendingTriggerEvents.push({
+          mode: 'slot-tag',
+          nodes: [...new Set(wave.deliveries.map(({ targetPath }) => targetPath))],
+          packets: wave.deliveries
+        });
+      }
+      return wave.deliveries.length;
+    }
+
+    if (actIngress) {
+      await enqueueSlotTagWave(reconciledAtoms, [{
+        sourceProgramPath: '@external/act',
+        sourceNodePath: actIngress.action.targetPath,
+        labels: actIngress.action.payload.labels
+      }]);
+      if (pendingTriggerEvents.length === 0) {
+        return {
+          atoms: reconciledAtoms,
+          lockIndex: finalLockIndex,
+          messages,
+          transformLogs,
+          pathChanges,
+          changedPaths: [...programChangedPaths]
+        };
+      }
+    }
 
     async function applyTriggeredJumpAuthorizations(baseAtoms, effects, relocations) {
       if ((effects?.length ?? 0) === 0) {
@@ -2370,6 +2432,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       }
       rememberStrutDeliveryClaims(cycle.strutDeliveryClaims);
       rememberSlotSignalClaims(cycle.slotSignalClaims);
+      rememberSlotTagClaims(cycle.slotTagClaims);
       await recordTransformStage('reconcile', refreshStartedAt, {
         ...(cycle.reconcileSummary ?? {})
       });
@@ -2428,6 +2491,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         && (cycle.shortcuts?.length ?? 0) === 0
         && (cycle.slotBodies?.length ?? 0) === 0
         && (cycle.slotSignals?.length ?? 0) === 0
+        && (cycle.slotProvides?.length ?? 0) === 0
         && (cycle.jumps?.length ?? 0) === 0
         && (cycle.jumpAuthorizations?.length ?? 0) === 0
         && (cycle.agentRegistrations?.length ?? 0) === 0;
@@ -2473,6 +2537,13 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           slotSignalClaimsByProgram.set(programPath, claim);
         }
       }
+      const slotTagClaimsByProgram = new Map();
+      for (const claim of cycle.slotTagClaims ?? []) {
+        const programPath = claim.split('\0', 1)[0];
+        if (programPath && !slotTagClaimsByProgram.has(programPath)) {
+          slotTagClaimsByProgram.set(programPath, claim);
+        }
+      }
       for (const request of cycle.transforms ?? []) {
         const {
           sourceProgramRef: _sourceProgramRef,
@@ -2483,6 +2554,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           ...rawTransformRequest
         } = request;
         const sourceSlotSignalClaim = slotSignalClaimsByProgram.get(sourceProgramPath) ?? null;
+        const sourceSlotTagClaim = slotTagClaimsByProgram.get(sourceProgramPath) ?? null;
         let transformRequest;
         try {
           transformRequest = normalizeScopedTransformRequest({
@@ -2492,7 +2564,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
             programRoot: sourceProgramRoot
           });
         } catch (error) {
-          if (sourceStrutDeliveryClaim || sourceSlotSignalClaim
+          if (sourceStrutDeliveryClaim || sourceSlotSignalClaim || sourceSlotTagClaim
             || programDeclaresSlotSeal(cycle.slotBodies, sourceProgramPath)) {
             throw Object.assign(new Error(error.message), {
               code: error.code ?? 'INVALID_PROGRAM_TRANSFORM',
@@ -2507,7 +2579,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         }
         const compiled = compileProgramTransform({ request: transformRequest, receiver });
         if (!compiled.ok) {
-          if (sourceStrutDeliveryClaim || sourceSlotSignalClaim
+          if (sourceStrutDeliveryClaim || sourceSlotSignalClaim || sourceSlotTagClaim
             || programDeclaresSlotSeal(cycle.slotBodies, sourceProgramPath)) {
             throw Object.assign(new Error(
               compiled.errors?.[0]?.message ?? 'Program transform 无法编译'
@@ -2529,6 +2601,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           sourceProgramRoot,
           sourceStrutDeliveryClaim,
           sourceSlotSignalClaim,
+          sourceSlotTagClaim,
           transformRequest,
           item: compiled.item,
           createNew: compiled.createNew
@@ -2546,6 +2619,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         && (cycle.shortcuts?.length ?? 0) === 0
         && (cycle.slotBodies?.length ?? 0) === 0
         && (cycle.slotSignals?.length ?? 0) === 0
+        && (cycle.slotProvides?.length ?? 0) === 0
         && (cycle.jumpAuthorizations?.length ?? 0) === 0
         && (cycle.jumps?.filter((jump) => jump.action !== 'guard').length ?? 0) === 0
         && pendingTriggerEvents.length === 0) {
@@ -2611,6 +2685,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
                 });
           } catch (error) {
             if (entry.sourceStrutDeliveryClaim || entry.sourceSlotSignalClaim
+              || entry.sourceSlotTagClaim
               || programDeclaresSlotSeal(cycle.slotBodies, entry.sourceProgramPath)) {
               return {
                 failed: true,
@@ -2653,6 +2728,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
               exactIndex = createExactTransformIndex(candidateAtoms);
             }
             if (entry.sourceStrutDeliveryClaim || entry.sourceSlotSignalClaim
+              || entry.sourceSlotTagClaim
               || programDeclaresSlotSeal(cycle.slotBodies, entry.sourceProgramPath)) {
               return {
                 failed: true,
@@ -2794,7 +2870,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         [...pathChanges, ...applicationRelocations]
       );
       if (authorization.error) {
-        if ((cycle.slotSignalClaims?.length ?? 0) > 0) {
+        if ((cycle.slotSignalClaims?.length ?? 0) > 0
+          || (cycle.slotTagClaims?.length ?? 0) > 0) {
           throw Object.assign(new Error(authorization.error.message), {
             code: authorization.error.code,
             details: authorization.error.details ?? {}
@@ -2809,7 +2886,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       }
       const jump = await applyTriggeredJump(application.atoms, cycle.jumps);
       if (jump.error) {
-        if ((cycle.slotSignalClaims?.length ?? 0) > 0) {
+        if ((cycle.slotSignalClaims?.length ?? 0) > 0
+          || (cycle.slotTagClaims?.length ?? 0) > 0) {
           throw Object.assign(new Error(jump.error.message), {
             code: jump.error.code,
             details: jump.error.details ?? {}
@@ -2854,6 +2932,16 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           signals: deliveries
         }
         : null;
+      const relocatedSlotTagProviders = (cycle.slotProvides ?? []).map((effect) => ({
+        ...effect,
+        sourceProgramPath: rewritePath(
+          effect.sourceProgramPath, [...pathChanges, ...cycleRelocations]
+        ),
+        sourceNodePath: rewritePath(
+          effect.sourceNodePath, [...pathChanges, ...cycleRelocations]
+        )
+      }));
+      await enqueueSlotTagWave(application.atoms, relocatedSlotTagProviders);
       const after = revisionOf(application.atoms);
       performanceTrace('program-reconcile-apply', {
         pass,

@@ -59,11 +59,11 @@
 - Modify: `work-engine/atom-language/transform-executor.mjs` only if the action envelope lacks an exact target packet field.
 - Create: `tests/atom-slot-tag-e2e.test.mjs`
 
-- [ ] RED: `transform {"thing$act=钻木取火|人工介入":"世界/木头"}` creates one scene at the exact target after existing Agent write authorization and does not mutate facts.
-- [ ] RED: a normal Transform commits its fact independently; only an explicitly running provider Program may emit a packet. Downstream Program failure cannot revoke the source fact receipt and must be reported as the subsequent execution result.
-- [ ] RED: receiver Transform effects use existing authorization and local atomic commit logic; labels never lend authority. One receiver failure does not corrupt facts or leak a half packet into a later scene.
-- [ ] GREEN: translate `$act` and Program provider output into the same canonical ingress shape and queue it through `reconcileProgramsForWorld`; preserve source/subsequent receipt separation.
-- [ ] Verify: `$act`, postcommit boundary, local atomic, Engine and public random-port CLI journeys; commit `feat(slot): connect act to tag causal runtime`.
+- [x] RED: `transform {"thing$act=钻木取火|人工介入":"世界/木头"}` creates one scene at the exact target after existing Agent write authorization and does not mutate facts.
+- [x] RED: a normal Transform commits its fact independently; only an explicitly running provider Program may emit a packet. Downstream Program failure cannot revoke the source fact receipt and must be reported as the subsequent execution result.
+- [x] RED: receiver Transform effects use existing authorization and local atomic commit logic; labels never lend authority. One receiver failure does not corrupt facts or leak a half packet into a later scene.
+- [x] GREEN: translate `$act` and Program provider output into the same canonical ingress shape and queue it through `reconcileProgramsForWorld`; preserve source/subsequent receipt separation.
+- [x] Verify: canonical contracts, Graph routing, scheduling, `$act`, authorization and legacy Strut isolation pass `33/33`; the broader direct run passes `218/219`, with its sole old Slot source-file assertion independently reproduced unchanged on baseline `e768d34` and therefore not attributed to this change. Commit `feat(slot): connect act to tag causal runtime`.
 
 ## Task 5: Migrate the old runtime through one adapter
 
