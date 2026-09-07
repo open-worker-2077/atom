@@ -18,11 +18,11 @@
 - Modify: `work-engine/atom-language/program-function-registry.json`
 - Create: `tests/atom-slot-tag-contract.test.mjs`
 
-- [ ] RED: prove `slot_provide(["标签一","标签二"])` produces exactly one packet for the current Program's containing node; a second call, empty/duplicate/invalid labels, or use outside an active causal invocation is rejected.
-- [ ] RED: prove `slot_receive({"labels":[...],"match":"all|exact"}, handler)` is a top-level declaration, contains no path/channel, and invokes `handler(packet)` only for a matching packet.
-- [ ] GREEN: replace the worker's public `slot()/signal()` contract with canonical `slot_provide()/slot_receive()` effects and AST declarations. Keep any old names in a private compatibility adapter, never in the canonical result type.
-- [ ] GREEN: compile receiver ownership as `containingNodePath + label condition -> Program`; a top-level Program uses its own path as the node anchor. Providers and receivers only declare labels; Graph resolves channels.
-- [ ] Verify: contract tests plus directly affected Python/registry tests; commit `feat(slot): define tag packet contracts`.
+- [x] RED: prove `slot_provide(["标签一","标签二"])` produces exactly one packet for the current Program's containing node; a second call, empty/duplicate/invalid labels, or use outside an active causal invocation is rejected.
+- [x] RED: prove `slot_receive({"labels":[...],"match":"all|exact"}, handler)` is a top-level declaration, contains no path/channel, and invokes `handler(packet)` only for a matching packet.
+- [x] GREEN: add canonical `slot_provide()/slot_receive()` effects and AST declarations. Historical names remain temporarily available only for Task 5 migration and do not enter the canonical packet type.
+- [x] GREEN: compile provider ownership as the containing node (or the Program itself when top-level). Receiver declaration is source-derived and contains labels only; Task 2 binds its containing node into the Graph index.
+- [x] Verify: contract, Python runtime and registry tests pass `33/33`; commit `feat(slot): define tag packet contracts`.
 
 ## Task 2: Replace adjacent-tree routing with Graph-strut routing
 
@@ -87,4 +87,3 @@
 - [ ] Reuse the affected evidence for unchanged revisions; do not run whole-software full tests.
 - [ ] Create a private hashed production backup, deploy through the existing Runtime/Watchdog tasks, and verify health, projection status, source hash conservation, `$act` ingress, one plant provider, one line Program and one matching receiver through formal entry points.
 - [ ] Update the unique ledger by user-visible capability/bug axes, commit, and attempt the already-authorized remote safety push. A remote approval failure remains local to that push and cannot suspend product work.
-

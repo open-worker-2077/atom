@@ -54,7 +54,7 @@ test('Program function catalog filters declared groups without exposing a second
 
   assert.equal(
     cycle.messages[0].text,
-    'agent,changed,child_detail,direct_children,explore,jump,jump_authorize,lock,shortcut,slot,slot_body,subtree_refs,transform|False'
+    'agent,changed,child_detail,direct_children,explore,jump,jump_authorize,lock,shortcut,slot,slot_body,slot_provide,subtree_refs,transform|False'
   );
 });
 
@@ -106,7 +106,7 @@ test('CLI and Web expose equivalent function registry data without an Agent cont
   const webPayload = await response.json();
   assert.equal(webPayload.ok, true);
   assert.equal(webPayload.result.contract, 'atom-program-function-registry');
-  assert.equal(webPayload.result.version, 7);
+  assert.equal(webPayload.result.version, 8);
   assert.equal(webPayload.result.runtimeContract, 'atom-interaction/4');
 
   const stdout = output();
@@ -362,7 +362,7 @@ test('public registry exposes only the current adjacent Slot signal ABI', async 
   const signal = registry.functions.find((item) => item.name === 'signal');
   const trigger = registry.functions.find((item) => item.name === 'trigger');
 
-  assert.equal(registry.version, 7);
+  assert.equal(registry.version, 8);
   assert.deepEqual(slot.contract.argument, {
     type: 'object',
     required: ['to', 'labels'],

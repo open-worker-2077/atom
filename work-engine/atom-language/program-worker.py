@@ -46,7 +46,7 @@ def load_program_function_registry():
     value = json.loads(module_path.read_text(encoding="utf-8"))
     hierarchy = value.get("functionScopeHierarchy", {})
     if (value.get("contract") != "atom-program-function-registry"
-            or value.get("version") != 7
+            or value.get("version") != 8
             or value.get("runtimeContract") != "atom-interaction/4"
             or hierarchy.get("groupField") != "functionFamilies[].id"
             or hierarchy.get("parentField") != "functionFamilies[].parent"
@@ -220,6 +220,7 @@ ALLOWED_FUNCTIONS = {
     "sorted", "str", "sum", "tuple", "zip",
     "Exception", "ValueError", "TypeError",
     "explore", "transform", "lock", "message", "choice", "current_atom", "trigger", "slot", "signal",
+    "slot_provide", "slot_receive",
     "direct_children", "child_detail", "missing_details", "form_status",
     "first_pending", "transition_allowed", "subtree_refs", "plan_form_flow",
     "plan_template_instance", "plan_shards", "instantiate", "template_catalog",
@@ -296,6 +297,13 @@ def validate_program(source, filename, allowed_registered_functions=None):
 
 
 def extract_trigger_contract(tree):
+    slot_receives = [
+        node.value for node in tree.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "slot_receive"
+    ]
     declarations = [
         node.value for node in tree.body
         if isinstance(node, ast.Expr)
@@ -303,6 +311,73 @@ def extract_trigger_contract(tree):
         and isinstance(node.value.func, ast.Name)
         and node.value.func.id == "trigger"
     ]
+    all_slot_receives = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "slot_receive"
+    ]
+    if all_slot_receives and (len(slot_receives) != 1
+                              or len(all_slot_receives) != 1):
+        raise ProgramSecurityError(
+            "slot_receive() must be one top-level declaration"
+        )
+    if slot_receives and declarations:
+        raise ProgramSecurityError(
+            "Atom Program cannot declare both slot_receive() and trigger()"
+        )
+    if slot_receives:
+        declaration = slot_receives[0]
+        if declaration.keywords or len(declaration.args) != 2:
+            raise ProgramSecurityError(
+                "slot_receive() requires one literal label contract and one function reference"
+            )
+        try:
+            parameters = ast.literal_eval(declaration.args[0])
+        except (TypeError, ValueError, SyntaxError) as error:
+            raise ProgramSecurityError(
+                "slot_receive() label contract must be literal JSON-compatible data"
+            ) from error
+        if (not isinstance(parameters, dict)
+                or set(parameters) - {"labels", "match"}
+                or set(parameters) != {"labels", "match"}
+                or not isinstance(parameters["labels"], list)
+                or not parameters["labels"]
+                or any(not isinstance(value, str) or not value.isalnum()
+                       for value in parameters["labels"])
+                or len(set(parameters["labels"])) != len(parameters["labels"])
+                or parameters["match"] not in {"all", "exact"}):
+            raise ProgramSecurityError(
+                "slot_receive() requires only unique alphanumeric labels and match all or exact"
+            )
+        entrypoint_node = declaration.args[1]
+        if not isinstance(entrypoint_node, ast.Name):
+            raise ProgramSecurityError(
+                "slot_receive() second argument must be a function reference"
+            )
+        entrypoint = entrypoint_node.id
+        functions = {
+            node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+        }
+        function = functions.get(entrypoint)
+        if function is None:
+            raise ProgramSecurityError(
+                f"slot_receive() entrypoint is not defined: {entrypoint}"
+            )
+        if (function.args.posonlyargs or len(function.args.args) != 1
+                or function.args.vararg or function.args.kwonlyargs
+                or function.args.kwarg):
+            raise ProgramSecurityError(
+                "slot_receive() entrypoint must accept one packet argument"
+            )
+        return {
+            "mode": "slot-tag",
+            "parameters": {
+                "labels": list(parameters["labels"]),
+                "match": parameters["match"],
+            },
+            "entrypoint": entrypoint,
+        }
     if not declarations:
         return None
     if len(declarations) != 1:
@@ -553,7 +628,7 @@ def main():
     views = {ref: AtomView(record) for ref, record in by_ref.items()}
     effects = {
         "locks": [], "messages": [], "transforms": [], "choices": [],
-        "slotBodies": [], "slotSignals": [], "jumps": [], "jumpAuthorizations": [], "shortcuts": [], "agents": [], "changedThings": []
+        "slotBodies": [], "slotSignals": [], "slotProvides": [], "jumps": [], "jumpAuthorizations": [], "shortcuts": [], "agents": [], "changedThings": []
     }
 
     if request.get("agentDeclarationOnly") is True:
@@ -753,6 +828,38 @@ def main():
                 or value.get("mode") != "slot"):
             raise EngineCallError("SLOT_SIGNAL_REQUIRED", "signal() requires one active Slot signal invocation")
         return {"from": value["from"], "labels": list(value["labels"])}
+
+    def slot_provide(labels):
+        if request.get("triggered") is not True and request.get("invokeMain") is not True:
+            return None
+        if (not isinstance(labels, list) or not labels
+                or any(not isinstance(label, str) or not label.isalnum()
+                       for label in labels)
+                or len(set(labels)) != len(labels)):
+            raise EngineCallError(
+                "INVALID_SLOT_PROVIDE_LABELS",
+                "slot_provide() requires unique non-empty alphanumeric labels",
+            )
+        if effects["slotProvides"]:
+            raise EngineCallError(
+                "MULTIPLE_SLOT_PROVIDE_PACKETS",
+                "slot_provide() may emit only one packet in one causal invocation",
+            )
+        effects["slotProvides"].append({"labels": list(labels)})
+        return None
+
+    def slot_receive(specification, entrypoint):
+        if not callable(entrypoint):
+            raise TypeError("slot_receive() requires one function reference")
+        value = request.get("programArguments")
+        if (request.get("triggered") is True and isinstance(value, dict)
+                and value.get("mode") == "slot-tag"):
+            entrypoint({
+                "labels": list(value.get("labels", [])),
+                "scene": value.get("scene"),
+                "source": value.get("source"),
+            })
+        return None
 
     def trigger(mode, parameters, entrypoint):
         if request.get("triggered") is True:
@@ -1460,6 +1567,8 @@ def main():
         "trigger": trigger,
         "slot": slot,
         "signal": signal,
+        "slot_provide": slot_provide,
+        "slot_receive": slot_receive,
         "jump": jump,
         "jump_authorize": jump_authorize,
         "changed": changed,

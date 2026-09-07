@@ -1002,6 +1002,35 @@ export function validateProgramResult(result, records, program, options = {}) {
       ...(scopeRoot ? { sourceScopeRoot: scopeRoot } : {})
     };
   });
+  const rawSlotProvides = result.slotProvides ?? [];
+  if (!Array.isArray(rawSlotProvides)) {
+    throw Object.assign(new Error('slot_provide() must return an array of tag packet effects'), {
+      code: 'INVALID_SLOT_PROVIDE_EFFECT'
+    });
+  }
+  const sourceNodePath = recordsByRef.get(program.parentRef)?.path ?? program.path;
+  const slotProvides = rawSlotProvides.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || Object.keys(entry).length !== 1
+      || !Array.isArray(entry.labels) || entry.labels.length === 0
+      || entry.labels.some((label) => typeof label !== 'string'
+        || !/^[\p{L}\p{N}]+$/u.test(label))
+      || new Set(entry.labels).size !== entry.labels.length) {
+      throw Object.assign(new Error('slot_provide() returned an invalid tag packet'), {
+        code: 'INVALID_SLOT_PROVIDE_EFFECT'
+      });
+    }
+    return {
+      sourceProgramPath: program.path,
+      sourceNodePath,
+      labels: [...entry.labels]
+    };
+  });
+  if (slotProvides.length > 1) {
+    throw Object.assign(new Error('slot_provide() returned more than one packet'), {
+      code: 'MULTIPLE_SLOT_PROVIDE_PACKETS'
+    });
+  }
   const rawSlotSignals = result.slotSignals ?? [];
   if (!Array.isArray(rawSlotSignals)) {
     throw Object.assign(new Error('slot() must return an array of adjacent signal effects'), {
@@ -1153,7 +1182,7 @@ export function validateProgramResult(result, records, program, options = {}) {
   }
   const trigger = result.trigger == null ? null : structuredClone(result.trigger);
   if (strutDecision === true) {
-    if ([locks, messages, transforms, shortcuts, slotBodies, slotSignals, choices, jumps, agentRegistrations].some((entries) => entries.length > 0)) {
+    if ([locks, messages, transforms, shortcuts, slotBodies, slotSignals, slotProvides, choices, jumps, agentRegistrations].some((entries) => entries.length > 0)) {
       throw Object.assign(new Error('Strut-decision Program may only return bool and cannot emit effects'), {
         code: 'PROGRAM_STRUT_EFFECT_FORBIDDEN', details: { program: program.path }
       });
@@ -1165,7 +1194,7 @@ export function validateProgramResult(result, records, program, options = {}) {
     }
   }
   return {
-    locks, messages, transforms, shortcuts, slotBodies, slotSignals, choices, jumps, jumpAuthorizations,
+    locks, messages, transforms, shortcuts, slotBodies, slotSignals, slotProvides, choices, jumps, jumpAuthorizations,
     agentRegistrations, changedThings, trigger,
     ...(strutDecision === true ? { strutDecision: result.strutDecision } : {})
   };
@@ -2130,7 +2159,7 @@ export class ProgramRuntimeScheduler {
       this.agentSecurityWorldRevision ?? ''
     ].join('\0');
     const candidates = programs.filter((program) => (
-      /\b(?:trigger|changed)\s*\(/u.test(program.detail)
+      /\b(?:trigger|slot_receive|changed)\s*\(/u.test(program.detail)
       && this.triggerContracts.get(program.path)?.detail !== program.detail
       && (this.deferredTriggerContracts.get(program.path)?.context !== deferredContext
         || this.deferredTriggerContracts.get(program.path)?.detail !== program.detail)
@@ -3291,6 +3320,9 @@ export class ProgramRuntimeScheduler {
       slotBodies: results.flatMap((result) => result.slotBodies ?? []),
       slotSignals: applicable.flatMap((entry) => entry.cached === false
         ? entry.result?.slotSignals ?? []
+        : []),
+      slotProvides: applicable.flatMap((entry) => entry.cached === false
+        ? entry.result?.slotProvides ?? []
         : []),
       jumps: applicable.flatMap((entry) => entry.cached === false
         ? entry.result?.jumps ?? []

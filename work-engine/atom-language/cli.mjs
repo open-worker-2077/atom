@@ -107,7 +107,7 @@ export async function executeAtomProgramFunctionRegistryEndpoint(
     );
   }
   if (payload.result?.contract !== 'atom-program-function-registry'
-    || payload.result?.version !== 7
+    || payload.result?.version !== 8
     || payload.result?.runtimeContract !== ATOM_RUNTIME_CONTRACT) {
     throw cliError(
       'ATOM_RUNTIME_CONTRACT_MISMATCH',
