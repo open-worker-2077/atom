@@ -458,8 +458,10 @@ export function createLegacyRuntimeComposition(options) {
           programScheduler: programRuntime,
           ...(typeof request.onCommitted === 'function' ? {
             onCommitted: async (committed) => {
+              resolutionAuthorityReady = false;
+              const notification = await request.onCommitted(committed);
               await refreshResolutionAuthority();
-              return request.onCommitted(committed);
+              return notification;
             }
           } : {}),
           ...(diagnostics ? { diagnosticRecorder: diagnostics } : {})

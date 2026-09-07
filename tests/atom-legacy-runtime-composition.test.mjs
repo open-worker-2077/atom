@@ -1266,6 +1266,68 @@ test('legacy composition forwards a content-free closed interaction timing ledge
   assert.equal(stages.every((stage) => JSON.stringify(stage).includes('atom.json') === false), true);
 });
 
+test('committed Human Web facts are acknowledged before Agent resolution authority refresh finishes', async () => {
+  let releaseAuthorityRefresh;
+  const authorityRefresh = new Promise((resolve) => { releaseAuthorityRefresh = resolve; });
+  let authorityRefreshStarted = false;
+  const committed = {
+    ok: true,
+    changed: true,
+    command: 'transform',
+    revisionBefore: 'rev-1',
+    revisionAfter: 'rev-2',
+    warnings: [],
+    errors: [],
+    messages: [],
+    subsequentExecution: { status: 'pending', sourceRevision: 'rev-2', errors: [] }
+  };
+  const runtime = createLegacyRuntimeComposition({
+    contextFile: 'atom.json',
+    graphFile: 'graph.json',
+    programScheduler: {},
+    worldService: {
+      async executeLegacy(request) {
+        await request.onCommitted(committed);
+        return committed;
+      },
+      async readCommittedSnapshot() {
+        authorityRefreshStarted = true;
+        await authorityRefresh;
+        return { facts: [], revision: 'sha256:rev-2', compatibilityManifest: null };
+      }
+    },
+    projectionOrchestrator: {
+      projectCurrent: async () => ({ sourceRevision: 'rev-2', graph: {}, spatial: { nodes: [] } })
+    },
+    graphPublisher: { publish: async () => {} },
+    spatialPublisher: { publish: async () => {} },
+    feedbackRecorder: async () => ({ ok: true }),
+    agentResolver: async () => null,
+    humanStatusTranslator: { translate: async () => 'transform {}' },
+    humanWorkspaceTranslator: { translate: async () => 'transform new {"thing":"New"}' }
+  });
+  let notifyCommitted;
+  const notified = new Promise((resolve) => { notifyCommitted = resolve; });
+  const execution = runtime.updateHumanWorkspace({
+    operation: { kind: 'node-create' },
+    correlationId: 'web-source-before-authority-refresh'
+  }, { onCommitted: notifyCommitted });
+
+  let first;
+  try {
+    first = await Promise.race([
+      notified.then(() => 'source-acknowledged'),
+      new Promise((resolve) => setTimeout(() => resolve('authority-refresh-blocked-source'), 50))
+    ]);
+  } finally {
+    releaseAuthorityRefresh();
+    await execution;
+  }
+
+  assert.equal(authorityRefreshStarted, true);
+  assert.equal(first, 'source-acknowledged');
+});
+
 test('legacy composition routes feedback through the configured recorder with world paths', async () => {
   const calls = [];
   const runtime = createLegacyRuntimeComposition({
