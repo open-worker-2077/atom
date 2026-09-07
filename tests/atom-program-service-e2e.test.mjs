@@ -727,7 +727,6 @@ test('4784 Web workspace edits commit atom.json before asynchronously publishing
 
 test('4784 Web may reversibly discard a container with a nested Agent Program', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-web-agent-discard-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -742,7 +741,10 @@ test('4784 Web may reversibly discard a container with a nested Agent Program', 
   const running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, projectionDelayMs: 0
   });
-  t.after(() => running.close());
+  t.after(async () => {
+    await running.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
   const state = await fetch(`${running.url}/__spatial/api/state`).then((response) => response.json());
   const plan = state.knowledge.nodes.find((node) => node.label === 'ESG Plan');
 
