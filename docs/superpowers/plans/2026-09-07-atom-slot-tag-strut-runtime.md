@@ -75,11 +75,11 @@
 - Modify: `docs/superpowers/specs/2026-08-31-atom-world-program-design.md`
 - Modify: `docs/superpowers/plans/2026-09-03-atom-current-requirement-ledger.md`
 
-- [ ] Inventory active non-backup strict-bool Strut and adjacent Slot declarations on a private production-world copy; immutable logs and backup-zone objects are excluded.
-- [ ] Convert behavior-preserving active declarations into explicit line/receiver Programs when the mapping is exact. Ambiguous business predicates remain listed and keep using the marked adapter; never guess labels or rewrite production facts silently.
-- [ ] Remove public Help/registry promotion of `slot()/signal()` and strict-bool delivery after exact migration; document only canonical `slot_provide()/slot_receive()` plus the user-owned `$act` ingress.
+- [x] Inventory active non-backup strict-bool Strut and adjacent Slot declarations with the read-only `inventory-slot-tag-runtime.mjs`; immutable logs and the typed default-backup subtree are separated. Production result: zero adjacent `slot()/signal()`, zero canonical declarations, twelve literal strict-bool line Programs and five unclassified line Programs.
+- [x] Convert behavior-preserving active declarations only when the mapping is exact. Current exact conversion count is zero: the seventeen active line Programs contain business predicates but no user-owned output label contract, so inventing labels would change meaning. They remain listed on the compatibility path and production facts remain byte-untouched.
+- [x] Keep public compatibility functions while the exact remaining adapter count is seventeen. Do not claim the old runtime removed; public removal is conditional on a later application-owned label migration reducing that count to zero.
 - [ ] Run only the Graph impact gates identified above, one private-world migration/readback journey, and one formal CLI/API journey. Record exact remaining adapter count; zero is required before declaring the old runtime removed.
-- [ ] Commit `feat(slot): migrate legacy strut signals`.
+- [ ] Commit `feat(slot): inventory legacy strut signals`.
 
 ## Task 6: Review, backup and controlled deployment
 
