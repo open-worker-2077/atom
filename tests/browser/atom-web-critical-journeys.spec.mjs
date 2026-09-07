@@ -978,6 +978,7 @@ test('a steady domain reuses its rasterized backdrop instead of repainting blurr
 async function openAModeFixture(page) {
   const parentPath = `root/${hashText('a-parent-id').toString(36)}`;
   const innerPath = `${parentPath}/${hashText('a-inner-id').toString(36)}`;
+  const leafPath = `${innerPath}/${hashText('a-leaf-id').toString(36)}`;
   const knowledge = {
     revision: 1,
     nodes: [
@@ -985,7 +986,8 @@ async function openAModeFixture(page) {
       { id: 'a-outside-id', key: 'root::a-outside-id', path: 'root', atomPath: '团外旁侧', label: '团外旁侧', detail: '', hasChildren: false },
       { id: 'a-inner-id', key: `${parentPath}::a-inner-id`, path: parentPath, atomPath: '父团/内层团', label: '内层团', detail: '', hasChildren: true },
       { id: 'a-inner-peer-id', key: `${parentPath}::a-inner-peer-id`, path: parentPath, atomPath: '父团/内层旁侧', label: '内层旁侧', detail: '', hasChildren: false },
-      { id: 'a-leaf-id', key: `${innerPath}::a-leaf-id`, path: innerPath, atomPath: '父团/内层团/叶子', label: '叶子', detail: '', hasChildren: false }
+      { id: 'a-leaf-id', key: `${innerPath}::a-leaf-id`, path: innerPath, atomPath: '父团/内层团/叶子', label: '叶子', detail: '', hasChildren: true },
+      { id: 'a-seed-id', key: `${leafPath}::a-seed-id`, path: leafPath, atomPath: '父团/内层团/叶子/种子', label: '种子', detail: '', hasChildren: false }
     ],
     edges: []
   };
@@ -995,7 +997,7 @@ async function openAModeFixture(page) {
   });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.spatialLab?.state().interactionTargets.some(({ label }) => label === '父团'));
-  return { parentPath, innerPath };
+  return { parentPath, innerPath, leafPath };
 }
 
 async function rightClickTarget(page, label, count) {
@@ -1081,6 +1083,36 @@ test('A sustained right press keeps the entered domain shell visibly inside the 
   expect(shell.radius).toBeGreaterThanOrEqual(minimumRecognizableRadius);
   expect(Math.abs(shell.x - viewport.width / 2)).toBeLessThanOrEqual(viewport.width * 0.08);
   expect(Math.abs(shell.y - viewport.height / 2)).toBeLessThanOrEqual(viewport.height * 0.08);
+});
+
+test('PageDown keeps the right-held current shell centred like a middle-click frame', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 2514, height: 1316 });
+  const { parentPath } = await openAModeFixture(page);
+  await holdRightTarget(page, '父团', 440);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(parentPath);
+  await page.keyboard.press('PageDown');
+  await page.waitForTimeout(550);
+
+  const shell = (await page.evaluate(() => window.spatialLab.state().clusterRegions))
+    .find(({ path }) => path === parentPath);
+  const viewport = page.viewportSize();
+  expect(shell).toBeTruthy();
+  expect(Math.abs(shell.x - viewport.width / 2)).toBeLessThanOrEqual(viewport.width * 0.08);
+  expect(Math.abs(shell.y - viewport.height / 2)).toBeLessThanOrEqual(viewport.height * 0.08);
+});
+
+test('repeated PageDown continues one layer deeper inside the same crosshair shell', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { parentPath, innerPath, leafPath } = await openAModeFixture(page);
+  await holdRightTarget(page, '父团', 440);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe(parentPath);
+
+  await page.keyboard.press('PageDown');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths)).toContain(innerPath);
+  await page.waitForTimeout(550);
+  await page.keyboard.press('PageDown');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths)).toContain(leafPath);
 });
 
 test('vertical shortcuts stay inside the deepest Graph shell under the crosshair', async ({ page }) => {

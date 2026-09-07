@@ -82,7 +82,7 @@ test('selecting a future ASDF mode cannot restyle an already rendered cluster sc
   assert.match(layout, /clusterScene\.clusters[\s\S]*projectionMode/);
 });
 
-test('PageDown applies nested A projection to the current field before expanding its next layer', () => {
+test('PageDown applies nested A projection to the visible frontier and keeps its anchor framed', () => {
   const visible = functionSource('visibleClusterDomains');
   const expand = functionSource('expandHoveredClusterLevel');
   const setMode = functionSource('setViewMode');
@@ -91,7 +91,9 @@ test('PageDown applies nested A projection to the current field before expanding
   assert.match(visible, /projectionMode:\s*state\.appliedViewMode/);
   assert.match(expand, /state\.appliedViewMode\s*=\s*["']nested["']/);
   assert.doesNotMatch(setMode, /appliedViewMode/);
-  assert.match(expand, /recenterLatestInteraction/);
+  assert.match(expand, /frontierPaths/);
+  assert.match(expand, /frameClusterDomain\(anchor\.path\)/);
+  assert.doesNotMatch(expand, /recenterLatestInteraction/);
   assert.match(functionSource('collapseHoveredClusterLevel'), /recenterLatestInteraction/);
 });
 

@@ -388,3 +388,4 @@
 - **打印Task1完成**：46e7772独立复审Approved、6/6；真实事实内存probe严格选中2活跃项，其他facts/header/source bytes守恒。Task2由generated_print_task2实现维护入口，root准备完整私密副本验收；生产未迁移。
 
 - **Task2真实规模失败（2026-09-06）**：b29c273合成focused14/14后，root完整私密副本维护apply约56秒Node4GB heap OOM退出134，尚无backup目录；atom.json、旧journal与events字节hash全部未变。生产未参与。当前拒绝部署，独立审查与维护脚本内存读取定位中；不以增加内核分支或盲目调大heap替代修正。raw real-copy-apply-1.log及real-copy-after-failed-apply.json位于本计划SDD。
+- **P0｜🟡 长按后的稳定居中与连续下钻（I3/U3/D1/E3）**：用户在正式 `manage` 画面确认外围团已恢复，但右键长按后继续 PageDown 会出现当前团偏离居中，且直属子团展开后不能继续剖开下一层。根因链已由两个真实浏览器RED确认：旧实现只检查锚定团直属节点，第一层展开后停止；随后又以长按前旧点击位置对焦，使域壳纵向偏移501.7px。候选改为沿同一锚定外围团的当前可见末端子团逐次剖开一层，并复用中键框团方式持续居中；自动取景不改变锚定范围，只有真实移动鼠标或重新点击才重定范围。Node直接链90/90、Chromium长按/连续PageDown/纵快往返及相邻A旅程10/10、build/control通过；不改Graph数据、推支内核或其他全局导航。待集成部署及正式入口只读回读后转绿。

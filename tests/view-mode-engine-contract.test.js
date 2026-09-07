@@ -197,8 +197,11 @@ test('all vertical shortcuts share the crosshair domain anchor and preserve outs
   assert.match(anchor, /clusterSceneRevision/);
   assert.match(expand, /planContextLevelExpansion/);
   assert.match(expand, /verticalScopeAnchor\(\)/);
-  assert.match(expand, /topLevelDomainNodesForPath\(anchor\.path\)/);
+  assert.match(expand, /frontierPaths/);
+  assert.match(expand, /pathSlots\(anchor\.path/);
+  assert.match(expand, /topLevelDomainNodesForPath\(ownerPath\)/);
   assert.match(expand, /openClusterChildDomain/);
+  assert.match(expand, /frameClusterDomain\(anchor\.path\)/);
   assert.doesNotMatch(expand, /visibleClusterDomains\(\)/);
   assert.match(collapse, /planContextLevelCollapse/);
   assert.match(collapse, /verticalScopeAnchor\(\)/);
@@ -221,6 +224,14 @@ test('all vertical shortcuts share the crosshair domain anchor and preserve outs
   assert.match(collapse, /planContextLevelCollapse\([\s\S]*["']nested["']/);
   assert.match(inputConfig, /PageUp · 十字所在团收缩一层（A）/);
   assert.match(inputConfig, /PageDown · 十字所在团剖开一层（A）/);
+});
+
+test('real pointer movement releases the remembered vertical scope anchor', () => {
+  const start = engine.indexOf('canvas.addEventListener("pointermove"');
+  const end = engine.indexOf('canvas.addEventListener("pointerup"', start);
+  const pointerMove = engine.slice(start, end);
+
+  assert.match(pointerMove, /state\.verticalScopeAnchor\s*=\s*null/);
 });
 
 test('the canvas shows only a crosshair whose centre is the pointer hit point', () => {

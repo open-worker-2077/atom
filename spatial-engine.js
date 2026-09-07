@@ -738,6 +738,7 @@
     floatingClusterDetailCount: 0,
     floatingDetailHiddenCount: 0,
     pointerPosition: { x: 0, y: 0 },
+    verticalScopeAnchor: null,
     detailMagnifier: {
       ...detailMagnifierModel.createState(),
       targetKey: "",
@@ -5935,14 +5936,28 @@
 
   function verticalScopeAnchor() {
     if (!state.clusterFieldOpen) {
+      state.verticalScopeAnchor = null;
       announce("十字当前没有进入可操作的外围团");
       return null;
+    }
+    const remembered = state.verticalScopeAnchor;
+    const rememberedRegion = remembered
+      && remembered.x === state.pointerPosition.x
+      && remembered.y === state.pointerPosition.y
+      && state.clusterHitRegions.find((region) => region.path === remembered.path);
+    if (rememberedRegion) {
+      return Object.freeze({
+        path: remembered.path,
+        depth: Number(rememberedRegion.depth),
+        sceneRevision: state.clusterSceneRevision
+      });
     }
     const resolved = viewModeModel.resolveVerticalScopeAnchor(
       state.clusterHitRegions,
       state.pointerPosition
     );
     if (!resolved) {
+      state.verticalScopeAnchor = null;
       announce("十字当前没有进入可操作的外围团");
       return null;
     }
@@ -5957,6 +5972,11 @@
       announce("外围团场景已变化，请重新定位十字");
       return null;
     }
+    state.verticalScopeAnchor = {
+      path: anchor.path,
+      x: state.pointerPosition.x,
+      y: state.pointerPosition.y
+    };
     return anchor;
   }
 
@@ -6150,16 +6170,23 @@
     const anchor = verticalScopeAnchor();
     if (!anchor) return false;
     state.appliedViewMode = "nested";
-    const entries = topLevelDomainNodesForPath(anchor.path).map((projected) => {
-      const node = projected.sourceNode || projected;
-      return {
-        key: visualNodeKey(node, anchor.path),
-        childPath: childPathFor(node, anchor.path),
-        ownerPath: anchor.path,
-        node,
-        portal: Boolean(node.capabilities && node.capabilities.portal)
-      };
-    });
+    const visiblePaths = [anchor.path, ...state.expandedClusterDomains.keys()]
+      .filter((path, index, paths) => pathSlots(anchor.path, path) && paths.indexOf(path) === index);
+    const frontierPaths = visiblePaths.filter((path) => (
+      !visiblePaths.some((candidate) => candidate !== path && candidate.startsWith(`${path}/`))
+    ));
+    const entries = frontierPaths.flatMap((ownerPath) => (
+      topLevelDomainNodesForPath(ownerPath).map((projected) => {
+        const node = projected.sourceNode || projected;
+        return {
+          key: visualNodeKey(node, ownerPath),
+          childPath: childPathFor(node, ownerPath),
+          ownerPath,
+          node,
+          portal: Boolean(node.capabilities && node.capabilities.portal)
+        };
+      })
+    ));
     const keys = viewModeModel.planContextLevelExpansion(
       entries,
       [...state.expandedClusterDomains.keys()],
@@ -6175,9 +6202,8 @@
     }
     if (!changed) return false;
     buildClusterScene();
-    recenterLatestInteraction();
     updateSelectionUI();
-    recordCurrentView();
+    frameClusterDomain(anchor.path);
     announce(`${pathLabelsForPath(anchor.path).at(-1) || "当前团"} 已展开一层`);
     return true;
   }
@@ -7358,6 +7384,7 @@
     }
     const point = canvasPoint(event);
     state.pointerPosition = point;
+    state.verticalScopeAnchor = null;
     if (pointerInput.button === 2 && pointerInput.shiftKey && !pointerInput.ctrlKey) {
       secondaryClickArbiter.cancel();
       canvas.setPointerCapture(event.pointerId);
@@ -7416,6 +7443,9 @@
 
   canvas.addEventListener("pointermove", (event) => {
     const point = canvasPoint(event);
+    if (point.x !== state.pointerPosition.x || point.y !== state.pointerPosition.y) {
+      state.verticalScopeAnchor = null;
+    }
     state.pointerPosition = point;
     if (state.wand.active && state.wand.pointerId === event.pointerId) {
       extendWandStroke(point);
