@@ -32,12 +32,12 @@
 - Modify: `work-engine/atom-language/strut-runtime.mjs`
 - Create: `tests/atom-slot-tag-routing.test.mjs`
 
-- [ ] RED: an ingress packet selects only struts whose antecedent contains the exact provider node; containment parent/child proximity alone produces no delivery.
-- [ ] RED: same-wave packets from multiple antecedents are grouped into one immutable input packet for one compound strut; no historical packet is read or retained.
-- [ ] RED: each strut requires one explicit Program for target behavior; zero Program means no target-runtime propagation, multiple Programs are rejected. Existing declarations remain readable only through the marked migration adapter.
-- [ ] GREEN: build local indexes for `node -> outgoing struts`, `strut -> declared downstream endpoints`, and `target node + receiver condition -> Program`; dynamic labels are never globally indexed or broadcast.
-- [ ] GREEN: use Graph clause identity, antecedent order and consequent order already produced by `parseGraphDocument`; do not infer channels from Slot containment.
-- [ ] Verify: parser, four-axis Graph, strut endpoint and packet-router gates; commit `feat(slot): route packets through graph struts`.
+- [x] RED: an ingress packet selects only struts whose antecedent contains the exact provider node; containment parent/child proximity alone produces no delivery.
+- [x] RED: same-wave packets from multiple antecedents are grouped into one immutable input packet for one compound strut; no historical packet is read or retained.
+- [x] RED: each strut requires one explicit Program for target behavior; zero Program means no target-runtime propagation, multiple Programs are rejected. Existing declarations remain readable only through the marked migration adapter.
+- [x] GREEN: build a cached local `node -> outgoing struts` index; each selected clause already owns its downstream endpoint list. Task 3 adds the receiver-condition index when it can be exercised end to end.
+- [x] GREEN: use Graph clause identity, antecedent order and consequent order already produced by `parseGraphDocument`; do not infer channels from Slot containment.
+- [x] Verify: packet routing, adjacent-legacy isolation, strut endpoint and four-axis Graph gates pass `35/35`; commit `feat(slot): route packets through graph struts`.
 
 ## Task 3: Run the strut Program and downstream receivers
 
