@@ -4140,7 +4140,7 @@
     state.detailMagnifier.enabled = enabled === true;
     ui.detailMagnifierCursor.hidden = true;
     canvas.dataset.detailMagnifier = state.detailMagnifier.enabled ? "on" : "off";
-    canvas.style.cursor = "none";
+    syncCanvasCursor();
     if (state.detailMagnifier.enabled) {
       updateDetailMagnifier(state.pointerPosition, state.hovered);
     } else {
@@ -6322,7 +6322,7 @@
     if (next.toggled) {
       state.wand.peerBatchArmed = false;
       state.wand.peerBatchMode = null;
-      canvas.style.cursor = "none";
+      syncCanvasCursor();
       updateSelectionUI();
       announce(next.highEnergy ? "玉杖递归已开启" : "已恢复木杖普通模式");
     }
@@ -6388,12 +6388,12 @@
 
   function armPeerViewBatch() {
     state.wand.peerBatchArmed = true;
-    canvas.style.cursor = "none";
+    syncCanvasCursor();
     return true;
   }
 
   function syncCanvasCursor(hit = null) {
-    canvas.style.cursor = "none";
+    canvas.style.cursor = "default";
   }
 
   function peerViewBatchRegions() {
@@ -6435,7 +6435,7 @@
     state.wand.pointerId = pointerId;
     state.wand.points = [{ x: point.x, y: point.y }];
     state.pointerPosition = { ...point };
-    canvas.style.cursor = "none";
+    syncCanvasCursor();
   }
 
   function extendWandStroke(point) {
@@ -8038,7 +8038,7 @@
     state.wand.closed = false;
     state.wand.shiftHeld = false;
     state.wand.highEnergy = state.demo.wandPreviousEnergy === true;
-    canvas.style.cursor = "none";
+    syncCanvasCursor();
   }
 
   function hideDemoOverlays() {
@@ -8368,7 +8368,7 @@
     state.wand.active = true;
     state.wand.points = [{ ...plan.points[0] }];
     state.pointerPosition = { ...plan.points[0] };
-    canvas.style.cursor = "none";
+    syncCanvasCursor();
     let pointIndex = 1;
 
     const advance = () => {
@@ -9288,6 +9288,7 @@
       path: state.currentPath,
       selected: state.selected ? state.selected.id : null,
       focused: state.focused ? state.focused.id : null,
+      pointerPosition: { ...state.pointerPosition },
       visibleNodes: state.rendered.filter((item) => item.kind === "node").length,
       inputPreset: input.activePreset,
       phase: currentInteractionPhase(),

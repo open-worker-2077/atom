@@ -385,7 +385,7 @@ body[data-spatial-scope-state="failed"] .scope-load-state {
 }
 
 #spaceCanvas[data-detail-magnifier="on"] {
-  cursor: none;
+  cursor: default;
 }
 
 .field-header,

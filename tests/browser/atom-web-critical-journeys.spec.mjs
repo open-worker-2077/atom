@@ -1142,7 +1142,11 @@ test('vertical shortcuts stay inside the deepest Graph shell under the crosshair
 
   await page.keyboard.press('End');
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths)).toContain(innerPath);
-  expect(await page.locator('#spaceCanvas').evaluate((canvas) => getComputedStyle(canvas).cursor)).toBe('none');
+  expect(await page.locator('#spaceCanvas').evaluate((canvas) => getComputedStyle(canvas).cursor)).toBe('default');
+  const canvasBox = await page.locator('#spaceCanvas').boundingBox();
+  const pointerPosition = await page.evaluate(() => window.spatialLab.state().pointerPosition);
+  expect(pointerPosition.x).toBeCloseTo(parentShell.clientX - canvasBox.x, 4);
+  expect(pointerPosition.y).toBeCloseTo(parentShell.clientY - canvasBox.y, 4);
 });
 
 test('PageDown from parent-shell blank expands both sibling child shells together', async ({ page }) => {

@@ -171,7 +171,7 @@ test('legacy peer-batch atoms remain available without owning the active double-
   const arm = functionSource('armPeerViewBatch');
   const consume = functionSource('consumePeerViewBatch');
 
-  assert.match(arm, /canvas\.style\.cursor\s*=\s*["']none["']/);
+  assert.match(arm, /syncCanvasCursor\(\)/);
   assert.match(consume, /syncCanvasCursor/);
   assert.doesNotMatch(functionSource('handleShiftTap'), /armPeerViewBatch/);
 });
@@ -234,14 +234,14 @@ test('real pointer movement releases the remembered vertical scope anchor', () =
   assert.match(pointerMove, /state\.verticalScopeAnchor\s*=\s*null/);
 });
 
-test('the canvas shows only a crosshair whose centre is the pointer hit point', () => {
+test('the visible system pointer and crosshair share the same hit point', () => {
   const cursor = functionSource('drawViewModeCursor');
   const sync = functionSource('syncCanvasCursor');
 
   assert.match(cursor, /context\.translate\(point\.x, point\.y\)/);
   assert.doesNotMatch(cursor, /point\.[xy]\s*\+\s*18/);
-  assert.match(sync, /canvas\.style\.cursor\s*=\s*["']none["']/);
-  assert.doesNotMatch(sync, /["']pointer["']|["']default["']/);
+  assert.match(sync, /canvas\.style\.cursor\s*=\s*["']default["']/);
+  assert.doesNotMatch(sync, /["']none["']/);
 });
 
 test('Shift right-drag records a visible wand stroke and resolves hit regions at release', () => {
