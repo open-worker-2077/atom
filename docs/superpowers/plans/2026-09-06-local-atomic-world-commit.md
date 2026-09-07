@@ -231,6 +231,6 @@ The existing Runtime and Watchdog tasks were stopped, main was fast-forwarded wi
 
 Formal CLI readback is complete. Disjoint local commits, immediate exact Explore, independent receipts and Program-outcome separation were verified through the public random-port journey and current production-world copy before deployment; the deployed executable is the same reviewed main revision. No new test facts were inserted into the live production world merely to duplicate that evidence.
 
-- [ ] **Step 6: Verify remote backup and close the ledger**
+- [x] **Step 6: Verify remote backup and close the ledger**
 
-Local deployment is closed. Remote safety backup remains pending because automatic approval review rejected the push to the unverified-owned GitHub remote; that external approval boundary does not block product work or the next push-strut implementation.
+Local deployment is closed. The reviewed local-atomic commits are ancestors of `origin/main@8dfdd90`, verified on 2026-09-07 after the user explicitly authorized the unified main push. The old rejected push remains only as event history; no separate remote feature branch is required for final delivery.
