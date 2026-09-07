@@ -183,6 +183,54 @@ test('Web node edit returns its committed source receipt without waiting for sub
   assert.equal(payload.knowledge, null, 'one local edit must not await or import the whole Graph projection');
 });
 
+test('Web node creation returns its committed source receipt without waiting for subsequent work or whole-Graph knowledge', async (context) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-web-local-create-receipt-'));
+  let releaseSubsequent;
+  const subsequentGate = new Promise(resolve => { releaseSubsequent = resolve; });
+  const instance = await createSpatialServer({
+    root: path.resolve(import.meta.dirname, '..'),
+    storeFile: path.join(directory, 'knowledge.json'),
+    async atomWorkspaceEdit(payload, { onCommitted }) {
+      const source = {
+        ok: true, changed: true, revisionAfter: 'source-revision',
+        subsequentExecution: { status: 'pending' }
+      };
+      await onCommitted(source);
+      await subsequentGate;
+      return {
+        ...source,
+        revisionAfter: 'final-revision',
+        subsequentExecution: { status: 'completed' }
+      };
+    }
+  });
+  await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
+  context.after(() => {
+    releaseSubsequent();
+    return new Promise(resolve => instance.server.close(resolve));
+  });
+  const origin = `http://127.0.0.1:${instance.server.address().port}`;
+  const response = await Promise.race([
+    fetch(`${origin}/__atom/api/workspace-edit`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        interactionId: 'web-local-create-receipt',
+        operation: {
+          kind: 'node-create', parentPath: 'root',
+          node: { id: 'new', key: 'root::new', path: 'root', atomPath: 'New' },
+          draft: { label: 'New', description: 'created' }
+        }
+      })
+    }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Web creation waited for subsequent work')), 200))
+  ]);
+  const payload = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(payload));
+  assert.equal(payload.result.revisionAfter, 'source-revision');
+  assert.equal(payload.result.subsequentExecution.status, 'pending');
+  assert.equal(payload.knowledge, null, 'one local creation must not await or import the whole Graph projection');
+});
+
 test('a still-running HTTP successor has its own observable timeout phase', async (context) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'spatial-successor-timeout-'));
   let cancellation;

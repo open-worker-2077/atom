@@ -2388,6 +2388,45 @@ test('transaction history appends compact events and content-addressed snapshots
   await assert.rejects(fs.access(journalFile), { code: 'ENOENT' });
 });
 
+test('warm transaction appends do not reread the accumulated event history', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-journal-bounded-append-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const journalFile = path.join(directory, 'transactions.json');
+  const repository = createJsonTransactionJournal({ file: journalFile });
+  const beforeFacts = [{ thing: 'Root', situation: 'before', slot: [], strut: [] }];
+  const middleFacts = [{ thing: 'Root', situation: 'middle', slot: [], strut: [] }];
+  const afterFacts = [{ thing: 'Root', situation: 'after', slot: [], strut: [] }];
+  const first = legacyLocalPatchPreparedRecord('bounded-first', beforeFacts, middleFacts);
+  await repository.prepare(first);
+  await repository.commit(first.commandId, first.receipt);
+  await repository.readState();
+
+  const originalReadFile = fs.readFile;
+  let accumulatedHistoryReads = 0;
+  fs.readFile = async (...args) => {
+    if (path.resolve(String(args[0])) === path.resolve(repository.eventFile)) {
+      accumulatedHistoryReads += 1;
+      throw Object.assign(new Error('steady-state append reread accumulated history'), {
+        code: 'FULL_HISTORY_READ_FORBIDDEN'
+      });
+    }
+    return originalReadFile(...args);
+  };
+  try {
+    const second = legacyLocalPatchPreparedRecord('bounded-second', middleFacts, afterFacts);
+    await repository.prepare(second);
+    await repository.commit(second.commandId, second.receipt);
+  } finally {
+    fs.readFile = originalReadFile;
+  }
+
+  assert.equal(accumulatedHistoryReads, 0);
+  const cold = createJsonTransactionJournal({ file: journalFile });
+  assert.deepEqual((await cold.readState()).receipts.map(({ commandId }) => commandId), [
+    'bounded-first', 'bounded-second'
+  ]);
+});
+
 test('local transaction records exact patch history without complete-world snapshot objects', async (t) => {
   const { coordinator, worldRepository, journalRepository, journalFile } = await fixture(t);
   const initialFacts = [{ thing: 'Root', situation: '', slot: [

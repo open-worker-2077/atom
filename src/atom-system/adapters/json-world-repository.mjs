@@ -107,6 +107,31 @@ function completePrefixBytes(raw) {
   return newline < 0 ? 0 : newline + 1;
 }
 
+async function completeFilePrefixBytes(handle, size, blockSize = 64 * 1024) {
+  let end = size;
+  while (end > 0) {
+    const start = Math.max(0, end - blockSize);
+    const length = end - start;
+    const buffer = Buffer.allocUnsafe(length);
+    let offset = 0;
+    while (offset < length) {
+      const result = await handle.read(buffer, offset, length - offset, start + offset);
+      const bytesRead = typeof result === 'number' ? result : result?.bytesRead;
+      if (!Number.isSafeInteger(bytesRead) || bytesRead <= 0 || bytesRead > length - offset) {
+        throw problem('INCOMPLETE_FILE_READ', 'File tail read made no forward progress', {
+          expectedBytes: length,
+          readBytes: offset
+        });
+      }
+      offset += bytesRead;
+    }
+    const newline = buffer.lastIndexOf(0x0a);
+    if (newline >= 0) return start + newline + 1;
+    end = start;
+  }
+  return 0;
+}
+
 async function writeFully(handle, value, position = 0) {
   const buffer = Buffer.isBuffer(value) ? value : Buffer.from(value, 'utf8');
   let offset = 0;
@@ -1155,17 +1180,17 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
   function appendEvent(event) {
     const work = async () => {
       await fs.mkdir(incrementalDirectory, { recursive: true });
-      let raw;
+      let handle;
       try {
-        raw = await fs.readFile(eventFile);
+        handle = await fs.open(eventFile, 'r+');
       } catch (error) {
         if (error.code !== 'ENOENT') throw error;
-        raw = Buffer.alloc(0);
+        handle = await fs.open(eventFile, 'w+');
       }
-      const completeBytes = completePrefixBytes(raw);
-      const handle = await fs.open(eventFile, raw.length ? 'r+' : 'w+');
       try {
-        await handle.truncate(completeBytes);
+        const { size } = await handle.stat();
+        const completeBytes = await completeFilePrefixBytes(handle, size);
+        if (completeBytes !== size) await handle.truncate(completeBytes);
         await writeFully(handle, `${JSON.stringify({ schemaVersion: 2, ...event })}\n`, completeBytes);
         await handle.sync();
       } finally {

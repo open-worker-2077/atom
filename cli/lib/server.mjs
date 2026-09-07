@@ -551,7 +551,8 @@ export async function createSpatialServer(options = {}) {
           return json(response, 404, { ok: false, error: { code: 'ATOM_WORKSPACE_EDIT_UNAVAILABLE' } });
         }
         const payload = await body(request);
-        if (payload?.operation?.kind === 'node-edit' && payload.operation.status !== 'delete') {
+        if (payload?.operation?.kind === 'node-create'
+          || (payload?.operation?.kind === 'node-edit' && payload.operation.status !== 'delete')) {
           const result = await atomCommandRequest({
             ...payload,
             interaction: { id: payload.interactionId }
