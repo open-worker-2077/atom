@@ -30,20 +30,37 @@ test('Thing identity operator backs up, commits, reads back, and rolls back one 
   await fs.writeFile(path.join(worldDirectory, 'atom.json'), `${JSON.stringify(source, null, 2)}\n`);
   await fs.writeFile(path.join(worldDirectory, 'graph.json'), `${JSON.stringify(source, null, 2)}\n`);
 
+  const persistence = createTransactionalWorldPersistence({
+    contextFile: path.join(worldDirectory, 'atom.json'),
+    projectionFile: path.join(worldDirectory, 'graph.json'),
+    journalFile: path.join(worldDirectory, 'atom.transactions.json')
+  });
+  const authoritativeSource = [...source, atom('压实后新增')];
+  const authoritativeRevision = revisionOfWorldFacts(authoritativeSource);
+  await persistence.commit({
+    correlationId: 'uncompacted-source',
+    expectedRevision: sourceRevision,
+    nextRevision: authoritativeRevision,
+    facts: authoritativeSource,
+    source: 'test',
+    changedPaths: ['压实后新增']
+  });
+
   const environment = { ...process.env, LOCALAPPDATA: localAppData };
   const dry = JSON.parse((await run(process.execPath, [operator, '--dry-run', '--attempt', 'cold'], {
     env: environment
   })).stdout);
   assert.equal(dry.changed, true);
-  assert.equal(dry.summary.thingCount, 3);
+  assert.equal(dry.revisions.source, authoritativeRevision);
+  assert.equal(dry.summary.thingCount, 4);
 
   const applied = JSON.parse((await run(process.execPath, [operator, '--apply', '--attempt', 'cold'], {
     env: environment
   })).stdout);
-  const deployed = JSON.parse(await fs.readFile(path.join(worldDirectory, 'atom.json'), 'utf8'));
-  const verified = planThingIdentityMigration(deployed);
+  const deployed = await persistence.readCommittedSnapshot();
+  const verified = planThingIdentityMigration(deployed.facts);
   assert.equal(verified.changed, false);
-  assert.equal(verified.summary.uniqueIdentityCount, 3);
+  assert.equal(verified.summary.uniqueIdentityCount, 4);
   assert.equal(verified.summary.boundStrutEndpointCount, 1);
   assert.equal((await fs.stat(applied.backup.receiptFile)).isFile(), true);
 
@@ -51,14 +68,9 @@ test('Thing identity operator backs up, commits, reads back, and rolls back one 
     env: environment
   })).stdout);
   assert.equal(rolledBack.ok, true);
-  assert.equal(rolledBack.revision, sourceRevision);
-  const persistence = createTransactionalWorldPersistence({
-    contextFile: path.join(worldDirectory, 'atom.json'),
-    projectionFile: path.join(worldDirectory, 'graph.json'),
-    journalFile: path.join(worldDirectory, 'atom.transactions.json')
-  });
-  assert.deepEqual((await persistence.readCommittedSnapshot()).facts, source);
+  assert.equal(rolledBack.revision, authoritativeRevision);
+  assert.deepEqual((await persistence.readCommittedSnapshot()).facts, authoritativeSource);
   assert.deepEqual(JSON.parse(await fs.readFile(
     path.join(applied.paths.backupDirectory, 'atom.json'), 'utf8'
-  )), source);
+  )), authoritativeSource);
 });

@@ -100,7 +100,9 @@ function persistenceFor(runtime) {
 }
 
 async function apply(mode, runtime) {
-  const source = await readWorld(runtime.contextFile);
+  const persistence = persistenceFor(runtime);
+  const sourceFile = await readWorld(runtime.contextFile);
+  const source = await persistence.readCommittedSnapshot();
   const plan = planThingIdentityMigration(source.facts);
   assertPlan(plan);
   const preflight = {
@@ -116,8 +118,7 @@ async function apply(mode, runtime) {
   if (!plan.changed || source.revision !== plan.sourceRevision) {
     throw problem('THING_IDENTITY_MIGRATION_NOT_REQUIRED', 'World already has complete Thing identities');
   }
-  const backup = await createBackup(runtime, plan, mode.attemptId, source.bytes);
-  const persistence = persistenceFor(runtime);
+  const backup = await createBackup(runtime, plan, mode.attemptId, sourceFile.bytes);
   const correlationId = `${plan.migrationId}:attempt:${mode.attemptId}`;
   let committed;
   try {
@@ -147,7 +148,7 @@ async function apply(mode, runtime) {
     ...preflight, action: 'apply',
     paths: { contextFile: runtime.contextFile, graphFile: runtime.graphFile,
       backupDirectory: backup.directory },
-    backup: { receiptFile: backup.receiptFile, sourceHash: hash(source.bytes) },
+    backup: { receiptFile: backup.receiptFile, sourceHash: hash(sourceFile.bytes) },
     transaction: redactedTransaction(committed),
     rollback: { targetCommandId: committed.commandId, expectedRevision: committed.afterRevision }
   };
