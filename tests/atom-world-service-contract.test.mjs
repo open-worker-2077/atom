@@ -647,7 +647,10 @@ test('real legacy transform advances atom facts through the durable transaction 
 
   assert.equal(result.ok, true);
   assert.equal(result.changed, true);
-  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')).map(({ thing }) => thing), ['Root']);
+  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  assert.deepEqual(stored.map((entry) => Object.entries(entry).find(([key]) => (
+    key.split(/[@&#]/u)[0] === 'thing'
+  ))?.[1]), ['Root']);
   const journal = await createJsonTransactionJournal({
     file: path.join(directory, 'atom.transactions.json')
   }).readState();

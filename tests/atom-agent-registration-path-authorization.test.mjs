@@ -115,7 +115,7 @@ test('a declared Agent may reconfigure a descendant but not an out-of-window dec
   assert.equal(scheduler.agentSecurity.has('Root/Outside/ForbiddenChild'), true);
 });
 
-test('authorized creation of an Agent Program keeps the Key as thing@program', async (t) => {
+test('authorized creation keeps the Agent Program type while issuing its identity', async (t) => {
   const files = await fixture(t);
   const scheduler = createProgramRuntimeScheduler();
   const childPath = 'Root/Task/Creator/CreatedChild';
@@ -136,7 +136,7 @@ test('authorized creation of an Agent Program keeps the Key as thing@program', a
   });
   assert.equal(result.ok, true, JSON.stringify(result));
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.equal(findAtom(stored, 'CreatedChild').key, 'thing@program');
+  assert.match(findAtom(stored, 'CreatedChild').key, /^thing@program&id=[A-Za-z0-9_-]{22}$/u);
   assert.equal(scheduler.agentSecurity.has(childPath), true);
 });
 

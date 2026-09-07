@@ -849,7 +849,9 @@ test('a declared creator adds a child Agent Program and prepares the server proj
   });
   assert.equal(registered.ok, true, JSON.stringify(registered.errors));
   world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(Object.hasOwn(findAtom(world, 'Root/Existing/Work/Parent/Bootstrap'), 'thing@program'), true);
+  assert.equal(Object.keys(findAtom(world, 'Root/Existing/Work/Parent/Bootstrap')).some((key) => (
+    key.startsWith('thing@program&id=')
+  )), true);
 
   const coldScheduler = createProgramRuntimeScheduler();
   await coldScheduler.rebuildAgentSecurity(world);

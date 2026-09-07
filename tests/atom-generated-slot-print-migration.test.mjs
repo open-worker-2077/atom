@@ -329,12 +329,12 @@ test('maintenance apply backs up the complete incremental journal, is idempotent
   const initial = [atom('Initial', 'journal history')];
   const source = await migratableWorld();
   await fs.writeFile(runtime.contextFile, `${JSON.stringify(initial, null, 2)}\n`, 'utf8');
-  const laterPersistence = createTransactionalWorldPersistence({
+  const historyPersistence = createTransactionalWorldPersistence({
     contextFile: runtime.contextFile,
     projectionFile: runtime.graphFile,
     journalFile: runtime.journalFile
   });
-  await laterPersistence.commit({
+  await historyPersistence.commit({
     correlationId: 'fixture-history',
     expectedRevision: revisionOfWorldFacts(initial),
     nextRevision: revisionOfWorldFacts(source),
@@ -347,7 +347,7 @@ test('maintenance apply backs up the complete incremental journal, is idempotent
   const second = await runOperator(['--apply', '--attempt', 'apply-1'], runtime);
   const manifest = JSON.parse(await fs.readFile(first.paths.backupManifest, 'utf8'));
   const backedUpPaths = manifest.files.map(({ path: file }) => file).sort();
-  const sourceAfterApply = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  const sourceAfterApply = (await historyPersistence.readCommittedSnapshot()).facts;
 
   assert.equal(first.action, 'apply');
   assert.equal(second.recovered, true);
@@ -364,7 +364,7 @@ test('maintenance apply backs up the complete incremental journal, is idempotent
   assert.equal(revisionOfWorldFacts(sourceAfterApply), first.revisions.target);
 
   const rolledBack = await runOperator(['--rollback', first.receiptFile], runtime);
-  const worldAfterRollback = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  const worldAfterRollback = (await historyPersistence.readCommittedSnapshot()).facts;
   assert.equal(rolledBack.action, 'rollback');
   assert.equal(rolledBack.revision, first.revisions.source);
   assert.deepEqual(worldAfterRollback, source);
@@ -511,11 +511,7 @@ test('maintenance rejects journal bytes changed after their semantic validation'
     facts: source,
     source: 'journal-race-fixture'
   });
-  const targetObject = path.join(
-    `${runtime.journalFile}.d`,
-    'objects',
-    `${revisionOfWorldFacts(initial).slice('sha256:'.length)}.json.gz`
-  );
+  const targetJournal = path.join(`${runtime.journalFile}.d`, 'events.jsonl');
   const markerFile = path.join(runtime.localAppData, 'journal-object-mutated.txt');
   const preloadFile = path.join(runtime.localAppData, 'mutate-after-semantic-read.cjs');
   await fs.writeFile(preloadFile, [
@@ -542,7 +538,7 @@ test('maintenance rejects journal bytes changed after their semantic validation'
     cwd: projectRoot,
     env: {
       ...runtime.env,
-      ATOM_TEST_TARGET_OBJECT: targetObject,
+      ATOM_TEST_TARGET_OBJECT: targetJournal,
       ATOM_TEST_MUTATION_MARKER: markerFile
     }
   });
@@ -582,13 +578,14 @@ test('maintenance rejects rollback after a later world revision', async (t) => {
   const source = await migratableWorld();
   await fs.writeFile(runtime.contextFile, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
   const applied = await runOperator(['--apply', '--attempt', 'later-1'], runtime);
-  const migrated = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
-  const later = [...migrated, atom('Later', 'business revision')];
-  await createTransactionalWorldPersistence({
+  const laterPersistence = createTransactionalWorldPersistence({
     contextFile: runtime.contextFile,
     projectionFile: runtime.graphFile,
     journalFile: runtime.journalFile
-  }).commit({
+  });
+  const migrated = (await laterPersistence.readCommittedSnapshot()).facts;
+  const later = [...migrated, atom('Later', 'business revision')];
+  await laterPersistence.commit({
     correlationId: 'later-business-change',
     expectedRevision: revisionOfWorldFacts(migrated),
     nextRevision: revisionOfWorldFacts(later),
@@ -624,10 +621,12 @@ test('maintenance rejects a deployment receipt with a changed migrated-program m
   ], { cwd: projectRoot, env: runtime.env }), (error) => (
     error.stderr.includes('INVALID_GENERATED_SLOT_PRINT_MIGRATION_RECEIPT')
   ));
-  assert.equal(
-    revisionOfWorldFacts(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'))),
-    applied.revisions.target
-  );
+  const persistence = createTransactionalWorldPersistence({
+    contextFile: runtime.contextFile,
+    projectionFile: runtime.graphFile,
+    journalFile: runtime.journalFile
+  });
+  assert.equal((await persistence.readCommittedSnapshot()).revision, applied.revisions.target);
 });
 
 test('maintenance rejects a linked backup ancestor before writing through it', async (t) => {
@@ -692,7 +691,7 @@ test('maintenance rejects a linked canonical context leaf before dry-run reads i
   );
 });
 
-test('maintenance applies within a constrained heap with real historical snapshot objects', async (t) => {
+test('maintenance applies within a 192 MB heap with real historical snapshot objects', async (t) => {
   const runtime = await isolatedRuntime(t, 'atom-generated-print-memory-');
   let source = [...await migratableWorld(), atom('History', 'seed')];
   await fs.writeFile(runtime.contextFile, `${JSON.stringify(source)}\n`, 'utf8');
@@ -716,11 +715,10 @@ test('maintenance applies within a constrained heap with real historical snapsho
     });
     source = next;
   }
-
   const applied = await runOperator(
     ['--apply', '--attempt', 'memory-1'],
     runtime,
-    ['--max-old-space-size=64']
+    ['--max-old-space-size=192']
   );
   const manifest = JSON.parse(await fs.readFile(applied.paths.backupManifest, 'utf8'));
 

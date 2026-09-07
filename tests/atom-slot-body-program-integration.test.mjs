@@ -25,7 +25,7 @@ function atom(thing, situation = '', slot = [], strut = [], types = []) {
   };
 }
 function thingOf(value) {
-  return Object.entries(value).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
+  return Object.entries(value).find(([key]) => key.split(/[@&#]/u)[0] === 'thing')?.[1];
 }
 function find(atoms, selector) {
   let slot = atoms;

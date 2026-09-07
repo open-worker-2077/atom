@@ -6,6 +6,10 @@ import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
+const thingOf = (value) => Object.entries(value).find(([key]) => (
+  key.split(/[@&#]/u)[0] === 'thing'
+))?.[1];
+
 async function fixture(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-world-root-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
@@ -87,7 +91,7 @@ test('transform new uses 世界之外 exact parent semantics without selecting a
   });
   assert.equal(created.ok, true, JSON.stringify(created.errors));
   const world = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.equal(world[0].slot[0].thing, '夜巡');
-  assert.equal(world[1].slot[0].thing, '推进流');
+  assert.equal(thingOf(world[0].slot[0]), '夜巡');
+  assert.equal(thingOf(world[1].slot[0]), '推进流');
   assert.equal(world[1].slot[0].slot.length, 0);
 });

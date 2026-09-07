@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
+import { applyLocalWorldPatch } from '../src/atom-system/world-runtime/local-world-patch.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { planGeneratedSlotPrintMigration } from '../work-engine/atom-language/generated-slot-print-migration.mjs';
 import { resolveAtomRuntime } from '../work-engine/atom-language/runtime-config.mjs';
@@ -138,15 +139,62 @@ function parseMode(argv) {
 
 async function readWorld(contextFile) {
   const bytes = await fs.readFile(contextFile);
-  const persistence = createTransactionalWorldPersistence({
-    contextFile,
-    projectionFile: path.join(path.dirname(contextFile), 'graph.json')
+  let facts = JSON.parse(bytes.toString('utf8'));
+  let revision = revisionOfWorldFacts(facts);
+  const journal = createJsonTransactionJournal({
+    file: path.join(path.dirname(contextFile), 'atom.transactions.json')
   });
-  const snapshot = await persistence.readCommittedSnapshot();
+  const state = await journal.readState();
+  const chain = [];
+  let chainRevision = revision;
+  for (const entry of state.receipts) {
+    if (entry.receipt?.beforeRevision !== chainRevision) continue;
+    chain.push(entry);
+    chainRevision = entry.receipt.afterRevision;
+  }
+  const latestRevision = state.receipts.at(-1)?.receipt?.afterRevision;
+  if (latestRevision && chainRevision !== latestRevision) {
+    throw problem(
+      'GENERATED_SLOT_PRINT_MIGRATION_JOURNAL_UNSETTLED',
+      'Authoritative Atom facts do not reach the latest committed transaction'
+    );
+  }
+  const lastWholeWorld = chain.findLastIndex((entry) => entry.historyMode !== 'local-patch');
+  let start = 0;
+  if (lastWholeWorld >= 0) {
+    let record = chain[lastWholeWorld];
+    if (!Array.isArray(record.after?.facts)) record = await journal.findCommitted(record.commandId);
+    facts = structuredClone(record.after.facts);
+    revision = revisionOfWorldFacts(facts);
+    if (revision !== chain[lastWholeWorld].receipt.afterRevision) {
+      throw problem(
+        'INVALID_GENERATED_SLOT_PRINT_MIGRATION_RECEIPT',
+        'Committed transaction history does not reproduce its declared Atom revision'
+      );
+    }
+    start = lastWholeWorld + 1;
+  }
+  for (const record of chain.slice(start)) {
+    if (record.historyMode === 'local-patch') {
+      facts = applyLocalWorldPatch(facts, record.patch);
+    } else {
+      throw problem(
+        'INVALID_GENERATED_SLOT_PRINT_MIGRATION_RECEIPT',
+        'Whole-world transaction ordering changed during reconstruction'
+      );
+    }
+    revision = revisionOfWorldFacts(facts);
+    if (revision !== record.receipt.afterRevision) {
+      throw problem(
+        'INVALID_GENERATED_SLOT_PRINT_MIGRATION_RECEIPT',
+        'Committed transaction history does not reproduce its declared Atom revision'
+      );
+    }
+  }
   return Object.freeze({
     bytes,
-    facts: snapshot.facts,
-    revision: snapshot.revision
+    facts,
+    revision
   });
 }
 
@@ -183,9 +231,9 @@ async function verifyJournal(journalFile, incrementalDirectory = `${journalFile}
   const journal = createJsonTransactionJournal({ file: journalFile, incrementalDirectory });
   const state = await journal.readState();
   const matches = [];
-  for (const { commandId } of state.receipts) {
-    const record = await journal.findCommitted(commandId);
-    if (match?.(record)) matches.push(record);
+  for (const record of state.receipts) {
+    if (!match?.(record)) continue;
+    matches.push(await journal.findCommitted(record.commandId));
   }
   return { preparedCount: state.prepared.length, receiptCount: state.receipts.length, matches };
 }
@@ -407,7 +455,7 @@ async function verifyBackup({ runtime, directory, attemptId }) {
     );
   }
   const sourceBytes = await fs.readFile(path.join(directory, 'atom.json'));
-  const sourceFacts = JSON.parse(sourceBytes.toString('utf8'));
+  const sourceFacts = (await readWorld(path.join(directory, 'atom.json'))).facts;
   const plan = planGeneratedSlotPrintMigration(sourceFacts);
   if (manifest.migrationId !== migrationIdFor(plan)
     || manifest.migrationId !== path.basename(path.dirname(directory))
@@ -515,7 +563,23 @@ function validateCommittedRecord({ record, deployment, currentRevision }) {
     || record.receipt?.status !== 'committed'
     || record.receipt?.result?.source !== expectedSource
     || currentRevision !== deployment.revisions.target) {
-    throw invalidReceipt('Central transaction does not match the generated slot print migration receipt');
+    throw problem(
+      'INVALID_GENERATED_SLOT_PRINT_MIGRATION_RECEIPT',
+      'Central transaction does not match the generated slot print migration receipt',
+      {
+        recordCommandId: record?.commandId,
+        commandId: transaction?.commandId,
+        commandExpectedRevision: record?.command?.expectedRevision,
+        sourceRevision: deployment?.revisions?.source,
+        historyMode: record?.historyMode,
+        patchChangedPaths: record?.patch?.changedPaths,
+        artifactChangedPaths: deployment?.artifacts?.changedPaths,
+        recordBeforeRevision: revisions.before,
+        recordAfterRevision: revisions.after,
+        targetRevision: deployment?.revisions?.target,
+        currentRevision
+      }
+    );
   }
   return record.receipt;
 }
@@ -723,7 +787,7 @@ async function applyMigration({ runtime, attemptId }) {
     sources: verified.sources
   });
   const currentSources = await collectBackupSources(runtime);
-  if (hash((await readWorld(runtime.contextFile)).bytes) !== backup.manifest.hashes.sourceFile
+  if (hash(await fs.readFile(runtime.contextFile)) !== backup.manifest.hashes.sourceFile
     || JSON.stringify(inventory(currentSources)) !== JSON.stringify(backup.manifest.files)) {
     throw problem(
       'GENERATED_SLOT_PRINT_MIGRATION_SOURCE_DIVERGED',
@@ -743,7 +807,13 @@ async function applyMigration({ runtime, attemptId }) {
       nextRevision: plan.nextRevision,
       facts: plan.facts,
       source: `generated-slot-print-migration:${backup.manifest.migrationId}`,
-      changedPaths: plan.changedPaths
+      changedPaths: plan.changedPaths,
+      affectedAtoms: plan.changedPaths.map((path) => ({ path, axes: ['situation'] })),
+      affectedPathClosureComplete: true,
+      relationEndpoints: [],
+      lockPaths: [],
+      shortcutPaths: [],
+      referencePaths: plan.changedPaths
     });
     const deployed = await readWorld(runtime.contextFile);
     if (deployed.revision !== plan.nextRevision) {

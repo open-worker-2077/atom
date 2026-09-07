@@ -11,6 +11,9 @@ import { writeAtomGraphProjection } from '../work-engine/atom-language/context-s
 import { exactMatches, prepareExploreWorld } from '../work-engine/atom-language/query-capability.mjs';
 
 const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
+const thingOf = (value) => Object.entries(value).find(([key]) => (
+  key.split(/[@&#]/u)[0] === 'thing'
+))?.[1];
 
 test('one immutable world reuses its exact Explore index', () => {
   const atoms = Object.freeze([
@@ -271,7 +274,7 @@ test('transform new creates a nested Atom by exact parent path without replacing
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.deepEqual(world[0].slot.map((child) => child.thing), ['Existing', 'New']);
+  assert.deepEqual(world[0].slot.map(thingOf), ['Existing', 'New']);
   assert.equal(world[0].slot[1].situation, 'created');
 });
 

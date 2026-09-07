@@ -1147,7 +1147,7 @@ test('public concurrent slot instances keep source history and Program failure i
     facts = printed.atoms;
   }
   const nameOf = (value) => Object.entries(value)
-    .find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
+    .find(([key]) => key.split(/[@&#]/u)[0] === 'thing')?.[1];
   const find = (selector) => selector.split('/').reduce(
     (parent, segment) => parent?.slot?.find((candidate) => nameOf(candidate) === segment),
     { slot: facts }

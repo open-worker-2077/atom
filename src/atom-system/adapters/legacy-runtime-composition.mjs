@@ -137,10 +137,15 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
       };
       for (const child of axisEntry(rawGraphDocument.graph, 'slot')?.[1] ?? []) visit(child);
       const resolveStrutPath = (sourcePath, selector) => {
-        if (graphByPath.has(selector)) return selector;
-        const sibling = `${sourcePath.split('/').slice(0, -1).join('/')}/${selector}`.replace(/^\//u, '');
+        const worldRoot = axisEntry(rawGraphDocument.graph, 'thing')?.[1];
+        const normalized = typeof selector === 'string' && typeof worldRoot === 'string'
+          && selector.startsWith(`${worldRoot}/`)
+          ? selector.slice(worldRoot.length + 1)
+          : selector;
+        if (graphByPath.has(normalized)) return normalized;
+        const sibling = `${sourcePath.split('/').slice(0, -1).join('/')}/${normalized}`.replace(/^\//u, '');
         if (graphByPath.has(sibling)) return sibling;
-        const named = [...graphByPath.keys()].filter((path) => path.split('/').at(-1) === selector);
+        const named = [...graphByPath.keys()].filter((path) => path.split('/').at(-1) === normalized);
         return named.length === 1 ? named[0] : '';
       };
       const requireAtomPath = (key, node = null) => {
@@ -249,7 +254,9 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
           rule?.['if@current'] === true && !Object.hasOwn(rule, 'if') && Array.isArray(rule.then)
         ));
         if (outbound) {
-          if (outbound.then.some((selector) => resolveStrutPath(sourcePath, selector?.thing) === targetPath)) {
+          if (outbound.then.some((selector) => (
+            resolveStrutPath(sourcePath, axisEntry(selector, 'thing')?.[1]) === targetPath
+          ))) {
             throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Web cannot duplicate one directed Atom strut relation');
           }
           outbound.then.push({ thing: targetPath });
@@ -268,9 +275,15 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
           rule?.['if@current'] === true && !Object.hasOwn(rule, 'if') && Array.isArray(rule.then)
             ? rule.then.map((selector, thenIndex) => ({ rule, ruleIndex, selector, thenIndex }))
             : []
-        )).filter(({ selector }) => resolveStrutPath(sourcePath, selector.thing) === targetPath);
+        )).filter(({ selector }) => (
+          resolveStrutPath(sourcePath, axisEntry(selector, 'thing')?.[1]) === targetPath
+        ));
         if (matching.length !== 1) {
-          throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Web relation edit requires one exact directed Atom relation');
+          throw problem(
+            'INVALID_HUMAN_WORKSPACE_REQUEST',
+            'Web relation edit requires one exact directed Atom relation',
+            { sourcePath, targetPath, strut }
+          );
         }
         if (operation.status === 'delete') {
           matching[0].rule.then.splice(matching[0].thenIndex, 1);
