@@ -338,6 +338,17 @@ test('a node created at a pointer keeps that exact visual anchor after authorita
   assert.match(prepareNode, /layoutIdentity:\s*node\.layoutIdentity\s*\|\|\s*node\.id/);
 });
 
+test('Web node creation carries its semantic parent coordinate into the atomic Transform request', () => {
+  const commit = functionSource('commitWorkspaceEdit');
+  const resolveParent = functionSource('semanticParentPathForSpatialPath');
+
+  assert.match(resolveParent, /workspace\.exportKnowledge\(\)/);
+  assert.match(resolveParent, /parent\?\.atomPath/);
+  assert.match(commit, /operation\.kind\s*===\s*["']node-create["']/);
+  assert.match(commit, /const parentAtomPath\s*=\s*semanticParentPathForSpatialPath\(operation\.path\)/);
+  assert.match(commit, /operation\s*=\s*\{\s*\.\.\.operation,\s*parentAtomPath\s*\}/);
+});
+
 test('Atom confirmation reselects changed identities without navigating or reframing the view', () => {
   const start = source.indexOf('global.addEventListener("spatial-workspace-persisted"');
   const end = source.indexOf('global.addEventListener("spatial-workspace-persist-failed"', start);

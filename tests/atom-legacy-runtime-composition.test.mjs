@@ -1458,6 +1458,28 @@ test('human workspace translator edits a Shortcut by semantic target path withou
   );
 });
 
+test('human workspace translator creates inside an explicit semantic parent without rebuilding the whole Graph projection', async () => {
+  let wholeGraphProjectionCalls = 0;
+  const translator = createLegacyHumanWorkspaceTranslator({
+    graphFile: 'missing-graph-must-not-be-read.json',
+    projectGraph: async () => {
+      wholeGraphProjectionCalls += 1;
+      throw new Error('whole Graph projection must not gate one local create');
+    }
+  });
+
+  assert.equal(
+    await translator.translate({
+      operation: {
+        kind: 'node-create', path: 'root/domain', parentAtomPath: '项目/当前团',
+        draft: { label: '新节点', description: '新正文' }
+      }
+    }),
+    'transform new {"thing":"项目/当前团/新节点","situation":"新正文","slot":[],"strut":[]}'
+  );
+  assert.equal(wholeGraphProjectionCalls, 0);
+});
+
 test('human workspace translator resolves an edited node locally without rebuilding the whole Graph projection', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-local-edit-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

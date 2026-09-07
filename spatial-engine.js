@@ -901,6 +901,15 @@
     return node;
   }
 
+  function semanticParentPathForSpatialPath(path) {
+    if (path === "root") return "";
+    const parent = (workspace.exportKnowledge().nodes || []).find((candidate) => (
+      candidate
+      && childPathFor(candidate, candidate.path || "root") === path
+    ));
+    return typeof parent?.atomPath === "string" ? parent.atomPath.trim() : null;
+  }
+
   function pathSlots(ancestorPath, candidatePath) {
     return Boolean(
       ancestorPath
@@ -5012,6 +5021,10 @@
     if (!operation) {
       announce("请先选择关系落脚节点");
       return false;
+    }
+    if (operation.kind === "node-create") {
+      const parentAtomPath = semanticParentPathForSpatialPath(operation.path);
+      if (parentAtomPath !== null) operation = { ...operation, parentAtomPath };
     }
     operation = workspaceModel.batchLandingOperation(operation, operation.batchEntries);
     closeNodeEditor();

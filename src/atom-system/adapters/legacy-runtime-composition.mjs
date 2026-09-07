@@ -105,8 +105,30 @@ function spatialChildPath(node) {
 }
 
 export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph = projectAtomGraphWithPaths }) {
+  const translateNodeCreate = (operation, parentAtomPath) => {
+    const label = operation.draft?.label?.trim();
+    const detail = operation.draft?.description?.trim() ?? '';
+    const type = operation.draft?.atomTypes?.[0]?.trim() ?? '';
+    if (!label || label.includes('/') || label.length > 200) {
+      throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'New Atom requires a non-empty name without slash');
+    }
+    if (type && (!/^[\p{L}\p{N}_-]+$/u.test(type) || type.length > 80)) {
+      throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Atom type requires one safe @type name');
+    }
+    if (typeof parentAtomPath !== 'string' || parentAtomPath.length > 4000) {
+      throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'New Atom requires one exact semantic parent path');
+    }
+    const normalizedParent = parentAtomPath.trim().replace(/^\/+|\/+$/gu, '');
+    const thing = normalizedParent ? `${normalizedParent}/${label}` : label;
+    return `transform new ${JSON.stringify({ [`thing${type ? `@${type}` : ''}`]: thing, situation: detail, slot: [], strut: [] })}`;
+  };
   return Object.freeze({
     async translate({ operation }) {
+      if (operation?.kind === 'node-create'
+        && typeof operation.path === 'string'
+        && Object.prototype.hasOwnProperty.call(operation, 'parentAtomPath')) {
+        return translateNodeCreate(operation, operation.parentAtomPath);
+      }
       const rawGraphDocument = JSON.parse(await fs.readFile(graphFile, 'utf8'));
       const graphByPath = new Map();
       const axisEntry = (node, axis) => Object.entries(node ?? {}).find(([rawKey]) => (
@@ -219,18 +241,7 @@ export function createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph =
       };
 
       if (operation?.kind === 'node-create' && typeof operation.path === 'string') {
-        const label = operation.draft?.label?.trim();
-        const detail = operation.draft?.description?.trim() ?? '';
-        const type = operation.draft?.atomTypes?.[0]?.trim() ?? '';
-        if (!label || label.includes('/') || label.length > 200) {
-          throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'New Atom requires a non-empty name without slash');
-        }
-        if (type && (!/^[\p{L}\p{N}_-]+$/u.test(type) || type.length > 80)) {
-          throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Atom type requires one safe @type name');
-        }
-        const parentAtomPath = containerPath(operation.path);
-        const thing = parentAtomPath ? `${parentAtomPath}/${label}` : label;
-        return `transform new ${JSON.stringify({ [`thing${type ? `@${type}` : ''}`]: thing, situation: detail, slot: [], strut: [] })}`;
+        return translateNodeCreate(operation, containerPath(operation.path));
       }
 
       if (operation?.kind === 'node-edit') {
