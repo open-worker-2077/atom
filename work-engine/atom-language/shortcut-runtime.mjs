@@ -118,6 +118,29 @@ export function shortcutMetadata(atom) {
   return isShortcutAtom(atom) ? structuredClone(parseMetadata(atom)) : null;
 }
 
+export function bindShortcutTargetIdentities(atoms) {
+  const matches = walk(atoms);
+  const byPath = new Map(matches.map((match) => [match.path.join('/'), match]));
+  const changedPaths = [];
+  for (const match of matches) {
+    if (!isShortcutAtom(match.atom)) continue;
+    const metadata = parseMetadata(match.atom);
+    if (metadata.target.state !== 'linked' || metadata.target.identity) continue;
+    const target = byPath.get(metadata.target.path);
+    const identity = target ? thingIdentity(target.atom) : null;
+    if (!identity) {
+      throw shortcutFailure(
+        'SHORTCUT_TARGET_IDENTITY_REQUIRED',
+        '虚拟引用目标没有可绑定的永久 Thing 身份'
+      );
+    }
+    metadata.target.identity = identity;
+    replaceSituation(match.atom, metadata);
+    changedPaths.push(match.path.join('/'));
+  }
+  return changedPaths;
+}
+
 export function retargetShortcutAtom(atom, targetPath, targetIdentity = null) {
   if (!isShortcutAtom(atom)) {
     throw shortcutFailure('SHORTCUT_RETARGET_REQUIRED', '.lnk. 只可改造虚拟引用自身');

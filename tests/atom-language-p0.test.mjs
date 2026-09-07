@@ -272,6 +272,11 @@ test('9b. external Atom requests cannot supply a kernel Thing identity', () => {
     assert.equal(result.ok, false);
     assert.equal(result.errors[0]?.code, 'KERNEL_IDENTITY_INPUT_FORBIDDEN');
   }
+  const nestedEndpoint = createAtomLanguageReceiver().receive(
+    'transform {"thing":"来源","strut":[{"if@current":true,"then":[{"thing&id=AbCdEfGhIjKlMnOpQrStUv":"目标"}]}]}'
+  );
+  assert.equal(nestedEndpoint.ok, false);
+  assert.equal(nestedEndpoint.errors[0]?.code, 'KERNEL_IDENTITY_INPUT_FORBIDDEN');
 });
 
 test('9c. central Thing creation issues one identity and field replacement preserves it', () => {

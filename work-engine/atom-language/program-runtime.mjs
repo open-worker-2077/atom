@@ -18,7 +18,7 @@ import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
 import { routeSlotTagPackets } from './slot-signal-runtime.mjs';
 import { buildStrutDeliveries, evaluateStrutClausesWithPrograms } from './strut-runtime.mjs';
 import { shortcutMetadata } from './shortcut-runtime.mjs';
-import { rewriteProgramSourcePathLiterals } from './transform-executor.mjs';
+import { rewriteProgramReferenceBatch } from './program-reference-runtime.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
@@ -621,19 +621,41 @@ function rewriteRelocatedPath(path, relocations) {
   ), path);
 }
 
-function rewriteProgramSourceThroughRelocations(source, relocations) {
-  return relocations.reduce((currentSource, relocation) => (
-    rewriteProgramSourcePathLiterals(currentSource, [relocation])
-  ), source);
+function priorPathThroughRelocations(pathValue, relocations) {
+  return [...relocations].reverse().reduce((currentPath, { sourcePath, resultPath }) => (
+    currentPath === resultPath || currentPath.startsWith(`${resultPath}/`)
+      ? `${sourcePath}${currentPath.slice(resultPath.length)}`
+      : currentPath
+  ), pathValue);
+}
+
+async function rewriteProgramSourceThroughRelocations(source, relocations, atoms) {
+  const aliases = relocations.flatMap(({ sourcePath, resultPath }) => {
+    const parts = sourcePath.split('/');
+    const suffixes = parts.slice(0, -1).map((_, index) => ({
+      sourcePath: parts.slice(index).join('/'), resultPath, rootSourcePath: sourcePath
+    }));
+    return suffixes.flatMap((change) => [change, {
+      sourcePath: `${WORLD_OUTSIDE_NAME}/${change.sourcePath}`,
+      resultPath: `${WORLD_OUTSIDE_NAME}/${change.resultPath}`,
+      rootSourcePath: change.rootSourcePath
+    }]);
+  });
+  const [rewritten] = await rewriteProgramReferenceBatch({
+    programs: [{ path: '<relocated-program>', source }],
+    aliases,
+    worldBindings: walkAtoms(atoms).map((match) => ({
+      path: priorPathThroughRelocations(match.path.join('/'), relocations),
+      id: oneStoredField(match.atom, 'thing')?.parsed.identity ?? null
+    }))
+  });
+  return rewritten.source;
 }
 
 function rewriteProgramReadRequest(request, relocations) {
   const rewritten = structuredClone(request);
   if (typeof rewritten?.thing !== 'string') return rewritten;
-  const literal = rewriteProgramSourceThroughRelocations(
-    JSON.stringify(rewritten.thing), relocations
-  );
-  rewritten.thing = JSON.parse(literal);
+  rewritten.thing = rewriteRelocatedPath(rewritten.thing, relocations);
   return rewritten;
 }
 
@@ -2208,8 +2230,8 @@ export class ProgramRuntimeScheduler {
     for (const [sourceProgramPath, dependency] of affectedReadDependencies) {
       const resultProgramPath = rewriteRelocatedPath(sourceProgramPath, relocations);
       const program = programsByPath.get(resultProgramPath);
-      if (!program || rewriteProgramSourceThroughRelocations(
-        dependency.detail, relocations
+      if (!program || await rewriteProgramSourceThroughRelocations(
+        dependency.detail, relocations, atoms
       ) !== program.detail) continue;
       const rebound = {
         detail: program.detail,

@@ -59,6 +59,10 @@ function partnersOf(atomValue) {
   return namedField(atomValue, 'strut').flatMap((rule) => rule.then ?? []);
 }
 
+function endpointThing(endpoint) {
+  return namedField(endpoint, 'thing');
+}
+
 test('complete Atom paths precisely select duplicate names', async (t) => {
   const files = await fixture(t, [
     atom('左', '', [atom('同名', '左正文')]),
@@ -99,13 +103,55 @@ test('rename preserves sibling and cross-tree partner targets', async (t) => {
     '甲/目标'
   ]);
   const atoms = await readAtoms(files.contextFile);
-  assert.equal(partnersOf(findByPath(atoms, '甲/同级来源'))[0].thing, '新目标');
-  assert.equal(partnersOf(findByPath(atoms, '乙/跨树来源'))[0].thing, '甲/新目标');
+  assert.equal(endpointThing(partnersOf(findByPath(atoms, '甲/同级来源'))[0]), '新目标');
+  assert.equal(endpointThing(partnersOf(findByPath(atoms, '乙/跨树来源'))[0]), '甲/新目标');
   const projection = JSON.parse(await fs.readFile(files.projectionFile, 'utf8'));
   assert.equal(
     projection.graph.slot[1].slot[1].strut[0].then[0].thing,
     'atom.json/甲/新目标'
   );
+});
+
+test('Strut identity keeps the original target when its old semantic path is reused', async (t) => {
+  const files = await fixture(t, [
+    { 'thing&id=AAAAAAAAAAAAAAAAAAAAAA': '目标', situation: '', slot: [], strut: [] },
+    {
+      'thing&id=BBBBBBBBBBBBBBBBBBBBBB': '来源', situation: '', slot: [],
+      strut: [{ 'if@current': true, then: [{ thing: '目标' }] }]
+    }
+  ]);
+
+  const renamed = await execute(files, 'transform {"thing.ren.新名":"目标"}');
+  assert.equal(renamed.ok, true, JSON.stringify(renamed.errors));
+  const created = await execute(files, 'transform new {"thing":"目标","situation":"新占位对象","slot":[],"strut":[]}');
+  assert.equal(created.ok, true, JSON.stringify(created.errors));
+
+  const world = await readAtoms(files.contextFile);
+  const original = findByPath(world, '新名');
+  const endpoint = partnersOf(findByPath(world, '来源'))[0];
+  const endpointKey = Object.keys(endpoint).find((key) => key.startsWith('thing'));
+  const originalKey = Object.keys(original).find((key) => key.startsWith('thing'));
+  assert.equal(endpointKey.match(/&id=([A-Za-z0-9_-]{22})/u)?.[1], originalKey.match(/&id=([A-Za-z0-9_-]{22})/u)?.[1]);
+  assert.equal(endpointThing(endpoint), '新名');
+  const projection = JSON.parse(await fs.readFile(files.projectionFile, 'utf8'));
+  assert.equal(projection.graph.slot[1].strut[0].then[0].thing, 'atom.json/新名');
+});
+
+test('a semantic Strut write binds its target identity in the same Transform', async (t) => {
+  const files = await fixture(t, [
+    { 'thing&id=AAAAAAAAAAAAAAAAAAAAAA': '目标', situation: '', slot: [], strut: [] },
+    { 'thing&id=BBBBBBBBBBBBBBBBBBBBBB': '来源', situation: '', slot: [], strut: [] }
+  ]);
+
+  const result = await execute(
+    files,
+    'transform {"thing":"来源","strut.rep.":[{"if@current":true,"then":[{"thing":"目标"}]}]}'
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  const endpoint = partnersOf(findByPath(await readAtoms(files.contextFile), '来源'))[0];
+  assert.equal(Object.keys(endpoint)[0], 'thing&id=AAAAAAAAAAAAAAAAAAAAAA');
+  assert.equal(endpointThing(endpoint), '目标');
 });
 
 test('rename rewrites exact path literals in Program sources', async (t) => {
@@ -162,10 +208,10 @@ test('move rewrites affected paths while keeping internal subtree relations loca
     '甲/分支/叶'
   ]);
   const atoms = await readAtoms(files.contextFile);
-  assert.equal(partnersOf(findByPath(atoms, '甲/原同级来源'))[0].thing, '分支');
-  assert.equal(partnersOf(findByPath(atoms, '乙/新同级来源'))[0].thing, '乙/分支');
-  assert.equal(partnersOf(findByPath(atoms, '乙/深层来源'))[0].thing, '乙/分支/叶');
-  assert.equal(partnersOf(findByPath(atoms, '乙/分支/内部来源'))[0].thing, '叶');
+  assert.equal(endpointThing(partnersOf(findByPath(atoms, '甲/原同级来源'))[0]), '分支');
+  assert.equal(endpointThing(partnersOf(findByPath(atoms, '乙/新同级来源'))[0]), '乙/分支');
+  assert.equal(endpointThing(partnersOf(findByPath(atoms, '乙/深层来源'))[0]), '乙/分支/叶');
+  assert.equal(endpointThing(partnersOf(findByPath(atoms, '乙/分支/内部来源'))[0]), '叶');
 });
 
 test('discard and restore keep external relations bound to the same Atom', async (t) => {
@@ -183,7 +229,7 @@ test('discard and restore keep external relations bound to the same Atom', async
   assert.equal(discarded.ok, true, JSON.stringify(discarded.errors));
   let atoms = await readAtoms(files.contextFile);
   assert.equal(
-    partnersOf(findByPath(atoms, '来源'))[0].thing,
+    endpointThing(partnersOf(findByPath(atoms, '来源'))[0]),
     '默认备份仓/目标'
   );
 
@@ -193,7 +239,7 @@ test('discard and restore keep external relations bound to the same Atom', async
   );
   assert.equal(restored.ok, true, JSON.stringify(restored.errors));
   atoms = await readAtoms(files.contextFile);
-  assert.equal(partnersOf(findByPath(atoms, '来源'))[0].thing, '甲/目标');
+  assert.equal(endpointThing(partnersOf(findByPath(atoms, '来源'))[0]), '甲/目标');
 });
 
 test('restore recovers a discarded subtree with strut and shortcut references intact', async (t) => {
@@ -218,7 +264,7 @@ test('restore recovers a discarded subtree with strut and shortcut references in
   const discarded = await execute(files, 'transform {"thing.dsc.":"Synthetic East/Duplicate"}');
   assert.equal(discarded.ok, true, JSON.stringify(discarded.errors));
   let world = await readAtoms(files.contextFile);
-  assert.equal(partnersOf(findByPath(world, 'Synthetic Source'))[0].thing, discarded.result.path);
+  assert.equal(endpointThing(partnersOf(findByPath(world, 'Synthetic Source'))[0]), discarded.result.path);
   assert.equal(
     shortcutMetadata(findByPath(world, 'Synthetic References/Duplicate Link')).target.state,
     'broken'
@@ -233,8 +279,8 @@ test('restore recovers a discarded subtree with strut and shortcut references in
   const target = findByPath(world, 'Synthetic East/Duplicate');
   assert.equal(namedField(target, 'situation'), 'payload');
   assert.equal(namedField(findByPath(world, 'Synthetic East/Duplicate/Leaf'), 'situation'), 'nested');
-  assert.equal(partnersOf(target)[0].thing, 'Leaf');
-  assert.equal(partnersOf(findByPath(world, 'Synthetic Source'))[0].thing, 'Synthetic East/Duplicate');
+  assert.equal(endpointThing(partnersOf(target)[0]), 'Leaf');
+  assert.equal(endpointThing(partnersOf(findByPath(world, 'Synthetic Source'))[0]), 'Synthetic East/Duplicate');
   assert.deepEqual(
     shortcutMetadata(findByPath(world, 'Synthetic References/Duplicate Link')).target,
     { state: 'linked', path: 'Synthetic East/Duplicate' }
@@ -256,9 +302,9 @@ test('copy preserves original bindings and redirects copied internal relations',
   const copied = await execute(files, 'transform {"thing.cpy.乙":"甲/分支"}');
   assert.equal(copied.ok, true, JSON.stringify(copied.errors));
   const atoms = await readAtoms(files.contextFile);
-  assert.equal(partnersOf(findByPath(atoms, '乙/外部来源'))[0].thing, '甲/分支');
+  assert.equal(endpointThing(partnersOf(findByPath(atoms, '乙/外部来源'))[0]), '甲/分支');
   assert.equal(
-    partnersOf(findByPath(atoms, '乙/分支/内部来源'))[0].thing,
+    endpointThing(partnersOf(findByPath(atoms, '乙/分支/内部来源'))[0]),
     '叶'
   );
 

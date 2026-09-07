@@ -1,4 +1,5 @@
 import ast
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -620,8 +621,197 @@ LEGACY_GRAPH_AXES = {
 }
 
 
+def inspect_program_references(source, filename):
+    tree = ast.parse(source, filename=filename, mode="exec")
+    shadowed = {
+        node.id for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+    }
+    shadowed.update(
+        node.name for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    )
+    sites = []
+    def add_site(role, value):
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            sites.append({
+                "role": role,
+                "selector": value.value,
+                "line": value.lineno,
+                "columnBytes": value.col_offset,
+                "endLine": value.end_lineno,
+                "endColumnBytes": value.end_col_offset,
+            })
+
+    if "explore" not in shadowed:
+        for node in ast.walk(tree):
+            if (not isinstance(node, ast.Call)
+                    or not isinstance(node.func, ast.Name)
+                    or node.func.id != "explore"
+                    or len(node.args) != 1
+                    or node.keywords
+                    or not isinstance(node.args[0], ast.Dict)):
+                continue
+            query = node.args[0]
+            for key, value in zip(query.keys, query.values):
+                if (isinstance(key, ast.Constant) and key.value == "thing"
+                        and isinstance(value, ast.Constant)
+                        and isinstance(value.value, str)):
+                    add_site("explore.thing", value)
+    if "trigger" not in shadowed:
+        for node in ast.walk(tree):
+            if (not isinstance(node, ast.Call)
+                    or not isinstance(node.func, ast.Name)
+                    or node.func.id != "trigger"
+                    or len(node.args) < 2
+                    or not isinstance(node.args[0], ast.Constant)
+                    or node.args[0].value != "transform"
+                    or not isinstance(node.args[1], ast.Dict)):
+                continue
+            for key, value in zip(node.args[1].keys, node.args[1].values):
+                if (isinstance(key, ast.Constant) and key.value == "nodes"
+                        and isinstance(value, (ast.List, ast.Tuple))):
+                    for item in value.elts:
+                        add_site("trigger.transform.nodes", item)
+    if "use_program" not in shadowed:
+        for node in ast.walk(tree):
+            if (not isinstance(node, ast.Call)
+                    or not isinstance(node.func, ast.Name)
+                    or node.func.id != "use_program"
+                    or len(node.args) != 1
+                    or node.keywords
+                    or not isinstance(node.args[0], ast.Dict)):
+                continue
+            for key, value in zip(node.args[0].keys, node.args[0].values):
+                if isinstance(key, ast.Constant) and key.value == "name":
+                    add_site("use_program.name", value)
+    if "lock" not in shadowed:
+        for node in ast.walk(tree):
+            if (not isinstance(node, ast.Call)
+                    or not isinstance(node.func, ast.Name)
+                    or node.func.id != "lock"
+                    or len(node.args) != 1
+                    or node.keywords
+                    or not isinstance(node.args[0], ast.Dict)):
+                continue
+            for key, value in zip(node.args[0].keys, node.args[0].values):
+                if not (isinstance(key, ast.Constant) and key.value == "targets"
+                        and isinstance(value, ast.Dict)):
+                    continue
+                for target_key, target_value in zip(value.keys, value.values):
+                    if (isinstance(target_key, ast.Constant) and target_key.value == "paths"
+                            and isinstance(target_value, (ast.List, ast.Tuple))):
+                        for item in target_value.elts:
+                            add_site("lock.targets.paths", item)
+    if "transform" not in shadowed:
+        for node in ast.walk(tree):
+            if (not isinstance(node, ast.Call)
+                    or not isinstance(node.func, ast.Name)
+                    or node.func.id != "transform"
+                    or len(node.args) != 1
+                    or node.keywords
+                    or not isinstance(node.args[0], ast.Dict)):
+                continue
+            for key, value in zip(node.args[0].keys, node.args[0].values):
+                if (isinstance(key, ast.Constant) and isinstance(key.value, str)
+                        and (key.value == "thing" or key.value.startswith("thing."))):
+                    add_site("transform.thing", value)
+    sites.sort(key=lambda item: (
+        item["line"], item["columnBytes"], item["endLine"], item["endColumnBytes"]
+    ))
+    return {
+        "sourceHash": "sha256:" + hashlib.sha256(source.encode("utf-8")).hexdigest(),
+        "sites": sites,
+    }
+
+
+def exact_reference_matches(selector, world_bindings):
+    outside = "世界之外/"
+    if selector.startswith(outside):
+        exact = selector[len(outside):]
+        return [item for item in world_bindings if item["path"] == exact]
+    if "/" not in selector:
+        return [item for item in world_bindings if item["path"].rsplit("/", 1)[-1] == selector]
+    return [item for item in world_bindings if (
+        item["path"] == selector or item["path"].endswith("/" + selector)
+    )]
+
+
+def rewrite_program_references(source, filename, aliases, world_bindings):
+    inspected = inspect_program_references(source, filename)
+    lines = source.splitlines(keepends=True)
+    byte_offsets = []
+    current = 0
+    for line in lines:
+        byte_offsets.append(current)
+        current += len(line.encode("utf-8"))
+    encoded = source.encode("utf-8")
+    patches = []
+    changed_sites = []
+    ordered_aliases = sorted(aliases, key=lambda item: len(item["sourcePath"]), reverse=True)
+    for site in inspected["sites"]:
+        selector = site["selector"]
+        targets = exact_reference_matches(selector, world_bindings)
+        if len(targets) != 1:
+            continue
+        change = next((item for item in ordered_aliases if (
+            selector == item["sourcePath"]
+            or selector.startswith(item["sourcePath"] + "/")
+        ) and (
+            targets[0]["path"] == item["rootSourcePath"]
+            or targets[0]["path"].startswith(item["rootSourcePath"] + "/")
+        )), None)
+        if change is None:
+            continue
+        rewritten = change["resultPath"] + selector[len(change["sourcePath"]):]
+        start = byte_offsets[site["line"] - 1] + site["columnBytes"]
+        end = byte_offsets[site["endLine"] - 1] + site["endColumnBytes"]
+        original_literal = encoded[start:end].decode("utf-8")
+        json_literal = json.dumps(rewritten, ensure_ascii=False)
+        if original_literal.startswith("'") and not original_literal.startswith("'''"):
+            inner = json_literal[1:-1].replace('\\"', '"').replace("'", "\\'")
+            replacement = f"'{inner}'"
+        else:
+            replacement = json_literal
+        patches.append((start, end, replacement.encode("utf-8")))
+        changed_sites.append({
+            **site,
+            "rewrittenSelector": rewritten,
+            "targetId": targets[0]["id"],
+        })
+    for start, end, replacement in sorted(patches, reverse=True):
+        encoded = encoded[:start] + replacement + encoded[end:]
+    return {
+        "sourceHash": inspected["sourceHash"],
+        "source": encoded.decode("utf-8"),
+        "changedSites": changed_sites,
+    }
+
+
 def main():
     request = json.loads(sys.stdin.readline())
+    if request.get("operation") == "inspect-references":
+        inspected = inspect_program_references(
+            request.get("source", ""),
+            request.get("path", "<atom-program>"),
+        )
+        sys.stdout.write(json.dumps({
+            "type": "result", "ok": True, **inspected
+        }, ensure_ascii=True, allow_nan=False) + "\n")
+        sys.stdout.flush()
+        return
+    if request.get("operation") == "rewrite-reference-batch":
+        rewritten = [rewrite_program_references(
+            item.get("source", ""),
+            item.get("path", "<atom-program>"),
+            request.get("aliases", []),
+            request.get("worldBindings", []),
+        ) for item in request.get("programs", [])]
+        sys.stdout.write(json.dumps({
+            "type": "result", "ok": True, "programs": rewritten
+        }, ensure_ascii=True, allow_nan=False) + "\n")
+        sys.stdout.flush()
+        return
     records = request["world"]
     agent_program_paths = set(request.get("agentProgramPaths", []))
     by_ref = {record["ref"]: record for record in records}

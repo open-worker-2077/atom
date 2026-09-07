@@ -287,16 +287,39 @@ function atomFields(atom, location) {
   return fields;
 }
 
-function projectedStrut(clause, rootThing) {
+function projectedStrut(clause, rootThing, thingPathByIdentity = new Map()) {
   const projected = structuredClone(clause);
   const qualify = (selector) => {
-    const key = typeof selector?.thing === 'string' ? 'thing'
-      : typeof selector?.['thing@program'] === 'string' ? 'thing@program' : null;
-    if (key && selector[key] !== '.'
-      && !selector[key].startsWith('./')
-      && selector[key].includes('/')
-      && !selector[key].startsWith(`${rootThing}/`)) {
-      selector[key] = `${rootThing}/${selector[key]}`;
+    const key = Object.keys(selector ?? {}).find((candidate) => {
+      const parsed = parseAtomKey(candidate, { descriptionSymbolWarnings: false });
+      return !parsed.errors.length && parsed.baseKey === 'thing';
+    }) ?? null;
+    const parsed = key ? parseAtomKey(key, { descriptionSymbolWarnings: false }) : null;
+    const publicKey = parsed
+      ? `thing${parsed.types.map(({ raw }) => `@${raw}`).join('')}`
+      : null;
+    if (parsed?.identity) {
+      const currentPath = thingPathByIdentity.get(parsed.identity);
+      if (!currentPath) {
+        throw atomLanguageError(
+          'STRUT_TARGET_IDENTITY_NOT_FOUND',
+          '推支线端点的永久 Thing 身份不存在',
+          { identity: parsed.identity }
+        );
+      }
+      delete selector[key];
+      selector[publicKey] = `${rootThing}/${currentPath}`;
+      return;
+    }
+    if (key && publicKey !== key) {
+      selector[publicKey] = selector[key];
+      delete selector[key];
+    }
+    if (publicKey && selector[publicKey] !== '.'
+      && !selector[publicKey].startsWith('./')
+      && selector[publicKey].includes('/')
+      && !selector[publicKey].startsWith(`${rootThing}/`)) {
+      selector[publicKey] = `${rootThing}/${selector[publicKey]}`;
     }
   };
   const visitExpr = (expr) => {
@@ -368,7 +391,11 @@ function projectAtom(atom, location, rootThing, options = {}) {
       ? []
       : value
         .filter((selector) => !isLegacyStrutEntry(selector))
-        .map((selector) => projectedStrut(selector, rootThing));
+        .map((selector) => projectedStrut(
+          selector,
+          rootThing,
+          options.thingPathByIdentity
+        ));
   }
   return projected;
 }
@@ -387,8 +414,20 @@ export function projectAtomContext(atoms, options = {}) {
   }
   validateThingIdentityUniqueness(atoms);
   const rootName = options.rootName ?? DEFAULT_CONTEXT_FILENAME;
+  const thingPathByIdentity = new Map();
+  function indexIdentities(nodes, parentPath = []) {
+    for (const atom of nodes) {
+      const fields = atomFields(atom, '$identity-index');
+      const pathParts = [...parentPath, fields.get('thing').value];
+      const identity = fields.get('thing').parsed.identity;
+      if (identity) thingPathByIdentity.set(identity, pathParts.join('/'));
+      indexIdentities(fields.get('slot').value, pathParts);
+    }
+  }
+  indexIdentities(atoms);
   const projectionOptions = {
     ...options,
+    thingPathByIdentity,
     allowLegacyStrut: options.allowLegacyStrut === true || legacySnapshotMetadata.has(atoms),
     atomPathByGraphPath: new Map(),
     parentAtomPath: ''

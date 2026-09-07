@@ -166,6 +166,26 @@ test('accepts persisted Thing identities while hiding them from the derived Grap
   assert.equal(Object.keys(projection.graph.slot[0]).some((key) => key.includes('&id=')), false);
 });
 
+test('projects an identity-bound Strut endpoint to the target current semantic path', () => {
+  const targetId = 'AAAAAAAAAAAAAAAAAAAAAA';
+  const world = [
+    { [`thing&id=${targetId}`]: '新名', situation: '', slot: [], strut: [] },
+    { 'thing&id=BBBBBBBBBBBBBBBBBBBBBB': '旧名', situation: '', slot: [], strut: [] },
+    {
+      'thing&id=CCCCCCCCCCCCCCCCCCCCCC': '来源',
+      situation: '',
+      slot: [],
+      strut: [{ 'if@current': true, then: [{ [`thing&id=${targetId}`]: '旧名' }] }]
+    }
+  ];
+
+  const projection = projectAtomContext(world);
+
+  assert.deepEqual(projection.graph.slot[2].strut[0].then[0], {
+    thing: 'atom.json/新名'
+  });
+});
+
 test('rejects duplicate persisted Thing identities before projection or write', async (t) => {
   const directory = await temporaryDirectory(t);
   const contextFile = path.join(directory, 'atom.json');

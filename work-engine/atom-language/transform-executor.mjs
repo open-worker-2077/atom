@@ -7,6 +7,7 @@ import { diagnostic } from './errors.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { programLockDeniedDiagnostic } from './program-locks.mjs';
+import { rewriteProgramReferenceBatch } from './program-reference-runtime.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { renewThingIdentities } from './slot-graph-semantics.mjs';
 import {
@@ -96,6 +97,13 @@ function walkAtoms(atoms) {
   return result;
 }
 
+function thingWorldBindings(atoms) {
+  return walkAtoms(atoms).map((match) => ({
+    path: match.path.join('/'),
+    id: storedField(match.atom, 'thing')?.parsed.identity ?? null
+  }));
+}
+
 export function rewriteProgramSourcePathLiterals(source, pathChanges) {
   if (typeof source !== 'string') return source;
   const aliases = pathChanges.flatMap(({ sourcePath, resultPath }) => {
@@ -132,40 +140,68 @@ function programSourceReferencesPath(source, sourcePath) {
   }]) !== source;
 }
 
-function rewriteProgramPathReferences(atoms, pathChanges, preparedMatches = null) {
-  const changedPaths = [];
+async function rewriteProgramPathReferences(
+  atoms, pathChanges, preparedMatches = null, worldBindings = thingWorldBindings(atoms)
+) {
+  const candidates = [];
   for (const match of preparedMatches ?? walkAtoms(atoms)) {
     const thing = storedField(match.atom, 'thing');
     if (!thing?.parsed.types.some((type) => type.raw === 'program')) continue;
     const situation = storedField(match.atom, 'situation');
     if (typeof situation?.value !== 'string') continue;
-    const rewritten = rewriteProgramSourcePathLiterals(situation.value, pathChanges);
-    if (rewritten === situation.value) continue;
-    replaceStoredField(match.atom, 'situation', rewritten);
-    changedPaths.push(match.path.join('/'));
+    candidates.push({ match, situation });
   }
+  if (candidates.length === 0) return [];
+  const aliases = pathChanges.flatMap(({ sourcePath, resultPath }) => {
+    const parts = sourcePath.split('/');
+    const suffixes = parts.slice(0, -1).map((_, index) => ({
+      sourcePath: parts.slice(index).join('/'), resultPath, rootSourcePath: sourcePath
+    }));
+    return suffixes.flatMap((change) => [change, {
+      sourcePath: `${WORLD_OUTSIDE_NAME}/${change.sourcePath}`,
+      resultPath: `${WORLD_OUTSIDE_NAME}/${change.resultPath}`,
+      rootSourcePath: change.rootSourcePath
+    }]);
+  });
+  const rewrittenPrograms = await rewriteProgramReferenceBatch({
+    programs: candidates.map(({ match, situation }) => ({
+      path: match.path.join('/'), source: situation.value
+    })),
+    aliases,
+    worldBindings
+  });
+  const changedPaths = [];
+  rewrittenPrograms.forEach((rewritten, index) => {
+    if (rewritten.source === candidates[index].situation.value) return;
+    replaceStoredField(candidates[index].match.atom, 'situation', rewritten.source);
+    changedPaths.push(candidates[index].match.path.join('/'));
+  });
   return changedPaths;
 }
 
 function strutLookup(matches) {
   const byPath = new Map();
   const byName = new Map();
+  const byIdentity = new Map();
   for (const match of matches) {
     byPath.set(match.path.join('/'), match);
-    const name = storedField(match.atom, 'thing')?.value;
+    const thing = storedField(match.atom, 'thing');
+    const name = thing?.value;
+    if (thing?.parsed.identity) byIdentity.set(thing.parsed.identity, match);
     const named = byName.get(name) ?? [];
     named.push(match);
     byName.set(name, named);
   }
-  return { byPath, byName };
+  return { byPath, byName, byIdentity };
 }
 
-function strutTarget(source, selector, matches, rootName, lookup = null) {
+function strutTarget(source, selector, matches, rootName, lookup = null, identity = null) {
   if (typeof selector !== 'string' || !selector) return null;
   const normalized = rootName && selector.startsWith(`${rootName}/`)
     ? selector.slice(rootName.length + 1)
     : selector;
-  const { byPath, byName } = lookup ?? strutLookup(matches);
+  const { byPath, byName, byIdentity } = lookup ?? strutLookup(matches);
+  if (identity) return byIdentity.get(identity) ?? null;
   if (normalized.includes('/')) return byPath.get(normalized) ?? null;
   const siblingPath = [...source.path.slice(0, -1), normalized].join('/');
   const sibling = byPath.get(siblingPath);
@@ -184,7 +220,7 @@ function strutSelectorRefs(rules) {
   const refs = [];
   function visitExpr(expr, locator) {
     if (!expr || typeof expr !== 'object' || Array.isArray(expr)) return;
-    if (typeof expr.thing === 'string' || typeof expr['thing@program'] === 'string') {
+    if (strutSelectorField(expr)) {
       refs.push({ selectorObject: expr, locator });
     }
     for (const operator of ['and', 'or']) {
@@ -198,8 +234,7 @@ function strutSelectorRefs(rules) {
     if (Array.isArray(rule.if)) rule.if.forEach((expr, index) => visitExpr(expr, [ruleIndex, 'if', index]));
     if (Array.isArray(rule.then)) {
       rule.then.forEach((selectorObject, index) => {
-        if (selectorObject && (typeof selectorObject.thing === 'string'
-          || typeof selectorObject['thing@program'] === 'string')) {
+        if (selectorObject && strutSelectorField(selectorObject)) {
           refs.push({ selectorObject, locator: [ruleIndex, 'then', index] });
         }
       });
@@ -213,11 +248,27 @@ function valueAtLocator(value, locator) {
 }
 
 function strutSelectorValue(selectorObject) {
-  return selectorObject?.thing ?? selectorObject?.['thing@program'];
+  return strutSelectorField(selectorObject)?.value;
 }
 
-function setStrutSelectorValue(selectorObject, value) {
-  selectorObject[Object.hasOwn(selectorObject, 'thing@program') ? 'thing@program' : 'thing'] = value;
+function strutSelectorField(selectorObject) {
+  for (const [rawKey, value] of Object.entries(selectorObject ?? {})) {
+    const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
+    if (!parsed.errors.length && parsed.baseKey === 'thing' && typeof value === 'string') {
+      return { rawKey, parsed, value };
+    }
+  }
+  return null;
+}
+
+function setStrutSelectorValue(selectorObject, value, identity = null) {
+  const field = strutSelectorField(selectorObject);
+  if (!field) return;
+  const nextKey = `thing${field.parsed.types.map(({ raw }) => `@${raw}`).join('')}${
+    identity ? `&id=${identity}` : ''
+  }`;
+  if (field.rawKey !== nextKey) delete selectorObject[field.rawKey];
+  selectorObject[nextKey] = value;
 }
 
 function capturePartnerBindings(atoms, rootName, relevance = null, preparedMatches = null) {
@@ -229,6 +280,7 @@ function capturePartnerBindings(atoms, rootName, relevance = null, preparedMatch
     if (!Array.isArray(partners)) continue;
     strutSelectorRefs(partners).forEach(({ selectorObject, locator }) => {
       const selector = strutSelectorValue(selectorObject);
+      const identity = strutSelectorField(selectorObject)?.parsed.identity ?? null;
       const normalized = rootName && selector.startsWith(`${rootName}/`)
         ? selector.slice(rootName.length + 1)
         : selector;
@@ -236,7 +288,7 @@ function capturePartnerBindings(atoms, rootName, relevance = null, preparedMatch
       if (relevance
         && !relevance.atoms.has(source.atom)
         && !relevance.names.has(selectorName)) return;
-      const target = strutTarget(source, selector, matches, rootName, lookup);
+      const target = strutTarget(source, selector, matches, rootName, lookup, identity);
       if (!target) return;
       if (relevance
         && !relevance.atoms.has(source.atom)
@@ -276,6 +328,7 @@ function rewritePartnerBindings(atoms, bindings, preparedMatches = null) {
     if (!Array.isArray(partners)) continue;
     if (valueAtLocator(partners, binding.locator) !== binding.selectorObject) continue;
     const before = strutSelectorValue(binding.selectorObject);
+    const beforeIdentity = strutSelectorField(binding.selectorObject)?.parsed.identity ?? null;
     const after = canonicalPartnerObject(
       source,
       target,
@@ -283,10 +336,26 @@ function rewritePartnerBindings(atoms, bindings, preparedMatches = null) {
       binding.explicitPath,
       lookup.byName
     );
-    setStrutSelectorValue(binding.selectorObject, after);
-    if (before !== after) changedPaths.add(source.path.join('/'));
+    const targetIdentity = storedField(target.atom, 'thing')?.parsed.identity ?? null;
+    setStrutSelectorValue(
+      binding.selectorObject,
+      after,
+      targetIdentity
+    );
+    if (before !== after || beforeIdentity !== targetIdentity) {
+      changedPaths.add(source.path.join('/'));
+    }
   }
   return [...changedPaths].sort();
+}
+
+export function bindStrutEndpointIdentities(atoms, rootName = null) {
+  const matches = walkAtoms(atoms);
+  return rewritePartnerBindings(
+    atoms,
+    capturePartnerBindings(atoms, rootName, null, matches),
+    matches
+  );
 }
 
 const preparedTransformRelations = new WeakMap();
@@ -407,7 +476,8 @@ function captureSubtreeBindings(sourceAtom, sourcePath) {
     if (!Array.isArray(partners)) continue;
     strutSelectorRefs(partners).forEach(({ selectorObject, locator }) => {
       const selector = strutSelectorValue(selectorObject);
-      const target = strutTarget(source, selector, matches, null);
+      const identity = strutSelectorField(selectorObject)?.parsed.identity ?? null;
+      const target = strutTarget(source, selector, matches, null, null, identity);
       if (!target) return;
       bindings.push({
         sourceAtom: source.atom,
@@ -431,9 +501,13 @@ function rewriteCopiedSubtreeBindings(clone, mapping, bindings, destinationPath)
     const selectorObject = Array.isArray(partners) ? valueAtLocator(partners, binding.locator) : null;
     if (!selectorObject) continue;
     const sameParent = source.parent === target.parent;
-    setStrutSelectorValue(selectorObject, !binding.explicitPath && sameParent
-      ? storedField(target.atom, 'thing')?.value
-      : [destinationPath, ...target.path].join('/'));
+    setStrutSelectorValue(
+      selectorObject,
+      !binding.explicitPath && sameParent
+        ? storedField(target.atom, 'thing')?.value
+        : [destinationPath, ...target.path].join('/'),
+      storedField(target.atom, 'thing')?.parsed.identity ?? null
+    );
   }
 }
 
@@ -599,6 +673,7 @@ export async function applyBatchRenames({
   contextFile,
   authorize = async () => ({ decision: 'allow' })
 }) {
+  const referenceWorldBindings = thingWorldBindings(atoms);
   const nextAtoms = structuredClone(atoms);
   const exactIndex = createExactTransformIndex(nextAtoms);
   const rootName = path.basename(contextFile);
@@ -682,7 +757,9 @@ export async function applyBatchRenames({
     sourcePath: plan.sourcePath,
     resultPath: finalMatches.get(plan.match.atom)?.path.join('/') ?? null
   })).filter(({ resultPath }) => resultPath !== null);
-  const programSourcePaths = rewriteProgramPathReferences(nextAtoms, pathChanges);
+  const programSourcePaths = await rewriteProgramPathReferences(
+    nextAtoms, pathChanges, null, referenceWorldBindings
+  );
   const shortcutPaths = [];
   rewriteShortcutTargetPaths(nextAtoms, pathChanges, shortcutPaths);
   return {
@@ -1048,6 +1125,7 @@ export async function applyTransform({
   transactionTransformLog = [],
   rewriteProgramPathReferences: rewriteProgramReferences = true
 }) {
+  const referenceWorldBindings = thingWorldBindings(atoms);
   const canMutateInput = mutateInput && !Object.isFrozen(atoms);
   const rootName = path.basename(contextFile);
   const thingFields = item.fields.filter((field) => field.baseKey === 'thing');
@@ -1346,6 +1424,7 @@ export async function applyTransform({
           }
           if (relationTarget) relationPaths.push(relationTarget.path.join('/'));
         }
+        relationPaths.push(...rewritePartnerBindings(nextAtoms, outgoing, postMatches));
       }
       if (partnerBindings.length) {
         relationPaths.push(...rewritePartnerBindings(nextAtoms, partnerBindings, postMatches));
@@ -1360,10 +1439,11 @@ export async function applyTransform({
       && resultPath
       && resultPath !== sourcePath
       && rewriteProgramReferences
-      ? rewriteProgramPathReferences(
+      ? await rewriteProgramPathReferences(
           nextAtoms,
           [{ sourcePath, resultPath }],
-          postMatches
+          postMatches,
+          referenceWorldBindings
         )
       : [];
     if (!error && resultPath && resultPath !== sourcePath) {
@@ -1472,7 +1552,9 @@ export async function applyTransform({
     const resultMatch = postMatches.find((match) => match.atom === resultAtom);
     const resultPath = resultMatch?.path.join('/') ?? sourcePath;
     const programSourcePaths = ['ren', 'mov'].includes(command.name) && rewriteProgramReferences
-      ? rewriteProgramPathReferences(nextAtoms, [{ sourcePath, resultPath }], postMatches)
+      ? await rewriteProgramPathReferences(
+          nextAtoms, [{ sourcePath, resultPath }], postMatches, referenceWorldBindings
+        )
       : [];
     const shortcutPaths = [];
     rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }], shortcutPaths, postMatches);

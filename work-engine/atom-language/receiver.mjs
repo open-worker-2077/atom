@@ -87,7 +87,22 @@ function nestedDiagnostics(value, property) {
   return [];
 }
 
-function normalizeStrutSelectors(value) {
+function nestedIdentityErrors(value, parserOptions) {
+  if (value?.kind === 'array') {
+    return value.values.flatMap((item) => nestedIdentityErrors(item, parserOptions));
+  }
+  if (value?.kind !== 'object') return [];
+  return value.entries.flatMap((entry) => {
+    const own = entry.key.includes('&')
+      ? parseAtomKey(entry.key, parserOptions).errors.filter(({ code }) => (
+          code === 'KERNEL_IDENTITY_INPUT_FORBIDDEN'
+        ))
+      : [];
+    return [...own, ...nestedIdentityErrors(entry.value, parserOptions)];
+  });
+}
+
+function normalizeStrutSelectors(value, parserOptions) {
   if (value?.kind !== 'array' || !Array.isArray(value.values)) {
     return {
       value: materializeGraphJson(value),
@@ -98,11 +113,11 @@ function normalizeStrutSelectors(value) {
     };
   }
   const rules = value.values.map((rule) => materializeGraphJson(rule));
-  const errors = value.values.flatMap((rule, ruleIndex) => (
+  const errors = [...nestedIdentityErrors(value, parserOptions), ...value.values.flatMap((rule, ruleIndex) => (
     rule?.kind === 'object' && Array.isArray(rule.entries)
       ? []
       : [diagnostic('INVALID_STRUT_CLAUSE', 'strut 项必须是推支规则对象', { ruleIndex })]
-  ));
+  ))];
   return { value: rules, errors };
 }
 
@@ -123,7 +138,7 @@ function normalizeField(entry, parserOptions, command) {
     };
   }
   if (parsed.baseKey === 'strut') {
-    const normalized = normalizeStrutSelectors(entry.value);
+    const normalized = normalizeStrutSelectors(entry.value, parserOptions);
     return {
       ...parsed,
       warnings: parsed.warnings,
