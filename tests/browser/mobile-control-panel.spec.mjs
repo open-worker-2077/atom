@@ -22,7 +22,7 @@ async function dispatchSyntheticPointer(page, selector, type, pointerId) {
   }, { type, pointerId });
 }
 
-test('mobile control panel separates mouse and keyboard without regressing held middle or Ctrl input', async ({ page }) => {
+test('mobile mouse and keyboard menus expand independently and preserve held middle or Ctrl input', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openIsolatedWorld(page);
 
@@ -33,20 +33,29 @@ test('mobile control panel separates mouse and keyboard without regressing held 
   const ctrl = keyboard.getByRole('button', { name: 'Ctrl' });
 
   await expect(panel).toBeVisible();
-  await expect(mouse.getByRole('heading', { name: '鼠标' })).toBeVisible();
-  await expect(keyboard.getByRole('heading', { name: '键盘' })).toBeVisible();
+  await expect(mouse.getByRole('button', { name: '鼠标控制' })).toBeVisible();
+  await expect(keyboard.getByRole('button', { name: '键盘控制' })).toBeVisible();
+  await expect(middle).toBeHidden();
+  await expect(ctrl).toBeHidden();
   await expect(keyboard.locator('[data-mobile-key-group]')).toHaveCount(4);
   const structuralView = keyboard.locator('[data-mobile-key-group="wandering"]');
-  await expect(structuralView.getByRole('heading', { name: '结构视图' })).toBeVisible();
   await expect(structuralView.locator('[data-mobile-key]')).toHaveAttribute('data-mobile-key', 'KeyA');
   await expect(mouse.locator('[data-mobile-mouse-button="1"]')).toHaveCount(1);
   await expect(keyboard.locator('[data-mobile-mouse-button]')).toHaveCount(0);
-  expect(await keyboard.locator('.mobile-control-panel__scroll').evaluate((element) => (
-    getComputedStyle(element).overflowX
-  ))).toBe('auto');
-  const panelBox = await panel.boundingBox();
-  expect(panelBox.height).toBeLessThan(280);
-  expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(844);
+  const mouseBox = await mouse.getByRole('button', { name: '鼠标控制' }).boundingBox();
+  const keyboardBox = await keyboard.getByRole('button', { name: '键盘控制' }).boundingBox();
+  expect(mouseBox.x).toBeGreaterThan(keyboardBox.x);
+
+  await mouse.getByRole('button', { name: '鼠标控制' }).click();
+  await expect(middle).toBeVisible();
+  await keyboard.getByRole('button', { name: '键盘控制' }).click();
+  await expect(keyboard.getByRole('button', { name: '导航', exact: true })).toBeVisible();
+  await expect(middle).toBeVisible();
+  await keyboard.getByRole('button', { name: '结构视图', exact: true }).click();
+  await expect(structuralView).toBeVisible();
+  await expect(ctrl).toBeVisible();
+  await expect(keyboard.getByRole('button', { name: '导航', exact: true })).toBeHidden();
+  await expect(middle).toBeVisible();
 
   await page.evaluate(() => {
     Element.prototype.setPointerCapture = () => {};
@@ -74,6 +83,13 @@ test('mobile control panel separates mouse and keyboard without regressing held 
   await dispatchSyntheticPointer(page, '[data-mobile-key="KeyA"]', 'pointerup', 73);
   await dispatchSyntheticPointer(page, '[data-mobile-key="ControlLeft"]', 'pointerup', 72);
   await expect(ctrl).toHaveAttribute('aria-pressed', 'false');
+
+  await keyboard.getByRole('button', { name: '返回键盘分类' }).click();
+  await expect(keyboard.getByRole('button', { name: '导航', exact: true })).toBeVisible();
+  await expect(middle).toBeVisible();
+  await mouse.getByRole('button', { name: '收起鼠标控制' }).click();
+  await expect(middle).toBeHidden();
+  await expect(keyboard.getByRole('button', { name: '导航', exact: true })).toBeVisible();
 
   await page.setViewportSize({ width: 1440, height: 960 });
   await expect(panel).toBeHidden();
@@ -129,6 +145,10 @@ test('A mode keeps a visible nested sphere above the mobile controls', async ({ 
   await openIsolatedWorld(page);
   await expect(page.locator('#helpPanel')).toBeHidden();
 
+  const keyboard = page.locator('[data-mobile-control-group="keyboard"]');
+  await keyboard.getByRole('button', { name: '键盘控制' }).click();
+  await keyboard.getByRole('button', { name: '结构视图', exact: true }).click();
+
   await dispatchSyntheticPointer(page, '[data-mobile-key="KeyA"]', 'pointerdown', 81);
   await dispatchSyntheticPointer(page, '[data-mobile-key="KeyA"]', 'pointerup', 81);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().viewMode)).toBe('nested');
@@ -145,7 +165,7 @@ test('A mode keeps a visible nested sphere above the mobile controls', async ({ 
   const visibleGeometry = await page.evaluate(() => {
     const state = window.spatialLab.state();
     const canvas = document.querySelector('#spaceCanvas');
-    const controlsTop = document.querySelector('.mobile-control-panel').getBoundingClientRect().top;
+    const controlsTop = document.querySelector('[data-mobile-control-group="keyboard"] [data-mobile-menu-panel]').getBoundingClientRect().top;
     const targets = state.clusterTargets
       .filter((item) => item.y + item.radius > 0 && item.y - item.radius < controlsTop)
       .filter((item) => item.radius >= 12);

@@ -7851,6 +7851,45 @@
     }));
   }
 
+  document.querySelectorAll("[data-mobile-menu-toggle]").forEach((toggle) => {
+    const panel = document.getElementById(toggle.getAttribute("aria-controls"));
+    if (!panel) return;
+    toggle.addEventListener("click", () => {
+      const opening = panel.hidden;
+      panel.hidden = !opening;
+      toggle.setAttribute("aria-expanded", String(opening));
+      const mouse = toggle.dataset.mobileMenuToggle === "mouse";
+      toggle.setAttribute("aria-label", opening
+        ? `收起${mouse ? "鼠标" : "键盘"}控制`
+        : `${mouse ? "鼠标" : "键盘"}控制`);
+    });
+  });
+
+  const keyboardMenu = document.getElementById("mobileKeyboardMenu");
+  if (keyboardMenu) {
+    const categories = keyboardMenu.querySelector("[data-mobile-menu-categories]");
+    const back = keyboardMenu.querySelector("[data-mobile-menu-back]");
+    const modifiers = keyboardMenu.querySelector("[data-mobile-menu-modifiers]");
+    const groups = [...keyboardMenu.querySelectorAll("[data-mobile-key-group]")];
+    const showCategories = () => {
+      categories.hidden = false;
+      back.hidden = true;
+      modifiers.hidden = true;
+      groups.forEach((group) => { group.hidden = true; });
+    };
+    keyboardMenu.querySelectorAll("[data-mobile-menu-category]").forEach((button) => {
+      button.addEventListener("click", () => {
+        categories.hidden = true;
+        back.hidden = false;
+        modifiers.hidden = false;
+        groups.forEach((group) => {
+          group.hidden = group.dataset.mobileKeyGroup !== button.dataset.mobileMenuCategory;
+        });
+      });
+    });
+    back.addEventListener("click", showCategories);
+  }
+
   document.querySelectorAll("[data-mobile-key]").forEach((button) => {
     const releaseMobileKey = (event) => {
       if (button.dataset.mobilePointer !== String(event.pointerId)) return;

@@ -60,12 +60,26 @@ test('coarse-pointer panel separates mouse controls from real keyboard keys', ()
 
 test('mobile controls stay hidden on desktop, preserve touch targets, and horizontally scroll one-handed', () => {
   assert.match(css, /\.mobile-control-panel\s*\{[\s\S]*?display:\s*none/u);
-  assert.match(css, /@media\s*\(max-width:\s*48rem\),\s*\(hover:\s*none\)\s*and\s*\(pointer:\s*coarse\)[\s\S]*?\.mobile-control-panel\s*\{[\s\S]*?display:\s*flex/u);
+  assert.match(css, /@media\s*\(max-width:\s*48rem\),\s*\(hover:\s*none\)\s*and\s*\(pointer:\s*coarse\)[\s\S]*?\.mobile-control-panel\s*\{[\s\S]*?display:\s*block/u);
   assert.match(css, /safe-area-inset-bottom/u);
   assert.match(css, /\.mobile-control-panel button\s*\{[\s\S]*?min-block-size:\s*2\.75rem/u);
   assert.match(css, /\.mobile-control-panel__scroll\s*\{[\s\S]*?overflow-x:\s*auto/u);
   assert.match(css, /\.mobile-control-panel__scroll\s*\{[\s\S]*?touch-action:\s*pan-x/u);
+  assert.match(css, /\[data-mobile-control-group="keyboard"\][\s\S]*?inset-inline-start:\s*var\(--space-sm\)/u);
+  assert.match(css, /\[data-mobile-control-group="mouse"\][\s\S]*?inset-inline-end:\s*var\(--space-sm\)/u);
   assert.match(css, /\[data-pressed="true"\]/u);
+});
+
+test('mobile control markup exposes independent launchers, local pages and keyboard modifiers', () => {
+  assert.match(html, /data-mobile-menu-toggle="mouse"[^>]*aria-controls="mobileMouseMenu"/u);
+  assert.match(html, /data-mobile-menu-toggle="keyboard"[^>]*aria-controls="mobileKeyboardMenu"/u);
+  assert.match(html, /id="mobileMouseMenu"[^>]*data-mobile-menu-panel/u);
+  assert.match(html, /id="mobileKeyboardMenu"[^>]*data-mobile-menu-panel/u);
+  assert.match(html, /data-mobile-menu-category="wandering"/u);
+  assert.match(html, /data-mobile-menu-category="navigation"/u);
+  assert.match(html, /data-mobile-menu-category="view"/u);
+  assert.match(html, /data-mobile-menu-category="operation"/u);
+  assert.match(html, /data-mobile-menu-modifiers[\s\S]*data-mobile-key="ControlLeft"[\s\S]*data-mobile-key="ShiftLeft"[\s\S]*data-mobile-key="AltLeft"/u);
 });
 
 test('mobile modifiers merge into graph pointer input and a stationary hold becomes right click', () => {

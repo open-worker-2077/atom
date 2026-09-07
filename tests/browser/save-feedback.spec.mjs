@@ -1,5 +1,15 @@
 import { test, expect } from '@playwright/test';
 
+async function holdRightTarget(page, label) {
+  const target = (await page.evaluate(() => window.spatialLab.state().interactionTargets))
+    .find((candidate) => candidate.label === label);
+  expect(target).toBeTruthy();
+  await page.mouse.move(target.clientX, target.clientY);
+  await page.mouse.down({ button: 'right' });
+  await page.waitForTimeout(440);
+  await page.mouse.up({ button: 'right' });
+}
+
 async function openEditableWorld(page) {
   await page.goto('/');
   await page.waitForFunction(() => (
@@ -7,14 +17,20 @@ async function openEditableWorld(page) {
     && window.spatialLab
     && window.spatialLab.state().visibleNodes > 0
   ));
+  if (await page.locator('#helpPanel').isVisible()) {
+    await page.locator('[data-close="help"]').click();
+  }
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('atom.json'))).toBe(true);
-  await page.keyboard.press('f');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await holdRightTarget(page, 'atom.json');
   await page.waitForFunction(() => (
     window.spatialLab.state().phase === 'idle'
     && window.spatialLab.state().transactionActive === false
     && window.spatialLab.state().path !== 'root'
   ));
+  if (await page.evaluate(() => window.spatialLab.state().clusterFieldOpen)) {
+    await page.evaluate(() => window.spatialLab.dispatch('toggleClusterField'));
+    await page.waitForFunction(() => window.spatialLab.state().clusterFieldOpen === false);
+  }
 }
 
 async function beginNodeCreation(page, label) {
@@ -53,8 +69,11 @@ test('mobile Save gives visible in-progress feedback within five seconds and rep
   await openEditableWorld(page);
   await beginNodeCreation(page, '移动保存反馈');
 
+  const keyboard = page.locator('[data-mobile-control-group="keyboard"]');
+  await keyboard.getByRole('button', { name: '键盘控制' }).click();
+  await keyboard.getByRole('button', { name: '操作与编辑', exact: true }).click();
   const startedAt = Date.now();
-  await page.locator('[data-mobile-key="Enter"]').click();
+  await keyboard.locator('[data-mobile-key="Enter"]').click();
   const status = page.locator('#saveStatus');
   await expect(status).toBeVisible({ timeout: 4_500 });
   await expect(status).toContainText('正在保存');

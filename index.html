@@ -90,9 +90,9 @@
     media="print"
     onload="this.media='all'"
   >
-  <link rel="stylesheet" href="spatial.css?v=sha256-9beb3caae2af7353">
+  <link rel="stylesheet" href="spatial.css?v=sha256-c9f089c55f2a4f8f">
 </head>
-<body data-build="sha256-9beb3caae2af7353" data-spatial-bridge="connecting">
+<body data-build="sha256-c9f089c55f2a4f8f" data-spatial-bridge="connecting">
   <div class="spatial-data-gate" role="status" aria-live="polite">
     <div class="spatial-data-gate__panel">
       <div class="spatial-data-gate__headline">
@@ -276,26 +276,36 @@
     </p>
 
     <nav class="mobile-control-panel" aria-label="手机控制面板">
-      <section class="mobile-control-panel__group" data-mobile-control-group="mouse" aria-labelledby="mobileMouseControls">
-        <h2 class="mobile-control-panel__title" id="mobileMouseControls">鼠标</h2>
-        <div class="mobile-control-panel__scroll" aria-label="鼠标按键">
+      <section class="mobile-control-panel__group" data-mobile-control-group="mouse">
+        <button type="button" data-mobile-menu-toggle="mouse" aria-controls="mobileMouseMenu" aria-expanded="false" aria-label="鼠标控制">鼠标</button>
+        <div class="mobile-control-panel__menu" id="mobileMouseMenu" data-mobile-menu-panel hidden>
+          <div class="mobile-control-panel__scroll" aria-label="鼠标按键">
           <div class="mobile-control-panel__row">
             <button type="button" data-mobile-mouse-button="1" aria-pressed="false">中键</button>
             <p class="mobile-control-panel__hint">按住中键，再在图区域拖动：横向转向，纵向抬头／俯视；前后远近当前仅支持鼠标滚轮。</p>
           </div>
+          </div>
         </div>
       </section>
-      <section class="mobile-control-panel__group" data-mobile-control-group="keyboard" aria-labelledby="mobileKeyboardControls">
-        <h2 class="mobile-control-panel__title" id="mobileKeyboardControls">键盘</h2>
-        <div class="mobile-control-panel__scroll" aria-label="键盘按键">
+      <section class="mobile-control-panel__group" data-mobile-control-group="keyboard">
+        <button type="button" data-mobile-menu-toggle="keyboard" aria-controls="mobileKeyboardMenu" aria-expanded="false" aria-label="键盘控制">键盘</button>
+        <div class="mobile-control-panel__menu" id="mobileKeyboardMenu" data-mobile-menu-panel hidden>
+          <div class="mobile-control-panel__categories" data-mobile-menu-categories>
+            <button type="button" data-mobile-menu-category="wandering">结构视图</button>
+            <button type="button" data-mobile-menu-category="navigation">导航</button>
+            <button type="button" data-mobile-menu-category="view">视图工具</button>
+            <button type="button" data-mobile-menu-category="operation">操作与编辑</button>
+          </div>
+          <button type="button" data-mobile-menu-back hidden aria-label="返回键盘分类">‹</button>
+          <div class="mobile-control-panel__scroll" aria-label="键盘按键">
           <div class="mobile-control-panel__key-groups">
-            <div class="mobile-control-panel__key-group" data-mobile-key-group="wandering">
+            <div class="mobile-control-panel__key-group" data-mobile-key-group="wandering" hidden>
               <h3 class="mobile-control-panel__key-title">结构视图</h3>
               <div class="mobile-control-panel__row">
                 <button type="button" data-mobile-key="KeyA" data-key-value="a">A</button>
               </div>
             </div>
-            <div class="mobile-control-panel__key-group" data-mobile-key-group="navigation">
+            <div class="mobile-control-panel__key-group" data-mobile-key-group="navigation" hidden>
               <h3 class="mobile-control-panel__key-title">导航</h3>
               <div class="mobile-control-panel__row">
               <button type="button" data-mobile-key="KeyZ" data-key-value="z">Z</button>
@@ -306,7 +316,7 @@
               <button type="button" data-mobile-key="PageDown" data-key-value="PageDown">PageDown</button>
               </div>
             </div>
-            <div class="mobile-control-panel__key-group" data-mobile-key-group="view">
+            <div class="mobile-control-panel__key-group" data-mobile-key-group="view" hidden>
               <h3 class="mobile-control-panel__key-title">视图工具</h3>
               <div class="mobile-control-panel__row">
                 <button type="button" data-mobile-key="CapsLock" data-key-value="CapsLock">CapsLock</button>
@@ -315,18 +325,21 @@
                 <button type="button" data-mobile-key="KeyP" data-key-value="p">P</button>
               </div>
             </div>
-            <div class="mobile-control-panel__key-group" data-mobile-key-group="operation">
+            <div class="mobile-control-panel__key-group" data-mobile-key-group="operation" hidden>
               <h3 class="mobile-control-panel__key-title">操作与编辑</h3>
               <div class="mobile-control-panel__row">
                 <button type="button" data-mobile-key="Escape" data-key-value="Escape">Esc</button>
-                <button type="button" data-mobile-key="ControlLeft" data-key-value="Control" data-mobile-modifier aria-pressed="false">Ctrl</button>
-                <button type="button" data-mobile-key="ShiftLeft" data-key-value="Shift" data-mobile-modifier aria-pressed="false">Shift</button>
-                <button type="button" data-mobile-key="AltLeft" data-key-value="Alt" data-mobile-modifier aria-pressed="false">Alt</button>
                 <button type="button" data-mobile-key="KeyK" data-key-value="k">K</button>
                 <button type="button" data-mobile-key="Enter" data-key-value="Enter">Enter</button>
                 <button type="button" data-mobile-key="Delete" data-key-value="Delete">Delete</button>
               </div>
             </div>
+          </div>
+          <div class="mobile-control-panel__row" data-mobile-menu-modifiers hidden>
+            <button type="button" data-mobile-key="ControlLeft" data-key-value="Control" data-mobile-modifier aria-pressed="false">Ctrl</button>
+            <button type="button" data-mobile-key="ShiftLeft" data-key-value="Shift" data-mobile-modifier aria-pressed="false">Shift</button>
+            <button type="button" data-mobile-key="AltLeft" data-key-value="Alt" data-mobile-modifier aria-pressed="false">Alt</button>
+          </div>
           </div>
         </div>
       </section>
@@ -636,29 +649,29 @@
   </main>
 
   <noscript>此实验场需要 JavaScript 才能响应空间交互。</noscript>
-  <script src="input-config.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-mobile-input-model.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-visual-model.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-detail-magnifier-model.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-gesture-arbiter.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-middle-frame-target.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-entity-registry.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-view-grammar.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-workspace-model.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-program-choice-model.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-mermaid-codec.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-json-codec.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-view-mode-model.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-help-page-model.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-work-order-registry-model.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-work-order-registry-panel.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-demo-model.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-demo-geometry.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-cluster-field.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="vendor/spatial-markdown-editor.bundle.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="vendor/atom-spatial-scene.bundle.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-engine.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-mermaid-panel.js?v=sha256-9beb3caae2af7353"></script>
-  <script src="spatial-browser-bridge.js?v=sha256-9beb3caae2af7353"></script>
+  <script src="input-config.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-mobile-input-model.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-visual-model.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-detail-magnifier-model.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-gesture-arbiter.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-middle-frame-target.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-entity-registry.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-view-grammar.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-workspace-model.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-program-choice-model.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-mermaid-codec.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-json-codec.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-view-mode-model.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-help-page-model.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-work-order-registry-model.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-work-order-registry-panel.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-demo-model.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-demo-geometry.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-cluster-field.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="vendor/spatial-markdown-editor.bundle.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="vendor/atom-spatial-scene.bundle.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-engine.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-mermaid-panel.js?v=sha256-c9f089c55f2a4f8f"></script>
+  <script src="spatial-browser-bridge.js?v=sha256-c9f089c55f2a4f8f"></script>
 </body>
 </html>
