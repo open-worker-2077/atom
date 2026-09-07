@@ -4,7 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  executeAtomLanguage,
+  readCommittedAtomLanguageFacts
+} from './helpers/atom-language-test-runtime.mjs';
 import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
 import { createLegacyRuntimeComposition } from '../src/atom-system/adapters/legacy-runtime-composition.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
@@ -22,7 +25,9 @@ function pythonLiteral(value) {
 
 function findAtom(atoms, expectedPath, parentPath = []) {
   for (const current of atoms) {
-    const thing = Object.entries(current).find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1];
+    const thing = Object.entries(current).find(([key]) => (
+      key === 'thing' || key.startsWith('thing@') || key.startsWith('thing&')
+    ))?.[1];
     const currentPath = [...parentPath, thing];
     if (currentPath.join('/') === expectedPath) return current;
     const nested = findAtom(current.slot ?? [], expectedPath, currentPath);
@@ -97,7 +102,7 @@ for (const kind of ['node', 'slot']) {
       if (lockedAction === 'explore') {
         assert.equal(JSON.stringify(result).includes('classified'), true);
       } else {
-        const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+        const stored = await readCommittedAtomLanguageFacts(files);
         assert.equal(findAtom(stored, files.targetPath).situation, 'updated');
       }
     });
@@ -111,7 +116,7 @@ for (const kind of ['node', 'slot']) {
       if (otherAction === 'explore') {
         assert.equal(JSON.stringify(result).includes('classified'), true);
       } else {
-        const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+        const stored = await readCommittedAtomLanguageFacts(files);
         assert.equal(findAtom(stored, files.targetPath).situation, 'updated');
       }
     });
@@ -208,7 +213,7 @@ test('a successful action-split Transform publishes a current Program projection
     agentPath: 'Root/Holder'
   });
   assert.equal(allowed.ok, true, JSON.stringify(allowed));
-  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const world = await readCommittedAtomLanguageFacts({ contextFile, projectionFile: graphFile });
   assert.equal(findAtom(world, nodeExplorePath).situation, 'updated');
   assert.equal(findAtom(world, nodeTransformPath).situation, 'updated');
 });

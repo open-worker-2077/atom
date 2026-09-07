@@ -17,7 +17,9 @@ function entry(value, baseKey) {
 }
 const field = (value, baseKey) => entry(value, baseKey)?.[1];
 const thingOf = (value) => field(value, 'thing');
-const typesOf = (value) => entry(value, 'thing')[0].split('@').slice(1).map((value) => value.split('#')[0]);
+const typesOf = (value) => parseAtomKey(entry(value, 'thing')[0], {
+  descriptionSymbolWarnings: false
+}).types.map((type) => type.raw);
 function find(atoms, selector) {
   let slot = atoms;
   let current = null;

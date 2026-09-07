@@ -7,6 +7,7 @@ import {
   sealWorldFactsRevision
 } from '../../src/atom-system/world-runtime/world-revision.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
+import { ensureThingIdentities } from './slot-graph-semantics.mjs';
 
 function mergeWarnings(...groups) {
   const warnings = [];
@@ -589,6 +590,7 @@ async function applyCreateTransform({
   const atom = persistentAtomFromItem(item);
   const invalid = validateNewAtom(atom);
   if (invalid) return { error: invalid };
+  ensureThingIdentities([atom]);
 
   const createNameField = oneStoredField(atom, 'thing');
   if (createNameField?.parsed.types.some((type) => type.raw === 'agent')) {
@@ -3145,6 +3147,19 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     postCommitEvent: sourceEvent = null,
     baseAtoms = atoms
   } = {}) {
+    const affectedAtomsFromPaths = (paths) => {
+      const expanded = new Set();
+      for (const rawPath of paths ?? []) {
+        const parts = String(rawPath).split('/').filter(Boolean);
+        for (let depth = 1; depth <= parts.length; depth += 1) {
+          expanded.add(parts.slice(0, depth).join('/'));
+        }
+      }
+      return [...expanded].sort().map((path) => ({
+        path,
+        axes: ['slot', 'situation', 'strut', 'thing']
+      }));
+    };
     const pathIntersects = (left, right) => left === right
       || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
     function lockDependencies(paths) {
@@ -3243,10 +3258,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         referencePaths: semanticInputsComplete
           ? [...new Set([...referencePaths, ...lockClosure.referencePaths])].sort()
           : null,
-        affectedAtoms: affectedAtoms ?? (Array.isArray(changedPaths) ? changedPaths.map((path) => ({
-          path,
-          axes: ['slot', 'situation', 'strut', 'thing']
-        })) : null),
+        affectedAtoms: affectedAtoms ?? (Array.isArray(changedPaths)
+          ? affectedAtomsFromPaths(changedPaths)
+          : null),
         transformLogRecord,
         postCommitEvent: sourceEvent,
         subsequentOf: subsequent ? sourceCommandId : null,

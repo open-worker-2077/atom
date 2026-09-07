@@ -149,6 +149,40 @@ test('projects decorated Atom keys recursively through parseAtomKey onto a virtu
   assert.deepEqual(atoms, atomsFixture(), 'projection must not turn the virtual root into a factual Atom');
 });
 
+test('accepts persisted Thing identities while hiding them from the derived Graph projection', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const contextFile = path.join(directory, 'atom.json');
+  const atoms = [{
+    'thing@program&id=AbCdEfGhIjKlMnOpQrStUv#窗口': '石器工坊',
+    situation: '正文',
+    slot: [],
+    strut: []
+  }];
+
+  await writeAtomContext(contextFile, atoms);
+  assert.deepEqual(await readAtomContext(contextFile, { create: false }), atoms);
+  const projection = projectAtomContext(atoms);
+  assert.equal(projection.graph.slot[0]['thing@program#窗口'], '石器工坊');
+  assert.equal(Object.keys(projection.graph.slot[0]).some((key) => key.includes('&id=')), false);
+});
+
+test('rejects duplicate persisted Thing identities before projection or write', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const contextFile = path.join(directory, 'atom.json');
+  const identity = 'AbCdEfGhIjKlMnOpQrStUv';
+  const atoms = ['甲', '乙'].map((thing) => ({
+    [`thing&id=${identity}`]: thing, situation: '', slot: [], strut: []
+  }));
+  assert.throws(
+    () => projectAtomContext(atoms),
+    (error) => error.code === 'DUPLICATE_THING_IDENTITY'
+  );
+  await assert.rejects(
+    writeAtomContext(contextFile, atoms),
+    (error) => error.code === 'DUPLICATE_THING_IDENTITY'
+  );
+});
+
 test('typed default backup preserves archived facts but excludes inactive strut from Graph validation', () => {
   const archivedStrut = [{
     if: [{ 'thing@program': '旧判定' }],

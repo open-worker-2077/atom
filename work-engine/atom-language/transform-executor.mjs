@@ -8,6 +8,7 @@ import { matchesExactSelector } from './exact-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { programLockDeniedDiagnostic } from './program-locks.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
+import { renewThingIdentities } from './slot-graph-semantics.mjs';
 import {
   breakShortcutTargets,
   isShortcutAtom,
@@ -21,6 +22,7 @@ function storedField(atom, baseKey) {
   for (const [rawKey, value] of Object.entries(atom ?? {})) {
     if (rawKey !== baseKey
       && !rawKey.startsWith(`${baseKey}@`)
+      && !rawKey.startsWith(`${baseKey}&`)
       && !rawKey.startsWith(`${baseKey}#`)) continue;
     const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
     if (parsed.baseKey === baseKey) fields.push({ rawKey, parsed, value });
@@ -54,7 +56,8 @@ function replaceStoredField(atom, baseKey, value, metadata = {}) {
   const description = metadata.description
     ?? previous?.parsed.description
     ?? null;
-  const rawKey = `${baseKey}${types.map((type) => `@${type}`).join('')}${
+  const identity = baseKey === 'thing' ? previous?.parsed.identity ?? null : null;
+  const rawKey = `${baseKey}${types.map((type) => `@${type}`).join('')}${identity ? `&id=${identity}` : ''}${
     descriptionPresent ? `#${description}` : ''
   }`;
   if (
@@ -449,6 +452,7 @@ export function insertAuthoritativeSubtreeCopy({
     ? captureSubtreeBindings(sourceAtom, sourcePath)
     : (bindings ?? capturePartnerBindings(atoms, rootName));
   const clone = structuredClone(sourceAtom);
+  renewThingIdentities([clone]);
   if (newRootName !== null) replaceStoredField(clone, 'thing', newRootName);
   const mapping = new Map();
   mapClonedSubtree(sourceAtom, clone, mapping);
@@ -1299,6 +1303,7 @@ export async function applyTransform({
       };
     }
     let targetPath = null;
+    let targetIdentity = null;
     if (retarget) {
       const invalid = validateParameter(retarget);
       if (invalid) return invalid;
@@ -1311,11 +1316,12 @@ export async function applyTransform({
         ) };
       }
       targetPath = target.match.path.join('/');
+      targetIdentity = storedField(target.match.atom, 'thing')?.parsed.identity ?? null;
     }
     let error = applyFields(selected.match.atom, item.fields, nextAtoms);
     if (!error && targetPath) {
       try {
-        retargetShortcutAtom(selected.match.atom, targetPath);
+        retargetShortcutAtom(selected.match.atom, targetPath, targetIdentity);
       } catch (caught) {
         error = diagnostic(caught.code ?? 'SHORTCUT_RETARGET_FAILED', caught.message);
       }

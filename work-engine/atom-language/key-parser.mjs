@@ -6,7 +6,8 @@ import {
 } from './graph-schema.mjs';
 import { createActionRegistry, createMatcherRegistry } from './registry.mjs';
 
-const LEFT_ENGINEERING_SYMBOLS = new Set(['@', '$', '~']);
+const LEFT_ENGINEERING_SYMBOLS = new Set(['@', '&', '$', '~']);
+const THING_ID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
 const DEFAULT_MATCHER_REGISTRY = createMatcherRegistry();
 const DEFAULT_ACTION_REGISTRY = createActionRegistry();
 
@@ -47,10 +48,11 @@ function splitLeftSide(left) {
   return { baseKey, sections };
 }
 
-function persistentKey(baseKey, types, descriptionPresent, description) {
+function persistentKey(baseKey, types, identity, descriptionPresent, description) {
   const typeText = types.map((type) => `@${type.raw}`).join('');
+  const identityText = identity ? `&id=${identity}` : '';
   const descriptionText = descriptionPresent ? `#${description}` : '';
-  return `${baseKey}${typeText}${descriptionText}`;
+  return `${baseKey}${typeText}${identityText}${descriptionText}`;
 }
 
 function actionParameterError(action, definition) {
@@ -104,6 +106,7 @@ export function parseAtomKey(rawKey, options = {}) {
       types: [],
       actions: [],
       hints: [],
+      identity: null,
       descriptionPresent: false,
       description: null,
       matcher: null,
@@ -119,7 +122,7 @@ export function parseAtomKey(rawKey, options = {}) {
   const left = descriptionPresent ? rawKey.slice(0, hashIndex) : rawKey;
 
   if (descriptionPresent && descriptionSymbolWarnings
-    && ['@', '$', '~'].some((symbol) => description.includes(symbol))) {
+    && ['@', '&', '$', '~'].some((symbol) => description.includes(symbol))) {
     warnings.push(diagnostic(
       'DESCRIPTION_NOT_LAST',
       '简介应放在最后；# 右侧仍全部按简介原文处理',
@@ -147,6 +150,7 @@ export function parseAtomKey(rawKey, options = {}) {
   const types = [];
   const actions = [];
   const hints = [];
+  const identitySections = [];
   for (const section of sections) {
     const command = parseCommandSegment(section.symbol, section.raw);
     if (!command.name) {
@@ -158,8 +162,43 @@ export function parseAtomKey(rawKey, options = {}) {
       continue;
     }
     if (section.symbol === '@') types.push(command);
+    if (section.symbol === '&') identitySections.push(command);
     if (section.symbol === '$') actions.push(command);
     if (section.symbol === '~') hints.push(command);
+  }
+
+  let identity = null;
+  if (identitySections.length > 1) {
+    errors.push(diagnostic(
+      'MULTIPLE_THING_IDENTITIES',
+      '一个 Thing 只能保存一个内核身份',
+      { rawKey }
+    ));
+  }
+  if (identitySections.length) {
+    const match = identitySections[0].raw.match(/^id=([A-Za-z0-9_-]{22})$/u);
+    if (baseKey !== 'thing') {
+      errors.push(diagnostic(
+        'THING_IDENTITY_AXIS_REQUIRED',
+        '内核身份只能附着在 thing 轴',
+        { rawKey, baseKey }
+      ));
+    } else if (!match || !THING_ID_PATTERN.test(match[1])) {
+      errors.push(diagnostic(
+        'INVALID_THING_IDENTITY',
+        'Thing 内核身份格式无效',
+        { rawKey }
+      ));
+    } else {
+      identity = match[1];
+      if (options.allowInternalIdentity === false) {
+        errors.push(diagnostic(
+          'KERNEL_IDENTITY_INPUT_FORBIDDEN',
+          'Thing 内核身份由内核签发，外部请求不得提供或修改',
+          { rawKey }
+        ));
+      }
+    }
   }
 
   if (baseKey === 'thing'
@@ -231,10 +270,11 @@ export function parseAtomKey(rawKey, options = {}) {
     types,
     actions,
     hints,
+    identity,
     descriptionPresent,
     description,
     matcher,
-    persistentKey: persistentKey(baseKey, types, descriptionPresent, description),
+    persistentKey: persistentKey(baseKey, types, identity, descriptionPresent, description),
     warnings,
     errors
   };

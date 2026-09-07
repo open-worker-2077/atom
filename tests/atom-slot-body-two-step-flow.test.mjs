@@ -11,7 +11,10 @@ import {
 } from '../work-engine/atom-language/cli.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
-import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  executeAtomLanguage,
+  readCommittedAtomLanguageFacts
+} from './helpers/atom-language-test-runtime.mjs';
 
 function atom(thing, situation = '', slot = [], strut = [], types = [], agentLabels = []) {
   const agent = types.includes('agent');
@@ -23,7 +26,7 @@ function atom(thing, situation = '', slot = [], strut = [], types = [], agentLab
 }
 
 function thingOf(value) {
-  return Object.entries(value).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
+  return Object.entries(value).find(([key]) => key.split(/[@&#]/u)[0] === 'thing')?.[1];
 }
 
 function find(atoms, selector) {
@@ -178,7 +181,7 @@ test('two-step slot instance unlocks without touching template or sibling', asyn
   )), JSON.stringify(observedTransforms));
   assert.equal(completed.ok, true, JSON.stringify(completed));
 
-  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const stored = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   assert.equal(find(stored, `${body}/槽例/甲/步骤一`).situation, '✅ 完成');
   assert.equal(find(stored, `${body}/槽例/甲/步骤二`).situation, '🏃‍♀️ 进行中');
   assert.equal(find(stored, `${body}/槽例/乙/步骤二`).situation, '⌛️ 等待');

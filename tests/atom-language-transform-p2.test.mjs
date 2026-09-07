@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { readAtomContext } from '../work-engine/atom-language/context-store.mjs';
 import {
   createShortcutAtom,
   shortcutMetadata
@@ -32,13 +33,14 @@ async function execute(files, source) {
 }
 
 async function readAtoms(file) {
-  return JSON.parse(await fs.readFile(file, 'utf8'));
+  return readAtomContext(file, { create: false });
 }
 
 function namedField(atomValue, baseKey) {
   return Object.entries(atomValue).find(([rawKey]) => (
     rawKey === baseKey
     || rawKey.startsWith(`${baseKey}@`)
+    || rawKey.startsWith(`${baseKey}&`)
     || rawKey.startsWith(`${baseKey}#`)
   ))?.[1];
 }

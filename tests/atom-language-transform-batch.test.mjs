@@ -8,6 +8,8 @@ import test from 'node:test';
 import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { readAtomContext } from '../work-engine/atom-language/context-store.mjs';
+import { atomName } from '../work-engine/atom-language/slot-graph-semantics.mjs';
 import {
   materializeGraphJson,
   parseGraphJson
@@ -374,7 +376,7 @@ test('a batch source commit precedes its Program effects commit', async (t) => {
   const world = createLegacyWorldService({
     onAuthoritativeWrite: async (write) => writes.push({
       ...write,
-      facts: JSON.parse(await fs.readFile(files.contextFile, 'utf8'))
+      facts: await readAtomContext(files.contextFile, { create: false })
     })
   });
   const scheduler = {
@@ -408,7 +410,7 @@ test('a batch source commit precedes its Program effects commit', async (t) => {
     writes[0].receipt.afterRevision.replace(/^sha256:/u, ''));
   assert.equal(result.revisionAfter,
     writes[1].receipt.afterRevision.replace(/^sha256:/u, ''));
-  const [sourceA, sourceB] = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const [sourceA, sourceB] = await readAtomContext(files.contextFile, { create: false });
   assert.deepEqual(sourceA.strut, struts('来源乙'));
   assert.deepEqual(sourceB.strut, struts('来源甲'));
   assert.equal(
@@ -423,7 +425,7 @@ test('a single Transform source commit precedes its Program effects commit', asy
   const world = createLegacyWorldService({
     onAuthoritativeWrite: async (write) => writes.push({
       ...write,
-      facts: JSON.parse(await fs.readFile(files.contextFile, 'utf8'))
+      facts: await readAtomContext(files.contextFile, { create: false })
     })
   });
   const scheduler = {
@@ -455,7 +457,7 @@ test('a single Transform source commit precedes its Program effects commit', asy
     writes[0].receipt.afterRevision.replace(/^sha256:/u, ''));
   assert.equal(result.revisionAfter,
     writes[1].receipt.afterRevision.replace(/^sha256:/u, ''));
-  const [sourceA, sourceB] = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const [sourceA, sourceB] = await readAtomContext(files.contextFile, { create: false });
   assert.equal(sourceA.situation, '新甲');
   assert.equal(sourceB.situation, '自动乙');
   assert.equal(result.revisionAfter, crypto.createHash('sha256')
@@ -486,7 +488,7 @@ test('a real Program creates then updates one Atom after the triggering source c
   const world = createLegacyWorldService({
     onAuthoritativeWrite: async (write) => writes.push({
       ...write,
-      facts: JSON.parse(await fs.readFile(contextFile, 'utf8'))
+      facts: await readAtomContext(contextFile, { create: false })
     })
   });
 
@@ -510,9 +512,9 @@ test('a real Program creates then updates one Atom after the triggering source c
     writes[0].receipt.afterRevision.replace(/^sha256:/u, ''));
   assert.equal(result.revisionAfter,
     writes[1].receipt.afterRevision.replace(/^sha256:/u, ''));
-  const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const persisted = await readAtomContext(contextFile, { create: false });
   assert.equal(persisted[0].slot.length, 1, JSON.stringify({ result, persisted }));
-  assert.equal(persisted[0].slot[0].thing, 'Created In Reconcile');
+  assert.equal(atomName(persisted[0].slot[0]), 'Created In Reconcile');
   assert.equal(persisted[0].slot[0].situation, 'final');
   assert.equal(result.revisionAfter, crypto.createHash('sha256')
     .update(JSON.stringify(persisted)).digest('hex'));

@@ -17,6 +17,15 @@ function atom(thing, situation = '', slot = [], type = '') {
   };
 }
 
+function identifiedAtom(identity, thing, situation = '', slot = [], type = '') {
+  return {
+    [`thing${type ? `@${type}` : ''}&id=${identity}`]: thing,
+    situation,
+    slot,
+    strut: []
+  };
+}
+
 test('a Transform $ action is decided by the Strut inline Program and delivers strict true downstream', async () => {
   const source = atom('Source', 'plain number: 42');
   source.strut = [{
@@ -423,6 +432,36 @@ test('prepared runtime indexes are reusable only for the exact authoritative wor
     scheduler.hasPreparedIndexesForRevision(revisionOfWorldFacts(changedWorld), changedWorld),
     true
   );
+});
+
+test('a persisted Thing identity remains the runtime coordinate across edits, rename, and move', () => {
+  const scheduler = createProgramRuntimeScheduler();
+  const identity = 'AbCdEfGhIjKlMnOpQrStUv';
+  const identified = (name, situation = '', slot = [], id = identity) => ({
+    [`thing&id=${id}`]: name,
+    situation,
+    slot,
+    strut: []
+  });
+  const worlds = [
+    [identified('Parent', '', [identified('Child')], 'AAAAAAAAAAAAAAAAAAAAAA'), identified('Other', '', [], 'BBBBBBBBBBBBBBBBBBBBBB')],
+    [identified('Parent', '', [identified('Child', 'changed')], 'AAAAAAAAAAAAAAAAAAAAAA'), identified('Other', '', [], 'BBBBBBBBBBBBBBBBBBBBBB')],
+    [identified('Parent', '', [identified('Renamed')], 'AAAAAAAAAAAAAAAAAAAAAA'), identified('Other', '', [], 'BBBBBBBBBBBBBBBBBBBBBB')],
+    [identified('Parent', '', [], 'AAAAAAAAAAAAAAAAAAAAAA'), identified('Other', '', [identified('Renamed')], 'BBBBBBBBBBBBBBBBBBBBBB')]
+  ];
+
+  const coordinates = worlds.map((world) => {
+    const record = scheduler.prepareRuntimeRecords(world)
+      .find(({ ref }) => ref === identity);
+    return { ref: record?.ref, path: record?.path };
+  });
+
+  assert.deepEqual(coordinates, [
+    { ref: identity, path: 'Parent/Child' },
+    { ref: identity, path: 'Parent/Child' },
+    { ref: identity, path: 'Parent/Renamed' },
+    { ref: identity, path: 'Other/Renamed' }
+  ]);
 });
 
 test('a literal path lock below a non-Agent synthetic test root recompiles into the active index', async () => {
@@ -1303,6 +1342,30 @@ test('a changed world revision recomputes Programs instead of reusing the previo
   assert.equal(changed.cached, false);
   assert.notEqual(changed.fingerprint, first.fingerprint);
   assert.equal(changed.messages[0].text, '42');
+});
+
+test('permanent Thing identities do not replace world revision cache invalidation', async () => {
+  const inputIdentity = 'AAAAAAAAAAAAAAAAAAAAAA';
+  const programIdentity = 'BBBBBBBBBBBBBBBBBBBBBB';
+  const program = identifiedAtom(programIdentity, 'Reporter', [
+    "value = explore({'thing': 'Input'})[0].situation",
+    "message({'level': 'info', 'text': value})"
+  ].join('\n'), [], 'program');
+  const scheduler = createProgramRuntimeScheduler();
+
+  const first = await scheduler.refresh([
+    identifiedAtom(inputIdentity, 'Input', 'before'),
+    program
+  ]);
+  const changed = await scheduler.refresh([
+    identifiedAtom(inputIdentity, 'Input', 'after'),
+    structuredClone(program)
+  ]);
+
+  assert.equal(first.cached, false);
+  assert.equal(changed.cached, false);
+  assert.notEqual(changed.fingerprint, first.fingerprint);
+  assert.equal(changed.messages[0].text, 'after');
 });
 
 test('a supplied undeclared origin cannot call registered Program functions while no context remains context-free', async () => {

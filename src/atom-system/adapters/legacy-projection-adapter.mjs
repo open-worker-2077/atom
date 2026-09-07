@@ -3,7 +3,7 @@ import { projectAtomGraphToKnowledge } from '../../../work-engine/atom-language/
 import { publicAtomTypes } from '../../../work-engine/atom-language/slot-graph-semantics.mjs';
 import { evaluateStrutClausesWithPrograms } from '../../../work-engine/atom-language/strut-runtime.mjs';
 
-const baseKeyOf = (rawKey) => String(rawKey).match(/^[^@#$~]+/u)?.[0] ?? '';
+const baseKeyOf = (rawKey) => String(rawKey).match(/^[^@&#$~]+/u)?.[0] ?? '';
 
 function fieldValue(atom, baseKey) {
   return Object.entries(atom ?? {}).find(([key]) => baseKeyOf(key) === baseKey)?.[1];

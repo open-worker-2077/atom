@@ -6,7 +6,10 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { slotProgramInvocationsForEvent } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
-import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  executeAtomLanguage,
+  readCommittedAtomLanguageFacts
+} from './helpers/atom-language-test-runtime.mjs';
 
 function atom(thing, situation = '', slot = [], strut = [], types = []) {
   const agentProgram = types.includes('agent');
@@ -22,7 +25,7 @@ function atom(thing, situation = '', slot = [], strut = [], types = []) {
 }
 
 function nameOf(value) {
-  return Object.entries(value).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
+  return Object.entries(value).find(([key]) => key.split(/[@&#]/u)[0] === 'thing')?.[1];
 }
 
 function find(atoms, selector) {
@@ -116,7 +119,7 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
     const result = await execute(runtime, source, unlabelled);
     assert.equal(result.ok, true, JSON.stringify(result.errors));
   }
-  const printedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const printedWorld = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   assert.ok(find(printedWorld, `${body}/槽例/实例001/字段甲`), '实例001未形成字段甲槽角色');
 
   for (const instance of ['实例001', '实例002']) {
@@ -136,7 +139,7 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
     }
   }
 
-  let stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  let stored = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   assert.equal(find(stored, `${body}/候选流/判定`), null);
   assert.ok(find(stored, `${body}/槽例/实例001`));
   assert.ok(find(stored, `${body}/槽例/实例002`));
@@ -145,14 +148,14 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
     { thing: `${body}/槽例/实例001/字段甲/值料`, 'situation.rep.值甲': '待填写' }
   ])}`, unlabelled);
   assert.equal(falseResult.ok, true, JSON.stringify(falseResult.errors));
-  stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  stored = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   assert.equal(find(stored, `${body}/槽例/实例001/状态锁`).situation.includes('lock('), false);
 
   const trueResult = await execute(runtime, `transform ${JSON.stringify([
     { thing: `${body}/槽例/实例001/字段乙/值料`, 'situation.rep.值乙': '待填写' }
   ])}`, unlabelled);
   assert.equal(trueResult.ok, true, JSON.stringify(trueResult.errors));
-  stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  stored = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   assert.equal(find(stored, `${body}/槽例/实例001/结果/结果料`).situation, '已批准');
   assert.equal(find(stored, `${body}/槽例/实例001/状态锁`).situation.includes('lock('), true);
   assert.equal(find(stored, `${body}/槽例/实例002/状态锁`).situation.includes('lock('), false);
@@ -164,7 +167,7 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
 
   const allowed = await execute(runtime, `transform {"thing":${JSON.stringify(target)},"situation.rep.已复核"}`, holder);
   assert.equal(allowed.ok, true, JSON.stringify(allowed.errors));
-  stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  stored = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   assert.equal(find(stored, target).situation, '已复核');
   assert.equal(find(stored, `${body}/槽例/实例002/结果/结果料`).situation, '待计算');
 
@@ -247,7 +250,7 @@ test('a failing strut subscriber preserves the committed source Transform', asyn
   assert.ok(result.subsequentExecution.errors.some((error) => (
     error.code === 'ATOM_PROGRAM_FAILED' && error.type === 'KeyError'
   )), JSON.stringify(result));
-  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const stored = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   assert.equal(find(stored, 'Source').situation, 'after');
 });
 
@@ -303,8 +306,9 @@ test('a rolled-back multi-subscriber delivery releases every claim for a complet
   });
   assert.equal(failed.ok, true, JSON.stringify(failed));
   assert.equal(failed.subsequentExecution.status, 'failed');
-  assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Source').situation, 'after');
-  assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Result').situation, 'before');
+  let committed = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
+  assert.equal(find(committed, 'Source').situation, 'after');
+  assert.equal(find(committed, 'Result').situation, 'before');
 
   const retried = await executeAtomLanguage({
     contextFile, projectionFile, programScheduler: scheduler,
@@ -312,7 +316,8 @@ test('a rolled-back multi-subscriber delivery releases every claim for a complet
     interaction: { id: `strut-retry-pass-${crypto.randomUUID()}` }
   });
   assert.equal(retried.ok, true, JSON.stringify(retried));
-  assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Result').situation, 'after');
+  committed = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
+  assert.equal(find(committed, 'Result').situation, 'after');
   assert.equal(applyCalls, 2);
 });
 
@@ -361,7 +366,8 @@ test('a strut subscriber effect rejected after worker success releases its claim
   });
   assert.equal(failed.ok, true, JSON.stringify(failed));
   assert.equal(failed.subsequentExecution.status, 'failed');
-  assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Source').situation, 'after');
+  let committed = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
+  assert.equal(find(committed, 'Source').situation, 'after');
 
   const retried = await executeAtomLanguage({
     contextFile, projectionFile, programScheduler: scheduler,
@@ -369,7 +375,8 @@ test('a strut subscriber effect rejected after worker success releases its claim
     interaction: { id: `strut-effect-pass-${crypto.randomUUID()}` }
   });
   assert.equal(retried.ok, true, JSON.stringify(retried));
-  assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Result').situation, 'after');
+  committed = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
+  assert.equal(find(committed, 'Result').situation, 'after');
   assert.equal(calls, 2);
 });
 

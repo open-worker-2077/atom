@@ -4,7 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  executeAtomLanguage,
+  readCommittedAtomLanguageFacts
+} from './helpers/atom-language-test-runtime.mjs';
 import { executeAtomLanguage as executeAtomLanguageKernel } from '../work-engine/atom-language/engine.mjs';
 import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
@@ -51,7 +54,7 @@ function findAtom(atoms, exactPath) {
   let current = null;
   for (const part of parts) {
     current = children.find((candidate) => Object.entries(candidate).some(([key, value]) => (
-      (key === 'thing' || key.startsWith('thing@') || key.startsWith('thing#')) && value === part
+      (key === 'thing' || key.startsWith('thing@') || key.startsWith('thing&') || key.startsWith('thing#')) && value === part
     )));
     if (!current) return null;
     children = current.slot;
@@ -223,11 +226,12 @@ test('shortcut locator follows target move and becomes broken when the target is
   ];
   const files = await fixture(t, world);
   const programScheduler = createProgramRuntimeScheduler();
-  assert.equal((await executeAtomLanguage({
+  const createdShortcut = await executeAtomLanguage({
     ...files,
     programScheduler,
     source: 'transform {"thing.run.":"引用域/创建引用"}'
-  })).ok, true);
+  });
+  assert.equal(createdShortcut.ok, true, JSON.stringify(createdShortcut.errors));
 
   const moved = await executeAtomLanguage({
     ...files, programScheduler, source: 'transform {"thing.mov.乙":"甲/权威 Thing"}'
@@ -259,6 +263,31 @@ test('shortcut locator follows target move and becomes broken when the target is
   assert.equal(broken.ok, false);
   assert.equal(broken.errors[0].code, 'SHORTCUT_TARGET_BROKEN');
   assert.equal(JSON.stringify(broken).includes('乙/权威 Thing'), false);
+});
+
+test('shortcut identity keeps the original target when its old semantic path is reused', () => {
+  const originalId = 'AAAAAAAAAAAAAAAAAAAAAA';
+  const replacementId = 'BBBBBBBBBBBBBBBBBBBBBB';
+  const original = {
+    [`thing&id=${originalId}`]: '新名', situation: '原对象', slot: [], strut: []
+  };
+  const replacement = {
+    [`thing&id=${replacementId}`]: '旧名', situation: '新占位对象', slot: [], strut: []
+  };
+  const shortcut = createShortcutAtom({
+    thing: '入口',
+    targetPath: '旧名',
+    targetIdentity: originalId,
+    referenceId: 'identity-bound-shortcut'
+  });
+
+  const resolved = resolveShortcutMatch([original, replacement, shortcut], {
+    atom: shortcut,
+    path: ['入口']
+  });
+
+  assert.strictEqual(resolved.atom, original);
+  assert.deepEqual(resolved.path, ['新名']);
 });
 
 test('persisted shortcut target rewrites are part of the exact local transaction closure', async (t) => {
@@ -446,21 +475,19 @@ test('public Transform cannot forge shortcut persistence or redirect a write thr
     ]))}`
   });
   assert.equal(nestedForgery.ok, false);
-  assert.equal(nestedForgery.errors[0].code, 'SHORTCUT_PERSISTENCE_FORGERY_DENIED');
+  assert.equal(nestedForgery.errors[0].code, 'KERNEL_IDENTITY_INPUT_FORBIDDEN');
 
   const persistedShortcut = createShortcutAtom({
     thing: '入口', targetPath: '目标', referenceId: 'reference-id'
   });
-  await fs.writeFile(files.contextFile, `${JSON.stringify([
-    atom('目标', '原文'), persistedShortcut
-  ], null, 2)}\n`, 'utf8');
+  const redirectFiles = await fixture(t, [atom('目标', '原文'), persistedShortcut]);
   const redirected = await executeAtomLanguage({
-    ...files,
+    ...redirectFiles,
     source: 'transform {"thing":"入口","situation.rep.":"不得转发"}'
   });
   assert.equal(redirected.ok, false);
   assert.equal(redirected.errors[0].code, 'SHORTCUT_TRANSFORM_REDIRECT_FORBIDDEN');
-  assert.equal(findAtom(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), '目标').situation, '原文');
+  assert.equal(findAtom(JSON.parse(await fs.readFile(redirectFiles.contextFile, 'utf8')), '目标').situation, '原文');
 
   const atoms = [atom('目标', '原文')];
   const effect = await applyShortcutEffect({
@@ -490,7 +517,7 @@ test('semantic Transform retargets one shortcut while preserving its internal id
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  const persisted = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const persisted = await readCommittedAtomLanguageFacts(files);
   const metadata = shortcutMetadata(findAtom(persisted, '引用域/入口'));
   assert.equal(metadata.referenceId, 'stable-reference-id');
   assert.deepEqual(metadata.target, { state: 'linked', path: '新目标' });

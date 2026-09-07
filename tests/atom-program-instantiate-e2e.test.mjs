@@ -5,8 +5,12 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
-import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  executeAtomLanguage,
+  readCommittedAtomLanguageFacts
+} from './helpers/atom-language-test-runtime.mjs';
 import { projectAtomContext } from '../work-engine/atom-language/context-store.mjs';
+import { atomName } from '../work-engine/atom-language/slot-graph-semantics.mjs';
 import { programFunctionRegistry } from '../work-engine/atom-language/program-function-registry.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { evaluateStrutClausesWithPrograms } from '../work-engine/atom-language/strut-runtime.mjs';
@@ -197,11 +201,11 @@ test('documented two-step commands create an Agent with one attached complete ad
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  const [creator] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const [creator] = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   const [taskArea] = creator.slot;
   const [agent] = taskArea.slot;
-  assert.equal(agent['thing@program'], '任务名');
-  assert.deepEqual(agent.slot.map((child) => child.thing ?? child['thing@program']), [
+  assert.equal(atomName(agent), '任务名');
+  assert.deepEqual(agent.slot.map(atomName), [
     '编标版本', '任务标题', '导航坐标', '设标', '建标', '推进', '收尾', '内部路由'
   ]);
   assert.deepEqual(scheduler.agentSecurity.get('当前Agent/任务区/任务名'), {
@@ -230,7 +234,7 @@ test('documented repair command attaches and instantiates a flow below an existi
   });
 
   assert.equal(result.ok, true, JSON.stringify({ errors: result.errors, warnings: result.warnings }));
-  const [agent] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const [agent] = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   assert.equal(agent['thing@program'], '已有任务名');
   assert.equal(agent.slot.length, 1);
   assert.equal(agent.slot[0]['thing@program'], '推进流');
@@ -261,11 +265,11 @@ test('advancement-flow data children can be edited without legacy uses partners'
   });
 
   assert.equal(edited.ok, true, JSON.stringify(edited.errors));
-  const [agent] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const [agent] = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   const requirement = agent.slot[0].slot
-    .find((child) => child.thing === '设标').slot
-    .find((child) => child.thing === '定向').slot
-    .find((child) => child.thing === '需求');
+    .find((child) => atomName(child) === '设标').slot
+    .find((child) => atomName(child) === '定向').slot
+    .find((child) => atomName(child) === '需求');
   assert.equal(requirement.situation, '真实需求');
 });
 

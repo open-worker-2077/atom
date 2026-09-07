@@ -1,7 +1,13 @@
+import crypto from 'node:crypto';
+
 import { parseAtomKey } from './key-parser.mjs';
 
 export const SLOT_ROLE_TYPE_PREFIX = 'slot-role-';
 export const SLOT_REVISION_TYPE_PREFIX = 'slot-revision-';
+
+export function createThingIdentity() {
+  return crypto.randomBytes(16).toString('base64url');
+}
 
 export function fieldsByBase(atom) {
   const result = new Map();
@@ -42,7 +48,10 @@ export function replaceStoredField(atom, baseKey, value, metadata = {}) {
   const types = metadata.types ?? previous?.parsed.types.map((type) => type.raw) ?? [];
   const descriptionPresent = metadata.descriptionPresent ?? previous?.parsed.descriptionPresent ?? false;
   const description = metadata.description ?? previous?.parsed.description ?? null;
-  const rawKey = `${baseKey}${types.map((type) => `@${type}`).join('')}${descriptionPresent ? `#${description}` : ''}`;
+  const identity = baseKey === 'thing'
+    ? (previous?.parsed.identity ?? metadata.identity ?? null)
+    : null;
+  const rawKey = `${baseKey}${types.map((type) => `@${type}`).join('')}${identity ? `&id=${identity}` : ''}${descriptionPresent ? `#${description}` : ''}`;
   for (const key of Object.keys(atom)) {
     if (parseAtomKey(key, { descriptionSymbolWarnings: false }).baseKey === baseKey) delete atom[key];
   }
@@ -51,11 +60,54 @@ export function replaceStoredField(atom, baseKey, value, metadata = {}) {
 
 export function createAtom({ thing, situation = '', slot = [], strut = [], types = [], description = null }) {
   const atom = {};
-  replaceStoredField(atom, 'thing', thing, { types, descriptionPresent: description != null, description });
+  replaceStoredField(atom, 'thing', thing, {
+    types,
+    identity: createThingIdentity(),
+    descriptionPresent: description != null,
+    description
+  });
   replaceStoredField(atom, 'situation', situation);
   replaceStoredField(atom, 'slot', slot);
   replaceStoredField(atom, 'strut', strut);
   return atom;
+}
+
+export function ensureThingIdentities(atoms) {
+  let changed = false;
+  function visit(atom) {
+    const thing = storedField(atom, 'thing');
+    if (thing && !thing.parsed.identity) {
+      replaceStoredField(atom, 'thing', thing.value, {
+        types: thing.parsed.types.map((type) => type.raw),
+        identity: createThingIdentity(),
+        descriptionPresent: thing.parsed.descriptionPresent,
+        description: thing.parsed.description
+      });
+      changed = true;
+    }
+    for (const child of childrenOf(atom) ?? []) visit(child);
+  }
+  for (const atom of atoms ?? []) visit(atom);
+  return changed;
+}
+
+export function renewThingIdentities(atoms) {
+  function visit(atom) {
+    const thing = storedField(atom, 'thing');
+    if (thing) {
+      const previousKey = thing.rawKey;
+      const nextIdentity = createThingIdentity();
+      for (const key of Object.keys(atom)) {
+        if (parseAtomKey(key, { descriptionSymbolWarnings: false }).baseKey === 'thing') delete atom[key];
+      }
+      const nextKey = `thing${thing.parsed.types.map((type) => `@${type.raw}`).join('')}&id=${nextIdentity}${thing.parsed.descriptionPresent ? `#${thing.parsed.description}` : ''}`;
+      atom[nextKey] = structuredClone(thing.value);
+      if (previousKey === nextKey) throw new Error('Thing identity renewal did not change identity');
+    }
+    for (const child of childrenOf(atom) ?? []) visit(child);
+  }
+  for (const atom of atoms ?? []) visit(atom);
+  return atoms;
 }
 
 export function walkAtoms(atoms) {

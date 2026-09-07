@@ -30,7 +30,7 @@ function digest(value) {
 }
 
 function baseKey(rawKey) {
-  return String(rawKey).match(/^[^@#$~]+/u)?.[0] ?? '';
+  return String(rawKey).match(/^[^@&#$~]+/u)?.[0] ?? '';
 }
 
 function migratedKey(rawKey) {
@@ -145,7 +145,7 @@ export function planGraphFourAxisMigration(root, options = {}) {
     if (seen.has(pathText)) throw problem('DUPLICATE_LEGACY_GRAPH_PATH', `旧 Graph 路径重复：${pathText}`);
     seen.add(pathText);
     const thingKey = migratedKey(field('thing').rawKey);
-    const types = thingKey.split('@').slice(1).map((part) => part.split('#')[0]);
+    const types = thingKey.split('@').slice(1).map((part) => part.split(/[&#]/u)[0]);
     if (types.includes('backup') && types.includes('default')) {
       if (defaultBackupPath) {
         throw problem('AMBIGUOUS_DEFAULT_BACKUP', 'World contains multiple typed default backup roots', {

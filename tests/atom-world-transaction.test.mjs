@@ -9,6 +9,7 @@ import { gzipSync } from 'node:zlib';
 import { createCommitCoordinator } from '../src/atom-system/world-runtime/commit-coordinator.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import {
+  applyLocalWorldPatch,
   createLocalWorldPatch,
   invertLocalWorldPatch
 } from '../src/atom-system/world-runtime/local-world-patch.mjs';
@@ -28,6 +29,7 @@ import {
   createShortcutAtom,
   resolveShortcutMatch
 } from '../work-engine/atom-language/shortcut-runtime.mjs';
+import { atomName } from '../work-engine/atom-language/slot-graph-semantics.mjs';
 
 function revisionOf(facts) {
   return `sha256:${crypto.createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`;
@@ -269,10 +271,10 @@ test('real shortcut retarget guards its validated target against a concurrent re
   }), (error) => error.code === 'WORLD_REVISION_CONFLICT');
 
   const committed = (await files.worldRepository.read()).facts;
-  assert.deepEqual(committed.map((atom) => atom.thing ?? atom['thing@shortcut']), [
+  assert.deepEqual(committed.map(atomName), [
     'Old', 'Moved', 'Entry'
   ]);
-  const entry = committed.find((atom) => atom['thing@shortcut'] === 'Entry');
+  const entry = committed.find((atom) => atomName(atom) === 'Entry');
   const resolved = resolveShortcutMatch(committed, { atom: entry, path: ['Entry'] });
   assert.equal(resolved.path.join('/'), 'Old');
 });
@@ -955,6 +957,25 @@ test('a local commit is durable in the append log before full-world compaction',
   }]);
   const afterCompactionRestart = createJsonWorldRepository({ file: worldFile, worldId: 'primary', localCommitFile });
   assert.deepEqual((await afterCompactionRestart.read()).facts, afterFacts);
+});
+
+test('local world patches locate Things by semantic path when their keys carry permanent identities', () => {
+  const beforeFacts = [{
+    'thing&id=AbCdEfGhIjKlMnOpQrStUv': 'Root',
+    situation: 'old', slot: [], strut: []
+  }];
+  const afterFacts = structuredClone(beforeFacts);
+  afterFacts[0].situation = 'new';
+  const patch = createLocalWorldPatch({
+    worldId: 'primary',
+    beforeRevision: revisionOf(beforeFacts),
+    afterRevision: revisionOf(afterFacts),
+    beforeFacts,
+    afterFacts,
+    changedPaths: ['Root']
+  });
+  assert.equal(patch.operations.length, 1);
+  assert.deepEqual(applyLocalWorldPatch(beforeFacts, patch), afterFacts);
 });
 
 test('local commit visibility waits for log fsync and a failed sync cannot seed the next commit', async (t) => {

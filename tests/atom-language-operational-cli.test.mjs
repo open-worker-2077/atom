@@ -6,7 +6,10 @@ import test from 'node:test';
 
 import { parseGraphDocument } from '../cli/lib/graph-json.mjs';
 import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
-import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  executeAtomLanguage,
+  readCommittedAtomLanguageFacts
+} from './helpers/atom-language-test-runtime.mjs';
 import {
   materializeGraphJson,
   parseGraphJson
@@ -88,7 +91,7 @@ function walkAtomTree(root) {
 }
 
 function assertAdjacentSiblings(siblings) {
-  const names = siblings.map((atom) => atom.thing);
+  const names = siblings.map((atom) => fieldEntry(atom, 'thing')?.[1]);
   siblings.forEach((atom, index) => {
     const then = [names[index - 1], names[index + 1]]
       .filter(Boolean)
@@ -342,7 +345,13 @@ test('operational Atom Language closes one isolated transform/explore/projection
   const createdWorld = JSON.parse(await fileText(contextFile));
   const createdProgram = createdWorld[0].slot[0].slot
     .find((entry) => fieldEntry(entry, 'thing')?.[1] === '石器工坊');
-  assert.equal(fieldEntry(createdProgram, 'thing')[0], 'thing@program#保存石器与工具的工坊');
+  const [createdProgramKey] = fieldEntry(createdProgram, 'thing');
+  const parsedCreatedProgramKey = parseAtomKey(createdProgramKey, {
+    descriptionSymbolWarnings: false
+  });
+  assert.deepEqual(parsedCreatedProgramKey.types.map(({ raw }) => raw), ['program']);
+  assert.match(parsedCreatedProgramKey.identity, /^[A-Za-z0-9_-]{22}$/u);
+  assert.equal(parsedCreatedProgramKey.description, '保存石器与工具的工坊');
   const duplicateContextBefore = await fileText(contextFile);
   const duplicateProjectionBefore = await fileText(projectionFile);
   const duplicate = await execute({
@@ -378,10 +387,12 @@ test('operational Atom Language closes one isolated transform/explore/projection
       .sort(),
     ['situation', 'slot', 'strut', 'thing']
   );
-  assert.equal(
-    fieldEntry(workshop, 'thing')[0],
-    'thing@program#保存石器与工具的工坊'
-  );
+  const persistedWorkshopThing = parseAtomKey(fieldEntry(workshop, 'thing')[0], {
+    descriptionSymbolWarnings: false
+  });
+  assert.deepEqual(persistedWorkshopThing.types.map(({ raw }) => raw), ['program']);
+  assert.match(persistedWorkshopThing.identity, /^[A-Za-z0-9_-]{22}$/u);
+  assert.equal(persistedWorkshopThing.description, '保存石器与工具的工坊');
   assert.equal(fieldEntry(workshop, 'thing')[1], '石器工坊');
   assert.equal(fieldEntry(workshop, 'situation')[1], registrationSource);
   const workshopDetail = workshop.slot[0];
@@ -404,11 +415,16 @@ test('operational Atom Language closes one isolated transform/explore/projection
   });
   assert.equal(updated.ok, true);
 
-  const updatedWorkshop = atomsIn(JSON.parse(await fileText(contextFile)))[0]
+  const updatedWorkshop = (await readCommittedAtomLanguageFacts({ contextFile, projectionFile }))[0]
     .slot[0].slot.find((entry) => fieldEntry(entry, 'thing')?.[1] === '石器工坊');
   const persistedAfterUpdate = updatedWorkshop.slot
     .find((entry) => fieldEntry(entry, 'thing')?.[1] === '工坊说明');
-  assert.equal(fieldEntry(persistedAfterUpdate, 'thing')[0], 'thing');
+  const persistedDetailThing = parseAtomKey(fieldEntry(persistedAfterUpdate, 'thing')[0], {
+    descriptionSymbolWarnings: false
+  });
+  assert.equal(persistedDetailThing.baseKey, 'thing');
+  assert.deepEqual(persistedDetailThing.types, []);
+  assert.match(persistedDetailThing.identity, /^[A-Za-z0-9_-]{22}$/u);
   assert.equal(
     fieldEntry(persistedAfterUpdate, 'situation')[0],
     'situation#保存石器与工具的工坊'

@@ -6,7 +6,10 @@ import test from 'node:test';
 
 import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
-import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  executeAtomLanguage,
+  readCommittedAtomLanguageFacts
+} from './helpers/atom-language-test-runtime.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
@@ -22,7 +25,7 @@ function findAtom(atoms, selector) {
   let current = null;
   for (const part of parts) {
     current = children.find((entry) => Object.entries(entry).some(([key, value]) => (
-      (key === 'thing' || key.startsWith('thing@')) && value === part
+      (key === 'thing' || key.startsWith('thing@') || key.startsWith('thing&')) && value === part
     ))) ?? null;
     if (!current) return null;
     children = current.slot ?? [];
@@ -55,7 +58,12 @@ async function executeFixture(files, source, scheduler = createProgramRuntimeSch
     interaction: { id: `slot-signal-${crypto.randomUUID()}` }
   });
   const bytes = await fs.readFile(files.contextFile, 'utf8');
-  return { result, bytes, world: JSON.parse(bytes), scheduler };
+  return {
+    result,
+    bytes,
+    world: await readCommittedAtomLanguageFacts(files),
+    scheduler
+  };
 }
 
 async function executeFixtureCli(files, source) {
@@ -880,7 +888,7 @@ test('signal outside Slot invocation fails only after its Transform source commi
   )));
   assert.equal(result.revisionAfter, result.subsequentExecution.sourceRevision);
   assert.notEqual(result.revisionAfter, result.revisionBefore);
-  assert.notEqual(bytes, files.before);
+  assert.notDeepEqual(stored, world);
   assert.deepEqual(stored, [world[0], atom('Go', 'changed')]);
 });
 

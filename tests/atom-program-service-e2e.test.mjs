@@ -24,6 +24,10 @@ function atom(thing, situation = '', slot = [], type = '') {
   return { [`thing${storedType ? `@${storedType}` : ''}`]: thing, situation: storedSituation, slot, strut: [] };
 }
 
+function thingOf(atomValue) {
+  return Object.entries(atomValue ?? {}).find(([key]) => key.split(/[@&#]/u)[0] === 'thing')?.[1];
+}
+
 function childPath(node) {
   let hash = 2166136261;
   for (const character of node.id) {
@@ -244,7 +248,7 @@ test('4784 keeps create and Program changes on whole-world history', async (t) =
     assert.equal(record.receipt.result.affectedPathClosureComplete, false);
   }
   const committed = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  const entry = committed[0].slot.find((candidate) => candidate['thing@shortcut'] === '入口');
+  const entry = committed[0].slot.find((candidate) => thingOf(candidate) === '入口');
   assert.equal(resolveShortcutMatch(committed, {
     atom: entry,
     path: ['工作Agent', '入口']
@@ -561,8 +565,8 @@ test('4784 Web workspace edits commit atom.json before asynchronously publishing
   assert.equal(payload.result.ok, true, JSON.stringify(payload.result.errors));
   await settleWorkspaceProjection(running, payload);
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(world[0].thing, 'Existing');
-  assert.equal(world[2].thing, 'Created in Web');
+  assert.equal(thingOf(world[0]), 'Existing');
+  assert.equal(thingOf(world[2]), 'Created in Web');
   const createdKnowledge = await waitForKnowledge(
     running.url,
     (knowledge) => knowledge.nodes.some((node) => node.label === 'Created in Web'),
@@ -591,7 +595,7 @@ test('4784 Web workspace edits commit atom.json before asynchronously publishing
   assert.equal(nestedPayload.result.ok, true, JSON.stringify(nestedPayload));
   await settleWorkspaceProjection(running, nestedPayload);
   const nestedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(nestedWorld[0].slot[0].thing, 'Nested in Web');
+  assert.equal(thingOf(nestedWorld[0].slot[0]), 'Nested in Web');
 
   const returnable = (await applyWebEdit({
     kind: 'node-create', path: childPath(parent), draft: { label: 'Return to top', description: 'root move' }

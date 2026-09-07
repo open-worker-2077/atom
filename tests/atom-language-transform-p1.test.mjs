@@ -9,7 +9,10 @@ import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { executeAtomLanguage as executeAtomLanguageKernel } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
-import { writeAtomGraphProjection } from '../work-engine/atom-language/context-store.mjs';
+import {
+  readAtomContext,
+  writeAtomGraphProjection
+} from '../work-engine/atom-language/context-store.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
 import {
   appendTransformLog,
@@ -21,6 +24,7 @@ import {
   TRANSFORM_COMMANDS,
   parseTransformKey
 } from '../work-engine/atom-language/transform-key-parser.mjs';
+import { parseAtomKey } from '../work-engine/atom-language/key-parser.mjs';
 
 function atom(thing, situation = '', slot = [], strut = []) {
   return { thing, situation, slot, strut };
@@ -40,7 +44,7 @@ async function execute(files, source, options = {}) {
 }
 
 async function readAtoms(file) {
-  return JSON.parse(await fs.readFile(file, 'utf8'));
+  return readAtomContext(file, { create: false });
 }
 
 function findAtom(atoms, thing) {
@@ -48,7 +52,7 @@ function findAtom(atoms, thing) {
   while (queue.length) {
     const candidate = queue.shift();
     const nameEntry = Object.entries(candidate).find(([rawKey]) => (
-      rawKey === 'thing' || rawKey.startsWith('thing@') || rawKey.startsWith('thing#')
+      parseAtomKey(rawKey, { descriptionSymbolWarnings: false }).baseKey === 'thing'
     ));
     if (nameEntry?.[1] === thing) return candidate;
     const childrenEntry = Object.entries(candidate).find(([rawKey]) => (

@@ -16,7 +16,7 @@ function digest(value) {
 }
 
 function baseKey(rawKey) {
-  return String(rawKey).match(/^[^@#$~]+/u)?.[0] ?? '';
+  return String(rawKey).match(/^[^@&#$~]+/u)?.[0] ?? '';
 }
 
 function entryAt(atom, axis) {

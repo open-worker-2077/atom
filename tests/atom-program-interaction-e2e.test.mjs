@@ -4,8 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  executeAtomLanguage,
+  readCommittedAtomLanguageFacts
+} from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { atomName } from '../work-engine/atom-language/slot-graph-semantics.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
@@ -235,8 +239,8 @@ test('explicit Program run creates a nested four-axis Atom and leaves assignment
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(result.changed, true);
   assert.equal(result.messages.some((message) => message.text === 'None'), true);
-  const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(persisted[0].slot[0].thing, 'Created');
+  const persisted = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
+  assert.equal(atomName(persisted[0].slot[0]), 'Created');
   assert.equal(persisted[0].slot[0].situation, '{"probe":true}');
 });
 
@@ -633,7 +637,8 @@ test('Program children are data and never require uses even when detail is empty
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot[0].situation, 'value');
+  assert.equal((await readCommittedAtomLanguageFacts({ contextFile, projectionFile }))[0]
+    .slot[0].situation, 'value');
 });
 
 test('thing.run forces the selected Python Program detail to execute again', async () => {

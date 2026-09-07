@@ -4,7 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  executeAtomLanguage,
+  readCommittedAtomLanguageFacts
+} from './helpers/atom-language-test-runtime.mjs';
 import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
@@ -73,7 +76,7 @@ function find(atoms, targetPath) {
   let current = null;
   for (const segment of targetPath.split('/')) {
     current = children.find((candidate) => Object.entries(candidate).some(([key, value]) => (
-      key.split(/[@#]/u)[0] === 'thing' && value === segment
+      key.split(/[@&#]/u)[0] === 'thing' && value === segment
     )));
     if (!current) return null;
     children = current.slot;
@@ -492,7 +495,7 @@ test('create commits its source and rejects an unauthorized declaration from sub
   assert.ok(result.subsequentExecution.errors.some(({ code }) => (
     code === 'AGENT_JURISDICTION_ESCALATION'
   )), JSON.stringify(result));
-  const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const stored = await readCommittedAtomLanguageFacts(files);
   assert.ok(find(stored, createdPath));
   assert.equal(find(stored, CHILD_PATH).situation, CHILD_SOURCE);
 });
@@ -512,7 +515,7 @@ test('single Transform commits its source and rejects an unauthorized declaratio
   assert.ok(result.subsequentExecution.errors.some(({ code }) => (
     code === 'AGENT_JURISDICTION_ESCALATION'
   )), JSON.stringify(result));
-  const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const stored = await readCommittedAtomLanguageFacts(files);
   assert.equal(find(stored, TARGET_PATH).situation, 'after');
   assert.equal(find(stored, CHILD_PATH).situation, CHILD_SOURCE);
 });
@@ -594,7 +597,7 @@ test('batch commits its source while isolating rejected candidate authority befo
   assert.ok(result.subsequentExecution.errors.some(({ code }) => (
     code === 'AGENT_JURISDICTION_ESCALATION'
   )), JSON.stringify(result));
-  const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const stored = await readCommittedAtomLanguageFacts(files);
   assert.equal(find(stored, TARGET_PATH).situation, 'after');
   assert.equal(find(stored, `${CREATOR_PATH}/Leak`).situation, 'still-stable');
   assert.equal(find(stored, CHILD_PATH).situation, CHILD_SOURCE);
@@ -688,7 +691,7 @@ test('durable commit survives shared Agent-security rebuild failure and recovers
   assert.ok(committed.warnings.some(({ code }) => (
     code === 'AGENT_SECURITY_REBUILD_RECOVERY_PENDING'
   )), JSON.stringify(committed));
-  assert.equal(JSON.parse(await fs.readFile(files.contextFile, 'utf8'))[0]
+  assert.equal((await readCommittedAtomLanguageFacts(files))[0]
     .slot[0].slot[0].slot.find((entry) => entry.thing === 'Target').situation, 'after');
   assert.equal(scheduler.agentSecurityWorldRevision, null);
 

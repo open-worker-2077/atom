@@ -169,7 +169,7 @@ export function createTransactionalWorldPersistence({
       || record?.operation !== 'discard' || record.archivePath !== archivePath
       || record.originalPath !== originalPath) return null;
     const axis = (atom, name) => Object.entries(atom ?? {})
-      .find(([key]) => key.split('@', 1)[0].split('#', 1)[0] === name)?.[1];
+      .find(([key]) => (key.match(/^[^@&#$~]+/u)?.[0] ?? '') === name)?.[1];
     const locate = (facts, parts) => {
       let children = facts;
       let atom = null;

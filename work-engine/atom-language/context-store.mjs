@@ -30,7 +30,34 @@ const LEGACY_V1_AXES = Object.freeze(['name', 'detail', 'children', 'partners'])
 const LEGACY_V1_AXIS_SET = new Set(LEGACY_V1_AXES);
 
 function rawBaseKey(rawKey) {
-  return String(rawKey).match(/^[^@#$~]+/u)?.[0] ?? '';
+  return String(rawKey).match(/^[^@&#$~]+/u)?.[0] ?? '';
+}
+
+function validateThingIdentityUniqueness(atoms) {
+  const seen = new Map();
+  function visit(atom, parentPath = []) {
+    if (!isPlainObject(atom)) return;
+    const thing = Object.entries(atom).map(([rawKey, value]) => ({
+      parsed: parseAtomKey(rawKey, { descriptionSymbolWarnings: false }), value
+    })).find(({ parsed }) => parsed.baseKey === 'thing');
+    const pathParts = [...parentPath, String(thing?.value ?? '')];
+    const identity = thing?.parsed.identity ?? null;
+    if (identity) {
+      if (seen.has(identity)) {
+        throw atomLanguageError(
+          'DUPLICATE_THING_IDENTITY',
+          '多个 Thing 使用了同一内核身份',
+          { identity, paths: [seen.get(identity), pathParts.join('/')] }
+        );
+      }
+      seen.set(identity, pathParts.join('/'));
+    }
+    const slot = Object.entries(atom).map(([rawKey, value]) => ({
+      parsed: parseAtomKey(rawKey, { descriptionSymbolWarnings: false }), value
+    })).find(({ parsed }) => parsed.baseKey === 'slot')?.value;
+    for (const child of Array.isArray(slot) ? slot : []) visit(child, pathParts);
+  }
+  for (const atom of Array.isArray(atoms) ? atoms : []) visit(atom);
 }
 
 function migratedLegacyKey(rawKey) {
@@ -78,7 +105,7 @@ function normalizePersistedContext(value) {
       }
     }
     const thingKey = migratedLegacyKey(fields.get('name').rawKey);
-    if (thingKey.split('@').slice(1).some((part) => part.split('#')[0] === 'program')) {
+    if (thingKey.split('@').slice(1).some((part) => part.split(/[&#]/u)[0] === 'program')) {
       isolatedProgramPaths.push(pathText);
     }
     return {
@@ -324,7 +351,7 @@ function projectAtom(atom, location, rootThing, options = {}) {
     : thing;
   options.atomPathByGraphPath?.set(`${rootThing}/${atomPath}`, atomPath);
   const projected = {
-    [fields.get('thing').rawKey]: thing,
+    [fields.get('thing').parsed.persistentKey.replace(/&id=[A-Za-z0-9_-]{22}/u, '')]: thing,
     [fields.get('situation').rawKey]: situation,
     [fields.get('slot').rawKey]: slot.map((child, index) => (
       projectAtom(child, `${location}.slot[${index}]`, rootThing, {
@@ -358,6 +385,7 @@ export function projectAtomContext(atoms, options = {}) {
       'Atom context 文档当前必须是顶层 Atom 数组'
     );
   }
+  validateThingIdentityUniqueness(atoms);
   const rootName = options.rootName ?? DEFAULT_CONTEXT_FILENAME;
   const projectionOptions = {
     ...options,

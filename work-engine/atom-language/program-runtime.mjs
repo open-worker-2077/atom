@@ -30,6 +30,7 @@ const preparedRecordSnapshots = new WeakMap();
 const preparedProgramSnapshots = new WeakMap();
 const preparedProgramFingerprints = new WeakMap();
 const isolatedProgramPathsByRecords = new WeakMap();
+const worldRevisionByRecords = new WeakMap();
 
 function withoutGraphRoot(graphDocument, graphPath) {
   const root = graphDocument?.graph?.thing;
@@ -210,7 +211,8 @@ function worldRecords(atoms) {
     const stored = fields(atom);
     const name = stored.get('thing')?.value;
     const atomPath = [...parentPath, name].join('/');
-    const ref = crypto.createHash('sha256').update(`${worldRevision}:${address}`).digest('base64url').slice(0, 24);
+    const ref = stored.get('thing')?.parsed.identity
+      ?? crypto.createHash('sha256').update(`${worldRevision}:${address}`).digest('base64url').slice(0, 24);
     const record = {
       ref,
       name,
@@ -241,6 +243,7 @@ function worldRecords(atoms) {
     isolatedProgramPathsByRecords.set(records, new Set(legacy.isolatedProgramPaths ?? []));
   }
   const prepared = freezePrepared(records);
+  worldRevisionByRecords.set(prepared, worldRevision);
   preparedProgramFingerprints.set(prepared, {
     byRef: new Map(prepared.map(record => [record.ref, record])), values: new Map()
   });
@@ -593,7 +596,7 @@ function mergeDerivedLocks(...collections) {
 }
 
 function worldRevisionKey(records) {
-  return records[0]?.ref ?? 'empty-world';
+  return worldRevisionByRecords.get(records) ?? 'empty-world';
 }
 
 function requestMayObserveEvent(request, eventNodes) {
@@ -636,8 +639,7 @@ function rewriteProgramReadRequest(request, relocations) {
 
 function worldKeyFromRevision(revision, atoms) {
   if (!atoms.length) return 'empty-world';
-  const canonical = `${revision}`.replace(/^sha256:/u, '');
-  return crypto.createHash('sha256').update(`${canonical}:0`).digest('base64url').slice(0, 24);
+  return `${revision}`.replace(/^sha256:/u, '');
 }
 
 function exactAtomAddress(atoms, selector) {
@@ -694,7 +696,8 @@ function localProjectionRebaseEligible(previousAtoms, atoms, changedPaths, store
   ));
 }
 
-function rebindPathLocks(locks, atoms, revision) {
+function rebindPathLocks(locks, atoms) {
+  const refsByPath = new Map(worldRecords(atoms).map((record) => [record.path, record.ref]));
   return locks.map((lock) => {
     const source = lock.sourceProgramPath
       ? exactAtomAddress(atoms, lock.sourceProgramPath)
@@ -705,10 +708,7 @@ function rebindPathLocks(locks, atoms, revision) {
     return {
       ...structuredClone(lock),
       ...(source ? {
-        sourceProgramRef: crypto.createHash('sha256')
-          .update(`${`${revision}`.replace(/^sha256:/u, '')}:${source.address}`)
-          .digest('base64url')
-          .slice(0, 24)
+        sourceProgramRef: refsByPath.get(lock.sourceProgramPath)
       } : {})
     };
   }).filter(Boolean);
@@ -1824,7 +1824,7 @@ export class ProgramRuntimeScheduler {
       const projection = {
         ...structuredClone(stored),
         worldKey: worldKeyFromRevision(revision, atoms),
-        locks: rebindPathLocks(stored.locks ?? [], atoms, revision)
+        locks: rebindPathLocks(stored.locks ?? [], atoms)
       };
       try {
         await this.projectionRepository.save(projection);

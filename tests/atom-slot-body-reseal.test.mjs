@@ -69,7 +69,9 @@ function revision(atoms) {
   return JSON.parse(field(records.at(-1), 'situation')).revision;
 }
 function adopted(value) {
-  const type = entry(value, 'thing')[0].split('@').find((item) => item.startsWith('slot-revision-'));
+  const type = parseAtomKey(entry(value, 'thing')[0], {
+    descriptionSymbolWarnings: false
+  }).types.find((item) => item.raw.startsWith('slot-revision-'))?.raw;
   return type?.slice('slot-revision-'.length).replace(/^sha256-/u, 'sha256:');
 }
 

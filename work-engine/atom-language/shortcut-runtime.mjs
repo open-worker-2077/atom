@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 import { diagnostic } from './errors.mjs';
 import { parseAtomKey } from './key-parser.mjs';
+import { createThingIdentity } from './slot-graph-semantics.mjs';
 
 export const SHORTCUT_TYPE = 'shortcut';
 export const SHORTCUT_CONTRACT = 'atom.shortcut';
@@ -20,6 +21,10 @@ function fieldsByBase(atom) {
 
 function storedField(atom, baseKey) {
   return fieldsByBase(atom).get(baseKey) ?? null;
+}
+
+function thingIdentity(atom) {
+  return storedField(atom, 'thing')?.parsed.identity ?? null;
 }
 
 function walk(atoms) {
@@ -59,6 +64,9 @@ function parseMetadata(atom) {
     || typeof metadata.referenceId !== 'string' || !metadata.referenceId
     || !metadata.target || typeof metadata.target !== 'object' || Array.isArray(metadata.target)
     || !['linked', 'broken'].includes(metadata.target.state)
+    || (metadata.target.identity !== undefined
+      && (typeof metadata.target.identity !== 'string'
+        || !/^[A-Za-z0-9_-]{22}$/u.test(metadata.target.identity)))
     || (metadata.target.state === 'linked'
       && (typeof metadata.target.path !== 'string' || !metadata.target.path.trim()))
     || (metadata.target.state === 'broken' && metadata.target.path !== null)
@@ -77,7 +85,12 @@ export function isShortcutAtom(atom) {
   return storedField(atom, 'thing')?.parsed.types.some((type) => type.raw === SHORTCUT_TYPE) ?? false;
 }
 
-export function createShortcutAtom({ thing, targetPath, referenceId = crypto.randomUUID() }) {
+export function createShortcutAtom({
+  thing,
+  targetPath,
+  targetIdentity = null,
+  referenceId = crypto.randomUUID()
+}) {
   if (typeof thing !== 'string' || !thing.trim() || thing !== thing.trim() || thing.includes('/')) {
     throw shortcutFailure('INVALID_SHORTCUT_THING', 'shortcut.thing 必须是单段非空显示名');
   }
@@ -85,12 +98,16 @@ export function createShortcutAtom({ thing, targetPath, referenceId = crypto.ran
     throw shortcutFailure('INVALID_SHORTCUT_TARGET_COORDINATE', 'shortcut.target 必须是精确 ThingCoordinate');
   }
   return {
-    'thing@shortcut': thing,
+    [`thing@shortcut&id=${createThingIdentity()}`]: thing,
     situation: stringifyMetadata({
       contract: SHORTCUT_CONTRACT,
       version: SHORTCUT_VERSION,
       referenceId,
-      target: { state: 'linked', path: targetPath.trim() }
+      target: {
+        state: 'linked',
+        path: targetPath.trim(),
+        ...(targetIdentity ? { identity: targetIdentity } : {})
+      }
     }),
     slot: [],
     strut: []
@@ -101,7 +118,7 @@ export function shortcutMetadata(atom) {
   return isShortcutAtom(atom) ? structuredClone(parseMetadata(atom)) : null;
 }
 
-export function retargetShortcutAtom(atom, targetPath) {
+export function retargetShortcutAtom(atom, targetPath, targetIdentity = null) {
   if (!isShortcutAtom(atom)) {
     throw shortcutFailure('SHORTCUT_RETARGET_REQUIRED', '.lnk. 只可改造虚拟引用自身');
   }
@@ -112,7 +129,11 @@ export function retargetShortcutAtom(atom, targetPath) {
     );
   }
   const metadata = parseMetadata(atom);
-  metadata.target = { state: 'linked', path: targetPath.trim() };
+  metadata.target = {
+    state: 'linked',
+    path: targetPath.trim(),
+    ...(targetIdentity ? { identity: targetIdentity } : {})
+  };
   replaceSituation(atom, metadata);
   return atom;
 }
@@ -120,7 +141,12 @@ export function retargetShortcutAtom(atom, targetPath) {
 export function resolveShortcutMatch(atoms, initialMatch, options = {}) {
   if (!isShortcutAtom(initialMatch?.atom)) return initialMatch;
   const maxDepth = options.maxDepth ?? SHORTCUT_MAX_DEPTH;
-  const byPath = new Map(walk(atoms).map((match) => [match.path.join('/'), match]));
+  const matches = walk(atoms);
+  const byPath = new Map(matches.map((match) => [match.path.join('/'), match]));
+  const byIdentity = new Map(matches.flatMap((match) => {
+    const identity = thingIdentity(match.atom);
+    return identity ? [[identity, match]] : [];
+  }));
   const visited = new Set();
   let current = initialMatch;
   let depth = 0;
@@ -137,7 +163,9 @@ export function resolveShortcutMatch(atoms, initialMatch, options = {}) {
     if (metadata.target.state === 'broken') {
       throw shortcutFailure('SHORTCUT_TARGET_BROKEN', '虚拟引用目标已删除或回收');
     }
-    const target = byPath.get(metadata.target.path);
+    const target = metadata.target.identity
+      ? byIdentity.get(metadata.target.identity)
+      : byPath.get(metadata.target.path);
     if (!target) {
       throw shortcutFailure('SHORTCUT_TARGET_BROKEN', '虚拟引用目标已删除或回收');
     }
@@ -189,9 +217,14 @@ export function breakShortcutTargets(
     if (metadata.target.state !== 'linked' || !pathWithin(metadata.target.path, removedPath)) continue;
     restorations?.push({
       referenceId: metadata.referenceId,
-      targetPath: metadata.target.path
+      targetPath: metadata.target.path,
+      ...(metadata.target.identity ? { targetIdentity: metadata.target.identity } : {})
     });
-    metadata.target = { state: 'broken', path: null };
+    metadata.target = {
+      state: 'broken',
+      path: null,
+      ...(metadata.target.identity ? { identity: metadata.target.identity } : {})
+    };
     replaceSituation(atom, metadata);
     affectedPaths?.push(path.join('/'));
   }
@@ -216,7 +249,8 @@ export function restoreShortcutTargets(
       || !pathWithin(restoration.targetPath, originalPath)) continue;
     metadata.target = {
       state: 'linked',
-      path: `${restoredPath}${restoration.targetPath.slice(originalPath.length)}`
+      path: `${restoredPath}${restoration.targetPath.slice(originalPath.length)}`,
+      ...(restoration.targetIdentity ? { identity: restoration.targetIdentity } : {})
     };
     replaceSituation(atom, metadata);
     affectedPaths?.push(path.join('/'));
@@ -339,7 +373,8 @@ export async function applyShortcutEffect({
   const nextSource = walk(nextAtoms).find((match) => match.path.join('/') === effect.sourceProgramPath);
   storedField(nextSource.atom, 'slot').value.push(createShortcutAtom({
     thing: effect.thing,
-    targetPath: effect.targetPath
+    targetPath: effect.targetPath,
+    targetIdentity: thingIdentity(target.atom)
   }));
   return {
     atoms: nextAtoms,

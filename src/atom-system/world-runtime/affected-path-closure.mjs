@@ -5,7 +5,7 @@ function canonicalPath(value) {
 
 function axisEntry(atom, axis) {
   return Object.entries(atom ?? {}).find(([key]) => (
-    String(key).split('@', 1)[0].split('#', 1)[0] === axis
+    (String(key).match(/^[^@&#$~]+/u)?.[0] ?? '') === axis
   )) ?? null;
 }
 

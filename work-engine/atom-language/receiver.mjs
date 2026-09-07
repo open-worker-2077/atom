@@ -166,7 +166,8 @@ export function createAtomLanguageReceiver(options = {}) {
   const parserOptions = {
     matcherRegistry,
     actionRegistry,
-    descriptionSymbolWarnings: options.descriptionSymbolWarnings
+    descriptionSymbolWarnings: options.descriptionSymbolWarnings,
+    allowInternalIdentity: false
   };
 
   function receive(source) {

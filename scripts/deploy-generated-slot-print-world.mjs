@@ -138,8 +138,16 @@ function parseMode(argv) {
 
 async function readWorld(contextFile) {
   const bytes = await fs.readFile(contextFile);
-  const facts = JSON.parse(bytes.toString('utf8'));
-  return Object.freeze({ bytes, facts, revision: revisionOfWorldFacts(facts) });
+  const persistence = createTransactionalWorldPersistence({
+    contextFile,
+    projectionFile: path.join(path.dirname(contextFile), 'graph.json')
+  });
+  const snapshot = await persistence.readCommittedSnapshot();
+  return Object.freeze({
+    bytes,
+    facts: snapshot.facts,
+    revision: snapshot.revision
+  });
 }
 
 function migrationIdFor(plan) {
@@ -697,6 +705,8 @@ async function applyMigration({ runtime, attemptId }) {
     }
   }
   const source = await readWorld(runtime.contextFile);
+  verified = await verifyStableJournalSources(runtime);
+  ({ journalEvidence } = verified);
   const plan = planGeneratedSlotPrintMigration(source.facts);
   if (plan.summary.migratedPrograms < 1 || plan.expectedRevision !== source.revision) {
     throw problem(

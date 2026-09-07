@@ -13,7 +13,7 @@ const codecFile = path.resolve(here, '..', '..', 'spatial-json-codec.js');
 let cachedCodec = null;
 
 function baseKeyOf(rawKey) {
-  return String(rawKey).match(/^[^@#$~]+/u)?.[0] ?? '';
+  return String(rawKey).match(/^[^@&#$~]+/u)?.[0] ?? '';
 }
 
 function axisValue(node, baseKey) {

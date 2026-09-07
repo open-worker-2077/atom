@@ -43,8 +43,8 @@ function metadataOf(rawKey) {
   return parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
 }
 
-function keyFromMetadata(baseKey, types, descriptionPresent, description) {
-  return `${baseKey}${types.map((type) => `@${type.raw}`).join('')}${
+function keyFromMetadata(baseKey, types, identity, descriptionPresent, description) {
+  return `${baseKey}${types.map((type) => `@${type.raw}`).join('')}${identity ? `&id=${identity}` : ''}${
     descriptionPresent ? `#${description}` : ''
   }`;
 }
@@ -85,6 +85,7 @@ export function mergePersistentAtom(existingAtom, normalizedItem) {
     const targetKey = keyFromMetadata(
       incoming.baseKey,
       types,
+      previous?.identity ?? null,
       descriptionPresent,
       description
     );

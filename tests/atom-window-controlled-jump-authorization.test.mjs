@@ -4,7 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  executeAtomLanguage,
+  readCommittedAtomLanguageFacts
+} from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import {
   expandProgramFunctionSelection,
@@ -104,19 +107,19 @@ async function fixture(t, options = {}) {
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, `${JSON.stringify(world(options), null, 2)}\n`);
+  await fs.writeFile(contextFile, `${JSON.stringify(options.initialWorld ?? world(options), null, 2)}\n`);
   return { contextFile, projectionFile };
 }
 
 function names(atomValue) {
   return (atomValue.slot ?? []).map((entry) => Object.entries(entry)
-    .find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1]);
+    .find(([key]) => key === 'thing' || key.startsWith('thing@') || key.startsWith('thing&'))?.[1]);
 }
 
 function findTyped(atoms, type, prefix = []) {
   for (const current of atoms) {
     const [entry] = Object.entries(current).filter(([key]) => (
-      key === 'thing' || key.startsWith('thing@')
+      key === 'thing' || key.startsWith('thing@') || key.startsWith('thing&')
     ));
     const currentPath = [...prefix, entry[1]];
     if (entry[0].split('@').slice(1).includes(type)) {
@@ -131,7 +134,7 @@ function findTyped(atoms, type, prefix = []) {
 function findThing(atoms, expected) {
   for (const current of atoms) {
     const entry = Object.entries(current).find(([key]) => (
-      key === 'thing' || key.startsWith('thing@')
+      key === 'thing' || key.startsWith('thing@') || key.startsWith('thing&')
     ));
     if (entry?.[1] === expected) return current;
     const nested = findThing(current.slot ?? [], expected);
@@ -179,18 +182,18 @@ test('an authorized controller moves a fixed child window that has no horizontal
 
   const guarded = await consumeAuthorization(files, scheduler);
   assert.equal(guarded.ok, true, JSON.stringify(guarded.errors));
-  const guardedWorld = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const guardedWorld = await readCommittedAtomLanguageFacts(files);
   assert.deepEqual(names(guardedWorld[0].slot[1].slot[0]), ['Window']);
   assert.deepEqual(names(guardedWorld[0].slot[1].slot[1]), []);
 
   const issued = await issueAuthorization(files, scheduler);
   assert.equal(issued.ok, true, JSON.stringify(issued.errors));
-  const issuedWorld = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const issuedWorld = await readCommittedAtomLanguageFacts(files);
   const issuedGrant = structuredClone(findTyped(issuedWorld, 'jump-authorization').atom);
 
   const moved = await consumeAuthorization(files, createProgramRuntimeScheduler());
   assert.equal(moved.ok, true, JSON.stringify(moved.errors));
-  const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const stored = await readCommittedAtomLanguageFacts(files);
   assert.deepEqual(names(stored[0].slot[1].slot[0]), []);
   assert.deepEqual(names(stored[0].slot[1].slot[1]), ['Window']);
 
@@ -213,11 +216,11 @@ test('an authorized controller moves a fixed child window that has no horizontal
   });
   assert.equal(currentParent.ok, true, JSON.stringify(currentParent.errors));
 
-  const replayedWorld = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const replayedWorld = await readCommittedAtomLanguageFacts(files);
   findThing(replayedWorld, 'Registration').slot.push(issuedGrant);
-  await fs.writeFile(files.contextFile, `${JSON.stringify(replayedWorld, null, 2)}\n`);
+  const replayFiles = await fixture(t, { initialWorld: replayedWorld });
   const replayed = await consumeAuthorization(
-    files,
+    replayFiles,
     createProgramRuntimeScheduler(),
     'Root/Work/Job2/Window'
   );
@@ -225,7 +228,7 @@ test('an authorized controller moves a fixed child window that has no horizontal
   assert.ok(replayed.errors.some((error) => (
     error.code === 'WINDOW_JUMP_AUTHORIZATION_INVALID'
   )), JSON.stringify(replayed.errors));
-  const afterReplay = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const afterReplay = await readCommittedAtomLanguageFacts(replayFiles);
   assert.deepEqual(names(afterReplay[0].slot[1].slot[0]), []);
   assert.deepEqual(names(afterReplay[0].slot[1].slot[1]), ['Window']);
 });
@@ -459,7 +462,7 @@ test('a matching retained authorization wakes the execution registration on retr
     interaction: { id: 'retry-controlled-jump', agent: { path: 'Root' } }
   });
   assert.equal(retried.ok, true, JSON.stringify(retried));
-  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const stored = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   assert.deepEqual(names(stored[0].slot[1].slot[0]), []);
   assert.deepEqual(names(stored[0].slot[1].slot[1]), ['Window']);
   const retryMoveLogs = (await readTransformLog(contextFile))
@@ -521,7 +524,7 @@ test('a triggered controller reports ambiguous successors without granting or mo
   assert.ok(result.warnings.some(({ code }) => (
     code === 'WINDOW_JUMP_AUTHORIZATION_CONFLICT'
   )), JSON.stringify(result.warnings));
-  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const stored = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   assert.equal(findThing(stored, 'Signal').situation, 'after');
   assert.deepEqual(names(stored[0].slot[1].slot[0]), ['Window']);
   assert.deepEqual(names(stored[0].slot[1].slot[1]), []);

@@ -6,7 +6,7 @@ function problem(code, message, details = {}) {
 }
 
 function baseKey(key) {
-  return String(key).split('@', 1)[0].split('#', 1)[0];
+  return String(key).match(/^[^@&#$~]+/u)?.[0] ?? '';
 }
 
 function axisEntry(atom, axis) {

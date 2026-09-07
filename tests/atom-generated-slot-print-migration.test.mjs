@@ -329,11 +329,12 @@ test('maintenance apply backs up the complete incremental journal, is idempotent
   const initial = [atom('Initial', 'journal history')];
   const source = await migratableWorld();
   await fs.writeFile(runtime.contextFile, `${JSON.stringify(initial, null, 2)}\n`, 'utf8');
-  await createTransactionalWorldPersistence({
+  const laterPersistence = createTransactionalWorldPersistence({
     contextFile: runtime.contextFile,
     projectionFile: runtime.graphFile,
     journalFile: runtime.journalFile
-  }).commit({
+  });
+  await laterPersistence.commit({
     correlationId: 'fixture-history',
     expectedRevision: revisionOfWorldFacts(initial),
     nextRevision: revisionOfWorldFacts(source),
@@ -600,7 +601,7 @@ test('maintenance rejects rollback after a later world revision', async (t) => {
   ], { cwd: projectRoot, env: runtime.env }), (error) => (
     error.stderr.includes('INVALID_GENERATED_SLOT_PRINT_MIGRATION_RECEIPT')
   ));
-  assert.deepEqual(JSON.parse(await fs.readFile(runtime.contextFile, 'utf8')), later);
+  assert.deepEqual((await laterPersistence.readCommittedSnapshot()).facts, later);
 });
 
 test('maintenance rejects a deployment receipt with a changed migrated-program mapping', async (t) => {
