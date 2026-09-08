@@ -695,10 +695,9 @@
   }
 
   async function pushKnowledge(event) {
-    const knowledge = event && event.detail && event.detail.knowledge;
+    let knowledge = event && event.detail && event.detail.knowledge;
     const operation = event && event.detail && event.detail.operation;
     const persistenceId = event && event.detail && event.detail.persistenceId;
-    if (!knowledge) return false;
     if (typeof operation === "string") {
       document.body.dataset.spatialBridge = "connected";
       return true;
@@ -707,6 +706,11 @@
       document.body.dataset.spatialBridge = "connected";
       return false;
     }
+    if (!knowledge && !(atomWorkspace && operation && typeof operation === "object")) {
+      await Promise.resolve();
+      knowledge = lab.exportKnowledge();
+    }
+    if (!knowledge && !operation) return false;
     if (operation && typeof operation === "object") workspaceOperationEpoch += 1;
     if (pushing) {
       queuedCommits.push({ kind: "workspace", knowledge, operation, persistenceId });

@@ -4852,12 +4852,13 @@
     const serviceBacked = Boolean(
       global.location && ["http:", "https:"].includes(global.location.protocol)
     );
+    const includeKnowledge = !serviceBacked || !operation || typeof operation !== "object";
     if (persistenceId !== null && serviceBacked) {
       showWorkspacePersistenceStatus(persistenceId, "正在保存，等待 Atom 确认", "saving");
     }
     global.dispatchEvent(new CustomEvent("spatial-workspace-committed", {
       detail: Object.freeze({
-        knowledge: workspace.exportKnowledge(),
+        knowledge: includeKnowledge ? workspace.exportKnowledge() : null,
         path: state.currentPath,
         operation,
         persistenceId

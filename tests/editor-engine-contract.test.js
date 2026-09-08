@@ -350,6 +350,13 @@ test('Web node creation carries its semantic parent coordinate into the atomic T
   assert.match(commit, /operation\s*=\s*\{\s*\.\.\.operation,\s*parentAtomPath\s*\}/);
 });
 
+test('service-backed atomic edits dispatch before exporting the whole browser knowledge graph', () => {
+  const persist = functionSource('persistWorkspaceSnapshot');
+
+  assert.match(persist, /const includeKnowledge\s*=\s*!serviceBacked\s*\|\|\s*!operation\s*\|\|\s*typeof operation\s*!==\s*["']object["']/);
+  assert.match(persist, /knowledge:\s*includeKnowledge\s*\?\s*workspace\.exportKnowledge\(\)\s*:\s*null/);
+});
+
 test('Atom confirmation reselects changed identities without navigating or reframing the view', () => {
   const start = source.indexOf('global.addEventListener("spatial-workspace-persisted"');
   const end = source.indexOf('global.addEventListener("spatial-workspace-persist-failed"', start);
@@ -510,7 +517,7 @@ test('save feedback waits for Atom only on service entries while every entry sti
     assert.equal(commits[0].type, 'spatial-workspace-committed', protocol);
     assert.equal(commits[0].detail.persistenceId, 1, protocol);
     assert.equal(commits[0].detail.operation, operation, protocol);
-    assert.equal(commits[0].detail.knowledge, knowledge, protocol);
+    assert.equal(commits[0].detail.knowledge, protocol === 'file:' ? knowledge : null, protocol);
   }
 });
 

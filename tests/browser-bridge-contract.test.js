@@ -954,7 +954,7 @@ test('Atom Web node creation enters the semantic workspace endpoint instead of o
     },
     fetch: async (url, options = {}) => {
       requests.push([url, options]);
-      if (url.endsWith('/health')) return response({ mode: 'single' });
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
       if (url.includes('/state') && !options.method) {
         return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
       }
@@ -982,7 +982,7 @@ test('Atom Web node creation enters the semantic workspace endpoint instead of o
     detail: {
       persistenceId: 7,
       operation: { kind: 'node-create', path: 'root', draft: { label: 'New Atom', description: 'Detail', position: { x: 7, y: -3, z: 2 } } },
-      knowledge: { revision: 1, nodes: [{ label: 'New Atom' }], edges: [] }
+      knowledge: null
     }
   });
 
