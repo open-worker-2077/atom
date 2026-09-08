@@ -273,9 +273,18 @@ test('transform new creates a nested Atom by exact parent path without replacing
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.deepEqual(world[0].slot.map(thingOf), ['Existing', 'New']);
-  assert.equal(world[0].slot[1].situation, 'created');
+  const existing = await executeAtomLanguage({
+    source: 'explore {"thing":"Root/Existing","situation$full":true}',
+    contextFile,
+    projectionFile
+  });
+  const created = await executeAtomLanguage({
+    source: 'explore {"thing":"Root/New","situation$full":true}',
+    contextFile,
+    projectionFile
+  });
+  assert.equal(existing.items[0].matches[0].situation, 'keep');
+  assert.equal(created.items[0].matches[0].situation, 'created');
 });
 
 test('CLI full-path success and rejection receipts are exact and read-only', async (t) => {

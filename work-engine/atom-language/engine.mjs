@@ -579,6 +579,16 @@ function isCompletePersistentAtomItem(item) {
     && new Set(item.fields.map((field) => field.baseKey)).size === required.size;
 }
 
+function isPlainLeafCreate(item, atom) {
+  const thing = oneStoredField(atom, 'thing');
+  const slot = oneStoredField(atom, 'slot')?.value;
+  const strut = oneStoredField(atom, 'strut')?.value;
+  return isCompletePersistentAtomItem(item)
+    && thing?.parsed.types.length === 0
+    && Array.isArray(slot) && slot.length === 0
+    && Array.isArray(strut) && strut.length === 0;
+}
+
 async function applyCreateTransform({
   atoms,
   item,
@@ -702,6 +712,7 @@ async function applyCreateTransform({
     changed: true,
     resultName: createPath.at(-1),
     resultPath: persistedCreatePath,
+    affectedPathClosureComplete: isPlainLeafCreate(item, atom),
     warnings: compiled.warnings
   };
 }
@@ -4100,6 +4111,10 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     }
     const sourceReceipt = await commitChangedGraph(nextAtoms, {
       changedPaths: [created.resultPath],
+      relationEndpoints: [],
+      shortcutPaths: [],
+      referencePaths: [],
+      affectedPathClosureComplete: created.affectedPathClosureComplete === true,
       ...(!subtreeSlotsTypedProgram(exactMatchAtPath(nextAtoms, created.resultPath)?.atom) ? {
         projectionRebase: {
           previousAtoms: atoms,

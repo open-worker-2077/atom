@@ -61,6 +61,62 @@ test('TC-PERF-LOCAL-EXPLORE / TC-PERF-LOCAL-TRANSFORM: a 20 MB unrelated sibling
   await assert.rejects(fs.access(path.join(`${journalFile}.d`, 'objects')), { code: 'ENOENT' });
 });
 
+test('TC-PERF-LOCAL-CREATE: a plain leaf create stays local beside a 20 MB sibling set', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-create-amplification-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const journalFile = path.join(directory, 'atom.transactions.json');
+  const unrelatedDetail = 'x'.repeat(20_000);
+  const world = [atom('Root', '', [
+    ...Array.from({ length: 1_000 }, (_, index) => atom(`Unrelated ${index}`, unrelatedDetail))
+  ])];
+  const baseline = JSON.stringify(world);
+  await fs.writeFile(contextFile, baseline, 'utf8');
+  const execute = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
+  await execute({ source: 'atom', interaction: { id: 'perf-create-prime' } });
+
+  const startedAt = performance.now();
+  const result = await execute({
+    source: 'transform new {"thing":"Root/New","situation":"small","slot":[],"strut":[]}',
+    interaction: { id: 'perf-local-create' }
+  });
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.ok(elapsedMs < 5_000, `local leaf create took ${elapsedMs.toFixed(1)}ms`);
+  assert.equal((await fs.readFile(contextFile, 'utf8')) === baseline, true,
+    'plain leaf create rewrote the complete baseline before acknowledgment');
+  const journal = await createJsonTransactionJournal({ file: journalFile }).readState();
+  const committed = journal.receipts.find((entry) => entry.correlationId === 'perf-local-create');
+  assert.equal(committed.historyMode, 'local-patch');
+  assert.deepEqual(committed.patch.changedPaths, ['Root/New']);
+  t.diagnostic(`plain-leaf-create=${elapsedMs.toFixed(1)}ms`);
+});
+
+test('TC-PERF-CONSERVATIVE-CREATE: a nested create keeps the complete-world safety path', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-nested-create-amplification-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const journalFile = path.join(directory, 'atom.transactions.json');
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root')]), 'utf8');
+  const execute = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
+  await execute({ source: 'atom', interaction: { id: 'nested-create-prime' } });
+
+  const result = await execute({
+    source: `transform new ${JSON.stringify(atom('Root/Branch', '', [atom('Child')]))}`,
+    interaction: { id: 'conservative-nested-create' }
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  const journal = await createJsonTransactionJournal({ file: journalFile }).readState();
+  const committed = journal.receipts.find((entry) => entry.correlationId === 'conservative-nested-create');
+  assert.notEqual(committed.historyMode, 'local-patch');
+});
+
 test('TC-PERF-CONSERVATIVE-TRANSFORM: structural operations stay whole-world and reversible', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-structural-amplification-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

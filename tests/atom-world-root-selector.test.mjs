@@ -90,8 +90,15 @@ test('transform new uses 世界之外 exact parent semantics without selecting a
     ...files
   });
   assert.equal(created.ok, true, JSON.stringify(created.errors));
-  const world = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.equal(thingOf(world[0].slot[0]), '夜巡');
-  assert.equal(thingOf(world[1].slot[0]), '推进流');
-  assert.equal(world[1].slot[0].slot.length, 0);
+  const topCreated = await executeAtomLanguage({
+    source: 'explore {"thing":"世界之外/推进流/夜巡","situation$full":true}', ...files
+  });
+  assert.equal(topCreated.ok, true, JSON.stringify(topCreated.errors));
+  assert.equal(topCreated.items[0].matches[0].path, '推进流/夜巡');
+  assert.equal(topCreated.items[0].matches[0].situation, 'synthetic');
+  const nestedMissing = await executeAtomLanguage({
+    source: 'explore {"thing":"项目/推进流/夜巡","situation$full":true}', ...files
+  });
+  assert.equal(nestedMissing.ok, false);
+  assert.equal(nestedMissing.errors[0].code, 'ATOM_NOT_FOUND');
 });

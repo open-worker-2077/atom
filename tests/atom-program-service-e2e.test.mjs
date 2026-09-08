@@ -13,7 +13,10 @@ import {
   createShortcutAtom,
   resolveShortcutMatch
 } from '../work-engine/atom-language/shortcut-runtime.mjs';
-import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
+import {
+  createJsonTransactionJournal,
+  createJsonWorldRepository
+} from '../src/atom-system/adapters/json-world-repository.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   const agentProgram = type === 'agent';
@@ -188,7 +191,7 @@ test('4784 commits disjoint concurrent writes without an explicit retry', async 
   );
 });
 
-test('4784 keeps create and Program changes on whole-world history', async (t) => {
+test('4784 keeps a plain leaf create local while Program changes stay whole-world', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-service-conservative-'));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
@@ -244,10 +247,11 @@ test('4784 keeps create and Program changes on whole-world history', async (t) =
     file: path.join(directory, 'atom.transactions.json')
   }).readState();
   const [createRecord, programRecord] = history.receipts.slice(-2);
-  for (const record of [createRecord, programRecord]) {
-    assert.equal(record.historyMode, undefined);
-    assert.equal(record.receipt.result.affectedPathClosureComplete, false);
-  }
+  assert.equal(createRecord.historyMode, 'local-patch');
+  assert.deepEqual(createRecord.patch.changedPaths, ['工作Agent/新增']);
+  assert.equal(createRecord.receipt.result.affectedPathClosureComplete, true);
+  assert.equal(programRecord.historyMode, undefined);
+  assert.equal(programRecord.receipt.result.affectedPathClosureComplete, false);
   const committed = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   const entry = committed[0].slot.find((candidate) => thingOf(candidate) === '入口');
   assert.equal(resolveShortcutMatch(committed, {
@@ -517,7 +521,7 @@ test('4784 applies one valid structural 80-effect set quickly and rejects a late
   }
 });
 
-test('4784 Web workspace edits commit atom.json before asynchronously publishing the exact projection', async (t) => {
+test('4784 Web workspace edits commit local Atom facts before asynchronously publishing the exact projection', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-web-create-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -531,6 +535,11 @@ test('4784 Web workspace edits commit atom.json before asynchronously publishing
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, projectionDelayMs: 0
   });
   t.after(() => running.close());
+  const committedWorld = createJsonWorldRepository({
+    file: contextFile,
+    worldId: 'primary',
+    localCommitFile: path.join(`${path.join(directory, 'atom.transactions.json')}.d`, 'world-commits.jsonl')
+  });
 
   const applyWebEdit = async (operation) => {
     const response = await fetch(`${running.url}/__atom/api/workspace-edit`, {
@@ -565,7 +574,7 @@ test('4784 Web workspace edits commit atom.json before asynchronously publishing
   assert.equal(response.status, 200, JSON.stringify(payload));
   assert.equal(payload.result.ok, true, JSON.stringify(payload.result.errors));
   await settleWorkspaceProjection(running, payload);
-  const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const world = (await committedWorld.read()).facts;
   assert.equal(thingOf(world[0]), 'Existing');
   assert.equal(thingOf(world[2]), 'Created in Web');
   const createdKnowledge = await waitForKnowledge(
@@ -595,7 +604,7 @@ test('4784 Web workspace edits commit atom.json before asynchronously publishing
   const nestedPayload = await nestedResponse.json();
   assert.equal(nestedPayload.result.ok, true, JSON.stringify(nestedPayload));
   await settleWorkspaceProjection(running, nestedPayload);
-  const nestedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const nestedWorld = (await committedWorld.read()).facts;
   assert.equal(thingOf(nestedWorld[0].slot[0]), 'Nested in Web');
 
   const returnable = (await applyWebEdit({

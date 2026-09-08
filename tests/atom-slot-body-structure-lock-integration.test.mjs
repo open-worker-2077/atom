@@ -12,6 +12,7 @@ import {
 } from '../work-engine/atom-language/query-capability.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { createJsonWorldRepository } from '../src/atom-system/adapters/json-world-repository.mjs';
 
 function atom(thing, situation = '', slot = [], strut = []) {
   return { thing, situation, slot, strut };
@@ -122,7 +123,11 @@ test('one Program may edit its model and reseal the same slot body atomically', 
     ...files
   });
   assert.equal(material.ok, true, JSON.stringify(material.errors));
-  const materialWorld = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const materialWorld = (await createJsonWorldRepository({
+    file: files.contextFile,
+    worldId: 'primary',
+    localCommitFile: path.join(`${path.join(path.dirname(files.contextFile), 'atom.transactions.json')}.d`, 'world-commits.jsonl')
+  }).read()).facts;
   const before = JSON.stringify(materialWorld
     .find((entry) => thingOf(entry) === '\u69fd\u4f53').slot
     .find((entry) => thingOf(entry) === '\u69fd\u4f8b').slot
