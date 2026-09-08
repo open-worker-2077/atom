@@ -14,6 +14,7 @@
   const DEFAULT_LAYOUT_PITCH_DEGREES = 90;
   const DEFAULT_BRANCH_SPREAD_DEGREES = 55;
   const DEFAULT_STRUT_SPACING_PERCENT = 0;
+  const DEFAULT_EMPTY_NODE_DIAMETER_PERCENT = 50;
   const MAX_NESTED_COMPACTNESS_PERCENT = 100;
   const DEFAULT_ZOOM_SPEED_PERCENT = 160;
   const DEFAULT_RELATIONSHIP_LINE_WIDTH_PERCENT = 180;
@@ -97,6 +98,13 @@
       : DEFAULT_PERIPHERAL_DEPTH_SHRINK_PERCENT;
   }
 
+  function validEmptyNodeDiameter(value) {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? Math.min(200, Math.max(20, Math.round(number)))
+      : DEFAULT_EMPTY_NODE_DIAMETER_PERCENT;
+  }
+
   function validRotationDegrees(value, fallback) {
     const number = Number(value);
     if (!Number.isFinite(number)) return fallback;
@@ -140,6 +148,7 @@
       strutSpacingPercent: Object.prototype.hasOwnProperty.call(source, "strutSpacingPercent")
         ? validPercent(source.strutSpacingPercent)
         : DEFAULT_STRUT_SPACING_PERCENT,
+      emptyNodeDiameterPercent: validEmptyNodeDiameter(source.emptyNodeDiameterPercent),
       nestedTunnelPercent: validPercent(source.nestedTunnelPercent),
       nestedTunnelInteriorPercent: validPercent(source.nestedTunnelInteriorPercent),
       zoomSpeedPercent: validZoomSpeed(source.zoomSpeedPercent),
@@ -250,6 +259,11 @@
   function withStrutSpacingInput(settingsInput, value) {
     const settings = normalizeSettings(settingsInput);
     return normalizeSettings({ ...settings, strutSpacingPercent: validPercent(value) });
+  }
+
+  function withEmptyNodeDiameterInput(settingsInput, value) {
+    const settings = normalizeSettings(settingsInput);
+    return normalizeSettings({ ...settings, emptyNodeDiameterPercent: validEmptyNodeDiameter(value) });
   }
 
   function withNestedTunnelInteriorInput(settingsInput, value) {
@@ -542,6 +556,7 @@
     withLayoutPitchInput,
     withBranchSpreadInput,
     withStrutSpacingInput,
+    withEmptyNodeDiameterInput,
     withNestedTunnelInput,
     withNestedTunnelInteriorInput,
     withZoomSpeedInput,

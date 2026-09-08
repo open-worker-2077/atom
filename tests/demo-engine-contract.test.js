@@ -46,6 +46,8 @@ test('demo model loads before the engine and the mapping panel owns persistent P
   assert.match(html, /id="nestedCompactnessValue"/);
   assert.match(html, /id="strutSpacing"[^>]*min="0"[^>]*max="100"[^>]*value="0"/);
   assert.match(html, /id="strutSpacingValue"/);
+  assert.match(html, /id="emptyNodeDiameter"[^>]*min="20"[^>]*max="200"[^>]*value="50"/);
+  assert.match(html, /id="emptyNodeDiameterValue"/);
   assert.match(html, /id="nestedTunnelStrength"[^>]*min="0"[^>]*max="100"/);
   assert.match(html, /id="nestedTunnelStrengthValue"/);
   assert.match(html, /id="nestedTunnelInteriorStrength"[^>]*min="0"[^>]*max="100"/);

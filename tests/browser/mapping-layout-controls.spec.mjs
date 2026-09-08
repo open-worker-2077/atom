@@ -58,6 +58,7 @@ async function moveRange(page, selector, value) {
     element.value = String(next);
     element.dispatchEvent(new Event('input', { bubbles: true }));
   }, value);
+  await page.waitForTimeout(80);
 }
 
 async function screenTargets(page, ids) {
@@ -80,14 +81,17 @@ test('orbital settings centralize tools and persist the CapsLock default detail 
   await expect(page.locator('#layoutPitch')).toHaveValue('90');
   await expect(page.locator('#branchSpread')).toHaveValue('55');
   await expect(page.locator('#strutSpacing')).toHaveValue('0');
+  await expect(page.locator('#emptyNodeDiameter')).toHaveValue('50');
   await moveRange(page, '#layoutYaw', 120);
   await moveRange(page, '#layoutPitch', 35);
   await moveRange(page, '#branchSpread', 70);
   await moveRange(page, '#strutSpacing', 65);
+  await moveRange(page, '#emptyNodeDiameter', 80);
   await expect(page.locator('#layoutYawValue')).toHaveText('120°');
   await expect(page.locator('#layoutPitchValue')).toHaveText('35°');
   await expect(page.locator('#branchSpreadValue')).toHaveText('70°');
   await expect(page.locator('#strutSpacingValue')).toHaveText('65%');
+  await expect(page.locator('#emptyNodeDiameterValue')).toHaveText('80%');
   await page.locator('#defaultDetailMode').selectOption('surface');
   await expect.poll(() => page.evaluate(() => JSON.parse(
     localStorage.getItem('graph-4d.presentation-settings.v2') || '{}'
@@ -105,6 +109,7 @@ test('orbital settings centralize tools and persist the CapsLock default detail 
   await expect(page.locator('#layoutPitch')).toHaveValue('35');
   await expect(page.locator('#branchSpread')).toHaveValue('70');
   await expect(page.locator('#strutSpacing')).toHaveValue('65');
+  await expect(page.locator('#emptyNodeDiameter')).toHaveValue('80');
 });
 
 test('saved CapsLock default detail mode applies to the initial field', async ({ page }) => {
@@ -139,8 +144,21 @@ test('S interval changes same-level screen edge gap without resizing those nodes
   );
 
   expect(edgeGap(after)).toBeGreaterThan(edgeGap(before) + 0.1);
-  expect(relativeRadiusDrift(before['child-a'].radius, after['child-a'].radius)).toBeLessThan(0.01);
-  expect(relativeRadiusDrift(before['child-b'].radius, after['child-b'].radius)).toBeLessThan(0.01);
+  expect(relativeRadiusDrift(before['child-a'].worldRadius, after['child-a'].worldRadius)).toBeLessThan(0.01);
+  expect(relativeRadiusDrift(before['child-b'].worldRadius, after['child-b'].worldRadius)).toBeLessThan(0.01);
+});
+
+test('empty-node diameter changes leaf bodies and keeps the opened parent shell content-driven', async ({ page }) => {
+  test.setTimeout(60_000);
+  await loadTwoLevelField(page, 'setNestedView');
+  await moveRange(page, '#nestedCompactness', 0);
+  await moveRange(page, '#emptyNodeDiameter', 20);
+  const small = await screenTargets(page, ['child-a', 'child-b']);
+  await moveRange(page, '#emptyNodeDiameter', 100);
+  const large = await screenTargets(page, ['child-a', 'child-b']);
+
+  expect(large['child-a'].worldRadius).toBeGreaterThan(small['child-a'].worldRadius * 2);
+  expect(large['child-b'].worldRadius).toBeGreaterThan(small['child-b'].worldRadius * 2);
 });
 
 test('A child shrink changes child screen radii without resizing the parent-domain peer', async ({ page }) => {

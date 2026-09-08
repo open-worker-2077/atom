@@ -20,9 +20,12 @@ function validatePatch(patch, fields) {
 export function createPresentationSettingsService({ repository, normalizeSettings }) {
   const fields = new Set(Object.keys(normalizeSettings({})));
   const legacyOmittedFieldSets = [
-    new Set(['strutSpacingPercent']),
-    new Set(['strutSpacingPercent', 'layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees']),
-    new Set(['strutSpacingPercent', 'secondaryNavigationDelayMs', 'layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees']),
+    new Set(['emptyNodeDiameterPercent']),
+    new Set(['emptyNodeDiameterPercent', 'strutSpacingPercent']),
+    new Set(['emptyNodeDiameterPercent', 'strutSpacingPercent', 'layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees']),
+    new Set(['emptyNodeDiameterPercent', 'strutSpacingPercent', 'secondaryNavigationDelayMs', 'layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees']),
+    new Set(['emptyNodeDiameterPercent', 'layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees']),
+    new Set(['emptyNodeDiameterPercent', 'secondaryNavigationDelayMs', 'layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees']),
     new Set(['layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees']),
     new Set(['secondaryNavigationDelayMs', 'layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees'])
   ];

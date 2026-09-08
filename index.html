@@ -90,9 +90,9 @@
     media="print"
     onload="this.media='all'"
   >
-  <link rel="stylesheet" href="spatial.css?v=sha256-5c27de05f2c7c10c">
+  <link rel="stylesheet" href="spatial.css?v=sha256-e3813a6fc72cf9c8">
 </head>
-<body data-build="sha256-5c27de05f2c7c10c" data-spatial-bridge="connecting">
+<body data-build="sha256-e3813a6fc72cf9c8" data-spatial-bridge="connecting">
   <div class="spatial-data-gate" role="status" aria-live="polite">
     <div class="spatial-data-gate__panel">
       <div class="spatial-data-gate__headline">
@@ -454,6 +454,14 @@
           <small>0% 时推支线只在节点或团的既有隔离缝隙中生长，不额外撑开空间。</small>
         </label>
         <label class="range-setting">
+          <span>空节点最小直径</span>
+          <span class="range-setting__control">
+            <input id="emptyNodeDiameter" type="range" min="20" max="200" step="1" value="50">
+            <output id="emptyNodeDiameterValue" for="emptyNodeDiameter">50%</output>
+          </span>
+          <small>没有下级实体的节点只使用该最小直径；打开下级后再由真实内容体积撑大。</small>
+        </label>
+        <label class="range-setting">
           <span>A 子层节点缩小</span>
           <span class="range-setting__control">
             <input id="peripheralDepthShrink" type="range" min="0" max="90" step="1" value="20"
@@ -679,29 +687,29 @@
   </main>
 
   <noscript>此实验场需要 JavaScript 才能响应空间交互。</noscript>
-  <script src="input-config.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-mobile-input-model.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-visual-model.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-detail-magnifier-model.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-gesture-arbiter.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-middle-frame-target.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-entity-registry.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-view-grammar.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-workspace-model.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-program-choice-model.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-mermaid-codec.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-json-codec.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-view-mode-model.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-help-page-model.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-work-order-registry-model.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-work-order-registry-panel.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-demo-model.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-demo-geometry.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-cluster-field.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="vendor/spatial-markdown-editor.bundle.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="vendor/atom-spatial-scene.bundle.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-engine.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-mermaid-panel.js?v=sha256-5c27de05f2c7c10c"></script>
-  <script src="spatial-browser-bridge.js?v=sha256-5c27de05f2c7c10c"></script>
+  <script src="input-config.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-mobile-input-model.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-visual-model.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-detail-magnifier-model.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-gesture-arbiter.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-middle-frame-target.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-entity-registry.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-view-grammar.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-workspace-model.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-program-choice-model.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-mermaid-codec.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-json-codec.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-view-mode-model.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-help-page-model.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-work-order-registry-model.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-work-order-registry-panel.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-demo-model.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-demo-geometry.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-cluster-field.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="vendor/spatial-markdown-editor.bundle.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="vendor/atom-spatial-scene.bundle.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-engine.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-mermaid-panel.js?v=sha256-e3813a6fc72cf9c8"></script>
+  <script src="spatial-browser-bridge.js?v=sha256-e3813a6fc72cf9c8"></script>
 </body>
 </html>

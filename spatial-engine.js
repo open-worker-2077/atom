@@ -110,6 +110,8 @@
     branchSpreadValue: document.getElementById("branchSpreadValue"),
     strutSpacing: document.getElementById("strutSpacing"),
     strutSpacingValue: document.getElementById("strutSpacingValue"),
+    emptyNodeDiameter: document.getElementById("emptyNodeDiameter"),
+    emptyNodeDiameterValue: document.getElementById("emptyNodeDiameterValue"),
     peripheralDepthShrink: document.getElementById("peripheralDepthShrink"),
     peripheralDepthShrinkValue: document.getElementById("peripheralDepthShrinkValue"),
     nestedTunnelStrength: document.getElementById("nestedTunnelStrength"),
@@ -1334,7 +1336,7 @@
       visibleRelationships,
       {
         iterations: 32,
-        baseGap: 1.08,
+        baseGap: clusterField.sameLevelIsolationGap(state.demo.settings.nestedCompactnessPercent),
         radiusScale: 1.64,
         repulsionRangeScale: 2.2,
         repulsionStrength: 0.72,
@@ -1362,6 +1364,7 @@
   }
 
   function visibleClusterDomains() {
+    const emptyNodeRadius = 0.82 * state.demo.settings.emptyNodeDiameterPercent / 100;
     const descriptors = new Map(
       [...state.expandedClusterDomains]
         .filter(([path]) => path === state.currentPath || path.startsWith(`${state.currentPath}/`))
@@ -1390,6 +1393,7 @@
             visible.push({
               ...node,
               sourceNode: node,
+              radius: emptyNodeRadius,
               position: resolveNodePosition(node, state.time)
             });
             if (!directOnly && node.revealed && level < 2) {
@@ -1402,20 +1406,18 @@
           ...visualModel.relationshipPairs(existingNodes(projected)),
           ...workspace.relationshipPairsForPath(descriptor.path)
         ];
-        const relaxedPositions = visualModel.relaxRelationshipLayout(
-          visible.map((node) => ({
+        const layoutEntries = visible.map((node) => ({
             id: node.id,
             position: node.position,
-            radius: node.radius,
+            radius: emptyNodeRadius,
             labelSpan: Math.min(6, String(node.label || "").length * 0.12),
             fixed: Boolean(node.manualPosition),
             parentId: node.parent ? node.parent.id : null,
             containerRadius: node.parent ? node.parent.radius : null
-          })),
-          domainRelationships,
-          {
+          }));
+        const layoutSettings = {
             iterations: 32,
-            baseGap: 1.08,
+            baseGap: clusterField.sameLevelIsolationGap(state.demo.settings.nestedCompactnessPercent),
             radiusScale: 1.64,
             repulsionRangeScale: 2.35,
             repulsionStrength: 0.78,
@@ -1432,12 +1434,22 @@
             branchSpreadDegrees: state.demo.settings.branchSpreadDegrees,
             strutSpacingPercent: state.demo.settings.strutSpacingPercent,
             preserveClosingStrut: true
-          }
+          };
+        const relaxedPositions = visualModel.relaxRelationshipLayout(
+          layoutEntries,
+          domainRelationships,
+          layoutSettings
+        );
+        const scaleReferencePositions = visualModel.relaxRelationshipLayout(
+          layoutEntries,
+          domainRelationships,
+          { ...layoutSettings, baseGap: clusterField.sameLevelIsolationGap(0), strutSpacingPercent: 0 }
         );
         const topologyNodeIds = new Set(domainRelationships.flatMap((relationship) => (
           [relationship.fromId, relationship.toId]
         )));
         visible.forEach((node) => {
+          node.__scaleReferencePosition = scaleReferencePositions[node.id] || node.position;
           if (relaxedPositions[node.id]) node.position = relaxedPositions[node.id];
           node.clusterTopologyPositioned = topologyNodeIds.has(node.id);
         });
@@ -8091,6 +8103,8 @@
     ui.branchSpreadValue.textContent = `${state.demo.settings.branchSpreadDegrees}°`;
     ui.strutSpacing.value = String(state.demo.settings.strutSpacingPercent);
     ui.strutSpacingValue.textContent = `${state.demo.settings.strutSpacingPercent}%`;
+    ui.emptyNodeDiameter.value = String(state.demo.settings.emptyNodeDiameterPercent);
+    ui.emptyNodeDiameterValue.textContent = `${state.demo.settings.emptyNodeDiameterPercent}%`;
     ui.peripheralDepthShrink.value = String(state.demo.settings.peripheralDepthShrinkPercent);
     ui.peripheralDepthShrinkValue.textContent = `${state.demo.settings.peripheralDepthShrinkPercent}%`;
     ui.nestedTunnelStrength.value = String(state.demo.settings.nestedTunnelPercent);
@@ -8124,7 +8138,8 @@
       || previous.layoutYawDegrees !== state.demo.settings.layoutYawDegrees
       || previous.layoutPitchDegrees !== state.demo.settings.layoutPitchDegrees
       || previous.branchSpreadDegrees !== state.demo.settings.branchSpreadDegrees
-      || previous.strutSpacingPercent !== state.demo.settings.strutSpacingPercent) {
+      || previous.strutSpacingPercent !== state.demo.settings.strutSpacingPercent
+      || previous.emptyNodeDiameterPercent !== state.demo.settings.emptyNodeDiameterPercent) {
       refreshClusterSceneAfterLayoutSetting();
     }
     return state.demo.settings;
@@ -9023,6 +9038,14 @@
 
   ui.strutSpacing.addEventListener("input", () => {
     updateDemoSettings(demoModel.withStrutSpacingInput(state.demo.settings, ui.strutSpacing.value));
+    refreshClusterSceneAfterLayoutSetting();
+  });
+
+  ui.emptyNodeDiameter.addEventListener("input", () => {
+    updateDemoSettings(demoModel.withEmptyNodeDiameterInput(
+      state.demo.settings,
+      ui.emptyNodeDiameter.value
+    ));
     refreshClusterSceneAfterLayoutSetting();
   });
 

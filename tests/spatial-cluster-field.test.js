@@ -30,6 +30,8 @@ function route(count) {
 test('builds one stable active cluster with owned nodes and bounded translucent shell', () => {
   const field = loadClusterField();
   assert.ok(field, 'SpatialClusterField must exist');
+  assert.equal(field.sameLevelIsolationGap(0), 0.04);
+  assert.equal(field.sameLevelIsolationGap(100), 2.64);
   const first = field.buildScene(route(1));
   const second = field.buildScene(route(1));
 
@@ -354,6 +356,35 @@ test('a single nested branch tightly wraps its content instead of multiplying em
   assert.ok(leaf.radius < 1.6, 'a one-node leaf keeps a compact shell');
   assert.ok(middle.radius < leaf.radius + 1.1, 'one nesting level adds only a close wrapping margin');
   assert.ok(root.radius < middle.radius + 1.1, 'nested wrapping stays additive instead of multiplicative');
+});
+
+test('zero isolation adds only the real per-level shell clearance through deep nesting', () => {
+  const field = loadClusterField();
+  const domains = Array.from({ length: 6 }, (_, depth) => ({
+    path: depth ? `root/${Array.from({ length: depth }, (__, index) => `level-${index + 1}`).join('/')}` : 'root',
+    parentPath: depth
+      ? (depth === 1 ? 'root' : `root/${Array.from({ length: depth - 1 }, (__, index) => `level-${index + 1}`).join('/')}`)
+      : null,
+    parentNodeId: depth ? `node-${depth - 1}` : null,
+    depth,
+    projectionMode: depth ? 'nested' : 'hierarchy',
+    nodes: [{ id: `node-${depth}`, radius: 0.2, position: { x: 0, y: 0, z: 0 }, __clusterLevel: 0 }]
+  }));
+  const scene = field.buildScene(domains, {
+    compact: true,
+    compactPercent: 0,
+    spatial3d: true
+  });
+  const byDepth = [...scene.clusters].sort((left, right) => right.depth - left.depth);
+
+  assert.ok(byDepth[0].radius <= 0.29, 'an empty leaf shell is its body plus zero-setting clearance');
+  for (let index = 1; index < byDepth.length; index += 1) {
+    assert.ok(
+      byDepth[index].radius - byDepth[index - 1].radius <= 0.09,
+      `depth ${byDepth[index].depth} adds one clearance instead of another minimum cavity`
+    );
+  }
+  assert.ok(byDepth.at(-1).radius <= 0.69, 'six nested levels remain a tight recursive package');
 });
 
 test('a child group carries its parent node detail for CapsLock floating presentation', () => {

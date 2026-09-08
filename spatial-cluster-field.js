@@ -33,6 +33,11 @@
     return mix(0.04, 0.3, repulsionGapAmount(options));
   }
 
+  function sameLevelIsolationGap(percentInput) {
+    const percent = clamp(Number(percentInput) || 0, 0, 100);
+    return repulsionGap({ compact: true, compactPercent: percent * 10 });
+  }
+
   function adaptivePreferenceResponse(compactness, pressure) {
     const pressureBoost = 1 + (clamp(pressure, 1, 6) - 1) * 0.08;
     return clamp(compactness * pressureBoost, 0, 1);
@@ -183,11 +188,13 @@
   function measuredClusterRadius(layoutNodes, optionsInput = {}) {
     const options = optionsInput && typeof optionsInput === "object" ? optionsInput : {};
     const compactness = compactAmount(options);
-    const minimumRadius = compactSpacing(options, 1.25, 0.85);
     const shellPadding = minimumShellClearance(options);
-    if (!layoutNodes.length) return minimumRadius;
+    if (!layoutNodes.length) return compactSpacing(options, 1.25, 0.85);
+    // A populated shell has no independent body-size floor. Its body is the
+    // real outer edge of its carriers plus this level's clearance. Keeping the
+    // old empty-shell floor here made every recursive level add another hidden
+    // cavity even when the visible isolation setting was zero.
     return Math.max(
-      minimumRadius,
       ...layoutNodes.map((node) => (
         Math.hypot(node.position.x, node.position.y, node.position.z)
           + node.__clusterRadius
@@ -1008,7 +1015,9 @@
         displayScale: 1
       };
       item.scaleReferenceRadius = clusterRadius(
-        item.sourceNodes,
+        item.sourceNodes.map((node) => node.__scaleReferencePosition
+          ? { ...node, position: node.__scaleReferencePosition }
+          : node),
         item.scaleReferenceNestedCarrierByNodeId,
         scaleReferenceOptions
       );
@@ -1310,6 +1319,7 @@
 
   global.SpatialClusterField = Object.freeze({
     buildScene,
+    sameLevelIsolationGap,
     buildScreenEnvelope,
     buildSpatialEnvelope,
     sampleSpatialEnvelopeSurface,
