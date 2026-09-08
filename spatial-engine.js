@@ -5032,6 +5032,8 @@
     }
     operation = workspaceModel.batchLandingOperation(operation, operation.batchEntries);
     closeNodeEditor();
+    announce("正在保存，等待 Atom 确认");
+    persistWorkspaceSnapshot(operation);
     if (operation.kind === "node-edit" && operation.status === "delete") {
       state.selected = null;
       announce("节点已从当前视觉图中移除");
@@ -5064,8 +5066,6 @@
     }
     updateSelectionUI();
     renderSearchResults();
-    announce("正在保存，等待 Atom 确认");
-    persistWorkspaceSnapshot(operation);
     canvas.focus({ preventScroll: true });
     return true;
   }

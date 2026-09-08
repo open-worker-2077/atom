@@ -494,6 +494,19 @@ test('semantic edits wait for persistence acknowledgement before claiming succes
   assert.match(source, /正在保存/);
 });
 
+test('atomic edits start persistence before local selection projection work', () => {
+  const commit = functionSource('commitWorkspaceEdit');
+  const persistAt = commit.indexOf('persistWorkspaceSnapshot(operation)');
+  const selectionAt = commit.indexOf('nodeByIdInPath(');
+  const selectionUiAt = commit.indexOf('updateSelectionUI()');
+
+  assert.notEqual(persistAt, -1);
+  assert.notEqual(selectionAt, -1);
+  assert.notEqual(selectionUiAt, -1);
+  assert.ok(persistAt < selectionAt);
+  assert.ok(persistAt < selectionUiAt);
+});
+
 test('save feedback waits for Atom only on service entries while every entry still dispatches the commit', () => {
   for (const protocol of ['http:', 'https:', 'file:']) {
     const persistenceDisplays = [];
