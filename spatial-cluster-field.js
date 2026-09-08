@@ -377,6 +377,102 @@
     return inside;
   }
 
+  function unitDirection(directionInput) {
+    const direction = directionInput || {};
+    const x = Number(direction.x) || 0;
+    const y = Number(direction.y) || 0;
+    const z = Number(direction.z) || 0;
+    const length = Math.hypot(x, y, z) || 1;
+    return { x: x / length, y: y / length, z: z / length };
+  }
+
+  function buildSpatialEnvelope(carriersInput, clearanceInput = 0) {
+    const carriers = (Array.isArray(carriersInput) ? carriersInput : []).filter((carrier) => (
+      carrier && (carrier.kind === "spatial-envelope" || carrier.kind === "sphere")
+    ));
+    return {
+      kind: "spatial-envelope",
+      carriers,
+      clearance: Math.max(0, Number(clearanceInput) || 0)
+    };
+  }
+
+  function spatialCarrierSupportPoint(carrier, directionInput) {
+    const direction = unitDirection(directionInput);
+    if (carrier && carrier.kind === "spatial-envelope") {
+      if (!carrier.carriers.length) return null;
+      let supported = null;
+      let maximum = -Infinity;
+      for (const child of carrier.carriers) {
+        const point = spatialCarrierSupportPoint(child, direction);
+        if (!point) continue;
+        const support = point.x * direction.x + point.y * direction.y + point.z * direction.z;
+        if (support > maximum) {
+          supported = point;
+          maximum = support;
+        }
+      }
+      if (!supported) return null;
+      return {
+        x: supported.x + direction.x * carrier.clearance,
+        y: supported.y + direction.y * carrier.clearance,
+        z: supported.z + direction.z * carrier.clearance
+      };
+    }
+    const center = carrier && carrier.center || {};
+    const radius = Math.max(0, Number(carrier && carrier.radius) || 0);
+    return {
+      x: (Number(center.x) || 0) + direction.x * radius,
+      y: (Number(center.y) || 0) + direction.y * radius,
+      z: (Number(center.z) || 0) + direction.z * radius
+    };
+  }
+
+  const spatialEnvelopeSurfaceCache = new WeakMap();
+
+  function sampleSpatialEnvelopeSurface(envelope, sampleCountInput = 512) {
+    if (!envelope || envelope.kind !== "spatial-envelope" || !envelope.carriers.length) return [];
+    const sampleCount = Math.max(48, Math.floor(Number(sampleCountInput) || 512));
+    const cached = spatialEnvelopeSurfaceCache.get(envelope);
+    if (cached && cached.count === sampleCount) return cached.points;
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+    const points = Array.from({ length: sampleCount }, (_, index) => {
+      const y = 1 - (index + 0.5) * 2 / sampleCount;
+      const radial = Math.sqrt(Math.max(0, 1 - y * y));
+      const angle = index * goldenAngle;
+      return spatialCarrierSupportPoint(envelope, {
+        x: Math.cos(angle) * radial,
+        y,
+        z: Math.sin(angle) * radial
+      });
+    }).filter(Boolean);
+    spatialEnvelopeSurfaceCache.set(envelope, { count: sampleCount, points });
+    return points;
+  }
+
+  function buildScreenPointEnvelope(pointsInput) {
+    const points = (Array.isArray(pointsInput) ? pointsInput : [])
+      .map((point) => ({ x: Number(point && point.x), y: Number(point && point.y) }))
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+    if (points.length < 3) return null;
+    const sorted = [...points].sort((left, right) => left.x - right.x || left.y - right.y);
+    const cross = (origin, left, right) => (
+      (left.x - origin.x) * (right.y - origin.y) - (left.y - origin.y) * (right.x - origin.x)
+    );
+    const half = (source) => {
+      const hull = [];
+      for (const point of source) {
+        while (hull.length >= 2 && cross(hull.at(-2), hull.at(-1), point) <= 0) hull.pop();
+        hull.push(point);
+      }
+      return hull;
+    };
+    const lower = half(sorted);
+    const upper = half([...sorted].reverse());
+    const hull = [...lower.slice(0, -1), ...upper.slice(0, -1)];
+    return hull.length >= 3 ? { kind: "rounded-hull", points: hull, bounds: screenEnvelopeBounds(hull) } : null;
+  }
+
   function nestedDescendantOf(cluster, anchor, clusterByPath) {
     let current = cluster;
     while (current && current.path !== anchor.path) {
@@ -1160,6 +1256,7 @@
     // close while preserving the advertised 3×–10× scene footprint.
     if (!clusters.length) {
       return {
+        spatial3d,
         clusters,
         corridors,
         compressionMultiplier,
@@ -1185,7 +1282,24 @@
       minimum[axis] += offset[axis];
       maximum[axis] += offset[axis];
     }
+    // Build bodies only after final world placement. An opened child supplies
+    // its complete volume, never its projected outline or enclosing circle.
+    // The enclosing radius remains a broad-phase camera/collision bound.
+    for (const cluster of [...clusters].sort((left, right) => right.depth - left.depth)) {
+      const carriers = primaryCarriers(cluster.layoutNodes || cluster.nodes).map((node) => {
+        const child = node.__nestedCarrierPath && clusterByPath.get(node.__nestedCarrierPath);
+        return child && child.spatialEnvelope || {
+          kind: "sphere",
+          center: { ...node.position },
+          radius: Number(node.__clusterRadius) || Number(node.radius) || 0.82
+        };
+      });
+      cluster.spatialEnvelope = buildSpatialEnvelope(carriers.length ? carriers : [{
+        kind: "sphere", center: { ...cluster.center }, radius: cluster.radius
+      }], carriers.length ? minimumShellClearance(options) * cluster.nodeScale : 0);
+    }
     return {
+      spatial3d,
       clusters,
       corridors,
       compressionMultiplier,
@@ -1197,6 +1311,9 @@
   global.SpatialClusterField = Object.freeze({
     buildScene,
     buildScreenEnvelope,
+    buildSpatialEnvelope,
+    sampleSpatialEnvelopeSurface,
+    buildScreenPointEnvelope,
     envelopeContainsPoint
   });
 })(window);

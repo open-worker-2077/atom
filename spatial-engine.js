@@ -1830,25 +1830,17 @@
 
   function projectClusterEnvelope(cluster, screen, screenOffsetInput, basis) {
     const screenOffset = screenOffsetInput || { x: 0, y: 0 };
-    const primary = (cluster.layoutNodes || []).filter((node) => (Number(node.__clusterLevel) || 0) === 0);
-    const sources = primary.length ? primary : cluster.layoutNodes || cluster.nodes || [];
-    const carriers = sources.map((node) => {
-      const projected = projectUnclipped(node.position, Number(node.__clusterRadius) || Number(node.radius) || 0.82, basis);
+    const surface = clusterField.sampleSpatialEnvelopeSurface(cluster.spatialEnvelope);
+    const projectedSurface = surface.map((point) => {
+      const projected = projectUnclipped(point, 0, basis);
       if (!projected) return null;
       return {
         x: projected.x + screenOffset.x,
-        y: projected.y + screenOffset.y,
-        radius: projected.radius
+        y: projected.y + screenOffset.y
       };
     }).filter(Boolean);
-    if (!carriers.length) {
-      return clusterField.buildScreenEnvelope([{ x: screen.x, y: screen.y, radius: screen.radius }], 0);
-    }
-    const contactedExtent = Math.max(...carriers.map((carrier) => (
-      Math.hypot(carrier.x - screen.x, carrier.y - screen.y) + carrier.radius
-    )));
-    const clearance = Math.max(4, screen.radius - contactedExtent);
-    return clusterField.buildScreenEnvelope(carriers, clearance);
+    return clusterField.buildScreenPointEnvelope(projectedSurface)
+      || clusterField.buildScreenEnvelope([{ x: screen.x, y: screen.y, radius: screen.radius }], 0);
   }
 
   function drawClusterTunnelInterior(cluster, screen, envelope) {
@@ -2089,6 +2081,9 @@
   function resolveClusterScreenLayout(rendered, basis) {
     state.clusterScreenOffsets.clear();
     if (!state.clusterFieldOpen) return;
+    // A camera turn may legitimately overlap different depths. Moving their
+    // pixels afterwards would separate nodes from their world-space bodies.
+    if (state.clusterScene.spatial3d === true) return;
     const projectionModes = new Set(
       state.clusterScene.clusters.map((cluster) => cluster.projectionMode)
     );

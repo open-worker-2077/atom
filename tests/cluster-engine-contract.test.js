@@ -61,6 +61,32 @@ test('immersed cluster keeps a visible smooth shrink-wrap border and uses it for
   assert.match(hit, /clusterField\.envelopeContainsPoint/);
 });
 
+test('cluster shells project a recursive spatial volume instead of wrapping screen nodes', () => {
+  const envelope = functionSource('projectClusterEnvelope');
+
+  assert.match(envelope, /cluster\.spatialEnvelope/);
+  assert.match(envelope, /sampleSpatialEnvelopeSurface/);
+  assert.match(envelope, /buildScreenPointEnvelope/);
+  assert.doesNotMatch(envelope, /cluster\.layoutNodes/);
+});
+
+test('3D projection preserves overlapping screen coordinates and clears old planar offsets', () => {
+  const state = {
+    clusterFieldOpen: true,
+    clusterScreenOffsets: new Map([['old', { x: 20, y: 30 }]]),
+    clusterScene: { spatial3d: true, clusters: [{ projectionMode: 'nested' }] }
+  };
+  const rendered = [
+    { kind: 'node', node: { id: 'front' }, ownerPath: 'root', screen: { x: 50, y: 50, radius: 10 } },
+    { kind: 'node', node: { id: 'back' }, ownerPath: 'root', screen: { x: 50, y: 50, radius: 10 } }
+  ];
+  const before = JSON.stringify(rendered);
+  const run = new Function('state', `${functionSource('resolveClusterScreenLayout')}; return resolveClusterScreenLayout;`)(state);
+  run(rendered, {});
+  assert.equal(JSON.stringify(rendered), before, 'camera projection is not followed by planar node repositioning');
+  assert.equal(state.clusterScreenOffsets.size, 0);
+});
+
 test('A inward view toggles nested child branches without changing the active domain', () => {
   assert.match(engine, /expandedClusterDomains:\s*new Map\(\)/);
   assert.match(engine, /function visibleClusterDomains\(/);

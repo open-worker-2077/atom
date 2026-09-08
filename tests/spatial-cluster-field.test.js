@@ -108,6 +108,67 @@ test('screen envelope shrink-wraps one, two and three carriers with a smooth out
   ]) assert.equal(field.envelopeContainsPoint(three, carrier.x, carrier.y), true);
 });
 
+test('spatial envelope recursively wraps child volumes before any screen projection', () => {
+  const field = loadClusterField();
+  const child = (x) => field.buildSpatialEnvelope([
+    { kind: 'sphere', center: { x: x - 1, y: -1, z: -1 }, radius: 1 },
+    { kind: 'sphere', center: { x: x + 1, y: -1, z: 1 }, radius: 1 },
+    { kind: 'sphere', center: { x, y: 1, z: 0 }, radius: 1 }
+  ], 0.4);
+  const left = child(-5);
+  const right = child(5);
+  const parent = field.buildSpatialEnvelope([left, right], 0.8);
+
+  assert.equal(parent.kind, 'spatial-envelope');
+  assert.equal(parent.carriers.length, 2, 'the parent carries two complete child volumes');
+  const samples = field.sampleSpatialEnvelopeSurface(parent, 192);
+  assert.ok(samples.length >= 192);
+  assert.ok(Math.max(...samples.map(({ x }) => x)) > 7);
+  assert.ok(Math.min(...samples.map(({ x }) => x)) < -7);
+  assert.ok(Math.max(...samples.map(({ z }) => z)) - Math.min(...samples.map(({ z }) => z)) > 3,
+    'the envelope remains a three-dimensional body before projection');
+});
+
+test('camera rotation projects the same three-dimensional body with a different silhouette', () => {
+  const field = loadClusterField();
+  const body = field.buildSpatialEnvelope([
+    { kind: 'sphere', center: { x: 0, y: -1, z: -5 }, radius: 1 },
+    { kind: 'sphere', center: { x: 0, y: 1, z: 5 }, radius: 1 }
+  ], 0.25);
+  const surface = field.sampleSpatialEnvelopeSurface(body, 768);
+  const front = field.buildScreenPointEnvelope(surface.map(({ x, y }) => ({ x, y })));
+  const side = field.buildScreenPointEnvelope(surface.map(({ z, y }) => ({ x: z, y })));
+  assert.ok(side.bounds.width > front.bounds.width * 4,
+    'turning the camera reveals the depth of the existing body');
+  assert.strictEqual(field.sampleSpatialEnvelopeSurface(body, 768), surface,
+    'a camera turn reuses the same world body rather than rebuilding a bag in screen space');
+  assert.ok(side.bounds.height > 4 && front.bounds.height > 4);
+});
+
+test('a scene parent wraps two complete nested three-node bodies in final world coordinates', () => {
+  const field = loadClusterField();
+  const nodes = ['a', 'b', 'c'].map((id, index) => ({
+    id, radius: 0.82, position: { x: index - 1, y: index % 2, z: index - 1 }
+  }));
+  const scene = field.buildScene([
+    { path: 'root', depth: 0, nodes: [
+      { id: 'left', position: { x: -3, y: 0, z: -2 } },
+      { id: 'right', position: { x: 3, y: 0, z: 2 } }
+    ] },
+    { path: 'root/left', depth: 1, parentPath: 'root', parentNodeId: 'left', projectionMode: 'nested', nodes },
+    { path: 'root/right', depth: 1, parentPath: 'root', parentNodeId: 'right', projectionMode: 'nested', nodes }
+  ], { compact: true, compactPercent: 50, spatial3d: true });
+  const [parent, left, right] = scene.clusters;
+  assert.strictEqual(parent.spatialEnvelope.carriers[0], left.spatialEnvelope);
+  assert.strictEqual(parent.spatialEnvelope.carriers[1], right.spatialEnvelope);
+  for (const child of [left, right]) {
+    assert.equal(child.spatialEnvelope.carriers.length, 3);
+    for (let index = 0; index < child.layoutNodes.length; index += 1) {
+      assert.deepEqual(child.spatialEnvelope.carriers[index].center, child.layoutNodes[index].position);
+    }
+  }
+});
+
 test('spatial compact packing uses depth to keep a dense slot body from collapsing into one plane', () => {
   const field = loadClusterField();
   const nodes = Array.from({ length: 6 }, (_, index) => ({
