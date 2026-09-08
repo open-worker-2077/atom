@@ -422,7 +422,8 @@ test('committed same-domain workspace relations participate in automatic layout'
   assert.match(collect, /repulsionRangeScale:\s*2\.2/);
   assert.match(collect, /repulsionStrength:\s*0\.72/);
   assert.match(collect, /fieldRepulsionStrength:\s*0\.38/);
-  assert.match(collect, /planarRepulsion:\s*true/);
+  assert.match(collect, /planarRepulsion:\s*false/);
+  assert.match(collect, /spatial3d:\s*true/);
   assert.match(collect, /anchorStrength:\s*0\.006/);
 });
 

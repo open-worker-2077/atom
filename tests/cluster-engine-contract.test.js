@@ -242,7 +242,8 @@ test('each cluster domain applies relationship repulsion before its shell is mea
 
   assert.match(visible, /workspace\.relationshipPairsForPath\(descriptor\.path\)/);
   assert.match(visible, /visualModel\.relaxRelationshipLayout\s*\(/);
-  assert.match(visible, /planarRepulsion:\s*true/);
+  assert.match(visible, /planarRepulsion:\s*false/);
+  assert.match(visible, /spatial3d:\s*true/);
 });
 
 test('steady cluster frames reuse the committed layout and visible edge projection', () => {

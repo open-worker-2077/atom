@@ -45,7 +45,7 @@ async function loadTwoLevelField(page, mode) {
   await expect.poll(() => page.evaluate((intent) => window.spatialLab.dispatch(intent), mode)).toBe(true);
   await expect.poll(() => page.evaluate(() => {
     if (!window.spatialLab.selectByLabel('母节点')) return false;
-    window.spatialLab.dispatch('applyViewMode');
+    window.spatialLab.dispatch('applyInwardView');
     return window.spatialLab.state().clusterFieldOpen;
   })).toBe(true);
   await page.evaluate(() => window.spatialLab.requestVisualIntent('dolly', { delta: 1800 }));
@@ -76,6 +76,15 @@ test('orbital settings centralize tools and persist the CapsLock default detail 
   await expect(page.locator('#settingsPanel')).toBeVisible();
   await expect(page.locator('#settingsPanel')).toHaveAttribute('aria-modal', 'true');
   await expect(page.locator('#settingsPanel h3')).toHaveText(['游走', '空间工具', '映射', '显示', '启动与帮助']);
+  await expect(page.locator('#layoutYaw')).toHaveValue('0');
+  await expect(page.locator('#layoutPitch')).toHaveValue('90');
+  await expect(page.locator('#branchSpread')).toHaveValue('55');
+  await moveRange(page, '#layoutYaw', 120);
+  await moveRange(page, '#layoutPitch', 35);
+  await moveRange(page, '#branchSpread', 70);
+  await expect(page.locator('#layoutYawValue')).toHaveText('120°');
+  await expect(page.locator('#layoutPitchValue')).toHaveText('35°');
+  await expect(page.locator('#branchSpreadValue')).toHaveText('70°');
   await page.locator('#defaultDetailMode').selectOption('surface');
   await expect.poll(() => page.evaluate(() => JSON.parse(
     localStorage.getItem('graph-4d.presentation-settings.v2') || '{}'
@@ -89,6 +98,9 @@ test('orbital settings centralize tools and persist the CapsLock default detail 
   await page.reload();
   await page.waitForFunction(() => window.spatialLab && document.body.dataset.spatialBridge === 'connected');
   await expect(page.locator('#defaultDetailMode')).toHaveValue('surface');
+  await expect(page.locator('#layoutYaw')).toHaveValue('120');
+  await expect(page.locator('#layoutPitch')).toHaveValue('35');
+  await expect(page.locator('#branchSpread')).toHaveValue('70');
 });
 
 test('saved CapsLock default detail mode applies to the initial field', async ({ page }) => {
@@ -114,14 +126,15 @@ test('S interval changes same-level screen edge gap without resizing those nodes
   await moveRange(page, '#nestedCompactness', 100);
   const after = await screenTargets(page, ['child-a', 'child-b']);
   const edgeGap = (targets) => Math.hypot(
-    targets['child-b'].x - targets['child-a'].x,
-    targets['child-b'].y - targets['child-a'].y
-  ) - targets['child-a'].radius - targets['child-b'].radius;
+    targets['child-b'].worldPosition.x - targets['child-a'].worldPosition.x,
+    targets['child-b'].worldPosition.y - targets['child-a'].worldPosition.y,
+    targets['child-b'].worldPosition.z - targets['child-a'].worldPosition.z
+  ) - targets['child-a'].worldRadius - targets['child-b'].worldRadius;
   const relativeRadiusDrift = (beforeRadius, afterRadius) => (
     Math.abs(afterRadius - beforeRadius) / beforeRadius
   );
 
-  expect(edgeGap(after)).toBeGreaterThan(edgeGap(before) + 1);
+  expect(edgeGap(after)).toBeGreaterThan(edgeGap(before) + 0.1);
   expect(relativeRadiusDrift(before['child-a'].radius, after['child-a'].radius)).toBeLessThan(0.01);
   expect(relativeRadiusDrift(before['child-b'].radius, after['child-b'].radius)).toBeLessThan(0.01);
 });

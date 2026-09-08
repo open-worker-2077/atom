@@ -544,13 +544,8 @@
         .filter((node) => node.__packingLocked !== true)
         .sort((left, right) => String(stableLayoutIdentity(left)).localeCompare(String(stableLayoutIdentity(right))));
       const fixed = positioned.filter((node) => node.__packingLocked === true);
-      const hasDerivedSpatialSkeleton = spatial3d && positioned.some((node) => (
-        Math.hypot(
-          node.position.x - center.x,
-          node.position.y - center.y,
-          node.position.z - center.z
-        ) > node.__clusterRadius * 1.5
-      ));
+      const hasDerivedSpatialSkeleton = spatial3d
+        && positioned.some((node) => node.clusterTopologyPositioned === true);
       if (spatial3d) {
         if (!hasDerivedSpatialSkeleton) {
           placeCompactVolume(automatic, fixed, center, collisionGap * displayScale);

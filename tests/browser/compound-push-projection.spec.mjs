@@ -79,7 +79,7 @@ test('A-mode strut endpoints attach to the final visible node boundaries', async
   ));
   expect(await page.evaluate(() => window.spatialLab.selectByLabel('载体'))).toBe(true);
   await page.keyboard.press('a');
-  await page.evaluate(() => window.spatialLab.dispatch('applyViewMode'));
+  await page.evaluate(() => window.spatialLab.dispatch('applyInwardView'));
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterFieldOpen)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().strutGeometry)).toHaveLength(1);
 

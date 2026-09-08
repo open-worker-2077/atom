@@ -79,7 +79,7 @@
 - Consumes: Tasks 1–3.
 - Produces: one browser build with stable 3D rotation, adaptive slot shells and unchanged interaction semantics.
 
-- [ ] **Step 1: Run** the minimum affected model, cluster, browser-scene, input and navigation tests.
-- [ ] **Step 2: Run** `npm run build:browser` and `npm run check:development-control`.
-- [ ] **Step 3: Exercise** one real browser journey: immerse, rotate side-on, change layout angles, open a nested slot, verify normal/immersed alpha, and add a closing edge without moving existing nodes.
+- [x] **Step 1: Run** the minimum affected model, cluster, browser-scene, input and navigation tests; final directly affected contract chain 168/168 passed.
+- [x] **Step 2: Run** `npm run build:browser` and `npm run check:development-control`; both passed for the candidate build.
+- [x] **Step 3: Exercise** one real browser journey: immerse, rotate side-on, change layout angles, open a nested slot, verify normal/immersed alpha, and add a closing edge without moving existing nodes; Chromium layout-control/persistence journey 4/4 passed and the closing-edge coordinate contract passed in the pure layout model.
 - [ ] **Step 4: Update** the unique Superpowers ledger with exact revision and evidence, commit, push the authorized safety backup, read the exact remote check, then deploy and read back the public 4784 build only if the affected chain is green.

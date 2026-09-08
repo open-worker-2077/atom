@@ -38,7 +38,7 @@ test('a newly entered scope stays visibly loading and non-editable until its sta
     });
     window.spatialLab.dispatch('setImmersiveView');
     window.spatialLab.selectByLabel('母节点');
-    window.spatialLab.dispatch('applyViewMode');
+    window.spatialLab.dispatch('applyInwardView');
   });
 
   await expect(page.locator('#scopeLoadState')).toBeVisible();
@@ -74,7 +74,7 @@ for (const entry of [
       window.spatialLab.selectByLabel('母节点');
       if (immersive) {
         window.spatialLab.dispatch('setImmersiveView');
-        window.spatialLab.dispatch('applyViewMode');
+        window.spatialLab.dispatch('applyInwardView');
       } else {
         window.spatialLab.dispatch('enter');
       }

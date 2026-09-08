@@ -101,8 +101,9 @@ test('S cluster shell border and interior use independent persistent controls', 
   assert.match(tunnel, /nestedTunnelInteriorPercent\s*\/\s*100/);
   assert.match(cluster, /nestedTunnelPercent\s*\/\s*100/);
   assert.match(cluster, /nestedTunnelInteriorPercent\s*\/\s*100/);
-  assert.match(cluster, /0\.58\s*\*\s*nestedTunnelStrength/);
-  assert.match(cluster, /4\s*\*\s*nestedTunnelStrength/);
+  assert.match(cluster, /0\.28\s*\+\s*0\.5\s*\*\s*nestedTunnelStrength/);
+  assert.match(cluster, /6\s*\*\s*nestedTunnelStrength/);
+  assert.match(cluster, /cluster\.active\s*\?\s*["']transparent["']/);
   assert.match(cluster, /drawClusterTunnelInterior\s*\(\s*cluster\s*,\s*screen\s*\)/);
 });
 

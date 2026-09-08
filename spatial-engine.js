@@ -1430,8 +1430,12 @@
             preserveClosingStrut: true
           }
         );
+        const topologyNodeIds = new Set(domainRelationships.flatMap((relationship) => (
+          [relationship.fromId, relationship.toId]
+        )));
         visible.forEach((node) => {
           if (relaxedPositions[node.id]) node.position = relaxedPositions[node.id];
+          node.clusterTopologyPositioned = topologyNodeIds.has(node.id);
         });
         return {
           ...descriptor,
@@ -9450,6 +9454,8 @@
           path: item.ownerPath,
           id: item.node.id,
           label: item.node.label,
+          worldPosition: { ...item.position },
+          worldRadius: Number(item.radius) || Number(item.node.radius) || 0,
           x: item.screen.x,
           y: item.screen.y,
           radius: item.screen.radius
