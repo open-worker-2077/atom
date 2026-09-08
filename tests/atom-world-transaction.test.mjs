@@ -959,6 +959,32 @@ test('a local commit is durable in the append log before full-world compaction',
   assert.deepEqual((await afterCompactionRestart.read()).facts, afterFacts);
 });
 
+test('the first local commit establishes a durable empty baseline for a new Atom world', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-first-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  const localCommitFile = path.join(directory, 'world-commits.jsonl');
+  const beforeFacts = [];
+  const afterFacts = [{ thing: 'First', situation: '', slot: [], strut: [] }];
+  const repository = createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile, initialFacts: beforeFacts
+  });
+  const patch = createLocalWorldPatch({
+    worldId: 'primary', beforeRevision: revisionOf(beforeFacts), afterRevision: revisionOf(afterFacts),
+    beforeFacts, afterFacts, changedPaths: ['First']
+  });
+
+  await repository.appendLocalCommit({
+    commandId: 'first-local-record', expectedRevision: revisionOf(beforeFacts),
+    nextSnapshot: { worldId: 'primary', revision: revisionOf(afterFacts), facts: afterFacts }, patch
+  });
+
+  assert.deepEqual(JSON.parse(await fs.readFile(worldFile, 'utf8')), beforeFacts,
+    'a new world must materialize its empty baseline before publishing the first patch');
+  const restarted = createJsonWorldRepository({ file: worldFile, worldId: 'primary', localCommitFile });
+  assert.deepEqual((await restarted.read()).facts, afterFacts);
+});
+
 test('local world patches locate Things by semantic path when their keys carry permanent identities', () => {
   const beforeFacts = [{
     'thing&id=AbCdEfGhIjKlMnOpQrStUv': 'Root',

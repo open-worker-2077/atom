@@ -796,6 +796,28 @@ export function createJsonWorldRepository({
           actualRevision: current.revision
         });
       }
+      if (await fileSignature(file, true) === 'missing') {
+        const preparedBaseline = prepareWorldFactsRevision(current.facts);
+        const baselineWrite = await writeJsonAtomically(file, current.facts, {
+          fileSystem,
+          serialized: `${preparedBaseline.json}\n`,
+          syncTemporary: true,
+          syncDirectory: true,
+          beforeRename: async (temporary) => {
+            const verifiedFacts = JSON.parse(await fileSystem.readFile(temporary, 'utf8'));
+            if (revisionOfWorldFacts(verifiedFacts) !== current.revision) {
+              throw problem('INVALID_WORLD_REVISION', 'Initial baseline failed revision verification');
+            }
+          }
+        });
+        if (baselineWrite.directorySynced) {
+          publication.provenBaselineRevision = current.revision;
+          publication.directorySyncUnavailable = false;
+          publication.baselineFrozen = false;
+        } else {
+          publication.directorySyncUnavailable = true;
+        }
+      }
       const facts = applyLocalWorldPatch(current.facts, patch);
       const prepared = snapshot(worldId, facts, { ownsFacts: true });
       if (prepared.revision !== nextSnapshot.revision) {

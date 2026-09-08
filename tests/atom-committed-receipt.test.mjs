@@ -7,6 +7,7 @@ import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-eng
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { createInteractionRuntime } from '../src/atom-system/public/interaction-runtime.mjs';
+import { readCommittedAtomLanguageFacts } from './helpers/atom-language-test-runtime.mjs';
 
 test('durable write returns its complete receipt before postcommit Program projection settles', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-committed-receipt-'));
@@ -66,7 +67,7 @@ test('durable write returns its complete receipt before postcommit Program proje
       settling,
       operation.then(result => { throw new Error(`projection not reached: ${JSON.stringify(result)}`); })
     ]);
-    assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].situation, 'saved');
+    assert.equal((await readCommittedAtomLanguageFacts({ contextFile, projectionFile }))[0].situation, 'saved');
     assert.equal(receipt?.ok, true, 'a committed write must not wait for disposable projection to acknowledge success');
     assert.equal(receipt.changed, true);
     assert.equal(receipt.command, 'transform');

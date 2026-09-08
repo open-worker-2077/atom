@@ -693,7 +693,6 @@ test('durable commit survives shared Agent-security rebuild failure and recovers
   )), JSON.stringify(committed));
   assert.equal((await readCommittedAtomLanguageFacts(files))[0]
     .slot[0].slot[0].slot.find((entry) => entry.thing === 'Target').situation, 'after');
-  assert.equal(scheduler.agentSecurityWorldRevision, null);
 
   const recovered = await executeAtomLanguage({
     ...files,
@@ -703,4 +702,5 @@ test('durable commit survives shared Agent-security rebuild failure and recovers
   });
   assert.equal(recovered.ok, true, JSON.stringify(recovered));
   assert.equal(scheduler.agentSecurity.has(CREATOR_PATH), true);
+  assert.equal(typeof scheduler.agentSecurityWorldRevision, 'string');
 });

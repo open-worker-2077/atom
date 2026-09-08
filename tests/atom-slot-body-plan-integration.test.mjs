@@ -6,7 +6,10 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { slotProgramInvocationsForEvent } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
-import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  executeAtomLanguage,
+  readCommittedAtomLanguageFacts
+} from './helpers/atom-language-test-runtime.mjs';
 
 const AGENT_SOURCE = 'agent({"labels":["^^"],"functions":{"groups":[],"names":["agent","explore","json_parse","slot_body","transform","trigger","use_program"]}})';
 const INLINE_FIELD_PREDICATE = [
@@ -306,7 +309,7 @@ test('a strict-false owner-local condition does not dispatch its consequent', as
   const changed = await run(runtime, triggerFields('实例001', ['字段甲']), scheduler);
 
   assert.equal(changed.ok, true, JSON.stringify(changed.errors));
-  const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
+  const committed = await readCommittedAtomLanguageFacts(runtime);
   assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果/结果料').situation, '');
   assert.equal(
     diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/候选流/计算').length,

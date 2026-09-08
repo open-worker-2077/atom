@@ -535,7 +535,7 @@ test('operational writes reject colliding files, preserve long context situation
     projectionFile
   });
   assert.equal(created.ok, true);
-  assert.equal(fieldEntry(JSON.parse(await fileText(contextFile))[0], 'situation')[1], longDetail);
+  assert.equal(fieldEntry((await readCommittedAtomLanguageFacts({ contextFile, projectionFile }))[0], 'situation')[1], longDetail);
   assert.equal(graphNode(JSON.parse(await fileText(projectionFile)), '长正文').situation, longDetail);
 
   const contextBefore = await fileText(contextFile);
@@ -612,7 +612,7 @@ test('stdin keeps an ASCII command intact in one complete chunk', async (t) => {
   });
 
   assert.equal(code, 0);
-  const [persisted] = JSON.parse(await fileText(contextFile));
+  const [persisted] = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   assert.equal(fieldEntry(persisted, 'situation')[1], 'plain');
 });
 
@@ -642,6 +642,6 @@ test('stdin retains replacement-character behavior for invalid UTF-8 at stream e
   });
 
   assert.equal(code, 0);
-  const [persisted] = JSON.parse(await fileText(contextFile));
+  const [persisted] = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   assert.equal(fieldEntry(persisted, 'situation')[1], '\uFFFD');
 });

@@ -247,7 +247,7 @@ try {
     rollbackRevision = rollback.afterRevision;
     rollbackCount += 1;
   }
-  const restoredRevision = revisionOfWorldFacts(JSON.parse(await fs.readFile(contextFile, 'utf8')));
+  const restoredRevision = (await persistence.readCommittedSnapshot()).revision;
 
   running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile

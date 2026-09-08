@@ -732,7 +732,7 @@ test('real legacy transform advances atom facts through the durable transaction 
 
   assert.equal(result.ok, true);
   assert.equal(result.changed, true);
-  const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+  const stored = (await service.readCommittedSnapshot({ contextFile, projectionFile })).facts;
   assert.deepEqual(stored.map((entry) => Object.entries(entry).find(([key]) => (
     key.split(/[@&#]/u)[0] === 'thing'
   ))?.[1]), ['Root']);
