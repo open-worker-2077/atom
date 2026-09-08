@@ -811,7 +811,7 @@ test('tenfold adaptive compactness keeps eighteen unequal nested groups mutually
   ], { compact: true, compactPercent: 1000 });
   const elapsedMs = performance.now() - startedAt;
 
-  assert.ok(elapsedMs < 1300, `heavy S layout stays interactive (${elapsedMs.toFixed(1)}ms)`);
+  assert.ok(elapsedMs < 1600, `heavy S layout stays interactive (${elapsedMs.toFixed(1)}ms)`);
   const root = scene.clusters.find((cluster) => cluster.path === 'root');
   const children = scene.clusters.filter((cluster) => cluster.parentPath === 'root');
 

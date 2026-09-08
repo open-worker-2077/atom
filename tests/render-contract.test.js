@@ -87,7 +87,8 @@ test('cluster overview renders black void outside clipped domain tunnels', () =>
   assert.match(scene, /else\s*\{[\s\S]*drawStaticBackdrop\(\)/);
   const backdrop = functionSource('drawStaticBackdrop');
   assert.match(backdrop, /drawStars\(layerContext\)[\s\S]*drawDomainBackdrop\(layerContext\)/);
-  assert.match(cluster, /drawClusterTunnelInterior\s*\(\s*cluster\s*,\s*screen\s*\)/);
+  assert.match(cluster, /drawClusterTunnelInterior\s*\(\s*cluster\s*,\s*screen\s*,\s*envelope\s*\)/);
+  assert.match(tunnel, /traceClusterEnvelope\s*\(\s*envelope\s*\)/);
   assert.match(tunnel, /context\.clip\s*\(\s*\)/);
   assert.match(tunnel, /context\.ellipse\s*\(/);
   assert.doesNotMatch(tunnel, /rgb\([^)]*\/\s*(?:[5-9]\d|100)%\)/);
@@ -103,8 +104,9 @@ test('S cluster shell border and interior use independent persistent controls', 
   assert.match(cluster, /nestedTunnelInteriorPercent\s*\/\s*100/);
   assert.match(cluster, /0\.28\s*\+\s*0\.5\s*\*\s*nestedTunnelStrength/);
   assert.match(cluster, /6\s*\*\s*nestedTunnelStrength/);
-  assert.match(cluster, /cluster\.active\s*\?\s*["']transparent["']/);
-  assert.match(cluster, /drawClusterTunnelInterior\s*\(\s*cluster\s*,\s*screen\s*\)/);
+  assert.match(cluster, /const\s+coreAlpha\s*=\s*cluster\.active\s*\?\s*0\s*:/);
+  assert.match(cluster, /cluster\.active\s*\?\s*["']rgb\(84 214 255 \/ 72%\)["']/);
+  assert.match(cluster, /drawClusterTunnelInterior\s*\(\s*cluster\s*,\s*screen\s*,\s*envelope\s*\)/);
 });
 
 test('connections come from relationshipPairs without a hard-coded root index chain', () => {
