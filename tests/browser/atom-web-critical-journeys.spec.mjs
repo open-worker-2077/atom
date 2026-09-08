@@ -322,6 +322,48 @@ test('Enter-committed node creation stays visible and preserves the current view
   expect(after.state.camera).toEqual(before.camera);
 });
 
+test('a newly submitted node joins the current cluster while Atom confirmation is still pending', async ({ page }) => {
+  test.setTimeout(60_000);
+  let releaseWorkspaceRequest;
+  const workspaceRequestGate = new Promise((resolve) => {
+    releaseWorkspaceRequest = resolve;
+  });
+  await page.route('**/__atom/api/workspace-edit', async (route) => {
+    await workspaceRequestGate;
+    await route.continue();
+  });
+
+  await openIsolatedWorld(page);
+  await enterAtomFile(page);
+  const shell = (await page.evaluate(() => {
+    const state = window.spatialLab.state();
+    return state.clusterRegions.find(({ path }) => path === state.path);
+  }));
+  expect(shell).toBeTruthy();
+  await page.keyboard.down('Control');
+  await page.mouse.click(shell.clientX + shell.radius * 0.72, shell.clientY);
+  await page.keyboard.up('Control');
+  const name = page.locator('#nodeNameEditor');
+  await expect(name).toBeVisible();
+  await name.fill('局部立即投影节点');
+  const pendingPress = name.press('Enter');
+  await page.waitForFunction(() => window.spatialLab.state().transactionActive === false);
+  await page.waitForTimeout(100);
+  const pendingSnapshot = await page.evaluate(() => ({
+    path: window.spatialLab.state().path,
+    labels: window.spatialLab.exportKnowledge().nodes.map(({ label }) => label),
+    visible: window.spatialLab.state().visibleNodeDescriptors.map(({ label }) => label),
+    clusters: window.spatialLab.state().clusterPaths
+  }));
+  releaseWorkspaceRequest();
+  await pendingPress;
+  expect(pendingSnapshot.visible, JSON.stringify(pendingSnapshot)).toContain('局部立即投影节点');
+  await page.waitForFunction(() => (
+    document.body.dataset.spatialBridge === 'connected'
+    && window.spatialLab.state().transactionActive === false
+  ));
+});
+
 test('TC-I24-CLI-WEB-LOCAL-FRESHNESS keeps the open page and F5 on the CLI value', async ({ page, request }) => {
   test.setTimeout(60_000);
   const atomPath = '测试入口/第一节点';

@@ -5029,6 +5029,7 @@
     if (operation.kind === "node-create") {
       const parentAtomPath = semanticParentPathForSpatialPath(operation.path);
       if (parentAtomPath !== null) operation = { ...operation, parentAtomPath };
+      if (state.clusterFieldOpen) buildClusterScene();
     }
     operation = workspaceModel.batchLandingOperation(operation, operation.batchEntries);
     closeNodeEditor();
