@@ -108,6 +108,8 @@
     layoutPitchValue: document.getElementById("layoutPitchValue"),
     branchSpread: document.getElementById("branchSpread"),
     branchSpreadValue: document.getElementById("branchSpreadValue"),
+    strutSpacing: document.getElementById("strutSpacing"),
+    strutSpacingValue: document.getElementById("strutSpacingValue"),
     peripheralDepthShrink: document.getElementById("peripheralDepthShrink"),
     peripheralDepthShrinkValue: document.getElementById("peripheralDepthShrinkValue"),
     nestedTunnelStrength: document.getElementById("nestedTunnelStrength"),
@@ -1347,6 +1349,7 @@
         layoutYawDegrees: state.demo.settings.layoutYawDegrees,
         layoutPitchDegrees: state.demo.settings.layoutPitchDegrees,
         branchSpreadDegrees: state.demo.settings.branchSpreadDegrees,
+        strutSpacingPercent: state.demo.settings.strutSpacingPercent,
         preserveClosingStrut: true
       }
     );
@@ -1427,6 +1430,7 @@
             layoutYawDegrees: state.demo.settings.layoutYawDegrees,
             layoutPitchDegrees: state.demo.settings.layoutPitchDegrees,
             branchSpreadDegrees: state.demo.settings.branchSpreadDegrees,
+            strutSpacingPercent: state.demo.settings.strutSpacingPercent,
             preserveClosingStrut: true
           }
         );
@@ -8085,6 +8089,8 @@
     ui.layoutPitchValue.textContent = `${state.demo.settings.layoutPitchDegrees}°`;
     ui.branchSpread.value = String(state.demo.settings.branchSpreadDegrees);
     ui.branchSpreadValue.textContent = `${state.demo.settings.branchSpreadDegrees}°`;
+    ui.strutSpacing.value = String(state.demo.settings.strutSpacingPercent);
+    ui.strutSpacingValue.textContent = `${state.demo.settings.strutSpacingPercent}%`;
     ui.peripheralDepthShrink.value = String(state.demo.settings.peripheralDepthShrinkPercent);
     ui.peripheralDepthShrinkValue.textContent = `${state.demo.settings.peripheralDepthShrinkPercent}%`;
     ui.nestedTunnelStrength.value = String(state.demo.settings.nestedTunnelPercent);
@@ -8117,7 +8123,8 @@
       || previous.peripheralDepthShrinkPercent !== state.demo.settings.peripheralDepthShrinkPercent
       || previous.layoutYawDegrees !== state.demo.settings.layoutYawDegrees
       || previous.layoutPitchDegrees !== state.demo.settings.layoutPitchDegrees
-      || previous.branchSpreadDegrees !== state.demo.settings.branchSpreadDegrees) {
+      || previous.branchSpreadDegrees !== state.demo.settings.branchSpreadDegrees
+      || previous.strutSpacingPercent !== state.demo.settings.strutSpacingPercent) {
       refreshClusterSceneAfterLayoutSetting();
     }
     return state.demo.settings;
@@ -9011,6 +9018,11 @@
 
   ui.branchSpread.addEventListener("input", () => {
     updateDemoSettings(demoModel.withBranchSpreadInput(state.demo.settings, ui.branchSpread.value));
+    refreshClusterSceneAfterLayoutSetting();
+  });
+
+  ui.strutSpacing.addEventListener("input", () => {
+    updateDemoSettings(demoModel.withStrutSpacingInput(state.demo.settings, ui.strutSpacing.value));
     refreshClusterSceneAfterLayoutSetting();
   });
 

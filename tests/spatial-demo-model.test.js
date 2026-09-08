@@ -19,7 +19,7 @@ test('first visit keeps automatic presentation off until the user explicitly ena
   assert.ok(model, 'SpatialDemoModel must exist');
   assert.deepEqual(
     JSON.parse(JSON.stringify(model.normalizeSettings(null))),
-    { idleSeconds: null, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 90, branchSpreadDegrees: 55, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 90, branchSpreadDegrees: 55, strutSpacingPercent: 0, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 
@@ -31,11 +31,11 @@ test('blank idle seconds disables presentation while retaining the last valid de
       lastIdleSeconds: 12,
       helpVisible: false
     }))),
-    { idleSeconds: null, lastIdleSeconds: 12, helpVisible: false, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 90, branchSpreadDegrees: 55, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 12, helpVisible: false, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 90, branchSpreadDegrees: 55, strutSpacingPercent: 0, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(model.withIdleInput({ idleSeconds: 8, lastIdleSeconds: 8, helpVisible: true }, ''))),
-    { idleSeconds: null, lastIdleSeconds: 8, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 90, branchSpreadDegrees: 55, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 8, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 90, branchSpreadDegrees: 55, strutSpacingPercent: 0, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 
@@ -92,11 +92,15 @@ test('3d graph orientation settings wrap full rotations and bound branch spread'
   assert.equal(defaults.layoutYawDegrees, 0);
   assert.equal(defaults.layoutPitchDegrees, 90);
   assert.equal(defaults.branchSpreadDegrees, 55);
+  assert.equal(defaults.strutSpacingPercent, 0);
   assert.equal(model.withLayoutYawInput(defaults, 450).layoutYawDegrees, 90);
   assert.equal(model.withLayoutYawInput(defaults, -90).layoutYawDegrees, 270);
   assert.equal(model.withLayoutPitchInput(defaults, 720).layoutPitchDegrees, 0);
   assert.equal(model.withBranchSpreadInput(defaults, -1).branchSpreadDegrees, 0);
   assert.equal(model.withBranchSpreadInput(defaults, 240).branchSpreadDegrees, 180);
+  assert.equal(model.withStrutSpacingInput(defaults, 65).strutSpacingPercent, 65);
+  assert.equal(model.withStrutSpacingInput(defaults, -1).strutSpacingPercent, 0);
+  assert.equal(model.withStrutSpacingInput(defaults, 140).strutSpacingPercent, 100);
 });
 
 test('zoom speed is persisted as an adjustable percentage with a faster default', () => {
@@ -437,7 +441,7 @@ test('invalid persisted settings recover without leaking unknown fields', () => 
   });
   assert.deepEqual(
     JSON.parse(JSON.stringify(settings)),
-    { idleSeconds: 5, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 90, branchSpreadDegrees: 55, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: 5, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 90, branchSpreadDegrees: 55, strutSpacingPercent: 0, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 

@@ -984,6 +984,69 @@ test('spatial 3d layout raises a directed main chain from source to target', () 
   assert.ok(Math.abs(layout.head.x - layout.foot.x) < 0.35);
 });
 
+test('spatial struts add no distance beyond the existing body isolation by default', () => {
+  const entries = ['foot', 'body', 'head'].map((id) => ({
+    id,
+    position: { x: 0, y: 0, z: 0 },
+    radius: 0.4,
+    labelSpan: 4
+  }));
+  const links = [
+    { fromId: 'foot', toId: 'body', kind: 'association' },
+    { fromId: 'body', toId: 'head', kind: 'association' }
+  ];
+  const compact = SpatialVisualModel.relaxRelationshipLayout(entries, links, {
+    spatial3d: true,
+    layoutPitchDegrees: 90,
+    baseGap: 0.2,
+    strutSpacingPercent: 0
+  });
+  const expanded = SpatialVisualModel.relaxRelationshipLayout(entries, links, {
+    spatial3d: true,
+    layoutPitchDegrees: 90,
+    baseGap: 0.2,
+    strutSpacingPercent: 100
+  });
+  const distance = (layout, from, to) => Math.hypot(
+    layout[to].x - layout[from].x,
+    layout[to].y - layout[from].y,
+    layout[to].z - layout[from].z
+  );
+  const compactGap = distance(compact, 'foot', 'body') - 0.8;
+  const expandedGap = distance(expanded, 'foot', 'body') - 0.8;
+
+  assert.ok(compactGap >= 0.19, 'the ordinary node isolation remains');
+  assert.ok(compactGap <= 0.28, `the strut does not reserve another corridor by default: ${compactGap}`);
+  assert.ok(expandedGap >= compactGap + 0.15, 'the explicit strut spacing control can widen it');
+});
+
+test('spatial struts keep each unequal body pair at its own minimum gap', () => {
+  const entries = [
+    { id: 'small-a', position: { x: 0, y: 0, z: 0 }, radius: 0.2 },
+    { id: 'small-b', position: { x: 0, y: 0, z: 0 }, radius: 0.2 },
+    { id: 'large', position: { x: 0, y: 0, z: 0 }, radius: 1.2 }
+  ];
+  const layout = SpatialVisualModel.relaxRelationshipLayout(entries, [
+    { fromId: 'small-a', toId: 'small-b', kind: 'association' },
+    { fromId: 'small-b', toId: 'large', kind: 'association' }
+  ], {
+    spatial3d: true,
+    layoutPitchDegrees: 90,
+    baseGap: 0.2,
+    strutSpacingPercent: 0
+  });
+  const distance = (from, to) => Math.hypot(
+    layout[to].x - layout[from].x,
+    layout[to].y - layout[from].y,
+    layout[to].z - layout[from].z
+  );
+
+  assert.ok(distance('small-a', 'small-b') <= 0.68,
+    'a later large body must not inflate the earlier small-body strut');
+  assert.ok(distance('small-b', 'large') <= 1.72,
+    'the large-body pair keeps only its own isolation gap');
+});
+
 test('spatial 3d branch spread controls distance from the main axis', () => {
   const entries = ['foot', 'body', 'head', 'arm'].map((id) => ({
     id,

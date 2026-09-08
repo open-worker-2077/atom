@@ -529,6 +529,10 @@
     var branchSpread = Number.isFinite(Number(settings.branchSpreadDegrees))
       ? Math.max(0, Math.min(180, Number(settings.branchSpreadDegrees))) * Math.PI / 180
       : 55 * Math.PI / 180;
+    var strutSpacingPercent = Number.isFinite(Number(settings.strutSpacingPercent))
+      ? Math.max(0, Math.min(100, Number(settings.strutSpacingPercent)))
+      : 0;
+    var strutSpacing = baseGap * strutSpacingPercent / 100;
     var sourceEntries = Array.isArray(entries) ? entries.filter(function (entry) {
       return isNode(entry)
         && typeof entry.id === 'string'
@@ -676,6 +680,11 @@
         return true;
       });
     }
+    var activeLinkKeys = new Set();
+    activeLinks.forEach(function (link) {
+      activeLinkKeys.add(link.fromId + '\u0000' + link.toId);
+      activeLinkKeys.add(link.toId + '\u0000' + link.fromId);
+    });
     var ids = sourceEntries.map(function (entry) { return entry.id; });
     var topologySeeded = new Set();
 
@@ -784,15 +793,18 @@
                 sum.z += anchors[id].z / component.length;
                 return sum;
               }, { x: 0, y: 0, z: 0 });
-          var step = 2.1;
+          var pathOffsets = [0];
           for (var pathIndex = 1; pathIndex < mainPath.length; pathIndex += 1) {
-            step = Math.max(step, (byId.get(mainPath[pathIndex - 1]).radius
-              + byId.get(mainPath[pathIndex]).radius) * 1.55 + baseGap);
+            pathOffsets.push(pathOffsets[pathIndex - 1]
+              + byId.get(mainPath[pathIndex - 1]).radius
+              + byId.get(mainPath[pathIndex]).radius
+              + baseGap
+              + strutSpacing);
           }
-          var halfSpan = step * Math.max(0, mainPath.length - 1) / 2;
+          var halfSpan = pathOffsets[pathOffsets.length - 1] / 2;
           mainPath.forEach(function (id, index) {
             if (byId.get(id).fixed) return;
-            var offset = index * step - halfSpan;
+            var offset = pathOffsets[index] - halfSpan;
             positions[id] = {
               x: centre.x + mainAxis.x * offset,
               y: centre.y + mainAxis.y * offset,
@@ -818,7 +830,10 @@
               z: mainAxis.z * Math.cos(branchSpread) + radial.z * Math.sin(branchSpread)
             };
             var parentPoint = positions[parentId];
-            var distance = step * (1 + Math.min(3, depth) * 0.08);
+            var distance = (byId.get(parentId).radius
+              + byId.get(id).radius
+              + baseGap
+              + strutSpacing) * (1 + Math.min(3, depth) * 0.08);
             positions[id] = {
               x: parentPoint.x + direction.x * distance,
               y: parentPoint.y + direction.y * distance,
@@ -1166,18 +1181,23 @@
           var rightEntry = byId.get(rightId);
           if (forceGroup(leftEntry) !== forceGroup(rightEntry)) continue;
           var separation = repulsionVectorBetween(leftId, rightId);
-          var minimumDistance = (leftEntry.radius + rightEntry.radius) * radiusScale
-            + baseGap
-            + (leftEntry.labelSpan + rightEntry.labelSpan) * 0.42;
-          var repulsionRange = minimumDistance * repulsionRangeScale;
+          var minimumDistance = spatial3d
+            ? leftEntry.radius + rightEntry.radius + baseGap
+            : (leftEntry.radius + rightEntry.radius) * radiusScale
+              + baseGap
+              + (leftEntry.labelSpan + rightEntry.labelSpan) * 0.42;
+          var repulsionRange = spatial3d ? minimumDistance : minimumDistance * repulsionRangeScale;
           var movableCount = Number(!leftEntry.fixed) + Number(!rightEntry.fixed);
           if (!movableCount) continue;
           var nearRepulsion = separation.distance < repulsionRange
             ? (repulsionRange - separation.distance) * repulsionStrength
             : 0;
-          var fieldRepulsion = minimumDistance * minimumDistance
-            / (separation.distance * separation.distance + minimumDistance * minimumDistance)
-            * fieldRepulsionStrength;
+          var directlyLinked = activeLinkKeys.has(leftId + '\u0000' + rightId);
+          var fieldRepulsion = spatial3d || directlyLinked
+            ? 0
+            : minimumDistance * minimumDistance
+              / (separation.distance * separation.distance + minimumDistance * minimumDistance)
+              * fieldRepulsionStrength;
           var repulsion = (nearRepulsion + fieldRepulsion) / movableCount;
           addDelta(deltas, leftId, separation.direction, -repulsion);
           addDelta(deltas, rightId, separation.direction, repulsion);
@@ -1192,12 +1212,14 @@
           || forceGroup(fromEntry) !== forceGroup(toEntry)
         ) return;
         var separation = vectorBetween(relationship.fromId, relationship.toId);
-        var radiusDistance = (fromEntry.radius + toEntry.radius) * 1.55;
-        var restDistance = Math.max(
-          radiusDistance + 1.4,
-          3.65,
-          radiusDistance + (fromEntry.labelSpan + toEntry.labelSpan) * 0.46
-        );
+        var radiusDistance = fromEntry.radius + toEntry.radius;
+        var restDistance = spatial3d
+          ? radiusDistance + baseGap + strutSpacing
+          : Math.max(
+              radiusDistance * 1.55 + 1.4,
+              3.65,
+              radiusDistance * 1.55 + (fromEntry.labelSpan + toEntry.labelSpan) * 0.46
+            );
         var movableCount = Number(!fromEntry.fixed) + Number(!toEntry.fixed);
         if (!movableCount) return;
         var pull = (separation.distance - restDistance) * linkStrength / movableCount;

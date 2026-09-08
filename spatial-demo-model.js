@@ -13,6 +13,7 @@
   const DEFAULT_LAYOUT_YAW_DEGREES = 0;
   const DEFAULT_LAYOUT_PITCH_DEGREES = 90;
   const DEFAULT_BRANCH_SPREAD_DEGREES = 55;
+  const DEFAULT_STRUT_SPACING_PERCENT = 0;
   const MAX_NESTED_COMPACTNESS_PERCENT = 100;
   const DEFAULT_ZOOM_SPEED_PERCENT = 160;
   const DEFAULT_RELATIONSHIP_LINE_WIDTH_PERCENT = 180;
@@ -136,6 +137,9 @@
       layoutYawDegrees: validRotationDegrees(source.layoutYawDegrees, DEFAULT_LAYOUT_YAW_DEGREES),
       layoutPitchDegrees: validRotationDegrees(source.layoutPitchDegrees, DEFAULT_LAYOUT_PITCH_DEGREES),
       branchSpreadDegrees: validBranchSpread(source.branchSpreadDegrees),
+      strutSpacingPercent: Object.prototype.hasOwnProperty.call(source, "strutSpacingPercent")
+        ? validPercent(source.strutSpacingPercent)
+        : DEFAULT_STRUT_SPACING_PERCENT,
       nestedTunnelPercent: validPercent(source.nestedTunnelPercent),
       nestedTunnelInteriorPercent: validPercent(source.nestedTunnelInteriorPercent),
       zoomSpeedPercent: validZoomSpeed(source.zoomSpeedPercent),
@@ -241,6 +245,11 @@
   function withBranchSpreadInput(settingsInput, value) {
     const settings = normalizeSettings(settingsInput);
     return normalizeSettings({ ...settings, branchSpreadDegrees: validBranchSpread(value) });
+  }
+
+  function withStrutSpacingInput(settingsInput, value) {
+    const settings = normalizeSettings(settingsInput);
+    return normalizeSettings({ ...settings, strutSpacingPercent: validPercent(value) });
   }
 
   function withNestedTunnelInteriorInput(settingsInput, value) {
@@ -532,6 +541,7 @@
     withLayoutYawInput,
     withLayoutPitchInput,
     withBranchSpreadInput,
+    withStrutSpacingInput,
     withNestedTunnelInput,
     withNestedTunnelInteriorInput,
     withZoomSpeedInput,

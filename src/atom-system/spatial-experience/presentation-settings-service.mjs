@@ -20,6 +20,9 @@ function validatePatch(patch, fields) {
 export function createPresentationSettingsService({ repository, normalizeSettings }) {
   const fields = new Set(Object.keys(normalizeSettings({})));
   const legacyOmittedFieldSets = [
+    new Set(['strutSpacingPercent']),
+    new Set(['strutSpacingPercent', 'layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees']),
+    new Set(['strutSpacingPercent', 'secondaryNavigationDelayMs', 'layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees']),
     new Set(['layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees']),
     new Set(['secondaryNavigationDelayMs', 'layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees'])
   ];

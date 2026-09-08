@@ -79,12 +79,15 @@ test('orbital settings centralize tools and persist the CapsLock default detail 
   await expect(page.locator('#layoutYaw')).toHaveValue('0');
   await expect(page.locator('#layoutPitch')).toHaveValue('90');
   await expect(page.locator('#branchSpread')).toHaveValue('55');
+  await expect(page.locator('#strutSpacing')).toHaveValue('0');
   await moveRange(page, '#layoutYaw', 120);
   await moveRange(page, '#layoutPitch', 35);
   await moveRange(page, '#branchSpread', 70);
+  await moveRange(page, '#strutSpacing', 65);
   await expect(page.locator('#layoutYawValue')).toHaveText('120°');
   await expect(page.locator('#layoutPitchValue')).toHaveText('35°');
   await expect(page.locator('#branchSpreadValue')).toHaveText('70°');
+  await expect(page.locator('#strutSpacingValue')).toHaveText('65%');
   await page.locator('#defaultDetailMode').selectOption('surface');
   await expect.poll(() => page.evaluate(() => JSON.parse(
     localStorage.getItem('graph-4d.presentation-settings.v2') || '{}'
@@ -101,6 +104,7 @@ test('orbital settings centralize tools and persist the CapsLock default detail 
   await expect(page.locator('#layoutYaw')).toHaveValue('120');
   await expect(page.locator('#layoutPitch')).toHaveValue('35');
   await expect(page.locator('#branchSpread')).toHaveValue('70');
+  await expect(page.locator('#strutSpacing')).toHaveValue('65');
 });
 
 test('saved CapsLock default detail mode applies to the initial field', async ({ page }) => {
