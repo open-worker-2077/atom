@@ -68,6 +68,58 @@ test('authoritative id replacement keeps compact node placement through stable l
   assert.deepEqual(placement(after), placement(before));
 });
 
+test('spatial compact packing uses depth to keep a dense slot body from collapsing into one plane', () => {
+  const field = loadClusterField();
+  const nodes = Array.from({ length: 6 }, (_, index) => ({
+    id: `volume-${index}`,
+    radius: 0.82,
+    position: { x: 0, y: 0, z: 0 },
+    __clusterLevel: 0
+  }));
+  const cluster = field.buildScene([
+    { path: 'root', depth: 0, active: true, projectionMode: 'nested', nodes }
+  ], { compact: true, compactPercent: 500, spatial3d: true }).clusters[0];
+
+  assert.ok(
+    new Set(cluster.layoutNodes.map((node) => node.position.z.toFixed(5))).size > 1,
+    'a real volume must place at least one peer at a different depth'
+  );
+  for (let leftIndex = 0; leftIndex < cluster.layoutNodes.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < cluster.layoutNodes.length; rightIndex += 1) {
+      const left = cluster.layoutNodes[leftIndex];
+      const right = cluster.layoutNodes[rightIndex];
+      assert.ok(
+        Math.hypot(
+          right.position.x - left.position.x,
+          right.position.y - left.position.y,
+          right.position.z - left.position.z
+        ) + 0.00001 >= left.__clusterRadius + right.__clusterRadius,
+        `${left.id} and ${right.id} remain exclusive in three dimensions`
+      );
+    }
+  }
+});
+
+test('spatial slot bodies preserve authored depth instead of flattening it', () => {
+  const field = loadClusterField();
+  const cluster = field.buildScene([{
+    path: 'root',
+    depth: 0,
+    active: true,
+    nodes: [
+      { id: 'near', radius: 0.82, position: { x: 0, y: 0, z: -2 } },
+      { id: 'far', radius: 0.82, position: { x: 0, y: 0, z: 2 } }
+    ]
+  }], { spatial3d: true }).clusters[0];
+  const near = cluster.layoutNodes.find((node) => node.id === 'near');
+  const far = cluster.layoutNodes.find((node) => node.id === 'far');
+
+  assert.ok(
+    Math.abs((far.position.z - near.position.z) - 4) < 0.00001,
+    'the authored four-unit depth interval stays four units'
+  );
+});
+
 test('dense cluster nodes repel in the visible plane instead of shrinking into a knot', () => {
   const field = loadClusterField();
   const sourceNodes = Array.from({ length: 12 }, (_, index) => ({

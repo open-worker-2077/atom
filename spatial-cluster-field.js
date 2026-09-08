@@ -70,7 +70,7 @@
     return Number(node.radius) || 0.82;
   }
 
-  function adaptiveContentScale(nodes, nestedCarrierByNodeId, compactness) {
+  function adaptiveContentScale(nodes, nestedCarrierByNodeId, compactness, spatial3d = false) {
     if (!(compactness > 0)) return 1;
     const carriers = primaryCarriers(nodes);
     if (carriers.length < 2) return 1;
@@ -80,7 +80,7 @@
     const naturalAnchorExtent = Math.max(...carriers.map((node) => Math.hypot(
       (Number(node.position && node.position.x) || 0) - origin.x,
       (Number(node.position && node.position.y) || 0) - origin.y,
-      ((Number(node.position && node.position.z) || 0) - origin.z) * 0.22
+      ((Number(node.position && node.position.z) || 0) - origin.z) * (spatial3d ? 1 : 0.22)
     )));
     if (!(naturalAnchorExtent > 0.0001)) return 1;
     const areaRadius = Math.sqrt(radii.reduce((sum, radius) => sum + radius * radius, 0)) * 1.12;
@@ -109,7 +109,8 @@
     const options = optionsInput && typeof optionsInput === "object" ? optionsInput : {};
     const compact = options.compact === true;
     const compactness = compactAmount(options);
-    const contentScale = adaptiveContentScale(nodes, nestedCarrierByNodeId, compactness);
+    const spatial3d = options.spatial3d === true;
+    const contentScale = adaptiveContentScale(nodes, nestedCarrierByNodeId, compactness, spatial3d);
     const shellPadding = minimumShellClearance(options);
     const carriers = primaryCarriers(nodes);
     const nodeCount = Math.max(1, carriers.length);
@@ -124,7 +125,7 @@
             * (node.clusterLocalPositionLocked === true ? 1 : contentScale),
           ((Number(node.position && node.position.y) || 0) - origin.y)
             * (node.clusterLocalPositionLocked === true ? 1 : contentScale),
-          ((Number(node.position && node.position.z) || 0) - origin.z) * 0.22
+          ((Number(node.position && node.position.z) || 0) - origin.z) * (spatial3d ? 1 : 0.22)
             * (node.clusterLocalPositionLocked === true ? 1 : contentScale)
         ) + effectiveCarrierRadius(node, nestedCarrierByNodeId) + shellPadding))
       : mix(1.25, 0.85, compactness);
@@ -161,6 +162,14 @@
     }
     const angle = (hash >>> 0) / 4294967296 * Math.PI * 2;
     return { x: Math.cos(angle), y: Math.sin(angle) };
+  }
+
+  function stableDirection3d(firstId, secondId) {
+    const planar = stableDirection(firstId, secondId);
+    const verticalSeed = stableDirection(`${firstId}:depth`, `${secondId}:depth`).x;
+    const z = clamp(verticalSeed, -0.86, 0.86);
+    const planarScale = Math.sqrt(Math.max(0, 1 - z * z));
+    return { x: planar.x * planarScale, y: planar.y * planarScale, z };
   }
 
   function stableLayoutIdentity(node) {
@@ -200,23 +209,23 @@
     }));
   }
 
-  function recenterCompactLayout(layout, center) {
+  function recenterCompactLayout(layout, center, spatial3d = false) {
     if (!layout.length || layout.some((node) => node.__packingLocked === true)) return;
-    const minimum = { x: Infinity, y: Infinity };
-    const maximum = { x: -Infinity, y: -Infinity };
+    const axes = spatial3d ? ["x", "y", "z"] : ["x", "y"];
+    const minimum = Object.fromEntries(axes.map((axis) => [axis, Infinity]));
+    const maximum = Object.fromEntries(axes.map((axis) => [axis, -Infinity]));
     for (const node of layout) {
-      minimum.x = Math.min(minimum.x, node.position.x - node.__clusterRadius);
-      maximum.x = Math.max(maximum.x, node.position.x + node.__clusterRadius);
-      minimum.y = Math.min(minimum.y, node.position.y - node.__clusterRadius);
-      maximum.y = Math.max(maximum.y, node.position.y + node.__clusterRadius);
+      for (const axis of axes) {
+        minimum[axis] = Math.min(minimum[axis], node.position[axis] - node.__clusterRadius);
+        maximum[axis] = Math.max(maximum[axis], node.position[axis] + node.__clusterRadius);
+      }
     }
-    const offset = {
-      x: (minimum.x + maximum.x) / 2 - center.x,
-      y: (minimum.y + maximum.y) / 2 - center.y
-    };
+    const offset = Object.fromEntries(axes.map((axis) => [
+      axis,
+      (minimum[axis] + maximum[axis]) / 2 - center[axis]
+    ]));
     for (const node of layout) {
-      node.position.x -= offset.x;
-      node.position.y -= offset.y;
+      for (const axis of axes) node.position[axis] -= offset[axis];
     }
   }
 
@@ -232,7 +241,7 @@
         nestedCarrierByNodeId,
         options
       );
-      if (options.compact === true) recenterCompactLayout(layout, center);
+      if (options.compact === true) recenterCompactLayout(layout, center, options.spatial3d === true);
       if (options.compact !== true) break;
       // The measured radius is the maximum of every real node edge plus x.
       // Edges already at x hold the shell; every other direction can shrink.
@@ -295,7 +304,7 @@
     }
   }
 
-  function shellOverlapCount(clusters, gap) {
+  function shellOverlapCount(clusters, gap, spatial3d = false) {
     const clusterByPath = new Map(clusters.map((cluster) => [cluster.path, cluster]));
     const anchors = clusters.filter((cluster) => cluster.projectionMode !== "nested");
     let count = 0;
@@ -306,7 +315,8 @@
         if (nestedDescendantOf(left, right, clusterByPath) || nestedDescendantOf(right, left, clusterByPath)) continue;
         const distance = Math.hypot(
           right.center.x - left.center.x,
-          right.center.y - left.center.y
+          right.center.y - left.center.y,
+          spatial3d ? right.center.z - left.center.z : 0
         );
         if (distance + 0.00001 < left.radius + right.radius + gap) count += 1;
       }
@@ -323,6 +333,7 @@
       clusters.filter((cluster) => nestedDescendantOf(cluster, anchor, clusterByPath))
     ]));
     const gap = repulsionGap(options);
+    const spatial3d = options && options.spatial3d === true;
 
     // This is a hard projection, not a visual zoom: every independent shell is
     // an actual circle collider. Only the two contacted edges move apart; all
@@ -335,16 +346,19 @@
           const right = anchors[rightIndex];
           const dx = right.center.x - left.center.x;
           const dy = right.center.y - left.center.y;
-          const distance = Math.hypot(dx, dy);
+          const dz = spatial3d ? right.center.z - left.center.z : 0;
+          const distance = Math.hypot(dx, dy, dz);
           const minimumDistance = left.radius + right.radius + gap;
           const penetration = minimumDistance - distance;
           if (!(penetration > 0.000001)) continue;
-          const planar = distance > 0.0001
-            ? { x: dx / distance, y: dy / distance, z: 0 }
-            : { ...stableDirection(left.path, right.path), z: 0 };
+          const direction = distance > 0.0001
+            ? { x: dx / distance, y: dy / distance, z: dz / distance }
+            : spatial3d
+              ? stableDirection3d(left.path, right.path)
+              : { ...stableDirection(left.path, right.path), z: 0 };
           const correction = penetration * 0.505;
-          const leftDelta = { x: -planar.x * correction, y: -planar.y * correction, z: -planar.z * correction };
-          const rightDelta = { x: planar.x * correction, y: planar.y * correction, z: planar.z * correction };
+          const leftDelta = { x: -direction.x * correction, y: -direction.y * correction, z: -direction.z * correction };
+          const rightDelta = { x: direction.x * correction, y: direction.y * correction, z: direction.z * correction };
           for (const member of families.get(left.path)) translateCluster(member, leftDelta);
           for (const member of families.get(right.path)) translateCluster(member, rightDelta);
           maximumPenetration = Math.max(maximumPenetration, penetration);
@@ -352,7 +366,7 @@
       }
       if (maximumPenetration <= 0.000001) break;
     }
-    return shellOverlapCount(clusters, gap);
+    return shellOverlapCount(clusters, gap, spatial3d);
   }
 
   function placeCompactDisk(automaticNodes, fixedNodes, center, gap) {
@@ -417,13 +431,83 @@
     }
   }
 
+  function placeCompactVolume(automaticNodes, fixedNodes, center, gap) {
+    const placed = [...fixedNodes];
+    const ordered = [...automaticNodes].sort((left, right) => (
+      right.__clusterRadius - left.__clusterRadius
+      || String(stableLayoutIdentity(left)).localeCompare(String(stableLayoutIdentity(right)))
+    ));
+    const fits = (node, candidate) => placed.every((other) => (
+      Math.hypot(
+        candidate.x - other.position.x,
+        candidate.y - other.position.y,
+        candidate.z - other.position.z
+      ) + 0.00001 >= node.__clusterRadius + other.__clusterRadius + gap
+    ));
+    const extentAt = (node, candidate) => Math.hypot(
+      candidate.x - center.x,
+      candidate.y - center.y,
+      candidate.z - center.z
+    ) + node.__clusterRadius;
+
+    for (const node of ordered) {
+      const candidates = [{ ...center }];
+      for (const anchor of placed) {
+        const tangentDistance = node.__clusterRadius + anchor.__clusterRadius + gap;
+        const seed = stableDirection3d(stableLayoutIdentity(node), stableLayoutIdentity(anchor));
+        for (let step = 0; step < 72; step += 1) {
+          const y = 1 - (step / 71) * 2;
+          const radial = Math.sqrt(Math.max(0, 1 - y * y));
+          const angle = Math.atan2(seed.y, seed.x) + step * Math.PI * (3 - Math.sqrt(5));
+          const direction = {
+            x: Math.cos(angle) * radial,
+            y,
+            z: Math.sin(angle) * radial
+          };
+          candidates.push({
+            x: anchor.position.x + direction.x * tangentDistance,
+            y: anchor.position.y + direction.y * tangentDistance,
+            z: anchor.position.z + direction.z * tangentDistance
+          });
+        }
+      }
+      let best = candidates.filter((candidate) => fits(node, candidate)).sort((left, right) => (
+        extentAt(node, left) - extentAt(node, right)
+        || left.z - right.z
+        || left.y - right.y
+        || left.x - right.x
+      ))[0];
+      if (!best) {
+        const seed = stableDirection3d(stableLayoutIdentity(node), "compact-volume");
+        const stepSize = Math.max(0.04, gap * 0.5, node.__clusterRadius * 0.12);
+        for (let attempt = 1; attempt < 4096; attempt += 1) {
+          const distance = stepSize * Math.cbrt(attempt);
+          const y = 1 - ((attempt * 0.61803398875) % 1) * 2;
+          const radial = Math.sqrt(Math.max(0, 1 - y * y));
+          const angle = Math.atan2(seed.y, seed.x) + attempt * Math.PI * (3 - Math.sqrt(5));
+          const candidate = {
+            x: center.x + Math.cos(angle) * radial * distance,
+            y: center.y + y * distance,
+            z: center.z + Math.sin(angle) * radial * distance
+          };
+          if (!fits(node, candidate)) continue;
+          best = candidate;
+          break;
+        }
+      }
+      if (best) node.position = { ...best };
+      placed.push(node);
+    }
+  }
+
   function transformedNodes(nodes, center, radius, ownerPath, nestedCarrierByNodeId = null, optionsInput = {}) {
     if (!nodes.length) return [];
     const options = optionsInput && typeof optionsInput === "object" ? optionsInput : {};
     const compact = options.compact === true;
+    const spatial3d = options.spatial3d === true;
     const compactness = compactAmount(options);
     const collisionGap = compact ? repulsionGap(options) : 0.18;
-    const contentScale = adaptiveContentScale(nodes, nestedCarrierByNodeId, compactness);
+    const contentScale = adaptiveContentScale(nodes, nestedCarrierByNodeId, compactness, spatial3d);
     const displayScale = clamp(Number(options.displayScale) || 1, 0.001, 1);
     const repackedCarrierIds = compact && nestedCarrierByNodeId
       ? new Set(nestedCarrierByNodeId.keys())
@@ -449,7 +533,8 @@
           y: center.y + ((Number(node.position && node.position.y) || 0) - origin.y) * positionScale * displayScale,
           z: compact
             ? center.z
-            : center.z + ((Number(node.position && node.position.z) || 0) - origin.z) * 0.22 * positionScale * displayScale
+            : center.z + ((Number(node.position && node.position.z) || 0) - origin.z)
+              * (spatial3d ? 1 : 0.22) * positionScale * displayScale
         }
       };
     });
@@ -459,12 +544,13 @@
         .filter((node) => node.__packingLocked !== true)
         .sort((left, right) => String(stableLayoutIdentity(left)).localeCompare(String(stableLayoutIdentity(right))));
       const fixed = positioned.filter((node) => node.__packingLocked === true);
-      placeCompactDisk(automatic, fixed, center, collisionGap * displayScale);
+      if (spatial3d) placeCompactVolume(automatic, fixed, center, collisionGap * displayScale);
+      else placeCompactDisk(automatic, fixed, center, collisionGap * displayScale);
     }
     const anchors = new Map(positioned.map((node) => [node.id, { ...node.position }]));
 
     for (let iteration = 0; iteration < 640; iteration += 1) {
-      const deltas = new Map(positioned.map((node) => [node.id, { x: 0, y: 0 }]));
+      const deltas = new Map(positioned.map((node) => [node.id, { x: 0, y: 0, z: 0 }]));
       let unsettled = false;
       for (let leftIndex = 0; leftIndex < positioned.length; leftIndex += 1) {
         for (let rightIndex = leftIndex + 1; rightIndex < positioned.length; rightIndex += 1) {
@@ -472,10 +558,13 @@
           const right = positioned[rightIndex];
           const dx = right.position.x - left.position.x;
           const dy = right.position.y - left.position.y;
-          const distance = Math.hypot(dx, dy);
+          const dz = spatial3d ? right.position.z - left.position.z : 0;
+          const distance = Math.hypot(dx, dy, dz);
           const direction = distance > 0.0001
-            ? { x: dx / distance, y: dy / distance }
-            : stableDirection(stableLayoutIdentity(left), stableLayoutIdentity(right));
+            ? { x: dx / distance, y: dy / distance, z: dz / distance }
+            : spatial3d
+              ? stableDirection3d(stableLayoutIdentity(left), stableLayoutIdentity(right))
+              : { ...stableDirection(stableLayoutIdentity(left), stableLayoutIdentity(right)), z: 0 };
           const minimumDistance = left.__clusterRadius + right.__clusterRadius + collisionGap;
           // In A mode repulsion begins exactly at x. A wider influence field
           // recreates the large empty gaps that compact packing is meant to remove.
@@ -492,8 +581,10 @@
           const rightForce = rightLocked ? 0 : leftLocked ? force * 2 : force;
           deltas.get(left.id).x -= direction.x * leftForce;
           deltas.get(left.id).y -= direction.y * leftForce;
+          deltas.get(left.id).z -= direction.z * leftForce;
           deltas.get(right.id).x += direction.x * rightForce;
           deltas.get(right.id).y += direction.y * rightForce;
+          deltas.get(right.id).z += direction.z * rightForce;
           unsettled = true;
         }
       }
@@ -503,18 +594,22 @@
         const anchor = anchors.get(node.id);
         delta.x += (anchor.x - node.position.x) * 0.002;
         delta.y += (anchor.y - node.position.y) * 0.002;
-        const length = Math.hypot(delta.x, delta.y);
+        delta.z += (anchor.z - node.position.z) * 0.002;
+        const length = Math.hypot(delta.x, delta.y, delta.z);
         const step = length > 0.48 ? 0.48 / length : 1;
         node.position.x += delta.x * step;
         node.position.y += delta.y * step;
+        if (spatial3d) node.position.z += delta.z * step;
         const localX = node.position.x - center.x;
         const localY = node.position.y - center.y;
-        const localDistance = Math.hypot(localX, localY);
+        const localZ = spatial3d ? node.position.z - center.z : 0;
+        const localDistance = Math.hypot(localX, localY, localZ);
         const boundary = Math.max(0.12, radius - node.__clusterRadius - minimumShellClearance(options));
         if (localDistance > boundary) {
           const scale = boundary / localDistance;
           node.position.x = center.x + localX * scale;
           node.position.y = center.y + localY * scale;
+          if (spatial3d) node.position.z = center.z + localZ * scale;
         }
       }
       if (!unsettled) break;
@@ -532,23 +627,28 @@
           const right = positioned[rightIndex];
           const dx = right.position.x - left.position.x;
           const dy = right.position.y - left.position.y;
-          const distance = Math.hypot(dx, dy);
+          const dz = spatial3d ? right.position.z - left.position.z : 0;
+          const distance = Math.hypot(dx, dy, dz);
           const minimumDistance = left.__clusterRadius + right.__clusterRadius + hardGap;
           const penetration = minimumDistance - distance;
           if (!(penetration > 0.000001)) continue;
           const direction = distance > 0.0001
-            ? { x: dx / distance, y: dy / distance }
-            : stableDirection(stableLayoutIdentity(left), stableLayoutIdentity(right));
+            ? { x: dx / distance, y: dy / distance, z: dz / distance }
+            : spatial3d
+              ? stableDirection3d(stableLayoutIdentity(left), stableLayoutIdentity(right))
+              : { ...stableDirection(stableLayoutIdentity(left), stableLayoutIdentity(right)), z: 0 };
           const leftLocked = left.__packingLocked === true;
           const rightLocked = right.__packingLocked === true;
           const correction = penetration * (leftLocked || rightLocked ? 1.01 : 0.505);
           if (!leftLocked) {
             left.position.x -= direction.x * correction;
             left.position.y -= direction.y * correction;
+            if (spatial3d) left.position.z -= direction.z * correction;
           }
           if (!rightLocked) {
             right.position.x += direction.x * correction;
             right.position.y += direction.y * correction;
+            if (spatial3d) right.position.z += direction.z * correction;
           }
           maximumPenetration = Math.max(maximumPenetration, penetration);
         }
@@ -557,12 +657,14 @@
         if (node.__packingLocked === true) continue;
         const localX = node.position.x - center.x;
         const localY = node.position.y - center.y;
-        const localDistance = Math.hypot(localX, localY);
+        const localZ = spatial3d ? node.position.z - center.z : 0;
+        const localDistance = Math.hypot(localX, localY, localZ);
         const boundary = Math.max(0.12, radius - node.__clusterRadius - minimumShellClearance(options));
         if (localDistance > boundary) {
           const scale = boundary / localDistance;
           node.position.x = center.x + localX * scale;
           node.position.y = center.y + localY * scale;
+          if (spatial3d) node.position.z = center.z + localZ * scale;
         }
       }
       if (maximumPenetration <= 0.000001) break;
@@ -572,7 +674,8 @@
       positioned.slice(leftIndex + 1).some((right) => (
         Math.hypot(
           right.position.x - left.position.x,
-          right.position.y - left.position.y
+          right.position.y - left.position.y,
+          spatial3d ? right.position.z - left.position.z : 0
         ) + 0.00001 < left.__clusterRadius + right.__clusterRadius + hardGap
       ))
     ));
@@ -584,30 +687,33 @@
       const cell = maximumRadius * 2 + hardGap;
       const placed = [];
       const movable = [];
-      const fitsPlaced = (node, x, y) => placed.every((other) => (
-        Math.hypot(x - other.position.x, y - other.position.y)
+      const fitsPlaced = (node, x, y, z) => placed.every((other) => (
+        Math.hypot(x - other.position.x, y - other.position.y, spatial3d ? z - other.position.z : 0)
           + 0.00001 >= node.__clusterRadius + other.__clusterRadius + hardGap
       ));
       for (const node of ordered) {
-        if (node.__packingLocked === true && fitsPlaced(node, node.position.x, node.position.y)) {
+        if (node.__packingLocked === true && fitsPlaced(node, node.position.x, node.position.y, node.position.z)) {
           placed.push(node);
         } else {
           movable.push(node);
         }
       }
       for (const node of movable) {
-        if (!fitsPlaced(node, node.position.x, node.position.y)) {
-          const baseDirection = stableDirection(stableLayoutIdentity(node), ownerPath);
+        if (!fitsPlaced(node, node.position.x, node.position.y, node.position.z)) {
+          const baseDirection = spatial3d
+            ? stableDirection3d(stableLayoutIdentity(node), ownerPath)
+            : { ...stableDirection(stableLayoutIdentity(node), ownerPath), z: 0 };
           const baseAngle = Math.atan2(baseDirection.y, baseDirection.x);
           for (let attempt = 0; attempt < 4096; attempt += 1) {
             const distance = cell * 0.58 * Math.sqrt(attempt);
             const angle = baseAngle + attempt * Math.PI * (3 - Math.sqrt(5));
             const x = center.x + Math.cos(angle) * distance;
             const y = center.y + Math.sin(angle) * distance;
-            if (!fitsPlaced(node, x, y)) continue;
+            const z = spatial3d ? center.z + baseDirection.z * distance : center.z;
+            if (!fitsPlaced(node, x, y, z)) continue;
             node.position.x = x;
             node.position.y = y;
-            node.position.z = center.z;
+            node.position.z = z;
             break;
           }
         }
@@ -621,6 +727,7 @@
     const routeDomains = Array.isArray(routeDomainsInput) ? routeDomainsInput : [];
     const options = optionsInput && typeof optionsInput === "object" ? optionsInput : {};
     const compact = options.compact === true;
+    const spatial3d = options.spatial3d === true;
     const compactness = compactAmount(options);
     const peripheralDepthShrinkPercent = clamp(
       Number(options.peripheralDepthShrinkPercent) || 0,
@@ -657,7 +764,8 @@
         sourceNodes,
         radius: clusterRadius(sourceNodes, null, {
           compact,
-          compactPercent: options.compactPercent
+          compactPercent: options.compactPercent,
+          spatial3d
         }),
         nestedCarrierByNodeId: new Map(),
         scaleReferenceNestedCarrierByNodeId: new Map(),
@@ -682,6 +790,7 @@
       const layoutOptions = {
         compact,
         compactPercent: options.compactPercent,
+        spatial3d,
         displayScale: 1
       };
       const contracted = contractShellToLocalEdges(
@@ -700,6 +809,7 @@
       const scaleReferenceOptions = {
         compact,
         compactPercent: 0,
+        spatial3d,
         displayScale: 1
       };
       item.scaleReferenceRadius = clusterRadius(
@@ -903,7 +1013,8 @@
     }
     const shellOverlapCountAfterRepulsion = repelIndependentShells(clusters, {
       compact,
-      compactPercent: options.compactPercent
+      compactPercent: options.compactPercent,
+      spatial3d
     });
     clusters.sort((left, right) => left.originalIndex - right.originalIndex);
 

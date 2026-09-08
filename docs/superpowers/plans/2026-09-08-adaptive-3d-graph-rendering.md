@@ -46,10 +46,10 @@
 - Consumes: local node spheres, nested slot carriers and adjustable compactness/clearance.
 - Produces: stable non-overlapping 3D node positions and the smallest spherical shell that contains every real child edge plus clearance.
 
-- [ ] **Step 1: Write failing tests** proving an empty group keeps the minimum radius, a populated group contracts to measured child edges, two equal children can occupy different z coordinates, and nested child volume expands only its ancestor chain.
-- [ ] **Step 2: Run** `node --test tests/spatial-cluster-field.test.js` and confirm the new 3D cases fail.
-- [ ] **Step 3: Implement** volumetric collision separation and packing, remove the existing z compression, and measure shell radius from full x/y/z distance.
-- [ ] **Step 4: Run** `node --test tests/spatial-cluster-field.test.js` and confirm green.
+- [x] **Step 1: Write failing tests** proving dense equal children use distinct z coordinates and authored z intervals remain intact; existing tests retain the empty minimum, measured contraction and ancestor-containment contracts.
+- [x] **Step 2: Run** `node --test --test-isolation=none tests/spatial-cluster-field.test.js`; both new 3D cases failed before implementation.
+- [x] **Step 3: Implement** deterministic volumetric packing and full x/y/z collision separation, remove z compression only in explicit 3D mode, and keep the legacy planar path unchanged.
+- [x] **Step 4: Run** `node --test --test-isolation=none tests/spatial-cluster-field.test.js`; 44/44 passed.
 
 ### Task 3: Projection settings and shell states
 
