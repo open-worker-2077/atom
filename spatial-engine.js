@@ -903,9 +903,12 @@
 
   function semanticParentPathForSpatialPath(path) {
     if (path === "root") return "";
-    const parent = (workspace.exportKnowledge().nodes || []).find((candidate) => (
+    const separator = path.lastIndexOf("/");
+    if (separator <= 0) return null;
+    const ownerPath = path.slice(0, separator);
+    const parent = domainNodesForPath(ownerPath).find((candidate) => (
       candidate
-      && childPathFor(candidate, candidate.path || "root") === path
+      && childPathFor(candidate, ownerPath) === path
     ));
     return typeof parent?.atomPath === "string" ? parent.atomPath.trim() : null;
   }

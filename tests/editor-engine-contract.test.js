@@ -342,8 +342,9 @@ test('Web node creation carries its semantic parent coordinate into the atomic T
   const commit = functionSource('commitWorkspaceEdit');
   const resolveParent = functionSource('semanticParentPathForSpatialPath');
 
-  assert.match(resolveParent, /workspace\.exportKnowledge\(\)/);
+  assert.match(resolveParent, /domainNodesForPath\(/);
   assert.match(resolveParent, /parent\?\.atomPath/);
+  assert.doesNotMatch(resolveParent, /workspace\.exportKnowledge\(\)/);
   assert.match(commit, /operation\.kind\s*===\s*["']node-create["']/);
   assert.match(commit, /const parentAtomPath\s*=\s*semanticParentPathForSpatialPath\(operation\.path\)/);
   assert.match(commit, /operation\s*=\s*\{\s*\.\.\.operation,\s*parentAtomPath\s*\}/);
