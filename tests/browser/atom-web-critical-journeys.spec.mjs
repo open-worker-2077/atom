@@ -1149,7 +1149,7 @@ test('vertical shortcuts stay inside the deepest Graph shell under the crosshair
   expect(pointerPosition.y).toBeCloseTo(parentShell.clientY - canvasBox.y, 4);
 });
 
-test('a sustained right press on blank inside the current immersive shell keeps that shell', async ({ page }) => {
+test('a sustained right press on blank inside the current immersive shell returns before release', async ({ page }) => {
   test.setTimeout(90_000);
   const { parentPath } = await openAModeFixture(page);
   await holdRightTarget(page, '父团');
@@ -1161,10 +1161,10 @@ test('a sustained right press on blank inside the current immersive shell keeps 
   await page.mouse.move(shell.clientX + shell.radius * 0.72, shell.clientY);
   await page.mouse.down({ button: 'right' });
   await page.waitForTimeout(440);
-  expect(await page.evaluate(() => window.spatialLab.state().path)).toBe(parentPath);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path), { timeout: 15_000 }).toBe('root');
   await page.mouse.up({ button: 'right' });
   await page.waitForTimeout(450);
-  expect(await page.evaluate(() => window.spatialLab.state().path)).toBe(parentPath);
+  expect(await page.evaluate(() => window.spatialLab.state().path)).toBe('root');
 });
 
 test('a sustained right press outside the current immersive shell returns before release exactly once', async ({ page }) => {
