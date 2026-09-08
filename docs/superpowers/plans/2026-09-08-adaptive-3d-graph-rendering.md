@@ -31,10 +31,10 @@
 - Consumes: layout entries, same-level relationship pairs and `{ layoutYawDegrees, layoutPitchDegrees, branchSpreadDegrees }`.
 - Produces: `relaxRelationshipLayout()` positions with a stable three-dimensional main axis, radial branches and cycle-preserving closure behavior.
 
-- [ ] **Step 1: Write failing tests** for a directed chain rising along the default axis, a branch receiving nonzero depth, yaw/pitch rotation, and a final closing edge preserving the open-chain coordinates.
-- [ ] **Step 2: Run** `node --test tests/spatial-visual-model.test.js` and confirm only the new contracts fail.
-- [ ] **Step 3: Implement** deterministic backbone scoring from current-level strut degree and continuity, orient source→target on the rotated main axis, place lower-weight branches around that axis, and exclude the final cycle-closing edge from seeding while retaining it in link forces and drawing.
-- [ ] **Step 4: Run** `node --test tests/spatial-visual-model.test.js` and confirm green.
+- [x] **Step 1: Write failing tests** for a directed chain rising along the default axis, a branch receiving nonzero depth, yaw/pitch rotation, and a final closing edge preserving the open-chain coordinates.
+- [x] **Step 2: Run** `node --test --test-isolation=none tests/spatial-visual-model.test.js`; the new orientation and closure contracts failed before implementation.
+- [x] **Step 3: Implement** deterministic directed backbone placement, rotated main-axis orientation, radial branch spread, and closure-edge exclusion from layout forces while retaining the real relationship for drawing.
+- [x] **Step 4: Run** `node --test --test-isolation=none tests/spatial-visual-model.test.js`; 50/50 passed.
 
 ### Task 2: Slot-driven adaptive 3D volumes
 

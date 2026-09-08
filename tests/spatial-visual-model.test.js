@@ -961,3 +961,96 @@ test('clears all snapshot-controlled flags before exact replay', () => {
     assert.equal(node.surfaceOpenedAt, 0);
   }
 });
+
+test('spatial 3d layout raises a directed main chain from source to target', () => {
+  const entries = ['foot', 'body', 'head'].map((id) => ({
+    id,
+    position: { x: 0, y: 0, z: 0 },
+    radius: 0.4
+  }));
+  const links = [
+    { fromId: 'foot', toId: 'body', kind: 'association' },
+    { fromId: 'body', toId: 'head', kind: 'association' }
+  ];
+  const layout = SpatialVisualModel.relaxRelationshipLayout(entries, links, {
+    spatial3d: true,
+    layoutYawDegrees: 0,
+    layoutPitchDegrees: 90,
+    branchSpreadDegrees: 55
+  });
+
+  assert.ok(layout.foot.y < layout.body.y);
+  assert.ok(layout.body.y < layout.head.y);
+  assert.ok(Math.abs(layout.head.x - layout.foot.x) < 0.35);
+});
+
+test('spatial 3d branch spread controls distance from the main axis', () => {
+  const entries = ['foot', 'body', 'head', 'arm'].map((id) => ({
+    id,
+    position: { x: 0, y: 0, z: 0 },
+    radius: 0.35
+  }));
+  const links = [
+    { fromId: 'foot', toId: 'body', kind: 'association' },
+    { fromId: 'body', toId: 'head', kind: 'association' },
+    { fromId: 'body', toId: 'arm', kind: 'association' }
+  ];
+  const narrow = SpatialVisualModel.relaxRelationshipLayout(entries, links, {
+    spatial3d: true,
+    layoutPitchDegrees: 90,
+    branchSpreadDegrees: 15
+  });
+  const wide = SpatialVisualModel.relaxRelationshipLayout(entries, links, {
+    spatial3d: true,
+    layoutPitchDegrees: 90,
+    branchSpreadDegrees: 80
+  });
+  const radial = (layout) => Math.hypot(
+    layout.arm.x - layout.body.x,
+    layout.arm.z - layout.body.z
+  );
+
+  assert.ok(radial(wide) > radial(narrow) * 1.5);
+});
+
+test('layout yaw and pitch rotate the derived graph without changing facts', () => {
+  const entries = ['a', 'b'].map((id) => ({
+    id,
+    position: { x: 0, y: 0, z: 0 },
+    radius: 0.4
+  }));
+  const links = [{ fromId: 'a', toId: 'b', kind: 'association' }];
+  const vertical = SpatialVisualModel.relaxRelationshipLayout(entries, links, {
+    spatial3d: true,
+    layoutPitchDegrees: 90
+  });
+  const horizontal = SpatialVisualModel.relaxRelationshipLayout(entries, links, {
+    spatial3d: true,
+    layoutYawDegrees: 90,
+    layoutPitchDegrees: 0
+  });
+
+  assert.ok(Math.abs(vertical.b.y - vertical.a.y) > Math.abs(vertical.b.x - vertical.a.x));
+  assert.ok(Math.abs(horizontal.b.x - horizontal.a.x) > Math.abs(horizontal.b.y - horizontal.a.y));
+});
+
+test('a final closing strut overlays the last open-chain layout', () => {
+  const entries = ['a', 'b', 'c', 'd'].map((id) => ({
+    id,
+    position: { x: 0, y: 0, z: 0 },
+    radius: 0.35
+  }));
+  const open = [
+    { fromId: 'a', toId: 'b', kind: 'association' },
+    { fromId: 'b', toId: 'c', kind: 'association' },
+    { fromId: 'c', toId: 'd', kind: 'association' }
+  ];
+  const options = { spatial3d: true, layoutPitchDegrees: 90, preserveClosingStrut: true };
+  const before = SpatialVisualModel.relaxRelationshipLayout(entries, open, options);
+  const after = SpatialVisualModel.relaxRelationshipLayout(entries, [
+    ...open,
+    { fromId: 'd', toId: 'a', kind: 'association' }
+  ], options);
+
+  assert.deepEqual(after, before);
+});

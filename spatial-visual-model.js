@@ -519,6 +519,16 @@
     var maxStep = Number.isFinite(settings.maxStep) ? settings.maxStep : 0.42;
     var maxFieldRadius = Number.isFinite(settings.maxFieldRadius) ? settings.maxFieldRadius : 10.8;
     var planarRepulsion = settings.planarRepulsion === true;
+    var spatial3d = settings.spatial3d === true;
+    var layoutYaw = Number.isFinite(Number(settings.layoutYawDegrees))
+      ? Number(settings.layoutYawDegrees) * Math.PI / 180
+      : 0;
+    var layoutPitch = Number.isFinite(Number(settings.layoutPitchDegrees))
+      ? Number(settings.layoutPitchDegrees) * Math.PI / 180
+      : Math.PI / 2;
+    var branchSpread = Number.isFinite(Number(settings.branchSpreadDegrees))
+      ? Math.max(0, Math.min(180, Number(settings.branchSpreadDegrees))) * Math.PI / 180
+      : 55 * Math.PI / 180;
     var sourceEntries = Array.isArray(entries) ? entries.filter(function (entry) {
       return isNode(entry)
         && typeof entry.id === 'string'
@@ -648,10 +658,192 @@
         && byId.has(relationship.toId)
         && relationship.fromId !== relationship.toId;
     }) : [];
+    var activeLinks = links;
+    if (spatial3d && settings.preserveClosingStrut === true) {
+      var closureParent = new Map();
+      var closureRoot = function (id) {
+        var root = closureParent.has(id) ? closureParent.get(id) : id;
+        while (closureParent.has(root) && closureParent.get(root) !== root) root = closureParent.get(root);
+        closureParent.set(id, root);
+        return root;
+      };
+      activeLinks = links.filter(function (link) {
+        if (link.kind === 'hierarchy') return true;
+        var fromRoot = closureRoot(link.fromId);
+        var toRoot = closureRoot(link.toId);
+        if (fromRoot === toRoot) return false;
+        closureParent.set(fromRoot, toRoot);
+        return true;
+      });
+    }
     var ids = sourceEntries.map(function (entry) { return entry.id; });
     var topologySeeded = new Set();
 
+    function spatialMainAxis() {
+      var cosPitch = Math.cos(layoutPitch);
+      return {
+        x: cosPitch * Math.sin(layoutYaw),
+        y: Math.sin(layoutPitch),
+        z: cosPitch * Math.cos(layoutYaw)
+      };
+    }
+
+    function seedSpatialTopologies() {
+      var mainAxis = spatialMainAxis();
+      var reference = Math.abs(mainAxis.y) < 0.86
+        ? { x: 0, y: 1, z: 0 }
+        : { x: 0, y: 0, z: 1 };
+      var radialURaw = {
+        x: mainAxis.y * reference.z - mainAxis.z * reference.y,
+        y: mainAxis.z * reference.x - mainAxis.x * reference.z,
+        z: mainAxis.x * reference.y - mainAxis.y * reference.x
+      };
+      var radialULength = Math.max(0.0001, Math.hypot(radialURaw.x, radialURaw.y, radialURaw.z));
+      var radialU = {
+        x: radialURaw.x / radialULength,
+        y: radialURaw.y / radialULength,
+        z: radialURaw.z / radialULength
+      };
+      var radialV = {
+        x: mainAxis.y * radialU.z - mainAxis.z * radialU.y,
+        y: mainAxis.z * radialU.x - mainAxis.x * radialU.z,
+        z: mainAxis.x * radialU.y - mainAxis.y * radialU.x
+      };
+      var groups = new Map();
+      ids.forEach(function (id) {
+        var groupKey = byId.get(id).parentId || '__root__';
+        if (!groups.has(groupKey)) groups.set(groupKey, []);
+        groups.get(groupKey).push(id);
+      });
+
+      groups.forEach(function (groupIds, groupKey) {
+        var groupSet = new Set(groupIds);
+        var groupLinks = activeLinks.filter(function (link) {
+          return link.kind !== 'hierarchy'
+            && groupSet.has(link.fromId)
+            && groupSet.has(link.toId);
+        });
+        if (!groupLinks.length) return;
+        var adjacency = new Map(groupIds.map(function (id) { return [id, []]; }));
+        var outgoing = new Map(groupIds.map(function (id) { return [id, []]; }));
+        var indegree = new Map(groupIds.map(function (id) { return [id, 0]; }));
+        groupLinks.forEach(function (link) {
+          adjacency.get(link.fromId).push(link.toId);
+          adjacency.get(link.toId).push(link.fromId);
+          outgoing.get(link.fromId).push(link.toId);
+          indegree.set(link.toId, indegree.get(link.toId) + 1);
+        });
+        var remaining = new Set(groupIds);
+        while (remaining.size) {
+          var componentStart = Array.from(remaining)[0];
+          var component = [];
+          var queue = [componentStart];
+          remaining.delete(componentStart);
+          while (queue.length) {
+            var current = queue.shift();
+            component.push(current);
+            adjacency.get(current).forEach(function (neighbor) {
+              if (!remaining.has(neighbor)) return;
+              remaining.delete(neighbor);
+              queue.push(neighbor);
+            });
+          }
+          var componentSet = new Set(component);
+          var sources = component.filter(function (id) { return indegree.get(id) === 0; });
+          if (!sources.length) sources = [component[0]];
+          var longestDirectedPath = function (id, visited) {
+            var nextVisited = new Set(visited);
+            nextVisited.add(id);
+            var best = [id];
+            outgoing.get(id).forEach(function (nextId) {
+              if (!componentSet.has(nextId) || nextVisited.has(nextId)) return;
+              var candidate = [id].concat(longestDirectedPath(nextId, nextVisited));
+              if (candidate.length > best.length) best = candidate;
+            });
+            return best;
+          };
+          var mainPath = [component[0]];
+          sources.forEach(function (sourceId) {
+            var candidate = longestDirectedPath(sourceId, new Set());
+            var candidateWeight = candidate.reduce(function (sum, id) {
+              return sum + adjacency.get(id).length;
+            }, 0);
+            var mainWeight = mainPath.reduce(function (sum, id) {
+              return sum + adjacency.get(id).length;
+            }, 0);
+            if (candidate.length > mainPath.length
+              || (candidate.length === mainPath.length && candidateWeight > mainWeight)) {
+              mainPath = candidate;
+            }
+          });
+          var centre = groupKey !== '__root__' && positions[groupKey]
+            ? positions[groupKey]
+            : component.reduce(function (sum, id) {
+                sum.x += anchors[id].x / component.length;
+                sum.y += anchors[id].y / component.length;
+                sum.z += anchors[id].z / component.length;
+                return sum;
+              }, { x: 0, y: 0, z: 0 });
+          var step = 2.1;
+          for (var pathIndex = 1; pathIndex < mainPath.length; pathIndex += 1) {
+            step = Math.max(step, (byId.get(mainPath[pathIndex - 1]).radius
+              + byId.get(mainPath[pathIndex]).radius) * 1.55 + baseGap);
+          }
+          var halfSpan = step * Math.max(0, mainPath.length - 1) / 2;
+          mainPath.forEach(function (id, index) {
+            if (byId.get(id).fixed) return;
+            var offset = index * step - halfSpan;
+            positions[id] = {
+              x: centre.x + mainAxis.x * offset,
+              y: centre.y + mainAxis.y * offset,
+              z: centre.z + mainAxis.z * offset
+            };
+            anchors[id] = { x: positions[id].x, y: positions[id].y, z: positions[id].z };
+            topologySeeded.add(id);
+          });
+          var placed = new Set(mainPath);
+          var placeBranch = function (parentId, id, depth, ordinal) {
+            if (placed.has(id)) return;
+            placed.add(id);
+            var seed = deterministicDirection(parentId, id);
+            var angle = Math.atan2(seed.z, seed.x) + ordinal * 1.618;
+            var radial = {
+              x: radialU.x * Math.cos(angle) + radialV.x * Math.sin(angle),
+              y: radialU.y * Math.cos(angle) + radialV.y * Math.sin(angle),
+              z: radialU.z * Math.cos(angle) + radialV.z * Math.sin(angle)
+            };
+            var direction = {
+              x: mainAxis.x * Math.cos(branchSpread) + radial.x * Math.sin(branchSpread),
+              y: mainAxis.y * Math.cos(branchSpread) + radial.y * Math.sin(branchSpread),
+              z: mainAxis.z * Math.cos(branchSpread) + radial.z * Math.sin(branchSpread)
+            };
+            var parentPoint = positions[parentId];
+            var distance = step * (1 + Math.min(3, depth) * 0.08);
+            positions[id] = {
+              x: parentPoint.x + direction.x * distance,
+              y: parentPoint.y + direction.y * distance,
+              z: parentPoint.z + direction.z * distance
+            };
+            anchors[id] = { x: positions[id].x, y: positions[id].y, z: positions[id].z };
+            topologySeeded.add(id);
+            adjacency.get(id).forEach(function (childId, childIndex) {
+              if (!placed.has(childId)) placeBranch(id, childId, depth + 1, childIndex);
+            });
+          };
+          mainPath.forEach(function (id, mainIndex) {
+            adjacency.get(id).forEach(function (neighbor, neighborIndex) {
+              if (!placed.has(neighbor)) placeBranch(id, neighbor, 0, mainIndex + neighborIndex);
+            });
+          });
+        }
+      });
+    }
+
     function seedSimpleTopologies() {
+      if (spatial3d) {
+        seedSpatialTopologies();
+        return;
+      }
       var groups = new Map();
       ids.forEach(function (id) {
         var entry = byId.get(id);
@@ -662,7 +854,7 @@
 
       groups.forEach(function (groupIds, groupKey) {
         var groupSet = new Set(groupIds);
-        var associationLinks = links.filter(function (relationship) {
+        var associationLinks = activeLinks.filter(function (relationship) {
           return relationship.kind !== 'hierarchy'
             && groupSet.has(relationship.fromId)
             && groupSet.has(relationship.toId);
@@ -992,7 +1184,7 @@
         }
       }
 
-      links.forEach(function (relationship) {
+      activeLinks.forEach(function (relationship) {
         var fromEntry = byId.get(relationship.fromId);
         var toEntry = byId.get(relationship.toId);
         if (
@@ -1013,7 +1205,7 @@
         addDelta(deltas, relationship.toId, separation.direction, -pull);
       });
 
-      links.forEach(function (relationship) {
+      activeLinks.forEach(function (relationship) {
         if (relationship.kind === 'hierarchy') return;
         var fromEntry = byId.get(relationship.fromId);
         var toEntry = byId.get(relationship.toId);
@@ -1068,10 +1260,10 @@
         });
       });
 
-      for (var firstLinkIndex = 0; firstLinkIndex < links.length; firstLinkIndex += 1) {
-        for (var secondLinkIndex = firstLinkIndex + 1; secondLinkIndex < links.length; secondLinkIndex += 1) {
-          var firstLink = links[firstLinkIndex];
-          var secondLink = links[secondLinkIndex];
+      for (var firstLinkIndex = 0; firstLinkIndex < activeLinks.length; firstLinkIndex += 1) {
+        for (var secondLinkIndex = firstLinkIndex + 1; secondLinkIndex < activeLinks.length; secondLinkIndex += 1) {
+          var firstLink = activeLinks[firstLinkIndex];
+          var secondLink = activeLinks[secondLinkIndex];
           var firstLinkGroup = linkForceGroup(firstLink);
           if (!firstLinkGroup || firstLinkGroup !== linkForceGroup(secondLink)) continue;
           if (!linksCross(firstLink, secondLink)) continue;
@@ -1131,10 +1323,10 @@
     if (planarRepulsion) {
       for (var crossingPass = 0; crossingPass < 48; crossingPass += 1) {
         var crossingAdjusted = false;
-        for (var crossingFirstIndex = 0; crossingFirstIndex < links.length; crossingFirstIndex += 1) {
-          for (var crossingSecondIndex = crossingFirstIndex + 1; crossingSecondIndex < links.length; crossingSecondIndex += 1) {
-            var crossingFirst = links[crossingFirstIndex];
-            var crossingSecond = links[crossingSecondIndex];
+        for (var crossingFirstIndex = 0; crossingFirstIndex < activeLinks.length; crossingFirstIndex += 1) {
+          for (var crossingSecondIndex = crossingFirstIndex + 1; crossingSecondIndex < activeLinks.length; crossingSecondIndex += 1) {
+            var crossingFirst = activeLinks[crossingFirstIndex];
+            var crossingSecond = activeLinks[crossingSecondIndex];
             var crossingGroup = linkForceGroup(crossingFirst);
             if (!crossingGroup || crossingGroup !== linkForceGroup(crossingSecond)) continue;
             if (!linksCross(crossingFirst, crossingSecond)) continue;
