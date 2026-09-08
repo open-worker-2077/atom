@@ -19,7 +19,10 @@ function validatePatch(patch, fields) {
 
 export function createPresentationSettingsService({ repository, normalizeSettings }) {
   const fields = new Set(Object.keys(normalizeSettings({})));
-  const legacyOmittedField = 'secondaryNavigationDelayMs';
+  const legacyOmittedFieldSets = [
+    new Set(['layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees']),
+    new Set(['secondaryNavigationDelayMs', 'layoutYawDegrees', 'layoutPitchDegrees', 'branchSpreadDegrees'])
+  ];
   async function read() {
     let document;
     try { document = await repository.read(); }
@@ -31,9 +34,11 @@ export function createPresentationSettingsService({ repository, normalizeSetting
     const savedFields = own(settings) ? Object.keys(settings) : [];
     const isCurrentFieldSet = savedFields.length === fields.size
       && savedFields.every(field => fields.has(field));
-    const isPriorFieldSet = savedFields.length === fields.size - 1
-      && !Object.hasOwn(settings, legacyOmittedField)
-      && savedFields.every(field => fields.has(field));
+    const isPriorFieldSet = legacyOmittedFieldSets.some((omitted) => (
+      savedFields.length === fields.size - omitted.size
+      && savedFields.every(field => fields.has(field) && !omitted.has(field))
+      && [...omitted].every(field => !Object.hasOwn(settings, field))
+    ));
     if (document.revision < 1 || !own(document.view) || Object.keys(document.view).length !== 1
       || !own(settings) || (!isCurrentFieldSet && !isPriorFieldSet)) {
       throw problem('INVALID_PRESENTATION_SETTINGS_DOCUMENT', 'Expected a saved presentation settings document');

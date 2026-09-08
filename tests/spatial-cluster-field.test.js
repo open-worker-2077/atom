@@ -120,6 +120,26 @@ test('spatial slot bodies preserve authored depth instead of flattening it', () 
   );
 });
 
+test('spatial compact shells preserve an already-derived strut skeleton', () => {
+  const field = loadClusterField();
+  const cluster = field.buildScene([{
+    path: 'root',
+    depth: 0,
+    active: true,
+    projectionMode: 'nested',
+    nodes: [
+      { id: 'source', radius: 0.4, position: { x: 0, y: -3, z: 0 } },
+      { id: 'middle', radius: 0.4, position: { x: 0, y: 0, z: 0 } },
+      { id: 'target', radius: 0.4, position: { x: 0, y: 3, z: 0 } }
+    ]
+  }], { compact: true, compactPercent: 50, spatial3d: true }).clusters[0];
+  const byId = Object.fromEntries(cluster.layoutNodes.map((node) => [node.id, node.position]));
+
+  assert.ok(byId.source.y < byId.middle.y);
+  assert.ok(byId.middle.y < byId.target.y);
+  assert.ok(Math.abs(byId.target.y - byId.source.y) > 1.5);
+});
+
 test('dense cluster nodes repel in the visible plane instead of shrinking into a knot', () => {
   const field = loadClusterField();
   const sourceNodes = Array.from({ length: 12 }, (_, index) => ({

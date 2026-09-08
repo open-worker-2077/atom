@@ -102,6 +102,12 @@
     floatingDetailBackdropOpacityValue: document.getElementById("floatingDetailBackdropOpacityValue"),
     nestedCompactness: document.getElementById("nestedCompactness"),
     nestedCompactnessValue: document.getElementById("nestedCompactnessValue"),
+    layoutYaw: document.getElementById("layoutYaw"),
+    layoutYawValue: document.getElementById("layoutYawValue"),
+    layoutPitch: document.getElementById("layoutPitch"),
+    layoutPitchValue: document.getElementById("layoutPitchValue"),
+    branchSpread: document.getElementById("branchSpread"),
+    branchSpreadValue: document.getElementById("branchSpreadValue"),
     peripheralDepthShrink: document.getElementById("peripheralDepthShrink"),
     peripheralDepthShrinkValue: document.getElementById("peripheralDepthShrinkValue"),
     nestedTunnelStrength: document.getElementById("nestedTunnelStrength"),
@@ -1336,7 +1342,12 @@
         anchorStrength: 0.006,
         maxStep: 0.56,
         maxFieldRadius: 16.8,
-        planarRepulsion: true
+        planarRepulsion: false,
+        spatial3d: true,
+        layoutYawDegrees: state.demo.settings.layoutYawDegrees,
+        layoutPitchDegrees: state.demo.settings.layoutPitchDegrees,
+        branchSpreadDegrees: state.demo.settings.branchSpreadDegrees,
+        preserveClosingStrut: true
       }
     );
     visibleCandidates.forEach((candidate) => {
@@ -1411,7 +1422,12 @@
             anchorStrength: 0.004,
             maxStep: 0.62,
             maxFieldRadius: 64,
-            planarRepulsion: true
+            planarRepulsion: false,
+            spatial3d: true,
+            layoutYawDegrees: state.demo.settings.layoutYawDegrees,
+            layoutPitchDegrees: state.demo.settings.layoutPitchDegrees,
+            branchSpreadDegrees: state.demo.settings.branchSpreadDegrees,
+            preserveClosingStrut: true
           }
         );
         visible.forEach((node) => {
@@ -1431,6 +1447,7 @@
       maxDetailedClusters: 9,
       compact: routeDomains.some((domain) => domain.projectionMode === "nested"),
       compactPercent: state.demo.settings.nestedCompactnessPercent * 10,
+      spatial3d: true,
       peripheralDepthShrinkPercent: state.demo.settings.peripheralDepthShrinkPercent
     });
     state.clusterScene = scene;
@@ -1904,7 +1921,7 @@
         magnifierNode: cluster.detailNode || null,
         detail: clusterDetailText(cluster)
       });
-      drawClusterTunnelInterior(cluster, screen);
+      if (!cluster.active) drawClusterTunnelInterior(cluster, screen);
       const nestedTunnelStrength = state.demo.settings.nestedTunnelPercent / 100;
       const interiorStrength = cluster.projectionMode === "nested"
         ? state.demo.settings.nestedTunnelInteriorPercent / 100
@@ -1917,7 +1934,7 @@
         screen.y,
         screen.radius * 1.14
       );
-      const coreAlpha = (cluster.active ? 0.034 : 0.022) * interiorStrength;
+      const coreAlpha = cluster.active ? 0 : 0.022 * interiorStrength;
       glow.addColorStop(0, `rgb(112 192 255 / ${coreAlpha * 0.36})`);
       glow.addColorStop(0.58, `rgb(74 153 224 / ${coreAlpha})`);
       glow.addColorStop(0.86, `rgb(119 103 244 / ${coreAlpha * 0.72})`);
@@ -1927,18 +1944,20 @@
       context.arc(screen.x, screen.y, screen.radius * 1.14, 0, Math.PI * 2);
       context.fill();
 
-      context.strokeStyle = cluster.projectionMode === "nested"
-        ? `rgb(156 225 255 / ${0.58 * nestedTunnelStrength})`
-        : cluster.active
-          ? "rgb(138 218 255 / 10%)"
-          : "rgb(106 171 229 / 5%)";
+      context.strokeStyle = cluster.active
+        ? "transparent"
+        : cluster.projectionMode === "nested"
+        ? `rgb(156 225 255 / ${0.28 + 0.5 * nestedTunnelStrength})`
+        : "rgb(106 171 229 / 8%)";
       context.lineWidth = cluster.projectionMode === "nested"
         ? 1
         : Math.max(8, screen.radius * 0.09);
       context.shadowColor = cluster.active ? theme.accent : theme["accent-2"];
-      context.shadowBlur = cluster.projectionMode === "nested"
-        ? 4 * nestedTunnelStrength
-        : cluster.active ? 22 : 14;
+      context.shadowBlur = cluster.active
+        ? 0
+        : cluster.projectionMode === "nested"
+        ? 2 + 6 * nestedTunnelStrength
+        : 14;
       context.beginPath();
       context.arc(screen.x, screen.y, screen.radius * 0.98, 0, Math.PI * 2);
       context.stroke();
@@ -8013,6 +8032,12 @@
     ui.nestedCompactnessValue.textContent = compactnessLabel(
       state.demo.settings.nestedCompactnessPercent
     );
+    ui.layoutYaw.value = String(state.demo.settings.layoutYawDegrees);
+    ui.layoutYawValue.textContent = `${state.demo.settings.layoutYawDegrees}°`;
+    ui.layoutPitch.value = String(state.demo.settings.layoutPitchDegrees);
+    ui.layoutPitchValue.textContent = `${state.demo.settings.layoutPitchDegrees}°`;
+    ui.branchSpread.value = String(state.demo.settings.branchSpreadDegrees);
+    ui.branchSpreadValue.textContent = `${state.demo.settings.branchSpreadDegrees}°`;
     ui.peripheralDepthShrink.value = String(state.demo.settings.peripheralDepthShrinkPercent);
     ui.peripheralDepthShrinkValue.textContent = `${state.demo.settings.peripheralDepthShrinkPercent}%`;
     ui.nestedTunnelStrength.value = String(state.demo.settings.nestedTunnelPercent);
@@ -8042,7 +8067,10 @@
     saveDemoSettings(state.demo.settings);
     syncPresentationControls();
     if (previous.nestedCompactnessPercent !== state.demo.settings.nestedCompactnessPercent
-      || previous.peripheralDepthShrinkPercent !== state.demo.settings.peripheralDepthShrinkPercent) {
+      || previous.peripheralDepthShrinkPercent !== state.demo.settings.peripheralDepthShrinkPercent
+      || previous.layoutYawDegrees !== state.demo.settings.layoutYawDegrees
+      || previous.layoutPitchDegrees !== state.demo.settings.layoutPitchDegrees
+      || previous.branchSpreadDegrees !== state.demo.settings.branchSpreadDegrees) {
       refreshClusterSceneAfterLayoutSetting();
     }
     return state.demo.settings;
@@ -8921,6 +8949,21 @@
       state.demo.settings,
       ui.nestedCompactness.value
     ));
+    refreshClusterSceneAfterLayoutSetting();
+  });
+
+  ui.layoutYaw.addEventListener("input", () => {
+    updateDemoSettings(demoModel.withLayoutYawInput(state.demo.settings, ui.layoutYaw.value));
+    refreshClusterSceneAfterLayoutSetting();
+  });
+
+  ui.layoutPitch.addEventListener("input", () => {
+    updateDemoSettings(demoModel.withLayoutPitchInput(state.demo.settings, ui.layoutPitch.value));
+    refreshClusterSceneAfterLayoutSetting();
+  });
+
+  ui.branchSpread.addEventListener("input", () => {
+    updateDemoSettings(demoModel.withBranchSpreadInput(state.demo.settings, ui.branchSpread.value));
     refreshClusterSceneAfterLayoutSetting();
   });
 

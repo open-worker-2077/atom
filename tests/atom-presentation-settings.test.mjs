@@ -63,7 +63,7 @@ test('presentation service preserves host settings across restart, rejects stale
   assert.deepEqual(Object.keys(document.view), ['presentationSettings']);
 });
 
-test('presentation service reads the prior complete field set by filling only the new hold threshold without writing', async () => {
+test('presentation service reads the prior complete field set by filling new projection controls without writing', async () => {
   const { service, file } = await serviceFixture();
   const legacySettings = { ...presentationModel.normalizeSettings({
     nestedTunnelPercent: 0,
@@ -71,6 +71,9 @@ test('presentation service reads the prior complete field set by filling only th
     defaultDetailMode: 'surface'
   }) };
   delete legacySettings.secondaryNavigationDelayMs;
+  delete legacySettings.layoutYawDegrees;
+  delete legacySettings.layoutPitchDegrees;
+  delete legacySettings.branchSpreadDegrees;
   const repository = createViewStateRepository({ file, worldId: 'primary' });
   await repository.write({ presentationSettings: legacySettings }, { revision: 7 });
   const before = await fs.readFile(file, 'utf8');
@@ -79,6 +82,9 @@ test('presentation service reads the prior complete field set by filling only th
 
   assert.equal(result.revision, 7);
   assert.equal(result.settings.secondaryNavigationDelayMs, 420);
+  assert.equal(result.settings.layoutYawDegrees, 0);
+  assert.equal(result.settings.layoutPitchDegrees, 90);
+  assert.equal(result.settings.branchSpreadDegrees, 55);
   assert.equal(result.settings.nestedTunnelPercent, 0);
   assert.equal(result.settings.otherDetailBrightnessPercent, 0);
   assert.equal(result.settings.defaultDetailMode, 'surface');

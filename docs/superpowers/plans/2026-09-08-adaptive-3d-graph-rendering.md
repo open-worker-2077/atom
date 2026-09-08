@@ -61,13 +61,13 @@
 - Test: `tests/spatial-visual-model.test.js`
 
 **Interfaces:**
-- Consumes: settings-menu inputs for layout yaw 0–360°, pitch 0–360°, branch spread and slot clearance.
+- Consumes: settings-menu inputs for layout yaw 0–360°, pitch 0–360° and branch spread; existing S sibling-clearance control remains the slot interval input.
 - Produces: normalized persisted settings passed into the two pure layout models; active immersed shell alpha 0, ordinary expanded shell translucent.
 
-- [ ] **Step 1: Write failing tests** for angle wrapping, branch-spread/clearance bounds, and default values.
-- [ ] **Step 2: Run** the two focused test files and confirm RED.
-- [ ] **Step 3: Add** the four settings controls, model normalizers and engine bindings; pass them only into current-domain scene construction and preserve camera controls independently.
-- [ ] **Step 4: Run** focused model and Web projection tests and confirm green.
+- [x] **Step 1: Write failing tests** for angle wrapping, branch-spread bounds, default values, real depth and preservation of the derived strut skeleton inside compact shells.
+- [x] **Step 2: Run** the focused model tests; the new settings and spatial contracts failed before implementation.
+- [x] **Step 3: Add** the three orientation controls, model normalizers, shared-setting migration and engine bindings; reuse the existing S interval control, pass explicit 3D options into current-domain layout, and make only the active immersed shell visually transparent while retaining hit regions.
+- [x] **Step 4: Run** focused settings, layout, cluster and shared-persistence tests; 136/136 passed.
 
 ### Task 4: Integration and public build
 

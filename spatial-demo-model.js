@@ -10,6 +10,9 @@
   const DEFAULT_NESTED_TUNNEL_PERCENT = 0;
   const DEFAULT_NESTED_COMPACTNESS_PERCENT = 50;
   const DEFAULT_PERIPHERAL_DEPTH_SHRINK_PERCENT = 20;
+  const DEFAULT_LAYOUT_YAW_DEGREES = 0;
+  const DEFAULT_LAYOUT_PITCH_DEGREES = 90;
+  const DEFAULT_BRANCH_SPREAD_DEGREES = 55;
   const MAX_NESTED_COMPACTNESS_PERCENT = 100;
   const DEFAULT_ZOOM_SPEED_PERCENT = 160;
   const DEFAULT_RELATIONSHIP_LINE_WIDTH_PERCENT = 180;
@@ -93,6 +96,19 @@
       : DEFAULT_PERIPHERAL_DEPTH_SHRINK_PERCENT;
   }
 
+  function validRotationDegrees(value, fallback) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.round(((number % 360) + 360) % 360);
+  }
+
+  function validBranchSpread(value) {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? Math.min(180, Math.max(0, Math.round(number)))
+      : DEFAULT_BRANCH_SPREAD_DEGREES;
+  }
+
   function validDetailMode(value) {
     return ["name", "surface", "floating"].includes(value)
       ? value
@@ -117,6 +133,9 @@
       ),
       peripheralDepthShrinkPercent: validPeripheralDepthShrink(source.peripheralDepthShrinkPercent),
       nestedCompactnessPercent: validNestedCompactness(source.nestedCompactnessPercent),
+      layoutYawDegrees: validRotationDegrees(source.layoutYawDegrees, DEFAULT_LAYOUT_YAW_DEGREES),
+      layoutPitchDegrees: validRotationDegrees(source.layoutPitchDegrees, DEFAULT_LAYOUT_PITCH_DEGREES),
+      branchSpreadDegrees: validBranchSpread(source.branchSpreadDegrees),
       nestedTunnelPercent: validPercent(source.nestedTunnelPercent),
       nestedTunnelInteriorPercent: validPercent(source.nestedTunnelInteriorPercent),
       zoomSpeedPercent: validZoomSpeed(source.zoomSpeedPercent),
@@ -201,6 +220,27 @@
       ...settings,
       nestedCompactnessPercent: validNestedCompactness(value)
     });
+  }
+
+  function withLayoutYawInput(settingsInput, value) {
+    const settings = normalizeSettings(settingsInput);
+    return normalizeSettings({
+      ...settings,
+      layoutYawDegrees: validRotationDegrees(value, DEFAULT_LAYOUT_YAW_DEGREES)
+    });
+  }
+
+  function withLayoutPitchInput(settingsInput, value) {
+    const settings = normalizeSettings(settingsInput);
+    return normalizeSettings({
+      ...settings,
+      layoutPitchDegrees: validRotationDegrees(value, DEFAULT_LAYOUT_PITCH_DEGREES)
+    });
+  }
+
+  function withBranchSpreadInput(settingsInput, value) {
+    const settings = normalizeSettings(settingsInput);
+    return normalizeSettings({ ...settings, branchSpreadDegrees: validBranchSpread(value) });
   }
 
   function withNestedTunnelInteriorInput(settingsInput, value) {
@@ -489,6 +529,9 @@
     withSecondaryNavigationDelayInput,
     withPeripheralDepthShrinkInput,
     withNestedCompactnessInput,
+    withLayoutYawInput,
+    withLayoutPitchInput,
+    withBranchSpreadInput,
     withNestedTunnelInput,
     withNestedTunnelInteriorInput,
     withZoomSpeedInput,
