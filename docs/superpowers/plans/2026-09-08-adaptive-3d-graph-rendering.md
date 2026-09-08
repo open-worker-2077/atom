@@ -1,0 +1,85 @@
+# Adaptive 3D Graph Rendering Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Make the current immersed Atom Web domain form a stable, rotatable three-dimensional Graph whose slot groups shrink to their contents and whose same-level strut topology forms the main and branch axes.
+
+**Architecture:** Keep Atom four-axis facts, SceneSnapshot, Workspace edits, navigation, hit testing and camera contracts unchanged. Extend the existing pure layout models so slot containment produces cached three-dimensional volumes and same-level strut edges produce a deterministic directed skeleton; Canvas continues projecting these world coordinates while existing interaction code consumes stable Thing IDs.
+
+**Tech Stack:** Browser JavaScript, Canvas 2D perspective projection, Node test runner.
+
+**Spec:** `docs/superpowers/specs/2026-08-31-atom-web-spatial-design.md` §4.4–4.5
+
+## Global Constraints
+
+- `thing / situation / slot / strut` remain the only Graph axes.
+- Slot defines containment and cutaway; strut defines same-level directed push relations and never owns hidden child nodes.
+- Default main-axis orientation is low source to high target; layout yaw, pitch and branch spread are projection settings only.
+- Adding a closing strut preserves the prior layout and overlays the closing edge; a cold closed graph uses its stored final edge as the closure reference.
+- Normal cutaway shells are translucent; the immersed shell is visually transparent but remains hit-testable.
+- Recompute only the changed local domain and its ancestor envelope chain.
+
+---
+
+### Task 1: Directed 3D topology skeleton
+
+**Files:**
+- Modify: `spatial-visual-model.js`
+- Test: `tests/spatial-visual-model.test.js`
+
+**Interfaces:**
+- Consumes: layout entries, same-level relationship pairs and `{ layoutYawDegrees, layoutPitchDegrees, branchSpreadDegrees }`.
+- Produces: `relaxRelationshipLayout()` positions with a stable three-dimensional main axis, radial branches and cycle-preserving closure behavior.
+
+- [ ] **Step 1: Write failing tests** for a directed chain rising along the default axis, a branch receiving nonzero depth, yaw/pitch rotation, and a final closing edge preserving the open-chain coordinates.
+- [ ] **Step 2: Run** `node --test tests/spatial-visual-model.test.js` and confirm only the new contracts fail.
+- [ ] **Step 3: Implement** deterministic backbone scoring from current-level strut degree and continuity, orient source→target on the rotated main axis, place lower-weight branches around that axis, and exclude the final cycle-closing edge from seeding while retaining it in link forces and drawing.
+- [ ] **Step 4: Run** `node --test tests/spatial-visual-model.test.js` and confirm green.
+
+### Task 2: Slot-driven adaptive 3D volumes
+
+**Files:**
+- Modify: `spatial-cluster-field.js`
+- Test: `tests/spatial-cluster-field.test.js`
+
+**Interfaces:**
+- Consumes: local node spheres, nested slot carriers and adjustable compactness/clearance.
+- Produces: stable non-overlapping 3D node positions and the smallest spherical shell that contains every real child edge plus clearance.
+
+- [ ] **Step 1: Write failing tests** proving an empty group keeps the minimum radius, a populated group contracts to measured child edges, two equal children can occupy different z coordinates, and nested child volume expands only its ancestor chain.
+- [ ] **Step 2: Run** `node --test tests/spatial-cluster-field.test.js` and confirm the new 3D cases fail.
+- [ ] **Step 3: Implement** volumetric collision separation and packing, remove the existing z compression, and measure shell radius from full x/y/z distance.
+- [ ] **Step 4: Run** `node --test tests/spatial-cluster-field.test.js` and confirm green.
+
+### Task 3: Projection settings and shell states
+
+**Files:**
+- Modify: `spatial-demo-model.js`
+- Modify: `index.html`
+- Modify: `spatial-engine.js`
+- Test: `tests/spatial-demo-model.test.js`
+- Test: `tests/spatial-visual-model.test.js`
+
+**Interfaces:**
+- Consumes: settings-menu inputs for layout yaw 0–360°, pitch 0–360°, branch spread and slot clearance.
+- Produces: normalized persisted settings passed into the two pure layout models; active immersed shell alpha 0, ordinary expanded shell translucent.
+
+- [ ] **Step 1: Write failing tests** for angle wrapping, branch-spread/clearance bounds, and default values.
+- [ ] **Step 2: Run** the two focused test files and confirm RED.
+- [ ] **Step 3: Add** the four settings controls, model normalizers and engine bindings; pass them only into current-domain scene construction and preserve camera controls independently.
+- [ ] **Step 4: Run** focused model and Web projection tests and confirm green.
+
+### Task 4: Integration and public build
+
+**Files:**
+- Modify: `index.html` build identifiers generated by the existing build script
+- Modify: `docs/superpowers/plans/2026-09-03-atom-current-requirement-ledger.md`
+
+**Interfaces:**
+- Consumes: Tasks 1–3.
+- Produces: one browser build with stable 3D rotation, adaptive slot shells and unchanged interaction semantics.
+
+- [ ] **Step 1: Run** the minimum affected model, cluster, browser-scene, input and navigation tests.
+- [ ] **Step 2: Run** `npm run build:browser` and `npm run check:development-control`.
+- [ ] **Step 3: Exercise** one real browser journey: immerse, rotate side-on, change layout angles, open a nested slot, verify normal/immersed alpha, and add a closing edge without moving existing nodes.
+- [ ] **Step 4: Update** the unique Superpowers ledger with exact revision and evidence, commit, push the authorized safety backup, read the exact remote check, then deploy and read back the public 4784 build only if the affected chain is green.
