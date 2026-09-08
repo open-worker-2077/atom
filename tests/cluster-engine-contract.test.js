@@ -50,6 +50,17 @@ test('multi-domain rendering draws soft shells and visual corridors before owned
   assert.ok(shellDraw > -1 && sphereDraw > shellDraw);
 });
 
+test('immersed cluster keeps a visible smooth shrink-wrap border and uses it for domain hits', () => {
+  const field = functionSource('drawClusterField');
+  const envelope = functionSource('projectClusterEnvelope');
+  const hit = functionSource('findClusterDomainContext');
+
+  assert.match(envelope, /clusterField\.buildScreenEnvelope/);
+  assert.match(field, /traceClusterEnvelope/);
+  assert.doesNotMatch(field, /cluster\.active\s*\?\s*["']transparent["']/);
+  assert.match(hit, /clusterField\.envelopeContainsPoint/);
+});
+
 test('A inward view toggles nested child branches without changing the active domain', () => {
   assert.match(engine, /expandedClusterDomains:\s*new Map\(\)/);
   assert.match(engine, /function visibleClusterDomains\(/);

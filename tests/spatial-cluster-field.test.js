@@ -68,6 +68,46 @@ test('authoritative id replacement keeps compact node placement through stable l
   assert.deepEqual(placement(after), placement(before));
 });
 
+test('screen envelope shrink-wraps one, two and three carriers with a smooth outline', () => {
+  const field = loadClusterField();
+  const one = field.buildScreenEnvelope([
+    { x: 0, y: 0, radius: 24 }
+  ], 8);
+  assert.equal(one.kind, 'circle');
+  assert.equal(one.radius, 32);
+
+  const two = field.buildScreenEnvelope([
+    { x: -72, y: 0, radius: 24 },
+    { x: 72, y: 0, radius: 24 }
+  ], 8);
+  assert.equal(two.kind, 'rounded-hull');
+  assert.ok(two.bounds.width > two.bounds.height * 2, 'two carriers form a capsule instead of a large circle');
+  assert.equal(field.envelopeContainsPoint(two, -72, 0), true);
+  assert.equal(field.envelopeContainsPoint(two, 72, 0), true);
+  assert.equal(field.envelopeContainsPoint(two, 0, 60), false, 'the old circular cavity is outside the capsule');
+
+  const three = field.buildScreenEnvelope([
+    { x: -62, y: -28, radius: 23 },
+    { x: 62, y: -18, radius: 23 },
+    { x: 0, y: 62, radius: 23 }
+  ], 8);
+  assert.equal(three.kind, 'rounded-hull');
+  assert.ok(three.points.length >= 48, 'the three-carrier bag has enough contour samples to stay round');
+  const turns = three.points.map((point, index, points) => {
+    const previous = points[(index - 1 + points.length) % points.length];
+    const next = points[(index + 1) % points.length];
+    const incoming = Math.atan2(point.y - previous.y, point.x - previous.x);
+    const outgoing = Math.atan2(next.y - point.y, next.x - point.x);
+    return Math.abs(Math.atan2(Math.sin(outgoing - incoming), Math.cos(outgoing - incoming)));
+  });
+  assert.ok(Math.max(...turns) < 0.34, 'the contour has no visible hard corner');
+  for (const carrier of [
+    { x: -62, y: -28 },
+    { x: 62, y: -18 },
+    { x: 0, y: 62 }
+  ]) assert.equal(field.envelopeContainsPoint(three, carrier.x, carrier.y), true);
+});
+
 test('spatial compact packing uses depth to keep a dense slot body from collapsing into one plane', () => {
   const field = loadClusterField();
   const nodes = Array.from({ length: 6 }, (_, index) => ({

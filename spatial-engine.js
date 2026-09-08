@@ -1808,14 +1808,56 @@
     context.restore();
   }
 
-  function drawClusterTunnelInterior(cluster, screen) {
+  function traceClusterEnvelope(envelope) {
+    context.beginPath();
+    if (!envelope || envelope.kind === "circle") {
+      const circle = envelope || { x: 0, y: 0, radius: 0 };
+      context.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
+      return;
+    }
+    const points = envelope.points || [];
+    if (points.length < 3) return;
+    const first = points[0];
+    const last = points.at(-1);
+    context.moveTo((last.x + first.x) / 2, (last.y + first.y) / 2);
+    for (let index = 0; index < points.length; index += 1) {
+      const point = points[index];
+      const next = points[(index + 1) % points.length];
+      context.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
+    }
+    context.closePath();
+  }
+
+  function projectClusterEnvelope(cluster, screen, screenOffsetInput, basis) {
+    const screenOffset = screenOffsetInput || { x: 0, y: 0 };
+    const primary = (cluster.layoutNodes || []).filter((node) => (Number(node.__clusterLevel) || 0) === 0);
+    const sources = primary.length ? primary : cluster.layoutNodes || cluster.nodes || [];
+    const carriers = sources.map((node) => {
+      const projected = projectUnclipped(node.position, Number(node.__clusterRadius) || Number(node.radius) || 0.82, basis);
+      if (!projected) return null;
+      return {
+        x: projected.x + screenOffset.x,
+        y: projected.y + screenOffset.y,
+        radius: projected.radius
+      };
+    }).filter(Boolean);
+    if (!carriers.length) {
+      return clusterField.buildScreenEnvelope([{ x: screen.x, y: screen.y, radius: screen.radius }], 0);
+    }
+    const contactedExtent = Math.max(...carriers.map((carrier) => (
+      Math.hypot(carrier.x - screen.x, carrier.y - screen.y) + carrier.radius
+    )));
+    const clearance = Math.max(4, screen.radius - contactedExtent);
+    return clusterField.buildScreenEnvelope(carriers, clearance);
+  }
+
+  function drawClusterTunnelInterior(cluster, screen, envelope) {
     const seed = hashText(`${cluster.path}:cluster-tunnel`);
     const interiorStrength = cluster.projectionMode === "nested"
       ? state.demo.settings.nestedTunnelInteriorPercent / 100
       : 1;
     context.save();
-    context.beginPath();
-    context.arc(screen.x, screen.y, screen.radius * 0.98, 0, Math.PI * 2);
+    traceClusterEnvelope(envelope);
     context.clip();
 
     const well = context.createRadialGradient(
@@ -1911,12 +1953,14 @@
       screen.x += screenOffset.x;
       screen.y += screenOffset.y;
       screen.radius = exactProjectedRadius(cluster.radius, screen.depth);
+      const envelope = projectClusterEnvelope(cluster, screen, screenOffset, basis);
       state.clusterHitRegions.push({
         path: cluster.path,
         depth: cluster.depth,
         x: screen.x,
         y: screen.y,
         radius: screen.radius,
+        envelope,
         worldRadius: cluster.radius,
         screenDepth: screen.depth,
         center: { ...cluster.center },
@@ -1925,7 +1969,7 @@
         magnifierNode: cluster.detailNode || null,
         detail: clusterDetailText(cluster)
       });
-      if (!cluster.active) drawClusterTunnelInterior(cluster, screen);
+      if (!cluster.active) drawClusterTunnelInterior(cluster, screen, envelope);
       const nestedTunnelStrength = state.demo.settings.nestedTunnelPercent / 100;
       const interiorStrength = cluster.projectionMode === "nested"
         ? state.demo.settings.nestedTunnelInteriorPercent / 100
@@ -1944,26 +1988,26 @@
       glow.addColorStop(0.86, `rgb(119 103 244 / ${coreAlpha * 0.72})`);
       glow.addColorStop(1, "transparent");
       context.fillStyle = glow;
-      context.beginPath();
-      context.arc(screen.x, screen.y, screen.radius * 1.14, 0, Math.PI * 2);
+      traceClusterEnvelope(envelope);
       context.fill();
 
       context.strokeStyle = cluster.active
-        ? "transparent"
+        ? "rgb(84 214 255 / 72%)"
         : cluster.projectionMode === "nested"
         ? `rgb(156 225 255 / ${0.28 + 0.5 * nestedTunnelStrength})`
         : "rgb(106 171 229 / 8%)";
-      context.lineWidth = cluster.projectionMode === "nested"
+      context.lineWidth = cluster.active
+        ? 1.8
+        : cluster.projectionMode === "nested"
         ? 1
         : Math.max(8, screen.radius * 0.09);
       context.shadowColor = cluster.active ? theme.accent : theme["accent-2"];
       context.shadowBlur = cluster.active
-        ? 0
+        ? 10
         : cluster.projectionMode === "nested"
         ? 2 + 6 * nestedTunnelStrength
         : 14;
-      context.beginPath();
-      context.arc(screen.x, screen.y, screen.radius * 0.98, 0, Math.PI * 2);
+      traceClusterEnvelope(envelope);
       context.stroke();
       if (cluster.parentCarrierNode) {
         drawConfirmationRipples(screen, cluster.parentCarrierNode);
@@ -4069,7 +4113,9 @@
         region,
         normalizedDistance: Math.hypot(x - region.x, y - region.y) / Math.max(1, region.radius)
       }))
-      .filter((candidate) => candidate.normalizedDistance <= 0.96)
+      .filter((candidate) => candidate.region.envelope
+        ? clusterField.envelopeContainsPoint(candidate.region.envelope, x, y)
+        : candidate.normalizedDistance <= 0.96)
       .sort((left, right) => (
         right.region.depth - left.region.depth
         || left.normalizedDistance - right.normalizedDistance
@@ -6504,7 +6550,9 @@
           region,
           distance: Math.hypot(point.x - region.x, point.y - region.y)
         }))
-        .filter((candidate) => candidate.distance <= candidate.region.radius * 0.96)
+        .filter((candidate) => candidate.region.envelope
+          ? clusterField.envelopeContainsPoint(candidate.region.envelope, point.x, point.y)
+          : candidate.distance <= candidate.region.radius * 0.96)
         .sort((left, right) => left.region.radius - right.region.radius)[0];
       const starPath = domainHit
         ? domainHit.region.path

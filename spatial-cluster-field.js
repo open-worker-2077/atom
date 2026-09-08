@@ -285,6 +285,98 @@
     return { center, radius, minimum, maximum };
   }
 
+  function screenEnvelopeBounds(points) {
+    const minimum = {
+      x: Math.min(...points.map((point) => point.x)),
+      y: Math.min(...points.map((point) => point.y))
+    };
+    const maximum = {
+      x: Math.max(...points.map((point) => point.x)),
+      y: Math.max(...points.map((point) => point.y))
+    };
+    return {
+      left: minimum.x,
+      top: minimum.y,
+      right: maximum.x,
+      bottom: maximum.y,
+      width: maximum.x - minimum.x,
+      height: maximum.y - minimum.y
+    };
+  }
+
+  function buildScreenEnvelope(carriersInput, clearanceInput = 0) {
+    const clearance = Math.max(0, Number(clearanceInput) || 0);
+    const carriers = (Array.isArray(carriersInput) ? carriersInput : [])
+      .map((carrier) => ({
+        x: Number(carrier && carrier.x),
+        y: Number(carrier && carrier.y),
+        radius: Math.max(0, Number(carrier && carrier.radius) || 0) + clearance
+      }))
+      .filter((carrier) => Number.isFinite(carrier.x) && Number.isFinite(carrier.y) && carrier.radius > 0);
+    if (!carriers.length) return null;
+    if (carriers.length === 1) {
+      const [carrier] = carriers;
+      return {
+        kind: "circle",
+        x: carrier.x,
+        y: carrier.y,
+        radius: carrier.radius,
+        bounds: {
+          left: carrier.x - carrier.radius,
+          top: carrier.y - carrier.radius,
+          right: carrier.x + carrier.radius,
+          bottom: carrier.y + carrier.radius,
+          width: carrier.radius * 2,
+          height: carrier.radius * 2
+        }
+      };
+    }
+
+    // A fixed angular support sweep creates the convex shrink-wrap of all
+    // carrier discs in O(n). The dense, evenly spaced contour stays visually
+    // round while avoiding the large empty quadrants of one enclosing circle.
+    const sampleCount = 72;
+    const points = Array.from({ length: sampleCount }, (_, index) => {
+      const angle = index / sampleCount * Math.PI * 2;
+      const xAxis = Math.cos(angle);
+      const yAxis = Math.sin(angle);
+      const carrier = carriers.reduce((best, candidate) => (
+        !best
+        || candidate.x * xAxis + candidate.y * yAxis + candidate.radius
+          > best.x * xAxis + best.y * yAxis + best.radius
+          ? candidate
+          : best
+      ), null);
+      return {
+        x: carrier.x + xAxis * carrier.radius,
+        y: carrier.y + yAxis * carrier.radius
+      };
+    });
+    return { kind: "rounded-hull", points, bounds: screenEnvelopeBounds(points) };
+  }
+
+  function envelopeContainsPoint(envelope, xInput, yInput) {
+    if (!envelope) return false;
+    const x = Number(xInput);
+    const y = Number(yInput);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    if (envelope.kind === "circle") {
+      return Math.hypot(x - envelope.x, y - envelope.y) <= envelope.radius;
+    }
+    const points = Array.isArray(envelope.points) ? envelope.points : [];
+    if (points.length < 3) return false;
+    let inside = false;
+    for (let current = 0, previous = points.length - 1; current < points.length; previous = current, current += 1) {
+      const left = points[current];
+      const right = points[previous];
+      if (
+        (left.y > y) !== (right.y > y)
+        && x < (right.x - left.x) * (y - left.y) / (right.y - left.y) + left.x
+      ) inside = !inside;
+    }
+    return inside;
+  }
+
   function nestedDescendantOf(cluster, anchor, clusterByPath) {
     let current = cluster;
     while (current && current.path !== anchor.path) {
@@ -1102,5 +1194,9 @@
     };
   }
 
-  global.SpatialClusterField = Object.freeze({ buildScene });
+  global.SpatialClusterField = Object.freeze({
+    buildScene,
+    buildScreenEnvelope,
+    envelopeContainsPoint
+  });
 })(window);
