@@ -97,6 +97,26 @@ test('an empty Slot domain uses the configured empty-node radius instead of a le
   assert.ok(Math.abs(scene.clusters[0].radius - radius) < 1e-9);
 });
 
+test('a populated leaf keeps the exact application-level empty-node radius without a hidden geometry floor', () => {
+  const field = loadClusterField();
+  const configuredRadius = 0.82 * 0.2;
+  const scene = field.buildScene([{
+    path: 'root',
+    depth: 0,
+    nodes: [{
+      id: 'leaf',
+      radius: configuredRadius,
+      position: { x: 0, y: 0, z: 0 }
+    }]
+  }], {
+    compact: true,
+    compactPercent: 0,
+    emptyNodeRadius: configuredRadius
+  });
+
+  assert.equal(scene.clusters[0].nodes[0].__clusterRadius, configuredRadius);
+});
+
 test('spatial envelope sphere carriers retain every recursive shell clearance for exact framing', () => {
   const field = loadClusterField();
   const nested = field.buildSpatialEnvelope([

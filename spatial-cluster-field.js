@@ -1036,7 +1036,7 @@
         ownerPath,
         __clusterRadius: (nestedCarrier
           ? nestedCarrier.radius + (Number.isFinite(nestedClearance) ? nestedClearance : 0.34)
-          : clamp((Number(node.radius) || 0.82) * 1.12, 0.34, 0.82)) * displayScale,
+          : (Number(node.radius) > 0 ? Number(node.radius) : 0.82)) * displayScale,
         __nestedCarrierPath: nestedCarrier ? nestedCarrier.path : null,
         __packingSpheres: compact && nestedCarrier && Array.isArray(nestedCarrier.spheres)
           ? nestedCarrier.spheres

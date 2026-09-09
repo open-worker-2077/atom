@@ -161,7 +161,7 @@ test('empty-node diameter changes leaf bodies and keeps the opened parent shell 
   expect(large['child-b'].worldRadius).toBeGreaterThan(small['child-b'].worldRadius * 2);
 });
 
-test('A child shrink changes child screen radii without resizing the parent-domain peer', async ({ page }) => {
+test('peripheral depth shrink leaves nested child bodies at their real scale', async ({ page }) => {
   test.setTimeout(60_000);
   await loadTwoLevelField(page, 'setNestedView');
   await moveRange(page, '#peripheralDepthShrink', 0);
@@ -170,7 +170,7 @@ test('A child shrink changes child screen radii without resizing the parent-doma
   await moveRange(page, '#peripheralDepthShrink', 80);
   const after = await screenTargets(page, ['child-a', 'child-b', 'peer-id']);
 
-  expect(after['child-a'].radius).toBeLessThan(before['child-a'].radius * 0.3);
-  expect(after['child-b'].radius).toBeLessThan(before['child-b'].radius * 0.3);
+  expect(after['child-a'].radius).toBeCloseTo(before['child-a'].radius, 4);
+  expect(after['child-b'].radius).toBeCloseTo(before['child-b'].radius, 4);
   expect(after['peer-id'].radius).toBeCloseTo(before['peer-id'].radius, 4);
 });
