@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { planStrutReceiverMigration } from '../work-engine/atom-language/strut-receiver-migration.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { projectAtomContext } from '../work-engine/atom-language/context-store.mjs';
+import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(import.meta.dirname, '..');
@@ -199,7 +200,11 @@ test('operator apply and receipt-only rollback restore the exact source world', 
     operator, '--rollback', recovered.receiptFile
   ], { cwd: projectRoot, env: { ...process.env, LOCALAPPDATA: localAppData } })).stdout);
   assert.equal(rolledBack.revision, revisionOfWorldFacts(source));
-  assert.deepEqual(JSON.parse(await fs.readFile(contextFile, 'utf8')), source);
+  assert.deepEqual((await createTransactionalWorldPersistence({
+    contextFile,
+    projectionFile: path.join(worldDirectory, 'graph.json'),
+    journalFile: path.join(worldDirectory, 'atom.transactions.json')
+  }).readCommittedSnapshot()).facts, source);
 });
 
 test('operator refuses a linked backup root before any migration write', async (t) => {

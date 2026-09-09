@@ -302,7 +302,8 @@ async function rollbackFromReceipt(runtime, receiptFile) {
     throw problem('INVALID_STRUT_RECEIVER_MIGRATION_RECEIPT',
       'Rollback receipt is not bound to this Atom world');
   }
-  const current = await readWorld(runtime.contextFile);
+  const persistence = persistenceFor(runtime);
+  const current = await persistence.readCommittedSnapshot();
   const journal = await createJsonTransactionJournal({ file: journalFile }).readState();
   const durable = journal.receipts.find(({ commandId }) => (
     commandId === receipt.transaction.commandId
@@ -316,12 +317,12 @@ async function rollbackFromReceipt(runtime, receiptFile) {
     throw problem('INVALID_STRUT_RECEIVER_MIGRATION_RECEIPT',
       'Rollback receipt does not match the durable migration command');
   }
-  const restored = await persistenceFor(runtime).rollback({
+  const restored = await persistence.rollback({
     targetCommandId: durable.commandId,
     correlationId: `${durable.correlationId}:operator-rollback`,
     expectedRevision: durableReceipt.afterRevision
   });
-  const world = await readWorld(runtime.contextFile);
+  const world = await persistence.readCommittedSnapshot();
   if (world.revision !== receipt.revisions.source) {
     throw problem('STRUT_RECEIVER_MIGRATION_ROLLBACK_FAILED',
       'Rollback did not restore the exact source revision');
