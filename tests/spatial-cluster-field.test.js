@@ -420,14 +420,14 @@ test('zero isolation adds only the real per-level shell clearance through deep n
   });
   const byDepth = [...scene.clusters].sort((left, right) => right.depth - left.depth);
 
-  assert.ok(byDepth[0].radius <= 0.29, 'an empty leaf shell is its body plus zero-setting clearance');
+  assert.ok(byDepth[0].radius <= 0.35, 'an empty leaf shell is its body plus zero-setting clearance');
   for (let index = 1; index < byDepth.length; index += 1) {
     assert.ok(
-      byDepth[index].radius - byDepth[index - 1].radius <= 0.09,
-      `depth ${byDepth[index].depth} adds one clearance instead of another minimum cavity`
+      Math.abs(byDepth[index].radius - byDepth[index - 1].radius) <= 0.01,
+      `depth ${byDepth[index].depth} preserves the same real body volume instead of shrinking it by depth`
     );
   }
-  assert.ok(byDepth.at(-1).radius <= 0.69, 'six nested levels remain a tight recursive package');
+  assert.ok(byDepth.at(-1).radius <= 0.35, 'six nested levels remain one tight real-scale recursive package');
 });
 
 test('a child group carries its parent node detail for CapsLock floating presentation', () => {
@@ -693,7 +693,7 @@ test('tenfold internal setting expands the real nested edge interval without sca
   }
 });
 
-test('adaptive S packing compresses a dense child more than a sparse child without crossing siblings', () => {
+test('adaptive S packing lets a dense child grow larger than a sparse child without crossing siblings', () => {
   const field = loadClusterField();
   const scene = field.buildScene([
     {
@@ -731,7 +731,10 @@ test('adaptive S packing compresses a dense child more than a sparse child witho
   const dense = scene.clusters.find((cluster) => cluster.path === 'root/dense');
   const plain = root.nodes.find((node) => node.id === 'plain-sibling');
 
-  assert.ok(dense.nodeScale < sparse.nodeScale, 'content pressure determines scale instead of depth alone');
+  assert.equal(dense.nodeScale, sparse.nodeScale,
+    'content complexity must not trigger an inverse display scale');
+  assert.ok(dense.radius > sparse.radius,
+    'the real accumulated content makes the dense child body larger');
   assert.ok(
     minimumBodyGap(field, sparse, dense) >= -0.000001,
     `unequal nested groups remain mutually exclusive (${minimumBodyGap(field, sparse, dense)})`
@@ -1674,7 +1677,7 @@ test('A peripheral expansion shrinks each child layer cumulatively while preserv
   }
 });
 
-test('A child shrink also scales nested child layers in the visible inner view', () => {
+test('A peripheral depth shrink never scales nested child layers in the visible inner view', () => {
   const field = loadClusterField();
   const node = (id) => ({ id, radius: 1, position: { x: 0, y: 0, z: 0 } });
   const domains = [
@@ -1685,5 +1688,9 @@ test('A child shrink also scales nested child layers in the visible inner view',
   const scaled = field.buildScene(domains, { compact: true, peripheralDepthShrinkPercent: 80 });
   const unscaledChild = unscaled.clusters.find((cluster) => cluster.path === 'root/child');
   const scaledChild = scaled.clusters.find((cluster) => cluster.path === 'root/child');
-  assert.ok(scaledChild.nodeScale < unscaledChild.nodeScale);
+  assert.equal(
+    scaledChild.nodeScale,
+    unscaledChild.nodeScale,
+    'the peripheral overview lens must not turn nested content complexity into inverse body size'
+  );
 });

@@ -100,16 +100,6 @@
     return mix(1, fittedScale, adaptiveResponse);
   }
 
-  function adaptiveNestedScale(childRadius, motherNode, compactness) {
-    if (!(compactness > 0)) return 1;
-    const motherRadius = clamp((Number(motherNode && motherNode.radius) || 0.82) * 1.12, 0.34, 0.82);
-    const carrierBudget = motherRadius + mix(0.42, 0.14, compactness);
-    const fittedScale = clamp(carrierBudget / Math.max(0.001, childRadius), 0.04, 1);
-    const oversizePressure = clamp(childRadius / Math.max(0.001, carrierBudget), 1, 6);
-    const adaptiveResponse = adaptivePreferenceResponse(compactness, oversizePressure);
-    return mix(1, fittedScale, adaptiveResponse);
-  }
-
   function clusterRadius(nodes, nestedCarrierByNodeId = null, optionsInput = {}) {
     const options = optionsInput && typeof optionsInput === "object" ? optionsInput : {};
     const compact = options.compact === true;
@@ -1276,7 +1266,6 @@
     const options = optionsInput && typeof optionsInput === "object" ? optionsInput : {};
     const compact = options.compact === true;
     const spatial3d = options.spatial3d === true;
-    const compactness = compactAmount(options);
     const peripheralDepthShrinkPercent = clamp(
       Number(options.peripheralDepthShrinkPercent) || 0,
       0,
@@ -1317,8 +1306,6 @@
           emptyNodeRadius: options.emptyNodeRadius
         }),
         nestedCarrierByNodeId: new Map(),
-        scaleReferenceNestedCarrierByNodeId: new Map(),
-        scaleReferenceRadius: 0,
         depth,
         parentPath,
         parentNodeId: domain.parentNodeId || null,
@@ -1364,23 +1351,6 @@
           radius: sphere.radius + minimumShellClearance(layoutOptions)
         }))
       ));
-      // S owns sibling edge clearance only. Derive nested display scale from
-      // the O(n) zero-gap structural radius so widening S cannot masquerade as
-      // child zoom or require a second collision solve for every domain.
-      const scaleReferenceOptions = {
-        compact,
-        compactPercent: 0,
-        spatial3d,
-        emptyNodeRadius: options.emptyNodeRadius,
-        displayScale: 1
-      };
-      item.scaleReferenceRadius = clusterRadius(
-        item.sourceNodes.map((node) => node.__scaleReferencePosition
-          ? { ...node, position: node.__scaleReferencePosition }
-          : node),
-        item.scaleReferenceNestedCarrierByNodeId,
-        scaleReferenceOptions
-      );
     };
     prepared.forEach(solvePreparedLayout);
     const nestedChildren = prepared
@@ -1396,7 +1366,9 @@
       for (const item of nestedChildren.filter((candidate) => candidate.depth === depth)) {
         const parent = preparedByPath.get(item.parentPath);
         const motherNode = parent.sourceNodes.find((node) => node.id === item.parentNodeId) || null;
-        item.nestedScale = adaptiveNestedScale(item.scaleReferenceRadius, motherNode, compactness);
+        // Content is mass: a developed child keeps its accumulated volume and
+        // the parent grows around it. Complexity must never become a shrink signal.
+        item.nestedScale = 1;
         parent.nestedCarrierByNodeId.set(item.parentNodeId, {
           path: item.domain.path || "root",
           radius: item.radius * item.nestedScale,
@@ -1413,12 +1385,6 @@
           clearance: compact ? 0 : 0.34,
           minimumRadius: Number(motherNode && motherNode.radius) || 0.82
         });
-        parent.scaleReferenceNestedCarrierByNodeId.set(item.parentNodeId, {
-          path: item.domain.path || "root",
-          radius: item.scaleReferenceRadius * item.nestedScale,
-          clearance: compact ? 0 : 0.34,
-          minimumRadius: Number(motherNode && motherNode.radius) || 0.82
-        });
         parentsToSolve.add(parent);
       }
       parentsToSolve.forEach(solvePreparedLayout);
@@ -1427,7 +1393,7 @@
     for (const item of [...prepared].sort((left, right) => left.depth - right.depth || left.originalIndex - right.originalIndex)) {
       const parent = preparedByPath.get(item.parentPath);
       if (compact && item.projectionMode === "nested" && parent) {
-        item.displayScale = parent.displayScale * item.nestedScale * peripheralDepthScale;
+        item.displayScale = parent.displayScale * item.nestedScale;
       } else if (item.projectionMode === "peripheral" && parent) {
         item.displayScale = parent.displayScale * peripheralDepthScale;
       } else {
