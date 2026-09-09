@@ -515,21 +515,24 @@ test('maintenance rejects journal bytes changed after their semantic validation'
   const markerFile = path.join(runtime.localAppData, 'journal-object-mutated.txt');
   const preloadFile = path.join(runtime.localAppData, 'mutate-after-semantic-read.cjs');
   await fs.writeFile(preloadFile, [
-    "const fs = require('node:fs/promises');",
+    "const fs = require('node:fs');",
+    "const { syncBuiltinESMExports } = require('node:module');",
     "const path = require('node:path');",
-    'const originalReadFile = fs.readFile.bind(fs);',
-    'const originalWriteFile = fs.writeFile.bind(fs);',
+    'const originalCreateReadStream = fs.createReadStream.bind(fs);',
     'const target = path.resolve(process.env.ATOM_TEST_TARGET_OBJECT);',
     'let mutated = false;',
-    'fs.readFile = async function readFile(file, ...args) {',
-    '  const bytes = await originalReadFile(file, ...args);',
+    'fs.createReadStream = function createReadStream(file, ...args) {',
+    '  const stream = originalCreateReadStream(file, ...args);',
     '  if (!mutated && typeof file === \'string\' && path.resolve(file) === target) {',
-    '    mutated = true;',
-    "    await originalWriteFile(target, Buffer.from('damaged after successful semantic read'));",
-    "    await originalWriteFile(process.env.ATOM_TEST_MUTATION_MARKER, 'mutated\\n', 'utf8');",
+    "    stream.once('end', () => {",
+    '      mutated = true;',
+    "      fs.writeFileSync(target, Buffer.from('damaged after successful semantic read'));",
+    "      fs.writeFileSync(process.env.ATOM_TEST_MUTATION_MARKER, 'mutated\\n', 'utf8');",
+    '    });',
     '  }',
-    '  return bytes;',
-    '};'
+    '  return stream;',
+    '};',
+    'syncBuiltinESMExports();'
   ].join('\n'), 'utf8');
 
   const operation = execFileAsync(process.execPath, [
