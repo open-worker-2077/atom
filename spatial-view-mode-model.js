@@ -296,6 +296,82 @@
     });
   }
 
+  function spatialEnvelopeFrame(carriersInput, basisInput, optionsInput) {
+    var carriers = (Array.isArray(carriersInput) ? carriersInput : []).map(function (carrier) {
+      var center = carrier && carrier.center || carrier;
+      return {
+        center: center,
+        radius: Math.max(0, Number(carrier && carrier.radius) || 0)
+      };
+    }).filter(function (carrier) {
+      var center = carrier.center;
+      return center && Number.isFinite(Number(center.x))
+        && Number.isFinite(Number(center.y))
+        && Number.isFinite(Number(center.z));
+    });
+    if (!carriers.length) return null;
+    var basis = basisInput || {};
+    var right = basis.right || { x: 1, y: 0, z: 0 };
+    var up = basis.up || { x: 0, y: 1, z: 0 };
+    var forward = basis.forward || { x: 0, y: 0, z: -1 };
+    var dot = function (point, axis) {
+      return Number(point.x) * Number(axis.x)
+        + Number(point.y) * Number(axis.y)
+        + Number(point.z) * Number(axis.z);
+    };
+    var coordinates = carriers.map(function (carrier) {
+      return {
+        right: dot(carrier.center, right),
+        up: dot(carrier.center, up),
+        forward: dot(carrier.center, forward),
+        radius: carrier.radius
+      };
+    });
+    var midpoint = function (axis) {
+      var minimum = Math.min.apply(Math, coordinates.map(function (coordinate) {
+        return coordinate[axis] - coordinate.radius;
+      }));
+      var maximum = Math.max.apply(Math, coordinates.map(function (coordinate) {
+        return coordinate[axis] + coordinate.radius;
+      }));
+      return (minimum + maximum) / 2;
+    };
+    var center = { right: midpoint('right'), up: midpoint('up'), forward: midpoint('forward') };
+    var target = {
+      x: right.x * center.right + up.x * center.up + forward.x * center.forward,
+      y: right.y * center.right + up.y * center.up + forward.y * center.forward,
+      z: right.z * center.right + up.z * center.up + forward.z * center.forward
+    };
+    var options = optionsInput || {};
+    var width = Math.max(1, Number(options.width) || 1);
+    var height = Math.max(1, Number(options.height) || 1);
+    var fov = Math.max(0.1, Number(options.fov) || Math.PI / 3);
+    var safeMargin = Math.max(0, Number(options.safeMargin) || 0);
+    var availableWidth = Math.max(1, width / 2 - safeMargin);
+    var availableHeight = Math.max(1, height / 2 - safeMargin);
+    var projectionSpan = Math.min(height, width * 1.25);
+    var focal = projectionSpan / (2 * Math.tan(fov / 2));
+    var horizontalAngle = Math.atan(availableWidth / focal);
+    var verticalAngle = Math.atan(availableHeight / focal);
+    var minimumDistance = Math.max(0.01, Number(options.minimumDistance) || 0.04);
+    var maximumDistance = Math.max(minimumDistance, Number(options.maximumDistance) || 25200);
+    var distance = coordinates.reduce(function (required, coordinate) {
+      var forwardOffset = coordinate.forward - center.forward;
+      return Math.max(
+        required,
+        (coordinate.radius + Math.abs(coordinate.right - center.right) * Math.cos(horizontalAngle))
+          / Math.sin(horizontalAngle) - forwardOffset,
+        (coordinate.radius + Math.abs(coordinate.up - center.up) * Math.cos(verticalAngle))
+          / Math.sin(verticalAngle) - forwardOffset,
+        coordinate.radius + minimumDistance - forwardOffset
+      );
+    }, minimumDistance);
+    return Object.freeze({
+      target: Object.freeze(target),
+      distance: Math.min(maximumDistance, Math.max(minimumDistance, distance))
+    });
+  }
+
   function resolveVerticalScopeAnchor(regionsInput, pointInput) {
     const point = pointInput || {};
     if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
@@ -414,6 +490,7 @@
     planViewTargets,
     resolveImmersiveOwnerContext,
     clusterDomainFrame,
+    spatialEnvelopeFrame,
     resolveVerticalScopeAnchor,
     planContextLevelExpansion,
     planContextLevelCollapse,

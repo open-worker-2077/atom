@@ -418,6 +418,32 @@ test('PageUp on an opened leaf group closes that pointed group itself', () => {
   );
 });
 
+test('spatial envelope framing fits an asymmetric body instead of its stale centre circle', () => {
+  const model = loadModel();
+  const frame = model.spatialEnvelopeFrame([
+    { x: 0, y: -1, z: 0 },
+    { x: 10, y: -1, z: 0 },
+    { x: 10, y: 1, z: 0 },
+    { x: 0, y: 1, z: 0 }
+  ], {
+    right: { x: 1, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 },
+    forward: { x: 0, y: 0, z: -1 }
+  }, {
+    width: 1600,
+    height: 900,
+    fov: Math.PI / 3,
+    safeMargin: 24,
+    minimumDistance: 0.04,
+    maximumDistance: 25200
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(frame.target)), { x: 5, y: 0, z: 0 });
+  const focal = 900 / (2 * Math.tan(Math.PI / 6));
+  assert.ok(frame.distance >= 5 * focal / (800 - 24));
+  assert.ok(frame.distance < 5 * focal / (800 - 24) + 0.001);
+});
+
 test('immersive entry frames every direct child inside the viewport with breathing room', () => {
   const model = loadModel();
   const frame = model.immersiveDomainFrame([

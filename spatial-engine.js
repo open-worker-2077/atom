@@ -1537,6 +1537,7 @@
           radius: cluster.radius,
           level: 0,
           clusterShellProxy: true,
+          clusterShellPath: cluster.path,
           focusContext: grammar.resolveFocusContext(
             sameNode(node, state.selected) ? grammar.focusRelations.focused : grammar.focusRelations.distant,
             Boolean(state.selected)
@@ -3947,7 +3948,8 @@
     state.ambiguity.forEach((region, index) => {
       context.globalAlpha = 0.46 - index * 0.1;
       context.beginPath();
-      context.arc(region.x, region.y, region.radius + 5 + index * 2, 0, Math.PI * 2);
+      if (region.envelope) traceClusterEnvelope(region.envelope);
+      else context.arc(region.x, region.y, region.radius + 5 + index * 2, 0, Math.PI * 2);
       context.stroke();
     });
     context.restore();
@@ -4052,13 +4054,19 @@
 
     state.hitRegions = rendered
       .filter((item) => !item.clusterShellProxy || Boolean(item.node))
-      .map((item) => ({
-        item,
-        x: item.screen.x,
-        y: item.screen.y,
-        radius: Math.max(item.kind === "command" ? 19 : item.kind === "pathStep" ? 18 : 16, item.screen.radius),
-        priority: item.focusContext ? item.focusContext.hitPriority : 50
-      }))
+      .map((item) => {
+        const clusterRegion = item.clusterShellProxy
+          ? state.clusterHitRegions.find((region) => region.path === item.clusterShellPath)
+          : null;
+        return {
+          item,
+          x: item.screen.x,
+          y: item.screen.y,
+          radius: Math.max(item.kind === "command" ? 19 : item.kind === "pathStep" ? 18 : 16, item.screen.radius),
+          envelope: clusterRegion && clusterRegion.envelope || null,
+          priority: item.focusContext ? item.focusContext.hitPriority : 50
+        };
+      })
       .sort((a, b) => b.priority - a.priority || a.item.screen.depth - b.item.screen.depth);
     syncMarkdownSurfaceOverlays();
     syncEditorOverlays();
@@ -4087,14 +4095,18 @@
           ? Math.max(6, region.item.screen.radius + 3)
           : Math.max(1, region.radius);
         const normalizedDistance = distance / hitRadius;
+        const containsPoint = region.envelope
+          ? clusterField.envelopeContainsPoint(region.envelope, x, y)
+          : normalizedDistance <= 1.14;
         const hoveredBonus = region.item.node && sameNode(region.item.node, state.hovered) ? 12 : 0;
         return {
           region,
+          containsPoint,
           normalizedDistance,
           score: region.priority + hoveredBonus - normalizedDistance * 72 - region.item.screen.depth * 0.18
         };
       })
-      .filter((candidate) => candidate.normalizedDistance <= 1.14)
+      .filter((candidate) => candidate.containsPoint)
       .sort((a, b) => b.score - a.score);
     const pointerTarget = middleFrameTarget.choosePointerTarget(candidates, x, y, {
       clusterFieldOpen: state.clusterFieldOpen
@@ -4127,7 +4139,13 @@
     const x = clientX - rect.left;
     const y = clientY - rect.top;
     const domainContext = findClusterDomainContext(x, y);
-    const region = middleFrameTarget.chooseMostSpecificTarget(state.hitRegions, x, y);
+    const middleRegions = state.hitRegions.map((region) => ({
+      ...region,
+      containsPoint: region.envelope
+        ? clusterField.envelopeContainsPoint(region.envelope, x, y)
+        : undefined
+    }));
+    const region = middleFrameTarget.chooseMostSpecificTarget(middleRegions, x, y);
     return region
       ? { ...region, domainContext }
       : domainContext
@@ -6334,14 +6352,8 @@
   }
 
   function frameClusterDomain(path) {
-    const cluster = state.clusterScene.clusters.find((candidate) => candidate.path === path);
-    if (!cluster) return false;
-    const frame = viewModeModel.clusterDomainFrame(cluster, {
-      fov: camera.fov,
-      aspect: state.width / Math.max(1, state.height),
-      minimumDistance: focusMinimumDistance(),
-      maximumDistance: MAX_CAMERA_DISTANCE
-    });
+    const frame = clusterSpatialFrame(path);
+    if (!frame) return false;
     startCameraTween(frame, 420, recordCurrentView);
     return true;
   }
@@ -7301,11 +7313,37 @@
     return MIN_CAMERA_DISTANCE / compressionMultiplier;
   }
 
+  function clusterSpatialFrame(path) {
+    const cluster = state.clusterScene && state.clusterScene.clusters
+      ? state.clusterScene.clusters.find((candidate) => candidate.path === path)
+      : null;
+    if (!cluster) return null;
+    const exact = viewModeModel.spatialEnvelopeFrame(
+      clusterField.spatialEnvelopeSpheres(cluster.spatialEnvelope),
+      cameraBasis(),
+      {
+        width: state.width,
+        height: state.height,
+        fov: camera.fov,
+        safeMargin: 24,
+        minimumDistance: focusMinimumDistance(),
+        maximumDistance: MAX_CAMERA_DISTANCE
+      }
+    );
+    return exact || viewModeModel.clusterDomainFrame(cluster, {
+      fov: camera.fov,
+      aspect: state.width / Math.max(1, state.height),
+      minimumDistance: focusMinimumDistance(),
+      maximumDistance: MAX_CAMERA_DISTANCE
+    });
+  }
+
   function quickFrameMiddleTarget(candidate) {
     if (!candidate || candidate.button !== 1) return false;
     let target = null;
     let radius = 0;
     let label = "";
+    let domainPath = null;
     if (candidate.node) {
       const ownerPath = candidate.item && candidate.item.ownerPath
         || nodeOwnerPath(candidate.node);
@@ -7313,6 +7351,7 @@
       const clickedGroupPath = isClusterShell && candidate.domainContext
         ? candidate.domainContext.path
         : ownerPath;
+      if (isClusterShell) domainPath = clickedGroupPath;
       const middleFocus = isClusterShell
         ? {
             kind: "domain",
@@ -7341,6 +7380,7 @@
         : candidate.node.label || "节点";
       selectNode(candidate.node);
     } else if (candidate.domainContext) {
+      domainPath = candidate.domainContext.path;
       const middleFocus = {
         kind: "domain",
         path: candidate.domainContext.path
@@ -7358,12 +7398,13 @@
     }
     recordCurrentView();
     state.cameraTween = null;
-    const distance = clamp(
+    const frame = domainPath ? clusterSpatialFrame(domainPath) : null;
+    const distance = frame ? frame.distance : clamp(
       radius / (Math.max(0.08, Math.tan(camera.fov / 2)) * 0.88),
       focusMinimumDistance(),
       MAX_CAMERA_DISTANCE
     );
-    startCameraTween({ target, distance }, 420, () => {
+    startCameraTween(frame || { target, distance }, 420, () => {
       recordCurrentView();
       updateSelectionUI();
     });
@@ -9532,7 +9573,8 @@
           y: region.y,
           clientX: canvas.getBoundingClientRect().left + region.x,
           clientY: canvas.getBoundingClientRect().top + region.y,
-          radius: Math.max(3, region.item.screen.radius)
+          radius: Math.max(3, region.item.screen.radius),
+          clusterShellProxy: Boolean(region.item.clusterShellProxy)
         })),
       strutGeometry: structuredClone(state.strutGeometry),
       selectedStrutClause: state.selectedStrutClause,
@@ -9565,7 +9607,8 @@
           clientX: canvas.getBoundingClientRect().left + region.x,
           clientY: canvas.getBoundingClientRect().top + region.y,
           radius: region.radius,
-          center: { ...region.center }
+          center: { ...region.center },
+          envelope: region.envelope ? structuredClone(region.envelope) : null
         }))
         : [],
       clusterTargets: state.clusterFieldOpen

@@ -30,8 +30,8 @@ function route(count) {
 test('builds one stable active cluster with owned nodes and bounded translucent shell', () => {
   const field = loadClusterField();
   assert.ok(field, 'SpatialClusterField must exist');
-  assert.equal(field.sameLevelIsolationGap(0), 0.04);
-  assert.equal(field.sameLevelIsolationGap(100), 2.64);
+  assert.equal(field.sameLevelIsolationGap(0), 0);
+  assert.equal(field.sameLevelIsolationGap(100), 3);
   const first = field.buildScene(route(1));
   const second = field.buildScene(route(1));
 
@@ -82,6 +82,22 @@ test('an empty Slot domain uses the configured empty-node radius instead of a le
   });
 
   assert.ok(Math.abs(scene.clusters[0].radius - radius) < 1e-9);
+});
+
+test('spatial envelope sphere carriers retain every recursive shell clearance for exact framing', () => {
+  const field = loadClusterField();
+  const nested = field.buildSpatialEnvelope([
+    field.buildSpatialEnvelope([{
+      kind: 'sphere',
+      center: { x: 3, y: -2, z: 1 },
+      radius: 0.7
+    }], 0.2)
+  ], 0.3);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(field.spatialEnvelopeSpheres(nested))), [{
+    center: { x: 3, y: -2, z: 1 },
+    radius: 1.2
+  }]);
 });
 
 test('screen envelope shrink-wraps one, two and three carriers with a smooth outline', () => {
@@ -905,7 +921,8 @@ test('S mode repacks locked nested carriers instead of leaving a hollow parent s
   assert.ok(Math.hypot(
     children[0].center.x - children[1].center.x,
     children[0].center.y - children[1].center.y
-  ) >= children[0].radius + children[1].radius, 'repacked child shells remain mutually exclusive');
+  ) >= children[0].radius + children[1].radius - 1e-6,
+  'repacked child shells remain mutually exclusive at literal zero spacing');
 });
 
 test('S mode removes inherited coordinate gaps between already-visible nested groups', () => {
@@ -934,7 +951,8 @@ test('S mode removes inherited coordinate gaps between already-visible nested gr
     children[0].center.y - children[1].center.y
   ) - children[0].radius - children[1].radius;
 
-  assert.ok(edgeGap >= 0.035 && edgeGap < 0.3, 'visible nested groups settle at the repulsion interval');
+  assert.ok(edgeGap >= -1e-6 && edgeGap < 0.02,
+    'visible nested groups touch at literal zero spacing without retaining a cavity');
   assert.ok(root.radius < 5.2, 'the parent shell contracts around the settled child edges');
 });
 
@@ -982,8 +1000,8 @@ test('a derived three-dimensional strut axis does not preserve a hollow gap betw
   );
   const edgeGap = centerDistance - children[0].radius - children[1].radius;
 
-  assert.ok(edgeGap >= 0.035 && edgeGap < 0.3,
-    'the established strut direction remains, but its child bodies settle at the real isolation interval');
+  assert.ok(edgeGap >= -1e-6 && edgeGap < 0.02,
+    'the established strut direction remains, but its child bodies touch at literal zero spacing');
   assert.ok(root.radius < children[0].radius + children[1].radius + 0.6,
     'the parent shell contains child bodies rather than the obsolete pre-expansion axis span');
 });
@@ -1019,9 +1037,59 @@ test('zero strut spacing contracts every unequal axis segment instead of one glo
     ) - from.__clusterRadius - to.__clusterRadius;
   };
 
-  assert.ok(edgeGap('foot', 'body') >= 0.035 && edgeGap('foot', 'body') < 0.12);
-  assert.ok(edgeGap('body', 'head') >= 0.035 && edgeGap('body', 'head') < 0.12,
-    'each strut segment uses only entity isolation; an earlier short segment cannot leave a later cavity');
+  assert.ok(edgeGap('foot', 'body') >= -1e-6 && edgeGap('foot', 'body') < 0.02);
+  assert.ok(edgeGap('body', 'head') >= -1e-6 && edgeGap('body', 'head') < 0.02,
+    'each strut segment reaches literal zero spacing; an earlier short segment cannot leave a later cavity');
+});
+
+test('zero spacing packs disconnected strut components instead of preserving their old centres as cavity', () => {
+  const field = loadClusterField();
+  const cluster = field.buildScene([{
+    path: 'root', depth: 0, nodes: [
+      {
+        id: 'upper-a', radius: 0.4, position: { x: 0, y: -30, z: 0 },
+        clusterTopologyPositioned: true, clusterTopologyNeighborIds: ['upper-b']
+      },
+      {
+        id: 'upper-b', radius: 0.4, position: { x: 0, y: -20, z: 0 },
+        clusterTopologyPositioned: true, clusterTopologyNeighborIds: ['upper-a']
+      },
+      {
+        id: 'lower-a', radius: 0.4, position: { x: 0, y: 20, z: 0 },
+        clusterTopologyPositioned: true, clusterTopologyNeighborIds: ['lower-b']
+      },
+      {
+        id: 'lower-b', radius: 0.4, position: { x: 0, y: 30, z: 0 },
+        clusterTopologyPositioned: true, clusterTopologyNeighborIds: ['lower-a']
+      },
+      {
+        id: 'isolated', radius: 0.4, position: { x: 18, y: 0, z: 4 },
+        clusterTopologyPositioned: true
+      }
+    ]
+  }], {
+    compact: true, compactPercent: 0, spatial3d: true, strutSpacingPercent: 0
+  }).clusters[0];
+  const byId = new Map(cluster.layoutNodes.map((node) => [node.id, node]));
+  const componentGap = (leftIds, rightIds) => Math.min(...leftIds.flatMap((leftId) => (
+    rightIds.map((rightId) => {
+      const left = byId.get(leftId);
+      const right = byId.get(rightId);
+      return Math.hypot(
+        right.position.x - left.position.x,
+        right.position.y - left.position.y,
+        right.position.z - left.position.z
+      ) - left.__clusterRadius - right.__clusterRadius;
+    })
+  )));
+
+  const betweenStrutGroups = componentGap(['upper-a', 'upper-b'], ['lower-a', 'lower-b']);
+  const isolatedToGraph = componentGap(['isolated'], ['upper-a', 'upper-b', 'lower-a', 'lower-b']);
+  assert.ok(betweenStrutGroups >= -1e-6 && betweenStrutGroups < 0.02,
+    'independent strut components settle against one another instead of keeping their old centres');
+  assert.ok(isolatedToGraph >= -1e-6 && isolatedToGraph < 0.02,
+    'an unconnected body also joins the minimum occupied volume');
+  assert.ok(cluster.radius < 3.2, 'the parent shell follows the packed bodies, not stale component positions');
 });
 
 test('S mode packs an incomplete row into a compact disk instead of a wide strip', () => {

@@ -26,6 +26,41 @@ async function waitForViewToSettle(page, { allowTransaction = false } = {}) {
   await page.waitForTimeout(550);
 }
 
+async function adaptiveShellBlankPoint(page, path) {
+  return page.evaluate((targetPath) => {
+    const state = window.spatialLab.state();
+    const shell = state.clusterRegions.find((region) => region.path === targetPath);
+    if (!shell || !shell.envelope) return null;
+    const envelope = shell.envelope;
+    const concrete = state.interactionTargets.filter((target) => !target.clusterShellProxy);
+    const contains = (x, y) => {
+      if (envelope.kind === 'circle') return Math.hypot(x - envelope.x, y - envelope.y) <= envelope.radius;
+      const points = envelope.points || [];
+      let inside = false;
+      for (let current = 0, previous = points.length - 1; current < points.length; previous = current, current += 1) {
+        const left = points[current];
+        const right = points[previous];
+        if (((left.y > y) !== (right.y > y))
+          && x < (right.x - left.x) * (y - left.y) / (right.y - left.y) + left.x) inside = !inside;
+      }
+      return inside;
+    };
+    const bounds = envelope.bounds;
+    const candidates = [];
+    for (let y = bounds.top + 8; y <= bounds.bottom - 8; y += 8) {
+      for (let x = bounds.left + 8; x <= bounds.right - 8; x += 8) {
+        if (!contains(x, y)) continue;
+        if (concrete.some((target) => Math.hypot(x - target.x, y - target.y) <= target.radius * 1.12)) continue;
+        candidates.push({ x, y, distance: Math.hypot(x - shell.x, y - shell.y) });
+      }
+    }
+    const point = candidates.sort((left, right) => left.distance - right.distance)[0];
+    if (!point) return null;
+    const rect = document.querySelector('#spaceCanvas').getBoundingClientRect();
+    return { x: point.x, y: point.y, clientX: rect.left + point.x, clientY: rect.top + point.y };
+  }, path);
+}
+
 async function observeFirstPathChangeFrame(page, initialPath) {
   await page.evaluate((path) => {
     window.__firstPathChangeFrame = null;
@@ -1266,8 +1301,10 @@ test('middle drag on the current outer shell orbits around that shell center', a
   const parentShell = (await page.evaluate(() => window.spatialLab.state().clusterRegions))
     .find(({ path }) => path === parentPath);
   expect(parentShell).toBeTruthy();
-  const x = parentShell.clientX + parentShell.radius * 0.72;
-  const y = parentShell.clientY;
+  const blank = await adaptiveShellBlankPoint(page, parentPath);
+  expect(blank).toBeTruthy();
+  const x = blank.clientX;
+  const y = blank.clientY;
 
   await page.mouse.move(x, y);
   await page.mouse.down({ button: 'middle' });
@@ -1278,6 +1315,31 @@ test('middle drag on the current outer shell orbits around that shell center', a
   expect(target.x).toBeCloseTo(parentShell.center.x, 5);
   expect(target.y).toBeCloseTo(parentShell.center.y, 5);
   expect(target.z).toBeCloseTo(parentShell.center.z, 5);
+});
+
+test('stationary middle click frames the adaptive shell that actually contains the pointer', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const { parentPath } = await openAModeFixture(page);
+  await rightClickTarget(page, '父团', 1);
+  await page.waitForTimeout(430);
+  const blank = await adaptiveShellBlankPoint(page, parentPath);
+  expect(blank).toBeTruthy();
+
+  await page.mouse.click(blank.clientX, blank.clientY, { button: 'middle' });
+  await page.waitForTimeout(550);
+
+  const state = await page.evaluate(() => window.spatialLab.state());
+  const shell = state.clusterRegions.find((region) => region.path === parentPath);
+  expect(shell).toBeTruthy();
+  expect(shell.envelope).toBeTruthy();
+  const bounds = shell.envelope.bounds;
+  const diagnostic = JSON.stringify({ bounds, camera: state.camera, center: shell.center });
+  expect(bounds.left, diagnostic).toBeGreaterThanOrEqual(16);
+  expect(bounds.top).toBeGreaterThanOrEqual(16);
+  expect(bounds.right).toBeLessThanOrEqual(1584);
+  expect(bounds.bottom).toBeLessThanOrEqual(884);
+  expect(Math.max(bounds.width / 1600, bounds.height / 900)).toBeGreaterThan(0.55);
 });
 
 test('ordinary nested blank right double-click collapses only its direct inner group', async ({ page }) => {

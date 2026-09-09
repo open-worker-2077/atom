@@ -9,10 +9,13 @@
         return {
           region,
           radius,
-          normalizedDistance: Math.hypot(x - region.x, y - region.y) / radius
+          normalizedDistance: Math.hypot(x - region.x, y - region.y) / radius,
+          inside: typeof region.containsPoint === "boolean"
+            ? region.containsPoint
+            : Math.hypot(x - region.x, y - region.y) / radius <= 1
         };
       })
-      .filter((candidate) => candidate.normalizedDistance <= 1)
+      .filter((candidate) => candidate.inside)
       .sort((left, right) => (
         left.radius - right.radius
         || left.normalizedDistance - right.normalizedDistance

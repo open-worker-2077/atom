@@ -25,12 +25,12 @@
 
   function minimumShellClearance(options) {
     if (!options || options.compact !== true) return 0.52;
-    return mix(0.08, 0.52, repulsionGapAmount(options));
+    return mix(0, 0.52, repulsionGapAmount(options));
   }
 
   function repulsionGap(options) {
     if (!options || options.compact !== true) return 0.18;
-    return mix(0.04, 0.3, repulsionGapAmount(options));
+    return mix(0, 0.3, repulsionGapAmount(options));
   }
 
   function sameLevelIsolationGap(percentInput) {
@@ -415,6 +415,20 @@
     };
   }
 
+  function spatialEnvelopeSpheres(carrierInput, inheritedClearanceInput = 0) {
+    const inheritedClearance = Math.max(0, Number(inheritedClearanceInput) || 0);
+    if (!carrierInput) return [];
+    if (carrierInput.kind === "sphere") {
+      return [{
+        center: { ...carrierInput.center },
+        radius: Math.max(0, Number(carrierInput.radius) || 0) + inheritedClearance
+      }];
+    }
+    if (carrierInput.kind !== "spatial-envelope") return [];
+    const clearance = inheritedClearance + Math.max(0, Number(carrierInput.clearance) || 0);
+    return carrierInput.carriers.flatMap((carrier) => spatialEnvelopeSpheres(carrier, clearance));
+  }
+
   function spatialCarrierSupportPoint(carrier, directionInput) {
     const direction = unitDirection(directionInput);
     if (carrier && carrier.kind === "spatial-envelope") {
@@ -706,36 +720,6 @@
     }
   }
 
-  function contractLegacySpatialSkeleton(automaticNodes, fixedNodes, center, gap) {
-    if (fixedNodes.length || automaticNodes.length < 2) return;
-    let requiredScale = 0;
-    for (let leftIndex = 0; leftIndex < automaticNodes.length; leftIndex += 1) {
-      for (let rightIndex = leftIndex + 1; rightIndex < automaticNodes.length; rightIndex += 1) {
-        const left = automaticNodes[leftIndex];
-        const right = automaticNodes[rightIndex];
-        const distance = Math.hypot(
-          right.position.x - left.position.x,
-          right.position.y - left.position.y,
-          right.position.z - left.position.z
-        );
-        if (!(distance > 0.0001)) continue;
-        requiredScale = Math.max(
-          requiredScale,
-          (left.__clusterRadius + right.__clusterRadius + gap) / distance
-        );
-      }
-    }
-    const scale = Math.min(1, requiredScale);
-    if (!(scale > 0 && scale < 0.99999)) return;
-    for (const node of automaticNodes) {
-      node.position = {
-        x: center.x + (node.position.x - center.x) * scale,
-        y: center.y + (node.position.y - center.y) * scale,
-        z: center.z + (node.position.z - center.z) * scale
-      };
-    }
-  }
-
   function settleDerivedSpatialSkeleton(automaticNodes, fixedNodes, center, gap, strutSpacingPercent) {
     const nodes = [...automaticNodes, ...fixedNodes];
     const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -756,14 +740,10 @@
         adjacency.get(neighborId).push(node.id);
       }
     }
-    if (!edges.length) {
-      contractLegacySpatialSkeleton(automaticNodes, fixedNodes, center, gap);
-      return;
-    }
-
     const sourcePositions = new Map(nodes.map((node) => [node.id, { ...node.position }]));
     const extraSpacing = gap * clamp(Number(strutSpacingPercent) || 0, 0, 100) / 100;
     const remaining = new Set(nodes.map((node) => node.id));
+    const components = [];
     while (remaining.size) {
       const componentStart = [...remaining].sort()[0];
       const componentIds = [];
@@ -778,6 +758,7 @@
           componentQueue.push(neighborId);
         }
       }
+      components.push(componentIds);
       if (componentIds.length < 2) continue;
       const fixedRoot = componentIds.find((id) => byId.get(id).__packingLocked === true);
       const rootId = fixedRoot || componentIds.slice().sort((leftId, rightId) => (
@@ -834,6 +815,122 @@
         node.position.z += originalCenter.z - settledCenter.z;
       }
     }
+
+    if (components.length < 2 || fixedNodes.length) return;
+    const orderedComponents = components.slice().sort((left, right) => (
+      right.length - left.length
+        || String(left.slice().sort()[0]).localeCompare(String(right.slice().sort()[0]))
+    ));
+    const sourceCenter = nodes.reduce((sum, node) => {
+      const point = sourcePositions.get(node.id);
+      sum.x += point.x / nodes.length;
+      sum.y += point.y / nodes.length;
+      sum.z += point.z / nodes.length;
+      return sum;
+    }, { x: 0, y: 0, z: 0 });
+    const componentCenter = (ids) => ids.reduce((sum, id) => {
+      const point = byId.get(id).position;
+      sum.x += point.x / ids.length;
+      sum.y += point.y / ids.length;
+      sum.z += point.z / ids.length;
+      return sum;
+    }, { x: 0, y: 0, z: 0 });
+    const translate = (ids, delta) => {
+      for (const id of ids) {
+        const point = byId.get(id).position;
+        point.x += delta.x;
+        point.y += delta.y;
+        point.z += delta.z;
+      }
+    };
+
+    const placedIds = [];
+    const firstIds = orderedComponents.shift();
+    const firstCenter = componentCenter(firstIds);
+    translate(firstIds, {
+      x: center.x - firstCenter.x,
+      y: center.y - firstCenter.y,
+      z: center.z - firstCenter.z
+    });
+    placedIds.push(...firstIds);
+
+    for (const componentIds of orderedComponents) {
+      const placedCenter = componentCenter(placedIds);
+      const movingCenter = componentCenter(componentIds);
+      const rawOutward = {
+        x: movingCenter.x - sourceCenter.x,
+        y: movingCenter.y - sourceCenter.y,
+        z: movingCenter.z - sourceCenter.z
+      };
+      const outwardLength = Math.hypot(rawOutward.x, rawOutward.y, rawOutward.z);
+      const outward = outwardLength > 0.0001
+        ? {
+            x: rawOutward.x / outwardLength,
+            y: rawOutward.y / outwardLength,
+            z: rawOutward.z / outwardLength
+          }
+        : stableDirection3d(componentIds[0], placedIds[0]);
+      const movingExtent = Math.max(...componentIds.map((id) => {
+        const node = byId.get(id);
+        return Math.hypot(
+          node.position.x - movingCenter.x,
+          node.position.y - movingCenter.y,
+          node.position.z - movingCenter.z
+        ) + node.__clusterRadius;
+      }));
+      const placedExtent = Math.max(...placedIds.map((id) => {
+        const node = byId.get(id);
+        return Math.hypot(
+          node.position.x - placedCenter.x,
+          node.position.y - placedCenter.y,
+          node.position.z - placedCenter.z
+        ) + node.__clusterRadius;
+      }));
+      const startDistance = placedExtent + movingExtent + gap + extraSpacing + 1;
+      const startCenter = {
+        x: placedCenter.x + outward.x * startDistance,
+        y: placedCenter.y + outward.y * startDistance,
+        z: placedCenter.z + outward.z * startDistance
+      };
+      translate(componentIds, {
+        x: startCenter.x - movingCenter.x,
+        y: startCenter.y - movingCenter.y,
+        z: startCenter.z - movingCenter.z
+      });
+      const direction = { x: -outward.x, y: -outward.y, z: -outward.z };
+      let firstContact = Infinity;
+      for (const movingId of componentIds) {
+        const moving = byId.get(movingId);
+        for (const placedId of placedIds) {
+          const placed = byId.get(placedId);
+          const rx = moving.position.x - placed.position.x;
+          const ry = moving.position.y - placed.position.y;
+          const rz = moving.position.z - placed.position.z;
+          const projection = rx * direction.x + ry * direction.y + rz * direction.z;
+          const combinedRadius = moving.__clusterRadius + placed.__clusterRadius + gap + extraSpacing;
+          const discriminant = projection * projection
+            - (rx * rx + ry * ry + rz * rz - combinedRadius * combinedRadius);
+          if (discriminant < 0) continue;
+          const entry = -projection - Math.sqrt(discriminant);
+          if (entry >= 0) firstContact = Math.min(firstContact, entry);
+        }
+      }
+      if (Number.isFinite(firstContact)) {
+        translate(componentIds, {
+          x: direction.x * firstContact,
+          y: direction.y * firstContact,
+          z: direction.z * firstContact
+        });
+      }
+      placedIds.push(...componentIds);
+    }
+
+    const packedCenter = componentCenter(nodes.map((node) => node.id));
+    translate(nodes.map((node) => node.id), {
+      x: sourceCenter.x - packedCenter.x,
+      y: sourceCenter.y - packedCenter.y,
+      z: sourceCenter.z - packedCenter.z
+    });
   }
 
   function transformedNodes(nodes, center, radius, ownerPath, nestedCarrierByNodeId = null, optionsInput = {}) {
@@ -1477,6 +1574,7 @@
     sameLevelIsolationGap,
     buildScreenEnvelope,
     buildSpatialEnvelope,
+    spatialEnvelopeSpheres,
     sampleSpatialEnvelopeSurface,
     buildScreenPointEnvelope,
     envelopeContainsPoint

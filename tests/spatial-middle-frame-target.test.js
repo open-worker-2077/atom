@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const targetResolver = require('../spatial-middle-frame-target.js');
 
 function nodeRegion(id, radius, options = {}) {
-  return {
+  const region = {
     x: options.x ?? 100,
     y: options.y ?? 100,
     radius,
@@ -16,6 +16,10 @@ function nodeRegion(id, radius, options = {}) {
       clusterShellProxy: options.clusterShellProxy === true
     }
   };
+  if (Object.prototype.hasOwnProperty.call(options, 'containsPoint')) {
+    region.containsPoint = options.containsPoint;
+  }
+  return region;
 }
 
 function candidate(region, score) {
@@ -49,6 +53,20 @@ test('middle framing falls back through nested shells from smallest to largest',
 test('middle framing ignores targets outside their visible hit circle', () => {
   const node = nodeRegion('missed-node', 20);
   assert.equal(targetResolver.chooseMostSpecificTarget([node], 140, 100), null);
+});
+
+test('middle framing obeys an adaptive shell hit instead of its enclosing circle', () => {
+  const missedShell = nodeRegion('adaptive-shell', 400, {
+    clusterShellProxy: true,
+    containsPoint: false
+  });
+  const hitShell = nodeRegion('adaptive-shell', 400, {
+    clusterShellProxy: true,
+    containsPoint: true
+  });
+
+  assert.equal(targetResolver.chooseMostSpecificTarget([missedShell], 100, 100), null);
+  assert.equal(targetResolver.chooseMostSpecificTarget([hitShell], 100, 100), hitShell);
 });
 
 test('cluster pointer selection keeps the concrete small node instead of a higher-score outer node', () => {

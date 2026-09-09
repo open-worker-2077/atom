@@ -370,7 +370,9 @@ test('stationary middle click quickly frames the pointed node or cluster', () =>
   const release = functionSource('releasePointer');
   assert.match(commit, /candidate\.button\s*===\s*1[\s\S]*quickFrameMiddleTarget\s*\(\s*candidate\s*\)/);
   assert.match(engine, /pointerInput\.button\s*===\s*1[\s\S]*findMiddleFrameHit\s*\(\s*event\.clientX\s*,\s*event\.clientY\s*\)/);
-  assert.match(middleHit, /middleFrameTarget\.chooseMostSpecificTarget\s*\(\s*state\.hitRegions/);
+  assert.match(middleHit, /middleRegions\s*=\s*state\.hitRegions\.map/);
+  assert.match(middleHit, /clusterField\.envelopeContainsPoint\s*\(\s*region\.envelope/);
+  assert.match(middleHit, /middleFrameTarget\.chooseMostSpecificTarget\s*\(\s*middleRegions/);
   assert.match(release, /candidate\.button\s*===\s*1[\s\S]*releaseHit\s*=\s*findMiddleFrameHit/);
   assert.match(quickFrame, /candidate\.node/);
   assert.match(quickFrame, /candidate\.domainContext/);
