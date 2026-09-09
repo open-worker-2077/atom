@@ -695,6 +695,36 @@
     }
   }
 
+  function contractDerivedSpatialSkeleton(automaticNodes, fixedNodes, center, gap) {
+    if (fixedNodes.length || automaticNodes.length < 2) return;
+    let requiredScale = 0;
+    for (let leftIndex = 0; leftIndex < automaticNodes.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < automaticNodes.length; rightIndex += 1) {
+        const left = automaticNodes[leftIndex];
+        const right = automaticNodes[rightIndex];
+        const distance = Math.hypot(
+          right.position.x - left.position.x,
+          right.position.y - left.position.y,
+          right.position.z - left.position.z
+        );
+        if (!(distance > 0.0001)) continue;
+        requiredScale = Math.max(
+          requiredScale,
+          (left.__clusterRadius + right.__clusterRadius + gap) / distance
+        );
+      }
+    }
+    const scale = Math.min(1, requiredScale);
+    if (!(scale > 0 && scale < 0.99999)) return;
+    for (const node of automaticNodes) {
+      node.position = {
+        x: center.x + (node.position.x - center.x) * scale,
+        y: center.y + (node.position.y - center.y) * scale,
+        z: center.z + (node.position.z - center.z) * scale
+      };
+    }
+  }
+
   function transformedNodes(nodes, center, radius, ownerPath, nestedCarrierByNodeId = null, optionsInput = {}) {
     if (!nodes.length) return [];
     const options = optionsInput && typeof optionsInput === "object" ? optionsInput : {};
@@ -742,7 +772,11 @@
       const hasDerivedSpatialSkeleton = spatial3d
         && positioned.some((node) => node.clusterTopologyPositioned === true);
       if (spatial3d) {
-        if (!hasDerivedSpatialSkeleton) {
+        if (hasDerivedSpatialSkeleton) {
+          // Strut owns the established direction. Once nested slot bodies have
+          // their real radii, the obsolete seed distance must not become cavity.
+          contractDerivedSpatialSkeleton(automatic, fixed, center, collisionGap * displayScale);
+        } else {
           placeCompactVolume(automatic, fixed, center, collisionGap * displayScale);
         }
       } else {

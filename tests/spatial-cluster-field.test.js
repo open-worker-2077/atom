@@ -924,6 +924,56 @@ test('S mode removes inherited coordinate gaps between already-visible nested gr
   assert.ok(root.radius < 5.2, 'the parent shell contracts around the settled child edges');
 });
 
+test('a derived three-dimensional strut axis does not preserve a hollow gap between expanded child bodies', () => {
+  const field = loadClusterField();
+  const childNodes = Array.from({ length: 3 }, (_, index) => ({
+    id: `axis-leaf-${index}`,
+    radius: 0.82,
+    position: { x: index * 0.04, y: index * 0.03, z: index * 0.02 }
+  }));
+  const scene = field.buildScene([
+    {
+      path: 'root',
+      depth: 0,
+      nodes: [
+        {
+          id: 'axis-start', radius: 0.82,
+          position: { x: -20, y: -16, z: -8 },
+          __scaleReferencePosition: { x: -20, y: -16, z: -8 },
+          clusterTopologyPositioned: true
+        },
+        {
+          id: 'axis-end', radius: 0.82,
+          position: { x: 20, y: 16, z: 8 },
+          __scaleReferencePosition: { x: 20, y: 16, z: 8 },
+          clusterTopologyPositioned: true
+        }
+      ]
+    },
+    {
+      path: 'root/start', depth: 1, parentPath: 'root', parentNodeId: 'axis-start',
+      projectionMode: 'nested', nodes: childNodes
+    },
+    {
+      path: 'root/end', depth: 1, parentPath: 'root', parentNodeId: 'axis-end',
+      projectionMode: 'nested', nodes: childNodes
+    }
+  ], { compact: true, compactPercent: 0, spatial3d: true });
+  const root = scene.clusters.find((cluster) => cluster.path === 'root');
+  const children = scene.clusters.filter((cluster) => cluster.parentPath === 'root');
+  const centerDistance = Math.hypot(
+    children[0].center.x - children[1].center.x,
+    children[0].center.y - children[1].center.y,
+    children[0].center.z - children[1].center.z
+  );
+  const edgeGap = centerDistance - children[0].radius - children[1].radius;
+
+  assert.ok(edgeGap >= 0.035 && edgeGap < 0.3,
+    'the established strut direction remains, but its child bodies settle at the real isolation interval');
+  assert.ok(root.radius < children[0].radius + children[1].radius + 0.6,
+    'the parent shell contains child bodies rather than the obsolete pre-expansion axis span');
+});
+
 test('S mode packs an incomplete row into a compact disk instead of a wide strip', () => {
   const field = loadClusterField();
   const nodes = Array.from({ length: 5 }, (_, index) => ({
