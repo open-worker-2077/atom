@@ -90,9 +90,9 @@
     media="print"
     onload="this.media='all'"
   >
-  <link rel="stylesheet" href="spatial.css?v=sha256-ec5345c76710d729">
+  <link rel="stylesheet" href="spatial.css?v=sha256-a116523e7a89a099">
 </head>
-<body data-build="sha256-ec5345c76710d729" data-spatial-bridge="connecting">
+<body data-build="sha256-a116523e7a89a099" data-spatial-bridge="connecting">
   <div class="spatial-data-gate" role="status" aria-live="polite">
     <div class="spatial-data-gate__panel">
       <div class="spatial-data-gate__headline">
@@ -414,6 +414,8 @@
       </nav>
       <section class="presentation-settings" aria-labelledby="viewSettingsTitle">
         <h4 id="viewSettingsTitle">视图布局</h4>
+        <details class="settings-submenu" data-settings-submenu open>
+          <summary>空间骨架</summary>
         <label class="range-setting">
           <span>S 同层互斥间隔</span>
           <span class="range-setting__control">
@@ -433,8 +435,8 @@
         <label class="range-setting">
           <span>Graph 纵向朝向</span>
           <span class="range-setting__control">
-            <input id="layoutPitch" type="range" min="0" max="359" step="1" value="90">
-            <output id="layoutPitchValue" for="layoutPitch">90°</output>
+            <input id="layoutPitch" type="range" min="0" max="359" step="1" value="0">
+            <output id="layoutPitchValue" for="layoutPitch">0°</output>
           </span>
           <small>默认起点低、终点高；横向与纵向角度只旋转布局，不改变 Graph 事实。</small>
         </label>
@@ -446,13 +448,16 @@
           </span>
         </label>
         <label class="range-setting">
-          <span>推支线额外撑开</span>
+          <span>推支线主动占用长度</span>
           <span class="range-setting__control">
             <input id="strutSpacing" type="range" min="0" max="100" step="1" value="0">
             <output id="strutSpacingValue" for="strutSpacing">0%</output>
           </span>
           <small>0% 时推支线只在节点或团的既有隔离缝隙中生长，不额外撑开空间。</small>
         </label>
+        </details>
+        <details class="settings-submenu" data-settings-submenu>
+          <summary>形体与观察</summary>
         <label class="range-setting">
           <span>空节点最小直径</span>
           <span class="range-setting__control">
@@ -491,6 +496,7 @@
             <output id="nestedTunnelInteriorStrengthValue" for="nestedTunnelInteriorStrength">0%</output>
           </span>
         </label>
+        </details>
       </section>
       <section class="presentation-settings" aria-labelledby="nodeSettingsTitle">
         <h4 id="nodeSettingsTitle">节点文字</h4>
@@ -687,29 +693,29 @@
   </main>
 
   <noscript>此实验场需要 JavaScript 才能响应空间交互。</noscript>
-  <script src="input-config.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-mobile-input-model.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-visual-model.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-detail-magnifier-model.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-gesture-arbiter.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-middle-frame-target.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-entity-registry.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-view-grammar.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-workspace-model.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-program-choice-model.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-mermaid-codec.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-json-codec.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-view-mode-model.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-help-page-model.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-work-order-registry-model.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-work-order-registry-panel.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-demo-model.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-demo-geometry.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-cluster-field.js?v=sha256-ec5345c76710d729"></script>
-  <script src="vendor/spatial-markdown-editor.bundle.js?v=sha256-ec5345c76710d729"></script>
-  <script src="vendor/atom-spatial-scene.bundle.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-engine.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-mermaid-panel.js?v=sha256-ec5345c76710d729"></script>
-  <script src="spatial-browser-bridge.js?v=sha256-ec5345c76710d729"></script>
+  <script src="input-config.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-mobile-input-model.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-visual-model.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-detail-magnifier-model.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-gesture-arbiter.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-middle-frame-target.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-entity-registry.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-view-grammar.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-workspace-model.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-program-choice-model.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-mermaid-codec.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-json-codec.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-view-mode-model.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-help-page-model.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-work-order-registry-model.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-work-order-registry-panel.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-demo-model.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-demo-geometry.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-cluster-field.js?v=sha256-a116523e7a89a099"></script>
+  <script src="vendor/spatial-markdown-editor.bundle.js?v=sha256-a116523e7a89a099"></script>
+  <script src="vendor/atom-spatial-scene.bundle.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-engine.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-mermaid-panel.js?v=sha256-a116523e7a89a099"></script>
+  <script src="spatial-browser-bridge.js?v=sha256-a116523e7a89a099"></script>
 </body>
 </html>

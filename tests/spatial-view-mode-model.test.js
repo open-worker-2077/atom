@@ -345,6 +345,23 @@ test('vertical scope resolution fails closed outside every visible domain shell'
   ], { x: 300, y: 300 }), null);
 });
 
+test('vertical scope resolution accepts a point inside the rendered adaptive envelope', () => {
+  const model = loadModel();
+  assert.deepEqual(JSON.parse(JSON.stringify(model.resolveVerticalScopeAnchor([
+    {
+      path: 'root/adaptive',
+      depth: 1,
+      x: 100,
+      y: 100,
+      radius: 30,
+      containsPoint: true
+    }
+  ], { x: 145, y: 100 }))), {
+    path: 'root/adaptive',
+    depth: 1
+  });
+});
+
 test('PageDown plans every currently visible unopened portal once through nested A projection', () => {
   const model = loadModel();
   const entries = [
@@ -390,6 +407,14 @@ test('PageUp closes only the deepest open layer inside the current context', () 
   assert.deepEqual(
     Array.from(model.planContextLevelCollapse(paths, 'root', 'immersive')),
     ['root/b', 'root/a/a1']
+  );
+});
+
+test('PageUp on an opened leaf group closes that pointed group itself', () => {
+  const model = loadModel();
+  assert.deepEqual(
+    Array.from(model.planContextLevelCollapse(['root/a'], 'root/a', 'nested')),
+    ['root/a']
   );
 });
 

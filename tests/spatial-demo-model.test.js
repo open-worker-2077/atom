@@ -19,7 +19,7 @@ test('first visit keeps automatic presentation off until the user explicitly ena
   assert.ok(model, 'SpatialDemoModel must exist');
   assert.deepEqual(
     JSON.parse(JSON.stringify(model.normalizeSettings(null))),
-    { idleSeconds: null, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 90, branchSpreadDegrees: 55, strutSpacingPercent: 0, emptyNodeDiameterPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 0, branchSpreadDegrees: 55, strutSpacingPercent: 0, emptyNodeDiameterPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 
@@ -31,11 +31,11 @@ test('blank idle seconds disables presentation while retaining the last valid de
       lastIdleSeconds: 12,
       helpVisible: false
     }))),
-    { idleSeconds: null, lastIdleSeconds: 12, helpVisible: false, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 90, branchSpreadDegrees: 55, strutSpacingPercent: 0, emptyNodeDiameterPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 12, helpVisible: false, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 0, branchSpreadDegrees: 55, strutSpacingPercent: 0, emptyNodeDiameterPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(model.withIdleInput({ idleSeconds: 8, lastIdleSeconds: 8, helpVisible: true }, ''))),
-    { idleSeconds: null, lastIdleSeconds: 8, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 90, branchSpreadDegrees: 55, strutSpacingPercent: 0, emptyNodeDiameterPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: null, lastIdleSeconds: 8, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 0, branchSpreadDegrees: 55, strutSpacingPercent: 0, emptyNodeDiameterPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 
@@ -90,7 +90,7 @@ test('3d graph orientation settings wrap full rotations and bound branch spread'
   const model = loadModel();
   const defaults = model.normalizeSettings(null);
   assert.equal(defaults.layoutYawDegrees, 0);
-  assert.equal(defaults.layoutPitchDegrees, 90);
+  assert.equal(defaults.layoutPitchDegrees, 0);
   assert.equal(defaults.branchSpreadDegrees, 55);
   assert.equal(defaults.strutSpacingPercent, 0);
   assert.equal(defaults.emptyNodeDiameterPercent, 50);
@@ -445,7 +445,7 @@ test('invalid persisted settings recover without leaking unknown fields', () => 
   });
   assert.deepEqual(
     JSON.parse(JSON.stringify(settings)),
-    { idleSeconds: 5, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 90, branchSpreadDegrees: 55, strutSpacingPercent: 0, emptyNodeDiameterPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
+    { idleSeconds: 5, lastIdleSeconds: 5, helpVisible: true, defaultDetailMode: 'floating', secondaryNavigationDelayMs: 420, peripheralDepthShrinkPercent: 20, nestedCompactnessPercent: 50, layoutYawDegrees: 0, layoutPitchDegrees: 0, branchSpreadDegrees: 55, strutSpacingPercent: 0, emptyNodeDiameterPercent: 50, nestedTunnelPercent: 0, nestedTunnelInteriorPercent: 0, zoomSpeedPercent: 160, relationshipLineWidthPercent: 180, relationshipBrightnessPercent: 160, middleLabelDepth: 3, highlightedLabelBrightnessPercent: 100, otherLabelBrightnessPercent: 35, middleDetailDepth: 3, highlightedDetailBrightnessPercent: 100, otherDetailBrightnessPercent: 0, floatingDetailBackdropOpacityPercent: 82 }
   );
 });
 

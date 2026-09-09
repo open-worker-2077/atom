@@ -70,6 +70,20 @@ test('authoritative id replacement keeps compact node placement through stable l
   assert.deepEqual(placement(after), placement(before));
 });
 
+test('an empty Slot domain uses the configured empty-node radius instead of a legacy shell floor', () => {
+  const field = loadClusterField();
+  const radius = 0.164;
+  const scene = field.buildScene([
+    { path: 'root/empty', depth: 1, active: true, projectionMode: 'nested', nodes: [] }
+  ], {
+    compact: true,
+    compactPercent: 0,
+    emptyNodeRadius: radius
+  });
+
+  assert.ok(Math.abs(scene.clusters[0].radius - radius) < 1e-9);
+});
+
 test('screen envelope shrink-wraps one, two and three carriers with a smooth outline', () => {
   const field = loadClusterField();
   const one = field.buildScreenEnvelope([
@@ -972,6 +986,42 @@ test('a derived three-dimensional strut axis does not preserve a hollow gap betw
     'the established strut direction remains, but its child bodies settle at the real isolation interval');
   assert.ok(root.radius < children[0].radius + children[1].radius + 0.6,
     'the parent shell contains child bodies rather than the obsolete pre-expansion axis span');
+});
+
+test('zero strut spacing contracts every unequal axis segment instead of one global scale', () => {
+  const field = loadClusterField();
+  const cluster = field.buildScene([{
+    path: 'root', depth: 0, nodes: [
+      {
+        id: 'foot', radius: 0.4, position: { x: 0, y: -20, z: 0 },
+        clusterTopologyPositioned: true, clusterTopologyNeighborIds: ['body']
+      },
+      {
+        id: 'body', radius: 0.4, position: { x: 0, y: -10, z: 0 },
+        clusterTopologyPositioned: true, clusterTopologyNeighborIds: ['foot', 'head']
+      },
+      {
+        id: 'head', radius: 0.4, position: { x: 0, y: 20, z: 0 },
+        clusterTopologyPositioned: true, clusterTopologyNeighborIds: ['body']
+      }
+    ]
+  }], {
+    compact: true, compactPercent: 0, spatial3d: true, strutSpacingPercent: 0
+  }).clusters[0];
+  const byId = new Map(cluster.layoutNodes.map((node) => [node.id, node]));
+  const edgeGap = (fromId, toId) => {
+    const from = byId.get(fromId);
+    const to = byId.get(toId);
+    return Math.hypot(
+      to.position.x - from.position.x,
+      to.position.y - from.position.y,
+      to.position.z - from.position.z
+    ) - from.__clusterRadius - to.__clusterRadius;
+  };
+
+  assert.ok(edgeGap('foot', 'body') >= 0.035 && edgeGap('foot', 'body') < 0.12);
+  assert.ok(edgeGap('body', 'head') >= 0.035 && edgeGap('body', 'head') < 0.12,
+    'each strut segment uses only entity isolation; an earlier short segment cannot leave a later cavity');
 });
 
 test('S mode packs an incomplete row into a compact disk instead of a wide strip', () => {

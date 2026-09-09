@@ -975,7 +975,7 @@ test('spatial 3d layout raises a directed main chain from source to target', () 
   const layout = SpatialVisualModel.relaxRelationshipLayout(entries, links, {
     spatial3d: true,
     layoutYawDegrees: 0,
-    layoutPitchDegrees: 90,
+    layoutPitchDegrees: 0,
     branchSpreadDegrees: 55
   });
 
@@ -1060,12 +1060,12 @@ test('spatial 3d branch spread controls distance from the main axis', () => {
   ];
   const narrow = SpatialVisualModel.relaxRelationshipLayout(entries, links, {
     spatial3d: true,
-    layoutPitchDegrees: 90,
+    layoutPitchDegrees: 0,
     branchSpreadDegrees: 15
   });
   const wide = SpatialVisualModel.relaxRelationshipLayout(entries, links, {
     spatial3d: true,
-    layoutPitchDegrees: 90,
+    layoutPitchDegrees: 0,
     branchSpreadDegrees: 80
   });
   const radial = (layout) => Math.hypot(
@@ -1085,12 +1085,13 @@ test('layout yaw and pitch rotate the derived graph without changing facts', () 
   const links = [{ fromId: 'a', toId: 'b', kind: 'association' }];
   const vertical = SpatialVisualModel.relaxRelationshipLayout(entries, links, {
     spatial3d: true,
-    layoutPitchDegrees: 90
+    layoutYawDegrees: 0,
+    layoutPitchDegrees: 0
   });
   const horizontal = SpatialVisualModel.relaxRelationshipLayout(entries, links, {
     spatial3d: true,
     layoutYawDegrees: 90,
-    layoutPitchDegrees: 0
+    layoutPitchDegrees: 90
   });
 
   assert.ok(Math.abs(vertical.b.y - vertical.a.y) > Math.abs(vertical.b.x - vertical.a.x));

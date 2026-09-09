@@ -78,7 +78,7 @@ test('orbital settings centralize tools and persist the CapsLock default detail 
   await expect(page.locator('#settingsPanel')).toHaveAttribute('aria-modal', 'true');
   await expect(page.locator('#settingsPanel h3')).toHaveText(['游走', '空间工具', '映射', '显示', '启动与帮助']);
   await expect(page.locator('#layoutYaw')).toHaveValue('0');
-  await expect(page.locator('#layoutPitch')).toHaveValue('90');
+  await expect(page.locator('#layoutPitch')).toHaveValue('0');
   await expect(page.locator('#branchSpread')).toHaveValue('55');
   await expect(page.locator('#strutSpacing')).toHaveValue('0');
   await expect(page.locator('#emptyNodeDiameter')).toHaveValue('50');

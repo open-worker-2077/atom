@@ -12,6 +12,13 @@
 
 ## Global Constraints
 
+## 2026-09-09 用户新增现场反馈：先记录，再定位
+
+- **状态边界**：以下两项为用户现场报告，尚未由本任务独立复现；根因未确认，未修改产品代码、展示参数或 Atom 世界。此前通过的测试不证明这两个新现场已通过。
+- **空节点体量**：用户已将“空节点最小大小”设为最小值，但图中上方空节点显著大于下方含内嵌节点的团。截图：`C:/Users/worker/AppData/Local/Temp/codex-clipboard-175b5b57-4b6a-4a89-9dba-d70065f54837.png`。待核实同一现场的准确节点、实际子项/折叠状态、参数生效值、世界半径与投影半径；不能仅以“最小值只是下限”解释后关闭，也不能把视觉留白直接等同于数据为空。验收须回到该现场，对照实际内容及视角说明尺寸来源，排除额外保底、旧半径或错误包络撑大；不得擅自要求所有空节点屏幕像素恒等。
+- **PageUp 无响应**：用户报告光标放在第二张截图所示位置无法 PageUp；位置靠近当前外壳内、两个子团之间的留白。截图：`C:/Users/worker/AppData/Local/Temp/codex-clipboard-8350c50f-0628-426c-aec1-8d61b8e90d07.png`。待在相同沉浸/展开状态分别核对指针位置、键盘焦点、事件接收、命中域与返回目标；不能凭截图判定焦点丢失，也不把留白擅自解释为禁止返回。验收以图示位置及相邻子团表面/外壳区域的 PageUp 实际行为为准，并保留原有导航合同。
+- **推进方式**：按 Superpowers systematic-debugging 收集最小复现与正反对照，再判断责任环节；本次仅持久化需求及诊断边界，不包含修复授权或已修复结论。唯一状态仍归总账，不另建平行账本。
+
 - `thing / situation / slot / strut` remain the only Graph axes.
 - Slot defines containment and cutaway; strut defines same-level directed push relations and never owns hidden child nodes.
 - Default main-axis orientation is low source to high target; layout yaw, pitch and branch spread are projection settings only.

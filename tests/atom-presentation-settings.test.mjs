@@ -83,7 +83,7 @@ test('presentation service reads the prior complete field set by filling new pro
   assert.equal(result.revision, 7);
   assert.equal(result.settings.secondaryNavigationDelayMs, 420);
   assert.equal(result.settings.layoutYawDegrees, 0);
-  assert.equal(result.settings.layoutPitchDegrees, 90);
+  assert.equal(result.settings.layoutPitchDegrees, 0);
   assert.equal(result.settings.branchSpreadDegrees, 55);
   assert.equal(result.settings.nestedTunnelPercent, 0);
   assert.equal(result.settings.otherDetailBrightnessPercent, 0);

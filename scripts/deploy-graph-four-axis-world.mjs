@@ -38,6 +38,11 @@ async function copyIfPresent(source, destination) {
   }
 }
 
+async function writeBackupBytes(source, destination, bytes) {
+  await fs.writeFile(destination, bytes, { flag: 'wx' });
+  return { source, destination, hash: hashBytes(bytes) };
+}
+
 async function readIfPresent(file) {
   try {
     return await fs.readFile(file);
@@ -124,9 +129,8 @@ function requireAttemptId(value) {
   return value;
 }
 
-async function currentRevision(contextFile) {
-  const facts = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  return revisionOfWorldFacts(facts);
+async function currentRevision(persistence) {
+  return (await persistence.readCommittedSnapshot()).revision;
 }
 
 async function restoreProjectionBackup({ deployment, graphFile }) {
@@ -178,7 +182,7 @@ async function main() {
 
   if (rollbackReceipt) {
     const deployment = JSON.parse(await fs.readFile(path.resolve(rollbackReceipt), 'utf8'));
-    const beforeRevision = await currentRevision(contextFile);
+    const beforeRevision = await currentRevision(persistence);
     let alreadyAtSource = beforeRevision === deployment.sourceRevision;
     const atDeploymentTarget = beforeRevision === deployment.migration?.rollback?.expectedRevision;
     if (!alreadyAtSource && !atDeploymentTarget) {
@@ -208,7 +212,7 @@ async function main() {
       }
     }
     if (rollbackError?.code === 'ROLLBACK_WORLD_DIVERGED'
-      && await currentRevision(contextFile) === deployment.sourceRevision) {
+      && await currentRevision(persistence) === deployment.sourceRevision) {
       rollbackError = null;
       alreadyAtSource = true;
     }
@@ -219,7 +223,7 @@ async function main() {
     }
     const projection = await restoreProjectionBackup({ deployment, graphFile });
     if (rollbackError) throw rollbackError;
-    const revision = await currentRevision(contextFile);
+    const revision = await currentRevision(persistence);
     const sidecarOk = !deployment.migration.requestDrivenLocks
       || restoredRequestDrivenLocks?.restoredSnapshotHash
         === deployment.migration.requestDrivenLocks.sourceHash;
@@ -238,9 +242,10 @@ async function main() {
     return;
   }
 
-  const sourceBytes = await fs.readFile(contextFile);
-  const sourceFacts = JSON.parse(sourceBytes.toString('utf8'));
-  const sourceRevision = revisionOfWorldFacts(sourceFacts);
+  const sourceSnapshot = await persistence.readCommittedSnapshot();
+  const sourceFacts = sourceSnapshot.facts;
+  const sourceRevision = sourceSnapshot.revision;
+  const sourceBytes = Buffer.from(`${JSON.stringify(sourceFacts, null, 2)}\n`, 'utf8');
   const requestDrivenLockSourceBytes = await readIfPresent(requestDrivenLockFile);
   let requestDrivenLockSnapshot = null;
   if (requestDrivenLockSourceBytes) {
@@ -310,7 +315,7 @@ async function main() {
         return existing;
       }
       const files = (await Promise.all([
-        copyIfPresent(contextFile, path.join(backupDirectory, 'atom.json')),
+        writeBackupBytes(contextFile, path.join(backupDirectory, 'atom.json'), sourceBytes),
         copyIfPresent(graphFile, path.join(backupDirectory, 'graph.json')),
         copyIfPresent(journalFile, path.join(backupDirectory, 'atom.transactions.json')),
         copyIfPresent(path.join(worldDirectory, 'knowledge.json'), path.join(backupDirectory, 'knowledge.json')),
@@ -367,8 +372,7 @@ async function main() {
       requestDrivenLockPersistence,
       attemptId
     });
-    const deployedFacts = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-    const deployedRevision = revisionOfWorldFacts(deployedFacts);
+    const deployedRevision = (await persistence.readCommittedSnapshot()).revision;
     const manifest = await persistence.compatibilityManifest();
     const result = {
       ...preflight,
@@ -390,7 +394,7 @@ async function main() {
       let rolledBack = { receipt: null, projectionPending: false };
       let rollbackError = null;
       let restoredRequestDrivenLocks = null;
-      const beforeRevision = await currentRevision(contextFile);
+      const beforeRevision = await currentRevision(persistence);
       let alreadyAtSource = beforeRevision === sourceRevision;
       const atDeploymentTarget = beforeRevision === migration.rollback.expectedRevision;
       if (atDeploymentTarget) {
@@ -407,7 +411,7 @@ async function main() {
         }
       }
       if (rollbackError?.code === 'ROLLBACK_WORLD_DIVERGED'
-        && await currentRevision(contextFile) === sourceRevision) {
+        && await currentRevision(persistence) === sourceRevision) {
         rollbackError = null;
         alreadyAtSource = true;
       }
@@ -434,7 +438,7 @@ async function main() {
         || restoredRequestDrivenLocks?.restoredSnapshotHash
           === migration.requestDrivenLocks.sourceHash;
       error.rollback = {
-        ok: await currentRevision(contextFile) === sourceRevision
+        ok: await currentRevision(persistence) === sourceRevision
           && !rollbackError
           && sidecarOk
           && projection?.restored === true,

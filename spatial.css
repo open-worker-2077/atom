@@ -1801,6 +1801,24 @@ body[data-spatial-scope-state="failed"] .scope-load-state {
   scroll-margin-block-start: 4rem;
 }
 
+.settings-submenu {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid rgba(132, 213, 255, 0.12);
+  padding: 0.7rem;
+}
+
+.settings-submenu > summary {
+  cursor: pointer;
+  color: var(--ink-1);
+  font: 500 0.72rem/1.2 "Tomorrow", sans-serif;
+  letter-spacing: 0.08em;
+}
+
+.settings-submenu:not([open]) > :not(summary) {
+  display: none;
+}
+
 .presentation-settings h3 {
   margin: 0;
   color: var(--ink-1);

@@ -193,7 +193,9 @@ test('all vertical shortcuts share the crosshair domain anchor and preserve outs
   const overview = functionSource('collapseVerticalScope');
   const leaves = functionSource('expandVerticalScopeToLeaves');
 
-  assert.match(anchor, /viewModeModel\.resolveVerticalScopeAnchor\(\s*state\.clusterHitRegions,\s*state\.pointerPosition\s*\)/);
+  assert.match(anchor, /viewModeModel\.resolveVerticalScopeAnchor/);
+  assert.match(anchor, /clusterField\.envelopeContainsPoint/);
+  assert.match(anchor, /state\.pointerPosition/);
   assert.match(anchor, /clusterSceneRevision/);
   assert.match(expand, /planContextLevelExpansion/);
   assert.match(expand, /verticalScopeAnchor\(\)/);
@@ -353,6 +355,7 @@ test('middle drag adopts the latest interacted node as orbit center without chan
 
   assert.match(down, /rememberLatestInteraction\(\s*item\s*\)/);
   assert.match(drag, /candidate\.dragIntent\s*===\s*["']orbit["'][\s\S]*adoptLatestInteractionAnchor\(\)/);
+  assert.match(drag, /candidate\.domainContext\.center/);
   assert.match(move, /state\.drag\.type\s*===\s*["']orbit["'][\s\S]*dispatchIntent\(["']orbit["']/);
   assert.match(adopt, /camera\.target\s*=/);
   assert.doesNotMatch(adopt, /camera\.(?:distance|yaw|pitch)\s*=/);

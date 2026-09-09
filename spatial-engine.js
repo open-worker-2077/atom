@@ -1445,13 +1445,28 @@
           domainRelationships,
           { ...layoutSettings, baseGap: clusterField.sameLevelIsolationGap(0), strutSpacingPercent: 0 }
         );
-        const topologyNodeIds = new Set(domainRelationships.flatMap((relationship) => (
-          [relationship.fromId, relationship.toId]
-        )));
+        const visibleNodeIds = new Set(visible.map((node) => node.id));
+        const visibleNodeById = new Map(visible.map((node) => [node.id, node]));
+        const activeStruts = visualModel.activeSpatialTopologyLinks(
+          domainRelationships.filter((relationship) => (
+            relationship.kind !== "hierarchy"
+              && visibleNodeIds.has(relationship.fromId)
+              && visibleNodeIds.has(relationship.toId)
+              && visibleNodeById.get(relationship.fromId).__clusterLevel
+                === visibleNodeById.get(relationship.toId).__clusterLevel
+          )),
+          layoutSettings
+        );
+        const topologyNeighbors = new Map(visible.map((node) => [node.id, []]));
+        activeStruts.forEach((relationship) => {
+          topologyNeighbors.get(relationship.fromId).push(relationship.toId);
+          topologyNeighbors.get(relationship.toId).push(relationship.fromId);
+        });
         visible.forEach((node) => {
           node.__scaleReferencePosition = scaleReferencePositions[node.id] || node.position;
           if (relaxedPositions[node.id]) node.position = relaxedPositions[node.id];
-          node.clusterTopologyPositioned = topologyNodeIds.has(node.id);
+          node.clusterTopologyNeighborIds = topologyNeighbors.get(node.id);
+          node.clusterTopologyPositioned = node.clusterTopologyNeighborIds.length > 0;
         });
         return {
           ...descriptor,
@@ -1463,11 +1478,14 @@
 
   function buildClusterScene() {
     const routeDomains = visibleClusterDomains();
+    const emptyNodeRadius = 0.82 * state.demo.settings.emptyNodeDiameterPercent / 100;
     const scene = clusterField.buildScene(routeDomains, {
       maxDetailedClusters: 9,
       compact: routeDomains.some((domain) => domain.projectionMode === "nested"),
       compactPercent: state.demo.settings.nestedCompactnessPercent * 10,
       spatial3d: true,
+      emptyNodeRadius,
+      strutSpacingPercent: state.demo.settings.strutSpacingPercent,
       peripheralDepthShrinkPercent: state.demo.settings.peripheralDepthShrinkPercent
     });
     state.clusterScene = scene;
@@ -6051,7 +6069,16 @@
       });
     }
     const resolved = viewModeModel.resolveVerticalScopeAnchor(
-      state.clusterHitRegions,
+      state.clusterHitRegions.map((region) => ({
+        ...region,
+        containsPoint: region.envelope
+          ? clusterField.envelopeContainsPoint(
+              region.envelope,
+              state.pointerPosition.x,
+              state.pointerPosition.y
+            )
+          : undefined
+      })),
       state.pointerPosition
     );
     if (!resolved) {
@@ -7461,6 +7488,10 @@
     }
     if (candidate.dragIntent === "orbit") {
       recordCurrentView();
+      if (!candidate.node && candidate.domainContext && candidate.domainContext.center) {
+        state.latestInteractionAnchor = { ...candidate.domainContext.center };
+        state.latestInteractionKey = null;
+      }
       adoptLatestInteractionAnchor();
       state.drag = {
         type: "orbit",
@@ -9021,6 +9052,15 @@
     refreshClusterSceneAfterLayoutSetting();
   });
 
+  document.querySelectorAll("[data-settings-submenu]").forEach((submenu) => {
+    submenu.addEventListener("toggle", () => {
+      if (!submenu.open) return;
+      document.querySelectorAll("[data-settings-submenu]").forEach((other) => {
+        if (other !== submenu) other.open = false;
+      });
+    });
+  });
+
   ui.layoutYaw.addEventListener("input", () => {
     updateDemoSettings(demoModel.withLayoutYawInput(state.demo.settings, ui.layoutYaw.value));
     refreshClusterSceneAfterLayoutSetting();
@@ -9524,7 +9564,8 @@
           y: region.y,
           clientX: canvas.getBoundingClientRect().left + region.x,
           clientY: canvas.getBoundingClientRect().top + region.y,
-          radius: region.radius
+          radius: region.radius,
+          center: { ...region.center }
         }))
         : [],
       clusterTargets: state.clusterFieldOpen

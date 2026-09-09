@@ -313,7 +313,10 @@
         region,
         normalizedDistance: Math.hypot(point.x - region.x, point.y - region.y) / region.radius
       }))
-      .filter((candidate) => candidate.normalizedDistance <= 0.96)
+      .filter((candidate) => (
+        candidate.region.containsPoint === true
+        || candidate.normalizedDistance <= 0.96
+      ))
       .sort((left, right) => (
         Number(right.region.depth) - Number(left.region.depth)
         || left.normalizedDistance - right.normalizedDistance
@@ -342,7 +345,7 @@
   function planContextLevelCollapse(pathsInput, currentPath) {
     if (!currentPath) return Object.freeze([]);
     const paths = (Array.isArray(pathsInput) ? pathsInput : [])
-      .filter((path) => path && path !== currentPath && path.startsWith(`${currentPath}/`));
+      .filter((path) => path && (path === currentPath || path.startsWith(`${currentPath}/`)));
     return Object.freeze(paths.filter((path) => (
       !paths.some((candidate) => candidate !== path && candidate.startsWith(`${path}/`))
     )));

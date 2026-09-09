@@ -118,6 +118,12 @@
     const contentScale = adaptiveContentScale(nodes, nestedCarrierByNodeId, compactness, spatial3d);
     const shellPadding = minimumShellClearance(options);
     const carriers = primaryCarriers(nodes);
+    if (!carriers.length) {
+      const configuredRadius = Number(options.emptyNodeRadius);
+      return configuredRadius > 0
+        ? configuredRadius
+        : compactSpacing(options, 1.25, 0.85);
+    }
     const nodeCount = Math.max(1, carriers.length);
     const maximumRadius = Math.max(
       0.34,
@@ -189,7 +195,12 @@
     const options = optionsInput && typeof optionsInput === "object" ? optionsInput : {};
     const compactness = compactAmount(options);
     const shellPadding = minimumShellClearance(options);
-    if (!layoutNodes.length) return compactSpacing(options, 1.25, 0.85);
+    if (!layoutNodes.length) {
+      const configuredRadius = Number(options.emptyNodeRadius);
+      return configuredRadius > 0
+        ? configuredRadius
+        : compactSpacing(options, 1.25, 0.85);
+    }
     // A populated shell has no independent body-size floor. Its body is the
     // real outer edge of its carriers plus this level's clearance. Keeping the
     // old empty-shell floor here made every recursive level add another hidden
@@ -695,7 +706,7 @@
     }
   }
 
-  function contractDerivedSpatialSkeleton(automaticNodes, fixedNodes, center, gap) {
+  function contractLegacySpatialSkeleton(automaticNodes, fixedNodes, center, gap) {
     if (fixedNodes.length || automaticNodes.length < 2) return;
     let requiredScale = 0;
     for (let leftIndex = 0; leftIndex < automaticNodes.length; leftIndex += 1) {
@@ -722,6 +733,106 @@
         y: center.y + (node.position.y - center.y) * scale,
         z: center.z + (node.position.z - center.z) * scale
       };
+    }
+  }
+
+  function settleDerivedSpatialSkeleton(automaticNodes, fixedNodes, center, gap, strutSpacingPercent) {
+    const nodes = [...automaticNodes, ...fixedNodes];
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const adjacency = new Map(nodes.map((node) => [node.id, []]));
+    const edges = [];
+    const edgeKeys = new Set();
+    for (const node of nodes) {
+      const neighborIds = Array.isArray(node.clusterTopologyNeighborIds)
+        ? node.clusterTopologyNeighborIds
+        : [];
+      for (const neighborId of neighborIds) {
+        if (!byId.has(neighborId) || neighborId === node.id) continue;
+        const key = [node.id, neighborId].sort().join('\u0000');
+        if (edgeKeys.has(key)) continue;
+        edgeKeys.add(key);
+        edges.push([node.id, neighborId]);
+        adjacency.get(node.id).push(neighborId);
+        adjacency.get(neighborId).push(node.id);
+      }
+    }
+    if (!edges.length) {
+      contractLegacySpatialSkeleton(automaticNodes, fixedNodes, center, gap);
+      return;
+    }
+
+    const sourcePositions = new Map(nodes.map((node) => [node.id, { ...node.position }]));
+    const extraSpacing = gap * clamp(Number(strutSpacingPercent) || 0, 0, 100) / 100;
+    const remaining = new Set(nodes.map((node) => node.id));
+    while (remaining.size) {
+      const componentStart = [...remaining].sort()[0];
+      const componentIds = [];
+      const componentQueue = [componentStart];
+      remaining.delete(componentStart);
+      while (componentQueue.length) {
+        const id = componentQueue.shift();
+        componentIds.push(id);
+        for (const neighborId of adjacency.get(id)) {
+          if (!remaining.has(neighborId)) continue;
+          remaining.delete(neighborId);
+          componentQueue.push(neighborId);
+        }
+      }
+      if (componentIds.length < 2) continue;
+      const fixedRoot = componentIds.find((id) => byId.get(id).__packingLocked === true);
+      const rootId = fixedRoot || componentIds.slice().sort((leftId, rightId) => (
+        adjacency.get(rightId).length - adjacency.get(leftId).length
+          || String(leftId).localeCompare(String(rightId))
+      ))[0];
+      const originalCenter = componentIds.reduce((sum, id) => {
+        const point = sourcePositions.get(id);
+        sum.x += point.x / componentIds.length;
+        sum.y += point.y / componentIds.length;
+        sum.z += point.z / componentIds.length;
+        return sum;
+      }, { x: 0, y: 0, z: 0 });
+      const visited = new Set([rootId]);
+      const queue = [rootId];
+      while (queue.length) {
+        const parentId = queue.shift();
+        const parent = byId.get(parentId);
+        for (const childId of adjacency.get(parentId)) {
+          if (visited.has(childId)) continue;
+          visited.add(childId);
+          queue.push(childId);
+          const child = byId.get(childId);
+          if (child.__packingLocked === true) continue;
+          const sourceParent = sourcePositions.get(parentId);
+          const sourceChild = sourcePositions.get(childId);
+          const dx = sourceChild.x - sourceParent.x;
+          const dy = sourceChild.y - sourceParent.y;
+          const dz = sourceChild.z - sourceParent.z;
+          const distance = Math.hypot(dx, dy, dz);
+          const direction = distance > 0.0001
+            ? { x: dx / distance, y: dy / distance, z: dz / distance }
+            : stableDirection3d(parentId, childId);
+          const targetDistance = parent.__clusterRadius + child.__clusterRadius + gap + extraSpacing;
+          child.position = {
+            x: parent.position.x + direction.x * targetDistance,
+            y: parent.position.y + direction.y * targetDistance,
+            z: parent.position.z + direction.z * targetDistance
+          };
+        }
+      }
+      if (fixedRoot) continue;
+      const settledCenter = componentIds.reduce((sum, id) => {
+        const point = byId.get(id).position;
+        sum.x += point.x / componentIds.length;
+        sum.y += point.y / componentIds.length;
+        sum.z += point.z / componentIds.length;
+        return sum;
+      }, { x: 0, y: 0, z: 0 });
+      for (const id of componentIds) {
+        const node = byId.get(id);
+        node.position.x += originalCenter.x - settledCenter.x;
+        node.position.y += originalCenter.y - settledCenter.y;
+        node.position.z += originalCenter.z - settledCenter.z;
+      }
     }
   }
 
@@ -775,7 +886,13 @@
         if (hasDerivedSpatialSkeleton) {
           // Strut owns the established direction. Once nested slot bodies have
           // their real radii, the obsolete seed distance must not become cavity.
-          contractDerivedSpatialSkeleton(automatic, fixed, center, collisionGap * displayScale);
+          settleDerivedSpatialSkeleton(
+            automatic,
+            fixed,
+            center,
+            collisionGap * displayScale,
+            options.strutSpacingPercent
+          );
         } else {
           placeCompactVolume(automatic, fixed, center, collisionGap * displayScale);
         }
@@ -1001,7 +1118,8 @@
         radius: clusterRadius(sourceNodes, null, {
           compact,
           compactPercent: options.compactPercent,
-          spatial3d
+          spatial3d,
+          emptyNodeRadius: options.emptyNodeRadius
         }),
         nestedCarrierByNodeId: new Map(),
         scaleReferenceNestedCarrierByNodeId: new Map(),
@@ -1027,6 +1145,8 @@
         compact,
         compactPercent: options.compactPercent,
         spatial3d,
+        strutSpacingPercent: options.strutSpacingPercent,
+        emptyNodeRadius: options.emptyNodeRadius,
         displayScale: 1
       };
       const contracted = contractShellToLocalEdges(
@@ -1046,6 +1166,7 @@
         compact,
         compactPercent: 0,
         spatial3d,
+        emptyNodeRadius: options.emptyNodeRadius,
         displayScale: 1
       };
       item.scaleReferenceRadius = clusterRadius(

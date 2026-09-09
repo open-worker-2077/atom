@@ -492,6 +492,33 @@
     return lineage.reverse();
   }
 
+  function activeSpatialTopologyLinks(relationships, options) {
+    var settings = options || {};
+    var links = Array.isArray(relationships) ? relationships.filter(function (relationship) {
+      return isNode(relationship)
+        && typeof relationship.fromId === 'string'
+        && typeof relationship.toId === 'string'
+        && relationship.fromId !== relationship.toId;
+    }) : [];
+    if (settings.spatial3d !== true || settings.preserveClosingStrut !== true) return links;
+
+    var closureParent = new Map();
+    var closureRoot = function (id) {
+      var root = closureParent.has(id) ? closureParent.get(id) : id;
+      while (closureParent.has(root) && closureParent.get(root) !== root) root = closureParent.get(root);
+      closureParent.set(id, root);
+      return root;
+    };
+    return links.filter(function (link) {
+      if (link.kind === 'hierarchy') return true;
+      var fromRoot = closureRoot(link.fromId);
+      var toRoot = closureRoot(link.toId);
+      if (fromRoot === toRoot) return false;
+      closureParent.set(fromRoot, toRoot);
+      return true;
+    });
+  }
+
   function relaxRelationshipLayout(entries, relationships, options) {
     var settings = options || {};
     var iterations = Number.isFinite(settings.iterations)
@@ -525,7 +552,7 @@
       : 0;
     var layoutPitch = Number.isFinite(Number(settings.layoutPitchDegrees))
       ? Number(settings.layoutPitchDegrees) * Math.PI / 180
-      : Math.PI / 2;
+      : 0;
     var branchSpread = Number.isFinite(Number(settings.branchSpreadDegrees))
       ? Math.max(0, Math.min(180, Number(settings.branchSpreadDegrees))) * Math.PI / 180
       : 55 * Math.PI / 180;
@@ -662,24 +689,7 @@
         && byId.has(relationship.toId)
         && relationship.fromId !== relationship.toId;
     }) : [];
-    var activeLinks = links;
-    if (spatial3d && settings.preserveClosingStrut === true) {
-      var closureParent = new Map();
-      var closureRoot = function (id) {
-        var root = closureParent.has(id) ? closureParent.get(id) : id;
-        while (closureParent.has(root) && closureParent.get(root) !== root) root = closureParent.get(root);
-        closureParent.set(id, root);
-        return root;
-      };
-      activeLinks = links.filter(function (link) {
-        if (link.kind === 'hierarchy') return true;
-        var fromRoot = closureRoot(link.fromId);
-        var toRoot = closureRoot(link.toId);
-        if (fromRoot === toRoot) return false;
-        closureParent.set(fromRoot, toRoot);
-        return true;
-      });
-    }
+    var activeLinks = activeSpatialTopologyLinks(links, settings);
     var activeLinkKeys = new Set();
     activeLinks.forEach(function (link) {
       activeLinkKeys.add(link.fromId + '\u0000' + link.toId);
@@ -689,11 +699,11 @@
     var topologySeeded = new Set();
 
     function spatialMainAxis() {
-      var cosPitch = Math.cos(layoutPitch);
+      var sinPitch = Math.sin(layoutPitch);
       return {
-        x: cosPitch * Math.sin(layoutYaw),
-        y: Math.sin(layoutPitch),
-        z: cosPitch * Math.cos(layoutYaw)
+        x: sinPitch * Math.sin(layoutYaw),
+        y: Math.cos(layoutPitch),
+        z: sinPitch * Math.cos(layoutYaw)
       };
     }
 
@@ -1440,6 +1450,7 @@
     resetSnapshotNodeState: resetSnapshotNodeState,
     relationshipPairs: relationshipPairs,
     nodeLineage: nodeLineage,
+    activeSpatialTopologyLinks: activeSpatialTopologyLinks,
     relaxRelationshipLayout: relaxRelationshipLayout
   });
 

@@ -1241,6 +1241,45 @@ test('PageDown from parent-shell blank expands both sibling child shells togethe
     .toEqual(expect.arrayContaining([innerPath, peerPath]));
 });
 
+test('PageUp on an opened child shell closes the pointed shell itself', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { parentPath, innerPath } = await openAModeFixture(page);
+  await rightClickTarget(page, '父团', 1);
+  await page.waitForTimeout(430);
+  await rightClickTarget(page, '内层团', 1);
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths)).toContain(innerPath);
+  const innerShell = (await page.evaluate(() => window.spatialLab.state().clusterRegions))
+    .find(({ path }) => path === innerPath);
+  expect(innerShell).toBeTruthy();
+  await page.mouse.move(innerShell.clientX, innerShell.clientY);
+
+  await page.keyboard.press('PageUp');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths)).not.toContain(innerPath);
+  expect(await page.evaluate(() => window.spatialLab.state().clusterPaths)).toContain(parentPath);
+});
+
+test('middle drag on the current outer shell orbits around that shell center', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { parentPath } = await openAModeFixture(page);
+  await rightClickTarget(page, '父团', 1);
+  await page.waitForTimeout(430);
+  const parentShell = (await page.evaluate(() => window.spatialLab.state().clusterRegions))
+    .find(({ path }) => path === parentPath);
+  expect(parentShell).toBeTruthy();
+  const x = parentShell.clientX + parentShell.radius * 0.72;
+  const y = parentShell.clientY;
+
+  await page.mouse.move(x, y);
+  await page.mouse.down({ button: 'middle' });
+  await page.mouse.move(x + 14, y + 6);
+  await page.mouse.up({ button: 'middle' });
+
+  const target = await page.evaluate(() => window.spatialLab.state().camera.target);
+  expect(target.x).toBeCloseTo(parentShell.center.x, 5);
+  expect(target.y).toBeCloseTo(parentShell.center.y, 5);
+  expect(target.z).toBeCloseTo(parentShell.center.z, 5);
+});
+
 test('ordinary nested blank right double-click collapses only its direct inner group', async ({ page }) => {
   test.setTimeout(90_000);
   await page.clock.install({ time: new Date('2026-09-06T00:00:00Z') });

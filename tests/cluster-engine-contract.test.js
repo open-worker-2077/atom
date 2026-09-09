@@ -398,6 +398,13 @@ test('mapping keeps a 100 percent display while sending a tenfold S interval to 
   assert.match(build, /nestedCompactnessPercent\s*\*\s*10/);
 });
 
+test('an empty Slot shell receives the same minimum radius as an empty node', () => {
+  const build = functionSource('buildClusterScene');
+  assert.match(build, /emptyNodeRadius/);
+  assert.match(build, /emptyNodeDiameterPercent/);
+  assert.match(build, /clusterField\.buildScene/);
+});
+
 test('S interval and A child shrink controls rebuild the currently visible cluster scene', () => {
   const refresh = functionSource('refreshClusterSceneAfterLayoutSetting');
   assert.match(refresh, /state\.clusterFieldOpen/);

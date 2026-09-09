@@ -112,3 +112,14 @@ test('input mapping exposes an accessible right-click hold duration control', ()
   );
   assert.match(mappingSection, /aria-label="恢复右键沉浸长按时长默认值"/u);
 });
+
+test('dense settings use one-level submenus with at most five direct controls each', () => {
+  const submenuPattern = /<details class="settings-submenu"[^>]*data-settings-submenu[^>]*>([\s\S]*?)<\/details>/gu;
+  const submenus = [...html.matchAll(submenuPattern)];
+  assert.equal(submenus.length, 2);
+  for (const submenu of submenus) {
+    const directControls = [...submenu[1].matchAll(/<label class="range-setting">/gu)];
+    assert.ok(directControls.length > 0 && directControls.length <= 5);
+  }
+  assert.match(submenus[0][0], /推支线主动占用长度/u);
+});
