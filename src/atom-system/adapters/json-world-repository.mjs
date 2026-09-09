@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -1224,38 +1225,47 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     return running;
   }
 
-  async function loadEvents() {
-    let text;
+  function parseEventLine(line, lineNumber) {
     try {
-      text = await fs.readFile(eventFile, 'utf8');
+      const event = JSON.parse(line);
+      const ordinary = ['prepared', 'committed', 'aborted'].includes(event?.type);
+      const protocol = event?.localCommitProtocol;
+      const validProtocol = protocol === undefined || (event.type === 'prepared'
+        && protocol?.contract === LOCAL_COMMIT_PROTOCOL.contract
+        && protocol.version === LOCAL_COMMIT_PROTOCOL.version);
+      if (event?.schemaVersion !== 2 || !ordinary || !validProtocol) throw new Error('invalid event');
+      return event;
     } catch (error) {
-      if (error.code === 'ENOENT') return [];
+      throw problem('INVALID_TRANSACTION_EVENT', 'Incremental transaction event is invalid', {
+        line: lineNumber,
+        cause: error.message
+      });
+    }
+  }
+
+  async function* loadEvents() {
+    let remainder = '';
+    let lineNumber = 0;
+    try {
+      for await (const chunk of createReadStream(eventFile, { encoding: 'utf8' })) {
+        remainder += chunk;
+        let newline = remainder.indexOf('\n');
+        while (newline >= 0) {
+          const line = remainder.slice(0, newline);
+          remainder = remainder.slice(newline + 1);
+          lineNumber += 1;
+          if (line) yield parseEventLine(line, lineNumber);
+          newline = remainder.indexOf('\n');
+        }
+      }
+    } catch (error) {
+      if (error.code === 'ENOENT') return;
+      if (error.code === 'INVALID_TRANSACTION_EVENT') throw error;
       throw problem('TRANSACTION_JOURNAL_READ_FAILED', 'Cannot read incremental transaction events', {
         cause: error.code
       });
     }
-    const lines = text.split('\n');
-    if (lines.at(-1) !== '') lines.pop();
-    else lines.pop();
-    return lines.filter(Boolean).map((line, index) => {
-      try {
-        const event = JSON.parse(line);
-        const ordinary = ['prepared', 'committed', 'aborted'].includes(event?.type);
-        const protocol = event?.localCommitProtocol;
-        const validProtocol = protocol === undefined || (event.type === 'prepared'
-          && protocol?.contract === LOCAL_COMMIT_PROTOCOL.contract
-          && protocol.version === LOCAL_COMMIT_PROTOCOL.version);
-        if (event?.schemaVersion !== 2 || !ordinary || !validProtocol) {
-          throw new Error('invalid event');
-        }
-        return event;
-      } catch (error) {
-        throw problem('INVALID_TRANSACTION_EVENT', 'Incremental transaction event is invalid', {
-          line: index + 1,
-          cause: error.message
-        });
-      }
-    });
+    // A final record without a newline was interrupted before publication.
   }
 
   async function loadState() {
@@ -1266,7 +1276,7 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     const order = legacy.receipts.map((entry) => entry.commandId);
     const records = new Map(legacy.receipts.map((entry) => [entry.commandId, structuredClone(entry)]));
     const outcomes = new Map();
-    for (const event of await loadEvents()) {
+    for await (const event of loadEvents()) {
       if (event.type === 'prepared') {
         if (receipts.has(event.commandId)) continue;
         prepared.set(event.commandId, event.record);

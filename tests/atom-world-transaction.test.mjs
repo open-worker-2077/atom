@@ -2414,6 +2414,28 @@ test('transaction history appends compact events and content-addressed snapshots
   await assert.rejects(fs.access(journalFile), { code: 'ENOENT' });
 });
 
+test('a cold journal read streams incremental events instead of loading the whole log into one string', async (t) => {
+  const { coordinator, worldRepository, journalFile } = await fixture(t);
+  const initial = await worldRepository.read();
+  await coordinator.execute({
+    command: command('cmd-streamed-cold-read', initial.revision),
+    transition: ({ facts }) => ({ facts: [...facts, { name: 'streamed' }] })
+  });
+  const repository = createJsonTransactionJournal({ file: journalFile });
+  const eventFile = path.join(`${journalFile}.d`, 'events.jsonl');
+  const originalReadFile = fs.readFile;
+  fs.readFile = async (...args) => {
+    if (path.resolve(String(args[0])) === path.resolve(eventFile)) {
+      throw Object.assign(new Error('whole journal read is forbidden'), { code: 'WHOLE_READ_FORBIDDEN' });
+    }
+    return originalReadFile(...args);
+  };
+  t.after(() => { fs.readFile = originalReadFile; });
+
+  const state = await repository.readState();
+  assert.deepEqual(state.receipts.map(({ commandId }) => commandId), ['cmd-streamed-cold-read']);
+});
+
 test('warm transaction appends do not reread the accumulated event history', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-journal-bounded-append-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
