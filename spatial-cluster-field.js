@@ -206,11 +206,13 @@
     // old empty-shell floor here made every recursive level add another hidden
     // cavity even when the visible isolation setting was zero.
     return Math.max(
-      ...layoutNodes.map((node) => (
-        Math.hypot(node.position.x, node.position.y, node.position.z)
-          + node.__clusterRadius
-          + shellPadding
-      ))
+      ...layoutNodes.flatMap((node) => localPackingSpheres(node).map((sphere) => (
+        Math.hypot(
+          node.position.x + sphere.center.x,
+          node.position.y + sphere.center.y,
+          node.position.z + sphere.center.z
+        ) + sphere.radius + shellPadding
+      )))
     );
   }
 
@@ -233,9 +235,12 @@
     const minimum = Object.fromEntries(axes.map((axis) => [axis, Infinity]));
     const maximum = Object.fromEntries(axes.map((axis) => [axis, -Infinity]));
     for (const node of layout) {
-      for (const axis of axes) {
-        minimum[axis] = Math.min(minimum[axis], node.position[axis] - node.__clusterRadius);
-        maximum[axis] = Math.max(maximum[axis], node.position[axis] + node.__clusterRadius);
+      for (const sphere of localPackingSpheres(node)) {
+        for (const axis of axes) {
+          const coordinate = node.position[axis] + sphere.center[axis];
+          minimum[axis] = Math.min(minimum[axis], coordinate - sphere.radius);
+          maximum[axis] = Math.max(maximum[axis], coordinate + sphere.radius);
+        }
       }
     }
     const offset = Object.fromEntries(axes.map((axis) => [
@@ -595,26 +600,32 @@
       right.__clusterRadius - left.__clusterRadius
       || String(stableLayoutIdentity(left)).localeCompare(String(stableLayoutIdentity(right)))
     ));
-    const fits = (node, candidate) => placed.every((other) => (
-      Math.hypot(candidate.x - other.position.x, candidate.y - other.position.y) + 0.00001
-        >= node.__clusterRadius + other.__clusterRadius + gap
-    ));
-    const extentAt = (node, candidate) => Math.hypot(
-      candidate.x - center.x,
-      candidate.y - center.y
-    ) + node.__clusterRadius;
+    const fits = (node, candidate) => {
+      const previous = node.position;
+      node.position = { x: candidate.x, y: candidate.y, z: center.z };
+      const accepted = placed.every((other) => !packingCollision(other, node, false, gap));
+      node.position = previous;
+      return accepted;
+    };
+    const extentAt = (node, candidate) => Math.max(...localPackingSpheres(node).map((sphere) => (
+      Math.hypot(
+        candidate.x + sphere.center.x - center.x,
+        candidate.y + sphere.center.y - center.y
+      ) + sphere.radius
+    )));
 
     for (const node of ordered) {
       const candidates = [{ x: center.x, y: center.y }];
       for (const anchor of placed) {
-        const tangentDistance = node.__clusterRadius + anchor.__clusterRadius + gap;
         const seed = stableDirection(stableLayoutIdentity(node), stableLayoutIdentity(anchor));
         const startAngle = Math.atan2(seed.y, seed.x);
         for (let step = 0; step < 48; step += 1) {
           const angle = startAngle + step * Math.PI * 2 / 48;
+          const direction = { x: Math.cos(angle), y: Math.sin(angle), z: 0 };
+          const tangentDistance = packingContactDistance(anchor, node, direction, gap);
           candidates.push({
-            x: anchor.position.x + Math.cos(angle) * tangentDistance,
-            y: anchor.position.y + Math.sin(angle) * tangentDistance
+            x: anchor.position.x + direction.x * tangentDistance,
+            y: anchor.position.y + direction.y * tangentDistance
           });
         }
       }
@@ -651,32 +662,101 @@
     }
   }
 
+  function localPackingSpheres(node) {
+    if (Array.isArray(node.__packingSpheres) && node.__packingSpheres.length) {
+      return node.__packingSpheres;
+    }
+    return [{ center: { x: 0, y: 0, z: 0 }, radius: node.__clusterRadius }];
+  }
+
+  function packingSupport(node, direction, sign = 1) {
+    if (!Array.isArray(node.__packingSpheres) || !node.__packingSpheres.length) {
+      return node.__clusterRadius;
+    }
+    let support = -Infinity;
+    for (const sphere of node.__packingSpheres) {
+      support = Math.max(
+        support,
+        sphere.center.x * direction.x * sign
+          + sphere.center.y * direction.y * sign
+          + sphere.center.z * direction.z * sign
+          + sphere.radius
+      );
+    }
+    return support;
+  }
+
+  function packingMinimumDistance(left, right, direction, gap) {
+    return packingSupport(left, direction) + packingSupport(right, direction, -1) + gap;
+  }
+
+  function packingCollision(left, right, spatial3d, gap) {
+    let strongest = null;
+    for (const leftSphere of localPackingSpheres(left)) {
+      for (const rightSphere of localPackingSpheres(right)) {
+        const dx = right.position.x + rightSphere.center.x - left.position.x - leftSphere.center.x;
+        const dy = right.position.y + rightSphere.center.y - left.position.y - leftSphere.center.y;
+        const dz = spatial3d
+          ? right.position.z + rightSphere.center.z - left.position.z - leftSphere.center.z
+          : 0;
+        const distance = Math.hypot(dx, dy, dz);
+        const penetration = leftSphere.radius + rightSphere.radius + gap - distance;
+        if (!(penetration > 0.000001) || strongest && strongest.penetration >= penetration) continue;
+        const direction = distance > 0.0001
+          ? { x: dx / distance, y: dy / distance, z: dz / distance }
+          : stableDirection3d(stableLayoutIdentity(left), stableLayoutIdentity(right));
+        strongest = { penetration, direction };
+      }
+    }
+    return strongest;
+  }
+
+  function packingContactDistance(left, right, direction, gap) {
+    let contactDistance = 0;
+    for (const leftSphere of localPackingSpheres(left)) {
+      for (const rightSphere of localPackingSpheres(right)) {
+        const qx = rightSphere.center.x - leftSphere.center.x;
+        const qy = rightSphere.center.y - leftSphere.center.y;
+        const qz = rightSphere.center.z - leftSphere.center.z;
+        const projection = qx * direction.x + qy * direction.y + qz * direction.z;
+        const combinedRadius = leftSphere.radius + rightSphere.radius + gap;
+        const discriminant = projection * projection
+          - (qx * qx + qy * qy + qz * qz - combinedRadius * combinedRadius);
+        if (discriminant < 0) continue;
+        contactDistance = Math.max(contactDistance, -projection + Math.sqrt(discriminant));
+      }
+    }
+    return contactDistance || packingMinimumDistance(left, right, direction, gap);
+  }
+
   function placeCompactVolume(automaticNodes, fixedNodes, center, gap) {
     const placed = [...fixedNodes];
     const ordered = [...automaticNodes].sort((left, right) => (
       right.__clusterRadius - left.__clusterRadius
       || String(stableLayoutIdentity(left)).localeCompare(String(stableLayoutIdentity(right)))
     ));
-    const fits = (node, candidate) => placed.every((other) => (
+    const fits = (node, candidate) => {
+      const previous = node.position;
+      node.position = { ...candidate };
+      const accepted = placed.every((other) => !packingCollision(other, node, true, gap));
+      node.position = previous;
+      return accepted;
+    };
+    const extentAt = (node, candidate) => Math.max(...localPackingSpheres(node).map((sphere) => (
       Math.hypot(
-        candidate.x - other.position.x,
-        candidate.y - other.position.y,
-        candidate.z - other.position.z
-      ) + 0.00001 >= node.__clusterRadius + other.__clusterRadius + gap
-    ));
-    const extentAt = (node, candidate) => Math.hypot(
-      candidate.x - center.x,
-      candidate.y - center.y,
-      candidate.z - center.z
-    ) + node.__clusterRadius;
+        candidate.x + sphere.center.x - center.x,
+        candidate.y + sphere.center.y - center.y,
+        candidate.z + sphere.center.z - center.z
+      ) + sphere.radius
+    )));
 
     for (const node of ordered) {
       const candidates = [{ ...center }];
+      const directionSamples = 36;
       for (const anchor of placed) {
-        const tangentDistance = node.__clusterRadius + anchor.__clusterRadius + gap;
         const seed = stableDirection3d(stableLayoutIdentity(node), stableLayoutIdentity(anchor));
-        for (let step = 0; step < 72; step += 1) {
-          const y = 1 - (step / 71) * 2;
+        for (let step = 0; step < directionSamples; step += 1) {
+          const y = 1 - (step / (directionSamples - 1)) * 2;
           const radial = Math.sqrt(Math.max(0, 1 - y * y));
           const angle = Math.atan2(seed.y, seed.x) + step * Math.PI * (3 - Math.sqrt(5));
           const direction = {
@@ -684,6 +764,7 @@
             y,
             z: Math.sin(angle) * radial
           };
+          const tangentDistance = packingContactDistance(anchor, node, direction, gap);
           candidates.push({
             x: anchor.position.x + direction.x * tangentDistance,
             y: anchor.position.y + direction.y * tangentDistance,
@@ -792,7 +873,7 @@
           const direction = distance > 0.0001
             ? { x: dx / distance, y: dy / distance, z: dz / distance }
             : stableDirection3d(parentId, childId);
-          const targetDistance = parent.__clusterRadius + child.__clusterRadius + gap + extraSpacing;
+          const targetDistance = packingContactDistance(parent, child, direction, gap + extraSpacing);
           child.position = {
             x: parent.position.x + direction.x * targetDistance,
             y: parent.position.y + direction.y * targetDistance,
@@ -872,19 +953,19 @@
         : stableDirection3d(componentIds[0], placedIds[0]);
       const movingExtent = Math.max(...componentIds.map((id) => {
         const node = byId.get(id);
-        return Math.hypot(
-          node.position.x - movingCenter.x,
-          node.position.y - movingCenter.y,
-          node.position.z - movingCenter.z
-        ) + node.__clusterRadius;
+        return Math.max(...localPackingSpheres(node).map((sphere) => Math.hypot(
+          node.position.x + sphere.center.x - movingCenter.x,
+          node.position.y + sphere.center.y - movingCenter.y,
+          node.position.z + sphere.center.z - movingCenter.z
+        ) + sphere.radius));
       }));
       const placedExtent = Math.max(...placedIds.map((id) => {
         const node = byId.get(id);
-        return Math.hypot(
-          node.position.x - placedCenter.x,
-          node.position.y - placedCenter.y,
-          node.position.z - placedCenter.z
-        ) + node.__clusterRadius;
+        return Math.max(...localPackingSpheres(node).map((sphere) => Math.hypot(
+          node.position.x + sphere.center.x - placedCenter.x,
+          node.position.y + sphere.center.y - placedCenter.y,
+          node.position.z + sphere.center.z - placedCenter.z
+        ) + sphere.radius));
       }));
       const startDistance = placedExtent + movingExtent + gap + extraSpacing + 1;
       const startCenter = {
@@ -903,16 +984,23 @@
         const moving = byId.get(movingId);
         for (const placedId of placedIds) {
           const placed = byId.get(placedId);
-          const rx = moving.position.x - placed.position.x;
-          const ry = moving.position.y - placed.position.y;
-          const rz = moving.position.z - placed.position.z;
-          const projection = rx * direction.x + ry * direction.y + rz * direction.z;
-          const combinedRadius = moving.__clusterRadius + placed.__clusterRadius + gap + extraSpacing;
-          const discriminant = projection * projection
-            - (rx * rx + ry * ry + rz * rz - combinedRadius * combinedRadius);
-          if (discriminant < 0) continue;
-          const entry = -projection - Math.sqrt(discriminant);
-          if (entry >= 0) firstContact = Math.min(firstContact, entry);
+          for (const movingSphere of localPackingSpheres(moving)) {
+            for (const placedSphere of localPackingSpheres(placed)) {
+              const rx = moving.position.x + movingSphere.center.x
+                - placed.position.x - placedSphere.center.x;
+              const ry = moving.position.y + movingSphere.center.y
+                - placed.position.y - placedSphere.center.y;
+              const rz = moving.position.z + movingSphere.center.z
+                - placed.position.z - placedSphere.center.z;
+              const projection = rx * direction.x + ry * direction.y + rz * direction.z;
+              const combinedRadius = movingSphere.radius + placedSphere.radius + gap + extraSpacing;
+              const discriminant = projection * projection
+                - (rx * rx + ry * ry + rz * rz - combinedRadius * combinedRadius);
+              if (discriminant < 0) continue;
+              const entry = -projection - Math.sqrt(discriminant);
+              if (entry >= 0) firstContact = Math.min(firstContact, entry);
+            }
+          }
         }
       }
       if (Number.isFinite(firstContact)) {
@@ -960,6 +1048,9 @@
           ? nestedCarrier.radius + (Number.isFinite(nestedClearance) ? nestedClearance : 0.34)
           : clamp((Number(node.radius) || 0.82) * 1.12, 0.34, 0.82)) * displayScale,
         __nestedCarrierPath: nestedCarrier ? nestedCarrier.path : null,
+        __packingSpheres: compact && nestedCarrier && Array.isArray(nestedCarrier.spheres)
+          ? nestedCarrier.spheres
+          : null,
         __packingLocked: packingLocked,
         position: {
           x: center.x + ((Number(node.position && node.position.x) || 0) - origin.x) * positionScale * displayScale,
@@ -1010,20 +1101,24 @@
           const dy = right.position.y - left.position.y;
           const dz = spatial3d ? right.position.z - left.position.z : 0;
           const distance = Math.hypot(dx, dy, dz);
-          const direction = distance > 0.0001
+          const collision = compact ? packingCollision(left, right, spatial3d, collisionGap) : null;
+          if (compact && !collision) continue;
+          const direction = collision ? collision.direction : distance > 0.0001
             ? { x: dx / distance, y: dy / distance, z: dz / distance }
             : spatial3d
               ? stableDirection3d(stableLayoutIdentity(left), stableLayoutIdentity(right))
               : { ...stableDirection(stableLayoutIdentity(left), stableLayoutIdentity(right)), z: 0 };
-          const minimumDistance = left.__clusterRadius + right.__clusterRadius + collisionGap;
+          const minimumDistance = packingMinimumDistance(left, right, direction, collisionGap);
           // In A mode repulsion begins exactly at x. A wider influence field
           // recreates the large empty gaps that compact packing is meant to remove.
           const influenceDistance = compact
             ? minimumDistance
             : minimumDistance * mix(1.72, 1.08, compactness);
           if (distance >= influenceDistance) continue;
-          const force = (influenceDistance - distance)
-            * (distance < minimumDistance ? 0.68 : mix(0.28, 0.08, compactness));
+          const force = compact
+            ? collision.penetration * 0.68
+            : (influenceDistance - distance)
+              * (distance < minimumDistance ? 0.68 : mix(0.28, 0.08, compactness));
           const bothLocked = left.__packingLocked === true && right.__packingLocked === true;
           const leftLocked = left.__packingLocked === true;
           const rightLocked = right.__packingLocked === true && !bothLocked;
@@ -1054,8 +1149,14 @@
         const localY = node.position.y - center.y;
         const localZ = spatial3d ? node.position.z - center.z : 0;
         const localDistance = Math.hypot(localX, localY, localZ);
-        const boundary = Math.max(0.12, radius - node.__clusterRadius - minimumShellClearance(options));
-        if (localDistance > boundary) {
+        const radialDirection = localDistance > 0.0001
+          ? { x: localX / localDistance, y: localY / localDistance, z: localZ / localDistance }
+          : { x: 1, y: 0, z: 0 };
+        const boundary = Math.max(
+          0.12,
+          radius - packingSupport(node, radialDirection) - minimumShellClearance(options)
+        );
+        if (!compact && localDistance > boundary) {
           const scale = boundary / localDistance;
           node.position.x = center.x + localX * scale;
           node.position.y = center.y + localY * scale;
@@ -1067,26 +1168,20 @@
 
     // Soft forces preserve the source shape, then this deterministic projection
     // enforces the hard geometry contract. It is deliberately independent of
-    // content density: every circle pair must be exclusive before rendering.
+    // content density: every rendered carrier volume must be exclusive before rendering.
     const hardGap = collisionGap;
-    for (let iteration = 0; iteration < 960; iteration += 1) {
+    const hardIterationLimit = positioned.some((node) => Array.isArray(node.__packingSpheres))
+      ? 320
+      : 960;
+    for (let iteration = 0; iteration < hardIterationLimit; iteration += 1) {
       let maximumPenetration = 0;
       for (let leftIndex = 0; leftIndex < positioned.length; leftIndex += 1) {
         for (let rightIndex = leftIndex + 1; rightIndex < positioned.length; rightIndex += 1) {
           const left = positioned[leftIndex];
           const right = positioned[rightIndex];
-          const dx = right.position.x - left.position.x;
-          const dy = right.position.y - left.position.y;
-          const dz = spatial3d ? right.position.z - left.position.z : 0;
-          const distance = Math.hypot(dx, dy, dz);
-          const minimumDistance = left.__clusterRadius + right.__clusterRadius + hardGap;
-          const penetration = minimumDistance - distance;
-          if (!(penetration > 0.000001)) continue;
-          const direction = distance > 0.0001
-            ? { x: dx / distance, y: dy / distance, z: dz / distance }
-            : spatial3d
-              ? stableDirection3d(stableLayoutIdentity(left), stableLayoutIdentity(right))
-              : { ...stableDirection(stableLayoutIdentity(left), stableLayoutIdentity(right)), z: 0 };
+          const collision = packingCollision(left, right, spatial3d, hardGap);
+          if (!collision) continue;
+          const { direction, penetration } = collision;
           const leftLocked = left.__packingLocked === true;
           const rightLocked = right.__packingLocked === true;
           const correction = penetration * (leftLocked || rightLocked ? 1.01 : 0.505);
@@ -1109,8 +1204,14 @@
         const localY = node.position.y - center.y;
         const localZ = spatial3d ? node.position.z - center.z : 0;
         const localDistance = Math.hypot(localX, localY, localZ);
-        const boundary = Math.max(0.12, radius - node.__clusterRadius - minimumShellClearance(options));
-        if (localDistance > boundary) {
+        const radialDirection = localDistance > 0.0001
+          ? { x: localX / localDistance, y: localY / localDistance, z: localZ / localDistance }
+          : { x: 1, y: 0, z: 0 };
+        const boundary = Math.max(
+          0.12,
+          radius - packingSupport(node, radialDirection) - minimumShellClearance(options)
+        );
+        if (!compact && localDistance > boundary) {
           const scale = boundary / localDistance;
           node.position.x = center.x + localX * scale;
           node.position.y = center.y + localY * scale;
@@ -1121,13 +1222,7 @@
     }
 
     const hasHardOverlap = () => positioned.some((left, leftIndex) => (
-      positioned.slice(leftIndex + 1).some((right) => (
-        Math.hypot(
-          right.position.x - left.position.x,
-          right.position.y - left.position.y,
-          spatial3d ? right.position.z - left.position.z : 0
-        ) + 0.00001 < left.__clusterRadius + right.__clusterRadius + hardGap
-      ))
+      positioned.slice(leftIndex + 1).some((right) => packingCollision(left, right, spatial3d, hardGap))
     ));
     if (hasHardOverlap()) {
       const ordered = [...positioned].sort((left, right) => (
@@ -1137,10 +1232,13 @@
       const cell = maximumRadius * 2 + hardGap;
       const placed = [];
       const movable = [];
-      const fitsPlaced = (node, x, y, z) => placed.every((other) => (
-        Math.hypot(x - other.position.x, y - other.position.y, spatial3d ? z - other.position.z : 0)
-          + 0.00001 >= node.__clusterRadius + other.__clusterRadius + hardGap
-      ));
+      const fitsPlaced = (node, x, y, z) => {
+        const previous = node.position;
+        node.position = { x, y, z };
+        const accepted = placed.every((other) => !packingCollision(other, node, spatial3d, hardGap));
+        node.position = previous;
+        return accepted;
+      };
       for (const node of ordered) {
         if (node.__packingLocked === true && fitsPlaced(node, node.position.x, node.position.y, node.position.z)) {
           placed.push(node);
@@ -1256,6 +1354,16 @@
       );
       item.localLayout = contracted.layout;
       item.radius = contracted.radius;
+      item.packingSpheres = primaryCarriers(item.localLayout).flatMap((node) => (
+        localPackingSpheres(node).map((sphere) => ({
+          center: {
+            x: node.position.x + sphere.center.x,
+            y: node.position.y + sphere.center.y,
+            z: node.position.z + sphere.center.z
+          },
+          radius: sphere.radius + minimumShellClearance(layoutOptions)
+        }))
+      ));
       // S owns sibling edge clearance only. Derive nested display scale from
       // the O(n) zero-gap structural radius so widening S cannot masquerade as
       // child zoom or require a second collision solve for every domain.
@@ -1292,6 +1400,14 @@
         parent.nestedCarrierByNodeId.set(item.parentNodeId, {
           path: item.domain.path || "root",
           radius: item.radius * item.nestedScale,
+          spheres: item.packingSpheres.map((sphere) => ({
+            center: {
+              x: sphere.center.x * item.nestedScale,
+              y: sphere.center.y * item.nestedScale,
+              z: sphere.center.z * item.nestedScale
+            },
+            radius: sphere.radius * item.nestedScale
+          })),
           // The hard collision gap already represents x; another carrier moat
           // would double-count the visible edge interval.
           clearance: compact ? 0 : 0.34,

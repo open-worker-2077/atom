@@ -13,6 +13,19 @@ function loadClusterField() {
   return sandbox.window.SpatialClusterField;
 }
 
+function minimumBodyGap(field, left, right) {
+  const spheres = (body) => body.spatialEnvelope
+    ? field.spatialEnvelopeSpheres(body.spatialEnvelope)
+    : [{ center: body.position, radius: body.__clusterRadius }];
+  return Math.min(...spheres(left).flatMap((leftSphere) => spheres(right).map((rightSphere) => (
+    Math.hypot(
+      rightSphere.center.x - leftSphere.center.x,
+      rightSphere.center.y - leftSphere.center.y,
+      rightSphere.center.z - leftSphere.center.z
+    ) - leftSphere.radius - rightSphere.radius
+  ))));
+}
+
 function route(count) {
   return Array.from({ length: count }, (_, depth) => ({
     path: depth ? `root/${Array.from({ length: depth }, (__, index) => `d${index + 1}`).join('/')}` : 'root',
@@ -720,14 +733,12 @@ test('adaptive S packing compresses a dense child more than a sparse child witho
 
   assert.ok(dense.nodeScale < sparse.nodeScale, 'content pressure determines scale instead of depth alone');
   assert.ok(
-    Math.hypot(dense.center.x - sparse.center.x, dense.center.y - sparse.center.y)
-      >= dense.radius + sparse.radius,
-    'unequal nested groups remain mutually exclusive'
+    minimumBodyGap(field, sparse, dense) >= -0.000001,
+    `unequal nested groups remain mutually exclusive (${minimumBodyGap(field, sparse, dense)})`
   );
   for (const child of [sparse, dense]) {
     assert.ok(
-      Math.hypot(child.center.x - plain.position.x, child.center.y - plain.position.y)
-        >= child.radius + plain.__clusterRadius,
+      minimumBodyGap(field, child, plain) >= -0.000001,
       `${child.path} stays outside an ordinary sibling node`
     );
     assert.ok(
@@ -855,8 +866,7 @@ test('tenfold adaptive compactness keeps eighteen unequal nested groups mutually
     for (let rightIndex = leftIndex + 1; rightIndex < children.length; rightIndex += 1) {
       const right = children[rightIndex];
       assert.ok(
-        Math.hypot(left.center.x - right.center.x, left.center.y - right.center.y)
-          >= left.radius + right.radius,
+        minimumBodyGap(field, left, right) >= -0.000001,
         `${left.path} and ${right.path} do not intersect`
       );
     }
@@ -918,10 +928,7 @@ test('S mode repacks locked nested carriers instead of leaving a hollow parent s
   const children = scene.clusters.filter((cluster) => cluster.parentPath === 'root');
 
   assert.ok(root.radius < 8, 'S mode must ignore stale carrier coordinates when packing nested groups');
-  assert.ok(Math.hypot(
-    children[0].center.x - children[1].center.x,
-    children[0].center.y - children[1].center.y
-  ) >= children[0].radius + children[1].radius - 1e-6,
+  assert.ok(minimumBodyGap(field, children[0], children[1]) >= -0.000001,
   'repacked child shells remain mutually exclusive at literal zero spacing');
 });
 
@@ -946,13 +953,10 @@ test('S mode removes inherited coordinate gaps between already-visible nested gr
   ], { compact: true, compactPercent: 0 });
   const root = scene.clusters.find((cluster) => cluster.path === 'root');
   const children = scene.clusters.filter((cluster) => cluster.parentPath === 'root');
-  const edgeGap = Math.hypot(
-    children[0].center.x - children[1].center.x,
-    children[0].center.y - children[1].center.y
-  ) - children[0].radius - children[1].radius;
+  const edgeGap = minimumBodyGap(field, children[0], children[1]);
 
   assert.ok(edgeGap >= -1e-6 && edgeGap < 0.02,
-    'visible nested groups touch at literal zero spacing without retaining a cavity');
+    `visible nested groups touch at literal zero spacing without retaining a cavity (${edgeGap})`);
   assert.ok(root.radius < 5.2, 'the parent shell contracts around the settled child edges');
 });
 
@@ -993,17 +997,59 @@ test('a derived three-dimensional strut axis does not preserve a hollow gap betw
   ], { compact: true, compactPercent: 0, spatial3d: true });
   const root = scene.clusters.find((cluster) => cluster.path === 'root');
   const children = scene.clusters.filter((cluster) => cluster.parentPath === 'root');
-  const centerDistance = Math.hypot(
-    children[0].center.x - children[1].center.x,
-    children[0].center.y - children[1].center.y,
-    children[0].center.z - children[1].center.z
-  );
-  const edgeGap = centerDistance - children[0].radius - children[1].radius;
+  const edgeGap = minimumBodyGap(field, children[0], children[1]);
 
   assert.ok(edgeGap >= -1e-6 && edgeGap < 0.02,
-    'the established strut direction remains, but its child bodies touch at literal zero spacing');
+    `the established strut direction remains, but its child bodies touch at literal zero spacing (${edgeGap})`);
   assert.ok(root.radius < children[0].radius + children[1].radius + 0.6,
     'the parent shell contains child bodies rather than the obsolete pre-expansion axis span');
+});
+
+test('zero strut spacing contacts nested adaptive volumes instead of their invisible enclosing spheres', () => {
+  const field = loadClusterField();
+  const child = (prefix) => [
+    {
+      id: `${prefix}-left`, radius: 0.82,
+      position: { x: -2.4, y: 0, z: 0 },
+      clusterLocalPositionLocked: true
+    },
+    {
+      id: `${prefix}-right`, radius: 0.82,
+      position: { x: 2.4, y: 0, z: 0 },
+      clusterLocalPositionLocked: true
+    }
+  ];
+  const scene = field.buildScene([
+    {
+      path: 'root', depth: 0, nodes: [
+        {
+          id: 'upper', radius: 0.82, position: { x: 0, y: -20, z: 0 },
+          clusterTopologyPositioned: true, clusterTopologyNeighborIds: ['lower']
+        },
+        {
+          id: 'lower', radius: 0.82, position: { x: 0, y: 20, z: 0 },
+          clusterTopologyPositioned: true, clusterTopologyNeighborIds: ['upper']
+        }
+      ]
+    },
+    {
+      path: 'root/upper', depth: 1, parentPath: 'root', parentNodeId: 'upper',
+      projectionMode: 'nested', nodes: child('upper')
+    },
+    {
+      path: 'root/lower', depth: 1, parentPath: 'root', parentNodeId: 'lower',
+      projectionMode: 'nested', nodes: child('lower')
+    }
+  ], {
+    compact: true, compactPercent: 0, spatial3d: true, strutSpacingPercent: 0
+  });
+  const children = scene.clusters
+    .filter((cluster) => cluster.parentPath === 'root')
+    .sort((left, right) => left.center.y - right.center.y);
+  const visibleGap = minimumBodyGap(field, children[0], children[1]);
+
+  assert.ok(visibleGap >= -1e-6 && visibleGap < 0.02,
+    `adaptive child volumes should touch at zero spacing; observed gap ${visibleGap}`);
 });
 
 test('zero strut spacing contracts every unequal axis segment instead of one global scale', () => {
