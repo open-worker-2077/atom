@@ -745,7 +745,7 @@
       }
       const previousByKey = new Map(((lastKnowledge && lastKnowledge.nodes) || [])
         .map((node) => [node.key, node]));
-      const statusChanges = (Array.isArray(knowledge.nodes) ? knowledge.nodes : [])
+      const statusChanges = (Array.isArray(knowledge && knowledge.nodes) ? knowledge.nodes : [])
         .filter((node) => {
           const previous = previousByKey.get(node.key);
           return node.label === "状态"

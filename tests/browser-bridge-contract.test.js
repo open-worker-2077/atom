@@ -172,6 +172,66 @@ test('Atom Web reports semantic persistence confirmation and failure instead of 
   }
 });
 
+test('service-backed node edits persist when the optimized commit omits the whole knowledge snapshot', async () => {
+  const listeners = new Map();
+  const lifecycle = [];
+  const requests = [];
+  const previousKnowledge = {
+    revision: 1,
+    nodes: [{ key: 'root::a', id: 'a', path: 'root', atomPath: 'A', label: 'A', detail: 'before' }],
+    edges: []
+  };
+  const persistedKnowledge = {
+    revision: 2,
+    nodes: [{ ...previousKnowledge.nodes[0], detail: 'after' }],
+    edges: []
+  };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false }),
+      importKnowledge: () => true,
+      exportField: () => ({ path: 'root' })
+    },
+    CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init.detail; } },
+    dispatchEvent: (event) => { lifecycle.push(event); return true; },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state') && !options.method) return response({ knowledge: previousKnowledge });
+      if (url.endsWith('/workspace-edit')) {
+        requests.push(JSON.parse(options.body));
+        return response({ result: { ok: true }, knowledge: persistedKnowledge });
+      }
+      return response({ result: {} });
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => 0
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+  lifecycle.length = 0;
+
+  const operation = {
+    kind: 'node-edit',
+    nodeKey: 'root::a',
+    node: previousKnowledge.nodes[0],
+    draft: { label: 'A', description: 'after' }
+  };
+  const result = await listeners.get('spatial-workspace-committed')({
+    detail: { persistenceId: 18, operation, knowledge: null }
+  });
+
+  assert.equal(result, true);
+  assert.deepEqual(requests, [{ operation }]);
+  assert.equal(lifecycle.length, 1);
+  assert.equal(lifecycle[0].type, 'spatial-workspace-persisted');
+  assert.equal(lifecycle[0].detail.persistenceId, 18);
+  assert.equal(lifecycle[0].detail.knowledge.revision, 2);
+});
+
 test('human status persistence reports the matching terminal receipt without turning failure or pending into success', async () => {
   const cases = [
     {
