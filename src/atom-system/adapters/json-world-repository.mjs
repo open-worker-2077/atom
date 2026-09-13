@@ -89,6 +89,7 @@ function publicationFor(file) {
       pending: false,
       repairRequired: false,
       visibleBytes: 0,
+      initialized: false,
       tail: Promise.resolve(),
       startupProofPending: true,
       startupProof: null,
@@ -345,7 +346,11 @@ export function createJsonWorldRepository({
     try {
       raw = await fileSystem.readFile(localCommitFile);
     } catch (error) {
-      if (error.code === 'ENOENT') return [];
+      if (error.code === 'ENOENT') {
+        publication.visibleBytes = 0;
+        publication.initialized = true;
+        return [];
+      }
       throw error;
     }
     const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, 'utf8');
@@ -354,6 +359,8 @@ export function createJsonWorldRepository({
     const visibleBytes = publication.pending || publication.repairRequired
       ? Math.min(publication.visibleBytes, scanned.publishedBytes)
       : scanned.publishedBytes;
+    publication.visibleBytes = visibleBytes;
+    publication.initialized = true;
     return scanLocalLog(buffer.subarray(0, visibleBytes)).records.map((record, index) => {
       try {
         const localCommit = record?.contract === 'atom.local-commit'
@@ -597,20 +604,37 @@ export function createJsonWorldRepository({
 
   async function appendRecordUnsafe(record) {
     await fileSystem.mkdir(path.dirname(localCommitFile), { recursive: true });
-    let raw;
-    try {
-      raw = await fileSystem.readFile(localCommitFile);
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-      raw = Buffer.alloc(0);
+    let fileBytes = 0;
+    let publishedBytes = null;
+    if (publication.initialized && !publication.pending && !publication.repairRequired
+      && !publication.indeterminate) {
+      try {
+        fileBytes = Number((await fileSystem.stat(localCommitFile)).size);
+        if (fileBytes === publication.visibleBytes) publishedBytes = publication.visibleBytes;
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        if (publication.visibleBytes === 0) publishedBytes = 0;
+      }
     }
-    const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, 'utf8');
-    const head = await publicationHead(buffer);
-    const scanned = scanLocalLog(buffer);
-    const publishedBytes = publication.repairRequired
-      ? Math.min(publication.visibleBytes, scanned.publishedBytes)
-      : scanned.publishedBytes;
-    if (!head) await persistPublicationHead(publishedBytes);
+    if (publishedBytes === null) {
+      let raw;
+      try {
+        raw = await fileSystem.readFile(localCommitFile);
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        raw = Buffer.alloc(0);
+      }
+      const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, 'utf8');
+      fileBytes = buffer.length;
+      const head = await publicationHead(buffer);
+      const scanned = scanLocalLog(buffer);
+      publishedBytes = publication.repairRequired
+        ? Math.min(publication.visibleBytes, scanned.publishedBytes)
+        : scanned.publishedBytes;
+      if (!head) await persistPublicationHead(publishedBytes);
+      publication.visibleBytes = publishedBytes;
+      publication.initialized = true;
+    }
     const framed = { ...record, publicationId: record.publicationId ?? crypto.randomUUID() };
     const serializedRecord = `${JSON.stringify(framed)}\n`;
     const serializedProof = framedRecord(framed).slice(serializedRecord.length);
@@ -622,7 +646,7 @@ export function createJsonWorldRepository({
     let proofBytes = 0;
     let proofWritten = false;
     try {
-      handle = await fileSystem.open(localCommitFile, buffer.length ? 'r+' : 'w+');
+      handle = await fileSystem.open(localCommitFile, fileBytes ? 'r+' : 'w+');
       await handle.truncate(publishedBytes);
       recordBytes = await writeFully(handle, serializedRecord, publishedBytes);
       await handle.sync();

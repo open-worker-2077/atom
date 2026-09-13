@@ -959,6 +959,46 @@ test('a local commit is durable in the append log before full-world compaction',
   assert.deepEqual((await afterCompactionRestart.read()).facts, afterFacts);
 });
 
+test('a warm local append uses its validated publication prefix instead of rereading the complete commit log', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-bounded-append-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const worldFile = path.join(directory, 'atom.json');
+  const localCommitFile = path.join(directory, 'world-commits.jsonl');
+  const initialFacts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+  const firstFacts = [{ thing: 'Root', situation: 'first', slot: [], strut: [] }];
+  const secondFacts = [{ thing: 'Root', situation: 'second', slot: [], strut: [] }];
+  await fs.writeFile(worldFile, `${JSON.stringify(initialFacts)}\n`, 'utf8');
+  let commitLogReads = 0;
+  const baseFileSystem = directorySyncCapableFileSystem(directory);
+  const fileSystem = {
+    ...baseFileSystem,
+    async readFile(target, ...args) {
+      if (path.resolve(target) === path.resolve(localCommitFile)) commitLogReads += 1;
+      return baseFileSystem.readFile(target, ...args);
+    }
+  };
+  const repository = createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile, fileSystem
+  });
+  const append = async (commandId, beforeFacts, afterFacts) => repository.appendLocalCommit({
+    commandId,
+    expectedRevision: revisionOf(beforeFacts),
+    nextSnapshot: { worldId: 'primary', revision: revisionOf(afterFacts), facts: afterFacts },
+    patch: createLocalWorldPatch({
+      worldId: 'primary', beforeRevision: revisionOf(beforeFacts),
+      afterRevision: revisionOf(afterFacts), beforeFacts, afterFacts, changedPaths: ['Root']
+    })
+  });
+
+  await append('bounded-first', initialFacts, firstFacts);
+  commitLogReads = 0;
+  await append('bounded-second', firstFacts, secondFacts);
+
+  assert.equal(commitLogReads, 0,
+    'the already-validated publication prefix makes append cost independent of retained history');
+  assert.deepEqual((await repository.read()).facts, secondFacts);
+});
+
 test('the first local commit establishes a durable empty baseline for a new Atom world', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-first-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
