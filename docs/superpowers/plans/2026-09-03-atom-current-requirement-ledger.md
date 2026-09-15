@@ -51,6 +51,7 @@
 - **RED 与根因**：新增非空子域首次沉浸浏览器旅程稳定失败，权威 `exportKnowledge` 与当前域 `exportField` 均已包含子节点，但最终 `visibleNodeDescriptors` 持续为空。根因是首次 scoped knowledge 导入后，当前路径分支只调用 `refitCurrentDomain`；该函数直接按进入瞬间的空 `clusterScene` 取景，没有先重建沉浸场景。返回父层再进入会重新执行 `buildClusterScene`，因此形成现场所见的二次进入自愈。
 - **当前 GREEN**：`refitCurrentDomain` 在当前域为多团场景时先重建场景、再按新权威内容取景；未改变数据导入、Graph 或空域语义。首次非空专项 `1/1 PASS`，完整路径加载集 `7/7 PASS`；右键长按进入、2514×1316 视口内收束、域壳显示及壳内／壳外长按返回相邻旅程 `6/6 PASS`。基线中三项旧失败来自测试仍调用已退役的 `setImmersiveView`，已改用现行 `applyImmersiveInwardView`，不恢复旧模式。
 - **系统门禁**：直接编辑器／视图／桥接合同 `128/128 PASS`，浏览器构建成功；候选全量 `2054 PASS / 4 FAIL / 1 SKIP`。四项失败均为性能时限：布局项在未修改的 `main` 基线独立复跑同样失败（基线 `2260.7ms`、候选 `2248.2ms`），结构 Transform 项仅在约 5 秒门槛边缘波动（基线曾以 `4152.6—4493.1ms` 通过，候选失败值 `5065.4—6050.6ms`），另两项为 80-effect 服务后续完成／结构批次时限；它们不触及本次浏览器加载链，作为既有环境性能门槛问题保留，不冒充全量通过。
+- **本地部署回读**：已快进本地 `main@687d954bcea3005d1c032b7b2732a3e468573532` 并通过现有 `Atom Graph Runtime` 任务重启 4784；冷启动后健康 revision `7808`、投影 `published`、生产世界 revision 仍为 `7e612b97…281ab9`，页面 build 为 `sha256-b66183a5ea56362a`。全新 2514×1316 Chromium 从正式入口首次逐层进入 `atom.json/🧊managegraph/办包/究谋/个务/内务/人务`，第一次即见 `蓄力、超功`，scope 为 `loaded` 且空域提示隐藏；验收拦截了 view PUT，未写生产事实或共享视图。远端网络恢复后，`gh auth status` 进一步确认当前 `open-worker-2077` token 已失效；远端推送与精确 checks 回读因此仍是外部认证阻塞，不把本地部署冒充远端收口。
 
 ### 2026-09-13 CLI 交互超时但事实已提交
 
