@@ -5864,6 +5864,7 @@
     optionsInput = optionsInput || {};
     const path = typeof optionsInput.path === "string" ? optionsInput.path : state.currentPath;
     if (path !== state.currentPath) return false;
+    if (state.clusterFieldOpen) buildClusterScene();
     const frame = state.clusterFieldOpen && state.depth > 0
       ? currentDomainClusterFrame()
       : currentDomainSceneFrame();

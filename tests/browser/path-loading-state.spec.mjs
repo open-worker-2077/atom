@@ -9,6 +9,60 @@ function hashText(value) {
   return hash >>> 0;
 }
 
+test('a non-empty scope renders its authoritative children on the first immersive entry', async ({ page }) => {
+  const childPath = `root/${hashText('parent-id').toString(36)}`;
+  let childScopeRequests = 0;
+  await page.route(`**/__spatial/api/state?path=${encodeURIComponent(childPath)}`, async (route) => {
+    childScopeRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        scope: { path: childPath },
+        knowledge: {
+          revision: 1,
+          nodes: [{
+            id: 'child-id', key: `${childPath}::child-id`, path: childPath,
+            atomPath: '母节点/子节点', label: '子节点', detail: '', hasChildren: false,
+            position: { x: 0, y: 0, z: 0 }
+          }],
+          edges: []
+        }
+      })
+    });
+  });
+
+  await page.goto('/');
+  await expect(page.locator('body')).toHaveAttribute('data-spatial-knowledge', 'authoritative');
+  await page.evaluate(() => {
+    window.spatialLab.importKnowledge({
+      revision: 1,
+      nodes: [{
+        id: 'parent-id', key: 'root::parent-id', path: 'root', atomPath: '母节点',
+        label: '母节点', detail: '', hasChildren: true, position: { x: 0, y: 0, z: 0 }
+      }],
+      edges: []
+    });
+    window.spatialLab.selectByLabel('母节点');
+    window.spatialLab.dispatch('applyImmersiveInwardView');
+  });
+
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().path)).toBe(childPath);
+  await expect.poll(() => page.evaluate(() => (
+    window.spatialLab.exportKnowledge().nodes.some(({ label }) => label === '子节点')
+  ))).toBe(true);
+  await expect.poll(() => page.evaluate(() => (
+    window.spatialLab.exportField().nodes.some(({ label }) => label === '子节点')
+  ))).toBe(true);
+  await expect.poll(() => page.evaluate(() => (
+    window.spatialLab.state().visibleNodeDescriptors.some(({ label }) => label === '子节点')
+  ))).toBe(true);
+  await expect(page.locator('#scopeLoadState')).toBeHidden();
+  await expect(page.locator('body')).toHaveAttribute('data-spatial-scope-state', 'loaded');
+  expect(childScopeRequests).toBe(1);
+});
+
 test('a newly entered scope stays visibly loading and non-editable until its state arrives', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('body')).toHaveAttribute('data-spatial-knowledge', 'authoritative');
@@ -36,9 +90,8 @@ test('a newly entered scope stays visibly loading and non-editable until its sta
       }],
       edges: []
     });
-    window.spatialLab.dispatch('setImmersiveView');
     window.spatialLab.selectByLabel('母节点');
-    window.spatialLab.dispatch('applyInwardView');
+    window.spatialLab.dispatch('applyImmersiveInwardView');
   });
 
   await expect(page.locator('#scopeLoadState')).toBeVisible();
@@ -73,8 +126,7 @@ for (const entry of [
       window.spatialLab.setScopeLoadState('root', 'loaded');
       window.spatialLab.selectByLabel('母节点');
       if (immersive) {
-        window.spatialLab.dispatch('setImmersiveView');
-        window.spatialLab.dispatch('applyInwardView');
+        window.spatialLab.dispatch('applyImmersiveInwardView');
       } else {
         window.spatialLab.dispatch('enter');
       }
