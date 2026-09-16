@@ -39,20 +39,26 @@ export function createMemoryTransactionPorts({
       return { contract: 'atom.world-snapshot', version: 1,
         worldId: initialSnapshot.worldId, revision: current.revision, facts: current.facts };
     },
-    async compareAndSwap({ expectedRevision, nextSnapshot }) {
+    async compareAndSwap({ commandId, expectedRevision, nextSnapshot }) {
+      if (staged?.commandId === commandId
+        && staged.expectedRevision === expectedRevision
+        && staged.nextSnapshot.revision === nextSnapshot.revision) return staged.nextSnapshot;
       if (authority.snapshot().revision !== expectedRevision || staged) {
         throw problem('WORLD_REVISION_CONFLICT', 'Memory world changed before staging');
       }
-      staged = nextSnapshot;
+      staged = { commandId, expectedRevision, nextSnapshot };
       return nextSnapshot;
     },
-    async appendLocalCommit({ expectedRevision, nextSnapshot }) {
-      return this.compareAndSwap({ expectedRevision, nextSnapshot });
+    async appendLocalCommit({ commandId, expectedRevision, nextSnapshot }) {
+      return this.compareAndSwap({ commandId, expectedRevision, nextSnapshot });
     },
     async durableCommitEvidence(identity) {
       const receipt = accepted.get(identity.commandId)?.receipt;
-      return receipt?.beforeRevision === identity.beforeRevision
-        && receipt.afterRevision === identity.afterRevision ? identity : null;
+      if (receipt?.beforeRevision === identity.beforeRevision
+        && receipt.afterRevision === identity.afterRevision) return identity;
+      return staged?.commandId === identity.commandId
+        && staged.expectedRevision === identity.beforeRevision
+        && staged.nextSnapshot.revision === identity.afterRevision ? identity : null;
     },
     async hasDurableCommit(identity) {
       return Boolean(await this.durableCommitEvidence(identity));
@@ -101,7 +107,7 @@ export function createMemoryTransactionPorts({
       if (!record || !staged) {
         throw problem('MISSING_PREPARED_TRANSACTION', `Command ${commandId} was not staged`);
       }
-      const facts = structuredClone(staged.facts);
+      const facts = structuredClone(staged.nextSnapshot.facts);
       const revision = sealWorldFactsRevision(facts);
       if (revision !== receipt.afterRevision) {
         throw problem('INVALID_WORLD_REVISION', 'Staged memory facts differ from receipt');

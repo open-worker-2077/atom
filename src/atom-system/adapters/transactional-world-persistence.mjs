@@ -49,7 +49,8 @@ const releaseWorldOwner = new FinalizationRegistry(({ key, reference }) => {
 });
 
 function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProjection,
-  worldId, runtimeAuthority = 'disk', saveSchedule, writerFactory = createDurableWorldWriter }) {
+  worldId, runtimeAuthority = 'disk', saveSchedule, writerFactory = createDurableWorldWriter,
+  onSaved }) {
   const key = JSON.stringify([path.resolve(contextFile), path.resolve(journalFile), worldId, runtimeAuthority]);
   let owner = worldOwners.get(key)?.deref();
   if (!owner) {
@@ -64,7 +65,7 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
     if (runtimeAuthority === 'memory') {
       const diskCoordinator = createCommitCoordinator({ worldRepository, journalRepository });
       owner = { runtimeAuthority, recovery: null, ready: null, writer: null, saver: null,
-        projections: new Set() };
+        projections: new Set(), savedListeners: new Set() };
       const delegate = (field) => new Proxy({}, { get: (_, name) => (...args) =>
         owner.ready.then(() => owner[field][name](...args)) });
       owner.worldRepository = delegate('memoryWorldRepository');
@@ -100,6 +101,9 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
             for (const key of owner.savedWorldVersions.keys()) {
               if (key <= version) owner.savedWorldVersions.delete(key);
             }
+            for (const listener of owner.savedListeners) listener({
+              contextFile, version: savedEvent.version, revision: savedEvent.revision
+            });
           },
           quietMs: saveSchedule?.quietMs ?? 250,
           maxDirtyMs: saveSchedule?.maxDirtyMs ?? 2000,
@@ -138,6 +142,7 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
   if (runtimeAuthority === 'memory' && publishLegacyProjection && projectionFile) {
     owner.projections.add(path.resolve(projectionFile));
   }
+  if (runtimeAuthority === 'memory' && typeof onSaved === 'function') owner.savedListeners.add(onSaved);
   return owner;
 }
 
@@ -156,10 +161,11 @@ export function createTransactionalWorldPersistence({
   runtimeAuthority = 'disk',
   saveSchedule = null,
   writerFactory = createDurableWorldWriter,
-  onAuthoritativeWrite = async () => {}
+  onAuthoritativeWrite = async () => {},
+  onSaved = null
 }) {
   const owner = ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProjection,
-    worldId, runtimeAuthority, saveSchedule, writerFactory });
+    worldId, runtimeAuthority, saveSchedule, writerFactory, onSaved });
   const { worldRepository, journalRepository, coordinator } = owner;
 
   function recover() {
@@ -577,9 +583,11 @@ export function createTransactionalWorldPersistence({
     async closeSaves() {
       if (owner.runtimeAuthority !== 'memory') return { pending: false };
       await owner.ready;
-      const result = await owner.saver.close();
-      await owner.writer.close();
-      return result;
+      try {
+        return await owner.saver.close();
+      } finally {
+        await owner.writer.close();
+      }
     },
     commit,
     compatibilityManifest,

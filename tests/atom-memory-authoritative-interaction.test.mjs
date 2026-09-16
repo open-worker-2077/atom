@@ -106,3 +106,28 @@ test('a save failure reports dirty state but does not undo an accepted read', as
   await service.flushSaves();
   assert.equal((await service.saveStatus(target)).pending, false);
 });
+
+test('closing a failed saver releases its writer even when flush rejects', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-memory-close-failure-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const before = [{ thing: 'Root', situation: 'before', slot: [], strut: [] }];
+  const after = [{ thing: 'Root', situation: 'after', slot: [], strut: [] }];
+  const target = { contextFile: path.join(directory, 'atom.json'),
+    projectionFile: path.join(directory, 'graph.json') };
+  await fs.writeFile(target.contextFile, `${JSON.stringify(before)}\n`, 'utf8');
+  let writerClosed = false;
+  const service = createLegacyWorldService({ memoryAuthoritative: true,
+    publishLegacyProjection: false,
+    saveSchedule: { quietMs: 60000, maxDirtyMs: 60000 },
+    writerFactory: () => ({ save: async () => {
+      throw Object.assign(new Error('injected save failure'), { code: 'EIO' });
+    }, close: async () => { writerClosed = true; } }),
+    execute: async (request) => {
+      await request.commitWorld({ expectedRevision: revisionOfWorldFacts(before),
+        nextRevision: revisionOfWorldFacts(after), facts: after });
+      return { ok: true, changed: true };
+    } });
+  await service.executeLegacy({ ...target, source: 'transform', interaction: { id: 'close-failure' } });
+  await assert.rejects(service.closeSaves(), { code: 'EIO' });
+  assert.equal(writerClosed, true);
+});

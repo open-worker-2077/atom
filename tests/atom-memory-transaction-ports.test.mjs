@@ -78,3 +78,28 @@ test('accepted Program source and outcome are visible before a save', async () =
     outcome: { status: 'pending', attemptId: 'attempt-1' } });
   assert.equal((await ports.journalRepository.programExecution(source.commandId)).outcome.attemptId, 'attempt-1');
 });
+
+for (const interruptedAt of ['after-prepare', 'after-world-write']) {
+  test(`memory recovery finishes an interrupted ${interruptedAt} decision exactly once`, async () => {
+    const before = snapshot([]);
+    const accepted = [];
+    const ports = createMemoryTransactionPorts({ initialSnapshot: before,
+      onAccepted: (entry) => accepted.push(entry) });
+    let interrupted = false;
+    const coordinator = createCommitCoordinator({ ...ports,
+      faultInjector: (stage) => {
+        if (!interrupted && stage === interruptedAt) {
+          interrupted = true;
+          throw Object.assign(new Error('injected interruption'), { code: 'INJECTED_INTERRUPTION' });
+        }
+      } });
+    await assert.rejects(coordinator.execute({ command: command('interrupted', before.revision),
+      transition: () => ({ facts: [{ thing: 'After', situation: '', slot: [], strut: [] }] }) }),
+    { code: 'INJECTED_INTERRUPTION' });
+    await coordinator.recover();
+    await coordinator.recover();
+    assert.equal(ports.authority.snapshot().facts[0].thing, 'After');
+    assert.equal(accepted.length, 1);
+    assert.equal((await ports.journalRepository.findReceipt('interrupted')).commandId, 'interrupted');
+  });
+}

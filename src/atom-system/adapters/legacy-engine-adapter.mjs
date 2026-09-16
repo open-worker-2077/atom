@@ -32,7 +32,8 @@ export function createLegacyWorldService(options = {}) {
       runtimeAuthority: options.memoryAuthoritative === true ? 'memory' : 'disk',
       saveSchedule: options.saveSchedule,
       writerFactory: options.writerFactory,
-      onAuthoritativeWrite: options.onAuthoritativeWrite
+      onAuthoritativeWrite: options.onAuthoritativeWrite,
+      onSaved: options.onSaved
     })
   ));
   const transactions = new Map();

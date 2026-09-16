@@ -442,7 +442,12 @@ export async function startAtomGraphServer(options = {}) {
   );
   const worldService = options.worldService ?? createLegacyWorldService({
     publishLegacyProjection: false,
-    onAuthoritativeWrite: () => backupTrigger?.schedule()
+    memoryAuthoritative: options.memoryAuthoritative === true,
+    saveSchedule: options.saveSchedule,
+    onAuthoritativeWrite: options.memoryAuthoritative === true
+      ? undefined : () => backupTrigger?.schedule(),
+    onSaved: options.memoryAuthoritative === true
+      ? () => backupTrigger?.schedule() : undefined
   });
   const currentAgentAuthorityOptions = async () => {
     if (typeof worldService.readCommittedSnapshot === 'function') {
@@ -551,7 +556,11 @@ export async function startAtomGraphServer(options = {}) {
   });
   notifySpatialProjection = instance.publishKnowledgeChange;
   backupTrigger?.start({ initialBackup: false });
-  instance.server.once('close', () => backupTrigger?.close());
+  let orderlyClosing = false;
+  let closePromise = null;
+  instance.server.once('close', () => {
+    if (!orderlyClosing) backupTrigger?.close();
+  });
   await new Promise((resolve, reject) => {
     const onError = (error) => {
       instance.server.off('listening', onListening);
@@ -595,12 +604,21 @@ export async function startAtomGraphServer(options = {}) {
     diagnostics,
     diagnosticRepository,
     backupTrigger,
-    close: async () => {
-      const closing = closeServer(instance.server);
-      await instance.drainAtomInteractions?.();
-      await interactionRuntime.close?.();
-      await diagnostics.flush?.();
-      await closing;
+    close: () => {
+      closePromise ??= (async () => {
+        orderlyClosing = true;
+        const closing = closeServer(instance.server);
+        try {
+          await instance.drainAtomInteractions?.();
+          await interactionRuntime.close?.();
+          await worldService.closeSaves?.();
+          await backupTrigger?.flush?.();
+          await diagnostics.flush?.();
+        } finally {
+          try { await closing; } finally { backupTrigger?.close(); }
+        }
+      })();
+      return closePromise;
     }
   });
 }

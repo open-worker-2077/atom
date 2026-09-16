@@ -8,6 +8,7 @@ import { createTransactionalWorldPersistence } from '../src/atom-system/adapters
 import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createJsonWorldRepository } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
 test('memory persistence accepts and reads a transition before its independent save', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-memory-persistence-'));
@@ -86,4 +87,38 @@ test('real Atom Transform is readable from memory before the old disk checkpoint
     localCommitFile: path.join(`${path.join(directory, 'atom.transactions.json')}.d`, 'world-commits.jsonl') });
   assert.equal((await durable.read()).facts[0].situation, 'new');
   assert.ok(JSON.parse(await fs.readFile(projectionFile, 'utf8')).graph);
+});
+
+test('Program source and subsequent facts both execute against accepted memory before save', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-memory-program-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([
+    { thing: 'test', situation: '', slot: [], strut: [] },
+    { thing: 'Trigger', situation: 'wait', slot: [], strut: [] },
+    { 'thing@program': 'Create Then Update', situation: [
+      "trigger = explore({'thing': 'Trigger', 'situation$full': None})[0]",
+      "if trigger.situation == 'go':",
+      "    transform({'thing': 'test/Created', 'situation': 'created', 'slot': [], 'strut': []})",
+      "    transform({'thing': 'test/Created', 'situation.rep.final': None})"
+    ].join('\n'), slot: [], strut: [] }
+  ]));
+  const service = createLegacyWorldService({ memoryAuthoritative: true,
+    publishLegacyProjection: false,
+    saveSchedule: { quietMs: 60000, maxDirtyMs: 60000 } });
+  t.after(() => service.closeSaves());
+  const result = await service.executeLegacy({ contextFile, projectionFile,
+    source: 'transform {"thing":"Trigger","situation.rep.go"}',
+    programMode: 'reconcile', programScheduler: createProgramRuntimeScheduler(),
+    interaction: { id: 'program-before-save' } });
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.subsequentExecution.status, 'completed');
+  const memory = await service.readCommittedSnapshot({ contextFile, projectionFile });
+  assert.equal(memory.facts[0].slot[0].situation, 'final');
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot.length, 0);
+  await service.flushSaves();
+  const durable = createJsonWorldRepository({ file: contextFile, worldId: 'primary',
+    localCommitFile: path.join(`${path.join(directory, 'atom.transactions.json')}.d`, 'world-commits.jsonl') });
+  assert.equal((await durable.read()).facts[0].slot[0].situation, 'final');
 });

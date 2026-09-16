@@ -73,13 +73,13 @@ parentPort.on('message', ({ id, records, events, revision, projectionFiles = [] 
         }
         else if (event.kind === 'outcome') {
           const stored = (await journalRepository.programExecution(event.sourceCommandId))?.outcome;
-          if (stored && stored.status !== 'pending'
-            && !isDeepStrictEqual(stored, event.outcome)) {
-            throw problem('WORLD_SAVE_OUTCOME_CONFLICT', 'Durable Program outcome differs from accepted memory');
-          }
+          if (event.outcome.status === 'pending' && stored?.status === 'completed') continue;
           if (!isDeepStrictEqual(stored, event.outcome)) {
-            await journalRepository.recordProgramExecution({ sourceCommandId: event.sourceCommandId,
+            const persisted = await journalRepository.recordProgramExecution({ sourceCommandId: event.sourceCommandId,
               outcome: event.outcome });
+            if (!isDeepStrictEqual(persisted, event.outcome)) {
+              throw problem('WORLD_SAVE_OUTCOME_CONFLICT', 'Durable Program outcome differs from accepted memory');
+            }
           }
         } else throw problem('INVALID_WORLD_SAVE_EVENT', 'Unknown save event');
       }

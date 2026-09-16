@@ -20,7 +20,7 @@ import { createProgramRuntimeScheduler } from '../work-engine/atom-language/prog
 import { resolveAtomRuntime } from '../work-engine/atom-language/runtime-config.mjs';
 import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
 import { readVisibleSlotPlans } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
-import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
+import { createJsonTransactionJournal, createJsonWorldRepository } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import {
   applyGraphFourAxisWorldMigration,
@@ -373,6 +373,47 @@ test('graph server initializes the projection, serves the full UI health and Gra
   assert.ok(labels.includes('石斧'), 'strut target projects as its own node');
   assert.equal(state.knowledge.edges.length, 1);
   assert.equal(state.knowledge.edges[0].label, 'strut');
+});
+
+test('HTTP Transform reads accepted memory before save and server close flushes its recovery point', async (t) => {
+  const directory = await temporaryDirectory();
+  removeTemporaryDirectoryAfter(t, directory);
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, `${JSON.stringify(atomFixture())}\n`, 'utf8');
+  const backupCalls = [];
+  const backupTrigger = { flush: async () => backupCalls.push('flush'),
+    start: () => backupCalls.push('start'),
+    schedule: () => backupCalls.push('schedule'),
+    close: () => backupCalls.push('close') };
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0,
+    contextFile, graphFile, storeFile, memoryAuthoritative: true,
+    saveSchedule: { quietMs: 60000, maxDirtyMs: 60000 }, backupTrigger });
+  t.after(() => running.close());
+  const request = (source, id) => fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ source, interaction: { id,
+      agent: { ref: 'fixture-agent-ref', path: '石器工坊' } }, history: [] })
+  }).then(async (response) => ({ status: response.status, body: await response.json() }));
+  const write = await request('transform {"thing":"石斧","situation.rep.内存已更新"}', 'memory-http-write');
+  assert.equal(write.status, 200, JSON.stringify(write.body));
+  const read = await request('explore {"thing":"石斧","situation$full":true}', 'memory-http-read');
+  assert.equal(read.status, 200, JSON.stringify(read.body));
+  assert.match(JSON.stringify(read.body), /内存已更新/u);
+  const durable = createJsonWorldRepository({ file: contextFile, worldId: 'primary',
+    localCommitFile: path.join(`${path.join(directory, 'atom.transactions.json')}.d`, 'world-commits.jsonl') });
+  assert.match(JSON.stringify((await durable.read()).facts), /可核查的物件/u,
+    'durable recovery point must still lag while the save timer is held');
+  assert.equal(backupCalls.includes('schedule'), false,
+    'backup must not capture the old disk checkpoint as the new accepted version');
+  await running.close();
+  assert.match(JSON.stringify((await durable.read()).facts), /内存已更新/u);
+  assert.ok(backupCalls.includes('schedule'));
+  assert.ok(backupCalls.indexOf('schedule') < backupCalls.indexOf('close'),
+    'backup trigger must remain open until the final durable save is scheduled');
+  assert.ok(backupCalls.lastIndexOf('flush') > backupCalls.indexOf('schedule'),
+    'shutdown must finish the pending backup after the durable save');
 });
 
 test('4784 resolves an Agent selector inside the resident world instead of every CLI process', async () => {
