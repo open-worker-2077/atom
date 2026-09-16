@@ -102,7 +102,7 @@ Run: `node --test tests/atom-default-backup-active-boundary.test.mjs`
 
 Expected: PASS。
 
-- [ ] **Step 5: 提交 Task 1**
+- [x] **Step 5: 提交 Task 1**
 
 ```bash
 git add work-engine/atom-language/default-backup-boundary.mjs tests/atom-default-backup-active-boundary.test.mjs
@@ -154,7 +154,7 @@ Run: `node --test --test-isolation=none tests/atom-default-backup-active-boundar
 
 Expected: PASS，且大备份夹具的 Spatial 只含备份根。
 
-- [ ] **Step 5: 提交 Task 2**
+- [x] **Step 5: 提交 Task 2**
 
 ```bash
 git add work-engine/atom-language/context-store.mjs work-engine/atom-language/graph-4d-projection.mjs src/atom-system/adapters/legacy-projection-adapter.mjs tests
@@ -208,7 +208,7 @@ Graph/Spatial 分别只保留 42 个节点（含虚拟根与备份根），runti
 65fa1e8f58ca43dd856419ecc2b081ecd1438baf4ab18486f358823c68d45f49。
 ```
 
-- [ ] **Step 5: 提交 Task 3**
+- [x] **Step 5: 提交 Task 3**
 
 ```bash
 git add work-engine/atom-language/program-runtime.mjs tests docs/superpowers/plans/2026-09-03-atom-current-requirement-ledger.md
@@ -224,7 +224,7 @@ git commit -m "feat: isolate archived facts from active runtime"
 - Consumes: Tasks 1—3 的同一候选 revision。
 - Produces: 聚焦、真实恢复、全量、生产回读与精确远端证据。
 
-- [ ] **Step 1: 运行最小受影响链**
+- [x] **Step 1: 运行最小受影响链**
 
 Run: `node --test --test-isolation=none tests/atom-default-backup-active-boundary.test.mjs tests/atom-language-context-store.test.mjs tests/atom-language-graph-4d-projection.test.mjs tests/atom-projection-pipeline.test.mjs tests/atom-program-runtime-scheduling.test.mjs tests/atom-rename-sealed-descendants.test.mjs`
 

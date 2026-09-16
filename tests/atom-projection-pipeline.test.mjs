@@ -279,6 +279,67 @@ test('incremental Web projection includes a cross-domain strut endpoint without 
   assert.equal(current.projections.spatial.value.strutRelations.length, 1);
 });
 
+test('incremental projection resolves archived short names against the complete world boundary', async () => {
+  const before = [
+    {
+      thing: 'Domain', situation: '', strut: [], slot: [
+        { thing: 'Source', situation: 'before', slot: [], strut: [] },
+        {
+          'thing@backup@default': 'Backup', situation: '', strut: [],
+          slot: [{ thing: 'X', situation: '', slot: [], strut: [] }]
+        }
+      ]
+    },
+    { thing: 'Other', situation: '', strut: [], slot: [{ thing: 'X', situation: '', slot: [], strut: [] }] }
+  ];
+  const after = structuredClone(before);
+  after[0].slot[0].strut = [{ 'if@current': true, then: [{ thing: 'X' }] }];
+  const repository = createMemoryProjectionRepository();
+  const pipeline = createProjectionPipeline({
+    projectors: createLegacyProjectionProjectors(),
+    repository
+  });
+
+  await pipeline.rebuild(snapshot('rev-backup-before', before));
+  await pipeline.rebuild(snapshot('rev-backup-after', after), { affectedPaths: ['Domain/Source'] });
+  const current = await repository.readCurrent('primary', 'rev-backup-after');
+  const fullRepository = createMemoryProjectionRepository();
+  const fullPipeline = createProjectionPipeline({
+    projectors: createLegacyProjectionProjectors(),
+    repository: fullRepository
+  });
+  await fullPipeline.rebuild(snapshot('rev-backup-after', after));
+  const expected = await fullRepository.readCurrent('primary', 'rev-backup-after');
+
+  assert.equal(
+    JSON.stringify(current.projections.graph.value),
+    JSON.stringify(expected.projections.graph.value)
+  );
+  assert.equal(
+    JSON.stringify(current.projections.spatial.value),
+    JSON.stringify(expected.projections.spatial.value)
+  );
+  assert.deepEqual(current.projections.graph.value.graph.slot[0].slot[0].strut, []);
+});
+
+test('incremental projection rejects a second typed default-backup root from full facts', () => {
+  const projectGraph = createLegacyProjectionProjectors()[0];
+  const before = [{ 'thing@backup@default': 'Backup A', situation: '', slot: [], strut: [] }];
+  const previous = projectGraph.project({ facts: before });
+  const after = [
+    ...before,
+    { 'thing@backup@default': 'Backup B', situation: '', slot: [], strut: [] }
+  ];
+
+  assert.throws(
+    () => projectGraph.project(
+      { facts: after },
+      { previousProjection: { value: previous }, affectedPaths: ['Backup B'] }
+    ),
+    (error) => error.code === 'AMBIGUOUS_DEFAULT_BACKUP'
+  );
+});
+
 test('spatial projection represents an Agent capability by its Program type only', async () => {
   const facts = [{
     'thing@program': 'Work Agent',

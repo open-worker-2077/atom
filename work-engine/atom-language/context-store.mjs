@@ -10,8 +10,9 @@ import { atomLanguageError } from './errors.mjs';
 import { RETIRED_GRAPH_AXES } from './graph-schema.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import {
-  isInsideDefaultBackupPath,
-  isTypedDefaultBackupTypes
+  collectDefaultBackupBoundary,
+  isTypedDefaultBackupTypes,
+  resolveBoundarySelector
 } from './default-backup-boundary.mjs';
 import {
   compatibilityMetadata,
@@ -35,33 +36,6 @@ const LEGACY_V1_AXIS_SET = new Set(LEGACY_V1_AXES);
 
 function rawBaseKey(rawKey) {
   return String(rawKey).match(/^[^@&#$~]+/u)?.[0] ?? '';
-}
-
-function validateThingIdentityUniqueness(atoms) {
-  const seen = new Map();
-  function visit(atom, parentPath = []) {
-    if (!isPlainObject(atom)) return;
-    const thing = Object.entries(atom).map(([rawKey, value]) => ({
-      parsed: parseAtomKey(rawKey, { descriptionSymbolWarnings: false }), value
-    })).find(({ parsed }) => parsed.baseKey === 'thing');
-    const pathParts = [...parentPath, String(thing?.value ?? '')];
-    const identity = thing?.parsed.identity ?? null;
-    if (identity) {
-      if (seen.has(identity)) {
-        throw atomLanguageError(
-          'DUPLICATE_THING_IDENTITY',
-          '多个 Thing 使用了同一内核身份',
-          { identity, paths: [seen.get(identity), pathParts.join('/')] }
-        );
-      }
-      seen.set(identity, pathParts.join('/'));
-    }
-    const slot = Object.entries(atom).map(([rawKey, value]) => ({
-      parsed: parseAtomKey(rawKey, { descriptionSymbolWarnings: false }), value
-    })).find(({ parsed }) => parsed.baseKey === 'slot')?.value;
-    for (const child of Array.isArray(slot) ? slot : []) visit(child, pathParts);
-  }
-  for (const atom of Array.isArray(atoms) ? atoms : []) visit(atom);
 }
 
 function migratedLegacyKey(rawKey) {
@@ -339,35 +313,28 @@ function projectedStrut(clause, rootThing, thingPathByIdentity = new Map()) {
 function selectorTargetsInactiveAtom(
   selector,
   rootThing,
-  inactiveAtomPaths,
-  inactiveOnlyAtomNames
+  sourceAtomPath,
+  boundary
 ) {
   const thingKey = Object.keys(selector ?? {}).find((candidate) => (
     parseAtomKey(candidate, { descriptionSymbolWarnings: false }).baseKey === 'thing'
   ));
   const rawPath = thingKey ? selector[thingKey] : null;
   if (typeof rawPath !== 'string') return false;
-  const atomPath = rawPath.startsWith(`${rootThing}/`)
-    ? rawPath.slice(rootThing.length + 1)
-    : rawPath;
-  return isInsideDefaultBackupPath(atomPath, inactiveAtomPaths)
-    || (!atomPath.includes('/') && inactiveOnlyAtomNames?.has(atomPath));
+  const target = resolveBoundarySelector(boundary, rawPath, sourceAtomPath, rootThing);
+  return target?.inactive === true;
 }
 
-function projectedActiveStrut(clause, rootThing, inactiveAtomPaths, inactiveOnlyAtomNames) {
+function projectedActiveStrut(clause, rootThing, sourceAtomPath, boundary) {
   const expressionTargetsInactive = (expression) => {
     if (!expression || typeof expression !== 'object' || Array.isArray(expression)) return false;
-    if (selectorTargetsInactiveAtom(
-      expression, rootThing, inactiveAtomPaths, inactiveOnlyAtomNames
-    )) return true;
+    if (selectorTargetsInactiveAtom(expression, rootThing, sourceAtomPath, boundary)) return true;
     return [...(expression.and ?? []), ...(expression.or ?? [])].some(expressionTargetsInactive);
   };
   if ((clause.if ?? []).some(expressionTargetsInactive)) return null;
   if (!Array.isArray(clause.then)) return clause;
   const activeTargets = (clause.then ?? []).filter((target) => (
-    !selectorTargetsInactiveAtom(
-      target, rootThing, inactiveAtomPaths, inactiveOnlyAtomNames
-    )
+    !selectorTargetsInactiveAtom(target, rootThing, sourceAtomPath, boundary)
   ));
   if (clause.then.length && activeTargets.length === 0) return null;
   return { ...clause, then: activeTargets };
@@ -435,8 +402,8 @@ function projectAtom(atom, location, rootThing, options = {}) {
         .map((selector) => projectedActiveStrut(
           projectedStrut(selector, rootThing, options.thingPathByIdentity),
           rootThing,
-          options.inactiveAtomPaths,
-          options.inactiveOnlyAtomNames
+          atomPath,
+          options.defaultBackupBoundary
         ))
         .filter(Boolean);
   }
@@ -455,49 +422,13 @@ export function projectAtomContext(atoms, options = {}) {
       'Atom context 文档当前必须是顶层 Atom 数组'
     );
   }
-  validateThingIdentityUniqueness(atoms);
   const rootName = options.rootName ?? DEFAULT_CONTEXT_FILENAME;
-  const thingPathByIdentity = new Map();
-  const inactiveAtomPaths = new Set();
-  const activeAtomNames = new Set();
-  const inactiveAtomNames = new Set();
-  const defaultBackupPaths = [];
-  function indexIdentities(nodes, parentPath = [], insideDefaultBackup = false) {
-    for (const atom of nodes) {
-      const fields = atomFields(atom, '$identity-index');
-      const pathParts = [...parentPath, fields.get('thing').value];
-      const thingTypes = fields.get('thing').parsed.types.map(({ name }) => name);
-      const defaultBackup = isTypedDefaultBackupTypes(thingTypes);
-      const inactive = insideDefaultBackup || defaultBackup;
-      const atomPath = pathParts.join('/');
-      if (defaultBackup) defaultBackupPaths.push(atomPath);
-      if (inactive) {
-        inactiveAtomPaths.add(atomPath);
-        inactiveAtomNames.add(fields.get('thing').value);
-      } else {
-        activeAtomNames.add(fields.get('thing').value);
-      }
-      const identity = fields.get('thing').parsed.identity;
-      if (identity) thingPathByIdentity.set(identity, atomPath);
-      indexIdentities(fields.get('slot').value, pathParts, inactive);
-    }
-  }
-  indexIdentities(atoms);
-  if (defaultBackupPaths.length > 1) {
-    throw atomLanguageError(
-      'AMBIGUOUS_DEFAULT_BACKUP',
-      'World contains multiple typed default backup roots',
-      { paths: defaultBackupPaths }
-    );
-  }
-  const inactiveOnlyAtomNames = new Set(
-    [...inactiveAtomNames].filter((name) => !activeAtomNames.has(name))
-  );
+  const defaultBackupBoundary = options.defaultBackupBoundary
+    ?? collectDefaultBackupBoundary(atoms);
   const projectionOptions = {
     ...options,
-    thingPathByIdentity,
-    inactiveAtomPaths,
-    inactiveOnlyAtomNames,
+    thingPathByIdentity: defaultBackupBoundary.thingPathByIdentity,
+    defaultBackupBoundary,
     allowLegacyStrut: options.allowLegacyStrut === true || legacySnapshotMetadata.has(atoms),
     atomPathByGraphPath: new Map(),
     parentAtomPath: ''

@@ -167,5 +167,13 @@ test('spatial projection hides every relation entering or leaving the default ba
 
   assert.equal(knowledge.nodes.some((node) => node.atomPath === '默认备份仓/已删除'), false);
   assert.equal(knowledge.nodes.some((node) => node.atomPath === '默认备份仓'), true);
+  assert.equal(knowledge.strutClauses.some((clause) => (
+    clause.sourcePath.includes('默认备份仓')
+    || clause.antecedentPaths.some((path) => path.includes('默认备份仓'))
+    || clause.then.some(({ targetPath }) => targetPath.includes('默认备份仓'))
+  )), false);
+  assert.equal(knowledge.strutRelations.some(({ sourcePath, targetPath }) => (
+    sourcePath.includes('默认备份仓') || targetPath.includes('默认备份仓')
+  )), false);
   assert.deepEqual(Array.from(knowledge.edges, (edge) => edge.label), ['strut']);
 });

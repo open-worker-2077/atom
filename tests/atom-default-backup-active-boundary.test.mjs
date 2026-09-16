@@ -118,6 +118,28 @@ test('unique archived short names are removed while an active homonym still reso
   }]);
 });
 
+test('short-name resolution uses the authoritative nearest domain before pruning', () => {
+  const facts = [
+    atom('thing', 'Domain', '', [
+      atom('thing', 'Source', '', [], [{ 'if@current': true, then: [{ thing: 'X' }] }]),
+      atom('thing@backup@default', 'Backup', '', [atom('thing', 'X')])
+    ]),
+    atom('thing', 'Other', '', [atom('thing', 'X')])
+  ];
+
+  assert.deepEqual(projectAtomContext(facts).graph.slot[0].slot[0].strut, []);
+});
+
+test('malformed cold payload is preserved without entering active Graph validation', () => {
+  const archived = { thing: 'Cold', situation: 'recoverable', slot: [] };
+  const facts = [atom('thing@backup@default', 'Default Backup', '', [archived])];
+
+  const graph = projectAtomContext(facts);
+
+  assert.deepEqual(graph.graph.slot[0].slot, []);
+  assert.deepEqual(facts[0].slot[0], archived);
+});
+
 test('restoring an archived subtree outside the boundary reactivates its derived records', () => {
   const [, backup] = worldWithArchivedSubtree();
   const restored = backup.slot[0];

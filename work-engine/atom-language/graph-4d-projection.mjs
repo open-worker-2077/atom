@@ -212,6 +212,19 @@ export async function projectAtomGraphWithPaths(rawGraphDocument, options = {}) 
     .filter((node) => node.atomTypes?.includes('backup') && node.atomTypes.includes('default'))
     .map((node) => node.atomPath);
   if (defaultBackupPaths.length) {
+    const rootPrefix = `${thingOf(graph)}/`;
+    const inactivePath = (rawPath) => {
+      const atomPath = rawPath?.startsWith(rootPrefix) ? rawPath.slice(rootPrefix.length) : rawPath;
+      return defaultBackupPaths.some((backupPath) => (
+        atomPath === backupPath || atomPath?.startsWith(`${backupPath}/`)
+      ));
+    };
+    const inactiveClause = (clause) => (
+      inactivePath(clause.sourcePath)
+      || (clause.antecedentPaths ?? []).some(inactivePath)
+      || (clause.dependencyPaths ?? []).some(inactivePath)
+      || (clause.then ?? []).some(({ targetPath }) => inactivePath(targetPath))
+    );
     const inactiveKeys = new Set(nodes
       .filter((node) => defaultBackupPaths.some((backupPath) => (
         node.atomPath === backupPath || node.atomPath?.startsWith(`${backupPath}/`)
@@ -226,6 +239,10 @@ export async function projectAtomGraphWithPaths(rawGraphDocument, options = {}) 
     for (const key of archivedKeys) atomPathByKey.delete(key);
     knowledge.edges = (knowledge.edges ?? []).filter((edge) => (
       !inactiveKeys.has(edge.from?.key) && !inactiveKeys.has(edge.to?.key)
+    ));
+    knowledge.strutClauses = (knowledge.strutClauses ?? []).filter((clause) => !inactiveClause(clause));
+    knowledge.strutRelations = (knowledge.strutRelations ?? []).filter((relation) => (
+      !inactivePath(relation.sourcePath) && !inactivePath(relation.targetPath)
     ));
   }
   return { knowledge, atomPathByKey };

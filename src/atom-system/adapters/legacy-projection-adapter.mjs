@@ -2,7 +2,10 @@ import { projectAtomContext } from '../../../work-engine/atom-language/context-s
 import { projectAtomGraphToKnowledge } from '../../../work-engine/atom-language/graph-4d-projection.mjs';
 import { publicAtomTypes } from '../../../work-engine/atom-language/slot-graph-semantics.mjs';
 import { evaluateStrutClausesWithPrograms } from '../../../work-engine/atom-language/strut-runtime.mjs';
-import { isTypedDefaultBackupTypes } from '../../../work-engine/atom-language/default-backup-boundary.mjs';
+import {
+  collectDefaultBackupBoundary,
+  isTypedDefaultBackupTypes
+} from '../../../work-engine/atom-language/default-backup-boundary.mjs';
 
 const baseKeyOf = (rawKey) => String(rawKey).match(/^[^@&#$~]+/u)?.[0] ?? '';
 
@@ -101,8 +104,9 @@ function incrementalGraphProjection({ facts, previous, affectedPaths, projectCon
   const rootThing = atomName(previous.graph) ?? 'atom.json';
   const affectedDomains = affectedTopDomains(affectedPaths, rootThing);
   if (!affectedDomains.size) return { value: previous, affectedDomains, partial: previous };
+  const defaultBackupBoundary = collectDefaultBackupBoundary(facts);
   const partialFacts = projectionDomainFacts(facts, affectedDomains, rootThing);
-  const partial = projectContext(partialFacts, options);
+  const partial = projectContext(partialFacts, { ...options, defaultBackupBoundary });
   const previousChildren = new Map((fieldValue(previous.graph, 'slot') ?? [])
     .map((atom) => [atomName(atom), atom]));
   const partialChildren = new Map((fieldValue(partial.graph, 'slot') ?? [])
