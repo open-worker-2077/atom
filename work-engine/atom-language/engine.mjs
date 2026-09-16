@@ -3323,6 +3323,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     await recordTransformStage('commit', commitStartedAt, { commitEntered: true });
     let derivedRecoveryPending = false;
     const rebuildCommittedAgentSecurity = async () => {
+      const securityStartedAt = performance.now();
       try {
         await options.programScheduler?.rebuildAgentSecurity?.(candidateAtoms);
       } catch (error) {
@@ -3334,6 +3335,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           { cause: error.code ?? error.name ?? 'AGENT_SECURITY_REBUILD_FAILED' }
         ));
       }
+      await recordTransformStage('security-rebuild', securityStartedAt);
     };
     if (sourceEvent && postcommit) deferredSourceSecurityRebuilds.push(rebuildCommittedAgentSecurity);
     else await rebuildCommittedAgentSecurity();

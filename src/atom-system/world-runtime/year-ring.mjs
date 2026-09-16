@@ -121,7 +121,8 @@ function sanitizeTransformStage(stage) {
     throw problem('INVALID_TRANSFORM_STAGE_DIAGNOSTIC', 'Transform stage must be an object');
   }
   if (![
-    'request', 'index-preparation', 'reconcile', 'transform-apply', 'commit', 'program-projection'
+    'request', 'index-preparation', 'reconcile', 'transform-apply', 'commit',
+    'security-rebuild', 'program-projection'
   ].includes(stage.stage)) {
     throw problem('INVALID_TRANSFORM_STAGE_DIAGNOSTIC', 'Transform stage is invalid');
   }

@@ -50,6 +50,7 @@
 - **当前证据**：正式运行诊断中107次成功读取平均约3.065秒、20次成功Transform平均约17.805秒；Transform的`commit`平均约6.682秒，另有平均约8.597秒未落入命名阶段，不能把全部慢归咎于文件大小。既有“局部原子提交”规格与“运行/恢复”规格把落盘置于交互可读之前，新用户定论明确替代该时序。新产品合同见[规格](../specs/2026-09-16-memory-authoritative-world-and-independent-save-design.md)。
 - **收口标准**：先建真实规模副本RED，再实施单一内存版本、独立有界保存调度、版本水位、失败重试与恢复；用CLI/Web/Program精确回读、保存阻塞下连续读写、异常重启和正式入口部署证明E3。当前只有基线与规格，不声称代码或性能已修复。
 - **首个 RED（未修复）**：隔离工作区 `feat/memory-authoritative-save` 中新增公开 World Service 调用链测试 `tests/atom-memory-authoritative-interaction.test.mjs`；将保存器阻塞后立即 Explore，实测仍得到旧 `before` 而非新 `after`，失败信息为 `Explore must see the accepted memory version`。既有事务基线 `102/102 PASS`；测试运行所需临时目录在只读沙箱内因 `EPERM` 无效，已在授权执行环境重跑取得有效结果。此 RED 只证明现行时序不符，不冒称实现已完成。
+- **计时缺口局部收窄**：Transform 诊断的 `commit` 之后补记 `security-rebuild` 阶段，先由现有诊断合同缺项RED，再最小实现转GREEN；关联诊断套件 `16/16 PASS`。该探针只记录时长而不记录Graph正文，尚未在真实规模副本回测，不能据此断言先前未分类的平均8.597秒均由安全重建造成。
 
 ### 2026-09-16 默认备份域不得参与活跃计算
 

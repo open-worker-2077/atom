@@ -38,7 +38,7 @@
 
 - [x] **Step 1: Write the failing test.** Use a gated persistence `commit`, start one Transform, then issue Explore through the same World Service before releasing the gate; assert new value and prompt acknowledgment.
 - [x] **Step 2: Run RED.** `node --test --test-isolation=none tests/atom-memory-authoritative-interaction.test.mjs` currently fails with `before !== after` in 0.55 seconds.
-- [ ] **Step 3: Attribute the missing timing.** Add only content-free timing probes around security rebuild, source notification and snapshot acquisition; run the smallest existing fixture and compare the sum with total `transform-stage` elapsed. Remove probes that are not suitable as permanent diagnostics.
+- [ ] **Step 3: Attribute the missing timing.** The content-free `security-rebuild` probe is RED→GREEN and its affected 16 tests pass; source notification/snapshot timing and real-scale attribution remain. Compare named stages with total `transform-stage` elapsed before closing this step.
 - [ ] **Step 4: Re-run existing baseline.** `node --test --test-isolation=none tests/atom-world-transaction.test.mjs` must remain 102/102 before architectural changes; current valid baseline is 102/102.
 - [ ] **Step 5: Commit only the reproducible test and timing diagnosis**, then update the existing ledger with the exact cause and measured stage boundaries.
 
