@@ -60,10 +60,14 @@ export function createLegacyWorldService(options = {}) {
     try {
       return await work();
     } finally {
-      options.onPersistenceStage?.({
+      const measurement = {
         stage,
         durationMs: Math.round((performance.now() - startedAt) * 1000) / 1000
-      });
+      };
+      options.onPersistenceStage?.(measurement);
+      if (process.env.ATOM_PERF_TRACE === '1') {
+        process.stderr.write(`${JSON.stringify({ event: 'world-service-stage', ...measurement })}\n`);
+      }
     }
   }
 

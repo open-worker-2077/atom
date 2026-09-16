@@ -723,6 +723,7 @@ function localProjectionRebaseEligible(previousAtoms, atoms, changedPaths, store
 }
 
 function rebindPathLocks(locks, atoms) {
+  if (locks.length === 0) return [];
   const refsByPath = new Map(worldRecords(atoms).map((record) => [record.path, record.ref]));
   return locks.map((lock) => {
     const source = lock.sourceProgramPath

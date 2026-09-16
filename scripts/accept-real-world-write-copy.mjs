@@ -1,6 +1,9 @@
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
@@ -14,6 +17,7 @@ if (process.argv.includes('--trace')) process.env.ATOM_PERF_TRACE = '1';
 const cleanupCopy = process.argv.includes('--cleanup');
 const measureStructuralLatency = process.argv.includes('--structural-latency');
 const createProgram = process.argv.includes('--program-create');
+const memoryAuthoritative = process.argv.includes('--memory-authoritative');
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -29,6 +33,17 @@ const journalFile = path.join(directory, 'atom.transactions.json');
 const sourceContents = await fs.readFile(sourceContext, 'utf8');
 await fs.copyFile(sourceContext, contextFile);
 const sourceRevision = revisionOfWorldFacts(JSON.parse(sourceContents));
+const journalModuleUrl = new URL('../src/atom-system/adapters/json-world-repository.mjs', import.meta.url).href;
+const { stdout: receiptCountText } = await promisify(execFile)(process.execPath, [
+  '--input-type=module', '--eval',
+  `import { createJsonTransactionJournal } from ${JSON.stringify(journalModuleUrl)};
+   process.stdout.write(String((await createJsonTransactionJournal({ file: process.argv[1] }).readState()).receipts.length));`,
+  journalFile
+], { maxBuffer: 1024 });
+const initialReceiptCount = Number(receiptCountText);
+if (!Number.isSafeInteger(initialReceiptCount) || initialReceiptCount < 0) {
+  throw new Error('Cannot count the copied pre-write journal receipts');
+}
 const sourceProgramProjection = path.join(path.dirname(sourceContext), 'program-projection.json');
 try {
   await fs.copyFile(sourceProgramProjection, path.join(directory, 'program-projection.json'));
@@ -44,8 +59,6 @@ for (const name of ['atom.transactions.json', 'atom.transactions.json.d']) {
     if (error.code !== 'ENOENT') throw error;
   }
 }
-const initialJournal = await createJsonTransactionJournal({ file: journalFile }).readState();
-const initialReceiptCount = initialJournal.receipts.length;
 
 let running;
 let monitor;
@@ -60,9 +73,11 @@ try {
   const requestedAgent = argument('--agent');
   const agentPath = requestedAgent ?? agentSecurity.keys().next().value;
   if (!agentPath) throw new Error('The copied world has no declared Agent Program context');
+  const writeInteractionId = crypto.randomUUID();
   const interaction = { agentSelector: agentPath, agent: { path: agentPath } };
   running = await startAtomGraphServer({
-    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, programScheduler
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, programScheduler,
+    memoryAuthoritative, ...(process.argv.includes('--trace') ? { timingInteractionId: writeInteractionId } : {})
   });
   const endpoint = `${running.url}/__atom/api/command`;
   const port = running.port;
@@ -83,7 +98,7 @@ try {
       situation: createProgram ? 'def main(arguments):\n    return True' : 'acceptance',
       slot: [], strut: []
     })}`,
-    interaction
+    interaction: { ...interaction, id: writeInteractionId }
   }, endpoint);
   const writeMs = Date.now() - startedAt;
   let structuralTimingsMs = null;

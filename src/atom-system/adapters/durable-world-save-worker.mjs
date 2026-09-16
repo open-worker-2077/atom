@@ -62,8 +62,7 @@ parentPort.on('message', ({ id, records, events, revision, projectionFiles = [] 
     try {
       await coordinator.recover();
       if (!manifestLoaded) {
-        const state = await journalRepository.readState();
-        latestCompatibilityManifest = state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null;
+        latestCompatibilityManifest = (await journalRepository.latestReceipt())?.result?.compatibilityManifest ?? null;
         manifestLoaded = true;
       }
       for (const event of events ?? records.map((record) => ({ kind: 'record', record }))) {

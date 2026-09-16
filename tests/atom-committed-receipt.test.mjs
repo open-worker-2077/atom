@@ -15,6 +15,13 @@ test('durable write returns its complete receipt before postcommit Program proje
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, '[]\n');
   const scheduler = createProgramRuntimeScheduler();
+  const rebaseProjection = scheduler.rebaseContextFreeProjection.bind(scheduler);
+  let sourceResponseTurnPassed = false;
+  let projectionStartedAfterResponseTurn = false;
+  scheduler.rebaseContextFreeProjection = (...args) => {
+    projectionStartedAfterResponseTurn = sourceResponseTurnPassed;
+    return rebaseProjection(...args);
+  };
   const refresh = scheduler.refresh.bind(scheduler);
   let committed = false;
   let release;
@@ -60,7 +67,11 @@ test('durable write returns its complete receipt before postcommit Program proje
     correlationId: 'durable-before-projection'
   }, {
     publish: false,
-    onCommitted: result => { receipt = result; notifications += 1; }
+    onCommitted: result => {
+      receipt = result;
+      notifications += 1;
+      setTimeout(() => { sourceResponseTurnPassed = true; }, 0);
+    }
   });
   try {
     await Promise.race([
@@ -78,4 +89,6 @@ test('durable write returns its complete receipt before postcommit Program proje
     await operation;
   }
   assert.equal(notifications, 1, 'early and final paths must not deliver duplicate acknowledgements');
+  assert.equal(projectionStartedAfterResponseTurn, true,
+    'derived projection must leave a response event-loop turn after the source receipt');
 });

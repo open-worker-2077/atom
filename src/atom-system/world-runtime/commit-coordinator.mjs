@@ -249,7 +249,7 @@ function matchesLegacyPreparedEvidence(evidence, identity) {
 export function createCommitCoordinator({
   worldRepository,
   journalRepository,
-  faultInjector = async () => {}
+  faultInjector = null
 }) {
   if (!worldRepository?.read || !worldRepository?.compareAndSwap) {
     throw problem('INVALID_WORLD_REPOSITORY', 'A readable compare-and-swap world repository is required');
@@ -537,7 +537,7 @@ export function createCommitCoordinator({
       }
 
       await journalRepository.prepare(record);
-      await faultInjector('after-prepare', structuredClone(record));
+      if (faultInjector) await faultInjector('after-prepare', structuredClone(record));
       if (record.historyMode === 'local-patch' && typeof worldRepository.appendLocalCommit === 'function') {
         await worldRepository.appendLocalCommit({
           commandId: record.commandId,
@@ -553,7 +553,7 @@ export function createCommitCoordinator({
           currentSnapshot: current
         });
       }
-      await faultInjector('after-world-write', structuredClone(record));
+      if (faultInjector) await faultInjector('after-world-write', structuredClone(record));
       const committed = await journalRepository.commit(command.commandId, receipt);
       worldRepository.scheduleCompaction?.();
       return committed;

@@ -1396,6 +1396,11 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     return structuredClone((await load()).receipts.get(commandId)?.receipt ?? null);
   }
 
+  async function latestReceipt() {
+    const state = await load();
+    return structuredClone(state.receipts.get(state.order.at(-1))?.receipt ?? null);
+  }
+
   async function findPrepared(commandId) {
     return hydrateRecord((await load()).prepared.get(commandId));
   }
@@ -1495,15 +1500,18 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
   async function readState() {
     const state = await load();
     const prepared = await Promise.all([...state.prepared.values()].map(hydrateRecord));
-    const compactReceipts = state.order.map((id) => structuredClone(state.receipts.get(id)));
-    const receipts = compactReceiptHistory(compactReceipts);
+    // Drop historical fact bodies before cloning. On a long-lived world the
+    // old event records can exceed a gigabyte; cloning them first doubles the
+    // heap even though readState intentionally exposes only their identities.
+    const receipts = structuredClone(compactReceiptHistory(
+      state.order.map((id) => state.receipts.get(id))));
     if (receipts.length) receipts[receipts.length - 1] = await hydrateRecord(receipts.at(-1));
     return { prepared, receipts };
   }
 
   return Object.freeze({
     file, incrementalDirectory, eventFile, objectDirectory,
-    findReceipt, findPrepared, findCommitted, legacyPreparedEvidence,
+    findReceipt, latestReceipt, findPrepared, findCommitted, legacyPreparedEvidence,
     prepare, commit, abort, listPrepared, readState,
     programExecution, programExecutionForInteraction, pendingProgramExecutions, recordProgramExecution
   });

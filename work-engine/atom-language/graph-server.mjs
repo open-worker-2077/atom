@@ -42,6 +42,14 @@ const defaultFiles = Object.freeze({
   storeFile: runtime.storeFile
 });
 
+export function runtimeBackupRepositoryFor({ contextFile, backupRepository, environment = process.env }) {
+  if (backupRepository !== undefined) return backupRepository;
+  const normalize = (value) => process.platform === 'win32'
+    ? path.resolve(value).toLowerCase() : path.resolve(value);
+  return normalize(contextFile) === normalize(defaultFiles.contextFile)
+    ? environment.ATOM_RUNTIME_BACKUP_REPO ?? null : null;
+}
+
 function problem(code, message, details = {}) {
   const error = new Error(message);
   error.code = code;
@@ -227,6 +235,10 @@ export function parseAtomGraphServerArgs(argv = []) {
       help = true;
       continue;
     }
+    if (argument === '--memory-authoritative') {
+      options.memoryAuthoritative = true;
+      continue;
+    }
     if (argument === '--host' || argument.startsWith('--host=')) {
       const parsed = optionValue(argv, index, '--host');
       options.host = parsed.value;
@@ -291,6 +303,7 @@ export function parseAtomGraphServerArgs(argv = []) {
   }
   return {
     ...resolveConfiguration(options),
+    ...(options.memoryAuthoritative ? { memoryAuthoritative: true } : {}),
     ...(options.timingInteractionId ? { timingInteractionId: options.timingInteractionId } : {}),
     help
   };
@@ -396,7 +409,8 @@ export async function startAtomGraphServer(options = {}) {
   normalizeOwnProcessPriority();
   const configuration = resolveConfiguration(options);
   const timingInteractionId = options.timingInteractionId ?? null;
-  const backupRepository = options.backupRepository ?? process.env.ATOM_RUNTIME_BACKUP_REPO;
+  const backupRepository = runtimeBackupRepositoryFor({ contextFile: configuration.contextFile,
+    backupRepository: options.backupRepository });
   const backupTriggerFactory = options.backupTriggerFactory ?? createAtomRuntimeBackupTrigger;
   const backupTrigger = options.backupTrigger ?? (backupRepository ? backupTriggerFactory({
     worldDirectory: path.dirname(configuration.contextFile),
@@ -631,6 +645,7 @@ function help() {
     '    [--context atom.json] [--graph graph.json] [--store knowledge.json]',
     '    [--program-projection program-projection.json]',
     '    [--runtime-diagnostics runtime-diagnostics.json]',
+    '    [--memory-authoritative]（内存事实立即可读；后台独立保存）',
     '',
     `默认目录：${path.dirname(defaultFiles.contextFile)}`,
     '4783 为现有服务保留，不能由本服务占用。'

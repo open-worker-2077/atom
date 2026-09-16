@@ -3356,6 +3356,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         let rebased = null;
         const projectionSettleStartedAt = performance.now();
         if (projectionRebase && options.programScheduler?.rebaseContextFreeProjection) {
+          const projectionRebaseStartedAt = performance.now();
           try {
             rebased = await options.programScheduler.rebaseContextFreeProjection(
               projectionRebase.previousAtoms,
@@ -3370,11 +3371,19 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           } catch {
             rebased = null;
           }
+          performanceTrace('program-projection-rebase', {
+            elapsedMs: Math.round(performance.now() - projectionRebaseStartedAt)
+          });
         }
+        const projectionFallbackStartedAt = performance.now();
         const settleWarnings = rebased?.persisted === true
           ? []
           : await settleContextFreeProgramProjectionForWorld(candidateAtoms);
+        performanceTrace('program-projection-fallback', {
+          elapsedMs: Math.round(performance.now() - projectionFallbackStartedAt)
+        });
         if (preparedRuntimeRecordsPromise) {
+          const preparedIndexStartedAt = performance.now();
           try {
             const preparedRuntimeRecords = await preparedRuntimeRecordsPromise;
             await options.programScheduler?.installPreparedRuntimeIndexes?.(
@@ -3384,6 +3393,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           } catch {
             // A failed performance cache never changes an already committed business result.
           }
+          performanceTrace('program-projection-index', {
+            elapsedMs: Math.round(performance.now() - preparedIndexStartedAt)
+          });
         }
         await recordTransformStage('program-projection', projectionSettleStartedAt, {
           candidateProgramCount: 0,

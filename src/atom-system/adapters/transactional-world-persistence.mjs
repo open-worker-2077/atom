@@ -64,7 +64,7 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
     const journalRepository = createJsonTransactionJournal({ file: journalFile });
     if (runtimeAuthority === 'memory') {
       const diskCoordinator = createCommitCoordinator({ worldRepository, journalRepository });
-      owner = { runtimeAuthority, recovery: null, ready: null, writer: null, saver: null,
+      owner = { key, runtimeAuthority, recovery: null, ready: null, writer: null, saver: null,
         projections: new Set(), savedListeners: new Set() };
       const delegate = (field) => new Proxy({}, { get: (_, name) => (...args) =>
         owner.ready.then(() => owner[field][name](...args)) });
@@ -101,9 +101,17 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
             for (const key of owner.savedWorldVersions.keys()) {
               if (key <= version) owner.savedWorldVersions.delete(key);
             }
-            for (const listener of owner.savedListeners) listener({
-              contextFile, version: savedEvent.version, revision: savedEvent.revision
-            });
+            owner.auxiliaryFailure = null;
+            const notice = { contextFile, version: savedEvent.version, revision: savedEvent.revision };
+            for (const listener of owner.savedListeners) {
+              try {
+                Promise.resolve(listener(notice)).catch((error) => {
+                  owner.auxiliaryFailure = { code: error.code ?? error.name ?? 'WORLD_SAVE_NOTICE_FAILED' };
+                });
+              } catch (error) {
+                owner.auxiliaryFailure = { code: error.code ?? error.name ?? 'WORLD_SAVE_NOTICE_FAILED' };
+              }
+            }
           },
           quietMs: saveSchedule?.quietMs ?? 250,
           maxDirtyMs: saveSchedule?.maxDirtyMs ?? 2000,
@@ -187,8 +195,10 @@ export function createTransactionalWorldPersistence({
   async function compatibilityManifest() {
     await recover();
     if (owner.manifestLoaded) return structuredClone(owner.cachedManifest);
-    const state = await journalRepository.readState();
-    owner.cachedManifest = structuredClone(state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null);
+    const latest = owner.runtimeAuthority === 'memory'
+      ? await journalRepository.latestReceipt()
+      : (await journalRepository.readState()).receipts.at(-1)?.receipt;
+    owner.cachedManifest = structuredClone(latest?.result?.compatibilityManifest ?? null);
     owner.manifestLoaded = true;
     return structuredClone(owner.cachedManifest);
   }
@@ -211,10 +221,10 @@ export function createTransactionalWorldPersistence({
   async function readCommittedSnapshot() {
     await recover();
     return coordinator.inspectCommitted(async (snapshot) => {
-      const state = await journalRepository.readState();
-      const compatibilityManifest = structuredClone(
-        state.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null
-      );
+      const latest = owner.runtimeAuthority === 'memory'
+        ? await journalRepository.latestReceipt()
+        : (await journalRepository.readState()).receipts.at(-1)?.receipt;
+      const compatibilityManifest = structuredClone(latest?.result?.compatibilityManifest ?? null);
       if (compatibilityManifest) validateCompatibilityManifest(compatibilityManifest, snapshot.facts);
       owner.cachedManifest = structuredClone(compatibilityManifest);
       owner.manifestLoaded = true;
@@ -229,11 +239,15 @@ export function createTransactionalWorldPersistence({
   async function transformLogEntries() {
     await recover();
     if (owner.cachedTransformLog) return structuredClone(owner.cachedTransformLog);
-    const state = await journalRepository.readState();
-    owner.cachedTransformLog = state.receipts.flatMap((entry) => {
-      const record = entry.receipt?.result?.transformLogRecord;
-      return record ? [structuredClone(record)] : [];
-    });
+    if (owner.runtimeAuthority === 'memory') {
+      owner.cachedTransformLog = await journalRepository.transformLogRecords();
+    } else {
+      const state = await journalRepository.readState();
+      owner.cachedTransformLog = state.receipts.flatMap((entry) => {
+        const record = entry.receipt?.result?.transformLogRecord;
+        return record ? [structuredClone(record)] : [];
+      });
+    }
     return structuredClone(owner.cachedTransformLog);
   }
 
@@ -571,7 +585,8 @@ export function createTransactionalWorldPersistence({
       return owner.runtimeAuthority === 'memory'
         ? owner.saver ? { ...owner.memoryPorts.authority.status(),
           pending: owner.saver.status().pending,
-          failure: owner.saver.status().failure }
+          failure: owner.saver.status().failure,
+          auxiliaryFailure: owner.auxiliaryFailure ?? null }
           : { pending: false, initializing: true }
         : { pending: false };
     },
@@ -586,7 +601,10 @@ export function createTransactionalWorldPersistence({
       try {
         return await owner.saver.close();
       } finally {
-        await owner.writer.close();
+        try { await owner.writer.close(); }
+        finally {
+          if (worldOwners.get(owner.key)?.deref() === owner) worldOwners.delete(owner.key);
+        }
       }
     },
     commit,

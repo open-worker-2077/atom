@@ -166,6 +166,23 @@ test('an unrelated situation edit rebases the context-free projection without re
   assert.deepEqual(restored.exploreReadPaths, ['Target']);
 });
 
+test('a projection with no locks does not traverse unrelated subtrees when rebinding', async () => {
+  const repository = memoryProjectionRepository();
+  repository.replace({ worldKey: 'before-revision', contextDependent: false,
+    failures: [], locks: [], exploreReadPaths: [], choices: [] });
+  const scheduler = createProgramRuntimeScheduler({ projectionRepository: repository });
+  const unrelated = atom('Unrelated', '', [{ thing: 'Nested', situation: '',
+    get slot() { throw new Error('unrelated subtree was traversed'); }, strut: [] }]);
+  const before = [atom('Changed', 'before'), unrelated];
+  const after = [atom('Changed', 'after'), unrelated];
+  const result = await scheduler.rebaseContextFreeProjection(before, after, {
+    changedPaths: ['Changed'], previousRevision: 'before-revision', revision: 'after-revision'
+  });
+  assert.equal(result.persisted, true);
+  assert.equal(result.local, true);
+  assert.deepEqual((await repository.load()).locks, []);
+});
+
 test('a dependency edit cannot rebase the context-free projection', async () => {
   const repository = memoryProjectionRepository();
   const before = [atom('Target', 'before'), atom('Program', '# reads target', [], 'program')];

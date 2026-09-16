@@ -12,6 +12,7 @@ import {
   createAtomGraphHandlers,
   normalizeOwnProcessPriority,
   parseAtomGraphServerArgs,
+  runtimeBackupRepositoryFor,
   startAtomGraphServer
 } from '../work-engine/atom-language/graph-server.mjs';
 import * as graphSchema from '../work-engine/atom-language/graph-schema.mjs';
@@ -29,6 +30,18 @@ import {
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+test('a copied world never inherits the official private backup destination', () => {
+  const official = resolveAtomRuntime().contextFile;
+  const copied = path.join(os.tmpdir(), 'atom-copy', 'atom.json');
+  const environment = { ATOM_RUNTIME_BACKUP_REPO: 'private-backup' };
+  assert.equal(runtimeBackupRepositoryFor({ contextFile: copied, environment }), null);
+  assert.equal(runtimeBackupRepositoryFor({ contextFile: official, environment }), 'private-backup');
+  assert.equal(runtimeBackupRepositoryFor({ contextFile: copied, environment,
+    backupRepository: 'explicit-test-backup' }), 'explicit-test-backup');
+  assert.equal(runtimeBackupRepositoryFor({ contextFile: official, environment,
+    backupRepository: null }), null);
+});
 
 test('Atom runtime promotes its own inherited below-normal priority without administrator access', () => {
   const calls = [];
@@ -375,9 +388,13 @@ test('graph server initializes the projection, serves the full UI health and Gra
   assert.equal(state.knowledge.edges[0].label, 'strut');
 });
 
+test('graph server can explicitly enable the memory-authoritative runtime', () => {
+  assert.equal(parseAtomGraphServerArgs(['--memory-authoritative']).memoryAuthoritative, true);
+});
+
 test('HTTP Transform reads accepted memory before save and server close flushes its recovery point', async (t) => {
   const directory = await temporaryDirectory();
-  removeTemporaryDirectoryAfter(t, directory);
+  let reopened = null;
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -390,7 +407,11 @@ test('HTTP Transform reads accepted memory before save and server close flushes 
   const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0,
     contextFile, graphFile, storeFile, memoryAuthoritative: true,
     saveSchedule: { quietMs: 60000, maxDirtyMs: 60000 }, backupTrigger });
-  t.after(() => running.close());
+  t.after(async () => {
+    await reopened?.close();
+    await running.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
   const request = (source, id) => fetch(`${running.url}/__atom/api/command`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ source, interaction: { id,
@@ -414,6 +435,18 @@ test('HTTP Transform reads accepted memory before save and server close flushes 
     'backup trigger must remain open until the final durable save is scheduled');
   assert.ok(backupCalls.lastIndexOf('flush') > backupCalls.indexOf('schedule'),
     'shutdown must finish the pending backup after the durable save');
+  reopened = await startAtomGraphServer({ host: '127.0.0.1', port: 0,
+    contextFile, graphFile, storeFile, memoryAuthoritative: true,
+    saveSchedule: { quietMs: 60000, maxDirtyMs: 60000 } });
+  const secondWrite = await fetch(`${reopened.url}/__atom/api/command`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ source: 'transform {"thing":"石斧","situation.rep.重启后可写"}',
+      interaction: { id: 'memory-http-write-after-restart',
+        agent: { ref: 'fixture-agent-ref', path: '石器工坊' } }, history: [] })
+  });
+  const secondBody = await secondWrite.json();
+  assert.equal(secondWrite.status, 200, JSON.stringify(secondBody));
+  assert.equal(secondBody.result?.ok, true, JSON.stringify(secondBody));
 });
 
 test('4784 resolves an Agent selector inside the resident world instead of every CLI process', async () => {

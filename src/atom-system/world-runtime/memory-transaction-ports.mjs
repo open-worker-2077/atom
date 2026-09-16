@@ -86,6 +86,17 @@ export function createMemoryTransactionPorts({
   };
 
   const journalRepository = Object.freeze({
+    async latestReceipt() {
+      return structuredClone((accepted.size
+        ? [...accepted.values()].at(-1)
+        : durableReceipts.at(-1))?.receipt ?? null);
+    },
+    async transformLogRecords() {
+      return structuredClone(entries().flatMap((entry) => {
+        const record = entry.receipt?.result?.transformLogRecord;
+        return record ? [record] : [];
+      }));
+    },
     async findReceipt(id) { return structuredClone(receiptFor(id)); },
     async findPrepared(id) { return structuredClone(prepared.get(id) ?? null); },
     async findCommitted(id) {

@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
-import { createJsonWorldRepository } from '../src/atom-system/adapters/json-world-repository.mjs';
+import { createJsonTransactionJournal, createJsonWorldRepository } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
@@ -32,6 +32,28 @@ test('memory persistence accepts and reads a transition before its independent s
   assert.equal(persistence.saveStatus.pending, false);
   assert.equal((await persistence.readCommittedSnapshot()).revision, receipt.afterRevision);
   assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].situation, 'accepted');
+  const journal = createJsonTransactionJournal({ file: path.join(directory, 'atom.transactions.json') });
+  assert.equal((await journal.latestReceipt()).afterRevision, receipt.afterRevision);
+});
+
+test('a backup scheduling error cannot mark an already durable save as failed', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-memory-backup-notification-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
+  const persistence = createTransactionalWorldPersistence({ contextFile,
+    projectionFile: path.join(directory, 'graph.json'), runtimeAuthority: 'memory',
+    publishLegacyProjection: false, saveSchedule: { quietMs: 60000, maxDirtyMs: 60000 },
+    onSaved: () => { throw Object.assign(new Error('backup unavailable'), { code: 'BACKUP_UNAVAILABLE' }); } });
+  t.after(() => persistence.closeSaves());
+  const before = await persistence.readCommittedSnapshot();
+  const facts = [{ thing: 'Root', situation: 'accepted', slot: [], strut: [] }];
+  await persistence.commit({ correlationId: 'backup-callback-error',
+    expectedRevision: before.revision, nextRevision: revisionOfWorldFacts(facts), facts });
+  await persistence.flushSaves();
+  assert.equal(persistence.saveStatus.pending, false);
+  assert.equal(persistence.saveStatus.failure, null);
+  assert.equal(persistence.saveStatus.auxiliaryFailure?.code, 'BACKUP_UNAVAILABLE');
 });
 
 test('public World Service Explore reads an accepted Transform before the save timer', async (t) => {
