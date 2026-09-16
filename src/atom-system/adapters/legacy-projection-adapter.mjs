@@ -2,6 +2,7 @@ import { projectAtomContext } from '../../../work-engine/atom-language/context-s
 import { projectAtomGraphToKnowledge } from '../../../work-engine/atom-language/graph-4d-projection.mjs';
 import { publicAtomTypes } from '../../../work-engine/atom-language/slot-graph-semantics.mjs';
 import { evaluateStrutClausesWithPrograms } from '../../../work-engine/atom-language/strut-runtime.mjs';
+import { isTypedDefaultBackupTypes } from '../../../work-engine/atom-language/default-backup-boundary.mjs';
 
 const baseKeyOf = (rawKey) => String(rawKey).match(/^[^@&#$~]+/u)?.[0] ?? '';
 
@@ -213,6 +214,7 @@ function atomTypesByPath(facts) {
     const path = parentPath ? `${parentPath}/${name}` : name;
     const types = publicAtomTypes(atom);
     if (types.length) result.set(path, types);
+    if (isTypedDefaultBackupTypes(types)) return;
     const slotField = Object.entries(atom).find(([rawKey]) => baseKeyOf(rawKey) === 'slot');
     for (const child of slotField?.[1] ?? []) visit(child, path);
   };

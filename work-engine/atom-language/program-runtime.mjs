@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { legacyAtomContextMetadata, projectAtomContext } from './context-store.mjs';
 import { parseAtomKey } from './key-parser.mjs';
+import { isTypedDefaultBackupTypes } from './default-backup-boundary.mjs';
 import {
   executeProgramExplore,
   oneStoredField,
@@ -231,6 +232,7 @@ function worldRecords(atoms) {
         : null;
     }
     records.push(record);
+    if (isTypedDefaultBackupTypes(record.types)) return record;
     for (const [index, child] of (stored.get('slot')?.value ?? []).entries()) {
       const childRecord = visit(child, ref, [...parentPath, name], `${address}/${index}`);
       record.childrenRefs.push(childRecord.ref);

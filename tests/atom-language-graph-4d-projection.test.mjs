@@ -165,5 +165,7 @@ test('spatial projection hides every relation entering or leaving the default ba
     atomTypesByPath: new Map([['默认备份仓', ['backup', 'default']]])
   });
 
+  assert.equal(knowledge.nodes.some((node) => node.atomPath === '默认备份仓/已删除'), false);
+  assert.equal(knowledge.nodes.some((node) => node.atomPath === '默认备份仓'), true);
   assert.deepEqual(Array.from(knowledge.edges, (edge) => edge.label), ['strut']);
 });

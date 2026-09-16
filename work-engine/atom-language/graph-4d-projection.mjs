@@ -212,13 +212,20 @@ export async function projectAtomGraphWithPaths(rawGraphDocument, options = {}) 
     .filter((node) => node.atomTypes?.includes('backup') && node.atomTypes.includes('default'))
     .map((node) => node.atomPath);
   if (defaultBackupPaths.length) {
-    const hiddenKeys = new Set(nodes
+    const inactiveKeys = new Set(nodes
       .filter((node) => defaultBackupPaths.some((backupPath) => (
         node.atomPath === backupPath || node.atomPath?.startsWith(`${backupPath}/`)
       )))
       .map((node) => node.key));
+    const archivedKeys = new Set(nodes
+      .filter((node) => defaultBackupPaths.some((backupPath) => (
+        node.atomPath?.startsWith(`${backupPath}/`)
+      )))
+      .map((node) => node.key));
+    knowledge.nodes = nodes.filter((node) => !archivedKeys.has(node.key));
+    for (const key of archivedKeys) atomPathByKey.delete(key);
     knowledge.edges = (knowledge.edges ?? []).filter((edge) => (
-      !hiddenKeys.has(edge.from?.key) && !hiddenKeys.has(edge.to?.key)
+      !inactiveKeys.has(edge.from?.key) && !inactiveKeys.has(edge.to?.key)
     ));
   }
   return { knowledge, atomPathByKey };

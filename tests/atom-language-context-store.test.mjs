@@ -221,9 +221,9 @@ test('typed default backup preserves archived facts but excludes inactive strut 
   }];
 
   const projection = projectAtomContext(atoms);
-  assert.equal(projection.graph.slot[0].slot[0]['thing@program'], '旧判定');
-  assert.deepEqual(projection.graph.slot[0].slot[0].strut, []);
+  assert.deepEqual(projection.graph.slot[0].slot, []);
   assert.deepEqual(atoms[0].slot[0].strut, archivedStrut);
+  assert.equal(atoms[0].slot[0]['thing@program'], '旧判定');
   assert.equal(projection.strutClauses.length, 0);
 });
 

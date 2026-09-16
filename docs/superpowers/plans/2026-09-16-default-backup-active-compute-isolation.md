@@ -66,7 +66,7 @@
 - Produces: `isTypedDefaultBackup(atom): boolean`；`collectDefaultBackupBoundary(atoms): { rootPath, archivedPaths, archivedIdentities }`。
 - Consumes: `parseAtomKey()` 的正式 Key 类型语义。
 
-- [ ] **Step 1: 写入边界 RED**
+- [x] **Step 1: 写入边界 RED**
 
 ```js
 const records = scheduler.prepareRuntimeRecords(worldWithLargeBackup);
@@ -76,13 +76,13 @@ assert.equal(spatial.nodes.some(({ atomPath }) => atomPath?.startsWith('Default 
 assert.deepEqual(sourceFacts, before, 'projection never mutates authoritative archive facts');
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run: `node --test tests/atom-default-backup-active-boundary.test.mjs tests/atom-language-context-store.test.mjs tests/atom-language-graph-4d-projection.test.mjs tests/atom-program-runtime-scheduling.test.mjs`
 
 Expected: 归档后代仍出现在 Graph、Spatial 或 runtime records 的断言失败。
 
-- [ ] **Step 3: 实现唯一类型边界**
+- [x] **Step 3: 实现唯一类型边界**
 
 ```js
 export function isTypedDefaultBackup(atom) {
@@ -96,7 +96,7 @@ export function isTypedDefaultBackup(atom) {
 }
 ```
 
-- [ ] **Step 4: 单测边界类型、名称伪装、输入不变与多根拒绝**
+- [x] **Step 4: 单测边界类型、名称伪装、输入不变与多根拒绝**
 
 Run: `node --test tests/atom-default-backup-active-boundary.test.mjs`
 
@@ -123,7 +123,7 @@ git commit -m "test: define inactive backup boundary"
 - Consumes: Task 1 的 `isTypedDefaultBackup` 与边界元数据。
 - Produces: 备份根保留但 `slot: []`、跨边界 strut 不进入活跃 Graph、Spatial 不含归档后代。
 
-- [ ] **Step 1: 让 context 投影在备份根停止递归**
+- [x] **Step 1: 让 context 投影在备份根停止递归**
 
 ```js
 const projectedSlot = isTypedDefaultBackup(atom)
@@ -131,7 +131,7 @@ const projectedSlot = isTypedDefaultBackup(atom)
   : slot.map((child, index) => projectAtom(child, `${location}.slot[${index}]`, rootThing, childOptions));
 ```
 
-- [ ] **Step 2: 使用边界元数据过滤进入／离开归档子树的 relation**
+- [x] **Step 2: 使用边界元数据过滤进入／离开归档子树的 relation**
 
 ```js
 const activeStrut = value
@@ -140,7 +140,7 @@ const activeStrut = value
   .filter((selector) => !selectorTouchesArchivedPath(selector, options.archivedPaths, rootThing));
 ```
 
-- [ ] **Step 3: Spatial 与增量类型索引在备份根停止递归**
+- [x] **Step 3: Spatial 与增量类型索引在备份根停止递归**
 
 ```js
 const types = publicAtomTypes(atom);
@@ -148,7 +148,7 @@ if (types.includes('backup') && types.includes('default')) return;
 for (const child of slotOf(atom)) visit(child, path);
 ```
 
-- [ ] **Step 4: 验证 Graph、Spatial、增量投影与 Web scope 合同**
+- [x] **Step 4: 验证 Graph、Spatial、增量投影与 Web scope 合同**
 
 Run: `node --test --test-isolation=none tests/atom-default-backup-active-boundary.test.mjs tests/atom-language-context-store.test.mjs tests/atom-language-graph-4d-projection.test.mjs tests/atom-projection-pipeline.test.mjs tests/atom-language-graph-server.test.mjs tests/browser-bridge-contract.test.js`
 
@@ -174,7 +174,7 @@ git commit -m "feat: exclude archived facts from active projections"
 - Consumes: Task 1 的显式边界判定。
 - Produces: `prepareRuntimeRecords()` 只返回活跃 records 与备份根；`rst` 后恢复节点重新出现。
 
-- [ ] **Step 1: 在 runtime records 的备份根停止递归**
+- [x] **Step 1: 在 runtime records 的备份根停止递归**
 
 ```js
 records.push(record);
@@ -184,7 +184,7 @@ if (!inactiveBackup) {
 }
 ```
 
-- [ ] **Step 2: 新增归档前／归档后／恢复后的记录与执行矩阵**
+- [x] **Step 2: 新增归档前／归档后／恢复后的记录与执行矩阵**
 
 ```js
 assert.equal(activeRecords.some(({ path }) => path.endsWith('/Archived Program')), false);
@@ -192,17 +192,20 @@ assert.equal(restoredRecords.some(({ path }) => path === 'Restored Program'), tr
 assert.deepEqual(restoredCycle.messages.map(({ text }) => text), ['restored']);
 ```
 
-- [ ] **Step 3: 验证恢复、权限、Shortcut 与关系守恒**
+- [x] **Step 3: 验证恢复、权限、Shortcut 与关系守恒**
 
 Run: `node --test --test-isolation=none tests/atom-program-runtime-scheduling.test.mjs tests/atom-rename-sealed-descendants.test.mjs tests/atom-program-service-e2e.test.mjs tests/atom-program-shortcut.test.mjs`
 
 Expected: PASS；归档不可执行，恢复后重新激活，权威 facts 与恢复身份保持。
 
-- [ ] **Step 4: 记录生产候选容量证据**
+- [x] **Step 4: 记录生产候选容量证据**
 
 ```text
 修复前：knowledge 12281 nodes；默认备份域 12240 nodes（99.67%）。
-候选：默认备份根保留；其归档后代在 Graph/Spatial/runtime records 中为 0。
+候选只读生产事实回放：完整 facts 12280，其中默认备份根 1、归档后代 12239；
+Graph/Spatial 分别只保留 42 个节点（含虚拟根与备份根），runtime records 41；
+三处归档后代均为 0，源文件 SHA-256 前后均为
+65fa1e8f58ca43dd856419ecc2b081ecd1438baf4ab18486f358823c68d45f49。
 ```
 
 - [ ] **Step 5: 提交 Task 3**

@@ -10,6 +10,10 @@ import { atomLanguageError } from './errors.mjs';
 import { RETIRED_GRAPH_AXES } from './graph-schema.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import {
+  isInsideDefaultBackupPath,
+  isTypedDefaultBackupTypes
+} from './default-backup-boundary.mjs';
+import {
   compatibilityMetadata,
   isLegacyStrutEntry,
   validateCompatibilityManifest
@@ -332,12 +336,49 @@ function projectedStrut(clause, rootThing, thingPathByIdentity = new Map()) {
   return projected;
 }
 
+function selectorTargetsInactiveAtom(
+  selector,
+  rootThing,
+  inactiveAtomPaths,
+  inactiveOnlyAtomNames
+) {
+  const thingKey = Object.keys(selector ?? {}).find((candidate) => (
+    parseAtomKey(candidate, { descriptionSymbolWarnings: false }).baseKey === 'thing'
+  ));
+  const rawPath = thingKey ? selector[thingKey] : null;
+  if (typeof rawPath !== 'string') return false;
+  const atomPath = rawPath.startsWith(`${rootThing}/`)
+    ? rawPath.slice(rootThing.length + 1)
+    : rawPath;
+  return isInsideDefaultBackupPath(atomPath, inactiveAtomPaths)
+    || (!atomPath.includes('/') && inactiveOnlyAtomNames?.has(atomPath));
+}
+
+function projectedActiveStrut(clause, rootThing, inactiveAtomPaths, inactiveOnlyAtomNames) {
+  const expressionTargetsInactive = (expression) => {
+    if (!expression || typeof expression !== 'object' || Array.isArray(expression)) return false;
+    if (selectorTargetsInactiveAtom(
+      expression, rootThing, inactiveAtomPaths, inactiveOnlyAtomNames
+    )) return true;
+    return [...(expression.and ?? []), ...(expression.or ?? [])].some(expressionTargetsInactive);
+  };
+  if ((clause.if ?? []).some(expressionTargetsInactive)) return null;
+  if (!Array.isArray(clause.then)) return clause;
+  const activeTargets = (clause.then ?? []).filter((target) => (
+    !selectorTargetsInactiveAtom(
+      target, rootThing, inactiveAtomPaths, inactiveOnlyAtomNames
+    )
+  ));
+  if (clause.then.length && activeTargets.length === 0) return null;
+  return { ...clause, then: activeTargets };
+}
+
 function projectAtom(atom, location, rootThing, options = {}) {
   const fields = atomFields(atom, location);
   const thing = fields.get('thing').value;
   const thingTypes = new Set(fields.get('thing').parsed.types.map(({ name }) => name));
   const insideDefaultBackup = options.insideDefaultBackup === true
-    || (thingTypes.has('backup') && thingTypes.has('default'));
+    || isTypedDefaultBackupTypes(thingTypes);
   const situation = fields.get('situation').value;
   const slot = fields.get('slot').value;
   const strut = fields.get('strut').value;
@@ -376,7 +417,7 @@ function projectAtom(atom, location, rootThing, options = {}) {
   const projected = {
     [fields.get('thing').parsed.persistentKey.replace(/&id=[A-Za-z0-9_-]{22}/u, '')]: thing,
     [fields.get('situation').rawKey]: situation,
-    [fields.get('slot').rawKey]: slot.map((child, index) => (
+    [fields.get('slot').rawKey]: insideDefaultBackup ? [] : slot.map((child, index) => (
       projectAtom(child, `${location}.slot[${index}]`, rootThing, {
         ...options,
         parentAtomPath: atomPath,
@@ -391,11 +432,13 @@ function projectAtom(atom, location, rootThing, options = {}) {
       ? []
       : value
         .filter((selector) => !isLegacyStrutEntry(selector))
-        .map((selector) => projectedStrut(
-          selector,
+        .map((selector) => projectedActiveStrut(
+          projectedStrut(selector, rootThing, options.thingPathByIdentity),
           rootThing,
-          options.thingPathByIdentity
-        ));
+          options.inactiveAtomPaths,
+          options.inactiveOnlyAtomNames
+        ))
+        .filter(Boolean);
   }
   return projected;
 }
@@ -415,19 +458,46 @@ export function projectAtomContext(atoms, options = {}) {
   validateThingIdentityUniqueness(atoms);
   const rootName = options.rootName ?? DEFAULT_CONTEXT_FILENAME;
   const thingPathByIdentity = new Map();
-  function indexIdentities(nodes, parentPath = []) {
+  const inactiveAtomPaths = new Set();
+  const activeAtomNames = new Set();
+  const inactiveAtomNames = new Set();
+  const defaultBackupPaths = [];
+  function indexIdentities(nodes, parentPath = [], insideDefaultBackup = false) {
     for (const atom of nodes) {
       const fields = atomFields(atom, '$identity-index');
       const pathParts = [...parentPath, fields.get('thing').value];
+      const thingTypes = fields.get('thing').parsed.types.map(({ name }) => name);
+      const defaultBackup = isTypedDefaultBackupTypes(thingTypes);
+      const inactive = insideDefaultBackup || defaultBackup;
+      const atomPath = pathParts.join('/');
+      if (defaultBackup) defaultBackupPaths.push(atomPath);
+      if (inactive) {
+        inactiveAtomPaths.add(atomPath);
+        inactiveAtomNames.add(fields.get('thing').value);
+      } else {
+        activeAtomNames.add(fields.get('thing').value);
+      }
       const identity = fields.get('thing').parsed.identity;
-      if (identity) thingPathByIdentity.set(identity, pathParts.join('/'));
-      indexIdentities(fields.get('slot').value, pathParts);
+      if (identity) thingPathByIdentity.set(identity, atomPath);
+      indexIdentities(fields.get('slot').value, pathParts, inactive);
     }
   }
   indexIdentities(atoms);
+  if (defaultBackupPaths.length > 1) {
+    throw atomLanguageError(
+      'AMBIGUOUS_DEFAULT_BACKUP',
+      'World contains multiple typed default backup roots',
+      { paths: defaultBackupPaths }
+    );
+  }
+  const inactiveOnlyAtomNames = new Set(
+    [...inactiveAtomNames].filter((name) => !activeAtomNames.has(name))
+  );
   const projectionOptions = {
     ...options,
     thingPathByIdentity,
+    inactiveAtomPaths,
+    inactiveOnlyAtomNames,
     allowLegacyStrut: options.allowLegacyStrut === true || legacySnapshotMetadata.has(atoms),
     atomPathByGraphPath: new Map(),
     parentAtomPath: ''
