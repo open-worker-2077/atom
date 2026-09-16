@@ -93,9 +93,7 @@ export function resolveBoundarySelector(boundary, selector, sourceAtomPath, root
       ?? null;
   }
   if (normalized.includes('/')) {
-    return boundary.entriesByPath.get(normalized)
-      ?? boundary.entriesByPath.get(`${sourceParts[0]}/${normalized}`)
-      ?? null;
+    return boundary.entriesByPath.get(normalized) ?? null;
   }
   const sibling = boundary.entriesByPath.get([...sourceParts.slice(0, -1), normalized].join('/'));
   if (sibling) return sibling;

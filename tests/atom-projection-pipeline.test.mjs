@@ -340,6 +340,74 @@ test('incremental projection rejects a second typed default-backup root from ful
   );
 });
 
+test('incremental projection expands active short-name and identity cross-domain endpoints', async (t) => {
+  const cases = [
+    {
+      name: 'short name',
+      targetKey: 'thing',
+      targetSelector: { thing: 'Target' }
+    },
+    {
+      name: 'identity',
+      targetKey: 'thing&id=AAAAAAAAAAAAAAAAAAAAAA',
+      targetSelector: { 'thing&id=AAAAAAAAAAAAAAAAAAAAAA': 'Former Target' }
+    }
+  ];
+  for (const entry of cases) {
+    await t.test(entry.name, async () => {
+      const before = [
+        { thing: 'A', situation: '', strut: [], slot: [
+          { thing: 'Source', situation: 'before', slot: [], strut: [] }
+        ] },
+        { thing: 'B', situation: '', strut: [], slot: [
+          { [entry.targetKey]: 'Target', situation: '', slot: [], strut: [] }
+        ] }
+      ];
+      const after = structuredClone(before);
+      after[0].slot[0].strut = [{ 'if@current': true, then: [entry.targetSelector] }];
+      const repository = createMemoryProjectionRepository();
+      const pipeline = createProjectionPipeline({
+        projectors: createLegacyProjectionProjectors(),
+        repository
+      });
+      await pipeline.rebuild(snapshot(`rev-${entry.name}-before`, before));
+      await pipeline.rebuild(
+        snapshot(`rev-${entry.name}-after`, after),
+        { affectedPaths: ['A/Source'] }
+      );
+      const incremental = await repository.readCurrent('primary', `rev-${entry.name}-after`);
+      const fullRepository = createMemoryProjectionRepository();
+      const fullPipeline = createProjectionPipeline({
+        projectors: createLegacyProjectionProjectors(),
+        repository: fullRepository
+      });
+      await fullPipeline.rebuild(snapshot(`rev-${entry.name}-after`, after));
+      const full = await fullRepository.readCurrent('primary', `rev-${entry.name}-after`);
+
+      assert.equal(
+        JSON.stringify(incremental.projections.graph.value),
+        JSON.stringify(full.projections.graph.value)
+      );
+      const spatialSemantics = (value) => ({
+        atomPaths: value.nodes
+          .map((node) => node.atomPath)
+          .filter(Boolean)
+          .sort(),
+        edges: value.edges
+          .map((edge) => [edge.from?.label, edge.to?.label, edge.label])
+          .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+        strutClauses: value.strutClauses,
+        strutRelations: value.strutRelations
+      });
+      assert.deepEqual(
+        spatialSemantics(incremental.projections.spatial.value),
+        spatialSemantics(full.projections.spatial.value)
+      );
+      assert.equal(incremental.projections.spatial.value.strutRelations.length, 1);
+    });
+  }
+});
+
 test('spatial projection represents an Agent capability by its Program type only', async () => {
   const facts = [{
     'thing@program': 'Work Agent',

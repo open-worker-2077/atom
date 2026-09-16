@@ -4,8 +4,10 @@ import { publicAtomTypes } from '../../../work-engine/atom-language/slot-graph-s
 import { evaluateStrutClausesWithPrograms } from '../../../work-engine/atom-language/strut-runtime.mjs';
 import {
   collectDefaultBackupBoundary,
-  isTypedDefaultBackupTypes
+  isTypedDefaultBackupTypes,
+  resolveBoundarySelector
 } from '../../../work-engine/atom-language/default-backup-boundary.mjs';
+import { parseAtomKey } from '../../../work-engine/atom-language/key-parser.mjs';
 
 const baseKeyOf = (rawKey) => String(rawKey).match(/^[^@&#$~]+/u)?.[0] ?? '';
 
@@ -28,42 +30,51 @@ function affectedTopDomains(affectedPaths, rootThing) {
   return new Set((affectedPaths ?? []).map((path) => topDomain(path, rootThing)).filter(Boolean));
 }
 
-function referencedTopDomains(atom, knownDomains, rootThing) {
+function referencedTopDomains(atom, knownDomains, rootThing, boundary) {
   const result = new Set();
-  const visit = (value) => {
+  const visit = (value, sourcePath) => {
     if (Array.isArray(value)) {
-      value.forEach(visit);
+      value.forEach((child) => visit(child, sourcePath));
       return;
     }
     if (!value || typeof value !== 'object') return;
     for (const [rawKey, child] of Object.entries(value)) {
-      if (baseKeyOf(rawKey) === 'thing' && typeof child === 'string'
-        && child !== '.' && !child.startsWith('./')) {
-        const domain = topDomain(child, rootThing);
-        if (child.includes('/') && knownDomains.has(domain)) result.add(domain);
+      if (baseKeyOf(rawKey) === 'thing' && typeof child === 'string') {
+        const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
+        const target = parsed.identity
+          ? boundary.entriesByPath.get(boundary.thingPathByIdentity.get(parsed.identity))
+          : resolveBoundarySelector(boundary, child, sourcePath, rootThing);
+        const domain = target && !target.inactive ? topDomain(target.path, rootThing) : '';
+        if (knownDomains.has(domain)) result.add(domain);
       }
-      visit(child);
+      visit(child, sourcePath);
     }
   };
-  const scanAtom = (current) => {
+  const scanAtom = (current, parentPath = '') => {
+    const name = atomName(current);
+    const currentPath = parentPath ? `${parentPath}/${name}` : name;
     for (const [rawKey, value] of Object.entries(current ?? {})) {
       const baseKey = baseKeyOf(rawKey);
-      if (baseKey === 'strut') visit(value);
-      if (baseKey === 'slot' && Array.isArray(value)) value.forEach(scanAtom);
+      if (baseKey === 'strut') visit(value, currentPath);
+      if (baseKey === 'slot' && Array.isArray(value)) {
+        value.forEach((child) => scanAtom(child, currentPath));
+      }
     }
   };
   scanAtom(atom);
   return result;
 }
 
-function projectionDomainFacts(facts, affectedDomains, rootThing) {
+function projectionDomainFacts(facts, affectedDomains, rootThing, boundary) {
   const byDomain = new Map(facts.map((atom) => [atomName(atom), atom]));
   const included = new Set([...affectedDomains].filter((domain) => byDomain.has(domain)));
   let expanded = true;
   while (expanded) {
     expanded = false;
     for (const domain of [...included]) {
-      for (const referenced of referencedTopDomains(byDomain.get(domain), byDomain, rootThing)) {
+      for (const referenced of referencedTopDomains(
+        byDomain.get(domain), byDomain, rootThing, boundary
+      )) {
         if (!included.has(referenced)) {
           included.add(referenced);
           expanded = true;
@@ -105,7 +116,9 @@ function incrementalGraphProjection({ facts, previous, affectedPaths, projectCon
   const affectedDomains = affectedTopDomains(affectedPaths, rootThing);
   if (!affectedDomains.size) return { value: previous, affectedDomains, partial: previous };
   const defaultBackupBoundary = collectDefaultBackupBoundary(facts);
-  const partialFacts = projectionDomainFacts(facts, affectedDomains, rootThing);
+  const partialFacts = projectionDomainFacts(
+    facts, affectedDomains, rootThing, defaultBackupBoundary
+  );
   const partial = projectContext(partialFacts, { ...options, defaultBackupBoundary });
   const previousChildren = new Map((fieldValue(previous.graph, 'slot') ?? [])
     .map((atom) => [atomName(atom), atom]));
@@ -287,7 +300,12 @@ export function createLegacyProjectionProjectors(options = {}) {
               previous,
               await projectSpatial(partialDocument, {
                 ...spatialOptions,
-                atomTypesByPath: atomTypesByPath(projectionDomainFacts(facts, affectedDomains, atomName(graphDocument.graph)))
+                atomTypesByPath: atomTypesByPath(projectionDomainFacts(
+                  facts,
+                  affectedDomains,
+                  atomName(graphDocument.graph),
+                  collectDefaultBackupBoundary(facts)
+                ))
               }),
               affectedDomains,
               graphDocument

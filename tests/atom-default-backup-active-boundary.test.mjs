@@ -130,6 +130,21 @@ test('short-name resolution uses the authoritative nearest domain before pruning
   assert.deepEqual(projectAtomContext(facts).graph.slot[0].slot[0].strut, []);
 });
 
+test('an invalid root-qualified-looking path is not rebound into the source domain', () => {
+  const facts = [atom('thing', 'Domain', '', [
+    atom('thing', 'Source', '', [], [{
+      'if@current': true,
+      then: [{ thing: 'Backup/Archived' }]
+    }]),
+    atom('thing@backup@default', 'Backup', '', [atom('thing', 'Archived')])
+  ])];
+
+  assert.throws(
+    () => projectAtomContext(facts),
+    (error) => error.code === 'STRUT_SELECTOR_NOT_FOUND'
+  );
+});
+
 test('malformed cold payload is preserved without entering active Graph validation', () => {
   const archived = { thing: 'Cold', situation: 'recoverable', slot: [] };
   const facts = [atom('thing@backup@default', 'Default Backup', '', [archived])];
