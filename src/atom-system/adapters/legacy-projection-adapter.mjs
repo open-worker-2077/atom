@@ -53,6 +53,7 @@ function referencedTopDomains(atom, knownDomains, rootThing, boundary) {
   const scanAtom = (current, parentPath = '') => {
     const name = atomName(current);
     const currentPath = parentPath ? `${parentPath}/${name}` : name;
+    if (boundary.entriesByPath.get(currentPath)?.inactive) return;
     for (const [rawKey, value] of Object.entries(current ?? {})) {
       const baseKey = baseKeyOf(rawKey);
       if (baseKey === 'strut') visit(value, currentPath);

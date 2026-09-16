@@ -322,6 +322,48 @@ test('incremental projection resolves archived short names against the complete 
   assert.deepEqual(current.projections.graph.value.graph.slot[0].slot[0].strut, []);
 });
 
+test('incremental projection never scans ambiguous or malformed strut inside the cold backup subtree', async () => {
+  const before = [
+    {
+      'thing@backup@default': 'Backup', situation: '', strut: [], slot: [
+        { thing: 'Cold', situation: '', slot: [], strut: [] }
+      ]
+    },
+    { thing: 'A', situation: '', strut: [], slot: [{ thing: 'X', situation: '', slot: [], strut: [] }] },
+    { thing: 'B', situation: '', strut: [], slot: [{ thing: 'X', situation: '', slot: [], strut: [] }] }
+  ];
+  const after = structuredClone(before);
+  after[0].slot[0].strut = [{ 'if@current': true, then: [{ thing: 'X' }] }];
+  const repository = createMemoryProjectionRepository();
+  const pipeline = createProjectionPipeline({
+    projectors: createLegacyProjectionProjectors(),
+    repository
+  });
+
+  await pipeline.rebuild(snapshot('rev-cold-strut-before', before));
+  await pipeline.rebuild(
+    snapshot('rev-cold-strut-after', after),
+    { affectedPaths: ['Backup/Cold'] }
+  );
+  const incremental = await repository.readCurrent('primary', 'rev-cold-strut-after');
+  const fullRepository = createMemoryProjectionRepository();
+  const fullPipeline = createProjectionPipeline({
+    projectors: createLegacyProjectionProjectors(),
+    repository: fullRepository
+  });
+  await fullPipeline.rebuild(snapshot('rev-cold-strut-after', after));
+  const full = await fullRepository.readCurrent('primary', 'rev-cold-strut-after');
+
+  assert.equal(
+    JSON.stringify(incremental.projections.graph.value),
+    JSON.stringify(full.projections.graph.value)
+  );
+  assert.equal(
+    JSON.stringify(incremental.projections.spatial.value),
+    JSON.stringify(full.projections.spatial.value)
+  );
+});
+
 test('incremental projection rejects a second typed default-backup root from full facts', () => {
   const projectGraph = createLegacyProjectionProjectors()[0];
   const before = [{ 'thing@backup@default': 'Backup A', situation: '', slot: [], strut: [] }];
