@@ -230,19 +230,19 @@ Run: `node --test --test-isolation=none tests/atom-default-backup-active-boundar
 
 Expected: PASS。
 
-- [ ] **Step 2: 运行完整候选门禁**
+- [x] **Step 2: 运行完整候选门禁**
 
 Run: `npm test`
 
 Expected: 0 FAIL；仅允许既有 Windows symlink 条件跳过。
 
-- [ ] **Step 3: 在生产事实只读副本上比较投影体量**
+- [x] **Step 3: 在生产事实只读副本上比较投影体量**
 
 ```text
 原始完整 facts 的 revision 与归档节点数不变；候选 Graph/knowledge/runtime records 不含归档后代；一次 rst 副本恢复后对应节点重新出现。
 ```
 
-- [ ] **Step 4: 独立代码审查并修复所有 Critical／Important**
+- [x] **Step 4: 独立代码审查并修复所有 Critical／Important**
 
 Run: 比较基线 SHA 与候选 SHA，审查事实守恒、跨边界关系、增量投影、Program 索引和恢复路径。
 
