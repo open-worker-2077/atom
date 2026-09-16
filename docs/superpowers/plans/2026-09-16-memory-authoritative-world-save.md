@@ -52,7 +52,7 @@
 - [x] **Step 2: Run** `node --test --test-isolation=none tests/atom-memory-world-authority.test.mjs`; observed initial constructor RED, then A→B→A and shallow-freeze RED before each fix.
 - [x] **Step 3: Implement** the smallest authority around existing sealed revision utilities; atomic publication assigns one snapshot with facts, manifest, content revision and monotonic version. Readers take that object without storage I/O.
 - [x] **Step 4: Run the new tests and existing local conflict tests** in `tests/atom-world-transaction.test.mjs`; new authority and revision tests `10/10 PASS`, existing transaction/recovery suite `102/102 PASS` at this revision.
-- [ ] **Step 5: Commit the authority and its tests.**
+- [x] **Step 5: Commit the authority and its tests.** Saved as `a5eaea5` on the isolated branch.
 
 ### Task 3: Build the independent, bounded saver
 
@@ -64,7 +64,7 @@
 - [x] **Step 2: Run** `node --test --test-isolation=none tests/atom-independent-world-saver.test.mjs`; three original tests failed on missing implementation before GREEN.
 - [x] **Step 3: Implement** bounded scheduling and state changes; disk I/O stays behind injected `save`, with no memory authority lock while awaiting it. The real `save` adapter still must keep CPU serialization off the interaction event loop.
 - [x] **Step 4: Run the new suite** with gated/failing save and deterministic clock; `4/4 PASS`. This proves orchestration only, not nonblocking real I/O.
-- [ ] **Step 5: Commit the scheduler and tests.**
+- [x] **Step 5: Commit the scheduler and tests.** Saved as `a43c6f3` on the isolated branch.
 
 ### Task 4: Integrate real transactions, journal evidence and restart
 
@@ -73,6 +73,7 @@
 **Interfaces:** Engine `commitWorld(transition)` returns an accepted-memory receipt without awaiting saving; `readCommittedSnapshot` returns the current memory version; storage `saveThrough(version)` verifies ordered durable receipts and a recovery watermark. Existing `programExecutionForInteraction`, `recordProgramExecution`, restore evidence and rollback must read accepted in-memory history while running, with durable save snapshots preserving restart semantics.
 
 - [ ] **Step 1: Extend RED** to real fixture storage: block disk save, accept two independent edits, Explore both immediately, release save, restart and inspect the last saved watermark; inject a save failure and verify memory keeps serving the new version while status reports unsaved.
+- [x] **Step 1a: Preserve the coordinator rules at the new boundary.** An in-memory world/journal port now runs the existing coordinator and exposes accepted facts, receipt and pending Program outcome together; focused tests `3/3 PASS`. It is not yet the public runtime or a durable save adapter.
 - [ ] **Step 2: Implement one startup owner** seeded from the existing verified committed view and bind all runtime reads to it. No request may reload a stale disk snapshot into active memory.
 - [ ] **Step 3: Move commit I/O behind `saveThrough`** and batch or append only the changed closed set plus ordered receipt/history metadata; keep existing private recovery and integrity checks. Measure bytes and stage timing to prove no per-interaction full-world rewrite or per-cycle full-history scan.
 - [ ] **Step 3a: Keep CPU off the interaction loop.** The real save adapter must serialize/hash/compress the changed closed set in a worker or equivalent bounded off-thread lane, with a real-scale event-loop-delay assertion while saving; an unawaited Promise on the same loop is not sufficient.
