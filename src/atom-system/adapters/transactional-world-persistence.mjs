@@ -10,7 +10,10 @@ import {
   validateCompatibilityManifest
 } from '../world-runtime/legacy-graph-compat.mjs';
 import { createCommitCoordinator } from '../world-runtime/commit-coordinator.mjs';
+import { createIndependentWorldSaver } from '../world-runtime/independent-world-saver.mjs';
+import { createMemoryTransactionPorts } from '../world-runtime/memory-transaction-ports.mjs';
 import { revisionOfWorldFacts } from '../world-runtime/world-revision.mjs';
+import { createDurableWorldWriter } from './durable-world-writer.mjs';
 import {
   createJsonTransactionJournal,
   createJsonWorldRepository
@@ -45,8 +48,9 @@ const releaseWorldOwner = new FinalizationRegistry(({ key, reference }) => {
   if (worldOwners.get(key) === reference) worldOwners.delete(key);
 });
 
-function ownerFor({ contextFile, journalFile, worldId }) {
-  const key = JSON.stringify([path.resolve(contextFile), path.resolve(journalFile), worldId]);
+function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProjection,
+  worldId, runtimeAuthority = 'disk', saveSchedule, writerFactory = createDurableWorldWriter }) {
+  const key = JSON.stringify([path.resolve(contextFile), path.resolve(journalFile), worldId, runtimeAuthority]);
   let owner = worldOwners.get(key)?.deref();
   if (!owner) {
     const worldRepository = createJsonWorldRepository({
@@ -57,11 +61,82 @@ function ownerFor({ contextFile, journalFile, worldId }) {
       autoCompact: true
     });
     const journalRepository = createJsonTransactionJournal({ file: journalFile });
-    owner = { worldRepository, journalRepository,
-      coordinator: createCommitCoordinator({ worldRepository, journalRepository }), recovery: null };
+    if (runtimeAuthority === 'memory') {
+      const diskCoordinator = createCommitCoordinator({ worldRepository, journalRepository });
+      owner = { runtimeAuthority, recovery: null, ready: null, writer: null, saver: null,
+        projections: new Set() };
+      const delegate = (field) => new Proxy({}, { get: (_, name) => (...args) =>
+        owner.ready.then(() => owner[field][name](...args)) });
+      owner.worldRepository = delegate('memoryWorldRepository');
+      owner.journalRepository = delegate('memoryJournalRepository');
+      owner.coordinator = delegate('memoryCoordinator');
+      owner.ready = (async () => {
+        await diskCoordinator.recover();
+        const initialSnapshot = await worldRepository.read();
+        const history = await journalRepository.readState();
+        const compatibilityManifest = history.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null;
+        const durableOutcomes = await Promise.all(history.receipts
+          .filter((entry) => entry.receipt?.result?.postCommitEvent)
+          .map(async (entry) => [entry.commandId,
+            (await journalRepository.programExecution(entry.commandId))?.outcome ?? null]));
+        const writer = writerFactory({ contextFile, journalFile, worldId });
+        let sequence = 0;
+        let savedSequence = 0;
+        let unsaved = [];
+        let ports;
+        const saver = createIndependentWorldSaver({
+          save: async ({ version, revision }) => {
+            const events = unsaved.filter((entry) => entry.sequence > savedSequence
+              && entry.sequence <= version).map(({ event }) => event);
+            const result = await writer.save({ events, revision,
+              projectionFiles: [...owner.projections] });
+            savedSequence = version;
+            unsaved = unsaved.filter((entry) => entry.sequence > savedSequence);
+            return result.revision;
+          },
+          onSaved: ({ version }) => {
+            const savedEvent = owner.savedWorldVersions.get(version);
+            ports.authority.markSaved({ version: savedEvent.version, revision: savedEvent.revision });
+            for (const key of owner.savedWorldVersions.keys()) {
+              if (key <= version) owner.savedWorldVersions.delete(key);
+            }
+          },
+          quietMs: saveSchedule?.quietMs ?? 250,
+          maxDirtyMs: saveSchedule?.maxDirtyMs ?? 2000,
+          retryMs: saveSchedule?.retryMs ?? 2000
+        });
+        owner.savedWorldVersions = new Map();
+        const enqueue = (event, worldVersion, revision) => {
+          const next = ++sequence;
+          unsaved.push({ sequence: next, event });
+          owner.savedWorldVersions.set(next, { version: worldVersion, revision });
+          saver.enqueue({ version: next, revision });
+        };
+        ports = createMemoryTransactionPorts({ initialSnapshot, compatibilityManifest,
+          durableReceipts: history.receipts, durableOutcomes,
+          durableFindCommitted: (id) => journalRepository.findCommitted(id),
+          onAccepted: ({ version, revision, record }) => enqueue({ kind: 'record', record }, version, revision),
+          onOutcome: ({ sourceCommandId, outcome }) => {
+            const current = ports.authority.snapshot();
+            enqueue({ kind: 'outcome', sourceCommandId, outcome }, current.version, current.revision);
+          } });
+        owner.memoryPorts = ports;
+        owner.memoryWorldRepository = ports.worldRepository;
+        owner.memoryJournalRepository = ports.journalRepository;
+        owner.memoryCoordinator = createCommitCoordinator(ports);
+        owner.writer = writer;
+        owner.saver = saver;
+      })();
+    } else {
+      owner = { runtimeAuthority, worldRepository, journalRepository,
+        coordinator: createCommitCoordinator({ worldRepository, journalRepository }), recovery: null };
+    }
     const reference = new WeakRef(owner);
     worldOwners.set(key, reference);
     releaseWorldOwner.register(owner, { key, reference });
+  }
+  if (runtimeAuthority === 'memory' && publishLegacyProjection && projectionFile) {
+    owner.projections.add(path.resolve(projectionFile));
   }
   return owner;
 }
@@ -78,9 +153,13 @@ export function createTransactionalWorldPersistence({
   journalFile = path.join(path.dirname(contextFile), 'atom.transactions.json'),
   worldId = 'primary',
   publishLegacyProjection = true,
+  runtimeAuthority = 'disk',
+  saveSchedule = null,
+  writerFactory = createDurableWorldWriter,
   onAuthoritativeWrite = async () => {}
 }) {
-  const owner = ownerFor({ contextFile, journalFile, worldId });
+  const owner = ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProjection,
+    worldId, runtimeAuthority, saveSchedule, writerFactory });
   const { worldRepository, journalRepository, coordinator } = owner;
 
   function recover() {
@@ -397,7 +476,7 @@ export function createTransactionalWorldPersistence({
         { ...(error.details ?? {}), receipt, cause: error.code ?? error.name }
       );
     }
-    if (publishLegacyProjection) {
+    if (publishLegacyProjection && owner.runtimeAuthority !== 'memory') {
       try {
         await writeAtomGraphProjection(projectionFile, committedFacts, {
           rootName: path.basename(contextFile),
@@ -461,7 +540,7 @@ export function createTransactionalWorldPersistence({
       revision: receipt.afterRevision,
       receipt
     });
-    if (publishLegacyProjection) {
+    if (publishLegacyProjection && owner.runtimeAuthority !== 'memory') {
       const restored = await worldRepository.read();
       try {
         await writeAtomGraphProjection(projectionFile, restored.facts, {
@@ -482,6 +561,26 @@ export function createTransactionalWorldPersistence({
   return Object.freeze({
     // Cache invalidation only; authoritative identity remains the world receipt.
     get compatibilityGeneration() { return owner.compatibilityGeneration ?? 0; },
+    get saveStatus() {
+      return owner.runtimeAuthority === 'memory'
+        ? owner.saver ? { ...owner.memoryPorts.authority.status(),
+          pending: owner.saver.status().pending,
+          failure: owner.saver.status().failure }
+          : { pending: false, initializing: true }
+        : { pending: false };
+    },
+    async flushSaves() {
+      if (owner.runtimeAuthority !== 'memory') return { pending: false };
+      await owner.ready;
+      return owner.saver.flush();
+    },
+    async closeSaves() {
+      if (owner.runtimeAuthority !== 'memory') return { pending: false };
+      await owner.ready;
+      const result = await owner.saver.close();
+      await owner.writer.close();
+      return result;
+    },
     commit,
     compatibilityManifest,
     readCommittedSnapshot,

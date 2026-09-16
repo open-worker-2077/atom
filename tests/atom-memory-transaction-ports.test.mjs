@@ -31,6 +31,8 @@ test('coordinator accepts into one memory fact/receipt boundary without storage'
   assert.equal(accepted.length, 1);
   assert.equal(accepted[0].version, 1);
   assert.equal(accepted[0].record.receipt.commandId, 'write-1');
+  assert.equal(Object.isFrozen(accepted[0].record), true);
+  assert.equal(Object.isFrozen(accepted[0].record.after.facts[0]), true);
   assert.equal(accepted[0].snapshot.revision, receipt.afterRevision);
   assert.equal((await coordinator.inspectCommitted((current) => current)).revision, receipt.afterRevision);
 });
@@ -46,6 +48,20 @@ test('recovery records seed memory history but never replay a persisted write as
   assert.equal((await ports.journalRepository.findCommitted('prior')).commandId, 'prior');
   assert.equal(ports.authority.status().acceptedVersion, 0);
   assert.equal((await ports.journalRepository.readState()).receipts.length, 1);
+});
+
+test('restart seeds durable Program outcome instead of rerunning a completed source', async () => {
+  const before = snapshot([]);
+  const event = { binding: 'agent', interaction: { id: 'source' } };
+  const durable = { commandId: 'source', receipt: { commandId: 'source', correlationId: 'source',
+    beforeRevision: before.revision, afterRevision: before.revision,
+    result: { postCommitEvent: event } } };
+  const outcome = { status: 'completed', attemptId: 'attempt', result: { ok: true } };
+  const ports = createMemoryTransactionPorts({ initialSnapshot: before,
+    durableReceipts: [durable], durableOutcomes: [['source', outcome]] });
+  assert.equal((await ports.journalRepository.programExecutionForInteraction('source')).outcome.status,
+    'completed');
+  assert.equal((await ports.journalRepository.pendingProgramExecutions()).length, 0);
 });
 
 test('accepted Program source and outcome are visible before a save', async () => {

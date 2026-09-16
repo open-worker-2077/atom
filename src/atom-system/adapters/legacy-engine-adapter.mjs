@@ -29,6 +29,9 @@ export function createLegacyWorldService(options = {}) {
       contextFile: request.contextFile,
       projectionFile: request.projectionFile,
       publishLegacyProjection: options.publishLegacyProjection !== false,
+      runtimeAuthority: options.memoryAuthoritative === true ? 'memory' : 'disk',
+      saveSchedule: options.saveSchedule,
+      writerFactory: options.writerFactory,
       onAuthoritativeWrite: options.onAuthoritativeWrite
     })
   ));
@@ -313,6 +316,18 @@ export function createLegacyWorldService(options = {}) {
   });
   return Object.freeze({
     ...service,
+    async saveStatus(request) {
+      if (!request?.contextFile || !request?.projectionFile) return null;
+      const persistence = transactionFor(request);
+      await recoverPersistence(persistence);
+      return structuredClone(persistence.saveStatus ?? { pending: false });
+    },
+    async flushSaves() {
+      await Promise.all([...transactions.values()].map((persistence) => persistence.flushSaves?.()));
+    },
+    async closeSaves() {
+      await Promise.all([...transactions.values()].map((persistence) => persistence.closeSaves?.()));
+    },
     async readCommittedSnapshot(request) {
       if (!request?.contextFile || !request?.projectionFile) return null;
       const persistence = transactionFor(request);

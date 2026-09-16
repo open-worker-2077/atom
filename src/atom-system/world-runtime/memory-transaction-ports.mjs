@@ -5,12 +5,19 @@ function problem(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
+function deepFreeze(value) {
+  if (!value || typeof value !== 'object') return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
 // The coordinator keeps its existing validation, conflict, patch, and rollback
 // rules. These ports move only publication from disk to the running authority.
 export function createMemoryTransactionPorts({
   initialSnapshot,
   compatibilityManifest = null,
   durableReceipts = [],
+  durableOutcomes = [],
   durableFindCommitted = async () => null,
   onAccepted = () => {},
   onOutcome = () => {}
@@ -23,7 +30,7 @@ export function createMemoryTransactionPorts({
   const durableById = new Map(durableReceipts.map((entry) => [entry.commandId, entry]));
   const accepted = new Map();
   const prepared = new Map();
-  const outcomes = new Map();
+  const outcomes = new Map(durableOutcomes);
   let staged = null;
 
   const worldRepository = Object.freeze({
@@ -107,7 +114,7 @@ export function createMemoryTransactionPorts({
           compatibilityManifest: receipt.result?.compatibilityManifest ?? null },
         receipt
       });
-      const entry = { ...record, receipt: structuredClone(receipt) };
+      const entry = deepFreeze({ ...structuredClone(record), receipt: structuredClone(receipt) });
       accepted.set(commandId, entry);
       prepared.delete(commandId);
       staged = null;
