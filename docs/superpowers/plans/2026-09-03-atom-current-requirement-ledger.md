@@ -49,6 +49,7 @@
 - **安全基线**：本次改造前，唯一未推送的既有部署回读记录已提交；`origin/main` 与远端标签 `backup/pre-memory-authority-20260916` 均精确指向 `86a5e8c8fa4ac074384786d86747432d0f34d111`，工作区当时干净。`atom.json` 是被忽略的应用事实，不在代码推送内。当前插件仍为官方 Superpowers `6.3.0`、来源 `https://github.com/obra/superpowers`、manifest SHA-256 `D7AC84A700062E865715F75626945A2A3324778C68DBA1A543C7ED41E48DEF10`；上游未变化，`SP-L01—L05` 继续补充、无冲突。
 - **当前证据**：正式运行诊断中107次成功读取平均约3.065秒、20次成功Transform平均约17.805秒；Transform的`commit`平均约6.682秒，另有平均约8.597秒未落入命名阶段，不能把全部慢归咎于文件大小。既有“局部原子提交”规格与“运行/恢复”规格把落盘置于交互可读之前，新用户定论明确替代该时序。新产品合同见[规格](../specs/2026-09-16-memory-authoritative-world-and-independent-save-design.md)。
 - **收口标准**：先建真实规模副本RED，再实施单一内存版本、独立有界保存调度、版本水位、失败重试与恢复；用CLI/Web/Program精确回读、保存阻塞下连续读写、异常重启和正式入口部署证明E3。当前只有基线与规格，不声称代码或性能已修复。
+- **首个 RED（未修复）**：隔离工作区 `feat/memory-authoritative-save` 中新增公开 World Service 调用链测试 `tests/atom-memory-authoritative-interaction.test.mjs`；将保存器阻塞后立即 Explore，实测仍得到旧 `before` 而非新 `after`，失败信息为 `Explore must see the accepted memory version`。既有事务基线 `102/102 PASS`；测试运行所需临时目录在只读沙箱内因 `EPERM` 无效，已在授权执行环境重跑取得有效结果。此 RED 只证明现行时序不符，不冒称实现已完成。
 
 ### 2026-09-16 默认备份域不得参与活跃计算
 
