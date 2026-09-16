@@ -60,10 +60,10 @@
 
 **Interfaces:** `createIndependentWorldSaver({save,quietMs,maxDirtyMs,clock,onState})` exposes `enqueue(version)`, `status()`, `flush()` and `close()`. `save(version)` persists a stable immutable version and returns its verified revision. Only one save call may run per world; a dirty version newer than the completed save is scheduled again.
 
-- [ ] **Step 1: Write deterministic clock-driven RED tests** for quiet-window coalescing, maximum dirty age under continuous input, at most one concurrent save, reads/writes continuing through a gated save, retry after failure, stale completion not lowering the watermark, and normal close flush.
-- [ ] **Step 2: Run** `node --test --test-isolation=none tests/atom-independent-world-saver.test.mjs` and confirm the intended RED.
-- [ ] **Step 3: Implement** bounded scheduling and state changes; keep disk I/O behind injected `save`, never acquire the memory authority's read/accept lock while awaiting it.
-- [ ] **Step 4: Run the new suite with a slow/failing fake save** and verify exact accepted/saved revisions plus pending/failure state.
+- [x] **Step 1: Write RED tests** for quiet-window coalescing, maximum dirty age under continuous input, single active save with 100 queued accepts coalescing to the latest, retry after failure, and close flush.
+- [x] **Step 2: Run** `node --test --test-isolation=none tests/atom-independent-world-saver.test.mjs`; three original tests failed on missing implementation before GREEN.
+- [x] **Step 3: Implement** bounded scheduling and state changes; disk I/O stays behind injected `save`, with no memory authority lock while awaiting it. The real `save` adapter still must keep CPU serialization off the interaction event loop.
+- [x] **Step 4: Run the new suite** with gated/failing save and deterministic clock; `4/4 PASS`. This proves orchestration only, not nonblocking real I/O.
 - [ ] **Step 5: Commit the scheduler and tests.**
 
 ### Task 4: Integrate real transactions, journal evidence and restart
@@ -75,6 +75,7 @@
 - [ ] **Step 1: Extend RED** to real fixture storage: block disk save, accept two independent edits, Explore both immediately, release save, restart and inspect the last saved watermark; inject a save failure and verify memory keeps serving the new version while status reports unsaved.
 - [ ] **Step 2: Implement one startup owner** seeded from the existing verified committed view and bind all runtime reads to it. No request may reload a stale disk snapshot into active memory.
 - [ ] **Step 3: Move commit I/O behind `saveThrough`** and batch or append only the changed closed set plus ordered receipt/history metadata; keep existing private recovery and integrity checks. Measure bytes and stage timing to prove no per-interaction full-world rewrite or per-cycle full-history scan.
+- [ ] **Step 3a: Keep CPU off the interaction loop.** The real save adapter must serialize/hash/compress the changed closed set in a worker or equivalent bounded off-thread lane, with a real-scale event-loop-delay assertion while saving; an unawaited Promise on the same loop is not sufficient.
 - [ ] **Step 4: Run the RED fixture, 102 transaction tests, Program source/effect and restore tests**, then targeted CLI/Web tests; resolve semantics conflicts at the owning boundary, not by weakening assertions.
 - [ ] **Step 5: Commit the integrated runtime.**
 
