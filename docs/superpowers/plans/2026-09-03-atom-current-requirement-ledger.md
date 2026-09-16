@@ -51,6 +51,7 @@
 - **收口标准**：先建真实规模副本RED，再实施单一内存版本、独立有界保存调度、版本水位、失败重试与恢复；用CLI/Web/Program精确回读、保存阻塞下连续读写、异常重启和正式入口部署证明E3。当前只有基线与规格，不声称代码或性能已修复。
 - **首个 RED（未修复）**：隔离工作区 `feat/memory-authoritative-save` 中新增公开 World Service 调用链测试 `tests/atom-memory-authoritative-interaction.test.mjs`；将保存器阻塞后立即 Explore，实测仍得到旧 `before` 而非新 `after`，失败信息为 `Explore must see the accepted memory version`。既有事务基线 `102/102 PASS`；测试运行所需临时目录在只读沙箱内因 `EPERM` 无效，已在授权执行环境重跑取得有效结果。此 RED 只证明现行时序不符，不冒称实现已完成。
 - **计时缺口局部收窄**：Transform 诊断的 `commit` 之后补记 `security-rebuild` 阶段，先由现有诊断合同缺项RED，再最小实现转GREEN；关联诊断套件 `16/16 PASS`。该探针只记录时长而不记录Graph正文，尚未在真实规模副本回测，不能据此断言先前未分类的平均8.597秒均由安全重建造成。
+- **内存事实核局部GREEN**：隔离分支已按RED→GREEN建立单一驻留快照、单调接受版本与独立已保存水位；6项新合同覆盖立即回读、保存旧版本不回滚、陈旧写拒绝、A→B→A哈希回环及浅冻结注入，关联世界修订测试合计`10/10 PASS`。该模块尚未接入正式CLI/Web/Program或真实保存器，原公开入口RED仍在，不称交互已提速。
 
 ### 2026-09-16 默认备份域不得参与活跃计算
 

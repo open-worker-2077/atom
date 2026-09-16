@@ -46,12 +46,12 @@
 
 **Files:** Create `src/atom-system/world-runtime/memory-world-authority.mjs`; create `tests/atom-memory-world-authority.test.mjs`.
 
-**Interfaces:** `createMemoryWorldAuthority({initialSnapshot})` produces `snapshot()` and `accept({expectedRevision,nextRevision,facts,compatibilityManifest,receipt,changedPaths})`; a successful `accept` returns `{acceptedRevision,savedRevision}`. `markSaved(revision)` changes only the durable watermark. Facts and manifest are read together from one version.
+**Interfaces:** `createMemoryWorldAuthority({initialSnapshot})` produces `snapshot()` and `accept({expectedVersion,expectedRevision,nextSnapshot,receipt})`; a successful `accept` returns `{acceptedVersion,acceptedRevision,savedVersion,savedRevision}`. `markSaved({version,revision})` changes only the durable watermark. The monotonic version guards A→B→A hash cycles; facts and manifest are read together from one version.
 
-- [ ] **Step 1: Write RED tests** for immediate read-your-writes, a rejected stale overlapping transition, allowed disjoint rebase only when the existing local-patch closure proves safety, and `markSaved(oldRevision)` leaving the current memory facts unchanged.
-- [ ] **Step 2: Run** `node --test --test-isolation=none tests/atom-memory-world-authority.test.mjs` and confirm each assertion fails for the intended missing behavior.
-- [ ] **Step 3: Implement** the smallest authority using the existing revision and local-patch utilities; do not invent new Graph validation or authorization semantics. Atomic publication must assign one snapshot object containing facts, manifest and revision; readers take that object without storage I/O.
-- [ ] **Step 4: Run the new tests and existing local conflict tests** in `tests/atom-world-transaction.test.mjs`; preserve exact error codes for real overlaps.
+- [x] **Step 1: Write RED tests** for immediate read-your-writes, rejected stale revision/version, A→B→A save ordering, older save not rolling back facts, and exclusion of shallow-frozen mutable nested facts. Disjoint rebase remains an integration test at the existing closure-aware coordinator, not a new rule in this core.
+- [x] **Step 2: Run** `node --test --test-isolation=none tests/atom-memory-world-authority.test.mjs`; observed initial constructor RED, then A→B→A and shallow-freeze RED before each fix.
+- [x] **Step 3: Implement** the smallest authority around existing sealed revision utilities; atomic publication assigns one snapshot with facts, manifest, content revision and monotonic version. Readers take that object without storage I/O.
+- [x] **Step 4: Run the new tests and existing local conflict tests** in `tests/atom-world-transaction.test.mjs`; new authority and revision tests `10/10 PASS`, existing transaction/recovery suite `102/102 PASS` at this revision.
 - [ ] **Step 5: Commit the authority and its tests.**
 
 ### Task 3: Build the independent, bounded saver

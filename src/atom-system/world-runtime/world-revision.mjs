@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 const immutableRevisions = new WeakMap();
 const immutableSerializations = new WeakMap();
+const sealedWorldFacts = new WeakSet();
 
 function freezeWorldFacts(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
@@ -21,7 +22,13 @@ export function revisionOfWorldFacts(facts) {
 
 export function sealWorldFactsRevision(facts) {
   freezeWorldFacts(facts);
-  return revisionOfWorldFacts(facts);
+  const revision = revisionOfWorldFacts(facts);
+  sealedWorldFacts.add(facts);
+  return revision;
+}
+
+export function isSealedWorldFacts(facts) {
+  return Array.isArray(facts) && sealedWorldFacts.has(facts);
 }
 
 export function prepareWorldFactsRevision(facts) {
