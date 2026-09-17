@@ -13,6 +13,14 @@ const adapterUrl = new URL('../src/atom-system/adapters/legacy-engine-adapter.mj
 const engineUrl = new URL('../work-engine/atom-language/engine.mjs', import.meta.url);
 const cliUrl = new URL('../work-engine/atom-language/cli.mjs', import.meta.url);
 
+function validCommittedSnapshot(facts, withManifest = true) {
+  const revision = `sha256:${crypto.createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`;
+  return Object.freeze({ facts, revision, compatibilityManifest: withManifest ? {
+    contract: 'atom.graph-four-axis-compatibility-manifest', version: 2,
+    sourceRevision: 'sha256:source', currentWorldRevision: revision, legacyStrut: []
+  } : null });
+}
+
 function failNextCommittedJournalEvent(t, directory) {
   const open = fs.open.bind(fs);
   let failed = false;
@@ -244,11 +252,7 @@ test('legacy World Service single-flights recovery and compatibility validation 
 
 test('legacy World Service gives the engine one committed facts and manifest snapshot', async () => {
   const facts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
-  const committedSnapshot = Object.freeze({
-    facts,
-    revision: 'sha256:committed',
-    compatibilityManifest: { currentWorldRevision: 'sha256:committed' }
-  });
+  const committedSnapshot = validCommittedSnapshot(facts);
   let snapshotCalls = 0;
   const service = (await import(adapterUrl)).createLegacyWorldService({
     transactionProvider: () => ({
@@ -278,6 +282,146 @@ test('legacy World Service gives the engine one committed facts and manifest sna
 
   assert.equal(result.ok, true);
   assert.equal(snapshotCalls, 1);
+});
+
+test('one accepted version retains the context and relation index across adapter reads', async () => {
+  const { createLegacyWorldService } = await import(adapterUrl);
+  const { readAtomContext } = await import('../work-engine/atom-language/context-store.mjs');
+  const { prepareTransformRelationIndex } = await import('../work-engine/atom-language/transform-executor.mjs');
+  const facts = [{ thing: 'Root', situation: 'A', slot: [], strut: [] }];
+  const revision = (value) => `sha256:${crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')}`;
+  let snapshot = { facts, revision: revision(facts), compatibilityManifest: null };
+  let compatibilityGeneration = 0;
+  const observed = [];
+  const persistence = {
+    get compatibilityGeneration() { return compatibilityGeneration; },
+    async recover() {},
+    async readCommittedSnapshot() { return snapshot; }
+  };
+  const service = createLegacyWorldService({ transactionProvider: () => persistence,
+    execute: async (request) => {
+      const atoms = await readAtomContext(request.contextFile, request);
+      observed.push({ atoms, index: prepareTransformRelationIndex(atoms, 'atom.json') });
+      return { ok: true, changed: false };
+    } });
+  const target = { contextFile: 'atom.json', projectionFile: 'graph.json' };
+  await service.executeLegacy({ ...target, source: 'explore Root', interaction: { id: 'version-a-1' } });
+  await service.executeLegacy({ ...target, source: 'explore Root', interaction: { id: 'version-a-2' } });
+  assert.strictEqual(observed[1].atoms, observed[0].atoms);
+  assert.strictEqual(observed[1].index, observed[0].index);
+  const publicCopy = await service.readCommittedSnapshot(target);
+  publicCopy.facts[0].situation = 'caller changed';
+  assert.equal(observed[0].atoms[0].situation, 'A');
+  const firstVersion = await service.readCommittedVersion(target);
+  const nextFacts = [{ thing: 'Root', situation: 'B', slot: [], strut: [] }];
+  snapshot = { facts: nextFacts, revision: revision(nextFacts), compatibilityManifest: null };
+  compatibilityGeneration += 1;
+  await service.executeLegacy({ ...target, source: 'explore Root', interaction: { id: 'version-b' } });
+  assert.notStrictEqual(observed[2].atoms, observed[0].atoms);
+  assert.equal(observed[2].atoms[0].situation, 'B');
+  snapshot = { facts: [{ thing: 'Root', situation: 'A', slot: [], strut: [] }],
+    revision: revision(facts), compatibilityManifest: null };
+  compatibilityGeneration += 1;
+  await service.executeLegacy({ ...target, source: 'explore Root', interaction: { id: 'version-a-again' } });
+  assert.notStrictEqual(observed[3].atoms, observed[0].atoms);
+  assert.notStrictEqual(await service.readCommittedVersion(target), firstVersion);
+});
+
+test('rejected writes retain the version while old readers survive a later acceptance', async () => {
+  const { createLegacyWorldService } = await import(adapterUrl);
+  const beforeFacts = [{ thing: 'Root', situation: 'A', slot: [], strut: [] }];
+  const afterFacts = [{ thing: 'Root', situation: 'B', slot: [], strut: [] }];
+  let snapshot = validCommittedSnapshot(beforeFacts, false);
+  let generation = 0;
+  let rejectNext = true;
+  let releaseOld;
+  let oldStarted;
+  const oldGate = new Promise((resolve) => { releaseOld = resolve; });
+  const oldEntered = new Promise((resolve) => { oldStarted = resolve; });
+  const persistence = {
+    get compatibilityGeneration() { return generation; },
+    async recover() {},
+    async readCommittedSnapshot() { return snapshot; },
+    async commit() {
+      if (rejectNext) { rejectNext = false; throw Object.assign(new Error('rejected'), { code: 'REJECTED' }); }
+      snapshot = validCommittedSnapshot(afterFacts, false);
+      generation += 1;
+      return { afterRevision: snapshot.revision };
+    }
+  };
+  const service = createLegacyWorldService({ transactionProvider: () => persistence,
+    execute: async (request) => {
+      if (request.source === 'old-reader') {
+        oldStarted();
+        await oldGate;
+        return { ok: true, situation: request.committedSnapshot.facts[0].situation };
+      }
+      if (request.source === 'write') {
+        try { await request.commitWorld({ facts: afterFacts }); }
+        catch (error) { return { ok: false, code: error.code }; }
+        return { ok: true, changed: true };
+      }
+      return { ok: true, situation: request.committedSnapshot.facts[0].situation };
+    } });
+  const target = { contextFile: 'atom.json', projectionFile: 'graph.json' };
+  const beforeVersion = await service.readCommittedVersion(target);
+  const oldRead = service.executeLegacy({ ...target, source: 'old-reader', interaction: { id: 'old-read' } });
+  await oldEntered;
+  try {
+    assert.equal((await service.executeLegacy({ ...target, source: 'write',
+      interaction: { id: 'rejected-write' } })).code, 'REJECTED');
+    assert.strictEqual(await service.readCommittedVersion(target), beforeVersion);
+    await service.executeLegacy({ ...target, source: 'write', interaction: { id: 'accepted-write' } });
+    const afterVersion = await service.readCommittedVersion(target);
+    assert.notStrictEqual(afterVersion, beforeVersion);
+    assert.equal((await service.executeLegacy({ ...target, source: 'new-reader',
+      interaction: { id: 'new-read' } })).situation, 'B');
+  } finally {
+    releaseOld();
+  }
+  assert.equal((await oldRead).situation, 'A');
+});
+
+test('real engine Explore reuses the adapter version and Transform preserves its old context', async (t) => {
+  const { createLegacyWorldService } = await import(adapterUrl);
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-real-owned-version-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const target = { contextFile: path.join(directory, 'atom.json'),
+    projectionFile: path.join(directory, 'graph.json') };
+  let snapshot = validCommittedSnapshot([{ thing: 'Root', situation: 'before', slot: [], strut: [] }], false);
+  let generation = 0;
+  const persistence = {
+    get compatibilityGeneration() { return generation; },
+    async recover() {},
+    async readCommittedSnapshot() { return snapshot; },
+    async programExecution() { return { outcome: null, childReceipt: null }; },
+    async recordProgramExecution({ outcome }) { return outcome; },
+    async commit(transition) {
+      snapshot = validCommittedSnapshot(structuredClone(transition.facts), false);
+      generation += 1;
+      return { commandId: 'real-engine-commit', afterRevision: snapshot.revision,
+        beforeRevision: transition.expectedRevision, correlationId: transition.correlationId,
+        affectedAtoms: [] };
+    }
+  };
+  const service = createLegacyWorldService({ transactionProvider: () => persistence });
+  const before = await service.readCommittedVersion(target);
+  const oldContext = await readAtomContext(target.contextFile, { committedVersion: before });
+  for (const id of ['real-owned-read-1', 'real-owned-read-2']) {
+    const result = await service.executeLegacy({ ...target,
+      source: 'explore {"thing":"Root"}', interaction: { id } });
+    assert.equal(result.ok, true, JSON.stringify(result.errors));
+    assert.strictEqual(await service.readCommittedVersion(target), before);
+  }
+  const write = await service.executeLegacy({ ...target,
+    source: 'transform {"thing":"Root","situation.rep.changed"}',
+    interaction: { id: 'real-owned-write' } });
+  assert.equal(write.ok, true, JSON.stringify(write.errors));
+  const after = await service.readCommittedVersion(target);
+  assert.notStrictEqual(after, before);
+  assert.equal(oldContext[0].situation, 'before');
+  assert.equal((await readAtomContext(target.contextFile, { committedVersion: after }))[0].situation,
+    'changed');
 });
 
 test('recovered committed-event EIO invalidates a prewarmed adapter tuple without changing an active request', async (t) => {
@@ -393,11 +537,7 @@ test('recovered committed-event EIO invalidates a prewarmed adapter tuple withou
 });
 
 test('legacy World Service exposes the cached committed tuple through one read-only seam', async () => {
-  const snapshot = Object.freeze({
-    facts: [{ thing: 'Root', situation: 'committed', slot: [], strut: [] }],
-    revision: 'sha256:committed',
-    compatibilityManifest: { currentWorldRevision: 'sha256:committed' }
-  });
+  const snapshot = validCommittedSnapshot([{ thing: 'Root', situation: 'committed', slot: [], strut: [] }]);
   let snapshotCalls = 0;
   const service = (await import(adapterUrl)).createLegacyWorldService({
     transactionProvider: () => ({
@@ -446,7 +586,7 @@ test('legacy World Service acknowledges a committed source before pending outcom
       compatibilityGeneration: 0,
       async recover() {},
       async readCommittedSnapshot() {
-        return { facts: [], revision: 'sha256:old', compatibilityManifest: null };
+        return validCommittedSnapshot([], false);
       },
       async pendingProgramExecutions() { return []; },
       async programExecutionForInteraction() { return null; },
@@ -500,10 +640,8 @@ test('legacy World Service acknowledges a committed source before pending outcom
 
 test('legacy World Service can reacquire one fresh committed snapshot after a commit', async () => {
   const snapshots = [
-    Object.freeze({ facts: [{ thing: 'Root', situation: 'old', slot: [], strut: [] }],
-      revision: 'sha256:old', compatibilityManifest: { currentWorldRevision: 'sha256:old' } }),
-    Object.freeze({ facts: [{ thing: 'Root', situation: 'new', slot: [], strut: [] }],
-      revision: 'sha256:new', compatibilityManifest: { currentWorldRevision: 'sha256:new' } })
+    validCommittedSnapshot([{ thing: 'Root', situation: 'old', slot: [], strut: [] }]),
+    validCommittedSnapshot([{ thing: 'Root', situation: 'new', slot: [], strut: [] }])
   ];
   let snapshotCalls = 0;
   const service = (await import(adapterUrl)).createLegacyWorldService({
@@ -514,11 +652,11 @@ test('legacy World Service can reacquire one fresh committed snapshot after a co
       async commit() { return { afterRevision: 'sha256:new' }; }
     }),
     execute: async (request) => {
-      assert.equal(request.committedSnapshot.revision, 'sha256:old');
+      assert.equal(request.committedSnapshot.revision, snapshots[0].revision);
       await request.commitWorld({ facts: snapshots[1].facts });
       const latest = await request.acquireCommittedSnapshot();
-      assert.equal(latest.revision, 'sha256:new');
-      assert.equal(latest.compatibilityManifest.currentWorldRevision, 'sha256:new');
+      assert.equal(latest.revision, snapshots[1].revision);
+      assert.equal(latest.compatibilityManifest.currentWorldRevision, snapshots[1].revision);
       return { ok: true, changed: true, revisionAfter: latest.revision };
     }
   });
@@ -528,22 +666,14 @@ test('legacy World Service can reacquire one fresh committed snapshot after a co
     interaction: { id: 'fresh-committed-snapshot-read' }
   });
 
-  assert.equal(result.revisionAfter, 'sha256:new');
+  assert.equal(result.revisionAfter, snapshots[1].revision);
   assert.equal(snapshotCalls, 2);
 });
 
 test('legacy World Service recovery execution receives a fresh committed tuple after a conflict', async () => {
   const snapshots = [
-    Object.freeze({
-      facts: [{ thing: 'Root', situation: 'old', slot: [], strut: [] }],
-      revision: 'sha256:old',
-      compatibilityManifest: { currentWorldRevision: 'sha256:old' }
-    }),
-    Object.freeze({
-      facts: [{ thing: 'Root', situation: 'new', slot: [], strut: [] }],
-      revision: 'sha256:new',
-      compatibilityManifest: { currentWorldRevision: 'sha256:new' }
-    })
+    validCommittedSnapshot([{ thing: 'Root', situation: 'old', slot: [], strut: [] }]),
+    validCommittedSnapshot([{ thing: 'Root', situation: 'new', slot: [], strut: [] }])
   ];
   const sourceReceipt = {
     commandId: 'source-command',
@@ -619,13 +749,13 @@ test('legacy World Service recovery execution receives a fresh committed tuple a
     {
       recovery: false,
       facts: snapshots[0].facts,
-      revision: 'sha256:old',
+      revision: snapshots[0].revision,
       compatibilityManifest: snapshots[0].compatibilityManifest
     },
     {
       recovery: true,
       facts: snapshots[1].facts,
-      revision: 'sha256:new',
+      revision: snapshots[1].revision,
       compatibilityManifest: snapshots[1].compatibilityManifest
     }
   ]);

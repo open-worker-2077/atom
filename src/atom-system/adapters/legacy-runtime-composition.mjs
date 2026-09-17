@@ -352,9 +352,11 @@ export function createLegacyRuntimeComposition(options) {
     ?? createLegacyProjectionOrchestrator({
       contextFile,
       programScheduler,
-      committedSnapshotProvider: typeof worldService.readCommittedSnapshot === 'function'
-        ? () => worldService.readCommittedSnapshot({ contextFile, projectionFile: graphFile })
-        : null,
+      committedSnapshotProvider: typeof worldService.readCommittedVersion === 'function'
+        ? () => worldService.readCommittedVersion({ contextFile, projectionFile: graphFile })
+        : typeof worldService.readCommittedSnapshot === 'function'
+          ? () => worldService.readCommittedSnapshot({ contextFile, projectionFile: graphFile })
+          : null,
       compatibilityManifestProvider: typeof worldService.compatibilityManifest === 'function'
         ? () => worldService.compatibilityManifest({ contextFile, projectionFile: graphFile })
         : null
@@ -410,7 +412,12 @@ export function createLegacyRuntimeComposition(options) {
   const resolvedAgents = new Map();
 
   async function refreshResolutionAuthority() {
-    if (typeof worldService.readCommittedSnapshot === 'function') {
+    if (typeof worldService.readCommittedVersion === 'function') {
+      resolutionAuthority = await worldService.readCommittedVersion({
+        contextFile,
+        projectionFile: graphFile
+      });
+    } else if (typeof worldService.readCommittedSnapshot === 'function') {
       const snapshot = await worldService.readCommittedSnapshot({
         contextFile,
         projectionFile: graphFile
@@ -449,8 +456,13 @@ export function createLegacyRuntimeComposition(options) {
     const cached = resolvedAgents.get(key);
     if (cached) return structuredClone(cached);
     const resolved = await agentResolver(contextFile, agentPath, {
-      ...(Array.isArray(authority?.facts) ? { committedSnapshot: structuredClone(authority) } : {}),
-      ...(manifest ? { compatibilityManifest: structuredClone(manifest) } : {}),
+      ...(Array.isArray(authority?.facts) ? {
+        committedSnapshot: typeof worldService.readCommittedVersion === 'function'
+          ? authority : structuredClone(authority),
+        ...(typeof worldService.readCommittedVersion === 'function' ? { committedVersion: authority } : {})
+      } : {}),
+      ...(manifest ? { compatibilityManifest: typeof worldService.readCommittedVersion === 'function'
+        ? manifest : structuredClone(manifest) } : {}),
       ...(authority?.revision ? { worldRevision: authority.revision } : (
         manifest?.currentWorldRevision ? { worldRevision: manifest.currentWorldRevision } : {}
       ))

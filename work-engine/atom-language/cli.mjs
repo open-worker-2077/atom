@@ -851,6 +851,14 @@ export async function resolveAgentContext(contextFile, selector, options = {}) {
 }
 
 async function readAgentFacts(contextFile, options) {
+  if (options.committedVersion !== undefined) {
+    return readAtomContext(contextFile, {
+      create: false,
+      committedVersion: options.committedVersion,
+      committedSnapshot: options.committedSnapshot,
+      compatibilityManifest: options.compatibilityManifest
+    });
+  }
   if (!options.committedSnapshot) {
     return readAtomContext(contextFile, {
       create: false,

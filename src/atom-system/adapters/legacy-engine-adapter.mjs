@@ -3,6 +3,7 @@ import path from 'node:path';
 import { executeAtomLanguage } from '../../../work-engine/atom-language/engine.mjs';
 import { createWorldService } from '../public/world-service.mjs';
 import { createTransactionalWorldPersistence } from './transactional-world-persistence.mjs';
+import { prepareCommittedAtomVersion } from '../../../work-engine/atom-language/context-store.mjs';
 
 // Only live invocations are joined here. All completed results and restart
 // decisions come from the central journal, never this transient rendezvous.
@@ -90,7 +91,10 @@ export function createLegacyWorldService(options = {}) {
       state.committedSnapshot = recoverPersistence(persistence)
         .then(async () => {
           if (typeof persistence.readCommittedSnapshot === 'function') {
-            return timed('committed-snapshot', () => persistence.readCommittedSnapshot());
+            return timed('committed-snapshot', async () => {
+              const snapshot = await persistence.readCommittedSnapshot();
+              return Array.isArray(snapshot?.facts) ? prepareCommittedAtomVersion(snapshot) : snapshot;
+            });
           }
           const compatibilityManifest = typeof persistence.compatibilityManifest === 'function'
             ? await timed('manifest', () => persistence.compatibilityManifest())
@@ -171,11 +175,12 @@ export function createLegacyWorldService(options = {}) {
       interactionBinding: entry.binding,
       compatibilityManifest: snapshot?.compatibilityManifest ?? null,
       ...(Array.isArray(snapshot?.facts) ? {
-        committedSnapshot: structuredClone(snapshot)
+        committedSnapshot: snapshot,
+        committedVersion: snapshot
       } : {}),
       acquireCommittedSnapshot: async () => {
         const latest = await committedSnapshotFor(persistence);
-        return latest ? structuredClone(latest) : null;
+        return latest ?? null;
       },
       transactionTransformLog,
       readDiscardEvidence: typeof persistence.readDiscardEvidence === 'function'
@@ -337,6 +342,10 @@ export function createLegacyWorldService(options = {}) {
       if (!request?.contextFile || !request?.projectionFile) return null;
       const persistence = transactionFor(request);
       return structuredClone(await committedSnapshotFor(persistence));
+    },
+    async readCommittedVersion(request) {
+      if (!request?.contextFile || !request?.projectionFile) return null;
+      return committedSnapshotFor(transactionFor(request));
     },
     async compatibilityManifest(request) {
       if (!request?.contextFile || !request?.projectionFile) return null;

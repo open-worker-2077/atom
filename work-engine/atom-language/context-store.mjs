@@ -19,11 +19,13 @@ import {
   isLegacyStrutEntry,
   validateCompatibilityManifest
 } from '../../src/atom-system/world-runtime/legacy-graph-compat.mjs';
+import { revisionOfWorldFacts, sealWorldFactsRevision } from '../../src/atom-system/world-runtime/world-revision.mjs';
 
 const DEFAULT_CONTEXT_FILENAME = 'atom.json';
 const contextSnapshots = new Map();
 const contextLoads = new Map();
 const legacySnapshotMetadata = new WeakMap();
+const committedVersionContexts = new WeakMap();
 const REQUIRED_ATOM_FIELDS = Object.freeze([
   'thing',
   'situation',
@@ -116,9 +118,39 @@ export function legacyAtomContextMetadata(atoms) {
 }
 
 function freezeSnapshot(value) {
-  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  if (!value || typeof value !== 'object') return value;
   for (const child of Object.values(value)) freezeSnapshot(child);
   return Object.freeze(value);
+}
+
+export function isCommittedAtomVersion(value) {
+  return Boolean(value && typeof value === 'object' && committedVersionContexts.has(value));
+}
+
+export function prepareCommittedAtomVersion(input) {
+  if (!Array.isArray(input?.facts) || typeof input.revision !== 'string') {
+    throw atomLanguageError('INVALID_WORLD_SNAPSHOT', 'Committed Atom snapshot requires facts and revision');
+  }
+  const facts = structuredClone(input.facts);
+  const revision = revisionOfWorldFacts(facts);
+  if (input.revision !== revision && input.revision !== revision.slice('sha256:'.length)) {
+    throw atomLanguageError('INVALID_WORLD_REVISION', 'Committed Atom revision does not match facts');
+  }
+  const compatibilityManifest = input.compatibilityManifest
+    ? structuredClone(input.compatibilityManifest) : null;
+  const normalized = normalizePersistedContext(facts);
+  const metadata = compatibilityManifest
+    ? compatibilityMetadata(compatibilityManifest, normalized.atoms)
+    : normalized.metadata;
+  projectAtomContext(normalized.atoms, { allowLegacyStrut: Boolean(metadata) });
+  const context = freezeSnapshot(normalized.atoms);
+  if (metadata) legacySnapshotMetadata.set(context, metadata);
+  sealWorldFactsRevision(facts);
+  if (context !== facts) sealWorldFactsRevision(context);
+  const version = Object.freeze({ facts, revision,
+    compatibilityManifest: freezeSnapshot(compatibilityManifest) });
+  committedVersionContexts.set(version, context);
+  return version;
 }
 
 async function contextSignature(file) {
@@ -484,6 +516,15 @@ async function atomicWriteJson(file, value) {
  */
 export async function readAtomContext(file, options = {}) {
   const contextFile = resolveAtomContextFile(file);
+  if (options.committedVersion !== undefined) {
+    const committed = committedVersionContexts.get(options.committedVersion);
+    if (!committed || (options.committedSnapshot && options.committedSnapshot !== options.committedVersion)
+      || (options.compatibilityManifest !== undefined && compatibilityCacheKey(options.compatibilityManifest)
+        !== compatibilityCacheKey(options.committedVersion.compatibilityManifest))) {
+      throw atomLanguageError('INVALID_WORLD_SNAPSHOT', 'Committed Atom version does not match its owned context');
+    }
+    return committed;
+  }
   if (options.committedSnapshot) {
     if (!Array.isArray(options.committedSnapshot.facts)) {
       throw atomLanguageError(

@@ -24,17 +24,38 @@ test('revision hashing is reused for one immutable fact snapshot', () => {
   Object.freeze(atom);
   const facts = Object.freeze([atom]);
 
+  sealWorldFactsRevision(facts);
+  const readsAfterSeal = reads;
   const first = revisionOfWorldFacts(facts);
   const second = revisionOfWorldFacts(facts);
 
   assert.equal(second, first);
-  assert.equal(reads, 1);
+  assert.equal(reads, readsAfterSeal);
 });
 
 test('mutable fact arrays are rehashed after in-place changes', () => {
   const facts = [{ name: 'A', detail: 'before', children: [], partners: [] }];
   const before = revisionOfWorldFacts(facts);
   facts[0].detail = 'after';
+  assert.notEqual(revisionOfWorldFacts(facts), before);
+});
+
+test('a shallow-frozen fact array cannot cache a mutable descendant revision', () => {
+  const facts = Object.freeze([{ thing: 'A', situation: 'before', slot: [], strut: [] }]);
+  const before = revisionOfWorldFacts(facts);
+  facts[0].situation = 'after';
+  assert.notEqual(revisionOfWorldFacts(facts), before);
+  sealWorldFactsRevision(facts);
+  assert.equal(Object.isFrozen(facts[0]), true);
+  assert.equal(Object.isFrozen(facts[0].slot), true);
+});
+
+test('a frozen but unsealed getter cannot bless a cached revision', () => {
+  let situation = 'before';
+  const facts = Object.freeze([Object.freeze({ thing: 'A',
+    get situation() { return situation; }, slot: Object.freeze([]), strut: Object.freeze([]) })]);
+  const before = revisionOfWorldFacts(facts);
+  situation = 'after';
   assert.notEqual(revisionOfWorldFacts(facts), before);
 });
 

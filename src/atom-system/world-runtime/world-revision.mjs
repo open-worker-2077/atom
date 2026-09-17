@@ -5,7 +5,7 @@ const immutableSerializations = new WeakMap();
 const sealedWorldFacts = new WeakSet();
 
 function freezeWorldFacts(value) {
-  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  if (!value || typeof value !== 'object') return value;
   for (const child of Object.values(value)) freezeWorldFacts(child);
   return Object.freeze(value);
 }
@@ -16,15 +16,13 @@ export function revisionOfWorldFacts(facts) {
     error.code = 'INVALID_WORLD_FACTS';
     throw error;
   }
-  const immutable = Object.isFrozen(facts);
   return prepareWorldFactsRevision(facts).revision;
 }
 
 export function sealWorldFactsRevision(facts) {
   freezeWorldFacts(facts);
-  const revision = revisionOfWorldFacts(facts);
   sealedWorldFacts.add(facts);
-  return revision;
+  return revisionOfWorldFacts(facts);
 }
 
 export function isSealedWorldFacts(facts) {
@@ -37,7 +35,7 @@ export function prepareWorldFactsRevision(facts) {
     error.code = 'INVALID_WORLD_FACTS';
     throw error;
   }
-  const immutable = Object.isFrozen(facts);
+  const immutable = sealedWorldFacts.has(facts);
   if (immutable && immutableRevisions.has(facts) && immutableSerializations.has(facts)) {
     return {
       revision: immutableRevisions.get(facts),

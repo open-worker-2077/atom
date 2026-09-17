@@ -965,7 +965,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     atoms = await readAtomContext(contextFile, {
       create: parsed.command === 'atom',
       compatibilityManifest: options.compatibilityManifest,
-      committedSnapshot: options.committedSnapshot
+      committedSnapshot: options.committedSnapshot,
+      committedVersion: options.committedVersion
     });
     performanceTrace('world-read-context', {
       elapsedMs: Math.round(performance.now() - operationStartedAt)
@@ -3440,7 +3441,10 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       : null;
     const latestAtoms = await readAtomContext(contextFile, {
       compatibilityManifest: committedSnapshot?.compatibilityManifest ?? options.compatibilityManifest,
-      ...(Array.isArray(committedSnapshot?.facts) ? { committedSnapshot } : {})
+      ...(Array.isArray(committedSnapshot?.facts) ? {
+        committedSnapshot,
+        committedVersion: committedSnapshot
+      } : {})
     });
     const errors = Array.isArray(error?.diagnostics) && error.diagnostics.length > 0
       ? structuredClone(error.diagnostics)

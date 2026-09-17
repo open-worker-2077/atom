@@ -464,6 +464,20 @@ export async function startAtomGraphServer(options = {}) {
       ? () => backupTrigger?.schedule() : undefined
   });
   const currentAgentAuthorityOptions = async () => {
+    if (typeof worldService.readCommittedVersion === 'function') {
+      const committedVersion = await worldService.readCommittedVersion({
+        contextFile: configuration.contextFile,
+        projectionFile: configuration.graphFile
+      });
+      return {
+        committedVersion,
+        committedSnapshot: committedVersion,
+        ...(committedVersion?.compatibilityManifest ? {
+          compatibilityManifest: committedVersion.compatibilityManifest
+        } : {}),
+        ...(committedVersion?.revision ? { worldRevision: committedVersion.revision } : {})
+      };
+    }
     if (typeof worldService.readCommittedSnapshot === 'function') {
       const committedSnapshot = await worldService.readCommittedSnapshot({
         contextFile: configuration.contextFile,

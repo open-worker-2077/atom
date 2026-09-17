@@ -13,6 +13,8 @@ import {
   writeAtomGraphProjection
 } from '../work-engine/atom-language/context-store.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import * as contextStore from '../work-engine/atom-language/context-store.mjs';
+import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 const struts = (...targets) => targets.length === 0
   ? []
@@ -104,6 +106,54 @@ test('repeated reads reuse one immutable context snapshot until the file revisio
   const third = await readAtomContext(contextFile, { create: false });
   assert.notStrictEqual(third, first);
   assert.equal(third[0]['situation#主观窗口'], '新正文');
+});
+
+test('a verified committed version reuses owned context without retaining caller mutations', async () => {
+  const contextFile = path.join(os.tmpdir(), 'atom-committed-version-context.json');
+  const facts = atomsFixture();
+  const revision = revisionOfWorldFacts(facts);
+  const version = contextStore.prepareCommittedAtomVersion({ facts, revision });
+  const first = await readAtomContext(contextFile, { committedVersion: version });
+  const second = await readAtomContext(contextFile, { committedVersion: version });
+  assert.strictEqual(first, second);
+  assert.equal(Object.isFrozen(first[0].slot[0]), true);
+  facts[0].slot[0]['thing@program'] = 'mutated';
+  assert.equal(second[0].slot[0]['thing@program'], '锤子');
+  await assert.rejects(readAtomContext(contextFile, {
+    committedVersion: { ...version }
+  }), { code: 'INVALID_WORLD_SNAPSHOT' });
+});
+
+test('a forged or shallow-frozen source cannot bless a committed version', () => {
+  const facts = Object.freeze(atomsFixture());
+  const revision = revisionOfWorldFacts(facts);
+  facts[0].slot[0]['thing@program'] = 'mutated';
+  assert.throws(() => contextStore.prepareCommittedAtomVersion({ facts, revision }), {
+    code: 'INVALID_WORLD_REVISION'
+  });
+});
+
+test('changed compatibility manifests never share an owned committed context', async () => {
+  const facts = atomsFixture();
+  const revision = revisionOfWorldFacts(facts);
+  const manifest = (sourceRevision) => ({
+    contract: 'atom.graph-four-axis-compatibility-manifest', version: 2,
+    sourceRevision, currentWorldRevision: revision, legacyStrut: []
+  });
+  const first = contextStore.prepareCommittedAtomVersion({ facts, revision,
+    compatibilityManifest: manifest('sha256:source-a') });
+  const second = contextStore.prepareCommittedAtomVersion({ facts, revision,
+    compatibilityManifest: manifest('sha256:source-b') });
+  const contextFile = path.join(os.tmpdir(), 'atom-manifest-version-context.json');
+  assert.notStrictEqual(await readAtomContext(contextFile, { committedVersion: first }),
+    await readAtomContext(contextFile, { committedVersion: second }));
+  await assert.rejects(readAtomContext(contextFile, { committedVersion: first,
+    compatibilityManifest: manifest('sha256:source-b') }), { code: 'INVALID_WORLD_SNAPSHOT' });
+  await assert.rejects(readAtomContext(contextFile, { committedVersion: first,
+    compatibilityManifest: null }), { code: 'INVALID_WORLD_SNAPSHOT' });
+  assert.throws(() => contextStore.prepareCommittedAtomVersion({ facts, revision,
+    compatibilityManifest: { ...manifest('sha256:source-c'), currentWorldRevision: 'sha256:forged' } }),
+  { code: 'GRAPH_COMPATIBILITY_MANIFEST_REVISION_MISMATCH' });
 });
 
 test('projects decorated Atom keys recursively through parseAtomKey onto a virtual Graph root', () => {

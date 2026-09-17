@@ -484,8 +484,10 @@ test('graph server uses its supplied scheduler for handler and interaction Agent
   const programScheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
   const rebuild = programScheduler.rebuildAgentSecurity.bind(programScheduler);
   const resolutionWorldRevisions = [];
+  const resolutionContexts = [];
   programScheduler.rebuildAgentSecurity = async (atoms) => {
     resolutionWorldRevisions.push(revisionOfWorldFacts(atoms));
+    resolutionContexts.push(atoms);
     return rebuild(atoms);
   };
   const running = await startAtomGraphServer({
@@ -505,11 +507,20 @@ test('graph server uses its supplied scheduler for handler and interaction Agent
     })
   });
   assert.equal(response.status, 200, await response.text());
+  const repeat = await fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ source: 'submit {"type":"bug","detail":"same committed version"}',
+      interaction: { id: 'shared-scheduler-resolution-repeat', agentSelector: '石器工坊',
+        agent: { path: '石器工坊' } }, history: [] })
+  });
+  assert.equal(repeat.status, 200, await repeat.text());
   assert.deepEqual(
     resolutionWorldRevisions,
-    [revisionOfWorldFacts(atomFixture()), revisionOfWorldFacts(atomFixture())],
-    'one request resolves its declared Agent at the handler and interaction-runtime boundaries through the supplied scheduler'
+    Array(3).fill(revisionOfWorldFacts(atomFixture())),
+    'both requests resolve their declared Agent at the handler and interaction-runtime boundaries'
   );
+  for (const atoms of resolutionContexts) assert.strictEqual(atoms, resolutionContexts[0],
+    'all Agent resolution boundaries must use the same owned committed context');
 });
 
 test('deployed Agent resolution reuses the world compatibility manifest for exact explore', async (t) => {

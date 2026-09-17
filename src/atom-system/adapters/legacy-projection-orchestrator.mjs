@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import {
+  isCommittedAtomVersion,
   legacyAtomContextMetadata,
   readAtomContext
 } from '../../../work-engine/atom-language/context-store.mjs';
@@ -58,12 +59,14 @@ export function createLegacyProjectionOrchestrator({
           actualRevision: suppliedRevision
         });
       }
+      const ownedVersion = isCommittedAtomVersion(supplied);
       const compatibilityManifest = supplied.compatibilityManifest
-        ? structuredClone(supplied.compatibilityManifest)
+        ? (ownedVersion ? supplied.compatibilityManifest : structuredClone(supplied.compatibilityManifest))
         : null;
       const facts = await readAtomContext(contextFile, {
         create: false,
         committedSnapshot: supplied,
+        ...(ownedVersion ? { committedVersion: supplied } : {}),
         ...(compatibilityManifest ? { compatibilityManifest } : {})
       });
       const revision = revisionOfWorldFacts(facts);
