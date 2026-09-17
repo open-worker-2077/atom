@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
+import { isSealedWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 import { diagnostic } from './errors.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
@@ -361,7 +362,8 @@ export function bindStrutEndpointIdentities(atoms, rootName = null) {
 const preparedTransformRelations = new WeakMap();
 
 export function prepareTransformRelationIndex(atoms, rootName) {
-  const prepared = preparedTransformRelations.get(atoms);
+  const sealed = isSealedWorldFacts(atoms);
+  const prepared = sealed ? preparedTransformRelations.get(atoms) : null;
   if (prepared?.rootName === rootName && prepared.matches && prepared.exactIndex) return prepared;
   const matches = prepared?.rootName === rootName && prepared.matches
     ? prepared.matches
@@ -374,7 +376,7 @@ export function prepareTransformRelationIndex(atoms, rootName) {
       ? prepared.bindings
       : capturePartnerBindings(atoms, rootName, null, matches)
   };
-  preparedTransformRelations.set(atoms, next);
+  if (sealed) preparedTransformRelations.set(atoms, next);
   return next;
 }
 
@@ -1357,7 +1359,8 @@ export async function applyTransform({
 
   const operation = structural.operation;
   const preservePreparedRelations = (matches = null) => {
-    if (inheritedRelationBindings && operation?.command.name !== 'cpy') {
+    if (isSealedWorldFacts(nextAtoms)
+      && inheritedRelationBindings && operation?.command.name !== 'cpy') {
       preparedTransformRelations.set(nextAtoms, {
         rootName,
         matches,
