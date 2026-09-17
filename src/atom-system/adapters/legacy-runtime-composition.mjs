@@ -115,12 +115,15 @@ export function createLegacyHumanStatusTranslator({ graphFile, projectGraph = pr
       const rawGraphDocument = await humanGraphDocument(graphFile, committedVersionProvider, contextFile);
       const { atomPathByKey } = await projectGraph(rawGraphDocument);
       const projectedPath = typeof requestedAtomPath === 'string' ? requestedAtomPath.trim() : '';
-      const atomPath = atomPathByKey.get(String(key || '').trim())
+      const mappedPath = atomPathByKey.get(String(key || '').trim());
+      const atomPath = mappedPath
         ?? (projectedPath ? projectedPath : '');
       const normalizedDetail = detail.trim();
+      const currentNodes = committedVersionProvider ? graphNodesByPath(rawGraphDocument) : null;
       if (!atomPath.endsWith('/状态') || !normalizedDetail || normalizedDetail.length > 200
         || normalizedDetail.includes('.rep.')
-        || (committedVersionProvider && !graphNodesByPath(rawGraphDocument).has(atomPath))) {
+        || (currentNodes && !currentNodes.has(atomPath))
+        || (currentNodes?.has(mappedPath) && currentNodes.has(projectedPath) && mappedPath !== projectedPath)) {
         throw problem(
           'INVALID_HUMAN_STATUS_REQUEST',
           'Human Web entry only updates an Atom 状态 detail'

@@ -559,6 +559,40 @@ test('Web status rejects a deleted current-memory target despite the stale Graph
   assert.equal(update.body.error.code, 'INVALID_HUMAN_STATUS_REQUEST');
 });
 
+test('public human status rejects conflicting current-memory key and atomPath', async (t) => {
+  const directory = await temporaryDirectory();
+  t.diagnostic(`Retained synthetic fixture: ${directory}`);
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const initial = atomFixture();
+  for (const name of ['A', 'B']) {
+    initial[0].slot.push({ thing: name, situation: '',
+      slot: [{ thing: '状态', situation: '进行中', slot: [], strut: [] }], strut: [] });
+  }
+  await fs.writeFile(contextFile, JSON.stringify(initial));
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0,
+    contextFile, graphFile, storeFile, memoryAuthoritative: true,
+    saveSchedule: { quietMs: 60000, maxDirtyMs: 60000 }, projectionDelayMs: 60000,
+    backupRepository: null });
+  t.after(() => running.close());
+  const state = await (await fetch(`${running.url}/__spatial/api/state`)).json();
+  const keyForB = state.knowledge.nodes.find((node) => node.atomPath === '石器工坊/B/状态')?.key;
+  assert.ok(keyForB);
+  await assert.rejects(
+    running.interactionRuntime.updateHumanStatus({ key: keyForB,
+      atomPath: '石器工坊/A/状态', detail: '已完成', correlationId: 'status-conflict' }),
+    (error) => error.code === 'INVALID_HUMAN_STATUS_REQUEST'
+  );
+  const read = await fetch(`${running.url}/__atom/api/command`, { method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ source: 'explore {"thing":"石器工坊/B/状态","situation$full":true}',
+      interaction: { id: 'status-conflict-read', agent: { ref: 'fixture-agent-ref', path: '石器工坊' } },
+      history: [] }) });
+  assert.equal(read.status, 200);
+  assert.match(JSON.stringify(await read.json()), /进行中/u);
+});
+
 test('HTTP Transform reads accepted memory before save and server close flushes its recovery point', async (t) => {
   const directory = await temporaryDirectory();
   let reopened = null;

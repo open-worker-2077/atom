@@ -1393,6 +1393,29 @@ test('human status translator accepts only projected 状态 nodes and returns on
   );
 });
 
+test('human status translator rejects conflicting current targets but keeps standalone key-first', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-status-conflict-'));
+  t.diagnostic(`Retained synthetic fixture: ${directory}`);
+  const graphFile = path.join(directory, 'graph.json');
+  const facts = [{ thing: 'Root', situation: '', slot: ['A', 'B'].map((name) => ({
+    thing: name, situation: '', slot: [{ thing: '状态', situation: '进行中', slot: [], strut: [] }], strut: []
+  })), strut: [] }];
+  const graph = { graph: { thing: 'atom.json', situation: '', slot: facts, strut: [] } };
+  await fs.writeFile(graphFile, JSON.stringify(graph));
+  const projectGraph = async () => ({ atomPathByKey: new Map([['key-for-b', 'Root/B/状态']]) });
+  const current = createLegacyHumanStatusTranslator({ graphFile, projectGraph,
+    committedVersionProvider: async () => ({ revision: 'current', facts }) });
+  await assert.rejects(
+    current.translate({ key: 'key-for-b', atomPath: 'Root/A/状态', detail: '已完成' }),
+    (error) => error.code === 'INVALID_HUMAN_STATUS_REQUEST'
+  );
+  assert.equal(await current.translate({ key: 'key-for-b', atomPath: 'Root/B/状态', detail: '已完成' }),
+    'transform {"thing":"Root/B/状态","situation.rep.已完成"}');
+  const standalone = createLegacyHumanStatusTranslator({ graphFile, projectGraph });
+  assert.equal(await standalone.translate({ key: 'key-for-b', atomPath: 'Root/A/状态', detail: '已完成' }),
+    'transform {"thing":"Root/B/状态","situation.rep.已完成"}');
+});
+
 test('human workspace translator treats the single synthetic root domain as the top-level Atom container', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-workspace-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
