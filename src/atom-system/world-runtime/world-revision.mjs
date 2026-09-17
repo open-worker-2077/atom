@@ -4,6 +4,7 @@ import { types } from 'node:util';
 const immutableRevisions = new WeakMap();
 const immutableSerializations = new WeakMap();
 const sealedWorldFacts = new WeakSet();
+const provenWorldObjects = new WeakMap();
 
 function invalidFacts() {
   const error = new Error('World facts must contain only plain JSON data');
@@ -11,7 +12,7 @@ function invalidFacts() {
   return error;
 }
 
-function freezeWorldFacts(value, active = new WeakSet(), validated = new WeakSet()) {
+function freezeWorldFacts(value, token, active = new WeakSet(), validated = new WeakSet()) {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (!value || typeof value !== 'object' || types.isProxy(value) || active.has(value)) {
@@ -35,12 +36,16 @@ function freezeWorldFacts(value, active = new WeakSet(), validated = new WeakSet
     }
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (!descriptor?.enumerable || !Object.hasOwn(descriptor, 'value')) throw invalidFacts();
-    freezeWorldFacts(descriptor.value, active, validated);
+    freezeWorldFacts(descriptor.value, token, active, validated);
   }
   if (array && elementCount !== value.length) throw invalidFacts();
   active.delete(value);
   validated.add(value);
-  return Object.freeze(value);
+  Object.freeze(value);
+  if (!array && provenWorldObjects.get(value)?.valid !== true) {
+    provenWorldObjects.set(value, token);
+  }
+  return value;
 }
 
 export function revisionOfWorldFacts(facts) {
@@ -54,13 +59,25 @@ export function revisionOfWorldFacts(facts) {
 
 export function sealWorldFactsRevision(facts) {
   if (sealedWorldFacts.has(facts)) return revisionOfWorldFacts(facts);
-  freezeWorldFacts(facts);
+  const token = { valid: false };
+  freezeWorldFacts(facts, token);
   sealedWorldFacts.add(facts);
-  return revisionOfWorldFacts(facts);
+  try {
+    const revision = revisionOfWorldFacts(facts);
+    token.valid = true;
+    return revision;
+  } catch (error) {
+    sealedWorldFacts.delete(facts);
+    throw error;
+  }
 }
 
 export function isSealedWorldFacts(facts) {
   return Array.isArray(facts) && sealedWorldFacts.has(facts);
+}
+
+export function isProvenWorldObject(value) {
+  return Boolean(value && typeof value === 'object' && provenWorldObjects.get(value)?.valid);
 }
 
 export function prepareWorldFactsRevision(facts) {

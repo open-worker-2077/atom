@@ -1,4 +1,5 @@
 import { diagnostic } from './errors.mjs';
+import { isProvenWorldObject, isSealedWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { createAtomLanguageReceiver } from './receiver.mjs';
@@ -18,38 +19,66 @@ import {
 
 const preparedExploreSnapshots = new WeakMap();
 const preparedSlotStructureSnapshots = new WeakMap();
+const preparedAtomFields = new WeakMap();
 
-export function fieldsByBase(atom) {
+function freezeDescription(value) {
+  if (!value || typeof value !== 'object') return value;
+  for (const child of Object.values(value)) freezeDescription(child);
+  return Object.freeze(value);
+}
+
+function fieldDescriptions(atom) {
+  const proven = isProvenWorldObject(atom);
+  if (proven && preparedAtomFields.has(atom)) return preparedAtomFields.get(atom);
   const byBase = new Map();
   for (const [rawKey, value] of Object.entries(atom ?? {})) {
     const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
     if (parsed.errors.length) continue;
     const list = byBase.get(parsed.baseKey) ?? [];
-    list.push({ rawKey, value, parsed });
+    list.push(Object.freeze({ rawKey, value, parsed: freezeDescription(parsed) }));
     byBase.set(parsed.baseKey, list);
+  }
+  for (const list of byBase.values()) Object.freeze(list);
+  if (proven) preparedAtomFields.set(atom, byBase);
+  return byBase;
+}
+
+function readStoredField(atom, baseKey) {
+  const matches = fieldDescriptions(atom).get(baseKey) ?? [];
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function publicField(field) {
+  return { rawKey: field.rawKey, value: field.value, parsed: structuredClone(field.parsed) };
+}
+
+export function fieldsByBase(atom) {
+  const byBase = new Map();
+  for (const [baseKey, fields] of fieldDescriptions(atom)) {
+    byBase.set(baseKey, fields.map(publicField));
   }
   return byBase;
 }
 
 export function oneStoredField(atom, baseKey) {
-  const matches = fieldsByBase(atom).get(baseKey) ?? [];
-  return matches.length === 1 ? matches[0] : null;
+  const field = readStoredField(atom, baseKey);
+  return field ? publicField(field) : null;
 }
 
 function storedStrutFields(atom) {
-  return fieldsByBase(atom).get('strut') ?? [];
+  return fieldDescriptions(atom).get('strut') ?? [];
 }
 
 export function walkAtoms(atoms, options = {}) {
   const visited = [];
   function visit(atom, parentPath, index, parent = null) {
     if (!atom || typeof atom !== 'object' || Array.isArray(atom)) return;
-    const nameField = oneStoredField(atom, 'thing');
+    const nameField = readStoredField(atom, 'thing');
     const name = typeof nameField?.value === 'string' ? nameField.value : `[${index}]`;
     const visiblePath = [...parentPath, name];
     const match = { atom, path: visiblePath, parent, index };
     visited.push(match);
-    const children = oneStoredField(atom, 'slot')?.value;
+    const children = readStoredField(atom, 'slot')?.value;
     if (Array.isArray(children)) {
       children.forEach((child, childIndex) => visit(child, visiblePath, childIndex, match));
     }
@@ -99,11 +128,11 @@ export function exactMatches(atoms, item, matcherRegistry, candidates = null, ex
     if (mode === 'exact') {
       return matchesExactSelector(
         atomPath,
-        oneStoredField(atom, 'thing')?.value,
+        readStoredField(atom, 'thing')?.value,
         nameField.value
       );
     }
-    return matcher.match(oneStoredField(atom, 'thing')?.value, nameField.value);
+    return matcher.match(readStoredField(atom, 'thing')?.value, nameField.value);
   });
   return { matches, expected: nameField.value };
 }
@@ -143,16 +172,16 @@ export function createAccessController(atoms, options = {}) {
   const agentMatch = agentPath
     ? exploreWorld.allMatches.find((match) => match.path.join('/') === agentPath)
     : null;
-  const agentTypes = oneStoredField(agentMatch?.atom, 'thing')?.parsed.types
+  const agentTypes = readStoredField(agentMatch?.atom, 'thing')?.parsed.types
     .map((type) => type.raw) ?? [];
   return {
     restricted: true,
     async authorize(match, operation, field, actor = {}) {
       const targetPath = Array.isArray(match.path) ? match.path.join('/') : match.path;
       const createdTypes = actor.createdAtom
-        ? oneStoredField(actor.createdAtom, 'thing')?.parsed.types.map((type) => type.raw) ?? []
+        ? readStoredField(actor.createdAtom, 'thing')?.parsed.types.map((type) => type.raw) ?? []
         : [];
-      const targetTypes = oneStoredField(match.atom, 'thing')?.parsed.types
+      const targetTypes = readStoredField(match.atom, 'thing')?.parsed.types
         .map((type) => type.raw) ?? [];
       if (operation === 'write' && targetTypes.includes('jump-authorization')
         && actor.windowJumpAuthorization !== true) {
@@ -193,7 +222,7 @@ export function createAccessController(atoms, options = {}) {
           operation,
           window: access.window,
           keys: access.keys ?? [],
-          target: { name: oneStoredField(match.atom, 'thing')?.value ?? match.name ?? null, path: targetPath }
+          target: { name: readStoredField(match.atom, 'thing')?.value ?? match.name ?? null, path: targetPath }
         });
         if (legacyDecision.decision !== 'allow') return legacyDecision;
       }
@@ -220,8 +249,8 @@ export function createAccessController(atoms, options = {}) {
 }
 
 export function describeAtom(match, includeFullDetail, options = {}) {
-  const nameField = oneStoredField(match.atom, 'thing');
-  const detailField = oneStoredField(match.atom, 'situation');
+  const nameField = readStoredField(match.atom, 'thing');
+  const detailField = readStoredField(match.atom, 'situation');
   const result = {
     path: match.path.join('/'),
     selector: options.selector ?? match.path.join('/'),
@@ -262,7 +291,7 @@ function shortcutResolutionMarker(match) {
   const metadata = shortcutMetadata(match.atom);
   return {
     identity: metadata.referenceId,
-    thing: oneStoredField(match.atom, 'thing')?.value ?? null,
+    thing: readStoredField(match.atom, 'thing')?.value ?? null,
     placement: 'slot',
     path: match.path.join('/')
   };
@@ -276,7 +305,7 @@ function prepareExploreMatches(allMatches) {
     exactIndex.get(selector).push(match);
   };
   for (const match of allMatches) {
-    const name = oneStoredField(match.atom, 'thing')?.value;
+    const name = readStoredField(match.atom, 'thing')?.value;
     add(name, match);
     for (let length = 2; length <= match.path.length; length += 1) {
       add(match.path.slice(-length).join('/'), match);
@@ -287,11 +316,11 @@ function prepareExploreMatches(allMatches) {
 }
 
 export function prepareExploreWorld(atoms) {
-  if (Object.isFrozen(atoms) && preparedExploreSnapshots.has(atoms)) {
+  if (isSealedWorldFacts(atoms) && preparedExploreSnapshots.has(atoms)) {
     return preparedExploreSnapshots.get(atoms);
   }
   const prepared = prepareExploreMatches(walkAtoms(atoms, { virtualRoot: true }));
-  if (Object.isFrozen(atoms)) preparedExploreSnapshots.set(atoms, prepared);
+  if (isSealedWorldFacts(atoms)) preparedExploreSnapshots.set(atoms, prepared);
   return prepared;
 }
 
@@ -302,12 +331,12 @@ export function prepareAccessWorld(atoms) {
 }
 
 export function prepareSlotStructureWorld(atoms) {
-  let slotStructure = Object.isFrozen(atoms)
+  let slotStructure = isSealedWorldFacts(atoms)
     ? preparedSlotStructureSnapshots.get(atoms)
     : null;
   if (!slotStructure) {
     slotStructure = compileSlotStructureGraphLocks(atoms);
-    if (Object.isFrozen(atoms)) preparedSlotStructureSnapshots.set(atoms, slotStructure);
+    if (isSealedWorldFacts(atoms)) preparedSlotStructureSnapshots.set(atoms, slotStructure);
   }
   return slotStructure;
 }
@@ -317,7 +346,7 @@ function pathsOverlap(left, right) {
 }
 
 export function inheritPreparedSlotStructureWorld(previousAtoms, nextAtoms, changedPaths = []) {
-  if (!Object.isFrozen(nextAtoms)) return false;
+  if (!isSealedWorldFacts(previousAtoms) || !isSealedWorldFacts(nextAtoms)) return false;
   const previousSlotStructure = preparedSlotStructureSnapshots.get(previousAtoms);
   if (!previousSlotStructure) return false;
   const protectedPaths = [
@@ -332,7 +361,7 @@ export function inheritPreparedSlotStructureWorld(previousAtoms, nextAtoms, chan
 }
 
 export function inheritPreparedAccessWorld(previousAtoms, nextAtoms) {
-  if (!Object.isFrozen(nextAtoms)) return false;
+  if (!isSealedWorldFacts(previousAtoms) || !isSealedWorldFacts(nextAtoms)) return false;
   const previousExplore = preparedExploreSnapshots.get(previousAtoms);
   const previousSlotStructure = preparedSlotStructureSnapshots.get(previousAtoms);
   if (!previousExplore || !previousSlotStructure) return false;
@@ -385,7 +414,7 @@ function resolvePartnerTarget(source, target, matches) {
   if (target.includes('/')) return byPath.get(target) ?? null;
   const sibling = byPath.get([...source.path.slice(0, -1), target].join('/'));
   if (sibling) return sibling;
-  const named = matches.filter((match) => oneStoredField(match.atom, 'thing')?.value === target);
+  const named = matches.filter((match) => readStoredField(match.atom, 'thing')?.value === target);
   for (let depth = source.path.length - 2; depth >= 0; depth -= 1) {
     const domain = source.path.slice(0, depth + 1);
     const scoped = named.filter((match) => domain.every((part, index) => match.path[index] === part));
@@ -466,7 +495,7 @@ function boundaryCandidates(anchor, matches, selected) {
 async function boundaryDirection(candidates, accessController) {
   let characters = 0;
   for (const candidate of candidates) {
-    const nameField = oneStoredField(candidate.atom, 'thing');
+    const nameField = readStoredField(candidate.atom, 'thing');
     const executable = nameField?.parsed.types.some((type) => type.raw === 'program') ?? false;
     if (accessController.restricted) {
       const nameAccess = await accessController.authorize(candidate, 'read', 'thing');
@@ -478,7 +507,7 @@ async function boundaryDirection(candidates, accessController) {
       }
     }
     const name = typeof nameField?.value === 'string' ? nameField.value : '';
-    const detail = oneStoredField(candidate.atom, 'situation')?.value;
+    const detail = readStoredField(candidate.atom, 'situation')?.value;
     characters += name.length + (executable ? 0 : String(detail ?? '').length);
   }
   return {
@@ -670,7 +699,7 @@ export async function executeExploreItem(
       } catch (error) {
         describedMatches.push({
           path: match.path.join('/'), selector: shortestUniqueSelector(match, visibleMatches),
-          thing: oneStoredField(match.atom, 'thing')?.value ?? null, types: ['shortcut'],
+          thing: readStoredField(match.atom, 'thing')?.value ?? null, types: ['shortcut'],
           description: null, shortcut: { state: 'broken', error: error.code ?? 'INVALID_SHORTCUT_RECORD' }
         });
         continue;

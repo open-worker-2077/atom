@@ -9,16 +9,18 @@ import { runAtomCli } from '../work-engine/atom-language/cli.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { writeAtomGraphProjection } from '../work-engine/atom-language/context-store.mjs';
 import { exactMatches, prepareExploreWorld } from '../work-engine/atom-language/query-capability.mjs';
+import { sealWorldFactsRevision } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const thingOf = (value) => Object.entries(value).find(([key]) => (
   key.split(/[@&#]/u)[0] === 'thing'
 ))?.[1];
 
-test('one immutable world reuses its exact Explore index', () => {
+test('one proven sealed world reuses its exact Explore index', () => {
   const atoms = Object.freeze([
     Object.freeze({ thing: 'Root', situation: '', slot: Object.freeze([]), strut: Object.freeze([]) })
   ]);
+  sealWorldFactsRevision(atoms);
   assert.strictEqual(prepareExploreWorld(atoms), prepareExploreWorld(atoms));
 });
 

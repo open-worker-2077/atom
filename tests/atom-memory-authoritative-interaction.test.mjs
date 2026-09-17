@@ -10,15 +10,26 @@ import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-rev
 import { readAtomContext } from '../work-engine/atom-language/context-store.mjs';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { walkAtoms } from '../work-engine/atom-language/query-capability.mjs';
 
 test('real engine reuses an accepted memory version and preserves old readers through save', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-owned-real-memory-'));
   t.diagnostic(`retained fixture: ${directory}`);
   const originalClone = globalThis.structuredClone;
+  const originalEntries = Object.entries;
   const cloneInputs = [];
+  const archiveFieldReads = new Map();
+  let archiveAtom = null;
+  let phase = null;
   t.mock.method(globalThis, 'structuredClone', (value, ...options) => {
     cloneInputs.push(value);
     return originalClone(value, ...options);
+  });
+  t.mock.method(Object, 'entries', (value) => {
+    if (value === archiveAtom && phase !== null) {
+      archiveFieldReads.set(phase, (archiveFieldReads.get(phase) ?? 0) + 1);
+    }
+    return originalEntries(value);
   });
   const target = { contextFile: path.join(directory, 'atom.json'),
     projectionFile: path.join(directory, 'graph.json') };
@@ -48,17 +59,22 @@ test('real engine reuses an accepted memory version and preserves old readers th
   let closed = false;
   try {
     const before = await service.readCommittedVersion(target);
+    archiveAtom = before.facts[1].slot[0];
     const oldContext = await readAtomContext(target.contextFile, { committedVersion: before });
     for (const id of ['owned-memory-read-1', 'owned-memory-read-2']) {
+      phase = id;
       const read = await service.executeLegacy({ ...target,
         source: 'explore {"thing":"Root"}', interaction: { id } });
+      phase = null;
       assert.equal(read.ok, true, JSON.stringify(read.errors));
       assert.strictEqual(await service.readCommittedVersion(target), before);
     }
+    phase = 'owned-memory-write';
     const write = await service.executeLegacy({ ...target,
       source: 'transform {"thing":"Root","situation.rep.changed"}',
       interaction: { id: 'owned-memory-write' }, programScheduler: scheduler,
       programMode: 'reconcile' });
+    phase = null;
     assert.equal(write.ok, true, JSON.stringify(write.errors));
     const after = await service.readCommittedVersion(target);
     assert.notStrictEqual(after, before);
@@ -77,9 +93,21 @@ test('real engine reuses an accepted memory version and preserves old readers th
     assert.equal(after.facts[0].situation, 'changed');
     assert.equal((await readAtomContext(target.contextFile, { committedVersion: after }))[0].situation,
       'changed');
+    phase = 'owned-memory-read-3';
     const latest = await service.executeLegacy({ ...target,
       source: 'explore {"thing":"Root"}', interaction: { id: 'owned-memory-read-3' } });
+    phase = null;
     assert.equal(latest.ok, true, JSON.stringify(latest.errors));
+    phase = 'repeat-old-reader-query';
+    walkAtoms(before.facts);
+    phase = 'repeat-new-reader-query';
+    walkAtoms(after.facts);
+    phase = null;
+    assert.ok((archiveFieldReads.get('owned-memory-read-1') ?? 0) > 0);
+    assert.equal(archiveFieldReads.get('owned-memory-read-2') ?? 0, 0);
+    assert.equal(archiveFieldReads.get('repeat-old-reader-query') ?? 0, 0);
+    assert.equal(archiveFieldReads.get('repeat-new-reader-query') ?? 0, 0);
+    t.diagnostic(`unchanged archived Atom Object.entries by phase: ${JSON.stringify(Object.fromEntries(archiveFieldReads))}`);
     assert.equal(JSON.parse(await fs.readFile(target.contextFile, 'utf8'))[0].situation,
       'before', 'the independent saver has not written the accepted version yet');
     await service.closeSaves();
