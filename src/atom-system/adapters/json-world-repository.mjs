@@ -1045,14 +1045,23 @@ export function createJsonWorldRepository({
         facts: nextSnapshot.facts
       });
       if (publication.baselineFrozen && publication.provenBaselineRevision) {
-        if (!await verifiedLocalMetadata() && (await read()).revision !== nextSnapshot.revision) {
+        let snapshotMetadata = await verifiedLocalMetadata();
+        if (!snapshotMetadata) {
+          if ((await read()).revision !== nextSnapshot.revision) {
+            throw problem('LOCAL_WORLD_COMMIT_CHANGED', 'World changed after the full commit was published');
+          }
+          snapshotMetadata = await verifiedLocalMetadata();
+        }
+        const metadata = await compactionMetadata();
+        // A rescan may have verified an external successor. Its identities must
+        // never be combined with the older snapshot when replacing the log.
+        if (!snapshotMetadata || snapshotMetadata.signature !== metadata.signature) {
           throw problem('LOCAL_WORLD_COMMIT_CHANGED', 'World changed after the full commit was published');
         }
-        const committedRecords = (await compactionMetadata()).identities;
         const currentNext = snapshot(worldId, nextSnapshot.facts, {
           ownsFacts: Object.isFrozen(nextSnapshot.facts)
         });
-        const generation = await replaceLogWithRecoveryGeneration(currentNext, committedRecords);
+        const generation = await replaceLogWithRecoveryGeneration(currentNext, metadata.identities);
         await persistFallbackGeneration({ commandId, beforeRevision: current.revision },
           nextSnapshot.revision, generation.generationId, publication.provenBaselineRevision).catch(() => {});
         localRecordCount = 0;

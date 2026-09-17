@@ -308,3 +308,41 @@ test('compaction refuses a snapshot whose log changes before metadata verificati
   assert.deepEqual((await (await f.restart()).read()).facts, facts('two'),
     'a stale compactor must not truncate the verified external successor');
 });
+
+test('frozen full commit refuses an external successor between metadata checks', async (t) => {
+  const f = await fixture(t, { directorySync: false });
+  await append(f.repository, 'bootstrap-a', 'one');
+  await append(f.repository, 'bootstrap-b', 'two');
+  await f.repository.scheduleCompaction();
+  const owner = await f.restart();
+  const current = await owner.read();
+  const frozenBaseline = await fs.readFile(f.file, 'utf8');
+  let injected = false;
+  f.onNextHead(() => {
+    // The first head stat belongs to append's owned-write metadata proof.
+    // Inject after the next stat: the first frozen-CAS metadata check returns
+    // its old signature, but the later compaction metadata sees a successor.
+    f.onNextHeadStat(() => f.onNextHeadStat(async () => {
+      const record = { contract: 'atom.local-commit', version: 1, mode: 'full', worldId: 'primary',
+        commandId: 'external-successor', beforeRevision: revisionOfWorldFacts(facts('three')),
+        afterRevision: revisionOfWorldFacts(facts('four')), facts: facts('four'),
+        publicationId: crypto.randomUUID() };
+      const serialized = JSON.stringify(record);
+      const proof = { contract: 'atom.local-commit-publication', version: 1, worldId: 'primary',
+        publicationId: record.publicationId,
+        recordDigest: `sha256:${crypto.createHash('sha256').update(serialized).digest('hex')}` };
+      await fs.appendFile(f.localCommitFile, `${serialized}\n${JSON.stringify(proof)}\n`);
+      injected = true;
+    }));
+  });
+  let failure;
+  try {
+    await owner.compareAndSwap({ commandId: 'full-race', expectedRevision: current.revision,
+      nextSnapshot: { worldId: 'primary', revision: revisionOfWorldFacts(facts('three')), facts: facts('three') } });
+  } catch (error) { failure = error; }
+  assert.equal(injected, true, 'the external successor must actually be published');
+  assert.equal(failure?.code, 'LOCAL_WORLD_COMMIT_CHANGED');
+  assert.equal(await fs.readFile(f.file, 'utf8'), frozenBaseline);
+  assert.deepEqual((await (await f.restart()).read()).facts, facts('four'),
+    'rejecting the stale generation must preserve the published external successor');
+});
