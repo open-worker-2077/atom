@@ -129,6 +129,7 @@ import {
   executeProgramExplore,
   fieldsByBase,
   oneStoredField,
+  readOnlyProgramDeclarationFields,
   prepareExploreWorld,
   prepareSlotStructureWorld,
   walkAtoms
@@ -221,6 +222,9 @@ function transformChangesProgramSurface(beforeAtoms, afterAtoms, transformed) {
 
 function programDeclarationSurface(atoms) {
   return walkAtoms(atoms).flatMap((match) => {
+    const fields = readOnlyProgramDeclarationFields(match.atom);
+    if (fields === null) return [];
+    if (fields !== undefined) return [{ path: match.path.join('/'), ...fields }];
     const thing = oneStoredField(match.atom, 'thing');
     if (!thing?.parsed.types.some((type) => type.raw === 'program')) return [];
     const situation = oneStoredField(match.atom, 'situation');

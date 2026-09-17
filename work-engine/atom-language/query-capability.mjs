@@ -48,6 +48,23 @@ function readStoredField(atom, baseKey) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+// Only immutable scalar declaration data crosses this internal boundary.
+// An unusual mutable situation retains the public-field fallback semantics.
+export function readOnlyProgramDeclarationFields(atom) {
+  const thing = readStoredField(atom, 'thing');
+  if (!thing?.parsed.types.some((type) => type.raw === 'program')) return null;
+  const situation = readStoredField(atom, 'situation');
+  const value = situation?.value ?? null;
+  if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
+    return undefined;
+  }
+  return Object.freeze({
+    thingKey: thing.rawKey,
+    situationKey: situation?.rawKey ?? null,
+    situation: value
+  });
+}
+
 function publicField(field) {
   return { rawKey: field.rawKey, value: field.value, parsed: structuredClone(field.parsed) };
 }
