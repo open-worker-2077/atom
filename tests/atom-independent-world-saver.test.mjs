@@ -128,3 +128,16 @@ test('continuous edits cannot postpone saving beyond the maximum dirty age', asy
   assert.equal(saver.status().savedVersion, 3);
   await saver.close();
 });
+
+test('a failed final flush stops retry timers and rejects new save targets', async () => {
+  const clock = fakeClock();
+  let attempts = 0;
+  const saver = createIndependentWorldSaver({ clock, quietMs: 10, maxDirtyMs: 100, retryMs: 5,
+    save: async () => { attempts += 1; throw Object.assign(new Error('dead'), { code: 'DEAD' }); } });
+  saver.enqueue({ version: 1, revision: 'one' });
+  await assert.rejects(saver.close(), { code: 'DEAD' });
+  await clock.advance(20);
+  assert.equal(attempts, 1, 'shutdown must not leave a background retry timer');
+  assert.throws(() => saver.enqueue({ version: 2, revision: 'two' }), { code: 'WORLD_SAVER_CLOSED' });
+  assert.equal(saver.status().pending, true);
+});

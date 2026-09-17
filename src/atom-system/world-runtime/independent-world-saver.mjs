@@ -115,10 +115,9 @@ export function createIndependentWorldSaver({
     status,
     flush,
     async close() {
-      await flush();
       closed = true;
       clearTimers();
-      return status();
+      return flush();
     }
   });
 }

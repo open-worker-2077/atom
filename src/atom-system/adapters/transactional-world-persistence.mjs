@@ -56,7 +56,31 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
   if (!owner) {
     if (runtimeAuthority === 'memory') {
       owner = { key, runtimeAuthority, recovery: null, ready: null, writer: null, saver: null,
-        projections: new Set(), savedListeners: new Set() };
+        projections: new Set(), savedListeners: new Set(), durableTail: Promise.resolve(),
+        closing: false, closed: false, closePromise: null, writerReady: null };
+      const writerClosed = () => problem('WORLD_SAVE_WORKER_CLOSED', 'Durable writer owner is closing');
+      const durableOperation = (operation, work) => {
+        const running = owner.durableTail.then(async () => {
+          if (owner.closed || (owner.closing && operation === 'history')) throw writerClosed();
+          if (owner.writer.lifecycle?.terminalFailure) {
+            if (owner.closing) throw writerClosed();
+            await owner.writer.close();
+            if (owner.closing || owner.closed) throw writerClosed();
+            const replacement = writerFactory({ contextFile, journalFile, worldId });
+            owner.writer = replacement;
+            // Recover disk once, but never seed the running memory world from
+            // this older checkpoint. Keep non-transport initialization errors
+            // latched rather than spawning another worker on every retry.
+            owner.writerReady = Promise.resolve().then(() => replacement.initialize());
+            await owner.writerReady;
+            if (owner.closing || owner.closed) throw writerClosed();
+          }
+          await owner.writerReady;
+          return work(owner.writer);
+        });
+        owner.durableTail = running.then(() => {}, () => {});
+        return running;
+      };
       const delegate = (field) => new Proxy({}, { get: (_, name) => (...args) =>
         owner.ready.then(() => owner[field][name](...args)) });
       owner.worldRepository = delegate('memoryWorldRepository');
@@ -65,8 +89,9 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
       owner.ready = (async () => {
         const writer = writerFactory({ contextFile, journalFile, worldId });
         owner.writer = writer;
+        owner.writerReady = Promise.resolve().then(() => writer.initialize());
         const { initialSnapshot, compatibilityManifest, durableReceipts, durableOutcomes } =
-          await writer.initialize();
+          await owner.writerReady;
         let sequence = 0;
         let savedSequence = 0;
         let unsaved = [];
@@ -75,15 +100,17 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
           save: async ({ version, revision }) => {
             const events = unsaved.filter((entry) => entry.sequence > savedSequence
               && entry.sequence <= version).map(({ event }) => event);
-            const result = await writer.save({ events, revision,
-              projectionFiles: [...owner.projections] });
-            savedSequence = version;
-            unsaved = unsaved.filter((entry) => entry.sequence > savedSequence);
+            const result = await durableOperation('save', (activeWriter) => activeWriter.save({ events, revision,
+              projectionFiles: [...owner.projections] }));
             return result.revision;
           },
           onSaved: ({ version }) => {
             const savedEvent = owner.savedWorldVersions.get(version);
             ports.authority.markSaved({ version: savedEvent.version, revision: savedEvent.revision });
+            // onSaved runs only after the saver validates the exact returned
+            // watermark. Until then the ordered events remain replay evidence.
+            savedSequence = version;
+            unsaved = unsaved.filter((entry) => entry.sequence > savedSequence);
             for (const key of owner.savedWorldVersions.keys()) {
               if (key <= version) owner.savedWorldVersions.delete(key);
             }
@@ -112,7 +139,7 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
         };
         ports = createMemoryTransactionPorts({ initialSnapshot, compatibilityManifest,
           durableReceipts, durableOutcomes,
-          durableFindCommitted: (id) => writer.findCommitted(id),
+          durableFindCommitted: (id) => durableOperation('history', (activeWriter) => activeWriter.findCommitted(id)),
           onAccepted: ({ version, revision, record }) => enqueue({ kind: 'record', record }, version, revision),
           onOutcome: ({ sourceCommandId, outcome }) => {
             const current = ports.authority.snapshot();
@@ -122,7 +149,6 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
         owner.memoryWorldRepository = ports.worldRepository;
         owner.memoryJournalRepository = ports.journalRepository;
         owner.memoryCoordinator = createCommitCoordinator(ports);
-        owner.writer = writer;
         owner.saver = saver;
       })().catch(async (error) => {
         try { await owner.writer?.close(); }
@@ -589,20 +615,29 @@ export function createTransactionalWorldPersistence({
     },
     async flushSaves() {
       if (owner.runtimeAuthority !== 'memory') return { pending: false };
+      if (owner.closing || owner.closed) throw problem('WORLD_SAVE_WORKER_CLOSED', 'Durable writer owner is closing');
       await owner.ready;
       return owner.saver.flush();
     },
     async closeSaves() {
       if (owner.runtimeAuthority !== 'memory') return { pending: false };
-      await owner.ready;
-      try {
-        return await owner.saver.close();
-      } finally {
-        try { await owner.writer.close(); }
-        finally {
-          if (worldOwners.get(owner.key)?.deref() === owner) worldOwners.delete(owner.key);
+      if (owner.closePromise) return owner.closePromise;
+      owner.closing = true;
+      owner.closePromise = (async () => {
+        try {
+          await owner.ready;
+          return await owner.saver.close();
+        } finally {
+          owner.closed = true;
+          try {
+            await owner.durableTail;
+            await owner.writer?.close();
+          } finally {
+            if (worldOwners.get(owner.key)?.deref() === owner) worldOwners.delete(owner.key);
+          }
         }
-      }
+      })();
+      return owner.closePromise;
     },
     commit,
     compatibilityManifest,

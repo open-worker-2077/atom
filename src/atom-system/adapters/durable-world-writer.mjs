@@ -22,6 +22,7 @@ export function createDurableWorldWriter({ contextFile, journalFile, worldId = '
   });
   let failed = null;
   let closed = false;
+  let closing = null;
   let initialization = null;
   worker.on('message', (message) => {
     if (message.ready) { readyResolve(); return; }
@@ -33,9 +34,9 @@ export function createDurableWorldWriter({ contextFile, journalFile, worldId = '
       message.error?.message ?? 'Durable world save failed'));
   });
   function fail(error) {
-    failed = error;
-    readyReject(error);
-    for (const entry of pending.values()) entry.reject(error);
+    failed ??= error;
+    readyReject(failed);
+    for (const entry of pending.values()) entry.reject(failed);
     pending.clear();
   }
   worker.on('error', fail);
@@ -70,6 +71,12 @@ export function createDurableWorldWriter({ contextFile, journalFile, worldId = '
   // A worker can fail before a caller starts its first RPC.
   ready.catch(() => {});
   return Object.freeze({
+    // Only transport events set failed. An RPC/data error is not a reason to
+    // replace the worker and repeat disk recovery.
+    get lifecycle() {
+      return Object.freeze({ closed, terminalFailure: failed
+        ? Object.freeze({ code: failed.code ?? failed.name, message: failed.message }) : null });
+    },
     initialize,
     async findCommitted(commandId) {
       if (typeof commandId !== 'string' || !commandId) {
@@ -89,12 +96,13 @@ export function createDurableWorldWriter({ contextFile, journalFile, worldId = '
       return request('save', { records, events, revision, projectionFiles });
     },
     async close() {
-      if (closed) return;
+      if (closing) return closing;
       closed = true;
       readyReject(problem('WORLD_SAVE_WORKER_CLOSED', 'Writer closed'));
       for (const entry of pending.values()) entry.reject(problem('WORLD_SAVE_WORKER_CLOSED', 'Writer closed'));
       pending.clear();
-      await worker.terminate();
+      closing = worker.terminate();
+      return closing;
     }
   });
 }

@@ -161,6 +161,7 @@ try {
     writerFactory: (configuration) => {
       const writer = createDurableWorldWriter(configuration);
       return Object.freeze({
+        get lifecycle() { return writer.lifecycle; },
         initialize: () => writer.initialize(),
         findCommitted: (commandId) => writer.findCommitted(commandId),
         async save(batch) {
