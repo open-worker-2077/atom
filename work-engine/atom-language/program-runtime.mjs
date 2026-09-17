@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { legacyAtomContextMetadata, projectAtomContext } from './context-store.mjs';
 import { parseAtomKey } from './key-parser.mjs';
-import { collectDefaultBackupBoundary } from './default-backup-boundary.mjs';
+import { preparedDefaultBackupBoundary } from './default-backup-boundary.mjs';
 import {
   executeProgramExplore,
   oneStoredField,
@@ -207,7 +207,7 @@ function worldRecords(atoms) {
   const worldRevision = revisionOfWorldFacts(atoms).slice('sha256:'.length);
   const cached = preparedRecordSnapshots.get(atoms);
   if (cached?.worldRevision === worldRevision) return cached.records;
-  const defaultBackupBoundary = collectDefaultBackupBoundary(atoms);
+  const defaultBackupBoundary = preparedDefaultBackupBoundary(atoms);
   const defaultBackupPaths = new Set(defaultBackupBoundary.defaultBackupPaths);
   const records = [];
   function visit(atom, parentRef, parentPath, address) {

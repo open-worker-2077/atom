@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
-import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
+import { revisionOfWorldFacts, sealWorldFactsRevision } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   return {
@@ -1551,13 +1551,14 @@ test('Program cycles default to a ten-second wall-clock budget', () => {
   assert.equal(scheduler.maxWorkers, 16);
 });
 
-test('one immutable world revision reuses its prepared Program records', async () => {
+test('an accessor in a shallow-frozen world is not treated as an owned immutable revision', async () => {
   let detailReads = 0;
+  let detail = "message({'level': 'info', 'text': 'cached'})";
   const program = {
     'thing@program': 'Cached Program',
     get detail() {
       detailReads += 1;
-      return "message({'level': 'info', 'text': 'cached'})";
+      return detail;
     },
     children: Object.freeze([]),
     partners: Object.freeze([])
@@ -1571,10 +1572,14 @@ test('one immutable world revision reuses its prepared Program records', async (
   });
 
   await scheduler.refresh(world);
+  const firstRecords = scheduler.prepareRuntimeRecords(world);
   const readsAfterFirst = detailReads;
+  detail = "message({'level': 'info', 'text': 'changed'})";
   await scheduler.refresh(world);
 
-  assert.equal(detailReads, readsAfterFirst);
+  assert.ok(detailReads > readsAfterFirst);
+  assert.notStrictEqual(scheduler.prepareRuntimeRecords(world), firstRecords,
+    'an accessor change must invalidate prepared records despite Object.freeze');
 });
 
 test('one immutable large-world revision reuses its Program cycle fingerprint', async () => {
@@ -1587,6 +1592,7 @@ test('one immutable large-world revision reuses its Program cycle fingerprint', 
     atom(`Fact ${index}`, 'x'.repeat(1_000))
   )));
   const scheduler = createProgramRuntimeScheduler();
+  sealWorldFactsRevision(world);
   await scheduler.refresh(world);
 
   const startedAt = performance.now();

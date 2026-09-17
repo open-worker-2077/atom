@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { diagnostic } from './errors.mjs';
 import {
+  isSealedWorldFacts,
   revisionOfWorldFacts,
   sealWorldFactsRevision
 } from '../../src/atom-system/world-runtime/world-revision.mjs';
@@ -4534,7 +4535,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     })
     : null;
   const sourceChanged = changed;
-  let sourceAtoms = structuredClone(nextAtoms);
+  let sourceAtoms = sourceChanged ? null
+    : isSealedWorldFacts(atoms) ? atoms : structuredClone(nextAtoms);
   let sourceRevision = revisionBefore;
   const sourceTransformLogRecord = transformed.logRecord && sourceChanged ? {
     ...transformed.logRecord,
@@ -4583,7 +4585,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     sourceRevision = sourceReceipt?.afterRevision?.replace(/^sha256:/u, '')
       ?? revisionOf(nextAtoms);
     revisionAfter = sourceRevision;
-    sourceAtoms = structuredClone(nextAtoms);
+    sourceAtoms = isSealedWorldFacts(nextAtoms) ? nextAtoms : structuredClone(nextAtoms);
     if (sourceTransformLogRecord) {
       try {
         await appendTransformLog(contextFile, sourceTransformLogRecord);

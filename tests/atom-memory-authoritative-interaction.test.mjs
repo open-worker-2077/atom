@@ -14,10 +14,21 @@ import { createProgramRuntimeScheduler } from '../work-engine/atom-language/prog
 test('real engine reuses an accepted memory version and preserves old readers through save', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-owned-real-memory-'));
   t.diagnostic(`retained fixture: ${directory}`);
+  const originalClone = globalThis.structuredClone;
+  const cloneInputs = [];
+  t.mock.method(globalThis, 'structuredClone', (value, ...options) => {
+    cloneInputs.push(value);
+    return originalClone(value, ...options);
+  });
   const target = { contextFile: path.join(directory, 'atom.json'),
     projectionFile: path.join(directory, 'graph.json') };
   await fs.writeFile(target.contextFile,
-    `${JSON.stringify([{ thing: 'Root', situation: 'before', slot: [], strut: [] }])}\n`, 'utf8');
+    `${JSON.stringify([
+      { thing: 'Root', situation: 'before', slot: [], strut: [] },
+      { 'thing@backup@default': 'Backup', situation: '', slot: [
+        { thing: 'Archived', situation: 'unchanged', slot: [], strut: [] }
+      ], strut: [] }
+    ])}\n`, 'utf8');
   let committedEngineCandidate = null;
   const scheduler = createProgramRuntimeScheduler();
   const programWorlds = [];
@@ -53,6 +64,10 @@ test('real engine reuses an accepted memory version and preserves old readers th
     assert.notStrictEqual(after, before);
     assert.strictEqual(after.facts, committedEngineCandidate,
       'memory acceptance and the owned version must retain the validated engine candidate');
+    assert.strictEqual(after.facts[1], before.facts[1],
+      'an ordinary situation edit must retain the sealed, unchanged archive');
+    assert.equal(cloneInputs.filter((value) => value === committedEngineCandidate).length, 0,
+      'accepted source facts must not be cloned again before Program effects');
     assert.equal(programWorlds.includes(committedEngineCandidate), true,
       'postcommit Program security must observe the same owned candidate');
     assert.equal(oldContext[0].situation, 'before');

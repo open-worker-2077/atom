@@ -10,7 +10,7 @@ import { atomLanguageError } from './errors.mjs';
 import { RETIRED_GRAPH_AXES } from './graph-schema.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import {
-  collectDefaultBackupBoundary,
+  preparedDefaultBackupBoundary,
   isTypedDefaultBackupTypes,
   resolveBoundarySelector
 } from './default-backup-boundary.mjs';
@@ -471,7 +471,7 @@ export function projectAtomContext(atoms, options = {}) {
   }
   const rootName = options.rootName ?? DEFAULT_CONTEXT_FILENAME;
   const defaultBackupBoundary = options.defaultBackupBoundary
-    ?? collectDefaultBackupBoundary(atoms);
+    ?? preparedDefaultBackupBoundary(atoms);
   const projectionOptions = {
     ...options,
     thingPathByIdentity: defaultBackupBoundary.thingPathByIdentity,
