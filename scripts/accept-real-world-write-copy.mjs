@@ -69,24 +69,27 @@ async function stage(name, operation) {
     throw error;
   }
 }
-const journalModuleUrl = new URL('../src/atom-system/adapters/json-world-repository.mjs', import.meta.url).href;
-const persistenceModuleUrl = new URL('../src/atom-system/adapters/transactional-world-persistence.mjs', import.meta.url).href;
+const writerModuleUrl = new URL('../src/atom-system/adapters/durable-world-writer.mjs', import.meta.url).href;
 async function inspectCopiedJournal(mode, baselineCount = 0) {
   const { stdout } = await promisify(execFile)(process.execPath, [
-    '--input-type=module', '--eval',
-    `import { createJsonTransactionJournal } from ${JSON.stringify(journalModuleUrl)};
-     import { createTransactionalWorldPersistence } from ${JSON.stringify(persistenceModuleUrl)};
-     const [contextFile, graphFile, journalFile, mode, baselineText] = process.argv.slice(1);
-     const receipts = (await createJsonTransactionJournal({ file: journalFile }).readState()).receipts;
-     const result = mode === 'baseline'
-       ? { receiptCount: receipts.length, revision: (await createTransactionalWorldPersistence({
-           contextFile, projectionFile: graphFile, journalFile, publishLegacyProjection: false
-         }).readCommittedSnapshot()).revision }
-       : { newCommits: receipts.slice(Number(baselineText)).map(({ receipt }) => ({
-           commandId: receipt.commandId, afterRevision: receipt.afterRevision
-         })) };
-     process.stdout.write(JSON.stringify(result));`,
-    contextFile, graphFile, journalFile, mode, String(baselineCount)
+    '--eval',
+    `void (async () => {
+       const { createDurableWorldWriter } = await import(${JSON.stringify(writerModuleUrl)});
+       const [contextFile, journalFile, mode, baselineText] = process.argv.slice(1);
+       const writer = createDurableWorldWriter({ contextFile, journalFile });
+       try {
+         const { initialSnapshot, durableReceipts } = await writer.initialize();
+         const result = mode === 'baseline'
+           ? { receiptCount: durableReceipts.length, revision: initialSnapshot.revision }
+           : { newCommits: durableReceipts.slice(Number(baselineText)).map(({ receipt }) => ({
+               commandId: receipt.commandId, afterRevision: receipt.afterRevision
+             })) };
+         process.stdout.write(JSON.stringify(result));
+       } finally {
+         await writer.close();
+       }
+     })().catch((error) => { console.error(error); process.exitCode = 1; });`,
+    contextFile, journalFile, mode, String(baselineCount)
   ], { maxBuffer: 1024 * 1024, env: { ...process.env, ATOM_RUNTIME_BACKUP_REPO: '' } });
   return JSON.parse(stdout);
 }

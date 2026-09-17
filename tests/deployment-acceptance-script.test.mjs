@@ -8,7 +8,9 @@ import { promisify } from 'node:util';
 
 import deploymentAcceptanceWorld from './fixtures/deployment-acceptance-world.fixture.mjs';
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
+import { createJsonWorldRepository } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
+import { createCommitCoordinator } from '../src/atom-system/world-runtime/commit-coordinator.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -140,6 +142,77 @@ test('deployment acceptance keeps two prior durable commits and restores their c
     publishLegacyProjection: false
   }).readCommittedSnapshot();
   assert.equal(copiedSnapshot.revision, before.revision);
+});
+
+test('deployment acceptance preserves a prepared source commit recovered before its baseline', async (t) => {
+  const { contextFile, source } = await createContext(t);
+  const directory = path.dirname(contextFile);
+  const journalFile = path.join(directory, 'atom.transactions.json');
+  const persistence = createTransactionalWorldPersistence({
+    contextFile, projectionFile: path.join(directory, 'graph.json'), journalFile,
+    publishLegacyProjection: false
+  });
+  let facts = structuredClone(deploymentAcceptanceWorld);
+  for (const number of [1, 2]) {
+    const nextFacts = [...facts, {
+      thing: `Prior ${number}`, situation: `durable ${number}`, slot: [], strut: []
+    }];
+    await persistence.commit({
+      correlationId: `prior-${number}`,
+      expectedRevision: revisionOfWorldFacts(facts), nextRevision: revisionOfWorldFacts(nextFacts),
+      facts: nextFacts, changedPaths: [`Prior ${number}`], affectedPathClosureComplete: true,
+      relationEndpoints: [], lockPaths: [], shortcutPaths: [], referencePaths: []
+    });
+    facts = nextFacts;
+  }
+  const journal = createJsonTransactionJournal({ file: journalFile });
+  const durableIds = (await journal.readState()).receipts.map(({ commandId }) => commandId);
+  assert.equal(durableIds.length, 2);
+  const pendingFacts = [...facts, {
+    thing: 'Recovered Prior', situation: 'source history', slot: [], strut: []
+  }];
+  const coordinator = createCommitCoordinator({
+    worldRepository: createJsonWorldRepository({ file: contextFile, worldId: 'primary',
+      localCommitFile: path.join(`${journalFile}.d`, 'world-commits.jsonl') }),
+    journalRepository: journal,
+    faultInjector(point) {
+      if (point === 'after-prepare') {
+        throw Object.assign(new Error('synthetic interruption'), { code: 'SYNTHETIC_INTERRUPTION' });
+      }
+    }
+  });
+  await assert.rejects(coordinator.execute({
+    command: {
+      contract: 'atom.world-command', version: 1, commandId: 'source-prepared',
+      correlationId: 'source-prepared', expectedRevision: revisionOfWorldFacts(facts),
+      name: 'transform', payload: {}
+    },
+    transition: () => ({ facts: pendingFacts, changedPaths: ['Recovered Prior'],
+      result: { affectedPathClosureComplete: true } })
+  }), { code: 'SYNTHETIC_INTERRUPTION' });
+  const before = await journal.readState();
+  assert.equal(before.receipts.length, 2);
+  assert.deepEqual(before.prepared.map(({ commandId }) => commandId), ['source-prepared']);
+  const { stdout, stderr } = await execFileAsync(process.execPath, [
+    script, '--context', contextFile, '--agent', '部署验收窗口'
+  ], { cwd: projectRoot, env: { ...process.env, ATOM_RUNTIME_BACKUP_REPO: '' } });
+  const result = JSON.parse(stdout);
+  assert.equal(result.ok, true, stderr);
+  assert.equal(result.rollbackCount, 1, stderr);
+  assert.equal(result.sourceRevisionRestored, true, stderr);
+  assert.equal(await fs.readFile(contextFile, 'utf8'), source);
+  const copiedJournal = await createJsonTransactionJournal({
+    file: path.join(result.tempDirectory, 'atom.transactions.json')
+  }).readState();
+  assert.deepEqual(copiedJournal.receipts.slice(0, 3).map(({ commandId }) => commandId),
+    [...durableIds, 'source-prepared']);
+  const copiedSnapshot = await createTransactionalWorldPersistence({
+    contextFile: path.join(result.tempDirectory, 'atom.json'),
+    projectionFile: path.join(result.tempDirectory, 'graph.json'),
+    journalFile: path.join(result.tempDirectory, 'atom.transactions.json'),
+    publishLegacyProjection: false
+  }).readCommittedSnapshot();
+  assert.equal(copiedSnapshot.revision, revisionOfWorldFacts(pendingFacts));
 });
 
 test('deployment acceptance times out a stage with a content-free diagnostic and preserves the copy', async (t) => {
