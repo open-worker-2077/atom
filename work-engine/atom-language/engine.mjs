@@ -93,6 +93,7 @@ import {
   applyTransform,
   createExactTransformIndex,
   isBatchRenameItem,
+  prepareTransformAccessMatches,
   prepareTransformRelationIndex,
   rewriteProgramSourcePathLiterals,
   transformChangesStructure
@@ -1041,10 +1042,11 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       )]
     };
   }
-  const preparedTransformWorld = prepareTransformRelationIndex(
-    atoms,
-    path.basename(contextFile)
-  );
+  const preparedTransformWorld = parsed.command === 'explore'
+    ? null
+    : prepareTransformRelationIndex(atoms, path.basename(contextFile));
+  const preparedAccessMatches = preparedTransformWorld?.matches
+    ?? prepareTransformAccessMatches(atoms);
   const requestStartAtoms = atoms;
   const preparedTransformAtoms = atoms;
   const revisionBefore = revisionOf(atoms);
@@ -1396,7 +1398,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     agentSecurity: programCycle.agentSecurity,
     graphLocks,
     ...(atoms === preparedTransformAtoms
-      ? { preparedAccessMatches: preparedTransformWorld.matches }
+      ? { preparedAccessMatches }
       : {})
   });
   const accessControllerForProgramEffect = (sourceProgramPath, sourceScopeRoot = null) => {

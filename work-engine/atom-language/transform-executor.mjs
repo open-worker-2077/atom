@@ -361,18 +361,27 @@ export function bindStrutEndpointIdentities(atoms, rootName = null) {
 
 const preparedTransformRelations = new WeakMap();
 
+export function prepareTransformAccessMatches(atoms) {
+  const sealed = isSealedWorldFacts(atoms);
+  const prepared = sealed ? preparedTransformRelations.get(atoms) : null;
+  if (prepared?.matches) return prepared.matches;
+  const matches = walkAtoms(atoms);
+  if (sealed) preparedTransformRelations.set(atoms, { ...prepared, matches });
+  return matches;
+}
+
 export function prepareTransformRelationIndex(atoms, rootName) {
   const sealed = isSealedWorldFacts(atoms);
   const prepared = sealed ? preparedTransformRelations.get(atoms) : null;
   if (prepared?.rootName === rootName && prepared.matches && prepared.exactIndex) return prepared;
-  const matches = prepared?.rootName === rootName && prepared.matches
+  const matches = prepared?.matches
     ? prepared.matches
     : walkAtoms(atoms);
   const next = {
     rootName,
     matches,
     exactIndex: createExactTransformIndexFromMatches(matches),
-    bindings: prepared?.rootName === rootName
+    bindings: prepared?.rootName === rootName && prepared.bindings
       ? prepared.bindings
       : capturePartnerBindings(atoms, rootName, null, matches)
   };
