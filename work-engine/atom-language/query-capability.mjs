@@ -65,6 +65,12 @@ export function readOnlyProgramDeclarationFields(atom) {
   });
 }
 
+export function isStoredTypedDefaultBackupAtom(atom) {
+  const types = readStoredField(atom, 'thing')?.parsed.types ?? [];
+  return types.some((type) => type.raw === 'backup')
+    && types.some((type) => type.raw === 'default');
+}
+
 function publicField(field) {
   return { rawKey: field.rawKey, value: field.value, parsed: structuredClone(field.parsed) };
 }
@@ -95,6 +101,7 @@ export function walkAtoms(atoms, options = {}) {
     const visiblePath = [...parentPath, name];
     const match = { atom, path: visiblePath, parent, index };
     visited.push(match);
+    if (options.skipDescendants?.(match) === true) return;
     const children = readStoredField(atom, 'slot')?.value;
     if (Array.isArray(children)) {
       children.forEach((child, childIndex) => visit(child, visiblePath, childIndex, match));

@@ -9,6 +9,7 @@ import {
 } from '../../src/atom-system/world-runtime/world-revision.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { ensureThingIdentities } from './slot-graph-semantics.mjs';
+import { hasValidatedDefaultBackupArchiveAt } from './default-backup-boundary.mjs';
 
 function mergeWarnings(...groups) {
   const warnings = [];
@@ -128,6 +129,7 @@ import {
   executeExploreItem,
   executeProgramExplore,
   fieldsByBase,
+  isStoredTypedDefaultBackupAtom,
   oneStoredField,
   readOnlyProgramDeclarationFields,
   prepareExploreWorld,
@@ -220,21 +222,63 @@ function transformChangesProgramSurface(beforeAtoms, afterAtoms, transformed) {
   ));
 }
 
+const archivedProgramDeclarations = new WeakMap();
+
+function declarationAtMatch(match) {
+  const fields = readOnlyProgramDeclarationFields(match.atom);
+  if (fields === null) return [];
+  if (fields !== undefined) return [{ path: match.path.join('/'), ...fields }];
+  const thing = oneStoredField(match.atom, 'thing');
+  if (!thing?.parsed.types.some((type) => type.raw === 'program')) return [];
+  const situation = oneStoredField(match.atom, 'situation');
+  return [{
+    path: match.path.join('/'),
+    thingKey: thing.rawKey,
+    situationKey: situation?.rawKey ?? null,
+    situation: situation?.value ?? null
+  }];
+}
+
+function archivedDeclarationSummary(root) {
+  const cached = archivedProgramDeclarations.get(root);
+  if (cached) return cached;
+  const summary = Object.freeze(walkAtoms([root]).flatMap((match) => (
+    declarationAtMatch(match).map((declaration) => Object.freeze({
+      relativePathParts: Object.freeze(match.path.slice(1)),
+      thingKey: declaration.thingKey,
+      situationKey: declaration.situationKey,
+      situation: declaration.situation
+    }))
+  )));
+  archivedProgramDeclarations.set(root, summary);
+  return summary;
+}
+
 function programDeclarationSurface(atoms) {
-  return walkAtoms(atoms).flatMap((match) => {
-    const fields = readOnlyProgramDeclarationFields(match.atom);
-    if (fields === null) return [];
-    if (fields !== undefined) return [{ path: match.path.join('/'), ...fields }];
-    const thing = oneStoredField(match.atom, 'thing');
-    if (!thing?.parsed.types.some((type) => type.raw === 'program')) return [];
-    const situation = oneStoredField(match.atom, 'situation');
-    return [{
-      path: match.path.join('/'),
-      thingKey: thing.rawKey,
-      situationKey: situation?.rawKey ?? null,
-      situation: situation?.value ?? null
-    }];
-  });
+  let archiveMatch = null;
+  let unsafeArchiveShape = false;
+  const matches = walkAtoms(atoms, { skipDescendants(match) {
+    const proven = hasValidatedDefaultBackupArchiveAt(match.atom, match.path);
+    if (proven) {
+      if (archiveMatch) unsafeArchiveShape = true;
+      else archiveMatch = match;
+      return true;
+    }
+    return false;
+  } });
+  if (!archiveMatch) return matches.flatMap(declarationAtMatch);
+  if (unsafeArchiveShape || matches.some((match) => (
+    match !== archiveMatch && isStoredTypedDefaultBackupAtom(match.atom)
+  ))) return walkAtoms(atoms).flatMap(declarationAtMatch);
+  const summary = archivedDeclarationSummary(archiveMatch.atom);
+  return matches.flatMap((match) => match === archiveMatch
+    ? summary.map((declaration) => ({
+      path: [...archiveMatch.path, ...declaration.relativePathParts].join('/'),
+      thingKey: declaration.thingKey,
+      situationKey: declaration.situationKey,
+      situation: declaration.situation
+    }))
+    : declarationAtMatch(match));
 }
 
 function relocatedProgramDeclarationSurface(atoms, pathChanges = [], simultaneous = false) {

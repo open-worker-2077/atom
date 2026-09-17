@@ -259,6 +259,15 @@ export function preparedDefaultBackupBoundary(atoms) {
   return preparedBoundary(atoms).view;
 }
 
+// A root is reusable only at the exact topology validated in a sealed world.
+// No boundary entries, caller trust flag, or mutable proof object escapes.
+export function hasValidatedDefaultBackupArchiveAt(atom, pathParts) {
+  const proof = validatedArchives.get(atom);
+  return Boolean(proof && Array.isArray(pathParts)
+    && proof.pathParts.length === pathParts.length
+    && proof.pathParts.every((part, index) => part === pathParts[index]));
+}
+
 export function collectDefaultBackupBoundary(atoms) {
   const prepared = preparedBoundary(atoms);
   if (!prepared.parts) return prepared.view;
