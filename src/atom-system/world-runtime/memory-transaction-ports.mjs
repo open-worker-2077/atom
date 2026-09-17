@@ -40,6 +40,12 @@ export function createMemoryTransactionPorts({
   const capacity = createPendingWorldCapacity(pendingLimits);
   const preparedCapacity = new Map();
   const programCapacity = new Map();
+  // Identity-only projections: saving can discard record bodies without any
+  // index retaining them. Public readers still receive detached executions.
+  const sourceByInteraction = new Map();
+  const childBySource = new Map();
+  const sourceOrder = new Map();
+  const pendingSources = new Set();
   let staged = null;
   let closing = false;
 
@@ -111,13 +117,37 @@ export function createMemoryTransactionPorts({
 
   const entries = () => [...durableHistory, ...accepted.values()];
   const receiptFor = (id) => accepted.get(id)?.receipt ?? durableById.get(id)?.receipt ?? null;
+  function refreshPending(sourceCommandId) {
+    if (!sourceOrder.has(sourceCommandId)) return;
+    const outcome = outcomes.get(sourceCommandId);
+    const pending = (!outcome || outcome.status === 'pending')
+      && (!childBySource.has(sourceCommandId) || isHardCapacityBlocked(outcome));
+    if (pending) pendingSources.add(sourceCommandId);
+    else pendingSources.delete(sourceCommandId);
+  }
+
+  function indexReceipt(receipt) {
+    const id = receipt.commandId;
+    const event = receipt.result?.postCommitEvent;
+    if (event) {
+      if (!sourceByInteraction.has(receipt.correlationId)) sourceByInteraction.set(receipt.correlationId, id);
+      if (!sourceOrder.has(id)) sourceOrder.set(id, sourceOrder.size);
+    }
+    const parent = receipt.result?.subsequentOf;
+    if (parent != null && !childBySource.has(parent)) childBySource.set(parent, id);
+    // An effectsCommitted source competes in the same original receipt order
+    // as an ordinary child, including a historical child preceding its source.
+    if (event?.effectsCommitted && !childBySource.has(id)) childBySource.set(id, id);
+    if (event) refreshPending(id);
+    if (parent != null) refreshPending(parent);
+  }
+  for (const entry of durableHistory) indexReceipt(entry.receipt);
+
   const executionFor = (sourceCommandId) => {
     const sourceReceipt = receiptFor(sourceCommandId);
     const event = sourceReceipt?.result?.postCommitEvent;
     if (!event) return null;
-    const childReceipt = entries().map((entry) => entry.receipt).find((receipt) =>
-      receipt?.result?.subsequentOf === sourceCommandId
-      || (receipt?.commandId === sourceCommandId && event.effectsCommitted)) ?? null;
+    const childReceipt = receiptFor(childBySource.get(sourceCommandId));
     let outcome = outcomes.get(sourceCommandId) ?? null;
     if (childReceipt && outcome?.status !== 'completed' && !isHardCapacityBlocked(outcome)) {
       outcome = { status: 'completed', sourceRevision: (event.sourceRevision
@@ -126,7 +156,7 @@ export function createMemoryTransactionPorts({
       attemptId: outcome?.attemptId ?? childReceipt.correlationId,
       childCommandId: childReceipt.commandId };
     }
-    return structuredClone({ sourceReceipt, event, outcome, childReceipt });
+    return { sourceReceipt, event, outcome, childReceipt };
   };
 
   function reserveProgramExecution(sourceCommandId) {
@@ -204,6 +234,7 @@ export function createMemoryTransactionPorts({
       });
       capacity.accept(reservation.record);
       accepted.set(commandId, entry);
+      indexReceipt(entry.receipt);
       if (reservation.program.length) programCapacity.set(commandId, { first: reservation.program[0], final: reservation.program[1] });
       preparedCapacity.delete(commandId);
       acceptedVersions.set(acceptedState.acceptedVersion, commandId);
@@ -220,16 +251,13 @@ export function createMemoryTransactionPorts({
       preparedCapacity.delete(id);
       return prepared.delete(id);
     },
-    async programExecution(id) { return executionFor(id); },
+    async programExecution(id) { return structuredClone(executionFor(id)); },
     async programExecutionForInteraction(correlationId) {
-      const source = entries().find((entry) => entry.receipt?.correlationId === correlationId
-        && entry.receipt?.result?.postCommitEvent);
-      return source ? executionFor(source.commandId) : null;
+      return structuredClone(executionFor(sourceByInteraction.get(correlationId)));
     },
     async pendingProgramExecutions() {
-      return entries().filter((entry) => entry.receipt?.result?.postCommitEvent)
-        .map((entry) => executionFor(entry.commandId))
-        .filter((execution) => !execution.outcome || execution.outcome.status === 'pending');
+      return [...pendingSources].sort((a, b) => sourceOrder.get(a) - sourceOrder.get(b))
+        .map(id => structuredClone(executionFor(id)));
     },
     async recordProgramExecution({ sourceCommandId, outcome }) {
       const execution = executionFor(sourceCommandId);
@@ -240,7 +268,7 @@ export function createMemoryTransactionPorts({
       const existing = outcomes.get(sourceCommandId);
       if (existing && existing.status !== 'pending') return structuredClone(existing);
       if (isHardCapacityBlocked(existing) && outcome.status === 'pending') return structuredClone(existing);
-      if (execution.childReceipt && outcome.status !== 'completed' && !isHardCapacityBlocked(outcome)) return execution.outcome;
+      if (execution.childReceipt && outcome.status !== 'completed' && !isHardCapacityBlocked(outcome)) return structuredClone(execution.outcome);
       assertAccepting();
       let value = { ...outcome, ...(execution.childReceipt ? { childCommandId: execution.childReceipt.commandId } : {}) };
       let bytes = pendingWorldEventBytes({ kind: 'outcome', sourceCommandId, outcome: value });
@@ -260,6 +288,7 @@ export function createMemoryTransactionPorts({
       const token = slots[slot] ?? capacity.reserve([bytes])[0];
       const released = capacity.resize(token, bytes);
       outcomes.set(sourceCommandId, stored);
+      refreshPending(sourceCommandId);
       capacity.accept(token);
       slots[slot] = null;
       onOutcome({ sourceCommandId, outcome: stored, reservation: token });
