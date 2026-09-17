@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import { writeSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -30,6 +31,7 @@ import { ATOM_RUNTIME_CONTRACT } from './runtime-contract.mjs';
 import { workOrderRegistry } from './work-order-registry.mjs';
 import { programFunctionRegistry } from './program-function-registry.mjs';
 import { primeAgentDirectory, resolveAgentContext } from './cli.mjs';
+import { DEFAULT_WORLD_SHUTDOWN_TIMEOUT_MS, worldShutdownDeadline, withinWorldShutdown } from '../../src/atom-system/world-runtime/world-shutdown.mjs';
 
 export const DEFAULT_ATOM_GRAPH_HOST = '127.0.0.1';
 export const DEFAULT_ATOM_GRAPH_PORT = 4784;
@@ -159,11 +161,14 @@ function validateDistinctPaths({
 }
 
 function resolveConfiguration(options = {}) {
+  const shutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_WORLD_SHUTDOWN_TIMEOUT_MS;
+  worldShutdownDeadline({ timeoutMs: shutdownTimeoutMs });
   const contextFile = resolveJsonPath(
     options.contextFile ?? defaultFiles.contextFile,
     'Atom context 文件'
   );
   const configuration = {
+    shutdownTimeoutMs,
     host: validateHost(options.host ?? DEFAULT_ATOM_GRAPH_HOST),
     port: validatePort(options.port ?? DEFAULT_ATOM_GRAPH_PORT),
     contextFile,
@@ -237,6 +242,12 @@ export function parseAtomGraphServerArgs(argv = []) {
     }
     if (argument === '--memory-authoritative') {
       options.memoryAuthoritative = true;
+      continue;
+    }
+    if (argument === '--shutdown-timeout-ms' || argument.startsWith('--shutdown-timeout-ms=')) {
+      const parsed = optionValue(argv, index, '--shutdown-timeout-ms');
+      options.shutdownTimeoutMs = Number(parsed.value);
+      index += parsed.consumed;
       continue;
     }
     if (argument === '--host' || argument.startsWith('--host=')) {
@@ -458,6 +469,7 @@ export async function startAtomGraphServer(options = {}) {
     publishLegacyProjection: false,
     memoryAuthoritative: options.memoryAuthoritative === true,
     saveSchedule: options.saveSchedule,
+    shutdownTimeoutMs: configuration.shutdownTimeoutMs,
     onAuthoritativeWrite: options.memoryAuthoritative === true
       ? undefined : () => backupTrigger?.schedule(),
     onSaved: options.memoryAuthoritative === true
@@ -572,6 +584,9 @@ export async function startAtomGraphServer(options = {}) {
     }),
     atomProjectionReadOnly: true,
     atomCommand: handlers.atomCommand,
+    atomSaveState: () => worldService.captureSaveState?.({
+      contextFile: configuration.contextFile, projectionFile: configuration.graphFile
+    }),
     atomHumanStatus: handlers.atomHumanStatus,
     atomWorkspaceEdit: handlers.atomWorkspaceEdit,
     atomProjectionRecover: handlers.atomProjectionRecover,
@@ -635,15 +650,29 @@ export async function startAtomGraphServer(options = {}) {
     close: () => {
       closePromise ??= (async () => {
         orderlyClosing = true;
+        const deadline = worldShutdownDeadline({ timeoutMs: configuration.shutdownTimeoutMs });
+        instance.beginCloseAtomInteractions();
+        worldService.beginClose?.();
         const closing = closeServer(instance.server);
         try {
-          await instance.drainAtomInteractions?.();
-          await interactionRuntime.close?.();
-          await worldService.closeSaves?.();
-          await backupTrigger?.flush?.();
-          await diagnostics.flush?.();
+          // Flush accepted evidence immediately, independently of computations
+          // that have not accepted and may never finish. All stages share one clock.
+          await withinWorldShutdown(Promise.all([
+            closing,
+            worldService.closeSaves?.({ deadline }),
+            (async () => {
+              await instance.drainAtomInteractions();
+              await interactionRuntime.close?.();
+            })()
+          ]), deadline);
+          await withinWorldShutdown(backupTrigger?.flush?.(), deadline);
+          await withinWorldShutdown(diagnostics.flush?.(), deadline);
+        } catch (error) {
+          instance.cancelAtomInteractions(error);
+          instance.server.closeAllConnections?.();
+          throw error;
         } finally {
-          try { await closing; } finally { backupTrigger?.close(); }
+          backupTrigger?.close();
         }
       })();
       return closePromise;
@@ -660,37 +689,52 @@ function help() {
     '    [--program-projection program-projection.json]',
     '    [--runtime-diagnostics runtime-diagnostics.json]',
     '    [--memory-authoritative]（内存事实立即可读；后台独立保存）',
+    '    [--shutdown-timeout-ms 30000]（关闭共享截止时间；超时不代表已保存）',
     '',
     `默认目录：${path.dirname(defaultFiles.contextFile)}`,
     '4783 为现有服务保留，不能由本服务占用。'
   ].join('\n');
 }
 
-const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : null;
-const currentFile = path.resolve(fileURLToPath(import.meta.url));
-if (invokedFile === currentFile) {
+export async function runAtomGraphServerCli({ argv = process.argv.slice(2), processLike = process,
+  startServer = startAtomGraphServer } = {}) {
+  function report(error, shutdown = false) {
+    const line = `${JSON.stringify({ ok: false,
+      ...(shutdown ? { shutdown: 'abnormal', saved: false } : {}),
+      error: { code: error.code ?? 'ATOM_GRAPH_SERVER_ERROR', message: error.message, details: error.details ?? {} } })}\n`;
+    // A short synchronous write on the actual CLI avoids exit truncating its
+    // unsaved warning; no stderr callback can delay the bounded exit path.
+    try { if (processLike === process) writeSync(2, line); else processLike.stderr.write(line); } catch {}
+  }
   try {
-    const options = parseAtomGraphServerArgs(process.argv.slice(2));
+    const options = parseAtomGraphServerArgs(argv);
     if (options.help) {
-      process.stdout.write(`${help()}\n`);
+      processLike.stdout.write(`${help()}\n`);
     } else {
-      const running = await startAtomGraphServer(options);
-      process.stdout.write(`Atom Graph 核查服务：${running.url}\n`);
-      process.stdout.write(`Atom context：${running.contextFile}\n`);
-      process.stdout.write(`Graph projection：${running.graphFile}\n`);
-      process.stdout.write(`Spatial store：${running.storeFile}\n`);
-      process.stdout.write(`Program 投影：${running.programProjectionFile}\n`);
-      process.stdout.write(`运行诊断：${running.diagnosticFile}\n`);
+      const running = await startServer(options);
+      let shutdown;
+      const stop = () => {
+        shutdown ??= Promise.resolve().then(() => running.close()).catch(error => {
+          report(error, true);
+          processLike.exitCode = 1;
+          processLike.exit(1);
+        });
+      };
+      processLike.on('SIGINT', stop);
+      processLike.on('SIGTERM', stop);
+      processLike.stdout.write(`Atom Graph 核查服务：${running.url}\n`);
+      processLike.stdout.write(`Atom context：${running.contextFile}\n`);
+      processLike.stdout.write(`Graph projection：${running.graphFile}\n`);
+      processLike.stdout.write(`Spatial store：${running.storeFile}\n`);
+      processLike.stdout.write(`Program 投影：${running.programProjectionFile}\n`);
+      processLike.stdout.write(`运行诊断：${running.diagnosticFile}\n`);
     }
   } catch (error) {
-    process.stderr.write(`${JSON.stringify({
-      ok: false,
-      error: {
-        code: error.code ?? 'ATOM_GRAPH_SERVER_ERROR',
-        message: error.message,
-        details: error.details ?? {}
-      }
-    })}\n`);
-    process.exitCode = 1;
+    report(error);
+    processLike.exitCode = 1;
   }
 }
+
+const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : null;
+const currentFile = path.resolve(fileURLToPath(import.meta.url));
+if (invokedFile === currentFile) await runAtomGraphServerCli();

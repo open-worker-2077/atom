@@ -199,6 +199,7 @@ test('graph server arguments default to the shared LocalAppData Atom world', () 
   assert.equal(DEFAULT_ATOM_GRAPH_HOST, '127.0.0.1');
   assert.equal(DEFAULT_ATOM_GRAPH_PORT, 4784);
   assert.deepEqual(parseAtomGraphServerArgs([]), {
+    shutdownTimeoutMs: 30000,
     host: '127.0.0.1',
     port: 4784,
     contextFile: runtime.contextFile,
@@ -221,6 +222,7 @@ test('graph server arguments default to the shared LocalAppData Atom world', () 
     '--request-driven-locks=request-driven-locks.json',
     '--runtime-diagnostics=runtime-diagnostics.json'
   ]), {
+    shutdownTimeoutMs: 30000,
     host: '127.0.0.2',
     port: 0,
     contextFile: path.resolve('context.json'),
@@ -419,9 +421,13 @@ test('HTTP Transform reads accepted memory before save and server close flushes 
   }).then(async (response) => ({ status: response.status, body: await response.json() }));
   const write = await request('transform {"thing":"石斧","situation.rep.内存已更新"}', 'memory-http-write');
   assert.equal(write.status, 200, JSON.stringify(write.body));
+  assert.equal(write.body.result.saveState.pending, true);
+  assert.notEqual(write.body.result.saveState.acceptedRevision, write.body.result.saveState.savedRevision);
   const read = await request('explore {"thing":"石斧","situation$full":true}', 'memory-http-read');
   assert.equal(read.status, 200, JSON.stringify(read.body));
   assert.match(JSON.stringify(read.body), /内存已更新/u);
+  assert.equal(read.body.result.saveState.pending, true);
+  assert.equal(read.body.result.saveState.acceptedRevision, write.body.result.saveState.acceptedRevision);
   const durable = createJsonWorldRepository({ file: contextFile, worldId: 'primary',
     localCommitFile: path.join(`${path.join(directory, 'atom.transactions.json')}.d`, 'world-commits.jsonl') });
   assert.match(JSON.stringify((await durable.read()).facts), /可核查的物件/u,

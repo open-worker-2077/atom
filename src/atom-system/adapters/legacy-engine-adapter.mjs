@@ -4,6 +4,7 @@ import { executeAtomLanguage } from '../../../work-engine/atom-language/engine.m
 import { createWorldService } from '../public/world-service.mjs';
 import { createTransactionalWorldPersistence } from './transactional-world-persistence.mjs';
 import { prepareCommittedAtomVersion, prepareOwnedCommittedAtomVersion } from '../../../work-engine/atom-language/context-store.mjs';
+import { DEFAULT_WORLD_SHUTDOWN_TIMEOUT_MS, worldShutdownDeadline, withinWorldShutdown } from '../world-runtime/world-shutdown.mjs';
 
 // Only live invocations are joined here. All completed results and restart
 // decisions come from the central journal, never this transient rendezvous.
@@ -33,6 +34,7 @@ export function createLegacyWorldService(options = {}) {
       runtimeAuthority: options.memoryAuthoritative === true ? 'memory' : 'disk',
       saveSchedule: options.saveSchedule,
       writerFactory: options.writerFactory,
+      shutdownTimeoutMs: options.shutdownTimeoutMs,
       onAuthoritativeWrite: options.onAuthoritativeWrite,
       onSaved: options.onSaved
     })
@@ -40,10 +42,31 @@ export function createLegacyWorldService(options = {}) {
   const transactions = new Map();
   const readiness = new WeakMap();
   const recoveryRequests = new WeakMap();
+  let closing = false;
+  let closePromise = null;
+
+  function captureSaveState(request) {
+    if (options.memoryAuthoritative !== true || !request?.contextFile || !request?.projectionFile) return null;
+    const persistence = transactions.get(`${request.contextFile}\0${request.projectionFile}`);
+    return persistence ? structuredClone(persistence.saveStatus ?? null) : null;
+  }
+
+  function withSaveState(request, result) {
+    const saveState = captureSaveState(request);
+    return saveState && result && typeof result === 'object' ? { ...result, saveState } : result;
+  }
+
+  function beginClose() {
+    closing = true;
+    for (const persistence of transactions.values()) persistence.beginClose?.();
+  }
 
   function transactionFor(request) {
     const key = `${request.contextFile}\0${request.projectionFile}`;
-    if (!transactions.has(key)) transactions.set(key, transactionProvider(request));
+    if (!transactions.has(key)) {
+      if (closing) throw Object.assign(new Error('World service is closing'), { code: 'WORLD_SAVE_WORKER_CLOSED' });
+      transactions.set(key, transactionProvider(request));
+    }
     return transactions.get(key);
   }
 
@@ -113,7 +136,7 @@ export function createLegacyWorldService(options = {}) {
   }
 
   async function resumePendingExecutions(request, persistence, entry) {
-    if (!request.programScheduler || entry.recovering || readinessFor(persistence).pendingRecovered) return;
+    if (closing || !request.programScheduler || entry.recovering || readinessFor(persistence).pendingRecovered) return;
     readinessFor(persistence).pendingRecovered = true;
     const worldKey = path.resolve(request.contextFile);
     if (recoveringWorlds.has(worldKey)) return recoveringWorlds.get(worldKey);
@@ -292,10 +315,16 @@ export function createLegacyWorldService(options = {}) {
     return businessSettled ? result : settleBusinessResult(result);
   }
 
-  const service = createWorldService({
-    executeLegacyInteraction: (original) => {
+  function executeLegacyInteraction(original) {
       if (!original.contextFile || !original.projectionFile) return execute(original);
-      const request = { ...original, interaction: { ...original.interaction,
+      const request = { ...original,
+        ...(typeof original.onCommitted === 'function' ? {
+          onCommitted: result => original.onCommitted(withSaveState(original, result))
+        } : {}),
+        ...(typeof original.onSubsequentSettled === 'function' ? {
+          onSubsequentSettled: result => original.onSubsequentSettled(withSaveState(original, result))
+        } : {}),
+        interaction: { ...original.interaction,
         id: original.interaction?.id ?? crypto.randomUUID() } };
       const key = `${path.resolve(request.contextFile)}\0${request.interaction.id}`;
       const recoveredBinding = recoveryRequests.get(original);
@@ -327,21 +356,25 @@ export function createLegacyWorldService(options = {}) {
       activeInteractions.set(key, entry);
       entry.running = executeInteraction(request, entry).finally(() => activeInteractions.delete(key));
       return entry.running;
-    }
+  }
+  const service = createWorldService({
+    executeLegacyInteraction: async original => withSaveState(original, await executeLegacyInteraction(original))
   });
   return Object.freeze({
     ...service,
-    async saveStatus(request) {
-      if (!request?.contextFile || !request?.projectionFile) return null;
-      const persistence = transactionFor(request);
-      await recoverPersistence(persistence);
-      return structuredClone(persistence.saveStatus ?? { pending: false });
-    },
+    captureSaveState,
+    async saveStatus(request) { return captureSaveState(request); },
     async flushSaves() {
       await Promise.all([...transactions.values()].map((persistence) => persistence.flushSaves?.()));
     },
-    async closeSaves() {
-      await Promise.all([...transactions.values()].map((persistence) => persistence.closeSaves?.()));
+    beginClose,
+    closeSaves({ timeoutMs = options.shutdownTimeoutMs ?? DEFAULT_WORLD_SHUTDOWN_TIMEOUT_MS, deadline } = {}) {
+      if (closePromise) return closePromise;
+      const absoluteDeadline = worldShutdownDeadline({ timeoutMs, deadline });
+      beginClose();
+      closePromise = withinWorldShutdown(Promise.all([...transactions.values()]
+        .map(persistence => persistence.closeSaves?.({ deadline: absoluteDeadline }))), absoluteDeadline);
+      return closePromise;
     },
     async readCommittedSnapshot(request) {
       if (!request?.contextFile || !request?.projectionFile) return null;

@@ -13,6 +13,8 @@ import { createCommitCoordinator } from '../world-runtime/commit-coordinator.mjs
 import { createIndependentWorldSaver } from '../world-runtime/independent-world-saver.mjs';
 import { createMemoryTransactionPorts } from '../world-runtime/memory-transaction-ports.mjs';
 import { isSealedWorldFacts, revisionOfWorldFacts } from '../world-runtime/world-revision.mjs';
+import { DEFAULT_WORLD_SHUTDOWN_TIMEOUT_MS, withinWorldShutdown,
+  worldShutdownDeadline, worldShutdownTimeout } from '../world-runtime/world-shutdown.mjs';
 import { createDurableWorldWriter } from './durable-world-writer.mjs';
 import {
   createJsonTransactionJournal,
@@ -44,27 +46,57 @@ function canonicalRevision(value) {
 // All in-process writers for a world use its existing coordinator. Projection hooks
 // stay on each facade; weak ownership never evicts a live writer or retains a world.
 const worldOwners = new Map();
+// A timed-out close must not become a second writer merely because its last
+// facade is collected. Keep the owner strongly fenced until termination proves.
+const quarantinedWorldOwners = new Map();
 const releaseWorldOwner = new FinalizationRegistry(({ key, reference }) => {
   if (worldOwners.get(key) === reference) worldOwners.delete(key);
 });
+
+function terminateWorldOwner(owner) {
+  if (!owner.termination) {
+    quarantinedWorldOwners.set(owner.worldKey, owner);
+    owner.termination = Promise.resolve().then(() => owner.writer?.close()).then(() => {
+      owner.terminated = true;
+      if (worldOwners.get(owner.key)?.deref() === owner) worldOwners.delete(owner.key);
+      if (quarantinedWorldOwners.get(owner.worldKey) === owner) quarantinedWorldOwners.delete(owner.worldKey);
+    });
+    owner.termination.catch(() => {});
+  }
+  return owner.termination;
+}
 
 function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProjection,
   worldId, runtimeAuthority = 'disk', saveSchedule, writerFactory = createDurableWorldWriter,
   onSaved }) {
   const key = JSON.stringify([path.resolve(contextFile), path.resolve(journalFile), worldId, runtimeAuthority]);
+  const pathKey = file => process.platform === 'win32' ? path.resolve(file).toLowerCase() : path.resolve(file);
+  const worldKey = JSON.stringify([pathKey(contextFile), pathKey(journalFile), worldId]);
+  if (quarantinedWorldOwners.has(worldKey)) {
+    throw problem('WORLD_SAVE_WORKER_QUARANTINED', 'Prior world writer termination is not confirmed');
+  }
   let owner = worldOwners.get(key)?.deref();
+  if (owner?.closing) throw problem('WORLD_SAVE_WORKER_CLOSED', 'World owner is closing');
   if (!owner) {
     if (runtimeAuthority === 'memory') {
-      owner = { key, runtimeAuthority, recovery: null, ready: null, writer: null, saver: null,
+      owner = { key, worldKey, runtimeAuthority, recovery: null, ready: null, writer: null, saver: null,
         projections: new Set(), savedListeners: new Set(), durableTail: Promise.resolve(),
         closing: false, closed: false, closePromise: null, writerReady: null };
+      owner.cancelled = new Promise((_, reject) => {
+        owner.cancel = (error) => {
+          owner.cancelError ??= error;
+          reject(owner.cancelError);
+        };
+      });
+      owner.cancelled.catch(() => {});
+      owner.cancellable = (operation) => Promise.race([operation, owner.cancelled]);
       const writerClosed = () => problem('WORLD_SAVE_WORKER_CLOSED', 'Durable writer owner is closing');
       const durableOperation = (operation, work) => {
-        const running = owner.durableTail.then(async () => {
+        const running = owner.cancellable(owner.durableTail.then(async () => {
           if (owner.closed || (owner.closing && operation === 'history')) throw writerClosed();
           if (owner.writer.lifecycle?.terminalFailure) {
             if (owner.closing) throw writerClosed();
-            await owner.writer.close();
+            await owner.cancellable(owner.writer.close());
             if (owner.closing || owner.closed) throw writerClosed();
             const replacement = writerFactory({ contextFile, journalFile, worldId });
             owner.writer = replacement;
@@ -72,12 +104,13 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
             // this older checkpoint. Keep non-transport initialization errors
             // latched rather than spawning another worker on every retry.
             owner.writerReady = Promise.resolve().then(() => replacement.initialize());
-            await owner.writerReady;
+            await owner.cancellable(owner.writerReady);
             if (owner.closing || owner.closed) throw writerClosed();
           }
-          await owner.writerReady;
+          await owner.cancellable(owner.writerReady);
+          if (owner.closed || (owner.closing && operation === 'history')) throw writerClosed();
           return work(owner.writer);
-        });
+        }));
         owner.durableTail = running.then(() => {}, () => {});
         return running;
       };
@@ -91,7 +124,7 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
         owner.writer = writer;
         owner.writerReady = Promise.resolve().then(() => writer.initialize());
         const { initialSnapshot, compatibilityManifest, durableReceipts, durableOutcomes } =
-          await owner.writerReady;
+          await owner.cancellable(owner.writerReady);
         let sequence = 0;
         let savedSequence = 0;
         let unsaved = [];
@@ -105,6 +138,8 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
             return result.revision;
           },
           onSaved: ({ version }) => {
+            if (owner.cancelError) throw owner.cancelError;
+            if (owner.closing && Date.now() >= owner.closeDeadline) throw worldShutdownTimeout();
             const savedEvent = owner.savedWorldVersions.get(version);
             ports.markSaved({ version: savedEvent.version, revision: savedEvent.revision });
             // onSaved runs only after the saver validates the exact returned
@@ -150,12 +185,10 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
         owner.memoryJournalRepository = ports.journalRepository;
         owner.memoryCoordinator = createCommitCoordinator(ports);
         owner.saver = saver;
+        if (owner.closing) ports.beginClose();
       })().catch(async (error) => {
-        try { await owner.writer?.close(); }
+        try { await owner.cancellable(terminateWorldOwner(owner)); }
         catch { /* Preserve the initialization failure as the authoritative cause. */ }
-        finally {
-          if (worldOwners.get(key)?.deref() === owner) worldOwners.delete(key);
-        }
         throw error;
       });
     } else {
@@ -191,13 +224,28 @@ export function createTransactionalWorldPersistence({
   publishLegacyProjection = true,
   runtimeAuthority = 'disk',
   saveSchedule = null,
+  shutdownTimeoutMs = DEFAULT_WORLD_SHUTDOWN_TIMEOUT_MS,
   writerFactory = createDurableWorldWriter,
   onAuthoritativeWrite = async () => {},
   onSaved = null
 }) {
+  worldShutdownDeadline({ timeoutMs: shutdownTimeoutMs });
   const owner = ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProjection,
     worldId, runtimeAuthority, saveSchedule, writerFactory, onSaved });
   const { worldRepository, journalRepository, coordinator } = owner;
+
+  function beginClose() {
+    if (owner.runtimeAuthority !== 'memory' || owner.closing) return;
+    owner.closing = true;
+    if (!owner.terminated) quarantinedWorldOwners.set(owner.worldKey, owner);
+    owner.memoryPorts?.beginClose();
+  }
+
+  function assertAccepting() {
+    if (owner.runtimeAuthority === 'memory' && (owner.closing || owner.closed)) {
+      throw problem('WORLD_SAVE_WORKER_CLOSED', 'World owner is closed to new writes');
+    }
+  }
 
   function recover() {
     owner.recovery ??= coordinator.recover()
@@ -361,6 +409,7 @@ export function createTransactionalWorldPersistence({
     compatibilityManifest: suppliedManifest = null,
     baseCompatibilityManifest: suppliedBaseManifest = null
   }) {
+    assertAccepting();
     await recover();
     async function existingExecutionReceipt() {
       if (postCommitEvent) {
@@ -552,6 +601,7 @@ export function createTransactionalWorldPersistence({
   }
 
   async function rollback({ targetCommandId, correlationId, expectedRevision }) {
+    assertAccepting();
     await recover();
     const canonicalExpectedRevision = canonicalRevision(expectedRevision);
     const receipt = await coordinator.rollback({
@@ -623,7 +673,7 @@ export function createTransactionalWorldPersistence({
       return owner.runtimeAuthority === 'memory'
         ? owner.saver ? { ...owner.memoryPorts.authority.status(),
           pending: owner.saver.status().pending,
-          failure: owner.saver.status().failure,
+          failure: owner.shutdownFailure ?? owner.saver.status().failure,
           auxiliaryFailure: owner.auxiliaryFailure ?? null }
           : { pending: false, initializing: true }
         : { pending: false };
@@ -634,22 +684,31 @@ export function createTransactionalWorldPersistence({
       await owner.ready;
       return owner.saver.flush();
     },
-    async closeSaves() {
+    beginClose,
+    async closeSaves({ timeoutMs = shutdownTimeoutMs, deadline } = {}) {
       if (owner.runtimeAuthority !== 'memory') return { pending: false };
       if (owner.closePromise) return owner.closePromise;
-      owner.closing = true;
+      owner.closeDeadline = worldShutdownDeadline({ timeoutMs, deadline });
+      beginClose();
       owner.closePromise = (async () => {
         try {
-          await owner.ready;
-          return await owner.saver.close();
-        } finally {
+          return await withinWorldShutdown((async () => {
+            await owner.ready;
+            try { return await owner.saver.close(); }
+            finally {
+              owner.closed = true;
+              owner.cancel(problem('WORLD_SAVE_WORKER_CLOSED', 'Durable writer owner is closed'));
+              await terminateWorldOwner(owner);
+            }
+          })(), owner.closeDeadline);
+        } catch (error) {
           owner.closed = true;
-          try {
-            await owner.durableTail;
-            await owner.writer?.close();
-          } finally {
-            if (worldOwners.get(owner.key)?.deref() === owner) worldOwners.delete(owner.key);
-          }
+          if (error.code === 'WORLD_SAVE_CLOSE_TIMEOUT') owner.shutdownFailure = { code: error.code };
+          owner.cancel(error);
+          // Do not wait behind a hung durable operation before terminating its
+          // worker. The strong quarantine clears only on actual confirmation.
+          void terminateWorldOwner(owner);
+          throw error;
         }
       })();
       return owner.closePromise;
@@ -660,6 +719,7 @@ export function createTransactionalWorldPersistence({
     ...(owner.runtimeAuthority === 'memory' ? {
       readOwnedCommittedSnapshot,
       async claimCandidate(facts) {
+        assertAccepting();
         await owner.ready;
         return owner.memoryPorts.claimCandidate(facts);
       }
@@ -681,6 +741,7 @@ export function createTransactionalWorldPersistence({
       return journalRepository.pendingProgramExecutions();
     },
     async recordProgramExecution(request) {
+      assertAccepting();
       await recover();
       return coordinator.recordProgramExecution(request);
     }

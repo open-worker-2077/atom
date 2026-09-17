@@ -35,8 +35,20 @@ export function createMemoryTransactionPorts({
   const outcomes = new Map(durableOutcomes);
   const claimedCandidates = new WeakSet();
   let staged = null;
+  let closing = false;
+
+  function assertAccepting() {
+    if (closing) throw problem('WORLD_SAVE_WORKER_CLOSED', 'Memory world is closed to new writes');
+  }
+
+  function beginClose() {
+    closing = true;
+    prepared.clear();
+    staged = null;
+  }
 
   function claimCandidate(facts) {
+    assertAccepting();
     sealWorldFactsRevision(facts);
     claimedCandidates.add(facts);
     return facts;
@@ -49,6 +61,7 @@ export function createMemoryTransactionPorts({
         worldId: initialSnapshot.worldId, revision: current.revision, facts: current.facts };
     },
     async compareAndSwap({ commandId, expectedRevision, nextSnapshot }) {
+      assertAccepting();
       if (staged?.commandId === commandId
         && staged.expectedRevision === expectedRevision
         && staged.nextSnapshot.revision === nextSnapshot.revision) return staged.nextSnapshot;
@@ -117,6 +130,7 @@ export function createMemoryTransactionPorts({
     async readState() { return { prepared: structuredClone([...prepared.values()]),
       receipts: structuredClone(entries()) }; },
     async prepare(record) {
+      assertAccepting();
       if (prepared.has(record.commandId) || receiptFor(record.commandId)) {
         throw problem('DUPLICATE_COMMAND_ID', `Command ${record.commandId} already exists`);
       }
@@ -125,6 +139,7 @@ export function createMemoryTransactionPorts({
     async commit(commandId, receipt) {
       const existing = receiptFor(commandId);
       if (existing) return structuredClone(existing);
+      assertAccepting();
       const record = prepared.get(commandId);
       if (!record || !staged) {
         throw problem('MISSING_PREPARED_TRANSACTION', `Command ${commandId} was not staged`);
@@ -174,6 +189,7 @@ export function createMemoryTransactionPorts({
       const existing = outcomes.get(sourceCommandId);
       if (existing && existing.status !== 'pending') return structuredClone(existing);
       if (execution.childReceipt && outcome.status !== 'completed') return execution.outcome;
+      assertAccepting();
       const stored = structuredClone({ ...outcome, ...(execution.childReceipt
         ? { childCommandId: execution.childReceipt.commandId } : {}) });
       outcomes.set(sourceCommandId, stored);
@@ -198,5 +214,5 @@ export function createMemoryTransactionPorts({
     return status;
   }
 
-  return Object.freeze({ authority, worldRepository, journalRepository, markSaved, claimCandidate });
+  return Object.freeze({ authority, worldRepository, journalRepository, markSaved, claimCandidate, beginClose });
 }

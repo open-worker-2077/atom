@@ -163,11 +163,25 @@ export async function createSpatialServer(options = {}) {
     : null;
   backupTrigger?.start();
   const activeAtomInteractions = new Set();
+  const cancelAtomWaits = new Set();
+  let acceptingAtomInteractions = true;
+  function assertAtomAdmission() {
+    if (!acceptingAtomInteractions) throw new SpatialStoreError('WORLD_SAVE_WORKER_CLOSED', 'Atom world is closing');
+  }
+  function beginCloseAtomInteractions() { acceptingAtomInteractions = false; }
+  function cancelAtomInteractions(error) {
+    beginCloseAtomInteractions();
+    for (const cancel of [...cancelAtomWaits]) cancel(error);
+  }
   const atomInteractionTimeoutMs = Math.max(
     1,
     Number(options.atomInteractionTimeoutMs ?? 15_000) || 15_000
   );
   const atomCommandReceipts = new Map();
+  function withAtomSaveState(result) {
+    const saveState = options.atomSaveState?.();
+    return saveState && result && typeof result === 'object' ? { ...result, saveState } : result;
+  }
   let spatialProjectionFailure = null;
   const knowledgeSubscribers = new Set();
   const mutatingSpatialMethods = new Set([
@@ -186,10 +200,23 @@ export async function createSpatialServer(options = {}) {
     }
   }
 
-  function trackAtomInteraction(operation) {
-    const current = Promise.resolve().then(operation);
+  function trackAtomInteraction(operation, onCancel = () => {}) {
+    assertAtomAdmission();
+    let cancel;
+    let cancelled;
+    const interruption = new Promise((_, reject) => {
+      cancel = error => { cancelled = error; try { onCancel(error); } finally { reject(error); } };
+    });
+    cancelAtomWaits.add(cancel);
+    const current = Promise.race([interruption, Promise.resolve().then(() => {
+      if (cancelled) throw cancelled;
+      return operation();
+    })]);
     activeAtomInteractions.add(current);
-    current.finally(() => activeAtomInteractions.delete(current)).catch(() => undefined);
+    current.finally(() => {
+      activeAtomInteractions.delete(current);
+      cancelAtomWaits.delete(cancel);
+    }).catch(() => undefined);
     return current;
   }
 
@@ -200,6 +227,7 @@ export async function createSpatialServer(options = {}) {
   }
 
   function atomCommandRequest(payload, operation, requestFingerprint = null) {
+    assertAtomAdmission();
     const interaction = payload?.interaction && typeof payload.interaction === 'object'
       ? payload.interaction
       : {};
@@ -330,6 +358,11 @@ export async function createSpatialServer(options = {}) {
       } finally {
         clearTimeout(timeout);
       }
+    }, error => {
+      clearTimeout(timeout);
+      controller.abort(error);
+      rejectActiveDeadline(error);
+      reject(error);
     }).catch(() => undefined);
     return receipt;
   }
@@ -523,7 +556,7 @@ export async function createSpatialServer(options = {}) {
           }
           return commandResult;
         });
-        return json(response, 200, { ok: true, result });
+        return json(response, 200, { ok: true, result: withAtomSaveState(result) });
       }
       if (url.pathname === '/__atom/api/human-status' && request.method === 'POST') {
         if (typeof options.atomHumanStatus !== 'function') {
@@ -544,7 +577,7 @@ export async function createSpatialServer(options = {}) {
         });
         const knowledge = await readKnowledge();
         publishKnowledgeChange(knowledge);
-        return json(response, 200, { ok: true, result, knowledge });
+        return json(response, 200, { ok: true, result: withAtomSaveState(result), knowledge });
       }
       if (url.pathname === '/__atom/api/workspace-edit' && request.method === 'POST') {
         if (typeof options.atomWorkspaceEdit !== 'function') {
@@ -563,12 +596,12 @@ export async function createSpatialServer(options = {}) {
             kind: 'workspace-edit',
             operation: payload.operation
           });
-          return json(response, 200, { ok: true, result, knowledge: null });
+          return json(response, 200, { ok: true, result: withAtomSaveState(result), knowledge: null });
         }
         const result = await trackAtomInteraction(() => options.atomWorkspaceEdit(payload));
         const knowledge = await readKnowledge();
         publishKnowledgeChange(knowledge);
-        return json(response, 200, { ok: true, result, knowledge });
+        return json(response, 200, { ok: true, result: withAtomSaveState(result), knowledge });
       }
       if (url.pathname === '/__atom/api/recover-projection' && request.method === 'POST') {
         const remoteAddress = request.socket.remoteAddress ?? '';
@@ -626,7 +659,9 @@ export async function createSpatialServer(options = {}) {
     graphFile,
     mode: bossStore ? 'boss' : 'single',
     publishKnowledgeChange,
-    drainAtomInteractions
+    drainAtomInteractions,
+    beginCloseAtomInteractions,
+    cancelAtomInteractions
   };
 }
 
