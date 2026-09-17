@@ -4,7 +4,10 @@ import test from 'node:test';
 import { projectAtomContext } from '../work-engine/atom-language/context-store.mjs';
 import { projectAtomGraphToKnowledge } from '../work-engine/atom-language/graph-4d-projection.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
-import { collectDefaultBackupBoundary } from '../work-engine/atom-language/default-backup-boundary.mjs';
+import {
+  collectDefaultBackupBoundary,
+  resolveBoundarySelector
+} from '../work-engine/atom-language/default-backup-boundary.mjs';
 import { sealWorldFactsRevision } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 const atom = (key, name, situation = '', slot = [], strut = []) => ({
@@ -244,4 +247,26 @@ test('archive proof never hides active identity collisions, another backup root,
   sealWorldFactsRevision(restored);
   assert.deepEqual(createProgramRuntimeScheduler().prepareRuntimeRecords(restored)
     .map(({ path }) => path), ['Active', 'Backup', 'Archived']);
+});
+
+test('archive proof rejects equal joined paths with different Thing ancestry', () => {
+  const backup = atom('thing@backup@default', 'Backup', '', [atom('thing', 'Shared')]);
+  const before = [atom('thing', 'A/B', '', [backup])];
+  sealWorldFactsRevision(before);
+  collectDefaultBackupBoundary(before);
+
+  const candidate = [atom('thing', 'A', '', [
+    atom('thing', 'B', '', [backup, atom('thing', 'Peer')]),
+    atom('thing', 'C', '', [atom('thing', 'Shared')])
+  ])];
+  sealWorldFactsRevision(candidate);
+  const warm = resolveBoundarySelector(
+    collectDefaultBackupBoundary(candidate), 'Shared', 'A/B/Peer', 'atom.json'
+  );
+  const cold = resolveBoundarySelector(
+    collectDefaultBackupBoundary(structuredClone(candidate)), 'Shared', 'A/B/Peer', 'atom.json'
+  );
+  assert.deepEqual({ path: warm?.path, inactive: warm?.inactive, pathParts: warm?.pathParts },
+    { path: cold?.path, inactive: cold?.inactive, pathParts: cold?.pathParts });
+  assert.deepEqual(cold?.pathParts, ['A', 'B', 'Backup', 'Shared']);
 });

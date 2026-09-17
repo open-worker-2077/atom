@@ -19,3 +19,11 @@ Base: `51381598bbb5038a7eadf72fbfcc955a42c78a05` (interleaved root documentation
 ## Remaining cost / limits
 
 The existing flat SHA-256 commitment still requires a full changed-world hash on the acknowledgement path; this patch neither changes receipt bytes nor establishes the specification's no-global-hash target. Initial or invalidated archive validation remains full, and public complete boundary materialization iterates archived metadata. Program/Transform/Explore and other revision checks retain their own work. The content-free counters prove only a reduced private boundary parse for an unchanged archive, not end-to-end latency acceptance. Root's immutable-revision real-copy measurement and independent review remain the next gates.
+
+## Fix round 1 — composed path is not topology
+
+Independent review found that a retained archive root could have the same joined path text after moving from one Thing named `A/B` to `A → B`. The proof then reused old `pathParts`, changing nearest-domain selector resolution. The proof now records the root's complete `pathParts` and requires exact component equality before reuse; a topology change takes the existing full-validation route.
+
+- RED: `ATOM_RUNTIME_BACKUP_REPO='' node --test --test-isolation=none --test-name-pattern='archive proof rejects equal joined paths with different Thing ancestry' tests/atom-default-backup-active-boundary.test.mjs` → 0/1, warm selector `{path:'A/C/Shared', inactive:false}` versus cold `{path:'A/B/Backup/Shared', inactive:true}`.
+- GREEN: same focused command → 1/1. Warm and cold now return the same archived entry with path parts `['A','B','Backup','Shared']`.
+- Affected chain: `ATOM_RUNTIME_BACKUP_REPO='' node --test --test-isolation=none tests/atom-default-backup-active-boundary.test.mjs tests/atom-language-context-store.test.mjs` → 32/32, exit 0. No production data or broader suite was used.

@@ -142,7 +142,7 @@ function archiveProof(boundary) {
   }
   for (const entries of entriesByName.values()) Object.freeze(entries);
   const orderByEntry = new Map(entries.map((entry, index) => [entry, index]));
-  return { root, path, entries, entriesByPath, entriesByName, thingPathByIdentity,
+  return { root, path, pathParts: rootEntry.pathParts, entries, entriesByPath, entriesByName, thingPathByIdentity,
     inactiveAtomPaths, orderByEntry, count: entries.length };
 }
 
@@ -171,7 +171,9 @@ function collectWithArchiveProof(atoms) {
         && isTypedDefaultBackupTypes(thingField.parsed.types);
       if (defaultBackup) {
         const candidate = validatedArchives.get(atom);
-        if (!candidate || candidate.path !== pathText || proof) {
+        if (!candidate || candidate.path !== pathText
+          || candidate.pathParts.length !== path.length
+          || candidate.pathParts.some((part, index) => part !== path[index]) || proof) {
           invalidated = true;
           return;
         }
