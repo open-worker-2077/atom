@@ -19,7 +19,19 @@ const worldRepository = createJsonWorldRepository({ file: contextFile, worldId,
 const journalRepository = createJsonTransactionJournal({ file: journalFile });
 const coordinator = createCommitCoordinator({ worldRepository, journalRepository });
 let latestCompatibilityManifest = null;
-let manifestLoaded = false;
+let initialization = null;
+
+function initialize() {
+  initialization ??= (async () => {
+    await coordinator.recover();
+    const initialSnapshot = await worldRepository.read();
+    const { receipts, outcomes } = await journalRepository.readMetadataState();
+    latestCompatibilityManifest = receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null;
+    return { initialSnapshot, durableReceipts: receipts, durableOutcomes: outcomes,
+      compatibilityManifest: latestCompatibilityManifest };
+  })();
+  return initialization;
+}
 
 async function persistRecord(record) {
   const existing = await journalRepository.findReceipt(record.commandId);
@@ -57,14 +69,20 @@ async function persistRecord(record) {
 }
 
 let tail = Promise.resolve();
-parentPort.on('message', ({ id, records, events, revision, projectionFiles = [] }) => {
+parentPort.on('message', ({ id, operation, commandId, records, events, revision, projectionFiles = [] }) => {
   const work = async () => {
     try {
-      await coordinator.recover();
-      if (!manifestLoaded) {
-        latestCompatibilityManifest = (await journalRepository.latestReceipt())?.result?.compatibilityManifest ?? null;
-        manifestLoaded = true;
+      const initial = await initialize();
+      if (operation === 'initialize') {
+        parentPort.postMessage({ id, ok: true, result: initial });
+        return;
       }
+      if (operation === 'findCommitted') {
+        parentPort.postMessage({ id, ok: true, result: await journalRepository.findCommitted(commandId) });
+        return;
+      }
+      if (operation !== 'save') throw problem('INVALID_WORLD_WRITER_OPERATION', 'Unknown writer operation');
+      await coordinator.recover();
       for (const event of events ?? records.map((record) => ({ kind: 'record', record }))) {
         if (event.kind === 'record') {
           await persistRecord(event.record);
@@ -94,7 +112,7 @@ parentPort.on('message', ({ id, records, events, revision, projectionFiles = [] 
           });
         }
       }
-      parentPort.postMessage({ id, ok: true, revision: current.revision });
+      parentPort.postMessage({ id, ok: true, result: { revision: current.revision } });
     } catch (error) {
       parentPort.postMessage({ id, ok: false, error: { code: error.code ?? error.name,
         message: error.message } });

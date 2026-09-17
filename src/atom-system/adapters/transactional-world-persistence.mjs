@@ -54,16 +54,7 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
   const key = JSON.stringify([path.resolve(contextFile), path.resolve(journalFile), worldId, runtimeAuthority]);
   let owner = worldOwners.get(key)?.deref();
   if (!owner) {
-    const worldRepository = createJsonWorldRepository({
-      file: contextFile,
-      worldId,
-      initialFacts: [],
-      localCommitFile: path.join(`${journalFile}.d`, 'world-commits.jsonl'),
-      autoCompact: true
-    });
-    const journalRepository = createJsonTransactionJournal({ file: journalFile });
     if (runtimeAuthority === 'memory') {
-      const diskCoordinator = createCommitCoordinator({ worldRepository, journalRepository });
       owner = { key, runtimeAuthority, recovery: null, ready: null, writer: null, saver: null,
         projections: new Set(), savedListeners: new Set() };
       const delegate = (field) => new Proxy({}, { get: (_, name) => (...args) =>
@@ -72,15 +63,10 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
       owner.journalRepository = delegate('memoryJournalRepository');
       owner.coordinator = delegate('memoryCoordinator');
       owner.ready = (async () => {
-        await diskCoordinator.recover();
-        const initialSnapshot = await worldRepository.read();
-        const history = await journalRepository.readState();
-        const compatibilityManifest = history.receipts.at(-1)?.receipt?.result?.compatibilityManifest ?? null;
-        const durableOutcomes = await Promise.all(history.receipts
-          .filter((entry) => entry.receipt?.result?.postCommitEvent)
-          .map(async (entry) => [entry.commandId,
-            (await journalRepository.programExecution(entry.commandId))?.outcome ?? null]));
         const writer = writerFactory({ contextFile, journalFile, worldId });
+        owner.writer = writer;
+        const { initialSnapshot, compatibilityManifest, durableReceipts, durableOutcomes } =
+          await writer.initialize();
         let sequence = 0;
         let savedSequence = 0;
         let unsaved = [];
@@ -125,8 +111,8 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
           saver.enqueue({ version: next, revision });
         };
         ports = createMemoryTransactionPorts({ initialSnapshot, compatibilityManifest,
-          durableReceipts: history.receipts, durableOutcomes,
-          durableFindCommitted: (id) => journalRepository.findCommitted(id),
+          durableReceipts, durableOutcomes,
+          durableFindCommitted: (id) => writer.findCommitted(id),
           onAccepted: ({ version, revision, record }) => enqueue({ kind: 'record', record }, version, revision),
           onOutcome: ({ sourceCommandId, outcome }) => {
             const current = ports.authority.snapshot();
@@ -138,8 +124,19 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
         owner.memoryCoordinator = createCommitCoordinator(ports);
         owner.writer = writer;
         owner.saver = saver;
-      })();
+      })().catch(async (error) => {
+        try { await owner.writer?.close(); }
+        catch { /* Preserve the initialization failure as the authoritative cause. */ }
+        finally {
+          if (worldOwners.get(key)?.deref() === owner) worldOwners.delete(key);
+        }
+        throw error;
+      });
     } else {
+      const worldRepository = createJsonWorldRepository({ file: contextFile, worldId,
+        initialFacts: [], localCommitFile: path.join(`${journalFile}.d`, 'world-commits.jsonl'),
+        autoCompact: true });
+      const journalRepository = createJsonTransactionJournal({ file: journalFile });
       owner = { runtimeAuthority, worldRepository, journalRepository,
         coordinator: createCommitCoordinator({ worldRepository, journalRepository }), recovery: null };
     }

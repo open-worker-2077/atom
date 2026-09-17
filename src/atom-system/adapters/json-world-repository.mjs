@@ -361,7 +361,11 @@ export function createJsonWorldRepository({
       : scanned.publishedBytes;
     publication.visibleBytes = visibleBytes;
     publication.initialized = true;
-    return scanLocalLog(buffer.subarray(0, visibleBytes)).records.map((record, index) => {
+    // The first scan has already parsed and verified each published frame.
+    // Parsing the same log again retains two copies of every historical patch
+    // alongside the raw buffer, which exhausts the save worker on large worlds.
+    return scanned.frames.filter((frame) => frame.end <= visibleBytes)
+      .map((frame) => frame.record).map((record, index) => {
       try {
         const localCommit = record?.contract === 'atom.local-commit'
           && record.version === 1
@@ -396,7 +400,7 @@ export function createJsonWorldRepository({
           cause: error.message
         });
       }
-    });
+      });
   }
 
   function applyRecord(current, record) {
@@ -1509,10 +1513,24 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     return { prepared, receipts };
   }
 
+  async function readMetadataState() {
+    const state = await load();
+    // Select metadata before cloning: local patches and snapshot bodies belong
+    // to the durable owner and are fetched only for explicit history operations.
+    const receipts = structuredClone(state.order.map((id) => {
+      const entry = state.receipts.get(id);
+      return { commandId: entry.commandId, historyMode: entry.historyMode, receipt: entry.receipt };
+    }));
+    const outcomes = await Promise.all(receipts
+      .filter((entry) => entry.receipt?.result?.postCommitEvent)
+      .map(async (entry) => [entry.commandId, (await programExecution(entry.commandId)).outcome]));
+    return { receipts, outcomes };
+  }
+
   return Object.freeze({
     file, incrementalDirectory, eventFile, objectDirectory,
     findReceipt, latestReceipt, findPrepared, findCommitted, legacyPreparedEvidence,
-    prepare, commit, abort, listPrepared, readState,
+    prepare, commit, abort, listPrepared, readState, readMetadataState,
     programExecution, programExecutionForInteraction, pendingProgramExecutions, recordProgramExecution
   });
 }

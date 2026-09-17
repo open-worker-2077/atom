@@ -471,7 +471,24 @@ export function createCommitCoordinator({
       chain.push(entry);
       cursor = entry.receipt.afterRevision;
     }
-    return cursor === currentRevision ? chain : null;
+    if (cursor !== currentRevision) return null;
+    // A memory owner keeps durable receipt metadata only. Recover the selected
+    // chain's patches on demand so the original closure proof remains intact.
+    const hydrated = [];
+    for (const entry of chain) {
+      if (entry.historyMode !== 'local-patch' || entry.patch) {
+        hydrated.push(entry);
+        continue;
+      }
+      const record = await journalRepository.findCommitted(entry.commandId);
+      if (!record || record.historyMode !== entry.historyMode
+        || record.commandId !== entry.commandId
+        || record.receipt?.commandId !== entry.receipt?.commandId
+        || record.receipt?.beforeRevision !== entry.receipt?.beforeRevision
+        || record.receipt?.afterRevision !== entry.receipt?.afterRevision) return null;
+      hydrated.push(record);
+    }
+    return hydrated;
   }
 
   async function rebaseCandidate(candidate, current) {

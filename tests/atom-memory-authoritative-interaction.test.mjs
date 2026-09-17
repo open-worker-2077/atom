@@ -26,7 +26,8 @@ test('accepted memory write is readable while independent saving is blocked', as
     saveSchedule: { quietMs: 0, maxDirtyMs: 0 },
     writerFactory: (configuration) => {
       const writer = createDurableWorldWriter(configuration);
-      return { close: () => writer.close(), async save(request) {
+      return { initialize: () => writer.initialize(), findCommitted: (id) => writer.findCommitted(id),
+        close: () => writer.close(), async save(request) {
         enteredSave();
         await saveGate;
         return writer.save(request);
@@ -80,7 +81,8 @@ test('a save failure reports dirty state but does not undo an accepted read', as
     saveSchedule: { quietMs: 0, maxDirtyMs: 0, retryMs: 60000 },
     writerFactory: (configuration) => {
       const writer = createDurableWorldWriter(configuration);
-      return { close: () => writer.close(), save(request) {
+      return { initialize: () => writer.initialize(), findCommitted: (id) => writer.findCommitted(id),
+        close: () => writer.close(), save(request) {
         if (!failedOnce) {
           failedOnce = true;
           failObserved();
@@ -119,9 +121,12 @@ test('closing a failed saver releases its writer even when flush rejects', async
   const service = createLegacyWorldService({ memoryAuthoritative: true,
     publishLegacyProjection: false,
     saveSchedule: { quietMs: 60000, maxDirtyMs: 60000 },
-    writerFactory: () => ({ save: async () => {
-      throw Object.assign(new Error('injected save failure'), { code: 'EIO' });
-    }, close: async () => { writerClosed = true; } }),
+    writerFactory: (configuration) => {
+      const writer = createDurableWorldWriter(configuration);
+      return { initialize: () => writer.initialize(), findCommitted: (id) => writer.findCommitted(id),
+        save: async () => { throw Object.assign(new Error('injected save failure'), { code: 'EIO' }); },
+        close: async () => { writerClosed = true; await writer.close(); } };
+    },
     execute: async (request) => {
       await request.commitWorld({ expectedRevision: revisionOfWorldFacts(before),
         nextRevision: revisionOfWorldFacts(after), facts: after });

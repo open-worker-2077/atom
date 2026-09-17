@@ -1,4 +1,5 @@
 import { Worker } from 'node:worker_threads';
+import { sealWorldFactsRevision } from '../world-runtime/world-revision.mjs';
 
 function problem(code, message) {
   return Object.assign(new Error(message), { code });
@@ -21,12 +22,13 @@ export function createDurableWorldWriter({ contextFile, journalFile, worldId = '
   });
   let failed = null;
   let closed = false;
+  let initialization = null;
   worker.on('message', (message) => {
     if (message.ready) { readyResolve(); return; }
     const entry = pending.get(message.id);
     if (!entry) return;
     pending.delete(message.id);
-    if (message.ok) entry.resolve({ revision: message.revision });
+    if (message.ok) entry.resolve(message.result);
     else entry.reject(problem(message.error?.code ?? 'WORLD_SAVE_FAILED',
       message.error?.message ?? 'Durable world save failed'));
   });
@@ -40,7 +42,42 @@ export function createDurableWorldWriter({ contextFile, journalFile, worldId = '
   worker.on('exit', (code) => {
     if (!closed) fail(problem('WORLD_SAVE_WORKER_EXITED', `Durable world writer exited (${code})`));
   });
+  async function request(operation, payload = {}) {
+    if (closed || failed) throw failed ?? problem('WORLD_SAVE_WORKER_CLOSED', 'Writer is closed');
+    await ready;
+    if (closed || failed) throw failed ?? problem('WORLD_SAVE_WORKER_CLOSED', 'Writer is closed');
+    const id = ++nextId;
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      try { worker.postMessage({ id, operation, ...payload }); }
+      catch (error) { pending.delete(id); reject(error); }
+    });
+  }
+  function initialize() {
+    initialization ??= request('initialize').then((result) => {
+      // Structured cloning across a worker boundary drops both freezing and
+      // the local revision seal. Restore that invariant before memory adoption.
+      const snapshot = result.initialSnapshot;
+      if (snapshot?.worldId !== worldId
+        || sealWorldFactsRevision(snapshot.facts) !== snapshot.revision) {
+        throw problem('INVALID_WORLD_REVISION', 'Recovered snapshot failed revision verification');
+      }
+      Object.freeze(snapshot);
+      return result;
+    });
+    return initialization;
+  }
+  // A worker can fail before a caller starts its first RPC.
+  ready.catch(() => {});
   return Object.freeze({
+    initialize,
+    async findCommitted(commandId) {
+      if (typeof commandId !== 'string' || !commandId) {
+        throw problem('INVALID_WORLD_HISTORY_QUERY', 'History lookup requires a command id');
+      }
+      await initialize();
+      return request('findCommitted', { commandId });
+    },
     async save({ records = [], events, revision, projectionFiles = [] }) {
       if (closed || failed) throw failed ?? problem('WORLD_SAVE_WORKER_CLOSED', 'Writer is closed');
       if (!Array.isArray(records) || !Array.isArray(projectionFiles)
@@ -48,17 +85,13 @@ export function createDurableWorldWriter({ contextFile, journalFile, worldId = '
         || typeof revision !== 'string') {
         throw problem('INVALID_WORLD_SAVE_BATCH', 'Save requires ordered records and revision');
       }
-      await ready;
-      const id = ++nextId;
-      return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-        try { worker.postMessage({ id, records, events, revision, projectionFiles }); }
-        catch (error) { pending.delete(id); reject(error); }
-      });
+      await initialize();
+      return request('save', { records, events, revision, projectionFiles });
     },
     async close() {
       if (closed) return;
       closed = true;
+      readyReject(problem('WORLD_SAVE_WORKER_CLOSED', 'Writer closed'));
       for (const entry of pending.values()) entry.reject(problem('WORLD_SAVE_WORKER_CLOSED', 'Writer closed'));
       pending.clear();
       await worker.terminate();
