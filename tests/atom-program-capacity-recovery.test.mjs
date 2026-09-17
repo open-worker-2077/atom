@@ -6,6 +6,7 @@ import test from 'node:test';
 import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import { sealWorldFactsRevision } from '../src/atom-system/world-runtime/world-revision.mjs';
+import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 
 process.env.ATOM_RUNTIME_BACKUP_REPO = '';
 const facts = situation => [{ thing: 'Root', situation, slot: [], strut: [] }];
@@ -17,7 +18,8 @@ async function until(predicate) {
     await tick();
   }
 }
-async function fixture(t, { maxEvents = 3, oversized = false, recoveredSeed = null, afterAttempt, rejectFirstAttempt = false } = {}) {
+async function fixture(t, { maxEvents = 3, oversized = false, recoveredSeed = null, afterAttempt, rejectFirstAttempt = false,
+  source = 'write', realEngine = false } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-capacity-'));
   t.diagnostic(`Retained synthetic fixture: ${directory}`);
   const target = { contextFile: path.join(directory, 'atom.json'), projectionFile: path.join(directory, 'graph.json') };
@@ -32,13 +34,13 @@ async function fixture(t, { maxEvents = 3, oversized = false, recoveredSeed = nu
     save: async batch => { saved.push(...batch.events); return { revision: batch.revision }; } }) });
   let sourceReceipt, attempts = 0;
   const service = createLegacyWorldService({ memoryAuthoritative: true, transactionProvider: () => persistence,
-    execute: async request => {
+    execute: realEngine ? executeAtomLanguage : async request => {
       if (request.source === 'read') return { ok: true, changed: false };
       if (!request.programExecution) {
         sourceReceipt = await request.commitWorld({ expectedRevision: request.committedSnapshot.revision,
           nextRevision: sealWorldFactsRevision(facts('source')), facts: facts('source'), changedPaths: ['Root'],
           affectedPathClosureComplete: true, postCommitEvent: { binding: request.interactionBinding,
-            interaction: request.interaction, enabled: true } });
+            interaction: request.interaction, enabled: true, resultPaths: ['Root'] } });
         await request.onCommitted({ ok: true, changed: true, messages: [], errors: [], warnings: [],
           subsequentExecution: { status: 'pending' }, revisionAfter: sourceReceipt.afterRevision });
       } else sourceReceipt = request.programExecution.sourceReceipt;
@@ -61,7 +63,7 @@ async function fixture(t, { maxEvents = 3, oversized = false, recoveredSeed = nu
       return result;
     } });
   t.after(() => service.closeSaves());
-  const request = { ...target, source: 'write', interaction: { id: 'source' }, programScheduler: {} };
+  const request = { ...target, source, interaction: { id: 'source' }, programScheduler: {} };
   return { service, persistence, saved, request, attempts: () => attempts,
     execution: () => persistence.programExecutionForInteraction('source') };
 }
@@ -146,3 +148,48 @@ test('recovered pending source obtains capacity on demand and keeps its original
   assert.equal(replay.subsequentExecution.status, 'completed');
   assert.equal(fresh.attempts(), 1);
 });
+
+for (const status of ['completed', 'failed']) {
+  test(`replaying saved ${status} without result rebuilds through the real engine without reserving future capacity`, async t => {
+    const source = 'transform {"thing":"Root","situation.rep.source"}';
+    const old = await fixture(t, { source });
+    await old.service.executeLegacy(old.request);
+    await old.service.closeSaves();
+    const recoveredFacts = facts('source');
+    const revision = sealWorldFactsRevision(recoveredFacts);
+    const durableReceipts = old.saved.filter(event => event.kind === 'record').map(event => ({
+      commandId: event.record.commandId, historyMode: event.record.historyMode, receipt: event.record.receipt }));
+    const terminal = { status, sourceRevision: revision.replace(/^sha256:/u, ''),
+      revisionAfter: revision.replace(/^sha256:/u, ''), errors: status === 'failed' ? [{ code: 'KNOWN_PROGRAM_FAILURE' }] : [] };
+    const fresh = await fixture(t, { source, realEngine: true, maxEvents: 2,
+      recoveredSeed: { initialSnapshot: { worldId: 'primary', facts: recoveredFacts, revision },
+        durableReceipts, durableOutcomes: [[durableReceipts[0].commandId, terminal]] } });
+    await fresh.persistence.recover();
+    const assertEmpty = () => {
+      const capacity = fresh.persistence.saveStatus.capacity;
+      assert.equal(capacity.events, 0);
+      assert.equal(capacity.bytes, 0);
+      assert.equal(capacity.reservedEvents, 0);
+    };
+    assertEmpty();
+    for (let replay = 0; replay < 3; replay++) {
+      const result = await fresh.service.executeLegacy(fresh.request);
+      assert.equal(result.ok, true);
+      assert.equal(result.subsequentExecution.status, status);
+      assert.deepEqual((await fresh.execution()).outcome, terminal);
+      await fresh.service.flushSaves();
+      assertEmpty();
+    }
+    assert.equal(fresh.saved.length, 0, 'historical result reconstruction must not produce save events');
+    const nextFacts = facts('new-write');
+    await fresh.persistence.commit({ expectedRevision: revision, nextRevision: sealWorldFactsRevision(nextFacts),
+      facts: nextFacts, changedPaths: ['Root'], affectedPathClosureComplete: true,
+      correlationId: 'new-write', source: 'new-write' });
+    assert.equal((await fresh.persistence.readCommittedSnapshot()).facts[0].situation, 'new-write');
+    await fresh.service.flushSaves();
+    assertEmpty();
+    const replayAfterSave = await fresh.service.executeLegacy(fresh.request);
+    assert.equal(replayAfterSave.subsequentExecution.status, status);
+    assertEmpty();
+  });
+}

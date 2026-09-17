@@ -115,3 +115,53 @@ Includes 17 new cases plus existing sealed-candidate transfer, saved-body hydrat
 - **Safety:** Rejected preparation does not enqueue; accepted callbacks cannot reject capacity. Release notification exceptions are absorbed after state transitions, and owner callbacks run later in a microtask. WeakSet completion joining cannot accumulate duplicate waiters for an active invocation. No timer-based full-capacity retry loop was introduced.
 - **Configuration:** A budget too small for source plus two maximum outcome reservations intentionally rejects the new source before acceptance. Raising limits/configuring an explicit bounded final outcome is an engineering/operational resolution for hard oversize; no automatic shortened terminal result or spill store is offered. Existing owners retain the configuration of their first facade, consistent with existing owner composition.
 - **Remaining limits:** Metadata history growth and startup historical replay are separate from unsaved capacity. This change does not claim a physical-memory cap, eliminate flatSHA CPU, or solve oversized arbitrary business results. An exceptionally tiny single-event cap can also be too small for the compact diagnostic; it remains a capacity rejection, not permission to accept an unaccounted body. Real-scale/performance and rollout gates remain root-owned.
+
+## Fix round 1 — terminal replay must not reserve future outcomes
+
+- **Finding / base:** Independent review Important1 against `f7a2e69b744e433b05d3ce17eea080d8c3396a49`: a legitimate saved `completed` or `failed` outcome without a cached `result` reached the adapter's unconditional reservation. The engine correctly reconstructed the result and the journal correctly returned the existing terminal outcome, leaving two future reservations with no corresponding save event to release them.
+- **Minimal fix:** The existing adapter reservation call now runs only for absent/pending outcomes. Terminal outcomes without result still pass through the unchanged real engine reconstruction and journal idempotent return. No ports, accounting, saver, close, disk format, marker or recovery-state changes are needed.
+- **Regression oracle:** Two cases restore valid source receipts with completed/failed outcome metadata but no result, then invoke the real adapter and `executeAtomLanguage`. Three repeated replays plus clean flushes must retain zero bytes/events/reservations and unchanged terminal outcomes, without new save events. A subsequent plain write must be accepted and saved; another historical replay after that save must still consume zero capacity. Fixtures retain their source/recovered directories. The helper now includes the real event's `resultPaths`, required for engine reconstruction.
+
+RED command (backup env empty):
+
+```powershell
+$env:ATOM_RUNTIME_BACKUP_REPO=''
+node --test --test-name-pattern='replaying saved' tests/atom-program-capacity-recovery.test.mjs
+```
+
+Exit 1: both reconstructed successfully, then failed the capacity assertion with actual 2, expected 0:
+
+```text
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 401.1178
+```
+
+Retained RED recovered fixtures: `C:/Users/worker/AppData/Local/Temp/atom-program-capacity-t9mTEE` and `atom-program-capacity-KxrEU7`. The preceding attempt failed because the old synthetic event omitted `resultPaths`; that fixture error was corrected before taking RED evidence and was not treated as a runtime defect.
+
+GREEN directly affected chain:
+
+```powershell
+$env:ATOM_RUNTIME_BACKUP_REPO=''
+node --test tests/atom-program-capacity-recovery.test.mjs tests/atom-memory-save-capacity.test.mjs tests/atom-memory-transaction-ports.test.mjs tests/atom-world-service-contract.test.mjs tests/atom-memory-persistence-integration.test.mjs
+```
+
+Exit 0:
+
+```text
+ℹ tests 58
+ℹ suites 0
+ℹ pass 58
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3115.3229
+```
+
+Retained GREEN terminal-replay fixtures: `C:/Users/worker/AppData/Local/Temp/atom-program-capacity-tJGCi1` and `atom-program-capacity-ms2PcW`. No unhandled rejection or runtime warning appeared. `git diff --check` passed, with only repository CRLF-normalization warnings. Self-review confirms the branch change does not skip engine reconstruction, rewrite saved outcomes, reserve for determined terminal state, or alter pending/source admission. Root's dirty plan remains untouched; only the adapter, focused test file and this report are in the fix commit. No new concern beyond the earlier stated quota boundaries.

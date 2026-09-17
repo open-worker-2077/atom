@@ -231,7 +231,13 @@ export function createLegacyWorldService(options = {}) {
       assertBinding(execution.event.binding, entry.binding);
       if (isHardCapacityBlocked(execution.outcome)) return capacityPendingResult(request, execution);
       if (execution.outcome?.result && execution.outcome.status !== 'pending') return execution.outcome.result;
-      try { await persistence.reserveProgramExecution?.(execution.sourceReceipt.commandId); }
+      try {
+        // A saved terminal without a cached result still needs engine result
+        // reconstruction, but has no future outcomes to reserve or release.
+        if (!execution.outcome || execution.outcome.status === 'pending') {
+          await persistence.reserveProgramExecution?.(execution.sourceReceipt.commandId);
+        }
+      }
       catch (error) {
         if (!isWorldCapacityError(error)) throw error;
         return capacityPendingResult(request, execution, { code: error.code, retryable: error.code === 'WORLD_SAVE_BACKPRESSURE' });
