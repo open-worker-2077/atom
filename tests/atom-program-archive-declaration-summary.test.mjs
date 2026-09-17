@@ -11,7 +11,10 @@ import {
   hasValidatedDefaultBackupArchiveAt
 } from '../work-engine/atom-language/default-backup-boundary.mjs';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
-import { walkAtoms } from '../work-engine/atom-language/query-capability.mjs';
+import {
+  isStoredTypedDefaultBackupAtom,
+  walkAtoms
+} from '../work-engine/atom-language/query-capability.mjs';
 
 const atom = (thing, situation = '', slot = []) => ({ thing, situation, slot, strut: [] });
 
@@ -129,6 +132,20 @@ test('archive proof requires the same sealed root and complete topology, not joi
   assert.equal(hasValidatedDefaultBackupArchiveAt(getter, ['A/B', 'Backup']), false);
   name = 'Changed';
   assert.equal(hasValidatedDefaultBackupArchiveAt(getter, ['A/B', 'Backup']), false);
+});
+
+test('a second typed backup with duplicate thing fields invalidates archive reuse', () => {
+  const archive = { 'thing@backup@default': 'Backup', situation: '', slot: [], strut: [] };
+  const before = [archive];
+  sealWorldFactsRevision(before);
+  collectDefaultBackupBoundary(before);
+  const duplicate = { 'thing@backup@default': 'Other', thing: 'Alias',
+    situation: '', slot: [], strut: [] };
+  const candidate = [archive, duplicate];
+  assert.equal(hasValidatedDefaultBackupArchiveAt(archive, ['Backup']), true);
+  assert.throws(() => collectDefaultBackupBoundary(candidate), { code: 'AMBIGUOUS_DEFAULT_BACKUP' });
+  assert.equal(isStoredTypedDefaultBackupAtom(duplicate), true,
+    'declaration reuse must fall back whenever boundary sees another typed root');
 });
 
 test('walk semantics retain nested Program order, duplicate and missing thing fields, and index placeholders', () => {

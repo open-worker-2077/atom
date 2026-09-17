@@ -66,7 +66,9 @@ export function readOnlyProgramDeclarationFields(atom) {
 }
 
 export function isStoredTypedDefaultBackupAtom(atom) {
-  const types = readStoredField(atom, 'thing')?.parsed.types ?? [];
+  // Boundary classification takes the first thing field. The first valid
+  // descriptor is conservative if an earlier malformed field was omitted.
+  const types = fieldDescriptions(atom).get('thing')?.[0]?.parsed.types ?? [];
   return types.some((type) => type.raw === 'backup')
     && types.some((type) => type.raw === 'default');
 }
