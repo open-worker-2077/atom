@@ -5,19 +5,23 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
-import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { executeAtomCommandEndpoint } from '../work-engine/atom-language/cli.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
 
+// A copied world must never inherit the production runtime's private backup target.
+process.env.ATOM_RUNTIME_BACKUP_REPO = '';
 if (process.argv.includes('--trace')) process.env.ATOM_PERF_TRACE = '1';
 const cleanupCopy = process.argv.includes('--cleanup');
 const measureStructuralLatency = process.argv.includes('--structural-latency');
 const createProgram = process.argv.includes('--program-create');
 const memoryAuthoritative = process.argv.includes('--memory-authoritative');
+const stageTimeoutMs = Number(argument('--stage-timeout-ms') ?? 300_000);
+if (!Number.isSafeInteger(stageTimeoutMs) || stageTimeoutMs <= 0) {
+  throw new Error('--stage-timeout-ms must be a positive integer');
+}
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -30,39 +34,94 @@ const contextFile = path.join(directory, 'atom.json');
 const graphFile = path.join(directory, 'graph.json');
 const storeFile = path.join(directory, 'knowledge.json');
 const journalFile = path.join(directory, 'atom.transactions.json');
-const sourceContents = await fs.readFile(sourceContext, 'utf8');
-await fs.copyFile(sourceContext, contextFile);
-const sourceRevision = revisionOfWorldFacts(JSON.parse(sourceContents));
-const journalModuleUrl = new URL('../src/atom-system/adapters/json-world-repository.mjs', import.meta.url).href;
-const { stdout: receiptCountText } = await promisify(execFile)(process.execPath, [
-  '--input-type=module', '--eval',
-  `import { createJsonTransactionJournal } from ${JSON.stringify(journalModuleUrl)};
-   process.stdout.write(String((await createJsonTransactionJournal({ file: process.argv[1] }).readState()).receipts.length));`,
-  journalFile
-], { maxBuffer: 1024 });
-const initialReceiptCount = Number(receiptCountText);
-if (!Number.isSafeInteger(initialReceiptCount) || initialReceiptCount < 0) {
-  throw new Error('Cannot count the copied pre-write journal receipts');
+let activeStage = null;
+function beginStage(name) {
+  if (activeStage) throw new Error(`Stage ${activeStage.name} is still active`);
+  process.stderr.write(`${JSON.stringify({ event: 'acceptance-stage', stage: name, status: 'started' })}\n`);
+  const startedAt = Date.now();
+  const timer = setTimeout(() => {
+    process.stderr.write(`${JSON.stringify({
+      event: 'acceptance-stage', stage: name, status: 'timed-out',
+      elapsedMs: Date.now() - startedAt, tempDirectory: directory
+    })}\n`);
+    // Do not await close() here: a stuck saver may be the operation being diagnosed.
+    process.exit(124);
+  }, stageTimeoutMs);
+  activeStage = { name, startedAt, timer };
 }
-const sourceProgramProjection = path.join(path.dirname(sourceContext), 'program-projection.json');
-try {
-  await fs.copyFile(sourceProgramProjection, path.join(directory, 'program-projection.json'));
-} catch (error) {
-  if (error.code !== 'ENOENT') throw error;
+function endStage(status = 'completed') {
+  if (!activeStage) return;
+  const { name, startedAt, timer } = activeStage;
+  clearTimeout(timer);
+  activeStage = null;
+  process.stderr.write(`${JSON.stringify({
+    event: 'acceptance-stage', stage: name, status, elapsedMs: Date.now() - startedAt
+  })}\n`);
 }
-for (const name of ['atom.transactions.json', 'atom.transactions.json.d']) {
+async function stage(name, operation) {
+  beginStage(name);
   try {
-    await fs.cp(path.join(path.dirname(sourceContext), name), path.join(directory, name), {
-      recursive: true
-    });
+    const result = await operation();
+    endStage();
+    return result;
+  } catch (error) {
+    endStage('failed');
+    throw error;
+  }
+}
+const journalModuleUrl = new URL('../src/atom-system/adapters/json-world-repository.mjs', import.meta.url).href;
+const persistenceModuleUrl = new URL('../src/atom-system/adapters/transactional-world-persistence.mjs', import.meta.url).href;
+async function inspectCopiedJournal(mode, baselineCount = 0) {
+  const { stdout } = await promisify(execFile)(process.execPath, [
+    '--input-type=module', '--eval',
+    `import { createJsonTransactionJournal } from ${JSON.stringify(journalModuleUrl)};
+     import { createTransactionalWorldPersistence } from ${JSON.stringify(persistenceModuleUrl)};
+     const [contextFile, graphFile, journalFile, mode, baselineText] = process.argv.slice(1);
+     const receipts = (await createJsonTransactionJournal({ file: journalFile }).readState()).receipts;
+     const result = mode === 'baseline'
+       ? { receiptCount: receipts.length, revision: (await createTransactionalWorldPersistence({
+           contextFile, projectionFile: graphFile, journalFile, publishLegacyProjection: false
+         }).readCommittedSnapshot()).revision }
+       : { newCommits: receipts.slice(Number(baselineText)).map(({ receipt }) => ({
+           commandId: receipt.commandId, afterRevision: receipt.afterRevision
+         })) };
+     process.stdout.write(JSON.stringify(result));`,
+    contextFile, graphFile, journalFile, mode, String(baselineCount)
+  ], { maxBuffer: 1024 * 1024, env: { ...process.env, ATOM_RUNTIME_BACKUP_REPO: '' } });
+  return JSON.parse(stdout);
+}
+const sourceContents = await stage('copy', async () => {
+  const contents = await fs.readFile(sourceContext);
+  await fs.copyFile(sourceContext, contextFile);
+  const sourceProgramProjection = path.join(path.dirname(sourceContext), 'program-projection.json');
+  try {
+    await fs.copyFile(sourceProgramProjection, path.join(directory, 'program-projection.json'));
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
+  for (const name of ['atom.transactions.json', 'atom.transactions.json.d']) {
+    try {
+      await fs.cp(path.join(path.dirname(sourceContext), name), path.join(directory, name), {
+        recursive: true
+      });
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  return contents;
+});
+const { receiptCount: initialReceiptCount, revision: sourceRevision } = await stage(
+  'baseline', () => inspectCopiedJournal('baseline')
+);
+if (!Number.isSafeInteger(initialReceiptCount) || initialReceiptCount < 0
+  || typeof sourceRevision !== 'string' || !sourceRevision) {
+  throw new Error('Cannot verify the copied committed-world baseline');
 }
 
 let running;
 let monitor;
 try {
+  beginStage('startup');
   const copiedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   const programScheduler = createProgramRuntimeScheduler({
     projectionRepository: createJsonProgramProjectionRepository({
@@ -79,6 +138,7 @@ try {
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, programScheduler,
     memoryAuthoritative, ...(process.argv.includes('--trace') ? { timingInteractionId: writeInteractionId } : {})
   });
+  endStage();
   const endpoint = `${running.url}/__atom/api/command`;
   const port = running.port;
   const testName = `__write_acceptance_${Date.now()}`;
@@ -91,6 +151,7 @@ try {
     delays.push(Math.max(0, now - expectedAt));
     expectedAt = now + 100;
   }, 100);
+  beginStage('interaction');
   const startedAt = Date.now();
   const write = await executeAtomCommandEndpoint({
     source: `transform new ${JSON.stringify({
@@ -232,19 +293,19 @@ try {
   if (process.argv.includes('--trace')) {
     process.stderr.write(`${JSON.stringify({ event: 'acceptance-pre-rollback', ...preRollback, warnings: write.warnings ?? [] })}\n`);
   }
-  await running.close();
+  endStage();
+  await stage('flush', () => running.close());
   running = null;
 
-  const journal = await createJsonTransactionJournal({ file: journalFile }).readState();
-  const newCommits = journal.receipts.slice(initialReceiptCount).map((entry) => entry.receipt);
+  beginStage('rollback');
+  const { newCommits } = await inspectCopiedJournal('new-commits', initialReceiptCount);
   const committed = newCommits.at(-1);
   if (!committed?.commandId || !committed.afterRevision) {
     throw new Error(`Acceptance write did not produce a rollback-capable receipt: ${JSON.stringify({
       writeOk: write.ok === true,
       writeErrorCodes: (write.errors ?? []).map(({ code }) => code),
       initialReceiptCount,
-      journalReceiptCount: journal.receipts.length,
-      preparedCount: journal.prepared.length
+      newCommitCount: newCommits.length
     })}`);
   }
   const persistence = createTransactionalWorldPersistence({
@@ -263,14 +324,17 @@ try {
     rollbackCount += 1;
   }
   const restoredRevision = (await persistence.readCommittedSnapshot()).revision;
+  endStage();
 
+  beginStage('restart');
   running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
   });
   const restartPort = running.port;
   const restoredHealthResponse = await fetch(`${running.url}/__spatial/api/health`);
   const restoredHealth = await restoredHealthResponse.json();
-  const sourceContextUnchanged = await fs.readFile(sourceContext, 'utf8') === sourceContents;
+  const sourceContextUnchanged = (await fs.readFile(sourceContext)).equals(sourceContents);
+  endStage();
   const result = {
     ...preRollback,
     restartPort,
@@ -291,9 +355,10 @@ try {
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (!result.ok) process.exitCode = 1;
 } finally {
+  endStage('failed');
   if (monitor) clearInterval(monitor);
   try {
-    await running?.close();
+    if (running) await stage('final-close', () => running.close());
   } finally {
     if (cleanupCopy) await fs.rm(directory, { recursive: true, force: true });
   }
