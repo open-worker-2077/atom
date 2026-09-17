@@ -6,6 +6,7 @@ import { writeAtomGraphProjection } from '../../../work-engine/atom-language/con
 import { createCommitCoordinator } from '../world-runtime/commit-coordinator.mjs';
 import { applyLocalWorldPatch } from '../world-runtime/local-world-patch.mjs';
 import { revisionOfWorldFacts } from '../world-runtime/world-revision.mjs';
+import { isHardCapacityBlocked } from '../world-runtime/pending-world-capacity.mjs';
 import { createJsonTransactionJournal, createJsonWorldRepository } from './json-world-repository.mjs';
 
 function problem(code, message) {
@@ -90,7 +91,8 @@ parentPort.on('message', ({ id, operation, commandId, records, events, revision,
         }
         else if (event.kind === 'outcome') {
           const stored = (await journalRepository.programExecution(event.sourceCommandId))?.outcome;
-          if (event.outcome.status === 'pending' && stored?.status === 'completed') continue;
+          if (event.outcome.status === 'pending' && stored?.status === 'completed'
+            && !isHardCapacityBlocked(event.outcome)) continue;
           if (!isDeepStrictEqual(stored, event.outcome)) {
             const persisted = await journalRepository.recordProgramExecution({ sourceCommandId: event.sourceCommandId,
               outcome: event.outcome });

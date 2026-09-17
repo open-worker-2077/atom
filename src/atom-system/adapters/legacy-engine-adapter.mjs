@@ -5,6 +5,7 @@ import { createWorldService } from '../public/world-service.mjs';
 import { createTransactionalWorldPersistence } from './transactional-world-persistence.mjs';
 import { prepareCommittedAtomVersion, prepareOwnedCommittedAtomVersion } from '../../../work-engine/atom-language/context-store.mjs';
 import { DEFAULT_WORLD_SHUTDOWN_TIMEOUT_MS, worldShutdownDeadline, withinWorldShutdown } from '../world-runtime/world-shutdown.mjs';
+import { isHardCapacityBlocked, isWorldCapacityError } from '../world-runtime/pending-world-capacity.mjs';
 
 // Only live invocations are joined here. All completed results and restart
 // decisions come from the central journal, never this transient rendezvous.
@@ -33,6 +34,7 @@ export function createLegacyWorldService(options = {}) {
       publishLegacyProjection: options.publishLegacyProjection !== false,
       runtimeAuthority: options.memoryAuthoritative === true ? 'memory' : 'disk',
       saveSchedule: options.saveSchedule,
+      pendingLimits: options.pendingLimits,
       writerFactory: options.writerFactory,
       shutdownTimeoutMs: options.shutdownTimeoutMs,
       onAuthoritativeWrite: options.onAuthoritativeWrite,
@@ -58,16 +60,25 @@ export function createLegacyWorldService(options = {}) {
 
   function beginClose() {
     closing = true;
-    for (const persistence of transactions.values()) persistence.beginClose?.();
+    for (const persistence of transactions.values()) {
+      readinessFor(persistence).unsubscribeCapacity?.();
+      persistence.beginClose?.();
+    }
   }
 
   function transactionFor(request) {
     const key = `${request.contextFile}\0${request.projectionFile}`;
     if (!transactions.has(key)) {
       if (closing) throw Object.assign(new Error('World service is closing'), { code: 'WORLD_SAVE_WORKER_CLOSED' });
-      transactions.set(key, transactionProvider(request));
+      const persistence = transactionProvider(request);
+      transactions.set(key, persistence);
+      readinessFor(persistence).unsubscribeCapacity = persistence.subscribeCapacityRelease?.(() => rearmCapacity(persistence));
     }
-    return transactions.get(key);
+    const persistence = transactions.get(key);
+    if (request.programScheduler) readinessFor(persistence).resumeRequest = { ...request,
+      source: undefined, history: [], interaction: { id: '' }, signal: undefined,
+      onCommitted: undefined, onSubsequentSettled: undefined };
+    return persistence;
   }
 
   function readinessFor(persistence) {
@@ -135,21 +146,73 @@ export function createLegacyWorldService(options = {}) {
     return (await committedSnapshotFor(persistence))?.compatibilityManifest ?? null;
   }
 
+  function rearmCapacity(persistence) {
+    const state = readinessFor(persistence);
+    if (closing || !state.resumeRequest) return;
+    state.resumeRequested = true;
+    if (state.resumeScheduled || state.capacityResuming) return;
+    state.resumeScheduled = true;
+    setImmediate(async () => {
+      state.resumeScheduled = false;
+      if (closing) return;
+      state.resumeRequested = false;
+      state.capacityResuming = true;
+      state.pendingRecovered = false;
+      try { await resumePendingExecutions(state.resumeRequest, persistence, { recovering: false, capacityRearm: true }); }
+      catch { /* A later actual release can retry retained pending sources. */ }
+      finally {
+        state.capacityResuming = false;
+        if (state.resumeRequested) rearmCapacity(persistence);
+      }
+    });
+  }
+
+  function capacityPendingResult(request, execution, reason = execution.outcome?.capacityBlocked) {
+    return { ok: true, language: 'atom', command: 'transform', changed: true,
+      contextFile: request.contextFile, projectionFile: request.projectionFile,
+      interactionId: execution.sourceReceipt.correlationId,
+      revisionBefore: execution.sourceReceipt.beforeRevision.replace(/^sha256:/u, ''),
+      revisionAfter: (execution.childReceipt?.afterRevision ?? execution.sourceReceipt.afterRevision).replace(/^sha256:/u, ''),
+      result: null, messages: [], errors: [], warnings: [{ code: 'ATOM_PROGRAM_CAPACITY_PENDING',
+        message: '来源事实已接受；后续结果因容量限制待处理', cause: reason?.code }],
+      subsequentExecution: { status: 'pending', sourceCommandId: execution.sourceReceipt.commandId,
+        ...(execution.childReceipt ? { childCommandId: execution.childReceipt.commandId } : {}), capacityBlocked: reason } };
+  }
+
   async function resumePendingExecutions(request, persistence, entry) {
     if (closing || !request.programScheduler || entry.recovering || readinessFor(persistence).pendingRecovered) return;
     readinessFor(persistence).pendingRecovered = true;
     const worldKey = path.resolve(request.contextFile);
-    if (recoveringWorlds.has(worldKey)) return recoveringWorlds.get(worldKey);
+    if (recoveringWorlds.has(worldKey)) {
+      // Joining an older recovery must not consume a release that it did not see.
+      if (entry.capacityRearm) readinessFor(persistence).resumeRequested = true;
+      return recoveringWorlds.get(worldKey);
+    }
     const recovering = (async () => {
       for (const execution of await persistence.pendingProgramExecutions?.() ?? []) {
+        if (isHardCapacityBlocked(execution.outcome)) continue;
         const id = execution.sourceReceipt.correlationId;
-        if (id === request.interaction.id || activeInteractions.has(`${worldKey}\0${id}`)) continue;
+        if (id === request.interaction.id) continue;
+        const active = activeInteractions.get(`${worldKey}\0${id}`);
+        if (active) {
+          if (entry.capacityRearm) {
+            const state = readinessFor(persistence);
+            state.releaseWaiters ??= new WeakSet();
+            if (!state.releaseWaiters.has(active)) {
+              state.releaseWaiters.add(active);
+              const settled = () => rearmCapacity(persistence);
+              active.running.then(settled, settled);
+            }
+          }
+          continue;
+        }
         const recoveryRequest = { ...request, source: execution.sourceReceipt.source,
           interaction: structuredClone(execution.event.interaction), history: [],
           trustedMaintenance: false, humanAuthority: false, bypassProgramLocks: false,
           onCommitted: undefined, onSubsequentSettled: undefined };
         recoveryRequests.set(recoveryRequest, execution.event.binding);
-        await service.executeLegacy(recoveryRequest);
+        const result = await service.executeLegacy(recoveryRequest);
+        if (result.subsequentExecution?.capacityBlocked?.retryable) break;
       }
     })();
     recoveringWorlds.set(worldKey, recovering);
@@ -166,7 +229,13 @@ export function createLegacyWorldService(options = {}) {
     let execution = await persistence.programExecutionForInteraction?.(request.interaction.id) ?? null;
     if (execution) {
       assertBinding(execution.event.binding, entry.binding);
+      if (isHardCapacityBlocked(execution.outcome)) return capacityPendingResult(request, execution);
       if (execution.outcome?.result && execution.outcome.status !== 'pending') return execution.outcome.result;
+      try { await persistence.reserveProgramExecution?.(execution.sourceReceipt.commandId); }
+      catch (error) {
+        if (!isWorldCapacityError(error)) throw error;
+        return capacityPendingResult(request, execution, { code: error.code, retryable: error.code === 'WORLD_SAVE_BACKPRESSURE' });
+      }
     }
     request.signal?.throwIfAborted?.();
     const committedSnapshot = await committedSnapshotFor(persistence);
@@ -180,10 +249,12 @@ export function createLegacyWorldService(options = {}) {
     let revalidatingConflict = false;
     let requestInterruptedCommit = false;
     const businessWarnings = [];
+    let outcomeCapacityFailure = null;
     async function recordOutcome(outcome) {
       try {
         return await persistence.recordProgramExecution({ sourceCommandId: sourceReceipt.commandId, outcome });
       } catch (error) {
+        if (isWorldCapacityError(error)) outcomeCapacityFailure = error;
         outcomeWarnings.push({ code: 'ATOM_PROGRAM_OUTCOME_PERSISTENCE_PENDING',
           message: '事实已提交，但后续结果未能持久保存；可用原交互标识恢复确认',
           cause: error.code ?? error.message, correlationId: request.interaction.id });
@@ -192,6 +263,8 @@ export function createLegacyWorldService(options = {}) {
     }
     if (execution && (!execution.outcome || execution.outcome.status === 'pending')) {
       await recordOutcome({ ...execution.outcome, status: 'pending', attemptId });
+      if (outcomeCapacityFailure) return capacityPendingResult(request, execution,
+        { code: outcomeCapacityFailure.code, retryable: outcomeCapacityFailure.code === 'WORLD_SAVE_BACKPRESSURE' });
     }
     const run = (recovery = execution, snapshot = committedSnapshot) => timed('engine.execute', () => execute({
       ...request,
@@ -249,6 +322,18 @@ export function createLegacyWorldService(options = {}) {
     async function settleBusinessResult(result) {
       if (!sourceReceipt || businessSettled) return result;
       execution = await persistence.programExecution(sourceReceipt.commandId);
+      const capacityFailure = [...(result.errors ?? []), ...(result.subsequentExecution?.errors ?? [])].find(isWorldCapacityError);
+      if (capacityFailure) {
+        const reason = { code: capacityFailure.code, retryable: capacityFailure.code === 'WORLD_SAVE_BACKPRESSURE' };
+        await recordOutcome({ status: 'pending', attemptId, capacityBlocked: reason });
+        businessSettled = true;
+        entry.pending = capacityPendingResult(request, execution, reason);
+        return entry.pending;
+      }
+      if (isHardCapacityBlocked(execution.outcome)) {
+        businessSettled = true;
+        return entry.pending = capacityPendingResult(request, execution);
+      }
       // A stale candidate has no committed effects. Re-evaluate the exact event
       // against current facts once; a confirmed child is read, never run again.
       if (!revalidatingConflict && result.subsequentExecution?.errors?.some(({ code }) => code === 'WORLD_REVISION_CONFLICT')) {
@@ -288,6 +373,9 @@ export function createLegacyWorldService(options = {}) {
       result.warnings = [...(result.warnings ?? []), ...businessWarnings];
       const outcome = await recordOutcome({ ...result.subsequentExecution, result: structuredClone(result) });
       businessSettled = true;
+      if (isHardCapacityBlocked(outcome)) {
+        return entry.pending = capacityPendingResult(request, { ...execution, outcome });
+      }
       if (!outcome) {
         return { ...result,
           warnings: [...(result.warnings ?? []).filter(({ code }) => code !== 'ATOM_SUBSEQUENT_EXECUTION_FAILED'), ...outcomeWarnings],

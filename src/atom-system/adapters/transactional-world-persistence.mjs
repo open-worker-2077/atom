@@ -123,7 +123,7 @@ function terminateWorldOwner(owner) {
 
 function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProjection,
   worldId, runtimeAuthority = 'disk', saveSchedule, writerFactory = createDurableWorldWriter,
-  onSaved }) {
+  onSaved, pendingLimits }) {
   const key = JSON.stringify([path.resolve(contextFile), path.resolve(journalFile), worldId, runtimeAuthority]);
   const pathKey = file => process.platform === 'win32' ? path.resolve(file).toLowerCase() : path.resolve(file);
   const worldKey = JSON.stringify([pathKey(contextFile), pathKey(journalFile), worldId]);
@@ -133,7 +133,7 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
   if (!owner) {
     if (runtimeAuthority === 'memory') {
       owner = { key, worldKey, runtimeAuthority, recovery: null, ready: null, writer: null, saver: null,
-        projections: new Set(), savedListeners: new Set(), durableTail: Promise.resolve(),
+        projections: new Set(), savedListeners: new Set(), capacityListeners: new Set(), durableTail: Promise.resolve(),
         closing: false, closed: false, closePromise: null, writerReady: null };
       owner.cancelled = new Promise((_, reject) => {
         owner.cancel = (error) => {
@@ -194,7 +194,8 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
             if (owner.cancelError) throw owner.cancelError;
             if (owner.closing && Date.now() >= owner.closeDeadline) throw worldShutdownTimeout();
             const savedEvent = owner.savedWorldVersions.get(version);
-            ports.markSaved({ version: savedEvent.version, revision: savedEvent.revision });
+            ports.markSaved({ version: savedEvent.version, revision: savedEvent.revision },
+              unsaved.filter(entry => entry.sequence <= version).map(entry => entry.reservation));
             // onSaved runs only after the saver validates the exact returned
             // watermark. Until then the ordered events remain replay evidence.
             savedSequence = version;
@@ -219,19 +220,26 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
           retryMs: saveSchedule?.retryMs ?? 2000
         });
         owner.savedWorldVersions = new Map();
-        const enqueue = (event, worldVersion, revision) => {
+        const enqueue = (event, worldVersion, revision, reservation) => {
           const next = ++sequence;
-          unsaved.push({ sequence: next, event });
+          unsaved.push({ sequence: next, event, reservation });
           owner.savedWorldVersions.set(next, { version: worldVersion, revision });
           saver.enqueue({ version: next, revision });
         };
-        ports = createMemoryTransactionPorts({ initialSnapshot, compatibilityManifest,
+        ports = createMemoryTransactionPorts({ initialSnapshot, compatibilityManifest, pendingLimits,
           durableReceipts, durableOutcomes,
+          onCapacityReleased: () => queueMicrotask(() => {
+            if (owner.closing || owner.closed) return;
+            for (const listener of owner.capacityListeners) {
+              try { Promise.resolve(listener()).catch(() => {}); }
+              catch { /* Capacity notification cannot undo accepted facts. */ }
+            }
+          }),
           durableFindCommitted: (id) => durableOperation('history', (activeWriter) => activeWriter.findCommitted(id)),
-          onAccepted: ({ version, revision, record }) => enqueue({ kind: 'record', record }, version, revision),
-          onOutcome: ({ sourceCommandId, outcome }) => {
+          onAccepted: ({ version, revision, record, reservation }) => enqueue({ kind: 'record', record }, version, revision, reservation),
+          onOutcome: ({ sourceCommandId, outcome, reservation }) => {
             const current = ports.authority.snapshot();
-            enqueue({ kind: 'outcome', sourceCommandId, outcome }, current.version, current.revision);
+            enqueue({ kind: 'outcome', sourceCommandId, outcome }, current.version, current.revision, reservation);
           } });
         owner.memoryPorts = ports;
         owner.memoryWorldRepository = ports.worldRepository;
@@ -284,11 +292,12 @@ export function createTransactionalWorldPersistence({
   shutdownTimeoutMs = DEFAULT_WORLD_SHUTDOWN_TIMEOUT_MS,
   writerFactory = createDurableWorldWriter,
   onAuthoritativeWrite = async () => {},
-  onSaved = null
+  onSaved = null,
+  pendingLimits
 }) {
   worldShutdownDeadline({ timeoutMs: shutdownTimeoutMs });
   const owner = ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProjection,
-    worldId, runtimeAuthority, saveSchedule, writerFactory, onSaved });
+    worldId, runtimeAuthority, saveSchedule, writerFactory, onSaved, pendingLimits });
   const { worldRepository, journalRepository, coordinator } = owner;
 
   function beginClose() {
@@ -733,7 +742,8 @@ export function createTransactionalWorldPersistence({
         ? owner.saver ? { ...owner.memoryPorts.authority.status(),
           pending: owner.saver.status().pending,
           failure: owner.shutdownFailure ?? owner.saver.status().failure,
-          auxiliaryFailure: owner.auxiliaryFailure ?? null }
+          auxiliaryFailure: owner.auxiliaryFailure ?? null,
+          capacity: owner.memoryPorts.pendingStatus() }
           : { pending: false, initializing: true }
         : { pending: false };
     },
@@ -744,6 +754,16 @@ export function createTransactionalWorldPersistence({
       return owner.saver.flush();
     },
     beginClose,
+    subscribeCapacityRelease(listener) {
+      if (owner.runtimeAuthority !== 'memory') return () => {};
+      owner.capacityListeners.add(listener);
+      return () => owner.capacityListeners.delete(listener);
+    },
+    async reserveProgramExecution(sourceCommandId) {
+      assertAccepting();
+      await recover();
+      if (owner.runtimeAuthority === 'memory') owner.memoryPorts.reserveProgramExecution(sourceCommandId);
+    },
     async closeSaves({ timeoutMs = shutdownTimeoutMs, deadline } = {}) {
       if (owner.runtimeAuthority !== 'memory') return { pending: false };
       if (owner.closePromise) return owner.closePromise;

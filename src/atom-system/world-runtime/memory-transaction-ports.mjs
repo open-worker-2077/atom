@@ -1,5 +1,6 @@
 import { createMemoryWorldAuthority } from './memory-world-authority.mjs';
 import { sealWorldFactsRevision } from './world-revision.mjs';
+import { createPendingWorldCapacity, isHardCapacityBlocked, pendingWorldEventBytes } from './pending-world-capacity.mjs';
 
 function problem(code, message) {
   return Object.assign(new Error(message), { code });
@@ -19,6 +20,8 @@ export function createMemoryTransactionPorts({
   durableReceipts = [],
   durableOutcomes = [],
   durableFindCommitted = async () => null,
+  pendingLimits,
+  onCapacityReleased = () => {},
   onAccepted = () => {},
   onOutcome = () => {}
 }) {
@@ -34,6 +37,9 @@ export function createMemoryTransactionPorts({
   const prepared = new Map();
   const outcomes = new Map(durableOutcomes);
   const claimedCandidates = new WeakSet();
+  const capacity = createPendingWorldCapacity(pendingLimits);
+  const preparedCapacity = new Map();
+  const programCapacity = new Map();
   let staged = null;
   let closing = false;
 
@@ -43,8 +49,24 @@ export function createMemoryTransactionPorts({
 
   function beginClose() {
     closing = true;
+    for (const reservation of preparedCapacity.values()) {
+      capacity.release([reservation.record, ...(reservation.program ?? [])]);
+    }
+    preparedCapacity.clear();
+    for (const slots of programCapacity.values()) capacity.release([slots.first, slots.final]);
+    programCapacity.clear();
     prepared.clear();
     staged = null;
+  }
+
+  function releaseCapacity(tokens) {
+    if (capacity.release(tokens)) notifyCapacityReleased();
+  }
+
+  function notifyCapacityReleased() {
+    if (closing) return;
+    try { Promise.resolve(onCapacityReleased()).catch(() => {}); }
+    catch { /* Scheduling cannot undo a completed capacity/state transition. */ }
   }
 
   function claimCandidate(facts) {
@@ -97,7 +119,7 @@ export function createMemoryTransactionPorts({
       receipt?.result?.subsequentOf === sourceCommandId
       || (receipt?.commandId === sourceCommandId && event.effectsCommitted)) ?? null;
     let outcome = outcomes.get(sourceCommandId) ?? null;
-    if (childReceipt && outcome?.status !== 'completed') {
+    if (childReceipt && outcome?.status !== 'completed' && !isHardCapacityBlocked(outcome)) {
       outcome = { status: 'completed', sourceRevision: (event.sourceRevision
         ?? sourceReceipt.afterRevision).replace(/^sha256:/u, ''),
       revisionAfter: childReceipt.afterRevision.replace(/^sha256:/u, ''), errors: [],
@@ -106,6 +128,18 @@ export function createMemoryTransactionPorts({
     }
     return structuredClone({ sourceReceipt, event, outcome, childReceipt });
   };
+
+  function reserveProgramExecution(sourceCommandId) {
+    assertAccepting();
+    if (!receiptFor(sourceCommandId)?.result?.postCommitEvent) {
+      throw problem('PROGRAM_SOURCE_NOT_FOUND', 'Post-commit source is unavailable');
+    }
+    if (!programCapacity.has(sourceCommandId)) {
+      const [first, final] = capacity.reserve([capacity.limits.maxEventBytes, capacity.limits.maxEventBytes]);
+      programCapacity.set(sourceCommandId, { first, final });
+    }
+    return programCapacity.get(sourceCommandId);
+  }
 
   const journalRepository = Object.freeze({
     async latestReceipt() {
@@ -134,6 +168,11 @@ export function createMemoryTransactionPorts({
       if (prepared.has(record.commandId) || receiptFor(record.commandId)) {
         throw problem('DUPLICATE_COMMAND_ID', `Command ${record.commandId} already exists`);
       }
+      const bytes = pendingWorldEventBytes({ kind: 'record', record });
+      const source = Boolean(record.receipt?.result?.postCommitEvent);
+      const [token, ...program] = capacity.reserve([bytes, ...(source
+        ? [capacity.limits.maxEventBytes, capacity.limits.maxEventBytes] : [])]);
+      preparedCapacity.set(record.commandId, { record: token, program });
       prepared.set(record.commandId, record);
     },
     async commit(commandId, receipt) {
@@ -151,6 +190,10 @@ export function createMemoryTransactionPorts({
       if (revision !== receipt.afterRevision) {
         throw problem('INVALID_WORLD_REVISION', 'Staged memory facts differ from receipt');
       }
+      const entry = deepFreeze({ ...structuredClone(record), receipt: structuredClone(receipt) });
+      const reservation = preparedCapacity.get(commandId);
+      const bytes = pendingWorldEventBytes({ kind: 'record', record: { ...record, receipt } });
+      capacity.resize(reservation.record, bytes);
       const expected = authority.snapshot();
       const acceptedState = authority.accept({
         expectedVersion: expected.version,
@@ -159,16 +202,24 @@ export function createMemoryTransactionPorts({
           compatibilityManifest: receipt.result?.compatibilityManifest ?? null },
         receipt
       });
-      const entry = deepFreeze({ ...structuredClone(record), receipt: structuredClone(receipt) });
+      capacity.accept(reservation.record);
       accepted.set(commandId, entry);
+      if (reservation.program.length) programCapacity.set(commandId, { first: reservation.program[0], final: reservation.program[1] });
+      preparedCapacity.delete(commandId);
       acceptedVersions.set(acceptedState.acceptedVersion, commandId);
       prepared.delete(commandId);
       staged = null;
       onAccepted({ version: acceptedState.acceptedVersion, revision,
-        snapshot: authority.snapshot(), record: entry });
+        snapshot: authority.snapshot(), record: entry, reservation: reservation.record });
       return structuredClone(receipt);
     },
-    async abort(id) { staged = null; return prepared.delete(id); },
+    async abort(id) {
+      if (staged?.commandId === id) staged = null;
+      const reservation = preparedCapacity.get(id);
+      if (reservation) releaseCapacity([reservation.record, ...reservation.program]);
+      preparedCapacity.delete(id);
+      return prepared.delete(id);
+    },
     async programExecution(id) { return executionFor(id); },
     async programExecutionForInteraction(correlationId) {
       const source = entries().find((entry) => entry.receipt?.correlationId === correlationId
@@ -188,17 +239,40 @@ export function createMemoryTransactionPorts({
       }
       const existing = outcomes.get(sourceCommandId);
       if (existing && existing.status !== 'pending') return structuredClone(existing);
-      if (execution.childReceipt && outcome.status !== 'completed') return execution.outcome;
+      if (isHardCapacityBlocked(existing) && outcome.status === 'pending') return structuredClone(existing);
+      if (execution.childReceipt && outcome.status !== 'completed' && !isHardCapacityBlocked(outcome)) return execution.outcome;
       assertAccepting();
-      const stored = structuredClone({ ...outcome, ...(execution.childReceipt
-        ? { childCommandId: execution.childReceipt.commandId } : {}) });
+      let value = { ...outcome, ...(execution.childReceipt ? { childCommandId: execution.childReceipt.commandId } : {}) };
+      let bytes = pendingWorldEventBytes({ kind: 'outcome', sourceCommandId, outcome: value });
+      if (bytes > capacity.limits.maxEventBytes) {
+        // Keep the reason, never the unbounded body. This explicit pending state
+        // cannot be replaced by child-derived synthetic completion on restart.
+        value = { status: 'pending', attemptId: 'capacity-blocked',
+          ...(execution.childReceipt ? { childCommandId: execution.childReceipt.commandId } : {}), capacityBlocked: {
+          code: 'WORLD_SAVE_EVENT_TOO_LARGE', requiredBytes: bytes, limitBytes: capacity.limits.maxEventBytes,
+          retryable: false } };
+        bytes = pendingWorldEventBytes({ kind: 'outcome', sourceCommandId, outcome: value });
+      }
+      const stored = structuredClone(value);
+      const slots = reserveProgramExecution(sourceCommandId);
+      const terminal = stored.status !== 'pending' || isHardCapacityBlocked(stored);
+      const slot = terminal ? 'final' : 'first';
+      const token = slots[slot] ?? capacity.reserve([bytes])[0];
+      const released = capacity.resize(token, bytes);
       outcomes.set(sourceCommandId, stored);
-      onOutcome({ sourceCommandId, outcome: stored });
+      capacity.accept(token);
+      slots[slot] = null;
+      onOutcome({ sourceCommandId, outcome: stored, reservation: token });
+      if (terminal) {
+        releaseCapacity([slots.first, slots.final]);
+        programCapacity.delete(sourceCommandId);
+      }
+      if (released) notifyCapacityReleased();
       return structuredClone(stored);
     }
   });
 
-  function markSaved(watermark) {
+  function markSaved(watermark, savedReservations = []) {
     // Validate before releasing any evidence. Versions, not repeated content
     // hashes, identify the exact acknowledged prefix (including A -> B -> A).
     const status = authority.markSaved(watermark);
@@ -211,8 +285,10 @@ export function createMemoryTransactionPorts({
       accepted.delete(commandId);
       acceptedVersions.delete(version);
     }
+    releaseCapacity(savedReservations);
     return status;
   }
 
-  return Object.freeze({ authority, worldRepository, journalRepository, markSaved, claimCandidate, beginClose });
+  return Object.freeze({ authority, worldRepository, journalRepository, markSaved, claimCandidate, beginClose,
+    pendingStatus: () => capacity.status(), reserveProgramExecution });
 }

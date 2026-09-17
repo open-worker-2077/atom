@@ -10,6 +10,7 @@ import {
   sealWorldFactsRevision
 } from '../world-runtime/world-revision.mjs';
 import { applyLocalWorldPatch } from '../world-runtime/local-world-patch.mjs';
+import { isHardCapacityBlocked } from '../world-runtime/pending-world-capacity.mjs';
 
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
@@ -1436,7 +1437,7 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     if (!sourceReceipt?.result?.postCommitEvent) return null;
     const childReceipt = state.receipts.get(state.children.get(sourceCommandId))?.receipt ?? null;
     let outcome = state.outcomes.get(sourceCommandId) ?? null;
-    if (childReceipt && outcome?.status !== 'completed') {
+    if (childReceipt && outcome?.status !== 'completed' && !isHardCapacityBlocked(outcome)) {
       outcome = { status: 'completed', sourceRevision: (sourceReceipt.result.postCommitEvent.sourceRevision
         ?? sourceReceipt.afterRevision).replace(/^sha256:/u, ''),
         revisionAfter: childReceipt.afterRevision.replace(/^sha256:/u, ''), errors: [],
@@ -1468,7 +1469,8 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
       const existing = state.outcomes.get(sourceCommandId);
       if (existing && existing.status !== 'pending') return structuredClone(existing);
       const childId = state.children.get(sourceCommandId);
-      if (childId && outcome.status !== 'completed') return (await programExecution(sourceCommandId)).outcome;
+      if (isHardCapacityBlocked(existing) && outcome.status === 'pending') return structuredClone(existing);
+      if (childId && outcome.status !== 'completed' && !isHardCapacityBlocked(outcome)) return (await programExecution(sourceCommandId)).outcome;
       const stored = structuredClone({ ...outcome, ...(childId ? { childCommandId: childId } : {}) });
       await appendEvent({ type: 'committed', commandId: sourceCommandId,
         record: state.records.get(sourceCommandId), receipt: source.receipt, programOutcome: stored });
