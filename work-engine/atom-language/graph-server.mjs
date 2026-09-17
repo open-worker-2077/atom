@@ -44,6 +44,27 @@ const defaultFiles = Object.freeze({
   storeFile: runtime.storeFile
 });
 
+export async function configuredDefaultServerArgs(argv, { markerFile = path.join(runtime.root, 'runtime-authority.json') } = {}) {
+  if (argv.length !== 0) return argv;
+  let contents;
+  try {
+    contents = await fs.readFile(markerFile, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return argv;
+    throw error;
+  }
+  let marker;
+  try {
+    marker = JSON.parse(contents);
+  } catch {
+    marker = null;
+  }
+  if (marker?.contract !== 'atom.runtime-authority/1' || !['memory', 'disk'].includes(marker.mode)) {
+    throw problem('INVALID_RUNTIME_AUTHORITY_MARKER', `Invalid runtime authority marker: ${markerFile}`);
+  }
+  return marker.mode === 'memory' ? ['--memory-authoritative'] : argv;
+}
+
 export function runtimeBackupRepositoryFor({ contextFile, backupRepository, environment = process.env }) {
   if (backupRepository !== undefined) return backupRepository;
   const normalize = (value) => process.platform === 'win32'
@@ -697,7 +718,7 @@ function help() {
 }
 
 export async function runAtomGraphServerCli({ argv = process.argv.slice(2), processLike = process,
-  startServer = startAtomGraphServer } = {}) {
+  startServer = startAtomGraphServer, defaultAuthority = false, authorityMarkerFile } = {}) {
   function report(error, shutdown = false) {
     const line = `${JSON.stringify({ ok: false,
       ...(shutdown ? { shutdown: 'abnormal', saved: false } : {}),
@@ -707,7 +728,9 @@ export async function runAtomGraphServerCli({ argv = process.argv.slice(2), proc
     try { if (processLike === process) writeSync(2, line); else processLike.stderr.write(line); } catch {}
   }
   try {
-    const options = parseAtomGraphServerArgs(argv);
+    const effectiveArgs = defaultAuthority
+      ? await configuredDefaultServerArgs(argv, { markerFile: authorityMarkerFile }) : argv;
+    const options = parseAtomGraphServerArgs(effectiveArgs);
     if (options.help) {
       processLike.stdout.write(`${help()}\n`);
     } else {
@@ -737,4 +760,4 @@ export async function runAtomGraphServerCli({ argv = process.argv.slice(2), proc
 
 const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : null;
 const currentFile = path.resolve(fileURLToPath(import.meta.url));
-if (invokedFile === currentFile) await runAtomGraphServerCli();
+if (invokedFile === currentFile) await runAtomGraphServerCli({ defaultAuthority: true });

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,10 +10,12 @@ import {
   DEFAULT_ATOM_GRAPH_HOST,
   DEFAULT_ATOM_GRAPH_PORT,
   createOneShotTimingObserver,
+  configuredDefaultServerArgs,
   createAtomGraphHandlers,
   normalizeOwnProcessPriority,
   parseAtomGraphServerArgs,
   runtimeBackupRepositoryFor,
+  runAtomGraphServerCli,
   startAtomGraphServer
 } from '../work-engine/atom-language/graph-server.mjs';
 import * as graphSchema from '../work-engine/atom-language/graph-schema.mjs';
@@ -388,6 +391,42 @@ test('graph server initializes the projection, serves the full UI health and Gra
   assert.ok(labels.includes('石斧'), 'strut target projects as its own node');
   assert.equal(state.knowledge.edges.length, 1);
   assert.equal(state.knowledge.edges[0].label, 'strut');
+});
+
+test('the owned no-argument server reads only its explicit local authority mode', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-runtime-authority-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const markerFile = path.join(directory, 'runtime-authority.json');
+  assert.deepEqual(await configuredDefaultServerArgs([], { markerFile }), []);
+
+  await fs.writeFile(markerFile, JSON.stringify({ contract: 'atom.runtime-authority/1', mode: 'memory' }));
+  assert.equal(parseAtomGraphServerArgs(await configuredDefaultServerArgs([], { markerFile })).memoryAuthoritative, true);
+  assert.deepEqual(await configuredDefaultServerArgs(['--context', 'copy.json'], { markerFile }),
+    ['--context', 'copy.json'], 'an isolated explicit context does not inherit the official mode');
+
+  await fs.writeFile(markerFile, JSON.stringify({ contract: 'atom.runtime-authority/1', mode: 'disk' }));
+  assert.deepEqual(await configuredDefaultServerArgs([], { markerFile }), [], 'rollback keeps the old disk default');
+  await fs.writeFile(markerFile, JSON.stringify({ contract: 'other', mode: 'memory' }));
+  await assert.rejects(configuredDefaultServerArgs([], { markerFile }), { code: 'INVALID_RUNTIME_AUTHORITY_MARKER' });
+});
+
+test('the real CLI startup consumes the official local authority marker', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-runtime-cli-mode-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const markerFile = path.join(directory, 'runtime-authority.json');
+  await fs.writeFile(markerFile, JSON.stringify({ contract: 'atom.runtime-authority/1', mode: 'memory' }));
+  const processLike = new EventEmitter();
+  processLike.stdout = processLike.stderr = { write() {} };
+  let received;
+  await runAtomGraphServerCli({ argv: [], processLike, defaultAuthority: true, authorityMarkerFile: markerFile,
+    startServer: async options => {
+      received = options;
+      return { url: 'http://127.0.0.1:4784', contextFile: options.contextFile,
+        graphFile: options.graphFile, storeFile: options.storeFile,
+        programProjectionFile: options.programProjectionFile, diagnosticFile: options.diagnosticFile,
+        close: async () => {} };
+    } });
+  assert.equal(received.memoryAuthoritative, true);
 });
 
 test('graph server can explicitly enable the memory-authoritative runtime', () => {
