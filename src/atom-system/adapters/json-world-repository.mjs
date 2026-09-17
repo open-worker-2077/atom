@@ -181,6 +181,7 @@ export function createJsonWorldRepository({
   let tail = Promise.resolve();
   let localRecordCount = 0;
   let compactionPromise = null;
+  let localMetadata = null;
   const publication = publicationFor(localCommitFile);
   const localCommitHeadFile = `${localCommitFile}.head.json`;
   const fallbackGenerationFile = `${localCommitFile}.fallback.json`;
@@ -213,18 +214,107 @@ export function createJsonWorldRepository({
     return running;
   }
 
-  async function fileSignature(target, optional = false) {
+  function statSignature(stat) {
+    return stat ? `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}` : 'missing';
+  }
+
+  async function fileStat(target, optional = false) {
     try {
-      const stat = await fileSystem.stat(target, { bigint: true });
-      return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+      return await fileSystem.stat(target, { bigint: true });
     } catch (error) {
-      if (optional && error.code === 'ENOENT') return 'missing';
+      if (optional && error.code === 'ENOENT') return null;
       throw error;
     }
   }
 
+  async function fileSignature(target, optional = false) {
+    return statSignature(await fileStat(target, optional));
+  }
+
   async function signature() {
     return `${await fileSignature(file)}|${await fileSignature(localCommitFile, true)}|${await fileSignature(localCommitHeadFile, true)}|${publication.version}`;
+  }
+
+  async function localFileState() {
+    const log = await fileStat(localCommitFile, true);
+    const head = await fileStat(localCommitHeadFile, true);
+    const headSignature = statSignature(head);
+    return { log, head, headSignature,
+      signature: `${statSignature(log)}|${headSignature}|${publication.version}` };
+  }
+
+  async function localSignature() {
+    return (await localFileState()).signature;
+  }
+
+  function sameWrittenFile(actual, written) {
+    // Rename may change ctime, but must retain the inode, byte count and mtime
+    // of the file we wrote. A fresh path stat alone cannot prove ownership.
+    return actual && written && actual.dev === written.dev && actual.ino === written.ino
+      && actual.size === written.size && actual.mtimeNs === written.mtimeNs;
+  }
+
+  async function rememberLocalMetadata(committedRecords, fileBytes, publishedBytes, proof) {
+    const state = await localFileState();
+    const verified = typeof proof === 'string' ? proof === state.signature
+      : sameWrittenFile(state.log, proof?.log) && (proof?.headSignature !== undefined
+        ? proof.headSignature === state.headSignature : sameWrittenFile(state.head, proof?.head));
+    if (!verified || Number(state.log?.size ?? 0) !== fileBytes
+      || publication.pending || publication.indeterminate) {
+      localMetadata = null;
+      return;
+    }
+    // Compaction needs only the same bounded identity window used by recovery
+    // generations. Never retain historical patch/fact bodies in this cache.
+    localMetadata = { signature: state.signature, headSignature: state.headSignature, fileBytes, publishedBytes,
+      repairRequired: publication.repairRequired,
+      identities: committedRecords.slice(-Math.max(1, compactionThreshold || 1)).map((record) => ({
+        commandId: record.commandId, beforeRevision: record.beforeRevision, afterRevision: record.afterRevision
+      })) };
+  }
+
+  async function verifiedLocalMetadata() {
+    assertPublicationAvailable();
+    const metadata = localMetadata;
+    if (!metadata || publication.pending
+      || metadata.repairRequired !== publication.repairRequired
+      || metadata.publishedBytes !== publication.visibleBytes
+      || metadata.signature !== await localSignature()) {
+      localMetadata = null;
+      return null;
+    }
+    return metadata;
+  }
+
+  async function compactionMetadata() {
+    let metadata = await verifiedLocalMetadata();
+    if (!metadata) {
+      await localRecords();
+      metadata = await verifiedLocalMetadata();
+    }
+    if (!metadata) throw problem('LOCAL_WORLD_COMMIT_CHANGED', 'Local log changed during proof verification');
+    return metadata;
+  }
+
+  async function knownSnapshotSignature() {
+    const metadata = await verifiedLocalMetadata();
+    // Bind the snapshot to the verified log, never a fresh external signature.
+    return metadata ? `${await fileSignature(file)}|${metadata.signature}` : null;
+  }
+
+  async function assertSnapshotCurrent() {
+    if (cachedSignature && cachedSignature !== await signature()) {
+      throw problem('LOCAL_WORLD_COMMIT_CHANGED', 'World changed after its snapshot was verified');
+    }
+  }
+
+  async function writeLocalFile(target, serialized, { syncDirectory = false } = {}) {
+    let written = null;
+    await writeJsonAtomically(target, null, { fileSystem, serialized,
+      syncTemporary: true, syncDirectory,
+      beforeRename: async (temporary) => { written = await fileStat(temporary); }
+    });
+    return written;
   }
 
   async function publicationHead(buffer) {
@@ -246,14 +336,9 @@ export function createJsonWorldRepository({
   }
 
   async function persistPublicationHead(bytes, throughCommandId = null) {
-    return writeJsonAtomically(localCommitHeadFile, null, {
-      fileSystem,
-      serialized: `${JSON.stringify({
+    return writeLocalFile(localCommitHeadFile, `${JSON.stringify({
         contract: 'atom.local-commit-head', version: 1, worldId, bytes, throughCommandId
-      })}\n`,
-      syncTemporary: true,
-      syncDirectory: true
-    });
+      })}\n`, { syncDirectory: true });
   }
 
   function framedRecord(record) {
@@ -342,6 +427,8 @@ export function createJsonWorldRepository({
 
   async function localRecords() {
     assertPublicationAvailable();
+    const beforeSignature = await localSignature();
+    localMetadata = null;
     let raw;
     try {
       raw = await fileSystem.readFile(localCommitFile);
@@ -349,6 +436,7 @@ export function createJsonWorldRepository({
       if (error.code === 'ENOENT') {
         publication.visibleBytes = 0;
         publication.initialized = true;
+        await rememberLocalMetadata([], 0, 0, beforeSignature);
         return [];
       }
       throw error;
@@ -364,7 +452,7 @@ export function createJsonWorldRepository({
     // The first scan has already parsed and verified each published frame.
     // Parsing the same log again retains two copies of every historical patch
     // alongside the raw buffer, which exhausts the save worker on large worlds.
-    return scanned.frames.filter((frame) => frame.end <= visibleBytes)
+    const records = scanned.frames.filter((frame) => frame.end <= visibleBytes)
       .map((frame) => frame.record).map((record, index) => {
       try {
         const localCommit = record?.contract === 'atom.local-commit'
@@ -401,6 +489,9 @@ export function createJsonWorldRepository({
         });
       }
       });
+    await rememberLocalMetadata(records.filter((record) => record.contract === 'atom.local-commit'),
+      buffer.length, visibleBytes, beforeSignature);
+    return records;
   }
 
   function applyRecord(current, record) {
@@ -474,7 +565,7 @@ export function createJsonWorldRepository({
     if (finalSignature !== beforeSignature) return read();
     if (publication.startupProofPending && !publication.pending) {
       publication.startupProofPending = false;
-      publication.startupProof ??= pruneFallbackGeneration().catch(() => null);
+      publication.startupProof ??= pruneFallbackGeneration({ records, signature: finalSignature }).catch(() => null);
       await publication.startupProof;
       if (await signature() !== finalSignature) return read();
     }
@@ -524,21 +615,20 @@ export function createJsonWorldRepository({
   }
 
   async function replaceLogWithWatermark(watermark) {
+    localMetadata = null;
     const serialized = `${JSON.stringify(watermark)}\n`;
-    await writeJsonAtomically(localCommitFile, null, {
-      fileSystem,
-      serialized,
-      syncTemporary: true
-    });
+    const writtenLog = await writeLocalFile(localCommitFile, serialized);
     const bytes = Buffer.byteLength(serialized, 'utf8');
-    await persistPublicationHead(bytes, watermark.throughCommandId).catch(() => null);
+    const writtenHead = await persistPublicationHead(bytes, watermark.throughCommandId).catch(() => null);
     publication.visibleBytes = bytes;
     publication.pending = false;
     publication.repairRequired = false;
     publication.version += 1;
+    await rememberLocalMetadata([], bytes, bytes, { log: writtenLog, head: writtenHead });
   }
 
   async function replaceLogWithRecoveryGeneration(current, committedRecords) {
+    localMetadata = null;
     const generationId = crypto.randomUUID();
     const members = committedRecords.slice(-Math.max(1, compactionThreshold || 1)).map((record) => ({
       commandId: record.commandId,
@@ -552,26 +642,28 @@ export function createJsonWorldRepository({
       facts: current.facts, members
     };
     const serialized = framedRecord(generation);
-    await writeJsonAtomically(localCommitFile, null, {
-      fileSystem, serialized, syncTemporary: true
-    });
+    const writtenLog = await writeLocalFile(localCommitFile, serialized);
     const bytes = Buffer.byteLength(serialized, 'utf8');
-    await persistPublicationHead(bytes, members.at(-1)?.commandId ?? null).catch(() => null);
+    const writtenHead = await persistPublicationHead(bytes, members.at(-1)?.commandId ?? null).catch(() => null);
     publication.visibleBytes = bytes;
     publication.pending = false;
     publication.repairRequired = false;
     publication.version += 1;
+    await rememberLocalMetadata([], bytes, bytes, { log: writtenLog, head: writtenHead });
     return generation;
   }
 
-  async function pruneFallbackGeneration() {
+  async function pruneFallbackGeneration(startupRead = null) {
     const marker = await fallbackGeneration();
     if (!marker || marker.writerRuntimeId === repositoryRuntimeId) return null;
     return withPublicationLock(async () => {
       const baseline = snapshot(worldId, JSON.parse(await fileSystem.readFile(file, 'utf8')), { ownsFacts: true });
       const baselineRevision = marker.baselineRevision ?? marker.revision;
       if (baseline.revision !== baselineRevision) return null;
-      const records = await localRecords();
+      // Reuse only this read's still-current verified records, under the shared
+      // publication lock. They are not retained as a historical body cache.
+      const records = startupRead?.signature === await signature()
+        ? startupRead.records : await localRecords();
       const ownerIndex = records.findIndex((record) => marker.generationId
         ? record.contract === 'atom.local-commit-generation'
           && record.generationId === marker.generationId
@@ -608,37 +700,11 @@ export function createJsonWorldRepository({
 
   async function appendRecordUnsafe(record) {
     await fileSystem.mkdir(path.dirname(localCommitFile), { recursive: true });
-    let fileBytes = 0;
-    let publishedBytes = null;
-    if (publication.initialized && !publication.pending && !publication.repairRequired
-      && !publication.indeterminate) {
-      try {
-        fileBytes = Number((await fileSystem.stat(localCommitFile)).size);
-        if (fileBytes === publication.visibleBytes) publishedBytes = publication.visibleBytes;
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error;
-        if (publication.visibleBytes === 0) publishedBytes = 0;
-      }
-    }
-    if (publishedBytes === null) {
-      let raw;
-      try {
-        raw = await fileSystem.readFile(localCommitFile);
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error;
-        raw = Buffer.alloc(0);
-      }
-      const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, 'utf8');
-      fileBytes = buffer.length;
-      const head = await publicationHead(buffer);
-      const scanned = scanLocalLog(buffer);
-      publishedBytes = publication.repairRequired
-        ? Math.min(publication.visibleBytes, scanned.publishedBytes)
-        : scanned.publishedBytes;
-      if (!head) await persistPublicationHead(publishedBytes);
-      publication.visibleBytes = publishedBytes;
-      publication.initialized = true;
-    }
+    const metadata = await compactionMetadata();
+    await assertSnapshotCurrent();
+    const { fileBytes, publishedBytes } = metadata;
+    localMetadata = null;
+    if (await fileSignature(localCommitHeadFile, true) === 'missing') await persistPublicationHead(publishedBytes);
     const framed = { ...record, publicationId: record.publicationId ?? crypto.randomUUID() };
     const serializedRecord = `${JSON.stringify(framed)}\n`;
     const serializedProof = framedRecord(framed).slice(serializedRecord.length);
@@ -658,13 +724,17 @@ export function createJsonWorldRepository({
       proofWritten = true;
       await handle.sync();
       const nextBytes = publishedBytes + recordBytes + proofBytes;
-      await persistPublicationHead(nextBytes, record.commandId).catch(() => null);
+      const writtenLog = await handle.stat?.({ bigint: true });
+      const writtenHead = await persistPublicationHead(nextBytes, record.commandId).catch(() => null);
       publication.visibleBytes = nextBytes;
       publication.pending = false;
       publication.repairRequired = false;
       publication.version += 1;
       localRecordCount += 1;
+      await rememberLocalMetadata([...metadata.identities, record], nextBytes, nextBytes,
+        { log: writtenLog, head: writtenHead });
     } catch (error) {
+      localMetadata = null;
       publication.pending = false;
       publication.repairRequired = true;
       publication.visibleBytes = publishedBytes;
@@ -719,6 +789,7 @@ export function createJsonWorldRepository({
 
   function recoverIndeterminateCommit(identity) {
     return withPublicationLock(async () => {
+      localMetadata = null;
       const pending = publication.indeterminate;
       if (pending && (pending.identity.commandId !== identity?.commandId
         || pending.identity.beforeRevision !== identity?.beforeRevision
@@ -781,25 +852,20 @@ export function createJsonWorldRepository({
     });
   }
 
-  async function repairLocalTail() {
-    let raw;
-    try {
-      raw = await fileSystem.readFile(localCommitFile);
-    } catch (error) {
-      if (error.code === 'ENOENT') return;
-      throw error;
+  async function repairLocalTail(expectedMetadata) {
+    const metadata = await compactionMetadata();
+    if (expectedMetadata && metadata.signature !== expectedMetadata.signature) {
+      throw problem('LOCAL_WORLD_COMMIT_CHANGED', 'Local log changed before tail repair');
     }
-    const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, 'utf8');
-    await publicationHead(buffer);
-    const scanned = scanLocalLog(buffer);
-    const completeBytes = publication.repairRequired
-      ? Math.min(publication.visibleBytes, scanned.publishedBytes)
-      : scanned.publishedBytes;
-    if (buffer.length === completeBytes) return;
+    const completeBytes = metadata.publishedBytes;
+    if (metadata.fileBytes === completeBytes) return;
+    localMetadata = null;
     const handle = await fileSystem.open(localCommitFile, 'r+');
+    let writtenLog = null;
     try {
       await handle.truncate(completeBytes);
       await handle.sync();
+      writtenLog = await handle.stat?.({ bigint: true });
     } finally {
       await handle.close();
     }
@@ -807,6 +873,8 @@ export function createJsonWorldRepository({
     publication.pending = false;
     publication.repairRequired = false;
     publication.version += 1;
+    await rememberLocalMetadata(metadata.identities, completeBytes, completeBytes,
+      { log: writtenLog, headSignature: metadata.headSignature });
   }
 
   function appendLocalCommit({ commandId, expectedRevision, nextSnapshot, patch }) {
@@ -862,7 +930,7 @@ export function createJsonWorldRepository({
       await faultInjector('after-local-append-sync', structuredClone(record));
       await faultInjector('before-memory-publication', structuredClone(record));
       cached = prepared;
-      cachedSignature = await signature();
+      cachedSignature = await knownSnapshotSignature();
       return prepared;
     }));
   }
@@ -871,9 +939,10 @@ export function createJsonWorldRepository({
     publication.startupProofPending = false;
     return serialize(() => withPublicationLock(async () => {
       const current = await read();
-      const committedRecords = (await localRecords())
-        .filter((record) => record.contract === 'atom.local-commit');
-      await repairLocalTail();
+      const metadata = await compactionMetadata();
+      await assertSnapshotCurrent();
+      const committedRecords = metadata.identities;
+      await repairLocalTail(metadata);
       if (publication.baselineFrozen && publication.provenBaselineRevision) {
         const generation = await replaceLogWithRecoveryGeneration(current, committedRecords);
         const latestMember = generation.members.at(-1);
@@ -883,7 +952,7 @@ export function createJsonWorldRepository({
         }, current.revision, generation.generationId, publication.provenBaselineRevision).catch(() => {});
         localRecordCount = 0;
         cached = current;
-        cachedSignature = await signature();
+        cachedSignature = await knownSnapshotSignature();
         return current;
       }
       const prepared = prepareWorldFactsRevision(current.facts);
@@ -930,7 +999,7 @@ export function createJsonWorldRepository({
       }
       localRecordCount = 0;
       cached = current;
-      cachedSignature = await signature();
+      cachedSignature = await knownSnapshotSignature();
       return current;
     }));
   }
@@ -976,8 +1045,10 @@ export function createJsonWorldRepository({
         facts: nextSnapshot.facts
       });
       if (publication.baselineFrozen && publication.provenBaselineRevision) {
-        const committedRecords = (await localRecords())
-          .filter((record) => record.contract === 'atom.local-commit');
+        if (!await verifiedLocalMetadata() && (await read()).revision !== nextSnapshot.revision) {
+          throw problem('LOCAL_WORLD_COMMIT_CHANGED', 'World changed after the full commit was published');
+        }
+        const committedRecords = (await compactionMetadata()).identities;
         const currentNext = snapshot(worldId, nextSnapshot.facts, {
           ownsFacts: Object.isFrozen(nextSnapshot.facts)
         });
@@ -986,7 +1057,7 @@ export function createJsonWorldRepository({
           nextSnapshot.revision, generation.generationId, publication.provenBaselineRevision).catch(() => {});
         localRecordCount = 0;
         cached = currentNext;
-        cachedSignature = await signature();
+        cachedSignature = await knownSnapshotSignature();
         return nextSnapshot;
       }
       const baselineWrite = await writeJsonAtomically(file, nextSnapshot.facts, {
@@ -1033,7 +1104,7 @@ export function createJsonWorldRepository({
       cached = snapshot(worldId, nextSnapshot.facts, {
         ownsFacts: Object.isFrozen(nextSnapshot.facts)
       });
-      cachedSignature = await signature();
+      cachedSignature = await knownSnapshotSignature();
       return nextSnapshot;
     }));
   }
