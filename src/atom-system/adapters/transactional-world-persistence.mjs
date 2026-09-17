@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import fs from 'node:fs/promises';
 
 import {
   adoptAtomContextSnapshot,
@@ -49,14 +50,68 @@ const worldOwners = new Map();
 // A timed-out close must not become a second writer merely because its last
 // facade is collected. Keep the owner strongly fenced until termination proves.
 const quarantinedWorldOwners = new Map();
+function assertWorldUnfenced(worldKey) {
+  if (quarantinedWorldOwners.has(worldKey)) {
+    throw problem('WORLD_SAVE_WORKER_QUARANTINED', 'Prior world writer termination is not confirmed');
+  }
+}
+
+// Guard at the actual I/O dispatch boundary, including handles opened before
+// close began. Entry checks alone cannot fence a disk operation across await.
+function fencedDiskFileSystem(worldKey, capability) {
+  const mutations = new Set(['mkdir', 'writeFile', 'appendFile', 'rename', 'truncate', 'rm', 'unlink', 'copyFile']);
+  const handleMutations = new Set(['write', 'writev', 'writeFile', 'appendFile', 'truncate', 'sync', 'datasync']);
+  async function dispatch(work) {
+    if (capability.revoked) throw problem('WORLD_SAVE_WORKER_QUARANTINED', 'Disk writer capability was revoked by world close');
+    assertWorldUnfenced(worldKey);
+    const pending = Promise.resolve(work());
+    capability.pending.add(pending);
+    try { return await pending; }
+    finally { capability.pending.delete(pending); }
+  }
+  return new Proxy(fs, { get(target, name) {
+    if (name === 'open') return async (...args) => {
+      const handle = await (args[1] === 'r' ? target.open(...args) : dispatch(() => target.open(...args)));
+      return new Proxy(handle, { get(opened, method) {
+        if (handleMutations.has(method)) return (...values) => dispatch(() => opened[method](...values));
+        const value = opened[method];
+        return typeof value === 'function' ? value.bind(opened) : value;
+      } });
+    };
+    if (mutations.has(name)) return (...args) => dispatch(() => target[name](...args));
+    const value = target[name];
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
+}
 const releaseWorldOwner = new FinalizationRegistry(({ key, reference }) => {
   if (worldOwners.get(key) === reference) worldOwners.delete(key);
 });
 
+function fenceWorldOwner(owner) {
+  quarantinedWorldOwners.set(owner.worldKey, owner);
+  owner.retiredDiskCapabilities ??= new Set();
+  for (const [key, reference] of worldOwners) {
+    const disk = reference.deref();
+    if (disk?.worldKey !== owner.worldKey || !disk.writeCapability) continue;
+    disk.writeCapability.revoked = true;
+    owner.retiredDiskCapabilities.add(disk.writeCapability);
+    // New facades after confirmed shutdown get a fresh capability. Existing
+    // facades and operations never regain write authority when the fence lifts.
+    worldOwners.delete(key);
+  }
+}
+
 function terminateWorldOwner(owner) {
   if (!owner.termination) {
-    quarantinedWorldOwners.set(owner.worldKey, owner);
-    owner.termination = Promise.resolve().then(() => owner.writer?.close()).then(() => {
+    fenceWorldOwner(owner);
+    owner.termination = Promise.resolve().then(async () => {
+      await owner.writer?.close();
+      // Already dispatched OS work cannot be recalled. Do not reopen the
+      // world until its completion is observed; revoked capabilities cannot
+      // dispatch a successor while we wait.
+      await Promise.allSettled([...owner.retiredDiskCapabilities].flatMap(capability => [...capability.pending]));
+      owner.retiredDiskCapabilities.clear();
+    }).then(() => {
       owner.terminated = true;
       if (worldOwners.get(owner.key)?.deref() === owner) worldOwners.delete(owner.key);
       if (quarantinedWorldOwners.get(owner.worldKey) === owner) quarantinedWorldOwners.delete(owner.worldKey);
@@ -72,9 +127,7 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
   const key = JSON.stringify([path.resolve(contextFile), path.resolve(journalFile), worldId, runtimeAuthority]);
   const pathKey = file => process.platform === 'win32' ? path.resolve(file).toLowerCase() : path.resolve(file);
   const worldKey = JSON.stringify([pathKey(contextFile), pathKey(journalFile), worldId]);
-  if (quarantinedWorldOwners.has(worldKey)) {
-    throw problem('WORLD_SAVE_WORKER_QUARANTINED', 'Prior world writer termination is not confirmed');
-  }
+  assertWorldUnfenced(worldKey);
   let owner = worldOwners.get(key)?.deref();
   if (owner?.closing) throw problem('WORLD_SAVE_WORKER_CLOSED', 'World owner is closing');
   if (!owner) {
@@ -192,12 +245,16 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
         throw error;
       });
     } else {
+      const writeCapability = { revoked: false, pending: new Set() };
+      const fileSystem = fencedDiskFileSystem(worldKey, writeCapability);
       const worldRepository = createJsonWorldRepository({ file: contextFile, worldId,
         initialFacts: [], localCommitFile: path.join(`${journalFile}.d`, 'world-commits.jsonl'),
-        autoCompact: true });
-      const journalRepository = createJsonTransactionJournal({ file: journalFile });
-      owner = { runtimeAuthority, worldRepository, journalRepository,
+        autoCompact: true, fileSystem });
+      const journalRepository = createJsonTransactionJournal({ file: journalFile, fileSystem });
+      owner = { worldKey, writeCapability, runtimeAuthority, worldRepository, journalRepository,
         coordinator: createCommitCoordinator({ worldRepository, journalRepository }), recovery: null };
+      // An in-flight capability keeps its weak-registry owner discoverable.
+      writeCapability.owner = owner;
     }
     const reference = new WeakRef(owner);
     worldOwners.set(key, reference);
@@ -237,7 +294,7 @@ export function createTransactionalWorldPersistence({
   function beginClose() {
     if (owner.runtimeAuthority !== 'memory' || owner.closing) return;
     owner.closing = true;
-    if (!owner.terminated) quarantinedWorldOwners.set(owner.worldKey, owner);
+    if (!owner.terminated) fenceWorldOwner(owner);
     owner.memoryPorts?.beginClose();
   }
 
@@ -245,6 +302,8 @@ export function createTransactionalWorldPersistence({
     if (owner.runtimeAuthority === 'memory' && (owner.closing || owner.closed)) {
       throw problem('WORLD_SAVE_WORKER_CLOSED', 'World owner is closed to new writes');
     }
+    if (owner.writeCapability?.revoked) throw problem('WORLD_SAVE_WORKER_QUARANTINED', 'Disk writer capability was revoked by world close');
+    assertWorldUnfenced(owner.worldKey);
   }
 
   function recover() {

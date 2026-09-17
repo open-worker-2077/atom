@@ -33,7 +33,7 @@ export function createAtomRuntimeBackupTrigger(options = {}) {
   const delayMs = Math.max(250, Number(options.delayMs) || 5 * 60 * 1_000);
   let watcher = null;
   let timer = null;
-  let running = false;
+  let running = null;
   let pending = false;
   let closed = false;
 
@@ -44,24 +44,43 @@ export function createAtomRuntimeBackupTrigger(options = {}) {
       return;
     }
     if (timer) return;
-    timer = setTimer(flush, delayMs);
+    timer = setTimer(() => {
+      timer = null;
+      return runOnce().catch(() => {});
+    }, delayMs);
+  }
+
+  function clearScheduled() {
+    if (timer) clearTimer(timer);
+    timer = null;
+  }
+
+  function runOnce() {
+    if (closed) return Promise.resolve();
+    if (running) return running;
+    pending = false;
+    running = Promise.resolve().then(() => runBackup({ worldDirectory, backupRepository,
+      branch, script: options.script || defaultScript })).then(result => {
+      if (result === false) throw Object.assign(new Error('Runtime backup did not complete successfully'), {
+        code: 'ATOM_RUNTIME_BACKUP_FAILED'
+      });
+    }).finally(() => {
+      running = null;
+      if (pending && !closed) schedule();
+    });
+    return running;
   }
 
   async function flush() {
-    if (timer) clearTimer(timer);
-    timer = null;
+    clearScheduled();
     if (closed) return;
-    if (running) {
-      pending = true;
-      return;
-    }
-    running = true;
-    await runBackup({ worldDirectory, backupRepository, branch, script: options.script || defaultScript });
-    running = false;
-    if (pending && !closed) {
-      pending = false;
-      schedule();
-    }
+    // An existing run may have captured an older recovery point. Explicit
+    // flush joins it and drains a fresh run, not just a future timer request.
+    if (running) pending = true;
+    do {
+      try { await runOnce(); }
+      finally { clearScheduled(); }
+    } while ((pending || running) && !closed);
   }
 
   function start({ initialBackup = true } = {}) {
@@ -70,7 +89,7 @@ export function createAtomRuntimeBackupTrigger(options = {}) {
       const name = typeof filename === 'string' ? filename.toLowerCase() : '';
       if (name === 'atom.json' || name === 'submissions.jsonl') schedule();
     });
-    if (initialBackup) void flush();
+    if (initialBackup) void flush().catch(() => {});
   }
 
   function close() {

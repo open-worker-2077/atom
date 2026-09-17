@@ -1208,7 +1208,7 @@ function compactReceiptHistory(receipts) {
       });
 }
 
-export function createJsonTransactionJournal({ file, incrementalDirectory = `${file}.d` }) {
+export function createJsonTransactionJournal({ file, incrementalDirectory = `${file}.d`, fileSystem = fs }) {
   if (!file) throw problem('INVALID_TRANSACTION_JOURNAL', 'file is required');
   const eventFile = path.join(incrementalDirectory, 'events.jsonl');
   const objectDirectory = path.join(incrementalDirectory, 'objects');
@@ -1218,7 +1218,7 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
 
   async function loadLegacy() {
     try {
-      const parsed = JSON.parse(await fs.readFile(file, 'utf8'));
+      const parsed = JSON.parse(await fileSystem.readFile(file, 'utf8'));
       if (parsed?.schemaVersion !== 1 || !Array.isArray(parsed.prepared) || !Array.isArray(parsed.receipts)) {
         throw problem('INVALID_TRANSACTION_JOURNAL', 'Transaction journal has an invalid shape');
       }
@@ -1242,7 +1242,7 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     const objectFile = snapshotObjectFile(identity?.snapshotRef ?? identity?.revision);
     let value;
     try {
-      value = JSON.parse((await gunzipAsync(await fs.readFile(objectFile))).toString('utf8'));
+      value = JSON.parse((await gunzipAsync(await fileSystem.readFile(objectFile))).toString('utf8'));
     } catch (error) {
       throw problem('TRANSACTION_SNAPSHOT_READ_FAILED', 'Cannot read transaction snapshot object', {
         revision: identity?.revision,
@@ -1264,11 +1264,11 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
       throw problem('INVALID_TRANSACTION_SNAPSHOT', 'Transaction snapshot does not match its revision');
     }
     const objectFile = snapshotObjectFile(value.revision);
-    await fs.mkdir(objectDirectory, { recursive: true });
+    await fileSystem.mkdir(objectDirectory, { recursive: true });
     let handle;
     let created = false;
     try {
-      handle = await fs.open(objectFile, 'wx');
+      handle = await fileSystem.open(objectFile, 'wx');
       created = true;
       await handle.writeFile(await gzipAsync(
         Buffer.from(JSON.stringify(value), 'utf8'),
@@ -1279,7 +1279,7 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
       await handle?.close();
       handle = null;
       if (error.code !== 'EEXIST') {
-        if (created) await fs.rm(objectFile, { force: true }).catch(() => {});
+        if (created) await fileSystem.rm(objectFile, { force: true }).catch(() => {});
         throw error;
       }
       await readSnapshot({ ...compactSnapshot(value), snapshotRef: value.revision });
@@ -1310,13 +1310,13 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
 
   function appendEvent(event) {
     const work = async () => {
-      await fs.mkdir(incrementalDirectory, { recursive: true });
+      await fileSystem.mkdir(incrementalDirectory, { recursive: true });
       let handle;
       try {
-        handle = await fs.open(eventFile, 'r+');
+        handle = await fileSystem.open(eventFile, 'r+');
       } catch (error) {
         if (error.code !== 'ENOENT') throw error;
-        handle = await fs.open(eventFile, 'w+');
+        handle = await fileSystem.open(eventFile, 'w+');
       }
       try {
         const { size } = await handle.stat();

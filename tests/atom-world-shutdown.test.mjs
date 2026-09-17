@@ -8,6 +8,7 @@ import { createCommitCoordinator } from '../src/atom-system/world-runtime/commit
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import { sealWorldFactsRevision, revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { withinWorldShutdown } from '../src/atom-system/world-runtime/world-shutdown.mjs';
+import { createJsonWorldRepository } from '../src/atom-system/adapters/json-world-repository.mjs';
 
 process.env.ATOM_RUNTIME_BACKUP_REPO = '';
 const facts = (situation = 'old') => [{ thing: 'Root', situation, slot: [], strut: [] }];
@@ -214,4 +215,124 @@ test('a clean successful close cancels in-flight and queued history waits withou
   await guarded(f.persistence.closeSaves({ timeoutMs: 100 }));
   await assert.rejects(guarded(first), { code: 'WORLD_SAVE_WORKER_CLOSED' });
   await assert.rejects(guarded(second), { code: 'WORLD_SAVE_WORKER_CLOSED' });
+});
+
+test('an existing disk facade is write-fenced while read-only recovery and another world remain available', async (t) => {
+  const f = await fixture(t, { hangClose: true });
+  const disk = createTransactionalWorldPersistence({ ...f.configuration, runtimeAuthority: 'disk' });
+  const before = await disk.readCommittedSnapshot();
+  const other = await fixture(t);
+  const otherDisk = createTransactionalWorldPersistence({ ...other.configuration, runtimeAuthority: 'disk' });
+  const otherBefore = await otherDisk.readCommittedSnapshot();
+  await f.commit();
+  await assert.rejects(f.persistence.closeSaves(), { code: 'WORLD_SAVE_CLOSE_TIMEOUT' });
+  await assert.rejects(disk.commit({ correlationId: 'old-disk-bypass', expectedRevision: before.revision,
+    nextRevision: revisionOfWorldFacts(facts('bypass')), facts: facts('bypass') }), { code: 'WORLD_SAVE_WORKER_QUARANTINED' });
+  assert.deepEqual(await disk.recover(), { recovered: 0 }, 'read-only recovery remains available');
+  assert.deepEqual((await disk.readCommittedSnapshot()).facts, facts());
+  await otherDisk.commit({ correlationId: 'different-world', expectedRevision: otherBefore.revision,
+    nextRevision: revisionOfWorldFacts(facts('other')), facts: facts('other') });
+  assert.deepEqual((await otherDisk.readCommittedSnapshot()).facts, facts('other'));
+  assert.deepEqual(JSON.parse(await fs.readFile(f.configuration.contextFile, 'utf8')), facts());
+});
+
+for (const target of ['world-commits.jsonl', 'events.jsonl']) {
+test(`disk ${target} publication remains fenced after an already-open handle crosses close`, async (t) => {
+  const f = await fixture(t, { hangClose: true });
+  const disk = createTransactionalWorldPersistence({ ...f.configuration, runtimeAuthority: 'disk' });
+  const before = await disk.readCommittedSnapshot();
+  const entered = deferred(), release = deferred();
+  const localCommitFile = path.join(path.dirname(f.configuration.contextFile), 'atom.transactions.json.d', 'world-commits.jsonl');
+  const heldFile = path.join(path.dirname(localCommitFile), target);
+  const originalOpen = fs.open;
+  let armed = true;
+  t.mock.method(fs, 'open', async (file, ...args) => {
+    const handle = await originalOpen(file, ...args);
+    if (armed && path.resolve(file) === heldFile) {
+      armed = false; entered.resolve(); await release.promise;
+    }
+    return handle;
+  });
+  t.after(() => release.resolve());
+  const writing = disk.commit({ correlationId: 'late-disk-publication', expectedRevision: before.revision,
+    nextRevision: revisionOfWorldFacts(facts('late-disk')), facts: facts('late-disk') });
+  writing.catch(() => {});
+  await guarded(entered.promise);
+  await assert.rejects(f.persistence.closeSaves(), { code: 'WORLD_SAVE_CLOSE_TIMEOUT' });
+  release.resolve();
+  await assert.rejects(writing, { code: 'WORLD_SAVE_WORKER_QUARANTINED' });
+  if (target === 'world-commits.jsonl') await assert.rejects(disk.recover(), { code: 'WORLD_SAVE_WORKER_QUARANTINED' });
+  else assert.deepEqual(await disk.recover(), { recovered: 0 });
+  const cold = createJsonWorldRepository({ file: f.configuration.contextFile, worldId: 'primary', localCommitFile });
+  assert.deepEqual((await cold.read()).facts, facts(), 'unaccepted prepared work must not become a cold-readable successor');
+});
+}
+
+test('world quarantine waits for previously dispatched disk I/O and never revives its old write capability', async (t) => {
+  const f = await fixture(t);
+  const disk = createTransactionalWorldPersistence({ ...f.configuration, runtimeAuthority: 'disk' });
+  const before = await disk.readCommittedSnapshot();
+  const entered = deferred(), release = deferred();
+  const localCommitFile = path.join(path.dirname(f.configuration.contextFile), 'atom.transactions.json.d', 'world-commits.jsonl');
+  const originalOpen = fs.open;
+  let armed = true;
+  t.mock.method(fs, 'open', async (file, ...args) => {
+    const handle = await originalOpen(file, ...args);
+    if (armed && path.resolve(file) === localCommitFile) {
+      armed = false; entered.resolve(); await release.promise;
+    }
+    return handle;
+  });
+  t.after(() => release.resolve());
+  const writing = disk.commit({ correlationId: 'tail-before-close', expectedRevision: before.revision,
+    nextRevision: revisionOfWorldFacts(facts('tail')), facts: facts('tail') });
+  writing.catch(() => {});
+  await guarded(entered.promise);
+  await assert.rejects(f.persistence.closeSaves(), { code: 'WORLD_SAVE_CLOSE_TIMEOUT' });
+  assert.equal(f.controls[0].closes, 1, 'only disk I/O confirmation remains, not a live worker');
+  assert.throws(() => createTransactionalWorldPersistence(f.configuration), { code: 'WORLD_SAVE_WORKER_QUARANTINED' });
+  release.resolve();
+  await assert.rejects(writing, { code: 'WORLD_SAVE_WORKER_QUARANTINED' });
+  await new Promise(resolve => setImmediate(resolve));
+  const reopened = createTransactionalWorldPersistence(f.configuration);
+  t.after(() => reopened.closeSaves().catch(() => {}));
+  assert.deepEqual((await reopened.readCommittedSnapshot()).facts, facts());
+  await assert.rejects(disk.commit({ correlationId: 'revoked-facade', expectedRevision: before.revision,
+    nextRevision: revisionOfWorldFacts(facts('revived')), facts: facts('revived') }), { code: 'WORLD_SAVE_WORKER_QUARANTINED' });
+  const cold = createJsonWorldRepository({ file: f.configuration.contextFile, worldId: 'primary', localCommitFile });
+  assert.deepEqual((await cold.read()).facts, facts());
+});
+
+test('disk recovery started before close cannot publish its prepared successor after an await', async (t) => {
+  const f = await fixture(t);
+  const disk = createTransactionalWorldPersistence({ ...f.configuration, runtimeAuthority: 'disk' });
+  const before = await disk.readCommittedSnapshot();
+  const entered = deferred(), release = deferred();
+  const localCommitFile = path.join(path.dirname(f.configuration.contextFile), 'atom.transactions.json.d', 'world-commits.jsonl');
+  const originalOpen = fs.open;
+  let phase = 'prepare-only';
+  t.mock.method(fs, 'open', async (file, ...args) => {
+    if (path.resolve(file) !== localCommitFile) return originalOpen(file, ...args);
+    if (phase === 'prepare-only') throw Object.assign(new Error('stop after real journal prepare'), { code: 'EIO' });
+    const handle = await originalOpen(file, ...args);
+    if (phase === 'hold-recovery') { phase = 'released'; entered.resolve(); await release.promise; }
+    return handle;
+  });
+  t.after(() => release.resolve());
+  await assert.rejects(disk.commit({ correlationId: 'prepared-recovery', expectedRevision: before.revision,
+    nextRevision: revisionOfWorldFacts(facts('recovered')), facts: facts('recovered') }), { code: 'EIO' });
+  phase = 'hold-recovery';
+  const recovering = disk.recover();
+  recovering.catch(() => {});
+  await guarded(entered.promise);
+  await assert.rejects(f.persistence.closeSaves(), { code: 'WORLD_SAVE_CLOSE_TIMEOUT' });
+  release.resolve();
+  await assert.rejects(recovering, { code: 'WORLD_SAVE_WORKER_QUARANTINED' });
+  const cold = createJsonWorldRepository({ file: f.configuration.contextFile, worldId: 'primary', localCommitFile });
+  await assert.rejects(cold.read(), { code: 'LOCAL_WORLD_COMMIT_RECOVERY_PENDING' });
+  assert.deepEqual(JSON.parse(await fs.readFile(f.configuration.contextFile, 'utf8')), facts());
+  await new Promise(resolve => setImmediate(resolve));
+  const freshDisk = createTransactionalWorldPersistence({ ...f.configuration, runtimeAuthority: 'disk' });
+  assert.deepEqual((await freshDisk.readCommittedSnapshot()).facts, facts('recovered'),
+    'only a fresh capability after the fence is safely released may finish the retained prepared transaction');
 });
