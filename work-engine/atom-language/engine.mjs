@@ -778,6 +778,7 @@ async function persistChangedGraph({
   projectionFile,
   rootName,
   commitWorld,
+  claimCandidate,
   expectedRevision,
   correlationId,
   source,
@@ -808,6 +809,7 @@ async function persistChangedGraph({
     error.code = 'WORLD_COMMIT_CAPABILITY_REQUIRED';
     throw error;
   }
+  await claimCandidate?.(atoms);
   const commitStartedAt = performance.now();
   const receipt = await commitWorld({
     expectedRevision,
@@ -3271,6 +3273,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         projectionFile,
         rootName: path.basename(contextFile),
         commitWorld: options.commitWorld,
+        claimCandidate: options.claimCandidate,
         expectedRevision,
         correlationId,
         source,

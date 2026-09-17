@@ -8,29 +8,19 @@ import {
   sealWorldFactsRevision
 } from '../src/atom-system/world-runtime/world-revision.mjs';
 
-test('revision hashing is reused for one immutable fact snapshot', () => {
-  let reads = 0;
-  const atom = {
-    name: 'A',
-    get detail() {
-      reads += 1;
-      return 'stable';
-    },
-    children: [],
-    partners: []
-  };
-  Object.freeze(atom.children);
-  Object.freeze(atom.partners);
-  Object.freeze(atom);
-  const facts = Object.freeze([atom]);
-
-  sealWorldFactsRevision(facts);
-  const readsAfterSeal = reads;
-  const first = revisionOfWorldFacts(facts);
-  const second = revisionOfWorldFacts(facts);
-
-  assert.equal(second, first);
-  assert.equal(reads, readsAfterSeal);
+test('sealed plain JSON facts reuse one canonical revision', (t) => {
+  const originalCreateHash = crypto.createHash;
+  let hashes = 0;
+  t.mock.method(crypto, 'createHash', (...args) => {
+    hashes += 1;
+    return originalCreateHash(...args);
+  });
+  const facts = [{ thing: 'A', situation: 'stable', slot: [], strut: [] }];
+  const first = sealWorldFactsRevision(facts);
+  assert.equal(revisionOfWorldFacts(facts), first);
+  assert.equal(revisionOfWorldFacts(facts), first);
+  assert.equal(hashes, 1);
+  assert.equal(Object.isFrozen(facts[0]), true);
 });
 
 test('mutable fact arrays are rehashed after in-place changes', () => {
@@ -59,27 +49,45 @@ test('a frozen but unsealed getter cannot bless a cached revision', () => {
   assert.notEqual(revisionOfWorldFacts(facts), before);
 });
 
-test('a finalized world is sealed once and reuses one canonical revision downstream', () => {
-  let reads = 0;
-  const facts = [{
-    thing: 'A',
-    get situation() {
-      reads += 1;
-      return 'final';
-    },
-    slot: [{ thing: 'B', situation: '', slot: [], strut: [] }],
-    strut: []
-  }];
+test('sealing rejects accessor facts before a cached revision can become stale', () => {
+  let situation = 'before';
+  const facts = Object.freeze([Object.freeze({ thing: 'A',
+    get situation() { return situation; }, slot: Object.freeze([]), strut: Object.freeze([]) })]);
+  assert.throws(() => sealWorldFactsRevision(facts), { code: 'INVALID_WORLD_FACTS' });
+  const before = revisionOfWorldFacts(facts);
+  situation = 'after';
+  assert.notEqual(revisionOfWorldFacts(facts), before);
+});
 
-  const prepared = sealWorldFactsRevision(facts);
-  const readsAfterSeal = reads;
+test('sealing rejects nested accessors and mutable exotic values', () => {
+  const nestedGetter = [{ thing: 'A', situation: '', slot: [], strut: [{
+    get then() { return [{ thing: 'B' }]; }
+  }] }];
+  assert.throws(() => sealWorldFactsRevision(nestedGetter), { code: 'INVALID_WORLD_FACTS' });
+  assert.throws(() => sealWorldFactsRevision([{ thing: 'A', situation: '', slot: [],
+    strut: [], extra: new Map([['mutable', 'before']]) }]), { code: 'INVALID_WORLD_FACTS' });
+});
 
-  assert.equal(revisionOfWorldFacts(facts), prepared);
-  assert.equal(revisionOfWorldFacts(facts), prepared);
-  assert.equal(reads, readsAfterSeal);
-  assert.equal(Object.isFrozen(facts), true);
-  assert.equal(Object.isFrozen(facts[0]), true);
-  assert.equal(Object.isFrozen(facts[0].slot[0]), true);
+test('sealing accepts shared plain JSON data but rejects sparse arrays and cycles', () => {
+  const shared = { thing: 'Shared', situation: '', slot: [], strut: [] };
+  const facts = [{ thing: 'Root', situation: '', slot: [shared, shared], strut: [] }];
+  assert.equal(sealWorldFactsRevision(facts), revisionOfWorldFacts(facts));
+  const sparse = [{ thing: 'Root', situation: '', slot: new Array(1), strut: [] }];
+  sparse[0].slot.extra = 'balances Object.keys length';
+  assert.throws(() => sealWorldFactsRevision(sparse), { code: 'INVALID_WORLD_FACTS' });
+  const cycle = [{ thing: 'Root', situation: '', slot: [], strut: [] }];
+  cycle[0].slot.push(cycle[0]);
+  assert.throws(() => sealWorldFactsRevision(cycle), { code: 'INVALID_WORLD_FACTS' });
+});
+
+test('sealing rejects a proxy that can change a frozen-looking fact', () => {
+  let situation = 'before';
+  const target = { thing: 'Root', situation: 'before', slot: [], strut: [] };
+  const facts = [new Proxy(target, {
+    get(object, key) { return key === 'situation' ? situation : Reflect.get(object, key); }
+  })];
+  assert.throws(() => sealWorldFactsRevision(facts), { code: 'INVALID_WORLD_FACTS' });
+  situation = 'after';
 });
 
 test('world revision is the sha256 of the canonical persisted JSON value', () => {

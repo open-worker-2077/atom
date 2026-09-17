@@ -14,7 +14,7 @@ import {
 } from '../work-engine/atom-language/context-store.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import * as contextStore from '../work-engine/atom-language/context-store.mjs';
-import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
+import { revisionOfWorldFacts, sealWorldFactsRevision } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 const struts = (...targets) => targets.length === 0
   ? []
@@ -122,6 +122,21 @@ test('a verified committed version reuses owned context without retaining caller
   await assert.rejects(readAtomContext(contextFile, {
     committedVersion: { ...version }
   }), { code: 'INVALID_WORLD_SNAPSHOT' });
+});
+
+test('internal owned preparation preserves sealed facts while public preparation isolates callers', () => {
+  const facts = atomsFixture();
+  const revision = sealWorldFactsRevision(facts);
+  const owned = contextStore.prepareOwnedCommittedAtomVersion({ facts, revision });
+  const publicVersion = contextStore.prepareCommittedAtomVersion({ facts, revision });
+  assert.strictEqual(owned.facts, facts);
+  assert.notStrictEqual(publicVersion.facts, facts);
+  assert.throws(() => contextStore.prepareOwnedCommittedAtomVersion({
+    facts: Object.freeze([{ thing: 'Root', situation: 'shallow', slot: [], strut: [] }]),
+    revision
+  }), { code: 'INVALID_WORLD_SNAPSHOT' });
+  assert.throws(() => contextStore.prepareOwnedCommittedAtomVersion({ facts,
+    revision: 'sha256:forged' }), { code: 'INVALID_WORLD_REVISION' });
 });
 
 test('a forged or shallow-frozen source cannot bless a committed version', () => {

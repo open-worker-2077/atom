@@ -37,6 +37,33 @@ test('coordinator accepts into one memory fact/receipt boundary without storage'
   assert.equal((await coordinator.inspectCommitted((current) => current)).revision, receipt.afterRevision);
 });
 
+test('only a privately claimed plain candidate transfers identity to memory acceptance', async () => {
+  const before = snapshot([{ thing: 'Root', situation: 'before', slot: [], strut: [] }]);
+  const ports = createMemoryTransactionPorts({ initialSnapshot: before });
+  const coordinator = createCommitCoordinator(ports);
+  const first = [{ thing: 'Root', situation: 'first', slot: [], strut: [] }];
+  ports.claimCandidate(first);
+  await coordinator.execute({ command: command('owned-1', before.revision),
+    transitionInputMode: 'trusted-readonly', transition: () => ({ facts: first,
+      revision: sealWorldFactsRevision(first) }) });
+  assert.strictEqual(ports.authority.snapshot().facts, first);
+  const second = [{ thing: 'Root', situation: 'second', slot: [], strut: [] }];
+  await coordinator.execute({ command: command('unclaimed-2', ports.authority.snapshot().revision),
+    transitionInputMode: 'trusted-readonly', transition: () => ({ facts: second,
+      revision: sealWorldFactsRevision(second) }) });
+  assert.notStrictEqual(ports.authority.snapshot().facts, second);
+  assert.equal(ports.authority.snapshot().facts[0].situation, 'second');
+  const returned = [{ thing: 'Root', situation: 'before', slot: [], strut: [] }];
+  ports.claimCandidate(returned);
+  await coordinator.execute({ command: command('owned-3', ports.authority.snapshot().revision),
+    transitionInputMode: 'trusted-readonly', transition: () => ({ facts: returned,
+      revision: sealWorldFactsRevision(returned) }) });
+  assert.strictEqual(ports.authority.snapshot().facts, returned);
+  assert.equal(ports.authority.snapshot().revision, before.revision);
+  assert.equal(ports.authority.status().acceptedVersion, 3);
+  assert.equal(first[0].situation, 'first');
+});
+
 test('recovery records seed memory history but never replay a persisted write as a new acceptance', async () => {
   const before = snapshot([]);
   const durable = { receipt: { commandId: 'prior', correlationId: 'prior',

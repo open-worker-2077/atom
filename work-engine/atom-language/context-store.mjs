@@ -19,7 +19,7 @@ import {
   isLegacyStrutEntry,
   validateCompatibilityManifest
 } from '../../src/atom-system/world-runtime/legacy-graph-compat.mjs';
-import { revisionOfWorldFacts, sealWorldFactsRevision } from '../../src/atom-system/world-runtime/world-revision.mjs';
+import { isSealedWorldFacts, revisionOfWorldFacts, sealWorldFactsRevision } from '../../src/atom-system/world-runtime/world-revision.mjs';
 
 const DEFAULT_CONTEXT_FILENAME = 'atom.json';
 const contextSnapshots = new Map();
@@ -119,6 +119,7 @@ export function legacyAtomContextMetadata(atoms) {
 
 function freezeSnapshot(value) {
   if (!value || typeof value !== 'object') return value;
+  if (isSealedWorldFacts(value)) return value;
   for (const child of Object.values(value)) freezeSnapshot(child);
   return Object.freeze(value);
 }
@@ -127,11 +128,10 @@ export function isCommittedAtomVersion(value) {
   return Boolean(value && typeof value === 'object' && committedVersionContexts.has(value));
 }
 
-export function prepareCommittedAtomVersion(input) {
+function prepareVersion(input, facts) {
   if (!Array.isArray(input?.facts) || typeof input.revision !== 'string') {
     throw atomLanguageError('INVALID_WORLD_SNAPSHOT', 'Committed Atom snapshot requires facts and revision');
   }
-  const facts = structuredClone(input.facts);
   const revision = revisionOfWorldFacts(facts);
   if (input.revision !== revision && input.revision !== revision.slice('sha256:'.length)) {
     throw atomLanguageError('INVALID_WORLD_REVISION', 'Committed Atom revision does not match facts');
@@ -145,12 +145,27 @@ export function prepareCommittedAtomVersion(input) {
   projectAtomContext(normalized.atoms, { allowLegacyStrut: Boolean(metadata) });
   const context = freezeSnapshot(normalized.atoms);
   if (metadata) legacySnapshotMetadata.set(context, metadata);
-  sealWorldFactsRevision(facts);
   if (context !== facts) sealWorldFactsRevision(context);
   const version = Object.freeze({ facts, revision,
     compatibilityManifest: freezeSnapshot(compatibilityManifest) });
   committedVersionContexts.set(version, context);
   return version;
+}
+
+export function prepareCommittedAtomVersion(input) {
+  if (!Array.isArray(input?.facts) || typeof input.revision !== 'string') {
+    throw atomLanguageError('INVALID_WORLD_SNAPSHOT', 'Committed Atom snapshot requires facts and revision');
+  }
+  const facts = structuredClone(input.facts);
+  sealWorldFactsRevision(facts);
+  return prepareVersion(input, facts);
+}
+
+export function prepareOwnedCommittedAtomVersion(input) {
+  if (!isSealedWorldFacts(input?.facts)) {
+    throw atomLanguageError('INVALID_WORLD_SNAPSHOT', 'Owned Atom version requires internally sealed facts');
+  }
+  return prepareVersion(input, input.facts);
 }
 
 async function contextSignature(file) {

@@ -8,6 +8,8 @@ import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-eng
 import { createDurableWorldWriter } from '../src/atom-system/adapters/durable-world-writer.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { readAtomContext } from '../work-engine/atom-language/context-store.mjs';
+import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
 test('real engine reuses an accepted memory version and preserves old readers through save', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-owned-real-memory-'));
@@ -16,9 +18,22 @@ test('real engine reuses an accepted memory version and preserves old readers th
     projectionFile: path.join(directory, 'graph.json') };
   await fs.writeFile(target.contextFile,
     `${JSON.stringify([{ thing: 'Root', situation: 'before', slot: [], strut: [] }])}\n`, 'utf8');
+  let committedEngineCandidate = null;
+  const scheduler = createProgramRuntimeScheduler();
+  const programWorlds = [];
+  const rebuildAgentSecurity = scheduler.rebuildAgentSecurity.bind(scheduler);
+  scheduler.rebuildAgentSecurity = async (facts) => {
+    programWorlds.push(facts);
+    return rebuildAgentSecurity(facts);
+  };
   const service = createLegacyWorldService({ memoryAuthoritative: true,
     publishLegacyProjection: false,
-    saveSchedule: { quietMs: 60_000, maxDirtyMs: 60_000 } });
+    saveSchedule: { quietMs: 60_000, maxDirtyMs: 60_000 },
+    execute: (request) => executeAtomLanguage({ ...request,
+      commitWorld: async (transition) => {
+        committedEngineCandidate = transition.facts;
+        return request.commitWorld(transition);
+      } }) });
   let closed = false;
   try {
     const before = await service.readCommittedVersion(target);
@@ -31,11 +46,20 @@ test('real engine reuses an accepted memory version and preserves old readers th
     }
     const write = await service.executeLegacy({ ...target,
       source: 'transform {"thing":"Root","situation.rep.changed"}',
-      interaction: { id: 'owned-memory-write' } });
+      interaction: { id: 'owned-memory-write' }, programScheduler: scheduler,
+      programMode: 'reconcile' });
     assert.equal(write.ok, true, JSON.stringify(write.errors));
     const after = await service.readCommittedVersion(target);
     assert.notStrictEqual(after, before);
+    assert.strictEqual(after.facts, committedEngineCandidate,
+      'memory acceptance and the owned version must retain the validated engine candidate');
+    assert.equal(programWorlds.includes(committedEngineCandidate), true,
+      'postcommit Program security must observe the same owned candidate');
     assert.equal(oldContext[0].situation, 'before');
+    const publicCopy = await service.readCommittedSnapshot(target);
+    assert.notStrictEqual(publicCopy.facts, after.facts);
+    publicCopy.facts[0].situation = 'caller mutation';
+    assert.equal(after.facts[0].situation, 'changed');
     assert.equal((await readAtomContext(target.contextFile, { committedVersion: after }))[0].situation,
       'changed');
     const latest = await service.executeLegacy({ ...target,

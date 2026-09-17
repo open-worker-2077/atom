@@ -33,7 +33,14 @@ export function createMemoryTransactionPorts({
   const acceptedVersions = new Map();
   const prepared = new Map();
   const outcomes = new Map(durableOutcomes);
+  const claimedCandidates = new WeakSet();
   let staged = null;
+
+  function claimCandidate(facts) {
+    sealWorldFactsRevision(facts);
+    claimedCandidates.add(facts);
+    return facts;
+  }
 
   const worldRepository = Object.freeze({
     async read() {
@@ -122,7 +129,9 @@ export function createMemoryTransactionPorts({
       if (!record || !staged) {
         throw problem('MISSING_PREPARED_TRANSACTION', `Command ${commandId} was not staged`);
       }
-      const facts = structuredClone(staged.nextSnapshot.facts);
+      const stagedFacts = staged.nextSnapshot.facts;
+      const facts = claimedCandidates.has(stagedFacts)
+        ? stagedFacts : structuredClone(stagedFacts);
       const revision = sealWorldFactsRevision(facts);
       if (revision !== receipt.afterRevision) {
         throw problem('INVALID_WORLD_REVISION', 'Staged memory facts differ from receipt');
@@ -189,5 +198,5 @@ export function createMemoryTransactionPorts({
     return status;
   }
 
-  return Object.freeze({ authority, worldRepository, journalRepository, markSaved });
+  return Object.freeze({ authority, worldRepository, journalRepository, markSaved, claimCandidate });
 }

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { executeAtomLanguage } from '../../../work-engine/atom-language/engine.mjs';
 import { createWorldService } from '../public/world-service.mjs';
 import { createTransactionalWorldPersistence } from './transactional-world-persistence.mjs';
-import { prepareCommittedAtomVersion } from '../../../work-engine/atom-language/context-store.mjs';
+import { prepareCommittedAtomVersion, prepareOwnedCommittedAtomVersion } from '../../../work-engine/atom-language/context-store.mjs';
 
 // Only live invocations are joined here. All completed results and restart
 // decisions come from the central journal, never this transient rendezvous.
@@ -92,6 +92,8 @@ export function createLegacyWorldService(options = {}) {
         .then(async () => {
           if (typeof persistence.readCommittedSnapshot === 'function') {
             return timed('committed-snapshot', async () => {
+              const owned = await persistence.readOwnedCommittedSnapshot?.();
+              if (Array.isArray(owned?.facts)) return prepareOwnedCommittedAtomVersion(owned);
               const snapshot = await persistence.readCommittedSnapshot();
               return Array.isArray(snapshot?.facts) ? prepareCommittedAtomVersion(snapshot) : snapshot;
             });
@@ -183,6 +185,9 @@ export function createLegacyWorldService(options = {}) {
         return latest ?? null;
       },
       transactionTransformLog,
+      ...(typeof persistence.claimCandidate === 'function' ? {
+        claimCandidate: (facts) => persistence.claimCandidate(facts)
+      } : {}),
       readDiscardEvidence: typeof persistence.readDiscardEvidence === 'function'
         ? (identity) => persistence.readDiscardEvidence(identity) : undefined,
       onSubsequentSettled: settleBusinessResult,

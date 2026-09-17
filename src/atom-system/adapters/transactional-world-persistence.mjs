@@ -12,7 +12,7 @@ import {
 import { createCommitCoordinator } from '../world-runtime/commit-coordinator.mjs';
 import { createIndependentWorldSaver } from '../world-runtime/independent-world-saver.mjs';
 import { createMemoryTransactionPorts } from '../world-runtime/memory-transaction-ports.mjs';
-import { revisionOfWorldFacts } from '../world-runtime/world-revision.mjs';
+import { isSealedWorldFacts, revisionOfWorldFacts } from '../world-runtime/world-revision.mjs';
 import { createDurableWorldWriter } from './durable-world-writer.mjs';
 import {
   createJsonTransactionJournal,
@@ -241,7 +241,7 @@ export function createTransactionalWorldPersistence({
     return null;
   }
 
-  async function readCommittedSnapshot() {
+  async function inspectCommittedSnapshot(copyFacts) {
     await recover();
     return coordinator.inspectCommitted(async (snapshot) => {
       const latest = owner.runtimeAuthority === 'memory'
@@ -252,10 +252,24 @@ export function createTransactionalWorldPersistence({
       owner.cachedManifest = structuredClone(compatibilityManifest);
       owner.manifestLoaded = true;
       return Object.freeze({
-        facts: structuredClone(snapshot.facts),
+        facts: copyFacts(snapshot.facts),
         revision: snapshot.revision,
         compatibilityManifest
       });
+    });
+  }
+
+  async function readCommittedSnapshot() {
+    return inspectCommittedSnapshot((facts) => structuredClone(facts));
+  }
+
+  async function readOwnedCommittedSnapshot() {
+    if (owner.runtimeAuthority !== 'memory') return null;
+    return inspectCommittedSnapshot((facts) => {
+      if (!isSealedWorldFacts(facts)) {
+        throw problem('INVALID_WORLD_SNAPSHOT', 'Memory authority returned unsealed facts');
+      }
+      return facts;
     });
   }
 
@@ -491,7 +505,8 @@ export function createTransactionalWorldPersistence({
     }
     if (reusedReceipt) return receipt;
     if (postCommitEvent) assertSourceBinding({ event: receipt.result.postCommitEvent }, postCommitEvent);
-    const committedSnapshot = await readCommittedSnapshot();
+    const committedSnapshot = await (owner.runtimeAuthority === 'memory'
+      ? readOwnedCommittedSnapshot() : readCommittedSnapshot());
     const committedFacts = committedSnapshot.revision === canonicalNextRevision
       ? facts
       : committedSnapshot.facts;
@@ -642,6 +657,13 @@ export function createTransactionalWorldPersistence({
     commit,
     compatibilityManifest,
     readCommittedSnapshot,
+    ...(owner.runtimeAuthority === 'memory' ? {
+      readOwnedCommittedSnapshot,
+      async claimCandidate(facts) {
+        await owner.ready;
+        return owner.memoryPorts.claimCandidate(facts);
+      }
+    } : {}),
     recover,
     rollback,
     transformLogEntries,
