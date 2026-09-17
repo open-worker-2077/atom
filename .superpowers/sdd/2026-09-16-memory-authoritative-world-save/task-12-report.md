@@ -1,0 +1,30 @@
+# Task 12 — Human Web translation from current accepted facts
+
+Status: DONE_WITH_CONCERNS. Base: `b70282b4441134bd64cc161090fe9d6e2ab98bc1`.
+
+## Boundary and root cause
+
+The public Web route accepted a memory-mode create with `saveState.pending=true` while both `atom.json` and `graph.json` still held the earlier version. The next Web edit returned HTTP 400 `INVALID_HUMAN_WORKSPACE_REQUEST` because the translator searched only the lagging `graph.json`. Subsequent real HTTP REDs showed rename→edit targeting the old path, a second relation edit overwriting the first accepted relation, and a deleted status key being translated into a failed Transform instead of rejected against current facts. These were not inferred solely from source inspection.
+
+The composition now supplies the existing `worldService.readCommittedVersion({contextFile,projectionFile:graphFile})` provider (or `readCommittedSnapshot` fallback) to its default translators *after* the World Service is constructed. Every translation using the provider constructs its lookup from that call's owned current facts; it does not reuse projection state or `resolutionAuthority`, wait for save, or publish Graph. Standalone translators without a provider retain the disk-Graph path. Current-facts key/path disagreements and malformed Web node identity fail closed; the standalone key-first fallback is unchanged. An aliased context filename is used as the translation root name so emitted strut selectors match the authoritative context path, even though the lagging published Graph's legacy root remains `atom.json`.
+
+## RED evidence (all commands run with backup disabled)
+
+- `$env:ATOM_RUNTIME_BACKUP_REPO=''; node --test --test-name-pattern='Web create then edit resolves accepted memory while save and Graph publication lag' tests/atom-language-graph-server.test.mjs` → 0 pass / 1 fail; create succeeded, next edit returned HTTP 400 `INVALID_HUMAN_WORKSPACE_REQUEST` (`Web edit target does not map to one Atom`).
+- `$env:ATOM_RUNTIME_BACKUP_REPO=''; node --test --test-name-pattern='Web relation edits preserve relations accepted after the last Graph publication' tests/atom-language-graph-server.test.mjs` → after correcting the synthetic Agent-window fixture, 0 pass / 1 fail; public Explore showed the second target but not the first accepted new relation. The initial fixture failure was `WINDOW_ACCESS_DENIED`, not counted as product RED.
+- `$env:ATOM_RUNTIME_BACKUP_REPO=''; node --test --test-name-pattern='Web rename then edit|Web status rejects' tests/atom-language-graph-server.test.mjs` → 0 pass / 3 fail; both memory and disk rename→edit tried the deleted old path (`ATOM_NOT_FOUND`), and the initial status fixture lacked the required default backup node. After correcting that fixture, the focused status test failed 200 versus expected 400: the stale key translated into a failed `ATOM_NOT_FOUND` Transform.
+- `$env:ATOM_RUNTIME_BACKUP_REPO=''; node --test --test-name-pattern='Web create then edit resolves accepted memory while save and Graph publication lag' tests/atom-language-graph-server.test.mjs` → 0 pass / 1 fail after adding the identity assertion; a mismatched `nodeKey` caused a real committed edit (HTTP 200) rather than rejection.
+- `$env:ATOM_RUNTIME_BACKUP_REPO=''; node --test --test-name-pattern='human workspace keeps standalone key precedence' tests/atom-legacy-runtime-composition.test.mjs` → 0 pass / 1 fail; the first implementation incorrectly prioritized explicit path over the established standalone key-first fallback. The corrected implementation keeps the prior branch and rejects two different current-version targets.
+- `$env:ATOM_RUNTIME_BACKUP_REPO=''; node --test --test-name-pattern='Web relation edits preserve relations accepted after the last Graph publication' tests/atom-language-graph-server.test.mjs` → 0 pass / 1 fail after changing only the synthetic context filename to `aliased-world.json`: `STRUT_SELECTOR_NOT_FOUND` (`aliased-world.json/atom.json/...`). Supplying the actual context basename to the current-facts translation resolved it. The published Graph root was observed as `atom.json`; that legacy projection file was not rewritten to make the test pass.
+
+No production world or official backup was accessed. All new synthetic fixtures were retained.
+
+## GREEN and self-review
+
+- `$env:ATOM_RUNTIME_BACKUP_REPO=''; node --test --test-name-pattern='Web create then edit|Web relation edits preserve|Web rename then edit|Web status rejects|human status translator|human workspace translator|human workspace keeps standalone key precedence|committed Human Web facts|HTTP Transform reads accepted memory' tests/atom-language-graph-server.test.mjs tests/atom-legacy-runtime-composition.test.mjs` → **14 tests, 14 pass, 0 fail, 0 skipped**, 3,480 ms. Covers five new HTTP journeys (create→edit, relation retention with aliased context, memory rename→edit, disk rename→edit, deleted status rejection), mismatched identity rejection, existing standalone translator contracts, composition acknowledgment ordering, and existing memory HTTP/save baseline.
+- `git diff --check -- src/atom-system/adapters/legacy-runtime-composition.mjs tests/atom-language-graph-server.test.mjs tests/atom-legacy-runtime-composition.test.mjs; node --check` on each of the three files → exit 0; only Git's Windows LF→CRLF notices, no whitespace or syntax error.
+- Reviewed the scoped diff for default translator construction order, one current version per translation, fail-closed invalid version, exact-target checks, no source-world access, and unchanged no-provider key-first behavior. Root-owned dirty plan and requirement ledger were not staged or edited by this task.
+
+## Residual concern
+
+Current-version `node-edit` performs an in-memory `projectGraph` lookup to detect disagreement between a Web key and an explicit semantic path. It does not publish Graph or wait for disk, but its real-world latency was not measured here. No full system or private-world acceptance was run; root owns final candidate validation.

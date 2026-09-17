@@ -394,6 +394,171 @@ test('graph server can explicitly enable the memory-authoritative runtime', () =
   assert.equal(parseAtomGraphServerArgs(['--memory-authoritative']).memoryAuthoritative, true);
 });
 
+test('Web create then edit resolves accepted memory while save and Graph publication lag', async (t) => {
+  const directory = await temporaryDirectory();
+  t.diagnostic(`Retained synthetic fixture: ${directory}`);
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  await fs.writeFile(contextFile, JSON.stringify(atomFixture()));
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0,
+    contextFile, graphFile, storeFile, memoryAuthoritative: true,
+    saveSchedule: { quietMs: 60000, maxDirtyMs: 60000 }, projectionDelayMs: 60000,
+    backupRepository: null });
+  t.after(() => running.close());
+  const post = async (route, payload) => {
+    const response = await fetch(`${running.url}${route}`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+    return { status: response.status, body: await response.json() };
+  };
+  const created = await post('/__atom/api/workspace-edit', { interactionId: 'web-create',
+    operation: { kind: 'node-create', path: 'root', parentAtomPath: '石器工坊',
+      draft: { label: '新工具', description: '初稿' } } });
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  assert.equal(created.body.result.ok, true, JSON.stringify(created.body));
+  assert.equal(created.body.result.saveState.pending, true);
+  assert.equal(JSON.stringify(await fs.readFile(contextFile, 'utf8')).includes('新工具'), false);
+  assert.equal((await fs.readFile(graphFile, 'utf8')).includes('新工具'), false);
+
+  const node = { id: 'created-locally', key: 'root::created-locally', path: 'root',
+    atomPath: '石器工坊/新工具', label: '新工具' };
+  const edited = await post('/__atom/api/workspace-edit', { interactionId: 'web-edit-created',
+    operation: { kind: 'node-edit', path: node.path, nodeKey: node.key, node,
+      draft: { label: '新工具', description: '已编辑', atomTypes: [] } } });
+  assert.equal(edited.status, 200, JSON.stringify(edited.body));
+  assert.equal(edited.body.result.ok, true, JSON.stringify(edited.body));
+  const read = await post('/__atom/api/command', { source: 'explore {"thing":"石器工坊/新工具","situation$full":true}',
+    interaction: { id: 'web-created-read', agent: { ref: 'fixture-agent-ref', path: '石器工坊' } }, history: [] });
+  assert.equal(read.status, 200, JSON.stringify(read.body));
+  assert.match(JSON.stringify(read.body), /已编辑/u);
+  assert.equal((await fs.readFile(graphFile, 'utf8')).includes('新工具'), false);
+  const mismatched = await post('/__atom/api/workspace-edit', { interactionId: 'web-mismatched-node-key',
+    operation: { kind: 'node-edit', path: node.path, nodeKey: 'root::different-node', node,
+      draft: { label: '新工具', description: '不得写入', atomTypes: [] } } });
+  assert.equal(mismatched.status, 400, JSON.stringify(mismatched.body));
+  assert.equal(mismatched.body.error.code, 'INVALID_HUMAN_WORKSPACE_REQUEST');
+});
+
+test('Web relation edits preserve relations accepted after the last Graph publication', async (t) => {
+  const directory = await temporaryDirectory();
+  t.diagnostic(`Retained synthetic fixture: ${directory}`);
+  const contextFile = path.join(directory, 'aliased-world.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const initial = atomFixture();
+  initial[0].slot.push({ thing: '关系源', situation: '', slot: [],
+    strut: [{ 'if@current': true, then: [{ thing: '石器工坊/石斧' }] }] });
+  initial[0].slot.push({ thing: '备用目标', situation: '', slot: [], strut: [] });
+  initial[0].slot.push({ thing: '追加目标', situation: '', slot: [], strut: [] });
+  await fs.writeFile(contextFile, JSON.stringify(initial));
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0,
+    contextFile, graphFile, storeFile, memoryAuthoritative: true,
+    saveSchedule: { quietMs: 60000, maxDirtyMs: 60000 }, projectionDelayMs: 60000,
+    backupRepository: null });
+  t.after(() => running.close());
+  const state = await (await fetch(`${running.url}/__spatial/api/state`)).json();
+  const node = (atomPath) => {
+    const found = state.knowledge.nodes.find((entry) => entry.atomPath === atomPath);
+    assert.ok(found, `missing synthetic spatial node ${atomPath}`);
+    return found;
+  };
+  const post = async (route, payload) => {
+    const response = await fetch(`${running.url}${route}`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+    return { status: response.status, body: await response.json() };
+  };
+  const source = node('石器工坊/关系源');
+  for (const [target, id] of [[node('石器工坊/备用目标'), 'relation-b'], [node('石器工坊/追加目标'), 'relation-c']]) {
+    const response = await post('/__atom/api/workspace-edit', { interactionId: id,
+      operation: { kind: 'edge-create', source, target } });
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+    assert.equal(response.body.result.ok, true, JSON.stringify(response.body));
+  }
+  const read = await post('/__atom/api/command', { source: 'explore {"thing":"石器工坊/关系源","strut":true}',
+    interaction: { id: 'relation-read', agent: { ref: 'fixture-agent-ref', path: '石器工坊' } }, history: [] });
+  assert.equal(read.status, 200, JSON.stringify(read.body));
+  assert.match(JSON.stringify(read.body), /备用目标/u);
+  assert.match(JSON.stringify(read.body), /追加目标/u);
+  const graph = JSON.parse(await fs.readFile(graphFile, 'utf8'));
+  assert.equal(graph.graph.thing, 'atom.json', 'the current-facts lookup keeps the canonical published Graph root');
+  const graphSource = graph.graph.slot[0].slot.find((child) => child.thing === '关系源');
+  assert.deepEqual(graphSource.strut[0].then, [{ thing: 'atom.json/石器工坊/石斧' }]);
+});
+
+for (const memoryAuthoritative of [true, false]) {
+  test(`Web rename then edit resolves the current target in ${memoryAuthoritative ? 'memory' : 'disk'} mode`, async (t) => {
+    const directory = await temporaryDirectory();
+    t.diagnostic(`Retained synthetic fixture: ${directory}`);
+    const contextFile = path.join(directory, 'atom.json');
+    const graphFile = path.join(directory, 'graph.json');
+    const storeFile = path.join(directory, 'knowledge.json');
+    await fs.writeFile(contextFile, JSON.stringify(atomFixture()));
+    const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0,
+      contextFile, graphFile, storeFile, memoryAuthoritative,
+      saveSchedule: { quietMs: 60000, maxDirtyMs: 60000 }, projectionDelayMs: 60000,
+      backupRepository: null });
+    t.after(() => running.close());
+    const state = await (await fetch(`${running.url}/__spatial/api/state`)).json();
+    const original = state.knowledge.nodes.find((node) => node.atomPath === '石器工坊/石斧');
+    assert.ok(original);
+    const post = async (route, payload) => {
+      const response = await fetch(`${running.url}${route}`, { method: 'POST',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+      return { status: response.status, body: await response.json() };
+    };
+    const renamed = await post('/__atom/api/workspace-edit', { interactionId: 'web-rename',
+      operation: { kind: 'node-edit', path: original.path, nodeKey: original.key, node: original,
+        draft: { label: '新石斧', description: '改名', atomTypes: [] } } });
+    assert.equal(renamed.status, 200, JSON.stringify(renamed.body));
+    assert.equal(renamed.body.result.ok, true, JSON.stringify(renamed.body));
+    const current = { ...original, atomPath: '石器工坊/新石斧', label: '新石斧' };
+    const edited = await post('/__atom/api/workspace-edit', { interactionId: 'web-edit-renamed',
+      operation: { kind: 'node-edit', path: current.path, nodeKey: current.key, node: current,
+        draft: { label: '新石斧', description: '二次编辑', atomTypes: [] } } });
+    assert.equal(edited.status, 200, JSON.stringify(edited.body));
+    assert.equal(edited.body.result.ok, true, JSON.stringify(edited.body));
+    const read = await post('/__atom/api/command', { source: 'explore {"thing":"石器工坊/新石斧","situation$full":true}',
+      interaction: { id: 'rename-read', agent: { ref: 'fixture-agent-ref', path: '石器工坊' } }, history: [] });
+    assert.equal(read.status, 200, JSON.stringify(read.body));
+    assert.match(JSON.stringify(read.body), /二次编辑/u);
+    assert.equal((await fs.readFile(graphFile, 'utf8')).includes('新石斧'), false);
+  });
+}
+
+test('Web status rejects a deleted current-memory target despite the stale Graph key', async (t) => {
+  const directory = await temporaryDirectory();
+  t.diagnostic(`Retained synthetic fixture: ${directory}`);
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  const storeFile = path.join(directory, 'knowledge.json');
+  const initial = atomFixture();
+  initial[0].slot.push({ thing: '状态', situation: '进行中', slot: [], strut: [] });
+  initial.push({ 'thing@backup@default': '备份仓', situation: '', slot: [], strut: [] });
+  await fs.writeFile(contextFile, JSON.stringify(initial));
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0,
+    contextFile, graphFile, storeFile, memoryAuthoritative: true,
+    saveSchedule: { quietMs: 60000, maxDirtyMs: 60000 }, projectionDelayMs: 60000,
+    backupRepository: null });
+  t.after(() => running.close());
+  const state = await (await fetch(`${running.url}/__spatial/api/state`)).json();
+  const statusNode = state.knowledge.nodes.find((node) => node.atomPath === '石器工坊/状态');
+  assert.ok(statusNode);
+  const post = async (route, payload) => {
+    const response = await fetch(`${running.url}${route}`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+    return { status: response.status, body: await response.json() };
+  };
+  const removed = await post('/__atom/api/workspace-edit', { interactionId: 'web-delete-status',
+    operation: { kind: 'node-edit', status: 'delete', path: statusNode.path,
+      nodeKey: statusNode.key, node: statusNode } });
+  assert.equal(removed.status, 200, JSON.stringify(removed.body));
+  assert.equal(removed.body.result.ok, true, JSON.stringify(removed.body));
+  const update = await post('/__atom/api/human-status', { key: statusNode.key,
+    detail: '已完成', interactionId: 'web-stale-status' });
+  assert.equal(update.status, 400, JSON.stringify(update.body));
+  assert.equal(update.body.error.code, 'INVALID_HUMAN_STATUS_REQUEST');
+});
+
 test('HTTP Transform reads accepted memory before save and server close flushes its recovery point', async (t) => {
   const directory = await temporaryDirectory();
   let reopened = null;

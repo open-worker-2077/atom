@@ -1510,6 +1510,30 @@ test('human workspace translator resolves an edited node locally without rebuild
   assert.equal(wholeGraphProjectionCalls, 0);
 });
 
+test('human workspace keeps standalone key precedence and rejects conflicting current key and path', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-identity-'));
+  t.diagnostic(`Retained synthetic fixture: ${directory}`);
+  const graphFile = path.join(directory, 'graph.json');
+  const facts = [{ thing: 'Root', situation: '', slot: [
+    { thing: 'A', situation: '', slot: [], strut: [] },
+    { thing: 'B', situation: '', slot: [], strut: [] }
+  ], strut: [] }];
+  await fs.writeFile(graphFile, JSON.stringify({ graph: atom('atom.json', '', [
+    atom('Root', '', [atom('A'), atom('B')])
+  ]) }));
+  const projectGraph = async () => ({ atomPathByKey: new Map([['root::node-a', 'Root/A']]) });
+  const operation = { kind: 'node-edit', nodeKey: 'root::node-a',
+    node: { id: 'node-a', key: 'root::node-a', path: 'root', atomPath: 'Root/B' },
+    draft: { label: 'A', description: 'edited', atomTypes: [] } };
+  const standalone = createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph });
+  const standaloneOperation = { ...operation, node: { ...operation.node, id: undefined } };
+  assert.equal(await standalone.translate({ operation: standaloneOperation }),
+    'transform {"thing":"Root/A","situation.rep.edited"}');
+  const current = createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph,
+    committedVersionProvider: async () => ({ facts, revision: 'sha256:synthetic', compatibilityManifest: null }) });
+  await assert.rejects(current.translate({ operation }), { code: 'INVALID_HUMAN_WORKSPACE_REQUEST' });
+});
+
 test('human workspace translator emits one atomic Transform for a batch landing', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-batch-landing-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
