@@ -1264,29 +1264,41 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
       throw problem('INVALID_TRANSACTION_SNAPSHOT', 'Transaction snapshot does not match its revision');
     }
     const objectFile = snapshotObjectFile(value.revision);
+    const identity = { ...compactSnapshot(value), snapshotRef: value.revision };
+    try {
+      await readSnapshot(identity);
+      return identity;
+    } catch (error) {
+      if (error.code !== 'TRANSACTION_SNAPSHOT_READ_FAILED' || error.details?.cause !== 'ENOENT') throw error;
+    }
     await fileSystem.mkdir(objectDirectory, { recursive: true });
+    const temporary = `${objectFile}.${process.pid}.${crypto.randomUUID()}.tmp`;
     let handle;
     let created = false;
     try {
-      handle = await fileSystem.open(objectFile, 'wx');
+      handle = await fileSystem.open(temporary, 'wx');
       created = true;
       await handle.writeFile(await gzipAsync(
         Buffer.from(JSON.stringify(value), 'utf8'),
         { level: zlibConstants.Z_BEST_SPEED }
       ));
       await handle.sync();
-    } catch (error) {
-      await handle?.close();
+      await handle.close();
       handle = null;
-      if (error.code !== 'EEXIST') {
-        if (created) await fileSystem.rm(objectFile, { force: true }).catch(() => {});
-        throw error;
+      // Publish only a complete, synced object. Hard-link creation is atomic
+      // and cannot replace an existing revision; a competing winner is verified.
+      // Revoked writers may leave a private temporary, never an empty canonical.
+      try {
+        await fileSystem.link(temporary, objectFile);
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        await readSnapshot(identity);
       }
-      await readSnapshot({ ...compactSnapshot(value), snapshotRef: value.revision });
     } finally {
       await handle?.close();
+      if (created) await fileSystem.rm(temporary, { force: true }).catch(() => {});
     }
-    return { ...compactSnapshot(value), snapshotRef: value.revision };
+    return identity;
   }
 
   async function compactRecord(record) {

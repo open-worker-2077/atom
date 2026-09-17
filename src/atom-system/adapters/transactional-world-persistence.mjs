@@ -59,7 +59,7 @@ function assertWorldUnfenced(worldKey) {
 // Guard at the actual I/O dispatch boundary, including handles opened before
 // close began. Entry checks alone cannot fence a disk operation across await.
 function fencedDiskFileSystem(worldKey, capability) {
-  const mutations = new Set(['mkdir', 'writeFile', 'appendFile', 'rename', 'truncate', 'rm', 'unlink', 'copyFile']);
+  const mutations = new Set(['mkdir', 'writeFile', 'appendFile', 'rename', 'link', 'truncate', 'rm', 'unlink', 'copyFile']);
   const handleMutations = new Set(['write', 'writev', 'writeFile', 'appendFile', 'truncate', 'sync', 'datasync']);
   async function dispatch(work) {
     if (capability.revoked) throw problem('WORLD_SAVE_WORKER_QUARANTINED', 'Disk writer capability was revoked by world close');

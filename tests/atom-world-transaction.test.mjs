@@ -2781,6 +2781,83 @@ function legacyPreparedRecord(commandId, beforeFacts, afterFacts) {
   };
 }
 
+test('concurrent journal snapshots publish only complete objects without replacing the winning revision', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-snapshot-publication-'));
+  t.diagnostic(`Retained synthetic fixture: ${directory}`);
+  const file = path.join(directory, 'transactions.json');
+  const record = legacyPreparedRecord('held', [{ marker: 'before' }], [{ marker: 'after' }]);
+  const canonical = path.join(`${file}.d`, 'objects', `${record.before.revision.slice(7)}.json.gz`);
+  let entered, release;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  let armed = true;
+  const fileSystem = { ...fs, async open(target, ...args) {
+    const handle = await fs.open(target, ...args);
+    if (!armed || !target.startsWith(canonical) || args[0] !== 'wx') return handle;
+    armed = false;
+    return new Proxy(handle, { get(opened, method) {
+      if (method === 'writeFile') return async (...values) => { entered(); await gate; return opened.writeFile(...values); };
+      const value = opened[method];
+      return typeof value === 'function' ? value.bind(opened) : value;
+    } });
+  } };
+  const held = createJsonTransactionJournal({ file, fileSystem }).prepare(record);
+  held.catch(() => {});
+  await waiting;
+  const winner = createJsonTransactionJournal({ file });
+  await winner.prepare({ ...record, commandId: 'winner' });
+  const winningBytes = await fs.readFile(canonical);
+  release();
+  await held;
+  assert.deepEqual(await fs.readFile(canonical), winningBytes);
+  const cold = createJsonTransactionJournal({ file });
+  assert.deepEqual((await cold.findPrepared('held')).before.facts, [{ marker: 'before' }]);
+  assert.deepEqual((await cold.findPrepared('winner')).after.facts, [{ marker: 'after' }]);
+});
+
+test('snapshot publication fails closed on an existing corrupt revision without overwriting it', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-snapshot-corrupt-'));
+  t.diagnostic(`Retained synthetic fixture: ${directory}`);
+  const file = path.join(directory, 'transactions.json');
+  const record = legacyPreparedRecord('corrupt', [{ marker: 'before' }], [{ marker: 'after' }]);
+  const objectDirectory = path.join(`${file}.d`, 'objects');
+  const canonical = path.join(objectDirectory, `${record.before.revision.slice(7)}.json.gz`);
+  await fs.mkdir(objectDirectory, { recursive: true });
+  await fs.writeFile(canonical, 'corrupt-existing-object');
+  await assert.rejects(createJsonTransactionJournal({ file }).prepare(record), { code: 'TRANSACTION_SNAPSHOT_READ_FAILED' });
+  assert.equal(await fs.readFile(canonical, 'utf8'), 'corrupt-existing-object');
+});
+
+for (const failure of ['writeFile', 'sync']) {
+  test(`snapshot ${failure} failure preserves a good existing object and leaves a retryable unpublished revision`, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-snapshot-write-failure-'));
+    t.diagnostic(`Retained synthetic fixture: ${directory}`);
+    const file = path.join(directory, 'transactions.json');
+    const record = legacyPreparedRecord('first', [{ marker: 'before' }], [{ marker: 'after' }]);
+    const initial = createJsonTransactionJournal({ file });
+    await initial.prepare(record);
+    const canonical = path.join(`${file}.d`, 'objects', `${record.before.revision.slice(7)}.json.gz`);
+    const goodBytes = await fs.readFile(canonical);
+    const next = legacyPreparedRecord('retry', record.before.facts, [{ marker: 'next' }]);
+    const nextFile = path.join(`${file}.d`, 'objects', `${next.after.revision.slice(7)}.json.gz`);
+    const fileSystem = { ...fs, async open(target, ...args) {
+      const handle = await fs.open(target, ...args);
+      if (!target.startsWith(nextFile) || args[0] !== 'wx') return handle;
+      return new Proxy(handle, { get(opened, method) {
+        if (method === failure) return async () => { throw Object.assign(new Error('injected snapshot failure'), { code: 'EIO' }); };
+        const value = opened[method];
+        return typeof value === 'function' ? value.bind(opened) : value;
+      } });
+    } };
+    await assert.rejects(createJsonTransactionJournal({ file, fileSystem }).prepare(next), { code: 'EIO' });
+    assert.deepEqual(await fs.readFile(canonical), goodBytes);
+    await assert.rejects(fs.stat(nextFile), { code: 'ENOENT' });
+    await createJsonTransactionJournal({ file }).prepare(next);
+    assert.deepEqual((await createJsonTransactionJournal({ file }).findPrepared('retry')).after.facts, [{ marker: 'next' }]);
+  });
+}
+
 function legacyLocalPatchPreparedRecord(commandId, beforeFacts, afterFacts) {
   const beforeRevision = revisionOf(beforeFacts);
   const afterRevision = revisionOf(afterFacts);

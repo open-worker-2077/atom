@@ -336,3 +336,86 @@ test('disk recovery started before close cannot publish its prepared successor a
   assert.deepEqual((await freshDisk.readCommittedSnapshot()).facts, facts('recovered'),
     'only a fresh capability after the fence is safely released may finish the retained prepared transaction');
 });
+
+test('revoking an open whole-world snapshot cannot poison the canonical revision for a fresh writer', async (t) => {
+  const f = await fixture(t);
+  const disk = createTransactionalWorldPersistence({ ...f.configuration, runtimeAuthority: 'disk' });
+  const before = await disk.readCommittedSnapshot();
+  const entered = deferred(), release = deferred();
+  const objectDirectory = path.join(path.dirname(f.configuration.contextFile), 'atom.transactions.json.d', 'objects');
+  const canonical = path.join(objectDirectory, `${before.revision.slice(7)}.json.gz`);
+  const originalOpen = fs.open;
+  let armed = true;
+  t.mock.method(fs, 'open', async (file, ...args) => {
+    const handle = await originalOpen(file, ...args);
+    if (armed && args[0] === 'wx' && path.resolve(file).startsWith(canonical)) {
+      armed = false; entered.resolve(); await release.promise;
+    }
+    return handle;
+  });
+  t.after(() => release.resolve());
+  const request = { correlationId: 'snapshot-before-close', expectedRevision: before.revision,
+    nextRevision: revisionOfWorldFacts(facts('snapshot-new')), facts: facts('snapshot-new') };
+  const writing = disk.commit(request);
+  writing.catch(() => {});
+  await guarded(entered.promise);
+  await assert.rejects(f.persistence.closeSaves(), { code: 'WORLD_SAVE_CLOSE_TIMEOUT' });
+  release.resolve();
+  await assert.rejects(writing, { code: 'WORLD_SAVE_WORKER_QUARANTINED' });
+  await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(disk.commit(request), { code: 'WORLD_SAVE_WORKER_QUARANTINED' });
+  const fresh = createTransactionalWorldPersistence({ ...f.configuration, runtimeAuthority: 'disk' });
+  assert.deepEqual(await fresh.recover(), { recovered: 0 });
+  await fresh.commit({ ...request, correlationId: 'snapshot-after-close' });
+  const cold = createJsonWorldRepository({ file: f.configuration.contextFile, worldId: 'primary',
+    localCommitFile: path.join(path.dirname(objectDirectory), 'world-commits.jsonl') });
+  assert.deepEqual((await cold.read()).facts, facts('snapshot-new'));
+  assert.ok((await fs.stat(canonical)).size > 0);
+});
+
+for (const stage of ['before-link', 'dispatched-link']) {
+  test(`snapshot ${stage} obeys revocation and waits for dispatched publication before reopening`, async (t) => {
+    const f = await fixture(t);
+    const disk = createTransactionalWorldPersistence({ ...f.configuration, runtimeAuthority: 'disk' });
+    const before = await disk.readCommittedSnapshot();
+    const entered = deferred(), release = deferred();
+    const objectDirectory = path.join(path.dirname(f.configuration.contextFile), 'atom.transactions.json.d', 'objects');
+    const canonical = path.join(objectDirectory, `${before.revision.slice(7)}.json.gz`);
+    let armed = true;
+    if (stage === 'before-link') {
+      const originalOpen = fs.open;
+      t.mock.method(fs, 'open', async (file, ...args) => {
+        const handle = await originalOpen(file, ...args);
+        if (!armed || !path.resolve(file).startsWith(canonical) || args[0] !== 'wx') return handle;
+        armed = false;
+        return new Proxy(handle, { get(opened, method) {
+          if (method === 'sync') return async () => { await opened.sync(); entered.resolve(); await release.promise; };
+          const value = opened[method];
+          return typeof value === 'function' ? value.bind(opened) : value;
+        } });
+      });
+    } else {
+      const originalLink = fs.link;
+      t.mock.method(fs, 'link', async (from, to) => {
+        await originalLink(from, to);
+        if (armed && path.resolve(to) === canonical) { armed = false; entered.resolve(); await release.promise; }
+      });
+    }
+    t.after(() => release.resolve());
+    const request = { correlationId: stage, expectedRevision: before.revision,
+      nextRevision: revisionOfWorldFacts(facts('linked')), facts: facts('linked') };
+    const writing = disk.commit(request);
+    writing.catch(() => {});
+    await guarded(entered.promise);
+    await assert.rejects(f.persistence.closeSaves(), { code: 'WORLD_SAVE_CLOSE_TIMEOUT' });
+    assert.throws(() => createTransactionalWorldPersistence(f.configuration), { code: 'WORLD_SAVE_WORKER_QUARANTINED' });
+    release.resolve();
+    await assert.rejects(writing, { code: 'WORLD_SAVE_WORKER_QUARANTINED' });
+    if (stage === 'before-link') await assert.rejects(fs.stat(canonical), { code: 'ENOENT' });
+    await new Promise(resolve => setImmediate(resolve));
+    await assert.rejects(disk.commit(request), { code: 'WORLD_SAVE_WORKER_QUARANTINED' });
+    const fresh = createTransactionalWorldPersistence({ ...f.configuration, runtimeAuthority: 'disk' });
+    await fresh.commit({ ...request, correlationId: `${stage}-fresh` });
+    assert.deepEqual((await fresh.readCommittedSnapshot()).facts, facts('linked'));
+  });
+}
