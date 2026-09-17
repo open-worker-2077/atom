@@ -6,6 +6,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
+import { createDurableWorldWriter } from '../src/atom-system/adapters/durable-world-writer.mjs';
+import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { executeAtomCommandEndpoint } from '../work-engine/atom-language/cli.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
@@ -18,6 +20,15 @@ const cleanupCopy = process.argv.includes('--cleanup');
 const measureStructuralLatency = process.argv.includes('--structural-latency');
 const createProgram = process.argv.includes('--program-create');
 const memoryAuthoritative = process.argv.includes('--memory-authoritative');
+const latencySamplesText = argument('--latency-samples');
+const latencySamples = latencySamplesText === null ? 0 : Number(latencySamplesText);
+if (latencySamplesText !== null
+  && (!Number.isSafeInteger(latencySamples) || latencySamples < 2 || latencySamples > 20)) {
+  throw new Error('--latency-samples must be an integer from 2 through 20');
+}
+if (latencySamples && createProgram) {
+  throw new Error('--latency-samples cannot replace a --program-create source');
+}
 const stageTimeoutMs = Number(argument('--stage-timeout-ms') ?? 300_000);
 if (!Number.isSafeInteger(stageTimeoutMs) || stageTimeoutMs <= 0) {
   throw new Error('--stage-timeout-ms must be a positive integer');
@@ -68,6 +79,16 @@ async function stage(name, operation) {
     endStage('failed');
     throw error;
   }
+}
+function summarizeMs(samplesMs) {
+  if (!samplesMs.length) return { count: 0, p50: null, p95: null, samplesMs: [] };
+  const ordered = [...samplesMs].sort((left, right) => left - right);
+  return {
+    count: samplesMs.length,
+    p50: ordered[Math.ceil(0.5 * ordered.length) - 1],
+    p95: ordered[Math.ceil(0.95 * ordered.length) - 1],
+    samplesMs
+  };
 }
 const writerModuleUrl = new URL('../src/atom-system/adapters/durable-world-writer.mjs', import.meta.url).href;
 async function inspectCopiedJournal(mode, baselineCount = 0) {
@@ -125,6 +146,32 @@ let running;
 let monitor;
 try {
   beginStage('startup');
+  const saveRpcWallSamples = [];
+  const acceptedSignals = [];
+  const savedSignals = [];
+  const measuredWorldService = memoryAuthoritative ? createLegacyWorldService({
+    publishLegacyProjection: false,
+    memoryAuthoritative: true,
+    onAuthoritativeWrite: ({ revision }) => {
+      acceptedSignals.push({ revision, atMs: performance.now() });
+    },
+    onSaved: ({ version, revision }) => {
+      savedSignals.push({ version, revision, atMs: performance.now() });
+    },
+    writerFactory: (configuration) => {
+      const writer = createDurableWorldWriter(configuration);
+      return Object.freeze({
+        initialize: () => writer.initialize(),
+        findCommitted: (commandId) => writer.findCommitted(commandId),
+        async save(batch) {
+          const started = performance.now();
+          try { return await writer.save(batch); }
+          finally { saveRpcWallSamples.push(performance.now() - started); }
+        },
+        close: () => writer.close()
+      });
+    }
+  }) : null;
   const copiedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   const programScheduler = createProgramRuntimeScheduler({
     projectionRepository: createJsonProgramProjectionRepository({
@@ -139,7 +186,9 @@ try {
   const interaction = { agentSelector: agentPath, agent: { path: agentPath } };
   running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile, programScheduler,
-    memoryAuthoritative, ...(process.argv.includes('--trace') ? { timingInteractionId: writeInteractionId } : {})
+    memoryAuthoritative,
+    ...(measuredWorldService ? { worldService: measuredWorldService } : {}),
+    ...(process.argv.includes('--trace') ? { timingInteractionId: writeInteractionId } : {})
   });
   endStage();
   const endpoint = `${running.url}/__atom/api/command`;
@@ -147,11 +196,14 @@ try {
   const testName = `__write_acceptance_${Date.now()}`;
   const acceptanceParent = argument('--parent') ?? agentPath;
   const testPath = [acceptanceParent, testName].filter(Boolean).join('/');
-  const delays = [];
+  const interactionDelays = [];
+  const saveDelays = [];
+  let eventLoopPhase = 'interaction';
   let expectedAt = Date.now() + 100;
   monitor = setInterval(() => {
     const now = Date.now();
-    delays.push(Math.max(0, now - expectedAt));
+    (eventLoopPhase === 'interaction' ? interactionDelays : saveDelays)
+      .push(Math.max(0, now - expectedAt));
     expectedAt = now + 100;
   }, 100);
   beginStage('interaction');
@@ -165,6 +217,36 @@ try {
     interaction: { ...interaction, id: writeInteractionId }
   }, endpoint);
   const writeMs = Date.now() - startedAt;
+  const sampleWriteMs = [];
+  const sampleReadMs = [];
+  const sampleRevisions = [];
+  let sampleReadbackOk = true;
+  let sampleOperationsOk = true;
+  let previousSituation = 'acceptance';
+  for (let index = 0; index < latencySamples; index += 1) {
+    const nextSituation = `acceptance-sample-${index}-${crypto.randomUUID()}`;
+    const sampleWriteStarted = performance.now();
+    const sampleWrite = await executeAtomCommandEndpoint({
+      source: `transform ${JSON.stringify({
+        thing: testPath, [`situation.rep.${nextSituation}`]: previousSituation
+      })}`,
+      interaction: { ...interaction, id: crypto.randomUUID() }
+    }, endpoint);
+    sampleWriteMs.push(performance.now() - sampleWriteStarted);
+    const sampleReadStarted = performance.now();
+    const sampleRead = await executeAtomCommandEndpoint({
+      source: `explore ${JSON.stringify({ thing: testPath, 'situation$full': true })}`,
+      interaction
+    }, endpoint);
+    sampleReadMs.push(performance.now() - sampleReadStarted);
+    sampleOperationsOk &&= sampleWrite.ok === true && sampleRead.ok === true;
+    sampleReadbackOk &&= sampleRead.items?.[0]?.matches?.[0]?.situation === nextSituation;
+    if (measuredWorldService) {
+      const status = await measuredWorldService.saveStatus({ contextFile, projectionFile: graphFile });
+      sampleRevisions.push(status?.acceptedRevision);
+    }
+    previousSituation = nextSituation;
+  }
   let structuralTimingsMs = null;
   let steadyTimingsMs = null;
   let structuralReadbackOk = true;
@@ -238,9 +320,6 @@ try {
       structuralReadbackOk = false;
     }
   }
-  clearInterval(monitor);
-  monitor = null;
-
   const readStartedAt = Date.now();
   const readback = await executeAtomCommandEndpoint({
     source: `explore {"thing":"${testPath}","situation$full":true}`,
@@ -261,6 +340,11 @@ try {
     && Object.keys(steadyTimingsMs).length === 2
     && Object.values(steadyTimingsMs).every((elapsedMs) => elapsedMs < 5_000)
   );
+  const uniqueAcceptedRevisions = measuredWorldService
+    ? sampleRevisions.length === latencySamples
+      && sampleRevisions.every((revision) => typeof revision === 'string' && revision)
+      && new Set(sampleRevisions).size === latencySamples
+    : null;
 
   const preRollback = {
     ok: write.ok === true
@@ -273,13 +357,16 @@ try {
       && programFailures === 0
       && structuralOperationsOk
       && structuralReadbackOk
-      && structuralLatencyOk,
+      && structuralLatencyOk
+      && sampleOperationsOk
+      && sampleReadbackOk
+      && uniqueAcceptedRevisions !== false,
     port,
     ephemeralPort: port !== 4784,
     tempPathsOk,
     writeMs,
     readMs,
-    maxEventLoopDelayMs: Math.max(0, ...delays),
+    maxEventLoopDelayMs: Math.max(0, ...interactionDelays),
     writeOk: write.ok === true,
     readbackOk: readback.ok === true,
     readbackFound,
@@ -297,8 +384,72 @@ try {
     process.stderr.write(`${JSON.stringify({ event: 'acceptance-pre-rollback', ...preRollback, warnings: write.warnings ?? [] })}\n`);
   }
   endStage();
-  await stage('flush', () => running.close());
+  eventLoopPhase = 'save';
+  let flushWaitMs = null;
+  let closeWaitMs = null;
+  let saveReadProbeCount = 0;
+  let saveReadProbeOk = true;
+  let saveWatermarkOk = null;
+  let acceptedToDurableWatermarkLagMs = null;
+  await stage('flush', async () => {
+    if (latencySamples && measuredWorldService) {
+      let status = await measuredWorldService.saveStatus({ contextFile, projectionFile: graphFile });
+      while (status?.pending) {
+        if (saveReadProbeCount < 20) {
+          const probe = await executeAtomCommandEndpoint({
+            source: `explore ${JSON.stringify({ thing: testPath, 'situation$full': true })}`,
+            interaction
+          }, endpoint);
+          saveReadProbeCount += 1;
+          saveReadProbeOk &&= probe.ok === true
+            && probe.items?.[0]?.matches?.[0]?.situation === previousSituation;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        status = await measuredWorldService.saveStatus({ contextFile, projectionFile: graphFile });
+      }
+      const flushStarted = performance.now();
+      await measuredWorldService.flushSaves();
+      flushWaitMs = performance.now() - flushStarted;
+    }
+    const closeStarted = performance.now();
+    await running.close();
+    closeWaitMs = performance.now() - closeStarted;
+    if (latencySamples && measuredWorldService) {
+      const status = await measuredWorldService.saveStatus({ contextFile, projectionFile: graphFile });
+      const saved = savedSignals.filter(({ version, revision }) => (
+        version === status?.acceptedVersion && revision === status?.acceptedRevision
+      )).at(-1);
+      const accepted = acceptedSignals.filter(({ revision }) => revision === status?.acceptedRevision).at(-1);
+      saveWatermarkOk = status?.pending === false
+        && status.acceptedVersion === status.savedVersion
+        && status.acceptedRevision === status.savedRevision
+        && status.failure === null
+        && status.auxiliaryFailure === null
+        && Boolean(saved && accepted);
+      if (saveWatermarkOk) {
+        acceptedToDurableWatermarkLagMs = Math.max(0, saved.atMs - accepted.atMs);
+      }
+    }
+  });
   running = null;
+  clearInterval(monitor);
+  monitor = null;
+  const latency = latencySamples ? {
+    sampleCount: latencySamples,
+    writeMs: summarizeMs(sampleWriteMs),
+    readMs: summarizeMs(sampleReadMs),
+    readbackOk: sampleReadbackOk && sampleOperationsOk,
+    uniqueAcceptedRevisions,
+    interactionMaxEventLoopDelayMs: Math.max(0, ...interactionDelays),
+    saveMaxEventLoopDelayMs: Math.max(0, ...saveDelays),
+    saveReadProbeCount,
+    saveReadProbeOk,
+    saveRpcWallMs: summarizeMs(saveRpcWallSamples),
+    acceptedToDurableWatermarkLagMs,
+    flushWaitMs,
+    closeWaitMs,
+    saveWatermarkOk
+  } : null;
 
   beginStage('rollback');
   const { newCommits } = await inspectCopiedJournal('new-commits', initialReceiptCount);
@@ -330,17 +481,39 @@ try {
   endStage();
 
   beginStage('restart');
+  const restartWorldService = memoryAuthoritative ? createLegacyWorldService({
+    memoryAuthoritative: true, publishLegacyProjection: false
+  }) : null;
   running = await startAtomGraphServer({
-    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
+    host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile,
+    memoryAuthoritative,
+    ...(restartWorldService ? { worldService: restartWorldService } : {})
   });
   const restartPort = running.port;
   const restoredHealthResponse = await fetch(`${running.url}/__spatial/api/health`);
   const restoredHealth = await restoredHealthResponse.json();
+  const restartReadback = await executeAtomCommandEndpoint({
+    source: `explore ${JSON.stringify({ thing: agentPath, 'situation$full': true })}`,
+    interaction
+  }, `${running.url}/__atom/api/command`);
+  const restartReadbackOk = restartReadback.ok === true
+    && JSON.stringify(restartReadback).includes(agentPath);
+  const restartStatus = restartWorldService
+    ? await restartWorldService.saveStatus({ contextFile, projectionFile: graphFile }) : null;
+  const restartSaveStatusOk = restartStatus ? restartStatus.pending === false
+    && restartStatus.acceptedVersion === restartStatus.savedVersion
+    && restartStatus.acceptedRevision === sourceRevision
+    && restartStatus.savedRevision === sourceRevision : null;
   const sourceContextUnchanged = (await fs.readFile(sourceContext)).equals(sourceContents);
   endStage();
   const result = {
     ...preRollback,
+    maxEventLoopDelayMs: Math.max(0, ...interactionDelays, ...saveDelays),
+    ...(latency ? { latency } : {}),
     restartPort,
+    restartMode: memoryAuthoritative ? 'memory' : 'disk',
+    restartReadbackOk,
+    restartSaveStatusOk,
     rollbackOk: rollbackRevision === sourceRevision,
     rollbackCount,
     sourceRevisionRestored: sourceRevision === restoredRevision,
@@ -353,6 +526,10 @@ try {
       && restoredHealthResponse.status === 200
       && restoredHealth.ok === true
       && restartPort !== 4784
+      && restartReadbackOk
+      && restartSaveStatusOk !== false
+      && (!latency || (latency.readbackOk && latency.saveReadProbeOk
+        && latency.saveWatermarkOk !== false))
       && sourceContextUnchanged
   };
   process.stdout.write(`${JSON.stringify(result)}\n`);

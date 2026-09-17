@@ -39,6 +39,10 @@ test('deployment acceptance proves an ephemeral isolated world and preserves its
   assert.equal(result.ephemeralPort, true);
   assert.notEqual(result.port, 4784);
   assert.equal(result.sourceContextUnchanged, true);
+  assert.equal(result.restartMode, 'disk');
+  assert.equal(result.restartReadbackOk, true);
+  assert.equal(result.restartSaveStatusOk, null);
+  assert.equal(Object.hasOwn(result, 'latency'), false);
   assert.equal(await fs.readFile(contextFile, 'utf8'), source);
   assert.ok((await fs.stat(result.tempDirectory)).isDirectory());
   const stages = stderr.trim().split('\n').map((line) => JSON.parse(line));
@@ -194,11 +198,14 @@ test('deployment acceptance preserves a prepared source commit recovered before 
   assert.equal(before.receipts.length, 2);
   assert.deepEqual(before.prepared.map(({ commandId }) => commandId), ['source-prepared']);
   const { stdout, stderr } = await execFileAsync(process.execPath, [
-    script, '--context', contextFile, '--agent', '部署验收窗口'
+    script, '--context', contextFile, '--agent', '部署验收窗口',
+    '--memory-authoritative', '--latency-samples', '2'
   ], { cwd: projectRoot, env: { ...process.env, ATOM_RUNTIME_BACKUP_REPO: '' } });
   const result = JSON.parse(stdout);
   assert.equal(result.ok, true, stderr);
-  assert.equal(result.rollbackCount, 1, stderr);
+  assert.equal(result.rollbackCount, 3, stderr);
+  assert.equal(result.latency.saveWatermarkOk, true);
+  assert.equal(result.restartMode, 'memory');
   assert.equal(result.sourceRevisionRestored, true, stderr);
   assert.equal(await fs.readFile(contextFile, 'utf8'), source);
   const copiedJournal = await createJsonTransactionJournal({
@@ -233,4 +240,62 @@ test('deployment acceptance times out a stage with a content-free diagnostic and
   assert.ok(path.basename(timedOut.tempDirectory).startsWith(temporaryPrefix));
   assert.ok((await fs.stat(timedOut.tempDirectory)).isDirectory());
   assert.equal(error.stderr.includes(contextFile), false, 'diagnostics must not reveal source path');
+});
+
+test('memory acceptance measures fresh public samples and durable save before same-mode restart', async (t) => {
+  const { contextFile, source } = await createContext(t);
+  const { stdout, stderr } = await execFileAsync(process.execPath, [
+    script, '--context', contextFile, '--agent', '部署验收窗口',
+    '--memory-authoritative', '--latency-samples', '2'
+  ], { cwd: projectRoot, env: { ...process.env, ATOM_RUNTIME_BACKUP_REPO: '' } });
+  const result = JSON.parse(stdout);
+  assert.equal(result.ok, true, stderr);
+  assert.equal(result.rollbackCount, 3, stderr);
+  assert.equal(result.sourceContextUnchanged, true);
+  assert.equal(await fs.readFile(contextFile, 'utf8'), source);
+  assert.equal(result.latency.sampleCount, 2);
+  assert.equal(result.latency.readbackOk, true);
+  assert.equal(result.latency.uniqueAcceptedRevisions, true);
+  for (const metric of ['writeMs', 'readMs']) {
+    assert.equal(result.latency[metric].count, 2);
+    assert.ok(Number.isFinite(result.latency[metric].p50));
+    assert.ok(Number.isFinite(result.latency[metric].p95));
+    assert.equal(result.latency[metric].p50, Math.min(...result.latency[metric].samplesMs));
+    assert.equal(result.latency[metric].p95, Math.max(...result.latency[metric].samplesMs));
+  }
+  assert.ok(result.latency.saveRpcWallMs.count >= 1);
+  assert.ok(Number.isFinite(result.latency.saveRpcWallMs.p95));
+  for (const metric of ['acceptedToDurableWatermarkLagMs', 'flushWaitMs', 'closeWaitMs',
+    'interactionMaxEventLoopDelayMs', 'saveMaxEventLoopDelayMs']) {
+    assert.ok(Number.isFinite(result.latency[metric]), metric);
+    assert.ok(result.latency[metric] >= 0, metric);
+  }
+  assert.equal(result.latency.saveWatermarkOk, true);
+  assert.ok(result.latency.saveReadProbeCount > 0);
+  assert.equal(result.latency.saveReadProbeOk, true);
+  assert.equal(result.restartMode, 'memory');
+  assert.equal(result.restartReadbackOk, true);
+  assert.equal(result.restartSaveStatusOk, true);
+  const journal = await createJsonTransactionJournal({
+    file: path.join(result.tempDirectory, 'atom.transactions.json')
+  }).readState();
+  assert.equal(new Set(journal.receipts.slice(0, 3).map(({ receipt }) => receipt.commandId)).size, 3);
+  assert.equal(new Set(journal.receipts.slice(0, 3).map(({ receipt }) => receipt.afterRevision)).size, 3);
+});
+
+test('latency-samples accepts only bounded integers', async (t) => {
+  const { contextFile } = await createContext(t);
+  for (const value of ['1', '21', '2.5', 'not-a-number']) {
+    let error;
+    try {
+      await execFileAsync(process.execPath, [script, '--context', contextFile,
+        '--latency-samples', value], {
+        cwd: projectRoot, env: { ...process.env, ATOM_RUNTIME_BACKUP_REPO: '' }
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    assert.equal(error?.code, 1, value);
+    assert.match(error.stderr, /--latency-samples/, value);
+  }
 });
