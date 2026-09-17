@@ -7,6 +7,59 @@ import test from 'node:test';
 import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createDurableWorldWriter } from '../src/atom-system/adapters/durable-world-writer.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
+import { readAtomContext } from '../work-engine/atom-language/context-store.mjs';
+
+test('real engine reuses an accepted memory version and preserves old readers through save', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-owned-real-memory-'));
+  t.diagnostic(`retained fixture: ${directory}`);
+  const target = { contextFile: path.join(directory, 'atom.json'),
+    projectionFile: path.join(directory, 'graph.json') };
+  await fs.writeFile(target.contextFile,
+    `${JSON.stringify([{ thing: 'Root', situation: 'before', slot: [], strut: [] }])}\n`, 'utf8');
+  const service = createLegacyWorldService({ memoryAuthoritative: true,
+    publishLegacyProjection: false,
+    saveSchedule: { quietMs: 60_000, maxDirtyMs: 60_000 } });
+  let closed = false;
+  try {
+    const before = await service.readCommittedVersion(target);
+    const oldContext = await readAtomContext(target.contextFile, { committedVersion: before });
+    for (const id of ['owned-memory-read-1', 'owned-memory-read-2']) {
+      const read = await service.executeLegacy({ ...target,
+        source: 'explore {"thing":"Root"}', interaction: { id } });
+      assert.equal(read.ok, true, JSON.stringify(read.errors));
+      assert.strictEqual(await service.readCommittedVersion(target), before);
+    }
+    const write = await service.executeLegacy({ ...target,
+      source: 'transform {"thing":"Root","situation.rep.changed"}',
+      interaction: { id: 'owned-memory-write' } });
+    assert.equal(write.ok, true, JSON.stringify(write.errors));
+    const after = await service.readCommittedVersion(target);
+    assert.notStrictEqual(after, before);
+    assert.equal(oldContext[0].situation, 'before');
+    assert.equal((await readAtomContext(target.contextFile, { committedVersion: after }))[0].situation,
+      'changed');
+    const latest = await service.executeLegacy({ ...target,
+      source: 'explore {"thing":"Root"}', interaction: { id: 'owned-memory-read-3' } });
+    assert.equal(latest.ok, true, JSON.stringify(latest.errors));
+    assert.equal(JSON.parse(await fs.readFile(target.contextFile, 'utf8'))[0].situation,
+      'before', 'the independent saver has not written the accepted version yet');
+    await service.closeSaves();
+    closed = true;
+    assert.equal(JSON.parse(await fs.readFile(target.contextFile, 'utf8'))[0].situation,
+      'before', 'the baseline file remains unchanged beneath the durable local commit');
+    const coldWriter = createDurableWorldWriter({ contextFile: target.contextFile,
+      journalFile: path.join(directory, 'atom.transactions.json') });
+    try {
+      const recovered = await coldWriter.initialize();
+      assert.equal(recovered.initialSnapshot.revision, after.revision);
+      assert.equal(recovered.initialSnapshot.facts[0].situation, 'changed');
+    } finally {
+      await coldWriter.close();
+    }
+  } finally {
+    if (!closed) await service.closeSaves().catch(() => {});
+  }
+});
 
 test('accepted memory write is readable while independent saving is blocked', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-memory-blocked-save-'));

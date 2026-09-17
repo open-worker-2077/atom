@@ -385,7 +385,7 @@ test('rejected writes retain the version while old readers survive a later accep
 test('real engine Explore reuses the adapter version and Transform preserves its old context', async (t) => {
   const { createLegacyWorldService } = await import(adapterUrl);
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-real-owned-version-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  t.diagnostic(`retained fixture: ${directory}`);
   const target = { contextFile: path.join(directory, 'atom.json'),
     projectionFile: path.join(directory, 'graph.json') };
   let snapshot = validCommittedSnapshot([{ thing: 'Root', situation: 'before', slot: [], strut: [] }], false);
