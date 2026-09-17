@@ -27,8 +27,10 @@ export function createMemoryTransactionPorts({
     revision: initialSnapshot.revision,
     compatibilityManifest
   } });
-  const durableById = new Map(durableReceipts.map((entry) => [entry.commandId, entry]));
+  const durableHistory = [...durableReceipts];
+  const durableById = new Map(durableHistory.map((entry) => [entry.commandId, entry]));
   const accepted = new Map();
+  const acceptedVersions = new Map();
   const prepared = new Map();
   const outcomes = new Map(durableOutcomes);
   let staged = null;
@@ -53,7 +55,7 @@ export function createMemoryTransactionPorts({
       return this.compareAndSwap({ commandId, expectedRevision, nextSnapshot });
     },
     async durableCommitEvidence(identity) {
-      const receipt = accepted.get(identity.commandId)?.receipt;
+      const receipt = receiptFor(identity.commandId);
       if (receipt?.beforeRevision === identity.beforeRevision
         && receipt.afterRevision === identity.afterRevision) return identity;
       return staged?.commandId === identity.commandId
@@ -65,7 +67,7 @@ export function createMemoryTransactionPorts({
     }
   });
 
-  const entries = () => [...durableReceipts, ...accepted.values()];
+  const entries = () => [...durableHistory, ...accepted.values()];
   const receiptFor = (id) => accepted.get(id)?.receipt ?? durableById.get(id)?.receipt ?? null;
   const executionFor = (sourceCommandId) => {
     const sourceReceipt = receiptFor(sourceCommandId);
@@ -89,7 +91,7 @@ export function createMemoryTransactionPorts({
     async latestReceipt() {
       return structuredClone((accepted.size
         ? [...accepted.values()].at(-1)
-        : durableReceipts.at(-1))?.receipt ?? null);
+        : durableHistory.at(-1))?.receipt ?? null);
     },
     async transformLogRecords() {
       return structuredClone(entries().flatMap((entry) => {
@@ -100,6 +102,8 @@ export function createMemoryTransactionPorts({
     async findReceipt(id) { return structuredClone(receiptFor(id)); },
     async findPrepared(id) { return structuredClone(prepared.get(id) ?? null); },
     async findCommitted(id) {
+      // Saved entries live only in durableHistory/durableById. They cannot
+      // shadow complete historical evidence supplied by the durable lane.
       return structuredClone(accepted.get(id) ?? await durableFindCommitted(id));
     },
     async listPrepared() { return structuredClone([...prepared.values()]); },
@@ -133,6 +137,7 @@ export function createMemoryTransactionPorts({
       });
       const entry = deepFreeze({ ...structuredClone(record), receipt: structuredClone(receipt) });
       accepted.set(commandId, entry);
+      acceptedVersions.set(acceptedState.acceptedVersion, commandId);
       prepared.delete(commandId);
       staged = null;
       onAccepted({ version: acceptedState.acceptedVersion, revision,
@@ -168,5 +173,21 @@ export function createMemoryTransactionPorts({
     }
   });
 
-  return Object.freeze({ authority, worldRepository, journalRepository });
+  function markSaved(watermark) {
+    // Validate before releasing any evidence. Versions, not repeated content
+    // hashes, identify the exact acknowledged prefix (including A -> B -> A).
+    const status = authority.markSaved(watermark);
+    for (const [version, commandId] of acceptedVersions) {
+      if (version > status.savedVersion) break;
+      const record = accepted.get(commandId);
+      const metadata = Object.freeze({ commandId, historyMode: record.historyMode, receipt: record.receipt });
+      durableHistory.push(metadata);
+      durableById.set(commandId, metadata);
+      accepted.delete(commandId);
+      acceptedVersions.delete(version);
+    }
+    return status;
+  }
+
+  return Object.freeze({ authority, worldRepository, journalRepository, markSaved });
 }

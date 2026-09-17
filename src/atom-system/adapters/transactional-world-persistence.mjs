@@ -106,7 +106,7 @@ function ownerFor({ contextFile, journalFile, projectionFile, publishLegacyProje
           },
           onSaved: ({ version }) => {
             const savedEvent = owner.savedWorldVersions.get(version);
-            ports.authority.markSaved({ version: savedEvent.version, revision: savedEvent.revision });
+            ports.markSaved({ version: savedEvent.version, revision: savedEvent.revision });
             // onSaved runs only after the saver validates the exact returned
             // watermark. Until then the ordered events remain replay evidence.
             savedSequence = version;
