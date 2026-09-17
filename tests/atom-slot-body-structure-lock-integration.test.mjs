@@ -13,6 +13,7 @@ import {
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { createJsonWorldRepository } from '../src/atom-system/adapters/json-world-repository.mjs';
+import { sealWorldFactsRevision } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 function atom(thing, situation = '', slot = [], strut = []) {
   return { thing, situation, slot, strut };
@@ -168,11 +169,11 @@ test('a Program cannot borrow reseal capability from another slot body', async (
 test('structure-preserving edits reuse slot locks only when changed paths stay outside slot domains', async () => {
   const previous = await lockedWorld();
   previous.push(atom('普通区', '', [atom('待移动')]));
-  Object.freeze(previous);
+  sealWorldFactsRevision(previous);
   const prepared = prepareSlotStructureWorld(previous);
 
   const unrelatedNext = structuredClone(previous);
-  Object.freeze(unrelatedNext);
+  sealWorldFactsRevision(unrelatedNext);
   assert.equal(inheritPreparedSlotStructureWorld(
     previous,
     unrelatedNext,
@@ -181,11 +182,15 @@ test('structure-preserving edits reuse slot locks only when changed paths stay o
   assert.equal(prepareSlotStructureWorld(unrelatedNext), prepared);
 
   const protectedNext = structuredClone(previous);
-  Object.freeze(protectedNext);
+  sealWorldFactsRevision(protectedNext);
   assert.equal(inheritPreparedSlotStructureWorld(
     previous,
     protectedNext,
     ['槽体/槽模/输入']
   ), false);
   assert.notEqual(prepareSlotStructureWorld(protectedNext), prepared);
+
+  const shallow = structuredClone(previous);
+  Object.freeze(shallow);
+  assert.equal(inheritPreparedSlotStructureWorld(previous, shallow, ['普通区/待移动']), false);
 });

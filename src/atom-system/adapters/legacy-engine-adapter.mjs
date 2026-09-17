@@ -6,6 +6,7 @@ import { createTransactionalWorldPersistence } from './transactional-world-persi
 import { prepareCommittedAtomVersion, prepareOwnedCommittedAtomVersion } from '../../../work-engine/atom-language/context-store.mjs';
 import { DEFAULT_WORLD_SHUTDOWN_TIMEOUT_MS, worldShutdownDeadline, withinWorldShutdown } from '../world-runtime/world-shutdown.mjs';
 import { isHardCapacityBlocked, isWorldCapacityError } from '../world-runtime/pending-world-capacity.mjs';
+import { SpatialStoreError } from '../../../cli/lib/store.mjs';
 
 // Only live invocations are joined here. All completed results and restart
 // decisions come from the central journal, never this transient rendezvous.
@@ -244,7 +245,15 @@ export function createLegacyWorldService(options = {}) {
       }
     }
     request.signal?.throwIfAborted?.();
-    const committedSnapshot = await committedSnapshotFor(persistence);
+    let committedSnapshot;
+    try {
+      committedSnapshot = await committedSnapshotFor(persistence);
+    } catch (error) {
+      // Preparation moved ahead of the engine for warm reads. Preserve the
+      // engine's structured invalid-context response for graph-domain errors.
+      if (!(error instanceof SpatialStoreError)) throw error;
+      return execute({ ...request, committedContextError: error });
+    }
     const transactionTransformLog = typeof persistence.transformLogEntries === 'function'
       ? await timed('transform-log', () => persistence.transformLogEntries())
       : [];

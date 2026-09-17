@@ -1014,6 +1014,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
 
   let atoms;
   try {
+    if (options.committedContextError) throw options.committedContextError;
     atoms = await readAtomContext(contextFile, {
       create: parsed.command === 'atom',
       compatibilityManifest: options.compatibilityManifest,

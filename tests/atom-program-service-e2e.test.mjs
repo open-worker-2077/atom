@@ -588,7 +588,7 @@ test('4784 Web workspace edits commit local Atom facts before asynchronously pub
   const refreshedCreated = refreshedState.knowledge.nodes.find((node) => node.label === 'Created in Web');
   assert.equal(refreshedCreated.atomPath, 'Created in Web');
   const refreshedKnowledge = (await applyWebEdit({
-    kind: 'node-edit', path: refreshedCreated.path, nodeKey: 'stale-browser-key', node: refreshedCreated,
+    kind: 'node-edit', path: refreshedCreated.path, nodeKey: refreshedCreated.key, node: refreshedCreated,
     draft: { label: 'Created after refresh', description: 'saved after refresh', atomTypes: [] }
   })).knowledge;
   const refreshedRenamed = refreshedKnowledge.nodes.find((node) => node.label === 'Created after refresh');
@@ -624,7 +624,7 @@ test('4784 Web workspace edits commit local Atom facts before asynchronously pub
   })).knowledge.nodes.find((node) => node.label === 'Move after refresh');
   const movedAfterRefresh = (await applyWebEdit({
     kind: 'node-land',
-    source: { key: 'stale-browser-key', nodeId: movable.id },
+    source: { key: movable.key, nodeId: movable.id },
     sourceNode: movable,
     target: { path: childPath(parent) },
     draft: { id: movable.id }
@@ -727,7 +727,7 @@ test('4784 Web workspace edits commit local Atom facts before asynchronously pub
 
   const nested = current.nodes.find((node) => node.label === 'Nested in Web');
   await applyWebEdit({
-    kind: 'node-edit', status: 'delete', path: nested.path, nodeKey: nested.key, node: { id: nested.id }, draft: {}
+    kind: 'node-edit', status: 'delete', path: nested.path, nodeKey: nested.key, node: nested, draft: {}
   });
   const finalWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(JSON.stringify(finalWorld).includes('Nested in Web'), true, 'discard remains recoverable in the backup area');
