@@ -457,6 +457,7 @@
         satellites: [],
         aliases: sanitizeAliases(node && node.aliases, currentKey),
         atomTypes: sanitizeAtomTypes(node && node.atomTypes),
+        atomPath: safeText(node && node.atomPath, "", 4000),
         lockState: sanitizeLockState(node && node.lockState),
         workspacePath: sourcePath,
         isWorkspaceNode: true

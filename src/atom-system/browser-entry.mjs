@@ -8,6 +8,7 @@ import {
 import { createEntityIndex } from './spatial-experience/entity-index.mjs';
 import { reduceInteraction } from './spatial-experience/interaction-reducer.mjs';
 import { createSceneSnapshot } from './spatial-experience/scene-snapshot.mjs';
+import { createBrowserCommandMapper } from './browser-command-mapper.mjs';
 
 globalThis.AtomSpatialScene = Object.freeze({
   applyViewIntent,
@@ -17,5 +18,6 @@ globalThis.AtomSpatialScene = Object.freeze({
   viewFactsFromLegacyState,
   createEntityIndex,
   reduceInteraction,
-  createSceneSnapshot
+  createSceneSnapshot,
+  createBrowserCommandMapper
 });

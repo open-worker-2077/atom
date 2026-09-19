@@ -250,6 +250,19 @@ test('blank edge landing previews and commits the same source node in another do
   assert.equal(knowledge.nodes[0].detail, '原始详情');
 });
 
+test('landing snapshot preserves the readonly Atom path for command compilation', () => {
+  const model = loadModel();
+  const workspace = model.createWorkspace();
+  const sourceNode = { id: 'source', label: '节点', atomPath: '域/节点' };
+  const source = model.qualifiedEndpoint('root', sourceNode, ['全域']);
+
+  workspace.beginEdgeCreate(source, sourceNode);
+  workspace.setNodeLanding({ path: 'root/target', position: { x: 0, y: 0, z: 0 } });
+  const operation = workspace.commit();
+
+  assert.equal(operation.sourceNode.atomPath, '域/节点');
+});
+
 test('blank landing preserves mirror visibility through export and import', () => {
   const model = loadModel();
   const workspace = model.createWorkspace();
