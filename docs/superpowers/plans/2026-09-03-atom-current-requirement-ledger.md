@@ -637,3 +637,7 @@
 - **2026-09-19 永久ID与Program名称引用核查**：永久Thing ID已经完成内核签发、持久保存、外部伪造拒绝、复制续签及Strut／Shortcut身份绑定；既有远端与正式世界证据为`origin/main@3da92b2`和12,243个Thing迁移回读。Program名称／语义路径引用的自动更新目前只属部分实现：AST能识别字面量`explore.thing`、`trigger("transform").nodes`、`use_program.name`、`lock.targets.paths`和`transform.thing`，改名／移动时在同一事务重写对应Situation文本，并用改名前world binding中的Thing ID避免明显错绑；但每个引用点尚未持久绑定目标ID，动态引用不改，短名变歧义时跳过，因此尚未完整满足“Program引用以永久身份连接”的既有规格。
 
 - **2026-09-19 Program引用性能缺口与候选边界**：当前每次`ren`／`mov`都会遍历全世界建立Thing bindings、遍历全部Program并为全部源码启动一次新的Python AST worker，复杂度约为`O(Thing总数 + Program源码总字节)`并位于交互事务关键路径；冷启动当前没有引用反向索引。用户提出冷启动按ID统一更新以避免持续卡顿。候选正确边界为：Program新建／正文更新时解析一次并把reference-site精确绑定目标Thing ID；冷启动只按Program ID与source hash建立或校验可丢弃的`target ID → reference sites`反向索引，不全量改写权威源码；改名／移动只查询受影响ID并在同一事务更新对应字面路径，成本收敛到受影响引用数。索引在Program变化及Thing创建、删除、恢复、改名、移动后增量维护，缓存丢失可重建；若缺少持久site→ID绑定，仅在冷启动按当前名称重解析会在同名新增或路径复用后错误重绑，不能作为最终实现。
+
+- **2026-09-19 Program引用索引定论（I3/U2/D3/E3）**：用户要求将上述方案持久化后进入目标模式解决。现正式采用“写入时绑定永久Thing ID、冷启动只重建／校验派生反向索引、热态按受影响ID增量改写、旧数据显式冷副本迁移”的边界；普通冷启动不得全量改写Program或制造revision，改名／移动不得继续全世界扫描与逐次Python冷启动。权威合同已进入世界／Program规格§2.4；本项排在Web→CLI单轨E3之后实施，不插队。
+
+- **2026-09-19 实施续点**：当前唯一执行顺序为`docs/superpowers/plans/2026-09-19-web-cli-single-command-spine.md`完成E3后，再执行`docs/superpowers/plans/2026-09-19-program-reference-index.md`完成E3。两份计划只展开本总账与既有规格中的当前定论，不建立平行需求源；目标模式只引用本总账，不复制目标详情。
