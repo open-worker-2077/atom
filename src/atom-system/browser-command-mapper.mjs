@@ -1,4 +1,5 @@
 const WORLD_OUTSIDE_NAME = '世界之外';
+const TRANSFORM_MARKER = /\.(?:rep|sum|typ|ren|lnk|mov|cpy|add|dsc|rst|run)\./u;
 
 function problem(code, message) {
   return Object.assign(new Error(message), { code });
@@ -35,6 +36,17 @@ function transform(fields) {
 
 function atomName(path) {
   return path.split('/').at(-1) || '';
+}
+
+function commandParameter(value) {
+  const parameter = String(value);
+  if (TRANSFORM_MARKER.test(parameter)) {
+    throw problem(
+      'WEB_COMMAND_PARAMETER_UNREPRESENTABLE',
+      'Atom CLI command parameters cannot contain a complete transform command marker'
+    );
+  }
+  return parameter;
 }
 
 function frozenCommand(source, operationKind, affectedAtomPaths) {
@@ -85,11 +97,12 @@ export function createBrowserCommandMapper() {
     if (shortcut) {
       const targetPath = text(draft.shortcutTargetPath);
       if (!targetPath) return unresolved();
-      const command = `thing${label === atomName(sourcePath) ? '' : `.ren.${label}`}.lnk.${targetPath}`;
+      const resolvedTargetPath = resolveNode({ atomPath: targetPath });
+      const command = `thing${label === atomName(sourcePath) ? '' : `.ren.${commandParameter(label)}`}.lnk.${commandParameter(resolvedTargetPath)}`;
       return frozenCommand(transform([field(command, sourcePath)]), operation.kind, [sourcePath, targetPath]);
     }
     const type = operation.atomTypesChanged === true ? String(atomTypes[0] ?? '').trim() : '';
-    const command = `thing${operation.atomTypesChanged === true ? `.typ.${type}` : ''}${label === atomName(sourcePath) ? '' : `.ren.${label}`}`;
+    const command = `thing${operation.atomTypesChanged === true ? `.typ.${commandParameter(type)}` : ''}${label === atomName(sourcePath) ? '' : `.ren.${commandParameter(label)}`}`;
     const description = String(draft.description ?? draft.detail ?? '');
     return frozenCommand(transform([
       field(command, sourcePath),
@@ -104,7 +117,7 @@ export function createBrowserCommandMapper() {
     const type = String(Array.isArray(draft.atomTypes) ? draft.atomTypes[0] ?? '' : '').trim();
     const thing = parentPath ? `${parentPath}/${label}` : label;
     const source = `transform new ${JSON.stringify({
-      [`thing${type ? `@${type}` : ''}`]: thing,
+      [`thing${type ? `@${commandParameter(type)}` : ''}`]: thing,
       situation: String(draft.description ?? draft.detail ?? ''),
       slot: [],
       strut: []
@@ -115,7 +128,7 @@ export function createBrowserCommandMapper() {
   function landing(operation) {
     const sourcePath = resolveNode(operation.source, operation.sourceNode ?? operation.draft);
     const destinationPath = resolveContainer(operation.target);
-    const destination = destinationPath || WORLD_OUTSIDE_NAME;
+    const destination = commandParameter(destinationPath || WORLD_OUTSIDE_NAME);
     return {
       sourcePath,
       destinationPath,

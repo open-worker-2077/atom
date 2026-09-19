@@ -59,7 +59,18 @@ test('compiles creation and a single-node move from the projection container ind
   });
   assert.equal(created.source, 'transform new {"thing@program":"域/新节点","situation":"创建正文","slot":[],"strut":[]}');
   assert.deepEqual(created.affectedAtomPaths, ['域/新节点']);
-  assert.equal(parse(created.source).createNew, true);
+  const createdFields = parse(created.source);
+  assert.equal(createdFields.createNew, true);
+  assert.deepEqual(createdFields.items[0].fields.map(({ baseKey, types, value }) => ({
+    baseKey,
+    types: types.map(({ name }) => name),
+    value
+  })), [
+    { baseKey: 'thing', types: ['program'], value: '域/新节点' },
+    { baseKey: 'situation', types: [], value: '创建正文' },
+    { baseKey: 'slot', types: [], value: [] },
+    { baseKey: 'strut', types: [], value: [] }
+  ]);
 
   const moved = mapper.compile({
     kind: 'node-land',
@@ -144,4 +155,59 @@ test('does not mutate frozen UI input and rejects an unresolved projection targe
     () => mapper.compile({ kind: 'node-edit', node: { key: 'n', atomPath: '域/过期坐标' }, draft: { label: '无', description: '', atomTypes: [] } }),
     (error) => error && error.code === 'WEB_COMMAND_TARGET_UNRESOLVED'
   );
+});
+
+test('resolves shortcut targets from the authoritative projection before compiling', () => {
+  const mapper = createBrowserCommandMapper();
+  const knowledge = knowledgeFixture();
+  mapper.replaceKnowledge(knowledge);
+
+  const allowed = mapper.compile({
+    kind: 'node-edit', node: { key: knowledge.nodes[1].key, atomTypes: ['shortcut'] },
+    draft: { label: '节点', shortcutTargetPath: '域/目标', atomTypes: ['shortcut'] }
+  });
+  assert.equal(parse(allowed.source).items[0].fields[0].commands[0].name, 'lnk');
+  assert.throws(
+    () => mapper.compile({
+      kind: 'node-edit', node: { key: knowledge.nodes[1].key, atomTypes: ['shortcut'] },
+      draft: { label: '节点', shortcutTargetPath: '域/未加载目标', atomTypes: ['shortcut'] }
+    }),
+    (error) => error && error.code === 'WEB_COMMAND_TARGET_UNRESOLVED'
+  );
+});
+
+test('rejects command-marker parameters that Atom CLI grammar cannot represent safely', () => {
+  const marker = '.dsc.';
+  const mapper = createBrowserCommandMapper();
+  const knowledge = knowledgeFixture();
+  mapper.replaceKnowledge(knowledge);
+  const rejects = (operation) => assert.throws(
+    () => mapper.compile(operation),
+    (error) => error && error.code === 'WEB_COMMAND_PARAMETER_UNREPRESENTABLE'
+  );
+
+  rejects({
+    kind: 'node-edit', node: { key: knowledge.nodes[1].key },
+    draft: { label: `新名${marker}`, description: '', atomTypes: [] }
+  });
+  rejects({
+    kind: 'node-edit', atomTypesChanged: true, node: { key: knowledge.nodes[1].key },
+    draft: { label: '节点', description: '', atomTypes: [`program${marker}`] }
+  });
+  rejects({
+    kind: 'node-create', path: knowledge.nodes[1].path,
+    draft: { label: '新节点', description: '', atomTypes: [`program${marker}`] }
+  });
+
+  const domain = { key: 'root::marker-domain', id: 'marker-domain', path: 'root', atomPath: `域${marker}` };
+  const sourcePath = spatialChildPath(domain);
+  const source = { key: `${sourcePath}::source`, id: 'source', path: sourcePath, atomPath: `域${marker}/节点` };
+  const shortcut = { key: `${sourcePath}::shortcut`, id: 'shortcut', path: sourcePath, atomPath: `域${marker}/快捷` };
+  const target = { key: `${sourcePath}::target`, id: 'target', path: sourcePath, atomPath: `域${marker}/目标${marker}` };
+  mapper.replaceKnowledge({ nodes: [domain, source, shortcut, target], edges: [] });
+  rejects({ kind: 'node-land', source: { key: source.key }, target: { path: sourcePath } });
+  rejects({
+    kind: 'node-edit', node: { key: shortcut.key, atomTypes: ['shortcut'] },
+    draft: { label: '快捷', shortcutTargetPath: target.atomPath, atomTypes: ['shortcut'] }
+  });
 });
