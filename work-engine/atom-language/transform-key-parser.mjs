@@ -9,6 +9,7 @@ export const TRANSFORM_COMMANDS = Object.freeze([
   'lnk',
   'mov',
   'cpy',
+  'add',
   'dsc',
   'rst',
   'run'
@@ -22,7 +23,8 @@ const COMMAND_AXES = Object.freeze({
   lnk: new Set(['thing']),
   mov: new Set(['thing']),
   cpy: new Set(['thing']),
-  dsc: new Set(['thing']),
+  add: new Set(['strut']),
+  dsc: new Set(['thing', 'strut']),
   rst: new Set(['thing']),
   run: new Set(['thing'])
 });

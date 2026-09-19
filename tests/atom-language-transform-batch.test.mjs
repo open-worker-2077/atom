@@ -112,6 +112,26 @@ test('batch Transform writes nothing when any item fails', async (t) => {
   assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
 });
 
+test('batch atomic strut add rolls back an earlier edge when a later target is absent', async (t) => {
+  const files = await fixture(t);
+  const before = await fs.readFile(files.contextFile, 'utf8');
+  const world = createLegacyWorldService();
+
+  const result = await world.executeLegacy({
+    ...files,
+    source: `transform ${JSON.stringify([
+      { thing: '来源甲', 'strut.add.': { thing: '来源乙' } },
+      { thing: '来源乙', 'strut.add.': { thing: '不存在' } }
+    ])}`
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.changed, false);
+  assert.equal(result.errors[0].code, 'ATOM_NOT_FOUND');
+  assert.equal(result.errors[0].itemIndex, 1);
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
+});
+
 test('CLI returns one compact Graph-JSON receipt per committed batch item', async (t) => {
   const files = await fixture(t);
   const world = createLegacyWorldService();

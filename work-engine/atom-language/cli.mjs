@@ -125,7 +125,8 @@ const TRANSFORM_HELP = Object.freeze({
   lnk: '{"thing.lnk.EXACT_TARGET":"EXACT_SHORTCUT"}（按语义路径改向虚拟引用自身；内部 identity 自动保持）',
   mov: '{"thing.mov.DESTINATION_PATH":"A"}（移动 slot 子树；移至顶层时 DESTINATION_PATH 使用“世界之外”；拒绝形成循环）',
   cpy: '{"thing.cpy.DESTINATION_PATH":"A"}（复制 slot 子树）',
-  dsc: '{"thing.dsc.":"A"}（可逆移入唯一默认备份仓）',
+  add: '{"thing":"SRC","strut.add.":{"thing":"DST"}}（新增 owner-local 无条件出边）',
+  dsc: '{"thing.dsc.":"A"}（可逆移入唯一默认备份仓）；{"thing":"SRC","strut.dsc.":{"thing":"DST"}}（删除 owner-local 无条件出边）',
   rst: '{"thing.rst.":"BACKUP_PATH/A"}（按丢弃记录恢复原位置）',
   run: '{"thing.run.":"PROGRAM_PATH"}（显式运行唯一 @program）'
 });

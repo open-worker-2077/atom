@@ -167,3 +167,16 @@ test('strut replacement cannot create a relation to a sealed target', async (t) 
   assert.equal(result.errors[0].code, 'WINDOW_ACCESS_DENIED');
   assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
 });
+
+test('atomic strut add cannot create a relation to a sealed target', async (t) => {
+  const files = await isolated(t);
+  const before = await fs.readFile(files.contextFile, 'utf8');
+  const result = await executeAtomLanguage({
+    ...files, legacyAccess,
+    source: 'transform {"thing":"Task","strut.add.":{"thing":"Personal/Diary"}}'
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'WINDOW_ACCESS_DENIED');
+  assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
+});

@@ -137,6 +137,18 @@ function normalizeField(entry, parserOptions, command) {
       value: true
     };
   }
+  if (parsed.baseKey === 'strut'
+    && parsed.commands.length === 1
+    && ['add', 'dsc'].includes(parsed.commands[0].name)) {
+    const value = normalizeValue(entry.value, parserOptions, command);
+    return {
+      ...parsed,
+      warnings: [...parsed.warnings, ...nestedDiagnostics(value, 'warnings')],
+      errors: [...parsed.errors, ...nestedDiagnostics(value, 'errors')],
+      valuePresent: true,
+      value
+    };
+  }
   if (parsed.baseKey === 'strut') {
     const normalized = normalizeStrutSelectors(entry.value, parserOptions);
     return {

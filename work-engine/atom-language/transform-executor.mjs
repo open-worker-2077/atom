@@ -829,17 +829,95 @@ function hasCompleteLocalDependencyClosure(item, selectedAtom, retarget) {
   return situationChanged;
 }
 
-function applyPartners(target, field) {
-  if (field.commands.length !== 1 || field.commands[0].name !== 'rep') {
-    return diagnostic('INVALID_STRUT_TRANSFORM', 'strut 只接受单个 .rep. 完整替换');
+function atomicStrutSelector(field) {
+  if (!field.valuePresent || field.value?.kind !== 'graph-object') {
+    return { error: diagnostic('INVALID_STRUT_RELATION_SELECTOR', 'strut 原子关系 Value 必须恰有一个 exact thing 对象') };
   }
-  if (field.commands[0].parameter !== '') {
-    return diagnostic('INVALID_STRUT_TRANSFORM', 'strut.rep 不接受键内参数');
+  const [selector] = field.value.fields;
+  if (field.value.fields.length !== 1
+    || selector.rawKey !== 'thing'
+    || selector.baseKey !== 'thing'
+    || !selector.valuePresent
+    || typeof selector.value !== 'string'
+    || !selector.value
+    || selector.commands.length
+    || selector.transformActions?.length) {
+    return { error: diagnostic('INVALID_STRUT_RELATION_SELECTOR', 'strut 原子关系 Value 必须恰有一个 exact thing 对象') };
   }
-  if (!field.valuePresent || !Array.isArray(field.value)) {
-    return diagnostic('INVALID_STRUT_ARRAY', 'strut.rep 必须提交完整 owner-local rule 数组 Value');
+  return { selector: selector.value };
+}
+
+function ownerLocalUnconditionalRelation(rule, source, target, matches, rootName) {
+  if (!rule || typeof rule !== 'object' || Array.isArray(rule)
+    || Object.keys(rule).length !== 2
+    || rule['if@current'] !== true
+    || !Array.isArray(rule.then)
+    || rule.then.length !== 1) return false;
+  const endpoint = strutSelectorField(rule.then[0]);
+  if (!endpoint) return false;
+  return strutTarget(
+    source,
+    endpoint.value,
+    matches,
+    rootName,
+    null,
+    endpoint.parsed.identity ?? null
+  )?.atom === target.atom;
+}
+
+function applyPartners(target, field, atoms, rootName) {
+  if (field.commands.length !== 1) {
+    return diagnostic('INVALID_STRUT_TRANSFORM', 'strut 只接受单个 .rep.、.add. 或 .dsc. 指令');
   }
-  replaceStoredField(target, 'strut', field.value);
+  const [command] = field.commands;
+  if (command.name === 'rep') {
+    if (command.parameter !== '') {
+      return diagnostic('INVALID_STRUT_TRANSFORM', 'strut.rep 不接受键内参数');
+    }
+    if (!field.valuePresent || !Array.isArray(field.value)) {
+      return diagnostic('INVALID_STRUT_ARRAY', 'strut.rep 必须提交完整 owner-local rule 数组 Value');
+    }
+    replaceStoredField(target, 'strut', field.value);
+    return null;
+  }
+  if (!['add', 'dsc'].includes(command.name) || command.parameter !== '') {
+    return diagnostic('INVALID_STRUT_TRANSFORM', 'strut 原子关系指令不接受键内参数');
+  }
+  const requested = atomicStrutSelector(field);
+  if (requested.error) return requested.error;
+  const matches = walkAtoms(atoms);
+  const source = matches.find((match) => match.atom === target);
+  const relationTarget = resolveUnique(atoms, requested.selector);
+  if (relationTarget.error) return relationTarget.error;
+  const partners = storedField(target, 'strut')?.value;
+  if (!source || !Array.isArray(partners)) {
+    return diagnostic('INVALID_STRUT_ARRAY', '目标 Atom 的 strut 必须是推支规则对象数组');
+  }
+  const relationIndex = partners.findIndex((rule) => (
+    ownerLocalUnconditionalRelation(rule, source, relationTarget.match, matches, rootName)
+  ));
+  if (command.name === 'add') {
+    if (relationIndex >= 0) {
+      return diagnostic('DUPLICATE_STRUT_RELATION', 'owner-local 无条件出边已存在');
+    }
+    const endpoint = {};
+    const selector = canonicalPartnerObject(source, relationTarget.match, matches, false);
+    endpoint.thing = selector;
+    setStrutSelectorValue(
+      endpoint,
+      selector,
+      storedField(relationTarget.match.atom, 'thing')?.parsed.identity ?? null
+    );
+    replaceStoredField(target, 'strut', [
+      ...structuredClone(partners),
+      { 'if@current': true, then: [endpoint] }
+    ]);
+    return null;
+  }
+  if (relationIndex < 0) {
+    return diagnostic('STRUT_RELATION_NOT_FOUND', 'owner-local 无条件出边不存在');
+  }
+  replaceStoredField(target, 'strut', partners.filter((_, index) => index !== relationIndex));
   return null;
 }
 
@@ -929,7 +1007,7 @@ function applyFields(target, fields, atoms, options = {}) {
         }
         continue;
       }
-      const error = applyPartners(target, field);
+      const error = applyPartners(target, field, atoms, options.rootName ?? null);
       if (error) return error;
       continue;
     }
@@ -1408,7 +1486,7 @@ export async function applyTransform({
       targetPath = target.match.path.join('/');
       targetIdentity = storedField(target.match.atom, 'thing')?.parsed.identity ?? null;
     }
-    let error = applyFields(selected.match.atom, item.fields, nextAtoms);
+    let error = applyFields(selected.match.atom, item.fields, nextAtoms, { rootName });
     if (!error && targetPath) {
       try {
         retargetShortcutAtom(selected.match.atom, targetPath, targetIdentity);

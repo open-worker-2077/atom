@@ -74,6 +74,7 @@ test('Transform P1 freezes one short dot-command registry without aliases', () =
     'lnk',
     'mov',
     'cpy',
+    'add',
     'dsc',
     'rst',
     'run'
@@ -206,6 +207,52 @@ test('summary, field type, rename, and complete strut replacement strip commands
     JSON.stringify(await readAtoms(files.contextFile)).includes('.rep.'),
     false
   );
+});
+
+test('atomic strut commands add one owner-local edge and remove its ID-bound renamed target', async (t) => {
+  const files = await fixture(t, [{
+    'thing&id=aaaaaaaaaaaaaaaaaaaaaa': '域',
+    situation: '',
+    slot: [
+      { 'thing&id=bbbbbbbbbbbbbbbbbbbbbb': '源', situation: '', slot: [], strut: [] },
+      { 'thing&id=cccccccccccccccccccccc': '目标', situation: '', slot: [], strut: [] }
+    ],
+    strut: []
+  }]);
+
+  const added = await execute(
+    files,
+    'transform {"thing":"域/源","strut.add.":{"thing":"域/目标"}}'
+  );
+  assert.equal(added.ok, true, JSON.stringify(added.errors));
+  const sourceAfterAdd = findAtom(await readAtoms(files.contextFile), '源');
+  assert.deepEqual(sourceAfterAdd.strut.map((rule) => rule['if@current']), [true]);
+  assert.equal(sourceAfterAdd.strut[0].then.length, 1);
+  const endpointKey = Object.keys(sourceAfterAdd.strut[0].then[0])[0];
+  assert.match(endpointKey, /^thing&id=/u, 'new edges retain the target identity');
+
+  const duplicate = await execute(
+    files,
+    'transform {"thing":"域/源","strut.add.":{"thing":"域/目标"}}'
+  );
+  assert.equal(duplicate.ok, false);
+  assert.equal(duplicate.errors[0].code, 'DUPLICATE_STRUT_RELATION');
+
+  const renamed = await execute(files, 'transform {"thing.ren.改名":"域/目标"}');
+  assert.equal(renamed.ok, true, JSON.stringify(renamed.errors));
+  const removed = await execute(
+    files,
+    'transform {"thing":"域/源","strut.dsc.":{"thing":"域/改名"}}'
+  );
+  assert.equal(removed.ok, true, JSON.stringify(removed.errors));
+  assert.deepEqual(findAtom(await readAtoms(files.contextFile), '源').strut, []);
+
+  const absent = await execute(
+    files,
+    'transform {"thing":"域/源","strut.dsc.":{"thing":"域/改名"}}'
+  );
+  assert.equal(absent.ok, false);
+  assert.equal(absent.errors[0].code, 'STRUT_RELATION_NOT_FOUND');
 });
 
 test('an empty thing typ command removes a generic type without changing the thing', async (t) => {
