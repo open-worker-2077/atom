@@ -5,22 +5,32 @@
 ## 当前核对基线
 
 - **上游来源**：`obra/superpowers`
-- **上游版本**：Superpowers 6.3.0
-- **Manifest SHA-256**：`D7AC84A700062E865715F75626945A2A3324778C68DBA1A543C7ED41E48DEF10`
+- **上游版本**：Superpowers 6.4.1
+- **Manifest SHA-256**：`8F879F5E2F04C5D2A93BD9EA455072384DC35D01F1DFC5307CA1BE0CEF5BE9AA`
 - **本地规则源**：工作区 `D:\Project\〇\AGENTS.md` 的“Superpowers 连续性补充”
 - **检查时点**：每个新 Session 首次开展实质开发时读取已安装插件 manifest
 - **触发条件**：版本、来源或 manifest SHA-256 任一项变化
 
 ## 本地差异
 
-| 编号 | 补充目的 | 上游主要核对位置 | 6.3.0 结论 |
+| 编号 | 补充目的 | 上游主要核对位置 | 6.4.1 结论 |
 | --- | --- | --- | --- |
-| SP-L01 | 用户顺序、依赖、紧急度、重要度和交付层级共同决定持续执行顺序 | `using-superpowers`、`writing-plans`、`executing-plans` | 继续补充 |
-| SP-L02 | 新结论即时写回现有规格、计划或唯一总账 | `writing-plans`、`executing-plans` | 继续补充 |
-| SP-L03 | 验证从直接影响链逐级升级，最终候选只做一次必要全量 | `test-driven-development`、`systematic-debugging`、`verification-before-completion` | 继续补充 |
-| SP-L04 | 局部阻塞只限制依赖步骤，其余已批准工作持续推进 | `executing-plans`、`systematic-debugging` | 继续补充 |
-| SP-L05 | 推送后按精确 revision 等待 GitHub 检查终态并收口红灯 | `verification-before-completion`、`finishing-a-development-branch` | 继续补充 |
-| SP-U01 | 上游升级时逐项核对全部本地差异 | 全部相关 Skill 与插件 manifest | 继续补充 |
+| SP-L01 | 用户顺序、依赖、紧急度、重要度和交付层级共同决定持续执行顺序 | `using-superpowers`、`writing-plans`、`executing-plans` | 上游未覆盖并继续补充 |
+| SP-L02 | 新结论即时写回现有规格、计划或唯一总账 | `writing-plans`、`executing-plans` | 上游未覆盖并继续补充 |
+| SP-L03 | 验证从直接影响链逐级升级，最终候选只做一次必要全量 | `test-driven-development`、`systematic-debugging`、`verification-before-completion` | 上游未覆盖并继续补充 |
+| SP-L04 | 局部阻塞只限制依赖步骤，其余已批准工作持续推进 | `executing-plans`、`systematic-debugging` | 上游未覆盖并继续补充 |
+| SP-L05 | 推送后按精确 revision 等待 GitHub 检查终态并收口红灯 | `verification-before-completion`、`finishing-a-development-branch` | 上游未覆盖并继续补充 |
+| SP-U01 | 上游升级时逐项核对全部本地差异 | 全部相关 Skill 与插件 manifest | 上游未覆盖并继续补充 |
+
+## 6.4.1 核对记录
+
+- **SP-L01**：上游新增的计划顺序与执行纪律未定义用户显式顺序、必要依赖、紧急度、重要度及 `I/U/D/E` 交付层级，继续补充。
+- **SP-L02**：上游已有 plan ledger 与 `Ruling:`／`task-done`，但未要求需求、根因、RED/GREEN、部署回读和真实阻塞形成时立即写回既有权威记录，继续补充。
+- **SP-L03**：上游要求 TDD 与完成前完整验证，但未定义最小影响链到最终候选全量一次的升级顺序、同 revision 证据复用及基础设施无效结果边界，继续补充。
+- **SP-L04**：上游已有阻塞处理链，但未明确局部失败不得外推为全局停工，亦未限定只切换到已批准且独立的必要工作，继续补充。
+- **SP-L05**：上游允许推送与 PR，但未要求按精确 revision 等待远端检查终态、红灯回写并持续修复，也未定义“仅备份、尚未验收”，继续补充。
+- **SP-U01**：上游未提供本地差异的版本、来源、manifest 哈希与逐项退出核对机制，继续补充。
+- **冲突结论**：未发现 6.4.1 与上述本地补充存在语义冲突；没有待用户裁定项。
 
 ## 升级核对
 
