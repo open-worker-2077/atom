@@ -118,6 +118,25 @@ test('trusted maintenance is an internal execution option and is forwarded only 
   ]);
 });
 
+test('server-selected command origin is forwarded to the world without entering the intent payload', async () => {
+  const context = ports();
+  const runtime = createInteractionRuntime(context);
+
+  await runtime.execute({
+    source: 'transform {"thing":"Root"}', correlationId: 'web-origin', history: []
+  }, { origin: 'web', humanAuthority: true, programMode: 'reconcile' });
+
+  assert.deepEqual(context.calls, [['world', {
+    source: 'transform {"thing":"Root"}',
+    interaction: { id: 'web-origin', agent: null },
+    history: [],
+    origin: 'web',
+    humanAuthority: true,
+    programMode: 'reconcile',
+    programRuntime: 'program-runtime'
+  }]]);
+});
+
 test('failed interactions retain their correlation id for bounded server-side diagnosis', async () => {
   const context = ports();
   context.world.execute = async () => ({

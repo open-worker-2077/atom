@@ -367,6 +367,41 @@ export async function createSpatialServer(options = {}) {
     return receipt;
   }
 
+  function atomCommandFingerprint(origin, payload) {
+    const interaction = payload?.interaction && typeof payload.interaction === 'object'
+      ? payload.interaction
+      : {};
+    return {
+      origin,
+      source: payload?.source,
+      agent: interaction.agent ?? null,
+      agentSelector: interaction.agentSelector ?? null,
+      history: payload?.history ?? []
+    };
+  }
+
+  async function executeAtomTextCommand(payload, command, origin) {
+    return atomCommandRequest(payload, async (normalized, onCommitted, signal, onSubsequentSettled) => {
+      const commandResult = await command(normalized, { onCommitted, signal, onSubsequentSettled });
+      if (commandResult?.changed !== false && graphFile && options.projectAtomKnowledge) {
+        try {
+          const document = JSON.parse(await fs.readFile(graphFile, 'utf8'));
+          await store.execute('knowledge.replace', {
+            knowledge: await options.projectAtomKnowledge(document, commandResult)
+          });
+          spatialProjectionFailure = null;
+          publishKnowledgeChange(await readKnowledge());
+        } catch (error) {
+          spatialProjectionFailure = {
+            code: error?.code ?? 'SPATIAL_PROJECTION_FAILED',
+            message: error?.message ?? 'Spatial projection failed after the world commit'
+          };
+        }
+      }
+      return commandResult;
+    }, atomCommandFingerprint(origin, payload));
+  }
+
   async function readKnowledge(projector) {
     if (!bossStore) return store.read(projector);
     const knowledge = (await bossStore.readAll()).knowledge;
@@ -537,25 +572,20 @@ export async function createSpatialServer(options = {}) {
           return json(response, 404, { ok: false, error: { code: 'ATOM_COMMAND_UNAVAILABLE' } });
         }
         const payload = await body(request);
-        const result = await atomCommandRequest(payload, async (normalized, onCommitted, signal, onSubsequentSettled) => {
-          const commandResult = await options.atomCommand(normalized, { onCommitted, signal, onSubsequentSettled });
-          if (commandResult?.changed !== false && graphFile && options.projectAtomKnowledge) {
-            try {
-              const document = JSON.parse(await fs.readFile(graphFile, 'utf8'));
-              await store.execute('knowledge.replace', {
-                knowledge: await options.projectAtomKnowledge(document, commandResult)
-              });
-              spatialProjectionFailure = null;
-              publishKnowledgeChange(await readKnowledge());
-            } catch (error) {
-              spatialProjectionFailure = {
-                code: error?.code ?? 'SPATIAL_PROJECTION_FAILED',
-                message: error?.message ?? 'Spatial projection failed after the world commit'
-              };
-            }
-          }
-          return commandResult;
-        });
+        const result = await executeAtomTextCommand(payload, options.atomCommand, 'cli');
+        return json(response, 200, { ok: true, result: withAtomSaveState(result) });
+      }
+      if (url.pathname === '/__atom/api/web-command' && request.method === 'POST') {
+        if (typeof options.atomWebCommand !== 'function') {
+          return json(response, 404, { ok: false, error: { code: 'ATOM_WEB_COMMAND_UNAVAILABLE' } });
+        }
+        const payload = await body(request);
+        const webPayload = {
+          source: payload?.source,
+          interaction: { id: payload?.interaction?.id },
+          history: Array.isArray(payload?.history) ? payload.history : []
+        };
+        const result = await executeAtomTextCommand(webPayload, options.atomWebCommand, 'web');
         return json(response, 200, { ok: true, result: withAtomSaveState(result) });
       }
       if (url.pathname === '/__atom/api/human-status' && request.method === 'POST') {

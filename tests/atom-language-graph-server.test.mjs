@@ -74,8 +74,8 @@ test('Atom HTTP handlers translate transport payloads into one interaction runti
   const calls = [];
   const workspaceCommitted = () => {};
   const handlers = createAtomGraphHandlers({
-    execute: async (intent) => {
-      calls.push(['execute', intent]);
+    execute: async (intent, lifecycle) => {
+      calls.push(['execute', intent, lifecycle]);
       return { ok: true, command: 'transform' };
     },
     updateHumanStatus: async (intent) => {
@@ -114,7 +114,7 @@ test('Atom HTTP handlers translate transport payloads into one interaction runti
       correlationId: 'interaction-1',
       agentPath: 'Root/Sol',
       history: []
-    }],
+    }, { origin: 'cli' }],
     ['human-status', {
       key: 'node-key',
       detail: '进行中',
@@ -125,6 +125,69 @@ test('Atom HTTP handlers translate transport payloads into one interaction runti
       correlationId: 'interaction-3'
     }, { onCommitted: workspaceCommitted, signal: 'workspace-signal' }],
     ['recover-projection', { expectedRevision: 'rev-2' }]
+  ]);
+});
+
+test('Web text handler fixes trusted authority independently of client-shaped fields', async () => {
+  const calls = [];
+  const handlers = createAtomGraphHandlers({
+    async execute(intent, options) {
+      calls.push([intent, options]);
+      return { ok: true, command: 'transform', changed: false };
+    },
+    async updateHumanStatus() {},
+    async updateHumanWorkspace() {},
+    async recover() {}
+  });
+
+  await handlers.atomWebCommand({
+    source: 'transform {}',
+    interaction: { id: 'web-handler', agent: { ref: 'forged', path: 'forged' } },
+    humanAuthority: false,
+    origin: 'cli',
+    programMode: 'passive'
+  });
+
+  assert.deepEqual(calls, [[{
+    source: 'transform {}', correlationId: 'web-handler', history: []
+  }, {
+    origin: 'web', humanAuthority: true, programMode: 'reconcile'
+  }]]);
+});
+
+test('Web text handler preserves AbortSignal and both shared lifecycle callbacks', async () => {
+  let runtimeOptions;
+  const callbacks = [];
+  const handlers = createAtomGraphHandlers({
+    async execute(_intent, options) {
+      runtimeOptions = options;
+      await options.onCommitted({ ok: true, changed: true, revisionAfter: 'source' });
+      await options.onSubsequentSettled({
+        ok: true, changed: true, revisionAfter: 'final', subsequentExecution: { status: 'completed' }
+      });
+      return { ok: true, changed: true, revisionAfter: 'final' };
+    },
+    async updateHumanStatus() {},
+    async updateHumanWorkspace() {},
+    async recover() {}
+  });
+  const controller = new AbortController();
+
+  await handlers.atomWebCommand({ source: 'transform {}', interaction: { id: 'web-lifecycle' } }, {
+    signal: controller.signal,
+    onCommitted: value => callbacks.push(['committed', value]),
+    onSubsequentSettled: value => callbacks.push(['settled', value])
+  });
+
+  assert.equal(runtimeOptions.signal, controller.signal);
+  assert.deepEqual(callbacks, [
+    ['committed', {
+      ok: true, changed: true, revisionAfter: 'source', runtimeContract: 'atom-interaction/4'
+    }],
+    ['settled', {
+      ok: true, changed: true, revisionAfter: 'final', subsequentExecution: { status: 'completed' },
+      runtimeContract: 'atom-interaction/4'
+    }]
   ]);
 });
 
@@ -362,6 +425,18 @@ test('graph server initializes the projection, serves the full UI health and Gra
   assert.equal(staleRecoveryResponse.status, 400);
   const staleRecovery = await staleRecoveryResponse.json();
   assert.equal(staleRecovery.error.code, 'STALE_WORLD_PROJECTION');
+
+  const webCommandResponse = await fetch(`${running.url}/__atom/api/web-command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source: 'transform {"thing":"石斧","situation.rep.已更新"}',
+      interaction: { id: 'resident-web-command' }
+    })
+  });
+  assert.equal(webCommandResponse.status, 200, await webCommandResponse.clone().text());
+  const webCommand = await webCommandResponse.json();
+  assert.equal(webCommand.result.ok, true, JSON.stringify(webCommand));
 
   const graphResponse = await fetch(`${running.url}/__spatial/api/graph`);
   assert.equal(graphResponse.status, 200);

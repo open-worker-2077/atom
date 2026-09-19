@@ -271,6 +271,7 @@ export function createInteractionRuntime({
       source,
       interaction: currentInteraction,
       history: intent.history,
+      ...(currentOptions.origin ? { origin: currentOptions.origin } : {}),
       ...(currentOptions.trustedMaintenance ? { trustedMaintenance: true } : {}),
       ...(currentOptions.humanAuthority ? { humanAuthority: true } : {}),
       ...(currentOptions.bypassProgramLocks ? { bypassProgramLocks: true } : {}),

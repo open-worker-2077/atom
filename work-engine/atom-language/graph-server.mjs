@@ -362,15 +362,14 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
     || typeof interactionRuntime?.recover !== 'function') {
     throw problem('INVALID_INTERACTION_RUNTIME', 'Atom Graph handlers require one interaction runtime');
   }
-  return Object.freeze({
-    async atomCommand(payload, lifecycle = {}) {
+  async function atomTextCommand(payload, lifecycle = {}, authority) {
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)
         || typeof payload.source !== 'string') {
         throw problem('INVALID_ATOM_COMMAND_REQUEST', 'Atom command endpoint requires source and optional interaction.agent');
       }
       const correlationId = payload.interaction?.id ?? crypto.randomUUID();
       let agent = payload.interaction?.agent;
-      if ((!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string')
+      if (authority.agentRequired && (!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string')
         && typeof payload.interaction?.agentSelector === 'string'
         && typeof options.resolveAgent === 'function') {
         try {
@@ -379,20 +378,23 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
           throw error;
         }
       }
-      if (!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string') {
+      if (authority.agentRequired && (!agent || typeof agent.ref !== 'string' || typeof agent.path !== 'string')) {
         throw problem('AGENT_REQUIRED', 'Atom command endpoint requires a revision-local declared Agent Program origin');
       }
       const decorate = (result) => ({
         ...result,
-        agent: agent.path,
+        ...(authority.agentRequired ? { agent: agent.path } : {}),
         runtimeContract: ATOM_RUNTIME_CONTRACT
       });
       const result = await interactionRuntime.execute({
         source: payload.source,
         correlationId,
-        agentPath: agent.path,
+        ...(authority.agentRequired ? { agentPath: agent.path } : {}),
         history: Array.isArray(payload.history) ? payload.history : []
       }, {
+        origin: authority.origin,
+        ...(authority.humanAuthority ? { humanAuthority: true } : {}),
+        ...(authority.programMode ? { programMode: authority.programMode } : {}),
         ...(lifecycle.signal ? { signal: lifecycle.signal } : {}),
         ...(typeof lifecycle.onCommitted === 'function' ? {
           onCommitted: (committed) => lifecycle.onCommitted(decorate(committed))
@@ -402,6 +404,16 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
         } : {})
       });
       return decorate(result);
+  }
+
+  return Object.freeze({
+    atomCommand(payload, lifecycle = {}) {
+      return atomTextCommand(payload, lifecycle, { origin: 'cli', agentRequired: true });
+    },
+    atomWebCommand(payload, lifecycle = {}) {
+      return atomTextCommand(payload, lifecycle, {
+        origin: 'web', humanAuthority: true, programMode: 'reconcile', agentRequired: false
+      });
     },
     async atomHumanStatus(payload) {
       if (!payload || typeof payload.key !== 'string' || typeof payload.detail !== 'string') {
@@ -605,6 +617,7 @@ export async function startAtomGraphServer(options = {}) {
     }),
     atomProjectionReadOnly: true,
     atomCommand: handlers.atomCommand,
+    atomWebCommand: handlers.atomWebCommand,
     atomSaveState: () => worldService.captureSaveState?.({
       contextFile: configuration.contextFile, projectionFile: configuration.graphFile
     }),
