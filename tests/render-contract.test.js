@@ -12,7 +12,31 @@ function functionSource(name) {
   const start = source.indexOf(marker);
   assert.notEqual(start, -1, `${name} exists`);
 
-  const bodyStart = source.indexOf('{', start + marker.length);
+  let parameterDepth = 0;
+  let signatureQuote = null;
+  let signatureEscaped = false;
+  let bodyStart = -1;
+  for (let index = start + marker.length - 1; index < source.length; index += 1) {
+    const character = source[index];
+    if (signatureQuote) {
+      if (signatureEscaped) signatureEscaped = false;
+      else if (character === '\\') signatureEscaped = true;
+      else if (character === signatureQuote) signatureQuote = null;
+      continue;
+    }
+    if (character === '"' || character === "'" || character === '`') {
+      signatureQuote = character;
+      continue;
+    }
+    if (character === '(') parameterDepth += 1;
+    else if (character === ')') {
+      parameterDepth -= 1;
+      if (parameterDepth === 0) {
+        bodyStart = source.indexOf('{', index + 1);
+        break;
+      }
+    }
+  }
   assert.notEqual(bodyStart, -1, `${name} has a body`);
 
   let depth = 0;

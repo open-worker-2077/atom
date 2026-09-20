@@ -137,7 +137,8 @@ function normalizeField(entry, parserOptions, command) {
       value: true
     };
   }
-  if (parsed.baseKey === 'strut'
+  if (command === 'transform'
+    && parsed.baseKey === 'strut'
     && parsed.commands.length === 1
     && ['add', 'dsc'].includes(parsed.commands[0].name)) {
     const value = normalizeValue(entry.value, parserOptions, command);

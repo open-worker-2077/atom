@@ -94,7 +94,7 @@ test('project routing has one Superpowers entry without tool-owned instructions'
   assert.doesNotMatch(instructions, /<!-- gitnexus:start -->/);
   assert.doesNotMatch(instructions, /GitNexus — Code Intelligence/);
   assert.match(superpowersEntry, /upstream-compatibility\.md/);
-  assert.match(upstreamCompatibility, /Superpowers 6\.3\.0/);
+  assert.match(upstreamCompatibility, /Superpowers 6\.4\.1/);
   assert.match(upstreamCompatibility, /每个新 Session 首次开展实质开发/);
   assert.match(upstreamCompatibility, /Manifest SHA-256/);
   for (const id of ['SP-L01', 'SP-L02', 'SP-L03', 'SP-L04', 'SP-L05', 'SP-U01']) {

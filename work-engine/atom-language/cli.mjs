@@ -826,9 +826,12 @@ export async function resolveAgentContext(contextFile, selector, options = {}) {
   }
   const requested = selector.trim();
   const atoms = await readAgentFacts(contextFile, options);
-  const scheduler = options.programScheduler ?? createProgramRuntimeScheduler({});
-  const security = await scheduler.rebuildAgentSecurity(atoms);
-  const directory = agentDirectoryFor(atoms, new Set(security.keys()), options);
+  let directory = agentDirectories.get(atoms);
+  if (!directory) {
+    const scheduler = options.programScheduler ?? createProgramRuntimeScheduler({});
+    const security = await scheduler.rebuildAgentSecurity(atoms);
+    directory = agentDirectoryFor(atoms, new Set(security.keys()), options);
+  }
   const exact = requested.includes('/')
     ? (directory.byPath.get(requested) ?? [])
     : (directory.byName.get(requested) ?? []);
@@ -905,6 +908,7 @@ function agentDirectoryFor(atoms, agentProgramPaths, options = {}) {
 
 export async function primeAgentDirectory(contextFile, options = {}) {
   const atoms = await readAgentFacts(contextFile, options);
+  if (agentDirectories.has(atoms)) return;
   const scheduler = options.programScheduler ?? createProgramRuntimeScheduler({});
   const security = await scheduler.rebuildAgentSecurity(atoms);
   agentDirectoryFor(atoms, new Set(security.keys()), options);
