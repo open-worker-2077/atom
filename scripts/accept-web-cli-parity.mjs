@@ -99,6 +99,21 @@ function onePass(record) {
   assert.ok(Number.isFinite(record.sharedCommandMs));
 }
 
+export async function waitForPublishedProjection(world, expectedRevision, { timeoutMs = 15_000 } = {}) {
+  const startedAt = performance.now();
+  while (performance.now() - startedAt < timeoutMs) {
+    const status = world.interactionRuntime.projectionStatus();
+    if (status?.status === 'published' && status.expectedRevision === expectedRevision) {
+      const health = await fetch(`${world.url}/__spatial/api/health`).then(response => response.json());
+      assert.equal(health.atomProjection.status, 'published');
+      assert.equal(health.atomProjection.expectedRevision, expectedRevision);
+      return { ...status, knowledgeRevision: health.revision };
+    }
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw new Error(`projection did not publish exact revision ${expectedRevision}: ${JSON.stringify(world.interactionRuntime.projectionStatus())}`);
+}
+
 // Compare the actual four axes while ignoring kernel-issued identity spelling.
 function semanticFacts(facts) {
   const visit = atoms => atoms.map(atom => {
@@ -117,6 +132,49 @@ function atPath(facts, selector) {
 async function ready(page) {
   await page.waitForFunction(() => document.body.dataset.spatialBridge === 'connected' && window.spatialLab?.state().visibleNodes > 0);
   if (await page.locator('#helpPanel').isVisible()) await page.locator('[data-close="help"]').click();
+}
+
+export function verifyImportedProjection(knowledge, revision, expected) {
+  assert.equal(knowledge?.revision, revision, 'browser must import the exact published revision');
+  const nodes = knowledge.nodes ?? [];
+  let checkedFacts = 0;
+  for (const [atomPath, detail] of Object.entries(expected.present ?? {})) {
+    const node = nodes.find(node => node.atomPath === atomPath);
+    assert.ok(node, `browser is missing ${atomPath}`);
+    if (detail !== null) assert.equal(node.detail, detail, `browser body mismatch at ${atomPath}`);
+    checkedFacts += 1;
+  }
+  for (const atomPath of expected.absent ?? []) {
+    assert.ok(!nodes.some(node => node.atomPath === atomPath), `browser retained deleted/moved ${atomPath}`);
+    checkedFacts += 1;
+  }
+  if (expected.noRelations) {
+    assert.deepEqual(knowledge.edges, [], 'browser retained a deleted relation edge');
+    assert.deepEqual(knowledge.strutClauses, [], 'browser retained a deleted relation clause');
+    checkedFacts += 1;
+  }
+  return checkedFacts;
+}
+
+async function verifyBrowserReload(page, world, revision, checkpoint, expected) {
+  const startedAt = performance.now();
+  const publication = await waitForPublishedProjection(world, revision);
+  await page.reload(); await ready(page);
+  await page.waitForFunction(revision => window.spatialLab.state().phase === 'idle'
+    && document.body.dataset.spatialScopeState === 'loaded'
+    && window.__parityMappers[0].revision === revision, publication.knowledgeRevision);
+  // F5 restores authoritative facts, not necessarily an independently saved
+  // transient camera/domain path. Reach the known domain through real gestures.
+  while (await page.evaluate(() => window.spatialLab.state().path !== 'root')) {
+    await page.mouse.click(48, 360, { button: 'right' });
+    await page.waitForTimeout(550);
+  }
+  await enter(page, 'atom.json'); await enter(page, AGENT); await enter(page, '目标域');
+  await page.waitForFunction(() => document.body.dataset.spatialScopeState === 'loaded');
+  const imported = await page.evaluate(() => window.__parityMappers[0].knowledge);
+  return { checkpoint, publication, importedRevision: imported.revision,
+    checkedFacts: verifyImportedProjection(imported, publication.knowledgeRevision, expected), expected,
+    evidenceWallMs: performance.now() - startedAt };
 }
 
 async function enter(page, label) {
@@ -177,14 +235,20 @@ async function commit(page, worlds, operation, records) {
   const responsePromise = page.waitForResponse(response => response.url().endsWith('/__atom/api/web-command'));
   responsePromise.catch(() => {});
   // Measure in the browser's clock at the actual save intent, not Playwright transport time.
-  const feedbackMs = await page.evaluate(() => {
+  const feedback = await page.evaluate(async () => {
     const start = performance.now();
     window.spatialLab.dispatch('confirmEdit');
     const status = document.querySelector('#saveStatus');
     if (status.hidden || status.dataset.state !== 'saving') throw new Error('save feedback absent');
-    return performance.now() - start;
+    const feedbackDomMs = performance.now() - start;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const style = getComputedStyle(status), bounds = status.getBoundingClientRect();
+    if (status.hidden || style.display === 'none' || style.visibility === 'hidden'
+      || bounds.width <= 0 || bounds.height <= 0) throw new Error('save feedback not visible at next paint frame');
+    return { feedbackDomMs, feedbackNextPaintMs: performance.now() - start,
+      feedbackNextPaintState: status.dataset.state };
   });
-  assert.ok(feedbackMs <= 100, `save feedback ${feedbackMs}ms exceeds 100ms`);
+  assert.ok(feedback.feedbackDomMs <= 100, `save feedback ${feedback.feedbackDomMs}ms exceeds 100ms`);
   const response = await responsePromise;
   const payload = await response.json();
   assert.equal(payload.result?.ok, true, JSON.stringify(payload));
@@ -202,7 +266,8 @@ async function commit(page, worlds, operation, records) {
   onePass(webRecord); onePass(cliRecord);
   assert.deepEqual(webRecord.parsed, cliRecord.parsed);
   const uiMapMs = await page.evaluate(() => window.__parityMappers[0].compileMs.at(-1));
-  records.push({ operation, source: request.source, feedbackMs, uiMapMs,
+  records.push({ operation, source: request.source, feedbackMs: feedback.feedbackDomMs, ...feedback, uiMapMs,
+    revisionAfter: payload.result.revisionAfter,
     webSharedCommandMs: webRecord.sharedCommandMs, cliSharedCommandMs: cliRecord.sharedCommandMs });
   await page.waitForFunction(() => document.body.dataset.spatialBridge === 'connected'
     && ['loaded', 'loaded-empty'].includes(document.body.dataset.spatialScopeState)
@@ -213,7 +278,7 @@ async function commit(page, worlds, operation, records) {
   await page.waitForTimeout(550);
 }
 
-export async function runBrowserParity({ page, worlds }) {
+export async function runBrowserParity({ page, worlds, measurePerformance = true }) {
   const journeyStartedAt = performance.now();
   page.setDefaultTimeout(15_000);
   await page.addInitScript(() => {
@@ -227,6 +292,7 @@ export async function runBrowserParity({ page, worlds }) {
         return Object.freeze({ replaceKnowledge(knowledge) {
           const result = mapper.replaceKnowledge(knowledge);
           observed.imports += 1; observed.revision = knowledge?.revision ?? observed.revision;
+          observed.knowledge = knowledge;
           return result;
         }, compile(operation) {
           const start = performance.now();
@@ -237,6 +303,7 @@ export async function runBrowserParity({ page, worlds }) {
     } });
   });
   const records = [];
+  const refreshProofs = [];
   console.log('parity: worlds ready, opening browser');
   await page.goto(worlds.web.url);
   await ready(page);
@@ -263,6 +330,9 @@ export async function runBrowserParity({ page, worlds }) {
   await enter(page, '目标域');
   await ctrlBlank(page);
   await commit(page, worlds, 'node-land', records);
+  const movedFacts = { present: { '验收入口/目标域/已改名': body, '验收入口/目标域/关系目标': null },
+    absent: ['验收入口/源域/已改名'] };
+  refreshProofs.push(await verifyBrowserReload(page, worlds.web, records.at(-1).revisionAfter, 'moved-body', movedFacts));
   await page.evaluate(() => {
     if (window.spatialLab.state().clusterFieldOpen) window.spatialLab.dispatch('toggleClusterField');
     window.spatialLab.refitCurrentDomain({ path: window.spatialLab.state().path, reason: 'parity-relation-view' });
@@ -281,8 +351,13 @@ export async function runBrowserParity({ page, worlds }) {
   await page.keyboard.down('Control'); await page.mouse.click(relation.clientX, relation.clientY, { button: 'right' }); await page.keyboard.up('Control');
   await page.evaluate(() => window.spatialLab.dispatch('deleteEdit'));
   await commit(page, worlds, 'edge-delete', records);
+  refreshProofs.push(await verifyBrowserReload(page, worlds.web, records.at(-1).revisionAfter, 'relation-deleted',
+    { ...movedFacts, noRelations: true }));
   await select(page, '已改名'); await page.evaluate(() => { window.spatialLab.dispatch('editNode'); window.spatialLab.dispatch('deleteEdit'); });
   await commit(page, worlds, 'node-delete', records);
+  const deletedFacts = { present: { '验收入口/目标域/关系目标': null },
+    absent: ['验收入口/目标域/已改名', '验收入口/源域/已改名'], noRelations: true };
+  refreshProofs.push(await verifyBrowserReload(page, worlds.web, records.at(-1).revisionAfter, 'thing-deleted', deletedFacts));
   const sevenStepJourneyMs = performance.now() - journeyStartedAt;
   const webFacts = semanticFacts(await worlds.web.facts());
   const cliFacts = semanticFacts(await worlds.cli.facts());
@@ -308,13 +383,17 @@ export async function runBrowserParity({ page, worlds }) {
     assert.deepEqual([hash(await worlds.web.facts()), hash(await worlds.cli.facts())], before);
     failures.push({ code: cli.errors[0].code, unchangedHashes: before });
   }
-  const journeyReport = { operations: records.map(r => r.operation), sameFacts: true, records, failures, sevenStepJourneyMs };
+  const journeyReport = { operations: records.map(r => r.operation), sameFacts: true, records, failures, sevenStepJourneyMs, refreshProofs,
+    journeyProtocol: 'raw wall time includes seven real edits and moved-body/relation-deleted/thing-deleted F5 evidence checkpoints',
+    feedbackProtocol: 'feedbackMs/feedbackDomMs are synchronous DOM saving state; feedbackNextPaintMs checks visible bounds/style after two requestAnimationFrame callbacks (frame proxy, not a compositor timestamp)' };
   await fs.writeFile(path.join(worlds.directory, 'journey-report.json'), JSON.stringify(journeyReport, null, 2));
-  const performanceReport = await runPerformanceSamples({ page, worlds });
-  await page.reload(); await ready(page);
+  const performanceReport = measurePerformance ? await runPerformanceSamples({ page, worlds }) : {};
+  const finalRevision = performanceReport.projectionProofs?.at(-1)?.web.expectedRevision ?? records.at(-1).revisionAfter;
+  refreshProofs.push(await verifyBrowserReload(page, worlds.web, finalRevision, 'final', deletedFacts));
   assert.equal(hash(semanticFacts(await worlds.web.facts())), hash(semanticFacts(await worlds.cli.facts())));
+  await fs.writeFile(path.join(worlds.directory, 'journey-report.json'), JSON.stringify(journeyReport, null, 2));
   return { ...journeyReport,
-    ...performanceReport, retainedEvidenceDirectory: worlds.directory };
+    ...performanceReport, acceptanceWallMs: performance.now() - journeyStartedAt, retainedEvidenceDirectory: worlds.directory };
 }
 
 export async function runPerformanceSamples({ page, worlds }) {
@@ -326,9 +405,9 @@ export async function runPerformanceSamples({ page, worlds }) {
     window.__parityMapper = mapper;
   });
   const samples = [];
+  const projectionProofs = [];
   for (let i = 0; i < 35; i += 1) {
     const id = crypto.randomUUID();
-    const previousRevision = await page.evaluate(() => window.__parityMappers[0].revision);
     const mapped = await page.evaluate(i => {
       const started = performance.now();
       const { source } = window.__parityMapper.compile({ kind: 'node-edit', node: { atomPath: '验收入口/采样节点' },
@@ -372,18 +451,28 @@ export async function runPerformanceSamples({ page, worlds }) {
     webSaveDrainMs = performance.now() - saveStartedAt;
     if (i % 2 === 1) await runCli();
     assert.equal(cli.ok, true, JSON.stringify(cli));
-    // The HTTP receipt and durable save do not imply that the authoritative
-    // projection/SSE import has finished. Keep rendering and SSE active, but
-    // drain the current pair's import before beginning the next independent pair.
+    // Both real runtimes must publish this pair's exact source revisions, not
+    // merely a newer numeric browser revision or a completed durable save.
     const projectionDrainStartedAt = performance.now();
-    await page.waitForFunction(revision => window.__parityMappers[0].revision > revision
+    const [webProjection, cliProjection] = await Promise.all([
+      [worlds.web, web.result.result.revisionAfter], [worlds.cli, cli.revisionAfter]
+    ].map(async ([world, revision]) => ({
+      publication: await waitForPublishedProjection(world, revision),
+      drainMs: performance.now() - projectionDrainStartedAt
+    })));
+    const dualProjectionDrainMs = performance.now() - projectionDrainStartedAt;
+    const importDrainStartedAt = performance.now();
+    await page.waitForFunction(revision => window.__parityMappers[0].revision === revision
       && document.body.dataset.spatialKnowledge === 'authoritative'
       && document.body.dataset.spatialBridge === 'connected'
       && ['loaded', 'loaded-empty'].includes(document.body.dataset.spatialScopeState)
       && window.spatialLab.state().phase === 'idle'
-      && !window.spatialLab.state().transactionActive, previousRevision);
+      && !window.spatialLab.state().transactionActive, webProjection.publication.knowledgeRevision);
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    const webProjectionDrainMs = performance.now() - projectionDrainStartedAt;
+    const webImportDrainMs = performance.now() - importDrainStartedAt;
+    projectionProofs.push({ pair: i, interactionId: id, source: mapped.source,
+      web: webProjection.publication, cli: cliProjection.publication,
+      browserImportedRevision: await page.evaluate(() => window.__parityMappers[0].revision) });
     const wr = worlds.web.observations.get(id), cr = worlds.cli.observations.get(`cli-${id}`);
     onePass(wr); onePass(cr); assert.deepEqual(wr.parsed, cr.parsed);
     assert.ok(Number.isFinite(web.transferMs), 'each request requires its browser ResourceTiming transfer sample');
@@ -394,18 +483,20 @@ export async function runPerformanceSamples({ page, worlds }) {
       cliEngineToCommitMs: cr.sharedCommandMs - cr.preEngineMs,
       webReceiptAssemblyMs: wr.sharedCommandMs - wr.commitReturnedMs,
       cliReceiptAssemblyMs: cr.sharedCommandMs - cr.commitReturnedMs,
-      webDrainMs, cliDrainMs, webSaveDrainMs, cliSaveDrainMs, webProjectionDrainMs,
-      sampleDrainMs: webDrainMs + cliDrainMs + webSaveDrainMs + cliSaveDrainMs + webProjectionDrainMs,
+      webDrainMs, cliDrainMs, webSaveDrainMs, cliSaveDrainMs,
+      webProjectionDrainMs: webProjection.drainMs, cliProjectionDrainMs: cliProjection.drainMs,
+      dualProjectionDrainMs, webImportDrainMs,
+      sampleDrainMs: webDrainMs + cliDrainMs + webSaveDrainMs + cliSaveDrainMs + dualProjectionDrainMs + webImportDrainMs,
       resourceTransferMs: web.transferMs,
       networkEnvelopeMs: Math.max(0, web.transferMs - wr.sharedCommandMs) + web.serializeMs + web.parseMs,
       browserSchedulingMs: Math.max(0, web.roundTripMs - web.transferMs - web.parseMs) });
     await fs.writeFile(path.join(worlds.directory, 'sample-progress.json'), JSON.stringify({
-      completedPairs: i + 1, measurements: samples, elapsedBatchMs: performance.now() - batchStartedAt
+      completedPairs: i + 1, measurements: samples, projectionProofs, elapsedBatchMs: performance.now() - batchStartedAt
     }, null, 2));
   }
   const timings = Object.fromEntries(Object.keys(samples[0]).map(key => [key, stats(samples.map(row => row[key]))]));
-  const report = { samples: samples.length, unrelatedThings: worlds.unrelatedThings, timings, measurements: samples,
-    sampleProtocol: '5 warmups then 30 samples; alternating CLI-first/Web-first; real subsequent calls, independent saves, and each pair\'s authoritative Web projection/SSE import plus idle/render frames drain outside command clocks; rendering and SSE stay active',
+  const report = { samples: samples.length, unrelatedThings: worlds.unrelatedThings, timings, measurements: samples, projectionProofs,
+    sampleProtocol: '5 warmups then 30 samples; alternating CLI-first/Web-first; real subsequent calls, independent saves, both exact command revisions published by their runtimes, and exact Web projection/SSE import plus idle/render frames drain outside command clocks; rendering and SSE stay active',
     sampleBatchWallMs: performance.now() - batchStartedAt };
   // Retain raw samples even when an assertion fails; a failed budget must be
   // diagnosable without repeating the workload merely to recover its data.
@@ -417,19 +508,50 @@ export async function runPerformanceSamples({ page, worlds }) {
   return report;
 }
 
-async function publicSmoke(endpoint) {
+export async function publicSmoke(endpoint) {
   const url = new URL(endpoint);
   const { chromium } = await import('@playwright/test');
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage();
+    const page = await browser.newPage({ serviceWorkers: 'block' });
+    const blockedMutations = [], actualMutations = [];
+    page.on('response', response => {
+      const request = response.request();
+      if (!['GET', 'HEAD'].includes(request.method())) actualMutations.push({ method: request.method(), url: request.url() });
+    });
+    await page.route('**/*', route => {
+      const request = route.request();
+      if (['GET', 'HEAD'].includes(request.method())) return route.continue();
+      blockedMutations.push({ method: request.method(), url: request.url() });
+      return route.abort('blockedbyclient');
+    });
     const health = await fetch(new URL('/__spatial/api/health', url)).then(r => r.json());
     assert.equal(health.ok, true); assert.equal(health.atomWorkspace, true);
     await page.goto(url.href); await ready(page);
+    const snapshot = async () => {
+      const observed = await page.evaluate(async () => {
+        const health = await fetch('/__spatial/api/health').then(response => response.json());
+        const state = await fetch('/__spatial/api/state?path=root').then(response => response.json());
+        const fingerprints = [...document.querySelectorAll('script[src],link[href]')]
+          .map(element => new URL(element.src || element.href).searchParams.get('v'))
+          .filter(value => value?.startsWith('sha256-'));
+        return { health, knowledge: state.knowledge, fingerprints: [...new Set(fingerprints)] };
+      });
+      assert.equal(observed.health.ok, true);
+      assert.ok(observed.knowledge?.nodes?.length > 0, 'smoke requires known authoritative read-only state');
+      assert.equal(observed.knowledge.revision, observed.health.revision);
+      assert.equal(observed.fingerprints.length, 1, 'served assets must identify one precise build');
+      return { healthRevision: observed.health.revision, projection: observed.health.atomProjection,
+        buildFingerprint: observed.fingerprints[0], stateHash: hash(observed.knowledge) };
+    };
+    const before = await snapshot();
     await page.reload(); await ready(page);
+    const after = await snapshot();
+    assert.deepEqual(after, before, 'F5 must preserve served build, health revision and known read-only state');
     const asset = await fetch(new URL('/vendor/atom-spatial-scene.bundle.js', url));
     assert.equal(asset.status, 200);
-    return { mode: 'public-smoke-read-only', health, f5: true,
+    assert.deepEqual(actualMutations, [], 'read-only smoke observed an actual mutation response');
+    return { mode: 'public-smoke-read-only', health, f5: { before, after }, blockedMutations, actualMutations,
       browserAssetStatus: asset.status, restartAndBackup: 'requires deployment controller evidence' };
   } finally { await browser.close(); }
 }

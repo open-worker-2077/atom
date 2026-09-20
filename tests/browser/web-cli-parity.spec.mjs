@@ -13,9 +13,17 @@ test('real browser edits and CLI replay preserve one source, four-axis facts and
     expect(report.operations).toEqual(['node-create', 'node-edit', 'rename', 'node-land', 'edge-create', 'edge-delete', 'node-delete']);
     expect(report.sameFacts).toBe(true);
     expect(report.samples).toBe(30);
+    expect(report.projectionProofs).toHaveLength(35);
+    for (const proof of report.projectionProofs) {
+      expect(proof.web.status).toBe('published');
+      expect(proof.cli.status).toBe('published');
+      expect(proof.browserImportedRevision).toBe(proof.web.knowledgeRevision);
+    }
+    expect(report.refreshProofs.map(proof => proof.checkpoint)).toEqual(['moved-body', 'relation-deleted', 'thing-deleted', 'final']);
     await testInfo.attach('web-cli-parity.json', { body: JSON.stringify(report, null, 2), contentType: 'application/json' });
-    const { records, measurements, ...summary } = report;
-    console.log(JSON.stringify({ ...summary, feedbackMs: records.map(r => r.feedbackMs) }));
+    const { records, measurements, projectionProofs, ...summary } = report;
+    console.log(JSON.stringify({ ...summary, feedbackDomMs: records.map(r => r.feedbackDomMs),
+      feedbackNextPaintMs: records.map(r => r.feedbackNextPaintMs) }));
   } catch (error) {
     console.log('parity failure state:', await page.evaluate(() => ({ dataset: { ...document.body.dataset },
       state: window.spatialLab?.state(), mappers: window.__parityMappers, save: document.querySelector('#saveStatus')?.textContent })).catch(() => null));
