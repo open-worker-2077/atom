@@ -590,7 +590,8 @@ export async function readAtomContext(file, options = {}) {
       ? compatibilityMetadata(options.compatibilityManifest, normalized.atoms)
       : normalized.metadata;
     projectAtomContext(normalized.atoms, { allowLegacyStrut: Boolean(metadata) });
-    const snapshot = freezeSnapshot(normalized.atoms);
+    sealWorldFactsRevision(normalized.atoms);
+    const snapshot = normalized.atoms;
     if (metadata) legacySnapshotMetadata.set(snapshot, metadata);
     contextSnapshots.set(contextFile, { signature, manifestRevision, value: snapshot });
     return snapshot;

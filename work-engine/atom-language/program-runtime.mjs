@@ -22,7 +22,10 @@ import { shortcutMetadata } from './shortcut-runtime.mjs';
 import { rewriteProgramReferenceBatch } from './program-reference-runtime.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
-import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
+import {
+  isSealedWorldFacts,
+  revisionOfWorldFacts
+} from '../../src/atom-system/world-runtime/world-revision.mjs';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_WORKERS = 16;
@@ -1417,6 +1420,7 @@ export class ProgramRuntimeScheduler {
     this.agentSecurity = new Map();
     this.agentDeclarationInspections = new Map();
     this.agentSecurityWorldRevision = null;
+    this.agentSecurityWorldFacts = null;
     this.latestRecords = null;
     this.preparedStrutGraphs = new Map();
     this.strutDeliveryExecutions = options.strutDeliveryExecutions ?? new Map();
@@ -1731,12 +1735,19 @@ export class ProgramRuntimeScheduler {
   }
 
   async rebuildAgentSecurity(atoms) {
+    if (this.agentSecurityWorldFacts === atoms && isSealedWorldFacts(atoms)) {
+      return this.agentSecurity;
+    }
     const records = worldRecords(atoms);
     const programs = programRecords(records);
     const fingerprint = agentSecurityFingerprint(programs);
-    if (this.agentSecurityWorldRevision === fingerprint) return this.agentSecurity;
+    if (this.agentSecurityWorldRevision === fingerprint) {
+      this.agentSecurityWorldFacts = isSealedWorldFacts(atoms) ? atoms : null;
+      return this.agentSecurity;
+    }
     this.agentSecurity = await this.deriveAgentSecurity(atoms);
     this.agentSecurityWorldRevision = fingerprint;
+    this.agentSecurityWorldFacts = isSealedWorldFacts(atoms) ? atoms : null;
     return this.agentSecurity;
   }
 
@@ -2063,6 +2074,7 @@ export class ProgramRuntimeScheduler {
     this.agentSecurity = new Map();
     this.agentDeclarationInspections.clear();
     this.agentSecurityWorldRevision = null;
+    this.agentSecurityWorldFacts = null;
     this.requestDrivenLocks = undefined;
     this.requestDrivenLocksWorldRevision = null;
     this.latestRecords = null;

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { sealWorldFactsRevision } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 function atom(key, name, situation = '', slot = []) {
   return { [key]: name, situation, slot, strut: [] };
@@ -101,6 +102,16 @@ test('changed Agent source is revalidated and rejected candidates cannot replace
   assert.deepEqual((await scheduler.deriveAgentSecurity(world)).get('Owner').functions, ['explore', 'use_program']);
   scheduler.invalidateDerivedWorldState();
   assert.deepEqual((await scheduler.deriveAgentSecurity(changed)).get('Owner').functions, ['explore']);
+});
+
+test('invalidating derived state rebuilds Agent security for the same sealed world facts', async () => {
+  const scheduler = createProgramRuntimeScheduler({ timeoutMs: 2000 });
+  const world = [atom('thing@program', 'Owner', agentSource)];
+  sealWorldFactsRevision(world);
+
+  assert.equal((await scheduler.rebuildAgentSecurity(world)).has('Owner'), true);
+  scheduler.invalidateDerivedWorldState();
+  assert.equal((await scheduler.rebuildAgentSecurity(world)).has('Owner'), true);
 });
 
 test('executing an Agent Program does not emit a registration mutation', async () => {
