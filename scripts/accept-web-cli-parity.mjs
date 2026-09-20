@@ -169,10 +169,27 @@ async function verifyBrowserReload(page, world, revision, checkpoint, expected) 
     await page.mouse.click(48, 360, { button: 'right' });
     await page.waitForTimeout(550);
   }
-  await enter(page, 'atom.json'); await enter(page, AGENT); await enter(page, '目标域');
+  await enter(page, 'atom.json'); await enter(page, AGENT);
+  let sourceScopeProof;
+  if (checkpoint === 'moved-body') {
+    await enter(page, '源域');
+    await page.waitForFunction(() => document.body.dataset.spatialScopeState === 'loaded');
+    const sourceKnowledge = await page.evaluate(() => window.__parityMappers[0].knowledge);
+    const sourceExpected = { present: { '验收入口/源域/源参照': null }, absent: ['验收入口/源域/已改名'] };
+    // The positive witness is asserted first, so absence cannot pass merely
+    // because the source domain was never loaded after F5.
+    const checkedFacts = verifyImportedProjection(sourceKnowledge, publication.knowledgeRevision, sourceExpected);
+    sourceScopeProof = { importedRevision: sourceKnowledge.revision,
+      presentWitness: sourceKnowledge.nodes.find(node => node.atomPath === '验收入口/源域/源参照').atomPath,
+      absentPaths: sourceExpected.absent, checkedFacts };
+    await page.mouse.click(48, 360, { button: 'right' });
+    await page.waitForTimeout(550);
+  }
+  await enter(page, '目标域');
   await page.waitForFunction(() => document.body.dataset.spatialScopeState === 'loaded');
   const imported = await page.evaluate(() => window.__parityMappers[0].knowledge);
   return { checkpoint, publication, importedRevision: imported.revision,
+    ...(sourceScopeProof ? { sourceScopeProof } : {}),
     checkedFacts: verifyImportedProjection(imported, publication.knowledgeRevision, expected), expected,
     evidenceWallMs: performance.now() - startedAt };
 }
