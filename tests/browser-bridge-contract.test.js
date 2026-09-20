@@ -1592,6 +1592,59 @@ for (const batch of [false, true]) test(`${batch ? 'batch' : 'single'} landing r
   assert.equal(requests.includes('/__spatial/api/state'), false, 'reconcile through scoped reads, not a full snapshot');
 });
 
+for (const batch of [false, true]) test(`unchanged same-scope ${batch ? 'batch' : 'single'} landing reconciles against the current authoritative projection`, async () => {
+  const listeners = new Map();
+  const events = [];
+  const node = { id: 'a', key: 'root::a', path: 'root', atomPath: 'A', label: 'A' };
+  const response = payload => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root' }),
+      exportField: () => ({ path: 'root' }),
+      importKnowledge: () => true
+    },
+    EventSource: class {},
+    fetch: async (url) => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) return response({
+        scope: { path: 'root' },
+        knowledge: { revision: 1, nodes: [node], edges: [] }
+      });
+      if (url.endsWith('/web-command')) return response({ ok: true, result: {
+        ok: true, changed: false, revisionAfter: 'unchanged-world-revision'
+      } });
+      return response({ result: {} });
+    },
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    dispatchEvent: event => events.push(event),
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  installWorkspaceModel(window);
+  vm.runInNewContext(source, { window, document });
+  await new Promise(resolve => setImmediate(resolve));
+
+  const landing = {
+    kind: 'node-land',
+    source: { key: node.key, path: 'root' },
+    sourceNode: node,
+    target: { path: 'root' },
+    draft: node
+  };
+  const operation = batch ? { kind: 'node-land-batch', landings: [landing], target: landing.target } : landing;
+  await listeners.get('spatial-workspace-committed')({ detail: { persistenceId: 43, operation } });
+
+  assert.equal(events.filter(event => event.type === 'spatial-workspace-projection-pending').length, 0,
+    'a no-op command has no future projection to wait for');
+  const saved = events.filter(event => event.type === 'spatial-workspace-persisted');
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].detail.persistenceId, 43);
+  assert.equal(saved[0].detail.persistedNode.key, node.key);
+  assert.equal(document.body.dataset.spatialBridge, 'connected');
+});
+
 test('batch landing is acknowledged only when every selected Atom exists in the authoritative destination', async () => {
   const listeners = new Map();
   const imports = [];

@@ -199,21 +199,21 @@ git commit -m "refactor: route web text through shared command runtime"
 - Consumes: Task 2 mapper 与 Task 3 `/web-command`。
 - Produces: 所有 Web 世界编辑请求体仅含 `source + interaction`；删除 `/workspace-edit`、`/human-status`、`createLegacyHumanWorkspaceTranslator()`、`updateHumanWorkspace()` 和 `updateHumanStatus()`。
 
-- [ ] **Step 1: Write failing bridge and architecture tests**
+- [x] **Step 1: Write failing bridge and architecture tests**
 
 固定截图根因：导入节点只有 `atomPath`，编辑后必须向 `/web-command` 发送规范 source。架构测试拒绝旧 route、translator、服务端 `operation.kind` 分派和写前 Graph 文件读取。
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `node --test tests/browser-bridge-contract.test.js tests/atom-legacy-runtime-composition.test.mjs tests/atom-production-architecture.test.mjs tests/atom-system-boundaries.test.mjs`
 
 Expected: 旧链仍存在且测试失败。
 
-- [ ] **Step 3: Cut over without dual-write**
+- [x] **Step 3: Cut over without dual-write**
 
 Bridge 初始化和每次权威 state 更新调用 `replaceKnowledge()`；提交时只 POST source。保留草稿、回滚、保存反馈、projection pending 和持久化回执对账；删除所有 Web 专属业务翻译与旧 route。
 
-- [ ] **Step 4: Verify GREEN and absence gate**
+- [x] **Step 4: Verify GREEN and absence gate**
 
 Run: `node --test tests/browser-bridge-contract.test.js tests/atom-legacy-runtime-composition.test.mjs tests/atom-production-architecture.test.mjs tests/atom-system-boundaries.test.mjs`
 
@@ -221,7 +221,7 @@ Run: `rg -n "Web edit requires one stable node identity|/__atom/api/workspace-ed
 
 Expected: tests PASS；生产代码检索无命中。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add spatial-browser-bridge.js src/atom-system/adapters/legacy-runtime-composition.mjs src/atom-system/public/interaction-runtime.mjs cli/lib/server.mjs work-engine/atom-language/graph-server.mjs docs/architecture/atom-capability-graph.json tests/browser-bridge-contract.test.js tests/atom-legacy-runtime-composition.test.mjs tests/atom-production-architecture.test.mjs tests/atom-system-boundaries.test.mjs

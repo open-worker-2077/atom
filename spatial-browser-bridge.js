@@ -258,6 +258,20 @@
 
   function reportPendingProjection(payload, persistenceId, operation) {
     const landing = ["node-land", "node-land-batch"].includes(operation?.kind);
+    if (landing && !payload?.knowledge && payload?.result?.ok === true && payload.result.changed === false) {
+      const nodes = operation.kind === "node-land-batch"
+        ? workspaceModel?.persistedBatchLandingNodes(operation, lastKnowledge) || []
+        : [workspaceModel?.persistedLandingNode(operation, lastKnowledge)].filter(Boolean);
+      const expected = operation.kind === "node-land-batch" ? operation.landings.length : 1;
+      if (!expected || nodes.length !== expected) {
+        throw new Error("落脚未改变事实，但当前权威投影无法确认目标，已恢复保存前状态");
+      }
+      document.body.dataset.spatialBridge = "connected";
+      reportPersistence("spatial-workspace-persisted", {
+        persistenceId, operation, knowledge: lastKnowledge, persistedNode: nodes[0]
+      });
+      return true;
+    }
     const awaitingLanding = landing && !payload?.knowledge && payload?.result?.ok === true
       && typeof payload.result.revisionAfter === "string";
     if (payload && payload.result && (payload.result.projectionStatus === "pending" || awaitingLanding)) {

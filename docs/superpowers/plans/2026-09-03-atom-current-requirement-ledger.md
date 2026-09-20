@@ -643,3 +643,7 @@
 - **2026-09-19 实施续点**：当前唯一执行顺序为`docs/superpowers/plans/2026-09-19-web-cli-single-command-spine.md`完成E3后，再执行`docs/superpowers/plans/2026-09-19-program-reference-index.md`完成E3。两份计划只展开本总账与既有规格中的当前定论，不建立平行需求源；目标模式只引用本总账，不复制目标详情。
 
 - **2026-09-20 Web→CLI单轨Task 4局部GREEN（I3/U3/D3/E3）**：Web创建、编辑、改名、移动、关系与删除已退出专属`workspace-edit`／`human-status`翻译入口，浏览器只把界面操作映射成规范Atom CLI文本，并以`source + interaction.id`进入共享`/web-command`运行时；服务端不再按`operation.kind`重建业务语义。原右键落脚期间无法返回上一层的根因也已修正：仅`node-land`／`node-land-batch`允许跨层导航，新增／编辑等其他事务继续阻断导航。最终受影响门禁为浏览器关键旅程11/11、四文件Node链86/86、浏览器构建、旧入口生产字符串缺席及diff检查全部通过；浏览器验收夹具已分离批量、导航保护与单节点搬移事实，避免测试间真实写入串扰。本项尚待Task 4提交复核以及Task 5同构性能、整仓候选、正式4784部署回读和精确远端检查，故E3仍开放。
+
+- **2026-09-20 Web→CLI单轨Task 4复核回修（I3/U3/D3/E3）**：独立复核确认同域单节点／批量落脚会由共享运行时正确返回`changed:false`且不产生新投影，但桥接层仍登记projection pending并要求空间revision严格增加，造成永久degraded。新增双路径RED均命中；当前改为仅在`changed:false`时以已加载的当前权威投影直接核对目标，核对成功立即确认持久化，核对失败则沿既有失败回滚，绝不等待不存在的新revision。定向单节点／批量回归2/2 GREEN；仍待受影响链、差异复核及Task 5 E3门禁。
+
+- **2026-09-20 Web→CLI单轨Task 4关闭**：回修后四文件受影响门禁88/88、浏览器构建和diff检查通过，build为`sha256-eed7f7a685ced618`；独立复核以真实双节点批量验证完整目标立即确认、缺失或重复目标均失败回滚，最终无Critical、Important或Minor。Task 4关闭，整体E3进入Task 5。
