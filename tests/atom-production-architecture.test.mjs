@@ -65,3 +65,16 @@ test('current production topology has no unregistered violations or temporary de
     []
   );
 });
+
+test('Web editing has one text command entry and no server-side UI translation', async () => {
+  const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+  for (const file of [
+    'cli/lib/server.mjs', 'work-engine/atom-language/graph-server.mjs',
+    'src/atom-system/adapters/legacy-runtime-composition.mjs',
+    'src/atom-system/public/interaction-runtime.mjs'
+  ]) {
+    const source = await fs.readFile(path.join(root, file), 'utf8');
+    assert.doesNotMatch(source, /atomWorkspaceEdit|atomHumanStatus|createLegacyHuman(?:Workspace|Status)Translator|updateHuman(?:Workspace|Status)/, file);
+    assert.doesNotMatch(source, /operation\??\.kind|humanGraphDocument|graphNodesByPath/, file);
+  }
+});

@@ -74,7 +74,7 @@
     },
     {
       "id": "workspace-edit", "name": "Web工作区编辑", "owner": "adapters", "status": "partial",
-      "purpose": "创建、编辑、移动、关联和删除节点，并逐操作提交而非定时覆盖。",
+      "purpose": "浏览器以权威投影映射创建、编辑、移动、关联和删除为规范 Atom CLI source，经 web-command 与 CLI 共用解析和提交链；服务端不翻译 UI operation。",
       "acceptance": [{ "kind": "adapter-test", "ref": "tests/browser-bridge-contract.test.js", "claim": "保存排队与权威回执有覆盖，真实浏览器操作链仍不闭合" }]
     },
     {

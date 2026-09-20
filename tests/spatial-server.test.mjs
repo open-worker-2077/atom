@@ -67,8 +67,6 @@ for (const terminalStatus of ['completed', 'failed']) {
     const projectionStarted = new Promise(resolve => { entered = resolve; });
     let calls = 0, activeSignal;
     const handlers = createAtomGraphHandlers({
-      updateHumanStatus() { throw new Error('unexpected status update'); },
-      updateHumanWorkspace() { throw new Error('unexpected workspace update'); },
       recover() { throw new Error('unexpected recovery'); },
       async execute(intent, { onCommitted, onSubsequentSettled, signal }) {
         calls += 1; activeSignal = signal;
@@ -142,7 +140,7 @@ test('Web node edit returns its committed source receipt without waiting for sub
   const instance = await createSpatialServer({
     root: path.resolve(import.meta.dirname, '..'),
     storeFile: path.join(directory, 'knowledge.json'),
-    async atomWorkspaceEdit(payload, { onCommitted }) {
+    async atomWebCommand(payload, { onCommitted }) {
       const source = {
         ok: true, changed: true, revisionAfter: 'source-revision',
         subsequentExecution: { status: 'pending' }
@@ -163,15 +161,11 @@ test('Web node edit returns its committed source receipt without waiting for sub
   });
   const origin = `http://127.0.0.1:${instance.server.address().port}`;
   const response = await Promise.race([
-    fetch(`${origin}/__atom/api/workspace-edit`, {
+    fetch(`${origin}/__atom/api/web-command`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        interactionId: 'web-local-receipt',
-        operation: {
-          kind: 'node-edit', path: 'root', nodeKey: 'root::a',
-          node: { id: 'a', key: 'root::a', path: 'root', atomPath: 'A' },
-          draft: { label: 'A', description: 'edited' }
-        }
+        interaction: { id: 'web-local-receipt' },
+        source: 'transform {"thing":"A","situation.rep.edited"}'
       })
     }),
     new Promise((_, reject) => setTimeout(() => reject(new Error('Web edit waited for subsequent work')), 200))
@@ -180,7 +174,7 @@ test('Web node edit returns its committed source receipt without waiting for sub
   assert.equal(response.status, 200, JSON.stringify(payload));
   assert.equal(payload.result.revisionAfter, 'source-revision');
   assert.equal(payload.result.subsequentExecution.status, 'pending');
-  assert.equal(payload.knowledge, null, 'one local edit must not await or import the whole Graph projection');
+  assert.equal(payload.knowledge, undefined, 'one local edit must not await or import the whole Graph projection');
 });
 
 test('Web node creation returns its committed source receipt without waiting for subsequent work or whole-Graph knowledge', async (context) => {
@@ -190,7 +184,7 @@ test('Web node creation returns its committed source receipt without waiting for
   const instance = await createSpatialServer({
     root: path.resolve(import.meta.dirname, '..'),
     storeFile: path.join(directory, 'knowledge.json'),
-    async atomWorkspaceEdit(payload, { onCommitted }) {
+    async atomWebCommand(payload, { onCommitted }) {
       const source = {
         ok: true, changed: true, revisionAfter: 'source-revision',
         subsequentExecution: { status: 'pending' }
@@ -211,15 +205,11 @@ test('Web node creation returns its committed source receipt without waiting for
   });
   const origin = `http://127.0.0.1:${instance.server.address().port}`;
   const response = await Promise.race([
-    fetch(`${origin}/__atom/api/workspace-edit`, {
+    fetch(`${origin}/__atom/api/web-command`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        interactionId: 'web-local-create-receipt',
-        operation: {
-          kind: 'node-create', parentPath: 'root',
-          node: { id: 'new', key: 'root::new', path: 'root', atomPath: 'New' },
-          draft: { label: 'New', description: 'created' }
-        }
+        interaction: { id: 'web-local-create-receipt' },
+        source: 'transform new {"thing":"New","situation":"created","slot":[],"strut":[]}'
       })
     }),
     new Promise((_, reject) => setTimeout(() => reject(new Error('Web creation waited for subsequent work')), 200))
@@ -228,7 +218,7 @@ test('Web node creation returns its committed source receipt without waiting for
   assert.equal(response.status, 200, JSON.stringify(payload));
   assert.equal(payload.result.revisionAfter, 'source-revision');
   assert.equal(payload.result.subsequentExecution.status, 'pending');
-  assert.equal(payload.knowledge, null, 'one local creation must not await or import the whole Graph projection');
+  assert.equal(payload.knowledge, undefined, 'one local creation must not await or import the whole Graph projection');
 });
 
 test('a still-running HTTP successor has its own observable timeout phase', async (context) => {

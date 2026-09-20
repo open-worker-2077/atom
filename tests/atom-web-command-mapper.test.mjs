@@ -3,6 +3,36 @@ import test from 'node:test';
 
 import { createBrowserCommandMapper } from '../src/atom-system/browser-command-mapper.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
+import { projectAtomGraphWithPaths } from '../work-engine/atom-language/graph-4d-projection.mjs';
+import { projectAtomContext } from '../work-engine/atom-language/context-store.mjs';
+
+test('creation inside the synthetic world container compiles a top-level Atom command', async () => {
+  const { knowledge } = await projectAtomGraphWithPaths(projectAtomContext([
+    { thing: 'Existing', situation: '', slot: [], strut: [] }
+  ]));
+  const root = knowledge.nodes.find(node => node.path === 'root');
+  const mapper = createBrowserCommandMapper();
+  mapper.replaceKnowledge(knowledge);
+  assert.equal(mapper.compile({ kind: 'node-create', path: spatialChildPath(root),
+    draft: { label: 'New', description: 'saved' }
+  }).source, 'transform new {"thing":"New","situation":"saved","slot":[],"strut":[]}');
+});
+
+test('container mapping follows projection coordinates instead of the atom.json display name', () => {
+  const mapper = createBrowserCommandMapper();
+  const root = { key: 'root::carrier', id: 'carrier', path: 'root', label: 'Renamed file carrier' };
+  const real = { key: 'root::real', id: 'real', path: 'root', label: 'atom.json', atomPath: 'Actual container' };
+  const create = path => mapper.compile({ kind: 'node-create', path, draft: { label: 'New' } }).source;
+  mapper.replaceKnowledge({ nodes: [root] });
+  assert.equal(JSON.parse(create(spatialChildPath(root)).slice('transform new '.length)).thing, 'New');
+  mapper.replaceKnowledge({ nodes: [real] });
+  assert.equal(JSON.parse(create(spatialChildPath(real)).slice('transform new '.length)).thing, 'Actual container/New');
+  mapper.replaceKnowledge({ nodes: [root, real] });
+  assert.throws(() => create(spatialChildPath(root)), { code: 'WEB_COMMAND_TARGET_UNRESOLVED' });
+  const nested = { ...root, path: 'root/nested', label: 'atom.json' };
+  mapper.replaceKnowledge({ nodes: [real, nested] });
+  assert.throws(() => create(spatialChildPath(nested)), { code: 'WEB_COMMAND_TARGET_UNRESOLVED' });
+});
 
 function spatialChildPath(node) {
   let hash = 2166136261;

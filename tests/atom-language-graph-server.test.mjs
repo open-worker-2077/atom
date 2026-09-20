@@ -72,18 +72,9 @@ test('Atom runtime keeps an already normal or higher own-process priority', () =
 
 test('Atom HTTP handlers translate transport payloads into one interaction runtime', async () => {
   const calls = [];
-  const workspaceCommitted = () => {};
   const handlers = createAtomGraphHandlers({
     execute: async (intent, lifecycle) => {
       calls.push(['execute', intent, lifecycle]);
-      return { ok: true, command: 'transform' };
-    },
-    updateHumanStatus: async (intent) => {
-      calls.push(['human-status', intent]);
-      return { ok: true, command: 'transform' };
-    },
-    updateHumanWorkspace: async (intent, lifecycle) => {
-      calls.push(['human-workspace', intent, lifecycle]);
       return { ok: true, command: 'transform' };
     },
     recover: async (intent) => {
@@ -97,15 +88,7 @@ test('Atom HTTP handlers translate transport payloads into one interaction runti
     interaction: { id: 'interaction-1', agent: { ref: 'old-ref', path: 'Root/Sol' } },
     history: []
   });
-  await handlers.atomHumanStatus({
-    key: 'node-key',
-    detail: '进行中',
-    interactionId: 'interaction-2'
-  });
-  await handlers.atomWorkspaceEdit({
-    operation: { kind: 'node-create', path: 'root', draft: { label: 'New' } },
-    interactionId: 'interaction-3'
-  }, { onCommitted: workspaceCommitted, signal: 'workspace-signal' });
+  await handlers.atomWebCommand({ source: 'transform {}', interaction: { id: 'interaction-2' } });
   await handlers.atomProjectionRecover({ expectedRevision: 'rev-2' });
 
   assert.deepEqual(calls, [
@@ -115,15 +98,8 @@ test('Atom HTTP handlers translate transport payloads into one interaction runti
       agentPath: 'Root/Sol',
       history: []
     }, { origin: 'cli' }],
-    ['human-status', {
-      key: 'node-key',
-      detail: '进行中',
-      correlationId: 'interaction-2'
-    }],
-    ['human-workspace', {
-      operation: { kind: 'node-create', path: 'root', draft: { label: 'New' } },
-      correlationId: 'interaction-3'
-    }, { onCommitted: workspaceCommitted, signal: 'workspace-signal' }],
+    ['execute', { source: 'transform {}', correlationId: 'interaction-2', history: [] },
+      { origin: 'web', humanAuthority: true, programMode: 'reconcile' }],
     ['recover-projection', { expectedRevision: 'rev-2' }]
   ]);
 });
@@ -135,8 +111,6 @@ test('Web text handler fixes trusted authority independently of client-shaped fi
       calls.push([intent, options]);
       return { ok: true, command: 'transform', changed: false };
     },
-    async updateHumanStatus() {},
-    async updateHumanWorkspace() {},
     async recover() {}
   });
 
@@ -167,8 +141,6 @@ test('Web text handler preserves AbortSignal and both shared lifecycle callbacks
       });
       return { ok: true, changed: true, revisionAfter: 'final' };
     },
-    async updateHumanStatus() {},
-    async updateHumanWorkspace() {},
     async recover() {}
   });
   const controller = new AbortController();
@@ -525,9 +497,7 @@ test('Web create then edit resolves accepted memory while save and Graph publica
       headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
     return { status: response.status, body: await response.json() };
   };
-  const created = await post('/__atom/api/workspace-edit', { interactionId: 'web-create',
-    operation: { kind: 'node-create', path: 'root', parentAtomPath: '石器工坊',
-      draft: { label: '新工具', description: '初稿' } } });
+  const created = await post('/__atom/api/web-command', { interaction: { id: 'web-create' }, source: 'transform new {"thing":"石器工坊/新工具","situation":"初稿","slot":[],"strut":[]}' });
   assert.equal(created.status, 200, JSON.stringify(created.body));
   assert.equal(created.body.result.ok, true, JSON.stringify(created.body));
   assert.equal(created.body.result.saveState.pending, true);
@@ -536,9 +506,7 @@ test('Web create then edit resolves accepted memory while save and Graph publica
 
   const node = { id: 'created-locally', key: 'root::created-locally', path: 'root',
     atomPath: '石器工坊/新工具', label: '新工具' };
-  const edited = await post('/__atom/api/workspace-edit', { interactionId: 'web-edit-created',
-    operation: { kind: 'node-edit', path: node.path, nodeKey: node.key, node,
-      draft: { label: '新工具', description: '已编辑', atomTypes: [] } } });
+  const edited = await post('/__atom/api/web-command', { interaction: { id: 'web-edit-created' }, source: 'transform {"thing":"石器工坊/新工具","situation.rep.已编辑"}' });
   assert.equal(edited.status, 200, JSON.stringify(edited.body));
   assert.equal(edited.body.result.ok, true, JSON.stringify(edited.body));
   const read = await post('/__atom/api/command', { source: 'explore {"thing":"石器工坊/新工具","situation$full":true}',
@@ -546,11 +514,11 @@ test('Web create then edit resolves accepted memory while save and Graph publica
   assert.equal(read.status, 200, JSON.stringify(read.body));
   assert.match(JSON.stringify(read.body), /已编辑/u);
   assert.equal((await fs.readFile(graphFile, 'utf8')).includes('新工具'), false);
-  const mismatched = await post('/__atom/api/workspace-edit', { interactionId: 'web-mismatched-node-key',
-    operation: { kind: 'node-edit', path: node.path, nodeKey: 'root::different-node', node,
-      draft: { label: '新工具', description: '不得写入', atomTypes: [] } } });
-  assert.equal(mismatched.status, 400, JSON.stringify(mismatched.body));
-  assert.equal(mismatched.body.error.code, 'INVALID_HUMAN_WORKSPACE_REQUEST');
+  for (const route of ['/__atom/api/workspace-edit', '/__atom/api/human-status']) {
+    const retired = await post(route, { operation: { kind: 'node-edit' } });
+    assert.equal(retired.status, 405);
+    assert.equal(retired.body.error.code, 'METHOD_NOT_ALLOWED');
+  }
 });
 
 test('Web relation edits preserve relations accepted after the last Graph publication', async (t) => {
@@ -583,8 +551,7 @@ test('Web relation edits preserve relations accepted after the last Graph public
   };
   const source = node('石器工坊/关系源');
   for (const [target, id] of [[node('石器工坊/备用目标'), 'relation-b'], [node('石器工坊/追加目标'), 'relation-c']]) {
-    const response = await post('/__atom/api/workspace-edit', { interactionId: id,
-      operation: { kind: 'edge-create', source, target } });
+    const response = await post('/__atom/api/web-command', { interaction: { id }, source: 'transform ' + JSON.stringify({ thing: source.atomPath, 'strut.add.': { thing: target.atomPath } }) });
     assert.equal(response.status, 200, JSON.stringify(response.body));
     assert.equal(response.body.result.ok, true, JSON.stringify(response.body));
   }
@@ -620,15 +587,11 @@ for (const memoryAuthoritative of [true, false]) {
         headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
       return { status: response.status, body: await response.json() };
     };
-    const renamed = await post('/__atom/api/workspace-edit', { interactionId: 'web-rename',
-      operation: { kind: 'node-edit', path: original.path, nodeKey: original.key, node: original,
-        draft: { label: '新石斧', description: '改名', atomTypes: [] } } });
+    const renamed = await post('/__atom/api/web-command', { interaction: { id: 'web-rename' }, source: 'transform {"thing.ren.新石斧":"石器工坊/石斧","situation.rep.改名"}' });
     assert.equal(renamed.status, 200, JSON.stringify(renamed.body));
     assert.equal(renamed.body.result.ok, true, JSON.stringify(renamed.body));
     const current = { ...original, atomPath: '石器工坊/新石斧', label: '新石斧' };
-    const edited = await post('/__atom/api/workspace-edit', { interactionId: 'web-edit-renamed',
-      operation: { kind: 'node-edit', path: current.path, nodeKey: current.key, node: current,
-        draft: { label: '新石斧', description: '二次编辑', atomTypes: [] } } });
+    const edited = await post('/__atom/api/web-command', { interaction: { id: 'web-edit-renamed' }, source: 'transform {"thing":"石器工坊/新石斧","situation.rep.二次编辑"}' });
     assert.equal(edited.status, 200, JSON.stringify(edited.body));
     assert.equal(edited.body.result.ok, true, JSON.stringify(edited.body));
     const read = await post('/__atom/api/command', { source: 'explore {"thing":"石器工坊/新石斧","situation$full":true}',
@@ -662,18 +625,16 @@ test('Web status rejects a deleted current-memory target despite the stale Graph
       headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
     return { status: response.status, body: await response.json() };
   };
-  const removed = await post('/__atom/api/workspace-edit', { interactionId: 'web-delete-status',
-    operation: { kind: 'node-edit', status: 'delete', path: statusNode.path,
-      nodeKey: statusNode.key, node: statusNode } });
+  const removed = await post('/__atom/api/web-command', { interaction: { id: 'web-delete-status' }, source: 'transform {"thing.dsc.":"石器工坊/状态"}' });
   assert.equal(removed.status, 200, JSON.stringify(removed.body));
   assert.equal(removed.body.result.ok, true, JSON.stringify(removed.body));
-  const update = await post('/__atom/api/human-status', { key: statusNode.key,
-    detail: '已完成', interactionId: 'web-stale-status' });
-  assert.equal(update.status, 400, JSON.stringify(update.body));
-  assert.equal(update.body.error.code, 'INVALID_HUMAN_STATUS_REQUEST');
+  const update = await post('/__atom/api/web-command', { interaction: { id: 'web-stale-status' }, source: 'transform {"thing":"石器工坊/状态","situation.rep.已完成"}' });
+  assert.equal(update.status, 200, JSON.stringify(update.body));
+  assert.equal(update.body.result.ok, false);
+  assert.ok(update.body.result.errors.length > 0);
 });
 
-test('public human status rejects conflicting current-memory key and atomPath', async (t) => {
+test('the interaction runtime exposes no former status or workspace translation methods', async (t) => {
   const directory = await temporaryDirectory();
   t.diagnostic(`Retained synthetic fixture: ${directory}`);
   const contextFile = path.join(directory, 'atom.json');
@@ -693,11 +654,8 @@ test('public human status rejects conflicting current-memory key and atomPath', 
   const state = await (await fetch(`${running.url}/__spatial/api/state`)).json();
   const keyForB = state.knowledge.nodes.find((node) => node.atomPath === '石器工坊/B/状态')?.key;
   assert.ok(keyForB);
-  await assert.rejects(
-    running.interactionRuntime.updateHumanStatus({ key: keyForB,
-      atomPath: '石器工坊/A/状态', detail: '已完成', correlationId: 'status-conflict' }),
-    (error) => error.code === 'INVALID_HUMAN_STATUS_REQUEST'
-  );
+  assert.equal(running.interactionRuntime.updateHumanStatus, undefined);
+  assert.equal(running.interactionRuntime.updateHumanWorkspace, undefined);
   const read = await fetch(`${running.url}/__atom/api/command`, { method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ source: 'explore {"thing":"石器工坊/B/状态","situation$full":true}',
@@ -775,8 +733,6 @@ test('4784 resolves an Agent selector inside the resident world instead of every
       calls.push(intent);
       return { ok: true, command: 'explore' };
     },
-    updateHumanStatus: async () => ({}),
-    updateHumanWorkspace: async () => ({}),
     recover: async () => ({})
   }, {
     resolveAgent: async (selector) => ({
@@ -951,8 +907,6 @@ test('graph server remains available and reports degraded health when only a dis
       };
     },
     async execute() { return { ok: true, changed: false }; },
-    async updateHumanStatus() { return { ok: true, changed: false }; },
-    async updateHumanWorkspace() { return { ok: true, changed: false }; },
     async recover() { return { sourceRevision: 'rev-2' }; },
     projectionStatus() { return structuredClone(projectionState); }
   };
@@ -996,8 +950,6 @@ test('ready graph server serves production-scale local state from its resident s
   const interactionRuntime = {
     async initialize() { return { initialization: { ok: true, changed: false } }; },
     async execute() { return { ok: true, changed: false }; },
-    async updateHumanStatus() { return { ok: true, changed: false }; },
-    async updateHumanWorkspace() { return { ok: true, changed: false }; },
     async recover() { return { sourceRevision: 'revision' }; },
     projectionStatus() { return { status: 'published' }; }
   };
@@ -1123,8 +1075,6 @@ test('independent explore requests execute concurrently against one initialized 
       active -= 1;
       return { ok: true, command: 'explore', changed: false, items: [], errors: [], warnings: [] };
     },
-    async updateHumanStatus() { return { ok: true, changed: false }; },
-    async updateHumanWorkspace() { return { ok: true, changed: false }; },
     async recover() { return { sourceRevision: 'revision' }; },
     projectionStatus() { return { status: 'published' }; }
   };
@@ -1170,8 +1120,6 @@ test('hung Atom interaction does not block an independent explore', async (t) =>
       }
       return { ok: true, command: 'explore', changed: false, items: [{ thing: 'Root' }] };
     },
-    async updateHumanStatus() { return { ok: true, changed: false }; },
-    async updateHumanWorkspace() { return { ok: true, changed: false }; },
     async recover() { return { sourceRevision: 'revision' }; },
     projectionStatus() { return { status: 'published' }; }
   };
@@ -1234,8 +1182,6 @@ test('hung Atom interaction does not block an independent transform', async (t) 
       }
       return { ok: true, command: 'transform', changed: false };
     },
-    async updateHumanStatus() { return { ok: true, changed: false }; },
-    async updateHumanWorkspace() { return { ok: true, changed: false }; },
     async recover() { return { sourceRevision: 'revision' }; },
     projectionStatus() { return { status: 'published' }; }
   };
@@ -1292,8 +1238,6 @@ test('hung Atom interaction reaches its own timeout without affecting later requ
       }
       return { ok: true, command: 'explore', changed: false, items: [] };
     },
-    async updateHumanStatus() { return { ok: true, changed: false }; },
-    async updateHumanWorkspace() { return { ok: true, changed: false }; },
     async recover() { return { sourceRevision: 'revision' }; },
     projectionStatus() { return { status: 'published' }; }
   };
@@ -1355,8 +1299,6 @@ test('duplicate HTTP requests with one interaction id execute one authoritative 
       await blocked;
       return { ...committed, projectionStatus: 'published' };
     },
-    async updateHumanStatus() { return { ok: true, changed: false }; },
-    async updateHumanWorkspace() { return { ok: true, changed: false }; },
     async recover() { return { sourceRevision: 'revision' }; },
     projectionStatus() { return { status: 'published' }; }
   };

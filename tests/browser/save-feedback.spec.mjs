@@ -11,6 +11,7 @@ async function holdRightTarget(page, label) {
 }
 
 async function openEditableWorld(page) {
+  await page.request.put('/__spatial/api/view', { data: { view: null } });
   await page.goto('/');
   await page.waitForFunction(() => (
     document.body.dataset.spatialBridge === 'connected'
@@ -51,7 +52,7 @@ function deferred() {
 test('mobile Save gives visible in-progress feedback within five seconds and reports success', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const responseGate = deferred();
-  await page.route('**/__atom/api/workspace-edit', async (route) => {
+  await page.route('**/__atom/api/web-command', async (route) => {
     await responseGate.promise;
     const response = await route.fetch();
     const payload = await response.json();
@@ -91,7 +92,7 @@ test('mobile Save gives visible in-progress feedback within five seconds and rep
 test('desktop Save reports a visible persistence failure without blocking the workspace', async ({ page }) => {
   test.setTimeout(60_000);
   const responseGate = deferred();
-  await page.route('**/__atom/api/workspace-edit', async (route) => {
+  await page.route('**/__atom/api/web-command', async (route) => {
     await responseGate.promise;
     await route.fulfill({
       status: 200,
@@ -119,7 +120,7 @@ test('desktop Save reports a visible persistence failure without blocking the wo
 test('projection-pending feedback stays truthful when an older receipt arrives later', async ({ page }) => {
   test.setTimeout(60_000);
   const responseGate = deferred();
-  await page.route('**/__atom/api/workspace-edit', async (route) => {
+  await page.route('**/__atom/api/web-command', async (route) => {
     await responseGate.promise;
     await route.fulfill({
       status: 200,

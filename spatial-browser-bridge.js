@@ -53,6 +53,7 @@
   let pullCompletion = Promise.resolve();
   let pushing = false;
   const queuedCommits = [];
+  const pendingLandings = new Map();
   let bossMode = false;
   let atomWorkspace = false;
   let lastKnowledge = null;
@@ -76,6 +77,8 @@
   let presentationSettingsDelivery = Promise.resolve();
   const loadedPaths = new Set();
   const workspaceModel = global.SpatialWorkspaceModel;
+  const commandMapper = global.AtomSpatialScene?.createBrowserCommandMapper();
+  commandMapper?.replaceKnowledge(null);
 
   function setInitialLoadProgress(stage, value) {
     if (!(stage in initialLoadProgress)) return;
@@ -146,6 +149,10 @@
     return [...new Set([
       fallbackPath,
       view && view.path,
+      ...[...pendingLandings.values()].flatMap(({ operation }) => (
+        (operation.kind === "node-land-batch" ? operation.landings : [operation])
+          .flatMap((landing) => [landing.source?.path || landing.sourceNode?.path, landing.target?.path])
+      )),
       ...(Array.isArray(view && view.expandedPaths) ? view.expandedPaths : [])
     ].filter((path) => typeof path === "string" && path.trim()))];
   }
@@ -250,7 +257,13 @@
   }
 
   function reportPendingProjection(payload, persistenceId, operation) {
-    if (payload && payload.result && payload.result.projectionStatus === "pending") {
+    const landing = ["node-land", "node-land-batch"].includes(operation?.kind);
+    const awaitingLanding = landing && !payload?.knowledge && payload?.result?.ok === true
+      && typeof payload.result.revisionAfter === "string";
+    if (payload && payload.result && (payload.result.projectionStatus === "pending" || awaitingLanding)) {
+      if (landing) pendingLandings.set(persistenceId, {
+        operation, previousKnowledge: lastKnowledge, revision, epoch: workspaceOperationEpoch
+      });
       document.body.dataset.spatialBridge = "degraded";
       reportPersistence("spatial-workspace-projection-pending", {
         persistenceId,
@@ -261,6 +274,25 @@
       return true;
     }
     return false;
+  }
+
+  function reconciledLandings(knowledge) {
+    const reconciled = [];
+    for (const [persistenceId, entry] of pendingLandings) {
+      if (Number(knowledge?.revision) <= entry.revision) continue;
+      if (entry.epoch !== workspaceOperationEpoch) {
+        pendingLandings.delete(persistenceId);
+        continue;
+      }
+      const { operation } = entry;
+      const nodes = operation.kind === "node-land-batch"
+        ? workspaceModel?.persistedBatchLandingNodes(operation, knowledge)
+        : [workspaceModel?.persistedLandingNode(operation, knowledge)].filter(Boolean);
+      const expected = operation.kind === "node-land-batch" ? operation.landings.length : 1;
+      if (!expected || nodes?.length !== expected) continue;
+      reconciled.push({ ...entry, persistenceId, persistedNode: nodes[0] });
+    }
+    return reconciled;
   }
 
   async function request(path, options) {
@@ -515,7 +547,7 @@
     const source = `transform ${JSON.stringify({
       [`thing$${detail.action}${suffix}`]: detail.targetPath
     })}`;
-    const response = await global.fetch("/__atom/api/command", {
+    const response = await global.fetch("/__atom/api/web-command", {
       method: "POST",
       cache: "no-store",
       headers: { "content-type": "application/json" },
@@ -607,8 +639,17 @@
           lastKnowledge = null;
         }
         const knowledge = scopedPath ? mergeScopedKnowledge(lastKnowledge, incoming) : incoming;
-        if (!lab.importKnowledge(knowledge, {
-          preserveTransaction: allowDuringTransaction && lab.state().transactionActive === true
+        const reconciled = reconciledLandings(knowledge);
+        const unresolvedCurrentLanding = [...pendingLandings.entries()].some(([id, entry]) => (
+          entry.epoch === workspaceOperationEpoch && !reconciled.some(({ persistenceId }) => persistenceId === id)
+        ));
+        const currentLanding = reconciled.find((entry) => entry.epoch === workspaceOperationEpoch);
+        const identityTransitions = currentLanding && workspaceModel?.operationIdentityTransitions
+          ? workspaceModel.operationIdentityTransitions(currentLanding.operation, knowledge,
+            currentLanding.previousKnowledge, currentLanding.persistedNode) : [];
+        if (!unresolvedCurrentLanding && !lab.importKnowledge(knowledge, {
+          preserveTransaction: allowDuringTransaction && lab.state().transactionActive === true,
+          identityTransitions
         })) return false;
         if (
           unseenScope
@@ -625,8 +666,16 @@
         }
         revision = incomingRevision;
         lastKnowledge = knowledge;
+        commandMapper?.replaceKnowledge(lastKnowledge);
         refreshedScopes.forEach((path) => loadedPaths.add(path));
         document.body.dataset.spatialKnowledge = "authoritative";
+        for (const entry of reconciled) {
+          pendingLandings.delete(entry.persistenceId);
+          if (entry.epoch === workspaceOperationEpoch) reportPersistence("spatial-workspace-persisted", {
+            persistenceId: entry.persistenceId, operation: entry.operation, knowledge,
+            persistedNode: entry.persistedNode
+          });
+        }
       }
       if (initialLoad) {
         await nextVisualFrame();
@@ -718,70 +767,14 @@
     }
     pushing = true;
     try {
-      if (operation && operation.kind === "node-create") {
-        const previousKnowledge = lastKnowledge;
-        const response = await global.fetch('/__atom/api/workspace-edit', {
-          method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ operation })
-        });
-        const payload = await response.json();
-        if (!response.ok || payload.ok === false || payload.result?.ok === false) {
-          throw new Error(payload.error?.message || payload.result?.errors?.[0]?.message || 'Atom workspace edit failed');
-        }
-        if (reportPendingProjection(payload, persistenceId, operation)) return true;
-        const persistedNode = reconcileCreatedNode(operation, payload.knowledge, previousKnowledge);
-        if (payload.knowledge) {
-          lastKnowledge = payload.knowledge;
-          revision = Number(payload.knowledge.revision) || revision;
-          if (!hasQueuedWorkspaceCommit()) {
-            importOperationKnowledge(payload.knowledge, operation, previousKnowledge, persistedNode);
-          }
-        }
-        document.body.dataset.spatialBridge = "connected";
-        reportPersistence("spatial-workspace-persisted", {
-          persistenceId, operation, knowledge: payload.knowledge, persistedNode
-        });
-        return true;
-      }
-      const previousByKey = new Map(((lastKnowledge && lastKnowledge.nodes) || [])
-        .map((node) => [node.key, node]));
-      const statusChanges = (Array.isArray(knowledge && knowledge.nodes) ? knowledge.nodes : [])
-        .filter((node) => {
-          const previous = previousByKey.get(node.key);
-          return node.label === "状态"
-            && previous && previous.detail !== node.detail;
-        });
-      if (statusChanges.length) {
-        let latest = null;
-        for (const node of statusChanges) {
-          const response = await global.fetch('/__atom/api/human-status', {
-            method: 'POST',
-            cache: 'no-store',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ key: node.key, atomPath: node.atomPath, detail: node.detail })
-          });
-          latest = await response.json();
-          if (!response.ok || latest.ok === false || latest.result?.ok === false) {
-            throw new Error(latest.error?.message || latest.result?.errors?.[0]?.message || 'Atom status update failed');
-          }
-        }
-        if (reportPendingProjection(latest, persistenceId, operation)) return true;
-        if (latest && latest.knowledge) {
-          lastKnowledge = latest.knowledge;
-          revision = Number(latest.knowledge.revision) || revision;
-          if (!hasQueuedWorkspaceCommit()) lab.importKnowledge(latest.knowledge);
-        }
-        document.body.dataset.spatialBridge = "connected";
-        reportPersistence("spatial-workspace-persisted", {
-          persistenceId, operation, knowledge: latest && latest.knowledge
-        });
-        return true;
-      }
       if (operation) {
         const previousKnowledge = lastKnowledge;
-        const response = await global.fetch('/__atom/api/workspace-edit', {
+        const command = commandMapper.compile(operation);
+        const response = await global.fetch('/__atom/api/web-command', {
           method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ operation })
+          body: JSON.stringify({ source: command.source, interaction: {
+            id: `web-edit-${Date.now()}-${transformActionSequence += 1}`
+          } })
         });
         const payload = await response.json();
         if (!response.ok || payload.ok === false || payload.result?.ok === false) {
@@ -802,12 +795,15 @@
           && workspaceModel
           && typeof workspaceModel.persistedLandingNode === "function"
           ? workspaceModel.persistedLandingNode(operation, payload.knowledge)
-          : reconcileEditedNode(operation, payload.knowledge, previousKnowledge);
+          : operation.kind === "node-create"
+            ? reconcileCreatedNode(operation, payload.knowledge, previousKnowledge)
+            : reconcileEditedNode(operation, payload.knowledge, previousKnowledge);
         if (operation.kind === "node-land" && !persistedNode) {
           throw new Error("单节点移动未完成：目标必须恰有一份且来源必须为零，已恢复保存前状态");
         }
         if (payload.knowledge) {
           lastKnowledge = payload.knowledge;
+          commandMapper?.replaceKnowledge(lastKnowledge);
           revision = Number(payload.knowledge.revision) || revision;
           if (!hasQueuedWorkspaceCommit()) {
             importOperationKnowledge(payload.knowledge, operation, previousKnowledge, persistedNode);
@@ -839,9 +835,11 @@
         const beforeKeys = JSON.stringify((knowledge.nodes || []).map((node) => node.key));
         const afterKeys = JSON.stringify((persisted.nodes || []).map((node) => node.key));
         lastKnowledge = persisted;
+        commandMapper?.replaceKnowledge(lastKnowledge);
         if (beforeKeys !== afterKeys) lab.importKnowledge(persisted);
       } else {
         lastKnowledge = knowledge;
+        commandMapper?.replaceKnowledge(lastKnowledge);
       }
       document.body.dataset.spatialBridge = "connected";
       return true;
@@ -926,6 +924,7 @@
       if (payload.knowledge) {
         lab.importKnowledge(payload.knowledge);
         lastKnowledge = payload.knowledge;
+        commandMapper?.replaceKnowledge(lastKnowledge);
         revision = Number(payload.knowledge.revision) || revision;
       }
       document.body.dataset.spatialBridge = "connected";

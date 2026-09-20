@@ -4,7 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.join(__dirname, '..', 'spatial-browser-bridge.js'), 'utf8');
+const mapperSource = fs.readFileSync(path.join(__dirname, '..', 'src/atom-system/browser-command-mapper.mjs'), 'utf8');
+const source = mapperSource.replace('export function createBrowserCommandMapper', 'function createBrowserCommandMapper')
+  + '\nwindow.AtomSpatialScene = { createBrowserCommandMapper };\n'
+  + fs.readFileSync(path.join(__dirname, '..', 'spatial-browser-bridge.js'), 'utf8');
 const workspaceModelSource = fs.readFileSync(path.join(__dirname, '..', 'spatial-workspace-model.js'), 'utf8');
 
 function installWorkspaceModel(window) {
@@ -143,7 +146,7 @@ test('Atom Web reports semantic persistence confirmation and failure instead of 
         if (url.includes('/state') && !options.method) {
           return response({ knowledge: { revision: 1, nodes: [{ key: 'root::a', atomPath: 'A' }] } });
         }
-        if (url.endsWith('/workspace-edit')) {
+        if (url.endsWith('/web-command')) {
           return succeeds
             ? response({ result: { ok: true }, knowledge: { revision: 2, nodes: [] } })
             : response({ ok: false, error: { message: 'write rejected' } }, false);
@@ -172,7 +175,7 @@ test('Atom Web reports semantic persistence confirmation and failure instead of 
   }
 });
 
-test('service-backed node edits persist when the optimized commit omits the whole knowledge snapshot', async () => {
+test('service-backed imported node edits use atomPath when the optimized commit omits identity and knowledge', async () => {
   const listeners = new Map();
   const lifecycle = [];
   const requests = [];
@@ -200,7 +203,7 @@ test('service-backed node edits persist when the optimized commit omits the whol
     fetch: async (url, options = {}) => {
       if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
       if (url.includes('/state') && !options.method) return response({ knowledge: previousKnowledge });
-      if (url.endsWith('/workspace-edit')) {
+      if (url.endsWith('/web-command')) {
         requests.push(JSON.parse(options.body));
         return response({ result: { ok: true }, knowledge: persistedKnowledge });
       }
@@ -216,8 +219,7 @@ test('service-backed node edits persist when the optimized commit omits the whol
 
   const operation = {
     kind: 'node-edit',
-    nodeKey: 'root::a',
-    node: previousKnowledge.nodes[0],
+    node: { atomPath: 'A' },
     draft: { label: 'A', description: 'after' }
   };
   const result = await listeners.get('spatial-workspace-committed')({
@@ -225,7 +227,10 @@ test('service-backed node edits persist when the optimized commit omits the whol
   });
 
   assert.equal(result, true);
-  assert.deepEqual(requests, [{ operation }]);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].source, 'transform {"thing":"A","situation.rep.after"}');
+  assert.deepEqual(Object.keys(requests[0]).sort(), ['interaction', 'source']);
+  assert.deepEqual(Object.keys(requests[0].interaction), ['id']);
   assert.equal(lifecycle.length, 1);
   assert.equal(lifecycle[0].type, 'spatial-workspace-persisted');
   assert.equal(lifecycle[0].detail.persistenceId, 18);
@@ -284,7 +289,7 @@ test('human status persistence reports the matching terminal receipt without tur
       fetch: async (url, options = {}) => {
         if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
         if (url.includes('/state') && !options.method) return response({ knowledge: previousKnowledge });
-        if (url.endsWith('/human-status')) return response(scenario.payload, scenario.responseOk);
+        if (url.endsWith('/web-command')) return response(scenario.payload, scenario.responseOk);
         return response({ result: {} });
       },
       addEventListener: (name, listener) => listeners.set(name, listener),
@@ -691,7 +696,7 @@ test('Atom Web reports committed facts with a pending projection without claimin
       if (url.includes('/state') && !options.method) {
         return response({ knowledge: { revision: 1, nodes: [{ key: 'root::a', atomPath: 'A' }] } });
       }
-      if (url.endsWith('/workspace-edit')) {
+      if (url.endsWith('/web-command')) {
         return response({
           result: {
             ok: true,
@@ -736,6 +741,7 @@ test('http bridge preserves the semantic operation when a structural commit is q
   const listeners = new Map();
   const requests = [];
   const imports = [];
+  const nodes = [{ key: 'root::a', atomPath: 'A' }, { key: 'root::b', atomPath: 'B' }, { id: 'target', key: 'root::target', path: 'root', atomPath: 'Target', label: 'Target' }];
   let releaseFirst;
   const response = (payload) => ({ ok: true, json: async () => payload });
   const document = { body: { dataset: {} }, hidden: false };
@@ -749,11 +755,11 @@ test('http bridge preserves the semantic operation when a structural commit is q
     fetch: async (url, options = {}) => {
       requests.push([url, options]);
       if (url.endsWith('/health')) return response({ mode: 'single' });
-      if (url.includes('/state') && !options.method) return response({ knowledge: { revision: 1, nodes: [] } });
-      if (url.endsWith('/workspace-edit')) {
+      if (url.includes('/state') && !options.method) return response({ knowledge: { revision: 1, nodes } });
+      if (url.endsWith('/web-command')) {
         if (!releaseFirst) {
           return new Promise((resolve) => {
-            releaseFirst = () => resolve(response({ ok: true, knowledge: { revision: 2, nodes: [{ label: 'older confirmation' }] } }));
+            releaseFirst = () => resolve(response({ ok: true, knowledge: { revision: 2, nodes } }));
           });
         }
         return response({
@@ -761,7 +767,7 @@ test('http bridge preserves the semantic operation when a structural commit is q
           knowledge: {
             revision: 3,
             nodes: [{
-              id: 'moved-b', key: 'root/doubtful::moved-b', path: 'root/doubtful',
+              id: 'moved-b', key: 'root/dz7ako::moved-b', path: 'root/dz7ako',
               label: 'latest confirmation'
             }]
           }
@@ -779,14 +785,14 @@ test('http bridge preserves the semantic operation when a structural commit is q
 
   const committed = listeners.get('spatial-workspace-committed');
   const first = committed({ detail: {
-    operation: { kind: 'node-edit', nodeKey: 'root::a', draft: { label: 'A' } },
+    operation: { kind: 'node-edit', nodeKey: 'root::a', node: { atomPath: 'A' }, draft: { label: 'A' } },
     knowledge: { revision: 1, nodes: [] }
   } });
   await Promise.resolve();
   committed({ detail: {
     operation: {
       kind: 'node-land', source: { key: 'root::b', path: 'root' },
-      target: { path: 'root/doubtful' }, draft: { label: 'latest confirmation' }
+      target: { path: 'root/dz7ako' }, draft: { label: 'latest confirmation' }
     },
     knowledge: { revision: 1, nodes: [] }
   } });
@@ -795,11 +801,11 @@ test('http bridge preserves the semantic operation when a structural commit is q
   assert.equal(imports.length, 0, 'an older confirmation must not overwrite a newer optimistic edit');
   await new Promise((resolve) => setImmediate(resolve));
 
-  const workspaceRequests = requests.filter(([url]) => url.endsWith('/workspace-edit'));
+  const workspaceRequests = requests.filter(([url]) => url.endsWith('/web-command'));
   assert.equal(workspaceRequests.length, 2);
   assert.equal(imports.length, 1);
   assert.equal(imports[0].nodes[0].label, 'latest confirmation');
-  assert.equal(JSON.parse(workspaceRequests[1][1].body).operation.kind, 'node-land');
+  assert.equal(JSON.parse(workspaceRequests[1][1].body).source, 'transform {"thing.mov.Target":"B"}');
   assert.equal(requests.some(([url, options]) => url.includes('/state') && options.method === 'PUT'), false);
 });
 
@@ -819,13 +825,13 @@ test('a queued view save never prevents the latest authoritative move projection
     fetch: async (url, options = {}) => {
       if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
       if (url.includes('/state') && !options.method) {
-        return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
+        return response({ knowledge: { revision: 1, nodes: [{ key: 'root::old-id', atomPath: '网络' }, { id: 'target', key: 'root::target', path: 'root', atomPath: 'Target', label: 'Target' }], edges: [] } });
       }
-      if (url.endsWith('/workspace-edit')) {
+      if (url.endsWith('/web-command')) {
         return new Promise((resolve) => {
           releaseMove = () => resolve(response({
             result: { ok: true },
-            knowledge: { revision: 2, nodes: [{ id: 'new-id', path: 'root/waiting', label: '网络' }], edges: [] }
+            knowledge: { revision: 2, nodes: [{ id: 'new-id', path: 'root/dz7ako', label: '网络' }], edges: [] }
           }));
         });
       }
@@ -845,7 +851,7 @@ test('a queued view save never prevents the latest authoritative move projection
     operation: {
       kind: 'node-land',
       source: { key: 'root::old-id' },
-      target: { path: 'root/waiting' },
+      target: { path: 'root/dz7ako' },
       draft: { label: '网络' }
     },
     knowledge: { revision: 1, nodes: [], edges: [] }
@@ -856,7 +862,7 @@ test('a queued view save never prevents the latest authoritative move projection
   await move;
 
   assert.equal(imports.length, 1);
-  assert.equal(imports[0].nodes[0].path, 'root/waiting');
+  assert.equal(imports[0].nodes[0].path, 'root/dz7ako');
 });
 
 test('Atom Web never lets an operation-less browser snapshot overwrite the Atom projection', async () => {
@@ -902,6 +908,7 @@ test('three rapid relation confirmations never redraw an older partial chain', a
   const listeners = new Map();
   const imports = [];
   const releases = [];
+  const nodes = ['a', 'b', 'c', 'd'].map(key => ({ key, atomPath: key }));
   let responseRevision = 1;
   const response = (payload) => ({ ok: true, json: async () => payload });
   const document = { body: { dataset: {} }, hidden: false };
@@ -914,15 +921,15 @@ test('three rapid relation confirmations never redraw an older partial chain', a
     },
     fetch: async (url, options = {}) => {
       if (url.endsWith('/health')) return response({ mode: 'single' });
-      if (url.includes('/state') && !options.method) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
-      if (url.endsWith('/workspace-edit')) {
+      if (url.includes('/state') && !options.method) return response({ knowledge: { revision: 1, nodes, edges: [] } });
+      if (url.endsWith('/web-command')) {
         return new Promise((resolve) => releases.push(() => {
           responseRevision += 1;
           resolve(response({
             result: { ok: true },
             knowledge: {
               revision: responseRevision,
-              nodes: [],
+              nodes,
               edges: Array.from({ length: responseRevision - 1 }, (_, index) => ({ id: `edge-${index + 1}` }))
             }
           }));
@@ -938,10 +945,10 @@ test('three rapid relation confirmations never redraw an older partial chain', a
   imports.length = 0;
   const committed = listeners.get('spatial-workspace-committed');
   const edge = (from, to) => ({ kind: 'edge-create', source: { key: from }, target: { key: to } });
-  const first = committed({ detail: { operation: edge('a', 'b'), knowledge: { revision: 1, nodes: [], edges: [] } } });
+  const first = committed({ detail: { operation: edge('a', 'b'), knowledge: { revision: 1, nodes, edges: [] } } });
   await Promise.resolve();
-  committed({ detail: { operation: edge('b', 'c'), knowledge: { revision: 1, nodes: [], edges: [] } } });
-  committed({ detail: { operation: edge('c', 'd'), knowledge: { revision: 1, nodes: [], edges: [] } } });
+  committed({ detail: { operation: edge('b', 'c'), knowledge: { revision: 1, nodes, edges: [] } } });
+  committed({ detail: { operation: edge('c', 'd'), knowledge: { revision: 1, nodes, edges: [] } } });
 
   releases.shift()();
   await first;
@@ -975,7 +982,7 @@ test('Atom Web keeps visual-only detail changes local instead of sending and rol
       if (url.includes('/state') && !options.method) {
         return response({ knowledge: { revision: 1, nodes: [{ key: 'root::a', detailMode: 'surface' }] } });
       }
-      if (url.endsWith('/workspace-edit')) {
+      if (url.endsWith('/web-command')) {
         return response({ ok: false, error: { message: 'visual operation is not an Atom edit' } }, false);
       }
       return response({ result: {} });
@@ -993,7 +1000,7 @@ test('Atom Web keeps visual-only detail changes local instead of sending and rol
     detail: { operation: 'detail-mode-floating', knowledge: changed }
   }), true);
 
-  assert.equal(requests.some(([url]) => url.endsWith('/workspace-edit')), false);
+  assert.equal(requests.some(([url]) => url.endsWith('/web-command')), false);
   assert.equal(imports.length, 0, 'the last server projection must not roll back a visual-only change');
   assert.equal(document.body.dataset.spatialBridge, 'connected');
 });
@@ -1018,7 +1025,7 @@ test('Atom Web node creation enters the semantic workspace endpoint instead of o
       if (url.includes('/state') && !options.method) {
         return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
       }
-      if (url.endsWith('/workspace-edit')) return response({
+      if (url.endsWith('/web-command')) return response({
         ok: true,
         result: { ok: true },
         knowledge: {
@@ -1046,11 +1053,11 @@ test('Atom Web node creation enters the semantic workspace endpoint instead of o
     }
   });
 
-  const workspace = requests.find(([url]) => url.endsWith('/workspace-edit'));
+  const workspace = requests.find(([url]) => url.endsWith('/web-command'));
   assert.ok(workspace, 'node creation reaches the Atom workspace command boundary');
-  assert.deepEqual(JSON.parse(workspace[1].body), {
-    operation: { kind: 'node-create', path: 'root', draft: { label: 'New Atom', description: 'Detail', position: { x: 7, y: -3, z: 2 } } }
-  });
+  assert.equal(JSON.parse(workspace[1].body).source,
+    'transform new {"thing":"New Atom","situation":"Detail","slot":[],"strut":[]}');
+  assert.deepEqual(Object.keys(JSON.parse(workspace[1].body)).sort(), ['interaction', 'source']);
   assert.deepEqual(JSON.parse(JSON.stringify(imports.at(-1).nodes[0].position)), { x: 7, y: -3, z: 2 });
   assert.deepEqual(JSON.parse(JSON.stringify(persisted.at(-1).persistedNode)), {
     id: 'projected-id', key: 'root::projected-id', path: 'root', label: 'New Atom', position: { x: 7, y: -3, z: 2 }, clusterLocalPositionLocked: false
@@ -1081,7 +1088,7 @@ test('Atom node rename keeps the prior visual placement and reports the new proj
       if (url.includes('/state') && !options.method) {
         return response({ knowledge: { revision: 1, nodes: [oldNode], edges: [] } });
       }
-      if (url.endsWith('/workspace-edit')) return response({
+      if (url.endsWith('/web-command')) return response({
         ok: true,
         result: { ok: true },
         knowledge: {
@@ -1150,7 +1157,7 @@ test('Atom Web keeps the locally edited node visible when the source receipt pre
       if (url.includes('/state') && !options.method) {
         return response({ knowledge: { revision: 1, nodes: [oldNode], edges: [] } });
       }
-      if (url.endsWith('/workspace-edit')) return response({
+      if (url.endsWith('/web-command')) return response({
         ok: true,
         result: {
           ok: true, changed: true, revisionAfter: 'source-revision',
@@ -1189,12 +1196,11 @@ test('Atom Web keeps the locally edited node visible when the source receipt pre
 
 test('every Atom Web structural edit uses the semantic workspace boundary instead of the projection store', async () => {
   for (const operation of [
-    { kind: 'node-edit', path: 'root', nodeKey: 'root::a', node: { id: 'a' }, draft: { label: 'Renamed', description: 'Edited' } },
-    { kind: 'node-edit', status: 'delete', path: 'root', nodeKey: 'root::a', node: { id: 'a' }, draft: {} },
+    { kind: 'node-edit', path: 'root', nodeKey: 'root::a', node: { atomPath: 'A' }, draft: { label: 'Renamed', description: 'Edited' } },
+    { kind: 'node-edit', status: 'delete', path: 'root', nodeKey: 'root::a', node: { atomPath: 'A' }, draft: {} },
     { kind: 'edge-create', source: { key: 'root::a' }, target: { key: 'root::b' } },
-    { kind: 'edge-edit', status: 'update', edge: { from: { key: 'root::a' }, to: { key: 'root::b' }, label: 'Changed' } },
     { kind: 'edge-edit', status: 'delete', edge: { from: { key: 'root::a' }, to: { key: 'root::b' }, label: 'Changed' } },
-    { kind: 'node-land', source: { key: 'root::a' }, target: { path: 'root/domain' }, draft: { id: 'a' } }
+    { kind: 'node-land', source: { key: 'root::a' }, target: { path: 'root/dz7ako' }, draft: { id: 'a' } }
   ]) {
     const listeners = new Map();
     const requests = [];
@@ -1209,8 +1215,8 @@ test('every Atom Web structural edit uses the semantic workspace boundary instea
       fetch: async (url, options = {}) => {
         requests.push([url, options]);
         if (url.endsWith('/health')) return response({ mode: 'single' });
-        if (url.includes('/state') && !options.method) return response({ knowledge: { revision: 1, nodes: [], edges: [] } });
-        if (url.endsWith('/workspace-edit')) return response({ result: { ok: true }, knowledge: { revision: 2, nodes: [], edges: [] } });
+        if (url.includes('/state') && !options.method) return response({ knowledge: { revision: 1, nodes: [{ key: 'root::a', atomPath: 'A' }, { key: 'root::b', atomPath: 'B' }, { id: 'target', key: 'root::target', path: 'root', atomPath: 'Target', label: 'Target' }], edges: [] } });
+        if (url.endsWith('/web-command')) return response({ result: { ok: true }, knowledge: { revision: 2, nodes: [], edges: [] } });
         return response({ result: {} });
       },
       addEventListener: (name, listener) => listeners.set(name, listener), setInterval: () => 0
@@ -1221,7 +1227,9 @@ test('every Atom Web structural edit uses the semantic workspace boundary instea
     await listeners.get('spatial-workspace-committed')({
       detail: { operation, knowledge: { revision: 1, nodes: [], edges: [] } }
     });
-    assert.equal(requests.some(([url]) => url.endsWith('/workspace-edit')), true, operation.kind);
+    const command = requests.find(([url]) => url.endsWith('/web-command'));
+    assert.ok(command, operation.kind);
+    assert.deepEqual(Object.keys(JSON.parse(command[1].body)).sort(), ['interaction', 'source']);
     assert.equal(requests.some(([url, options]) => url.includes('/state') && options.method === 'PUT'), false, operation.kind);
   }
 });
@@ -1460,6 +1468,7 @@ test('an older pull already in flight cannot overwrite a newer optimistic worksp
   const imports = [];
   let releaseInitialPull;
   let releaseWorkspaceSave;
+  let reads = 0;
   const response = (payload) => ({ ok: true, json: async () => payload });
   const document = { body: { dataset: {} }, hidden: false };
   const window = {
@@ -1472,13 +1481,14 @@ test('an older pull already in flight cannot overwrite a newer optimistic worksp
     fetch: async (url) => {
       if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
       if (url.includes('/state')) {
+        if (++reads === 1) return response({ knowledge: { revision: 1, nodes: [{ key: 'root::edited', atomPath: '编辑后' }], edges: [] } });
         return new Promise((resolve) => {
           releaseInitialPull = () => resolve(response({
             knowledge: { revision: 1, nodes: [], edges: [] }
           }));
         });
       }
-      if (url.endsWith('/workspace-edit')) {
+      if (url.endsWith('/web-command')) {
         return new Promise((resolve) => {
           releaseWorkspaceSave = () => resolve(response({
             result: { ok: true },
@@ -1495,6 +1505,9 @@ test('an older pull already in flight cannot overwrite a newer optimistic worksp
   vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
   await new Promise((resolve) => setImmediate(resolve));
 
+  listeners.get('spatial-view-committed')({ detail: { view: { path: 'root/new-scope' } } });
+  await new Promise((resolve) => setImmediate(resolve));
+  imports.length = 0;
   const save = listeners.get('spatial-workspace-committed')({ detail: {
     persistenceId: 31,
     operation: {
@@ -1513,6 +1526,70 @@ test('an older pull already in flight cannot overwrite a newer optimistic worksp
     'an in-flight stale pull must never redraw the page after a local operation begins');
   assert.equal(imports.at(-1).revision, 2);
   assert.equal(imports.at(-1).nodes[0].label, '编辑后');
+});
+
+for (const batch of [false, true]) test(`${batch ? 'batch' : 'single'} landing reconciles an early text receipt only after authoritative source and destination refresh`, async () => {
+  const listeners = new Map();
+  const events = [];
+  const requests = [];
+  const imports = [];
+  let eventSource;
+  let serverRevision = 1;
+  const sourceNode = { id: 'a', key: 'root::a', path: 'root', atomPath: 'A', label: 'A' };
+  const targetNode = { id: 'target', key: 'root::target', path: 'root', atomPath: 'Target', label: 'Target' };
+  const movedNode = { ...sourceNode, id: 'a2', key: 'root/dz7ako::a2', path: 'root/dz7ako', atomPath: 'Target/A' };
+  const response = payload => ({ ok: true, json: async () => payload });
+  const document = { body: { dataset: {} }, hidden: false };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, path: 'root/dz7ako' }),
+      exportField: () => ({ path: 'root/dz7ako' }),
+      importKnowledge: knowledge => { imports.push(knowledge); return true; }
+    },
+    EventSource: class { constructor() { eventSource = this; } },
+    fetch: async (url, options = {}) => {
+      requests.push(url);
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) return response({
+        scope: { path: url.includes('dz7ako') ? 'root/dz7ako' : 'root' },
+        knowledge: { revision: serverRevision, nodes: serverRevision === 1
+          ? [sourceNode, targetNode] : serverRevision === 2 ? [sourceNode, movedNode, targetNode] : [movedNode, targetNode], edges: [] }
+      });
+      if (url.endsWith('/web-command')) return response({ ok: true, result: {
+        ok: true, changed: true, revisionAfter: 'committed-world-revision'
+      } });
+      return response({ result: {} });
+    },
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    dispatchEvent: event => events.push(event),
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => { throw new Error('polling is forbidden'); }
+  };
+  installWorkspaceModel(window);
+  vm.runInNewContext(source, { window, document });
+  await new Promise(resolve => setImmediate(resolve));
+  const landing = { kind: 'node-land', source: { key: sourceNode.key, path: 'root' }, sourceNode,
+    target: { path: 'root/dz7ako' }, draft: sourceNode };
+  const operation = batch ? { kind: 'node-land-batch', landings: [landing], target: landing.target } : landing;
+  imports.length = 0;
+  await listeners.get('spatial-workspace-committed')({ detail: { persistenceId: 42, operation } });
+  assert.equal(events.filter(event => event.type === 'spatial-workspace-persist-failed').length, 0);
+  assert.equal(events.filter(event => event.type === 'spatial-workspace-projection-pending').length, 1);
+  assert.equal(imports.length, 0, 'durable receipt must not roll back the optimistic move');
+  serverRevision = 2;
+  eventSource.onmessage({ data: '{"revision":2}' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(events.filter(event => event.type === 'spatial-workspace-persisted').length, 0,
+    'a destination copy with its source still present is not a reconciled move');
+  serverRevision = 3;
+  eventSource.onmessage({ data: '{"revision":3}' });
+  await new Promise(resolve => setImmediate(resolve));
+  const saved = events.filter(event => event.type === 'spatial-workspace-persisted');
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].detail.persistenceId, 42);
+  assert.ok(requests.includes('/__spatial/api/state?path=root'), 'refresh source scope to prove absence');
+  assert.equal(requests.includes('/__spatial/api/state'), false, 'reconcile through scoped reads, not a full snapshot');
 });
 
 test('batch landing is acknowledged only when every selected Atom exists in the authoritative destination', async () => {
@@ -1534,15 +1611,15 @@ test('batch landing is acknowledged only when every selected Atom exists in the 
     fetch: async (url, options = {}) => {
       if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
       if (url.includes('/state') && !options.method) {
-        return response({ knowledge: { revision: 1, nodes: [sourceA, sourceB], edges: [] } });
+        return response({ knowledge: { revision: 1, nodes: [sourceA, sourceB, { id: 'target', key: 'root::target', path: 'root', atomPath: 'Target', label: 'Target' }], edges: [] } });
       }
-      if (url.endsWith('/workspace-edit')) {
+      if (url.endsWith('/web-command')) {
         return response({
           ok: true,
           result: { ok: true },
           knowledge: {
             revision: 2,
-            nodes: [{ ...sourceA, id: 'a2', key: 'target::a2', path: 'target', atomPath: 'Target/A' }, sourceB],
+            nodes: [{ ...sourceA, id: 'a2', key: 'root/dz7ako::a2', path: 'root/dz7ako', atomPath: 'Target/A' }, sourceB],
             edges: []
           }
         });
@@ -1563,7 +1640,7 @@ test('batch landing is acknowledged only when every selected Atom exists in the 
   await new Promise((resolve) => setImmediate(resolve));
   imports.length = 0;
 
-  const target = { path: 'target' };
+  const target = { path: 'root/dz7ako' };
   await listeners.get('spatial-workspace-committed')({ detail: {
     persistenceId: 41,
     operation: {
@@ -1609,9 +1686,9 @@ test('single landing is failed and rolled back when authority keeps the source w
     fetch: async (url, options = {}) => {
       if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
       if (url.includes('/state') && !options.method) {
-        return response({ knowledge: { revision: 1, nodes: [sourceNode], edges: [] } });
+        return response({ knowledge: { revision: 1, nodes: [sourceNode, { id: 'target', key: 'root::target', path: 'root', atomPath: 'Target', label: 'Target' }], edges: [] } });
       }
-      if (url.endsWith('/workspace-edit')) {
+      if (url.endsWith('/web-command')) {
         return response({
           ok: true,
           result: { ok: true },
@@ -1639,7 +1716,7 @@ test('single landing is failed and rolled back when authority keeps the source w
     operation: {
       kind: 'node-land',
       source: { key: sourceNode.key }, sourceNode,
-      target: { path: 'target' }, draft: sourceNode
+      target: { path: 'root/dz7ako' }, draft: sourceNode
     },
     knowledge: { revision: 1, nodes: [], edges: [] }
   } });
@@ -2543,3 +2620,16 @@ for (const secondWriteSucceeds of [false, true]) {
     assert.equal(writes.length, 2, 'recovery must not replay either patch');
   });
 }
+
+test('production Web entry retires operation payloads and both server translation routes', () => {
+  const root = path.join(__dirname, '..');
+  for (const file of [
+    'spatial-browser-bridge.js', 'cli/lib/server.mjs',
+    'src/atom-system/adapters/legacy-runtime-composition.mjs',
+    'src/atom-system/public/interaction-runtime.mjs',
+    'work-engine/atom-language/graph-server.mjs'
+  ]) {
+    const production = fs.readFileSync(path.join(root, file), 'utf8');
+    assert.doesNotMatch(production, /\/__atom\/api\/(?:workspace-edit|human-status)|createLegacyHuman(?:Workspace|Status)Translator|updateHuman(?:Workspace|Status)|Web edit requires one stable node identity/, file);
+  }
+});

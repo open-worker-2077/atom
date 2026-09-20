@@ -143,7 +143,7 @@ for (const businessStatus of ['completed', 'failed']) {
     const runtime = createInteractionRuntime({
       world: { execute: value => service.executeLegacy({ ...request, programScheduler: scheduler, ...value }) },
       projections: { publish: unused, recover: unused }, feedback: { submit: unused },
-      agents: { resolve: unused }, humanStatus: { translate: unused }
+      agents: { resolve: unused }
     });
     const operation = runtime.execute({ source: request.source, correlationId: request.interaction.id }, {
       publish: false, signal: controller.signal, onCommitted() { notifications += 1; },
@@ -627,7 +627,7 @@ for (const throughRuntime of [false, true]) {
     const runtime = createInteractionRuntime({
       world: { execute: value => service.executeLegacy({ ...request, ...value }) },
       projections: { publish: unused, recover: unused }, feedback: { submit: unused },
-      agents: { resolve: unused }, humanStatus: { translate: unused }
+      agents: { resolve: unused }
     });
     const result = throughRuntime
       ? await runtime.execute({ source: request.source, correlationId: request.interaction.id }, { publish: false, onCommitted })

@@ -17,6 +17,7 @@ const ALLOWED = Object.freeze({
 
 function componentOf(file) {
   const normalized = file.replaceAll('\\', '/');
+  if (normalized === 'browser-command-mapper.mjs') return 'adapters';
   return normalized.includes('/') ? normalized.split('/')[0] : 'entry';
 }
 

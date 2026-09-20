@@ -58,7 +58,6 @@ test('durable write returns its complete receipt before postcommit Program proje
     }) },
     projections: { publish: unused, recover: unused },
     feedback: { submit: unused }, agents: { resolve: unused },
-    humanStatus: { translate: unused }
   });
   let receipt;
   let notifications = 0;

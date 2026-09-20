@@ -23,8 +23,6 @@ async function serverFor(t) {
       });
       return { ok: true, command: 'transform', changed: false };
     },
-    async updateHumanStatus() {},
-    async updateHumanWorkspace() {},
     async recover() {}
   });
   const instance = await createSpatialServer({

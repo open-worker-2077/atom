@@ -641,3 +641,5 @@
 - **2026-09-19 Program引用索引定论（I3/U2/D3/E3）**：用户要求将上述方案持久化后进入目标模式解决。现正式采用“写入时绑定永久Thing ID、冷启动只重建／校验派生反向索引、热态按受影响ID增量改写、旧数据显式冷副本迁移”的边界；普通冷启动不得全量改写Program或制造revision，改名／移动不得继续全世界扫描与逐次Python冷启动。权威合同已进入世界／Program规格§2.4；本项排在Web→CLI单轨E3之后实施，不插队。
 
 - **2026-09-19 实施续点**：当前唯一执行顺序为`docs/superpowers/plans/2026-09-19-web-cli-single-command-spine.md`完成E3后，再执行`docs/superpowers/plans/2026-09-19-program-reference-index.md`完成E3。两份计划只展开本总账与既有规格中的当前定论，不建立平行需求源；目标模式只引用本总账，不复制目标详情。
+
+- **2026-09-20 Web→CLI单轨Task 4局部GREEN（I3/U3/D3/E3）**：Web创建、编辑、改名、移动、关系与删除已退出专属`workspace-edit`／`human-status`翻译入口，浏览器只把界面操作映射成规范Atom CLI文本，并以`source + interaction.id`进入共享`/web-command`运行时；服务端不再按`operation.kind`重建业务语义。原右键落脚期间无法返回上一层的根因也已修正：仅`node-land`／`node-land-batch`允许跨层导航，新增／编辑等其他事务继续阻断导航。最终受影响门禁为浏览器关键旅程11/11、四文件Node链86/86、浏览器构建、旧入口生产字符串缺席及diff检查全部通过；浏览器验收夹具已分离批量、导航保护与单节点搬移事实，避免测试间真实写入串扰。本项尚待Task 4提交复核以及Task 5同构性能、整仓候选、正式4784部署回读和精确远端检查，故E3仍开放。

@@ -6,9 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
-  createLegacyRuntimeComposition,
-  createLegacyHumanStatusTranslator,
-  createLegacyHumanWorkspaceTranslator
+  createLegacyRuntimeComposition
 } from '../src/atom-system/adapters/legacy-runtime-composition.mjs';
 import { createLegacyProjectionOrchestrator } from '../src/atom-system/adapters/legacy-projection-orchestrator.mjs';
 import { createRuntimeCliExecutor } from '../src/atom-system/adapters/runtime-cli-executor.mjs';
@@ -1027,7 +1025,6 @@ test('legacy composition binds world, Program, projection and spatial publicatio
     },
     feedbackRecorder: async (request) => ({ ok: true, request }),
     agentResolver: async (_file, agentPath) => ({ ref: 'resolved', path: agentPath }),
-    humanStatusTranslator: { translate: async () => 'transform {}' }
   });
 
   const result = await runtime.execute({
@@ -1128,7 +1125,6 @@ test('default projection consumes the current compatibility manifest after a loc
     spatialPublisher: { publish: async () => {} },
     feedbackRecorder: async () => ({ ok: true }),
     agentResolver: async () => null,
-    humanStatusTranslator: { translate: async () => 'transform {}' }
   });
 
   const initialized = await runtime.initialize({ correlationId: 'current-manifest-startup' });
@@ -1171,7 +1167,6 @@ test('legacy composition primes and revision-binds Agent resolution without cach
       if (agentPath === 'Root/Missing') throw Object.assign(new Error('missing'), { code: 'AGENT_NOT_FOUND' });
       return { ref: `${options.worldRevision}:${agentPath}`, path: agentPath };
     },
-    humanStatusTranslator: { translate: async () => 'transform {}' }
   });
 
   await runtime.initialize({ correlationId: 'prime-agent-resolution' });
@@ -1213,7 +1208,6 @@ test('legacy composition identifies the disposable projection stage without expo
     spatialPublisher: { publish: async () => assert.fail('must stop at the failed Graph cache') },
     feedbackRecorder: async () => ({ ok: true }),
     agentResolver: async () => null,
-    humanStatusTranslator: { translate: async () => 'transform {}' }
   });
 
   const result = await runtime.execute({ source: 'transform {}', correlationId: 'projection-stage' });
@@ -1251,7 +1245,6 @@ test('legacy composition forwards a content-free closed interaction timing ledge
       await new Promise((resolve) => setTimeout(resolve, 8));
       return { ref: 'agent-ref', path: 'Root/Agent' };
     },
-    humanStatusTranslator: { translate: async () => 'transform {}' }
   });
 
   const startedAt = performance.now();
@@ -1306,15 +1299,13 @@ test('committed Human Web facts are acknowledged before Agent resolution authori
     spatialPublisher: { publish: async () => {} },
     feedbackRecorder: async () => ({ ok: true }),
     agentResolver: async () => null,
-    humanStatusTranslator: { translate: async () => 'transform {}' },
-    humanWorkspaceTranslator: { translate: async () => 'transform new {"thing":"New"}' }
   });
   let notifyCommitted;
   const notified = new Promise((resolve) => { notifyCommitted = resolve; });
-  const execution = runtime.updateHumanWorkspace({
-    operation: { kind: 'node-create' },
+  const execution = runtime.execute({
+    source: 'transform new {"thing":"New","situation":"","slot":[],"strut":[]}',
     correlationId: 'web-source-before-authority-refresh'
-  }, { onCommitted: (result) => {
+  }, { origin: 'web', humanAuthority: true, programMode: 'reconcile', onCommitted: (result) => {
     notifyCommitted(result);
     setImmediate(() => { sourceDeliveryTurnReached = true; });
   } });
@@ -1351,7 +1342,6 @@ test('legacy composition routes feedback through the configured recorder with wo
       return { ok: true, submission: { id: 'feedback-1' } };
     },
     agentResolver: async (_file, agentPath) => ({ ref: 'resolved', path: agentPath }),
-    humanStatusTranslator: { translate: async () => 'transform {}' }
   });
 
   const result = await runtime.execute({
@@ -1367,230 +1357,4 @@ test('legacy composition routes feedback through the configured recorder with wo
     id: 'interaction-2',
     agent: { ref: 'resolved', path: 'Root/Sol' }
   });
-});
-
-test('human status translator accepts only projected 状态 nodes and returns one transform intent', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-status-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const graphFile = path.join(directory, 'graph.json');
-  await fs.writeFile(graphFile, '{}\n', 'utf8');
-  const translator = createLegacyHumanStatusTranslator({
-    graphFile,
-    projectGraph: async () => ({ atomPathByKey: new Map([['node-key', 'Root/状态']]) })
-  });
-
-  assert.equal(
-    await translator.translate({ key: 'node-key', detail: '进行中' }),
-    'transform {"thing":"Root/状态","situation.rep.进行中"}'
-  );
-  assert.equal(
-    await translator.translate({ key: 'stale-node-key', atomPath: 'Root/状态', detail: '已完成' }),
-    'transform {"thing":"Root/状态","situation.rep.已完成"}'
-  );
-  await assert.rejects(
-    translator.translate({ key: 'missing', detail: '进行中' }),
-    (error) => error.code === 'INVALID_HUMAN_STATUS_REQUEST'
-  );
-});
-
-test('human status translator rejects conflicting current targets but keeps standalone key-first', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-status-conflict-'));
-  t.diagnostic(`Retained synthetic fixture: ${directory}`);
-  const graphFile = path.join(directory, 'graph.json');
-  const facts = [{ thing: 'Root', situation: '', slot: ['A', 'B'].map((name) => ({
-    thing: name, situation: '', slot: [{ thing: '状态', situation: '进行中', slot: [], strut: [] }], strut: []
-  })), strut: [] }];
-  const graph = { graph: { thing: 'atom.json', situation: '', slot: facts, strut: [] } };
-  await fs.writeFile(graphFile, JSON.stringify(graph));
-  const projectGraph = async () => ({ atomPathByKey: new Map([['key-for-b', 'Root/B/状态']]) });
-  const current = createLegacyHumanStatusTranslator({ graphFile, projectGraph,
-    committedVersionProvider: async () => ({ revision: 'current', facts }) });
-  await assert.rejects(
-    current.translate({ key: 'key-for-b', atomPath: 'Root/A/状态', detail: '已完成' }),
-    (error) => error.code === 'INVALID_HUMAN_STATUS_REQUEST'
-  );
-  assert.equal(await current.translate({ key: 'key-for-b', atomPath: 'Root/B/状态', detail: '已完成' }),
-    'transform {"thing":"Root/B/状态","situation.rep.已完成"}');
-  const standalone = createLegacyHumanStatusTranslator({ graphFile, projectGraph });
-  assert.equal(await standalone.translate({ key: 'key-for-b', atomPath: 'Root/A/状态', detail: '已完成' }),
-    'transform {"thing":"Root/B/状态","situation.rep.已完成"}');
-});
-
-test('human workspace translator treats the single synthetic root domain as the top-level Atom container', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-workspace-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const graphFile = path.join(directory, 'graph.json');
-  await fs.writeFile(graphFile, '{}\n', 'utf8');
-  const rootDomain = {
-    id: 'synthetic-root', key: 'root::synthetic-root', path: 'root', atomPath: '',
-    label: 'atom.json', hasChildren: true
-  };
-  let hash = 2166136261;
-  for (const character of rootDomain.id) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  const rootDomainPath = `root/${(hash >>> 0).toString(36)}`;
-  const translator = createLegacyHumanWorkspaceTranslator({
-    graphFile,
-    projectGraph: async () => ({
-      knowledge: { nodes: [rootDomain], edges: [] },
-      atomPathByKey: new Map()
-    })
-  });
-
-  assert.equal(
-    await translator.translate({
-      operation: {
-        kind: 'node-create', path: rootDomainPath,
-        draft: { label: 'Top-level from Web', description: 'saved' }
-      }
-    }),
-    'transform new {"thing":"Top-level from Web","situation":"saved","slot":[],"strut":[]}'
-  );
-});
-
-test('human workspace translator edits a Shortcut by semantic target path without exposing identity', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-shortcut-edit-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const graphFile = path.join(directory, 'graph.json');
-  await fs.writeFile(graphFile, '{}\n', 'utf8');
-  const shortcut = {
-    id: 'shortcut', key: 'root::shortcut', path: 'root', atomPath: '引用域/入口',
-    label: '入口', atomTypes: ['shortcut'], shortcutTargetPath: '旧目标'
-  };
-  const translator = createLegacyHumanWorkspaceTranslator({
-    graphFile,
-    projectGraph: async () => ({
-      knowledge: { nodes: [shortcut], edges: [] },
-      atomPathByKey: new Map([[shortcut.key, shortcut.atomPath]])
-    })
-  });
-
-  assert.equal(
-    await translator.translate({
-      operation: {
-        kind: 'node-edit', path: 'root', nodeKey: shortcut.key, node: shortcut,
-        draft: {
-          label: '入口', atomTypes: ['shortcut'], description: '',
-          shortcutTargetPath: '新域/目标'
-        }
-      }
-    }),
-    'transform {"thing.lnk.新域/目标":"引用域/入口"}'
-  );
-});
-
-test('human workspace translator creates inside an explicit semantic parent without rebuilding the whole Graph projection', async () => {
-  let wholeGraphProjectionCalls = 0;
-  const translator = createLegacyHumanWorkspaceTranslator({
-    graphFile: 'missing-graph-must-not-be-read.json',
-    projectGraph: async () => {
-      wholeGraphProjectionCalls += 1;
-      throw new Error('whole Graph projection must not gate one local create');
-    }
-  });
-
-  assert.equal(
-    await translator.translate({
-      operation: {
-        kind: 'node-create', path: 'root/domain', parentAtomPath: '项目/当前团',
-        draft: { label: '新节点', description: '新正文' }
-      }
-    }),
-    'transform new {"thing":"项目/当前团/新节点","situation":"新正文","slot":[],"strut":[]}'
-  );
-  assert.equal(wholeGraphProjectionCalls, 0);
-});
-
-test('human workspace translator resolves an edited node locally without rebuilding the whole Graph projection', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-local-edit-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const graphFile = path.join(directory, 'graph.json');
-  await fs.writeFile(graphFile, JSON.stringify({
-    graph: atom('atom.json', '', [atom('项目', '', [atom('待编辑', '旧正文')])])
-  }), 'utf8');
-  const node = {
-    id: 'local-edit', key: 'root/domain::local-edit', path: 'root/domain',
-    atomPath: '项目/待编辑', label: '待编辑', detail: '旧正文'
-  };
-  let wholeGraphProjectionCalls = 0;
-  const translator = createLegacyHumanWorkspaceTranslator({
-    graphFile,
-    projectGraph: async () => {
-      wholeGraphProjectionCalls += 1;
-      throw new Error('whole Graph projection must not gate one local edit');
-    }
-  });
-
-  assert.equal(
-    await translator.translate({ operation: {
-      kind: 'node-edit', path: node.path, nodeKey: node.key, node,
-      draft: { label: '已编辑', description: '新正文', atomTypes: [] }
-    } }),
-    'transform {"thing.ren.已编辑":"项目/待编辑","situation.rep.新正文"}'
-  );
-  assert.equal(wholeGraphProjectionCalls, 0);
-});
-
-test('human workspace keeps standalone key precedence and rejects conflicting current key and path', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-identity-'));
-  t.diagnostic(`Retained synthetic fixture: ${directory}`);
-  const graphFile = path.join(directory, 'graph.json');
-  const facts = [{ thing: 'Root', situation: '', slot: [
-    { thing: 'A', situation: '', slot: [], strut: [] },
-    { thing: 'B', situation: '', slot: [], strut: [] }
-  ], strut: [] }];
-  await fs.writeFile(graphFile, JSON.stringify({ graph: atom('atom.json', '', [
-    atom('Root', '', [atom('A'), atom('B')])
-  ]) }));
-  const projectGraph = async () => ({ atomPathByKey: new Map([['root::node-a', 'Root/A']]) });
-  const operation = { kind: 'node-edit', nodeKey: 'root::node-a',
-    node: { id: 'node-a', key: 'root::node-a', path: 'root', atomPath: 'Root/B' },
-    draft: { label: 'A', description: 'edited', atomTypes: [] } };
-  const standalone = createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph });
-  const standaloneOperation = { ...operation, node: { ...operation.node, id: undefined } };
-  assert.equal(await standalone.translate({ operation: standaloneOperation }),
-    'transform {"thing":"Root/A","situation.rep.edited"}');
-  const current = createLegacyHumanWorkspaceTranslator({ graphFile, projectGraph,
-    committedVersionProvider: async () => ({ facts, revision: 'sha256:synthetic', compatibilityManifest: null }) });
-  await assert.rejects(current.translate({ operation }), { code: 'INVALID_HUMAN_WORKSPACE_REQUEST' });
-});
-
-test('human workspace translator emits one atomic Transform for a batch landing', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-human-batch-landing-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const graphFile = path.join(directory, 'graph.json');
-  await fs.writeFile(graphFile, '{}\n', 'utf8');
-  const targetNode = { id: 'target', key: 'root::target', path: 'root', label: '目标域' };
-  let hash = 2166136261;
-  for (const character of targetNode.id) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  const targetSpatialPath = `root/${(hash >>> 0).toString(36)}`;
-  const translator = createLegacyHumanWorkspaceTranslator({
-    graphFile,
-    projectGraph: async () => ({
-      knowledge: { nodes: [targetNode], edges: [] },
-      atomPathByKey: new Map([
-        ['root::a', '来源甲'],
-        ['root::b', '来源乙'],
-        [targetNode.key, '目标域']
-      ])
-    })
-  });
-
-  assert.equal(
-    await translator.translate({
-      operation: {
-        kind: 'node-land-batch',
-        landings: [
-          { source: { key: 'root::a' }, target: { path: targetSpatialPath } },
-          { source: { key: 'root::b' }, target: { path: targetSpatialPath } }
-        ]
-      }
-    }),
-    'transform [{"thing.mov.目标域":"来源甲"},{"thing.mov.目标域":"来源乙"}]'
-  );
 });

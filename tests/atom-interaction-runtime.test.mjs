@@ -54,18 +54,6 @@ function ports() {
         calls.push(['agent', path]);
         return { ref: 'agent-ref', path };
       }
-    },
-    humanStatus: {
-      translate: async (request) => {
-        calls.push(['human-status', structuredClone(request)]);
-        return `transform {"name":"${request.key}","situation.rep.":"${request.detail}"}`;
-      }
-    },
-    humanWorkspace: {
-      translate: async (request) => {
-        calls.push(['human-workspace', structuredClone(request)]);
-        return 'transform {"name":"Root/Workspace","situation.rep.":"updated"}';
-      }
     }
   };
 }
@@ -600,8 +588,6 @@ test('the first use of an Agent prepares its scoped Program projection once and 
         return { ref: 'agent-ref', path };
       }
     },
-    humanStatus: { async translate() {} },
-    humanWorkspace: { async translate() {} },
     programRuntime: 'program-runtime'
   });
 
@@ -650,8 +636,6 @@ test('a trusted agentless read prepares its context-free Program projection once
     },
     feedback: { async submit() {} },
     agents: { async resolve() { throw new Error('agentless request must not resolve an Agent'); } },
-    humanStatus: { async translate() {} },
-    humanWorkspace: { async translate() {} },
     programRuntime: 'program-runtime'
   });
 
@@ -714,8 +698,6 @@ test('an ordinary exact Explore passively prepares projections without replaying
     },
     feedback: { submit: async () => ({ ok: true }) },
     agents: { resolve: async (agentPath) => ({ ref: `agent:${agentPath}`, path: agentPath }) },
-    humanStatus: { translate: async () => '' },
-    humanWorkspace: { translate: async () => '' },
     programRuntime: scheduler
   });
 
@@ -908,58 +890,6 @@ test('feedback stays in the same interaction boundary without entering world mut
   ]);
 });
 
-test('human status translation re-enters the same world lifecycle as an explicit privileged intent', async () => {
-  const context = ports();
-  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
-
-  await runtime.updateHumanStatus({
-    key: 'Root/状态',
-    detail: '进行中',
-    correlationId: 'interaction-3'
-  });
-  await new Promise((resolve) => setTimeout(resolve, 5));
-
-  assert.deepEqual(context.calls, [
-    ['human-status', { key: 'Root/状态', atomPath: '', detail: '进行中' }],
-    ['world', {
-      source: 'transform {"name":"Root/状态","situation.rep.":"进行中"}',
-      interaction: { id: 'interaction-3', agent: null },
-      history: [],
-      humanAuthority: true,
-      bypassProgramLocks: true,
-      programMode: 'reconcile',
-      programRuntime: 'program-runtime'
-    }],
-    ['projection', { expectedRevision: 'rev-2', lockState: { revision: 'rev-2' } }]
-  ]);
-});
-
-test('human workspace changes rebuild the context-free Program projection in the same world lifecycle', async () => {
-  const context = ports();
-  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
-
-  await runtime.updateHumanWorkspace({
-    operation: { type: 'move', sourcePath: 'Root/A', targetPath: 'Root/B' },
-    correlationId: 'interaction-workspace'
-  });
-  await new Promise((resolve) => setTimeout(resolve, 5));
-
-  assert.deepEqual(context.calls, [
-    ['human-workspace', {
-      operation: { type: 'move', sourcePath: 'Root/A', targetPath: 'Root/B' }
-    }],
-    ['world', {
-      source: 'transform {"name":"Root/Workspace","situation.rep.":"updated"}',
-      interaction: { id: 'interaction-workspace', agent: null },
-      history: [],
-      humanAuthority: true,
-      programMode: 'reconcile',
-      programRuntime: 'program-runtime'
-    }],
-    ['projection', { expectedRevision: 'rev-2', lockState: { revision: 'rev-2' } }]
-  ]);
-});
-
 test('human workspace lifecycle exposes the committed source before its subsequent result settles', async () => {
   const context = ports();
   let releaseSubsequent;
@@ -979,10 +909,11 @@ test('human workspace lifecycle exposes the committed source before its subseque
   };
   const runtime = createInteractionRuntime(context);
   let committed;
-  const operation = runtime.updateHumanWorkspace({
-    operation: { kind: 'node-edit' },
+  const operation = runtime.execute({
+    source: 'transform {"thing":"Root/Workspace","situation.rep.updated"}',
     correlationId: 'human-workspace-local-source'
   }, {
+    origin: 'web', humanAuthority: true, programMode: 'reconcile',
     onCommitted(result) { committed = result; }
   });
 

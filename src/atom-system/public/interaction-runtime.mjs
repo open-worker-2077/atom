@@ -85,8 +85,6 @@ export function createInteractionRuntime({
   projections,
   feedback,
   agents,
-  humanStatus,
-  humanWorkspace,
   programRuntime,
   diagnostics = null,
   onStage = null,
@@ -97,7 +95,6 @@ export function createInteractionRuntime({
   requireMethod(projections, 'recover', 'INVALID_PROJECTION_PORT', 'Interaction runtime projection port');
   requireMethod(feedback, 'submit', 'INVALID_FEEDBACK_PORT', 'Interaction runtime feedback port');
   requireMethod(agents, 'resolve', 'INVALID_AGENT_DIRECTORY', 'Interaction runtime agent directory');
-  requireMethod(humanStatus, 'translate', 'INVALID_HUMAN_STATUS_PORT', 'Interaction runtime human-status port');
   if (diagnostics) {
     requireMethod(diagnostics, 'record', 'INVALID_RUNTIME_DIAGNOSTIC_PORT', 'Interaction runtime diagnostic port');
   }
@@ -447,37 +444,6 @@ export function createInteractionRuntime({
     });
   }
 
-  async function updateHumanStatus({ key, atomPath, detail, correlationId }) {
-    if ((typeof key !== 'string' || !key.trim()) && (typeof atomPath !== 'string' || !atomPath.trim())
-      || typeof detail !== 'string' || !detail.trim()) {
-      throw problem('INVALID_HUMAN_STATUS', 'Human status requires one stable target and non-empty detail');
-    }
-    const source = await humanStatus.translate({
-      key: typeof key === 'string' ? key.trim() : '',
-      atomPath: typeof atomPath === 'string' ? atomPath.trim() : '',
-      detail: detail.trim()
-    });
-    return executeValidated(validateIntent({ source, correlationId, history: [] }), {
-      humanAuthority: true,
-      bypassProgramLocks: true,
-      programMode: 'reconcile'
-    });
-  }
-
-  async function updateHumanWorkspace({ operation, correlationId }, lifecycle = {}) {
-    requireMethod(humanWorkspace, 'translate', 'INVALID_HUMAN_WORKSPACE_PORT', 'Interaction runtime human-workspace port');
-    const source = await humanWorkspace.translate({ operation });
-    return executeValidated(validateIntent({ source, correlationId, history: [] }), {
-      humanAuthority: true,
-      programMode: 'reconcile',
-      ...(lifecycle.signal ? { signal: lifecycle.signal } : {}),
-      ...(typeof lifecycle.onCommitted === 'function' ? { onCommitted: lifecycle.onCommitted } : {}),
-      ...(typeof lifecycle.onSubsequentSettled === 'function'
-        ? { onSubsequentSettled: lifecycle.onSubsequentSettled }
-        : {})
-    });
-  }
-
   async function recover({ expectedRevision }) {
     if (typeof expectedRevision !== 'string' || !expectedRevision.trim()) {
       throw problem('INVALID_WORLD_REVISION', 'Recovery requires a non-empty expected revision');
@@ -516,8 +482,6 @@ export function createInteractionRuntime({
   return Object.freeze({
     initialize,
     execute,
-    updateHumanStatus,
-    updateHumanWorkspace,
     recover,
     projectionStatus,
     close

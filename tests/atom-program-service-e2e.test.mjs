@@ -8,6 +8,7 @@ import test from 'node:test';
 
 import { executeAtomCommandEndpoint, resolveAgentContext } from '../work-engine/atom-language/cli.mjs';
 import { projectAtomGraphToKnowledge } from '../work-engine/atom-language/graph-4d-projection.mjs';
+import { createBrowserCommandMapper } from '../src/atom-system/browser-command-mapper.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 import {
   createShortcutAtom,
@@ -17,6 +18,23 @@ import {
   createJsonTransactionJournal,
   createJsonWorldRepository
 } from '../src/atom-system/adapters/json-world-repository.mjs';
+
+async function browserPayload(running, { operation }) {
+  const { knowledge } = await (await fetch(`${running.url}/__spatial/api/state`)).json();
+  const mapper = createBrowserCommandMapper();
+  mapper.replaceKnowledge(knowledge);
+  // These service tests start with stable projected keys, just as the UI does.
+  const selected = operation.node ?? knowledge.nodes.find(node => node.key === operation.nodeKey);
+  const command = mapper.compile({ ...operation, ...(selected ? { node: selected } : {}) });
+  return { source: command.source, interaction: { id: crypto.randomUUID() } };
+}
+
+async function postBrowserEdit(running, payload) {
+  return fetch(`${running.url}/__atom/api/web-command`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(await browserPayload(running, payload))
+  });
+}
 
 function atom(thing, situation = '', slot = [], type = '') {
   const agentProgram = type === 'agent';
@@ -52,7 +70,7 @@ async function waitForKnowledge(url, predicate, message, timeoutMs = 2_000) {
 
 async function settleWorkspaceProjection(running, payload, timeoutMs = 2_000) {
   const expectedRevision = payload.result?.projectionRecovery?.expectedRevision
-    ?? (payload.knowledge === null ? payload.result?.revisionAfter : null);
+    ?? payload.result?.revisionAfter;
   if (!expectedRevision) return payload;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -542,32 +560,22 @@ test('4784 Web workspace edits commit local Atom facts before asynchronously pub
   });
 
   const applyWebEdit = async (operation) => {
-    const response = await fetch(`${running.url}/__atom/api/workspace-edit`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ operation })
-    });
+    const response = await postBrowserEdit(running, { operation });
     const payload = await response.json();
     assert.equal(response.status, 200, JSON.stringify(payload));
     assert.equal(payload.result.ok, true, JSON.stringify(payload.result.errors));
     return settleWorkspaceProjection(running, payload);
   };
   const rejectWebEdit = async (operation) => {
-    const response = await fetch(`${running.url}/__atom/api/workspace-edit`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ operation })
-    });
+    const response = await postBrowserEdit(running, { operation });
     const payload = await response.json();
     assert.equal(response.status, 200, JSON.stringify(payload));
     assert.equal(payload.result.ok, false, JSON.stringify(payload.result));
     return payload;
   };
 
-  const response = await fetch(`${running.url}/__atom/api/workspace-edit`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
+  const response = await postBrowserEdit(running, {
       operation: { kind: 'node-create', path: 'root', draft: { label: 'Created in Web', description: 'saved fact' } }
-    })
   });
   const payload = await response.json();
 
@@ -595,11 +603,8 @@ test('4784 Web workspace edits commit local Atom facts before asynchronously pub
   assert.equal(refreshedRenamed.detail, 'saved after refresh');
 
   const parent = payload.knowledge.nodes.find((node) => node.label === 'Existing');
-  const nestedResponse = await fetch(`${running.url}/__atom/api/workspace-edit`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
+  const nestedResponse = await postBrowserEdit(running, {
       operation: { kind: 'node-create', path: childPath(parent), draft: { label: 'Nested in Web', description: 'nested fact' } }
-    })
   });
   const nestedPayload = await nestedResponse.json();
   assert.equal(nestedPayload.result.ok, true, JSON.stringify(nestedPayload));
@@ -631,7 +636,7 @@ test('4784 Web workspace edits commit local Atom facts before asynchronously pub
   })).knowledge.nodes.find((node) => node.label === 'Move after refresh');
   assert.equal(movedAfterRefresh.atomPath, 'Existing/Move after refresh');
 
-  const adoptedLegacyNode = (await applyWebEdit({
+  await assert.rejects(applyWebEdit({
     kind: 'node-land',
     source: { key: 'root::legacy-local-only', nodeId: 'legacy-local-only' },
     sourceNode: {
@@ -641,9 +646,8 @@ test('4784 Web workspace edits commit local Atom facts before asynchronously pub
     draft: {
       id: 'legacy-local-only', label: 'Legacy local inspiration', description: 'preserve this detail', atomTypes: []
     }
-  })).knowledge.nodes.find((node) => node.label === 'Legacy local inspiration');
-  assert.equal(adoptedLegacyNode.atomPath, 'Existing/Legacy local inspiration');
-  assert.equal(adoptedLegacyNode.detail, 'preserve this detail');
+  }), { code: 'WEB_COMMAND_TARGET_UNRESOLVED' });
+  assert.equal(JSON.stringify((await committedWorld.read()).facts).includes('Legacy local inspiration'), false);
 
   let current = nestedPayload.knowledge;
   let created = current.nodes.find((node) => node.label === 'Created after refresh');
@@ -688,9 +692,7 @@ test('4784 Web workspace edits commit local Atom facts before asynchronously pub
   renamed = current.nodes.find((node) => node.label === 'Node renamed only');
   assert.equal(current.edges.length, 1);
 
-  const labelEdit = await fetch(`${running.url}/__atom/api/workspace-edit`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
+  await assert.rejects(browserPayload(running, {
       operation: {
         kind: 'edge-edit', status: 'update',
         edge: {
@@ -699,10 +701,7 @@ test('4784 Web workspace edits commit local Atom facts before asynchronously pub
           label: 'Changed relation'
         }
       }
-    })
-  });
-  assert.equal(labelEdit.status, 400);
-  assert.equal((await labelEdit.json()).error.code, 'INVALID_HUMAN_WORKSPACE_REQUEST');
+  }), { code: 'WEB_COMMAND_OPERATION_UNSUPPORTED' });
   assert.equal(current.edges[0].label, 'strut');
   existing = current.nodes.find((node) => node.label === 'Existing');
   renamed = current.nodes.find((node) => node.label === 'Node renamed only');
@@ -757,14 +756,11 @@ test('4784 Web may reversibly discard a container with a nested Agent Program', 
   const state = await fetch(`${running.url}/__spatial/api/state`).then((response) => response.json());
   const plan = state.knowledge.nodes.find((node) => node.label === 'ESG Plan');
 
-  const response = await fetch(`${running.url}/__atom/api/workspace-edit`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
+  const response = await postBrowserEdit(running, {
       operation: {
         kind: 'node-edit', status: 'delete', path: plan.path,
         nodeKey: plan.key, node: plan, draft: {}
       }
-    })
   });
   const payload = await response.json();
 
@@ -795,15 +791,11 @@ test('cold-start state includes deep Graph facts on first entry and refreshes an
   assert.ok(deep, JSON.stringify(firstState.knowledge));
   assert.equal(deep.detail, 'cold-start fact');
 
-  const response = await fetch(`${running.url}/__atom/api/workspace-edit`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
+  const response = await postBrowserEdit(running, {
       operation: {
         kind: 'node-edit', path: deep.path, nodeKey: deep.key,
         draft: { label: 'Level 3 renamed', description: 'authoritative detail', atomTypes: [] }
       }
-    })
   });
   const edited = await response.json();
   assert.equal(response.status, 200, JSON.stringify(edited));
@@ -850,9 +842,7 @@ test('4784 Web batch landing moves every selected sibling into one nested Atom c
   ].includes(node.atomPath));
   assert.equal(sources.length, 2);
 
-  const response = await fetch(`${running.url}/__atom/api/workspace-edit`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
+  const response = await postBrowserEdit(running, {
       operation: {
         kind: 'node-land-batch',
         target: { path: childPath(target) },
@@ -864,7 +854,6 @@ test('4784 Web batch landing moves every selected sibling into one nested Atom c
           draft: source
         }))
       }
-    })
   });
   const payload = await response.json();
   assert.equal(response.status, 200, JSON.stringify(payload));

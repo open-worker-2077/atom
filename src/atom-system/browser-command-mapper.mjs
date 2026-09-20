@@ -188,6 +188,10 @@ export function createBrowserCommandMapper() {
       const nextByContainer = new Map([['root', '']]);
       const nextLoadedPaths = new Set();
       const nodes = Array.isArray(knowledge?.nodes) ? knowledge.nodes : [];
+      const roots = nodes.filter(node => node?.path === 'root');
+      if (roots.length === 1 && !text(roots[0].atomPath)) {
+        nextByContainer.set(spatialChildPath(roots[0]), '');
+      }
       for (const node of nodes) {
         const atomPath = text(node?.atomPath);
         if (!atomPath) continue;

@@ -357,8 +357,6 @@ function displayHost(host) {
 
 export function createAtomGraphHandlers(interactionRuntime, options = {}) {
   if (typeof interactionRuntime?.execute !== 'function'
-    || typeof interactionRuntime?.updateHumanStatus !== 'function'
-    || typeof interactionRuntime?.updateHumanWorkspace !== 'function'
     || typeof interactionRuntime?.recover !== 'function') {
     throw problem('INVALID_INTERACTION_RUNTIME', 'Atom Graph handlers require one interaction runtime');
   }
@@ -414,25 +412,6 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
       return atomTextCommand(payload, lifecycle, {
         origin: 'web', humanAuthority: true, programMode: 'reconcile', agentRequired: false
       });
-    },
-    async atomHumanStatus(payload) {
-      if (!payload || typeof payload.key !== 'string' || typeof payload.detail !== 'string') {
-        throw problem('INVALID_HUMAN_STATUS_REQUEST', 'Human status requires a projected node key and detail');
-      }
-      return interactionRuntime.updateHumanStatus({
-        key: payload.key,
-        detail: payload.detail,
-        correlationId: payload.interactionId ?? crypto.randomUUID()
-      });
-    },
-    async atomWorkspaceEdit(payload, lifecycle = {}) {
-      if (!payload?.operation || typeof payload.operation !== 'object') {
-        throw problem('INVALID_HUMAN_WORKSPACE_REQUEST', 'Human workspace edit requires an operation');
-      }
-      return interactionRuntime.updateHumanWorkspace({
-        operation: payload.operation,
-        correlationId: payload.interactionId ?? crypto.randomUUID()
-      }, lifecycle);
     },
     async atomProjectionRecover(payload) {
       if (!payload || typeof payload.expectedRevision !== 'string' || !payload.expectedRevision.trim()) {
@@ -621,8 +600,6 @@ export async function startAtomGraphServer(options = {}) {
     atomSaveState: () => worldService.captureSaveState?.({
       contextFile: configuration.contextFile, projectionFile: configuration.graphFile
     }),
-    atomHumanStatus: handlers.atomHumanStatus,
-    atomWorkspaceEdit: handlers.atomWorkspaceEdit,
     atomProjectionRecover: handlers.atomProjectionRecover,
     atomProjectionStatus: typeof interactionRuntime.projectionStatus === 'function'
       ? () => interactionRuntime.projectionStatus()

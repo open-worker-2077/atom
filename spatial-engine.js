@@ -935,6 +935,8 @@
     const transaction = workspace.transaction();
     return Boolean(
       transaction
+      && transaction.kind !== "node-land"
+      && transaction.kind !== "node-land-batch"
       && !(transaction.kind === "edge-create" && !transaction.target)
     );
   }

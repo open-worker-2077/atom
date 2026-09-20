@@ -457,7 +457,7 @@ export async function createSpatialServer(options = {}) {
           version: VERSION,
           revision: knowledge.revision,
           mode: bossStore ? 'boss' : 'single',
-          atomWorkspace: typeof options.atomWorkspaceEdit === 'function',
+          atomWorkspace: typeof options.atomWebCommand === 'function',
           ...(atomProjection ? { atomProjection } : {}),
           ...(spatialProjectionFailure ? {
             spatialProjection: { status: 'pending', error: spatialProjectionFailure }
@@ -587,51 +587,6 @@ export async function createSpatialServer(options = {}) {
         };
         const result = await executeAtomTextCommand(webPayload, options.atomWebCommand, 'web');
         return json(response, 200, { ok: true, result: withAtomSaveState(result) });
-      }
-      if (url.pathname === '/__atom/api/human-status' && request.method === 'POST') {
-        if (typeof options.atomHumanStatus !== 'function') {
-          return json(response, 404, { ok: false, error: { code: 'ATOM_HUMAN_STATUS_UNAVAILABLE' } });
-        }
-        const payload = await body(request);
-        const result = await trackAtomInteraction(async () => {
-          const commandResult = await options.atomHumanStatus(payload);
-          if (graphFile) {
-            const document = JSON.parse(await fs.readFile(graphFile, 'utf8'));
-            if (options.projectAtomKnowledge) {
-              await store.execute('knowledge.replace', {
-                knowledge: await options.projectAtomKnowledge(document, commandResult)
-              });
-            }
-          }
-          return commandResult;
-        });
-        const knowledge = await readKnowledge();
-        publishKnowledgeChange(knowledge);
-        return json(response, 200, { ok: true, result: withAtomSaveState(result), knowledge });
-      }
-      if (url.pathname === '/__atom/api/workspace-edit' && request.method === 'POST') {
-        if (typeof options.atomWorkspaceEdit !== 'function') {
-          return json(response, 404, { ok: false, error: { code: 'ATOM_WORKSPACE_EDIT_UNAVAILABLE' } });
-        }
-        const payload = await body(request);
-        if (payload?.operation?.kind === 'node-create'
-          || (payload?.operation?.kind === 'node-edit' && payload.operation.status !== 'delete')) {
-          const result = await atomCommandRequest({
-            ...payload,
-            interaction: { id: payload.interactionId }
-          }, (normalized, onCommitted, signal, onSubsequentSettled) => options.atomWorkspaceEdit({
-            operation: normalized.operation,
-            interactionId: normalized.interaction.id
-          }, { onCommitted, signal, onSubsequentSettled }), {
-            kind: 'workspace-edit',
-            operation: payload.operation
-          });
-          return json(response, 200, { ok: true, result: withAtomSaveState(result), knowledge: null });
-        }
-        const result = await trackAtomInteraction(() => options.atomWorkspaceEdit(payload));
-        const knowledge = await readKnowledge();
-        publishKnowledgeChange(knowledge);
-        return json(response, 200, { ok: true, result: withAtomSaveState(result), knowledge });
       }
       if (url.pathname === '/__atom/api/recover-projection' && request.method === 'POST') {
         const remoteAddress = request.socket.remoteAddress ?? '';

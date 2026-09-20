@@ -37,7 +37,7 @@ async function fixture(t, { hangBackup = false, backupTrigger, onSave, shutdownT
     interactionRuntime: {
       initialize: async () => ({ initialization: { ok: true } }),
       execute: async (_, lifecycle) => { signal = lifecycle.signal; entered.resolve(); await release.promise; return { ok: true }; },
-      updateHumanStatus: async () => ({}), updateHumanWorkspace: async () => ({}), recover: async () => ({}),
+      recover: async () => ({}),
       close: async () => calls.push('runtime-close')
     } });
   t.after(async () => { release.resolve(); await running.close().catch(() => {}); running.server.closeAllConnections(); });

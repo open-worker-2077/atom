@@ -179,8 +179,8 @@ test('approved identity reaches the target without forwarding trusted proxy head
 test('approved POST body and SSE response stream through the same gateway boundary', async (t) => {
   const { gateway, received } = await fixture(t);
   const headers = { 'Tailscale-User-Login': 'worker@example.com' };
-  const payload = JSON.stringify({ operation: 'test' });
-  const posted = await request(`${gateway.url}/__atom/api/workspace-edit`, {
+  const payload = JSON.stringify({ source: 'explore {}', interaction: { id: 'gateway-web' } });
+  const posted = await request(`${gateway.url}/__atom/api/web-command`, {
     method: 'POST',
     headers: { ...headers, 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) },
     body: payload

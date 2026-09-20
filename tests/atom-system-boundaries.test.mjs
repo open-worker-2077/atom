@@ -36,3 +36,14 @@ test('dependency audit rejects domain code importing an adapter', () => {
     to: 'adapters'
   }]);
 });
+
+test('the browser mapper belongs to the adapter boundary without admitting adapter imports into the domain', () => {
+  const audit = auditDependencyRecords([
+    { file: 'browser-entry.mjs', imports: ['./browser-command-mapper.mjs'] },
+    { file: 'world-kernel/bad.mjs', imports: ['../browser-command-mapper.mjs'] }
+  ]);
+  assert.deepEqual(audit.violations, [{
+    file: 'world-kernel/bad.mjs', from: 'world-kernel',
+    dependency: '../browser-command-mapper.mjs', to: 'adapters'
+  }]);
+});
