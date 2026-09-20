@@ -694,3 +694,4 @@
 - **2026-09-20 Task 5复核修复提交**：`ea991590baf882303bf1f6e371dc738b5e06351e`（5文件，`test: harden parity readback and projection evidence`），development-control／diff-check PASS；提交后工作树干净，无运行中长测。交主控独立复核与最终全量／E3／远端收口，未自行执行这些步骤。
 - **2026-09-20 Task 5源域证据Minor**：复核要求移动缺席必须以源域实际加载为前提；对应小世界F5回归先RED（2.7分钟），准确失败于缺少sourceScopeProof。最小修复在移动后F5真实进入源域，以精确revision先确认源参照存在、再确认旧移动路径缺席，随后真实返回目标域继续原正文／revision断言。仅验收容器180→240秒容纳额外导航，不变更命令预算或生产；仅重跑该小世界回归，不重复30样本。
 - **2026-09-20 Task 5源域证据GREEN**：对应小世界Playwright1/1 PASS（2.6分钟），`atom-web-cli-parity-PNtuYP/journey-report.json`记录移动后源域／目标域均导入精确revision=5，源参照存在、旧移动路径缺席，目标正文逐字节一致；原四处F5及反馈断言全部保留。未重复完整30样本，未触碰生产、npm test、部署或推送。
+- **2026-09-20 Task 5源域证据提交**：`39bc1983cf18f7cb552767e402003b0b6ea6e633`（3文件，`test: prove moved node absence in loaded source scope`），diff-check PASS；阶段提交后工作树干净，无运行中长测，交主控最终候选复核。
