@@ -20,6 +20,45 @@ function executableFunction(name, dependencies = {}) {
   return Function(...names, `"use strict"; return (${functionSource(name)});`)(...values);
 }
 
+test('simple projected strut keeps ordinary selection and enters edge editing only for Ctrl-right', () => {
+  const direct = executableFunction('directPointerIntent');
+  const edge = { from: { key: 'a' }, to: { key: 'b' } };
+  const item = { kind: 'strut-clause', clauseId: 'simple', editableEdge: edge };
+  assert.equal(direct(item, { button: 0 }).intent, 'selectStrutClause');
+  assert.equal(direct(item, { button: 2 }).intent, 'selectStrutClause');
+  const edit = direct(item, { button: 2, ctrlKey: true });
+  assert.equal(edit.intent, 'editEdge');
+  assert.equal(edit.visualMeta.item.kind, 'relationship');
+  assert.equal(edit.visualMeta.item.edge, edge);
+  assert.equal(direct({ kind: 'strut-clause', clauseId: 'compound' }, { button: 2, ctrlKey: true }).intent, 'selectStrutClause');
+});
+
+test('conditional and compound Strut geometry cannot acquire a simple-edge delete affordance', () => {
+  const visualModel = require('../spatial-visual-model.js');
+  const point = (x, y) => ({ screen: { x, y, radius: 1 } });
+  const nodes = new Map([['A', point(0, 0)], ['B', point(100, 0)], ['C', point(100, 100)]]);
+  for (const [name, implicit, targets, editable] of [
+    ['simple', true, ['B'], true], ['conditional', false, ['B'], false], ['compound', true, ['B', 'C'], false]
+  ]) {
+    const state = { strutGeometry: [], strutClauses: [{ id: name, sourcePath: 'A',
+      root: { kind: 'thing', targetPath: 'A', implicit }, antecedentPaths: ['A'], dependencyPaths: ['A'],
+      then: targets.map((targetPath, thenOrdinal) => ({ kind: 'thing', targetPath, thenOrdinal })),
+      evaluation: { decision: true } }] };
+    const rendered = [];
+    const prepare = executableFunction('prepareStrutLayer', { state, visualModel,
+      drawTopologyLink(from, to, relationship) {
+        rendered.push(relationship);
+        return { start: from.screen, end: to.screen };
+      } });
+    const layer = prepare(nodes);
+    const edge = { id: 'projected-edge' };
+    layer.bindProjectedEdge('A', 'B', edge);
+    layer.draw();
+    assert.ok(rendered.length > 0);
+    assert.equal(rendered.some(segment => segment.editableEdge === edge), editable, name);
+  }
+});
+
 function numericConstant(name) {
   const match = source.match(new RegExp(`const\\s+${name}\\s*=\\s*(\\d+(?:\\.\\d+)?)`));
   assert.ok(match, `${name} has a numeric value`);

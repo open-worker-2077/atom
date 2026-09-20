@@ -647,3 +647,41 @@
 - **2026-09-20 Web→CLI单轨Task 4复核回修（I3/U3/D3/E3）**：独立复核确认同域单节点／批量落脚会由共享运行时正确返回`changed:false`且不产生新投影，但桥接层仍登记projection pending并要求空间revision严格增加，造成永久degraded。新增双路径RED均命中；当前改为仅在`changed:false`时以已加载的当前权威投影直接核对目标，核对成功立即确认持久化，核对失败则沿既有失败回滚，绝不等待不存在的新revision。定向单节点／批量回归2/2 GREEN；仍待受影响链、差异复核及Task 5 E3门禁。
 
 - **2026-09-20 Web→CLI单轨Task 4关闭**：回修后四文件受影响门禁88/88、浏览器构建和diff检查通过，build为`sha256-eed7f7a685ced618`；独立复核以真实双节点批量验证完整目标立即确认、缺失或重复目标均失败回滚，最终无Critical、Important或Minor。Task 4关闭，整体E3进入Task 5。
+
+- **2026-09-20 Web→CLI Task 5 RED**：基于`7cad5ec`执行同构与性能验收。新增12,500无关节点热态映射证据已有GREEN（30样本p95=0.026ms且无重复投影读取）；精确parser/validator观测RED为实际`[]`、期望各一次。只增加默认关闭的本地receiver observer，异常吞掉，不改变业务结果、不扩展HTTP协议。后续以真实双世界服务和Chromium采集同一source、四轴守恒与分段耗时；最终全量、正式部署与远端门禁仍开放。
+
+- **2026-09-20 Task 5真实关系删除RED**：同构旅程前五步已发送正确创建／编辑／改名／移动／建边CLI文本。小型隔离世界诊断按正式`Ctrl+右键选线→Delete→Enter`操作，实际命中binary Strut且`selectedStrutClause`正确，但`transactionActive:false`、未发送删除命令。根因是绘制层为避免重复显示隐藏了原始可编辑edge命中，替换后的`strut-clause`只支持选择。最小修复应把同一已加载投影edge附在简单无条件binary命中上，仅Ctrl+右键进入已有edge-edit；普通选线、复合／条件条款与CLI语义保持原合同。
+
+- **2026-09-20 Task 5分段口径裁定**：小型隔离世界七步、四轴事实与失败hash守恒已通过；30样本实测Web shared p95=6.88ms、CLI=6.17ms、ResourceTiming传输=9.80ms，而fetch await总往返=456.40ms。响应到达后的浏览器主线程调度不能计作网络。主控裁定网络／信封采用ResourceTiming传输减shared再加同步JSON序列化／解析，继续保留原始roundTrip与browserScheduling并独立报告；12,500规模roundTrip达到1s须作为新RED，不能通过拆分隐藏。原5ms／10%+5ms／50ms／100ms合同均保持。
+
+- **2026-09-20 Task 5门禁推进**：受影响Node链217/217、浏览器构建通过，build=`sha256-a18384e2825dcdee`。追加复合Strut浏览器回归的第二项在已退役“全域”按钮等待60秒失败，此前几何／hub断言均通过；以`input-config.js`现行“左键空白取消聚焦”合同替换该夹具动作，保留全部业务断言，定向复验。指定保存反馈与同构旅程独立继续，未执行最终全量／部署／推送。
+
+- **2026-09-20 Task 5大世界性能RED**：12,500无关Thing下七项真实编辑、相同CLI重放、四轴与三类失败hash／计数均通过；保存反馈3/3通过。30样本Web shared p95=320.231ms、CLI=275.590ms，超过308.149ms上限；compile=0.10ms、网络信封=4.03ms、roundTrip=529.60ms、browserScheduling=213.40ms均达标。先对共享入口至executor的准备段与executor至来源提交分段观测，定位真实差异；不放宽阈值、不进入后续Program索引。
+
+- **2026-09-20 Task 5采样隔离裁定**：定向复现仍RED（Web shared p95=347.694ms、CLI=264.980ms），pre-executor仅0.246／0.153ms，排除快照准备计时边界假设。现有runtime阶段证据显示两个隔离世界同处Node进程，前一来源早回执之后的后续执行与另一世界样本重叠。主控认可每个真实调用settled后再启动另一世界、且轮换CLI-first／Web-first；等待明确排除在shared／roundTrip外并单独报告，七步真实旅程与采样批次总墙钟保留。原全部阈值不变，正定向检验此单一假设。
+
+- **2026-09-20 Task 5隔离诊断续点**：排除双世界来源后续重叠并轮换顺序后，Web shared p50／p95=249.48／408.83ms、CLI=254.10／359.50ms，仍超400.45ms上限；故重叠不是充分根因。现成阶段记录中Web来源commit最大298.89ms，新增test-side `commitWorld`返回时刻，区分权威提交与来源回执组装间隙；坚持原门禁，不用重复运行碰运气。
+
+- **2026-09-20 Task 5保存竞争假设**：12次阶段诊断回执组装Web7–15ms／CLI8–17ms，未构成主要偏差；CLI-first后的Web多次321／329／336ms，Web-first约228–269ms。独立保存默认quietMs=250ms，CLI来源回执后的真实调用settled并不等于保存已结束；浏览器自身调度却使Web保存通常先完成。下一单变量诊断仅在命令计时完成后调用真实`flushSaves()`，单独记录saveDrain，不改生产保存调度，检验双世界后台保存争用。
+
+- **2026-09-20 Task 5性能定向GREEN**：真实后续与独立保存均在命令钟外排空、轮换先后顺序后，12,500规模30样本Web shared p95=307.98ms、CLI=318.36ms（上限355.20）；compile=0.10ms、网络信封=4.02ms、roundTrip=578.60ms、browserScheduling=266.20ms。独立保存drain p95 Web155.01ms／CLI157.39ms，含5次预热的35次完整批次墙钟60.57s。保存竞争假设获单变量支持；当前升回完整七步＋采样与复合Strut复验，不以定向GREEN替代完整验收。
+
+- **2026-09-20 Task 5复合夹具更正**：复验表明旧帮助label仍写“左键空白取消聚焦”，但实际`fieldPrimary:null`，空白点击不触发clearFocus。该回归只需从已验证的hub聚焦回到可见几何；改用退役按钮对应的公开`clearFocus`视觉intent，不注入workspace operation，不修改生产输入绑定，仍以真实鼠标选择Strut并验证无Atom写入。
+
+- **2026-09-20 Task 5完整复验仍RED**：保存排空与轮换协议下完整七步后30样本Web shared p95=337.049ms、CLI=293.424ms，仍超327.767ms上限；compile=.20ms、网络信封=3.85ms、roundTrip=530.90ms、browserScheduling=212.20ms均通过。先前独立采样GREEN不得替代此结果；暂停试调采样参数并交主控裁定进一步共享路径诊断边界，性能合同与E3仍开放。已明确修正的复合Strut夹具可独立复验。
+
+- **2026-09-20 Task 5复合夹具边界**：clearFocus复验已通过所有几何、真实Strut点击与clause身份断言；最终无Atom写入断言暴露启动时合法`PUT /presentation-settings`，旧夹具仅豁免`/view`。按该测试“无Atom写入”原义，仅豁免这两条PUT展示状态入口，其他变更请求仍全拒绝；生产设置行为不改。
+
+- **2026-09-20 Task 5复合Strut关闭**：最新定向Chromium 2/2通过（35.8秒）。性能仍以完整旅程337.049／293.424ms RED为当前结论；主控已启动只读诊断，本执行器暂停重跑性能。验收脚本增强同ID计数累计，避免重入覆盖旧计数；后续运行将把七步旅程与完整30样本JSON保留在每次独立临时世界目录，失败也保留，避免为取数重复工作负载。
+
+- **2026-09-20 Task 5阶段探针RED/GREEN**：主控只读诊断将差额定位至单项Transform提交前未标记段，要求观测sealWorldFactsRevision／postCommitEvent／inheritPreparedAccessWorld／validateRequestCandidate，不先改programMode。两项探针合同先0/2 RED，默认关闭、异常隔离的内部观察入口及缓存存在／尺寸标量观测实现后性能文件5/5 GREEN。仅验收显式开启该探针，接下来用最小配对样本证伪全世界访问缓存继承假设；当前性能RED不变。
+
+- **2026-09-20 Task 5缓存假设证伪**：guard前缓存观测补充RED后5/5 GREEN；4对真实Web/CLI样本均previousSealed=true、nextSealed=false，故继承立即false（热态0.01–0.05ms），并未执行全图缓存复制。初始两cache都在（12,509 matches／37,525 selectors），后续Explore无／Slot有，不能把sealed早退误作cache都无。证据在临时世界`atom-web-cli-parity-BtCBTY/stage-samples.json`。该轮validateRequestCandidate单次Web约74–92ms／CLI50–62ms，而上一12对约34–60ms，差额伴随环境波动；已交主控，未改programMode、阈值或业务算法，未再跑完整验收。
+
+- **2026-09-20 Task 5CPU取证入口**：主控要求继续区分候选校验计算量与竞争。threadCPU／实际遍历输入断言先1项RED，追加仅显式探针启用时的threadCpuUsage、前后ordinal、已提交标识、请求／提交路径、真实visitedMatches／声明数／声明序列化字节后性能文件5/5 GREEN。规模指标读取本来就产生的遍历结果，不为取证新增全世界扫描；正执行8对相同source样本，当前完整性能RED结论保留。
+
+- **2026-09-20 Task 5CPU配对结论**：8对原始证据位于临时世界`atom-web-cli-parity-DyfI9w/stage-samples.json`。Web／CLI每次前后均2根、12,508真实遍历matches、archiveShortcut=true、1声明／189字节，输入一致。去首对后7对均值：来源提交前Web wall45.974／threadCPU42.429ms，对照CLI44.293／42.714；提交后Web46.675／47.000，对照CLI46.257／47.000。线程CPU相同且wall仅1.68／0.42ms差，本轮不支持校验算法或输入造成稳定额外计算；此前差额更符合运行竞争，但该定向结果不替代尚未通过的完整性能门禁。Windows线程CPU约15–16ms量化须保留解释边界；等待主控下一裁定，不擅自重跑完整性能或变更策略。
+- **2026-09-20 Task 5投影排空裁定**：主控要求不改业务校验或阈值；每对真实调用settled与flushSaves后，再等Web权威投影／SSE导入新revision、页面idle及渲染帧，方开始下一独立样本。该等待明确记为projection／sample drain并排除于命令钟，保留SSE、渲染、原始roundTrip与七步总体验耗时；批准一次完整30样本验证剩余隔离缺口。
+- **2026-09-20 Task 5验收容器超时**：新增真实投影排空后，Playwright总300秒时限在后续样本投影等待期间耗尽；临时世界`atom-web-cli-parity-9DNskC`保留七步与失败守恒GREEN（真实旅程119.54秒），尚无30样本预算结论。仅把测试容器时限增为600秒、逐对留原始证据后重试；不改变业务、单命令预算、阈值或既有性能RED结论。
+- **2026-09-20 Task 5完整同构GREEN**：权威投影排空后的真实七步／12,500无关Thing／30计量样本／F5验收Chromium1/1 PASS（5.9分钟）。parser／validator／executor各一次、同source解析、最终四轴、3类失败错误码及各世界失败前后哈希均通过。Web shared p50／p95=281.090／396.617ms，CLI=273.145／433.938ms，原阈值482.332ms；compile p95=0.10ms，network/envelope=4.208ms，原始roundTrip=619.50ms，browserScheduling=237.10ms，保存反馈最大10.30ms。投影drain p95=5096.01ms、总sample drain=5424.40ms均明确排除命令钟；35对采样墙钟245.85秒，七步原始体验墙钟90.923秒，不以拆分隐藏总耗时。原始journey／performance／逐对报告保留于临时世界`atom-web-cli-parity-vB78UA`。此前RED不删；接续新增engine/query探针受影响链、build与development-control，复用同生产代码save-feedback3/3与compound2/2，不重复完整性能；最终全量／部署／远端仍归主控。
+- **2026-09-20 Task 5本地候选门禁**：新增只读阶段探针后的受影响Node链219/219 PASS（20.83秒），browser build、development-control及diff-check均PASS；浏览器fingerprint仍为`sha256-a18384e2825dcdee`。交主控独立复核候选后执行最终`npm test`、正式4784部署／回读与精确远端终态，本地实现不冒充E3完成。未改生产atom.json，未进入后续Program引用索引。

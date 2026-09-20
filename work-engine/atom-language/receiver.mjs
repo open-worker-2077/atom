@@ -188,6 +188,10 @@ function normalizeItem(node, index, parserOptions, command) {
 }
 
 export function createAtomLanguageReceiver(options = {}) {
+  // Optional local observation only; observer failures cannot change command semantics.
+  const observe = typeof options.onStage === 'function' ? (stage) => {
+    try { options.onStage({ stage }); } catch { /* Observational. */ }
+  } : null;
   const matcherRegistry = options.matcherRegistry ?? createMatcherRegistry();
   const actionRegistry = options.actionRegistry ?? createActionRegistry();
   const parserOptions = {
@@ -226,6 +230,7 @@ export function createAtomLanguageReceiver(options = {}) {
       };
     }
     try {
+      observe?.('parser');
       root = parseGraphJson(command.payload);
     } catch (error) {
       return {
@@ -250,6 +255,7 @@ export function createAtomLanguageReceiver(options = {}) {
 
     const batch = root?.kind === 'array';
     const nodes = batch ? root.values : [root];
+    observe?.('validator');
     const items = nodes.map((node, index) => (
       normalizeItem(node, index, parserOptions, command.command)
     ));

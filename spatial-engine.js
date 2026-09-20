@@ -2488,6 +2488,7 @@
                 kind: "strut-clause",
                 clauseId: relationship.clauseId,
                 segmentRole: relationship.segmentRole,
+                editableEdge: relationship.editableEdge || null,
                 node: null,
                 label: relationship.label
               },
@@ -2503,6 +2504,13 @@
   }
 
   function prepareStrutLayer(renderedByGraphPath) {
+    const editableClauseIds = new Set(state.strutClauses.filter((clause) => (
+      clause && clause.root && clause.root.kind === "thing" && clause.root.implicit === true
+      && clause.root.targetPath === clause.sourcePath
+      && Array.isArray(clause.then) && clause.then.length === 1
+      && clause.then[0] && clause.then[0].kind === "thing"
+    )).map((clause) => clause.id));
+    const projectedEdges = new Map();
     const strutBundles = visualModel.strutBundles(state.strutClauses, {
       junctionRatio: 0.5,
       visiblePaths: new Set(renderedByGraphPath.keys())
@@ -2565,6 +2573,8 @@
           label: "strut",
           clauseId: geometry.clauseId,
           segmentRole: segment.role,
+          editableEdge: segment.role === "binary" && editableClauseIds.has(geometry.clauseId)
+            ? projectedEdges.get(`${segment.fromPath}\u0000${segment.toPath}`) || null : null,
           showLabel: segment.role === "binary" || segment.role === "trunk",
           glyphs: false,
           ...(segment.role !== "antecedent" ? { glyphs: true } : {})
@@ -2582,6 +2592,9 @@
 
     return {
       drawablePairs,
+      bindProjectedEdge(fromPath, toPath, edge) {
+        projectedEdges.set(`${fromPath}\u0000${toPath}`, edge);
+      },
       draw() {
         drawableBundles.forEach(drawBundle);
       }
@@ -2689,7 +2702,10 @@
       const toNode = edge.to.path === state.currentPath
         ? renderedNodes.get(edge.to.nodeId)?.node
         : null;
-      if (edge.label === "strut" && strutLayer.drawablePairs.has(`${fromNode?.graphPath}\u0000${toNode?.graphPath}`)) return;
+      if (edge.label === "strut" && strutLayer.drawablePairs.has(`${fromNode?.graphPath}\u0000${toNode?.graphPath}`)) {
+        strutLayer.bindProjectedEdge(fromNode.graphPath, toNode.graphPath, edge);
+        return;
+      }
       drawWorkspaceEdge(edge);
     });
     strutLayer.draw();
@@ -5093,7 +5109,10 @@
       if (
         edge.label === "strut"
         && strutLayer.drawablePairs.has(`${from.node.graphPath}\u0000${to.node.graphPath}`)
-      ) continue;
+      ) {
+        strutLayer.bindProjectedEdge(from.node.graphPath, to.node.graphPath, edge);
+        continue;
+      }
       drawTopologyLink(from, to, {
         fromId: fromEndpoint.nodeId,
         toId: toEndpoint.nodeId,
@@ -7203,7 +7222,7 @@
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   }
 
-  function directPointerIntent(item) {
+  function directPointerIntent(item, pointer = {}) {
     if (!item) {
       return null;
     }
@@ -7219,6 +7238,9 @@
       return { intent: "inspect", visualMeta: {}, target: item.node };
     }
     if (item.kind === "strut-clause") {
+      if (pointer.button === 2 && pointer.ctrlKey && item.editableEdge) {
+        return { intent: "editEdge", visualMeta: { item: { kind: "relationship", edge: item.editableEdge } }, target: null };
+      }
       return { intent: "selectStrutClause", visualMeta: { item }, target: null };
     }
     return null;
@@ -7609,7 +7631,7 @@
       dragIntent,
       mappingEvent,
       mappingContext,
-      direct: directPointerIntent(item),
+      direct: directPointerIntent(item, mappingEvent),
       threshold: event.pointerType === "touch" ? 10 : 6,
       cancelled: false
     };
@@ -7710,7 +7732,7 @@
             candidate.item = secondaryHit ? secondaryHit.item || null : null;
             candidate.node = candidate.item && candidate.item.node ? candidate.item.node : null;
             candidate.domainContext = secondaryHit ? secondaryHit.domainContext || null : null;
-            candidate.direct = directPointerIntent(candidate.item);
+            candidate.direct = directPointerIntent(candidate.item, { ...candidate.mappingEvent, button: 2 });
             if (candidate.node) rememberLatestInteraction(candidate.item);
             const transaction = workspace.transaction();
             candidate.mappingContext = {

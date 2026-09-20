@@ -255,7 +255,7 @@ function archivedDeclarationSummary(root) {
   return summary;
 }
 
-function programDeclarationSurface(atoms) {
+function programDeclarationSurface(atoms, traversal = null) {
   let archiveMatch = null;
   let unsafeArchiveShape = false;
   const matches = walkAtoms(atoms, { skipDescendants(match) {
@@ -267,10 +267,16 @@ function programDeclarationSurface(atoms) {
     }
     return false;
   } });
+  if (traversal) Object.assign(traversal, { roots: atoms.length, visitedMatches: matches.length,
+    archiveShortcut: Boolean(archiveMatch), unsafeArchiveShape });
   if (!archiveMatch) return matches.flatMap(declarationAtMatch);
   if (unsafeArchiveShape || matches.some((match) => (
     match !== archiveMatch && isStoredTypedDefaultBackupAtom(match.atom)
-  ))) return walkAtoms(atoms).flatMap(declarationAtMatch);
+  ))) {
+    const completeMatches = walkAtoms(atoms);
+    if (traversal) traversal.fallbackVisitedMatches = completeMatches.length;
+    return completeMatches.flatMap(declarationAtMatch);
+  }
   const summary = archivedDeclarationSummary(archiveMatch.atom);
   return matches.flatMap((match) => match === archiveMatch
     ? summary.map((declaration) => ({
@@ -519,10 +525,18 @@ async function validateAgentProgramDelegation({
   declarationRelocations = [],
   declarationRemovalRoots = [],
   restoredDeclarationSurface = null,
-  simultaneousRelocations = false
+  simultaneousRelocations = false,
+  surfaceInput = null
 }) {
-  if (JSON.stringify(programDeclarationSurface(beforeAtoms))
-    === JSON.stringify(programDeclarationSurface(afterAtoms))) {
+  const beforeSurface = programDeclarationSurface(beforeAtoms, surfaceInput?.before);
+  const beforeText = JSON.stringify(beforeSurface);
+  const afterSurface = programDeclarationSurface(afterAtoms, surfaceInput?.after);
+  const afterText = JSON.stringify(afterSurface);
+  if (surfaceInput) {
+    Object.assign(surfaceInput.before, { declarations: beforeSurface.length, serializedBytes: Buffer.byteLength(beforeText) });
+    Object.assign(surfaceInput.after, { declarations: afterSurface.length, serializedBytes: Buffer.byteLength(afterText) });
+  }
+  if (beforeText === afterText) {
     return { ok: true, errors: [] };
   }
   if (declarationRelocations.length > 0
@@ -977,6 +991,12 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     return buildFailureBase(...args);
   }
   const operationStartedAt = performance.now();
+  const observeExecutionStage = typeof options.onExecutionStage === 'function' ? event => {
+    try {
+      options.onExecutionStage({ interactionId: options.interaction?.id ?? null,
+        programMode: options.programMode ?? 'current', humanAuthority: options.humanAuthority === true, ...event });
+    } catch { /* Default-off local timing cannot change execution semantics. */ }
+  } : null;
   const source = options.source;
   const receiver = options.receiver ?? createAtomLanguageReceiver(options.receiverOptions);
   const parsed = receiver.receive(source);
@@ -2021,11 +2041,15 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   let requestDeclarationRelocations = [];
   let requestDeclarationRemovalRoots = [];
   let requestRestoredDeclarationSurface = null;
+  let observedValidationCount = 0;
 
   async function validateRequestCandidate(
     candidateAtoms, declarationRelocations = requestDeclarationRelocations
   ) {
-    return validateAgentProgramDelegation({
+    const startedAt = observeExecutionStage ? performance.now() : 0;
+    const startedCpu = observeExecutionStage && typeof process.threadCpuUsage === 'function' ? process.threadCpuUsage() : null;
+    const surfaceInput = observeExecutionStage ? { before: {}, after: {} } : null;
+    const pending = validateAgentProgramDelegation({
       beforeAtoms: requestStartAtoms,
       afterAtoms: candidateAtoms,
       creatorSecurity,
@@ -2034,8 +2058,18 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       declarationRelocations,
       declarationRemovalRoots: requestDeclarationRemovalRoots,
       restoredDeclarationSurface: requestRestoredDeclarationSurface,
-      simultaneousRelocations: parsed.batch && parsed.items.every(isBatchRenameItem)
+      simultaneousRelocations: parsed.batch && parsed.items.every(isBatchRenameItem),
+      surfaceInput
     });
+    if (!observeExecutionStage) return pending;
+    const result = await pending;
+    const cpu = startedCpu ? process.threadCpuUsage(startedCpu) : null;
+    observeExecutionStage({ stage: 'validateRequestCandidate', durationMs: performance.now() - startedAt,
+      threadCpuMs: cpu ? (cpu.user + cpu.system) / 1000 : null,
+      ordinal: ++observedValidationCount, sourceCommitted: postcommit?.sourceNotified === true,
+      requestedPaths: parsed.items.flatMap(item => item.fields.filter(field => field.baseKey === 'thing' && typeof field.value === 'string').map(field => field.value)),
+      committedAffectedPaths: [...committedAffectedPaths], surfaceInput, result: result.ok });
+    return result;
   }
 
   function throwCandidateDelegationFailure(errors) {
@@ -4589,11 +4623,15 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   let sourceAtoms = sourceChanged ? null
     : isSealedWorldFacts(atoms) ? atoms : structuredClone(nextAtoms);
   let sourceRevision = revisionBefore;
+  const sealStartedAt = observeExecutionStage ? performance.now() : 0;
   const sourceTransformLogRecord = transformed.logRecord && sourceChanged ? {
     ...transformed.logRecord,
     revisionBefore,
     revisionAfter: sealWorldFactsRevision(nextAtoms).slice('sha256:'.length)
   } : null;
+  observeExecutionStage?.({ stage: 'sealWorldFactsRevision', durationMs: performance.now() - sealStartedAt,
+    called: Boolean(transformed.logRecord && sourceChanged) });
+  const eventStartedAt = observeExecutionStage ? performance.now() : 0;
   unchangedSourceEvent = postCommitEvent({ mode: 'transform',
     ...(transformAction ? { action: transformAction } : {}),
     affectedPaths: isBatchRenameItem(item)
@@ -4605,9 +4643,15 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       && (declarationRelocations.length === 0 || isBatchRenameItem(item)),
     ...(transformed.archive ? { archive: structuredClone(transformed.archive) } : {})
   });
+  observeExecutionStage?.({ stage: 'postCommitEvent', durationMs: performance.now() - eventStartedAt });
   if (sourceChanged) {
     if (!programSurfaceChanged && isLocalizedSituationTransform(item)) {
-      inheritPreparedAccessWorld(atoms, nextAtoms);
+      if (observeExecutionStage) {
+        const startedAt = performance.now();
+        let cacheState = { previousExplore: false, previousSlotStructure: false };
+        const result = inheritPreparedAccessWorld(atoms, nextAtoms, event => { cacheState = event; });
+        observeExecutionStage({ stage: 'inheritPreparedAccessWorld', durationMs: performance.now() - startedAt, ...cacheState, result });
+      } else inheritPreparedAccessWorld(atoms, nextAtoms);
     }
     const sourceReceipt = await commitChangedGraph(nextAtoms, {
       changedPaths: transformAffectedPaths,

@@ -208,7 +208,9 @@ test('one explicit N-to-H plus H-to-M composition keeps the real hub and two cla
   expect(hub).toBeTruthy();
   await page.mouse.click(hub.clientX, hub.clientY, { button: 'middle' });
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().selected)).toBe('H');
-  await page.getByRole('button', { name: '全域', exact: true }).click();
+  // The overview button is retired; use its public visual intent, not a workspace mutation.
+  await page.evaluate(() => window.spatialLab.dispatch('clearFocus'));
+  await page.waitForTimeout(550); // clearFocus owns a 520ms camera tween.
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().strutGeometry)).toHaveLength(2);
   expect(await page.evaluate(() => ({
     geometryIds: window.spatialLab.state().strutGeometry.map(({ id }) => id),
@@ -230,7 +232,8 @@ test('one explicit N-to-H plus H-to-M composition keeps the real hub and two cla
   await expect.poll(() => page.evaluate(() => (
     window.spatialLab.state().selectedStrutClause
   ))).toBe('strut:Flow/H:0');
-  expect(mutatingRequests.filter(({ url }) => (
-    new URL(url).pathname !== '/__spatial/api/view'
+  // View state and loopback presentation-default bootstrap are not Atom writes.
+  expect(mutatingRequests.filter(({ method, url }) => (
+    !(method === 'PUT' && ['/__spatial/api/view', '/__spatial/api/presentation-settings'].includes(new URL(url).pathname))
   ))).toEqual([]);
 });

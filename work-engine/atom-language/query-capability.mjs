@@ -386,7 +386,17 @@ export function inheritPreparedSlotStructureWorld(previousAtoms, nextAtoms, chan
   return true;
 }
 
-export function inheritPreparedAccessWorld(previousAtoms, nextAtoms) {
+export function inheritPreparedAccessWorld(previousAtoms, nextAtoms, observe = null) {
+  if (typeof observe === 'function') {
+    const previousExplore = preparedExploreSnapshots.get(previousAtoms);
+    const previousSlotStructure = preparedSlotStructureSnapshots.get(previousAtoms);
+    try {
+      observe({ previousSealed: isSealedWorldFacts(previousAtoms), nextSealed: isSealedWorldFacts(nextAtoms),
+        previousExplore: Boolean(previousExplore), previousSlotStructure: Boolean(previousSlotStructure),
+        exploreMatches: previousExplore?.allMatches.length ?? 0, exploreSelectors: previousExplore?.exactIndex.size ?? 0,
+        slotDomains: previousSlotStructure?.domains.length ?? 0, slotLocks: previousSlotStructure?.locks.length ?? 0 });
+    } catch { /* Local observation cannot alter cache inheritance. */ }
+  }
   if (!isSealedWorldFacts(previousAtoms) || !isSealedWorldFacts(nextAtoms)) return false;
   const previousExplore = preparedExploreSnapshots.get(previousAtoms);
   const previousSlotStructure = preparedSlotStructureSnapshots.get(previousAtoms);
