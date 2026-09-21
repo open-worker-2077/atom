@@ -37,6 +37,36 @@ test('coordinator accepts into one memory fact/receipt boundary without storage'
   assert.equal((await coordinator.inspectCommitted((current) => current)).revision, receipt.afterRevision);
 });
 
+test('binding metadata shares memory acceptance, retry and interruption recovery with Program facts', async () => {
+  const before = snapshot([{ thing: 'Root', situation: 'before', slot: [], strut: [] }]);
+  const after = [{ thing: 'Root', situation: 'after', slot: [], strut: [] }];
+  const binding = { version: 1, replacements: [{ programThingId: 'program-id',
+    sourceHash: `sha256:${'a'.repeat(64)}`, sites: [{ fingerprint: 'ref:module.body[0]:0',
+      role: 'ref', targetThingId: 'target-id' }] }], removals: [] };
+  let interrupted = false;
+  const ports = createMemoryTransactionPorts({ initialSnapshot: before });
+  const coordinator = createCommitCoordinator({ ...ports, faultInjector(stage) {
+    if (!interrupted && stage === 'after-prepare') {
+      interrupted = true;
+      throw Object.assign(new Error('journal interrupted'), { code: 'INJECTED_INTERRUPTION' });
+    }
+  } });
+  const request = { command: command('binding-write', before.revision), transition: () => ({
+    facts: after, result: { programRefBindings: binding }
+  }) };
+  await assert.rejects(coordinator.execute(request), { code: 'INJECTED_INTERRUPTION' });
+  assert.equal(ports.authority.snapshot().facts[0].situation, 'before');
+  assert.deepEqual((await ports.journalRepository.readMetadataState()).receipts, []);
+
+  await coordinator.recover();
+  const metadata = await ports.journalRepository.readMetadataState();
+  assert.equal(ports.authority.snapshot().facts[0].situation, 'after');
+  assert.deepEqual(metadata.receipts[0].receipt.result.programRefBindings, binding);
+  const retried = await coordinator.execute(request);
+  assert.equal(retried.commandId, 'binding-write');
+  assert.equal((await ports.journalRepository.readMetadataState()).receipts.length, 1);
+});
+
 test('only a privately claimed plain candidate transfers identity to memory acceptance', async () => {
   const before = snapshot([{ thing: 'Root', situation: 'before', slot: [], strut: [] }]);
   const ports = createMemoryTransactionPorts({ initialSnapshot: before });

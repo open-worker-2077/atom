@@ -21,6 +21,11 @@ import {
   createJsonTransactionJournal,
   createJsonWorldRepository
 } from './json-world-repository.mjs';
+import {
+  createProgramRefBindingUpdate,
+  programRefBindingsForRollback,
+  redactProgramRefBindings
+} from '../../../work-engine/atom-language/program-ref-binding-ledger.mjs';
 
 function problem(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -474,6 +479,7 @@ export function createTransactionalWorldPersistence({
     transformLogRecord = null,
     postCommitEvent = null,
     subsequentOf = null,
+    programRefBindings = null,
     compatibilityManifest: suppliedManifest = null,
     baseCompatibilityManifest: suppliedBaseManifest = null
   }) {
@@ -496,7 +502,7 @@ export function createTransactionalWorldPersistence({
       return null;
     }
     const existing = await existingExecutionReceipt();
-    if (existing) return existing;
+    if (existing) return redactProgramRefBindings(existing);
     const computedRevision = revisionOfWorldFacts(facts);
     const canonicalNextRevision = canonicalRevision(nextRevision);
     const canonicalExpectedRevision = canonicalRevision(expectedRevision);
@@ -530,6 +536,9 @@ export function createTransactionalWorldPersistence({
     let nextManifest = suppliedManifest
       ? (validateCompatibilityManifest(suppliedManifest, facts), structuredClone(suppliedManifest))
       : null;
+    const bindingUpdate = programRefBindings == null
+      ? null
+      : createProgramRefBindingUpdate(programRefBindings);
     let receipt;
     let reusedReceipt = false;
     try {
@@ -607,7 +616,8 @@ export function createTransactionalWorldPersistence({
               ...(previousManifest ? { previousCompatibilityManifest: previousManifest } : {}),
               ...(transformLogRecord ? {
                 transformLogRecord: structuredClone(transformLogRecord)
-              } : {})
+              } : {}),
+              ...(bindingUpdate ? { programRefBindings: bindingUpdate } : {})
             }
           };
         }
@@ -616,11 +626,11 @@ export function createTransactionalWorldPersistence({
       if (postCommitEvent) {
         const existing = await journalRepository.programExecutionForInteraction(correlationId);
         assertSourceBinding(existing, postCommitEvent);
-        if (existing) return existing.sourceReceipt;
+        if (existing) return redactProgramRefBindings(existing.sourceReceipt);
       }
       throw error;
     }
-    if (reusedReceipt) return receipt;
+    if (reusedReceipt) return redactProgramRefBindings(receipt);
     if (postCommitEvent) assertSourceBinding({ event: receipt.result.postCommitEvent }, postCommitEvent);
     const committedSnapshot = await (owner.runtimeAuthority === 'memory'
       ? readOwnedCommittedSnapshot() : readCommittedSnapshot());
@@ -642,13 +652,13 @@ export function createTransactionalWorldPersistence({
         operation: 'commit',
         contextFile,
         revision: receipt.afterRevision,
-        receipt
+        receipt: redactProgramRefBindings(receipt)
       });
     } catch (error) {
       throw problem(
         error.code ?? 'WORLD_COMMITTED_AUXILIARY_PENDING',
         error.message ?? 'World transition committed, but an auxiliary projection requires recovery',
-        { ...(error.details ?? {}), receipt, cause: error.code ?? error.name }
+        { ...(error.details ?? {}), receipt: redactProgramRefBindings(receipt), cause: error.code ?? error.name }
       );
     }
     if (publishLegacyProjection && owner.runtimeAuthority !== 'memory') {
@@ -661,19 +671,22 @@ export function createTransactionalWorldPersistence({
         throw problem(
           'WORLD_COMMITTED_PROJECTION_PENDING',
           'World transition committed, but the legacy Graph projection requires recovery',
-          { receipt, projection: 'graph', cause: error.code ?? error.name }
+          { receipt: redactProgramRefBindings(receipt), projection: 'graph', cause: error.code ?? error.name }
         );
       }
     }
-    return receipt;
+    return redactProgramRefBindings(receipt);
   }
 
   async function rollback({ targetCommandId, correlationId, expectedRevision }) {
     assertAccepting();
     await recover();
     const canonicalExpectedRevision = canonicalRevision(expectedRevision);
+    const metadataState = await journalRepository.readMetadataState();
+    const inverseBindings = programRefBindingsForRollback(metadataState.receipts, targetCommandId);
     const receipt = await coordinator.rollback({
       targetCommandId,
+      ...(inverseBindings ? { result: { programRefBindings: inverseBindings } } : {}),
       rebaseResult: async ({ current, facts: rebasedFacts, result }) => {
         const state = await journalRepository.readState();
         const currentManifest = structuredClone(
@@ -714,7 +727,7 @@ export function createTransactionalWorldPersistence({
       operation: 'rollback',
       contextFile,
       revision: receipt.afterRevision,
-      receipt
+      receipt: redactProgramRefBindings(receipt)
     });
     if (publishLegacyProjection && owner.runtimeAuthority !== 'memory') {
       const restored = await worldRepository.read();
@@ -727,11 +740,11 @@ export function createTransactionalWorldPersistence({
         throw problem(
           'WORLD_COMMITTED_PROJECTION_PENDING',
           'World rollback committed, but the legacy Graph projection requires recovery',
-          { receipt, projection: 'graph', cause: error.code ?? error.name }
+          { receipt: redactProgramRefBindings(receipt), projection: 'graph', cause: error.code ?? error.name }
         );
       }
     }
-    return receipt;
+    return redactProgramRefBindings(receipt);
   }
 
   return Object.freeze({
@@ -809,15 +822,15 @@ export function createTransactionalWorldPersistence({
     readDiscardEvidence,
     async programExecution(sourceCommandId) {
       await recover();
-      return journalRepository.programExecution(sourceCommandId);
+      return redactProgramRefBindings(await journalRepository.programExecution(sourceCommandId));
     },
     async programExecutionForInteraction(correlationId) {
       await recover();
-      return journalRepository.programExecutionForInteraction(correlationId);
+      return redactProgramRefBindings(await journalRepository.programExecutionForInteraction(correlationId));
     },
     async pendingProgramExecutions() {
       await recover();
-      return journalRepository.pendingProgramExecutions();
+      return redactProgramRefBindings(await journalRepository.pendingProgramExecutions());
     },
     async recordProgramExecution(request) {
       assertAccepting();

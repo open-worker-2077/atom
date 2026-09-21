@@ -193,6 +193,16 @@ export function createMemoryTransactionPorts({
     async listPrepared() { return structuredClone([...prepared.values()]); },
     async readState() { return { prepared: structuredClone([...prepared.values()]),
       receipts: structuredClone(entries()) }; },
+    async readMetadataState() {
+      return {
+        receipts: structuredClone(entries().map((entry) => ({
+          commandId: entry.commandId,
+          historyMode: entry.historyMode,
+          receipt: entry.receipt
+        }))),
+        outcomes: structuredClone([...outcomes])
+      };
+    },
     async prepare(record) {
       assertAccepting();
       if (prepared.has(record.commandId) || receiptFor(record.commandId)) {

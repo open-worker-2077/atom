@@ -586,7 +586,7 @@ export function createCommitCoordinator({
     }));
   }
 
-  function rollback({ targetCommandId, command, rebaseResult }) {
+  function rollback({ targetCommandId, command, rebaseResult, result: suppliedResult = null }) {
     return serialize(async () => {
       await recoverUnsafe();
       if (typeof targetCommandId !== 'string' || !targetCommandId.trim()) {
@@ -662,6 +662,10 @@ export function createCommitCoordinator({
         ...(target.receipt.result?.previousCompatibilityManifest
           ? { compatibilityManifest: target.receipt.result.previousCompatibilityManifest }
           : {})
+      };
+      if (suppliedResult != null) rollbackResult = {
+        ...rollbackResult,
+        ...structuredClone(suppliedResult)
       };
       if (current.revision !== targetAfterRevision && typeof rebaseResult === 'function') {
         rollbackResult = await rebaseResult({

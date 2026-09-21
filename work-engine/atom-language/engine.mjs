@@ -10,6 +10,7 @@ import {
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { ensureThingIdentities } from './slot-graph-semantics.mjs';
 import { normalizeProgramReferences } from './program-reference-runtime.mjs';
+import { createProgramRefBindingUpdate } from './program-ref-binding-ledger.mjs';
 import { hasValidatedDefaultBackupArchiveAt } from './default-backup-boundary.mjs';
 
 function mergeWarnings(...groups) {
@@ -522,7 +523,38 @@ async function validatePrograms(atoms, contextFile, previousAtoms = null, progra
         match.atom[oneStoredField(match.atom, 'situation')?.rawKey ?? 'situation'] = program.source;
       }
     }
-    return { ok: true, errors: [], warnings: [], atoms: nextAtoms, programReferences: normalized };
+    const programIds = (facts) => new Set(walkAtoms(facts).flatMap((match) => {
+      const thing = oneStoredField(match.atom, 'thing');
+      return thing?.parsed.types.some((type) => type.raw === 'program') && thing.parsed.identity
+        ? [thing.parsed.identity]
+        : [];
+    }));
+    const beforeIds = programIds(previousAtoms ?? []);
+    const afterIds = programIds(nextAtoms);
+    const replacements = normalized.map((program) => {
+      const match = exactMatchAtPath(nextAtoms, program.path);
+      const thing = oneStoredField(match?.atom, 'thing');
+      if (!thing?.parsed.identity) {
+        throw Object.assign(new Error('Program reference binding requires a permanent Thing identity'), {
+          code: 'PROGRAM_REFERENCE_IDENTITY_REQUIRED'
+        });
+      }
+      return {
+        programThingId: thing.parsed.identity,
+        sourceHash: `sha256:${crypto.createHash('sha256').update(program.source).digest('hex')}`,
+        sites: program.referenceSites.map(({ fingerprint, role, targetThingId }) => ({
+          fingerprint,
+          role,
+          targetThingId
+        }))
+      };
+    });
+    const programRefBindings = createProgramRefBindingUpdate({
+      replacements,
+      removals: [...beforeIds].filter((id) => !afterIds.has(id))
+    });
+    return { ok: true, errors: [], warnings: [], atoms: nextAtoms,
+      programReferences: normalized, programRefBindings };
   } catch (error) {
     return {
       ok: false,
@@ -798,6 +830,7 @@ async function applyCreateTransform({
     resultName: createPath.at(-1),
     resultPath: persistedCreatePath,
     affectedPathClosureComplete: isPlainLeafCreate(item, atom),
+    programRefBindings: compiled.programRefBindings ?? null,
     warnings: compiled.warnings
   };
 }
@@ -875,6 +908,7 @@ async function persistChangedGraph({
   shortcutPaths = null,
   referencePaths = null,
   transformLogRecord = null,
+  programRefBindings = null,
   postCommitEvent = null,
   subsequentOf = null,
   compatibilityManifest,
@@ -915,7 +949,8 @@ async function persistChangedGraph({
       referencePaths,
       ...(compatibilityManifest ? { baseCompatibilityManifest: compatibilityManifest } : {})
     } : {}),
-    ...(transformLogRecord ? { transformLogRecord } : {})
+    ...(transformLogRecord ? { transformLogRecord } : {}),
+    ...(programRefBindings ? { programRefBindings } : {})
   });
   performanceTrace('world-commit', {
     elapsedMs: Math.round(performance.now() - commitStartedAt)
@@ -3273,6 +3308,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     referencePaths = null,
     affectedPathClosureComplete = false,
     transformLogRecord = null,
+    programRefBindings = null,
     localizedSituationValidation = false,
     structurePreservingValidation = false,
     preparedRuntimeRecordsPromise = null,
@@ -3399,6 +3435,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           ? affectedAtomsFromPaths(changedPaths)
           : null),
         transformLogRecord,
+        programRefBindings,
         postCommitEvent: sourceEvent,
         subsequentOf: subsequent ? sourceCommandId : null,
         compatibilityManifest: options.compatibilityManifest,
@@ -3989,6 +4026,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     const finalProgramMessages = [];
     let subsequentChanged = false;
     let subsequentChangedPaths = [];
+    let sourceProgramRefBindings = null;
     unchangedSourceEvent = postCommitEvent({ mode: 'transform',
           nodes: [...(renameBatch ? renameEventNodes : transformEventNodes)], affectedPaths: [...transformEventNodes] },
         results.map(({ result }) => result?.path), { batch: true,
@@ -4008,6 +4046,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         return failureBase(parsed, contextFile, projectionFile, atoms, compiled.errors);
       }
       nextAtoms = compiled.atoms ?? nextAtoms;
+      sourceProgramRefBindings = compiled.programRefBindings ?? null;
       const delegated = await validateRequestCandidate(nextAtoms, batchDeclarationRelocations);
       if (!delegated.ok) {
         releaseStrutDeliveryClaims();
@@ -4020,6 +4059,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         referencePaths: [...referencePaths],
         affectedPathClosureComplete: affectedPathClosureComplete
           && !sourceProgramSurfaceChanged,
+        programRefBindings: sourceProgramRefBindings,
         ...(!sourceProgramSurfaceChanged ? {
           projectionRebase: {
             previousAtoms: atoms,
@@ -4246,6 +4286,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       relationEndpoints: [],
       shortcutPaths: [],
       referencePaths: [],
+      programRefBindings: created.programRefBindings ?? null,
       affectedPathClosureComplete: created.affectedPathClosureComplete === true,
       ...(!subtreeSlotsTypedProgram(exactMatchAtPath(nextAtoms, created.resultPath)?.atom) ? {
         projectionRebase: {
@@ -4600,6 +4641,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     transformLogs: [],
     pathChanges: []
   };
+  let sourceProgramRefBindings = null;
   if (programSurfaceChanged) {
     const compiled = await validatePrograms(
       nextAtoms, contextFile, atoms, candidateProgramScheduler
@@ -4616,6 +4658,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       );
     }
     nextAtoms = compiled.atoms ?? nextAtoms;
+    sourceProgramRefBindings = compiled.programRefBindings ?? null;
     postRefresh.atoms = nextAtoms;
     const delegated = await validateRequestCandidate(nextAtoms, declarationRelocations);
     if (!delegated.ok) {
@@ -4701,6 +4744,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       structurePreservingValidation: !programSurfaceChanged
         && isStructurePreservingTransform(item),
       transformLogRecord: sourceTransformLogRecord,
+      programRefBindings: sourceProgramRefBindings,
       postCommitEvent: unchangedSourceEvent
     });
     if (sourceReceipt?.authorizationFailure) return sourceReceipt.authorizationFailure;

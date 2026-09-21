@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import * as references from '../work-engine/atom-language/program-reference-runtime.mjs';
+import { ensureThingIdentities } from '../work-engine/atom-language/slot-graph-semantics.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
 const atom = (name, situation = '', slot = [], type = '') => ({
@@ -138,7 +139,9 @@ async function fixture(t, world) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-reference-write-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
-  await fs.writeFile(contextFile, JSON.stringify(world));
+  const identifiedWorld = structuredClone(world);
+  ensureThingIdentities(identifiedWorld);
+  await fs.writeFile(contextFile, JSON.stringify(identifiedWorld));
   return { contextFile, projectionFile: path.join(directory, 'atom.graph.json'), programScheduler: createProgramRuntimeScheduler() };
 }
 
