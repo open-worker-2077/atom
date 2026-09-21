@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 
 import { diagnostic } from './errors.mjs';
 import { parseAtomKey } from './key-parser.mjs';
-import { createThingIdentity } from './slot-graph-semantics.mjs';
+import { parseShortThingId } from './thing-id-allocator.mjs';
 
 export const SHORTCUT_TYPE = 'shortcut';
 export const SHORTCUT_CONTRACT = 'atom.shortcut';
@@ -48,6 +48,14 @@ function shortcutFailure(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
+function isShortThingId(value) {
+  try {
+    return parseShortThingId(value).id === value;
+  } catch {
+    return false;
+  }
+}
+
 function parseMetadata(atom) {
   const situation = storedField(atom, 'situation')?.value;
   const slot = storedField(atom, 'slot')?.value;
@@ -65,8 +73,7 @@ function parseMetadata(atom) {
     || !metadata.target || typeof metadata.target !== 'object' || Array.isArray(metadata.target)
     || !['linked', 'broken'].includes(metadata.target.state)
     || (metadata.target.identity !== undefined
-      && (typeof metadata.target.identity !== 'string'
-        || !/^[A-Za-z0-9_-]{22}$/u.test(metadata.target.identity)))
+      && !isShortThingId(metadata.target.identity))
     || (metadata.target.state === 'linked'
       && (typeof metadata.target.path !== 'string' || !metadata.target.path.trim()))
     || (metadata.target.state === 'broken' && metadata.target.path !== null)
@@ -89,6 +96,7 @@ export function createShortcutAtom({
   thing,
   targetPath,
   targetIdentity = null,
+  identity,
   referenceId = crypto.randomUUID()
 }) {
   if (typeof thing !== 'string' || !thing.trim() || thing !== thing.trim() || thing.includes('/')) {
@@ -97,8 +105,12 @@ export function createShortcutAtom({
   if (typeof targetPath !== 'string' || !targetPath.trim()) {
     throw shortcutFailure('INVALID_SHORTCUT_TARGET_COORDINATE', 'shortcut.target 必须是精确 ThingCoordinate');
   }
+  if (identity == null) {
+    throw shortcutFailure('THING_IDENTITY_REQUIRED', 'Shortcut creation requires one transaction-reserved identity');
+  }
+  const shortcutIdentity = parseShortThingId(identity).id;
   return {
-    [`thing@shortcut&id=${createThingIdentity()}`]: thing,
+    [`thing@shortcut&id=${shortcutIdentity}`]: thing,
     situation: stringifyMetadata({
       contract: SHORTCUT_CONTRACT,
       version: SHORTCUT_VERSION,
@@ -284,7 +296,8 @@ export function restoreShortcutTargets(
 export async function applyShortcutEffect({
   atoms,
   effect,
-  authorize = async () => ({ decision: 'allow' })
+  authorize = async () => ({ decision: 'allow' }),
+  reserveThingIdentities
 }) {
   const matches = walk(atoms);
   const source = matches.find((match) => match.path.join('/') === effect?.sourceProgramPath);
@@ -397,7 +410,8 @@ export async function applyShortcutEffect({
   storedField(nextSource.atom, 'slot').value.push(createShortcutAtom({
     thing: effect.thing,
     targetPath: effect.targetPath,
-    targetIdentity: thingIdentity(target.atom)
+    targetIdentity: thingIdentity(target.atom),
+    identity: reserveThingIdentities(1)[0]
   }));
   return {
     atoms: nextAtoms,

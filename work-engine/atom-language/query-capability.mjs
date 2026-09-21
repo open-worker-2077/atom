@@ -1,6 +1,7 @@
 import { diagnostic } from './errors.mjs';
 import { isProvenWorldObject, isSealedWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
+import { parseThingSelector } from './thing-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { createAtomLanguageReceiver } from './receiver.mjs';
 import { parseSlotRelativeSelector, resolveSlotRelativeSelector } from './slot-relative-scope.mjs';
@@ -134,6 +135,17 @@ export function exactMatches(atoms, item, matcherRegistry, candidates = null, ex
     return { error: diagnostic('ATOM_THING_REQUIRED', '首轮 explore/transform 执行需要带 Value 的 thing 精确锚点') };
   }
   const mode = nameField.matcher?.mode ?? 'exact';
+  const parsedSelector = mode === 'exact' ? parseThingSelector(nameField.value) : null;
+  if (parsedSelector?.kind === 'invalid-identity') return { error: parsedSelector.error };
+  if (parsedSelector?.kind === 'identity') {
+    const available = candidates ?? walkAtoms(atoms);
+    return {
+      matches: available.filter(match => (
+        readStoredField(match.atom, 'thing')?.parsed.identity === parsedSelector.identity
+      )),
+      expected: 'identity selector'
+    };
+  }
   const matcher = matcherRegistry.resolve(mode);
   if (!matcher) {
     return { error: diagnostic('UNSUPPORTED_MATCHER', `不支持此匹配模式：${mode}`, { mode }) };

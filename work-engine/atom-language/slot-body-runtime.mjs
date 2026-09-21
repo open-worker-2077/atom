@@ -7,14 +7,16 @@ export async function applySlotBodyEffect({
   effect,
   sourceProgramPath = null,
   authorize = async () => ({ decision: 'allow' }),
-  mutateInput = false
+  mutateInput = false,
+  reserveThingIdentities
 }) {
   return applyPlanSlotBodyEffect({
     atoms,
     effect,
     sourceProgramPath,
     authorize,
-    mutateInput
+    mutateInput,
+    reserveThingIdentities
   });
 }
 

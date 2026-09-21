@@ -428,8 +428,12 @@ function projectAtom(atom, location, rootThing, options = {}) {
     ? `${options.parentAtomPath}/${thing}`
     : thing;
   options.atomPathByGraphPath?.set(`${rootThing}/${atomPath}`, atomPath);
+  const thingField = fields.get('thing');
+  const publicThingKey = thingField.parsed.identity
+    ? thingField.parsed.persistentKey.replace(`&id=${thingField.parsed.identity}`, '')
+    : thingField.parsed.persistentKey;
   const projected = {
-    [fields.get('thing').parsed.persistentKey.replace(/&id=[A-Za-z0-9_-]{22}/u, '')]: thing,
+    [publicThingKey]: thing,
     [fields.get('situation').rawKey]: situation,
     [fields.get('slot').rawKey]: insideDefaultBackup ? [] : slot.map((child, index) => (
       projectAtom(child, `${location}.slot[${index}]`, rootThing, {

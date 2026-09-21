@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseThingSelector } from './thing-selector.mjs';
 
 const workerFile = path.join(path.dirname(fileURLToPath(import.meta.url)), 'program-worker.py');
 
@@ -13,15 +14,25 @@ export function normalizeProgramReferences({ source, sourceHash, referenceSites,
     });
   }
   const boundSites = referenceSites.map((site) => {
+    const identitySelector = site.selector.startsWith('@')
+      ? parseThingSelector(site.selector)
+      : null;
+    if (identitySelector?.kind === 'invalid-identity') throw identitySelector.error;
     const rooted = site.selector.startsWith('世界之外/');
     const selector = rooted ? site.selector.slice('世界之外/'.length) : site.selector;
-    const matches = worldBindings.filter(({ path }) => rooted
-      ? path === selector
-      : path === selector || path.endsWith(`/${selector}`));
+    const matches = identitySelector?.kind === 'identity'
+      ? worldBindings.filter(({ id }) => id === identitySelector.identity)
+      : worldBindings.filter(({ path }) => rooted
+        ? path === selector
+        : path === selector || path.endsWith(`/${selector}`));
     if (matches.length !== 1) {
-      throw Object.assign(new Error(`Program reference must resolve uniquely: ${site.selector}`), {
+      throw Object.assign(new Error(identitySelector
+        ? 'Program identity reference must resolve uniquely'
+        : `Program reference must resolve uniquely: ${site.selector}`), {
         code: matches.length ? 'AMBIGUOUS_PROGRAM_REFERENCE' : 'PROGRAM_REFERENCE_NOT_FOUND',
-        details: { selector: site.selector, role: site.role, matches: matches.map(({ path }) => path) }
+        details: identitySelector
+          ? { role: site.role, matches: matches.length }
+          : { selector: site.selector, role: site.role, matches: matches.map(({ path }) => path) }
       });
     }
     const target = matches[0];

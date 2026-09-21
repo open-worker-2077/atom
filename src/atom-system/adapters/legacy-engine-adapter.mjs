@@ -7,6 +7,7 @@ import { prepareCommittedAtomVersion, prepareOwnedCommittedAtomVersion } from '.
 import { DEFAULT_WORLD_SHUTDOWN_TIMEOUT_MS, worldShutdownDeadline, withinWorldShutdown } from '../world-runtime/world-shutdown.mjs';
 import { isHardCapacityBlocked, isWorldCapacityError } from '../world-runtime/pending-world-capacity.mjs';
 import { SpatialStoreError } from '../../../cli/lib/store.mjs';
+import { rebuildThingIdWatermark } from '../../../work-engine/atom-language/thing-id-allocator.mjs';
 
 // Only live invocations are joined here. All completed results and restart
 // decisions come from the central journal, never this transient rendezvous.
@@ -281,28 +282,32 @@ export function createLegacyWorldService(options = {}) {
       if (outcomeCapacityFailure) return capacityPendingResult(request, execution,
         { code: outcomeCapacityFailure.code, retryable: outcomeCapacityFailure.code === 'WORLD_SAVE_BACKPRESSURE' });
     }
-    const run = (recovery = execution, snapshot = committedSnapshot) => timed('engine.execute', () => execute({
-      ...request,
-      ...(recovery ? { programExecution: recovery,
-        interaction: structuredClone(recovery.event.interaction) } : {}),
-      interactionBinding: entry.binding,
-      compatibilityManifest: snapshot?.compatibilityManifest ?? null,
-      ...(Array.isArray(snapshot?.facts) ? {
-        committedSnapshot: snapshot,
-        committedVersion: snapshot
-      } : {}),
-      acquireCommittedSnapshot: async () => {
-        const latest = await committedSnapshotFor(persistence);
-        return latest ?? null;
-      },
-      transactionTransformLog,
-      ...(typeof persistence.claimCandidate === 'function' ? {
-        claimCandidate: (facts) => persistence.claimCandidate(facts)
-      } : {}),
-      readDiscardEvidence: typeof persistence.readDiscardEvidence === 'function'
-        ? (identity) => persistence.readDiscardEvidence(identity) : undefined,
-      onSubsequentSettled: settleBusinessResult,
-      onCommitted: async result => {
+    const run = async (recovery = execution, snapshot = committedSnapshot) => {
+      const metadata = await persistence.readInternalMetadataState?.();
+      const thingIdentityWatermark = rebuildThingIdWatermark(metadata?.receipts ?? []);
+      return timed('engine.execute', () => execute({
+        ...request,
+        thingIdentityWatermark,
+        ...(recovery ? { programExecution: recovery,
+          interaction: structuredClone(recovery.event.interaction) } : {}),
+        interactionBinding: entry.binding,
+        compatibilityManifest: snapshot?.compatibilityManifest ?? null,
+        ...(Array.isArray(snapshot?.facts) ? {
+          committedSnapshot: snapshot,
+          committedVersion: snapshot
+        } : {}),
+        acquireCommittedSnapshot: async () => {
+          const latest = await committedSnapshotFor(persistence);
+          return latest ?? null;
+        },
+        transactionTransformLog,
+        ...(typeof persistence.claimCandidate === 'function' ? {
+          claimCandidate: (facts) => persistence.claimCandidate(facts)
+        } : {}),
+        readDiscardEvidence: typeof persistence.readDiscardEvidence === 'function'
+          ? (identity) => persistence.readDiscardEvidence(identity) : undefined,
+        onSubsequentSettled: settleBusinessResult,
+        onCommitted: async result => {
         entry.pending = structuredClone(result);
         try {
           await request.onCommitted?.({ ...result, warnings: [...(result.warnings ?? []), ...outcomeWarnings] });
@@ -311,8 +316,8 @@ export function createLegacyWorldService(options = {}) {
             await recordOutcome({ ...result.subsequentExecution, attemptId, result: structuredClone(result) });
           }
         }
-      },
-      commitWorld: async (transition) => {
+        },
+        commitWorld: async (transition) => {
         if (request.signal?.aborted) requestInterruptedCommit = true;
         request.signal?.throwIfAborted?.();
         let receipt;
@@ -332,8 +337,9 @@ export function createLegacyWorldService(options = {}) {
         readinessFor(persistence).committedSnapshot = null;
         if (transition.postCommitEvent) sourceReceipt = receipt;
         return receipt;
-      }
-    }));
+        }
+      }));
+    };
     async function settleBusinessResult(result) {
       if (!sourceReceipt || businessSettled) return result;
       execution = await persistence.programExecution(sourceReceipt.commandId);
@@ -414,7 +420,15 @@ export function createLegacyWorldService(options = {}) {
       }
       return durable;
     }
-    const result = await run();
+    let result;
+    try {
+      result = await run();
+    } catch (error) {
+      if (error?.code !== 'THING_IDENTITY_WATERMARK_CONFLICT') throw error;
+      readinessFor(persistence).committedSnapshot = null;
+      const recoverySnapshot = await committedSnapshotFor(persistence);
+      result = await run(execution, recoverySnapshot);
+    }
     return businessSettled ? result : settleBusinessResult(result);
   }
 

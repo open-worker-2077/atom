@@ -256,12 +256,16 @@ function roleCatalog(layout) {
   return directChild(layout.print, ROLES_NAME);
 }
 
-function ensureRoleRecords(layout, plan) {
+function reservedAtom(reserveThingIdentities, fields) {
+  return createAtom({ ...fields, identity: reserveThingIdentities(1)[0] });
+}
+
+function ensureRoleRecords(layout, plan, reserveThingIdentities) {
   const catalog = roleCatalog(layout);
   const existing = new Map((childrenOf(catalog) ?? []).map((record) => [atomName(record), record]));
   for (const role of plan.roles) {
     if (!existing.has(role.role_id)) {
-      childrenOf(catalog).push(createAtom({
+      childrenOf(catalog).push(reservedAtom(reserveThingIdentities, {
         thing: role.role_id,
         situation: JSON.stringify({ role_id: role.role_id })
       }));
@@ -273,11 +277,11 @@ function ensureRoleRecords(layout, plan) {
   }
 }
 
-function appendRevision(layout, plan) {
+function appendRevision(layout, plan, reserveThingIdentities) {
   const revisions = revisionContainer(layout);
   const existing = (childrenOf(revisions) ?? []).find((record) => atomName(record) === plan.revision);
   if (!existing) {
-    childrenOf(revisions).push(createAtom({
+    childrenOf(revisions).push(reservedAtom(reserveThingIdentities, {
       thing: plan.revision,
       situation: JSON.stringify(plan)
     }));
@@ -285,18 +289,18 @@ function appendRevision(layout, plan) {
   replaceStoredField(layout.print, 'situation', planSource(plan));
 }
 
-function initialSeal(atoms, layout) {
+function initialSeal(atoms, layout, reserveThingIdentities) {
   childrenOf(layout.body).push(
-    createAtom({
+    reservedAtom(reserveThingIdentities, {
       thing: PRINT_NAME,
       situation: 'def main(arguments):\n    return arguments',
       slot: [
-        createAtom({ thing: ROLES_NAME }),
-        createAtom({ thing: REVISIONS_NAME })
+        reservedAtom(reserveThingIdentities, { thing: ROLES_NAME }),
+        reservedAtom(reserveThingIdentities, { thing: REVISIONS_NAME })
       ],
       types: ['program']
     }),
-    createAtom({ thing: EXAMPLES_NAME })
+    reservedAtom(reserveThingIdentities, { thing: EXAMPLES_NAME })
   );
   return layoutOf(atoms, layout.bodyPath);
 }
@@ -360,12 +364,12 @@ function strutRoleSides(entry) {
   };
 }
 
-function buildInstance(layout, plan, name) {
+function buildInstance(layout, plan, name, reserveThingIdentities) {
   const instancePath = `${layout.examplesPath}/${name}`;
   const slots = plan.roles.filter((role) => role.kind === 'slot');
   const created = new Map();
   for (const role of slots) {
-    const node = createAtom({
+    const node = reservedAtom(reserveThingIdentities, {
       thing: role.path === '.' ? name : role.thing,
       situation: role.contract_situation,
       types: role.types,
@@ -427,13 +431,13 @@ function firstLocalMaterial(oldPlan, oldMap, roleId, slotPath) {
   return null;
 }
 
-function synchronizeInstance(layout, instance, oldPlan, newPlan, receipt) {
+function synchronizeInstance(layout, instance, oldPlan, newPlan, receipt, reserveThingIdentities) {
   const instanceName = atomName(instance);
   const instancePath = `${layout.examplesPath}/${instanceName}`;
   const oldMap = roleMapForInstance(layout, instance);
   const oldRoleById = new Map(oldPlan.roles.map((role) => [role.role_id, role]));
   const newRoleById = new Map(newPlan.roles.map((role) => [role.role_id, role]));
-  const rebuilt = buildInstance(layout, newPlan, instanceName);
+  const rebuilt = buildInstance(layout, newPlan, instanceName, reserveThingIdentities);
   const rebuiltMap = roleMapForInstance(layout, rebuilt);
 
   for (const [roleId, newRole] of newRoleById) {
@@ -499,19 +503,19 @@ async function authorizeLayout(layout, authorize) {
   return null;
 }
 
-async function seal(atoms, effect, authorize) {
+async function seal(atoms, effect, authorize, reserveThingIdentities) {
   let layout = layoutOf(atoms, effect.body);
   if (layout.error) return layout;
   const denied = await authorizeLayout(layout, authorize);
   if (denied) return { error: denied };
-  if (!layout.sealed) layout = initialSeal(atoms, layout);
+  if (!layout.sealed) layout = initialSeal(atoms, layout, reserveThingIdentities);
   const compiled = compilePlan(layout, true);
   if (compiled.error) return compiled;
-  ensureRoleRecords(layout, compiled.plan);
+  ensureRoleRecords(layout, compiled.plan, reserveThingIdentities);
   const recompiled = compilePlan(layout, true);
   if (recompiled.error) return recompiled;
   const oldPlan = currentPlan(layout);
-  appendRevision(layout, recompiled.plan);
+  appendRevision(layout, recompiled.plan, reserveThingIdentities);
   const instances = [...(childrenOf(layout.examples) ?? [])].sort((left, right) => (
     atomName(left).localeCompare(atomName(right), 'zh-CN')
   ));
@@ -546,7 +550,9 @@ async function seal(atoms, effect, authorize) {
         revision: adoptedRevision
       }) };
     }
-    const synchronized = synchronizeInstance(layout, instance, adoptedPlan, recompiled.plan, receipt);
+    const synchronized = synchronizeInstance(
+      layout, instance, adoptedPlan, recompiled.plan, receipt, reserveThingIdentities
+    );
     if (synchronized.error) return synchronized;
     const position = childrenOf(layout.examples).indexOf(instance);
     childrenOf(layout.examples)[position] = synchronized.replacement;
@@ -570,7 +576,7 @@ async function seal(atoms, effect, authorize) {
   };
 }
 
-async function printExample(atoms, effect, sourceProgramPath, authorize) {
+async function printExample(atoms, effect, sourceProgramPath, authorize, reserveThingIdentities) {
   const layout = layoutOf(atoms, effect.body);
   if (layout.error) return layout;
   if (!layout.sealed) return { error: slotError('SLOT_BODY_NOT_SEALED', '槽体尚未封装', { body: layout.bodyPath }) };
@@ -602,7 +608,7 @@ async function printExample(atoms, effect, sourceProgramPath, authorize) {
   if (decision?.decision && decision.decision !== 'allow') {
     return { error: slotError('PROGRAM_LOCK_DENIED', '当前窗口不允许打印槽例', { path: layout.examplesPath }) };
   }
-  childrenOf(layout.examples).push(buildInstance(layout, plan, name));
+  childrenOf(layout.examples).push(buildInstance(layout, plan, name, reserveThingIdentities));
   return {
     atoms,
     receipt: {
@@ -619,7 +625,8 @@ export async function applyPlanSlotBodyEffect({
   effect,
   sourceProgramPath = null,
   authorize = async () => ({ decision: 'allow' }),
-  mutateInput = false
+  mutateInput = false,
+  reserveThingIdentities
 }) {
   const effectKeys = effect && typeof effect === 'object' && !Array.isArray(effect)
     ? Object.keys(effect)
@@ -636,8 +643,8 @@ export async function applyPlanSlotBodyEffect({
   const candidate = mutateInput ? atoms : structuredClone(atoms);
   const before = mutateInput ? structuredClone(atoms) : null;
   const result = effect.action === 'seal'
-    ? await seal(candidate, effect, authorize)
-    : await printExample(candidate, effect, sourceProgramPath, authorize);
+    ? await seal(candidate, effect, authorize, reserveThingIdentities)
+    : await printExample(candidate, effect, sourceProgramPath, authorize, reserveThingIdentities);
   if (result?.error && mutateInput) atoms.splice(0, atoms.length, ...before);
   return result;
 }

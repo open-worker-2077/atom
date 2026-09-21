@@ -9,6 +9,7 @@ import {
 } from '../../src/atom-system/world-runtime/world-revision.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { ensureThingIdentities } from './slot-graph-semantics.mjs';
+import { createThingIdAllocationSession } from './thing-id-allocator.mjs';
 import { normalizeProgramReferences } from './program-reference-runtime.mjs';
 import { createProgramRefBindingUpdate } from './program-ref-binding-ledger.mjs';
 import { hasValidatedDefaultBackupArchiveAt } from './default-backup-boundary.mjs';
@@ -725,7 +726,8 @@ async function applyCreateTransform({
   contextFile,
   authorize,
   matcherRegistry,
-  programScheduler = null
+  programScheduler = null,
+  reserveThingIdentities
 }) {
   const commandFields = item.fields.filter((field) => field.commands?.length);
   if (commandFields.length) {
@@ -738,7 +740,9 @@ async function applyCreateTransform({
   const atom = persistentAtomFromItem(item);
   const invalid = validateNewAtom(atom);
   if (invalid) return { error: invalid };
-  ensureThingIdentities([atom]);
+  ensureThingIdentities([atom], {
+    identities: reserveThingIdentities(walkAtoms([atom]).length)
+  });
 
   const createNameField = oneStoredField(atom, 'thing');
   if (createNameField?.parsed.types.some((type) => type.raw === 'agent')) {
@@ -923,6 +927,7 @@ async function persistChangedGraph({
   referencePaths = null,
   transformLogRecord = null,
   programRefBindings = null,
+  thingIdentityAllocator = null,
   postCommitEvent = null,
   subsequentOf = null,
   compatibilityManifest,
@@ -964,7 +969,8 @@ async function persistChangedGraph({
       ...(compatibilityManifest ? { baseCompatibilityManifest: compatibilityManifest } : {})
     } : {}),
     ...(transformLogRecord ? { transformLogRecord } : {}),
-    ...(programRefBindings ? { programRefBindings } : {})
+    ...(programRefBindings ? { programRefBindings } : {}),
+    ...(thingIdentityAllocator ? { thingIdentityAllocator } : {})
   });
   performanceTrace('world-commit', {
     elapsedMs: Math.round(performance.now() - commitStartedAt)
@@ -1028,6 +1034,7 @@ export async function executeAtomLanguage(options = {}) {
 }
 
 async function executeAtomLanguageInteraction(options, postcommit) {
+  let thingIdentityAllocation = null;
   const pendingStrutDeliveryClaims = new Set();
   const pendingSlotSignalClaims = new Set();
   const pendingSlotTagClaims = new Set();
@@ -1058,6 +1065,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   }
   function failureBase(...args) {
     releaseStrutDeliveryClaims();
+    thingIdentityAllocation?.discard();
     return buildFailureBase(...args);
   }
   const operationStartedAt = performance.now();
@@ -1070,6 +1078,20 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   const source = options.source;
   const receiver = options.receiver ?? createAtomLanguageReceiver(options.receiverOptions);
   const parsed = receiver.receive(source);
+  thingIdentityAllocation = createThingIdAllocationSession(
+    options.thingIdentityWatermark ?? '000'
+  );
+  async function withThingIdentityCheckpoint(work) {
+    const checkpoint = thingIdentityAllocation.checkpoint();
+    try {
+      const result = await work();
+      if (result?.error) thingIdentityAllocation.restore(checkpoint);
+      return result;
+    } catch (error) {
+      thingIdentityAllocation.restore(checkpoint);
+      throw error;
+    }
+  }
   const contextFile = resolveAtomContextFile(options.contextFile ?? path.resolve('atom.json'));
   const projectionFile = projectionFileFor(contextFile, options.projectionFile);
 
@@ -1631,13 +1653,14 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     });
   }
   for (const effect of programCycle.shortcuts ?? []) {
-    const shortcut = await applyShortcutEffect({
+    const shortcut = await withThingIdentityCheckpoint(() => applyShortcutEffect({
       atoms,
       effect,
+      reserveThingIdentities: count => thingIdentityAllocation.reserve(count),
       authorize: (match, operation, field, actor = {}) => accessController.authorize(
         match, operation, field, { ...actor, programPath: effect.sourceProgramPath }
       )
-    });
+    }));
     if (shortcut.error) return failureBase(parsed, contextFile, projectionFile, atoms, [shortcut.error]);
     if (shortcut.changed) {
       const before = revisionOf(atoms);
@@ -1786,10 +1809,11 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           compiled.errors?.[0]?.message ?? '跳窗目标无法编译'
         )]);
       }
-      const moved = await applyTransform({
+      const moved = await withThingIdentityCheckpoint(() => applyTransform({
         atoms,
         item: compiled.item,
         contextFile,
+        reserveThingIdentities: count => thingIdentityAllocation.reserve(count),
         authorize: (match, operation, field, actor = {}) => moveController.authorize(
           match, operation, field, {
             ...actor,
@@ -1798,7 +1822,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
             windowLifecycle: { action: 'move', destinationPath }
           }
         )
-      });
+      }));
       if (moved.error) {
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
           moved.error.code === 'WINDOW_ACCESS_DENIED'
@@ -1954,20 +1978,22 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     };
     try {
       transformed = compiled.createNew
-        ? await applyCreateTransform({
+        ? await withThingIdentityCheckpoint(() => applyCreateTransform({
             atoms,
             item: compiled.item,
             contextFile,
             authorize: authorizeProgramEffect,
             matcherRegistry: receiver.matcherRegistry,
-            programScheduler: candidateProgramScheduler
-          })
-        : await applyTransform({
+            programScheduler: candidateProgramScheduler,
+            reserveThingIdentities: count => thingIdentityAllocation.reserve(count)
+          }))
+        : await withThingIdentityCheckpoint(() => applyTransform({
             atoms,
             item: compiled.item,
             contextFile,
-            authorize: authorizeProgramEffect
-          });
+            authorize: authorizeProgramEffect,
+            reserveThingIdentities: count => thingIdentityAllocation.reserve(count)
+          }));
     } catch (error) {
       if (jumpEffects.length) {
         return failureBase(parsed, contextFile, projectionFile, jumpBaseAtoms, [diagnostic(
@@ -2055,10 +2081,11 @@ async function executeAtomLanguageInteraction(options, postcommit) {
 
   for (const request of programCycle.slotBodies ?? []) {
     const { sourceProgramPath, sourceScopeRoot: _sourceScopeRoot, ...effect } = request;
-    const result = await applySlotBodyEffect({
+    const result = await withThingIdentityCheckpoint(() => applySlotBodyEffect({
       atoms,
       effect,
       sourceProgramPath,
+      reserveThingIdentities: count => thingIdentityAllocation.reserve(count),
       authorize: async ({ path: targetPath }) => {
         const match = walkAtoms(atoms).find((candidate) => candidate.path.join('/') === targetPath);
         if (!match) return { decision: 'deny' };
@@ -2069,7 +2096,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           }
         );
       }
-    });
+    }));
     if (result.error) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
         result.error.code ?? 'PROGRAM_SLOT_BODY_REJECTED',
@@ -2521,10 +2548,11 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           compiled.errors?.[0]?.message ?? '触发迁窗目标无法编译'
         ) };
       }
-      const moved = await applyTransform({
+      const moved = await withThingIdentityCheckpoint(() => applyTransform({
         atoms: baseAtoms,
         item: compiled.item,
         contextFile,
+        reserveThingIdentities: count => thingIdentityAllocation.reserve(count),
         authorize: (match, operation, field, actor = {}) => issuerController.authorize(
           match, operation, field, {
             ...actor,
@@ -2533,7 +2561,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
             windowLifecycle: { action: 'move', destinationPath: payload.destinationPath }
           }
         )
-      });
+      }));
       if (moved.error) {
         return { error: diagnostic(
           moved.error.code === 'WINDOW_ACCESS_DENIED'
@@ -2853,22 +2881,24 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           };
           try {
             transformed = entry.createNew
-              ? await applyCreateTransform({
+              ? await withThingIdentityCheckpoint(() => applyCreateTransform({
                   atoms: candidateAtoms,
                   item: entry.item,
                   contextFile,
                   authorize: authorizeProgramEffect,
                   matcherRegistry: receiver.matcherRegistry,
-                  programScheduler: runtimeScheduler
-                })
-              : await applyTransform({
+                  programScheduler: runtimeScheduler,
+                  reserveThingIdentities: count => thingIdentityAllocation.reserve(count)
+                }))
+              : await withThingIdentityCheckpoint(() => applyTransform({
                   atoms: candidateAtoms,
                   item: entry.item,
                   contextFile,
                   authorize: authorizeProgramEffect,
                   mutateInput,
-                  exactIndex
-                });
+                  exactIndex,
+                  reserveThingIdentities: count => thingIdentityAllocation.reserve(count)
+                }));
           } catch (error) {
             if (entry.sourceStrutDeliveryClaim || entry.sourceSlotSignalClaim
               || entry.sourceSlotTagClaim
@@ -2976,13 +3006,14 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       let shortcutAtoms = structuredClone(reconciledAtoms);
       const appliedShortcuts = [];
       for (const effect of cycle.shortcuts ?? []) {
-        const shortcut = await applyShortcutEffect({
+        const shortcut = await withThingIdentityCheckpoint(() => applyShortcutEffect({
           atoms: shortcutAtoms,
           effect,
+          reserveThingIdentities: count => thingIdentityAllocation.reserve(count),
           authorize: (match, operation, field, actor = {}) => cycleAccessController.authorize(
             match, operation, field, { ...actor, programPath: effect.sourceProgramPath }
           )
-        });
+        }));
         if (shortcut.error) {
           throw Object.assign(new Error(shortcut.error.message), {
             code: shortcut.error.code, details: { program: effect.sourceProgramPath }
@@ -3020,10 +3051,11 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       const appliedSlotBodies = [];
       for (const request of cycle.slotBodies ?? []) {
         const { sourceProgramPath, sourceScopeRoot: _sourceScopeRoot, ...effect } = request;
-        const slotResult = await applySlotBodyEffect({
+        const slotResult = await withThingIdentityCheckpoint(() => applySlotBodyEffect({
           atoms: application.atoms,
           effect,
           sourceProgramPath,
+          reserveThingIdentities: count => thingIdentityAllocation.reserve(count),
           authorize: async ({ path: targetPath }) => {
             const match = walkAtoms(application.atoms)
               .find((candidate) => candidate.path.join('/') === targetPath);
@@ -3035,7 +3067,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
               }
             );
           }
-        });
+        }));
         if (slotResult.error) {
           throw Object.assign(new Error(slotResult.error.message), {
             code: slotResult.error.code ?? 'PROGRAM_SLOT_BODY_REJECTED',
@@ -3323,6 +3355,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     affectedPathClosureComplete = false,
     transformLogRecord = null,
     programRefBindings = null,
+    thingIdentityAllocator = null,
     localizedSituationValidation = false,
     structurePreservingValidation = false,
     preparedRuntimeRecordsPromise = null,
@@ -3415,6 +3448,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     }
     const commitStartedAt = performance.now();
     let receipt = null;
+    const pendingIdentityUpdate = thingIdentityAllocator ?? thingIdentityAllocation.pendingUpdate();
     try {
       const semanticInputsComplete = affectedPathClosureComplete === true
         && [relationEndpoints, shortcutPaths, referencePaths].every(Array.isArray);
@@ -3450,12 +3484,14 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           : null),
         transformLogRecord,
         programRefBindings,
+        thingIdentityAllocator: pendingIdentityUpdate,
         postCommitEvent: sourceEvent,
         subsequentOf: subsequent ? sourceCommandId : null,
         compatibilityManifest: options.compatibilityManifest,
         localizedSituationValidation,
         structurePreservingValidation
       });
+      if (pendingIdentityUpdate) thingIdentityAllocation.confirm(pendingIdentityUpdate);
       rememberCommittedAffectedPaths(receipt);
       if (sourceEvent) sourceCommandId = receipt?.commandId ?? null;
     } catch (error) {
@@ -3464,18 +3500,21 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         return null;
       }
       if (subsequent && error?.details?.receipt?.afterRevision) {
+        if (pendingIdentityUpdate) thingIdentityAllocation.confirm(pendingIdentityUpdate);
         rememberCommittedAffectedPaths(error.details.receipt);
         confirmStrutDeliveryClaims();
         error.committedReceipt = error.details.receipt;
         throw error;
       }
       if (sourceEvent && error?.details?.receipt?.afterRevision) {
+        if (pendingIdentityUpdate) thingIdentityAllocation.confirm(pendingIdentityUpdate);
         receipt = error.details.receipt;
         sourceCommandId = receipt.commandId;
         rememberCommittedAffectedPaths(receipt);
         interactionWarnings.push(diagnostic(error.code ?? 'WORLD_COMMITTED_AUXILIARY_PENDING',
           error.message, { cause: error.details.cause, sourceCommandId }));
       } else {
+        if (pendingIdentityUpdate) thingIdentityAllocation.discard();
         releaseStrutDeliveryClaims();
         await recordTransformStage('commit', commitStartedAt, {
           commitEntered: true,
@@ -3957,15 +3996,16 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     for (const candidate of renameBatch ? [] : parsed.items) {
       let transformed;
       try {
-        transformed = await applyTransform({
+        transformed = await withThingIdentityCheckpoint(() => applyTransform({
           atoms: nextAtoms,
           item: candidate,
           contextFile,
           authorize: accessController.authorize,
           mutateInput: true,
           exactIndex,
-          rewriteProgramPathReferences: true
-        });
+          rewriteProgramPathReferences: true,
+          reserveThingIdentities: count => thingIdentityAllocation.reserve(count)
+        }));
       } catch (error) {
         return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
           error.code ?? 'TRANSFORM_BATCH_ITEM_FAILED',
@@ -4271,14 +4311,15 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   }
 
   if (parsed.createNew) {
-    const created = await applyCreateTransform({
+    const created = await withThingIdentityCheckpoint(() => applyCreateTransform({
       atoms,
       item,
       contextFile,
       authorize: accessController.authorize,
       matcherRegistry: receiver.matcherRegistry,
-      programScheduler: candidateProgramScheduler
-    });
+      programScheduler: candidateProgramScheduler,
+      reserveThingIdentities: count => thingIdentityAllocation.reserve(count)
+    }));
     interactionWarnings.push(...(created.warnings ?? []));
     if (created.error) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [created.error], {
@@ -4585,7 +4626,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   }
 
   const transformApplyStartedAt = performance.now();
-  const transformed = await applyTransform({
+  const transformed = await withThingIdentityCheckpoint(() => applyTransform({
     atoms,
     item,
     contextFile,
@@ -4593,8 +4634,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     exactIndex: preparedTransformWorld.exactIndex,
     allMatches: preparedTransformWorld.allMatches,
     transactionTransformLog: options.transactionTransformLog ?? [],
-    rewriteProgramPathReferences: true
-  });
+    rewriteProgramPathReferences: true,
+    reserveThingIdentities: count => thingIdentityAllocation.reserve(count)
+  }));
   if (transformed.error) {
     releaseStrutDeliveryClaims();
     return failureBase(parsed, contextFile, projectionFile, atoms, [transformed.error], { messages: interactionMessages });

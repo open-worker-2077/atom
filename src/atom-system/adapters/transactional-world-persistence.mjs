@@ -26,6 +26,28 @@ import {
   programRefBindingsForRollback,
   redactProgramRefBindings
 } from '../../../work-engine/atom-language/program-ref-binding-ledger.mjs';
+import {
+  rebuildThingIdWatermark,
+  thingIdentityAllocatorUpdate
+} from '../../../work-engine/atom-language/thing-id-allocator.mjs';
+
+function redactInternalMetadata(value) {
+  const redacted = redactProgramRefBindings(value);
+  const redactReceipt = (receipt) => {
+    if (receipt?.result && typeof receipt.result === 'object') delete receipt.result.thingIdentityAllocator;
+  };
+  redactReceipt(redacted);
+  redactReceipt(redacted?.receipt);
+  redactReceipt(redacted?.sourceReceipt);
+  redactReceipt(redacted?.childReceipt);
+  if (Array.isArray(redacted)) for (const entry of redacted) {
+    redactReceipt(entry);
+    redactReceipt(entry?.receipt);
+    redactReceipt(entry?.sourceReceipt);
+    redactReceipt(entry?.childReceipt);
+  }
+  return redacted;
+}
 
 function problem(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -409,6 +431,11 @@ export function createTransactionalWorldPersistence({
     return structuredClone(owner.cachedTransformLog);
   }
 
+  async function readInternalMetadataState() {
+    await recover();
+    return journalRepository.readMetadataState();
+  }
+
   async function readDiscardEvidence({ discardId, archivePath, originalPath }) {
     if (![discardId, archivePath, originalPath].every((value) => typeof value === 'string' && value)) return null;
     await recover();
@@ -480,6 +507,7 @@ export function createTransactionalWorldPersistence({
     postCommitEvent = null,
     subsequentOf = null,
     programRefBindings = null,
+    thingIdentityAllocator = null,
     compatibilityManifest: suppliedManifest = null,
     baseCompatibilityManifest: suppliedBaseManifest = null
   }) {
@@ -502,7 +530,7 @@ export function createTransactionalWorldPersistence({
       return null;
     }
     const existing = await existingExecutionReceipt();
-    if (existing) return redactProgramRefBindings(existing);
+    if (existing) return redactInternalMetadata(existing);
     const computedRevision = revisionOfWorldFacts(facts);
     const canonicalNextRevision = canonicalRevision(nextRevision);
     const canonicalExpectedRevision = canonicalRevision(expectedRevision);
@@ -539,6 +567,16 @@ export function createTransactionalWorldPersistence({
     const bindingUpdate = programRefBindings == null
       ? null
       : createProgramRefBindingUpdate(programRefBindings);
+    const identityUpdate = thingIdentityAllocator == null
+      ? null
+      : thingIdentityAllocatorUpdate({
+        previousWatermark: thingIdentityAllocator.previousWatermark,
+        ids: thingIdentityAllocator.issued
+      });
+    if (identityUpdate && (thingIdentityAllocator.version !== identityUpdate.version
+      || thingIdentityAllocator.nextWatermark !== identityUpdate.nextWatermark)) {
+      throw problem('INVALID_THING_ID_ALLOCATION', 'Thing ID allocation metadata is not canonical');
+    }
     let receipt;
     let reusedReceipt = false;
     try {
@@ -572,8 +610,19 @@ export function createTransactionalWorldPersistence({
           };
         },
         validateCommit: async () => {
-          const existing = await existingExecutionReceipt();
+          const existing = await existingExecutionReceipt()
+            ?? await journalRepository.findReceipt(commandId);
           reusedReceipt = Boolean(existing);
+          if (!existing && identityUpdate) {
+            const metadata = await journalRepository.readMetadataState();
+            const watermark = rebuildThingIdWatermark(metadata.receipts);
+            if (watermark !== identityUpdate.previousWatermark) {
+              throw problem('THING_IDENTITY_WATERMARK_CONFLICT', 'Thing ID allocation is based on a stale watermark', {
+                expectedWatermark: identityUpdate.previousWatermark,
+                actualWatermark: watermark
+              });
+            }
+          }
           return existing;
         },
         command: {
@@ -617,7 +666,8 @@ export function createTransactionalWorldPersistence({
               ...(transformLogRecord ? {
                 transformLogRecord: structuredClone(transformLogRecord)
               } : {}),
-              ...(bindingUpdate ? { programRefBindings: bindingUpdate } : {})
+              ...(bindingUpdate ? { programRefBindings: bindingUpdate } : {}),
+              ...(identityUpdate ? { thingIdentityAllocator: identityUpdate } : {})
             }
           };
         }
@@ -626,11 +676,11 @@ export function createTransactionalWorldPersistence({
       if (postCommitEvent) {
         const existing = await journalRepository.programExecutionForInteraction(correlationId);
         assertSourceBinding(existing, postCommitEvent);
-        if (existing) return redactProgramRefBindings(existing.sourceReceipt);
+        if (existing) return redactInternalMetadata(existing.sourceReceipt);
       }
       throw error;
     }
-    if (reusedReceipt) return redactProgramRefBindings(receipt);
+    if (reusedReceipt) return redactInternalMetadata(receipt);
     if (postCommitEvent) assertSourceBinding({ event: receipt.result.postCommitEvent }, postCommitEvent);
     const committedSnapshot = await (owner.runtimeAuthority === 'memory'
       ? readOwnedCommittedSnapshot() : readCommittedSnapshot());
@@ -652,13 +702,13 @@ export function createTransactionalWorldPersistence({
         operation: 'commit',
         contextFile,
         revision: receipt.afterRevision,
-        receipt: redactProgramRefBindings(receipt)
+        receipt: redactInternalMetadata(receipt)
       });
     } catch (error) {
       throw problem(
         error.code ?? 'WORLD_COMMITTED_AUXILIARY_PENDING',
         error.message ?? 'World transition committed, but an auxiliary projection requires recovery',
-        { ...(error.details ?? {}), receipt: redactProgramRefBindings(receipt), cause: error.code ?? error.name }
+        { ...(error.details ?? {}), receipt: redactInternalMetadata(receipt), cause: error.code ?? error.name }
       );
     }
     if (publishLegacyProjection && owner.runtimeAuthority !== 'memory') {
@@ -671,11 +721,11 @@ export function createTransactionalWorldPersistence({
         throw problem(
           'WORLD_COMMITTED_PROJECTION_PENDING',
           'World transition committed, but the legacy Graph projection requires recovery',
-          { receipt: redactProgramRefBindings(receipt), projection: 'graph', cause: error.code ?? error.name }
+          { receipt: redactInternalMetadata(receipt), projection: 'graph', cause: error.code ?? error.name }
         );
       }
     }
-    return redactProgramRefBindings(receipt);
+    return redactInternalMetadata(receipt);
   }
 
   async function rollback({ targetCommandId, correlationId, expectedRevision }) {
@@ -727,7 +777,7 @@ export function createTransactionalWorldPersistence({
       operation: 'rollback',
       contextFile,
       revision: receipt.afterRevision,
-      receipt: redactProgramRefBindings(receipt)
+      receipt: redactInternalMetadata(receipt)
     });
     if (publishLegacyProjection && owner.runtimeAuthority !== 'memory') {
       const restored = await worldRepository.read();
@@ -740,11 +790,11 @@ export function createTransactionalWorldPersistence({
         throw problem(
           'WORLD_COMMITTED_PROJECTION_PENDING',
           'World rollback committed, but the legacy Graph projection requires recovery',
-          { receipt: redactProgramRefBindings(receipt), projection: 'graph', cause: error.code ?? error.name }
+          { receipt: redactInternalMetadata(receipt), projection: 'graph', cause: error.code ?? error.name }
         );
       }
     }
-    return redactProgramRefBindings(receipt);
+    return redactInternalMetadata(receipt);
   }
 
   return Object.freeze({
@@ -807,6 +857,7 @@ export function createTransactionalWorldPersistence({
     },
     commit,
     compatibilityManifest,
+    readInternalMetadataState,
     readCommittedSnapshot,
     ...(owner.runtimeAuthority === 'memory' ? {
       readOwnedCommittedSnapshot,
@@ -822,15 +873,15 @@ export function createTransactionalWorldPersistence({
     readDiscardEvidence,
     async programExecution(sourceCommandId) {
       await recover();
-      return redactProgramRefBindings(await journalRepository.programExecution(sourceCommandId));
+      return redactInternalMetadata(await journalRepository.programExecution(sourceCommandId));
     },
     async programExecutionForInteraction(correlationId) {
       await recover();
-      return redactProgramRefBindings(await journalRepository.programExecutionForInteraction(correlationId));
+      return redactInternalMetadata(await journalRepository.programExecutionForInteraction(correlationId));
     },
     async pendingProgramExecutions() {
       await recover();
-      return redactProgramRefBindings(await journalRepository.pendingProgramExecutions());
+      return redactInternalMetadata(await journalRepository.pendingProgramExecutions());
     },
     async recordProgramExecution(request) {
       assertAccepting();

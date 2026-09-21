@@ -1,12 +1,16 @@
-import crypto from 'node:crypto';
-
 import { parseAtomKey } from './key-parser.mjs';
+import { parseShortThingId } from './thing-id-allocator.mjs';
 
 export const SLOT_ROLE_TYPE_PREFIX = 'slot-role-';
 export const SLOT_REVISION_TYPE_PREFIX = 'slot-revision-';
 
-export function createThingIdentity() {
-  return crypto.randomBytes(16).toString('base64url');
+function requireThingIdentity(identity) {
+  if (identity == null) {
+    throw Object.assign(new Error('Thing creation requires one transaction-reserved identity'), {
+      code: 'THING_IDENTITY_REQUIRED'
+    });
+  }
+  return parseShortThingId(identity).id;
 }
 
 export function fieldsByBase(atom) {
@@ -58,11 +62,11 @@ export function replaceStoredField(atom, baseKey, value, metadata = {}) {
   atom[rawKey] = structuredClone(value);
 }
 
-export function createAtom({ thing, situation = '', slot = [], strut = [], types = [], description = null }) {
+export function createAtom({ thing, identity, situation = '', slot = [], strut = [], types = [], description = null }) {
   const atom = {};
   replaceStoredField(atom, 'thing', thing, {
     types,
-    identity: createThingIdentity(),
+    identity: requireThingIdentity(identity),
     descriptionPresent: description != null,
     description
   });
@@ -72,14 +76,23 @@ export function createAtom({ thing, situation = '', slot = [], strut = [], types
   return atom;
 }
 
-export function ensureThingIdentities(atoms) {
+export function ensureThingIdentities(atoms, { identities = [] } = {}) {
+  const missingCount = walkAtoms(atoms ?? []).filter(({ atom }) => (
+    !storedField(atom, 'thing')?.parsed.identity
+  )).length;
+  if (missingCount !== identities.length) {
+    throw Object.assign(new Error('Thing identity allocation does not match missing identities'), {
+      code: 'THING_IDENTITY_ALLOCATION_MISMATCH'
+    });
+  }
   let changed = false;
+  let identityIndex = 0;
   function visit(atom) {
     const thing = storedField(atom, 'thing');
     if (thing && !thing.parsed.identity) {
       replaceStoredField(atom, 'thing', thing.value, {
         types: thing.parsed.types.map((type) => type.raw),
-        identity: createThingIdentity(),
+        identity: requireThingIdentity(identities[identityIndex++]),
         descriptionPresent: thing.parsed.descriptionPresent,
         description: thing.parsed.description
       });
@@ -88,15 +101,27 @@ export function ensureThingIdentities(atoms) {
     for (const child of childrenOf(atom) ?? []) visit(child);
   }
   for (const atom of atoms ?? []) visit(atom);
+  if (identityIndex !== identities.length) {
+    throw Object.assign(new Error('Thing identity allocation does not match missing identities'), {
+      code: 'THING_IDENTITY_ALLOCATION_MISMATCH'
+    });
+  }
   return changed;
 }
 
-export function renewThingIdentities(atoms) {
+export function renewThingIdentities(atoms, { identities = [] } = {}) {
+  const thingCount = walkAtoms(atoms ?? []).filter(({ atom }) => storedField(atom, 'thing')).length;
+  if (thingCount !== identities.length) {
+    throw Object.assign(new Error('Thing identity allocation does not match copied identities'), {
+      code: 'THING_IDENTITY_ALLOCATION_MISMATCH'
+    });
+  }
+  let identityIndex = 0;
   function visit(atom) {
     const thing = storedField(atom, 'thing');
     if (thing) {
       const previousKey = thing.rawKey;
-      const nextIdentity = createThingIdentity();
+      const nextIdentity = requireThingIdentity(identities[identityIndex++]);
       for (const key of Object.keys(atom)) {
         if (parseAtomKey(key, { descriptionSymbolWarnings: false }).baseKey === 'thing') delete atom[key];
       }
@@ -107,6 +132,11 @@ export function renewThingIdentities(atoms) {
     for (const child of childrenOf(atom) ?? []) visit(child);
   }
   for (const atom of atoms ?? []) visit(atom);
+  if (identityIndex !== identities.length) {
+    throw Object.assign(new Error('Thing identity allocation does not match copied identities'), {
+      code: 'THING_IDENTITY_ALLOCATION_MISMATCH'
+    });
+  }
   return atoms;
 }
 

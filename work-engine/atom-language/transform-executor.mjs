@@ -531,13 +531,14 @@ export function insertAuthoritativeSubtreeCopy({
   bindings = null,
   sourcePath = null,
   destinationPath = null,
-  scope = 'world'
+  scope = 'world',
+  identities
 }) {
   const partnerBindings = scope === 'subtree'
     ? captureSubtreeBindings(sourceAtom, sourcePath)
     : (bindings ?? capturePartnerBindings(atoms, rootName));
   const clone = structuredClone(sourceAtom);
-  renewThingIdentities([clone]);
+  renewThingIdentities([clone], { identities });
   if (newRootName !== null) replaceStoredField(clone, 'thing', newRootName);
   const mapping = new Map();
   mapClonedSubtree(sourceAtom, clone, mapping);
@@ -1212,7 +1213,8 @@ export async function applyTransform({
   exactIndex = null,
   allMatches = null,
   transactionTransformLog = [],
-  rewriteProgramPathReferences: rewriteProgramReferences = true
+  rewriteProgramPathReferences: rewriteProgramReferences = true,
+  reserveThingIdentities
 }) {
   const referenceWorldBindings = thingWorldBindings(atoms);
   const canMutateInput = mutateInput && !Object.isFrozen(atoms);
@@ -1628,7 +1630,8 @@ export async function applyTransform({
         sourceAtom: target.atom,
         destinationChildren,
         rootName,
-        bindings: partnerBindings
+        bindings: partnerBindings,
+        identities: reserveThingIdentities(walkAtoms([target.atom]).length)
       });
       resultAtom = copied.clone;
     } else {

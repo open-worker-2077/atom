@@ -105,3 +105,92 @@ export function planThingIdAllocation({ watermark, count }) {
     nextWatermark: ids.at(-1)
   });
 }
+
+export function thingIdentityAllocatorUpdate({ previousWatermark, ids }) {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw allocatorError('INVALID_THING_ID_ALLOCATION', 'Thing ID allocation must issue at least one identity');
+  }
+  const expected = planThingIdAllocation({ watermark: previousWatermark, count: ids.length });
+  if (ids.some((id, index) => id !== expected.ids[index])) {
+    throw allocatorError('INVALID_THING_ID_ALLOCATION', 'Thing ID allocation must be one contiguous sequence');
+  }
+  return Object.freeze({
+    version: 1,
+    previousWatermark,
+    nextWatermark: expected.nextWatermark,
+    issued: Object.freeze([...ids])
+  });
+}
+
+export function createThingIdAllocationSession(initialWatermark = '000') {
+  parseWatermark(initialWatermark);
+  let committedWatermark = initialWatermark;
+  let pendingIds = [];
+  return Object.freeze({
+    reserve(count) {
+      const allocation = planThingIdAllocation({
+        watermark: pendingIds.at(-1) ?? committedWatermark,
+        count
+      });
+      pendingIds.push(...allocation.ids);
+      return [...allocation.ids];
+    },
+    checkpoint() {
+      return Object.freeze({ watermark: committedWatermark, pendingCount: pendingIds.length });
+    },
+    restore(checkpoint) {
+      if (checkpoint?.watermark !== committedWatermark
+        || !Number.isSafeInteger(checkpoint?.pendingCount)
+        || checkpoint.pendingCount < 0
+        || checkpoint.pendingCount > pendingIds.length) {
+        throw allocatorError('INVALID_THING_ID_CHECKPOINT', 'Thing ID allocation checkpoint does not belong to the current generation');
+      }
+      pendingIds = pendingIds.slice(0, checkpoint.pendingCount);
+    },
+    pendingUpdate() {
+      return pendingIds.length
+        ? thingIdentityAllocatorUpdate({ previousWatermark: committedWatermark, ids: pendingIds })
+        : null;
+    },
+    confirm(update) {
+      const pending = this.pendingUpdate();
+      if (!pending || JSON.stringify(update) !== JSON.stringify(pending)) {
+        throw allocatorError('THING_IDENTITY_CONFIRMATION_MISMATCH', 'Committed Thing ID allocation does not match the pending allocation');
+      }
+      committedWatermark = pending.nextWatermark;
+      pendingIds = [];
+    },
+    discard() {
+      pendingIds = [];
+    },
+    watermark() {
+      return committedWatermark;
+    }
+  });
+}
+
+export function rebuildThingIdWatermark(receipts) {
+  if (!Array.isArray(receipts)) {
+    throw allocatorError('INVALID_THING_ID_RECEIPTS', 'Thing ID receipt history must be an array');
+  }
+  let watermark = '000';
+  const issued = new Set();
+  for (const entry of receipts) {
+    const update = entry?.receipt?.result?.thingIdentityAllocator;
+    if (update === undefined) continue;
+    if (!update || update.version !== 1 || update.previousWatermark !== watermark
+      || !Array.isArray(update.issued) || update.issued.some(id => issued.has(id))) {
+      throw allocatorError('INVALID_THING_ID_ALLOCATION_HISTORY', 'Thing ID allocation history is not contiguous');
+    }
+    const canonical = thingIdentityAllocatorUpdate({
+      previousWatermark: update.previousWatermark,
+      ids: update.issued
+    });
+    if (canonical.nextWatermark !== update.nextWatermark) {
+      throw allocatorError('INVALID_THING_ID_ALLOCATION_HISTORY', 'Thing ID allocation watermark does not match its issued identities');
+    }
+    update.issued.forEach(id => issued.add(id));
+    watermark = update.nextWatermark;
+  }
+  return watermark;
+}
