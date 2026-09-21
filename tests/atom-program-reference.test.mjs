@@ -91,3 +91,24 @@ test('an ambiguous semantic selector is not rebound to a different Thing identit
   assert.equal(rewritten.source, source);
   assert.deepEqual(rewritten.changedSites, []);
 });
+
+test('reference relocation preserves operation keys, concatenation comments, and creation names', async () => {
+  const source = [
+    'transform({"thing.mov." "Domain/Old":"Domain/Target"})',
+    'explore({"thing": ("Domain/" # keep me\r\n    "Old")})',
+    'transform({"thing":"Domain/Old","situation":"","slot":[],"strut":[]})',
+    'transform({"thing.ren.Domain/Old":"Domain/Target"})'
+  ].join('\n');
+  const [rewritten] = await rewriteProgramReferenceBatch({
+    programs: [{ path: 'Program', source }],
+    aliases: [{ sourcePath: 'Domain/Old', resultPath: 'Domain/New', rootSourcePath: 'Domain/Old' }],
+    worldBindings: [{ path: 'Domain/Old', id: 'destination-id' }, { path: 'Domain/Target', id: 'target-id' }]
+  });
+  assert.equal(rewritten.changedSites.length, 2);
+  assert.match(rewritten.source, / # keep me\r\n    /u);
+  assert.ok(rewritten.source.includes('"thing.mov.Domain/New"'));
+  assert.ok(rewritten.source.includes('"thing":"Domain/Old","situation":"","slot":[],"strut":[]'));
+  assert.ok(rewritten.source.includes('"thing.ren.Domain/Old"'));
+  const inspected = await inspectProgramReferenceSites({ source: rewritten.source });
+  assert.equal(inspected.sites.find((site) => site.role === 'transform.mov.parameter').selector, 'Domain/New');
+});

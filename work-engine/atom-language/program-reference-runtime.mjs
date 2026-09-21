@@ -14,6 +14,7 @@ export function normalizeProgramReferences({ source, sourceHash, referenceSites,
   }
   const encoded = Buffer.from(source, 'utf8');
   const patches = [];
+  const literals = new Map();
   const boundSites = referenceSites.map((site) => {
     const rooted = site.selector.startsWith('世界之外/');
     const selector = rooted ? site.selector.slice('世界之外/'.length) : site.selector;
@@ -35,15 +36,32 @@ export function normalizeProgramReferences({ source, sourceHash, referenceSites,
       throw Object.assign(new Error('Invalid Program reference byte range'), { code: 'INVALID_PROGRAM_REFERENCE_SITE' });
     }
     if (site.selector !== exactPath) {
-      const literal = encoded.subarray(startByte, endByte).toString('utf8');
-      const quote = literal.match(/^[uUrR]*('''|"""|'|")/u)?.[1] ?? '"';
-      // Drop raw prefixes when escaping is needed; preserve the quote delimiter.
-      const inner = JSON.stringify(exactPath).slice(1, -1)
-        .replace(/\\"/gu, '"').replace(new RegExp(quote[0], 'gu'), `\\${quote[0]}`);
-      patches.push({ startByte, endByte, replacement: Buffer.from(`${quote}${inner}${quote}`, 'utf8') });
+      const key = `${startByte}:${endByte}`;
+      const literal = literals.get(key) ?? {
+        value: site.literalValue ?? site.selector,
+        tokens: site.literalTokens ?? [{ startByte, endByte }],
+        changes: []
+      };
+      literal.changes.push({ start: site.selectorStart ?? 0,
+        end: site.selectorEnd ?? Array.from(literal.value).length, replacement: exactPath });
+      literals.set(key, literal);
     }
     return { ...site, targetThingId: target.id, exactPath };
   });
+  for (const literal of literals.values()) {
+    const characters = Array.from(literal.value);
+    for (const change of literal.changes.sort((a, b) => b.start - a.start)) {
+      characters.splice(change.start, change.end - change.start, ...change.replacement);
+    }
+    // Keep all token boundaries, comments and intervening whitespace intact.
+    for (const [index, token] of literal.tokens.entries()) {
+      const original = encoded.subarray(token.startByte, token.endByte).toString('utf8');
+      const quote = original.match(/^[uUrR]*('''|"""|'|")/u)?.[1] ?? '"';
+      const inner = JSON.stringify(index === 0 ? characters.join('') : '').slice(1, -1)
+        .replace(/\\"/gu, '"').replace(new RegExp(quote[0], 'gu'), `\\${quote[0]}`);
+      patches.push({ ...token, replacement: Buffer.from(`${quote}${inner}${quote}`, 'utf8') });
+    }
+  }
   let normalized = encoded;
   for (const patch of patches.sort((a, b) => b.startByte - a.startByte)) {
     normalized = Buffer.concat([normalized.subarray(0, patch.startByte), patch.replacement, normalized.subarray(patch.endByte)]);

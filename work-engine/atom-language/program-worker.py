@@ -1,10 +1,12 @@
 import ast
 import hashlib
 import importlib.util
+import io
 import json
 import re
 from pathlib import Path
 import sys
+import tokenize
 
 sys.dont_write_bytecode = True
 
@@ -627,6 +629,14 @@ def inspect_program_references(source, filename, tree=None):
         tree = ast.parse(source, filename=filename, mode="exec")
     # Python source line numbers recognize CR/LF, not Unicode string separators.
     offsets = [0] + [match.end() for match in re.finditer(b"\r\n|\r|\n", source.encode("utf-8"))]
+    source_lines = re.split(r"\r\n|\r|\n", source)
+    string_tokens = []
+    for token in tokenize.generate_tokens(io.StringIO(source, newline=None).readline):
+        if token.type == tokenize.STRING:
+            string_tokens.append({
+                "startByte": offsets[token.start[0] - 1] + len(source_lines[token.start[0] - 1][:token.start[1]].encode("utf-8")),
+                "endByte": offsets[token.end[0] - 1] + len(source_lines[token.end[0] - 1][:token.end[1]].encode("utf-8")),
+            })
     paths = {}
     calls = []
     enclosing_iterators = {}
@@ -677,19 +687,48 @@ def inspect_program_references(source, filename, tree=None):
                         visit(child, f"{ast_path}.{field}[{index}]", child_shadowed)
     visit(tree, "module", set())
     sites = []
-    def add_site(role, value):
+    def add_site(role, value, selector_start=None, selector_end=None):
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            start = offsets[value.lineno - 1] + value.col_offset
+            end = offsets[value.end_lineno - 1] + value.end_col_offset
+            tokens = [token for token in string_tokens if token["startByte"] >= start and token["endByte"] <= end]
             sites.append({
                 "role": role,
-                "selector": value.value,
+                "selector": value.value[selector_start:selector_end],
                 "line": value.lineno,
                 "columnBytes": value.col_offset,
                 "endLine": value.end_lineno,
                 "endColumnBytes": value.end_col_offset,
-                "startByte": offsets[value.lineno - 1] + value.col_offset,
-                "endByte": offsets[value.end_lineno - 1] + value.end_col_offset,
+                "startByte": start,
+                "endByte": end,
                 "astPath": paths[id(value)],
+                **({"literalTokens": tokens} if len(tokens) > 1 else {}),
+                **({"literalValue": value.value, "selectorStart": selector_start, "selectorEnd": selector_end}
+                   if selector_start is not None else {}),
             })
+
+    def effective_entries(dictionary):
+        entries = {}
+        uncertain = False
+        for key, value in zip(dictionary.keys, dictionary.values):
+            if key is None and isinstance(value, ast.Dict):
+                nested, unknown = effective_entries(value)
+                if unknown:
+                    entries.clear()
+                    uncertain = True
+                entries.update(nested)
+            elif isinstance(key, ast.Constant) and isinstance(key.value, str):
+                entries[key.value] = (key, value)
+            elif key is None or not isinstance(key, ast.Constant):
+                # A dynamic key or unpacking can override every preceding entry.
+                entries.clear()
+                uncertain = True
+        return entries, uncertain
+
+    command_pattern = re.compile(r"\.(rep|sum|typ|ren|lnk|mov|cpy|add|dsc|rst|run)\.")
+
+    def base_axis(key):
+        return re.split(r"[@#$~]", key, maxsplit=1)[0]
 
     for node in calls:
         name = node.func.id
@@ -697,7 +736,8 @@ def inspect_program_references(source, filename, tree=None):
             if (len(node.args) >= 2 and isinstance(node.args[0], ast.Constant)
                     and node.args[0].value == "transform"
                     and isinstance(node.args[1], ast.Dict)):
-                for key, value in zip(node.args[1].keys, node.args[1].values):
+                entries, _ = effective_entries(node.args[1])
+                for key, value in entries.values():
                     if (isinstance(key, ast.Constant) and key.value == "nodes"
                             and isinstance(value, (ast.List, ast.Tuple))):
                         for item in value.elts:
@@ -706,17 +746,30 @@ def inspect_program_references(source, filename, tree=None):
         if (len(node.args) != 1 or node.keywords
                 or not isinstance(node.args[0], ast.Dict)):
             continue
-        for key, value in zip(node.args[0].keys, node.args[0].values):
+        entries, uncertain = effective_entries(node.args[0])
+        creation = (name == "transform" and not uncertain and len(entries) == 4
+                    and {base_axis(key) for key in entries} == {"thing", "situation", "slot", "strut"}
+                    and not any(command_pattern.search(key) for key in entries))
+        for key, value in entries.values():
             if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
                 continue
             if name == "explore" and key.value == "thing":
                 add_site("explore.thing", value)
             elif name == "use_program" and key.value == "name":
                 add_site("use_program.name", value)
-            elif name == "transform" and (key.value == "thing" or key.value.startswith("thing.")):
+            elif name == "transform":
+                markers = list(command_pattern.finditer(key.value))
+                base = key.value[:markers[0].start()] if markers else key.value
+                if base_axis(base) != "thing" or creation:
+                    continue
                 add_site("transform.thing", value)
+                for index, marker in enumerate(markers):
+                    end = markers[index + 1].start() if index + 1 < len(markers) else len(key.value)
+                    if marker.group(1) in {"mov", "cpy", "lnk", "run"} and end > marker.end():
+                        add_site(f"transform.{marker.group(1)}.parameter", key, marker.end(), end)
             elif name == "lock" and key.value == "targets" and isinstance(value, ast.Dict):
-                for target_key, target_value in zip(value.keys, value.values):
+                targets, _ = effective_entries(value)
+                for target_key, target_value in targets.values():
                     if (isinstance(target_key, ast.Constant) and target_key.value == "paths"
                             and isinstance(target_value, (ast.List, ast.Tuple))):
                         for item in target_value.elts:
@@ -746,6 +799,7 @@ def rewrite_program_references(source, filename, aliases, world_bindings):
     inspected = inspect_program_references(source, filename)
     encoded = source.encode("utf-8")
     patches = []
+    literals = {}
     changed_sites = []
     ordered_aliases = sorted(aliases, key=lambda item: len(item["sourcePath"]), reverse=True)
     for site in inspected["sites"]:
@@ -765,19 +819,30 @@ def rewrite_program_references(source, filename, aliases, world_bindings):
         rewritten = change["resultPath"] + selector[len(change["sourcePath"]):]
         start = site["startByte"]
         end = site["endByte"]
-        original_literal = encoded[start:end].decode("utf-8")
-        json_literal = json.dumps(rewritten, ensure_ascii=False)
-        if original_literal.startswith("'") and not original_literal.startswith("'''"):
-            inner = json_literal[1:-1].replace('\\"', '"').replace("'", "\\'")
-            replacement = f"'{inner}'"
-        else:
-            replacement = json_literal
-        patches.append((start, end, replacement.encode("utf-8")))
+        literal = literals.setdefault((start, end), {
+            "value": site.get("literalValue", selector),
+            "tokens": site.get("literalTokens", [{"startByte": start, "endByte": end}]),
+            "changes": [],
+        })
+        literal["changes"].append((
+            site.get("selectorStart", 0), site.get("selectorEnd", len(literal["value"])), rewritten
+        ))
         changed_sites.append({
             **site,
             "rewrittenSelector": rewritten,
             "targetId": targets[0]["id"],
         })
+    for literal in literals.values():
+        value = literal["value"]
+        for start, end, replacement in sorted(literal["changes"], reverse=True):
+            value = value[:start] + replacement + value[end:]
+        for index, token in enumerate(literal["tokens"]):
+            start, end = token["startByte"], token["endByte"]
+            original = encoded[start:end].decode("utf-8")
+            quote = re.match(r"^[uUrR]*('''|\"\"\"|'|\")", original).group(1)
+            inner = json.dumps(value if index == 0 else "", ensure_ascii=False)[1:-1]
+            inner = inner.replace('\\"', '"').replace(quote[0], "\\" + quote[0])
+            patches.append((start, end, (quote + inner + quote).encode("utf-8")))
     for start, end, replacement in sorted(patches, reverse=True):
         encoded = encoded[:start] + replacement + encoded[end:]
     return {

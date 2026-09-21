@@ -21,6 +21,69 @@ const roles = [
   ['transform.thing', 'transform({"thing":"目标","situation.rep.完成":None})', 'transform({"thing":"域/目标","situation.rep.完成":None})']
 ];
 
+test('complete four-axis Transform creation names are not references or rewritten suffixes', async (t) => {
+  const source = 'def main():\n    transform({"thing":"New", "situation":"", "slot":[], "strut":[]})\n    transform({"thing@program":"Target", "situation":"pass", "slot":[], "strut":[]})';
+  const files = await fixture(t, [atom('Domain', '', [atom('Target')])]);
+  const result = await executeAtomLanguage({ ...files, source: `transform new ${JSON.stringify(atom('Creator', source, [], 'program'))}` });
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  const persisted = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.equal(persisted.find((item) => Object.values(item).includes('Creator')).situation, source);
+});
+
+for (const operation of ['mov', 'cpy', 'lnk', 'run']) {
+  test(`Transform .${operation}. binds its reference parameter and source selector`, async (t) => {
+    const source = `transform({"thing.${operation}.Destination":"Target"})`;
+    const [analysis] = await createProgramRuntimeScheduler().validateProgramSources([atom('Program', source, [], 'program')]);
+    const normalized = references.normalizeProgramReferences({ source, ...analysis, worldBindings: [
+      { path: 'Domain/Target', id: 'target-id' }, { path: 'Domain/Destination', id: 'destination-id' }
+    ] });
+    assert.equal(normalized.source, `transform({"thing.${operation}.Domain/Destination":"Domain/Target"})`);
+    assert.ok(normalized.referenceSites.some((site) => site.role === `transform.${operation}.parameter` && site.targetThingId === 'destination-id'));
+    assert.throws(() => references.normalizeProgramReferences({ source, ...analysis,
+      worldBindings: [{ path: 'Domain/Target', id: 'target-id' }] }), { code: 'PROGRAM_REFERENCE_NOT_FOUND' });
+    const files = await fixture(t, [atom('Domain', '', [atom('Target'), atom('Destination')])]);
+    const programSource = `def main():\n    ${source}`;
+    const result = await executeAtomLanguage({ ...files,
+      source: `transform new ${JSON.stringify(atom('Program', programSource, [], 'program'))}` });
+    assert.equal(result.ok, true, JSON.stringify(result.errors));
+    const persisted = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+    assert.equal(persisted.find((item) => Object.values(item).includes('Program')).situation,
+      `def main():\n    transform({"thing.${operation}.Domain/Destination":"Domain/Target"})`);
+  });
+}
+
+test('Transform .ren. keeps the new name as text while binding its source', async () => {
+  const source = 'transform({"thing.ren.New":"Target"})';
+  const [analysis] = await createProgramRuntimeScheduler().validateProgramSources([atom('Program', source, [], 'program')]);
+  const normalized = references.normalizeProgramReferences({ source, ...analysis,
+    worldBindings: [{ path: 'Domain/Target', id: 'target-id' }, { path: 'Domain/New', id: 'unrelated-id' }] });
+  assert.equal(normalized.source, 'transform({"thing.ren.New":"Domain/Target"})');
+  assert.equal(normalized.referenceSites.length, 1);
+});
+
+test('normalization preserves comments and whitespace between concatenated string tokens', async () => {
+  const source = 'explore({"thing": ("Tar" # keep me\r\n    "get")})';
+  const [analysis] = await createProgramRuntimeScheduler().validateProgramSources([atom('Program', source, [], 'program')]);
+  const normalized = references.normalizeProgramReferences({ source, ...analysis,
+    worldBindings: [{ path: 'Domain/Target', id: 'target-id' }] });
+  assert.match(normalized.source, / # keep me\r\n    /u);
+  const [revalidated] = await createProgramRuntimeScheduler().validateProgramSources([atom('Program', normalized.source, [], 'program')]);
+  assert.equal(revalidated.referenceSites[0].selector, 'Domain/Target');
+});
+
+test('only effective unambiguously known dictionary values are bound', async () => {
+  const source = [
+    'explore({"thing":"Missing", "thing":selector})',
+    'explore({"thing":"Missing", **unknown})',
+    'explore({"thing":"Missing", dynamic_key:selector})',
+    'explore({**unknown, "thing":"Target"})',
+    'explore({"thing":"Missing", **{"thing":"Target"}})',
+    'lock({"targets":{"paths":["Missing"], "paths":dynamic_paths}})'
+  ].join('\n');
+  const [analysis] = await createProgramRuntimeScheduler().validateProgramSources([atom('Program', source, [], 'program')]);
+  assert.deepEqual(analysis.referenceSites.map((site) => site.selector), ['Target', 'Target']);
+});
+
 for (const [role, source, expected] of roles) {
   test(`write normalization binds ${role} to exact path and permanent identity`, async () => {
     const world = [atom('域', '', [atom('目标', 'def main(arguments):\n    return arguments', [], 'program')]), atom('程序', source, [], 'program')];
