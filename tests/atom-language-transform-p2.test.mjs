@@ -114,9 +114,9 @@ test('rename preserves sibling and cross-tree partner targets', async (t) => {
 
 test('Strut identity keeps the original target when its old semantic path is reused', async (t) => {
   const files = await fixture(t, [
-    { 'thing&id=AAAAAAAAAAAAAAAAAAAAAA': '目标', situation: '', slot: [], strut: [] },
+    { 'thing&id=101': '目标', situation: '', slot: [], strut: [] },
     {
-      'thing&id=BBBBBBBBBBBBBBBBBBBBBB': '来源', situation: '', slot: [],
+      'thing&id=102': '来源', situation: '', slot: [],
       strut: [{ 'if@current': true, then: [{ thing: '目标' }] }]
     }
   ]);
@@ -131,7 +131,7 @@ test('Strut identity keeps the original target when its old semantic path is reu
   const endpoint = partnersOf(findByPath(world, '来源'))[0];
   const endpointKey = Object.keys(endpoint).find((key) => key.startsWith('thing'));
   const originalKey = Object.keys(original).find((key) => key.startsWith('thing'));
-  assert.equal(endpointKey.match(/&id=([A-Za-z0-9_-]{22})/u)?.[1], originalKey.match(/&id=([A-Za-z0-9_-]{22})/u)?.[1]);
+  assert.equal(endpointKey.match(/&id=([0-9A-Za-z]{3,})/u)?.[1], originalKey.match(/&id=([0-9A-Za-z]{3,})/u)?.[1]);
   assert.equal(endpointThing(endpoint), '新名');
   const projection = JSON.parse(await fs.readFile(files.projectionFile, 'utf8'));
   assert.equal(projection.graph.slot[1].strut[0].then[0].thing, 'atom.json/新名');
@@ -139,8 +139,8 @@ test('Strut identity keeps the original target when its old semantic path is reu
 
 test('a semantic Strut write binds its target identity in the same Transform', async (t) => {
   const files = await fixture(t, [
-    { 'thing&id=AAAAAAAAAAAAAAAAAAAAAA': '目标', situation: '', slot: [], strut: [] },
-    { 'thing&id=BBBBBBBBBBBBBBBBBBBBBB': '来源', situation: '', slot: [], strut: [] }
+    { 'thing&id=101': '目标', situation: '', slot: [], strut: [] },
+    { 'thing&id=102': '来源', situation: '', slot: [], strut: [] }
   ]);
 
   const result = await execute(
@@ -150,17 +150,19 @@ test('a semantic Strut write binds its target identity in the same Transform', a
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const endpoint = partnersOf(findByPath(await readAtoms(files.contextFile), '来源'))[0];
-  assert.equal(Object.keys(endpoint)[0], 'thing&id=AAAAAAAAAAAAAAAAAAAAAA');
+  assert.equal(Object.keys(endpoint)[0], 'thing&id=101');
   assert.equal(endpointThing(endpoint), '目标');
 });
 
-test('rename rewrites exact path literals in Program sources', async (t) => {
+test('rename preserves Program source while identity bindings follow the renamed target', async (t) => {
   const oldPath = '甲/目标';
   const newPath = '甲/新目标';
   const files = await fixture(t, [
-    atom('甲', '', [atom('目标')]),
+    { 'thing&id=101': '甲', situation: '', slot: [
+      { 'thing&id=102': '目标', situation: '', slot: [], strut: [] }
+    ], strut: [] },
     {
-      'thing@program': '监听器',
+      'thing@program&id=103': '监听器',
       situation: `def main():\n    explore({"thing":${JSON.stringify(oldPath)}})\ntrigger("transform", {"nodes":[${JSON.stringify(oldPath)}]}, main)`,
       slot: [],
       strut: []
@@ -175,8 +177,8 @@ test('rename rewrites exact path literals in Program sources', async (t) => {
 
   assert.equal(renamed.ok, true, JSON.stringify(renamed.errors));
   const watcher = findByPath(await readAtoms(files.contextFile), '监听器');
-  assert.equal(watcher.situation.includes(oldPath), false);
-  assert.equal(watcher.situation.match(new RegExp(newPath, 'gu')).length, 2);
+  assert.equal(watcher.situation.match(new RegExp(oldPath, 'gu')).length, 2);
+  assert.equal(watcher.situation.includes(newPath), false);
 });
 
 test('move rewrites affected paths while keeping internal subtree relations local', async (t) => {
@@ -249,6 +251,7 @@ test('restore recovers a discarded subtree with strut and shortcut references in
     ]),
     atom('Synthetic Source', '', [], [{ thing: 'Synthetic East/Duplicate' }]),
     atom('Synthetic References', '', [createShortcutAtom({
+      identity: '101',
       thing: 'Duplicate Link',
       targetPath: 'Synthetic East/Duplicate',
       referenceId: 'synthetic-duplicate-link'

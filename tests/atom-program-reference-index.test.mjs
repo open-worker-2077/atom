@@ -8,6 +8,7 @@ import {
 import { createProgramReferenceIndex } from '../work-engine/atom-language/program-reference-index.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
+import { thingIdForOrdinal } from '../work-engine/atom-language/thing-id-allocator.mjs';
 
 function atom(id, name, source = '', children = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}&id=${id}`]: name, situation: source, slot: children, strut: [] };
@@ -29,21 +30,22 @@ const receipts = (...replacements) => [{ receipt: { result: {
 
 test('index consumes persisted identities and current ID paths without parsing readable selectors', async () => {
   const sources = Array.from({ length: 10 }, (_, i) => `# ${i}\nexplore({"thing":ref("World/Target")})`);
-  const world = freeze([atom('world_________________', 'World', '', [atom('target________________', 'Target'),
-    ...Array.from({ length: 100 }, (_, i) => atom(`p${i}`.padEnd(22, '_'), `P${i}`, sources[i % 10], [], 'program'))])]);
+  const programId = (index) => thingIdForOrdinal(1_000 + index);
+  const world = freeze([atom('101', 'World', '', [atom('102', 'Target'),
+    ...Array.from({ length: 100 }, (_, i) => atom(programId(i), `P${i}`, sources[i % 10], [], 'program'))])]);
   const bytes = JSON.stringify(world);
   const revision = revisionOfWorldFacts(world);
   const replacements = Array.from({ length: 100 }, (_, i) => binding(
-    `p${i}`.padEnd(22, '_'), sources[i % 10], 'target________________', `ref:module.body[0]:${i}`
+    programId(i), sources[i % 10], '102', `ref:module.body[0]:${i}`
   ));
   const bindings = rebuildProgramRefBindings(receipts(...replacements), replacements);
   const index = await createProgramReferenceIndex(world, { bindings });
-  assert.equal(index.sitesForTargets(['target________________']).length, 100);
-  assert.equal(index.sitesForTargets(['target________________', 'target________________']).length, 100);
+  assert.equal(index.sitesForTargets(['102']).length, 100);
+  assert.equal(index.sitesForTargets(['102', '102']).length, 100);
   assert.deepEqual(index.sitesForTargets(['absent']), []);
-  const [site] = index.sitesForProgram('p7____________________');
-  assert.equal(site.programThingId, 'p7____________________');
-  assert.equal(site.targetThingId, 'target________________');
+  const [site] = index.sitesForProgram(programId(7));
+  assert.equal(site.programThingId, programId(7));
+  assert.equal(site.targetThingId, '102');
   assert.equal(site.exactPath, 'World/Target');
   assert.equal(site.role, 'ref');
   assert.equal(site.sourceHash, hash(sources[7]));
@@ -55,22 +57,22 @@ test('index consumes persisted identities and current ID paths without parsing r
 
 test('missing binding, source mismatch and missing target quarantine only their Program', async () => {
   const source = 'explore({"thing":ref("World/Target")})';
-  const missingId = 'missing'.padEnd(22, '_');
-  const staleId = 'stale'.padEnd(22, '_');
-  const goneId = 'gone'.padEnd(22, '_');
-  const deletedId = 'deleted'.padEnd(22, '_');
-  const world = [atom('world_________________', 'World', '', [atom('target________________', 'Target'),
-    atom('good__________________', 'Good', source, [], 'program'),
+  const missingId = '202';
+  const staleId = '203';
+  const goneId = '204';
+  const deletedId = '205';
+  const world = [atom('101', 'World', '', [atom('102', 'Target'),
+    atom('201', 'Good', source, [], 'program'),
     atom(missingId, 'MissingBinding', source, [], 'program'),
     atom(staleId, 'Stale', `${source}\n# changed`, [], 'program'),
     atom(goneId, 'MissingTarget', source, [], 'program')])];
   const bindings = rebuildProgramRefBindings(receipts(
-    binding('good__________________', source, 'target________________'),
-    binding(staleId, source, 'target________________'),
+    binding('201', source, '102'),
+    binding(staleId, source, '102'),
     binding(goneId, source, deletedId)
   ), null);
   const index = await createProgramReferenceIndex(world, { bindings });
-  assert.deepEqual(index.sitesForTargets(['target________________']).map(site => site.programThingId), ['good__________________']);
+  assert.deepEqual(index.sitesForTargets(['102']).map(site => site.programThingId), ['201']);
   assert.deepEqual(index.failures.map(({ programThingId, code }) => ({ programThingId, code })), [
     { programThingId: missingId, code: 'PROGRAM_REF_BINDING_MISSING' },
     { programThingId: staleId, code: 'PROGRAM_REF_SOURCE_MISMATCH' },
@@ -80,9 +82,9 @@ test('missing binding, source mismatch and missing target quarantine only their 
 
 test('missing-target scheduler exception and warning expose no hidden Thing identity', async () => {
   const source = 'explore({"thing":ref("World/Target")})';
-  const programId = 'program-private'.padEnd(22, '_');
-  const missingTargetId = 'target-private'.padEnd(22, '_');
-  const world = [atom('world_________________', 'World', '', [
+  const programId = '201';
+  const missingTargetId = '202';
+  const world = [atom('101', 'World', '', [
     atom(programId, 'MissingTarget', source, [], 'program')
   ])];
   const bindings = rebuildProgramRefBindings(receipts(
@@ -114,33 +116,33 @@ test('missing-target scheduler exception and warning expose no hidden Thing iden
 
 test('only explicitly typed default backup Programs are excluded from reference inspection', async () => {
   const source = 'explore({"thing":ref("Target")})';
-  const world = [atom('target________________', 'Target'),
-    atom('backup________________', 'Archive', '', [atom('archived______________', 'Archived', source, [], 'program')], 'backup@default'),
-    atom('ordinary______________', '备份', '', [atom('active________________', 'Active', source, [], 'program')])];
+  const world = [atom('101', 'Target'),
+    atom('102', 'Archive', '', [atom('103', 'Archived', source, [], 'program')], 'backup@default'),
+    atom('104', '备份', '', [atom('105', 'Active', source, [], 'program')])];
   const bindings = rebuildProgramRefBindings(receipts(
-    binding('active________________', source, 'target________________')
+    binding('105', source, '101')
   ), null);
   const index = await createProgramReferenceIndex(world, { bindings });
-  assert.deepEqual(index.sitesForProgram('archived______________'), []);
-  assert.deepEqual(index.sitesForTargets(['target________________']).map(site => site.programThingId), ['active________________']);
+  assert.deepEqual(index.sitesForProgram('103'), []);
+  assert.deepEqual(index.sitesForTargets(['101']).map(site => site.programThingId), ['105']);
   assert.deepEqual(index.failures, []);
 });
 
 test('owner removal and ID-path transitions return immutable disposable snapshots', async () => {
   const source = 'explore({"thing":ref("World/Target")})';
-  const world = freeze([atom('world_________________', 'World', '', [atom('target________________', 'Target'),
-    atom('owner_________________', 'Owner', source, [], 'program')])]);
+  const world = freeze([atom('101', 'World', '', [atom('102', 'Target'),
+    atom('103', 'Owner', source, [], 'program')])]);
   const bindings = rebuildProgramRefBindings(receipts(
-    binding('owner_________________', source, 'target________________')
+    binding('103', source, '102')
   ), null);
   const index = await createProgramReferenceIndex(world, { bindings });
-  assert.equal(index.sitesForTargets(['target________________']).length, 1);
-  const moved = index.transition({ relocations: [{ thingId: 'target________________', resultPath: 'World/Renamed' }] });
-  assert.equal(moved.sitesForProgram('owner_________________')[0].exactPath, 'World/Renamed');
-  assert.equal(index.sitesForProgram('owner_________________')[0].exactPath, 'World/Target');
-  assert.equal(moved.sitesForProgram('owner_________________')[0].targetThingId, 'target________________');
-  assert.equal(moved.withoutProgram('owner_________________').sitesForTargets(['target________________']).length, 0);
-  assert.throws(() => { moved.sitesForProgram('owner_________________')[0].exactPath = 'corrupt'; }, TypeError);
-  assert.throws(() => { index.sitesForTargets(['target________________']).push({}); }, TypeError);
+  assert.equal(index.sitesForTargets(['102']).length, 1);
+  const moved = index.transition({ relocations: [{ thingId: '102', resultPath: 'World/Renamed' }] });
+  assert.equal(moved.sitesForProgram('103')[0].exactPath, 'World/Renamed');
+  assert.equal(index.sitesForProgram('103')[0].exactPath, 'World/Target');
+  assert.equal(moved.sitesForProgram('103')[0].targetThingId, '102');
+  assert.equal(moved.withoutProgram('103').sitesForTargets(['102']).length, 0);
+  assert.throws(() => { moved.sitesForProgram('103')[0].exactPath = 'corrupt'; }, TypeError);
+  assert.throws(() => { index.sitesForTargets(['102']).push({}); }, TypeError);
   assert.equal(world[0].slot[1].situation, source);
 });

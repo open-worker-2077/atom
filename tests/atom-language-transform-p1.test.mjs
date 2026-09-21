@@ -174,13 +174,13 @@ test('situation rep performs local replacement with Value and full replacement w
 test('summary, field type, rename, and complete strut replacement strip commands', async (t) => {
   const files = await fixture(t, [
     {
-      thing: '甲',
+      'thing&id=101': '甲',
       'situation#旧简介': 'def main(arguments):\n    return True',
       slot: [],
       strut: []
     },
-    atom('甲事实', '', [], [{ 'if@current': true, then: [{ thing: '乙' }] }]),
-    atom('乙')
+    { 'thing&id=102': '甲事实', situation: '', slot: [], strut: [{ 'if@current': true, then: [{ 'thing&id=103': '乙' }] }] },
+    { 'thing&id=103': '乙', situation: '', slot: [], strut: [] }
   ]);
   const programScheduler = createProgramRuntimeScheduler();
   for (const source of [
@@ -195,13 +195,16 @@ test('summary, field type, rename, and complete strut replacement strip commands
 
   const updated = findAtom(await readAtoms(files.contextFile), '甲新版');
   assert.ok(updated);
-  assert.equal(updated['thing@program'], '甲新版');
+  assert.equal(
+    Object.entries(updated).find(([rawKey]) => rawKey.startsWith('thing@program'))?.[1],
+    '甲新版'
+  );
   assert.equal(updated['situation#新简介'], 'def main(arguments):\n    return True');
   assert.deepEqual(updated.strut, []);
   assert.deepEqual(findAtom(await readAtoms(files.contextFile), '甲事实').strut, [{
     'if@current': true,
     if: [{ program: 'def main(context):\n    return True' }],
-    then: [{ thing: '乙' }]
+    then: [{ 'thing&id=103': '乙' }]
   }]);
   assert.equal(
     JSON.stringify(await readAtoms(files.contextFile)).includes('.rep.'),
@@ -211,11 +214,11 @@ test('summary, field type, rename, and complete strut replacement strip commands
 
 test('atomic strut commands add one owner-local edge and remove its ID-bound renamed target', async (t) => {
   const files = await fixture(t, [{
-    'thing&id=aaaaaaaaaaaaaaaaaaaaaa': '域',
+    'thing&id=101': '域',
     situation: '',
     slot: [
-      { 'thing&id=bbbbbbbbbbbbbbbbbbbbbb': '源', situation: '', slot: [], strut: [] },
-      { 'thing&id=cccccccccccccccccccccc': '目标', situation: '', slot: [], strut: [] }
+      { 'thing&id=102': '源', situation: '', slot: [], strut: [] },
+      { 'thing&id=103': '目标', situation: '', slot: [], strut: [] }
     ],
     strut: []
   }]);

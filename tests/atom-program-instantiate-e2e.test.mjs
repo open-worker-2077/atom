@@ -14,6 +14,7 @@ import { atomName } from '../work-engine/atom-language/slot-graph-semantics.mjs'
 import { programFunctionRegistry } from '../work-engine/atom-language/program-function-registry.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { evaluateStrutClausesWithPrograms } from '../work-engine/atom-language/strut-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 
 const fixtureAgentSpecification = programFunctionRegistry().functions
   .find((entry) => entry.name === 'agent').contract.argument.example;
@@ -39,7 +40,7 @@ test('instantiate creates one complete advancement flow below the calling Progra
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-instantiate-flow-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('新任务', '项目目标', [
       atom('推进流', [
         "instantiate({",
@@ -50,7 +51,7 @@ test('instantiate creates one complete advancement flow below the calling Progra
         "})"
       ].join('\n'), [], 'program')
     ])
-  ], null, 2));
+  ] });
   const scheduler = createProgramRuntimeScheduler();
 
   const first = await executeAtomLanguage({
@@ -61,13 +62,13 @@ test('instantiate creates one complete advancement flow below the calling Progra
 
   const afterFirst = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   const program = afterFirst[0].slot[0];
-  assert.deepEqual(program.slot.map((entry) => entry.thing ?? entry['thing@program']), [
+  assert.deepEqual(program.slot.map((entry) => atomName(entry)), [
     '编标版本', '任务标题', '导航坐标', '设标', '建标', '推进', '收尾', '内部路由'
   ]);
-  assert.equal(program.slot.find((entry) => entry.thing === '任务标题').situation, '新任务');
-  assert.equal(program.slot.find((entry) => entry['thing@program'] === '内部路由')['thing@program'], '内部路由');
+  assert.equal(program.slot.find((entry) => atomName(entry) === '任务标题').situation, '新任务');
+  assert.equal(atomName(program.slot.find((entry) => atomName(entry) === '内部路由')), '内部路由');
   assert.deepEqual(
-    program.slot.find((entry) => entry.thing === '设标').slot.map((entry) => entry.thing),
+    program.slot.find((entry) => atomName(entry) === '设标').slot.map((entry) => atomName(entry)),
     ['定向', '调研', '策评']
   );
 
@@ -88,11 +89,11 @@ test('advancement-flow transitions consume Strut-owned strict-bool Programs with
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-instantiate-strut-gate-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Synthetic Flow', '', [
       atom('Generator', "instantiate({'template':'advancement-flow','version':'latest','mode':'ensure','parameters':{'title':'Synthetic'}})", [], 'program')
     ])
-  ], null, 2));
+  ] });
   const scheduler = createProgramRuntimeScheduler();
   const instantiated = await executeAtomLanguage({
     source: 'atom', contextFile, projectionFile, programScheduler: scheduler
@@ -141,9 +142,9 @@ test('advancement-flow transitions consume Strut-owned strict-bool Programs with
   const completedWorld = structuredClone(initialWorld);
   const generator = completedWorld[0].slot[0];
   const direction = generator.slot
-    .find((child) => child.thing === '设标').slot
-    .find((child) => child.thing === '定向');
-  direction.slot.find((child) => child.thing === '状态').situation = '已通过';
+    .find((child) => atomName(child) === '设标').slot
+    .find((child) => atomName(child) === '定向');
+  direction.slot.find((child) => atomName(child) === '状态').situation = '已通过';
   const completedGraph = projectAtomContext(completedWorld);
   const completedTransition = completedGraph.strutClauses
     .find((clause) => clause.sourcePath.endsWith('/定向'));
@@ -220,9 +221,9 @@ test('documented repair command attaches and instantiates a flow below an existi
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   const existingAgentSource = `agent(${JSON.stringify(fixtureAgentSpecification)})`;
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('已有任务名', existingAgentSource, [], 'program')
-  ], null, 2), 'utf8');
+  ] });
   const scheduler = createProgramRuntimeScheduler();
 
   const result = await executeAtomLanguage({
@@ -235,10 +236,10 @@ test('documented repair command attaches and instantiates a flow below an existi
 
   assert.equal(result.ok, true, JSON.stringify({ errors: result.errors, warnings: result.warnings }));
   const [agent] = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
-  assert.equal(agent['thing@program'], '已有任务名');
+  assert.equal(atomName(agent), '已有任务名');
   assert.equal(agent.slot.length, 1);
-  assert.equal(agent.slot[0]['thing@program'], '推进流');
-  assert.equal(agent.slot[0].slot.find((child) => child.thing === '导航坐标').situation, '定向');
+  assert.equal(atomName(agent.slot[0]), '推进流');
+  assert.equal(agent.slot[0].slot.find((child) => atomName(child) === '导航坐标').situation, '定向');
 });
 
 test('advancement-flow data children can be edited without legacy uses partners', async () => {

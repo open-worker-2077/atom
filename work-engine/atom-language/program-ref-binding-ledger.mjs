@@ -158,6 +158,16 @@ export function rebuildProgramRefBindings(receipts, currentPrograms = null) {
   return bindingSnapshot(values);
 }
 
+export function applyProgramRefBindingUpdate(snapshot, value) {
+  const values = new Map(snapshot?.entries?.() ?? []);
+  const update = createProgramRefBindingUpdate(value ?? {});
+  for (const id of update.removals) values.delete(id);
+  for (const replacement of update.replacements) {
+    values.set(replacement.programThingId, replacement);
+  }
+  return bindingSnapshot(values);
+}
+
 export function programRefBindingsForRollback(receipts, targetCommandId) {
   const entries = [...(receipts ?? [])];
   const targetIndex = entries.findIndex((entry) => (

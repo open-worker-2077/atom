@@ -8,6 +8,7 @@ import {
   executeAtomLanguage,
   readCommittedAtomLanguageFacts
 } from './helpers/atom-language-test-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { atomName } from '../work-engine/atom-language/slot-graph-semantics.mjs';
 
@@ -21,25 +22,25 @@ test('discard deactivates nested Program indexes and restore rebuilds them from 
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   const watcherSource = [
-    "dependency = explore({'thing': 'Dependency', 'situation$full': None})[0]",
+    "dependency = explore({'thing': ref('Dependency'), 'situation$full': None})[0]",
     'def on_source_change():',
-    "    transform({'thing': 'Target', 'situation.rep.triggered': None})",
-    "trigger('transform', {'nodes': ['Source']}, on_source_change)"
+    "    transform({'thing': ref('Target'), 'situation.rep.triggered': None})",
+    "trigger('transform', {'nodes': [ref('Source')]}, on_source_change)"
   ].join('\n');
   const activeSource = [
-    "dependency = explore({'thing': 'Dependency', 'situation$full': None})[0]",
+    "dependency = explore({'thing': ref('Dependency'), 'situation$full': None})[0]",
     'def on_source_change():',
     "    message({'level': 'info', 'text': 'active watcher ran'})",
-    "trigger('transform', {'nodes': ['Source']}, on_source_change)"
+    "trigger('transform', {'nodes': [ref('Source')]}, on_source_change)"
   ].join('\n');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Source'),
     atom('Dependency'),
     atom('Target', 'stable'),
     atom('Program Container', '', [atom('Watcher', watcherSource, [], 'program')]),
     atom('Active Watcher', activeSource, [], 'program'),
     atom('Default Backup', '', [], 'backup@default')
-  ], null, 2));
+  ] });
   const scheduler = createProgramRuntimeScheduler();
   const execute = (source) => executeAtomLanguage({
     source, contextFile, projectionFile, programScheduler: scheduler
@@ -49,10 +50,10 @@ test('discard deactivates nested Program indexes and restore rebuilds them from 
   assert.equal(discarded.ok, true, JSON.stringify(discarded.errors));
   const archivedWorld = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   const archivedContainer = archivedWorld
-    .find((candidate) => candidate['thing@backup@default'] === 'Default Backup')
+    .find((candidate) => atomName(candidate) === 'Default Backup')
     .slot[0];
-  assert.equal(archivedContainer['thing'], 'Program Container');
-  assert.equal(archivedContainer.slot[0]['thing@program'], 'Watcher');
+  assert.equal(atomName(archivedContainer), 'Program Container');
+  assert.equal(atomName(archivedContainer.slot[0]), 'Watcher');
   assert.equal(archivedContainer.slot[0].situation, watcherSource);
   assert.deepEqual([...scheduler.triggerContracts.keys()], ['Active Watcher']);
   assert.deepEqual(
@@ -146,7 +147,7 @@ test('Program transform uses the normal Transform executor and is persisted befo
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-transform-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('汇总值', '0'),
     atom('计算程序', [
       "target = explore({'thing': '汇总值', 'situation$full': None})[0]",
@@ -154,7 +155,7 @@ test('Program transform uses the normal Transform executor and is persisted befo
       "    transform({'thing': '汇总值', 'situation.rep.42': None})",
       "    message({'level': 'info', 'text': '已写入汇总值'})"
     ].join('\n'), [], 'program')
-  ], null, 2));
+  ] });
 
   const result = await executeAtomLanguage({
     source: 'explore {"thing":"汇总值","situation$full"}',
@@ -176,7 +177,7 @@ test('Program parses source detail JSON, processes it, and serializes it into a 
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Source', '{"record_key":"R1","label":"旧"}'),
     atom('Target', '{}'),
     atom('JSON Processor', [
@@ -188,7 +189,7 @@ test('Program parses source detail JSON, processes it, and serializes it into a 
       'if target.situation != serialized:',
       '    transform({"thing": "Target", "situation.rep." + serialized: None})'
     ].join('\n'), [], 'program')
-  ], null, 2));
+  ] });
 
   const run = await executeAtomLanguage({
     source: 'transform {"thing.run.":"JSON Processor"}',
@@ -222,13 +223,13 @@ test('explicit Program run creates a nested four-axis Atom and leaves assignment
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('test'),
     atom('Creator', [
       "result = transform({'thing': 'test/Created', 'situation': '{\"probe\":true}', 'slot': [], 'strut': []})",
       "message({'level': 'info', 'text': str(result)})"
     ].join('\n'), [], 'program')
-  ], null, 2));
+  ] });
   const result = await executeAtomLanguage({
     source: 'transform {"thing.run.":"Creator"}',
     contextFile,
@@ -356,7 +357,7 @@ test('a caught JSON codec failure discards effects registered earlier in the Pro
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Target', 'original'),
     atom('Catching Program', [
       "transform({'thing': 'Target', 'situation.rep.changed': None})",
@@ -365,7 +366,7 @@ test('a caught JSON codec failure discards effects registered earlier in the Pro
       'except ValueError:',
       '    pass'
     ].join('\n'), [], 'program')
-  ], null, 2));
+  ] });
 
   const before = await fs.readFile(contextFile, 'utf8');
   const result = await executeAtomLanguage({
@@ -388,7 +389,7 @@ test('explore keeps Program computation active without leaking unrelated Program
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Target', 'before'),
     atom('Working Program', [
       "target = explore({'thing': 'Target', 'situation$full': None})[0]",
@@ -397,7 +398,7 @@ test('explore keeps Program computation active without leaking unrelated Program
     ].join('\n'), [], 'program'),
     atom('Unrelated Broken Program', "raise ValueError('unrelated failure')", [], 'program'),
     atom('Unrelated Reporting Program', "message({'level': 'info', 'text': 'background message'})", [], 'program')
-  ], null, 2));
+  ] });
 
   const result = await executeAtomLanguage({
     source: 'explore {"thing":"Target","situation$full"}',
@@ -457,16 +458,16 @@ test('batch ancestor rename preserves descendant slot locks without treating pat
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-batch-rename-lock-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('域', '', [
       atom('甲', '', [atom('受保护后代')]),
       atom('乙')
     ]),
     atom('后代锁', [
-      "target = explore({'thing': '域/甲/受保护后代'})[0]",
+      "target = explore({'thing': ref('域/甲/受保护后代')})[0]",
       "lock({'targets': {'refs': [target.ref]}, 'mode': 'write', 'fields': ['slot']})"
     ].join('\n'), [], 'program')
-  ], null, 2));
+  ] });
   const result = await executeAtomLanguage({
     source: `transform ${JSON.stringify([
       { 'thing.ren.新甲': '域/甲' },
@@ -479,8 +480,8 @@ test('batch ancestor rename preserves descendant slot locks without treating pat
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const after = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.deepEqual(after[0].slot.map((node) => node.thing), ['新甲', '新乙']);
-  assert.equal(after[0].slot[0].slot[0].thing, '受保护后代');
+  assert.deepEqual(after[0].slot.map((node) => atomName(node)), ['新甲', '新乙']);
+  assert.equal(atomName(after[0].slot[0].slot[0]), '受保护后代');
   const denied = await executeAtomLanguage({
     source: 'transform {"thing":"域/新甲/受保护后代","slot":[]}', contextFile, projectionFile,
     programScheduler: createProgramRuntimeScheduler()
@@ -564,20 +565,20 @@ test('a Program cannot rename a locked target in the same stale-ref cycle', asyn
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-stale-lock-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('目标', '原文'),
     atom('结构程序', [
       "target = explore({'thing': '目标'})[0]",
       "lock({'targets': {'refs': [target.ref]}, 'mode': 'write', 'fields': ['thing']})",
       "transform({'thing.ren.新目标': '目标'})"
     ].join('\n'), [], 'program')
-  ], null, 2));
+  ] });
   const result = await executeAtomLanguage({
     source: 'atom', contextFile, projectionFile, programScheduler: createProgramRuntimeScheduler()
   });
   assert.equal(result.ok, true);
   assert.equal(result.warnings[0].code, 'PROGRAM_TRANSFORM_REJECTED');
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].thing, '目标');
+  assert.equal(atomName(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0]), '目标');
 });
 
 test('transform new reports Program lock denial instead of an undefined decision', async () => {
@@ -603,11 +604,11 @@ test('renaming an Agent Program ignores uses on Program data children', async ()
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-legacy-validation-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Legacy Agent', 'agent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})', [
       atom('Legacy Program', '', [atom('Legacy Step')], 'program')
     ], 'program')
-  ], null, 2));
+  ] });
 
   const result = await executeAtomLanguage({
     source: 'transform {"thing.ren.Renamed Agent":"Legacy Agent"}',
@@ -618,7 +619,7 @@ test('renaming an Agent Program ignores uses on Program data children', async ()
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0]['thing@program'], 'Renamed Agent');
+  assert.equal(atomName(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0]), 'Renamed Agent');
   assert.equal(result.warnings.some((warning) => warning.code === 'PROGRAM_USES_REQUIRED'), false);
 });
 

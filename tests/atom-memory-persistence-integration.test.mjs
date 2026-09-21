@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,6 +10,8 @@ import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-eng
 import { createJsonTransactionJournal, createJsonWorldRepository } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { createProgramRefBindingUpdate } from '../work-engine/atom-language/program-ref-binding-ledger.mjs';
+import { inspectProgramReferenceSites } from '../work-engine/atom-language/program-reference-runtime.mjs';
 
 test('memory persistence accepts and reads a transition before its independent save', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-memory-persistence-'));
@@ -116,20 +119,47 @@ test('Program source and subsequent facts both execute against accepted memory b
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
-    { thing: 'test', situation: '', slot: [], strut: [] },
-    { thing: 'Trigger', situation: 'wait', slot: [], strut: [] },
-    { 'thing@program': 'Create Then Update', situation: [
+  const programSource = [
       "trigger = explore({'thing': 'Trigger', 'situation$full': None})[0]",
       "if trigger.situation == 'go':",
-      "    transform({'thing': 'test/Created', 'situation': 'created', 'slot': [], 'strut': []})",
+      "    transform({'thing': 'test/Created', 'situation.rep.created': None})",
       "    transform({'thing': 'test/Created', 'situation.rep.final': None})"
-    ].join('\n'), slot: [], strut: [] }
-  ]));
+    ].join('\n');
+  const before = [
+    { 'thing&id=101': 'test', situation: '', slot: [
+      { 'thing&id=104': 'Created', situation: 'old', slot: [], strut: [] }
+    ], strut: [] },
+    { 'thing&id=102': 'Trigger', situation: 'wait', slot: [], strut: [] }
+  ];
+  const facts = [...before, {
+    'thing@program&id=103': 'Create Then Update', situation: programSource, slot: [], strut: []
+  }];
+  await fs.writeFile(contextFile, JSON.stringify(before));
+  const inspected = await inspectProgramReferenceSites({ source: programSource });
+  const seed = createTransactionalWorldPersistence({ contextFile, projectionFile,
+    publishLegacyProjection: false });
+  await seed.commit({
+    correlationId: 'seed-program-binding',
+    expectedRevision: revisionOfWorldFacts(before),
+    nextRevision: revisionOfWorldFacts(facts),
+    facts,
+    programRefBindings: createProgramRefBindingUpdate({ replacements: [{
+      programThingId: '103',
+      sourceHash: `sha256:${createHash('sha256').update(programSource).digest('hex')}`,
+      sites: inspected.sites.map(site => ({
+        fingerprint: site.fingerprint,
+        role: site.role,
+        targetThingId: site.selector === 'Trigger' ? '102' : '104'
+      }))
+    }] })
+  });
   const service = createLegacyWorldService({ memoryAuthoritative: true,
     publishLegacyProjection: false,
     saveSchedule: { quietMs: 60000, maxDirtyMs: 60000 } });
   t.after(() => service.closeSaves());
+  assert.equal((await service.readProgramRefBindings({ contextFile, projectionFile }))
+    .forProgram('103')?.sourceHash,
+  `sha256:${createHash('sha256').update(programSource).digest('hex')}`);
   const result = await service.executeLegacy({ contextFile, projectionFile,
     source: 'transform {"thing":"Trigger","situation.rep.go"}',
     programMode: 'reconcile', programScheduler: createProgramRuntimeScheduler(),
@@ -137,8 +167,8 @@ test('Program source and subsequent facts both execute against accepted memory b
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(result.subsequentExecution.status, 'completed');
   const memory = await service.readCommittedSnapshot({ contextFile, projectionFile });
-  assert.equal(memory.facts[0].slot[0].situation, 'final');
-  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot.length, 0);
+  assert.equal(memory.facts[0].slot[0]?.situation, 'final', JSON.stringify({ result, memory }));
+  assert.equal(JSON.parse(await fs.readFile(contextFile, 'utf8'))[0].slot[0].situation, 'old');
   await service.flushSaves();
   const durable = createJsonWorldRepository({ file: contextFile, worldId: 'primary',
     localCommitFile: path.join(`${path.join(directory, 'atom.transactions.json')}.d`, 'world-commits.jsonl') });

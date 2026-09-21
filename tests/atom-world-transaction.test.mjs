@@ -224,7 +224,7 @@ test('real shortcut retarget guards its validated target against a concurrent re
   const initialFacts = [
     { thing: 'Old', situation: '', slot: [], strut: [] },
     { thing: 'New', situation: '', slot: [], strut: [] },
-    createShortcutAtom({ thing: 'Entry', targetPath: 'Old', referenceId: 'entry-ref' })
+    createShortcutAtom({ identity: '101', thing: 'Entry', targetPath: 'Old', referenceId: 'entry-ref' })
   ];
   await writeJsonAtomically(files.worldFile, initialFacts);
   const initial = await files.worldRepository.read();

@@ -21,10 +21,19 @@ import { createTransactionalWorldPersistence } from '../src/atom-system/adapters
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import {
   applyShortcutEffect,
-  createShortcutAtom,
+  createShortcutAtom as createShortcutAtomKernel,
   resolveShortcutMatch,
   shortcutMetadata
 } from '../work-engine/atom-language/shortcut-runtime.mjs';
+import { thingIdForOrdinal } from '../work-engine/atom-language/thing-id-allocator.mjs';
+
+let nextShortcutIdentityOrdinal = 200_000;
+function createShortcutAtom(options) {
+  return createShortcutAtomKernel({
+    ...options,
+    identity: options.identity ?? thingIdForOrdinal(nextShortcutIdentityOrdinal++)
+  });
+}
 
 function atom(thing, situation = '', slot = [], types = []) {
   return {
@@ -266,8 +275,8 @@ test('shortcut locator follows target move and becomes broken when the target is
 });
 
 test('shortcut identity keeps the original target when its old semantic path is reused', () => {
-  const originalId = 'AAAAAAAAAAAAAAAAAAAAAA';
-  const replacementId = 'BBBBBBBBBBBBBBBBBBBBBB';
+  const originalId = '101';
+  const replacementId = '102';
   const original = {
     [`thing&id=${originalId}`]: '新名', situation: '原对象', slot: [], strut: []
   };

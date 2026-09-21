@@ -436,7 +436,7 @@ test('prepared runtime indexes are reusable only for the exact authoritative wor
 
 test('a persisted Thing identity remains the runtime coordinate across edits, rename, and move', () => {
   const scheduler = createProgramRuntimeScheduler();
-  const identity = 'AbCdEfGhIjKlMnOpQrStUv';
+  const identity = '101';
   const identified = (name, situation = '', slot = [], id = identity) => ({
     [`thing&id=${id}`]: name,
     situation,
@@ -444,10 +444,10 @@ test('a persisted Thing identity remains the runtime coordinate across edits, re
     strut: []
   });
   const worlds = [
-    [identified('Parent', '', [identified('Child')], 'AAAAAAAAAAAAAAAAAAAAAA'), identified('Other', '', [], 'BBBBBBBBBBBBBBBBBBBBBB')],
-    [identified('Parent', '', [identified('Child', 'changed')], 'AAAAAAAAAAAAAAAAAAAAAA'), identified('Other', '', [], 'BBBBBBBBBBBBBBBBBBBBBB')],
-    [identified('Parent', '', [identified('Renamed')], 'AAAAAAAAAAAAAAAAAAAAAA'), identified('Other', '', [], 'BBBBBBBBBBBBBBBBBBBBBB')],
-    [identified('Parent', '', [], 'AAAAAAAAAAAAAAAAAAAAAA'), identified('Other', '', [identified('Renamed')], 'BBBBBBBBBBBBBBBBBBBBBB')]
+    [identified('Parent', '', [identified('Child')], '102'), identified('Other', '', [], '103')],
+    [identified('Parent', '', [identified('Child', 'changed')], '102'), identified('Other', '', [], '103')],
+    [identified('Parent', '', [identified('Renamed')], '102'), identified('Other', '', [], '103')],
+    [identified('Parent', '', [], '102'), identified('Other', '', [identified('Renamed')], '103')]
   ];
 
   const coordinates = worlds.map((world) => {
@@ -1335,10 +1335,11 @@ test('a changed world revision recomputes Programs instead of reusing the previo
 });
 
 test('permanent Thing identities do not replace world revision cache invalidation', async () => {
-  const inputIdentity = 'AAAAAAAAAAAAAAAAAAAAAA';
-  const programIdentity = 'BBBBBBBBBBBBBBBBBBBBBB';
+  const inputIdentity = '101';
+  const programIdentity = '102';
   const program = identifiedAtom(programIdentity, 'Reporter', [
-    "value = explore({'thing': 'Input'})[0].situation",
+    "selector = 'Input'",
+    "value = explore({'thing': selector})[0].situation",
     "message({'level': 'info', 'text': value})"
   ].join('\n'), [], 'program');
   const scheduler = createProgramRuntimeScheduler();

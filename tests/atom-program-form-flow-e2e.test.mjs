@@ -6,6 +6,8 @@ import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { atomName } from '../work-engine/atom-language/slot-graph-semantics.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
@@ -26,10 +28,10 @@ test('a compiler Program materializes a standard into an idempotent form flow', 
     "    transform({'thing': '任务流', 'slot': plan['slot']})",
     "    message({'level': 'info', 'text': '已按标准生成表单流'})"
   ].join('\n');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('任务流'),
     atom('编标程序', program, [], 'program')
-  ], null, 2));
+  ] });
   const scheduler = createProgramRuntimeScheduler();
 
   const first = await executeAtomLanguage({
@@ -40,9 +42,9 @@ test('a compiler Program materializes a standard into an idempotent form flow', 
   assert.equal(first.messages[0].text, '已按标准生成表单流');
 
   const afterFirst = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  const flow = afterFirst.find((entry) => entry.thing === '任务流');
-  assert.deepEqual(flow.slot.map((entry) => entry.thing), ['定向', '调研']);
-  assert.deepEqual(flow.slot[0].slot.map((entry) => entry.thing), ['状态', '需求', '边界']);
+  const flow = afterFirst.find((entry) => atomName(entry) === '任务流');
+  assert.deepEqual(flow.slot.map(atomName), ['定向', '调研']);
+  assert.deepEqual(flow.slot[0].slot.map(atomName), ['状态', '需求', '边界']);
 
   const second = await executeAtomLanguage({
     source: 'atom', contextFile, projectionFile, programScheduler: scheduler

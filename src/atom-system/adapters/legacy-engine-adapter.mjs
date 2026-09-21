@@ -8,6 +8,7 @@ import { DEFAULT_WORLD_SHUTDOWN_TIMEOUT_MS, worldShutdownDeadline, withinWorldSh
 import { isHardCapacityBlocked, isWorldCapacityError } from '../world-runtime/pending-world-capacity.mjs';
 import { SpatialStoreError } from '../../../cli/lib/store.mjs';
 import { rebuildThingIdWatermark } from '../../../work-engine/atom-language/thing-id-allocator.mjs';
+import { rebuildProgramRefBindings } from '../../../work-engine/atom-language/program-ref-binding-ledger.mjs';
 
 // Only live invocations are joined here. All completed results and restart
 // decisions come from the central journal, never this transient rendezvous.
@@ -285,9 +286,11 @@ export function createLegacyWorldService(options = {}) {
     const run = async (recovery = execution, snapshot = committedSnapshot) => {
       const metadata = await persistence.readInternalMetadataState?.();
       const thingIdentityWatermark = rebuildThingIdWatermark(metadata?.receipts ?? []);
+      const programRefBindings = rebuildProgramRefBindings(metadata?.receipts ?? []);
       return timed('engine.execute', () => execute({
         ...request,
         thingIdentityWatermark,
+        programRefBindings,
         ...(recovery ? { programExecution: recovery,
           interaction: structuredClone(recovery.event.interaction) } : {}),
         interactionBinding: entry.binding,
@@ -501,6 +504,12 @@ export function createLegacyWorldService(options = {}) {
     async readCommittedVersion(request) {
       if (!request?.contextFile || !request?.projectionFile) return null;
       return committedSnapshotFor(transactionFor(request));
+    },
+    async readProgramRefBindings(request) {
+      if (!request?.contextFile || !request?.projectionFile) return null;
+      const persistence = transactionFor(request);
+      const metadata = await persistence.readInternalMetadataState?.();
+      return rebuildProgramRefBindings(metadata?.receipts ?? []);
     },
     async compatibilityManifest(request) {
       if (!request?.contextFile || !request?.projectionFile) return null;

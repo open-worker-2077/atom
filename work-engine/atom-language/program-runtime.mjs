@@ -1278,6 +1278,9 @@ function runWorker({
   allowedFunctions = null, resolveExactPath = null, agentDeclarationOnly = false, agentProgramPaths = [],
   pathByThingId = null
 }) {
+  const resolvedPathByThingId = pathByThingId ?? Object.fromEntries(
+    records.map(({ ref, path }) => [ref, path])
+  );
   return new Promise((resolve, reject) => {
     const child = spawn(python, ['-I', '-X', 'utf8', workerFile], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -1370,7 +1373,9 @@ function runWorker({
       programArguments,
       strutDecision,
       agentProgramPaths,
-      ...(pathByThingId ? { pathByThingId: pathByThingId instanceof Map ? Object.fromEntries(pathByThingId) : pathByThingId } : {}),
+      pathByThingId: resolvedPathByThingId instanceof Map
+        ? Object.fromEntries(resolvedPathByThingId)
+        : resolvedPathByThingId,
       ...(allowedFunctions ? { allowedFunctions } : {})
     });
   });
@@ -1409,6 +1414,10 @@ export class ProgramRuntimeScheduler {
     this.inspectProgramReferences = options.inspectProgramReferences ?? inspectProgramReferenceSites;
     this.programReferenceIndex = null;
     this.programReferenceRevision = null;
+    this.programRefBindings = options.programRefBindings ?? null;
+    this.programRefBindingsFingerprint = this.programRefBindings?.entries
+      ? JSON.stringify(this.programRefBindings.entries())
+      : '';
     this.programReferencePreparations = new Map();
     this.programReferenceGeneration = 0;
     this.diagnosticRecorder = options.diagnosticRecorder ?? null;
@@ -1536,7 +1545,7 @@ export class ProgramRuntimeScheduler {
       scopeRoot: executionContext.scopeRoot ?? null,
       programRoot: executionContext.programRoot ?? null
     }));
-    const result = await this.runBounded(() => this.runProgram({
+    const result = await this.runBounded(() => this.executeProgram({
       python: this.python,
       records,
       programs: [program],
@@ -1620,7 +1629,7 @@ export class ProgramRuntimeScheduler {
       childrenRefs: Object.freeze([]),
       partners: Object.freeze([])
     });
-    const result = await this.runBounded(() => this.runProgram({
+    const result = await this.runBounded(() => this.executeProgram({
       python: this.python,
       records,
       programs: [program],
@@ -2010,6 +2019,16 @@ export class ProgramRuntimeScheduler {
     return worldRecords(atoms);
   }
 
+  setProgramRefBindings(bindings) {
+    const fingerprint = bindings?.entries ? JSON.stringify(bindings.entries()) : '';
+    if (this.programRefBindingsFingerprint === fingerprint) return;
+    this.programRefBindings = bindings ?? null;
+    this.programRefBindingsFingerprint = fingerprint;
+    this.programReferenceIndex = null;
+    this.programReferenceRevision = null;
+    this.programReferenceGeneration += 1;
+  }
+
   async prepareProgramReferenceIndex(atoms) {
     const revision = revisionOfWorldFacts(atoms);
     if (this.programReferenceIndex && this.programReferenceRevision === revision) return this.programReferenceIndex;
@@ -2017,6 +2036,7 @@ export class ProgramRuntimeScheduler {
     if (pending) return pending;
     const generation = ++this.programReferenceGeneration;
     const promise = createProgramReferenceIndex(atoms, {
+      bindings: this.programRefBindings,
       inspectProgram: (request) => this.runBounded(() => this.inspectProgramReferences({
         ...request, python: this.python, timeoutMs: this.timeoutMs
       }))
@@ -2056,6 +2076,29 @@ export class ProgramRuntimeScheduler {
     }));
   }
 
+  executeProgram(request) {
+    if (this.runProgram !== runWorker) return this.runProgram(request);
+    const bind = (program) => {
+      if (!program) return program;
+      const indexedSites = this.programReferenceIndex?.sitesForProgram(program.ref) ?? [];
+      return {
+        ...program,
+        refBindings: {
+          sourceHash: `sha256:${crypto.createHash('sha256').update(program.detail).digest('hex')}`,
+          sites: indexedSites.map(({ fingerprint, role, targetThingId }) => ({
+            fingerprint, role, targetThingId
+          }))
+        }
+      };
+    };
+    return this.runProgram({
+      ...request,
+      programs: (request.programs ?? []).map(bind),
+      program: bind(request.program),
+      pathByThingId: new Map(request.records.map(({ ref, path }) => [ref, path]))
+    });
+  }
+
   activeProgramRecords(records, selector = null) {
     const failures = this.referenceFailures(records);
     const excluded = new Set(failures.map(failure => failure.programThingId));
@@ -2092,6 +2135,7 @@ export class ProgramRuntimeScheduler {
       runProgram: this.runProgram,
       inspectProgram: this.inspectProgram,
       inspectProgramReferences: this.inspectProgramReferences,
+      programRefBindings: this.programRefBindings,
       diagnosticRecorder: this.diagnosticRecorder,
       runBounded: (operation) => this.runBounded(operation),
       strutDeliveryExecutions: this.strutDeliveryExecutions,
@@ -2130,6 +2174,30 @@ export class ProgramRuntimeScheduler {
     candidate.programReferenceIndex = this.programReferenceIndex;
     candidate.programReferenceRevision = this.programReferenceRevision;
     return candidate;
+  }
+
+  adoptCandidateRuntime(candidate) {
+    if (!(candidate instanceof ProgramRuntimeScheduler)) {
+      throw Object.assign(new Error('Candidate Program runtime is invalid'), {
+        code: 'INVALID_PROGRAM_CANDIDATE_RUNTIME'
+      });
+    }
+    for (const field of [
+      'completed', 'reusable', 'programReusable', 'dormantFailures',
+      'triggerContracts', 'triggerIndex', 'programReadDependencies',
+      'relocationPreparedReadPrograms', 'deferredTriggerContracts',
+      'slotInvocationCycles', 'agentSecurity', 'agentDeclarationInspections',
+      'preparedStrutGraphs'
+    ]) this[field] = candidate[field];
+    for (const field of [
+      'triggerContractsInitialized', 'agentSecurityWorldRevision',
+      'agentSecurityWorldFacts', 'requestDrivenLocks',
+      'requestDrivenLocksWorldRevision', 'requestDrivenLockRetirementChecked',
+      'latestRecords', 'programReferenceIndex', 'programReferenceRevision',
+      'programRefBindings', 'programRefBindingsFingerprint',
+      'programReferenceGeneration', 'loadedProjection', 'projectionLoadWarning'
+    ]) this[field] = candidate[field];
+    this.programReferencePreparations.clear();
   }
 
   invalidateDerivedWorldState() {
@@ -2224,7 +2292,7 @@ export class ProgramRuntimeScheduler {
           || !previous.types.includes('program');
       })()
     ));
-    const validated = await Promise.all(programs.map((program) => this.runBounded(() => this.runProgram({
+    const validated = await Promise.all(programs.map((program) => this.runBounded(() => this.executeProgram({
       python: this.python,
       records,
       programs: activePrograms,
@@ -2298,7 +2366,7 @@ export class ProgramRuntimeScheduler {
     ));
     const resolveExactPath = (selector) => resolveExactPathFromCurrentContext(atoms, selector);
     const inspected = await Promise.all(affectedPrograms.map((program) => this.runBounded(() => (
-      this.runProgram({
+      this.executeProgram({
         python: this.python,
         records,
         programs,
@@ -2448,7 +2516,7 @@ export class ProgramRuntimeScheduler {
         || this.deferredTriggerContracts.get(program.path)?.detail !== program.detail)
     ));
     const inspected = await Promise.allSettled(candidates.map((program) => this.runBounded(() => (
-      this.runProgram({
+      this.executeProgram({
         python: this.python,
         records,
         programs: programMayResolveAnotherProgram(program) ? programs : [program],
@@ -3418,7 +3486,7 @@ export class ProgramRuntimeScheduler {
             );
           }
           const effectiveScopeRoot = slotInvocation?.scopeRoot ?? options.slotScopeRoot ?? null;
-          return this.runProgram({
+          return this.executeProgram({
             python: this.python,
             records,
             programs: programMayResolveAnotherProgram(program) ? availablePrograms : [program],

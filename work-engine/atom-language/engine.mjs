@@ -11,7 +11,10 @@ import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { ensureThingIdentities } from './slot-graph-semantics.mjs';
 import { createThingIdAllocationSession } from './thing-id-allocator.mjs';
 import { normalizeProgramReferences } from './program-reference-runtime.mjs';
-import { createProgramRefBindingUpdate } from './program-ref-binding-ledger.mjs';
+import {
+  applyProgramRefBindingUpdate,
+  createProgramRefBindingUpdate
+} from './program-ref-binding-ledger.mjs';
 import { hasValidatedDefaultBackupArchiveAt } from './default-backup-boundary.mjs';
 
 function mergeWarnings(...groups) {
@@ -23,6 +26,27 @@ function mergeWarnings(...groups) {
     seen.add(key);
   }
   return warnings;
+}
+
+function mergeProgramRefBindingUpdates(...values) {
+  const replacements = new Map();
+  const removals = new Set();
+  for (const update of values.filter(Boolean)) {
+    for (const id of update.removals ?? []) {
+      replacements.delete(id);
+      removals.add(id);
+    }
+    for (const replacement of update.replacements ?? []) {
+      removals.delete(replacement.programThingId);
+      replacements.set(replacement.programThingId, replacement);
+    }
+  }
+  return replacements.size || removals.size
+    ? createProgramRefBindingUpdate({
+        replacements: [...replacements.values()],
+        removals: [...removals]
+      })
+    : null;
 }
 
 function immutableClone(value) {
@@ -510,8 +534,32 @@ async function validatePrograms(atoms, contextFile, previousAtoms = null, progra
     }));
     const normalized = (validated ?? []).map((program) => {
       const match = exactMatchAtPath(atoms, program.path);
+      const source = oneStoredField(match.atom, 'situation')?.value ?? '';
+      const programThingId = oneStoredField(match.atom, 'thing')?.parsed.identity ?? null;
+      const existing = programThingId
+        ? programScheduler.programRefBindings?.forProgram?.(programThingId) ?? null
+        : null;
+      const existingSites = new Map((existing?.sites ?? []).map((site) => (
+        [`${site.fingerprint}\0${site.role}`, site]
+      )));
+      const canReuseBinding = existing?.sourceHash === program.sourceHash
+        && existingSites.size === program.referenceSites.length
+        && program.referenceSites.every((site) => existingSites.has(
+          `${site.fingerprint}\0${site.role}`
+        ));
+      if (canReuseBinding) {
+        return {
+          path: program.path,
+          ...program,
+          source,
+          referenceSites: program.referenceSites.map((site) => ({
+            ...site,
+            targetThingId: existingSites.get(`${site.fingerprint}\0${site.role}`).targetThingId
+          }))
+        };
+      }
       return { path: program.path, ...normalizeProgramReferences({
-        source: oneStoredField(match.atom, 'situation')?.value ?? '',
+        source,
         ...program, worldBindings
       }) };
     });
@@ -1306,9 +1354,12 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   let creatorSecurity = null;
   let candidateProgramScheduler = null;
   if (options.programScheduler) {
+    if (Object.hasOwn(options, 'programRefBindings')) {
+      options.programScheduler.setProgramRefBindings?.(options.programRefBindings ?? null);
+    }
     const indexPreparationStartedAt = performance.now();
     try {
-      if (options.programMode === 'project') {
+      if (options.programMode === 'project' || options.programMode === 'reconcile') {
         await options.programScheduler.prepareProgramReferenceIndex?.(atoms);
       }
       activeRequestDrivenLocks = await options.programScheduler.activeRequestDrivenLocks?.(atoms, {
@@ -1505,6 +1556,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   });
   const graphLocks = activeLocks.filter((lock) => lock.kind);
   let programChanged = false;
+  let initialProgramRefBindings = null;
   const initialProgramTriggerNodes = [];
   const initialProgramTransformTriggerNodes = [];
   const initialProgramRelocations = [];
@@ -2190,6 +2242,25 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     if (!delegated.ok) throwCandidateDelegationFailure(delegated.errors);
   }
 
+  async function synchronizeCandidateProgramBindings(update, candidateAtoms, { invalidate = false } = {}) {
+    if (!candidateProgramScheduler) return;
+    if (invalidate) candidateProgramScheduler.invalidateDerivedWorldState?.();
+    if (update) {
+      const bindings = applyProgramRefBindingUpdate(
+        candidateProgramScheduler.programRefBindings,
+        update
+      );
+      candidateProgramScheduler.setProgramRefBindings?.(bindings);
+    }
+    await candidateProgramScheduler.prepareProgramReferenceIndex?.(candidateAtoms);
+  }
+
+  function publishCandidateProgramRuntime() {
+    if (candidateProgramScheduler && candidateProgramScheduler !== options.programScheduler) {
+      options.programScheduler?.adoptCandidateRuntime?.(candidateProgramScheduler);
+    }
+  }
+
   async function reconcileProgramsForWorld(
     candidateAtoms, initialTriggerEvent = null, failOnProgramFailure = false,
     declarationRelocations = requestDeclarationRelocations
@@ -2216,6 +2287,27 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     const transformLogs = [];
     const pathChanges = [];
     const programChangedPaths = new Set();
+    const bindingReplacements = new Map();
+    const bindingRemovals = new Set();
+    const collectProgramRefBindings = (update) => {
+      if (!update) return;
+      for (const id of update.removals ?? []) {
+        bindingReplacements.delete(id);
+        bindingRemovals.add(id);
+      }
+      for (const replacement of update.replacements ?? []) {
+        bindingRemovals.delete(replacement.programThingId);
+        bindingReplacements.set(replacement.programThingId, replacement);
+      }
+    };
+    const collectedProgramRefBindings = () => (
+      bindingReplacements.size || bindingRemovals.size
+        ? createProgramRefBindingUpdate({
+            replacements: [...bindingReplacements.values()],
+            removals: [...bindingRemovals]
+          })
+        : null
+    );
     let finalLockIndex = programLockIndex;
     let finalGraphLocks = graphLocks;
     const initialTriggerEvents = Array.isArray(initialTriggerEvent)
@@ -2272,6 +2364,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           messages,
           transformLogs,
           pathChanges,
+          programRefBindings: collectedProgramRefBindings(),
           changedPaths: [...programChangedPaths]
         };
       }
@@ -3160,6 +3253,30 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         )
       }));
       await enqueueSlotTagWave(application.atoms, relocatedSlotTagProviders);
+      const applicationProgramRefBindings = (application.applied ?? [])
+        .map(({ transformed }) => transformed.programRefBindings)
+        .filter(Boolean);
+      const programSurfaceChangedByEffects = (application.applied?.length ?? 0) > 0
+        && JSON.stringify(programDeclarationSurface(reconciledAtoms))
+          !== JSON.stringify(programDeclarationSurface(application.atoms));
+      if (programSurfaceChangedByEffects) {
+        const compiled = await validatePrograms(
+          application.atoms, contextFile, reconciledAtoms, runtimeScheduler
+        );
+        if (!compiled.ok) {
+          const first = compiled.errors[0] ?? diagnostic(
+            'INVALID_PROGRAM_SOURCE', 'Program effect introduced an invalid Program'
+          );
+          throw Object.assign(new Error(first.message), {
+            code: first.code,
+            details: first.details ?? {}
+          });
+        }
+        application.atoms = compiled.atoms ?? application.atoms;
+        if (compiled.programRefBindings) {
+          applicationProgramRefBindings.push(compiled.programRefBindings);
+        }
+      }
       const after = revisionOf(application.atoms);
       performanceTrace('program-reconcile-apply', {
         pass,
@@ -3174,6 +3291,17 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           ...cycleRelocations
         ]);
         reconciledAtoms = application.atoms;
+        const bindingUpdates = applicationProgramRefBindings;
+        if (bindingUpdates.length > 0) {
+          runtimeScheduler.invalidateDerivedWorldState?.();
+          let bindingSnapshot = runtimeScheduler.programRefBindings;
+          for (const update of bindingUpdates) {
+            collectProgramRefBindings(update);
+            bindingSnapshot = applyProgramRefBindingUpdate(bindingSnapshot, update);
+          }
+          runtimeScheduler.setProgramRefBindings?.(bindingSnapshot);
+          await runtimeScheduler.prepareProgramReferenceIndex?.(reconciledAtoms);
+        }
         passChanged = true;
         for (const entry of appliedShortcuts) {
           if (entry.shortcut.resultPath) programChangedPaths.add(entry.shortcut.resultPath);
@@ -3275,6 +3403,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           messages,
           transformLogs,
           pathChanges,
+          programRefBindings: collectedProgramRefBindings(),
           changedPaths: [...programChangedPaths]
         };
       }
@@ -3780,6 +3909,24 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     }
   }
 
+  if (programChanged
+    && JSON.stringify(programDeclarationSurface(requestStartAtoms))
+      !== JSON.stringify(programDeclarationSurface(atoms))) {
+    const compiled = await validatePrograms(
+      atoms, contextFile, requestStartAtoms, candidateProgramScheduler
+    );
+    interactionWarnings.push(...compiled.warnings);
+    if (!compiled.ok) {
+      releaseStrutDeliveryClaims();
+      return failureBase(parsed, contextFile, projectionFile, atoms, compiled.errors);
+    }
+    atoms = compiled.atoms ?? atoms;
+    initialProgramRefBindings = compiled.programRefBindings ?? null;
+    await synchronizeCandidateProgramBindings(initialProgramRefBindings, atoms, {
+      invalidate: true
+    });
+  }
+
   if (programChanged && (
     parsed.command === 'atom' || parsed.command === 'explore' || strictSlotRecompute
   )) {
@@ -3798,6 +3945,10 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       )]);
     }
     atoms = reconciled.atoms;
+    initialProgramRefBindings = mergeProgramRefBindingUpdates(
+      initialProgramRefBindings,
+      reconciled.programRefBindings
+    );
     programLockIndex = reconciled.lockIndex;
     accessController = createAccessController(atoms, {
       ...options, programLockIndex, agentPath: interaction.agent?.path ?? null,
@@ -3809,7 +3960,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
 
   if (parsed.command === 'atom') {
     if (programChanged) {
-      const commitReceipt = await commitChangedGraph(atoms);
+      const commitReceipt = await commitChangedGraph(atoms, {
+        programRefBindings: initialProgramRefBindings
+      });
       if (commitReceipt?.authorizationFailure) return commitReceipt.authorizationFailure;
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
@@ -3845,7 +3998,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
 
   if (parsed.command === 'explore') {
     if (programChanged) {
-      const commitReceipt = await commitChangedGraph(atoms);
+      const commitReceipt = await commitChangedGraph(atoms, {
+        programRefBindings: initialProgramRefBindings
+      });
       if (commitReceipt?.authorizationFailure) return commitReceipt.authorizationFailure;
       for (const record of programTransformLogs) await appendTransformLog(contextFile, record);
     }
@@ -4078,6 +4233,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     requestDeclarationRelocations = batchDeclarationRelocations;
     let finalProgramLockIndex = programLockIndex;
     const finalProgramMessages = [];
+    let finalProgramRefBindings = null;
     let subsequentChanged = false;
     let subsequentChangedPaths = [];
     let sourceProgramRefBindings = null;
@@ -4157,6 +4313,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       && (requestDeclarationRelocations.length === 0 || renameBatch)) {
       let reconciled;
       try {
+        await synchronizeCandidateProgramBindings(sourceProgramRefBindings, nextAtoms, {
+          invalidate: true
+        });
         reconciled = await reconcileProgramsForWorld(nextAtoms, {
           mode: 'transform',
           nodes: [...(renameBatch ? renameEventNodes : transformEventNodes)]
@@ -4184,6 +4343,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         };
       }
       nextAtoms = reconciled.atoms;
+      finalProgramRefBindings = reconciled.programRefBindings ?? null;
       finalProgramLockIndex = reconciled.lockIndex;
       finalProgramMessages.push(...reconciled.messages);
       programTransformLogs.push(...reconciled.transformLogs);
@@ -4227,6 +4387,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           correlationId: `${interaction.id}:subsequent`,
           allowEmpty: true,
           subsequent: true,
+          programRefBindings: finalProgramRefBindings,
           baseAtoms: sourceAtoms
         });
         revisionAfter = commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
@@ -4276,6 +4437,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     } else {
       confirmStrutDeliveryClaims();
     }
+    publishCandidateProgramRuntime();
     return {
       ok: true,
       language: 'atom',
@@ -4383,6 +4545,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     if (options.programScheduler && options.trustedMaintenance !== true
       && requestDeclarationRelocations.length === 0) {
       try {
+        await synchronizeCandidateProgramBindings(created.programRefBindings ?? null, nextAtoms, {
+          invalidate: true
+        });
         postRefresh = await reconcileProgramsForWorld(nextAtoms, {
           mode: 'transform', nodes: [created.resultPath], affectedPaths: [created.resultPath]
         });
@@ -4428,6 +4593,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           correlationId: `${interaction.id}:subsequent`,
           allowEmpty: true,
           subsequent: true,
+          programRefBindings: postRefresh.programRefBindings ?? null,
           baseAtoms: sourceAtoms
         });
         revisionAfter = commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
@@ -4472,6 +4638,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         ));
       }
     }
+    publishCandidateProgramRuntime();
     return {
       ok: true,
       language: 'atom',
@@ -4853,6 +5020,10 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   if (options.programScheduler && options.trustedMaintenance !== true
     && (requestDeclarationRelocations.length === 0 || isBatchRenameItem(item))) {
     try {
+      await synchronizeCandidateProgramBindings(sourceProgramRefBindings, nextAtoms, {
+        invalidate: programSurfaceChanged
+          || transformed.sourcePath !== transformed.resultPath
+      });
       postRefresh = await reconcileProgramsForWorld(nextAtoms, {
         mode: 'transform',
         ...(transformAction ? { action: transformAction } : {}),
@@ -4921,6 +5092,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         correlationId: `${interaction.id}:subsequent`,
         allowEmpty: true,
         subsequent: true,
+        programRefBindings: postRefresh.programRefBindings ?? null,
         baseAtoms: sourceAtoms
       });
       revisionAfter = commitReceipt?.afterRevision?.replace(/^sha256:/u, '')
@@ -4979,6 +5151,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     elapsedMs: Math.round(performance.now() - resultLookupStartedAt)
   });
   if (!changed) confirmStrutDeliveryClaims();
+  publishCandidateProgramRuntime();
   return {
     ok: true,
     language: 'atom',

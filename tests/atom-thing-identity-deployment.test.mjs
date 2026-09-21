@@ -8,13 +8,19 @@ import { promisify } from 'node:util';
 
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
-import { planThingIdentityMigration } from '../work-engine/atom-language/thing-identity-migration.mjs';
+import { createProgramRefBindingUpdate } from '../work-engine/atom-language/program-ref-binding-ledger.mjs';
+import { planShortThingIdentityMigration } from '../work-engine/atom-language/thing-identity-migration.mjs';
 
 const run = promisify(execFile);
 const operator = path.resolve('scripts/deploy-thing-identity-world.mjs');
 
-function atom(thing, situation = '', slot = [], strut = []) {
-  return { thing, situation, slot, strut };
+const legacy = Object.freeze({
+  root: 'AAAAAAAAAAAAAAAAAAAAAA', target: 'BBBBBBBBBBBBBBBBBBBBBB',
+  source: 'CCCCCCCCCCCCCCCCCCCCCC', added: 'DDDDDDDDDDDDDDDDDDDDDD'
+});
+
+function atom(id, thing, situation = '', slot = [], strut = []) {
+  return { [`thing&id=${id}`]: thing, situation, slot, strut };
 }
 
 test('Thing identity operator backs up, commits, reads back, and rolls back one cold world', async (t) => {
@@ -22,9 +28,11 @@ test('Thing identity operator backs up, commits, reads back, and rolls back one 
   t.after(() => fs.rm(localAppData, { recursive: true, force: true }));
   const worldDirectory = path.join(localAppData, 'AtomGraph', 'worlds', 'primary');
   await fs.mkdir(worldDirectory, { recursive: true });
-  const source = [atom('域', '', [
-    atom('目标'),
-    atom('来源', '', [], [{ 'if@current': true, then: [{ thing: '目标' }] }])
+  const source = [atom(legacy.root, '域', '', [
+    atom(legacy.target, '目标'),
+    atom(legacy.source, '来源', '', [], [{
+      'if@current': true, then: [{ [`thing&id=${legacy.target}`]: '目标' }]
+    }])
   ])];
   const sourceRevision = revisionOfWorldFacts(source);
   await fs.writeFile(path.join(worldDirectory, 'atom.json'), `${JSON.stringify(source, null, 2)}\n`);
@@ -33,9 +41,10 @@ test('Thing identity operator backs up, commits, reads back, and rolls back one 
   const persistence = createTransactionalWorldPersistence({
     contextFile: path.join(worldDirectory, 'atom.json'),
     projectionFile: path.join(worldDirectory, 'graph.json'),
-    journalFile: path.join(worldDirectory, 'atom.transactions.json')
+    journalFile: path.join(worldDirectory, 'atom.transactions.json'),
+    publishLegacyProjection: false
   });
-  const authoritativeSource = [...source, atom('压实后新增')];
+  const authoritativeSource = [...source, atom(legacy.added, '压实后新增')];
   const authoritativeRevision = revisionOfWorldFacts(authoritativeSource);
   await persistence.commit({
     correlationId: 'uncompacted-source',
@@ -58,10 +67,13 @@ test('Thing identity operator backs up, commits, reads back, and rolls back one 
     env: environment
   })).stdout);
   const deployed = await persistence.readCommittedSnapshot();
-  const verified = planThingIdentityMigration(deployed.facts);
+  const verified = planShortThingIdentityMigration({
+    facts: deployed.facts,
+    programRefBindings: createProgramRefBindingUpdate(),
+    sourceWatermark: applied.summary.allocatorWatermark
+  });
   assert.equal(verified.changed, false);
-  assert.equal(verified.summary.uniqueIdentityCount, 4);
-  assert.equal(verified.summary.boundStrutEndpointCount, 1);
+  assert.equal(verified.summary.uniqueShortIdentityCount, 4);
   assert.equal((await fs.stat(applied.backup.receiptFile)).isFile(), true);
 
   const rolledBack = JSON.parse((await run(process.execPath, [operator, '--rollback', applied.receiptFile], {

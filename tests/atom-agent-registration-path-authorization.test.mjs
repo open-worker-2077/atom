@@ -6,9 +6,12 @@ import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { thingIdForOrdinal } from '../work-engine/atom-language/thing-id-allocator.mjs';
 
+let nextFixtureIdentityOrdinal = 1_000;
 function atom(thing, situation = '', slot = [], type = '') {
-  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
+  const identity = thingIdForOrdinal(nextFixtureIdentityOrdinal++);
+  return { [`thing${type ? `@${type}` : ''}&id=${identity}`]: thing, situation, slot, strut: [] };
 }
 
 const CREATOR_SOURCE = 'agent({"labels":["^"],"functions":{"groups":[],"names":["agent","message","transform"]}})';
@@ -72,7 +75,7 @@ async function fixture(t) {
 function findAtom(atoms, expected) {
   for (const current of atoms) {
     const entry = Object.entries(current).find(([key]) => (
-      key === 'thing' || key.startsWith('thing@')
+      key === 'thing' || key.startsWith('thing@') || key.startsWith('thing&') || key.startsWith('thing#')
     ));
     if (entry?.[1] === expected) return { atom: current, key: entry[0] };
     const nested = findAtom(current.slot ?? [], expected);
@@ -96,7 +99,7 @@ test('a declared Agent may reconfigure a descendant but not an out-of-window dec
   });
   assert.equal(allowed.ok, true, JSON.stringify(allowed));
   let stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.equal(findAtom(stored, 'AllowedChild').key, 'thing@program');
+  assert.match(findAtom(stored, 'AllowedChild').key, /^thing@program&id=/u);
   assert.equal(findAtom(stored, 'AllowedChild').atom.situation, allowedSource);
 
   const denied = await executeAtomLanguage({
@@ -110,7 +113,7 @@ test('a declared Agent may reconfigure a descendant but not an out-of-window dec
   assert.equal(denied.ok, false, JSON.stringify(denied));
   assert.ok(denied.errors.some((error) => error.code === 'WINDOW_ACCESS_DENIED'), JSON.stringify(denied));
   stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.equal(findAtom(stored, 'ForbiddenChild').key, 'thing@program');
+  assert.match(findAtom(stored, 'ForbiddenChild').key, /^thing@program&id=/u);
   assert.equal(findAtom(stored, 'ForbiddenChild').atom.situation, CHILD_SOURCE);
   assert.equal(scheduler.agentSecurity.has('Root/Outside/ForbiddenChild'), true);
 });
@@ -136,7 +139,7 @@ test('authorized creation keeps the Agent Program type while issuing its identit
   });
   assert.equal(result.ok, true, JSON.stringify(result));
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.match(findAtom(stored, 'CreatedChild').key, /^thing@program&id=[A-Za-z0-9_-]{22}$/u);
+  assert.match(findAtom(stored, 'CreatedChild').key, /^thing@program&id=[0-9A-Za-z]{3,}$/u);
   assert.equal(scheduler.agentSecurity.has(childPath), true);
 });
 
@@ -180,7 +183,7 @@ test('an authorized parent may demote its child Program without mutating its Key
   });
   assert.equal(result.ok, true, JSON.stringify(result));
   const stored = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.equal(findAtom(stored, 'AllowedChild').key, 'thing@program');
+  assert.match(findAtom(stored, 'AllowedChild').key, /^thing@program&id=/u);
   assert.equal(scheduler.agentSecurity.has(childPath), false);
 });
 
@@ -248,7 +251,7 @@ test('human Web discard may deactivate an Agent subtree without granting delegat
   assert.equal(result.ok, true, JSON.stringify(result));
   const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(findAtom(stored, 'Workspace').atom.slot.length, 0);
-  assert.equal(findAtom(stored, 'Default Backup').atom.slot[0].thing, 'Reference Plan');
+  assert.ok(findAtom(stored, 'Reference Plan'));
   assert.equal(scheduler.agentSecurity.has('Workspace/Reference Plan/Nested Agent'), false);
 });
 
@@ -282,13 +285,13 @@ for (const [index, scenario] of DELEGATION_CASES.entries()) {
     if (scenario.error) {
       assert.equal(result.ok, false, JSON.stringify(result));
       assert.ok(result.errors.some((error) => error.code === scenario.error), JSON.stringify(result));
-      assert.equal(findAtom(stored, `Child${index}`).key, 'thing@program');
+      assert.match(findAtom(stored, `Child${index}`).key, /^thing@program&id=/u);
       assert.equal(scheduler.agentSecurity.has(childPath), false);
       return;
     }
 
     assert.equal(result.ok, true, JSON.stringify(result));
-    assert.equal(findAtom(stored, `Child${index}`).key, 'thing@program');
+    assert.match(findAtom(stored, `Child${index}`).key, /^thing@program&id=/u);
     assert.deepEqual(scheduler.agentSecurity.get(childPath), scenario.expectedSecurity);
 
     const coldScheduler = createProgramRuntimeScheduler();

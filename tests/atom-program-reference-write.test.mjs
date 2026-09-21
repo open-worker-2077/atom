@@ -7,7 +7,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import * as references from '../work-engine/atom-language/program-reference-runtime.mjs';
-import { ensureThingIdentities } from '../work-engine/atom-language/slot-graph-semantics.mjs';
+import { ensureThingIdentities, storedField, walkAtoms } from '../work-engine/atom-language/slot-graph-semantics.mjs';
+import { thingIdForOrdinal } from '../work-engine/atom-language/thing-id-allocator.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 
 const atom = (name, situation = '', slot = [], type = '') => ({
@@ -140,7 +141,12 @@ async function fixture(t, world) {
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const identifiedWorld = structuredClone(world);
-  ensureThingIdentities(identifiedWorld);
+  const missing = walkAtoms(identifiedWorld).filter(({ atom: value }) => (
+    !storedField(value, 'thing')?.parsed.identity
+  ));
+  ensureThingIdentities(identifiedWorld, {
+    identities: missing.map((_, index) => thingIdForOrdinal(1_000 + index))
+  });
   await fs.writeFile(contextFile, JSON.stringify(identifiedWorld));
   return { contextFile, projectionFile: path.join(directory, 'atom.graph.json'), programScheduler: createProgramRuntimeScheduler() };
 }

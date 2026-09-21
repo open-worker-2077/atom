@@ -43,7 +43,7 @@ test('Program create and update emit the normalized source binding in the same c
   const contextFile = path.join(directory, 'atom.json');
   const journalFile = path.join(directory, 'atom.transactions.json');
   const projectionFile = path.join(directory, 'atom.graph.json');
-  const targetId = 'target'.padEnd(22, '_');
+  const targetId = '101';
   await fs.writeFile(contextFile, JSON.stringify([
     { [`thing&id=${targetId}`]: 'World', situation: '', slot: [], strut: [] }
   ]));
@@ -84,7 +84,7 @@ for (const [label, clearedSource] of [['empty', ''], ['whitespace-only', ' \t ']
     const contextFile = path.join(directory, 'atom.json');
     const journalFile = path.join(directory, 'atom.transactions.json');
     const projectionFile = path.join(directory, 'atom.graph.json');
-    const targetId = 'target'.padEnd(22, '_');
+    const targetId = '101';
     await fs.writeFile(contextFile, JSON.stringify([
       { [`thing&id=${targetId}`]: 'World', situation: '', slot: [], strut: [] }
     ]));

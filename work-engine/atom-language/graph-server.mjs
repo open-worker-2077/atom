@@ -493,9 +493,16 @@ export async function startAtomGraphServer(options = {}) {
         contextFile: configuration.contextFile,
         projectionFile: configuration.graphFile
       });
+      const programRefBindings = typeof worldService.readProgramRefBindings === 'function'
+        ? await worldService.readProgramRefBindings({
+            contextFile: configuration.contextFile,
+            projectionFile: configuration.graphFile
+          })
+        : null;
       return {
         committedVersion,
         committedSnapshot: committedVersion,
+        programRefBindings,
         ...(committedVersion?.compatibilityManifest ? {
           compatibilityManifest: committedVersion.compatibilityManifest
         } : {}),
@@ -577,7 +584,10 @@ export async function startAtomGraphServer(options = {}) {
   }
   const startupAuthority = await currentAgentAuthorityOptions();
   const startupFacts = (startupAuthority.committedVersion ?? startupAuthority.committedSnapshot)?.facts;
-  if (Array.isArray(startupFacts)) await programScheduler.prepareProgramReferenceIndex?.(startupFacts);
+  if (Array.isArray(startupFacts)) {
+    programScheduler.setProgramRefBindings?.(startupAuthority.programRefBindings ?? null);
+    await programScheduler.prepareProgramReferenceIndex?.(startupFacts);
+  }
   await primeAgentDirectory(configuration.contextFile, {
     programScheduler,
     ...startupAuthority

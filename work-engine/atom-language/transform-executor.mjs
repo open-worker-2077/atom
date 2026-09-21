@@ -10,7 +10,7 @@ import { parseAtomKey } from './key-parser.mjs';
 import { programLockDeniedDiagnostic } from './program-locks.mjs';
 import { rewriteProgramReferenceBatch } from './program-reference-runtime.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
-import { renewThingIdentities } from './slot-graph-semantics.mjs';
+import { ensureThingIdentities, renewThingIdentities } from './slot-graph-semantics.mjs';
 import {
   breakShortcutTargets,
   isShortcutAtom,
@@ -922,7 +922,7 @@ function applyPartners(target, field, atoms, rootName) {
   return null;
 }
 
-function applyExplicitChildren(target, field, atoms) {
+function applyExplicitChildren(target, field, atoms, reserveThingIdentities) {
   if (!field.valuePresent || !Array.isArray(field.value)) {
     return diagnostic('INVALID_ATOM_CHILDREN', 'slot 必须提交明确 Thing 数组');
   }
@@ -957,10 +957,24 @@ function applyExplicitChildren(target, field, atoms) {
           { missing }
         );
       }
+      const missingIdentityCount = walkAtoms([created]).filter(({ atom }) => (
+        !storedField(atom, 'thing')?.parsed.identity
+      )).length;
+      if (missingIdentityCount > 0) {
+        if (typeof reserveThingIdentities !== 'function') {
+          return diagnostic('THING_IDENTITY_REQUIRED', '新增 slot Thing 必须由事务预留永久身份');
+        }
+        ensureThingIdentities([created], {
+          identities: reserveThingIdentities(missingIdentityCount)
+        });
+      }
       children.push(created);
       continue;
     }
-    const error = applyFields(matches[0], submitted.fields, atoms, { nested: true });
+    const error = applyFields(matches[0], submitted.fields, atoms, {
+      nested: true,
+      reserveThingIdentities
+    });
     if (error) return error;
   }
   return null;
@@ -1013,7 +1027,7 @@ function applyFields(target, fields, atoms, options = {}) {
       continue;
     }
     if (field.baseKey === 'slot' && field.valuePresent) {
-      const error = applyExplicitChildren(target, field, atoms);
+      const error = applyExplicitChildren(target, field, atoms, options.reserveThingIdentities);
       if (error) return error;
     }
   }
@@ -1488,7 +1502,10 @@ export async function applyTransform({
       targetPath = target.match.path.join('/');
       targetIdentity = storedField(target.match.atom, 'thing')?.parsed.identity ?? null;
     }
-    let error = applyFields(selected.match.atom, item.fields, nextAtoms, { rootName });
+    let error = applyFields(selected.match.atom, item.fields, nextAtoms, {
+      rootName,
+      reserveThingIdentities
+    });
     if (!error && targetPath) {
       try {
         retargetShortcutAtom(selected.match.atom, targetPath, targetIdentity);

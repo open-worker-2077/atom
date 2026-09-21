@@ -9,6 +9,22 @@ import {
   auditProductionArchitecture
 } from '../src/atom-system/operations/production-architecture-audit.mjs';
 
+async function productionSources(root) {
+  const files = [];
+  async function visit(directory) {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) await visit(absolute);
+      else if (/\.(?:js|mjs|cjs)$/u.test(entry.name)) files.push(absolute);
+    }
+  }
+  for (const directory of ['work-engine', 'src']) await visit(path.join(root, directory));
+  return Promise.all(files.map(async absolute => ({
+    file: path.relative(root, absolute).replaceAll('\\', '/'),
+    source: await fs.readFile(absolute, 'utf8')
+  })));
+}
+
 async function fixture(t, files) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-architecture-audit-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -77,4 +93,27 @@ test('Web editing has one text command entry and no server-side UI translation',
     assert.doesNotMatch(source, /atomWorkspaceEdit|atomHumanStatus|createLegacyHuman(?:Workspace|Status)Translator|updateHuman(?:Workspace|Status)/, file);
     assert.doesNotMatch(source, /operation\??\.kind|humanGraphDocument|graphNodesByPath/, file);
   }
+});
+
+test('short Thing identity has one allocator and confines legacy parsing to cold migration', async () => {
+  const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+  const sources = await productionSources(root);
+  const matchingFiles = (pattern) => sources
+    .filter(({ source }) => pattern.test(source))
+    .map(({ file }) => file)
+    .sort();
+
+  assert.deepEqual(matchingFiles(/randomBytes\(16\)/u), []);
+  assert.deepEqual(matchingFiles(/identityAlias/u), []);
+  assert.deepEqual(matchingFiles(/\{22\}/u), [
+    'work-engine/atom-language/key-parser.mjs',
+    'work-engine/atom-language/short-thing-id-migration.mjs'
+  ]);
+  assert.deepEqual(matchingFiles(/legacy-22-migration/u), [
+    'work-engine/atom-language/key-parser.mjs',
+    'work-engine/atom-language/short-thing-id-migration.mjs'
+  ]);
+  assert.deepEqual(matchingFiles(/export function thingIdForOrdinal/u), [
+    'work-engine/atom-language/thing-id-allocator.mjs'
+  ]);
 });

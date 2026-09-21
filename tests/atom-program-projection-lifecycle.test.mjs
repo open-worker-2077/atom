@@ -7,8 +7,13 @@ import test from 'node:test';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
-import { ensureThingIdentities, storedField } from '../work-engine/atom-language/slot-graph-semantics.mjs';
+import { ensureThingIdentities, storedField, walkAtoms } from '../work-engine/atom-language/slot-graph-semantics.mjs';
 import { inspectProgramReferenceSites } from '../work-engine/atom-language/program-reference-runtime.mjs';
+import { thingIdForOrdinal } from '../work-engine/atom-language/thing-id-allocator.mjs';
+import {
+  createProgramRefBindingUpdate,
+  rebuildProgramRefBindings
+} from '../work-engine/atom-language/program-ref-binding-ledger.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   const agentProgram = type === 'agent';
@@ -40,28 +45,73 @@ function memoryProjectionRepository() {
   };
 }
 
+let nextFixtureIdentity = 1_000;
+function identify(atoms) {
+  const missing = walkAtoms(atoms).filter(({ atom: value }) => (
+    !storedField(value, 'thing')?.parsed.identity
+  ));
+  ensureThingIdentities(atoms, {
+    identities: missing.map(() => thingIdForOrdinal(nextFixtureIdentity++))
+  });
+  return atoms;
+}
+
+async function bindingsFor(atoms) {
+  const records = walkAtoms(atoms);
+  const replacements = [];
+  for (const { atom: value } of records) {
+    const thing = storedField(value, 'thing');
+    if (!thing?.parsed.types.some(type => type.raw === 'program')) continue;
+    const source = storedField(value, 'situation')?.value ?? '';
+    if (!source.trim()) continue;
+    const inspected = await inspectProgramReferenceSites({ source });
+    replacements.push({
+      programThingId: thing.parsed.identity,
+      sourceHash: inspected.sourceHash,
+      sites: inspected.sites.map(site => {
+        const matches = records.filter(record => {
+          const pathValue = record.path.join('/');
+          return pathValue === site.selector || pathValue.endsWith(`/${site.selector}`);
+        });
+        return {
+          fingerprint: site.fingerprint,
+          role: site.role,
+          targetThingId: matches.length === 1
+            ? storedField(matches[0].atom, 'thing').parsed.identity
+            : 'zzz'
+        };
+      })
+    });
+  }
+  const update = createProgramRefBindingUpdate({ replacements });
+  return rebuildProgramRefBindings([{ receipt: { result: { programRefBindings: update } } }]);
+}
+
 test('startup reference rebuild preserves bytes and revision while isolating missing targets from execution', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-reference-startup-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const world = [atom('Agent', '', [atom('Target', 'before'),
-    atom('Good', 'explore({"thing":"Agent/Target"})', [], 'program'),
-    atom('Bad', 'explore({"thing":"Missing"})', [], 'program')], 'agent'),
-    atom('Archive', '', [atom('Archived', 'explore({"thing":"Missing"})', [], 'program')], 'backup@default')];
-  ensureThingIdentities(world);
+    atom('Good', 'explore({"thing":ref("Agent/Target")})', [], 'program'),
+    atom('Bad', 'explore({"thing":ref("Missing")})', [], 'program')], 'agent'),
+    atom('Archive', '', [atom('Archived', 'explore({"thing":ref("Missing")})', [], 'program')], 'backup@default')];
+  identify(world);
   await fs.writeFile(contextFile, JSON.stringify(world));
   const bytes = await fs.readFile(contextFile, 'utf8');
   const revision = revisionOfWorldFacts(world);
   const executions = [];
-  const scheduler = createProgramRuntimeScheduler({ runProgram: async ({ program }) => {
+  const scheduler = createProgramRuntimeScheduler({
+    programRefBindings: await bindingsFor(world),
+    runProgram: async ({ program }) => {
     executions.push(program.path);
     return { locks: [], messages: [], transforms: [] };
-  } });
+    }
+  });
   const prepared = await executeAtomLanguage({ source: 'atom', contextFile,
     projectionFile: path.join(directory, 'graph.json'), programScheduler: scheduler, programMode: 'project' });
   assert.equal(prepared.ok, true, JSON.stringify(prepared.errors));
   assert.ok(scheduler.programReferenceIndex, 'startup must publish a derived reference index');
-  assert.equal(scheduler.programReferenceIndex.failures[0].code, 'PROGRAM_REFERENCE_TARGET_MISSING');
+  assert.equal(scheduler.programReferenceIndex.failures[0].code, 'PROGRAM_REF_TARGET_MISSING');
   assert.deepEqual(executions.sort(), ['Agent', 'Agent/Good']);
   assert.equal(await fs.readFile(contextFile, 'utf8'), bytes);
   assert.equal(revisionOfWorldFacts(JSON.parse(bytes)), revision);
@@ -114,39 +164,46 @@ test('a query consumes the current Program projection without executing Programs
 });
 
 test('a missing-reference quarantine blocks explicit execution but expires when the same Program source changes', async () => {
-  const world = [atom('Broken', 'explore({"thing":"Missing"})', [], 'program')];
-  ensureThingIdentities(world);
+  const world = [atom('Broken', 'explore({"thing":ref("Missing")})', [], 'program')];
+  identify(world);
   let inspections = 0;
-  const scheduler = createProgramRuntimeScheduler({ inspectProgramReferences: async request => {
+  const scheduler = createProgramRuntimeScheduler({
+    programRefBindings: await bindingsFor(world),
+    inspectProgramReferences: async request => {
     inspections += 1;
     return inspectProgramReferenceSites(request);
-  } });
+    }
+  });
   const [first, second] = await Promise.all([
     scheduler.prepareProgramReferenceIndex(world), scheduler.prepareProgramReferenceIndex(world)
   ]);
   assert.equal(first, second);
-  assert.equal(inspections, 1);
+  assert.equal(inspections, 0, 'cold rebuild consumes the persisted binding snapshot');
   await assert.rejects(scheduler.refresh(world, { programSelector: 'Broken', force: true }), {
-    code: 'PROGRAM_REFERENCE_TARGET_MISSING'
+    code: 'PROGRAM_REF_TARGET_MISSING'
   });
   const renamed = structuredClone(world);
   renamed[0][storedField(renamed[0], 'thing').rawKey] = 'Renamed';
   await assert.rejects(scheduler.refresh(renamed, { programSelector: 'Renamed', force: true }), {
-    code: 'PROGRAM_REFERENCE_TARGET_MISSING'
+    code: 'PROGRAM_REF_TARGET_MISSING'
   });
   const repaired = structuredClone(world);
   repaired[0].situation = 'message({"level":"info","text":"repaired"})';
+  scheduler.setProgramRefBindings(await bindingsFor(repaired));
   const cycle = await scheduler.refresh(repaired, { programSelector: 'Broken', force: true });
   assert.equal(cycle.messages[0].text, 'repaired');
-  assert.equal(cycle.runtimeWarnings?.some(warning => warning.code === 'PROGRAM_REFERENCE_TARGET_MISSING') ?? false, false);
-  assert.equal(inspections, 1, 'ordinary execution does not cold-rebuild the reference index');
+  assert.equal(cycle.runtimeWarnings?.some(warning => warning.code === 'PROGRAM_REF_TARGET_MISSING') ?? false, false);
+  assert.equal(inspections, 0, 'ordinary execution does not reparse Program references');
 });
 
 test('quarantined Programs stay outside persisted projection fingerprints and unrelated rebases', async () => {
   const world = [atom('Fact', 'before'), atom('Good', 'pass', [], 'program'),
-    atom('Broken', 'explore({"thing":"Missing"})', [], 'program')];
-  ensureThingIdentities(world);
-  const scheduler = createProgramRuntimeScheduler({ projectionRepository: memoryProjectionRepository() });
+    atom('Broken', 'explore({"thing":ref("Missing")})', [], 'program')];
+  identify(world);
+  const scheduler = createProgramRuntimeScheduler({
+    projectionRepository: memoryProjectionRepository(),
+    programRefBindings: await bindingsFor(world)
+  });
   await scheduler.refresh(world, { isolateFailures: true, prepareAllIndexes: true });
   assert.equal((await scheduler.assertContextFreeProjection(world)).persisted, true);
   const changed = structuredClone(world);
@@ -159,9 +216,12 @@ test('quarantined Programs stay outside persisted projection fingerprints and un
 
 test('derived-state invalidation preserves same-identity same-source quarantine across an unrelated commit', async () => {
   const world = [atom('Fact', 'before'), atom('Good', 'message({"level":"info","text":"healthy"})', [], 'program'),
-    atom('Broken', 'explore({"thing":"Missing"})', [], 'program')];
-  ensureThingIdentities(world);
-  const scheduler = createProgramRuntimeScheduler({ projectionRepository: memoryProjectionRepository() });
+    atom('Broken', 'explore({"thing":ref("Missing")})', [], 'program')];
+  identify(world);
+  const scheduler = createProgramRuntimeScheduler({
+    projectionRepository: memoryProjectionRepository(),
+    programRefBindings: await bindingsFor(world)
+  });
   await scheduler.refresh(world, { isolateFailures: true, prepareAllIndexes: true });
   const committed = structuredClone(world);
   committed[0].situation = 'after';
@@ -169,74 +229,55 @@ test('derived-state invalidation preserves same-identity same-source quarantine 
   const committedRevision = revisionOfWorldFacts(committed);
   scheduler.invalidateDerivedWorldState();
   await assert.rejects(scheduler.current(committed, { programSelector: 'Broken' }), {
-    code: 'PROGRAM_REFERENCE_TARGET_MISSING'
+    code: 'PROGRAM_REF_TARGET_MISSING'
   });
   await assert.rejects(scheduler.refresh(committed, { programSelector: 'Broken', force: true }), {
-    code: 'PROGRAM_REFERENCE_TARGET_MISSING'
+    code: 'PROGRAM_REF_TARGET_MISSING'
   });
   const cycle = await scheduler.refresh(committed, { isolateFailures: true });
   assert.equal(cycle.messages[0].text, 'healthy');
   assert.deepEqual(cycle.failures, []);
-  assert.equal(cycle.runtimeWarnings.some(warning => warning.code === 'PROGRAM_REFERENCE_TARGET_MISSING'), true);
+  assert.equal(cycle.runtimeWarnings.some(warning => warning.code === 'PROGRAM_REF_TARGET_MISSING'), true);
   assert.equal(JSON.stringify(committed), committedBytes);
   assert.equal(revisionOfWorldFacts(committed), committedRevision);
 });
 
-test('concurrent reference rebuilds reuse each revision and an older late result cannot replace the newer index', async () => {
-  const older = [atom('Target'), atom('Program', '# older\nexplore({"thing":"Target"})', [], 'program')];
-  ensureThingIdentities(older);
+test('reference rebuilds reuse one revision and a newer binding generation replaces it', async () => {
+  const older = [atom('Target'), atom('Program', '# older\nexplore({"thing":ref("Target")})', [], 'program')];
+  identify(older);
   const newer = structuredClone(older);
-  newer[1].situation = '# newer\nexplore({"thing":"Missing"})';
-  const oldGate = Promise.withResolvers();
-  const oldStarted = Promise.withResolvers();
-  let oldInspections = 0;
-  const scheduler = createProgramRuntimeScheduler({ inspectProgramReferences: async request => {
-    if (request.source.startsWith('# older')) {
-      oldInspections += 1;
-      oldStarted.resolve();
-      await oldGate.promise;
-    }
-    return inspectProgramReferenceSites(request);
-  } });
-  const oldRequest = scheduler.prepareProgramReferenceIndex(older);
-  await oldStarted.promise;
+  newer[1].situation = '# newer\nexplore({"thing":ref("Missing")})';
+  const scheduler = createProgramRuntimeScheduler({
+    programRefBindings: await bindingsFor(older)
+  });
+  const [first, repeated] = await Promise.all([
+    scheduler.prepareProgramReferenceIndex(older),
+    scheduler.prepareProgramReferenceIndex(older)
+  ]);
+  assert.equal(first, repeated);
+  scheduler.setProgramRefBindings(await bindingsFor(newer));
   const newestIndex = await scheduler.prepareProgramReferenceIndex(newer);
-  const repeatedOldRequest = scheduler.prepareProgramReferenceIndex(older);
-  oldGate.resolve();
-  const [oldIndex, repeatedOldIndex] = await Promise.all([oldRequest, repeatedOldRequest]);
   assert.equal(scheduler.programReferenceIndex, newestIndex);
   assert.equal(scheduler.programReferenceRevision, revisionOfWorldFacts(newer));
-  assert.equal(oldIndex, repeatedOldIndex);
-  assert.equal(oldInspections, 1);
-  assert.equal(newestIndex.failures[0].code, 'PROGRAM_REFERENCE_TARGET_MISSING');
+  assert.equal(newestIndex.failures[0].code, 'PROGRAM_REF_TARGET_MISSING');
 });
 
-test('invalidation cancels in-flight reference publication while preserving the last published snapshot', async () => {
-  const original = [atom('Target'), atom('Program', '# published\nexplore({"thing":"Target"})', [], 'program')];
-  ensureThingIdentities(original);
+test('invalidation rebuilds the latest explicit binding generation', async () => {
+  const original = [atom('Target'), atom('Program', '# published\nexplore({"thing":ref("Target")})', [], 'program')];
+  identify(original);
   const pending = structuredClone(original);
-  pending[1].situation = '# pending\nexplore({"thing":"Missing"})';
-  const gate = Promise.withResolvers();
-  const started = Promise.withResolvers();
-  const scheduler = createProgramRuntimeScheduler({ inspectProgramReferences: async request => {
-    if (request.source.startsWith('# pending')) {
-      started.resolve();
-      await gate.promise;
-    }
-    return inspectProgramReferenceSites(request);
-  } });
+  pending[1].situation = '# pending\nexplore({"thing":ref("Missing")})';
+  const scheduler = createProgramRuntimeScheduler({
+    programRefBindings: await bindingsFor(original)
+  });
   const published = await scheduler.prepareProgramReferenceIndex(original);
-  const interrupted = scheduler.prepareProgramReferenceIndex(pending);
-  await started.promise;
+  assert.equal(published.failures.length, 0);
+  scheduler.setProgramRefBindings(await bindingsFor(pending));
   scheduler.invalidateDerivedWorldState();
-  gate.resolve();
-  await interrupted;
-  assert.equal(scheduler.programReferenceIndex, published);
-  assert.equal(scheduler.programReferenceRevision, revisionOfWorldFacts(original));
   const rebuilt = await scheduler.prepareProgramReferenceIndex(pending);
   assert.equal(scheduler.programReferenceIndex, rebuilt);
   assert.equal(scheduler.programReferenceRevision, revisionOfWorldFacts(pending));
-  assert.equal(rebuilt.failures[0].code, 'PROGRAM_REFERENCE_TARGET_MISSING');
+  assert.equal(rebuilt.failures[0].code, 'PROGRAM_REF_TARGET_MISSING');
 });
 
 test('a validated Program projection survives scheduler restart for the exact world revision', async () => {
@@ -558,7 +599,7 @@ test('each committed Program create settles the next independent request onto it
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   await fs.writeFile(contextFile, JSON.stringify([
-    atom('Root', '', [], 'agent')
+    { 'thing@program&id=101': 'Root', situation: 'agent({"labels":[],"functions":{"groups":[],"names":["explore","transform"]}})', slot: [], strut: [] }
   ], null, 2));
   const projectionRepository = memoryProjectionRepository();
   const programExecutions = [];
@@ -587,6 +628,7 @@ test('each committed Program create settles the next independent request onto it
   const createdPredicate = await executeAtomLanguage({
     source: 'transform new {"thing@program":"Root/Predicate","situation":"def main(arguments):\\n    return False","slot":[],"strut":[]}',
     contextFile, projectionFile, programScheduler: scheduler, commitWorld,
+    thingIdentityWatermark: '101',
     interaction: { id: 'create-predicate', ...interaction }
   });
   assert.equal(createdPredicate.ok, true, JSON.stringify(createdPredicate.errors));
@@ -598,6 +640,7 @@ test('each committed Program create settles the next independent request onto it
   const createdRegistration = await executeAtomLanguage({
     source: 'transform new {"thing@program":"Root/Registration","situation":"def main(arguments):\\n    return None","slot":[],"strut":[]}',
     contextFile, projectionFile, programScheduler: scheduler, commitWorld,
+    thingIdentityWatermark: '102',
     interaction: { id: 'create-registration', ...interaction }
   });
   assert.equal(createdRegistration.ok, true, JSON.stringify(createdRegistration.errors));
