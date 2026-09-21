@@ -99,8 +99,26 @@ function hasIdentityMigrationBarrier(entry) {
 
 function replay(receipts) {
   const values = new Map();
+  const migrationSnapshots = new Map();
   for (const entry of receipts ?? []) {
-    if (hasIdentityMigrationBarrier(entry)) values.clear();
+    const commandId = entry?.commandId ?? receiptOf(entry)?.commandId;
+    if (hasIdentityMigrationBarrier(entry)) {
+      migrationSnapshots.set(commandId, new Map(values));
+      values.clear();
+    }
+    const rollback = receiptOf(entry)?.result?.thingIdentityMigrationRollback;
+    if (rollback != null) {
+      if (rollback.version !== 1 || typeof rollback.targetCommandId !== 'string'
+        || !migrationSnapshots.has(rollback.targetCommandId)) {
+        throw Object.assign(new Error('Program reference binding migration rollback is invalid'), {
+          code: 'INVALID_PROGRAM_REF_BINDING_MIGRATION_ROLLBACK'
+        });
+      }
+      values.clear();
+      for (const [id, binding] of migrationSnapshots.get(rollback.targetCommandId)) {
+        values.set(id, binding);
+      }
+    }
     const update = updateOf(entry);
     if (!update) continue;
     for (const id of update.removals) values.delete(id);
@@ -146,6 +164,7 @@ export function programRefBindingsForRollback(receipts, targetCommandId) {
     (entry?.commandId ?? receiptOf(entry)?.commandId) === targetCommandId
   ));
   if (targetIndex < 0) return null;
+  if (hasIdentityMigrationBarrier(entries[targetIndex])) return null;
   const targetUpdate = updateOf(entries[targetIndex]);
   if (!targetUpdate) return null;
   const before = replay(entries.slice(0, targetIndex));

@@ -229,6 +229,9 @@ export function planShortThingIdentityMigration({
   projectAtomContext(nextFacts);
   const nextScan = scanFacts(nextFacts);
   const nextRevision = revisionOfWorldFacts(nextFacts);
+  const migrationId = `short-thing-id-${createHash('sha256')
+    .update(`${sourceRevision}\0${nextRevision}\0${scanned.records.length}`)
+    .digest('hex').slice(0, 24)}`;
   const thingIdentityAllocator = thingIdentityAllocatorUpdate({ previousWatermark: '000', ids: allocation.ids });
   const thingIdentityMigration = Object.freeze({
     version: 1,
@@ -241,6 +244,7 @@ export function planShortThingIdentityMigration({
   });
   return Object.freeze({
     changed: true,
+    migrationId,
     sourceRevision,
     nextRevision,
     facts: nextFacts,

@@ -175,8 +175,26 @@ export function rebuildThingIdWatermark(receipts) {
   }
   let watermark = '000';
   const issued = new Set();
+  const migrationSnapshots = new Map();
   for (const entry of receipts) {
-    const update = entry?.receipt?.result?.thingIdentityAllocator;
+    const receipt = entry?.receipt;
+    const commandId = entry?.commandId ?? receipt?.commandId;
+    if (receipt?.result?.thingIdentityMigration) {
+      migrationSnapshots.set(commandId, { watermark, issued: new Set(issued) });
+    }
+    const rollback = receipt?.result?.thingIdentityMigrationRollback;
+    if (rollback != null) {
+      const snapshot = rollback?.version === 1
+        ? migrationSnapshots.get(rollback.targetCommandId)
+        : null;
+      if (!snapshot) {
+        throw allocatorError('INVALID_THING_ID_MIGRATION_ROLLBACK', 'Thing ID migration rollback target is invalid');
+      }
+      watermark = snapshot.watermark;
+      issued.clear();
+      snapshot.issued.forEach(id => issued.add(id));
+    }
+    const update = receipt?.result?.thingIdentityAllocator;
     if (update === undefined) continue;
     if (!update || update.version !== 1 || update.previousWatermark !== watermark
       || !Array.isArray(update.issued) || update.issued.some(id => issued.has(id))) {

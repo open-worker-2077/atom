@@ -508,6 +508,7 @@ export function createTransactionalWorldPersistence({
     subsequentOf = null,
     programRefBindings = null,
     thingIdentityAllocator = null,
+    thingIdentityMigration = null,
     compatibilityManifest: suppliedManifest = null,
     baseCompatibilityManifest: suppliedBaseManifest = null
   }) {
@@ -576,6 +577,20 @@ export function createTransactionalWorldPersistence({
     if (identityUpdate && (thingIdentityAllocator.version !== identityUpdate.version
       || thingIdentityAllocator.nextWatermark !== identityUpdate.nextWatermark)) {
       throw problem('INVALID_THING_ID_ALLOCATION', 'Thing ID allocation metadata is not canonical');
+    }
+    const migrationBarrier = thingIdentityMigration == null
+      ? null
+      : structuredClone(thingIdentityMigration);
+    if (migrationBarrier && (migrationBarrier.version !== 1
+      || migrationBarrier.sourceContract !== 'base64url-22'
+      || migrationBarrier.targetContract !== 'base62-short'
+      || migrationBarrier.sourceRevision !== canonicalExpectedRevision
+      || migrationBarrier.targetRevision !== canonicalNextRevision
+      || !Number.isSafeInteger(migrationBarrier.thingCount)
+      || migrationBarrier.thingCount < 0
+      || migrationBarrier.allocatorWatermark !== identityUpdate?.nextWatermark
+      || !bindingUpdate)) {
+      throw problem('INVALID_THING_IDENTITY_MIGRATION', 'Thing identity migration metadata is incomplete');
     }
     let receipt;
     let reusedReceipt = false;
@@ -667,7 +682,8 @@ export function createTransactionalWorldPersistence({
                 transformLogRecord: structuredClone(transformLogRecord)
               } : {}),
               ...(bindingUpdate ? { programRefBindings: bindingUpdate } : {}),
-              ...(identityUpdate ? { thingIdentityAllocator: identityUpdate } : {})
+              ...(identityUpdate ? { thingIdentityAllocator: identityUpdate } : {}),
+              ...(migrationBarrier ? { thingIdentityMigration: migrationBarrier } : {})
             }
           };
         }
@@ -733,10 +749,19 @@ export function createTransactionalWorldPersistence({
     await recover();
     const canonicalExpectedRevision = canonicalRevision(expectedRevision);
     const metadataState = await journalRepository.readMetadataState();
+    const targetEntry = metadataState.receipts.find((entry) => (
+      (entry.commandId ?? entry.receipt?.commandId) === targetCommandId
+    ));
+    const identityMigrationRollback = targetEntry?.receipt?.result?.thingIdentityMigration
+      ? { version: 1, targetCommandId }
+      : null;
     const inverseBindings = programRefBindingsForRollback(metadataState.receipts, targetCommandId);
     const receipt = await coordinator.rollback({
       targetCommandId,
-      ...(inverseBindings ? { result: { programRefBindings: inverseBindings } } : {}),
+      ...((inverseBindings || identityMigrationRollback) ? { result: {
+        ...(inverseBindings ? { programRefBindings: inverseBindings } : {}),
+        ...(identityMigrationRollback ? { thingIdentityMigrationRollback: identityMigrationRollback } : {})
+      } } : {}),
       rebaseResult: async ({ current, facts: rebasedFacts, result }) => {
         const state = await journalRepository.readState();
         const currentManifest = structuredClone(
