@@ -1237,6 +1237,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   if (options.programScheduler) {
     const indexPreparationStartedAt = performance.now();
     try {
+      if (options.programMode === 'project') {
+        await options.programScheduler.prepareProgramReferenceIndex?.(atoms);
+      }
       activeRequestDrivenLocks = await options.programScheduler.activeRequestDrivenLocks?.(atoms, {
         preparedIndexesValid: canReusePreparedRuntimeIndexes
       }) ?? [];

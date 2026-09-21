@@ -7,6 +7,8 @@ import test from 'node:test';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
+import { ensureThingIdentities, storedField } from '../work-engine/atom-language/slot-graph-semantics.mjs';
+import { inspectProgramReferenceSites } from '../work-engine/atom-language/program-reference-runtime.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   const agentProgram = type === 'agent';
@@ -37,6 +39,46 @@ function memoryProjectionRepository() {
     }
   };
 }
+
+test('startup reference rebuild preserves bytes and revision while isolating missing targets from execution', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-reference-startup-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const contextFile = path.join(directory, 'atom.json');
+  const world = [atom('Agent', '', [atom('Target', 'before'),
+    atom('Good', 'explore({"thing":"Agent/Target"})', [], 'program'),
+    atom('Bad', 'explore({"thing":"Missing"})', [], 'program')], 'agent'),
+    atom('Archive', '', [atom('Archived', 'explore({"thing":"Missing"})', [], 'program')], 'backup@default')];
+  ensureThingIdentities(world);
+  await fs.writeFile(contextFile, JSON.stringify(world));
+  const bytes = await fs.readFile(contextFile, 'utf8');
+  const revision = revisionOfWorldFacts(world);
+  const executions = [];
+  const scheduler = createProgramRuntimeScheduler({ runProgram: async ({ program }) => {
+    executions.push(program.path);
+    return { locks: [], messages: [], transforms: [] };
+  } });
+  const prepared = await executeAtomLanguage({ source: 'atom', contextFile,
+    projectionFile: path.join(directory, 'graph.json'), programScheduler: scheduler, programMode: 'project' });
+  assert.equal(prepared.ok, true, JSON.stringify(prepared.errors));
+  assert.ok(scheduler.programReferenceIndex, 'startup must publish a derived reference index');
+  assert.equal(scheduler.programReferenceIndex.failures[0].code, 'PROGRAM_REFERENCE_TARGET_MISSING');
+  assert.deepEqual(executions.sort(), ['Agent', 'Agent/Good']);
+  assert.equal(await fs.readFile(contextFile, 'utf8'), bytes);
+  assert.equal(revisionOfWorldFacts(JSON.parse(bytes)), revision);
+  const id = storedField(world[0].slot[0], 'thing').parsed.identity;
+  assert.equal(scheduler.programReferenceIndex.sitesForTargets([id]).length, 1);
+  const interaction = { id: 'reference-isolation', agent: { ref: storedField(world[0], 'thing').parsed.identity, path: 'Agent' } };
+  const explored = await executeAtomLanguage({ source: 'explore {"thing":"Agent/Target"}', contextFile,
+    programScheduler: scheduler, interaction });
+  assert.equal(explored.ok, true, JSON.stringify(explored.errors));
+  const transformed = await executeAtomLanguage({ source: 'transform {"thing":"Agent/Target","situation.rep.after"}',
+    contextFile, projectionFile: path.join(directory, 'graph.json'), programScheduler: scheduler, interaction,
+    commitWorld: async ({ facts }) => fs.writeFile(contextFile, JSON.stringify(facts)) });
+  assert.equal(transformed.ok, true, JSON.stringify(transformed.errors));
+  assert.equal(transformed.changed, true);
+  assert.equal(executions.includes('Agent/Bad'), false);
+  assert.equal(executions.includes('Archive/Archived'), false);
+});
 
 test('a query consumes the current Program projection without executing Programs', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-query-projection-'));
@@ -69,6 +111,50 @@ test('a query consumes the current Program projection without executing Programs
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(reads, 1);
   assert.equal(result.changed, false);
+});
+
+test('a missing-reference quarantine blocks explicit execution but expires when the same Program source changes', async () => {
+  const world = [atom('Broken', 'explore({"thing":"Missing"})', [], 'program')];
+  ensureThingIdentities(world);
+  let inspections = 0;
+  const scheduler = createProgramRuntimeScheduler({ inspectProgramReferences: async request => {
+    inspections += 1;
+    return inspectProgramReferenceSites(request);
+  } });
+  const [first, second] = await Promise.all([
+    scheduler.prepareProgramReferenceIndex(world), scheduler.prepareProgramReferenceIndex(world)
+  ]);
+  assert.equal(first, second);
+  assert.equal(inspections, 1);
+  await assert.rejects(scheduler.refresh(world, { programSelector: 'Broken', force: true }), {
+    code: 'PROGRAM_REFERENCE_TARGET_MISSING'
+  });
+  const renamed = structuredClone(world);
+  renamed[0][storedField(renamed[0], 'thing').rawKey] = 'Renamed';
+  await assert.rejects(scheduler.refresh(renamed, { programSelector: 'Renamed', force: true }), {
+    code: 'PROGRAM_REFERENCE_TARGET_MISSING'
+  });
+  const repaired = structuredClone(world);
+  repaired[0].situation = 'message({"level":"info","text":"repaired"})';
+  const cycle = await scheduler.refresh(repaired, { programSelector: 'Broken', force: true });
+  assert.equal(cycle.messages[0].text, 'repaired');
+  assert.equal(cycle.runtimeWarnings?.some(warning => warning.code === 'PROGRAM_REFERENCE_TARGET_MISSING') ?? false, false);
+  assert.equal(inspections, 1, 'ordinary execution does not cold-rebuild the reference index');
+});
+
+test('quarantined Programs stay outside persisted projection fingerprints and unrelated rebases', async () => {
+  const world = [atom('Fact', 'before'), atom('Good', 'pass', [], 'program'),
+    atom('Broken', 'explore({"thing":"Missing"})', [], 'program')];
+  ensureThingIdentities(world);
+  const scheduler = createProgramRuntimeScheduler({ projectionRepository: memoryProjectionRepository() });
+  await scheduler.refresh(world, { isolateFailures: true, prepareAllIndexes: true });
+  assert.equal((await scheduler.assertContextFreeProjection(world)).persisted, true);
+  const changed = structuredClone(world);
+  changed[0].situation = 'after';
+  const rebased = await scheduler.rebaseContextFreeProjection(world, changed, { changedPaths: ['Fact'], isolateFailures: true });
+  assert.equal(rebased.persisted, true);
+  assert.equal((await scheduler.assertContextFreeProjection(changed)).persisted, true);
+  assert.equal((await scheduler.persistComputedContextFreeProjection(world)).persisted, true);
 });
 
 test('a validated Program projection survives scheduler restart for the exact world revision', async () => {
@@ -396,7 +482,11 @@ test('each committed Program create settles the next independent request onto it
   const programExecutions = [];
   const scheduler = createProgramRuntimeScheduler({
     projectionRepository,
-    runProgram: async ({ program }) => {
+    runProgram: async ({ program, validateOnly }) => {
+      if (validateOnly) {
+        const inspection = await inspectProgramReferenceSites({ source: program.detail });
+        return { locks: [], triggers: [], sourceHash: inspection.sourceHash, referenceSites: inspection.sites };
+      }
       programExecutions.push(program.path);
       return { locks: [], messages: [], transforms: [] };
     }

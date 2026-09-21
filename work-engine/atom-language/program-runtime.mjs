@@ -19,7 +19,8 @@ import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
 import { routeSlotTagPackets } from './slot-signal-runtime.mjs';
 import { buildStrutDeliveries, evaluateStrutClausesWithPrograms } from './strut-runtime.mjs';
 import { shortcutMetadata } from './shortcut-runtime.mjs';
-import { rewriteProgramReferenceBatch } from './program-reference-runtime.mjs';
+import { inspectProgramReferenceSites, rewriteProgramReferenceBatch } from './program-reference-runtime.mjs';
+import { createProgramReferenceIndex } from './program-reference-index.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
 import {
@@ -1403,6 +1404,10 @@ export class ProgramRuntimeScheduler {
     this.dormantFailures = new Map();
     this.runProgram = options.runProgram ?? runWorker;
     this.inspectProgram = options.inspectProgram ?? runWorker;
+    this.inspectProgramReferences = options.inspectProgramReferences ?? inspectProgramReferenceSites;
+    this.programReferenceIndex = null;
+    this.programReferenceRevision = null;
+    this.programReferencePreparation = null;
     this.diagnosticRecorder = options.diagnosticRecorder ?? null;
     this.projectionRepository = options.projectionRepository ?? null;
     this.loadedProjection = undefined;
@@ -1682,7 +1687,7 @@ export class ProgramRuntimeScheduler {
 
   async deriveAgentSecurity(atoms) {
     const records = worldRecords(atoms);
-    const programs = programRecords(records);
+    const programs = this.activeProgramRecords(records);
     const inspected = await Promise.all(programs.map((program) => {
       // Declaration-only inspection is a pure AST operation: it cannot read Graph
       // facts or execute code. Reuse only the exact path/source previously checked.
@@ -1740,7 +1745,7 @@ export class ProgramRuntimeScheduler {
       return this.agentSecurity;
     }
     const records = worldRecords(atoms);
-    const programs = programRecords(records);
+    const programs = this.activeProgramRecords(records);
     const fingerprint = agentSecurityFingerprint(programs);
     if (this.agentSecurityWorldRevision === fingerprint) {
       this.agentSecurityWorldFacts = isSealedWorldFacts(atoms) ? atoms : null;
@@ -1754,7 +1759,7 @@ export class ProgramRuntimeScheduler {
 
   async inspectAgentRegistration(atoms, selector) {
     const records = worldRecords(atoms);
-    const programs = programRecords(records);
+    const programs = this.activeProgramRecords(records);
     const program = programs.find((entry) => entry.path === selector);
     if (!program) {
       throw Object.assign(
@@ -1791,7 +1796,7 @@ export class ProgramRuntimeScheduler {
     if (!this.projectionRepository) return Object.freeze({ persisted: false });
     const agentProgramPaths = new Set((await this.rebuildAgentSecurity(atoms)).keys());
     const records = worldRecords(atoms);
-    const programs = programRecords(records);
+    const programs = this.activeProgramRecords(records);
     const stored = await this.projectionRepository.load();
     if (!stored
       || stored.worldKey !== worldRevisionKey(records)
@@ -1817,7 +1822,7 @@ export class ProgramRuntimeScheduler {
     if (!this.projectionRepository) return Object.freeze({ persisted: false });
     const agentProgramPaths = new Set((await this.rebuildAgentSecurity(atoms)).keys());
     const records = worldRecords(atoms);
-    const programs = programRecords(records);
+    const programs = this.activeProgramRecords(records);
     const key = fingerprint(records, programs, null, isolateFailures);
     const value = this.completed.get(key);
     const requests = value?.exploreRequests ?? [];
@@ -1875,8 +1880,8 @@ export class ProgramRuntimeScheduler {
     }
     const previousRecords = worldRecords(previousAtoms);
     const records = worldRecords(atoms);
-    const previousPrograms = programRecords(previousRecords);
-    const programs = programRecords(records);
+    const previousPrograms = this.activeProgramRecords(previousRecords);
+    const programs = this.activeProgramRecords(records);
     if (!stored
       || stored.worldKey !== worldRevisionKey(previousRecords)
       || stored.contextDependent !== false
@@ -1923,7 +1928,7 @@ export class ProgramRuntimeScheduler {
     await this.rebuildAgentSecurity(atoms);
     const records = worldRecords(atoms);
     const resolveExactPath = (selector) => resolveExactPathFromCurrentContext(atoms, selector);
-    const programs = programRecords(records);
+    const programs = this.activeProgramRecords(records);
     const lockPrograms = programs.filter((program) => /\block\s*\(/u.test(program.detail));
     // Lock validation depends on derived Agent authority, not unrelated Program bodies.
     const lockSecurityFingerprint = crypto.createHash('sha256')
@@ -2002,6 +2007,48 @@ export class ProgramRuntimeScheduler {
     return worldRecords(atoms);
   }
 
+  async prepareProgramReferenceIndex(atoms) {
+    const revision = revisionOfWorldFacts(atoms);
+    if (this.programReferenceIndex && this.programReferenceRevision === revision) return this.programReferenceIndex;
+    if (this.programReferencePreparation?.revision === revision) return this.programReferencePreparation.promise;
+    const promise = createProgramReferenceIndex(atoms, {
+      inspectProgram: (request) => this.runBounded(() => this.inspectProgramReferences({
+        ...request, python: this.python, timeoutMs: this.timeoutMs
+      }))
+    }).then(index => {
+      this.programReferenceIndex = index;
+      this.programReferenceRevision = revision;
+      this.agentSecurityWorldFacts = null;
+      this.agentSecurityWorldRevision = null;
+      this.pruneInactiveProgramIndexes(worldRecords(atoms));
+      return index;
+    }).finally(() => {
+      if (this.programReferencePreparation?.promise === promise) this.programReferencePreparation = null;
+    });
+    this.programReferencePreparation = { revision, promise };
+    return promise;
+  }
+
+  referenceFailures(records) {
+    if (!this.programReferenceIndex?.failures.length) return [];
+    const byId = new Map(records.map(record => [record.ref, record]));
+    return this.programReferenceIndex.failures.filter(failure => {
+      const record = byId.get(failure.programThingId);
+      return record && failure.sourceHash === `sha256:${crypto.createHash('sha256').update(record.detail).digest('hex')}`;
+    });
+  }
+
+  activeProgramRecords(records, selector = null) {
+    const failures = this.referenceFailures(records);
+    const excluded = new Set(failures.map(failure => failure.programThingId));
+    const programs = programRecords(records, selector);
+    if (selector) {
+      const rejected = failures.find(failure => failure.programThingId === programs[0]?.ref);
+      if (rejected) throw Object.assign(new Error(rejected.message), rejected, { programPath: programs[0].path });
+    }
+    return programs.filter(program => !excluded.has(program.ref));
+  }
+
   async installPreparedRuntimeIndexes(atoms, records) {
     if (worldRecords(atoms) !== records) {
       throw Object.assign(new Error('Prepared runtime records do not belong to this world snapshot'), {
@@ -2022,6 +2069,7 @@ export class ProgramRuntimeScheduler {
       maxWorkers: this.maxWorkers,
       runProgram: this.runProgram,
       inspectProgram: this.inspectProgram,
+      inspectProgramReferences: this.inspectProgramReferences,
       diagnosticRecorder: this.diagnosticRecorder,
       runBounded: (operation) => this.runBounded(operation),
       strutDeliveryExecutions: this.strutDeliveryExecutions,
@@ -2057,10 +2105,14 @@ export class ProgramRuntimeScheduler {
     candidate.requestDrivenLocksWorldRevision = this.requestDrivenLocksWorldRevision;
     candidate.requestDrivenLockRetirementChecked = this.requestDrivenLockRetirementChecked;
     candidate.latestRecords = this.latestRecords;
+    candidate.programReferenceIndex = this.programReferenceIndex;
+    candidate.programReferenceRevision = this.programReferenceRevision;
     return candidate;
   }
 
   invalidateDerivedWorldState() {
+    this.programReferenceIndex = null;
+    this.programReferenceRevision = null;
     this.completed.clear();
     this.reusable.clear();
     this.programReusable.clear();
@@ -2085,7 +2137,7 @@ export class ProgramRuntimeScheduler {
   }
 
   pruneInactiveProgramIndexes(records) {
-    const activePaths = new Set(programRecords(records).map((record) => record.path));
+    const activePaths = new Set(this.activeProgramRecords(records).map((record) => record.path));
     for (const path of this.triggerContracts.keys()) {
       if (!activePaths.has(path)) this.removeTriggerContract(path);
     }
@@ -2101,6 +2153,7 @@ export class ProgramRuntimeScheduler {
     const active = await this.activeRequestDrivenLocks();
     return {
       ...value,
+      runtimeWarnings: [...(value.runtimeWarnings ?? []), ...this.referenceFailures(value.records ?? this.latestRecords ?? [])],
       locks: mergeDerivedLocks(value.locks ?? [], active),
       agentSecurity: (() => {
         const scopePath = agentScopePath(agentOrigin);
@@ -2208,7 +2261,7 @@ export class ProgramRuntimeScheduler {
     }
     await this.rebuildAgentSecurity(atoms);
     const records = worldRecords(atoms);
-    const programs = programRecords(records);
+    const programs = this.activeProgramRecords(records);
     const affectedPrefixes = [...new Set(relocations.flatMap(({ sourcePath, resultPath }) => (
       [sourcePath, resultPath]
     )))];
@@ -2511,10 +2564,10 @@ export class ProgramRuntimeScheduler {
     await this.activeRequestDrivenLocks(reusePreparedIndexes ? null : atoms);
     const records = reusePreparedIndexes ? this.latestRecords : worldRecords(atoms);
     if (!reusePreparedIndexes) this.latestRecords = records;
-    const availablePrograms = programRecords(records);
+    const availablePrograms = this.activeProgramRecords(records);
     const agentProgramPaths = new Set(this.agentSecurity.keys());
     const programs = options.programSelector
-      ? programRecords(records, options.programSelector)
+      ? this.activeProgramRecords(records, options.programSelector)
       : availablePrograms;
     const isolateFailures = options.isolateFailures === true;
     const key = fingerprint(records, programs, options.agentOrigin, isolateFailures);
@@ -2600,6 +2653,7 @@ export class ProgramRuntimeScheduler {
   }
 
   async refresh(atoms, options = {}) {
+    if (options.prepareAllIndexes === true) await this.prepareProgramReferenceIndex(atoms);
     const preparedTriggerEvent = options.triggerEvent ?? null;
     if ((preparedTriggerEvent?.mode === 'slot'
         && !validSlotTriggerEvent(preparedTriggerEvent))
@@ -2711,10 +2765,10 @@ export class ProgramRuntimeScheduler {
     if (compatibility) {
       isolatedProgramPathsByRecords.set(records, new Set(compatibility.isolatedProgramPaths ?? []));
     }
-    const availablePrograms = programRecords(records);
+    const availablePrograms = this.activeProgramRecords(records);
     const agentProgramPaths = new Set(this.agentSecurity.keys());
     const programs = options.programSelector
-      ? programRecords(records, options.programSelector)
+      ? this.activeProgramRecords(records, options.programSelector)
       : availablePrograms;
     const isolateFailures = options.isolateFailures === true;
     const baseKey = fingerprint(records, programs, options.agentOrigin, isolateFailures);
@@ -3658,6 +3712,7 @@ export class ProgramRuntimeScheduler {
     const contextDependent = requestsDependOnAgent(uniqueRequests)
       || results.some((result) => (result.jumps?.length ?? 0) > 0);
     const runtimeWarnings = [
+      ...this.referenceFailures(records),
       ...(this.projectionLoadWarning ? [this.projectionLoadWarning] : []),
       ...diagnosticWarnings
     ];

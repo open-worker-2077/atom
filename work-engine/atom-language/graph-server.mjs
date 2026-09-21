@@ -576,6 +576,8 @@ export async function startAtomGraphServer(options = {}) {
     );
   }
   const startupAuthority = await currentAgentAuthorityOptions();
+  const startupFacts = (startupAuthority.committedVersion ?? startupAuthority.committedSnapshot)?.facts;
+  if (Array.isArray(startupFacts)) await programScheduler.prepareProgramReferenceIndex?.(startupFacts);
   await primeAgentDirectory(configuration.contextFile, {
     programScheduler,
     ...startupAuthority
