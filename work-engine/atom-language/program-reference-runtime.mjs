@@ -148,8 +148,12 @@ export async function compileProgramRefs({ source, bindings, pathByThingId, sour
   if ((sourceHash && sourceHash !== actualHash) || inspected.sourceHash !== actualHash) {
     throw Object.assign(new Error('Program 引述 source does not match its binding analysis'), { code: 'PROGRAM_REF_SOURCE_MISMATCH' });
   }
+  if (bindings != null && bindings.sourceHash !== actualHash) {
+    throw Object.assign(new Error('Program 引述 bindings do not belong to this source'), { code: 'PROGRAM_REF_SOURCE_MISMATCH' });
+  }
   const sites = inspected.sites.map((site) => {
-    const matches = (bindings ?? []).filter(binding => binding.fingerprint === site.fingerprint && binding.role === site.role);
+    const matches = (Array.isArray(bindings?.sites) ? bindings.sites : [])
+      .filter(binding => binding.fingerprint === site.fingerprint && binding.role === site.role);
     if (matches.length !== 1) throw Object.assign(new Error('Program 引述 binding is missing'), { code: 'PROGRAM_REF_BINDING_MISSING' });
     const targetThingId = matches[0].targetThingId;
     const exactPath = pathByThingId instanceof Map ? pathByThingId.get(targetThingId) : pathByThingId?.[targetThingId];

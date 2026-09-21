@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as refs from '../work-engine/atom-language/program-reference-runtime.mjs';
 
 const inspect = (source) => refs.inspectProgramReferenceSites({ source });
+const bindingSet = (source, sites, target = () => 'target') => ({
+  sourceHash: `sha256:${createHash('sha256').update(source).digest('hex')}`,
+  sites: sites.map(s => ({ fingerprint: s.fingerprint, role: s.role, targetThingId: target(s) }))
+});
 const worker = fileURLToPath(new URL('../work-engine/atom-language/program-worker.py', import.meta.url));
 function run(source, extra = {}) {
   const result = spawnSync('python', ['-I', '-X', 'utf8', worker], {
@@ -68,7 +73,7 @@ test('execution projection uses bound identity, preserves Situation and needs no
   const source = 'message({"text":ref("World/Old")}) # keep ref("World/Old")';
   const { sites } = await inspect(source);
   assert.equal(typeof refs.compileProgramRefs, 'function');
-  const bindings = sites.map(s => ({ fingerprint: s.fingerprint, role: s.role, targetThingId: 'original-id' }));
+  const bindings = bindingSet(source, sites, () => 'original-id');
   const compiled = await refs.compileProgramRefs({ source, bindings,
     pathByThingId: new Map([['original-id', 'World/New'], ['replacement-id', 'World/Old']]) });
   const result = run(compiled.source, { allowedFunctions: ['message'] });
@@ -81,7 +86,7 @@ test('execution projection uses bound identity, preserves Situation and needs no
 
 test('missing bindings fail closed even when a matching path exists', async () => {
   assert.equal(typeof refs.compileProgramRefs, 'function');
-  await assert.rejects(refs.compileProgramRefs({ source: 'ref("World/Old")', bindings: [],
+  await assert.rejects(refs.compileProgramRefs({ source: 'ref("World/Old")',
     pathByThingId: new Map([['new-id', 'World/Old']]) }), { code: 'PROGRAM_REF_BINDING_MISSING' });
   assert.equal(run('ref("World/Old")').error.code, 'PROGRAM_REF_BINDING_MISSING');
 });
@@ -96,7 +101,7 @@ test('execution uses the same identity projection for nested Program invocations
   const detail = 'def main(arguments):\n    return ref("World/Old")';
   const { sites } = await inspect(detail);
   const child = { ref: 'child', path: 'Child', name: 'Child', types: ['program'], detail,
-    refBindings: sites.map(s => ({ fingerprint: s.fingerprint, role: s.role, targetThingId: 'target' })) };
+    refBindings: bindingSet(detail, sites) };
   const result = run('message({"text": use_program({"name":"Child", "arguments":{}})})', {
     world: [child], pathByThingId: { target: 'World/New' }, allowedFunctions: ['message', 'use_program']
   });
@@ -108,8 +113,7 @@ test('execution uses the same identity projection for nested Program invocations
 test('command projection changes every bound path while preserving operation names and concatenation comments', async () => {
   const source = 'transform({"thing.mov." # destination\r\n "OldDestination":"OldTarget"})';
   const { sites } = await inspect(source);
-  const bindings = sites.map(s => ({ fingerprint: s.fingerprint, role: s.role,
-    targetThingId: s.selector === 'OldDestination' ? 'destination' : 'target' }));
+  const bindings = bindingSet(source, sites, s => s.selector === 'OldDestination' ? 'destination' : 'target');
   const result = await refs.compileProgramRefs({ source, bindings,
     pathByThingId: { destination: 'World/NewDestination', target: 'World/NewTarget' } });
   assert.equal(result.source, 'transform({"thing.mov.World/NewDestination" # destination\r\n "":"World/NewTarget"})');
@@ -118,7 +122,7 @@ test('command projection changes every bound path while preserving operation nam
 test('missing target identity and stale source analysis never fall back to readable names', async () => {
   const source = 'ref("World/Target")';
   const { sites, sourceHash } = await inspect(source);
-  const bindings = sites.map(s => ({ fingerprint: s.fingerprint, role: s.role, targetThingId: 'missing' }));
+  const bindings = bindingSet(source, sites, () => 'missing');
   await assert.rejects(refs.compileProgramRefs({ source, bindings, pathByThingId: { other: 'World/Target' } }),
     { code: 'PROGRAM_REF_TARGET_MISSING' });
   await assert.rejects(refs.compileProgramRefs({ source: source + '\n', bindings, sourceHash, referenceSites: sites,
@@ -129,7 +133,7 @@ test('parenthesized marker names compile without corrupting their surrounding sy
   const source = 'message({"text": ((ref))("World/Old")})';
   const { sites } = await inspect(source);
   const result = await refs.compileProgramRefs({ source,
-    bindings: sites.map(s => ({ fingerprint: s.fingerprint, role: s.role, targetThingId: 'target' })),
+    bindings: bindingSet(source, sites),
     pathByThingId: { target: 'World/New' } });
   const executed = run(result.source);
   assert.equal(executed.ok, true, JSON.stringify(executed));
@@ -144,4 +148,67 @@ test('site fingerprints survive readable path normalization including repeated c
   const next = await inspect(normalized.source);
   assert.equal(new Set(sites.map(s => s.fingerprint)).size, 4);
   assert.deepEqual(next.sites.map(s => s.fingerprint), sites.map(s => s.fingerprint));
+});
+
+test('a trailing comma in ref still yields a string in both compiler and worker', async () => {
+  const source = 'message({"text":ref("Old", # keep this comment\r\n)})';
+  const { sites } = await inspect(source);
+  const bindings = bindingSet(source, sites);
+  const compiled = await refs.compileProgramRefs({ source, bindings, pathByThingId: { target: 'World/New' } });
+  const executed = run(compiled.source);
+  assert.equal(executed.ok, true, JSON.stringify(executed));
+  assert.equal(executed.messages[0].text, 'World/New');
+  assert.ok(compiled.source.includes('# keep this comment\r\n'));
+  const direct = run(source, { program: { ref: 'program', path: 'Program', detail: source, refBindings: bindings },
+    pathByThingId: { target: 'World/New' } });
+  assert.equal(direct.ok, true, JSON.stringify(direct));
+  assert.equal(direct.messages[0].text, 'World/New');
+});
+
+test('worker projects bound command paths for both main and nested Programs', async () => {
+  for (const nested of [false, true]) {
+    const command = 'transform({"thing.mov.OldDestination":"OldTarget"})';
+    const detail = nested ? `def main(arguments):\n    ${command}` : command;
+    const { sites } = await inspect(detail);
+    const program = { ref: 'command-child', path: 'Program', name: 'Program', types: ['program'], detail,
+      refBindings: bindingSet(detail, sites, s => s.selector === 'OldDestination' ? 'destination' : 'target') };
+    const result = nested
+      ? run('use_program({"name":"Program", "arguments":{}})', { world: [program],
+        pathByThingId: { target: 'World/NewTarget', destination: 'World/NewDestination' } })
+      : run(detail, { program, pathByThingId: { target: 'World/NewTarget', destination: 'World/NewDestination' } });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(result.transforms, [{ 'thing.mov.World/NewDestination': 'World/NewTarget' }]);
+  }
+});
+
+test('command execution without its binding fails closed before producing effects', () => {
+  const result = run('transform({"thing.mov.OldDestination":"OldTarget"})');
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'PROGRAM_REF_BINDING_MISSING');
+  assert.equal(result.transforms, undefined);
+});
+
+test('binding provenance is mandatory in both JS and worker, independent of analysis hash', async () => {
+  const source = 'message({"text":ref("Old")})';
+  const { sites, sourceHash } = await inspect(source);
+  const unversioned = bindingSet(source, sites).sites;
+  await assert.rejects(refs.compileProgramRefs({ source, bindings: unversioned, sourceHash, referenceSites: sites,
+    pathByThingId: { target: 'World/New' } }), { code: 'PROGRAM_REF_SOURCE_MISMATCH' });
+  const direct = run(source, { program: { ref: 'program', path: 'Program', detail: source, refBindings: unversioned },
+    pathByThingId: { target: 'World/New' } });
+  assert.equal(direct.ok, false);
+  assert.equal(direct.error.code, 'PROGRAM_REF_SOURCE_MISMATCH');
+});
+
+test('old source bindings cannot be reused by a new ref at the same AST position', async () => {
+  const source = 'message({"text":ref("Old")})';
+  const { sites } = await inspect(source);
+  const bindings = bindingSet(source, sites);
+  const edited = 'message({"text":ref("Other")})';
+  await assert.rejects(refs.compileProgramRefs({ source: edited, bindings,
+    pathByThingId: { target: 'World/New' } }), { code: 'PROGRAM_REF_SOURCE_MISMATCH' });
+  const direct = run(edited, { program: { ref: 'program', path: 'Program', detail: edited, refBindings: bindings },
+    pathByThingId: { target: 'World/New' } });
+  assert.equal(direct.ok, false);
+  assert.equal(direct.error.code, 'PROGRAM_REF_SOURCE_MISMATCH');
 });

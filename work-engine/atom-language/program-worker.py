@@ -714,6 +714,11 @@ def inspect_program_references(source, filename, tree=None):
                     if token["startByte"] >= name_end and token["text"] == "(":
                         break
                     marker_tokens.append({key: token[key] for key in ("startByte", "endByte")})
+                # A Call's trailing comma is syntax, not a tuple in the projected value.
+                call_end = offsets[call.end_lineno - 1] + call.end_col_offset
+                marker_tokens.extend({key: token[key] for key in ("startByte", "endByte")}
+                                     for token in syntax_tokens
+                                     if token["text"] == "," and end <= token["startByte"] < call_end)
             sites.append({
                 "kind": "ref" if call is not None else "command",
                 "role": role,
@@ -796,16 +801,19 @@ def inspect_program_references(source, filename, tree=None):
     }
 
 
-def project_ref_tree(tree, sites, bindings=None, path_by_thing_id=None, validate_only=False):
+def project_ref_tree(tree, analysis, bindings=None, path_by_thing_id=None, validate_only=False):
     """Compile 引述 on an AST copy; stored Situation and its analysis stay immutable."""
+    if not validate_only and bindings is not None and (
+            not isinstance(bindings, dict) or bindings.get("sourceHash") != analysis["sourceHash"]):
+        raise EngineCallError("PROGRAM_REF_SOURCE_MISMATCH", "Program 引述 bindings do not belong to this source")
+    bound_sites = bindings.get("sites", []) if isinstance(bindings, dict) else []
     replacements = {}
-    for site in sites:
-        if site["kind"] != "ref":
-            continue
+    command_literals = {}
+    for site in analysis["sites"]:
         if validate_only:
             value = site["selector"]
         else:
-            matches = [binding for binding in (bindings or [])
+            matches = [binding for binding in bound_sites
                        if binding.get("fingerprint") == site["fingerprint"]
                        and binding.get("role") == site["role"]]
             if len(matches) != 1:
@@ -813,9 +821,27 @@ def project_ref_tree(tree, sites, bindings=None, path_by_thing_id=None, validate
             value = (path_by_thing_id or {}).get(matches[0].get("targetThingId"))
             if not isinstance(value, str) or not value:
                 raise EngineCallError("PROGRAM_REF_TARGET_MISSING", "Program 引述 target is missing")
-        replacements[(site["line"], site["columnBytes"])] = value
+        key = (site["line"], site["columnBytes"])
+        if site["kind"] == "ref":
+            replacements[key] = value
+        else:
+            literal = command_literals.setdefault(key, {
+                "value": site.get("literalValue", site["selector"]), "changes": []})
+            literal["changes"].append((site.get("selectorStart", 0),
+                                       site.get("selectorEnd", len(literal["value"])), value))
+    for key, literal in command_literals.items():
+        value = literal["value"]
+        for start, end, replacement in sorted(literal["changes"], reverse=True):
+            value = value[:start] + replacement + value[end:]
+        command_literals[key] = value
 
     class Project(ast.NodeTransformer):
+        def visit_Constant(self, node):
+            key = (node.lineno, node.col_offset)
+            if key in command_literals:
+                return ast.copy_location(ast.Constant(command_literals[key]), node)
+            return node
+
         def visit_Call(self, node):
             if (isinstance(node.func, ast.Name) and node.func.id == "ref"
                     and len(node.args) == 1):
@@ -1233,8 +1259,8 @@ def main():
         target_tree = validate_program(
             target["detail"], target["path"], request.get("allowedFunctions")
         )
-        target_sites = inspect_program_references(target["detail"], target["path"], target_tree)["sites"]
-        target_tree = project_ref_tree(target_tree, target_sites, target.get("refBindings"), request.get("pathByThingId"))
+        target_analysis = inspect_program_references(target["detail"], target["path"], target_tree)
+        target_tree = project_ref_tree(target_tree, target_analysis, target.get("refBindings"), request.get("pathByThingId"))
         child_namespace = dict(namespace)
         child_namespace["use_program"] = use_program
         program_stack.append(target["ref"])
@@ -1953,8 +1979,8 @@ def main():
         target_tree = validate_program(
             target["detail"], target["path"], request.get("allowedFunctions")
         )
-        target_sites = inspect_program_references(target["detail"], target["path"], target_tree)["sites"]
-        target_tree = project_ref_tree(target_tree, target_sites, target.get("refBindings"), request.get("pathByThingId"))
+        target_analysis = inspect_program_references(target["detail"], target["path"], target_tree)
+        target_tree = project_ref_tree(target_tree, target_analysis, target.get("refBindings"), request.get("pathByThingId"))
         child_namespace = dict(namespace)
         child_namespace["use_program"] = use_program
         program_stack.append(target["ref"])
@@ -1984,7 +2010,7 @@ def main():
         request["program"]["detail"], request["program"]["path"], program_tree
     )
     projected_tree = project_ref_tree(
-        program_tree, references["sites"], request["program"].get("refBindings"),
+        program_tree, references, request["program"].get("refBindings"),
         request.get("pathByThingId"), validate_only=request.get("validateOnly") is True
     )
     trigger_contract = extract_trigger_contract(projected_tree)
