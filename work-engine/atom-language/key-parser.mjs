@@ -5,9 +5,10 @@ import {
   validateStrutTypes
 } from './graph-schema.mjs';
 import { createActionRegistry, createMatcherRegistry } from './registry.mjs';
+import { parseShortThingId } from './thing-id-allocator.mjs';
 
 const LEFT_ENGINEERING_SYMBOLS = new Set(['@', '&', '$', '~']);
-const THING_ID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
+const LEGACY_THING_ID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
 const DEFAULT_MATCHER_REGISTRY = createMatcherRegistry();
 const DEFAULT_ACTION_REGISTRY = createActionRegistry();
 
@@ -176,26 +177,38 @@ export function parseAtomKey(rawKey, options = {}) {
     ));
   }
   if (identitySections.length) {
-    const match = identitySections[0].raw.match(/^id=([A-Za-z0-9_-]{22})$/u);
+    const identityText = identitySections[0].raw.match(/^id=(.*)$/u)?.[1] ?? null;
     if (baseKey !== 'thing') {
       errors.push(diagnostic(
         'THING_IDENTITY_AXIS_REQUIRED',
         '内核身份只能附着在 thing 轴',
         { rawKey, baseKey }
       ));
-    } else if (!match || !THING_ID_PATTERN.test(match[1])) {
-      errors.push(diagnostic(
-        'INVALID_THING_IDENTITY',
-        'Thing 内核身份格式无效',
-        { rawKey }
-      ));
     } else {
-      identity = match[1];
       if (options.allowInternalIdentity === false) {
         errors.push(diagnostic(
           'KERNEL_IDENTITY_INPUT_FORBIDDEN',
           'Thing 内核身份由内核签发，外部请求不得提供或修改',
           { rawKey }
+        ));
+      }
+      const identityContract = options.identityContract ?? 'short';
+      try {
+        if (identityContract === 'legacy-22-migration') {
+          if (!identityText || !LEGACY_THING_ID_PATTERN.test(identityText)) {
+            throw new Error('legacy identity is not a 22-character base64url value');
+          }
+          identity = identityText;
+        } else if (identityContract === 'short') {
+          identity = parseShortThingId(identityText).id;
+        } else {
+          throw new Error(`unknown identity contract: ${identityContract}`);
+        }
+      } catch {
+        errors.push(diagnostic(
+          'INVALID_THING_IDENTITY',
+          'Thing 内核身份格式无效',
+          { rawKey, identityContract }
         ));
       }
     }

@@ -17,7 +17,6 @@ import {
 } from '../work-engine/atom-language/index.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import {
-  createAtom,
   replaceStoredField,
   storedField
 } from '../work-engine/atom-language/slot-graph-semantics.mjs';
@@ -256,9 +255,9 @@ test('9. the left side of # is split and dispatched by @, $, and ~', () => {
   assert.equal(parsed.value, '窗口一');
 });
 
-test('9a. a trusted persisted Thing key keeps one canonical kernel identity', () => {
+test('9a. migration parsing keeps the legacy kernel identity explicit', () => {
   const rawKey = 'thing@program&id=AbCdEfGhIjKlMnOpQrStUv#石器工坊窗口';
-  const parsed = parseAtomKey(rawKey);
+  const parsed = parseAtomKey(rawKey, { identityContract: 'legacy-22-migration' });
   assert.deepEqual(parsed.errors, []);
   assert.equal(parsed.identity, 'AbCdEfGhIjKlMnOpQrStUv');
   assert.equal(parsed.persistentKey, rawKey);
@@ -267,22 +266,22 @@ test('9a. a trusted persisted Thing key keeps one canonical kernel identity', ()
 test('9b. external Atom requests cannot supply a kernel Thing identity', () => {
   for (const command of ['explore', 'transform']) {
     const result = createAtomLanguageReceiver().receive(
-      `${command} {"thing&id=AbCdEfGhIjKlMnOpQrStUv":"石器工坊"}`
+      `${command} {"thing&id=00A":"石器工坊"}`
     );
     assert.equal(result.ok, false);
     assert.equal(result.errors[0]?.code, 'KERNEL_IDENTITY_INPUT_FORBIDDEN');
   }
   const nestedEndpoint = createAtomLanguageReceiver().receive(
-    'transform {"thing":"来源","strut":[{"if@current":true,"then":[{"thing&id=AbCdEfGhIjKlMnOpQrStUv":"目标"}]}]}'
+    'transform {"thing":"来源","strut":[{"if@current":true,"then":[{"thing&id=00A":"目标"}]}]}'
   );
   assert.equal(nestedEndpoint.ok, false);
   assert.equal(nestedEndpoint.errors[0]?.code, 'KERNEL_IDENTITY_INPUT_FORBIDDEN');
 });
 
-test('9c. central Thing creation issues one identity and field replacement preserves it', () => {
-  const atom = createAtom({ thing: '石器工坊', types: ['program'], description: '窗口' });
+test('9c. short Thing identity survives field replacement', () => {
+  const atom = { 'thing@program&id=00A#窗口': '石器工坊' };
   const first = storedField(atom, 'thing').parsed.identity;
-  assert.match(first, /^[A-Za-z0-9_-]{22}$/u);
+  assert.equal(first, '00A');
   replaceStoredField(atom, 'thing', '石器工坊新版');
   const replaced = storedField(atom, 'thing');
   assert.equal(replaced.parsed.identity, first);
