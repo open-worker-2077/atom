@@ -243,29 +243,21 @@
   }
 
   function contractShellToLocalEdges(nodes, center, initialRadius, ownerPath, nestedCarrierByNodeId, options) {
-    let radius = initialRadius;
-    let layout = [];
-    for (let pass = 0; pass < 12; pass += 1) {
-      layout = transformedNodes(
-        nodes,
-        center,
-        radius,
-        ownerPath,
-        nestedCarrierByNodeId,
-        options
-      );
-      if (options.compact === true) recenterCompactLayout(layout, center, options.spatial3d === true);
-      if (options.compact !== true) break;
-      // The measured radius is the maximum of every real node edge plus x.
-      // Edges already at x hold the shell; every other direction can shrink.
-      const contactedRadius = measuredClusterRadius(layout, options);
-      if (contactedRadius >= radius - 0.0005) {
-        radius = contactedRadius;
-        break;
-      }
-      radius = contactedRadius;
-    }
-    return { layout, radius };
+    const layout = transformedNodes(
+      nodes,
+      center,
+      initialRadius,
+      ownerPath,
+      nestedCarrierByNodeId,
+      options
+    );
+    if (options.compact !== true) return { layout, radius: initialRadius };
+    recenterCompactLayout(layout, center, options.spatial3d === true);
+    // Compact packing is unconstrained by the provisional shell radius: it
+    // resolves real carrier contacts first, then measures the exact shell.
+    // Re-running the same layout with that measured radius is an identical
+    // full solve and cannot contract it further.
+    return { layout, radius: measuredClusterRadius(layout, options) };
   }
 
   function sceneBoundsForClusters(clusters) {
