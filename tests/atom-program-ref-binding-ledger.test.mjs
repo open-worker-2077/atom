@@ -77,6 +77,44 @@ test('Program create and update emit the normalized source binding in the same c
   assert.equal(nextBinding.sites[0].targetThingId, targetId);
 });
 
+for (const [label, clearedSource] of [['empty', ''], ['whitespace-only', ' \t ']]) {
+  test(`Program update to ${label} source replaces its prior binding with zero sites`, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), `atom-program-binding-${label}-`));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const contextFile = path.join(directory, 'atom.json');
+    const journalFile = path.join(directory, 'atom.transactions.json');
+    const projectionFile = path.join(directory, 'atom.graph.json');
+    const targetId = 'target'.padEnd(22, '_');
+    await fs.writeFile(contextFile, JSON.stringify([
+      { [`thing&id=${targetId}`]: 'World', situation: '', slot: [], strut: [] }
+    ]));
+    const runtime = { contextFile, projectionFile, programScheduler: createProgramRuntimeScheduler() };
+    const initialSource = 'def main():\n    return explore({"thing":ref("World")})';
+    const created = await executeAtomLanguage({ ...runtime, source: `transform new ${JSON.stringify({
+      'thing@program': 'Program', situation: initialSource, slot: [], strut: []
+    })}` });
+    assert.equal(created.ok, true, JSON.stringify(created.errors));
+    const createdFacts = JSON.parse(await fs.readFile(contextFile, 'utf8'));
+    const program = createdFacts.find((entry) => Object.values(entry).includes('Program'));
+    const programThingId = parseAtomKey(Object.keys(program).find((key) => key.startsWith('thing'))).identity;
+
+    const cleared = await executeAtomLanguage({ ...runtime, source: `transform ${JSON.stringify({
+      thing: 'Program', [`situation.rep.${clearedSource}`]: program.situation
+    })}` });
+    assert.equal(cleared.ok, true, JSON.stringify(cleared.errors));
+    const metadata = await createJsonTransactionJournal({ file: journalFile }).readMetadataState();
+    const delta = metadata.receipts.at(-1).receipt.result.programRefBindings;
+    assert.deepEqual(delta.removals, []);
+    assert.deepEqual(delta.replacements, [{
+      programThingId,
+      sourceHash: hash(clearedSource),
+      sites: []
+    }]);
+    assert.deepEqual(rebuildProgramRefBindings(metadata.receipts).forProgram(programThingId),
+      delta.replacements[0]);
+  });
+}
+
 test('receipt replay rebuilds immutable Program bindings by identity and applies removals', () => {
   const firstSource = 'explore({"thing":ref("World/Target")})';
   const secondSource = 'explore({"thing":ref("World/Other")})';
@@ -96,10 +134,12 @@ test('receipt replay rebuilds immutable Program bindings by identity and applies
   assert.throws(() => { snapshot.forProgram('program-id').sites[0].targetThingId = 'corrupt'; }, TypeError);
   assert.throws(() => { snapshot.programIds.push('corrupt'); }, TypeError);
 
+  const deletion = createProgramRefBindingUpdate({ removals: ['program-id'] });
   const deleted = rebuildProgramRefBindings([
     receipt('create', first),
-    receipt('delete', createProgramRefBindingUpdate({ removals: ['program-id'] }))
-  ], []);
+    receipt('delete', deletion)
+  ]);
+  assert.deepEqual(deletion, { version: 1, replacements: [], removals: ['program-id'] });
   assert.equal(deleted.forProgram('program-id'), null);
 });
 
@@ -155,7 +195,9 @@ test('disk transaction stores binding metadata once while every returned receipt
   assert.equal(deleted.result.programRefBindings, undefined);
   const afterDelete = await createJsonTransactionJournal({ file: journalFile }).readMetadataState();
   assert.equal(afterDelete.receipts.length, 2);
-  assert.equal(rebuildProgramRefBindings(afterDelete.receipts, []).forProgram('program-id'), null);
+  assert.deepEqual(afterDelete.receipts.at(-1).receipt.result.programRefBindings,
+    { version: 1, replacements: [], removals: ['program-id'] });
+  assert.equal(rebuildProgramRefBindings(afterDelete.receipts).forProgram('program-id'), null);
 });
 
 test('conflict persists neither candidate Program source nor its binding change', async (t) => {
@@ -184,7 +226,10 @@ test('conflict persists neither candidate Program source nor its binding change'
 
   assert.deepEqual((await persistence.readCommittedSnapshot()).facts, winningFacts);
   const metadata = await createJsonTransactionJournal({ file: journalFile }).readMetadataState();
-  assert.equal(rebuildProgramRefBindings(metadata.receipts, []).forProgram('program-id'), null);
+  assert.equal(metadata.receipts.some(({ receipt: stored }) => (
+    stored.result.programRefBindings?.replacements.some(({ programThingId }) => programThingId === 'program-id')
+  )), false);
+  assert.equal(rebuildProgramRefBindings(metadata.receipts).forProgram('program-id'), null);
 });
 
 test('journal prepare failure persists neither candidate Program source nor binding metadata', async (t) => {

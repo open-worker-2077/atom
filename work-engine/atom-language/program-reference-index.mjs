@@ -26,7 +26,7 @@ function bindProgram({ programThingId, programPath, sourceHash }, binding, pathB
     const sites = binding.sites.map((site) => {
       const exactPath = pathByThingId.get(site.targetThingId);
       if (!exactPath) {
-        throw Object.assign(new Error(`Program reference target is missing: ${site.targetThingId}`), {
+        throw Object.assign(new Error('Program reference target is missing'), {
           code: 'PROGRAM_REF_TARGET_MISSING',
           details: { fingerprint: site.fingerprint, role: site.role }
         });

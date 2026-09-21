@@ -6,6 +6,7 @@ import {
   rebuildProgramRefBindings
 } from '../work-engine/atom-language/program-ref-binding-ledger.mjs';
 import { createProgramReferenceIndex } from '../work-engine/atom-language/program-reference-index.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 
 function atom(id, name, source = '', children = [], type = '') {
@@ -75,6 +76,40 @@ test('missing binding, source mismatch and missing target quarantine only their 
     { programThingId: staleId, code: 'PROGRAM_REF_SOURCE_MISMATCH' },
     { programThingId: goneId, code: 'PROGRAM_REF_TARGET_MISSING' }
   ]);
+});
+
+test('missing-target scheduler exception and warning expose no hidden Thing identity', async () => {
+  const source = 'explore({"thing":ref("World/Target")})';
+  const programId = 'program-private'.padEnd(22, '_');
+  const missingTargetId = 'target-private'.padEnd(22, '_');
+  const world = [atom('world_________________', 'World', '', [
+    atom(programId, 'MissingTarget', source, [], 'program')
+  ])];
+  const bindings = rebuildProgramRefBindings(receipts(
+    binding(programId, source, missingTargetId)
+  ));
+  const index = await createProgramReferenceIndex(world, { bindings });
+  const scheduler = createProgramRuntimeScheduler();
+  const records = scheduler.prepareRuntimeRecords(world);
+  scheduler.programReferenceIndex = index;
+
+  assert.throws(() => scheduler.activeProgramRecords(records, 'MissingTarget'), (error) => {
+    assert.equal(error.code, 'PROGRAM_REF_TARGET_MISSING');
+    assert.equal(error.programPath, 'World/MissingTarget');
+    assert.equal(error.details.fingerprint, 'ref:module.body[0]:0');
+    assert.equal(error.details.role, 'ref');
+    const exposed = JSON.stringify({ message: error.message, ...error });
+    assert.equal(exposed.includes(programId), false);
+    assert.equal(exposed.includes(missingTargetId), false);
+    return true;
+  });
+
+  const withWarnings = await scheduler.overlayRequestDrivenLocks({ records, locks: [] });
+  assert.equal(withWarnings.runtimeWarnings[0].code, 'PROGRAM_REF_TARGET_MISSING');
+  assert.equal(withWarnings.runtimeWarnings[0].programPath, 'World/MissingTarget');
+  const exposed = JSON.stringify(withWarnings.runtimeWarnings);
+  assert.equal(exposed.includes(programId), false);
+  assert.equal(exposed.includes(missingTargetId), false);
 });
 
 test('only explicitly typed default backup Programs are excluded from reference inspection', async () => {

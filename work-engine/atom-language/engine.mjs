@@ -523,14 +523,18 @@ async function validatePrograms(atoms, contextFile, previousAtoms = null, progra
         match.atom[oneStoredField(match.atom, 'situation')?.rawKey ?? 'situation'] = program.source;
       }
     }
-    const programIds = (facts) => new Set(walkAtoms(facts).flatMap((match) => {
+    const programEntries = (facts) => walkAtoms(facts).flatMap((match) => {
       const thing = oneStoredField(match.atom, 'thing');
       return thing?.parsed.types.some((type) => type.raw === 'program') && thing.parsed.identity
-        ? [thing.parsed.identity]
+        ? [{ programThingId: thing.parsed.identity,
+          source: oneStoredField(match.atom, 'situation')?.value ?? '' }]
         : [];
-    }));
-    const beforeIds = programIds(previousAtoms ?? []);
-    const afterIds = programIds(nextAtoms);
+    });
+    const beforePrograms = new Map(programEntries(previousAtoms ?? [])
+      .map((program) => [program.programThingId, program]));
+    const afterPrograms = programEntries(nextAtoms);
+    const beforeIds = new Set(beforePrograms.keys());
+    const afterIds = new Set(afterPrograms.map(({ programThingId }) => programThingId));
     const replacements = normalized.map((program) => {
       const match = exactMatchAtPath(nextAtoms, program.path);
       const thing = oneStoredField(match?.atom, 'thing');
@@ -549,6 +553,16 @@ async function validatePrograms(atoms, contextFile, previousAtoms = null, progra
         }))
       };
     });
+    const replacedIds = new Set(replacements.map(({ programThingId }) => programThingId));
+    for (const program of afterPrograms) {
+      if (replacedIds.has(program.programThingId) || program.source.trim()
+        || beforePrograms.get(program.programThingId)?.source === program.source) continue;
+      replacements.push({
+        programThingId: program.programThingId,
+        sourceHash: `sha256:${crypto.createHash('sha256').update(program.source).digest('hex')}`,
+        sites: []
+      });
+    }
     const programRefBindings = createProgramRefBindingUpdate({
       replacements,
       removals: [...beforeIds].filter((id) => !afterIds.has(id))

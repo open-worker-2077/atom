@@ -2044,13 +2044,29 @@ export class ProgramRuntimeScheduler {
     });
   }
 
+  referenceWarnings(records) {
+    const byId = new Map(records.map(record => [record.ref, record]));
+    return this.referenceFailures(records).map((failure) => ({
+      code: failure.code,
+      message: failure.message,
+      details: structuredClone(failure.details ?? {}),
+      ...(byId.get(failure.programThingId)?.path
+        ? { programPath: byId.get(failure.programThingId).path }
+        : {})
+    }));
+  }
+
   activeProgramRecords(records, selector = null) {
     const failures = this.referenceFailures(records);
     const excluded = new Set(failures.map(failure => failure.programThingId));
     const programs = programRecords(records, selector);
     if (selector) {
       const rejected = failures.find(failure => failure.programThingId === programs[0]?.ref);
-      if (rejected) throw Object.assign(new Error(rejected.message), rejected, { programPath: programs[0].path });
+      if (rejected) {
+        const warning = this.referenceWarnings(records)
+          .find(({ programPath }) => programPath === programs[0].path);
+        throw Object.assign(new Error(warning.message), warning);
+      }
     }
     return programs.filter(program => !excluded.has(program.ref));
   }
@@ -2161,7 +2177,7 @@ export class ProgramRuntimeScheduler {
     const active = await this.activeRequestDrivenLocks();
     return {
       ...value,
-      runtimeWarnings: [...(value.runtimeWarnings ?? []), ...this.referenceFailures(value.records ?? this.latestRecords ?? [])],
+      runtimeWarnings: [...(value.runtimeWarnings ?? []), ...this.referenceWarnings(value.records ?? this.latestRecords ?? [])],
       locks: mergeDerivedLocks(value.locks ?? [], active),
       agentSecurity: (() => {
         const scopePath = agentScopePath(agentOrigin);
@@ -3720,7 +3736,7 @@ export class ProgramRuntimeScheduler {
     const contextDependent = requestsDependOnAgent(uniqueRequests)
       || results.some((result) => (result.jumps?.length ?? 0) > 0);
     const runtimeWarnings = [
-      ...this.referenceFailures(records),
+      ...this.referenceWarnings(records),
       ...(this.projectionLoadWarning ? [this.projectionLoadWarning] : []),
       ...diagnosticWarnings
     ];
