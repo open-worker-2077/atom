@@ -61,6 +61,24 @@ test('Transform .ren. keeps the new name as text while binding its source', asyn
   assert.equal(normalized.referenceSites.length, 1);
 });
 
+test('Transform .mov.世界之外 preserves the virtual destination and binds only its source Thing', async (t) => {
+  const source = 'def main():\n    transform({"thing.mov.世界之外":"Target"})';
+  const [analysis] = await createProgramRuntimeScheduler().validateProgramSources([atom('Program', source, [], 'program')]);
+  const normalized = references.normalizeProgramReferences({ source, ...analysis,
+    worldBindings: [{ path: 'Domain/Target', id: 'target-id' }] });
+  assert.equal(normalized.source, 'def main():\n    transform({"thing.mov.世界之外":"Domain/Target"})');
+  assert.deepEqual(normalized.referenceSites.map(({ role, targetThingId }) => ({ role, targetThingId })),
+    [{ role: 'transform.thing', targetThingId: 'target-id' }]);
+  assert.throws(() => references.normalizeProgramReferences({ source, ...analysis, worldBindings: [] }),
+    { code: 'PROGRAM_REFERENCE_NOT_FOUND' });
+  const files = await fixture(t, [atom('Domain', '', [atom('Target')])]);
+  const written = await executeAtomLanguage({ ...files,
+    source: `transform new ${JSON.stringify(atom('Program', source, [], 'program'))}` });
+  assert.equal(written.ok, true, JSON.stringify(written.errors));
+  const persisted = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  assert.equal(persisted.find((item) => Object.values(item).includes('Program')).situation, normalized.source);
+});
+
 test('normalization preserves comments and whitespace between concatenated string tokens', async () => {
   const source = 'explore({"thing": ("Tar" # keep me\r\n    "get")})';
   const [analysis] = await createProgramRuntimeScheduler().validateProgramSources([atom('Program', source, [], 'program')]);

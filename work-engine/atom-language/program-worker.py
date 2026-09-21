@@ -765,6 +765,9 @@ def inspect_program_references(source, filename, tree=None):
                 add_site("transform.thing", value)
                 for index, marker in enumerate(markers):
                     end = markers[index + 1].start() if index + 1 < len(markers) else len(key.value)
+                    # Moving to the virtual root does not reference a stored Thing.
+                    if marker.group(1) == "mov" and key.value[marker.end():end] == "世界之外":
+                        continue
                     if marker.group(1) in {"mov", "cpy", "lnk", "run"} and end > marker.end():
                         add_site(f"transform.{marker.group(1)}.parameter", key, marker.end(), end)
             elif name == "lock" and key.value == "targets" and isinstance(value, ast.Dict):
