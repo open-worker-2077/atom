@@ -12,9 +12,6 @@ export function normalizeProgramReferences({ source, sourceHash, referenceSites,
       code: 'PROGRAM_REFERENCE_SOURCE_MISMATCH'
     });
   }
-  const encoded = Buffer.from(source, 'utf8');
-  const patches = [];
-  const literals = new Map();
   const boundSites = referenceSites.map((site) => {
     const rooted = site.selector.startsWith('世界之外/');
     const selector = rooted ? site.selector.slice('世界之外/'.length) : site.selector;
@@ -30,6 +27,17 @@ export function normalizeProgramReferences({ source, sourceHash, referenceSites,
     const target = matches[0];
     const needsRoot = rooted || worldBindings.some(({ path }) => path !== target.path && path.endsWith(`/${target.path}`));
     const exactPath = needsRoot ? `世界之外/${target.path}` : target.path;
+    return { ...site, targetThingId: target.id, exactPath };
+  });
+  return { source: patchProgramSites(source, boundSites), sourceHash, referenceSites: boundSites };
+}
+
+function patchProgramSites(source, sites, { compile = false } = {}) {
+  const encoded = Buffer.from(source, 'utf8');
+  const patches = [];
+  const literals = new Map();
+  for (const site of sites) {
+    const exactPath = site.exactPath;
     const { startByte, endByte } = site;
     if (!Number.isInteger(startByte) || !Number.isInteger(endByte)
       || startByte < 0 || endByte <= startByte || endByte > encoded.length) {
@@ -46,8 +54,11 @@ export function normalizeProgramReferences({ source, sourceHash, referenceSites,
         end: site.selectorEnd ?? Array.from(literal.value).length, replacement: exactPath });
       literals.set(key, literal);
     }
-    return { ...site, targetThingId: target.id, exactPath };
-  });
+    if (compile && site.kind === 'ref') {
+      // Remove the marker expression tokens, retaining call parentheses and every comment.
+      for (const token of site.markerTokens) patches.push({ ...token, replacement: Buffer.alloc(0) });
+    }
+  }
   for (const literal of literals.values()) {
     const characters = Array.from(literal.value);
     for (const change of literal.changes.sort((a, b) => b.start - a.start)) {
@@ -66,7 +77,7 @@ export function normalizeProgramReferences({ source, sourceHash, referenceSites,
   for (const patch of patches.sort((a, b) => b.startByte - a.startByte)) {
     normalized = Buffer.concat([normalized.subarray(0, patch.startByte), patch.replacement, normalized.subarray(patch.endByte)]);
   }
-  return { source: normalized.toString('utf8'), sourceHash, referenceSites: boundSites };
+  return normalized.toString('utf8');
 }
 
 function runReferenceWorker(request, { python = 'python', timeoutMs = 10_000 } = {}) {
@@ -129,3 +140,23 @@ export async function rewriteProgramReferenceBatch({
   }, { python, timeoutMs });
   return result.programs;
 }
+
+// Bindings are kernel metadata supplied by the caller; selectors never resolve identities here.
+export async function compileProgramRefs({ source, bindings, pathByThingId, sourceHash, referenceSites }) {
+  const inspected = referenceSites ? { sourceHash, sites: referenceSites } : await inspectProgramReferenceSites({ source });
+  const actualHash = `sha256:${createHash('sha256').update(source).digest('hex')}`;
+  if ((sourceHash && sourceHash !== actualHash) || inspected.sourceHash !== actualHash) {
+    throw Object.assign(new Error('Program 引述 source does not match its binding analysis'), { code: 'PROGRAM_REF_SOURCE_MISMATCH' });
+  }
+  const sites = inspected.sites.map((site) => {
+    const matches = (bindings ?? []).filter(binding => binding.fingerprint === site.fingerprint && binding.role === site.role);
+    if (matches.length !== 1) throw Object.assign(new Error('Program 引述 binding is missing'), { code: 'PROGRAM_REF_BINDING_MISSING' });
+    const targetThingId = matches[0].targetThingId;
+    const exactPath = pathByThingId instanceof Map ? pathByThingId.get(targetThingId) : pathByThingId?.[targetThingId];
+    if (typeof exactPath !== 'string' || !exactPath) throw Object.assign(new Error('Program 引述 target is missing'), { code: 'PROGRAM_REF_TARGET_MISSING' });
+    return { ...site, exactPath };
+  });
+  return { source: patchProgramSites(source, sites, { compile: true }), sourceHash: actualHash };
+}
+
+export const inspectProgramRefSites = inspectProgramReferenceSites;

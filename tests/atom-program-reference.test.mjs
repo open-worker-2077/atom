@@ -6,29 +6,29 @@ import {
   rewriteProgramReferenceBatch
 } from '../work-engine/atom-language/program-reference-runtime.mjs';
 
-test('Program reference inspection finds only literal kernel Explore selectors', async () => {
+test('Program reference inspection finds only explicit ref selectors', async () => {
   const source = [
     '# explore({"thing":"注释不是引用"})',
     'message({"level":"info","text":"目标"})',
     'ordinary = {"thing":"目标"}',
     'def later():',
-    '    return explore({"thing":"域/目标"})',
+    '    return explore({"thing":ref("域/目标")})',
     'dynamic = explore({"thing": ordinary["thing"]})'
   ].join('\n');
 
   const inspected = await inspectProgramReferenceSites({ source, programPath: '测试Program' });
 
   assert.match(inspected.sourceHash, /^sha256:[0-9a-f]{64}$/u);
-  assert.deepEqual(inspected.sites, [{
-    role: 'explore.thing',
+  assert.deepEqual(inspected.sites.map(({ kind, fingerprint, callStartByte, callEndByte, callAstPath, markerTokens, ...site }) => site), [{
+    role: 'ref',
     selector: '域/目标',
     line: 5,
-    columnBytes: 28,
+    columnBytes: 32,
     endLine: 5,
-    endColumnBytes: 40,
-    startByte: Buffer.byteLength(source.split('\n').slice(0, 4).join('\n') + '\n') + 28,
-    endByte: Buffer.byteLength(source.split('\n').slice(0, 4).join('\n') + '\n') + 40,
-    astPath: 'module.body[2].body[0].value.args[0].values[0]'
+    endColumnBytes: 44,
+    startByte: Buffer.byteLength(source.split('\n').slice(0, 4).join('\n') + '\n') + 32,
+    endByte: Buffer.byteLength(source.split('\n').slice(0, 4).join('\n') + '\n') + 44,
+    astPath: 'module.body[2].body[0].value.args[0].values[0].args[0]'
   }]);
 });
 
@@ -47,10 +47,10 @@ test('Program reference rewrite changes kernel reference sites without touching 
     '# explore({"thing":"域/旧名"})',
     'message({"text":"域/旧名"})',
     'ordinary = {"thing":"域/旧名"}',
-    'explore({"thing":"域/旧名"})',
-    'trigger("transform", {"nodes":["域/旧名"]}, main)',
-    'use_program({"name":"域/旧名/执行", "arguments":{}})',
-    'lock({"targets":{"paths":["域/旧名"]}})',
+    'explore({"thing":ref("域/旧名")})',
+    'trigger("transform", {"nodes":[ref("域/旧名")]}, main)',
+    'use_program({"name":ref("域/旧名/执行"), "arguments":{}})',
+    'lock({"targets":{"paths":[ref("域/旧名")]}})',
     'transform({"thing":"域/旧名", "situation.rep.新":"旧"})'
   ].join('\n');
   const [rewritten] = await rewriteProgramReferenceBatch({
@@ -70,16 +70,16 @@ test('Program reference rewrite changes kernel reference sites without touching 
     '# explore({"thing":"域/旧名"})',
     'message({"text":"域/旧名"})',
     'ordinary = {"thing":"域/旧名"}',
-    'explore({"thing":"域/新名"})',
-    'trigger("transform", {"nodes":["域/新名"]}, main)',
-    'use_program({"name":"域/新名/执行", "arguments":{}})',
-    'lock({"targets":{"paths":["域/新名"]}})',
+    'explore({"thing":ref("域/新名")})',
+    'trigger("transform", {"nodes":[ref("域/新名")]}, main)',
+    'use_program({"name":ref("域/新名/执行"), "arguments":{}})',
+    'lock({"targets":{"paths":[ref("域/新名")]}})',
     'transform({"thing":"域/新名", "situation.rep.新":"旧"})'
   ].join('\n'));
 });
 
 test('an ambiguous semantic selector is not rebound to a different Thing identity', async () => {
-  const source = 'explore({"thing":"目标"})';
+  const source = 'explore({"thing":ref("目标")})';
   const [rewritten] = await rewriteProgramReferenceBatch({
     programs: [{ path: '测试Program', source }],
     aliases: [{ sourcePath: '目标', resultPath: '甲/新目标', rootSourcePath: '甲/目标' }],
@@ -95,7 +95,7 @@ test('an ambiguous semantic selector is not rebound to a different Thing identit
 test('reference relocation preserves operation keys, concatenation comments, and creation names', async () => {
   const source = [
     'transform({"thing.mov." "Domain/Old":"Domain/Target"})',
-    'explore({"thing": ("Domain/" # keep me\r\n    "Old")})',
+    'explore({"thing": ref("Domain/" # keep me\r\n    "Old")})',
     'transform({"thing":"Domain/Old","situation":"","slot":[],"strut":[]})',
     'transform({"thing.ren.Domain/Old":"Domain/Target"})'
   ].join('\n');

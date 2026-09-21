@@ -1,4 +1,5 @@
 import ast
+import copy
 import hashlib
 import importlib.util
 import io
@@ -219,6 +220,7 @@ ALLOWED_NODE_TYPES = (
 )
 
 ALLOWED_FUNCTIONS = {
+    "ref",  # Compile-time 引述 syntax, never an authorized runtime function.
     "all", "any", "bool", "dict", "enumerate", "filter", "float",
     "int", "len", "list", "map", "max", "min", "range", "set",
     "sorted", "str", "sum", "tuple", "zip",
@@ -631,12 +633,16 @@ def inspect_program_references(source, filename, tree=None):
     offsets = [0] + [match.end() for match in re.finditer(b"\r\n|\r|\n", source.encode("utf-8"))]
     source_lines = re.split(r"\r\n|\r|\n", source)
     string_tokens = []
+    syntax_tokens = []
     for token in tokenize.generate_tokens(io.StringIO(source, newline=None).readline):
-        if token.type == tokenize.STRING:
-            string_tokens.append({
+        if token.type in {tokenize.STRING, tokenize.NAME, tokenize.OP}:
+            position = {
                 "startByte": offsets[token.start[0] - 1] + len(source_lines[token.start[0] - 1][:token.start[1]].encode("utf-8")),
                 "endByte": offsets[token.end[0] - 1] + len(source_lines[token.end[0] - 1][:token.end[1]].encode("utf-8")),
-            })
+            }
+            syntax_tokens.append({**position, "text": token.string})
+            if token.type == tokenize.STRING:
+                string_tokens.append(position)
     paths = {}
     calls = []
     enclosing_iterators = {}
@@ -653,6 +659,10 @@ def inspect_program_references(source, filename, tree=None):
                 names.add(child.id)
             if isinstance(child, ast.ExceptHandler) and child.name:
                 names.add(child.name)
+            if isinstance(child, (ast.Import, ast.ImportFrom)):
+                names.update(alias.asname or alias.name.split(".")[0] for alias in child.names)
+                if any(alias.name == "*" for alias in child.names):
+                    names.update({"ref", "transform"})
             for descendant in ast.iter_child_nodes(child):
                 collect(descendant)
         for child in node.body:
@@ -670,6 +680,8 @@ def inspect_program_references(source, filename, tree=None):
         inner_shadowed = shadowed
         if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef)):
             inner_shadowed = shadowed | local_bindings(node)
+        if isinstance(node, ast.Lambda):
+            inner_shadowed = shadowed | {arg.arg for arg in ast.walk(node.args) if isinstance(arg, ast.arg)}
         if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
             enclosing_iterators[id(node.generators[0].iter)] = shadowed
             inner_shadowed = shadowed | {
@@ -678,7 +690,7 @@ def inspect_program_references(source, filename, tree=None):
             }
         for field, value in ast.iter_fields(node):
             # Function defaults execute in the enclosing scope.
-            child_shadowed = shadowed if isinstance(node, ast.FunctionDef) and field != "body" else inner_shadowed
+            child_shadowed = shadowed if isinstance(node, (ast.FunctionDef, ast.Lambda)) and field != "body" else inner_shadowed
             if isinstance(value, ast.AST):
                 visit(value, f"{ast_path}.{field}", child_shadowed)
             elif isinstance(value, list):
@@ -687,12 +699,23 @@ def inspect_program_references(source, filename, tree=None):
                         visit(child, f"{ast_path}.{field}[{index}]", child_shadowed)
     visit(tree, "module", set())
     sites = []
-    def add_site(role, value, selector_start=None, selector_end=None):
+    def add_site(role, value, selector_start=None, selector_end=None, call=None, occurrence=0):
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
             start = offsets[value.lineno - 1] + value.col_offset
             end = offsets[value.end_lineno - 1] + value.end_col_offset
             tokens = [token for token in string_tokens if token["startByte"] >= start and token["endByte"] <= end]
+            marker_tokens = []
+            if call is not None:
+                call_start = offsets[call.lineno - 1] + call.col_offset
+                name_end = offsets[call.func.end_lineno - 1] + call.func.end_col_offset
+                for token in syntax_tokens:
+                    if token["startByte"] < call_start:
+                        continue
+                    if token["startByte"] >= name_end and token["text"] == "(":
+                        break
+                    marker_tokens.append({key: token[key] for key in ("startByte", "endByte")})
             sites.append({
+                "kind": "ref" if call is not None else "command",
                 "role": role,
                 "selector": value.value[selector_start:selector_end],
                 "line": value.lineno,
@@ -702,6 +725,11 @@ def inspect_program_references(source, filename, tree=None):
                 "startByte": start,
                 "endByte": end,
                 "astPath": paths[id(value)],
+                "fingerprint": f"{role}:{paths[id(value)]}:{occurrence}",
+                **({"callStartByte": offsets[call.lineno - 1] + call.col_offset,
+                    "callEndByte": offsets[call.end_lineno - 1] + call.end_col_offset,
+                    "markerTokens": marker_tokens,
+                    "callAstPath": paths[id(call)]} if call is not None else {}),
                 **({"literalTokens": tokens} if len(tokens) > 1 else {}),
                 **({"literalValue": value.value, "selectorStart": selector_start, "selectorEnd": selector_end}
                    if selector_start is not None else {}),
@@ -732,18 +760,11 @@ def inspect_program_references(source, filename, tree=None):
 
     for node in calls:
         name = node.func.id
-        if name == "trigger":
-            if (len(node.args) >= 2 and isinstance(node.args[0], ast.Constant)
-                    and node.args[0].value == "transform"
-                    and isinstance(node.args[1], ast.Dict)):
-                entries, _ = effective_entries(node.args[1])
-                for key, value in entries.values():
-                    if (isinstance(key, ast.Constant) and key.value == "nodes"
-                            and isinstance(value, (ast.List, ast.Tuple))):
-                        for item in value.elts:
-                            add_site("trigger.transform.nodes", item)
+        if name == "ref":
+            if len(node.args) == 1 and not node.keywords:
+                add_site("ref", node.args[0], call=node)
             continue
-        if (len(node.args) != 1 or node.keywords
+        if (name != "transform" or len(node.args) != 1 or node.keywords
                 or not isinstance(node.args[0], ast.Dict)):
             continue
         entries, uncertain = effective_entries(node.args[0])
@@ -753,11 +774,7 @@ def inspect_program_references(source, filename, tree=None):
         for key, value in entries.values():
             if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
                 continue
-            if name == "explore" and key.value == "thing":
-                add_site("explore.thing", value)
-            elif name == "use_program" and key.value == "name":
-                add_site("use_program.name", value)
-            elif name == "transform":
+            if name == "transform":
                 markers = list(command_pattern.finditer(key.value))
                 base = key.value[:markers[0].start()] if markers else key.value
                 if base_axis(base) != "thing" or creation:
@@ -769,14 +786,7 @@ def inspect_program_references(source, filename, tree=None):
                     if marker.group(1) == "mov" and key.value[marker.end():end] == "世界之外":
                         continue
                     if marker.group(1) in {"mov", "cpy", "lnk", "run"} and end > marker.end():
-                        add_site(f"transform.{marker.group(1)}.parameter", key, marker.end(), end)
-            elif name == "lock" and key.value == "targets" and isinstance(value, ast.Dict):
-                targets, _ = effective_entries(value)
-                for target_key, target_value in targets.values():
-                    if (isinstance(target_key, ast.Constant) and target_key.value == "paths"
-                            and isinstance(target_value, (ast.List, ast.Tuple))):
-                        for item in target_value.elts:
-                            add_site("lock.targets.paths", item)
+                        add_site(f"transform.{marker.group(1)}.parameter", key, marker.end(), end, occurrence=index)
     sites.sort(key=lambda item: (
         item["line"], item["columnBytes"], item["endLine"], item["endColumnBytes"]
     ))
@@ -784,6 +794,37 @@ def inspect_program_references(source, filename, tree=None):
         "sourceHash": "sha256:" + hashlib.sha256(source.encode("utf-8")).hexdigest(),
         "sites": sites,
     }
+
+
+def project_ref_tree(tree, sites, bindings=None, path_by_thing_id=None, validate_only=False):
+    """Compile 引述 on an AST copy; stored Situation and its analysis stay immutable."""
+    replacements = {}
+    for site in sites:
+        if site["kind"] != "ref":
+            continue
+        if validate_only:
+            value = site["selector"]
+        else:
+            matches = [binding for binding in (bindings or [])
+                       if binding.get("fingerprint") == site["fingerprint"]
+                       and binding.get("role") == site["role"]]
+            if len(matches) != 1:
+                raise EngineCallError("PROGRAM_REF_BINDING_MISSING", "Program 引述 binding is missing")
+            value = (path_by_thing_id or {}).get(matches[0].get("targetThingId"))
+            if not isinstance(value, str) or not value:
+                raise EngineCallError("PROGRAM_REF_TARGET_MISSING", "Program 引述 target is missing")
+        replacements[(site["line"], site["columnBytes"])] = value
+
+    class Project(ast.NodeTransformer):
+        def visit_Call(self, node):
+            if (isinstance(node.func, ast.Name) and node.func.id == "ref"
+                    and len(node.args) == 1):
+                value = node.args[0]
+                key = (value.lineno, value.col_offset)
+                if key in replacements:
+                    return ast.copy_location(ast.Constant(replacements[key]), node)
+            return self.generic_visit(node)
+    return ast.fix_missing_locations(Project().visit(copy.deepcopy(tree)))
 
 
 def exact_reference_matches(selector, world_bindings):
@@ -1192,6 +1233,8 @@ def main():
         target_tree = validate_program(
             target["detail"], target["path"], request.get("allowedFunctions")
         )
+        target_sites = inspect_program_references(target["detail"], target["path"], target_tree)["sites"]
+        target_tree = project_ref_tree(target_tree, target_sites, target.get("refBindings"), request.get("pathByThingId"))
         child_namespace = dict(namespace)
         child_namespace["use_program"] = use_program
         program_stack.append(target["ref"])
@@ -1910,6 +1953,8 @@ def main():
         target_tree = validate_program(
             target["detail"], target["path"], request.get("allowedFunctions")
         )
+        target_sites = inspect_program_references(target["detail"], target["path"], target_tree)["sites"]
+        target_tree = project_ref_tree(target_tree, target_sites, target.get("refBindings"), request.get("pathByThingId"))
         child_namespace = dict(namespace)
         child_namespace["use_program"] = use_program
         program_stack.append(target["ref"])
@@ -1935,13 +1980,17 @@ def main():
         request["program"]["path"],
         request.get("allowedFunctions"),
     )
-    trigger_contract = extract_trigger_contract(program_tree)
+    references = inspect_program_references(
+        request["program"]["detail"], request["program"]["path"], program_tree
+    )
+    projected_tree = project_ref_tree(
+        program_tree, references["sites"], request["program"].get("refBindings"),
+        request.get("pathByThingId"), validate_only=request.get("validateOnly") is True
+    )
+    trigger_contract = extract_trigger_contract(projected_tree)
     agent_declaration = extract_agent_declaration(program_tree)
-    request_lock_declarations = extract_request_driven_lock_declarations(program_tree)
+    request_lock_declarations = extract_request_driven_lock_declarations(projected_tree)
     if request.get("validateOnly") is True:
-        references = inspect_program_references(
-            request["program"]["detail"], request["program"]["path"], program_tree
-        )
         sys.stdout.write(json.dumps(
             {
                 "type": "result", "ok": True, "trigger": trigger_contract,
@@ -1956,7 +2005,7 @@ def main():
         ) + "\n")
         sys.stdout.flush()
         return
-    exec(compile(program_tree, request["program"]["path"], "exec"), namespace, namespace)
+    exec(compile(projected_tree, request["program"]["path"], "exec"), namespace, namespace)
     if request.get("invokeMain") is True:
         entrypoint = namespace.get("main")
         if not callable(entrypoint):

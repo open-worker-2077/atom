@@ -1275,7 +1275,8 @@ function runWorker({
   python, records, programs, program, timeoutMs, executeExplore, validateOnly = false,
   triggered = false, changedNodes = [], scopeRoot = null, programRoot = null,
   invokeMain = false, programArguments = {}, strutDecision = false,
-  allowedFunctions = null, resolveExactPath = null, agentDeclarationOnly = false, agentProgramPaths = []
+  allowedFunctions = null, resolveExactPath = null, agentDeclarationOnly = false, agentProgramPaths = [],
+  pathByThingId = null
 }) {
   return new Promise((resolve, reject) => {
     const child = spawn(python, ['-I', '-X', 'utf8', workerFile], {
@@ -1369,6 +1370,7 @@ function runWorker({
       programArguments,
       strutDecision,
       agentProgramPaths,
+      ...(pathByThingId ? { pathByThingId: pathByThingId instanceof Map ? Object.fromEntries(pathByThingId) : pathByThingId } : {}),
       ...(allowedFunctions ? { allowedFunctions } : {})
     });
   });

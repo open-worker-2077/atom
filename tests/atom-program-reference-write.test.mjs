@@ -14,10 +14,10 @@ const atom = (name, situation = '', slot = [], type = '') => ({
 });
 
 const roles = [
-  ['explore.thing', 'explore({"thing":"目标"})', 'explore({"thing":"域/目标"})'],
-  ['trigger.transform.nodes', 'def main():\n    pass\ntrigger("transform", {"nodes":["目标"]}, main)', 'def main():\n    pass\ntrigger("transform", {"nodes":["域/目标"]}, main)'],
-  ['use_program.name', 'use_program({"name":"目标","arguments":{}})', 'use_program({"name":"域/目标","arguments":{}})'],
-  ['lock.targets.paths', 'lock({"targets":{"paths":["目标"]}})', 'lock({"targets":{"paths":["域/目标"]}})'],
+  ['ref', 'explore({"thing":ref("目标")})', 'explore({"thing":ref("域/目标")})'],
+  ['ref', 'def main():\n    pass\ntrigger("transform", {"nodes":[ref("目标")]}, main)', 'def main():\n    pass\ntrigger("transform", {"nodes":[ref("域/目标")]}, main)'],
+  ['ref', 'use_program({"name":ref("目标"),"arguments":{}})', 'use_program({"name":ref("域/目标"),"arguments":{}})'],
+  ['ref', 'lock({"targets":{"paths":[ref("目标")]}})', 'lock({"targets":{"paths":[ref("域/目标")]}})'],
   ['transform.thing', 'transform({"thing":"目标","situation.rep.完成":None})', 'transform({"thing":"域/目标","situation.rep.完成":None})']
 ];
 
@@ -80,7 +80,7 @@ test('Transform .mov.世界之外 preserves the virtual destination and binds on
 });
 
 test('normalization preserves comments and whitespace between concatenated string tokens', async () => {
-  const source = 'explore({"thing": ("Tar" # keep me\r\n    "get")})';
+  const source = 'explore({"thing": ref("Tar" # keep me\r\n    "get")})';
   const [analysis] = await createProgramRuntimeScheduler().validateProgramSources([atom('Program', source, [], 'program')]);
   const normalized = references.normalizeProgramReferences({ source, ...analysis,
     worldBindings: [{ path: 'Domain/Target', id: 'target-id' }] });
@@ -89,7 +89,7 @@ test('normalization preserves comments and whitespace between concatenated strin
   assert.equal(revalidated.referenceSites[0].selector, 'Domain/Target');
 });
 
-test('only effective unambiguously known dictionary values are bound', async () => {
+test('ordinary dictionary values remain text regardless of effective entries', async () => {
   const source = [
     'explore({"thing":"Missing", "thing":selector})',
     'explore({"thing":"Missing", **unknown})',
@@ -99,7 +99,7 @@ test('only effective unambiguously known dictionary values are bound', async () 
     'lock({"targets":{"paths":["Missing"], "paths":dynamic_paths}})'
   ].join('\n');
   const [analysis] = await createProgramRuntimeScheduler().validateProgramSources([atom('Program', source, [], 'program')]);
-  assert.deepEqual(analysis.referenceSites.map((site) => site.selector), ['Target', 'Target']);
+  assert.deepEqual(analysis.referenceSites.map((site) => site.selector), []);
 });
 
 for (const [role, source, expected] of roles) {
@@ -118,11 +118,11 @@ for (const [role, source, expected] of roles) {
 
 test('normalization preserves Unicode, CRLF, quotes, comments and dynamic references', async () => {
   const source = [
-    '# explore({"thing":"不存在"})',
+    '# explore({"thing":ref("不存在")})',
     'ordinary = {"thing":"不存在"}',
     'text = "Unicode separator: \u2028"',
     'def later():',
-    '    text = "字😀"; explore({\'thing\':\'目标\'})',
+    '    text = "字😀"; explore({\'thing\':ref(\'目标\')})',
     '    explore({"thing":ordinary["thing"]})',
     'def local(explore):',
     '    return explore({"thing":"局部文字"})'
@@ -144,7 +144,7 @@ async function fixture(t, world) {
 
 test('creating a Program persists normalized Situation', async (t) => {
   const files = await fixture(t, [atom('域', '', [atom('目标')])]);
-  const source = 'def main():\n    return explore({"thing":"目标"})';
+  const source = 'def main():\n    return explore({"thing":ref("目标")})';
   const result = await executeAtomLanguage({ ...files, source: `transform new ${JSON.stringify(atom('程序', source, [], 'program'))}` });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const persisted = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
@@ -159,7 +159,7 @@ for (const [label, world] of [
   test(`${label} static target rejects the entire Program write`, async (t) => {
     const files = await fixture(t, world);
     const before = await fs.readFile(files.contextFile, 'utf8');
-    const source = 'def main():\n    return explore({"thing":"目标"})';
+    const source = 'def main():\n    return explore({"thing":ref("目标")})';
     const result = await executeAtomLanguage({ ...files, source: `transform new ${JSON.stringify(atom('程序', source, [], 'program'))}` });
     assert.equal(result.ok, false);
     assert.equal(result.errors[0].code, 'INVALID_PROGRAM_SOURCE');
@@ -169,21 +169,21 @@ for (const [label, world] of [
 }
 
 test('write validation returns binding sites from its syntax-validation AST', async () => {
-  const source = 'explore({"thing":"目标"})';
+  const source = 'explore({"thing":ref("目标")})';
   const world = [atom('域', '', [atom('目标')]), atom('程序', source, [], 'program')];
   const validated = await createProgramRuntimeScheduler().validateProgramSources(world);
   assert.ok(Array.isArray(validated), 'validation must return changed Program AST binding results');
   assert.equal(validated.length, 1);
   assert.match(validated[0].sourceHash, /^sha256:[0-9a-f]{64}$/u);
   assert.equal(validated[0].referenceSites[0].selector, '目标');
-  assert.equal(validated[0].referenceSites[0].role, 'explore.thing');
+  assert.equal(validated[0].referenceSites[0].role, 'ref');
   assert.ok(Number.isInteger(validated[0].referenceSites[0].startByte));
   assert.ok(Number.isInteger(validated[0].referenceSites[0].endByte));
   assert.ok(validated[0].referenceSites[0].astPath);
 });
 
 test('validation and reference recognition parse the same Program source once', () => {
-  const source = 'explore({"thing":"目标"})';
+  const source = 'explore({"thing":ref("目标")})';
   const worker = fileURLToPath(new URL('../work-engine/atom-language/program-worker.py', import.meta.url));
   const script = [
     'import ast, runpy, sys',
@@ -211,7 +211,7 @@ test('validation and reference recognition parse the same Program source once', 
 });
 
 test('frozen source analysis stays immutable and a stale source hash is rejected', async () => {
-  const source = 'explore({"thing":"目标"})';
+  const source = 'explore({"thing":ref("目标")})';
   const world = [atom('程序', source, [], 'program')];
   const freeze = (value) => {
     if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); }
@@ -222,7 +222,7 @@ test('frozen source analysis stays immutable and a stale source hash is rejected
   freeze(analysis);
   const bindings = freeze([{ path: '域/目标', id: 'target-id' }]);
   assert.equal(references.normalizeProgramReferences({ source, ...analysis, worldBindings: bindings }).source,
-    'explore({"thing":"域/目标"})');
+    'explore({"thing":ref("域/目标")})');
   assert.equal(world[0].situation, source);
   assert.equal(analysis.referenceSites[0].selector, '目标');
   assert.throws(() => references.normalizeProgramReferences({ source: source + '\n', ...analysis, worldBindings: bindings }),
@@ -230,7 +230,7 @@ test('frozen source analysis stays immutable and a stale source hash is rejected
 });
 
 test('comprehension target shadowing leaves its outermost iterable in the enclosing scope', async () => {
-  const source = 'values = [explore({"thing":"业务文字"}) for explore in explore({"thing":"目标"})]';
+  const source = 'values = [ref("业务文字") for ref in ref("目标")]';
   const [analysis] = await createProgramRuntimeScheduler().validateProgramSources([atom('程序', source, [], 'program')]);
   assert.deepEqual(analysis.referenceSites.map((site) => site.selector), ['目标']);
 });
@@ -238,13 +238,13 @@ test('comprehension target shadowing leaves its outermost iterable in the enclos
 test('editing a Program normalizes its Situation and invalid edits preserve the prior source and scheduler index', async (t) => {
   const source = 'def main():\n    pass';
   const files = await fixture(t, [atom('域', '', [atom('目标')]), atom('程序', source, [], 'program')]);
-  const replacement = 'def main():\n    return explore({"thing":"目标"})';
+  const replacement = 'def main():\n    return explore({"thing":ref("目标")})';
   const result = await executeAtomLanguage({ ...files, source: `transform ${JSON.stringify({ thing: '程序', [`situation.rep.${replacement}`]: source })}` });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const persisted = await fs.readFile(files.contextFile, 'utf8');
   assert.ok(persisted.includes('域/目标'));
   const index = structuredClone([...files.programScheduler.triggerContracts]);
-  const invalid = await executeAtomLanguage({ ...files, source: `transform ${JSON.stringify({ thing: '程序', 'situation.rep.explore({"thing":"不存在"})': replacement.replace('"目标"', '"域/目标"') })}` });
+  const invalid = await executeAtomLanguage({ ...files, source: `transform ${JSON.stringify({ thing: '程序', 'situation.rep.explore({"thing":ref("不存在")})': replacement.replace('"目标"', '"域/目标"') })}` });
   assert.equal(invalid.ok, false);
   assert.equal(invalid.revisionAfter, invalid.revisionBefore);
   assert.equal(await fs.readFile(files.contextFile, 'utf8'), persisted);

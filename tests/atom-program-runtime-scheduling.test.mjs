@@ -906,7 +906,7 @@ test('ordinary uncached read dependencies stay dormant without private relocatio
   assert.deepEqual(cycle.messages, []);
 });
 
-test('private relocation ownership refresh rebases Program reads without executing business effects', async () => {
+test('private relocation refresh invalidates manually edited plain-string reads without guessing 引述', async () => {
   const scheduler = createProgramRuntimeScheduler();
   const readerSource = [
     "watched = explore({'thing':'Root/Parent/Watched','situation$full':None})[0]",
@@ -954,25 +954,15 @@ test('private relocation ownership refresh rebases Program reads without executi
   });
   assert.equal(calls.every(({ validateOnly }) => validateOnly), true);
   assert.equal(scheduler.programReadDependencies.has('Root/Parent/Reader'), false);
-  assert.deepEqual(scheduler.programReadDependencies.get('Root/Parent Final/Reader'), {
-    detail: relocated[0].slot[0].slot[1].situation,
-    requests: [{ thing: 'Root/Parent Final/Watched', 'situation$full': null }],
-    contextDependent: false,
-    scopePath: null
-  });
+  assert.equal(scheduler.programReadDependencies.has('Root/Parent Final/Reader'), false);
   assert.deepEqual(
     scheduler.programReadDependencies.get('Unrelated Reader'),
     unrelatedBefore
   );
 
   calls.length = 0;
-  const cycle = await scheduler.refresh(relocated, {
-    triggerEvent: {
-      mode: 'transform',
-      nodes: ['Root/Parent/Watched', 'Root/Parent Final/Watched'],
-      preparedIndexesValid: true
-    }
-  });
+  // Explicit execution may rediscover the edited ordinary query; relocation cannot infer it.
+  const cycle = await scheduler.refresh(relocated, { programSelector: 'Root/Parent Final/Reader', force: true });
 
   assert.deepEqual(cycle.messages.map(({ text }) => text), ['reader'], JSON.stringify({
     calls,

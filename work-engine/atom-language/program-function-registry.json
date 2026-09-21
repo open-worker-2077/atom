@@ -14,6 +14,9 @@
     }
   },
   "definitions": {},
+  "syntaxMarkers": [
+    { "name": "ref", "label": "引述", "phase": "compile", "argument": "one-static-string-positional", "authorization": "none", "execution": "bound-identity-path-projection" }
+  ],
   "functionScopeHierarchy": {
     "groupField": "functionFamilies[].id",
     "parentField": "functionFamilies[].parent",
