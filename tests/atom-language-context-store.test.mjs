@@ -218,7 +218,7 @@ test('accepts persisted Thing identities while hiding them from the derived Grap
   const directory = await temporaryDirectory(t);
   const contextFile = path.join(directory, 'atom.json');
   const atoms = [{
-    'thing@program&id=AbCdEfGhIjKlMnOpQrStUv#窗口': '石器工坊',
+    'thing@program&id=001#窗口': '石器工坊',
     situation: '正文',
     slot: [],
     strut: []
@@ -232,12 +232,12 @@ test('accepts persisted Thing identities while hiding them from the derived Grap
 });
 
 test('projects an identity-bound Strut endpoint to the target current semantic path', () => {
-  const targetId = 'AAAAAAAAAAAAAAAAAAAAAA';
+  const targetId = '001';
   const world = [
     { [`thing&id=${targetId}`]: '新名', situation: '', slot: [], strut: [] },
-    { 'thing&id=BBBBBBBBBBBBBBBBBBBBBB': '旧名', situation: '', slot: [], strut: [] },
+    { 'thing&id=002': '旧名', situation: '', slot: [], strut: [] },
     {
-      'thing&id=CCCCCCCCCCCCCCCCCCCCCC': '来源',
+      'thing&id=003': '来源',
       situation: '',
       slot: [],
       strut: [{ 'if@current': true, then: [{ [`thing&id=${targetId}`]: '旧名' }] }]
@@ -254,7 +254,7 @@ test('projects an identity-bound Strut endpoint to the target current semantic p
 test('rejects duplicate persisted Thing identities before projection or write', async (t) => {
   const directory = await temporaryDirectory(t);
   const contextFile = path.join(directory, 'atom.json');
-  const identity = 'AbCdEfGhIjKlMnOpQrStUv';
+  const identity = '001';
   const atoms = ['甲', '乙'].map((thing) => ({
     [`thing&id=${identity}`]: thing, situation: '', slot: [], strut: []
   }));

@@ -296,6 +296,10 @@ export function describeAtom(match, includeFullDetail, options = {}) {
     types: nameField?.parsed.types.map((type) => type.raw) ?? [],
     description: detailField?.parsed.descriptionPresent ? detailField.parsed.description : null
   };
+  if (['explicit', 'ambiguity', 'audit'].includes(options.identityDisclosure)
+    && nameField?.parsed.identity) {
+    result.identity = `@${nameField.parsed.identity}`;
+  }
   if (includeFullDetail) result.situation = detailField?.value ?? null;
   for (const field of options.strutFields ?? []) {
     result[field.rawKey] = structuredClone(field.value);
@@ -694,7 +698,11 @@ export async function executeExploreItem(
       index: item.index,
       errors: [diagnostic('AMBIGUOUS_ATOM_NAME', `exact name“${selected.expected}”匹配到多个 Atom，首轮不会猜测`, {
         name: selected.expected,
-        paths: selected.matches.map((match) => match.path.join('/'))
+        paths: selected.matches.map((match) => match.path.join('/')),
+        candidates: selected.matches.map((match) => ({
+          path: match.path.join('/'),
+          identity: `@${readStoredField(match.atom, 'thing').parsed.identity}`
+        }))
       })]
     };
   }
@@ -726,6 +734,13 @@ export async function executeExploreItem(
   const graphLocks = options.graphLocks ?? [];
   const includeStrut = item.fields.some((field) => field.baseKey === 'strut');
   const anchor = visibleMatches.find((match) => match.atom === selected.matches[0].atom);
+  const queryThingField = nameFieldIn(item);
+  const querySelector = queryThingField?.matcher?.mode === 'exact'
+    ? parseThingSelector(queryThingField.value)
+    : null;
+  const anchorIdentityDisclosure = querySelector?.kind === 'identity'
+    ? 'explicit'
+    : queryThingField?.hints.some((hint) => hint.name === 'identity') ? 'audit' : null;
   const routes = item.fields.filter((field) => field.baseKey === 'slot').flatMap((field) => (
     field.actions.map((action) => ({ axis: action.name, parameter: action.parameter }))
   ));
@@ -764,6 +779,9 @@ export async function executeExploreItem(
     }
     const described = describeAtom(describedMatch, includeFullDetail, {
       selector: shortestUniqueSelector(describedMatch, visibleMatches),
+      ...(match === anchor && anchorIdentityDisclosure
+        ? { identityDisclosure: anchorIdentityDisclosure }
+        : {}),
       ...(includeStrut ? { strutFields: storedStrutFields(describedMatch.atom) } : {}),
       lockState: compiledLockState(lockIndex, graphLocks, describedMatch.path.join('/')),
       ...(includeLockStatus ? {

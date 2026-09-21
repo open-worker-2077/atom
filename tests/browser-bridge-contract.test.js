@@ -24,6 +24,75 @@ test('bridge synchronizes snapshots through the explicit lab API only', () => {
   assert.doesNotMatch(source, /\.click\s*\(/);
 });
 
+test('Web identity audit is an explicit CLI explore and never enters default knowledge', () => {
+  assert.match(source, /"thing~identity"\s*:\s*atomPath/u);
+  assert.match(source, /web-identity-audit-/u);
+  assert.match(source, /thingIdentityAudit/u);
+  assert.match(source, /navigator\?\.clipboard\?\.writeText/u);
+  assert.doesNotMatch(source, /selected\.identity\s*=/u);
+});
+
+test('Web identity audit reads and copies one selected address only after the user clicks', async () => {
+  const listeners = new Map();
+  const elementListeners = new Map();
+  const requests = [];
+  const copied = [];
+  let auditButton = null;
+  const readout = { appendChild(element) { auditButton = element; } };
+  const selectionCaps = { parentElement: readout };
+  const selectionLabel = {};
+  const document = {
+    body: { dataset: {} }, hidden: false,
+    getElementById(id) {
+      if (id === 'selectionCaps') return selectionCaps;
+      if (id === 'selectionLabel') return selectionLabel;
+      if (id === 'thingIdentityAudit') return auditButton;
+      return null;
+    },
+    createElement() {
+      return {
+        textContent: '', disabled: false,
+        setAttribute() {},
+        addEventListener(name, listener) { elementListeners.set(name, listener); }
+      };
+    },
+    addEventListener() {}
+  };
+  const response = (payload) => ({ ok: true, json: async () => payload });
+  const knowledge = { revision: 1, nodes: [{ id: 'selected', path: 'root', atomPath: 'Root/Target' }] };
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ transactionActive: false, selected: 'selected', path: 'root' }),
+      exportKnowledge: () => knowledge,
+      importKnowledge: () => true,
+      exportField: () => ({ path: 'root' })
+    },
+    navigator: { clipboard: { writeText: async (value) => copied.push(value) } },
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/web-command')) {
+        requests.push(JSON.parse(options.body));
+        return response({ ok: true, result: { ok: true, items: [{ matches: [{ identity: '@002' }] }] } });
+      }
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (url.includes('/state')) return response({ knowledge });
+      return response({});
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    setInterval: () => 0
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document }, { filename: 'spatial-browser-bridge.js' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(auditButton.textContent, '显示门牌');
+  assert.equal(requests.length, 0);
+  await elementListeners.get('click')();
+  assert.equal(requests[0].source, 'explore {"thing~identity":"Root/Target"}');
+  assert.deepEqual(copied, ['@002']);
+  assert.equal(auditButton.textContent, '@002 · 已复制');
+});
+
 test('Boss bridge confirms populated Leader deletion and routes Z X to data history', () => {
   assert.match(source, /global\.confirm\s*\(/);
   assert.match(source, /confirmedRecursiveDeleteNodeIds/);

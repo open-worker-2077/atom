@@ -548,6 +548,7 @@ function graphMatch(match, hint = null, boundary = null) {
   const entries = [
     graphEntry(`thing${types}${transientHint}`, true, match.selector ?? match.thing)
   ];
+  if (match.identity) entries.push(graphEntry('identity~address', true, match.identity));
   const descriptionPresent = (
     match.description !== null && match.description !== undefined
   );

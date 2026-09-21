@@ -723,6 +723,68 @@
     return inPath.length === 1 ? inPath[0] : null;
   }
 
+  function selectedAtomPath() {
+    const knowledge = lab.exportKnowledge();
+    const nodes = Array.isArray(knowledge?.nodes) ? knowledge.nodes : [];
+    const current = lab.state();
+    if (!current?.selected) return null;
+    const matches = nodes.filter((node) => (node.nodeId || node.id) === current.selected
+      && (!current.path || node.path === current.path));
+    const selected = matches.length === 1
+      ? matches[0]
+      : nodes.find((node) => (node.nodeId || node.id) === current.selected);
+    return typeof selected?.atomPath === "string" && selected.atomPath.trim()
+      ? selected.atomPath.trim()
+      : null;
+  }
+
+  function installThingIdentityAudit() {
+    if (typeof document.getElementById !== "function"
+      || typeof document.createElement !== "function") return;
+    const readout = document.getElementById("selectionCaps")?.parentElement;
+    if (!readout || document.getElementById("thingIdentityAudit")) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = "thingIdentityAudit";
+    button.textContent = "显示门牌";
+    button.setAttribute("aria-label", "显示并复制当前节点门牌号");
+    button.addEventListener("click", async () => {
+      const atomPath = selectedAtomPath();
+      if (!atomPath) {
+        button.textContent = "请先选择节点";
+        return;
+      }
+      button.disabled = true;
+      try {
+        const response = await global.fetch("/__atom/api/web-command", {
+          method: "POST", cache: "no-store", headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            source: `explore ${JSON.stringify({ "thing~identity": atomPath })}`,
+            interaction: { id: `web-identity-audit-${Date.now()}` }
+          })
+        });
+        const payload = await response.json();
+        const identity = payload?.result?.items?.[0]?.matches?.[0]?.identity;
+        if (!response.ok || payload.ok === false || payload.result?.ok === false
+          || typeof identity !== "string" || !identity.startsWith("@")) {
+          throw new Error(payload?.result?.errors?.[0]?.message || "门牌读取失败");
+        }
+        await global.navigator?.clipboard?.writeText?.(identity);
+        button.textContent = `${identity} · 已复制`;
+      } catch {
+        button.textContent = "门牌读取失败";
+      } finally {
+        button.disabled = false;
+      }
+    });
+    readout.appendChild(button);
+    const label = document.getElementById("selectionLabel");
+    if (label && typeof global.MutationObserver === "function") {
+      new global.MutationObserver(() => { button.textContent = "显示门牌"; })
+        .observe(label, { childList: true, characterData: true, subtree: true });
+    }
+  }
+
   function recursiveDeleteConfirmations(nextKnowledge) {
     if (!bossMode || !lastKnowledge) return [];
     const prior = Array.isArray(lastKnowledge.nodes) ? lastKnowledge.nodes : [];
@@ -968,6 +1030,7 @@
   global.addEventListener("spatial-view-committed", pushView);
   global.addEventListener("atom-transform-action", enqueueAtomTransformAction);
   global.addEventListener("spatial-presentation-settings-changed", enqueuePresentationSettings);
+  installThingIdentityAudit();
   if (typeof document.addEventListener === "function") {
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) void readPresentationSettings();
