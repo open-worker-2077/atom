@@ -10,6 +10,7 @@ import {
   executeAtomLanguage,
   readCommittedAtomLanguageFacts
 } from './helpers/atom-language-test-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
@@ -42,10 +43,13 @@ async function fixture(t, world) {
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, `${JSON.stringify(world, null, 2)}\n`, 'utf8');
+  const seeded = await seedBoundWorld({ contextFile, projectionFile, facts: world, returnDetails: true });
   return {
     contextFile,
     projectionFile,
+    programRefBindings: seeded.programRefBindings,
+    thingIdentityWatermark: seeded.thingIdentityWatermark,
+    initial: seeded.facts,
     before: await fs.readFile(contextFile, 'utf8')
   };
 }
@@ -396,7 +400,7 @@ test('cold prepared projection keeps explicit Slot delivery after relocating the
       );
 
       assert.equal(result.ok, true, JSON.stringify(result));
-      assert.ok(findAtom(stored, entry.finalReceiverPath));
+      assert.ok(findAtom(stored, entry.finalReceiverPath), JSON.stringify(result));
       assert.equal(readSituation(stored, 'Initial Relocation Target'), 'delivered');
       assert.deepEqual(invocations.map(({ programPath }) => programPath), [entry.finalReceiverPath]);
       assert.equal(invocations[0].signal.sourcePath, entry.finalReceiverPath.replace(/\/Receiver$/u, ''));
@@ -472,7 +476,7 @@ test('explicit run keeps its actual Slot delivery on the original sender when co
 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.ok(findAtom(stored, 'Parent/Sender/Receiver'));
-  assert.ok(findAtom(stored, 'Destination/Sender/Receiver'));
+  assert.ok(findAtom(stored, 'Destination/Sender/Receiver'), JSON.stringify(result));
   assert.equal(readSituation(stored, 'Explicit Copy Target'), 'delivered');
   assert.deepEqual(invocations.map(({ programPath }) => programPath), [
     'Parent/Sender/Receiver'
@@ -669,7 +673,7 @@ test('queued ancestor relocation rebases a descendant Program read dependency wi
     `trigger("slot", {"from":"up","labels":[${JSON.stringify(label)}]}, receive)`
   ].join('\n');
   const reader = [
-    "watched = explore({'thing':'Root/Parent/Watched','situation$full':None})[0]",
+    "watched = explore({'thing':ref('Root/Parent/Watched'),'situation$full':None})[0]",
     "if watched.situation == 'go':",
     "    message({'level':'info','text':'reader'})"
   ].join('\n');
@@ -688,7 +692,7 @@ test('queued ancestor relocation rebases a descendant Program read dependency wi
     program('Relocator', [
       'def relocate_parent():',
       '    transform({"thing.ren.Parent Final":"Root/Parent"})',
-      '    transform({"thing":"Root/Parent Final/Watched","situation.rep.go":None})',
+      '    transform({"thing":"Root/Parent " + "Final/Watched","situation.rep.go":None})',
       'trigger("transform", {"nodes":["Relocate Parent Dependency"]}, relocate_parent)'
     ].join('\n')),
     atom('Go', 'before'),
@@ -746,7 +750,7 @@ test('queued Slot delivery follows one receiver through chained relocation witho
     program('Relocator', [
       'def relocate():',
       '    transform({"thing.ren.Receiver Final":"Parent/Receiver"})',
-      '    transform({"thing.mov.Destination":"Parent/Receiver Final"})',
+      '    transform({"thing.mov.Destination":"Parent/" + "Receiver Final"})',
       '    transform({"thing.mov.Parent":"Holding Final/Receiver Final"})',
       '    transform({"thing.mov.Parent":"Holding/Receiver"})',
       'trigger("transform", {"nodes":["Relocate"]}, relocate)'
@@ -816,8 +820,8 @@ test('queued Slot delivery does not execute a receiver invalidated after relocat
     ]),
     program('Invalidator', [
       'def invalidate():',
+      '    transform({"thing":"Parent/Receiver","situation.rep.pass":None})',
       '    transform({"thing.ren.Receiver Invalid":"Parent/Receiver"})',
-      '    transform({"thing":"Parent/Receiver Invalid","situation.rep.pass":None})',
       'trigger("transform", {"nodes":["Invalidate"]}, invalidate)'
     ].join('\n')),
     atom('Go', 'before'),
@@ -889,7 +893,9 @@ test('signal outside Slot invocation fails only after its Transform source commi
   assert.equal(result.revisionAfter, result.subsequentExecution.sourceRevision);
   assert.notEqual(result.revisionAfter, result.revisionBefore);
   assert.notDeepEqual(stored, world);
-  assert.deepEqual(stored, [world[0], atom('Go', 'changed')]);
+  const expected = structuredClone(files.initial);
+  expected[1].situation = 'changed';
+  assert.deepEqual(stored, expected);
 });
 
 test('a referenced Program emits a Slot signal from its own adjacent position', async (t) => {

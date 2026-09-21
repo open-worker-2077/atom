@@ -2103,7 +2103,6 @@ export class ProgramRuntimeScheduler {
   }
 
   executeProgram(request) {
-    if (this.runProgram !== runWorker) return this.runProgram(request);
     const bind = (program) => {
       if (!program) return program;
       const indexedSites = this.programReferenceIndex?.sitesForProgram(program.ref) ?? [];

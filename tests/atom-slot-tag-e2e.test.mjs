@@ -10,7 +10,11 @@ import {
 } from '../work-engine/atom-language/cli.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
-import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import {
+  executeAtomLanguage,
+  readCommittedAtomLanguageFacts
+} from './helpers/atom-language-test-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 
 const atom = (thing, situation = '', slot = [], strut = [], type = '') => ({
   [`thing${type ? `@${type}` : ''}`]: thing,
@@ -26,8 +30,13 @@ async function fixture(t, world) {
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, `${JSON.stringify(world, null, 2)}\n`, 'utf8');
-  return { contextFile, projectionFile };
+  const seeded = await seedBoundWorld({ contextFile, projectionFile, facts: world, returnDetails: true });
+  return {
+    contextFile,
+    projectionFile,
+    programRefBindings: seeded.programRefBindings,
+    thingIdentityWatermark: seeded.thingIdentityWatermark
+  };
 }
 
 async function execute(files, source, scheduler = createProgramRuntimeScheduler()) {
@@ -37,12 +46,14 @@ async function execute(files, source, scheduler = createProgramRuntimeScheduler(
     programScheduler: scheduler,
     interaction: { id: `slot-tag-${crypto.randomUUID()}` }
   });
-  const world = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+  const world = await readCommittedAtomLanguageFacts(files);
   return { result, world, scheduler };
 }
 
 function situationAt(world, thing) {
-  return world.find((entry) => entry.thing === thing)?.situation ?? null;
+  return world.find((entry) => Object.entries(entry).some(([key, value]) => (
+    key.split(/[@&]/u)[0] === 'thing' && value === thing
+  )))?.situation ?? null;
 }
 
 function causalWorld(receiverSource, sourceSlot = []) {
@@ -161,7 +172,7 @@ test('an ordinary fact Transform does not manufacture a canonical tag packet', a
 test('a receiver failure leaves an already committed source fact intact', async (t) => {
   const files = await fixture(t, causalWorld([
     'def receive(packet):',
-    '    transform({"thing":"不存在","situation.rep.失败":None})',
+    '    transform({"thing.mov.火":"火"})',
     'slot_receive({"labels":["点燃"],"match":"all"}, receive)'
   ].join('\n'), [program('提供点燃', [
     'def send():',
