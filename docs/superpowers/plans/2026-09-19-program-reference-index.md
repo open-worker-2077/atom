@@ -1,33 +1,251 @@
-# Program 名称引用增量索引 Implementation Plan
+# Program 名称引述与身份绑定 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Program 静态名称引用在写入时规范化并绑定永久 Thing ID，冷启动只建立一次反向索引，改名与移动只更新受影响引用。
+**Goal:** Program 以显式 `ref("可读名称或exact path")` 引述 Thing，内核隐藏并持久绑定永久 Thing ID，热态改名／移动不改 Program，冷启动按 ID 校正过期可读路径并由独立保存阶段落盘。
 
-**Architecture:** Program Situation 仍是唯一可读源码事实；所有可维护静态引用在写入或一次性迁移时规范化为 exact 语义路径。运行时从这些事实解析目标 ID，维护可丢弃的 `targetThingId → reference sites` 索引；路径变更与命中源码改写同一事务提交，索引仅在提交成功后发布。正常冷启动不改写世界、不制造 revision。
+**Architecture:** Program Situation 仍是唯一应用源码事实；`ref()`只是编译期“引述”标记，不是调用／使用能力。内核把 `Program Thing ID＋source hash＋稳定引述点指纹→target Thing ID` 作为中央事务回执元数据原子保存，冷启动从回执恢复并建立可丢弃反向索引；运行前按已绑定 ID 投影当前 exact path。Thing 热态改名／移动只改变 ID→path 投影，不访问或改写 Program Situation。
 
 **Tech Stack:** Node.js 24 ESM、Python 3 AST worker、Atom Graph-JSON、node:test、中央世界事务。
 
-**Spec:** `docs/superpowers/specs/2026-08-31-atom-world-program-design.md#24-program-名称引用索引`；状态只写回 `docs/superpowers/plans/2026-09-03-atom-current-requirement-ledger.md`。
+**Spec:** `docs/superpowers/specs/2026-08-31-atom-world-program-design.md#24-program-名称引述与身份绑定`；状态只写回 `docs/superpowers/plans/2026-09-03-atom-current-requirement-ledger.md`。
 
 ## Global Constraints
 
-- 本计划只在 Web→CLI 单轨 E3 完成后执行。
-- Program 源码仍是 Situation 字符串；不新增第五轴、权威 sidecar 或隐藏 ID 文本。
-- 新增/修改 Program 的可维护静态引用必须唯一解析并规范化为 exact path；不存在或歧义则整笔拒绝。
-- 动态表达式、注释、普通字符串和被遮蔽函数不自动绑定或改写。
-- 冷启动只重建/校验派生索引，不写世界；索引丢失可由规范 exact path 重建。
-- rename/move/archive/restore 与引用路径改写同一世界事务，失败不发布候选索引。
-- 热态不得扫描无关 Program 或启动新的 Python 进程。
-- 旧短名 Program 只经显式冷副本迁移规范化，不能在普通启动时偷偷修复。
+- `ref()`在Atom中称为“引述”，不表示调用、使用或执行，不与`use_program`混用。
+- 应用层、Web、CLI、Program Situation与普通回执均不得出现永久target ID；ID只存在内核身份与中央事务元数据层。
+- 普通字符串永远是文本；只有未被局部遮蔽的静态`ref("literal")`和Atom命令操作符已定型的路径角色形成引述。
+- `ref()`恰好接受一个静态字符串位置参数；关键字参数、动态表达式、拼接、别名调用、局部定义或导入伪造均不得绑定。
+- 引述绑定与Program源码变化在同一中央事务回执中提交；失败、冲突或保存中断不得留下半份源码或半份绑定。
+- 热态rename／move对Program源码访问数、引述解析worker启动数与Program写入数均为0。
+- 冷启动校正先进入内存唯一事实，再走既有独立保存阶段；磁盘延迟不得阻塞内存读写。
+- 显式`backup@default`子树不进入校正、索引或执行；旧裸字符串只经隔离冷副本显式迁移。
+- 最终候选才运行一次整仓门禁；中间任务按最小受影响链升级验证。
 
 ## Review Focus
 
-- 同名新增、旧路径复用后，原引用仍指向原 Thing ID。
-- 完整四轴 `transform({...})` 创建与 `.ren/.mov/.cpy/.lnk/.run` 的参数角色不能误分类。
-- 归档 Program 不进入活跃执行索引，恢复后仍按原目标校正路径。
-- CRLF、Unicode、单双引号转义和多引用长度变化按 UTF-8 byte range 正确补丁。
-- worker 超时、事务冲突、源码哈希失配和保存失败不留下半份源码或提前发布索引。
+- **文本分界**：正文、message文本、注释、字典普通值和同名局部`ref`逐字节不变，只有合法引述绑定。
+- **身份守恒**：同名新增、旧路径复用、连续改名／移动及重启后仍指向原target ID。
+- **事务守恒**：Program提交冲突、journal失败、内存接受后保存失败和rollback均保持源码与绑定同代。
+- **生命周期**：Program复制、归档、恢复及target归档／恢复不泄漏执行、不换绑。
+- **性能边界**：10,000 Thing＋1,000无关Program的热态rename／move不扫描Program、不启动Python、不改Situation。
+
+## Revision Authority
+
+- 只执行下方 **Revised Tasks R3—R7**。文件后部原Task 1—5保留为历史证据，其中原Task 3—5已被用户定论撤销，不得执行。
+- 已验证基础：`310488f`、`61f87bd`、`d43a7e1`提供单次AST与UTF-8站点；`f09ca45`、`8b10d81`提供不可变索引、备份域排除、局部隔离和并发发布守恒。R3、R4负责把旧“裸字符串按path绑定”替换为显式引述和持久绑定。
+
+## Revised Tasks R3—R7
+
+### Task R3: 显式 `ref()` 引述语法与执行投影
+
+**Files:**
+- Modify: `work-engine/atom-language/program-worker.py`
+- Modify: `work-engine/atom-language/program-reference-runtime.mjs`
+- Modify: `work-engine/atom-language/program-runtime.mjs`
+- Modify: `work-engine/atom-language/engine.mjs`
+- Modify: `work-engine/atom-language/program-function-registry.json`
+- Create: `tests/atom-program-ref-syntax.test.mjs`
+- Modify: `tests/atom-program-reference.test.mjs`
+- Modify: `tests/atom-program-reference-write.test.mjs`
+
+**Interfaces:**
+- Consumes: 当前validate-only AST与`{role,selector,startByte,endByte,astPath}`站点。
+- Produces: `inspectProgramRefSites(source)`只返回合法`ref()`与命令定型路径；`compileProgramRefs({source,bindings,pathByThingId})`只在执行副本中把站点投影为当前exact path。
+
+- [ ] **Step 1: Write failing syntax-boundary tests**
+
+```js
+const inspected = await inspectProgramReferenceSites({ source: `
+message({"level":"info","text":"World/Target"})
+explore({"thing": ref("World/Target")})
+` });
+assert.deepEqual(inspected.sites.map(site => [site.kind, site.selector]), [['ref', 'World/Target']]);
+```
+
+增加`ref(name)`、双参数、关键字参数、局部`def ref`、赋值遮蔽、注释、相邻字面量、CRLF／Unicode；`.ren/.mov/.cpy/.lnk/.dsc/.rst/.run`命令定型路径仍产生`kind:'command'`站点。
+
+- [ ] **Step 2: Verify RED**
+
+Run: `node --test tests/atom-program-ref-syntax.test.mjs tests/atom-program-reference.test.mjs tests/atom-program-reference-write.test.mjs`
+
+Expected:旧实现仍按消费函数位置识别裸字符串，`ref()`尚无编译投影。
+
+- [ ] **Step 3: Implement the syntax marker**
+
+共享AST只收集未遮蔽的`ref("literal")`；`ref`登记为Program语言语法标记而非授权函数。执行副本按站点指纹查binding、按target ID取得当前path，再把对应AST节点替换为exact path常量；缺binding返回`PROGRAM_REF_BINDING_MISSING`，不得按名称回退。
+
+- [ ] **Step 4: Verify GREEN and commit**
+
+Run: `node --test tests/atom-program-ref-syntax.test.mjs tests/atom-program-reference.test.mjs tests/atom-program-reference-write.test.mjs tests/atom-program-runtime-scheduling.test.mjs`
+
+```powershell
+git add work-engine/atom-language/program-worker.py work-engine/atom-language/program-reference-runtime.mjs work-engine/atom-language/program-runtime.mjs work-engine/atom-language/engine.mjs work-engine/atom-language/program-function-registry.json tests/atom-program-ref-syntax.test.mjs tests/atom-program-reference.test.mjs tests/atom-program-reference-write.test.mjs
+git commit -m "feat: add explicit Program ref syntax"
+```
+
+### Task R4: 中央事务内核引述绑定
+
+**Files:**
+- Create: `work-engine/atom-language/program-ref-binding-ledger.mjs`
+- Modify: `work-engine/atom-language/engine.mjs`
+- Modify: `work-engine/atom-language/program-reference-index.mjs`
+- Modify: `src/atom-system/adapters/transactional-world-persistence.mjs`
+- Modify: `src/atom-system/adapters/json-world-repository.mjs`
+- Modify: `src/atom-system/world-runtime/memory-transaction-ports.mjs`
+- Create: `tests/atom-program-ref-binding-ledger.test.mjs`
+- Modify: `tests/atom-program-reference-index.test.mjs`
+- Modify: `tests/atom-memory-transaction-ports.test.mjs`
+
+**Interfaces:**
+- Consumes: R3站点与写入时唯一解析的target Thing ID。
+- Produces: receipt result `programRefBindings:{version:1,replacements:[{programThingId,sourceHash,sites:[{fingerprint,role,targetThingId}]}],removals:[programThingId]}`；`rebuildProgramRefBindings(receipts,currentPrograms)`返回不可变binding snapshot。
+
+- [ ] **Step 1: Write failing atomic-binding tests**
+
+```js
+const receipt = await commitProgram(`explore({"thing": ref("World/Target")})`);
+assert.equal(receipt.result.programRefBindings.replacements[0].sites[0].targetThingId, targetId);
+const rebuilt = rebuildProgramRefBindings((await journal.readMetadataState()).receipts, world);
+assert.equal(rebuilt.forProgram(programId).sites[0].targetThingId, targetId);
+```
+
+覆盖commit冲突、journal失败、内存事务、同commandId重试、Program删除、rollback，以及普通CLI／Web／Program回执不出现target ID。
+
+- [ ] **Step 2: Verify RED**
+
+Run: `node --test tests/atom-program-ref-binding-ledger.test.mjs tests/atom-program-reference-index.test.mjs tests/atom-memory-transaction-ports.test.mjs`
+
+Expected:receipt尚无binding metadata，索引仍按path重新绑定。
+
+- [ ] **Step 3: Persist and rebuild hidden bindings**
+
+Program源码变化时在候选提交前生成完整replacement，与facts进入同一`atom.world-receipt` result；`readMetadataState()`只读receipt metadata。Task 2索引改为消费binding snapshot＋当前ID→path，不再由Situation path决定target ID。缺失、source hash不符、target不存在分别返回`PROGRAM_REF_BINDING_MISSING`、`PROGRAM_REF_SOURCE_MISMATCH`、`PROGRAM_REF_TARGET_MISSING`并只隔离对应Program。
+
+- [ ] **Step 4: Verify GREEN and commit**
+
+Run: `node --test tests/atom-program-ref-binding-ledger.test.mjs tests/atom-program-reference-index.test.mjs tests/atom-memory-transaction-ports.test.mjs tests/atom-language-transform-receipt.test.mjs`
+
+```powershell
+git add work-engine/atom-language/program-ref-binding-ledger.mjs work-engine/atom-language/engine.mjs work-engine/atom-language/program-reference-index.mjs src/atom-system/adapters/transactional-world-persistence.mjs src/atom-system/adapters/json-world-repository.mjs src/atom-system/world-runtime/memory-transaction-ports.mjs tests/atom-program-ref-binding-ledger.test.mjs tests/atom-program-reference-index.test.mjs tests/atom-memory-transaction-ports.test.mjs tests/atom-language-transform-receipt.test.mjs
+git commit -m "feat: persist hidden Program ref bindings"
+```
+
+### Task R5: 冷启动按ID校正与独立保存
+
+**Files:**
+- Create: `work-engine/atom-language/program-ref-cold-start.mjs`
+- Modify: `work-engine/atom-language/graph-server.mjs`
+- Modify: `work-engine/atom-language/program-runtime.mjs`
+- Modify: `src/atom-system/adapters/legacy-engine-adapter.mjs`
+- Modify: `src/atom-system/adapters/durable-world-save-worker.mjs`
+- Create: `tests/atom-program-ref-cold-start.test.mjs`
+- Modify: `tests/atom-program-projection-lifecycle.test.mjs`
+- Modify: `tests/atom-memory-save-capacity.test.mjs`
+
+**Interfaces:** `planProgramRefColdStart({facts,bindings}) -> {changed,programs,nextFacts,nextBindings}`；变化通过既有内存世界提交入口接受，save worker独立持久。
+
+- [ ] **Step 1: Write and verify failing cold-start tests**
+
+```js
+const started = await coldStart(worldAfterTargetRename, bindingsBeforeRename);
+assert.match(programSource(started.memoryFacts, programId), /ref\("World\/Renamed"\)/u);
+assert.equal(started.servingBeforeSaveResolved, true);
+```
+
+覆盖路径未变零revision、连续改名只取最终path、保存阻塞／失败时内存Explore可用并重试、旧路径复用不换绑、备份Program零访问、target归档局部隔离、二次启动`changed:false`。
+
+Run: `node --test tests/atom-program-ref-cold-start.test.mjs tests/atom-program-projection-lifecycle.test.mjs tests/atom-memory-save-capacity.test.mjs`
+
+Expected:当前启动只建索引，不按隐藏ID校正`ref()`。
+
+- [ ] **Step 2: Implement memory-first reconciliation**
+
+按distinct source hash解析一次，只补丁过期`ref()`，生成新source hash与replacement bindings并通过中央内存提交一次接受；服务使用新内存事实启动，durable save继续现有串行、重试、关闭前flush与备份时序。单Program失败只隔离自身。
+
+- [ ] **Step 3: Verify GREEN and commit**
+
+Run: `node --test tests/atom-program-ref-cold-start.test.mjs tests/atom-program-projection-lifecycle.test.mjs tests/atom-memory-save-capacity.test.mjs tests/atom-language-graph-server.test.mjs`
+
+```powershell
+git add work-engine/atom-language/program-ref-cold-start.mjs work-engine/atom-language/graph-server.mjs work-engine/atom-language/program-runtime.mjs src/atom-system/adapters/legacy-engine-adapter.mjs src/atom-system/adapters/durable-world-save-worker.mjs tests/atom-program-ref-cold-start.test.mjs tests/atom-program-projection-lifecycle.test.mjs tests/atom-memory-save-capacity.test.mjs tests/atom-language-graph-server.test.mjs
+git commit -m "feat: reconcile Program refs at cold start"
+```
+
+### Task R6: 热态零改写、生命周期与旧数据迁移
+
+**Files:**
+- Modify: `work-engine/atom-language/transform-executor.mjs`
+- Modify: `work-engine/atom-language/engine.mjs`
+- Modify: `work-engine/atom-language/program-reference-index.mjs`
+- Create: `work-engine/atom-language/program-ref-migration.mjs`
+- Create: `scripts/deploy-program-ref-bindings.mjs`
+- Create: `tests/atom-program-ref-hot-path.test.mjs`
+- Create: `tests/atom-program-ref-lifecycle.test.mjs`
+- Create: `tests/atom-program-ref-migration.test.mjs`
+
+- [ ] **Step 1: Write and verify failing lifecycle tests**
+
+```js
+const result = await renameTarget(worldWith1000UnrelatedPrograms);
+assert.equal(result.metrics.visitedPrograms, 0);
+assert.equal(result.metrics.pythonStarts, 0);
+assert.deepEqual(programSources(result.world), programSources(before));
+```
+
+覆盖copy新Program ID继承target绑定、Program归档／恢复、target归档／恢复、唯一裸字符串迁移、歧义零写和rollback。
+
+Run: `node --test tests/atom-program-ref-hot-path.test.mjs tests/atom-program-ref-lifecycle.test.mjs tests/atom-program-ref-migration.test.mjs tests/atom-language-transform-p2.test.mjs`
+
+Expected:现有Transform executor仍扫描Program并调用rewrite worker；迁移器不存在。
+
+- [ ] **Step 2: Remove hot rewriting and implement migration**
+
+删除rename／move路径的`thingWorldBindings(atoms)`、全Program loop、`rewriteProgramReferenceBatch()`和`rewriteProgramSourceThroughRelocations()`；只更新ID→path投影。copy生成新owner binding；archive只退出活跃索引；restore按ID恢复。迁移仅在冷副本把可证明的旧角色裸字符串原子改为`ref()`＋binding metadata。
+
+- [ ] **Step 3: Verify GREEN and commit**
+
+Run: `node --test tests/atom-program-ref-hot-path.test.mjs tests/atom-program-ref-lifecycle.test.mjs tests/atom-program-ref-migration.test.mjs tests/atom-language-transform-batch.test.mjs tests/atom-language-transform-p1.test.mjs tests/atom-language-transform-p2.test.mjs`
+
+Run: `rg -n "rewriteProgramReferenceBatch|rewriteProgramSourceThroughRelocations|thingWorldBindings" work-engine/atom-language/transform-executor.mjs work-engine/atom-language/program-runtime.mjs`
+
+```powershell
+git add work-engine/atom-language/transform-executor.mjs work-engine/atom-language/engine.mjs work-engine/atom-language/program-reference-index.mjs work-engine/atom-language/program-ref-migration.mjs scripts/deploy-program-ref-bindings.mjs tests/atom-program-ref-hot-path.test.mjs tests/atom-program-ref-lifecycle.test.mjs tests/atom-program-ref-migration.test.mjs
+git commit -m "perf: keep Program refs stable across hot relocations"
+```
+
+### Task R7: 性能门禁、生产迁移与E3收口
+
+**Files:**
+- Create: `tests/atom-program-ref-performance.test.mjs`
+- Modify: `tests/atom-system-performance.test.mjs`
+- Modify: `tests/atom-production-architecture.test.mjs`
+- Modify: `work-engine/atom-language/cli.mjs`
+- Modify: `docs/superpowers/plans/2026-09-03-atom-current-requirement-ledger.md`
+
+- [ ] **Step 1: Add and run scale gates**
+
+构造10,000 Thing、1,000无关Program、1个命中Program；断言热态rename／move均`visitedPrograms===0`、`pythonStarts===0`、`programWrites===0`，100→1,000无关Program的中位数比例小于2。冷启动断言每distinct source hash最多解析一次、只写实际过期`ref()`、普通字符串零绑定、ID不进入公开输出。
+
+Run: `node --test tests/atom-program-ref-performance.test.mjs tests/atom-system-performance.test.mjs tests/atom-production-architecture.test.mjs`
+
+- [ ] **Step 2: Escalate verification once per revision**
+
+Run: `node --test tests/atom-program-ref*.test.mjs tests/atom-program-reference*.test.mjs tests/atom-language-transform-batch.test.mjs tests/atom-language-transform-p1.test.mjs tests/atom-language-transform-p2.test.mjs tests/atom-program-runtime-scheduling.test.mjs`
+
+Run: `npm run test:architecture`
+
+Run: `npm run test:system`
+
+Final candidate only: `npm test`
+
+- [ ] **Step 3: Migrate, deploy and close remotely**
+
+正式冷副本执行dry-run、apply、restart、rollback、再次restart；验证源码、binding receipt、world revision与正式源文件SHA-256。保留私有备份和精确代码回退点后快进main，重启4784并从CLI／Web回读`ref()`path、热态rename零Program写、冷启动校正、health／published和生产事实哈希；推送精确SHA并等待远端检查成功后写回唯一总账、关闭E3。
+
+---
+
+## Historical Superseded Tasks — Do Not Execute
 
 ---
 
