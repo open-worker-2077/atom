@@ -157,6 +157,88 @@ test('quarantined Programs stay outside persisted projection fingerprints and un
   assert.equal((await scheduler.persistComputedContextFreeProjection(world)).persisted, true);
 });
 
+test('derived-state invalidation preserves same-identity same-source quarantine across an unrelated commit', async () => {
+  const world = [atom('Fact', 'before'), atom('Good', 'message({"level":"info","text":"healthy"})', [], 'program'),
+    atom('Broken', 'explore({"thing":"Missing"})', [], 'program')];
+  ensureThingIdentities(world);
+  const scheduler = createProgramRuntimeScheduler({ projectionRepository: memoryProjectionRepository() });
+  await scheduler.refresh(world, { isolateFailures: true, prepareAllIndexes: true });
+  const committed = structuredClone(world);
+  committed[0].situation = 'after';
+  const committedBytes = JSON.stringify(committed);
+  const committedRevision = revisionOfWorldFacts(committed);
+  scheduler.invalidateDerivedWorldState();
+  await assert.rejects(scheduler.current(committed, { programSelector: 'Broken' }), {
+    code: 'PROGRAM_REFERENCE_TARGET_MISSING'
+  });
+  await assert.rejects(scheduler.refresh(committed, { programSelector: 'Broken', force: true }), {
+    code: 'PROGRAM_REFERENCE_TARGET_MISSING'
+  });
+  const cycle = await scheduler.refresh(committed, { isolateFailures: true });
+  assert.equal(cycle.messages[0].text, 'healthy');
+  assert.deepEqual(cycle.failures, []);
+  assert.equal(cycle.runtimeWarnings.some(warning => warning.code === 'PROGRAM_REFERENCE_TARGET_MISSING'), true);
+  assert.equal(JSON.stringify(committed), committedBytes);
+  assert.equal(revisionOfWorldFacts(committed), committedRevision);
+});
+
+test('concurrent reference rebuilds reuse each revision and an older late result cannot replace the newer index', async () => {
+  const older = [atom('Target'), atom('Program', '# older\nexplore({"thing":"Target"})', [], 'program')];
+  ensureThingIdentities(older);
+  const newer = structuredClone(older);
+  newer[1].situation = '# newer\nexplore({"thing":"Missing"})';
+  const oldGate = Promise.withResolvers();
+  const oldStarted = Promise.withResolvers();
+  let oldInspections = 0;
+  const scheduler = createProgramRuntimeScheduler({ inspectProgramReferences: async request => {
+    if (request.source.startsWith('# older')) {
+      oldInspections += 1;
+      oldStarted.resolve();
+      await oldGate.promise;
+    }
+    return inspectProgramReferenceSites(request);
+  } });
+  const oldRequest = scheduler.prepareProgramReferenceIndex(older);
+  await oldStarted.promise;
+  const newestIndex = await scheduler.prepareProgramReferenceIndex(newer);
+  const repeatedOldRequest = scheduler.prepareProgramReferenceIndex(older);
+  oldGate.resolve();
+  const [oldIndex, repeatedOldIndex] = await Promise.all([oldRequest, repeatedOldRequest]);
+  assert.equal(scheduler.programReferenceIndex, newestIndex);
+  assert.equal(scheduler.programReferenceRevision, revisionOfWorldFacts(newer));
+  assert.equal(oldIndex, repeatedOldIndex);
+  assert.equal(oldInspections, 1);
+  assert.equal(newestIndex.failures[0].code, 'PROGRAM_REFERENCE_TARGET_MISSING');
+});
+
+test('invalidation cancels in-flight reference publication while preserving the last published snapshot', async () => {
+  const original = [atom('Target'), atom('Program', '# published\nexplore({"thing":"Target"})', [], 'program')];
+  ensureThingIdentities(original);
+  const pending = structuredClone(original);
+  pending[1].situation = '# pending\nexplore({"thing":"Missing"})';
+  const gate = Promise.withResolvers();
+  const started = Promise.withResolvers();
+  const scheduler = createProgramRuntimeScheduler({ inspectProgramReferences: async request => {
+    if (request.source.startsWith('# pending')) {
+      started.resolve();
+      await gate.promise;
+    }
+    return inspectProgramReferenceSites(request);
+  } });
+  const published = await scheduler.prepareProgramReferenceIndex(original);
+  const interrupted = scheduler.prepareProgramReferenceIndex(pending);
+  await started.promise;
+  scheduler.invalidateDerivedWorldState();
+  gate.resolve();
+  await interrupted;
+  assert.equal(scheduler.programReferenceIndex, published);
+  assert.equal(scheduler.programReferenceRevision, revisionOfWorldFacts(original));
+  const rebuilt = await scheduler.prepareProgramReferenceIndex(pending);
+  assert.equal(scheduler.programReferenceIndex, rebuilt);
+  assert.equal(scheduler.programReferenceRevision, revisionOfWorldFacts(pending));
+  assert.equal(rebuilt.failures[0].code, 'PROGRAM_REFERENCE_TARGET_MISSING');
+});
+
 test('a validated Program projection survives scheduler restart for the exact world revision', async () => {
   const repository = memoryProjectionRepository();
   const world = [atom('Program', '# projection', [], 'program')];

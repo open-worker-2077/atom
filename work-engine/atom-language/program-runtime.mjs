@@ -1407,7 +1407,8 @@ export class ProgramRuntimeScheduler {
     this.inspectProgramReferences = options.inspectProgramReferences ?? inspectProgramReferenceSites;
     this.programReferenceIndex = null;
     this.programReferenceRevision = null;
-    this.programReferencePreparation = null;
+    this.programReferencePreparations = new Map();
+    this.programReferenceGeneration = 0;
     this.diagnosticRecorder = options.diagnosticRecorder ?? null;
     this.projectionRepository = options.projectionRepository ?? null;
     this.loadedProjection = undefined;
@@ -2010,12 +2011,15 @@ export class ProgramRuntimeScheduler {
   async prepareProgramReferenceIndex(atoms) {
     const revision = revisionOfWorldFacts(atoms);
     if (this.programReferenceIndex && this.programReferenceRevision === revision) return this.programReferenceIndex;
-    if (this.programReferencePreparation?.revision === revision) return this.programReferencePreparation.promise;
+    const pending = this.programReferencePreparations.get(revision);
+    if (pending) return pending;
+    const generation = ++this.programReferenceGeneration;
     const promise = createProgramReferenceIndex(atoms, {
       inspectProgram: (request) => this.runBounded(() => this.inspectProgramReferences({
         ...request, python: this.python, timeoutMs: this.timeoutMs
       }))
     }).then(index => {
+      if (generation !== this.programReferenceGeneration) return index;
       this.programReferenceIndex = index;
       this.programReferenceRevision = revision;
       this.agentSecurityWorldFacts = null;
@@ -2023,9 +2027,9 @@ export class ProgramRuntimeScheduler {
       this.pruneInactiveProgramIndexes(worldRecords(atoms));
       return index;
     }).finally(() => {
-      if (this.programReferencePreparation?.promise === promise) this.programReferencePreparation = null;
+      if (this.programReferencePreparations.get(revision) === promise) this.programReferencePreparations.delete(revision);
     });
-    this.programReferencePreparation = { revision, promise };
+    this.programReferencePreparations.set(revision, promise);
     return promise;
   }
 
@@ -2111,8 +2115,10 @@ export class ProgramRuntimeScheduler {
   }
 
   invalidateDerivedWorldState() {
-    this.programReferenceIndex = null;
-    this.programReferenceRevision = null;
+    // Keep the immutable snapshot: quarantine is rechecked by Thing ID/source hash
+    // on every consumption. Cancel publication rights of pre-invalidation builds.
+    this.programReferenceGeneration += 1;
+    this.programReferencePreparations.clear();
     this.completed.clear();
     this.reusable.clear();
     this.programReusable.clear();
