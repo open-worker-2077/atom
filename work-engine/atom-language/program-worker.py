@@ -2,6 +2,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 import sys
 
@@ -621,16 +622,60 @@ LEGACY_GRAPH_AXES = {
 }
 
 
-def inspect_program_references(source, filename):
-    tree = ast.parse(source, filename=filename, mode="exec")
-    shadowed = {
-        node.id for node in ast.walk(tree)
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
-    }
-    shadowed.update(
-        node.name for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    )
+def inspect_program_references(source, filename, tree=None):
+    if tree is None:
+        tree = ast.parse(source, filename=filename, mode="exec")
+    # Python source line numbers recognize CR/LF, not Unicode string separators.
+    offsets = [0] + [match.end() for match in re.finditer(b"\r\n|\r|\n", source.encode("utf-8"))]
+    paths = {}
+    calls = []
+    enclosing_iterators = {}
+
+    def local_bindings(node):
+        names = set()
+        def collect(child):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(child.name)
+                return
+            if isinstance(child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                return
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+                names.add(child.id)
+            if isinstance(child, ast.ExceptHandler) and child.name:
+                names.add(child.name)
+            for descendant in ast.iter_child_nodes(child):
+                collect(descendant)
+        for child in node.body:
+            collect(child)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.update(arg.arg for arg in ast.walk(node.args) if isinstance(arg, ast.arg))
+        return names
+
+    def visit(node, ast_path, shadowed):
+        shadowed = enclosing_iterators.get(id(node), shadowed)
+        paths[id(node)] = ast_path
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id not in shadowed:
+                calls.append(node)
+        inner_shadowed = shadowed
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef)):
+            inner_shadowed = shadowed | local_bindings(node)
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            enclosing_iterators[id(node.generators[0].iter)] = shadowed
+            inner_shadowed = shadowed | {
+                item.id for generator in node.generators for item in ast.walk(generator.target)
+                if isinstance(item, ast.Name)
+            }
+        for field, value in ast.iter_fields(node):
+            # Function defaults execute in the enclosing scope.
+            child_shadowed = shadowed if isinstance(node, ast.FunctionDef) and field != "body" else inner_shadowed
+            if isinstance(value, ast.AST):
+                visit(value, f"{ast_path}.{field}", child_shadowed)
+            elif isinstance(value, list):
+                for index, child in enumerate(value):
+                    if isinstance(child, ast.AST):
+                        visit(child, f"{ast_path}.{field}[{index}]", child_shadowed)
+    visit(tree, "module", set())
     sites = []
     def add_site(role, value):
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
@@ -641,81 +686,41 @@ def inspect_program_references(source, filename):
                 "columnBytes": value.col_offset,
                 "endLine": value.end_lineno,
                 "endColumnBytes": value.end_col_offset,
+                "startByte": offsets[value.lineno - 1] + value.col_offset,
+                "endByte": offsets[value.end_lineno - 1] + value.end_col_offset,
+                "astPath": paths[id(value)],
             })
 
-    if "explore" not in shadowed:
-        for node in ast.walk(tree):
-            if (not isinstance(node, ast.Call)
-                    or not isinstance(node.func, ast.Name)
-                    or node.func.id != "explore"
-                    or len(node.args) != 1
-                    or node.keywords
-                    or not isinstance(node.args[0], ast.Dict)):
+    for node in calls:
+        name = node.func.id
+        if name == "trigger":
+            if (len(node.args) >= 2 and isinstance(node.args[0], ast.Constant)
+                    and node.args[0].value == "transform"
+                    and isinstance(node.args[1], ast.Dict)):
+                for key, value in zip(node.args[1].keys, node.args[1].values):
+                    if (isinstance(key, ast.Constant) and key.value == "nodes"
+                            and isinstance(value, (ast.List, ast.Tuple))):
+                        for item in value.elts:
+                            add_site("trigger.transform.nodes", item)
+            continue
+        if (len(node.args) != 1 or node.keywords
+                or not isinstance(node.args[0], ast.Dict)):
+            continue
+        for key, value in zip(node.args[0].keys, node.args[0].values):
+            if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
                 continue
-            query = node.args[0]
-            for key, value in zip(query.keys, query.values):
-                if (isinstance(key, ast.Constant) and key.value == "thing"
-                        and isinstance(value, ast.Constant)
-                        and isinstance(value.value, str)):
-                    add_site("explore.thing", value)
-    if "trigger" not in shadowed:
-        for node in ast.walk(tree):
-            if (not isinstance(node, ast.Call)
-                    or not isinstance(node.func, ast.Name)
-                    or node.func.id != "trigger"
-                    or len(node.args) < 2
-                    or not isinstance(node.args[0], ast.Constant)
-                    or node.args[0].value != "transform"
-                    or not isinstance(node.args[1], ast.Dict)):
-                continue
-            for key, value in zip(node.args[1].keys, node.args[1].values):
-                if (isinstance(key, ast.Constant) and key.value == "nodes"
-                        and isinstance(value, (ast.List, ast.Tuple))):
-                    for item in value.elts:
-                        add_site("trigger.transform.nodes", item)
-    if "use_program" not in shadowed:
-        for node in ast.walk(tree):
-            if (not isinstance(node, ast.Call)
-                    or not isinstance(node.func, ast.Name)
-                    or node.func.id != "use_program"
-                    or len(node.args) != 1
-                    or node.keywords
-                    or not isinstance(node.args[0], ast.Dict)):
-                continue
-            for key, value in zip(node.args[0].keys, node.args[0].values):
-                if isinstance(key, ast.Constant) and key.value == "name":
-                    add_site("use_program.name", value)
-    if "lock" not in shadowed:
-        for node in ast.walk(tree):
-            if (not isinstance(node, ast.Call)
-                    or not isinstance(node.func, ast.Name)
-                    or node.func.id != "lock"
-                    or len(node.args) != 1
-                    or node.keywords
-                    or not isinstance(node.args[0], ast.Dict)):
-                continue
-            for key, value in zip(node.args[0].keys, node.args[0].values):
-                if not (isinstance(key, ast.Constant) and key.value == "targets"
-                        and isinstance(value, ast.Dict)):
-                    continue
+            if name == "explore" and key.value == "thing":
+                add_site("explore.thing", value)
+            elif name == "use_program" and key.value == "name":
+                add_site("use_program.name", value)
+            elif name == "transform" and (key.value == "thing" or key.value.startswith("thing.")):
+                add_site("transform.thing", value)
+            elif name == "lock" and key.value == "targets" and isinstance(value, ast.Dict):
                 for target_key, target_value in zip(value.keys, value.values):
                     if (isinstance(target_key, ast.Constant) and target_key.value == "paths"
                             and isinstance(target_value, (ast.List, ast.Tuple))):
                         for item in target_value.elts:
                             add_site("lock.targets.paths", item)
-    if "transform" not in shadowed:
-        for node in ast.walk(tree):
-            if (not isinstance(node, ast.Call)
-                    or not isinstance(node.func, ast.Name)
-                    or node.func.id != "transform"
-                    or len(node.args) != 1
-                    or node.keywords
-                    or not isinstance(node.args[0], ast.Dict)):
-                continue
-            for key, value in zip(node.args[0].keys, node.args[0].values):
-                if (isinstance(key, ast.Constant) and isinstance(key.value, str)
-                        and (key.value == "thing" or key.value.startswith("thing."))):
-                    add_site("transform.thing", value)
     sites.sort(key=lambda item: (
         item["line"], item["columnBytes"], item["endLine"], item["endColumnBytes"]
     ))
@@ -739,12 +744,6 @@ def exact_reference_matches(selector, world_bindings):
 
 def rewrite_program_references(source, filename, aliases, world_bindings):
     inspected = inspect_program_references(source, filename)
-    lines = source.splitlines(keepends=True)
-    byte_offsets = []
-    current = 0
-    for line in lines:
-        byte_offsets.append(current)
-        current += len(line.encode("utf-8"))
     encoded = source.encode("utf-8")
     patches = []
     changed_sites = []
@@ -764,8 +763,8 @@ def rewrite_program_references(source, filename, aliases, world_bindings):
         if change is None:
             continue
         rewritten = change["resultPath"] + selector[len(change["sourcePath"]):]
-        start = byte_offsets[site["line"] - 1] + site["columnBytes"]
-        end = byte_offsets[site["endLine"] - 1] + site["endColumnBytes"]
+        start = site["startByte"]
+        end = site["endByte"]
         original_literal = encoded[start:end].decode("utf-8")
         json_literal = json.dumps(rewritten, ensure_ascii=False)
         if original_literal.startswith("'") and not original_literal.startswith("'''"):
@@ -1872,9 +1871,14 @@ def main():
     agent_declaration = extract_agent_declaration(program_tree)
     request_lock_declarations = extract_request_driven_lock_declarations(program_tree)
     if request.get("validateOnly") is True:
+        references = inspect_program_references(
+            request["program"]["detail"], request["program"]["path"], program_tree
+        )
         sys.stdout.write(json.dumps(
             {
                 "type": "result", "ok": True, "trigger": trigger_contract,
+                "sourceHash": references["sourceHash"],
+                "referenceSites": references["sites"],
                 **effects,
                 "locks": request_lock_declarations,
                 **({"agents": [agent_declaration]} if agent_declaration is not None else {}),

@@ -25,7 +25,10 @@ test('Program reference inspection finds only literal kernel Explore selectors',
     line: 5,
     columnBytes: 28,
     endLine: 5,
-    endColumnBytes: 40
+    endColumnBytes: 40,
+    startByte: Buffer.byteLength(source.split('\n').slice(0, 4).join('\n') + '\n') + 28,
+    endByte: Buffer.byteLength(source.split('\n').slice(0, 4).join('\n') + '\n') + 40,
+    astPath: 'module.body[2].body[0].value.args[0].values[0]'
   }]);
 });
 

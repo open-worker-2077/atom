@@ -1265,6 +1265,7 @@ export function validateProgramResult(result, records, program, options = {}) {
   return {
     locks, messages, transforms, shortcuts, slotBodies, slotSignals, slotProvides, choices, jumps, jumpAuthorizations,
     agentRegistrations, changedThings, trigger,
+    ...(result.sourceHash ? { sourceHash: result.sourceHash, referenceSites: result.referenceSites } : {}),
     ...(strutDecision === true ? { strutDecision: result.strutDecision } : {})
   };
 }
@@ -2180,6 +2181,11 @@ export class ProgramRuntimeScheduler {
     for (const path of this.relocationPreparedReadPrograms) {
       if (!activePaths.has(path)) this.relocationPreparedReadPrograms.delete(path);
     }
+    return programs.map((program, index) => ({
+      path: program.path,
+      sourceHash: validated[index].sourceHash,
+      referenceSites: validated[index].referenceSites ?? []
+    }));
   }
 
   async refreshPreparedTriggerOwnership(atoms, relocations) {

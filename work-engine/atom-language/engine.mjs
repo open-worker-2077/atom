@@ -9,6 +9,7 @@ import {
 } from '../../src/atom-system/world-runtime/world-revision.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { ensureThingIdentities } from './slot-graph-semantics.mjs';
+import { normalizeProgramReferences } from './program-reference-runtime.mjs';
 import { hasValidatedDefaultBackupArchiveAt } from './default-backup-boundary.mjs';
 
 function mergeWarnings(...groups) {
@@ -501,8 +502,27 @@ async function validatePrograms(atoms, contextFile, previousAtoms = null, progra
     return { ok: true, errors: [], warnings: [] };
   }
   try {
-    await programScheduler.validateProgramSources(atoms, previousAtoms ?? []);
-    return { ok: true, errors: [], warnings: [] };
+    const validated = await programScheduler.validateProgramSources(atoms, previousAtoms ?? []);
+    const worldBindings = walkAtoms(atoms).map((match) => ({
+      path: match.path.join('/'), id: oneStoredField(match.atom, 'thing')?.parsed.identity ?? null
+    }));
+    const normalized = (validated ?? []).map((program) => {
+      const match = exactMatchAtPath(atoms, program.path);
+      return { path: program.path, ...normalizeProgramReferences({
+        source: oneStoredField(match.atom, 'situation')?.value ?? '',
+        ...program, worldBindings
+      }) };
+    });
+    // Validate the entire candidate before replacing any Situation; input snapshots may be frozen.
+    const nextAtoms = normalized.some((program) => program.source !== oneStoredField(exactMatchAtPath(atoms, program.path).atom, 'situation')?.value)
+      ? structuredClone(atoms) : atoms;
+    if (nextAtoms !== atoms) {
+      for (const program of normalized) {
+        const match = exactMatchAtPath(nextAtoms, program.path);
+        match.atom[oneStoredField(match.atom, 'situation')?.rawKey ?? 'situation'] = program.source;
+      }
+    }
+    return { ok: true, errors: [], warnings: [], atoms: nextAtoms, programReferences: normalized };
   } catch (error) {
     return {
       ok: false,
@@ -771,6 +791,7 @@ async function applyCreateTransform({
     ? await validatePrograms(nextAtoms, contextFile, atoms, programScheduler)
     : { ok: true, errors: [], warnings: [] };
   if (!compiled.ok) return { error: compiled.errors[0], warnings: compiled.warnings };
+  nextAtoms = compiled.atoms ?? nextAtoms;
   return {
     atoms: nextAtoms,
     changed: true,
@@ -3983,6 +4004,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         releaseStrutDeliveryClaims();
         return failureBase(parsed, contextFile, projectionFile, atoms, compiled.errors);
       }
+      nextAtoms = compiled.atoms ?? nextAtoms;
       const delegated = await validateRequestCandidate(nextAtoms, batchDeclarationRelocations);
       if (!delegated.ok) {
         releaseStrutDeliveryClaims();
@@ -4590,6 +4612,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         compiled.errors
       );
     }
+    nextAtoms = compiled.atoms ?? nextAtoms;
+    postRefresh.atoms = nextAtoms;
     const delegated = await validateRequestCandidate(nextAtoms, declarationRelocations);
     if (!delegated.ok) {
       releaseStrutDeliveryClaims();
