@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
 import { createJsonRequestDrivenLockRepository } from '../src/atom-system/adapters/json-request-driven-lock-repository.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
@@ -29,8 +30,11 @@ async function fixture(t, atoms) {
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, `${JSON.stringify(atoms, null, 2)}\n`, 'utf8');
-  return { contextFile, projectionFile };
+  const seeded = await seedBoundWorld({
+    contextFile, projectionFile, facts: atoms, returnDetails: true
+  });
+  atoms.splice(0, atoms.length, ...structuredClone(seeded.facts));
+  return { contextFile, projectionFile, programRefBindings: seeded.programRefBindings };
 }
 
 function jumpWorld(destination = 'Root/A/B') {
@@ -94,11 +98,11 @@ function contaminateInternalExploreSnapshot(scheduler) {
 
 function childNames(atomValue) {
   return (atomValue.slot ?? []).map((entry) => Object.entries(entry)
-    .find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1]);
+    .find(([key]) => key.split(/[@&]/u)[0] === 'thing')?.[1]);
 }
 
 function nameOf(atomValue) {
-  return Object.entries(atomValue).find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1];
+  return Object.entries(atomValue).find(([key]) => key.split(/[@&]/u)[0] === 'thing')?.[1];
 }
 
 test('successful jump moves the active Agent in the same authoritative commit', async (t) => {
@@ -678,6 +682,7 @@ test('a rejected recycle commit retains the Agent and its source-derived self-lo
       ...files,
       programMode: 'reconcile',
       programScheduler: scheduler,
+      programRefBindings: files.programRefBindings,
       commitWorld: async () => {
         throw Object.assign(new Error('synthetic commit rejection'), {
           code: 'SYNTHETIC_COMMIT_REJECTION'
@@ -702,7 +707,7 @@ test('cyclic destination and downstream failure both roll back the moved window'
     if (mode === 'downstream') {
       initial[0].slot.push(atom(
         'BrokenEffect',
-        'transform({"thing":"Missing","situation.rep.value":None})',
+        'transform({"thing.mov.Root/A/B":"Root/A/B"})',
         [], 'program'
       ));
     }

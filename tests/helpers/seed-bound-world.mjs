@@ -3,7 +3,8 @@ import fs from 'node:fs/promises';
 import { createTransactionalWorldPersistence } from '../../src/atom-system/adapters/transactional-world-persistence.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
 import {
-  createProgramRefBindingUpdate
+  createProgramRefBindingUpdate,
+  rebuildProgramRefBindings
 } from '../../work-engine/atom-language/program-ref-binding-ledger.mjs';
 import { inspectProgramReferenceSites } from '../../work-engine/atom-language/program-reference-runtime.mjs';
 import {
@@ -26,7 +27,9 @@ function resolveTarget(records, selector) {
     : null;
 }
 
-export async function seedBoundWorld({ contextFile, projectionFile, facts }) {
+export async function seedBoundWorld({
+  contextFile, projectionFile, facts, returnDetails = false, publishLegacyProjection = false
+}) {
   const seededFacts = structuredClone(facts);
   const recordsBefore = walkAtoms(seededFacts);
   const missing = recordsBefore.filter(({ atom }) => !storedField(atom, 'thing')?.parsed.identity);
@@ -58,14 +61,15 @@ export async function seedBoundWorld({ contextFile, projectionFile, facts }) {
   const persistence = createTransactionalWorldPersistence({
     contextFile,
     projectionFile,
-    publishLegacyProjection: false
+    publishLegacyProjection
   });
+  const programRefBindingUpdate = createProgramRefBindingUpdate({ replacements });
   await persistence.commit({
     correlationId: 'seed-bound-world',
     expectedRevision: revisionOfWorldFacts([]),
     nextRevision: revisionOfWorldFacts(seededFacts),
     facts: seededFacts,
-    programRefBindings: createProgramRefBindingUpdate({ replacements }),
+    programRefBindings: programRefBindingUpdate,
     ...(allocation.ids.length > 0 ? {
       thingIdentityAllocator: thingIdentityAllocatorUpdate({
         previousWatermark: '000',
@@ -73,5 +77,12 @@ export async function seedBoundWorld({ contextFile, projectionFile, facts }) {
       })
     } : {})
   });
-  return seededFacts;
+  if (!returnDetails) return seededFacts;
+  return {
+    facts: seededFacts,
+    thingIdentityWatermark: allocation.nextWatermark,
+    programRefBindings: rebuildProgramRefBindings([{ receipt: { result: {
+      programRefBindings: programRefBindingUpdate
+    } } }])
+  };
 }

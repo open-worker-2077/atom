@@ -207,6 +207,30 @@ function fields(atom) {
   return result;
 }
 
+function publicProgramStruts(value) {
+  const publicValue = structuredClone(value ?? []);
+  const visit = (entry) => {
+    if (!entry || typeof entry !== 'object') return;
+    if (Array.isArray(entry)) {
+      for (const child of entry) visit(child);
+      return;
+    }
+    for (const key of Object.keys(entry)) {
+      const parsed = parseAtomKey(key, { descriptionSymbolWarnings: false });
+      if (!parsed.errors.length && parsed.baseKey === 'thing') {
+        const publicKey = `thing${parsed.types.map(({ raw }) => `@${raw}`).join('')}`;
+        if (publicKey !== key) {
+          entry[publicKey] = entry[key];
+          delete entry[key];
+        }
+      }
+      visit(entry[key]);
+    }
+  };
+  visit(publicValue);
+  return publicValue;
+}
+
 function worldRecords(atoms) {
   const worldRevision = revisionOfWorldFacts(atoms).slice('sha256:'.length);
   const cached = preparedRecordSnapshots.get(atoms);
@@ -228,7 +252,7 @@ function worldRecords(atoms) {
       types: stored.get('thing')?.parsed.types.map((type) => type.raw) ?? [],
       parentRef,
       childrenRefs: [],
-      partners: structuredClone(stored.get('strut')?.value ?? [])
+      partners: publicProgramStruts(stored.get('strut')?.value ?? [])
     };
     if (record.types.includes('shortcut')) {
       const metadata = shortcutMetadata(atom);
@@ -1273,6 +1297,7 @@ export function validateProgramResult(result, records, program, options = {}) {
 
 function runWorker({
   python, records, programs, program, timeoutMs, executeExplore, validateOnly = false,
+  projectBoundReferences = false,
   triggered = false, changedNodes = [], scopeRoot = null, programRoot = null,
   invokeMain = false, programArguments = {}, strutDecision = false,
   allowedFunctions = null, resolveExactPath = null, agentDeclarationOnly = false, agentProgramPaths = [],
@@ -1365,6 +1390,7 @@ function runWorker({
       world: programs ?? programRecords(records),
       program,
       validateOnly,
+      projectBoundReferences,
       agentDeclarationOnly,
       triggered,
       changedNodes,
@@ -2380,6 +2406,7 @@ export class ProgramRuntimeScheduler {
           );
         },
         validateOnly: true,
+        projectBoundReferences: true,
         agentProgramPaths: [...this.agentSecurity.keys()]
       })
     ))));

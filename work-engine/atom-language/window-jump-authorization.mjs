@@ -25,13 +25,14 @@ export function issuerAuthorityGeneration(record, security) {
 }
 
 export function createWindowJumpAuthorization({
-  operationId, effect, issuerAgentPath, issuerSecurity, recordsByPath
+  operationId, effect, issuerAgentPath, issuerSecurity, recordsByPath, thingIdentity
 }) {
   const window = recordsByPath.get(effect.windowPath);
   const source = recordsByPath.get(effect.sourcePath);
   const destination = recordsByPath.get(effect.destinationPath);
   const issuer = recordsByPath.get(issuerAgentPath);
   if (!window || !source || !destination || !issuer || !issuerSecurity
+    || typeof thingIdentity !== 'string' || !thingIdentity
     || !source.path.startsWith(`${window.path}/`)) {
     throw Object.assign(new Error('Controlled jump authorization bindings are invalid'), {
       code: 'WINDOW_JUMP_AUTHORIZATION_INVALID'
@@ -53,7 +54,7 @@ export function createWindowJumpAuthorization({
   };
   return {
     atom: {
-      [`thing@${WINDOW_JUMP_AUTHORIZATION_TYPE}`]: `迁窗授权-${operationId}`,
+      [`thing@${WINDOW_JUMP_AUTHORIZATION_TYPE}&id=${thingIdentity}`]: `迁窗授权-${operationId}`,
       situation: JSON.stringify(payload),
       slot: [],
       strut: []

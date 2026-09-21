@@ -801,16 +801,18 @@ def inspect_program_references(source, filename, tree=None):
     }
 
 
-def project_ref_tree(tree, analysis, bindings=None, path_by_thing_id=None, validate_only=False):
+def project_ref_tree(tree, analysis, bindings=None, path_by_thing_id=None, validate_only=False,
+                     project_bound_references=False):
     """Compile 引述 on an AST copy; stored Situation and its analysis stay immutable."""
-    if not validate_only and bindings is not None and (
+    use_bindings = not validate_only or project_bound_references
+    if use_bindings and bindings is not None and (
             not isinstance(bindings, dict) or bindings.get("sourceHash") != analysis["sourceHash"]):
         raise EngineCallError("PROGRAM_REF_SOURCE_MISMATCH", "Program 引述 bindings do not belong to this source")
     bound_sites = bindings.get("sites", []) if isinstance(bindings, dict) else []
     replacements = {}
     command_literals = {}
     for site in analysis["sites"]:
-        if validate_only:
+        if not use_bindings:
             value = site["selector"]
         else:
             matches = [binding for binding in bound_sites
@@ -2011,7 +2013,8 @@ def main():
     )
     projected_tree = project_ref_tree(
         program_tree, references, request["program"].get("refBindings"),
-        request.get("pathByThingId"), validate_only=request.get("validateOnly") is True
+        request.get("pathByThingId"), validate_only=request.get("validateOnly") is True,
+        project_bound_references=request.get("projectBoundReferences") is True
     )
     trigger_contract = extract_trigger_contract(projected_tree)
     agent_declaration = extract_agent_declaration(program_tree)

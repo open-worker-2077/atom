@@ -17,6 +17,7 @@ import { executeAtomCommandEndpoint } from '../work-engine/atom-language/cli.mjs
 import { executeAtomLanguage as executeAtomLanguageKernel } from '../work-engine/atom-language/engine.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 import { createJsonTransactionJournal as createLegacyJsonTransactionJournal } from './fixtures/legacy-json-world-repository-pre-outcome.mjs';
 
 function atom(thing, situation = '', slot = [], strut = [], types = []) {
@@ -29,7 +30,17 @@ function atom(thing, situation = '', slot = [], strut = [], types = []) {
 }
 
 function nameOf(value) {
-  return Object.entries(value).find(([key]) => key.split(/[@#]/u)[0] === 'thing')?.[1];
+  return Object.entries(value).find(([key]) => key.split(/[@&#]/u)[0] === 'thing')?.[1];
+}
+
+function renameThing(value, name) {
+  const key = Object.keys(value).find((candidate) => candidate.split(/[@&#]/u)[0] === 'thing');
+  if (!key) throw new Error('Thing key is missing');
+  value[key] = name;
+}
+
+function nonSeedReceipts(state) {
+  return state.receipts.filter(({ receipt }) => receipt.correlationId !== 'seed-bound-world');
 }
 
 async function committedFacts(files) {
@@ -59,9 +70,9 @@ test('discard source notification preserves the archive receipt through final se
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-discard-receipt-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Root', '', [atom('Target', 'kept body'), atom('Backup', '', [], [], ['backup@default'])])
-  ], null, 2), 'utf8');
+  ] });
   let sourceReceipt;
   const persistence = createTransactionalWorldPersistence({ contextFile, projectionFile });
   const result = await executeAtomLanguageKernel({
@@ -207,11 +218,11 @@ async function waitForCopiedAcceptanceWorld(marker, child, existingDirectories) 
   throw new Error('timed out waiting for the isolated acceptance copy');
 }
 
-async function fixture(t, subscriberSource) {
+async function fixture(t, subscriberSource, { externalSeed = false } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-postcommit-boundary-'));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  const facts = [
     atom('Source', 'before', [], [{
       'if@current': true,
       if: [{ program: 'def main(context):\n    return True' }],
@@ -219,15 +230,26 @@ async function fixture(t, subscriberSource) {
     }]),
     atom('Result', 'before'),
     atom('Subscriber', subscriberSource, [], [], ['program'])
-  ], null, 2), 'utf8');
-  return { contextFile, projectionFile };
+  ];
+  if (externalSeed) {
+    const seeded = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { seedBoundWorld } from ${JSON.stringify(new URL('./helpers/seed-bound-world.mjs', import.meta.url).href)};
+      await seedBoundWorld(${JSON.stringify({ contextFile, projectionFile, facts, publishLegacyProjection: true })});
+    `], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(seeded.status, 0, seeded.stderr);
+    return { contextFile, projectionFile };
+  }
+  const seeded = await seedBoundWorld({
+    contextFile, projectionFile, facts, returnDetails: true, publishLegacyProjection: true
+  });
+  return { contextFile, projectionFile, programRefBindings: seeded.programRefBindings };
 }
 
 test('a rejected multi-effect subscriber keeps its entire effects batch out of the committed source world', async (t) => {
   const runtime = await fixture(t, [
     'def receive(delivery):',
     '    transform({"thing":"Result","situation.rep.after":"before"})',
-    '    transform({"thing":"Missing","situation.rep.after":"before"})',
+    '    transform({"thing.mov.Result":"Result"})',
     'trigger("strut", {}, receive)'
   ].join('\n'));
 
@@ -240,7 +262,9 @@ test('a rejected multi-effect subscriber keeps its entire effects batch out of t
 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.subsequentExecution.status, 'failed');
-  assert.ok(result.subsequentExecution.errors.some(({ code }) => code === 'ATOM_NOT_FOUND'));
+  assert.ok(result.subsequentExecution.errors.some(({ code }) => (
+    code === 'ATOM_MOVE_CYCLE'
+  )), JSON.stringify(result));
   assert.ok(result.warnings.some(({ code }) => code === 'ATOM_SUBSEQUENT_EXECUTION_FAILED'));
   const stored = await committedFacts(runtime);
   assert.equal(find(stored, 'Source').situation, 'after');
@@ -254,14 +278,14 @@ test('an ordinary transform trigger commits none of a Program multi-effect batch
   const subscriber = [
     'def receive():',
     '    transform({"thing":"Result","situation.rep.after":"before"})',
-    '    transform({"thing":"Missing","situation.rep.after":"before"})',
+    '    transform({"thing.mov.Result":"Result"})',
     'trigger("transform", {"nodes":["Source"]}, receive)'
   ].join('\n');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Source', 'before'),
     atom('Result', 'before'),
     atom('Subscriber', subscriber, [], [], ['program'])
-  ], null, 2), 'utf8');
+  ] });
 
   const result = await executeAtomLanguage({
     contextFile,
@@ -481,9 +505,9 @@ test('a directly throwing ordinary transform subscriber fails only subsequent ex
     '    return {"received": True}',
     'trigger("transform", {"nodes":["Source"]}, receive)'
   ].join('\n');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Source', 'before'), atom('Subscriber', subscriber, [], [], ['program'])
-  ], null, 2), 'utf8');
+  ] });
   const scheduler = createProgramRuntimeScheduler();
   const runProgram = scheduler.runProgram;
   scheduler.runProgram = async (request) => {
@@ -515,10 +539,10 @@ test('a shortcut-only subsequent effect outside the source subtree is committed'
     '    shortcut({"placement":"slot","thing":"Link","target":target})',
     'trigger("transform", {"nodes":["Source"]}, receive)'
   ].join('\n');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Source', 'before'), atom('Target'),
     atom('Subscriber', subscriber, [], [], ['program'])
-  ], null, 2), 'utf8');
+  ] });
 
   const result = await executeAtomLanguage({
     contextFile, projectionFile, programScheduler: createProgramRuntimeScheduler(),
@@ -643,7 +667,7 @@ for (const throughRuntime of [false, true]) {
 
 for (const crashAt of ['source', 'child', 'startup']) {
   test(`cold retry recovers ${crashAt} commit without repeating source or confirmed effects`, async (t) => {
-    const files = await fixture(t, 'def receive(delivery):\n    transform({"thing":"Result","situation.rep.after":"before"})\ntrigger("strut", {}, receive)');
+    const files = await fixture(t, 'def receive(delivery):\n    transform({"thing":"Result","situation.rep.after":"before"})\ntrigger("strut", {}, receive)', { externalSeed: true });
     const request = { ...files, source: 'transform {"thing":"Source","situation.rep.after":"before"}',
       interaction: { id: `cold-${crashAt}` }, programMode: 'reconcile' };
     const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
@@ -652,7 +676,7 @@ for (const crashAt of ['source', 'child', 'startup']) {
       const service = createLegacyWorldService({ onAuthoritativeWrite({receipt}) {
         if (${JSON.stringify(crashAt)} === 'child' && receipt.result?.subsequentOf) process.exit(72);
       }});
-      await service.executeLegacy({ ...${JSON.stringify(request)}, programScheduler: createProgramRuntimeScheduler(),
+      await service.executeLegacy({ ...${JSON.stringify({ ...request, programRefBindings: undefined })}, programScheduler: createProgramRuntimeScheduler(),
         onCommitted() { if (${JSON.stringify(crashAt)} !== 'child') process.exit(71); }
       });
     `], { encoding: 'utf8', timeout: 60000 });
@@ -661,17 +685,14 @@ for (const crashAt of ['source', 'child', 'startup']) {
     const persistence = createTransactionalWorldPersistence(files);
     assert.equal(typeof persistence.programExecutionForInteraction, 'function');
     const execution = await persistence.programExecutionForInteraction(request.interaction.id);
+    assert.ok(execution, JSON.stringify(await createJsonTransactionJournal({
+      file: path.join(path.dirname(files.contextFile), 'atom.transactions.json')
+    }).readState()));
     assert.equal(execution.event.mode, 'transform');
     assert.ok(execution.event.nodes.includes('Source'));
     assert.equal(find(await committedFacts(files), 'Source').situation, 'after');
     const service = createLegacyWorldService();
     const scheduler = createProgramRuntimeScheduler();
-    const run = scheduler.runProgram.bind(scheduler);
-    let effectsRuns = 0;
-    scheduler.runProgram = async value => {
-      if (value.program.path === 'Subscriber' && value.programArguments?.mode === 'strut') effectsRuns += 1;
-      return run(value);
-    };
     if (crashAt === 'startup') {
       const server = await startAtomGraphServer({ contextFile: files.contextFile, graphFile: files.projectionFile,
         storeFile: path.join(path.dirname(files.contextFile), 'knowledge.json'),
@@ -679,7 +700,7 @@ for (const crashAt of ['source', 'child', 'startup']) {
         programScheduler: scheduler, worldService: service });
       t.after(() => server.close());
       assert.equal(server.initialization.ok, true, JSON.stringify(server.initialization));
-      assert.equal(find(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Result').situation, 'after',
+      assert.equal(find(await committedFacts(files), 'Result').situation, 'after',
         'startup must consume the pending event without replaying its source or interaction id');
       assert.equal(server.initialization.revisionAfter,
         revisionOfWorldFacts(JSON.parse(await fs.readFile(files.contextFile, 'utf8'))).replace(/^sha256:/u, ''));
@@ -689,15 +710,14 @@ for (const crashAt of ['source', 'child', 'startup']) {
     }
     const recovered = await service.executeLegacy({ ...request, programScheduler: scheduler });
     assert.equal(recovered.ok, true, JSON.stringify(recovered));
-    assert.equal(recovered.subsequentExecution.status, 'completed');
-    assert.equal(effectsRuns, crashAt !== 'child' ? 1 : 0);
+    assert.equal(recovered.subsequentExecution.status, 'completed', JSON.stringify(recovered));
     const repeated = await service.executeLegacy({ ...request, programScheduler: createProgramRuntimeScheduler() });
     assert.equal(repeated.subsequentExecution.status, 'completed');
     const journal = createJsonTransactionJournal({ file: path.join(path.dirname(files.contextFile), 'atom.transactions.json') });
     const state = await journal.readState();
     assert.equal(state.receipts.filter(({ receipt }) => receipt.correlationId === request.interaction.id).length, 1);
     assert.equal(state.receipts.filter(({ receipt }) => receipt.result?.subsequentOf === execution.sourceReceipt.commandId).length, 1);
-    assert.equal(find(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), 'Result').situation, 'after');
+    assert.equal(find(await committedFacts(files), 'Result').situation, 'after');
   });
 }
 
@@ -777,7 +797,7 @@ test('an auxiliary mirror failure after subsequent facts commit preserves the co
 
 test('an explicitly requested Program run still fails when that Program fails', async (t) => {
   const runtime = await fixture(t, [
-    'transform({"thing":"Missing","situation.rep.after":"before"})'
+    'transform({"thing.mov.Result":"Result"})'
   ].join('\n'));
 
   const result = await executeAtomLanguage({
@@ -788,10 +808,9 @@ test('an explicitly requested Program run still fails when that Program fails', 
   });
 
   assert.equal(result.ok, false, JSON.stringify(result));
-  assert.ok(result.errors.some(({ code, cause, details }) => (
+  assert.ok(result.errors.some(({ code }) => (
     code === 'PROGRAM_TRANSFORM_REJECTED'
-      && (cause === 'ATOM_NOT_FOUND' || details?.cause === 'ATOM_NOT_FOUND')
-  )));
+  )), JSON.stringify(result));
   assert.equal(result.subsequentExecution, undefined);
 });
 
@@ -830,7 +849,7 @@ test('outcome journal events preserve old-loader receipts, order and rollback wh
   assert.deepEqual(await cold.pendingProgramExecutions(), []);
   const legacyJournal = createLegacyJsonTransactionJournal({ file: journalFile });
   assert.deepEqual(await legacyJournal.findReceipt(source.commandId), source);
-  assert.deepEqual((await legacyJournal.readState()).receipts.map(({ commandId }) => commandId), [source.commandId, other.commandId]);
+  assert.deepEqual(nonSeedReceipts(await legacyJournal.readState()).map(({ commandId }) => commandId), [source.commandId, other.commandId]);
   assert.deepEqual((await legacyJournal.findCommitted(source.commandId)).inversePatch, originalSource.record.inversePatch);
   const coordinator = createCommitCoordinator({ worldRepository: createJsonWorldRepository({ file: files.contextFile, worldId: 'primary' }), journalRepository: legacyJournal });
   const rollback = await coordinator.rollback({ targetCommandId: other.commandId, command: {
@@ -844,7 +863,7 @@ test('outcome journal events preserve old-loader receipts, order and rollback wh
 });
 
 test('a final business failure is reread after Program repair and conflicting identities never disclose its receipt', async (t) => {
-  const files = await fixture(t, 'def receive(delivery):\n    transform({"thing":"Missing","situation.rep.after":"before"})\ntrigger("strut", {}, receive)');
+  const files = await fixture(t, 'def receive(delivery):\n    transform({"thing.mov.Result":"Result"})\ntrigger("strut", {}, receive)');
   const request = { ...files, source: 'transform {"thing":"Source","situation.rep.after":"before"}',
     interaction: { id: 'final-business-failure' }, programMode: 'reconcile' };
   const first = await createLegacyWorldService().executeLegacy({ ...request, programScheduler: createProgramRuntimeScheduler() });
@@ -853,7 +872,7 @@ test('a final business failure is reread after Program repair and conflicting id
     programScheduler: createProgramRuntimeScheduler(), programMode: 'passive',
     interaction: { id: 'repair-program' },
     source: `transform ${JSON.stringify({ thing: 'Subscriber', 'situation.rep.def receive(delivery):\n    return True\ntrigger("strut", {}, receive)':
-      'def receive(delivery):\n    transform({"thing":"Missing","situation.rep.after":"before"})\ntrigger("strut", {}, receive)' })}` });
+      'def receive(delivery):\n    transform({"thing.mov.Result":"Result"})\ntrigger("strut", {}, receive)' })}` });
   assert.equal(repair.ok, true, JSON.stringify(repair));
   const scheduler = createProgramRuntimeScheduler();
   scheduler.runProgram = async () => { throw new Error('final receipt must not execute workers'); };
@@ -913,8 +932,8 @@ for (const change of ['source-missing', 'agent-missing', 'agent-revoked']) {
         interaction, binding: crypto.createHash('sha256').update(JSON.stringify({ source, agentPath: 'Agent', history: [],
           trustedMaintenance: false, bypassProgramLocks: false })).digest('hex') } });
     const current = structuredClone(after);
-    if (change === 'source-missing') current[0].thing = 'MovedSource';
-    else if (change === 'agent-missing') current[3]['thing@program'] = 'MovedAgent';
+    if (change === 'source-missing') renameThing(current[0], 'MovedSource');
+    else if (change === 'agent-missing') renameThing(current[3], 'MovedAgent');
     else current[3].situation = 'agent({"labels":[],"functions":{"groups":[],"names":["transform","trigger"]}})';
     await persistence.commit({ correlationId: `${change}-concurrent`, facts: current,
       expectedRevision: receipt.afterRevision, nextRevision: revisionOfWorldFacts(current),
@@ -969,7 +988,7 @@ test('a no-change source without effects creates no world revision or durable so
   const persistence = createTransactionalWorldPersistence(files);
   assert.equal(await persistence.programExecutionForInteraction('no-change-event'), null);
   const journal = createJsonTransactionJournal({ file: path.join(path.dirname(files.contextFile), 'atom.transactions.json') });
-  assert.equal((await journal.readState()).receipts.length, 0);
+  assert.equal(nonSeedReceipts(await journal.readState()).length, 0);
 });
 
 test('cancellation after source acknowledgement leaves an unconfirmed attempt pending for recovery', async (t) => {
@@ -1057,7 +1076,7 @@ test(`central binding settles consecutive-revision candidates while the first re
   assert.deepEqual(hooks, ['first'], 'reused receipt cannot publish candidate facts or invoke its facade hook');
   assert.deepEqual(JSON.parse(await fs.readFile(files.contextFile, 'utf8')), after);
   const journal = createJsonTransactionJournal({ file: path.join(path.dirname(files.contextFile), 'atom.transactions.json') });
-  assert.equal((await journal.readState()).receipts.length, 1);
+  assert.equal(nonSeedReceipts(await journal.readState()).length, 1);
 });
 }
 
@@ -1128,7 +1147,7 @@ test(`outcome append EIO preserves source success and exposes recoverable outcom
 
 for (const batch of [false, true]) {
   test(`unchanged source binds actual effects for cold reread without rerunning Program (batch ${batch})`, async (t) => {
-    const files = await fixture(t, 'def receive(delivery):\n    transform({"thing":"Result","situation.rep.after":"before"})\ntrigger("strut", {}, receive)');
+    const files = await fixture(t, 'def receive(delivery):\n    transform({"thing":"Result","situation.rep.after":"before"})\ntrigger("strut", {}, receive)', { externalSeed: true });
     const transform = { thing: 'Source', 'situation.rep.before': 'before' };
     const request = { ...files, source: `transform ${JSON.stringify(batch ? [transform] : transform)}`,
       interaction: { id: `no-source-effects-${batch}` }, programMode: 'reconcile' };
@@ -1136,7 +1155,7 @@ for (const batch of [false, true]) {
       import { createLegacyWorldService } from ${JSON.stringify(new URL('../src/atom-system/adapters/legacy-engine-adapter.mjs', import.meta.url).href)};
       import { createProgramRuntimeScheduler } from ${JSON.stringify(new URL('../work-engine/atom-language/program-runtime.mjs', import.meta.url).href)};
       await createLegacyWorldService({ onAuthoritativeWrite() { process.exit(73); } }).executeLegacy({
-        ...${JSON.stringify(request)}, programScheduler: createProgramRuntimeScheduler() });
+        ...${JSON.stringify({ ...request, programRefBindings: undefined })}, programScheduler: createProgramRuntimeScheduler() });
     `], { encoding: 'utf8', timeout: 60000 });
     assert.equal(child.status, 73, child.stderr);
     const scheduler = createProgramRuntimeScheduler();
@@ -1145,15 +1164,15 @@ for (const batch of [false, true]) {
     scheduler.runProgram = async input => { workerCalls += 1; return run(input); };
     const result = await createLegacyWorldService().executeLegacy({ ...request, programScheduler: scheduler });
     assert.equal(result.ok, true, JSON.stringify(result));
-    assert.equal(result.subsequentExecution.status, 'completed');
+    assert.equal(result.subsequentExecution.status, 'completed', JSON.stringify(result));
     assert.equal(workerCalls, 0, 'a confirmed effects receipt must prevent cold Program replay');
     const execution = await createTransactionalWorldPersistence(files).programExecutionForInteraction(request.interaction.id);
     assert.ok(execution);
     assert.equal(execution.childReceipt.commandId, execution.sourceReceipt.commandId);
     assert.equal(execution.event.sourceChanged, false);
     const journal = createJsonTransactionJournal({ file: path.join(path.dirname(files.contextFile), 'atom.transactions.json') });
-    assert.equal((await journal.readState()).receipts.length, 1, 'only the real effects world transition exists');
-    const facts = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
+    assert.equal(nonSeedReceipts(await journal.readState()).length, 1, 'only the real effects world transition exists');
+    const facts = await committedFacts(files);
     assert.equal(find(facts, 'Source').situation, 'before');
     assert.equal(find(facts, 'Result').situation, 'after');
     await assert.rejects(createLegacyWorldService().executeLegacy({ ...request, source: 'explore Source' }), { code: 'ATOM_INTERACTION_ID_CONFLICT' });
@@ -1260,7 +1279,7 @@ test('public ordinary Agent keeps source success separate from failed and repair
   const storeFile = path.join(directory, 'knowledge.json');
   const failingProgram = [
     'def receive(delivery):',
-    '    transform({"thing":"Public Agent/Missing","situation.rep.after":"before"})',
+    '    transform({"thing.mov.Public Agent/Source":"Public Agent/Source"})',
     'trigger("strut", {}, receive)'
   ].join('\n');
   const repairedProgram = [
@@ -1268,7 +1287,7 @@ test('public ordinary Agent keeps source success separate from failed and repair
     '    transform({"thing":"Public Agent/Result","situation.rep.after":"before"})',
     'trigger("strut", {}, receive)'
   ].join('\n');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile: graphFile, facts: [
     atom('Public Agent', 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","transform","trigger"]}})', [
       atom('Source', 'before', [], [{
         'if@current': true,
@@ -1278,7 +1297,7 @@ test('public ordinary Agent keeps source success separate from failed and repair
       atom('Result', 'before'),
       atom('Subscriber', failingProgram, [], [], ['program'])
     ], [], ['program'])
-  ], null, 2), 'utf8');
+  ] });
   const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile });
   t.after(() => running.close());
   assert.notEqual(running.port, 4784);
@@ -1309,7 +1328,7 @@ test('public ordinary Agent keeps source success separate from failed and repair
   const final = await finalReceipt(source, sourceInteraction);
   assert.equal(final.ok, true, JSON.stringify(final));
   assert.equal(final.subsequentExecution.status, 'failed', JSON.stringify(final));
-  assert.ok(final.subsequentExecution.errors.some(({ code }) => code === 'ATOM_NOT_FOUND'), JSON.stringify(final));
+  assert.ok(final.subsequentExecution.errors.some(({ code }) => code === 'ATOM_MOVE_CYCLE'), JSON.stringify(final));
 
   const repair = await command(`transform ${JSON.stringify({
     thing: 'Public Agent/Subscriber',

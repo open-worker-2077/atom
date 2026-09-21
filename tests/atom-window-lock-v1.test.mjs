@@ -14,9 +14,14 @@ import { expandProgramFunctionSelection } from '../work-engine/atom-language/pro
 import { programFunctionRegistry } from '../work-engine/atom-language/program-function-registry.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
+}
+
+function thingEntry(value) {
+  return Object.entries(value).find(([key]) => key.split(/[@&]/u)[0] === 'thing');
 }
 
 test('function groups resolve through the current registry to deduplicated effective names', () => {
@@ -212,7 +217,7 @@ test('an Agent key may satisfy its own node lock and reconfigure without exceedi
   const projectionFile = path.join(directory, 'graph.json');
   const initialSource = 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore","transform"]}})';
   const updatedSource = 'agent({"labels":["^"],"functions":{"groups":[],"names":["explore"]}})';
-  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+  await seedBoundWorld({ contextFile, projectionFile, facts: [atom('Root', '', [
     atom('Window', initialSource, [], 'program'),
     atom(
       'Window Lock',
@@ -220,7 +225,7 @@ test('an Agent key may satisfy its own node lock and reconfigure without exceedi
       [],
       'program'
     )
-  ])], null, 2));
+  ])] });
 
   const result = await executeAtomLanguage({
     source: `transform {"thing":"Root/Window",${JSON.stringify(`situation.rep.${updatedSource}`)}}`,
@@ -242,7 +247,7 @@ test('an unmatched Agent node lock denies self-reconfiguration without mutation'
   const projectionFile = path.join(directory, 'graph.json');
   const initialSource = 'agent({"labels":["finance"],"functions":{"groups":[],"names":["explore","transform"]}})';
   const updatedSource = 'agent({"labels":["finance"],"functions":{"groups":[],"names":["explore"]}})';
-  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+  await seedBoundWorld({ contextFile, projectionFile, facts: [atom('Root', '', [
     atom('Window', initialSource, [], 'program'),
     atom(
       'Window Lock',
@@ -250,7 +255,7 @@ test('an unmatched Agent node lock denies self-reconfiguration without mutation'
       [],
       'program'
     )
-  ])], null, 2));
+  ])] });
 
   const result = await executeAtomLanguage({
     source: `transform {"thing":"Root/Window",${JSON.stringify(`situation.rep.${updatedSource}`)}}`,
@@ -273,7 +278,7 @@ async function descendantAgentCandidateFixture(t, suffix, lockFields = ['thing']
   const projectionFile = path.join(directory, 'graph.json');
   const agentSource = 'agent({"labels":["worker"],"functions":{"groups":[],"names":["agent","explore","lock","transform"]}})';
   const initialProgramSource = 'agent({"labels":[],"functions":{"groups":[],"names":["explore"]}})';
-  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+  await seedBoundWorld({ contextFile, projectionFile, facts: [atom('Root', '', [
     atom('Window', agentSource, [
       atom('Child Program', initialProgramSource, [atom('Strut Fact')], 'program'),
       atom('Strut Decision', 'def main(arguments):\n    return True', [], 'program')
@@ -285,7 +290,7 @@ async function descendantAgentCandidateFixture(t, suffix, lockFields = ['thing']
       'program'
     )] : []),
     atom('Default Backup', '', [], 'backup@default')
-  ])], null, 2));
+  ])] });
   return { contextFile, projectionFile };
 }
 
@@ -305,7 +310,7 @@ for (const scenario of [
     assertStored(world) {
       const strut = world[0].slot[0].slot[0].slot[0].strut[0];
       assert.equal(strut.if[0].program, 'def main(context):\n    return True');
-      assert.equal(strut.then[0].thing, 'Root');
+      assert.equal(thingEntry(strut.then[0])?.[1], 'Root');
     }
   },
   {
@@ -314,17 +319,14 @@ for (const scenario of [
     source: 'transform {"thing.dsc.":"Root/Window/Child Program"}',
     assertStored(world) {
       assert.deepEqual(
-        world[0].slot[0].slot.map((entry) => entry['thing@program'] ?? entry.thing),
+        world[0].slot[0].slot.map((entry) => thingEntry(entry)?.[1]),
         ['Strut Decision']
       );
       const backup = world[0].slot.find((entry) => Object.entries(entry).some(([key, value]) => (
         key.startsWith('thing') && value === 'Default Backup'
       )));
-      assert.equal(backup.slot[0]['thing@program'], 'Child Program');
-      assert.deepEqual(
-        Object.keys(backup.slot[0]).filter((key) => key.startsWith('thing')),
-        ['thing@program']
-      );
+      assert.equal(thingEntry(backup.slot[0])?.[1], 'Child Program');
+      assert.equal(thingEntry(backup.slot[0])?.[0].split('&')[0], 'thing@program');
     }
   }
 ]) {
@@ -343,11 +345,7 @@ for (const scenario of [
     scenario.assertStored(world);
     const child = world[0].slot[0].slot[0];
     if (child) {
-      assert.equal(Object.hasOwn(child, 'thing@program'), true);
-      assert.deepEqual(
-        Object.keys(child).filter((key) => key.startsWith('thing')),
-        ['thing@program']
-      );
+      assert.equal(thingEntry(child)?.[0].split('&')[0], 'thing@program');
     }
   });
 }

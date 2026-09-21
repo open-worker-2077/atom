@@ -8,13 +8,14 @@ import { createProgramRuntimeScheduler } from '../work-engine/atom-language/prog
 import { createJsonRequestDrivenLockRepository } from '../src/atom-system/adapters/json-request-driven-lock-repository.mjs';
 import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 function nameOf(value) {
-  return Object.entries(value).find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1];
+  return Object.entries(value).find(([key]) => key.split(/[@&]/u)[0] === 'thing')?.[1];
 }
 
 function agentProgramSource(functions = ['explore', 'lock', 'transform']) {
@@ -170,7 +171,7 @@ test('scheduler Program moves one fixed window while its spatial scope follows t
   const lockSource = [
     'lock({"targets":{"paths":["Root/控制器"],"scope":"subtree"},"mode":"read_write","fields":["thing","situation","slot","strut"],"allowed_windows":{"relation":"target_within_window_parent"},"allowed_programs":{"paths":["Root/控制器/调度程序"]},"refresh":{"policy":"on_request"}})'
   ].join('\n');
-  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+  await seedBoundWorld({ contextFile, projectionFile, facts: [atom('Root', '', [
     atom('控制器', agentProgramSource(['explore', 'lock', 'transform', 'trigger']), [
       atom('状态', '1'),
       atom('调度程序', schedulerSource, [], 'program'),
@@ -178,7 +179,7 @@ test('scheduler Program moves one fixed window while its spatial scope follows t
       atom('工单1', '', [atom('回单', '待回'), atom('执行窗口', agentProgramSource(), [], 'program@jump-executor')]),
       atom('工单2', '', [atom('回单', '待回')])
     ], 'program')
-  ])], null, 2));
+  ])] });
   const scheduler = createProgramRuntimeScheduler({
     requestDrivenLockRepository: createJsonRequestDrivenLockRepository({ file: snapshotFile })
   });
@@ -321,13 +322,13 @@ test('source-derived type lock survives movement and cold restart without sideca
   const source = [
     'lock({"targets":{"paths":["Root/控制器/受控目标"]},"mode":"write","fields":["situation"],"allowed_windows":{"types":{"all":["program"],"any":["approved"]}},"refresh":{"policy":"on_request"}})'
   ].join('\n');
-  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+  await seedBoundWorld({ contextFile, projectionFile, facts: [atom('Root', '', [
     atom('控制器', agentProgramSource(), [
       atom('允许窗口', agentProgramSource(), [], 'program@approved'),
       atom('其他窗口', agentProgramSource(), [], 'program'),
       atom('新父'), atom('受控目标', '原值'), atom('窗口锁程序', source, [], 'program')
     ], 'program@approved')
-  ])], null, 2));
+  ])] });
   const projectionRepository = createJsonProgramProjectionRepository({ file: programProjectionFile });
   const scheduler = createProgramRuntimeScheduler({ projectionRepository });
   const interaction = (path) => ({ agent: { ref: `agent:${path}`, path } });
@@ -371,13 +372,13 @@ test('world-record window types enforce transform locks and persist without conc
   const source = [
     'lock({"targets":{"paths":["Root/控制器/受控目标"]},"mode":"write","fields":["situation"],"allowed_windows":{"types":{"all":["program"],"any":["研发"],"none":["执行"]}},"when":{"target_types":{"all":["槽例","待处理"]},"actions":["transform"]},"refresh":{"policy":"on_request"}})'
   ].join('\n');
-  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+  await seedBoundWorld({ contextFile, projectionFile, facts: [atom('Root', '', [
     atom('控制器', agentProgramSource(), [
       atom('其他窗口', agentProgramSource(), [], 'program@执行'),
       atom('受控目标', '', [], '槽例@待处理'),
       atom('窗口锁程序', source, [], 'program')
     ], 'program@研发')
-  ])], null, 2));
+  ])] });
   const scheduler = createProgramRuntimeScheduler();
   const interaction = (windowPath) => ({ agent: { ref: `agent:${windowPath}`, path: windowPath } });
 

@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { thingIdForOrdinal } from '../work-engine/atom-language/thing-id-allocator.mjs';
 
@@ -59,7 +60,7 @@ async function fixture(t) {
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+  await seedBoundWorld({ contextFile, projectionFile, facts: [atom('Root', '', [
     atom('Task', '', [
       atom('Creator', CREATOR_SOURCE, [
         atom('AllowedChild', CHILD_SOURCE, [], 'program')
@@ -68,7 +69,7 @@ async function fixture(t) {
     atom('Outside', '', [
       atom('ForbiddenChild', CHILD_SOURCE, [], 'program')
     ])
-  ])], null, 2));
+  ])] });
   return { contextFile, projectionFile };
 }
 
@@ -230,14 +231,14 @@ test('human Web discard may deactivate an Agent subtree without granting delegat
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Workspace', '', [
       atom('Reference Plan', '', [
         atom('Nested Agent', CHILD_SOURCE, [], 'program')
       ])
     ]),
     atom('Default Backup', '', [], 'backup@default')
-  ], null, 2));
+  ] });
   const scheduler = createProgramRuntimeScheduler();
 
   const result = await executeAtomLanguage({
@@ -263,13 +264,13 @@ for (const [index, scenario] of DELEGATION_CASES.entries()) {
     const projectionFile = path.join(directory, 'graph.json');
     const creatorPath = `Root/Task/Creator${index}`;
     const childPath = `${creatorPath}/Child${index}`;
-    await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+    await seedBoundWorld({ contextFile, projectionFile, facts: [atom('Root', '', [
       atom('Task', '', [
         atom(`Creator${index}`, scenario.creator, [
           atom(`Child${index}`, 'value = 1', [], 'program')
         ], 'program')
       ])
-    ])], null, 2));
+    ])] });
     const scheduler = createProgramRuntimeScheduler();
 
     const result = await executeAtomLanguage({

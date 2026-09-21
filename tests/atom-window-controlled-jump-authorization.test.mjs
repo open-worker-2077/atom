@@ -8,6 +8,7 @@ import {
   executeAtomLanguage,
   readCommittedAtomLanguageFacts
 } from './helpers/atom-language-test-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import {
   expandProgramFunctionSelection,
@@ -107,13 +108,23 @@ async function fixture(t, options = {}) {
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, `${JSON.stringify(options.initialWorld ?? world(options), null, 2)}\n`);
-  return { contextFile, projectionFile };
+  const seeded = await seedBoundWorld({
+    contextFile,
+    projectionFile,
+    facts: options.initialWorld ?? world(options),
+    returnDetails: true
+  });
+  return {
+    contextFile,
+    projectionFile,
+    programRefBindings: seeded.programRefBindings,
+    thingIdentityWatermark: seeded.thingIdentityWatermark
+  };
 }
 
 function names(atomValue) {
   return (atomValue.slot ?? []).map((entry) => Object.entries(entry)
-    .find(([key]) => key === 'thing' || key.startsWith('thing@') || key.startsWith('thing&'))?.[1]);
+    .find(([key]) => key.split(/[@&]/u)[0] === 'thing')?.[1]);
 }
 
 function findTyped(atoms, type, prefix = []) {
@@ -122,7 +133,7 @@ function findTyped(atoms, type, prefix = []) {
       key === 'thing' || key.startsWith('thing@') || key.startsWith('thing&')
     ));
     const currentPath = [...prefix, entry[1]];
-    if (entry[0].split('@').slice(1).includes(type)) {
+    if (entry[0].split('&')[0].split('@').slice(1).includes(type)) {
       return { atom: current, path: currentPath.join('/') };
     }
     const nested = findTyped(current.slot ?? [], type, currentPath);
@@ -417,7 +428,7 @@ test('a matching retained authorization wakes the execution registration on retr
     '    })',
     `trigger("transform", {"nodes":[${JSON.stringify(registrationPath)}]}, handoff)`
   ].join('\n');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Root', rootSource, [
       atom('Signal', 'before'),
       atom('Work', '', [
@@ -431,7 +442,7 @@ test('a matching retained authorization wakes the execution registration on retr
         atom('Job2')
       ])
     ], 'program')
-  ], null, 2));
+  ] });
 
   const scheduler = createProgramRuntimeScheduler();
   const retained = await executeAtomLanguage({
@@ -510,7 +521,7 @@ test('a triggered controller reports ambiguous successors without granting or mo
       atom('Job3')
     ])
   ], 'program')];
-  await fs.writeFile(contextFile, `${JSON.stringify(initial, null, 2)}\n`);
+  await seedBoundWorld({ contextFile, projectionFile, facts: initial });
 
   const result = await executeAtomLanguage({
     contextFile,

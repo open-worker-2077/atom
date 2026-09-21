@@ -8,6 +8,7 @@ import {
   executeAtomLanguage,
   readCommittedAtomLanguageFacts
 } from './helpers/atom-language-test-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 import { createLegacyWorldService } from '../src/atom-system/adapters/legacy-engine-adapter.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 
@@ -63,8 +64,13 @@ async function fixture(t, programs = [], childPrograms = []) {
       ...programs
     ], 'program')
   ])])];
-  await fs.writeFile(contextFile, JSON.stringify(initial, null, 2));
-  return { contextFile, projectionFile, initial };
+  const seeded = await seedBoundWorld({
+    contextFile, projectionFile, facts: initial, returnDetails: true
+  });
+  initial.splice(0, initial.length, ...structuredClone(seeded.facts));
+  return {
+    contextFile, projectionFile, initial, programRefBindings: seeded.programRefBindings
+  };
 }
 
 function interaction(id) {
@@ -84,6 +90,10 @@ function find(atoms, targetPath) {
   return current;
 }
 
+function thingName(atomValue) {
+  return Object.entries(atomValue).find(([key]) => key.split(/[@&#]/u)[0] === 'thing')?.[1];
+}
+
 async function assertRejectedWithoutCommit(result, files, before) {
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.ok(result.errors.some(({ code }) => code === 'AGENT_JURISDICTION_ESCALATION'), JSON.stringify(result));
@@ -91,14 +101,16 @@ async function assertRejectedWithoutCommit(result, files, before) {
   assert.equal(await fs.readFile(files.contextFile, 'utf8'), before);
 }
 
-async function seedCommittedSharedRuntime(initial) {
+async function seedCommittedSharedRuntime(initial, programRefBindings) {
   let projection = Object.freeze({ marker: 'committed-projection' });
   const scheduler = createProgramRuntimeScheduler({
+    programRefBindings,
     projectionRepository: {
       async load() { return structuredClone(projection); },
       async save(value) { projection = structuredClone(value); }
     }
   });
+  await scheduler.prepareProgramReferenceIndex(initial);
   await scheduler.refresh(initial, { isolateFailures: true, passive: true });
   assert.equal(scheduler.triggerContractsInitialized, true);
   assert.ok(scheduler.triggerContracts.has(COMMITTED_TRIGGER_PATH));
@@ -155,7 +167,7 @@ test('a context-free transform trigger authorizes an Agent Program with its own 
     `trigger("transform", {"nodes":[${JSON.stringify(signalPath)}]}, advance)`
   ].join('\n');
   const guardSource = `lock({"targets":{"paths":[${JSON.stringify(targetPath)}],"scope":"exact"},"actions":["transform"],"labels":["总控"]})`;
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Root', '', [
       atom('Controller', controllerSource, [
         atom('Signal', 'before'),
@@ -163,7 +175,7 @@ test('a context-free transform trigger authorizes an Agent Program with its own 
         atom('Guard', guardSource, [], 'program')
       ], 'program')
     ])
-  ], null, 2));
+  ] });
 
   const programScheduler = createProgramRuntimeScheduler();
   const result = await executeAtomLanguage({
@@ -198,7 +210,7 @@ test('a context-free ordinary Program does not inherit its enclosing Agent label
     `trigger("transform", {"nodes":[${JSON.stringify(signalPath)}]}, advance)`
   ].join('\n');
   const guardSource = `lock({"targets":{"paths":[${JSON.stringify(targetPath)}],"scope":"exact"},"actions":["transform"],"labels":["总控"]})`;
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Root', '', [
       atom('Controller', 'agent({"labels":["总控"],"functions":{"groups":[],"names":["lock","transform","trigger"]}})', [
         atom('Signal', 'before'),
@@ -207,7 +219,7 @@ test('a context-free ordinary Program does not inherit its enclosing Agent label
         atom('Guard', guardSource, [], 'program')
       ], 'program')
     ])
-  ], null, 2));
+  ] });
 
   const result = await executeAtomLanguage({
     contextFile,
@@ -247,7 +259,7 @@ test('a completed stage lets its total-control Agent activate and unlock the nex
     `trigger("transform", {"nodes":[${JSON.stringify(firstPath)}]}, advance)`
   ].join('\n');
   const guardSource = `lock({"targets":{"paths":[${JSON.stringify(nextPath)}],"scope":"subtree"},"actions":["transform"],"labels":["总控"]})`;
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Root', '', [
       atom('Controller', controllerSource, [
         {
@@ -258,7 +270,7 @@ test('a completed stage lets its total-control Agent activate and unlock the nex
         atom('第二步业务锁', guardSource, [], 'program')
       ], 'program')
     ])
-  ], null, 2));
+  ] });
 
   const programScheduler = createProgramRuntimeScheduler();
   const result = await executeAtomLanguage({
@@ -270,8 +282,8 @@ test('a completed stage lets its total-control Agent activate and unlock the nex
 
   assert.equal(result.ok, true, JSON.stringify(result));
   const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(stored[0].slot[0].slot[0].thing, '✅第一步');
-  assert.equal(stored[0].slot[0].slot[1].thing, '🏃‍♀️第二步');
+  assert.equal(thingName(stored[0].slot[0].slot[0]), '✅第一步');
+  assert.equal(thingName(stored[0].slot[0].slot[1]), '🏃‍♀️第二步');
   assert.equal(stored[0].slot[0].slot[2].situation, inertGuard);
   assert.deepEqual(await programScheduler.activeRequestDrivenLocks(stored), []);
 });
@@ -331,7 +343,7 @@ test('a five-stage strut chain hands one execution Agent to each activated succe
     '      "when": explore({"thing":"When"})[0],',
     '      "where": explore({"thing":"Where"})[0]',
     '    })',
-    `trigger("transform", {"nodes":[${JSON.stringify(registrationPath(0))}]}, handoff)`
+    `trigger("transform", {"nodes":[ref(${JSON.stringify(registrationPath(0))})]}, handoff)`
   ].join('\n');
   const stageAtoms = stageNames.map((name, index) => {
     const strut = index < stageNames.length - 1
@@ -360,13 +372,13 @@ test('a five-stage strut chain hands one execution Agent to each activated succe
       )]
     };
   });
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     atom('Root', '', [
       atom('Controller', controllerSource, [
         ...stageAtoms
       ], 'program')
     ])
-  ], null, 2));
+  ] });
 
   const programScheduler = createProgramRuntimeScheduler();
   for (let index = 0; index < stageNames.length - 1; index += 1) {
@@ -385,9 +397,7 @@ test('a five-stage strut chain hands one execution Agent to each activated succe
     const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
     const paths = new Set((function walk(atoms, prefix = []) {
       return atoms.flatMap((entry) => {
-        const thing = Object.entries(entry).find(([key]) => (
-          key === 'thing' || key.startsWith('thing@')
-        ))[1];
+        const thing = thingName(entry);
         const current = [...prefix, thing];
         return [current.join('/'), ...walk(entry.slot ?? [], current)];
       });
@@ -395,9 +405,12 @@ test('a five-stage strut chain hands one execution Agent to each activated succe
     assert.ok(paths.has(completedPath(index)));
     assert.ok(
       paths.has(activePath(index + 1)),
-      `${JSON.stringify(result.warnings)}\n${[...paths].join('\n')}`
+      `${JSON.stringify(result.subsequentExecution ?? result.warnings)}\n${[...paths].join('\n')}`
     );
-    assert.ok(paths.has(executionPath(index + 1)), [...paths].join('\n'));
+    assert.ok(
+      paths.has(executionPath(index + 1)),
+      `${JSON.stringify(result)}\n${[...paths].join('\n')}`
+    );
     assert.equal(paths.has(`${completedPath(index)}/执行`), false);
     assert.equal([...paths].some((entry) => entry.includes('迁窗授权-')), false);
   }
@@ -416,7 +429,7 @@ test('renaming an editable antecedent preserves a strut stored on a business-loc
   const pendingPath = `${rootPath}/⌛️🔒后项`;
   const rootSource = 'agent({"labels":[],"functions":{"groups":[],"names":["lock","transform"]}})';
   const guardSource = `lock({"targets":{"paths":[${JSON.stringify(pendingPath)}],"scope":"subtree"},"actions":["transform"],"labels":["总控"]})`;
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     {
       'thing@program': rootPath,
       situation: rootSource,
@@ -430,7 +443,7 @@ test('renaming an editable antecedent preserves a strut stored on a business-loc
       ],
       strut: []
     }
-  ], null, 2));
+  ] });
 
   const programScheduler = createProgramRuntimeScheduler();
   const renamed = await executeAtomLanguage({
@@ -443,8 +456,12 @@ test('renaming an editable antecedent preserves a strut stored on a business-loc
 
   assert.equal(renamed.ok, true, JSON.stringify(renamed.errors));
   const [root] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(root.slot[0].thing, '✅前项');
-  assert.equal(root.slot[1].strut[0].if[0].thing, `${rootPath}/✅前项`);
+  assert.equal(thingName(root.slot[0]), '✅前项');
+  assert.equal(
+    thingName(root.slot[1].strut[0].if[0]),
+    `${rootPath}/✅前项`,
+    JSON.stringify(root.slot[1].strut[0])
+  );
 
   const directPendingEdit = await executeAtomLanguage({
     contextFile,
@@ -546,7 +563,7 @@ for (const scenario of [
         'program'
       )
     ]);
-    const scheduler = await seedCommittedSharedRuntime(files.initial);
+    const scheduler = await seedCommittedSharedRuntime(files.initial, files.programRefBindings);
     const sharedBefore = sharedRuntimeSnapshot(scheduler);
     const worldBefore = await fs.readFile(files.contextFile, 'utf8');
     const unauthorizedSource = declaredTriggerSource(ESCALATED_SOURCE);
@@ -574,12 +591,12 @@ test('batch commits its source while isolating rejected candidate authority befo
     atom('Escalation Trigger', triggerProgramSource(TARGET_PATH, CHILD_PATH, maliciousSource), [], 'program')
   ], [atom('Unauthorized Worker', unauthorizedWorkerSource, [], 'program')]);
   const scheduler = createProgramRuntimeScheduler();
-  const originalRunProgram = scheduler.runProgram;
+  const originalExecuteProgram = scheduler.executeProgram.bind(scheduler);
   let unauthorizedRuns = 0;
-  scheduler.runProgram = async (request) => {
+  scheduler.executeProgram = async (request) => {
     if (request.program?.path === `${CHILD_PATH}/Unauthorized Worker`
       && request.triggered === true) unauthorizedRuns += 1;
-    return originalRunProgram(request);
+    return originalExecuteProgram(request);
   };
   await scheduler.rebuildAgentSecurity(files.initial);
   const committedSecurity = structuredClone([...scheduler.agentSecurity]);
@@ -594,10 +611,10 @@ test('batch commits its source while isolating rejected candidate authority befo
   });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.subsequentExecution.status, 'failed');
+  const stored = await readCommittedAtomLanguageFacts(files);
   assert.ok(result.subsequentExecution.errors.some(({ code }) => (
     code === 'AGENT_JURISDICTION_ESCALATION'
   )), JSON.stringify(result));
-  const stored = await readCommittedAtomLanguageFacts(files);
   assert.equal(find(stored, TARGET_PATH).situation, 'after');
   assert.equal(find(stored, `${CREATOR_PATH}/Leak`).situation, 'still-stable');
   assert.equal(find(stored, CHILD_PATH).situation, CHILD_SOURCE);
@@ -626,7 +643,7 @@ for (const scenario of [
         'program'
       )
     ]);
-    const scheduler = await seedCommittedSharedRuntime(files.initial);
+    const scheduler = await seedCommittedSharedRuntime(files.initial, files.programRefBindings);
     const sharedBefore = sharedRuntimeSnapshot(scheduler);
 
     let commitAttempts = 0;
@@ -671,7 +688,7 @@ test('durable commit survives shared Agent-security rebuild failure and recovers
   let injected = false;
   scheduler.rebuildAgentSecurity = async (atoms) => {
     const target = atoms[0]?.slot?.[0]?.slot?.[0]?.slot
-      ?.find((entry) => entry.thing === 'Target');
+      ?.find((entry) => thingName(entry) === 'Target');
     if (!injected && target?.situation === 'after') {
       injected = true;
       throw Object.assign(new Error('synthetic rebuild failure'), {
@@ -692,7 +709,7 @@ test('durable commit survives shared Agent-security rebuild failure and recovers
     code === 'AGENT_SECURITY_REBUILD_RECOVERY_PENDING'
   )), JSON.stringify(committed));
   assert.equal((await readCommittedAtomLanguageFacts(files))[0]
-    .slot[0].slot[0].slot.find((entry) => entry.thing === 'Target').situation, 'after');
+    .slot[0].slot[0].slot.find((entry) => thingName(entry) === 'Target').situation, 'after');
 
   const recovered = await executeAtomLanguage({
     ...files,

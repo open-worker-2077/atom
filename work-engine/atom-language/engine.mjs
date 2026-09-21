@@ -1677,7 +1677,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         effect,
         issuerAgentPath,
         issuerSecurity,
-        recordsByPath
+        recordsByPath,
+        thingIdentity: thingIdentityAllocation.reserve(1)[0]
       });
     } catch (error) {
       return failureBase(parsed, contextFile, projectionFile, atoms, [diagnostic(
@@ -2280,6 +2281,17 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         code: 'PROGRAM_CANDIDATE_RUNTIME_UNAVAILABLE'
       });
     }
+    if (declarationRelocations.length > 0) {
+      if (typeof candidateProgramScheduler.refreshPreparedTriggerOwnership !== 'function') {
+        throw Object.assign(new Error('Candidate runtime cannot refresh relocated trigger ownership'), {
+          code: 'PROGRAM_TRIGGER_OWNERSHIP_REFRESH_UNAVAILABLE'
+        });
+      }
+      await candidateProgramScheduler.refreshPreparedTriggerOwnership(
+        candidateAtoms,
+        declarationRelocations
+      );
+    }
     await assertRequestCandidateAuthority(candidateAtoms, declarationRelocations);
     const runtimeScheduler = candidateProgramScheduler;
     let reconciledAtoms = candidateAtoms;
@@ -2509,7 +2521,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
             effect,
             issuerAgentPath,
             issuerSecurity,
-            recordsByPath
+            recordsByPath,
+            thingIdentity: thingIdentityAllocation.reserve(1)[0]
           });
         } catch (error) {
           return { error: diagnostic(
@@ -3285,22 +3298,26 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         changed: before !== after
       });
       if (before !== after) {
+        const bindingUpdates = applicationProgramRefBindings;
+        if (bindingUpdates.length > 0) {
+          runtimeScheduler.invalidateDerivedWorldState?.();
+          let bindingSnapshot = runtimeScheduler.programRefBindings;
+          for (const update of bindingUpdates) {
+            bindingSnapshot = applyProgramRefBindingUpdate(bindingSnapshot, update);
+          }
+          runtimeScheduler.setProgramRefBindings?.(bindingSnapshot);
+          await runtimeScheduler.prepareProgramReferenceIndex?.(application.atoms);
+        }
         await assertRequestCandidateAuthority(application.atoms, [
           ...declarationRelocations,
           ...pathChanges,
           ...cycleRelocations
         ]);
         reconciledAtoms = application.atoms;
-        const bindingUpdates = applicationProgramRefBindings;
         if (bindingUpdates.length > 0) {
-          runtimeScheduler.invalidateDerivedWorldState?.();
-          let bindingSnapshot = runtimeScheduler.programRefBindings;
           for (const update of bindingUpdates) {
             collectProgramRefBindings(update);
-            bindingSnapshot = applyProgramRefBindingUpdate(bindingSnapshot, update);
           }
-          runtimeScheduler.setProgramRefBindings?.(bindingSnapshot);
-          await runtimeScheduler.prepareProgramReferenceIndex?.(reconciledAtoms);
         }
         passChanged = true;
         for (const entry of appliedShortcuts) {
@@ -4846,7 +4863,11 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   }
   let revisionAfter = revisionBefore;
   let changed = transformed.changed === true || programChanged;
-  const declarationRelocations = (transformed.structuralCommand === 'mov' || isBatchRenameItem(item))
+  const declarationRelocations = (
+    transformed.structuralCommand === 'ren'
+    || transformed.structuralCommand === 'mov'
+    || isBatchRenameItem(item)
+  )
     && transformed.sourcePath && transformed.resultPath
     && transformed.sourcePath !== transformed.resultPath
     ? [{ sourcePath: transformed.sourcePath, resultPath: transformed.resultPath }]
@@ -5018,7 +5039,12 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     });
   }
   if (options.programScheduler && options.trustedMaintenance !== true
-    && (requestDeclarationRelocations.length === 0 || isBatchRenameItem(item))) {
+    && (
+      requestDeclarationRelocations.length === 0
+      || transformed.structuralCommand === 'ren'
+      || transformed.structuralCommand === 'mov'
+      || isBatchRenameItem(item)
+    )) {
     try {
       await synchronizeCandidateProgramBindings(sourceProgramRefBindings, nextAtoms, {
         invalidate: programSurfaceChanged
