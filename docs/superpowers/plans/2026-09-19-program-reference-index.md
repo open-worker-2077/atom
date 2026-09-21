@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Program 以显式 `ref("可读名称或exact path")` 引述 Thing，内核隐藏并持久绑定永久 Thing ID，热态改名／移动不改 Program，冷启动按 ID 校正过期可读路径并由独立保存阶段落盘。
+**Goal:** Program 以显式 `ref("可读名称或exact path")`／`ref("@aZ3")` 引述 Thing，内核持久绑定永久 Thing ID，热态改名／移动不改 Program，冷启动按 ID 校正过期可读路径并由独立保存阶段落盘。
 
 **Architecture:** Program Situation 仍是唯一应用源码事实；`ref()`只是编译期“引述”标记，不是调用／使用能力。内核把 `Program Thing ID＋source hash＋稳定引述点指纹→target Thing ID` 作为中央事务回执元数据原子保存，冷启动从回执恢复并建立可丢弃反向索引；运行前按已绑定 ID 投影当前 exact path。Thing 热态改名／移动只改变 ID→path 投影，不访问或改写 Program Situation。
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - `ref()`在Atom中称为“引述”，不表示调用、使用或执行，不与`use_program`混用。
-- 应用层、Web、CLI、Program Situation与普通回执均不得出现永久target ID；ID只存在内核身份与中央事务元数据层。
+- 名称是应用层、Web与CLI的默认显示；只在显式身份查询、重名消歧或获权审计中显示`@<Thing ID>`并允许精确寻址，普通回执与无关错误不得泄漏 ID，整批 binding 元数据仍不可公开读写。
 - 普通字符串永远是文本；只有未被局部遮蔽的静态`ref("literal")`和Atom命令操作符已定型的路径角色形成引述。
 - `ref()`恰好接受一个静态字符串位置参数；关键字参数、动态表达式、拼接、别名调用、局部定义或导入伪造均不得绑定。
 - 引述绑定与Program源码变化在同一中央事务回执中提交；失败、冲突或保存中断不得留下半份源码或半份绑定。
@@ -32,8 +32,8 @@
 
 ## Revision Authority
 
-- 只执行下方 **Revised Tasks R3—R7**。文件后部原Task 1—5保留为历史证据，其中原Task 3—5已被用户定论撤销，不得执行。
-- 已验证基础：`310488f`、`61f87bd`、`d43a7e1`提供单次AST与UTF-8站点；`f09ca45`、`8b10d81`提供不可变索引、备份域排除、局部隔离和并发发布守恒。R3、R4负责把旧“裸字符串按path绑定”替换为显式引述和持久绑定。
+- 只执行下方 **Revised Tasks R3—R7** 及R4后明确插入的S1必要依赖。文件后部原Task 1—5保留为历史证据，其中原Task 3—5已被用户定论撤销，不得执行。
+- 已验证基础：`310488f`、`61f87bd`、`d43a7e1`提供单次AST与UTF-8站点；`f09ca45`、`8b10d81`提供不可变索引、备份域排除、局部隔离和并发发布守恒。R3已关闭显式引述，R4已由`c5003b3`关闭中央事务持久绑定；进入R5前必须先完成下方S1的一次性短ID合同切换。
 
 ## Revised Tasks R3—R7
 
@@ -84,7 +84,7 @@ git add work-engine/atom-language/program-worker.py work-engine/atom-language/pr
 git commit -m "feat: add explicit Program ref syntax"
 ```
 
-### Task R4: 中央事务内核引述绑定
+### Task R4: 中央事务内核引述绑定（已关闭）
 
 **Files:**
 - Create: `work-engine/atom-language/program-ref-binding-ledger.mjs`
@@ -131,6 +131,14 @@ git add work-engine/atom-language/program-ref-binding-ledger.mjs work-engine/ato
 git commit -m "feat: persist hidden Program ref bindings"
 ```
 
+### Required Dependency S1: 一次性短 Thing ID 合同切换
+
+**Plan:** `docs/superpowers/plans/2026-09-21-atom-short-thing-id.md`
+
+**Dependency:** 必须在R4关闭后、R5开始前完整实施并达到E3。R4现有binding已引用现世界22字符Thing ID；S1须在受控冷副本按稳定遍历顺序为12,243个现有Thing重新分配短ID，并在同一原子迁移中替换Thing keys、Strut／Shortcut端点、Program owner／target binding元数据及allocator watermark。不得让R5在旧ID上继续生成冷启动校正、索引或保存证据，否则会把待退役身份扩散到后续状态。
+
+**Gate:** S1未完成正式迁移、整批回退演练、选择性`@id`显示／同权限寻址、一次最终全量、4784部署回读及精确远端检查前，R5—R7保持停止。S1完成后，R5只消费已迁移的短ID world snapshot与同代binding snapshot；不得兼容旧22字符ID、建立alias或在普通启动补迁移。
+
 ### Task R5: 冷启动按ID校正与独立保存
 
 **Files:**
@@ -143,7 +151,7 @@ git commit -m "feat: persist hidden Program ref bindings"
 - Modify: `tests/atom-program-projection-lifecycle.test.mjs`
 - Modify: `tests/atom-memory-save-capacity.test.mjs`
 
-**Interfaces:** `planProgramRefColdStart({facts,bindings}) -> {changed,programs,nextFacts,nextBindings}`；变化通过既有内存世界提交入口接受，save worker独立持久。
+**Interfaces:** 消费S1已完成短ID切换的world snapshot与同代binding snapshot；`planProgramRefColdStart({facts,bindings}) -> {changed,programs,nextFacts,nextBindings}`；变化通过既有内存世界提交入口接受，save worker独立持久。
 
 - [ ] **Step 1: Write and verify failing cold-start tests**
 
@@ -157,7 +165,7 @@ assert.equal(started.servingBeforeSaveResolved, true);
 
 Run: `node --test tests/atom-program-ref-cold-start.test.mjs tests/atom-program-projection-lifecycle.test.mjs tests/atom-memory-save-capacity.test.mjs`
 
-Expected:当前启动只建索引，不按隐藏ID校正`ref()`。
+Expected:当前启动只建索引，不按已绑定Thing ID校正`ref()`。
 
 - [ ] **Step 2: Implement memory-first reconciliation**
 
@@ -225,7 +233,7 @@ git commit -m "perf: keep Program refs stable across hot relocations"
 
 - [ ] **Step 1: Add and run scale gates**
 
-构造10,000 Thing、1,000无关Program、1个命中Program；断言热态rename／move均`visitedPrograms===0`、`pythonStarts===0`、`programWrites===0`，100→1,000无关Program的中位数比例小于2。冷启动断言每distinct source hash最多解析一次、只写实际过期`ref()`、普通字符串零绑定、ID不进入公开输出。
+构造10,000 Thing、1,000无关Program、1个命中Program；断言热态rename／move均`visitedPrograms===0`、`pythonStarts===0`、`programWrites===0`，100→1,000无关Program的中位数比例小于2。冷启动断言每distinct source hash最多解析一次、只写实际过期`ref()`、普通字符串零绑定；默认／未授权输出不含ID，显式`@id`查询与获权审计按S1合同选择性显示。
 
 Run: `node --test tests/atom-program-ref-performance.test.mjs tests/atom-system-performance.test.mjs tests/atom-production-architecture.test.mjs`
 
