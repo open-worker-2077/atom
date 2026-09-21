@@ -8,6 +8,7 @@ import {
 } from './slot-graph-semantics.mjs';
 import { bindStrutEndpointIdentities } from './transform-executor.mjs';
 import { revisionOfWorldFacts } from '../../src/atom-system/world-runtime/world-revision.mjs';
+export { planShortThingIdentityMigration } from './short-thing-id-migration.mjs';
 
 function endpointStats(atoms) {
   let total = 0;

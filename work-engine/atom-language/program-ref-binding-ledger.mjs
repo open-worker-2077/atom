@@ -78,9 +78,29 @@ function updateOf(entry) {
   return createProgramRefBindingUpdate(update);
 }
 
+function hasIdentityMigrationBarrier(entry) {
+  const barrier = receiptOf(entry)?.result?.thingIdentityMigration;
+  if (barrier == null) return false;
+  if (barrier.version !== 1
+    || barrier.sourceContract !== 'base64url-22'
+    || barrier.targetContract !== 'base62-short'
+    || !Number.isSafeInteger(barrier.thingCount)
+    || barrier.thingCount < 0
+    || typeof barrier.sourceRevision !== 'string'
+    || typeof barrier.targetRevision !== 'string'
+    || typeof barrier.allocatorWatermark !== 'string'
+    || updateOf(entry) == null) {
+    throw Object.assign(new Error('Program reference binding migration barrier is invalid'), {
+      code: 'INVALID_PROGRAM_REF_BINDING_MIGRATION'
+    });
+  }
+  return true;
+}
+
 function replay(receipts) {
   const values = new Map();
   for (const entry of receipts ?? []) {
+    if (hasIdentityMigrationBarrier(entry)) values.clear();
     const update = updateOf(entry);
     if (!update) continue;
     for (const id of update.removals) values.delete(id);
