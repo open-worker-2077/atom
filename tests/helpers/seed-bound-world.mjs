@@ -13,7 +13,9 @@ import {
   walkAtoms
 } from '../../work-engine/atom-language/slot-graph-semantics.mjs';
 import {
+  parseShortThingId,
   planThingIdAllocation,
+  thingIdForOrdinal,
   thingIdentityAllocatorUpdate
 } from '../../work-engine/atom-language/thing-id-allocator.mjs';
 
@@ -33,8 +35,27 @@ export async function seedBoundWorld({
   const seededFacts = structuredClone(facts);
   const recordsBefore = walkAtoms(seededFacts);
   const missing = recordsBefore.filter(({ atom }) => !storedField(atom, 'thing')?.parsed.identity);
-  const allocation = planThingIdAllocation({ watermark: '000', count: missing.length });
+  const highestOrdinal = recordsBefore.reduce((highest, { atom }) => {
+    const identity = storedField(atom, 'thing')?.parsed.identity;
+    if (!identity) return highest;
+    try {
+      return Math.max(highest, parseShortThingId(identity).ordinal);
+    } catch {
+      return highest;
+    }
+  }, 0);
+  const allocation = planThingIdAllocation({
+    watermark: highestOrdinal > 0 ? thingIdForOrdinal(highestOrdinal) : '000',
+    count: missing.length
+  });
   ensureThingIdentities(seededFacts, { identities: allocation.ids });
+  // Identities stamped by a direct kernel call never reached the allocator, so
+  // record every identity the seeded world carries as one contiguous issuance;
+  // otherwise a later engine commit looks like it starts from a stale watermark.
+  const issuedIdentities = walkAtoms(seededFacts)
+    .map(({ atom }) => storedField(atom, 'thing')?.parsed.identity ?? null)
+    .filter(Boolean)
+    .sort((left, right) => parseShortThingId(left).ordinal - parseShortThingId(right).ordinal);
   const records = walkAtoms(seededFacts);
   const replacements = [];
   for (const record of records) {
@@ -70,10 +91,10 @@ export async function seedBoundWorld({
     nextRevision: revisionOfWorldFacts(seededFacts),
     facts: seededFacts,
     programRefBindings: programRefBindingUpdate,
-    ...(allocation.ids.length > 0 ? {
+    ...(issuedIdentities.length > 0 ? {
       thingIdentityAllocator: thingIdentityAllocatorUpdate({
         previousWatermark: '000',
-        ids: allocation.ids
+        ids: issuedIdentities
       })
     } : {})
   });
