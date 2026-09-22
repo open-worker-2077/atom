@@ -126,11 +126,12 @@ export async function createProgramReferenceIndex(atoms, {
           continue;
         }
       const persisted = bindings?.forProgram?.(entry.identity) ?? null;
-      const effective = persisted ?? await deriveBinding({
-        programThingId: entry.identity, programPath: entry.path, source, sourceHash
-      }, inspectProgram, currentPaths);
+      // A Program without persisted kernel bindings stays usable with literal
+      // selectors (no index entry, no quarantine) until a write binds it; the
+      // index never parses sources of its own accord.
+      if (!persisted) continue;
       const bound = bindProgram({ programThingId: entry.identity, programPath: entry.path, sourceHash },
-        effective, currentPaths);
+        persisted, currentPaths);
       owners.set(entry.identity, bound.sites);
       if (bound.failure) failures.set(entry.identity, bound.failure);
     } catch (error) {
