@@ -267,7 +267,7 @@ function atomFields(atom, location) {
 
   const fields = new Map();
   for (const rawKey of Object.keys(atom)) {
-    const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
+    const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false, identityContract: 'world-any' });
     if (parsed.errors.length) {
       throw atomLanguageError(
         'INVALID_ATOM_FIELD',
@@ -316,10 +316,10 @@ function projectedStrut(clause, rootThing, thingPathByIdentity = new Map()) {
   const projected = structuredClone(clause);
   const qualify = (selector) => {
     const key = Object.keys(selector ?? {}).find((candidate) => {
-      const parsed = parseAtomKey(candidate, { descriptionSymbolWarnings: false });
+      const parsed = parseAtomKey(candidate, { descriptionSymbolWarnings: false, identityContract: 'world-any' });
       return !parsed.errors.length && parsed.baseKey === 'thing';
     }) ?? null;
-    const parsed = key ? parseAtomKey(key, { descriptionSymbolWarnings: false }) : null;
+    const parsed = key ? parseAtomKey(key, { descriptionSymbolWarnings: false, identityContract: 'world-any' }) : null;
     const publicKey = parsed
       ? `thing${parsed.types.map(({ raw }) => `@${raw}`).join('')}`
       : null;
@@ -364,7 +364,7 @@ function selectorTargetsInactiveAtom(
   boundary
 ) {
   const thingKey = Object.keys(selector ?? {}).find((candidate) => (
-    parseAtomKey(candidate, { descriptionSymbolWarnings: false }).baseKey === 'thing'
+    parseAtomKey(candidate, { descriptionSymbolWarnings: false, identityContract: 'world-any' }).baseKey === 'thing'
   ));
   const rawPath = thingKey ? selector[thingKey] : null;
   if (typeof rawPath !== 'string') return false;
@@ -444,7 +444,7 @@ function projectAtom(atom, location, rootThing, options = {}) {
     ))
   };
   for (const [rawKey, value] of Object.entries(atom)) {
-    const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
+    const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false, identityContract: 'world-any' });
     if (parsed.baseKey !== 'strut') continue;
     projected[rawKey] = insideDefaultBackup
       ? []
