@@ -22,8 +22,15 @@ import * as graphSchema from '../work-engine/atom-language/graph-schema.mjs';
 import { resolveAgentContext } from '../work-engine/atom-language/cli.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { resolveAtomRuntime } from '../work-engine/atom-language/runtime-config.mjs';
-import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
+import { applySlotBodyEffect as applySlotBodyEffectKernel } from '../work-engine/atom-language/slot-body-runtime.mjs';
 import { readVisibleSlotPlans } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
+import { thingIdentityReserverFor } from './helpers/thing-identity-reserver.mjs';
+
+const applySlotBodyEffect = (options) => applySlotBodyEffectKernel({
+  ...options,
+  reserveThingIdentities: options.reserveThingIdentities
+    ?? thingIdentityReserverFor(options.atoms ?? [])
+});
 import { createJsonTransactionJournal, createJsonWorldRepository } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import {

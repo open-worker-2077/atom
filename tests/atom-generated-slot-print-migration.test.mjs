@@ -19,9 +19,16 @@ import {
   atomName,
   childrenOf,
   fieldValue,
-  replaceStoredField
+  replaceStoredField,
+  storedField,
+  walkAtoms
 } from '../work-engine/atom-language/slot-graph-semantics.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
+import {
+  createThingIdAllocationSession,
+  parseShortThingId,
+  thingIdForOrdinal
+} from '../work-engine/atom-language/thing-id-allocator.mjs';
 
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -56,9 +63,23 @@ function unsealedBody(name) {
 }
 
 async function seal(facts, bodyPath) {
+  const identities = walkAtoms(facts)
+    .map(({ atom: candidate }) => storedField(candidate, 'thing')?.parsed.identity)
+    .filter(Boolean);
+  const highestOrdinal = identities.reduce((highest, identity) => {
+    try {
+      return Math.max(highest, parseShortThingId(identity).ordinal);
+    } catch {
+      return highest;
+    }
+  }, 0);
+  const allocation = createThingIdAllocationSession(
+    highestOrdinal > 0 ? thingIdForOrdinal(highestOrdinal) : '000'
+  );
   const result = await applyPlanSlotBodyEffect({
     atoms: facts,
-    effect: { action: 'seal', body: bodyPath }
+    effect: { action: 'seal', body: bodyPath },
+    reserveThingIdentities: (count) => allocation.reserve(count)
   });
   assert.equal(result.error, undefined, JSON.stringify(result.error));
   return result.atoms;

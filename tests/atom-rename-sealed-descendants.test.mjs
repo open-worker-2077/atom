@@ -6,7 +6,14 @@ import path from 'node:path';
 import { createRuntimeCliExecutor } from '../src/atom-system/adapters/runtime-cli-executor.mjs';
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
-import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
+import { applySlotBodyEffect as applySlotBodyEffectKernel } from '../work-engine/atom-language/slot-body-runtime.mjs';
+import { thingIdentityReserverFor } from './helpers/thing-identity-reserver.mjs';
+
+const applySlotBodyEffect = (options) => applySlotBodyEffectKernel({
+  ...options,
+  reserveThingIdentities: options.reserveThingIdentities
+    ?? thingIdentityReserverFor(options.atoms ?? [])
+});
 import { createAccessController, walkAtoms } from '../work-engine/atom-language/query-capability.mjs';
 import { createAtomLanguageReceiver } from '../work-engine/atom-language/receiver.mjs';
 import { applyTransform, applyBatchRenames } from '../work-engine/atom-language/transform-executor.mjs';

@@ -2,8 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createAccessController, walkAtoms } from '../work-engine/atom-language/query-capability.mjs';
-import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
+import { applySlotBodyEffect as applySlotBodyEffectKernel } from '../work-engine/atom-language/slot-body-runtime.mjs';
 import { compileSlotStructureGraphLocks } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
+import { thingIdentityReserverFor } from './helpers/thing-identity-reserver.mjs';
+
+const applySlotBodyEffect = (options) => applySlotBodyEffectKernel({
+  ...options,
+  reserveThingIdentities: options.reserveThingIdentities
+    ?? thingIdentityReserverFor(options.atoms ?? [])
+});
 import { authorizeWindowGraphPath } from '../work-engine/atom-language/window-lock-v1.mjs';
 
 function atom(thing, situation = '', slot = [], strut = [], type = '') {

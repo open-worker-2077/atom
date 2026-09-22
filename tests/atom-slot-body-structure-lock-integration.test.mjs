@@ -4,8 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
+import { applySlotBodyEffect as applySlotBodyEffectKernel } from '../work-engine/atom-language/slot-body-runtime.mjs';
 import { readVisibleSlotPlans } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
+import { thingIdentityReserverFor } from './helpers/thing-identity-reserver.mjs';
+
+const applySlotBodyEffect = (options) => applySlotBodyEffectKernel({
+  ...options,
+  reserveThingIdentities: options.reserveThingIdentities
+    ?? thingIdentityReserverFor(options.atoms ?? [])
+});
 import {
   inheritPreparedSlotStructureWorld,
   prepareSlotStructureWorld

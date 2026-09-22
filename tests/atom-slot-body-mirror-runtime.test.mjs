@@ -7,8 +7,15 @@ import test from 'node:test';
 
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
-import { applySlotBodyEffect } from '../work-engine/atom-language/slot-body-runtime.mjs';
+import { applySlotBodyEffect as applySlotBodyEffectKernel } from '../work-engine/atom-language/slot-body-runtime.mjs';
 import { readVisibleSlotPlans } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
+import { thingIdentityReserverFor } from './helpers/thing-identity-reserver.mjs';
+
+const applySlotBodyEffect = (options) => applySlotBodyEffectKernel({
+  ...options,
+  reserveThingIdentities: options.reserveThingIdentities
+    ?? thingIdentityReserverFor(options.atoms ?? [])
+});
 import {
   createShortcutAtom,
   shortcutMetadata

@@ -7,7 +7,6 @@ import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.
 import { executeAtomCommandEndpoint } from '../work-engine/atom-language/cli.mjs';
 import { walkAtoms } from '../work-engine/atom-language/query-capability.mjs';
 import { shortcutMetadata } from '../work-engine/atom-language/shortcut-runtime.mjs';
-import { rewriteProgramSourcePathLiterals } from '../work-engine/atom-language/transform-executor.mjs';
 
 const arg = (key) => process.argv[process.argv.indexOf(key) + 1];
 for (const key of ['--context', '--agent', '--target', '--name']) {
@@ -126,11 +125,11 @@ try {
     for (const key of Object.keys(a).filter((k) => k.startsWith('situation'))) {
       const reference = shortcutMetadata(a);
       if (reference?.target.state === 'linked') reference.target.path = relocate(reference.target.path);
-      const expected = oldThing.split(/[@#]/u).includes('program')
-        ? rewriteProgramSourcePathLiterals(a[key], [{ sourcePath: target, resultPath: renamed }])
-        : reference && reference.target.path !== shortcutMetadata(a).target.path
-          ? JSON.stringify(reference)
-          : a[key];
+      // R6: relocation never rewrites Program source; bindings follow the
+      // permanent Thing identity, so every Situation axis stays byte-identical.
+      const expected = reference && reference.target.path !== shortcutMetadata(a).target.path
+        ? JSON.stringify(reference)
+        : a[key];
       assert.equal(b[key], expected, `Unexpected Situation change ${p}`);
       if (expected !== a[key] && oldThing.split(/[@#]/u).includes('program')) programsRewritten++;
     }
