@@ -88,7 +88,9 @@ function canonicalReferences(atoms, mapPath) {
     return [{
       path: referencePath,
       thing: referencePath.split('/').at(-1),
-      rawKey: axisField(match.atom, 'thing')[0],
+      // The write may stamp the permanent identity onto the reference node, so
+      // compare its key shape rather than the raw `&id=` suffix.
+      rawKey: String(axisField(match.atom, 'thing')[0]).replace(/&id=[^#]*/u, ''),
       metadata
     }];
   }).sort((left, right) => left.path.localeCompare(right.path));
