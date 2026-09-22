@@ -52,7 +52,9 @@ function isShortThingId(value) {
   try {
     return parseShortThingId(value).id === value;
   } catch {
-    return false;
+    // Identities issued under the previous contract stay valid kernel records
+    // until the world is migrated to the short contract.
+    return /^[A-Za-z0-9_-]{22}$/u.test(value);
   }
 }
 

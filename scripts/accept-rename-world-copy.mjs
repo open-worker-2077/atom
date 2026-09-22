@@ -116,8 +116,8 @@ try {
   for (const [p, a] of before) {
     const b = after.get(relocate(p));
     assert.ok(b, `Missing ${p}`);
-    const oldThing = Object.keys(a).find((k) => /^thing(?:[@#]|$)/u.test(k));
-    assert.equal(Object.keys(b).find((k) => /^thing(?:[@#]|$)/u.test(k)), oldThing, `Types changed ${p}`);
+    const oldThing = Object.keys(a).find((k) => /^thing(?:[@#&]|$)/u.test(k));
+    assert.equal(Object.keys(b).find((k) => /^thing(?:[@#&]|$)/u.test(k)), oldThing, `Types changed ${p}`);
     assert.equal(b[oldThing], p === target ? arg('--name') : a[oldThing]);
     assert.equal(axisField(b, 'situation')[0], axisField(a, 'situation')[0], `Situation axis changed ${p}`);
     assert.equal(axisField(b, 'slot')[0], axisField(a, 'slot')[0], `Slot axis changed ${p}`);
@@ -134,7 +134,7 @@ try {
       if (expected !== a[key] && oldThing.split(/[@#]/u).includes('program')) programsRewritten++;
     }
     // Compare direct child names in order; descendants must keep their topology.
-    const childNames = (n) => (n.slot ?? []).map((child) => child[Object.keys(child).find((k) => /^thing(?:[@#]|$)/u.test(k))]);
+    const childNames = (n) => (n.slot ?? []).map((child) => child[Object.keys(child).find((k) => /^thing(?:[@#&]|$)/u.test(k))]);
     const oldNames = childNames(a);
     const expectedNames = p === target.slice(0, target.lastIndexOf('/'))
       ? oldNames.map((n) => n === target.split('/').at(-1) ? arg('--name') : n) : oldNames;
