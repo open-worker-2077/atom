@@ -192,7 +192,7 @@ export function parseAtomKey(rawKey, options = {}) {
           { rawKey }
         ));
       }
-      const identityContract = options.identityContract ?? 'short';
+      const identityContract = options.identityContract ?? 'world-any';
       try {
         if (identityContract === 'legacy-22-migration') {
           if (!identityText || !LEGACY_THING_ID_PATTERN.test(identityText)) {

@@ -16,7 +16,7 @@ function requireThingIdentity(identity) {
 export function fieldsByBase(atom) {
   const result = new Map();
   for (const [rawKey, value] of Object.entries(atom ?? {})) {
-    const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
+    const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false, identityContract: 'world-any' });
     if (!result.has(parsed.baseKey)) result.set(parsed.baseKey, []);
     result.get(parsed.baseKey).push({ rawKey, parsed, value });
   }
@@ -57,7 +57,7 @@ export function replaceStoredField(atom, baseKey, value, metadata = {}) {
     : null;
   const rawKey = `${baseKey}${types.map((type) => `@${type}`).join('')}${identity ? `&id=${identity}` : ''}${descriptionPresent ? `#${description}` : ''}`;
   for (const key of Object.keys(atom)) {
-    if (parseAtomKey(key, { descriptionSymbolWarnings: false }).baseKey === baseKey) delete atom[key];
+    if (parseAtomKey(key, { descriptionSymbolWarnings: false, identityContract: 'world-any' }).baseKey === baseKey) delete atom[key];
   }
   atom[rawKey] = structuredClone(value);
 }
@@ -123,7 +123,7 @@ export function renewThingIdentities(atoms, { identities = [] } = {}) {
       const previousKey = thing.rawKey;
       const nextIdentity = requireThingIdentity(identities[identityIndex++]);
       for (const key of Object.keys(atom)) {
-        if (parseAtomKey(key, { descriptionSymbolWarnings: false }).baseKey === 'thing') delete atom[key];
+        if (parseAtomKey(key, { descriptionSymbolWarnings: false, identityContract: 'world-any' }).baseKey === 'thing') delete atom[key];
       }
       const nextKey = `thing${thing.parsed.types.map((type) => `@${type.raw}`).join('')}&id=${nextIdentity}${thing.parsed.descriptionPresent ? `#${thing.parsed.description}` : ''}`;
       atom[nextKey] = structuredClone(thing.value);

@@ -51,15 +51,27 @@ test('batch allocation accepts the reserved watermark and crosses the three-digi
   }
 });
 
-test('parseAtomKey defaults to canonical short identities', () => {
+test('parseAtomKey accepts canonical short identities and rejects unknown ones', () => {
   const parsed = parseAtomKey('thing@program&id=00A#窗口');
   assert.deepEqual(parsed.errors, []);
   assert.equal(parsed.identity, '00A');
   assert.equal(parsed.persistentKey, 'thing@program&id=00A#窗口');
 
+  // Persisted worlds still carry identities issued under the previous contract;
+  // both are valid kernel identities, while anything else stays invalid.
   const legacy = parseAtomKey('thing@program&id=AbCdEfGhIjKlMnOpQrStUv#窗口');
-  assert.equal(legacy.identity, null);
-  assert.equal(legacy.errors[0].code, 'INVALID_THING_IDENTITY');
+  assert.deepEqual(legacy.errors, []);
+  assert.equal(legacy.identity, 'AbCdEfGhIjKlMnOpQrStUv');
+
+  const strict = parseAtomKey('thing@program&id=AbCdEfGhIjKlMnOpQrStUv', {
+    identityContract: 'short'
+  });
+  assert.equal(strict.identity, null);
+  assert.equal(strict.errors[0].code, 'INVALID_THING_IDENTITY');
+
+  const forged = parseAtomKey('thing@program&id=not-a-kernel-identity');
+  assert.equal(forged.identity, null);
+  assert.equal(forged.errors[0].code, 'INVALID_THING_IDENTITY');
 });
 
 test('legacy 22-character identities require explicit migration parsing', () => {
