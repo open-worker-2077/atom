@@ -714,8 +714,7 @@ test('queued ancestor relocation rebases a descendant Program read dependency wi
     }
     return runProgram(request);
   };
-
-  const { result } = await executeFixture(
+  const { result, world: stored } = await executeFixture(
     files,
     'transform {"thing":"Go","situation.rep.changed"}',
     scheduler
@@ -723,6 +722,7 @@ test('queued ancestor relocation rebases a descendant Program read dependency wi
 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(result.messages.map(({ text }) => text), ['slot', 'reader']);
+  assert.equal(readSituation(stored, 'Root/Parent Final/Reader'), reader);
   assert.deepEqual(
     readerExecutions.filter(({ triggered }) => triggered).map(({ path }) => path),
     ['Root/Parent Final/Reader']

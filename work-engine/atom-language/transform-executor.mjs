@@ -8,7 +8,6 @@ import { diagnostic } from './errors.mjs';
 import { matchesExactSelector } from './exact-selector.mjs';
 import { parseAtomKey } from './key-parser.mjs';
 import { programLockDeniedDiagnostic } from './program-locks.mjs';
-import { rewriteProgramReferenceBatch } from './program-reference-runtime.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { ensureThingIdentities, renewThingIdentities } from './slot-graph-semantics.mjs';
 import {
@@ -96,88 +95,6 @@ function walkAtoms(atoms) {
   }
   atoms.forEach((atom, index) => visit(atom, null, index, []));
   return result;
-}
-
-function thingWorldBindings(atoms) {
-  return walkAtoms(atoms).map((match) => ({
-    path: match.path.join('/'),
-    id: storedField(match.atom, 'thing')?.parsed.identity ?? null
-  }));
-}
-
-export function rewriteProgramSourcePathLiterals(source, pathChanges) {
-  if (typeof source !== 'string') return source;
-  const aliases = pathChanges.flatMap(({ sourcePath, resultPath }) => {
-    const parts = sourcePath.split('/');
-    const suffixes = parts.slice(0, -1).map((_, index) => ({
-      sourcePath: parts.slice(index).join('/'),
-      resultPath
-    }));
-    return suffixes.flatMap((change) => [
-      change,
-      {
-        sourcePath: `${WORLD_OUTSIDE_NAME}/${change.sourcePath}`,
-        resultPath: `${WORLD_OUTSIDE_NAME}/${change.resultPath}`
-      }
-    ]);
-  }).sort((left, right) => right.sourcePath.length - left.sourcePath.length);
-  return source.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/gu, (literal) => {
-    const quote = literal[0];
-    const value = literal.slice(1, -1);
-    const change = aliases.find(({ sourcePath }) => (
-      value === sourcePath || value.startsWith(`${sourcePath}/`)
-    ));
-    const rewritten = change
-      ? `${change.resultPath}${value.slice(change.sourcePath.length)}`
-      : value;
-    return `${quote}${rewritten}${quote}`;
-  });
-}
-
-function programSourceReferencesPath(source, sourcePath) {
-  return rewriteProgramSourcePathLiterals(source, [{
-    sourcePath,
-    resultPath: '\u0000atom-relocated-path'
-  }]) !== source;
-}
-
-async function rewriteProgramPathReferences(
-  atoms, pathChanges, preparedMatches = null, worldBindings = thingWorldBindings(atoms)
-) {
-  const candidates = [];
-  for (const match of preparedMatches ?? walkAtoms(atoms)) {
-    const thing = storedField(match.atom, 'thing');
-    if (!thing?.parsed.types.some((type) => type.raw === 'program')) continue;
-    const situation = storedField(match.atom, 'situation');
-    if (typeof situation?.value !== 'string') continue;
-    candidates.push({ match, situation });
-  }
-  if (candidates.length === 0) return [];
-  const aliases = pathChanges.flatMap(({ sourcePath, resultPath }) => {
-    const parts = sourcePath.split('/');
-    const suffixes = parts.slice(0, -1).map((_, index) => ({
-      sourcePath: parts.slice(index).join('/'), resultPath, rootSourcePath: sourcePath
-    }));
-    return suffixes.flatMap((change) => [change, {
-      sourcePath: `${WORLD_OUTSIDE_NAME}/${change.sourcePath}`,
-      resultPath: `${WORLD_OUTSIDE_NAME}/${change.resultPath}`,
-      rootSourcePath: change.rootSourcePath
-    }]);
-  });
-  const rewrittenPrograms = await rewriteProgramReferenceBatch({
-    programs: candidates.map(({ match, situation }) => ({
-      path: match.path.join('/'), source: situation.value
-    })),
-    aliases,
-    worldBindings
-  });
-  const changedPaths = [];
-  rewrittenPrograms.forEach((rewritten, index) => {
-    if (rewritten.source === candidates[index].situation.value) return;
-    replaceStoredField(candidates[index].match.atom, 'situation', rewritten.source);
-    changedPaths.push(candidates[index].match.path.join('/'));
-  });
-  return changedPaths;
 }
 
 function strutLookup(matches) {
@@ -685,7 +602,6 @@ export async function applyBatchRenames({
   contextFile,
   authorize = async () => ({ decision: 'allow' })
 }) {
-  const referenceWorldBindings = thingWorldBindings(atoms);
   const nextAtoms = structuredClone(atoms);
   const exactIndex = createExactTransformIndex(nextAtoms);
   const rootName = path.basename(contextFile);
@@ -769,15 +685,12 @@ export async function applyBatchRenames({
     sourcePath: plan.sourcePath,
     resultPath: finalMatches.get(plan.match.atom)?.path.join('/') ?? null
   })).filter(({ resultPath }) => resultPath !== null);
-  const programSourcePaths = await rewriteProgramPathReferences(
-    nextAtoms, pathChanges, null, referenceWorldBindings
-  );
   const shortcutPaths = [];
   rewriteShortcutTargetPaths(nextAtoms, pathChanges, shortcutPaths);
   return {
     atoms: nextAtoms,
     relationPaths,
-    programSourcePaths,
+    programSourcePaths: [],
     shortcutPaths,
     affectedPathClosureComplete: false,
     results: plans.map((plan) => ({
@@ -1227,10 +1140,8 @@ export async function applyTransform({
   exactIndex = null,
   allMatches = null,
   transactionTransformLog = [],
-  rewriteProgramPathReferences: rewriteProgramReferences = true,
   reserveThingIdentities
 }) {
-  const referenceWorldBindings = thingWorldBindings(atoms);
   const canMutateInput = mutateInput && !Object.isFrozen(atoms);
   const rootName = path.basename(contextFile);
   const thingFields = item.fields.filter((field) => field.baseKey === 'thing');
@@ -1295,19 +1206,6 @@ export async function applyTransform({
       if (!isShortcutAtom(match.atom)) continue;
       closureMatches.push(match);
       deepValueAtoms.add(match.atom);
-    }
-    if (rewriteProgramReferences && ['ren', 'mov'].includes(pathCommand?.name)) {
-      const sourcePath = originalSelection.match.path.join('/');
-      for (const match of originalMatches) {
-        const thing = storedField(match.atom, 'thing');
-        const situation = storedField(match.atom, 'situation');
-        if (thing?.parsed.types.some((type) => type.raw === 'program')
-          && typeof situation?.value === 'string'
-          && programSourceReferencesPath(situation.value, sourcePath)) {
-          closureMatches.push(match);
-          deepValueAtoms.add(match.atom);
-        }
-      }
     }
     if (['mov', 'cpy'].includes(command?.name) && command.parameter !== WORLD_OUTSIDE_NAME) {
       const destination = resolveUnique(atoms, command.parameter, exactIndex);
@@ -1543,18 +1441,6 @@ export async function applyTransform({
     const resultPath = rewritesPaths
       ? postMatches.find((match) => match.atom === selected.match.atom)?.path.join('/') ?? null
       : sourcePath;
-    const programSourcePaths = !error
-      && rename
-      && resultPath
-      && resultPath !== sourcePath
-      && rewriteProgramReferences
-      ? await rewriteProgramPathReferences(
-          nextAtoms,
-          [{ sourcePath, resultPath }],
-          postMatches,
-          referenceWorldBindings
-        )
-      : [];
     if (!error && resultPath && resultPath !== sourcePath) {
       rewriteShortcutTargetPaths(
         nextAtoms,
@@ -1571,7 +1457,7 @@ export async function applyTransform({
       sourcePath,
       resultPath,
       relationPaths,
-      programSourcePaths,
+      programSourcePaths: [],
       shortcutPaths,
       referencePaths: targetPath ? [targetPath] : [],
       affectedPathClosureComplete: hasCompleteLocalDependencyClosure(
@@ -1661,11 +1547,6 @@ export async function applyTransform({
     }
     const resultMatch = postMatches.find((match) => match.atom === resultAtom);
     const resultPath = resultMatch?.path.join('/') ?? sourcePath;
-    const programSourcePaths = ['ren', 'mov'].includes(command.name) && rewriteProgramReferences
-      ? await rewriteProgramPathReferences(
-          nextAtoms, [{ sourcePath, resultPath }], postMatches, referenceWorldBindings
-        )
-      : [];
     const shortcutPaths = [];
     rewriteShortcutTargetPaths(nextAtoms, [{ sourcePath, resultPath }], shortcutPaths, postMatches);
     preservePreparedRelations(postMatches);
@@ -1676,7 +1557,7 @@ export async function applyTransform({
       resultPath,
       structuralCommand: command.name,
       relationPaths,
-      programSourcePaths,
+      programSourcePaths: [],
       shortcutPaths,
       affectedPathClosureComplete: false,
       matches: postMatches,

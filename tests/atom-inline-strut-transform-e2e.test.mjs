@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 
 const atom = (thing, situation = '', strut = [], type = '') => ({
   [`thing${type ? `@${type}` : ''}`]: thing,
@@ -13,6 +14,18 @@ const atom = (thing, situation = '', strut = [], type = '') => ({
   slot: [],
   strut
 });
+
+function findFact(atoms, name) {
+  for (const entry of atoms ?? []) {
+    const key = Object.keys(entry).find((candidate) => (
+      candidate === 'thing' || candidate.startsWith('thing@') || candidate.startsWith('thing&')
+    ));
+    if (key && entry[key] === name) return entry;
+    const nested = findFact(entry.slot ?? [], name);
+    if (nested) return nested;
+  }
+  return null;
+}
 
 test('CLI Transform $click executes the Strut-owned predicate and delivers true without mutating facts', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-inline-strut-action-'));
@@ -143,20 +156,24 @@ test('an ordinary upstream Transform can make the inline predicate true and adva
     "    transform({'thing':'阶段二','situation.rep.🏃‍♀️':None})",
     'trigger("strut", {}, receive)'
   ].join('\n'), [], 'program');
-  await fs.writeFile(contextFile, JSON.stringify([
-    source, atom('阶段二', '⌛️🔒'), subscriber
-  ], null, 2), 'utf8');
+  const seeded = await seedBoundWorld({
+    contextFile,
+    projectionFile,
+    returnDetails: true,
+    facts: [source, atom('阶段二', '⌛️🔒'), subscriber]
+  });
 
   const result = await executeAtomLanguage({
     contextFile,
     projectionFile,
     programScheduler: createProgramRuntimeScheduler(),
+    programRefBindings: seeded.programRefBindings,
     source: 'transform {"thing":"阶段一","situation.rep.✅"}',
     interaction: { id: `inline-strut-progress-${crypto.randomUUID()}` }
   });
 
   assert.equal(result.ok, true, JSON.stringify(result));
   const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(stored.find((entry) => entry.thing === '阶段一').situation, '✅');
-  assert.equal(stored.find((entry) => entry.thing === '阶段二').situation, '🏃‍♀️');
+  assert.equal(findFact(stored, '阶段一').situation, '✅');
+  assert.equal(findFact(stored, '阶段二').situation, '🏃‍♀️');
 });

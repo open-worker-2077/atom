@@ -19,7 +19,7 @@ import { slotProgramInvocationsForEvent } from './slot-body-plan-runtime.mjs';
 import { routeSlotTagPackets } from './slot-signal-runtime.mjs';
 import { buildStrutDeliveries, evaluateStrutClausesWithPrograms } from './strut-runtime.mjs';
 import { shortcutMetadata } from './shortcut-runtime.mjs';
-import { inspectProgramReferenceSites, rewriteProgramReferenceBatch } from './program-reference-runtime.mjs';
+import { inspectProgramReferenceSites } from './program-reference-runtime.mjs';
 import { createProgramReferenceIndex } from './program-reference-index.mjs';
 import { WORLD_OUTSIDE_NAME } from './world-root.mjs';
 import { programDiagnosticIdentity } from '../../src/atom-system/world-runtime/year-ring.mjs';
@@ -651,37 +651,6 @@ function rewriteRelocatedPath(path, relocations) {
       ? `${resultPath}${currentPath.slice(sourcePath.length)}`
       : currentPath
   ), path);
-}
-
-function priorPathThroughRelocations(pathValue, relocations) {
-  return [...relocations].reverse().reduce((currentPath, { sourcePath, resultPath }) => (
-    currentPath === resultPath || currentPath.startsWith(`${resultPath}/`)
-      ? `${sourcePath}${currentPath.slice(resultPath.length)}`
-      : currentPath
-  ), pathValue);
-}
-
-async function rewriteProgramSourceThroughRelocations(source, relocations, atoms) {
-  const aliases = relocations.flatMap(({ sourcePath, resultPath }) => {
-    const parts = sourcePath.split('/');
-    const suffixes = parts.slice(0, -1).map((_, index) => ({
-      sourcePath: parts.slice(index).join('/'), resultPath, rootSourcePath: sourcePath
-    }));
-    return suffixes.flatMap((change) => [change, {
-      sourcePath: `${WORLD_OUTSIDE_NAME}/${change.sourcePath}`,
-      resultPath: `${WORLD_OUTSIDE_NAME}/${change.resultPath}`,
-      rootSourcePath: change.rootSourcePath
-    }]);
-  });
-  const [rewritten] = await rewriteProgramReferenceBatch({
-    programs: [{ path: '<relocated-program>', source }],
-    aliases,
-    worldBindings: walkAtoms(atoms).map((match) => ({
-      path: priorPathThroughRelocations(match.path.join('/'), relocations),
-      id: oneStoredField(match.atom, 'thing')?.parsed.identity ?? null
-    }))
-  });
-  return rewritten.source;
 }
 
 function rewriteProgramReadRequest(request, relocations) {
@@ -1988,7 +1957,7 @@ export class ProgramRuntimeScheduler {
         const allowedFunctions = !allowed || !isAgentProgram
           ? allowed
           : [...new Set([...allowed, 'agent'])];
-        return this.inspectProgram({
+        return this.executeProgram({
           python: this.python,
           records,
           programs: [program],
@@ -2003,7 +1972,8 @@ export class ProgramRuntimeScheduler {
               { code: 'INVALID_REQUEST_DRIVEN_LOCK_RECONSTRUCTION_EFFECT' }
             );
           },
-          validateOnly: true
+          validateOnly: true,
+          projectBoundReferences: this.projectsBoundReferencesFor(program)
         });
       })
     )));
@@ -2053,6 +2023,20 @@ export class ProgramRuntimeScheduler {
     this.programReferenceIndex = null;
     this.programReferenceRevision = null;
     this.programReferenceGeneration += 1;
+  }
+
+  // Persisted kernel binding plus unchanged source is the only case where a
+  // validate-only compile may project the permanent identity onto a current path.
+  projectsBoundReferencesFor(program) {
+    const binding = program
+      ? this.programRefBindings?.forProgram?.(program.ref) ?? null
+      : null;
+    if (!binding) return false;
+    const sourceHash = `sha256:${crypto.createHash('sha256')
+      .update(program.detail ?? '').digest('hex')}`;
+    if (binding.sourceHash !== sourceHash) return false;
+    const indexed = this.programReferenceIndex?.sitesForProgram?.(program.ref);
+    return Array.isArray(indexed) && indexed.length === binding.sites.length;
   }
 
   async prepareProgramReferenceIndex(atoms) {
@@ -2331,6 +2315,7 @@ export class ProgramRuntimeScheduler {
         );
       },
       validateOnly: true,
+      projectBoundReferences: this.projectsBoundReferencesFor(program),
       agentProgramPaths: [...this.agentSecurity.keys()]
     }))));
     for (const [index, program] of programs.entries()) {
@@ -2405,7 +2390,7 @@ export class ProgramRuntimeScheduler {
           );
         },
         validateOnly: true,
-        projectBoundReferences: true,
+        projectBoundReferences: this.projectsBoundReferencesFor(program),
         agentProgramPaths: [...this.agentSecurity.keys()]
       })
     ))));
@@ -2424,9 +2409,7 @@ export class ProgramRuntimeScheduler {
     for (const [sourceProgramPath, dependency] of affectedReadDependencies) {
       const resultProgramPath = rewriteRelocatedPath(sourceProgramPath, relocations);
       const program = programsByPath.get(resultProgramPath);
-      if (!program || await rewriteProgramSourceThroughRelocations(
-        dependency.detail, relocations, atoms
-      ) !== program.detail) continue;
+      if (!program || dependency.detail !== program.detail) continue;
       const rebound = {
         detail: program.detail,
         requests: dependency.requests.map((request) => (
@@ -2562,6 +2545,7 @@ export class ProgramRuntimeScheduler {
           });
         },
         validateOnly: !/\bchanged\s*\(/u.test(program.detail),
+        projectBoundReferences: this.projectsBoundReferencesFor(program),
         changedNodes: [],
         agentProgramPaths: [...this.agentSecurity.keys()]
       })

@@ -14,6 +14,7 @@ import {
   materializeGraphJson,
   parseGraphJson
 } from '../work-engine/atom-language/graph-json.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 
 function atom(thing, situation = '', strut = []) {
   const normalizedStrut = strut.length && strut.every((item) => Object.keys(item).length === 1 && item.thing)
@@ -293,13 +294,13 @@ test('batch Transform swaps sibling names from one final-state plan and rewrites
   );
 });
 
-test('batch rename rewrites Program path literals from the same final-state plan', async (t) => {
+test('batch rename preserves Program source while its binding follows the final-state plan', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-transform-batch-program-paths-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   const watchedPath = '域/甲/甲子';
-  await fs.writeFile(contextFile, `${JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     {
       ...atom('域'),
       slot: [
@@ -313,7 +314,7 @@ test('batch rename rewrites Program path literals from the same final-state plan
       slot: [],
       strut: []
     }
-  ], null, 2)}\n`, 'utf8');
+  ] });
   const world = createLegacyWorldService();
   const programScheduler = createProgramRuntimeScheduler();
   const initialized = await world.executeLegacy({
@@ -337,9 +338,10 @@ test('batch rename rewrites Program path literals from the same final-state plan
   });
 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  const watcher = JSON.parse(await fs.readFile(contextFile, 'utf8'))[1];
-  assert.equal(watcher.situation.includes(watchedPath), false);
-  assert.equal(watcher.situation.includes('域/乙/甲子'), true);
+  const watcher = JSON.parse(await fs.readFile(contextFile, 'utf8'))
+    .find((entry) => atomName(entry) === '监听器');
+  assert.equal(watcher.situation.includes(watchedPath), true);
+  assert.equal(watcher.situation.includes('域/乙/甲子'), false);
 });
 
 test('batch Transform rejects a final sibling-thing collision without writing any item', async (t) => {
@@ -489,21 +491,21 @@ test('a real Program creates then updates one Atom after the triggering source c
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     { thing: 'test', situation: '', slot: [], strut: [] },
     { thing: 'Trigger', situation: 'wait', slot: [], strut: [] },
     {
       'thing@program': 'Create Then Update',
       situation: [
-        "trigger = explore({'thing': 'Trigger', 'situation$full': None})[0]",
+        "trigger = explore({'thing': ref('Trigger'), 'situation$full': None})[0]",
         "if trigger.situation == 'go':",
-        "    transform({'thing': 'test/Created In Reconcile', 'situation': 'created', 'slot': [], 'strut': []})",
-        "    transform({'thing': 'test/Created In Reconcile', 'situation.rep.final': None})"
+        "    transform({'thing': 'test/' + 'Created In Reconcile', 'situation': 'created', 'slot': [], 'strut': []})",
+        "    transform({'thing': 'test/' + 'Created In Reconcile', 'situation.rep.final': None})"
       ].join('\n'),
       slot: [],
       strut: []
     }
-  ], null, 2));
+  ] });
   const writes = [];
   const world = createLegacyWorldService({
     onAuthoritativeWrite: async (write) => writes.push({
@@ -545,7 +547,7 @@ test('a Transform request triggers its declared Program even when the requested 
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  const facts = [
     {
       thing: 'test',
       situation: '',
@@ -565,15 +567,14 @@ test('a Transform request triggers its declared Program even when the requested 
       ],
       strut: []
     }
-  ], null, 2));
-  const initial = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  initial[0].slot = [{
+  ];
+  facts[0].slot = [{
     thing: 'Target Trigger Case',
     situation: '',
-    slot: initial[0].slot,
+    slot: facts[0].slot,
     strut: []
   }];
-  await fs.writeFile(contextFile, JSON.stringify(initial, null, 2));
+  await seedBoundWorld({ contextFile, projectionFile, facts });
   const writes = [];
   const world = createLegacyWorldService({
     onAuthoritativeWrite: (write) => writes.push(write)
@@ -590,7 +591,7 @@ test('a Transform request triggers its declared Program even when the requested 
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(writes.length, 1);
   const persisted = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(persisted[0].slot[0].slot.find(({ thing }) => thing === 'Result').situation, 'fired');
+  assert.equal(persisted[0].slot[0].slot.find((entry) => atomName(entry) === 'Result').situation, 'fired');
 });
 
 test('batch receipt follows a final Program rename in the same commit', async (t) => {

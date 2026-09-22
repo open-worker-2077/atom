@@ -87,10 +87,10 @@ test('active relations into the default-backup subtree are removed before strict
 });
 
 test('identity-bound relations cannot keep an archived endpoint active', () => {
-  const archivedId = 'AAAAAAAAAAAAAAAAAAAAAA';
+  const archivedId = '00A';
   const facts = [
     {
-      'thing&id=BBBBBBBBBBBBBBBBBBBBBB': 'Active',
+      'thing&id=00B': 'Active',
       situation: '',
       slot: [],
       strut: [{
@@ -228,7 +228,7 @@ test('sealed ordinary edits reuse private archive proof without reparsing archiv
 });
 
 test('archive proof never hides active identity collisions, another backup root, or restore', () => {
-  const archivedId = 'AAAAAAAAAAAAAAAAAAAAAA';
+  const archivedId = '00A';
   const before = [atom('thing', 'Active'), atom('thing@backup@default', 'Backup', '', [
     atom(`thing&id=${archivedId}`, 'Archived')
   ])];

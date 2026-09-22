@@ -352,8 +352,7 @@ test('ordinary fact edits reuse the compiled Agent security directory', async ()
 
 test('one mutable world revision shares one prepared record snapshot across index builders', async () => {
   const recordSnapshots = [];
-  const scheduler = createProgramRuntimeScheduler({
-    inspectProgram: async ({ records, program, agentDeclarationOnly }) => {
+  const runner = async ({ records, program, agentDeclarationOnly }) => {
       recordSnapshots.push(records);
       if (agentDeclarationOnly) {
         return program.path === 'Worker'
@@ -382,7 +381,10 @@ test('one mutable world revision shares one prepared record snapshot across inde
               labels: ['team']
             }]
           };
-    }
+  };
+  const scheduler = createProgramRuntimeScheduler({
+    inspectProgram: runner,
+    runProgram: runner
   });
   const world = [
     atom(
@@ -489,8 +491,7 @@ test('a literal path lock below a non-Agent synthetic test root recompiles into 
 test('path changes rebuild request-driven locks while ordinary fact edits reuse them', async () => {
   let inspections = 0;
   const inspectedProgramCounts = [];
-  const scheduler = createProgramRuntimeScheduler({
-    inspectProgram: async ({ programs, agentDeclarationOnly }) => {
+  const runner = async ({ programs, agentDeclarationOnly }) => {
       if (agentDeclarationOnly) return { agentRegistrations: [] };
       inspections += 1;
       inspectedProgramCounts.push(programs.length);
@@ -502,7 +503,10 @@ test('path changes rebuild request-driven locks while ordinary fact edits reuse 
           labels: ['team']
         }]
       };
-    }
+  };
+  const scheduler = createProgramRuntimeScheduler({
+    inspectProgram: runner,
+    runProgram: runner
   });
   const guard = atom(
     'Guard',
@@ -527,8 +531,7 @@ test('path changes rebuild request-driven locks while ordinary fact edits reuse 
 
 test('request-driven locks rebuild when an allowed Program path loses its Program type', async () => {
   let inspections = 0;
-  const scheduler = createProgramRuntimeScheduler({
-    inspectProgram: async ({ agentDeclarationOnly }) => {
+  const runner = async ({ agentDeclarationOnly }) => {
       if (agentDeclarationOnly) return { agentRegistrations: [] };
       inspections += 1;
       return {
@@ -541,7 +544,10 @@ test('request-driven locks rebuild when an allowed Program path loses its Progra
           protect: { atom: true, messages: false }
         }]
       };
-    }
+  };
+  const scheduler = createProgramRuntimeScheduler({
+    inspectProgram: runner,
+    runProgram: runner
   });
   const guard = atom(
     'Guard',

@@ -23,13 +23,13 @@ import {
 } from '../src/atom-system/world-runtime/legacy-graph-compat.mjs';
 import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { executeAtomLanguage } from '../work-engine/atom-language/engine.mjs';
-import { rewriteProgramSourcePathLiterals } from '../work-engine/atom-language/transform-executor.mjs';
 import {
   createProgramRuntimeScheduler,
   resolveExactPathFromCurrentContext,
   validateProgramResult
 } from '../work-engine/atom-language/program-runtime.mjs';
 import { authorizeWindowGraphPath } from '../work-engine/atom-language/window-lock-v1.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 
 function atom(thing, situation = '', slot = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
@@ -323,21 +323,6 @@ test('projection consumes commits after a Windows-frozen baseline generation', a
   assert.equal(findAtom(projected.graph.graph.slot, 'Root').situation, 'after');
 });
 
-test('Program relocation rewrites an exact ancestor-qualified suffix but leaves prose intact', () => {
-  const source = [
-    '# Area/LockedSuffix is prose.',
-    'lock({"targets":{"paths":["Area/Locked/Child"]}})',
-    'lock({"targets":{"paths":["世界之外/World/Area/Locked/Child"]}})'
-  ].join('\n');
-  const rewritten = rewriteProgramSourcePathLiterals(source, [{
-    sourcePath: 'World/Area/Locked',
-    resultPath: 'World/Destination/Locked'
-  }]);
-  assert.match(rewritten, /World\/Destination\/Locked\/Child/u);
-  assert.match(rewritten, /世界之外\/World\/Destination\/Locked\/Child/u);
-  assert.match(rewritten, /Area\/LockedSuffix/u);
-});
-
 async function waitUntil(predicate, message, timeoutMs = 2_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -350,13 +335,22 @@ async function waitUntil(predicate, message, timeoutMs = 2_000) {
 
 function findAtom(atoms, expectedPath, parentPath = []) {
   for (const current of atoms) {
-    const thing = Object.entries(current).find(([key]) => key === 'thing' || key.startsWith('thing@'))?.[1];
+    const thing = Object.entries(current).find(([key]) => (
+      key === 'thing' || key.startsWith('thing@') || key.startsWith('thing&')
+    ))?.[1];
     const currentPath = [...parentPath, thing];
     if (currentPath.join('/') === expectedPath) return current;
     const nested = findAtom(current.slot ?? [], expectedPath, currentPath);
     if (nested) return nested;
   }
   return null;
+}
+
+function hasType(atom, expectedType) {
+  if (!atom) return false;
+  return Object.keys(atom).some((key) => (
+    key.split('@').slice(1).some((part) => part.split(/[&#]/u)[0] === expectedType)
+  ));
 }
 
 test('maintenance CLI requests enter through the same interaction runtime contract', async () => {
@@ -403,7 +397,11 @@ test('trusted maintenance atomically moves a Program-locked subtree while ordina
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  const seeded = await seedBoundWorld({
+    contextFile,
+    projectionFile: graphFile,
+    returnDetails: true,
+    facts: [
     atom('Root', '', [
       atom('Locked', 'preserve', [
         atom('Child', 'preserve'),
@@ -411,7 +409,7 @@ test('trusted maintenance atomically moves a Program-locked subtree while ordina
           'Nested Agent',
           [
             'agent({"labels":[],"functions":{"groups":[],"names":["agent","lock"]}})',
-            'lock({"targets":{"paths":["Root/Locked/Child"],"scope":"exact"},"actions":["transform"],"labels":["nested"]})'
+            'lock({"targets":{"paths":[ref("Root/Locked/Child")],"scope":"exact"},"actions":["transform"],"labels":["nested"]})'
           ].join('\n'),
           [],
           'program'
@@ -431,7 +429,8 @@ test('trusted maintenance atomically moves a Program-locked subtree while ordina
       atom('Destination'),
       atom('Guard', 'lock({"targets":{"paths":["Root"],"scope":"subtree"},"actions":["transform"],"labels":["migration-key"]})', [], 'program')
     ])
-  ]), 'utf8');
+    ]
+  });
   const source = 'transform {"thing.mov.Root/Destination":"Root/Locked"}';
 
   const ordinary = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
@@ -451,7 +450,7 @@ test('trusted maintenance atomically moves a Program-locked subtree while ordina
   assert.equal(findAtom(world, 'Root/Destination/Locked/Child').situation, 'preserve');
   assert.match(
     findAtom(world, 'Root/Destination/Locked/Reactive Program').situation,
-    /Root\/Destination\/Locked\/Child/u
+    /Root\/Locked\/Child/u
   );
   assert.match(
     findAtom(world, 'Root/Destination/Locked/Reactive Program').situation,
@@ -461,10 +460,12 @@ test('trusted maintenance atomically moves a Program-locked subtree while ordina
     findAtom(world, 'Root/Destination/Locked/Nested Agent').situation,
     [
       'agent({"labels":[],"functions":{"groups":[],"names":["agent","lock"]}})',
-      'lock({"targets":{"paths":["Root/Destination/Locked/Child"],"scope":"exact"},"actions":["transform"],"labels":["nested"]})'
+      'lock({"targets":{"paths":[ref("Root/Locked/Child")],"scope":"exact"},"actions":["transform"],"labels":["nested"]})'
     ].join('\n')
   );
   const rebuilt = createProgramRuntimeScheduler();
+  rebuilt.setProgramRefBindings(seeded.programRefBindings);
+  await rebuilt.prepareProgramReferenceIndex(world);
   await rebuilt.rebuildAgentSecurity(world);
   assert.equal(rebuilt.agentSecurity.has('Root/Locked/Nested Agent'), false);
   assert.equal(rebuilt.agentSecurity.has('Root/Destination/Locked/Nested Agent'), true);
@@ -485,7 +486,11 @@ test('an upper Agent window moves a descendant subtree while a lower Agent windo
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  const seeded = await seedBoundWorld({
+    contextFile,
+    projectionFile: graphFile,
+    returnDetails: true,
+    facts: [
     atom('Root', 'agent({"labels":[],"functions":{"groups":[],"names":["agent","lock","transform"]}})', [
       atom('Locked', 'preserve', [
         atom('Child', 'preserve'),
@@ -518,7 +523,8 @@ test('an upper Agent window moves a descendant subtree while a lower Agent windo
         'program'
       )
     ], 'program')
-  ]), 'utf8');
+    ]
+  });
 
   const execute = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
   const lowerDenied = await execute({
@@ -544,15 +550,20 @@ test('an upper Agent window moves a descendant subtree while a lower Agent windo
   const world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   assert.equal(findAtom(world, 'Root/Locked'), null);
   assert.equal(findAtom(world, 'Root/Destination/Locked/Child').situation, 'preserve');
-  assert.deepEqual(
-    findAtom(world, 'Root/External Source').strut,
-    [{ 'if@current': true, then: [{ thing: 'Root/Destination/Locked/Child' }] }]
-  );
+  const externalStrut = findAtom(world, 'Root/External Source').strut;
+  assert.equal(externalStrut.length, 1);
+  assert.equal(externalStrut[0]['if@current'], true);
+  assert.equal(externalStrut[0].then.length, 1);
+  const [[externalTargetKey, externalTargetPath]] = Object.entries(externalStrut[0].then[0]);
+  assert.match(externalTargetKey, /^thing&id=[0-9A-Za-z]{3,}$/u);
+  assert.equal(externalTargetPath, 'Root/Destination/Locked/Child');
   assert.match(
     findAtom(world, 'Root/Destination/Locked/Reactive Program').situation,
-    /Root\/Destination\/Locked\/Child/u
+    /Root\/Locked\/Child/u
   );
   const rebuilt = createProgramRuntimeScheduler();
+  rebuilt.setProgramRefBindings(seeded.programRefBindings);
+  await rebuilt.prepareProgramReferenceIndex(world);
   await rebuilt.rebuildAgentSecurity(world);
   assert.equal(rebuilt.agentSecurity.has('Root/Locked/Nested Agent'), false);
   assert.equal(rebuilt.agentSecurity.has('Root/Destination/Locked/Nested Agent'), true);
@@ -871,9 +882,9 @@ test('Agent self-reconfiguration reaches delegation validation and maintenance c
   const originalSource = 'agent({"functions":{"groups":[],"names":["agent"]}})';
   const replacementSource = 'agent({"labels":[],"functions":{"groups":[],"names":["agent","explore","slot_body","transform","use_program"]}})';
   const replace = `transform {"thing":${JSON.stringify(agentPath)},${JSON.stringify(`situation.rep.${replacementSource}`)}}`;
-  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+  await seedBoundWorld({ contextFile, projectionFile: graphFile, facts: [atom('Root', '', [
     atom('Parent', '', [atom('Window', originalSource, [], 'program')])
-  ])]), 'utf8');
+  ])] });
 
   const server = createLegacyRuntimeComposition({ contextFile, graphFile, storeFile });
   await server.initialize({ correlationId: 'server-startup' });
@@ -920,7 +931,7 @@ test('an ancestor Agent Program governs descendant reconfiguration without a mai
   const replacement = (target) => (
     `transform {"thing":${JSON.stringify(target)},${JSON.stringify(`situation.rep.${replacementSource}`)}}`
   );
-  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [
+  await seedBoundWorld({ contextFile, projectionFile: graphFile, facts: [atom('Root', '', [
     atom('Domain', '', [
       atom('Worker', workerSource, [], 'program'),
       atom('Manager', managerSource, [
@@ -928,7 +939,7 @@ test('an ancestor Agent Program governs descendant reconfiguration without a mai
       ], 'program'),
       atom('Outside', 'unchanged')
     ])
-  ])]), 'utf8');
+  ])] });
 
   const worker = createLegacyRuntimeComposition({ contextFile, graphFile, storeFile });
   await worker.initialize({ correlationId: 'before-bootstrap-startup' });
@@ -941,7 +952,7 @@ test('an ancestor Agent Program governs descendant reconfiguration without a mai
   assert.ok(selfDeniedBeforeBootstrap.errors.some((error) => error.code === 'PROGRAM_FUNCTION_DELEGATION_DENIED'), JSON.stringify(selfDeniedBeforeBootstrap));
 
   let world = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.equal(Object.hasOwn(findAtom(world, managerPath), 'thing@program'), true);
+  assert.equal(hasType(findAtom(world, managerPath), 'program'), true);
 
   const daily = createLegacyRuntimeComposition({
     contextFile,

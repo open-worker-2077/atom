@@ -725,25 +725,25 @@ test('Agent key, lock, and path changes invalidate accelerated Program results',
   ])];
 
   await scheduler.refresh(world, { agentOrigin: { path: 'Root/Agent' } });
-  assert.equal(executions, 2);
+  assert.equal(executions, 3);
   await scheduler.refresh(structuredClone(world), { agentOrigin: { path: 'Root/Agent' } });
-  assert.equal(executions, 2, 'an unchanged world should reuse accelerated results');
+  assert.equal(executions, 3, 'an unchanged world should reuse accelerated results');
 
   const keyChanged = structuredClone(world);
   keyChanged[0].slot[0].situation = keyChanged[0].slot[0].situation.replace('["^"]', '["^^"]');
   await scheduler.refresh(keyChanged, { agentOrigin: { path: 'Root/Agent' } });
-  assert.equal(executions, 3, 'an Agent key change must invalidate its affected accelerated result');
+  assert.equal(executions, 5, 'an Agent key change must invalidate its affected accelerated result');
 
   const lockChanged = structuredClone(keyChanged);
   lockChanged[0].slot[1].situation = lockChanged[0].slot[1].situation.replace('["^"]', '["^^"]');
   await scheduler.refresh(lockChanged, { agentOrigin: { path: 'Root/Agent' } });
-  assert.equal(executions, 4, 'a lock change must invalidate its affected accelerated result');
+  assert.equal(executions, 7, 'a lock change must invalidate its affected accelerated result');
 
   const pathChanged = structuredClone(lockChanged);
   pathChanged[0].slot[0]['thing@program'] = 'RenamedAgent';
   pathChanged[0].slot[1].situation = pathChanged[0].slot[1].situation.replace('Root/Agent', 'Root/RenamedAgent');
   await scheduler.refresh(pathChanged, { agentOrigin: { path: 'Root/RenamedAgent' } });
-  assert.equal(executions, 6, 'a valid path move must invalidate the Agent and its affected lock result');
+  assert.equal(executions, 10, 'a valid path move must invalidate the Agent and its affected lock result');
 });
 
 test('startup isolates Agent-bound jump failures into a restartable context-free passive projection', async () => {

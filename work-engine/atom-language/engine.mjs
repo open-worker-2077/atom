@@ -122,7 +122,6 @@ import {
   isBatchRenameItem,
   prepareTransformAccessMatches,
   prepareTransformRelationIndex,
-  rewriteProgramSourcePathLiterals,
   transformChangesStructure
 } from './transform-executor.mjs';
 import {
@@ -333,7 +332,7 @@ function relocatedProgramDeclarationSurface(atoms, pathChanges = [], simultaneou
     .map((declaration) => ({
       ...declaration,
       path: rewritePath(declaration.path),
-      situation: rewriteProgramSourcePathLiterals(declaration.situation, pathChanges)
+      situation: declaration.situation
     }))
     .sort((left, right) => left.path.localeCompare(right.path));
 }
@@ -584,7 +583,7 @@ async function validatePrograms(atoms, contextFile, previousAtoms = null, progra
     const afterPrograms = programEntries(nextAtoms);
     const beforeIds = new Set(beforePrograms.keys());
     const afterIds = new Set(afterPrograms.map(({ programThingId }) => programThingId));
-    const replacements = normalized.map((program) => {
+    const replacements = normalized.flatMap((program) => {
       const match = exactMatchAtPath(nextAtoms, program.path);
       const thing = oneStoredField(match?.atom, 'thing');
       if (!thing?.parsed.identity) {
@@ -592,7 +591,7 @@ async function validatePrograms(atoms, contextFile, previousAtoms = null, progra
           code: 'PROGRAM_REFERENCE_IDENTITY_REQUIRED'
         });
       }
-      return {
+      const replacement = {
         programThingId: thing.parsed.identity,
         sourceHash: `sha256:${crypto.createHash('sha256').update(program.source).digest('hex')}`,
         sites: program.referenceSites.map(({ fingerprint, role, targetThingId }) => ({
@@ -601,6 +600,10 @@ async function validatePrograms(atoms, contextFile, previousAtoms = null, progra
           targetThingId
         }))
       };
+      const existing = programScheduler.programRefBindings?.forProgram?.(
+        replacement.programThingId
+      ) ?? null;
+      return existing && isDeepStrictEqual(existing, replacement) ? [] : [replacement];
     });
     const replacedIds = new Set(replacements.map(({ programThingId }) => programThingId));
     for (const program of afterPrograms) {
@@ -612,10 +615,10 @@ async function validatePrograms(atoms, contextFile, previousAtoms = null, progra
         sites: []
       });
     }
-    const programRefBindings = createProgramRefBindingUpdate({
-      replacements,
-      removals: [...beforeIds].filter((id) => !afterIds.has(id))
-    });
+    const removals = [...beforeIds].filter((id) => !afterIds.has(id));
+    const programRefBindings = replacements.length || removals.length
+      ? createProgramRefBindingUpdate({ replacements, removals })
+      : null;
     return { ok: true, errors: [], warnings: [], atoms: nextAtoms,
       programReferences: normalized, programRefBindings };
   } catch (error) {
@@ -3270,8 +3273,11 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         .map(({ transformed }) => transformed.programRefBindings)
         .filter(Boolean);
       const programSurfaceChangedByEffects = (application.applied?.length ?? 0) > 0
-        && JSON.stringify(programDeclarationSurface(reconciledAtoms))
-          !== JSON.stringify(programDeclarationSurface(application.atoms));
+        && JSON.stringify(relocatedProgramDeclarationSurface(
+          reconciledAtoms, applicationRelocations
+        ))
+          !== JSON.stringify(programDeclarationSurface(application.atoms)
+            .sort((left, right) => left.path.localeCompare(right.path)));
       if (programSurfaceChangedByEffects) {
         const compiled = await validatePrograms(
           application.atoms, contextFile, reconciledAtoms, runtimeScheduler
@@ -4175,7 +4181,6 @@ async function executeAtomLanguageInteraction(options, postcommit) {
           authorize: accessController.authorize,
           mutateInput: true,
           exactIndex,
-          rewriteProgramPathReferences: true,
           reserveThingIdentities: count => thingIdentityAllocation.reserve(count)
         }));
       } catch (error) {
@@ -4818,7 +4823,6 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     exactIndex: preparedTransformWorld.exactIndex,
     allMatches: preparedTransformWorld.allMatches,
     transactionTransformLog: options.transactionTransformLog ?? [],
-    rewriteProgramPathReferences: true,
     reserveThingIdentities: count => thingIdentityAllocation.reserve(count)
   }));
   if (transformed.error) {
