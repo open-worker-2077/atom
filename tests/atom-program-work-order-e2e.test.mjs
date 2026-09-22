@@ -14,8 +14,13 @@ function atom(thing, situation = '', slot = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
+function nameOf(item) {
+  const key = Object.keys(item ?? {}).find((candidate) => candidate.split(/[@&#]/u)[0] === 'thing');
+  return key ? item[key] : undefined;
+}
+
 function child(parent, name) {
-  return parent.slot.find((item) => item.thing === name || item[`thing@program`] === name);
+  return (parent.slot ?? []).find((item) => nameOf(item) === name);
 }
 
 function workOrderFact(name = '并发工单', status = '执行中') {
@@ -78,7 +83,7 @@ test('a top-level test Program completes create fill validate submit read-back i
   assert.equal(world.length, 1, 'test world remains isolated from business data');
   const order = child(world[0], '闭环工单');
   assert.ok(order, 'the work order is persisted below the dedicated test Atom');
-  assert.deepEqual(order.slot.map((item) => item.thing), ['Output', 'Step', 'Criteria']);
+  assert.deepEqual(order.slot.map((item) => nameOf(item)), ['Output', 'Step', 'Criteria']);
   assert.equal(JSON.parse(order.situation).status, '待验收');
   assert.equal(JSON.parse(child(order, 'Output').situation).交付物.成果引用, 'doc://e2e.rep.segment');
   assert.deepEqual(JSON.parse(child(order, 'Step').situation).操作.实际产出, ['doc://e2e.rep.segment']);

@@ -235,12 +235,16 @@ test('CLI keeps dot-command literals inside a situation rep replacement', async 
     "    transform({'thing.ren.X': 'Target', 'situation.rep.done': None})",
     "    return '.dsc. remains source text'"
   ].join('\n');
-  await fs.writeFile(contextFile, `${JSON.stringify([{
-    'thing@program': '合成Program',
-    situation: '旧源码',
-    slot: [],
-    strut: []
-  }], null, 2)}\n`, 'utf8');
+  await fs.writeFile(contextFile, `${JSON.stringify([
+    {
+      'thing@program': '合成Program',
+      situation: '旧源码',
+      slot: [],
+      strut: []
+    },
+    // R6 requires every maintainable static reference to resolve on write.
+    { thing: 'Target', situation: '', slot: [], strut: [] }
+  ], null, 2)}\n`, 'utf8');
   const scheduler = createProgramRuntimeScheduler();
 
   let stdout = '';
@@ -350,7 +354,7 @@ test('operational Atom Language closes one isolated transform/explore/projection
     descriptionSymbolWarnings: false
   });
   assert.deepEqual(parsedCreatedProgramKey.types.map(({ raw }) => raw), ['program']);
-  assert.match(parsedCreatedProgramKey.identity, /^[A-Za-z0-9_-]{22}$/u);
+  assert.match(parsedCreatedProgramKey.identity, /^[0-9A-Za-z]{3,}$/u);
   assert.equal(parsedCreatedProgramKey.description, '保存石器与工具的工坊');
   const duplicateContextBefore = await fileText(contextFile);
   const duplicateProjectionBefore = await fileText(projectionFile);
@@ -391,7 +395,7 @@ test('operational Atom Language closes one isolated transform/explore/projection
     descriptionSymbolWarnings: false
   });
   assert.deepEqual(persistedWorkshopThing.types.map(({ raw }) => raw), ['program']);
-  assert.match(persistedWorkshopThing.identity, /^[A-Za-z0-9_-]{22}$/u);
+  assert.match(persistedWorkshopThing.identity, /^[0-9A-Za-z]{3,}$/u);
   assert.equal(persistedWorkshopThing.description, '保存石器与工具的工坊');
   assert.equal(fieldEntry(workshop, 'thing')[1], '石器工坊');
   assert.equal(fieldEntry(workshop, 'situation')[1], registrationSource);
@@ -424,7 +428,7 @@ test('operational Atom Language closes one isolated transform/explore/projection
   });
   assert.equal(persistedDetailThing.baseKey, 'thing');
   assert.deepEqual(persistedDetailThing.types, []);
-  assert.match(persistedDetailThing.identity, /^[A-Za-z0-9_-]{22}$/u);
+  assert.match(persistedDetailThing.identity, /^[0-9A-Za-z]{3,}$/u);
   assert.equal(
     fieldEntry(persistedAfterUpdate, 'situation')[0],
     'situation#保存石器与工具的工坊'
