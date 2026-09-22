@@ -811,7 +811,7 @@ def project_ref_tree(tree, analysis, bindings=None, path_by_thing_id=None, valid
                      project_bound_references=False, bindings_required=True):
     """Compile 引述 on an AST copy; stored Situation and its analysis stay immutable."""
     use_bindings = (not validate_only or project_bound_references) and bindings_required
-    if use_bindings and bindings is None:
+    if use_bindings and bindings is None and analysis["sites"]:
         raise EngineCallError("PROGRAM_REF_BINDING_MISSING", "Program 引述 binding is missing")
     if use_bindings and bindings is not None and (
             not isinstance(bindings, dict) or bindings.get("sourceHash") != analysis["sourceHash"]):

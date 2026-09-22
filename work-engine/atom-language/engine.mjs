@@ -521,19 +521,6 @@ function programRunRequest(item) {
   return { selector: field.value, scopeRoot: command.parameter || null };
 }
 
-function adoptThingIdentitiesOnCandidate(candidateAtoms, reserveThingIdentities) {
-  if (typeof reserveThingIdentities !== 'function') return null;
-  const missing = walkAtoms(candidateAtoms).filter(({ atom }) => (
-    !oneStoredField(atom, 'thing')?.parsed.identity
-  )).length;
-  if (missing === 0) return null;
-  // Snapshot atoms may be frozen; adopt on a copy so the committed patch
-  // carries the new keys while the immutable base stays untouched.
-  const healed = structuredClone(candidateAtoms);
-  ensureThingIdentities(healed, { identities: reserveThingIdentities(missing) });
-  return healed;
-}
-
 // A Program that never received persisted kernel bindings stays quarantined
 // until some write binds it; treat that as a Program-surface change so the very
 // next write adopts the bindings instead of leaving the Program unusable.
@@ -547,11 +534,8 @@ function hasUnboundPrograms(facts, scheduler) {
   });
 }
 
-async function validatePrograms(
-  atoms, contextFile, previousAtoms = null, programScheduler = null, reserveThingIdentities = null
-) {
+async function validatePrograms(atoms, contextFile, previousAtoms = null, programScheduler = null) {
   void contextFile;
-  atoms = adoptThingIdentitiesOnCandidate(atoms, reserveThingIdentities) ?? atoms;
   if (typeof programScheduler?.validateProgramSources !== 'function') {
     return { ok: true, errors: [], warnings: [] };
   }
@@ -918,8 +902,7 @@ async function applyCreateTransform({
     oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => type.raw === 'program')
   ));
   const compiled = introducesProgram
-    ? await validatePrograms(nextAtoms, contextFile, atoms, programScheduler,
-      count => thingIdentityAllocation.reserve(count))
+    ? await validatePrograms(nextAtoms, contextFile, atoms, programScheduler)
     : { ok: true, errors: [], warnings: [] };
   if (!compiled.ok) return { error: compiled.errors[0], warnings: compiled.warnings };
   nextAtoms = compiled.atoms ?? nextAtoms;
@@ -3310,8 +3293,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
             .sort((left, right) => left.path.localeCompare(right.path)));
       if (programSurfaceChangedByEffects) {
         const compiled = await validatePrograms(
-          application.atoms, contextFile, reconciledAtoms, runtimeScheduler,
-          count => thingIdentityAllocation.reserve(count)
+          application.atoms, contextFile, reconciledAtoms, runtimeScheduler
         );
         if (!compiled.ok) {
           const first = compiled.errors[0] ?? diagnostic(
@@ -3549,9 +3531,6 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     postCommitEvent: sourceEvent = null,
     baseAtoms = atoms
   } = {}) {
-    candidateAtoms = adoptThingIdentitiesOnCandidate(
-      candidateAtoms, count => thingIdentityAllocation.reserve(count)
-    ) ?? candidateAtoms;
     const affectedAtomsFromPaths = (paths) => {
       const expanded = new Set();
       for (const rawPath of paths ?? []) {
@@ -3970,8 +3949,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     && JSON.stringify(programDeclarationSurface(requestStartAtoms))
       !== JSON.stringify(programDeclarationSurface(atoms))) {
     const compiled = await validatePrograms(
-      atoms, contextFile, requestStartAtoms, candidateProgramScheduler,
-      count => thingIdentityAllocation.reserve(count)
+      atoms, contextFile, requestStartAtoms, candidateProgramScheduler
     );
     interactionWarnings.push(...compiled.warnings);
     if (!compiled.ok) {
@@ -4305,8 +4283,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         || subtreeSlotsTypedProgram(exactMatchAtPath(nextAtoms, targetPath)?.atom)
       ));
       const compiled = await validatePrograms(
-        nextAtoms, contextFile, atoms, candidateProgramScheduler,
-        count => thingIdentityAllocation.reserve(count)
+        nextAtoms, contextFile, atoms, candidateProgramScheduler
       );
       interactionWarnings.push(...compiled.warnings);
       if (!compiled.ok) {
@@ -4929,8 +4906,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   let sourceProgramRefBindings = null;
   if (programSurfaceChanged) {
     const compiled = await validatePrograms(
-      nextAtoms, contextFile, atoms, candidateProgramScheduler,
-      count => thingIdentityAllocation.reserve(count)
+      nextAtoms, contextFile, atoms, candidateProgramScheduler
     );
     interactionWarnings.push(...compiled.warnings);
     if (!compiled.ok) {

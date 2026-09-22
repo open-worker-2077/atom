@@ -186,8 +186,8 @@ test('batch Transform moves multiple existing Atoms in one authoritative commit'
   assert.equal(result.batch, true);
   assert.equal(writes.length, 1);
   const current = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(current.map((item) => item.thing), ['目标域']);
-  assert.deepEqual(current[0].slot.map((item) => item.thing), ['来源甲', '来源乙']);
+  assert.deepEqual(current.map((item) => atomName(item)), ['目标域']);
+  assert.deepEqual(current[0].slot.map((item) => atomName(item)), ['来源甲', '来源乙']);
 });
 
 test('trusted maintenance atomically moves the backup root and renames its former parent', async (t) => {
@@ -215,10 +215,10 @@ test('trusted maintenance atomically moves the backup root and renames its forme
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(writes.length, 1, 'the maintenance migration is one authoritative commit');
   const current = JSON.parse(await fs.readFile(files.contextFile, 'utf8'));
-  assert.deepEqual(current.map((item) => item.thing ?? item['thing@backup@default']), [
+  assert.deepEqual(current.map((item) => atomName(item)), [
     '🧊manage', '默认备份仓'
   ]);
-  assert.deepEqual(current[0].slot.map((item) => item.thing), ['工务']);
+  assert.deepEqual(current[0].slot.map((item) => atomName(item)), ['工务']);
 });
 
 test('trusted maintenance mixed structural batch rolls back every item when a later rename fails', async (t) => {
@@ -286,8 +286,8 @@ test('batch Transform swaps sibling names from one final-state plan and rewrites
     ['域/乙', '域/甲']
   );
   const [domain] = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.deepEqual(domain.slot.map((child) => child.thing), ['乙', '甲', '观察者']);
-  assert.equal(domain.slot[0].slot[0].thing, '甲子');
+  assert.deepEqual(domain.slot.map((child) => atomName(child)), ['乙', '甲', '观察者']);
+  assert.equal(atomName(domain.slot[0].slot[0]), '甲子');
   assert.deepEqual(
     domain.slot[2].strut,
     struts('域/乙/甲子')
