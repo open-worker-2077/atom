@@ -534,13 +534,70 @@ function hasUnboundPrograms(facts, scheduler) {
   });
 }
 
-async function validatePrograms(atoms, contextFile, previousAtoms = null, programScheduler = null) {
+// Authors never maintain ids: the kernel adopts an identity for the Program it
+// is about to bind, and for the Things that Program's references point at.
+function adoptProgramIdentities(candidateAtoms, validated, reserveThingIdentities) {
+  if (typeof reserveThingIdentities !== 'function' || !Array.isArray(validated)) return null;
+  const records = walkAtoms(candidateAtoms).map((match) => ({
+    path: match.path.join('/'),
+    atom: match.atom,
+    identity: oneStoredField(match.atom, 'thing')?.parsed.identity ?? null
+  }));
+  const wanted = new Set();
+  for (const program of validated) {
+    if (typeof program?.path === 'string') wanted.add(program.path);
+    for (const site of program?.referenceSites ?? []) {
+      if (typeof site?.selector !== 'string' || !site.selector) continue;
+      if (site.selector.startsWith('@')) {
+        const match = records.find((record) => record.identity === site.selector.slice(1));
+        if (match) wanted.add(match.path);
+        continue;
+      }
+      const rooted = site.selector.startsWith(`${WORLD_OUTSIDE_NAME}/`);
+      const selector = rooted ? site.selector.slice(WORLD_OUTSIDE_NAME.length + 1) : site.selector;
+      const matches = records.filter((record) => (rooted
+        ? record.path === selector
+        : record.path === selector || record.path.endsWith(`/${selector}`)));
+      if (matches.length === 1) wanted.add(matches[0].path);
+    }
+  }
+  if (wanted.size === 0) return null;
+  const healed = structuredClone(candidateAtoms);
+  const healedRecords = walkAtoms(healed).map((match) => ({
+    path: match.path.join('/'),
+    atom: match.atom,
+    identity: oneStoredField(match.atom, 'thing')?.parsed.identity ?? null
+  }));
+  const byPath = new Map(healedRecords.map((record) => [record.path, record]));
+  const adoptedPaths = healedRecords
+    .filter((record) => wanted.has(record.path) && !record.identity)
+    .map((record) => record.path);
+  // A descendant of another adopted subtree is stamped by its ancestor's walk,
+  // so only the outermost paths are handed to the allocator.
+  const targetPaths = adoptedPaths.filter((path) => !adoptedPaths.some((other) => (
+    other !== path && path.startsWith(`${other}/`)
+  )));
+  const targets = targetPaths.map((path) => byPath.get(path).atom);
+  if (targets.length === 0) return null;
+  // Adoption descends into a referenced subtree, so reserve for every atom
+  // the walk will actually stamp.
+  const missing = walkAtoms(targets).filter(({ atom }) => (
+    !oneStoredField(atom, 'thing')?.parsed.identity
+  )).length;
+  ensureThingIdentities(targets, { identities: reserveThingIdentities(missing) });
+  return healed;
+}
+
+async function validatePrograms(
+  atoms, contextFile, previousAtoms = null, programScheduler = null, reserveThingIdentities = null
+) {
   void contextFile;
   if (typeof programScheduler?.validateProgramSources !== 'function') {
     return { ok: true, errors: [], warnings: [] };
   }
   try {
     const validated = await programScheduler.validateProgramSources(atoms, previousAtoms ?? []);
+    atoms = adoptProgramIdentities(atoms, validated, reserveThingIdentities) ?? atoms;
     const worldBindings = walkAtoms(atoms).map((match) => ({
       path: match.path.join('/'), id: oneStoredField(match.atom, 'thing')?.parsed.identity ?? null
     }));
@@ -902,7 +959,8 @@ async function applyCreateTransform({
     oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => type.raw === 'program')
   ));
   const compiled = introducesProgram
-    ? await validatePrograms(nextAtoms, contextFile, atoms, programScheduler)
+    ? await validatePrograms(nextAtoms, contextFile, atoms, programScheduler,
+      reserveThingIdentities)
     : { ok: true, errors: [], warnings: [] };
   if (!compiled.ok) return { error: compiled.errors[0], warnings: compiled.warnings };
   nextAtoms = compiled.atoms ?? nextAtoms;
@@ -3293,7 +3351,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
             .sort((left, right) => left.path.localeCompare(right.path)));
       if (programSurfaceChangedByEffects) {
         const compiled = await validatePrograms(
-          application.atoms, contextFile, reconciledAtoms, runtimeScheduler
+          application.atoms, contextFile, reconciledAtoms, runtimeScheduler,
+          count => thingIdentityAllocation.reserve(count)
         );
         if (!compiled.ok) {
           const first = compiled.errors[0] ?? diagnostic(
@@ -3949,7 +4008,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     && JSON.stringify(programDeclarationSurface(requestStartAtoms))
       !== JSON.stringify(programDeclarationSurface(atoms))) {
     const compiled = await validatePrograms(
-      atoms, contextFile, requestStartAtoms, candidateProgramScheduler
+      atoms, contextFile, requestStartAtoms, candidateProgramScheduler,
+      count => thingIdentityAllocation.reserve(count)
     );
     interactionWarnings.push(...compiled.warnings);
     if (!compiled.ok) {
@@ -4283,7 +4343,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         || subtreeSlotsTypedProgram(exactMatchAtPath(nextAtoms, targetPath)?.atom)
       ));
       const compiled = await validatePrograms(
-        nextAtoms, contextFile, atoms, candidateProgramScheduler
+        nextAtoms, contextFile, atoms, candidateProgramScheduler,
+        count => thingIdentityAllocation.reserve(count)
       );
       interactionWarnings.push(...compiled.warnings);
       if (!compiled.ok) {
@@ -4906,7 +4967,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   let sourceProgramRefBindings = null;
   if (programSurfaceChanged) {
     const compiled = await validatePrograms(
-      nextAtoms, contextFile, atoms, candidateProgramScheduler
+      nextAtoms, contextFile, atoms, candidateProgramScheduler,
+      count => thingIdentityAllocation.reserve(count)
     );
     interactionWarnings.push(...compiled.warnings);
     if (!compiled.ok) {

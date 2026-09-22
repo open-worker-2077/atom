@@ -115,13 +115,16 @@ export async function createProgramReferenceIndex(atoms, {
   const failures = new Map();
   for (const entry of boundary.entriesByPath.values()) {
     if (entry.inactive || !storedField(entry.atom, 'thing')?.parsed.types.some(type => type.raw === 'program')) continue;
-    const source = storedField(entry.atom, 'situation')?.value ?? '';
-    if (!source.trim()) continue;
-    const sourceHash = hash(source);
-    try {
-      if (!entry.identity) throw Object.assign(new Error('Program reference indexing requires a permanent Thing identity'), {
-        code: 'PROGRAM_REFERENCE_IDENTITY_REQUIRED'
-      });
+      const source = storedField(entry.atom, 'situation')?.value ?? '';
+      if (!source.trim()) continue;
+      const sourceHash = hash(source);
+      try {
+        if (!entry.identity) {
+          // Authors never maintain ids: a Program the world still carries
+          // without one stays usable with literal selectors until a write
+          // adopts its permanent identity; it is simply not indexed yet.
+          continue;
+        }
       const persisted = bindings?.forProgram?.(entry.identity) ?? null;
       const effective = persisted ?? await deriveBinding({
         programThingId: entry.identity, programPath: entry.path, source, sourceHash
