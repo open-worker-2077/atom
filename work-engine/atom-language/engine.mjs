@@ -2259,6 +2259,24 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     await candidateProgramScheduler.prepareProgramReferenceIndex?.(candidateAtoms);
   }
 
+  // Identity is a kernel concern; an author never maintains ids. Any Thing the
+  // candidate still carries without one adopts the next permanent identity from
+  // the same allocation session that this write commits, so Program references
+  // can bind without asking the application layer for an id.
+  function adoptMissingThingIdentities(candidateAtoms) {
+    const missing = walkAtoms(candidateAtoms).filter(({ atom }) => (
+      !oneStoredField(atom, 'thing')?.parsed.identity
+    )).length;
+    if (missing === 0) return null;
+    // Snapshot atoms may be frozen; adopt on a copy so the committed patch
+    // carries the new keys and the immutable base stays untouched.
+    const healed = structuredClone(candidateAtoms);
+    ensureThingIdentities(healed, {
+      identities: thingIdentityAllocation.reserve(missing)
+    });
+    return healed;
+  }
+
   function publishCandidateProgramRuntime() {
     if (candidateProgramScheduler && candidateProgramScheduler !== options.programScheduler) {
       options.programScheduler?.adoptCandidateRuntime?.(candidateProgramScheduler);
@@ -4198,6 +4216,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       }
 
       nextAtoms = transformed.atoms;
+      nextAtoms = adoptMissingThingIdentities(nextAtoms) ?? nextAtoms;
       if (transformed.changed && transformChangesStructure(candidate)) {
         exactIndex = createExactTransformIndex(nextAtoms);
       }
@@ -4831,6 +4850,7 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   }
 
   let nextAtoms = transformed.atoms;
+  nextAtoms = adoptMissingThingIdentities(nextAtoms) ?? nextAtoms;
   const pureRestore = item.fields.length === 1 && item.fields[0].baseKey === 'thing'
     && item.fields[0].commands.length === 1 && item.fields[0].commands[0].name === 'rst';
   if (pureRestore && transformed.logRecord?.operation === 'restore'
