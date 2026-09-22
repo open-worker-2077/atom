@@ -2306,10 +2306,7 @@ export class ProgramRuntimeScheduler {
         const previous = previousByPath.get(record.path);
         return !previous
           || previous.detail !== record.detail
-          || !previous.types.includes('program')
-          // A Program without persisted kernel bindings is bound once, on the
-          // next write, instead of staying quarantined forever.
-          || !this.programRefBindings?.forProgram?.(record.ref);
+          || !previous.types.includes('program');
       })()
     ));
     const validated = await Promise.all(programs.map((program) => this.runBounded(() => this.executeProgram({

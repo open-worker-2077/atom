@@ -521,19 +521,6 @@ function programRunRequest(item) {
   return { selector: field.value, scopeRoot: command.parameter || null };
 }
 
-// A Program that never received persisted kernel bindings stays quarantined
-// until some write binds it; treat that as a Program-surface change so the very
-// next write adopts the bindings instead of leaving the Program unusable.
-function hasUnboundPrograms(facts, scheduler) {
-  const bindings = scheduler?.programRefBindings ?? null;
-  return walkAtoms(facts).some(({ atom }) => {
-    const thing = oneStoredField(atom, 'thing');
-    if (!thing?.parsed.types.some((type) => type.raw === 'program')) return false;
-    if (!thing.parsed.identity) return true;
-    return !(bindings?.forProgram?.(thing.parsed.identity));
-  });
-}
-
 // Authors never maintain ids: the kernel adopts an identity for the Program it
 // is about to bind, and for the Things that Program's references point at.
 function adoptProgramIdentities(candidateAtoms, validated, reserveThingIdentities) {
@@ -4954,9 +4941,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   requestDeclarationRemovalRoots = transformed.logRecord?.operation === 'discard' && transformed.sourcePath
     ? [transformed.sourcePath]
     : [];
-  const programSurfaceChanged = (changed
-    && transformChangesProgramSurface(atoms, nextAtoms, transformed))
-    || hasUnboundPrograms(nextAtoms, candidateProgramScheduler ?? options.programScheduler);
+  const programSurfaceChanged = changed
+    && transformChangesProgramSurface(atoms, nextAtoms, transformed);
   let postRefresh = {
     atoms: nextAtoms,
     lockIndex: programLockIndex,
