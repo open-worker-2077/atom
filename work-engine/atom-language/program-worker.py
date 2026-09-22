@@ -701,6 +701,12 @@ def inspect_program_references(source, filename, tree=None):
     sites = []
     def add_site(role, value, selector_start=None, selector_end=None, call=None, occurrence=0):
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            # Slot-scope relative selectors resolve against the current slot
+            # instance at execution time; they are never world references.
+            site_selector = (value.value[selector_start:selector_end]
+                             if selector_start is not None else value.value)
+            if site_selector.startswith("./") or site_selector == ".":
+                return
             start = offsets[value.lineno - 1] + value.col_offset
             end = offsets[value.end_lineno - 1] + value.end_col_offset
             tokens = [token for token in string_tokens if token["startByte"] >= start and token["endByte"] <= end]
@@ -802,9 +808,11 @@ def inspect_program_references(source, filename, tree=None):
 
 
 def project_ref_tree(tree, analysis, bindings=None, path_by_thing_id=None, validate_only=False,
-                     project_bound_references=False):
+                     project_bound_references=False, bindings_required=True):
     """Compile 引述 on an AST copy; stored Situation and its analysis stay immutable."""
-    use_bindings = not validate_only or project_bound_references
+    use_bindings = (not validate_only or project_bound_references) and bindings_required
+    if use_bindings and bindings is None:
+        raise EngineCallError("PROGRAM_REF_BINDING_MISSING", "Program 引述 binding is missing")
     if use_bindings and bindings is not None and (
             not isinstance(bindings, dict) or bindings.get("sourceHash") != analysis["sourceHash"]):
         raise EngineCallError("PROGRAM_REF_SOURCE_MISMATCH", "Program 引述 bindings do not belong to this source")
@@ -1262,7 +1270,7 @@ def main():
             target["detail"], target["path"], request.get("allowedFunctions")
         )
         target_analysis = inspect_program_references(target["detail"], target["path"], target_tree)
-        target_tree = project_ref_tree(target_tree, target_analysis, target.get("refBindings"), request.get("pathByThingId"))
+        target_tree = project_ref_tree(target_tree, target_analysis, target.get("refBindings"), request.get("pathByThingId"), bindings_required=target.get("bindingsRequired") is not False)
         child_namespace = dict(namespace)
         child_namespace["use_program"] = use_program
         program_stack.append(target["ref"])
@@ -1982,7 +1990,7 @@ def main():
             target["detail"], target["path"], request.get("allowedFunctions")
         )
         target_analysis = inspect_program_references(target["detail"], target["path"], target_tree)
-        target_tree = project_ref_tree(target_tree, target_analysis, target.get("refBindings"), request.get("pathByThingId"))
+        target_tree = project_ref_tree(target_tree, target_analysis, target.get("refBindings"), request.get("pathByThingId"), bindings_required=target.get("bindingsRequired") is not False)
         child_namespace = dict(namespace)
         child_namespace["use_program"] = use_program
         program_stack.append(target["ref"])
@@ -2014,7 +2022,8 @@ def main():
     projected_tree = project_ref_tree(
         program_tree, references, request["program"].get("refBindings"),
         request.get("pathByThingId"), validate_only=request.get("validateOnly") is True,
-        project_bound_references=request.get("projectBoundReferences") is True
+        project_bound_references=request.get("projectBoundReferences") is True,
+        bindings_required=request.get("bindingsRequired") is not False
     )
     trigger_contract = extract_trigger_contract(projected_tree)
     agent_declaration = extract_agent_declaration(program_tree)

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { collectDefaultBackupBoundary } from './default-backup-boundary.mjs';
 import { storedField } from './slot-graph-semantics.mjs';
+import { parseThingSelector } from './thing-selector.mjs';
 
 const hash = (source) => `sha256:${createHash('sha256').update(source).digest('hex')}`;
 const empty = Object.freeze([]);
@@ -41,6 +42,33 @@ function bindProgram({ programThingId, programPath, sourceHash }, binding, pathB
   }
 }
 
+// A Program that predates kernel bindings (or was created outside a bound
+// write) derives its reference sites once, from the current world, so it stays
+// usable; the next write persists the same binding as kernel metadata.
+async function deriveBinding({ programThingId, programPath, source, sourceHash }, inspectProgram, pathByThingId) {
+  if (typeof inspectProgram !== 'function') return null;
+  const inspected = await inspectProgram({ source, programPath });
+  if (!inspected || inspected.sourceHash !== sourceHash) return null;
+  const byPath = [...pathByThingId.entries()].map(([id, path]) => ({ id, path }));
+  const sites = inspected.sites.map((site) => {
+    const identitySelector = site.selector?.startsWith('@')
+      ? parseThingSelector(site.selector)
+      : null;
+    if (identitySelector?.kind === 'invalid-identity') return null;
+    const rooted = site.selector?.startsWith('世界之外/');
+    const selector = rooted ? site.selector.slice('世界之外/'.length) : site.selector;
+    const matches = identitySelector?.kind === 'identity'
+      ? byPath.filter(({ id }) => id === identitySelector.identity)
+      : byPath.filter(({ path }) => (rooted
+        ? path === selector
+        : path === selector || path.endsWith(`/${selector}`)));
+    if (matches.length !== 1) return null;
+    return { fingerprint: site.fingerprint, role: site.role, targetThingId: matches[0].id };
+  });
+  if (sites.some((site) => site === null)) return null;
+  return { programThingId, sourceHash, sites };
+}
+
 function snapshot(pathByThingId, owners, failuresByOwner) {
   const reverse = new Map();
   for (const sites of owners.values()) for (const site of sites) {
@@ -76,7 +104,9 @@ function snapshot(pathByThingId, owners, failuresByOwner) {
 }
 
 // Disposable cache: persisted kernel bindings establish identity; paths only project readability.
-export async function createProgramReferenceIndex(atoms, { bindings = null, pathByThingId = null } = {}) {
+export async function createProgramReferenceIndex(atoms, {
+  bindings = null, pathByThingId = null, inspectProgram = null
+} = {}) {
   const boundary = collectDefaultBackupBoundary(atoms);
   const currentPaths = pathByThingId instanceof Map
     ? new Map(pathByThingId)
@@ -92,8 +122,12 @@ export async function createProgramReferenceIndex(atoms, { bindings = null, path
       if (!entry.identity) throw Object.assign(new Error('Program reference indexing requires a permanent Thing identity'), {
         code: 'PROGRAM_REFERENCE_IDENTITY_REQUIRED'
       });
+      const persisted = bindings?.forProgram?.(entry.identity) ?? null;
+      const effective = persisted ?? await deriveBinding({
+        programThingId: entry.identity, programPath: entry.path, source, sourceHash
+      }, inspectProgram, currentPaths);
       const bound = bindProgram({ programThingId: entry.identity, programPath: entry.path, sourceHash },
-        bindings?.forProgram?.(entry.identity) ?? null, currentPaths);
+        effective, currentPaths);
       owners.set(entry.identity, bound.sites);
       if (bound.failure) failures.set(entry.identity, bound.failure);
     } catch (error) {

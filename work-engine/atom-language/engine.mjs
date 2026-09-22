@@ -521,8 +521,37 @@ function programRunRequest(item) {
   return { selector: field.value, scopeRoot: command.parameter || null };
 }
 
-async function validatePrograms(atoms, contextFile, previousAtoms = null, programScheduler = null) {
+function adoptThingIdentitiesOnCandidate(candidateAtoms, reserveThingIdentities) {
+  if (typeof reserveThingIdentities !== 'function') return null;
+  const missing = walkAtoms(candidateAtoms).filter(({ atom }) => (
+    !oneStoredField(atom, 'thing')?.parsed.identity
+  )).length;
+  if (missing === 0) return null;
+  // Snapshot atoms may be frozen; adopt on a copy so the committed patch
+  // carries the new keys while the immutable base stays untouched.
+  const healed = structuredClone(candidateAtoms);
+  ensureThingIdentities(healed, { identities: reserveThingIdentities(missing) });
+  return healed;
+}
+
+// A Program that never received persisted kernel bindings stays quarantined
+// until some write binds it; treat that as a Program-surface change so the very
+// next write adopts the bindings instead of leaving the Program unusable.
+function hasUnboundPrograms(facts, scheduler) {
+  const bindings = scheduler?.programRefBindings ?? null;
+  return walkAtoms(facts).some(({ atom }) => {
+    const thing = oneStoredField(atom, 'thing');
+    if (!thing?.parsed.types.some((type) => type.raw === 'program')) return false;
+    if (!thing.parsed.identity) return true;
+    return !(bindings?.forProgram?.(thing.parsed.identity));
+  });
+}
+
+async function validatePrograms(
+  atoms, contextFile, previousAtoms = null, programScheduler = null, reserveThingIdentities = null
+) {
   void contextFile;
+  atoms = adoptThingIdentitiesOnCandidate(atoms, reserveThingIdentities) ?? atoms;
   if (typeof programScheduler?.validateProgramSources !== 'function') {
     return { ok: true, errors: [], warnings: [] };
   }
@@ -889,7 +918,8 @@ async function applyCreateTransform({
     oneStoredField(match.atom, 'thing')?.parsed.types.some((type) => type.raw === 'program')
   ));
   const compiled = introducesProgram
-    ? await validatePrograms(nextAtoms, contextFile, atoms, programScheduler)
+    ? await validatePrograms(nextAtoms, contextFile, atoms, programScheduler,
+      count => thingIdentityAllocation.reserve(count))
     : { ok: true, errors: [], warnings: [] };
   if (!compiled.ok) return { error: compiled.errors[0], warnings: compiled.warnings };
   nextAtoms = compiled.atoms ?? nextAtoms;
@@ -2259,24 +2289,6 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     await candidateProgramScheduler.prepareProgramReferenceIndex?.(candidateAtoms);
   }
 
-  // Identity is a kernel concern; an author never maintains ids. Any Thing the
-  // candidate still carries without one adopts the next permanent identity from
-  // the same allocation session that this write commits, so Program references
-  // can bind without asking the application layer for an id.
-  function adoptMissingThingIdentities(candidateAtoms) {
-    const missing = walkAtoms(candidateAtoms).filter(({ atom }) => (
-      !oneStoredField(atom, 'thing')?.parsed.identity
-    )).length;
-    if (missing === 0) return null;
-    // Snapshot atoms may be frozen; adopt on a copy so the committed patch
-    // carries the new keys and the immutable base stays untouched.
-    const healed = structuredClone(candidateAtoms);
-    ensureThingIdentities(healed, {
-      identities: thingIdentityAllocation.reserve(missing)
-    });
-    return healed;
-  }
-
   function publishCandidateProgramRuntime() {
     if (candidateProgramScheduler && candidateProgramScheduler !== options.programScheduler) {
       options.programScheduler?.adoptCandidateRuntime?.(candidateProgramScheduler);
@@ -3298,7 +3310,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
             .sort((left, right) => left.path.localeCompare(right.path)));
       if (programSurfaceChangedByEffects) {
         const compiled = await validatePrograms(
-          application.atoms, contextFile, reconciledAtoms, runtimeScheduler
+          application.atoms, contextFile, reconciledAtoms, runtimeScheduler,
+          count => thingIdentityAllocation.reserve(count)
         );
         if (!compiled.ok) {
           const first = compiled.errors[0] ?? diagnostic(
@@ -3536,6 +3549,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     postCommitEvent: sourceEvent = null,
     baseAtoms = atoms
   } = {}) {
+    candidateAtoms = adoptThingIdentitiesOnCandidate(
+      candidateAtoms, count => thingIdentityAllocation.reserve(count)
+    ) ?? candidateAtoms;
     const affectedAtomsFromPaths = (paths) => {
       const expanded = new Set();
       for (const rawPath of paths ?? []) {
@@ -3954,7 +3970,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
     && JSON.stringify(programDeclarationSurface(requestStartAtoms))
       !== JSON.stringify(programDeclarationSurface(atoms))) {
     const compiled = await validatePrograms(
-      atoms, contextFile, requestStartAtoms, candidateProgramScheduler
+      atoms, contextFile, requestStartAtoms, candidateProgramScheduler,
+      count => thingIdentityAllocation.reserve(count)
     );
     interactionWarnings.push(...compiled.warnings);
     if (!compiled.ok) {
@@ -4216,7 +4233,6 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       }
 
       nextAtoms = transformed.atoms;
-      nextAtoms = adoptMissingThingIdentities(nextAtoms) ?? nextAtoms;
       if (transformed.changed && transformChangesStructure(candidate)) {
         exactIndex = createExactTransformIndex(nextAtoms);
       }
@@ -4289,7 +4305,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         || subtreeSlotsTypedProgram(exactMatchAtPath(nextAtoms, targetPath)?.atom)
       ));
       const compiled = await validatePrograms(
-        nextAtoms, contextFile, atoms, candidateProgramScheduler
+        nextAtoms, contextFile, atoms, candidateProgramScheduler,
+        count => thingIdentityAllocation.reserve(count)
       );
       interactionWarnings.push(...compiled.warnings);
       if (!compiled.ok) {
@@ -4850,7 +4867,6 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   }
 
   let nextAtoms = transformed.atoms;
-  nextAtoms = adoptMissingThingIdentities(nextAtoms) ?? nextAtoms;
   const pureRestore = item.fields.length === 1 && item.fields[0].baseKey === 'thing'
     && item.fields[0].commands.length === 1 && item.fields[0].commands[0].name === 'rst';
   if (pureRestore && transformed.logRecord?.operation === 'restore'
@@ -4900,8 +4916,9 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   requestDeclarationRemovalRoots = transformed.logRecord?.operation === 'discard' && transformed.sourcePath
     ? [transformed.sourcePath]
     : [];
-  const programSurfaceChanged = changed
-    && transformChangesProgramSurface(atoms, nextAtoms, transformed);
+  const programSurfaceChanged = (changed
+    && transformChangesProgramSurface(atoms, nextAtoms, transformed))
+    || hasUnboundPrograms(nextAtoms, candidateProgramScheduler ?? options.programScheduler);
   let postRefresh = {
     atoms: nextAtoms,
     lockIndex: programLockIndex,
@@ -4912,7 +4929,8 @@ async function executeAtomLanguageInteraction(options, postcommit) {
   let sourceProgramRefBindings = null;
   if (programSurfaceChanged) {
     const compiled = await validatePrograms(
-      nextAtoms, contextFile, atoms, candidateProgramScheduler
+      nextAtoms, contextFile, atoms, candidateProgramScheduler,
+      count => thingIdentityAllocation.reserve(count)
     );
     interactionWarnings.push(...compiled.warnings);
     if (!compiled.ok) {

@@ -1360,6 +1360,7 @@ function runWorker({
       program,
       validateOnly,
       projectBoundReferences,
+      bindingsRequired: program?.bindingsRequired !== false,
       agentDeclarationOnly,
       triggered,
       changedNodes,
@@ -2089,7 +2090,12 @@ export class ProgramRuntimeScheduler {
   executeProgram(request) {
     const bind = (program) => {
       if (!program) return program;
-      const indexedSites = this.programReferenceIndex?.sitesForProgram(program.ref) ?? [];
+      const indexedSites = this.programReferenceIndex?.sitesForProgram(program.ref);
+      // Inline predicate sources are not Things and can never own persisted
+      // kernel bindings, so their literals stay resolved exactly as written.
+      if (!Array.isArray(indexedSites)) {
+        return { ...program, bindingsRequired: false };
+      }
       return {
         ...program,
         refBindings: {
@@ -2298,7 +2304,10 @@ export class ProgramRuntimeScheduler {
         const previous = previousByPath.get(record.path);
         return !previous
           || previous.detail !== record.detail
-          || !previous.types.includes('program');
+          || !previous.types.includes('program')
+          // A Program without persisted kernel bindings is bound once, on the
+          // next write, instead of staying quarantined forever.
+          || !this.programRefBindings?.forProgram?.(record.ref);
       })()
     ));
     const validated = await Promise.all(programs.map((program) => this.runBounded(() => this.executeProgram({
