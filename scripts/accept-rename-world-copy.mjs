@@ -81,6 +81,9 @@ function canonicalReferences(atoms, mapPath) {
     const metadata = shortcutMetadata(match.atom);
     if (!metadata) return [];
     if (metadata.target.state === 'linked') metadata.target.path = mapPath(metadata.target.path);
+    // A write may stamp the kernel identity onto the referenced target; the
+    // reference contract itself is the stable part compared here.
+    delete metadata.target.identity;
     const referencePath = mapPath(match.path.join('/'));
     return [{
       path: referencePath,
@@ -117,8 +120,12 @@ try {
     const b = after.get(relocate(p));
     assert.ok(b, `Missing ${p}`);
     const oldThing = Object.keys(a).find((k) => /^thing(?:[@#&]|$)/u.test(k));
-    assert.equal(Object.keys(b).find((k) => /^thing(?:[@#&]|$)/u.test(k)), oldThing, `Types changed ${p}`);
-    assert.equal(b[oldThing], p === target ? arg('--name') : a[oldThing]);
+    const newThing = Object.keys(b).find((k) => /^thing(?:[@#&]|$)/u.test(k));
+    // A write may stamp a permanent identity onto a node that had none, so the
+    // persisted key gains `&id=…`; types and name must still match exactly.
+    const keyShape = (key) => String(key).replace(/&id=[^#]*/u, '');
+    assert.equal(keyShape(newThing), keyShape(oldThing), `Types changed ${p}`);
+    assert.equal(b[newThing], p === target ? arg('--name') : a[oldThing]);
     assert.equal(axisField(b, 'situation')[0], axisField(a, 'situation')[0], `Situation axis changed ${p}`);
     assert.equal(axisField(b, 'slot')[0], axisField(a, 'slot')[0], `Slot axis changed ${p}`);
     assert.equal(axisField(b, 'strut')[0], axisField(a, 'strut')[0], `Strut axis changed ${p}`);
