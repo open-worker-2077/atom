@@ -11,9 +11,9 @@ import { projectAtomGraphToKnowledge } from '../work-engine/atom-language/graph-
 import { createBrowserCommandMapper } from '../src/atom-system/browser-command-mapper.mjs';
 import { startAtomGraphServer } from '../work-engine/atom-language/graph-server.mjs';
 import {
-  createShortcutAtom,
   resolveShortcutMatch
 } from '../work-engine/atom-language/shortcut-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 import {
   createJsonTransactionJournal,
   createJsonWorldRepository
@@ -214,14 +214,17 @@ test('4784 keeps a plain leaf create local while Program changes stay whole-worl
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile: graphFile, facts: [
     atom('工作Agent', '', [
       atom('规则Program', 'def main(arguments):\n    return None', [], 'program'),
       atom('旧目标'),
       atom('新目标'),
-      createShortcutAtom({ thing: '入口', targetPath: '工作Agent/旧目标', referenceId: 'entry-ref' })
+      { 'thing@shortcut': '入口', situation: JSON.stringify({
+        contract: 'atom.shortcut', version: 1, referenceId: 'entry-ref',
+        target: { state: 'linked', path: '工作Agent/旧目标' }
+      }), slot: [], strut: [] }
     ], 'agent')
-  ], null, 2));
+  ] });
   const running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
   });
@@ -951,7 +954,7 @@ test('4784 exact Explore does not replay an unrelated slot effect after an expli
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile: graphFile, facts: [
     atom('工作Agent', '', [
       atom('目标', 'before'),
       atom('改值Program', "transform({'thing':'工作Agent/目标','situation.rep.after':None})", [], 'program'),
@@ -960,7 +963,7 @@ test('4784 exact Explore does not replay an unrelated slot effect after an expli
         "slot_body({'action':'print','body':'不存在槽体','revision':'synthetic','name':'不应创建'})"
       ].join('\n'), [], 'program')
     ], 'agent')
-  ], null, 2));
+  ] });
   const running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile
   });
