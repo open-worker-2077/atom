@@ -55,7 +55,7 @@ test('index consumes persisted identities and current ID paths without parsing r
   assert.equal(revisionOfWorldFacts(world), revision);
 });
 
-test('missing binding, source mismatch and missing target quarantine only their Program', async () => {
+test('unbound Programs remain literal while stale and missing targets quarantine only their Program', async () => {
   const source = 'explore({"thing":ref("World/Target")})';
   const missingId = '202';
   const staleId = '203';
@@ -73,8 +73,8 @@ test('missing binding, source mismatch and missing target quarantine only their 
   ), null);
   const index = await createProgramReferenceIndex(world, { bindings });
   assert.deepEqual(index.sitesForTargets(['102']).map(site => site.programThingId), ['201']);
+  assert.deepEqual(index.sitesForProgram(missingId), []);
   assert.deepEqual(index.failures.map(({ programThingId, code }) => ({ programThingId, code })), [
-    { programThingId: missingId, code: 'PROGRAM_REF_BINDING_MISSING' },
     { programThingId: staleId, code: 'PROGRAM_REF_SOURCE_MISMATCH' },
     { programThingId: goneId, code: 'PROGRAM_REF_TARGET_MISSING' }
   ]);

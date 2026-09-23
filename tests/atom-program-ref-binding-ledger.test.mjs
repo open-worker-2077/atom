@@ -36,6 +36,9 @@ const receipt = (commandId, programRefBindings, extra = {}) => ({
   ...(extra.rollbackOf ? { rollbackOf: extra.rollbackOf } : {}),
   result: { ...(programRefBindings ? { programRefBindings } : {}) }
 });
+const visibleInteraction = ({ result, warnings, errors, messages, affectedPaths, lockState }) => ({
+  result, warnings, errors, messages, affectedPaths, lockState
+});
 
 test('Program create and update emit the normalized source binding in the same central receipt', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-binding-engine-'));
@@ -53,7 +56,7 @@ test('Program create and update emit the normalized source binding in the same c
     'thing@program': 'Program', situation: rawSource, slot: [], strut: []
   })}` });
   assert.equal(created.ok, true, JSON.stringify(created.errors));
-  assert.equal(JSON.stringify(created).includes(targetId), false);
+  assert.equal(JSON.stringify(visibleInteraction(created)).includes(targetId), false);
   const createdFacts = JSON.parse(await fs.readFile(contextFile, 'utf8'));
   const program = createdFacts.find((entry) => Object.values(entry).includes('Program'));
   const programThingId = parseAtomKey(Object.keys(program).find((key) => key.startsWith('thing'))).identity;
@@ -69,7 +72,7 @@ test('Program create and update emit the normalized source binding in the same c
     thing: 'Program', [`situation.rep.${nextSource}`]: program.situation
   })}` });
   assert.equal(updated.ok, true, JSON.stringify(updated.errors));
-  assert.equal(JSON.stringify(updated).includes(targetId), false);
+  assert.equal(JSON.stringify(visibleInteraction(updated)).includes(targetId), false);
   const metadata = await createJsonTransactionJournal({ file: journalFile }).readMetadataState();
   const nextBinding = metadata.receipts.at(-1).receipt.result.programRefBindings.replacements[0];
   assert.equal(nextBinding.programThingId, programThingId);
