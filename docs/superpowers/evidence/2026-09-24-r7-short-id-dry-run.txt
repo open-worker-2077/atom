@@ -1,0 +1,1 @@
+{"ok":false,"code":"PROGRAM_REF_BINDING_MISSING","message":"Every migrated Program requires one binding entry","details":{}}
