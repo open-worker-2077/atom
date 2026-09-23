@@ -225,12 +225,17 @@ test('outside orchestration materializes a local variable Thing before triggerin
 
 test('one atomic batch evaluates one owner-local condition and dispatches its consequent once', async (t) => {
   const runtime = await setupConditional(t);
-  const diagnostics = [];
-  const scheduler = createProgramRuntimeScheduler({
-    diagnosticRecorder: { async record(entry) { diagnostics.push(entry); } }
-  });
+  const scheduler = createProgramRuntimeScheduler();
+  const calls = [];
+  const originalRunProgram = scheduler.runProgram;
+  scheduler.runProgram = async (request) => {
+    if (request.program.path === 'Root/条件槽体/候选流/计算') {
+      calls.push(request.triggered);
+    }
+    return originalRunProgram(request);
+  };
   await sealAndPrintConditional(runtime, scheduler);
-  diagnostics.length = 0;
+  calls.length = 0;
 
   const before = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.deepEqual(find(before, 'Root/条件槽体/槽例/实例001/字段甲').strut, [
@@ -262,8 +267,9 @@ test('one atomic batch evaluates one owner-local condition and dispatches its co
   const committed = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果/结果料').situation, '已计算');
   assert.equal(
-    diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/候选流/计算').length,
-    1
+    calls.filter((triggered) => triggered === true).length,
+    1,
+    JSON.stringify(calls)
   );
 });
 
@@ -290,12 +296,17 @@ test('a same-value local-material Transform still evaluates and dispatches owner
 
 test('a strict-false owner-local condition does not dispatch its consequent', async (t) => {
   const runtime = await setupConditional(t);
-  const diagnostics = [];
-  const scheduler = createProgramRuntimeScheduler({
-    diagnosticRecorder: { async record(entry) { diagnostics.push(entry); } }
-  });
+  const scheduler = createProgramRuntimeScheduler();
+  const calls = [];
+  const originalRunProgram = scheduler.runProgram;
+  scheduler.runProgram = async (request) => {
+    if (request.program.path === 'Root/条件槽体/候选流/计算') {
+      calls.push(request.triggered);
+    }
+    return originalRunProgram(request);
+  };
   await sealAndPrintConditional(runtime, scheduler);
-  diagnostics.length = 0;
+  calls.length = 0;
 
   const before = JSON.parse(await fs.readFile(runtime.contextFile, 'utf8'));
   assert.equal(slotProgramInvocationsForEvent(before, {
@@ -312,9 +323,9 @@ test('a strict-false owner-local condition does not dispatch its consequent', as
   const committed = await readCommittedAtomLanguageFacts(runtime);
   assert.equal(find(committed, 'Root/条件槽体/槽例/实例001/结果/结果料').situation, '');
   assert.equal(
-    diagnostics.filter((entry) => entry.program?.path === 'Root/条件槽体/候选流/计算').length,
+    calls.filter((triggered) => triggered === true).length,
     0,
-    'strict false must not dispatch the downstream subscriber'
+    `strict false must not dispatch the downstream subscriber: ${JSON.stringify(calls)}`
   );
 });
 

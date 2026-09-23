@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
 import { slotProgramInvocationsForEvent } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 import {
   executeAtomLanguage,
   readCommittedAtomLanguageFacts
@@ -104,9 +105,16 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  await fs.writeFile(contextFile, JSON.stringify(world(), null, 2), 'utf8');
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
   const scheduler = createProgramRuntimeScheduler();
   const runtime = { contextFile, projectionFile, programScheduler: scheduler };
+  const initialized = await executeAtomLanguage({
+    ...runtime,
+    source: `transform new ${JSON.stringify(world()[0])}`,
+    humanAuthority: true,
+    interaction: { id: crypto.randomUUID(), agent: null }
+  });
+  assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
   const unlabelled = 'Root/Holder/Unlabelled';
   const holder = 'Root/Holder';
   const body = `${unlabelled}/条件槽体`;
@@ -138,6 +146,7 @@ test('a slot strut true lets its own triggered action arm a node lock without lo
       assert.equal(created.ok, true, JSON.stringify(created.errors));
     }
   }
+  runtime.programMode = 'current';
 
   let stored = await readCommittedAtomLanguageFacts({ contextFile, projectionFile });
   assert.equal(find(stored, `${body}/候选流/判定`), null);
@@ -235,7 +244,7 @@ test('a failing strut subscriber preserves the committed source Transform', asyn
       'trigger("strut", {}, receive)'
     ].join('\n'), [], [], ['program'])
   ];
-  await fs.writeFile(contextFile, JSON.stringify(initial, null, 2), 'utf8');
+  await seedBoundWorld({ contextFile, projectionFile, facts: initial });
   const scheduler = createProgramRuntimeScheduler();
   const result = await executeAtomLanguage({
     contextFile,
@@ -281,7 +290,7 @@ test('a rolled-back multi-subscriber delivery releases every claim for a complet
       'trigger("strut", {}, receive)'
     ].join('\n'), [], [], ['program'])
   ];
-  await fs.writeFile(contextFile, JSON.stringify(initial, null, 2), 'utf8');
+  await seedBoundWorld({ contextFile, projectionFile, facts: initial });
   const scheduler = createProgramRuntimeScheduler();
   const runProgram = scheduler.runProgram;
   let failTransientOnce = true;
@@ -331,7 +340,7 @@ test('a strut subscriber effect rejected after worker success releases its claim
     if: [{ program: 'def main(context):\n    return True' }],
     then: [{ 'thing@program': 'ApplySubscriber' }]
   }]);
-  await fs.writeFile(contextFile, JSON.stringify([
+  await seedBoundWorld({ contextFile, projectionFile, facts: [
     source,
     atom('Result', 'before'),
     atom('ApplySubscriber', [
@@ -339,7 +348,7 @@ test('a strut subscriber effect rejected after worker success releases its claim
       '    transform({"thing":"Result","situation.rep.after":"before"})',
       'trigger("strut", {}, receive)'
     ].join('\n'), [], [], ['program'])
-  ], null, 2), 'utf8');
+  ] });
   const scheduler = createProgramRuntimeScheduler();
   const runProgram = scheduler.runProgram;
   let replaceEffectOnce = true;
