@@ -8,6 +8,7 @@ import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-w
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import { applySlotBodyEffect as applySlotBodyEffectKernel } from '../work-engine/atom-language/slot-body-runtime.mjs';
 import { thingIdentityReserverFor } from './helpers/thing-identity-reserver.mjs';
+import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 
 const applySlotBodyEffect = (options) => applySlotBodyEffectKernel({
   ...options,
@@ -26,6 +27,26 @@ import { createJsonRuntimeDiagnosticRepository } from '../src/atom-system/adapte
 
 const atom = (thing, slot = [], situation = '') => ({ thing, situation, slot, strut: [] });
 const find = (atoms, path) => walkAtoms(atoms).find((m) => m.path.join('/') === path)?.atom;
+const thingOf = (value) => Object.entries(value).find(([key]) => key.split(/[@&#]/u)[0] === 'thing')?.[1];
+const thingKeyOf = (value) => Object.keys(value).find((key) => key.split(/[@&#]/u)[0] === 'thing');
+const withoutRelationEndpointIds = (value) => {
+  const copy = structuredClone(value);
+  const strip = (entry) => Array.isArray(entry) ? entry.map(strip)
+    : entry && typeof entry === 'object'
+      ? Object.fromEntries(Object.entries(entry).map(([key, child]) => [
+        key.replace(/&id=[0-9A-Za-z]+/u, ''), strip(child)
+      ])) : entry;
+  const visit = (node) => {
+    node.strut = node.strut?.map((rule) => ({
+      ...rule,
+      ...(rule.if ? { if: strip(rule.if) } : {}),
+      ...(rule.then ? { then: strip(rule.then) } : {})
+    })) ?? node.strut;
+    node.slot?.forEach(visit);
+  };
+  visit(copy);
+  return copy;
+};
 
 async function fixture() {
   const sealed = await applySlotBodyEffect({
@@ -63,7 +84,7 @@ async function authorityArchive(t, extraProgram = null, workerSource = 'agent({"
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-restore-authority-'));
   t.diagnostic(`retained fixture: ${directory}`);
   const files = { contextFile: path.join(directory, 'atom.json'), graphFile: path.join(directory, 'graph.json'), storeFile: path.join(directory, 'knowledge.json') };
-  await fs.writeFile(files.contextFile, JSON.stringify(atoms));
+  await seedBoundWorld({ contextFile: files.contextFile, projectionFile: files.graphFile, facts: atoms });
   const execute = createRuntimeCliExecutor(files);
   const run = (id, request, create = false) => execute({ source: `transform ${create ? 'new ' : ''}${JSON.stringify(request)}`, interaction: { id, agent: { path: 'Root' } } });
   const discarded = await run('archive', { 'thing.dsc.': 'Root/Parent' });
@@ -315,26 +336,31 @@ test(`public ancestor discard persists one reversible sealed archive and cold-re
   });
   find(atoms, 'Root/Parent/Event').strut = [{ 'if@current': true, then: [{ thing: 'Root/Parent/Result' }] }];
   find(atoms, 'Root/Sibling').strut = [{ 'if@current': true, then: [{ thing: 'Root/Parent/Event' }] }];
-  const shortcut = {
+  let shortcut = {
     'thing@shortcut': 'Link', situation: JSON.stringify({
       contract: 'atom.shortcut', version: 1, referenceId: 'ancestor-discard-link',
       target: { state: 'linked', path: 'Root/Parent/Result' }
     }), slot: [], strut: []
   };
   atoms[0].slot.push(shortcut);
-  const oldArchive = atom('Parent', [], 'historical archive');
+  let oldArchive = atom('Parent', [], 'historical archive');
   find(atoms, 'Backup').slot.push(oldArchive);
-  const historicalOwner = atom('Owner');
+  let historicalOwner = atom('Owner');
   historicalOwner.strut = [{ 'if@current': true, then: [
     { thing: 'Backup/History/Anchor' }, { thing: 'Root/Parent/Event' }
   ] }];
   find(atoms, 'Backup').slot.push(atom('History', [historicalOwner, atom('Anchor')]));
-  const initialParent = structuredClone(parent);
+  let initialParent = structuredClone(parent);
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-ancestor-discard-'));
   t.diagnostic(`retained fixture: ${directory}`);
   const contextFile = path.join(directory, 'atom.json');
   const files = { contextFile, graphFile: path.join(directory, 'graph.json'), storeFile: path.join(directory, 'knowledge.json') };
-  await fs.writeFile(contextFile, JSON.stringify(atoms));
+  const seeded = await seedBoundWorld({ contextFile, projectionFile: files.graphFile, facts: atoms });
+  atoms.splice(0, atoms.length, ...seeded);
+  initialParent = structuredClone(find(atoms, 'Root/Parent'));
+  oldArchive = structuredClone(find(atoms, 'Backup/Parent'));
+  historicalOwner = structuredClone(find(atoms, 'Backup/History/Owner'));
+  shortcut = structuredClone(find(atoms, 'Root/Link'));
   const execute = createRuntimeCliExecutor(files);
   const forbiddenOwnerEdit = await execute({ source: 'transform {"thing":"Backup/History/Owner","strut.rep.":[]}', interaction: { id: 'foreign-owner-denied', agent: { path: 'Root' } } });
   assert.equal(forbiddenOwnerEdit.ok, false);
@@ -352,19 +378,26 @@ test(`public ancestor discard persists one reversible sealed archive and cold-re
   assert.deepEqual(find(stored, `${discarded.archive.path}/Body`), initialParent.slot[0]);
   assert.deepEqual(find(stored, `${discarded.archive.path}/Worker`), initialParent.slot[3]);
   assert.equal(find(stored, `${discarded.archive.path}/Result`).situation, 'untouched');
-  assert.equal(find(stored, `${discarded.archive.path}/Event`).strut[0].then[0].thing, `${discarded.archive.path}/Result`);
-  assert.equal(find(stored, 'Root/Sibling').strut[0].then[0].thing, `${discarded.archive.path}/Event`);
+  assert.equal(thingOf(find(stored, `${discarded.archive.path}/Event`).strut[0].then[0]), `${discarded.archive.path}/Result`);
+  assert.equal(thingOf(find(stored, 'Root/Sibling').strut[0].then[0]), `${discarded.archive.path}/Event`);
   assert.deepEqual(JSON.parse(find(stored, 'Root/Link').situation).target, { state: 'broken', path: null });
-  assert.deepEqual(find(stored, 'Backup/History/Owner').strut, [{ 'if@current': true, then: [
-    { thing: 'Backup/History/Anchor' }, { thing: `${discarded.archive.path}/Event` }
-  ] }]);
+  const ownerEndpoints = find(stored, 'Backup/History/Owner').strut[0].then;
+  assert.deepEqual(ownerEndpoints.map(thingOf), [
+    'Backup/History/Anchor', `${discarded.archive.path}/Event`
+  ]);
+  assert.equal(thingKeyOf(ownerEndpoints[0]), thingKeyOf(historicalOwner.strut[0].then[0]));
+  assert.equal(
+    thingKeyOf(ownerEndpoints[1]).match(/&id=([0-9A-Za-z]+)/u)?.[1],
+    thingKeyOf(find(stored, `${discarded.archive.path}/Event`)).match(/&id=([0-9A-Za-z]+)/u)?.[1]
+  );
   const journal = createJsonTransactionJournal({ file: path.join(directory, 'atom.transactions.json') });
   const history = await journal.readState();
-  assert.equal(history.receipts.length, 1, JSON.stringify(history.receipts));
-  assert.equal(history.receipts[0].receipt.result.transformLogRecord.originalPath, 'Root/Parent');
-  assert.equal(history.receipts[0].historyMode, undefined);
-  assert.equal(history.receipts[0].receipt.result.affectedPathClosureComplete, false);
-  assert.deepEqual((await journal.findCommitted(history.receipts[0].commandId)).after.facts, stored);
+  const discardReceipts = history.receipts.filter((entry) => entry.correlationId !== 'seed-bound-world');
+  assert.equal(discardReceipts.length, 1, JSON.stringify(discardReceipts));
+  assert.equal(discardReceipts[0].receipt.result.transformLogRecord.originalPath, 'Root/Parent');
+  assert.equal(discardReceipts[0].historyMode, undefined);
+  assert.equal(discardReceipts[0].receipt.result.affectedPathClosureComplete, false);
+  assert.deepEqual((await journal.findCommitted(discardReceipts[0].commandId)).after.facts, stored);
   const coldExecute = createRuntimeCliExecutor(files);
   const coldRead = await coldExecute({ source: 'explore {"thing":"Root/Sibling","situation$full":true}', interaction: { id: 'cold-read', agent: { path: 'Root' } } });
   assert.equal(coldRead.ok, true, JSON.stringify(coldRead.errors));
@@ -376,11 +409,11 @@ test(`public ancestor discard persists one reversible sealed archive and cold-re
   const restored = await coldExecute({ source: `transform ${JSON.stringify({ 'thing.rst.': discarded.archive.restoreCoordinate })}`, interaction: { id: 'ancestor-restore', agent: { path: 'Root' } } });
   assert.equal(restored.ok, true, JSON.stringify(restored.errors));
   const afterRestore = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.deepEqual(find(afterRestore, 'Root/Parent'), initialParent);
+  assert.deepEqual(withoutRelationEndpointIds(find(afterRestore, 'Root/Parent')), withoutRelationEndpointIds(initialParent));
   assert.deepEqual(find(afterRestore, 'Backup/Parent'), oldArchive);
-  assert.deepEqual(find(afterRestore, 'Root/Sibling'), find(atoms, 'Root/Sibling'));
+  assert.deepEqual(withoutRelationEndpointIds(find(afterRestore, 'Root/Sibling')), withoutRelationEndpointIds(find(atoms, 'Root/Sibling')));
   assert.deepEqual(find(afterRestore, 'Root/Link'), shortcut);
-  assert.deepEqual(find(afterRestore, 'Backup/History/Owner'), historicalOwner);
+  assert.deepEqual(withoutRelationEndpointIds(find(afterRestore, 'Backup/History/Owner')), withoutRelationEndpointIds(historicalOwner));
   const restoredHistory = await journal.readState();
   assert.equal(restoredHistory.receipts.at(-1).historyMode, undefined);
   assert.equal(restoredHistory.receipts.at(-1).receipt.result.affectedPathClosureComplete, false);
@@ -415,12 +448,13 @@ test('atomic sibling name swaps preserve existing descendant Agent declarations'
   const root = { 'thing@program': 'Root', situation: 'agent({"labels":[],"functions":{"groups":["graph","program"],"names":[]}})', slot: [atom('A', [worker]), atom('B')], strut: [] };
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-rename-swap-'));
   const contextFile = path.join(dir, 'atom.json');
-  await fs.writeFile(contextFile, JSON.stringify([root]));
-  const execute = createRuntimeCliExecutor({ contextFile, graphFile: path.join(dir, 'graph.json'), storeFile: path.join(dir, 'knowledge.json') });
+  const graphFile = path.join(dir, 'graph.json');
+  const seeded = await seedBoundWorld({ contextFile, projectionFile: graphFile, facts: [root] });
+  const execute = createRuntimeCliExecutor({ contextFile, graphFile, storeFile: path.join(dir, 'knowledge.json') });
   const result = await execute({ source: 'transform [{"thing.ren.B":"Root/A"},{"thing.ren.A":"Root/B"}]', interaction: { id: 'swap', agent: { path: 'Root' } } });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   const after = JSON.parse(await fs.readFile(contextFile, 'utf8'));
-  assert.deepEqual(find(after, 'Root/B/Worker'), worker);
+  assert.deepEqual(find(after, 'Root/B/Worker'), find(seeded, 'Root/A/Worker'));
   assert.equal(find(after, 'Root/A/Worker'), undefined);
 });
 
@@ -463,7 +497,7 @@ test('rename never grants sibling or locked-root authority and compound slot wri
 });
 
 for (const batch of [false, true]) {
-  test(`${batch ? 'batch' : 'single'} public rename rewrites Program paths without firing business triggers`, async () => {
+  test(`${batch ? 'batch' : 'single'} public rename keeps bound Program source without firing business triggers`, async () => {
     const atoms = await fixture();
     atoms[0]['thing@program'] = atoms[0].thing;
     delete atoms[0].thing;
@@ -473,22 +507,23 @@ for (const batch of [false, true]) {
     parent.slot.push(atom('Event'));
     const reactive = atom('Reactive', [], [
       'def main():',
-      '    transform({"thing":"Root/Parent/Result","situation.rep.fired":"untouched"})',
-      'trigger("transform", {"nodes":["Root/Parent/Event"]}, main)'
+      '    transform({"thing":ref("Root/Parent/Result"),"situation.rep.fired":"untouched"})',
+      'trigger("transform", {"nodes":[ref("Root/Parent/Event")]}, main)'
     ].join('\n'));
     reactive['thing@program'] = reactive.thing;
     delete reactive.thing;
     parent.slot.push(reactive);
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-rename-trigger-test-'));
     const contextFile = path.join(directory, 'atom.json');
-    await fs.writeFile(contextFile, JSON.stringify(atoms));
-    const execute = createRuntimeCliExecutor({ contextFile, graphFile: path.join(directory, 'graph.json'), storeFile: path.join(directory, 'knowledge.json') });
+    const graphFile = path.join(directory, 'graph.json');
+    await seedBoundWorld({ contextFile, projectionFile: graphFile, facts: atoms });
+    const execute = createRuntimeCliExecutor({ contextFile, graphFile, storeFile: path.join(directory, 'knowledge.json') });
     const rename = { 'thing.ren.Renamed': 'Root/Parent' };
     const result = await execute({ source: `transform ${JSON.stringify(batch ? [rename] : rename)}`, interaction: { id: 'rename', agent: { path: 'Root' } } });
     assert.equal(result.ok, true, JSON.stringify(result.errors));
     const stored = JSON.parse(await fs.readFile(contextFile, 'utf8'));
     assert.equal(find(stored, 'Root/Renamed/Result').situation, 'untouched');
-    assert.match(find(stored, 'Root/Renamed/Reactive').situation, /Root\/Renamed\/Result/u);
+    assert.equal(find(stored, 'Root/Renamed/Reactive').situation, reactive.situation);
     const invoked = await execute({ source: 'transform {"thing":"Root/Renamed/Event","situation.rep.changed"}', interaction: { id: 'after-rename', agent: { path: 'Root' } } });
     assert.equal(invoked.ok, true, JSON.stringify(invoked.errors));
     assert.equal(find(JSON.parse(await fs.readFile(contextFile, 'utf8')), 'Root/Renamed/Result').situation, 'fired');
