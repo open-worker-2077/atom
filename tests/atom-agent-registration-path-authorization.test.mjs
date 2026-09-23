@@ -7,12 +7,9 @@ import test from 'node:test';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
 import { seedBoundWorld } from './helpers/seed-bound-world.mjs';
 import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
-import { thingIdForOrdinal } from '../work-engine/atom-language/thing-id-allocator.mjs';
 
-let nextFixtureIdentityOrdinal = 1_000;
 function atom(thing, situation = '', slot = [], type = '') {
-  const identity = thingIdForOrdinal(nextFixtureIdentityOrdinal++);
-  return { [`thing${type ? `@${type}` : ''}&id=${identity}`]: thing, situation, slot, strut: [] };
+  return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
 const CREATOR_SOURCE = 'agent({"labels":["^"],"functions":{"groups":[],"names":["agent","message","transform"]}})';
