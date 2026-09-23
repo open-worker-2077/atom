@@ -54,20 +54,43 @@ async function setup(t, bodyProgram = 'slot_body({"action":"seal"})') {
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
-  const atoms = await lockedWorld();
-  const body = atoms.find((entry) => thingOf(entry) === '\u69fd\u4f53');
-  body['thing@program'] = body.thing;
-  delete body.thing;
-  body.situation = bodyProgram;
-  atoms.push({
+  const body = {
+    'thing@program': '槽体', situation: 'slot_body({"action":"seal"})',
+    slot: [atom('候选', '', [atom('输入'), atom('输出')])], strut: []
+  };
+  const otherBody = {
     'thing@program': 'OtherBody',
     situation: [
       'transform({"thing":"\u69fd\u4f53/\u5019\u9009/\u8f93\u5165","situation.rep.v3":None})',
       'slot_body({"action":"seal"})'
     ].join('\n'),
     slot: [atom('Candidate', '', [atom('Field')])], strut: []
+  };
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
+  const programScheduler = createProgramRuntimeScheduler();
+  let programMode = 'reconcile';
+  const run = (source) => executeAtomLanguage({
+    source, contextFile, projectionFile, programScheduler, programMode
   });
-  await fs.writeFile(contextFile, `${JSON.stringify(atoms, null, 2)}\n`, 'utf8');
+  for (const entry of [body, otherBody]) {
+    const created = await run(`transform new ${JSON.stringify(entry)}`);
+    assert.equal(created.ok, true, JSON.stringify(created.errors));
+  }
+  const sealed = await run('transform {"thing.run.":"槽体"}');
+  assert.equal(sealed.ok, true, JSON.stringify(sealed.errors));
+  const printer = await run(`transform new ${JSON.stringify({
+    'thing@program': '打印实例',
+    situation: 'use_program({"name":"槽体/print","arguments":{"name":"实例"}})',
+    slot: [], strut: []
+  })}`);
+  assert.equal(printer.ok, true, JSON.stringify(printer.errors));
+  programMode = 'current';
+  if (bodyProgram !== body.situation) {
+    const updated = await run(`transform ${JSON.stringify({
+      thing: '槽体', [`situation.rep.${bodyProgram}`]: body.situation
+    })}`);
+    assert.equal(updated.ok, true, JSON.stringify(updated.errors));
+  }
   return { contextFile, projectionFile };
 }
 
