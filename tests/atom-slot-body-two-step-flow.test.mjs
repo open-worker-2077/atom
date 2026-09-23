@@ -120,7 +120,7 @@ test('two-step slot instance unlocks without touching template or sibling', asyn
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   const { world, executionSource, whenSource, whereSource, registrationSource } = fixture();
-  await fs.writeFile(contextFile, JSON.stringify(world, null, 2), 'utf8');
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
   const programScheduler = createProgramRuntimeScheduler();
   const observedTransforms = [];
   const runProgram = programScheduler.runProgram;
@@ -131,13 +131,22 @@ test('two-step slot instance unlocks without touching template or sibling', asyn
     }
     return result;
   };
-  const run = (source, agentPath = 'Root') => executeAtomLanguage({
+  const run = (source, agentPath = 'Root', programMode = 'reconcile') => executeAtomLanguage({
     contextFile,
     projectionFile,
     source,
+    programMode,
     programScheduler,
     interaction: { id: crypto.randomUUID(), agent: { path: agentPath } }
   });
+  const initialized = await executeAtomLanguage({
+    contextFile, projectionFile,
+    source: `transform new ${JSON.stringify(world[0])}`,
+    programScheduler,
+    humanAuthority: true,
+    interaction: { id: crypto.randomUUID(), agent: null }
+  });
+  assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
   const body = 'Root/两步槽体';
 
   for (const source of [
@@ -172,7 +181,8 @@ test('two-step slot instance unlocks without touching template or sibling', asyn
 
   const completed = await run(
     `transform {"thing":"${body}/槽例/甲/步骤一","situation.rep.✅ 完成"}`,
-    body
+    body,
+    'current'
   );
   const triggeredAdvance = observedTransforms.find((entry) => entry.request.triggered === true);
   assert.equal(triggeredAdvance?.request.scopeRoot, `${body}/槽例/甲`, JSON.stringify(observedTransforms));
@@ -198,7 +208,16 @@ test('public CLI preserves one completed mirrored instance across a cold restart
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
   const { world, executionSource, whenSource, whereSource, registrationSource } = fixture();
-  await fs.writeFile(contextFile, JSON.stringify(world, null, 2), 'utf8');
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
+  const initialized = await executeAtomLanguage({
+    contextFile,
+    projectionFile: graphFile,
+    source: `transform new ${JSON.stringify(world[0])}`,
+    programScheduler: createProgramRuntimeScheduler(),
+    humanAuthority: true,
+    interaction: { id: crypto.randomUUID() }
+  });
+  assert.equal(initialized.ok, true, JSON.stringify(initialized.errors));
 
   let running = await startAtomGraphServer({
     host: '127.0.0.1', port: 0, contextFile, graphFile, storeFile

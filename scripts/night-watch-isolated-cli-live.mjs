@@ -199,8 +199,8 @@ async function main() {
     await create('jump.when-program.write', agents.journey, programAtom(whenPath, 'def main(arguments):\n    return True'));
     await create('jump.where-program.write', agents.journey, programAtom(wherePath, `def main(arguments):\n    return explore({"thing":${JSON.stringify(destinationPath)}})[0]`));
     await create('jump.registration-program.write', agents.journey, programAtom(jumpPath, [
-      `when_program = explore({"thing":${JSON.stringify(whenPath)}})[0]`,
-      `where_program = explore({"thing":${JSON.stringify(wherePath)}})[0]`,
+      `when_program = explore({"thing":ref(${JSON.stringify(whenPath)})})[0]`,
+      `where_program = explore({"thing":ref(${JSON.stringify(wherePath)})})[0]`,
       'jump({"when":when_program,"where":where_program})'
     ].join('\n')));
     await run('jump.registration.run', agents.journey, sourceRun(jumpPath));
