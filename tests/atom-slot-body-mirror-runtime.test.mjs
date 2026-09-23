@@ -7,17 +7,9 @@ import test from 'node:test';
 
 import { createTransactionalWorldPersistence } from '../src/atom-system/adapters/transactional-world-persistence.mjs';
 import { createJsonTransactionJournal } from '../src/atom-system/adapters/json-world-repository.mjs';
-import { applySlotBodyEffect as applySlotBodyEffectKernel } from '../work-engine/atom-language/slot-body-runtime.mjs';
-import { readVisibleSlotPlans } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
-import { thingIdentityReserverFor } from './helpers/thing-identity-reserver.mjs';
-
-const applySlotBodyEffect = (options) => applySlotBodyEffectKernel({
-  ...options,
-  reserveThingIdentities: options.reserveThingIdentities
-    ?? thingIdentityReserverFor(options.atoms ?? [])
-});
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+import { compileSlotStructureGraphLocks, readVisibleSlotPlans } from '../work-engine/atom-language/slot-body-plan-runtime.mjs';
 import {
-  createShortcutAtom,
   shortcutMetadata
 } from '../work-engine/atom-language/shortcut-runtime.mjs';
 import { executeAtomLanguage } from './helpers/atom-language-test-runtime.mjs';
@@ -33,6 +25,10 @@ function thingOf(value) {
   return Object.entries(value).find(([key]) => key.split(/[@&#]/u)[0] === 'thing')?.[1];
 }
 
+function idOf(value) {
+  return Object.keys(value).find((key) => key.startsWith('thing'))?.match(/&id=([0-9A-Za-z]+)/u)?.[1];
+}
+
 function find(atoms, selector) {
   let current = { slot: atoms };
   for (const segment of selector.split('/')) {
@@ -43,24 +39,7 @@ function find(atoms, selector) {
 }
 
 function strutTargets(value) {
-  return value.strut.flatMap((rule) => rule.then ?? []).map((target) => target.thing);
-}
-
-async function slotBodyWithInstance() {
-  const sealed = await applySlotBodyEffect({
-    atoms: [atom('槽体', '', [atom('候选', '', [atom('输入'), atom('输出')])])],
-    effect: { action: 'seal', body: '槽体' },
-    sourceProgramPath: '封装'
-  });
-  assert.equal(sealed.error, undefined);
-  const [visible] = readVisibleSlotPlans(sealed.atoms);
-  const printed = await applySlotBodyEffect({
-    atoms: sealed.atoms,
-    effect: { action: 'print', body: '槽体', name: '实例', revision: visible.plan.revision },
-    sourceProgramPath: '槽体/print'
-  });
-  assert.equal(printed.error, undefined);
-  return printed.atoms;
+  return value.strut.flatMap((rule) => rule.then ?? []).map(thingOf);
 }
 
 test('four-axis references, slot locks, and inverse local rollback survive an unrelated commit', async (t) => {
@@ -69,27 +48,50 @@ test('four-axis references, slot locks, and inverse local rollback survive an un
   const contextFile = path.join(directory, 'atom.json');
   const projectionFile = path.join(directory, 'graph.json');
   const journalFile = path.join(directory, 'atom.transactions.json');
-  const slotBody = await slotBodyWithInstance();
-  find(slotBody, '槽体/槽例/实例/输入').situation = '旧实例值';
+  const shortcutSource = [
+    'target = explore({"thing":"东/目标"})[0]',
+    'shortcut({"placement":"slot","thing":"入口","target":target})'
+  ].join('\n');
   const initial = [
-    ...slotBody,
+    { 'thing@program': '槽体', situation: 'slot_body({"action":"seal"})',
+      slot: [atom('候选', '', [atom('输入', '初始值'), atom('输出')])], strut: [] },
     atom('东', '', [atom('目标', '权威值', [atom('叶', '内部值')], [{ thing: '叶' }])]),
     atom('西'),
     atom('来源', '', [], [{ thing: '东/目标' }]),
-    atom('引用', '', [createShortcutAtom({
-      thing: '入口', targetPath: '东/目标', referenceId: 'task-4-four-axis-entry'
-    })]),
+    { 'thing@program': '引用', situation: shortcutSource, slot: [], strut: [] },
     atom('无关', '旧值'),
     atom('另一个无关', '旧值'),
     { 'thing@backup@default': '默认备份仓', situation: '', slot: [], strut: [] }
   ];
-  await fs.writeFile(contextFile, `${JSON.stringify(initial, null, 2)}\n`, 'utf8');
+  await fs.writeFile(contextFile, '[]\n', 'utf8');
+  const programScheduler = createProgramRuntimeScheduler();
+  let runtimeMode = 'reconcile';
   const run = (source, id = crypto.randomUUID()) => executeAtomLanguage({
     contextFile,
     projectionFile,
     source,
+    programScheduler,
+    programMode: runtimeMode,
+    humanAuthority: false,
     interaction: { id }
   });
+  for (const entry of initial) {
+    const created = await run(`transform new ${JSON.stringify(entry)}`);
+    assert.equal(created.ok, true, JSON.stringify(created.errors));
+  }
+  const shortcutCreated = await run('transform {"thing.run.":"引用"}');
+  assert.equal(shortcutCreated.ok, true, JSON.stringify(shortcutCreated.errors));
+  const sealed = await run('transform {"thing.run.":"槽体"}');
+  assert.equal(sealed.ok, true, JSON.stringify(sealed.errors));
+  const printer = await run(`transform new ${JSON.stringify({
+    'thing@program': '打印实例',
+    situation: 'use_program({"name":"槽体/print","arguments":{"name":"实例"}})',
+    slot: [], strut: []
+  })}`);
+  assert.equal(printer.ok, true, JSON.stringify(printer.errors));
+  runtimeMode = 'current';
+  const instanceValue = await run('transform {"thing":"槽体/槽例/实例/输入","situation.rep.旧实例值":"初始值"}');
+  assert.equal(instanceValue.ok, true, JSON.stringify(instanceValue.errors));
 
   const renamed = await run('transform {"thing.ren.重命名目标":"东/目标"}');
   assert.equal(renamed.ok, true, JSON.stringify(renamed.errors));
@@ -132,6 +134,9 @@ test('four-axis references, slot locks, and inverse local rollback survive an un
   });
 
   const world = (await persistence.readCommittedSnapshot()).facts;
+  const visiblePlans = readVisibleSlotPlans(world);
+  assert.equal(visiblePlans.length, 1, JSON.stringify(visiblePlans));
+  assert.ok(compileSlotStructureGraphLocks(world).locks.length > 0);
   assert.equal(find(world, targetPath).situation, '旧值');
   assert.equal(find(world, preservedPath).situation, '新值');
   assert.equal(find(world, instancePath).situation, '实例值');
@@ -139,11 +144,13 @@ test('four-axis references, slot locks, and inverse local rollback survive an un
   assert.equal(find(world, '西/重命名目标/叶').situation, '内部值');
   assert.deepEqual(strutTargets(find(world, '西/重命名目标')), ['叶']);
   assert.deepEqual(strutTargets(find(world, '来源')), ['西/重命名目标']);
+  const movedTargetId = idOf(find(world, '西/重命名目标'));
+  assert.ok(movedTargetId);
   assert.deepEqual(shortcutMetadata(find(world, '引用/入口')).target, {
-    state: 'linked', path: '西/重命名目标'
+    state: 'linked', path: '西/重命名目标', identity: movedTargetId
   });
 
-  const protectedTemplate = await run('transform {"thing":"槽体/候选/输入","situation.rep.越权":""}');
+  const protectedTemplate = await run('transform {"thing.ren.越权":"槽体/候选/输入"}');
   assert.equal(protectedTemplate.ok, false, JSON.stringify(protectedTemplate));
-  assert.equal(protectedTemplate.errors.some(({ code }) => code === 'SLOT_STRUCTURE_LOCK_DENIED'), true);
+  assert.equal(protectedTemplate.errors.some(({ code }) => code === 'SLOT_STRUCTURE_LOCK_DENIED'), true, JSON.stringify(protectedTemplate));
 });
