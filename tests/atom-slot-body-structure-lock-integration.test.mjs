@@ -49,7 +49,7 @@ async function lockedWorld() {
   })).atoms;
 }
 
-async function setup(t, bodyProgram = 'slot_body({"action":"seal"})') {
+async function setup(t, { includeOtherBody = false } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-slot-structure-lock-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
@@ -68,11 +68,11 @@ async function setup(t, bodyProgram = 'slot_body({"action":"seal"})') {
   };
   await fs.writeFile(contextFile, '[]\n', 'utf8');
   const programScheduler = createProgramRuntimeScheduler();
-  let programMode = 'reconcile';
+  const programMode = 'reconcile';
   const run = (source) => executeAtomLanguage({
     source, contextFile, projectionFile, programScheduler, programMode
   });
-  for (const entry of [body, otherBody]) {
+  for (const entry of includeOtherBody ? [body, otherBody] : [body]) {
     const created = await run(`transform new ${JSON.stringify(entry)}`);
     assert.equal(created.ok, true, JSON.stringify(created.errors));
   }
@@ -84,14 +84,7 @@ async function setup(t, bodyProgram = 'slot_body({"action":"seal"})') {
     slot: [], strut: []
   })}`);
   assert.equal(printer.ok, true, JSON.stringify(printer.errors));
-  programMode = 'current';
-  if (bodyProgram !== body.situation) {
-    const updated = await run(`transform ${JSON.stringify({
-      thing: '槽体', [`situation.rep.${bodyProgram}`]: body.situation
-    })}`);
-    assert.equal(updated.ok, true, JSON.stringify(updated.errors));
-  }
-  return { contextFile, projectionFile };
+  return { contextFile, projectionFile, programScheduler };
 }
 
 test('central Transform permits instance data but protects mapped structure and rejects forged roles', async (t) => {
@@ -138,17 +131,18 @@ test('authorized reseal replaces its own mapped projections without a structural
   const files = await setup(t);
   const result = await executeAtomLanguage({
     source: 'transform {"thing.run.":"\u69fd\u4f53"}',
-    programScheduler: createProgramRuntimeScheduler(),
+    programMode: 'current',
     ...files
   });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
 });
 
 test('one Program may edit its model and reseal the same slot body atomically', async (t) => {
-  const files = await setup(t, [
+  const files = await setup(t);
+  const bodyProgram = [
     'transform({"thing":"\u69fd\u4f53/\u5019\u9009/\u8f93\u5165","situation.rep.v2":None})',
     'slot_body({"action":"seal"})'
-  ].join('\n'));
+  ].join('\n');
   const material = await executeAtomLanguage({
     source: 'transform new {"thing":"\u69fd\u4f53/\u69fd\u4f8b/\u5b9e\u4f8b/\u8f93\u5165/\u672c\u5730\u6599","situation":"\u4fdd\u7559","slot":[],"strut":[]}',
     ...files
@@ -166,8 +160,10 @@ test('one Program may edit its model and reseal the same slot body atomically', 
     .find((entry) => thingOf(entry) === '\u8f93\u5165').slot);
 
   const result = await executeAtomLanguage({
-    source: 'transform {"thing.run.":"\u69fd\u4f53"}',
-    programScheduler: createProgramRuntimeScheduler(),
+    source: `transform ${JSON.stringify({
+      thing: '槽体', [`situation.rep.${bodyProgram}`]: 'slot_body({"action":"seal"})'
+    })}`,
+    programMode: 'current',
     ...files
   });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
@@ -184,11 +180,11 @@ test('one Program may edit its model and reseal the same slot body atomically', 
 });
 
 test('a Program cannot borrow reseal capability from another slot body', async (t) => {
-  const files = await setup(t);
+  const files = await setup(t, { includeOtherBody: true });
   const before = await fs.readFile(files.contextFile, 'utf8');
   const result = await executeAtomLanguage({
     source: 'transform {"thing.run.":"OtherBody"}',
-    programScheduler: createProgramRuntimeScheduler(),
+    programMode: 'current',
     ...files
   });
   assert.equal(result.ok, false);
