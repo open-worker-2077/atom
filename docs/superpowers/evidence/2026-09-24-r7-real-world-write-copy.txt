@@ -1,0 +1,17 @@
+{"event":"acceptance-stage","stage":"copy","status":"started"}
+{"event":"acceptance-stage","stage":"copy","status":"completed","elapsedMs":11085}
+{"event":"acceptance-stage","stage":"baseline","status":"started"}
+{"event":"acceptance-stage","stage":"baseline","status":"completed","elapsedMs":46613}
+{"event":"acceptance-stage","stage":"startup","status":"started"}
+{"event":"acceptance-stage","stage":"startup","status":"completed","elapsedMs":41928}
+{"event":"acceptance-stage","stage":"interaction","status":"started"}
+{"event":"acceptance-stage","stage":"interaction","status":"completed","elapsedMs":14861}
+{"event":"acceptance-stage","stage":"flush","status":"started"}
+{"event":"acceptance-stage","stage":"flush","status":"completed","elapsedMs":444}
+{"event":"acceptance-stage","stage":"rollback","status":"started"}
+{"event":"acceptance-stage","stage":"rollback","status":"completed","elapsedMs":112774}
+{"event":"acceptance-stage","stage":"restart","status":"started"}
+{"event":"acceptance-stage","stage":"restart","status":"completed","elapsedMs":20287}
+{"ok":true,"port":50434,"ephemeralPort":true,"tempPathsOk":true,"writeMs":7651,"readMs":7207,"maxEventLoopDelayMs":4158,"writeOk":true,"readbackOk":true,"readbackFound":true,"healthOk":true,"programFailures":0,"restartPort":54682,"restartMode":"disk","restartReadbackOk":true,"restartSaveStatusOk":null,"rollbackOk":true,"rollbackCount":1,"sourceRevisionRestored":true,"sourceContextUnchanged":true,"restartHealthOk":true,"tempDirectory":"C:\\Users\\worker\\AppData\\Local\\Temp\\atom-real-write-acceptance-qyPDjW"}
+{"event":"acceptance-stage","stage":"final-close","status":"started"}
+{"event":"acceptance-stage","stage":"final-close","status":"completed","elapsedMs":2}
