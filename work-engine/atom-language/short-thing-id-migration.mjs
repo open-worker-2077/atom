@@ -108,6 +108,8 @@ function rewriteShortcutSituation(rawSituation, identityMap) {
   try { metadata = JSON.parse(rawSituation); }
   catch { throw migrationError('INVALID_SHORTCUT_RECORD', 'A migrated Shortcut has invalid metadata'); }
   const targetIdentity = metadata?.target?.identity;
+  if (metadata?.target?.state === 'broken' && metadata.target.path === null
+    && targetIdentity === undefined) return rawSituation;
   if (typeof targetIdentity !== 'string' || !targetIdentity) {
     throw migrationError('UNBOUND_SHORTCUT_TARGET', 'Every migrated Shortcut target requires one legacy identity');
   }

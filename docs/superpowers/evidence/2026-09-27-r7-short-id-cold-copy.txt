@@ -1,0 +1,22 @@
+Formal read-only dry-run: exit 0
+{"contract":"atom.thing-identity-migration-preflight","version":1,"action":"dry-run","attemptId":"r7-20260927-b","migrationId":"short-thing-id-ac90a1975702465997cc2793","revisions":{"source":"sha256:d35f72633dc3525f19192f11da337fcebb57c82146e2b6eb5a3ba218193a4948","target":"sha256:162f79475c9094729d1499b4f18146c8d955beb4c439991e0329bab5d19cc657"},"changed":true,"summary":{"thingCount":12300,"uniqueShortIdentityCount":12300,"topologyPreserved":true,"activeLegacyIdentityCount":0,"allocatorWatermark":"3CO"}}
+
+Cold-copy acceptance command: node scripts/accept-short-id-world-copy.mjs
+Exit: 0
+{"ok":true,"copyDirectory":"C:\\Users\\worker\\AppData\\Local\\Temp\\atom-short-id-acceptance-ftUjVR","sourceHash":"sha256:f566ead0ef03325c40d3da10947f27fc52f5147580d5b7a4f72f410f1c7245b9","sourceUnchanged":true,"thingCount":12300,"sourceRevision":"sha256:d35f72633dc3525f19192f11da337fcebb57c82146e2b6eb5a3ba218193a4948","targetRevision":"sha256:162f79475c9094729d1499b4f18146c8d955beb4c439991e0329bab5d19cc657","allocatorWatermark":"3CO","firstReceiptFile":"C:\\Users\\worker\\AppData\\Local\\Temp\\atom-short-id-acceptance-ftUjVR\\AtomGraph\\worlds\\primary\\migration-backups\\thing-identity\\copy-first\\deployment-receipt.json","secondReceiptFile":"C:\\Users\\worker\\AppData\\Local\\Temp\\atom-short-id-acceptance-ftUjVR\\AtomGraph\\worlds\\primary\\migration-backups\\thing-identity\\copy-second\\deployment-receipt.json","firstRestartChanged":false,"rollbackOk":true,"rollbackRestartChanged":true,"secondRestartChanged":false}
+
+The copy was retained for further receipt/hash and runtime checks. No formal apply was executed.
+
+Migrated-copy public write acceptance command: node scripts/accept-real-world-write-copy.mjs --context <copyDirectory>/AtomGraph/worlds/primary/atom.json
+Exit: 0
+{"ok":true,"port":58006,"ephemeralPort":true,"tempPathsOk":true,"writeMs":11902,"readMs":8897,"writeOk":true,"readbackOk":true,"readbackFound":true,"healthOk":true,"programFailures":0,"restartPort":59112,"restartMode":"disk","restartReadbackOk":true,"rollbackOk":true,"rollbackCount":1,"sourceRevisionRestored":true,"sourceContextUnchanged":true,"restartHealthOk":true,"tempDirectory":"C:\\Users\\worker\\AppData\\Local\\Temp\\atom-real-write-acceptance-J3VMS7"}
+
+Read-only allocator receipt check on that acceptance copy: exit 0
+{"receiptCount":2937,"allocatorWatermark":"3CP","allocations":[{"previousWatermark":"000","nextWatermark":"3CO","issuedCount":12300,"firstIssued":"001","lastIssued":"3CO"},{"previousWatermark":"000","nextWatermark":"3CO","issuedCount":12300,"firstIssued":"001","lastIssued":"3CO"},{"previousWatermark":"3CO","nextWatermark":"3CP","issuedCount":1,"firstIssued":"3CP","lastIssued":"3CP"}]}
+
+Read-only full four-axis semantic comparison after reversing the private identity map: exit 0
+{"semanticEqual":true,"thingCount":12300,"beforeSemanticHash":"sha256:bf04f25b5c2b69b50999aa43ae3d98d0e92fdda7a720fa6893ec1be1f283364f","afterSemanticHash":"sha256:bf04f25b5c2b69b50999aa43ae3d98d0e92fdda7a720fa6893ec1be1f283364f","identityMapBijective":true}
+
+Old-code cold recovery command: from clean main@b38c787324b329bf65d4f74ff521e0f112325dff, node scripts/accept-real-world-write-copy.mjs --context <copyDirectory>/AtomGraph/worlds/primary/migration-backups/thing-identity/copy-second/atom.json
+Exit: 0
+{"ok":true,"port":58121,"ephemeralPort":true,"tempPathsOk":true,"writeMs":3413,"readMs":4545,"writeOk":true,"readbackOk":true,"readbackFound":true,"healthOk":true,"programFailures":0,"restartPort":55918,"restartMode":"disk","restartReadbackOk":true,"rollbackOk":true,"rollbackCount":1,"sourceRevisionRestored":true,"sourceContextUnchanged":true,"restartHealthOk":true,"tempDirectory":"C:\\Users\\worker\\AppData\\Local\\Temp\\atom-real-write-acceptance-AD2j9B"}

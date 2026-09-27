@@ -179,6 +179,19 @@ test('cold migration still rejects an unbound active Program', () => {
   });
 });
 
+test('cold migration preserves a broken Shortcut without a target identity', () => {
+  const broken = JSON.stringify({
+    contract: 'atom.shortcut', version: 1, referenceId: 'old-broken',
+    target: { state: 'broken', path: null }
+  });
+  const facts = [legacyAtom(ids.root, 'Root', { slot: [
+    legacyAtom(ids.shortcut, 'Broken Entry', { types: ['shortcut'], situation: broken })
+  ] })];
+  const plan = planShortThingIdentityMigration({ facts, sourceWatermark: '000' });
+  assert.equal(plan.facts[0].slot[0].situation, broken);
+  assert.equal(storedField(plan.facts[0].slot[0], 'thing').parsed.identity, '002');
+});
+
 test('production-sized migration assigns all 12,243 identities once in linear preorder', () => {
   const thingCount = 12_243;
   const facts = Array.from({ length: thingCount }, (_, index) => legacyAtom(
