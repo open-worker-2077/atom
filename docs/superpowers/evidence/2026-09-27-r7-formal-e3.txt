@@ -1,0 +1,39 @@
+R7 formal E3 deployment evidence — 2026-09-27
+
+Authorization: user selected full E3 for b47fc0687d28527dddbef7a310c5d91751184387, including feature-branch push, formal short-ID migration, 4784 switch, and main push.
+
+Code and remote backup
+- Candidate: b47fc0687d28527dddbef7a310c5d91751184387; feature worktree clean before deployment.
+- origin/feat/program-reference-index read back as that exact SHA.
+- Draft PR #73 triggered Test run 36314502606. GitHub reported completed/success for headSha b47fc0687d28527dddbef7a310c5d91751184387; PR check test=SUCCESS.
+- Formal main before: b38c787324b329bf65d4f74ff521e0f112325dff, clean and ancestor of candidate.
+
+Formal precondition
+- Runtime before: health ok=true, revision=8193, atomProjection.status=published, expectedRevision=sha256:d35f72633dc3525f19192f11da337fcebb57c82146e2b6eb5a3ba218193a4948.
+- Formal atom.json SHA-256 before stopping and after stopping: f566ead0ef03325c40d3da10947f27fc52f5147580d5b7a4f72f410f1c7245b9.
+- Watchdog disabled; Atom Graph Runtime stopped; 4784 confirmed not listening. Backup attempt directory did not exist.
+
+One-time formal migration
+- Command: node scripts/deploy-thing-identity-world.mjs --apply --attempt r7-20260927-formal
+- Exit: 0; source revision sha256:d35f72633dc3525f19192f11da337fcebb57c82146e2b6eb5a3ba218193a4948; target revision sha256:162f79475c9094729d1499b4f18146c8d955beb4c439991e0329bab5d19cc657.
+- Summary: thingCount=12300, uniqueShortIdentityCount=12300, topologyPreserved=true, activeLegacyIdentityCount=0, allocatorWatermark=3CO.
+- Transaction commandId: legacy-a5ac4146abecd517feb36b615650ffea142f21d731463ec01976eccbd8e327a4; status=committed; one active Program binding generated.
+- Private backup and rollback receipts: C:\Users\worker\AppData\Local\AtomGraph\worlds\primary\migration-backups\thing-identity\r7-20260927-formal\backup-receipt.json and deployment-receipt.json. Backup atom.json hash is the original f566ead0...c7245b9.
+
+Code switch and public readback
+- Local main fast-forwarded to b47fc0687d28527dddbef7a310c5d91751184387 and remained clean.
+- After task restart: health ok=true, revision=8194, atomProjection.status=published, expectedRevision=sha256:162f79475c9094729d1499b4f18146c8d955beb4c439991e0329bab5d19cc657.
+- Watchdog restored: Ready, Settings.Enabled=true, trigger enabled.
+- Served HTTP / status=200 and SHA-256=67685d08372a1a9f099120c936ae4c54f6b91967e650d3cc8945c2b7aa344200, identical to local index.html.
+- Migrated atom.json SHA-256=719fa0652ed807dc9f1e1f9f1831277558bdc2e4b5cb3ddeae013dbf0c27d413.
+- Public CLI read: node work-engine/atom-language/cli.mjs --agent '🧊managegraph' explore '{"thing":"🧊managegraph"}' exited 0 and returned thing@program=🧊managegraph with 44-node down preview. GET /__spatial/api/graph returned 200 and contained 🧊managegraph.
+
+Full four-axis semantic verification
+- A first diagnostic directly compared backup atom.json against the migrated world and returned semanticEqual=false. That physical file omits committed changes still held in the pre-migration transaction journal; it is not the old committed snapshot.
+- The authoritative comparison used createTransactionalWorldPersistence.readCommittedSnapshot() on the complete private backup (atom.json plus atom.transactions.json and .d) and the migrated live world, then reversed all 12,300 IDs using the private identity map.
+- Exit=0; oldRevision=sha256:d35f72633dc3525f19192f11da337fcebb57c82146e2b6eb5a3ba218193a4948; newRevision=sha256:162f79475c9094729d1499b4f18146c8d955beb4c439991e0329bab5d19cc657; semanticEqual=true; identityMapBijective=true; beforeSemanticHash=afterSemanticHash=sha256:bf04f25b5c2b69b50999aa43ae3d98d0e92fdda7a720fa6893ec1be1f283364f.
+
+Remote main
+- origin/main read back as b47fc0687d28527dddbef7a310c5d91751184387 after fast-forward push.
+- Main push Test run 36315358415: headSha=b47fc0687d28527dddbef7a310c5d91751184387, completed/success; all Test job steps passed. The run URL is https://github.com/open-worker-2077/atom/actions/runs/36315358415.
+- Draft PR #73 auto-transitioned to MERGED after the exact main fast-forward; mergedAt=2026-09-27T11:19:27Z. No separate merge commit was introduced.
