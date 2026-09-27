@@ -139,6 +139,46 @@ test('migration barrier replaces the complete active Program binding generation'
   assert.deepEqual(snapshot.programIds, ['005']);
 });
 
+test('cold migration preserves unbound Programs inside the default backup without activating them', () => {
+  const archivedSource = 'transform({"thing":ref("Missing/Old/Target")})';
+  const archivedId = 'FFFFFFFFFFFFFFFFFFFFFF';
+  const backupId = 'GGGGGGGGGGGGGGGGGGGGGG';
+  const facts = [legacyAtom(ids.root, 'Root', { slot: [
+    legacyAtom(backupId, 'Backup', { types: ['backup', 'default'], slot: [
+      legacyAtom(archivedId, 'Old Program', {
+        types: ['program'], situation: archivedSource,
+        strut: [{ 'if@current': true, then: [{ 'thing@program': './Gone' }] }]
+      })
+    ] })
+  ] })];
+  const before = JSON.stringify(facts);
+  const plan = planShortThingIdentityMigration({
+    facts, programRefBindings: createProgramRefBindingUpdate(), sourceWatermark: '000'
+  });
+  assert.equal(JSON.stringify(facts), before);
+  assert.equal(plan.changed, true);
+  assert.equal(plan.identityMap.get(archivedId), '003');
+  assert.equal(plan.facts[0].slot[0].slot[0].situation, archivedSource);
+  assert.equal(plan.facts[0].slot[0].slot[0].strut[0].then[0]['thing@program'], './Gone');
+  assert.deepEqual(plan.nextBindings.replacements, []);
+  assert.equal(plan.summary.thingCount, 3);
+  assert.equal(plan.summary.activeLegacyIdentityCount, 0);
+
+  const second = planShortThingIdentityMigration({
+    facts: plan.facts, programRefBindings: plan.nextBindings,
+    sourceWatermark: plan.summary.allocatorWatermark
+  });
+  assert.equal(second.changed, false);
+});
+
+test('cold migration still rejects an unbound active Program', () => {
+  const input = fixture();
+  input.programRefBindings = createProgramRefBindingUpdate();
+  assert.throws(() => planShortThingIdentityMigration({ ...input, sourceWatermark: '000' }), {
+    code: 'PROGRAM_REF_BINDING_MISSING'
+  });
+});
+
 test('production-sized migration assigns all 12,243 identities once in linear preorder', () => {
   const thingCount = 12_243;
   const facts = Array.from({ length: thingCount }, (_, index) => legacyAtom(

@@ -7,6 +7,7 @@ import { revisionOfWorldFacts } from '../src/atom-system/world-runtime/world-rev
 import { writeAtomGraphProjection } from '../work-engine/atom-language/context-store.mjs';
 import { planShortThingIdentityMigration } from '../work-engine/atom-language/thing-identity-migration.mjs';
 import { rebuildProgramRefBindings } from '../work-engine/atom-language/program-ref-binding-ledger.mjs';
+import { prepareShortThingIdProgramBindings } from '../work-engine/atom-language/short-thing-id-program-preflight.mjs';
 import { rebuildThingIdWatermark } from '../work-engine/atom-language/thing-id-allocator.mjs';
 import { resolveAtomRuntime } from '../work-engine/atom-language/runtime-config.mjs';
 
@@ -162,9 +163,12 @@ async function apply(mode, runtime) {
   const sourceFile = await readWorld(runtime.contextFile);
   const source = await persistence.readCommittedSnapshot();
   const input = await migrationInput(persistence);
+  const programRefBindings = await prepareShortThingIdProgramBindings({
+    facts: source.facts, bindings: input.programRefBindings
+  });
   const plan = planShortThingIdentityMigration({
     facts: source.facts,
-    programRefBindings: input.programRefBindings,
+    programRefBindings,
     sourceWatermark: input.sourceWatermark
   });
   assertPlan(plan);

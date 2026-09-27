@@ -1,0 +1,1 @@
+{"ok":false,"code":"UNBOUND_STRUT_ENDPOINT","message":"Every migrated Strut endpoint requires one legacy target identity","details":{}}

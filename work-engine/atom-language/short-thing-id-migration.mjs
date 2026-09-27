@@ -44,7 +44,7 @@ function scanFacts(facts) {
     throw migrationError('INVALID_THING_IDENTITY_MIGRATION_SOURCE', 'Thing identity migration requires one Atom array');
   }
   const records = [];
-  function visit(atom, parentPath) {
+  function visit(atom, parentPath, inactiveBackup = false) {
     if (!atom || typeof atom !== 'object' || Array.isArray(atom)) {
       throw migrationError('INVALID_THING_IDENTITY_MIGRATION_SOURCE', 'Migration encountered a non-Thing slot item');
     }
@@ -54,13 +54,15 @@ function scanFacts(facts) {
       throw migrationError('INVALID_THING_IDENTITY_MIGRATION_SOURCE', 'Migrated Thing names must be non-empty strings');
     }
     const path = [...parentPath, name];
-    records.push({ atom, path, ...identity });
+    const types = new Set(identity.field.parsed.types.map(type => type.raw));
+    const inactive = inactiveBackup || (types.has('backup') && types.has('default'));
+    records.push({ atom, path, inactiveBackup: inactive, ...identity });
     const contract = identity.contract === 'legacy-22' ? 'legacy-22-migration' : 'short';
     const slot = axisField(atom, 'slot', contract).value;
     if (!Array.isArray(slot)) {
       throw migrationError('INVALID_THING_IDENTITY_MIGRATION_SOURCE', 'Migrated slot axes must be arrays');
     }
-    for (const child of slot) visit(child, path);
+    for (const child of slot) visit(child, path, inactive);
   }
   for (const atom of facts) visit(atom, []);
   const contracts = new Set(records.map(({ contract }) => contract));
@@ -80,21 +82,24 @@ function persistentThingKey(parsed, identity) {
   }`;
 }
 
-function rewriteStrutValue(value, identityMap) {
-  if (Array.isArray(value)) return value.map(item => rewriteStrutValue(item, identityMap));
+function rewriteStrutValue(value, identityMap, ownerPath, inactiveBackup) {
+  if (Array.isArray(value)) return value.map(item => rewriteStrutValue(item, identityMap, ownerPath, inactiveBackup));
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value).map(([rawKey, child]) => {
     const parsed = parseAtomKey(rawKey, {
       descriptionSymbolWarnings: false,
       identityContract: 'legacy-22-migration'
     });
-    if (parsed.baseKey !== 'thing') return [rawKey, rewriteStrutValue(child, identityMap)];
+    if (parsed.baseKey !== 'thing') return [rawKey, rewriteStrutValue(child, identityMap, ownerPath, inactiveBackup)];
+    if (!parsed.identity && !parsed.errors.length && inactiveBackup) {
+      return [rawKey, rewriteStrutValue(child, identityMap, ownerPath, inactiveBackup)];
+    }
     if (parsed.errors.length || !parsed.identity) {
-      throw migrationError('UNBOUND_STRUT_ENDPOINT', 'Every migrated Strut endpoint requires one legacy target identity');
+      throw migrationError('UNBOUND_STRUT_ENDPOINT', 'Every migrated Strut endpoint requires one legacy target identity', { ownerPath });
     }
     const nextIdentity = identityMap.get(parsed.identity);
-    if (!nextIdentity) throw migrationError('DANGLING_STRUT_ENDPOINT', 'A Strut endpoint targets a missing Thing');
-    return [persistentThingKey(parsed, nextIdentity), rewriteStrutValue(child, identityMap)];
+    if (!nextIdentity) throw migrationError('DANGLING_STRUT_ENDPOINT', 'A Strut endpoint targets a missing Thing', { ownerPath });
+    return [persistentThingKey(parsed, nextIdentity), rewriteStrutValue(child, identityMap, ownerPath, inactiveBackup)];
   }));
 }
 
@@ -112,25 +117,27 @@ function rewriteShortcutSituation(rawSituation, identityMap) {
 }
 
 function rewriteFacts(facts, identityMap) {
-  function rewriteAtom(atom) {
+  function rewriteAtom(atom, parentPath = [], inactiveBackup = false) {
     const thing = axisField(atom, 'thing', 'legacy-22-migration');
+    const path = [...parentPath, thing.value];
     const nextIdentity = identityMap.get(thing.parsed.identity);
     const types = new Set(thing.parsed.types.map(type => type.raw));
+    const inactive = inactiveBackup || (types.has('backup') && types.has('default'));
     return Object.fromEntries(Object.entries(atom).map(([rawKey, value]) => {
       const parsed = parseAtomKey(rawKey, {
         descriptionSymbolWarnings: false,
         identityContract: 'legacy-22-migration'
       });
       if (parsed.baseKey === 'thing') return [persistentThingKey(parsed, nextIdentity), value];
-      if (parsed.baseKey === 'slot') return [rawKey, value.map(rewriteAtom)];
-      if (parsed.baseKey === 'strut') return [rawKey, rewriteStrutValue(value, identityMap)];
+      if (parsed.baseKey === 'slot') return [rawKey, value.map(child => rewriteAtom(child, path, inactive))];
+      if (parsed.baseKey === 'strut') return [rawKey, rewriteStrutValue(value, identityMap, path.join('/'), inactive)];
       if (parsed.baseKey === 'situation' && types.has('shortcut')) {
         return [rawKey, rewriteShortcutSituation(value, identityMap)];
       }
       return [rawKey, structuredClone(value)];
     }));
   }
-  return facts.map(rewriteAtom);
+  return facts.map(atom => rewriteAtom(atom));
 }
 
 function bindingReplacements(programRefBindings) {
@@ -171,8 +178,8 @@ function rewriteBindings(bindings, records, identityMap) {
       sites
     });
   }
-  if (programRecords.some(({ identity }) => !byOwner.has(identity))) {
-    throw migrationError('PROGRAM_REF_BINDING_MISSING', 'Every migrated Program requires one binding entry');
+  if (programRecords.some(({ identity, inactiveBackup }) => !inactiveBackup && !byOwner.has(identity))) {
+    throw migrationError('PROGRAM_REF_BINDING_MISSING', 'Every active migrated Program requires one binding entry');
   }
   return createProgramRefBindingUpdate({ replacements: [...byOwner.values()] });
 }
