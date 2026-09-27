@@ -391,8 +391,8 @@ test('incremental projection expands active short-name and identity cross-domain
     },
     {
       name: 'identity',
-      targetKey: 'thing&id=AAAAAAAAAAAAAAAAAAAAAA',
-      targetSelector: { 'thing&id=AAAAAAAAAAAAAAAAAAAAAA': 'Former Target' }
+      targetKey: 'thing&id=00A',
+      targetSelector: { 'thing&id=00A': 'Former Target' }
     }
   ];
   for (const entry of cases) {

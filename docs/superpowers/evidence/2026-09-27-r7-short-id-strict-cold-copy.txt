@@ -1,0 +1,19 @@
+Candidate code revision: a1b9eb8 (ordinary Atom key parser accepts short Thing IDs only)
+
+Formal world read-only dry-run: exit 0
+{"contract":"atom.thing-identity-migration-preflight","version":1,"action":"dry-run","attemptId":"r7-20260927-strict","migrationId":"short-thing-id-ac90a1975702465997cc2793","revisions":{"source":"sha256:d35f72633dc3525f19192f11da337fcebb57c82146e2b6eb5a3ba218193a4948","target":"sha256:162f79475c9094729d1499b4f18146c8d955beb4c439991e0329bab5d19cc657"},"changed":true,"summary":{"thingCount":12300,"uniqueShortIdentityCount":12300,"topologyPreserved":true,"activeLegacyIdentityCount":0,"allocatorWatermark":"3CO"}}
+
+Fresh cold-copy command: node scripts/accept-short-id-world-copy.mjs
+Exit: 0
+{"ok":true,"copyDirectory":"C:\\Users\\worker\\AppData\\Local\\Temp\\atom-short-id-acceptance-itaCAr","sourceHash":"sha256:f566ead0ef03325c40d3da10947f27fc52f5147580d5b7a4f72f410f1c7245b9","sourceUnchanged":true,"thingCount":12300,"sourceRevision":"sha256:d35f72633dc3525f19192f11da337fcebb57c82146e2b6eb5a3ba218193a4948","targetRevision":"sha256:162f79475c9094729d1499b4f18146c8d955beb4c439991e0329bab5d19cc657","allocatorWatermark":"3CO","firstRestartChanged":false,"rollbackOk":true,"rollbackRestartChanged":true,"secondRestartChanged":false}
+
+Full four-axis semantic comparison after reversing the private migration map: exit 0
+{"semanticEqual":true,"thingCount":12300,"beforeSemanticHash":"sha256:bf04f25b5c2b69b50999aa43ae3d98d0e92fdda7a720fa6893ec1be1f283364f","afterSemanticHash":"sha256:bf04f25b5c2b69b50999aa43ae3d98d0e92fdda7a720fa6893ec1be1f283364f","identityMapBijective":true}
+
+Migrated-copy public write/readback/rollback/restart: exit 0
+{"ok":true,"port":51019,"ephemeralPort":true,"writeMs":11454,"readMs":8856,"writeOk":true,"readbackOk":true,"healthOk":true,"programFailures":0,"restartPort":49668,"restartReadbackOk":true,"rollbackOk":true,"rollbackCount":1,"sourceRevisionRestored":true,"sourceContextUnchanged":true,"restartHealthOk":true,"tempDirectory":"C:\\Users\\worker\\AppData\\Local\\Temp\\atom-real-write-acceptance-YBc9Mt"}
+
+Allocator receipt after that normal creation and rollback: exit 0
+{"receiptCount":2937,"allocatorWatermark":"3CP","allocations":[{"previousWatermark":"000","nextWatermark":"3CO","issuedCount":12300,"firstIssued":"001","lastIssued":"3CO"},{"previousWatermark":"000","nextWatermark":"3CO","issuedCount":12300,"firstIssued":"001","lastIssued":"3CO"},{"previousWatermark":"3CO","nextWatermark":"3CP","issuedCount":1,"firstIssued":"3CP","lastIssued":"3CP"}]}
+
+Previous old-code cold recovery evidence remains valid for unchanged main@b38c787 and the same legacy source revision; see 2026-09-27-r7-short-id-cold-copy.txt. No formal apply was executed.
