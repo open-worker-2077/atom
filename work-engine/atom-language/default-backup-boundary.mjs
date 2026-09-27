@@ -22,7 +22,7 @@ export function isTypedDefaultBackupTypes(types) {
 
 function parsedField(atom, baseKey) {
   for (const [rawKey, value] of Object.entries(atom ?? {})) {
-    const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false, identityContract: 'world-any' });
+    const parsed = parseAtomKey(rawKey, { descriptionSymbolWarnings: false });
     if (parsed.baseKey === baseKey) return { rawKey, parsed, value };
   }
   return null;

@@ -192,7 +192,7 @@ export function parseAtomKey(rawKey, options = {}) {
           { rawKey }
         ));
       }
-      const identityContract = options.identityContract ?? 'world-any';
+      const identityContract = options.identityContract ?? 'short';
       try {
         if (identityContract === 'legacy-22-migration') {
           if (!identityText || !LEGACY_THING_ID_PATTERN.test(identityText)) {
@@ -201,12 +201,6 @@ export function parseAtomKey(rawKey, options = {}) {
           identity = identityText;
         } else if (identityContract === 'short') {
           identity = parseShortThingId(identityText).id;
-        } else if (identityContract === 'world-any') {
-          // Persisted worlds may still carry identities issued by the previous
-          // contract; both stay valid kernel identities until migration.
-          identity = LEGACY_THING_ID_PATTERN.test(identityText ?? '')
-            ? identityText
-            : parseShortThingId(identityText).id;
         } else {
           throw new Error(`unknown identity contract: ${identityContract}`);
         }

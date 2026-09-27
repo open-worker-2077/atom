@@ -15,7 +15,7 @@ const atom = (id, name, types = [], source = '', slot = []) => ({
 
 function facts() {
   return [atom(ids[0], 'Root', [], '', [
-    atom(ids[1], '🧊managegraph', ['agent', 'program'], 'print("ready")'),
+    atom(ids[1], '🧊managegraph', ['program'], 'print("ready")'),
     atom(ids[2], 'Backup', ['backup', 'default'], '', [
       atom(ids[3], 'Old Program', ['program'], 'transform({"thing":ref("Gone")})')
     ])

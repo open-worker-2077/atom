@@ -105,14 +105,15 @@ test('short Thing identity has one allocator and confines legacy parsing to cold
 
   assert.deepEqual(matchingFiles(/randomBytes\(16\)/u), []);
   assert.deepEqual(matchingFiles(/identityAlias/u), []);
+  assert.deepEqual(matchingFiles(/world-any/u), []);
   assert.deepEqual(matchingFiles(/\{22\}/u), [
     'work-engine/atom-language/key-parser.mjs',
-    'work-engine/atom-language/short-thing-id-migration.mjs',
-    'work-engine/atom-language/shortcut-runtime.mjs'
+    'work-engine/atom-language/short-thing-id-migration.mjs'
   ]);
   assert.deepEqual(matchingFiles(/legacy-22-migration/u), [
     'work-engine/atom-language/key-parser.mjs',
-    'work-engine/atom-language/short-thing-id-migration.mjs'
+    'work-engine/atom-language/short-thing-id-migration.mjs',
+    'work-engine/atom-language/short-thing-id-program-preflight.mjs'
   ]);
   assert.deepEqual(matchingFiles(/export function thingIdForOrdinal/u), [
     'work-engine/atom-language/thing-id-allocator.mjs'

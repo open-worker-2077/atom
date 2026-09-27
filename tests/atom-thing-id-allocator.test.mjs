@@ -57,17 +57,22 @@ test('parseAtomKey accepts canonical short identities and rejects unknown ones',
   assert.equal(parsed.identity, '00A');
   assert.equal(parsed.persistentKey, 'thing@program&id=00A#窗口');
 
-  // Persisted worlds still carry identities issued under the previous contract;
-  // both are valid kernel identities, while anything else stays invalid.
+  // Ordinary parsing must never accept an old identity after the cold cutover.
   const legacy = parseAtomKey('thing@program&id=AbCdEfGhIjKlMnOpQrStUv#窗口');
-  assert.deepEqual(legacy.errors, []);
-  assert.equal(legacy.identity, 'AbCdEfGhIjKlMnOpQrStUv');
+  assert.equal(legacy.identity, null);
+  assert.equal(legacy.errors[0].code, 'INVALID_THING_IDENTITY');
 
   const strict = parseAtomKey('thing@program&id=AbCdEfGhIjKlMnOpQrStUv', {
     identityContract: 'short'
   });
   assert.equal(strict.identity, null);
   assert.equal(strict.errors[0].code, 'INVALID_THING_IDENTITY');
+
+  const dual = parseAtomKey('thing@program&id=AbCdEfGhIjKlMnOpQrStUv', {
+    identityContract: 'world-any'
+  });
+  assert.equal(dual.identity, null);
+  assert.equal(dual.errors[0].code, 'INVALID_THING_IDENTITY');
 
   const forged = parseAtomKey('thing@program&id=not-a-kernel-identity');
   assert.equal(forged.identity, null);

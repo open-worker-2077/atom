@@ -1,11 +1,46 @@
 import { createHash } from 'node:crypto';
 
-import { collectDefaultBackupBoundary } from './default-backup-boundary.mjs';
+import { parseAtomKey } from './key-parser.mjs';
 import { createProgramRefBindingUpdate } from './program-ref-binding-ledger.mjs';
 import { inspectProgramReferenceSites } from './program-reference-runtime.mjs';
-import { storedField } from './slot-graph-semantics.mjs';
 
 const hash = (source) => `sha256:${createHash('sha256').update(source).digest('hex')}`;
+
+function migrationField(atom, baseKey, identityContract) {
+  const matches = Object.entries(atom ?? {}).map(([key, value]) => ({
+    value, parsed: parseAtomKey(key, { descriptionSymbolWarnings: false, identityContract })
+  })).filter(({ parsed }) => parsed.baseKey === baseKey);
+  if (matches.length !== 1 || matches[0].parsed.errors.length) {
+    throw Object.assign(new Error(`Migration requires one valid ${baseKey} axis`), {
+      code: 'INVALID_THING_IDENTITY_MIGRATION_SOURCE'
+    });
+  }
+  return matches[0];
+}
+
+function programRecords(facts) {
+  const records = [];
+  function visit(atom, parentPath = [], archived = false) {
+    let contract = 'legacy-22-migration';
+    let thing;
+    try { thing = migrationField(atom, 'thing', contract); }
+    catch {
+      contract = 'short';
+      thing = migrationField(atom, 'thing', contract);
+    }
+    const path = [...parentPath, thing.value];
+    const types = new Set(thing.parsed.types.map(({ raw }) => raw));
+    const inactive = archived || (types.has('backup') && types.has('default'));
+    if (types.has('program')) records.push({
+      programThingId: thing.parsed.identity,
+      programPath: path.join('/'), inactive,
+      source: migrationField(atom, 'situation', contract).value
+    });
+    for (const child of migrationField(atom, 'slot', contract).value) visit(child, path, inactive);
+  }
+  for (const atom of facts) visit(atom);
+  return records;
+}
 
 // Legacy worlds may predate binding receipts. Only an active Program proven to
 // have zero reference sites can acquire an empty binding during the same cold
@@ -15,20 +50,17 @@ export async function prepareShortThingIdProgramBindings({
 }) {
   const replacements = bindings?.entries?.().map(([, binding]) => binding) ?? [];
   const boundIds = new Set(replacements.map(({ programThingId }) => programThingId));
-  const boundary = collectDefaultBackupBoundary(facts);
-  for (const entry of boundary.entriesByPath.values()) {
-    if (entry.inactive || !storedField(entry.atom, 'thing')?.parsed.types
-      .some(({ raw }) => raw === 'program') || boundIds.has(entry.identity)) continue;
-    const source = storedField(entry.atom, 'situation')?.value ?? '';
-    const inspected = await inspectProgram({ source, programPath: entry.path });
-    if (inspected.sourceHash !== hash(source) || inspected.sites.length !== 0) {
+  for (const entry of programRecords(facts)) {
+    if (entry.inactive || boundIds.has(entry.programThingId)) continue;
+    const inspected = await inspectProgram({ source: entry.source, programPath: entry.programPath });
+    if (inspected.sourceHash !== hash(entry.source) || inspected.sites.length !== 0) {
       throw Object.assign(new Error('Active legacy Program requires verified reference bindings'), {
         code: 'PROGRAM_REF_BINDING_MISSING',
-        details: { programPath: entry.path, referenceSiteCount: inspected.sites.length }
+        details: { programPath: entry.programPath, referenceSiteCount: inspected.sites.length }
       });
     }
-    replacements.push({ programThingId: entry.identity, sourceHash: inspected.sourceHash, sites: [] });
-    boundIds.add(entry.identity);
+    replacements.push({ programThingId: entry.programThingId, sourceHash: inspected.sourceHash, sites: [] });
+    boundIds.add(entry.programThingId);
   }
   return createProgramRefBindingUpdate({ replacements });
 }

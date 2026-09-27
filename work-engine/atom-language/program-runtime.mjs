@@ -202,7 +202,7 @@ function fields(atom) {
   const result = new Map();
   for (const [key, value] of Object.entries(atom ?? {})) {
     const parsed = parseAtomKey(key, {
-      descriptionSymbolWarnings: false, identityContract: 'world-any'
+      descriptionSymbolWarnings: false
     });
     if (!parsed.errors.length && !result.has(parsed.baseKey)) result.set(parsed.baseKey, { parsed, value });
   }

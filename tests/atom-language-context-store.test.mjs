@@ -28,6 +28,13 @@ const gatedStrut = (_program, ...targets) => targets.length === 0
       then: targets.map((thing) => ({ thing }))
     }];
 
+test('ordinary projection rejects a pre-cutover 22-character Thing identity', () => {
+  const legacy = [{
+    'thing&id=AbCdEfGhIjKlMnOpQrStUv': 'Legacy', situation: '', slot: [], strut: []
+  }];
+  assert.throws(() => projectAtomContext(legacy), { code: 'INVALID_ATOM_FIELD' });
+});
+
 function atomsFixture() {
   const workshopAgentSource = [
     'LEGACY_AGENT_SITUATION = "工坊正文"',
