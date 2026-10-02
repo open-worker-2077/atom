@@ -431,9 +431,9 @@ export function createTransactionalWorldPersistence({
     return structuredClone(owner.cachedTransformLog);
   }
 
-  async function readInternalMetadataState() {
+  async function readInternalMetadataState(options) {
     await recover();
-    return journalRepository.readMetadataState();
+    return journalRepository.readMetadataState(options);
   }
 
   async function readDiscardEvidence({ discardId, archivePath, originalPath }) {
@@ -629,7 +629,7 @@ export function createTransactionalWorldPersistence({
             ?? await journalRepository.findReceipt(commandId);
           reusedReceipt = Boolean(existing);
           if (!existing && identityUpdate) {
-            const metadata = await journalRepository.readMetadataState();
+            const metadata = await journalRepository.readMetadataState({ identityOnly: true });
             const watermark = rebuildThingIdWatermark(metadata.receipts);
             if (watermark !== identityUpdate.previousWatermark) {
               throw problem('THING_IDENTITY_WATERMARK_CONFLICT', 'Thing ID allocation is based on a stale watermark', {

@@ -23,6 +23,12 @@
 
 ### Task 2：按已证实根因进行TDD修复
 
+**效率RED**：`node --test --test-name-pattern='identity metadata reads' tests/atom-memory-transaction-ports.test.mjs`失败（1 fail）；身份读取仍访问无关历史source和outcome各一次，计数2≠0。该回归同时要求身份水位/绑定可重建、返回值脱离内部历史及默认全量读取保持完整。
+
+**2026-10-03 隔离进展与效率定因**：原生worktree入口因聊天根目录不是Git仓库失败，已按Skill在`.worktrees/cli-source-timeout-20261003`建立`fix/cli-source-timeout-20261003@61e9c29`。既有提交边界基线47/47通过（`../evidence/2026-10-03-cli-boundary-baseline.txt`）。第一份热复制因manifest/revision不一致在启动校验拒绝，未执行写入；第二份复制前后事实/日志水位一致，随机端口、memory authority、关闭备份外发，正式事实文件哈希前后不变。真实副本3正文更新公开CLI为11596.4463ms/exit0/pending，两次Explore为6089.1164/6933.6056ms；现场超时尚未复现。
+
+CPU样本窗口12382.945ms，`memory-transaction-ports.readMetadataState`包含耗时5139.810ms，其中历史receipt的`structuredClone`5138.240ms；这证明每次仅为allocator/binding重建却复制完整历史结果是本次效率热点。证据保存于本任务SDD目录`copy-probe-stable.txt`、私有临时副本的`source.cpuprofile`（不推送私有世界）。Task2效率修复范围：给内存/JSON journal的既有metadata读取增加内部identity投影，保留allocator、binding及迁移/回滚元数据，先投影再克隆；默认全量metadata和历史恢复合同保持。adapter两处身份重建与中央allocator校验使用投影。先用可观测的大历史无关字段证明RED与身份等价/隔离，再跑真实副本同输入测量。deadline/commit分歧仍须独立RED和修复，不因效率收益略去。
+
 **Files**：优先既有`tests/atom-language-graph-server.test.mjs`、`tests/atom-transform-postcommit-boundary.test.mjs`、`tests/atom-language-transform-batch.test.mjs`、`tests/atom-cli.test.mjs`及根因实际命中原模块；精确范围在Task1定因后入账，不同时改无关模块。
 **Interfaces**：消费Task1失败与时序；输出同一失败GREEN、有限来源/后续预算、零迟到未提交写及效率证据。
 
@@ -32,6 +38,12 @@
 - [ ] 运行最小影响链，自查diff并阶段提交；失败先定向调试。Expected：直接合同回归全绿。
 
 ### Task 3：E3验收与交付
+
+**效率直接链验收**：增加JSON journal投影的绑定重放等价与返回值隔离断言后，内存事务/Thing身份/Program绑定/短ID迁移/冷部署36/36通过（3484.8963ms）。这是阶段候选，未部署；后续继续固定夹具性能对照和来源超时竞态RED。
+
+**真实副本初测（各1次，环境/热状态波动尚未量化）**：GREEN三正文CLI2998.7261ms/exit0/pending，前后Explore271.8932/568.9032ms；CPU窗口3313.443ms，原完整metadata clone热点已不在前22项。此前BASE三正文11596.4463ms、Explore6089.1164/6933.6056ms；两个新采集副本均验证生产事实哈希不变。该初测支持效率收益，但尚未逐字核对两份世界与输入或重复取样，不能作为最终同输入性能验收；后续用固定同一私有夹具分别运行baseline/GREEN并记录散布。GREEN证据`copy-probe-identity-green.txt`，CPU样本私有保留。
+
+**效率GREEN（阶段，未交付）**：上述身份读取RED已GREEN；内存事务、Thing身份事务、Program绑定最小影响链28/28通过。实现限于内部identity投影及三处消费点；默认完整metadata仍保留，正式世界未改。真实副本修复后测量已启动，尚待结果；deadline/提交竞态与E3仍未完成。
 
 **Interfaces**：消费Task2候选与直接链证据；输出已部署、公开入口正确回读、精确远端全绿。
 

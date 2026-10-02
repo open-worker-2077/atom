@@ -303,6 +303,16 @@ test('rollback emits the inverse binding delta and replay restores the prior gen
 
   const metadata = await createJsonTransactionJournal({ file: journalFile }).readMetadataState();
   const priorSource = `${firstSource}\n# seeded`;
+  const journal = createJsonTransactionJournal({ file: journalFile });
+  const identity = await journal.readMetadataState({ identityOnly: true });
+  assert.deepEqual(rebuildProgramRefBindings(identity.receipts).entries(),
+    rebuildProgramRefBindings(metadata.receipts).entries());
+  assert.equal(identity.receipts.at(-1).receipt.result.compatibilityManifest, undefined);
+  assert.equal(identity.receipts.at(-1).receipt.result.transformLogRecord, undefined);
+  assert.deepEqual(identity.outcomes, []);
+  identity.receipts.at(-1).receipt.result.programRefBindings.removals.push('program-id');
+  assert.deepEqual(rebuildProgramRefBindings((await journal.readMetadataState({ identityOnly: true }))
+    .receipts).entries(), rebuildProgramRefBindings(metadata.receipts).entries());
   const rebuilt = rebuildProgramRefBindings(metadata.receipts, [
     { programThingId: 'program-id', sourceHash: hash(priorSource) }
   ]);

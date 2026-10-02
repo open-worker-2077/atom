@@ -284,7 +284,7 @@ export function createLegacyWorldService(options = {}) {
         { code: outcomeCapacityFailure.code, retryable: outcomeCapacityFailure.code === 'WORLD_SAVE_BACKPRESSURE' });
     }
     const run = async (recovery = execution, snapshot = committedSnapshot) => {
-      const metadata = await persistence.readInternalMetadataState?.();
+      const metadata = await persistence.readInternalMetadataState?.({ identityOnly: true });
       const thingIdentityWatermark = rebuildThingIdWatermark(metadata?.receipts ?? []);
       const programRefBindings = rebuildProgramRefBindings(metadata?.receipts ?? []);
       return timed('engine.execute', () => execute({
@@ -508,7 +508,7 @@ export function createLegacyWorldService(options = {}) {
     async readProgramRefBindings(request) {
       if (!request?.contextFile || !request?.projectionFile) return null;
       const persistence = transactionFor(request);
-      const metadata = await persistence.readInternalMetadataState?.();
+      const metadata = await persistence.readInternalMetadataState?.({ identityOnly: true });
       return rebuildProgramRefBindings(metadata?.receipts ?? []);
     },
     async compatibilityManifest(request) {

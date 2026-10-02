@@ -4,6 +4,31 @@ import test from 'node:test';
 import { createCommitCoordinator } from '../src/atom-system/world-runtime/commit-coordinator.mjs';
 import { sealWorldFactsRevision } from '../src/atom-system/world-runtime/world-revision.mjs';
 import { createMemoryTransactionPorts } from '../src/atom-system/world-runtime/memory-transaction-ports.mjs';
+import { rebuildThingIdWatermark } from '../work-engine/atom-language/thing-id-allocator.mjs';
+import { rebuildProgramRefBindings } from '../work-engine/atom-language/program-ref-binding-ledger.mjs';
+
+test('identity metadata reads detach replay inputs without traversing historical bodies or outcomes', async () => {
+  let bodyReads = 0;
+  const result = { thingIdentityAllocator: { version: 1, previousWatermark: '000',
+    nextWatermark: '001', issued: ['001'] },
+  programRefBindings: { version: 1, replacements: [{ programThingId: '001',
+    sourceHash: `sha256:${'a'.repeat(64)}`, sites: [] }], removals: [] },
+  get source() { bodyReads += 1; return 'large historical source'; } };
+  const before = snapshot([]);
+  const ports = createMemoryTransactionPorts({ initialSnapshot: before,
+    durableReceipts: [{ commandId: 'prior', receipt: { commandId: 'prior', result } }],
+    durableOutcomes: [['prior', { get result() { bodyReads += 1; return 'large outcome'; } }]] });
+  const identity = await ports.journalRepository.readMetadataState({ identityOnly: true });
+  assert.equal(bodyReads, 0, 'unrelated receipt and outcome bodies must not be cloned');
+  assert.equal(rebuildThingIdWatermark(identity.receipts), '001');
+  assert.deepEqual(rebuildProgramRefBindings(identity.receipts).programIds, ['001']);
+  identity.receipts[0].receipt.result.programRefBindings.removals.push('001');
+  assert.deepEqual(rebuildProgramRefBindings((await ports.journalRepository
+    .readMetadataState({ identityOnly: true })).receipts).programIds, ['001']);
+  const full = await ports.journalRepository.readMetadataState();
+  assert.equal(full.receipts[0].receipt.result.source, 'large historical source');
+  assert.equal(full.outcomes[0][1].result, 'large outcome');
+});
 
 function snapshot(facts) {
   return { contract: 'atom.world-snapshot', version: 1, worldId: 'primary',

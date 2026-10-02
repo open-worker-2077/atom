@@ -1,4 +1,5 @@
 import { createMemoryWorldAuthority } from './memory-world-authority.mjs';
+import { identityReceiptMetadata } from './identity-receipt-metadata.mjs';
 import { sealWorldFactsRevision } from './world-revision.mjs';
 import { createPendingWorldCapacity, isHardCapacityBlocked, pendingWorldEventBytes } from './pending-world-capacity.mjs';
 
@@ -193,7 +194,10 @@ export function createMemoryTransactionPorts({
     async listPrepared() { return structuredClone([...prepared.values()]); },
     async readState() { return { prepared: structuredClone([...prepared.values()]),
       receipts: structuredClone(entries()) }; },
-    async readMetadataState() {
+    async readMetadataState({ identityOnly = false } = {}) {
+      if (identityOnly) return {
+        receipts: structuredClone(entries().map(identityReceiptMetadata)), outcomes: []
+      };
       return {
         receipts: structuredClone(entries().map((entry) => ({
           commandId: entry.commandId,

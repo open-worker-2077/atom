@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { identityReceiptMetadata } from '../world-runtime/identity-receipt-metadata.mjs';
 import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -1607,8 +1608,10 @@ export function createJsonTransactionJournal({ file, incrementalDirectory = `${f
     return { prepared, receipts };
   }
 
-  async function readMetadataState() {
+  async function readMetadataState({ identityOnly = false } = {}) {
     const state = await load();
+    if (identityOnly) return { receipts: structuredClone(state.order.map((id) =>
+      identityReceiptMetadata(state.receipts.get(id)))), outcomes: [] };
     // Select metadata before cloning: local patches and snapshot bodies belong
     // to the durable owner and are fetched only for explicit history operations.
     const receipts = structuredClone(state.order.map((id) => {
