@@ -28,6 +28,8 @@
 
 **2026-10-03 用户措辞纠正**：原“分别保留正文展示与相机定位”应直接写各自触发的功能，不能用“保留”代替动作；原“发布”指CLI写入后的Web图数据更新及页面刷新通知，不是发布软件版本。已按上述具体动作修正短设计；用户本次是在纠正表达，设计review仍待回复，未当作实施批准。
 
+**2026-10-03 共用模块与旧数据风险核对**：spatial-middle-frame-target.js的chooseMostSpecificTarget按实际包含范围筛选，再按较小半径、归一化距离、深度排序，返回原region；全文放大镜必须直接复用该结果，不能只取消排除团却继续自己的排序。legacy-projection-orchestrator.mjs仅在开始生成图数据时检查expectedRevision；legacy-runtime-composition.mjs随后依次更新Graph和Spatial，尚无生成期间新事实提交后的再次核对。runtime的generation保护状态不能单独证明页面不退回旧数据；实施必须覆盖图数据生成／写入期间新提交到达的实际交错，并核对Web接收到的内容。只读定位已具备实施入口，当前唯一实施阻塞仍为brainstorming短设计的用户review，已跨连续目标回合等待；不把用户措辞纠正或自动目标续行当作批准。
+
 
 **2026-10-03 只读接线核对（设计review等待中）**：界面实际提示名称为“全文放大镜”（本节标题“信息放大镜”保留为需求锚点）。spatial-engine.js:4300的currentMagnifierNode明确过滤clusterShellProxy，并独立按归一化距离挑选；4155的findMiddleFrameHit已经调用middleFrameTarget.chooseMostSpecificTarget，结合实际团envelope和domainContext解析节点/已解剖团，是共用入口。当前放大镜回归还断言排除团，该旧断言应按本次用户新合同更换，仍须保留隐藏后代不泄漏与关系详情选择。interaction-runtime:256来源确认回调只通知CLI，339才在world.execute全部返回后登记projection；210还等待所有activeInteractions归零，composition默认projectionDelayMs=4000。已有graph-server spatialPublisher成功后调用notifySpatialProjection，SSE通知链可复用。定向验收必须覆盖来源已确认但后续Program阻塞、无关交互持续活动、发布自身阻塞/失败、迟到revision以及真实Web已展开路径回显，不能只证明普通命令最终更新。此阶段仅读取代码并入账，未写产品代码或运行实现测试。
 
