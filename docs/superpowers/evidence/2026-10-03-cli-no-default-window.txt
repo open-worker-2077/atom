@@ -1,0 +1,4 @@
+{
+  "noAgentExit": 4,
+  "stderr": "错误 AGENT_REQUIRED：公开 Atom CLI 需要 --agent 上下文起点"
+}

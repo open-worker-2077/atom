@@ -13,6 +13,10 @@
 
 ## 状态与证据
 
+**2026-10-03 正式部署与公共回读 GREEN**：生产main快进`8e6418a`（产品代码6bc1f01），既有任务PID35960→50280，health8259、projection published且expectedRevision仍cf7f9ed4…a3fa1f；watchdog恢复Ready。全局PATH `atom.cmd --help`165行含专门pending合同；显式🧊managegraph的全局只读exit0、Graph-JSON、607ms。公共CLI HTTP只读ok=true/changed=false/agent=🧊managegraph、atom-interaction/4，revision不变，保存水位相等0/0、无dirty/pending/failure；页面与部署候选SHA逐字相等，atom.json checkpoint SHA仍58517729…e2c78。无窗口全局调用exit4/AGENT_REQUIRED，未默认暴露managegraph。真实写入效果复用六份私有冷副本证据，不重放正式业务。现在保存部署回读、推送main并等待其精确远端终态；完整E3剩远端main门禁。
+
+**2026-10-03 部署保护处理**：首次归属保护因CIM返回null未动服务；任务调度器运行实例确认4784 PID8896等于Atom Graph Runtime EnginePID。第二次按任务停止后，Git因预存CLI换行状态拒绝快进，finally重启旧代码并恢复watchdog，未迁改世界。原CLI字节已保留在忽略归档；git hash-object规范内容=`HEAD:work-engine/atom-language/cli.mjs`（1684bc42…6d2），仅git add刷新索引后无代码/暂存差异。继续既有部署，不覆盖用户实质改动。
+
 **2026-10-03 最终候选全量与功能远端 GREEN**：`6bc1f01`一次最终全量2409项、2408通过/0失败/1跳过（614744ms），句柄71650终态0；功能分支精确SHA远端run37056686432终态success，独立评审Approved。部署前私有备份754文件/4435343897字节，逐字节核验且复制前后源清单稳定；私有路径/manifest仅在runtime-data忽略目录。本地备份世界atom.json SHA为`58517729…e2c78`。接续既有监督任务切换、全局Help与明确窗口只读回读，再main精确检查；未提前宣称E3完成。
 
 **2026-10-03 功能分支与部署预检**：origin/fix/cli-source-timeout-20261003远端SHA精确为`6bc1f01f172d7d9b910b7286184e1bdc0def03d0`；PR#74已创建并附到当前任务，远端run37056686432正在检查该SHA。本地最终全量句柄71650继续。正式CLI只读仍旧source超时；既有人工Web只读入口返回changed=false、runtime atom-interaction/4，acceptedVersion=savedVersion=53、acceptedRevision=savedRevision=`sha256:cf7f9ed4…a3fa1f`，dirty=false/pending=false/failure=null、容量待存0。部署前本地私有事实/日志备份准备中，不外发、不迁改业务世界。

@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "candidate": "8e6418adac1ce77677ebf72ee99be0813938b5dd",
+  "oldPid": 35960,
+  "newPid": 50280,
+  "healthRevision": 8259,
+  "projection": {
+    "status": "published",
+    "expectedRevision": "cf7f9ed464f41d8e1e58351d68355eac7a1b70756a745a03d1883a5104a3fa1f"
+  },
+  "preflight": {
+    "acceptedVersion": 0,
+    "acceptedRevision": "sha256:cf7f9ed464f41d8e1e58351d68355eac7a1b70756a745a03d1883a5104a3fa1f",
+    "savedVersion": 0,
+    "savedRevision": "sha256:cf7f9ed464f41d8e1e58351d68355eac7a1b70756a745a03d1883a5104a3fa1f",
+    "dirty": false,
+    "pending": false,
+    "failure": null,
+    "auxiliaryFailure": null,
+    "capacity": {
+      "limits": {
+        "maxBytes": 536870912,
+        "maxEvents": 2048,
+        "maxEventBytes": 67108864
+      },
+      "bytes": 0,
+      "events": 0,
+      "reservedBytes": 0,
+      "reservedEvents": 0,
+      "pressure": null
+    }
+  }
+}

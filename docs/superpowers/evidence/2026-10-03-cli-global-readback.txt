@@ -1,0 +1,10 @@
+{
+  "exit": 0,
+  "milliseconds": 607.4134,
+  "format": "Graph-JSON",
+  "keys": [
+    "thing@program",
+    "boundary~preview"
+  ],
+  "selectedWindow": "🧊managegraph"
+}

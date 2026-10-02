@@ -1,0 +1,165 @@
+atom
+
+用途：其他 session 的 Agent 仅凭本页完成安全的日常读取、改造、Program 复用、验收和反馈。
+
+调用格式：
+  atom.cmd --% --agent AGENT atom
+  atom.cmd --% --agent AGENT explore|explore new "{...}"
+  atom.cmd --% --agent AGENT transform|transform new "{...}"
+  atom.cmd --% --agent AGENT submit "{...}"
+  PowerShell：$request | atom.cmd --agent AGENT --stdin
+
+Options:
+  --agent AGENT      必填；exact 且唯一的已声明 Agent Program 名称或路径
+                     Agent 是 thing@program 上由源码派生的能力：Situation 必须恰有一个顶层字面量 agent({...})；不是 Key 类型。
+  --endpoint URL     显式指定隔离 Atom command endpoint；省略时使用本机 4784
+  --stdin            从标准输入读取一条完整 Atom 命令；用于变量、多行、长文本和特殊字符
+  --json             已弃用的兼容选项；Atom 命令结果仍为 Graph-JSON
+  --program-function-registry  输出 CLI/Web/Program 共用的注册函数、分层职能组 scope 与 Atom 类型契约
+  --work-order-registry  输出 CLI/Web 共用的工单动作、错误与回执契约
+  -h, --help         显示帮助
+
+Agent 入口：
+  --agent 只指定本次交互的上下文来源，不指定节点的归属或写入位置，也不代表身份、权限或锁。
+  查询或写入的事实目标不得代替 --agent 上下文来源；目标 Atom 本身不需要是 Agent Program。
+  Agent Program 与其他 Program 共用调度器和 use_program() 分派；Agent、锁、Jump 与触发目录均是当前世界修订绑定的派生缓存。
+  会话已给出或已绑定唯一已声明 Agent Program 时直接复用，不得重复询问；只有上下文来源确实未知或不唯一时才请求明确。
+  每条非交互命令都原样携带已绑定的 Agent Program；CLI 不会把目标 thing 自动当作 --agent。
+  短名必须唯一；重名时增加必要路径片段。仍无法确定上下文时联系任务派发方或维护入口。
+  进入交互会话：atom.cmd --agent AGENT；Ctrl+C 退出。
+  PowerShell 固定短 JSON 可使用 --%；--% 会停止变量展开，变量、多行或长文本必须通过 --stdin 传入。
+
+日常闭环：
+  1. explore 当前锚点和最小必要邻域；只依据显式事实与用户授权决定下一步。
+     用户要求使用或创建一个命名节点时，先 explore 预定父节点及其直接子节点：已有相同或明确等价节点则复用；确实没有可复用节点时才 transform new。
+  2. 优先运行已有 Program/模板；没有适用能力时才执行最小 transform。
+  3. 每次写入后重新 explore 实际写入的 Atom 及其必要 slot、strut 和 situation。
+  4. 以回读事实验收；Program 消息不是其他 Agent 已改变的证明。失败按下方错误动作处理。
+
+Graph-JSON 基础：
+  thing 是可识别和操作的事物；situation 是其当前承载的正文、事实、规则或 Program 内容。
+  每个 Thing 同时也是 Slot：面向上级时是上级 Slot 中已填写的槽料，面向下级时继续定义下级槽料的位置和组织。向上钻取得类别、归属、用途和语境，向下钻取得组成、属性、参数和内部结构。
+  strut 是 Thing 面向相邻 Thing 的支柱结构，保存前项、后项、判定条件与可审计关系身份；Thing 可接受 Strut 支撑，也可成为支撑其他 Thing 的 Strut。
+  Graph-JSON 只使用 thing、situation、slot、strut 四轴；slot 与 strut 均为数组。
+  1→N 写在起点：{"if@current":true,"then":[{"thing":"B"},{"thing":"C"}]}；N→1 写在终点：{"if":[{"and":[{"thing":"A"},{"thing":"B"}]}],"then@current":true}。
+  每条 rule 必须且只能含一个 @current:true；if 永远是前项，then 永远是后项。禁止无 current、外部 thing@program 判定引用和 Program 自持 current 端点；禁止原生 N→M。
+  if 内嵌判定写 {"program":"def main(context):\n    return ..."}：context 含全部事实前项、后项与本次规范化 Transform $动作信封；仅 strict bool 决定本条推支，且不得产生写入等副作用。then 接受普通事实 Thing 或显式 thing@program 接收 Program。
+  Strut前项快照：context["antecedents"]为数组，每项含path、thing、situation；后项context["consequents"]同形状。单前项完成判定：def main(context): return context["antecedents"][0]["situation"] == "已完成"。多个前项按path/thing辨认，不猜数组顺序；Program只返回bool，不写事实。
+  Transform 注册动作写在 Key 区，例如 transform {"thing$click":"EXACT路径"}；$click 只是动作注册表中的一项，CLI/Web 共用同一动作信封，Explore 不触发动作。
+  Agent轻量动手使用 transform {"thing$act=钻木取火|人工介入":"世界/木头"}；一个$act=只提供一个标签包，Thing值仍是exact目标。标签只允许Unicode文字或数字，空标签、重复标签、空格及符号均拒绝。
+  N→1、1→N 各自保留 strut clause 身份；Web 在归一化 0.5 形成共享汇流／分流线干。多入多出必须建立显式枢纽 H，拆为 N→H 与 H→M 两条规则；H 保持可见可审计。可复用／可调度 Program 源码放 exact thing@program 的 situation；仅 Strut 纯判定源码内嵌在本 clause 的 if.program。
+  @type 写在 thing 键上（如 thing@program）；#简介必须在键末尾；~hint 仅为返回提示。Agent 是 Situation 中一个顶层字面量 agent({...}) 声明，不是 Key 类型。
+  Explore 接受对象或对象数组；Transform 对象数组把已有 Atom 改造作为一个原子批次执行，并逐项返回结果。所有结果只使用 Graph-JSON。
+
+Explore 契约（只读，不修复或写入投影）：
+  atom.cmd --% --agent 工作Agent explore "{""thing"":""目标节点"",""situation$full"":true,""slot$latitude+1"":true,""slot$longitude+1"":true,""strut"":true}"
+  thing 默认 exact；短名重名时逐步增加必要的上级路径片段。顶层同名目标使用“世界之外/目标名”精确选择。fuzzy、regex、vector 不支持。
+  “世界之外”以 thing@universe 暴露为不落盘的虚拟父级；用于读取、上下钻、顶层消歧，以及作为 .mov. 的顶层目的地。
+  situation$full（返回完整 situation；否则可只返回简介）
+  situation$lock（只读返回当前 exact 节点的已编译锁状态，不读取或改写 backing JSON）
+  slot$latitude+1 / slot$latitude-1（向上看一层 / 向下看一层；向下结果保留嵌套 slot；数字可调整，0 为锚点层）
+  slot$longitude+1 / slot$longitude-1（向后看一个同级 / 向前看一个同级；数字可调整，0 为锚点）
+  每次成功命中 exact 锚点都会返回 boundary~preview；up/down/left/right 分别给出视野外 state、hasMore、nodes、characters，并随重新锚定更新。protected 方向不公开精确数量且不得当作空白。
+  读取投影推荐使用标准 JSON true（例如 ""situation$full"":true、""strut"":true）；无值投影键继续兼容。
+  strut 按原始 ordinal 回读 owner 声明；从任一相关端查询会带出唯一 owner 节点及其完整 if→then rule，不复制持久声明。
+  多层向下查询按真实包含关系返回嵌套 slot；thing 仅在需要消歧时增加最短必要路径片段。
+  explore new 使用同一查询契约，并重置本次探索上下文；空结果返回 explore~empty/new，不代表错误。
+
+Transform 契约（目标 thing 必须 exact 且唯一；写入后必须回读）：
+  transform new 创建完整 Atom；新节点的归属由 thing 中的精确父路径决定，与 --agent 无关。
+  thing 可用“精确父路径/新名称”创建子 Atom，省略父路径则创建顶层 Atom；父路径不明确时只询问父 Atom。
+  Transform 对象数组可批量改名、移动或更新已有 Atom 的 situation/strut：任一项失败整批不写；成功后整批只做一次权威提交。
+  批量改名按最终状态统一校验，可交换同级名称；整批统一重写后代路径与 strut selector。批量改名项不得混入移动、situation 或 strut。
+  situation 和 strut 的全文替换必须显式使用 .rep.；每个对象的结构操作只能有一个。
+  .rep.  {"thing":"A","situation.rep.NEW"}；全文替换键没有 Value；不得写 :null，null 是一个已提供的局部替换 Value；局部替换用 "situation.rep.NEW":"OLD"；strut 全替换用 "strut.rep.":[{"if@current":true,"then":[{"thing":"TARGET"}]}]
+  .sum.  {"thing":"A","situation.sum.SUMMARY"}（只更新 situation 简介）
+  .typ.  {"thing.typ.TYPE":"A"}（替换类型标记）；{"thing.typ.":"A"}（移除类型标记）
+  .ren.  {"thing.ren.NEW_THING":"A"}（同级必须保持唯一）
+  .lnk.  {"thing.lnk.EXACT_TARGET":"EXACT_SHORTCUT"}（按语义路径改向虚拟引用自身；内部 identity 自动保持）
+  .mov.  {"thing.mov.DESTINATION_PATH":"A"}（移动 slot 子树；移至顶层时 DESTINATION_PATH 使用“世界之外”；拒绝形成循环）
+  .cpy.  {"thing.cpy.DESTINATION_PATH":"A"}（复制 slot 子树）
+  .add.  {"thing":"SRC","strut.add.":{"thing":"DST"}}（新增 owner-local 无条件出边）
+  .dsc.  {"thing.dsc.":"A"}（可逆移入唯一默认备份仓）；{"thing":"SRC","strut.dsc.":{"thing":"DST"}}（删除 owner-local 无条件出边）
+  .rst.  {"thing.rst.":"BACKUP_PATH/A"}（按丢弃记录恢复原位置）
+  .run.  {"thing.run.":"PROGRAM_PATH"}（显式运行唯一 @program）
+
+Program 模板与复用：
+  @program 是唯一可执行类型，situation 直接保存 Python；普通交互不得手工替代已有 Program 或模板。
+  本 Atom Program 可自行研发、研磨并通过 use_program() 复用；成熟实现也可作为后续公共能力素材。
+  注册表与底层运行时不通过 Program 开放修改；这项保护不限制 Agent 自行研发 Program。
+内核函数：
+  Graph 函数：explore、shortcut、agent、jump、jump_authorize、changed、transform、slot、slot_provide、slot_body、lock、direct_children、child_detail、subtree_refs
+  Form 函数：form、missing_details、form_status、plan_form_flow
+  Program 函数：message、choice、current_atom、signal、slot_receive、trigger、use_program、first_pending、transition_allowed、plan_shards、plan_template_instance、instantiate、template_catalog、function_catalog、json_parse、json_stringify
+应用函数：
+  工单应用：work_order、work_order_catalog
+  注册函数目录：function_catalog({layer?,family?,scope?})；完整公共契约可用 atom.cmd --program-function-registry 读取。
+  Form 评估：form({"action":"evaluate","components":[{"name":"组件","activation":"required|optional|disabled","value":{},"requirements":[{"path":["JSON键","下级键"]}],"components":[]}]})；components 可递归嵌套。
+  Form 返回 valid、required、optional、disabled、active、missing；missing 每项为 {"component":["组件路径"],"path":["缺失键路径"]}。required 必参与；optional 在自身或后代有内容时参与；disabled 子树不参与校验；未使用的 optional 不形成缺项。
+  多选函数：choice({id,options:[{id,label}],selected:[id],empty})；参数必须使用双引号标准 JSON（同时是合法 Python），当前仅支持多选，返回 selected 数组并在显式 .run. 回执中公开 choices。
+  Program 并发独立运行并共享单轮 10 秒时间预算；单项失败独立报告，超时自动中断。短期内避免编写超出该预算的复杂 Program。
+  Program transform 创建：transform({"thing":"精确父路径/新节点","situation":"内容","slot":[],"strut":[]})；完整四轴且无点号指令时创建，带点号指令按更新处理。
+  transform() 返回 None，只表示登记了延后效果；实际提交必须以交互回执或后续 exact explore 回读确认。
+  JSON 函数：json_parse({"text":"..."})->JSON值；json_stringify({"value":...,"indent"?:0..8})->string。序列化默认紧凑，拒绝 NaN、Infinity 和非 JSON 值；失败将终止整个 Program 评估且不发布已登记效果；不开放 import/eval；可配合 situation.rep. 写回。
+  世界函数：explore(query)->rows；transform(spec)、shortcut(spec)、agent(spec)、slot(spec)、slot_body(spec)、lock(spec)、message(spec)->effect；current_atom()->Program；signal()->当前 Slot 信号。
+  虚拟引用：target = explore({"thing":"EXACT目标"})[0]；shortcut({"placement":"slot","thing":"显示名","target":target})在当前 Program 直接 slot 下创建引用。resolved = explore({"thing":"EXACT快捷入口"})[0] 仍是透明目标 ThingCoordinate；仅在本次 Agent 已获统一 Graph 读取授权时，resolved.shortcut_reference 才提供该入口的精确引用记录 ThingCoordinate（父 slot Explore 的对应透明结果同样提供）。shortcut({"action":"delete","reference":resolved.shortcut_reference})只删除引用，不改变目标，也不删除创建 Program。目标坐标、路径字符串和 .ref 均不能代替引用坐标。引用不复制目标事实、不携带创建者权限；每次查看均以本次 Agent 的普通 Explore 鉴权解析目标。改向使用 transform {"thing.lnk.EXACT目标":"EXACT快捷入口"}，只改引用自身并保持内部 identity；Web 只显示名称和目标语义路径，不要求人工或 Agent 记忆 ID。普通 Transform 不经引用重定向。
+  Agent登记：当前 Program 调用 agent({"labels":["^^","业务标签"],"functions":{"groups":["form"],"names":["message"]}}) 即把本节点登记为 Agent；无 target／lock／mode。labels、groups、names 必须是源码中的 JSON literal，functions 必填且禁止 null、通配。
+  职能 scope：groups 是正式分层权限，运行时按当前 registry 获得该组及后代组的函数；names 是冻结的具体函数授权。子窗口只能获得创建者 scope 本身、后代组或其函数，不能上铸祖先组、跨到同级其他职能树，仅持有 name 也不能铸造 group。
+  标签边界：连续 ^ 只表示管辖等级，普通字符串是业务标签，两者不混算；自身或子 Agent 的 ^ 数量不得超过创建者。持有 ^ 的 Agent 可在既有 Graph 活动空间内定义普通标签；子 functions 必须通过创建者符号 scope 的同组或后代关系校验。
+  Agent 重配：对 Agent Program 的 situation.rep 与普通 Transform 共用同一实际路径鉴权；当前 Agent 钥匙标签逐层匹配 slot／node 锁标签，自身与后代不设特殊管理通道，新的 labels／groups／names 不得超过调用方已持有范围。
+  权限索引：软件在 Agent、标签、锁或路径变化时增量更新可丢弃索引；请求命中即用，缺失或失效则沿实际路径即时计算并回填。索引缺失不得阻断启动、Explore 或 Transform。
+  窗口跳转：jump({"when":when_program,"where":where_program,"recycle":recycle_program})；三项均可省略，recycle=true 直接回收，随后才算 when，且仅 when=true 才算 where；省略 when 即守窗。jump 定位复用 Explore、移动复用 Transform，并通过同一 Graph 鉴权链。
+  受控横向迁窗：上级 Program 须显式获授 names:["jump_authorize"]，并在自身合法域内用 window=explore({"thing":"EXACT窗口"})[0]、source=explore({"thing":"EXACT注册Program"})[0]、destination=explore({"thing":"EXACT目的地"})[0] 后调用 jump_authorize({"window":window,"source":source,"destination":destination})。函数只返回 {"planned":true}，凭据不暴露；内核在 source 下生成一次性授权坐标。执行窗口的 where 返回该授权的 explore() 坐标后，仍按 recycle→when→where 顺序消费；落地前复验签发方当前 Graph 权限并在中央事务内移动与删授权。
+  受控迁窗边界：jump_authorize 只能用具体 names 授予且不可委派；执行窗口不能读取目的地 situation、改目的地、篡改／复制／重放授权。预传 ThingCoordinate、完整路径、短名、.ref、strut 或 shortcut 都不携带迁移权限；签发方失权、Graph 世代变化、节点／slot 锁拒绝或提交失败时窗口原位不动。
+  精确坐标：when_program = explore({"thing":"EXACT判定@program"})[0]；把 explore() 返回对象直接交给 jump 或锁规则，不使用 .ref。jump 的 when／where／recycle 及 where 返回值只接受 ThingCoordinate；短名字符串与完整 EXACT_PATH 字符串均拒绝，数组位置也不得猜测。精确字符串兼容仅保留于 use_program.name 与 CLI thing.run. 选择器，不扩散到 jump；旧 AtomView 仅由内部适配层兼容。
+  变化探针：def main(arguments):
+    point = explore({"thing":"EXACT监测Thing"})[0]
+    if not changed([point]):
+        return
+    # 命中后才 explore／聚合／计算。changed 只返回 bool 并登记既有 Transform 反向索引，控制流必须由调用方显式短路。
+  固定窗口锁：agent() 登记时由内核强制启用且不可关闭或自定义；可读 current／后代／同父普通节点／唯一直接父上下文，可写 current 后代。直接父不能成为新锚点进入其同层；exact path 不绕过。
+  冷启动：内核从包含一个顶层字面量 agent({...}) 声明的 thing@program Situation 重建 labels 与符号职能 scope，并从 Program 中的 literal-path lock() 按当前 Graph 重编译锁；旧侧车 locks 返回 RETIRED_REQUEST_DRIVEN_LOCK_SNAPSHOT，agentRegistrations 返回 RETIRED_AGENT_REGISTRATION_SNAPSHOT，windowSelfLocks/windowSelfLockAgents 返回 RETIRED_WINDOW_SELF_LOCK_SNAPSHOT，均只能一次性审计清退且不作为鉴权输入。
+  Transform 触发器：先定义无参数 main，再声明 trigger("transform", {"nodes":["exact 节点路径"]}, main)。main 是函数引用，不能写 main()；运行时按反向索引只运行命中的 Program；相同值写入仍属于 Transform 事件。未声明 trigger 的 Program 冷启动时遇到无关 Transform 不会重放；显式 .run.、其自身被 Transform 或已知 explore 依赖变化时仍运行。
+  Slot信号：slot({"to":"up|down","labels":[...]})只沿直接父子Slot投递；接收节点自己的Program用trigger("slot", {"from":"up|down","labels":[...],"match":"all|exact"}, main)，回调内signal()读取本次来源与标签。信号不写事实、不自动续传、不授予权限。
+  推支触发器：普通前项／后项不保存布尔值；推支线 if 内嵌 Program strict true 后只形成 typed delivery。Graph then 必须把实际接收 Program 写为 thing@program 后项；该 Program 以 trigger("strut", {}, main) 声明是否响应，其中 main(delivery) 接收 decision、clauseId、antecedentPaths、consequentPath 与 revision。Program 不得用 nodes 重复选择 Graph 后项；false、普通事实后项或未声明 Trigger 均不执行。
+  Program 停用：把 Program 本身或其普通 slot 上级通过 .dsc. 可逆移入唯一 thing@backup@default 子树；其中 @program 保留类型与 situation 源码，但不进入活跃运行、trigger、changed 或 explore 依赖索引，也不能由 thing.run/use_program 执行。.rst. 恢复原位后按当前事实重新激活并重建索引。停用只认显式 backup@default 类型，不根据容器显示名猜测。
+  统一鉴权顺序：当前 Agent 起点 → 实际 slot 路径上的锁 → 目标 node 锁；Explore、Transform 及注册函数内部读写共用此链，标签不足返回锁拒绝且不读取目标 situation。
+  模板函数：template_catalog(spec)->entries；instantiate({template,version,mode,parameters})->result；use_program({name,arguments})->result。
+  Program 复用：use_program({"name": explore({"thing":"EXACT @program 路径"})[0], "arguments": {...}})；坐标会按当前窗口与 Program 边界重新授权。精确字符串名称或路径继续兼容；不使用 .ref。
+  槽体研发：槽体本身是 thing@program，Situation 内调用 slot_body({"action":"seal"})，首次只含一棵普通可自运行候选 DataFlow（下级槽、slot、strut、@program）。研发态可用 transform {"thing.run.EXACT候选根路径":"EXACT_PROGRAM_PATH"} 绑定当前域。
+  槽体封装：运行槽体自身 Program 即自声明封装；调用方不得传 body，内核也不按名称识别或改名候选 DataFlow。中央事务原名保留候选，并新增 print@program 与槽例；不预建空槽例。print 计划可用 explore {"thing":"EXACT槽体/print/修订","slot$latitude-1":true} 审计。
+  槽体结构锁：seal 固定自动保护当前及未来映射槽 self 的名称／结构／strut／Program 规则，不接受 lock 开关；槽下未映射料初始可写，伪造槽角色返回 SLOT_ROLE_FORGERY_DENIED。审核等业务冻结使用通用 lock()。
+  业务状态锁：持久声明使用 lock({"targets":{"paths":["EXACT路径"],"scope":"exact|subtree"},"actions":["explore|transform"],"labels":["标签"]}) 的顶层 literal，冷启动按当前 Graph 重编译；动态或未知目标稳定拒绝。lock() 不能覆盖固定 Agent／槽体锁；条件动作由后项自己的 strut trigger 直接消费 typed true，不重复 Explore 判定。
+  槽体打印：授权调用方使用 use_program({"name":"EXACT槽体/print","arguments":{"name":"新槽例名"}})；name 是唯一打印参数，调用方不得传 revision，修订由当前 print@program 内部绑定。内核复制抽象槽、嵌套 slot、strut、类型、槽契约与默认初值，不复制应用 Program 或后续具体料。
+  槽例填写与计算：使用 transform {"thing":"EXACT槽体/槽例/实例/槽","situation.rep.填写值"} 写入槽例数据。槽例数据事件按“当前槽例→稳定角色→槽模共享逻辑”只执行实际触达链；研发态绑定支持 ./相对 slot 路径。槽模内相对引用和内部绝对引用均映射为当前槽例数据，结果写回当前槽例；槽模外绝对引用保持真实外部目标并继续经过统一鉴权。禁止跨槽例和穿透嵌套槽例边界。
+  槽例填料与变量：带槽模角色的实例节点是抽象槽；槽下 transform new 的未映射普通 Thing 子树是本地料。Program 与文本节点分工：Program 保存共享逻辑，正式业务数据由槽例文本／事实节点提供；不同槽例调用上下文隔离。
+  槽模修订：同一槽体 Program 在同一中央事务内修改自身候选 DataFlow 后再次 slot_body({"action":"seal"})；只有该自声明组合获得 slot-reseal 能力。成功后同步全部槽例的映射结构与共享 Program 引用，并逐字节保留未映射本地料；删除含料槽整次冲突回滚。
+  槽体错误：INVALID_SLOT_BODY_EFFECT、INVALID_SLOT_BODY_LAYOUT、INVALID_SLOT_PRINT_PLAN、SLOT_BODY_NOT_SEALED、SLOT_PRINT_PLAN_STALE、SLOT_BODY_EXAMPLE_EXISTS、SLOT_MATERIAL_SLOTMENT_CONFLICT、SLOT_INSTANCE_REVISION_MISSING、SLOT_SCOPE_ROOT_UNBOUND、SLOT_RELATIVE_SELECTOR_REQUIRED、SLOT_RELATIVE_TARGET_NOT_FOUND、SLOT_RELATIVE_TARGET_AMBIGUOUS、SLOT_SCOPE_BOUNDARY_CROSSING、SLOT_SCOPE_ROLE_MISMATCH、SLOT_BODY_NESTED_EFFECT_FORBIDDEN；任一失败不产生半份槽例。
+  工单函数：work_order_catalog({template?,version?})->contract；work_order({action,...})->result。v1 动作固定为 create/fill/validate/submit/reject/revise/read-back。
+  工单公开契约：atom.cmd --work-order-registry；该只读命令无需 --agent，Web 帮助从同一注册表渲染动作、错误和提交回执字段。
+  工单写入只能由 Program 发出并继续经过 Transform、修订检查和中央提交；调用时使用精确版本、稳定 creation_id 与 exact path，写后按 read-back 和世界回读验收。
+  规划函数：direct_children(rows,parent_path)、child_detail(rows,parent_path,name,default)、missing_details(rows,parent_path,names)、form_status(rows,parent_path,status_name)、first_pending(forms,completed_states)、transition_allowed(current,requested,transitions)、subtree_refs(rows,root_path)、plan_shards(sources,spec)、plan_form_flow(rows,parent_path,standard)、plan_template_instance(rows,parent_path,template)。
+  模板参数以 template_catalog({}) 返回的契约为准；被 use_program 调用的 Program 必须定义 main(arguments)。
+  推进流两步配方：当前 Agent 必须实际持有下列 agent／instantiate 等固定函数名；第1步只创建 Program，第2步显式运行后，agent() 把当前 Program 登记为 Agent，instantiate() 在同一事务附加完整推进流。
+    第1步：transform new {"thing@program":"当前Agent/任务区/任务名","situation":"agent({\"labels\":[],\"functions\":{\"groups\":[],\"names\":[\"agent\",\"current_atom\",\"explore\",\"first_pending\",\"form_status\",\"instantiate\",\"lock\",\"message\",\"subtree_refs\",\"transform\"]}})\ninstantiate({\"template\":\"advancement-flow\",\"version\":\"latest\",\"mode\":\"ensure\",\"parameters\":{\"title\":\"任务标题\"}})","slot":[],"strut":[]}
+    第2步：transform {"thing.run.":"当前Agent/任务区/任务名"}
+  “任务区”必须是当前窗口下已获准写入的普通事实父节点；不要通过给窗口自身追加 slot 绕过固定锁。两步均须使用当前已认证 --agent 选择已声明 Agent Program 并走统一 Graph 权限域；第2步成功回执后再 exact explore 回读新 Agent 与推进流。需要随职能树集中变更时使用 groups，需要冻结权限时使用最小 names；不得用公开 Transform 创建 Agent Key 类型。
+
+反馈：
+  submit {"type":"bug|pain|requirement|optimization","detail":"1 至 10000 字说明"}
+  反馈记录当前 Agent Program 和本会话最近历史；反馈不绕过锁，也不证明问题已修复。
+
+错误处理与下一步动作：
+  先按对应错误的纠正提示处理；纠正提示仍无法解除阻断、CLI 已无法正常使用时，才 submit bug 或 requirement。
+  AGENT_NOT_FOUND / AGENT_TYPE_REQUIRED / AMBIGUOUS_AGENT：只修正 --agent 上下文来源；不得把查询目标改成 Agent Program 或拿它代替入口；未知入口联系派发方。
+  INVALID_GRAPH_JSON：固定短 JSON 检查语法后重试；变量、多行或长文本改用 --stdin，不猜测、不改 backing JSON。
+  UNKNOWN_* / INVALID_*：按错误中的纠正提示修正输入后重试。
+  AMBIGUOUS_ATOM_NAME：重新 explore 预定父节点及必要同级；使用能唯一表征目标的最短 exact 路径。
+  ATOM_NOT_FOUND：若用户意图是使用或创建该节点，先 explore 预定父节点及直接子节点，复用相同或明确等价节点；确实不存在时，以“精确父路径/新名称”执行 transform new。父路径不明确时只询问父 Atom。
+  WORLD_REVISION_CONFLICT：停止当前写入，重新读取最新事实，再基于新修订重新判断；不得盲目重放。
+  PROGRAM_LOCK_DENIED / WINDOW_ACCESS_DENIED：停止修改并按错误提示处理，不绕过锁。
+  ATOM_ENGINE_UNAVAILABLE：确认 4784 服务可用；仍失败则联系维护入口。
+  PROJECTION_RECOVERY_PENDING：可丢弃派生投影待恢复；只有成功回执确认 changed=true 时，才表示本次事实写入已成功，禁止重复写入。准备已有世界投影也可能携带此提示，不代表被拒绝的命令已提交。4784 应继续服务；维护入口仅限本机 POST /__atom/api/recover-projection，并使用 projectionRecovery.expectedRevision。
+  ATOM_COMMIT_CONFIRMATION_PENDING：中央提交仍在确认，尚未裁定是否成功；保留原关联号读取结果，禁止换新请求重放来猜结果。此提示不表示已提交、未提交或无变化。
+  ATOM_PROGRAM_TIMEOUT / ATOM_PROGRAM_CANCELLED / ATOM_PROGRAM_FAILED：不得手工仿制 Program；回读事实并按错误提示处理。
+  未知损坏或无法确认提交状态：停止写入并联系维护入口。日常 Agent 不直接执行事务或投影恢复。
