@@ -1,7 +1,7 @@
 # Atom 当前需求与缺陷总账
 
-**更新时间：** 2026-09-17
-**已核对远程基线：** `origin/main@ec1f31d`（Web编辑局部响应、手机双菜单及交付状态校准已推送；精确远端检查34134296493终态成功）；A模式改构前回退标签`pre-a-mode-consolidation-20260904`保留。
+**更新时间：** 2026-10-03
+**已核对远程基线：** `origin/main@1d36f126703603e70f92f4080a3130d0816cc15b`（本轮CLI修复E3及精确远端run37058685690成功；源码候选6bc1f01）。
 **用途：** 本页是当前唯一的需求排队与状态裁定入口。规格负责产品定论，专项计划负责实施细节；旧计划中的历史勾选、聊天记录、Agent 自报和 Atom 世界均不能替代本页状态。
 
 ## 会话回查证据
@@ -12,6 +12,10 @@
 - **最近12小时增量校准**：以同一原始JSONL按时间增量回查；白板／槽体最新定论之后至本次交接请求之间未发现新的业务定论。当前新增要求仅为：用本总账、规格和恢复断点完成交接，不依赖故障Session记忆；旧内容仍以既有Superpowers文件为准，不重复全量回查。
 
 ## 状态与证据
+
+**2026-10-03 本轮 E3 完成**：产品候选代码`6bc1f01`，交付main提交`1d36f126703603e70f92f4080a3130d0816cc15b`已推送，功能远端run37056686432与main精确远端run37058685690均终态success；PR#74已合入。最终本地全量2408通过、0失败、1跳过，独立评审Approved。正式4784通过既有任务加载，公共CLI明确🧊managegraph窗口只读exit0/约607ms，HTTP成功且保存完毕；无窗口AGENT_REQUIRED，Help含确认等待合同。六份私有副本写入/中央receipt/冷读及completed、零额外effects验证，固定输入更新中位6093→3244ms。事实revision与checkpoint SHA不变，未重放业务写入。安全备份远端f72731f保留，部署前私有754文件逐字节备份有效。
+
+**完成审计**：当前Task1—3均有已读真实证据，根因、RED/GREEN、阶段提交、整包评审与最终全量、功能/main精确终态、正式部署及公共回读均结算；无未解决Important/Critical、无延后Minor。本轮未另作未经用户确认的产品边界裁定。诊断产物与原CLI字节已保留归档，没有删除文件；worktree保留。本次收尾提交只更新既有Superpowers完成记录与脱敏检查证据，产品源码保持已验收候选；收尾提交的精确远端检查通过GitHub当前main Checks回读，仍按SP-L05等待终态后才关闭目标模式。
 
 **2026-10-03 正式部署与公共回读 GREEN**：生产main快进`8e6418a`（产品代码6bc1f01），既有任务PID35960→50280，health8259、projection published且expectedRevision仍cf7f9ed4…a3fa1f；watchdog恢复Ready。全局PATH `atom.cmd --help`165行含专门pending合同；显式🧊managegraph的全局只读exit0、Graph-JSON、607ms。公共CLI HTTP只读ok=true/changed=false/agent=🧊managegraph、atom-interaction/4，revision不变，保存水位相等0/0、无dirty/pending/failure；页面与部署候选SHA逐字相等，atom.json checkpoint SHA仍58517729…e2c78。无窗口全局调用exit4/AGENT_REQUIRED，未默认暴露managegraph。真实写入效果复用六份私有冷副本证据，不重放正式业务。现在保存部署回读、推送main并等待其精确远端终态；完整E3剩远端main门禁。
 
