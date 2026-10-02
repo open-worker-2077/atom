@@ -17,6 +17,10 @@
 
 **状态**：需求已持久化；用户以“那就没问题”确认已澄清的短设计，brainstorming bounded review完成，实施阻塞解除。接续隔离工作区、TDD与E3验收；措辞应直接对应操作及结果，不以“保留”“发布”等不明确的词代替动作。
 
+**Task 1 RED**：隔离分支fix/magnifier-web-refresh-20261003，实施步骤见2026-10-03-magnifier-web-refresh.md。实际引擎函数行为测试证明已解剖团返回null，重叠对象的距离优先与中键小对象优先不同；旧模型基线14/14通过。测试首次VM加载错误已修正，不计作功能RED。实施直接调用现有findMiddleFrameHit，以同一范围和优先级识别对象。
+
+**Task 1 GREEN**：currentMagnifierNode已直接调用findMiddleFrameHit，未新增排序；节点／已解剖团、包围圆外形边界、局部归属及隐藏后代行为覆盖，直接链100/100通过。真实Chromium CapsLock三击读取未解剖节点→右键剖开→团空白全文→中键定位旅程1/1通过（29.8秒）；首次30秒总预算到期，trace显示各功能断言通过，按同类旅程90秒预算复跑成功。仅候选验证，尚未部署。下一步来源确认时独立更新Web与旧revision保护。
+
 **ManageGraph承接**：🧊managegraph 的开发事项承接用户现行空间界面与CLI反馈，产出共用定位逻辑和即时跨入口回显，再以公共入口验收回流本总账。窗口仅由当前session显式提供。
 
 | 顺序 | 用户需求与边界 | 优先级 | 验收 |

@@ -4298,26 +4298,12 @@
   }
 
   function currentMagnifierNode(point) {
-    const match = state.hitRegions
-      .filter((region) => (
-        region.item
-        && region.item.node
-        && !region.item.clusterShellProxy
-      ))
-      .map((region) => ({
-        region,
-        distance: Math.hypot(point.x - region.x, point.y - region.y),
-        radius: Math.max(1, region.radius)
-      }))
-      .filter((entry) => entry.distance <= entry.radius * 1.14)
-      .sort((left, right) => (
-        left.distance / left.radius - right.distance / right.radius
-        || left.radius - right.radius
-      ))[0];
-    return match ? {
-      node: match.region.item.node,
-      ownerPath: match.region.item.ownerPath || nodeOwnerPath(match.region.item.node),
-      normalizedDistance: match.distance / match.radius
+    const rect = canvas.getBoundingClientRect();
+    const region = findMiddleFrameHit(point.x + rect.left, point.y + rect.top);
+    return region?.item?.node ? {
+      node: region.item.node,
+      ownerPath: region.item.ownerPath || nodeOwnerPath(region.item.node),
+      normalizedDistance: Math.hypot(point.x - region.x, point.y - region.y) / Math.max(1, region.radius)
     } : null;
   }
 
