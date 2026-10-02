@@ -1,0 +1,30 @@
+全文放大镜与 CLI 异步 Web 更新：脱敏验收证据
+
+需求与裁定：2026-09-03-atom-current-requirement-ledger.md 的 2026-10-03 新目标。
+实施：2026-10-03-magnifier-web-refresh.md；PR #75。
+最终代码/测试候选：c8bcc2eb85d898075c2fcb1fd882f3a126d8dcda。
+
+定向验证：137/137，补充链146/146；架构13/13；系统364/364。
+实际浏览器：三击读取未解剖节点、剖开后团空白全文、中键定位通过。
+实际 CLI：Web更新和后续工作受控阻塞时仍先返回；释放Web更新后同一打开页面自动取得新正文。
+独立评审：Critical 0、Important 3 已一次定向RED/GREEN修复；Minor团外壳专属高亮延后。
+保留历史失败：旧候选迟到更新、入向关系、并行浏览器未识别三击、全量清理竞态；没有删除失败证据。
+服务测试关闭前删除临时目录导致后台写入冲突，保留夹具后服务链14/14。
+最终完整测试：2422项，2421通过，0失败，1跳过；673969ms；终态0。
+功能精确远端：run37069943752，headSha=c8bcc2e，completed/success。
+
+正式部署：既有4784任务，PID50280→34256；watchdog恢复Ready。
+冷启动先完成私有备份，超过35秒探测窗口；之后健康恢复，不以首轮探测失败宣称成功。
+正式公共回读：health8262，projection published，事实revision回读前后不变。
+index.html、spatial-engine.js与候选逐字节一致。
+全局Help有效；明确用户提供的managegraph窗口explore exit0、541ms、合法Graph-JSON。
+无窗口调用exit4、AGENT_REQUIRED；浏览器就绪、pageErrors=0。
+正式业务写入未重放；新写入真实旅程仅使用合成隔离世界。
+
+部署前本机私有备份：754文件、4437383383字节；源清单稳定、逐字节核验成功。
+私有世界、截图、业务正文与备份路径没有提交到公共仓库。
+运行诊断与原始测试日志在官方忽略scratch中保留；worktree保留。
+
+main合入提交：c97e4ba5ab8babe3a92b39ebb46567b646ed74e9。
+main产品精确远端：run37071503043，headSha=c97e4ba，completed/success。
+收尾仅文档更新，产品及测试与c8bcc2e无差异；本提交精确远端以当前main的GitHub Checks终态为准，成功后关闭目标。

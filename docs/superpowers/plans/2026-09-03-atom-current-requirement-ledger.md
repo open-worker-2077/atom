@@ -15,7 +15,7 @@
 
 ### 2026-10-03 新目标：信息放大镜共用命中与 CLI 异步 Web 更新
 
-**状态**：需求已持久化；用户以“那就没问题”确认已澄清的短设计，brainstorming bounded review完成，实施阻塞解除。接续隔离工作区、TDD与E3验收；措辞应直接对应操作及结果，不以“保留”“发布”等不明确的词代替动作。
+**状态**：两项功能已实现并完成E3产品验收，PR#75已合入main；本地完整测试2421通过、0失败、1跳过，功能及main产品提交的精确远端检查均成功，正式4784与公共入口回读通过。当前收尾提交仅补充本总账、实施计划及脱敏证据，其精确Checks终态成功后关闭目标。措辞直接对应触发动作和更新对象。
 
 **Task 1 RED**：隔离分支fix/magnifier-web-refresh-20261003，实施步骤见2026-10-03-magnifier-web-refresh.md。实际引擎函数行为测试证明已解剖团返回null，重叠对象的距离优先与中键小对象优先不同；旧模型基线14/14通过。测试首次VM加载错误已修正，不计作功能RED。实施直接调用现有findMiddleFrameHit，以同一范围和优先级识别对象。
 
@@ -49,10 +49,24 @@
 
 **服务生命周期定向GREEN**：批量移入独立331ms通过；完整服务链另遇workspace测试失败／句柄不退出，workspace独立872ms通过。移除此服务测试文件中先于close的独立删除钩子，保留合成临时世界，以现有running.close等待后台工作；同一无隔离服务链TAP 14/14、0失败、13683ms终态。未改产品、放宽2秒等待或隐藏断言；全量须重新绑定新候选。审批一度将测试名4784误判正式业务写入，已用mkdtemp与port0代码证明隔离并获准。失败进程51320／41264经精确命令确认后停止，不涉及正式50280。
 
+**新候选全量进行中**：c8bcc2eb85d898075c2fcb1fd882f3a126d8dcda已推送，产品代码与f578c33相同，仅服务测试生命周期和总账变化。完整npm test句柄79581，证据final-full-c8bcc2e.txt；精确远端run37069943752已创建，等待终态。未部署，仍为仅备份尚未验收。
+
+**远端旧候选终态**：f578c33的run37068671740因新提交被GitHub并发控制取消，终态cancelled；不是通过。最新c8bcc2e的run37069943752继续运行，验收与收口仅绑定新候选。
+
+**功能远端GREEN**：run37069943752精确headSha=c8bcc2eb85d898075c2fcb1fd882f3a126d8dcda，status completed／conclusion success，watch句柄37700终态0。本地新候选全量尚未终态，上次全量失败两项及Web连续编辑已经在此次完整执行中通过。待本地全量结束再进入E3部署。
+
+**最终全量GREEN c8bcc2e**：2422项2421通过、0失败、1跳过（673969ms），句柄79581终态0；PR#75唯一test check COMPLETED/SUCCESS且headRefOid精确c8bcc2e。代码候选完整验收成立，开始既有4784任务部署与公共入口回读；目标仍待E3和main精确终态，不提前关闭。
+
+**正式任务启动RED**：正式main无用户改动，快进c8bcc2e；仅停止已注册Atom任务，未杀无归属进程。启动后35秒健康仍不可连，部署句柄70097终态1；finally已尝试启动服务并恢复watchdog，LastTaskResult=2147946720，4784无监听。正在读取既有调度配置与错误原因，未宣称部署成功、未改业务事实或关闭目标。
+
+**正式部署与公共回读GREEN**：既有启动链先flush私有备份再开放4784，超过本次35秒检查窗口；之后既有任务自行监听PID34256，health8262、projection published、中央事实revision仍bbdcc03d…4d56f9，watchdog恢复Ready。正式index.html与spatial-engine.js逐字节等于已验收候选；全局Help有效，显式🧊managegraph只读exit0／541ms／Graph-JSON，无窗口exit4／AGENT_REQUIRED；真实浏览器就绪、pageErrors=0，回读前后事实revision不变。未重放正式业务写入。PR#75已合入，merge=c97e4ba5ab8babe3a92b39ebb46567b646ed74e9；待main收尾提交及精确远端终态后关闭目标。
+
+**main产品远端GREEN与完成审计**：run37071503043精确headSha=c97e4ba5ab8babe3a92b39ebb46567b646ed74e9，completed/success，watch句柄13588终态0。两项用户需求均有根因、RED/GREEN、真实旅程、必要门禁、最终完整测试、一次独立评审修复、功能/main精确终态、正式部署及公共回读。无未解决Important/Critical；Minor团外壳专属高亮明确延后。worktree和失败诊断保留，私有世界逐字节备份有效；无正式业务重放。收尾仅更新文档，产品及测试diff c8bcc2e为空，复用该候选验证；本收尾提交的精确Checks仍须终态success再关闭目标，其SHA和结果由GitHub当前main回读，不以旧候选代替。
+
 | 顺序 | 用户需求与边界 | 优先级 | 验收 |
 |---|---|---|---|
 | 1 | CapsLock三击的信息放大镜既可指向未解剖节点，也可指向已解剖团；共用中键单击的节点/团目标命中与语义归属，不复制另一套定位算法 | I3/U3/D2/E3 | 展开团和未展开节点均显示准确对象正文；重叠目标优先级与中键一致；隐藏后代不泄漏；中键定位和关系详情保持有效；真实浏览器验证 |
-| 2 | CLI写入经中央确认后立即发起异步Web更新，CLI回执不等待更新完成 | I3/U3/D2/E3 | 后续Program或发布受控阻塞时来源CLI仍先返回；Web接收该revision或其更新版本；迟到旧发布不回退；更新失败不否定已提交事实；真实CLI/Web旅程验证 |
+| 2 | CLI写入经中央确认后立即发起异步Web更新，CLI回执不等待更新完成 | I3/U3/D2/E3 | 后续Program或Web图数据更新受控阻塞时来源CLI仍先返回；Web接收该revision或其更新版本；迟到旧图数据不回退；更新失败不否定已提交事实；真实CLI/Web旅程验证 |
 
 **短设计（用户已确认）**：全文放大镜与中键共用同一套节点／已解剖团的目标识别：CapsLock三击开启放大镜后，指向对象显示它的全文；中键单击对象，让相机定位到它。沿interaction-runtime已有Web图数据更新、revision与SSE通知链，CLI写入经中央确认后立即异步生成最新Web图数据并通知已打开的页面刷新；CLI不等待图数据更新或页面刷新完成。只接受当前或更新revision，防止迟到旧结果把页面退回旧状态，不增加第二世界权威、不延长CLI预算、不重放来源或后续Program。当前代码明确把clusterShellProxy排除于放大镜，且异步投影要等activeInteractions归零，分别是定向回归入口。
 
@@ -61,9 +75,9 @@
 **2026-10-03 共用模块与旧数据风险核对**：spatial-middle-frame-target.js的chooseMostSpecificTarget按实际包含范围筛选，再按较小半径、归一化距离、深度排序，返回原region；全文放大镜必须直接复用该结果，不能只取消排除团却继续自己的排序。legacy-projection-orchestrator.mjs仅在开始生成图数据时检查expectedRevision；legacy-runtime-composition.mjs随后依次更新Graph和Spatial，尚无生成期间新事实提交后的再次核对。runtime的generation保护状态不能单独证明页面不退回旧数据；实施必须覆盖图数据生成／写入期间新提交到达的实际交错，并核对Web接收到的内容。只读定位已具备实施入口，当前唯一实施阻塞仍为brainstorming短设计的用户review，已跨连续目标回合等待；不把用户措辞纠正或自动目标续行当作批准。
 
 
-**2026-10-03 只读接线核对（设计review等待中）**：界面实际提示名称为“全文放大镜”（本节标题“信息放大镜”保留为需求锚点）。spatial-engine.js:4300的currentMagnifierNode明确过滤clusterShellProxy，并独立按归一化距离挑选；4155的findMiddleFrameHit已经调用middleFrameTarget.chooseMostSpecificTarget，结合实际团envelope和domainContext解析节点/已解剖团，是共用入口。当前放大镜回归还断言排除团，该旧断言应按本次用户新合同更换，仍须保留隐藏后代不泄漏与关系详情选择。interaction-runtime:256来源确认回调只通知CLI，339才在world.execute全部返回后登记projection；210还等待所有activeInteractions归零，composition默认projectionDelayMs=4000。已有graph-server spatialPublisher成功后调用notifySpatialProjection，SSE通知链可复用。定向验收必须覆盖来源已确认但后续Program阻塞、无关交互持续活动、发布自身阻塞/失败、迟到revision以及真实Web已展开路径回显，不能只证明普通命令最终更新。此阶段仅读取代码并入账，未写产品代码或运行实现测试。
+**2026-10-03 只读接线核对（设计review等待中）**：界面实际提示名称为“全文放大镜”（本节标题“信息放大镜”保留为需求锚点）。spatial-engine.js:4300的currentMagnifierNode明确过滤clusterShellProxy，并独立按归一化距离挑选；4155的findMiddleFrameHit已经调用middleFrameTarget.chooseMostSpecificTarget，结合实际团envelope和domainContext解析节点/已解剖团，是共用入口。当前放大镜回归还断言排除团，该旧断言应按本次用户新合同更换，仍须保留隐藏后代不泄漏与关系详情选择。interaction-runtime:256来源确认回调只通知CLI，339才在world.execute全部返回后登记projection；210还等待所有activeInteractions归零，composition默认projectionDelayMs=4000。已有graph-server spatialPublisher成功后调用notifySpatialProjection，SSE通知链可复用。定向验收必须覆盖来源已确认但后续Program阻塞、无关交互持续活动、Web图数据更新自身阻塞/失败、迟到revision以及真实Web已展开路径回显，不能只证明普通命令最终更新。此阶段仅读取代码并入账，未写产品代码或运行实现测试。
 
-**执行与证据**：已核对main安全基线fe9d8c9及其精确远端success，前一目标complete，工作目录干净。review后建立隔离worktree，依TDD写节点/团共用命中与来源确认异步发布RED→GREEN，最小受影响链→真实关键旅程→必要门禁→最终候选全量一次；一次整包独立评审，修复Important/Critical。完成候选推送及精确远端检查、既有4784部署、公共入口回读与main收口后才关闭目标。原截图仅作视觉现象证据，私有世界/业务正文不得推送。
+**执行与证据**：已核对main安全基线fe9d8c9及其精确远端success，前一目标complete，工作目录干净。review后建立隔离worktree，依TDD写节点/团共用命中与来源确认后异步Web更新RED→GREEN，最小受影响链→真实关键旅程→必要门禁→最终候选全量一次；一次整包独立评审，修复Important/Critical。完成候选推送及精确远端检查、既有4784部署、公共入口回读与main收口后才关闭目标。原截图仅作视觉现象证据，私有世界/业务正文不得推送。
 
 **2026-10-03 本轮 E3 完成**：产品候选代码`6bc1f01`，交付main提交`1d36f126703603e70f92f4080a3130d0816cc15b`已推送，功能远端run37056686432与main精确远端run37058685690均终态success；PR#74已合入。最终本地全量2408通过、0失败、1跳过，独立评审Approved。正式4784通过既有任务加载，公共CLI明确🧊managegraph窗口只读exit0/约607ms，HTTP成功且保存完毕；无窗口AGENT_REQUIRED，Help含确认等待合同。六份私有副本写入/中央receipt/冷读及completed、零额外effects验证，固定输入更新中位6093→3244ms。事实revision与checkpoint SHA不变，未重放业务写入。安全备份远端f72731f保留，部署前私有754文件逐字节备份有效。
 
