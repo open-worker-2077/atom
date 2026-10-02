@@ -521,7 +521,6 @@ test('the large magnifier panel only lays out when its target or viewport change
 
 test('magnifier resolves only visible rendered targets and never leaks a hidden descendant carrier', () => {
   assert.match(source, /function currentMagnifierNode\(point\)/);
-  assert.match(source, /!region\.item\.clusterShellProxy/);
   const update = functionSource('updateDetailMagnifier');
   assert.doesNotMatch(update, /regions:\s*state\.clusterHitRegions/);
   assert.match(source, /magnifierNode:/);

@@ -117,8 +117,20 @@ function incrementalGraphProjection({ facts, previous, affectedPaths, projectCon
   const affectedDomains = affectedTopDomains(affectedPaths, rootThing);
   if (!affectedDomains.size) return { value: previous, affectedDomains, partial: previous };
   const defaultBackupBoundary = collectDefaultBackupBoundary(facts);
+  const projectionDomains = new Set(affectedDomains);
+  // Incoming clauses must be available when recreating edges touching an updated endpoint.
+  // Use the prior clause index; unrelated world domains remain outside the partial projection.
+  for (const clause of previous.strutClauses ?? []) {
+    const endpoints = [
+      ...(clause.antecedentPaths ?? clause.dependencyPaths ?? []),
+      ...(clause.then ?? []).map((target) => target.targetPath)
+    ];
+    if (endpoints.some((path) => affectedDomains.has(topDomain(path, rootThing)))) {
+      projectionDomains.add(topDomain(clause.sourcePath, rootThing));
+    }
+  }
   const partialFacts = projectionDomainFacts(
-    facts, affectedDomains, rootThing, defaultBackupBoundary
+    facts, projectionDomains, rootThing, defaultBackupBoundary
   );
   const partial = projectContext(partialFacts, { ...options, defaultBackupBoundary });
   const previousChildren = new Map((fieldValue(previous.graph, 'slot') ?? [])
@@ -299,15 +311,7 @@ export function createLegacyProjectionProjectors(options = {}) {
         const knowledge = affectedDomains && partialDocument && previous
           ? mergeSpatialProjection(
               previous,
-              await projectSpatial(partialDocument, {
-                ...spatialOptions,
-                atomTypesByPath: atomTypesByPath(projectionDomainFacts(
-                  facts,
-                  affectedDomains,
-                  atomName(graphDocument.graph),
-                  collectDefaultBackupBoundary(facts)
-                ))
-              }),
+              await projectSpatial(partialDocument, spatialOptions),
               affectedDomains,
               graphDocument
             )

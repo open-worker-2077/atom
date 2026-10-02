@@ -77,7 +77,7 @@ export function createLegacyRuntimeComposition(options) {
     projectionOrchestrator = null,
     diagnostics = null,
     onStage = null,
-    projectionDelayMs = 4_000,
+    projectionDelayMs = 0,
     programScheduler = createProgramRuntimeScheduler({ diagnosticRecorder: diagnostics }),
     graphPublisher = defaultGraphPublisher(graphFile),
     spatialPublisher = defaultSpatialPublisher(storeFile),
@@ -123,6 +123,19 @@ export function createLegacyRuntimeComposition(options) {
     throw problem('INVALID_GRAPH_PUBLISHER', 'Legacy runtime composition requires Graph publisher');
   }
 
+  async function assertProjectionCurrent(projected) {
+    if (!committedVersionProvider) return;
+    const current = await committedVersionProvider();
+    const expected = String(projected.sourceRevision).replace(/^sha256:/u, '');
+    const actual = String(current?.revision).replace(/^sha256:/u, '');
+    if (expected !== actual) {
+      throw problem('STALE_WORLD_PROJECTION', 'New world facts superseded the generated Web data', {
+        expectedRevision: projected.sourceRevision, actualRevision: current?.revision,
+        projection: 'projector', cause: 'STALE_WORLD_PROJECTION'
+      });
+    }
+  }
+
   async function projectAndPublish(request) {
     let projected;
     try {
@@ -142,7 +155,9 @@ export function createLegacyRuntimeComposition(options) {
         { projection: 'projector', cause: error.code ?? error.name }
       );
     }
+    await assertProjectionCurrent(projected);
     await publishProjectionStage('graph', graphPublisher, projected.graph);
+    await assertProjectionCurrent(projected);
     await publishProjectionStage('spatial', spatialPublisher, projected.spatial);
     return projected;
   }
@@ -218,6 +233,9 @@ export function createLegacyRuntimeComposition(options) {
 
   return createInteractionRuntime({
     world: {
+      ...(committedVersionProvider ? {
+        currentRevision: async () => (await committedVersionProvider()).revision
+      } : {}),
       execute: async ({ programRuntime, ...request }) => {
         const result = await worldService.executeLegacy({
           ...request,

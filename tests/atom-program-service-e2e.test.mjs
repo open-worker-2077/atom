@@ -65,7 +65,8 @@ async function waitForKnowledge(url, predicate, message, timeoutMs = 2_000) {
     if (predicate(state.knowledge)) return state.knowledge;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  assert.fail(message);
+  const health = await fetch(`${url}/__spatial/api/health`).then((response) => response.json());
+  assert.fail(`${message}; projection=${JSON.stringify(health.atomProjection)}`);
 }
 
 async function settleWorkspaceProjection(running, payload, timeoutMs = 2_000) {
@@ -283,7 +284,6 @@ test('4784 keeps a plain leaf create local while Program changes stay whole-worl
 
 test('4784 applies one valid 80-effect set quickly and rejects a later invalid batch atomically', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-service-effect-set-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -410,7 +410,6 @@ test('4784 applies one valid 80-effect set quickly and rejects a later invalid b
 
 test('4784 applies one valid structural 80-effect set quickly and rejects a later mixed batch atomically', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-structural-effect-set-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -544,7 +543,6 @@ test('4784 applies one valid structural 80-effect set quickly and rejects a late
 
 test('4784 Web workspace edits commit local Atom facts before asynchronously publishing the exact projection', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-web-create-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -777,7 +775,6 @@ test('4784 Web may reversibly discard a container with a nested Agent Program', 
 
 test('cold-start state includes deep Graph facts on first entry and refreshes an authoritative Web rename', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-deep-cold-start-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -820,7 +817,6 @@ test('cold-start state includes deep Graph facts on first entry and refreshes an
 
 test('4784 Web batch landing moves every selected sibling into one nested Atom container', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-web-batch-land-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -880,7 +876,6 @@ test('4784 Web batch landing moves every selected sibling into one nested Atom c
 
 test('4784 rejects direct projection replacement so Web edits cannot bypass atom.json', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-projection-read-only-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -902,7 +897,6 @@ test('4784 rejects direct projection replacement so Web edits cannot bypass atom
 
 test('4784 continues an ordinary command without replaying an unrelated startup failure', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-program-service-isolation-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -990,7 +984,6 @@ test('4784 exact Explore does not replay an unrelated slot effect after an expli
 
 test('4784 submit endpoint records the current agent and supplied CLI history', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-feedback-service-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');

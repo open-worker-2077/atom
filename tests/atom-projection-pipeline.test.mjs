@@ -279,6 +279,34 @@ test('incremental Web projection includes a cross-domain strut endpoint without 
   assert.equal(current.projections.spatial.value.strutRelations.length, 1);
 });
 
+test('incremental Web target update keeps its incoming cross-domain edge without rebuilding unrelated domains', async () => {
+  const before = [
+    { thing: 'A', situation: '', slot: [{ thing: 'Source', situation: '', slot: [], strut: [{ 'if@current': true, then: [{ thing: 'B/Target' }] }] }], strut: [] },
+    { thing: 'B', situation: '', slot: [{ thing: 'Target', situation: 'before', slot: [], strut: [] }], strut: [] },
+    { thing: 'C', situation: 'unrelated', slot: [], strut: [] }
+  ];
+  const after = structuredClone(before);
+  after[1].slot[0].situation = 'after';
+  const counts = [];
+  const repository = createMemoryProjectionRepository();
+  const pipeline = createProjectionPipeline({
+    projectors: createLegacyProjectionProjectors({
+      projectContext(facts, options) {
+        counts.push(facts.length);
+        return projectAtomContext(facts, options);
+      }
+    }), repository
+  });
+  await pipeline.rebuild(snapshot('incoming-before', before));
+  const prior = await repository.readCurrent('primary', 'incoming-before');
+  await pipeline.rebuild(snapshot('incoming-after', after), { affectedPaths: ['B/Target'] });
+  const current = await repository.readCurrent('primary', 'incoming-after');
+  assert.equal(current.projections.spatial.value.edges.length, 1);
+  assert.equal(current.projections.spatial.value.edges[0].id, prior.projections.spatial.value.edges[0].id);
+  assert.deepEqual(counts, [3, 2]);
+  assert.equal(current.projections.graph.value.graph.slot[1].slot[0].situation, 'after');
+});
+
 test('incremental projection resolves archived short names against the complete world boundary', async () => {
   const before = [
     {
