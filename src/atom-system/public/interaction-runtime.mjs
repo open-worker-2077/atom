@@ -88,7 +88,7 @@ export function createInteractionRuntime({
   programRuntime,
   diagnostics = null,
   onStage = null,
-  projectionDelayMs = 4_000
+  projectionDelayMs = 0
 }) {
   requireMethod(world, 'execute', 'INVALID_WORLD_PORT', 'Interaction runtime world port');
   requireMethod(projections, 'publish', 'INVALID_PROJECTION_PORT', 'Interaction runtime projection port');
@@ -104,7 +104,6 @@ export function createInteractionRuntime({
   let projectionTimer = null;
   let projectionTail = Promise.resolve();
   let scheduledProjection = null;
-  let activeInteractions = 0;
   let closing = false;
 
   async function timedStage(stage, work, interactionId = null) {
@@ -208,7 +207,7 @@ export function createInteractionRuntime({
   }
 
   function armScheduledProjection() {
-    if (closing || activeInteractions > 0 || projectionTimer || !scheduledProjection) return;
+    if (closing || projectionTimer || !scheduledProjection) return;
     projectionTimer = setTimeout(() => {
       projectionTimer = null;
       const scheduled = scheduledProjection;
@@ -252,10 +251,27 @@ export function createInteractionRuntime({
       });
     }
     let committedNotified = false;
+    let sourceProjectionRevision = null;
+    let sourceProjectionOutcome = null;
     const notificationWarnings = [];
+    const updateWeb = (result) => {
+      if (options.publish === false || result?.changed === false) return null;
+      if (result?.revisionAfter === sourceProjectionRevision) return sourceProjectionOutcome;
+      const outcome = scheduleProjection(result);
+      if (outcome) {
+        sourceProjectionRevision = result.revisionAfter;
+        sourceProjectionOutcome = outcome;
+      }
+      return outcome;
+    };
+    const notifySourceReceipt = (result) => {
+      updateWeb(result);
+      return options.onSourceReceipt?.(withInteractionId(result, intent.correlationId));
+    };
     const notifyCommitted = async (result) => {
       if (committedNotified || result?.ok !== true || result?.changed !== true) return;
       committedNotified = true;
+      updateWeb(result);
       try {
         await options.onCommitted?.(withInteractionId(structuredClone(result), intent.correlationId));
       } catch (error) {
@@ -275,10 +291,8 @@ export function createInteractionRuntime({
       ...(currentOptions.programMode ? { programMode: currentOptions.programMode } : {}),
       ...(currentOptions.signal ? { signal: currentOptions.signal } : {}),
       ...(typeof options.onCommitStarted === 'function' ? { onCommitStarted: options.onCommitStarted } : {}),
-      ...(typeof options.onSourceReceipt === 'function' ? {
-        onSourceReceipt: result => options.onSourceReceipt(withInteractionId(result, intent.correlationId))
-      } : {}),
-      ...(typeof options.onCommitted === 'function' ? { onCommitted: notifyCommitted } : {}),
+      onSourceReceipt: notifySourceReceipt,
+      onCommitted: notifyCommitted,
       ...(typeof options.onSubsequentSettled === 'function' ? {
         onSubsequentSettled: result => options.onSubsequentSettled(withInteractionId(result, intent.correlationId))
       } : {}),
@@ -336,7 +350,7 @@ export function createInteractionRuntime({
     }
     if (notificationWarnings.length) result = { ...result, warnings: [...(result.warnings ?? []), ...notificationWarnings] };
     if (options.publish !== false && result?.changed !== false) {
-      result = withProjectionOutcome(result, scheduleProjection(result));
+      result = withProjectionOutcome(result, updateWeb(result));
     }
     if (diagnostics && result?.command === 'explore') {
       try {
@@ -405,13 +419,9 @@ export function createInteractionRuntime({
   }
 
   async function executeValidated(intent, options = {}) {
-    activeInteractions += 1;
-    if (projectionTimer) clearTimeout(projectionTimer);
-    projectionTimer = null;
     try {
       return await executeValidatedCore(intent, options);
     } finally {
-      activeInteractions -= 1;
       armScheduledProjection();
     }
   }
@@ -452,16 +462,20 @@ export function createInteractionRuntime({
     if (typeof expectedRevision !== 'string' || !expectedRevision.trim()) {
       throw problem('INVALID_WORLD_REVISION', 'Recovery requires a non-empty expected revision');
     }
+    const generation = ++projectionGeneration;
     try {
-      projectionGeneration += 1;
       if (projectionTimer) clearTimeout(projectionTimer);
       projectionTimer = null;
       scheduledProjection = null;
-      const projection = await projections.recover({ expectedRevision });
-      latestProjectionState = Object.freeze({ status: 'published', expectedRevision });
+      const recovery = projectionTail.catch(() => {}).then(() => projections.recover({ expectedRevision }));
+      projectionTail = recovery.catch(() => {});
+      const projection = await recovery;
+      if (generation === projectionGeneration) {
+        latestProjectionState = Object.freeze({ status: 'published', expectedRevision });
+      }
       return projection;
     } catch (error) {
-      latestProjectionState = Object.freeze({
+      if (generation === projectionGeneration) latestProjectionState = Object.freeze({
         status: 'pending',
         expectedRevision,
         failure: projectionFailure(error)

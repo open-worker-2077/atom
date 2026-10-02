@@ -1008,6 +1008,47 @@ test('an ancestor Agent Program governs descendant reconfiguration without a mai
   });
 });
 
+test('Web skips old graph data when new facts commit during Graph file update', async () => {
+  let facts = [atom('Root', 'initial')];
+  const graphStarted = Promise.withResolvers();
+  const releaseGraph = Promise.withResolvers();
+  const webUpdated = Promise.withResolvers();
+  const webContents = [];
+  let graphWrites = 0;
+  const worldService = {
+    readCommittedSnapshot: async () => ({ facts, revision: revisionOfWorldFacts(facts) }),
+    executeLegacy: async (request) => {
+      facts = [atom('Root', request.source === 'transform old' ? 'old' : 'new')];
+      const result = { ok: true, changed: true, revisionAfter: revisionOfWorldFacts(facts) };
+      await request.onCommitted?.(result);
+      return result;
+    }
+  };
+  const runtime = createLegacyRuntimeComposition({
+    contextFile: 'atom.json', graphFile: 'graph.json', worldService,
+    programScheduler: {},
+    graphPublisher: { publish: async () => {
+      if (++graphWrites === 1) { graphStarted.resolve(); await releaseGraph.promise; }
+    } },
+    spatialPublisher: { publish: async (knowledge) => {
+      const text = knowledge.nodes.find(({ label }) => label === 'Root').detail;
+      webContents.push(text);
+      if (text === 'new') webUpdated.resolve();
+    } }
+  });
+  try {
+    await runtime.execute({ source: 'transform old', correlationId: 'old-content' });
+    await graphStarted.promise;
+    await runtime.execute({ source: 'transform new', correlationId: 'new-content' });
+    releaseGraph.resolve();
+    await webUpdated.promise;
+    assert.deepEqual(webContents, ['new']);
+  } finally {
+    releaseGraph.resolve();
+    await runtime.close();
+  }
+});
+
 test('legacy composition binds world, Program, projection and spatial publication behind one runtime', async () => {
   const calls = [];
   const programScheduler = { id: 'scheduler' };
@@ -1018,7 +1059,8 @@ test('legacy composition binds world, Program, projection and spatial publicatio
     projectionDelayMs: 0,
     worldService: {
       executeLegacy: async (request) => {
-        calls.push(['world', { ...request, programScheduler: request.programScheduler?.id }]);
+        const { onCommitted, onSourceReceipt, ...serializable } = request;
+        calls.push(['world', { ...serializable, programScheduler: request.programScheduler?.id }]);
         return { ok: true, revisionAfter: 'rev-2', lockState: { active: true } };
       }
     },

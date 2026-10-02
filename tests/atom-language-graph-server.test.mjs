@@ -1574,14 +1574,22 @@ test('CLI commit notifies Web only after the affected Spatial projection is curr
   const final = await commit('局部刷新后的正文', 'cli-web-local-freshness-final');
   assert.equal(final.status, 200, await final.text());
 
-  const noticeText = decoder.decode((await reader.read()).value);
-  const notice = JSON.parse(noticeText.match(/data: (\{[^\n]+\})/u)[1]);
-  const after = await fetch(`${running.url}/__spatial/api/state?path=root`)
-    .then((stateResponse) => stateResponse.json());
-  const updated = after.knowledge.nodes.find((node) => node.label === '石斧');
-
-  assert.ok(notice.revision > before.knowledge.revision);
-  assert.equal(notice.revision, after.knowledge.revision);
+  // Immediate source updates may expose the first committed value before the
+  // second command finishes. Each notice must describe already-readable data;
+  // continue through those valid intermediate updates to the final value.
+  let updated;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const noticeText = decoder.decode((await reader.read()).value);
+    const notices = [...noticeText.matchAll(/data: (\{[^\n]+\})/gu)].map((match) => JSON.parse(match[1]));
+    const after = await fetch(`${running.url}/__spatial/api/state?path=root`)
+      .then((stateResponse) => stateResponse.json());
+    updated = after.knowledge.nodes.find((node) => node.label === '石斧');
+    for (const notice of notices) {
+      assert.ok(notice.revision > before.knowledge.revision);
+      assert.ok(notice.revision <= after.knowledge.revision);
+    }
+    if (updated.detail === '局部刷新后的正文') break;
+  }
   assert.equal(updated.detail, '局部刷新后的正文');
   abort.abort();
   await reader.cancel().catch(() => {});

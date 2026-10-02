@@ -29,7 +29,8 @@ function ports() {
     programRuntime,
     world: {
       execute: async (request) => {
-        calls.push(['world', structuredClone({ ...request, programRuntime: request.programRuntime?.id })]);
+        const { onCommitted, onSourceReceipt, ...serializable } = request;
+        calls.push(['world', structuredClone({ ...serializable, programRuntime: request.programRuntime?.id })]);
         return { ok: true, revisionAfter: 'rev-2', lockState: { revision: 'rev-2' } };
       }
     },
@@ -474,7 +475,7 @@ test('closing the runtime waits for disposable projection work already in flight
   assert.equal(closed, true);
 });
 
-test('an immediate authoritative read defers pending disposable publication until the read returns', async () => {
+test('an active authoritative read does not postpone the committed Web update', async () => {
   const events = [];
   const context = ports();
   context.projections.publish = async ({ expectedRevision }) => {
@@ -503,7 +504,79 @@ test('an immediate authoritative read defers pending disposable publication unti
   await read;
   await new Promise((resolve) => setTimeout(resolve, 20));
 
-  assert.deepEqual(events, ['read:start', 'read:end', 'publish:rev-1']);
+  assert.deepEqual(events, ['read:start', 'publish:rev-1', 'read:end']);
+});
+
+for (const callback of ['onSourceReceipt', 'onCommitted']) {
+  test(`${callback} starts Web update while subsequent Program work remains blocked`, async () => {
+    const context = ports();
+    const program = Promise.withResolvers();
+    const updated = Promise.withResolvers();
+    const confirmed = Promise.withResolvers();
+    let publications = 0;
+    const result = { ok: true, command: 'transform', changed: true, revisionAfter: 'source-rev' };
+    context.world.execute = async (request) => {
+      await request[callback]?.(result);
+      confirmed.resolve();
+      await program.promise;
+      return result;
+    };
+    context.projections.publish = async ({ expectedRevision }) => {
+      publications += 1;
+      updated.resolve(expectedRevision);
+      return { sourceRevision: expectedRevision };
+    };
+    const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
+    let receipt;
+    const execution = runtime.execute({ source: 'transform {}', correlationId: `blocked-${callback}` }, {
+      [callback]: (result) => { receipt = result; }
+    });
+    try {
+      await confirmed.promise;
+      assert.equal(receipt?.revisionAfter, 'source-rev');
+      const revision = await Promise.race([updated.promise,
+        new Promise((resolve) => setTimeout(() => resolve(null), 100))]);
+      assert.equal(revision, 'source-rev', 'Web must update before subsequent Program returns');
+    } finally {
+      program.resolve();
+      await execution;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await runtime.close();
+    }
+    assert.equal(publications, 1, 'the final source result must not repeat the same Web update');
+  });
+}
+
+test('a late recovery cannot replace a newer committed Web update', async () => {
+  const context = ports();
+  const old = Promise.withResolvers();
+  const started = Promise.withResolvers();
+  const contents = [];
+  context.projections.recover = async () => {
+    started.resolve();
+    await old.promise;
+    contents.push('old');
+    return { sourceRevision: 'old' };
+  };
+  context.projections.publish = async () => {
+    contents.push('new');
+    return { sourceRevision: 'new' };
+  };
+  context.world.execute = async () => ({ ok: true, changed: true, revisionAfter: 'new' });
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
+  const recovery = runtime.recover({ expectedRevision: 'old' });
+  await started.promise;
+  await runtime.execute({ source: 'transform {}', correlationId: 'new-during-recovery' });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  old.resolve();
+  await recovery;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(contents.at(-1), 'new');
+    assert.equal(runtime.projectionStatus().expectedRevision, 'new');
+  } finally {
+    await runtime.close();
+  }
 });
 
 test('prepared Program context retries the command without waiting for disposable Web publication', async () => {
@@ -766,8 +839,9 @@ test('a failed deferred projection after Program preparation remains visible in 
 test('an ordinary read consumes current projections without rebuilding them', async () => {
   const context = ports();
   context.world.execute = async (request) => {
+    const { onCommitted, onSourceReceipt, ...serializable } = request;
     context.calls.push(['world', structuredClone({
-      ...request,
+      ...serializable,
       programRuntime: request.programRuntime?.id
     })]);
     return {
