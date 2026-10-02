@@ -24,7 +24,9 @@
 | 1 | CapsLock三击的信息放大镜既可指向未解剖节点，也可指向已解剖团；共用中键单击的节点/团目标命中与语义归属，不复制另一套定位算法 | I3/U3/D2/E3 | 展开团和未展开节点均显示准确对象正文；重叠目标优先级与中键一致；隐藏后代不泄漏；中键定位和关系详情保持有效；真实浏览器验证 |
 | 2 | CLI写入经中央确认后立即发起异步Web更新，CLI回执不等待更新完成 | I3/U3/D2/E3 | 后续Program或发布受控阻塞时来源CLI仍先返回；Web接收该revision或其更新版本；迟到旧发布不回退；更新失败不否定已提交事实；真实CLI/Web旅程验证 |
 
-**短设计（待review）**：沿spatial-engine.js当前渲染命中路径抽取/复用节点与clusterShellProxy的目标归属，让信息放大镜与中键各自消费同一命中结果，保留各自显示与相机行为。沿interaction-runtime已有projection发布、revision与SSE链，在中央确认事实时登记并发动异步更新；保留最新revision防旧结果覆盖，不增加第二世界权威、不延长CLI预算、不重放来源或后续Program。当前代码明确把clusterShellProxy排除于放大镜，且异步投影要等activeInteractions归零，分别是定向回归入口。
+**短设计（待review）**：全文放大镜与中键共用同一套节点／已解剖团的目标识别：CapsLock三击开启放大镜后，指向对象显示它的全文；中键单击对象，让相机定位到它。沿interaction-runtime已有Web图数据更新、revision与SSE通知链，CLI写入经中央确认后立即异步生成最新Web图数据并通知已打开的页面刷新；CLI不等待图数据更新或页面刷新完成。只接受当前或更新revision，防止迟到旧结果把页面退回旧状态，不增加第二世界权威、不延长CLI预算、不重放来源或后续Program。当前代码明确把clusterShellProxy排除于放大镜，且异步投影要等activeInteractions归零，分别是定向回归入口。
+
+**2026-10-03 用户措辞纠正**：原“分别保留正文展示与相机定位”应直接写各自触发的功能，不能用“保留”代替动作；原“发布”指CLI写入后的Web图数据更新及页面刷新通知，不是发布软件版本。已按上述具体动作修正短设计；用户本次是在纠正表达，设计review仍待回复，未当作实施批准。
 
 
 **2026-10-03 只读接线核对（设计review等待中）**：界面实际提示名称为“全文放大镜”（本节标题“信息放大镜”保留为需求锚点）。spatial-engine.js:4300的currentMagnifierNode明确过滤clusterShellProxy，并独立按归一化距离挑选；4155的findMiddleFrameHit已经调用middleFrameTarget.chooseMostSpecificTarget，结合实际团envelope和domainContext解析节点/已解剖团，是共用入口。当前放大镜回归还断言排除团，该旧断言应按本次用户新合同更换，仍须保留隐藏后代不泄漏与关系详情选择。interaction-runtime:256来源确认回调只通知CLI，339才在world.execute全部返回后登记projection；210还等待所有activeInteractions归零，composition默认projectionDelayMs=4000。已有graph-server spatialPublisher成功后调用notifySpatialProjection，SSE通知链可复用。定向验收必须覆盖来源已确认但后续Program阻塞、无关交互持续活动、发布自身阻塞/失败、迟到revision以及真实Web已展开路径回显，不能只证明普通命令最终更新。此阶段仅读取代码并入账，未写产品代码或运行实现测试。
