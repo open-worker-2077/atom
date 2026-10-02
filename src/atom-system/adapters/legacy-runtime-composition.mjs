@@ -233,6 +233,9 @@ export function createLegacyRuntimeComposition(options) {
 
   return createInteractionRuntime({
     world: {
+      ...(committedVersionProvider ? {
+        currentRevision: async () => (await committedVersionProvider()).revision
+      } : {}),
       execute: async ({ programRuntime, ...request }) => {
         const result = await worldService.executeLegacy({
           ...request,

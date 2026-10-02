@@ -324,9 +324,10 @@ export function createLegacyWorldService(options = {}) {
         if (request.signal?.aborted) requestInterruptedCommit = true;
         request.signal?.throwIfAborted?.();
         let receipt;
+        const { sourceProjection, ...centralTransition } = transition;
         try {
           receipt = await persistence.commit({
-            ...transition,
+            ...centralTransition,
             signal: request.signal,
             onCommitStarted: transition.postCommitEvent
               && transition.postCommitEvent.sourceChanged !== false ? request.onCommitStarted : undefined,
@@ -338,6 +339,13 @@ export function createLegacyWorldService(options = {}) {
                 interactionId: request.interaction.id, contextFile: request.contextFile,
                 projectionFile: request.projectionFile,
                 revisionBefore: committed.beforeRevision.replace(/^sha256:/u, ''), revisionAfter,
+                ...(sourceProjection ?? {}),
+                ...(Array.isArray(committed.affectedAtoms) ? {
+                  affectedPaths: [...new Set([
+                    ...(sourceProjection?.affectedPaths ?? []),
+                    ...committed.affectedAtoms.map(({ path }) => path).filter(Boolean)
+                  ])].sort()
+                } : {}),
                 errors: [], messages: [], warnings: [{ code: 'ATOM_COMMITTED_ACKNOWLEDGEMENT_PENDING',
                   message: '中央事实已提交；完整来源回执待完成', correlationId: request.interaction.id }],
                 subsequentExecution: { status: 'pending', sourceRevision: revisionAfter, revisionAfter,

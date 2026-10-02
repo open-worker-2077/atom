@@ -28,26 +28,26 @@
 **Files:** Modify `spatial-engine.js`; Test `tests/spatial-visible-target.test.js`, `tests/render-contract.test.js`, `tests/browser/fulltext-target.spec.mjs`。
 **Interfaces:** Consumes `findMiddleFrameHit(clientX, clientY)` 返回 `{item,domainContext,x,y,radius}`；Produces `currentMagnifierNode(point)` 返回 `{node,ownerPath,normalizedDistance}`，`point`为canvas局部坐标。
 
-- [ ] Step 1: 编写实际引擎函数行为测试：已解剖团命中、重叠小节点优先、团边界外拒绝、局部ownerPath、不可见后代不参与；预期字面对象ID及ownerPath。
-- [ ] Step 2: `node --test tests/spatial-visible-target.test.js`，Expected: 当前过滤团与不同排序导致断言失败。
-- [ ] Step 3: `currentMagnifierNode(point)`转换坐标后调用`findMiddleFrameHit`，从命中item取得node和ownerPath；不复制排序；保持关系与详情框分支。
-- [ ] Step 4: `node --test tests/spatial-visible-target.test.js tests/spatial-middle-frame-target.test.js tests/spatial-detail-magnifier-model.test.js tests/render-contract.test.js tests/view-mode-engine-contract.test.js tests/middle-label-focus-contract.test.js`，Expected: 全部通过。更换旧排除团断言为行为覆盖。
-- [ ] Step 5: 新增真实浏览器CapsLock三击、团空白区域全文及中键定位旅程；运行`npx playwright test --config=playwright.config.mjs tests/browser/fulltext-target.spec.mjs`，Expected: 全部通过；提交Task 1。
+- [x] Step 1: 编写实际引擎函数行为测试：已解剖团命中、重叠小节点优先、团边界外拒绝、局部ownerPath、不可见后代不参与；预期字面对象ID及ownerPath。
+- [x] Step 2: `node --test tests/spatial-visible-target.test.js`，Expected: 当前过滤团与不同排序导致断言失败。
+- [x] Step 3: `currentMagnifierNode(point)`转换坐标后调用`findMiddleFrameHit`，从命中item取得node和ownerPath；不复制排序；保持关系与详情框分支。
+- [x] Step 4: `node --test tests/spatial-visible-target.test.js tests/spatial-middle-frame-target.test.js tests/spatial-detail-magnifier-model.test.js tests/render-contract.test.js tests/view-mode-engine-contract.test.js tests/middle-label-focus-contract.test.js`，Expected: 全部通过。更换旧排除团断言为行为覆盖。
+- [x] Step 5: 新增真实浏览器CapsLock三击、团空白区域全文及中键定位旅程；运行`npx playwright test --config=playwright.config.mjs tests/browser/fulltext-target.spec.mjs`，Expected: 全部通过；提交Task 1。
 
 ### Task 2: 来源确认后异步更新 Web 图数据
 
 **Files:** Modify `src/atom-system/public/interaction-runtime.mjs`, `src/atom-system/adapters/legacy-runtime-composition.mjs`；Test `tests/atom-interaction-runtime.test.mjs`, `tests/atom-legacy-runtime-composition.test.mjs`及实际CLI/Web旅程。
 **Interfaces:** Consumes 中央`onSourceReceipt`/`onCommitted`回调、`projections.publish({expectedRevision,lockState,affectedPaths})`；Produces 已确认来源启动独立Web更新，CLI回执不等待，最新revision通知现有SSE。
 
-- [ ] Step 1: 添加受控阻塞测试：来源确认后Program不返回、无关交互活动、图数据更新挂起/失败；断言CLI来源先确认且更新已启动。添加旧生成期间新事实提交的真实组合测试，断言最终Web内容为新值。
-- [ ] Step 2: `node --test tests/atom-interaction-runtime.test.mjs tests/atom-legacy-runtime-composition.test.mjs`，Expected: 来源确认后未启动及旧结果保护缺失的断言失败。
-- [ ] Step 3: 从中央来源确认回调登记更新并不等待；不受activeInteractions阻挡，不固定等待4秒；串行更新合并新revision，避免同来源结尾重复更新，保留失败回读/关闭行为；在真实图数据写入与页面通知边界落实旧结果保护。
-- [ ] Step 4: 同Step 2命令，Expected: 全部通过；真实CLI写入后页面接收新数据，不借手动刷新掩盖断链；提交Task 2。
+- [x] Step 1: 添加受控阻塞测试：来源确认后Program不返回、无关交互活动、图数据更新挂起/失败；断言CLI来源先确认且更新已启动。添加旧生成期间新事实提交的真实组合测试，断言最终Web内容为新值。
+- [x] Step 2: `node --test tests/atom-interaction-runtime.test.mjs tests/atom-legacy-runtime-composition.test.mjs`，Expected: 来源确认后未启动及旧结果保护缺失的断言失败。
+- [x] Step 3: 从中央来源确认回调登记更新并不等待；不受activeInteractions阻挡，不固定等待4秒；串行更新合并新revision，避免同来源结尾重复更新，保留失败回读/关闭行为；在真实图数据写入与页面通知边界落实旧结果保护。
+- [x] Step 4: 同Step 2命令，Expected: 全部通过；真实CLI写入后页面接收新数据，不借手动刷新掩盖断链；提交Task 2。
 
 ## E3 收口
 
 - [ ] 最小链通过后运行真实关键旅程与必要架构/系统门禁；提交最终候选并运行一次完整`npm test`。
-- [ ] 使用executing-plans一次独立整包评审；Important/Critical定向RED→GREEN修复，候选变化后全量证据重新绑定。
+- [x] 使用executing-plans一次独立整包评审；Important/Critical定向RED→GREEN修复，候选变化后全量证据重新绑定。
 - [ ] 推送候选到功能分支，等待精确SHA远端终态；通过后按既有4784监督任务部署、公共Help/明确窗口回读、浏览器验证。
 - [ ] 推送main并等待精确SHA远端终态；全部证据写回总账后关闭目标。
 

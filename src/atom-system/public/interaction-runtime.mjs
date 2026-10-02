@@ -104,6 +104,7 @@ export function createInteractionRuntime({
   let projectionTimer = null;
   let projectionTail = Promise.resolve();
   let scheduledProjection = null;
+  const projectionInputs = new Map();
   let closing = false;
 
   async function timedStage(stage, work, interactionId = null) {
@@ -170,13 +171,18 @@ export function createInteractionRuntime({
 
   async function publish(result, generation = null) {
     if (!result?.ok || typeof result.revisionAfter !== 'string' || !result.revisionAfter) return null;
+    let expectedRevision = result.revisionAfter;
     try {
       const startedAt = performance.now();
+      const currentRevision = await world.currentRevision?.();
+      expectedRevision = currentRevision ? currentRevision.replace(/^sha256:/u, '') : result.revisionAfter;
+      const rebased = expectedRevision !== result.revisionAfter.replace(/^sha256:/u, '');
+      const input = projectionInputs.get(expectedRevision) ?? (rebased ? {} : result);
       const published = await projections.publish({
-        expectedRevision: result.revisionAfter,
-        lockState: result.lockState,
-        ...(Array.isArray(result.affectedPaths) && result.affectedPaths.length
-          ? { affectedPaths: result.affectedPaths }
+        expectedRevision,
+        lockState: input.lockState,
+        ...(!rebased && Array.isArray(input.affectedPaths) && input.affectedPaths.length
+          ? { affectedPaths: input.affectedPaths }
           : {})
       });
       performanceTrace('projection-publish', {
@@ -185,22 +191,27 @@ export function createInteractionRuntime({
       if (generation === null || generation === projectionGeneration) {
         latestProjectionState = Object.freeze({
           status: 'published',
-          expectedRevision: result.revisionAfter
+          expectedRevision
         });
       }
       return Object.freeze({ status: 'published', projection: published });
     } catch (error) {
+      if (error.code === 'STALE_WORLD_PROJECTION' && error.details?.actualRevision
+        && !closing && (generation === null || generation === projectionGeneration)) {
+        return scheduleProjection({ ok: true, changed: true,
+          revisionAfter: error.details.actualRevision.replace(/^sha256:/u, '') });
+      }
       const failure = projectionFailure(error);
       if (generation === null || generation === projectionGeneration) {
         latestProjectionState = Object.freeze({
           status: 'pending',
-          expectedRevision: result.revisionAfter,
+          expectedRevision,
           failure
         });
       }
       return Object.freeze({
         status: 'pending',
-        expectedRevision: result.revisionAfter,
+        expectedRevision,
         failure
       });
     }
@@ -225,6 +236,9 @@ export function createInteractionRuntime({
       || typeof result.revisionAfter !== 'string' || !result.revisionAfter) return null;
     const generation = ++projectionGeneration;
     const expectedRevision = result.revisionAfter;
+    const inputKey = expectedRevision.replace(/^sha256:/u, '');
+    projectionInputs.set(inputKey, { ...projectionInputs.get(inputKey), ...result });
+    if (projectionInputs.size > 32) projectionInputs.delete(projectionInputs.keys().next().value);
     if (projectionTimer) clearTimeout(projectionTimer);
     projectionTimer = null;
     scheduledProjection = { generation, result };
@@ -253,14 +267,22 @@ export function createInteractionRuntime({
     let committedNotified = false;
     let sourceProjectionRevision = null;
     let sourceProjectionOutcome = null;
+    let sourceProjectionResult = null;
     const notificationWarnings = [];
     const updateWeb = (result) => {
       if (options.publish === false || result?.changed === false) return null;
-      if (result?.revisionAfter === sourceProjectionRevision) return sourceProjectionOutcome;
+      if (result?.revisionAfter === sourceProjectionRevision) {
+        const enriched = ['lockState', 'affectedPaths'].some((field) => (
+          Array.isArray(result[field]) && JSON.stringify(result[field]) !== JSON.stringify(sourceProjectionResult?.[field])
+        ));
+        if (!enriched) return sourceProjectionOutcome;
+        result = { ...sourceProjectionResult, ...result };
+      }
       const outcome = scheduleProjection(result);
       if (outcome) {
         sourceProjectionRevision = result.revisionAfter;
         sourceProjectionOutcome = outcome;
+        sourceProjectionResult = result;
       }
       return outcome;
     };

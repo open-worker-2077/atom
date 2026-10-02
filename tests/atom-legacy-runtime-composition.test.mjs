@@ -1008,6 +1008,34 @@ test('an ancestor Agent Program governs descendant reconfiguration without a mai
   });
 });
 
+test('central source receipt already carries the prepared lock state and affected paths', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-source-projection-input-'));
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, JSON.stringify([atom('Root', '', [atom('Target', 'old')])]));
+  const { createLegacyWorldService } = await import('../src/atom-system/adapters/legacy-engine-adapter.mjs');
+  const world = createLegacyWorldService({ memoryAuthoritative: true, publishLegacyProjection: false });
+  t.after(() => world.closeSaves());
+  const scheduler = createProgramRuntimeScheduler();
+  await world.executeLegacy({ source: 'atom', contextFile, projectionFile: graphFile,
+    humanAuthority: true, origin: 'web', programMode: 'project',
+    interaction: { id: 'prepare-central-projection-input' }, programScheduler: scheduler });
+  let early;
+  let source;
+  const result = await world.executeLegacy({
+    source: 'transform {"thing":"Root/Target","situation.rep.new"}',
+    contextFile, projectionFile: graphFile, humanAuthority: true, origin: 'web',
+    interaction: { id: 'central-projection-input' },
+    programScheduler: scheduler,
+    onSourceReceipt: (value) => { early = value; },
+    onCommitted: (value) => { source = value; }
+  });
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.ok(Array.isArray(early.lockState), 'missing lock state must not mean no locks');
+  assert.deepEqual(early.lockState, source.lockState);
+  assert.ok(early.affectedPaths.includes('Root/Target'));
+});
+
 test('Web skips old graph data when new facts commit during Graph file update', async () => {
   let facts = [atom('Root', 'initial')];
   const graphStarted = Promise.withResolvers();

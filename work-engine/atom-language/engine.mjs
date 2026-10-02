@@ -1038,6 +1038,7 @@ async function persistChangedGraph({
   programRefBindings = null,
   thingIdentityAllocator = null,
   postCommitEvent = null,
+  sourceProjection = null,
   subsequentOf = null,
   compatibilityManifest,
   localizedSituationValidation = false,
@@ -1066,6 +1067,7 @@ async function persistChangedGraph({
     correlationId,
     source,
     ...(postCommitEvent ? { postCommitEvent } : {}),
+    ...(sourceProjection ? { sourceProjection } : {}),
     ...(subsequentOf ? { subsequentOf } : {}),
     ...(Array.isArray(changedPaths) && changedPaths.length ? { changedPaths } : {}),
     ...(Array.isArray(affectedAtoms) ? { affectedAtoms } : {}),
@@ -3697,6 +3699,13 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         programRefBindings,
         thingIdentityAllocator: pendingIdentityUpdate,
         postCommitEvent: sourceEvent,
+        sourceProjection: sourceEvent && sourceEvent.sourceChanged !== false ? {
+          lockState: programLockState(programLockIndex),
+          affectedPaths: [...new Set([
+            ...(changedPaths ?? []), ...(relationEndpoints ?? []),
+            ...(lockClosure.lockPaths ?? []), ...(shortcutPaths ?? []), ...(referencePaths ?? [])
+          ])].sort()
+        } : null,
         subsequentOf: subsequent ? sourceCommandId : null,
         compatibilityManifest: options.compatibilityManifest,
         localizedSituationValidation,

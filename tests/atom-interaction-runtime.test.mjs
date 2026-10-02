@@ -547,6 +547,65 @@ for (const callback of ['onSourceReceipt', 'onCommitted']) {
   });
 }
 
+test('a late final result updates current central facts instead of cancelling the newer source update', async () => {
+  const context = ports();
+  const oldFinal = Promise.withResolvers();
+  let current = 'r1';
+  const published = [];
+  context.world.currentRevision = async () => current;
+  context.world.execute = async (request) => {
+    if (request.source === 'transform A') {
+      request.onSourceReceipt({ ok: true, changed: true, revisionAfter: 'r1' });
+      await oldFinal.promise;
+      return { ok: true, changed: true, revisionAfter: 'r2' };
+    }
+    current = 'r3';
+    const result = { ok: true, changed: true, revisionAfter: 'r3',
+      lockState: [{ path: 'B', owner: 'P' }], affectedPaths: ['B'] };
+    request.onSourceReceipt(result);
+    return result;
+  };
+  context.projections.publish = async ({ expectedRevision, lockState }) => {
+    if (expectedRevision !== current) throw Object.assign(new Error('stale'), {
+      code: 'STALE_WORLD_PROJECTION', details: { actualRevision: current }
+    });
+    assert.deepEqual(lockState, [{ path: 'B', owner: 'P' }]);
+    published.push(expectedRevision);
+    return { sourceRevision: expectedRevision };
+  };
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 10 });
+  const first = runtime.execute({ source: 'transform A', correlationId: 'late-A' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await runtime.execute({ source: 'transform B', correlationId: 'new-B' });
+  oldFinal.resolve(); await first;
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  try {
+    assert.deepEqual(published, ['r3']);
+    assert.equal(runtime.projectionStatus().status, 'published');
+    assert.equal(runtime.projectionStatus().expectedRevision, 'r3');
+  } finally { await runtime.close(); }
+});
+
+test('complete source metadata fills the early same-revision Web update', async () => {
+  const context = ports();
+  const requests = [];
+  context.world.execute = async (request) => {
+    request.onSourceReceipt({ ok: true, changed: true, revisionAfter: 'r1' });
+    const result = { ok: true, changed: true, revisionAfter: 'r1',
+      lockState: [{ path: 'Locked', owner: 'P' }], affectedPaths: ['Locked'] };
+    await request.onCommitted(result);
+    return result;
+  };
+  context.projections.publish = async (request) => { requests.push(request); return { sourceRevision: 'r1' }; };
+  const runtime = createInteractionRuntime({ ...context, projectionDelayMs: 0 });
+  await runtime.execute({ source: 'transform {}', correlationId: 'complete-metadata' });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  try {
+    assert.deepEqual(requests.at(-1).lockState, [{ path: 'Locked', owner: 'P' }]);
+    assert.deepEqual(requests.at(-1).affectedPaths, ['Locked']);
+  } finally { await runtime.close(); }
+});
+
 test('a late recovery cannot replace a newer committed Web update', async () => {
   const context = ports();
   const old = Promise.withResolvers();

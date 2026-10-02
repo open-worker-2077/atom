@@ -4303,6 +4303,7 @@
     return region?.item?.node ? {
       node: region.item.node,
       ownerPath: region.item.ownerPath || nodeOwnerPath(region.item.node),
+      clusterShellProxy: Boolean(region.item.clusterShellProxy),
       normalizedDistance: Math.hypot(point.x - region.x, point.y - region.y) / Math.max(1, region.radius)
     } : null;
   }
@@ -4325,7 +4326,7 @@
     if (!state.detailMagnifier.enabled) return;
     const nodeHit = currentMagnifierNode(point);
     const relationHit = currentMagnifierRelation(point);
-    const preferNode = nodeHit && (!relationHit || nodeHit.normalizedDistance <= 0.72);
+    const preferNode = nodeHit && (!relationHit || (!nodeHit.clusterShellProxy && nodeHit.normalizedDistance <= 0.72));
     const node = preferNode ? nodeHit.node : null;
     const relation = preferNode ? null : relationHit;
     const target = detailMagnifierModel.targetAt({
