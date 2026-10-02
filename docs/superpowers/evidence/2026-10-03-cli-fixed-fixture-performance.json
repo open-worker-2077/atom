@@ -1,0 +1,64 @@
+{
+  "baselineRevision": "61e9c29",
+  "candidateRevision": "44d1659",
+  "samplesPerRevision": 3,
+  "sameInitialFacts": true,
+  "sameInput": true,
+  "sameFinalFacts": true,
+  "sourceUnchanged": true,
+  "samples": [
+    {
+      "mode": "baseline",
+      "round": 1,
+      "writeMs": 6021.132,
+      "readBeforeMs": 3716.508,
+      "readAfterMs": 3551.219
+    },
+    {
+      "mode": "baseline",
+      "round": 2,
+      "writeMs": 6452.856,
+      "readBeforeMs": 3845.785,
+      "readAfterMs": 4478.403
+    },
+    {
+      "mode": "baseline",
+      "round": 3,
+      "writeMs": 6093.311,
+      "readBeforeMs": 3831.049,
+      "readAfterMs": 3658.549
+    },
+    {
+      "mode": "green",
+      "round": 1,
+      "writeMs": 2872.124,
+      "readBeforeMs": 269.691,
+      "readAfterMs": 612.214
+    },
+    {
+      "mode": "green",
+      "round": 2,
+      "writeMs": 3243.557,
+      "readBeforeMs": 279.029,
+      "readAfterMs": 653.826
+    },
+    {
+      "mode": "green",
+      "round": 3,
+      "writeMs": 3287.348,
+      "readBeforeMs": 302.946,
+      "readAfterMs": 658.969
+    }
+  ],
+  "baseline": {
+    "writeMedianMs": 6093.311,
+    "writeMinMs": 6021.132,
+    "writeMaxMs": 6452.856
+  },
+  "green": {
+    "writeMedianMs": 3243.557,
+    "writeMinMs": 2872.124,
+    "writeMaxMs": 3287.348
+  },
+  "medianReductionPercent": 46.77
+}

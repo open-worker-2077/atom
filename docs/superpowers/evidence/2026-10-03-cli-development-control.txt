@@ -1,0 +1,4 @@
+
+> atom@0.3.0 check:development-control
+> node scripts/check-development-control-source.mjs
+

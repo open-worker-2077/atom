@@ -1,0 +1,56 @@
+[
+  {
+    "mode": "baseline",
+    "round": 1,
+    "receiptSourceMatches": true,
+    "terminalNewlineNormalized": true,
+    "coldFactsMatch": true,
+    "outcome": "completed",
+    "subsequentFactCommits": 0
+  },
+  {
+    "mode": "baseline",
+    "round": 2,
+    "receiptSourceMatches": true,
+    "terminalNewlineNormalized": true,
+    "coldFactsMatch": true,
+    "outcome": "completed",
+    "subsequentFactCommits": 0
+  },
+  {
+    "mode": "baseline",
+    "round": 3,
+    "receiptSourceMatches": true,
+    "terminalNewlineNormalized": true,
+    "coldFactsMatch": true,
+    "outcome": "completed",
+    "subsequentFactCommits": 0
+  },
+  {
+    "mode": "green",
+    "round": 1,
+    "receiptSourceMatches": true,
+    "terminalNewlineNormalized": true,
+    "coldFactsMatch": true,
+    "outcome": "completed",
+    "subsequentFactCommits": 0
+  },
+  {
+    "mode": "green",
+    "round": 2,
+    "receiptSourceMatches": true,
+    "terminalNewlineNormalized": true,
+    "coldFactsMatch": true,
+    "outcome": "completed",
+    "subsequentFactCommits": 0
+  },
+  {
+    "mode": "green",
+    "round": 3,
+    "receiptSourceMatches": true,
+    "terminalNewlineNormalized": true,
+    "coldFactsMatch": true,
+    "outcome": "completed",
+    "subsequentFactCommits": 0
+  }
+]

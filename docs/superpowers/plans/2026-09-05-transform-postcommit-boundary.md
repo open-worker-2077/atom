@@ -12,6 +12,19 @@
 
 **执行方式**：主Agent依systematic-debugging、TDD和executing-plans亲自执行，最终按该Skill做一次独立整包评审。用户已明确持续执行，计划形成后直接进入任务，不重复请求继续授权；必要的具体外发审批仍按实际审批结果处理。基于main安全点使用隔离worktree，禁止在生产 checkout直接实现。
 
+**当前验收主干（代码候选44d1659，尚未部署）**
+
+| 边界 | 当前证据 | 状态 |
+|---|---|---|
+| 历史元数据效率 | identity投影RED→GREEN；固定同夹具各3次更新中位6093→3244ms | 已通过 |
+| 未入世界写的取消 | prepare在途abort→撤销候选，零admission、零写、零冷恢复迟到写 | 已通过 |
+| 中央写入在途 | 有限确认pending；同ID后读成功且执行1次 | 已通过 |
+| 来源已经确认 | 提前中央证明；deadline不否定已提交事实，取消归属后续 | 已通过 |
+| CLI关联与Help | pending显示等待，保留phase/id/timeout/command，Help说明未知结果 | 已通过 |
+| 私有真实旅程与冷读 | 6份receipt.source精确匹配（仅规范末尾stdin换行）；冷事实revision一致；completed、零额外effects提交 | 已通过 |
+| 系统门禁 | 直接链110/110；架构13/13；系统307/307；开发控制exit0 | 已通过 |
+| 最终交付 | 最终候选npm test一次→独立评审→精确远端检查→代码部署→公共4784回读 | 待执行 |
+
 ### Task 1：建立真实失败与定因证据
 
 **Files**：隔离证据进入该计划的既有Superpowers证据/SDD目录；读取`cli/lib/server.mjs`、`src/atom-system/adapters/legacy-engine-adapter.mjs`、`src/atom-system/world-runtime/commit-coordinator.mjs`、`work-engine/atom-language/engine.mjs`及既有诊断注册接口。
@@ -22,6 +35,8 @@
 - [ ] 把根因与证据即时写回本计划，确定Task2具体文件/测试；没有根因不得写产品修复。Expected：原始证据可独立回接结论。
 
 ### Task 2：按已证实根因进行TDD修复
+
+**第四阶段提交**：`44d1659`保存中央在途专门pending裁定、实际中央admission接线、CLI等待表现、规格边界与110/110直接证据。未推送/部署。固定夹具BASE首轮完成：初始事实SHA`58517729…e2c78`、transform输入SHA`8ed14e6d…80eee`、3正文已逐字提交验证且来源哈希不变；三正文6021.1324ms，前后Explore3716.5081/3551.2190ms。正在串行交替收集BASE/GREEN各3次，结束后汇总相同SHA与波动，才判性能验收。
 
 **在途GREEN与CLI RED**：HTTP三态回归3/3通过，40ms期限后在途报告专门pending、解除后同ID成功且计数1；源超时和中央已确认成功均保留。实际runtime集成补验中央admission与来源证明command一致，prepare取消回归补验admission=0。CLI pending表现RED仍打印“错误”，按已确定未知结果合同改为“等待”并保留关联，不打印updated/unchanged。
 
@@ -62,6 +77,14 @@ CPU样本窗口12382.945ms，`memory-transaction-ports.readMetadataState`包含�
 - [ ] 运行最小影响链，自查diff并阶段提交；失败先定向调试。Expected：直接合同回归全绿。
 
 ### Task 3：E3验收与交付
+
+**冷旅程GREEN与系统门禁**：正确接入现行world-commits日志后，六份副本中央来源SHA（只规范经长度验证的末尾stdin換行）、冷事实revision与来源receipt相符，后续均completed、零errors、零额外effects提交。只读冷验收没有重放请求。证据`../evidence/2026-10-03-cli-fixed-fixture-cold.json`。架构13/13、系统307/307、开发控制exit0；无需再重复直接/系统测试。固定事实与请求复测、冷恢复链已通过，接下来保存最终候选后执行全量一次，再独立评审/E3。
+
+**冷读事实入口校正**：receipt.source已通过只移除已由长度确认的末尾stdin换行的精确SHA比较；下一断言用原始atom.json作为最终事实，revision不匹配。memory/durable world的该文件是checkpoint，当前事实须由worldRepository读取checkpoint＋增量world-commit日志。冷探针改用现行createJsonWorldRepository.read权威入口，不改产品或世界，不把checkpoint旧值当已提交事实丢失。
+
+**冷读探针校正**：首轮六份副本冷读在receipt.source hash比较处失败；CLI经stdin追加末尾换行，而性能探针hash计算不含该换行。该断言尚须严格验证只多末尾一个LF/CRLF后再规范化，不当作产品失败、不跳过来源匹配。确认输入逐字一致和中央终态后才进入最终全量。
+
+**固定夹具性能GREEN**：句柄81744已退出0，BASE/GREEN串行交替各3次；6次初始事实SHA、transform输入SHA及最终事实revision各自唯一一致，3正文逐字验证、来源文件哈希均不变。BASE更新6021—6453ms、中位6093.311ms；GREEN2872—3287ms、中位3243.557ms，降低46.77%。初始Explore BASE3717—3846ms、GREEN270—303ms；后读BASE3551—4478ms、GREEN612—659ms。公开汇总`../evidence/2026-10-03-cli-fixed-fixture-performance.json`不含私有世界内容/位置，原始隔离样本本地保留。真实关键旅程与直接链已通过，升级必要系统门禁：架构四文件＋开发控制，以及test:system中尚无同revision有效证据的9文件；Graph server与production architecture分别复用110链与本次架构证据，不重复独立跑。之后才对最终候选全量一次、独立审查、E3。
 
 **中央在途直接链GREEN**：HTTP在途/已确认/未入写三态、真实runtime中央admission、prepare取消、CLI等待与关联直接链110/110通过（37847.0117ms）；原始证据`../evidence/2026-10-03-cli-inflight-direct-chain.txt`。固定同夹具性能旅程已启动：来源为保留的私有稳定副本，逐次复制、输入/初始事实SHA与提交后3正文逐字校验；baseline为已只读核对的生产代码checkout`61e9c29`（cli已有CRLF-only改动保留），测量期间不改正式世界。首轮句柄69371，尚未形成最终性能证据。
 

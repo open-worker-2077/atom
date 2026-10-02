@@ -1,0 +1,25 @@
+
+> atom@0.3.0 test:architecture
+> node --test tests/atom-capability-graph.test.mjs tests/atom-production-architecture.test.mjs tests/atom-system-architecture.test.mjs tests/atom-system-boundaries.test.mjs
+
+✔ the Atom capability graph is a connected and owned system contract (7.2124ms)
+✔ web editing preserves view facts across authoritative reconciliation (2.5768ms)
+✔ production audit rejects an unregistered entry importing the legacy engine (22.1792ms)
+✔ production audit rejects direct world-fact persistence outside an approved port (5.6263ms)
+✔ current production topology has no unregistered violations or temporary debt (32.342ms)
+✔ Web editing has one text command entry and no server-side UI translation (1.5037ms)
+✔ short Thing identity has one allocator and confines legacy parsing to cold migration (11.8386ms)
+✔ the target architecture assigns every fact to one owner and permits only declared dependencies (3.4615ms)
+✔ world command and receipt contracts require versions, revisions, and correlation ids (0.492ms)
+✔ world snapshots and projections are explicitly revision-labelled (0.3218ms)
+✔ the current Atom target architecture has no forbidden inward dependency (12.557ms)
+✔ dependency audit rejects domain code importing an adapter (0.313ms)
+✔ the browser mapper belongs to the adapter boundary without admitting adapter imports into the domain (0.1052ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 151.4992
