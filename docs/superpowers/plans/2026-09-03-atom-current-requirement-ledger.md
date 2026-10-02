@@ -26,6 +26,9 @@
 
 **短设计（待review）**：沿spatial-engine.js当前渲染命中路径抽取/复用节点与clusterShellProxy的目标归属，让信息放大镜与中键各自消费同一命中结果，保留各自显示与相机行为。沿interaction-runtime已有projection发布、revision与SSE链，在中央确认事实时登记并发动异步更新；保留最新revision防旧结果覆盖，不增加第二世界权威、不延长CLI预算、不重放来源或后续Program。当前代码明确把clusterShellProxy排除于放大镜，且异步投影要等activeInteractions归零，分别是定向回归入口。
 
+
+**2026-10-03 只读接线核对（设计review等待中）**：界面实际提示名称为“全文放大镜”（本节标题“信息放大镜”保留为需求锚点）。spatial-engine.js:4300的currentMagnifierNode明确过滤clusterShellProxy，并独立按归一化距离挑选；4155的findMiddleFrameHit已经调用middleFrameTarget.chooseMostSpecificTarget，结合实际团envelope和domainContext解析节点/已解剖团，是共用入口。当前放大镜回归还断言排除团，该旧断言应按本次用户新合同更换，仍须保留隐藏后代不泄漏与关系详情选择。interaction-runtime:256来源确认回调只通知CLI，339才在world.execute全部返回后登记projection；210还等待所有activeInteractions归零，composition默认projectionDelayMs=4000。已有graph-server spatialPublisher成功后调用notifySpatialProjection，SSE通知链可复用。定向验收必须覆盖来源已确认但后续Program阻塞、无关交互持续活动、发布自身阻塞/失败、迟到revision以及真实Web已展开路径回显，不能只证明普通命令最终更新。此阶段仅读取代码并入账，未写产品代码或运行实现测试。
+
 **执行与证据**：已核对main安全基线fe9d8c9及其精确远端success，前一目标complete，工作目录干净。review后建立隔离worktree，依TDD写节点/团共用命中与来源确认异步发布RED→GREEN，最小受影响链→真实关键旅程→必要门禁→最终候选全量一次；一次整包独立评审，修复Important/Critical。完成候选推送及精确远端检查、既有4784部署、公共入口回读与main收口后才关闭目标。原截图仅作视觉现象证据，私有世界/业务正文不得推送。
 
 **2026-10-03 本轮 E3 完成**：产品候选代码`6bc1f01`，交付main提交`1d36f126703603e70f92f4080a3130d0816cc15b`已推送，功能远端run37056686432与main精确远端run37058685690均终态success；PR#74已合入。最终本地全量2408通过、0失败、1跳过，独立评审Approved。正式4784通过既有任务加载，公共CLI明确🧊managegraph窗口只读exit0/约607ms，HTTP成功且保存完毕；无窗口AGENT_REQUIRED，Help含确认等待合同。六份私有副本写入/中央receipt/冷读及completed、零额外effects验证，固定输入更新中位6093→3244ms。事实revision与checkpoint SHA不变，未重放业务写入。安全备份远端f72731f保留，部署前私有754文件逐字节备份有效。
