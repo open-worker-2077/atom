@@ -1,5 +1,35 @@
 # Transform Post-commit Boundary Implementation Plan
 
+## 2026-10-03 公开 CLI 超时现场只读排查
+
+**范围**：来源 session `01a0d480-5fbe-7210-96f5-310594b231d1`传达用户授权仅排查效率与超时事实，不修复、不重放业务写入、不恢复投影、不改变超时或批量大小。本节为既有计划的现场证据增量，不覆盖历史已交付 revision。当前源码 `main@aa9c1e6`；已有未提交 `cli.mjs` 改动保留，本次未改产品代码。未建立写入复现循环，不能宣布根因或修复验证。
+
+### 已核对的经过
+
+从来源 rollout 的 `item_completed/CommandExecution`重新计算 duration，与传入七项实测一致（包含小数）；两笔原始失败均为 `ATOM_INTERACTION_TIMEOUT: Atom source phase exceeded its 15000ms deadline`。10000ms是工具yield，15000ms来自服务端来源阶段定时器，不能互换。
+
+| 对象 | 工具全过程 | 服务端既存证据 | 已确认结果 |
+|---|---:|---|---|
+| A：8处正文＋2简介 | 16472.6188ms，exit1 | 同时段 `3cf73a9b-4d3c-42f1-b594-50bd00b53bac:transform-stage` 为 failure，10844.099ms；未找到该ID的prepared/committed事件 | 来源即时回读8正文均为before；A与该诊断目前只作时段匹配，不能称完整请求精确绑定 |
+| 单独改名 | 11036.9504ms，exit0/pending | 回执ID `5a331aa4-32b8-4920-a4da-7d59a1a0fa41`精确匹配中央提交；本地时间02:13:03.329提交；诊断2860.172ms | 后续日志已从pending变为completed、errors为空、后续没有新事实revision |
+| B：3处正文＋1简介 | 16494.1456ms，exit1 | ID `b3ac6ddf-77a6-4735-9c2a-6f23839b8741` 的中央receipt.source与rollout实参逐字相等（仅去末尾CRLF）；本地时间02:13:41.824提交；诊断9070.280ms/success | 中央Program outcome为completed、errors为空，4项结果均changed；后续没有新事实revision |
+
+B来源提交 `5599ad8e1e63eaa82d0c5eba155f1cf7419f0806efcfda52d9855b1f10b6a59f` → `81f708af2aaea8b8f1f6c9f466f319d8743b0bf8f0fa907b3917c5334b9dc266`，commandId `legacy-0e0193ad11187fa3088df43f068e55903f38a8c631230074e08d09b2c76fda5e`。因此B的失败回执不能解释为未提交，也不能依据pending文字推断后续持续挂起。A未找到提交记录不等于已证明其所有未来状态；本次不重放。
+
+### 可见耗时边界与缺口
+
+- 同时段A失败诊断：首次reconcile结束elapsed429.295ms，commit阶段耗343.712ms、结束elapsed10844.084ms，中间 **10071.077ms未被细分stage覆盖**。
+- B：首次reconcile结束elapsed425.582ms，commit耗1127.735ms、结束elapsed7503.360ms，中间 **5950.043ms未被细分stage覆盖**；program-projection记录55.142ms。批量分支未记录独立transform-apply stage，间隙覆盖候选应用、克隆/修订计算、Program与请求校验及提交前准备等，不能把它全算作某一个函数。
+- 三笔transform诊断中candidateProgramCount/executedProgramCount均为0，未出现Program运行耗时指纹；这不提供ESG trigger执行导致卡顿的证据，也不代表Program源码校验成本为0。
+- 两次初始Explore全过程10379.246/9516.1496ms，服务端read诊断5927.293/4424.571ms（按时间与affectedAtoms匹配）；差值4451.953/5091.5786ms涵盖诊断计时范围之外的工作，不能未经计时分摊给CLI启动、Agent解析、adapter准备或网络。
+
+### 源码事实与未证实根因
+
+`cli/lib/server.mjs`的source定时器从operation之前起算；来源onCommitted通知才清除/切换预算。`graph-server.mjs`在runtime.execute之前解析Agent，adapter在engine之前处理恢复、快照、日志与元数据，故engine stage不是HTTP来源全过程。adapter进入commitWorld前检查abort，中央coordinator异步prepare/CAS/journal commit期间无该请求signal检查；通知又晚于中央提交。该边界能容纳“提交已发生而来源回执先超时”的结果，但现有现场没有定时器触发瞬间、callback时间、CAS时间或事件循环记录，**不能宣布它已被证实为B的具体根因**。
+
+HTTP错误保留details.phase/interactionId/timeoutMs，但CLI在executeAtomCommandEndpoint只将error.code/message转成cliError，现场stderr因此丢失A/B请求关联号。B已由实参匹配补回；A仍缺完整请求绑定。既存stdout仅启动配置、当前stderr为空，未发现该时段逐层trace。尚缺中央prepare/CAS/journal各自时间、通知与deadline先后、未细分候选阶段耗时及CPU/IO样本；这些是后续定因所需证据。本轮没有添加探针或更改运行环境。
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 合法来源 Transform 先原子提交，后续 Program 运行失败不撤销或否定该来源；既有触发、权限、局部性与恢复需求继续成立。
