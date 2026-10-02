@@ -13,6 +13,12 @@
 
 ## 状态与证据
 
+**2026-10-03 最终候选全量与功能远端 GREEN**：`6bc1f01`一次最终全量2409项、2408通过/0失败/1跳过（614744ms），句柄71650终态0；功能分支精确SHA远端run37056686432终态success，独立评审Approved。部署前私有备份754文件/4435343897字节，逐字节核验且复制前后源清单稳定；私有路径/manifest仅在runtime-data忽略目录。本地备份世界atom.json SHA为`58517729…e2c78`。接续既有监督任务切换、全局Help与明确窗口只读回读，再main精确检查；未提前宣称E3完成。
+
+**2026-10-03 功能分支与部署预检**：origin/fix/cli-source-timeout-20261003远端SHA精确为`6bc1f01f172d7d9b910b7286184e1bdc0def03d0`；PR#74已创建并附到当前任务，远端run37056686432正在检查该SHA。本地最终全量句柄71650继续。正式CLI只读仍旧source超时；既有人工Web只读入口返回changed=false、runtime atom-interaction/4，acceptedVersion=savedVersion=53、acceptedRevision=savedRevision=`sha256:cf7f9ed4…a3fa1f`，dirty=false/pending=false/failure=null、容量待存0。部署前本地私有事实/日志备份准备中，不外发、不迁改业务世界。
+
+**2026-10-03 最终候选 `6bc1f01`**：修复、评审结算及规范证据已阶段提交。最终全量句柄71650运行中，输出`../evidence/2026-10-03-cli-final-candidate-full-test.txt`；首次全量的2项已定向GREEN，不隐去历史失败。功能分支推送与精确远端检查接续执行；代码部署仍须全量与远端通过。
+
 **2026-10-03 评审修复 GREEN**：在途操作拒绝后缓存结算、只确认不重放的中央恢复、暂时确认失败后再查已修复；四态HTTP4/4、真实世界写入前/写入后确认中断恢复2/2、直接链122/122、仓库治理8/8、必要架构13/13与开发控制exit0。独立评审复审Approved，两项Important结算。确认成功无receipt恢复原操作异常，不把IO未知状态伪造未提交；已有中央事实证明保留成功。证据JSON改为内容相同txt、原诊断产物软归档到runtime-data，零删除。即将提交新候选并执行最终全量；未部署。
 
 **2026-10-03 最终全量与评审 RED**：eb961aa全量2403项，2400通过、2失败、1跳过（599242ms）；失败为新增证据JSON不符合公共仓库边界与governance测试写死6.4.1。独立整包评审发现Important：在途操作迟到拒绝后同ID永久旧pending；新增两项HTTP回归RED。定向修复沿中央既有recover/findReceipt提供只确认不重放的回读，再结算缓存；已确认事实不被辅助异常否定。当前禁止部署，完成定向GREEN后再升级最终候选验证。

@@ -82,6 +82,12 @@ CPU样本窗口12382.945ms，`memory-transaction-ports.readMetadataState`包含�
 
 ### Task 3：E3验收与交付
 
+**2026-10-03 最终候选全量与功能远端 GREEN**：`6bc1f01`一次最终全量2409项、2408通过/0失败/1跳过（614744ms），句柄71650终态0；功能分支精确SHA远端run37056686432终态success，独立评审Approved。部署前私有备份754文件/4435343897字节，逐字节核验且复制前后源清单稳定；私有路径/manifest仅在runtime-data忽略目录。本地备份世界atom.json SHA为`58517729…e2c78`。接续既有监督任务切换、全局Help与明确窗口只读回读，再main精确检查；未提前宣称E3完成。
+
+**2026-10-03 功能分支与部署预检**：origin/fix/cli-source-timeout-20261003远端SHA精确为`6bc1f01f172d7d9b910b7286184e1bdc0def03d0`；PR#74已创建并附到当前任务，远端run37056686432正在检查该SHA。本地最终全量句柄71650继续。正式CLI只读仍旧source超时；既有人工Web只读入口返回changed=false、runtime atom-interaction/4，acceptedVersion=savedVersion=53、acceptedRevision=savedRevision=`sha256:cf7f9ed4…a3fa1f`，dirty=false/pending=false/failure=null、容量待存0。部署前本地私有事实/日志备份准备中，不外发、不迁改业务世界。
+
+**2026-10-03 最终候选 `6bc1f01`**：修复、评审结算及规范证据已阶段提交。最终全量句柄71650运行中，输出`../evidence/2026-10-03-cli-final-candidate-full-test.txt`；首次全量的2项已定向GREEN，不隐去历史失败。功能分支推送与精确远端检查接续执行；代码部署仍须全量与远端通过。
+
 **最终候选全量启动**：已保存`eb961aa`（产品代码44d1659不变），此前全量尚未运行；本次`npm test`句柄95318，输出`../evidence/2026-10-03-cli-final-full-test.txt`。同候选只运行这一次，结果未出前不声明全量通过。暂存检查提示原始开发控制输出末尾额外空行，属证据文本格式，待记录修正；不涉及产品候选。
 
 **冷旅程GREEN与系统门禁**：正确接入现行world-commits日志后，六份副本中央来源SHA（只规范经长度验证的末尾stdin換行）、冷事实revision与来源receipt相符，后续均completed、零errors、零额外effects提交。只读冷验收没有重放请求。证据`../evidence/2026-10-03-cli-fixed-fixture-cold.txt`。架构13/13、系统307/307、开发控制exit0；无需再重复直接/系统测试。固定事实与请求复测、冷恢复链已通过，接下来保存最终候选后执行全量一次，再独立评审/E3。
@@ -108,7 +114,7 @@ CPU样本窗口12382.945ms，`memory-transaction-ports.readMetadataState`包含�
 
 **Interfaces**：消费Task2候选与直接链证据；输出已部署、公开入口正确回读、精确远端全绿。
 
-- [ ] 真实隔离CLI关键旅程及必要system门禁通过后，对最终候选执行`npm test`一次；整包独立评审并以RED→GREEN修复Important/Critical。Expected：零未解释失败，所有重要评审项有证据结算。
+- [x] 真实隔离CLI关键旅程及必要system门禁通过后，对最终候选执行`npm test`一次；整包独立评审并以RED→GREEN修复Important/Critical。Expected：零未解释失败，所有重要评审项有证据结算。
 - [ ] 安全推送候选并核对精确revision远端检查终态；使用已存在部署机制和可恢复备份完成代码切换，不迁改业务Graph。Expected：部署与远端SHA一致。
 - [ ] 公共4784以用户当前session明确给定`🧊managegraph`窗口执行只读回读；真实写入效果旅程在正式世界冷副本验证并记录效率前后结果。Expected：公共入口正确、无假失败、事实与后续状态一致。
 - [ ] 总账/原计划即时收口并保存最终证据，目标仅在E3与精确远端检查成功后标complete。Expected：验收可回溯。
