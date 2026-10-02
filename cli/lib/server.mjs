@@ -249,7 +249,7 @@ export async function createSpatialServer(options = {}) {
           '同一 Atom 请求标识不能对应不同命令'
         );
       }
-      return existing.receipt;
+      return existing.refresh ? existing.refresh().then(() => existing.receipt) : existing.receipt;
     }
 
     let resolveReceipt;
@@ -284,7 +284,7 @@ export async function createSpatialServer(options = {}) {
     let commitInFlight = null;
     const commitStarted = identity => {
       if (identity?.correlationId === id && typeof identity.commandId === 'string') {
-        commitInFlight = { commandId: identity.commandId };
+        commitInFlight = { commandId: identity.commandId, confirm: identity.confirm };
       }
     };
     const sourceReceiptConfirmed = result => {
@@ -309,7 +309,8 @@ export async function createSpatialServer(options = {}) {
             : `Atom ${timedPhase} phase exceeded its ${atomInteractionTimeoutMs}ms deadline`
         );
         timeoutError.details = { phase: timedPhase, interactionId: id, timeoutMs: atomInteractionTimeoutMs };
-        if (timedPhase === 'commit') Object.assign(timeoutError.details, commitInFlight, { status: 'pending' });
+        if (timedPhase === 'commit') Object.assign(timeoutError.details,
+          { commandId: commitInFlight.commandId, status: 'pending' });
         if (phase === 'source' && confirmedSourceResult) sourceCommitted(confirmedSourceResult);
         controller.abort(timeoutError);
         rejectActiveDeadline(timeoutError);
@@ -366,7 +367,46 @@ export async function createSpatialServer(options = {}) {
           }
           entry.receipt = Promise.resolve(final);
           settle(final);
-        }, () => undefined);
+        }, error => {
+          const preserveConfirmed = () => {
+            const confirmed = durableBusinessResult ?? confirmedSourceResult;
+            if (!confirmed) return false;
+            entry.receipt = Promise.resolve(structuredClone(confirmed));
+            entry.refresh = null;
+            settle(confirmed);
+            return true;
+          };
+          if (preserveConfirmed()) return;
+          // The rejected operation has finished. Later reads must see its
+          // current adjudication, rather than the first caller's deadline.
+          entry.receipt = operationResult;
+          if (typeof commitInFlight?.confirm !== 'function') return;
+          let refreshing;
+          entry.refresh = () => refreshing ??= (async () => {
+            let refreshTimeout;
+            try {
+              await Promise.race([commitInFlight.confirm(), new Promise((_, rejectRefresh) => {
+                refreshTimeout = setTimeout(() => rejectRefresh(error), atomInteractionTimeoutMs);
+              })]);
+              if (!preserveConfirmed()) {
+                entry.receipt = operationResult;
+                entry.refresh = null;
+              }
+            } catch (confirmationError) {
+              if (!preserveConfirmed()) {
+                const pending = new SpatialStoreError('ATOM_COMMIT_CONFIRMATION_PENDING',
+                  '中央提交仍待恢复确认；请使用原关联号读取结果');
+                pending.details = { phase: 'commit', status: 'pending', interactionId: id,
+                  commandId: commitInFlight.commandId, cause: confirmationError?.code ?? error?.code };
+                entry.receipt = Promise.reject(pending);
+                entry.receipt.catch(() => undefined);
+              }
+            } finally {
+              clearTimeout(refreshTimeout);
+              refreshing = null;
+            }
+          })();
+        });
         const result = await Promise.race([operationResult, deadline]);
         settle(result);
         return result;

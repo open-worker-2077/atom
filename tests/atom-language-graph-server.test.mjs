@@ -1267,6 +1267,57 @@ test('commit in flight reports bounded confirmation pending and same-id read set
   assert.equal(executions, 1);
 });
 
+for (const transient of [false, true]) for (const committed of [false, true]) test(`same-id read settles rejected in-flight operation from central confirmation (${committed}, transient ${transient})`, async (t) => {
+  const directory = await temporaryDirectory();
+  const contextFile = path.join(directory, 'atom.json'), graphFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, '[]');
+  await fs.writeFile(graphFile, '{}');
+  let release, executions = 0, confirmations = 0, lifecycle;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const failure = Object.assign(new Error('central confirmation interrupted'), { code: 'CONFIRMATION_IO_FAILED' });
+  const interactionRuntime = {
+    async initialize() { return { initialization: { ok: true, changed: false } }; },
+    async execute(_intent, callbacks) {
+      executions += 1;
+      lifecycle = callbacks;
+      callbacks.onCommitStarted?.({ commandId: 'rejected-command', correlationId: 'rejected-in-flight',
+        async confirm() {
+          confirmations += 1;
+          if (transient && confirmations === 1) throw failure;
+          if (committed) callbacks.onSourceReceipt?.({ ok: true, changed: true, command: 'transform',
+            revisionAfter: 'confirmed-after', subsequentExecution: { status: 'pending' } });
+        } });
+      await blocked;
+      throw failure;
+    },
+    async recover() { return { sourceRevision: 'revision' }; },
+    projectionStatus() { return { status: 'published' }; }
+  };
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, contextFile, graphFile,
+    storeFile: path.join(directory, 'knowledge.json'), interactionRuntime, atomInteractionTimeoutMs: 40 });
+  t.after(async () => { release(); await running.close(); });
+  const request = () => fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ source: 'transform {"thing":"Root","situation":"after"}',
+      interaction: { id: 'rejected-in-flight', agent: { ref: 'transport-ref', path: 'Root' } } })
+  });
+  assert.equal((await (await request()).json()).error?.code, 'ATOM_COMMIT_CONFIRMATION_PENDING');
+  release();
+  await new Promise(resolve => setImmediate(resolve));
+  if (transient) assert.equal((await (await request()).json()).error?.code, 'ATOM_COMMIT_CONFIRMATION_PENDING');
+  const final = await (await request()).json();
+  if (committed) {
+    assert.equal(final.ok, true, JSON.stringify(final));
+    assert.equal(final.result.revisionAfter, 'confirmed-after');
+  } else {
+    assert.equal(final.error?.code, failure.code, JSON.stringify(final));
+    assert.equal(final.result, undefined);
+  }
+  assert.equal(confirmations, transient ? 2 : 1);
+  assert.equal(executions, 1);
+  assert.ok(lifecycle.signal.aborted);
+});
+
 test('source deadline uses confirmed central facts while auxiliary acknowledgement is blocked', async (t) => {
   const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');

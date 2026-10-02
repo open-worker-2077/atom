@@ -604,7 +604,14 @@ export function createTransactionalWorldPersistence({
     try {
       receipt = await coordinator.execute({
         signal,
-        onCommitStarted,
+        onCommitStarted: identity => onCommitStarted?.({ ...identity, async confirm() {
+          // Recover this prepared command through the existing central owner;
+          // never replay the source operation to answer a transport read.
+          await recover();
+          const confirmed = await journalRepository.findReceipt(identity.commandId);
+          if (confirmed) notifyCommitReceipt(confirmed);
+          return confirmed ? redactInternalMetadata(confirmed) : null;
+        } }),
         ...(Array.isArray(beforeFacts) ? { baseFacts: beforeFacts } : {}),
         rebaseResult: async ({ current, after, facts: rebasedFacts, result }) => {
           const state = await journalRepository.readState();

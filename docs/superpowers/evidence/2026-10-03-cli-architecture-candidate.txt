@@ -1,0 +1,21 @@
+✔ the Atom capability graph is a connected and owned system contract (6.619ms)
+✔ web editing preserves view facts across authoritative reconciliation (2.9501ms)
+✔ production audit rejects an unregistered entry importing the legacy engine (21.4139ms)
+✔ production audit rejects direct world-fact persistence outside an approved port (5.6971ms)
+✔ current production topology has no unregistered violations or temporary debt (30.9456ms)
+✔ Web editing has one text command entry and no server-side UI translation (1.5295ms)
+✔ short Thing identity has one allocator and confines legacy parsing to cold migration (11.9171ms)
+✔ the target architecture assigns every fact to one owner and permits only declared dependencies (3.1873ms)
+✔ world command and receipt contracts require versions, revisions, and correlation ids (0.508ms)
+✔ world snapshots and projections are explicitly revision-labelled (0.2832ms)
+✔ the current Atom target architecture has no forbidden inward dependency (12.9879ms)
+✔ dependency audit rejects domain code importing an adapter (0.3041ms)
+✔ the browser mapper belongs to the adapter boundary without admitting adapter imports into the domain (0.1019ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 144.3189

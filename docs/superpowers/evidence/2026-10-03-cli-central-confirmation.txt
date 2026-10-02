@@ -1,0 +1,10 @@
+✔ central confirmation recovers an interrupted source without replay (before-world-write) (190.1271ms)
+✔ central confirmation recovers an interrupted source without replay (after-world-write) (152.5719ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 470.9468

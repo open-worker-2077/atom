@@ -1,0 +1,50 @@
+✖ same-id read settles rejected in-flight operation from central confirmation (false) (108.7563ms)
+✖ same-id read settles rejected in-flight operation from central confirmation (true) (78.4298ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 315.0121
+
+✖ failing tests:
+
+test at tests\atom-language-graph-server.test.mjs:1270:40
+✖ same-id read settles rejected in-flight operation from central confirmation (false) (108.7563ms)
+  AssertionError [ERR_ASSERTION]: {"ok":false,"error":{"code":"ATOM_COMMIT_CONFIRMATION_PENDING","message":"中央提交仍在确认，结果尚未裁定；请使用原关联号读取结果","details":{"phase":"commit","interactionId":"rejected-in-flight","timeoutMs":40,"commandId":"rejected-command","status":"pending"}}}
+  + actual - expected
+
+  + 'ATOM_COMMIT_CONFIRMATION_PENDING'
+  - 'CONFIRMATION_IO_FAILED'
+
+      at TestContext.<anonymous> (file:///D:/Project/%E3%80%87/subprojects/atom/.worktrees/cli-source-timeout-20261003/tests/atom-language-graph-server.test.mjs:1311:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'ATOM_COMMIT_CONFIRMATION_PENDING',
+    expected: 'CONFIRMATION_IO_FAILED',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\atom-language-graph-server.test.mjs:1270:40
+✖ same-id read settles rejected in-flight operation from central confirmation (true) (78.4298ms)
+  AssertionError [ERR_ASSERTION]: {"ok":false,"error":{"code":"ATOM_COMMIT_CONFIRMATION_PENDING","message":"中央提交仍在确认，结果尚未裁定；请使用原关联号读取结果","details":{"phase":"commit","interactionId":"rejected-in-flight","timeoutMs":40,"commandId":"rejected-command","status":"pending"}}}
+
+  false !== true
+
+      at TestContext.<anonymous> (file:///D:/Project/%E3%80%87/subprojects/atom/.worktrees/cli-source-timeout-20261003/tests/atom-language-graph-server.test.mjs:1308:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

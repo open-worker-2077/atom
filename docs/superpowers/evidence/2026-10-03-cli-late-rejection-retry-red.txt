@@ -1,0 +1,34 @@
+✔ same-id read settles rejected in-flight operation from central confirmation (false, transient false) (106.5239ms)
+✔ same-id read settles rejected in-flight operation from central confirmation (true, transient false) (80.3044ms)
+✖ same-id read settles rejected in-flight operation from central confirmation (false, transient true) (80.3108ms)
+✔ same-id read settles rejected in-flight operation from central confirmation (true, transient true) (74.8855ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 471.5898
+
+✖ failing tests:
+
+test at tests\atom-language-graph-server.test.mjs:1270:79
+✖ same-id read settles rejected in-flight operation from central confirmation (false, transient true) (80.3108ms)
+  AssertionError [ERR_ASSERTION]: {"ok":false,"error":{"code":"ATOM_COMMIT_CONFIRMATION_PENDING","message":"中央提交仍待恢复确认；请使用原关联号读取结果","details":{"phase":"commit","status":"pending","interactionId":"rejected-in-flight","commandId":"rejected-command","cause":"CONFIRMATION_IO_FAILED"}}}
+  + actual - expected
+
+  + 'ATOM_COMMIT_CONFIRMATION_PENDING'
+  - 'CONFIRMATION_IO_FAILED'
+
+      at TestContext.<anonymous> (file:///D:/Project/%E3%80%87/subprojects/atom/.worktrees/cli-source-timeout-20261003/tests/atom-language-graph-server.test.mjs:1313:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'ATOM_COMMIT_CONFIRMATION_PENDING',
+    expected: 'CONFIRMATION_IO_FAILED',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

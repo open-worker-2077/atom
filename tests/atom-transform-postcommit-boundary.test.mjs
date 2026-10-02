@@ -125,6 +125,46 @@ test('discard source notification preserves the archive receipt through final se
   assert.equal(result.subsequentExecution.status, 'completed', JSON.stringify(result));
 });
 
+for (const stage of ['before-world-write', 'after-world-write']) test(`central confirmation recovers an interrupted source without replay (${stage})`, async (t) => {
+  const files = await fixture(t, 'def receive(delivery):\n    return True\ntrigger("strut", {}, receive)');
+  const persistence = createTransactionalWorldPersistence(files);
+  const before = await persistence.readCommittedSnapshot();
+  const after = structuredClone(before.facts);
+  find(after, 'Source').situation = 'confirmed after interruption';
+  let interrupted = false, admission, proof;
+  const failure = Object.assign(new Error('confirmation interrupted'), { code: 'CONFIRMATION_IO_FAILED' });
+  if (stage === 'after-world-write') {
+    mockJournalEventWrite(t, path.dirname(files.contextFile), event => {
+      if (event.type === 'committed' && !interrupted) { interrupted = true; throw failure; }
+    });
+  } else {
+    const open = fs.open.bind(fs);
+    t.mock.method(fs, 'open', async (target, flags, ...args) => {
+      if (String(target).startsWith(path.dirname(files.contextFile))
+        && String(target).endsWith('world-commits.jsonl') && ['r+', 'w+'].includes(flags) && !interrupted) {
+        interrupted = true;
+        throw failure;
+      }
+      return open(target, flags, ...args);
+    });
+  }
+  await assert.rejects(persistence.commit({ correlationId: `confirm-${stage}`,
+    expectedRevision: before.revision, nextRevision: revisionOfWorldFacts(after), facts: after,
+    beforeFacts: before.facts, changedPaths: ['Source'],
+    onCommitStarted(value) { admission = value; }, onCommitReceipt(value) { proof = value; }
+  }), { code: failure.code });
+  assert.equal(proof, undefined);
+  assert.ok(admission?.commandId);
+  const recovered = await admission.confirm();
+  assert.equal(recovered.status, 'committed');
+  assert.equal(proof.commandId, admission.commandId);
+  assert.equal((await admission.confirm()).commandId, recovered.commandId);
+  assert.equal(find((await persistence.readCommittedSnapshot()).facts, 'Source').situation,
+    'confirmed after interruption');
+  const state = await persistence.readInternalMetadataState();
+  assert.equal(state.receipts.filter(entry => entry.commandId === admission.commandId).length, 1);
+});
+
 test('central source proof reaches runtime before committed auxiliary adoption finishes', async (t) => {
   const files = await fixture(t, 'def receive(delivery):\n    return True\ntrigger("strut", {}, receive)');
   let entered, release, proof, admission;
@@ -151,6 +191,9 @@ test('central source proof reaches runtime before committed auxiliary adoption f
   assert.equal(proof.interactionId, 'early-central-proof');
   assert.equal(admission.correlationId, 'early-central-proof');
   assert.equal(admission.commandId, proof.subsequentExecution.sourceCommandId);
+  const reread = await admission.confirm();
+  assert.equal(reread.commandId, admission.commandId);
+  assert.equal(reread.status, 'committed');
   assert.equal(fullAcknowledgements, 0);
   assert.equal(find(await committedFacts(files), 'Source').situation, 'after');
   assert.equal(proof.revisionAfter, revisionOfWorldFacts(await committedFacts(files)).replace(/^sha256:/u, ''));

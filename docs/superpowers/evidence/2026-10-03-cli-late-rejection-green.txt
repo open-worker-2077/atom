@@ -1,0 +1,12 @@
+✔ same-id read settles rejected in-flight operation from central confirmation (false, transient false) (106.3879ms)
+✔ same-id read settles rejected in-flight operation from central confirmation (true, transient false) (77.7252ms)
+✔ same-id read settles rejected in-flight operation from central confirmation (false, transient true) (79.9943ms)
+✔ same-id read settles rejected in-flight operation from central confirmation (true, transient true) (79.6595ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 480.6895

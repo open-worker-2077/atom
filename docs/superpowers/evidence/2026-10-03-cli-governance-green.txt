@@ -1,0 +1,16 @@
+✔ public repository excludes local worlds, projections, backups and context data (28.3751ms)
+✔ tracked JSON is limited to source manifests, public schemas and reviewed architecture contracts (21.5802ms)
+✔ local Agent integrations are ignored and Playwright output stays outside the source tree (101.9443ms)
+✔ repository keeps durable local authority and makes GitHub collaboration optional (2.152ms)
+✔ architecture and accepted decisions are durable repository facts (0.952ms)
+✔ GitHub templates, CI and runtime-data exclusions are present (3.1706ms)
+✔ project routing has one Superpowers entry without tool-owned instructions (0.8675ms)
+✔ contributor prerequisites require the supported Node.js runtime (0.535ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 439.5725
