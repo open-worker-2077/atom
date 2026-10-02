@@ -37,6 +37,16 @@ test('public command error retains source deadline correlation details', async (
   assert.match(cli.stderr, /关联 source-deadline-id/u);
 });
 
+test('CLI renders central confirmation pending as waiting with original correlation', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => ({ ok: false,
+    async json() { return { ok: false, error: { code: 'ATOM_COMMIT_CONFIRMATION_PENDING',
+      message: '提交仍在确认', details: { interactionId: 'pending-source', phase: 'commit' } } }; } }));
+  const cli = await runCli(['transform', '{}'], executeAtomCommandEndpoint);
+  assert.match(cli.stderr, /等待 ATOM_COMMIT_CONFIRMATION_PENDING/u);
+  assert.match(cli.stderr, /关联 pending-source/u);
+  assert.doesNotMatch(cli.stderr, /错误|unchanged|updated/u);
+});
+
 function runExternalAtom(args, input) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [currentCliEntry, ...args], {

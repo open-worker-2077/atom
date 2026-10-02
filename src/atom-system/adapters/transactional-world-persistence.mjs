@@ -492,6 +492,7 @@ export function createTransactionalWorldPersistence({
   async function commit({
     signal,
     onCommitReceipt,
+    onCommitStarted,
     correlationId,
     expectedRevision,
     nextRevision,
@@ -603,6 +604,7 @@ export function createTransactionalWorldPersistence({
     try {
       receipt = await coordinator.execute({
         signal,
+        onCommitStarted,
         ...(Array.isArray(beforeFacts) ? { baseFacts: beforeFacts } : {}),
         rebaseResult: async ({ current, after, facts: rebasedFacts, result }) => {
           const state = await journalRepository.readState();

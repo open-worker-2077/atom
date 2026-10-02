@@ -80,7 +80,7 @@ export function createLegacyWorldService(options = {}) {
     const persistence = transactions.get(key);
     if (request.programScheduler) readinessFor(persistence).resumeRequest = { ...request,
       source: undefined, history: [], interaction: { id: '' }, signal: undefined,
-      onCommitted: undefined, onSubsequentSettled: undefined, onSourceReceipt: undefined };
+      onCommitted: undefined, onSubsequentSettled: undefined, onSourceReceipt: undefined, onCommitStarted: undefined };
     return persistence;
   }
 
@@ -212,7 +212,7 @@ export function createLegacyWorldService(options = {}) {
         const recoveryRequest = { ...request, source: execution.sourceReceipt.source,
           interaction: structuredClone(execution.event.interaction), history: [],
           trustedMaintenance: false, humanAuthority: false, bypassProgramLocks: false,
-          onCommitted: undefined, onSubsequentSettled: undefined, onSourceReceipt: undefined };
+          onCommitted: undefined, onSubsequentSettled: undefined, onSourceReceipt: undefined, onCommitStarted: undefined };
         recoveryRequests.set(recoveryRequest, execution.event.binding);
         const result = await service.executeLegacy(recoveryRequest);
         if (result.subsequentExecution?.capacityBlocked?.retryable) break;
@@ -328,6 +328,8 @@ export function createLegacyWorldService(options = {}) {
           receipt = await persistence.commit({
             ...transition,
             signal: request.signal,
+            onCommitStarted: transition.postCommitEvent
+              && transition.postCommitEvent.sourceChanged !== false ? request.onCommitStarted : undefined,
             onCommitReceipt: committed => {
               if (!transition.postCommitEvent || transition.postCommitEvent.sourceChanged === false) return;
               sourceReceipt = committed;

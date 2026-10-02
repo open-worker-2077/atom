@@ -274,6 +274,7 @@ export function createInteractionRuntime({
       ...(currentOptions.bypassProgramLocks ? { bypassProgramLocks: true } : {}),
       ...(currentOptions.programMode ? { programMode: currentOptions.programMode } : {}),
       ...(currentOptions.signal ? { signal: currentOptions.signal } : {}),
+      ...(typeof options.onCommitStarted === 'function' ? { onCommitStarted: options.onCommitStarted } : {}),
       ...(typeof options.onSourceReceipt === 'function' ? {
         onSourceReceipt: result => options.onSourceReceipt(withInteractionId(result, intent.correlationId))
       } : {}),

@@ -44,7 +44,7 @@ test('cancellation during central prepare leaves no late write or recoverable ca
   const before = snapshot([{ thing: 'Root', situation: 'before', slot: [], strut: [] }]);
   const ports = createMemoryTransactionPorts({ initialSnapshot: before });
   const controller = new AbortController();
-  let reachedPrepare, releasePrepare;
+  let reachedPrepare, releasePrepare, admissions = 0;
   const prepared = new Promise(resolve => { reachedPrepare = resolve; });
   const released = new Promise(resolve => { releasePrepare = resolve; });
   const coordinator = createCommitCoordinator({ ...ports, async faultInjector(stage) {
@@ -52,6 +52,7 @@ test('cancellation during central prepare leaves no late write or recoverable ca
   } });
   const execution = coordinator.execute({ command: command('cancelled-source', before.revision),
     signal: controller.signal,
+    onCommitStarted() { admissions += 1; },
     transition: () => ({ facts: [{ thing: 'Root', situation: 'after', slot: [], strut: [] }] }) });
   await prepared;
   const reason = Object.assign(new Error('source deadline'), { code: 'ATOM_INTERACTION_TIMEOUT' });
@@ -62,6 +63,7 @@ test('cancellation during central prepare leaves no late write or recoverable ca
   assert.deepEqual(await ports.journalRepository.listPrepared(), []);
   await coordinator.recover();
   assert.equal(ports.authority.status().acceptedVersion, 0);
+  assert.equal(admissions, 0, 'cancelled preparation never enters the world write boundary');
 });
 
 test('coordinator accepts into one memory fact/receipt boundary without storage', async () => {

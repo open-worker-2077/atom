@@ -23,6 +23,14 @@
 
 ### Task 2：按已证实根因进行TDD修复
 
+**在途GREEN与CLI RED**：HTTP三态回归3/3通过，40ms期限后在途报告专门pending、解除后同ID成功且计数1；源超时和中央已确认成功均保留。实际runtime集成补验中央admission与来源证明command一致，prepare取消回归补验admission=0。CLI pending表现RED仍打印“错误”，按已确定未知结果合同改为“等待”并保留关联，不打印updated/unchanged。
+
+**在途HTTP RED**：中央写入开始标识后等待阻塞，40ms预算届满现行返回ATOM_INTERACTION_TIMEOUT/phase=source，未区分在途；新回归失败。预期专门ATOM_COMMIT_CONFIRMATION_PENDING/phase=commit/原command与interaction关联，解除后同ID读取成功、执行计数仍1。该状态不是来源无变化，也不伪造成功revision。
+
+**在途边界架构（system-architecture Skill，既有规格§2.4）**：事实由中央world/journal拥有，来源/后续由runtime消费，HTTP/CLI只映射裁定与关联，投影可重建；当前工作规模约12k事实与长历史，性能已由样本定位。入口→runtime→adapter→coordinator→world/journal单向依赖；中央最后取消检查后发布`onCommitStarted`身份（非提交证明），已有`onSourceReceipt`发布确认事实。输入为已校验命令与signal，输出是未入写/提交在途/已确认三种证据；提交在途期限届满报告专门pending错误与关联、原预算不延长；拒绝把未知当未提交或无限等待。中央序列化、CAS、原子批量、Agent授权、容量背压和持久恢复均沿原合同；无迁移/新队列/竞争账本。兼容性：普通成功/来源拒绝不变，新增明确pending码；回退通过既有备份SHA及Git代码回退，世界日志格式不变。验收映射：prepare取消→零写/零待恢复；在途→有限pending并同ID单次结算；中央证明→来源成功；后续终态/投影→既有99项直接证据；性能→固定私有夹具对照；发布→最终全量、独立审查、公共回读、精确远端终态。
+
+**第三阶段提交**：`2bfe62c`保存提前中央事实证明、deadline成功/pending裁定及CLI错误关联；直接链99/99、CLI9/9通过。未推送/部署，目标仍进行中。下一步写内部commit在途RED（世界写开始后、journal证明之前），按同一有限等待与如实状态合同修复，然后固定私有夹具复测和最终E3。
+
 **CLI关联RED**：`atom-language-cli-graph.test.mjs`新回归确认executeAtomCommandEndpoint错误丢失details，预期来源phase/id/timeout而实际undefined。按原现场排查范围保留服务端结构化details，并让CLI stderr输出已有交互关联号供用方回读；不新增用户命令或默认窗口。
 
 **已提交deadline GREEN**：原HTTP RED转200/changed=true/pending，取消原因变为ATOM_SUBSEQUENT_TIMEOUT；无中央证明的来源超时及独立请求仍通过，共4/4。实际runtime→legacy adapter→persistence集成回归验证：authoritative辅助采用阻塞时，中央证明已到达且revision精确等于已提交事实，完整onCommitted尚未发生；解除后正常完整回执仅一次（1/1）。直接整链已启动句柄48536。内部证明仅供deadline使用，不取代正常完整回执，不延长预算；私有世界无外发。
@@ -54,6 +62,8 @@ CPU样本窗口12382.945ms，`memory-transaction-ports.readMetadataState`包含�
 - [ ] 运行最小影响链，自查diff并阶段提交；失败先定向调试。Expected：直接合同回归全绿。
 
 ### Task 3：E3验收与交付
+
+**中央在途直接链GREEN**：HTTP在途/已确认/未入写三态、真实runtime中央admission、prepare取消、CLI等待与关联直接链110/110通过（37847.0117ms）；原始证据`../evidence/2026-10-03-cli-inflight-direct-chain.txt`。固定同夹具性能旅程已启动：来源为保留的私有稳定副本，逐次复制、输入/初始事实SHA与提交后3正文逐字校验；baseline为已只读核对的生产代码checkout`61e9c29`（cli已有CRLF-only改动保留），测量期间不改正式世界。首轮句柄69371，尚未形成最终性能证据。
 
 **CLI关联GREEN与直接链**：executeAtomCommandEndpoint保留error.details，真实runAtomCli stderr显示原interactionId；该文件9/9通过（24931.8426ms），原始输出`../evidence/2026-10-03-cli-correlation-direct-chain.txt`。提前事实证明99/99证据已保存。下一边界仍是不可逆世界写开始后、journal确认之前的有限等待与如实pending裁定；此时不可把无确认状态报告成未提交，也不可无限等候。
 

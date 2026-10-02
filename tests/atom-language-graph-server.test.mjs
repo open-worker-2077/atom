@@ -1226,6 +1226,47 @@ test('hung Atom interaction does not block an independent transform', async (t) 
   await blockedWrite;
 });
 
+test('commit in flight reports bounded confirmation pending and same-id read settles once', async (t) => {
+  const directory = await temporaryDirectory();
+  const contextFile = path.join(directory, 'atom.json'), graphFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, '[]');
+  await fs.writeFile(graphFile, '{}');
+  let release, executions = 0;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const interactionRuntime = {
+    async initialize() { return { initialization: { ok: true, changed: false } }; },
+    async execute(_intent, lifecycle) {
+      executions += 1;
+      lifecycle.onCommitStarted?.({ commandId: 'central-command', correlationId: 'in-flight-source' });
+      await blocked;
+      const result = { ok: true, changed: true, command: 'transform', revisionAfter: 'after' };
+      lifecycle.onSourceReceipt?.(result);
+      await lifecycle.onCommitted(result);
+      return result;
+    },
+    async recover() { return { sourceRevision: 'after' }; },
+    projectionStatus() { return { status: 'published' }; }
+  };
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0, contextFile, graphFile,
+    storeFile: path.join(directory, 'knowledge.json'), interactionRuntime, atomInteractionTimeoutMs: 40 });
+  t.after(async () => { release(); await running.close(); });
+  const request = () => fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ source: 'transform {"thing":"Root","situation":"after"}',
+      interaction: { id: 'in-flight-source', agent: { ref: 'transport-ref', path: 'Root' } } })
+  });
+  const initial = await (await request()).json();
+  assert.equal(initial.error?.code, 'ATOM_COMMIT_CONFIRMATION_PENDING', JSON.stringify(initial));
+  assert.equal(initial.error.details.phase, 'commit');
+  assert.equal(initial.error.details.commandId, 'central-command');
+  assert.equal(initial.error.details.interactionId, 'in-flight-source');
+  release();
+  const final = await (await request()).json();
+  assert.equal(final.ok, true, JSON.stringify(final));
+  assert.equal(final.result.revisionAfter, 'after');
+  assert.equal(executions, 1);
+});
+
 test('source deadline uses confirmed central facts while auxiliary acknowledgement is blocked', async (t) => {
   const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');

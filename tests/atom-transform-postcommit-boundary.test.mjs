@@ -127,7 +127,7 @@ test('discard source notification preserves the archive receipt through final se
 
 test('central source proof reaches runtime before committed auxiliary adoption finishes', async (t) => {
   const files = await fixture(t, 'def receive(delivery):\n    return True\ntrigger("strut", {}, receive)');
-  let entered, release, proof;
+  let entered, release, proof, admission;
   const auxiliaryStarted = new Promise(resolve => { entered = resolve; });
   const blocked = new Promise(resolve => { release = resolve; });
   const service = createLegacyWorldService({ async onAuthoritativeWrite(write) {
@@ -143,11 +143,14 @@ test('central source proof reaches runtime before committed auxiliary adoption f
   let fullAcknowledgements = 0;
   const operation = runtime.execute({ source: 'transform {"thing":"Source","situation.rep.after":"before"}',
     correlationId: 'early-central-proof' }, { publish: false,
+    onCommitStarted(value) { admission = value; },
     onSourceReceipt(value) { proof = value; }, onCommitted() { fullAcknowledgements += 1; } });
   t.after(async () => { release(); await operation.catch(() => {}); });
   await auxiliaryStarted;
   assert.equal(proof?.ok, true);
   assert.equal(proof.interactionId, 'early-central-proof');
+  assert.equal(admission.correlationId, 'early-central-proof');
+  assert.equal(admission.commandId, proof.subsequentExecution.sourceCommandId);
   assert.equal(fullAcknowledgements, 0);
   assert.equal(find(await committedFacts(files), 'Source').situation, 'after');
   assert.equal(proof.revisionAfter, revisionOfWorldFacts(await committedFacts(files)).replace(/^sha256:/u, ''));

@@ -316,6 +316,7 @@ function help() {
     '  PROGRAM_LOCK_DENIED / WINDOW_ACCESS_DENIED：停止修改并按错误提示处理，不绕过锁。',
     '  ATOM_ENGINE_UNAVAILABLE：确认 4784 服务可用；仍失败则联系维护入口。',
     '  PROJECTION_RECOVERY_PENDING：可丢弃派生投影待恢复；只有成功回执确认 changed=true 时，才表示本次事实写入已成功，禁止重复写入。准备已有世界投影也可能携带此提示，不代表被拒绝的命令已提交。4784 应继续服务；维护入口仅限本机 POST /__atom/api/recover-projection，并使用 projectionRecovery.expectedRevision。',
+    '  ATOM_COMMIT_CONFIRMATION_PENDING：中央提交仍在确认，尚未裁定是否成功；保留原关联号读取结果，禁止换新请求重放来猜结果。此提示不表示已提交、未提交或无变化。',
     '  ATOM_PROGRAM_TIMEOUT / ATOM_PROGRAM_CANCELLED / ATOM_PROGRAM_FAILED：不得手工仿制 Program；回读事实并按错误提示处理。',
     '  未知损坏或无法确认提交状态：停止写入并联系维护入口。日常 Agent 不直接执行事务或投影恢复。'
   ].join('\n');
@@ -1173,7 +1174,8 @@ export async function runAtomCli(argv = [], overrides = {}) {
     if (interaction?.agent && !result.agent) result.agent = interaction.agent.path;
     return writeGraphResult(result, stdout, stderr);
   } catch (error) {
-    stderr.write(`错误 ${error.code || 'ATOM_LANGUAGE_CLI_ERROR'}：${error.message}\n`);
+    const label = error.code === 'ATOM_COMMIT_CONFIRMATION_PENDING' ? '等待' : '错误';
+    stderr.write(`${label} ${error.code || 'ATOM_LANGUAGE_CLI_ERROR'}：${error.message}\n`);
     if (typeof error.details?.interactionId === 'string') stderr.write(`关联 ${error.details.interactionId}\n`);
     return error.code ? 4 : 1;
   }

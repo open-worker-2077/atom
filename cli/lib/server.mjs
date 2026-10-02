@@ -281,6 +281,12 @@ export async function createSpatialServer(options = {}) {
     let businessPhase = 'source';
     let durableBusinessResult = null;
     let confirmedSourceResult = null;
+    let commitInFlight = null;
+    const commitStarted = identity => {
+      if (identity?.correlationId === id && typeof identity.commandId === 'string') {
+        commitInFlight = { commandId: identity.commandId };
+      }
+    };
     const sourceReceiptConfirmed = result => {
       if (result?.ok === true && result?.changed === true && typeof result.revisionAfter === 'string') {
         confirmedSourceResult = structuredClone(result);
@@ -294,12 +300,16 @@ export async function createSpatialServer(options = {}) {
       if (controller.signal.aborted) return;
       businessPhase = phase;
       timeout = setTimeout(() => {
-        const timedPhase = phase === 'source' && confirmedSourceResult ? 'subsequent' : phase;
+        const timedPhase = phase === 'source' ? (confirmedSourceResult ? 'subsequent'
+          : commitInFlight ? 'commit' : 'source') : phase;
         const timeoutError = new SpatialStoreError(
-          timedPhase === 'subsequent' ? 'ATOM_SUBSEQUENT_TIMEOUT' : 'ATOM_INTERACTION_TIMEOUT',
-          `Atom ${timedPhase} phase exceeded its ${atomInteractionTimeoutMs}ms deadline`
+          timedPhase === 'commit' ? 'ATOM_COMMIT_CONFIRMATION_PENDING'
+            : timedPhase === 'subsequent' ? 'ATOM_SUBSEQUENT_TIMEOUT' : 'ATOM_INTERACTION_TIMEOUT',
+          timedPhase === 'commit' ? '中央提交仍在确认，结果尚未裁定；请使用原关联号读取结果'
+            : `Atom ${timedPhase} phase exceeded its ${atomInteractionTimeoutMs}ms deadline`
         );
         timeoutError.details = { phase: timedPhase, interactionId: id, timeoutMs: atomInteractionTimeoutMs };
+        if (timedPhase === 'commit') Object.assign(timeoutError.details, commitInFlight, { status: 'pending' });
         if (phase === 'source' && confirmedSourceResult) sourceCommitted(confirmedSourceResult);
         controller.abort(timeoutError);
         rejectActiveDeadline(timeoutError);
@@ -326,7 +336,7 @@ export async function createSpatialServer(options = {}) {
     trackAtomInteraction(async () => {
       try {
         const operationResult = Promise.resolve().then(() => (
-          operation(normalized, sourceCommitted, controller.signal, subsequentSettled, sourceReceiptConfirmed)
+          operation(normalized, sourceCommitted, controller.signal, subsequentSettled, sourceReceiptConfirmed, commitStarted)
         ));
         operationResult.then(result => {
           // The first caller keeps its source acknowledgement. Later reads see
@@ -389,8 +399,8 @@ export async function createSpatialServer(options = {}) {
   }
 
   async function executeAtomTextCommand(payload, command, origin) {
-    return atomCommandRequest(payload, async (normalized, onCommitted, signal, onSubsequentSettled, onSourceReceipt) => {
-      const commandResult = await command(normalized, { onCommitted, signal, onSubsequentSettled, onSourceReceipt });
+    return atomCommandRequest(payload, async (normalized, onCommitted, signal, onSubsequentSettled, onSourceReceipt, onCommitStarted) => {
+      const commandResult = await command(normalized, { onCommitted, signal, onSubsequentSettled, onSourceReceipt, onCommitStarted });
       if (commandResult?.changed !== false && graphFile && options.projectAtomKnowledge) {
         try {
           const document = JSON.parse(await fs.readFile(graphFile, 'utf8'));
