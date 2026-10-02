@@ -13,6 +13,8 @@
 
 ## 状态与证据
 
+- **2026-10-03 当前授权目标（I3/U3/D3/E3）**：用户要求确认安全备份→Superpowers持久化→目标模式→持续修复到完成。安全分支`backup/atom-cli-before-repair-20261003@f72731f7531bba48d52433721b1076b4ad34251b`已精确远端核对；官方6.4.2/source obra/superpowers/manifest `EF99FCE86F655E7B65F9505BDF468C9BCAF9BF49915C72E128ED62BAC40A6586`已逐项核对SP-L01—05/SP-U01，全部继续补充、无冲突。执行与验收进入[原提交边界计划当前目标](2026-09-05-transform-postcommit-boundary.md#2026-10-03-当前修复目标与执行计划)，当前Task1定因，尚未产品修复/部署。
+
 - **2026-10-03 CLI来源超时现场只读排查，尚未修复**：用户经来源session明确要求只排查、不改软件或业务世界。原始七次调用已核对；B批量实参与中央receipt.source精确匹配，虽然CLI返回15000ms来源超时/exit1，来源已提交且后续completed、零后续事实修订。单独改名的pending也已完成。A时段失败诊断尚缺请求实参绑定，即时8正文回读均为before。现有阶段计时显示A/B提交前约10.071/5.950秒未细分，未证实ESG trigger、投影、批量大小或正文长度为根因；未重放写入、调超时、恢复投影或改产品代码。完整事实、revision与未知项写回[原提交边界计划](2026-09-05-transform-postcommit-boundary.md#2026-10-03-公开-cli-超时现场只读排查)。
 
 ### 2026-09-06 Superpowers本地记录一致性核查（历史快照）

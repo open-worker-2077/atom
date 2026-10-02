@@ -1,5 +1,48 @@
 # Transform Post-commit Boundary Implementation Plan
 
+## 2026-10-03 当前修复目标与执行计划
+
+**Goal（I3/U3/D3/E3）**：根治公开Atom CLI来源回执与真实提交状态不一致，并定位、消除本次现场效率卡点；完成回归、部署、公共入口回读与精确远端检查。详情和阶段证据只以本计划、既有规格与唯一总账为准。
+
+**授权与顺序**：用户要求先确认安全备份，再Superpowers持久化，再开启目标模式，持续解决到完成；现已核对远端main代码基线`aa9c1e61f4705dcef1c9682c5be24988c4af377d`，新增现场记录已提交并经具体外发授权推送到`backup/atom-cli-before-repair-20261003@f72731f7531bba48d52433721b1076b4ad34251b`，远端SHA精确一致。该分支仅安全备份、尚未修复验收。
+
+**Spec**：既有`../specs/2026-08-31-atom-runtime-projection-recovery-design.md`与本计划原来源/后续生命周期裁定。事实提交、运行终态与派生投影独立；普通错误不得否定已提交事实；未提交的超时不得迟到写入。Atom全球CLI入口及当前session用户指定窗口合同继续有效。
+
+**Architecture / Tech Stack**：沿当前Node HTTP生命周期、legacy adapter、中央提交和engine批量链定向诊断与TDD；先在隔离世界建立真实可重复失败和分段计时，再依证据修复原接线，不预选增大超时、缩小批量或恢复投影。公开入口必须携带用户给定窗口；生产业务改名和剩余正文同步仍由来源任务执行，不由开发验收重放。
+
+**执行方式**：主Agent依systematic-debugging、TDD和executing-plans亲自执行，最终按该Skill做一次独立整包评审。用户已明确持续执行，计划形成后直接进入任务，不重复请求继续授权；必要的具体外发审批仍按实际审批结果处理。基于main安全点使用隔离worktree，禁止在生产 checkout直接实现。
+
+### Task 1：建立真实失败与定因证据
+
+**Files**：隔离证据进入该计划的既有Superpowers证据/SDD目录；读取`cli/lib/server.mjs`、`src/atom-system/adapters/legacy-engine-adapter.mjs`、`src/atom-system/world-runtime/commit-coordinator.mjs`、`work-engine/atom-language/engine.mjs`及既有诊断注册接口。
+**Interfaces**：输入下节现场请求/诊断、现行spec；输出可复现失败、逐段耗时及证实根因，供Task2消费。
+
+- [ ] 在隔离世界和随机非4784端口，以公开CLI运行同类批量正文更新并回读；保留原始输入/输出、revision、中央receipt和阶段时间，不改生产世界。Expected：获得现场同型失败或明确的未复现结果；禁止凭未复现宣布根治。
+- [ ] 利用既有计时接口/隔离诊断补足Agent解析、adapter准备、批量应用/校验、中央prepare/CAS/journal及来源通知的边界；每条探针对应一个可证伪预测。Expected：定位实际主耗时及回执与提交分歧顺序。
+- [ ] 把根因与证据即时写回本计划，确定Task2具体文件/测试；没有根因不得写产品修复。Expected：原始证据可独立回接结论。
+
+### Task 2：按已证实根因进行TDD修复
+
+**Files**：优先既有`tests/atom-language-graph-server.test.mjs`、`tests/atom-transform-postcommit-boundary.test.mjs`、`tests/atom-language-transform-batch.test.mjs`、`tests/atom-cli.test.mjs`及根因实际命中原模块；精确范围在Task1定因后入账，不同时改无关模块。
+**Interfaces**：消费Task1失败与时序；输出同一失败GREEN、有限来源/后续预算、零迟到未提交写及效率证据。
+
+- [ ] 先写能捕获真实分歧的回归并运行RED；超时前未提交/中央提交在途/已提交通知未到/后续pending与终态/投影滞后各保留对应事实判据。Expected：失败由实际合同缺陷产生，不是夹具错误。
+- [ ] 最小修复根因；保留中央单次提交、Agent鉴权、原子批量、后续独立终态及可恢复投影。Expected：原RED转GREEN。
+- [ ] 对定位的效率卡点建立同输入、同世界、同环境前后计时，记录测量次数与波动；不得把调大预算当性能收益。Expected：热点被消除/缩短且事实守恒。
+- [ ] 运行最小影响链，自查diff并阶段提交；失败先定向调试。Expected：直接合同回归全绿。
+
+### Task 3：E3验收与交付
+
+**Interfaces**：消费Task2候选与直接链证据；输出已部署、公开入口正确回读、精确远端全绿。
+
+- [ ] 真实隔离CLI关键旅程及必要system门禁通过后，对最终候选执行`npm test`一次；整包独立评审并以RED→GREEN修复Important/Critical。Expected：零未解释失败，所有重要评审项有证据结算。
+- [ ] 安全推送候选并核对精确revision远端检查终态；使用已存在部署机制和可恢复备份完成代码切换，不迁改业务Graph。Expected：部署与远端SHA一致。
+- [ ] 公共4784以用户当前session明确给定`🧊managegraph`窗口执行只读回读；真实写入效果旅程在正式世界冷副本验证并记录效率前后结果。Expected：公共入口正确、无假失败、事实与后续状态一致。
+- [ ] 总账/原计划即时收口并保存最终证据，目标仅在E3与精确远端检查成功后标complete。Expected：验收可回溯。
+
+**Review Focus**：deadline与commit在途竞态；CLI错误关联信息丢失；原子批量校验失败零写；Program源码变更的权限/绑定校验；投影或后续失败不能覆盖来源成功。Pre-flight：Task1证据决定Task2修复范围，Task2候选决定Task3验证范围，无第二状态源。生产业务、凭据、私有世界快照及备份位置不得推送仓库。
+
+
 ## 2026-10-03 公开 CLI 超时现场只读排查
 
 **范围**：来源 session `01a0d480-5fbe-7210-96f5-310594b231d1`传达用户授权仅排查效率与超时事实，不修复、不重放业务写入、不恢复投影、不改变超时或批量大小。本节为既有计划的现场证据增量，不覆盖历史已交付 revision。当前源码 `main@aa9c1e6`；已有未提交 `cli.mjs` 改动保留，本次未改产品代码。未建立写入复现循环，不能宣布根因或修复验证。

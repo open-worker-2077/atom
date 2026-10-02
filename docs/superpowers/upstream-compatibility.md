@@ -5,13 +5,15 @@
 ## 当前核对基线
 
 - **上游来源**：`obra/superpowers`
-- **上游版本**：Superpowers 6.4.1
-- **Manifest SHA-256**：`8F879F5E2F04C5D2A93BD9EA455072384DC35D01F1DFC5307CA1BE0CEF5BE9AA`
+- **上游版本**：Superpowers 6.4.2
+- **Manifest SHA-256**：`EF99FCE86F655E7B65F9505BDF468C9BCAF9BF49915C72E128ED62BAC40A6586`
 - **本地规则源**：工作区 `D:\Project\〇\AGENTS.md` 的“Superpowers 连续性补充”
 - **检查时点**：每个新 Session 首次开展实质开发时读取已安装插件 manifest
 - **触发条件**：版本、来源或 manifest SHA-256 任一项变化
 
 ## 本地差异
+
+2026-10-03首次实质开发核对：manifest来源仍为`obra/superpowers`。完整核对6.4.2的using-superpowers、writing-plans、executing-plans、systematic-debugging、test-driven-development、verification-before-completion及finishing-a-development-branch原文。SP-L01（顺序/IUDE）、SP-L02（即时权威入账）、SP-L03（受影响链逐级升级及同revision复用）、SP-L04（局部阻塞定界）、SP-L05（精确远端检查终态）、SP-U01（差异逐项结算）均裁定“上游未覆盖并继续补充”，未发现语义冲突；下方6.4.1逐项理由继续成立。此次完成更新核对基线，不改官方Skill。
 
 | 编号 | 补充目的 | 上游主要核对位置 | 6.4.1 结论 |
 | --- | --- | --- | --- |
