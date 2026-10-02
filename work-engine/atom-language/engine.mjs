@@ -5062,18 +5062,6 @@ async function executeAtomLanguageInteraction(options, postcommit) {
       ?? revisionOf(nextAtoms);
     revisionAfter = sourceRevision;
     sourceAtoms = isSealedWorldFacts(nextAtoms) ? nextAtoms : structuredClone(nextAtoms);
-    if (sourceTransformLogRecord) {
-      try {
-        await appendTransformLog(contextFile, sourceTransformLogRecord);
-      } catch (error) {
-        if (sourceReceipt?.result?.transformLogRecord?.id !== sourceTransformLogRecord.id) throw error;
-        interactionWarnings.push(diagnostic(
-          'TRANSFORM_LOG_MIRROR_FAILED',
-          '事实与可逆记录已由中央事务提交，但辅助 Transform 日志镜像写入失败',
-          { cause: error.code ?? error.name }
-        ));
-      }
-    }
     const sourceMatch = walkAtoms(nextAtoms).find((match) => (
       match.path.join('/') === (transformed.resultPath ?? transformed.resultName)
     ));
@@ -5103,6 +5091,18 @@ async function executeAtomLanguageInteraction(options, postcommit) {
         status: 'pending', sourceRevision, revisionAfter: sourceRevision, errors: []
       }
     });
+    if (sourceTransformLogRecord) {
+      try {
+        await appendTransformLog(contextFile, sourceTransformLogRecord);
+      } catch (error) {
+        if (sourceReceipt?.result?.transformLogRecord?.id !== sourceTransformLogRecord.id) throw error;
+        interactionWarnings.push(diagnostic(
+          'TRANSFORM_LOG_MIRROR_FAILED',
+          '事实与可逆记录已由中央事务提交，但辅助 Transform 日志镜像写入失败',
+          { cause: error.code ?? error.name }
+        ));
+      }
+    }
   }
   if (options.programScheduler && options.trustedMaintenance !== true
     && (

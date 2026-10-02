@@ -540,13 +540,14 @@ export function createCommitCoordinator({
     };
   }
 
-  async function commitCandidate(candidate) {
+  async function commitCandidate(candidate, signal) {
       if (candidate.receipt && !candidate.record) return candidate.receipt;
       const { command } = candidate;
       const existingReceipt = await journalRepository.findReceipt(command.commandId);
       if (existingReceipt) return existingReceipt;
       const pending = candidate.pending ?? await journalRepository.findPrepared(command.commandId);
       if (pending) return recoverRecord(pending);
+      signal?.throwIfAborted();
       let { before, after, receipt, record } = candidate;
       const current = await worldRepository.read();
       if (current.revision !== before.revision) {
@@ -555,6 +556,10 @@ export function createCommitCoordinator({
 
       await journalRepository.prepare(record);
       if (faultInjector) await faultInjector('after-prepare', structuredClone(record));
+      if (signal?.aborted) {
+        await journalRepository.abort(command.commandId, { reason: 'source-cancelled-before-world-write' });
+        signal.throwIfAborted();
+      }
       if (record.historyMode === 'local-patch' && typeof worldRepository.appendLocalCommit === 'function') {
         await worldRepository.appendLocalCommit({
           commandId: record.commandId,
@@ -582,7 +587,7 @@ export function createCommitCoordinator({
       // when a candidate was prepared after their world write but before append.
       await recoverUnsafe();
       const existing = await request.validateCommit?.();
-      return existing ?? commitCandidate(candidate);
+      return existing ?? commitCandidate(candidate, request.signal);
     }));
   }
 

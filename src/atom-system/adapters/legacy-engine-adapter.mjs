@@ -327,6 +327,7 @@ export function createLegacyWorldService(options = {}) {
         try {
           receipt = await persistence.commit({
             ...transition,
+            signal: request.signal,
             source: request.source,
             correlationId: transition.correlationId ?? request.interaction?.id
           });

@@ -29,6 +29,37 @@ function atom(thing, situation = '', slot = [], strut = [], types = []) {
   };
 }
 
+test('source acknowledgement precedes auxiliary log IO', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-source-log-order-'));
+  const contextFile = path.join(directory, 'atom.json');
+  const projectionFile = path.join(directory, 'graph.json');
+  await seedBoundWorld({ contextFile, projectionFile, facts: [atom('Root', '', [
+    atom('Target', 'before'), atom('Other', 'before'),
+    atom('Backup', '', [], [], ['backup@default'])
+  ])] });
+  const persistence = createTransactionalWorldPersistence({ contextFile, projectionFile });
+  let acknowledged = false;
+  const observed = [];
+  const open = fs.open.bind(fs);
+  t.mock.method(fs, 'open', async (target, ...args) => {
+    if (String(target) === path.join(directory, 'atom.transform-log.json.d', 'events.jsonl')) {
+      observed.push(acknowledged);
+    }
+    return open(target, ...args);
+  });
+  const operation = { 'thing.dsc.': 'Root/Target' };
+  const source = `transform ${JSON.stringify(operation)}`;
+  const result = await executeAtomLanguageKernel({ contextFile, projectionFile, source,
+    interaction: { id: `source-log-order-${crypto.randomUUID()}` },
+    programMode: 'reconcile', programScheduler: createProgramRuntimeScheduler(),
+    commitWorld: transition => persistence.commit(transition),
+    onCommitted(receipt) { acknowledged = receipt.ok && receipt.changed; } });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(observed.length, 1);
+  assert.ok(observed.every(Boolean), 'central facts must be acknowledged before auxiliary IO');
+  assert.equal(find((await persistence.readCommittedSnapshot()).facts, 'Root/Target'), null);
+});
+
 function nameOf(value) {
   return Object.entries(value).find(([key]) => key.split(/[@&#]/u)[0] === 'thing')?.[1];
 }

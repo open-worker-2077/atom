@@ -23,6 +23,14 @@
 
 ### Task 2：按已证实根因进行TDD修复
 
+**中央取消GREEN（阶段）**：新增真实prepare暂停/abort回归已GREEN，memory事务10/10通过；signal从legacy adapter经persistence传到中央coordinator，prepare结束且世界写尚未发生时撤销本次候选、拒绝原取消原因，恢复不产生迟到写。取消发生在世界写内部或事实提交后仍未结算，不能据此宣称所有在途竞态解决。来源通知与身份链的完整直接验证已启动，句柄92716。
+
+**中央取消RED**：真实memory coordinator在after-prepare处暂停，来源signal超时后恢复执行，仍完成事实写入；新回归因Missing expected rejection失败。修复边界确定为首次不可逆世界写之前检查signal，已prepare但尚未写入的本次候选撤销journal，不留冷恢复迟到写；已发生世界写之后的确认仍须以事实证据裁定，不能直接抛取消假称未提交。来源通知顺序回归已GREEN。
+
+**来源通知RED**：实际engine单笔discard中央提交完成后，辅助Transform日志open发生在onCommitted之前；新回归断言失败，证明辅助IO可延迟已提交来源确认。批量discard夹具被现行轴合同拒绝，已排除该无效夹具，不将其当产品RED。此缺陷不能直接归因原B（普通正文无可逆日志）；本次先按来源终态合同修复单笔日志通知顺序，中央提交在途竞态仍独立推进。
+
+**阶段提交**：效率修复与36/36直接链证据保存为`fix/cli-source-timeout-20261003@03ba038`；未推送、未部署。下一步固定同一私有夹具完成baseline/GREEN重复测量，并建立中央提交在途/已提交但来源通知未达的deadline回归；当前仍不能宣称完整修复。
+
 **效率RED**：`node --test --test-name-pattern='identity metadata reads' tests/atom-memory-transaction-ports.test.mjs`失败（1 fail）；身份读取仍访问无关历史source和outcome各一次，计数2≠0。该回归同时要求身份水位/绑定可重建、返回值脱离内部历史及默认全量读取保持完整。
 
 **2026-10-03 隔离进展与效率定因**：原生worktree入口因聊天根目录不是Git仓库失败，已按Skill在`.worktrees/cli-source-timeout-20261003`建立`fix/cli-source-timeout-20261003@61e9c29`。既有提交边界基线47/47通过（`../evidence/2026-10-03-cli-boundary-baseline.txt`）。第一份热复制因manifest/revision不一致在启动校验拒绝，未执行写入；第二份复制前后事实/日志水位一致，随机端口、memory authority、关闭备份外发，正式事实文件哈希前后不变。真实副本3正文更新公开CLI为11596.4463ms/exit0/pending，两次Explore为6089.1164/6933.6056ms；现场超时尚未复现。
@@ -38,6 +46,8 @@ CPU样本窗口12382.945ms，`memory-transaction-ports.readMetadataState`包含�
 - [ ] 运行最小影响链，自查diff并阶段提交；失败先定向调试。Expected：直接合同回归全绿。
 
 ### Task 3：E3验收与交付
+
+**来源通知/取消直接链**：句柄92716已退出0，提交边界/Thing身份事务/Program绑定67/67通过（29859.0676ms），原始输出`../evidence/2026-10-03-cli-cancellation-direct-chain.txt`。当前仅确认辅助日志通知顺序和prepare阶段取消边界，世界写在途及已提交通知滞后仍需后续定向验收。
 
 **效率直接链验收**：增加JSON journal投影的绑定重放等价与返回值隔离断言后，内存事务/Thing身份/Program绑定/短ID迁移/冷部署36/36通过（3484.8963ms）。这是阶段候选，未部署；后续继续固定夹具性能对照和来源超时竞态RED。
 
