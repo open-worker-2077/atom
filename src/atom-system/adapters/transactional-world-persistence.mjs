@@ -491,6 +491,7 @@ export function createTransactionalWorldPersistence({
 
   async function commit({
     signal,
+    onCommitReceipt,
     correlationId,
     expectedRevision,
     nextRevision,
@@ -514,6 +515,10 @@ export function createTransactionalWorldPersistence({
     baseCompatibilityManifest: suppliedBaseManifest = null
   }) {
     assertAccepting();
+    function notifyCommitReceipt(receipt) {
+      try { Promise.resolve(onCommitReceipt?.(redactInternalMetadata(receipt))).catch(() => {}); }
+      catch { /* A notification cannot negate central facts. */ }
+    }
     await recover();
     async function existingExecutionReceipt() {
       if (postCommitEvent) {
@@ -694,10 +699,14 @@ export function createTransactionalWorldPersistence({
       if (postCommitEvent) {
         const existing = await journalRepository.programExecutionForInteraction(correlationId);
         assertSourceBinding(existing, postCommitEvent);
-        if (existing) return redactInternalMetadata(existing.sourceReceipt);
+        if (existing) {
+          notifyCommitReceipt(existing.sourceReceipt);
+          return redactInternalMetadata(existing.sourceReceipt);
+        }
       }
       throw error;
     }
+    notifyCommitReceipt(receipt);
     if (reusedReceipt) return redactInternalMetadata(receipt);
     if (postCommitEvent) assertSourceBinding({ event: receipt.result.postCommitEvent }, postCommitEvent);
     const committedSnapshot = await (owner.runtimeAuthority === 'memory'

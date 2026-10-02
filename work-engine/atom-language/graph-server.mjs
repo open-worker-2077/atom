@@ -394,6 +394,9 @@ export function createAtomGraphHandlers(interactionRuntime, options = {}) {
         ...(authority.humanAuthority ? { humanAuthority: true } : {}),
         ...(authority.programMode ? { programMode: authority.programMode } : {}),
         ...(lifecycle.signal ? { signal: lifecycle.signal } : {}),
+        ...(typeof lifecycle.onSourceReceipt === 'function' ? {
+          onSourceReceipt: result => lifecycle.onSourceReceipt(decorate(result))
+        } : {}),
         ...(typeof lifecycle.onCommitted === 'function' ? {
           onCommitted: (committed) => lifecycle.onCommitted(decorate(committed))
         } : {}),

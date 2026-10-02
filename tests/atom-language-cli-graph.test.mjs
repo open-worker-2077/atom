@@ -21,6 +21,22 @@ import { atomCmdSpawnOptions } from '../scripts/night-watch-isolated-cli-live.mj
 
 const currentCliEntry = path.resolve(import.meta.dirname, '../work-engine/atom-language/cli.mjs');
 
+test('public command error retains source deadline correlation details', async (t) => {
+  const details = { phase: 'source', interactionId: 'source-deadline-id', timeoutMs: 15000 };
+  t.mock.method(globalThis, 'fetch', async () => ({ ok: false,
+    async json() { return { ok: false, error: { code: 'ATOM_INTERACTION_TIMEOUT',
+      message: 'source deadline', details } }; } }));
+  await assert.rejects(executeAtomCommandEndpoint({ source: 'explore {}',
+    interaction: { agentSelector: 'Session Agent' } }), error => {
+    assert.equal(error.code, 'ATOM_INTERACTION_TIMEOUT');
+    assert.deepEqual(error.details, details);
+    return true;
+  });
+  const cli = await runCli(['explore', '{}'], executeAtomCommandEndpoint);
+  assert.equal(cli.code, 4);
+  assert.match(cli.stderr, /关联 source-deadline-id/u);
+});
+
 function runExternalAtom(args, input) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [currentCliEntry, ...args], {

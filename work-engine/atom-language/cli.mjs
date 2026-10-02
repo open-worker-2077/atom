@@ -46,7 +46,8 @@ export async function executeAtomCommandEndpoint(options, endpoint = DEFAULT_ATO
   }
   const payload = await response.json();
   if (!response.ok || !payload.ok) {
-    throw cliError(payload.error?.code ?? 'ATOM_ENGINE_REQUEST_FAILED', payload.error?.message ?? 'Atom engineering service request failed');
+    throw cliError(payload.error?.code ?? 'ATOM_ENGINE_REQUEST_FAILED',
+      payload.error?.message ?? 'Atom engineering service request failed', payload.error?.details);
   }
   if (payload.result?.runtimeContract !== ATOM_RUNTIME_CONTRACT) {
     throw cliError(
@@ -320,9 +321,10 @@ function help() {
   ].join('\n');
 }
 
-function cliError(code, message) {
+function cliError(code, message, details) {
   const error = new Error(message);
   error.code = code;
+  if (details !== undefined) error.details = structuredClone(details);
   return error;
 }
 
@@ -1172,6 +1174,7 @@ export async function runAtomCli(argv = [], overrides = {}) {
     return writeGraphResult(result, stdout, stderr);
   } catch (error) {
     stderr.write(`错误 ${error.code || 'ATOM_LANGUAGE_CLI_ERROR'}：${error.message}\n`);
+    if (typeof error.details?.interactionId === 'string') stderr.write(`关联 ${error.details.interactionId}\n`);
     return error.code ? 4 : 1;
   }
 }

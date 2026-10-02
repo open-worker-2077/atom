@@ -80,7 +80,7 @@ export function createLegacyWorldService(options = {}) {
     const persistence = transactions.get(key);
     if (request.programScheduler) readinessFor(persistence).resumeRequest = { ...request,
       source: undefined, history: [], interaction: { id: '' }, signal: undefined,
-      onCommitted: undefined, onSubsequentSettled: undefined };
+      onCommitted: undefined, onSubsequentSettled: undefined, onSourceReceipt: undefined };
     return persistence;
   }
 
@@ -212,7 +212,7 @@ export function createLegacyWorldService(options = {}) {
         const recoveryRequest = { ...request, source: execution.sourceReceipt.source,
           interaction: structuredClone(execution.event.interaction), history: [],
           trustedMaintenance: false, humanAuthority: false, bypassProgramLocks: false,
-          onCommitted: undefined, onSubsequentSettled: undefined };
+          onCommitted: undefined, onSubsequentSettled: undefined, onSourceReceipt: undefined };
         recoveryRequests.set(recoveryRequest, execution.event.binding);
         const result = await service.executeLegacy(recoveryRequest);
         if (result.subsequentExecution?.capacityBlocked?.retryable) break;
@@ -328,6 +328,19 @@ export function createLegacyWorldService(options = {}) {
           receipt = await persistence.commit({
             ...transition,
             signal: request.signal,
+            onCommitReceipt: committed => {
+              if (!transition.postCommitEvent || transition.postCommitEvent.sourceChanged === false) return;
+              sourceReceipt = committed;
+              const revisionAfter = committed.afterRevision.replace(/^sha256:/u, '');
+              request.onSourceReceipt?.({ ok: true, language: 'atom', command: 'transform', changed: true,
+                interactionId: request.interaction.id, contextFile: request.contextFile,
+                projectionFile: request.projectionFile,
+                revisionBefore: committed.beforeRevision.replace(/^sha256:/u, ''), revisionAfter,
+                errors: [], messages: [], warnings: [{ code: 'ATOM_COMMITTED_ACKNOWLEDGEMENT_PENDING',
+                  message: '中央事实已提交；完整来源回执待完成', correlationId: request.interaction.id }],
+                subsequentExecution: { status: 'pending', sourceRevision: revisionAfter, revisionAfter,
+                  sourceCommandId: committed.commandId, errors: [] } });
+            },
             source: request.source,
             correlationId: transition.correlationId ?? request.interaction?.id
           });

@@ -125,6 +125,38 @@ test('discard source notification preserves the archive receipt through final se
   assert.equal(result.subsequentExecution.status, 'completed', JSON.stringify(result));
 });
 
+test('central source proof reaches runtime before committed auxiliary adoption finishes', async (t) => {
+  const files = await fixture(t, 'def receive(delivery):\n    return True\ntrigger("strut", {}, receive)');
+  let entered, release, proof;
+  const auxiliaryStarted = new Promise(resolve => { entered = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  const service = createLegacyWorldService({ async onAuthoritativeWrite(write) {
+    if (write.operation === 'commit') { entered(); await blocked; }
+  } });
+  const unused = async () => { throw new Error('unexpected capability'); };
+  const runtime = createInteractionRuntime({
+    world: { execute: request => service.executeLegacy({ ...files, ...request,
+      programMode: 'reconcile', programScheduler: createProgramRuntimeScheduler() }) },
+    projections: { publish: unused, recover: unused }, feedback: { submit: unused },
+    agents: { resolve: unused }
+  });
+  let fullAcknowledgements = 0;
+  const operation = runtime.execute({ source: 'transform {"thing":"Source","situation.rep.after":"before"}',
+    correlationId: 'early-central-proof' }, { publish: false,
+    onSourceReceipt(value) { proof = value; }, onCommitted() { fullAcknowledgements += 1; } });
+  t.after(async () => { release(); await operation.catch(() => {}); });
+  await auxiliaryStarted;
+  assert.equal(proof?.ok, true);
+  assert.equal(proof.interactionId, 'early-central-proof');
+  assert.equal(fullAcknowledgements, 0);
+  assert.equal(find(await committedFacts(files), 'Source').situation, 'after');
+  assert.equal(proof.revisionAfter, revisionOfWorldFacts(await committedFacts(files)).replace(/^sha256:/u, ''));
+  release();
+  const result = await operation;
+  assert.equal(result.ok, true);
+  assert.equal(fullAcknowledgements, 1);
+});
+
 test('a terminal-only engine callback never reports a missing source notification callback as failure', async (t) => {
   const files = await fixture(t, 'def receive(delivery):\n    return True\ntrigger("strut", {}, receive)');
   const persistence = createTransactionalWorldPersistence(files);

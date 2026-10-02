@@ -280,6 +280,12 @@ export async function createSpatialServer(options = {}) {
     let rejectActiveDeadline;
     let businessPhase = 'source';
     let durableBusinessResult = null;
+    let confirmedSourceResult = null;
+    const sourceReceiptConfirmed = result => {
+      if (result?.ok === true && result?.changed === true && typeof result.revisionAfter === 'string') {
+        confirmedSourceResult = structuredClone(result);
+      }
+    };
     const deadline = new Promise((_, rejectDeadline) => {
       rejectActiveDeadline = rejectDeadline;
     });
@@ -288,11 +294,13 @@ export async function createSpatialServer(options = {}) {
       if (controller.signal.aborted) return;
       businessPhase = phase;
       timeout = setTimeout(() => {
+        const timedPhase = phase === 'source' && confirmedSourceResult ? 'subsequent' : phase;
         const timeoutError = new SpatialStoreError(
-          phase === 'subsequent' ? 'ATOM_SUBSEQUENT_TIMEOUT' : 'ATOM_INTERACTION_TIMEOUT',
-          `Atom ${phase} phase exceeded its ${atomInteractionTimeoutMs}ms deadline`
+          timedPhase === 'subsequent' ? 'ATOM_SUBSEQUENT_TIMEOUT' : 'ATOM_INTERACTION_TIMEOUT',
+          `Atom ${timedPhase} phase exceeded its ${atomInteractionTimeoutMs}ms deadline`
         );
-        timeoutError.details = { phase, interactionId: id, timeoutMs: atomInteractionTimeoutMs };
+        timeoutError.details = { phase: timedPhase, interactionId: id, timeoutMs: atomInteractionTimeoutMs };
+        if (phase === 'source' && confirmedSourceResult) sourceCommitted(confirmedSourceResult);
         controller.abort(timeoutError);
         rejectActiveDeadline(timeoutError);
       }, atomInteractionTimeoutMs);
@@ -318,7 +326,7 @@ export async function createSpatialServer(options = {}) {
     trackAtomInteraction(async () => {
       try {
         const operationResult = Promise.resolve().then(() => (
-          operation(normalized, sourceCommitted, controller.signal, subsequentSettled)
+          operation(normalized, sourceCommitted, controller.signal, subsequentSettled, sourceReceiptConfirmed)
         ));
         operationResult.then(result => {
           // The first caller keeps its source acknowledgement. Later reads see
@@ -381,8 +389,8 @@ export async function createSpatialServer(options = {}) {
   }
 
   async function executeAtomTextCommand(payload, command, origin) {
-    return atomCommandRequest(payload, async (normalized, onCommitted, signal, onSubsequentSettled) => {
-      const commandResult = await command(normalized, { onCommitted, signal, onSubsequentSettled });
+    return atomCommandRequest(payload, async (normalized, onCommitted, signal, onSubsequentSettled, onSourceReceipt) => {
+      const commandResult = await command(normalized, { onCommitted, signal, onSubsequentSettled, onSourceReceipt });
       if (commandResult?.changed !== false && graphFile && options.projectAtomKnowledge) {
         try {
           const document = JSON.parse(await fs.readFile(graphFile, 'utf8'));

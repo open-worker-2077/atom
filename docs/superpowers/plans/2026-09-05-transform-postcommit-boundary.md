@@ -23,6 +23,14 @@
 
 ### Task 2：按已证实根因进行TDD修复
 
+**CLI关联RED**：`atom-language-cli-graph.test.mjs`新回归确认executeAtomCommandEndpoint错误丢失details，预期来源phase/id/timeout而实际undefined。按原现场排查范围保留服务端结构化details，并让CLI stderr输出已有交互关联号供用方回读；不新增用户命令或默认窗口。
+
+**已提交deadline GREEN**：原HTTP RED转200/changed=true/pending，取消原因变为ATOM_SUBSEQUENT_TIMEOUT；无中央证明的来源超时及独立请求仍通过，共4/4。实际runtime→legacy adapter→persistence集成回归验证：authoritative辅助采用阻塞时，中央证明已到达且revision精确等于已提交事实，完整onCommitted尚未发生；解除后正常完整回执仅一次（1/1）。直接整链已启动句柄48536。内部证明仅供deadline使用，不取代正常完整回执，不延长预算；私有世界无外发。
+
+**已提交deadline RED**：HTTP回归在中央事实已确认但完整来源通知阻塞时仍返回400/ATOM_INTERACTION_TIMEOUT（40ms）；原来源/后续生命周期没有供deadline消费的提前提交证据。修复沿既有生命周期增加内部onSourceReceipt，中央receipt确认后、context采用/authoritative辅助通知前发布最小事实证明；正常完整来源回执保持，只有预算届满且已有中央证明时返回成功/pending，并把取消归属后续。来源预算不延长；无中央证明仍拒绝来源超时。世界写内部尚无journal确认的在途状态仍须独立裁定。
+
+**第二阶段提交**：`8e8dabe`已保存来源通知先于辅助日志及prepare后取消撤销候选；直接链67/67，memory事务10/10。未推送/部署。接续优先项：世界写在途与已提交但通知未到的deadline事实裁定，然后固定同私有夹具性能复测、完整E3。
+
 **中央取消GREEN（阶段）**：新增真实prepare暂停/abort回归已GREEN，memory事务10/10通过；signal从legacy adapter经persistence传到中央coordinator，prepare结束且世界写尚未发生时撤销本次候选、拒绝原取消原因，恢复不产生迟到写。取消发生在世界写内部或事实提交后仍未结算，不能据此宣称所有在途竞态解决。来源通知与身份链的完整直接验证已启动，句柄92716。
 
 **中央取消RED**：真实memory coordinator在after-prepare处暂停，来源signal超时后恢复执行，仍完成事实写入；新回归因Missing expected rejection失败。修复边界确定为首次不可逆世界写之前检查signal，已prepare但尚未写入的本次候选撤销journal，不留冷恢复迟到写；已发生世界写之后的确认仍须以事实证据裁定，不能直接抛取消假称未提交。来源通知顺序回归已GREEN。
@@ -46,6 +54,10 @@ CPU样本窗口12382.945ms，`memory-transaction-ports.readMetadataState`包含�
 - [ ] 运行最小影响链，自查diff并阶段提交；失败先定向调试。Expected：直接合同回归全绿。
 
 ### Task 3：E3验收与交付
+
+**CLI关联GREEN与直接链**：executeAtomCommandEndpoint保留error.details，真实runAtomCli stderr显示原interactionId；该文件9/9通过（24931.8426ms），原始输出`../evidence/2026-10-03-cli-correlation-direct-chain.txt`。提前事实证明99/99证据已保存。下一边界仍是不可逆世界写开始后、journal确认之前的有限等待与如实pending裁定；此时不可把无确认状态报告成未提交，也不可无限等候。
+
+**提前中央证明直接链**：句柄48536退出0，HTTP Graph server/提交边界/memory事务99/99通过（30437.7876ms）；原始输出`../evidence/2026-10-03-cli-source-proof-direct-chain.txt`。CLI错误details回归亦已GREEN，继续补stderr关联回读与CLI直接链；世界写内部在途状态尚未结算，不升级全量或部署。
 
 **来源通知/取消直接链**：句柄92716已退出0，提交边界/Thing身份事务/Program绑定67/67通过（29859.0676ms），原始输出`../evidence/2026-10-03-cli-cancellation-direct-chain.txt`。当前仅确认辅助日志通知顺序和prepare阶段取消边界，世界写在途及已提交通知滞后仍需后续定向验收。
 

@@ -1,0 +1,17 @@
+✔ public command error retains source deadline correlation details (1.7998ms)
+✔ the atom CLI drives a graph served from a fully isolated 4784-style store (103.4004ms)
+✔ public CLI targets an explicitly isolated command endpoint (228.0649ms)
+✔ the isolated live runner launches public atom.cmd through the Windows shell only for fixed generated arguments (0.1633ms)
+✔ the current CLI entry preserves --agent for an isolated endpoint (436.0957ms)
+✔ an explicitly registered ^ synthetic Agent proves path-lock fail-closed and rejects ^^ delegation (2379.5826ms)
+✔ the full isolated public-CLI journey keeps shortcut execution in the moved Agent domain (21609.907ms)
+✔ exact CLI Explore exposes an explicit read-only compiled-lock status without mutating the target (42.6516ms)
+✔ exact CLI Explore renders lock~active for a compiled literal path lock (6.5238ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 24931.8426

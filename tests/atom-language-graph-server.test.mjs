@@ -1226,6 +1226,46 @@ test('hung Atom interaction does not block an independent transform', async (t) 
   await blockedWrite;
 });
 
+test('source deadline uses confirmed central facts while auxiliary acknowledgement is blocked', async (t) => {
+  const directory = await temporaryDirectory();
+  const contextFile = path.join(directory, 'atom.json');
+  const graphFile = path.join(directory, 'graph.json');
+  await fs.writeFile(contextFile, '[]');
+  await fs.writeFile(graphFile, '{}');
+  let release, observedSignal;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const confirmed = { ok: true, changed: true, command: 'transform',
+    revisionBefore: 'before', revisionAfter: 'after', errors: [],
+    subsequentExecution: { status: 'pending', sourceRevision: 'after', revisionAfter: 'after', errors: [] } };
+  const interactionRuntime = {
+    async initialize() { return { initialization: { ok: true, changed: false } }; },
+    async execute(_intent, lifecycle) {
+      observedSignal = lifecycle.signal;
+      lifecycle.onSourceReceipt?.(confirmed);
+      await blocked;
+      await lifecycle.onCommitted(confirmed);
+      return confirmed;
+    },
+    async recover() { return { sourceRevision: 'after' }; },
+    projectionStatus() { return { status: 'published' }; }
+  };
+  const running = await startAtomGraphServer({ host: '127.0.0.1', port: 0,
+    contextFile, graphFile, storeFile: path.join(directory, 'knowledge.json'),
+    interactionRuntime, atomInteractionTimeoutMs: 40 });
+  t.after(async () => { release(); await running.close(); });
+  const response = await fetch(`${running.url}/__atom/api/command`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ source: 'transform {"thing":"Root","situation":"after"}',
+      interaction: { id: 'confirmed-before-auxiliary', agent: { ref: 'transport-ref', path: 'Root' } } })
+  });
+  const payload = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(payload));
+  assert.equal(payload.result.changed, true);
+  assert.equal(payload.result.revisionAfter, 'after');
+  assert.equal(payload.result.subsequentExecution.status, 'pending');
+  assert.equal(observedSignal.reason.code, 'ATOM_SUBSEQUENT_TIMEOUT');
+});
+
 test('hung Atom interaction reaches its own timeout without affecting later requests', async (t) => {
   const directory = await temporaryDirectory();
   const contextFile = path.join(directory, 'atom.json');
