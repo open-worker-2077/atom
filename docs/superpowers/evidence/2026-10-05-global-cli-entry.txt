@@ -1,0 +1,38 @@
+Atom global CLI entry recovery — 2026-10-05 (Asia/Shanghai)
+
+Baseline safety backup
+backup/atom-global-entry-before-repair-20261005 initially 188d820b66b364a58b9cb34341db475655febcf5.
+Persisted plan checkpoint: 670b48fcb18ba5ca759286a6abb5b0ce7ac4fe27 pushed to the same branch.
+
+Confirmed contrast
+Default atom.cmd --help: exit0, 0 lines before repair.
+Source session screenshot successful Help at 03:31: tool argument require_escalated.
+Default fs.realpathSync resolves linked entry; realpathSync.native returns EPERM.
+Default fs.stat/readFile succeed; linked and direct entry have equal file identity.
+Default HTTP connect 127.0.0.1:4784: EACCES; permitted tool execution connects normally.
+
+Regression
+CLI baseline 19/19.
+Affected CLI contracts 28/28.
+Delegated entry with native main false and realpath/stat denied:
+90cde05 gives empty Help (RED); canonical-path fallback returns Help (GREEN).
+Import remains inert.
+
+Candidate remote verification
+6f5e63526276fe9ba2794ba4b564e720fd5fcba3
+PR76 merged by fast-forward, no extra merge commit.
+GitHub run37228862822 completed/success.
+npm test: 2424 tests, 2403 pass, 0 fail, 21 platform skips, 440254ms.
+
+Deployed public entry
+Formal main and global npm-linked source: 6f5e63526276fe9ba2794ba4b564e720fd5fcba3.
+Default global atom.cmd --help: exit0, 165 lines, --agent present.
+Default global command without window: exit4 AGENT_REQUIRED.
+Global read with session-provided window and permitted local-network execution: exit0, root returned.
+No business mutation or service restart in this repair.
+
+Remaining checkpoint at evidence creation
+Windows local full npm test: exit0, 2424 tests, 2423 pass, 0 fail, 1 platform skip, 846137ms.
+Generated assets archived in ignored runtime-data before restoring test-only tracked changes.
+Main run37229459216 on 6f5e63526276fe9ba2794ba4b564e720fd5fcba3 completed/success.
+The final audit commit changes only the ledger, plan, and this evidence; runtime product code remains identical.

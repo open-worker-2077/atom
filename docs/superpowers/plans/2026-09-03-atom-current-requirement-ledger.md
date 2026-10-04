@@ -1,7 +1,7 @@
 # Atom 当前需求与缺陷总账
 
-**更新时间：** 2026-10-03
-**已核对远程基线：** `origin/main@1d36f126703603e70f92f4080a3130d0816cc15b`（本轮CLI修复E3及精确远端run37058685690成功；源码候选6bc1f01）。
+**更新时间：** 2026-10-05
+**已核对远程基线：** `origin/main@6f5e63526276fe9ba2794ba4b564e720fd5fcba3`（全局CLI入口恢复E3，精确main run37229459216成功；PR#76）。
 **用途：** 本页是当前唯一的需求排队与状态裁定入口。规格负责产品定论，专项计划负责实施细节；旧计划中的历史勾选、聊天记录、Agent 自报和 Atom 世界均不能替代本页状态。
 
 ## 会话回查证据
@@ -15,11 +15,19 @@
 
 ### 2026-10-05 当前目标：全局 CLI 入口静默退出（I3/U3/D2/E3）
 
+**当前状态**：正式全局入口已恢复并完成E3；Windows全量、候选和main精确远端检查均通过。当前收尾提交仅持久化本总账、实施计划与脱敏证据，确认其精确远端检查终态后关闭目标。下方RED与未部署记录是历史阶段。
+
 **用户纠偏**：只返回报错仍未解决。可读文件遭遇 realpath 拒绝时，应自动完成身份判断并正常执行同一个全局命令；无须使用者改路径或提权。恢复正常执行是本次验收主干。
 
 **入口回归 RED**：真实子进程在 junction 指向同一源码且 realpath EPERM 时 Help 为空，1失败/1导入隔离通过；现有 CLI 合同19/19基线通过。默认环境 stat 可读且两路径文件身份相同，最小修复采用文件身份回退，保持现有入口和窗口合同。
 
-**状态**：已回查 🌍 最近30分钟并复现；安全备份已推送，尚未修复。实施与诊断见 [2026-10-05-global-cli-entry.md](2026-10-05-global-cli-entry.md)。默认调用 atom.cmd --help 空输出却 exit0；realpath EPERM 后入口 guard 比较 junction 与真实源码的字面路径，误判为导入而跳过执行。文件 stat/readFile 正常；此前为何没有暴露需要历史环境证据，尚不能归因环境升级。备份分支 backup/atom-global-entry-before-repair-20261005 精确指向 188d820b66b364a58b9cb34341db475655febcf5，同 SHA main 检查37072430939成功。Superpowers 6.4.2 来源和 manifest 与既有核对基线一致，SP-L01—05及SP-U01继续补充。ManageGraph 开发冲程承接入口故障，产出默认权限可用的全局 CLI；来源会话业务迁移不在本次软件修复范围。
+**恢复执行 GREEN／尚未部署**：受影响合同28/28通过。独立评审指出 native main 掩盖回退测试，已补 import.meta.main=false 且 realpath/stat 均拒绝的真实委托旅程：90cde05空Help为RED，增加可用的非native realpathSync后GREEN。真实默认候选别名Help输出165行；缺少窗口明确AGENT_REQUIRED，允许本机网络的调用只读回读根成功。截图中的🌍03:31成功调用在原始记录中明确require_escalated，同刻默认正式全局Help仍空，不是自行恢复。另默认连接4784被执行环境以connect EACCES拒绝，单次获准调用正常；该网络边界不由Atom修改OS或绕过沙箱。本次恢复无需提权的入口识别；业务HTTP需执行工具授予既有本机网络访问。PR#76候选6f5e635、精确run37228862822和最终本地全量尚在执行，未宣称E3完成。
+
+**全量GREEN／正式回读通过**：产品6f5e635已快进正式main并推送，PR#76自动MERGED。候选run37228862822完整npm test为2403通过、0失败、21平台跳过；Windows同候选为2423通过、0失败、1跳过，846137ms、自然exit0。正式全局atom.cmd在默认环境Help165行exit0、缺窗AGENT_REQUIRED exit4，工具获准本机网络后只读根查询exit0。本次未改业务事实、未重启服务、未调整OS权限。main精确run37229459216仍待终态，收口证据见../evidence/2026-10-05-global-cli-entry.txt；构建产物已存既有忽略runtime-data后恢复测试生成的前端变化。
+
+**正式E3收口**：产品main@6f5e63526276fe9ba2794ba4b564e720fd5fcba3的精确run37229459216已completed/success；本地与两次远端完整门禁均无失败，正式公共入口已回读。本次修复的是正常可读入口的自动恢复执行，截图中的临时成功来自require_escalated调用权限不同。无法据此推断数月执行环境变化或宣称Atom能授权OS网络。评审Minor：真实文件importer补充用例延后，现有模块导入惰性回归通过。Ruling与成本完整记录于实施计划，不另建状态源。
+
+**初始证据**：已回查 🌍 最近30分钟并复现，先推送安全备份再实施。实施与诊断见 [2026-10-05-global-cli-entry.md](2026-10-05-global-cli-entry.md)。原默认调用 atom.cmd --help 空输出却 exit0；realpath EPERM 后入口 guard 比较 junction 与真实源码的字面路径，误判为导入而跳过执行。文件 stat/readFile 正常；不能无证据归因环境升级。备份分支 backup/atom-global-entry-before-repair-20261005 初始SHA为188d820b66b364a58b9cb34341db475655febcf5，同SHA main检查37072430939成功；随后仅持久化计划的670b48f也已推送到该备份分支。Superpowers 6.4.2 来源和manifest与既有核对基线一致，SP-L01—05及SP-U01继续补充。ManageGraph开发冲程承接入口故障，产出默认权限可用的全局CLI；来源会话业务迁移不在本次软件修复范围。
 
 ### 2026-10-03 新目标：信息放大镜共用命中与 CLI 异步 Web 更新
 
