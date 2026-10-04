@@ -18,6 +18,9 @@
 
 ## 已取得证据
 
+- 用户截图所示 🌍 03:31 再次成功的 Help，原始工具参数明确为 require_escalated；同一时点默认调用仍空输出 exit0，不是自恢复，也不代表修复已部署。
+- 默认环境新增最小对照：fs.realpathSync（JS逐段解析）正常得到 junction 的真实路径，而 fs.realpathSync.native 返回 EPERM；说明“所有 realpath 均受限”的旧归纳错误，应按具体解析实现定界。
+
 - 2026-10-05 回查 🌍 02:54—03:24（Asia/Shanghai）对话：阻断是全局 Help 空输出 exit0；业务迁移尚未执行。
 - 当前默认调用复现同样症状。真实源码路径与 npm junction 路径均 stat/readFile 成功、realpath EPERM；提高单次调用权限后 Help 正常。
 - CLI 将两个 realpath 失败降级为各自字面路径，别名与真实路径不同，入口 guard 为 false，主程序未运行便正常退出。这是确认的软件缺陷；为什么历史执行环境不同仍待核对，不能直接归因 Codex 升级。
@@ -45,6 +48,10 @@
 - [ ] 运行 CLI 受影响合同及隔离真实旅程，记录并提交。
 
 ### Task 2：全局入口 E3
+
+**评审与修复**：一次独立评审指出当前 Node 的 native main 可能掩盖文件身份回退，以及旧受支持版本的恢复缺口。补充真实委托启动（import.meta.main=false）、realpath 与 stat 均拒绝的测试；旧90cde05 Help为空为RED，新实现使用非native realpathSync逐段解析恢复为GREEN。该路径在真实默认环境已验证成功；不提高 Node 最低版本。原候选全量在新证据形成后终止，不作为通过证据。Minor：导入测试尚未使用真实 importer 文件，按技能延后；现有真实模块导入惰性测试通过。
+
+**Ruling:** 所有身份解析方法均不可用且无 native main 时，无法安全区分导入与执行；本次解决可读入口的已复现失败，不凭文件名猜测执行。误判的成本是导入触发业务操作，故保持不猜测，并将该极端环境视为证据不足的边界。
 
 **Files:** 同一代码候选；证据和状态回写本计划与唯一总账。
 

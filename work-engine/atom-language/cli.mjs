@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import process from 'node:process';
@@ -1182,10 +1183,16 @@ export async function runAtomCli(argv = [], overrides = {}) {
 }
 
 const invokedFile = process.argv[1]
-  ? await fs.realpath(path.resolve(process.argv[1])).catch(() => path.resolve(process.argv[1]))
+  ? await fs.realpath(path.resolve(process.argv[1])).catch(() => {
+    try { return realpathSync(path.resolve(process.argv[1])); }
+    catch { return path.resolve(process.argv[1]); }
+  })
   : null;
 const currentFile = await fs.realpath(fileURLToPath(import.meta.url))
-  .catch(() => fileURLToPath(import.meta.url));
+  .catch(() => {
+    try { return realpathSync(fileURLToPath(import.meta.url)); }
+    catch { return fileURLToPath(import.meta.url); }
+  });
 // A linked executable remains the same file even when canonical-path lookup
 // is restricted. Compare filesystem identities rather than abandoning the CLI.
 const sameEntryFile = invokedFile && (invokedFile === currentFile || await Promise.all([
