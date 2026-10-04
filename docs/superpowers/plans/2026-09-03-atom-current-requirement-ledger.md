@@ -15,6 +15,10 @@
 
 ### 2026-10-05 当前目标：全局 CLI 入口静默退出（I3/U3/D2/E3）
 
+**用户纠偏**：只返回报错仍未解决。可读文件遭遇 realpath 拒绝时，应自动完成身份判断并正常执行同一个全局命令；无须使用者改路径或提权。恢复正常执行是本次验收主干。
+
+**入口回归 RED**：真实子进程在 junction 指向同一源码且 realpath EPERM 时 Help 为空，1失败/1导入隔离通过；现有 CLI 合同19/19基线通过。默认环境 stat 可读且两路径文件身份相同，最小修复采用文件身份回退，保持现有入口和窗口合同。
+
 **状态**：已回查 🌍 最近30分钟并复现；安全备份已推送，尚未修复。实施与诊断见 [2026-10-05-global-cli-entry.md](2026-10-05-global-cli-entry.md)。默认调用 atom.cmd --help 空输出却 exit0；realpath EPERM 后入口 guard 比较 junction 与真实源码的字面路径，误判为导入而跳过执行。文件 stat/readFile 正常；此前为何没有暴露需要历史环境证据，尚不能归因环境升级。备份分支 backup/atom-global-entry-before-repair-20261005 精确指向 188d820b66b364a58b9cb34341db475655febcf5，同 SHA main 检查37072430939成功。Superpowers 6.4.2 来源和 manifest 与既有核对基线一致，SP-L01—05及SP-U01继续补充。ManageGraph 开发冲程承接入口故障，产出默认权限可用的全局 CLI；来源会话业务迁移不在本次软件修复范围。
 
 ### 2026-10-03 新目标：信息放大镜共用命中与 CLI 异步 Web 更新

@@ -1186,7 +1186,14 @@ const invokedFile = process.argv[1]
   : null;
 const currentFile = await fs.realpath(fileURLToPath(import.meta.url))
   .catch(() => fileURLToPath(import.meta.url));
-if (invokedFile && invokedFile === currentFile) {
+// A linked executable remains the same file even when canonical-path lookup
+// is restricted. Compare filesystem identities rather than abandoning the CLI.
+const sameEntryFile = invokedFile && (invokedFile === currentFile || await Promise.all([
+  fs.stat(invokedFile, { bigint: true }),
+  fs.stat(currentFile, { bigint: true })
+]).then(([invoked, current]) => invoked.ino !== 0n
+  && invoked.ino === current.ino && invoked.dev === current.dev).catch(() => false));
+if (sameEntryFile || import.meta.main === true) {
   const runtime = resolveAtomRuntime();
   process.exitCode = await runAtomCli(process.argv.slice(2), {
     requireAgent: true,

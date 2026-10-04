@@ -3,6 +3,8 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 恢复全局 atom.cmd 在当前受限调用中的正常 Help 和读取，并解释故障触发条件。
+
+**2026-10-05 用户纠偏（绑定验收）**：重点不是将空输出改为报错。文件仍可访问时，正常软件应恢复入口识别并继续执行；使用者使用同一个全局命令，不改路径、不提权、不因可恢复的 realpath 失败停工。明确错误只适用于真正无法执行的失败，不能作为本问题的解决结果。
 **Architecture:** 修复 CLI 对执行入口与导入模块的身份判断，保留导入无副作用合同。以真实全局调用与隔离回归共同验收。
 **Tech Stack:** Windows、PowerShell、Node.js ESM、node:test。
 **Spec:** 本计划的验收边界；唯一排队状态见 2026-09-03-atom-current-requirement-ledger.md。
@@ -31,6 +33,8 @@
 5. 身份无法判断的真正入口失败必须可观察，不得误报成功。
 
 ### Task 1：诊断与入口修复
+
+**RED**：真实子进程将 argv 指向同一文件的 junction，并仅令 realpath 返回 EPERM；Help 输出为空导致 --agent 断言失败，模块导入仍无输出。Windows 测试预加载 URL 与参数分界错误先修正，不计作产品 RED。现有 CLI 合同基线19/19通过。默认环境 stat 返回两路径相同 dev=2364630212、ino=562949954502045，可据文件身份识别同一入口。入口 guard 已存在于2026-08-14源码基线；没有证据证明本周新增，不能把当前失败推断为近期 Atom 改坏。
 
 **Files:** Modify work-engine/atom-language/cli.mjs；Test tests 中既有 CLI 合同文件及必要的新入口回归文件。
 **Interfaces:** 消费 process.argv[1] 和 import.meta.url；保持 runAtomCli 原接口与返回合同。
