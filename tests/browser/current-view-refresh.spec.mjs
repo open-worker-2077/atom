@@ -41,15 +41,17 @@ test('F5 restores the current domain and camera instead of opening root', async 
   await expect.poll(() => page.evaluate(() => window.spatialLab?.state().path)).toBe(before.path);
   expect(await page.evaluate(() => window.spatialLab.state().camera)).toEqual(before.camera);
 });
-test('F5 restores expanded groups with the same camera', async ({ page }) => {
+test('F5 resets expanded groups and reframes their collapsed domain', async ({ page }) => {
   await open(page);
   await page.evaluate(() => window.spatialLab.dispatch('applyInwardView'));
   await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths.length)).toBeGreaterThan(1);
   await page.waitForTimeout(600);
-  const before = await page.evaluate(() => ({ paths: window.spatialLab.state().clusterPaths, camera: window.spatialLab.state().camera }));
   await page.reload();
-  await expect.poll(() => page.evaluate(() => window.spatialLab?.state().clusterPaths)).toEqual(before.paths);
-  expect(await page.evaluate(() => window.spatialLab.state().camera)).toEqual(before.camera);
+  await expect.poll(() => page.evaluate(() => window.spatialLab?.state().clusterPaths)).toEqual(['root']);
+  await expect.poll(() => page.evaluate(() => {
+    const target = window.spatialLab.state().interactionTargets.find(t => t.label === '阅读团');
+    return target ? Math.hypot(target.clientX - innerWidth / 2, target.clientY - innerHeight / 2) : Infinity;
+  })).toBeLessThan(5);
 });
 
 test('invalid saved browsing data does not prevent loading the current world', async ({ page }) => {

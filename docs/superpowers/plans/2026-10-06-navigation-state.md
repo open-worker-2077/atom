@@ -36,9 +36,9 @@
 **Interfaces:** restoreBrowserView(saved)、returnClusterToDepth(targetDepth,previous)、collapseClusterDomain(path)、clusterSpatialFrame(path)；不新增业务存储。
 
 - [x] 合成多层世界复现三项RED；修正无效诊断前提。
-- [ ] 按已确认主干逐项最小修复；先上钻，再刷新，再收拢。
-- [ ] 原展开恢复断言按新合同更新；验证无展开F5相机、损坏快照及自动正文更新继续有效。
-- [ ] 运行navigation-state/current-view-refresh/expanded-reader-refresh关键旅程；受影响模型与桥接合同通过后阶段提交。
+- [x] 按已确认主干逐项最小修复；先上钻，再刷新，再收拢。
+- [x] 原展开恢复断言按新合同更新；无展开F5相机GREEN，损坏快照及自动正文更新进入组合验证。
+- [x] 运行navigation-state/current-view-refresh/expanded-reader-refresh关键旅程；受影响模型与桥接合同通过后阶段提交。
 
 ### Task 2: 评审、远端与正式E3
 
@@ -49,3 +49,15 @@
 - [ ] 更新实际资源入口哈希，候选推送PR，必要完整门禁取得精确revision成功。
 - [ ] main快进部署；公共4784只读上/下钻与刷新/收拢回读，拦截业务写入。
 - [ ] 推送正式main及审计记录，精确远端检查终态成功后关闭目标；不为记录审计检查本身无止境产生新提交。
+
+**上钻首个修复定向验证**：两次上钻路径与子团清零断言已通过；整条多层旅程触及默认30秒总时限，在最终居中断言前超时，未得到居中有效结果。旅程总时限按既有复杂浏览器旅程设90秒，各行为断言仍5秒，不放宽产品可见性条件。
+
+**上钻GREEN**：真实多层exit旅程1/1通过（16.1秒），连续上钻path正确、两次下级团清零、总节点屏幕居中。刷新修复只在读取浏览快照时清临时展开，并在布局重置时复用refitCurrentDomain；视图历史restoreVisualSnapshot不变。
+
+**刷新GREEN**：原文偏好、未展开F5当前域与相机、展开后F5清零并居中、刷新上钻再下钻子团仍清零，4/4通过。startupBrowserView消费的快照先清展开，桥接不会按旧expandedClusters重新预取；同会话历史恢复函数未变。收拢按新collectClusterNodes的carrier几何调用既有spatialEnvelopeFrame与startCameraTween，不读旧hitRegions。
+
+**收拢GREEN**：真实PageDown/子团空白右键1/1通过（15.8秒），返回carrier在5px内居中。补验证另一未收拢分支仍展开；接下来受影响链与组合旅程。
+
+**合同裁定**：受影响链170项169通过/1失败，唯一旧合同禁止上钻调用任何相机取景，与本次用户要求父层居中冲突。按新规格退出该旧源码禁用断言，并退出同文件收拢不得取景的误导性标题/弱源码断言；保留展开、清选择等边界，居中行为由真实浏览器RED→GREEN覆盖，不用新源码文字替代行为证据。
+
+**Task1组合GREEN**：Windows Chromium8/8（2分钟），真实上钻、刷新清零再下钻、PageDown右键收拢居中且另一分支仍展开、旧原文偏好、无展开F5相机、坏快照、展开团正文实时更新不移动相机全部通过。受影响Node170/170。复用同产品revision有效证据，不因task-done包装重复运行整组旅程；实际命令与完整输出已在所属SDD目录留存。入口按实际资源重算版本，无bundled源码变化，不重新引入无关vendor构建差异。进入fresh整体评审和精确远端完整门禁。

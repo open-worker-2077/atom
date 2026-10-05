@@ -5972,9 +5972,12 @@
     state.menuFor = null;
     state.middleLabelFocus = null;
     state.prefetchedDomain = null;
+    sceneAdapter.commitViewIntent(state, { type: "clear-views" });
     buildClusterScene();
     updateSelectionUI();
-    announce(`已收回最深球团，当前保留 ${state.depth + 1} 个域`);
+    startCameraTween(currentDomainClusterFrame(), 420, recordCurrentView);
+    announce(`已返回 ${previous.crumbs.at(-1)}`);
+    return true;
   }
 
   function returnToDepth(targetDepth) {
@@ -6387,6 +6390,22 @@
     return true;
   }
 
+  function frameCollapsedCluster(descriptor) {
+    const carrier = collectClusterNodes().find(item => !item.clusterShellProxy
+      && item.ownerPath === descriptor.parentPath && item.node.id === descriptor.parentNodeId);
+    if (!carrier) return frameClusterDomain(descriptor.parentPath);
+    const frame = viewModeModel.spatialEnvelopeFrame(
+      [{ center: carrier.position, radius: carrier.radius }], cameraBasis(), {
+        width: state.width, height: state.height, fov: camera.fov, safeMargin: 24,
+        minimumDistance: focusMinimumDistance(), maximumDistance: MAX_CAMERA_DISTANCE
+      }
+    );
+    if (!frame) return false;
+    rememberLatestInteraction(carrier);
+    startCameraTween(frame, 420, recordCurrentView);
+    return true;
+  }
+
   function collapseClusterDomain(path) {
     const descriptor = state.expandedClusterDomains.get(path);
     const changed = collapseClusterDomainWithOptions(path, {
@@ -6396,7 +6415,7 @@
     });
     if (!changed) return false;
     buildClusterScene();
-    recenterLatestInteraction();
+    frameCollapsedCluster(descriptor);
     updateSelectionUI();
     announce(`已收起 ${descriptor.label} 的子域团`);
     return true;
@@ -9334,7 +9353,11 @@
         || (snapshot.detailModes !== undefined && (!Array.isArray(snapshot.detailModes)
           || !snapshot.detailModes.every(entry => entry && typeof entry.id === "string"
             && ["name", "surface", "floating"].includes(entry.mode))))) return null;
-      return saved;
+      return {
+        ...saved,
+        resetExpanded: snapshot.expandedClusters.length > 0 || (snapshot.revealedIds || []).length > 0,
+        snapshot: { ...snapshot, expandedClusters: [], revealedIds: [], detailLensIds: [], surfaceIds: [], detailModes: [] }
+      };
     } catch (_) { return null; }
   }
   function saveBrowserView() {
@@ -9355,13 +9378,13 @@
     }
     if (!route) return false;
     const snapshot = { ...saved.snapshot, path, depth: route.entries.length, crumbs: route.labels };
-    if (path !== saved.snapshot.path) { snapshot.selectedId = null; snapshot.focusedId = null; }
+    if (path !== saved.snapshot.path || saved.resetExpanded) { snapshot.selectedId = null; snapshot.focusedId = null; }
     state.domainRoutes.set(path, cloneDomainStack(route.entries));
     if (!restoreVisualSnapshot(snapshot)) return false;
     const viewCamera = saved.camera;
     const values = [viewCamera?.target?.x, viewCamera?.target?.y, viewCamera?.target?.z,
       viewCamera?.yaw, viewCamera?.pitch, viewCamera?.distance];
-    if (path === saved.snapshot.path && values.every(Number.isFinite) && viewCamera.distance > 0) {
+    if (!saved.resetExpanded && path === saved.snapshot.path && values.every(Number.isFinite) && viewCamera.distance > 0) {
       state.cameraTween = null;
       Object.assign(camera, viewCamera, { target: { ...viewCamera.target } });
     } else refitCurrentDomain({ path, reason: "view-restored" });

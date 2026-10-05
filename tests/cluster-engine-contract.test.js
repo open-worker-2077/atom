@@ -339,27 +339,22 @@ test('cluster blank edit and exit gestures use the visible sphere instead of its
   assert.match(engine, /findHit\(event\.clientX, event\.clientY, \{ blankSensitive, semanticEdit \}\)/);
 });
 
-test('cluster branch toggles preserve the user camera instead of forcing a closer fit', () => {
+test('opening branches and toggling the field preserve the user camera', () => {
   const toggle = functionSource('toggleClusterChildDomain');
-  const collapse = functionSource('collapseClusterDomain');
   const modeToggle = functionSource('toggleClusterField');
 
   assert.match(toggle, /buildClusterScene\(\)/);
-  assert.match(collapse, /buildClusterScene\(\)/);
   assert.doesNotMatch(toggle, /fitClusterFieldCamera|startCameraTween|camera\.distance\s*=/);
-  assert.doesNotMatch(collapse, /fitClusterFieldCamera|startCameraTween|camera\.distance\s*=/);
   assert.match(modeToggle, /buildClusterScene\(\)/);
   assert.doesNotMatch(modeToggle, /fitClusterFieldCamera|startCameraTween|camera\.distance\s*=/);
 });
 
-test('cluster navigation and selection clearing never rewrite the user zoom', () => {
+test('selection clearing and overview retain their existing scene boundaries', () => {
   const clear = functionSource('clearFocus');
-  const returnDepth = functionSource('returnClusterToDepth');
   const overview = functionSource('returnOverview');
   const locate = functionSource('locateKnowledgeNode');
 
   assert.match(clear, /if \(state\.clusterFieldOpen\) \{\s*buildClusterScene\(\);/);
-  assert.doesNotMatch(returnDepth, /fitClusterFieldCamera|startCameraTween|camera\.distance\s*=/);
   assert.match(overview, /commitViewIntent\(state, \{ type: "clear-views" \}\)/);
   assert.match(locate, /if \(state\.clusterFieldOpen\) buildClusterScene\(\);/);
 });
