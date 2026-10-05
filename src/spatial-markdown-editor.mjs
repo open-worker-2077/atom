@@ -39,6 +39,54 @@ const markdownRenderer = new MarkdownIt({
   typographer: false
 });
 
+// Convert only table text: code and raw HTML retain their existing literal semantics.
+markdownRenderer.core.ruler.after("inline", "table_line_breaks", (state) => {
+  let inCell = false;
+  for (const block of state.tokens) {
+    if (block.type === "td_open" || block.type === "th_open") inCell = true;
+    if (block.type === "td_close" || block.type === "th_close") inCell = false;
+    if (!inCell || block.type !== "inline") continue;
+    const children = [];
+    let hasLineContent = false;
+    const addText = (content, original) => {
+      if (!hasLineContent) content = content.trimStart();
+      if (!content) return;
+      const token = new state.Token("text", "", 0);
+      token.content = content;
+      token.level = original.level;
+      children.push(token);
+      if (content.trim()) hasLineContent = true;
+    };
+    const addBreak = (original) => {
+      const last = children.at(-1);
+      if (last?.type === "text") last.content = last.content.trimEnd();
+      const token = new state.Token("hardbreak", "br", 0);
+      token.level = original.level;
+      children.push(token);
+      hasLineContent = false;
+    };
+    for (const child of block.children || []) {
+      if (child.type !== "text") {
+        children.push(child);
+        if (child.type === "hardbreak" || child.type === "softbreak") hasLineContent = false;
+        else if (child.content || child.type === "image") hasLineContent = true;
+        continue;
+      }
+      let offset = 0;
+      for (const match of child.content.matchAll(/<br\s*\/?>|[ \t]*●/gi)) {
+        addText(child.content.slice(offset, match.index), child);
+        if (match[0].trim() === "●") {
+          if (hasLineContent) addBreak(child);
+          addText("●", child);
+        } else addBreak(child);
+        offset = match.index + match[0].length;
+      }
+      addText(child.content.slice(offset), child);
+    }
+    block.children = children;
+  }
+});
+
 function sanitizeRenderedMarkdown(markdownText) {
   const unsafeHtml = markdownRenderer.render(String(markdownText || ""));
   const DOMPurify = createDOMPurify(window);

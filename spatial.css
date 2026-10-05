@@ -368,6 +368,8 @@ body[data-spatial-scope-state="failed"] .scope-load-state {
 }
 
 .detail-magnifier__content :is(th, td) {
+  overflow-wrap: break-word;
+  word-break: normal;
   padding: var(--space-xs) var(--space-sm);
   border: 1px solid color-mix(in oklch, var(--color-ink-2) 24%, transparent);
   text-align: left;
