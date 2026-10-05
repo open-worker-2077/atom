@@ -31,16 +31,18 @@
 - [x] 浏览器先复现三项RED并确认安全原行为。
 - [x] 在表格文本token中识别主动br和分项；保留代码、原HTML禁用与sanitize。
 - [x] 调整单元格折行规则，构建实际bundle；四项浏览器GREEN。
-- [ ] 导航与正文自动刷新关键旅程、Markdown合同及受影响链组合验证；阶段提交。
+- [x] 导航与正文自动刷新关键旅程、Markdown合同及受影响链组合验证；阶段提交。
 
 ### Task 2: 评审与E3
 
 **Files:** 本计划、既有总账与导航计划。
 **Interfaces:** 消费Task1最终候选，沿导航计划一次候选完整门禁与正式部署。
 
-- [ ] 一次fresh表格增量评审；Important/Critical按RED→GREEN修复。
+- [x] 一次fresh表格增量评审；Important/Critical按RED→GREEN修复。
 - [ ] 和导航候选共用最终精确revision远端检查与正式4784回读，main审计推送成功。
 
 **执行记录**：持久化后远端精确核对40f98fa。共用表格token转换与CSS已实现并构建；保留无源码变化的场景bundle构建输出后恢复原bundle，重算入口实际资源版本。首轮浏览器运行本机HTTP沙箱未形成测试结果，结束后按本机网络权限重跑，不计产品失败。
 
 **GREEN**：Windows Chromium4/4（28.4秒），br三种写法实际四行、●实际三行、窄视口09:50一个文本行且长文多行、带属性br与img不执行/代码不转换。Markdown合同8/8。跨强调与链接/已有br分项组合加入最终旅程。
+
+**最终组合与评审GREEN**：Windows Chromium14/14（3.1分钟），覆盖9项导航/固定原文/实时正文刷新及5项表格旅程；最终受影响Node162/162、开发控制通过。fresh表格增量评审无Critical/Important/Minor，实际MarkdownIt只读补查转义br、强调/链接、已有换行无空行均正常。进入精确候选远端完整门禁，尚未部署。
