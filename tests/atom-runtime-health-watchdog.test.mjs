@@ -235,3 +235,16 @@ test('the default grace keeps a cold runtime alive for a one-minute listener del
   assert.equal(observed.result.action, 'grace');
   assert.equal(observed.calls.some((call) => /^(?:stop|start):/u.test(call)), false);
 });
+
+
+test('a healthy public runtime is preserved when its scheduled task is not running', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
+  const observed = await runWatchdog(t, { taskState: 'Ready', health: [true],
+    state: { unhealthySince: '2026-08-27T23:58:00.0000000Z', lastRecoveryAt: null } });
+  assert.equal(observed.result.action, 'none');
+  assert.equal(observed.result.healthy, true);
+  assert.deepEqual(observed.calls.filter(call => /^(?:stop|start):/u.test(call)), []);
+  const state = JSON.parse(await fs.readFile(observed.result.statePath, 'utf8'));
+  assert.equal(state.unhealthySince, null);
+});

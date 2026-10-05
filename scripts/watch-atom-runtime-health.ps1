@@ -92,6 +92,16 @@ try {
   $state = Read-AtomWatchdogState
   $now = Get-Date
   if ([string]$task.State -ne "Running") {
+    # A recovery process may serve the same endpoint outside the scheduled task.
+    if (Test-AtomRuntimeHealth) {
+      $state.unhealthySince = $null
+      $state.lastRecoveryAt = $null
+      Write-AtomWatchdogState $state
+      Write-Output ([pscustomobject]@{
+        ok = $true; action = "none"; healthy = $true; task = $TaskName; statePath = $StatePath
+      })
+      return
+    }
     if (Test-AtomRecoveryCoolingDown $state $now) {
       Write-AtomWatchdogState $state
       Write-Output ([pscustomobject]@{
