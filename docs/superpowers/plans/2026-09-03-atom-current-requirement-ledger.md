@@ -961,3 +961,5 @@
 2026-10-06 恢复GREEN：4784 health正常，公共CLI只读exit0，Web导航/表格sha256-556d0ddfc065dd7a回读通过。watchdog任务Ready但health真仍Start已行为RED（9/10）；防复发进入2026-10-06-runtime-deployment.md，补全局入口部署匹配规则及健康优先监管，当前服务不再重启。
 
 2026-10-06 服务防复发GREEN：watchdog10/10、fresh评审无缺陷，全局唯一入口部署约束精确一行已验证/可恢复归档。健康实例46016继续服务，待监管脚本候选远端门禁后只更新正式文件；禁止重复重启。
+
+2026-10-06 正式E3产品验收GREEN：导航三项及PageUp取景、表格主动换行/分项与短值完整、服务恢复及健康优先监管均已部署公共回读。最终候选fc05d2d精确run37346563322 completed/success，2405通过/0失败/22条件跳过；Windows14条组合旅程、162受影响合同、10项监管行为均绿。静态文件快进保持正式服务PID46016不变，公共CLI只读exit0、health持续正常。开发入口部署约束已归位；最后main审计提交远端精确检查为目标关闭条件，终态从远端实际结果读取，不无限生成审计提交。全部详情仍由navigation-state、table-line-breaks、runtime-deployment所属计划承接。
