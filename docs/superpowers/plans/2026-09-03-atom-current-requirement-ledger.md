@@ -971,3 +971,5 @@
 2026-10-06 长按修复远端基础设施阻塞：42195f5 run37372990156首次failure，注释确认托管runner多次未分配，测试steps为空；不是代码测试失败。记录后同revision重试，本机最终候选完整门禁进行中；静态正式回读可在本机GREEN后独立推进，远端终态仍是收口门槛。详情见right-hold-upward原计划。
 
 2026-10-06 长按与Web诊断产品E3 GREEN：42195f5最终Windows全量2431通过/0失败/1跳过，最终父层居中+日志突发2/2、日志5/5；fresh整体Critical0/Important0/Minor计数恢复已修。正式静态版本sha256-ce88592bcf6e59be保持PID46016不重启；公共真长按返回父域、1团、中心误差0px，帮助按钮下载51条诊断，所有12次API写请求拦截。软件修复已部署，剩余PR79精确远端runner重试/main收口仍待有效终态，目标active；详情见right-hold-upward原计划。
+
+2026-10-06 长按/诊断远端候选GREEN：42195f5 run37372990156第二次completed/success，2410通过/0失败/22平台条件跳过；Windows全量2431通过，正式E3已验收，runner阻塞解除。产品需求验收完成，PR79合入与最后main审计精确远端成功是目标关闭门槛；main不得引入新产品漂移，后续复用已验证代码证据。全部详情见right-hold-upward原计划。
