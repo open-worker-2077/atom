@@ -43,3 +43,5 @@ Ready+healthy无需Start；Ready+unhealthy仍启动并等待；Running+unhealthy
 **测试纠偏**：RED的action=started有效；GREEN初轮action=none已正确，仅新增断言错误地把必要health读取也当作禁止的调用，改为只断言无start/stop生命周期动作，不降低实际服务检查。
 
 **GREEN**：Windows隔离watchdog10/10，Ready+healthy不Start/Stop且清旧故障、Ready+unhealthy照常启动、grace/cooldown/mutex均通过。全局唯一入口已精确追加部署约束，原/新文件归档在D:/Project/〇/docs/file-management/2026-10-06-deployment-continuity，不新增开发入口。正式服务仍health正常，修改尚未切换正式监管脚本。
+
+**fresh评审GREEN**：888f626..ad162413只读增量评审无Critical/Important/Minor，无搁置事项；10/10真实PowerShell行为证据已读。全局before/after验证只增加部署约束一行。产品导航/表格继续复用已验收证据，不因本次监管脚本修复重新运行浏览器。进入新候选精确远端门禁后仅快进正式文件，禁止服务重启。
