@@ -620,6 +620,9 @@
     pullCompletion = new Promise((resolve) => { completePull = resolve; });
     pulling = true;
     const pullOperationEpoch = workspaceOperationEpoch;
+    const pendingAtStart = pendingRemoteRevision;
+    const revisionRetries = Number.isInteger(options.revisionRetries) ? options.revisionRetries : 2;
+    let retryMixedRevision = false;
     const initialLoad = document.body.dataset.spatialKnowledge !== "authoritative";
     const normalizedPath = typeof requestedPath === "string" && requestedPath.trim()
       ? requestedPath.trim()
@@ -650,7 +653,15 @@
       let refreshedScopes = scopedPath ? [scopedPath] : [];
       if (newerRevision && ((!initialLoad && lastKnowledge) || startupBrowserView)) {
         const refreshedRoute = await refreshExpandedRoute(payload, normalizedPath);
-        if (!refreshedRoute) return false;
+        if (!refreshedRoute) {
+          retryMixedRevision = revisionRetries > 0;
+          if (!retryMixedRevision) {
+            document.body.dataset.spatialBridge = "offline";
+            setScopeLoadState(normalizedPath, "failed", "数据版本仍在变化，等待下一次更新后重试");
+            if (initialLoad) reportMainEntryUnavailable("state");
+          }
+          return false;
+        }
         payload = refreshedRoute.payload;
         incoming = payload.knowledge;
         scopedPath = payload.scope && payload.scope.path;
@@ -718,6 +729,11 @@
     } finally {
       pulling = false;
       completePull();
+      if (retryMixedRevision) {
+        void pullKnowledge(normalizedPath, { ...options, revisionRetries: revisionRetries - 1 });
+      } else if (pendingRemoteRevision > revision && pendingRemoteRevision > pendingAtStart) {
+        void drainRemoteChanges();
+      }
     }
   }
 

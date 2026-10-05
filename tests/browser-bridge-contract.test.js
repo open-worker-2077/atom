@@ -2755,3 +2755,88 @@ test('production Web entry retires operation payloads and both server translatio
     assert.doesNotMatch(production, /\/__atom\/api\/(?:workspace-edit|human-status)|createLegacyHuman(?:Workspace|Status)Translator|updateHuman(?:Workspace|Status)|Web edit requires one stable node identity/, file);
   }
 });
+
+test('startup browsing recovery catches a CLI revision arriving during its scope pull', async () => {
+  const imports = [];
+  const reads = [];
+  const restored = [];
+  let eventSource;
+  let rootReads = 0;
+  let childReads = 0;
+  const saved = { version: 1, snapshot: { path: 'root/a', expandedClusters: [] } };
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = payload => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ path: 'root', transactionActive: false }),
+      savedBrowserView: () => saved,
+      restoreBrowserView: view => { restored.push(view); return true; },
+      exportField: () => ({ path: 'root' }),
+      importKnowledge: knowledge => { imports.push(structuredClone(knowledge)); return true; }
+    },
+    EventSource: class { constructor() { eventSource = this; } },
+    fetch: async url => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (!url.includes('/state')) return response({ result: {} });
+      const scope = new URL(`http://atom.test${url}`).searchParams.get('path');
+      reads.push(scope);
+      const revision = scope === 'root' && ++rootReads === 1 ? 1 : 2;
+      if (scope === 'root/a' && ++childReads === 1) eventSource.onmessage({ data: '{"revision":2}' });
+      return response({ scope: { path: scope }, knowledge: { revision,
+        nodes: [{ id: scope, key: `${scope}::${scope}`, path: scope, label: `r${revision}` }], edges: [] } });
+    },
+    addEventListener() {}
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document, URL }, { filename: 'spatial-browser-bridge.js' });
+  for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(reads, ['root', 'root/a', 'root', 'root/a']);
+  assert.equal(imports.length, 1);
+  assert.equal(imports[0].revision, 2);
+  assert.ok(imports[0].nodes.every(node => node.label === 'r2'));
+  assert.equal(restored.length, 1);
+  assert.equal(document.body.dataset.spatialKnowledge, 'authoritative');
+  assert.equal(document.body.dataset.spatialBridge, 'connected');
+});
+
+test('continuously changing recovery scopes stop after finite retries instead of spinning', async () => {
+  const imports = [];
+  const reads = [];
+  const restored = [];
+  let eventSource;
+  let rootReads = 0;
+  let childReads = 0;
+  const saved = { version: 1, snapshot: { path: 'root/a', expandedClusters: [] } };
+  const document = { body: { dataset: {} }, hidden: false };
+  const response = payload => ({ ok: true, json: async () => payload });
+  const window = {
+    location: { hostname: '127.0.0.1', protocol: 'http:' },
+    spatialLab: {
+      state: () => ({ path: 'root', transactionActive: false }),
+      savedBrowserView: () => saved,
+      restoreBrowserView: view => { restored.push(view); return true; },
+      exportField: () => ({ path: 'root' }),
+      importKnowledge: knowledge => { imports.push(structuredClone(knowledge)); return true; }
+    },
+    EventSource: class { constructor() { eventSource = this; } },
+    fetch: async url => {
+      if (url.endsWith('/health')) return response({ mode: 'single', atomWorkspace: true });
+      if (!url.includes('/state')) return response({ result: {} });
+      const scope = new URL(`http://atom.test${url}`).searchParams.get('path');
+      reads.push(scope);
+      const revision = scope === 'root' ? 1 : 2;
+      if (scope === 'root/a' && ++childReads === 1) eventSource.onmessage({ data: '{"revision":2}' });
+      return response({ scope: { path: scope }, knowledge: { revision,
+        nodes: [{ id: scope, key: `${scope}::${scope}`, path: scope, label: `r${revision}` }], edges: [] } });
+    },
+    addEventListener() {}
+  };
+  window.window = window;
+  vm.runInNewContext(source, { window, document, URL }, { filename: 'spatial-browser-bridge.js' });
+  for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(reads, ['root', 'root/a', 'root', 'root/a', 'root', 'root/a']);
+  assert.equal(imports.length, 0);
+  assert.equal(restored.length, 0);
+  assert.equal(document.body.dataset.spatialBridge, 'offline');
+});
