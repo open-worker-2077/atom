@@ -32,3 +32,8 @@ test('large geometry records have a byte limit as well as an event limit', () =>
   assert.ok(logger.export().length < 160000);
   assert.ok(logger.snapshot().dropped > 0);
 });
+
+test('reload retains dropped count and includes records discarded during restore', () => {
+  const logger=createDiagnostics({capacity:2,storage:{getItem:()=>JSON.stringify({dropped:3,events:Array.from({length:5},(_,sequence)=>({event:'navigation',sequence}))})}});
+  assert.equal(logger.snapshot().dropped,6);
+});

@@ -32,7 +32,11 @@
       const saved = storage?.getItem(key);
       if (saved && saved.length < 256000) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed.events)) events = parsed.events.slice(-capacity).map(item => compact(item));
+        if (Array.isArray(parsed.events)) {
+          dropped = Number.isSafeInteger(parsed.dropped) && parsed.dropped >= 0 ? parsed.dropped : 0;
+          events = parsed.events.slice(-capacity).map(item => compact(item));
+          dropped += parsed.events.length - events.length;
+        }
       }
     } catch {}
     bytes = events.reduce((sum,event) => sum + JSON.stringify(event).length, 0);
