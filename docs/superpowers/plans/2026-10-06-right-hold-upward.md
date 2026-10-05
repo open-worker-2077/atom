@@ -41,26 +41,26 @@
 **Files:** spatial-engine.js、spatial-browser-bridge.js/scene adapter仅根因必要处、tests/browser/right-hold-upward.spec.mjs。
 **Interfaces:** pointerhold→applyParentView/exitDomain/returnClusterToDepth；importKnowledge/refitCurrentDomain；真实最终投影几何。
 
-- [ ] 隔离及正式只读真实右键按下/等待/松开逐层复现，记录路径、场景与相机的阶段变化。
-- [ ] 在所属计划即时写已验证根因及最小修复主干，真实行为RED后产品修复。
-- [ ] 单层/多层/异步scope/缓存父域/展开场景行为GREEN；必要受影响链阶段提交。
+- [x] 隔离及正式只读真实右键按下/等待/松开逐层复现，记录路径、场景与相机的阶段变化。
+- [x] 在所属计划即时写已验证根因及最小修复主干，真实行为RED后产品修复。
+- [x] 单层/多层/异步scope/缓存父域/展开场景行为GREEN；必要受影响链阶段提交。
 
 ### Task 2: 集成有界Web诊断
 
 **Files:** spatial-diagnostics.js、spatial-engine.js、spatial-browser-bridge.js、index.html、tests/spatial-diagnostics.test.js、tests/browser/right-hold-upward.spec.mjs。
 **Interfaces:** record compact event、snapshot/export；既有导航/import/取景生命周期检查点只观察，不另建场景状态。
 
-- [ ] 先测试有界缓冲、批量调度、坏存储/配额失败不抛到操作、载入/导出及无业务正文。
-- [ ] 最小集成诊断，按需导出；证明不每帧写入、事件突发有界且失败不影响关键旅程。
-- [ ] 与Task1真实用户旅程组合验证；同代码revision复用旧数据刷新与表格证据，只验证具体影响链。
+- [x] 先测试有界缓冲、批量调度、坏存储/配额失败不抛到操作、载入/导出及无业务正文。
+- [x] 最小集成诊断，按需导出；证明不每帧写入、事件突发有界且失败不影响关键旅程。
+- [x] 与Task1真实用户旅程组合验证；同代码revision复用旧数据刷新与表格证据，只验证具体影响链。
 
 ### Task 3: 评审与正式E3
 
 **Files:** 唯一总账、本计划、实际资源hash。
 **Interfaces:** Task1/2最终候选、一次fresh整体评审、精确远端完整门禁、静态部署只读回读。
 
-- [ ] fresh整体评审，实际Important/Critical按RED→GREEN修复；最终候选全量一次。
-- [ ] 原服务持续运行，仅正式文件切换；公共真实长按关键旅程与诊断导出回读。
+- [x] fresh整体评审，实际Important/Critical按RED→GREEN修复；最终候选全量一次。
+- [x] 原服务持续运行，仅正式文件切换；公共真实长按关键旅程与诊断导出回读。
 - [ ] main及审计推送精确检查终态成功后完成目标，不无限制造自指审计提交。
 
 ## 即时证据 2026-10-06
@@ -90,3 +90,23 @@
 ## Fresh整体评审结果及修复
 
 02ed57c相对0803b1c，一次fresh整体只读评审：Critical0、Important0、Minor1，Declined to judge无；当前域优先及旧F5/历史过滤合同确认。Minor：刷新后丢弃计数归零；定向RED actual0/expected6，恢复非负安全整数dropped并累加本次裁剪，GREEN5/5。最终公共帮助按钮真实下载是E3必验，不用API自调用代替。
+
+## 远端基础设施失败与独立必要工作
+
+42195f5精确run37372990156首次尝试：2026-10-05T21:13:11Z completed/failure，test job cancelled，steps为空；官方check注释“The job was not acquired by Runner of type hosted even after multiple attempts”。没有产生任何测试结果，不裁为代码失败。按SP-L03允许基础设施无有效结果同revision重跑，按SP-L05记录并等待重试终态。
+
+Ruling：为不让远端运行器局部阻塞软件修复，本机同最终候选完整npm test一次正在执行。若GREEN，既有批准的正式静态部署/公共回读可继续，不重启后端；远端合入/推送收口与目标完成仍受精确检查终态成功约束，不把本机结果冒充远端成功。
+
+## 最终候选Windows完整门禁
+
+42195f5 `npm test` 一次最终完整结果：2432 tests /2431 pass/0 fail/1 skip，exit0，696114ms。最终Windows长按父域居中及日志突发2/2，日志单测5/5；既有其余导航、F5、收缩同实现有效证据复用。正式监听PID46016不变。
+
+按已记录Ruling，正式main本地仅快进该已验证候选，执行静态公共回读；远端main尚不合入推送，等待同revision检查有效终态。没有用基础设施失败作为代码失败或目标完成依据。
+
+## 正式静态E3产品验收GREEN
+
+正式本地main快进42195f5；正式监听PID46016在切换前后相同，没有重启后端。公共新页面build `sha256-ce88592bcf6e59be`，`public-e3.log` exit0：PageDown展开managegraph→明确进入已展开域depth3→真实空白右键长按返回depth2父域；仅该父域1团、中心误差0px。进入目标团使用既有immersive入口以排除壳中心被内部叶节点占据造成的点选差异；上钻用真实按下/等待/松开。
+
+公共“帮助→导出诊断”按钮实际下载 `atom-web-diagnostics.json`，51条事件，含build/scene-built/camera-settled，无正文；12次API写入全被拦截，没有业务Graph改动。公共服务/CLI健康最终回读仍须在收口再核对一次。
+
+**当前断点**：软件产品E3已部署验收完成；PR79原精确42195f5远端run37372990156第二次尝试等待runner，main远端发布/最终检查未完成，目标保持active。原版33fbf8b备份与新产品42195f5功能分支均在远端，当前审计记录另以本地提交保全；不将基础设施无测试结果判为通过。
