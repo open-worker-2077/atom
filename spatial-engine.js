@@ -31,6 +31,7 @@
     path: document.getElementById("fieldPath"),
     selectionLabel: document.getElementById("selectionLabel"),
     selectionCopy: document.getElementById("selectionCopy"),
+    selectionCopyToggle: document.getElementById("selectionCopyToggle"),
     selectionCaps: document.getElementById("selectionCaps"),
     scopeLoadState: document.getElementById("scopeLoadState"),
     saveStatus: document.getElementById("saveStatus"),
@@ -5245,7 +5246,26 @@
     }
   }
 
+  const SELECTION_COPY_KEY = "atom.selection-raw-text.visible.v1";
+  let selectionCopyVisible = false;
+  try { selectionCopyVisible = global.localStorage.getItem(SELECTION_COPY_KEY) === "true"; }
+  catch (_) { /* Optional display preference. */ }
+  function syncSelectionCopyVisibility() {
+    ui.selectionCopy.hidden = !selectionCopyVisible;
+    if (ui.selectionCopyToggle) {
+      ui.selectionCopyToggle.textContent = selectionCopyVisible ? "隐藏原文" : "显示原文";
+      ui.selectionCopyToggle.setAttribute("aria-expanded", String(selectionCopyVisible));
+    }
+  }
+  if (ui.selectionCopyToggle) ui.selectionCopyToggle.addEventListener("click", () => {
+    selectionCopyVisible = !selectionCopyVisible;
+    try { global.localStorage.setItem(SELECTION_COPY_KEY, String(selectionCopyVisible)); }
+    catch (_) { /* Keep the current page usable without storage. */ }
+    syncSelectionCopyVisibility();
+  });
+
   function updateSelectionUI() {
+    syncSelectionCopyVisibility();
     renderScopeLoadState();
     if (!state.selected) {
       const viewLabel = viewModeModel.modeLabels[state.viewMode] || state.viewMode;
@@ -9293,6 +9313,65 @@
   updateNavigationUI();
   global.requestAnimationFrame(frame);
 
+  const BROWSER_VIEW_KEY = "atom.browser-view.v1";
+  function savedBrowserView() {
+    try {
+      const saved = JSON.parse(global.sessionStorage.getItem(BROWSER_VIEW_KEY));
+      const snapshot = saved?.snapshot;
+      const validPath = path => typeof path === "string" && path.length <= 4096 && /^root(?:\/[^/]+)*$/.test(path);
+      const validIds = ids => ids === undefined || (Array.isArray(ids) && ids.length <= VISUAL_SNAPSHOT_NODE_LIMIT
+        && ids.every(id => typeof id === "string"));
+      if (saved?.version !== 1 || !validPath(snapshot?.path)
+        || !Array.isArray(snapshot.crumbs) || snapshot.crumbs.length > 128
+        || !snapshot.crumbs.every(label => typeof label === "string")
+        || !Array.isArray(snapshot.expandedClusters) || snapshot.expandedClusters.length > 128
+        || !snapshot.expandedClusters.every(entry => entry && validPath(entry.path)
+          && (entry.parentPath === null || validPath(entry.parentPath))
+          && (entry.parentNodeId === null || typeof entry.parentNodeId === "string")
+          && Number.isSafeInteger(entry.depth) && entry.depth >= 0 && entry.depth <= 128
+          && Array.isArray(entry.pathLabels) && entry.pathLabels.every(label => typeof label === "string"))
+        || ![snapshot.revealedIds, snapshot.detailLensIds, snapshot.surfaceIds].every(validIds)
+        || (snapshot.detailModes !== undefined && (!Array.isArray(snapshot.detailModes)
+          || !snapshot.detailModes.every(entry => entry && typeof entry.id === "string"
+            && ["name", "surface", "floating"].includes(entry.mode))))) return null;
+      return saved;
+    } catch (_) { return null; }
+  }
+  function saveBrowserView() {
+    if (document.body.dataset.spatialKnowledge !== "authoritative" || state.transitionLocked) return;
+    try {
+      global.sessionStorage.setItem(BROWSER_VIEW_KEY, JSON.stringify({
+        version: 1, snapshot: visualSnapshot(), camera: cameraSnapshot()
+      }));
+    } catch (_) { /* Browsing remains usable when tab storage is unavailable. */ }
+  }
+  function restoreBrowserView(saved) {
+    if (!saved?.snapshot || state.transitionLocked) return false;
+    let path = saved.snapshot.path;
+    let route = knowledgeRouteForPath(path);
+    while (!route && path.includes("/")) {
+      path = path.slice(0, path.lastIndexOf("/"));
+      route = knowledgeRouteForPath(path);
+    }
+    if (!route) return false;
+    const snapshot = { ...saved.snapshot, path, depth: route.entries.length, crumbs: route.labels };
+    if (path !== saved.snapshot.path) { snapshot.selectedId = null; snapshot.focusedId = null; }
+    state.domainRoutes.set(path, cloneDomainStack(route.entries));
+    if (!restoreVisualSnapshot(snapshot)) return false;
+    const viewCamera = saved.camera;
+    const values = [viewCamera?.target?.x, viewCamera?.target?.y, viewCamera?.target?.z,
+      viewCamera?.yaw, viewCamera?.pitch, viewCamera?.distance];
+    if (path === saved.snapshot.path && values.every(Number.isFinite) && viewCamera.distance > 0) {
+      state.cameraTween = null;
+      Object.assign(camera, viewCamera, { target: { ...viewCamera.target } });
+    } else refitCurrentDomain({ path, reason: "view-restored" });
+    state.viewHistory.reset(visualSnapshot());
+    updateNavigationUI();
+    return true;
+  }
+  global.addEventListener("pagehide", saveBrowserView);
+  global.addEventListener("beforeunload", saveBrowserView);
+
   function requestVisualIntent(intent, visualMeta = {}) {
     if (!visualIntentSet.has(intent)) {
       return false;
@@ -9435,6 +9514,7 @@
     cleanupOrphanedDemoKnowledge();
     state.hovered = null;
     currentDomainNodes();
+    if (state.clusterFieldOpen) buildClusterScene();
     const resolveImportedNode = ({ path, id }) => nodeByIdInPath(path, id);
     state.rendered = workspaceModel.reconcileVisualItems(
       state.rendered,
@@ -9673,6 +9753,8 @@
     }),
     applyPresentationSettings,
     importKnowledge,
+    savedBrowserView,
+    restoreBrowserView,
     setScopeLoadState,
     refitCurrentDomain,
     refreshLoadedDomain,

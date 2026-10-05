@@ -46,6 +46,7 @@
   if (!supported) return;
 
   const API = "/__spatial/api";
+  let startupBrowserView = typeof lab.savedBrowserView === "function" ? lab.savedBrowserView() : null;
   const PRESENTATION_SETTINGS_BACKUP_KEY = "graph-4d.presentation-settings.pre-shared.v1";
   const initialLoadProgress = { service: 0, data: 0, scene: 0 };
   let revision = -1;
@@ -148,6 +149,8 @@
     const view = typeof lab.exportField === "function" ? lab.exportField() : null;
     return [...new Set([
       fallbackPath,
+      ...(startupBrowserView ? startupBrowserView.snapshot.path.split("/").map((_, index, segments) => segments.slice(0, index + 1).join("/")) : []),
+      ...(startupBrowserView ? startupBrowserView.snapshot.expandedClusters.flatMap(entry => [entry.parentPath, entry.path]) : []),
       view && view.path,
       ...[...pendingLandings.values()].flatMap(({ operation }) => (
         (operation.kind === "node-land-batch" ? operation.landings : [operation])
@@ -168,7 +171,12 @@
     const scopes = [seedScope];
     for (const path of paths) {
       if (path === seedScope) continue;
-      const payload = await request(`/state?path=${encodeURIComponent(path)}`);
+      let payload;
+      try { payload = await request(`/state?path=${encodeURIComponent(path)}`); }
+      catch (error) {
+        if (startupBrowserView && error.status === 404) continue;
+        throw error;
+      }
       const incomingRevision = Number(payload?.knowledge?.revision) || 0;
       if (incomingRevision !== seedRevision) {
         pendingRemoteRevision = Math.max(pendingRemoteRevision, incomingRevision, seedRevision);
@@ -319,6 +327,7 @@
     if (!response.ok || payload.ok === false) {
       const error = new Error(payload.error && payload.error.message || "Spatial bridge request failed");
       error.code = payload.error && payload.error.code;
+      error.status = response.status;
       throw error;
     }
     return payload;
@@ -639,7 +648,7 @@
       const newerRevision = incomingRevision > revision;
       const unseenScope = scopedPath && !loadedPaths.has(scopedPath);
       let refreshedScopes = scopedPath ? [scopedPath] : [];
-      if (newerRevision && !initialLoad && lastKnowledge) {
+      if (newerRevision && ((!initialLoad && lastKnowledge) || startupBrowserView)) {
         const refreshedRoute = await refreshExpandedRoute(payload, normalizedPath);
         if (!refreshedRoute) return false;
         payload = refreshedRoute.payload;
@@ -665,13 +674,16 @@
           preserveTransaction: allowDuringTransaction && lab.state().transactionActive === true,
           identityTransitions
         })) return false;
+        const restoredBrowserView = initialLoad && startupBrowserView
+          && typeof lab.restoreBrowserView === "function" && lab.restoreBrowserView(startupBrowserView);
+        if (initialLoad) startupBrowserView = null;
         if (
-          unseenScope
+          !restoredBrowserView && unseenScope
           && scopedPath === (lab.state().path || "root")
           && typeof lab.refitCurrentDomain === "function"
         ) {
           lab.refitCurrentDomain({ path: scopedPath, reason: "scope-loaded" });
-        } else if (unseenScope && typeof lab.refreshLoadedDomain === "function") {
+        } else if (!restoredBrowserView && unseenScope && typeof lab.refreshLoadedDomain === "function") {
           lab.refreshLoadedDomain({ path: scopedPath, reason: "scope-loaded" });
         }
         if (initialLoad) {
