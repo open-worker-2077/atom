@@ -84,7 +84,7 @@ async function settleWorkspaceProjection(running, payload, timeoutMs = 2_000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  assert.fail(`workspace projection ${expectedRevision} was not published`);
+  assert.fail(`workspace projection ${expectedRevision} was not published; actual=${JSON.stringify(running.interactionRuntime.projectionStatus())}`);
 }
 
 test('CLI rejects a stale 4784 runtime instead of trusting a newer local help contract', async (t) => {
