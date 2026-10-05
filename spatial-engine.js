@@ -19,6 +19,13 @@
   const demoGeometry = global.SpatialDemoGeometry;
   const detailMagnifierModel = global.SpatialDetailMagnifierModel;
   const sceneAdapter = global.AtomSpatialScene;
+  function traceSpatial(event, extra = {}) {
+    global.SpatialDiagnostics?.record(event, {
+      path: state.currentPath, depth: state.depth, build: document.body.dataset.build,
+      sceneRevision: state.clusterSceneRevision, camera: cameraSnapshot(), width:state.width, height:state.height,
+      ...extra
+    });
+  }
 
   if (!context || !input || !mobileInput || !visualModel || !gestureArbiter || !middleFrameTarget || !registry || !grammar || !workspaceModel || !programChoiceModel || !clusterField || !viewModeModel || !helpPageModel || !demoModel || !demoGeometry || !detailMagnifierModel || !sceneAdapter) {
     document.body.dataset.spatialUnavailable = "true";
@@ -1493,6 +1500,8 @@
     });
     state.clusterScene = scene;
     state.clusterSceneRevision += 1;
+    traceSpatial("scene-built", { count: scene.clusters.length, compression: scene.compressionMultiplier,
+      clusters: scene.clusters.slice(0,16).map(cluster => ({path:cluster.path, target:cluster.center, radius:cluster.radius})) });
     state.clusterConnectionEdges = (workspace.exportKnowledge().edges || []).map((edge) => ({
       edge,
       fromEndpoint: workspace.resolveEndpoint(edge.from),
@@ -4190,6 +4199,7 @@
   }
 
   function startCameraTween(destination, duration, onComplete) {
+    traceSpatial("camera-request", {target:destination.target, distance:destination.distance, duration});
     const from = cameraSnapshot();
     const to = {
       target: destination.target ? { ...destination.target } : { ...from.target },
@@ -4223,6 +4233,7 @@
     camera.distance = tween.from.distance + (tween.to.distance - tween.from.distance) * eased;
     if (progress >= 1) {
       state.cameraTween = null;
+      traceSpatial("camera-settled");
       if (typeof tween.onComplete === "function") {
         tween.onComplete();
       }
@@ -5696,6 +5707,7 @@
     state.nodes = prefetched && prefetched.path === route.path
       ? prefetched.nodes
       : createChildDomainNodes(enteredNode, state.currentPath, state.depth);
+    traceSpatial("route-committed");
     // Publish only after every active-domain field has been replaced together.
     publishCurrentView();
     rememberDomainRoute(state.currentPath, state.domainStack);
@@ -6284,7 +6296,7 @@
   function applyParentView(domainContext) {
     const path = (domainContext && domainContext.path) || state.currentPath;
     if (!path || path === "root") return false;
-    if (state.expandedClusterDomains.has(path)) {
+    if (path !== state.currentPath && state.expandedClusterDomains.has(path)) {
       const changed = collapseClusterDomain(path);
       if (changed) recordCurrentView();
       return changed;
@@ -6942,6 +6954,7 @@
   }
 
   function dispatchIntent(intent, visualMeta = {}, explicitTarget = null) {
+    traceSpatial("intent", {intent});
     if (!visualIntentSet.has(intent)) {
       return false;
     }
