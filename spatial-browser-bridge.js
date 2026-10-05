@@ -632,7 +632,9 @@
         setScopeLoadState(normalizedPath, "loading");
       }
       if (initialLoad) setInitialLoadProgress("data", 15);
+      global.SpatialDiagnostics?.record("scope-request", {path:normalizedPath, revision});
       let payload = await request(`/state?path=${encodeURIComponent(normalizedPath)}`);
+      global.SpatialDiagnostics?.record("scope-received", {path:normalizedPath, revision:Number(payload.knowledge?.revision) || 0});
       if (initialLoad) {
         setInitialLoadProgress("service", 100);
         setInitialLoadProgress("data", 75);
