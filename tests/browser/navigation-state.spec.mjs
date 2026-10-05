@@ -88,3 +88,26 @@ test('right-click collapse after PageDown centers the resulting carrier', async 
     return t ? Math.hypot(t.clientX - innerWidth / 2, t.clientY - innerHeight / 2) : Infinity;
   })).toBeLessThan(5);
 });
+
+test('PageUp frames the rebuilt parent after a recently centered child collapse', async ({ page }) => {
+  await open(page);
+  await enter(page, '总域', parentPath);
+  await expand(page);
+  await page.evaluate(() => {
+    window.spatialLab.selectByLabel('左团');
+    window.spatialLab.dispatch('applyInwardView');
+  });
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths.length)).toBe(2);
+  await page.waitForTimeout(600);
+  // Reframe the parent with the existing product operation before the next level gesture.
+  await page.evaluate(() => window.spatialLab.refitCurrentDomain());
+  await page.waitForTimeout(600);
+  await page.mouse.move(720, 480);
+  await page.locator('canvas').focus();
+  await page.keyboard.press('PageUp');
+  await expect.poll(() => page.evaluate(() => window.spatialLab.state().clusterPaths)).toEqual([parentPath]);
+  await expect.poll(() => page.evaluate(() => {
+    const s = window.spatialLab.state(), r = s.clusterRegions.find(r => r.path === s.path);
+    return r ? Math.hypot(r.clientX - innerWidth / 2, r.clientY - innerHeight / 2) : Infinity;
+  })).toBeLessThan(5);
+});

@@ -131,7 +131,6 @@ test('PageDown applies nested A projection to the visible frontier and keeps its
   assert.match(expand, /frontierPaths/);
   assert.match(expand, /frameClusterDomain\(anchor\.path\)/);
   assert.doesNotMatch(expand, /recenterLatestInteraction/);
-  assert.match(functionSource('collapseHoveredClusterLevel'), /recenterLatestInteraction/);
 });
 
 test('double Shift owns a persistent peer selection instead of arming the next right click', () => {

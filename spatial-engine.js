@@ -6441,7 +6441,7 @@
     }
     if (!changed) return false;
     buildClusterScene();
-    recenterLatestInteraction();
+    frameClusterDomain(anchor.path);
     updateSelectionUI();
     recordCurrentView();
     announce(`${pathLabelsForPath(anchor.path).at(-1) || "当前团"} 已收缩一层`);
