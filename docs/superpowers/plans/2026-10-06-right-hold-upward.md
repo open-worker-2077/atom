@@ -165,3 +165,7 @@ PR79已MERGED，mergeCommit e9741a010fc89659a091cc08e6cda8fa4354cac8，时间202
 **正式切换前只读基线**：4784 HTTP200，当前监听PID8956（与上次历史PID46016不同）；本次没有重启服务，不将历史PID用作当前进程证据。正式main工作树干净。开发入口check:development-control通过；fresh整包评审进行中。
 
 **fresh整包评审**：expanded_hold_fresh_review 无Critical/Important；Minor为已提交hold后移动仍记cancel，导致日志语义误导。定向修复以secondaryCommitted区分pending取消与已提交动作；旧guard回放review-cancel-red.log exit1，恢复guard直接70/70 GREEN；browser-review-green.log实际已提交后移动1/1通过，camera不漂移且无取消误报。评审修复关闭，开始最终候选全量一次。
+
+**候选封包**：713ac748701ac8273a4e56ea4a6440ba86958b01 已推送功能分支并创建PR80；精确远端run37722659284运行中。本机同候选完整npm test运行中，尚未形成终态。评审定向确认Minor已关闭。后续记录只改Superpowers审计，不漂移产品代码；远端main检查仍须对最终精确审计revision通过。
+
+**构建封包补齐**：npm test首步build:browser已按新spatial-engine内容更新index.html的内容hash/资源版本参数；将该确定性构建输出纳入候选，测试过程正在验证的工作树即此输出。只补stamp和审计，不改变已评审逻辑；精确远端改跟踪新的候选revision，旧713ac检查不作为最终门禁。
