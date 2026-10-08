@@ -1,5 +1,32 @@
 # 长按右键导航取景与Web诊断
 
+## 2026-10-08 长按无法进入沉浸：排查中
+
+- 用户报告突然无法右键长按进入沉浸，要求继续自主排查；不把新标签正常推断为原页面正常，不要求用户截图代替诊断。
+- 基线：main `1be3c9e`，工作树无产品改动；官方 Superpowers 6.4.2 manifest SHA256 `EF99FCE86F655E7B65F9505BDF468C9BCAF9BF49915C72E128ED62BAC40A6586` 与本会话核对基线一致。
+- 已验证对照：公开4784新标签 build `sha256-ce88592bcf6e59be`、阈值240ms，实际鼠标右键按下/持续/松开依次进入 atom.json 和 managegraph；日志出现 applyImmersiveInwardView、route-committed、scope-received、camera-settled，无console error。仅证明干净页的这两次操作正常。
+- 当前工具可连接的浏览器仅含本任务创建的标签，无法直接读取用户故障标签；继续以源码和展开/连续手势场景定位，不以此宣称全局阻塞。
+- 待验证断点：目标选择及portal资格、展开团命中、6px移动取消、修饰键/blur/lostpointercapture取消、过渡锁、编辑状态阻止。当前未裁定根因，未改产品、重启服务或开启新目标。
+
+### 当前已复现的具体分支
+
+公开新页面进入managegraph后PageDown展开子团，在展开团内部、未命中真实子节点的位置实际持续右键按住并松开，路径保持depth2，界面提示子域团已收起，日志intent明确为 `applyParentView`。对照靠近团中心但仍落在子节点扩大的命中范围，实际进入子节点depth4，并非团本体。上述两种行为证明长按识别并未整体失效，展开改变了目标解析。
+
+源码因果链：`findHit` 的blankSensitive分支按 `nodeOwnerPath(node) === domainContext.path` 过滤，子团域壳载体的owner是父域，因此被过滤；未命中内部节点时返回 `{item:null,domainContext}`，mappingContext.onNode为false，hold映射 `fieldHoldSecondary=applyParentView`，随后 `applyParentView` 收缩已展开子团。现存right-hold-upward浏览器回归还明确期望此收缩；不能把变更悄悄写成无行为变化的修复。
+
+既定修复主干：尚未成为当前沉浸范围的已展开子团，长按选择团本体进入沉浸；当前沉浸域的空白仍返回母域，内部节点优先命中，短按收缩不变。用户明确这是早已确认的定论并要求直接执行。撤回“需要再次研讨”的错误裁定：旧测试反映实现偏离，不能覆盖用户定论。未以本复现冒充用户未连接页面的现场证据。移动6px取消为既有明确合同，不改阈值；过渡锁开启函数当前无调用，不作为已确认故障原因。
+
+### 恢复既定长按合同的实施步骤（I3/U3/D2/E3）
+
+使用 writing-plans 补齐此原计划，using-git-worktrees 复用本会话既有隔离checkout，executing-plans 内联执行，test-driven-development 写真实鼠标回归。
+
+- [ ] 将本次根因、用户纠偏、步骤持久化，提交原有版本并推送 `backup/atom-before-expanded-hold-repair-20261008`，回读精确远端SHA；备份仅保存、尚未验收。
+- [ ] 开启目标，详情只指向唯一总账和本原计划。
+- [ ] 浏览器RED：PageDown展开子团→对不含内部节点的团内位置持续右键按住→应在松开前进入该团；保持短按收缩、当前域空白长按上钻和内部节点优先不变；修正旧收缩预期并保留已提交长按后移动不错误拖拽的真实验收。
+- [ ] 最小实现：仅对长按单独解析已展开子团载体，复用现有domainContext、载体与沉浸入口；不扩大普通短按命中、不把当前域外壳当子节点、不复制空间命中算法。
+- [ ] GREEN→真实关键旅程→必要合同门禁；一次fresh整包评审，Important/Critical定向RED/GREEN。
+- [ ] 最终候选完整测试一次、候选推送与精确远端检查；静态部署不停止健康后端，公共入口实际长按回读；main推送及精确终态后完成目标。保留原始证据及工作树，零删除。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** 真实长按右键导航后Graph居中可见，逐层上钻不产生漂浮残团；Web提供不阻塞交互的有界诊断。
