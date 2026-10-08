@@ -24,6 +24,17 @@ function functionSource(name) {
       else if (character === quote) quote = null;
       continue;
     }
+    if (character === '/' && engine[index + 1] === '/') {
+      const end = engine.indexOf('\n', index + 2);
+      index = end < 0 ? engine.length : end;
+      continue;
+    }
+    if (character === '/' && engine[index + 1] === '*') {
+      const end = engine.indexOf('*/', index + 2);
+      assert.notEqual(end, -1, `${name} comment is bounded`);
+      index = end + 1;
+      continue;
+    }
     if (character === '"' || character === "'" || character === '`') {
       quote = character;
       continue;

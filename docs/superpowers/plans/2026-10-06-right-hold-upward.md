@@ -169,3 +169,5 @@ PR79已MERGED，mergeCommit e9741a010fc89659a091cc08e6cda8fa4354cac8，时间202
 **候选封包**：713ac748701ac8273a4e56ea4a6440ba86958b01 已推送功能分支并创建PR80；精确远端run37722659284运行中。本机同候选完整npm test运行中，尚未形成终态。评审定向确认Minor已关闭。后续记录只改Superpowers审计，不漂移产品代码；远端main检查仍须对最终精确审计revision通过。
 
 **构建封包补齐**：npm test首步build:browser已按新spatial-engine内容更新index.html的内容hash/资源版本参数；将该确定性构建输出纳入候选，测试过程正在验证的工作树即此输出。只补stamp和审计，不改变已评审逻辑；精确远端改跟踪新的候选revision，旧713ac检查不作为最终门禁。
+
+**远端失败即时入账**：精确728c32c/run37722878938完整2434项：2411pass、1fail、22skip；唯一失败view-mode-engine-contract的functionSource夹具将新注释中的单引号误作JS字符串，导致函数边界提取失败。定向view-parser-red.log可重现；夹具跳过行/块注释后view-parser-green.log通过，产品代码未变。本机完整尚在运行，已出现两项未改后端的性能断言失败，需终态后定向排查；不当作远端全局通过或完成。
