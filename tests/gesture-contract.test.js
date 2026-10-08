@@ -182,6 +182,9 @@ test('direct lens and command candidates bypass secondary hold and release their
 test('only real unmodified inward or parent navigation starts secondary hold arbitration', () => {
   const secondaryBegins = [];
   const beginSecondaryNavigation = executableFunction('beginSecondaryNavigation', {
+    traceSpatial:()=>{},
+    childPathFor:()=> 'root/portal',nodeOwnerPath:()=> 'root',
+    state: {currentPath:'root',expandedClusterDomains:new Map(),demo:{settings:{secondaryNavigationDelayMs:240}}},
     isUnmodifiedSecondaryNavigation: () => true,
     holdsCurrentImmersiveBoundary: () => false,
     gestureArbiter,
@@ -209,6 +212,57 @@ test('only real unmodified inward or parent navigation starts secondary hold arb
 
   assert.equal(beginSecondaryNavigation({ ...candidate, intent: 'inspect' }), false);
   assert.equal(secondaryBegins.length, 1);
+});
+
+test('expanded child hold enters its carrier while taps and current-shell holds keep parent navigation', () => {
+  const carrier={id:'group',capabilities:{portal:true}};
+  const realNode={id:'inner'};
+  const state={demo:{settings:{secondaryNavigationDelayMs:240}},currentPath:'root',expandedClusterDomains:new Map([['root/group',{}]]),
+    clusterScene:{clusters:[{path:'root/group',parentCarrierNode:carrier}]}};
+  const actions=[];
+  const begin=executableFunction('beginSecondaryNavigation',{
+    state,traceSpatial:()=>{},childPathFor:()=> 'root/group',nodeOwnerPath:()=> 'root',isUnmodifiedSecondaryNavigation:()=>true,gestureArbiter,
+    input:{resolvePointer:(_event,context)=>context.onNode?'applyImmersiveInwardView':'applyParentView'},
+    contextualizeAction:action=>action,secondaryClickArbiter:{begin:(...args)=>actions.push(args)},
+    candidateArbiterKey:()=> 'field',candidateSecondarySequenceKey:()=> 'field',candidateSecondaryPhysicalPoint:()=>({x:10,y:10,tolerance:6})
+  });
+  const candidate={button:2,intent:'applyParentView',item:null,node:null,domainContext:{path:'root/group'},mappingContext:{onNode:false}};
+  assert.equal(begin({...candidate}),true);
+  assert.equal(actions[0][0].intent,'applyParentView');
+  assert.equal(actions[0][0].target,null);
+  assert.equal(actions[0][1].intent,'applyImmersiveInwardView');
+  assert.equal(actions[0][1].target,carrier);
+  begin({...candidate,domainContext:{path:'root'}});
+  assert.equal(actions[1][1].intent,'applyParentView');
+  assert.equal(actions[1][1].target,null);
+  begin({...candidate,node:realNode,item:{node:realNode},intent:'applyInwardView'});
+  assert.equal(actions[2][1].target,realNode);
+  begin({...candidate,item:{kind:'relationship'}});
+  assert.equal(actions[3][1].intent,'applyParentView');
+});
+
+test('secondary cancellation logs the reason and movement once without changing the cancellation', () => {
+  const events=[];
+  let cancellations=0;
+  const state={pointerCandidate:{secondaryNavigation:true,cancelled:false,movementPx:12,startedAt:0}};
+  const cancel=executableFunction('cancelPendingSecondaryNavigation',{
+    state,traceSpatial:(event,extra)=>events.push({event,...extra}),
+    secondaryClickArbiter:{cancel:()=>cancellations++}
+  });
+  cancel('movement');
+  assert.equal(state.pointerCandidate.cancelled,true);
+  assert.equal(cancellations,1);
+  assert.equal(events.length,1);
+  assert.equal(events[0].event,'secondary-cancel');
+  assert.equal(events[0].status,'movement');
+  assert.equal(events[0].distance,12);
+  cancel('blur');
+  assert.equal(events.length,1);
+  assert.equal(cancellations,2);
+  state.pointerCandidate={secondaryNavigation:true,cancelled:false,secondaryCommitted:true,movementPx:12};
+  cancel('movement');
+  assert.equal(events.length,1);
+  assert.equal(cancellations,3);
 });
 
 test('current immersive shell blank remains parent navigation instead of consuming the hold', () => {

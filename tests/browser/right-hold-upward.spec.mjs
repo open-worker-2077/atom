@@ -38,6 +38,90 @@ async function expand(page) {
   await page.waitForTimeout(600);
 }
 
+async function shellBlank(page, path) {
+  return page.evaluate(path => {
+    const s = window.spatialLab.state(), r = s.clusterRegions.find(r => r.path === path);
+    const points = r.envelope.points;
+    const inside = (x,y) => {
+      let hit = false;
+      for (let i=0,j=points.length-1;i<points.length;j=i++) {
+        const a=points[i], b=points[j];
+        if ((a.y>y)!==(b.y>y) && x<(b.x-a.x)*(y-a.y)/(b.y-a.y)+a.x) hit=!hit;
+      }
+      return hit;
+    };
+    for (let y=Math.max(30,r.envelope.bounds.top+10);y<Math.min(innerHeight-60,r.envelope.bounds.bottom-10);y+=8) {
+      for (let x=Math.max(30,r.envelope.bounds.left+10);x<Math.min(innerWidth-60,r.envelope.bounds.right-10);x+=8) {
+        if (inside(x,y) && !s.interactionTargets.some(t => !t.clusterShellProxy && Math.hypot(x-t.clientX,y-t.clientY)<(t.radius+3)*1.14+12)
+          && document.elementFromPoint(x,y)?.id==='spaceCanvas') return {x,y};
+      }
+    }
+    throw Error('no shell blank');
+  },path);
+}
+
+test('hold in an expanded child group enters that group before release', async ({page}) => {
+  await open(page); await enter(page,'总域',parentPath); await expand(page);
+  const point = await shellBlank(page,leftPath);
+  const delay = Number(await page.locator('#secondaryNavigationDelay').inputValue());
+  await page.mouse.move(point.x,point.y); await page.mouse.down({button:'right'});
+  await page.waitForTimeout(delay+180);
+  await expect.poll(()=>page.evaluate(()=>window.spatialLab.state().path)).toBe(leftPath);
+  await page.mouse.up({button:'right'});
+  await page.waitForTimeout(600);
+  expect(await page.evaluate(()=>window.spatialLab.state().path)).toBe(leftPath);
+  const events=await page.evaluate(()=>window.SpatialDiagnostics.snapshot().events);
+  expect(events).toEqual(expect.arrayContaining([
+    expect.objectContaining({event:'secondary-press',status:'expanded-child',intent:'applyImmersiveInwardView',target:{path:leftPath}}),
+    expect.objectContaining({event:'secondary-hold',intent:'applyImmersiveInwardView'})
+  ]));
+});
+
+test('moving before the hold threshold records cancellation without navigating', async ({page}) => {
+  await page.clock.install();
+  await open(page); await enter(page,'总域',parentPath); await expand(page);
+  const point=await shellBlank(page,leftPath);
+  await page.clock.pauseAt(await page.evaluate(()=>Date.now()+60_000));
+  const before=await page.evaluate(()=>window.SpatialDiagnostics.snapshot().events.at(-1)?.sequence || 0);
+  await page.mouse.move(point.x,point.y); await page.mouse.down({button:'right'});
+  await page.mouse.move(point.x+12,point.y);
+  await page.mouse.up({button:'right'});
+  await page.clock.runFor(1200);
+  expect(await page.evaluate(()=>window.spatialLab.state().path)).toBe(parentPath);
+  const events=await page.evaluate(sequence=>window.SpatialDiagnostics.snapshot().events.filter(e=>e.sequence>sequence),before);
+  expect(events.filter(e=>e.event==='secondary-cancel')).toEqual([
+    expect.objectContaining({status:'movement',distance:12})
+  ]);
+  expect(events.some(e=>e.event==='secondary-hold'||e.event==='secondary-tap')).toBe(false);
+});
+
+test('short press in an expanded child group still collapses that group', async ({page}) => {
+  await open(page); await enter(page,'总域',parentPath); await expand(page);
+  const point = await shellBlank(page,leftPath);
+  await page.mouse.click(point.x,point.y,{button:'right'});
+  await expect.poll(()=>page.evaluate(path=>window.spatialLab.state().clusterPaths.includes(path),leftPath)).toBe(false);
+  expect(await page.evaluate(()=>window.spatialLab.state().path)).toBe(parentPath);
+});
+
+test('hold on a real child of an expanded group enters that child', async ({page}) => {
+  await open(page); await enter(page,'总域',parentPath); await expand(page);
+  const target=await page.evaluate(()=>window.spatialLab.state().interactionTargets.find(t=>t.label==='左一'&&!t.clusterShellProxy));
+  const delay=Number(await page.locator('#secondaryNavigationDelay').inputValue());
+  await page.mouse.move(target.clientX,target.clientY); await page.mouse.down({button:'right'});
+  await page.waitForTimeout(delay+180); await page.mouse.up({button:'right'});
+  await expect.poll(()=>page.evaluate(()=>window.spatialLab.state().path)).toBe(child(leftPath,'l1'));
+});
+
+test('hold inside the current immersive shell still returns to its parent', async ({page}) => {
+  await open(page); await enter(page,'总域',parentPath); await expand(page);
+  await enter(page,'左团',leftPath);
+  const point=await shellBlank(page,leftPath);
+  const delay=Number(await page.locator('#secondaryNavigationDelay').inputValue());
+  await page.mouse.move(point.x,point.y); await page.mouse.down({button:'right'});
+  await page.waitForTimeout(delay+180); await page.mouse.up({button:'right'});
+  await expect.poll(()=>page.evaluate(()=>window.spatialLab.state().path)).toBe(parentPath);
+});
+
 test('delayed expanded scopes keep the PageDown domain centered', async ({page}) => {
   await page.route('**/__spatial/api/state*', async route => {
     const path = new URL(route.request().url()).searchParams.get('path') || 'root';
@@ -58,24 +142,21 @@ test('delayed expanded scopes keep the PageDown domain centered', async ({page})
 
 test('movement after a committed right hold cannot drag using the departed scene anchor', async ({page}) => {
   await open(page); await enter(page,'总域',parentPath); await expand(page);
-  const point=await page.evaluate(path=>{
-    const s=window.spatialLab.state(), r=s.clusterRegions.find(r=>r.path===path);
-    for(let i=0;i<48;i++) {
-      const x=r.clientX+Math.cos(i/48*Math.PI*2)*r.radius*.75;
-      const y=r.clientY+Math.sin(i/48*Math.PI*2)*r.radius*.75;
-      if(x>20&&y>20&&x<innerWidth-60&&y<innerHeight-60&&!s.interactionTargets.some(t=>!t.clusterShellProxy&&Math.hypot(x-t.clientX,y-t.clientY)<t.radius+12))return{x,y};
-    } throw Error('no shell blank');
-  },leftPath);
+  const point=await shellBlank(page,leftPath);
   const delay=Number(await page.locator('#secondaryNavigationDelay').inputValue());
   await page.mouse.move(point.x,point.y); await page.mouse.down({button:'right'});
   await page.waitForTimeout(delay+600);
-  await expect.poll(()=>page.evaluate(path=>window.spatialLab.state().clusterPaths.includes(path),leftPath)).toBe(false);
+  await expect.poll(()=>page.evaluate(()=>window.spatialLab.state().path)).toBe(leftPath);
   const before=await page.evaluate(()=>window.spatialLab.state().camera);
   await page.mouse.move(point.x+30,point.y+10); await page.mouse.up({button:'right'});
   await page.waitForTimeout(600);
   const after=await page.evaluate(()=>window.spatialLab.state().camera);
   expect(after.target).toEqual(before.target);
   expect(after.distance).toEqual(before.distance);
+  const events=await page.evaluate(()=>window.SpatialDiagnostics.snapshot().events);
+  const committed=events.findLastIndex(e=>e.event==='secondary-hold');
+  expect(committed).toBeGreaterThanOrEqual(0);
+  expect(events.slice(committed+1).some(e=>e.event==='secondary-cancel')).toBe(false);
 });
 
 test('holding blank in an entered expanded domain goes to its actual parent', async ({page}) => {

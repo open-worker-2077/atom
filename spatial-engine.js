@@ -7246,11 +7246,14 @@
     clearTimer: global.clearTimeout.bind(global),
     commitSingle(action) {
       if (action && action.intent) {
+        traceSpatial("secondary-tap", { intent: action.intent });
         dispatchIntent(action.intent, action.visualMeta, action.target);
       }
     },
     commitHold(action) {
       if (action && action.intent) {
+        if (state.pointerCandidate?.secondaryNavigation) state.pointerCandidate.secondaryCommitted = true;
+        traceSpatial("secondary-hold", { intent: action.intent });
         dispatchIntent(action.intent, action.visualMeta, action.target);
       }
     }
@@ -7343,16 +7346,31 @@
     if (!isUnmodifiedSecondaryNavigation(candidate) || candidate.direct) return false;
     const singleAction = gestureArbiter.classifyTap(candidate);
     if (!singleAction || !["applyInwardView", "applyParentView"].includes(singleAction.intent)) return false;
+    // An expanded child group's blank remains a collapse target for a tap,
+    // but holding enters its carrier. The current domain shell stays blank.
+    const holdDomainPath = candidate.domainContext && candidate.domainContext.path;
+    const holdCarrier = !candidate.item
+      && holdDomainPath !== state.currentPath
+      && state.expandedClusterDomains.has(holdDomainPath)
+      ? state.clusterScene?.clusters.find(cluster => cluster.path === holdDomainPath)?.parentCarrierNode
+      : null;
+    const holdTarget = candidate.node || holdCarrier || null;
     const holdIntent = input.resolvePointer(
       { ...candidate.mappingEvent, button: 2 },
-      { ...(candidate.mappingContext || {}), gesture: "hold" }
+      { ...(candidate.mappingContext || {}), onNode: Boolean(holdTarget), gesture: "hold" }
     );
     candidate.secondaryNavigation = true;
+    traceSpatial("secondary-press", {
+      intent: holdIntent,
+      status: holdCarrier ? "expanded-child" : holdTarget ? "node" : "blank",
+      duration: state.demo.settings.secondaryNavigationDelayMs,
+      target: { path: holdTarget ? childPathFor(holdTarget, nodeOwnerPath(holdTarget)) : holdDomainPath || state.currentPath }
+    });
     secondaryClickArbiter.begin(
       contextualizeAction(singleAction, candidate),
       holdIntent
         ? contextualizeAction(
-          { intent: holdIntent, visualMeta: {}, target: candidate.node || null },
+          { intent: holdIntent, visualMeta: {}, target: holdTarget },
           candidate
         )
         : null,
@@ -7363,8 +7381,14 @@
     return true;
   }
 
-  function cancelPendingSecondaryNavigation() {
+  function cancelPendingSecondaryNavigation(reason = "cancelled") {
     if (state.pointerCandidate && state.pointerCandidate.secondaryNavigation) {
+      if (!state.pointerCandidate.cancelled && !state.pointerCandidate.secondaryCommitted) {
+        traceSpatial("secondary-cancel", {
+          status: reason,
+          distance: state.pointerCandidate.movementPx
+        });
+      }
       state.pointerCandidate.cancelled = true;
     }
     secondaryClickArbiter.cancel();
@@ -7693,7 +7717,7 @@
       candidate.movementPx = Math.max(candidate.movementPx || 0, distance);
       if (distance >= candidate.threshold) {
         primaryClickArbiter.cancel();
-        cancelPendingSecondaryNavigation();
+        cancelPendingSecondaryNavigation("movement");
         state.pointerCandidate = null;
         beginDragFromCandidate(candidate);
       } else {
@@ -7815,17 +7839,17 @@
   canvas.addEventListener("pointerup", releasePointer);
   canvas.addEventListener("pointercancel", (event) => {
     primaryClickArbiter.cancel();
-    cancelPendingSecondaryNavigation();
+    cancelPendingSecondaryNavigation("pointercancel");
     releasePointer(event, true);
   });
   canvas.addEventListener("lostpointercapture", (event) => {
     if (!state.pointerCandidate || state.pointerCandidate.pointerId !== event.pointerId) return;
-    cancelPendingSecondaryNavigation();
+    cancelPendingSecondaryNavigation("lostcapture");
     state.pointerCandidate = null;
   });
   global.addEventListener("blur", () => {
     primaryClickArbiter.cancel();
-    cancelPendingSecondaryNavigation();
+    cancelPendingSecondaryNavigation("blur");
     state.wand.shiftHeld = false;
     state.wand.active = false;
     state.wand.points = [];
@@ -7926,7 +7950,7 @@
 
   document.addEventListener("keydown", (event) => {
     if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) {
-      cancelPendingSecondaryNavigation();
+      cancelPendingSecondaryNavigation("modifier");
     }
     if (viewModeModel.isShiftKeyEvent(event) && !event.repeat) {
       if (workspace.transaction()) {
@@ -8047,7 +8071,7 @@
 
   document.addEventListener("keyup", (event) => {
     if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) {
-      cancelPendingSecondaryNavigation();
+      cancelPendingSecondaryNavigation("modifier");
     }
     if (
       event.code === "CapsLock"

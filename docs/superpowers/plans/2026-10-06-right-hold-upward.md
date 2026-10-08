@@ -1,6 +1,6 @@
 # 长按右键导航取景与Web诊断
 
-## 2026-10-08 长按无法进入沉浸：排查中
+## 2026-10-08 长按无法进入沉浸：根因已复现、候选验收中
 
 - 用户报告突然无法右键长按进入沉浸，要求继续自主排查；不把新标签正常推断为原页面正常，不要求用户截图代替诊断。
 - 基线：main `1be3c9e`，工作树无产品改动；官方 Superpowers 6.4.2 manifest SHA256 `EF99FCE86F655E7B65F9505BDF468C9BCAF9BF49915C72E128ED62BAC40A6586` 与本会话核对基线一致。
@@ -20,12 +20,20 @@
 
 使用 writing-plans 补齐此原计划，using-git-worktrees 复用本会话既有隔离checkout，executing-plans 内联执行，test-driven-development 写真实鼠标回归。
 
-- [ ] 将本次根因、用户纠偏、步骤持久化，提交原有版本并推送 `backup/atom-before-expanded-hold-repair-20261008`，回读精确远端SHA；备份仅保存、尚未验收。
-- [ ] 开启目标，详情只指向唯一总账和本原计划。
-- [ ] 浏览器RED：PageDown展开子团→对不含内部节点的团内位置持续右键按住→应在松开前进入该团；保持短按收缩、当前域空白长按上钻和内部节点优先不变；修正旧收缩预期并保留已提交长按后移动不错误拖拽的真实验收。
-- [ ] 最小实现：仅对长按单独解析已展开子团载体，复用现有domainContext、载体与沉浸入口；不扩大普通短按命中、不把当前域外壳当子节点、不复制空间命中算法。
-- [ ] GREEN→真实关键旅程→必要合同门禁；一次fresh整包评审，Important/Critical定向RED/GREEN。
+- [x] 将本次根因、用户纠偏、步骤持久化，提交原有版本并推送 `backup/atom-before-expanded-hold-repair-20261008`，回读精确远端SHA `904fdaf28bfc6b23afac5550ae1367c8744dce3c`；备份仅保存、尚未验收。
+- [x] 开启目标，详情只指向唯一总账和本原计划。
+- [x] 浏览器RED：PageDown展开子团→对不含内部节点的团内位置持续右键按住→应在松开前进入该团；保持短按收缩、当前域空白长按上钻和内部节点优先不变；修正旧收缩预期并保留已提交长按后移动不错误拖拽的真实验收。
+- [x] 最小实现：仅对长按单独解析已展开子团载体，复用现有domainContext、载体与沉浸入口；不扩大普通短按命中、不把当前域外壳当子节点、不复制空间命中算法。
+- [x] GREEN→真实关键旅程→必要合同门禁；一次fresh整包评审，Important/Critical定向RED/GREEN。
 - [ ] 最终候选完整测试一次、候选推送与精确远端检查；静态部署不停止健康后端，公共入口实际长按回读；main推送及精确终态后完成目标。保留原始证据及工作树，零删除。
+
+实施工作树 `.worktrees/web-current-view-20261005`，branch `fix/expanded-group-hold-20261008`，BASE `904fdaf`；原main安全备份已核对，旧有效基线测试复用。测试首次沙箱拒绝本机socket，未形成测试结果，已终止该测试会话并以获准隔离4796临时世界重跑，未涉及正式4784。
+
+**RED**：`red-elevated.log`，新真实长按回归期望进入leftPath，实际仍parentPath，1 failed／32.1秒。最小实现只在beginSecondaryNavigation为未命中真实item的已展开子团复用cluster.parentCarrierNode构造长按目标；短按原action与签名保持，当前域shell不成为carrier。
+
+**定向GREEN／夹具纠正**：长按进入、进入后移动不拖拽、当前域外空白上钻、延迟scope居中、日志限量5项浏览器通过；新增短按回读夹具漏传leftPath引起ReferenceError，界面已实际收缩，补入evaluate参数后单独重验。64/64输入与仲裁合同通过（此前63项夹具需补state依赖，已纠正）；新增可执行合同覆盖子团carrier长按、current shell返回、真实子节点及关系优先。剩余3项关键旅程在隔离端口重验，不升级全量。
+
+**用户增量要求**：排查上午可用后来失效的原因并防止类似回归。当前日志是每标签有界sessionStorage，不含之前原标签的完整事件；没有上午现场证据，不把时间顺序猜测当根因。已验证同一团由未展开变展开时动作从沉浸变收缩，代码build未改变，说明状态依赖可直接解释症状。补充同源非阻断诊断：按下目标类型／长按意图／阈值／稳定opaque目标，实际hold执行，短按释放，移动、pointercancel、lostcapture、blur、modifier取消原因；不逐帧记录、不记业务正文、不引入网络日志任务。回归覆盖展开前后及当前域返回边界，防止旧测试覆盖用户原定论。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -151,3 +159,9 @@ Ruling：为不让远端运行器局部阻塞软件修复，本机同最终候�
 PR79已MERGED，mergeCommit e9741a010fc89659a091cc08e6cda8fa4354cac8，时间2026-10-05T21:40:11Z。正式main接回该合并，相对已验证42195f5仅两份Superpowers记录有差异，产品代码无漂移；公共版本ce88592bcf6e59be有效证据复用，健康/投影published/PID46016最终回读正常。
 
 本次封包是最后main审计：其后只有推送、读取该精确HEAD远端检查并在成功后关闭目标。无需再生成自指提交来记录该提交自身检查。软件需求/部署/评审均已验收；最后main门槛始终依赖外部真实结果，不预写成功。
+
+**2026-10-08 相邻旅程GREEN**：additional-green.log 的短按收缩、内部真实节点进入、当前沉浸壳内空白返回3/3通过；与green-browser.log已通过5项共同覆盖8条实际旅程。取消日志单测先RED（0条事件≠1），实现后direct-final.log 70/70通过，涵盖输入、仲裁、中键与既有日志失败隔离。浏览器日志夹具pauseAt用了主机时间而浏览器时钟已前进，出现Cannot fast-forward to the past；首次改为浏览器Date.now()+1000仍被工具延迟超过；改为+60秒后browser-cancel-final.log 1/1通过，真实移动产生一次movement/distance=12，无hold/tap且不导航；保留两次原失败trace。实际展开团按下及hold日志在browser-diagnostics-corrected.log通过。9条关键浏览器旅程已取得有效结果。
+
+**正式切换前只读基线**：4784 HTTP200，当前监听PID8956（与上次历史PID46016不同）；本次没有重启服务，不将历史PID用作当前进程证据。正式main工作树干净。开发入口check:development-control通过；fresh整包评审进行中。
+
+**fresh整包评审**：expanded_hold_fresh_review 无Critical/Important；Minor为已提交hold后移动仍记cancel，导致日志语义误导。定向修复以secondaryCommitted区分pending取消与已提交动作；旧guard回放review-cancel-red.log exit1，恢复guard直接70/70 GREEN；browser-review-green.log实际已提交后移动1/1通过，camera不漂移且无取消误报。评审修复关闭，开始最终候选全量一次。
