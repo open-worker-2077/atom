@@ -4,6 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { createLegacyRuntimeComposition } from '../src/atom-system/adapters/legacy-runtime-composition.mjs';
+import { createJsonProgramProjectionRepository } from '../src/atom-system/adapters/json-program-projection-repository.mjs';
+import { createProgramRuntimeScheduler } from '../work-engine/atom-language/program-runtime.mjs';
+
 import { createRuntimeCliExecutor } from '../src/atom-system/adapters/runtime-cli-executor.mjs';
 import {
   createJsonTransactionJournal,
@@ -15,9 +19,23 @@ function atom(thing, situation = '', slot = [], type = '') {
   return { [`thing${type ? `@${type}` : ''}`]: thing, situation, slot, strut: [] };
 }
 
+// Match the CLI scheduler while owning the asynchronous projection lifetime.
+function createTestRuntimeExecutor(t, options) {
+  const programScheduler = createProgramRuntimeScheduler({
+    projectionRepository: createJsonProgramProjectionRepository({
+      file: path.join(path.dirname(options.contextFile), 'program-projection.json')
+    })
+  });
+  const interactionRuntime = createLegacyRuntimeComposition({ ...options, programScheduler });
+  t.after(async () => {
+    await interactionRuntime.close();
+    await fs.rm(path.dirname(options.contextFile), { recursive: true, force: true });
+  });
+  return createRuntimeCliExecutor({ ...options, programScheduler, interactionRuntime });
+}
+
 test('TC-PERF-LOCAL-EXPLORE / TC-PERF-LOCAL-TRANSFORM: a 20 MB unrelated sibling set stays local', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-runtime-amplification-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -28,7 +46,7 @@ test('TC-PERF-LOCAL-EXPLORE / TC-PERF-LOCAL-TRANSFORM: a 20 MB unrelated sibling
     ...Array.from({ length: 1_000 }, (_, index) => atom(`Unrelated ${index}`, unrelatedDetail))
   ])];
   await fs.writeFile(contextFile, JSON.stringify(world), 'utf8');
-  const execute = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
+  const execute = createTestRuntimeExecutor(t, { contextFile, graphFile, storeFile });
   await execute({ source: 'atom', interaction: { id: 'perf-prime' } });
 
   const beforeExplore = await fs.readFile(contextFile, 'utf8');
@@ -63,7 +81,6 @@ test('TC-PERF-LOCAL-EXPLORE / TC-PERF-LOCAL-TRANSFORM: a 20 MB unrelated sibling
 
 test('TC-PERF-LOCAL-CREATE: a plain leaf create stays local beside a 20 MB sibling set', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-create-amplification-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -74,7 +91,7 @@ test('TC-PERF-LOCAL-CREATE: a plain leaf create stays local beside a 20 MB sibli
   ])];
   const baseline = JSON.stringify(world);
   await fs.writeFile(contextFile, baseline, 'utf8');
-  const execute = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
+  const execute = createTestRuntimeExecutor(t, { contextFile, graphFile, storeFile });
   await execute({ source: 'atom', interaction: { id: 'perf-create-prime' } });
 
   const startedAt = performance.now();
@@ -97,13 +114,12 @@ test('TC-PERF-LOCAL-CREATE: a plain leaf create stays local beside a 20 MB sibli
 
 test('TC-PERF-CONSERVATIVE-CREATE: a nested create keeps the complete-world safety path', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-nested-create-amplification-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
   const journalFile = path.join(directory, 'atom.transactions.json');
   await fs.writeFile(contextFile, JSON.stringify([atom('Root')]), 'utf8');
-  const execute = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
+  const execute = createTestRuntimeExecutor(t, { contextFile, graphFile, storeFile });
   await execute({ source: 'atom', interaction: { id: 'nested-create-prime' } });
 
   const result = await execute({
@@ -119,7 +135,6 @@ test('TC-PERF-CONSERVATIVE-CREATE: a nested create keeps the complete-world safe
 
 test('TC-PERF-CONSERVATIVE-TRANSFORM: structural operations stay whole-world and reversible', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-structural-amplification-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const contextFile = path.join(directory, 'atom.json');
   const graphFile = path.join(directory, 'graph.json');
   const storeFile = path.join(directory, 'knowledge.json');
@@ -134,7 +149,7 @@ test('TC-PERF-CONSERVATIVE-TRANSFORM: structural operations stay whole-world and
     atom('Backup', '', [], 'backup@default')
   ];
   await fs.writeFile(contextFile, JSON.stringify(world), 'utf8');
-  const execute = createRuntimeCliExecutor({ contextFile, graphFile, storeFile });
+  const execute = createTestRuntimeExecutor(t, { contextFile, graphFile, storeFile });
   await execute({ source: 'atom', interaction: { id: 'structural-prime' } });
   const timings = {};
   const run = async (id, source) => {

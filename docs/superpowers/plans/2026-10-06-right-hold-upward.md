@@ -182,3 +182,7 @@ Ruling：不修改未受影响后端或放宽性能合同，复用此次全量�
 **收口边界**：软件产品E3已部署回读；开始PR80合入及最终main审计推送。审计只改两份Superpowers文件，不漂移产品代码；须读取最终main精确远端检查终态成功才能完成目标。上午原故障标签历史证据缺口仍保留，已复现的状态原因不冒充其完整时间线。
 
 **最后审计封包**：PR80已合入；最终main将接回合并元数据并只追加本封包和总账审计。产品与已验收1838bc2相同，Web build 69ebf2600823650b不漂移；远端最终检查成功证据直接读取，不为记录该检查自身结果再制造审计提交。
+
+**最终main门禁失败与必要定界**：8f6aed5精确run37724666477完整2434项，2411pass／1fail／22skip。唯一失败TC-PERF-LOCAL-CREATE的t.after临时目录删除ENOTEMPTY；业务与性能断言已通过，既有异步projection仍写入临时目录。createRuntimeCliExecutor持有的interactionRuntime未被测试关闭；createInteractionRuntime.close现已提供取消待发timer并等待projectionTail的合同。按SP-L04仅阻塞最终main检查，不撤销公共WebE3；在现有隔离worktree继续必要测试收尾修复，以同样scheduler/projectionRepository构造测试runtime、先close再执行既有清理，不改生产后端。此类四处同源fixture共同修正，未受影响的JSON提交fixture不扩改；定向GREEN和评审核对后推送远端新候选。
+
+**测试收尾定向GREEN**：teardown-green.log五项全部通过，普通创建实际2565ms；结构rename/move/discard/restore仍各自低于原5秒门槛，历史mode和原子性断言未弱化。同四处测试采用与CLI同构scheduler/projectionRepository及LegacyRuntimeComposition，并先await close再原清理，生产文件无改动。定向评审核对后仅将测试和既有Superpowers审计快进main，直接读取新main精确完整检查；不重复产品部署或已有效Web旅程。
