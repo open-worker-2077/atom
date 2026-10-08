@@ -25,7 +25,8 @@
 - [x] 浏览器RED：PageDown展开子团→对不含内部节点的团内位置持续右键按住→应在松开前进入该团；保持短按收缩、当前域空白长按上钻和内部节点优先不变；修正旧收缩预期并保留已提交长按后移动不错误拖拽的真实验收。
 - [x] 最小实现：仅对长按单独解析已展开子团载体，复用现有domainContext、载体与沉浸入口；不扩大普通短按命中、不把当前域外壳当子节点、不复制空间命中算法。
 - [x] GREEN→真实关键旅程→必要合同门禁；一次fresh整包评审，Important/Critical定向RED/GREEN。
-- [ ] 最终候选完整测试一次、候选推送与精确远端检查；静态部署不停止健康后端，公共入口实际长按回读；main推送及精确终态后完成目标。保留原始证据及工作树，零删除。
+- [x] 最终候选完整测试一次及具体失败定向收口；候选精确远端检查通过，静态部署不停止健康后端，公共入口实际长按回读通过。
+- [ ] 最终main审计推送及精确检查终态成功后完成目标。保留原始证据及工作树，零删除。
 
 实施工作树 `.worktrees/web-current-view-20261005`，branch `fix/expanded-group-hold-20261008`，BASE `904fdaf`；原main安全备份已核对，旧有效基线测试复用。测试首次沙箱拒绝本机socket，未形成测试结果，已终止该测试会话并以获准隔离4796临时世界重跑，未涉及正式4784。
 
@@ -171,3 +172,13 @@ PR79已MERGED，mergeCommit e9741a010fc89659a091cc08e6cda8fa4354cac8，时间202
 **构建封包补齐**：npm test首步build:browser已按新spatial-engine内容更新index.html的内容hash/资源版本参数；将该确定性构建输出纳入候选，测试过程正在验证的工作树即此输出。只补stamp和审计，不改变已评审逻辑；精确远端改跟踪新的候选revision，旧713ac检查不作为最终门禁。
 
 **远端失败即时入账**：精确728c32c/run37722878938完整2434项：2411pass、1fail、22skip；唯一失败view-mode-engine-contract的functionSource夹具将新注释中的单引号误作JS字符串，导致函数边界提取失败。定向view-parser-red.log可重现；夹具跳过行/块注释后view-parser-green.log通过，产品代码未变。本机完整尚在运行，已出现两项未改后端的性能断言失败，需终态后定向排查；不当作远端全局通过或完成。
+
+**Windows最终全量与定向收口**：final-npm-test.log一次2434 tests／2430pass／3fail／1skip，977315ms。三个失败：缓存命中实际31.3127ms越30ms（cache-targeted.log单独1/1GREEN）；结构80效应在5秒时仍pending（全量结束后structural-after-full.log 1/1GREEN，完成及拒绝批次原子性均验证）；上文source夹具（修复后32/32GREEN）。原904fdaf同结构性能测试baseline-structural.log还出现已完成却5660ms越5秒，证明本机该门槛存在原版计时波动，不能归于Web修复。
+
+Ruling：不修改未受影响后端或放宽性能合同，复用此次全量其余有效证据，以三项失败的定向GREEN及修复夹具后的精确远端完整门禁作为收口；不再无依据重复本机全量。成本：本机整体全量并非全绿，原版5秒门槛波动如后续业务复现应单独诊断；不将其说成已消除。产品Web关键旅程9项、直接70项、view合同32项有效。1838bc2远端完整仍须终态成功，尚不完成。
+
+**候选远端与公共E3 GREEN**：1838bc24a6f3cd65af0c8a0a6a4aae7e7ba2fc6d 精确run37723573146 completed/success，2434tests／2412pass／0fail／22平台skip，完整remote-final-green.log已保存。正式本地main只快进此候选，监听PID8956切换前后相同，未重启后端。公共新页面build sha256-69ebf2600823650b，真实右键长按依次进入atom.json及managegraph；PageDown展开后原故障坐标(690,207)长按在松开前进入套办depth3，日志secondary-press/status expanded-child/目标opaque子路径及secondary-hold applyImmersiveInwardView一致。当前域空白真实长按返回managegraph depth2，仅当前域1团，投影中心(640,360)为1280×720视口中心。实际H→导出诊断下载成功，public-diagnostics.json保留事件。无业务Graph写入。
+
+**收口边界**：软件产品E3已部署回读；开始PR80合入及最终main审计推送。审计只改两份Superpowers文件，不漂移产品代码；须读取最终main精确远端检查终态成功才能完成目标。上午原故障标签历史证据缺口仍保留，已复现的状态原因不冒充其完整时间线。
+
+**最后审计封包**：PR80已合入；最终main将接回合并元数据并只追加本封包和总账审计。产品与已验收1838bc2相同，Web build 69ebf2600823650b不漂移；远端最终检查成功证据直接读取，不为记录该检查自身结果再制造审计提交。
