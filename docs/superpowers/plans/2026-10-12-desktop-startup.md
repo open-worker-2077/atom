@@ -40,6 +40,12 @@
 - [ ] 复用start-atom-graph.ps1，加有界互斥、启动日志；增加install-atom-desktop-shortcut.ps1，安装真实快捷方式。
 - [ ] 实际从快捷方式打开浏览器、HTTP200、重复启动PID不变；保留安装/诊断回执。
 
+### 正式回读与防复发
+
+2026-10-12 09:42:58正式启动ready，约164秒；health.ok=true、首页200，浏览器scope=loaded且无page errors。桌面C:/Users/worker/Desktop/Atom.lnk两次真实运行ready/browser=True，监听PID2392不变；监管已重新启用。原始事务目录和atom.json本地完整副本保存在AtomGraph/backups/desktop-startup-20261012（938文件，7197464120 bytes），未删除或覆盖历史。
+
+实测发现监管默认120秒短于164秒冷启动；170秒模拟回归RED（错误restarted），改为与启动器相同300秒，保持健康实例优先和有界恢复。最后只需该增量定向验证与评审，复用既有全量候选证据，不重复无关全量。
+
 ### Task 3: 交付
 
 - [ ] fresh整体评审、修复Critical/Important、最小链→必要门禁→候选全量一次。

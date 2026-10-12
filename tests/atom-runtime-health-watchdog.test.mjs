@@ -248,3 +248,12 @@ test('a healthy public runtime is preserved when its scheduled task is not runni
   const state = JSON.parse(await fs.readFile(observed.result.statePath, 'utf8'));
   assert.equal(state.unhealthySince, null);
 });
+
+test('default watchdog grace covers the observed 164-second history recovery', { skip: process.platform !== 'win32' }, async t => {
+  const observed = await runWatchdog(t, {
+    useScriptDefault: true, taskState: 'Running', health: [false],
+    state: { unhealthySince: '2026-08-27T23:57:10.0000000Z', lastRecoveryAt: null }
+  });
+  assert.equal(observed.result.action, 'grace');
+  assert.equal(observed.calls.some(call => /^(?:stop|start):/u.test(call)), false);
+});
