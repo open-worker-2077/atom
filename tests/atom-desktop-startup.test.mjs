@@ -49,3 +49,22 @@ test('default supervised server failure survives in a local startup log', async 
  assert.equal(event.status, 'failed');
  assert.equal(event.code, 'INVALID_RUNTIME_AUTHORITY_MARKER');
 });
+
+test('simultaneous desktop requests share one startup and both open only when ready', { skip: process.platform !== 'win32' }, async t => {
+ const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-startup-concurrent-'));
+ t.diagnostic(`Retained synthetic concurrent startup: ${directory}`);
+ const script = path.join(directory, 'run.ps1');
+ const ready = quote(path.join(directory, 'ready'));
+ const starts = quote(path.join(directory, 'starts'));
+ const browsers = quote(path.join(directory, 'browsers'));
+ await fs.writeFile(script, '\uFEFF' + `
+ function Invoke-RestMethod { if (Test-Path '${ready}') { return [pscustomobject]@{ok=$true} }; throw 'offline' }
+ function Get-ScheduledTask { return [pscustomobject]@{TaskName='Atom Graph Runtime';State='Ready'} }
+ function Start-ScheduledTask { Add-Content '${starts}' 'start'; Start-Sleep -Milliseconds 500; New-Item -ItemType File '${ready}' | Out-Null }
+ function Start-Process { if (-not (Test-Path '${ready}')) { throw 'BROWSER_BEFORE_READY' }; Add-Content '${browsers}' 'browser' }
+ & '${quote(path.join(root, 'scripts/start-atom-graph.ps1'))}' -NoFailureDialog -LogDirectory '${quote(directory)}' -MutexName 'Local\\AtomTest${path.basename(directory)}'
+ `);
+ await Promise.all([1,2].map(() => exec('powershell.exe', ['-NoProfile','-ExecutionPolicy','Bypass','-File',script])));
+ assert.equal((await fs.readFile(path.join(directory, 'starts'),'utf8')).trim().split(/\r?\n/).length, 1);
+ assert.equal((await fs.readFile(path.join(directory, 'browsers'),'utf8')).trim().split(/\r?\n/).length, 2);
+});
