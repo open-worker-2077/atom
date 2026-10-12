@@ -30,15 +30,15 @@
 
 ### Task 1: 修复大日志启动
 
-- [ ] 增加禁止whole-file read的回归测试，运行RED。
-- [ ] 改 json-world-repository.mjs 的localRecords和indeterminate恢复为流式扫描；按需hydrate待应用帧，保持发布协议。
-- [ ] 定向world transaction/publication/recovery测试GREEN；真实正式启动就绪并恢复监管。
+- [x] 增加禁止whole-file read的回归测试，运行RED。
+- [x] 改 json-world-repository.mjs 的localRecords和indeterminate恢复为流式扫描；按需hydrate待应用帧，保持发布协议。
+- [x] 定向world transaction/publication/recovery测试GREEN；真实正式启动就绪并恢复监管。
 
 ### Task 2: 桌面入口
 
-- [ ] 对重复点击、就绪先于浏览器、失败日志、安装不覆盖写RED行为测试。
-- [ ] 复用start-atom-graph.ps1，加有界互斥、启动日志；增加install-atom-desktop-shortcut.ps1，安装真实快捷方式。
-- [ ] 实际从快捷方式打开浏览器、HTTP200、重复启动PID不变；保留安装/诊断回执。
+- [x] 对重复点击、就绪先于浏览器、失败日志、安装不覆盖写RED行为测试。
+- [x] 复用start-atom-graph.ps1，加有界互斥、启动日志；增加install-atom-desktop-shortcut.ps1，安装真实快捷方式。
+- [x] 实际从快捷方式打开浏览器、HTTP200、重复启动PID不变；保留安装/诊断回执。
 
 ### 正式回读与防复发
 
@@ -48,7 +48,7 @@
 
 ### Task 3: 交付
 
-- [ ] fresh整体评审、修复Critical/Important、最小链→必要门禁→候选全量一次。
+- [x] fresh整体评审、修复Critical/Important、最小链→必要门禁→候选全量一次。
 - [ ] 推送精确候选并等远端终态；部署、公共回读、main收口和关闭目标。安全备份仅备份不代表验收。
 
 ## 当前断点
@@ -58,3 +58,5 @@
 Fresh评审发现P1：扫描后lazy hydrate重开路径期间compaction替换文件，报LOCAL_WORLD_COMMIT_CHANGED而未重试。第二次open暂停的真实竞态回归已RED；仅文件签名变化时重试，稳定损坏保留错误。桌面启动日志RED已确认；待正式恢复与真实快捷方式验收。
 
 Task1 RED→GREEN：新增受控ERR_FS_FILE_TOO_LARGE测试先RED；local log读取与indeterminate恢复改为64KiB流式扫描，验证发布proof/abort并仅保留帧身份位置，待恢复事实按需读取。107项transaction/large-log测试GREEN。故障注入FileHandle补read/stat，竞态读取门禁移到open以保持真实语义。待fresh评审与真实正式恢复。
+
+当前6414c05：fresh整体及两次增量评审通过，原P1均关闭；115项journal/launcher、55项server/watchdog、3项真实desktop、12项监管增量通过。恢复监管时旧unhealthySince会跳过新宽限的两次调用回归已RED→GREEN，两个真正启动分支更新时点。正式PID2392继续健康。唯一全量运行中，出现结构Transform耗时>5秒门禁失败，正做原版同机定向对照；不得据此宣称全量通过。远端PR81候选检查等待终态。

@@ -37,6 +37,14 @@ npm start
 
 启动后打开终端输出的 `http://127.0.0.1:4784/`。Web 与 CLI 使用同一事实世界；不要直接打开 `index.html` 代替服务入口。
 
+Windows 可安装桌面入口：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-atom-desktop-shortcut.ps1
+```
+
+之后双击桌面 `Atom`，自动检查服务、必要时启动，等待就绪后打开浏览器。重复点击共用启动过程；健康服务继续运行。启动诊断保存在 `%LOCALAPPDATA%\AtomGraph\startup-logs`。
+
 Agent 和工程工具通过公开 CLI 契约交互：
 
 ```powershell
