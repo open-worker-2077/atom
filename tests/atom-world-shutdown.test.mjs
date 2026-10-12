@@ -414,7 +414,17 @@ for (const stage of ['before-link', 'dispatched-link']) {
     if (stage === 'before-link') await assert.rejects(fs.stat(canonical), { code: 'ENOENT' });
     await new Promise(resolve => setImmediate(resolve));
     await assert.rejects(disk.commit(request), { code: 'WORLD_SAVE_WORKER_QUARANTINED' });
-    const fresh = createTransactionalWorldPersistence({ ...f.configuration, runtimeAuthority: 'disk' });
+    // One event-loop turn does not prove that dispatched OS I/O has finished.
+    // Reopening succeeds only when the real quarantine has cleared.
+    const fresh = await guarded((async () => {
+      for (;;) {
+        try { return createTransactionalWorldPersistence({ ...f.configuration, runtimeAuthority: 'disk' }); }
+        catch (error) {
+          if (error.code !== 'WORLD_SAVE_WORKER_QUARANTINED') throw error;
+          await new Promise(resolve => setTimeout(resolve, 1));
+        }
+      }
+    })());
     await fresh.commit({ ...request, correlationId: `${stage}-fresh` });
     assert.deepEqual((await fresh.readCommittedSnapshot()).facts, facts('linked'));
   });

@@ -60,3 +60,7 @@ Fresh评审发现P1：扫描后lazy hydrate重开路径期间compaction替换文
 Task1 RED→GREEN：新增受控ERR_FS_FILE_TOO_LARGE测试先RED；local log读取与indeterminate恢复改为64KiB流式扫描，验证发布proof/abort并仅保留帧身份位置，待恢复事实按需读取。107项transaction/large-log测试GREEN。故障注入FileHandle补read/stat，竞态读取门禁移到open以保持真实语义。待fresh评审与真实正式恢复。
 
 当前6414c05：fresh整体及两次增量评审通过，原P1均关闭；115项journal/launcher、55项server/watchdog、3项真实desktop、12项监管增量通过。恢复监管时旧unhealthySince会跳过新宽限的两次调用回归已RED→GREEN，两个真正启动分支更新时点。正式PID2392继续健康。唯一全量运行中，出现结构Transform耗时>5秒门禁失败，正做原版同机定向对照；不得据此宣称全量通过。远端PR81候选检查等待终态。
+
+20530b8远端完整run38193615586终态failure：2442项、2409通过、6失败、27条件跳过。5项compaction测试只统计旧readFile导致流式read未计数，适配FileHandle.read后32项compaction/shutdown定向GREEN，缓存0历史读取等原断言保持不变。另1项snapshot before-link测试以单次setImmediate当作OS I/O完成确认，Linux仍处于合法隔离；改为400ms受控等待真实隔离解除，旧写者始终拒绝，不改产品隔离规则。
+
+本机全量出现性能5秒阈值失败后停止，原版同负载perf-mov=5153.8ms；释放失败全量负载后同候选四项均GREEN（2590.6/3454.1/2059.4/2541.7ms）。原截图与失败日志保留于D:/Project/〇/exports/atom-desktop-startup/2026-10-12，不宣称本机全量通过。修正实际远端失败后重跑必要门禁，等待新精确revision终态。

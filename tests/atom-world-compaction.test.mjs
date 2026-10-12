@@ -62,6 +62,14 @@ async function fixture(t, { directorySync = true } = {}) {
       const handle = await fs.open(target, flags, ...args);
       if (path.resolve(target) !== localCommitFile) return handle;
       return new Proxy(handle, { get(object, property) {
+        if (property === 'read') return async (...args) => {
+          const result = await object.read(...args);
+          if (result.bytesRead) {
+            counts.reads += 1;
+            counts.bytes += result.bytesRead;
+          }
+          return result;
+        };
         if (property === 'sync') return async () => {
           if (failingSync && --failingSync === 0) {
             throw Object.assign(new Error('injected log sync failure'), { code: 'EIO' });
