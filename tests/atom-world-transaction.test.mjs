@@ -1078,6 +1078,8 @@ test('local commit visibility waits for log fsync and a failed sync cannot seed 
           }
           return handle.sync();
         },
+        stat: (...args) => handle.stat(...args),
+        read: (...args) => handle.read(...args),
         close: (...closeArgs) => handle.close(...closeArgs)
       };
     }
@@ -1167,6 +1169,8 @@ for (const writeFault of [
             }
             return handle.sync();
           },
+          stat: (...args) => handle.stat(...args),
+          read: (...args) => handle.read(...args),
           close: (...args) => handle.close(...args)
         };
       }
@@ -1260,6 +1264,8 @@ for (const failureMode of [
             }
             return handle.sync();
           },
+          stat: (...args) => handle.stat(...args),
+          read: (...args) => handle.read(...args),
           close: (...args) => handle.close(...args)
         };
       }
@@ -1385,7 +1391,9 @@ test('coordinator keeps an indeterminate world write prepared until owner recove
           }
           return handle.sync();
         },
-        close: (...args) => handle.close(...args)
+        stat: (...args) => handle.stat(...args),
+          read: (...args) => handle.read(...args),
+          close: (...args) => handle.close(...args)
       };
     }
   };
@@ -1499,6 +1507,8 @@ test('a missing initial publication head cannot expose a fully written failed ap
           }
           return handle.sync();
         },
+        stat: (...args) => handle.stat(...args),
+        read: (...args) => handle.read(...args),
         close: (...closeArgs) => handle.close(...closeArgs)
       };
     }
@@ -1654,13 +1664,13 @@ test('a read retries when compaction replaces the baseline before its log read',
   const logReadGate = new Promise((resolve) => { releaseLogRead = resolve; });
   const fileSystem = {
     ...fs,
-    async readFile(target, ...args) {
+    async open(target, ...args) {
       if (!paused && path.resolve(target) === path.resolve(localCommitFile)) {
         paused = true;
         signalLogRead();
         await logReadGate;
       }
-      return fs.readFile(target, ...args);
+      return fs.open(target, ...args);
     }
   };
   const reader = createJsonWorldRepository({
@@ -1830,7 +1840,9 @@ for (const mode of ['local-compaction', 'full-world-fallback']) {
             if (baselineTemporary) events.push('baseline-temporary-sync');
             return handle.sync();
           },
-          close: (...closeArgs) => handle.close(...closeArgs)
+          stat: (...args) => handle.stat(...args),
+        read: (...args) => handle.read(...args),
+        close: (...closeArgs) => handle.close(...closeArgs)
         };
       },
       async rename(source, target) {

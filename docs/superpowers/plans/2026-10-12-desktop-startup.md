@@ -48,3 +48,5 @@
 ## 当前断点
 
 方案已持久化，待原版安全备份；产品实现尚未开始。原版本4ba0e91，唯一总账保留10-10只读诊断记录。
+
+Task1 RED→GREEN：新增受控ERR_FS_FILE_TOO_LARGE测试先RED；local log读取与indeterminate恢复改为64KiB流式扫描，验证发布proof/abort并仅保留帧身份位置，待恢复事实按需读取。107项transaction/large-log测试GREEN。故障注入FileHandle补read/stat，竞态读取门禁移到open以保持真实语义。待fresh评审与真实正式恢复。

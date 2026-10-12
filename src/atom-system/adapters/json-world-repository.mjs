@@ -319,7 +319,7 @@ export function createJsonWorldRepository({
     return written;
   }
 
-  async function publicationHead(buffer) {
+  async function publicationHead(completeBytes) {
     let parsed;
     try {
       parsed = JSON.parse(await fileSystem.readFile(localCommitHeadFile, 'utf8'));
@@ -333,7 +333,6 @@ export function createJsonWorldRepository({
       || parsed.worldId !== worldId || !Number.isSafeInteger(parsed.bytes) || parsed.bytes < 0) {
       throw problem('INVALID_LOCAL_WORLD_COMMIT_HEAD', 'Local commit publication head has an invalid shape');
     }
-    const completeBytes = completePrefixBytes(buffer);
     return { ...parsed, bytes: Math.min(parsed.bytes, completeBytes) };
   }
 
@@ -362,78 +361,107 @@ export function createJsonWorldRepository({
     })}\n`;
   }
 
-  function scanLocalLog(raw) {
-    const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw ?? '', 'utf8');
-    const completeBytes = completePrefixBytes(buffer);
-    const records = [];
-    const frames = [];
-    let cursor = 0;
-    let publishedBytes = 0;
-    while (cursor < completeBytes) {
-      const newline = buffer.indexOf(0x0a, cursor);
-      if (newline < 0 || newline >= completeBytes) break;
-      const line = buffer.subarray(cursor, newline).toString('utf8');
-      let record;
-      try {
-        record = JSON.parse(line);
-      } catch (error) {
-        throw problem('INVALID_LOCAL_WORLD_COMMIT', 'Local world commit record is invalid', {
-          line: records.length + 1, cause: error.message
-        });
+  // Keep only frame identities/offsets; historical fact and patch bodies are
+  // read on demand. A local log can exceed readFile's 2 GiB limit.
+  const recordFrames = new WeakMap();
+
+  async function* localLines(handle, size) {
+    let position = 0, start = 0, parts = [], bytes = 0;
+    while (position < size) {
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, size - position));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, position);
+      if (!bytesRead) break;
+      let cursor = 0;
+      for (;;) {
+        const newline = chunk.indexOf(0x0a, cursor);
+        if (newline < 0 || newline >= bytesRead) break;
+        const part = chunk.subarray(cursor, newline);
+        parts.push(part); bytes += part.length;
+        yield { text: Buffer.concat(parts, bytes).toString('utf8'),
+          start, end: position + newline + 1 };
+        start = position + newline + 1; parts = []; bytes = 0;
+        cursor = newline + 1;
       }
-      if (record?.contract === 'atom.local-commit-publication') break;
-      if (typeof record?.publicationId === 'string' && record.publicationId) {
-        const proofStart = newline + 1;
-        const proofNewline = buffer.indexOf(0x0a, proofStart);
-        if (proofNewline < 0 || proofNewline >= completeBytes) break;
-        let proof;
-        try {
-          proof = JSON.parse(buffer.subarray(proofStart, proofNewline).toString('utf8'));
-        } catch {
-          break;
+      const part = chunk.subarray(cursor, bytesRead);
+      if (part.length) { parts.push(part); bytes += part.length; }
+      position += bytesRead;
+    }
+    // Unterminated tail has never been published.
+  }
+
+  async function scanLocalLog() {
+    const handle = await fileSystem.open(localCommitFile, 'r');
+    try {
+      const { size } = await handle.stat();
+      const lines = localLines(handle, size)[Symbol.asyncIterator]();
+      const frames = [];
+      let next = await lines.next(), publishedBytes = 0;
+      while (!next.done) {
+        const line = next.value;
+        let record;
+        try { record = JSON.parse(line.text); }
+        catch (error) {
+          throw problem('INVALID_LOCAL_WORLD_COMMIT', 'Local world commit record is invalid',
+            { line: frames.length + 1, cause: error.message });
         }
-        const digest = `sha256:${crypto.createHash('sha256').update(line).digest('hex')}`;
-        if (proof?.contract !== 'atom.local-commit-publication' || proof.version !== 1
-          || proof.worldId !== worldId || proof.publicationId !== record.publicationId
-          || proof.recordDigest !== digest) break;
-        const afterProof = proofNewline + 1;
-        const abortNewline = buffer.indexOf(0x0a, afterProof);
-        if (abortNewline >= 0 && abortNewline < completeBytes) {
+        if (record?.contract === 'atom.local-commit-publication') break;
+        let end = line.end;
+        next = await lines.next();
+        if (typeof record?.publicationId === 'string' && record.publicationId) {
+          if (next.done) break;
+          let proof;
+          try { proof = JSON.parse(next.value.text); } catch { break; }
+          const digest = `sha256:${crypto.createHash('sha256').update(line.text).digest('hex')}`;
+          if (proof?.contract !== 'atom.local-commit-publication' || proof.version !== 1
+            || proof.worldId !== worldId || proof.publicationId !== record.publicationId
+            || proof.recordDigest !== digest) break;
+          end = next.value.end;
+          next = await lines.next();
           let abort;
-          try {
-            abort = JSON.parse(buffer.subarray(afterProof, abortNewline).toString('utf8'));
-          } catch {
-            abort = null;
-          }
+          try { abort = next.done ? null : JSON.parse(next.value.text); } catch { abort = null; }
           if (abort?.contract === 'atom.local-commit-publication-abort' && abort.version === 1
             && abort.worldId === worldId && abort.publicationId === record.publicationId
             && abort.recordDigest === digest) {
-            publishedBytes = abortNewline + 1;
-            cursor = abortNewline + 1;
+            publishedBytes = next.value.end;
+            next = await lines.next();
             continue;
           }
         }
-        records.push(record);
-        frames.push({ record, start: cursor, end: proofNewline + 1 });
-        publishedBytes = proofNewline + 1;
-        cursor = proofNewline + 1;
-        continue;
+        const header = { ...record };
+        // Retain array shape for validation, without retaining the payload.
+        if (Array.isArray(header.facts)) header.facts = [];
+        delete header.patch;
+        const frame = { record: header, start: line.start, recordEnd: line.end, end };
+        recordFrames.set(header, frame);
+        frames.push(frame); publishedBytes = end;
       }
-      records.push(record);
-      frames.push({ record, start: cursor, end: newline + 1 });
-      publishedBytes = newline + 1;
-      cursor = newline + 1;
-    }
-    return { records, frames, publishedBytes };
+      return { frames, publishedBytes, fileBytes: size };
+    } finally { await handle.close(); }
+  }
+
+  async function hydrateLocalRecord(record) {
+    const frame = recordFrames.get(record);
+    if (!frame) return record;
+    const handle = await fileSystem.open(localCommitFile, 'r');
+    try {
+      const buffer = Buffer.allocUnsafe(frame.recordEnd - frame.start);
+      let read = 0;
+      while (read < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, read, buffer.length - read, frame.start + read);
+        if (!bytesRead) throw problem('LOCAL_WORLD_COMMIT_CHANGED', 'Local record changed during recovery');
+        read += bytesRead;
+      }
+      return JSON.parse(buffer.toString('utf8'));
+    } finally { await handle.close(); }
   }
 
   async function localRecords() {
     assertPublicationAvailable();
     const beforeSignature = await localSignature();
     localMetadata = null;
-    let raw;
+    let scanned;
     try {
-      raw = await fileSystem.readFile(localCommitFile);
+      scanned = await scanLocalLog();
     } catch (error) {
       if (error.code === 'ENOENT') {
         publication.visibleBytes = 0;
@@ -443,9 +471,7 @@ export function createJsonWorldRepository({
       }
       throw error;
     }
-    const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, 'utf8');
-    await publicationHead(buffer);
-    const scanned = scanLocalLog(buffer);
+    await publicationHead(scanned.publishedBytes);
     const visibleBytes = publication.pending || publication.repairRequired
       ? Math.min(publication.visibleBytes, scanned.publishedBytes)
       : scanned.publishedBytes;
@@ -492,7 +518,7 @@ export function createJsonWorldRepository({
       }
       });
     await rememberLocalMetadata(records.filter((record) => record.contract === 'atom.local-commit'),
-      buffer.length, visibleBytes, beforeSignature);
+      scanned.fileBytes, visibleBytes, beforeSignature);
     return records;
   }
 
@@ -562,7 +588,7 @@ export function createJsonWorldRepository({
     const pendingRecords = records.slice(start)
       .filter((record) => ['atom.local-commit', 'atom.local-commit-generation'].includes(record.contract));
     localRecordCount = pendingRecords.filter((record) => record.contract === 'atom.local-commit').length;
-    for (const record of pendingRecords) materialized = applyRecord(materialized, record);
+    for (const record of pendingRecords) materialized = applyRecord(materialized, await hydrateLocalRecord(record));
     const finalSignature = await signature();
     if (finalSignature !== beforeSignature) return read();
     if (publication.startupProofPending && !publication.pending) {
@@ -799,15 +825,12 @@ export function createJsonWorldRepository({
         throw indeterminateProblem();
       }
       await fileSystem.mkdir(path.dirname(localCommitFile), { recursive: true });
-      let raw;
-      try {
-        raw = await fileSystem.readFile(localCommitFile);
-      } catch (error) {
+      let scanned;
+      try { scanned = await scanLocalLog(); }
+      catch (error) {
         if (error.code !== 'ENOENT') throw error;
-        raw = Buffer.alloc(0);
+        scanned = { frames: [], publishedBytes: 0, fileBytes: 0 };
       }
-      const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, 'utf8');
-      const scanned = scanLocalLog(buffer);
       const exactFrame = scanned.frames.find(({ record }) => record.contract === 'atom.local-commit'
         && record.worldId === worldId
         && record.commandId === identity?.commandId
@@ -816,10 +839,10 @@ export function createJsonWorldRepository({
       const originalPrefix = pending?.originalPrefix ?? exactFrame?.start ?? scanned.publishedBytes;
       let handle;
       try {
-        handle = await fileSystem.open(localCommitFile, buffer.length ? 'r+' : 'w+');
+        handle = await fileSystem.open(localCommitFile, scanned.fileBytes ? 'r+' : 'w+');
         if (!exactFrame) {
           const safeBytes = Math.min(originalPrefix, scanned.publishedBytes);
-          if (buffer.length !== safeBytes) await handle.truncate(safeBytes);
+          if (scanned.fileBytes !== safeBytes) await handle.truncate(safeBytes);
         }
         await handle.sync();
         publication.indeterminate = null;
