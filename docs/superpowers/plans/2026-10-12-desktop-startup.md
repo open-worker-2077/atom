@@ -68,3 +68,4 @@ Task1 RED→GREEN：新增受控ERR_FS_FILE_TOO_LARGE测试先RED；local log读
 ## 最终产品验收
 
 6685cc48ec69a195d9b247476d242370a119a9d2完整远端run38194282794为completed/success：2442项，2415通过、0失败、27条件跳过。远端原6项失败均已定向处理并复评；不再遗留Critical/Important。正式服务、桌面快捷方式、两次真实打开浏览器和监管回读完成。main同步产品及本次记录，最后精确检查与目标关闭在交付回读完成，不再制造自指审计提交。
+交付末次回读：main精确dd322f55343707744a81ebbd7032c05c4f6e81e5的run38194974178 completed/success，2415通过/0失败/27条件跳过；正式healthy=true。发现此前创建的桌面Atom.lnk不在原路径，系统Desktop路径未改变；安装器重新创建后10:24:08真实browser=True，随后文件仍存在且服务健康。未发现与Atom.lnk/start-atom-graph相关Defender检测事件；移除来源未确认，不归因于用户或其他软件。该现场补充仅作备份记录，产品main仍为已验收dd322f5，不制造重复产品门禁。
