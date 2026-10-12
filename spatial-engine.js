@@ -787,8 +787,40 @@
     transitionOrigin: null,
     reducedMotion: global.matchMedia("(prefers-reduced-motion: reduce)").matches,
     starField: [],
-    frameCount: 0
+    frameCount: 0,
+    renderDirty: true,
+    renderActiveUntil: 0
   };
+
+  let renderRequestId = null;
+  let renderIdleTimer = null;
+  let lastSceneFrameAt = performance.now();
+  function requestRender(continuousMs = 0) {
+    state.renderDirty = true;
+    state.renderActiveUntil = Math.max(state.renderActiveUntil, performance.now() + continuousMs);
+    if (document.hidden || renderRequestId !== null) return;
+    if (renderIdleTimer !== null) {
+      global.clearTimeout(renderIdleTimer);
+      renderIdleTimer = null;
+    }
+    renderRequestId = global.requestAnimationFrame(frame);
+  }
+
+  function scheduleIdleDemo(retryDelay = 0) {
+    if (document.hidden || state.demo.settings.idleSeconds === null || renderIdleTimer !== null) return;
+    const remaining = state.demo.settings.idleSeconds * 1000 - (performance.now() - state.demo.lastInputAt);
+    renderIdleTimer = global.setTimeout(() => {
+      renderIdleTimer = null;
+      if (document.hidden) return;
+      if (demoModel.shouldStart({ idleSeconds: state.demo.settings.idleSeconds,
+        lastInputAt: state.demo.lastInputAt, now: performance.now() }) && startDemoPresentation()) {
+        requestRender();
+      } else {
+        // An open edit transaction can defer a tour without painting repeatedly.
+        scheduleIdleDemo(1000);
+      }
+    }, Math.max(50, remaining, retryDelay));
+  }
 
   const camera = {
     target: { x: 0, y: 0, z: 0 },
@@ -2928,8 +2960,8 @@
     if (surfaceImageCache.has(attachment.url)) return surfaceImageCache.get(attachment.url);
     const image = new global.Image();
     const record = { image, status: "loading" };
-    image.addEventListener("load", () => { record.status = "ready"; }, { once: true });
-    image.addEventListener("error", () => { record.status = "error"; }, { once: true });
+    image.addEventListener("load", () => { record.status = "ready"; requestRender(); }, { once: true });
+    image.addEventListener("error", () => { record.status = "error"; requestRender(); }, { once: true });
     image.src = attachment.url;
     surfaceImageCache.set(attachment.url, record);
     if (surfaceImageCache.size > SURFACE_IMAGE_CACHE_LIMIT) {
@@ -3255,6 +3287,7 @@
 
   function startConfirmationRipples(node, count) {
     if (!node) return;
+    requestRender();
     state.confirmationRipples.set(node.id, {
       count: clamp(Math.trunc(count), 1, 3),
       startedAt: performance.now()
@@ -4199,6 +4232,7 @@
   }
 
   function startCameraTween(destination, duration, onComplete) {
+    requestRender();
     traceSpatial("camera-request", {target:destination.target, distance:destination.distance, duration});
     const from = cameraSnapshot();
     const to = {
@@ -4275,6 +4309,7 @@
   }
 
   function setScopeLoadState(path, status, detail = {}) {
+    requestRender();
     const normalizedPath = typeof path === "string" && path.trim() ? path.trim() : "root";
     const normalizedStatus = ["loading", "loaded", "failed"].includes(status) ? status : "loading";
     state.scopeLoadStates.set(normalizedPath, {
@@ -5276,6 +5311,7 @@
   });
 
   function updateSelectionUI() {
+    requestRender();
     syncSelectionCopyVisibility();
     renderScopeLoadState();
     if (!state.selected) {
@@ -6954,6 +6990,7 @@
   }
 
   function dispatchIntent(intent, visualMeta = {}, explicitTarget = null) {
+    requestRender(250);
     traceSpatial("intent", {intent});
     if (!visualIntentSet.has(intent)) {
       return false;
@@ -8275,6 +8312,7 @@
   }
 
   function updateDemoSettings(nextSettings) {
+    requestRender();
     const previous = state.demo.settings;
     state.demo.settings = demoModel.normalizeSettings(nextSettings);
     saveDemoSettings(state.demo.settings);
@@ -8289,6 +8327,7 @@
   }
 
   function applyPresentationSettings(settings) {
+    requestRender();
     const previous = state.demo.settings;
     state.demo.settings = demoModel.normalizeSettings(settings);
     saveDemoSettings(state.demo.settings);
@@ -8990,6 +9029,7 @@
 
   function registerHumanInput(event) {
     if (!event) return;
+    requestRender(250);
     if (state.demo.active) {
       cleanupDemoSession("human-input", { animateCamera: false });
       stopDemoPresentation({ skipCleanup: true });
@@ -9247,6 +9287,15 @@
   document.addEventListener("visibilitychange", () => {
     stopDemoPresentation();
     state.demo.lastInputAt = performance.now();
+    if (renderRequestId !== null) global.cancelAnimationFrame(renderRequestId);
+    renderRequestId = null;
+    if (renderIdleTimer !== null) global.clearTimeout(renderIdleTimer);
+    renderIdleTimer = null;
+    if (!document.hidden) requestRender();
+  });
+  global.addEventListener("resize", () => requestRender());
+  ["pointerup", "pointercancel", "keyup", "input", "change", "click"].forEach(type => {
+    document.addEventListener(type, () => requestRender(250), true);
   });
 
   ui.spatialSearch.addEventListener("input", renderSearchResults);
@@ -9326,18 +9375,25 @@
   const reducedMotionQuery = global.matchMedia("(prefers-reduced-motion: reduce)");
   reducedMotionQuery.addEventListener("change", (event) => {
     state.reducedMotion = event.matches;
+    requestRender();
   });
 
   function frame(now) {
+    renderRequestId = null;
+    if (document.hidden) return;
     resizeCanvas();
-    state.time = now / 1000;
+    // The scene clock pauses with drawing, so orbiting children do not jump
+    // away from the pointer when an idle or hidden page wakes up.
+    state.time += Math.min(Math.max(0, now - lastSceneFrameAt), 50) / 1000;
+    lastSceneFrameAt = now;
     const waitingForAuthoritativeKnowledge = document.body.dataset.spatialBridge === "connecting"
       && document.body.dataset.spatialKnowledge !== "authoritative";
     if (!waitingForAuthoritativeKnowledge) {
+      state.renderDirty = false;
       updateCameraTween(now);
       renderScene();
       updateDetailMagnifier(state.pointerPosition, state.hovered);
-      if (state.frameCount % 12 === 0) {
+      if (state.frameCount % 12 === 0 || (!state.cameraTween && !state.drag && now >= state.renderActiveUntil)) {
         updateMetrics();
         if (
           !state.demo.active
@@ -9352,7 +9408,22 @@
       }
     }
     state.frameCount += 1;
-    global.requestAnimationFrame(frame);
+    // Expire pulses even when their nodes have left the visible domain.
+    for (const [id, ripple] of state.confirmationRipples) {
+      if (now - ripple.startedAt >= RIPPLE_LAYER_DURATION + (ripple.count - 1) * RIPPLE_LAYER_DELAY) {
+        state.confirmationRipples.delete(id);
+      }
+    }
+    for (const [key, until] of state.wandGlowUntil) {
+      if (now >= until) state.wandGlowUntil.delete(key);
+    }
+    if (renderRequestId !== null) return;
+    if (state.renderDirty || state.cameraTween || state.drag || state.demo.active
+      || state.wand.highEnergy || state.confirmationRipples.size > 0
+      || state.wandGlowUntil.size > 0
+      || now < state.commitPulseUntil || now < state.locatedUntil || now < state.renderActiveUntil) {
+      renderRequestId = global.requestAnimationFrame(frame);
+    } else scheduleIdleDemo();
   }
 
   syncPresentationControls();
@@ -9367,7 +9438,7 @@
   updateMetrics();
   state.viewHistory.reset(visualSnapshot());
   updateNavigationUI();
-  global.requestAnimationFrame(frame);
+  requestRender();
 
   const BROWSER_VIEW_KEY = "atom.browser-view.v1";
   function savedBrowserView() {
@@ -9543,6 +9614,7 @@
   }
 
   function importKnowledge(knowledge, options) {
+    requestRender();
     options = options && typeof options === "object" ? options : {};
     const identityTransitions = Array.isArray(options.identityTransitions)
       ? options.identityTransitions
@@ -9700,6 +9772,10 @@
     requestVisualIntent,
     state: () => ({
       depth: state.depth,
+      rendering: { frames: state.frameCount, dirty: state.renderDirty, activeUntil: state.renderActiveUntil,
+        cameraTween: Boolean(state.cameraTween), drag: Boolean(state.drag), demo: state.demo.active,
+        highEnergy: state.wand.highEnergy, ripples: state.confirmationRipples.size,
+        commitUntil: state.commitPulseUntil, locatedUntil: state.locatedUntil },
       path: state.currentPath,
       selected: state.selected ? state.selected.id : null,
       focused: state.focused ? state.focused.id : null,
