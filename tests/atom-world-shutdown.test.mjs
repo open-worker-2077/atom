@@ -417,13 +417,15 @@ for (const stage of ['before-link', 'dispatched-link']) {
     // One event-loop turn does not prove that dispatched OS I/O has finished.
     // Reopening succeeds only when the real quarantine has cleared.
     const fresh = await guarded((async () => {
-      for (;;) {
+      const deadline = Date.now() + 350;
+      while (Date.now() < deadline) {
         try { return createTransactionalWorldPersistence({ ...f.configuration, runtimeAuthority: 'disk' }); }
         catch (error) {
           if (error.code !== 'WORLD_SAVE_WORKER_QUARANTINED') throw error;
           await new Promise(resolve => setTimeout(resolve, 1));
         }
       }
+      assert.fail('Writer quarantine did not clear after dispatched I/O settled');
     })());
     await fresh.commit({ ...request, correlationId: `${stage}-fresh` });
     assert.deepEqual((await fresh.readCommittedSnapshot()).facts, facts('linked'));
