@@ -987,3 +987,9 @@
 2026-10-06 长按/诊断远端候选GREEN：42195f5 run37372990156第二次completed/success，2410通过/0失败/22平台条件跳过；Windows全量2431通过，正式E3已验收，runner阻塞解除。产品需求验收完成，PR79合入与最后main审计精确远端成功是目标关闭门槛；main不得引入新产品漂移，后续复用已验证代码证据。全部详情见right-hold-upward原计划。
 
 2026-10-06 最后main审计封包：PR79 MERGED@e9741a0；main已接回合并，相对2410项远端GREEN候选42195f5仅本总账与right-hold-upward审计记录变化，软件代码无漂移。需求/正式E3/fresh评审已验收，服务published且PID46016持续不变。当前唯一关闭门槛是本封包main HEAD推送后的精确远端completed/success；状态直接以该revision远端证据裁定，不再递归制造自指审计提交。
+
+2026-10-10 🌍自动审核超时排查（只读诊断，未修改产品或权限）：原会话01a1162d-10f3-7ea1-8c6d-4509b10978f9在北京时间14:23:19申请CLI沙箱外只读；审核器线程01a1247a-f16c-7bd1-b1b2-f177f3f0693d的codex-auto-review模型启动WebSocket预热超时，14:23:49请求超时重试，14:24:04回退HTTP，14:24:49截止并中断；14:24:55重试审核在14:26:25再次截止，原会话14:26:27收到超时拒绝。证据为本机logs_2.sqlite的codex_core::responses_retry、client、startup_prewarm与原rollout工具输出；该链路没有执行Atom命令。两次审核请求未压缩体分别340509与607827字节，不能据此认定上下文大小是根因；同时间模型列表刷新亦request timed out。主假设是审核模型连接或响应异常，仍不能区分本机代理/网络与远端服务。
+
+2026-10-10 当前最小对照：沙箱Invoke-WebRequest访问127.0.0.1:4784报套接字权限拒绝；经自动审核批准的同地址沙箱外只读返回HTTP200，监听进程8956。全局atom.cmd --help正常；确认帮助成功不能代表后端连接成功。另尝试复测原🌍私有窗口的只读explore，被当前自动审核明确以本会话未授权私有窗口拒绝；遵守拒绝未绕行，故没有把HTTP200夸大为Graph命令回读成功。现在审核器可返回批准/拒绝，历史两次超时与当前窗口授权拒绝必须分开。正式服务无须为该审批超时重启；当前排查结论不宣称🌍已完成其待写业务或根治Codex审核链路。官方机制依据：https://learn.chatgpt.com/docs/sandboxing/auto-review 。
+
+2026-10-12 桌面启动需求优先 I3/U3/D3/E3：正式入口拒绝连接RED；直接启动确认world-commits.jsonl 2260143653 bytes触发ERR_FS_FILE_TOO_LARGE。复用既有启动器补桌面入口/日志/互斥，同时流式校验大事务日志并按需载入正文，保持全部历史及发布协议。上游6.4.2 manifest与项目基线一致。唯一步骤与证据见[2026-10-12-desktop-startup.md](2026-10-12-desktop-startup.md)；实施前安全备份与目标待完成。
