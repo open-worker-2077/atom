@@ -49,7 +49,7 @@
 ### Task 3: 交付
 
 - [x] fresh整体评审、修复Critical/Important、最小链→必要门禁→候选全量一次。
-- [ ] 推送精确候选并等远端终态；部署、公共回读、main收口和关闭目标。安全备份仅备份不代表验收。
+- [x] 产品候选推送并获远端通过；正式部署及公共回读完成。main同步本次验收记录后，回读精确revision检查并关闭目标。安全备份不代替验收。
 
 ## 当前断点
 
@@ -64,3 +64,7 @@ Task1 RED→GREEN：新增受控ERR_FS_FILE_TOO_LARGE测试先RED；local log读
 20530b8远端完整run38193615586终态failure：2442项、2409通过、6失败、27条件跳过。5项compaction测试只统计旧readFile导致流式read未计数，适配FileHandle.read后32项compaction/shutdown定向GREEN，缓存0历史读取等原断言保持不变。另1项snapshot before-link测试以单次setImmediate当作OS I/O完成确认，Linux仍处于合法隔离；改为400ms受控等待真实隔离解除，旧写者始终拒绝，不改产品隔离规则。
 
 本机全量出现性能5秒阈值失败后停止，原版同负载perf-mov=5153.8ms；释放失败全量负载后同候选四项均GREEN（2590.6/3454.1/2059.4/2541.7ms）。原截图与失败日志保留于D:/Project/〇/exports/atom-desktop-startup/2026-10-12，不宣称本机全量通过。修正实际远端失败后重跑必要门禁，等待新精确revision终态。
+
+## 最终产品验收
+
+6685cc48ec69a195d9b247476d242370a119a9d2完整远端run38194282794为completed/success：2442项，2415通过、0失败、27条件跳过。远端原6项失败均已定向处理并复评；不再遗留Critical/Important。正式服务、桌面快捷方式、两次真实打开浏览器和监管回读完成。main同步产品及本次记录，最后精确检查与目标关闭在交付回读完成，不再制造自指审计提交。
