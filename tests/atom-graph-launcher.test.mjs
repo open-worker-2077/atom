@@ -10,7 +10,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const execFileAsync = promisify(execFile);
 const launcherPath = path.join(root, 'scripts', 'start-atom-graph.ps1');
 
-async function runLauncherScenario({ taskState, taskQueryError = null, healthyAfter, timeoutSeconds = 300 }) {
+async function runLauncherScenario({ taskState, taskQueryError = null, healthyAfter, timeoutSeconds = 300, mutexName }) {
   const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-launcher-'));
   const wrapper = path.join(fixture, 'run.ps1');
   const psQuote = (value) => value.replaceAll("'", "''");
@@ -29,8 +29,8 @@ async function runLauncherScenario({ taskState, taskQueryError = null, healthyAf
     'function Start-Sleep {}',
     "function Start-Process { param($FilePath); if ([string]$FilePath -eq 'http://127.0.0.1:4784/') { $global:browserCalls += 1; return }; $global:rawProcessCalls += 1; return [pscustomobject]@{ HasExited = $false } }",
     '$caught = $null',
-    `try { & '${psQuote(launcherPath)}' -StartupTimeoutSeconds ${timeoutSeconds} -PollMilliseconds 1 -NoFailureDialog | Out-Null } catch { $caught = $_.Exception.Message }`,
-    '[pscustomobject]@{ healthChecks = $global:healthChecks; startCalls = $global:startCalls; browserCalls = $global:browserCalls; rawProcessCalls = $global:rawProcessCalls; error = $caught } | ConvertTo-Json -Compress'
+    `try { & '${psQuote(launcherPath)}' -StartupTimeoutSeconds ${timeoutSeconds} -PollMilliseconds 1 -NoFailureDialog -LogDirectory '${psQuote(fixture)}' ${mutexName ? `-MutexName '${psQuote(mutexName)}'` : ''} | Out-Null } catch { $caught = $_.Exception.Message }`,
+    `[pscustomobject]@{ healthChecks = $global:healthChecks; startCalls = $global:startCalls; browserCalls = $global:browserCalls; rawProcessCalls = $global:rawProcessCalls; error = $caught; logs = @(Get-ChildItem '${psQuote(fixture)}' -Filter '*.log' | ForEach-Object { [string](Get-Content $_.FullName -Raw) }) } | ConvertTo-Json -Compress`
   ].join('\r\n'), 'utf8');
   try {
     const { stdout } = await execFileAsync('powershell.exe', [
@@ -102,4 +102,12 @@ test('Atom Graph launcher never starts a duplicate server when scheduled-task di
   assert.equal(observed.startCalls, 0);
   assert.equal(observed.rawProcessCalls, 0);
   assert.equal(observed.browserCalls, 0);
+});
+
+test('launcher preserves a startup failure in a local log and includes its path in the error', { skip: process.platform !== 'win32' }, async () => {
+  const observed = await runLauncherScenario({ taskState: 'Running', healthyAfter: 999, timeoutSeconds: 0 });
+  assert.match(observed.error, /ATOM_GRAPH_STARTUP_TIMEOUT/);
+  assert.match(observed.error, /\.log/);
+  assert.equal(observed.logs.length, 1);
+  assert.match(observed.logs[0], /ATOM_GRAPH_STARTUP_TIMEOUT/);
 });

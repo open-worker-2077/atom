@@ -9,7 +9,7 @@ import { createJsonWorldRepository } from '../src/atom-system/adapters/json-worl
 const revision = facts => `sha256:${crypto.createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`;
 test('cold recovery and durable evidence do not read the entire local log into one buffer', async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-large-local-log-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  t.diagnostic(`Retained synthetic fixture: ${directory}`);
   const file = path.join(directory, 'atom.json');
   const log = `${file}.local-commits.jsonl`;
   const facts = [{ thing: '中文跨块', situation: '正文'.repeat(40000) }];

@@ -588,7 +588,14 @@ export function createJsonWorldRepository({
     const pendingRecords = records.slice(start)
       .filter((record) => ['atom.local-commit', 'atom.local-commit-generation'].includes(record.contract));
     localRecordCount = pendingRecords.filter((record) => record.contract === 'atom.local-commit').length;
-    for (const record of pendingRecords) materialized = applyRecord(materialized, await hydrateLocalRecord(record));
+    try {
+      for (const record of pendingRecords) materialized = applyRecord(materialized, await hydrateLocalRecord(record));
+    } catch (error) {
+      // Compaction may replace the path between scanning and lazy hydration.
+      // Retry only a changed generation; stable corruption remains an error.
+      if (await signature() !== beforeSignature) return read();
+      throw error;
+    }
     const finalSignature = await signature();
     if (finalSignature !== beforeSignature) return read();
     if (publication.startupProofPending && !publication.pending) {

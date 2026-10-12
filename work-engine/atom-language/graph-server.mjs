@@ -725,6 +725,15 @@ function help() {
 
 export async function runAtomGraphServerCli({ argv = process.argv.slice(2), processLike = process,
   startServer = startAtomGraphServer, defaultAuthority = false, authorityMarkerFile } = {}) {
+  async function startupLog(event) {
+    if (processLike !== process || !defaultAuthority || argv.length !== 0) return;
+    try {
+      const directory = path.join(runtime.root, 'startup-logs');
+      await fs.mkdir(directory, { recursive: true });
+      await fs.appendFile(path.join(directory, `server-${new Date().toISOString().slice(0, 10)}.log`),
+        `${JSON.stringify({ time: new Date().toISOString(), ...event })}\n`);
+    } catch {} // Diagnostic storage cannot prevent startup or hide its original error.
+  }
   function report(error, shutdown = false) {
     const line = `${JSON.stringify({ ok: false,
       ...(shutdown ? { shutdown: 'abnormal', saved: false } : {}),
@@ -741,6 +750,7 @@ export async function runAtomGraphServerCli({ argv = process.argv.slice(2), proc
       processLike.stdout.write(`${help()}\n`);
     } else {
       const running = await startServer(options);
+      await startupLog({ status: 'ready', url: running.url });
       let shutdown;
       const stop = () => {
         shutdown ??= Promise.resolve().then(() => running.close()).catch(error => {
@@ -759,6 +769,7 @@ export async function runAtomGraphServerCli({ argv = process.argv.slice(2), proc
       processLike.stdout.write(`运行诊断：${running.diagnosticFile}\n`);
     }
   } catch (error) {
+    await startupLog({ status: 'failed', code: error.code ?? 'ATOM_GRAPH_SERVER_ERROR', message: error.message });
     report(error);
     processLike.exitCode = 1;
   }

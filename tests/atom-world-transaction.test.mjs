@@ -1686,6 +1686,53 @@ test('a read retries when compaction replaces the baseline before its log read',
   assert.deepEqual((await reader.read()).facts, afterFacts);
 });
 
+test('a read retries when compaction replaces the baseline before lazy record hydration', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-read-compaction-'));
+
+  const worldFile = path.join(directory, 'atom.json');
+  const localCommitFile = path.join(directory, 'world-commits.jsonl');
+  const beforeFacts = [{ thing: 'Root', situation: 'old', slot: [], strut: [] }];
+  const afterFacts = [{ thing: 'Root', situation: 'new', slot: [], strut: [] }];
+  await fs.writeFile(worldFile, `${JSON.stringify(beforeFacts)}\n`, 'utf8');
+  const writer = createJsonWorldRepository({ file: worldFile, worldId: 'primary', localCommitFile, fileSystem: directorySyncCapableFileSystem(directory) });
+  const patch = createLocalWorldPatch({
+    worldId: 'primary', beforeRevision: revisionOf(beforeFacts), afterRevision: revisionOf(afterFacts),
+    beforeFacts, afterFacts, changedPaths: ['Root']
+  });
+  await writer.appendLocalCommit({
+    commandId: 'read-compaction-race', expectedRevision: revisionOf(beforeFacts),
+    nextSnapshot: { worldId: 'primary', revision: revisionOf(afterFacts), facts: afterFacts }, patch
+  });
+  let releaseLogRead;
+  let signalLogRead;
+  let paused = false;
+  let logOpens = 0;
+  const logReadStarted = new Promise((resolve) => { signalLogRead = resolve; });
+  const logReadGate = new Promise((resolve) => { releaseLogRead = resolve; });
+  const fileSystem = {
+    ...fs,
+    async open(target, ...args) {
+      if (path.resolve(target) === path.resolve(localCommitFile) && ++logOpens === 2) {
+        paused = true;
+        signalLogRead();
+        await logReadGate;
+      }
+      return fs.open(target, ...args);
+    }
+  };
+  const reader = createJsonWorldRepository({
+    file: worldFile, worldId: 'primary', localCommitFile, fileSystem
+  });
+
+  const reading = reader.read();
+  await logReadStarted;
+  await writer.compactCommittedState();
+  releaseLogRead();
+
+  assert.deepEqual((await reading).facts, afterFacts);
+  assert.deepEqual((await reader.read()).facts, afterFacts);
+});
+
 test('local record retention schedules compaction only when its configured threshold is reached', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-local-compaction-threshold-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

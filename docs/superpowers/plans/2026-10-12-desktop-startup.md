@@ -47,6 +47,8 @@
 
 ## 当前断点
 
-方案已持久化，待原版安全备份；产品实现尚未开始。原版本4ba0e91，唯一总账保留10-10只读诊断记录。
+原版安全备份已推送并核对：backup/atom-before-desktop-startup-20261012 → 5be58b949166898ec00b42a883188683298a776e；仅备份、尚未验收。目标仅指向本计划与唯一入口。实施位于既有隔离worktree的fix/desktop-startup-20261012分支。
+
+Fresh评审发现P1：扫描后lazy hydrate重开路径期间compaction替换文件，报LOCAL_WORLD_COMMIT_CHANGED而未重试。第二次open暂停的真实竞态回归已RED；仅文件签名变化时重试，稳定损坏保留错误。桌面启动日志RED已确认；待正式恢复与真实快捷方式验收。
 
 Task1 RED→GREEN：新增受控ERR_FS_FILE_TOO_LARGE测试先RED；local log读取与indeterminate恢复改为64KiB流式扫描，验证发布proof/abort并仅保留帧身份位置，待恢复事实按需读取。107项transaction/large-log测试GREEN。故障注入FileHandle补read/stat，竞态读取门禁移到open以保持真实语义。待fresh评审与真实正式恢复。
