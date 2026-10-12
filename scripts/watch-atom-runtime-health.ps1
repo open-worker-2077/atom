@@ -110,6 +110,7 @@ try {
       return
     }
     $state.lastRecoveryAt = $now.ToUniversalTime().ToString("o")
+    $state.unhealthySince = $state.lastRecoveryAt
     Write-AtomWatchdogState $state
     Start-ScheduledTask -TaskName $TaskName
     $healthy = Wait-AtomRuntimeHealth
@@ -167,6 +168,8 @@ try {
   if (-not (Wait-AtomTaskStopped)) {
     throw "ATOM_RUNTIME_WATCHDOG_STOP_TIMEOUT: $TaskName"
   }
+  $state.unhealthySince = (Get-Date).ToUniversalTime().ToString("o")
+  Write-AtomWatchdogState $state
   Start-ScheduledTask -TaskName $TaskName
   $healthy = Wait-AtomRuntimeHealth
   if ($healthy) {

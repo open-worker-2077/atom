@@ -257,3 +257,13 @@ test('default watchdog grace covers the observed 164-second history recovery', {
   assert.equal(observed.result.action, 'grace');
   assert.equal(observed.calls.some(call => /^(?:stop|start):/u.test(call)), false);
 });
+
+test('watchdog-owned cold recovery gets a new full startup grace', { skip: process.platform !== 'win32' }, async t => {
+  const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'atom-watchdog-recovery-'));
+  t.diagnostic(`Retained synthetic recovery: ${stateRoot}`);
+  const first = await runWatchdog(t, { stateRoot, useScriptDefault:true, taskState:'Running', health:[false], state:{unhealthySince:'2026-08-27T23:00:00Z',lastRecoveryAt:null} });
+  assert.equal(first.result.action, 'restarted');
+  const second = await runWatchdog(t, { stateRoot, useScriptDefault:true, taskState:'Running', health:[false], now:'2026-08-28T00:02:50Z' });
+  assert.equal(second.result.action, 'grace');
+  assert.equal(second.calls.some(call => /^(?:stop|start):/u.test(call)), false);
+});
