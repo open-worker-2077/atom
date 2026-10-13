@@ -1003,3 +1003,5 @@
 2026-10-12 Web空闲绘图产品E3 GREEN：候选bf787d5精确远端38203371204 completed/success，2415通过/0失败/27条件跳过；正式版本sha256-089211f2a8d00c95，空闲0帧、输入唤醒2帧、scope loaded/HTTP200/health正常，PID2392不重启。安全备份、持久化、fresh评审与全部受影响旅程完成；剩余main审计提交精确远端检查，当前状态随实际远端终态裁定。详情见web-render-idle所属计划。
 
 2026-10-12 Web空闲绘图最终收口GREEN：origin/main@6edf5ac724ce0497aa8ec34870c76a46e51ae211 精确38204031556 completed/success，PR82 MERGED；安全备份、独立fresh评审、受影响旅程、正式静态部署与公共回读全部完成。最终文档回执另存backup/atom-web-render-idle-receipt-20261012，产品main不再递归自指提交。目标关闭；100ms跨页症状的独立浏览器复现边界仍如所属计划所述。
+
+2026-10-13 外部改名疑似残留 I3/U2/D2/E3：真实应用会话命令确认直接 thing.ren 后更新正文，没有新增再删除；正式 CLI 与 Web revision8806 均无旧名称节点。隔离真实 CLI 在沉浸与展开祖先双域自动更新通过，尚未复现截图残留；当前无法取得发生页的既有浏览器状态，不宣称修复或确诊。调查证据与下一步仅见原[Web 缺陷计划](2026-09-01-atom-web-bug-patrol.md)末节；未改产品代码、未重启正式服务。
