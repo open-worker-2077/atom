@@ -185,7 +185,7 @@ test('diagnostics export has navigation checkpoints and bursts do not write per 
       return {immediate,writes,log:window.SpatialDiagnostics.export()};
     } finally {Storage.prototype.setItem=original;}
   });
-  expect(result.immediate).toBe(0); expect(result.writes).toBe(1);
+  expect(result.immediate).toBe(0); expect(result.writes).toBe(0);
   expect(JSON.parse(result.log).events.length).toBeLessThanOrEqual(128);
   expect(result.log).not.toContain('PRIVATE_SENTINEL');
   await page.evaluate(()=>window.spatialLab.dispatch('exit'));

@@ -9,6 +9,7 @@ import { createBossBackupTrigger } from './boss-backup-trigger.mjs';
 import { childDomainPath } from './probe.mjs';
 import { SpatialStoreError, createStore } from './store.mjs';
 import { VERSION } from './version.mjs';
+import { createDiagnosticSink } from './diagnostic-sink.mjs';
 
 const MIME = new Map([
   ['.html', 'text/html; charset=utf-8'],
@@ -152,6 +153,7 @@ export async function createSpatialServer(options = {}) {
   const bossDirectory = options.bossDirectory ? path.resolve(options.bossDirectory) : null;
   const bossStore = bossDirectory ? createBossStore(bossDirectory) : null;
   const store = bossStore || createStore(storeFile);
+  const diagnosticSink = createDiagnosticSink(path.dirname(storeFile));
   await store.init();
   const backupTrigger = bossStore && options.backupRepository
     ? createBossBackupTrigger({
@@ -471,6 +473,28 @@ export async function createSpatialServer(options = {}) {
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://127.0.0.1');
+      if (url.pathname === '/__spatial/api/diagnostics') {
+        const host = request.headers.host || '';
+        const local = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host)
+          && ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(request.socket.remoteAddress);
+        if (!local) {
+          return json(response,403,{ok:false});
+        }
+        try { presentationWriteOrigin(request,false); } catch { return json(response,403,{ok:false}); }
+        if(request.method === 'GET') {
+          response.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});
+          return response.end(await diagnosticSink.read());
+        }
+        if(request.method !== 'POST') return json(response,405,{ok:false});
+        let size=0;const chunks=[];
+        for await(const chunk of request) {
+          size+=chunk.length;
+          if(size>32000) return json(response,413,{ok:false});
+          chunks.push(chunk);
+        }
+        diagnosticSink.accept(Buffer.concat(chunks).toString('utf8'));
+        return json(response,202,{ok:true});
+      }
       if (url.pathname === '/__spatial/api/presentation-settings') {
         const service = options.presentationSettingsService;
         if (!service) return json(response, 404, { ok: false, error: { code: 'PRESENTATION_SETTINGS_UNAVAILABLE' } });
@@ -691,6 +715,7 @@ export async function createSpatialServer(options = {}) {
     }
   });
   server.once('close', () => backupTrigger?.close());
+  server.once('close', () => diagnosticSink.close());
 
   return {
     server,

@@ -20,11 +20,11 @@
   const detailMagnifierModel = global.SpatialDetailMagnifierModel;
   const sceneAdapter = global.AtomSpatialScene;
   function traceSpatial(event, extra = {}) {
-    global.SpatialDiagnostics?.record(event, {
+    try { global.SpatialDiagnostics?.record(event, {
       path: state.currentPath, depth: state.depth, build: document.body.dataset.build,
       sceneRevision: state.clusterSceneRevision, camera: cameraSnapshot(), width:state.width, height:state.height,
       ...extra
-    });
+    }); } catch { /* Diagnostic failure must not alter application state. */ }
   }
 
   if (!context || !input || !mobileInput || !visualModel || !gestureArbiter || !middleFrameTarget || !registry || !grammar || !workspaceModel || !programChoiceModel || !clusterField || !viewModeModel || !helpPageModel || !demoModel || !demoGeometry || !detailMagnifierModel || !sceneAdapter) {
@@ -4109,6 +4109,14 @@
       }
     }
     drawFloatingDetails(rendered, labelPlacements);
+    if (state.diagnosticKnowledgeRevision !== undefined) {
+      const revision = state.diagnosticKnowledgeRevision;
+      delete state.diagnosticKnowledgeRevision;
+      traceSpatial('knowledge-rendered', { revision, count:rendered.length,
+        nodes:rendered.filter(item => item.kind === 'node' && item.node).slice(0,96)
+          .map(item => ({key:`${item.ownerPath || nodeOwnerPath(item.node)}::${item.node.id}`,
+            labelHash:hashText(String(item.node.label || '')).toString(36)})) });
+    }
     drawAmbiguityCandidates();
     drawWandTrail();
     drawViewModeCursor();
@@ -9636,6 +9644,12 @@
     if (!workspace.importKnowledge(knowledge, {
       preserveTransaction: options.preserveTransaction === true
     })) return false;
+    try { state.diagnosticKnowledgeRevision = Number(knowledge.revision) || 0;
+      traceSpatial('knowledge-import', { revision:state.diagnosticKnowledgeRevision,
+      count:Array.isArray(knowledge.nodes) ? knowledge.nodes.length : 0,
+      nodes:(Array.isArray(knowledge.nodes) ? knowledge.nodes : []).filter(node => node && typeof node === 'object').slice(0,96)
+        .map(node => ({key:node.key || `${node.path}::${node.id}`,
+          labelHash:hashText(String(node.label || '')).toString(36)})) }); } catch {}
     state.strutClauses = Array.isArray(knowledge.strutClauses)
       ? structuredClone(knowledge.strutClauses)
       : [];
@@ -9646,6 +9660,17 @@
     cleanupOrphanedDemoKnowledge();
     state.hovered = null;
     currentDomainNodes();
+    // A remote rename/move can replace a path-derived carrier identity. Never
+    // render a cached expanded domain whose authoritative parent has vanished.
+    const retainedBranches = [];
+    for (const descriptor of [...state.expandedClusterDomains.values()].sort((a,b) => a.depth-b.depth)) {
+      const parent = nodeByIdInPath(descriptor.parentPath, descriptor.parentNodeId);
+      if (!parent) continue;
+      retainedBranches.push({...descriptor,label:parent.label,
+        pathLabels:[...(descriptor.pathLabels || []).slice(0,-1),parent.label]});
+    }
+    sceneAdapter.commitViewIntent(state,{type:'replace-views',descriptors:retainedBranches,
+      projections:Object.fromEntries(retainedBranches.map(branch => [branch.path,branch.projectionMode || 'nested']))});
     if (state.clusterFieldOpen) buildClusterScene();
     const resolveImportedNode = ({ path, id }) => nodeByIdInPath(path, id);
     state.rendered = workspaceModel.reconcileVisualItems(

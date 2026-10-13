@@ -15,6 +15,8 @@ function expectedContentBuildId(entryHtml) {
     [...entryHtml.matchAll(/(?:href|src)="((?:spatial|input|tokens|vendor\/)[^"]+)"/g)]
       .map((match) => new URL(match[1], 'https://local.invalid/').pathname.slice(1))
   )].sort();
+  if(assets.includes('spatial-diagnostics.js')) assets.push('spatial-diagnostics-worker.js');
+  assets.sort();
   const digest = crypto.createHash('sha256');
   for (const asset of assets) {
     digest.update(`${asset}\0`);
@@ -48,6 +50,7 @@ test('consecutive revision stamps are idempotent in an isolated browser-entry co
       [...html.matchAll(/(?:href|src)="((?:spatial|input|tokens|vendor\/)[^"]+)"/g)]
         .map((match) => new URL(match[1], 'https://local.invalid/').pathname.slice(1))
     )];
+    if(assets.includes('spatial-diagnostics.js')) assets.push('spatial-diagnostics-worker.js');
     for (const asset of assets) {
       const destination = path.join(temporaryRoot, asset);
       fs.mkdirSync(path.dirname(destination), { recursive: true });

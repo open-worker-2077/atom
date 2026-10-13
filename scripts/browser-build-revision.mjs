@@ -11,7 +11,9 @@ export function executableAssetPaths(entryHtml) {
 
 export async function contentBuildRevision(root, entryHtml) {
   const digest = crypto.createHash("sha256");
-  for (const asset of executableAssetPaths(entryHtml)) {
+  const assets = executableAssetPaths(entryHtml);
+  if (assets.includes('spatial-diagnostics.js')) assets.push('spatial-diagnostics-worker.js');
+  for (const asset of assets.sort()) {
     digest.update(`${asset}\0`);
     digest.update(await fs.readFile(path.join(root, asset)));
     digest.update("\0");

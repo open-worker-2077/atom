@@ -37,3 +37,24 @@ test('reload retains dropped count and includes records discarded during restore
   const logger=createDiagnostics({capacity:2,storage:{getItem:()=>JSON.stringify({dropped:3,events:Array.from({length:5},(_,sequence)=>({event:'navigation',sequence}))})}});
   assert.equal(logger.snapshot().dropped,6);
 });
+
+test('transport is deferred, bounded, and unavailable transport cannot break interaction', () => {
+  const scheduled = [], sent = [];
+  const logger = createDiagnostics({ capacity: 8, schedule: fn => scheduled.push(fn), storage: null,
+    transport: batch => { sent.push(batch); throw Error('offline'); } });
+  for (let i=0;i<100;i++) logger.record('knowledge-import', { revision:i,
+    nodes:[{key:'root::probe', labelHash:'123', detail:'private'}] });
+  assert.equal(sent.length,0);
+  assert.equal(scheduled.length,1);
+  assert.doesNotThrow(()=>scheduled.shift()());
+  assert.equal(sent.length,1);
+  assert.equal(sent[0].events.length,8);
+  assert.equal(sent[0].events[0].nodes[0].labelHash,'123');
+  assert.doesNotMatch(JSON.stringify(sent),/private/);
+});
+
+test('unicode metadata is bounded by encoded bytes, not character count', () => {
+  const logger=createDiagnostics({capacity:256,storage:null,schedule:()=>{}});
+  for(let i=0;i<12;i++) logger.record('knowledge-import',{nodes:Array.from({length:96},()=>({key:'中'.repeat(160),labelHash:'abc'}))});
+  assert.ok(Buffer.byteLength(JSON.stringify(logger.snapshot()))<100000);
+});
