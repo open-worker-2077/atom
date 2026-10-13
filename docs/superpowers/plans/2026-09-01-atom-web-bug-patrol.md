@@ -189,3 +189,18 @@ Task7保存可见反馈优先实施，I0/U0/D1/E3；移动已交付，手机共�
 2026-10-13 fresh Important定向整改：有效祖先误收起、null节点导致日志异常、Unicode按字符计量、超30KB单事件丢失，各自建立RED；全部按一次修复批次处理。改为仅依据父载体存在性清退；诊断构造与record异常隔离；UTF-8真实字节计量；Worker裁剪超大元数据并按批量字节装箱。已认证私有HTTPS网关保留Origin/改写Host链建立RED→GREEN，接收复用既有same-origin策略，物理HTTP入口仍限制loopback。生产不再写sessionStorage，对应旧测试1次存储写断言改为0次；关键导航13项已过，旧存储断言失败不属于业务回归。
 
 2026-10-13 候选验收：fresh原Important全部RED→GREEN关闭，实际磁盘日志格式化超96KB尾项追加RED→GREEN（紧凑snapshot且预留外壳空间）。无残留Critical/Important。最终关键浏览器15项GREEN；此前导航/CLI13项GREEN、展开正文GREEN，Node受影响72项和新增限量9项GREEN、构建版本6项GREEN。唯一候选全量由精确远端CI执行，避免本机重复全量。产品部署尚未进行。
+
+2026-10-13 候选56518aa精确远端run38341806658 completed/success：2446项、2419通过、0失败、27平台条件跳过。正式checkout已快进至候选，原唯一Atom Graph Runtime已通过既有ScheduledTask受控切换，启动等待和新诊断接口回读进行中；main已推送同一候选，精确main检查待终态。未修改正式世界业务事实。
+
+2026-10-13 E3：正式服务已恢复健康，诊断GET200；实际公共网页build sha256-6fa1a1a42ed1fc1c、scope loaded、bridge connected、无pageerror；浏览器Worker自动POST202，开发端直接回读knowledge-import与knowledge-rendered同为revision8818；日志2048字节，等待1秒frame13→13，日志不唤醒绘图。
+
+2026-10-13 用户纠正正式使用中断：为增加维护接口而重启唯一正式进程，造成应用短时不可用，属于本次部署方式失当；测试隔离本身不能证明正式切换不中断。立即约束：当前正式服务已恢复，后续不再启动/停止/重启正式实例；main门禁和记录收口均只读。后续后端部署必须先在隔离环境证明应用持续可用的切换方式，否则不执行切换，不能把中断当作正常开发成本。此约束即时接回唯一开发运作规格，不以已恢复掩盖中断。
+
+## 2026-10-13 最终回执
+
+- 原版与主干安全备份039c75a已核对；产品56518aa25397ca5b727827dd07a2b77dd84249b7已推送origin/main，PR83 MERGED。
+- 精确候选run38341806658与main run38342529249均completed/success；2446项、2419通过、0失败、27平台条件跳过。fresh无剩余Critical/Important；真实新增、改名、正文及绘制监控和全部受影响关键旅程通过。
+- 正式E3：health正常、scope loaded、bridge connected、build sha256-6fa1a1a42ed1fc1c；Worker自动POST202，维护GET200，knowledge-import/knowledge-rendered revision8818同链回读；日志2048字节，空闲frame13→13，无pageerror。未向正式世界创建测试节点。
+- 日志按事件限量；前台1000条简小记录6.3947ms、一次调度（不作为整个应用CPU占用声明）；网络与文件处理在Worker，实际近期文件≤96000字节，无生产sessionStorage同步持久化、无逐帧日志、失败不影响应用。
+- 本次唯一正式服务的重启造成使用中断，已明确记为部署失当并补入运作规格，不能用恢复健康抵消该问题。当前服务已恢复；此任务后续无运行实例切换。通用不中断部署能力尚未实现，未来后端更新必须先证明持续可用切换，不能重复本次方式。
+- 初始三项交付完成；本末次回执另推安全分支保存，不递归制造产品CI审计提交。
