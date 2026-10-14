@@ -118,3 +118,7 @@
 主干：保留兼容错误码ATOM_ENGINE_UNAVAILABLE，表述改为当前执行环境不能连接，并公开有界底层连接原因链及命令原关联号；区分权限拒绝、连接拒绝、超时和未知。Help先核对实际全局入口/命令/绑定Agent，然后说明Help输出和沙箱内端口不可见均不证明宿主服务状态。仅在现有审批机制允许时，以同一最小只读查询和同host/port的原生连接做环境对照；一侧拒绝另一侧成功则使用已批准可用入口继续原授权并回读。禁止自动提权、修改全局沙箱、无条件沙箱外执行；不把连接问题改写为Agent/路径/语法错误。写入提交状态未知时保留原关联号，禁止换请求重放。
 
 执行：先安全备份与仅链接本计划/恢复入口的目标，再复用干净worktree。TDD覆盖底层权限10013/EACCES/EPERM、ECONNREFUSED、超时、普通未知失败、AggregateError/循环有界，以及真实不可达端口和批准入口成功；Help合同与全局Help回读。Fresh整分支审查，最小受影响链及精确候选远端全量。仅更新CLI/Help，无须重启正式服务；实际全局Help和最小已授权锚点读取为E3。推送main后检查精确revision终态。
+
+2026-10-14 RED→GREEN：三种公共endpoint原本丢底层原因的10项RED全部GREEN，含EACCES/EPERM/10013、ECONNREFUSED、连接超时、未知、AggregateError循环有界、真实隔离端口成功/拒绝、Help指导。连同原CLI/Agent/入口/完整隔离CLI旅程41项GREEN。当前限制环境原生TCP再次复现10013；与批准环境对照只探测/读取，没有修改全局配置或写世界。上游manifest6.4.2 SHA仍EF99FCE...6586，基线一致。候选只改CLI反馈/Help，不改服务或重启。
+
+2026-10-14 fresh唯一Important：headers后body断开时response.json在fetch catch外，真实隔离HTTP回归RED原interactionId丢失。新增统一响应读取包装，保留原关联号、底层原因、request/response阶段；业务HTTP错误继续原路径，不改Graph/权限/提交机制。第11项截断回归GREEN，受影响链42项复核；不重启正式服务。批准环境同一Explore实际exit0，原生TCP Connected=true，Get-Command实际C:/Users/worker/.local/bin/atom.cmd，与限制环境10013差异已核对。

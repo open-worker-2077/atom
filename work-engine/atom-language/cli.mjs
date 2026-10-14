@@ -26,6 +26,46 @@ export const DEFAULT_ATOM_COMMAND_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/c
 export const DEFAULT_WORK_ORDER_REGISTRY_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/work-order-registry';
 export const DEFAULT_PROGRAM_FUNCTION_REGISTRY_ENDPOINT = 'http://127.0.0.1:4784/__atom/api/program-function-registry';
 
+function connectionFailure(endpoint, cause, interactionId, phase = 'request') {
+  const causes = [], queue = [cause], seen = new Set();
+  while (queue.length && causes.length < 8) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
+    seen.add(current);
+    const entry = { message: String(current.message || 'Unknown connection error').slice(0, 240) };
+    for (const [name, value] of Object.entries({code:current.code,errno:current.errno,syscall:current.syscall,
+      socketError:current.socketError ?? current.SocketError,nativeError:current.nativeError ?? current.NativeError})) {
+      if (typeof value === 'string') entry[name] = value.slice(0,80);
+      else if (typeof value === 'number' && Number.isFinite(value)) entry[name] = value;
+    }
+    causes.push(entry);
+    if (current.cause) queue.push(current.cause);
+    if (Array.isArray(current.errors)) queue.push(...current.errors.slice(0,4));
+  }
+  const categories = new Set();
+  for (const entry of causes) {
+    const code = String(entry.code || '').toUpperCase();
+    if (['EACCES','EPERM','WSAEACCES'].includes(code)
+      || [entry.errno,entry.socketError,entry.nativeError].some(value => Number(value) === 10013)) categories.add('permission-denied');
+    else if (code === 'ECONNREFUSED') categories.add('connection-refused');
+    else if (['ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT'].includes(code)) categories.add('timeout');
+  }
+  const category = categories.size > 1 ? 'mixed' : [...categories][0] || 'unknown';
+  const reasons = causes.map(entry => [entry.code,entry.message,
+    ...['errno','socketError','nativeError','syscall'].filter(key => entry[key] !== undefined).map(key => `${key}=${entry[key]}`)
+  ].filter(Boolean).join(' ')).join(' ← ');
+  const error = cliError('ATOM_ENGINE_UNAVAILABLE',
+    `当前执行环境未完成 Atom 接口 ${endpoint} 请求（${phase === 'response' ? '读取响应' : '发起请求'}）：${reasons || '未知连接原因'}（${category}）；此结果不足以认定服务停机，请按 --help 区分环境权限与服务状态。`,
+    {connection:{phase,category,causes},...(interactionId ? {interactionId} : {})});
+  error.cause = cause;
+  return error;
+}
+
+async function readEndpointResponse(response, endpoint, interactionId) {
+  try { return await response.json(); }
+  catch (cause) { throw connectionFailure(endpoint,cause,interactionId,'response'); }
+}
+
 export async function executeAtomCommandEndpoint(options, endpoint = DEFAULT_ATOM_COMMAND_ENDPOINT) {
   const interaction = {
     ...(options.interaction ?? {}),
@@ -43,9 +83,9 @@ export async function executeAtomCommandEndpoint(options, endpoint = DEFAULT_ATO
       })
     });
   } catch (cause) {
-    throw cliError('ATOM_ENGINE_UNAVAILABLE', `Atom engineering service is unavailable at ${endpoint}: ${cause.message}`);
+    throw connectionFailure(endpoint,cause,interaction.id);
   }
-  const payload = await response.json();
+  const payload = await readEndpointResponse(response,endpoint,interaction.id);
   if (!response.ok || !payload.ok) {
     throw cliError(payload.error?.code ?? 'ATOM_ENGINE_REQUEST_FAILED',
       payload.error?.message ?? 'Atom engineering service request failed', payload.error?.details);
@@ -66,12 +106,9 @@ export async function executeAtomWorkOrderRegistryEndpoint(
   try {
     response = await fetch(endpoint);
   } catch (cause) {
-    throw cliError(
-      'ATOM_ENGINE_UNAVAILABLE',
-      `Atom engineering service is unavailable at ${endpoint}: ${cause.message}`
-    );
+    throw connectionFailure(endpoint,cause);
   }
-  const payload = await response.json();
+  const payload = await readEndpointResponse(response,endpoint);
   if (!response.ok || !payload.ok) {
     throw cliError(
       payload.error?.code ?? 'ATOM_ENGINE_REQUEST_FAILED',
@@ -96,12 +133,9 @@ export async function executeAtomProgramFunctionRegistryEndpoint(
   try {
     response = await fetch(endpoint);
   } catch (cause) {
-    throw cliError(
-      'ATOM_ENGINE_UNAVAILABLE',
-      `Atom engineering service is unavailable at ${endpoint}: ${cause.message}`
-    );
+    throw connectionFailure(endpoint,cause);
   }
-  const payload = await response.json();
+  const payload = await readEndpointResponse(response,endpoint);
   if (!response.ok || !payload.ok) {
     throw cliError(
       payload.error?.code ?? 'ATOM_ENGINE_REQUEST_FAILED',
@@ -315,7 +349,14 @@ function help() {
     '  ATOM_NOT_FOUND：若用户意图是使用或创建该节点，先 explore 预定父节点及直接子节点，复用相同或明确等价节点；确实不存在时，以“精确父路径/新名称”执行 transform new。父路径不明确时只询问父 Atom。',
     '  WORLD_REVISION_CONFLICT：停止当前写入，重新读取最新事实，再基于新修订重新判断；不得盲目重放。',
     '  PROGRAM_LOCK_DENIED / WINDOW_ACCESS_DENIED：停止修改并按错误提示处理，不绕过锁。',
-    '  ATOM_ENGINE_UNAVAILABLE：确认 4784 服务可用；仍失败则联系维护入口。',
+    '  ATOM_ENGINE_UNAVAILABLE / fetch failed：表示当前执行环境未完成接口请求（连接或响应失败），不足以认定服务停机；底层原因、失败阶段与原关联号以错误回执为准。',
+    '    ① 核对原命令、会话已绑定的 --agent 和真实全局入口（PowerShell：Get-Command atom.cmd）。连接失败不等于 Agent、目标路径或 Graph-JSON 错误。',
+    '    ② ECONNREFUSED 表示连接被拒绝，ETIMEDOUT / UND_ERR_*_TIMEOUT 表示超时，EACCES / EPERM 或原生套接字 10013 表示访问权限拒绝；多原因逐项看，不猜具体沙箱规则。',
+    '    ③ --help 本地输出成功不证明工程服务可连接；限制环境中看不到监听记录也不能推出宿主服务已停止。',
+    '    ④ 怀疑环境权限时，仅在现有审批机制允许下，对照原样相同的最小只读 Explore 与同一 endpoint 主机/端口的原生 TCP 连接；TCP 探测不调用私有 Atom API。',
+    '       每次需要审批的调用仍独立审批；禁止自行修改全局沙箱配置或绕过审批，不是无条件沙箱外执行。',
+    '    ⑤ 一侧权限拒绝、另一侧查询成功：通过已批准可用入口继续原授权任务并回读；环境权限问题与真实服务故障分别反馈。两侧仍不可达或证据不明时联系维护入口。',
+    '    ⑥ 写操作连接/响应失败且提交状态未知：保留原关联号联系维护入口回读，禁止换新请求重放；不能用环境对照重复写入。只读查询失败可在批准入口原样验证。',
     '  PROJECTION_RECOVERY_PENDING：可丢弃派生投影待恢复；只有成功回执确认 changed=true 时，才表示本次事实写入已成功，禁止重复写入。准备已有世界投影也可能携带此提示，不代表被拒绝的命令已提交。4784 应继续服务；维护入口仅限本机 POST /__atom/api/recover-projection，并使用 projectionRecovery.expectedRevision。',
     '  ATOM_COMMIT_CONFIRMATION_PENDING：中央提交仍在确认，尚未裁定是否成功；保留原关联号读取结果，禁止换新请求重放来猜结果。此提示不表示已提交、未提交或无变化。',
     '  ATOM_PROGRAM_TIMEOUT / ATOM_PROGRAM_CANCELLED / ATOM_PROGRAM_FAILED：不得手工仿制 Program；回读事实并按错误提示处理。',
