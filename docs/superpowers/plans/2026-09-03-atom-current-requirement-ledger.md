@@ -1019,3 +1019,7 @@
 2026-10-14 连接环境Help I3/U3/D2/E3：用户经应用会话转达TCP10013/CLI fetch failed与批准环境成功的对照，现有Help不区分环境与服务，CLI三处丢底层原因。仅改善有界原因展示与诊断指导，不能认定服务故障、自动提权或改全局沙箱。步骤/验收仅原CLI反馈计划末节；先备份目标再实现，正式服务不重启。
 
 2026-10-14 CLI连接Help候选GREEN：11项连接/截断回归及现有CLI/Agent/入口/完整隔离旅程合计42通过，fresh唯一Important响应读取关联号已RED→GREEN关闭且增量复核无剩余问题。现场限制环境TCP10013、批准环境TCP及CLI成功；安全备份fc38500已核对。候选远端全量及正式全局Help回读待完成，无正式服务重启。
+
+2026-10-14 CLI连接Help E3：origin/main@c5faf7d候选全量2430通过，PR84 MERGED；全局Help实际回读新指导，受限CLI实际EACCES/原关联号可见，批准环境相同只读查询成功；health正常、PID2440不变。main精确run38506630290待终态；详情仅原CLI反馈计划末节。
+
+2026-10-14 CLI连接Help完成：origin/main@c5faf7d精确候选/main检查均success，2430通过/0失败/27平台条件跳过，PR84 MERGED；实际全局Help与限制/批准环境对照验收，底层EACCES和原关联号已显示，正式PID2440未变。原版备份及末次回执backup/atom-cli-connection-help-receipt-20261014均保存。没有修复未经证实的服务故障，没有自动改变权限。

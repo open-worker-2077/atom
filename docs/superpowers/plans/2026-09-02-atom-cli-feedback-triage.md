@@ -122,3 +122,13 @@
 2026-10-14 RED→GREEN：三种公共endpoint原本丢底层原因的10项RED全部GREEN，含EACCES/EPERM/10013、ECONNREFUSED、连接超时、未知、AggregateError循环有界、真实隔离端口成功/拒绝、Help指导。连同原CLI/Agent/入口/完整隔离CLI旅程41项GREEN。当前限制环境原生TCP再次复现10013；与批准环境对照只探测/读取，没有修改全局配置或写世界。上游manifest6.4.2 SHA仍EF99FCE...6586，基线一致。候选只改CLI反馈/Help，不改服务或重启。
 
 2026-10-14 fresh唯一Important：headers后body断开时response.json在fetch catch外，真实隔离HTTP回归RED原interactionId丢失。新增统一响应读取包装，保留原关联号、底层原因、request/response阶段；业务HTTP错误继续原路径，不改Graph/权限/提交机制。第11项截断回归GREEN，受影响链42项复核；不重启正式服务。批准环境同一Explore实际exit0，原生TCP Connected=true，Get-Command实际C:/Users/worker/.local/bin/atom.cmd，与限制环境10013差异已核对。
+
+2026-10-14 E3：候选c5faf7dcfc738e12b7f9526d19799d89d7c01f89精确run38505874854 completed/success，2457项、2430通过、0失败、27平台条件跳过；已快进正式并推送origin/main，PR84 MERGED。实际全局C:/Users/worker/.local/bin/atom.cmd --help在限制环境可输出新10013/原生TCP/审批/原关联号指导。同一Explore：限制环境exit4，实际底层EACCES、permission-denied及关联号均显示；经既有审批环境exit0、实际锚点回读成功。正式health正常、PID2440部署前后不变。未改全局沙箱、无自动提权、无未知写入重放、无重启。main精确run38506630290等待终态。
+
+## 2026-10-14 最终验收回执
+
+原版/计划安全备份fc38500801cfd205035aedf8017f89ab36335271远端核对；产品origin/main@c5faf7dcfc738e12b7f9526d19799d89d7c01f89。精确候选run38505874854及main run38506630290均completed/success：2457项、2430通过、0失败、27平台条件跳过；PR84 MERGED，fresh无剩余问题。
+
+实际全局Help在限制环境已输出新指引。实际同一最小Explore：限制环境exit4、底层EACCES/permission-denied及原关联号可见；原生TCP10013。经现有独立审批的环境原样查询exit0且读到锚点，TCP成功。正式health正常，PID2440更新前后不变，无重启、无全局沙箱修改、无自动提权/未知写入重放。对服务真不可达、权限拒绝、可达三类反馈及响应截断的原号保护均已验收。未推断更深层沙箱规则。
+
+本末次回执另存安全分支，不制造产品递归审计CI提交；当前任务完成。
